@@ -1,0 +1,8 @@
+Oracle build and verification tools
+
+See docs/validation.md, section "CPython oracles: tools/oracle", for the
+reviewed release pin, build commands, provenance, module checks, result
+format, venv helper and offline harness checks.
+
+Run the Python drivers with host Python 3. Keep interpreter installations,
+source/build directories and dependency environments outside the checkout.

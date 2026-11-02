@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Summarize result manifests against each suite's full expected inventory."""
+
+import argparse
+from collections import Counter
+import csv
+import math
+from pathlib import Path
+import sys
+
+
+STATUSES = ("PASS", "FAIL", "ERROR", "SKIP", "XFAIL", "XPASS", "TIMEOUT", "CRASH", "NOTRUN")
+
+
+def read_manifest(path, expected=False):
+    with path.open(encoding="utf-8", newline="") as stream:
+        reader = csv.DictReader(stream, delimiter="\t")
+        if reader.fieldnames != ["id", "status", "seconds"] and not (expected and reader.fieldnames == ["id"]):
+            raise ValueError(f"{path}: invalid header")
+        rows = {}
+        for row in reader:
+            name = row.get("id")
+            if not name or name in rows or None in row:
+                raise ValueError(f"{path}: empty or duplicate id, or malformed row")
+            if reader.fieldnames != ["id"]:
+                if row["status"] not in STATUSES:
+                    raise ValueError(f"{path}: invalid status for {name}")
+                try:
+                    seconds = float(row["seconds"])
+                except (TypeError, ValueError):
+                    raise ValueError(f"{path}: invalid seconds for {name}") from None
+                if not math.isfinite(seconds) or seconds < 0:
+                    raise ValueError(f"{path}: invalid seconds for {name}")
+            rows[name] = row.get("status", "NOTRUN")
+    if expected and not rows:
+        raise ValueError(f"{path}: expected inventory is empty")
+    return rows
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--results", type=Path, default=Path(__file__).resolve().parents[1] / "results")
+    args = parser.parse_args()
+    print("\t".join(("suite", "runtime", "total", *STATUSES, "pass_rate")))
+    inventories = sorted(args.results.glob("*/expected.tsv"))
+    if not inventories:
+        print("scoreboard: no expected inventories", file=sys.stderr)
+        return 2
+    try:
+        for inventory in inventories:
+            expected = read_manifest(inventory, expected=True)
+            for path in sorted(inventory.parent.glob("*.tsv")):
+                if path == inventory:
+                    continue
+                actual = read_manifest(path)
+                extra = actual.keys() - expected.keys()
+                if extra:
+                    raise ValueError(f"{path}: unexpected ids: {', '.join(sorted(extra))}")
+                counts = Counter(actual.get(name, "NOTRUN") for name in expected)
+                print("\t".join((inventory.parent.name, path.stem, str(len(expected)),
+                                 *(str(counts[s]) for s in STATUSES),
+                                 f"{100 * counts['PASS'] / len(expected):.2f}%")))
+    except (OSError, ValueError) as error:
+        print(f"scoreboard: {error}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

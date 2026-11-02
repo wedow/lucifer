@@ -1,0 +1,12 @@
+#!/bin/sh
+# Package installation and dependency pinning belong to each consuming suite.
+set -eu
+[ "$#" -eq 2 ] || { printf '%s\n' 'usage: venv PREFIX DIR' >&2; exit 1; }
+prefix=$1
+directory=$2
+[ -f "$prefix/ORACLE-INFO" ] || { printf '%s\n' 'venv: PREFIX has no ORACLE-INFO' >&2; exit 1; }
+python=$prefix/bin/python3.14t
+[ -x "$python" ] || python=$prefix/bin/python3.14
+[ -x "$python" ] || { printf '%s\n' 'venv: oracle executable is missing' >&2; exit 1; }
+[ ! -e "$directory" ] && [ ! -L "$directory" ] || { printf '%s\n' 'venv: DIR already exists; use it directly or choose a new directory' >&2; exit 1; }
+exec "$python" -I -m venv "$directory"

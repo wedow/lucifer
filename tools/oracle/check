@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Check a pinned oracle through its executable; run this driver on host Python."""
+
+import argparse
+import csv
+import json
+import math
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+import tempfile
+import time
+
+
+ROOT = Path(__file__).resolve().parents[2]
+MODULES = ("_tkinter", "bz2", "ctypes", "decimal", "lzma", "readline",
+           "sqlite3", "ssl", "zlib")
+IDS = sorted(["runtime.abi", "runtime.version"] + ["module." + m for m in MODULES])
+MARKER = "oracle-check-ok"
+
+
+def run(command, code, timeout):
+    start = time.monotonic()
+    try:
+        child = subprocess.run(command + ["-I", "-c", code], capture_output=True,
+                               timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "TIMEOUT", time.monotonic() - start, "interpreter timed out"
+    except OSError as error:
+        return "NOTRUN", 0.0, str(error)
+    elapsed = time.monotonic() - start
+    detail = child.stderr.decode("utf-8", errors="replace")
+    if child.returncode < 0:
+        return "CRASH", elapsed, detail or f"signal {-child.returncode}"
+    if child.returncode == 77:
+        return "SKIP", elapsed, detail
+    if child.returncode:
+        return "FAIL", elapsed, detail or f"exit {child.returncode}"
+    if child.stdout != (MARKER + "\n").encode():
+        return "ERROR", elapsed, "interpreter did not return the expected marker"
+    return "PASS", elapsed, detail
+
+
+def write_manifest(path, rows):
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="",
+                                     dir=path.parent, prefix="." + path.name,
+                                     delete=False) as stream:
+        temporary = Path(stream.name)
+        writer = csv.writer(stream, delimiter="\t", lineterminator="\n")
+        writer.writerow(("id", "status", "seconds"))
+        writer.writerows(rows)
+    temporary.replace(path)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--python", required=True, help="interpreter command (shell quoting allowed)")
+    parser.add_argument("--runtime", required=True, help="result file label")
+    parser.add_argument("--disable-gil", action="store_true")
+    parser.add_argument("--results", type=Path, default=ROOT / "results")
+    parser.add_argument("--timeout", type=float, default=30.0)
+    args = parser.parse_args()
+    if not args.runtime or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for c in args.runtime) or args.runtime in (".", "..", "expected"):
+        parser.error("runtime must be a file label other than expected")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("timeout must be finite and positive")
+    try:
+        command = shlex.split(args.python)
+    except ValueError as error:
+        parser.error(str(error))
+    if not command:
+        parser.error("python command must not be empty")
+    directory = args.results / "oracle"
+    directory.mkdir(parents=True, exist_ok=True)
+    write_manifest(directory / "expected.tsv", ((name, "NOTRUN", "0") for name in IDS))
+    probe = run(command, f"print({MARKER!r})", args.timeout)
+    rows = []
+    details = {}
+    expected_gil = not args.disable_gil
+    state_check = f"assert sys._is_gil_enabled() is {expected_gil!r}, 'unexpected GIL state after imports'\n"
+    for name in IDS:
+        if probe[0] != "PASS":
+            status, seconds, detail = "NOTRUN", 0.0, "startup probe: " + probe[0] + ": " + probe[2]
+        else:
+            code = "import sys, sysconfig\n"
+            if name == "runtime.version":
+                code += "assert sys.version_info[:2] == (3, 14), sys.version\n"
+            elif name == "runtime.abi":
+                code += f"assert bool(sysconfig.get_config_var('Py_GIL_DISABLED')) is {args.disable_gil!r}\n"
+                code += f"assert sys.abiflags == {'t' if args.disable_gil else ''!r}, sys.abiflags\n"
+            else:
+                module = name.removeprefix("module.")
+                if module == "_tkinter":
+                    code += "try:\n import _tkinter\nexcept ModuleNotFoundError as error:\n print(str(error), file=sys.stderr)\n sys.exit(77)\n"
+                else:
+                    code += f"import {module}\n"
+                if module == "decimal":
+                    code += "import _decimal\nassert decimal.Decimal is _decimal.Decimal\n"
+            code += state_check + f"print({MARKER!r})\n"
+            status, seconds, detail = run(command, code, args.timeout)
+        rows.append((name, status, f"{seconds:.6f}"))
+        details[name] = detail
+        print(f"{name}: {status}" + (f" ({detail.strip()})" if detail else ""))
+    write_manifest(directory / (args.runtime + ".tsv"), rows)
+    (directory / (args.runtime + ".json")).write_text(
+        json.dumps({"command": command, "disable_gil": args.disable_gil, "details": details}, indent=2) + "\n",
+        encoding="utf-8")
+    return 0 if all(row[1] in ("PASS", "SKIP") for row in rows) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
