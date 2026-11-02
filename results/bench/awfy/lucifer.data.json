@@ -1,0 +1,107 @@
+{
+  "logs": {},
+  "rows": {
+    "Bounce": {
+      "id": "Bounce",
+      "inner_iterations": 1500,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "CD": {
+      "id": "CD",
+      "inner_iterations": 250,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "DeltaBlue": {
+      "id": "DeltaBlue",
+      "inner_iterations": 12000,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "Havlak": {
+      "id": "Havlak",
+      "inner_iterations": 1500,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "Json": {
+      "id": "Json",
+      "inner_iterations": 100,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "List": {
+      "id": "List",
+      "inner_iterations": 1500,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "Mandelbrot": {
+      "id": "Mandelbrot",
+      "inner_iterations": 500,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "NBody": {
+      "id": "NBody",
+      "inner_iterations": 250000,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "Permute": {
+      "id": "Permute",
+      "inner_iterations": 1000,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "Queens": {
+      "id": "Queens",
+      "inner_iterations": 1000,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "Richards": {
+      "id": "Richards",
+      "inner_iterations": 100,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "Sieve": {
+      "id": "Sieve",
+      "inner_iterations": 3000,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "Storage": {
+      "id": "Storage",
+      "inner_iterations": 1000,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    "Towers": {
+      "id": "Towers",
+      "inner_iterations": 600,
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    }
+  },
+  "runtime": "lucifer",
+  "runtime_info": null,
+  "samples_us": {},
+  "source_sha256": "f3565cc44928915ec4f0afced5d7f5b57dc5295df968908a6210fde4089b9f68"
+}

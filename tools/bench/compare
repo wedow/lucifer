@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Write runtime/CPython median time ratios, with coverage and missing cells."""
+import argparse
+import csv
+import json
+import math
+from pathlib import Path
+import statistics
+
+from common import ROOT
+
+
+def read_manifest(path):
+    with path.open() as stream:
+        return {row['id']: row['status'] for row in csv.DictReader(stream, delimiter='\t')}
+
+
+def medians(directory, runtime, suite):
+    if suite == 'awfy':
+        with (directory / (runtime + '.csv')).open() as stream:
+            return {row['id']: float(row['median_us']) for row in csv.DictReader(stream)
+                    if row['status'] == 'PASS' and row['median_us']}
+    data = json.loads((directory / (runtime + '.json')).read_text())
+    output = {}
+    for bench in data['benchmarks']:
+        name = bench.get('metadata', {}).get('name', data.get('metadata', {}).get('name'))
+        values = [v for run in bench['runs'] for v in run.get('values', [])]
+        if values:
+            output[name] = statistics.median(values)
+    return output
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--suite', required=True, choices=['awfy', 'pyperformance'])
+    parser.add_argument('--directory', type=Path)
+    parser.add_argument('--baseline', default='cpython-3.14.10')
+    args = parser.parse_args()
+    directory = args.directory or ROOT / 'results/bench' / args.suite
+    expected = sorted(read_manifest(directory / 'expected.tsv'))
+    runtimes = sorted(p.stem for p in directory.glob('*.tsv') if p.stem != 'expected')
+    results = {r: medians(directory, r, args.suite) for r in runtimes}
+    baseline = results.get(args.baseline, {})
+    rows, aggregates = [], []
+    for runtime in runtimes:
+        statuses = read_manifest(directory / (runtime + '.tsv'))
+        ratios = []
+        for name in expected:
+            value, reference = results[runtime].get(name), baseline.get(name)
+            ratio = value / reference if (statuses.get(name) == 'PASS' and value and reference
+                                          and value > 0 and reference > 0) else None
+            if ratio is not None:
+                ratios.append(ratio)
+            rows.append(dict(runtime=runtime, id=name, status=statuses.get(name, 'NOTRUN'),
+                             runtime_over_cpython=ratio))
+        # A partial panel has diagnostic ratios, never an overall score.
+        aggregate = math.exp(statistics.fmean(map(math.log, ratios))) if len(ratios) == len(expected) else None
+        aggregates.append(dict(runtime=runtime, measured=len(ratios), expected=len(expected),
+                               runtime_over_cpython=aggregate))
+    for filename, values in [('factors.csv', rows), ('summary.csv', aggregates)]:
+        with (directory / filename).open('w', newline='') as stream:
+            writer = csv.DictWriter(stream, values[0].keys(), lineterminator='\n')
+            writer.writeheader()
+            writer.writerows(values)
+    print('runtime\tmeasured/expected\truntime/CPython (lower is faster)')
+    for row in aggregates:
+        value = row['runtime_over_cpython']
+        print(f'{row["runtime"]}\t{row["measured"]}/{row["expected"]}\t{value:.6f}' if value is not None
+              else f'{row["runtime"]}\t{row["measured"]}/{row["expected"]}\tmissing')
+
+
+if __name__ == '__main__':
+    main()

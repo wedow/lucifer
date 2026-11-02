@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Binary-level regression checks for benchmark drivers, using no real timings."""
+import csv
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+from common import ROOT
+from steady import median_interval, steady_start, summarize
+
+
+class BenchCheck(unittest.TestCase):
+    def invoke(self, *args):
+        result = subprocess.run([sys.executable, *map(str, args)], capture_output=True,
+                                text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result.stdout
+
+    def manifest(self, folder, runtime):
+        with (folder / (runtime + '.tsv')).open() as stream:
+            return list(csv.DictReader(stream, delimiter='\t'))
+
+    def test_missing_and_failing_interpreters(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for binary in [str(root / 'missing'), '/bin/false']:
+                for suite, count in [('awfy', 14), ('pyperformance', 9)]:
+                    folder = root / suite
+                    arguments = [ROOT / 'tools/bench' / suite]
+                    if suite == 'pyperformance':
+                        arguments += ['run']
+                    self.invoke(*arguments, '--python', binary, '--runtime', 'lucifer', '--output', folder)
+                    rows = self.manifest(folder, 'lucifer')
+                    self.assertEqual(len(rows), count)
+                    self.assertEqual({r['status'] for r in rows}, {'NOTRUN'})
+                    self.assertEqual({r['id'] for r in rows},
+                                     {r['id'] for r in self.manifest(folder, 'expected')})
+                    self.invoke(ROOT / 'tools/bench/compare', '--suite', suite, '--directory', folder)
+                    with (folder / 'summary.csv').open() as stream:
+                        summary = next(csv.DictReader(stream))
+                    self.assertEqual(summary['measured'], '0')
+                    self.assertEqual(summary['runtime_over_cpython'], '')
+            output = self.invoke(ROOT / 'tools/scoreboard', root)
+            self.assertEqual(output.count('0.00%'), 2)
+
+    def test_wrong_answers_crashes_and_timeouts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fake = root / 'interpreter'
+            for body, expected in [
+                ("print('Benchmark failed with incorrect result', file=sys.stderr); sys.exit(1)", 'FAIL'),
+                ("import signal, os; os.kill(os.getpid(), signal.SIGKILL)", 'CRASH'),
+                ("import time; time.sleep(3)", 'TIMEOUT'),
+                ("print('no samples')", 'ERROR'),
+            ]:
+                fake.write_text('#!' + sys.executable + '\nimport sys\n'
+                    "if '-c' in sys.argv:\n print('{\"version\": [3, 14, 10]}')\nelse:\n " + body + '\n')
+                fake.chmod(0o755)
+                folder = root / expected
+                self.invoke(ROOT / 'tools/bench/awfy', '--python', str(fake), '--runtime', 'fake',
+                            '--benchmarks', 'Bounce', '--timeout', '0.2', '--output', folder)
+                rows = {r['id']: r['status'] for r in self.manifest(folder, 'fake')}
+                self.assertEqual(rows.pop('Bounce'), expected)
+                self.assertEqual(set(rows.values()), {'NOTRUN'})
+            # A disappeared executable must not leave stale scored cells or abort
+            # because its new runtime fingerprint is unavailable.
+            self.invoke(ROOT / 'tools/bench/awfy', '--python', str(root / 'missing'),
+                        '--runtime', 'fake', '--benchmarks', 'Bounce', '--output', folder)
+            self.assertEqual({r['status'] for r in self.manifest(folder, 'fake')}, {'NOTRUN'})
+
+    def test_steady_rule(self):
+        self.assertEqual(steady_start([100] * 20), 0)
+        self.assertEqual(steady_start([1000, 500] + [100] * 20), 2)
+        self.assertIsNone(steady_start(list(range(100, 200))))
+        self.assertIsNone(steady_start([100] * 11))
+        fallback = summarize(list(range(100, 121)), 1)
+        self.assertEqual(fallback['steady'], 'fallback')
+        self.assertEqual(fallback['median_us'], 115)
+        self.assertEqual(fallback['first_iteration_us'], 100)
+        self.assertEqual(median_interval([1] * 5), (None, None))
+        self.assertEqual(median_interval([1] * 20), (1, 1))
+
+    def test_complete_protocol_and_failed_tail(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fake = root / 'interpreter'
+            fake.write_text('#!' + sys.executable + '\nimport sys\n'
+                "if '-c' in sys.argv:\n print('{\"version\": [3, 14, 10]}')\n"
+                "else:\n name = sys.argv[-2]\n"
+                " for i in range(20): print(name + ': iterations=1 runtime: 600000us')\n"
+                " print('Total Runtime: 12000000us')\n"
+                " if '--fail' in sys.argv: sys.exit(1)\n")
+            fake.chmod(0o755)
+            self.invoke(ROOT / 'tools/bench/awfy', '--python', str(root / 'missing'),
+                        '--runtime', 'cpython-3.14.10', '--output', root)
+            for runtime, extra in [('cpython-3.14.10', ''), ('bad', ' --fail')]:
+                self.invoke(ROOT / 'tools/bench/awfy', '--python', str(fake) + extra,
+                            '--runtime', runtime, '--output', root)
+            self.invoke(ROOT / 'tools/bench/compare', '--suite', 'awfy', '--directory', root)
+            with (root / 'summary.csv').open() as stream:
+                summary = {r['runtime']: r for r in csv.DictReader(stream)}
+            self.assertEqual(summary['cpython-3.14.10']['measured'], '14')
+            self.assertEqual(float(summary['cpython-3.14.10']['runtime_over_cpython']), 1)
+            self.assertEqual(summary['bad']['measured'], '0')
+            self.assertEqual(summary['bad']['runtime_over_cpython'], '')
+            self.assertEqual({r['status'] for r in self.manifest(root, 'bad')}, {'ERROR'})
+
+
+if __name__ == '__main__':
+    unittest.main()

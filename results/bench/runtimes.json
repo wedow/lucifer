@@ -1,0 +1,77 @@
+{
+  "cpython-3.14.10": {
+    "default": {
+      "abi_flags": "",
+      "arguments": [],
+      "compiler": "cc",
+      "configure_args": "'--prefix=<local-path>' '--enable-optimizations=no' 'CC=cc' 'CFLAGS=-O2' 'LDFLAGS=' 'CPPFLAGS='",
+      "executable_sha256": "6441077694980135b100184dae309c6e303c50519d6b694daa7997fb8be954df",
+      "free_threaded": false,
+      "gil_enabled": true,
+      "implementation": "cpython",
+      "jit_available": false,
+      "jit_enabled": false,
+      "version": [
+        3,
+        14,
+        10
+      ]
+    },
+    "jit_followup": "separate JIT-capable build required",
+    "python_jit_1": {
+      "abi_flags": "",
+      "compiler": "cc",
+      "configure_args": "'--prefix=<local-path>' '--enable-optimizations=no' 'CC=cc' 'CFLAGS=-O2' 'LDFLAGS=' 'CPPFLAGS='",
+      "free_threaded": false,
+      "gil_enabled": true,
+      "implementation": "cpython",
+      "jit_available": false,
+      "jit_enabled": false,
+      "version": [
+        3,
+        14,
+        10
+      ]
+    }
+  },
+  "cpython-3.14.10t": {
+    "default": {
+      "abi_flags": "t",
+      "arguments": [],
+      "compiler": "cc",
+      "configure_args": "'--prefix=<local-path>' '--enable-optimizations=no' '--disable-gil' 'CC=cc' 'CFLAGS=-O2' 'LDFLAGS=' 'CPPFLAGS='",
+      "executable_sha256": "6c333424df584c3adaf4a7f9de9c9a2b2b6440debb8b9a6c6bdc52a968b8f1b5",
+      "free_threaded": true,
+      "gil_enabled": false,
+      "implementation": "cpython",
+      "jit_available": false,
+      "jit_enabled": false,
+      "version": [
+        3,
+        14,
+        10
+      ]
+    },
+    "jit_followup": "separate JIT-capable build required",
+    "python_jit_1": {
+      "abi_flags": "t",
+      "compiler": "cc",
+      "configure_args": "'--prefix=<local-path>' '--enable-optimizations=no' '--disable-gil' 'CC=cc' 'CFLAGS=-O2' 'LDFLAGS=' 'CPPFLAGS='",
+      "free_threaded": true,
+      "gil_enabled": false,
+      "implementation": "cpython",
+      "jit_available": false,
+      "jit_enabled": false,
+      "version": [
+        3,
+        14,
+        10
+      ]
+    }
+  },
+  "lucifer": {
+    "default": null,
+    "jit_followup": null,
+    "python_jit_1": null
+  }
+}

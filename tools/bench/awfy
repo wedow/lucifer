@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Run canonical, correctness-checked AWFY in one fresh process per row."""
+import argparse
+import csv
+import json
+from pathlib import Path
+import re
+import time
+
+from common import (ROOT, command, probe, public_data, run, runtime_name,
+                    source_hash, write_json, write_manifest)
+from steady import summarize
+
+# Same unchanged inner work as the donor's tools/perf/awfy-sizes.sh.
+INNER = dict(DeltaBlue=12000, Richards=100, Json=100, CD=250, Havlak=1500,
+             Bounce=1500, List=1500, Mandelbrot=500, NBody=250000, Permute=1000,
+             Queens=1000, Sieve=3000, Storage=1000, Towers=600)
+FIELDS = ['id', 'status', 'reason', 'seconds', 'inner_iterations', 'iterations',
+          'steady', 'steady_start', 'steady_n', 'median_us', 'ci_low_us', 'ci_high_us',
+          'first_iteration_us', 'first_over_median', 'warmup_us', 'warmup_cost_us',
+          'startup_overhead_us']
+
+
+def parse_samples(name, output):
+    pattern = re.compile(re.escape(name) + r': iterations=1 runtime: (\d+)us')
+    return [int(match[1]) for line in output.splitlines()
+            if (match := pattern.fullmatch(line))]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--python', required=True, help='interpreter command (shell words, no shell execution)')
+    parser.add_argument('--runtime', required=True, type=runtime_name)
+    parser.add_argument('--output', type=Path, default=ROOT / 'results/bench/awfy')
+    parser.add_argument('--benchmarks', default=','.join(sorted(INNER)),
+                        help='comma-separated shard; other rows retain previous results')
+    parser.add_argument('--timeout', type=float, default=180)
+    args = parser.parse_args()
+    names = args.benchmarks.split(',')
+    if not set(names) <= INNER.keys() or args.timeout <= 0:
+        parser.error('unknown benchmark or nonpositive timeout')
+    argv = command(args.python)
+    info = probe(argv)
+    source = ROOT / 'third_party/awfy/Python'
+    worker = Path(__file__).with_name('awfy_worker.py')
+    datafile = args.output / (args.runtime + '.data.json')
+    previous = json.loads(datafile.read_text()) if datafile.exists() else {}
+    fingerprint = source_hash(ROOT / 'third_party/awfy')
+    if not info:
+        # An unavailable target invalidates every cell, including stale shards.
+        previous = {}
+        names = sorted(INNER)
+    elif not previous.get('runtime_info') or set(names) == INNER.keys():
+        # The first working binary can replace a missing-runtime scoreboard.
+        # A full panel is also a fresh run; only partial shards need continuity.
+        previous = {}
+    if previous and (previous['source_sha256'] != fingerprint or previous['runtime_info'] != info):
+        parser.error('existing shard has different source/runtime; use a fresh output directory')
+    rows = previous.get('rows', {name: dict(id=name, status='NOTRUN', reason='not scheduled',
+                                         seconds=0, inner_iterations=inner)
+                                 for name, inner in INNER.items()})
+    raw = previous.get('samples_us', {})
+    logs = previous.get('logs', {})
+    deadline = time.monotonic() + 900
+    for name in names:
+        row = dict(id=name, status='NOTRUN', reason='missing or failing interpreter',
+                   seconds=0, inner_iterations=INNER[name])
+        raw.pop(name, None)
+        logs.pop(name, None)
+        if info and time.monotonic() < deadline:
+            status, out, err, elapsed = run(argv + ['-u', str(worker), str(source), name,
+                                                   str(INNER[name])],
+                                           min(args.timeout, deadline - time.monotonic()))
+            samples = parse_samples(name, out)
+            row.update(status=status, seconds=elapsed, reason='', iterations=len(samples))
+            logs[name] = public_data(dict(stdout=out, stderr=err))
+            raw[name] = samples
+            if status == 'PASS':
+                if not samples or min(samples) <= 0 or 'Total Runtime: ' not in out:
+                    row.update(status='ERROR', reason='missing or invalid verified samples')
+                elif len(samples) > 1000 or (len(samples) < 1000 and
+                                            (len(samples) < 20 or sum(samples) < 10_000_000)):
+                    row.update(status='ERROR', reason='incomplete iteration budget')
+                else:
+                    row.update(summarize(samples, elapsed))
+            elif 'incorrect result' in err:
+                row.update(status='FAIL', reason='upstream answer verification failed')
+            else:
+                row['reason'] = 'benchmark process ' + status.lower()
+        elif info:
+            row['reason'] = 'invocation wall budget exhausted'
+        rows[name] = row
+        print(f'{args.runtime}/{name}: {row["status"]}', flush=True)
+    write_json(datafile, dict(runtime=args.runtime, runtime_info=info, source_sha256=fingerprint,
+                             rows=rows, samples_us=raw, logs=logs))
+    args.output.mkdir(parents=True, exist_ok=True)
+    with (args.output / (args.runtime + '.csv')).open('w', newline='') as stream:
+        writer = csv.DictWriter(stream, FIELDS, lineterminator='\n')
+        writer.writeheader()
+        writer.writerows(rows[name] for name in sorted(INNER))
+    write_manifest(args.output, args.runtime,
+                   [(r['id'], r['status'], r['seconds']) for r in rows.values()], INNER)
+
+
+if __name__ == '__main__':
+    main()
