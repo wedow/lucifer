@@ -1,0 +1,30 @@
+{
+  "package": "pytz",
+  "version": "2026.6",
+  "runtime": "cpython-3.14.10t",
+  "source_sha256": "3b0fc2727707663d6e517936f444fd8a8b240f1fc32f4bf7ee03274245945284",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "366216a72af85f1fef8937a7de4ac838cc2ae738ab4299a25632b15af8c82e3f",
+  "harness_sha256": {
+    "run.py": "795ec4c1cc0f058d012f4bf42297a849e10ae8b4c83949f9ccfe8f782c946f6a",
+    "recorder.py": "4b2205a94f148834372183fd28637e41fcb36e21ba83fc1758988a71535ef1b1",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 208
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "t",
+    "package_version": "2026.6",
+    "native_modules": {},
+    "gil_enabled": false,
+    "free_threaded": true,
+    "exitstatus": 0
+  },
+  "collection_sha256": "4ca8494c1a34e95c129d8791bcf681c4b38d9df51c1da7760a86bc42c845fa0b",
+  "upstream_ids": {},
+  "outcomes": []
+}

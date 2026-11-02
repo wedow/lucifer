@@ -1,0 +1,396 @@
+{
+  "package": "lxml",
+  "version": "6.1.3",
+  "runtime": "cpython-3.14.10",
+  "source_sha256": "45222d94ddd511536f3b2f7d9deae3b2339b4ce0f075f1ca25703b07cad9dd21",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "harness_sha256": {
+    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
+    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 2000,
+    "SKIP": 51
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "",
+    "package_version": "6.1.3",
+    "native_modules": {
+      "lxml._elementpath": "cf4adaab225cc118e02a300bff5c4d08c01bd4d1e94d3133637d277cd7942119",
+      "lxml.etree": "0527412673571e96528365835cc0052b1b4887070e55425226251d9e479eef88",
+      "lxml.html._difflib": "8c70615f4d23acd78a6763ef4cc1d33b365e9eebc1a060137369da141369b48e",
+      "lxml.html.diff": "a4da7178a0086ab2642d426059339fca662e86f9c069d22d3cd5df98d5fc33a8",
+      "lxml.builder": "217df705ccd0630afb17affa86f8ff2bee2ee9aae54215d2ff0bfc6f8fea83cc",
+      "lxml.sax": "cf96ad4a04966829cfd9e8bf042246de54f7421d6582b8f3ef0e6f91820bd241",
+      "lxml.objectify": "975d4c72422e8f233f749f62ed39c2b07c119d717f444182d76f9ed4364d048a"
+    },
+    "gil_enabled": true,
+    "free_threaded": false,
+    "exitstatus": 0
+  },
+  "collection_sha256": "01ce74e671ee8f93251e36e14f8b70c448a13936364a9ffef9c98054c959dadb",
+  "outcomes": [
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_HTMLParser.test_integration",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_XHTMLParser.test_integration",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "xhtml5lib does not have XHTMLParser"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_document_fromstring.test_basic",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_document_fromstring.test_guess_charset_arg_gets_passed_to_parser",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_document_fromstring.test_guess_charset_not_used_for_unicode",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_document_fromstring.test_integration",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_document_fromstring.test_raises_type_error_on_nonstring_input",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragment_fromstring.test_basic",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragment_fromstring.test_create_parent",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragment_fromstring.test_create_parent_default_type_no_ns",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragment_fromstring.test_raises_error_if_multiple_elements_found",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragment_fromstring.test_raises_error_if_no_elements_found",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragment_fromstring.test_raises_error_if_tail",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragment_fromstring.test_raises_error_on_leading_text",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragment_fromstring.test_raises_type_error_on_nonstring_input",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragments_fromstring.test_basic",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragments_fromstring.test_guess_charset_arg_gets_passed_to_parser",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragments_fromstring.test_guess_charset_not_used_for_unicode",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragments_fromstring.test_integration",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragments_fromstring.test_no_leading_text_raises_error_if_leading_text",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragments_fromstring.test_no_leading_text_strips_empty_leading_text",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fragments_fromstring.test_raises_type_error_on_nonstring_input",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_integration_single_fragment",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_integration_whole_doc",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_raises_type_error_on_nonstring_input",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_returns_body_if_has_text",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_returns_body_if_single_element_has_tail",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_returns_unwraps_body_if_single_element",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_returns_whole_doc_if_head_not_empty",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_returns_whole_doc_if_head_not_empty_no_ns",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_returns_whole_doc_if_input_contains_doctype",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_returns_whole_doc_if_input_contains_html_tag",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_returns_whole_doc_if_input_is_encoded",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_wraps_multiple_fragments_in_div_no_ns",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_fromstring.test_wraps_multiple_fragments_in_span_no_ns",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_parse.test_integration",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_parse.test_with_file_name",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_parse.test_with_file_object",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.html.tests.test_html5parser.Test_parse.test_with_url",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "html5lib is not installed"
+    },
+    {
+      "id": "lxml.tests.test_elementpath.ElementTreeElementPathTestCase.test_cache",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "lxml-only"
+    },
+    {
+      "id": "lxml.tests.test_elementpath.ElementTreeElementPathTestCase.test_tokenizer",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "lxml-only"
+    },
+    {
+      "id": "lxml.tests.test_elementpath.ElementTreeElementPathTestCase.test_tokenizer_index",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "lxml-only"
+    },
+    {
+      "id": "lxml.tests.test_elementtree.ElementTreePullTestCase.test_simple_xml_chunk_1",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "Feeding the parser by too small chunks defers parsing"
+    },
+    {
+      "id": "lxml.tests.test_elementtree.ElementTreePullTestCase.test_simple_xml_chunk_5",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "Feeding the parser by too small chunks defers parsing"
+    },
+    {
+      "id": "lxml.tests.test_http_io.HttpIOTestCase.test_http_client",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "needs HTTP support in libxml2"
+    },
+    {
+      "id": "lxml.tests.test_http_io.HttpIOTestCase.test_http_client_404",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "needs HTTP support in libxml2"
+    },
+    {
+      "id": "lxml.tests.test_http_io.HttpIOTestCase.test_http_client_gzip",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "needs HTTP support in libxml2"
+    },
+    {
+      "id": "lxml.tests.test_http_io.HttpIOTestCase.test_network_dtd",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "needs HTTP support in libxml2"
+    },
+    {
+      "id": "lxml.tests.test_http_io.HttpIOTestCase.test_parser_input_mix",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "needs HTTP support in libxml2"
+    },
+    {
+      "id": "lxml.tests.test_incremental_xmlfile.TempPathXmlFileTestCase.test_buffering",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "temp file behaviour is too platform specific here"
+    },
+    {
+      "id": "lxml.tests.test_incremental_xmlfile.TempPathXmlFileTestCase.test_flush",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "temp file behaviour is too platform specific here"
+    }
+  ]
+}

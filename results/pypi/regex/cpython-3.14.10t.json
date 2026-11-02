@@ -1,0 +1,32 @@
+{
+  "package": "regex",
+  "version": "2026.9.29",
+  "runtime": "cpython-3.14.10t",
+  "source_sha256": "8b5fcc4771732191b2b7d1dd68d8f0353f47f8d90b6150f6dce58bf1112442cb",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "366216a72af85f1fef8937a7de4ac838cc2ae738ab4299a25632b15af8c82e3f",
+  "harness_sha256": {
+    "run.py": "795ec4c1cc0f058d012f4bf42297a849e10ae8b4c83949f9ccfe8f782c946f6a",
+    "recorder.py": "4b2205a94f148834372183fd28637e41fcb36e21ba83fc1758988a71535ef1b1",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 101
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "t",
+    "package_version": "2026.9.29",
+    "native_modules": {
+      "regex._regex": "a2f338c58be939dcb051a92d0bfd34d4533d46d061c9f4fa394dfeed9bd985a6"
+    },
+    "gil_enabled": false,
+    "free_threaded": true,
+    "exitstatus": 0
+  },
+  "collection_sha256": "fc0ee4545583722f59b57a9722faf6c01f5d452015e45e23a7d4aff465309607",
+  "upstream_ids": {},
+  "outcomes": []
+}

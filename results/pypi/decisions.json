@@ -1,0 +1,166 @@
+{
+  "environment_fixes": [
+    {
+      "package": "requests",
+      "finding": "Four local TLS tests used relative certificate paths; four timeout cases target an external unroutable address.",
+      "resolution": "Use the source working directory and retain the four external-address cases as explicit offline SKIP."
+    },
+    {
+      "package": "requests",
+      "finding": "A parameter embeds the installed pytest filename, which differs between ABI environments.",
+      "resolution": "Normalize only known installation roots to site-packages/ in all test IDs."
+    },
+    {
+      "package": "pyyaml",
+      "finding": "The upstream legacy collector gives three no-data cases the same node ID.",
+      "resolution": "Append the original function name to no-data item IDs; keep all three cases."
+    },
+    {
+      "package": "lxml",
+      "finding": "Release wheels omit the source test packages.",
+      "resolution": "Call the upstream unittest loader with source test paths attached to the installed lxml packages."
+    },
+    {
+      "package": "python-dateutil",
+      "finding": "The suite marks no_cover cases through its coverage plugin.",
+      "resolution": "Explicitly load the hash-pinned pytest-cov plugin."
+    },
+    {
+      "package": "pydantic-core",
+      "finding": "The timezone tests import Pydantic in addition to pydantic-core.",
+      "resolution": "Pin and install Pydantic and its dependency closure for the test environment."
+    },
+    {
+      "package": "sqlalchemy",
+      "finding": "Asyncio test modules import greenlet even with --disable-asyncio.",
+      "resolution": "Exclude test/ext/asyncio at collection within the declared synchronous SQLite lane."
+    },
+    {
+      "package": "pyparsing",
+      "finding": "The release unit-test CI installs Matplotlib on Python 3.14.",
+      "resolution": "Pin and install its wheel closure before the final baseline."
+    },
+    {
+      "package": "networkx",
+      "finding": "The release default CI environment includes NumPy, SciPy, pandas and Matplotlib.",
+      "resolution": "Pin those wheel dependencies; include doctests and the release image-comparison lane."
+    },
+    {
+      "package": "jinja2",
+      "finding": "Importlib collection hid the res fixture package and changed a module-name assertion.",
+      "resolution": "Use the release CI default prepend import mode for this package."
+    },
+    {
+      "package": "lxml",
+      "finding": "Six doctests access samples/ and doc/ relative to the source root.",
+      "resolution": "Use the release source root as the working directory, as the upstream test runner does."
+    },
+    {
+      "package": "pydantic-core",
+      "finding": "Custom parameter IDs include process addresses, random UUIDs and Rust hash-map repr order.",
+      "resolution": "Use pytest callspec parameter names/indices as stable IDs; retain original IDs in runtime JSON and raw journals."
+    },
+    {
+      "package": "urllib3",
+      "finding": "An upstream 0.1-second deadline can interrupt failure reporting under instrumentation.",
+      "resolution": "Apply a five-second minimum to pytest timeout markers, preserving socket timeout arguments and assertions."
+    },
+    {
+      "package": "click",
+      "finding": "The suite checks module-qualified reprs and globbing relative to the source root.",
+      "resolution": "Use the source working directory and default prepend import mode, as CI does."
+    },
+    {
+      "package": "rich",
+      "finding": "Golden syntax colors depend on the Pygments version; forcing COLUMNS overrides tests of descriptor fallback.",
+      "resolution": "Use Pygments 2.19.2 from the release poetry.lock and unset COLUMNS/LINES for this suite."
+    },
+    {
+      "package": "urllib3",
+      "finding": "The release uv.lock uses the urllib3 Hypercorn fork at d1719f8c1570cbd8e6a3719ffdb14a4d72880abb; PyPI Hypercorn lacks its TLS and _transport scope extensions.",
+      "resolution": "Load that exact source archive as a test-server dependency, with a SHA-256 pin. Production urllib3 remains the published wheel."
+    },
+    {
+      "package": "networkx",
+      "finding": "fontTools 4.68.0 cp314t bezierTools enables the GIL; Matplotlib loads it for the PS backend.",
+      "resolution": "Use the published fontTools pure Python wheel in both environments and rerun the graph suite."
+    },
+    {
+      "package": "sqlalchemy",
+      "finding": "The upstream collector omits nine tutorial methods on free-threaded builds because DocTest requires gil_enabled.",
+      "resolution": "Keep the full GIL-derived inventory and map this exact allowlist to SKIP in the free-threaded manifest."
+    },
+    {
+      "package": "pydantic-core",
+      "finding": "The sdist has no dependency lock and current doc tooling rejects 25 unchanged documentation examples during lint, before running them.",
+      "resolution": "Pin pytest-examples 0.0.15, Black 24.10.0 and Ruff 0.9.2 from the available upstream main uv.lock snapshot. A matching release-tag lock was unavailable (unverified). Assertions and examples remain unchanged."
+    },
+    {
+      "package": "urllib3",
+      "finding": "Two unmarked HTTP/2 thread-probe cases connect to reserved internet address 240.0.0.0 (TARPIT_HOST). The offline guard makes their intended connect-timeout/thread scheduling assumptions invalid.",
+      "resolution": "Keep both TLS variants in the denominator as explicit offline SKIP."
+    },
+    {
+      "package": "networkx",
+      "finding": "The shared corpus environment supplies optional lxml, which enables the GIL and caused a free-threaded GraphML crash. NetworkX default CI dependencies omit lxml.",
+      "resolution": "Use package-specific environments omitting lxml and lxml-html-clean. Keep the full frozen inventory, with upstream dependency skips and an exact allowlist for the omitted GraphML doctest module. lxml retains its own corpus lane."
+    },
+    {
+      "package": "packaging",
+      "finding": "Four upstream file-URI fixtures embed home-directory syntax in their generated parameter labels. They are static test data, rather than machine paths.",
+      "resolution": "Use parameter indices for this one test family and keep its original labels only in external journals, respecting the public-path rule."
+    }
+  ],
+  "upstream": [
+    {
+      "package": "python-dateutil",
+      "id": "tests/test_tzfile.py::test_gettz_local_abbreviation_without_time_zone_data",
+      "classification": "Reproduced FAIL on both pinned oracles with TZ=UTC, including a repeat run. The preceding test requires gettz(UTC) is tz.UTC while this test expects tzlocal for every local alphabetic abbreviation.",
+      "resolution": "Retain FAIL in the scoreboard; no assertion or timezone is changed."
+    },
+    {
+      "package": "urllib3",
+      "id": "test/test_response.py::TestResponse::test_chunked_decoding_gzip_swallow_garbage",
+      "classification": "GzipDecoder.flush propagates zlib.error on concatenated gzip data followed by garbage. Reproduced on both pinned oracles after the CI-server and offline-selection repairs.",
+      "resolution": "Retain FAIL; no assertion or production package is patched."
+    },
+    {
+      "package": "urllib3",
+      "id": "test/test_response.py::TestResponse::test_read_chunked_with_trailing_data_does_not_hang[gzip]",
+      "classification": "The trailing gzip garbage reaches the same unhandled zlib.error during flush. Reproduced on both pinned oracles after the CI-server and offline-selection repairs.",
+      "resolution": "Retain FAIL; no assertion or production package is patched."
+    },
+    {
+      "package": "urllib3",
+      "id": "test/test_ssltransport.py::SingleTLSLayerTestCase::test_start_closed_socket",
+      "classification": "The test expects OSError from a closed socket, but CPython 3.14 first raises ValueError for check_hostname without server_hostname. Reproduced on both pinned oracles after the CI-server and offline-selection repairs.",
+      "resolution": "Retain FAIL; no assertion or production package is patched."
+    },
+    {
+      "package": "lxml",
+      "classification": "The published cp314t extension declares that it uses the GIL. Its own free-threaded-ABI suite passes with the automatically enabled GIL.",
+      "resolution": "Keep the observed GIL state explicit and the driver nonzero; no forced GIL-off setting or rebuilt extension is used. No-GIL lxml compatibility remains unverified."
+    }
+  ],
+  "flaky": [
+    {
+      "package": "python-dateutil",
+      "id": "tests/property/test_rrule_prop.py::test_rruleset_roundtrip[deepcopy-disabled]",
+      "classification": "Hypothesis 200 ms timing deadline failure; its internal retries measured different times for the same example.",
+      "resolution": "Confirmed by a second unchanged full run: all three timing failures disappeared under the same 200 ms Hypothesis deadline."
+    },
+    {
+      "package": "python-dateutil",
+      "id": "tests/property/test_rrule_prop.py::test_rruleset_roundtrip[deepcopy-empty]",
+      "classification": "Hypothesis 200 ms timing deadline failure; its internal retries measured different times for the same example.",
+      "resolution": "Confirmed by a second unchanged full run: all three timing failures disappeared under the same 200 ms Hypothesis deadline."
+    },
+    {
+      "package": "python-dateutil",
+      "id": "tests/property/test_rrule_prop.py::test_rruleset_roundtrip[deepcopy-partial]",
+      "classification": "Hypothesis 200 ms timing deadline failure; its internal retries measured different times for the same example.",
+      "resolution": "Confirmed by a second unchanged full run: all three timing failures disappeared under the same 200 ms Hypothesis deadline."
+    }
+  ],
+  "notes": "Final per-test outcomes and reasons are in each runtime JSON/TSV. Initial environment failures are superseded only after reruns."
+}

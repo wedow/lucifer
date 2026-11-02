@@ -1,0 +1,39 @@
+{
+  "package": "pyparsing",
+  "version": "3.3.3",
+  "runtime": "cpython-3.14.10",
+  "source_sha256": "928ae7e20211f3b6f3915a72f06a0cfd29ab9d24279dd6346b6b1a7146397d36",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "harness_sha256": {
+    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
+    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 2094
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "",
+    "package_version": "3.3.3",
+    "native_modules": {
+      "markupsafe._speedups": "198503479e11bfc3d5d91f2f7282648986781f845fa3642d3d4953bac6f4ee7f",
+      "numpy._core._multiarray_umath": "ffdecbe5382f6499d77fbb3fd034fbf3c0ac5a5516be76044610bb41f9934e04",
+      "numpy.linalg._umath_linalg": "8b8bafe494052e3d5bb20138ee3dcbc1328dff386c1f23695c89b16722689e53",
+      "matplotlib._c_internal_utils": "fb7709387b3a0b401424f4de5fd14da28f519126a776346a40375c47f0ae7906",
+      "PIL._imaging": "ab913e97d2dd06360033e26a2af3a28fd7d8980f6b103c1d498ec119b35a3ba2",
+      "matplotlib._path": "58fca3d04943d65594f7cb538a1f233ffc61cb0d2c1ea28b450e93c3c71cb97d",
+      "matplotlib.ft2font": "fa0d7163bd7e8b4327d6e3a96cbdc5d38a1aa6de25385f3bbe78456e52ebc8b0",
+      "kiwisolver._cext": "b9f4e6713e3cc5e3856a608c9bf6c37008a3f4ac0f939868c0b3e9b648aec686",
+      "matplotlib.backends._backend_agg": "c0c9e942e9eee435e071e1a7dcda4f808beb3e3a06c0bfe18f3289a8e145b297"
+    },
+    "gil_enabled": true,
+    "free_threaded": false,
+    "exitstatus": 0
+  },
+  "collection_sha256": "25a92bb52105a19b3eaf88aa1b0135357bf26e04600bff4382e43ac9af495250",
+  "outcomes": []
+}

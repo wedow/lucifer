@@ -1,0 +1,26 @@
+{
+  "package": "urllib3",
+  "version": "2.8.0",
+  "runtime": "lucifer",
+  "source_sha256": "63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63",
+  "lock_sha256": "6652f33e0a7d4b5d978b182e5dff8a085d364bea5b49f38a61081745703eefb7",
+  "corpus_sha256": "6a0696d238c5318e3ae7cdf9bbd7181d63594152c3d1fbd84a4a9e141e0c8e9a",
+  "harness_sha256": {
+    "run.py": "60eaa2f90e6493ff40181ffd9755540353a80b420a530afcf364ad975ae7db31",
+    "recorder.py": "3690cc9db5fd541ae2cd4fcb28547c5521d7027338b7f7f6c3f6a858f865b267",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "test_sources": {
+    "hypercorn": "4c5a9da30a8060bc2b57cf3ed95520e08a53a0f4d8f63985ea44c176712d16da"
+  },
+  "environment_omit": [],
+  "reason": "interpreter failed startup",
+  "returncode": null,
+  "counts": {
+    "NOTRUN": 2709
+  },
+  "state": null,
+  "collection_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "upstream_ids": {},
+  "outcomes": []
+}

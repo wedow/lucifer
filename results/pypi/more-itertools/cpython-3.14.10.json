@@ -1,0 +1,66 @@
+{
+  "package": "more-itertools",
+  "version": "11.2.1",
+  "runtime": "cpython-3.14.10",
+  "source_sha256": "cbf08fd0af284dc69718b9b76a8e6203df624d70209ea511e4219d350c856f63",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "harness_sha256": {
+    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
+    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 925,
+    "SKIP": 5
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "",
+    "package_version": "11.2.1",
+    "native_modules": {},
+    "gil_enabled": true,
+    "free_threaded": false,
+    "exitstatus": 0
+  },
+  "collection_sha256": "51aa6f0c327aed109b4cf7dfc37b040f3efd6ccc9208e641e4d4e0e0fcaba573",
+  "outcomes": [
+    {
+      "id": "more_itertools.more.powerset_of_sets",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "all examples were skipped"
+    },
+    {
+      "id": "more_itertools.recipes.random_combination",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "all examples were skipped"
+    },
+    {
+      "id": "more_itertools.recipes.random_combination_with_replacement",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "all examples were skipped"
+    },
+    {
+      "id": "more_itertools.recipes.random_permutation",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "all examples were skipped"
+    },
+    {
+      "id": "more_itertools.recipes.random_product",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "all examples were skipped"
+    }
+  ]
+}

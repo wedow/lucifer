@@ -1,0 +1,27 @@
+{
+  "package": "networkx",
+  "version": "3.7",
+  "runtime": "lucifer",
+  "source_sha256": "fd77a511bd90f39f3d016351345b52cf5319b813bdca01de3f755d3cca62e96a",
+  "lock_sha256": "6652f33e0a7d4b5d978b182e5dff8a085d364bea5b49f38a61081745703eefb7",
+  "corpus_sha256": "8467b9c0cc798eaae4423e55914e7cf34709f666bc1d182847f964694752fb5c",
+  "harness_sha256": {
+    "run.py": "6c95d1e8fd59b0bdab3d75349f8bd8818a096c193d429086d9fbb60beeb55f83",
+    "recorder.py": "4d88a7e5a3ad65b88d501d87dcec59b21c07897083502bed31e8c5a9af233e26",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "test_sources": {},
+  "environment_omit": [
+    "lxml",
+    "lxml-html-clean"
+  ],
+  "reason": "interpreter failed startup",
+  "returncode": null,
+  "counts": {
+    "NOTRUN": 10914
+  },
+  "state": null,
+  "collection_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "upstream_ids": {},
+  "outcomes": []
+}

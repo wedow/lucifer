@@ -1,0 +1,910 @@
+id	status	seconds
+tests/test_api.py::TestExtendedAPI::test_autoescape_autoselect	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_context_finalize	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_cycler	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_env_autoescape	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_eval_finalize	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_expressions	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_finalize	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_finalize_constant_expression	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_get_template_undefined	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_item_and_attribute	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_no_finalize_template_data	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_sandbox_max_range	NOTRUN	0.000000
+tests/test_api.py::TestExtendedAPI::test_template_passthrough	NOTRUN	0.000000
+tests/test_api.py::TestLowLevel::test_custom_code_generator	NOTRUN	0.000000
+tests/test_api.py::TestLowLevel::test_custom_context	NOTRUN	0.000000
+tests/test_api.py::TestMeta::test_find_included_templates	NOTRUN	0.000000
+tests/test_api.py::TestMeta::test_find_refererenced_templates	NOTRUN	0.000000
+tests/test_api.py::TestMeta::test_find_undeclared_variables	NOTRUN	0.000000
+tests/test_api.py::TestStreaming::test_basic_streaming	NOTRUN	0.000000
+tests/test_api.py::TestStreaming::test_buffered_streaming	NOTRUN	0.000000
+tests/test_api.py::TestStreaming::test_dump_stream	NOTRUN	0.000000
+tests/test_api.py::TestStreaming::test_streaming_behavior	NOTRUN	0.000000
+tests/test_api.py::TestUndefined::test_chainable_undefined	NOTRUN	0.000000
+tests/test_api.py::TestUndefined::test_debug_undefined	NOTRUN	0.000000
+tests/test_api.py::TestUndefined::test_default_undefined	NOTRUN	0.000000
+tests/test_api.py::TestUndefined::test_indexing_gives_undefined	NOTRUN	0.000000
+tests/test_api.py::TestUndefined::test_logging_undefined	NOTRUN	0.000000
+tests/test_api.py::TestUndefined::test_none_gives_proper_error	NOTRUN	0.000000
+tests/test_api.py::TestUndefined::test_object_repr	NOTRUN	0.000000
+tests/test_api.py::TestUndefined::test_stopiteration_is_undefined	NOTRUN	0.000000
+tests/test_api.py::TestUndefined::test_strict_undefined	NOTRUN	0.000000
+tests/test_api.py::TestUndefined::test_undefined_and_special_attributes	NOTRUN	0.000000
+tests/test_api.py::TestUndefined::test_undefined_attribute_error	NOTRUN	0.000000
+tests/test_api.py::test_overlay_enable_async	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_awaitable_property_slicing	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_bare_async	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_call_in_loop	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_changed	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_context_vars[<lambda>0]	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_context_vars[<lambda>1]	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_context_vars[auto_aiter]	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_context_vars[iter]	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_context_vars[reversed]	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_cycling	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_else	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_empty_blocks	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_lookaround	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_loop_errors[asyncio]	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_loop_errors[trio]	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_loop_filter	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_looploop	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_noniter	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_nonrecursive_loop_filter	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_recursive	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_recursive_depth	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_recursive_depth0	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_recursive_empty_loop_iter	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_recursive_lookaround	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_recursive_loop_filter	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_reversed_bug	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_scope	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_scoped_loop_var	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_scoped_special_var	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_scoping_bug	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_simple	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_unpacking	NOTRUN	0.000000
+tests/test_async.py::TestAsyncForLoop::test_varlen	NOTRUN	0.000000
+tests/test_async.py::TestAsyncImports::test_context_imports	NOTRUN	0.000000
+tests/test_async.py::TestAsyncImports::test_exports[asyncio]	NOTRUN	0.000000
+tests/test_async.py::TestAsyncImports::test_exports[trio]	NOTRUN	0.000000
+tests/test_async.py::TestAsyncImports::test_from_import_with_globals	NOTRUN	0.000000
+tests/test_async.py::TestAsyncImports::test_import_with_globals	NOTRUN	0.000000
+tests/test_async.py::TestAsyncImports::test_import_with_globals_override	NOTRUN	0.000000
+tests/test_async.py::TestAsyncImports::test_trailing_comma	NOTRUN	0.000000
+tests/test_async.py::TestAsyncIncludes::test_choice_includes	NOTRUN	0.000000
+tests/test_async.py::TestAsyncIncludes::test_context_include	NOTRUN	0.000000
+tests/test_async.py::TestAsyncIncludes::test_context_include_with_overrides	NOTRUN	0.000000
+tests/test_async.py::TestAsyncIncludes::test_include_ignoring_missing	NOTRUN	0.000000
+tests/test_async.py::TestAsyncIncludes::test_unoptimized_scopes	NOTRUN	0.000000
+tests/test_async.py::TestAsyncIncludes::test_unoptimized_scopes_autoescape	NOTRUN	0.000000
+tests/test_async.py::test_async_blocks[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_async_blocks[trio]	NOTRUN	0.000000
+tests/test_async.py::test_async_extend[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_async_extend[trio]	NOTRUN	0.000000
+tests/test_async.py::test_async_generate	NOTRUN	0.000000
+tests/test_async.py::test_async_iteration_in_templates	NOTRUN	0.000000
+tests/test_async.py::test_async_iteration_in_templates_extended	NOTRUN	0.000000
+tests/test_async.py::test_await_and_macros[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_await_and_macros[trio]	NOTRUN	0.000000
+tests/test_async.py::test_await_on_calls[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_await_on_calls[trio]	NOTRUN	0.000000
+tests/test_async.py::test_await_on_calls_normal_render	NOTRUN	0.000000
+tests/test_async.py::test_basic_async[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_basic_async[trio]	NOTRUN	0.000000
+tests/test_async.py::test_basic_generate_async[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_basic_generate_async[trio]	NOTRUN	0.000000
+tests/test_async.py::test_blocks_generate_async[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_blocks_generate_async[trio]	NOTRUN	0.000000
+tests/test_async.py::test_chainable_undefined_aiter[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_chainable_undefined_aiter[trio]	NOTRUN	0.000000
+tests/test_async.py::test_getitem_after_call	NOTRUN	0.000000
+tests/test_async.py::test_getitem_after_filter	NOTRUN	0.000000
+tests/test_async.py::test_include_generate_async[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_include_generate_async[trio]	NOTRUN	0.000000
+tests/test_async.py::test_namespace_awaitable[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_namespace_awaitable[trio]	NOTRUN	0.000000
+tests/test_async.py::test_native_async[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_native_async[trio]	NOTRUN	0.000000
+tests/test_async.py::test_native_list_async[asyncio]	NOTRUN	0.000000
+tests/test_async.py::test_native_list_async[trio]	NOTRUN	0.000000
+tests/test_async_filters.py::test_attribute_map[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_attribute_map[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_bool_reject[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_bool_reject[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_bool_select[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_bool_select[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_custom_async_filter[asyncio]	NOTRUN	0.000000
+tests/test_async_filters.py::test_custom_async_filter[trio]	NOTRUN	0.000000
+tests/test_async_filters.py::test_custom_async_iteratable_filter[asyncio-<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_custom_async_iteratable_filter[asyncio-<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_custom_async_iteratable_filter[trio-<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_custom_async_iteratable_filter[trio-<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_empty_map	NOTRUN	0.000000
+tests/test_async_filters.py::test_first[asyncio-<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_first[asyncio-<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_first[trio-<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_first[trio-<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_groupby[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_groupby[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_groupby_case[False-a: 1, 3\nb: 2\n]	NOTRUN	0.000000
+tests/test_async_filters.py::test_groupby_case[True-A: 3\na: 1\nb: 2\n]	NOTRUN	0.000000
+tests/test_async_filters.py::test_groupby_multidot[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_groupby_multidot[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_groupby_tuple_index[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_groupby_tuple_index[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_join_attribute[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_join_attribute[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_join_env_int[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_join_env_int[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_join_string_list[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_join_string_list[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_map_sum	NOTRUN	0.000000
+tests/test_async_filters.py::test_simple_map[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_simple_map[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_simple_reject[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_simple_reject[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_simple_select[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_simple_select[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_simple_select_attr[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_simple_select_attr[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_slice[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_slice[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_sum[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_sum[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_sum_attributes[<lambda>0]	NOTRUN	0.000000
+tests/test_async_filters.py::test_sum_attributes[<lambda>1]	NOTRUN	0.000000
+tests/test_async_filters.py::test_sum_attributes_nested	NOTRUN	0.000000
+tests/test_async_filters.py::test_sum_attributes_tuple	NOTRUN	0.000000
+tests/test_async_filters.py::test_unique_with_async_gen	NOTRUN	0.000000
+tests/test_bytecode_cache.py::TestByteCodeCache::test_simple	NOTRUN	0.000000
+tests/test_bytecode_cache.py::TestMemcachedBytecodeCache::test_dump_load	NOTRUN	0.000000
+tests/test_bytecode_cache.py::TestMemcachedBytecodeCache::test_exception	NOTRUN	0.000000
+tests/test_compile.py::test_block_set_vars_unpacking_deterministic	NOTRUN	0.000000
+tests/test_compile.py::test_filters_deterministic	NOTRUN	0.000000
+tests/test_compile.py::test_import_as_with_context_deterministic	NOTRUN	0.000000
+tests/test_compile.py::test_loop_set_vars_unpacking_deterministic	NOTRUN	0.000000
+tests/test_compile.py::test_top_level_set_vars_unpacking_deterministic	NOTRUN	0.000000
+tests/test_compile.py::test_undefined_import_curly_name	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_call_in_loop	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_changed	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_context_vars	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_cycling	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_else	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_else_scoping_item	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_empty_blocks	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_intended_scoping_with_set	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_lookaround	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_loop_errors	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_loop_filter	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_loop_unassignable	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_looploop	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_noniter	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_recursive	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_recursive_depth	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_recursive_depth0	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_recursive_empty_loop_iter	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_recursive_lookaround	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_reversed_bug	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_scope	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_scoped_loop_var	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_scoped_special_var	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_scoping_bug	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_simple	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_unpacking	NOTRUN	0.000000
+tests/test_core_tags.py::TestForLoop::test_varlen	NOTRUN	0.000000
+tests/test_core_tags.py::TestIfCondition::test_complete	NOTRUN	0.000000
+tests/test_core_tags.py::TestIfCondition::test_elif	NOTRUN	0.000000
+tests/test_core_tags.py::TestIfCondition::test_elif_deep	NOTRUN	0.000000
+tests/test_core_tags.py::TestIfCondition::test_else	NOTRUN	0.000000
+tests/test_core_tags.py::TestIfCondition::test_empty	NOTRUN	0.000000
+tests/test_core_tags.py::TestIfCondition::test_no_scope	NOTRUN	0.000000
+tests/test_core_tags.py::TestIfCondition::test_simple	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_arguments	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_arguments_defaults_nonsense	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_caller_defaults_nonsense	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_caller_undefined	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_callself	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_complex_call	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_include	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_macro_api	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_macro_defaults_self_ref	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_scoping	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_simple	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_simple_call	NOTRUN	0.000000
+tests/test_core_tags.py::TestMacros::test_varargs	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_block	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_block_escaping	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_block_escaping_filtered	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_block_filtered	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_block_filtered_set	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_init_namespace	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_namespace	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_namespace_block	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_namespace_loop	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_namespace_macro	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_namespace_redefined	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_namespace_set_tuple	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_normal	NOTRUN	0.000000
+tests/test_core_tags.py::TestSet::test_set_invalid	NOTRUN	0.000000
+tests/test_core_tags.py::TestWith::test_with	NOTRUN	0.000000
+tests/test_core_tags.py::TestWith::test_with_argument_scoping	NOTRUN	0.000000
+tests/test_debug.py::TestDebug::test_get_corresponding_lineno_traceback	NOTRUN	0.000000
+tests/test_debug.py::TestDebug::test_include_syntax_error_source	NOTRUN	0.000000
+tests/test_debug.py::TestDebug::test_local_extraction	NOTRUN	0.000000
+tests/test_debug.py::TestDebug::test_pickleable_syntax_error	NOTRUN	0.000000
+tests/test_debug.py::TestDebug::test_regular_syntax_error	NOTRUN	0.000000
+tests/test_debug.py::TestDebug::test_runtime_error	NOTRUN	0.000000
+tests/test_debug.py::TestDebug::test_syntax_error	NOTRUN	0.000000
+tests/test_ext.py::TestAutoEscape::test_nonvolatile	NOTRUN	0.000000
+tests/test_ext.py::TestAutoEscape::test_overlay_scopes	NOTRUN	0.000000
+tests/test_ext.py::TestAutoEscape::test_scoped_setting	NOTRUN	0.000000
+tests/test_ext.py::TestAutoEscape::test_scoping	NOTRUN	0.000000
+tests/test_ext.py::TestAutoEscape::test_volatile	NOTRUN	0.000000
+tests/test_ext.py::TestAutoEscape::test_volatile_scoping	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_contextreference_node_can_pass_locals	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_contextreference_node_passes_context	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_debug	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_do	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_extend_late	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_extension_nodes	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_extension_ordering	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_identifier	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_loop_controls	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_preprocessor_extension	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_rebinding	NOTRUN	0.000000
+tests/test_ext.py::TestExtensions::test_streamfilter_extension	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_comment_extract	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_complex_plural	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_extract	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_extract_context	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_extract_trimmed	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_extract_trimmed_option	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_nested_trans_error	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_trans	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_trans_block_error	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_trans_plural	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_trans_plural_with_functions	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_trans_stringformatting	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_trimmed	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_trimmed_policy	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_trimmed_policy_override	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_trimmed_varname_trimmed	NOTRUN	0.000000
+tests/test_ext.py::TestInternationalization::test_trimmed_vars	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_autoescape_macros	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_autoescape_support	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_complex_plural	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_context	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_context_block	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_context_plural	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_context_plural_block	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_newstyle_plural	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_novars_vars_escaping	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_num_called_num	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_num_used_twice	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_trans	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_trans_plural	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_trans_stringformatting	NOTRUN	0.000000
+tests/test_ext.py::TestNewstyleInternationalization::test_trans_vars	NOTRUN	0.000000
+tests/test_ext.py::TestScope::test_basic_scope_behavior	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_abs	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_attribute_map	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_batch	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_block	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_bool_reject	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_bool_select	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_capitalize	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_center	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_chaining	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_default	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_dictsort[-[('aa', 0), ('AB', 3), ('b', 1), ('c', 2)]]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_dictsort[by="value"-[('aa', 0), ('b', 1), ('c', 2), ('AB', 3)]]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_dictsort[reverse=true-[('c', 2), ('b', 1), ('AB', 3), ('aa', 0)]]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_dictsort[true-[('AB', 3), ('aa', 0), ('b', 1), ('c', 2)]]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_empty_map	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_escape	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_filesizeformat	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_filesizeformat_issue59	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_filter_calling	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_filter_undefined	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_filter_undefined_in_condexpr	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_filter_undefined_in_elif	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_filter_undefined_in_else	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_filter_undefined_in_if	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_filter_undefined_in_nested_if	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_filtertag	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_first	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_float[32.32-32.32]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_float[42-42.0]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_float[abc-0.0]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_float_default	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_forceescape	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_format	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_func_reject_attr	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_func_select_attr	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_groupby	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_groupby_case[False-a: 1, 3\nb: 2\n]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_groupby_case[True-A: 3\na: 1\nb: 2\n]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_groupby_default	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_groupby_multidot	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_groupby_tuple_index	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_indent	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_indent_markup_input	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_indent_width_string	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_int[12345678901234567890-12345678901234567890]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_int[1e10000-0]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_int[32.32-32]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_int[42-42]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_int[abc-0]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_int_base[011-8-9]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_int_base[0x33Z-16-0]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_int_base[0x4d32-16-19762]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_int_default	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_int_special_method	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_items	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_items_undefined	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_join	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_join_attribute	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_json_dump	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_last	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_length	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_lower	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_map_default	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_map_sum	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_min_max[{{ ["a", "B"]|max }}-B]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_min_max[{{ ["a", "B"]|max(case_sensitive=true) }}-a]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_min_max[{{ ["a", "B"]|min }}-a]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_min_max[{{ ["a", "B"]|min(case_sensitive=true) }}-B]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_min_max[{{ []|max }}-]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_min_max[{{ []|min }}-]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_min_max_attribute[max-9]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_min_max_attribute[min-1]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_pprint	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_random	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_replace	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_reverse	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_round_negative	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_round_positive	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_safe	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_simple_map	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_simple_reject	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_simple_reject_attr	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_simple_select	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_simple_select_attr	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_slice	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sort1	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sort2	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sort3	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sort4	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sort5	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sort6	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sort7	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sort8	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_string	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_striptags	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sum	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sum_attributes	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sum_attributes_nested	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_sum_attributes_tuple	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_title	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_trim[ .-stays]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_trim[.-  ..stays]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_trim[None-..stays..]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_truncate	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_truncate_end_length	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_truncate_very_short	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_unique	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_unique_attribute	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_unique_case_sensitive	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_upper	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlencode[Hello, world!-Hello%2C%20world%21]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlencode[Hello, world\u203d-Hello%2C%20world%E2%80%BD]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlencode[a b/c-a%20b/c]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlencode[value2-f=1]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlencode[value3-f=1&amp;z=2]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlencode[value4-%E2%80%BD=1]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlencode[value5-0=1]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlencode[value6-a+b%2Fc=a+b%2Fc]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlize	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlize_extra_schemes_parameter	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlize_rel_policy	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_urlize_target_parameter	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_wordcount	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_wordwrap	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_xmlattr	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[ ]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[/]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[=]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[>]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[\n]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[\t]	NOTRUN	0.000000
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[\x0c]	NOTRUN	0.000000
+tests/test_idtracking.py::test_basics	NOTRUN	0.000000
+tests/test_idtracking.py::test_complex	NOTRUN	0.000000
+tests/test_idtracking.py::test_if_branching_multi_scope	NOTRUN	0.000000
+tests/test_idtracking.py::test_if_branching_stores	NOTRUN	0.000000
+tests/test_idtracking.py::test_if_branching_stores_undefined	NOTRUN	0.000000
+tests/test_imports.py::TestImports::test_context_imports	NOTRUN	0.000000
+tests/test_imports.py::TestImports::test_exports	NOTRUN	0.000000
+tests/test_imports.py::TestImports::test_from_import_with_globals	NOTRUN	0.000000
+tests/test_imports.py::TestImports::test_import_needs_name	NOTRUN	0.000000
+tests/test_imports.py::TestImports::test_import_with_globals	NOTRUN	0.000000
+tests/test_imports.py::TestImports::test_import_with_globals_override	NOTRUN	0.000000
+tests/test_imports.py::TestImports::test_no_trailing_comma	NOTRUN	0.000000
+tests/test_imports.py::TestImports::test_not_exported	NOTRUN	0.000000
+tests/test_imports.py::TestImports::test_trailing_comma_with_context	NOTRUN	0.000000
+tests/test_imports.py::TestIncludes::test_choice_includes	NOTRUN	0.000000
+tests/test_imports.py::TestIncludes::test_context_include	NOTRUN	0.000000
+tests/test_imports.py::TestIncludes::test_context_include_with_overrides	NOTRUN	0.000000
+tests/test_imports.py::TestIncludes::test_import_from_with_context	NOTRUN	0.000000
+tests/test_imports.py::TestIncludes::test_include_ignoring_missing	NOTRUN	0.000000
+tests/test_imports.py::TestIncludes::test_unoptimized_scopes	NOTRUN	0.000000
+tests/test_inheritance.py::TestBugFix::test_double_extends	NOTRUN	0.000000
+tests/test_inheritance.py::TestBugFix::test_fixed_macro_scoping_bug	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_duplicate_required_or_scoped	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_dynamic_inheritance	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_invalid_required	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_layout	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_level1	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_level1_required	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_level2	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_level2_required	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_level3	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_level3_required	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_level4	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_multi_inheritance	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_preserve_blocks	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_required_with_scope	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_reuse_blocks	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_scoped_block	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_scoped_block_after_inheritance	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_super	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_super_in_scoped_block	NOTRUN	0.000000
+tests/test_inheritance.py::TestInheritance::test_working	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_balancing	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_bytefallback	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_comments	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_lineno_with_strip	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[1a-False]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[\U0001f40da-False]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[\u1885-True]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[\u1886-True]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[\u2118-True]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[\u212e-True]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[\u304d-True]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[\xb7-False]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[_-True]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[a--False]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[a\U0001f40d\U0001f40d-False]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[a\xb7-True]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[f\xf6\xf6-True]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_name[foo-True]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_normalizing	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_operators	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_raw1	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_raw2	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_raw3	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_raw4	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_string_escapes	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLexer::test_trailing_newline	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_comment_syntax	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_erb_syntax	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_erb_syntax_no_lstrip	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_erb_syntax_with_manual	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_angle_bracket	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_angle_bracket_comment	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_angle_bracket_compact	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_angle_bracket_simple	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_blocks_consume_after_without_new_line	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_blocks_false_with_no_lstrip	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_blocks_inside_with_new_line	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_blocks_outside_with_new_line	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_blocks_without_new_line	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_comment	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_embeded_strings	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_endline	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_inline	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_left_chars	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_nested	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_preserve_leading_newlines	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_comment	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_consume_before_without_new_line	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_inside_with_new_line	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_outside_with_new_line	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_raw	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_without_new_line	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_no_lstrip	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_php_syntax	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_php_syntax_compact	NOTRUN	0.000000
+tests/test_lexnparse.py::TestLstripBlocks::test_php_syntax_with_manual	NOTRUN	0.000000
+tests/test_lexnparse.py::TestParser::test_balancing	NOTRUN	0.000000
+tests/test_lexnparse.py::TestParser::test_comment_syntax	NOTRUN	0.000000
+tests/test_lexnparse.py::TestParser::test_erb_syntax	NOTRUN	0.000000
+tests/test_lexnparse.py::TestParser::test_error_messages	NOTRUN	0.000000
+tests/test_lexnparse.py::TestParser::test_line_syntax	NOTRUN	0.000000
+tests/test_lexnparse.py::TestParser::test_line_syntax_priority	NOTRUN	0.000000
+tests/test_lexnparse.py::TestParser::test_php_syntax	NOTRUN	0.000000
+tests/test_lexnparse.py::TestParser::test_start_comment	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_attr	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_block_end_name	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_bool	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_call	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_collection_literal[()]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_collection_literal[[]]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_collection_literal[{}]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare[1->-0]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare[1->=-1]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare[2-<-3]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare[3-<=-4]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare[4-!=-5]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare[4-==-4]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ 4 < 2 < 3 }}-False]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ 4 > 2 < 3 }}-True]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ 4 > 2 > 3 }}-False]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ a < b < c }}-False]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ a > b < c }}-True]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ a > b > c }}-False]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_compare_parens	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_concat	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_conditional_expression	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_const	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_const_assign	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_constant_casing	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_div	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_django_attr	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_filter_priority	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_function_calls	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_grouping	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_implicit_subscribed_tuple	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_inop	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_localset	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_math	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_neg_filter_priority	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_notin	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0-0]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0_00-0]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0b1001_1111-159]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0o123-83]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0o1_23-83]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0x123abc-1194684]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0x12_3abc-1194684]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[1-1]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[1.2-1.2]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[10e1-100.0]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[123-123]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[12_34_56-123456]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[1_2.3_4e5_6-1.234e+57]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[1e0-1.0]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[2.5e+100-2.5e+100]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[2.5e100-2.5e+100]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[25.6e-10-2.56e-09]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[34.56-34.56]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[3_4.5_6-34.56]	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_operator_precedence	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_parse_unary	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_raw2	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_short_conditional_expression	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_slicing	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_string_concatenation	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_subscript	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_test_chaining	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_trailing_comma	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_tuple	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_tuple_expr	NOTRUN	0.000000
+tests/test_lexnparse.py::TestSyntax::test_unary	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTokenStream::test_iter	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTokenStream::test_simple	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_comment_no_trim	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_comment_trim	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_lstrip_no_trim	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_multiple_comment_no_trim_lstrip	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_multiple_comment_trim_lstrip	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_no_trim	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_no_trim_angle_bracket	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_no_trim_nested	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_no_trim_outer	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_no_trim_php_syntax	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_raw_no_trim_lstrip	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_raw_trim_lstrip	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_trim	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_trim_blocks_false_with_no_trim	NOTRUN	0.000000
+tests/test_lexnparse.py::TestTrimBlocks::test_trim_nested	NOTRUN	0.000000
+tests/test_loader.py::TestFileSystemLoader::test_caches_template_based_on_mtime	NOTRUN	0.000000
+tests/test_loader.py::TestFileSystemLoader::test_error_includes_paths	NOTRUN	0.000000
+tests/test_loader.py::TestFileSystemLoader::test_filename_normpath	NOTRUN	0.000000
+tests/test_loader.py::TestFileSystemLoader::test_searchpath_as_list_including_pathlib	NOTRUN	0.000000
+tests/test_loader.py::TestFileSystemLoader::test_searchpath_as_pathlib	NOTRUN	0.000000
+tests/test_loader.py::TestFileSystemLoader::test_searchpath_as_str	NOTRUN	0.000000
+tests/test_loader.py::TestFileSystemLoader::test_uses_specified_encoding[iso-8859-1-\xe6\x96\x87\xe5\xad\x97\xe5\x8c\x96\xe3\x81\x91]	NOTRUN	0.000000
+tests/test_loader.py::TestFileSystemLoader::test_uses_specified_encoding[utf-8-\u6587\u5b57\u5316\u3051]	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_cache_loader_change	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_caching	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_choice_loader	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_dict_loader	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_dict_loader_cache_invalidates	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_filesystem_loader_overlapping_names	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_function_loader	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_limited_size_cache	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_no_cache	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_package_loader	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_prefix_loader	NOTRUN	0.000000
+tests/test_loader.py::TestLoaders::test_split_template_path	NOTRUN	0.000000
+tests/test_loader.py::TestModuleLoader::test_choice_loader	NOTRUN	0.000000
+tests/test_loader.py::TestModuleLoader::test_deflated_zip_compile	NOTRUN	0.000000
+tests/test_loader.py::TestModuleLoader::test_filesystem_compile	NOTRUN	0.000000
+tests/test_loader.py::TestModuleLoader::test_log	NOTRUN	0.000000
+tests/test_loader.py::TestModuleLoader::test_path_as_pathlib	NOTRUN	0.000000
+tests/test_loader.py::TestModuleLoader::test_prefix_loader	NOTRUN	0.000000
+tests/test_loader.py::TestModuleLoader::test_stored_zip_compile	NOTRUN	0.000000
+tests/test_loader.py::TestModuleLoader::test_supports_pathlib_in_list_of_paths	NOTRUN	0.000000
+tests/test_loader.py::TestModuleLoader::test_weak_references	NOTRUN	0.000000
+tests/test_loader.py::test_package_dir_list	NOTRUN	0.000000
+tests/test_loader.py::test_package_dir_source[foo/test.html-FOO]	NOTRUN	0.000000
+tests/test_loader.py::test_package_dir_source[test.html-BAR]	NOTRUN	0.000000
+tests/test_loader.py::test_package_file_list	NOTRUN	0.000000
+tests/test_loader.py::test_package_file_source[foo/test.html-FOO]	NOTRUN	0.000000
+tests/test_loader.py::test_package_file_source[test.html-BAR]	NOTRUN	0.000000
+tests/test_loader.py::test_package_loader_no_dir	NOTRUN	0.000000
+tests/test_loader.py::test_package_zip_list	NOTRUN	0.000000
+tests/test_loader.py::test_package_zip_omit_curdir[./]	NOTRUN	0.000000
+tests/test_loader.py::test_package_zip_omit_curdir[.]	NOTRUN	0.000000
+tests/test_loader.py::test_package_zip_omit_curdir[]	NOTRUN	0.000000
+tests/test_loader.py::test_package_zip_source[foo/test.html-FOO]	NOTRUN	0.000000
+tests/test_loader.py::test_package_zip_source[test.html-BAR]	NOTRUN	0.000000
+tests/test_loader.py::test_pep_451_import_hook	NOTRUN	0.000000
+tests/test_nativetypes.py::test_adding_undefined_native_return	NOTRUN	0.000000
+tests/test_nativetypes.py::test_block	NOTRUN	0.000000
+tests/test_nativetypes.py::test_booleans[{{ '' == None }}-False]	NOTRUN	0.000000
+tests/test_nativetypes.py::test_booleans[{{ 1 == 1 }}-True]	NOTRUN	0.000000
+tests/test_nativetypes.py::test_booleans[{{ 2 + 2 == 5 }}-False]	NOTRUN	0.000000
+tests/test_nativetypes.py::test_booleans[{{ None is none }}-True]	NOTRUN	0.000000
+tests/test_nativetypes.py::test_booleans[{{ value }}-False]	NOTRUN	0.000000
+tests/test_nativetypes.py::test_booleans[{{ value }}-True]	NOTRUN	0.000000
+tests/test_nativetypes.py::test_cast_int	NOTRUN	0.000000
+tests/test_nativetypes.py::test_concat_strings_with_quotes	NOTRUN	0.000000
+tests/test_nativetypes.py::test_constant_dunder	NOTRUN	0.000000
+tests/test_nativetypes.py::test_constant_dunder_to_string	NOTRUN	0.000000
+tests/test_nativetypes.py::test_is_defined_native_return	NOTRUN	0.000000
+tests/test_nativetypes.py::test_leading_spaces	NOTRUN	0.000000
+tests/test_nativetypes.py::test_list_add	NOTRUN	0.000000
+tests/test_nativetypes.py::test_loop_look_alike	NOTRUN	0.000000
+tests/test_nativetypes.py::test_loops	NOTRUN	0.000000
+tests/test_nativetypes.py::test_loops_with_ints	NOTRUN	0.000000
+tests/test_nativetypes.py::test_macro	NOTRUN	0.000000
+tests/test_nativetypes.py::test_multi_expression_add	NOTRUN	0.000000
+tests/test_nativetypes.py::test_no_intermediate_eval	NOTRUN	0.000000
+tests/test_nativetypes.py::test_spontaneous_env	NOTRUN	0.000000
+tests/test_nativetypes.py::test_string_literal_var	NOTRUN	0.000000
+tests/test_nativetypes.py::test_string_top_level	NOTRUN	0.000000
+tests/test_nativetypes.py::test_tuple_of_variable_strings	NOTRUN	0.000000
+tests/test_nativetypes.py::test_undefined_native_return	NOTRUN	0.000000
+tests/test_nativetypes.py::test_variable_dunder	NOTRUN	0.000000
+tests/test_nodes.py::test_template_hash	NOTRUN	0.000000
+tests/test_pickle.py::test_environment	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_block_set_with_extends	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_cached_extends[extends]	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_cached_extends[include]	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_call_with_args	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_callable_defaults	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_caller_scoping	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_correct_prefix_loader_name	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_custom_context	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_double_caller	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_double_caller_no_default	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_else_loop_bug	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_empty_if	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_empty_if_condition_fails	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_extends_output_bugs	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_grouper_repr	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_keyword_folding	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_loop_call_loop	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_loop_include	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_macro_blocks	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_macro_escaping	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_macro_scoping	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_macro_var_bug	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_macro_var_bug_advanced	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_markup_and_chainable_undefined	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_nested_for_else	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_nested_loop_scoping	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_old_macro_loop_scoping_bug	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_partial_conditional_assignments	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_pass_context_block_and_loop	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_pass_context_callable_class	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_pass_context_in_blocks	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_pass_context_loop_vars	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_pass_context_scoped_loop_vars	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_pass_context_with_select	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_recursive_loop_bug	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_recursive_loop_compile	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_recursive_loop_filter	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_scoped_block	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_scoped_block_loop_vars	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_scopes_and_blocks	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_scopes_and_include	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_set_and_include	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_stacked_locals_scoping_bug	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_stacked_locals_scoping_bug_twoframe	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_subproperty_if	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_urlize_filter_closing_punctuation	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_urlize_filter_escaping	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_variable_reuse	NOTRUN	0.000000
+tests/test_regression.py::TestBug::test_weird_inline_comment	NOTRUN	0.000000
+tests/test_regression.py::TestCorner::test_assigned_scoping	NOTRUN	0.000000
+tests/test_regression.py::TestCorner::test_closure_scoping	NOTRUN	0.000000
+tests/test_regression.py::test_load_parameter_when_set_in_all_if_branches	NOTRUN	0.000000
+tests/test_regression.py::test_unicode_whitespace[\x0c]	NOTRUN	0.000000
+tests/test_regression.py::test_unicode_whitespace[\x85]	NOTRUN	0.000000
+tests/test_runtime.py::test_iterator_not_advanced_early	NOTRUN	0.000000
+tests/test_runtime.py::test_loop_idx	NOTRUN	0.000000
+tests/test_runtime.py::test_loop_idx0	NOTRUN	0.000000
+tests/test_runtime.py::test_loopcontext0	NOTRUN	0.000000
+tests/test_runtime.py::test_loopcontext1	NOTRUN	0.000000
+tests/test_runtime.py::test_loopcontext2	NOTRUN	0.000000
+tests/test_runtime.py::test_mock_not_pass_arg_marker	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_copy[ChainableUndefined]	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_copy[DebugUndefined]	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_copy[StrictUndefined]	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_copy[Undefined]	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_deepcopy[ChainableUndefined]	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_deepcopy[DebugUndefined]	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_deepcopy[StrictUndefined]	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_deepcopy[Undefined]	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_pickle[ChainableUndefined]	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_pickle[DebugUndefined]	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_pickle[StrictUndefined]	NOTRUN	0.000000
+tests/test_runtime.py::test_undefined_pickle[Undefined]	NOTRUN	0.000000
+tests/test_security.py::TestSandbox::test_attr_filter	NOTRUN	0.000000
+tests/test_security.py::TestSandbox::test_binary_operator_intercepting	NOTRUN	0.000000
+tests/test_security.py::TestSandbox::test_immutable_environment	NOTRUN	0.000000
+tests/test_security.py::TestSandbox::test_restricted	NOTRUN	0.000000
+tests/test_security.py::TestSandbox::test_template_data	NOTRUN	0.000000
+tests/test_security.py::TestSandbox::test_unary_operator_intercepting	NOTRUN	0.000000
+tests/test_security.py::TestSandbox::test_unsafe	NOTRUN	0.000000
+tests/test_security.py::TestStringFormat::test_basic_format_all_okay	NOTRUN	0.000000
+tests/test_security.py::TestStringFormat::test_basic_format_safety	NOTRUN	0.000000
+tests/test_security.py::TestStringFormat::test_empty_braces_format	NOTRUN	0.000000
+tests/test_security.py::TestStringFormat::test_safe_format_all_okay	NOTRUN	0.000000
+tests/test_security.py::TestStringFormat::test_safe_format_safety	NOTRUN	0.000000
+tests/test_security.py::TestStringFormatMap::test_attr_filter	NOTRUN	0.000000
+tests/test_security.py::TestStringFormatMap::test_basic_format_all_okay	NOTRUN	0.000000
+tests/test_security.py::TestStringFormatMap::test_basic_format_safety	NOTRUN	0.000000
+tests/test_security.py::TestStringFormatMap::test_indirect_call	NOTRUN	0.000000
+tests/test_security.py::TestStringFormatMap::test_safe_format_all_okay	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[eq 2-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[eq 3-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[ge 2-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[ge 3-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[gt 1-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[gt 2-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[le 1-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[le 2-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[lt 2-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[lt 3-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[ne 2-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_compare_aliases[ne 3-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_defined	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_equalto	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_escaped	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_even	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_greaterthan	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_in	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_lessthan	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_lower	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_multiple_tests	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_no_paren_for_arg1	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_odd	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_sameas	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types["foo" is callable-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types["foo" is iterable-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types["foo" is mapping-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types["foo" is sequence-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types["foo" is string-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[(10 ** 100) is float-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[(10 ** 100) is integer-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[(10 ** 100) is number-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[0 is boolean-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[0 is false-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[0 is true-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[0.0 is boolean-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[1 is boolean-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[1 is false-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[1 is true-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[1.0 is boolean-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[3.14159 is boolean-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[3.14159 is integer-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[3.14159 is number-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[4.2 is float-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is boolean-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is callable-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is false-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is float-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is integer-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is iterable-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is mapping-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is none-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is number-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is sequence-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is string-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[42 is true-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[[1, 2, 3] is sequence-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[[] is callable-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[[] is iterable-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[[] is mapping-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[[] is sequence-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[complex is number-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is boolean-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is callable-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is false-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is float-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is integer-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is iterable-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is mapping-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is none-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is number-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is sequence-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is string-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[false is true-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[mydict is mapping-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is boolean-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is callable-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is false-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is float-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is integer-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is iterable-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is mapping-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is none-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is number-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is sequence-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is string-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[none is true-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[range is callable-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[range(5) is iterable-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[true is boolean-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[true is false-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[true is float-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[true is integer-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[true is none-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[true is number-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[true is string-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[true is true-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[{} is callable-False]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[{} is iterable-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[{} is mapping-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_types[{} is sequence-True]	NOTRUN	0.000000
+tests/test_tests.py::TestTestsCase::test_upper	NOTRUN	0.000000
+tests/test_tests.py::test_is_filter	NOTRUN	0.000000
+tests/test_tests.py::test_is_test	NOTRUN	0.000000
+tests/test_tests.py::test_name_undefined	NOTRUN	0.000000
+tests/test_tests.py::test_name_undefined_in_if	NOTRUN	0.000000
+tests/test_utils.py::TestEscapeUrlizeTarget::test_escape_urlize_target	NOTRUN	0.000000
+tests/test_utils.py::TestEscapeUrlizeTarget::test_urlize_mail_mastodon	NOTRUN	0.000000
+tests/test_utils.py::TestHelpers::test_autoescape_select	NOTRUN	0.000000
+tests/test_utils.py::TestHelpers::test_object_type_repr	NOTRUN	0.000000
+tests/test_utils.py::TestLRUCache::test_clear	NOTRUN	0.000000
+tests/test_utils.py::TestLRUCache::test_copy[copy0]	NOTRUN	0.000000
+tests/test_utils.py::TestLRUCache::test_copy[copy1]	NOTRUN	0.000000
+tests/test_utils.py::TestLRUCache::test_items	NOTRUN	0.000000
+tests/test_utils.py::TestLRUCache::test_pickleable	NOTRUN	0.000000
+tests/test_utils.py::TestLRUCache::test_repr	NOTRUN	0.000000
+tests/test_utils.py::TestLRUCache::test_setdefault	NOTRUN	0.000000
+tests/test_utils.py::TestLRUCache::test_simple	NOTRUN	0.000000
+tests/test_utils.py::TestLRUCache::test_values	NOTRUN	0.000000
+tests/test_utils.py::TestLRUCache::test_values_empty	NOTRUN	0.000000
+tests/test_utils.py::TestLoremIpsum::test_lorem_ipsum_html	NOTRUN	0.000000
+tests/test_utils.py::TestLoremIpsum::test_lorem_ipsum_markup	NOTRUN	0.000000
+tests/test_utils.py::TestLoremIpsum::test_lorem_ipsum_max	NOTRUN	0.000000
+tests/test_utils.py::TestLoremIpsum::test_lorem_ipsum_min	NOTRUN	0.000000
+tests/test_utils.py::TestLoremIpsum::test_lorem_ipsum_n	NOTRUN	0.000000
+tests/test_utils.py::test_consume	NOTRUN	0.000000
+tests/test_utils.py::test_copy_missing	NOTRUN	0.000000
+tests/test_utils.py::test_missing	NOTRUN	0.000000
+tests/test_utils.py::test_pickle_missing[0]	NOTRUN	0.000000
+tests/test_utils.py::test_pickle_missing[1]	NOTRUN	0.000000
+tests/test_utils.py::test_pickle_missing[2]	NOTRUN	0.000000
+tests/test_utils.py::test_pickle_missing[3]	NOTRUN	0.000000
+tests/test_utils.py::test_pickle_missing[4]	NOTRUN	0.000000
+tests/test_utils.py::test_pickle_missing[5]	NOTRUN	0.000000

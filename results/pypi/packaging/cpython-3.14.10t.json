@@ -1,0 +1,38 @@
+{
+  "package": "packaging",
+  "version": "26.3",
+  "runtime": "cpython-3.14.10t",
+  "source_sha256": "94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "harness_sha256": {
+    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
+    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 62423
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "t",
+    "package_version": "26.3",
+    "native_modules": {
+      "hypothesis._native": "adf18f3cda0e47a1053fc2b617c768e8d854b271194be09c7facab2fd458f4fa"
+    },
+    "gil_enabled": false,
+    "free_threaded": true,
+    "exitstatus": 0
+  },
+  "collection_sha256": "f2393b48e0ff5300039ef5688792fa2b1e1e732f93a9fd10fc7feb1eeee1a7e4",
+  "outcomes": [],
+  "id_relabeling": {
+    "family": "test_dir_info_url_file_absolute_case_insensitive",
+    "parameter": "url",
+    "count": 4,
+    "original_labels": "retained only in external journal"
+  },
+  "relabeling_adapter_sha256": "4d88a7e5a3ad65b88d501d87dcec59b21c07897083502bed31e8c5a9af233e26"
+}

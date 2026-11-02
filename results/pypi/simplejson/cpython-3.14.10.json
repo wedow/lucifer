@@ -1,0 +1,467 @@
+{
+  "package": "simplejson",
+  "version": "4.2.0",
+  "runtime": "cpython-3.14.10",
+  "source_sha256": "55b121b70a560f4610bd3a355ab2015aca4f39978f6a82353f24d2013fe85861",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "harness_sha256": {
+    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
+    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 430,
+    "SKIP": 62
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "",
+    "package_version": "4.2.0",
+    "native_modules": {
+      "simplejson._speedups": "b9c9cb7e31827651c197517cd04523f0e657ed9741822107083ec5376d11ff61"
+    },
+    "gil_enabled": true,
+    "free_threaded": false,
+    "exitstatus": 0
+  },
+  "collection_sha256": "165422f14ea84f2d7f706e3dd3d88ee267e5d05ed9f7f84063b416fbfa9bedc0",
+  "outcomes": [
+    {
+      "id": "native/simplejson.tests.test_bitsize_int_as_string.TestBitSizeIntAsString.test_large_bitcount_returned_long_hook_not_called",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "Python 2 int() can return a long subclass"
+    },
+    {
+      "id": "native/simplejson.tests.test_bitsize_int_as_string.TestBitSizeIntAsString.test_large_bitcount_returned_long_value_preserved",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "Python 2 int() can return a long subclass"
+    },
+    {
+      "id": "native/simplejson.tests.test_dump.TestFrozenDict.test_frozendict_in_list",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "frozendict not available"
+    },
+    {
+      "id": "native/simplejson.tests.test_dump.TestFrozenDict.test_frozendict_nested",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "frozendict not available"
+    },
+    {
+      "id": "native/simplejson.tests.test_dump.TestFrozenDict.test_frozendict_toplevel",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "frozendict not available"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_asdict_returning_non_dict_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_bigint_as_string_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_circular_reference_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_dict_fast_path_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_dict_slow_path_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_dumps_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_encoder_construction_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_failed_construction_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_for_json_raising_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_list_fast_path_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_loads_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_non_string_dict_keys_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_scanner_construction_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_skipkeys_fast_path_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "native/simplejson.tests.test_speedups.TestRefcountLeaks.test_tuple_fast_path_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_bitsize_int_as_string.TestBitSizeIntAsString.test_large_bitcount_returned_long_hook_not_called",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "Python 2 int() can return a long subclass"
+    },
+    {
+      "id": "python/simplejson.tests.test_bitsize_int_as_string.TestBitSizeIntAsString.test_large_bitcount_returned_long_value_preserved",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "Python 2 int() can return a long subclass"
+    },
+    {
+      "id": "python/simplejson.tests.test_dump.TestFrozenDict.test_frozendict_in_list",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "frozendict not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_dump.TestFrozenDict.test_frozendict_nested",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "frozendict not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_dump.TestFrozenDict.test_frozendict_toplevel",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "frozendict not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_free_threading.TestFreeThreading.test_concurrent_decode",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_free_threading.TestFreeThreading.test_concurrent_encode",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_free_threading.TestFreeThreading.test_concurrent_encode_decode",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_free_threading.TestFreeThreading.test_shared_encoder_instance",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestDecode.test_bad_bool_args",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestDecode.test_make_scanner",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestEncode.test_bad_bool_args",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestEncode.test_bad_encoding",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestEncode.test_bad_str_encoder",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestEncode.test_make_encoder",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestHeapTypes.test_encoder_instances_work",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestHeapTypes.test_encoder_is_heap_type",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestHeapTypes.test_encoder_type_is_gc_tracked",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestHeapTypes.test_scanner_instances_work",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestHeapTypes.test_scanner_is_heap_type",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestHeapTypes.test_scanner_type_is_gc_tracked",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_asdict_returning_non_dict_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_bigint_as_string_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_circular_reference_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_dict_fast_path_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_dict_slow_path_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_dumps_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_encoder_construction_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_failed_construction_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_for_json_raising_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_list_fast_path_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_loads_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_non_string_dict_keys_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_scanner_construction_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_skipkeys_fast_path_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_speedups.TestRefcountLeaks.test_tuple_fast_path_no_leak",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "debug build required (sys.gettotalrefcount)"
+    },
+    {
+      "id": "python/simplejson.tests.test_subinterpreters.TestSubinterpreters.test_decode_in_subinterpreter",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_subinterpreters.TestSubinterpreters.test_encode_in_subinterpreter",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_subinterpreters.TestSubinterpreters.test_import_in_subinterpreter",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_subinterpreters.TestSubinterpreters.test_multiple_subinterpreters",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_subinterpreters.TestSubinterpreters.test_subinterpreter_heap_types",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    },
+    {
+      "id": "python/simplejson.tests.test_subinterpreters.TestSubinterpreters.test_subinterpreter_state_independent",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "C Extension not available"
+    }
+  ]
+}
