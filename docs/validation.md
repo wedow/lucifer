@@ -304,8 +304,6 @@ unique IDs, complete coverage, finite nonnegative durations, interpreter build
 and GIL state, and the absence of worker/protocol errors. Raw diagnostics remain
 local; the committed metadata and manifests contain portable paths and IDs.
 
-# Validation harnesses
-
 ## NumPy: immutable full-suite acceptance
 
 `tools/numpytest/PIN` pins NumPy 2.5.4, the latest stable PyPI release with
@@ -465,8 +463,6 @@ output and shard merging. The final content audit verified all seven TSV files:
 exact expected coverage, sorted unique IDs, LF endings, finite nonnegative
 durations, valid statuses, no unrun oracle cases and all-zero Lucifer scores.
 Actual Lucifer interoperability remains unverified until its executable exists.
-
-# Validation harnesses
 
 ## Benchmarks
 

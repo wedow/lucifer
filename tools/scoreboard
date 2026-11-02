@@ -39,10 +39,12 @@ def read_manifest(path, expected=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--results", type=Path, default=Path(__file__).resolve().parents[1] / "results")
+    parser.add_argument("results", nargs="?", type=Path)
+    parser.add_argument("--results", dest="results_option", type=Path)
     args = parser.parse_args()
+    args.results = args.results or args.results_option or Path(__file__).resolve().parents[1] / "results"
     print("\t".join(("suite", "runtime", "total", *STATUSES, "pass_rate")))
-    inventories = sorted(args.results.glob("*/expected.tsv"))
+    inventories = sorted(args.results.rglob("expected.tsv"))
     if not inventories:
         print("scoreboard: no expected inventories", file=sys.stderr)
         return 2
@@ -57,7 +59,7 @@ def main():
                 if extra:
                     raise ValueError(f"{path}: unexpected ids: {', '.join(sorted(extra))}")
                 counts = Counter(actual.get(name, "NOTRUN") for name in expected)
-                print("\t".join((inventory.parent.name, path.stem, str(len(expected)),
+                print("\t".join((inventory.parent.relative_to(args.results).as_posix(), path.stem, str(len(expected)),
                                  *(str(counts[s]) for s in STATUSES),
                                  f"{100 * counts['PASS'] / len(expected):.2f}%")))
     except (OSError, ValueError) as error:
