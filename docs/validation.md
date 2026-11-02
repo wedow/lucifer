@@ -1492,8 +1492,8 @@ JIT runtime did not yet exist in the original snapshot.
 | bench/pyperformance / cpython-3.14.10-jit | — → 9 | — → 9 | — → 0 | 0 / 0 | — → 100.00% |
 | bench/pyperformance / cpython-3.14.10t | 9 → 9 | 9 → 9 | 0 → 0 | 0 / 0 | 100.00% → 100.00% |
 | bench/pyperformance / lucifer | 9 → 9 | 0 → 0 | 0 → 0 | 0 / 0 | 0.00% → 0.00% |
-| libtest / cpython-3.14.10 | 53973 → 56200 | 45915 → 50832 | 8048 → 5351 | 7 / 0 | 85.07% → 90.45% |
-| libtest / cpython-3.14.10t | 53973 → 56200 | 45900 → 50814 | 8059 → 5365 | 8 / 0 | 85.04% → 90.42% |
+| libtest / cpython-3.14.10 | 53973 → 56200 | 45915 → 50834 | 8048 → 5349 | 7 / 0 | 85.07% → 90.45% |
+| libtest / cpython-3.14.10t | 53973 → 56200 | 45900 → 50816 | 8059 → 5363 | 8 / 0 | 85.04% → 90.42% |
 | libtest / lucifer | 53973 → 56200 | 0 → 0 | 0 → 0 | 0 / 0 | 0.00% → 0.00% |
 | numpytest / cpython-3.14.10 | 52273 → 52273 | 50135 → 51226 | 2106 → 1010 | 5 / 0 | 95.91% → 98.00% |
 | numpytest / cpython-3.14.10t | 52273 → 52273 | 50049 → 51140 | 2192 → 1096 | 5 / 0 | 95.75% → 97.83% |
@@ -1520,9 +1520,9 @@ free-threaded lanes add 84 ABI3 guards and two upstream immortalization guards.
 The parallel free-threaded outcome map exactly matches its serial counterpart.
 
 The remaining libtest dependency skips are 3,016 cases requiring unavailable
-Python 2.7/3.2–3.13 executables and one GLE-library case per ABI. Two browser-
-discovery cases per ABI retain their observed headless SKIP. Their Xvfb recheck
-after installing `xdg-utils` is queued behind an active timing reservation. The resource-aware
+Python 2.7/3.2–3.13 executables and one GLE-library case per ABI. The two browser-
+discovery cases per ABI now pass under Xvfb with `xdg-utils`; these discovery
+checks do not open a web page. The resource-aware
 conditional omissions fell from **5,595 to 67**: 63 network-module cases and four
 oversized ZIP64 cases. Additional decorated network/URL skips remain explicit.
 
@@ -1530,7 +1530,7 @@ oversized ZIP64 cases. Additional decorated network/URL skips remain explicit.
 |---|---:|---:|---:|---:|
 | CPU features | 0 | 0 | 705 | 705 |
 | Environment and OS features | 385 | 383 | 0 | 0 |
-| Missing dependencies | 3019 | 3019 | 0 | 0 |
+| Missing dependencies | 3017 | 3017 | 0 | 0 |
 | Other platforms | 764 | 765 | 7 | 7 |
 | Resource policy | 143 | 143 | 0 | 0 |
 | Upstream declarations and build guards | 1040 | 1055 | 298 | 384 |

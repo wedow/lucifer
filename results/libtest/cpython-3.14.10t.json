@@ -7,7 +7,7 @@
     "TZ": "UTC"
   },
   "expected_sha256": "5d6e4bdea334779094405d8e8ccf1d35451f5f3de4daf1f3667356e6ca8ff38e",
-  "jobs": 1,
+  "jobs": 2,
   "modules": {
     "test.test_asyncio.test_base_events": {
       "additional_skip_reasons": {},
@@ -22174,20 +22174,20 @@
         "--python",
         "{python0} {repo}/tools/libtest/bridge.py --worker",
         "--timeout",
-        "180",
+        "180.0",
         "--randseed",
         "0",
         "-u",
-        "all,-network,-urlfetch,-gui,-largefile,-cpu,-walltime",
+        "all,-network,-urlfetch,tzdata,xpickle",
         "--junit-xml",
-        "{repo}/results/libtest/raw/cpython-3.14.10t/test_webbrowser/junit.xml",
+        "{scratch}/test_webbrowser/junit.xml",
         "--tempdir",
-        "{repo}/results/libtest/raw/cpython-3.14.10t/test_webbrowser",
+        "{scratch}/test_webbrowser",
         "test_webbrowser"
       ],
       "counts": {
-        "PASS": 45,
-        "SKIP": 13
+        "PASS": 47,
+        "SKIP": 11
       },
       "environment": {
         "LC_ALL": "C.UTF-8",
@@ -22198,15 +22198,13 @@
       },
       "observation_error": false,
       "returncode": 0,
-      "seconds": 0.3646562062203884,
+      "seconds": 1.215969306183979,
       "skip_reasons": {
         "test.test_webbrowser.BrowserRegistrationTest.test_no_xdg_settings_on_macOS": "macOS specific test",
         "test.test_webbrowser.IOSBrowserTest.test_open": "Test only applicable to iOS",
         "test.test_webbrowser.IOSBrowserTest.test_open_new": "Test only applicable to iOS",
         "test.test_webbrowser.IOSBrowserTest.test_open_new_tab": "Test only applicable to iOS",
         "test.test_webbrowser.IOSBrowserTest.test_open_with_autoraise_false": "Test only applicable to iOS",
-        "test.test_webbrowser.ImportTest.test_environment": "could not locate runnable browser",
-        "test.test_webbrowser.ImportTest.test_environment_preferred": "could not locate runnable browser",
         "test.test_webbrowser.MacOSXOSAScriptTest.test_default": "macOS specific test",
         "test.test_webbrowser.MacOSXOSAScriptTest.test_default_browser_lookup": "macOS specific test",
         "test.test_webbrowser.MacOSXOSAScriptTest.test_default_open": "macOS specific test",
@@ -26807,5 +26805,5 @@
   },
   "source": "installed",
   "startup": "PASS",
-  "timeout": 300.0
+  "timeout": 180.0
 }

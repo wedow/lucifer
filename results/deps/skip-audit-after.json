@@ -813,16 +813,6 @@
     {
       "category": "Missing dependencies",
       "counts": {
-        "libtest/cpython-3.14.10": 2,
-        "libtest/cpython-3.14.10t": 2,
-        "numpytest/cpython-3.14.10": 0,
-        "numpytest/cpython-3.14.10t": 0
-      },
-      "reason": "could not locate runnable browser"
-    },
-    {
-      "category": "Missing dependencies",
-      "counts": {
         "libtest/cpython-3.14.10": 1,
         "libtest/cpython-3.14.10t": 1,
         "numpytest/cpython-3.14.10": 0,
