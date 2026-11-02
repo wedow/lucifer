@@ -1,0 +1,12 @@
+id	status	seconds
+module._tkinter	NOTRUN	0.000000
+module.bz2	NOTRUN	0.000000
+module.ctypes	NOTRUN	0.000000
+module.decimal	NOTRUN	0.000000
+module.lzma	NOTRUN	0.000000
+module.readline	NOTRUN	0.000000
+module.sqlite3	NOTRUN	0.000000
+module.ssl	NOTRUN	0.000000
+module.zlib	NOTRUN	0.000000
+runtime.abi	NOTRUN	0.000000
+runtime.version	NOTRUN	0.000000

@@ -1,0 +1,120 @@
+#!/bin/sh
+# Build an independent release oracle, outside the repository.
+set -eu
+
+die() { printf '%s\n' "build-cpython: $*" >&2; exit 1; }
+usage() { die 'usage: build-cpython TAG PREFIX [--disable-gil]'; }
+[ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
+tag=$1
+prefix=$2
+gil_flag=
+if [ "$#" -eq 3 ]; then
+    [ "$3" = --disable-gil ] || usage
+    gil_flag=--disable-gil
+fi
+case $tag in v3.[0-9]*.[0-9]*) ;; *) die 'TAG must be a Python 3 release tag' ;; esac
+git check-ref-format "refs/tags/$tag" || die 'invalid tag'
+case $prefix in /*) ;; *) prefix=$PWD/$prefix ;; esac
+mkdir -p "$(dirname "$prefix")"
+parent=$(CDPATH= cd -- "$(dirname "$prefix")" && pwd -P)
+prefix=$parent/$(basename "$prefix")
+[ ! -L "$prefix" ] || die 'PREFIX must not be a symlink'
+stage=$parent/.oracle-stage/$(basename "$prefix")
+case $stage/ in "$prefix/"*) die 'PREFIX overlaps the staging directory' ;; esac
+work=${ORACLE_WORKDIR:-$parent/.oracle-build/$(basename "$prefix")}
+case $work in /*) ;; *) work=$PWD/$work ;; esac
+mkdir -p "$work"
+work=$(CDPATH= cd -- "$work" && pwd -P)
+case $work/ in "$prefix/"*) die 'work directory must be outside PREFIX' ;; esac
+case $prefix/ in "$work/source/"*|"$work/build/"*|"$work/stage/"*) die 'PREFIX overlaps build data' ;; esac
+prefix_lock=$parent/.oracle-$(basename "$prefix").lock
+mkdir "$prefix_lock" 2>/dev/null || die "prefix is already locked: $prefix_lock"
+trap 'rmdir "$prefix_lock"' 0
+mkdir "$work/lock" 2>/dev/null || die "work directory is already locked: $work/lock"
+trap 'rmdir "$work/lock"; rmdir "$prefix_lock"' 0
+trap 'exit 1' HUP INT TERM
+
+repository=https://github.com/python/cpython
+remote=$(git ls-remote "$repository" "refs/tags/$tag" "refs/tags/$tag^{}")
+commit=$(printf '%s\n' "$remote" | awk -v ref="refs/tags/$tag^{}" '$2 == ref { print $1 }')
+if [ -z "$commit" ]; then
+    commit=$(printf '%s\n' "$remote" | awk -v ref="refs/tags/$tag" '$2 == ref { print $1 }')
+fi
+[ -n "$commit" ] || die "tag does not exist on the official repository: $tag"
+# Reviewed pin; reject a moved release tag, including on repeat builds.
+if [ "$tag" = v3.14.10 ]; then
+    [ "$commit" = b703b2c5e704341d61e367b9b940b77ed11dded0 ] || die 'v3.14.10 commit differs from the pinned commit'
+fi
+jobs=${JOBS:-4}
+case $jobs in ''|*[!0-9]*) die 'JOBS must be a positive integer' ;; esac
+[ "$jobs" -gt 0 ] 2>/dev/null || die 'JOBS must be a positive integer'
+CC=${CC:-cc}
+CFLAGS=-O2
+CPPFLAGS=${CPPFLAGS-}
+LDFLAGS=${LDFLAGS-}
+export CC CFLAGS CPPFLAGS LDFLAGS
+# Keep arguments quoted in the recorded, replayable configure command.
+quote() { printf "'"; printf '%s' "$1" | sed "s/'/'\\\\''/g"; printf "'"; }
+configure_command=$(
+    printf 'CC='; quote "$CC"
+    printf ' CFLAGS='; quote "$CFLAGS"
+    printf ' CPPFLAGS='; quote "$CPPFLAGS"
+    printf ' LDFLAGS='; quote "$LDFLAGS"
+    printf ' '; quote "$work/source/configure"
+    printf ' '; quote "--prefix=$prefix"
+    printf ' --enable-optimizations=no'
+    [ -z "$gil_flag" ] || printf ' %s' "$gil_flag"
+)
+{
+    printf 'TAG=%s\nCOMMIT=%s\nREPOSITORY=%s\n' "$tag" "$commit" "$repository"
+    printf 'CONFIGURE_COMMAND=%s\n' "$configure_command"
+    printf 'COMPILER_VERSION:\n'
+    "$CC" --version
+} > "$work/REQUEST"
+version=${tag#v}
+minor=${version%.*}
+suffix=
+[ -z "$gil_flag" ] || suffix=t
+python=bin/python$minor$suffix
+verify() {
+    "$1" -I -c 'import sys, sysconfig; assert sys.version.split()[0] == sys.argv[1]; disabled = sys.argv[2] == "t"; assert bool(sysconfig.get_config_var("Py_GIL_DISABLED")) == disabled; assert sys._is_gil_enabled() == (not disabled)' "$version" "$suffix"
+}
+if [ -f "$prefix/ORACLE-INFO" ]; then
+    cmp -s "$work/REQUEST" "$prefix/ORACLE-INFO" || die 'existing oracle provenance differs; choose a new PREFIX and work directory'
+    verify "$prefix/$python" || die 'existing oracle failed verification'
+    printf 'Oracle already installed: %s\n' "$prefix/$python"
+    exit 0
+fi
+if [ -d "$prefix" ]; then
+    rmdir "$prefix" 2>/dev/null || die 'PREFIX is nonempty without ORACLE-INFO; choose an empty prefix'
+elif [ -e "$prefix" ]; then
+    die 'PREFIX exists and is not a directory'
+fi
+if [ ! -d "$work/source" ]; then
+    git clone --depth 1 --single-branch --branch "$tag" "$repository" "$work/source"
+fi
+[ "$(git -C "$work/source" remote get-url origin)" = "$repository" ] || die 'source origin is not the official repository'
+[ "$(git -C "$work/source" rev-parse HEAD)" = "$commit" ] || die 'source HEAD differs from the official tag commit'
+[ "$(git -C "$work/source" rev-parse "refs/tags/$tag^{}")" = "$commit" ] || die 'local release tag differs from its official commit'
+[ -z "$(git -C "$work/source" status --porcelain --untracked-files=normal)" ] || die 'source checkout is modified'
+if [ -f "$work/BUILD-REQUEST" ]; then
+    cmp -s "$work/REQUEST" "$work/BUILD-REQUEST" || die 'build configuration changed; choose a new work directory'
+fi
+cp "$work/REQUEST" "$work/BUILD-REQUEST"
+# Stage beside PREFIX even when ORACLE_WORKDIR is on another filesystem.
+# Publishing with rename must not fall back to copying a partial installation.
+mkdir -p "$work/build" "$stage"
+cd "$work/build"
+if [ ! -f Makefile ]; then
+    set -- "$work/source/configure" "--prefix=$prefix" --enable-optimizations=no
+    [ -z "$gil_flag" ] || set -- "$@" "$gil_flag"
+    printf 'Configure: %s\n' "$configure_command"
+    "$@" > configure.log 2>&1 || { tail -n 60 configure.log >&2; die 'configure failed (see configure.log)'; }
+fi
+make -j "$jobs" > build.log 2>&1 || { tail -n 80 build.log >&2; die 'build failed (see build.log)'; }
+make -j "$jobs" install DESTDIR="$stage" > install.log 2>&1 || { tail -n 80 install.log >&2; die 'install failed (see install.log)'; }
+verify "$stage$prefix/$python" || die 'staged interpreter failed verification'
+cp "$work/REQUEST" "$stage$prefix/ORACLE-INFO"
+[ ! -e "$prefix" ] && [ ! -L "$prefix" ] || die 'PREFIX appeared during the build; refusing to overwrite it'
+mv "$stage$prefix" "$prefix"
+printf 'Installed oracle: %s\n' "$prefix/$python"
