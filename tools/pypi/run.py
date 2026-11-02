@@ -297,8 +297,11 @@ def run(args, pin):
     manifest(target / (args.runtime + '.tsv'), rows)
     def public(value):
         text = json.dumps(value, ensure_ascii=True)
-        for path in [str(args.work), str(args.cache), str(ROOT), str(Path.home())]:
-            text = text.replace(path, '<external>')
+        python = Path(shlex.split(args.python)[0]).resolve()
+        for path, label in [(args.work, '<work>'), (args.cache, '<cache>'), (args.env, '<env>'),
+                            (python.parent.parent, '<python>'), (ROOT, '<repo>'), (Path.home(), '<external>')]:
+            if path:
+                text = text.replace(str(Path(path).resolve()), label).replace(str(path), label)
         text = re.sub(r'pytest-of-[^/\\\s]+', 'pytest-of-runtime', text)
         return json.loads(text)
     evidence = {'package': args.package, 'version': pkg['version'], 'runtime': args.runtime,
