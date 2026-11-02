@@ -1,0 +1,17 @@
+{
+  "runtime": "cpython-3.14.10t",
+  "source_commit": "b703b2c5e704341d61e367b9b940b77ed11dded0",
+  "findings": [
+    {
+      "id": "serial/test.test_threading.EventTests.test_set_and_clear",
+      "baseline_status": "FAIL",
+      "classification": "intermittent upstream timing assertion",
+      "observation": "The initial run exceeded the test's internal 30-second event deadline. Three fresh focused upstream regrtest runs passed. The original FAIL remains in the baseline; its root cause is unverified.",
+      "rerun_statuses": ["PASS", "PASS", "PASS"]
+    }
+  ],
+  "expected_failures": [
+    "serial/test.test_importlib.test_util.IncompatibleExtensionModuleRestrictionsTests.test_single_phase_init_module"
+  ],
+  "collection_note": "A fresh stdout-only collection removed four stderr diagnostic lines previously mistaken for IDs. All real case outcomes were retained. Empty Windows-only module units remain visible in inventory.json."
+}

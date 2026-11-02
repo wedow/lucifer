@@ -1788,3 +1788,319 @@ retained a disabled GIL without forcing it off.
 [f2py source-file provenance](../results/deps/f2py-sources.json) are retained
 beside the scoreboards. Raw logs, compiled fixtures and interpreter installations
 remain outside the public checkout.
+
+## Free-threading corpus: `tools/ftcorpus`
+
+Two additional correctness scoreboards implement the concurrency plan in
+[research §4](research/02-concurrency.md#4-validation-corpus-and-concrete-acceptance-plan).
+`ft-cpython` covers CPython's own free-threading and sanitizer-selected tests;
+`ft-packages` covers 20 pinned ecosystem suites. Each expected ID includes a
+`serial/` or `parallel/` prefix; package IDs also include package ownership.
+Both lanes therefore remain independently visible in the shared TSV denominator.
+`tools/scoreboard` discovers both suites without an adapter. Skips, expected
+failures and serial fallbacks never disappear from the inventory.
+
+### Upstream selection and artifacts
+
+CPython selection comes from **v3.14.10**, commit
+`b703b2c5e704341d61e367b9b940b77ed11dded0`, rather than the research snapshot's
+older 3.14.0 inventory. The host parses the literal lists in
+[Lib/test/libregrtest/tsan.py](https://github.com/python/cpython/blob/v3.14.10/Lib/test/libregrtest/tsan.py),
+expands package selectors through the existing regression-suite inventory, and
+freshly collects the selected installed cases using `--list-cases`. It includes
+all 29 `TSAN_TESTS` selectors and runs `test_abc` and `test_hashlib` normally and
+with `--parallel-threads=4`, matching
+[reusable-san.yml](https://github.com/python/cpython/blob/v3.14.10/.github/workflows/reusable-san.yml).
+Process parallelism is explicitly `-j1`. The observer reuses the libtest adapter;
+it preserves real IDs and observes the parallel wrapper's aggregate result lists
+because upstream sometimes calls `addSuccess` before extending its skip/xfail lists.
+Such copies must retain SKIP/XFAIL instead of becoming PASS.
+
+These are ordinary release-build executions of the **TSan-selected corpus**.
+Neither oracle was built with ThreadSanitizer. There is no claim of sanitizer
+coverage or JIT race instrumentation. The inventory fingerprints both upstream
+[Tools/tsan suppression files](https://github.com/python/cpython/tree/v3.14.10/Tools/tsan).
+Their documented omissions remain relevant: `test_concurrent_futures` is excluded
+upstream for gh-130605, and the selected C-API coverage is limited to `test_mem`
+and `test_pyatomic` pending gh-116908/gh-116909. Other libtest cases remain in that
+separate scoreboard; sanitizer selection does not waive full C-API compatibility.
+
+Package enrollment uses the
+[tracker at 53b7eaf3f5fa312e3deef3b944af35074854af1e](https://github.com/Quansight-Labs/free-threaded-compatibility/blob/53b7eaf3f5fa312e3deef3b944af35074854af1e/docs/tracking.md).
+Its first-support versions are **not** installation pins.
+[packages.lock.json](../tools/ftcorpus/packages.lock.json) fixes release versions,
+PyPI sdist and wheel URLs, SHA-256, all installed dependency wheels, test selectors,
+and the inspected release CI references. Tests come from the hashed PyPI sdists;
+implementations come from published wheels. A fresh private external test-only copy for each process attempt keeps
+source packages from shadowing the installed native extensions. Joblib and
+ndindex retain their enclosing package names through links to the installed wheel
+payload, preserving relative imports without executing implementation source from
+the sdist. The reference
+`vendor/` trees are never executed. Native wheel payloads are checked against
+their archive before and after execution, excluding installation metadata and
+wheel `.data` relocation entries.
+Attempt directory names are independent of runtime labels, so a label's dots
+cannot change cwd-dependent module/cache names. Attempt copies are removed after
+the process exits; the pristine hashed sources and raw logs remain available.
+
+The corpus mixes C/Cython, Rust/PyO3, C++, native FFI and Python code. Sixteen
+projects publish the selected Linux x86-64 **cp314t** wheels. Packaging, joblib
+and setuptools-rust use universal Python wheels; SoundFile implements its Python
+binding in Python/CFFI and uses a platform wheel bundling libsndfile. Pure Python
+projects cannot publish meaningful `cp314t` extension tags, so universal wheels
+are deliberately admitted for the requested mixed corpus. NumPy's complete
+unchanged-artifact acceptance remains the independent `numpytest` gate; this
+corpus adds breadth rather than substituting a selected NumPy subset.
+
+| Package | Pinned version | Main coverage | Threaded setting |
+|---|---|---|---|
+| packaging | 26.3 | Versions, requirements, markers and Python caches | 4, corpus default |
+| joblib | 1.6.0 | Python workers, serialization, pools and shared state | 4, corpus default |
+| setuptools-rust | 1.13.0 | Python build metadata and Rust binding configuration | 4, corpus default |
+| frozenlist | 1.8.0 | Cython/Python frozen mutable sequences | 4, corpus default |
+| multidict | 7.2.1 | C/Python mapping mutation and views | 4, corpus default |
+| yarl | 1.25.1 | C/Python URL parsing, caches and Unicode | 4, corpus default |
+| propcache | 0.5.4 | C/Python descriptors, cache eviction and lifetime | 4, corpus default |
+| MarkupSafe | 3.0.4 | C/Python escaping and Unicode subclasses | 8, release tox configuration |
+| msgpack | 1.2.4 | Native/Python serializers and streaming buffers | auto × 20 iterations, release CI |
+| xxhash | 4.0.2 | C hash contexts, buffers and state copying | 4, corpus default |
+| ujson | 6.0.0 | C JSON parsing, numeric edges and callbacks | 4, corpus default |
+| cramjam | 2.14.0 | Rust compression, buffers and streams | 4, corpus default |
+| kiwisolver | 1.5.1 | C++ solver objects, constraints and ownership | 4, corpus default |
+| wrapt | 2.5.2 | Native/Python proxies, descriptors and decorators | 4, corpus default |
+| marisa-trie | 1.4.1 | C++/Cython tries and memory mapping | 4, release CI |
+| ndindex | 1.10.1 | Native/Python indexing and property tests | 2 × 2 iterations, release CI |
+| rpds-py | 2026.9.1 | Rust persistent containers and shared structures | 10, release nox configuration |
+| bcrypt | 5.0.0 | Rust password hashing, KDF state and buffer validation | 4, corpus default |
+| msgspec | 0.22.0 | Native structured serializers and reference ownership | 4, corpus default |
+| SoundFile | 0.14.0 | Python/CFFI audio buffers and native file lifetime | 4, corpus default |
+
+Psutil remains a test dependency rather than an enrolled suite: its release's
+full test dependency `psleak` has no published wheel, and its privileged and
+long-running memory-leak campaigns require separate provisioning. Bcrypt adds
+a published cp314t artifact and a self-contained crypto regression suite instead.
+Orjson and lz4 were not enrolled because the queried releases lack suitable
+Linux x86-64 cp314t wheels.
+
+The exact five upstream threaded invocations are linked in each package's `ci`
+record. A release's absence of a threaded pytest invocation is not evidence that
+it uses four threads: **four is our explicit stress default for the other 15**.
+Their release-tag GitHub workflows and tox/nox/pyproject configurations were
+inspected. `auto` remains upstream's actual setting; its resolved per-node worker
+counts are exported. Thread-unsafe tests retain upstream serial fallback and its
+reason. The shared `benchmark` fixture is explicitly registered as thread-unsafe:
+its contract allows one call, so concurrent copies would test the fixture's
+usage guard. Those functional checks run once as serial fallbacks. SoundFile's shared open-file
+and BytesIO fixtures, and functions using its fixed output filenames, also use
+reviewed serial fallback rules in the lock. Its explicit internally threaded
+error-reporting test still runs; no test is skipped by these rules. An unrestricted
+shared-handle close reproduction is retained separately as a native-crash
+diagnostic. A contract permitting concurrent close of one handle is unverified.
+`--skip-thread-unsafe` and `--ignore-gil-enabled` are never passed.
+
+Selectors cover each project's Python pytest suite. For msgspec this is
+`tests/unit`, its wheel CI entry point, rather than performance and static-typing
+campaigns; kiwisolver uses `py/tests`, rather than its separate C++ unit program.
+Setuptools-rust's pytest tests are distinct from its cross-compilation/example
+build campaigns. Cramjam follows its wheel CI's `--benchmark-skip`, preserving
+benchmark-test SKIPs without running timing benchmarks in a correctness lane.
+Other benchmark fixtures execute once with `--benchmark-disable`, without timing
+samples. Coverage reporting, xdist and style-check `addopts` are cleared so process load is
+bounded; upstream assertions, fixtures, warning filters and test markers remain.
+Packaging's opt-in property tests are included because no `-m 'not property'`
+filter is applied. Optional dependency skips remain visible.
+
+### Preparation, execution and stress
+
+All drivers use the host's Python 3 standard library. Target pytest and plugins
+live only in the locked external venv. Preparation recreates that venv from
+the complete hashed wheel closure; it cannot inherit extra optional dependencies. Choose external paths and apply the
+machine's execution reservation policy around every preparation/test command:
+
+```sh
+python3 tools/ftcorpus/prepare.py --python "$ORACLE_T" --work "$FT_WORK"
+python3 tools/ftcorpus/run.py ft-cpython collect --python "$ORACLE_T" \
+  --runtime cpython-3.14.10t --source "$CPYTHON_SOURCE"
+python3 tools/ftcorpus/run.py ft-packages collect --python "$FT_WORK/venv/bin/python" \
+  --runtime cpython-3.14.10t --work "$FT_WORK"
+python3 tools/ftcorpus/run.py ft-cpython run --python "$ORACLE_T" \
+  --runtime cpython-3.14.10t --shard 0/8 --resume
+python3 tools/ftcorpus/run.py ft-packages run --python "$FT_WORK/venv/bin/python" \
+  --runtime cpython-3.14.10t --work "$FT_WORK" --select markupsafe --resume
+python3 tools/ftcorpus/run.py ft-cpython run --python bin/lucifer --runtime lucifer
+python3 tools/ftcorpus/run.py ft-packages run --python bin/lucifer \
+  --runtime lucifer --work "$FT_WORK"
+python3 tools/scoreboard
+make check-harness
+```
+
+Repeat each shard index to cover the complete inventory; select unit substrings
+with `--select`, individual package files/node IDs with `--selectors`, and lanes
+with `--lane`. Large parameter matrices can use `--case-shard INDEX/TOTAL`
+with an exact `--select` package; these are stable sorted ID stripes, selected by the observer after upstream
+collection. This keeps collection linear and avoids command-line size limits.
+Explicit long node lists use pytest response files.
+Repeat every stripe to cover the full inventory. Such selection can expose
+upstream order-dependent fixtures. The recorded packaging baseline uses a whole
+normal suite run and one process per test file in the threaded lane. This bounds
+its property-test work while preserving each file's class cache-cleanup sequence;
+each process has a 600-second controller budget. `--resume` preserves other rows and rejects changed seeds, stress
+settings, resource policies, timeouts, artifact locks or expected inventories.
+A fresh or failing startup always resets **all** expected rows to NOTRUN, even
+with resume. Collection requires the exact pinned CPython free-threaded oracle,
+and rejects empty collections. Executable paths retain symlinks so a venv keeps
+its prefix and subprocess dependencies; startup metadata records whether the
+interpreter is in a venv. Failure to collect cannot establish a denominator.
+
+The startup probe checks free-threaded build capability and a disabled runtime
+GIL. Observers check GIL state after plugin/test imports and at completion; no
+`-X gil=0` or `PYTHON_GIL=0` forces away automatic fallback. A fallback makes the
+unit ERROR. These observations cover the pytest process and regrtest workers;
+arbitrary subprocesses started inside upstream tests are not universally
+instrumented for GIL state. Their child-specific guarantees remain unverified.
+A missing/failing/malformed or hanging interpreter produces the full
+NOTRUN manifest and a nonzero exit, never an empty successful run.
+Resource settings match libtest: external network/URL fetches, GUI, large-file,
+CPU-heavy and long-walltime resources are disabled. Per-unit subprocess groups
+are bounded and core dumps are disabled; text faulthandler traces remain in raw logs; timeout or crash invalidates the entire unit. Remaining unattempted
+units stay NOTRUN. The default per-unit deadline is 180 seconds (120 seconds per individual pytest
+test). Ndindex's threaded exhaustive tests use its CI's 600-second per-test
+deadline, with a 660-second controller bound. An explicit `--timeout` overrides
+the package controller budget. Each command
+admits work only while it can finish inside its 1,000-second budget. Split large
+package suites by test file to keep each reservation below about 20 minutes.
+Seconds are diagnostic test durations, not performance measurements.
+
+`--iterations N` repeats each selected unit in fresh processes and retains its
+worst result. Iteration `i` uses seed `--seed + i`, recorded separately in the
+unit metadata and raw iteration directory. Python hash/RNG seeds, regrtest's
+random seed and Hypothesis seeds are supplied. Independent RNGs inside upstream
+tests retain their own behavior; a seed does not reproduce OS scheduling. `--threads N` overrides the outer threaded lane counts for an
+explicit stress run. Keep a separate runtime label/results directory for these
+runs. Package CI iteration counts remain the inner repetition count, so the
+metadata makes both multipliers visible.
+
+Future Lucifer stress runs use the **same inventories, test sources and cp314t
+wheel artifacts**, exposed through the external venv's site-packages path.
+`--runtime-arg` passes actual supported interpreter options without inventing
+Lucifer flags; `--perturbation` records the requested policy. Merely recording a
+policy does not activate perturbation. Once Lucifer has scheduler hooks, pass
+its real seed/yield settings there, and perturb legal acquire/release,
+publication, reference acquisition, retirement, callback and deopt boundaries.
+Run worker counts 1/2/4/8, multiple seeds and bounded fresh-process repetitions;
+never insert a yield inside a promised atomic commit. Native sanitizer builds
+and targeted same-object history/model tests remain complementary future lanes.
+This harness owns process repetition, thread counts, seed replay and watchdogs
+today; actual Lucifer scheduler/JIT/GC perturbation remains unverified.
+
+Raw logs and detailed failure reasons stay in ignored `results/<suite>/raw/`;
+portable JSON records inventory/lock hashes, build/GIL state, per-unit counts,
+iteration seeds, concurrency and fallback dispositions. Downloads, sources,
+venvs and wheel caches stay outside the repository. The Rust metadata tests required installing `rust 1:1.99.1-1` and its
+dependencies `libgit2 1:1.9.7-1`, `lld 23.1.4-1`, and `llhttp 9.3.1-1`.
+The existing `nodejs 26.12.0-1` runs the pinned Pyright typing tests. Cargo's
+cache is kept in the external workspace; the example Cargo.lock files are
+covered by the setuptools-rust sdist hash. These tests inspect Cargo metadata
+and do not rebuild the enrolled extension wheels.
+
+### Recorded oracle findings
+
+The CPython corpus contains 10,321 IDs: **9,892 PASS, 427 SKIP, one XFAIL
+and one FAIL**. The failure is
+`serial/test.test_threading.EventTests.test_set_and_clear`: its internal
+thread-completion wait exceeded 30 seconds. Three fresh focused upstream
+regrtest runs passed. The initial FAIL remains recorded as an intermittent
+timing failure; its root cause is unverified. The XFAIL is upstream's
+single-phase extension/subinterpreter restriction test. The portable
+[findings record](../results/ft-cpython/oracle-findings.json) preserves the case
+IDs and rerun outcomes. A fresh stdout-only collection excluded four diagnostic
+stderr lines previously mistaken for cases; the real case outcomes were retained.
+
+### Recorded package baseline
+
+The two inventories contain **173,925 IDs** in total. Lucifer has no executable
+and records all of them as NOTRUN, with zero PASS. Both oracle manifests cover
+their complete expected inventory; their ERROR, TIMEOUT, CRASH and NOTRUN counts
+are zero. The package inventory has **81,802 cases per lane**.
+
+| Suite | Runtime | Expected | PASS | Other statuses | Pass rate |
+|---|---|---:|---:|---|---:|
+| ft-cpython | cpython-3.14.10t | 10,321 | 9,892 | 1 FAIL, 427 SKIP, 1 XFAIL | 95.84% |
+| ft-cpython | lucifer | 10,321 | 0 | 10,321 NOTRUN | 0.00% |
+| ft-packages | cpython-3.14.10t | 163,604 | 162,434 | 172 FAIL, 974 SKIP, 16 XFAIL, 8 XPASS | 99.28% |
+| ft-packages | lucifer | 163,604 | 0 | 163,604 NOTRUN | 0.00% |
+
+Per-package totals keep each project's coverage visible:
+
+| Package | Cases per lane | Normal | Threaded |
+|---|---:|---|---|
+| bcrypt | 147 | 147 PASS | 147 PASS |
+| cramjam | 694 | 583 PASS, 108 SKIP, 3 XFAIL | 583 PASS, 108 SKIP, 3 XFAIL |
+| frozenlist | 104 | 103 PASS, 1 FAIL | 103 PASS, 1 FAIL |
+| joblib | 1,534 | 1,509 PASS, 21 SKIP, 4 XPASS | 1,508 PASS, 1 FAIL, 21 SKIP, 4 XPASS |
+| kiwisolver | 50 | 50 PASS | 50 PASS |
+| marisa-trie | 118 | 117 PASS, 1 FAIL | 118 PASS |
+| markupsafe | 80 | 79 PASS, 1 SKIP | 79 PASS, 1 SKIP |
+| msgpack | 161 | 159 PASS, 2 SKIP | 159 PASS, 2 SKIP |
+| msgspec | 6,602 | 6,478 PASS, 124 SKIP | 6,471 PASS, 7 FAIL, 124 SKIP |
+| multidict | 4,616 | 4,422 PASS, 194 SKIP | 4,378 PASS, 44 FAIL, 194 SKIP |
+| ndindex | 122 | 122 PASS | 122 PASS |
+| packaging | 62,850 | 62,850 PASS | 62,850 PASS |
+| propcache | 61 | 61 PASS | 61 PASS |
+| rpds-py | 132 | 132 PASS | 132 PASS |
+| setuptools-rust | 6 | 6 PASS | 6 PASS |
+| soundfile | 331 | 331 PASS | 331 PASS |
+| ujson | 478 | 477 PASS, 1 XFAIL | 477 PASS, 1 XFAIL |
+| wrapt | 1,418 | 1,381 PASS, 37 SKIP | 1,279 PASS, 102 FAIL, 37 SKIP |
+| xxhash | 277 | 277 PASS | 262 PASS, 15 FAIL |
+| yarl | 2,021 | 2,017 PASS, 4 XFAIL | 2,017 PASS, 4 XFAIL |
+
+All **172 retained FAIL and eight XPASS rows** were retried three times in
+fresh processes grouped by package and lane: 27 processes and 540 focused
+case outcomes. The original results remain in the scoreboard. Among the FAIL
+rows, 113 failed in all three trials, 32 changed from FAIL to fixture ERROR
+after watcher-slot exhaustion, 23 had mixed pass/failure outcomes, and four
+passed all three trials. All eight XPASS rows remained XPASS in every trial.
+
+The main findings are:
+
+- Wrapt's 102 threaded failures involve shared unittest instances, wrapper
+  counters, descriptor installation and captured state. Multidict's 44 involve
+  shared watcher logs, global watcher slots and reference-count observations;
+  its slot-allocation test also caused the focused fixture-error cascade.
+  Xxhash's 15 involve concurrent execution on one shared subinterpreter, which
+  CPython rejects. Msgspec's seven involve shared StructUnion caches or the
+  interpreter-wide integer conversion limit. Package implementation defects
+  versus unsupported test-state sharing remain **unverified** for these nodes.
+- FrozenList's interface assertion fails in both lanes on the private
+  `MutableSequence.__annotations_cache__` attribute. Three additional plain
+  pytest runs failed too. A public-interface compatibility defect is unverified.
+- Joblib's managed memmap-folder reuse assertion and Marisa-trie's 200 ms
+  Hypothesis deadline failure passed all three focused trials. One msgspec
+  integer-limit case and one wrapt monkey-patching case also passed all three.
+  These initial failures remain visible, with their root causes unverified.
+- Eight joblib checks pass despite upstream xfail markers referring to
+  [loky pull 255](https://github.com/joblib/loky/pull/255) and
+  [joblib issue 1086](https://github.com/joblib/joblib/issues/1086). These passes
+  do not establish that either upstream issue is fully resolved.
+
+The unrestricted SoundFile shared-handle close diagnostic aborted with
+SIGABRT in **three of three** fresh stock-plugin runs, with the GIL reported
+disabled before execution. The failing call was `test_buffer_write[obj]` in
+`SoundFile.close` / `libsndfile.sf_close`; concurrent close of that shared handle
+has an unverified contract. The original unit abort invalidated 331 rows. The
+required lane retains every case and passes all 331 using the documented
+shared-handle/fixed-filename fixture fallbacks.
+
+The [package findings record](../results/ft-packages/oracle-findings.json) stores
+every retained ID, baseline status, all three focused outcomes and the separate
+native diagnostic. Raw traces remain external or ignored. The combined
+`make check-harness` target passes **50 tests**, including seven for this driver
+that exercise unavailable/failing interpreters, GIL rejection, malformed
+observations, watchdogs, artifact changes, venv symlinks, pristine external
+staging, collection diagnostics, coverage denominators and parallel aggregation.
+The final audit also verifies all **96 artifacts (20 sdists and 76 wheels)**,
+installed wheel payloads, Cargo.lock inputs, selected CPython source files,
+manifest IDs/statuses/LF/numeric durations, and the complete zero Lucifer rows.
+`pip check` reports no broken requirements. Execution used bounded correctness
+reservations; seconds in these manifests are diagnostic durations.

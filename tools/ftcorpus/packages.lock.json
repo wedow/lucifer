@@ -1,0 +1,1235 @@
+{
+  "artifacts": [
+    {
+      "filename": "packaging-26.3.tar.gz",
+      "name": "packaging",
+      "sha256": "94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79",
+      "url": "https://files.pythonhosted.org/packages/7d/fa/3944b40b07da9ce895c0e6303a5ab7d53da063554f534556b134a54d6093/packaging-26.3.tar.gz",
+      "version": "26.3"
+    },
+    {
+      "filename": "joblib-1.6.0.tar.gz",
+      "name": "joblib",
+      "sha256": "2ccc96785b12046c08fd6d55839c12857831b54a3c1673ffadd2f04bfc4eda03",
+      "url": "https://files.pythonhosted.org/packages/d5/1d/537ab090f302b838943a1b56497dd53059b9a9b46a074936470173a2e207/joblib-1.6.0.tar.gz",
+      "version": "1.6.0"
+    },
+    {
+      "filename": "setuptools_rust-1.13.0.tar.gz",
+      "name": "setuptools-rust",
+      "sha256": "f2afcf4baeee689910ce49cfa8aad4e08cce72f417449bcc32891b8664fdc726",
+      "url": "https://files.pythonhosted.org/packages/68/ba/b31781d61bf9ee3c232a1d1160db11c11cdeae1d44e06c90723b25a8279f/setuptools_rust-1.13.0.tar.gz",
+      "version": "1.13.0"
+    },
+    {
+      "filename": "frozenlist-1.8.0.tar.gz",
+      "name": "frozenlist",
+      "sha256": "3ede829ed8d842f6cd48fc7081d7a41001a56f1f38603f9d49bf3020d59a31ad",
+      "url": "https://files.pythonhosted.org/packages/2d/f5/c831fac6cc817d26fd54c7eaccd04ef7e0288806943f7cc5bbf69f3ac1f0/frozenlist-1.8.0.tar.gz",
+      "version": "1.8.0"
+    },
+    {
+      "filename": "multidict-7.2.1.tar.gz",
+      "name": "multidict",
+      "sha256": "e8af3e6f1bdbc31fd762b094133b478b89988eaebc63cbe82b1d9e3bbd15cede",
+      "url": "https://files.pythonhosted.org/packages/7b/6b/29ef8e752f5854dcc267ded0652c475bec99b86f255957a0d4fcad657b18/multidict-7.2.1.tar.gz",
+      "version": "7.2.1"
+    },
+    {
+      "filename": "yarl-1.25.1.tar.gz",
+      "name": "yarl",
+      "sha256": "03dd38de09bc213e9a8b29761eec33ee1d5318dac0e49d8af36e4d27830e23a7",
+      "url": "https://files.pythonhosted.org/packages/75/16/e8be8e2fb175bbf41a0680381a319f1199fae256588241a2ac8677eafb49/yarl-1.25.1.tar.gz",
+      "version": "1.25.1"
+    },
+    {
+      "filename": "propcache-0.5.4.tar.gz",
+      "name": "propcache",
+      "sha256": "ff6b113f50bc066a698db5d944d2c6dc7507168dd3341e255a8892fd0715a558",
+      "url": "https://files.pythonhosted.org/packages/b3/9a/9fbf4e4ec0c2d7f1c32519fff782ef467859b8faa9fbc5331a96f6395d43/propcache-0.5.4.tar.gz",
+      "version": "0.5.4"
+    },
+    {
+      "filename": "markupsafe-3.0.4.tar.gz",
+      "name": "markupsafe",
+      "sha256": "2e9ad7dd851bf45fab9f75cbff4cb493fee9979e8d8c7c9c3ee119022518edd6",
+      "url": "https://files.pythonhosted.org/packages/38/9b/e422a865e1d5d57d0e509b4e0bf1c1a70a7f6382c29a5aa428df994c8bc8/markupsafe-3.0.4.tar.gz",
+      "version": "3.0.4"
+    },
+    {
+      "filename": "msgpack-1.2.4.tar.gz",
+      "name": "msgpack",
+      "sha256": "475c44e12f2a5de766a8448783f149c9b33f3f49b88953c6cd739a77d93c732c",
+      "url": "https://files.pythonhosted.org/packages/cc/52/1ec7ead2c7528bf3d1db73e886fa4df10f9e6f0eb7854a448b7090cfcef7/msgpack-1.2.4.tar.gz",
+      "version": "1.2.4"
+    },
+    {
+      "filename": "xxhash-4.0.2.tar.gz",
+      "name": "xxhash",
+      "sha256": "af3d1b3cfa5280e84d8968e9f30c9eca75781db4915eb6d6acb0dd4fc93e0f47",
+      "url": "https://files.pythonhosted.org/packages/39/e6/ed6c428055ffd3f9299db3ec8671fd78b70c24173c040b8faafb6348ebbb/xxhash-4.0.2.tar.gz",
+      "version": "4.0.2"
+    },
+    {
+      "filename": "ujson-6.0.0.tar.gz",
+      "name": "ujson",
+      "sha256": "80e23393feb707582e0ad495c397a4477b646d08094d2df64f7316f9fafd8aae",
+      "url": "https://files.pythonhosted.org/packages/64/7c/e1fa3fb70b53192436d751b5cb671f0ee960baa188b8351a7fec735223d3/ujson-6.0.0.tar.gz",
+      "version": "6.0.0"
+    },
+    {
+      "filename": "cramjam-2.14.0.tar.gz",
+      "name": "cramjam",
+      "sha256": "050095380dc01a7f3dc2b8bcd9de2cbf4a208a8aab32301c760ea3c280d641bd",
+      "url": "https://files.pythonhosted.org/packages/21/78/bfb048f7fcf70192081ad834e7bbde59af716bbdd4d2410ffd39357db068/cramjam-2.14.0.tar.gz",
+      "version": "2.14.0"
+    },
+    {
+      "filename": "kiwisolver-1.5.1.tar.gz",
+      "name": "kiwisolver",
+      "sha256": "f1303ef2eec81262a4b708c3e858afe58d7c75ad91c1c05266eda7673369859a",
+      "url": "https://files.pythonhosted.org/packages/ba/07/bd78e6a8fae171ea041ef5bba3ed21a003522fa088834b069b1909981f30/kiwisolver-1.5.1.tar.gz",
+      "version": "1.5.1"
+    },
+    {
+      "filename": "wrapt-2.5.2.tar.gz",
+      "name": "wrapt",
+      "sha256": "551cb49e88b3722faad780303833bc4fa70685fb1773270fb98b40d39d9fddbf",
+      "url": "https://files.pythonhosted.org/packages/9c/b0/f752d19e1e83ab8bd64aeccfde32ff086aee3ef08520f7340b69a8d0a4d2/wrapt-2.5.2.tar.gz",
+      "version": "2.5.2"
+    },
+    {
+      "filename": "marisa_trie-1.4.1.tar.gz",
+      "name": "marisa-trie",
+      "sha256": "44ce3bdbeb7c950d463e460184fc3e18702df9ef0edb826bac672fd789fb1d20",
+      "url": "https://files.pythonhosted.org/packages/77/5d/e235921b5b74818cb65b557fa05cc6201c2c1612d4866ff75c835bcf808d/marisa_trie-1.4.1.tar.gz",
+      "version": "1.4.1"
+    },
+    {
+      "filename": "ndindex-1.10.1.tar.gz",
+      "name": "ndindex",
+      "sha256": "0f6113c1f031248f8818cbee1aa92aa3c9472b7701debcce9fddebcd2f610f11",
+      "url": "https://files.pythonhosted.org/packages/f5/92/4b9d2f4e0f3eabcfc7b02b48261f6e5ad36a3e2c1bbdcc4e3b7b6c768fa6/ndindex-1.10.1.tar.gz",
+      "version": "1.10.1"
+    },
+    {
+      "filename": "rpds_py-2026.9.1.tar.gz",
+      "name": "rpds-py",
+      "sha256": "4793ef7f78268b124b73fa933440f01d258bbae01de9fa53e9080c9ab0425a12",
+      "url": "https://files.pythonhosted.org/packages/42/68/3bd46b8a5e01d3c2ebdf9c5e9497912e3fe0cde02bac21a7130ca866e403/rpds_py-2026.9.1.tar.gz",
+      "version": "2026.9.1"
+    },
+    {
+      "filename": "msgspec-0.22.0.tar.gz",
+      "name": "msgspec",
+      "sha256": "0a13624a4969159fe35d8c2a3d377b2b61bbd8585e327440d5e52725affcce38",
+      "url": "https://files.pythonhosted.org/packages/d0/e6/6dcf9306ff3c5e486578f3bf29ed11dfbdbbc2a8bf0caf7e07d392887fda/msgspec-0.22.0.tar.gz",
+      "version": "0.22.0"
+    },
+    {
+      "filename": "soundfile-0.14.0.tar.gz",
+      "name": "soundfile",
+      "sha256": "ba1c1a2d618bca5c406647c83b89f07cc8810fa506a50622a6993ba130c1de11",
+      "url": "https://files.pythonhosted.org/packages/d2/db/949331952a6fb1c5b12e9de80fd08747966c2039d1a61db4764fbd3981c2/soundfile-0.14.0.tar.gz",
+      "version": "0.14.0"
+    },
+    {
+      "filename": "packaging-26.3-py3-none-any.whl",
+      "name": "packaging",
+      "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+      "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl",
+      "version": "26.3"
+    },
+    {
+      "filename": "joblib-1.6.0-py3-none-any.whl",
+      "name": "joblib",
+      "sha256": "3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba",
+      "url": "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl",
+      "version": "1.6.0"
+    },
+    {
+      "filename": "setuptools_rust-1.13.0-py3-none-any.whl",
+      "name": "setuptools-rust",
+      "sha256": "666439c4d90e968bb625bcf87ec0aa02b4f49e599d2f5dc255c633a04e8eca99",
+      "url": "https://files.pythonhosted.org/packages/0b/80/909e46e684e47b116ed145bf2a1a8f5f7c9d90e8c3f8f7fce6a529c0068d/setuptools_rust-1.13.0-py3-none-any.whl",
+      "version": "1.13.0"
+    },
+    {
+      "filename": "frozenlist-1.8.0-cp314-cp314t-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+      "name": "frozenlist",
+      "sha256": "39ecbc32f1390387d2aa4f5a995e465e9e2f79ba3adcac92d68e3e0afae6657c",
+      "url": "https://files.pythonhosted.org/packages/62/1c/3d8622e60d0b767a5510d1d3cf21065b9db874696a51ea6d7a43180a259c/frozenlist-1.8.0-cp314-cp314t-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+      "version": "1.8.0"
+    },
+    {
+      "filename": "multidict-7.2.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "multidict",
+      "sha256": "66af55b07e4593790157e85f897f06983ded8a8692cb2fb048f3049c1d3fa172",
+      "url": "https://files.pythonhosted.org/packages/1b/de/9a74903ffdbe3712ba392166935c91785ccdff82dc4b6a15b28a4df52a14/multidict-7.2.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "7.2.1"
+    },
+    {
+      "filename": "yarl-1.25.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "yarl",
+      "sha256": "7c88edaec8c349ad4c5ad4c486a3defcc4b80ceb2f074436ffa0a87caf5e76a6",
+      "url": "https://files.pythonhosted.org/packages/d1/38/97d79b81c342b78246cfedb74809e68841f3198d21653e10d3232bd9c622/yarl-1.25.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "1.25.1"
+    },
+    {
+      "filename": "propcache-0.5.4-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "propcache",
+      "sha256": "a219f0ac59817a9114dd2aa57c13180f993e819ba658c7ddab4b66ed1ee0d370",
+      "url": "https://files.pythonhosted.org/packages/fc/57/527910c455b5ec62f6871bef45d4f79fea16cb8c966ba0d4a07f0339ddc4/propcache-0.5.4-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "0.5.4"
+    },
+    {
+      "filename": "markupsafe-3.0.4-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "MarkupSafe",
+      "sha256": "b4a635a0487774f841cb1fb62e907e7195cc95bc761e053184b8acc3ceb20733",
+      "url": "https://files.pythonhosted.org/packages/30/77/680998b54efdea06fc114565cd739b6d059f826a0279219b218dfa750d29/markupsafe-3.0.4-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "3.0.4"
+    },
+    {
+      "filename": "msgpack-1.2.4-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "msgpack",
+      "sha256": "55e6106d2d085af42b2de72efeb38ed255241a24b32295ca889707c1d679c442",
+      "url": "https://files.pythonhosted.org/packages/a9/e2/383ece1c1b27c1ed322055fce8ab8972bc6d529ede881592065ce0c461bf/msgpack-1.2.4-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "1.2.4"
+    },
+    {
+      "filename": "xxhash-4.0.2-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "xxhash",
+      "sha256": "52dff0cfe99e1f03614a40867e39d5c5a1d55047e114265db4ec2355d65fc542",
+      "url": "https://files.pythonhosted.org/packages/f3/3c/973412a0e43b02a3538ba6c71ad1732f3b6ccff0dc1855655b36b6c98be4/xxhash-4.0.2-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "4.0.2"
+    },
+    {
+      "filename": "ujson-6.0.0-cp314-cp314t-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "ujson",
+      "sha256": "8af54166141d5c8ebeebc044c3569ef10edfcdf6fd8ecb487a2bf33c776ebc8f",
+      "url": "https://files.pythonhosted.org/packages/ec/c9/9ab8d5ab9ca362381d0fcc8c6e6a831e96385a908792b2378db6282a374e/ujson-6.0.0-cp314-cp314t-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "6.0.0"
+    },
+    {
+      "filename": "cramjam-2.14.0-cp314-cp314t-manylinux_2_28_x86_64.whl",
+      "name": "cramjam",
+      "sha256": "6606ec8231d7544da99f9f50275252ef8632ac4960f1f88b4f63843f28ef593b",
+      "url": "https://files.pythonhosted.org/packages/ae/f1/910ec26ddc4dc922d0146d9f469f237b5ccff70f73fdf6b5c5b5b6c0826b/cramjam-2.14.0-cp314-cp314t-manylinux_2_28_x86_64.whl",
+      "version": "2.14.0"
+    },
+    {
+      "filename": "kiwisolver-1.5.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "name": "kiwisolver",
+      "sha256": "43844c1a7ad6d723d5b5b4c4fc7f5bd399c40e288120d16257c7c9e8765c6e85",
+      "url": "https://files.pythonhosted.org/packages/42/73/17dce073a6ae259bb32cf9d686c4079d2e538868bc45967462bf33df914a/kiwisolver-1.5.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "version": "1.5.1"
+    },
+    {
+      "filename": "wrapt-2.5.2-cp314-cp314t-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+      "name": "wrapt",
+      "sha256": "48fd5026977adb3e2fda292a6a796967b511935d23f97dc2ae1f127a3a8639d5",
+      "url": "https://files.pythonhosted.org/packages/9c/84/40901e8ba08f6f18f213fea51daa41a8107ccaae4e0b6e13b842f02f5feb/wrapt-2.5.2-cp314-cp314t-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+      "version": "2.5.2"
+    },
+    {
+      "filename": "marisa_trie-1.4.1-cp314-cp314t-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "marisa-trie",
+      "sha256": "faa9ec37e2393e86ca3cb2e568447730654dc3292097232cec1c646f257deac5",
+      "url": "https://files.pythonhosted.org/packages/b3/57/14c5a667663797add840a755bef63b82eca1a07e64fc046875e294af5af0/marisa_trie-1.4.1-cp314-cp314t-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "1.4.1"
+    },
+    {
+      "filename": "ndindex-1.10.1-cp314-cp314t-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "ndindex",
+      "sha256": "5c3634a8df43e7928122225a3d64d850c8957bd1edf2e403907deacb478af27b",
+      "url": "https://files.pythonhosted.org/packages/73/78/eb2e5d067d4c054451e33eaece74cbdcb58236dc60516e73d783dae34c7e/ndindex-1.10.1-cp314-cp314t-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "1.10.1"
+    },
+    {
+      "filename": "rpds_py-2026.9.1-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "name": "rpds-py",
+      "sha256": "0da298fb372dc192610a4b9ecbc68a0cd8b675bbbd1fc519d01b41cfd658333e",
+      "url": "https://files.pythonhosted.org/packages/ed/71/0fa7bb77b57af0d710273964180d11b503f62b8a5c358eb2d8c3f62feff6/rpds_py-2026.9.1-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "version": "2026.9.1"
+    },
+    {
+      "filename": "psutil-7.2.2-cp314-cp314t-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "psutil",
+      "sha256": "1fa4ecf83bcdf6e6c8f4449aff98eefb5d0604bf88cb883d7da3d8d2d909546a",
+      "url": "https://files.pythonhosted.org/packages/d5/2e/e6782744700d6759ebce3043dcfa661fb61e2fb752b91cdeae9af12c2178/psutil-7.2.2-cp314-cp314t-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "7.2.2"
+    },
+    {
+      "filename": "msgspec-0.22.0-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "msgspec",
+      "sha256": "a8b98ae215a102cbf6635f7df45f5c4af12f77fad1f7b71b9808fcf868a5735d",
+      "url": "https://files.pythonhosted.org/packages/17/24/a249f3491cabbe77cc65a1a6f87c128582aa39357227149be61cac8e554f/msgspec-0.22.0-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "0.22.0"
+    },
+    {
+      "filename": "soundfile-0.14.0-py2.py3-none-manylinux_2_28_x86_64.whl",
+      "name": "soundfile",
+      "sha256": "1e38bac1853412871318e82a1ba69a8be677619b56025bbfcccdb41b6cafe82d",
+      "url": "https://files.pythonhosted.org/packages/7b/a2/70fd4432b924684c372df8b0a45708c36c057ef3596c9eb53e0a806b980b/soundfile-0.14.0-py2.py3-none-manylinux_2_28_x86_64.whl",
+      "version": "0.14.0"
+    },
+    {
+      "filename": "semantic_version-2.10.0-py2.py3-none-any.whl",
+      "name": "semantic-version",
+      "sha256": "de78a3b8e0feda74cabc54aab2da702113e33ac9d9eb9d2389bcf1f58b7d9177",
+      "url": "https://files.pythonhosted.org/packages/6a/23/8146aad7d88f4fcb3a6218f41a60f6c2d4e3a72de72da1825dc7c8f7877c/semantic_version-2.10.0-py2.py3-none-any.whl",
+      "version": "2.10.0"
+    },
+    {
+      "filename": "pytest-9.2.0-py3-none-any.whl",
+      "name": "pytest",
+      "sha256": "07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588",
+      "url": "https://files.pythonhosted.org/packages/51/39/1f5d8c8877a0fa327db959c19341d4be61660de1ab6b7391f9eb805bcd67/pytest-9.2.0-py3-none-any.whl",
+      "version": "9.2.0"
+    },
+    {
+      "filename": "pluggy-1.7.0-py3-none-any.whl",
+      "name": "pluggy",
+      "sha256": "7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec",
+      "url": "https://files.pythonhosted.org/packages/40/9e/2b38731e0fc536806f16490e1a12d7f0dc2a1235aa8cc07bcc75416a7daa/pluggy-1.7.0-py3-none-any.whl",
+      "version": "1.7.0"
+    },
+    {
+      "filename": "pytest_run_parallel-0.10.0-py3-none-any.whl",
+      "name": "pytest-run-parallel",
+      "sha256": "712e96f4dac3e7dc14eff747ffba4180030db11ff22fd62513d9cf81289a1681",
+      "url": "https://files.pythonhosted.org/packages/a1/46/b22fd3dd6ea72efe88766ce734ba81536f56198de979f75cb0a5b463c2c5/pytest_run_parallel-0.10.0-py3-none-any.whl",
+      "version": "0.10.0"
+    },
+    {
+      "filename": "pytest_timeout-2.4.0-py3-none-any.whl",
+      "name": "pytest-timeout",
+      "sha256": "c42667e5cdadb151aeb5b26d114aff6bdf5a907f176a007a30b940d3d865b5c2",
+      "url": "https://files.pythonhosted.org/packages/fa/b6/3127540ecdf1464a00e5a01ee60a1b09175f6913f0644ac748494d9c4b21/pytest_timeout-2.4.0-py3-none-any.whl",
+      "version": "2.4.0"
+    },
+    {
+      "filename": "hypothesis-6.170.14-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "name": "hypothesis",
+      "sha256": "44c481115770bb3df5014b0369ea1aaf7319b81b3346a744a9265fc933190c3d",
+      "url": "https://files.pythonhosted.org/packages/63/17/aab31d83a3195edf21ff0b05ea8fabf1fcf723517a6ba7bd1aee3b2713e3/hypothesis-6.170.14-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "version": "6.170.14"
+    },
+    {
+      "filename": "sortedcontainers-2.4.0-py2.py3-none-any.whl",
+      "name": "sortedcontainers",
+      "sha256": "a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0",
+      "url": "https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl",
+      "version": "2.4.0"
+    },
+    {
+      "filename": "numpy-2.5.4-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "numpy",
+      "sha256": "c9b80cdf5cedba0e90d93fa5f9a333c4d65bd545cd669b71bb97ce2b703c9d73",
+      "url": "https://files.pythonhosted.org/packages/34/88/16c5f12f86f5ad2817c4d103205131fc6c8acb3d1878af05a1a4f23ec859/numpy-2.5.4-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "2.5.4"
+    },
+    {
+      "filename": "scipy-1.18.1-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "scipy",
+      "sha256": "a1d33a7836f7ddc1993427966a0823468ec41bcbdb1a9f9942d1d7e57f803ba3",
+      "url": "https://files.pythonhosted.org/packages/87/53/39d046cc7574ed6acacb6bd5723e220107ece80bff12faaf3efc4ddeede4/scipy-1.18.1-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "1.18.1"
+    },
+    {
+      "filename": "pretend-1.0.9-py2.py3-none-any.whl",
+      "name": "pretend",
+      "sha256": "e389b12b7073604be67845dbe32bf8297360ad9a609b24846fe15d86e0b7dc01",
+      "url": "https://files.pythonhosted.org/packages/49/1f/3d4f0579913edd3ad5b23ad52fcc42531cb736ad52af2ba6c057da8785b6/pretend-1.0.9-py2.py3-none-any.whl",
+      "version": "1.0.9"
+    },
+    {
+      "filename": "tomli_w-1.2.0-py3-none-any.whl",
+      "name": "tomli_w",
+      "sha256": "188306098d013b691fcadc011abd66727d3c414c571bb01b1a174ba8c983cf90",
+      "url": "https://files.pythonhosted.org/packages/c7/18/c86eb8e0202e32dd3df50d43d7ff9854f8e0603945ff398974c1d91ac1ef/tomli_w-1.2.0-py3-none-any.whl",
+      "version": "1.2.0"
+    },
+    {
+      "filename": "pytest_cov-7.1.0-py3-none-any.whl",
+      "name": "pytest-cov",
+      "sha256": "a0461110b7865f9a271aa1b51e516c9a95de9d696734a2f71e3e78f46e1d4678",
+      "url": "https://files.pythonhosted.org/packages/9d/7a/d968e294073affff457b041c2be9868a40c1c71f4a35fcc1e45e5493067b/pytest_cov-7.1.0-py3-none-any.whl",
+      "version": "7.1.0"
+    },
+    {
+      "filename": "pytest_benchmark-5.3.1-py3-none-any.whl",
+      "name": "pytest-benchmark",
+      "sha256": "d7732a9952b1c4a4a32277adc693739126eab37afc3a711847f53805ccadc020",
+      "url": "https://files.pythonhosted.org/packages/78/75/919ac85ad3f762e45aa369d2f68d40390e316474b6bb8434aeb6e3c8bf8b/pytest_benchmark-5.3.1-py3-none-any.whl",
+      "version": "5.3.1"
+    },
+    {
+      "filename": "pytest_xdist-3.8.0-py3-none-any.whl",
+      "name": "pytest-xdist",
+      "sha256": "202ca578cfeb7370784a8c33d6d05bc6e13b4f25b5053c30a152269fd10f0b88",
+      "url": "https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl",
+      "version": "3.8.0"
+    },
+    {
+      "filename": "pytest_asyncio-1.4.1.post1-py3-none-any.whl",
+      "name": "pytest-asyncio",
+      "sha256": "0755e488cc0a2b9bd2eab7292cc6390d4cbb8390f1020745647bae5a708e0165",
+      "url": "https://files.pythonhosted.org/packages/e3/de/adbc7578959cfab07e5e7c05cf6d54224a51e7667ea2c07458b6bc571e75/pytest_asyncio-1.4.1.post1-py3-none-any.whl",
+      "version": "1.4.1.post1"
+    },
+    {
+      "filename": "pytest_mock-3.17.0-py3-none-any.whl",
+      "name": "pytest-mock",
+      "sha256": "1b82aa4b37137248bd687055e109723debeb07b489de1565297dc9589c5f2d6b",
+      "url": "https://files.pythonhosted.org/packages/e8/ea/47fbdc8f37410956fd445720e927589b1e2a47772c5f28109f0ce2fa26d9/pytest_mock-3.17.0-py3-none-any.whl",
+      "version": "3.17.0"
+    },
+    {
+      "filename": "pytest_instafail-0.5.0-py3-none-any.whl",
+      "name": "pytest-instafail",
+      "sha256": "6855414487e9e4bb76a118ce952c3c27d3866af15487506c4ded92eb72387819",
+      "url": "https://files.pythonhosted.org/packages/e8/c0/c32dc39fc172e684fdb3d30169843efb65c067be1e12689af4345731126e/pytest_instafail-0.5.0-py3-none-any.whl",
+      "version": "0.5.0"
+    },
+    {
+      "filename": "readme_renderer-46.0-py3-none-any.whl",
+      "name": "readme_renderer",
+      "sha256": "d0dae1f74bb273b534770cb4cccb6bb78735540afdb03c2146f4e19dcd412560",
+      "url": "https://files.pythonhosted.org/packages/4b/72/ac5ca81fe9121fcaa9d828d21017cba00a16a98e4ea5fb60c878f93dda4f/readme_renderer-46.0-py3-none-any.whl",
+      "version": "46.0"
+    },
+    {
+      "filename": "memory_profiler-0.61.0-py3-none-any.whl",
+      "name": "memory-profiler",
+      "sha256": "400348e61031e3942ad4d4109d18753b2fb08c2f6fb8290671c5513a34182d84",
+      "url": "https://files.pythonhosted.org/packages/49/26/aaca612a0634ceede20682e692a6c55e35a94c21ba36b807cc40fe910ae1/memory_profiler-0.61.0-py3-none-any.whl",
+      "version": "0.61.0"
+    },
+    {
+      "filename": "threadpoolctl-3.7.0-py3-none-any.whl",
+      "name": "threadpoolctl",
+      "sha256": "cd8b60b5641b45c67bbf73c64c843235fc2d8a480c87389f52f5dbee893b86be",
+      "url": "https://files.pythonhosted.org/packages/43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl",
+      "version": "3.7.0"
+    },
+    {
+      "filename": "setuptools-84.2.1-py3-none-any.whl",
+      "name": "setuptools",
+      "sha256": "ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2",
+      "url": "https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl",
+      "version": "84.2.1"
+    },
+    {
+      "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+      "name": "typing_extensions",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+      "version": "4.16.0"
+    },
+    {
+      "filename": "freezegun-1.5.5-py3-none-any.whl",
+      "name": "freezegun",
+      "sha256": "cd557f4a75cf074e84bc374249b9dd491eaeacd61376b9eb3c423282211619d2",
+      "url": "https://files.pythonhosted.org/packages/5e/2e/b41d8a1a917d6581fc27a35d05561037b048e47df50f27f8ac9c7e27a710/freezegun-1.5.5-py3-none-any.whl",
+      "version": "1.5.5"
+    },
+    {
+      "filename": "trustme-1.2.1-py3-none-any.whl",
+      "name": "trustme",
+      "sha256": "d768e5fc57c86dfc5ec9365102e9b092541cd6954b35d8c1eea01a84f35a762a",
+      "url": "https://files.pythonhosted.org/packages/b5/f3/c34dbabf6da5eda56fe923226769d40e11806952cd7f46655dd06e10f018/trustme-1.2.1-py3-none-any.whl",
+      "version": "1.2.1"
+    },
+    {
+      "filename": "cffi-2.1.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "name": "cffi",
+      "sha256": "51b31d1c98274844cfd7838ce00bfc27c7423a4dc00fc0772fc3331c2cc90676",
+      "url": "https://files.pythonhosted.org/packages/9a/95/eff5f0cee78d2eabc7eebffec40d3fc1876b5f3c95582e018bb4b99601f2/cffi-2.1.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "version": "2.1.1"
+    },
+    {
+      "filename": "cloudpickle-3.1.2-py3-none-any.whl",
+      "name": "cloudpickle",
+      "sha256": "9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a",
+      "url": "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl",
+      "version": "3.1.2"
+    },
+    {
+      "filename": "coverage-7.17.0-cp314-cp314t-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+      "name": "coverage",
+      "sha256": "7c570293f001ea91598b90e90cb9b98fddee833e90bbede432cbd218331ccd8e",
+      "url": "https://files.pythonhosted.org/packages/77/d8/d99be3bfbb208512f039c80b31e404138a86678fc929a17acd5b7135a6ae/coverage-7.17.0-cp314-cp314t-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+      "version": "7.17.0"
+    },
+    {
+      "filename": "cryptography-50.0.2-cp314-cp314t-manylinux_2_34_x86_64.whl",
+      "name": "cryptography",
+      "sha256": "828d49b0ff5a0e3975865571c5d91dbbdd0d38d8289b249a163e9425413a5e05",
+      "url": "https://files.pythonhosted.org/packages/6c/01/03263395f74d50b071e9e66daace3f8bef80493e5d410726f2ba8554736b/cryptography-50.0.2-cp314-cp314t-manylinux_2_34_x86_64.whl",
+      "version": "50.0.2"
+    },
+    {
+      "filename": "docutils-0.23-py3-none-any.whl",
+      "name": "docutils",
+      "sha256": "25d013af9bf23bc1c7b2b093dff4208166c53a94786c9e447808335ef1185fea",
+      "url": "https://files.pythonhosted.org/packages/32/91/30151a39f7570f448ed84529390628a651d7f27c87d73c9b887f8189695e/docutils-0.23-py3-none-any.whl",
+      "version": "0.23"
+    },
+    {
+      "filename": "execnet-2.1.2-py3-none-any.whl",
+      "name": "execnet",
+      "sha256": "67fba928dd5a544b783f6056f449e5e3931a5c378b128bc18501f7ea79e296ec",
+      "url": "https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl",
+      "version": "2.1.2"
+    },
+    {
+      "filename": "idna-3.20-py3-none-any.whl",
+      "name": "idna",
+      "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+      "url": "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl",
+      "version": "3.20"
+    },
+    {
+      "filename": "iniconfig-2.3.1-py3-none-any.whl",
+      "name": "iniconfig",
+      "sha256": "9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7",
+      "url": "https://files.pythonhosted.org/packages/56/43/4ca9e49d27a1fcf6bece6f6aec0ea46bb9112489b93d4b688fb415457bdb/iniconfig-2.3.1-py3-none-any.whl",
+      "version": "2.3.1"
+    },
+    {
+      "filename": "nh3-0.3.7-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "name": "nh3",
+      "sha256": "eae64328e46a25785535afcb6885b6f182ecaf5ee8c88f8c075422db8aacc65b",
+      "url": "https://files.pythonhosted.org/packages/1e/60/847a21339f095c4d4c655af31fa2d18b174585bcc210709facacc7ce205c/nh3-0.3.7-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "version": "0.3.7"
+    },
+    {
+      "filename": "py_cpuinfo2-10.1.1-py3-none-any.whl",
+      "name": "py-cpuinfo2",
+      "sha256": "adc53396bfb206e6498d078ec2ab407f85799ecd819584ac36a8f80a2d4d762d",
+      "url": "https://files.pythonhosted.org/packages/23/0a/ba69d2dde1ae12ef1d389ea5a216384c5ff6ef7a1e7a48d1e9b6686f6790/py_cpuinfo2-10.1.1-py3-none-any.whl",
+      "version": "10.1.1"
+    },
+    {
+      "filename": "pygments-2.21.0-py3-none-any.whl",
+      "name": "Pygments",
+      "sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
+      "url": "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl",
+      "version": "2.21.0"
+    },
+    {
+      "filename": "python_dateutil-4.0.0-py3-none-any.whl",
+      "name": "python-dateutil",
+      "sha256": "a5e246f79eb80475e691bf93862cead98decd8a498cf53ba0516fcdc0f50dc1c",
+      "url": "https://files.pythonhosted.org/packages/2f/a9/52b89563d154433d79b51ed1eb4842bf7334cb2696891a7fe135618853d7/python_dateutil-4.0.0-py3-none-any.whl",
+      "version": "4.0.0"
+    },
+    {
+      "filename": "pycparser-3.12-py3-none-any.whl",
+      "name": "pycparser",
+      "sha256": "a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e",
+      "url": "https://files.pythonhosted.org/packages/b6/ae/315bbeee126a769cbde43cf4908acb4b40408d8bf8bbf334dd7368d8dadf/pycparser-3.12-py3-none-any.whl",
+      "version": "3.12"
+    },
+    {
+      "filename": "tzdata-2026.6-py2.py3-none-any.whl",
+      "name": "tzdata",
+      "sha256": "0a10eec6e13ef16b627fabed9a5f2ba61a62b1c67f327305f4e7e412a70b4aec",
+      "url": "https://files.pythonhosted.org/packages/0a/66/9a06c2227fedfd4919f0eaaa8b94377d9730882a7e4f95823c9a331ab5e1/tzdata-2026.6-py2.py3-none-any.whl",
+      "version": "2026.6"
+    },
+    {
+      "filename": "pip-26.2.2-py3-none-any.whl",
+      "name": "pip",
+      "sha256": "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70",
+      "url": "https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl",
+      "version": "26.2.2"
+    },
+    {
+      "filename": "attrs-26.1.0-py3-none-any.whl",
+      "name": "attrs",
+      "sha256": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
+      "url": "https://files.pythonhosted.org/packages/64/b4/17d4b0b2a2dc85a6df63d1157e028ed19f90d4cd97c36717afef2bc2f395/attrs-26.1.0-py3-none-any.whl",
+      "version": "26.1.0"
+    },
+    {
+      "filename": "pyyaml-6.0.3-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "PyYAML",
+      "sha256": "00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c",
+      "url": "https://files.pythonhosted.org/packages/b1/5e/f77dc6b9036943e285ba76b49e118d9ea929885becb0a29ba8a7c75e29fe/pyyaml-6.0.3-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "6.0.3"
+    },
+    {
+      "filename": "bcrypt-5.0.0.tar.gz",
+      "name": "bcrypt",
+      "sha256": "f748f7c2d6fd375cc93d3fba7ef4a9e3a092421b8dbf34d8d4dc06be9492dfdd",
+      "url": "https://files.pythonhosted.org/packages/d4/36/3329e2518d70ad8e2e5817d5a4cac6bba05a47767ec416c7d020a965f408/bcrypt-5.0.0.tar.gz",
+      "version": "5.0.0"
+    },
+    {
+      "filename": "bcrypt-5.0.0-cp314-cp314t-manylinux_2_28_x86_64.whl",
+      "name": "bcrypt",
+      "sha256": "7f277a4b3390ab4bebe597800a90da0edae882c6196d3038a73adf446c4f969f",
+      "url": "https://files.pythonhosted.org/packages/27/d7/1ff22703ec6d4f90e62f1a5654b8867ef96bafb8e8102c2288333e1a6ca6/bcrypt-5.0.0-cp314-cp314t-manylinux_2_28_x86_64.whl",
+      "version": "5.0.0"
+    },
+    {
+      "filename": "pytest_codspeed-5.0.3-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "pytest-codspeed",
+      "sha256": "20eba63765be9d1b6cacbbfad84b87d49eb04b357a7045a0899880da181f81e3",
+      "url": "https://files.pythonhosted.org/packages/d1/de/2213f868fa7694f743f96cccbc07e757f45c920c523cccc2da97bc8652df/pytest_codspeed-5.0.3-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "5.0.3"
+    },
+    {
+      "filename": "objgraph-3.6.2-py3-none-any.whl",
+      "name": "objgraph",
+      "sha256": "8114c97712291c3ba30d882406a384d0a7651b307ea9a06e0d83836ccde85e15",
+      "url": "https://files.pythonhosted.org/packages/8e/67/7bffbb861cb8a0a62b7df50738d35812bf40dc8bcc1559c04bdf593f1164/objgraph-3.6.2-py3-none-any.whl",
+      "version": "3.6.2"
+    },
+    {
+      "filename": "rich-15.0.0-py3-none-any.whl",
+      "name": "rich",
+      "sha256": "33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb",
+      "url": "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl",
+      "version": "15.0.0"
+    },
+    {
+      "filename": "markdown_it_py-4.2.0-py3-none-any.whl",
+      "name": "markdown-it-py",
+      "sha256": "9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a",
+      "url": "https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl",
+      "version": "4.2.0"
+    },
+    {
+      "filename": "mdurl-0.1.2-py3-none-any.whl",
+      "name": "mdurl",
+      "sha256": "84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8",
+      "url": "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl",
+      "version": "0.1.2"
+    },
+    {
+      "filename": "sympy-1.14.0-py3-none-any.whl",
+      "name": "sympy",
+      "sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5",
+      "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl",
+      "version": "1.14.0"
+    },
+    {
+      "filename": "mpmath-1.3.0-py3-none-any.whl",
+      "name": "mpmath",
+      "sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c",
+      "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl",
+      "version": "1.3.0"
+    },
+    {
+      "filename": "pydantic-2.14.2-py3-none-any.whl",
+      "name": "pydantic",
+      "sha256": "7efbf7507b937931cd32a5755acb00ea1cf5ccb1d4e8067a5850d5069e382118",
+      "url": "https://files.pythonhosted.org/packages/97/01/c71a71258b58659c72504e5fd65b451f6e36e34dc931d0b237ded213c814/pydantic-2.14.2-py3-none-any.whl",
+      "version": "2.14.2"
+    },
+    {
+      "filename": "pydantic_core-2.50.2-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "name": "pydantic_core",
+      "sha256": "713d7c33c0e231e3786eb0ec95885814dd65d5f3a09754399b6acbf5e9365f11",
+      "url": "https://files.pythonhosted.org/packages/7b/9e/f1fe9384bb37e4e728c51c79151808deacf7b2502e245f50b57c85eeb199/pydantic_core-2.50.2-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "version": "2.50.2"
+    },
+    {
+      "filename": "annotated_types-0.8.0-py3-none-any.whl",
+      "name": "annotated-types",
+      "sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
+      "url": "https://files.pythonhosted.org/packages/99/91/8acff4f5e50511b911bbccb72b8628a49c68ce14148cd9f6431094859a90/annotated_types-0.8.0-py3-none-any.whl",
+      "version": "0.8.0"
+    },
+    {
+      "filename": "typing_inspection-0.4.4-py3-none-any.whl",
+      "name": "typing-inspection",
+      "sha256": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147",
+      "url": "https://files.pythonhosted.org/packages/67/81/4add07e5172b7ac40d8ed5ff580409a7801a4fe26d529bdd915401dabfbe/typing_inspection-0.4.4-py3-none-any.whl",
+      "version": "0.4.4"
+    },
+    {
+      "filename": "expandvars-1.1.2-py3-none-any.whl",
+      "name": "expandvars",
+      "sha256": "d1652fe4e61914f5b88ada93aaedb396446f55ae4621de45c8cb9f66e5712526",
+      "url": "https://files.pythonhosted.org/packages/7f/e6/79c43f7a55264e479a9fbf21ddba6a73530b3ea8439a8bb7fa5a281721af/expandvars-1.1.2-py3-none-any.whl",
+      "version": "1.1.2"
+    },
+    {
+      "filename": "pyright-1.1.414-py3-none-any.whl",
+      "name": "pyright",
+      "sha256": "2a6b4b3298c9eec174c5ed83bd338de6eee82df2992f3e1930e6199d381be36f",
+      "url": "https://files.pythonhosted.org/packages/d7/ba/18b6e682ead424ad24bcc134339ae5d1b931cd9ae260540592a058a91279/pyright-1.1.414-py3-none-any.whl",
+      "version": "1.1.414"
+    },
+    {
+      "filename": "nodeenv-1.12.0-py3-none-any.whl",
+      "name": "nodeenv",
+      "sha256": "80644d65c10cc2be12e3e4b54b3367ff288c7ad24ae75c2dcc65454fc7449d4d",
+      "url": "https://files.pythonhosted.org/packages/2d/6a/8a9ac7d5e2f7cf53c459bfef90ebc17a2f8cd54b665af96799d4c534840e/nodeenv-1.12.0-py3-none-any.whl",
+      "version": "1.12.0"
+    }
+  ],
+  "packages": {
+    "bcrypt": {
+      "ci": {
+        "matches": [],
+        "repository": "pyca/bcrypt",
+        "tag": "5.0.0",
+        "version": "5.0.0"
+      },
+      "parallel_iterations": 1,
+      "sdist": "bcrypt-5.0.0.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "bcrypt-5.0.0",
+      "test_files": [
+        "tests",
+        "pyproject.toml",
+        "setup.cfg",
+        "LICENSE",
+        "README.rst"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "5.0.0"
+    },
+    "cramjam": {
+      "ci": {
+        "matches": [],
+        "repository": "milesgranger/pyrus-cramjam",
+        "tag": "v2.14.0",
+        "version": "2.14.0"
+      },
+      "parallel_iterations": 1,
+      "pytest_args": [
+        "--benchmark-skip"
+      ],
+      "sdist": "cramjam-2.14.0.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "cramjam-2.14.0",
+      "test_files": [
+        "tests",
+        "pyproject.toml",
+        "LICENSE"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "2.14.0"
+    },
+    "frozenlist": {
+      "ci": {
+        "matches": [],
+        "repository": "aio-libs/frozenlist",
+        "tag": "v1.8.0",
+        "version": "1.8.0"
+      },
+      "parallel_iterations": 1,
+      "sdist": "frozenlist-1.8.0.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "frozenlist-1.8.0",
+      "test_files": [
+        "tests",
+        "pytest.ini",
+        "pyproject.toml",
+        "setup.cfg",
+        ".coveragerc",
+        "LICENSE",
+        "README.rst"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "1.8.0"
+    },
+    "joblib": {
+      "ci": {
+        "matches": [],
+        "repository": "joblib/joblib",
+        "tag": "1.6.0",
+        "version": "1.6.0"
+      },
+      "parallel_iterations": 1,
+      "sdist": "joblib-1.6.0.tar.gz",
+      "selectors": [
+        "joblib/test"
+      ],
+      "source_dir": "joblib-1.6.0",
+      "test_files": [
+        "joblib/test",
+        "conftest.py",
+        "pyproject.toml",
+        "setup.cfg",
+        "README.rst"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "1.6.0",
+      "wheel_overlay": "joblib"
+    },
+    "kiwisolver": {
+      "ci": {
+        "matches": [],
+        "repository": "nucleic/kiwi",
+        "tag": "1.5.1",
+        "version": "1.5.1"
+      },
+      "parallel_iterations": 1,
+      "sdist": "kiwisolver-1.5.1.tar.gz",
+      "selectors": [
+        "py/tests"
+      ],
+      "source_dir": "kiwisolver-1.5.1",
+      "test_files": [
+        "py/tests",
+        "pyproject.toml",
+        "setup.cfg",
+        "LICENSE"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "1.5.1"
+    },
+    "marisa-trie": {
+      "ci": {
+        "matches": [
+          {
+            "line": 38,
+            "path": ".github/workflows/tests.yml",
+            "text": "run: python -m pytest --parallel-threads 4",
+            "url": "https://github.com/pytries/marisa-trie/blob/1.4.1/.github/workflows/tests.yml#L38"
+          }
+        ],
+        "repository": "pytries/marisa-trie",
+        "tag": "1.4.1",
+        "version": "1.4.1"
+      },
+      "parallel_iterations": 1,
+      "sdist": "marisa_trie-1.4.1.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "marisa_trie-1.4.1",
+      "test_files": [
+        "tests",
+        "pyproject.toml",
+        "setup.cfg",
+        "LICENSE",
+        "README.rst"
+      ],
+      "thread_policy": "upstream",
+      "threads": 4,
+      "version": "1.4.1"
+    },
+    "markupsafe": {
+      "ci": {
+        "matches": [
+          {
+            "line": 157,
+            "path": "pyproject.toml",
+            "text": "\"--parallel-threads=8\",",
+            "url": "https://github.com/pallets/markupsafe/blob/3.0.4/pyproject.toml#L157"
+          }
+        ],
+        "repository": "pallets/markupsafe",
+        "tag": "3.0.4",
+        "version": "3.0.4"
+      },
+      "parallel_iterations": 1,
+      "sdist": "markupsafe-3.0.4.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "markupsafe-3.0.4",
+      "test_files": [
+        "tests",
+        "pyproject.toml",
+        "setup.cfg"
+      ],
+      "thread_policy": "upstream",
+      "threads": 8,
+      "version": "3.0.4"
+    },
+    "msgpack": {
+      "ci": {
+        "matches": [
+          {
+            "line": 70,
+            "path": ".github/workflows/test.yml",
+            "text": "pytest -v --parallel-threads=auto --iterations=20 test",
+            "url": "https://github.com/msgpack/msgpack-python/blob/v1.2.4/.github/workflows/test.yml#L70"
+          },
+          {
+            "line": 76,
+            "path": ".github/workflows/test.yml",
+            "text": "MSGPACK_PUREPYTHON=1 pytest -v --parallel-threads=auto --iterations=20 test",
+            "url": "https://github.com/msgpack/msgpack-python/blob/v1.2.4/.github/workflows/test.yml#L76"
+          }
+        ],
+        "repository": "msgpack/msgpack-python",
+        "tag": "v1.2.4",
+        "version": "1.2.4"
+      },
+      "parallel_iterations": 20,
+      "sdist": "msgpack-1.2.4.tar.gz",
+      "selectors": [
+        "test"
+      ],
+      "source_dir": "msgpack-1.2.4",
+      "test_files": [
+        "test",
+        "pyproject.toml",
+        "setup.cfg"
+      ],
+      "thread_policy": "upstream",
+      "threads": "auto",
+      "version": "1.2.4"
+    },
+    "msgspec": {
+      "ci": {
+        "matches": [],
+        "repository": "jcrist/msgspec",
+        "tag": "0.22.0",
+        "version": "0.22.0"
+      },
+      "parallel_iterations": 1,
+      "sdist": "msgspec-0.22.0.tar.gz",
+      "selectors": [
+        "tests/unit"
+      ],
+      "source_dir": "msgspec-0.22.0",
+      "test_files": [
+        "tests/unit",
+        "conftest.py",
+        "pyproject.toml",
+        "setup.cfg",
+        "LICENSE",
+        "tests/__init__.py",
+        "src/msgspec/_core.c"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "0.22.0"
+    },
+    "multidict": {
+      "ci": {
+        "matches": [],
+        "repository": "aio-libs/multidict",
+        "tag": "v7.2.1",
+        "version": "7.2.1"
+      },
+      "parallel_iterations": 1,
+      "sdist": "multidict-7.2.1.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "multidict-7.2.1",
+      "test_files": [
+        "tests",
+        "pytest.ini",
+        "pyproject.toml",
+        "setup.cfg",
+        ".coveragerc",
+        "LICENSE",
+        "README.rst",
+        "tools",
+        "benchmarks"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "7.2.1"
+    },
+    "ndindex": {
+      "ci": {
+        "matches": [
+          {
+            "line": 31,
+            "path": ".github/workflows/freethreading_tests.yml",
+            "text": "python -m pytest --parallel-threads=2 --iterations=2 -v -s \\",
+            "url": "https://github.com/Quansight-Labs/ndindex/blob/1.10.1/.github/workflows/freethreading_tests.yml#L31"
+          }
+        ],
+        "repository": "Quansight-Labs/ndindex",
+        "tag": "1.10.1",
+        "version": "1.10.1"
+      },
+      "parallel_iterations": 2,
+      "sdist": "ndindex-1.10.1.tar.gz",
+      "selectors": [
+        "ndindex/tests"
+      ],
+      "source_dir": "ndindex-1.10.1",
+      "test_files": [
+        "ndindex/tests",
+        "conftest.py",
+        "pytest.ini",
+        "pyproject.toml",
+        "setup.cfg",
+        "LICENSE"
+      ],
+      "test_timeout": 600,
+      "thread_policy": "upstream",
+      "threads": 2,
+      "timeout_source": "https://github.com/Quansight-Labs/ndindex/blob/1.10.1/.github/workflows/freethreading_tests.yml#L32",
+      "unit_timeout": 660,
+      "version": "1.10.1",
+      "wheel_overlay": "ndindex"
+    },
+    "packaging": {
+      "ci": {
+        "matches": [],
+        "repository": "pypa/packaging",
+        "tag": "26.3",
+        "version": "26.3"
+      },
+      "parallel_iterations": 1,
+      "sdist": "packaging-26.3.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "packaging-26.3",
+      "test_files": [
+        "tests",
+        "pyproject.toml",
+        "LICENSE",
+        "README.rst"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "unit_timeout": 600,
+      "version": "26.3"
+    },
+    "propcache": {
+      "ci": {
+        "matches": [],
+        "repository": "aio-libs/propcache",
+        "tag": "v0.5.4",
+        "version": "0.5.4"
+      },
+      "parallel_iterations": 1,
+      "pythonpath": [
+        "packaging"
+      ],
+      "sdist": "propcache-0.5.4.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "propcache-0.5.4",
+      "test_files": [
+        "tests",
+        "pytest.ini",
+        "pyproject.toml",
+        "setup.cfg",
+        ".coveragerc",
+        "LICENSE",
+        "README.rst",
+        "packaging"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "0.5.4"
+    },
+    "rpds-py": {
+      "ci": {
+        "matches": [
+          {
+            "line": 80,
+            "path": "noxfile.py",
+            "text": "session.run(\"pytest\", \"--parallel-threads=10\", *session.posargs, TESTS)",
+            "url": "https://github.com/crate-py/rpds/blob/v2026.9.1/noxfile.py#L80"
+          }
+        ],
+        "repository": "crate-py/rpds",
+        "tag": "v2026.9.1",
+        "version": "2026.9.1"
+      },
+      "parallel_iterations": 1,
+      "sdist": "rpds_py-2026.9.1.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "rpds_py-2026.9.1",
+      "test_files": [
+        "tests",
+        "pyproject.toml",
+        "LICENSE",
+        "README.rst"
+      ],
+      "thread_policy": "upstream",
+      "threads": 10,
+      "version": "2026.9.1"
+    },
+    "setuptools-rust": {
+      "ci": {
+        "matches": [],
+        "repository": "PyO3/setuptools-rust",
+        "tag": "v1.13.0",
+        "version": "1.13.0"
+      },
+      "parallel_iterations": 1,
+      "sdist": "setuptools_rust-1.13.0.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "setuptools_rust-1.13.0",
+      "test_files": [
+        "tests",
+        "pyproject.toml",
+        "setup.cfg",
+        "LICENSE",
+        "examples"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "1.13.0"
+    },
+    "soundfile": {
+      "ci": {
+        "matches": [],
+        "repository": "bastibe/python-soundfile",
+        "tag": "0.14.0",
+        "version": "0.14.0"
+      },
+      "fixture_policy": "pytest copies share open handles, file positions and output filenames; retain serial fallback and internal concurrency tests",
+      "parallel_iterations": 1,
+      "sdist": "soundfile-0.14.0.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "serial_fixtures": [
+        "file_stereo_r",
+        "file_mono_r",
+        "file_w",
+        "file_stereo_rplus",
+        "file_obj_stereo_rplus",
+        "file_obj_w",
+        "file_wplus",
+        "file_inmemory",
+        "sf_stereo_r",
+        "sf_stereo_w",
+        "sf_stereo_rplus",
+        "sf_stereo_wplus"
+      ],
+      "serial_globals": [
+        "filename_new",
+        "filename_mp3",
+        "filename_flac",
+        "filename_opus"
+      ],
+      "source_dir": "soundfile-0.14.0",
+      "test_files": [
+        "tests",
+        "setup.cfg",
+        "LICENSE",
+        "README.rst"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "0.14.0"
+    },
+    "ujson": {
+      "ci": {
+        "matches": [],
+        "repository": "ultrajson/ultrajson",
+        "tag": "6.0.0",
+        "version": "6.0.0"
+      },
+      "parallel_iterations": 1,
+      "sdist": "ujson-6.0.0.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "ujson-6.0.0",
+      "test_files": [
+        "tests",
+        "pyproject.toml",
+        "setup.cfg",
+        "scripts"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "6.0.0"
+    },
+    "wrapt": {
+      "ci": {
+        "matches": [],
+        "repository": "GrahamDumpleton/wrapt",
+        "tag": "2.5.2",
+        "version": "2.5.2"
+      },
+      "parallel_iterations": 1,
+      "sdist": "wrapt-2.5.2.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "wrapt-2.5.2",
+      "test_files": [
+        "tests",
+        "pyproject.toml",
+        "setup.cfg",
+        "LICENSE"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "2.5.2"
+    },
+    "xxhash": {
+      "ci": {
+        "matches": [],
+        "repository": "ifduyue/python-xxhash",
+        "tag": "v4.0.2",
+        "version": "4.0.2"
+      },
+      "parallel_iterations": 1,
+      "sdist": "xxhash-4.0.2.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "xxhash-4.0.2",
+      "test_files": [
+        "tests",
+        "pyproject.toml",
+        "setup.cfg",
+        "LICENSE",
+        "README.rst"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "4.0.2"
+    },
+    "yarl": {
+      "ci": {
+        "matches": [],
+        "repository": "aio-libs/yarl",
+        "tag": "v1.25.1",
+        "version": "1.25.1"
+      },
+      "parallel_iterations": 1,
+      "sdist": "yarl-1.25.1.tar.gz",
+      "selectors": [
+        "tests"
+      ],
+      "source_dir": "yarl-1.25.1",
+      "test_files": [
+        "tests",
+        "pytest.ini",
+        "pyproject.toml",
+        "setup.cfg",
+        ".coveragerc",
+        "LICENSE",
+        "README.rst"
+      ],
+      "thread_policy": "corpus-default (no threaded invocation in release CI/config)",
+      "threads": 4,
+      "version": "1.25.1"
+    }
+  },
+  "tracker_commit": "53b7eaf3f5fa312e3deef3b944af35074854af1e"
+}
