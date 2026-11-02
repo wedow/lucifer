@@ -9,3 +9,5 @@ The bar:
 - Every speed claim is measured against CPython, PyPy and free-threaded CPython, across a broad corpus, never one benchmark.
 
 Status: scoping research.
+
+License: MIT (see LICENSE). Vendored third-party code under `third_party/` keeps its own license.
