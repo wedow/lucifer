@@ -1,0 +1,2025 @@
+{
+  "findings": [
+    {
+      "baseline_status": "FAIL",
+      "classification": "reproducible upstream interface assertion",
+      "evidence": "The interface assertion expects the private MutableSequence __annotations_cache__ attribute on the native FrozenList. Three additional plain pytest processes without the parallel observer also failed. A public-interface compatibility defect is unverified.",
+      "id": "parallel/frozenlist/tests/test_frozenlist.py::TestFrozenList::test_iface",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "XPASS",
+      "classification": "upstream expected-failure marker unexpectedly passes",
+      "evidence": "The pinned upstream xfail remains intact. Nested-dispatch markers cite joblib/loky pull 255; the multiprocessing child-cleanup marker cites joblib issue 1086. Passing these checks does not establish that either upstream issue is fully resolved.",
+      "id": "parallel/joblib/joblib/test/test_memmapping.py::test_child_raises_parent_exits_cleanly[multiprocessing]",
+      "rerun_statuses": [
+        "XPASS",
+        "XPASS",
+        "XPASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel executor/tempfolder reuse regression candidate",
+      "evidence": "Consecutive calls through one managed Parallel object returned different memmap parent directories while other test copies ran. Root cause and package-versus-fixture responsibility remain unverified.",
+      "id": "parallel/joblib/joblib/test/test_memmapping.py::test_managed_backend_reuse_temp_folder[loky]",
+      "rerun_statuses": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "XPASS",
+      "classification": "upstream expected-failure marker unexpectedly passes",
+      "evidence": "The pinned upstream xfail remains intact. Nested-dispatch markers cite joblib/loky pull 255; the multiprocessing child-cleanup marker cites joblib issue 1086. Passing these checks does not establish that either upstream issue is fully resolved.",
+      "id": "parallel/joblib/joblib/test/test_parallel.py::test_nested_exception_dispatch[loky]",
+      "rerun_statuses": [
+        "XPASS",
+        "XPASS",
+        "XPASS"
+      ]
+    },
+    {
+      "baseline_status": "XPASS",
+      "classification": "upstream expected-failure marker unexpectedly passes",
+      "evidence": "The pinned upstream xfail remains intact. Nested-dispatch markers cite joblib/loky pull 255; the multiprocessing child-cleanup marker cites joblib issue 1086. Passing these checks does not establish that either upstream issue is fully resolved.",
+      "id": "parallel/joblib/joblib/test/test_parallel.py::test_nested_exception_dispatch[multiprocessing]",
+      "rerun_statuses": [
+        "XPASS",
+        "XPASS",
+        "XPASS"
+      ]
+    },
+    {
+      "baseline_status": "XPASS",
+      "classification": "upstream expected-failure marker unexpectedly passes",
+      "evidence": "The pinned upstream xfail remains intact. Nested-dispatch markers cite joblib/loky pull 255; the multiprocessing child-cleanup marker cites joblib issue 1086. Passing these checks does not establish that either upstream issue is fully resolved.",
+      "id": "parallel/joblib/joblib/test/test_parallel.py::test_nested_exception_dispatch[threading]",
+      "rerun_statuses": [
+        "XPASS",
+        "XPASS",
+        "XPASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel process-global state assertion",
+      "evidence": "The test clears/inspects the shared StructUnion cache while concurrent copies add distinct local types or evict entries. Failures concern exclusive cache-size/eviction assumptions.",
+      "id": "parallel/msgspec/tests/unit/test_common.py::TestStructUnion::test_struct_union_cache_evicted[json]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel process-global state assertion",
+      "evidence": "The test clears/inspects the shared StructUnion cache while concurrent copies add distinct local types or evict entries. Failures concern exclusive cache-size/eviction assumptions.",
+      "id": "parallel/msgspec/tests/unit/test_common.py::TestStructUnion::test_struct_union_cache_evicted[msgpack]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel process-global state assertion",
+      "evidence": "The test clears/inspects the shared StructUnion cache while concurrent copies add distinct local types or evict entries. Failures concern exclusive cache-size/eviction assumptions.",
+      "id": "parallel/msgspec/tests/unit/test_common.py::TestStructUnion::test_struct_union_cached[json-False]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel process-global state assertion",
+      "evidence": "The test clears/inspects the shared StructUnion cache while concurrent copies add distinct local types or evict entries. Failures concern exclusive cache-size/eviction assumptions.",
+      "id": "parallel/msgspec/tests/unit/test_common.py::TestStructUnion::test_struct_union_cached[json-True]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel process-global state assertion",
+      "evidence": "The test clears/inspects the shared StructUnion cache while concurrent copies add distinct local types or evict entries. Failures concern exclusive cache-size/eviction assumptions.",
+      "id": "parallel/msgspec/tests/unit/test_common.py::TestStructUnion::test_struct_union_cached[msgpack-False]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel process-global state assertion",
+      "evidence": "The test clears/inspects the shared StructUnion cache while concurrent copies add distinct local types or evict entries. Failures concern exclusive cache-size/eviction assumptions.",
+      "id": "parallel/msgspec/tests/unit/test_common.py::TestStructUnion::test_struct_union_cached[msgpack-True]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel process-global state assertion",
+      "evidence": "The test temporarily changes the interpreter-wide integer conversion limit while other copies restore that same setting.",
+      "id": "parallel/msgspec/tests/unit/test_json.py::TestIntegers::test_decode_big_int_max_length[1000]",
+      "rerun_statuses": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_a_callback_may_mutate_the_multidict_it_watches[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_a_callback_that_unwatches_gets_no_further_events[c]",
+      "rerun_statuses": [
+        "ERROR",
+        "PASS",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_a_callback_that_watches_joins_mid_batch[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_a_reused_watcher_id_does_not_inherit_old_watches[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_add_returns_the_added_pair[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_add_watcher_runs_out_of_slots[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_an_event_without_a_key_reports_no_hash[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_clear_of_an_empty_multidict_records_nothing[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_clear_records_one_event_not_one_per_pair[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_clone_records_a_finalizer_add_after_cloning[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_copy_records_nothing[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_delitem_of_a_missing_key_records_nothing[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_delitem_removes_every_match[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_every_watcher_slot_gets_its_own_events[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_extend_batches_one_added_per_pair[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_get_type[c-cimultidict]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_get_type[c-cimultidict_proxy]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_get_type[c-multidict]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_get_type[c-multidict_proxy]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_hash_is_the_identity_hash[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_identity_of_a_case_insensitive_key[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_identity_of_a_case_sensitive_key[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_init_again_clears_then_adds[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_init_again_records_a_finalizer_add_after_clearing[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_init_from_itself_with_kwargs_only_adds[c-proxy]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_init_from_itself_with_kwargs_only_adds[c-self]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_init_from_the_same_type_clones[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_istr_type[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_merge_only_adds_absent_keys[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_popall_batches_one_deleted_per_value[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_popitem_deletes[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_popone_deletes[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_reading_records_nothing[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_rewatching_overwrites_user_data[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_setdefault_adds_only_when_absent[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_setitem_on_a_new_key_adds[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_setitem_replaces_the_first_and_deletes_the_rest[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_two_watchers_can_watch_one_multidict[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_unwatch_by_an_id_the_multidict_never_saw[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_unwatching_one_watcher_leaves_the_other[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_update_replaces_the_first_match[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_user_data_is_per_watched_multidict[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_watch_through_a_proxy_watches_the_underlying_multidict[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel C-API test-state interference",
+      "evidence": "Affected checks share watcher logs/fixtures, interpreter-wide watcher slots, or exact reference-count observations across test copies. Extra callback events and reference-count deltas were observed. An implementation defect for this case is unverified.",
+      "id": "parallel/multidict/tests/test_capi.py::test_watcher_data_is_shared_by_every_watched_multidict[c]",
+      "rerun_statuses": [
+        "FAIL",
+        "ERROR",
+        "ERROR"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_annotations.py::TestAnnotationMutation::test_set_annotations_on_object_proxy",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_attribute_wrapper.py::TestAttributeProxy::test_class_default_fallback",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_attribute_wrapper.py::TestAttributeProxy::test_composes_over_descriptor",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_attribute_wrapper.py::TestAttributeProxy::test_delete_instance_value",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_attribute_wrapper.py::TestAttributeProxy::test_missing_terminal_raises_attribute_error",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_attribute_wrapper.py::TestAttributeProxy::test_prior_descriptor_validation",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_attribute_wrapper.py::TestAttributeProxy::test_prior_property",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_attribute_wrapper.py::TestAttributeProxy::test_prior_read_only_property",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_attribute_wrapper.py::TestAttributeProxy::test_returns_handle",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_attribute_wrapper.py::TestAttributeProxy::test_stacked_application_composes",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_callable_binding_no_args.py::TestCallableBindingNoArgs::test_callable_binding_with_instance_arg_succeeds",
+      "rerun_statuses": [
+        "PASS",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodBoundTracker::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodBoundTracker::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodCountedWrapper::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodCountedWrapper::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodTracker::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodTracker::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodWrappedAttrs::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodWrappedAttrs::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodWrappedAttrs::test_reset",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodWrapperAttrs::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodWrapperAttrs::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestClassMethodWrapperAttrs::test_reset",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodBoundTracker::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodBoundTracker::test_separate_instances_share_count",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodCountedWrapper::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodCountedWrapper::test_separate_instances_share_count",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodTracker::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodTracker::test_separate_instances_share_count",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodWrappedAttrs::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodWrappedAttrs::test_reset",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodWrappedAttrs::test_separate_instances_share_count",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodWrapperAttrs::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodWrapperAttrs::test_reset",
+      "rerun_statuses": [
+        "FAIL",
+        "PASS",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestInstanceMethodWrapperAttrs::test_separate_instances_share_count",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestNormalFunctionBoundTracker::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestNormalFunctionCountedWrapper::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestNormalFunctionTracker::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestNormalFunctionWrappedAttrs::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestNormalFunctionWrappedAttrs::test_reset",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestNormalFunctionWrapperAttrs::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestNormalFunctionWrapperAttrs::test_reset",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodBoundTracker::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodBoundTracker::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodBoundTracker::test_reset",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodCountedWrapper::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodCountedWrapper::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodTracker::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodTracker::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodWrappedAttrs::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodWrappedAttrs::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodWrapperAttrs::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodWrapperAttrs::test_count_increments",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_decorator_state.py::TestStaticMethodWrapperAttrs::test_reset",
+      "rerun_statuses": [
+        "PASS",
+        "FAIL",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_deferred_patching.py::TestDeferredPatchFunctionWrapper::test_deferred_patch_before_import",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_deferred_patching.py::TestDeferredWrapFunctionWrapper::test_deferred_wrap_before_import",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_find_wrapper.py::TestFindWrapper::test_buried_wrapper",
+      "rerun_statuses": [
+        "PASS",
+        "PASS",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_find_wrapper.py::TestFindWrapper::test_class_attribute_getattr_trap",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_find_wrapper.py::TestFindWrapper::test_predicate",
+      "rerun_statuses": [
+        "PASS",
+        "FAIL",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_find_wrapper.py::TestFindWrapper::test_same_wrapper_function_twice",
+      "rerun_statuses": [
+        "FAIL",
+        "PASS",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_lru_cache.py::TestClassMethod::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_lru_cache.py::TestClassMethod::test_caching",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_lru_cache.py::TestPlainFunction::test_caching",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_lru_cache.py::TestPlainFunction::test_different_args_cached_separately",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_lru_cache.py::TestStaticMethod::test_access_via_instance",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_lru_cache.py::TestStaticMethod::test_caching",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_memoize.py::TestSynchronized::test_instancemethod",
+      "rerun_statuses": [
+        "FAIL",
+        "PASS",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_monkey_patching.py::TestMonkeyPatching::test_patch_function_module_name",
+      "rerun_statuses": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_monkey_patching.py::TestMonkeyPatching::test_patch_function_module_name_enabled_callable",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_monkey_patching.py::TestMonkeyPatching::test_wrap_class_method_inherited",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_monkey_patching.py::TestMonkeyPatching::test_wrap_instance_method_module_name",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_object_proxy.py::TestAttributeAccess::test_init_called_wrapped_deleted",
+      "rerun_statuses": [
+        "FAIL",
+        "PASS",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_post_import_hooks.py::TestPostImportHooks::test_import_deadlock_1",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_post_import_hooks.py::TestPostImportHooks::test_import_deadlock_3",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_post_import_hooks.py::TestPostImportHooksStringForm::test_string_hook_callback_in_synthetic_module",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_scoped_function_wrapper.py::TestScopedFunctionWrapper::test_nested_scopes",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_scoped_function_wrapper.py::TestScopedFunctionWrapper::test_patch_scoped_to_block",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_scoped_function_wrapper.py::TestScopedFunctionWrapper::test_removed_on_exception",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_scoped_function_wrapper.py::TestScopedFunctionWrapper::test_wrapt_wrapper_left_on_top_spliced",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_scoped_function_wrapper.py::TestScopedFunctionWrapper::test_yields_nothing",
+      "rerun_statuses": [
+        "PASS",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_synchronized_lock.py::TestSynchronized::test_synchronized_function",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_synchronized_lock.py::TestSynchronized::test_synchronized_inner_classmethod",
+      "rerun_statuses": [
+        "FAIL",
+        "PASS",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_synchronized_lock.py::TestSynchronized::test_synchronized_inner_staticmethod",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_synchronized_lock.py::TestSynchronized::test_synchronized_instancemethod",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_synchronized_lock.py::TestSynchronized::test_synchronized_outer_classmethod",
+      "rerun_statuses": [
+        "FAIL",
+        "PASS",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_synchronized_lock.py::TestSynchronized::test_synchronized_type_new_style",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_synchronized_lock.py::TestSynchronized::test_synchronized_type_old_style",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_transient_function_wrapper.py::TestTransientFunctionWrapper::test_module_function_restored_exactly",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_transient_function_wrapper.py::TestTransientFunctionWrapper::test_nested_application",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_transient_function_wrapper.py::TestTransientFunctionWrapper::test_transient_function_wrapper",
+      "rerun_statuses": [
+        "PASS",
+        "PASS",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_unwrap_object.py::TestUnwrapObject::test_deferred_wrap_and_handle_recovery",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_unwrap_object.py::TestUnwrapObject::test_equal_but_distinct_proxy",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_unwrap_object.py::TestUnwrapObject::test_remove_buried_splices",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_unwrap_object.py::TestUnwrapObject::test_remove_outermost",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_unwrap_object.py::TestUnwrapObject::test_same_wrapper_function_twice",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_unwrap_object.py::TestUnwrapObject::test_terminal_original_as_handle",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_unwrap_object.py::TestUnwrapObject::test_unwrap_twice",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "PASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_unwrap_object.py::TestUnwrapObject::test_value_proxy",
+      "rerun_statuses": [
+        "PASS",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_unwrap_object.py::TestUnwrapObjectAttribute::test_buried_interceptor_spliced",
+      "rerun_statuses": [
+        "PASS",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_unwrap_object.py::TestUnwrapObjectCreatedSlot::test_record_not_read_through_delegation",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_wrapper_chain.py::TestWrapperChain::test_attribute_wrapper_missing_terminal",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "parallel wrapper/test-state assertion",
+      "evidence": "The parallel plugin invokes unittest method copies on one test instance. Observed failures include shared wrapper counters, repeated descriptor installation, and captured-instance identity. Fixture interference versus a package defect remains unverified for this node.",
+      "id": "parallel/wrapt/tests/core/test_wrapper_chain.py::TestWrapperChain::test_broken_proxy_error_propagates",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_copy",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_import",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_reset",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_version_exists",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_xxh128_alias",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_xxh32_oneshot",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_xxh32_stream",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_xxh3_128_oneshot",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_xxh3_128_stream",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_xxh3_64_oneshot",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_xxh3_64_stream",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_xxh64_oneshot",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterBasic::test_xxh64_stream",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterIsolation::test_algorithms_available",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "shared subinterpreter rejects concurrent execution",
+      "evidence": "Parallel copies share the unittest instance and its interpreter ID. CPython raises InterpreterError: interpreter already running. This does not demonstrate an incorrect hash result or an extension crash.",
+      "id": "parallel/xxhash/tests/test_interpreters.py::TestSubinterpreterIsolation::test_immutable_type",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "reproducible upstream interface assertion",
+      "evidence": "The interface assertion expects the private MutableSequence __annotations_cache__ attribute on the native FrozenList. Three additional plain pytest processes without the parallel observer also failed. A public-interface compatibility defect is unverified.",
+      "id": "serial/frozenlist/tests/test_frozenlist.py::TestFrozenList::test_iface",
+      "rerun_statuses": [
+        "FAIL",
+        "FAIL",
+        "FAIL"
+      ]
+    },
+    {
+      "baseline_status": "XPASS",
+      "classification": "upstream expected-failure marker unexpectedly passes",
+      "evidence": "The pinned upstream xfail remains intact. Nested-dispatch markers cite joblib/loky pull 255; the multiprocessing child-cleanup marker cites joblib issue 1086. Passing these checks does not establish that either upstream issue is fully resolved.",
+      "id": "serial/joblib/joblib/test/test_memmapping.py::test_child_raises_parent_exits_cleanly[multiprocessing]",
+      "rerun_statuses": [
+        "XPASS",
+        "XPASS",
+        "XPASS"
+      ]
+    },
+    {
+      "baseline_status": "XPASS",
+      "classification": "upstream expected-failure marker unexpectedly passes",
+      "evidence": "The pinned upstream xfail remains intact. Nested-dispatch markers cite joblib/loky pull 255; the multiprocessing child-cleanup marker cites joblib issue 1086. Passing these checks does not establish that either upstream issue is fully resolved.",
+      "id": "serial/joblib/joblib/test/test_parallel.py::test_nested_exception_dispatch[loky]",
+      "rerun_statuses": [
+        "XPASS",
+        "XPASS",
+        "XPASS"
+      ]
+    },
+    {
+      "baseline_status": "XPASS",
+      "classification": "upstream expected-failure marker unexpectedly passes",
+      "evidence": "The pinned upstream xfail remains intact. Nested-dispatch markers cite joblib/loky pull 255; the multiprocessing child-cleanup marker cites joblib issue 1086. Passing these checks does not establish that either upstream issue is fully resolved.",
+      "id": "serial/joblib/joblib/test/test_parallel.py::test_nested_exception_dispatch[multiprocessing]",
+      "rerun_statuses": [
+        "XPASS",
+        "XPASS",
+        "XPASS"
+      ]
+    },
+    {
+      "baseline_status": "XPASS",
+      "classification": "upstream expected-failure marker unexpectedly passes",
+      "evidence": "The pinned upstream xfail remains intact. Nested-dispatch markers cite joblib/loky pull 255; the multiprocessing child-cleanup marker cites joblib issue 1086. Passing these checks does not establish that either upstream issue is fully resolved.",
+      "id": "serial/joblib/joblib/test/test_parallel.py::test_nested_exception_dispatch[threading]",
+      "rerun_statuses": [
+        "XPASS",
+        "XPASS",
+        "XPASS"
+      ]
+    },
+    {
+      "baseline_status": "FAIL",
+      "classification": "property-test timing flake",
+      "evidence": "The initial Hypothesis run exceeded its 200 ms deadline (about 331 ms); the same example ran in about 17 ms during shrinking. This is a timing observation, not evidence of incorrect trie data.",
+      "id": "serial/marisa-trie/tests/test_threading.py::test_saveload[RecordTrie]",
+      "rerun_statuses": [
+        "PASS",
+        "PASS",
+        "PASS"
+      ]
+    }
+  ],
+  "rerun_cascades": [
+    "In two multidict focused trials, test_add_watcher_runs_out_of_slots exhausted the interpreter-wide watcher IDs. Later watcher fixtures raised RuntimeError: no more multidict watcher IDs available; 32 nodes therefore changed from FAIL to fixture ERROR. These outcomes share the preceding allocation failure and are retained separately from baseline outcomes."
+  ],
+  "rerun_policy": "Three fresh focused processes per affected package/lane, selecting all its retained FAIL/XPASS nodes with the original pinned wheel, thread count and inner iteration count. Explicit node selection can change upstream fixture order. Initial genuine failures remain in the scoreboard even when focused runs pass.",
+  "rerun_summary": {
+    "ERROR/PASS/PASS": 1,
+    "FAIL/ERROR/ERROR": 32,
+    "FAIL/FAIL/FAIL": 113,
+    "FAIL/FAIL/PASS": 8,
+    "FAIL/PASS/FAIL": 5,
+    "FAIL/PASS/PASS": 1,
+    "PASS/FAIL/FAIL": 4,
+    "PASS/FAIL/PASS": 2,
+    "PASS/PASS/FAIL": 2,
+    "PASS/PASS/PASS": 4,
+    "XPASS/XPASS/XPASS": 8
+  },
+  "runtime": "cpython-3.14.10t",
+  "seed": 0,
+  "setup_corrections": [
+    "preserve interpreter symlinks so venv subprocesses keep installed dependencies",
+    "stage required test helpers and resources from pinned sdists",
+    "provide pinned typing tools and Rust metadata dependencies",
+    "serialize the single-use shared benchmark fixture via the upstream plugin fallback",
+    "use fresh external attempt directories independent of runtime labels",
+    "use ndindex CI timeout and split packaging threaded work by file without removing cases"
+  ],
+  "unrestricted_diagnostics": [
+    {
+      "classification": "native shared-handle close abort; threading contract unverified",
+      "gil_disabled_before_execution": true,
+      "id": "parallel/soundfile/tests/test_soundfile.py::test_buffer_write[obj]",
+      "observation": "Three stock pytest-run-parallel reproductions aborted in SoundFile.close / libsndfile.sf_close. Copies share sf_stereo_w and close the same native handle. A contract allowing concurrent close is unverified. The original full-unit abort invalidated 331 rows, not 331 independently established crashes. The required lane retains every test and uses reviewed shared-handle/fixed-filename serial fallbacks; its 331 cases pass.",
+      "returncodes": [
+        -6,
+        -6,
+        -6
+      ],
+      "threads": 4
+    }
+  ]
+}

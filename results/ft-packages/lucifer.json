@@ -1,0 +1,30 @@
+{
+  "binary_sha256": null,
+  "environment": {
+    "LC_ALL": "C.UTF-8",
+    "PYTHONHASHSEED": "0",
+    "PYTHON_JIT": "0",
+    "TZ": "UTC",
+    "force_gil_off": false
+  },
+  "plan": {
+    "expected_sha256": "b8a4898759903e51283e7a800bfe9ce73ff079703c25c60b3d0ff3fad63c6ffc",
+    "iterations": 1,
+    "lock_sha256": "17e3dcfb8f6979b59a8023ebcfb26ed5f2b05d848e1f947fb26d47400e223ca0",
+    "perturbation": "none",
+    "resources": "all,-network,-urlfetch,-gui,-largefile,-cpu,-walltime",
+    "runtime_args": [],
+    "seed": 0,
+    "threads": null,
+    "timeout": null
+  },
+  "platform": {
+    "affinity_cpus": 10,
+    "logical_cpus": 12,
+    "machine": "x86_64",
+    "os": "linux"
+  },
+  "preparation_corrections": "included pinned source assets and tool dependencies; artifact versions and test IDs retained",
+  "probe": null,
+  "units": {}
+}
