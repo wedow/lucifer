@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Summarize validation manifests against their nonempty expected denominators."""
+
+import argparse
+from collections import Counter
+import csv
+import math
+from pathlib import Path
+
+STATUSES = "PASS FAIL ERROR SKIP XFAIL XPASS TIMEOUT CRASH NOTRUN".split()
+
+
+def read(path):
+    with path.open(newline="") as stream:
+        reader = csv.DictReader(stream, delimiter="\t", quoting=csv.QUOTE_NONE)
+        if reader.fieldnames != ["id", "status", "seconds"]:
+            raise ValueError(f"{path.name}: invalid header")
+        rows = {}
+        for row in reader:
+            seconds = float(row["seconds"])
+            if (not row["id"] or row["id"] in rows or row["status"] not in STATUSES
+                    or not math.isfinite(seconds) or seconds < 0):
+                raise ValueError(f"{path.name}: invalid or duplicate row")
+            rows[row["id"]] = row["status"]
+    return rows
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--results", type=Path, default=Path(__file__).resolve().parents[1] / "results")
+    parser.add_argument("--suite", action="append")
+    parser.add_argument("--runtime", action="append")
+    args = parser.parse_args()
+    print("suite\truntime\ttotal\t" + "\t".join(STATUSES) + "\tpass_rate\textra")
+    invalid = False
+    for directory in sorted(args.results.iterdir()):
+        if not directory.is_dir() or args.suite and directory.name not in args.suite:
+            continue
+        try:
+            expected = read(directory / "expected.tsv")
+            if not expected:
+                raise ValueError(f"{directory.name}: empty expected manifest")
+            for path in sorted(directory.glob("*.tsv")):
+                if path.name == "expected.tsv" or args.runtime and path.stem not in args.runtime:
+                    continue
+                rows = read(path)
+                counts = Counter(rows.get(ident, "NOTRUN") for ident in expected)
+                extra = len(rows.keys() - expected.keys())
+                print("\t".join([directory.name, path.stem, str(len(expected))]
+                                + [str(counts[s]) for s in STATUSES]
+                                + [f"{100 * counts['PASS'] / len(expected):.2f}%", str(extra)]))
+                invalid |= bool(extra)
+        except (OSError, ValueError) as exc:
+            print("invalid:", exc)
+            invalid = True
+    return int(invalid)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

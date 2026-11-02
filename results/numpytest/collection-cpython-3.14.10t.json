@@ -1,0 +1,13 @@
+{
+  "numpy": "2.5.4",
+  "collected": 52273,
+  "collection_sha256": "84f478d01922a7dbb56f1d2150727d2e26dde24ecac1f5565c7dc7bf94998dd4",
+  "finish": {
+    "version": "3.14.10",
+    "abiflags": "t",
+    "free_threaded_build": true,
+    "gil_enabled": false,
+    "exitstatus": 0
+  },
+  "requirements_sha256": "13a20f27474bc0e98445882b51cdbd8d88bc3c6d9b53a3f6c13ff9de2ec752b7"
+}
