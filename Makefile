@@ -7,3 +7,5 @@ check-harness:
 	python3 tools/difftest/check.py
 
 	python3 tools/ftcorpus/check.py
+
+	python3 tools/pypi/check.py

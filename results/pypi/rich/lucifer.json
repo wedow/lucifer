@@ -1,0 +1,23 @@
+{
+  "package": "rich",
+  "version": "15.0.0",
+  "runtime": "lucifer",
+  "source_sha256": "5e79a8738b4e4e552291253c69e32c695de38f24400b137b119d54385234526a",
+  "lock_sha256": "9a6f088d33e3a6161b0926405996302b088f92271a2f2c73ef175417a9e4250a",
+  "corpus_sha256": "8b572ef0be093ec0e832eb06c2d08b707ee2829e4796c85b00e6dc30f4d7bbd1",
+  "harness_sha256": {
+    "run.py": "fb784858fd6fa7268fe3f4d2ca9dc2c32ce8616e18a6548af85a6d668c3e327f",
+    "recorder.py": "4b2205a94f148834372183fd28637e41fcb36e21ba83fc1758988a71535ef1b1",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "test_sources": {},
+  "reason": "interpreter failed startup",
+  "returncode": null,
+  "counts": {
+    "NOTRUN": 981
+  },
+  "state": null,
+  "collection_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "upstream_ids": {},
+  "outcomes": []
+}

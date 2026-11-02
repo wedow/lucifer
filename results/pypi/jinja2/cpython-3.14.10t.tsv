@@ -1,0 +1,910 @@
+id	status	seconds
+tests/test_api.py::TestExtendedAPI::test_autoescape_autoselect	PASS	0.001616
+tests/test_api.py::TestExtendedAPI::test_context_finalize	PASS	0.000743
+tests/test_api.py::TestExtendedAPI::test_cycler	PASS	0.000396
+tests/test_api.py::TestExtendedAPI::test_env_autoescape	PASS	0.000790
+tests/test_api.py::TestExtendedAPI::test_eval_finalize	PASS	0.000770
+tests/test_api.py::TestExtendedAPI::test_expressions	PASS	0.001915
+tests/test_api.py::TestExtendedAPI::test_finalize	PASS	0.001103
+tests/test_api.py::TestExtendedAPI::test_finalize_constant_expression	PASS	0.000779
+tests/test_api.py::TestExtendedAPI::test_get_template_undefined	PASS	0.000518
+tests/test_api.py::TestExtendedAPI::test_item_and_attribute	PASS	0.006095
+tests/test_api.py::TestExtendedAPI::test_no_finalize_template_data	PASS	0.000839
+tests/test_api.py::TestExtendedAPI::test_sandbox_max_range	PASS	0.002028
+tests/test_api.py::TestExtendedAPI::test_template_passthrough	PASS	0.000707
+tests/test_api.py::TestLowLevel::test_custom_code_generator	PASS	0.001052
+tests/test_api.py::TestLowLevel::test_custom_context	PASS	0.000763
+tests/test_api.py::TestMeta::test_find_included_templates	PASS	0.000990
+tests/test_api.py::TestMeta::test_find_refererenced_templates	PASS	0.000873
+tests/test_api.py::TestMeta::test_find_undeclared_variables	PASS	0.002566
+tests/test_api.py::TestStreaming::test_basic_streaming	PASS	0.001328
+tests/test_api.py::TestStreaming::test_buffered_streaming	PASS	0.001349
+tests/test_api.py::TestStreaming::test_dump_stream	PASS	0.001059
+tests/test_api.py::TestStreaming::test_streaming_behavior	PASS	0.000659
+tests/test_api.py::TestUndefined::test_chainable_undefined	PASS	0.005709
+tests/test_api.py::TestUndefined::test_debug_undefined	PASS	0.003344
+tests/test_api.py::TestUndefined::test_default_undefined	PASS	0.004230
+tests/test_api.py::TestUndefined::test_indexing_gives_undefined	PASS	0.001050
+tests/test_api.py::TestUndefined::test_logging_undefined	PASS	0.003373
+tests/test_api.py::TestUndefined::test_none_gives_proper_error	PASS	0.000409
+tests/test_api.py::TestUndefined::test_object_repr	PASS	0.000368
+tests/test_api.py::TestUndefined::test_stopiteration_is_undefined	PASS	0.001885
+tests/test_api.py::TestUndefined::test_strict_undefined	PASS	0.005212
+tests/test_api.py::TestUndefined::test_undefined_and_special_attributes	PASS	0.000293
+tests/test_api.py::TestUndefined::test_undefined_attribute_error	PASS	0.000303
+tests/test_api.py::test_overlay_enable_async	PASS	0.000395
+tests/test_async.py::TestAsyncForLoop::test_awaitable_property_slicing	PASS	0.001456
+tests/test_async.py::TestAsyncForLoop::test_bare_async	PASS	0.001604
+tests/test_async.py::TestAsyncForLoop::test_call_in_loop	PASS	0.002097
+tests/test_async.py::TestAsyncForLoop::test_changed	PASS	0.002004
+tests/test_async.py::TestAsyncForLoop::test_context_vars[<lambda>0]	PASS	0.002539
+tests/test_async.py::TestAsyncForLoop::test_context_vars[<lambda>1]	PASS	0.002319
+tests/test_async.py::TestAsyncForLoop::test_context_vars[auto_aiter]	PASS	0.002386
+tests/test_async.py::TestAsyncForLoop::test_context_vars[iter]	PASS	0.002476
+tests/test_async.py::TestAsyncForLoop::test_context_vars[reversed]	PASS	0.002432
+tests/test_async.py::TestAsyncForLoop::test_cycling	PASS	0.002159
+tests/test_async.py::TestAsyncForLoop::test_else	PASS	0.001427
+tests/test_async.py::TestAsyncForLoop::test_empty_blocks	PASS	0.001366
+tests/test_async.py::TestAsyncForLoop::test_lookaround	PASS	0.001939
+tests/test_async.py::TestAsyncForLoop::test_loop_errors[asyncio]	PASS	0.003122
+tests/test_async.py::TestAsyncForLoop::test_loop_errors[trio]	PASS	0.003508
+tests/test_async.py::TestAsyncForLoop::test_loop_filter	PASS	0.003493
+tests/test_async.py::TestAsyncForLoop::test_looploop	PASS	0.001946
+tests/test_async.py::TestAsyncForLoop::test_noniter	PASS	0.001177
+tests/test_async.py::TestAsyncForLoop::test_nonrecursive_loop_filter	PASS	0.001841
+tests/test_async.py::TestAsyncForLoop::test_recursive	PASS	0.002227
+tests/test_async.py::TestAsyncForLoop::test_recursive_depth	PASS	0.002176
+tests/test_async.py::TestAsyncForLoop::test_recursive_depth0	PASS	0.002197
+tests/test_async.py::TestAsyncForLoop::test_recursive_empty_loop_iter	PASS	0.001302
+tests/test_async.py::TestAsyncForLoop::test_recursive_lookaround	PASS	0.003277
+tests/test_async.py::TestAsyncForLoop::test_recursive_loop_filter	PASS	0.002387
+tests/test_async.py::TestAsyncForLoop::test_reversed_bug	PASS	0.001532
+tests/test_async.py::TestAsyncForLoop::test_scope	PASS	0.001252
+tests/test_async.py::TestAsyncForLoop::test_scoped_loop_var	PASS	0.002932
+tests/test_async.py::TestAsyncForLoop::test_scoped_special_var	PASS	0.001836
+tests/test_async.py::TestAsyncForLoop::test_scoping_bug	PASS	0.002235
+tests/test_async.py::TestAsyncForLoop::test_simple	PASS	0.001426
+tests/test_async.py::TestAsyncForLoop::test_unpacking	PASS	0.001841
+tests/test_async.py::TestAsyncForLoop::test_varlen	PASS	0.001223
+tests/test_async.py::TestAsyncImports::test_context_imports	PASS	0.007294
+tests/test_async.py::TestAsyncImports::test_exports[asyncio]	PASS	0.002763
+tests/test_async.py::TestAsyncImports::test_exports[trio]	PASS	0.003327
+tests/test_async.py::TestAsyncImports::test_from_import_with_globals	PASS	0.002064
+tests/test_async.py::TestAsyncImports::test_import_with_globals	PASS	0.003059
+tests/test_async.py::TestAsyncImports::test_import_with_globals_override	PASS	0.002238
+tests/test_async.py::TestAsyncImports::test_trailing_comma	PASS	0.003711
+tests/test_async.py::TestAsyncIncludes::test_choice_includes	PASS	0.007978
+tests/test_async.py::TestAsyncIncludes::test_context_include	PASS	0.002841
+tests/test_async.py::TestAsyncIncludes::test_context_include_with_overrides	PASS	0.001666
+tests/test_async.py::TestAsyncIncludes::test_include_ignoring_missing	PASS	0.003362
+tests/test_async.py::TestAsyncIncludes::test_unoptimized_scopes	PASS	0.002971
+tests/test_async.py::TestAsyncIncludes::test_unoptimized_scopes_autoescape	PASS	0.003071
+tests/test_async.py::test_async_blocks[asyncio]	PASS	0.001602
+tests/test_async.py::test_async_blocks[trio]	PASS	0.001986
+tests/test_async.py::test_async_extend[asyncio]	PASS	0.001915
+tests/test_async.py::test_async_extend[trio]	PASS	0.002246
+tests/test_async.py::test_async_generate	PASS	0.001352
+tests/test_async.py::test_async_iteration_in_templates	PASS	0.001335
+tests/test_async.py::test_async_iteration_in_templates_extended	PASS	0.001537
+tests/test_async.py::test_await_and_macros[asyncio]	PASS	0.001907
+tests/test_async.py::test_await_and_macros[trio]	PASS	0.002182
+tests/test_async.py::test_await_on_calls[asyncio]	PASS	0.001394
+tests/test_async.py::test_await_on_calls[trio]	PASS	0.001660
+tests/test_async.py::test_await_on_calls_normal_render	PASS	0.001161
+tests/test_async.py::test_basic_async[asyncio]	PASS	0.001707
+tests/test_async.py::test_basic_async[trio]	PASS	0.002126
+tests/test_async.py::test_basic_generate_async[asyncio]	PASS	0.001442
+tests/test_async.py::test_basic_generate_async[trio]	PASS	0.001758
+tests/test_async.py::test_blocks_generate_async[asyncio]	PASS	0.001683
+tests/test_async.py::test_blocks_generate_async[trio]	PASS	0.002184
+tests/test_async.py::test_chainable_undefined_aiter[asyncio]	PASS	0.001654
+tests/test_async.py::test_chainable_undefined_aiter[trio]	PASS	0.001926
+tests/test_async.py::test_getitem_after_call	PASS	0.001579
+tests/test_async.py::test_getitem_after_filter	PASS	0.001504
+tests/test_async.py::test_include_generate_async[asyncio]	PASS	0.001703
+tests/test_async.py::test_include_generate_async[trio]	PASS	0.002164
+tests/test_async.py::test_namespace_awaitable[asyncio]	PASS	0.001580
+tests/test_async.py::test_namespace_awaitable[trio]	PASS	0.001940
+tests/test_async.py::test_native_async[asyncio]	PASS	0.001242
+tests/test_async.py::test_native_async[trio]	PASS	0.001399
+tests/test_async.py::test_native_list_async[asyncio]	PASS	0.001200
+tests/test_async.py::test_native_list_async[trio]	PASS	0.001588
+tests/test_async_filters.py::test_attribute_map[<lambda>0]	PASS	0.001984
+tests/test_async_filters.py::test_attribute_map[<lambda>1]	PASS	0.001916
+tests/test_async_filters.py::test_bool_reject[<lambda>0]	PASS	0.001790
+tests/test_async_filters.py::test_bool_reject[<lambda>1]	PASS	0.001758
+tests/test_async_filters.py::test_bool_select[<lambda>0]	PASS	0.001753
+tests/test_async_filters.py::test_bool_select[<lambda>1]	PASS	0.001680
+tests/test_async_filters.py::test_custom_async_filter[asyncio]	PASS	0.001603
+tests/test_async_filters.py::test_custom_async_filter[trio]	PASS	0.002183
+tests/test_async_filters.py::test_custom_async_iteratable_filter[asyncio-<lambda>0]	PASS	0.002296
+tests/test_async_filters.py::test_custom_async_iteratable_filter[asyncio-<lambda>1]	PASS	0.002163
+tests/test_async_filters.py::test_custom_async_iteratable_filter[trio-<lambda>0]	PASS	0.002767
+tests/test_async_filters.py::test_custom_async_iteratable_filter[trio-<lambda>1]	PASS	0.002422
+tests/test_async_filters.py::test_empty_map	PASS	0.001424
+tests/test_async_filters.py::test_first[asyncio-<lambda>0]	PASS	0.001768
+tests/test_async_filters.py::test_first[asyncio-<lambda>1]	PASS	0.001804
+tests/test_async_filters.py::test_first[trio-<lambda>0]	PASS	0.002205
+tests/test_async_filters.py::test_first[trio-<lambda>1]	PASS	0.002106
+tests/test_async_filters.py::test_groupby[<lambda>0]	PASS	0.002488
+tests/test_async_filters.py::test_groupby[<lambda>1]	PASS	0.002558
+tests/test_async_filters.py::test_groupby_case[False-a: 1, 3\nb: 2\n]	PASS	0.002371
+tests/test_async_filters.py::test_groupby_case[True-A: 3\na: 1\nb: 2\n]	PASS	0.002382
+tests/test_async_filters.py::test_groupby_multidot[<lambda>0]	PASS	0.002711
+tests/test_async_filters.py::test_groupby_multidot[<lambda>1]	PASS	0.002760
+tests/test_async_filters.py::test_groupby_tuple_index[<lambda>0]	PASS	0.002413
+tests/test_async_filters.py::test_groupby_tuple_index[<lambda>1]	PASS	0.002354
+tests/test_async_filters.py::test_join_attribute[<lambda>0]	PASS	0.001768
+tests/test_async_filters.py::test_join_attribute[<lambda>1]	PASS	0.001716
+tests/test_async_filters.py::test_join_env_int[<lambda>0]	PASS	0.001579
+tests/test_async_filters.py::test_join_env_int[<lambda>1]	PASS	0.001482
+tests/test_async_filters.py::test_join_string_list[<lambda>0]	PASS	0.001503
+tests/test_async_filters.py::test_join_string_list[<lambda>1]	PASS	0.001529
+tests/test_async_filters.py::test_map_sum	PASS	0.001923
+tests/test_async_filters.py::test_simple_map[<lambda>0]	PASS	0.001768
+tests/test_async_filters.py::test_simple_map[<lambda>1]	PASS	0.001674
+tests/test_async_filters.py::test_simple_reject[<lambda>0]	PASS	0.001861
+tests/test_async_filters.py::test_simple_reject[<lambda>1]	PASS	0.001804
+tests/test_async_filters.py::test_simple_select[<lambda>0]	PASS	0.001780
+tests/test_async_filters.py::test_simple_select[<lambda>1]	PASS	0.001802
+tests/test_async_filters.py::test_simple_select_attr[<lambda>0]	PASS	0.002170
+tests/test_async_filters.py::test_simple_select_attr[<lambda>1]	PASS	0.002304
+tests/test_async_filters.py::test_slice[<lambda>0]	PASS	0.002419
+tests/test_async_filters.py::test_slice[<lambda>1]	PASS	0.002240
+tests/test_async_filters.py::test_sum[<lambda>0]	PASS	0.001468
+tests/test_async_filters.py::test_sum[<lambda>1]	PASS	0.001381
+tests/test_async_filters.py::test_sum_attributes[<lambda>0]	PASS	0.001681
+tests/test_async_filters.py::test_sum_attributes[<lambda>1]	PASS	0.001503
+tests/test_async_filters.py::test_sum_attributes_nested	PASS	0.001356
+tests/test_async_filters.py::test_sum_attributes_tuple	PASS	0.001535
+tests/test_async_filters.py::test_unique_with_async_gen	PASS	0.001792
+tests/test_bytecode_cache.py::TestByteCodeCache::test_simple	PASS	0.003113
+tests/test_bytecode_cache.py::TestMemcachedBytecodeCache::test_dump_load	PASS	0.000302
+tests/test_bytecode_cache.py::TestMemcachedBytecodeCache::test_exception	PASS	0.000324
+tests/test_compile.py::test_block_set_vars_unpacking_deterministic	PASS	0.003337
+tests/test_compile.py::test_filters_deterministic	PASS	0.002299
+tests/test_compile.py::test_import_as_with_context_deterministic	PASS	0.002565
+tests/test_compile.py::test_loop_set_vars_unpacking_deterministic	PASS	0.003612
+tests/test_compile.py::test_top_level_set_vars_unpacking_deterministic	PASS	0.003235
+tests/test_compile.py::test_undefined_import_curly_name	PASS	0.001621
+tests/test_core_tags.py::TestForLoop::test_call_in_loop	PASS	0.001887
+tests/test_core_tags.py::TestForLoop::test_changed	PASS	0.001237
+tests/test_core_tags.py::TestForLoop::test_context_vars	PASS	0.008027
+tests/test_core_tags.py::TestForLoop::test_cycling	PASS	0.001757
+tests/test_core_tags.py::TestForLoop::test_else	PASS	0.001420
+tests/test_core_tags.py::TestForLoop::test_else_scoping_item	PASS	0.001473
+tests/test_core_tags.py::TestForLoop::test_empty_blocks	PASS	0.001419
+tests/test_core_tags.py::TestForLoop::test_intended_scoping_with_set	PASS	0.002330
+tests/test_core_tags.py::TestForLoop::test_lookaround	PASS	0.001597
+tests/test_core_tags.py::TestForLoop::test_loop_errors	PASS	0.002139
+tests/test_core_tags.py::TestForLoop::test_loop_filter	PASS	0.002666
+tests/test_core_tags.py::TestForLoop::test_loop_unassignable	PASS	0.000756
+tests/test_core_tags.py::TestForLoop::test_looploop	PASS	0.001735
+tests/test_core_tags.py::TestForLoop::test_noniter	PASS	0.000975
+tests/test_core_tags.py::TestForLoop::test_recursive	PASS	0.001773
+tests/test_core_tags.py::TestForLoop::test_recursive_depth	PASS	0.002220
+tests/test_core_tags.py::TestForLoop::test_recursive_depth0	PASS	0.001904
+tests/test_core_tags.py::TestForLoop::test_recursive_empty_loop_iter	PASS	0.001048
+tests/test_core_tags.py::TestForLoop::test_recursive_lookaround	PASS	0.002913
+tests/test_core_tags.py::TestForLoop::test_reversed_bug	PASS	0.001347
+tests/test_core_tags.py::TestForLoop::test_scope	PASS	0.000968
+tests/test_core_tags.py::TestForLoop::test_scoped_loop_var	PASS	0.002209
+tests/test_core_tags.py::TestForLoop::test_scoped_special_var	PASS	0.001477
+tests/test_core_tags.py::TestForLoop::test_scoping_bug	PASS	0.001709
+tests/test_core_tags.py::TestForLoop::test_simple	PASS	0.001041
+tests/test_core_tags.py::TestForLoop::test_unpacking	PASS	0.001375
+tests/test_core_tags.py::TestForLoop::test_varlen	PASS	0.000957
+tests/test_core_tags.py::TestIfCondition::test_complete	PASS	0.001370
+tests/test_core_tags.py::TestIfCondition::test_elif	PASS	0.001036
+tests/test_core_tags.py::TestIfCondition::test_elif_deep	PASS	0.378622
+tests/test_core_tags.py::TestIfCondition::test_else	PASS	0.001064
+tests/test_core_tags.py::TestIfCondition::test_empty	PASS	0.000934
+tests/test_core_tags.py::TestIfCondition::test_no_scope	PASS	0.001775
+tests/test_core_tags.py::TestIfCondition::test_simple	PASS	0.000873
+tests/test_core_tags.py::TestMacros::test_arguments	PASS	0.002341
+tests/test_core_tags.py::TestMacros::test_arguments_defaults_nonsense	PASS	0.000619
+tests/test_core_tags.py::TestMacros::test_caller_defaults_nonsense	PASS	0.000679
+tests/test_core_tags.py::TestMacros::test_caller_undefined	PASS	0.001404
+tests/test_core_tags.py::TestMacros::test_callself	PASS	0.001807
+tests/test_core_tags.py::TestMacros::test_complex_call	PASS	0.001550
+tests/test_core_tags.py::TestMacros::test_include	PASS	0.001736
+tests/test_core_tags.py::TestMacros::test_macro_api	PASS	0.001603
+tests/test_core_tags.py::TestMacros::test_macro_defaults_self_ref	PASS	0.001512
+tests/test_core_tags.py::TestMacros::test_scoping	PASS	0.001862
+tests/test_core_tags.py::TestMacros::test_simple	PASS	0.001827
+tests/test_core_tags.py::TestMacros::test_simple_call	PASS	0.001428
+tests/test_core_tags.py::TestMacros::test_varargs	PASS	0.001489
+tests/test_core_tags.py::TestSet::test_block	PASS	0.000992
+tests/test_core_tags.py::TestSet::test_block_escaping	PASS	0.001088
+tests/test_core_tags.py::TestSet::test_block_escaping_filtered	PASS	0.001207
+tests/test_core_tags.py::TestSet::test_block_filtered	PASS	0.001361
+tests/test_core_tags.py::TestSet::test_block_filtered_set	PASS	0.002110
+tests/test_core_tags.py::TestSet::test_init_namespace	PASS	0.001598
+tests/test_core_tags.py::TestSet::test_namespace	PASS	0.001249
+tests/test_core_tags.py::TestSet::test_namespace_block	PASS	0.001290
+tests/test_core_tags.py::TestSet::test_namespace_loop	PASS	0.001892
+tests/test_core_tags.py::TestSet::test_namespace_macro	PASS	0.001863
+tests/test_core_tags.py::TestSet::test_namespace_redefined	PASS	0.001189
+tests/test_core_tags.py::TestSet::test_namespace_set_tuple	PASS	0.001813
+tests/test_core_tags.py::TestSet::test_normal	PASS	0.000906
+tests/test_core_tags.py::TestSet::test_set_invalid	PASS	0.001096
+tests/test_core_tags.py::TestWith::test_with	PASS	0.001334
+tests/test_core_tags.py::TestWith::test_with_argument_scoping	PASS	0.001590
+tests/test_debug.py::TestDebug::test_get_corresponding_lineno_traceback	PASS	0.000853
+tests/test_debug.py::TestDebug::test_include_syntax_error_source	PASS	0.001461
+tests/test_debug.py::TestDebug::test_local_extraction	PASS	0.000269
+tests/test_debug.py::TestDebug::test_pickleable_syntax_error	PASS	0.000484
+tests/test_debug.py::TestDebug::test_regular_syntax_error	PASS	0.000977
+tests/test_debug.py::TestDebug::test_runtime_error	PASS	0.003374
+tests/test_debug.py::TestDebug::test_syntax_error	PASS	0.002552
+tests/test_ext.py::TestAutoEscape::test_nonvolatile	PASS	0.001832
+tests/test_ext.py::TestAutoEscape::test_overlay_scopes	PASS	0.001871
+tests/test_ext.py::TestAutoEscape::test_scoped_setting	PASS	0.002023
+tests/test_ext.py::TestAutoEscape::test_scoping	PASS	0.001198
+tests/test_ext.py::TestAutoEscape::test_volatile	PASS	0.001268
+tests/test_ext.py::TestAutoEscape::test_volatile_scoping	PASS	0.003617
+tests/test_ext.py::TestExtensions::test_contextreference_node_can_pass_locals	PASS	0.001194
+tests/test_ext.py::TestExtensions::test_contextreference_node_passes_context	PASS	0.001037
+tests/test_ext.py::TestExtensions::test_debug	PASS	0.001237
+tests/test_ext.py::TestExtensions::test_do	PASS	0.001711
+tests/test_ext.py::TestExtensions::test_extend_late	PASS	0.000828
+tests/test_ext.py::TestExtensions::test_extension_nodes	PASS	0.000854
+tests/test_ext.py::TestExtensions::test_extension_ordering	PASS	0.000319
+tests/test_ext.py::TestExtensions::test_identifier	PASS	0.000266
+tests/test_ext.py::TestExtensions::test_loop_controls	PASS	0.002408
+tests/test_ext.py::TestExtensions::test_preprocessor_extension	PASS	0.000810
+tests/test_ext.py::TestExtensions::test_rebinding	PASS	0.000293
+tests/test_ext.py::TestExtensions::test_streamfilter_extension	PASS	0.000864
+tests/test_ext.py::TestInternationalization::test_comment_extract	PASS	0.000871
+tests/test_ext.py::TestInternationalization::test_complex_plural	PASS	0.001346
+tests/test_ext.py::TestInternationalization::test_extract	PASS	0.000845
+tests/test_ext.py::TestInternationalization::test_extract_context	PASS	0.000721
+tests/test_ext.py::TestInternationalization::test_extract_trimmed	PASS	0.000863
+tests/test_ext.py::TestInternationalization::test_extract_trimmed_option	PASS	0.000814
+tests/test_ext.py::TestInternationalization::test_nested_trans_error	PASS	0.000424
+tests/test_ext.py::TestInternationalization::test_trans	PASS	0.002164
+tests/test_ext.py::TestInternationalization::test_trans_block_error	PASS	0.000405
+tests/test_ext.py::TestInternationalization::test_trans_plural	PASS	0.001195
+tests/test_ext.py::TestInternationalization::test_trans_plural_with_functions	PASS	0.001302
+tests/test_ext.py::TestInternationalization::test_trans_stringformatting	PASS	0.001086
+tests/test_ext.py::TestInternationalization::test_trimmed	PASS	0.000847
+tests/test_ext.py::TestInternationalization::test_trimmed_policy	PASS	0.001328
+tests/test_ext.py::TestInternationalization::test_trimmed_policy_override	PASS	0.000837
+tests/test_ext.py::TestInternationalization::test_trimmed_varname_trimmed	PASS	0.001000
+tests/test_ext.py::TestInternationalization::test_trimmed_vars	PASS	0.001050
+tests/test_ext.py::TestNewstyleInternationalization::test_autoescape_macros	PASS	0.001242
+tests/test_ext.py::TestNewstyleInternationalization::test_autoescape_support	PASS	0.001161
+tests/test_ext.py::TestNewstyleInternationalization::test_complex_plural	PASS	0.001211
+tests/test_ext.py::TestNewstyleInternationalization::test_context	PASS	0.000864
+tests/test_ext.py::TestNewstyleInternationalization::test_context_block	PASS	0.001096
+tests/test_ext.py::TestNewstyleInternationalization::test_context_plural	PASS	0.000974
+tests/test_ext.py::TestNewstyleInternationalization::test_context_plural_block	PASS	0.001235
+tests/test_ext.py::TestNewstyleInternationalization::test_newstyle_plural	PASS	0.000956
+tests/test_ext.py::TestNewstyleInternationalization::test_novars_vars_escaping	PASS	0.002058
+tests/test_ext.py::TestNewstyleInternationalization::test_num_called_num	PASS	0.000856
+tests/test_ext.py::TestNewstyleInternationalization::test_num_used_twice	PASS	0.001037
+tests/test_ext.py::TestNewstyleInternationalization::test_trans	PASS	0.002064
+tests/test_ext.py::TestNewstyleInternationalization::test_trans_plural	PASS	0.000982
+tests/test_ext.py::TestNewstyleInternationalization::test_trans_stringformatting	PASS	0.000935
+tests/test_ext.py::TestNewstyleInternationalization::test_trans_vars	PASS	0.002220
+tests/test_ext.py::TestScope::test_basic_scope_behavior	PASS	0.001605
+tests/test_filters.py::TestFilter::test_abs	PASS	0.001060
+tests/test_filters.py::TestFilter::test_attribute_map	PASS	0.001431
+tests/test_filters.py::TestFilter::test_batch	PASS	0.001539
+tests/test_filters.py::TestFilter::test_block	PASS	0.001113
+tests/test_filters.py::TestFilter::test_bool_reject	PASS	0.001398
+tests/test_filters.py::TestFilter::test_bool_select	PASS	0.001518
+tests/test_filters.py::TestFilter::test_capitalize	PASS	0.000890
+tests/test_filters.py::TestFilter::test_center	PASS	0.000955
+tests/test_filters.py::TestFilter::test_chaining	PASS	0.001080
+tests/test_filters.py::TestFilter::test_default	PASS	0.001531
+tests/test_filters.py::TestFilter::test_dictsort[-[('aa', 0), ('AB', 3), ('b', 1), ('c', 2)]]	PASS	0.001196
+tests/test_filters.py::TestFilter::test_dictsort[by="value"-[('aa', 0), ('b', 1), ('c', 2), ('AB', 3)]]	PASS	0.001210
+tests/test_filters.py::TestFilter::test_dictsort[reverse=true-[('c', 2), ('b', 1), ('AB', 3), ('aa', 0)]]	PASS	0.001238
+tests/test_filters.py::TestFilter::test_dictsort[true-[('AB', 3), ('aa', 0), ('b', 1), ('c', 2)]]	PASS	0.001182
+tests/test_filters.py::TestFilter::test_empty_map	PASS	0.001171
+tests/test_filters.py::TestFilter::test_escape	PASS	0.000925
+tests/test_filters.py::TestFilter::test_filesizeformat	PASS	0.002020
+tests/test_filters.py::TestFilter::test_filesizeformat_issue59	PASS	0.001744
+tests/test_filters.py::TestFilter::test_filter_calling	PASS	0.000371
+tests/test_filters.py::TestFilter::test_filter_undefined	PASS	0.000753
+tests/test_filters.py::TestFilter::test_filter_undefined_in_condexpr	PASS	0.002295
+tests/test_filters.py::TestFilter::test_filter_undefined_in_elif	PASS	0.001703
+tests/test_filters.py::TestFilter::test_filter_undefined_in_else	PASS	0.001464
+tests/test_filters.py::TestFilter::test_filter_undefined_in_if	PASS	0.001456
+tests/test_filters.py::TestFilter::test_filter_undefined_in_nested_if	PASS	0.001730
+tests/test_filters.py::TestFilter::test_filtertag	PASS	0.001242
+tests/test_filters.py::TestFilter::test_first	PASS	0.001003
+tests/test_filters.py::TestFilter::test_float[32.32-32.32]	PASS	0.001209
+tests/test_filters.py::TestFilter::test_float[42-42.0]	PASS	0.001193
+tests/test_filters.py::TestFilter::test_float[abc-0.0]	PASS	0.001196
+tests/test_filters.py::TestFilter::test_float_default	PASS	0.001147
+tests/test_filters.py::TestFilter::test_forceescape	PASS	0.001144
+tests/test_filters.py::TestFilter::test_format	PASS	0.001003
+tests/test_filters.py::TestFilter::test_func_reject_attr	PASS	0.001667
+tests/test_filters.py::TestFilter::test_func_select_attr	PASS	0.001729
+tests/test_filters.py::TestFilter::test_groupby	PASS	0.002993
+tests/test_filters.py::TestFilter::test_groupby_case[False-a: 1, 3\nb: 2\n]	PASS	0.002123
+tests/test_filters.py::TestFilter::test_groupby_case[True-A: 3\na: 1\nb: 2\n]	PASS	0.002025
+tests/test_filters.py::TestFilter::test_groupby_default	PASS	0.002053
+tests/test_filters.py::TestFilter::test_groupby_multidot	PASS	0.002132
+tests/test_filters.py::TestFilter::test_groupby_tuple_index	PASS	0.002234
+tests/test_filters.py::TestFilter::test_indent	PASS	0.004829
+tests/test_filters.py::TestFilter::test_indent_markup_input	PASS	0.003384
+tests/test_filters.py::TestFilter::test_indent_width_string	PASS	0.001093
+tests/test_filters.py::TestFilter::test_int[12345678901234567890-12345678901234567890]	PASS	0.001201
+tests/test_filters.py::TestFilter::test_int[1e10000-0]	PASS	0.001211
+tests/test_filters.py::TestFilter::test_int[32.32-32]	PASS	0.001231
+tests/test_filters.py::TestFilter::test_int[42-42]	PASS	0.001227
+tests/test_filters.py::TestFilter::test_int[abc-0]	PASS	0.001212
+tests/test_filters.py::TestFilter::test_int_base[011-8-9]	PASS	0.001389
+tests/test_filters.py::TestFilter::test_int_base[0x33Z-16-0]	PASS	0.001355
+tests/test_filters.py::TestFilter::test_int_base[0x4d32-16-19762]	PASS	0.001409
+tests/test_filters.py::TestFilter::test_int_default	PASS	0.001135
+tests/test_filters.py::TestFilter::test_int_special_method	PASS	0.001032
+tests/test_filters.py::TestFilter::test_items	PASS	0.001170
+tests/test_filters.py::TestFilter::test_items_undefined	PASS	0.001148
+tests/test_filters.py::TestFilter::test_join	PASS	0.001743
+tests/test_filters.py::TestFilter::test_join_attribute	PASS	0.001351
+tests/test_filters.py::TestFilter::test_json_dump	PASS	0.000970
+tests/test_filters.py::TestFilter::test_last	PASS	0.001085
+tests/test_filters.py::TestFilter::test_length	PASS	0.001006
+tests/test_filters.py::TestFilter::test_lower	PASS	0.000961
+tests/test_filters.py::TestFilter::test_map_default	PASS	0.003650
+tests/test_filters.py::TestFilter::test_map_sum	PASS	0.001503
+tests/test_filters.py::TestFilter::test_min_max[{{ ["a", "B"]|max }}-B]	PASS	0.001112
+tests/test_filters.py::TestFilter::test_min_max[{{ ["a", "B"]|max(case_sensitive=true) }}-a]	PASS	0.001186
+tests/test_filters.py::TestFilter::test_min_max[{{ ["a", "B"]|min }}-a]	PASS	0.001149
+tests/test_filters.py::TestFilter::test_min_max[{{ ["a", "B"]|min(case_sensitive=true) }}-B]	PASS	0.001197
+tests/test_filters.py::TestFilter::test_min_max[{{ []|max }}-]	PASS	0.001072
+tests/test_filters.py::TestFilter::test_min_max[{{ []|min }}-]	PASS	0.001037
+tests/test_filters.py::TestFilter::test_min_max_attribute[max-9]	PASS	0.001331
+tests/test_filters.py::TestFilter::test_min_max_attribute[min-1]	PASS	0.001262
+tests/test_filters.py::TestFilter::test_pprint	PASS	0.004185
+tests/test_filters.py::TestFilter::test_random	PASS	0.001600
+tests/test_filters.py::TestFilter::test_replace	PASS	0.003541
+tests/test_filters.py::TestFilter::test_reverse	PASS	0.001321
+tests/test_filters.py::TestFilter::test_round_negative	PASS	0.001431
+tests/test_filters.py::TestFilter::test_round_positive	PASS	0.001506
+tests/test_filters.py::TestFilter::test_safe	PASS	0.001382
+tests/test_filters.py::TestFilter::test_simple_map	PASS	0.001332
+tests/test_filters.py::TestFilter::test_simple_reject	PASS	0.001406
+tests/test_filters.py::TestFilter::test_simple_reject_attr	PASS	0.001638
+tests/test_filters.py::TestFilter::test_simple_select	PASS	0.001606
+tests/test_filters.py::TestFilter::test_simple_select_attr	PASS	0.001661
+tests/test_filters.py::TestFilter::test_slice	PASS	0.001602
+tests/test_filters.py::TestFilter::test_sort1	PASS	0.001212
+tests/test_filters.py::TestFilter::test_sort2	PASS	0.001279
+tests/test_filters.py::TestFilter::test_sort3	PASS	0.000989
+tests/test_filters.py::TestFilter::test_sort4	PASS	0.001267
+tests/test_filters.py::TestFilter::test_sort5	PASS	0.002098
+tests/test_filters.py::TestFilter::test_sort6	PASS	0.001307
+tests/test_filters.py::TestFilter::test_sort7	PASS	0.001258
+tests/test_filters.py::TestFilter::test_sort8	PASS	0.001202
+tests/test_filters.py::TestFilter::test_string	PASS	0.001025
+tests/test_filters.py::TestFilter::test_striptags	PASS	0.001091
+tests/test_filters.py::TestFilter::test_sum	PASS	0.001016
+tests/test_filters.py::TestFilter::test_sum_attributes	PASS	0.001022
+tests/test_filters.py::TestFilter::test_sum_attributes_nested	PASS	0.001008
+tests/test_filters.py::TestFilter::test_sum_attributes_tuple	PASS	0.001142
+tests/test_filters.py::TestFilter::test_title	PASS	0.006059
+tests/test_filters.py::TestFilter::test_trim[ .-stays]	PASS	0.001334
+tests/test_filters.py::TestFilter::test_trim[.-  ..stays]	PASS	0.001400
+tests/test_filters.py::TestFilter::test_trim[None-..stays..]	PASS	0.001350
+tests/test_filters.py::TestFilter::test_truncate	PASS	0.001758
+tests/test_filters.py::TestFilter::test_truncate_end_length	PASS	0.001030
+tests/test_filters.py::TestFilter::test_truncate_very_short	PASS	0.001171
+tests/test_filters.py::TestFilter::test_unique	PASS	0.001343
+tests/test_filters.py::TestFilter::test_unique_attribute	PASS	0.001208
+tests/test_filters.py::TestFilter::test_unique_case_sensitive	PASS	0.001315
+tests/test_filters.py::TestFilter::test_upper	PASS	0.000903
+tests/test_filters.py::TestFilter::test_urlencode[Hello, world!-Hello%2C%20world%21]	PASS	0.001313
+tests/test_filters.py::TestFilter::test_urlencode[Hello, world\u203d-Hello%2C%20world%E2%80%BD]	PASS	0.001259
+tests/test_filters.py::TestFilter::test_urlencode[a b/c-a%20b/c]	PASS	0.001181
+tests/test_filters.py::TestFilter::test_urlencode[value2-f=1]	PASS	0.001282
+tests/test_filters.py::TestFilter::test_urlencode[value3-f=1&amp;z=2]	PASS	0.001313
+tests/test_filters.py::TestFilter::test_urlencode[value4-%E2%80%BD=1]	PASS	0.001192
+tests/test_filters.py::TestFilter::test_urlencode[value5-0=1]	PASS	0.001111
+tests/test_filters.py::TestFilter::test_urlencode[value6-a+b%2Fc=a+b%2Fc]	PASS	0.001208
+tests/test_filters.py::TestFilter::test_urlize	PASS	0.002643
+tests/test_filters.py::TestFilter::test_urlize_extra_schemes_parameter	PASS	0.001160
+tests/test_filters.py::TestFilter::test_urlize_rel_policy	PASS	0.000870
+tests/test_filters.py::TestFilter::test_urlize_target_parameter	PASS	0.001012
+tests/test_filters.py::TestFilter::test_wordcount	PASS	0.001642
+tests/test_filters.py::TestFilter::test_wordwrap	PASS	0.001048
+tests/test_filters.py::TestFilter::test_xmlattr	PASS	0.001582
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[ ]	PASS	0.001368
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[/]	PASS	0.001341
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[=]	PASS	0.001289
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[>]	PASS	0.001352
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[\n]	PASS	0.001443
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[\t]	PASS	0.001515
+tests/test_filters.py::TestFilter::test_xmlattr_key_invalid[\x0c]	PASS	0.001371
+tests/test_idtracking.py::test_basics	PASS	0.000360
+tests/test_idtracking.py::test_complex	PASS	0.000522
+tests/test_idtracking.py::test_if_branching_multi_scope	PASS	0.000351
+tests/test_idtracking.py::test_if_branching_stores	PASS	0.000309
+tests/test_idtracking.py::test_if_branching_stores_undefined	PASS	0.000307
+tests/test_imports.py::TestImports::test_context_imports	PASS	0.005205
+tests/test_imports.py::TestImports::test_exports	PASS	0.002654
+tests/test_imports.py::TestImports::test_from_import_with_globals	PASS	0.002035
+tests/test_imports.py::TestImports::test_import_needs_name	PASS	0.001564
+tests/test_imports.py::TestImports::test_import_with_globals	PASS	0.002691
+tests/test_imports.py::TestImports::test_import_with_globals_override	PASS	0.002138
+tests/test_imports.py::TestImports::test_no_trailing_comma	PASS	0.000856
+tests/test_imports.py::TestImports::test_not_exported	PASS	0.002311
+tests/test_imports.py::TestImports::test_trailing_comma_with_context	PASS	0.003569
+tests/test_imports.py::TestIncludes::test_choice_includes	PASS	0.005275
+tests/test_imports.py::TestIncludes::test_context_include	PASS	0.002288
+tests/test_imports.py::TestIncludes::test_context_include_with_overrides	PASS	0.001601
+tests/test_imports.py::TestIncludes::test_import_from_with_context	PASS	0.001808
+tests/test_imports.py::TestIncludes::test_include_ignoring_missing	PASS	0.002330
+tests/test_imports.py::TestIncludes::test_unoptimized_scopes	PASS	0.002509
+tests/test_inheritance.py::TestBugFix::test_double_extends	PASS	0.002913
+tests/test_inheritance.py::TestBugFix::test_fixed_macro_scoping_bug	PASS	0.003905
+tests/test_inheritance.py::TestInheritance::test_duplicate_required_or_scoped	PASS	0.002311
+tests/test_inheritance.py::TestInheritance::test_dynamic_inheritance	PASS	0.002100
+tests/test_inheritance.py::TestInheritance::test_invalid_required	PASS	0.003135
+tests/test_inheritance.py::TestInheritance::test_layout	PASS	0.001593
+tests/test_inheritance.py::TestInheritance::test_level1	PASS	0.002193
+tests/test_inheritance.py::TestInheritance::test_level1_required	PASS	0.001610
+tests/test_inheritance.py::TestInheritance::test_level2	PASS	0.003061
+tests/test_inheritance.py::TestInheritance::test_level2_required	PASS	0.002227
+tests/test_inheritance.py::TestInheritance::test_level3	PASS	0.003824
+tests/test_inheritance.py::TestInheritance::test_level3_required	PASS	0.002917
+tests/test_inheritance.py::TestInheritance::test_level4	PASS	0.004379
+tests/test_inheritance.py::TestInheritance::test_multi_inheritance	PASS	0.002692
+tests/test_inheritance.py::TestInheritance::test_preserve_blocks	PASS	0.002218
+tests/test_inheritance.py::TestInheritance::test_required_with_scope	PASS	0.003061
+tests/test_inheritance.py::TestInheritance::test_reuse_blocks	PASS	0.001392
+tests/test_inheritance.py::TestInheritance::test_scoped_block	PASS	0.002303
+tests/test_inheritance.py::TestInheritance::test_scoped_block_after_inheritance	PASS	0.003694
+tests/test_inheritance.py::TestInheritance::test_super	PASS	0.003413
+tests/test_inheritance.py::TestInheritance::test_super_in_scoped_block	PASS	0.002572
+tests/test_inheritance.py::TestInheritance::test_working	PASS	0.001427
+tests/test_lexnparse.py::TestLexer::test_balancing	PASS	0.001934
+tests/test_lexnparse.py::TestLexer::test_bytefallback	PASS	0.001137
+tests/test_lexnparse.py::TestLexer::test_comments	PASS	0.001883
+tests/test_lexnparse.py::TestLexer::test_lineno_with_strip	PASS	0.000392
+tests/test_lexnparse.py::TestLexer::test_name[1a-False]	PASS	0.000685
+tests/test_lexnparse.py::TestLexer::test_name[\U0001f40da-False]	PASS	0.000639
+tests/test_lexnparse.py::TestLexer::test_name[\u1885-True]	PASS	0.001059
+tests/test_lexnparse.py::TestLexer::test_name[\u1886-True]	PASS	0.000978
+tests/test_lexnparse.py::TestLexer::test_name[\u2118-True]	PASS	0.000951
+tests/test_lexnparse.py::TestLexer::test_name[\u212e-True]	PASS	0.000928
+tests/test_lexnparse.py::TestLexer::test_name[\u304d-True]	PASS	0.000951
+tests/test_lexnparse.py::TestLexer::test_name[\xb7-False]	PASS	0.000683
+tests/test_lexnparse.py::TestLexer::test_name[_-True]	PASS	0.000900
+tests/test_lexnparse.py::TestLexer::test_name[a--False]	PASS	0.000682
+tests/test_lexnparse.py::TestLexer::test_name[a\U0001f40d\U0001f40d-False]	PASS	0.000698
+tests/test_lexnparse.py::TestLexer::test_name[a\xb7-True]	PASS	0.000936
+tests/test_lexnparse.py::TestLexer::test_name[f\xf6\xf6-True]	PASS	0.000990
+tests/test_lexnparse.py::TestLexer::test_name[foo-True]	PASS	0.000992
+tests/test_lexnparse.py::TestLexer::test_normalizing	PASS	0.001461
+tests/test_lexnparse.py::TestLexer::test_operators	PASS	0.000708
+tests/test_lexnparse.py::TestLexer::test_raw1	PASS	0.000859
+tests/test_lexnparse.py::TestLexer::test_raw2	PASS	0.000825
+tests/test_lexnparse.py::TestLexer::test_raw3	PASS	0.000826
+tests/test_lexnparse.py::TestLexer::test_raw4	PASS	0.000816
+tests/test_lexnparse.py::TestLexer::test_string_escapes	PASS	0.002933
+tests/test_lexnparse.py::TestLexer::test_trailing_newline	PASS	0.002835
+tests/test_lexnparse.py::TestLstripBlocks::test_comment_syntax	PASS	0.001517
+tests/test_lexnparse.py::TestLstripBlocks::test_erb_syntax	PASS	0.001225
+tests/test_lexnparse.py::TestLstripBlocks::test_erb_syntax_no_lstrip	PASS	0.001118
+tests/test_lexnparse.py::TestLstripBlocks::test_erb_syntax_with_manual	PASS	0.001099
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip	PASS	0.001030
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_angle_bracket	PASS	0.001167
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_angle_bracket_comment	PASS	0.000774
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_angle_bracket_compact	PASS	0.001140
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_angle_bracket_simple	PASS	0.001385
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_blocks_consume_after_without_new_line	PASS	0.001235
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_blocks_false_with_no_lstrip	PASS	0.001409
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_blocks_inside_with_new_line	PASS	0.001549
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_blocks_outside_with_new_line	PASS	0.001431
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_blocks_without_new_line	PASS	0.001365
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_comment	PASS	0.000886
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_embeded_strings	PASS	0.001002
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_endline	PASS	0.000994
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_inline	PASS	0.001017
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_left_chars	PASS	0.001026
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_nested	PASS	0.001110
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_preserve_leading_newlines	PASS	0.000918
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim	PASS	0.000887
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_comment	PASS	0.000690
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_consume_before_without_new_line	PASS	0.001234
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_inside_with_new_line	PASS	0.001516
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_outside_with_new_line	PASS	0.001409
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_raw	PASS	0.000834
+tests/test_lexnparse.py::TestLstripBlocks::test_lstrip_trim_blocks_without_new_line	PASS	0.001453
+tests/test_lexnparse.py::TestLstripBlocks::test_no_lstrip	PASS	0.000980
+tests/test_lexnparse.py::TestLstripBlocks::test_php_syntax	PASS	0.001165
+tests/test_lexnparse.py::TestLstripBlocks::test_php_syntax_compact	PASS	0.001172
+tests/test_lexnparse.py::TestLstripBlocks::test_php_syntax_with_manual	PASS	0.001459
+tests/test_lexnparse.py::TestParser::test_balancing	PASS	0.000796
+tests/test_lexnparse.py::TestParser::test_comment_syntax	PASS	0.001300
+tests/test_lexnparse.py::TestParser::test_erb_syntax	PASS	0.001624
+tests/test_lexnparse.py::TestParser::test_error_messages	PASS	0.002275
+tests/test_lexnparse.py::TestParser::test_line_syntax	PASS	0.002636
+tests/test_lexnparse.py::TestParser::test_line_syntax_priority	PASS	0.002914
+tests/test_lexnparse.py::TestParser::test_php_syntax	PASS	0.001740
+tests/test_lexnparse.py::TestParser::test_start_comment	PASS	0.001093
+tests/test_lexnparse.py::TestSyntax::test_attr	PASS	0.001033
+tests/test_lexnparse.py::TestSyntax::test_block_end_name	PASS	0.001098
+tests/test_lexnparse.py::TestSyntax::test_bool	PASS	0.001119
+tests/test_lexnparse.py::TestSyntax::test_call	PASS	0.001407
+tests/test_lexnparse.py::TestSyntax::test_collection_literal[()]	PASS	0.000872
+tests/test_lexnparse.py::TestSyntax::test_collection_literal[[]]	PASS	0.000832
+tests/test_lexnparse.py::TestSyntax::test_collection_literal[{}]	PASS	0.000878
+tests/test_lexnparse.py::TestSyntax::test_compare[1->-0]	PASS	0.001018
+tests/test_lexnparse.py::TestSyntax::test_compare[1->=-1]	PASS	0.001023
+tests/test_lexnparse.py::TestSyntax::test_compare[2-<-3]	PASS	0.001011
+tests/test_lexnparse.py::TestSyntax::test_compare[3-<=-4]	PASS	0.001000
+tests/test_lexnparse.py::TestSyntax::test_compare[4-!=-5]	PASS	0.001008
+tests/test_lexnparse.py::TestSyntax::test_compare[4-==-4]	PASS	0.001016
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ 4 < 2 < 3 }}-False]	PASS	0.001032
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ 4 > 2 < 3 }}-True]	PASS	0.001027
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ 4 > 2 > 3 }}-False]	PASS	0.001031
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ a < b < c }}-False]	PASS	0.001130
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ a > b < c }}-True]	PASS	0.001290
+tests/test_lexnparse.py::TestSyntax::test_compare_compound[{{ a > b > c }}-False]	PASS	0.001152
+tests/test_lexnparse.py::TestSyntax::test_compare_parens	PASS	0.001029
+tests/test_lexnparse.py::TestSyntax::test_concat	PASS	0.000811
+tests/test_lexnparse.py::TestSyntax::test_conditional_expression	PASS	0.000904
+tests/test_lexnparse.py::TestSyntax::test_const	PASS	0.001339
+tests/test_lexnparse.py::TestSyntax::test_const_assign	PASS	0.000691
+tests/test_lexnparse.py::TestSyntax::test_constant_casing	PASS	0.002089
+tests/test_lexnparse.py::TestSyntax::test_div	PASS	0.000971
+tests/test_lexnparse.py::TestSyntax::test_django_attr	PASS	0.001097
+tests/test_lexnparse.py::TestSyntax::test_filter_priority	PASS	0.000986
+tests/test_lexnparse.py::TestSyntax::test_function_calls	PASS	0.003974
+tests/test_lexnparse.py::TestSyntax::test_grouping	PASS	0.000998
+tests/test_lexnparse.py::TestSyntax::test_implicit_subscribed_tuple	PASS	0.001159
+tests/test_lexnparse.py::TestSyntax::test_inop	PASS	0.001064
+tests/test_lexnparse.py::TestSyntax::test_localset	PASS	0.001441
+tests/test_lexnparse.py::TestSyntax::test_math	PASS	0.001026
+tests/test_lexnparse.py::TestSyntax::test_neg_filter_priority	PASS	0.000559
+tests/test_lexnparse.py::TestSyntax::test_notin	PASS	0.001024
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0-0]	PASS	0.001030
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0_00-0]	PASS	0.000994
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0b1001_1111-159]	PASS	0.000977
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0o123-83]	PASS	0.000975
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0o1_23-83]	PASS	0.000970
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0x123abc-1194684]	PASS	0.000999
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[0x12_3abc-1194684]	PASS	0.001003
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[1-1]	PASS	0.000931
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[1.2-1.2]	PASS	0.000946
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[10e1-100.0]	PASS	0.001555
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[123-123]	PASS	0.000895
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[12_34_56-123456]	PASS	0.000919
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[1_2.3_4e5_6-1.234e+57]	PASS	0.000991
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[1e0-1.0]	PASS	0.000995
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[2.5e+100-2.5e+100]	PASS	0.001136
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[2.5e100-2.5e+100]	PASS	0.001128
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[25.6e-10-2.56e-09]	PASS	0.001037
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[34.56-34.56]	PASS	0.000959
+tests/test_lexnparse.py::TestSyntax::test_numeric_literal[3_4.5_6-34.56]	PASS	0.000971
+tests/test_lexnparse.py::TestSyntax::test_operator_precedence	PASS	0.001024
+tests/test_lexnparse.py::TestSyntax::test_parse_unary	PASS	0.001869
+tests/test_lexnparse.py::TestSyntax::test_raw2	PASS	0.000796
+tests/test_lexnparse.py::TestSyntax::test_short_conditional_expression	PASS	0.001744
+tests/test_lexnparse.py::TestSyntax::test_slicing	PASS	0.001138
+tests/test_lexnparse.py::TestSyntax::test_string_concatenation	PASS	0.000803
+tests/test_lexnparse.py::TestSyntax::test_subscript	PASS	0.001157
+tests/test_lexnparse.py::TestSyntax::test_test_chaining	PASS	0.001205
+tests/test_lexnparse.py::TestSyntax::test_trailing_comma	PASS	0.001131
+tests/test_lexnparse.py::TestSyntax::test_tuple	PASS	0.000945
+tests/test_lexnparse.py::TestSyntax::test_tuple_expr	PASS	0.004151
+tests/test_lexnparse.py::TestSyntax::test_unary	PASS	0.000824
+tests/test_lexnparse.py::TestTokenStream::test_iter	PASS	0.000345
+tests/test_lexnparse.py::TestTokenStream::test_simple	PASS	0.000379
+tests/test_lexnparse.py::TestTrimBlocks::test_comment_no_trim	PASS	0.000698
+tests/test_lexnparse.py::TestTrimBlocks::test_comment_trim	PASS	0.000688
+tests/test_lexnparse.py::TestTrimBlocks::test_lstrip_no_trim	PASS	0.000872
+tests/test_lexnparse.py::TestTrimBlocks::test_multiple_comment_no_trim_lstrip	PASS	0.000750
+tests/test_lexnparse.py::TestTrimBlocks::test_multiple_comment_trim_lstrip	PASS	0.000740
+tests/test_lexnparse.py::TestTrimBlocks::test_no_trim	PASS	0.000903
+tests/test_lexnparse.py::TestTrimBlocks::test_no_trim_angle_bracket	PASS	0.001510
+tests/test_lexnparse.py::TestTrimBlocks::test_no_trim_nested	PASS	0.001006
+tests/test_lexnparse.py::TestTrimBlocks::test_no_trim_outer	PASS	0.000946
+tests/test_lexnparse.py::TestTrimBlocks::test_no_trim_php_syntax	PASS	0.001287
+tests/test_lexnparse.py::TestTrimBlocks::test_raw_no_trim_lstrip	PASS	0.001077
+tests/test_lexnparse.py::TestTrimBlocks::test_raw_trim_lstrip	PASS	0.000929
+tests/test_lexnparse.py::TestTrimBlocks::test_trim	PASS	0.000915
+tests/test_lexnparse.py::TestTrimBlocks::test_trim_blocks_false_with_no_trim	PASS	0.002753
+tests/test_lexnparse.py::TestTrimBlocks::test_trim_nested	PASS	0.001022
+tests/test_loader.py::TestFileSystemLoader::test_caches_template_based_on_mtime	PASS	0.001553
+tests/test_loader.py::TestFileSystemLoader::test_error_includes_paths	PASS	0.000766
+tests/test_loader.py::TestFileSystemLoader::test_filename_normpath	PASS	0.001156
+tests/test_loader.py::TestFileSystemLoader::test_searchpath_as_list_including_pathlib	PASS	0.001282
+tests/test_loader.py::TestFileSystemLoader::test_searchpath_as_pathlib	PASS	0.001180
+tests/test_loader.py::TestFileSystemLoader::test_searchpath_as_str	PASS	0.001177
+tests/test_loader.py::TestFileSystemLoader::test_uses_specified_encoding[iso-8859-1-\xe6\x96\x87\xe5\xad\x97\xe5\x8c\x96\xe3\x81\x91]	PASS	0.001375
+tests/test_loader.py::TestFileSystemLoader::test_uses_specified_encoding[utf-8-\u6587\u5b57\u5316\u3051]	PASS	0.001095
+tests/test_loader.py::TestLoaders::test_cache_loader_change	PASS	0.000957
+tests/test_loader.py::TestLoaders::test_caching	PASS	0.000923
+tests/test_loader.py::TestLoaders::test_choice_loader	PASS	0.001217
+tests/test_loader.py::TestLoaders::test_dict_loader	PASS	0.000725
+tests/test_loader.py::TestLoaders::test_dict_loader_cache_invalidates	PASS	0.000946
+tests/test_loader.py::TestLoaders::test_filesystem_loader_overlapping_names	PASS	0.001192
+tests/test_loader.py::TestLoaders::test_function_loader	PASS	0.000712
+tests/test_loader.py::TestLoaders::test_limited_size_cache	PASS	0.001179
+tests/test_loader.py::TestLoaders::test_no_cache	PASS	0.000880
+tests/test_loader.py::TestLoaders::test_package_loader	PASS	0.000840
+tests/test_loader.py::TestLoaders::test_prefix_loader	PASS	0.001310
+tests/test_loader.py::TestLoaders::test_split_template_path	PASS	0.000289
+tests/test_loader.py::TestModuleLoader::test_choice_loader	PASS	0.003448
+tests/test_loader.py::TestModuleLoader::test_deflated_zip_compile	PASS	0.004336
+tests/test_loader.py::TestModuleLoader::test_filesystem_compile	PASS	0.004031
+tests/test_loader.py::TestModuleLoader::test_log	PASS	0.002538
+tests/test_loader.py::TestModuleLoader::test_path_as_pathlib	PASS	0.004088
+tests/test_loader.py::TestModuleLoader::test_prefix_loader	PASS	0.003218
+tests/test_loader.py::TestModuleLoader::test_stored_zip_compile	PASS	0.004352
+tests/test_loader.py::TestModuleLoader::test_supports_pathlib_in_list_of_paths	PASS	0.004108
+tests/test_loader.py::TestModuleLoader::test_weak_references	PASS	0.031212
+tests/test_loader.py::test_package_dir_list	PASS	0.000486
+tests/test_loader.py::test_package_dir_source[foo/test.html-FOO]	PASS	0.000732
+tests/test_loader.py::test_package_dir_source[test.html-BAR]	PASS	0.000683
+tests/test_loader.py::test_package_file_list	PASS	0.000470
+tests/test_loader.py::test_package_file_source[foo/test.html-FOO]	PASS	0.000891
+tests/test_loader.py::test_package_file_source[test.html-BAR]	PASS	0.000664
+tests/test_loader.py::test_package_loader_no_dir	PASS	0.000386
+tests/test_loader.py::test_package_zip_list	PASS	0.000630
+tests/test_loader.py::test_package_zip_omit_curdir[./]	PASS	0.000756
+tests/test_loader.py::test_package_zip_omit_curdir[.]	PASS	0.000729
+tests/test_loader.py::test_package_zip_omit_curdir[]	PASS	0.000797
+tests/test_loader.py::test_package_zip_source[foo/test.html-FOO]	PASS	0.001021
+tests/test_loader.py::test_package_zip_source[test.html-BAR]	PASS	0.000832
+tests/test_loader.py::test_pep_451_import_hook	PASS	0.000358
+tests/test_nativetypes.py::test_adding_undefined_native_return	PASS	0.000958
+tests/test_nativetypes.py::test_block	PASS	0.001868
+tests/test_nativetypes.py::test_booleans[{{ '' == None }}-False]	PASS	0.001065
+tests/test_nativetypes.py::test_booleans[{{ 1 == 1 }}-True]	PASS	0.001022
+tests/test_nativetypes.py::test_booleans[{{ 2 + 2 == 5 }}-False]	PASS	0.001059
+tests/test_nativetypes.py::test_booleans[{{ None is none }}-True]	PASS	0.001080
+tests/test_nativetypes.py::test_booleans[{{ value }}-False]	PASS	0.001058
+tests/test_nativetypes.py::test_booleans[{{ value }}-True]	PASS	0.001037
+tests/test_nativetypes.py::test_cast_int	PASS	0.000977
+tests/test_nativetypes.py::test_concat_strings_with_quotes	PASS	0.000980
+tests/test_nativetypes.py::test_constant_dunder	PASS	0.000877
+tests/test_nativetypes.py::test_constant_dunder_to_string	PASS	0.000923
+tests/test_nativetypes.py::test_is_defined_native_return	PASS	0.001004
+tests/test_nativetypes.py::test_leading_spaces	PASS	0.000808
+tests/test_nativetypes.py::test_list_add	PASS	0.000955
+tests/test_nativetypes.py::test_loop_look_alike	PASS	0.001069
+tests/test_nativetypes.py::test_loops	PASS	0.001180
+tests/test_nativetypes.py::test_loops_with_ints	PASS	0.001095
+tests/test_nativetypes.py::test_macro	PASS	0.001372
+tests/test_nativetypes.py::test_multi_expression_add	PASS	0.000964
+tests/test_nativetypes.py::test_no_intermediate_eval	PASS	0.000856
+tests/test_nativetypes.py::test_spontaneous_env	PASS	0.000668
+tests/test_nativetypes.py::test_string_literal_var	PASS	0.000787
+tests/test_nativetypes.py::test_string_top_level	PASS	0.000695
+tests/test_nativetypes.py::test_tuple_of_variable_strings	PASS	0.001194
+tests/test_nativetypes.py::test_undefined_native_return	PASS	0.000797
+tests/test_nativetypes.py::test_variable_dunder	PASS	0.000864
+tests/test_nodes.py::test_template_hash	PASS	0.000432
+tests/test_pickle.py::test_environment	PASS	0.001245
+tests/test_regression.py::TestBug::test_block_set_with_extends	PASS	0.001833
+tests/test_regression.py::TestBug::test_cached_extends[extends]	PASS	0.001687
+tests/test_regression.py::TestBug::test_cached_extends[include]	PASS	0.001600
+tests/test_regression.py::TestBug::test_call_with_args	PASS	0.002775
+tests/test_regression.py::TestBug::test_callable_defaults	PASS	0.002547
+tests/test_regression.py::TestBug::test_caller_scoping	PASS	0.003604
+tests/test_regression.py::TestBug::test_correct_prefix_loader_name	PASS	0.000494
+tests/test_regression.py::TestBug::test_custom_context	PASS	0.001449
+tests/test_regression.py::TestBug::test_double_caller	PASS	0.002052
+tests/test_regression.py::TestBug::test_double_caller_no_default	PASS	0.002376
+tests/test_regression.py::TestBug::test_else_loop_bug	PASS	0.001994
+tests/test_regression.py::TestBug::test_empty_if	PASS	0.001031
+tests/test_regression.py::TestBug::test_empty_if_condition_fails	PASS	0.000921
+tests/test_regression.py::TestBug::test_extends_output_bugs	PASS	0.002334
+tests/test_regression.py::TestBug::test_grouper_repr	PASS	0.000291
+tests/test_regression.py::TestBug::test_keyword_folding	PASS	0.001006
+tests/test_regression.py::TestBug::test_loop_call_loop	PASS	0.003095
+tests/test_regression.py::TestBug::test_loop_include	PASS	0.001874
+tests/test_regression.py::TestBug::test_macro_blocks	PASS	0.001566
+tests/test_regression.py::TestBug::test_macro_escaping	PASS	0.001440
+tests/test_regression.py::TestBug::test_macro_scoping	PASS	0.003482
+tests/test_regression.py::TestBug::test_macro_var_bug	PASS	0.002100
+tests/test_regression.py::TestBug::test_macro_var_bug_advanced	PASS	0.002759
+tests/test_regression.py::TestBug::test_markup_and_chainable_undefined	PASS	0.000311
+tests/test_regression.py::TestBug::test_nested_for_else	PASS	0.001746
+tests/test_regression.py::TestBug::test_nested_loop_scoping	PASS	0.001427
+tests/test_regression.py::TestBug::test_old_macro_loop_scoping_bug	PASS	0.001588
+tests/test_regression.py::TestBug::test_partial_conditional_assignments	PASS	0.001348
+tests/test_regression.py::TestBug::test_pass_context_block_and_loop	PASS	0.002956
+tests/test_regression.py::TestBug::test_pass_context_callable_class	PASS	0.000984
+tests/test_regression.py::TestBug::test_pass_context_in_blocks	PASS	0.001781
+tests/test_regression.py::TestBug::test_pass_context_loop_vars	PASS	0.002604
+tests/test_regression.py::TestBug::test_pass_context_scoped_loop_vars	PASS	0.002377
+tests/test_regression.py::TestBug::test_pass_context_with_select	PASS	0.001474
+tests/test_regression.py::TestBug::test_recursive_loop_bug	PASS	0.001329
+tests/test_regression.py::TestBug::test_recursive_loop_compile	PASS	0.004515
+tests/test_regression.py::TestBug::test_recursive_loop_filter	PASS	0.002156
+tests/test_regression.py::TestBug::test_scoped_block	PASS	0.001530
+tests/test_regression.py::TestBug::test_scoped_block_loop_vars	PASS	0.002086
+tests/test_regression.py::TestBug::test_scopes_and_blocks	PASS	0.003585
+tests/test_regression.py::TestBug::test_scopes_and_include	PASS	0.002041
+tests/test_regression.py::TestBug::test_set_and_include	PASS	0.001527
+tests/test_regression.py::TestBug::test_stacked_locals_scoping_bug	PASS	0.004797
+tests/test_regression.py::TestBug::test_stacked_locals_scoping_bug_twoframe	PASS	0.002078
+tests/test_regression.py::TestBug::test_subproperty_if	PASS	0.001399
+tests/test_regression.py::TestBug::test_urlize_filter_closing_punctuation	PASS	0.000971
+tests/test_regression.py::TestBug::test_urlize_filter_escaping	PASS	0.000886
+tests/test_regression.py::TestBug::test_variable_reuse	PASS	0.002906
+tests/test_regression.py::TestBug::test_weird_inline_comment	PASS	0.001073
+tests/test_regression.py::TestCorner::test_assigned_scoping	PASS	0.003422
+tests/test_regression.py::TestCorner::test_closure_scoping	PASS	0.004845
+tests/test_regression.py::test_load_parameter_when_set_in_all_if_branches	PASS	0.001745
+tests/test_regression.py::test_unicode_whitespace[\x0c]	PASS	0.001001
+tests/test_regression.py::test_unicode_whitespace[\x85]	PASS	0.000919
+tests/test_runtime.py::test_iterator_not_advanced_early	PASS	0.001620
+tests/test_runtime.py::test_loop_idx	PASS	0.001791
+tests/test_runtime.py::test_loop_idx0	PASS	0.001943
+tests/test_runtime.py::test_loopcontext0	PASS	0.000272
+tests/test_runtime.py::test_loopcontext1	PASS	0.000307
+tests/test_runtime.py::test_loopcontext2	PASS	0.000265
+tests/test_runtime.py::test_mock_not_pass_arg_marker	PASS	0.001227
+tests/test_runtime.py::test_undefined_copy[ChainableUndefined]	PASS	0.000426
+tests/test_runtime.py::test_undefined_copy[DebugUndefined]	PASS	0.000404
+tests/test_runtime.py::test_undefined_copy[StrictUndefined]	PASS	0.000401
+tests/test_runtime.py::test_undefined_copy[Undefined]	PASS	0.000462
+tests/test_runtime.py::test_undefined_deepcopy[ChainableUndefined]	PASS	0.000444
+tests/test_runtime.py::test_undefined_deepcopy[DebugUndefined]	PASS	0.000443
+tests/test_runtime.py::test_undefined_deepcopy[StrictUndefined]	PASS	0.000429
+tests/test_runtime.py::test_undefined_deepcopy[Undefined]	PASS	0.000431
+tests/test_runtime.py::test_undefined_pickle[ChainableUndefined]	PASS	0.000432
+tests/test_runtime.py::test_undefined_pickle[DebugUndefined]	PASS	0.000420
+tests/test_runtime.py::test_undefined_pickle[StrictUndefined]	PASS	0.000455
+tests/test_runtime.py::test_undefined_pickle[Undefined]	PASS	0.000449
+tests/test_security.py::TestSandbox::test_attr_filter	PASS	0.001267
+tests/test_security.py::TestSandbox::test_binary_operator_intercepting	PASS	0.002535
+tests/test_security.py::TestSandbox::test_immutable_environment	PASS	0.003192
+tests/test_security.py::TestSandbox::test_restricted	PASS	0.000835
+tests/test_security.py::TestSandbox::test_template_data	PASS	0.001489
+tests/test_security.py::TestSandbox::test_unary_operator_intercepting	PASS	0.002345
+tests/test_security.py::TestSandbox::test_unsafe	PASS	0.004991
+tests/test_security.py::TestStringFormat::test_basic_format_all_okay	PASS	0.001099
+tests/test_security.py::TestStringFormat::test_basic_format_safety	PASS	0.000959
+tests/test_security.py::TestStringFormat::test_empty_braces_format	PASS	0.002000
+tests/test_security.py::TestStringFormat::test_safe_format_all_okay	PASS	0.001289
+tests/test_security.py::TestStringFormat::test_safe_format_safety	PASS	0.001290
+tests/test_security.py::TestStringFormatMap::test_attr_filter	PASS	0.001337
+tests/test_security.py::TestStringFormatMap::test_basic_format_all_okay	PASS	0.001356
+tests/test_security.py::TestStringFormatMap::test_basic_format_safety	PASS	0.001243
+tests/test_security.py::TestStringFormatMap::test_indirect_call	PASS	0.001695
+tests/test_security.py::TestStringFormatMap::test_safe_format_all_okay	PASS	0.001468
+tests/test_tests.py::TestTestsCase::test_compare_aliases[eq 2-True]	PASS	0.001106
+tests/test_tests.py::TestTestsCase::test_compare_aliases[eq 3-False]	PASS	0.001033
+tests/test_tests.py::TestTestsCase::test_compare_aliases[ge 2-True]	PASS	0.001022
+tests/test_tests.py::TestTestsCase::test_compare_aliases[ge 3-False]	PASS	0.001097
+tests/test_tests.py::TestTestsCase::test_compare_aliases[gt 1-True]	PASS	0.001070
+tests/test_tests.py::TestTestsCase::test_compare_aliases[gt 2-False]	PASS	0.001034
+tests/test_tests.py::TestTestsCase::test_compare_aliases[le 1-False]	PASS	0.001065
+tests/test_tests.py::TestTestsCase::test_compare_aliases[le 2-True]	PASS	0.001054
+tests/test_tests.py::TestTestsCase::test_compare_aliases[lt 2-False]	PASS	0.001163
+tests/test_tests.py::TestTestsCase::test_compare_aliases[lt 3-True]	PASS	0.001154
+tests/test_tests.py::TestTestsCase::test_compare_aliases[ne 2-False]	PASS	0.001085
+tests/test_tests.py::TestTestsCase::test_compare_aliases[ne 3-True]	PASS	0.001073
+tests/test_tests.py::TestTestsCase::test_defined	PASS	0.001058
+tests/test_tests.py::TestTestsCase::test_equalto	PASS	0.002501
+tests/test_tests.py::TestTestsCase::test_escaped	PASS	0.001160
+tests/test_tests.py::TestTestsCase::test_even	PASS	0.000925
+tests/test_tests.py::TestTestsCase::test_greaterthan	PASS	0.000961
+tests/test_tests.py::TestTestsCase::test_in	PASS	0.002144
+tests/test_tests.py::TestTestsCase::test_lessthan	PASS	0.000995
+tests/test_tests.py::TestTestsCase::test_lower	PASS	0.000981
+tests/test_tests.py::TestTestsCase::test_multiple_tests	PASS	0.000967
+tests/test_tests.py::TestTestsCase::test_no_paren_for_arg1	PASS	0.000937
+tests/test_tests.py::TestTestsCase::test_odd	PASS	0.000981
+tests/test_tests.py::TestTestsCase::test_sameas	PASS	0.001090
+tests/test_tests.py::TestTestsCase::test_types["foo" is callable-False]	PASS	0.001100
+tests/test_tests.py::TestTestsCase::test_types["foo" is iterable-True]	PASS	0.001405
+tests/test_tests.py::TestTestsCase::test_types["foo" is mapping-False]	PASS	0.001066
+tests/test_tests.py::TestTestsCase::test_types["foo" is sequence-True]	PASS	0.001100
+tests/test_tests.py::TestTestsCase::test_types["foo" is string-True]	PASS	0.001068
+tests/test_tests.py::TestTestsCase::test_types[(10 ** 100) is float-False]	PASS	0.001143
+tests/test_tests.py::TestTestsCase::test_types[(10 ** 100) is integer-True]	PASS	0.001209
+tests/test_tests.py::TestTestsCase::test_types[(10 ** 100) is number-True]	PASS	0.001094
+tests/test_tests.py::TestTestsCase::test_types[0 is boolean-False]	PASS	0.001172
+tests/test_tests.py::TestTestsCase::test_types[0 is false-False]	PASS	0.001053
+tests/test_tests.py::TestTestsCase::test_types[0 is true-False]	PASS	0.001152
+tests/test_tests.py::TestTestsCase::test_types[0.0 is boolean-False]	PASS	0.001177
+tests/test_tests.py::TestTestsCase::test_types[1 is boolean-False]	PASS	0.001267
+tests/test_tests.py::TestTestsCase::test_types[1 is false-False]	PASS	0.001083
+tests/test_tests.py::TestTestsCase::test_types[1 is true-False]	PASS	0.001030
+tests/test_tests.py::TestTestsCase::test_types[1.0 is boolean-False]	PASS	0.001281
+tests/test_tests.py::TestTestsCase::test_types[3.14159 is boolean-False]	PASS	0.001163
+tests/test_tests.py::TestTestsCase::test_types[3.14159 is integer-False]	PASS	0.001139
+tests/test_tests.py::TestTestsCase::test_types[3.14159 is number-True]	PASS	0.001063
+tests/test_tests.py::TestTestsCase::test_types[4.2 is float-True]	PASS	0.001054
+tests/test_tests.py::TestTestsCase::test_types[42 is boolean-False]	PASS	0.001180
+tests/test_tests.py::TestTestsCase::test_types[42 is callable-False]	PASS	0.001399
+tests/test_tests.py::TestTestsCase::test_types[42 is false-False]	PASS	0.001144
+tests/test_tests.py::TestTestsCase::test_types[42 is float-False]	PASS	0.001284
+tests/test_tests.py::TestTestsCase::test_types[42 is integer-True]	PASS	0.001143
+tests/test_tests.py::TestTestsCase::test_types[42 is iterable-False]	PASS	0.001001
+tests/test_tests.py::TestTestsCase::test_types[42 is mapping-False]	PASS	0.001069
+tests/test_tests.py::TestTestsCase::test_types[42 is none-False]	PASS	0.001049
+tests/test_tests.py::TestTestsCase::test_types[42 is number-True]	PASS	0.001102
+tests/test_tests.py::TestTestsCase::test_types[42 is sequence-False]	PASS	0.001078
+tests/test_tests.py::TestTestsCase::test_types[42 is string-False]	PASS	0.001096
+tests/test_tests.py::TestTestsCase::test_types[42 is true-False]	PASS	0.001033
+tests/test_tests.py::TestTestsCase::test_types[[1, 2, 3] is sequence-True]	PASS	0.001144
+tests/test_tests.py::TestTestsCase::test_types[[] is callable-False]	PASS	0.001149
+tests/test_tests.py::TestTestsCase::test_types[[] is iterable-True]	PASS	0.001055
+tests/test_tests.py::TestTestsCase::test_types[[] is mapping-False]	PASS	0.001126
+tests/test_tests.py::TestTestsCase::test_types[[] is sequence-True]	PASS	0.001072
+tests/test_tests.py::TestTestsCase::test_types[complex is number-True]	PASS	0.001147
+tests/test_tests.py::TestTestsCase::test_types[false is boolean-True]	PASS	0.001091
+tests/test_tests.py::TestTestsCase::test_types[false is callable-False]	PASS	0.001181
+tests/test_tests.py::TestTestsCase::test_types[false is false-True]	PASS	0.001089
+tests/test_tests.py::TestTestsCase::test_types[false is float-False]	PASS	0.001002
+tests/test_tests.py::TestTestsCase::test_types[false is integer-False]	PASS	0.001107
+tests/test_tests.py::TestTestsCase::test_types[false is iterable-False]	PASS	0.000997
+tests/test_tests.py::TestTestsCase::test_types[false is mapping-False]	PASS	0.001310
+tests/test_tests.py::TestTestsCase::test_types[false is none-False]	PASS	0.001164
+tests/test_tests.py::TestTestsCase::test_types[false is number-True]	PASS	0.001103
+tests/test_tests.py::TestTestsCase::test_types[false is sequence-False]	PASS	0.001032
+tests/test_tests.py::TestTestsCase::test_types[false is string-False]	PASS	0.000978
+tests/test_tests.py::TestTestsCase::test_types[false is true-False]	PASS	0.001056
+tests/test_tests.py::TestTestsCase::test_types[mydict is mapping-True]	PASS	0.001103
+tests/test_tests.py::TestTestsCase::test_types[none is boolean-False]	PASS	0.001068
+tests/test_tests.py::TestTestsCase::test_types[none is callable-False]	PASS	0.001084
+tests/test_tests.py::TestTestsCase::test_types[none is false-False]	PASS	0.001061
+tests/test_tests.py::TestTestsCase::test_types[none is float-False]	PASS	0.001139
+tests/test_tests.py::TestTestsCase::test_types[none is integer-False]	PASS	0.001274
+tests/test_tests.py::TestTestsCase::test_types[none is iterable-False]	PASS	0.001129
+tests/test_tests.py::TestTestsCase::test_types[none is mapping-False]	PASS	0.001217
+tests/test_tests.py::TestTestsCase::test_types[none is none-True]	PASS	0.001016
+tests/test_tests.py::TestTestsCase::test_types[none is number-False]	PASS	0.001197
+tests/test_tests.py::TestTestsCase::test_types[none is sequence-False]	PASS	0.001096
+tests/test_tests.py::TestTestsCase::test_types[none is string-False]	PASS	0.000988
+tests/test_tests.py::TestTestsCase::test_types[none is true-False]	PASS	0.001059
+tests/test_tests.py::TestTestsCase::test_types[range is callable-True]	PASS	0.001161
+tests/test_tests.py::TestTestsCase::test_types[range(5) is iterable-True]	PASS	0.001223
+tests/test_tests.py::TestTestsCase::test_types[true is boolean-True]	PASS	0.001296
+tests/test_tests.py::TestTestsCase::test_types[true is false-False]	PASS	0.001081
+tests/test_tests.py::TestTestsCase::test_types[true is float-False]	PASS	0.000998
+tests/test_tests.py::TestTestsCase::test_types[true is integer-False]	PASS	0.001080
+tests/test_tests.py::TestTestsCase::test_types[true is none-False]	PASS	0.001031
+tests/test_tests.py::TestTestsCase::test_types[true is number-True]	PASS	0.000986
+tests/test_tests.py::TestTestsCase::test_types[true is string-False]	PASS	0.000987
+tests/test_tests.py::TestTestsCase::test_types[true is true-True]	PASS	0.001026
+tests/test_tests.py::TestTestsCase::test_types[{} is callable-False]	PASS	0.001164
+tests/test_tests.py::TestTestsCase::test_types[{} is iterable-True]	PASS	0.001031
+tests/test_tests.py::TestTestsCase::test_types[{} is mapping-True]	PASS	0.001102
+tests/test_tests.py::TestTestsCase::test_types[{} is sequence-True]	PASS	0.001046
+tests/test_tests.py::TestTestsCase::test_upper	PASS	0.000978
+tests/test_tests.py::test_is_filter	PASS	0.000319
+tests/test_tests.py::test_is_test	PASS	0.000318
+tests/test_tests.py::test_name_undefined	PASS	0.000721
+tests/test_tests.py::test_name_undefined_in_if	PASS	0.001256
+tests/test_utils.py::TestEscapeUrlizeTarget::test_escape_urlize_target	PASS	0.000305
+tests/test_utils.py::TestEscapeUrlizeTarget::test_urlize_mail_mastodon	PASS	0.000289
+tests/test_utils.py::TestHelpers::test_autoescape_select	PASS	0.000263
+tests/test_utils.py::TestHelpers::test_object_type_repr	PASS	0.000292
+tests/test_utils.py::TestLRUCache::test_clear	PASS	0.000257
+tests/test_utils.py::TestLRUCache::test_copy[copy0]	PASS	0.000400
+tests/test_utils.py::TestLRUCache::test_copy[copy1]	PASS	0.000377
+tests/test_utils.py::TestLRUCache::test_items	PASS	0.000276
+tests/test_utils.py::TestLRUCache::test_pickleable	PASS	0.000417
+tests/test_utils.py::TestLRUCache::test_repr	PASS	0.000262
+tests/test_utils.py::TestLRUCache::test_setdefault	PASS	0.000266
+tests/test_utils.py::TestLRUCache::test_simple	PASS	0.000265
+tests/test_utils.py::TestLRUCache::test_values	PASS	0.000312
+tests/test_utils.py::TestLRUCache::test_values_empty	PASS	0.000304
+tests/test_utils.py::TestLoremIpsum::test_lorem_ipsum_html	PASS	0.000609
+tests/test_utils.py::TestLoremIpsum::test_lorem_ipsum_markup	PASS	0.001130
+tests/test_utils.py::TestLoremIpsum::test_lorem_ipsum_max	PASS	0.002655
+tests/test_utils.py::TestLoremIpsum::test_lorem_ipsum_min	PASS	0.005161
+tests/test_utils.py::TestLoremIpsum::test_lorem_ipsum_n	PASS	0.072546
+tests/test_utils.py::test_consume	PASS	0.000276
+tests/test_utils.py::test_copy_missing	PASS	0.000289
+tests/test_utils.py::test_missing	PASS	0.000273
+tests/test_utils.py::test_pickle_missing[0]	PASS	0.000431
+tests/test_utils.py::test_pickle_missing[1]	PASS	0.000556
+tests/test_utils.py::test_pickle_missing[2]	PASS	0.000411
+tests/test_utils.py::test_pickle_missing[3]	PASS	0.000413
+tests/test_utils.py::test_pickle_missing[4]	PASS	0.000395
+tests/test_utils.py::test_pickle_missing[5]	PASS	0.000378

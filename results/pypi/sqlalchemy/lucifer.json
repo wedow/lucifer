@@ -1,0 +1,22 @@
+{
+  "package": "sqlalchemy",
+  "version": "2.1.6",
+  "runtime": "lucifer",
+  "source_sha256": "499eae5c9051efe96cb9a73ec2fbde8ffa4186f102b9094ebab8fcc9d3b99f52",
+  "lock_sha256": "9a6f088d33e3a6161b0926405996302b088f92271a2f2c73ef175417a9e4250a",
+  "corpus_sha256": "e665cbcc4ff01a448b3ddfde485d93b3e7afc005694f48a878dd5f2f6954cd3f",
+  "harness_sha256": {
+    "run.py": "7e6e3e1d28a7f82d639896ac407b1d1a2b46591309d8f566bfa44e8394e50337",
+    "recorder.py": "4b2205a94f148834372183fd28637e41fcb36e21ba83fc1758988a71535ef1b1",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "interpreter failed startup",
+  "returncode": null,
+  "counts": {
+    "NOTRUN": 23740
+  },
+  "state": null,
+  "collection_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "upstream_ids": {},
+  "outcomes": []
+}

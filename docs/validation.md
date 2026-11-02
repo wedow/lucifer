@@ -2104,3 +2104,228 @@ installed wheel payloads, Cargo.lock inputs, selected CPython source files,
 manifest IDs/statuses/LF/numeric durations, and the complete zero Lucifer rows.
 `pip check` reports no broken requirements. Execution used bounded correctness
 reservations; seconds in these manifests are diagnostic durations.
+
+## Production package corpus: `tools/pypi`
+
+The corpus runs upstream tests from pinned release sources against installed
+release wheels. The host-Python driver uses only the standard library; pytest
+and test dependencies run inside the target environment. All archives and wheel
+dependencies have SHA-256 pins in `tools/pypi/corpus.json` and
+`tools/pypi/requirements.lock`. Downloads, extracted sources, environments,
+pytest logs and incremental outcome journals belong in external directories.
+No reference checkout under `vendor/` is executed.
+
+This is a **24-package** revision of [the proposed 20](research/05-oracles-and-benchmarks.md#4-a-first-corpus-of-20-popular-pypi-package-suites).
+It retains packaging, urllib3, requests, cryptography, PyYAML, MarkupSafe,
+Jinja2, Pillow, lxml, SQLAlchemy, NetworkX, SymPy and simplejson. NumPy already
+has its dedicated acceptance lane. pandas and SciPy's large scientific suites,
+Django's framework/database matrix, setuptools' build-system suite, pytest's
+self-hosting suite and cffi's compiler-driven suite are outside this initial
+corpus; they remain future coverage, without an implied passing result.
+The required attrs, more-itertools, sortedcontainers, pyparsing, pydantic-core,
+msgpack, regex, python-dateutil, pytz, click and rich add distinct collection,
+parser, validation, binary-format, Unicode, timezone and terminal mechanisms.
+Pydantic-core supplies the requested Pydantic/native validation coverage;
+Pydantic's separate Python wrapper suite is unverified.
+
+| Proposed entry moved out of this corpus | Recorded reason |
+|---|---|
+| NumPy | Its full wheel acceptance suite already has a dedicated scoreboard above. |
+| pandas, SciPy | Large scientific dependency matrices overlap that NumPy lane; the required additional production packages take priority in this bounded first corpus. Their own suites remain unverified here. |
+| Django | SQLAlchemy and Jinja2 provide the initial ORM/template coverage; Django's additional framework and optional database matrix is deferred. |
+| setuptools | Its subprocess build/install tests need a separately controlled build and download environment beyond this immutable-wheel lane. |
+| pytest | Self-hosting runner/plugin tests are deferred in favor of the required application-library mechanisms. |
+| cffi | Its compiler-driven foreign-call suite merits a separate build-enabled ABI lane; cryptography uses the pinned cffi wheel as a dependency here. |
+
+Rich and sortedcontainers omit their tests from the published sdists. Their
+sources therefore use the matching upstream release-tag archives, with hashes
+recorded alongside the PyPI wheel hashes. All other test sources are PyPI
+sdists. Sources and test selectors are explicit in the corpus lock.
+
+Choose absolute external directories and create each oracle environment under
+the execution policy of the machine doing validation. Use a fresh environment
+directory when changing the dependency lock or package profile:
+
+```sh
+python3 tools/pypi/run.py setup --python "$ORACLE_GIL" --env "$ENV_GIL" \
+  --cache "$CACHE" --work "$WORK"
+python3 tools/pypi/run.py setup --python "$ORACLE_T" --env "$ENV_T" \
+  --cache "$CACHE" --work "$WORK"
+# Repeat collection and execution for each package in corpus.json.
+python3 tools/pypi/run.py collect --python "$ENV_GIL/bin/python" \
+  --package attrs --runtime cpython-3.14.10 --cache "$CACHE" --work "$WORK"
+python3 tools/pypi/run.py run --python "$ENV_GIL/bin/python" \
+  --package attrs --runtime cpython-3.14.10 --cache "$CACHE" --work "$WORK"
+python3 tools/pypi/run.py run --python "$ENV_T/bin/python" \
+  --package attrs --runtime cpython-3.14.10t --cache "$CACHE" --work "$WORK"
+python3 tools/pypi/run.py run --python bin/lucifer \
+  --package attrs --runtime lucifer --cache "$CACHE" --work "$WORK"
+tools/scoreboard --results results/pypi
+make check-harness
+```
+
+Each collection must succeed, contain unique IDs and agree with its frozen
+`results/pypi/<package>/expected.tsv`. Runs preserve the entire inventory in
+sorted LF TSV; missing or failing target commands produce all NOTRUN. PASS is
+the only numerator. SKIP, XFAIL and XPASS remain separate. JSON evidence records
+source/lock and harness hashes, collection fingerprints, return codes, GIL state,
+loaded native-module hashes and reasons.
+A partial journal preserves completed outcomes after interruption; the active
+case becomes TIMEOUT or CRASH and unreported cases remain NOTRUN. The default
+whole-package deadline is 900 seconds, with a 60-second individual pytest
+limit. Run each package in a separate externally serialized test invocation.
+Suite elapsed times are diagnostics, never application speed measurements.
+
+The environment fixes hash seed zero, UTC, C.UTF-8 and one BLAS/OpenMP thread.
+Matplotlib uses a private configuration cache. Rich unsets COLUMNS/LINES so its
+descriptor-fallback tests retain control of terminal dimensions.
+It does not force the free-threaded GIL off: the final GIL state is observed.
+An enabled GIL in a free-threaded build makes the driver return nonzero.
+External-network markers are skipped. Requests' HTTP-service fixture tests stay
+in the denominator as SKIP; its offline object/protocol tests run. Loopback
+fixtures used by upstream suites are permitted. SQLAlchemy uses SQLite and
+excludes asynchronous database drivers. SymPy uses its core, logic and matrices
+suites; sortedcontainers runs its deterministic coverage suite, leaving the
+separate randomized stress programs outside this declared lane. Upstream
+ordinary marker defaults remain in effect. The two unmarked urllib3 HTTP/2
+TARPIT probes also remain SKIP because they use an external reserved address.
+Its pytest timeout markers have a five-second minimum to keep the upstream
+0.1-second deadline from interrupting instrumented failure reporting; socket
+timeouts and assertions are unchanged.
+
+The unittest adapters call upstream loaders: more-itertools' `load_tests`
+includes doctests, simplejson's `all_tests_suite` wraps the same cases in native
+and Python modes, lxml's `get_test_files`/`get_test_cases` applies the release's
+default level and includes its doctests, pytz calls its `test_suite`, and regex
+uses its unittest cases. The other packages use pytest. Adapters and import-path
+setup leave upstream assertions and production code unchanged. Native extension
+imports are required for the ten C package entries; the final loaded-module
+hashes are retained. No system packages were installed for this corpus.
+
+For a future working Lucifer, `--site` can point at the free-threaded oracle's
+installed `site-packages`, reusing the exact pinned cp314t extension binaries.
+That interoperability remains unverified until Lucifer exists.
+
+
+### Corpus environment details
+
+The artifact lock covers 116 distributions and 138 published wheels for Linux
+x86-64, plus the test-source archives. Installations use only those exact hashes,
+without dependency resolution or source builds. Rich uses Pygments 2.19.2 from
+its release `poetry.lock`. The pydantic-core sdist lacks a dependency lock and
+its release-tag lock was unavailable; its documentation tooling uses the
+available [upstream main lock](https://github.com/pydantic/pydantic-core/blob/main/uv.lock)
+versions: pytest-examples 0.0.15, Black
+24.10.0 and Ruff 0.9.2. Matching that tooling snapshot to the release tag remains
+**unverified**. Those tools execute the unchanged examples and assertions.
+
+urllib3's own `pyproject.toml` and `uv.lock` select the
+[urllib3 Hypercorn fork](https://github.com/urllib3/hypercorn/tree/d1719f8c1570cbd8e6a3719ffdb14a4d72880abb)
+at `d1719f8c1570cbd8e6a3719ffdb14a4d72880abb`. Its SHA-256-pinned source is
+loaded only as a test-server dependency, providing the TLS and proxy scope
+extensions absent from published Hypercorn. The production urllib3 wheel is
+unchanged. The lock and JSON evidence record this source dependency explicitly.
+
+NetworkX gets separate environments matching its default dependency selection:
+NumPy, SciPy, pandas and Matplotlib are present; optional lxml and lxml-html-clean
+are absent. This prevents an optional XML extension from changing the GIL state
+of the graph run. fontTools uses its published pure Python wheel because its
+compiled optional accelerator enables the GIL. NetworkX still includes doctests
+and image comparisons. Create its environments with:
+
+```sh
+python3 tools/pypi/run.py setup --package networkx --python "$ORACLE_GIL" \
+  --env "$ENV_NX_GIL" --cache "$CACHE" --work "$WORK"
+python3 tools/pypi/run.py setup --package networkx --python "$ORACLE_T" \
+  --env "$ENV_NX_T" --cache "$CACHE" --work "$WORK"
+# Use these commands for NetworkX's run steps above.
+python3 tools/pypi/run.py run --package networkx --python "$ENV_NX_T/bin/python" \
+  --runtime cpython-3.14.10t --cache "$CACHE" --work "$WORK"
+```
+
+The full expected inventory retains five GraphML doctests that upstream omits
+when optional lxml is absent. An exact allowlist maps those to SKIP. SQLAlchemy
+similarly omits nine tutorial methods on free-threaded builds because its
+`DocTest.__requires__` includes `gil_enabled`; an exact allowlist preserves them
+as SKIP in the common inventory. All other unreported cases remain NOTRUN.
+The original collections and journals stay in the external work directory.
+
+pydantic-core's custom parameter labels include addresses, random UUIDs and
+unordered Rust debug output. Its stable IDs therefore use pytest's parameter
+names and indices. Runtime JSON retains the original IDs separately. PyYAML's
+legacy collector gives three no-data cases the same node ID; the adapter appends
+their original function names. Known source and installation-root prefixes are
+normalized inside all IDs, preserving portability without comparing addresses.
+Four packaging file-URI fixture labels also use parameter indices; their original
+labels remain only in external journals to meet the public-path rule.
+
+`results/pypi/decisions.json` records environment repairs, upstream failures and
+confirmed flakiness. The published lxml cp314t extension **enables the GIL**.
+Its row is a functional free-threaded-ABI run with that observed fallback;
+no GIL-off lxml compatibility result is claimed. The driver reports this
+capability gap with a nonzero exit even when its tests pass. No setting forces
+an extension to run without the GIL and no extension is rebuilt for this lane.
+
+### Recorded package baseline (2026-11-02)
+
+Kind describes the principal package implementation; pure packages can have
+native dependencies. Rates count PASS alone against every expected case.
+Every Lucifer row is NOTRUN: **0 / 139,582 (0.00%)**.
+
+| Package | Version | Kind | Expected tests | CPython PASS / expected | CPython t PASS / expected | Scope and exclusions |
+|---|---|---|---:|---:|---:|---|
+| [attrs](https://pypi.org/project/attrs/26.1.0/) | 26.1.0 | pure | 1,387 | 1,380 (99.50%) | 1,380 (99.50%) | Platform/type-checker skips; 2 upstream XFAIL. |
+| [click](https://pypi.org/project/click/8.5.0/) | 8.5.0 | pure | 2,016 | 1,991 (98.76%) | 1,991 (98.76%) | Upstream ordinary unit selection; stress marker excluded; platform/resource skips and 1 XFAIL. |
+| [cryptography](https://pypi.org/project/cryptography/50.0.2/) | 50.0.2 | C | 4,681 | 4,486 (95.83%) | 4,486 (95.83%) | Full Python suite; optional vectors, backend algorithms and resource cases SKIP. |
+| [jinja2](https://pypi.org/project/jinja2/3.1.6/) | 3.1.6 | pure | 909 | 909 (100.00%) | 909 (100.00%) | Full unit suite using upstream prepend import mode. |
+| [lxml](https://pypi.org/project/lxml/6.1.3/) | 6.1.3 | C | 2,051 | 2,000 (97.51%) | 2,000 (97.51%) | Upstream default-level unittest/doctests; **t enables GIL**. |
+| [markupsafe](https://pypi.org/project/markupsafe/3.0.4/) | 3.0.4 | C | 80 | 79 (98.75%) | 79 (98.75%) | Python/native equivalence cases; 1 upstream SKIP. |
+| [more-itertools](https://pypi.org/project/more-itertools/11.2.1/) | 11.2.1 | pure | 930 | 925 (99.46%) | 925 (99.46%) | Upstream unittest loader includes doctests; 5 all-skipped doctest groups. |
+| [msgpack](https://pypi.org/project/msgpack/1.2.4/) | 1.2.4 | C | 161 | 160 (99.38%) | 159 (98.76%) | Native/fallback tests; upstream build/GIL skips retained. |
+| [networkx](https://pypi.org/project/networkx/3.7/) | 3.7 | pure | 10,914 | 10,110 (92.63%) | 10,110 (92.63%) | Default dependency environment, doctests/image checks; optional XML cases SKIP; 741 upstream XFAIL. |
+| [packaging](https://pypi.org/project/packaging/26.3/) | 26.3 | pure | 62,423 | 62,423 (100.00%) | 62,423 (100.00%) | Upstream default non-property selection; full 62,423-case inventory. |
+| [pillow](https://pypi.org/project/pillow/13.0.0/) | 13.0.0 | C | 5,738 | 5,608 (97.73%) | 5,608 (97.73%) | Full pytest suite including fuzz-regression inputs; feature/resource skips, 3 XFAIL. |
+| [pydantic-core](https://pypi.org/project/pydantic-core/2.50.2/) | 2.50.2 | C | 6,171 | 6,043 (97.93%) | 6,043 (97.93%) | Full Python suite, documentation examples and upstream fast Hypothesis profile; 8 XFAIL. |
+| [pyparsing](https://pypi.org/project/pyparsing/3.3.3/) | 3.3.3 | pure | 2,094 | 2,094 (100.00%) | 2,094 (100.00%) | Full unit suite and tiny-language examples, including Matplotlib cases. |
+| [python-dateutil](https://pypi.org/project/python-dateutil/4.0.0/) | 4.0.0 | pure | 5,343 | 5,063 (94.76%) | 5,063 (94.76%) | Full suite including properties; 1 upstream UTC FAIL and 17 XFAIL; timing flakiness recorded. |
+| [pytz](https://pypi.org/project/pytz/2026.6/) | 2026.6 | pure | 208 | 208 (100.00%) | 208 (100.00%) | Own unittest loader and doctests. |
+| [pyyaml](https://pypi.org/project/pyyaml/6.0.3/) | 6.0.3 | C | 2,608 | 2,608 (100.00%) | 2,608 (100.00%) | Upstream legacy collection, Python and LibYAML modes. |
+| [regex](https://pypi.org/project/regex/2026.9.29/) | 2026.9.29 | C | 101 | 101 (100.00%) | 101 (100.00%) | Own unittest cases, preserving internal subcases. |
+| [requests](https://pypi.org/project/requests/2.34.2/) | 2.34.2 | pure | 633 | 410 (64.77%) | 410 (64.77%) | Offline HTTP/object subset; service fixtures and external-address probes SKIP. |
+| [rich](https://pypi.org/project/rich/15.0.0/) | 15.0.0 | pure | 981 | 956 (97.45%) | 956 (97.45%) | Full unit suite; optional Jupyter/terminal cases SKIP; release Pygments pin. |
+| [simplejson](https://pypi.org/project/simplejson/4.2.0/) | 4.2.0 | C | 492 | 430 (87.40%) | 430 (87.40%) | Native and Python modes; debug-build, Python 2/3.15 and native-only cases SKIP. |
+| [sortedcontainers](https://pypi.org/project/sortedcontainers/2.4.0/) | 2.4.0 | pure | 291 | 291 (100.00%) | 291 (100.00%) | All deterministic coverage modules; separate randomized stress programs excluded. |
+| [sqlalchemy](https://pypi.org/project/sqlalchemy/2.1.6/) | 2.1.6 | C | 23,740 | 23,125 (97.41%) | 23,055 (97.11%) | Synchronous SQLite; other server dialects/async drivers excluded; 9 GIL-only tutorials SKIP on t. |
+| [sympy](https://pypi.org/project/sympy/1.14.0/) | 1.14.0 | pure | 2,921 | 2,816 (96.41%) | 2,816 (96.41%) | Core, logic and matrices; other modules excluded; upstream slow/tooslow defaults, 31 XFAIL. |
+| [urllib3](https://pypi.org/project/urllib3/2.8.0/) | 2.8.0 | pure | 2,709 | 2,111 (77.93%) | 2,111 (77.93%) | Loopback servers and offline cases; 593 SKIP, 2 XFAIL, 3 upstream FAIL. |
+
+The common inventory contains **139,582 tests**. The remaining
+oracle failures are retained as FAIL, without new xfails or weakened assertions:
+one python-dateutil UTC-abbreviation case and three urllib3 cases (two gzip
+trailing-garbage flushes and closed-socket SSL validation order). Both oracles
+reproduce them. The final urllib3 evidence records zlib 1.3.2 and OpenSSL 3.6.5.
+The three initial free-threaded dateutil Hypothesis deadline failures disappeared
+on an unchanged repeat and are recorded as timing flakiness.
+
+Except for lxml's explicit GIL fallback, every final t run observed a disabled
+GIL after testing. FAIL, SKIP and XFAIL contribute zero to the numerator.
+All expected rows are present; no oracle case remains NOTRUN, ERROR, TIMEOUT or
+CRASH. The initial NetworkX crash and environment failures are superseded only
+by the completed repaired-environment runs recorded in the decision log.
+
+Runtime JSON identifies the dependency lock actually used. Exact hash-addressed
+lock snapshots under `results/pypi/locks/` retain earlier completed baselines
+from the environment-repair sequence. To reconstruct an earlier environment,
+download that snapshot's wheels into the external cache using pip
+`--require-hashes --only-binary=:all: --no-deps`, then pass `--lock SNAPSHOT`
+to setup and run. The current lock remains the default. Each future invocation preserves
+its lock snapshot automatically.
+
+`make check-harness` passed, including all **12 package-corpus binary checks**:
+missing/failing/malformed startup, real process interruption, retained completed
+outcomes, symlink-preserved environments, empty collection, explicit upstream
+collection skips, hash tampering, scoreboard denominators and offline networking.
+The final content audit verifies all 96 TSVs, 72 runtime records, dependency/source
+hashes, sorted unique inventories, LF endings, statuses, finite nonnegative
+durations, full coverage and zero Lucifer passes. No system packages were
+installed. Actual Lucifer execution remains unverified until its binary exists.

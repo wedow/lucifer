@@ -1,0 +1,209 @@
+{
+  "package": "click",
+  "version": "8.5.0",
+  "runtime": "cpython-3.14.10",
+  "source_sha256": "ba0d2089de75ea0310e2dde03160e6ca10009947fb95a182f9b54021bb272e34",
+  "lock_sha256": "9a6f088d33e3a6161b0926405996302b088f92271a2f2c73ef175417a9e4250a",
+  "corpus_sha256": "8b572ef0be093ec0e832eb06c2d08b707ee2829e4796c85b00e6dc30f4d7bbd1",
+  "harness_sha256": {
+    "run.py": "fb784858fd6fa7268fe3f4d2ca9dc2c32ce8616e18a6548af85a6d668c3e327f",
+    "recorder.py": "4b2205a94f148834372183fd28637e41fcb36e21ba83fc1758988a71535ef1b1",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "test_sources": {},
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 1991,
+    "XFAIL": 1,
+    "SKIP": 24
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "",
+    "package_version": "8.5.0",
+    "native_modules": {},
+    "gil_enabled": true,
+    "free_threaded": false,
+    "exitstatus": 0
+  },
+  "collection_sha256": "ced8f48476de1e065a61bd78fc0066ede9d191a2e2b022e3dc730befcc0a8e95",
+  "upstream_ids": {},
+  "outcomes": [
+    {
+      "id": "tests/test_chain.py::test_group_chaining",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "tests/test_chain.py:227: in test_group_chaining\n    @cli.group()\n     ^^^^^^^^^^^\n../../../../../gil/lib/python3.14/site-packages/click/core.py:1884: in decorator\n    self.add_command(cmd)\n../../../../../gil/lib/python3.14/site-packages/click/core.py:1788: in add_command\n    _check_nested_chain(self, name, cmd, register=True)\n../../../../../gil/lib/python3.14/site-packages/click/core.py:99: in _check_nested_chain\n    raise RuntimeError(message)\nE   RuntimeError: It is not possible to add the group 'l1a' to another group 'cli' that is in chain mode."
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[True-h]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[True-H]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[True-\\xe9]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[True-\\xc0]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[True- ]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[True-\\u5b57]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[True-\\xe0H]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[True-\\xe0R]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[False-h]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[False-H]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[False-\\xe9]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[False-\\xc0]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[False- ]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[False-\\u5b57]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[False-\\xe0H]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows[False-\\xe0R]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 387, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_special_key_windows[\\x00-a]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 397, 'Skipped: Tests special character inputs using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_special_key_windows[\\x00-b]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 397, 'Skipped: Tests special character inputs using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_special_key_windows[\\xe0-c]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 397, 'Skipped: Tests special character inputs using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows_exceptions[\\x03-KeyboardInterrupt]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 412, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_getchar_windows_exceptions[\\x1a-EOFError]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 412, 'Skipped: Tests user-input using the msvcrt module.')"
+    },
+    {
+      "id": "tests/test_termui.py::test_editor_windows_path_normalization[plain notepad]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 569, 'Skipped: Windows-specific editor paths')"
+    },
+    {
+      "id": "tests/test_termui.py::test_editor_windows_path_normalization[quoted path with flag]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_termui.py', 569, 'Skipped: Windows-specific editor paths')"
+    },
+    {
+      "id": "tests/test_testing.py::test_capture_fd_windows_error",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/click/cpython-3.14.10/source/click-8.5.0/tests/test_testing.py', 629, 'Skipped: Windows-only test')"
+    }
+  ]
+}

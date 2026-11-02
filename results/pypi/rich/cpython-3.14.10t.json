@@ -1,0 +1,208 @@
+{
+  "package": "rich",
+  "version": "15.0.0",
+  "runtime": "cpython-3.14.10t",
+  "source_sha256": "5e79a8738b4e4e552291253c69e32c695de38f24400b137b119d54385234526a",
+  "lock_sha256": "9a6f088d33e3a6161b0926405996302b088f92271a2f2c73ef175417a9e4250a",
+  "corpus_sha256": "8b572ef0be093ec0e832eb06c2d08b707ee2829e4796c85b00e6dc30f4d7bbd1",
+  "harness_sha256": {
+    "run.py": "fb784858fd6fa7268fe3f4d2ca9dc2c32ce8616e18a6548af85a6d668c3e327f",
+    "recorder.py": "4b2205a94f148834372183fd28637e41fcb36e21ba83fc1758988a71535ef1b1",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "test_sources": {},
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 956,
+    "SKIP": 25
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "t",
+    "package_version": "15.0.0",
+    "native_modules": {},
+    "gil_enabled": false,
+    "free_threaded": true,
+    "exitstatus": 0
+  },
+  "collection_sha256": "6c91b8d975e4568b97459cf989a5fe6140035f7d3b8fae641c382e73bb9089fa",
+  "upstream_ids": {},
+  "outcomes": [
+    {
+      "id": "tests/test_inspect.py::test_inspect_builtin_function_except_python311",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_inspect.py', 148, 'Skipped: rendered differently on py3.14')"
+    },
+    {
+      "id": "tests/test_inspect.py::test_inspect_integer_with_methods_python38_and_python39",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_inspect.py', 225, 'Skipped: rendered differently on py3.14')"
+    },
+    {
+      "id": "tests/test_inspect.py::test_inspect_integer_with_methods_python310only",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_inspect.py', 263, 'Skipped: rendered differently on py3.14')"
+    },
+    {
+      "id": "tests/test_inspect.py::test_inspect_integer_with_methods_python311",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_inspect.py', 306, 'Skipped: rendered differently on py3.14')"
+    },
+    {
+      "id": "tests/test_pretty.py::test_attrs_broken",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_pretty.py', 642, 'Skipped: rendered differently on py3.14')"
+    },
+    {
+      "id": "tests/test_traceback.py::test_traceback_finely_grained_missing",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_traceback.py', 332, 'Skipped: Not applicable after Python 3.11')"
+    },
+    {
+      "id": "tests/test_tree.py::test_render_tree_win32",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_tree.py', 81, 'Skipped: Windows specific')"
+    },
+    {
+      "id": "tests/test_tree.py::test_render_tree_hide_root_win32",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_tree.py', 121, 'Skipped: Windows specific')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_text_only",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 23, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_text_multiple_segments",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 31, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_text_with_style",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 41, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_cursor_move_to",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 51, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_carriage_return",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 61, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_home",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 69, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_cursor_single_cell_movement[9-move_cursor_up]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 77, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_cursor_single_cell_movement[10-move_cursor_down]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 77, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_cursor_single_cell_movement[11-move_cursor_forward]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 77, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_cursor_single_cell_movement[12-move_cursor_backward]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 77, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_erase_line[0-erase_end_of_line]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 96, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_erase_line[1-erase_start_of_line]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 96, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_erase_line[2-erase_line]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 96, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_show_cursor",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 112, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_hide_cursor",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 120, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_cursor_move_to_column",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 128, 'Skipped: windows only')"
+    },
+    {
+      "id": "tests/test_windows_renderer.py::test_control_set_terminal_window_title",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/rich/cpython-3.14.10t/source/rich-15.0.0/tests/test_windows_renderer.py', 136, 'Skipped: windows only')"
+    }
+  ]
+}

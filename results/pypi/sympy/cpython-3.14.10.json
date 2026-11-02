@@ -1,0 +1,812 @@
+{
+  "package": "sympy",
+  "version": "1.14.0",
+  "runtime": "cpython-3.14.10",
+  "source_sha256": "d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "harness_sha256": {
+    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
+    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 2816,
+    "SKIP": 74,
+    "XFAIL": 31
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "",
+    "package_version": "1.14.0",
+    "native_modules": {
+      "hypothesis._native": "e40780bfbfb364b2fcc2b65e7baba953e4e1eaacb19fdd39578130889f0ec427",
+      "numpy._core._multiarray_umath": "ffdecbe5382f6499d77fbb3fd034fbf3c0ac5a5516be76044610bb41f9934e04",
+      "numpy.linalg._umath_linalg": "8b8bafe494052e3d5bb20138ee3dcbc1328dff386c1f23695c89b16722689e53",
+      "_cyutility": "48d47f2461a785896aadf530cfd5770d8642566ab264dfd0bef9685e4c6bb28c",
+      "scipy._cyutility": "48d47f2461a785896aadf530cfd5770d8642566ab264dfd0bef9685e4c6bb28c",
+      "scipy._lib._ccallback_c": "b8731a6ff8144810e2f8c1ed0a3c6c8c52e2921ece2801740b80b2855c796ff5",
+      "scipy.sparse._sparsetools": "587dfe80eb5ac91b2965ce77c38c15a83c89e814298e582e4166e9c60a9ee23a",
+      "numpy.fft._pocketfft_umath": "8532d109d939ca5e9d500f7b0d051728aa3d18266dd14cf925b42ab561da7e20",
+      "charset_normalizer.md": "a92bc8c547c9fdc8b6f1d4d20a6500bdaf3622893202b206ce7b6c516a5f8be9",
+      "charset_normalizer.cd": "4ca0b03cc9e0d6a206c33433c2d62fbd43dc0eca43015c8532635ee66ea60818",
+      "numpy.random._common": "e3afa045b076a8361024614ffc819b473b526cc091cb6ca34a33b6e490bf71bf",
+      "numpy.random.bit_generator": "1fd2d54df7d9db2f61adfba4822ce17ef6e2e0c731825343e577ec5aa4c33e44",
+      "numpy.random._bounded_integers": "8f0322bdccc58afcd2b717a6132c705f37e161c6aa307caec3f912464f48d333",
+      "numpy.random._pcg64": "75254268e5ecbfceb82294f57a0beb7224e5eebd0165ae17899c43da49928170",
+      "numpy.random._generator": "0a20c1b0def1050ebec07eee0675f234221bfec211109a1f7d66999581617fe6",
+      "numpy.random._mt19937": "525251b5627c23560bbf0579f7ecd931ab19d750d71a2b1c5a23c80c7177de1e",
+      "numpy.random._philox": "03093df45c60396e2cdce6103512f79737714688a08452613f1db515aca78c63",
+      "numpy.random._sfc64": "94d8cbf5a5f94ed4bcc4e90958afcf1c2dc8f910593fe30a5050ed5c903460fb",
+      "numpy.random.mtrand": "70ff2c6a24bad502c9a8a9cb3fb641147c472b4a60362b85a8184df4796b1d00",
+      "_csparsetools": "96f7c300e76d4e668cbeb8018cea587b993af198482bc35518d5c4f2558c0bb6",
+      "scipy.sparse._csparsetools": "96f7c300e76d4e668cbeb8018cea587b993af198482bc35518d5c4f2558c0bb6",
+      "matplotlib._c_internal_utils": "fb7709387b3a0b401424f4de5fd14da28f519126a776346a40375c47f0ae7906",
+      "PIL._imaging": "ab913e97d2dd06360033e26a2af3a28fd7d8980f6b103c1d498ec119b35a3ba2",
+      "matplotlib._path": "58fca3d04943d65594f7cb538a1f233ffc61cb0d2c1ea28b450e93c3c71cb97d",
+      "matplotlib.ft2font": "fa0d7163bd7e8b4327d6e3a96cbdc5d38a1aa6de25385f3bbe78456e52ebc8b0",
+      "kiwisolver._cext": "b9f4e6713e3cc5e3856a608c9bf6c37008a3f4ac0f939868c0b3e9b648aec686",
+      "matplotlib._image": "09d71cfa7b9c0b90f367e63531cd4b6f145d80df2fd4f8d7000902e95846778e",
+      "scipy.special._ufuncs_cxx": "7d8f3da332bde1a94b7e9ac19707bb63cee8cbef3f088a69f1a43f8526623b01",
+      "scipy.linalg._fblas": "60f7c949c2efd719c08e55e3ddd1dc3a1561b3fa3404369b163bde53a0c21217",
+      "scipy.linalg._flapack": "5bc35c29eb4d9b1a6e76d992eb1fdd5ae43a74f4f06777d81bb5c316c7f588e6",
+      "scipy.linalg._batched_linalg": "4f0ab0a9e6a5dc6140e39e3df2370ed26bbe39fe5f91a4cff590b0720e2ce324",
+      "scipy.linalg._cythonized_array_utils": "55dc695e8c0f7026b464330fea98cfb7c2a682eff30650d9045b379586d64ec4",
+      "scipy.linalg._solve_toeplitz": "e3f50a75bb387313173e2be88308a6ac0da40597911dc7c140ec9083c5a7c0fb",
+      "scipy.linalg._internal_matfuncs": "978ba8b3a24a56579d61f96cc534d1cff0df938fc1f3047f2b72216b86b19438",
+      "scipy.linalg._linalg_pythran": "604f6bfe522d25050921d206d98898f36007aa525157f2c8cee4162ac780124e",
+      "scipy.linalg.cython_blas": "092bc02e25b3c16d2d53f2a61f49c174ffab3f234afa7e456ce92a67d45bd51e",
+      "scipy.linalg.cython_lapack": "b8c73ddf942e7b00077074016e8064478abc4195c83ef32b7ac1dbe90582c769",
+      "scipy.linalg._decomp_update": "a7d0b23a2b20fcde623c1480f211fca9c183258183feb4329e2dc6daba20ba30",
+      "scipy.special._ellip_harm_2": "3b4b46fd8735e87d8e584dcd3f2b3605308eb5e3b1930edcf2e21a93c6ca98c5",
+      "scipy.special._special_ufuncs": "73301f284307eeb1e2fe84bb9ba676b8f7c1cd6d78288aa5f17bfeb8429d8531",
+      "scipy.special._gufuncs": "18621e3b90e9b135cecbeae5aa32badc5ecd6be167e0c41948e03fd54afa730c",
+      "scipy.special._ufuncs": "cbe1d8a148dfbf5a727ff8621c5eef848a9e20e4ec69f3cb1e7493bd597a23c2",
+      "scipy.special._specfun": "0efa7d8e2a9239ae8cc5f88a2a85ef5474d14534905525ab22ef15a4d8d991e1",
+      "scipy.special._comb": "18cf5c9443415a94bb0766332a9864e24a0742c7ee0c8a0c5fe3742d52699da2"
+    },
+    "gil_enabled": true,
+    "free_threaded": false,
+    "exitstatus": 0
+  },
+  "collection_sha256": "2637ad4d045213a8a05857a293faf11a038b71d2f2b747a8c4ac5796fa8b27c6",
+  "outcomes": [
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__assumptions__assume__Predicate",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 115, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__assumptions__relation__binrel__BinaryRelation",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 131, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__codegen__ast__CodegenAST",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 142, 'Skipped: abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__codegen__ast__AssignmentBase",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 147, 'Skipped: abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__codegen__ast__AugmentedAssignment",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 152, 'Skipped: abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__concrete__expr_with_limits__ExprWithLimits",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 600, 'Skipped: abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__concrete__expr_with_limits__AddWithLimits",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 607, 'Skipped: abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__concrete__expr_with_intlimits__ExprWithIntLimits",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 614, 'Skipped: abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__core__function__Function",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 688, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__core__numbers__IntegerConstant",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 772, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__core__numbers__RationalConstant",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 817, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__core__operations__AssocOp",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 827, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__core__operations__LatticeOp",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 832, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__core__relational__Relational",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 857, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__sets__sets__Set",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 940, 'Skipped: does it make sense to test this?')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__stats__rv__Distribution",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 1122, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__stats__crv__SingleContinuousDistribution",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 1126, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__stats__drv__SingleDiscreteDistribution",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 1196, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__stats__drv__DiscreteDistribution",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 1200, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__stats__drv__DiscreteDomain",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 1204, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__stats__rv__SinglePSpace",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 1240, 'Skipped: abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__stats__rv__ProductPSpace",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 1252, 'Skipped: abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__stats__frv__SingleFiniteDistribution",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 1403, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__stats__crv__ContinuousDistribution",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 1407, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__combinatorial__factorials__CombinatorialFunction",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 1967, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__elementary__exponential__ExpBase",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2204, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__elementary__hyperbolic__HyperbolicFunction",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2224, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__elementary__hyperbolic__ReciprocalHyperbolicFunction",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2229, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__elementary__hyperbolic__InverseHyperbolicFunction",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2234, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__elementary__integers__RoundFunction",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2297, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__elementary__miscellaneous__MinMaxBase",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2332, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__elementary__trigonometric__TrigonometricFunction",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2352, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__elementary__trigonometric__ReciprocalTrigonometricFunction",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2356, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__elementary__trigonometric__InverseTrigonometricFunction",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2360, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__special__bessel__BesselBase",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2433, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__special__bessel__SphericalBesselBase",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2438, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__special__bessel__SphericalHankelBase",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2443, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__special__error_functions__FresnelIntegral",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2592, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__special__error_functions__TrigonometricIntegral",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2627, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__special__hyper__TupleParametersBase",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2731, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__special__hyper__TupleArg",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2736, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__special__hyper__HyperRep",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2751, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__functions__special__polynomials__OrthogonalPolynomial",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2815, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__integrals__transforms__IntegralTransform",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2940, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__integrals__transforms__FourierTypeTransform",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2965, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__integrals__transforms__SineCosineTypeTransform",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 2980, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__integrals__transforms__HankelTypeTransform",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 3005, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__logic__boolalg__Boolean",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 3066, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__logic__boolalg__BooleanAtom",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 3075, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__matrices__expressions__matexpr__MatrixBase",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 3140, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__matrices__immutable__ImmutableRepMatrix",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 3145, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__matrices__expressions__matexpr__MatrixExpr",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 3232, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__matrices__expressions__factorizations__Factorization",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 3429, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__physics__biomechanics__curve__CharacteristicCurveFunction",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 3460, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__physics__quantum__shor__CMod",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 3958, 'Skipped: TODO: sympy.physics.quantum.shor: Cmod Not Implemented')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__physics__secondquant__Annihilator",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4214, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__physics__secondquant__BosonicOperator",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4231, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__physics__secondquant__Creator",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4252, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__polys__rootoftools__RootOf",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4484, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__series__sequences__SeqBase",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4509, 'Skipped: Abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__series__sequences__SeqExpr",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4521, 'Skipped: Abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__series__series_class__SeriesBase",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4565, 'Skipped: Abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__series__formal__FiniteFormalPowerSeries",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4589, 'Skipped: Abstract Class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__tensor__array__ndim_array__ImmutableNDimArray",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4622, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__tensor__tensor__TensorType",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4713, 'Skipped: deprecated class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__tensor__tensor__TensExpr",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4735, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__geometry__line__LinearEntity",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4840, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__geometry__line__LinearEntity2D",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4859, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__geometry__line__LinearEntity3D",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4879, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__geometry__entity__GeometrySet",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 4924, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_args.py::test_sympy__categories__baseclasses__Morphism",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/core/tests/test_args.py', 5028, 'Skipped: abstract class')"
+    },
+    {
+      "id": "sympy/core/tests/test_arit.py::test_evenness_in_ternary_integer_product_with_odd",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_arit.py:554: in test_evenness_in_ternary_integer_product_with_odd\n    assert (y*x*(x + k)).is_even is True\nE   assert None is True\nE    +  where None = ((y * x) * (x + k)).is_even"
+    },
+    {
+      "id": "sympy/core/tests/test_arit.py::test_oddness_in_ternary_integer_product_with_odd",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_arit.py:573: in test_oddness_in_ternary_integer_product_with_odd\n    assert (y*x*(x + k)).is_odd is False\nE   assert None is False\nE    +  where None = ((y * x) * (x + k)).is_odd"
+    },
+    {
+      "id": "sympy/core/tests/test_assumptions.py::test_symbol_infinitereal_mul",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_assumptions.py:481: in test_symbol_infinitereal_mul\n    assert (-ix).is_extended_positive is None\nE   assert True is None\nE    +  where True = -ix.is_extended_positive"
+    },
+    {
+      "id": "sympy/core/tests/test_assumptions.py::test_neg_symbol_falsenonnegative",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_assumptions.py:540: in test_neg_symbol_falsenonnegative\n    assert x.is_nonpositive is False  # this currently returns None\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE   assert None is False\nE    +  where None = -x.is_nonpositive"
+    },
+    {
+      "id": "sympy/core/tests/test_assumptions.py::test_issue_6275",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_assumptions.py:1030: in test_issue_6275\n    assert isinstance(x*0, type(0*S.Infinity))\nE   AssertionError: assert False\nE    +  where False = isinstance((x * 0), <class 'sympy.core.numbers.NaN'>)\nE    +    where <class 'sympy.core.numbers.NaN'> = type((0 * oo))\nE    +      where oo = S.Infinity"
+    },
+    {
+      "id": "sympy/core/tests/test_assumptions.py::test_issue_7993",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_assumptions.py:1111: in test_issue_7993\n    assert (x - y).is_zero is False\nE   assert None is False\nE    +  where None = (_Dummy_438 - _Dummy_439).is_zero"
+    },
+    {
+      "id": "sympy/core/tests/test_constructor_postprocessor.py::test_subexpression_postprocessors",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_constructor_postprocessor.py:81: in test_subexpression_postprocessors\n    assert 3*a*w**2 == 3*w**2\nE   assert ((3 * a) * (w ** 2)) == (3 * (w ** 2))"
+    },
+    {
+      "id": "sympy/core/tests/test_eval.py::test_pow_eval_X1",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_eval.py:62: in test_pow_eval_X1\n    assert (-1)**Rational(1, 3) == S.Half + S.Half*I*sqrt(3)\nE   assert (-1 ** 1/3) == (1/2 + ((1/2 * I) * sqrt(3)))\nE    +  where 1/3 = Rational(1, 3)\nE    +  and   1/2 = S.Half\nE    +  and   1/2 = S.Half\nE    +  and   sqrt(3) = sqrt(3)"
+    },
+    {
+      "id": "sympy/core/tests/test_evalf.py::test_evalf_complex_bug",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_evalf.py:98: in test_evalf_complex_bug\n    assert NS('(pi+E*I)*(E+pi*I)', 15) in ('0.e-15 + 17.25866050002*I',\nE   AssertionError: assert '17.2586605000200*I' in ('0.e-15 + 17.25866050002*I', '0.e-17 + 17.25866050002*I', '-0.e-17 + 17.25866050002*I')\nE    +  where '17.2586605000200*I' = NS('(pi+E*I)*(E+pi*I)', 15)"
+    },
+    {
+      "id": "sympy/core/tests/test_evalf.py::test_evalf_complex_powers_bug",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_evalf.py:121: in test_evalf_complex_powers_bug\n    assert NS('(pi + pi*I)**4') == '-389.63636413601 + 0.e-14*I'\nE   AssertionError: assert '-389.636364136010' == '-389.63636413601 + 0.e-14*I'\nE     \nE     - -389.63636413601 + 0.e-14*I\nE     ?                 --- -------\nE     + -389.636364136010"
+    },
+    {
+      "id": "sympy/core/tests/test_expr.py::test_call_2",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_expr.py:918: in test_call_2\n    assert (2*f)(x) == 2*f(x)\n            ^^^\nE   TypeError: unsupported operand type(s) for *: 'int' and 'UndefinedFunction'"
+    },
+    {
+      "id": "sympy/core/tests/test_expr.py::test_float_0_fail",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_expr.py:2168: in test_float_0_fail\n    assert Float(0.0)*x == Float(0.0)\nE   assert (0.0 * x) == 0.0\nE    +  where 0.0 = Float(0.0)\nE    +  and   0.0 = Float(0.0)"
+    },
+    {
+      "id": "sympy/core/tests/test_function.py::test_Subs2",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_function.py:420: in test_Subs2\n    assert Subs(f(x), x**2, x).doit() == f(sqrt(x))\nE   assert f(x) == f(sqrt(x))\nE    +  where f(x) = doit()\nE    +    where doit = Subs(f(x), x**2, x).doit\nE    +      where Subs(f(x), x**2, x) = Subs(f(x), (x ** 2), x)\nE    +        where f(x) = f(x)\nE    +  and   f(sqrt(x)) = f(sqrt(x))\nE    +    where sqrt(x) = sqrt(x)"
+    },
+    {
+      "id": "sympy/core/tests/test_match.py::test_functions_X1",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_match.py:288: in test_functions_X1\n    assert f.match(p*g(q*x)) == {p: 1, g: cos, q: 5}\n                     ^^^^^^\nE   TypeError: 'WildFunction' object is not callable"
+    },
+    {
+      "id": "sympy/core/tests/test_match.py::test_issue_4883",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_match.py:651: in test_issue_4883\n    assert eq.match(pat) == {a: 2}\nE   assert None == {a_: 2}\nE    +  where None = match((-x + a_)**2)\nE    +    where match = (x - 2)**2.match"
+    },
+    {
+      "id": "sympy/core/tests/test_noncommutative.py::test_collect",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_noncommutative.py:51: in test_collect\n    assert collect(A*B - B*A, A) == A*B - B*A\n           ^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/simplify/radsimp.py:386: in collect\n    collect(a, syms, func, True, exact, distribute_order_term)\n../../../gil/lib/python3.14/site-packages/sympy/simplify/radsimp.py:390: in collect\n    collect(term, syms, func, True, exact, distribute_order_term)\n../../../gil/lib/python3.14/site-packages/sympy/simplify/radsimp.py:427: in collect\n    raise AttributeError(\"Can not collect noncommutative symbol\")\nE   AttributeError: Can not collect noncommutative symbol"
+    },
+    {
+      "id": "sympy/core/tests/test_noncommutative.py::test_ratsimp",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_noncommutative.py:101: in test_ratsimp\n    assert ratsimp(A*B - B*A) == A*B - B*A\n           ^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/simplify/ratsimp.py:24: in ratsimp\n    Q, r = reduced(f, [g], field=True, expand=False)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/polys/polytools.py:7447: in reduced\n    polys, opt = parallel_poly_from_expr([f] + list(G), *gens, **args)\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/polys/polytools.py:4687: in parallel_poly_from_expr\n    return _parallel_poly_from_expr(exprs, opt)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/polys/polytools.py:4738: in _parallel_poly_from_expr\n    reps, opt = _parallel_dict_from_expr(exprs, opt)\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/polys/polyutils.py:349: in _parallel_dict_from_expr\n    raise PolynomialError('non-commutative expressions are not supported')\nE   sympy.polys.polyerrors.PolynomialError: non-commutative expressions are not supported"
+    },
+    {
+      "id": "sympy/core/tests/test_noncommutative.py::test_rcollect",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_noncommutative.py:106: in test_rcollect\n    assert rcollect(A*B - B*A, A) == A*B - B*A\n           ^^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/simplify/radsimp.py:497: in rcollect\n    return collect(expr, vars)\n           ^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/simplify/radsimp.py:386: in collect\n    collect(a, syms, func, True, exact, distribute_order_term)\n../../../gil/lib/python3.14/site-packages/sympy/simplify/radsimp.py:390: in collect\n    collect(term, syms, func, True, exact, distribute_order_term)\n../../../gil/lib/python3.14/site-packages/sympy/simplify/radsimp.py:427: in collect\n    raise AttributeError(\"Can not collect noncommutative symbol\")\nE   AttributeError: Can not collect noncommutative symbol"
+    },
+    {
+      "id": "sympy/core/tests/test_numbers.py::test_mpmath_issues",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_numbers.py:1841: in test_mpmath_issues\n    assert _normalize(mpf, 53) != (0, int(0), 0, 0)\n           ^^^^^^^^^^^^^^^^^^^\nE   TypeError: _normalize() missing 4 required positional arguments: 'exp', 'bc', 'prec', and 'rnd'"
+    },
+    {
+      "id": "sympy/core/tests/test_relational.py::test_multivariate_relational_as_set",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_relational.py:457: in test_multivariate_relational_as_set\n    assert (x*y >= 0).as_set() == Interval(0, oo)*Interval(0, oo) + \\\n           ^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/logic/boolalg.py:209: in as_set\n    raise NotImplementedError(\"Sorry, as_set has not yet been\"\nE   NotImplementedError: Sorry, as_set has not yet been implemented for multivariate expressions"
+    },
+    {
+      "id": "sympy/core/tests/test_relational.py::test_issue_8444_nonworkingtests",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_relational.py:865: in test_issue_8444_nonworkingtests\n    assert x >= floor(x)\n../../../gil/lib/python3.14/site-packages/sympy/core/relational.py:519: in __bool__\n    raise TypeError(\nE   TypeError: cannot determine truth value of Relational: x >= floor(x)"
+    },
+    {
+      "id": "sympy/core/tests/test_subs.py::test_mul2",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_subs.py:710: in test_mul2\n    assert (2*(x + 1)).is_Mul\nE   assert False\nE    +  where False = (2 * (x + 1)).is_Mul"
+    },
+    {
+      "id": "sympy/core/tests/test_sympify.py::test_issue_16772",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_sympify.py:197: in test_issue_16772\n    assert sympify(('.3', '.2'), rational=True) == Tuple(*ans)\nE   assert (0.3, 0.2) == (3/10, 1/5)\nE     \nE     Use -v to get more diff"
+    },
+    {
+      "id": "sympy/core/tests/test_sympify.py::test_sympify_rational_numbers_set",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/core/tests/test_sympify.py:670: in test_sympify_rational_numbers_set\n    assert sympify({'.3', '.2'}, rational=True) == FiniteSet(*ans)\nE   assert {0.2, 0.3} == {1/5, 3/10}\nE     \nE     Use -v to get more diff"
+    },
+    {
+      "id": "sympy/logic/tests/test_boolalg.py::test_multivariate_bool_as_set",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/logic/tests/test_boolalg.py:887: in test_multivariate_bool_as_set\n    assert And(x >= 0, y >= 0).as_set() == Interval(0, oo) * Interval(0, oo)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/logic/boolalg.py:209: in as_set\n    raise NotImplementedError(\"Sorry, as_set has not yet been\"\nE   NotImplementedError: Sorry, as_set has not yet been implemented for multivariate expressions"
+    },
+    {
+      "id": "sympy/logic/tests/test_inference.py::test_z3",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/logic/tests/test_inference.py', 330, 'Skipped: z3 not installed.')"
+    },
+    {
+      "id": "sympy/logic/tests/test_inference.py::test_z3_vs_lra_dpll2",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/logic/tests/test_inference.py', 347, 'Skipped: z3 not installed.')"
+    },
+    {
+      "id": "sympy/logic/tests/test_lra_theory.py::test_random_problems",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/sympy/cpython-3.14.10/source/sympy-1.14.0/sympy/logic/tests/test_lra_theory.py', 127, 'Skipped: z3 is not installed')"
+    },
+    {
+      "id": "sympy/logic/tests/test_lra_theory.py::test_pos_neg_zero",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/logic/tests/test_lra_theory.py:224: in test_pos_neg_zero\n    lra, _ = LRASolver.from_encoded_cnf(enc, testing_mode=True)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/logic/algorithms/lra_theory.py:272: in from_encoded_cnf\n    assert prop.function in ALLOWED_PRED\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE   AssertionError"
+    },
+    {
+      "id": "sympy/logic/tests/test_lra_theory.py::test_pos_neg_infinite",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/logic/tests/test_lra_theory.py:263: in test_pos_neg_infinite\n    lra, _ = LRASolver.from_encoded_cnf(enc, testing_mode=True)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/logic/algorithms/lra_theory.py:272: in from_encoded_cnf\n    assert prop.function in ALLOWED_PRED\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE   AssertionError"
+    },
+    {
+      "id": "sympy/logic/tests/test_lra_theory.py::test_infinite_strict_inequalities",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/logic/tests/test_lra_theory.py:392: in test_infinite_strict_inequalities\n    lra, _ = LRASolver.from_encoded_cnf(enc, testing_mode=True)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/logic/algorithms/lra_theory.py:278: in from_encoded_cnf\n    raise UnhandledInput(f\"{prop} contains infinity\")\nE   sympy.logic.algorithms.lra_theory.UnhandledInput: Q.ge(y, oo) contains infinity"
+    },
+    {
+      "id": "sympy/matrices/tests/test_commonmatrix.py::test_diff",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/matrices/tests/test_commonmatrix.py:1168: in test_diff\n    assert m.diff(x) == Matrix(2, 1, [1, 0])\n           ^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/matrices/matrices.py:441: in diff\n    deriv = ArrayDerivative(self, *args, evaluate=evaluate)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/tensor/array/array_derivatives.py:19: in __new__\n    obj = super().__new__(cls, expr, *variables, **kwargs)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/core/function.py:1261: in __new__\n    expr = sympify(expr)\n           ^^^^^^^^^^^^^\n../../../gil/lib/python3.14/site-packages/sympy/core/sympify.py:484: in sympify\n    return type(a)([sympify(x, locals=locals, convert_xor=convert_xor,\n../../../gil/lib/python3.14/site-packages/sympy/matrices/common.py:3085: in __init__\n    raise NotImplementedError(\"Cannot initialize matrix with given parameters\")\nE   NotImplementedError: Cannot initialize matrix with given parameters"
+    },
+    {
+      "id": "sympy/matrices/tests/test_eigen.py::test_eigen_vects",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/matrices/tests/test_eigen.py:163: in test_eigen_vects\n    raises(NotImplementedError, lambda: m.is_diagonalizable(True))\nE   Failed: DID NOT RAISE NotImplementedError"
+    },
+    {
+      "id": "sympy/matrices/tests/test_matrices.py::test_issue_3979",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/sympy-1.14.0/sympy/matrices/tests/test_matrices.py:2635: in test_issue_3979\n    raises(AttributeError, lambda: hash(cls.eye(1)))\nsource/sympy-1.14.0/sympy/matrices/tests/test_matrices.py:2635: in <lambda>\n    raises(AttributeError, lambda: hash(cls.eye(1)))\n                                   ^^^^^^^^^^^^^^^^\nE   TypeError: unhashable type: 'MutableDenseMatrix'"
+    }
+  ]
+}

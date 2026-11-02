@@ -1,0 +1,31 @@
+{
+  "package": "jinja2",
+  "version": "3.1.6",
+  "runtime": "cpython-3.14.10",
+  "source_sha256": "0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "harness_sha256": {
+    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
+    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 909
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "",
+    "package_version": "3.1.6",
+    "native_modules": {
+      "markupsafe._speedups": "198503479e11bfc3d5d91f2f7282648986781f845fa3642d3d4953bac6f4ee7f"
+    },
+    "gil_enabled": true,
+    "free_threaded": false,
+    "exitstatus": 0
+  },
+  "collection_sha256": "76de10c9d1d31b0019c062aa7c95535e8d646719971f3bcb913f8f5cdc93c00b",
+  "outcomes": []
+}

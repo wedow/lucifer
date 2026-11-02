@@ -1,0 +1,21 @@
+{
+  "package": "pyparsing",
+  "version": "3.3.3",
+  "runtime": "lucifer",
+  "source_sha256": "928ae7e20211f3b6f3915a72f06a0cfd29ab9d24279dd6346b6b1a7146397d36",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "harness_sha256": {
+    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
+    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "interpreter failed startup",
+  "returncode": null,
+  "counts": {
+    "NOTRUN": 2094
+  },
+  "state": null,
+  "collection_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "outcomes": []
+}

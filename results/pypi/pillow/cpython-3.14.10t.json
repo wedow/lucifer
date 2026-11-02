@@ -1,0 +1,953 @@
+{
+  "package": "pillow",
+  "version": "13.0.0",
+  "runtime": "cpython-3.14.10t",
+  "source_sha256": "cdcd1ba258178f7356d74170c9a81ba4eab6a5d55748bc402a5a2a6fe6be3510",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "harness_sha256": {
+    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
+    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 5608,
+    "SKIP": 127,
+    "XFAIL": 3
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "t",
+    "package_version": "13.0.0",
+    "native_modules": {
+      "PIL._imaging": "c9f00a7b8ff16848e0b4c153801eab1bc26536904c276e54c7151103e2613c75",
+      "PIL._imagingmath": "55c2b3afb9197e025af8de9b0e89e011ba0e44d9b8a829e90ad26f51d39856d8",
+      "psutil._psutil_linux": "07600fbb07cf958562752049c0776f84dd5b666a42fd7d5b79cc0dab580afffd",
+      "PIL._imagingft": "e57157b6cf056586c2ba0014920104fa4cdd10595ba05d65821eda30ff2c578a",
+      "numpy._core._multiarray_umath": "8b702e9261a43d0a381a4306052b3d3eb3cf82a475b3a11341df32578a6800b5",
+      "numpy.linalg._umath_linalg": "9bb453121423a9d517c95d484ba0bc487b47e7b01f6277e6e980d2ec0c7d807d",
+      "PIL._avif": "7cb94f03215dc6537ca3395b5ba5c804366ac93c2db8396a6e08c9b6ddb2a364",
+      "PIL._webp": "8da1064336db024f72f3e5a7465c126ed15a03a00d47e2d53c25a1ffb6aece64",
+      "PIL._imagingcms": "8035a2af0e715f3ed84edf8193548117aba33a253dc79ae6f90a2afb4677c849",
+      "PIL._imagingmorph": "536d1ed8b9a8002ab08b4c0684ff660e6679d57e18d60b61fba6fde4ddaa98ba"
+    },
+    "gil_enabled": false,
+    "free_threaded": true,
+    "exitstatus": 0
+  },
+  "collection_sha256": "6faa243d999503fb71ffa84d1bb341cd6f1ec246969251f5022660b47850c1af",
+  "outcomes": [
+    {
+      "id": "Tests/test_features.py::test_libimagequant_version",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_features.py', 60, 'Skipped: libimagequant not available')"
+    },
+    {
+      "id": "Tests/test_file_avif.py::TestFileAvif::test_decoder_codec_param",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_avif.py', 513, 'Skipped: aom decode not available')"
+    },
+    {
+      "id": "Tests/test_file_avif.py::TestFileAvif::test_encoder_codec_cannot_decode",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_avif.py', 520, 'Skipped: rav1e encode not available')"
+    },
+    {
+      "id": "Tests/test_file_avif.py::TestFileAvif::test_decoder_codec_available",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_avif.py', 558, 'Skipped: aom decode not available')"
+    },
+    {
+      "id": "Tests/test_file_avif.py::TestFileAvif::test_decoder_codec_available_cannot_decode",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_avif.py', 566, 'Skipped: rav1e encode not available')"
+    },
+    {
+      "id": "Tests/test_file_avif.py::TestFileAvif::test_svt_optimizations",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_avif.py', 599, 'Skipped: svt encode not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_sanity[1-Tests/images/eps/zero_bb.eps-size0]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 87, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_sanity[1-Tests/images/eps/non_zero_bb.eps-size1]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 87, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_sanity[2-Tests/images/eps/zero_bb.eps-size0]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 87, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_sanity[2-Tests/images/eps/non_zero_bb.eps-size1]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 87, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_load",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 101, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_load_long_binary_data[]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 210, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_load_long_binary_data[\\xc5\\xd0\\xd3\\xc6\\x0c\\x00\\x00\\x00\\x00\\x00\\x00\\x00]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 210, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_cmyk",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 233, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_showpage",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 249, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_transparency",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 260, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_file_object",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 273, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_bytesio_object",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 281, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_1[Tests/images/eps/1.eps]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 295, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_1[Tests/images/eps/1_boundingbox_after_imagedata.eps]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 295, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_1[Tests/images/eps/1_second_imagedata.eps]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 295, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_filename_not_parsed_as_ghostscript_argument",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 322, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_render_scale1",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 338, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_render_scale2",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 360, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_resize[Tests/images/eps/zero_bb.eps]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 382, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_resize[Tests/images/eps/non_zero_bb.eps]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 382, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_resize[Tests/images/eps/illu10_preview.eps]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 382, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_thumbnail[Tests/images/eps/zero_bb.eps]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 393, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_thumbnail[Tests/images/eps/non_zero_bb.eps]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 393, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_eps.py::test_emptyline",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_eps.py', 439, 'Skipped: Ghostscript not available')"
+    },
+    {
+      "id": "Tests/test_file_jpeg.py::TestFileCloseW32::test_fd_leak",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_jpeg.py', 1159, 'Skipped: Windows only')"
+    },
+    {
+      "id": "Tests/test_file_jpeg2k.py::test_unknown_colorspace",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_jpeg2k.py', 212, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_jpeg2k.py::test_cmyk",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_jpeg2k.py', 373, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_jpeg2k.py::test_cmyk_save",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_jpeg2k.py', 383, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_jpeg2k.py::test_subsampling_decode[subsampling_1]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_jpeg2k.py', 456, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_jpeg2k.py::test_subsampling_decode[subsampling_2]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_jpeg2k.py', 456, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_jpeg2k.py::test_subsampling_decode[zoo1]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_jpeg2k.py', 456, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_jpeg2k.py::test_subsampling_decode[zoo2]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_jpeg2k.py', 456, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_jpeg2k.py::test_pclr",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_jpeg2k.py', 476, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_libtiff.py::TestFileLibTiff::test_webp",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_libtiff.py', 1171, 'Skipped: WEBP compression support is not configured')"
+    },
+    {
+      "id": "Tests/test_file_libtiff.py::TestFileLibTiff::test_save_many_compressed",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_libtiff.py', 1581, 'Skipped: Checks a Windows handle limit')"
+    },
+    {
+      "id": "Tests/test_file_msp.py::test_open_windows_v2",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_msp.py', 63, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_msp.py::test_msp_v2",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_msp.py', 76, 'Skipped: Even More Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_sun.py::test_rgbx",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_sun.py', 75, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_sun.py::test_others",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_sun.py', 91, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_tiff.py::TestFileTiff::test_string_dimension",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_tiff.py', 1012, 'Skipped: Extra image files not installed')"
+    },
+    {
+      "id": "Tests/test_file_tiff.py::TestFileTiffW32::test_fd_leak",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_tiff.py', 1048, 'Skipped: Windows only')"
+    },
+    {
+      "id": "Tests/test_file_wmf.py::test_load_oversized_dimensions",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_file_wmf.py', 62, 'Skipped: requires Windows')"
+    },
+    {
+      "id": "Tests/test_image.py::TestImage::test_repr_pretty",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_image.py', 91, 'Skipped: IPython is not installed')"
+    },
+    {
+      "id": "Tests/test_image_access.py::TestEmbeddable::test_embeddable",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_image_access.py', 263, 'Skipped: requires Windows')"
+    },
+    {
+      "id": "Tests/test_image_fromqimage.py::test_sanity_1",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_image_fromqimage.py', 44, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_image_fromqimage.py::test_sanity_rgb",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_image_fromqimage.py', 49, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_image_fromqimage.py::test_sanity_rgba",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_image_fromqimage.py', 54, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_image_fromqimage.py::test_sanity_l",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_image_fromqimage.py', 59, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_image_fromqimage.py::test_sanity_p",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_image_fromqimage.py', 64, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_image_quantize.py::test_libimagequant_quantize",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_image_quantize.py', 28, 'Skipped: libimagequant not available')"
+    },
+    {
+      "id": "Tests/test_image_quantize.py::test_resize",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_image_quantize.py', 121, 'Skipped: libimagequant not available')"
+    },
+    {
+      "id": "Tests/test_image_resample.py::TestCoreResampleAlphaCorrect::test_levels_rgba",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "Tests/test_image_resample.py:347: in test_levels_rgba\n    self.run_levels_case(case.resize((512, 32), Image.Resampling.BOX))\nTests/test_image_resample.py:339: in run_levels_case\n    assert 256 == len(used_colors), (\nE   AssertionError: All colors should be present in resized image. Only 240 on line 2.\nE   assert 256 == 240\nE    +  where 240 = len({0, 1, 2, 3, 4, 5, ...})"
+    },
+    {
+      "id": "Tests/test_image_resample.py::TestCoreResampleAlphaCorrect::test_levels_la",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "Tests/test_image_resample.py:358: in test_levels_la\n    self.run_levels_case(case.resize((512, 32), Image.Resampling.BOX))\nTests/test_image_resample.py:339: in run_levels_case\n    assert 256 == len(used_colors), (\nE   AssertionError: All colors should be present in resized image. Only 240 on line 2.\nE   assert 256 == 240\nE    +  where 240 = len({0, 1, 2, 3, 4, 5, ...})"
+    },
+    {
+      "id": "Tests/test_imagedraw.py::test_line_h_s1_w2",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "Tests/test_imagedraw.py:1139: in test_line_h_s1_w2\n    assert_image_equal_tofile(\nTests/helper.py:116: in assert_image_equal_tofile\n    assert_image_equal(a, converted_im, msg)\nTests/helper.py:105: in assert_image_equal\n    pytest.fail(msg or \"got different content\")\nE   Failed: line horizontal 1px slope 2px wide failed"
+    },
+    {
+      "id": "Tests/test_imagefontctl.py::test_getlength_combine[overline-ttb-L]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagefontctl.py', 233, 'Skipped: fails with this font')"
+    },
+    {
+      "id": "Tests/test_imagefontctl.py::test_getlength_combine[overline-ttb-1]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagefontctl.py', 233, 'Skipped: fails with this font')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grab",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 16, 'Skipped: requires Windows or macOS')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grab_x11",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 46, 'Skipped: X connection failed: error 5')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grab_no_xcb",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 48, 'Skipped: tests missing XCB')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grab_handle",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 70, 'Skipped: Only runs on macOS CI')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grab_invalid_handle",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 96, 'Skipped: macOS and Windows only')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grabclipboard_file",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 136, 'Skipped: Windows only')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grabclipboard_png",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 148, 'Skipped: Windows only')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grabclipboard_wl_clipboard[gif]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 164, 'Skipped: Linux with wl-clipboard only')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grabclipboard_wl_clipboard[png]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 164, 'Skipped: Linux with wl-clipboard only')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grabclipboard_wl_clipboard[ico]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 164, 'Skipped: Linux with wl-clipboard only')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grabclipboard_wl_clipboard_errors[text]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 180, 'Skipped: Linux with wl-clipboard only')"
+    },
+    {
+      "id": "Tests/test_imagegrab.py::TestImageGrab::test_grabclipboard_wl_clipboard_errors[--clear]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagegrab.py', 180, 'Skipped: Linux with wl-clipboard only')"
+    },
+    {
+      "id": "Tests/test_imageqt.py::test_rgb",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageqt.py', 19, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_imageqt.py::test_image[1]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageqt.py', 44, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_imageqt.py::test_image[RGB]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageqt.py', 44, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_imageqt.py::test_image[RGBA]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageqt.py', 44, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_imageqt.py::test_image[L]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageqt.py', 44, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_imageqt.py::test_image[P]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageqt.py', 44, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_imageqt.py::test_image[I;16]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageqt.py', 44, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_imageqt.py::test_closed_file",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageqt.py', 53, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_imageqt.py::test_align8to32_deprecation",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageqt.py', 58, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_imageshow.py::test_show[1]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageshow.py', 52, 'Skipped: Only run on CIs; hangs on Windows CIs')"
+    },
+    {
+      "id": "Tests/test_imageshow.py::test_show[I;16]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageshow.py', 52, 'Skipped: Only run on CIs; hangs on Windows CIs')"
+    },
+    {
+      "id": "Tests/test_imageshow.py::test_show[LA]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageshow.py', 52, 'Skipped: Only run on CIs; hangs on Windows CIs')"
+    },
+    {
+      "id": "Tests/test_imageshow.py::test_show[RGB]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageshow.py', 52, 'Skipped: Only run on CIs; hangs on Windows CIs')"
+    },
+    {
+      "id": "Tests/test_imageshow.py::test_show[RGBA]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageshow.py', 52, 'Skipped: Only run on CIs; hangs on Windows CIs')"
+    },
+    {
+      "id": "Tests/test_imageshow.py::test_ipythonviewer",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imageshow.py', 118, 'Skipped: IPython not installed')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_kw",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 37, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_photoimage[1]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 61, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_photoimage[L]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 61, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_photoimage[P]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 61, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_photoimage[RGB]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 61, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_photoimage[RGBA]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 61, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_photoimage_apply_transparency",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 81, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_photoimage_blank[1]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 88, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_photoimage_blank[L]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 88, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_photoimage_blank[P]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 88, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_photoimage_blank[RGB]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 88, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_photoimage_blank[RGBA]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 88, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagetk.py::test_bitmapimage",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagetk.py', 101, 'Skipped: TCL Error: no display name and no $DISPLAY environment variable')"
+    },
+    {
+      "id": "Tests/test_imagewin.py::TestImageWinDib::test_dib_image",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagewin.py', 39, 'Skipped: Windows only')"
+    },
+    {
+      "id": "Tests/test_imagewin.py::TestImageWinDib::test_dib_mode_string",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagewin.py', 49, 'Skipped: Windows only')"
+    },
+    {
+      "id": "Tests/test_imagewin.py::TestImageWinDib::test_dib_hwnd",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagewin.py', 63, 'Skipped: Windows only')"
+    },
+    {
+      "id": "Tests/test_imagewin.py::TestImageWinDib::test_dib_paste",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagewin.py', 75, 'Skipped: Windows only')"
+    },
+    {
+      "id": "Tests/test_imagewin.py::TestImageWinDib::test_dib_paste_bbox",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagewin.py', 89, 'Skipped: Windows only')"
+    },
+    {
+      "id": "Tests/test_imagewin.py::TestImageWinDib::test_dib_frombytes_tobytes_roundtrip",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_imagewin.py', 122, 'Skipped: Windows only')"
+    },
+    {
+      "id": "Tests/test_qt_image_qapplication.py::test_sanity",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_qt_image_qapplication.py', 55, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_qt_image_toqimage.py::test_sanity[RGB]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_qt_image_toqimage.py', 21, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_qt_image_toqimage.py::test_sanity[RGBA]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_qt_image_toqimage.py', 21, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_qt_image_toqimage.py::test_sanity[L]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_qt_image_toqimage.py', 21, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_qt_image_toqimage.py::test_sanity[P]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_qt_image_toqimage.py', 21, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_qt_image_toqimage.py::test_sanity[1]",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_qt_image_toqimage.py', 21, 'Skipped: Qt bindings are not installed')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash_1.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash_2.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-2020-10-test.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-0c7e0e8e11ce787078f00b5b0ca409a167f070e0.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-0e16d3bfb83be87356d026d66919deaefca44dac.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-1152ec2d1a1a71395b6f2ce6721c38924d025bf3.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-1185209cf7655b5aed8ae5e77784dfdd18ab59e9.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-338516dbd2f0e83caddb8ce256c22db3bd6dc40f.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-4f085cc12ece8cde18758d42608bed6a2a2cfb1c.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-86214e58da443d2b80820cff9677a38a33dcbbca.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-f46f5b2f43c370fe65706c11449f567ecc345e74.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-63b1dffefc8c075ddc606c0a2f5fdc15ece78863.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-74d2a78403a5a59db1fb0a2b8735ac068a75f6e3.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-81154a65438ba5aaeca73fd502fa4850fbde60f8.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_crashes[Tests/images/crash-0da013a13571cc8eb457a39fee8db18f8a3c7127.tif]",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 52, 'Skipped: test image not found')"
+    },
+    {
+      "id": "Tests/test_tiff_crashes.py::test_tiff_mmap",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/pillow/cpython-3.14.10t/source/pillow-13.0.0/Tests/test_tiff_crashes.py', 68, 'Skipped: test image not found')"
+    }
+  ]
+}

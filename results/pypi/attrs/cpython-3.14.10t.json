@@ -1,0 +1,94 @@
+{
+  "package": "attrs",
+  "version": "26.1.0",
+  "runtime": "cpython-3.14.10t",
+  "source_sha256": "d03ceb89cb322a8fd706d4fb91940737b6642aa36998fe130a9bc96c985eff32",
+  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
+  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "harness_sha256": {
+    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
+    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "reason": "completed",
+  "returncode": 0,
+  "counts": {
+    "PASS": 1380,
+    "SKIP": 5,
+    "XFAIL": 2
+  },
+  "state": {
+    "version": "3.14.10",
+    "abi": "t",
+    "package_version": "26.1.0",
+    "native_modules": {
+      "hypothesis._native": "adf18f3cda0e47a1053fc2b617c768e8d854b271194be09c7facab2fd458f4fa",
+      "numpy._core._multiarray_umath": "8b702e9261a43d0a381a4306052b3d3eb3cf82a475b3a11341df32578a6800b5",
+      "numpy.linalg._umath_linalg": "9bb453121423a9d517c95d484ba0bc487b47e7b01f6277e6e980d2ec0c7d807d",
+      "numpy.random._common": "1eb47194afae5a1949e934562ae9dbb11b2acc58cd96eec340d6d6d682ace397",
+      "numpy.random.bit_generator": "8e76d0e7dae7e03cab7575bf268cb6140ead54dfdcc2068a1b2e9fb2f56bad58",
+      "numpy.random._bounded_integers": "662d76dcbbea089de701439f1164b181d0f9067c3b3c482e51dcfaf930ed16e8",
+      "numpy.random._pcg64": "21160b431c5fcf732bf0b22822026f3b88783cbaf9fdb479df89e6e3e968ffea",
+      "numpy.random._generator": "18cc0113c0782b3ad944364721c3d12bdab3b2feb65c56a3ecccabc08729dfdd",
+      "numpy.random._mt19937": "945de2dd4ef2de7fffdea08df23e493a0df3e03c551787daa501a5d9070a2297",
+      "numpy.random._philox": "d394deff5b9c0e63b7fe9abfce31be5e4c6c30ba8f486068b7954642fbe0f8ea",
+      "numpy.random._sfc64": "a5cd88b8ac9e02b0a8766817f60f8d5413328ad258508ac6ce7a838ddf2c99f6",
+      "numpy.random.mtrand": "5c0fe5a0bd605e688f57b2dccd61c498a5e6f4d21a9819b27e201bb77b89047c"
+    },
+    "gil_enabled": false,
+    "free_threaded": true,
+    "exitstatus": 0
+  },
+  "collection_sha256": "c1a3162bcec6014564b4f00552488cd2d80b880b981af56d7e8e39ff989f440d",
+  "outcomes": [
+    {
+      "id": "tests/test_make.py::TestAutoDetect::test_match_args_pre_310",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/attrs/cpython-3.14.10t/source/attrs-26.1.0/tests/test_make.py', 3029, 'Skipped: Pre-3.10 only.')"
+    },
+    {
+      "id": "tests/test_pyright.py::test_pyright_baseline",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/attrs/cpython-3.14.10t/source/attrs-26.1.0/tests/test_pyright.py', 35, 'Skipped: Requires pyright.')"
+    },
+    {
+      "id": "tests/test_pyright.py::test_pyright_attrsinstance_compat",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/attrs/cpython-3.14.10t/source/attrs-26.1.0/tests/test_pyright.py', 83, 'Skipped: Requires pyright.')"
+    },
+    {
+      "id": "tests/test_pyright.py::test_pyright_field_converters_tuple",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/attrs/cpython-3.14.10t/source/attrs-26.1.0/tests/test_pyright.py', 111, 'Skipped: Requires pyright.')"
+    },
+    {
+      "id": "tests/test_setattr.py::TestSetAttr::test_slotted_confused",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/attrs-26.1.0/tests/test_setattr.py:340: in test_slotted_confused\n    C(1).x = 2\n    ^^^^\n<attrs generated methods tests.test_setattr.TestSetAttr.test_slotted_confused.<locals>.C>:23: in __init__\n    self.x = x\n    ^^^^^^\n../../../t/lib/python3.14t/site-packages/attr/_make.py:1188: in __setattr__\n    nval = hook(self, a, val)\n           ^^^^^^^^^^^^^^^^^^\n../../../t/lib/python3.14t/site-packages/attr/setters.py:35: in frozen\n    raise FrozenAttributeError\nE   attr.exceptions.FrozenAttributeError: can't set attribute"
+    },
+    {
+      "id": "tests/test_slots.py::test_implicitly_weakrefable",
+      "phase": "setup",
+      "outcome": "skipped",
+      "xfail": false,
+      "reason": "('<external>/attrs/cpython-3.14.10t/source/attrs-26.1.0/tests/test_slots.py', 517, 'Skipped: slots without weakref_slot should only work on PyPy')"
+    },
+    {
+      "id": "tests/test_slots.py::test_slots_cached_property_infers_type",
+      "phase": "call",
+      "outcome": "skipped",
+      "xfail": true,
+      "reason": "source/attrs-26.1.0/tests/test_slots.py:806: in test_slots_cached_property_infers_type\n    assert A.__annotations__ == {\"x\": int, \"f\": int}\nE   AssertionError: assert {'x': <class 'int'>} == {'x': <class ...<class 'int'>}\nE     \nE     Omitting 1 identical items, use -vv to show\nE     Right contains 1 more item:\nE     {'f': <class 'int'>}\nE     Use -v to get more diff"
+    }
+  ]
+}

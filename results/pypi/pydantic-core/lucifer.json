@@ -1,0 +1,23 @@
+{
+  "package": "pydantic-core",
+  "version": "2.50.2",
+  "runtime": "lucifer",
+  "source_sha256": "1b0e8dc3932cf4e9ed5727570325cacc716b9409ffc794a221c0ccc72e8eb775",
+  "lock_sha256": "6652f33e0a7d4b5d978b182e5dff8a085d364bea5b49f38a61081745703eefb7",
+  "corpus_sha256": "0fc3f60b3670a3ef5cd74136b4f44f07cf9c6034b17b25bce3ebc6ea0a869cd3",
+  "harness_sha256": {
+    "run.py": "173fa8abd2d1d319580f231a30b17573ba25308192d853bacb631ac095589464",
+    "recorder.py": "4b2205a94f148834372183fd28637e41fcb36e21ba83fc1758988a71535ef1b1",
+    "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
+  },
+  "test_sources": {},
+  "reason": "interpreter failed startup",
+  "returncode": null,
+  "counts": {
+    "NOTRUN": 6171
+  },
+  "state": null,
+  "collection_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "upstream_ids": {},
+  "outcomes": []
+}
