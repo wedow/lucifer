@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Group all recorded oracle SKIP reasons without changing their denominator."""
+import argparse
+from collections import Counter
+import csv
+import json
+from pathlib import Path
+import re
+
+
+def category(reason):
+    text = reason.lower()
+    if 'resource' in text and any(x in text for x in ('not enabled', 'omission', 'omitted', 'not generated')) or 'network is not enabled' in text:
+        return 'Resource policy'
+    if any(x in text for x in ('windows', 'win32', 'macos', 'mac os', 'os x', 'osx', 'ios', 'android', 'emscripten', 'wasi', 'musllinux', 'linux and', 'ppc double', '32-bit', '32 bit', 'winreg', '_winapi', '_wmi', 'winfunctype', 'ctypes.oledll', 'ntfs', "'nt' module", 'path separator')):
+        return 'Other platforms'
+    if 'x86_v4' in text or 'non-baseline feature' in text:
+        return 'CPU features'
+    if any(x in text for x in ('critical bug', 'segfaults')):
+        return 'Upstream declarations and build guards'
+    if re.fullmatch(r'python \d+\.\d+ not available', text):
+        return 'Missing dependencies'
+    if any(x in text for x in ('fortran', 'mypy', 'cffi', 'pyinstaller', 'numba', 'numpy_quaddtype', 'hypothesis required', 'needs numpy', 'tzdata not installed', 'pyfakefs', 'big_o', '_tkinter', 'lib_gle', 'requires ifconfig', 'csh required', 'documentation sources', 'could not locate runnable browser')):
+        return 'Missing dependencies'
+    if any(x in text for x in ('locale', 'timezone', 'utc', 'tty', 'ttys', 'terminal', 'not enough memory', 'privilege', 'permission', 'operation not permitted', 'root', 'sockets required', 'socketcan', 'protocol not supported', 'not loaded', 'can isotp', 'can j1939', 'af_alg required', 'read-only', 'file system', 'filesystem')):
+        return 'Environment and OS features'
+    return 'Upstream declarations and build guards'
+
+
+def statuses(path):
+    with path.open() as stream:
+        return {r['id']: r['status'] for r in csv.DictReader(stream, delimiter='\t')}
+
+
+def audit(root, legacy_raw=None):
+    counts = Counter()
+    extra_counts = Counter()
+    module_reasons = {}
+    for suite in ('libtest', 'numpytest'):
+        directory = root / suite
+        inventory = json.loads((directory / 'inventory.json').read_text()) if suite == 'libtest' else None
+        profile = json.loads((directory / 'resource-profile.json').read_text()) if suite == 'libtest' else None
+        omitted = set()
+        if profile:
+            all_ids = {i for b in inventory.values() for e in b.values() for i in e['cases']}
+            generated = {i for b in ('gil', 'free-threaded') for e in profile[b].values() for i in e['cases']}
+            omitted = all_ids - generated
+        for runtime in ('cpython-3.14.10', 'cpython-3.14.10t'):
+            rows = statuses(directory / (runtime + '.tsv'))
+            reasons = {}
+            all_reasons = {}
+            if suite == 'libtest':
+                metadata = json.loads((directory / (runtime + '.json')).read_text())
+                for entry in metadata['modules'].values():
+                    reasons.update(entry.get('skip_reasons', {}))
+                    for ident, values in entry.get('additional_skip_reasons', {}).items():
+                        all_reasons.setdefault(ident, set()).update(values)
+                module_reasons[runtime] = {}
+                for name, entry in metadata['modules'].items():
+                    if entry.get('state') not in ('SKIPPED', 'RESOURCE_DENIED'):
+                        continue
+                    reason = entry.get('skip_reason')
+                    if reason is None and legacy_raw:
+                        log = legacy_raw / runtime / name / 'output.log'
+                        match = re.search(r' skipped -- (.+)', log.read_text(errors='replace')) if log.exists() else None
+                        reason = match[1] if match else None
+                    reason = re.sub(r'(?<!\w)/[^\s\"\'<>;,]+', '<path>', reason or 'unrecorded module skip reason')
+                    module_reasons[runtime][name] = dict(reason=reason, category=category(reason))
+                if legacy_raw:
+                    # Initial metadata omitted per-case reasons. Recover the
+                    # original observations, leaving the suite and IDs unchanged.
+                    observed = {}
+                    for path in (legacy_raw / runtime).glob('*/events.jsonl'):
+                        for line in path.read_text().splitlines():
+                            event = json.loads(line)
+                            if event.get('status') != 'SKIP':
+                                continue
+                            ident = event['id']
+                            match = re.fullmatch(r'(?:setUp|tearDown)(?:Class|Module) \((.+)\)', ident)
+                            targets = [i for i in rows if i.startswith(match[1] + '.')] if match else [ident]
+                            for ident in targets:
+                                observed[ident] = event.get('reason', '')
+                                all_reasons.setdefault(ident, set()).add(event.get('reason', ''))
+                    for ident, value in observed.items():
+                        reasons.setdefault(ident, value)
+                build = inventory['free-threaded' if runtime.endswith('t') else 'gil']
+                available = {i for e in build.values() for i in e['cases']}
+                for ident in rows:
+                    if ident in omitted:
+                        reasons.setdefault(ident, 'resource-profile omission (conditional generation)')
+                    elif ident not in available:
+                        reasons.setdefault(ident, 'not collected by this ABI build (union inventory)')
+            else:
+                # A newer shard supersedes older overlapping shard diagnostics.
+                records = [(p.name, json.loads(p.read_text())) for p in directory.glob(runtime + '-*.json')]
+                for _, record in sorted(records, key=lambda pair: (pair[1].get('recorded_at', ''), pair[0])):
+                    reasons.update(record.get('reasons', {}))
+            for ident, status in rows.items():
+                if status != 'SKIP':
+                    continue
+                reason = re.sub(r'(?<!\w)/[^\s\"\'<>;,]+', '<path>', reasons.get(ident, 'unrecorded skip reason')) or '(empty upstream reason)'
+                counts[category(reason), reason, suite, runtime] += 1
+                extras = {re.sub(r'(?<!\w)/[^\s\"\'<>;,]+', '<path>', extra) or '(empty upstream reason)'
+                          for extra in all_reasons.get(ident, set())}
+                for extra in extras:
+                    if extra != reason:
+                        extra_counts[category(extra), extra, suite, runtime] += 1
+    columns = [(s, r) for s in ('libtest', 'numpytest') for r in ('cpython-3.14.10', 'cpython-3.14.10t')]
+    return dict(cases=[dict(category=cat, reason=reason, counts={s + '/' + r: counts[cat, reason, s, r] for s, r in columns})
+                      for cat, reason in sorted({(c, r) for c, r, _, _ in counts})],
+                subtests=[dict(category=cat, reason=reason, counts={s + '/' + r: extra_counts[cat, reason, s, r] for s, r in columns})
+                          for cat, reason in sorted({(c, r) for c, r, _, _ in extra_counts})],
+                modules=module_reasons)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--results', type=Path, default=Path(__file__).resolve().parents[2] / 'results')
+    parser.add_argument('--legacy-raw', type=Path)
+    parser.add_argument('--output', required=True, type=Path)
+    args = parser.parse_args()
+    rows = audit(args.results, args.legacy_raw)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(rows, indent=2, sort_keys=True) + '\n')
+    print(len({(row['category'], row['reason']) for section in ('cases', 'subtests') for row in rows[section]}),
+          'distinct grouped reasons')
+
+
+if __name__ == '__main__':
+    main()

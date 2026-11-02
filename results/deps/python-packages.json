@@ -1,0 +1,45 @@
+{
+  "gil": {
+    "PyInstaller": "6.22.3",
+    "altgraph": "0.17.5",
+    "ast-serialize": "0.13.1",
+    "big-O": "0.11.0",
+    "cffi": "2.1.1",
+    "librt": "0.16.0",
+    "llvmlite": "0.50.0",
+    "mypy": "2.4.1",
+    "mypy_extensions": "1.1.0",
+    "numba": "0.68.1",
+    "numpy-quaddtype": "1.0.0",
+    "pathspec": "1.1.1",
+    "pycparser": "3.12",
+    "pyfakefs": "6.3.0",
+    "pyinstaller-hooks-contrib": "2026.9",
+    "typing_extensions": "4.16.0"
+  },
+  "jit": {
+    "docutils": "0.18.1",
+    "packaging": "25.0",
+    "psutil": "7.2.2",
+    "pyperf": "2.10.0",
+    "pyperformance": "1.14.0"
+  },
+  "t": {
+    "PyInstaller": "6.22.3",
+    "altgraph": "0.17.5",
+    "ast-serialize": "0.13.1",
+    "big-O": "0.11.0",
+    "cffi": "2.1.1",
+    "librt": "0.16.0",
+    "llvmlite": "0.50.0",
+    "mypy": "2.4.1",
+    "mypy_extensions": "1.1.0",
+    "numba": "0.68.1",
+    "numpy-quaddtype": "1.0.0",
+    "pathspec": "1.1.1",
+    "pycparser": "3.12",
+    "pyfakefs": "6.3.0",
+    "pyinstaller-hooks-contrib": "2026.9",
+    "typing_extensions": "4.16.0"
+  }
+}

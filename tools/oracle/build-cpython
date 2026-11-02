@@ -3,15 +3,23 @@
 set -eu
 
 die() { printf '%s\n' "build-cpython: $*" >&2; exit 1; }
-usage() { die 'usage: build-cpython TAG PREFIX [--disable-gil]'; }
-[ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
+usage() { die 'usage: build-cpython TAG PREFIX [--disable-gil | --enable-experimental-jit] [--rebuild]'; }
+[ "$#" -ge 2 ] || usage
 tag=$1
 prefix=$2
+shift 2
 gil_flag=
-if [ "$#" -eq 3 ]; then
-    [ "$3" = --disable-gil ] || usage
-    gil_flag=--disable-gil
-fi
+jit_flag=
+rebuild=no
+for flag do
+    case $flag in
+        --disable-gil) gil_flag=$flag ;;
+        --enable-experimental-jit) jit_flag=--enable-experimental-jit=yes ;;
+        --rebuild) rebuild=yes ;;
+        *) usage ;;
+    esac
+done
+[ -z "$gil_flag" ] || [ -z "$jit_flag" ] || die 'CPython 3.14 does not support JIT with free threading'
 case $tag in v3.[0-9]*.[0-9]*) ;; *) die 'TAG must be a Python 3 release tag' ;; esac
 git check-ref-format "refs/tags/$tag" || die 'invalid tag'
 case $prefix in /*) ;; *) prefix=$PWD/$prefix ;; esac
@@ -64,6 +72,7 @@ configure_command=$(
     printf ' '; quote "--prefix=$prefix"
     printf ' --enable-optimizations=no'
     [ -z "$gil_flag" ] || printf ' %s' "$gil_flag"
+    [ -z "$jit_flag" ] || printf ' %s' "$jit_flag"
 )
 {
     printf 'TAG=%s\nCOMMIT=%s\nREPOSITORY=%s\n' "$tag" "$commit" "$repository"
@@ -77,15 +86,21 @@ suffix=
 [ -z "$gil_flag" ] || suffix=t
 python=bin/python$minor$suffix
 verify() {
-    "$1" -I -c 'import sys, sysconfig; assert sys.version.split()[0] == sys.argv[1]; disabled = sys.argv[2] == "t"; assert bool(sysconfig.get_config_var("Py_GIL_DISABLED")) == disabled; assert sys._is_gil_enabled() == (not disabled)' "$version" "$suffix"
+    "$1" -I -c 'import sys, sysconfig; assert sys.version.split()[0] == sys.argv[1]; disabled = sys.argv[2] == "t"; assert bool(sysconfig.get_config_var("Py_GIL_DISABLED")) == disabled; assert sys._is_gil_enabled() == (not disabled); assert not sys.argv[3] or sys._jit.is_available()' "$version" "$suffix" "$jit_flag"
 }
+replacing=no
 if [ -f "$prefix/ORACLE-INFO" ]; then
     cmp -s "$work/REQUEST" "$prefix/ORACLE-INFO" || die 'existing oracle provenance differs; choose a new PREFIX and work directory'
     verify "$prefix/$python" || die 'existing oracle failed verification'
-    printf 'Oracle already installed: %s\n' "$prefix/$python"
-    exit 0
+    if [ "$rebuild" = no ]; then
+        printf 'Oracle already installed: %s\n' "$prefix/$python"
+        exit 0
+    fi
+    replacing=yes
 fi
-if [ -d "$prefix" ]; then
+if [ "$replacing" = yes ]; then
+    [ ! -e "$work/previous-prefix" ] || die 'previous-prefix backup exists; recover it before rebuilding'
+elif [ -d "$prefix" ]; then
     rmdir "$prefix" 2>/dev/null || die 'PREFIX is nonempty without ORACLE-INFO; choose an empty prefix'
 elif [ -e "$prefix" ]; then
     die 'PREFIX exists and is not a directory'
@@ -105,9 +120,10 @@ cp "$work/REQUEST" "$work/BUILD-REQUEST"
 # Publishing with rename must not fall back to copying a partial installation.
 mkdir -p "$work/build" "$stage"
 cd "$work/build"
-if [ ! -f Makefile ]; then
+if [ ! -f Makefile ] || [ "$rebuild" = yes ]; then
     set -- "$work/source/configure" "--prefix=$prefix" --enable-optimizations=no
     [ -z "$gil_flag" ] || set -- "$@" "$gil_flag"
+    [ -z "$jit_flag" ] || set -- "$@" "$jit_flag"
     printf 'Configure: %s\n' "$configure_command"
     "$@" > configure.log 2>&1 || { tail -n 60 configure.log >&2; die 'configure failed (see configure.log)'; }
 fi
@@ -115,6 +131,15 @@ make -j "$jobs" > build.log 2>&1 || { tail -n 80 build.log >&2; die 'build faile
 make -j "$jobs" install DESTDIR="$stage" > install.log 2>&1 || { tail -n 80 install.log >&2; die 'install failed (see install.log)'; }
 verify "$stage$prefix/$python" || die 'staged interpreter failed verification'
 cp "$work/REQUEST" "$stage$prefix/ORACLE-INFO"
-[ ! -e "$prefix" ] && [ ! -L "$prefix" ] || die 'PREFIX appeared during the build; refusing to overwrite it'
-mv "$stage$prefix" "$prefix"
+if [ "$replacing" = yes ]; then
+    mv "$prefix" "$work/previous-prefix"
+    if ! mv "$stage$prefix" "$prefix"; then
+        mv "$work/previous-prefix" "$prefix"
+        die 'publication failed; restored the previous oracle'
+    fi
+    rm -rf "$work/previous-prefix"
+else
+    [ ! -e "$prefix" ] && [ ! -L "$prefix" ] || die 'PREFIX appeared during the build; refusing to overwrite it'
+    mv "$stage$prefix" "$prefix"
+fi
 printf 'Installed oracle: %s\n' "$prefix/$python"

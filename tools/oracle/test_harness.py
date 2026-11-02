@@ -131,6 +131,24 @@ class BuilderTests(Commands):
         self.assertFalse(self.prefix.exists())
         self.assertFalse(any(call[0] == "make" for call in self.calls()))
 
+    def test_rebuild_reconfigures_and_preserves_install_on_failure(self):
+        self.assertEqual(self.build().returncode, 0)
+        binary = self.prefix / 'bin/python3.14'
+        original = binary.read_bytes()
+        self.environment['FAKE_INSTALL_FAIL'] = '1'
+        self.assertNotEqual(self.build('--rebuild').returncode, 0)
+        self.assertEqual(binary.read_bytes(), original)
+        del self.environment['FAKE_INSTALL_FAIL']
+        result = self.build('--rebuild')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sum(call[0] == 'configure' for call in self.calls()), 3)
+
+    def test_jit_configuration(self):
+        result = self.build('--enable-experimental-jit')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--enable-experimental-jit=yes', (self.prefix / 'ORACLE-INFO').read_text())
+        self.assertNotEqual(self.build('--enable-experimental-jit', '--disable-gil').returncode, 0)
+
     def test_reject_checkout_mismatch(self):
         self.environment["FAKE_HEAD"] = "2" * 40
         result = self.build()

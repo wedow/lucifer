@@ -5,7 +5,7 @@
       "arguments": [],
       "compiler": "cc",
       "configure_args": "'--prefix=<local-path>' '--enable-optimizations=no' 'CC=cc' 'CFLAGS=-O2' 'LDFLAGS=' 'CPPFLAGS='",
-      "executable_sha256": "6441077694980135b100184dae309c6e303c50519d6b694daa7997fb8be954df",
+      "executable_sha256": "d725fcb52dfa077036df830026022008373fba32085d9eebf600780140a3f51e",
       "free_threaded": false,
       "gil_enabled": true,
       "implementation": "cpython",
@@ -34,13 +34,48 @@
       ]
     }
   },
+  "cpython-3.14.10-jit": {
+    "default": {
+      "abi_flags": "",
+      "arguments": [],
+      "compiler": "cc",
+      "configure_args": "'--prefix=<local-path>' '--enable-optimizations=no' '--enable-experimental-jit=yes' 'CC=cc' 'CFLAGS=-O2' 'LDFLAGS=' 'CPPFLAGS='",
+      "executable_sha256": "64049e61fd6c1359a7a25c465a2ccd9c1bcbd65f84f0d4c251c1d6293a33d48a",
+      "free_threaded": false,
+      "gil_enabled": true,
+      "implementation": "cpython",
+      "jit_available": true,
+      "jit_enabled": false,
+      "version": [
+        3,
+        14,
+        10
+      ]
+    },
+    "jit_followup": null,
+    "python_jit_1": {
+      "abi_flags": "",
+      "compiler": "cc",
+      "configure_args": "'--prefix=<local-path>' '--enable-optimizations=no' '--enable-experimental-jit=yes' 'CC=cc' 'CFLAGS=-O2' 'LDFLAGS=' 'CPPFLAGS='",
+      "free_threaded": false,
+      "gil_enabled": true,
+      "implementation": "cpython",
+      "jit_available": true,
+      "jit_enabled": true,
+      "version": [
+        3,
+        14,
+        10
+      ]
+    }
+  },
   "cpython-3.14.10t": {
     "default": {
       "abi_flags": "t",
       "arguments": [],
       "compiler": "cc",
       "configure_args": "'--prefix=<local-path>' '--enable-optimizations=no' '--disable-gil' 'CC=cc' 'CFLAGS=-O2' 'LDFLAGS=' 'CPPFLAGS='",
-      "executable_sha256": "6c333424df584c3adaf4a7f9de9c9a2b2b6440debb8b9a6c6bdc52a968b8f1b5",
+      "executable_sha256": "424013c6105660b2580cddb421e02a5fd184bbb03d6ff547d728d55f06b24cc5",
       "free_threaded": true,
       "gil_enabled": false,
       "implementation": "cpython",

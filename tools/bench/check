@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Binary-level regression checks for benchmark drivers, using no real timings."""
 import csv
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -12,6 +13,31 @@ from steady import median_interval, steady_start, summarize
 
 
 class BenchCheck(unittest.TestCase):
+    def test_jit_reaches_probe_and_benchmark(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fake = root / 'jit-python'
+            fake.write_text('#!' + sys.executable + '\nimport os, json, sys\n'
+                "enabled = os.environ.get('PYTHON_JIT') == '1'\n"
+                "if '-c' in sys.argv:\n print(json.dumps(dict(version=[3,14,10], jit_available=True, jit_enabled=enabled)))\n"
+                "else:\n assert enabled\n name = sys.argv[-2]\n"
+                " for i in range(20): print(name + ': iterations=1 runtime: 600000us')\n"
+                " print('Total Runtime: 12000000us')\n")
+            fake.chmod(0o755)
+            self.invoke(ROOT / 'tools/bench/awfy', '--python', fake, '--runtime', 'jit',
+                        '--jit', '1', '--benchmarks', 'Bounce', '--output', root)
+            rows = {r['id']: r['status'] for r in self.manifest(root, 'jit')}
+            self.assertEqual(rows['Bounce'], 'PASS')
+            self.assertTrue(json.loads((root / 'jit.data.json').read_text())['runtime_info']['jit_enabled'])
+            unavailable = root / 'no-jit'
+            unavailable.write_text('#!' + sys.executable + '\nprint(\'{"version":[3,14,10],"jit_available":false,"jit_enabled":false}\')\n')
+            unavailable.chmod(0o755)
+            for suite in ('awfy', 'pyperformance'):
+                args = [ROOT / 'tools/bench' / suite] + (['run'] if suite == 'pyperformance' else [])
+                self.invoke(*args, '--python', unavailable, '--runtime', 'unavailable',
+                            '--jit', '1', '--output', root / suite)
+                self.assertEqual({r['status'] for r in self.manifest(root / suite, 'unavailable')}, {'NOTRUN'})
+
     def invoke(self, *args):
         result = subprocess.run([sys.executable, *map(str, args)], capture_output=True,
                                 text=True, timeout=30)

@@ -21,7 +21,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[2]
 BRIDGE = Path(__file__).with_name('bridge.py')
 RESULTS = ROOT / 'results' / 'libtest'
-RESOURCES = 'all,-network,-urlfetch,-gui,-largefile,-cpu,-walltime'
+RESOURCES = 'all,-network,-urlfetch,tzdata,xpickle'
 STATUSES = 'PASS FAIL ERROR SKIP XFAIL XPASS TIMEOUT CRASH NOTRUN'.split()
 RANK = {s: i for i, s in enumerate(['PASS', 'SKIP', 'XFAIL', 'NOTRUN', 'XPASS', 'FAIL', 'ERROR', 'CRASH', 'TIMEOUT'])}
 PROBE = "import json,sys,sysconfig,test; print(json.dumps({'version':list(sys.version_info[:3]),'implementation':sys.implementation.name,'free_threaded':bool(sysconfig.get_config_var('Py_GIL_DISABLED')),'gil_enabled':getattr(sys,'_is_gil_enabled',lambda:True)(),'dont_write_bytecode':sys.dont_write_bytecode,'test':test.__file__}))"
@@ -112,6 +112,10 @@ def clean(text, python, scratch):
     # Diagnostics may contain installation/source paths, account names or host
     # details. Keep raw logs local; publish only IDs, states and portable argv.
     return text
+
+
+def public_reason(text):
+    return re.sub(r'(?<!\w)/[^\s\"\'<>;,]+', '<path>', str(text))
 
 
 def probe(python, env, raw, timeout):
@@ -256,6 +260,19 @@ def run_module(module, ids, args, python, env, raw, unavailable):
                     if key.startswith(match[1] + '.'):
                         merge_case(observed, key, event['status'], 0)
     rows = {}
+    reasons = {}
+    all_reasons = {}
+    for event in records:
+        if event.get('status') != 'SKIP' or not isinstance(event.get('id'), str):
+            continue
+        key = event['id']
+        match = re.fullmatch(r'(?:setUp|tearDown)(?:Class|Module) \((.+)\)', key)
+        targets = [i for i in ids if i.startswith(match[1] + '.')] if match else [key]
+        for ident in targets:
+            if ident in ids:
+                reason = public_reason(event.get('reason', ''))
+                reasons[ident] = reason
+                all_reasons.setdefault(ident, set()).add(reason)
     if observation_error and fallback not in ('TIMEOUT', 'CRASH'):
         fallback = 'ERROR'
     for key in ids:
@@ -269,12 +286,22 @@ def run_module(module, ids, args, python, env, raw, unavailable):
             rows[key] = ('SKIP', 0)
         else:
             rows[key] = (fallback, 0)
+    module_skip = None
+    if disposition in ('SKIPPED', 'RESOURCE_DENIED'):
+        match = re.search(r' skipped -- (.+)', (directory / 'output.log').read_text(errors='replace'))
+        module_skip = public_reason(match[1]) if match else 'upstream module skip'
     detail = {'state': disposition, 'returncode': code, 'seconds': elapsed,
               'command': [clean(part, python, raw) for part in command],
               'counts': dict(Counter(status for status, _ in rows.values())),
               'unexpected_ids': sorted(set(observed) - set(ids)),
               'observation_error': observation_error,
+              'skip_reasons': {key: reasons.get(key, module_skip or unavailable.get(key, 'module skipped'))
+                               for key, (status, _) in sorted(rows.items()) if status == 'SKIP'},
+              'additional_skip_reasons': {key: sorted(values - {reasons[key]}) for key, values in sorted(all_reasons.items())
+                                          if rows[key][0] == 'SKIP' and len(values) > 1},
               'environment': {key: env.get(key) for key in ('PYTHONHASHSEED', 'PYTHON_JIT', 'PYTHONDONTWRITEBYTECODE', 'LC_ALL', 'TZ')}}
+    if module_skip:
+        detail['skip_reason'] = module_skip
     print(f'{module}: {detail["counts"]} ({elapsed:.1f}s)', flush=True)
     return rows, detail
 
@@ -326,7 +353,7 @@ def run(args, python, env, raw):
         metadata['startup'] = 'NOTRUN'
     else:
         metadata['startup'] = 'PASS'
-        unavailable = set()
+        unavailable = {}
         profile_path = args.results / 'resource-profile.json'
         if profile_path.exists():
             profile = json.loads(profile_path.read_text())
@@ -335,12 +362,12 @@ def run(args, python, env, raw):
                     entries = [profile[build].get(module, {}) for build in inventory]
                     if all(entry.get('status') in ('COLLECTED', 'EMPTY_OR_SKIPPED') for entry in entries):
                         generated = {key for entry in entries for key in entry['cases']}
-                        unavailable.update(ids - generated)
+                        unavailable.update(dict.fromkeys(ids - generated, 'resource-profile omission (conditional generation)'))
         metadata['resource_omitted_cases'] = len(unavailable)
         if args.source == 'installed' and info['implementation'] == 'cpython' and info['version'] == [3, 14, 10]:
             build = inventory.get('free-threaded' if info['free_threaded'] else 'gil', {})
             available = {case for entry in build.values() for case in entry['cases']}
-            unavailable.update(set(expected) - available)
+            unavailable.update(dict.fromkeys(set(expected) - available, 'not collected by this ABI build (union inventory)'))
         with ThreadPoolExecutor(max_workers=args.jobs) as executor:
             futures = {executor.submit(run_module, module, modules[module], args, python,
                                        env, raw, unavailable): module for module in selected}
@@ -390,7 +417,9 @@ def main():
         parser.error('--python must be a nonempty command')
     # Relative interpreter paths are resolved before moving into private dirs.
     if '/' in python[0]:
-        python[0] = str(Path(python[0]).resolve())
+        # Following a venv's executable symlink changes its sys.prefix and
+        # silently drops that environment's test dependencies.
+        python[0] = str(Path(python[0]).absolute())
     env = environment(args.source)
     if args.action == 'collect':
         collect(args, python, env, raw)

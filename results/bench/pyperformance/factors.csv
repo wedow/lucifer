@@ -8,6 +8,15 @@ cpython-3.14.10,json_loads,PASS,1.0
 cpython-3.14.10,python_startup,PASS,1.0
 cpython-3.14.10,regex_dna,PASS,1.0
 cpython-3.14.10,richards,PASS,1.0
+cpython-3.14.10-jit,async_generators,PASS,1.0572097488782468
+cpython-3.14.10-jit,comprehensions,PASS,1.0423621444654403
+cpython-3.14.10-jit,docutils,PASS,1.0248828574621303
+cpython-3.14.10-jit,float,PASS,0.9530200488243603
+cpython-3.14.10-jit,generators,PASS,0.9961120093270037
+cpython-3.14.10-jit,json_loads,PASS,1.0016270333267596
+cpython-3.14.10-jit,python_startup,PASS,1.0175327538646506
+cpython-3.14.10-jit,regex_dna,PASS,0.9970996986936645
+cpython-3.14.10-jit,richards,PASS,0.7530433525686289
 cpython-3.14.10t,async_generators,PASS,1.037631318091786
 cpython-3.14.10t,comprehensions,PASS,1.186915063063455
 cpython-3.14.10t,docutils,PASS,1.14008264175569

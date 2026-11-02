@@ -24,13 +24,13 @@ class HarnessChecks(unittest.TestCase):
         (self.root / 'inventory.json').write_text(json.dumps({
             'free-threaded': {'test_fixture': {'cases': self.ids}}}))
 
-    def run_fake(self, body=None, timeout=0.15, resume=False):
+    def run_fake(self, body=None, timeout=0.15, resume=False, interpreter=None):
         fake = self.root / 'fake.py'
         if body is None:
             command = str(self.root / 'absent')
         else:
             fake.write_text(body)
-            command = shlex.join([sys.executable, str(fake)])
+            command = shlex.join([interpreter or sys.executable, str(fake)])
         completed = subprocess.run([
             sys.executable, str(RUNNER), 'run', '--python', command,
             '--runtime', 'fake', '--results', str(self.root), '--source', 'installed',
@@ -49,6 +49,20 @@ class HarnessChecks(unittest.TestCase):
 
     def test_startup_exit_one(self):
         self.assertEqual(self.run_fake('raise SystemExit(1)\n'), ['NOTRUN'] * 3)
+
+    def test_virtual_environment_interpreter_is_preserved(self):
+        venv = self.root / 'venv'
+        subprocess.run([sys.executable, '-m', 'venv', '--without-pip', str(venv)],
+                       check=True, capture_output=True, timeout=30)
+        body = ('import sys\nassert sys.prefix == ' + repr(str(venv)) + '\n'
+                + self.fake_probe() + """
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'PASSED'}) + '\\n')
+with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
+    for name in ('first','second','third'):
+        stream.write(json.dumps({'id':'test_fixture.Example.test_' + name,'status':'PASS','seconds':0}) + '\\n')
+""")
+        self.assertEqual(self.run_fake(body, timeout=2, interpreter=str(venv / 'bin/python')), ['PASS'] * 3)
 
     def test_startup_hang(self):
         self.assertEqual(self.run_fake('import time; time.sleep(60)\n'), ['NOTRUN'] * 3)
@@ -105,9 +119,13 @@ with open(sys.argv[sys.argv.index('--junit-xml') + 1], 'w') as stream:
                  '</testsuite></testsuites>')
 with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
     stream.write(json.dumps({'id':'test_fixture.Example.test_first','status':'FAIL','seconds':0.3}) + '\\n')
-    stream.write(json.dumps({'id':'test_fixture.Example.test_third','status':'SKIP','seconds':0}) + '\\n')
+    stream.write(json.dumps({'id':'test_fixture.Example.test_third','status':'SKIP','seconds':0,'reason':'missing <path> fixture'}) + '\\n')
+    stream.write(json.dumps({'id':'test_fixture.Example.test_third','status':'SKIP','seconds':0,'reason':'other skipped subtest'}) + '\\n')
 """
         self.assertEqual(self.run_fake(body), ['FAIL', 'XFAIL', 'SKIP'])
+        detail = json.loads((self.root / 'fake.json').read_text())['modules']['test_fixture']
+        self.assertEqual(detail['skip_reasons'], {self.ids[2]: 'other skipped subtest'})
+        self.assertEqual(detail['additional_skip_reasons'], {self.ids[2]: ['missing <path> fixture']})
 
     def test_fixture_error_is_not_a_pass(self):
         body = self.fake_probe() + """
@@ -154,7 +172,7 @@ with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
 
     def test_resource_omission_stays_in_denominator(self):
         (self.root / 'resource-profile.json').write_text(json.dumps({
-            'resources': 'all,-network,-urlfetch,-gui,-largefile,-cpu,-walltime',
+            'resources': 'all,-network,-urlfetch,tzdata,xpickle',
             'free-threaded': {'test_fixture': {'cases': self.ids[:2], 'status':'COLLECTED'}},
         }))
         self.assertEqual(self.run_fake(self.fake_probe() + """

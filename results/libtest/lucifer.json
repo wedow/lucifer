@@ -6,11 +6,11 @@
     "PYTHON_JIT": "0",
     "TZ": "UTC"
   },
-  "expected_sha256": "5474a316ba0e267fb1965542d29c95ffff8384892263e4825da57479d060ab52",
+  "expected_sha256": "5d6e4bdea334779094405d8e8ccf1d35451f5f3de4daf1f3667356e6ca8ff38e",
   "jobs": 2,
   "modules": {},
   "probe": {},
-  "resources": "all,-network,-urlfetch,-gui,-largefile,-cpu,-walltime",
+  "resources": "all,-network,-urlfetch,tzdata,xpickle",
   "source": "vendored",
   "startup": "NOTRUN",
   "timeout": 180

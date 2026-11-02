@@ -5,12 +5,17 @@ import base64
 import csv
 import hashlib
 import json
+import io
 from pathlib import Path
 import shutil
+import runpy
 import subprocess
 import sys
+import tarfile
+import types
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 HERE = Path(__file__).resolve().parent
@@ -46,10 +51,12 @@ class HarnessChecks(unittest.TestCase):
             "import json,os,pathlib,sys,time\n"
             "pathlib.Path(__file__+'.started').touch()\n"
             "mode=pathlib.Path(__file__+'.mode').read_text()\n"
+            "if mode=='pass':assert os.environ['NUMPYTEST_SITE'] not in os.environ['PYTHONPATH'].split(os.pathsep)\n"
             "if mode=='fail':sys.exit(42)\n"
             "if mode=='badprobe':print('[]');sys.exit()\n"
+            "if mode=='wrongsite':print(json.dumps(dict(numpy='1.0',numpy_file='/different/numpy/__init__.py')));sys.exit()\n"
             "if '-c' in sys.argv:\n"
-            " print(json.dumps(dict(numpy='1.0',version='3.14.10',free_threaded_build=True,gil_enabled=False)));sys.exit()\n"
+            " print(json.dumps(dict(numpy='1.0',numpy_file=os.environ['NUMPYTEST_SITE']+'/numpy/__init__.py',version='3.14.10',free_threaded_build=True,gil_enabled=False)));sys.exit()\n"
             "ids=" + repr(self.ids) + "\n"
             "shards=json.loads(os.environ['NUMPYTEST_SHARDS'])\n"
             "ids=[i for i in ids if any(i.startswith(s) for s in shards)]\n"
@@ -70,6 +77,7 @@ class HarnessChecks(unittest.TestCase):
             " if i:E.SubElement(case,'skipped',type='pytest.xfail',message='known upstream issue')\n"
             " if not i and mode=='xpass':E.SubElement(props,'property',name='outcome',value='XPASS')\n"
             " if not i and mode=='error':E.SubElement(case,'error',message='setup failed')\n"
+            " if not i and mode=='threadwarn' and 'error::pytest.PytestUnhandledThreadExceptionWarning' in sys.argv:E.SubElement(case,'error',message='unhandled thread exception')\n"
             " if not i and mode=='failcase':E.SubElement(case,'failure',message='assertion failed')\n"
             "E.ElementTree(root).write(sys.argv[sys.argv.index('--junitxml')+1])\n"
             "pathlib.Path(os.environ['NUMPYTEST_STATE']).write_text(json.dumps(dict(gil_enabled=False)))\n"
@@ -96,7 +104,7 @@ class HarnessChecks(unittest.TestCase):
         self.assertEqual(self.rows(), dict.fromkeys(self.ids, "NOTRUN"))
 
     def test_failing_interpreter(self):
-        for mode in ("fail", "badprobe"):
+        for mode in ("fail", "badprobe", "wrongsite"):
             with self.subTest(mode=mode):
                 self.mode(mode)
                 self.assertEqual(self.invoke().returncode, 0)
@@ -107,6 +115,46 @@ class HarnessChecks(unittest.TestCase):
         outcome = self.invoke()
         self.assertEqual(outcome.returncode, 0, outcome.stderr)
         self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "XFAIL"])))
+
+    def test_pinned_documentation_fixtures_and_tampering(self):
+        archive = self.cache / 'source.tar.gz'
+        with tarfile.open(archive, 'w:gz') as package:
+            member = tarfile.TarInfo('numpy-1.0/doc/source/f2py/code/example.f')
+            member.size = 7
+            package.addfile(member, io.BytesIO(b'example'))
+        pinfile = self.tool / 'PIN'
+        pin = json.loads(pinfile.read_text())
+        pin['sdist'] = dict(filename=archive.name, sha256=hashlib.sha256(archive.read_bytes()).hexdigest())
+        pinfile.write_text(json.dumps(pin))
+        functions = runpy.run_path(str(self.tool / 'run.py'))
+        info = functions['prepare_docs'](self.cache, self.site)
+        self.assertEqual(functions['verify_docs'](self.site), info)
+        self.assertEqual((self.site / 'fixture.so').read_bytes(), b'unmodified')
+        (self.site / 'doc/source/f2py/code/example.f').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'source mismatch'):
+            functions['verify_docs'](self.site)
+        archive.write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'archive hash mismatch'):
+            functions['prepare_docs'](self.cache, self.site)
+
+    def test_typing_relocation_preserves_error_and_original_fixture(self):
+        source = self.root / 'data'
+        (source / 'pass').mkdir(parents=True)
+        fixture = source / 'pass/example.py'
+        fixture.write_text('invalid fixture\n')
+        def fake_run(args):
+            copied = Path(args[-1]) / 'example.py'
+            self.assertNotEqual(copied, fixture)
+            self.assertEqual(copied.read_bytes(), fixture.read_bytes())
+            return str(copied) + ':1: error: sentinel\n', '', 1
+        module = types.SimpleNamespace(DATA_DIR=str(source), api=types.SimpleNamespace(run=fake_run))
+        stub = types.SimpleNamespace(hookimpl=lambda **kw: lambda function: function)
+        with patch.dict(sys.modules, pytest=stub):
+            functions = runpy.run_path(str(HERE / 'recorder.py'))
+        info = functions['relocate_typing_inputs'](module, self.root / 'work')
+        self.assertEqual(info['files'], 1)
+        self.assertEqual(module.api.run([str(source / 'pass')]), (str(fixture) + ':1: error: sentinel\n', '', 1))
+        self.assertEqual(fixture.read_text(), 'invalid fixture\n')
 
     def test_tampered_wheel_payload(self):
         (self.site / "fixture.so").write_bytes(b"changed")
@@ -120,7 +168,7 @@ class HarnessChecks(unittest.TestCase):
         self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "CRASH"])))
 
     def test_xpass_error_and_failure_are_not_passes(self):
-        for mode, status in [("xpass", "XPASS"), ("error", "ERROR"), ("failcase", "FAIL")]:
+        for mode, status in [("xpass", "XPASS"), ("error", "ERROR"), ("failcase", "FAIL"), ("threadwarn", "ERROR")]:
             with self.subTest(mode=mode):
                 self.mode(mode)
                 self.invoke()
@@ -131,6 +179,12 @@ class HarnessChecks(unittest.TestCase):
         self.mode("failcase")
         self.assertNotEqual(self.invoke("--shard", self.ids[0].split("[")[0]).returncode, 0)
         self.assertEqual(self.rows(), dict(zip(self.ids, ["FAIL", "XFAIL"])))
+
+    def test_failing_startup_clears_unselected_shard_results(self):
+        self.assertEqual(self.invoke().returncode, 0)
+        self.mode('fail')
+        self.assertEqual(self.invoke('--shard', self.ids[0].split('[')[0]).returncode, 0)
+        self.assertEqual(self.rows(), dict.fromkeys(self.ids, 'NOTRUN'))
 
     def test_empty_collection_does_not_replace_denominator(self):
         self.mode("empty")

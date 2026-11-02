@@ -1,0 +1,3 @@
+# Optional complexity tests; source hash from PyPI JSON.
+# Install with --no-deps --no-build-isolation into the pinned test venv.
+big-O==0.11.0 --hash=sha256:e7eb227fac0cdd5a2349e00be26247175ae3e131c5141837d90096cb458db3db

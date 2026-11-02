@@ -1,0 +1,91 @@
+{
+  "cpython-3.14.10": [
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_folds_and_gaps",
+      "status": "FAIL"
+    },
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_folds_from_utc",
+      "status": "FAIL"
+    },
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_unambiguous",
+      "status": "FAIL"
+    },
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_folds_and_gaps",
+      "status": "FAIL"
+    },
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_folds_from_utc",
+      "status": "FAIL"
+    },
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_unambiguous",
+      "status": "FAIL"
+    }
+  ],
+  "cpython-3.14.10t": [
+    {
+      "after": "FAIL",
+      "id": "test.test_build_details.CPythonBuildDetailsTests.test_base_interpreter",
+      "status": "FAIL"
+    },
+    {
+      "after": "PASS",
+      "id": "test.test_multiprocessing_fork.test_processes.WithProcessesTestQueue.test_put",
+      "status": "FAIL"
+    },
+    {
+      "after": "PASS",
+      "id": "test.test_multiprocessing_spawn.test_processes.WithProcessesTestProcess.test_interrupt",
+      "status": "ERROR"
+    },
+    {
+      "after": "PASS",
+      "id": "test.test_ssl.ThreadedTests.test_ssl_in_multiple_threads",
+      "status": "ERROR"
+    },
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_folds_and_gaps",
+      "status": "FAIL"
+    },
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_folds_from_utc",
+      "status": "FAIL"
+    },
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_unambiguous",
+      "status": "FAIL"
+    },
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_folds_and_gaps",
+      "status": "FAIL"
+    },
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_folds_from_utc",
+      "status": "FAIL"
+    },
+    {
+      "after": "FAIL",
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_unambiguous",
+      "status": "FAIL"
+    },
+    {
+      "after": "REPLACED_BY_REAL_CASES",
+      "id": "unittest.loader.ModuleSkipped.test.test_zipfile._path.test_complexity",
+      "status": "ERROR"
+    }
+  ]
+}
