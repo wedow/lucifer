@@ -1,0 +1,67 @@
+{
+  "plan": {
+    "min_time": 0.05,
+    "processes": 3,
+    "values": 3,
+    "warmups": 2
+  },
+  "requirements_sha256": "efcf1b19c0e214b2a72969f9ecb632ab54cdd82e2173f54e3205a6ca98ce2c60",
+  "rows": [
+    {
+      "id": "async_generators",
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    {
+      "id": "comprehensions",
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    {
+      "id": "docutils",
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    {
+      "id": "float",
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    {
+      "id": "generators",
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    {
+      "id": "json_loads",
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    {
+      "id": "python_startup",
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    {
+      "id": "regex_dna",
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    },
+    {
+      "id": "richards",
+      "reason": "missing or failing interpreter",
+      "seconds": 0,
+      "status": "NOTRUN"
+    }
+  ],
+  "runtime": "lucifer",
+  "runtime_info": null
+}

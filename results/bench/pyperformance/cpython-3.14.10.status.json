@@ -1,0 +1,110 @@
+{
+  "plan": {
+    "min_time": 0.05,
+    "processes": 3,
+    "values": 3,
+    "warmups": 2
+  },
+  "requirements_sha256": "efcf1b19c0e214b2a72969f9ecb632ab54cdd82e2173f54e3205a6ca98ce2c60",
+  "rows": [
+    {
+      "correctness": "PASS",
+      "id": "async_generators",
+      "log": "....\nasync_generators: Mean +- std dev: 368 ms +- 11 ms\n",
+      "reason": "",
+      "seconds": 8.330113125965,
+      "source_sha256": "a3f3c53a59529122a3c49fd97ef41ef02d2e732d955edfdff48b477c688793dc",
+      "status": "PASS"
+    },
+    {
+      "correctness": "PASS",
+      "id": "comprehensions",
+      "log": "....\nWARNING: the benchmark result may be unstable\n* Not enough samples to get a stable result (95% certainly of less than 1% variation)\n\nTry to rerun the benchmark with more runs, values and/or loops.\nRun 'python -m pyperf system tune' command to reduce the system jitter.\nUse pyperf stats, pyperf dump and pyperf hist to analyze results.\nUse --quiet option to hide these warnings.\n\ncomprehensions: Mean +- std dev: 17.6 us +- 0.2 us\n",
+      "reason": "",
+      "seconds": 2.081700841197744,
+      "source_sha256": "d8856545886a801f4dfaf8f778ffaa4a859e113b6689427c6e98f9f7e9c207d2",
+      "status": "PASS"
+    },
+    {
+      "correctness": "PASS",
+      "id": "docutils",
+      "log": "....\nWARNING: the benchmark result may be unstable\n* Not enough samples to get a stable result (95% certainly of less than 1% variation)\n\nTry to rerun the benchmark with more runs, values and/or loops.\nRun 'python -m pyperf system tune' command to reduce the system jitter.\nUse pyperf stats, pyperf dump and pyperf hist to analyze results.\nUse --quiet option to hide these warnings.\n\ndocutils: Mean +- std dev: 2.53 sec +- 0.03 sec\n",
+      "reason": "",
+      "seconds": 51.76931313890964,
+      "source_sha256": "a9ede54c8d3c33a213014c2659196f3ef27d5668c0a7332ebfcd694b765d741a",
+      "status": "PASS"
+    },
+    {
+      "correctness": "PASS",
+      "id": "float",
+      "log": "....\nWARNING: the benchmark result may be unstable\n* Not enough samples to get a stable result (95% certainly of less than 1% variation)\n\nTry to rerun the benchmark with more runs, values and/or loops.\nRun 'python -m pyperf system tune' command to reduce the system jitter.\nUse pyperf stats, pyperf dump and pyperf hist to analyze results.\nUse --quiet option to hide these warnings.\n\nfloat: Mean +- std dev: 73.0 ms +- 3.0 ms\n",
+      "reason": "",
+      "seconds": 2.1064129781443626,
+      "source_sha256": "7d969075a1423dac8b67e2882d5c04940fd729770572b1d81ad30c171169f5a0",
+      "status": "PASS"
+    },
+    {
+      "correctness": "PASS",
+      "id": "generators",
+      "log": "....\nWARNING: the benchmark result may be unstable\n* Not enough samples to get a stable result (95% certainly of less than 1% variation)\n\nTry to rerun the benchmark with more runs, values and/or loops.\nRun 'python -m pyperf system tune' command to reduce the system jitter.\nUse pyperf stats, pyperf dump and pyperf hist to analyze results.\nUse --quiet option to hide these warnings.\n\ngenerators: Mean +- std dev: 28.5 ms +- 0.5 ms\n",
+      "reason": "",
+      "seconds": 3.2335874552372843,
+      "source_sha256": "98736065fa609c8b7ae11ba3d7c0e8c2cf7e104ce7fd6ce6becc269cf63c6acf",
+      "status": "PASS"
+    },
+    {
+      "correctness": "PASS",
+      "id": "json_loads",
+      "log": "....\nWARNING: the benchmark result may be unstable\n* Not enough samples to get a stable result (95% certainly of less than 1% variation)\n\nTry to rerun the benchmark with more runs, values and/or loops.\nRun 'python -m pyperf system tune' command to reduce the system jitter.\nUse pyperf stats, pyperf dump and pyperf hist to analyze results.\nUse --quiet option to hide these warnings.\n\njson_loads: Mean +- std dev: 33.8 us +- 0.2 us\n",
+      "reason": "",
+      "seconds": 2.3716817619279027,
+      "source_sha256": "0112cf5de3a472341807e1eee537eb8d6c2d312250572ea0c793c64ea6487539",
+      "status": "PASS"
+    },
+    {
+      "correctness": "PASS",
+      "id": "python_startup",
+      "log": "....\nWARNING: the benchmark result may be unstable\n* Not enough samples to get a stable result (95% certainly of less than 1% variation)\n\nTry to rerun the benchmark with more runs, values and/or loops.\nRun 'python -m pyperf system tune' command to reduce the system jitter.\nUse pyperf stats, pyperf dump and pyperf hist to analyze results.\nUse --quiet option to hide these warnings.\n\npython_startup: Mean +- std dev: 10.6 ms +- 0.1 ms\n",
+      "reason": "",
+      "seconds": 3.092700510052964,
+      "source_sha256": "3542d7ff9c9dfccc312d59a52532dab9456c2c9442ce79f8ee65935b35661818",
+      "status": "PASS"
+    },
+    {
+      "correctness": "PASS",
+      "id": "regex_dna",
+      "log": "....\nWARNING: the benchmark result may be unstable\n* Not enough samples to get a stable result (95% certainly of less than 1% variation)\n\nTry to rerun the benchmark with more runs, values and/or loops.\nRun 'python -m pyperf system tune' command to reduce the system jitter.\nUse pyperf stats, pyperf dump and pyperf hist to analyze results.\nUse --quiet option to hide these warnings.\n\nregex_dna: Mean +- std dev: 167 ms +- 4 ms\n",
+      "reason": "",
+      "seconds": 4.848502982174978,
+      "source_sha256": "0c095e0dfe3b97c60a30d975de66a666479c8e662290da58f2e0cdfea5323564",
+      "status": "PASS"
+    },
+    {
+      "correctness": "PASS",
+      "id": "richards",
+      "log": "....\nrichards: Mean +- std dev: 46.5 ms +- 0.2 ms\n",
+      "reason": "",
+      "seconds": 2.522143740905449,
+      "source_sha256": "65d9a022b400d53f2e8329eae784bb3ea7bd6ea11e8193b755f9819f70b39df8",
+      "status": "PASS"
+    }
+  ],
+  "runtime": "cpython-3.14.10",
+  "runtime_info": {
+    "abi_flags": "",
+    "arguments": [],
+    "compiler": "cc",
+    "configure_args": "'--prefix=<local-path>' '--enable-optimizations=no' 'CC=cc' 'CFLAGS=-O2' 'LDFLAGS=' 'CPPFLAGS='",
+    "executable_sha256": "6441077694980135b100184dae309c6e303c50519d6b694daa7997fb8be954df",
+    "free_threaded": false,
+    "gil_enabled": true,
+    "implementation": "cpython",
+    "jit_available": false,
+    "jit_enabled": false,
+    "version": [
+      3,
+      14,
+      10
+    ]
+  }
+}

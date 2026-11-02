@@ -1,0 +1,4 @@
+runtime,measured,expected,runtime_over_cpython
+cpython-3.14.10,9,9,1.0
+cpython-3.14.10t,9,9,1.1081039392906185
+lucifer,0,9,

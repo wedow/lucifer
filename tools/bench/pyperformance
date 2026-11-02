@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""Install or run a hash-locked, predeclared pyperformance breadth panel."""
+import argparse
+import json
+import math
+from pathlib import Path
+import tempfile
+import time
+
+from common import (ROOT, command, probe, public_data, run, runtime_name, sha256, source_hash,
+                    write_json, write_manifest)
+
+NAMES = ('async_generators', 'comprehensions', 'docutils', 'float', 'generators',
+         'json_loads', 'python_startup', 'regex_dna', 'richards')
+LOCK = Path(__file__).with_name('requirements.lock')
+INFO = '''import importlib.metadata as m, json, pathlib, pyperformance, psutil, sys, sysconfig
+assert pyperformance.__version__ == '1.14.0'
+assert m.version('pyperf') == '2.10.0'
+assert m.version('packaging') == '25.0'
+assert m.version('psutil') == '7.2.2'
+assert m.version('docutils') == '0.18.1'
+assert not sysconfig.get_config_var('Py_GIL_DISABLED') or not sys._is_gil_enabled()
+root = pathlib.Path(pyperformance.__file__).parent / 'data-files' / 'benchmarks'
+print(json.dumps(str(root)))
+'''
+
+
+def setup(args):
+    argv = command(args.python)
+    if not probe(argv):
+        raise SystemExit('cannot create benchmark environment: interpreter unavailable')
+    status, _, err, _ = run(argv + ['-m', 'venv', str(args.venv)], timeout=180)
+    if status != 'PASS':
+        raise SystemExit(public_data(err) or 'venv creation failed')
+    python = args.venv / 'bin/python'
+    status, out, err, _ = run([str(python), '-m', 'pip', 'install', '--require-hashes',
+                               '--only-binary=:all:', '--no-deps', '-r', str(LOCK)], timeout=300)
+    print(public_data(out))
+    if status != 'PASS':
+        raise SystemExit(public_data(err) or 'locked installation failed')
+
+
+def measured_values(bench):
+    return [value for iteration in bench.get('runs', []) for value in iteration.get('values', [])]
+
+
+def benchmark_name(bench, data):
+    return bench.get('metadata', {}).get('name', data.get('metadata', {}).get('name'))
+
+
+def execute(args):
+    argv = command(args.python)
+    info = probe(argv)
+    root = None
+    if info:
+        status, out, _, _ = run(argv + ['-c', INFO])
+        try:
+            root = Path(json.loads(out)) if status == 'PASS' else None
+        except (TypeError, ValueError):
+            pass
+    records, benchmarks = [], []
+    deadline = time.monotonic() + 900
+    args.output.mkdir(parents=True, exist_ok=True)
+    for name in NAMES:
+        row = dict(id=name, status='NOTRUN', seconds=0,
+                   reason='missing or failing interpreter' if not info else 'locked environment unavailable')
+        if root and time.monotonic() < deadline:
+            row['source_sha256'] = source_hash(root / ('bm_' + name))
+            status, out, err, elapsed = run(argv + [str(Path(__file__).with_name('pyperformance_check.py')),
+                                                   str(root), name],
+                                           min(args.timeout, deadline - time.monotonic()))
+            row.update(seconds=elapsed, correctness=status)
+            if status != 'PASS' or out.strip() != 'correctness: PASS':
+                row.update(status='FAIL' if status == 'ERROR' else status,
+                           reason='correctness preflight failed', log=public_data(out + err))
+            else:
+                with tempfile.TemporaryDirectory(prefix='benchmark-') as temp:
+                    destination = Path(temp) / 'result.json'
+                    status, out, err, elapsed = run(argv + [str(root / ('bm_' + name) / 'run_benchmark.py'),
+                        '--processes', '3', '--values', '3', '--warmups', '2', '--min-time', '0.05',
+                        '--inherit-environ', 'PYTHONHASHSEED,PYTHON_JIT,TZ,LC_ALL,OMP_NUM_THREADS,OPENBLAS_NUM_THREADS',
+                        '--output', str(destination)], max(0.001, min(args.timeout, deadline - time.monotonic())))
+                    row.update(status=status, seconds=row['seconds'] + elapsed, reason='',
+                               log=public_data(out + err))
+                    if status == 'PASS':
+                        try:
+                            data = json.loads(destination.read_text())
+                            found = data['benchmarks']
+                            if len(found) != 1 or benchmark_name(found[0], data) != name:
+                                raise ValueError('unexpected emitted benchmark names')
+                            bench = found[0]
+                            values = measured_values(bench)
+                            workers = [r['values'] for r in bench.get('runs', []) if r.get('values')]
+                            if (len(workers) != 3 or any(len(v) != 3 for v in workers)
+                                    or len(values) != 9 or not all(isinstance(v, (int, float)) and
+                                                         math.isfinite(v) and v > 0 for v in values)):
+                                raise ValueError('expected three values from each of three workers')
+                            # Expand global metadata so each entry remains independently readable.
+                            bench['metadata'] = {**data.get('metadata', {}), **bench.get('metadata', {}),
+                                                 'performance_version': '1.14.0'}
+                            benchmarks.append(public_data(bench))
+                        except (OSError, ValueError, KeyError, TypeError) as exc:
+                            row.update(status='ERROR', reason=str(exc))
+        elif root:
+            row['reason'] = 'invocation wall budget exhausted'
+        print(f'{args.runtime}/{name}: {row["status"]}', flush=True)
+        records.append(row)
+    # A missing runtime still produces a JSON artifact plus every expected TSV row.
+    # Empty pyperf suites cannot be loaded by pyperf; readers must check the TSV.
+    write_json(args.output / (args.runtime + '.json'), dict(version='1.0', benchmarks=benchmarks,
+               metadata={'performance_version': '1.14.0'}))
+    write_json(args.output / (args.runtime + '.status.json'), dict(runtime=args.runtime,
+               runtime_info=info, requirements_sha256=sha256(LOCK), rows=records,
+               plan=dict(processes=3, values=3, warmups=2, min_time=0.05)))
+    write_manifest(args.output, args.runtime, [(r['id'], r['status'], r['seconds']) for r in records], NAMES)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    subs = parser.add_subparsers(dest='action', required=True)
+    install = subs.add_parser('setup', help='create a venv and install wheels with hashes; run under build isolation')
+    install.add_argument('--python', required=True)
+    install.add_argument('--venv', required=True, type=Path)
+    launch = subs.add_parser('run', help='run under timing isolation')
+    launch.add_argument('--python', required=True, help='locked venv interpreter command')
+    launch.add_argument('--runtime', required=True, type=runtime_name)
+    launch.add_argument('--output', type=Path, default=ROOT / 'results/bench/pyperformance')
+    launch.add_argument('--timeout', type=float, default=180)
+    args = parser.parse_args()
+    if args.action == 'setup':
+        setup(args)
+    else:
+        if args.timeout <= 0:
+            parser.error('timeout must be positive')
+        execute(args)
+
+
+if __name__ == '__main__':
+    main()

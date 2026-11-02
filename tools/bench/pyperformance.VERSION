@@ -1,0 +1,5 @@
+release 1.14.0
+source https://pypi.org/project/pyperformance/1.14.0/
+reference https://github.com/python/pyperformance
+Install the published release wheels, never the vendor/ reference checkout.
+The complete selected-panel dependency closure is requirements.lock.

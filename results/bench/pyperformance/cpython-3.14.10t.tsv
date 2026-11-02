@@ -1,0 +1,10 @@
+id	status	seconds
+async_generators	PASS	8.567267408
+comprehensions	PASS	2.375460825
+docutils	PASS	58.574581693
+float	PASS	2.205364068
+generators	PASS	3.232292731
+json_loads	PASS	2.535104539
+python_startup	PASS	3.400184407
+regex_dna	PASS	4.935572876
+richards	PASS	1.782883022

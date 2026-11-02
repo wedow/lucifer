@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Summarize result manifests against their complete expected denominators."""
+import argparse
+from collections import Counter
+import csv
+from pathlib import Path
+
+STATUSES = 'PASS FAIL ERROR SKIP XFAIL XPASS TIMEOUT CRASH NOTRUN'.split()
+
+
+def read(path):
+    with path.open(newline='') as stream:
+        reader = csv.DictReader(stream, delimiter='\t')
+        if reader.fieldnames != ['id', 'status', 'seconds']:
+            raise ValueError(f'{path}: invalid header')
+        rows = list(reader)
+    ids = [r['id'] for r in rows]
+    if not ids or ids != sorted(set(ids)):
+        raise ValueError(f'{path}: empty, duplicate or unsorted ids')
+    for row in rows:
+        if row['status'] not in STATUSES:
+            raise ValueError(f'{path}: invalid status')
+        seconds = float(row['seconds'])
+        if not (0 <= seconds < float('inf')):
+            raise ValueError(f'{path}: invalid seconds')
+    return {r['id']: r['status'] for r in rows}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('results', nargs='?', type=Path,
+                        default=Path(__file__).resolve().parents[1] / 'results')
+    args = parser.parse_args()
+    print('suite\truntime\ttotal\t' + '\t'.join(STATUSES) + '\tpass_rate')
+    found = False
+    for expected_file in sorted(args.results.rglob('expected.tsv')):
+        found = True
+        expected = read(expected_file)
+        suite = expected_file.parent.relative_to(args.results).as_posix()
+        for path in sorted(expected_file.parent.glob('*.tsv')):
+            if path == expected_file:
+                continue
+            rows = read(path)
+            if rows.keys() - expected.keys():
+                raise ValueError(f'{path}: unexpected ids')
+            counts = Counter(rows.get(ident, 'NOTRUN') for ident in expected)
+            print('\t'.join([suite, path.stem, str(len(expected)),
+                             *(str(counts[s]) for s in STATUSES),
+                             f'{counts["PASS"] / len(expected):.2%}']))
+    if not found:
+        parser.error('no expected manifests')
+
+
+if __name__ == '__main__':
+    main()
