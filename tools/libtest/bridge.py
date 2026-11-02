@@ -93,7 +93,14 @@ def main():
         runpy.run_module(module, run_name='__main__')
     else:
         from test.libregrtest.results import TestResults
+        from test.libregrtest.runtests import RunTests
         from test.libregrtest.main import main as regrtest
+
+        # Our command runs locally, so upstream's inherited descriptor works
+        # with the wrapper too. stdout is unsafe: curses emits terminal bytes
+        # during shutdown after the worker has serialized its result.
+        if os.name == 'posix':
+            RunTests.json_file_use_stdout = lambda self: False
 
         if '--list-cases' in sys.argv:
             # Upstream's list-cases branch skips setup_tests(), so its -u

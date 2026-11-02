@@ -58,6 +58,8 @@ The observer calls regrtest's own entry point and worker module. It records
 module states and unittest events without changing test assertions, selection,
 decorators, or the vendored library. It supplements JUnit XML for class/module
 fixtures and subtests: upstream XML otherwise omits some names and outcomes.
+Local workers use regrtest's inherited file descriptor for result JSON, keeping
+terminal-control bytes from curses out of the status channel.
 The worst observed outcome wins when a case has multiple subtests. Whole-module
 crashes and timeouts mark **all** its expected cases CRASH/TIMEOUT, including
 earlier cases; partial progress cannot turn a crashed module into a pass.
