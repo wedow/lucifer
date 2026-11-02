@@ -7,6 +7,7 @@ from collections import Counter
 from contextlib import nullcontext
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -79,7 +80,10 @@ def execute(command, env, cwd, timeout, log, stderr_log=None, worker_pid=None):
                     os.killpg(int(worker_pid.read_text()), signal.SIGKILL)
                 except (ProcessLookupError, ValueError):
                     pass
-            os.killpg(proc.pid, signal.SIGKILL)
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             code = proc.wait()
     return code, timed_out, time.monotonic() - started
 
@@ -88,10 +92,11 @@ def json_lines(path):
     if not path.exists():
         return []
     records = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(errors='replace').splitlines():
         if line:
             try:
-                records.append(json.loads(line))
+                record = json.loads(line)
+                records.append(record if isinstance(record, dict) else {'invalid_record': True})
             except ValueError:
                 # A killed worker can leave a final partial write. Never lose
                 # its CRASH/TIMEOUT disposition while reading observations.
@@ -189,7 +194,10 @@ def xml_rows(path):
             if case.find(tag) is not None:
                 status = value
                 break
-        merge_case(rows, key, status, float(case.get('time', '0')))
+        seconds = float(case.get('time', '0'))
+        if not math.isfinite(seconds):
+            raise ValueError('nonfinite JUnit duration')
+        merge_case(rows, key, status, seconds)
     return rows
 
 
@@ -223,7 +231,7 @@ def run_module(module, ids, args, python, env, raw, unavailable):
         fallback = 'ERROR'
     else:
         fallback = 'NOTRUN'
-    observation_error = False
+    observation_error = any(record.get('invalid_record') for record in states)
     try:
         observed = xml_rows(xml)
     except (ET.ParseError, ValueError):
@@ -231,7 +239,10 @@ def run_module(module, ids, args, python, env, raw, unavailable):
         observation_error = True
     records = json_lines(events)
     for event in records:
-        if 'invalid_record' in event:
+        if ('invalid_record' in event or not isinstance(event.get('id'), str)
+                or not isinstance(event.get('status'), str) or event['status'] not in RANK
+                or not isinstance(event.get('seconds'), (int, float))
+                or not math.isfinite(event['seconds'])):
             observation_error = True
             continue
         if event['id'] in ids:

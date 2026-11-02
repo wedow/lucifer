@@ -126,6 +126,17 @@ with open(sys.argv[sys.argv.index('--junit-xml') + 1], 'w') as stream:
     stream.write('<partial')
 """), ['ERROR'] * 3)
 
+    def test_malformed_observations(self):
+        for value in ([], {'id': self.ids[0], 'status': [], 'seconds': 'fast'}):
+            with self.subTest(value=value):
+                body = self.fake_probe() + """
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write('[]\\n')
+with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
+    stream.write(json.dumps(""" + repr(value) + """) + '\\n')
+"""
+                self.assertEqual(self.run_fake(body), ['ERROR'] * 3)
+
     def test_shared_ids_keep_worst_module_outcome(self):
         (self.root / 'inventory.json').write_text(json.dumps({'free-threaded': {
             'test_fixture': {'cases': self.ids},
