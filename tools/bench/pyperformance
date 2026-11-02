@@ -50,10 +50,10 @@ def benchmark_name(bench, data):
 
 def execute(args):
     argv = command(args.python)
-    info = probe(argv)
+    info = probe(argv, args.jit)
     root = None
     if info:
-        status, out, _, _ = run(argv + ['-c', INFO])
+        status, out, _, _ = run(argv + ['-c', INFO], env_overrides={'PYTHON_JIT': args.jit})
         try:
             root = Path(json.loads(out)) if status == 'PASS' else None
         except (TypeError, ValueError):
@@ -68,7 +68,8 @@ def execute(args):
             row['source_sha256'] = source_hash(root / ('bm_' + name))
             status, out, err, elapsed = run(argv + [str(Path(__file__).with_name('pyperformance_check.py')),
                                                    str(root), name],
-                                           min(args.timeout, deadline - time.monotonic()))
+                                           min(args.timeout, deadline - time.monotonic()),
+                                           env_overrides={'PYTHON_JIT': args.jit})
             row.update(seconds=elapsed, correctness=status)
             if status != 'PASS' or out.strip() != 'correctness: PASS':
                 row.update(status='FAIL' if status == 'ERROR' else status,
@@ -79,7 +80,8 @@ def execute(args):
                     status, out, err, elapsed = run(argv + [str(root / ('bm_' + name) / 'run_benchmark.py'),
                         '--processes', '3', '--values', '3', '--warmups', '2', '--min-time', '0.05',
                         '--inherit-environ', 'PYTHONHASHSEED,PYTHON_JIT,TZ,LC_ALL,OMP_NUM_THREADS,OPENBLAS_NUM_THREADS',
-                        '--output', str(destination)], max(0.001, min(args.timeout, deadline - time.monotonic())))
+                        '--output', str(destination)], max(0.001, min(args.timeout, deadline - time.monotonic())),
+                        env_overrides={'PYTHON_JIT': args.jit})
                     row.update(status=status, seconds=row['seconds'] + elapsed, reason='',
                                log=public_data(out + err))
                     if status == 'PASS':
@@ -126,6 +128,7 @@ def main():
     launch.add_argument('--runtime', required=True, type=runtime_name)
     launch.add_argument('--output', type=Path, default=ROOT / 'results/bench/pyperformance')
     launch.add_argument('--timeout', type=float, default=180)
+    launch.add_argument('--jit', choices=['0', '1'], default='0', help='requested PYTHON_JIT setting; 1 requires an enabled JIT')
     args = parser.parse_args()
     if args.action == 'setup':
         setup(args)

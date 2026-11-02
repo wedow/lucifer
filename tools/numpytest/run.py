@@ -6,6 +6,7 @@ import base64
 import binascii
 from collections import Counter
 import csv
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tarfile
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
@@ -84,7 +86,7 @@ def execute(command, cwd, env, log, timeout):
 def probe(command, site, work, env):
     source = (
         "import json,sys,sysconfig,numpy; print(json.dumps({"
-        "'version':sys.version.split()[0],'numpy':numpy.__version__,"
+        "'version':sys.version.split()[0],'numpy':numpy.__version__,'numpy_file':numpy.__file__,"
         "'free_threaded_build':bool(sysconfig.get_config_var('Py_GIL_DISABLED')),"
         "'gil_enabled':sys._is_gil_enabled() if hasattr(sys,'_is_gil_enabled') else None}))"
     )
@@ -97,6 +99,9 @@ def probe(command, site, work, env):
     except (ValueError, IndexError):
         return None
     if not isinstance(result, dict) or result.get("numpy") != PIN["version"]:
+        return None
+    filename = result.pop('numpy_file', None)
+    if not isinstance(filename, str) or Path(filename).resolve() != (site / 'numpy/__init__.py').resolve():
         return None
     return result
 
@@ -183,6 +188,51 @@ def journal_rows(path):
     return rows
 
 
+def prepare_docs(cache, site):
+    """Supply upstream's omitted Fortran examples beside the immutable wheel."""
+    source = PIN['sdist']
+    archive = cache / source['filename']
+    if digest(archive) != source['sha256']:
+        raise ValueError('NumPy source archive hash mismatch')
+    root = site / 'doc'
+    prefix = f"numpy-{PIN['version']}/doc/source/f2py/code/"
+    files = {}
+    with tarfile.open(archive) as package:
+        for member in package:
+            if not member.name.startswith(prefix) or not member.isfile():
+                continue
+            relative = Path(member.name[len(prefix):])
+            if relative.is_absolute() or '..' in relative.parts:
+                raise ValueError('invalid documentation source path')
+            target = root / 'source/f2py/code' / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(package.extractfile(member).read())
+            files[target.relative_to(root).as_posix()] = digest(target)
+    if not files:
+        raise ValueError('source archive contains no f2py examples')
+    info = dict(source, files=files)
+    (root / 'F2PY-SOURCES.json').write_text(json.dumps(info, indent=2, sort_keys=True) + '\n')
+    return info
+
+
+def verify_docs(site):
+    root = site / 'doc'
+    path = root / 'F2PY-SOURCES.json'
+    if not path.exists():
+        return None
+    info = json.loads(path.read_text())
+    if (not isinstance(info, dict)
+            or any(info.get(key) != value for key, value in PIN['sdist'].items())
+            or not isinstance(info.get('files'), dict) or not info['files']
+            or not all(isinstance(k, str) and isinstance(v, str) for k, v in info['files'].items())):
+        raise ValueError('f2py documentation provenance mismatch')
+    for name, expected in info['files'].items():
+        relative = Path(name)
+        if relative.is_absolute() or '..' in relative.parts or digest(root / relative) != expected:
+            raise ValueError('f2py documentation source mismatch')
+    return info
+
+
 def prepare(args):
     args.venv = args.venv.resolve()
     subprocess.run([args.oracle, "-m", "venv", "--clear", str(args.venv)], check=True)
@@ -193,9 +243,13 @@ def prepare(args):
     with tempfile.TemporaryDirectory(prefix="numpytest-install-") as temporary:
         requirement = Path(temporary) / "numpy.txt"
         requirement.write_text(f"numpy=={PIN['version']} --hash=sha256:{wheel['sha256']}\n")
+        optional = HERE / 'optional-requirements.txt'
         subprocess.run([str(python), "-m", "pip", "install", "--force-reinstall", "--no-index", "--only-binary=:all:",
                         "--find-links", str(args.cache.resolve()), "--require-hashes",
-                        "-r", str(HERE / "requirements.txt"), "-r", str(requirement)], check=True)
+                        "-r", str(HERE / "requirements.txt"), "-r", str(requirement),
+                        *(['-r', str(optional)] if optional.exists() else [])], check=True)
+    site = args.venv / 'lib' / ('python3.14t' if args.abi == 'cp314t' else 'python3.14') / 'site-packages'
+    prepare_docs(args.cache, site)
 
 
 def run(args):
@@ -206,7 +260,7 @@ def run(args):
     shards = args.shard or [""]
     label = shards[0].replace("/", "_") if len(shards) == 1 else hashlib.sha256("\n".join(shards).encode()).hexdigest()[:12]
     if command and "/" in command[0]:
-        command[0] = str(Path(command[0]).resolve())
+        command[0] = str(Path(command[0]).absolute())
     site = args.site.resolve() if args.site else None
     args.work.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix=args.runtime + "-", dir=args.work.resolve()))
@@ -214,7 +268,8 @@ def run(args):
     env.pop("PYTHONHOME", None)
     env.pop("PYTHON_GIL", None)
     env.pop("PYTEST_ADDOPTS", None)
-    env.update({"PYTHONPATH": os.pathsep.join([str(HERE)] + ([str(site)] if site else [])),
+    env.update({"PYTHONPATH": str(HERE),
+                "NPY_RUN_MYPY_IN_TESTSUITE": "1",
                 "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONHASHSEED": "0",
                 "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1",
                 "NUMPYTEST_SITE": str(site) if site else "",
@@ -237,11 +292,22 @@ def run(args):
     metadata = {"numpy": PIN["version"], "abi": args.abi, "shards": shards,
                 "parallel_threads": 4 if args.parallel else 1, "timeout": args.timeout,
                 "requirements_sha256": digest(HERE / "requirements.txt") if (HERE / "requirements.txt").exists() else None}
+    optional_lock = HERE / "optional-requirements.txt"
+    if optional_lock.exists():
+        metadata['optional_requirements_sha256'] = digest(optional_lock)
     try:
         if not site:
             raise ValueError("site-packages required for an executable runtime")
         metadata["artifact"] = verify_artifact(args.cache, site, args.abi)
+        metadata['doc_sources'] = verify_docs(site)
         state = probe(command, site, work, env)
+        metadata['site_injected'] = False
+        if state is None:
+            # Prefer the target venv's natural site path. Putting site-packages
+            # on PYTHONPATH makes mypy treat installed modules as user sources.
+            env['PYTHONPATH'] = os.pathsep.join([str(HERE), str(site)])
+            metadata['site_injected'] = True
+            state = probe(command, site, work, env)
         if state is None:
             raise ValueError("interpreter failed startup or NumPy import")
         if args.abi == "cp314t" and (not state.get("free_threaded_build") or state.get("gil_enabled") is not False):
@@ -256,12 +322,14 @@ def run(args):
             raise ValueError("cannot establish collection: " + metadata["unavailable"]) from exc
         if not expected:
             raise ValueError("expected.tsv must be collected with the oracle first")
+        rows = {ident: ('NOTRUN', 0.0) for ident in expected}
         write_manifest(destination, rows)
         directory.mkdir(parents=True, exist_ok=True)
         (directory / (args.runtime + ".json")).write_text(json.dumps(metadata, indent=2) + "\n")
         print(suite, args.runtime, dict(Counter(s for s, _ in rows.values())))
         return 0
     pytest_args = ["-m", "pytest", "-p", "recorder", "-p", "pytest_timeout", "-q", "-ra",
+                   "-W", "error::pytest.PytestUnhandledThreadExceptionWarning",
                    "--rootdir", str(site), "--junitxml", str(work / "junit.xml"),
                    "-o", "junit_family=xunit2", "--timeout=600"]
     if args.parallel:
@@ -319,10 +387,12 @@ def run(args):
     # Confirm tests did not modify the acceptance artifact.
     try:
         metadata["artifact_after"] = verify_artifact(args.cache, site, args.abi)
+        metadata['doc_sources_after'] = verify_docs(site)
     except (OSError, ValueError, zipfile.BadZipFile):
         metadata["artifact_changed"] = True
         rows.update({i: ("ERROR", rows[i][1]) for i in selected})
     metadata["counts"] = dict(Counter(s for s, _ in rows.values()))
+    metadata['recorded_at'] = datetime.now(timezone.utc).isoformat()
     write_manifest(destination, rows)
     suffix = "-" + label if args.shard else ""
     (directory / (args.runtime + suffix + ".json")).write_text(json.dumps(metadata, indent=2) + "\n")

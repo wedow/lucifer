@@ -1,0 +1,99 @@
+{
+  "numpy": "2.5.4",
+  "abi": "cp314t",
+  "shards": [
+    "numpy/f2py/tests/test_abstract_interface.py"
+  ],
+  "parallel_threads": 4,
+  "timeout": 540,
+  "requirements_sha256": "13a20f27474bc0e98445882b51cdbd8d88bc3c6d9b53a3f6c13ff9de2ec752b7",
+  "optional_requirements_sha256": "cf8cd005aaf1955846e0927c0084c3117a0613035211af019ddfb55d0e39d73e",
+  "artifact": {
+    "wheel": "numpy-2.5.4-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+    "sha256": "c9b80cdf5cedba0e90d93fa5f9a333c4d65bd545cd669b71bb97ce2b703c9d73",
+    "verified_files": 925,
+    "native_binaries": {
+      "numpy/_core/_multiarray_tests.cpython-314t-x86_64-linux-gnu.so": "7e69822b81cfb13d481a5d5c8f2f35e8f0753db10708fea33063183b25cca155",
+      "numpy/_core/_multiarray_umath.cpython-314t-x86_64-linux-gnu.so": "8b702e9261a43d0a381a4306052b3d3eb3cf82a475b3a11341df32578a6800b5",
+      "numpy/_core/_operand_flag_tests.cpython-314t-x86_64-linux-gnu.so": "f1fe2a2d76c0b487807eb2f828d61084dc2db1ce59640cbd82c1ccd498d86438",
+      "numpy/_core/_rational_tests.cpython-314t-x86_64-linux-gnu.so": "f89d12601abb7768e0cf6c78a5650253c979bd12b8d7fbc447233f62370a837c",
+      "numpy/_core/_simd.cpython-314t-x86_64-linux-gnu.so": "9bc545487cc2c5c6c9bb45ecc877ac5e3d795b31a7372879890b6ec6d834b278",
+      "numpy/_core/_struct_ufunc_tests.cpython-314t-x86_64-linux-gnu.so": "18ba34986ac7fac722db002282f1e9635b5608faef903e37584ba5d3056f45f7",
+      "numpy/_core/_umath_tests.cpython-314t-x86_64-linux-gnu.so": "5c4fbcd0b8a49da6391c9d29de4ebd272ad0581f6683a315a95d9a4a841804a8",
+      "numpy/fft/_pocketfft_umath.cpython-314t-x86_64-linux-gnu.so": "82bd24a03a32e84521e5325cfe2b5fdfebc5fdb37f712a14fffa78c751854d75",
+      "numpy/linalg/_umath_linalg.cpython-314t-x86_64-linux-gnu.so": "9bb453121423a9d517c95d484ba0bc487b47e7b01f6277e6e980d2ec0c7d807d",
+      "numpy/linalg/lapack_lite.cpython-314t-x86_64-linux-gnu.so": "5f95eeea79e4ca29f8ca201bbcc208c61d23fae38edf2aa1689347ed6b1ae287",
+      "numpy/random/_bounded_integers.cpython-314t-x86_64-linux-gnu.so": "662d76dcbbea089de701439f1164b181d0f9067c3b3c482e51dcfaf930ed16e8",
+      "numpy/random/_common.cpython-314t-x86_64-linux-gnu.so": "1eb47194afae5a1949e934562ae9dbb11b2acc58cd96eec340d6d6d682ace397",
+      "numpy/random/_generator.cpython-314t-x86_64-linux-gnu.so": "18cc0113c0782b3ad944364721c3d12bdab3b2feb65c56a3ecccabc08729dfdd",
+      "numpy/random/_mt19937.cpython-314t-x86_64-linux-gnu.so": "945de2dd4ef2de7fffdea08df23e493a0df3e03c551787daa501a5d9070a2297",
+      "numpy/random/_pcg64.cpython-314t-x86_64-linux-gnu.so": "21160b431c5fcf732bf0b22822026f3b88783cbaf9fdb479df89e6e3e968ffea",
+      "numpy/random/_philox.cpython-314t-x86_64-linux-gnu.so": "d394deff5b9c0e63b7fe9abfce31be5e4c6c30ba8f486068b7954642fbe0f8ea",
+      "numpy/random/_sfc64.cpython-314t-x86_64-linux-gnu.so": "a5cd88b8ac9e02b0a8766817f60f8d5413328ad258508ac6ce7a838ddf2c99f6",
+      "numpy/random/bit_generator.cpython-314t-x86_64-linux-gnu.so": "8e76d0e7dae7e03cab7575bf268cb6140ead54dfdcc2068a1b2e9fb2f56bad58",
+      "numpy/random/mtrand.cpython-314t-x86_64-linux-gnu.so": "5c0fe5a0bd605e688f57b2dccd61c498a5e6f4d21a9819b27e201bb77b89047c",
+      "numpy.libs/libgfortran-83c28eba-468e71e5.so.5.0.0": "a6a368328d02a5d8a149746f13f6268f8cc9192df5c18777b25c3c9b5ef52160",
+      "numpy.libs/libquadmath-2284e583-a9307bba.so.0.0.0": "6bc3069003caec1f075be3c51ae8355332f081fa9465910c4b5724e7fe7d8ad4",
+      "numpy.libs/libscipy_openblas64_-f48b354e.so": "432e1c1739731468ba305771af96773939e43016643e2d630f58cb45b6670e96"
+    }
+  },
+  "startup": {
+    "version": "3.14.10",
+    "numpy": "2.5.4",
+    "free_threaded_build": true,
+    "gil_enabled": false
+  },
+  "interpreter_sha256": "424013c6105660b2580cddb421e02a5fd184bbb03d6ff547d728d55f06b24cc5",
+  "exitstatus": 0,
+  "unexpected": [],
+  "not_collected": [],
+  "finish": {
+    "version": "3.14.10",
+    "abiflags": "t",
+    "free_threaded_build": true,
+    "gil_enabled": false,
+    "exitstatus": 0,
+    "parallel_cases": 0,
+    "serial_fallback": {
+      "numpy/f2py/tests/test_abstract_interface.py::TestAbstractInterface::test_abstract_interface": "f2py tests are thread-unsafe",
+      "numpy/f2py/tests/test_abstract_interface.py::TestAbstractInterface::test_parse_abstract_interface": "f2py tests are thread-unsafe"
+    }
+  },
+  "reasons": {},
+  "artifact_after": {
+    "wheel": "numpy-2.5.4-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+    "sha256": "c9b80cdf5cedba0e90d93fa5f9a333c4d65bd545cd669b71bb97ce2b703c9d73",
+    "verified_files": 925,
+    "native_binaries": {
+      "numpy/_core/_multiarray_tests.cpython-314t-x86_64-linux-gnu.so": "7e69822b81cfb13d481a5d5c8f2f35e8f0753db10708fea33063183b25cca155",
+      "numpy/_core/_multiarray_umath.cpython-314t-x86_64-linux-gnu.so": "8b702e9261a43d0a381a4306052b3d3eb3cf82a475b3a11341df32578a6800b5",
+      "numpy/_core/_operand_flag_tests.cpython-314t-x86_64-linux-gnu.so": "f1fe2a2d76c0b487807eb2f828d61084dc2db1ce59640cbd82c1ccd498d86438",
+      "numpy/_core/_rational_tests.cpython-314t-x86_64-linux-gnu.so": "f89d12601abb7768e0cf6c78a5650253c979bd12b8d7fbc447233f62370a837c",
+      "numpy/_core/_simd.cpython-314t-x86_64-linux-gnu.so": "9bc545487cc2c5c6c9bb45ecc877ac5e3d795b31a7372879890b6ec6d834b278",
+      "numpy/_core/_struct_ufunc_tests.cpython-314t-x86_64-linux-gnu.so": "18ba34986ac7fac722db002282f1e9635b5608faef903e37584ba5d3056f45f7",
+      "numpy/_core/_umath_tests.cpython-314t-x86_64-linux-gnu.so": "5c4fbcd0b8a49da6391c9d29de4ebd272ad0581f6683a315a95d9a4a841804a8",
+      "numpy/fft/_pocketfft_umath.cpython-314t-x86_64-linux-gnu.so": "82bd24a03a32e84521e5325cfe2b5fdfebc5fdb37f712a14fffa78c751854d75",
+      "numpy/linalg/_umath_linalg.cpython-314t-x86_64-linux-gnu.so": "9bb453121423a9d517c95d484ba0bc487b47e7b01f6277e6e980d2ec0c7d807d",
+      "numpy/linalg/lapack_lite.cpython-314t-x86_64-linux-gnu.so": "5f95eeea79e4ca29f8ca201bbcc208c61d23fae38edf2aa1689347ed6b1ae287",
+      "numpy/random/_bounded_integers.cpython-314t-x86_64-linux-gnu.so": "662d76dcbbea089de701439f1164b181d0f9067c3b3c482e51dcfaf930ed16e8",
+      "numpy/random/_common.cpython-314t-x86_64-linux-gnu.so": "1eb47194afae5a1949e934562ae9dbb11b2acc58cd96eec340d6d6d682ace397",
+      "numpy/random/_generator.cpython-314t-x86_64-linux-gnu.so": "18cc0113c0782b3ad944364721c3d12bdab3b2feb65c56a3ecccabc08729dfdd",
+      "numpy/random/_mt19937.cpython-314t-x86_64-linux-gnu.so": "945de2dd4ef2de7fffdea08df23e493a0df3e03c551787daa501a5d9070a2297",
+      "numpy/random/_pcg64.cpython-314t-x86_64-linux-gnu.so": "21160b431c5fcf732bf0b22822026f3b88783cbaf9fdb479df89e6e3e968ffea",
+      "numpy/random/_philox.cpython-314t-x86_64-linux-gnu.so": "d394deff5b9c0e63b7fe9abfce31be5e4c6c30ba8f486068b7954642fbe0f8ea",
+      "numpy/random/_sfc64.cpython-314t-x86_64-linux-gnu.so": "a5cd88b8ac9e02b0a8766817f60f8d5413328ad258508ac6ce7a838ddf2c99f6",
+      "numpy/random/bit_generator.cpython-314t-x86_64-linux-gnu.so": "8e76d0e7dae7e03cab7575bf268cb6140ead54dfdcc2068a1b2e9fb2f56bad58",
+      "numpy/random/mtrand.cpython-314t-x86_64-linux-gnu.so": "5c0fe5a0bd605e688f57b2dccd61c498a5e6f4d21a9819b27e201bb77b89047c",
+      "numpy.libs/libgfortran-83c28eba-468e71e5.so.5.0.0": "a6a368328d02a5d8a149746f13f6268f8cc9192df5c18777b25c3c9b5ef52160",
+      "numpy.libs/libquadmath-2284e583-a9307bba.so.0.0.0": "6bc3069003caec1f075be3c51ae8355332f081fa9465910c4b5724e7fe7d8ad4",
+      "numpy.libs/libscipy_openblas64_-f48b354e.so": "432e1c1739731468ba305771af96773939e43016643e2d630f58cb45b6670e96"
+    }
+  },
+  "counts": {
+    "PASS": 50053,
+    "XFAIL": 30,
+    "SKIP": 2188,
+    "XPASS": 2
+  },
+  "recorded_at": "2026-11-02T05:54:18.993884+00:00"
+}

@@ -71,11 +71,14 @@ print(json.dumps(dict(version=list(sys.version_info[:3]),
 '''
 
 
-def probe(argv):
-    status, out, _, _ = run(argv + ['-c', PROBE], timeout=15)
+def probe(argv, jit='0'):
+    status, out, _, _ = run(argv + ['-c', PROBE], timeout=15,
+                          env_overrides={'PYTHON_JIT': jit})
     try:
         info = json.loads(out) if status == 'PASS' else None
         if not isinstance(info, dict) or not isinstance(info['version'], list):
+            return None
+        if jit == '1' and not (info.get('jit_available') and info.get('jit_enabled')):
             return None
         binary = info.pop('python_executable', None) or (shutil.which(argv[0]) if argv else None)
         if binary:

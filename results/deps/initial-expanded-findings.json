@@ -1,0 +1,74 @@
+{
+  "cpython-3.14.10": [
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_folds_and_gaps",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_folds_from_utc",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_unambiguous",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_folds_and_gaps",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_folds_from_utc",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_unambiguous",
+      "status": "FAIL"
+    }
+  ],
+  "cpython-3.14.10t": [
+    {
+      "id": "test.test_build_details.CPythonBuildDetailsTests.test_base_interpreter",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_multiprocessing_fork.test_processes.WithProcessesTestQueue.test_put",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_multiprocessing_spawn.test_processes.WithProcessesTestProcess.test_interrupt",
+      "status": "ERROR"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_ssl_in_multiple_threads",
+      "status": "ERROR"
+    },
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_folds_and_gaps",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_folds_from_utc",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_unambiguous",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_folds_and_gaps",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_folds_from_utc",
+      "status": "FAIL"
+    },
+    {
+      "id": "test.test_zoneinfo.test_zoneinfo.TZDataTests.test_unambiguous",
+      "status": "FAIL"
+    },
+    {
+      "id": "unittest.loader.ModuleSkipped.test.test_zipfile._path.test_complexity",
+      "status": "ERROR"
+    }
+  ]
+}

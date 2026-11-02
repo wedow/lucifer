@@ -35,12 +35,13 @@ def main():
     parser.add_argument('--benchmarks', default=','.join(sorted(INNER)),
                         help='comma-separated shard; other rows retain previous results')
     parser.add_argument('--timeout', type=float, default=180)
+    parser.add_argument('--jit', choices=['0', '1'], default='0', help='requested PYTHON_JIT setting; 1 requires an enabled JIT')
     args = parser.parse_args()
     names = args.benchmarks.split(',')
     if not set(names) <= INNER.keys() or args.timeout <= 0:
         parser.error('unknown benchmark or nonpositive timeout')
     argv = command(args.python)
-    info = probe(argv)
+    info = probe(argv, args.jit)
     source = ROOT / 'third_party/awfy/Python'
     worker = Path(__file__).with_name('awfy_worker.py')
     datafile = args.output / (args.runtime + '.data.json')
@@ -70,7 +71,8 @@ def main():
         if info and time.monotonic() < deadline:
             status, out, err, elapsed = run(argv + ['-u', str(worker), str(source), name,
                                                    str(INNER[name])],
-                                           min(args.timeout, deadline - time.monotonic()))
+                                           min(args.timeout, deadline - time.monotonic()),
+                                           env_overrides={'PYTHON_JIT': args.jit})
             samples = parse_samples(name, out)
             row.update(status=status, seconds=elapsed, reason='', iterations=len(samples))
             logs[name] = public_data(dict(stdout=out, stderr=err))
