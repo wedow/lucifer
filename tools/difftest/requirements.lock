@@ -1,0 +1,5 @@
+# Published universal wheels, verified against PyPI release JSON.
+hypothesis==6.152.1 \
+    --hash=sha256:40a3619d9e0cb97b018857c7986f75cf5de2e5ec0fa8a0b172d00747758f749e
+sortedcontainers==2.4.0 \
+    --hash=sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0

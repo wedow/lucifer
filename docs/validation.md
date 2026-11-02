@@ -665,3 +665,174 @@ The four harness self-tests passed. Final artifact checks verified manifest
 denominators, recorded medians against raw samples, worker/value counts, missing
 cells, dependency/source fingerprints and omitted local paths. Upstream pyperf
 successfully loaded and compared both exported oracle JSON suites.
+
+## difftest: independent program comparison
+
+`python3 tools/difftest` is a host-Python, standard-library-only runner. It runs
+each program under the pinned CPython v3.14.10 **free-threaded** oracle and the
+command passed with `--python`. Commands are parsed as shell words without
+executing a shell. The semantic baseline follows the oracle section above,
+superseding the research plan's 3.14.0 proposal.
+
+The frozen inventory contains **164 programs**: 118 focused programs in
+`tests/diff/corpus/`, 32 Hypothesis-generated programs in `tests/diff/generated/`,
+and all 14 AWFY programs in `tests/diff/awfy/`. IDs are repository-relative program
+paths. The corpus covers integer overflow and numeric protocols, exact float
+formatting, dictionary order and iterator mutation, descriptors, metaclasses,
+slots, generators, coroutines and async cancellation, exception chaining and
+full tracebacks, deterministic collection/finalization, closures, comprehension
+scope, Unicode, augmented assignment, sort callbacks/stability and conversion
+limits. Additional seams include method/class/builtin rebinding after warm-up,
+memoryview leases, mutable function defaults and pattern matching.
+
+```sh
+python3 tools/difftest run --oracle "$ORACLE_T" --python "$ORACLE_T" --runtime cpython-3.14.10t
+python3 tools/difftest run --oracle "$ORACLE_T" --python "$ORACLE_GIL" --runtime cpython-3.14.10
+python3 tools/difftest run --oracle "$ORACLE_T" --python bin/lucifer --runtime lucifer
+python3 tools/scoreboard
+```
+
+Run validation commands inside the environment's external test reservation.
+The default is 32 hot repetitions, one AWFY repetition, a 90-second timeout per arm/program and a
+5-second startup timeout. `--loops` changes the shared warm-up history, including
+the generated programs' final rare-value call. `--awfy-loops` controls the
+separately sized AWFY history. Initial 32-repetition Havlak trials exceeded both
+30- and 90-second bounds under shared load; the default AWFY panel therefore
+uses one verified run per arm, without silently capping the requested work. No
+Lucifer tier-admission protocol exists yet: repetition counts are recorded, but
+reaching a particular tier is **unverified**. Supply interpreter/tier options as
+part of `--python` when they exist. The 15-minute invocation budget stops starting
+new cases; a running pair may add up to two case timeouts. Use `--select ID_PREFIX`
+for bounded diagnosis; every unselected expected program remains NOTRUN. Runs
+replace that runtime's manifest rather than merging different warm-up histories.
+
+### Comparison contract and artifacts
+
+Every arm gets a fresh process and private working directory. The runner fixes
+hash seed 0, UTC, C.UTF-8 and UTF-8 I/O, removes inherited `PYTHON*` switches,
+and disables bytecode writes. It does not disable the target's JIT or force a
+GIL setting. Both process groups are bounded and descendants are terminated.
+The oracle must identify as CPython 3.14.10, be built free-threaded and report a
+disabled GIL. Each completed program records GIL state again after imports;
+an oracle that re-enables it cannot earn PASS. `--allow-unpinned-oracle` is only
+for offline self-checks/development and is not used for the recorded baseline.
+
+Stdout, stderr and integer exit status must match. Deterministic bytes, whitespace,
+exception messages, traceback lines, float reprs and numeric hex literals are
+preserved. Normalization replaces only known scratch/repository roots and the
+hex address in the default repr pattern ` at 0x...>`. A program marked
+`# difftest-timing` additionally normalizes whole lines matching
+`DIFFTEST_TIME=NUMBERUNIT`; ordinary numbers and unmarked timing text remain exact.
+The AWFY adapters emit this explicit timing channel; its values are diagnostics,
+not performance measurements. No numeric tolerances apply to this suite.
+
+Programs marked `# difftest-state` must leave `STATE`. A separate JSON graph
+captures scalar types, container identities, aliases, cycles, dictionary insertion
+order, byte content and float hex encodings. Signed zero, infinities and finite
+floats are exact; NaNs compare as the common `nan` token, without payload/sign
+distinctions. Sets/frozensets have canonical scalar-member order. Supported state
+types are None, bool, int, float, str, bytes, bytearray, list, tuple, dict, set and
+frozenset; unsupported objects are observation errors. State is compared without
+output normalization. The graph transport is independent of pickle.
+
+`tests/diff/inventory.json` pins every source, harness/helper, generator lock and
+AWFY dependency hash. `python3 tools/difftest collect` explicitly refreshes it
+and `results/difftest/expected.tsv`; ordinary runs never shrink the denominator
+when sources disappear. Expected and runtime manifests use the shared sorted LF
+`id\tstatus\tseconds` TSV contract. Seconds are combined subprocess wall times.
+Only PASS contributes to the scoreboard. Missing/failing/hanging startup yields
+all NOTRUN. Mismatches are FAIL, signals CRASH and bounded execution TIMEOUT.
+An invalid oracle, missing state/protocol output after the expected exit, changed source/dependency or
+observation exceeding 16 MiB is ERROR. Deliberate uncaught-exception programs
+declare their expected nonzero exit with `# difftest-exit: NUMBER`; an unexpected
+oracle failure cannot pass merely because both arms failed identically.
+
+Raw stdout/stderr, state, exact argv, post-import GIL observations and unified
+`mismatch.diff` files stay under ignored `.difftest-work/RUNTIME/` (or `--work`).
+Runtime `.local.json` metadata contains commands, environment, source inventory
+hash and per-arm outcomes and is ignored because diagnostics can identify local
+paths. Use a new work directory for a separate run whose diagnostics must be
+retained. The runner returns 1 for any incomplete/non-PASS panel and 2 for invalid
+configuration. Lucifer's absent executable produces the complete NOTRUN panel.
+
+### Generated and AWFY lanes
+
+The generator alone runs in a separate **oracle venv**. Its requirements pin
+[Hypothesis 6.152.1](https://pypi.org/project/hypothesis/6.152.1/) and
+[sortedcontainers 2.4.0](https://pypi.org/project/sortedcontainers/2.4.0/) to the
+published universal-wheel SHA-256 hashes. `setup.py` uses the pinned free-threaded
+oracle and installs with `--require-hashes --only-binary=:all: --no-deps`.
+Preparation belongs inside external build isolation. No system packages were
+installed for this lane.
+
+```sh
+python3 tools/difftest/setup.py --oracle "$ORACLE_T" --venv "$GENERATOR_VENV"
+# Test isolation; --output must contain no existing programs:
+"$GENERATOR_VENV/bin/python" tools/difftest/generate.py emit --seed 31410 --count 32 --output "$GENERATED"
+"$GENERATOR_VENV/bin/python" tools/difftest/generate.py fuzz --seed 731 --count 40 \
+  --output .difftest-work/fuzz --oracle "$ORACLE_T" --python bin/lucifer
+python3 tools/difftest/check_generator.py --generator-python "$GENERATOR_VENV/bin/python" --oracle "$ORACLE_T"
+```
+
+Hypothesis generates bounded integer expressions and list/dict/string operation
+traces with aliases, slices, callbacks and exception observations. Each program
+warms on a small integer and then supplies a generated rare value, including
+overflow-sized integers. The generator fixes the seed, disables its example
+database/deadline and preserves the generator hash, Hypothesis version, source
+hashes and full input specs in `generation.json`. The committed seed is **31410**.
+Emitted programs replay through the ordinary runner without Hypothesis in the
+target. For future additions, copy reviewed emitted programs into `tests/diff/`
+and explicitly recollect the inventory.
+
+The `fuzz` command uses Hypothesis's generation/shrinking phases, executing the
+same oracle/target comparison for each example. It preserves every attempted
+source/spec and the final `minimized.py`/`minimized.json`; seeds supplement the
+actual reproducer. Invalid oracle observations abort fuzzing rather than becoming
+semantic findings. A missing Lucifer cannot produce fuzzing coverage.
+Fuzzing stops starting examples after its five-minute `--budget`; an in-flight
+pair may add two example timeouts. Budget exhaustion is an invalid/incomplete run.
+Offline binary checks require no Hypothesis; the optional generator checks exercise
+byte-for-byte seeded replay, shrinking an injected insertion defect, and replay
+of the minimized standalone failure through the host runner.
+
+The AWFY lane uses the existing unchanged, licensed source pinned in
+`third_party/awfy/VERSION`. Every repetition calls upstream
+`inner_benchmark_loop` and requires its answer verifier to return True. CD uses
+the upstream verified two-aircraft input; all other rows use inner size 1,
+including the upstream verified small Havlak, Mandelbrot and NBody inputs. These
+are correctness workloads, distinct from the benchmark panel's larger canonical
+sizes. The adapter captures verification, input size and completed repetitions
+as state; upstream verification determines how much of the answer is checked.
+AWFY's `json.py` loads under a separate module name to coexist with stdlib JSON.
+
+`make check-harness` includes twelve offline binary-level difftest checks covering
+startup failures, signals/timeouts, output/exit/state findings, oracle failures,
+source drift, venv command preservation and narrow normalization, with full
+expected coverage in every run. Startup probes in these checks have a five-second
+allowance independent of the intentionally shorter program timeouts.
+
+### Recorded differential baseline, 2026-11-02
+
+| Runtime | Expected | PASS | NOTRUN | PASS / expected |
+|---|---:|---:|---:|---:|
+| cpython-3.14.10t (self-diff) | 164 | 164 | 0 | 100.00% |
+| cpython-3.14.10 (versus free-threaded oracle) | 164 | 164 | 0 | 100.00% |
+| lucifer | 164 | 0 | 164 | 0.00% |
+
+All other statuses are zero. **No known semantic differences** were observed
+between the two builds in this declared inventory. Both comparisons used 32
+focused/generated repetitions and one verified AWFY repetition per arm, with
+the fixed inputs and normalization above. The free-threaded oracle and target
+retained a disabled GIL after every completed program; the standard target
+retained its enabled GIL. These build capabilities are recorded separately from
+the compared program state.
+
+The manifests and portable [baseline metadata](../results/difftest/baseline.json)
+retain executable, inventory and manifest hashes, capability observations,
+environment, seed and repetition counts. The complete `make check-harness`
+passed **55 checks**, including all twelve difftest checks. The optional generator
+checks also passed seeded replay, injected-defect shrinking and standalone
+failure replay. Artifact checks verified exact expected coverage, sorted LF
+manifests, source/dependency fingerprints, post-import GIL state and zero pending
+mismatch diffs. Actual Lucifer semantics and tier admission remain **unverified**
+until its executable exists.

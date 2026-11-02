@@ -1,0 +1,71 @@
+{
+  "awfy_loops": 1,
+  "environment": {
+    "LC_ALL": "C.UTF-8",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONIOENCODING": "utf-8:backslashreplace",
+    "PYTHONUTF8": "1",
+    "TZ": "UTC"
+  },
+  "hypothesis_seed": 31410,
+  "inventory_sha256": "1db9960be07f6cf986de67e07b158988accd2a7cc3c913d0ee1ea4d376a55168",
+  "known_semantic_differences": [],
+  "loops": 32,
+  "oracle_commit": "b703b2c5e704341d61e367b9b940b77ed11dded0",
+  "oracle_role": "free-threaded",
+  "oracle_tag": "v3.14.10",
+  "runtimes": {
+    "cpython-3.14.10": {
+      "counts": {
+        "PASS": 164
+      },
+      "executable_sha256": "d725fcb52dfa077036df830026022008373fba32085d9eebf600780140a3f51e",
+      "manifest_sha256": "362af3f0781886aa5c47787ebfb3e9a98dab24c5fa0ea3be58caae91a3b63cbe",
+      "post_import_gil": true,
+      "startup": {
+        "abi": "",
+        "free_threaded": false,
+        "gil": true,
+        "implementation": "cpython",
+        "version": [
+          3,
+          14,
+          10
+        ]
+      },
+      "total": 164
+    },
+    "cpython-3.14.10t": {
+      "counts": {
+        "PASS": 164
+      },
+      "executable_sha256": "424013c6105660b2580cddb421e02a5fd184bbb03d6ff547d728d55f06b24cc5",
+      "manifest_sha256": "48b2333e146afb8f399cfcc3af54f098aa50d63aa7291a52012a88d89c14f09d",
+      "post_import_gil": false,
+      "startup": {
+        "abi": "t",
+        "free_threaded": true,
+        "gil": false,
+        "implementation": "cpython",
+        "version": [
+          3,
+          14,
+          10
+        ]
+      },
+      "total": 164
+    },
+    "lucifer": {
+      "counts": {
+        "NOTRUN": 164
+      },
+      "manifest_sha256": "4ae62fc854aa1ea7af929e7a2659eb15b67a1ab927f4e043cd535cd5fbc30412",
+      "total": 164
+    }
+  },
+  "system_packages_installed": [],
+  "timeout_seconds": 90
+}

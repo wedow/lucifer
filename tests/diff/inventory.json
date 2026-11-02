@@ -1,0 +1,1027 @@
+{
+  "cases": {
+    "tests/diff/awfy/bounce.py": {
+      "exit": 0,
+      "sha256": "0f21e3d4e91457f12ec6f1b970e54a9c8d6497553651051eff52d2167eae67a8",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/cd.py": {
+      "exit": 0,
+      "sha256": "c2c3d1cc745422a5269530f648e67c1cd6280ff687d7c4431d353d5d0a657b94",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/deltablue.py": {
+      "exit": 0,
+      "sha256": "4576cd55d0ea8e412dbdbb1e9d3b411257c5775db878c9bd7ef26bbd0eeade13",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/havlak.py": {
+      "exit": 0,
+      "sha256": "65c0077493a2e51aa9df4a33381b479a653644730d207e1261b4164e258e4389",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/json.py": {
+      "exit": 0,
+      "sha256": "472818ec0578562088e1f47dc20ad01bbd34c99fa32fda78c3031d79870b4273",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/list.py": {
+      "exit": 0,
+      "sha256": "cf79b67686deb4a3f5fdbc4708984fa3baefc82b6c648189ea07dadb69839705",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/mandelbrot.py": {
+      "exit": 0,
+      "sha256": "4d5403f1c06425b959ea8605a2ce0a561fa6171ccb764077bde9b30f07858663",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/nbody.py": {
+      "exit": 0,
+      "sha256": "1bf8d2f60572aac7ae78fd02049c8264a6433d14fd435dcf1fe1f71d5509667d",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/permute.py": {
+      "exit": 0,
+      "sha256": "6fa16e1f1e2bcabf635800a07a45c979371ebd8b801b024aed8e9eae390ecc53",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/queens.py": {
+      "exit": 0,
+      "sha256": "eb57832d58c15b7b0edaa717e97c346aba5f08915d1c7afc3f99c7184060113e",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/richards.py": {
+      "exit": 0,
+      "sha256": "d7a6f3295e613d1541bde52a43eeca237a52f97cb5a138ed86f77f5321e51095",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/sieve.py": {
+      "exit": 0,
+      "sha256": "8bb23059bbfa271fd2d14d370c8da2f3db6b39671d2d70367a5cae66c2e8e0a8",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/storage.py": {
+      "exit": 0,
+      "sha256": "b57da3600aa3948aca47fe2c10e028bcc4041fbf56267a78e922f25072627376",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/awfy/towers.py": {
+      "exit": 0,
+      "sha256": "7d85e2e461f4fe46af773ba1fc9520fabf1abf699d5f3160e48e0cb7a97fb0a3",
+      "state": true,
+      "timing": true
+    },
+    "tests/diff/corpus/async_cancellation_finally.py": {
+      "exit": 0,
+      "sha256": "89bba798cd25e7dd8ee0db922c431ee2a97f7be815d29baa5b66b1449c517e60",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/async_context_manager.py": {
+      "exit": 0,
+      "sha256": "2639db3b69e9e3b584217ed9a3101a92066e705c563f6cc04feeb333c7ef9b82",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/async_contextvars.py": {
+      "exit": 0,
+      "sha256": "1416092b92eb31c60c1df90e608075f1e518753f8b50a76e2759b321c31fcea3",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/async_generator_iteration.py": {
+      "exit": 0,
+      "sha256": "01c1b12154f1774f61a03907b3777fb5a305073cb990ba73e152cc9aec5cddc3",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/augassign_attribute_order.py": {
+      "exit": 0,
+      "sha256": "1632802ac233c1a6e091b46da6b616ad27ae015e3957400efb965322c2bd50d8",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/augassign_dict_union.py": {
+      "exit": 0,
+      "sha256": "06b346318277a5e63c5fb83226a0d9a312afca0b61fb4173ea7c0057e9c78cc9",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/augassign_list_alias.py": {
+      "exit": 0,
+      "sha256": "c690d7063daae8ee08e7bbf5b716a39bc64eb50dcb7823abd8b9a9322a2e2161",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/augassign_notimplemented.py": {
+      "exit": 0,
+      "sha256": "1169dbe4d7f4b43e6598e4532e504a0540daa5d15dd922796fcbec85c2a44399",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/augassign_subscript_order.py": {
+      "exit": 0,
+      "sha256": "4afb459c8d4e0d60a910833d005735d3f00ad3fd8f1575f5ef7a0a8228436059",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/augassign_tuple_item_partial.py": {
+      "exit": 0,
+      "sha256": "1218a36dcd389d66d2ac69918817ef731a4b19e6bda0d35a277c06df567dabdd",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/builtin_rebinding.py": {
+      "exit": 0,
+      "sha256": "3372b7fa3f22297951d9003b0adf503d8ff00faf3cb64bb41d04bef2d4edc6d2",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/class_attribute_delete.py": {
+      "exit": 0,
+      "sha256": "d37484bb53983ec1409c59beb86286b9ef8bae66fc727cfac8e05f5935039977",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/class_bases_invalidation.py": {
+      "exit": 0,
+      "sha256": "211344e6b5649752fde4b8117ffef5dd4c9e05d34e5e3c69704519098688f5ca",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/class_mro_diamond.py": {
+      "exit": 0,
+      "sha256": "a22f5cb9af587ef7c6898d36de9b5091de577f73f330a64a6386b0722a54cebb",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/closure_cell_mutation.py": {
+      "exit": 0,
+      "sha256": "1957b10e7df3ba64be354fdd015f4a849fa54d944e2dd5c0fa8d56eedc376723",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/closure_class_scope.py": {
+      "exit": 0,
+      "sha256": "c5ec076e3fe99059447cc8b19bf175dc9eea1406f767669df9056787790bc20b",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/closure_delete_cell.py": {
+      "exit": 0,
+      "sha256": "cdfaab6a03f7b9385048b51ce1cae9d3f40b2ff818982036af1d8bf4cbb70136",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/closure_late_binding.py": {
+      "exit": 0,
+      "sha256": "b5c7fd909fe6bfdeb3cb0c260a5521a210cd2850301f45c7a62e224d7d238f65",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/closure_nonlocal_mutation.py": {
+      "exit": 0,
+      "sha256": "ad43ec52b705a8d2eaaf32f271b2d56dde0cb3a20eb3432ff6e6ee582323c043",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/closure_recursive_capture.py": {
+      "exit": 0,
+      "sha256": "7702ed0c3d04f2e94b694a387634d9439c68662187dab82cb7f5610dc1b7bf81",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/comprehension_class_scope.py": {
+      "exit": 0,
+      "sha256": "4fc91f295e68e8c08f835563ca50628071c490af396644cd02719af6aff6d38e",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/comprehension_exception_restore.py": {
+      "exit": 0,
+      "sha256": "a6214851ee758d3e776df3b677eea733412ecf220ac36d31bdc0590389ce09f7",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/comprehension_iterable_once.py": {
+      "exit": 0,
+      "sha256": "c60a4109b64dab2d48a3ca0a4d36dcc5cba6ba286340a1687c21494db491f2ee",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/comprehension_nested.py": {
+      "exit": 0,
+      "sha256": "44693dd57a686d4c40d668524ca377c746c20dee08431d8c36c3002d38dfc456",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/comprehension_no_leak.py": {
+      "exit": 0,
+      "sha256": "5ed1af7af35862fe3c0745e3fa1025068f53031871ca90016756de2cf504d0f4",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/comprehension_walrus_scope.py": {
+      "exit": 0,
+      "sha256": "c3a5232997dad9cddc76b9a26e9369cb81e0833c8a12ae919da928e02934c769",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/container_state_types.py": {
+      "exit": 0,
+      "sha256": "9719ae86f3ac4edeaaf23df1fcf88e715d11e0acb103018c9a9f05d49dcad692",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/corpus/context_manager_exception.py": {
+      "exit": 0,
+      "sha256": "fdc4c0f33f8e655eb5febc7377159b317e5a6a6cf023b18161d0b508ecb736f5",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/conversion_index_not_int.py": {
+      "exit": 0,
+      "sha256": "fc72c510ae75adf0c15c64eefaef249f0cd4c2af882e15404ef6f33c5ad6d62f",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/conversion_int_bases.py": {
+      "exit": 0,
+      "sha256": "63051741b9b986f1026ab0a6fb1896d414959bce14c8fd301f23d0eba7239798",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/conversion_int_limit.py": {
+      "exit": 0,
+      "sha256": "95e3e626cfdba3b799fc452d2a859d26b1c9a1a36359646adb79c686cb08132a",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/conversion_invalid_protocol_result.py": {
+      "exit": 0,
+      "sha256": "d014b50c12586aa589318fb2fdd50911a4171244b37c4a48fa5397547984c544",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/conversion_str_repr_protocol.py": {
+      "exit": 0,
+      "sha256": "926f50c9cadbef4c4bb264ab094e893332d3bbac1fdab4ab12eddb89c5c8ff59",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/coroutine_manual_await.py": {
+      "exit": 0,
+      "sha256": "6b64d4eae35825bd02c510d5767e0ad747e70f36810316b28e0c1329b1b559f2",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/descriptor_data_precedence.py": {
+      "exit": 0,
+      "sha256": "cb9dfadd75d54e243dc0e51390e789bfef66415c8f24d537e8ed57e847602bd6",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/descriptor_getattr_fallback.py": {
+      "exit": 0,
+      "sha256": "47d08bb6beabfe85f9be5319342143473fb68e8cbe2afbe69a9ffb2c684167b7",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/descriptor_getattribute.py": {
+      "exit": 0,
+      "sha256": "9a0585216beff96f1ad901d9194950b52d85963078a42473a0947dcfdc6a95d3",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/descriptor_method_rebind.py": {
+      "exit": 0,
+      "sha256": "358404979dc91d034a1db9c5267ef71effab606e36d5a71b1e6c78e90d7a5e0d",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/descriptor_nondata_shadow.py": {
+      "exit": 0,
+      "sha256": "e35f9e903c98a874e1d516a224d75d3a0e51adc4f62f4c9bccf4d7b3aef32087",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/descriptor_property_delete.py": {
+      "exit": 0,
+      "sha256": "91594ee38080d654e2a2acfa0b855148df3a31566b47ee0617ab16a3b3ba3df7",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/descriptor_set_name.py": {
+      "exit": 0,
+      "sha256": "9f22f5447171061616d6f22dc628e791d63ea79315500ab484dfd0899098afab",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/descriptor_special_lookup.py": {
+      "exit": 0,
+      "sha256": "05593bdb19e8e805c22569402e6e67293ab070153e6abcbed809ecafc85e6da9",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/descriptor_static_class_methods.py": {
+      "exit": 0,
+      "sha256": "3e9b0f281c4e811bfa90683e58e14cda5f7892322141dd3de4994ca0d3b6af74",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/dict_alias_graph.py": {
+      "exit": 0,
+      "sha256": "95ab8baeeb955ad9ae0fb308f3d190f7217eac7a608df03a1a13592c77799df4",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/corpus/dict_colliding_keys.py": {
+      "exit": 0,
+      "sha256": "e34f844453f5e710b36568a3c7fa2e164ee8d8d5cadd80cfb075d00ea7c63b3a",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/dict_equal_distinct_key.py": {
+      "exit": 0,
+      "sha256": "e7d09b9e2eb27b3712e94652024533b977a541c80042faa64696590eed418526",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/dict_hash_exception.py": {
+      "exit": 0,
+      "sha256": "768a7b690c3eb93fd07868df8b8bc9a8e2c0b81e9ae77fda070e06dab8baadf5",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/dict_iterator_resize.py": {
+      "exit": 0,
+      "sha256": "e26d586124f21275b41de13663958c933c63145088ce6ce8639d00ccceaaf68c",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/dict_iterator_value_change.py": {
+      "exit": 0,
+      "sha256": "2de79e9546a1b11107212a33d4c1d975ed4f297db7451e6cfab1a2520d32526a",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/dict_missing_subclass.py": {
+      "exit": 0,
+      "sha256": "17ad80529748561772367fe24ef2bef73eb48eda24528c8d2cc7790a169cc4f5",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/dict_reinsert_order.py": {
+      "exit": 0,
+      "sha256": "f7ee6e113a11f7d37f6824bec3976998221d131972b1bd72db389dd7be180c99",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/dict_views_dynamic.py": {
+      "exit": 0,
+      "sha256": "d7af93c553282fde50ec4699ba6b5ed6c6b99b6b44cb1b18e61a13436a0f5ef0",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/exception_explicit_chain.py": {
+      "exit": 0,
+      "sha256": "6ee62b2d707ade3bed4cb8b39276808bcbefaaf280711f82add4510062f26833",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/exception_finally_return.py": {
+      "exit": 0,
+      "sha256": "c574314f12512b4cb8545e4a84e29fa1a38ea7cd60ee4ed1f4887bf0cb85b01f",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/exception_groups.py": {
+      "exit": 0,
+      "sha256": "db77898feef4686fbcce2058aba359eb370248e0fe8446915e03269bf47e5130",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/exception_reraise_identity.py": {
+      "exit": 0,
+      "sha256": "d1c5a5d58c35f7d0cc0c5a02c13203d46a830fbdd28265f0b707fd97b2890356",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/exception_suppress_chain.py": {
+      "exit": 0,
+      "sha256": "90653e9a4211824a15d6664d8d1877e63ab7d8b0ff9bced099101a7dab9c6c17",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/exception_target_cleared.py": {
+      "exit": 0,
+      "sha256": "1f71e59b78025e931d10fabef0ddd3f33d6502d35b2642e4295101f7f814be84",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/exception_traceback_frames.py": {
+      "exit": 0,
+      "sha256": "c5d5b77fd76a53683abc63a8cdd0a7e81bff3a834f6b50cfe181f11243d3f7dd",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/exception_uncaught_traceback.py": {
+      "exit": 1,
+      "sha256": "e02461c36858e19d9ee82f44f8f61361919639f55b499a3544ae915eb4daa45a",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/finalizer_resurrection.py": {
+      "exit": 0,
+      "sha256": "853e3235d1ec6f734069ce15ed1ab2cebb0d892d96f25cb370cb898730a1ff7d",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/finalizer_single_cycle.py": {
+      "exit": 0,
+      "sha256": "4150a17c9237c9948bb4c3d7247cd9901a38d8d862af58933de5c31a536d5735",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/float_floor_mod.py": {
+      "exit": 0,
+      "sha256": "ef6c8d72e780249a709cefcdd1b0bfeffbea2fc978738cf3bf1abf843149d151",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/float_format_boundaries.py": {
+      "exit": 0,
+      "sha256": "378a08fbd3856120aed9a5bc447d0921573c2e81b3b6ac0bfec1e9cca6bf9bcf",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/float_hex_ratio.py": {
+      "exit": 0,
+      "sha256": "bb70e64085310dc7eaf7495a788f074af2bc1d93d5fcf9d8cd27053420993a3a",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/float_nan_infinity.py": {
+      "exit": 0,
+      "sha256": "44f7b452ca4c11deec2113f01de46d5df87b74c870d336284fa9d4daa2cf980d",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/float_pack_bits.py": {
+      "exit": 0,
+      "sha256": "cf9e2fbe6b179795110d123ebdb02cd11a1546c46eb16e0a489a2f42afe1a214",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/float_repr_roundtrip.py": {
+      "exit": 0,
+      "sha256": "0da3b9e8880ba4cca7496b174661ab2a2622373a1236fd2d612d5cb43146fdf4",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/float_round_ties.py": {
+      "exit": 0,
+      "sha256": "13e271a060338094aea2b155f8e877759d544c419c4844d93ace3997312efbff",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/float_signed_zero.py": {
+      "exit": 0,
+      "sha256": "7d6a086d883dbc5edbf765f5d1697e0f1f5347f5690b8ad77acd95855b194c20",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/function_defaults_kwonly.py": {
+      "exit": 0,
+      "sha256": "5576ce672e8c3265710550b52ce66c94b1170bcd9400fb7d52cfe4597f9465e7",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/generator_close_delegation.py": {
+      "exit": 0,
+      "sha256": "1a719cca8c56dcf82cdf4a2f5170bd78cfa2cc42e47a4d24558d4c7d0f2395ae",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/generator_pep479.py": {
+      "exit": 0,
+      "sha256": "9f3f209c76de34edbc8fc775a5f021ebc80aa40c29b5084c5a2087849f5c6f82",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/generator_reentry.py": {
+      "exit": 0,
+      "sha256": "b3d7588305649c5294f437114f650e0a00510b7a3fd4841f3a4f469d415eba82",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/generator_send_return.py": {
+      "exit": 0,
+      "sha256": "d14caf0ad6da259a9ee141d50bf49a47178c1b765aa4b9fd42b2fa8f8f1eb662",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/generator_throw_finally.py": {
+      "exit": 0,
+      "sha256": "4b87a0f77926fe85e4602df973c445a11907e31716d9f1717dc831228941c35b",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/generator_yield_from.py": {
+      "exit": 0,
+      "sha256": "5dec8029b392a36a12d89d117477cf64d7ee9b5fcf4fd19da903e07b1b975fda",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_add_overflow.py": {
+      "exit": 0,
+      "sha256": "e32c26d6ce7a9d96190e0c199f85b3ce793f8fd426ee62e8d9e4e0000506b37a",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_bitwise_negative.py": {
+      "exit": 0,
+      "sha256": "40f41a5db5d6f156179fa0ce15762f8d42e94f986b7a7c7905020ef00ab2a7f3",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_bool_subclass.py": {
+      "exit": 0,
+      "sha256": "af551b1e2c0388a37c50cf7b90655169245bcff1deab65119e80dee45c53f982",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_bytes_boundaries.py": {
+      "exit": 0,
+      "sha256": "240d1157b57bef79a98c19929959501d87327c3abf47ed2eec5ce69a69d46fd2",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_float_comparison.py": {
+      "exit": 0,
+      "sha256": "a9a4f8335141c5fb1c40b76729560016daf983f0811c35fec8c178527841a6ea",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_floor_mod_signs.py": {
+      "exit": 0,
+      "sha256": "d0a3e7f727a445824e7f1f2bb6b180efd5d3dd8c3e9ce9aa0b1deb9d09990b13",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_index_protocol.py": {
+      "exit": 0,
+      "sha256": "8facdd533e7c8e654a2cb0af9d8e14dbe21922f9ace852e8c343d15f98571f30",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_multiply_overflow.py": {
+      "exit": 0,
+      "sha256": "72a199650e91030a4e6debce6cef706c91607eb097f54445dac33e31a9759231",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_power_modular.py": {
+      "exit": 0,
+      "sha256": "91a4abef73cc5d0e1f2f1ed6b74f49aa5575b4d97e53ee301eea3181b60a4242",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_reflected_operator.py": {
+      "exit": 0,
+      "sha256": "b3082e0e707025e3669f4782daac2e0e01dedba207681cf6b7eec78176b3e7fd",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_shift_edges.py": {
+      "exit": 0,
+      "sha256": "4894a2c4f451fbbae40f99fdb0fc58238a23038bfad3a73cf4e1d3a0e28c2c32",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/int_type_change_after_warmup.py": {
+      "exit": 0,
+      "sha256": "00a4edc7aa3c1413fcc95133ce211aa3949c8a59e9f09b6a8a3196089022c5bb",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/list_iteration_mutation.py": {
+      "exit": 0,
+      "sha256": "ce3ffa78db837e153ea764c3f0e4041d6176d8d086ccd426c5384c6798a0ef44",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/list_slice_alias.py": {
+      "exit": 0,
+      "sha256": "198d96d653e7dcf72c88339feeb3e1157d2104dcc22363134428a29681698217",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/memoryview_alias_release.py": {
+      "exit": 0,
+      "sha256": "cea0cc4719b4a8374425d271a7a6fc1d4e042aad33a3b3a55235916bd0b9f32c",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/metaclass_call.py": {
+      "exit": 0,
+      "sha256": "5ba0e48c0647047cf982dcdbbbb4d24a6f1c219632cee2b9e634eecd4ce8f48b",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/metaclass_init_subclass.py": {
+      "exit": 0,
+      "sha256": "02d8d47e1e17ffbfaa4dae52c0548d5c1ed685c63236024cb3ae888b1e25c4e6",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/metaclass_instancecheck.py": {
+      "exit": 0,
+      "sha256": "61c2917ee092f02b4c97b37608ba14ba645f2a11c958c06cdf28aeb9dc4ae88b",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/metaclass_prepare_order.py": {
+      "exit": 0,
+      "sha256": "8fc5daa6932541b83ab290109a33eb8d8fee71ad1929d7705467428e996fda65",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/pattern_mapping_sequence.py": {
+      "exit": 0,
+      "sha256": "98a2ce47db272acabbbe9b79e1ca864219a22bccb74550079e82cee377135c44",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/repr_address_normalization.py": {
+      "exit": 0,
+      "sha256": "14c861c9fd724635bf7613d9bb1c31e394a956c2868282ca491e961a485cb161",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/slots_delete_descriptor.py": {
+      "exit": 0,
+      "sha256": "a63d0fc76a65d774d89f393d2e6608f008cbe24a0ac3001fcdfb296f1860e3e0",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/slots_inheritance.py": {
+      "exit": 0,
+      "sha256": "76aa8cbeca844d18dccba6849840c51fb58de15bf41c3e15de5a7bdfd1a6da10",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/slots_missing_dict.py": {
+      "exit": 0,
+      "sha256": "8372de9527e6c2438b5c2446692ebf51e6f053b59d5e0d37c1b0e096b8376c13",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/sort_key_exception.py": {
+      "exit": 0,
+      "sha256": "37dd4011f1b777c7a626e8edf23a4a0f9c76d0d4312863a38fc5b1a5ce717c5e",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/sort_key_mutation.py": {
+      "exit": 0,
+      "sha256": "ec194f112d4569a12d55b8d705c69bbc6a563831e81b93efda8407d4178a8efc",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/sort_key_once.py": {
+      "exit": 0,
+      "sha256": "e724d2939cc2ab41547808caae32363edac1ca8177f059268959f6574fce305f",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/sort_reverse_stable.py": {
+      "exit": 0,
+      "sha256": "aaa59c502d527f04a6693a262c91fdc4ef674280f2a19ad04cbefb16b7d1f58e",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/sort_stability.py": {
+      "exit": 0,
+      "sha256": "94e749c6a847aaa797b3a6c7b890c89ceec0bab06042381dab84637b47f58eb2",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/unicode_case_expansion.py": {
+      "exit": 0,
+      "sha256": "cd2896d94688cf81cdcf3f642be2b37cc90959459e52ccbf6cc1c0003d48534e",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/unicode_format_map.py": {
+      "exit": 0,
+      "sha256": "ec823c8cbe1d12ff9fc166885e5ee136c0db778d522c462abcbe835327b92e8b",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/unicode_predicates.py": {
+      "exit": 0,
+      "sha256": "ce770f24cf8bb0de2c52157cfc712f4af88cd3ba929245536e259b02f7b6c65a",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/unicode_search_bounds.py": {
+      "exit": 0,
+      "sha256": "ac3a0021f264cb60468b50bb552611b80b76241a438f4ee5aa31554f6ae04fd7",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/unicode_slice_nonbmp.py": {
+      "exit": 0,
+      "sha256": "dd2dd2083a7abd1890929c7a2577720b77e7a6df129340ec41fe92b09fe7afb8",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/unicode_split_join.py": {
+      "exit": 0,
+      "sha256": "ca179c71d8c1a8044412c71914e2ad9856333d2ea9968d2c44bab5c26a2d71d1",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/unicode_surrogate_errors.py": {
+      "exit": 0,
+      "sha256": "ddd04119be31f1c2369f29348b4b6bdc03d917f1302e58b419c9fe5d129bbc8b",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/unicode_translate.py": {
+      "exit": 0,
+      "sha256": "4490d4b9f4f5ae1b31a3ed5ccdee1214c81bd8830a4718c7ff769d043a5572eb",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/weakref_explicit_collection.py": {
+      "exit": 0,
+      "sha256": "04c162e48ea66090a432e5af5e3fe79e5943ce3306d2712d0152316a56621e98",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/weakref_finalize_call_once.py": {
+      "exit": 0,
+      "sha256": "8775009fa70af17eb0aaaf7b57482746f934e6ec9505dd4409fc4a0505927b17",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/weakref_slots.py": {
+      "exit": 0,
+      "sha256": "f5db7326f1a3e732f3cc9248fe0094e3ac1f670ef567ef54d4d90b699effa80c",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/weakref_weakmethod.py": {
+      "exit": 0,
+      "sha256": "bfdbe9bdf5ad2b0d8f115270bfbf35d93a391bf705929341f0faad8a0c8368f3",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0000.py": {
+      "exit": 0,
+      "sha256": "eadf4872fa710b1e0443aa54c68e2ab7154a2fa963d29ccc40f656caec3d90b3",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0001.py": {
+      "exit": 0,
+      "sha256": "f953362fef0e4ca8dc2a60b467067f6cac65a79af5d2cc03c25ea1272adc1e66",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0002.py": {
+      "exit": 0,
+      "sha256": "ef32d4a2ac00ad5fc80b33fa69f74a5e5192d78cde2482628e9eb96041f59e14",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0003.py": {
+      "exit": 0,
+      "sha256": "f1ccfe6dfc617cfee1d56a22b181de97311f1c6aa818fc61dd0f40be2933a432",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0004.py": {
+      "exit": 0,
+      "sha256": "df05eccb1f9ee3dfd63d09c2d4cc0d2119ba762fedbfcb3ab31ef63906e65abe",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0005.py": {
+      "exit": 0,
+      "sha256": "147511a4a47c1b92d944ed51f94ae12d96675746fb6f6aca27fd0604cb6569b2",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0006.py": {
+      "exit": 0,
+      "sha256": "61f79c3028679b37536658d704dfe7a4f7ff5b1c05975ea48e9eb2c6db820da1",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0007.py": {
+      "exit": 0,
+      "sha256": "6a0b0a2fea853b893caaf4c5fa1be761d47bb7b63973cc5c78ad441e71b81420",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0008.py": {
+      "exit": 0,
+      "sha256": "7da3d01418cab46c7fd9086997d03af5477d5c873369a305cf6dc3c962039116",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0009.py": {
+      "exit": 0,
+      "sha256": "9cd9b744d26fe9020896c4fd219045707585365b4452f77a130c1e20df02786d",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0010.py": {
+      "exit": 0,
+      "sha256": "5f382dbaa4ff60e0bed2d407ef6a429903743660a6246cdf31a1948b1d71fc31",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0011.py": {
+      "exit": 0,
+      "sha256": "2ada7605857a3e31efec1e658374cce6a19e325f97b33aaa1fa211f61f1e407e",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0012.py": {
+      "exit": 0,
+      "sha256": "3be15858903897656c550e9861f5dfd65bcc56405bbe5ca945eec03de3fd49c1",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0013.py": {
+      "exit": 0,
+      "sha256": "5294ee6c73dd82fd8d52b57fa14492bdceac4acd45137a1d464917cdc298f78d",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0014.py": {
+      "exit": 0,
+      "sha256": "e1b7e1d9c343a8d4ecfda138cf2346481ba9f26d01d47b8630c9fbca665cf749",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0015.py": {
+      "exit": 0,
+      "sha256": "b3f157189b8ae83a375f1ffe43b945d9df1198169f5a4b80fd1d6b5b0763115e",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0016.py": {
+      "exit": 0,
+      "sha256": "26ea7e495410715ec3446b34c4a7084992f06b59857d6b719f60dde2005f54f8",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0017.py": {
+      "exit": 0,
+      "sha256": "dd0dd5bed35f6a03f153c961e5b7fff9d2358b23c2032f2092a112c8f01559b2",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0018.py": {
+      "exit": 0,
+      "sha256": "21c69c19ce989d5fd64158433656286b701622c6308f19fa8f4ce1c232aec996",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0019.py": {
+      "exit": 0,
+      "sha256": "78555f52d7b1aa5f46247e9cac1cb0f3f19e0292958b766124cc7103c6a2e941",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0020.py": {
+      "exit": 0,
+      "sha256": "8a2e774e00626e5a283967f9c08c5b476e72d2ba9d97948e1f8968c7147b8495",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0021.py": {
+      "exit": 0,
+      "sha256": "aa0f2c8ba8996bb46a221457180d9e8546cef66cd25d1a2955d7b7491f2fc6c2",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0022.py": {
+      "exit": 0,
+      "sha256": "6166ff94ee7cc921bbf907dfe74fe6c780cfed666633de84de76c79fa5810764",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0023.py": {
+      "exit": 0,
+      "sha256": "85b4899669eec6a8fa6bca71bc7a8920ed09c6afa87caa1d209e07658de2c2c2",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0024.py": {
+      "exit": 0,
+      "sha256": "a38633bbea88f7aa372686fb628463a6ce7c56e0fef5a2e6ecb3e48866b64a56",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0025.py": {
+      "exit": 0,
+      "sha256": "c789044540316f5246269bf7f8185e90d680477323457f634b7080058fda97f1",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0026.py": {
+      "exit": 0,
+      "sha256": "e95d2cd8472797183cbca122b7f7ef6b3abe25b1a808b704f91ad54caa1c9239",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0027.py": {
+      "exit": 0,
+      "sha256": "b870b1e3f7e5310519283361123a840e43760141c08bbab40a1b68036fb69f2b",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0028.py": {
+      "exit": 0,
+      "sha256": "3b94fc25302af040a0ad097d66dc129dcefc270af9c764f58b026ed42d8cc2fb",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0029.py": {
+      "exit": 0,
+      "sha256": "0fbd4499aa30a4d4e3f43c34259ed5e7543e5d260bcf08b77354367b9fdea8fb",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0030.py": {
+      "exit": 0,
+      "sha256": "23bfa9eabd2ba61686c5a5d5fc0abcd2ba5d22a3ccb9f88702f674c5bc6839af",
+      "state": true,
+      "timing": false
+    },
+    "tests/diff/generated/seed_31410_0031.py": {
+      "exit": 0,
+      "sha256": "7ba6fb5d32f42ec7168ea4ada8c64f90ab2bdfcc15acc2f210fde1499a39613c",
+      "state": true,
+      "timing": false
+    }
+  },
+  "dependencies": {
+    "third_party/awfy/Python/benchmark.py": "2e437f219050218803edb28ca04a7bd248bfa2599c29fbb82a77b769f9dea462",
+    "third_party/awfy/Python/bounce.py": "145b5dec3d686cf27164012b131e4aaf67387d694dd5992c5caa7f69aebaf67d",
+    "third_party/awfy/Python/cd.py": "59ea3b5139d2f300a61b95d84856b263fb7cefa9cb17ce06cd2655a42aea03c5",
+    "third_party/awfy/Python/deltablue.py": "0fce0836b124af04dcfe7802e9eb431dfb6f00542e927f778ef2409c5c8279ec",
+    "third_party/awfy/Python/harness.py": "493de14e539061a19f33033f9f8944f3ccc1eb1cd59140c530f0c6c9c602e661",
+    "third_party/awfy/Python/havlak.py": "06cdfb4998e09085a45bc6090ec6186f593d207bece904ff949b2d5c86d60704",
+    "third_party/awfy/Python/json.py": "71a651d305667b8b2b3229ea90db17af3812ac33c846c2bc3e6fc7c44701cafe",
+    "third_party/awfy/Python/list.py": "0667d8d8e03501ccefd29beee54e9748264675111d354aee64c2eeb44777ee90",
+    "third_party/awfy/Python/mandelbrot.py": "94d89f90c9696ff4664cd7ed4ff110e1d2e23b60da546315ceb75f0c404a59b1",
+    "third_party/awfy/Python/nbody.py": "31ebd069c86ddf0f333e4a9dbd19ae53a670c70fef32be560c816ec6dd9b8558",
+    "third_party/awfy/Python/permute.py": "0d7399ead5038bec9a5ed3b15fa270143325463bf258c6431137a43d2188e9b1",
+    "third_party/awfy/Python/queens.py": "98bc92c9d877a3dbb63d5f374b53740a91734b661588d2a3a15a157df9370c2c",
+    "third_party/awfy/Python/richards.py": "85fb861bcfabc107277bc70c583fe223589a4b7a8f322ee62d39bde86286556c",
+    "third_party/awfy/Python/run.py": "62b53321f0b5341d057af9bcafe9fe92b9ab2ee28a3c105ecf66ee7a74db7517",
+    "third_party/awfy/Python/sieve.py": "ba0f87bbc195bca72489961dd558774a039c33b226946aee79e1ee33efb3a0c4",
+    "third_party/awfy/Python/som/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "third_party/awfy/Python/som/constants.py": "695fcf58534d2bcfadcc66ad0f0b5f31aabd2c9330039d054be291aa978d0a97",
+    "third_party/awfy/Python/som/dictionary.py": "74d1575d22b77f4d016a7b6ac6c1b2da670f3a4cf1c3a0e9a38a66478adf2165",
+    "third_party/awfy/Python/som/identity_dictionary.py": "d05d4c0852fab03a88f367071d0a4d9eb62dea69cde8b9971df3e3f2131329c1",
+    "third_party/awfy/Python/som/identity_set.py": "4bfef2fb2175c5a4b07f17b8e5ba57e5f58adf5aaee1e5532ad33bcff681904b",
+    "third_party/awfy/Python/som/random.py": "0e39bdc4ad99239651dc5db6168bdd16dde7665356b20b1a7c983bf3f8608d83",
+    "third_party/awfy/Python/som/set.py": "07f7af8acf1282c50296e84ae6f8a0d10df44f6a16e546db09a0c4dab6f3b529",
+    "third_party/awfy/Python/som/vector.py": "d9d2d4cfbc5ee29e7d919f02dbdbb115c34975e61a4c0e767ef73e758b65c0bf",
+    "third_party/awfy/Python/storage.py": "2d0e15aa96ffc9a42ac4946db4dd416a2cf08c77e43a0d67f4b60d5dc4d83828",
+    "third_party/awfy/Python/towers.py": "44a3e6173e956798fe6dc19dbca55e50d1d62ef101db70aec94ee970cfcde4ab",
+    "third_party/awfy/VERSION": "54d3f0d6a094fa92683687fd328fb0306332d8021f1c55858e2c9d8a5224efb2",
+    "tools/difftest/__main__.py": "639dc86b57ad77cb1c5ef709fe9601000222c57272c38c354359e1f33839b352",
+    "tools/difftest/bridge.py": "2c86d64e84369a0f61114df7b9e99cd18f9d0d0ba0d135171f030b1b0ca37211",
+    "tools/difftest/check.py": "88ba15e72fb074ecc6906d679b331101c6cf8a35557121f0ef2484324ac805c9",
+    "tools/difftest/check_generator.py": "82027c9890e55a1ea7e859ef7c8daa27c3fc9c1721b90d15ecd1df5c7fc51eef",
+    "tools/difftest/generate.py": "cae5f6e992b857d12192a66e67954db1c449b630b28452aa6615982a18b00957",
+    "tools/difftest/normalize.py": "7a3c5b0c15e2111e5539b7b2125784cdfad385e287f59071114384b41871b317",
+    "tools/difftest/requirements.lock": "3cc220bb9aa81c3e15984b95a8ce73c831685e7cb51a453579195667f577ec2e",
+    "tools/difftest/run.py": "c00c68b74cd748fdc54de210b10aa40b6ca1c1c255c7f72f920b673ee03445a8",
+    "tools/difftest/setup.py": "c74fe6772ac0a2f1582c8a97b8bcfbf0168ad9c070fc53f86d68b6bda80eb097",
+    "tools/difftest/support.py": "a2d2b09fd5dc4d7748f72007fd4ed191c23c8eed77122dfcce51199bf1856803"
+  },
+  "schema": 1
+}

@@ -1,0 +1,6 @@
+"""AWFY Sieve: unchanged upstream answer verification."""
+# difftest-state
+# difftest-timing
+from support import awfy
+
+STATE = awfy('Sieve', 1)
