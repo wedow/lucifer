@@ -124,3 +124,44 @@ identities. Both collections completed without errors. The resource profile
 omits 5,595 of those IDs from conditional generation, retaining them as explicit
 skips in the full denominator. Empty/import-skipped module counts are 30 for the
 free-threaded build and 77 for the GIL build.
+
+### Recorded baseline
+
+All 538 modules were attempted under each oracle with the settings above,
+divided into module batches with resource reservations bounded to about 18
+minutes. The manifests contain all 53,973 expected IDs:
+
+| Runtime | PASS | FAIL | SKIP | XFAIL | NOTRUN | Pass rate |
+|---|---:|---:|---:|---:|---:|---:|
+| cpython-3.14.10 | 45,915 | 0 | 8,048 | 10 | 0 | 85.07% |
+| cpython-3.14.10t | 45,900 | 1 | 8,059 | 13 | 0 | 85.04% |
+| lucifer | 0 | 0 | 0 | 0 | 53,973 | 0.00% |
+
+ERROR, XPASS, TIMEOUT and CRASH are zero in all three manifests. Lucifer's
+executable is absent; every row is NOTRUN with zero seconds. The complete
+outcomes are in [the manifests](../results/libtest/), including every skipped
+and expected-failure ID. No skip or expected failure contributes to the pass
+rate. Skips include resource-disabled cases, build-specific guards, unavailable
+platform features/extensions, source-build-only checks, and upstream decorators.
+
+The sole failure is
+`test.test_build_details.CPythonBuildDetailsTests.test_base_interpreter` in the
+free-threaded build. Its installed `build-details.json` names `python3.14`,
+while the exercised binary is `python3.14t`. This failure was independently
+reproduced without the observer; see [the upstream assertion](../third_party/cpython/Lib/test/test_build_details.py):
+
+```sh
+"$ORACLE_T" -m test -j 1 --timeout 180 --match test_base_interpreter test_build_details
+```
+
+The free-threaded `test_warnings` module also records an ENV_CHANGED diagnostic
+for warning filters, with all 201 cases passing. Regrtest accepts this under its
+default policy; the module state remains visible in the runtime metadata.
+
+Verification included 16 harness self-checks, byte-for-byte comparison of all
+2,435 vendored library files and the license against the fresh clone, and fresh
+collection with normal bytecode settings matching both inventories and the
+expected manifest exactly. Manifest checks cover headers, LF endings, sorted
+unique IDs, complete coverage, finite nonnegative durations, interpreter build
+and GIL state, and the absence of worker/protocol errors. Raw diagnostics remain
+local; the committed metadata and manifests contain portable paths and IDs.
