@@ -12,28 +12,47 @@ def append(path, value):
 
 
 def observe_cases():
+    import unittest
     from test.libregrtest.testresult import RegressionTestResult
 
     starts = {}
+    case_ids = {}
     original_start = RegressionTestResult.startTest
 
     def start(self, test):
         starts[id(test)] = time.perf_counter()
+        case_ids[id(test)] = test.id()
         return original_start(self, test)
 
     RegressionTestResult.startTest = start
+    original_stop = RegressionTestResult.stopTest
+
+    def stop(self, test):
+        try:
+            return original_stop(self, test)
+        finally:
+            starts.pop(id(test), None)
+            case_ids.pop(id(test), None)
+
+    RegressionTestResult.stopTest = stop
+
+    def case_id(test):
+        if id(test) in case_ids:
+            return case_ids[id(test)]
+        value = test.id
+        return value() if callable(value) else str(value)
 
     def wrap(name, status):
         original = getattr(RegressionTestResult, name)
 
         def record(self, test, *args):
             result = original(self, test, *args)
-            parent = getattr(test, 'test_case', test)
+            parent = test.test_case if isinstance(test, unittest.case._SubTest) else test
             reason = ''
             if args:
                 reason = str(args[0]) if name == 'addSkip' else str(args[0][1])
             append(os.environ['LIBTEST_EVENTS'], {
-                'id': parent.id(), 'status': status, 'reason': reason,
+                'id': case_id(parent), 'status': status, 'reason': reason,
                 'seconds': time.perf_counter() - starts.get(id(parent), time.perf_counter()),
             })
             return result
@@ -51,7 +70,7 @@ def observe_cases():
         result = original_subtest(self, test, subtest, err)
         if err is not None:
             append(os.environ['LIBTEST_EVENTS'], {
-                'id': test.id(),
+                'id': case_id(test),
                 'status': 'FAIL' if issubclass(err[0], test.failureException) else 'ERROR',
                 'reason': str(err[1]),
                 'seconds': time.perf_counter() - starts.get(id(test), time.perf_counter()),
@@ -75,6 +94,13 @@ def main():
     else:
         from test.libregrtest.results import TestResults
         from test.libregrtest.main import main as regrtest
+
+        if '--list-cases' in sys.argv:
+            # Upstream's list-cases branch skips setup_tests(), so its -u
+            # flags otherwise have no effect on conditional case generation.
+            from test import support
+            from test.libregrtest.cmdline import _parse_args
+            support.use_resources = dict(_parse_args(sys.argv[1:]).use_resources)
 
         original = TestResults.accumulate_result
 

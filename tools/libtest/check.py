@@ -24,7 +24,7 @@ class HarnessChecks(unittest.TestCase):
         (self.root / 'inventory.json').write_text(json.dumps({
             'free-threaded': {'test_fixture': {'cases': self.ids}}}))
 
-    def run_fake(self, body=None, timeout=0.15):
+    def run_fake(self, body=None, timeout=0.15, resume=False):
         fake = self.root / 'fake.py'
         if body is None:
             command = str(self.root / 'absent')
@@ -35,6 +35,7 @@ class HarnessChecks(unittest.TestCase):
             sys.executable, str(RUNNER), 'run', '--python', command,
             '--runtime', 'fake', '--results', str(self.root), '--source', 'installed',
             '--startup-timeout', str(timeout), '--timeout', str(timeout),
+            *(['--resume'] if resume else []),
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=40)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         with (self.root / 'fake.tsv').open(newline='') as stream:
@@ -51,6 +52,15 @@ class HarnessChecks(unittest.TestCase):
 
     def test_startup_hang(self):
         self.assertEqual(self.run_fake('import time; time.sleep(60)\n'), ['NOTRUN'] * 3)
+
+    def test_failed_resume_clears_previous_results(self):
+        (self.root / 'fake.tsv').write_text((self.root / 'expected.tsv').read_text().replace('NOTRUN', 'PASS'))
+        (self.root / 'fake.json').write_text(json.dumps({
+            'modules': {'test_fixture': {}},
+            'shared_cases': {'test_fixture': {self.ids[0]: ['PASS', 1]}},
+        }))
+        self.assertEqual(self.run_fake('raise SystemExit(1)\n', resume=True), ['NOTRUN'] * 3)
+        self.assertNotIn('shared_cases', json.loads((self.root / 'fake.json').read_text()))
 
     def fake_probe(self):
         return """import json,os,sys,time
@@ -74,6 +84,14 @@ os.kill(os.getpid(), signal.SIGKILL)
         self.assertEqual(self.run_fake(self.fake_probe() + """
 with open(os.environ['LIBTEST_STATE'], 'w') as stream:
     stream.write(json.dumps({'state':'TIMEOUT'}) + '\\n')
+"""), ['TIMEOUT'] * 3)
+
+    def test_faulthandler_timeout_is_not_a_crash(self):
+        self.assertEqual(self.run_fake(self.fake_probe() + """
+print('Timeout (0:00:00.150000)!', flush=True)
+time.sleep(0.2)
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'WORKER_FAILED'}) + '\\n')
 """), ['TIMEOUT'] * 3)
 
     def test_xml_and_fixture_skip(self):
@@ -122,6 +140,51 @@ with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
             'status':'FAIL' if sys.argv[-1].endswith('other') else 'PASS', 'seconds':0}) + '\\n')
 """
         self.assertEqual(self.run_fake(body), ['FAIL'] * 3)
+
+    def test_resource_omission_stays_in_denominator(self):
+        (self.root / 'resource-profile.json').write_text(json.dumps({
+            'resources': 'all,-network,-urlfetch,-gui,-largefile,-cpu,-walltime',
+            'free-threaded': {'test_fixture': {'cases': self.ids[:2], 'status':'COLLECTED'}},
+        }))
+        self.assertEqual(self.run_fake(self.fake_probe() + """
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'PASSED'}) + '\\n')
+"""), ['NOTRUN', 'NOTRUN', 'SKIP'])
+
+    def test_bytecode_writing_is_not_disabled(self):
+        body = self.fake_probe() + """
+assert 'PYTHONDONTWRITEBYTECODE' not in os.environ
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'PASSED'}) + '\\n')
+with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
+    for name in ('first', 'second', 'third'):
+        stream.write(json.dumps({'id':'test_fixture.Example.test_' + name,'status':'PASS','seconds':0}) + '\\n')
+"""
+        self.assertEqual(self.run_fake(body), ['PASS'] * 3)
+
+    def test_observer_handles_mutated_ids_and_test_case_method(self):
+        body = self.fake_probe() + """
+import io,runpy,types,unittest
+module = types.ModuleType('test.libregrtest.testresult')
+class RegressionTestResult(unittest.TextTestResult):
+    pass
+module.RegressionTestResult = RegressionTestResult
+sys.modules[module.__name__] = module
+""" + 'runpy.run_path(' + repr(str(RUNNER.with_name('bridge.py'))) + ")[\"observe_cases\"]()\n" + """
+class Example(unittest.TestCase):
+    def test_first(self): pass
+    def test_case(self): pass
+Example.__module__ = 'test_fixture'
+result = RegressionTestResult(io.StringIO(), False, 0)
+case = Example('test_first')
+result.startTest(case)
+case.id = 123
+result.addSuccess(case)
+result.stopTest(case)
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'PASSED'}) + '\\n')
+"""
+        self.assertEqual(self.run_fake(body), ['PASS', 'NOTRUN', 'NOTRUN'])
 
     def test_collection_preserves_upstream_ids(self):
         fake = self.root / 'collector.py'

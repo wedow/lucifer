@@ -26,6 +26,8 @@ example the Python and C decimal doctests) form one row with the worst outcome.
 ```sh
 python3 tools/libtest/run.py collect --python "$ORACLE_T" --source installed --runtime cpython-3.14.10t
 python3 tools/libtest/run.py collect --python "$ORACLE_GIL" --source installed --runtime cpython-3.14.10
+python3 tools/libtest/run.py collect --profile --python "$ORACLE_T" --source installed --runtime cpython-3.14.10t
+python3 tools/libtest/run.py collect --profile --python "$ORACLE_GIL" --source installed --runtime cpython-3.14.10
 python3 tools/libtest/run.py run --python "$ORACLE_T" --source installed --runtime cpython-3.14.10t
 python3 tools/libtest/run.py run --python "$ORACLE_GIL" --source installed --runtime cpython-3.14.10
 python3 tools/libtest/run.py run --python bin/lucifer --runtime lucifer
@@ -59,9 +61,18 @@ fixtures and subtests: upstream XML otherwise omits some names and outcomes.
 The worst observed outcome wins when a case has multiple subtests. Whole-module
 crashes and timeouts mark **all** its expected cases CRASH/TIMEOUT, including
 earlier cases; partial progress cannot turn a crashed module into a pass.
+Regrtest's faulthandler timeout exits are recognized as TIMEOUT even though its
+parent labels them `WORKER_FAILED`.
 Unreported cases remain NOTRUN, or ERROR when module setup fails. For pinned
 oracle runs only, cases absent from that build's recorded collection become
 SKIP; this adapter does not apply to Lucifer.
+
+Regrtest's normal `--list-cases` branch does not initialize resource flags.
+`collect --profile` additionally lists cases with those flags initialized by
+the observer, and saves `resource-profile.json` without changing `expected.tsv`.
+Cases omitted from both builds' resource-aware inventories are explicitly SKIP
+when not observed during execution, including conditional timezone expansion.
+This resource policy applies to every runtime; it never removes expected rows.
 
 Resource policy enables ordinary subprocess, decimal, audio, console and curses
 resources while disabling external network/URL access, GUI, large-file, CPU-heavy
@@ -72,7 +83,9 @@ is supplied. Local loopback tests remain enabled. Skips remain SKIP, never PASS.
 Use `--resources` and `--timeout` for separately labelled expanded runs.
 
 The environment clears inherited `PYTHON*` options and fixes `PYTHONHASHSEED=0`,
-`PYTHON_JIT=0`, `PYTHONDONTWRITEBYTECODE=1`, `LC_ALL=C.UTF-8`, and `TZ=UTC`.
+`PYTHON_JIT=0`, `LC_ALL=C.UTF-8`, and `TZ=UTC`. Bytecode writing keeps its normal
+enabled behavior, which import and compileall tests require; generated caches
+are ignored by Git.
 Regrtest's RNG seed is 0. The startup metadata records free-threaded capability
 and GIL state after imports; the harness does not force the GIL on or off.
 Per-case seconds are diagnostic elapsed times from upstream XML/the observer,
@@ -98,4 +111,14 @@ manifest still includes the complete expected denominator.
 
 The standalone self-check script exercises startup exit 1, startup hang, missing
 executables, module crashes/timeouts, expected failure, subtest failure, and
-fixture-error accounting through the runner's command-line boundary.
+fixture-error accounting through the runner's command-line boundary. It also
+checks parameterized/doctest collection, malformed XML, repeated IDs, and resource
+omissions.
+
+The initial collection contains 53,973 unique IDs across 538 modules per build:
+53,799 listed by the free-threaded oracle and 53,771 by the GIL oracle. There
+are 202 free-threaded-only and 174 GIL-only IDs; `inventory.json` preserves their
+identities. Both collections completed without errors. The resource profile
+omits 5,595 of those IDs from conditional generation, retaining them as explicit
+skips in the full denominator. Empty/import-skipped module counts are 30 for the
+free-threaded build and 77 for the GIL build.

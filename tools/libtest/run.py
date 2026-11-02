@@ -23,7 +23,7 @@ RESULTS = ROOT / 'results' / 'libtest'
 RESOURCES = 'all,-network,-urlfetch,-gui,-largefile,-cpu,-walltime'
 STATUSES = 'PASS FAIL ERROR SKIP XFAIL XPASS TIMEOUT CRASH NOTRUN'.split()
 RANK = {s: i for i, s in enumerate(['PASS', 'SKIP', 'XFAIL', 'NOTRUN', 'XPASS', 'FAIL', 'ERROR', 'CRASH', 'TIMEOUT'])}
-PROBE = "import json,sys,sysconfig,test; print(json.dumps({'version':list(sys.version_info[:3]),'implementation':sys.implementation.name,'free_threaded':bool(sysconfig.get_config_var('Py_GIL_DISABLED')),'gil_enabled':getattr(sys,'_is_gil_enabled',lambda:True)(),'test':test.__file__}))"
+PROBE = "import json,sys,sysconfig,test; print(json.dumps({'version':list(sys.version_info[:3]),'implementation':sys.implementation.name,'free_threaded':bool(sysconfig.get_config_var('Py_GIL_DISABLED')),'gil_enabled':getattr(sys,'_is_gil_enabled',lambda:True)(),'dont_write_bytecode':sys.dont_write_bytecode,'test':test.__file__}))"
 
 
 def write_manifest(path, rows):
@@ -51,7 +51,7 @@ def environment(source):
     for name in list(env):
         if name.startswith('PYTHON') or name in ('LIBTEST_EVENTS', 'LIBTEST_STATE', 'LIBTEST_PID'):
             env.pop(name)
-    env.update(PYTHONHASHSEED='0', PYTHONDONTWRITEBYTECODE='1', PYTHON_JIT='0',
+    env.update(PYTHONHASHSEED='0', PYTHON_JIT='0',
                LC_ALL='C.UTF-8', TZ='UTC', TERM='dumb', NO_COLOR='1')
     if source == 'vendored':
         env['PYTHONPATH'] = str(ROOT / 'third_party' / 'cpython' / 'Lib')
@@ -140,7 +140,8 @@ def collect(args, python, env, raw):
     inventory = {}
     for module in modules:
         log = raw / (module + '.collection.log')
-        command = [*python, '-m', 'test', '-u', args.resources, '--list-cases', module]
+        entry = [str(BRIDGE)] if args.profile else ['-m', 'test']
+        command = [*python, *entry, '-u', args.resources, '--list-cases', module]
         code, hung, _ = execute(command, env, raw, args.timeout, log,
                                 raw / (module + '.collection.stderr'))
         text = log.read_text(errors='replace')
@@ -151,10 +152,15 @@ def collect(args, python, env, raw):
                              'status': 'ERROR' if code != 0 or hung else ('COLLECTED' if cases else 'EMPTY_OR_SKIPPED')}
         print(f'collect {module}: {len(cases)} {inventory[module]["status"]}', flush=True)
     label = 'free-threaded' if info['free_threaded'] else 'gil'
-    path = args.results / 'inventory.json'
+    path = args.results / ('resource-profile.json' if args.profile else 'inventory.json')
     database = json.loads(path.read_text()) if path.exists() else {}
     database[label] = inventory
+    if args.profile:
+        database['resources'] = args.resources
     path.write_text(json.dumps(database, indent=2, sort_keys=True) + '\n')
+    if args.profile:
+        print(f'{label} resource-aware inventory added')
+        return
     ids = {case for build in database.values() for entry in build.values() for case in entry['cases']}
     if not ids:
         raise ValueError('collection produced no cases')
@@ -202,7 +208,12 @@ def run_module(module, ids, args, python, env, raw, unavailable):
                                   directory / 'output.log', worker_pid=worker_pid)
     states = json_lines(state)
     disposition = states[-1].get('state', 'MISSING') if states else 'MISSING'
-    if hung or disposition == 'TIMEOUT':
+    # Upstream normally implements its timeout with faulthandler exit=True;
+    # the parent reports that exit as WORKER_FAILED rather than TIMEOUT.
+    faulthandler_timeout = (disposition == 'WORKER_FAILED' and elapsed >= args.timeout * 0.9
+                            and re.search(r'(?m)^Timeout \([0-9:.]+\)!',
+                                          (directory / 'output.log').read_text(errors='replace')))
+    if hung or disposition == 'TIMEOUT' or faulthandler_timeout:
         fallback = 'TIMEOUT'
     elif code is not None and code < 0 or disposition == 'WORKER_FAILED':
         fallback = 'CRASH'
@@ -251,7 +262,8 @@ def run_module(module, ids, args, python, env, raw, unavailable):
               'command': [clean(part, python, raw) for part in command],
               'counts': dict(Counter(status for status, _ in rows.values())),
               'unexpected_ids': sorted(set(observed) - set(ids)),
-              'observation_error': observation_error}
+              'observation_error': observation_error,
+              'environment': {key: env.get(key) for key in ('PYTHONHASHSEED', 'PYTHON_JIT', 'PYTHONDONTWRITEBYTECODE', 'LC_ALL', 'TZ')}}
     print(f'{module}: {detail["counts"]} ({elapsed:.1f}s)', flush=True)
     return rows, detail
 
@@ -291,7 +303,7 @@ def run(args, python, env, raw):
             metadata = json.loads(metadata_path.read_text())
     info = probe(python, env, raw, args.startup_timeout)
     metadata.update(resources=args.resources, timeout=args.timeout, jobs=args.jobs,
-                    environment={key: env[key] for key in ('PYTHONHASHSEED', 'PYTHONDONTWRITEBYTECODE', 'PYTHON_JIT', 'LC_ALL', 'TZ')},
+                    environment={key: env.get(key) for key in ('PYTHONHASHSEED', 'PYTHONDONTWRITEBYTECODE', 'PYTHON_JIT', 'LC_ALL', 'TZ')},
                     source=args.source, expected_sha256=hashlib.sha256((args.results / 'expected.tsv').read_bytes()).hexdigest(),
                     probe={key: value for key, value in (info or {}).items() if key != 'test'})
     if not info:
@@ -299,14 +311,25 @@ def run(args, python, env, raw):
         # is visibly NOTRUN, including when only one shard was requested.
         rows = {key: ('NOTRUN', 0) for key in expected}
         metadata['modules'] = {}
+        metadata.pop('shared_cases', None)
         metadata['startup'] = 'NOTRUN'
     else:
         metadata['startup'] = 'PASS'
         unavailable = set()
+        profile_path = args.results / 'resource-profile.json'
+        if profile_path.exists():
+            profile = json.loads(profile_path.read_text())
+            if profile.get('resources') == args.resources and all(build in profile for build in inventory):
+                for module, ids in modules.items():
+                    entries = [profile[build].get(module, {}) for build in inventory]
+                    if all(entry.get('status') in ('COLLECTED', 'EMPTY_OR_SKIPPED') for entry in entries):
+                        generated = {key for entry in entries for key in entry['cases']}
+                        unavailable.update(ids - generated)
+        metadata['resource_omitted_cases'] = len(unavailable)
         if args.source == 'installed' and info['implementation'] == 'cpython' and info['version'] == [3, 14, 10]:
             build = inventory.get('free-threaded' if info['free_threaded'] else 'gil', {})
             available = {case for entry in build.values() for case in entry['cases']}
-            unavailable = set(expected) - available
+            unavailable.update(set(expected) - available)
         with ThreadPoolExecutor(max_workers=args.jobs) as executor:
             futures = {executor.submit(run_module, module, modules[module], args, python,
                                        env, raw, unavailable): module for module in selected}
@@ -341,12 +364,15 @@ def main():
     parser.add_argument('--modules', nargs='+')
     parser.add_argument('--shard', help='zero-based INDEX/TOTAL, stable sorted module stripes')
     parser.add_argument('--resume', action='store_true', help='preserve other shards; selected modules always rerun')
+    parser.add_argument('--profile', action='store_true', help='collect with resource-aware conditional generation; keep expected unchanged')
     args = parser.parse_args()
     if args.jobs < 1 or args.timeout <= 0 or args.startup_timeout <= 0 or not re.fullmatch(r'[\w.-]+', args.runtime):
         parser.error('invalid jobs, timeout, or runtime')
     args.results = args.results.resolve()
     args.results.mkdir(parents=True, exist_ok=True)
     raw = (args.raw_dir or args.results / 'raw' / args.runtime).resolve()
+    if args.profile:
+        raw = raw / 'profile'
     raw.mkdir(parents=True, exist_ok=True)
     python = shlex.split(args.python)
     if not python:
