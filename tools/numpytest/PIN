@@ -1,0 +1,29 @@
+{
+  "version": "2.5.4",
+  "source": "https://pypi.org/pypi/numpy/2.5.4/json",
+  "selection": "Latest stable release with a non-yanked cp314t manylinux x86-64 wheel, queried 2026-11-02.",
+  "wheels": {
+    "cp314": {
+      "filename": "numpy-2.5.4-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "d549420b8858885cea8838a727842249218b9c1da24dd517e25c9c7a948310a3",
+      "url": "https://files.pythonhosted.org/packages/16/d5/928078d2b28f26829b138b4a6c3980045022fb409f570657a224ae60ef4e/numpy-2.5.4-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+    },
+    "cp314t": {
+      "filename": "numpy-2.5.4-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "c9b80cdf5cedba0e90d93fa5f9a333c4d65bd545cd669b71bb97ce2b703c9d73",
+      "url": "https://files.pythonhosted.org/packages/34/88/16c5f12f86f5ad2817c4d103205131fc6c8acb3d1878af05a1a4f23ec859/numpy-2.5.4-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+    }
+  },
+  "upstream_test_requirements": "https://github.com/numpy/numpy/blob/v2.5.4/requirements/test_requirements.txt",
+  "parallel": {
+    "dependency": "pytest-run-parallel==0.8.2",
+    "threads": 4,
+    "iterations": 1,
+    "source": "https://github.com/numpy/numpy/blob/v2.5.4/.github/workflows/macos.yml",
+    "translation": "spin test -p 4 forwards --parallel-threads=4; full suite includes slow cases as required here; thread_unsafe tests retain serial fallback."
+  },
+  "bootstrap_pip": {
+    "filename": "pip-26.2.2-py3-none-any.whl",
+    "sha256": "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+  }
+}
