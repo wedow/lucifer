@@ -571,3 +571,42 @@ def scandir(path=None):
                  (prefix + name).encode('utf-8', 'surrogateescape') if isinstance(path, bytes) else prefix + name,
                  kind, ino)
         for name, kind, ino in _lucifer.os_scandir(path)])
+
+
+def WCOREDUMP(status):
+    return bool(status & 0x80)
+
+
+def waitstatus_to_exitcode(status):
+    """Convert a wait status to an exit code."""
+    if not isinstance(status, int):
+        status = status.__index__()
+    if WIFEXITED(status):
+        return WEXITSTATUS(status)
+    if WIFSIGNALED(status):
+        return -WTERMSIG(status)
+    raise ValueError('invalid wait status: %d' % status)
+
+
+def _exec_bytes(value):
+    return value if isinstance(value, bytes) else fspath(value).encode('utf-8', 'surrogateescape') \
+        if isinstance(fspath(value), str) else fspath(value)
+
+
+def execv(path, argv, /):
+    """Execute an executable path with arguments, replacing current process."""
+    if not isinstance(argv, (tuple, list)):
+        raise TypeError('execv() arg 2 must be a tuple or list')
+    if not argv or not argv[0]:
+        raise ValueError('execv() arg 2 first element cannot be empty')
+    _lucifer.os_execve(_path('execv', path), tuple(_exec_bytes(a) for a in argv), None)
+
+
+def execve(path, argv, env):
+    """Execute an executable path with arguments, replacing current process."""
+    if not isinstance(argv, (tuple, list)):
+        raise TypeError('execve: argv must be a tuple or list')
+    if not argv or not argv[0]:
+        raise ValueError('execve: argv first element cannot be empty')
+    entries = tuple(_exec_bytes(k) + b'=' + _exec_bytes(v) for k, v in env.items())
+    _lucifer.os_execve(_path('execve', path), tuple(_exec_bytes(a) for a in argv), entries)
