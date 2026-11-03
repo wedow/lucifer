@@ -40,15 +40,17 @@ def main():
         expected = 'id\tstatus\tseconds\na\tNOTRUN\t0\nb\tNOTRUN\t0\n'
         (result / 'expected.tsv').write_text(expected)
         fake = root / 'fake.py'
-        fake.write_text('''import json,os,signal,sys,time
+        fake.write_text('''import json,os,shutil,signal,sys,time
 mode=sys.argv[1]
 if mode=='symlink' and not sys.executable.endswith('linked-python'): raise SystemExit(7)
 if mode=='fail': raise SystemExit(7)
 if mode=='bad': print('not JSON'); raise SystemExit()
 if 'CORPUS_JOURNAL' not in os.environ:
- print('{"ok":true,"version":"fixture"}'); raise SystemExit()
+ print(json.dumps({'ok':True,'version':'fixture','prefix':sys.prefix})); raise SystemExit()
 f=open(os.environ['CORPUS_JOURNAL'],'a',buffering=1)
 def emit(x): f.write(json.dumps(x)+'\\n')
+if mode=='viewers': emit({'collection':['a','b']+(['viewer1'] if shutil.which('display') else [])}); emit({'state':{'exitstatus':0}}); raise SystemExit()
+if mode=='prefix': emit({'collection':['a','b']}); emit({'id':'a','phase':'call','outcome':'failed','seconds':0.0,'xfail':False,'reason':'in '+sys.prefix}); emit({'id':'b','phase':'call','outcome':'passed','seconds':0.0,'xfail':False,'reason':''}); emit({'state':{'exitstatus':1}}); raise SystemExit()
 if mode=='empty': emit({'collection':[]}); emit({'state':{'exitstatus':0}}); raise SystemExit()
 if mode=='hypothesis':
  # Each run must draw the same examples, with no replay of earlier runs.
@@ -119,6 +121,40 @@ emit({'state':{'exitstatus':0,'free_threaded':mode=='collection-skip','gil_enabl
         p = run(f'{sys.executable} {fake} collection-skip','skip',root/'skip-results')
         assert p.returncode == 0 and 'c\tSKIP\t' in (skipped/'skip.tsv').read_text(), p.stderr
         checks += 1
+        # A venv outside the fixture root: its bin holds no viewer, and its prefix is the environment path.
+        with tempfile.TemporaryDirectory() as outside:
+            venv = Path(outside) / 'env'
+            subprocess.run([sys.executable, '-m', 'venv', str(venv)], check=True)
+            venv_python = venv / 'bin' / 'python'
+            # Host PATH entries must not change collected ids: only the pinned PATH reaches the suite.
+            no_viewers = root / 'no-viewers'
+            no_viewers.mkdir()
+            viewer_bin = root / 'viewer-bin'
+            viewer_bin.mkdir()
+            (viewer_bin / 'display').write_text('#!/bin/sh\nexit 0\n')
+            (viewer_bin / 'display').chmod(0o755)
+            viewers = root / 'viewer-results'
+
+            def collect_on(path_entry):
+                return subprocess.run([sys.executable, str(harness / 'run.py'), 'collect', '--python',
+                    f'{venv_python} {fake} viewers', '--package', 'fixture', '--runtime', 'viewers',
+                    '--cache', str(root), '--work', str(root / 'work'), '--results', str(viewers)],
+                    capture_output=True, text=True, env={**os.environ, 'PATH': str(path_entry)})
+            p = collect_on(no_viewers)
+            assert p.returncode == 0, p.stderr
+            p = collect_on(viewer_bin)
+            assert p.returncode == 0 and 'differs' not in p.stderr, p.stderr
+            checks += 1
+            # Without --env, the environment path (the interpreter's prefix) must not reach committed evidence.
+            prefixed = root / 'prefix-results'
+            (prefixed / 'fixture').mkdir(parents=True)
+            (prefixed / 'fixture' / 'expected.tsv').write_text(expected)
+            p = subprocess.run([sys.executable, str(harness / 'run.py'), 'run', '--python', f'{venv_python} {fake} prefix',
+                '--package', 'fixture', '--runtime', 'prefix', '--cache', str(root), '--work', str(root / 'work'),
+                '--results', str(prefixed), '--timeout', '5'], capture_output=True, text=True)
+            evidence = (prefixed / 'fixture' / 'prefix.json').read_text()
+            assert str(venv) not in evidence and str(venv.resolve()) not in evidence and '<env>' in evidence, (p.stderr, evidence)
+            checks += 1
         archive.write_bytes(b'corrupt')
         p = run(f'{sys.executable} {fake} pass','tamper')
         assert p.returncode == 2 and 'hash mismatch' in p.stderr
