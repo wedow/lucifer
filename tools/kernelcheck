@@ -28,6 +28,9 @@ SOURCES = ROOT / "tests" / "kernel"
 BUILD = ROOT / "build" / "tests" / "kernel"
 STACK = 512 * 1024
 TIMEOUT = 120
+# A handoff lane parks the task at every safepoint, which costs a few hundred
+# nanoseconds each: its heaviest programs take a minute or more on a quiet host.
+HANDOFF_TIMEOUT = 600
 MAGIC = (3627).to_bytes(2, "little") + b"\r\n"
 # Lanes are the -X policies a program runs under, on the oracle as well:
 # CPython only records an unknown -X option in sys._xoptions. "handoff:N" is
@@ -76,9 +79,10 @@ def run(interpreter, flags, pyc, env=None):
     """env None: -I -S with the inherited environment; else -S with exactly env."""
     stdin = STDIN.get(pyc.stem, b"")
     isolation = ["-I", "-S"] if env is None else ["-S"]
+    timeout = HANDOFF_TIMEOUT if any(f.startswith("lucifer_handoff") for f in flags) else TIMEOUT
     try:
         child = subprocess.run([interpreter, *isolation, *flags, str(pyc)],
-                               capture_output=True, timeout=TIMEOUT, env=env,
+                               capture_output=True, timeout=timeout, env=env,
                                input=stdin, preexec_fn=limit_stack, cwd=BUILD)
     except subprocess.TimeoutExpired:
         return ("timeout", b"", b"")

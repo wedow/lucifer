@@ -375,6 +375,8 @@ struct lu_carrier {
     struct lu_entry *entries;
     uintptr_t poll;             /* the poll word */
     uint32_t wake;              /* the futex a park sleeps on; bumped by each unpark */
+    unsigned long native_id;    /* the thread's TID: a syscall, so read once */
+    uint32_t sleeping;          /* the carrier's thread is in, or about to enter, a futex sleep on `wake` */
     struct lu_task *task;       /* the task last attached here: the thread's tstate
                                    while its state is attached */
     struct lu_task *gilstate;   /* the thread's PyGILState tstate (CPython's autoTSSkey) */

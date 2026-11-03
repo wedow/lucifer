@@ -59,7 +59,7 @@ bind_tstate(struct lu_task *t)
     if (ts->thread_id == 0) {
         ts->thread_id = (unsigned long)pthread_self();      /* the task's ident, for life */
     }
-    ts->native_thread_id = (unsigned long)gettid();
+    ts->native_thread_id = lu_carrier->native_id;
     e->nbound++;
     if (e->brc.tid == 0) {
         lu_brc_register(e);

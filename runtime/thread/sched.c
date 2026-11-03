@@ -6,10 +6,9 @@
    A park has two halves, split so that no other carrier runs the task while
    its activation is still unwinding:
 
-   - In the eval loop, at the safepoint: the task registers a wait record in
-     its own tail and completes it (lu_wait_begin, lu_unpark: an early result
-     is kept), with `carrier` naming the other carrier. The loop saves its
-     frame and returns LU_EVAL_PARKED.
+   - In the eval loop, at the safepoint: the task fills the wait record in its
+     own tail with a result already in (lu_wait_ready), `carrier` naming the
+     other carrier. The loop saves its frame and returns LU_EVAL_PARKED.
    - In the carrier's loop, once the activation has returned: the task leaves
      the carrier (detached, unbound) and lu_park_commit queues it, since its
      wait is complete. A wait completed later queues it from lu_unpark.
@@ -109,11 +108,7 @@ lu_sched_safepoint(struct lu_task *t)
     if (t->ts.critical_section != 0) {
         Py_FatalError("lucifer: a task reached a migration point inside a critical section");
     }
-    struct lu_wait *w = &t->wait;
-    uint64_t id = lu_wait_begin(w);
-    w->unpinned = 1;
-    w->carrier = other_carrier(lu_carrier);
-    lu_unpark(id, 0);
+    lu_wait_ready(&t->wait, other_carrier(lu_carrier));
     return 1;
 }
 
@@ -142,7 +137,9 @@ run_loop(struct lu_carrier *c, struct lu_task *waiting)
             }
             /* Nothing runs here, so nothing reads storage this carrier has
                retired: free what it can before sleeping. */
-            lu_qsbr_process(c);
+            if (c->qsbr.queue.first < c->qsbr.queue.n) {
+                lu_qsbr_process(c);
+            }
             lu_carrier_sleep(c, seq);
             continue;
         }

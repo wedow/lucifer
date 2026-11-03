@@ -33,6 +33,7 @@ struct lu_wait {
     int status;                 /* LU_PARK_PENDING until it ends, then lu_park's result */
     uintptr_t result;           /* the unparker's, once status is LU_PARK_OK */
     PyTime_t deadline;          /* absolute CLOCK_MONOTONIC ns, or -1 for none */
+    int registered;             /* linked in the wait table while pending: an unpark can find it */
     int unpinned;               /* the waiter parks without sleeping: no one sleeps on `carrier`'s futex */
     int parked;                 /* ... and its task has left its carrier (lu_park_commit):
                                    completing the wait queues the task on `carrier` */
@@ -42,6 +43,11 @@ struct lu_wait {
 /* Registers `w` for the calling thread and returns its id. From here an
    unpark of the id is kept until lu_park consumes it. */
 uint64_t lu_wait_begin(struct lu_wait *w);
+
+/* A wait that is complete before anyone could hold its id, as an unpinned
+   task's handoff is: no unpark can find it, so it never enters the wait
+   table. `carrier` is the one whose queue the task joins. */
+void lu_wait_ready(struct lu_wait *w, struct lu_carrier *carrier);
 
 /* Waits until `w` is unparked or `deadline` (absolute CLOCK_MONOTONIC ns, -1
    for none) passes, then ends the wait: its id is stale from here on. A

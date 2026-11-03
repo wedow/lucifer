@@ -3,7 +3,10 @@
    the thread's first allocation, and the biased-refcount owner record, which
    binding a task registers (runtime/thread/task.c). */
 
+#define _GNU_SOURCE
 #include "lucifer.h"
+
+#include <unistd.h>
 
 _Thread_local struct lu_carrier *lu_carrier;
 
@@ -90,6 +93,7 @@ lu_carrier_bind(void)
         abort();
     }
     lu_carrier = c;
+    c->native_id = (unsigned long)gettid();
     c->current = entry_new(c, &_PyRuntime.main_interp);
     lu_qsbr_register(c);
     pthread_setspecific(_PyRuntime.carrier_key, c);
