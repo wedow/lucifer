@@ -22,3 +22,5 @@ Builder: opus.
 
 make check-kernel LANE=handoff and LANE=handoff:1 ... handoff:8 match the oracle for every program present; handoff_witness prints 1 plain and 2 under each handoff lane.
 
+
+- From K1t: specialized LOAD_ATTR caches keep a descriptor pointer alive only through the type version guard. With two carriers, reclaim it through QSBR, or hold a reference.
