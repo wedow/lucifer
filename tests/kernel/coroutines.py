@@ -1,5 +1,6 @@
 # Coroutines, async for/with and async generators, driven by a hand-written
 # event loop (there is no asyncio in the kernel).
+import sys
 
 
 def show(label, f):
@@ -348,3 +349,32 @@ async def nested(n):
 
 
 print('nested', run(nested(50)))
+
+
+# the task's async generator hooks
+def hooks():
+    seen = []
+
+    def firstiter(agen):
+        seen.append(agen.__name__)
+
+    sys.set_asyncgen_hooks(firstiter=firstiter)
+
+    async def ag():
+        yield 1
+
+    a = ag()
+    nx = a.__anext__()
+    try:
+        nx.send(None)
+    except StopIteration as e:
+        print('hook value', e.value)
+    sys.set_asyncgen_hooks(firstiter=None)
+    print('hook seen', seen)
+    try:
+        sys.set_asyncgen_hooks(firstiter=5)
+    except TypeError as e:
+        print(e)
+
+
+hooks()

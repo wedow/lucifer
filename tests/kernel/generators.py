@@ -365,3 +365,41 @@ def tree(n):
 
 
 print('tree', list(tree(4)))
+
+
+# throw and close through a 100-deep chain; dropping a suspended generator closes it
+def chain(n):
+    if n == 0:
+        try:
+            yield 'bottom'
+        except KeyError as e:
+            yield 'caught ' + str(e)
+        finally:
+            print('bottom finally')
+        return
+    yield from chain(n - 1)
+
+
+g = chain(100)
+print(next(g))
+print(g.throw(KeyError('deep')))
+g.close()
+print('closed', g.gi_frame)
+
+
+def dropped():
+    try:
+        yield 1
+        yield 2
+    finally:
+        print('dropped finally')
+
+
+for x in dropped():
+    print('first', x)
+    break
+print('after break')
+d = dropped()
+next(d)
+del d
+print('after del')
