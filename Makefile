@@ -77,6 +77,14 @@ HIDDEN = compiler:compiler:lib/compiler/__init__.py \
 	$(foreach f,$(filter-out %/__init__.py,$(wildcard lib/compiler/*.py)),compiler.$(basename $(notdir $f)):compiler.$(basename $(notdir $f)):$f)
 EXPORTS = results/abi/cp314t-exports.tsv
 
+# Every gate step runs under timeout: on expiry the whole process group is
+# killed (so no daemon-thread child survives) and the step fails with 124/137.
+# TMO bounds one program, STEP_TMO a whole tool run; override on the command line.
+TMO = 120
+STEP_TMO = 3600
+RUN = timeout -k 10 $(TMO)
+STEP = timeout -k 10 $(STEP_TMO)
+
 .PHONY: all abi-audit check check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler regen
 all: bin/lucifer build/lib/stamp
 
@@ -117,11 +125,11 @@ check: check-blocking check-globals check-capi check-kernel check-embed
 
 # Blocking calls only in runtime/prim/os.c, inside the syscall bracket.
 check-blocking: $(MAIN) $(LIB_OBJS)
-	$(HOST_PYTHON) tools/blockcheck runtime/prim/os.c $(MAIN) $(LIB_OBJS)
+	$(STEP) $(HOST_PYTHON) tools/blockcheck runtime/prim/os.c $(MAIN) $(LIB_OBJS)
 
 # Every writable symbol of the executable is accounted for.
 check-globals: bin/lucifer
-	python3 tools/abi/globals.py $(EXPORTS) tools/abi/globals.tsv bin/lucifer
+	$(STEP) python3 tools/abi/globals.py $(EXPORTS) tools/abi/globals.tsv bin/lucifer
 
 # Extensions built only against include/, preloaded with LD_BIND_NOW=1 so that
 # ld.so must bind every import to bin/lucifer before their checks run. Each
@@ -160,8 +168,8 @@ $(EXT_DIR)/accelerators:
 check-capi-ext: bin/lucifer $(EXT_DIR)/accelerators $(EXT_DIR)/exc_cross$(EXT_SUFFIX) \
 	  $(foreach m,$(SLOTS_MODULES),$(EXT_DIR)/slots_$(m)$(EXT_SUFFIX))
 	@for p in $(EXT_PROGRAMS); do \
-	  { PYTHONPATH=$(EXT_DIR) $(ORACLE_T) tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.expected; \
-	  { PYTHONPATH=$(EXT_DIR) bin/lucifer tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.actual; \
+	  { PYTHONPATH=$(EXT_DIR) $(RUN) $(ORACLE_T) tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.expected; \
+	  { PYTHONPATH=$(EXT_DIR) $(RUN) bin/lucifer tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.actual; \
 	  diff $(EXT_DIR)/$$p.expected $(EXT_DIR)/$$p.actual > $(EXT_DIR)/$$p.diff || { cat $(EXT_DIR)/$$p.diff; echo "FAIL $$p"; exit 1; }; \
 	  echo "PASS $$p"; \
 	done
@@ -170,7 +178,7 @@ check-capi: bin/lucifer $(CAPI_TESTS) check-capi-ext
 	@for so in $(CAPI_TESTS); do \
 	  name=$$(basename $$so .so); \
 	  for run in $$(seq 15); do \
-	    out=$$(LD_BIND_NOW=1 LD_PRELOAD=./$$so bin/lucifer 2>&1); \
+	    out=$$(LD_BIND_NOW=1 LD_PRELOAD=./$$so $(RUN) bin/lucifer 2>&1); \
 	    [ "$$out" = "capi $$name ok" ] || { echo "FAIL $$name (run $$run)"; exit 1; }; \
 	  done; echo "PASS $$name"; \
 	done
@@ -188,8 +196,9 @@ build/tests/embed/run: tests/embed/run.c build/liblucifer.a
 	$(CC) $(CFLAGS) -std=gnu11 -Wall -Iinclude -pthread -o $@ $< -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive -lm
 
 check-embed: build/tests/embed/run bin/lucifer
-	@build/tests/embed/run $(EMBED_PROGRAMS) > build/tests/embed/actual 2>&1; \
-	{ for p in $(EMBED_PROGRAMS); do bin/lucifer -c "$$p" 2>&1; done; } > build/tests/embed/expected; \
+	@$(RUN) build/tests/embed/run $(EMBED_PROGRAMS) > build/tests/embed/actual 2>&1; \
+	st=$$?; [ $$st -lt 124 ] || { echo "FAIL embed (exit $$st)"; exit 1; }; \
+	{ for p in $(EMBED_PROGRAMS); do $(RUN) bin/lucifer -c "$$p" 2>&1; done; } > build/tests/embed/expected; \
 	diff build/tests/embed/expected build/tests/embed/actual && echo "PASS embed"
 
 # Rerun when the headers or the export list change.
@@ -209,8 +218,8 @@ check-harness:
 # oracle under a 512 KiB stack. PROGRAMS="a b" selects; LANE= picks a policy.
 
 check-kernel: bin/lucifer build/lib/stamp
-	$(HOST_PYTHON) tools/kernelcheck --opcodes
-	$(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer \
+	$(STEP) $(HOST_PYTHON) tools/kernelcheck --opcodes
+	$(STEP) $(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer \
 	  --programs "$(PROGRAMS)" $(if $(LANE),--lane $(LANE))
 
 check-compiler:
