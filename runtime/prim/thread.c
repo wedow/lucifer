@@ -121,8 +121,8 @@ prim_thread_start(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (!PyLong_Check(args[1]) || lu_long_as_long(args[1], &stack_size) < 0) {
         return NULL;
     }
-    if (_PyRuntime.main_interp.finalizing) {
-        lu_err_format(PyExc_RuntimeError, "can't create new thread at interpreter shutdown");
+    if (__atomic_load_n(&_PyRuntime.finalizing, __ATOMIC_RELAXED)) {
+        lu_err_format(PyExc_PythonFinalizationError, "can't create new thread at interpreter shutdown");
         return NULL;
     }
     pthread_attr_t attr;

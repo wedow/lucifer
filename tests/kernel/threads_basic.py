@@ -286,7 +286,21 @@ atexit.register(print, 'atexit')
 
 def after_main():
     gate.wait()
+    while not threading._SHUTTING_DOWN:         # threading._shutdown is joining this thread
+        time.sleep(0.001)
+    child = threading.Thread(target=print, args=('started while the main thread joins',))
+    child.start()
+    child.join()
     print('non-daemon done')
+
+
+def start_at_exit():
+    child = threading.Thread(target=print, args=('started by atexit',))
+    child.start()
+    child.join()
+
+
+atexit.register(start_at_exit)
 
 
 threading.Thread(target=after_main).start()

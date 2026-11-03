@@ -252,7 +252,6 @@ struct _is {
     struct lu_lock tasks_lock;  /* the task list (HEAD_LOCK) */
     PyThreadState *tasks;       /* every task of this interpreter, in any state */
     uint64_t next_task_id;
-    int finalizing;             /* Py_FinalizeEx has begun: no thread starts */
     int tasks_closed;           /* finalization removed the other tasks: new ones hang at attach */
     PyObject *modules;          /* sys.modules */
     PyObject *builtins;         /* builtins.__dict__ */

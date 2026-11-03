@@ -504,7 +504,6 @@ int
 Py_FinalizeEx(void)
 {
     struct _is *interp = &_PyRuntime.main_interp;
-    interp->finalizing = 1;
     /* wait_for_thread_shutdown: threading._shutdown joins the non-daemon threads. */
     PyObject *threading = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("threading"));
     PyObject *shutdown = threading != NULL
