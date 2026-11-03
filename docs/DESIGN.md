@@ -19,9 +19,9 @@ suite passing against the unmodified cp314t wheel. This document decides how.
 | 3 | Compiler | Python: a tokenizer, a pegen-generated parser, then a port of symtable/codegen/flowgraph/assemble. It must produce output byte-identical to CPython's. | 17.3k lines of C (`Python/{compile,codegen,flowgraph,assemble,symtable,ast_preprocess}.c`). The generator is `Tools/peg_generator/pegen/python_generator.py`. §3 |
 | 4 | Bootstrap | The host CPython 3.14 compiles the kernel and stdlib to `.pyc`/frozen marshal at build time. Self-hosting means Lucifer reproduces those bytes. There is no heap snapshot at first. | Bytecode is CPython's, so the host is a perfect stage-0 compiler. Snapshots wait on a startup measurement. §3 |
 | 5 | Object model | The cp314t headers are canonical. Every materialized object sits at a stable address with the exact layout. Unboxing and scalar replacement happen only inside JIT code, before escape. | `PyObject` is 32 B on t vs 16 B on GIL builds. `PyTypeObject` symbols are 0x1b0 B in the oracle. Research 01 §6–7. §4 |
-| 6 | Memory | Vendored mimalloc with per-thread heaps (cp314t's allocator); biased refcounting exactly as `Include/refcount.h`; trial-deletion cycle collector over the GC heaps; QSBR for container storage. | Extensions hold references the runtime cannot see (statics, module state), so only refcount-informed collection is sound. Root tracing is not. §4.3 |
+| 6 | Memory | Vendored mimalloc with per-carrier heaps (cp314t's allocator); biased refcounting exactly as `Include/refcount.h`; trial-deletion cycle collector over the GC heaps; QSBR for container storage. | Extensions hold references the runtime cannot see (statics, module state), so only refcount-informed collection is sound. Root tracing is not. §4.3 |
 | 7 | Builtins | Python "kernel" classes installed into the static C type objects. C-API functions are primitives where they only touch layout. Otherwise they are thunks into the kernel. Kernel frames are invisible. | Research 03 §5/§7. One semantic source per operation. §4.4 |
-| 8 | Threads | 1:1. Each `threading.Thread` and each foreign thread is a glibc pthread with a `PyThreadState`. Attach/detach and stop-the-world follow cp314t. There is no M:N scheduler on the path to the bar. | `_Py_ThreadId()` inlines `%fs:0` into extension code. Native affinity holds by construction. Research 02 §3.2. §5 |
+| 8 | Threads | **Tasks on carriers from K1.** A task (`PyThreadState` plus heap frames) is a Python thread of control. A carrier (pthread) owns what the ABI ties to the OS thread: `ob_tid`, mimalloc heaps, BRC, QSBR, TLS. A degenerate scheduler binds one task per carrier for life (cp314t's 1:1) until M1.8 lets unpinned tasks migrate. | `_Py_ThreadId()` inlines `%fs:0` into extension code, so ownership belongs to the carrier. Retrofitting M:N onto native-stack execution failed repeatedly in the donor's predecessors. §5 |
 | 9 | Tiers | A C interpreter with inline caches (the reference and the deopt target), then a block-SSA optimizing JIT in C ported from the donor. A template tier only if warm-up data asks for one. | The donor's own roadmap keeps the interpreter as the reference/deopt landing. §6 |
 | 10 | Build | `make`. Python runs only in the bootstrap freeze/compile step (host CPython 3.14, later Lucifer itself). | §7 |
 
@@ -69,7 +69,7 @@ conformance is checked by the compiler rather than by review. A C/fasm mix would
 need every struct the JIT touches mirrored into fasm includes, and nothing the
 donor contains can be linked unchanged (research 04 §6). The donor's value
 transfers as algorithms, invariants and test method (§6.3), ported to C. The
-little assembly we need (context-switch and deopt trampolines, under 200 lines)
+little assembly we need (deopt trampolines, under 200 lines; there is no stack switching, §5.2)
 lives in `.S` files assembled by the same `cc`.
 
 Experiment that could reintroduce fasm: if the template tier is ever justified
@@ -201,12 +201,12 @@ The decision comes from data: see §10 for the startup experiment.
 
 | Mechanism | Design | Source |
 |---|---|---|
-| Allocator | mimalloc as vendored by CPython (9,770 lines, MIT), with the cp314t heap split per thread: objects, GC objects, GC objects with preheader, raw memory. `PyObject_Malloc`/`PyMem_Malloc` go to mimalloc; `PyMem_RawMalloc` goes to libc. The GC enumerates objects by walking GC heaps, so there is no per-object GC list. | `Objects/mimalloc`, `Objects/obmalloc.c` |
-| Refcount | Exact `Include/refcount.h` cp314t semantics. `ob_tid` is the owning pthread's TCB (`%fs:0`); local non-atomic increments by the owner, shared atomic otherwise. `_Py_DecRefShared` and `_Py_MergeZeroLocalRefcount` are exported. Biased-refcount merge queues are per thread. | `Python/brc.c` (208 lines) port |
+| Allocator | mimalloc as vendored by CPython (9,770 lines, MIT), with the cp314t heap split per carrier (§5.3): objects, GC objects, GC objects with preheader, raw memory. `PyObject_Malloc`/`PyMem_Malloc` go to mimalloc; `PyMem_RawMalloc` goes to libc. The GC enumerates objects by walking GC heaps, so there is no per-object GC list. | `Objects/mimalloc`, `Objects/obmalloc.c` |
+| Refcount | Exact `Include/refcount.h` cp314t semantics. `ob_tid` is the allocating carrier's TCB (`%fs:0`); local non-atomic increments by that carrier, shared atomic otherwise, including from a migrated task. `_Py_DecRefShared` and `_Py_MergeZeroLocalRefcount` are exported. Biased-refcount merge queues are per carrier. | `Python/brc.c` (208 lines) port |
 | Immortals | `ob_ref_local == UINT32_MAX` for statics, interned strings and small ints; `_Py_SetImmortal` exported. | `refcount.h` |
-| Deferred refcount | Functions, code, modules, heap types and top-level globals use cp314t deferred counting. Stack references from interpreter and JIT frames are not counted, so the GC scans thread frames. This is where precise stack maps (donor INV-EXE-1, INV-GC-1) become mandatory. | `_PyObject_SetDeferredRefcount` |
+| Deferred refcount | Functions, code, modules, heap types and top-level globals use cp314t deferred counting. Stack references from interpreter and JIT frames are not counted, so the GC scans every task's frames, running or parked. This is where precise stack maps (donor INV-EXE-1, INV-GC-1) become mandatory. | `_PyObject_SetDeferredRefcount` |
 | Storage reclamation | Replaced `ob_item` arrays and dict keys tables are freed after a QSBR grace period. Lock-free readers (`list[i]`, dict lookup) never see freed storage. | `Python/qsbr.c` (282) port; donor `vm_retire`/`vm_grace_step` |
-| Uniqueness | `_PyObject_IsUniquelyReferenced` follows cp314t (owner + local 1 + shared 0). `PyUnstable_Object_IsUniqueReferencedTemporary` consults interpreter and JIT frames. NumPy's in-place temporary elision depends on it. | research 01 §6.2 |
+| Uniqueness | `_PyObject_IsUniquelyReferenced` follows cp314t (owner + local 1 + shared 0). `PyUnstable_Object_IsUniqueReferencedTemporary` consults interpreter and JIT frames. NumPy's in-place temporary elision depends on it. Another carrier's objects answer false (§5.3). | research 01 §6.2 |
 
 ### 4.3 Cycle collector
 
@@ -217,7 +217,7 @@ throughout. Lucifer therefore uses cp314t's trial deletion
 
 1. Stop the world (§5). Walk the mimalloc GC heaps.
 2. For each tracked object, compute `gc_refs = refcount − internal references`
-   via `tp_traverse`. Add deferred stack roots found in thread frames.
+   via `tp_traverse`. Add deferred stack roots found in task frames (§5.6).
 3. Anything with `gc_refs > 0`, plus everything reachable from it, survives. Run
    `tp_finalize` on the rest (PEP 442), handle resurrection, clear weakrefs, then
    `tp_clear`.
@@ -254,7 +254,7 @@ C extension ─▶ C-API function ─▶ thunk ───────┤      └
   shows only the user frame, as the difftest traceback programs require.
 - **Primitives** are the `_lucifer` builtin module in C (`runtime/prim/`). Each one
   has a descriptor: argument/result kinds, may-raise, may-allocate, may-reenter,
-  safepoint, effects. Kernel code calls them as ordinary functions; the JIT inlines
+  may-block (parks or brackets, §5.5), thread-scoped (§5.4), safepoint, effects. Kernel code calls them as ordinary functions; the JIT inlines
   them as intrinsics. Families follow research 03 §5: object/layout (allocate a
   layout, read/write a field, incref/decref, type and identity); scalars (compact-int
   fast arithmetic with overflow flag, digit-vector kernels, IEEE ops, `dtoa`
@@ -262,8 +262,8 @@ C extension ─▶ C-API function ─▶ thunk ───────┤      └
   arrays, 1/2/4-byte char storage, copy/fill/compare/find with refcount-correct
   bulk moves); namespace dict (lookup/insert/delete for exact-str keys, used by
   `LOAD_GLOBAL`, `LOAD_ATTR` on modules/types and `_PyType_Lookup`); sync (`PyMutex`,
-  critical sections, atomics, park/unpark); control (call, raise, frame
-  materialization, weakref, attach/detach); platform (fd/fs/process/time/signal/
+  critical sections, atomics, park/unpark); control (call and generator resume, which return a
+  frame to push, §5.2; raise, frame materialization, weakref, attach/detach); platform (fd/fs/process/time/signal/
   socket, `dlopen`/`dlsym`, `fork_exec`). Target: at most 300 kernel primitives
   plus platform adapters, counted by `tools/census` (§11).
 - **No bootstrap regress.** Interpreter namespace operations call the namespace
@@ -296,23 +296,240 @@ address with the exact layout. Materialization happens once, so later identity
 checks see the same object. Unboxed fields in heap objects are out of scope until
 identity tests justify them (`a.x is a.x` stays true).
 
-## 5. Threads, safepoints, native affinity
+## 5. Execution model: tasks on carriers
 
-| Surface | Mapping |
+Every Python thread of control is a **task**. Every OS thread that runs one is a
+**carrier**. From K1 the scheduler is degenerate: one task per carrier, bound for
+life, which is exactly cp314t's 1:1 threads. Every structural precondition for
+M:N exists from the first interpreter, so turning on migration (rung M1.8) is a
+policy change with tests, not a rewrite.
+
+### 5.1 Why it is designed in
+
+| Source | What failed or forced a redesign | Rule taken |
+|---|---|---|
+| Donor's predecessor VMs (owner report; not in the donor's history) | M:N retrofitted onto execution state that lived on native stacks failed several times. The donor was restarted with the shapes designed in: Processes never correspond to native stacks, worker and execution state stay separable, stacks are VM-managed chunks (donor `docs/00-CONSTITUTION.md` §XVI, items 128–135). | Execution state is off the C stack from K1 (§5.2). |
+| Donor, current docs (shapes that work) | No register bank or native SP is continuation state at a park (INV-SCH-8, INV-EXE-1). A completion carries a never-reused wait identity (INV-SCH-14, `docs/vm/wait-DESIGN.md`). A stop aimed at one Process diverts only that Process (INV-SCH-11). A stop is complete only when every owed acknowledgement arrived (INV-SCH-12). Per-worker `runnext` and local queues with stealing of runnable work only (`docs/vm/execution-model-DESIGN.md` §5.1). | §5.5 wait records, §5.6 per-carrier acks and targeted stops, affinity-first queues. |
+| Donor, places where state still leaked native | Compiled activations rode the worker stack, so deep recursion segfaulted at 8k–65k levels while heap-framed interpretation had no bound (7987473ae). A global FIFO plus a service-thread wake relay migrated 75% of dispatches at 4 workers and caused 10–20% cross-worker young roots. Delivery on the running worker and per-worker queues cut ping-pong migrations from 20,097 to 1 (`execution-model-DESIGN.md` §0, 901baae09, d1fcd6b9a). | No Python recursion in C. Affinity is the default, because a migrated task loses biased refcounting (§5.3). |
+| Java Loom ([JEP 444](https://openjdk.org/jeps/444), [JEP 491](https://openjdk.org/jeps/491)) | Virtual threads pin inside native frames and inside `synchronized`, because monitors were owned by the carrier. A blocking pinned thread captures its carrier. Fixing monitors took a JDK release (24). | Every lock owner is the task from day one. Native frames pin. Pinned blocking blocks only its own carrier. |
+| Go ([`runtime/proc.go`](https://go.dev/src/runtime/proc.go) `entersyscall`/`handoffp`, [`cgocall.go`](https://go.dev/src/runtime/cgocall.go), [Go 1.4 notes](https://go.dev/doc/go1.4#runtime)) | Segmented stacks were replaced by copied runtime stacks (hot split). A blocking syscall or cgo call stays on its M while sysmon hands the P to another M after about 20 µs. A C→Go callback locks the goroutine to its thread. `LockOSThread` serves thread-affine C libraries. | A blocking call runs in place and the run queue moves (§5.5). C callbacks pin. Thread-scoped primitives pin for life (§5.4). |
+| Stackless and greenlet ([greenlet docs](https://greenlet.readthedocs.io/en/latest/)) | Hard switching copies C stack slices. That breaks C code holding stack addresses, and greenlets cannot cross threads. Only soft switching (a non-recursive eval) is cheap and safe. | The C stack is never switched or copied. An unpinned park returns to the carrier loop. |
+| CPython 3.11+ (`Include/internal/pycore_interpframe_structs.h`, `Python/ceval.c`, `Python/bytecodes.c`) | `_PyInterpreterFrame`s live on per-thread `_PyStackChunk`s. `_PUSH_FRAME` calls Python without recursing. Generator frames are embedded in the generator and resumed by `SEND_GEN`/`FOR_ITER_GEN` via `DISPATCH_INLINED`. A `FRAME_OWNED_BY_INTERPRETER` entry frame marks each C entry. Slot wrappers (`slot_nb_add`), `__del__` and C-API calls still recurse, and 3.14 bounds them with `c_stack_soft_limit`. | Copy the frame model. Close the recursion CPython keeps by putting protocols in kernel Python. |
+
+The Loom, Go and greenlet rows come from public documentation and were not
+re-verified for this document (unverified).
+
+### 5.2 Execution state off the C stack
+
+- **Frames** are private structs on the task's chunked frame stack
+  (`datastack_*`). Generator and coroutine frames are embedded in their objects.
+  `PyFrameObject` is created lazily.
+- **One eval-loop activation per task.** These push or pop frames in that
+  activation, with no C recursion:
+  - calls, returns and exception unwinding across Python frames;
+  - generator and coroutine resumption by `FOR_ITER`, `SEND`, `await`,
+    `next()`, `send`, `throw` and `close`;
+  - class bodies, `exec`/`eval`, and imports of Python modules;
+  - every kernel builtin.
+
+  The mechanism has two parts:
+  - Call and resume primitives return a frame for the loop to push. They never
+    call the interpreter.
+  - Slot protocols with Python implementations are kernel Python (binary-op
+    reflection, rich comparison, `__getattribute__`→`__getattr__`, `__init__`
+    after `__new__`), so for the interpreter they are ordinary calls.
+- **C recursion remains only where C calls Python.** These run a nested eval
+  loop on the carrier's C stack and pin the task for their duration (§5.4):
+  - extension code calling the C-API (`PyObject_Call*`, `PyIter_Next` on a
+    generator, slot calls made from C);
+  - extension module init;
+  - `tp_finalize`/`__del__` and weakref callbacks run at a refcount-zero decref,
+    which keeps cp314t's prompt finalization;
+  - C-level trace and profile functions, `sys.monitoring` callbacks and signal
+    handlers.
+- **Depth accounting.** `py_recursion_remaining` counts Python frames and is
+  task state. C recursion is bounded by the carrier's `c_stack_soft_limit`. It
+  raises `RecursionError` at nested-eval entry, as 3.14 does.
+- **JIT frames** obey INV-EXE-1. Before any park or safepoint acknowledgement,
+  every frame is published. Native registers and SP are never continuation
+  state.
+- **No stack switching.** An unpinned park makes the eval loop return to the
+  carrier's loop. Resuming means entering the loop at the task's top frame.
+  There is no context-switch assembly.
+
+### 5.3 Task and carrier
+
+The task record is a `PyThreadState` (`struct _ts`) plus a private task tail.
+The carrier record is per pthread, reached through one TLS word.
+`PyThreadState_Get()` and `PyGILState_GetThisThreadState()` return the task bound
+to the calling carrier. A task with a C frame cannot be rebound, so an extension
+sees one stable tstate for its whole native extent.
+
+| Owner | State |
 |---|---|
-| `threading.Thread`, `_thread.start_joinable_thread` | One glibc pthread, created by a platform primitive. A `PyThreadState` (CPython prefix plus private tail: mimalloc heaps, BRC queue, QSBR record, frame stack, JIT state). |
-| Foreign threads | `PyGILState_Ensure` / `PyThreadState_New` attach a state. `PyGILState_*` means attach/detach, never serialization. |
-| Blocking | `Py_BEGIN_ALLOW_THREADS` and blocking primitives detach. Detached threads count as stopped. |
-| Stop-the-world | Used by GC, `sys.settrace`/`setprofile` across all threads, and code invalidation. A request bumps a global stop sequence; attached threads acknowledge at the eval breaker (interpreter) or a two-instruction poll (JIT, the donor `sc_next` pattern) after publishing a complete frame state. This is G4/INV-EXE-1: a continuation is recorded before anything can stop. |
-| Signals | Handlers run on the main thread at safepoints (`Modules/signalmodule.c` semantics, policy in Python). |
-| Locks | `PyMutex` + parking lot ported from `Python/{lock,parking_lot,critical_section}.c` (1,228 lines). The byte lives in `ob_mutex`, which extensions also take. |
-| Native affinity | Every Python thread is a pthread 1:1, so a native call chain, its TLS and `native_id` never move. |
-| Extensions without `Py_mod_gil` | Imported with the GIL still disabled, i.e. CPython 3.14t `PYTHON_GIL=0` behavior (owner decision 3, §11). NumPy declares `Py_MOD_GIL_NOT_USED`. |
+| Task (travels with it) | `interp`, `prev`/`next` (the interpreter's task list), `_status.{initialized,finalizing,cleared,finalized}`, `_whence`, `id`, `thread_id` (§5.7), `py_recursion_remaining`/`_limit`, `recursion_headroom`, `tracing`, `what_event`, `c_tracefunc`/`c_profilefunc` and their objects, `current_frame`, `datastack_chunk`/`_top`/`_limit`, `current_exception`, `exc_info`, `exc_state`, `async_exc`, `dict`, `delete_later`, `context`, `context_ver`, `coroutine_origin_tracking_depth`, `async_gen_firstiter`/`_finalizer`, `current_executor`, `dict_global_version`, `threading_local_key`/`_sentinel`, `remote_debugger_support`, `critical_section` (always empty at a migration point). Tail: `asyncio_running_loop`/`_task`, `Py_tss_t` values, pending targeted events, pin state. |
+| Carrier: tstate fields rewritten at bind, meaningful only while bound | `state` (attached/detached), `native_thread_id`, `gilstate_counter`, `_status.{bound,unbound,bound_gilstate,active}`, `holds_gil` (always 0), `eval_breaker` (mirrors the carrier's poll word) |
+| Carrier record | biased-refcount identity (`ob_tid` is this pthread's TCB, the `%fs:0` that `_Py_ThreadId()` inlines into extensions); mimalloc heaps; freelists; BRC merge queue; per-thread heap-type refcount array; QSBR record; GC allocation counters; native stack bounds and C-stack references; poll word; run queue; glibc TLS, `errno` |
 
-M:N is not needed for the bar and stays out until there is a lightweight-task
-API to put on it. When it comes, the donor scheduler (worker-local run queues,
-futex parking, wait incarnation IDs; research 02 §3.1) adapts to tasks that pin to
-their carrier while any C frame is on their stack.
+**Objects do not belong to tasks.**
+- `ob_tid` names the carrier that allocated the object, and migration changes no
+  object.
+- On a new carrier, the task's references to older objects take the shared
+  (atomic) refcount path, which is correct and slower.
+- Zero-local merges queue to the owning carrier, which drains its BRC queue at
+  every poll and before it sleeps. A retiring carrier merges everything it owns
+  and abandons its heaps, which is cp314t's thread-exit path.
+- New allocations go to the current carrier's heaps. Remote frees use
+  mimalloc's cross-thread path.
+- `_PyObject_IsUniquelyReferenced` answers false for another carrier's objects.
+  A migrated task therefore gets the conservative answer, and NumPy elides fewer
+  temporaries.
+
+### 5.4 Pinning
+
+A task may leave its carrier only at a park or a safepoint, and only when
+`pin == 0` and it is not pinned for life.
+
+- **Transient pin.** `pin` is one word in the task tail.
+  - It is incremented when the eval loop calls foreign C (an extension function,
+    method, slot or vectorcall, or a `ctypes` call) and when C enters a nested
+    eval loop. It is decremented on return.
+  - Kernel primitives that neither call Python nor block are not counted.
+  - The cost is one increment and one decrement per foreign call, at the same
+    place 3.14 checks the C stack.
+  - `Py_BEGIN_ALLOW_THREADS` regions are inside C, so they are pinned by
+    construction.
+- **Lifetime pin.** These tasks never migrate:
+  - tasks attached for a foreign OS thread (`PyGILState_Ensure`,
+    `PyThreadState_New`);
+  - the main task (signal masks, Tk and other main-thread C libraries);
+  - any task that calls a platform primitive whose descriptor is
+    `thread_scoped`: `os.sched_setaffinity(0, …)`, `signal.pthread_sigmask`,
+    `os.unshare`/`setns`, and the like.
+- **A pinned park blocks its carrier in place** on that carrier's futex and
+  counts as detached. That is exactly cp314t.
+- **Invariants at a migration point:**
+  - no C frame;
+  - no critical section held (kernel commit regions contain no safepoint, and a
+    section suspended by a detach is inside C);
+  - no open QSBR read interval (primitives close theirs before returning).
+- **Identity-keyed state uses the task ident, never the carrier.** This covers
+  the owners of `RLock`, `_thread.lock` and import locks, `threading.local`, and
+  `Py_tss_t`. It is Loom's monitor lesson.
+
+### 5.5 Park and unpark
+
+Every blocking operation goes through one of two entry points from K1:
+
+- **`lu_park(wait, deadline) → result`** is for waits that someone else
+  completes.
+  - A wait record holds its owner task, a never-reused wait id, a result slot
+    and a deadline.
+  - `lu_unpark(id, result)` may come from any thread. Stale and duplicate ids
+    are ignored, and an early result is retained.
+  - An unpinned task parks with its frames published, and the eval loop returns
+    to the carrier. Unpark queues the task on the carrier that last ran it.
+  - A pinned task's carrier sleeps on its futex instead.
+  - The ported parking lot (`Python/parking_lot.c`) sits on these calls. So do
+    `PyMutex`, critical-section contention, `_thread.lock`, `RLock`,
+    `Condition`, `queue`, `Event` and `join`. `time.sleep` and every timeout
+    are deadlines.
+- **`lu_syscall_begin()`/`lu_syscall_end()`** bracket every blocking syscall.
+  - This is cp314t's detach/attach, the same thing `Py_BEGIN_ALLOW_THREADS`
+    does.
+  - The call runs in place, so `errno`, TLS and signal semantics are untouched.
+  - With migration on, a monitor hands a carrier's runnable tasks to a spare
+    carrier once the carrier has spent about 20 µs inside a bracket (Go
+    `handoffp`).
+  - Users: file I/O, `waitpid`, `getaddrinfo`, `select`/`poll`/`epoll_wait`,
+    socket calls, `flock` and tty reads.
+- **io_uring comes later and is measured.** Socket, poll, pidfd and file
+  operations move from the bracket to `lu_park` over a per-carrier ring. The
+  running carrier submits and reaps, as in donor `execution-model-DESIGN.md`
+  §5.1. Callers see the same API.
+- **K1 minimum:**
+  - `lu_park`/`lu_unpark` over futexes, with deadlines;
+  - the parking lot and `PyMutex` on top of them;
+  - the bracket around every blocking syscall in `runtime/prim/os.c`;
+  - a `make check` lint that rejects any blocking libc or syscall call outside
+    the bracketed wrappers.
+
+### 5.6 Safepoints and stop-the-world
+
+- **Polls.** Each carrier has one poll word. The interpreter checks it at calls
+  and back-edges (the eval breaker). JIT code checks it with a two-instruction
+  poll (the donor's `sc_next` pattern).
+- **Stop-the-world**, used by GC, `settrace`/`setprofile` across all threads and
+  code invalidation:
+  - A request bumps a global stop sequence.
+  - It completes when every attached carrier has acknowledged after publishing
+    its task's frames.
+  - Detached carriers (in a syscall bracket, in a pinned park, or idle) count as
+    stopped. They wait at re-attach until the world restarts.
+  - Tasks never acknowledge. A running task is covered by its carrier's ack.
+    Parked and runnable tasks are quiescent by construction, so the cost is
+    O(carriers), not O(tasks).
+- **Walks over all tasks.** GC roots, `threading.settrace_all_threads` and
+  `setprofile_all_threads`, and frame inspection walk the interpreter's task
+  list, in every state.
+- **Targeted events** set the task's pending bit and, if the task is bound, its
+  carrier's poll word. There is no global bump. This covers
+  `PyThreadState_SetAsyncExc`, per-task tracing and debugger stops. Binding
+  re-raises the poll word if bits are pending.
+- **Signals.** Handlers run in the main task at its safepoints
+  (`Modules/signalmodule.c` semantics, policy in Python).
+- **Fairness (M1.8).** A monitor sets the preempt bit on a carrier whose task
+  has run 10 ms while other tasks are runnable (Go sysmon). It is a no-op in the
+  degenerate scheduler.
+- **Locks.** `PyMutex` and critical sections are ported from
+  `Python/{lock,parking_lot,critical_section}.c` (1,228 lines). The byte lives in
+  `ob_mutex`, which extensions also take.
+- **Extensions without `Py_mod_gil`** load with the GIL still disabled, which is
+  CPython 3.14t's `PYTHON_GIL=0` behavior (§11 item 3). NumPy declares
+  `Py_MOD_GIL_NOT_USED`.
+
+### 5.7 `threading.Thread` and lightweight tasks
+
+| Surface | Degenerate (K1 to M1.8) | Migration on (M1.8) |
+|---|---|---|
+| `threading.Thread`, `_thread.start_joinable_thread` | a task plus a new carrier pthread, bound for life | a task on the carrier pool, pinned only while `pin > 0` or for life. Pool size comes from the affinity mask and the cgroup quota, and handoff (§5.5) adds carriers. |
+| `_thread.get_ident()` | the carrier's `pthread_self()`, as in cp314t | the task ident: nonzero and unique among live tasks; may be reused after exit, as in CPython |
+| `threading.get_native_id()` | the carrier's TID | the current carrier's TID. `Thread.native_id` keeps the value from start, so for an unpinned thread the two can differ. That is the one observable divergence, and a lifetime pin makes them agree from then on. |
+| `threading.local`, `Py_tss_t`, contextvars, exception and trace state | per task | per task |
+| C `thread_local` in extensions | the thread's own | the carrier's: right for caches (BLAS buffers, `errno`), wrong for identity |
+| Foreign threads, the main thread | pinned for life | pinned for life |
+| `threading.stack_size()` | sizes the carrier | sizes new carriers; bounds only C recursion |
+
+Research 02 §3.2 marks transparent migration of arbitrary extension TLS as
+unverified. M1.8 decides it from data. If a corpus lane diverges because an
+extension keys identity on C TLS, calling into that extension becomes a
+lifetime pin, recorded as a module-level flag. It never becomes a global
+fallback.
+
+**No lightweight-task API.** Once migration is on, a `threading.Thread` costs a
+task: a tstate and heap frames. Tens of thousands of threads then come through
+the standard API, and a private API would be a non-CPython surface that no
+program uses. asyncio stays the Python event loop. A native loop over `lu_park`
+and io_uring is a §10 experiment after M1.8.
+
+### 5.8 Proving the preconditions while the scheduler is degenerate
+
+- **Deep recursion.** `check-kernel` runs every program under a 512 KiB
+  `RLIMIT_STACK`. `tests/kernel/deep_recursion.py`:
+  - recurses 150,000 Python frames deep under `sys.setrecursionlimit(200_000)`;
+  - drives a 10,000-deep `yield from` chain;
+  - unwinds an exception through 100,000 frames.
+
+  It is written first and shown passing on the oracle under the same limit.
+- **Handoff stress, `-X lucifer_handoff`.** This is a scheduler policy, not a
+  test hook. It starts a second carrier and lifts the main-task pin. Every
+  safepoint with `pin == 0` then parks the task and unparks it on the other
+  carrier, through the same `lu_park`, run-queue and bind code that M1.8
+  migration uses.
+  - Every `tests/kernel` program under the flag matches the oracle.
+  - `tests/kernel/handoff_witness.py` prints how many distinct
+    `_thread.get_native_id()` values it saw over 1,000 loop iterations. It
+    expects 2 under the flag and 1 without.
 
 ## 6. Tiers
 
@@ -322,8 +539,11 @@ their carrier while any C frame is on their stack.
   Semantics come from `Python/bytecodes.c` (5,551 lines), written by hand. The
   cases generator is not used: its output embeds CPython internals and would put
   Python into the runtime build.
-- Frames are private structs on per-thread chunked stacks. `PyFrameObject` is
+- Frames are private structs on per-task chunked stacks. `PyFrameObject` is
   created lazily on observation.
+- The loop is non-recursive for Python-to-Python calls, generators and
+  coroutines. It returns to the carrier on an unpinned park and recurses only
+  under C (§5.2).
 - Inline caches live in the `CACHE` words, as in CPython. Specialization rewrites
   opcodes with atomic stores, valid under concurrent execution. Guards are
   `tp_version_tag`, dict keys versions, `func_version` and global-dict watcher
@@ -377,9 +597,10 @@ No donor file is linked. Each row is a port or a reuse of method.
 | `source_send_cache.inc` site identity, advisory profiling, exit-driven recompile | inline-cache feedback | adapt |
 | Field-kind maps (`field_kinds.inc`) | GC reference maps per layout; heap-type inline values | adapt |
 | `vm_retire`/`vm_grace_step` | QSBR (cp314t `qsbr.c` is the code) | method |
-| Epoch stop protocol (`sc_poll_core`, exact-once ACK) | stop-the-world | method |
+| Epoch stop protocol (`sc_poll_core`, exact-once ACK), targeted stops (INV-SCH-11) | per-carrier stop-the-world, task events (§5.6) | method |
 | `perf_map.inc` (531 lines) | perf map/jitdump writer | port |
-| Scheduler, sockets/io_uring, snapshots | not on the path to the bar | later, owner decision 7 |
+| Published continuations (INV-EXE-1, INV-SCH-8), wait identities (`wait-DESIGN.md`), per-worker `runnext`/local queues/stealing (`execution-model-DESIGN.md` §5.1) | task/carrier split, `lu_park`, M1.8 scheduler (§5) | method |
+| Per-worker io_uring, snapshots | io_uring after M1.8 by measurement (§10); no snapshots | later |
 | Template tier `tc.inc` | none at first | §10 experiment |
 | Copying nurseries, 8-byte header, tagged immediates in the heap, freestanding ELF | rejected | conflict with stable `PyObject*` and glibc hosting |
 | Test and measurement method (scenario harness, exact-output oracles, AWFY sampler, gates) | already in `tools/` | copied |
@@ -387,7 +608,7 @@ No donor file is linked. Each row is a port or a reuse of method.
 ## 7. Repository layout and build
 
 ```
-Makefile                 all, check, check-compiler, check-kernel, check-capi, abi-audit, selfhost, regen, check-harness
+Makefile                 all, check, check-compiler, check-kernel, check-sched, check-capi, abi-audit, selfhost, regen, check-harness
 include/                 verbatim CPython v3.14.10 Include/ (no internal/) + cp314t pyconfig.h
 runtime/
   main.c                 argv → config (Python/initconfig.c semantics) → kernel bootstrap → lucifer startup
@@ -398,9 +619,9 @@ runtime/
                          buffer.c weakref.c pystate.c capsule.c datetime.c … (every exported symbol)
   interp/                ceval.c frame.c specialize.c code.c marshal.c frozen.c(loader) exceptions.c
   prim/                  _lucifer: object.c int.c float.c dtoa.c str.c storage.c dict.c sync.c os.c loader.c
-  thread/                tstate.c lock.c parking_lot.c critical_section.c stw.c
+  thread/                task.c carrier.c sched.c park.c lock.c parking_lot.c critical_section.c stw.c
   jit/                   (from rung P0) ssa*.c regalloc.c x86.c deopt.c perfmap.c
-  asm/                   switch.S deopt.S
+  asm/                   deopt.S
 lib/
   kernel/                Python builtins (§4.4) + sys/builtins module population + startup
   modules/               Python replacements for CPython C modules (§9.3), e.g. _io.py marshal.py _sre.py itertools.py
@@ -414,6 +635,7 @@ tools/abi                abi-audit: exported set and symbol sizes vs results/abi
 tools/census             Python vs native line and primitive counts
 tests/kernel/            binary-level programs run with -I -S against the oracle
 tests/capi/              programs importing unmodified oracle lib-dynload extensions
+tests/sched/             M1.8 programs: many tasks on few carriers, pinned callbacks
 build/                   ignored: frozen.c, objects, lib/python3.14t with __pycache__
 bin/lucifer              ignored build output
 ```
@@ -450,7 +672,7 @@ parallel.
 |---|---|---|---|
 | C0 | `make check-compiler` (host) | 100% byte-identical marshal and AST for the 42 closure modules, 164 difftest programs and `tests/kernel`; report the share of all vendored `Lib/**/*.py` the host compiles | none |
 | K0 | `make abi-audit` | `bin/lucifer` exports all 1,843 `Py*`/`_Py*` symbols; all 215 data symbols have the oracle's `nm -S` sizes; unimplemented functions abort naming themselves and are counted | none |
-| K1 | `make check-kernel` | every `tests/kernel` program (≥ 30) run as host-compiled `.pyc` under `-I -S` matches the oracle on stdout, stderr and exit | K0 |
+| K1 | `make check-kernel` | every `tests/kernel` program (≥ 30) run as host-compiled `.pyc` under `-I -S` with a 512 KiB stack limit matches the oracle on stdout, stderr and exit, both plain and under `-X lucifer_handoff`, including `deep_recursion` and `handoff_witness` (§5.8) | K0 |
 | M0.0 | `tools/difftest run --python bin/lucifer` | probe accepted: 0 NOTRUN of 164 | C0, K1 |
 | M0.1 | same | 46 named programs PASS (§9.4) | M0.0 |
 | M0.2 | same | 164/164 PASS (adds cycle GC, weakrefs/finalizers, generators/async, float formatting, traceback printing, metaclasses, `memoryview`, pattern matching, generated and AWFY lanes) | M0.1 |
@@ -462,6 +684,7 @@ parallel.
 | M1.5 | `tools/numpytest run` | ≥ 13,069 PASS (25%) | M1.4 |
 | M1.6 | same | ≥ 39,205 PASS (75%), 0 CRASH | M1.5 |
 | M1.7 | serial and `--parallel` | every case the current cpython-3.14.10t oracle manifest marks PASS is PASS (oracle parity; 51,140 as of the 11-02 widened baseline), no FAIL/ERROR/TIMEOUT/CRASH, GIL disabled throughout. **This is the public bar.** | M1.6, M1.3 |
+| M1.8 | `make check-sched`; ftcorpus serial/parallel; `tools/numpytest run --parallel`, all with migration on | `tests/sched/many_tasks.py` (10,000 threads ping-ponging over `Condition`s and socketpairs, plus sleeps) matches the oracle with `-X lucifer_carriers=4` while the runner samples at most 16 OS threads; `tests/sched/pinned_callback.py` (a `ctypes` `qsort` comparator that blocks on a lock released by another thread) sees one `get_native_id()` across each callback while 1,000 other threads migrate; ftcorpus and numpytest PASS sets equal M1.7's; `tests/kernel` and difftest pass under `-X lucifer_handoff` | M1.7; every blocking primitive on `lu_park` or the bracket (§5.5) |
 | P0 | `tools/bench/awfy --python bin/lucifer` | 14/14 PASS with the SSA tier on (no speed target) | M0.2 |
 | P1 | `tools/bench/compare --suite awfy` | geomean time/CPython ≤ 1.189 (parity with the oracle) | P0 |
 | P2 | same | ≤ 0.594 (2× faster than the oracle); pyperformance 9/9 PASS | P1 |
@@ -473,7 +696,8 @@ ftcorpus serial/parallel parity; the 24 pypi suites; pyperformance against PyPy.
 ## 9. First vertical slice: C0, K0, K1, M0.0, M0.1
 
 Goal: `tools/difftest run --oracle "$ORACLE_T" --python bin/lucifer` reports the
-probe accepted and 46 PASS. Single thread, interpreter only, refcount only
+probe accepted and 46 PASS. One task (a second carrier only under
+`-X lucifer_handoff`), interpreter only, refcount only
 (`gc.collect()` returns 0 and collects nothing until M0.2), no JIT. All 1,843
 symbols are exported, most as aborting stubs.
 
@@ -507,16 +731,17 @@ Done when: K0 in §8.
 
 ### 9.3 K1, then M0.0: interpreter, kernel, startup closure
 
-Files: `runtime/interp/*`, `runtime/prim/*`, `runtime/thread/{tstate,lock,parking_lot,critical_section}.c`,
+Files: `runtime/interp/*`, `runtime/prim/*`, `runtime/thread/{task,carrier,sched,park,lock,parking_lot,critical_section}.c`,
 `lib/kernel/*`, `lib/modules/*`, `tools/freeze`, `tests/kernel/*.py`.
 
 | Piece | Content |
 |---|---|
-| Interpreter | All base opcodes that appear in the C0 corpus; generic slot dispatch; exact-type primitive fast paths; exceptions with tables, tracebacks and chaining; generators, coroutines and `yield from` (`os`, `re` and `enum` use them); closures and cells; class creation with `__build_class__`, `__prepare__`, `__init_subclass__`, `__set_name__` (`enum` needs all of them). |
+| Interpreter | Non-recursive for Python calls, generators and coroutines (§5.2). All base opcodes that appear in the C0 corpus; generic slot dispatch; exact-type primitive fast paths; exceptions with tables, tracebacks and chaining; generators, coroutines and `yield from` (`os`, `re` and `enum` use them); closures and cells; class creation with `__build_class__`, `__prepare__`, `__init_subclass__`, `__set_name__` (`enum` needs all of them). |
 | Kernel types | Everything listed in §4.4. Exact `int`/`str`/`float` repr and hash; `str` methods used by `re`, `enum`, `json`, `os`, `posixpath`, `sysconfig`. |
 | Native modules as Python ports | `marshal` (`dumps`), `_sre` (from PyPy `rpython/rlib/rsre/rsre_core.py` + `rsre_char.py`, 1,934 lines, de-RPython'd), `itertools`, `_collections` (deque, defaultdict; PyPy `lib_pypy/_collections.py` 440 lines), `_functools` (absent: `functools.py` has Python fallbacks), `_abc` (absent: `abc.py` falls back to `_py_abc`), `_io` (from `_pyio`), `_codecs` (utf-8/latin-1/ascii/escape codecs), `_contextvars` (PyPy, 202 lines), `_operator` (absent: `operator.py`), `_stat` (absent: `stat.py`), `_json` (absent: Python scanner), `_types`, `_weakref`, `_thread` (locks, ident, `_local`; no thread start yet), `_signal`, `time`, `errno`, `posix`, `pwd`, `_imp`, `_warnings` (absent: `warnings.py`), `atexit`, `gc`, `_string`, `_sysconfig`, `sys` and `builtins` population. |
+| Tasks and carriers | Task record and carrier record split as §5.3; the `pin` counter; the degenerate scheduler; `lu_park`/`lu_unpark` with deadlines under the parking lot; the syscall bracket and its lint; `-X lucifer_handoff` (§5.5, §5.8). |
 | Startup | `main.c` parses argv. The kernel loads from frozen, importlib bootstraps, stdio comes from the `_io` port, then `site`, then `-c`/script/`.pyc`, then `sys.excepthook` → `traceback._print_exception_bltin` (as 3.14 does), then `atexit` and exit code. |
-| `tests/kernel` | ≥ 30 programs written first, each shown failing: arithmetic and bigints, str/bytes methods, list/dict/set/tuple, classes and inheritance, descriptors, exceptions, generators, closures, comprehensions, `with`, f-strings, `print` with `sep`/`end`/`file`. They run as `.pyc` under `-I -S`, so K1 does not need C0. |
+| `tests/kernel` | ≥ 30 programs written first, each shown failing: arithmetic and bigints, str/bytes methods, list/dict/set/tuple, classes and inheritance, descriptors, exceptions, generators, closures, comprehensions, `with`, f-strings, `print` with `sep`/`end`/`file`, `deep_recursion`, `handoff_witness`. They run as `.pyc` under `-I -S`, so K1 does not need C0. |
 
 Order inside the slice: K0 → interpreter + kernel to K1 (in parallel with C0) →
 startup closure to M0.0 → corpus fixes to M0.1.
@@ -562,6 +787,8 @@ FAIL or PASS opportunistically; none may be NOTRUN after M0.0.
 | Optimizer written in C vs Python | C | Not close for now. A Python optimizer would compile itself and couple compile latency to warm-up. Revisit only if C SSA maintenance measurably lags. |
 | Specialization in shared `co_code` vs per-thread side tables | shared, atomic rewrite (cp314t does this) | `ft-cpython` parallel lane and a specialization-thrash microbench |
 | Heap-type field unboxing | off | difftest identity/state programs + AWFY NBody/CD with a flag |
+| io_uring waits vs the syscall bracket (§5.5) | bracket | after M1.8: socket and file rows of `many_tasks` and an HTTP lane; move an operation to the ring where it beats the bracket |
+| Native asyncio loop over `lu_park` | Python loop | after M1.8: asyncio pyperformance rows; adopt if it beats the selector loop by a measured margin |
 
 ## 11. Decisions settled (2026-11-03)
 
@@ -571,7 +798,7 @@ FAIL or PASS opportunistically; none may be NOTRUN after M0.0.
 4. **`decimal`** uses `_pydecimal`. The oracle-check row accepts it for Lucifer.
 5. **"Mostly Python"** is measured by `tools/census` as proposed. Thresholds get set once the first measured numbers exist.
 6. **Adapted CPython C** is allowed where it is native by necessity (§7 list). Each adapted file is recorded in `third_party/cpython/CHANGES.md`.
-7. **No M:N scheduler or lightweight-task API** before M1.7.
+7. **M:N is structural from K1** (§5). Tasks, carriers, pins, park/unpark and per-carrier stop-the-world are in the first interpreter, under a degenerate one-task-per-carrier scheduler. Migration turns on at M1.8. There is no lightweight-task API: cheap `threading.Thread` is the API (§5.7).
 
 ## 12. Reproducing the counts
 
