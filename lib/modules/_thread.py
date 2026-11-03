@@ -468,28 +468,30 @@ where the corresponding signal handler will be executed."""
 
 class _ThreadHandle:
     """Handle of a thread: its identifier, and a lock held from the thread's start until it ends."""
-    __slots__ = ('_ident', '_done', '_started')
+    __slots__ = ('_ident', '_done', '_started', '_exited')
 
     def __init__(self, ident=0, started=False):
         self._ident = ident
         self._done = _lucifer.mutex_new()
         self._started = started
+        self._exited = False
 
     @property
     def ident(self):
         return self._ident
 
     def is_done(self):
-        return self._started and not _lucifer.mutex_locked(self._done)
+        return self._exited         # not the lock's state: a join holds the lock for a moment
 
     def _set_done(self):
+        self._exited = True
         _lucifer.mutex_release(self._done)
 
     def join(self, timeout=None):
         """Wait for the thread to finish."""
         if not self._started:
             raise RuntimeError('thread not started')
-        if self._ident == get_ident():
+        if self._ident == get_ident() and not self.is_done():
             raise RuntimeError('Cannot join current thread')
         if timeout is None:
             wait = -1

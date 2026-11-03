@@ -235,3 +235,39 @@ print(tail)
 reprs = []
 wait_done(_thread.start_joinable_thread(lambda: reprs.append(repr({1}) + repr([local])), daemon=False))
 print(reprs[0][:4], _thread._count())
+
+# A finished thread stays done while others join it, and the thread that takes over its identifier
+# (the thread ident is reused once the thread is gone) may join it.
+import time
+first = _thread.start_joinable_thread(lambda: None, daemon=False)
+first.join()
+time.sleep(0.05)
+joins = [0]
+flips = []
+
+
+def joiner():
+    while joins[0] < 2000:
+        first.join()
+        joins[0] += 1
+
+
+def poller():
+    while joins[0] < 2000:
+        if not first.is_done() and not flips:
+            flips.append(1)
+
+
+def join_first():
+    try:
+        first.join()
+        return _thread.get_ident() == first.ident
+    except RuntimeError as e:
+        return e
+
+
+reuse = []
+_thread.start_joinable_thread(lambda: reuse.append(join_first()), daemon=False).join()
+pair = [_thread.start_joinable_thread(f, daemon=False) for f in (joiner, poller)]
+[h.join() for h in pair]
+print(flips, reuse)
