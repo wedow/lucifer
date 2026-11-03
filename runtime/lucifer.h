@@ -213,6 +213,9 @@ struct lu_gc {
     Py_ssize_t last_mem;
     Py_ssize_t long_lived_total;
     PyObject *hook;             /* gc.py's callback runner; strong */
+    PyMutex deferred_lock;
+    PyObject **deferred_code;   /* code objects that lost their last reference, resurrected */
+    Py_ssize_t deferred_code_count, deferred_code_capacity;
 };
 
 /* A function queued by Py_AddPendingCall (runtime/interp/poll.c). */
@@ -711,6 +714,9 @@ int lu_sys_init_streams(struct _is *interp);
 
 /* runtime/interp/import.c: _imp, then _frozen_importlib and its install. */
 int lu_import_init(struct _is *interp);
+
+/* runtime/interp/marshal.c: marshal.dumps. */
+PyObject *lu_marshal_dumps(PyObject *x, int version, int allow_code);
 
 /* PyModuleObject (Include/internal/pycore_moduleobject.h). */
 typedef struct {
