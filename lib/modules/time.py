@@ -125,6 +125,7 @@ _make_struct_time = _lucifer.structseq.structseq_make
 _DAYS = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')
 _MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
 _INT_MAX = 2147483647
+_STRUCT_TM_ITEMS = 11
 
 
 def _time_t(seconds):
@@ -164,16 +165,22 @@ def localtime(seconds=None, /):
     return _struct_time(seconds, True)
 
 
-def _tm_arg(t):
+def _tm_arg(t, function):
     """gettmarg: nine integers, from a struct_time or a tuple."""
     if not isinstance(t, tuple):
         raise TypeError('Tuple or struct_time argument required')
     if not isinstance(t, struct_time):
+        if len(t) != 9:
+            raise TypeError('%s(): illegal time tuple argument' % function)
         t = struct_time(t)
-    fields = tuple(t)
+    fields = tuple(t)[:9]
     for value in fields:
         if not isinstance(value, int):
             raise TypeError("'%s' object cannot be interpreted as an integer" % type(value).__name__)
+        if value > _INT_MAX:
+            raise OverflowError('signed integer is greater than maximum')
+        if value < -_INT_MAX - 1:
+            raise OverflowError('signed integer is less than minimum')
     return t, fields
 
 
@@ -207,7 +214,7 @@ def _check_tm(fields, strict_year=False):
 
 def asctime(time_tuple=None, /):
     """Convert a time tuple to a string, e.g. 'Sat Jun 06 16:26:11 1998'."""
-    t = localtime() if time_tuple is None else _tm_arg(time_tuple)[0]
+    t = localtime() if time_tuple is None else _tm_arg(time_tuple, 'asctime')[0]
     year, mon, mday, hour, minute, sec, wday, yday, isdst = _check_tm(tuple(t)[:9])
     return '%s %s%3d %02d:%02d:%02d %d' % (_DAYS[wday], _MONTHS[mon - 1], mday, hour, minute, sec, year)
 
@@ -223,7 +230,7 @@ def ctime(seconds=None, /):
 
 def mktime(time_tuple, /):
     """Convert a time tuple in local time to seconds since the Epoch."""
-    t, fields = _tm_arg(time_tuple)
+    t, fields = _tm_arg(time_tuple, 'mktime')
     seconds = _lucifer.mktime(fields)
     if seconds is None:
         raise OverflowError('mktime argument out of range')
@@ -237,14 +244,12 @@ def strftime(format, time_tuple=None, /):
     if time_tuple is None:
         t = localtime()
     else:
-        t = _tm_arg(time_tuple)[0]
+        t = _tm_arg(time_tuple, 'strftime')[0]
     fields = _check_tm(tuple(t)[:9])
-    if '\0' in format:
-        raise ValueError('embedded null character')
     zone = gmtoff = None
     if isinstance(t, struct_time):
         zone, gmtoff = t.tm_zone, t.tm_gmtoff
-    return _lucifer.strftime(format, fields, zone, gmtoff or 0)
+    return '\0'.join(_lucifer.strftime(part, fields, zone, gmtoff or 0) for part in format.split('\0'))
 
 
 def strptime(data_string, format='%a %b %d %H:%M:%S %Y', /):

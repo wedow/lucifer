@@ -38,10 +38,6 @@ prim_tm_tuple(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     time_t t = (time_t)secs;
     struct tm tm;
     if ((args[1] == Py_True ? localtime_r(&t, &tm) : gmtime_r(&t, &tm)) == NULL) {
-        if (errno == EOVERFLOW) {
-            lu_err_format(PyExc_OverflowError, "timestamp out of range for platform time_t");
-            return NULL;
-        }
         return os_error();
     }
     long long year = (long long)tm.tm_year + 1900;
@@ -151,7 +147,7 @@ prim_strftime(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
         size_t n = strftime(buf, size, format, &tm);
         if (n > 0 || size > 256 * flen) {
-            PyObject *result = PyUnicode_DecodeUTF8(buf, (Py_ssize_t)n, "surrogateescape");
+            PyObject *result = PyUnicode_DecodeUTF8(buf, (Py_ssize_t)n, NULL);
             PyMem_RawFree(buf);
             return result;
         }
