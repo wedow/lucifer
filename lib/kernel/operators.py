@@ -6,7 +6,8 @@ functions' frames, so reflection never recurses in C (DESIGN 5.2)."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_tp_name, is_subtype, kernel_set, int_add,
-    truth_exact, int_format, int_hash, type_has_sequence, list_append, new_check, kernel_get,
+    truth_exact, int_format, int_hash, type_has_sequence, list_append, new_check, kernel_get, ns_get,
+    cell_get,
 )
 from _lucifer import _boot
 
@@ -317,6 +318,51 @@ def delitem(obj, key):
     error(TypeError, str_join('', ("'", _name(obj), "' object does not support item deletion")))
 
 
+def _name_error(name):
+    exc = NameError(str_join('', ("name '", name, "' is not defined")))
+    exc.name = name
+    return exc
+
+
+def load_name(ns, globals_, builtins_, name):
+    """LOAD_NAME over a locals mapping that is not an exact dict: it, then
+    globals, then builtins."""
+    try:
+        return getitem(ns, name)
+    except KeyError:
+        pass
+    for namespace in (globals_, builtins_):
+        value = ns_get(namespace, name, MISSING)
+        if value is not MISSING:
+            return value
+    raise _name_error(name)
+
+
+def load_name_or_cell(ns, name, cell):
+    """LOAD_FROM_DICT_OR_DEREF over such a mapping: it, then the cell."""
+    try:
+        return getitem(ns, name)
+    except KeyError:
+        pass
+    value = cell_get(cell)
+    if value is MISSING:
+        error(NameError, str_join('', (
+            "cannot access free variable '", name,
+            "' where it is not associated with a value in enclosing scope")))
+    return value
+
+
+def delete_name(ns, name):
+    """DELETE_NAME over such a mapping."""
+    try:
+        delitem(ns, name)
+    except KeyError:
+        raise _name_error(name) from None
+
+
+kernel_set('load_name', load_name)
+kernel_set('load_name_or_cell', load_name_or_cell)
+kernel_set('delete_name', delete_name)
 kernel_set('getitem', getitem)
 kernel_set('setitem', setitem)
 kernel_set('delitem', delitem)

@@ -247,6 +247,71 @@ instance that has no instance attributes and cannot be given any.
     def __ge__(self, other):
         return NotImplemented
 
+    def __format__(self, format_spec, /):
+        """Default object formatter.
+
+Return str(self) if format_spec is empty. Raise TypeError otherwise."""
+        if not kind(format_spec, 'str'):
+            error(TypeError, str_join('', ('__format__() argument must be str, not ',
+                                           type_tp_name(type(format_spec)))))
+        if format_spec:
+            error(TypeError, str_join('', ('unsupported format string passed to ',
+                                           type_tp_name(type(self)), '.__format__')))
+        return str(self)
+
+    def __getstate__(self):
+        """Helper for pickle."""
+        try:
+            state = getattr_hook(self, '__dict__')
+        except AttributeError:
+            state = None
+        if not state:
+            state = None
+        import copyreg
+        slots = {}
+        for name in copyreg._slotnames(type(self)):
+            try:
+                slots[name] = getattr_hook(self, name)
+            except AttributeError:
+                pass
+        return (state, slots) if slots else state
+
+    def __reduce__(self):
+        """Helper for pickle."""
+        import copyreg
+        return copyreg._reduce_ex(self, 0)
+
+    def __reduce_ex__(self, protocol, /):
+        """Helper for pickle."""
+        reduce = type_lookup(type(self), '__reduce__')
+        if reduce is not _object_reduce:
+            return call_special(reduce, self)
+        import copyreg
+        if protocol < 2:
+            return copyreg._reduce_ex(self, protocol)
+        cls = type(self)
+        try:
+            getnewargs_ex = getattr_hook(self, '__getnewargs_ex__')
+        except AttributeError:
+            getnewargs_ex = None
+        if getnewargs_ex is not None:
+            args, kwargs = getnewargs_ex()
+        else:
+            kwargs = None
+            try:
+                getnewargs = getattr_hook(self, '__getnewargs__')
+            except AttributeError:
+                args = ()
+            else:
+                args = getnewargs()
+        if kwargs:
+            newobj, newargs = copyreg.__newobj_ex__, (cls, args, kwargs)
+        else:
+            newobj, newargs = copyreg.__newobj__, (cls, *args)
+        listitems = iter(self) if isinstance(self, list) else None
+        dictitems = iter(self.items()) if isinstance(self, dict) else None
+        return newobj, newargs, getattr_hook(self, '__getstate__')(), listitems, dictitems
+
     @classmethod_
     def __init_subclass__(cls):
         """This method is called when a class is subclassed.
@@ -266,6 +331,7 @@ overridden to extend subclasses.
 _object_dict = type_dict(object)
 _object_new = ns_get(_object_dict, '__new__', MISSING)
 _object_init = ns_get(_object_dict, '__init__', MISSING)
+_object_reduce = ns_get(_object_dict, '__reduce__', MISSING)
 _object_getattribute = ns_get(_object_dict, '__getattribute__', MISSING)
 _object_setattr = ns_get(_object_dict, '__setattr__', MISSING)
 

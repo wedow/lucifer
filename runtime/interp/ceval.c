@@ -431,7 +431,7 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
     /* A kernel call's operands: kernel[kid] on kargs[0..nk), owned, its
        value handled per kret. kret is also the value's fate for the callee
        push_callee enters. */
-    PyObject *kargs[3];
+    PyObject *kargs[4];
     PyObject *exit_args[5];     /* WITH_EXCEPT_START's call: a free slot, self, 3 arguments */
     int kid, nk;
     uint8_t kret;
@@ -561,6 +561,17 @@ op_LOAD_NAME: {
         lu_err_format(PyExc_SystemError, "no locals found");
         goto error;
     }
+    if (!PyDict_CheckExact(frame->locals)) {
+        SAVE_FRAME();
+        kargs[0] = Py_NewRef(frame->locals);
+        kargs[1] = Py_NewRef(frame->globals);
+        kargs[2] = Py_NewRef(frame->builtins);
+        kargs[3] = Py_NewRef(name);
+        nk = 4;
+        kid = LU_K_load_name;
+        kret = LU_RETURN_PUSH;
+        goto kernel_call;
+    }
     if ((v = ns_get(frame->locals, name)) == NULL && !PyErr_Occurred()
         && (v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
         && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
@@ -576,6 +587,15 @@ op_STORE_NAME: {
     PyObject *v = POP();
     SAVE_FRAME();
     int err;
+    if (frame->locals != NULL && !PyDict_CheckExact(frame->locals)) {
+        kargs[0] = Py_NewRef(frame->locals);
+        kargs[1] = Py_NewRef(name);
+        kargs[2] = v;
+        nk = 3;
+        kid = LU_K_setitem;
+        kret = LU_RETURN_DISCARD;
+        goto kernel_call;
+    }
     if (frame->locals == NULL) {
         lu_err_format(PyExc_SystemError, "no locals found when storing '%s'",
                       PyUnicode_AsUTF8(name));
@@ -1316,6 +1336,15 @@ op_LOAD_FROM_DICT_OR_DEREF: {
     PyObject *mod_or_class_dict = POP();
     SAVE_FRAME();
     PyObject *name = PyTuple_GET_ITEM(code->co_localsplusnames, oparg);
+    if (!PyDict_CheckExact(mod_or_class_dict)) {
+        kargs[0] = mod_or_class_dict;
+        kargs[1] = Py_NewRef(name);
+        kargs[2] = Py_NewRef(GETLOCAL(oparg));
+        nk = 3;
+        kid = LU_K_load_name_or_cell;
+        kret = LU_RETURN_PUSH;
+        goto kernel_call;
+    }
     PyObject *v = ns_get(mod_or_class_dict, name);
     int failed = v == NULL && PyErr_Occurred();
     if (v != NULL) {
@@ -1375,9 +1404,12 @@ op_DELETE_NAME:
         goto error;
     }
     if (!PyDict_CheckExact(frame->locals)) {
-        lu_err_format(PyExc_SystemError, "namespace is a %s, not a dict",
-                      Py_TYPE(frame->locals)->tp_name);
-        goto error;
+        kargs[0] = Py_NewRef(frame->locals);
+        kargs[1] = Py_NewRef(NAME(oparg));
+        nk = 2;
+        kid = LU_K_delete_name;
+        kret = LU_RETURN_DISCARD;
+        goto kernel_call;
     }
     if (!lu_ns_delete(frame->locals, NAME(oparg))) {
         name_error(NAME(oparg));
@@ -1798,6 +1830,16 @@ op_LOAD_FROM_DICT_OR_GLOBALS: {
     PyObject *name = NAME(oparg);
     SAVE_FRAME();
     PyObject *v;
+    if (!PyDict_CheckExact(dict)) {
+        kargs[0] = dict;
+        kargs[1] = Py_NewRef(frame->globals);
+        kargs[2] = Py_NewRef(frame->builtins);
+        kargs[3] = Py_NewRef(name);
+        nk = 4;
+        kid = LU_K_load_name;
+        kret = LU_RETURN_PUSH;
+        goto kernel_call;
+    }
     if ((v = ns_get(dict, name)) == NULL && !PyErr_Occurred()
         && (v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
         && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {

@@ -266,35 +266,31 @@ boot_native(struct _is *interp)
     return add_module(interp, lu_module_from_def(&lu_lucifer_module));
 }
 
-/* __main__ as pyrun_file leaves it for a .pyc: __file__ and the
-   SourcelessFileLoader importlib's external half provides. */
+/* __main__ as pyrun_file leaves it for a program file: __file__, __cached__
+   and the loader importlib's external half provides for the file's kind
+   (SourceFileLoader, or SourcelessFileLoader for a .pyc). */
 static int
-set_main_file(struct _is *interp, PyObject *main, const wchar_t *path)
+set_main_file(struct _is *interp, PyObject *main, const wchar_t *path, const char *loader_class)
 {
     PyObject *file = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, path, (Py_ssize_t)wcslen(path));
     PyObject *external = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("_frozen_importlib_external"));
     PyObject *cls = external != NULL
-        ? lu_ns_lookup(PyModule_GetDict(external), PyUnicode_InternFromString("SourcelessFileLoader")) : NULL;
+        ? lu_ns_lookup(PyModule_GetDict(external), PyUnicode_InternFromString(loader_class)) : NULL;
     PyObject *args[2] = { LU_ID(__main__), file };
     PyObject *loader = file != NULL && cls != NULL ? lu_call(cls, args, 2, NULL) : NULL;
     PyObject *ns = PyModule_GetDict(main);
     int err = loader == NULL || lu_ns_insert(ns, LU_ID(__loader__), loader) < 0
-        || lu_ns_insert(ns, PyUnicode_InternFromString("__file__"), file) < 0;
+        || lu_ns_insert(ns, PyUnicode_InternFromString("__file__"), file) < 0
+        || lu_ns_insert(ns, PyUnicode_InternFromString("__cached__"), Py_None) < 0;
     Py_XDECREF(file);
     Py_XDECREF(loader);
     return err ? -1 : 0;
 }
 
-/* run_pyc_file: the 16-byte header, then the code object. */
-static int
-run_pyc(struct _is *interp, const char *program, const char *path)
+/* Everything the stream holds, or NULL with an exception set. */
+static PyObject *
+read_all(FILE *fp)
 {
-    FILE *fp = fopen(path, "rb");
-    if (fp == NULL) {
-        int err = errno;
-        fprintf(stderr, "%s: can't open file '%s': [Errno %d] %s\n", program, path, err, strerror(err));
-        return 2;
-    }
     char *data = NULL;
     size_t size = 0, cap = 0;
     for (;;) {
@@ -303,9 +299,7 @@ run_pyc(struct _is *interp, const char *program, const char *path)
             char *grown = realloc(data, cap);
             if (grown == NULL) {
                 free(data);
-                fclose(fp);
-                PyErr_NoMemory();
-                return report();
+                return PyErr_NoMemory();
             }
             data = grown;
         }
@@ -315,42 +309,135 @@ run_pyc(struct _is *interp, const char *program, const char *path)
         }
         size += n;
     }
-    fclose(fp);
-    PyObject *code = NULL;
-    const unsigned char *h = (const unsigned char *)data;
+    PyObject *bytes = PyBytes_FromStringAndSize(data, (Py_ssize_t)size);
+    free(data);
+    return bytes;
+}
+
+/* maybe_pyc_file: a .pyc by name or by its magic number. */
+static int
+is_pyc(const char *path, PyObject *data)
+{
+    size_t n = strlen(path);
+    const unsigned char *h = (const unsigned char *)PyBytes_AS_STRING(data);
+    return (n >= 4 && strcmp(path + n - 4, ".pyc") == 0)
+        || (PyBytes_GET_SIZE(data) >= 2 && (h[0] | h[1] << 8) == (LU_MAGIC & 0xffff));
+}
+
+/* run_pyc_file's reading: the 16-byte header, then the code object. */
+static PyObject *
+code_of_pyc(PyObject *data)
+{
+    const unsigned char *h = (const unsigned char *)PyBytes_AS_STRING(data);
+    Py_ssize_t size = PyBytes_GET_SIZE(data);
     if (size < 16 || (h[0] | h[1] << 8 | (long)h[2] << 16 | (long)h[3] << 24) != LU_MAGIC) {
         PyErr_SetString(PyExc_RuntimeError, "Bad magic number in .pyc file");
+        return NULL;
     }
-    else {
-        code = PyMarshal_ReadObjectFromString(data + 16, (Py_ssize_t)(size - 16));
-        if (code != NULL && !PyCode_Check(code)) {
-            Py_CLEAR(code);
-            PyErr_SetString(PyExc_RuntimeError, "Bad code object in .pyc file");
-        }
+    PyObject *code = PyMarshal_ReadObjectFromString((const char *)h + 16, size - 16);
+    if (code != NULL && !PyCode_Check(code)) {
+        Py_CLEAR(code);
+        PyErr_SetString(PyExc_RuntimeError, "Bad code object in .pyc file");
     }
-    free(data);
-    if (code == NULL) {
-        return report();
-    }
+    return code;
+}
+
+/* builtins.compile(source, filename, "exec"), inheriting nothing. */
+static PyObject *
+compile_main(struct _is *interp, PyObject *source, PyObject *filename)
+{
+    PyObject *builtins = lu_ns_lookup(interp->modules, LU_ID(builtins));
+    PyObject *compile = builtins != NULL
+        ? lu_ns_lookup(PyModule_GetDict(builtins), PyUnicode_InternFromString("compile")) : NULL;
+    PyObject *mode = PyUnicode_FromString("exec");
+    PyObject *args[5] = { source, filename, mode, PyLong_FromLong(0), Py_True };
+    PyObject *code = compile != NULL && mode != NULL && args[3] != NULL ? lu_call(compile, args, 5, NULL) : NULL;
+    Py_XDECREF(mode);
+    Py_XDECREF(args[3]);
+    return code;
+}
+
+/* Runs code as __main__. loader_class is NULL for -c and standard input,
+   which have no file. */
+static int
+run_main_code(struct _is *interp, PyObject *code, const wchar_t *path, const char *loader_class)
+{
     PyObject *main = lu_module_new("__main__");
     PyObject *result = NULL;
     if (main != NULL) {
         PyObject *ns = PyModule_GetDict(main);
         PyObject *builtins = lu_ns_lookup(interp->modules, LU_ID(builtins));
+        PyObject *importlib = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("_frozen_importlib"));
+        PyObject *builtin_importer = importlib != NULL
+            ? lu_ns_lookup(PyModule_GetDict(importlib), PyUnicode_InternFromString("BuiltinImporter")) : NULL;
         if (lu_ns_insert(ns, LU_ID(__builtins__), builtins) == 0
             && lu_ns_insert(interp->modules, LU_ID(__main__), main) == 0
-            && set_main_file(interp, main, interp->config.run_filename) == 0) {
+            && (loader_class != NULL ? set_main_file(interp, main, path, loader_class) == 0
+                : builtin_importer == NULL || lu_ns_insert(ns, LU_ID(__loader__), builtin_importer) == 0)) {
             result = PyEval_EvalCode(code, ns, ns);
         }
         Py_DECREF(main);
     }
-    Py_DECREF(code);
     flush_io();
     if (result == NULL) {
         return report_uncaught();
     }
     Py_DECREF(result);
     return 0;
+}
+
+/* The program the config names: -c's command, a file (source or .pyc), or
+   standard input. */
+static int
+run_program(struct _is *interp, const char *program, const char *path)
+{
+    const PyConfig *config = &interp->config;
+    PyObject *code = NULL;
+    const wchar_t *file = NULL;
+    const char *loader = NULL;
+    if (config->run_command != NULL) {
+        PyObject *source = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, config->run_command,
+                                                     (Py_ssize_t)wcslen(config->run_command));
+        PyObject *name = PyUnicode_FromString("<string>");
+        code = source != NULL && name != NULL ? compile_main(interp, source, name) : NULL;
+        Py_XDECREF(source);
+        Py_XDECREF(name);
+    }
+    else if (config->run_filename == NULL || wcscmp(config->run_filename, L"-") == 0) {
+        PyObject *source = read_all(stdin);
+        PyObject *name = PyUnicode_FromString("<stdin>");
+        code = source != NULL && name != NULL ? compile_main(interp, source, name) : NULL;
+        Py_XDECREF(source);
+        Py_XDECREF(name);
+    }
+    else {
+        FILE *fp = fopen(path, "rb");
+        if (fp == NULL) {
+            int err = errno;
+            fprintf(stderr, "%s: can't open file '%s': [Errno %d] %s\n", program, path, err, strerror(err));
+            return 2;
+        }
+        PyObject *data = read_all(fp);
+        fclose(fp);
+        file = config->run_filename;
+        if (data != NULL && is_pyc(path, data)) {
+            loader = "SourcelessFileLoader";
+            code = code_of_pyc(data);
+        }
+        else if (data != NULL) {
+            loader = "SourceFileLoader";
+            PyObject *name = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, file, (Py_ssize_t)wcslen(file));
+            code = name != NULL ? compile_main(interp, data, name) : NULL;
+            Py_XDECREF(name);
+        }
+        Py_XDECREF(data);
+    }
+    if (code == NULL) {
+        return report();
+    }
+    int status = run_main_code(interp, code, file, loader);
+    Py_DECREF(code);
+    return status;
 }
 
 /* The native bootstrap, then the frozen kernel, sys and importlib. */
@@ -434,8 +521,8 @@ Py_RunMain(void)
     struct _is *interp = &_PyRuntime.main_interp;
     const PyConfig *config = &interp->config;
     char *program = Py_EncodeLocale(config->orig_argv.length > 0 ? config->orig_argv.items[0] : L"lucifer", NULL);
-    char *path = Py_EncodeLocale(config->run_filename, NULL);
-    int status = run_pyc(interp, program, path);
+    char *path = config->run_filename != NULL ? Py_EncodeLocale(config->run_filename, NULL) : NULL;
+    int status = run_program(interp, program, path);
     PyMem_Free(program);
     PyMem_Free(path);
     if (Py_FinalizeEx() < 0 && status == 0) {

@@ -54,7 +54,14 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 	collections:collections:third_party/cpython/Lib/collections/__init__.py \
 	typing:typing:third_party/cpython/Lib/typing.py \
 	token:token:third_party/cpython/Lib/token.py \
-	ast:ast:third_party/cpython/Lib/ast.py
+	ast:ast:third_party/cpython/Lib/ast.py \
+	_ast_unparse:_ast_unparse:third_party/cpython/Lib/_ast_unparse.py \
+	enum:enum:third_party/cpython/Lib/enum.py \
+	contextlib:contextlib:third_party/cpython/Lib/contextlib.py \
+	os:os:third_party/cpython/Lib/os.py \
+	stat:stat:third_party/cpython/Lib/stat.py \
+	posixpath:posixpath:third_party/cpython/Lib/posixpath.py \
+	genericpath:genericpath:third_party/cpython/Lib/genericpath.py
 # The compiler runs as a C module would: its frames are not in tracebacks.
 HIDDEN = compiler:compiler:lib/compiler/__init__.py \
 	$(foreach f,$(filter-out %/__init__.py,$(wildcard lib/compiler/*.py)),compiler.$(basename $(notdir $f)):compiler.$(basename $(notdir $f)):$f)

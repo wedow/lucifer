@@ -123,6 +123,32 @@ def open(path, flags, mode=0o777, *, dir_fd=None):
     return _lucifer.os_open(_path('open', path), flags, mode)
 
 
+def mkdir(path, mode=0o777, *, dir_fd=None):
+    """Create a directory."""
+    _lucifer.os_mkdir(_path('mkdir', path), mode)
+
+
+def rmdir(path, *, dir_fd=None):
+    """Remove a directory."""
+    _lucifer.os_rmdir(_path('rmdir', path))
+
+
+def unlink(path, *, dir_fd=None):
+    """Remove a file (same as remove())."""
+    _lucifer.os_unlink(_path('unlink', path))
+
+
+remove = unlink
+
+
+def rename(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+    """Rename a file or directory."""
+    _lucifer.os_rename(_path('rename', src), _path('rename', dst))
+
+
+replace = rename
+
+
 def close(fd):
     """Close a file descriptor."""
     _lucifer.os_close(fd)
@@ -168,6 +194,11 @@ def strerror(code, /):
     return _lucifer.os_strerror(code)
 
 
+def cpu_count():
+    """Return the number of logical CPUs in the system, or None."""
+    return _lucifer.os_cpu_count()
+
+
 def getpid():
     """Return the current process id."""
     return _lucifer.os_getpid()
@@ -188,3 +219,7 @@ def _create_environ():
 
 
 environ = _create_environ()
+
+
+# No optional function is advertised: os builds empty supports_* sets from this.
+_have_functions = []
