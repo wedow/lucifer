@@ -48,8 +48,8 @@ abi-audit: bin/lucifer
 check: check-blocking check-globals check-capi check-kernel
 
 # Blocking calls only in runtime/prim/os.c, inside the syscall bracket.
-check-blocking: build/liblucifer.a
-	$(HOST_PYTHON) tools/blockcheck build/liblucifer.a runtime/prim/os.c
+check-blocking: $(MAIN) $(LIB_OBJS)
+	$(HOST_PYTHON) tools/blockcheck runtime/prim/os.c $(MAIN) $(LIB_OBJS)
 
 # Every writable symbol of the executable is accounted for.
 check-globals: bin/lucifer

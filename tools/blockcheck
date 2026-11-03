@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Reject blocking calls outside the syscall bracket (DESIGN 5.5).
 
-usage: blockcheck ARCHIVE WRAPPERS.c
+usage: blockcheck WRAPPERS.c OBJECT...
 
 Every blocking operation goes through lu_park or a wrapper in WRAPPERS.c
 (runtime/prim/os.c) that brackets the call with lu_syscall_begin/end. Three
 rules make that checkable:
 
-1. Only the wrappers' member references a blocking libc symbol (nm over the
-   ARCHIVE members). The vendored allocator is the one exception: mimalloc
+1. Only the wrappers' object references a blocking libc symbol (nm over
+   every OBJECT of the executable, by path: archive members are named by
+   basename alone). The vendored allocator is the one exception: mimalloc
    reads /proc once at startup through syscall() and sleeps in its
    out-of-memory retry.
 2. In WRAPPERS.c each mention of a blocking name lies inside LU_SYSCALL(...),
@@ -38,36 +39,41 @@ BLOCKING = set("""
     pthread_join pthread_cond_wait pthread_cond_timedwait pthread_cond_clockwait
     sem_wait sem_timedwait sem_clockwait
     msgrcv msgsnd mq_receive mq_send mq_timedreceive mq_timedsend
-    system popen syscall
+    system popen pclose syscall
+    thrd_sleep thrd_join cnd_wait cnd_timedwait pthread_timedjoin_np
+    pthread_clockjoin_np pthread_barrier_wait semop semtimedop
+    tcdrain msync sync_file_range
 """.split())
 
-WRAPPERS = "os.o"
-ALLOCATOR = ("alloc.o", {"syscall", "sleep"})
+WRAPPERS = "build/runtime/prim/os.o"
+ALLOCATOR = ("build/runtime/object/alloc.o", {"syscall", "sleep"})
 FUTEX = {"lu_futex_wait", "lu_futex_wake"}
-PARK = "park.o"
+PARK = "build/runtime/thread/park.o"
 
 
 def base(name):
-    """read for read, __read_chk, read64 or read@GLIBC_2.2.5."""
-    name = name.split("@")[0]
-    m = re.fullmatch(r"__(\w+?)(?:_chk|_2)", name)
-    if m:
-        name = m.group(1)
-    return name[:-2] if name.endswith("64") else name
+    """read for read@GLIBC_2.2.5, __read, __read_chk, __read_nocancel,
+    __pread64_chk or __open64_2: libc exports these aliases too."""
+    name = name.split("@")[0].lstrip("_")
+    while True:
+        stripped = re.sub(r"(_chk|_2|_nocancel|_nostatus|64)$", "", name)
+        if stripped == name:
+            return name
+        name = stripped
 
 
-def check_archive(archive):
-    out = subprocess.run(["nm", "-A", "--undefined-only", archive],
+def check_objects(objects):
+    out = subprocess.run(["nm", "-A", "--undefined-only", *objects],
                          capture_output=True, text=True, check=True).stdout
     problems = []
     for line in out.splitlines():
-        member, symbol = re.fullmatch(r".*:([^:]+):\s+U\s+(\S+)", line).groups()
+        obj, symbol = re.fullmatch(r"([^:]+):\s+U\s+(\S+)", line).groups()
         name = base(symbol)
-        if name in BLOCKING and member != WRAPPERS and not (
-                member == ALLOCATOR[0] and name in ALLOCATOR[1]):
-            problems.append(f"{member} calls {symbol} outside the wrappers")
-        if symbol in FUTEX and member != PARK:
-            problems.append(f"{member} calls {symbol}; only lu_park sleeps on the futex")
+        if name in BLOCKING and obj != WRAPPERS and not (
+                obj == ALLOCATOR[0] and name in ALLOCATOR[1]):
+            problems.append(f"{obj} calls {symbol} outside the wrappers")
+        if symbol in FUTEX and obj != PARK:
+            problems.append(f"{obj} calls {symbol}; only lu_park sleeps on the futex")
     return problems
 
 
@@ -111,10 +117,10 @@ def check_wrappers(path):
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 3:
         sys.exit(__doc__.splitlines()[2])
-    archive, wrappers = sys.argv[1:]
-    problems = check_archive(archive) + check_wrappers(wrappers)
+    wrappers, objects = sys.argv[1], sys.argv[2:]
+    problems = check_objects(objects) + check_wrappers(wrappers)
     for p in problems:
         print("blockcheck: " + p)
     sys.exit(1 if problems else 0)
