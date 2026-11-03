@@ -194,7 +194,11 @@ def compare_case(name, spec, oracle, target, work, loops, timeout):
         record["argv"] = invocation
         records[arm] = record
         if record["kind"] != "EXIT":
-            return record["kind"], sum(r["seconds"] for r in records.values()), records
+            if arm == "oracle":
+                # An oracle crash or hang says nothing about the target.
+                record["reason"] = "oracle " + record["kind"].lower()
+                return "ERROR", record["seconds"], records
+            return record["kind"],sum(r["seconds"] for r in records.values()), records
         if arm == "oracle" and record["code"] != spec["exit"]:
             record["reason"] = "oracle did not reach the declared exit status"
             return "ERROR", record["seconds"], records

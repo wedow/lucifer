@@ -118,6 +118,12 @@ sys.exit(code)
         self.assertEqual(rows['state.py'], 'FAIL')
         self.assertEqual(rows['output.py'], 'FAIL')
 
+    def test_crashing_or_hanging_oracle_is_error(self):
+        for mode in ('crash', 'timeout'):
+            with self.subTest(mode=mode):
+                _, rows = self.run_driver(oracle=self.fake(mode), timeout=1)
+                self.assertEqual(set(rows.values()), {'ERROR'})
+
     def test_bad_oracle_is_error(self):
         self.add_program('broken.py', 'raise AssertionError("oracle defect")\n')
         _, rows = self.run_driver()
