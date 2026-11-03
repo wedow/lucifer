@@ -6,7 +6,7 @@ constructor, the action passes [] (ast2obj turns NULL into an empty list).
 """
 import sys
 from _ast import (
-    Add, And, Attribute, BitAnd, BitOr, BitXor, Call, ClassDef, Compare, Constant, Del, Div, Eq,
+    Add, And, Attribute, BitAnd, BitOr, BitXor, Call, ClassDef, Compare, Del, Div, Eq,
     FloorDiv, FormattedValue, FunctionDef, AsyncFunctionDef, Gt, GtE, In, Interpolation, Invert, Is,
     IsNot, JoinedStr, LShift, List, Load, Lt, LtE, MatMult, Mod, Module, Mult, Name, Not, NotEq, NotIn,
     Or, Pow, RShift, Starred, Store, Sub, Subscript, TemplateStr, Tuple, TypeIgnore, UAdd, USub,
@@ -21,6 +21,18 @@ from .pegen import (
     RAISE_SYNTAX_ERROR_STARTING_FROM, PyPARSE_BARRY_AS_BDFL, new_identifier,
 )
 from .string_parser import decode_string, parse_string
+
+
+def Constant(value, kind, **location):
+    """A Constant whose one-character str or bytes value is the shared singleton.
+
+    CPython creates every string through unicode_result or
+    PyBytes_FromStringAndSize, which hand out the cached one-character objects;
+    marshal then sees them as shared (and interned), so identity is observable.
+    """
+    if len(value) == 1 if isinstance(value, (str, bytes)) else False:
+        value = (chr(ord(value)) if ord(value) < 256 else value) if isinstance(value, str) else bytes([value[0]])
+    return _ast.Constant(value, kind, **location)
 
 # The singletons ast2obj hands out for expr_context, operators and comparisons.
 Load, Store, Del = pegen.LOAD, Store(), Del()
@@ -342,13 +354,13 @@ def seq_delete_starred_exprs(p, kwargs):
 
 
 def ensure_imaginary(p, exp):
-    if type(exp) is not Constant or type(exp.value) is not complex:
+    if type(exp) is not _ast.Constant or type(exp.value) is not complex:
         RAISE_SYNTAX_ERROR_KNOWN_LOCATION(p, exp, "imaginary number required in complex literal")
     return exp
 
 
 def ensure_real(p, exp):
-    if type(exp) is not Constant or type(exp.value) is complex:
+    if type(exp) is not _ast.Constant or type(exp.value) is complex:
         RAISE_SYNTAX_ERROR_KNOWN_LOCATION(p, exp, "real number required in complex literal")
     return exp
 
@@ -408,7 +420,7 @@ def check_fstring_conversion(p, conv_token, conv):
 
 
 def _is_empty_str(item):
-    return type(item) is Constant and type(item.value) is str and not item.value
+    return type(item) is _ast.Constant and type(item.value) is str and not item.value
 
 
 def setup_full_format_spec(p, colon, spec, lineno, col_offset, end_lineno, end_col_offset):
@@ -419,7 +431,7 @@ def setup_full_format_spec(p, colon, spec, lineno, col_offset, end_lineno, end_c
     # spec is parsed as an *empty* JoinedStr node, instead of having an empty
     # constant in it.
     spec = [item for item in spec if not _is_empty_str(item)]
-    if not spec or (len(spec) == 1 and type(spec[0]) is Constant):
+    if not spec or (len(spec) == 1 and type(spec[0]) is _ast.Constant):
         res = JoinedStr(spec, lineno=lineno, col_offset=col_offset, end_lineno=end_lineno,
                         end_col_offset=end_col_offset)
     else:
@@ -567,7 +579,7 @@ def _get_resized_exprs(p, a, raw_expressions, b, tstring):
             seq.append(values[0])
             seq.append(values[1])
             continue
-        if type(item) is Constant:
+        if type(item) is _ast.Constant:
             item = _decode_fstring_part(p, is_raw, item, b)
             # Tokenizer emits string parts even when the underlying string
             # might become an empty value (e.g. FSTRING_MIDDLE with the value
@@ -710,8 +722,8 @@ def _build_concatenated_str(p, strings):
         elem = flattened[i]
         # if the current elem and the following are constants, fold them and
         # all consequent constants
-        if type(elem) is Constant:
-            if i + 1 < n and type(flattened[i + 1]) is Constant:
+        if type(elem) is _ast.Constant:
+            if i + 1 < n and type(flattened[i + 1]) is _ast.Constant:
                 first_elem = last_elem = elem
                 # When a string is getting concatenated, the kind of the
                 # string is determined by the first string in the
@@ -722,7 +734,7 @@ def _build_concatenated_str(p, strings):
                 kind = elem.kind
                 parts = []
                 j = i
-                while j < n and type(flattened[j]) is Constant:
+                while j < n and type(flattened[j]) is _ast.Constant:
                     parts.append(flattened[j].value)
                     last_elem = flattened[j]
                     j += 1
@@ -749,7 +761,7 @@ def concatenate_strings(p, strings, lineno, col_offset, end_lineno, end_col_offs
     """_PyPegen_concatenate_strings"""
     f_string_found = unicode_string_found = bytes_found = False
     for elem in strings:
-        if type(elem) is Constant:
+        if type(elem) is _ast.Constant:
             if type(elem.value) is bytes:
                 bytes_found = True
             else:
