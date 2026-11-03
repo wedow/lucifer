@@ -1,6 +1,6 @@
 ---
 id: luc-abar
-status: open
+status: closed
 deps: [luc-qidc]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: opus.
 
 make check-kernel PROGRAMS="invalidate" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t); every earlier program still matches; the handoff lanes for it are checked in K1u.
 
+
+## Notes
+
+**2026-11-03T09:10:55Z**
+
+invalidate.py matches the oracle; watchers.c matches the oracle's events. LOAD_GLOBAL and LOAD_ATTR cached; STORE_ATTR, CALL (func_version is ready), BINARY_OP, COMPARE_OP, FOR_ITER, TO_BOOL stay generic.
