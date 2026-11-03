@@ -11,7 +11,7 @@ MAIN = build/runtime/main.o
 LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o))
 EXPORTS = results/abi/cp314t-exports.tsv
 
-.PHONY: all abi-audit check-globals check-capi regen-abi check-harness check-compiler regen
+.PHONY: all abi-audit check-globals check-capi check-kernel regen-abi check-harness check-compiler regen
 all: bin/lucifer
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -70,6 +70,14 @@ check-harness:
 	python3 tools/difftest/check.py
 	python3 tools/ftcorpus/check.py
 	python3 tools/pypi/check.py
+
+# tests/kernel programs, host-compiled to .pyc, against the free-threaded
+# oracle under a 512 KiB stack. PROGRAMS="a b" selects; LANE= picks a policy.
+ORACLE_T ?= python3.14t
+
+check-kernel: bin/lucifer
+	$(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer \
+	  --programs "$(PROGRAMS)" $(if $(LANE),--lane $(LANE))
 
 check-compiler:
 	$(HOST_PYTHON) tools/compilercheck --corpus closure,difftest,kernel,lib --require closure,difftest,kernel

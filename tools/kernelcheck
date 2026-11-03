@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Run tests/kernel programs on the oracle and on bin/lucifer and compare.
+
+Run with a host CPython 3.14 (magic 3627). Each tests/kernel/NAME.py is
+compiled by the host into build/tests/kernel/NAME.pyc, then run as
+`INTERPRETER -I -S NAME.pyc` under a 512 KiB RLIMIT_STACK, once on the
+free-threaded oracle and once on bin/lucifer. stdout, stderr and the exit
+status must be identical. Exit status 1 when any program differs.
+"""
+import argparse
+import difflib
+import importlib.util
+from pathlib import Path
+import py_compile
+import resource
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+SOURCES = ROOT / "tests" / "kernel"
+BUILD = ROOT / "build" / "tests" / "kernel"
+STACK = 512 * 1024
+TIMEOUT = 120
+MAGIC = (3627).to_bytes(2, "little") + b"\r\n"
+# Lanes are the -X policies a program runs under; only the plain lane exists
+# until the handoff scheduler does.
+LANES = {"plain": []}
+
+
+def limit_stack():
+    resource.setrlimit(resource.RLIMIT_STACK, (STACK, STACK))
+
+
+def run(interpreter, flags, pyc):
+    try:
+        child = subprocess.run([interpreter, *flags, "-I", "-S", str(pyc)],
+                               capture_output=True, timeout=TIMEOUT,
+                               preexec_fn=limit_stack, cwd=BUILD)
+    except subprocess.TimeoutExpired:
+        return ("timeout", b"", b"")
+    return (child.returncode, child.stdout, child.stderr)
+
+
+def describe(name, oracle, ours):
+    lines = [f"FAIL {name}"]
+    for label, index in (("exit", 0), ("stdout", 1), ("stderr", 2)):
+        if oracle[index] == ours[index]:
+            continue
+        if index == 0:
+            lines.append(f"  exit: oracle {oracle[0]}, lucifer {ours[0]}")
+            continue
+        expected = oracle[index].decode("utf-8", "replace").splitlines()
+        actual = ours[index].decode("utf-8", "replace").splitlines()
+        lines.append(f"  {label}:")
+        lines.extend("    " + line for line in difflib.unified_diff(
+            expected, actual, "oracle", "lucifer", lineterm=""))
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--oracle", required=True, help="free-threaded CPython 3.14")
+    parser.add_argument("--lucifer", default=str(ROOT / "bin" / "lucifer"))
+    parser.add_argument("--programs", default="", help="space-separated names")
+    parser.add_argument("--lane", default="plain")
+    args = parser.parse_args()
+
+    if importlib.util.MAGIC_NUMBER != MAGIC:
+        sys.exit("kernelcheck: the host Python must be CPython 3.14 (magic 3627)")
+    if args.lane not in LANES:
+        sys.exit(f"kernelcheck: unknown lane {args.lane!r}")
+    names = args.programs.split() or sorted(p.stem for p in SOURCES.glob("*.py"))
+    lucifer = str(Path(args.lucifer).resolve())
+    BUILD.mkdir(parents=True, exist_ok=True)
+
+    failed = 0
+    for name in names:
+        source = SOURCES / f"{name}.py"
+        if not source.is_file():
+            sys.exit(f"kernelcheck: no program {source}")
+        pyc = BUILD / f"{name}.pyc"
+        py_compile.compile(str(source), str(pyc), dfile=f"{name}.py", doraise=True)
+        oracle = run(args.oracle, [], pyc)
+        ours = run(lucifer, LANES[args.lane], pyc)
+        if oracle == ours:
+            print(f"PASS {name}")
+        else:
+            failed += 1
+            print(describe(name, oracle, ours))
+    print(f"{len(names) - failed}/{len(names)} programs match the oracle ({args.lane})")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
