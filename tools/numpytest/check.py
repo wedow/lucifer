@@ -80,7 +80,7 @@ class HarnessChecks(unittest.TestCase):
             " if not i and mode=='threadwarn' and 'error::pytest.PytestUnhandledThreadExceptionWarning' in sys.argv:E.SubElement(case,'error',message='unhandled thread exception')\n"
             " if not i and mode in ('failcase','badstate'):E.SubElement(case,'failure',message='assertion failed')\n"
             "E.ElementTree(root).write(sys.argv[sys.argv.index('--junitxml')+1])\n"
-            "pathlib.Path(os.environ['NUMPYTEST_STATE']).write_text('{' if mode=='badstate' else json.dumps(dict(gil_enabled=False)))\n"
+            "pathlib.Path(os.environ['NUMPYTEST_STATE']).write_text('{' if mode=='badstate' else json.dumps(dict(gil_enabled=False,parallel_ids=[] if mode=='serialonly' else ids)))\n"
         )
         self.fake.chmod(0o755)
         self.mode("pass")
@@ -166,6 +166,28 @@ class HarnessChecks(unittest.TestCase):
         self.mode("crash")
         self.assertNotEqual(self.invoke().returncode, 0)
         self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "CRASH"])))
+
+    def test_shell_wrapper_crash_exit_is_crash(self):
+        wrapper = self.root / "wrapper"
+        wrapper.write_text('#!/bin/sh\n"' + str(self.fake) + '" "$@"\n')
+        wrapper.chmod(0o755)
+        self.mode("crash")
+        self.assertNotEqual(self.invoke(python=wrapper).returncode, 0)
+        self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "CRASH"])))
+
+    def test_parallel_lane_scores_serial_fallback_against_oracle(self):
+        lane = self.root / "results/numpytest-parallel"
+        lane.mkdir()
+        (lane / "expected.tsv").write_text(self.expected.read_text())
+        def run(mode, oracle_fallback):
+            (lane / "oracle.json").write_text(json.dumps({"finish": {"serial_fallback": oracle_fallback}}))
+            self.mode(mode)
+            self.invoke("--parallel", "--oracle-runtime", "oracle")
+            with (lane / "fake.tsv").open() as stream:
+                return {r["id"]: r["status"] for r in csv.DictReader(stream, delimiter="\t", quoting=csv.QUOTE_NONE)}
+        self.assertEqual(run("pass", {}), dict(zip(self.ids, ["PASS", "XFAIL"])))
+        self.assertEqual(run("serialonly", {}), dict(zip(self.ids, ["FAIL", "XFAIL"])))
+        self.assertEqual(run("serialonly", {self.ids[0]: "thread-unsafe"}), dict(zip(self.ids, ["PASS", "XFAIL"])))
 
     def test_xpass_error_and_failure_are_not_passes(self):
         for mode, status in [("xpass", "XPASS"), ("error", "ERROR"), ("failcase", "FAIL"), ("threadwarn", "ERROR")]:

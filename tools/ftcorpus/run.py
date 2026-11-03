@@ -259,6 +259,12 @@ def package_run(args, name, cases, raw):
         rows = {key: ('ERROR', 0) for key in cases}
     parallelism = next((r for r in records if 'parallelism' in r), {})
     parallel = len(parallelism.get('parallelism', {}))
+    if lane == 'parallel' and args.runtime != args.oracle_runtime:
+        # A case the oracle ran parallel-wrapped must not pass serially.
+        oracle = json.loads((args.results / (args.oracle_runtime + '.json')).read_text())['units'][name]
+        serial = {case for detail in oracle for case in detail['serial_fallback']}
+        rows = {key: ('FAIL', seconds) if status == 'PASS' and key not in serial | set(parallelism.get('parallelism', {})) else (status, seconds)
+                for key, (status, seconds) in rows.items()}
     detail = {'artifact': artifact, 'unit_timeout': package_timeout(args, package), 'test_timeout': package_test_timeout(args, package), 'timed_out': bool(hung or timeout_report), 'returncode': code, 'seconds': elapsed, 'gil_valid': gil_valid(records),
               'parallel_collected': parallel,
               'parallel_threads': dict(Counter(parallelism.get('parallelism', {}).values())),
@@ -419,6 +425,7 @@ def main():
     parser.add_argument('action', choices=['collect', 'run'])
     parser.add_argument('--python', required=True)
     parser.add_argument('--runtime', default='lucifer')
+    parser.add_argument('--oracle-runtime', default='cpython-3.14.10t', help='recorded oracle run the parallel lane is compared with')
     parser.add_argument('--source', type=Path, help='official pinned CPython checkout (read only)')
     parser.add_argument('--work', type=Path, help='external package workspace from prepare.py')
     parser.add_argument('--results', type=Path)

@@ -59,6 +59,7 @@ emit({'id':'a','phase':'call','outcome':'failed' if mode=='fail-a' else 'passed'
 emit({'active':'b'})
 if mode=='timeout': time.sleep(10)
 if mode=='crash': os.kill(os.getpid(),signal.SIGTERM)
+if mode=='segv': os.kill(os.getpid(),signal.SIGSEGV)
 emit({'id':'b','phase':'call','outcome':'skipped','seconds':0.0,'xfail':True,'reason':'expected'})
 emit({'state':{'exitstatus':0,'free_threaded':mode=='collection-skip','gil_enabled':False}})
 ''')
@@ -79,6 +80,14 @@ emit({'state':{'exitstatus':0,'free_threaded':mode=='collection-skip','gil_enabl
             assert 'a\tPASS\t' in rows and 'b\t'+status+'\t' in rows, (p.stderr,rows)
             assert p.returncode == (0 if mode=='pass' else 1)
             checks += 1
+        # A shell wrapper reports a fatal signal as exit 128+N.
+        wrapper = root / 'wrapper'
+        wrapper.write_text(f'#!/bin/sh\n{sys.executable} {fake} "$@"\n')
+        wrapper.chmod(0o755)
+        p = run(f'{wrapper} segv', 'wrapper')
+        rows = (result/'wrapper.tsv').read_text()
+        assert 'a\tPASS\t' in rows and 'b\tCRASH\t' in rows, (p.stderr, rows)
+        checks += 1
         # A refused run must not leave an earlier run's passes in place.
         (result/'stale.tsv').write_text(expected.replace('NOTRUN', 'PASS'))
         p = run(f'{sys.executable} {fake} extra', 'stale')

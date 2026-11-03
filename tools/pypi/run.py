@@ -61,7 +61,11 @@ def inventory(path):
     return ids
 
 
+FATAL_SIGNALS = {int(s) for s in (signal.SIGSEGV, signal.SIGABRT, signal.SIGBUS, signal.SIGILL, signal.SIGFPE, signal.SIGKILL)}
+
+
 def execute(command, cwd, env, log, timeout):
+    """Run a command; a shell wrapper reports a fatal signal as exit 128+N, returned as -N."""
     with log.open('wb') as stream:
         try:
             proc = subprocess.Popen(command, cwd=cwd, env=env, stdout=stream,
@@ -69,7 +73,8 @@ def execute(command, cwd, env, log, timeout):
         except OSError:
             return None
         try:
-            return proc.wait(timeout=timeout)
+            code = proc.wait(timeout=timeout)
+            return 128 - code if code - 128 in FATAL_SIGNALS else code
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
