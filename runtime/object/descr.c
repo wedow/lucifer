@@ -16,6 +16,8 @@
 
 #include <string.h>
 
+extern PyTypeObject _PyUnion_Type;      /* internal in CPython, defined in types/static.c */
+
 /* property, classmethod/staticmethod, super and mappingproxy, as in CPython. */
 typedef struct {
     PyObject_HEAD
@@ -670,6 +672,17 @@ iter_dealloc(PyObject *op)
     fields_dealloc(op, sizeof(PyObject), sizeof(PyObject) + LU_ITER_FIELDS * sizeof(PyObject *));
 }
 
+/* types.GenericAlias and typing.Union hold four object fields: origin,
+   args, parameters and starred; args, hashable_args, unhashable_args and
+   parameters. */
+#define LU_ALIAS_FIELDS 4
+
+static void
+alias_dealloc(PyObject *op)
+{
+    fields_dealloc(op, sizeof(PyObject), sizeof(PyObject) + LU_ALIAS_FIELDS * sizeof(PyObject *));
+}
+
 #define FIELDS_DEALLOC(name, type, first, last) \
     static void name(PyObject *op) \
     { fields_dealloc(op, offsetof(type, first), offsetof(type, last) + sizeof(PyObject *)); }
@@ -735,6 +748,10 @@ lu_descr_init(void)
     ITER_LAYOUT(PyEnum_Type);
     ITER_LAYOUT(PyReversed_Type);
     ITER_LAYOUT(PyCallIter_Type);
+    layout(&Py_GenericAliasType, sizeof(PyObject) + LU_ALIAS_FIELDS * sizeof(PyObject *),
+           0, alias_dealloc, NULL, NULL);
+    layout(&_PyUnion_Type, sizeof(PyObject) + LU_ALIAS_FIELDS * sizeof(PyObject *),
+           0, alias_dealloc, NULL, NULL);
 }
 
 /* The _lucifer primitives over descriptors. */
@@ -949,8 +966,9 @@ field_offset(PyObject *obj, PyObject *index)
                                            &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type,
                                            &PyMap_Type, &PyFilter_Type, &PyZip_Type,
                                            &PyEnum_Type, &PyReversed_Type, &PyCallIter_Type,
-                                           &PyFrameLocalsProxy_Type };
-    static const int counts[] = { 5, 2, 2, 3, 1, 1, 3, 3, 1, 3, 3, 3, 3, 3, 3, 1 };
+                                           &PyFrameLocalsProxy_Type,
+                                           &Py_GenericAliasType, &_PyUnion_Type };
+    static const int counts[] = { 5, 2, 2, 3, 1, 1, 3, 3, 1, 3, 3, 3, 3, 3, 3, 1, 4, 4 };
     long i;
     if (!PyLong_CheckExact(index) || lu_long_as_long(index, &i) < 0) {
         return -1;

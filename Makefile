@@ -17,9 +17,9 @@ KERNEL = lib/kernel/_boot.py lib/kernel/object.py lib/kernel/type.py lib/kernel/
 	lib/kernel/exceptions.py lib/kernel/operators.py lib/kernel/_format.py lib/kernel/int.py \
 	lib/kernel/float.py lib/kernel/complex.py lib/kernel/slice.py lib/kernel/_args.py lib/kernel/iter.py lib/kernel/tuple.py lib/kernel/_listsort.py \
 	lib/kernel/list.py lib/kernel/range.py lib/kernel/str.py lib/kernel/bytes.py lib/kernel/memoryview.py \
-	lib/kernel/dict.py lib/kernel/set.py \
+	lib/kernel/dict.py lib/kernel/set.py lib/kernel/mappingproxy.py \
 	lib/kernel/generators.py lib/kernel/frame.py \
-	lib/kernel/iterators.py lib/kernel/builtins.py lib/kernel/weakref.py lib/kernel/module.py lib/kernel/structseq.py lib/kernel/sys.py
+	lib/kernel/iterators.py lib/kernel/builtins.py lib/kernel/weakref.py lib/kernel/module.py lib/kernel/structseq.py lib/kernel/sys.py lib/kernel/genericalias.py
 # The builtin modules, as Python over the _lucifer primitives, and the modules
 # importlib finds as frozen (NAME:ORIGNAME:FILE).
 MODULES = $(wildcard lib/modules/*.py)
@@ -44,7 +44,15 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 	_py_abc:_py_abc:third_party/cpython/Lib/_py_abc.py \
 	_weakrefset:_weakrefset:third_party/cpython/Lib/_weakrefset.py \
 	_collections_abc:_collections_abc:third_party/cpython/Lib/_collections_abc.py \
-	io:io:third_party/cpython/Lib/io.py
+	io:io:third_party/cpython/Lib/io.py \
+	types:types:third_party/cpython/Lib/types.py \
+	keyword:keyword:third_party/cpython/Lib/keyword.py \
+	reprlib:reprlib:third_party/cpython/Lib/reprlib.py \
+	copyreg:copyreg:third_party/cpython/Lib/copyreg.py \
+	operator:operator:third_party/cpython/Lib/operator.py \
+	functools:functools:third_party/cpython/Lib/functools.py \
+	collections:collections:third_party/cpython/Lib/collections/__init__.py \
+	typing:typing:third_party/cpython/Lib/typing.py
 EXPORTS = results/abi/cp314t-exports.tsv
 
 .PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel regen-abi check-harness check-compiler regen

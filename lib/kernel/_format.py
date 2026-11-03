@@ -672,7 +672,7 @@ def pct_format(fmt, args, bm=False):
     out = []
     ctx = [0, -1, args]
     mapping = None
-    if type(args) is tuple:
+    if kind(args, 'tuple'):
         box_set(ctx, 0, 0)
         box_set(ctx, 1, _tuple_size(args))
     else:

@@ -32,17 +32,25 @@ lu_poll_slow(PyThreadState *ts)
     struct lu_carrier *c = t->carrier;
     uintptr_t breaker = __atomic_load_n(&c->poll, __ATOMIC_ACQUIRE);
 
+    /* Python-visible effects (signal handlers, pending calls, collection, an
+       asynchronous exception) wait while a builtin's frame runs: CPython's
+       builtins are C and never poll, so a raise cannot land in the middle of
+       one. The reasons stay set and are handled by the poll after the
+       builtin returns. Stop-the-world and refcount merges are not visible to
+       Python and are honoured at once. */
+    int visible = !in_builtin(ts);
+
     /* Stop-the-world. The attach inside blocks until the stop is over. */
     if (breaker & LU_POLL_PLEASE_STOP) {
         lu_poll_clear(c, LU_POLL_PLEASE_STOP);
         lu_stw_acknowledge(t);
     }
-    if (breaker & LU_POLL_SIGNALS_PENDING) {
+    if ((breaker & LU_POLL_SIGNALS_PENDING) && visible) {
         if (lu_signals_handle(ts) < 0) {
             return -1;
         }
     }
-    if (breaker & LU_POLL_CALLS_TO_DO) {
+    if ((breaker & LU_POLL_CALLS_TO_DO) && visible) {
         if (lu_pending_calls_handle(ts) < 0) {
             return -1;
         }
@@ -55,10 +63,8 @@ lu_poll_slow(PyThreadState *ts)
             lu_qsbr_process(c);
         }
     }
-    /* Collection runs only here, and not in a builtin's frame: CPython's
-       builtins are C and never poll, so the reason waits for the poll that
-       follows the builtin's return. */
-    if ((breaker & LU_POLL_GC_SCHEDULED) && !in_builtin(ts)) {
+    /* Collection runs only here. */
+    if ((breaker & LU_POLL_GC_SCHEDULED) && visible) {
         lu_poll_clear(c, LU_POLL_GC_SCHEDULED);
         lu_gc_run(ts);
     }
@@ -70,7 +76,7 @@ lu_poll_slow(PyThreadState *ts)
         lu_task_unsignal(t, breaker & LU_POLL_NO_PRODUCER);
     }
     /* An asynchronous exception, set by PyThreadState_SetAsyncExc. */
-    if (breaker & LU_POLL_ASYNC_EXCEPTION) {
+    if ((breaker & LU_POLL_ASYNC_EXCEPTION) && visible) {
         lu_task_unsignal(t, LU_POLL_ASYNC_EXCEPTION);
         PyObject *exc = __atomic_exchange_n(&ts->async_exc, NULL, __ATOMIC_SEQ_CST);
         if (exc != NULL) {

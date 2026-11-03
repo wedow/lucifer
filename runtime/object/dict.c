@@ -129,7 +129,8 @@ lu_dict_notify(PyDictObject *mp, PyDict_WatchEvent event, PyObject *key, PyObjec
 }
 
 /* The item calls of the dict API that watchers are tested through. They go
-   to the kernel's item protocol, which hashes and compares keys. */
+   to the dict's own implementation, which hashes and compares keys; a
+   subclass's __setitem__ or __delitem__ is not consulted, as in CPython. */
 
 int
 PyDict_SetItem(PyObject *op, PyObject *key, PyObject *value)
@@ -139,7 +140,7 @@ PyDict_SetItem(PyObject *op, PyObject *key, PyObject *value)
         return -1;
     }
     PyObject *args[3] = { op, key, value };
-    PyObject *r = lu_call_kernel(LU_K_setitem, args, 3);
+    PyObject *r = lu_call_kernel(LU_K_dict_setitem, args, 3);
     Py_XDECREF(r);
     return r == NULL ? -1 : 0;
 }
@@ -152,7 +153,7 @@ PyDict_DelItem(PyObject *op, PyObject *key)
         return -1;
     }
     PyObject *args[2] = { op, key };
-    PyObject *r = lu_call_kernel(LU_K_delitem, args, 2);
+    PyObject *r = lu_call_kernel(LU_K_dict_delitem, args, 2);
     Py_XDECREF(r);
     return r == NULL ? -1 : 0;
 }

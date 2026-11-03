@@ -9,7 +9,7 @@ dict, then non-data descriptors and plain class attributes.
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_dict, type_bases, type_tp_name, type_qualname,
     instance_dict, ns_get, ns_set, ns_del, alloc, set_class, kernel_set, address,
-    object_hash,
+    object_hash, type_flag,
 )
 from _lucifer import _boot
 
@@ -20,6 +20,18 @@ is_data = _boot.is_data
 call_special = _boot.call_special
 
 __all__ = ('object',)
+
+
+_IS_ABSTRACT = 1 << 20          # Py_TPFLAGS_IS_ABSTRACT
+
+
+def _abstract_error(cls):
+    """object_new's refusal of a class with abstract methods."""
+    names = sorted(type_dict(cls)['__abstractmethods__'])
+    error(TypeError, str_join('', (
+        "Can't instantiate abstract class ", type_tp_name(cls),
+        ' without an implementation for abstract method', 's' if len(names) > 1 else '', " '",
+        str_join("', '", (*names,)), "'")))
 
 
 def _no_attribute(obj, name):
@@ -173,6 +185,8 @@ instance that has no instance attributes and cannot be given any.
                 error(TypeError, 'object.__new__() takes exactly one argument (the type to instantiate)')
             if type_lookup(cls, '__init__') is _object_init:
                 error(TypeError, str_join('', (type_tp_name(cls), '() takes no arguments')))
+        if type_flag(cls, _IS_ABSTRACT):
+            _abstract_error(cls)
         return alloc(cls, object)
 
     def __init__(self, *args, **kwargs):

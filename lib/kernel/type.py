@@ -4,10 +4,10 @@ and the type getsets over the layout primitives)."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_dict, type_mro, type_bases,
-    type_base, type_name, type_qualname, type_set_name, type_tp_name, type_flag,
+    type_base, type_name, type_qualname, type_set_name, type_tp_name, type_flag, type_set_flag,
     type_can_new, type_new_layout, type_set_mro, type_set_bases, type_subclasses,
     type_modified, type_static_module, is_subtype, ns_get, ns_set, ns_del, ns_items, cell_set, proxy_new,
-    field_get, kernel_get,
+    field_get, kernel_get, is_callable,
 )
 from _lucifer import _boot, object as _object
 
@@ -102,6 +102,122 @@ def _set_doc(cls, value):
         error(TypeError, str_join('', (
             "cannot set '__doc__' attribute of immutable type '", type_tp_name(cls), "'")))
     ns_set(type_dict(cls), '__doc__', None if value is MISSING else value)
+    type_modified(cls)
+
+
+_IS_ABSTRACT = 1 << 20
+
+
+def _get_abstractmethods(cls):
+    """type_abstractmethods: only the class's own, never type's."""
+    value = ns_get(type_dict(cls), '__abstractmethods__', MISSING) if cls is not type else MISSING
+    if value is MISSING:
+        error(AttributeError, '__abstractmethods__')
+    return value
+
+
+def _set_abstractmethods(cls, value):
+    """type_set_abstractmethods: Py_TPFLAGS_IS_ABSTRACT follows the truth of the value."""
+    d = type_dict(cls)
+    if value is MISSING:
+        if ns_get(d, '__abstractmethods__', MISSING) is MISSING:
+            error(AttributeError, '__abstractmethods__')
+        ns_del(d, '__abstractmethods__')
+        abstract = False
+    else:
+        abstract = True if value else False
+        ns_set(d, '__abstractmethods__', value)
+    type_modified(cls)
+    type_set_flag(cls, _IS_ABSTRACT, abstract)
+
+
+def _heap_only(cls, name):
+    if not type_flag(cls, _HEAPTYPE):
+        error(AttributeError, str_join('', (
+            "type object '", type_tp_name(cls), "' has no attribute '", name, "'")))
+
+
+def _own(d, name):
+    return ns_get(d, name, MISSING)
+
+
+def _drop(d, name):
+    if ns_get(d, name, MISSING) is not MISSING:
+        ns_del(d, name)
+
+
+def _get_annotate(cls):
+    """type_get_annotate."""
+    _heap_only(cls, '__annotate__')
+    d = type_dict(cls)
+    annotate = _own(d, '__annotate__')
+    if annotate is MISSING:
+        annotate = _own(d, '__annotate_func__')
+    if annotate is MISSING:
+        ns_set(d, '__annotate_func__', None)
+        return None
+    get = type_lookup(type(annotate), '__get__')
+    if get is not MISSING:
+        annotate = get(annotate, None, cls)
+    return annotate
+
+
+def _set_annotate(cls, value):
+    if value is MISSING:
+        error(TypeError, 'cannot delete __annotate__ attribute')
+    if not type_flag(cls, _HEAPTYPE):
+        error(TypeError, str_join('', (
+            "cannot set '__annotate__' attribute of immutable type '", type_tp_name(cls), "'")))
+    if value is not None and not is_callable(value):
+        error(TypeError, '__annotate__ must be callable or None')
+    d = type_dict(cls)
+    ns_set(d, '__annotate_func__', value)
+    if value is not None:
+        _drop(d, '__annotations_cache__')
+    type_modified(cls)
+
+
+def _get_annotations(cls):
+    """type_get_annotations: the class's own, built from __annotate__ on first use."""
+    _heap_only(cls, '__annotations__')
+    d = type_dict(cls)
+    annotations = _own(d, '__annotations__')
+    if annotations is MISSING:
+        annotations = _own(d, '__annotations_cache__')
+    if annotations is not MISSING:
+        get = type_lookup(type(annotations), '__get__')
+        if get is not MISSING:
+            annotations = get(annotations, None, cls)
+        return annotations
+    annotate = cls.__annotate__
+    if is_callable(annotate):
+        annotations = annotate(1)
+        if not kind(annotations, 'dict'):
+            error(TypeError, str_join('', (
+                "__annotate__ returned non-dict of type '", type_tp_name(type(annotations)), "'")))
+    else:
+        annotations = {}
+    ns_set(d, '__annotations_cache__', annotations)
+    type_modified(cls)
+    return annotations
+
+
+def _set_annotations(cls, value):
+    if not type_flag(cls, _HEAPTYPE):
+        error(TypeError, str_join('', (
+            "cannot set '__annotations__' attribute of immutable type '", type_tp_name(cls), "'")))
+    d = type_dict(cls)
+    key = '__annotations__' if _own(d, '__annotations__') is not MISSING else '__annotations_cache__'
+    if value is MISSING:
+        if _own(d, key) is MISSING:
+            error(AttributeError, '__annotations__')
+        ns_del(d, key)
+    else:
+        ns_set(d, key, value)
+    if key == '__annotations__':
+        _drop(d, '__annotations_cache__')
+    _drop(d, '__annotate_func__')
+    _drop(d, '__annotate__')
     type_modified(cls)
 
 
@@ -322,6 +438,9 @@ type(name, bases, dict, **kwds) -> a new type"""
     __module__ = getset(_get_module, _set_module)
     __doc__ = getset(_get_doc, _set_doc)
     __dict__ = getset(_get_dict)
+    __annotations__ = getset(_get_annotations, _set_annotations)
+    __annotate__ = getset(_get_annotate, _set_annotate)
+    __abstractmethods__ = getset(_get_abstractmethods, _set_abstractmethods)
     __bases__ = getset(_get_bases, _set_bases)
     __mro__ = getset(_get_mro)
     __base__ = getset(_get_base)

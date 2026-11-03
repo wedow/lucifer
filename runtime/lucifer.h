@@ -139,6 +139,8 @@ struct lu_static_type_state {
     X(getitem)                  /* PyObject_GetItem: BINARY_OP NB_SUBSCR, BINARY_SLICE */ \
     X(setitem)                  /* PyObject_SetItem(container, key, value): STORE_SUBSCR, STORE_SLICE */ \
     X(delitem)                  /* PyObject_DelItem: DELETE_SUBSCR */ \
+    X(dict_setitem)             /* PyDict_SetItem(dict, key, value): the dict's own, whatever the subclass overrides */ \
+    X(dict_delitem)             /* PyDict_DelItem(dict, key) */ \
     X(length)                   /* PyObject_Size as an int: GET_LEN */ \
     X(get_iter)                 /* PyObject_GetIter: GET_ITER */ \
     X(next_item)                /* the next item of an iterator, or MISSING: FOR_ITER */ \
@@ -163,7 +165,10 @@ struct lu_static_type_state {
     X(stopiteration_error)      /* CALL_INTRINSIC_1 STOPITERATION_ERROR: (exc, kind) */ \
     X(gen_close)                /* close() of a generator or coroutine, from its finalizer */ \
     X(import_from)              /* IMPORT_FROM: import_from(module, name) */ \
-    X(import_star)              /* INTRINSIC_IMPORT_STAR: import_star(locals, module) */
+    X(import_star)              /* INTRINSIC_IMPORT_STAR: import_star(locals, module) */ \
+    X(intrinsic_1)              /* CALL_INTRINSIC_1 of PEP 695: (value, oparg) */ \
+    X(intrinsic_2)              /* CALL_INTRINSIC_2 of PEP 695: (a, b, oparg) */ \
+    X(generic_alias)            /* Py_GenericAlias(origin, args): type[int] before the kernel has the type */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
     LU_KERNEL_FUNCTIONS(LU_KERNEL_ID)
