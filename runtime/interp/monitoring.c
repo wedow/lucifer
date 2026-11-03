@@ -157,11 +157,12 @@ mon_get_events(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* The event set of set_events and set_local_events, with the derived events
-   expanded; -1 with an error set. */
+   expanded; -1 with an error set. Local sets are range-checked after the
+   events that only global ones have are dropped. */
 static int
 normalize_events(int event_set, int limit, const char *what)
 {
-    if (event_set < 0 || event_set >= (1 << limit)) {
+    if (limit == LU_MON_EVENTS && (event_set < 0 || event_set >= (1 << limit))) {
         PyErr_Format(PyExc_ValueError, "invalid %sevent set 0x%x", what, event_set);
         return -1;
     }
@@ -173,6 +174,10 @@ normalize_events(int event_set, int limit, const char *what)
     if (event_set & (1 << PY_MONITORING_EVENT_BRANCH)) {
         event_set &= ~(1 << PY_MONITORING_EVENT_BRANCH);
         event_set |= (1 << PY_MONITORING_EVENT_BRANCH_RIGHT) | (1 << PY_MONITORING_EVENT_BRANCH_LEFT);
+    }
+    if (event_set < 0 || event_set >= (1 << limit)) {
+        PyErr_Format(PyExc_ValueError, "invalid %sevent set 0x%x", what, event_set);
+        return -1;
     }
     return event_set;
 }

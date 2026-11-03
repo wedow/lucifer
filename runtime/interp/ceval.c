@@ -606,6 +606,7 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
     LOAD_FRAME();
     if (mode == EVAL_THROW) {
         /* The throw skipped RESUME, which would have brought the code up to date. */
+        cur_instr = next_instr;         /* the RESUME it skipped: no line event is hidden behind it */
         SAVE_FRAME();
         PyObject *thrown = PyErr_GetRaisedException();
         if (lu_instrument(code, ts->interp) < 0) {
@@ -1083,6 +1084,7 @@ resume_linked:
     LOAD_FRAME();
     if (ts->current_exception != NULL) {
         /* A throw skips the RESUME that brings the code up to date. */
+        cur_instr = next_instr;         /* the RESUME it skipped: no line event is hidden behind it */
         SAVE_FRAME();
         PyObject *thrown = PyErr_GetRaisedException();
         int err = lu_instrument(code, ts->interp);
@@ -1300,6 +1302,9 @@ op_END_ASYNC_FOR:
     SAVE_FRAME();
     PyErr_SetRaisedException(POP());
     lasti = INSTR_START() - lu_code_start(code);
+    if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RERAISE)) {
+        lu_monitor_reraise(ts, frame, INSTR_START());
+    }
     goto exception_unwind;
 
 op_CLEANUP_THROW: {
@@ -1319,6 +1324,9 @@ op_CLEANUP_THROW: {
     SAVE_FRAME();
     PyErr_SetRaisedException(POP());
     lasti = INSTR_START() - lu_code_start(code);
+    if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RERAISE)) {
+        lu_monitor_reraise(ts, frame, INSTR_START());
+    }
     goto exception_unwind;
 }
 
@@ -2691,6 +2699,9 @@ op_RAISE_VARARGS: {
         }
         PyErr_SetRaisedException(Py_NewRef(exc));
         lasti = INSTR_START() - lu_code_start(code);
+        if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RERAISE)) {
+            lu_monitor_reraise(ts, frame, INSTR_START());
+        }
         goto exception_unwind;
     }
     sp -= oparg;
