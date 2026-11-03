@@ -1,6 +1,6 @@
 ---
 id: luc-f56i
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T02:02:34Z
