@@ -49,6 +49,7 @@ struct lu_frame {
     PyObject *locals;           /* strong; NULL for optimized code */
     PyFrameObject *frame_obj;   /* lazy; owns nothing and reads through this record */
     lu_codeunit *instr;         /* the next instruction; valid at safepoints and C calls */
+    lu_codeunit *last;          /* the start of the instruction before instr, as the loop saw it */
     PyObject **stackpointer;    /* the value stack's top, valid with instr */
     uint8_t owner;              /* enum lu_frame_owner */
     uint8_t ret;                /* enum lu_frame_return */

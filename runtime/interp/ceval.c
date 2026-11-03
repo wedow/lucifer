@@ -244,12 +244,14 @@ unpack_exact(PyObject *seq, int n, PyObject **out)
     return 1;
 }
 
-/* The oparg of the instruction at `at`, with its EXTENDED_ARG prefixes. */
+/* The oparg of the instruction at `at`, with its EXTENDED_ARG prefixes, which
+   instrumentation may hide behind INSTRUMENTED_LINE or INSTRUMENTED_INSTRUCTION. */
 static int
-instr_oparg(lu_codeunit *at)
+instr_oparg(PyCodeObject *code, lu_codeunit *at)
 {
     int arg = at->op.arg, shift = 8;
-    for (lu_codeunit *p = at - 1; p->op.code == EXTENDED_ARG; p--, shift += 8) {
+    for (lu_codeunit *p = at - 1; lu_base_opcode(code, p - lu_code_start(code)) == EXTENDED_ARG;
+         p--, shift += 8) {
         arg |= p->op.arg << shift;
     }
     return arg;
@@ -523,9 +525,9 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
         localsplus = frame->localsplus; \
         sp = frame->stackpointer; \
         next_instr = frame->instr; \
-        cur_instr = next_instr > lu_code_start(code) ? next_instr - 1 : next_instr; \
+        cur_instr = frame->last; \
     } while (0)
-#define SAVE_FRAME() do { frame->instr = next_instr; frame->stackpointer = sp; } while (0)
+#define SAVE_FRAME() do { frame->instr = next_instr; frame->stackpointer = sp; frame->last = cur_instr; } while (0)
 #define DISPATCH() do { \
         prev_instr = cur_instr; \
         cur_instr = next_instr; \
@@ -564,13 +566,13 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
         else if ((ret) == LU_RETURN_SENT) { \
             PUSH(Py_NewRef(PyTuple_GET_ITEM(v, 0))); \
             if (PyTuple_GET_ITEM(v, 1) == Py_True) { \
-                next_instr += instr_oparg(SEND_START()); \
+                next_instr += instr_oparg(code, SEND_START()); \
             } \
             Py_DECREF(v); \
         } \
         else if ((ret) == LU_RETURN_FOR_ITER) { \
             if ((v) == LU_MISSING) { \
-                next_instr += instr_oparg(SEND_START()) + 1; \
+                next_instr += instr_oparg(code, SEND_START()) + 1; \
             } \
             else { \
                 PUSH(v); \
@@ -616,8 +618,10 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
 op_CACHE:
 unknown_opcode:
     SAVE_FRAME();
-    lu_err_format(PyExc_SystemError, "%s:%d: unknown opcode %d",
-                  PyUnicode_AsUTF8(code->co_filename), code->co_firstlineno, opcode);
+    { int u = (int)(next_instr - 1 - lu_code_start(code)); char buf[200]; int n = 0;
+      for (int k = u - 8; k < u + 4; k++) n += snprintf(buf + n, sizeof buf - n, " %d", k >= 0 ? lu_code_start(code)[k].op.code : -1);
+    lu_err_format(PyExc_SystemError, "%s:%d: unknown opcode %d at unit %d:%s prev %d(op %d)",
+                  PyUnicode_AsUTF8(code->co_filename), code->co_firstlineno, opcode, u, buf, (int)(prev_instr - lu_code_start(code)), prev_instr->op.code); }
     goto error;
 
 instrumented_opcode:
@@ -1128,7 +1132,7 @@ return_frame: {
     frame = caller;
     LOAD_FRAME();
     if (ret == LU_RETURN_SEND) {
-        next_instr += instr_oparg(SEND_START());        /* out of the yield-from loop */
+        next_instr += instr_oparg(code, SEND_START());        /* out of the yield-from loop */
     }
     PUSH_RETURNED(ret, retval);
     if (from_builtin && !(code->co_flags & LU_CO_KERNEL)) {

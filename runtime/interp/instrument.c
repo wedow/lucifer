@@ -329,10 +329,11 @@ original_opcode_at(PyCodeObject *code, Py_ssize_t i)
 {
     int opcode = __atomic_load_n(&lu_code_start(code)[i].op.code, __ATOMIC_RELAXED);
     lu_monitoring *data = __atomic_load_n(&code->_co_monitoring, __ATOMIC_ACQUIRE);
-    if (opcode == INSTRUMENTED_LINE) {
+    /* A cache word can look like either: it has no data to read. */
+    if (opcode == INSTRUMENTED_LINE && data != NULL && data->lines != NULL) {
         opcode = get_original_opcode(data->lines, (int)i);
     }
-    if (opcode == INSTRUMENTED_INSTRUCTION) {
+    if (opcode == INSTRUMENTED_INSTRUCTION && data != NULL && data->per_instruction_opcodes != NULL) {
         opcode = data->per_instruction_opcodes[i];
     }
     return opcode;

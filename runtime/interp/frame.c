@@ -62,7 +62,7 @@ lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals)
     f->builtins = func->func_builtins;
     f->locals = Py_XNewRef(locals);
     f->frame_obj = NULL;
-    f->instr = lu_code_start(code);
+    f->instr = f->last = lu_code_start(code);
     f->owner = (code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) ? LU_FRAME_KERNEL_HIDDEN
                                                                 : LU_FRAME_INTERPRETER;
     f->ret = LU_RETURN_PUSH;
