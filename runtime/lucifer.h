@@ -586,7 +586,7 @@ void lu_gc_run(PyThreadState *ts);
 /* The stress tick's collection (-X lucifer_stress=gc:N), `every` allocations after
    the last tick: as a manual one, but it leaves the counts, statistics and callbacks
    as they were. A collection costs the heap, so ticks are skipped until the
-   allocations since the last one are an eighth of it. */
+   allocations since the last one are half of it. */
 void lu_gc_stress(PyThreadState *ts, unsigned long every);
 
 /* Signals (runtime/interp/signals.c): the trip handler sets a flag and the

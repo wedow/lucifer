@@ -369,7 +369,7 @@ within 1,000 bytes of 1 MB in a snapshot diff. The wheel imports
   allocations. The collection
   runs at the next poll as a silent full collection (no callbacks, counts or
   statistics). A collection costs the heap, so ticks are skipped until the
-  allocations since the last collection reach an eighth of the heap's blocks;
+  allocations since the last collection reach half the heap's blocks;
   `gc:1` is thus "as often as is affordable", deterministic in allocations.
 - **`deopt:N` (P0).** Guards are compiled to fail at a seeded phase on every
   Nth execution. Code compiled without the flag has no stress instructions.
