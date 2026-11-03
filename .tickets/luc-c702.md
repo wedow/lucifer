@@ -1,7 +1,7 @@
 ---
 id: luc-c702
 status: open
-deps: [luc-vvqv, luc-74bf]
+deps: [luc-vvqv, luc-74bf, luc-ojvv]
 links: []
 created: 2026-11-03T02:08:33Z
 type: feature
