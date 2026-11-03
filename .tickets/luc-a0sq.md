@@ -1,6 +1,6 @@
 ---
 id: luc-a0sq
-status: open
+status: closed
 deps: [luc-8dqq, luc-at0e, luc-dlik]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -24,3 +24,9 @@ make check-kernel LANE=handoff and LANE=handoff:1 ... handoff:8 match the oracle
 
 
 - From K1t: specialized LOAD_ATTR caches keep a descriptor pointer alive only through the type version guard. With two carriers, reclaim it through QSBR, or hold a reference.
+
+## Notes
+
+**2026-11-03T10:41:43Z**
+
+K1r done: -X lucifer_handoff[=SEED] runs a second carrier; the main task parks at safepoints of its outermost activation and resumes on the other carrier through lu_wait_ready, lu_park_commit, the run queue and lu_task_bind/attach; kernelcheck handoff and handoff:1..8 lanes 405/405, handoff_witness 1 plain and 2 under handoff. Follow-ups: luc-m0na (inline caches need deferred refcount or QSBR before tasks run at once), luc-0u5x (unpinned parks for blocking primitives, timers, idle-carrier BRC merge).
