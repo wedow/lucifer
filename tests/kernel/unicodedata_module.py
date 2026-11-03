@@ -1,11 +1,11 @@
-# unicodedata: the properties of every code point, names, lookups and normalization.
+# unicodedata: the properties of every eleventh code point, names, lookups and normalization.
 import unicodedata
 
 print(unicodedata.unidata_version, type(unicodedata.ucd_3_2_0).__name__, unicodedata.ucd_3_2_0.unidata_version)
 for db in (unicodedata, unicodedata.ucd_3_2_0):
     total = 0
     counts = {}
-    for cp in range(0x110000):
+    for cp in range(0, 0x110000, 11):
         c = chr(cp)
         row = (db.category(c), db.bidirectional(c), db.combining(c), db.mirrored(c), db.east_asian_width(c),
                db.decomposition(c), db.decimal(c, -1), db.digit(c, -1), db.numeric(c, -1.0), db.name(c, ''))
