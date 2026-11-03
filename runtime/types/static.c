@@ -6,7 +6,6 @@
    startup. Data whose layout no public header defines is private: it is
    reserved at the oracle's size and defined when its code is ported. */
 
-#include "Python.h"
 #include "lucifer.h"
 
 /* CPython's internal _PyObject_HEAD_INIT, for a bare PyObject, which the
