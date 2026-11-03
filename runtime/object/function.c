@@ -520,6 +520,22 @@ PyFunction_SetKwDefaults(PyObject *op, PyObject *defaults)
     return func_set_kwdefaults(op, defaults, NULL);
 }
 
+#define FUNCTION_FIELD(name, field) \
+    PyObject * \
+    PyFunction_Get##name(PyObject *op) \
+    { \
+        if (!PyFunction_Check(op)) { \
+            lu_err_format(PyExc_SystemError, "bad argument to internal function"); \
+            return NULL; \
+        } \
+        return ((PyFunctionObject *)op)->field; \
+    }
+FUNCTION_FIELD(Code, func_code)
+FUNCTION_FIELD(Globals, func_globals)
+FUNCTION_FIELD(Module, func_module)
+FUNCTION_FIELD(Defaults, func_defaults)
+FUNCTION_FIELD(KwDefaults, func_kwdefaults)
+
 /* The watcher API (funcobject.c). */
 
 static lu_watcher *

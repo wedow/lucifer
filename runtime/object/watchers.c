@@ -5,6 +5,21 @@
 
 #include "lucifer.h"
 
+/* Dict watcher id 0 is CPython's own, taken at startup; it has no work here. */
+static int
+reserved_dict_callback(PyDict_WatchEvent event, PyObject *dict, PyObject *key, PyObject *value)
+{
+    return 0;
+}
+
+void
+lu_watchers_init(struct _is *interp)
+{
+    interp->next_keys_version = 2;              /* 0 is none, 1 is reserved, as in 3.14 */
+    interp->next_func_version = 2;              /* FUNC_VERSION_FIRST_VALID */
+    interp->dict_watchers[0] = (lu_watcher)reserved_dict_callback;
+}
+
 int
 lu_watcher_add(lu_watcher *table, int first, lu_watcher callback, const char *kind)
 {

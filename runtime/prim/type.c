@@ -662,8 +662,7 @@ lu_types_init(PyInterpreterState *interp)
         }
     }
     interp->next_version_tag = VERSION_TAG_BASE;
-    interp->next_keys_version = 2;                  /* 0 is none, 1 reserved as in 3.14 */
-    interp->next_func_version = 2;                  /* FUNC_VERSION_FIRST_VALID */
+    lu_watchers_init(interp);
     return 0;
 }
 

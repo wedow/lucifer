@@ -652,10 +652,12 @@ void lu_func_notify(PyFunction_WatchEvent event, PyFunctionObject *func, PyObjec
 /* Tells code watchers that co was created or is being destroyed. */
 void lu_code_notify(PyCodeEvent event, PyCodeObject *co);
 
-/* The watcher tables (runtime/object/watchers.c). Add puts callback in the
+/* The watcher tables (runtime/object/watchers.c), set up with the interpreter's
+   version counters. Add puts callback in the
    first free id from `first` and returns it, or raises RuntimeError. Clear
    frees an id; Check raises ValueError, formatted with the id from `invalid`
    or `unset`, unless the id has a callback. -1 on error. */
+void lu_watchers_init(struct _is *interp);
 int lu_watcher_add(lu_watcher *table, int first, lu_watcher callback, const char *kind);
 int lu_watcher_check(lu_watcher *table, int id, const char *invalid, const char *unset);
 

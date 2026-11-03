@@ -128,7 +128,45 @@ lu_dict_notify(PyDictObject *mp, PyDict_WatchEvent event, PyObject *key, PyObjec
     }
 }
 
-/* The watcher API (dictobject.c). Ids 0 and 1 are CPython's own. */
+/* The item calls of the dict API that watchers are tested through. They go
+   to the kernel's item protocol, which hashes and compares keys. */
+
+int
+PyDict_SetItem(PyObject *op, PyObject *key, PyObject *value)
+{
+    if (!PyDict_Check(op)) {
+        lu_err_format(PyExc_SystemError, "bad argument to internal function");
+        return -1;
+    }
+    PyObject *args[3] = { op, key, value };
+    PyObject *r = lu_call_kernel(LU_K_setitem, args, 3);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
+int
+PyDict_DelItem(PyObject *op, PyObject *key)
+{
+    if (!PyDict_Check(op)) {
+        lu_err_format(PyExc_SystemError, "bad argument to internal function");
+        return -1;
+    }
+    PyObject *args[2] = { op, key };
+    PyObject *r = lu_call_kernel(LU_K_delitem, args, 2);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
+void
+PyDict_Clear(PyObject *op)
+{
+    if (PyDict_Check(op)) {
+        lu_dict_clear((PyDictObject *)op);
+    }
+}
+
+/* The watcher API (dictobject.c). Id 0 is CPython's own, in use from startup
+   (its optimizer watches globals); id 1 is reserved. */
 
 static lu_watcher *
 dict_watchers(void)

@@ -7,6 +7,9 @@
 #include "interp/exceptions.h"
 #include "interp/frame.h"
 
+#include "opcode.h"
+#include "opcode_ids.h"
+
 #include <string.h>
 
 /* Code watchers (codeobject.c): CREATE once a code object is built, DESTROY as
@@ -157,4 +160,36 @@ lu_code_new(const struct lu_code_fields *c)
     }
     lu_code_notify(PY_CODE_EVENT_CREATE, co);
     return (PyObject *)co;
+}
+
+/* PyCode_NewEmpty: a code object that raises AssertionError. */
+PyCodeObject *
+PyCode_NewEmpty(const char *filename, const char *funcname, int firstlineno)
+{
+    static const char assert0[6] = { RESUME, 0, LOAD_COMMON_CONSTANT, 0, RAISE_VARARGS, 1 };
+    static const char linetable[2] = { (char)((1 << 7) | (PY_CODE_LOCATION_INFO_NO_COLUMNS << 3) | 2), 0 };
+    PyObject *code = PyBytes_FromStringAndSize(assert0, sizeof assert0);
+    PyObject *lines = PyBytes_FromStringAndSize(linetable, sizeof linetable);
+    PyObject *empty_bytes = PyBytes_FromStringAndSize("", 0);
+    PyObject *empty_tuple = PyTuple_New(0);
+    PyObject *file = PyUnicode_FromString(filename);
+    PyObject *name = PyUnicode_FromString(funcname);
+    PyObject *result = NULL;
+    if (code && lines && empty_bytes && empty_tuple && file && name) {
+        struct lu_code_fields fields = {
+            .filename = file, .name = name, .qualname = name,
+            .flags = CO_OPTIMIZED | CO_NEWLOCALS, .code = code, .firstlineno = firstlineno,
+            .linetable = lines, .consts = empty_tuple, .names = empty_tuple,
+            .localsplusnames = empty_tuple, .localspluskinds = empty_bytes,
+            .stacksize = 1, .exceptiontable = empty_bytes,
+        };
+        result = lu_code_new(&fields);
+    }
+    Py_XDECREF(code);
+    Py_XDECREF(lines);
+    Py_XDECREF(empty_bytes);
+    Py_XDECREF(empty_tuple);
+    Py_XDECREF(file);
+    Py_XDECREF(name);
+    return (PyCodeObject *)result;
 }
