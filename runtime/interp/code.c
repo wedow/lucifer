@@ -66,55 +66,11 @@ PyCode_ClearWatcher(int id)
     return 0;
 }
 
-/* The free-threaded build gives code objects deferred reference counts: one
-   whose count reaches zero is not freed then but by the next collection. A
-   duplicate that the compiler merged away therefore still holds the objects
-   it shared with the survivor, which marshal sees as shared. */
-static int
-defer_code(PyCodeObject *co)
-{
-    struct lu_gc *gc = &PyInterpreterState_Get()->gc;
-    PyMutex_Lock(&gc->deferred_lock);
-    if (gc->deferred_code_count == gc->deferred_code_capacity) {
-        Py_ssize_t capacity = gc->deferred_code_capacity ? gc->deferred_code_capacity * 2 : 64;
-        PyObject **grown = PyMem_RawRealloc(gc->deferred_code, capacity * sizeof *grown);
-        if (grown == NULL) {
-            PyMutex_Unlock(&gc->deferred_lock);
-            return 0;
-        }
-        gc->deferred_code = grown;
-        gc->deferred_code_capacity = capacity;
-    }
-    co->co_flags |= LU_CO_DEFERRED;
-    ((PyObject *)co)->ob_ref_local = 1;
-    gc->deferred_code[gc->deferred_code_count++] = (PyObject *)co;
-    PyMutex_Unlock(&gc->deferred_lock);
-    return 1;
-}
-
-void
-lu_code_release_deferred(PyInterpreterState *interp)
-{
-    struct lu_gc *gc = &interp->gc;
-    PyMutex_Lock(&gc->deferred_lock);
-    PyObject **list = gc->deferred_code;
-    Py_ssize_t count = gc->deferred_code_count;
-    gc->deferred_code = NULL;
-    gc->deferred_code_count = gc->deferred_code_capacity = 0;
-    PyMutex_Unlock(&gc->deferred_lock);
-    for (Py_ssize_t i = 0; i < count; i++) {
-        Py_DECREF(list[i]);
-    }
-    PyMem_RawFree(list);
-}
-
 static void
 code_dealloc(PyObject *op)
 {
     PyCodeObject *co = (PyCodeObject *)op;
-    if (!(co->co_flags & (LU_CO_DEFERRED | LU_CO_KERNEL)) && defer_code(co)) {
-        return;
-    }
+    lu_clear_weakrefs(op);
     lu_resurrect_start(op);
     lu_code_notify(PY_CODE_EVENT_DESTROY, co);
     if (lu_resurrect_end(op) != 0) {
@@ -131,6 +87,14 @@ code_dealloc(PyObject *op)
     Py_XDECREF(co->co_linetable);
     lu_monitoring_free(co);
     lu_object_free(op);
+}
+
+/* co_consts is the only reference a code object holds that can be in a cycle. */
+static int
+code_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    Py_VISIT(((PyCodeObject *)op)->co_consts);
+    return 0;
 }
 
 static int code_same(PyCodeObject *a, PyCodeObject *b);
@@ -212,8 +176,10 @@ lu_code_init(void)
     PyCode_Type.tp_getset = code_getset;
     PyCode_Type.tp_basicsize = offsetof(PyCodeObject, co_code_adaptive);
     PyCode_Type.tp_itemsize = sizeof(lu_codeunit);
-    PyCode_Type.tp_flags |= Py_TPFLAGS_DEFAULT;
+    PyCode_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
+    PyCode_Type.tp_weaklistoffset = offsetof(PyCodeObject, co_weakreflist);
     PyCode_Type.tp_dealloc = code_dealloc;
+    PyCode_Type.tp_traverse = code_traverse;
 }
 
 /* intern_strings: the items of a names tuple become the interned strings, in place. */
@@ -307,6 +273,9 @@ lu_code_new(const struct lu_code_fields *c)
     if (co == NULL) {
         return NULL;
     }
+    /* Deferred reference counting: frames count their code, but a count that
+       reaches zero frees nothing; only a collection does. */
+    lu_set_deferred((PyObject *)co);
     Py_SET_SIZE(co, nbytes / (Py_ssize_t)sizeof(lu_codeunit));
     co->co_consts = Py_NewRef(c->consts);
     co->co_names = Py_NewRef(c->names);

@@ -228,6 +228,9 @@ typedef struct {
     PyDictObject *dv_dict;
 } dictviewobject;
 
+LU_GC_FIELDS(dictiter, dictiterobject, di_dict, di_dict)
+LU_GC_FIELDS(dictview, dictviewobject, dv_dict, dv_dict)
+
 static void
 dictiter_dealloc(PyObject *op)
 {
@@ -385,12 +388,16 @@ lu_dict_views_init(void)
         iters[i]->tp_basicsize = sizeof(dictiterobject);
         iters[i]->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
         iters[i]->tp_dealloc = dictiter_dealloc;
+        iters[i]->tp_traverse = dictiter_traverse;
+        iters[i]->tp_clear = dictiter_clear;
     }
     PyTypeObject *views[] = { &PyDictKeys_Type, &PyDictValues_Type, &PyDictItems_Type };
     for (int i = 0; i < 3; i++) {
         views[i]->tp_basicsize = sizeof(dictviewobject);
         views[i]->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
         views[i]->tp_dealloc = dictview_dealloc;
+        views[i]->tp_traverse = dictview_traverse;
+        views[i]->tp_clear = dictview_clear;
     }
 }
 

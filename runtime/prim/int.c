@@ -1752,7 +1752,8 @@ prim_int_from_text(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         const void *data = PyUnicode_DATA(s);
         for (Py_ssize_t i = 0; i < len; i++) {
             Py_UCS4 c = PyUnicode_READ(kind, data, i);
-            buf[i] = c < 128 ? (char)c : is_unicode_space(c) ? ' ' : '?';
+            int digit = c < 128 ? -1 : _PyUnicode_ToDecimalDigit(c);
+            buf[i] = c < 128 ? (char)c : is_unicode_space(c) ? ' ' : digit >= 0 ? (char)('0' + digit) : '?';
             if (c >= 0x1c && c <= 0x1f) {
                 buf[i] = ' ';
             }

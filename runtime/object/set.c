@@ -11,10 +11,65 @@
 #define LINEAR_PROBES 9
 #define PERTURB_SHIFT 5
 
+/* set_clear_internal. */
+void
+lu_set_clear(PySetObject *so)
+{
+    setentry *table, small_copy[PySet_MINSIZE];
+    Py_ssize_t used;
+    int malloced;
+    Py_BEGIN_CRITICAL_SECTION(so);
+    table = so->table;
+    used = so->used;
+    malloced = table != so->smalltable;
+    if (!malloced && so->fill > 0) {
+        memcpy(small_copy, table, sizeof small_copy);
+        table = small_copy;
+    }
+    if (malloced || so->fill > 0) {
+        memset(so->smalltable, 0, sizeof so->smalltable);
+        so->fill = so->used = 0;
+        so->mask = PySet_MINSIZE - 1;
+        so->table = so->smalltable;
+        so->hash = -1;
+    }
+    Py_END_CRITICAL_SECTION();
+    for (setentry *e = table; used > 0; e++) {
+        if (e->key != NULL && e->key != LU_SET_DUMMY) {
+            used--;
+            Py_DECREF(e->key);
+        }
+    }
+    if (malloced) {
+        lu_qsbr_retire(table);
+    }
+}
+
+static int
+set_clear(PyObject *op)
+{
+    lu_set_clear((PySetObject *)op);
+    return 0;
+}
+
+static int
+set_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    PySetObject *so = (PySetObject *)op;
+    for (Py_ssize_t i = 0; i <= so->mask; i++) {
+        PyObject *key = so->table[i].key;
+        if (key != NULL && key != LU_SET_DUMMY) {
+            Py_VISIT(key);
+        }
+    }
+    return 0;
+}
+
 static void
 set_dealloc(PyObject *op)
 {
     PySetObject *so = (PySetObject *)op;
+    lu_clear_weakrefs(op);
     for (Py_ssize_t i = 0; i <= so->mask; i++) {
         PyObject *key = so->table[i].key;
         if (key != NULL && key != LU_SET_DUMMY) {
@@ -38,6 +93,9 @@ lu_set_init(void)
     PySet_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyFrozenSet_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PySet_Type.tp_dealloc = PyFrozenSet_Type.tp_dealloc = set_dealloc;
+    PySet_Type.tp_traverse = PyFrozenSet_Type.tp_traverse = set_traverse;
+    PySet_Type.tp_clear = PyFrozenSet_Type.tp_clear = set_clear;
+    PySet_Type.tp_weaklistoffset = PyFrozenSet_Type.tp_weaklistoffset = offsetof(PySetObject, weakreflist);
 }
 
 PyObject *

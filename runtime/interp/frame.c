@@ -224,6 +224,40 @@ lu_frame_retire(struct lu_frame *f)
     return taken;
 }
 
+static int
+frame_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    struct lu_frameobj *fo = FO(op);
+    Py_VISIT(fo->f_back);
+    Py_VISIT(fo->f_trace);
+    Py_VISIT(fo->f_extra_locals);
+    Py_VISIT(fo->f_overwritten);
+    /* A frame object that does not own its frame holds nothing of it. */
+    if (fo->f_frame == &fo->own) {
+        Py_VISIT(fo->own.code);
+        Py_VISIT(fo->own.func);
+        Py_VISIT(fo->own.locals);
+        for (PyObject **p = fo->own.localsplus; p < fo->own.stackpointer; p++) {
+            Py_VISIT(*p);
+        }
+    }
+    return 0;
+}
+
+static int
+frame_clear(PyObject *op)
+{
+    struct lu_frameobj *fo = FO(op);
+    Py_CLEAR(fo->f_back);
+    Py_CLEAR(fo->f_trace);
+    Py_CLEAR(fo->f_extra_locals);
+    Py_CLEAR(fo->f_overwritten);
+    if (fo->f_frame == &fo->own) {
+        release_refs(&fo->own);
+    }
+    return 0;
+}
+
 /* A dying frame object frees the chain of callers only it holds in a loop. */
 static void
 frame_dealloc(PyObject *op)
@@ -418,6 +452,8 @@ lu_frame_init(void)
     PyFrame_Type.tp_basicsize = offsetof(struct lu_frameobj, own.localsplus);
     PyFrame_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyFrame_Type.tp_dealloc = frame_dealloc;
+    PyFrame_Type.tp_traverse = frame_traverse;
+    PyFrame_Type.tp_clear = frame_clear;
     PyFrame_Type.tp_members = frame_members;
     PyFrame_Type.tp_getset = frame_getset;
     PyFrameLocalsProxy_Type.tp_flags |= Py_TPFLAGS_MAPPING;

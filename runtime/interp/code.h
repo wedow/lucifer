@@ -18,13 +18,6 @@
    hidden as a C module's are, but classes stay ordinary classes. */
 #define LU_CO_HIDDEN 0x20000000
 
-/* co_flags bit of a code object that has been deferred once: its last
-   reference is gone and it waits in the interpreter for the next collection. */
-#define LU_CO_DEFERRED 0x10000000
-
-/* Frees the code objects whose last reference went since the last collection. */
-void lu_code_release_deferred(PyInterpreterState *interp);
-
 /* The fields marshal reads (_PyCodeConstructor), borrowed. */
 struct lu_code_fields {
     PyObject *filename, *name, *qualname;

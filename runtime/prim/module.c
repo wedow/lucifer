@@ -3,7 +3,46 @@
    _lucifer uses multi-phase init with module state and keeps no file-scope
    mutable data (FOUNDATIONS 2.1). */
 
+#include "interp/exceptions.h"
 #include "prim/bytes.h"
+
+/* bpo-39824: m_traverse and m_clear need the state a positive m_size promises. */
+static int
+module_has_state(PyModuleObject *m)
+{
+    return m->md_def != NULL && (m->md_def->m_size <= 0 || m->md_state != NULL);
+}
+
+static int
+module_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    PyModuleObject *m = (PyModuleObject *)op;
+    if (module_has_state(m) && m->md_def->m_traverse != NULL) {
+        int res = m->md_def->m_traverse(op, visit, arg);
+        if (res) {
+            return res;
+        }
+    }
+    Py_VISIT(m->md_dict);
+    return 0;
+}
+
+static int
+module_clear(PyObject *op)
+{
+    PyModuleObject *m = (PyModuleObject *)op;
+    if (module_has_state(m) && m->md_def->m_clear != NULL) {
+        int res = m->md_def->m_clear(op);
+        if (PyErr_Occurred()) {
+            lu_err_unraisable_text("Exception ignored in m_clear of module", op);
+        }
+        if (res) {
+            return res;
+        }
+    }
+    Py_CLEAR(m->md_dict);
+    return 0;
+}
 
 static void
 module_dealloc(PyObject *op)
@@ -29,6 +68,8 @@ lu_module_init(void)
     PyModule_Type.tp_basicsize = sizeof(PyModuleObject);
     PyModule_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyModule_Type.tp_dealloc = module_dealloc;
+    PyModule_Type.tp_traverse = module_traverse;
+    PyModule_Type.tp_clear = module_clear;
     PyModule_Type.tp_dictoffset = offsetof(PyModuleObject, md_dict);
     PyModule_Type.tp_members = module_members;
 }

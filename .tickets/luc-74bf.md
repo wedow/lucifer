@@ -1,6 +1,6 @@
 ---
 id: luc-74bf
-status: open
+status: closed
 deps: [luc-a5u6]
 links: []
 created: 2026-11-03T01:39:45Z
@@ -17,3 +17,9 @@ Cycle collector (trial deletion over GC heaps), weakrefs and finalizers, async/c
 
 tools/difftest run --python bin/lucifer: 164/164 PASS.
 - Foundations: check-kernel passes under -X lucifer_stress=gc:1 and difftest 164/164 under gc:100; tests/kernel/resurrect.py (single-run __del__ resurrection, weakref callback order vs __del__, WeakValueDictionary under gc.collect) matches the oracle (docs/FOUNDATIONS.md 2.7, 2.14).
+
+## Notes
+
+**2026-11-03T22:20:46Z**
+
+cycle collector landed on luc-74bf: difftest 164/164, gc:100 164/164 (--timeout 300), check-kernel gc:1 479/479

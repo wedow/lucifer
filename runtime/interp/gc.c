@@ -1,12 +1,12 @@
-/* The collector's trigger (the policy half of Python/gc_free_threading.c).
+/* The collector's policy and its entry points (the rest of
+   Python/gc_free_threading.c and Modules/gcmodule.c); the cycle collector
+   itself is collector.c.
 
    Allocating a GC object counts it, and when the count passes the young
    threshold, and the process has grown or enough has been allocated, the GC
    reason is raised in the allocating carrier's poll word. The collection
    itself runs only from the poll handler, at a call or a back-edge, where
-   every frame is published (FOUNDATIONS 2.5). Until the cycle collector
-   arrives (M0.2) a collection runs gc.callbacks, stops the world, and finds
-   nothing.
+   every frame is published (FOUNDATIONS 2.5).
 
    The counts are as CPython's: each carrier buffers 512 allocations before
    adding them to the interpreter's count, and frees subtract the same way,
@@ -18,13 +18,13 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #define LOCAL_ALLOC_COUNT_THRESHOLD 512
-enum { REASON_HEAP, REASON_MANUAL };
 
 /* get_process_mem_usage: resident plus swapped memory in KB, or -1. */
-static Py_ssize_t
-process_mem_usage(void)
+Py_ssize_t
+lu_gc_mem_usage(void)
 {
     FILE *fp = fopen("/proc/self/status", "r");
     if (fp == NULL) {
@@ -52,7 +52,7 @@ process_mem_usage(void)
 static int
 should_collect_mem_usage(struct lu_gc *gc)
 {
-    Py_ssize_t mem = process_mem_usage();
+    Py_ssize_t mem = lu_gc_mem_usage();
     if (mem < 0) {
         return 1;
     }
@@ -143,6 +143,14 @@ invoke_callback(PyThreadState *ts, const char *phase, int generation, Py_ssize_t
     Py_XDECREF(result);
 }
 
+static double
+seconds_now(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (double)t.tv_sec + (double)t.tv_nsec * 1e-9;
+}
+
 /* gc_collect_main. */
 static Py_ssize_t
 collect(PyThreadState *ts, int generation, int reason)
@@ -153,29 +161,36 @@ collect(PyThreadState *ts, int generation, int reason)
                                      __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)) {
         return 0;               /* one is in progress */
     }
-    if (reason == REASON_HEAP && !should_collect(gc)) {
+    if (reason == LU_GC_REASON_HEAP && !should_collect(gc)) {
         __atomic_store_n(&gc->collecting, 0, __ATOMIC_SEQ_CST);
         return 0;
     }
-    invoke_callback(ts, "start", generation, 0, 0);
-
-    /* gc_collect_internal: the counters, under a stopped world. */
-    lu_stw_stop(ts->interp);
-    if (generation + 1 < 3) {
-        gc->old_count[generation] += 1;
+    PyObject *pending = PyErr_GetRaisedException();
+    int visible = reason != LU_GC_REASON_SHUTDOWN && reason != LU_GC_REASON_STRESS;
+    if (visible) {
+        invoke_callback(ts, "start", generation, 0, 0);
     }
-    __atomic_store_n(&gc->young_count, 0, __ATOMIC_RELAXED);
-    gc->deferred_count = 0;
-    for (int i = 1; i <= generation; i++) {
-        gc->old_count[i - 1] = 0;
+    double started = 0;
+    int stats = visible && (gc->debug & LU_GC_DEBUG_STATS);
+    if (stats) {
+        fprintf(stderr, "gc: collecting generation %d...\n", generation);
+        started = seconds_now();
     }
-    gc->last_mem = process_mem_usage();
-    lu_stw_start(ts->interp);
-    lu_code_release_deferred(ts->interp);
-
-    invoke_callback(ts, "stop", generation, 0, 0);
+    Py_ssize_t collected, uncollectable;
+    lu_gc_collect_garbage(ts, generation, reason, &collected, &uncollectable);
+    if (stats) {
+        fprintf(stderr, "gc: done, %zd unreachable, %zd uncollectable, %.4fs elapsed\n",
+                collected + uncollectable, uncollectable, seconds_now() - started);
+    }
+    if (visible) {
+        gc->stats[generation][0] += 1;
+        gc->stats[generation][1] += collected;
+        gc->stats[generation][2] += uncollectable;
+        invoke_callback(ts, "stop", generation, collected, uncollectable);
+    }
+    PyErr_SetRaisedException(pending);
     __atomic_store_n(&gc->collecting, 0, __ATOMIC_SEQ_CST);
-    return 0;
+    return collected + uncollectable;
 }
 
 /* _Py_RunGC: the GC reason was raised. */
@@ -183,7 +198,18 @@ void
 lu_gc_run(PyThreadState *ts)
 {
     if (__atomic_load_n(&ts->interp->gc.enabled, __ATOMIC_RELAXED)) {
-        collect(ts, 0, REASON_HEAP);
+        collect(ts, 0, LU_GC_REASON_HEAP);
+    }
+}
+
+void
+lu_gc_stress(PyThreadState *ts, unsigned long every)
+{
+    struct lu_gc *gc = &ts->interp->gc;
+    gc->stress_allocs += (Py_ssize_t)every;
+    if (__atomic_load_n(&gc->enabled, __ATOMIC_RELAXED) && gc->stress_allocs >= gc->stress_live / 2) {
+        gc->stress_allocs = 0;
+        collect(ts, 2, LU_GC_REASON_STRESS);
     }
 }
 
@@ -195,10 +221,14 @@ PyGC_Collect(void)
     if (!__atomic_load_n(&ts->interp->gc.enabled, __ATOMIC_RELAXED)) {
         return 0;
     }
-    PyObject *exc = PyErr_GetRaisedException();
-    Py_ssize_t n = collect(ts, 2, REASON_MANUAL);
-    PyErr_SetRaisedException(exc);
-    return n;
+    return collect(ts, 2, LU_GC_REASON_MANUAL);
+}
+
+/* _PyGC_CollectNoFail: the last collection, before the interpreter ends. */
+void
+lu_gc_collect_shutdown(PyThreadState *ts)
+{
+    collect(ts, 2, LU_GC_REASON_SHUTDOWN);
 }
 
 int
@@ -239,6 +269,7 @@ gc_field(struct lu_gc *gc, long index)
     case 4: return &gc->young_count;
     case 5: return &gc->old_count[0];
     case 6: return &gc->old_count[1];
+    case 7: return &gc->debug;
     default: return NULL;
     }
 }
@@ -281,15 +312,18 @@ prim_gc_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
-/* gc_hook(runner): gc.py's runner(phase, generation, collected, uncollectable). */
+/* gc_hook(runner, garbage): gc.py's runner(phase, generation, collected,
+   uncollectable), and the list gc.garbage the collector appends to. */
 static PyObject *
 prim_gc_hook(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(1);
+    ARGS(2);
     struct lu_gc *gc = &PyInterpreterState_Get()->gc;
-    PyObject *old = gc->hook;
+    PyObject *old_hook = gc->hook, *old_garbage = gc->garbage;
     gc->hook = Py_NewRef(args[0]);
-    Py_XDECREF(old);
+    gc->garbage = Py_NewRef(args[1]);
+    Py_XDECREF(old_hook);
+    Py_XDECREF(old_garbage);
     return Py_NewRef(Py_None);
 }
 
@@ -302,11 +336,193 @@ prim_gc_collect(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (!PyLong_CheckExact(args[0]) || lu_long_as_long(args[0], &generation) < 0) {
         return NULL;
     }
-    return PyLong_FromLong((long)collect(PyThreadState_Get(), (int)generation, REASON_MANUAL));
+    return PyLong_FromLong((long)collect(PyThreadState_Get(), (int)generation, LU_GC_REASON_MANUAL));
+}
+
+/* gc_get_objects(), gc_get_referrers(objs): lists. */
+static PyObject *
+prim_gc_get_objects(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(0);
+    return lu_gc_get_objects(PyInterpreterState_Get());
+}
+
+static PyObject *
+prim_gc_get_referrers(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    return PyTuple_CheckExact(args[0]) ? lu_gc_get_referrers(PyInterpreterState_Get(), args[0]) : NULL;
+}
+
+static int
+referents_visit(PyObject *obj, void *list)
+{
+    return lu_list_append(list, obj) < 0;
+}
+
+/* gc_get_referents(objs): what each GC object among them references. */
+static PyObject *
+prim_gc_get_referents(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    PyObject *objs = args[0], *result = PyList_New(0);
+    for (Py_ssize_t i = 0; result != NULL && PyTuple_CheckExact(objs) && i < PyTuple_GET_SIZE(objs); i++) {
+        PyObject *obj = PyTuple_GET_ITEM(objs, i);
+        traverseproc traverse = lu_is_gc(obj) ? Py_TYPE(obj)->tp_traverse : NULL;
+        if (traverse != NULL && traverse(obj, referents_visit, result)) {
+            Py_CLEAR(result);
+        }
+    }
+    return result;
+}
+
+/* gc_freeze(mode): 1 freezes, 0 unfreezes, -1 only counts; the frozen count. */
+static PyObject *
+prim_gc_freeze(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    long mode;
+    if (!PyLong_CheckExact(args[0]) || lu_long_as_long(args[0], &mode) < 0) {
+        return NULL;
+    }
+    return PyLong_FromLongLong(lu_gc_freeze(PyInterpreterState_Get(), (int)mode));
+}
+
+/* gc_is_tracked(obj), gc_is_finalized(obj) */
+static PyObject *
+prim_gc_is_tracked(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    return Py_NewRef((lu_is_gc(args[0]) && lu_gc_is_tracked(args[0])) ? Py_True : Py_False);
+}
+
+static PyObject *
+prim_gc_is_finalized(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    return Py_NewRef((lu_is_gc(args[0]) && (args[0]->ob_gc_bits & LU_GC_FINALIZED)) ? Py_True : Py_False);
+}
+
+/* gc_stats(): collections, collected and uncollectable of each generation, flat. */
+static PyObject *
+prim_gc_stats(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(0);
+    struct lu_gc *gc = &PyInterpreterState_Get()->gc;
+    PyObject *t = PyTuple_New(9);
+    for (int i = 0; t != NULL && i < 9; i++) {
+        PyObject *n = PyLong_FromLongLong(gc->stats[i / 3][i % 3]);
+        if (n == NULL) {
+            Py_CLEAR(t);
+            break;
+        }
+        PyTuple_SET_ITEM(t, i, n);
+    }
+    return t;
 }
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_gc_methods[] = {
-    FAST(gc_get), FAST(gc_set), FAST(gc_hook), FAST(gc_collect),
+    FAST(gc_get), FAST(gc_set), FAST(gc_hook), FAST(gc_collect), FAST(gc_get_objects),
+    FAST(gc_get_referrers), FAST(gc_get_referents), FAST(gc_freeze), FAST(gc_is_tracked),
+    FAST(gc_is_finalized), FAST(gc_stats),
     { NULL, NULL, 0, NULL },
 };
+
+/* The C API of GC objects (Python/gc_free_threading.c). */
+
+static size_t
+presize_of(PyTypeObject *tp)
+{
+    return (tp->tp_flags & Py_TPFLAGS_PREHEADER) ? 2 * sizeof(PyObject *) : 0;
+}
+
+void
+PyObject_GC_Track(void *op)
+{
+    PyObject *o = op;
+    if (lu_gc_is_tracked(o)) {
+        Py_FatalError("object already tracked by the garbage collector");
+    }
+    o->ob_gc_bits |= LU_GC_TRACKED;
+}
+
+void
+PyObject_GC_UnTrack(void *op)
+{
+    ((PyObject *)op)->ob_gc_bits &= ~LU_GC_TRACKED;
+}
+
+int
+PyObject_GC_IsTracked(PyObject *op)
+{
+    return lu_is_gc(op) && lu_gc_is_tracked(op);
+}
+
+int
+PyObject_GC_IsFinalized(PyObject *op)
+{
+    return lu_is_gc(op) && (op->ob_gc_bits & LU_GC_FINALIZED) != 0;
+}
+
+/* Uninitialized, untracked memory with the object header set. */
+static PyObject *
+gc_new(PyTypeObject *tp, size_t size, size_t extra)
+{
+    void *mem = lu_gc_alloc(tp, size + extra, presize_of(tp));
+    return mem != NULL ? PyObject_Init(mem, tp) : PyErr_NoMemory();
+}
+
+PyObject *
+_PyObject_GC_New(PyTypeObject *tp)
+{
+    return gc_new(tp, tp->tp_basicsize, 0);
+}
+
+PyVarObject *
+_PyObject_GC_NewVar(PyTypeObject *tp, Py_ssize_t nitems)
+{
+    if (nitems < 0) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+    PyVarObject *op = (PyVarObject *)gc_new(tp, _PyObject_VAR_SIZE(tp, nitems), 0);
+    if (op != NULL) {
+        Py_SET_SIZE(op, nitems);
+    }
+    return op;
+}
+
+PyObject *
+PyUnstable_Object_GC_NewWithExtraData(PyTypeObject *tp, size_t extra)
+{
+    PyObject *op = gc_new(tp, tp->tp_basicsize, extra);
+    if (op != NULL) {
+        memset((char *)op + tp->tp_basicsize, 0, extra);
+    }
+    return op;
+}
+
+PyVarObject *
+_PyObject_GC_Resize(PyVarObject *op, Py_ssize_t nitems)
+{
+    PyTypeObject *tp = Py_TYPE(op);
+    size_t size = _PyObject_VAR_SIZE(tp, nitems);
+    /* A new block: realloc would not keep it in the GC heap. */
+    void *mem = lu_gc_alloc(tp, size, presize_of(tp));
+    if (mem == NULL) {
+        return (PyVarObject *)PyErr_NoMemory();
+    }
+    size_t old = _PyObject_VAR_SIZE(tp, Py_SIZE(op));
+    memcpy(mem, op, old < size ? old : size);
+    ((PyObject *)mem)->ob_gc_bits &= ~LU_GC_TRACKED;
+    PyObject_GC_Del(op);
+    Py_SET_SIZE((PyVarObject *)mem, nitems);
+    return mem;
+}
+
+void
+PyObject_GC_Del(void *op)
+{
+    lu_object_free(op);
+}

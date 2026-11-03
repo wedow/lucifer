@@ -650,108 +650,99 @@ static PyMemberDef super_members[] = {
 static void
 fields_dealloc(PyObject *op, Py_ssize_t first, Py_ssize_t end)
 {
-    for (Py_ssize_t off = first; off < end; off += sizeof(PyObject *)) {
-        Py_CLEAR(*(PyObject **)((char *)op + off));
-    }
+    lu_fields_clear(op, first, end);
     lu_object_free(op);
 }
 
-static void
-descr_dealloc(PyObject *op)
-{
-    fields_dealloc(op, offsetof(PyDescrObject, d_type), offsetof(PyDescrObject, d_qualname) + sizeof(PyObject *));
-}
+/* One dealloc, traverse and clear per layout of object fields. */
+#define FIELDS(name, type, first, last) \
+    LU_GC_FIELDS(name, type, first, last) \
+    static void name##_dealloc(PyObject *op) \
+    { fields_dealloc(op, offsetof(type, first), offsetof(type, last) + sizeof(PyObject *)); }
+
+FIELDS(descr, PyDescrObject, d_type, d_qualname)
 
 /* map, filter, zip, enumerate, reversed and callable_iterator hold up to
    three object fields, which their kernel methods reach by index. */
 #define LU_ITER_FIELDS 3
-
-static void
-iter_dealloc(PyObject *op)
-{
-    fields_dealloc(op, sizeof(PyObject), sizeof(PyObject) + LU_ITER_FIELDS * sizeof(PyObject *));
-}
+typedef struct { PyObject_HEAD PyObject *f[LU_ITER_FIELDS]; } iterfields;
+FIELDS(iter, iterfields, f[0], f[LU_ITER_FIELDS - 1])
 
 /* types.GenericAlias and typing.Union hold four object fields: origin,
    args, parameters and starred; args, hashable_args, unhashable_args and
    parameters. */
 #define LU_ALIAS_FIELDS 4
+typedef struct { PyObject_HEAD PyObject *f[LU_ALIAS_FIELDS]; } aliasfields;
+FIELDS(alias, aliasfields, f[0], f[LU_ALIAS_FIELDS - 1])
+
+FIELDS(wrapper, wrapperobject, descr, self)
+FIELDS(method, PyMethodObject, im_func, im_self)
+FIELDS(classmethod, classmethod, cm_callable, cm_dict)
+FIELDS(property, propertyobject, prop_get, prop_name)
+FIELDS(super, superobject, type, obj_type)
+FIELDS(proxy, mappingproxyobject, mapping, mapping)
 
 static void
-alias_dealloc(PyObject *op)
-{
-    fields_dealloc(op, sizeof(PyObject), sizeof(PyObject) + LU_ALIAS_FIELDS * sizeof(PyObject *));
-}
-
-#define FIELDS_DEALLOC(name, type, first, last) \
-    static void name(PyObject *op) \
-    { fields_dealloc(op, offsetof(type, first), offsetof(type, last) + sizeof(PyObject *)); }
-FIELDS_DEALLOC(wrapper_dealloc, wrapperobject, descr, self)
-FIELDS_DEALLOC(method_dealloc, PyMethodObject, im_func, im_self)
-FIELDS_DEALLOC(classmethod_dealloc, classmethod, cm_callable, cm_dict)
-FIELDS_DEALLOC(property_dealloc, propertyobject, prop_get, prop_name)
-FIELDS_DEALLOC(super_dealloc, superobject, type, obj_type)
-FIELDS_DEALLOC(proxy_dealloc, mappingproxyobject, mapping, mapping)
-
-static void
-layout(PyTypeObject *tp, Py_ssize_t size, unsigned long flags, destructor dealloc,
-       PyMemberDef *members, PyGetSetDef *getset)
+layout_gc(PyTypeObject *tp, Py_ssize_t size, unsigned long flags, destructor dealloc,
+          traverseproc traverse, inquiry clear, PyMemberDef *members, PyGetSetDef *getset)
 {
     tp->tp_basicsize = size;
     tp->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC | flags;
     tp->tp_dealloc = dealloc;
+    tp->tp_traverse = traverse;
+    tp->tp_clear = clear;
     tp->tp_members = members;
     tp->tp_getset = getset;
 }
+
+#define layout(tp, size, flags, name, members, getset) \
+    layout_gc(tp, size, flags, name##_dealloc, name##_traverse, name##_clear, members, getset)
 
 void
 lu_descr_init(void)
 {
     layout(&PyMethodDescr_Type, sizeof(PyMethodDescrObject),
-           Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_METHOD_DESCRIPTOR, descr_dealloc,
+           Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_METHOD_DESCRIPTOR, descr,
            descr_members, method_descr_getset);
     PyMethodDescr_Type.tp_vectorcall_offset = offsetof(PyMethodDescrObject, vectorcall);
     PyMethodDescr_Type.tp_call = PyVectorcall_Call;
-    layout(&PyClassMethodDescr_Type, sizeof(PyMethodDescrObject), 0, descr_dealloc,
+    layout(&PyClassMethodDescr_Type, sizeof(PyMethodDescrObject), 0, descr,
            descr_members, method_descr_getset);
     layout(&PyWrapperDescr_Type, sizeof(PyWrapperDescrObject), Py_TPFLAGS_METHOD_DESCRIPTOR,
-           descr_dealloc, descr_members, plain_descr_getset);
+           descr, descr_members, plain_descr_getset);
     PyWrapperDescr_Type.tp_call = wrapperdescr_call;
-    layout(&PyMemberDescr_Type, sizeof(PyMemberDescrObject), 0, descr_dealloc,
+    layout(&PyMemberDescr_Type, sizeof(PyMemberDescrObject), 0, descr,
            descr_members, plain_descr_getset);
-    layout(&PyGetSetDescr_Type, sizeof(PyGetSetDescrObject), 0, descr_dealloc,
+    layout(&PyGetSetDescr_Type, sizeof(PyGetSetDescrObject), 0, descr,
            descr_members, getset_descr_getset);
-    layout(&lu_method_wrapper_type, sizeof(wrapperobject), 0, wrapper_dealloc,
+    layout(&lu_method_wrapper_type, sizeof(wrapperobject), 0, wrapper,
            wrapper_members, wrapper_getset);
     lu_method_wrapper_type.tp_call = method_wrapper_call;
-    layout(&PyMethod_Type, sizeof(PyMethodObject), Py_TPFLAGS_HAVE_VECTORCALL, method_dealloc,
+    layout(&PyMethod_Type, sizeof(PyMethodObject), Py_TPFLAGS_HAVE_VECTORCALL, method,
            method_members, NULL);
     PyMethod_Type.tp_vectorcall_offset = offsetof(PyMethodObject, vectorcall);
     PyMethod_Type.tp_call = PyVectorcall_Call;
     PyCFunction_Type.tp_members = cfunction_members;
     PyCFunction_Type.tp_getset = cfunction_getset;
     PyCFunction_Type.tp_call = PyVectorcall_Call;
-    layout(&PyClassMethod_Type, sizeof(classmethod), 0, classmethod_dealloc,
+    layout(&PyClassMethod_Type, sizeof(classmethod), 0, classmethod,
            classmethod_members, classmethod_getset);
     PyClassMethod_Type.tp_dictoffset = offsetof(classmethod, cm_dict);
-    layout(&PyStaticMethod_Type, sizeof(classmethod), 0, classmethod_dealloc,
+    layout(&PyStaticMethod_Type, sizeof(classmethod), 0, classmethod,
            classmethod_members, classmethod_getset);
     PyStaticMethod_Type.tp_dictoffset = offsetof(classmethod, cm_dict);
-    layout(&PyProperty_Type, sizeof(propertyobject), 0, property_dealloc, property_members, NULL);
-    layout(&PySuper_Type, sizeof(superobject), 0, super_dealloc, super_members, NULL);
-    layout(&PyDictProxy_Type, sizeof(mappingproxyobject), 0, proxy_dealloc, NULL, NULL);
-#define ITER_LAYOUT(tp) layout(&tp, sizeof(PyObject) + LU_ITER_FIELDS * sizeof(PyObject *), 0, \
-                               iter_dealloc, NULL, NULL)
+    layout(&PyProperty_Type, sizeof(propertyobject), 0, property, property_members, NULL);
+    layout(&PySuper_Type, sizeof(superobject), 0, super, super_members, NULL);
+    layout(&PyDictProxy_Type, sizeof(mappingproxyobject), 0, proxy, NULL, NULL);
+#define ITER_LAYOUT(tp) layout(&tp, sizeof(iterfields), 0, iter, NULL, NULL)
     ITER_LAYOUT(PyMap_Type);
     ITER_LAYOUT(PyFilter_Type);
     ITER_LAYOUT(PyZip_Type);
     ITER_LAYOUT(PyEnum_Type);
     ITER_LAYOUT(PyReversed_Type);
     ITER_LAYOUT(PyCallIter_Type);
-    layout(&Py_GenericAliasType, sizeof(PyObject) + LU_ALIAS_FIELDS * sizeof(PyObject *),
-           0, alias_dealloc, NULL, NULL);
-    layout(&_PyUnion_Type, sizeof(PyObject) + LU_ALIAS_FIELDS * sizeof(PyObject *),
-           0, alias_dealloc, NULL, NULL);
+    layout(&Py_GenericAliasType, sizeof(aliasfields), 0, alias, NULL, NULL);
+    layout(&_PyUnion_Type, sizeof(aliasfields), 0, alias, NULL, NULL);
 }
 
 /* The _lucifer primitives over descriptors. */

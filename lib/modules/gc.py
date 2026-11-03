@@ -1,8 +1,7 @@
 """gc (Modules/gcmodule.c): the collector's controls. The settings and counts
 live in the runtime (runtime/interp/gc.c), which schedules a collection at the
-first call or back-edge after the allocation counts pass the threshold. Until
-the cycle collector arrives, a collection runs the callbacks, stops the world,
-and finds nothing."""
+first call or back-edge after the allocation counts pass the threshold; the
+cycle collector is runtime/interp/collector.c."""
 
 import _lucifer
 
@@ -15,11 +14,8 @@ DEBUG_LEAK = DEBUG_COLLECTABLE | DEBUG_UNCOLLECTABLE | DEBUG_SAVEALL
 garbage = []
 callbacks = []
 
-_debug = 0
-_frozen = 0
-
 # _lucifer.gc_get/gc_set fields.
-_ENABLED, _YOUNG, _OLD0, _OLD1, _COUNT_YOUNG, _COUNT_OLD0, _COUNT_OLD1 = range(7)
+_ENABLED, _YOUNG, _OLD0, _OLD1, _COUNT_YOUNG, _COUNT_OLD0, _COUNT_OLD1, _DEBUG = range(8)
 
 
 def _run_callbacks(phase, generation, collected, uncollectable):
@@ -36,7 +32,7 @@ the rest still run."""
             _lucifer.write_unraisable('Exception ignored while invoking gc callback', callback, exc)
 
 
-_lucifer.gc_hook(_run_callbacks)
+_lucifer.gc_hook(_run_callbacks, garbage)
 
 
 def enable():
@@ -88,28 +84,66 @@ def get_count():
 
 def get_debug():
     """Get the garbage collection debugging flags."""
-    return _debug
+    return _lucifer.gc_get(_DEBUG)
 
 
 def set_debug(flags, /):
     """Set the garbage collection debugging flags."""
-    global _debug
-    _debug = flags
+    _lucifer.gc_set(_DEBUG, flags)
 
 
 def get_stats():
     """Return a list of dictionaries containing per-generation statistics."""
-    return [{'collections': 0, 'collected': 0, 'uncollectable': 0} for _ in range(3)]
+    flat = _lucifer.gc_stats()
+    return [{'collections': flat[3 * i], 'collected': flat[3 * i + 1],
+             'uncollectable': flat[3 * i + 2]} for i in range(3)]
+
+
+def get_objects(generation=None):
+    """Return a list of objects tracked by the collector (excluding the list returned).
+
+If generation is not None, return only the objects tracked by the
+collector that are in that generation."""
+    if generation is not None:
+        if not isinstance(generation, int):
+            raise TypeError("'%s' object cannot be interpreted as an integer" % type(generation).__name__)
+        if generation >= 3:
+            raise ValueError('generation parameter must be less than the number of available generations (3)')
+        if generation < 0:
+            raise ValueError('generation parameter cannot be negative')
+    return _lucifer.gc_get_objects()
+
+
+def get_referrers(*objs):
+    """Return the list of objects that directly refer to any of 'objs'."""
+    return _lucifer.gc_get_referrers(objs)
+
+
+def get_referents(*objs):
+    """Return the list of objects directly referred to by 'objs'."""
+    return _lucifer.gc_get_referents(objs)
+
+
+def is_tracked(obj, /):
+    """Returns true if the object is tracked by the garbage collector."""
+    return _lucifer.gc_is_tracked(obj)
+
+
+def is_finalized(obj, /):
+    """Returns true if the object has been already finalized by the GC."""
+    return _lucifer.gc_is_finalized(obj)
 
 
 def freeze():
     """Freeze all current tracked objects and ignore them for future collections."""
+    _lucifer.gc_freeze(1)
 
 
 def unfreeze():
     """Unfreeze all objects in the permanent generation."""
+    _lucifer.gc_freeze(0)
 
 
 def get_freeze_count():
     """Return the number of objects in the permanent generation."""
-    return _frozen
+    return _lucifer.gc_freeze(-1)

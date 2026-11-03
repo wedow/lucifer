@@ -56,6 +56,44 @@ words_of(PyObject *op)
     return (PyObject **)((PyBaseExceptionObject *)op + 1);
 }
 
+static int
+exc_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    PyBaseExceptionObject *e = (PyBaseExceptionObject *)op;
+    Py_VISIT(e->dict);
+    Py_VISIT(e->args);
+    Py_VISIT(e->notes);
+    Py_VISIT(e->traceback);
+    Py_VISIT(e->context);
+    Py_VISIT(e->cause);
+    const struct exc_layout *l = layout_of(Py_TYPE(op));
+    for (size_t i = 0; l != NULL && i < l->nwords; i++) {
+        if (!(l->ssize >> i & 1)) {
+            Py_VISIT(words_of(op)[i]);
+        }
+    }
+    return 0;
+}
+
+static int
+exc_clear(PyObject *op)
+{
+    PyBaseExceptionObject *e = (PyBaseExceptionObject *)op;
+    Py_CLEAR(e->dict);
+    Py_CLEAR(e->args);
+    Py_CLEAR(e->notes);
+    Py_CLEAR(e->traceback);
+    Py_CLEAR(e->cause);
+    Py_CLEAR(e->context);
+    const struct exc_layout *l = layout_of(Py_TYPE(op));
+    for (size_t i = 0; l != NULL && i < l->nwords; i++) {
+        if (!(l->ssize >> i & 1)) {
+            Py_CLEAR(words_of(op)[i]);
+        }
+    }
+    return 0;
+}
+
 static void
 exc_dealloc(PyObject *op)
 {
@@ -316,6 +354,24 @@ tb_dealloc(PyObject *op)
             op = next;
         }
     }
+}
+
+static int
+tb_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    PyTracebackObject *tb = (PyTracebackObject *)op;
+    Py_VISIT(tb->tb_next);
+    Py_VISIT(tb->tb_frame);
+    return 0;
+}
+
+static int
+tb_clear(PyObject *op)
+{
+    PyTracebackObject *tb = (PyTracebackObject *)op;
+    Py_CLEAR(tb->tb_next);
+    Py_CLEAR(tb->tb_frame);
+    return 0;
 }
 
 static PyObject *
@@ -832,6 +888,8 @@ lu_exc_init(void)
             + (l != NULL ? l->nwords * sizeof(PyObject *) : 0);
         (*tp)->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
         (*tp)->tp_dealloc = exc_dealloc;
+        (*tp)->tp_traverse = exc_traverse;
+        (*tp)->tp_clear = exc_clear;
         (*tp)->tp_dictoffset = offsetof(PyBaseExceptionObject, dict);
     }
     static const struct { PyObject **type; PyMemberDef *members; PyGetSetDef *getset; } own[] = {
@@ -855,6 +913,8 @@ lu_exc_init(void)
     PyTraceBack_Type.tp_basicsize = sizeof(PyTracebackObject);
     PyTraceBack_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyTraceBack_Type.tp_dealloc = tb_dealloc;
+    PyTraceBack_Type.tp_traverse = tb_traverse;
+    PyTraceBack_Type.tp_clear = tb_clear;
     PyTraceBack_Type.tp_members = tb_members;
     PyTraceBack_Type.tp_getset = tb_getset;
 }

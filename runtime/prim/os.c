@@ -12,6 +12,7 @@
 #include <langinfo.h>
 #include <poll.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <locale.h>
 #include <linux/futex.h>
@@ -640,6 +641,7 @@ union sys_arg {
     X(sys_getpgrp, "", getpgrp()) \
     X(sys_setsid, "", setsid()) \
     X(sys_kill, "ii", kill((pid_t)a[0].i, (int)a[1].i)) \
+    X(sys_shutdown, "ii", LU_SYSCALL(shutdown((int)a[0].i, (int)a[1].i))) \
     X(sys_fcntl, "iii", LU_SYSCALL(fcntl((int)a[0].i, (int)a[1].i, a[2].i))) \
     X(sys_alarm, "i", alarm((unsigned)a[0].i)) \
     X(sys_sysconf, "i", sysconf((int)a[0].i)) \
@@ -756,6 +758,27 @@ prim_os_pipe(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *t = r != NULL && w != NULL ? PyTuple_Pack(2, r, w) : NULL;
     Py_XDECREF(r);
     Py_XDECREF(w);
+    return t;
+}
+
+/* socketpair(family, type, proto): a connected pair of descriptors. */
+static PyObject *
+prim_os_socketpair(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long family, type, proto;
+    if (nargs != 3 || int_arg(args[0], &family) < 0 || int_arg(args[1], &type) < 0
+        || int_arg(args[2], &proto) < 0) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "socketpair(family, type, proto)"), NULL);
+    }
+    int fds[2];
+    if (socketpair((int)family, (int)type, (int)proto, fds) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    PyObject *a = PyLong_FromLong(fds[0]), *b = PyLong_FromLong(fds[1]);
+    PyObject *t = a != NULL && b != NULL ? PyTuple_Pack(2, a, b) : NULL;
+    Py_XDECREF(a);
+    Py_XDECREF(b);
     return t;
 }
 
@@ -1391,6 +1414,7 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_readlink", (PyCFunction)(void (*)(void))prim_os_readlink, METH_FASTCALL, NULL },
     { "os_urandom", (PyCFunction)(void (*)(void))prim_os_urandom, METH_FASTCALL, NULL },
     { "os_pipe", (PyCFunction)(void (*)(void))prim_os_pipe, METH_FASTCALL, NULL },
+    { "os_socketpair", (PyCFunction)(void (*)(void))prim_os_socketpair, METH_FASTCALL, NULL },
     { "os_uname", (PyCFunction)(void (*)(void))prim_os_uname, METH_FASTCALL, NULL },
     { "os_putenv", (PyCFunction)(void (*)(void))prim_os_putenv, METH_FASTCALL, NULL },
     { "os_scandir", (PyCFunction)(void (*)(void))prim_os_scandir, METH_FASTCALL, NULL },

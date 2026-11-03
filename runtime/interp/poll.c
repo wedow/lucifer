@@ -68,9 +68,10 @@ lu_poll_slow(PyThreadState *ts)
         lu_task_unsignal(t, LU_POLL_GC_SCHEDULED);
         lu_gc_run(ts);
     }
-    /* The stress tick (FOUNDATIONS 2.7) becomes a collection with M0.2. */
-    if (breaker & LU_POLL_STRESS_TICK) {
+    /* The stress tick (FOUNDATIONS 2.7): a collection at every Nth allocation. */
+    if ((breaker & LU_POLL_STRESS_TICK) && visible) {
         lu_poll_clear(c, LU_POLL_STRESS_TICK);
+        lu_gc_stress(ts, _PyRuntime.stress.gc);
     }
     if (breaker & LU_POLL_NO_PRODUCER) {
         lu_task_unsignal(t, breaker & LU_POLL_NO_PRODUCER);
