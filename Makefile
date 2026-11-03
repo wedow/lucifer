@@ -52,7 +52,13 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 	operator:operator:third_party/cpython/Lib/operator.py \
 	functools:functools:third_party/cpython/Lib/functools.py \
 	collections:collections:third_party/cpython/Lib/collections/__init__.py \
-	typing:typing:third_party/cpython/Lib/typing.py
+	typing:typing:third_party/cpython/Lib/typing.py \
+	enum:enum:third_party/cpython/Lib/enum.py \
+	re:re:third_party/cpython/Lib/re/__init__.py \
+	re._casefix:re._casefix:third_party/cpython/Lib/re/_casefix.py \
+	re._compiler:re._compiler:third_party/cpython/Lib/re/_compiler.py \
+	re._constants:re._constants:third_party/cpython/Lib/re/_constants.py \
+	re._parser:re._parser:third_party/cpython/Lib/re/_parser.py
 EXPORTS = results/abi/cp314t-exports.tsv
 
 .PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel regen-abi check-harness check-compiler regen
