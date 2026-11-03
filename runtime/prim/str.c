@@ -204,7 +204,7 @@ prim_str_replace(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(4); STR(0); STR(1); STR(2); IDX(3, count);
     PyObject *s = args[0], *old = args[1], *new = args[2];
     Py_ssize_t len = LEN(s), n = LEN(old);
-    if (count == 0 || (n == 0 && len == 0 && count == 0)) {
+    if (count == 0) {
         return substring(s, 0, len);
     }
     ubuf b = { 0 };
@@ -353,6 +353,29 @@ prim_bytes_ord(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return NULL;
     }
     return PyLong_FromLong((unsigned char)PyBytes_AS_STRING(args[0])[i]);
+}
+
+/* str_sizeof(s): unicode_sizeof_impl. */
+static PyObject *
+prim_str_sizeof(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); STR(0);
+    PyObject *s = args[0];
+    Py_ssize_t size;
+    if (PyUnicode_IS_COMPACT_ASCII(s)) {
+        size = sizeof(PyASCIIObject) + LEN(s) + 1;
+    }
+    else if (PyUnicode_IS_COMPACT(s)) {
+        size = sizeof(PyCompactUnicodeObject) + (LEN(s) + 1) * KIND(s);
+    }
+    else {
+        size = sizeof(PyUnicodeObject);
+        if (((PyUnicodeObject *)s)->data.any != NULL) size += (LEN(s) + 1) * KIND(s);
+    }
+    if (!PyUnicode_IS_ASCII(s) && ((PyCompactUnicodeObject *)s)->utf8 != NULL) {
+        size += ((PyCompactUnicodeObject *)s)->utf8_length + 1;
+    }
+    return PyLong_FromLongLong(size);
 }
 
 static PyObject *
@@ -1262,7 +1285,7 @@ prim_str_subtype(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_str_methods[] = {
     FAST(str_find), FAST(str_count), FAST(str_replace), FAST(str_slice), FAST(str_slice_step),
-    FAST(str_item), FAST(str_decimal), FAST(slice_parts), FAST(box_get), FAST(box_set), FAST(str_ord), FAST(str_chr), FAST(str_len), FAST(bytes_ord), FAST(str_hash), FAST(str_cmp),
+    FAST(str_item), FAST(str_decimal), FAST(slice_parts), FAST(box_get), FAST(box_set), FAST(str_ord), FAST(str_chr), FAST(str_len), FAST(bytes_ord), FAST(str_sizeof), FAST(str_hash), FAST(str_cmp),
     FAST(str_concat), FAST(str_repeat), FAST(str_split), FAST(str_splitlines), FAST(str_strip),
     FAST(str_case), FAST(str_is), FAST(str_expandtabs), FAST(str_ascii), FAST(str_encode),
     FAST(str_decode), FAST(str_iter), FAST(str_subtype),

@@ -8,7 +8,7 @@ from _lucifer import (
     is_subtype, int_format, text_repr, new_check, str_find, str_count, str_replace, str_slice,
     str_slice_step, str_item, str_ord, str_chr, str_len, str_hash, str_cmp, str_concat,
     str_repeat, str_split, str_splitlines, str_strip, str_case, str_is, str_expandtabs, str_ascii,
-    str_encode, str_decode, str_iter, str_subtype, list_append, slice_parts, kernel_set,
+    str_encode, str_decode, str_iter, str_subtype, str_sizeof, list_append, slice_parts, kernel_set,
 )
 from _lucifer import _boot, operators, _format
 
@@ -383,6 +383,12 @@ errors defaults to 'strict'."""
 
     def __getnewargs__(self):
         return (_exact(self),)
+
+    def __sizeof__(self):
+        return str_sizeof(self)
+
+    def __rmod__(self, other):
+        return NotImplemented
 
     def __format__(self, format_spec, /):
         if not kind(format_spec, 'str'):

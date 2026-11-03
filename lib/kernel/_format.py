@@ -688,6 +688,10 @@ def pct_format(fmt, args):
         if j > i:
             list_append(out, _sub(fmt, i, j))
         i = j + 1
+        if i < n and str_ord(fmt, i) == 37:
+            list_append(out, '%')
+            i += 1
+            continue
         flags = ''
         width = -1
         precision = -1
@@ -746,9 +750,6 @@ def pct_format(fmt, args):
             error(ValueError, 'incomplete format')
         ty = str_item(fmt, i)
         i += 1
-        if ty == '%':
-            list_append(out, '%')
-            continue
         v = key if key is not MISSING else _next_arg(ctx)
         list_append(out, _convert_arg(ty, v, flags, width, precision, fmt, i))
     if box_get(ctx, 0) < box_get(ctx, 1) and mapping is None:
