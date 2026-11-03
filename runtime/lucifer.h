@@ -166,6 +166,10 @@ struct lu_static_type_state {
     X(import_star)              /* INTRINSIC_IMPORT_STAR: import_star(locals, module) */ \
     X(intrinsic_1)              /* CALL_INTRINSIC_1 of PEP 695: (value, oparg) */ \
     X(intrinsic_2)              /* CALL_INTRINSIC_2 of PEP 695: (a, b, oparg) */ \
+    X(match_class)              /* MATCH_CLASS: (subject, type, names, nargs): the attributes or None */ \
+    X(match_keys)               /* MATCH_KEYS: (subject, keys): the values or None */ \
+    X(match_mapping)            /* MATCH_MAPPING: whether the subject is a mapping */ \
+    X(match_sequence)           /* MATCH_SEQUENCE: whether the subject is a sequence for patterns */ \
     X(build_template)           /* BUILD_TEMPLATE: (strings, interpolations) */ \
     X(build_interpolation)      /* BUILD_INTERPOLATION: (value, expression, conversion, format_spec) */ \
     X(generic_alias)            /* Py_GenericAlias(origin, args): type[int] before the kernel has the type */

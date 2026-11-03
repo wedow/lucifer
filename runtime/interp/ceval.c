@@ -412,6 +412,11 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
         [CONVERT_VALUE] = &&op_CONVERT_VALUE,
         [BUILD_STRING] = &&op_BUILD_STRING,
         [BUILD_TEMPLATE] = &&op_BUILD_TEMPLATE,
+        [MATCH_CLASS] = &&op_MATCH_CLASS,
+        [MATCH_KEYS] = &&op_MATCH_KEYS,
+        [MATCH_MAPPING] = &&op_MATCH_MAPPING,
+        [MATCH_SEQUENCE] = &&op_MATCH_SEQUENCE,
+        [EXIT_INIT_CHECK] = &&op_EXIT_INIT_CHECK,
         [BUILD_INTERPOLATION] = &&op_BUILD_INTERPOLATION,
         [RETURN_GENERATOR] = &&op_RETURN_GENERATOR,
         [YIELD_VALUE] = &&op_YIELD_VALUE,
@@ -2014,6 +2019,64 @@ op_BUILD_STRING: {
     Py_DECREF(pieces);
     ERROR_IF(res == NULL);
     PUSH(res);
+    DISPATCH();
+}
+
+op_MATCH_MAPPING: {
+    /* subject -- subject, whether it is a mapping */
+    SAVE_FRAME();
+    kargs[0] = Py_NewRef(TOP());
+    nk = 1;
+    kid = LU_K_match_mapping;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_MATCH_SEQUENCE: {
+    /* subject -- subject, whether it is a sequence that is not a str, bytes or bytearray */
+    SAVE_FRAME();
+    kargs[0] = Py_NewRef(TOP());
+    nk = 1;
+    kid = LU_K_match_sequence;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_MATCH_KEYS: {
+    /* subject, keys -- subject, keys, tuple of the values or None */
+    SAVE_FRAME();
+    kargs[0] = Py_NewRef(sp[-2]);
+    kargs[1] = Py_NewRef(sp[-1]);
+    nk = 2;
+    kid = LU_K_match_keys;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_MATCH_CLASS: {
+    /* subject, type, names -- tuple of the attributes or None; oparg positional patterns */
+    SAVE_FRAME();
+    sp -= 3;
+    kargs[0] = sp[0];
+    kargs[1] = sp[1];
+    kargs[2] = sp[2];
+    kargs[3] = lu_small_int(oparg);
+    nk = 4;
+    kid = LU_K_match_class;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_EXIT_INIT_CHECK: {
+    /* value -- ; __init__ must have returned None */
+    PyObject *value = POP();
+    if (value != Py_None) {
+        SAVE_FRAME();
+        lu_err_format(PyExc_TypeError, "__init__() should return None, not '%.200s'", Py_TYPE(value)->tp_name);
+        Py_DECREF(value);
+        goto error;
+    }
+    Py_DECREF(value);
     DISPATCH();
 }
 
