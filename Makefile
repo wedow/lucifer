@@ -27,7 +27,8 @@ abi-audit: bin/lucifer
 	python3 tools/abi/audit.py $(EXPORTS) bin/lucifer
 
 # Extensions built only against include/, preloaded with LD_BIND_NOW=1 so that
-# ld.so must bind every import to bin/lucifer before their checks run.
+# ld.so must bind every import to bin/lucifer before their checks run. Each
+# test runs 15 times: the thread tests fail only on some schedules.
 CAPI_TESTS = $(patsubst tests/capi/%.c,build/tests/capi/%.so,$(wildcard tests/capi/*.c))
 
 build/tests/capi/%.so: tests/capi/%.c
@@ -37,9 +38,10 @@ build/tests/capi/%.so: tests/capi/%.c
 check-capi: bin/lucifer $(CAPI_TESTS)
 	@for so in $(CAPI_TESTS); do \
 	  name=$$(basename $$so .so); \
-	  out=$$(LD_BIND_NOW=1 LD_PRELOAD=./$$so bin/lucifer); \
-	  if [ "$$out" = "capi $$name ok" ]; then echo "PASS $$name"; \
-	  else echo "FAIL $$name"; exit 1; fi; \
+	  for run in $$(seq 15); do \
+	    out=$$(LD_BIND_NOW=1 LD_PRELOAD=./$$so bin/lucifer 2>&1); \
+	    [ "$$out" = "capi $$name ok" ] || { echo "FAIL $$name (run $$run)"; exit 1; }; \
+	  done; echo "PASS $$name"; \
 	done
 
 # Rerun when the headers or the export list change.
