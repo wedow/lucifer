@@ -3,21 +3,29 @@ CFLAGS = -O2 -g
 # Hidden by default: only what the headers declare PyAPI_FUNC/PyAPI_DATA, or
 # LU_EXPORT marks, reaches the dynamic symbol table that -rdynamic fills.
 LU_CFLAGS = -std=gnu11 -Wall -Wextra -Wno-unused-parameter -fvisibility=hidden \
-	-pthread -Iinclude -Iruntime
+	-fno-omit-frame-pointer -pthread -Iinclude -Iruntime -Ithird_party/mimalloc/include
 LU_LDFLAGS = -rdynamic -pthread
 
 SRCS = $(wildcard runtime/*.c runtime/*/*.c)
-OBJS = $(SRCS:%.c=build/%.o)
+MAIN = build/runtime/main.o
+LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o))
 EXPORTS = results/abi/cp314t-exports.tsv
 
-.PHONY: all abi-audit check-capi regen-abi check-harness check-compiler regen
+.PHONY: all abi-audit check-globals check-capi regen-abi check-harness check-compiler regen
 all: bin/lucifer
 
-bin/lucifer: $(OBJS)
+# The runtime is an archive so that an embedder can link it too. Every member
+# is kept: extensions bind to symbols that nothing in main.o refers to.
+build/liblucifer.a: $(LIB_OBJS)
 	@mkdir -p $(@D)
-	$(CC) $(LU_LDFLAGS) -o $@ $(OBJS)
+	rm -f $@
+	ar rcs $@ $^
 
-build/runtime/object/alloc.o: LU_CFLAGS += -Ithird_party/mimalloc/include -Ithird_party/mimalloc/src
+bin/lucifer: $(MAIN) build/liblucifer.a
+	@mkdir -p $(@D)
+	$(CC) $(LU_LDFLAGS) -o $@ $(MAIN) -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive
+
+build/runtime/object/alloc.o: LU_CFLAGS += -Ithird_party/mimalloc/src
 
 build/%.o: %.c $(wildcard runtime/*.h)
 	@mkdir -p $(@D)
@@ -26,8 +34,13 @@ build/%.o: %.c $(wildcard runtime/*.h)
 abi-audit: bin/lucifer
 	python3 tools/abi/audit.py $(EXPORTS) bin/lucifer
 
+# Every writable symbol of the executable is accounted for.
+check-globals: bin/lucifer
+	python3 tools/abi/globals.py $(EXPORTS) tools/abi/globals.tsv bin/lucifer
+
 # Extensions built only against include/, preloaded with LD_BIND_NOW=1 so that
-# ld.so must bind every import to bin/lucifer before their checks run.
+# ld.so must bind every import to bin/lucifer before their checks run. Each
+# test runs 15 times: the thread tests fail only on some schedules.
 CAPI_TESTS = $(patsubst tests/capi/%.c,build/tests/capi/%.so,$(wildcard tests/capi/*.c))
 
 build/tests/capi/%.so: tests/capi/%.c
@@ -37,9 +50,10 @@ build/tests/capi/%.so: tests/capi/%.c
 check-capi: bin/lucifer $(CAPI_TESTS)
 	@for so in $(CAPI_TESTS); do \
 	  name=$$(basename $$so .so); \
-	  out=$$(LD_BIND_NOW=1 LD_PRELOAD=./$$so bin/lucifer); \
-	  if [ "$$out" = "capi $$name ok" ]; then echo "PASS $$name"; \
-	  else echo "FAIL $$name"; exit 1; fi; \
+	  for run in $$(seq 15); do \
+	    out=$$(LD_BIND_NOW=1 LD_PRELOAD=./$$so bin/lucifer 2>&1); \
+	    [ "$$out" = "capi $$name ok" ] || { echo "FAIL $$name (run $$run)"; exit 1; }; \
+	  done; echo "PASS $$name"; \
 	done
 
 # Rerun when the headers or the export list change.
