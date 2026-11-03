@@ -52,7 +52,9 @@ capi_call_instrumentation(PyMonitoringState *state, PyObject *codelike, int32_t 
             state->active &= ~(1 << tool);
         }
     }
-    Py_XDECREF(args[2]);
+    if (event != PY_MONITORING_EVENT_LINE) {
+        Py_DECREF(args[2]);     /* the offset made above; a line number is the caller's */
+    }
     return err;
 }
 
