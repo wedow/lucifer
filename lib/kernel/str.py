@@ -211,7 +211,8 @@ def _in(x, names):
 
 
 def _encoding_name(encoding):
-    """The codec's canonical name, as codecs.lookup normalizes it."""
+    """The primitive codec's canonical name, as codecs.lookup normalizes it, or
+    None for an encoding that only the codec registry knows."""
     name = str_replace(str_case(encoding, 0), '-', '_', -1)
     name = str_replace(name, ' ', '_', -1)
     if _in(name, ('utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4')):
@@ -222,25 +223,19 @@ def _encoding_name(encoding):
     if _in(name, ('ascii', 'us_ascii', '646', 'ansi_x3.4_1968', 'ansi_x3_4_1968', 'cp367', 'iso646_us',
                 'iso_646.irv_1991', 'iso_ir_6', 'us')):
         return 'ascii'
-    error(LookupError, _cat('unknown encoding: ', encoding))
+    return None
 
 
 _HANDLERS = ('strict', 'ignore', 'replace', 'backslashreplace', 'xmlcharrefreplace',
              'surrogateescape', 'surrogatepass')
 
 
-def _check_handler(errors):
-    for h in _HANDLERS:
-        if h == errors:
-            return
-    error(LookupError, _cat("unknown error handler name '", errors, "'"))
-
-
 def _encode(self, encoding, errors):
     name = _encoding_name(encoding)
+    if name is None or not _in(errors, _HANDLERS):
+        return __import__('_codecs')._encode_text(self, encoding, errors)
     r = str_encode(self, name, errors)
     if kind(r, 'tuple'):
-        _check_handler(errors)
         start, end, reason = r
         raise UnicodeEncodeError(name, self, start, end, reason)
     return r
@@ -248,9 +243,10 @@ def _encode(self, encoding, errors):
 
 def _decode(data, encoding, errors):
     name = _encoding_name(encoding)
+    if name is None or not _in(errors, _HANDLERS):
+        return __import__('_codecs')._decode_text(data, encoding, errors)
     r = str_decode(data, name, errors)
     if kind(r, 'tuple'):
-        _check_handler(errors)
         start, end, reason = r
         raise UnicodeDecodeError(name, data, start, end, reason)
     return r

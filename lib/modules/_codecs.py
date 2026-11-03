@@ -100,8 +100,8 @@ def _lookup_text(encoding, alternate):
     if type(codec) is tuple:
         return codec
     if not getattr(codec, '_is_text_encoding', True):
-        raise LookupError("'%s' is not a text encoding; use %s to handle arbitrary codecs"
-                          % (encoding, alternate))
+        raise LookupError("'%s' is not a text encoding" % encoding
+                          + ('; use %s to handle arbitrary codecs' % alternate if alternate else ''))
     return codec
 
 
@@ -109,6 +109,11 @@ def _check_result(result, what):
     if not isinstance(result, tuple) or len(result) != 2:
         raise TypeError(what + ' must return a tuple (object, integer)')
     return result[0]
+
+
+def _check_name(function, name, value):
+    if not isinstance(value, str):
+        raise TypeError("%s() argument '%s' must be str, not %s" % (function, name, type(value).__name__))
 
 
 def encode(obj, encoding='utf-8', errors='strict'):
@@ -119,6 +124,8 @@ error handling scheme.  Default is 'strict' meaning that encoding errors raise
 a ValueError.  Other possible values are 'ignore', 'replace' and
 'backslashreplace' as well as any other name registered with
 codecs.register_error that can handle ValueErrors."""
+    _check_name('encode', 'encoding', encoding)
+    _check_name('encode', 'errors', errors)
     return _check_result(lookup(encoding)[0](obj, errors), 'encoder')
 
 
@@ -130,6 +137,8 @@ handling scheme.  Default is 'strict' meaning that encoding errors raise
 a ValueError.  Other possible values are 'ignore', 'replace' and
 'backslashreplace' as well as any other name registered with
 codecs.register_error that can handle ValueErrors."""
+    _check_name('decode', 'encoding', encoding)
+    _check_name('decode', 'errors', errors)
     return _check_result(lookup(encoding)[1](obj, errors), 'decoder')
 
 
@@ -221,9 +230,9 @@ def _replace_errors(exc):
     if isinstance(exc, UnicodeEncodeError):
         return ('?' * (exc.end - exc.start), exc.end)
     if isinstance(exc, UnicodeDecodeError):
-        return ('�', exc.end)
+        return ('\ufffd', exc.end)
     if isinstance(exc, UnicodeTranslateError):
-        return ('�' * (exc.end - exc.start), exc.end)
+        return ('\ufffd' * (exc.end - exc.start), exc.end)
     _unknown(exc)
 
 
@@ -381,11 +390,11 @@ encode_one(str) encodes a replacement string in the same codec."""
 
 # Argument checking, as the clinic converters do
 
-def _errors(errors):
+def _errors(errors, function):
     if errors is None:
         return 'strict'
     if not isinstance(errors, str):
-        raise TypeError('argument must be str or None, not ' + type(errors).__name__)
+        raise TypeError('%s() argument 2 must be str or None, not %s' % (function, type(errors).__name__))
     return errors
 
 
@@ -469,27 +478,27 @@ def _decode_primitive(name, data, errors, final):
 
 
 def utf_8_encode(str, errors=None, /):
-    return _encode_primitive('utf-8', _text('utf_8_encode', str), _errors(errors)), len(str)
+    return _encode_primitive('utf-8', _text('utf_8_encode', str), _errors(errors, 'utf_8_encode')), len(str)
 
 
 def utf_8_decode(data, errors=None, final=False, /):
-    return _decode_primitive('utf-8', data, _errors(errors), final)
+    return _decode_primitive('utf-8', data, _errors(errors, 'utf_8_decode'), final)
 
 
 def latin_1_encode(str, errors=None, /):
-    return _encode_primitive('latin-1', _text('latin_1_encode', str), _errors(errors)), len(str)
+    return _encode_primitive('latin-1', _text('latin_1_encode', str), _errors(errors, 'latin_1_encode')), len(str)
 
 
 def latin_1_decode(data, errors=None, /):
-    return _decode_primitive('latin-1', data, _errors(errors), True)
+    return _decode_primitive('latin-1', data, _errors(errors, 'latin_1_decode'), True)
 
 
 def ascii_encode(str, errors=None, /):
-    return _encode_primitive('ascii', _text('ascii_encode', str), _errors(errors)), len(str)
+    return _encode_primitive('ascii', _text('ascii_encode', str), _errors(errors, 'ascii_encode')), len(str)
 
 
 def ascii_decode(data, errors=None, /):
-    return _decode_primitive('ascii', data, _errors(errors), True)
+    return _decode_primitive('ascii', data, _errors(errors, 'ascii_decode'), True)
 
 
 # utf-16 and utf-32: width 2 or 4 bytes per unit
@@ -536,7 +545,6 @@ def _encode_wide(text, errors, byteorder, width):
 def _decode_wide(data, errors, byteorder, final, width):
     """(text, consumed, byteorder) of utf-16 or utf-32 data."""
     data = _bytes(data)
-    name = 'utf-%d' % (width * 8) + ('' if byteorder == 0 else '-le' if byteorder < 0 else '-be')
     n = len(data)
     pos = 0
     if byteorder == 0 and n >= width:
@@ -546,6 +554,7 @@ def _decode_wide(data, errors, byteorder, final, width):
         elif bom == int.from_bytes((0xfeff).to_bytes(width, 'little'), 'big'):
             byteorder, pos = 1, width
     order = 'big' if byteorder > 0 else 'little'
+    name = 'utf-%d-%s' % (width * 8, 'be' if byteorder > 0 else 'le')
     out = []
     while pos < n:
         if n - pos < width:
@@ -590,65 +599,65 @@ def _decode_wide(data, errors, byteorder, final, width):
 
 
 def utf_16_encode(str, errors=None, byteorder=0, /):
-    return _encode_wide(_text('utf_16_encode', str), _errors(errors), byteorder, 2), len(str)
+    return _encode_wide(_text('utf_16_encode', str), _errors(errors, 'utf_16_encode'), byteorder, 2), len(str)
 
 
 def utf_16_le_encode(str, errors=None, /):
-    return _encode_wide(_text('utf_16_le_encode', str), _errors(errors), -1, 2), len(str)
+    return _encode_wide(_text('utf_16_le_encode', str), _errors(errors, 'utf_16_le_encode'), -1, 2), len(str)
 
 
 def utf_16_be_encode(str, errors=None, /):
-    return _encode_wide(_text('utf_16_be_encode', str), _errors(errors), 1, 2), len(str)
+    return _encode_wide(_text('utf_16_be_encode', str), _errors(errors, 'utf_16_be_encode'), 1, 2), len(str)
 
 
 def utf_16_decode(data, errors=None, final=False, /):
-    text, consumed, _ = _decode_wide(data, _errors(errors), 0, final, 2)
+    text, consumed, _ = _decode_wide(data, _errors(errors, 'utf_16_decode'), 0, final, 2)
     return text, consumed
 
 
 def utf_16_le_decode(data, errors=None, final=False, /):
-    text, consumed, _ = _decode_wide(data, _errors(errors), -1, final, 2)
+    text, consumed, _ = _decode_wide(data, _errors(errors, 'utf_16_le_decode'), -1, final, 2)
     return text, consumed
 
 
 def utf_16_be_decode(data, errors=None, final=False, /):
-    text, consumed, _ = _decode_wide(data, _errors(errors), 1, final, 2)
+    text, consumed, _ = _decode_wide(data, _errors(errors, 'utf_16_be_decode'), 1, final, 2)
     return text, consumed
 
 
 def utf_16_ex_decode(data, errors=None, byteorder=0, final=False, /):
-    return _decode_wide(data, _errors(errors), byteorder, final, 2)
+    return _decode_wide(data, _errors(errors, 'utf_16_ex_decode'), byteorder, final, 2)
 
 
 def utf_32_encode(str, errors=None, byteorder=0, /):
-    return _encode_wide(_text('utf_32_encode', str), _errors(errors), byteorder, 4), len(str)
+    return _encode_wide(_text('utf_32_encode', str), _errors(errors, 'utf_32_encode'), byteorder, 4), len(str)
 
 
 def utf_32_le_encode(str, errors=None, /):
-    return _encode_wide(_text('utf_32_le_encode', str), _errors(errors), -1, 4), len(str)
+    return _encode_wide(_text('utf_32_le_encode', str), _errors(errors, 'utf_32_le_encode'), -1, 4), len(str)
 
 
 def utf_32_be_encode(str, errors=None, /):
-    return _encode_wide(_text('utf_32_be_encode', str), _errors(errors), 1, 4), len(str)
+    return _encode_wide(_text('utf_32_be_encode', str), _errors(errors, 'utf_32_be_encode'), 1, 4), len(str)
 
 
 def utf_32_decode(data, errors=None, final=False, /):
-    text, consumed, _ = _decode_wide(data, _errors(errors), 0, final, 4)
+    text, consumed, _ = _decode_wide(data, _errors(errors, 'utf_32_decode'), 0, final, 4)
     return text, consumed
 
 
 def utf_32_le_decode(data, errors=None, final=False, /):
-    text, consumed, _ = _decode_wide(data, _errors(errors), -1, final, 4)
+    text, consumed, _ = _decode_wide(data, _errors(errors, 'utf_32_le_decode'), -1, final, 4)
     return text, consumed
 
 
 def utf_32_be_decode(data, errors=None, final=False, /):
-    text, consumed, _ = _decode_wide(data, _errors(errors), 1, final, 4)
+    text, consumed, _ = _decode_wide(data, _errors(errors, 'utf_32_be_decode'), 1, final, 4)
     return text, consumed
 
 
 def utf_32_ex_decode(data, errors=None, byteorder=0, final=False, /):
-    return _decode_wide(data, _errors(errors), byteorder, final, 4)
+    return _decode_wide(data, _errors(errors, 'utf_32_ex_decode'), byteorder, final, 4)
 
 
 # The escape codecs
@@ -660,7 +669,7 @@ _HEX = '0123456789abcdefABCDEF'
 
 
 def unicode_escape_encode(str, errors=None, /):
-    _errors(errors)
+    _errors(errors, 'unicode_escape_encode')
     out = []
     for c in _text('unicode_escape_encode', str):
         o = ord(c)
@@ -674,15 +683,32 @@ def unicode_escape_encode(str, errors=None, /):
 
 
 def raw_unicode_escape_encode(str, errors=None, /):
-    _errors(errors)
+    _errors(errors, 'raw_unicode_escape_encode')
     out = []
     for c in _text('raw_unicode_escape_encode', str):
         out.append(c if ord(c) < 0x100 else _hex_escape(c))
     return ''.join(out).encode('latin-1'), len(str)
 
 
+def _warn_invalid(invalid, prefix):
+    """The DeprecationWarning for the first invalid escape a decode met."""
+    if invalid:
+        import _warnings
+        char, octal = invalid[0]
+        what = 'octal escape sequence' if octal else 'escape sequence'
+        _warnings.warn('%s"\\%s" is an invalid %s. Such sequences will not work in the future. '
+                       % (prefix, '%o' % char if octal else char, what), DeprecationWarning, 1)
+
+
 def _escape_decode(name, data, errors, final, raw):
     """unicode_escape and raw_unicode_escape decoding: (text, consumed)."""
+    invalid = []
+    result = _escape_decode_core(name, data, errors, final, raw, invalid)
+    _warn_invalid(invalid, '')
+    return result
+
+
+def _escape_decode_core(name, data, errors, final, raw, invalid):
     data = _bytes(data)
     n = len(data)
     out = []
@@ -726,7 +752,10 @@ def _escape_decode(name, data, errors, final, raw):
             end = pos
             while end < n and end < pos + 2 and chr(data[end]) in '01234567':
                 end += 1
-            out.append(chr(int(data[pos - 1:end], 8)))
+            value = int(data[pos - 1:end], 8)
+            if value > 0xff and not invalid:
+                invalid.append((value, True))
+            out.append(chr(value))
             pos = end
             continue
         if kind in 'xuU':
@@ -764,6 +793,8 @@ def _escape_decode(name, data, errors, final, raw):
                     reason = 'unknown Unicode character name'
                     end = close + 1
         else:
+            if not invalid:
+                invalid.append((kind, False))
             out.append('\\' + kind)
             continue
         replacement, pos = _handle_decode(errors, name, data, start, end, reason)
@@ -772,11 +803,11 @@ def _escape_decode(name, data, errors, final, raw):
 
 
 def unicode_escape_decode(data, errors=None, final=True, /):
-    return _escape_decode('unicodeescape', data, _errors(errors), final, False)
+    return _escape_decode('unicodeescape', data, _errors(errors, 'unicode_escape_decode'), final, False)
 
 
 def raw_unicode_escape_decode(data, errors=None, final=True, /):
-    return _escape_decode('rawunicodeescape', data, _errors(errors), final, True)
+    return _escape_decode('rawunicodeescape', data, _errors(errors, 'raw_unicode_escape_decode'), final, True)
 
 
 def escape_encode(data, errors=None, /):
@@ -797,7 +828,8 @@ def escape_encode(data, errors=None, /):
 
 
 def escape_decode(data, errors=None, /):
-    errors = _errors(errors)
+    errors = _errors(errors, 'escape_decode')
+    invalid = []
     data = data.encode('latin-1') if isinstance(data, str) else _bytes(data)
     n = len(data)
     out = bytearray()
@@ -818,7 +850,10 @@ def escape_decode(data, errors=None, /):
             end = pos
             while end < n and end < pos + 2 and chr(data[end]) in '01234567':
                 end += 1
-            out.append(int(data[pos - 1:end], 8) & 0xff)
+            value = int(data[pos - 1:end], 8)
+            if value > 0xff and not invalid:
+                invalid.append((value, True))
+            out.append(value & 0xff)
             pos = end
         elif c == 'x':
             digits = data[pos:pos + 2].decode('latin-1')
@@ -835,7 +870,10 @@ def escape_decode(data, errors=None, /):
             else:
                 pos += len(digits) and (1 if digits[0] in _HEX else 0)
         else:
+            if not invalid:
+                invalid.append((c, False))
             out += b'\\' + c.encode('latin-1')
+    _warn_invalid(invalid, 'b')
     return bytes(out), n
 
 
@@ -843,7 +881,7 @@ def escape_decode(data, errors=None, /):
 
 def charmap_build(map, /):
     """Build an encoding map from a decoding table of 256 characters."""
-    return {ord(c): i for i, c in enumerate(map) if c != '￾'}
+    return {ord(c): i for i, c in enumerate(map)}
 
 
 def _charmap_byte(mapping, c):
@@ -866,7 +904,7 @@ def _charmap_byte(mapping, c):
 
 def charmap_encode(str, errors=None, mapping=None, /):
     text = _text('charmap_encode', str)
-    errors = _errors(errors)
+    errors = _errors(errors, 'charmap_encode')
     if mapping is None:
         return latin_1_encode(text, errors)
     out = []
@@ -898,7 +936,7 @@ def charmap_encode(str, errors=None, mapping=None, /):
 
 def charmap_decode(data, errors=None, mapping=None, /):
     data = _bytes(data)
-    errors = _errors(errors)
+    errors = _errors(errors, 'charmap_decode')
     if mapping is None:
         return latin_1_decode(data, errors)
     out = []
@@ -919,7 +957,7 @@ def charmap_decode(data, errors=None, mapping=None, /):
             value = chr(value)
         elif value is not None and not isinstance(value, str):
             raise TypeError('character mapping must return integer, None or str')
-        if value is None or value == '￾':
+        if value is None or value == '\ufffe':
             replacement, pos = _handle_decode(errors, 'charmap', data, pos, pos + 1,
                                               'character maps to <undefined>')
             out.append(replacement)

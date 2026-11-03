@@ -33,6 +33,13 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 	encodings.latin_1:encodings.latin_1:third_party/cpython/Lib/encodings/latin_1.py \
 	encodings.utf_16:encodings.utf_16:third_party/cpython/Lib/encodings/utf_16.py \
 	encodings.utf_32:encodings.utf_32:third_party/cpython/Lib/encodings/utf_32.py \
+	encodings.utf_16_le:encodings.utf_16_le:third_party/cpython/Lib/encodings/utf_16_le.py \
+	encodings.utf_16_be:encodings.utf_16_be:third_party/cpython/Lib/encodings/utf_16_be.py \
+	encodings.utf_32_le:encodings.utf_32_le:third_party/cpython/Lib/encodings/utf_32_le.py \
+	encodings.utf_32_be:encodings.utf_32_be:third_party/cpython/Lib/encodings/utf_32_be.py \
+	encodings.utf_8_sig:encodings.utf_8_sig:third_party/cpython/Lib/encodings/utf_8_sig.py \
+	encodings.unicode_escape:encodings.unicode_escape:third_party/cpython/Lib/encodings/unicode_escape.py \
+	encodings.raw_unicode_escape:encodings.raw_unicode_escape:third_party/cpython/Lib/encodings/raw_unicode_escape.py \
 	abc:abc:third_party/cpython/Lib/abc.py \
 	_py_abc:_py_abc:third_party/cpython/Lib/_py_abc.py \
 	_weakrefset:_weakrefset:third_party/cpython/Lib/_weakrefset.py \
@@ -60,7 +67,7 @@ build/%.o: %.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<
 
-build/frozen.c: tools/freeze $(KERNEL) $(MODULES) $(foreach e,$(FROZEN),$(lastword $(subst :, ,$(e))))
+build/frozen.c: Makefile tools/freeze $(KERNEL) $(MODULES) $(foreach e,$(FROZEN),$(lastword $(subst :, ,$(e))))
 	$(HOST_PYTHON) tools/freeze $@ --kernel $(KERNEL) --builtin $(MODULES) --frozen $(FROZEN)
 
 build/frozen.o: build/frozen.c $(HEADERS)
