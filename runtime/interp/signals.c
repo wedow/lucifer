@@ -184,7 +184,7 @@ prim_signal_raise(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1);
     long signum;
-    if (!PyLong_CheckExact(args[0]) || lu_long_as_long(args[0], &signum) < 0) {
+    if (!PyLong_Check(args[0]) || lu_long_as_long(args[0], &signum) < 0) {
         return NULL;
     }
     if (raise((int)signum) < 0) {
@@ -201,7 +201,7 @@ prim_signal_interrupt(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1);
     long signum;
-    if (!PyLong_CheckExact(args[0]) || lu_long_as_long(args[0], &signum) < 0) {
+    if (!PyLong_Check(args[0]) || lu_long_as_long(args[0], &signum) < 0) {
         return NULL;
     }
     if (PyErr_SetInterruptEx((int)signum) < 0) {
@@ -211,8 +211,24 @@ prim_signal_interrupt(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
+/* signal_ignored(signum): whether the process ignores the signal (SIG_IGN), as it does for
+   SIGINT when started in the background. */
+static PyObject *
+prim_signal_ignored(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    long signum;
+    struct sigaction sa;
+    if (!PyLong_Check(args[0]) || lu_long_as_long(args[0], &signum) < 0
+        || sigaction((int)signum, NULL, &sa) < 0) {
+        lu_err_format(PyExc_ValueError, "signal number out of range");
+        return NULL;
+    }
+    return Py_NewRef(sa.sa_handler == SIG_IGN ? Py_True : Py_False);
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_signal_methods[] = {
-    FAST(signal_install), FAST(signal_raise), FAST(signal_interrupt),
+    FAST(signal_install), FAST(signal_raise), FAST(signal_interrupt), FAST(signal_ignored),
     { NULL, NULL, 0, NULL },
 };
