@@ -10,3 +10,9 @@ tags: [kernel]
 ---
 # mappingproxy: keys/items/values/__iter__/__len__/get/copy and | as in CPython, so vars(cls) iterates
 
+
+## Notes
+
+**2026-11-03T09:38:22Z**
+
+mappingproxy methods and | done in lib/kernel/mappingproxy.py; tests/kernel/mapping_views.py

@@ -1,5 +1,5 @@
 ---
-id: lq-1mcf
+id: luc-1mcf
 status: open
 deps: []
 links: []
