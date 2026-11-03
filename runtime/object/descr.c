@@ -660,6 +660,16 @@ descr_dealloc(PyObject *op)
     fields_dealloc(op, offsetof(PyDescrObject, d_type), offsetof(PyDescrObject, d_qualname) + sizeof(PyObject *));
 }
 
+/* map, filter, zip, enumerate, reversed and callable_iterator hold up to
+   three object fields, which their kernel methods reach by index. */
+#define LU_ITER_FIELDS 3
+
+static void
+iter_dealloc(PyObject *op)
+{
+    fields_dealloc(op, sizeof(PyObject), sizeof(PyObject) + LU_ITER_FIELDS * sizeof(PyObject *));
+}
+
 #define FIELDS_DEALLOC(name, type, first, last) \
     static void name(PyObject *op) \
     { fields_dealloc(op, offsetof(type, first), offsetof(type, last) + sizeof(PyObject *)); }
@@ -717,6 +727,14 @@ lu_descr_init(void)
     layout(&PyProperty_Type, sizeof(propertyobject), 0, property_dealloc, property_members, NULL);
     layout(&PySuper_Type, sizeof(superobject), 0, super_dealloc, super_members, NULL);
     layout(&PyDictProxy_Type, sizeof(mappingproxyobject), 0, proxy_dealloc, NULL, NULL);
+#define ITER_LAYOUT(tp) layout(&tp, sizeof(PyObject) + LU_ITER_FIELDS * sizeof(PyObject *), 0, \
+                               iter_dealloc, NULL, NULL)
+    ITER_LAYOUT(PyMap_Type);
+    ITER_LAYOUT(PyFilter_Type);
+    ITER_LAYOUT(PyZip_Type);
+    ITER_LAYOUT(PyEnum_Type);
+    ITER_LAYOUT(PyReversed_Type);
+    ITER_LAYOUT(PyCallIter_Type);
 }
 
 /* The _lucifer primitives over descriptors. */
@@ -928,8 +946,10 @@ field_offset(PyObject *obj, PyObject *index)
     static PyTypeObject *const types[] = { &PyProperty_Type, &PyClassMethod_Type,
                                            &PyStaticMethod_Type, &PySuper_Type, &PyDictProxy_Type,
                                            &lu_coro_wrapper_type, &_PyAsyncGenASend_Type,
-                                           &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type };
-    static const int counts[] = { 5, 2, 2, 3, 1, 1, 3, 3, 1 };
+                                           &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type,
+                                           &PyMap_Type, &PyFilter_Type, &PyZip_Type,
+                                           &PyEnum_Type, &PyReversed_Type, &PyCallIter_Type };
+    static const int counts[] = { 5, 2, 2, 3, 1, 1, 3, 3, 1, 3, 3, 3, 3, 3, 3 };
     long i;
     if (!PyLong_CheckExact(index) || lu_long_as_long(index, &i) < 0) {
         return -1;

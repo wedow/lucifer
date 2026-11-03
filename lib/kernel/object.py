@@ -7,7 +7,7 @@ dict, then non-data descriptors and plain class attributes.
 """
 
 from _lucifer import (
-    MISSING, error, str_join, kind, type_lookup, type_dict, type_tp_name, type_qualname,
+    MISSING, error, str_join, kind, type_lookup, type_dict, type_bases, type_tp_name, type_qualname,
     instance_dict, ns_get, ns_set, ns_del, alloc, set_class, kernel_set, address,
     object_hash,
 )
@@ -126,6 +126,14 @@ def delattr_hook(obj, name):
     call_special(type_lookup(type(obj), '__delattr__'), obj, name)
 
 
+def merge_class_dict(d, cls):
+    """merge_class_dict of Objects/typeobject.c: the class's dict, then those
+    of its bases, into d."""
+    d.update(type_dict(cls))
+    for base in type_bases(cls):
+        merge_class_dict(d, base)
+
+
 def _get_class(self):
     return type(self)
 
@@ -175,6 +183,21 @@ instance that has no instance attributes and cannot be given any.
             if type_lookup(tp, '__new__') is _object_new:
                 error(TypeError, str_join('', (
                     type_tp_name(tp), '.__init__() takes exactly one argument (the instance to initialize)')))
+
+    def __dir__(self):
+        """Default dir() implementation."""
+        try:
+            d = getattr_hook(self, '__dict__')
+        except AttributeError:
+            d = None
+        d = dict(d) if kind(d, 'dict') else {}
+        try:
+            cls = getattr_hook(self, '__class__')
+        except AttributeError:
+            cls = MISSING
+        if cls is not MISSING:
+            merge_class_dict(d, cls)
+        return list(d)
 
     def __repr__(self):
         tp = type(self)

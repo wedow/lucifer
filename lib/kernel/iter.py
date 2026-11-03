@@ -6,7 +6,8 @@ exact tuple, list and range loops never come here."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, kernel_set,
-    iter_new, iter_state, iter_set, list_append, list_splice, tuple_from,
+    iter_new, iter_state, iter_set, list_append, list_splice, tuple_from, is_callable,
+    alloc, field_get, field_set,
 )
 from _lucifer import _boot, operators
 
@@ -172,14 +173,19 @@ def tuple_of(iterable):
         list_append(items, x)
 
 
-def iter(obj, /, *args):
+def iter(obj, sentinel=MISSING, /):
     """Get an iterator from an object.
 
 In the first form, the argument must supply its own iterator, or be a sequence.
 In the second form, the callable is called until it returns the sentinel."""
-    if args:
-        error(TypeError, 'iter(callable, sentinel) arrives with the builtins')
-    return get_iter(obj)
+    if sentinel is MISSING:
+        return get_iter(obj)
+    if not is_callable(obj):
+        error(TypeError, 'iter(v, w): v must be callable')
+    it = alloc(callable_iterator, callable_iterator)
+    field_set(it, 0, obj)
+    field_set(it, 1, sentinel)
+    return it
 
 
 def next(it, default=MISSING, /):
@@ -220,6 +226,30 @@ class iterator:
             return NotImplemented
         n = operators.length(seq) - i
         return n if n > 0 else 0
+
+
+@kernel_type(static_type('callable_iterator'))
+class callable_iterator:
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        func = field_get(self, 0)
+        if func is None:
+            raise StopIteration
+        try:
+            value = func()
+        except StopIteration:
+            value = MISSING
+        else:
+            sentinel = field_get(self, 1)
+            if value is sentinel or value == sentinel:
+                value = MISSING
+        if value is MISSING:
+            field_set(self, 0, None)
+            field_set(self, 1, None)
+            raise StopIteration
+        return value
 
 
 kernel_set('get_iter', get_iter)
