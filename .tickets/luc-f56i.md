@@ -2,7 +2,7 @@
 id: luc-f56i
 status: closed
 deps: []
-links: []
+links: [luc-r6ny]
 created: 2026-11-03T02:02:34Z
 type: task
 priority: 1
