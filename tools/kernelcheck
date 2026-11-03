@@ -10,7 +10,10 @@ status must be identical. Exit status 1 when any program differs.
 Programs in RUNS run once per (flags, environment); an environment replaces
 -I -S and the inherited environment. SEEDED programs are also run unseeded, twice: the runs must differ
 after the first line, which must equal the oracle's. FLAG_ROWS are bin/lucifer
-command lines whose exit status and stderr are checked directly.
+command lines whose exit status and stderr are checked directly. SOURCE_ROWS are
+programs given as source (-c, a .py script, standard input, imports that write
+__pycache__): the oracle and bin/lucifer run each in the same directory, and the
+output, exit status and the .pyc files left behind must be identical.
 """
 import argparse
 import difflib
