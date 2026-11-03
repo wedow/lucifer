@@ -159,7 +159,10 @@ def run(args, pin):
     target = args.results / args.package
     expected = target / 'expected.tsv'
     rows = {name: ('NOTRUN', 0.0) for name in inventory(expected)} if expected.exists() else {}
-    work = args.work / args.package / args.runtime
+    if args.action == 'run' and rows:
+        # A run refused below must not leave an earlier run's outcomes in place.
+        manifest(target / (args.runtime + '.tsv'), rows)
+    work =args.work / args.package / args.runtime
     work.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     for key in ['PYTHONHOME', 'PYTHONPATH', 'PYTHON_GIL', 'PYTEST_ADDOPTS', 'PYTEST_PLUGINS']:
