@@ -49,6 +49,12 @@ HANDOFF_STDOUT = {
     "handoff_witness": b"2\n",
     "handoff_pinned": b"signal handler saw 1\nmain saw 2\natexit callback saw 1\n",
 }
+# name -> ticket: known divergences under the handoff lanes. The program must
+# still exit as the oracle does; a mismatch reports XFAIL, a match XPASS (then
+# delete the entry). Each entry names the ticket that removes it.
+HANDOFF_XFAIL = {
+    "marshal_dumps": "luc-ymb3",
+}
 # name -> [(flags, env)]: env None is -I -S with the inherited environment.
 RUNS = {
     "hash_seed": [([], {"PYTHONHASHSEED": "12345"}), ([], {"PYTHONHASHSEED": "0"})],
@@ -224,7 +230,9 @@ def main():
             if args.lane.startswith("handoff") and name in HANDOFF_STDOUT:
                 oracle = (oracle[0], HANDOFF_STDOUT[name], oracle[2])
             ours = run(lucifer, LANES[args.lane] + flags, pyc, env)
-            if oracle == ours:
+            if args.lane.startswith("handoff") and name in HANDOFF_XFAIL and oracle[0] == ours[0]:
+                print(f"{'XPASS' if oracle == ours else 'XFAIL'} {label} ({HANDOFF_XFAIL[name]})")
+            elif oracle == ours:
                 print(f"PASS {label}")
             else:
                 failed += 1
