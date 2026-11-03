@@ -16,4 +16,4 @@ Cycle collector (trial deletion over GC heaps), weakrefs and finalizers, async/c
 ## Acceptance Criteria
 
 tools/difftest run --python bin/lucifer: 164/164 PASS.
-
+- Foundations: check-kernel passes under -X lucifer_stress=gc:1 and difftest 164/164 under gc:100; tests/kernel/resurrect.py (single-run __del__ resurrection, weakref callback order vs __del__, WeakValueDictionary under gc.collect) matches the oracle (docs/FOUNDATIONS.md 2.7, 2.14).

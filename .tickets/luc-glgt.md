@@ -1,7 +1,7 @@
 ---
 id: luc-glgt
 status: open
-deps: [luc-t6y4, luc-bmfl]
+deps: [luc-t6y4, luc-bmfl, luc-8vke, luc-fd8e]
 links: []
 created: 2026-11-03T01:39:45Z
 type: epic

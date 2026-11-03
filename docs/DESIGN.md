@@ -190,7 +190,7 @@ The decision comes from data: see §10 for the startup experiment.
   `_Py_NoneStruct`, `PyExc_*`, small-int cache −5..256, …) are statically
   initialized immortal C objects in `runtime/types/static.c`. They have the oracle's
   exact symbol sizes (`nm -S`: `PyFloat_Type` 0x1b0, `_Py_NoneStruct` 0x20,
-  `_Py_TrueStruct` 0x30). The kernel fills in their dicts and slots at startup.
+  `_Py_TrueStruct` 0x30). The kernel fills in their slots at startup; their dicts live in per-interpreter state, so `tp_dict` stays NULL as in the oracle (`docs/FOUNDATIONS.md` §2.1).
 - **Hashes and table orders are bit-exact.** str/bytes use SipHash-1-3 (key zero
   under `PYTHONHASHSEED=0`, which every harness sets); int hashes mod 2^61−1;
   float hashes as `_Py_HashDouble`; tuples use xxHash. The set table replicates
@@ -369,7 +369,7 @@ sees one stable tstate for its whole native extent.
 |---|---|
 | Task (travels with it) | `interp`, `prev`/`next` (the interpreter's task list), `_status.{initialized,finalizing,cleared,finalized}`, `_whence`, `id`, `thread_id` (§5.7), `py_recursion_remaining`/`_limit`, `recursion_headroom`, `tracing`, `what_event`, `c_tracefunc`/`c_profilefunc` and their objects, `current_frame`, `datastack_chunk`/`_top`/`_limit`, `current_exception`, `exc_info`, `exc_state`, `async_exc`, `dict`, `delete_later`, `context`, `context_ver`, `coroutine_origin_tracking_depth`, `async_gen_firstiter`/`_finalizer`, `current_executor`, `dict_global_version`, `threading_local_key`/`_sentinel`, `remote_debugger_support`, `critical_section` (always empty at a migration point). Tail: `asyncio_running_loop`/`_task`, `Py_tss_t` values, pending targeted events, pin state. |
 | Carrier: tstate fields rewritten at bind, meaningful only while bound | `state` (attached/detached), `native_thread_id`, `gilstate_counter`, `_status.{bound,unbound,bound_gilstate,active}`, `holds_gil` (always 0), `eval_breaker` (mirrors the carrier's poll word) |
-| Carrier record | biased-refcount identity (`ob_tid` is this pthread's TCB, the `%fs:0` that `_Py_ThreadId()` inlines into extensions); mimalloc heaps; freelists; BRC merge queue; per-thread heap-type refcount array; QSBR record; GC allocation counters; native stack bounds and C-stack references; poll word; run queue; glibc TLS, `errno` |
+| Carrier record | biased-refcount identity (`ob_tid` is this pthread's TCB, the `%fs:0` that `_Py_ThreadId()` inlines into extensions); mimalloc heaps and BRC merge queue, both per (carrier, interpreter) (`docs/FOUNDATIONS.md` §2.1); freelists; per-thread heap-type refcount array; QSBR record; GC allocation counters; native stack bounds and C-stack references; poll word; run queue; glibc TLS, `errno` |
 
 **Objects do not belong to tasks.**
 - `ob_tid` names the carrier that allocated the object, and migration changes no
@@ -689,6 +689,8 @@ parallel.
 | P1 | `tools/bench/compare --suite awfy` | geomean time/CPython ≤ 1.189 (parity with the oracle) | P0 |
 | P2 | same | ≤ 0.594 (2× faster than the oracle); pyperformance 9/9 PASS | P1 |
 | P3 | same | ≤ 0.119 (10× faster than the oracle). The donor runs AWFY about 23× faster than CPython. | P2 |
+
+Foundation rungs (K0.1, K1.1, M0.3, M1.1a, M1.6a, L1–L3) and the shapes they carry are in `docs/FOUNDATIONS.md` §4.
 
 Later rungs (no tickets yet): oracle check 11/11; libtest full-suite percentages;
 ftcorpus serial/parallel parity; the 24 pypi suites; pyperformance against PyPy.

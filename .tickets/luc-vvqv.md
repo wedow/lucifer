@@ -1,7 +1,7 @@
 ---
 id: luc-vvqv
 status: open
-deps: [luc-dfbu]
+deps: [luc-dfbu, luc-r6ny]
 links: []
 created: 2026-11-03T01:39:45Z
 type: feature
@@ -21,4 +21,9 @@ make check-kernel: every tests/kernel program (at least 30, covering the familie
 - Every tests/kernel program also matches the oracle under -X lucifer_handoff, which hands the task between two carriers at every safepoint through the production park/run-queue/bind path (DESIGN 5.8).
 - tests/kernel/handoff_witness.py prints 2 distinct _thread.get_native_id() values under -X lucifer_handoff and 1 without.
 - make check rejects any blocking syscall in runtime/ outside the lu_syscall_begin/end bracket.
-
+- Foundations (docs/FOUNDATIONS.md 2): tests/kernel/frames.py (_getframe(1).f_locals write-through, f_lineno/f_lasti, f_back skipping kernel builtins, gi_frame, frame.clear(), tb_frame/tb_lineno) matches the oracle, plain and under -X lucifer_handoff.
+- tests/kernel/invalidate.py (warm loop, then mutate a class attribute, a base attribute, __bases__, a global, builtins.len, f.__code__, obj.__class__) and tests/kernel/exc_kernel.py (raises through sorted/dict.__getitem__/map with chaining, sys.exception() in generators, except*) match the oracle.
+- tests/kernel/gc_at_poll.py: gc.callbacks fire only at calls/back-edges, in the oracle's order (one poll handler; GC runs only from the GC poll bit).
+- tests/kernel/hash_seed.py matches the oracle under PYTHONHASHSEED=12345 and =0; unseeded runs differ and sys.flags.hash_randomization == 1.
+- check-kernel passes under -X lucifer_handoff=1 through =8 (seeded park-or-continue); -X lucifer_stress=bogus exits 2 with a message.
+- make check-capi: a tests/capi program reads PyLong_Type.tp_dict as NULL after kernel init (the dict lives in interpreter state, as in the oracle) while int.__dict__ works (docs/FOUNDATIONS.md 2.1).
