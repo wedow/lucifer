@@ -13,7 +13,8 @@ from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, alloc, kernel_set,
     kernel_get, ns_get, ns_set, ns_items, instance_dict, is_subtype, exc_set_word, exc_word,
     handled_exception, set_handled_exception, is_exception, is_exception_class, list_append,
-    caller_traceback, is_callable, int_text,
+    caller_traceback, is_callable, int_text, int_format, str_repeat, str_len, str_item, str_ord,
+    bytes_ord,
 )
 from _lucifer import _boot
 import sys
@@ -547,27 +548,22 @@ class UnicodeTranslateError:
 
 
 def _length(seq):
+    if kind(seq, 'str') or kind(seq, 'bytes'):
+        return size(seq)
     n = 0
     for x in seq:
         n = n + 1
     return n
 
 
-_HEX = '0123456789abcdef'
-
-
 def _hex(value, digits):
-    out = []
-    for i in range(digits):
-        out = [_nth(_HEX, value % 16 + 1), *out]
-        value = value // 16
-    return str_join('', (*out,))
+    text = int_format(value, 16, False)
+    return str_join('', (str_repeat('0', digits - str_len(text)), text))
 
 
 def _escape(obj, index):
     """The character of a str at index, as \\xNN, \\uNNNN or \\UNNNNNNNN."""
-    ch = _nth(obj, index + 1)
-    code = ord(ch)
+    code = str_ord(obj, index)
     if code <= 0xff:
         return str_join('', ('\\x', _hex(code, 2)))
     if code <= 0xffff:
@@ -589,16 +585,12 @@ def _unicode_str(self, verb, obj, decoding):
             what = str_join('', ("character '", _escape(obj, start), "'"))
         return str_join('', ("'", encoding, "' codec can't ", verb, ' ', what,
                              ' in position ', _text(start), ': ', reason))
-    return str_join('', ("'", encoding, "' codec can't ", verb, ' characters in position ',
-                         _text(start), '-', _text(end - 1), ': ', reason))
+    return str_join('', ("'", encoding, "' codec can't ", verb, ' bytes' if decoding else ' characters',
+                         ' in position ', _text(start), '-', _text(end - 1), ': ', reason))
 
 
 def _nth_byte(data, index):
-    i = 0
-    for b in data:
-        if i == index:
-            return b
-        i = i + 1
+    return bytes_ord(data, index)
 
 
 # Exception groups

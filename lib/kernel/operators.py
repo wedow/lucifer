@@ -6,7 +6,7 @@ functions' frames, so reflection never recurses in C (DESIGN 5.2)."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_tp_name, is_subtype, kernel_set, int_add,
-    truth_exact,
+    truth_exact, list_append,
 )
 from _lucifer import _boot
 
@@ -43,6 +43,23 @@ _COMPARE = (
 )
 
 
+# Types whose __add__, __mul__ and __rmul__ are sequence slots (sq_concat,
+# sq_repeat): they run after the number slots of both operands have declined,
+# so a user __radd__ or __rmul__ wins against a str on the left.
+_SEQUENCES = []
+
+
+def add_sequence(t):
+    list_append(_SEQUENCES, t)
+
+
+def _is_sequence(t):
+    for s in _SEQUENCES:
+        if s is t:
+            return True
+    return False
+
+
 def _entry(table, i):
     for e in table:
         if i == 0:
@@ -77,7 +94,9 @@ def binary_op(a, b, op):
         sym = '** or pow()'
     tb = type(b)
     fb = MISSING
-    if tb is not ta:
+    seq_a = (op == 0 or op == 5 or op == 13 or op == 18) and _is_sequence(ta)
+    seq_b = (op == 5 or op == 18) and _is_sequence(tb)
+    if tb is not ta and not seq_b:
         fb = type_lookup(tb, reverse)
     # A subclass's own reflected method goes first (method_is_overloaded).
     if fb is not MISSING and is_subtype(tb, ta) and fb is not type_lookup(ta, reverse):
@@ -85,7 +104,7 @@ def binary_op(a, b, op):
         if r is not NotImplemented:
             return r
         fb = MISSING
-    f = type_lookup(ta, forward)
+    f = MISSING if seq_a else type_lookup(ta, forward)
     if f is not MISSING:
         r = call_special(f, a, b)
         if r is not NotImplemented:
@@ -94,6 +113,10 @@ def binary_op(a, b, op):
         r = call_special(fb, b, a)
         if r is not NotImplemented:
             return r
+    if seq_a:
+        return call_special(type_lookup(ta, forward), a, b)
+    if seq_b:
+        return call_special(type_lookup(tb, reverse), b, a)
     _unsupported(sym, a, b)
 
 

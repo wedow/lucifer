@@ -133,7 +133,11 @@ struct lu_static_type_state {
     X(do_raise)                 /* RAISE_VARARGS: do_raise(exc, cause or MISSING) */ \
     X(load_special)             /* LOAD_SPECIAL: load_special(owner, which) */ \
     X(exc_group_match)          /* CHECK_EG_MATCH: (rest, match) of an exception and a type */ \
-    X(prep_reraise_star)        /* CALL_INTRINSIC_2 PREP_RERAISE_STAR */
+    X(prep_reraise_star)        /* CALL_INTRINSIC_2 PREP_RERAISE_STAR */ \
+    X(str)                      /* PyObject_Str, for CONVERT_VALUE 1 */ \
+    X(repr)                     /* PyObject_Repr, for CONVERT_VALUE 2 */ \
+    X(ascii)                    /* PyObject_ASCII, for CONVERT_VALUE 3 */ \
+    X(format)                   /* PyObject_Format(value, spec): FORMAT_SIMPLE, FORMAT_WITH_SPEC */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
     LU_KERNEL_FUNCTIONS(LU_KERNEL_ID)
