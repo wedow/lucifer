@@ -55,8 +55,6 @@ def _count(self, key):
     ndim = mv_attr(self, 'ndim')
     if ndim == 0:
         error(TypeError, 'invalid indexing of 0-dim memory')
-    if ndim > 1:
-        error(NotImplementedError, 'multi-dimensional slicing is not implemented')
     return slice_bounds(key, mv_len(self))
 
 
@@ -109,6 +107,8 @@ class memoryview:
 
     def __delitem__(self, key):
         mv_attr(self, 'ndim')
+        if mv_attr(self, 'readonly'):
+            error(TypeError, 'cannot modify read-only memory')
         error(TypeError, 'cannot delete memory')
 
     def __iter__(self):

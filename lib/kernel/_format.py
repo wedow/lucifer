@@ -774,7 +774,8 @@ def _bytes_arg(ty, v, flags, width, precision):
     if ty == 'c':
         if b_check(v):
             if b_len(v) != 1:
-                error(TypeError, '%c requires an integer in range(256) or a single byte')
+                error(TypeError, _cat('%c requires an integer in range(256) or a single byte, not a ',
+                                      _name(v), ' object of length ', int_format(b_len(v), 10, False)))
             return _justify(str_decode(b_bytes(v), 'latin-1', 'strict'), flags, width)
         if not kind(v, 'int') and type_lookup(type(v), '__index__') is MISSING:
             error(TypeError, _cat('%c requires an integer in range(256) or a single byte, not ', _name(v)))

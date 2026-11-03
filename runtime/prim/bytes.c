@@ -529,9 +529,18 @@ PRIM(b_bytes, 1)
     if (PyBytes_CheckExact(args[0])) {
         return Py_NewRef(args[0]);
     }
-    BV(v, 0);
-    PyObject *r = mk(v.p, v.n);
-    lu_bv_put(&v);
+    if (PyBytes_Check(args[0])) {
+        return mk(PyBytes_AS_STRING(args[0]), PyBytes_GET_SIZE(args[0]));
+    }
+    Py_buffer view;
+    if (PyObject_GetBuffer(args[0], &view, PyBUF_FULL_RO) < 0) {
+        return NULL;
+    }
+    PyObject *r = PyBytes_FromStringAndSize(NULL, view.len);
+    if (r != NULL && view.len && PyBuffer_ToContiguous(PyBytes_AS_STRING(r), &view, view.len, 'C') < 0) {
+        Py_CLEAR(r);
+    }
+    PyBuffer_Release(&view);
     return r;
 }
 
@@ -1454,6 +1463,27 @@ prim_b_iter(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return (PyObject *)it;
 }
 
+/* b_next(it): the next byte, or MISSING; b_hint(it): how many are left. */
+static PyObject *
+prim_b_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    PyObject *r = biter_next(args[0]);
+    return r != NULL ? r : PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
+}
+
+static PyObject *
+prim_b_hint(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    biterobject *it = (biterobject *)args[0];
+    if (it->seq == NULL) {
+        return PyLong_FromLong(0);
+    }
+    Py_ssize_t n = PyBytes_Check(it->seq) ? PyBytes_GET_SIZE(it->seq) : PyByteArray_GET_SIZE(it->seq);
+    return PyLong_FromLongLong(n > it->index ? n - it->index : 0);
+}
+
 /* b_sizeof(x) */
 static PyObject *
 prim_b_sizeof(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -1692,6 +1722,6 @@ PyMethodDef lu_prim_bytes_methods[] = {
     FAST(b_slice_step), FAST(b_cmp), FAST(b_hash), FAST(b_concat), FAST(b_repeat), FAST(b_find),
     FAST(b_count), FAST(b_match), FAST(b_replace), FAST(b_join), FAST(b_split),
     FAST(b_splitlines), FAST(b_strip), FAST(b_case), FAST(b_is), FAST(b_expandtabs),
-    FAST(b_translate), FAST(b_hex), FAST(b_fromhex), FAST(b_iter), FAST(b_sizeof),
+    FAST(b_translate), FAST(b_hex), FAST(b_fromhex), FAST(b_iter), FAST(b_next), FAST(b_hint), FAST(b_sizeof),
     { NULL, NULL, 0, NULL },
 };

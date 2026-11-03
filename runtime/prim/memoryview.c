@@ -656,11 +656,7 @@ prim_mv_slice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     SELF(mv);
     IDX(1, start); IDX(2, step); IDX(3, count);
     Py_buffer *v = &mv->view;
-    if (v->ndim != 1) {
-        PyErr_SetString(PyExc_NotImplementedError, "multi-dimensional slicing is not implemented");
-        return NULL;
-    }
-    PyMemoryViewObject *r = add_view(MB(mv), v, 1);
+    PyMemoryViewObject *r = add_view(MB(mv), v, v->ndim);
     if (r == NULL) {
         return NULL;
     }

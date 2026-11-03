@@ -10,7 +10,7 @@ from _lucifer import (
     int_format, text_repr, str_replace, new_check, str_encode, instance_dict,
     b_len, b_check, b_bytes, b_from_ints, b_zeros, b_subtype, b_item, b_slice, b_slice_step,
     b_cmp, b_hash, b_concat, b_repeat, b_find, b_count, b_match, b_replace, b_join, b_split,
-    b_splitlines, b_strip, b_case, b_is, b_expandtabs, b_translate, b_hex, b_fromhex, b_iter,
+    b_splitlines, b_strip, b_case, b_is, b_expandtabs, b_translate, b_hex, b_fromhex, b_iter, b_next, b_hint,
     b_sizeof, ba_new, ba_wrap, ba_splice, ba_set_step, ba_del_step, ba_set_item, ba_pop,
     ba_remove, ba_reverse, ba_resize, ba_irepeat, ba_alloc, list_append,
 )
@@ -51,11 +51,10 @@ def _plural(n):
 def _args(name, args, lo, hi):
     """_PyArg_CheckPositional: args padded with MISSING to hi entries."""
     n = size(args)
-    if n < lo:
-        error(TypeError, _cat(name, ' expected at least ', _decimal(lo), ' ', _plural(lo),
-                              ', got ', _decimal(n)))
-    if n > hi:
-        error(TypeError, _cat(name, ' expected at most ', _decimal(hi), ' ', _plural(hi),
+    if n < lo or n > hi:
+        qual = '' if lo == hi else 'at least ' if n < lo else 'at most '
+        want = lo if n < lo else hi
+        error(TypeError, _cat(name, ' expected ', qual, _decimal(want), ' ', _plural(want),
                               ', got ', _decimal(n)))
     while n < hi:
         args = (*args, MISSING)
@@ -63,7 +62,34 @@ def _args(name, args, lo, hi):
     return args
 
 
-def _parse(name, args, kwargs, names, lo):
+def _tname(self):
+    """The type named in a method's messages: the class of self, or self for a classmethod."""
+    return type_tp_name(self if kind(self, 'type') else _bytearray if kind(self, 'bytearray') else _bytes)
+
+
+def _nokw(self, name, kwargs):
+    if kwargs:
+        error(TypeError, _cat(_tname(self), '.', name, '() takes no keyword arguments'))
+
+
+def _a(self, name, args, kwargs, lo, hi):
+    """A fastcall method's positional arguments, padded."""
+    _nokw(self, name, kwargs)
+    return _args(name, args, lo, hi)
+
+
+def _o(self, name, args, kwargs):
+    """The one argument of a METH_O method."""
+    _nokw(self, name, kwargs)
+    n = size(args)
+    if n != 1:
+        error(TypeError, _cat(_tname(self), '.', name, '() takes exactly one argument (',
+                              _decimal(n), ' given)'))
+    for x in args:
+        return x
+
+
+def _parse(name, args, kwargs, names, lo, posonly=0):
     """Positional or keyword arguments (clinic): the values in order of
     names, MISSING where absent."""
     n = size(args)
@@ -81,14 +107,15 @@ def _parse(name, args, kwargs, names, lo):
             if nm == key:
                 found = True
                 if values[i] is not MISSING:
-                    error(TypeError, _cat(name, "() got multiple values for argument '", key, "'"))
+                    error(TypeError, _cat('argument for ', name, "() given by name ('", key,
+                                          "') and position (", _decimal(i + 1), ')'))
                 values[i] = value
             i += 1
         if not found:
             error(TypeError, _cat(name, "() got an unexpected keyword argument '", key, "'"))
     if lo > 0 and values[lo - 1] is MISSING:
-        error(TypeError, _cat(name, '() missing required argument \'', names[lo - 1], "' (pos ",
-                              _decimal(lo), ')'))
+        error(TypeError, _cat(name, '() takes at least ', _decimal(lo), ' positional ', _plural(lo),
+                              ' (', _decimal(n), ' given)'))
     return values
 
 
@@ -214,32 +241,39 @@ def size_of_str(s):
 
 # shared methods ------------------------------------------------------------
 
-def _m_find(self, *args):
+def _m_find(self, *args, **kwargs):
+    _nokw(self, 'find', kwargs)
     return _find(self, args, 'find', False)
 
 
-def _m_rfind(self, *args):
+def _m_rfind(self, *args, **kwargs):
+    _nokw(self, 'rfind', kwargs)
     return _find(self, args, 'rfind', True)
 
 
-def _m_index(self, *args):
+def _m_index(self, *args, **kwargs):
+    _nokw(self, 'index', kwargs)
     return _find_index(self, args, 'index', False)
 
 
-def _m_rindex(self, *args):
+def _m_rindex(self, *args, **kwargs):
+    _nokw(self, 'rindex', kwargs)
     return _find_index(self, args, 'rindex', True)
 
 
-def _m_count(self, *args):
+def _m_count(self, *args, **kwargs):
+    _nokw(self, 'count', kwargs)
     sub, start, end = _args('count', args, 1, 3)
     return b_count(self, _sub(sub), _bound(start, 0), _bound(end, _SSIZE_MAX))
 
 
-def _m_startswith(self, *args):
+def _m_startswith(self, *args, **kwargs):
+    _nokw(self, 'startswith', kwargs)
     return _tailmatch(self, args, 'startswith', False)
 
 
-def _m_endswith(self, *args):
+def _m_endswith(self, *args, **kwargs):
+    _nokw(self, 'endswith', kwargs)
     return _tailmatch(self, args, 'endswith', True)
 
 
@@ -274,15 +308,16 @@ def _partition(self, sep, last):
             _out(self, b_slice(self, at + b_len(sep), n)))
 
 
-def _m_partition(self, sep, /):
-    return _partition(self, sep, False)
+def _m_partition(self, *args, **kwargs):
+    return _partition(self, _o(self, 'partition', args, kwargs), False)
 
 
-def _m_rpartition(self, sep, /):
-    return _partition(self, sep, True)
+def _m_rpartition(self, *args, **kwargs):
+    return _partition(self, _o(self, 'rpartition', args, kwargs), True)
 
 
-def _m_join(self, iterable, /):
+def _m_join(self, *args, **kwargs):
+    iterable = _o(self, 'join', args, kwargs)
     if kind(iterable, 'tuple'):
         items = iterable
     elif kind(iterable, 'list'):
@@ -296,20 +331,7 @@ def _m_join(self, iterable, /):
 
 
 def _m_replace(self, *args, **kwargs):
-    n = size(args)
-    count = MISSING
-    for key, value in ns_items(kwargs):
-        if key != 'count':
-            error(TypeError, _cat("replace() got an unexpected keyword argument '", key, "'"))
-        count = value
-    if n < 2:
-        error(TypeError, _cat('replace expected at least 2 arguments, got ', _decimal(n)))
-    if n > 3 or (n == 3 and count is not MISSING):
-        error(TypeError, _cat('replace expected at most 3 arguments, got ', _decimal(n)))
-    if n == 3:
-        old, new, count = args
-    else:
-        old, new = args
+    old, new, count = _a(self, 'replace', args, kwargs, 2, 3)
     return _out(self, b_replace(self, old, new, -1 if count is MISSING else as_ssize(count, None)))
 
 
@@ -318,26 +340,31 @@ def _chars(args, name):
     return None if chars is MISSING else chars
 
 
-def _m_strip(self, *args):
+def _m_strip(self, *args, **kwargs):
+    _nokw(self, 'strip', kwargs)
     return _out(self, b_strip(self, _chars(args, 'strip'), 3))
 
 
-def _m_lstrip(self, *args):
+def _m_lstrip(self, *args, **kwargs):
+    _nokw(self, 'lstrip', kwargs)
     return _out(self, b_strip(self, _chars(args, 'lstrip'), 1))
 
 
-def _m_rstrip(self, *args):
+def _m_rstrip(self, *args, **kwargs):
+    _nokw(self, 'rstrip', kwargs)
     return _out(self, b_strip(self, _chars(args, 'rstrip'), 2))
 
 
-def _m_removeprefix(self, prefix, /):
+def _m_removeprefix(self, *args, **kwargs):
+    prefix = _o(self, 'removeprefix', args, kwargs)
     n = b_len(prefix) if b_check(prefix) else b_len(b_bytes(prefix))
     if n and b_match(self, prefix, 0, _SSIZE_MAX, False):
         return _out(self, b_slice(self, n, b_len(self)))
     return _out(self, b_bytes(self))
 
 
-def _m_removesuffix(self, suffix, /):
+def _m_removesuffix(self, *args, **kwargs):
+    suffix = _o(self, 'removesuffix', args, kwargs)
     n = b_len(suffix) if b_check(suffix) else b_len(b_bytes(suffix))
     if n and b_match(self, suffix, 0, _SSIZE_MAX, True):
         return _out(self, b_slice(self, 0, b_len(self) - n))
@@ -358,8 +385,8 @@ def _is(mode, name):
     return method
 
 
-def _m_center(self, *args):
-    width, fill = _args('center', args, 1, 2)
+def _m_center(self, *args, **kwargs):
+    width, fill = _a(self, 'center', args, kwargs, 1, 2)
     width = as_ssize(width, None)
     fill = _fill_arg('center', fill)
     n = b_len(self)
@@ -370,23 +397,24 @@ def _m_center(self, *args):
     return _out(self, b_concat(b_concat(_pad(fill, left), self), _pad(fill, marg - left)))
 
 
-def _m_ljust(self, *args):
-    width, fill = _args('ljust', args, 1, 2)
+def _m_ljust(self, *args, **kwargs):
+    width, fill = _a(self, 'ljust', args, kwargs, 1, 2)
     width = as_ssize(width, None)
     fill = _fill_arg('ljust', fill)
     n = b_len(self)
     return _out(self, b_concat(self, _pad(fill, width - n)))
 
 
-def _m_rjust(self, *args):
-    width, fill = _args('rjust', args, 1, 2)
+def _m_rjust(self, *args, **kwargs):
+    width, fill = _a(self, 'rjust', args, kwargs, 1, 2)
     width = as_ssize(width, None)
     fill = _fill_arg('rjust', fill)
     n = b_len(self)
     return _out(self, b_concat(_pad(fill, width - n), self))
 
 
-def _m_zfill(self, width, /):
+def _m_zfill(self, *args, **kwargs):
+    width = _o(self, 'zfill', args, kwargs)
     width = as_ssize(width, None)
     n = b_len(self)
     if width <= n:
@@ -402,7 +430,10 @@ def _m_expandtabs(self, *args, **kwargs):
     return _out(self, b_expandtabs(self, 8 if tabsize is MISSING else as_ssize(tabsize, None)))
 
 
-def _m_translate(self, table, /, delete=b''):
+def _m_translate(self, *args, **kwargs):
+    table, delete = _parse('translate', args, kwargs, ('table', 'delete'), 1, 1)
+    if delete is MISSING:
+        delete = b''
     if table is not None:
         if not b_check(table):
             b_bytes(table)
@@ -411,7 +442,8 @@ def _m_translate(self, table, /, delete=b''):
     return _out(self, b_translate(self, table, delete))
 
 
-def _m_maketrans(cls, frm, to, /):
+def _m_maketrans(cls, *args, **kwargs):
+    frm, to = _a(cls, 'maketrans', args, kwargs, 2, 2)
     if b_len(frm) != b_len(to):
         error(ValueError, 'maketrans arguments must have same length')
     f = b_bytes(frm)
@@ -445,7 +477,8 @@ def _m_hex(self, *args, **kwargs):
     return _hex(self, args, kwargs)
 
 
-def _m_fromhex(cls, string, /):
+def _m_fromhex(cls, *args, **kwargs):
+    string = _o(cls, 'fromhex', args, kwargs)
     r = b_fromhex(string)
     if cls is _bytearray:
         return ba_wrap(cls, r)
@@ -623,6 +656,13 @@ def _bytes_of(args, kwargs):
     return _from_object(x, 'bytes')
 
 
+def _all_ints(x):
+    for v in x:
+        if type(v) is not int:
+            return False
+    return True
+
+
 def _bytearray_fill(self, args, kwargs):
     """bytearray_init: replaces self's contents by the source."""
     x, encoding, errors = _parse('bytearray', args, kwargs, ('source', 'encoding', 'errors'), 0)
@@ -649,30 +689,42 @@ def _bytearray_fill(self, args, kwargs):
         data = b_zeros(count)
     elif b_check(x):
         data = b_bytes(x)
+    elif (type(x) is list or type(x) is tuple) and _all_ints(x):
+        data = b_from_ints([*[_byte(v) for v in x]])
     else:
         if (type_lookup(type(x), '__iter__') is MISSING
                 and type_lookup(type(x), '__getitem__') is MISSING):
             error(TypeError, _cat("cannot convert '", _name(x), "' object to bytearray"))
-        _extend(self, x)
-        return
+        it = _iter.get_iter(x)
+        while True:
+            v = _iter.next_item(it)
+            if v is MISSING:
+                return
+            ba_splice(self, _SSIZE_MAX, _SSIZE_MAX, b_from_ints((_byte(v),)))
     ba_splice(self, 0, n, data)
 
 
 def _extend(self, iterable):
+    """bytearray.extend: a buffer is spliced in; anything else is read in full first."""
     if b_check(iterable):
         ba_splice(self, _SSIZE_MAX, _SSIZE_MAX, iterable)
         return
-    if kind(iterable, 'str'):
-        error(TypeError, _cat("expected iterable of integers; got: '", _name(iterable), "'"))
     if (type_lookup(type(iterable), '__iter__') is MISSING
             and type_lookup(type(iterable), '__getitem__') is MISSING):
         error(TypeError, _cat("can't extend bytearray with ", _name(iterable)))
+    items = []
     it = _iter.get_iter(iterable)
     while True:
         v = _iter.next_item(it)
         if v is MISSING:
-            return
-        ba_splice(self, _SSIZE_MAX, _SSIZE_MAX, b_from_ints((_byte(v),)))
+            break
+        try:
+            list_append(items, _byte(v))
+        except TypeError:
+            if kind(iterable, 'str'):
+                error(TypeError, "expected iterable of integers; got: 'str'")
+            raise
+    ba_splice(self, _SSIZE_MAX, _SSIZE_MAX, b_from_ints(items))
 
 
 @kernel_type(_bytes)
@@ -953,24 +1005,28 @@ Construct a mutable bytearray object from:
     def __alloc__(self):
         return ba_alloc(self)
 
-    def append(self, item, /):
+    def append(self, *args, **kwargs):
         """Append a single item to the end of the bytearray."""
+        item = _o(self, 'append', args, kwargs)
         ba_splice(self, _SSIZE_MAX, _SSIZE_MAX, b_from_ints((_byte(item),)))
 
-    def clear(self):
+    def clear(self, *args):
+        _noargs(self, 'clear', args)
         """Remove all items from the bytearray."""
         ba_splice(self, 0, _SSIZE_MAX, b'')
 
-    def copy(self):
+    def copy(self, *args):
+        _noargs(self, 'copy', args)
         """Return a copy of B."""
         return ba_wrap(bytearray, self)
 
-    def extend(self, iterable_of_ints, /):
+    def extend(self, *args, **kwargs):
         """Append all the items from the iterator or sequence to the end of the bytearray."""
-        _extend(self, iterable_of_ints)
+        _extend(self, _o(self, 'extend', args, kwargs))
 
-    def insert(self, index, item, /):
+    def insert(self, *args, **kwargs):
         """Insert a single item into the bytearray before the given index."""
+        index, item = _a(self, 'insert', args, kwargs, 2, 2)
         i = as_ssize(index, None)
         v = _byte(item)
         n = b_len(self)
@@ -982,22 +1038,54 @@ Construct a mutable bytearray object from:
             i = n
         ba_splice(self, i, i, b_from_ints((v,)))
 
-    def pop(self, index=-1, /):
+    def pop(self, *args, **kwargs):
         """Remove and return a single item from B."""
-        return ba_pop(self, as_ssize(index, None))
+        index, = _a(self, 'pop', args, kwargs, 0, 1)
+        return ba_pop(self, -1 if index is MISSING else as_ssize(index, None))
 
-    def remove(self, value, /):
+    def remove(self, *args, **kwargs):
         """Remove the first occurrence of a value in the bytearray."""
-        ba_remove(self, _byte(value))
+        ba_remove(self, _byte(_o(self, 'remove', args, kwargs)))
 
-    def reverse(self):
+    def reverse(self, *args):
+        _noargs(self, 'reverse', args)
         """Reverse the order of the values in B in place."""
         ba_reverse(self)
 
-    def resize(self, size, /):
+    def resize(self, *args, **kwargs):
         """Resize the internal buffer of bytearray to len."""
-        ba_resize(self, as_ssize(size, None))
+        ba_resize(self, as_ssize(_o(self, 'resize', args, kwargs), OverflowError))
 
 
 operators.add_sequence(bytes)
 operators.add_sequence(bytearray)
+
+
+@kernel_type(static_type('bytes_iterator'))
+class bytes_iterator:
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        v = b_next(self)
+        if v is MISSING:
+            raise StopIteration
+        return v
+
+    def __length_hint__(self):
+        return b_hint(self)
+
+
+@kernel_type(static_type('bytearray_iterator'))
+class bytearray_iterator:
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        v = b_next(self)
+        if v is MISSING:
+            raise StopIteration
+        return v
+
+    def __length_hint__(self):
+        return b_hint(self)
