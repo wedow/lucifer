@@ -4,6 +4,7 @@
    a frame is runtime/interp/call.c. */
 
 #include "interp/frame.h"
+#include "interp/instrument.h"
 #include "interp/code.h"
 #include "interp/gen.h"
 #include "prim/prim.h"
@@ -303,14 +304,9 @@ frame_set_lineno(PyObject *op, PyObject *value, void *closure)
 {
     if (value == NULL) {
         lu_err_format(PyExc_AttributeError, "cannot delete attribute");
+        return -1;
     }
-    else if (!PyLong_CheckExact(value)) {
-        lu_err_format(PyExc_ValueError, "lineno must be an integer");
-    }
-    else {
-        lu_err_format(PyExc_ValueError, "f_lineno can only be set by a trace function");
-    }
-    return -1;
+    return lu_frame_set_lineno(FO(op)->f_frame, value);
 }
 
 static PyObject *
@@ -363,6 +359,9 @@ frame_set_trace(PyObject *op, PyObject *value, void *closure)
     PyObject *old = FO(op)->f_trace;
     FO(op)->f_trace = value == NULL || value == Py_None ? NULL : Py_NewRef(value);
     Py_XDECREF(old);
+    if (FO(op)->f_trace != NULL && FO(op)->f_trace_opcodes) {
+        return lu_set_opcode_trace(op, 1);
+    }
     return 0;
 }
 
@@ -381,7 +380,10 @@ frame_set_trace_opcodes(PyObject *op, PyObject *value, void *closure)
         return -1;
     }
     FO(op)->f_trace_opcodes = value == Py_True;
-    return 0;
+    if (value == Py_True) {
+        return FO(op)->f_trace != NULL ? lu_set_opcode_trace(op, 1) : 0;
+    }
+    return lu_set_opcode_trace(op, 0);
 }
 
 static PyObject *

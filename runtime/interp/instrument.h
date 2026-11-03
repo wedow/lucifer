@@ -50,6 +50,15 @@ typedef struct _PyCoMonitoringData {
 
 #define LU_CO_NO_MONITORING_EVENTS 0x2000000    /* CO_NO_MONITORING_EVENTS */
 
+/* The location table walked in address order (PyCodeAddressRange): each
+   entry covers [start, end) bytes of code and has a line, or none. */
+struct lu_addr_range {
+    const uint8_t *p, *limit;
+    int start, end, line, no_line;
+};
+void lu_range_init(PyCodeObject *co, struct lu_addr_range *r);
+int lu_range_advance(struct lu_addr_range *r);       /* 0 at the end of the table */
+
 /* Fills the opcode tables, once. */
 void lu_instrument_init(void);
 
@@ -64,6 +73,9 @@ int lu_line_original_opcode(PyCodeObject *code, lu_codeunit *at);
 int lu_instrumented_opcode_at(PyCodeObject *code, lu_codeunit *at);
 /* An opcode with specialization removed. */
 int lu_opcode_deopt(int opcode);
+
+/* f_lineno = value, from a trace function (runtime/interp/frame_lineno.c). */
+int lu_frame_set_lineno(struct lu_frame *f, PyObject *value);
 
 /* Brings `code` to the interpreter's monitoring version (RESUME). */
 int lu_instrument(PyCodeObject *code, PyInterpreterState *interp);
@@ -113,6 +125,8 @@ lu_no_tools_for_global_event(PyThreadState *ts, int event)
 PyObject *lu_monitoring_module_new(void);
 /* sys.setprofile, sys.settrace and the C-API (runtime/interp/legacy_tracing.c). */
 extern PyMethodDef lu_sys_tracing_methods[];
+/* Instruction events for the code of a frame object that traces opcodes, or none. */
+int lu_set_opcode_trace(PyObject *frame, int enable);
 
 /* The line of code unit `index`, from the line table instrumentation built. */
 int lu_instrumentation_line(PyCodeObject *code, int index);

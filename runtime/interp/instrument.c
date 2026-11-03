@@ -244,10 +244,6 @@ set_line_delta(lu_line_data *line_data, int index, int line_delta)
 }
 
 /* The location table, walked once in address order (PyCodeAddressRange). */
-struct addr_range {
-    const uint8_t *p, *limit;
-    int start, end, line, no_line;
-};
 
 static int
 read_svarint_line(const uint8_t **p)
@@ -262,8 +258,8 @@ read_svarint_line(const uint8_t **p)
     return val & 1 ? -(int)(val >> 1) : (int)(val >> 1);
 }
 
-static void
-range_init(PyCodeObject *co, struct addr_range *r)
+void
+lu_range_init(PyCodeObject *co, struct lu_addr_range *r)
 {
     r->p = (const uint8_t *)PyBytes_AS_STRING(co->co_linetable);
     r->limit = r->p + PyBytes_GET_SIZE(co->co_linetable);
@@ -272,8 +268,8 @@ range_init(PyCodeObject *co, struct addr_range *r)
 }
 
 /* Moves to the next entry; 0 at the end of the table. */
-static int
-range_advance(struct addr_range *r)
+int
+lu_range_advance(struct lu_addr_range *r)
 {
     if (r->p >= r->limit) {
         return 0;
@@ -299,10 +295,10 @@ range_advance(struct addr_range *r)
 /* The line of the instruction at byte offset `addr`, ascending calls only
    (_PyCode_CheckLineNumber). */
 static int
-range_line(int addr, struct addr_range *r)
+range_line(int addr, struct lu_addr_range *r)
 {
     while (addr >= r->end) {
-        if (!range_advance(r)) {
+        if (!lu_range_advance(r)) {
             return -1;
         }
     }
@@ -958,8 +954,8 @@ initialize_lines(lu_line_data *line_data, PyCodeObject *code, int bytes_per_entr
 {
     line_data->bytes_per_entry = bytes_per_entry;
     int code_len = (int)Py_SIZE(code);
-    struct addr_range range;
-    range_init(code, &range);
+    struct lu_addr_range range;
+    lu_range_init(code, &range);
     int current_line = -1;
     for (int i = 0; i < code_len; ) {
         int opcode = lu_base_opcode(code, i);
@@ -1098,8 +1094,8 @@ update_instrumentation_data(PyCodeObject *code, PyInterpreterState *interp)
     }
     if (all_events.tools[PY_MONITORING_EVENT_LINE]) {
         if (data->lines == NULL) {
-            struct addr_range range;
-            range_init(code, &range);
+            struct lu_addr_range range;
+            lu_range_init(code, &range);
             int max_line = code->co_firstlineno + 1;
             for (int i = code->_co_firsttraceable; i < code_len; ) {
                 int line = range_line(i * (int)sizeof(lu_codeunit), &range);

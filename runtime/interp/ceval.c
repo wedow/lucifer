@@ -645,6 +645,7 @@ instrumented_opcode:
                 goto error; \
             } \
             next_instr = to_; \
+            sp = frame->stackpointer; \
         } \
     } while (0)
 
@@ -685,6 +686,7 @@ op_INSTRUMENTED_RESUME: {
     ERROR_IF(lu_fire(ts, oparg > 0, frame, this_instr) < 0);
     if (frame->instr != next_instr) {
         next_instr = frame->instr;      /* the tool moved the frame */
+        sp = frame->stackpointer;
         DISPATCH();
     }
     if ((oparg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM) {
@@ -707,6 +709,7 @@ op_INSTRUMENTED_LINE: {
         }
         if (frame->instr != next_instr) {
             next_instr = frame->instr;      /* the tool moved the frame */
+            sp = frame->stackpointer;
             DISPATCH();
         }
     }
@@ -1154,6 +1157,7 @@ op_INSTRUMENTED_YIELD_VALUE: {
     ERROR_IF(lu_fire_arg(ts, PY_MONITORING_EVENT_PY_YIELD, frame, this_instr, TOP()) < 0);
     if (frame->instr != next_instr) {
         next_instr = frame->instr;      /* the tool moved the frame */
+        sp = frame->stackpointer;
         DISPATCH();
     }
 }
@@ -2538,7 +2542,7 @@ op_UNPACK_SEQUENCE: {
     }
     SAVE_FRAME();
     kargs[0] = seq;
-    kargs[1] = lu_small_int(oparg);
+    kargs[1] = PyLong_FromLong(oparg);      /* a long target list outgrows the small ints */
     nk = 2;
     kid = LU_K_unpack;
     kret = LU_RETURN_UNPACK;

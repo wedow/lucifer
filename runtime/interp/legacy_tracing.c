@@ -93,8 +93,8 @@ set_opcode_trace_world_stopped(PyCodeObject *code, int enable)
 }
 
 /* f_trace_opcodes: instruction events for this frame's code. */
-static int
-set_opcode_trace(PyObject *frame, int enable)
+int
+lu_set_opcode_trace(PyObject *frame, int enable)
 {
     PyCodeObject *code = lu_frame_code((PyFrameObject *)frame);
     PyInterpreterState *interp = PyInterpreterState_Get();
@@ -116,7 +116,7 @@ call_trace_func(PyObject *self, PyObject *arg)
         PyErr_SetString(PyExc_SystemError, "Missing frame when calling trace function.");
         return NULL;
     }
-    if (lu_frame_trace_opcodes((PyObject *)frame) && set_opcode_trace((PyObject *)frame, 1) != 0) {
+    if (lu_frame_trace_opcodes((PyObject *)frame) && lu_set_opcode_trace((PyObject *)frame, 1) != 0) {
         return NULL;
     }
     Py_INCREF(frame);
@@ -158,7 +158,7 @@ HANDLER(sys_trace_instruction_func)
     }
     PyThreadState *ts = PyThreadState_Get();
     if (!ts->c_tracefunc || !lu_frame_trace_opcodes((PyObject *)frame)) {
-        if (set_opcode_trace((PyObject *)frame, 0) != 0) {
+        if (lu_set_opcode_trace((PyObject *)frame, 0) != 0) {
             return NULL;
         }
         Py_RETURN_NONE;
