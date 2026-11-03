@@ -36,7 +36,10 @@ LANES = {"plain": [], "handoff": ["-X", "lucifer_handoff"]}
 LANES.update({f"handoff:{n}": ["-X", f"lucifer_handoff={n}"] for n in range(1, 9)})
 # name -> stdout under the handoff lanes, where two carriers run the program:
 # the one place lucifer is meant to differ from the oracle.
-HANDOFF_STDOUT = {"handoff_witness": b"2\n"}
+HANDOFF_STDOUT = {
+    "handoff_witness": b"2\n",
+    "handoff_pinned": b"signal handler saw 1\nmain saw 2\natexit callback saw 1\n",
+}
 # name -> [(flags, env)]: env None is -I -S with the inherited environment.
 RUNS = {
     "hash_seed": [([], {"PYTHONHASHSEED": "12345"}), ([], {"PYTHONHASHSEED": "0"})],

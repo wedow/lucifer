@@ -416,7 +416,6 @@ int
 Py_FinalizeEx(void)
 {
     struct _is *interp = &_PyRuntime.main_interp;
-    lu_sched_stop();
     PyObject *atexit = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("atexit"));
     PyObject *run = atexit != NULL
         ? lu_ns_lookup(PyModule_GetDict(atexit), PyUnicode_InternFromString("_run_exitfuncs")) : NULL;
@@ -428,6 +427,7 @@ Py_FinalizeEx(void)
         Py_XDECREF(result);
     }
     int status = flush_std_files();
+    lu_sched_stop();
     __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     return status;
 }
