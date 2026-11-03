@@ -6,7 +6,8 @@ Every writable symbol nm reports in BINARY (types D, d, B, b) must be one of:
 - an exported oracle data symbol (EXPORTS.tsv);
 - the carrier's thread-local word, lu_carrier;
 - a mimalloc process global (defined under third_party/mimalloc);
-- a row of GLOBALS.tsv: a name or fnmatch pattern, then the reason.
+- a row of GLOBALS.tsv: a name or fnmatch pattern, the source file that
+  defines it (a path suffix, or - for a symbol nm gives no line), the reason.
 """
 
 import csv
@@ -37,11 +38,15 @@ def main():
     for r in rows:
         if not r["reason"].strip():
             sys.exit(f"{globals_tsv}: no reason for {r['name']}")
-    patterns = [r["name"] for r in rows]
+    def listed(name, where):
+        source = where.rsplit(":", 1)[0]
+        return any(fnmatch.fnmatchcase(name, r["name"])
+                   and (source.endswith(r["file"]) if r["file"] != "-" else not source)
+                   for r in rows)
     bad = [f"{name} {where}".strip() for name, where in writable(binary)
            if name not in oracle and name != CARRIER
            and "third_party/mimalloc/" not in where
-           and not any(fnmatch.fnmatchcase(name, p) for p in patterns)]
+           and not listed(name, where)]
     for b in bad:
         print(f"unexplained writable global: {b}")
     sys.exit(1 if bad else 0)
