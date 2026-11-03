@@ -47,9 +47,18 @@ def key_hash(key):
     try:
         return hash_of(key)
     except TypeError as exc:
-        if type(exc) is TypeError:
-            error(TypeError, _cat("cannot use '", _name(key), "' as a dict key (", to_str(exc), ')'))
-        raise
+        failure = exc
+    if type(failure) is not TypeError:
+        raise failure
+    error(TypeError, _cat("cannot use '", _name(key), "' as a dict key (", to_str(failure), ')'))
+
+
+def has_keys(obj):
+    try:
+        obj.keys
+    except AttributeError:
+        return False
+    return True
 
 
 def lookup(d, key, h):
@@ -193,9 +202,12 @@ def mapping_keys(o):
     out = o.keys()
     if type(out) is list:
         return out
+    it = None
     try:
         it = _iter.get_iter(out)
     except TypeError:
+        pass
+    if it is None:
         error(TypeError, _cat(_name(o), '.keys() returned a non-iterable (type ', _name(out), ')'))
     return _list.list_of(it)
 
@@ -249,12 +261,10 @@ def update_arg(d, arg):
     if type(arg) is dict:
         merge(d, arg, 1)
         return
-    try:
-        arg.keys
-    except AttributeError:
-        merge_from_seq2(d, arg, 1)
-    else:
+    if has_keys(arg):
         merge(d, arg, 1)
+    else:
+        merge_from_seq2(d, arg, 1)
 
 
 def update_common(d, args, kwargs, name):
@@ -277,11 +287,22 @@ def build_map(items):
     return d
 
 
+def merge_kwargs(d, update, fname):
+    """DICT_MERGE: the keywords of f(**update) into the kwargs dict d, which
+    holds exact strs and refuses a key twice."""
+    if not kind(update, 'dict') and not has_keys(update):
+        error(TypeError, _cat(fname, ' argument after ** must be a mapping, not ', _name(update)))
+    for key in mapping_keys(update):
+        if type(key) is not str:
+            error(TypeError, 'keywords must be strings')
+        if contains(d, key):
+            error(TypeError, _cat(fname, " got multiple values for keyword argument '", key, "'"))
+        setitem(d, key, operators.getitem(update, key))
+
+
 def update_op(d, update):
     """DICT_UPDATE: {**update}."""
-    try:
-        update.keys
-    except AttributeError:
+    if not has_keys(update):
         error(TypeError, _cat("'", _name(update), "' object is not a mapping"))
     merge(d, update, 1)
 
@@ -858,3 +879,4 @@ class dict_values:
 
 kernel_set('build_map', build_map)
 kernel_set('dict_update', update_op)
+kernel_set('dict_merge', merge_kwargs)

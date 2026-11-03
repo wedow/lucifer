@@ -1191,6 +1191,21 @@ op_LIST_EXTEND: {
 op_DICT_MERGE: {
     PyObject *update = POP();
     SAVE_FRAME();
+    if (!PyDict_CheckExact(update) || !lu_dict_str_keys(update)) {
+        char buf[256];
+        PyObject *name = PyUnicode_FromString(lu_function_str(sp[-oparg - 3], buf, sizeof buf));
+        if (name == NULL) {
+            Py_DECREF(update);
+            goto error;
+        }
+        kargs[0] = Py_NewRef(sp[-oparg]);
+        kargs[1] = update;
+        kargs[2] = name;
+        nk = 3;
+        kid = LU_K_dict_merge;
+        kret = LU_RETURN_DISCARD;
+        goto kernel_call;
+    }
     int err = lu_dict_merge(sp[-oparg - 3], sp[-oparg], update);
     Py_DECREF(update);
     ERROR_IF(err < 0);

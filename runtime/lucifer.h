@@ -143,6 +143,7 @@ struct lu_static_type_state {
     X(list_extend)              /* _PyList_Extend(list, iterable): LIST_EXTEND */ \
     X(build_map)                /* BUILD_MAP of keys that are not all exact strs: a tuple of key, value, ... */ \
     X(build_set)                /* BUILD_SET: a tuple of the items */ \
+    X(dict_merge)               /* DICT_MERGE: (kwargs, mapping, the callee's name) for f(**mapping) */ \
     X(dict_update)              /* DICT_UPDATE: dict.update(mapping) for {**mapping} */ \
     X(set_add)                  /* SET_ADD: (set, item) */ \
     X(set_update)               /* SET_UPDATE: (set, iterable) */ \

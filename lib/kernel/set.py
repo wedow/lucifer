@@ -53,20 +53,26 @@ def set_key_hash(key):
     try:
         return hash_of(key)
     except TypeError as exc:
-        if type(exc) is TypeError:
-            error(TypeError, _cat("cannot use '", _name(key), "' as a set element (", to_str(exc), ')'))
-        raise
+        failure = exc
+    raise_unhashable(key, failure)
+
+
+def raise_unhashable(key, failure):
+    if type(failure) is not TypeError:
+        raise failure
+    error(TypeError, _cat("cannot use '", _name(key), "' as a set element (", to_str(failure), ')'))
 
 
 def probe_hash(key):
     """The hash of key for a lookup: an unhashable set stands for the frozenset
     of its elements (set_contains_lock_held)."""
     try:
-        return set_key_hash(key)
-    except TypeError:
-        if is_subtype(type(key), set):
-            return set_hash_impl(key, False)
-        raise
+        return hash_of(key)
+    except TypeError as exc:
+        failure = exc
+    if is_subtype(type(key), set):
+        return set_hash_impl(key, False)
+    raise_unhashable(key, failure)
 
 
 def lookup(s, key, h, found_first):

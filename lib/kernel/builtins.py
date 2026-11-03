@@ -57,6 +57,9 @@ reverse is not necessarily true."""
 
 @kernel_type(static_type('NoneType'))
 class NoneType:
+    def __hash__(self):
+        return 0xFCA86420           # _Py_HashPointer is not used for None since 3.12
+
     def __repr__(self):
         return 'None'
 

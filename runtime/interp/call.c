@@ -495,18 +495,9 @@ int
 lu_dict_merge(PyObject *func, PyObject *dict, PyObject *update)
 {
     char buf[256];
-    if (!PyDict_CheckExact(update)) {
-        lu_err_format(PyExc_TypeError, "%s argument after ** must be a mapping, not %.200s",
-                      lu_function_str(func, buf, sizeof buf), Py_TYPE(update)->tp_name);
-        return -1;
-    }
     Py_ssize_t pos = 0;
     PyObject *key, *value;
     while (lu_ns_next(update, &pos, &key, &value)) {
-        if (!PyUnicode_CheckExact(key)) {
-            lu_err_format(PyExc_TypeError, "keywords must be strings");
-            return -1;
-        }
         if (lu_ns_lookup(dict, key) != NULL) {
             lu_err_format(PyExc_TypeError, "%s got multiple values for keyword argument '%s'",
                           lu_function_str(func, buf, sizeof buf), utf8(key));

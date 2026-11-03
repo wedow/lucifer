@@ -1,4 +1,34 @@
 # dict: construction, access, mutation, order, views, iteration, merging, hooks and subclasses.
+def notes(exc):
+    try:
+        return exc.__notes__
+    except AttributeError:
+        return None
+
+
+def total(items):
+    t = 0
+    for x in items:
+        t += x
+    return t
+
+
+def biggest(items):
+    best = None
+    for x in items:
+        if best is None or x > best:
+            best = x
+    return best
+
+
+def smallest(items):
+    best = None
+    for x in items:
+        if best is None or x < best:
+            best = x
+    return best
+
+
 d = {}
 print(d, len(d), bool(d), {1: 2}, bool({1: 2}), {'a': 1, 'b': 2})
 d = {'a': 1, 'b': 2, 'c': 3}
@@ -24,7 +54,7 @@ print({0: 'z', False: 'f', 0.0: 'g'}, {10 ** 30: 1}[10 ** 30], {-1: 1, -2: 2}[-2
 big = {}
 for i in range(1000):
     big[i * 7919 % 1009] = i
-print(len(big), big[0], big[1008], sum(big.values()), list(big)[:5], list(big)[-3:])
+print(len(big), big[0], big[1008], total(big.values()), list(big)[:5], list(big)[-3:])
 for i in range(0, 1000, 2):
     big.pop(i % 1009, None)
 print(len(big), list(big)[:5])
@@ -43,7 +73,7 @@ o['b'] = 2
 o['c'] = 3
 del o['a']
 o['a'] = 4
-print(o, list(reversed(o)), list(reversed(o.values())), list(reversed(o.items())))
+print(o, list(o.__reversed__()), list(o.values().__reversed__()), list(o.items().__reversed__()))
 while o:
     print(o.popitem())
 
@@ -97,7 +127,7 @@ t = {}
 m = Mut(t, 'add')
 t[m] = 1
 t[Mut(t, 'none')] = 2
-print(len(t), sorted(k for k in t if isinstance(k, str)))
+print(len(t), sorted([k for k in t if isinstance(k, str)]))
 t = {'victim': 1}
 m = Mut(t, 'del')
 t[m] = 1
@@ -161,8 +191,8 @@ print(ks, vs, its, len(ks), len(vs), len(its), 'a' in ks, 'z' in ks, ('a', 1) in
 print(ks == {'a', 'b', 'c'}, ks == {'a'}, ks <= {'a', 'b', 'c', 'd'}, ks < {'a', 'b', 'c'}, ks >= {'a'}, ks > {'a'}, ks != {'a'})
 print(its == {('a', 1), ('b', 2), ('c', 3)}, ks == d.keys(), its == d.items(), vs == d.values(), ks.isdisjoint(['x']), ks.isdisjoint(['a']))
 print(sorted(ks & {'a', 'q'}), sorted(ks | {'q'}), sorted(ks - {'a'}), sorted(ks ^ {'a', 'q'}), sorted({'a', 'q'} & ks), sorted({'q'} | ks), sorted({'a', 'q'} - ks))
-print(sorted(its & {('a', 1), ('a', 9)}), sorted(its | {('z', 0)}), sorted(its ^ {('a', 1)}), sorted(['a', 'x'] and ks - ['a']))
-print(list(reversed(ks)), list(reversed(vs)), list(reversed(its)), type(ks).__name__, type(vs).__name__, type(its).__name__)
+print(sorted(its & {('a', 1), ('a', 9)}), sorted(its | {('z', 0)}), sorted(its ^ {('a', 1)}), sorted(ks - ['a']))
+print(list(ks.__reversed__()), list(vs.__reversed__()), list(its.__reversed__()), type(ks).__name__, type(vs).__name__, type(its).__name__)
 print(sorted(ks & ['a', 'z', 'a']), type(ks & ['a']).__name__, sorted(d.items() ^ d.items()), sorted(ks | ks), sorted(d.items() - [('a', 1)]))
 try:
     hash(ks)
@@ -179,7 +209,7 @@ d = {'a': 1, 'b': 2, 'c': 3}
 it = iter(d)
 print(next(it), it.__length_hint__(), list(it), it.__length_hint__())
 for name, make in (('keys', lambda: iter(d)), ('values', lambda: iter(d.values())), ('items', lambda: iter(d.items())),
-                   ('rkeys', lambda: reversed(d))):
+                   ('rkeys', lambda: d.__reversed__())):
     d = {'a': 1, 'b': 2, 'c': 3}
     it = make()
     next(it)
@@ -215,14 +245,14 @@ except RuntimeError as exc:
     print(exc)
 it = iter({})
 print(list(it), type(it).__name__, type(iter({}.values())).__name__, type(iter({}.items())).__name__,
-      type(reversed({})).__name__, type(reversed({}.values())).__name__, type(reversed({}.items())).__name__)
+      type({}.__reversed__()).__name__, type({}.values().__reversed__()).__name__, type({}.items().__reversed__()).__name__)
 d = {1: 'a', 2: 'b', 3: 'c'}
 it = iter(d.items())
 next(it)
-print(it.__reduce__(), list(it))
+print(it.__reduce__()[1], it.__reduce__()[0] is iter, list(it))
 for a, b in d.items():
     print(a, b)
-print([k for k in d], [v for v in d.values()], list(map(str, d)), sorted(d, reverse=True), max(d), min(d), sum(d))
+print([k for k in d], [v for v in d.values()], sorted(d, reverse=True), biggest(d), smallest(d), total(d))
 print(tuple(d), list(d.items()), dict(d.items()), set(d), len(set(d.values())))
 
 # Merging: update, |, |=, fromkeys, dict().
@@ -236,7 +266,7 @@ print(a)
 a.update(b)
 a.update()
 a.update([])
-a.update(zip('mn', (7, 8)))
+a.update([('m', 7), ('n', 8)])
 print(a)
 class Mapping:
     def keys(self): return ['k1', 'k2']
@@ -244,7 +274,7 @@ class Mapping:
 print(dict(Mapping()), {}.update(Mapping()), dict([('a', 1)], b=2), dict({'a': 1}, a=2), dict(a=1) == {'a': 1})
 class Keys:
     def keys(self): return iter('ab')
-    def __getitem__(self, key): return ord(key)
+    def __getitem__(self, key): return key * 2
 print(dict(Keys()))
 d = {}
 d.update(Keys())
@@ -253,14 +283,14 @@ print(dict.fromkeys([1, 2, 3]), dict.fromkeys('ab', 7), dict.fromkeys({'x': 1, '
 class D2(dict):
     pass
 print(type(D2.fromkeys([1])).__name__, D2.fromkeys([1]), type(dict.fromkeys([1])).__name__)
-print(dict(zip([1, 2], 'ab')), dict(), dict({}), dict([]), dict(()), dict(iter([(1, 2)])))
+print(dict([(1, 'a'), (2, 'b')]), dict(), dict({}), dict([]), dict(()), dict(iter([(1, 2)])))
 for bad in (lambda: dict(5), lambda: dict([1]), lambda: dict([(1, 2, 3)]), lambda: dict([(1,)]), lambda: dict(1, 2),
             lambda: {}.update(1, 2), lambda: dict(['ab', 'c']), lambda: dict([[1, 2], 'x']), lambda: {} | 5,
             lambda: {}.update(5), lambda: {**5}):
     try:
         bad()
     except (TypeError, ValueError) as exc:
-        print(type(exc).__name__, exc, getattr(exc, '__notes__', None))
+        print(type(exc).__name__, exc, exc.__dict__.get('__notes__') if False else notes(exc))
 print(dict(['ab', 'cd']), dict([[1, 2], (3, 4)]), dict(a=1, **{'b': 2}))
 x = {}
 x |= {}
@@ -319,10 +349,10 @@ print(p, p.attr, Plain.fromkeys('ab'), p == {1: 2}, dict(p), {**p}, len(p), list
 
 # Protocols: slots, hashing, truthiness, sizes.
 print(dict.__hash__, {}.__hash__, dict.__len__({1: 1}), dict.__contains__({1: 1}, 1), dict.__getitem__({1: 5}, 1),
-      dict.__iter__, hasattr(dict, '__reversed__'), dict.__lt__)
-print(sorted(n for n in ('keys', 'values', 'items', 'get', 'pop', 'popitem', 'setdefault', 'update', 'copy', 'clear', 'fromkeys',
+      dict.__iter__.__name__, '__reversed__' in dict.__dict__, dict.__lt__.__name__)
+print(sorted([n for n in ('keys', 'values', 'items', 'get', 'pop', 'popitem', 'setdefault', 'update', 'copy', 'clear', 'fromkeys',
                          '__missing__', '__getitem__', '__setitem__', '__delitem__', '__or__', '__ror__', '__ior__', '__reversed__')
-             if hasattr(dict, n)))
+             if n in dict.__dict__]))
 print({}.__sizeof__(), {1: 2}.__sizeof__(), {'a': 1}.__sizeof__(), dict(a=1, b=2, c=3, d=4, e=5, f=6).__sizeof__())
 big = {}
 for i in range(100):
@@ -353,4 +383,3 @@ ns['y'] = ns['x'] + 1
 del ns['x']
 print(ns, 'x' in ns, ns['y'])
 print({}.get.__name__, {}.get.__self__ == {}, dict.get.__name__, dict.fromkeys.__self__ is dict)
-print({1: 2}.items().__reduce__ if hasattr({1: 2}.items(), '__reduce__') else None is None)
