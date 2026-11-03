@@ -7,11 +7,65 @@
     "TZ": "UTC"
   },
   "expected_sha256": "5d6e4bdea334779094405d8e8ccf1d35451f5f3de4daf1f3667356e6ca8ff38e",
-  "jobs": 2,
-  "modules": {},
-  "probe": {},
+  "jobs": 1,
+  "modules": {
+    "test_bool": {
+      "additional_skip_reasons": {},
+      "command": [
+        "{repo}/bin/lucifer",
+        "{repo}/tools/libtest/bridge.py",
+        "-j",
+        "1",
+        "--python",
+        "{repo}/bin/lucifer {repo}/tools/libtest/bridge.py --worker",
+        "--timeout",
+        "180",
+        "--randseed",
+        "0",
+        "-u",
+        "all,-network,-urlfetch,tzdata,xpickle",
+        "--junit-xml",
+        "{scratch}/test_bool/junit.xml",
+        "--tempdir",
+        "{scratch}/test_bool",
+        "test_bool"
+      ],
+      "counts": {
+        "FAIL": 1,
+        "PASS": 30
+      },
+      "environment": {
+        "LC_ALL": "C.UTF-8",
+        "PYTHONDONTWRITEBYTECODE": null,
+        "PYTHONHASHSEED": "0",
+        "PYTHON_JIT": "0",
+        "TZ": "UTC"
+      },
+      "observation_error": false,
+      "returncode": 2,
+      "seconds": 16.74430939485319,
+      "skip_reasons": {},
+      "state": "FAILED",
+      "unexpected_ids": []
+    }
+  },
+  "probe": {
+    "dont_write_bytecode": false,
+    "free_threaded": true,
+    "gil_enabled": false,
+    "implementation": "cpython",
+    "version": [
+      3,
+      14,
+      10
+    ]
+  },
+  "resource_omitted_cases": 67,
   "resources": "all,-network,-urlfetch,tzdata,xpickle",
-  "source": "vendored",
-  "startup": "NOTRUN",
+  "shared_cases": {
+    "test_bool": {}
+  },
+  "source": "installed",
+  "startup": "PASS",
   "timeout": 180
 }

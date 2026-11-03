@@ -301,5 +301,5 @@ spaces until the Unicode database exists. `runtime/prim/str.c`'s
   `subprocess` use.
 - `lib/kernel/match.py` is `_PyEval_MatchClass` and `match_keys` of
   `Python/ceval.c`; `lib/kernel/cell.py` is `Objects/cellobject.c`.
-- `lib/modules/sysconfigdata.py` is the Makefile and `pyconfig.h` values of
+- `lib/sysconfigdata.py` is the Makefile and `pyconfig.h` values of
   the free-threaded 3.14 ABI, installed as `_sysconfigdata_t_linux_x86_64-linux-gnu`.
