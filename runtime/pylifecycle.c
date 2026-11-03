@@ -550,10 +550,11 @@ release_interpreter(struct _is *interp)
     PyConfig_Clear(&interp->config);
 }
 
-/* Py_FinalizeEx, as far as there is something to finalize: atexit's
-   callbacks run, the standard streams are flushed, then the runtime counts
-   as finalizing. CPython flushes once more after tearing the modules down;
-   there is no teardown to print from yet. */
+/* Py_FinalizeEx, as far as there is something to finalize: the non-daemon
+   threads are joined, atexit's callbacks run, the standard streams are flushed,
+   the other threads are shut down, then the runtime counts as finalizing.
+   CPython flushes once more after tearing the modules down; there is no
+   teardown to print from yet. */
 int
 Py_FinalizeEx(void)
 {
@@ -579,6 +580,8 @@ Py_FinalizeEx(void)
         }
         Py_XDECREF(result);
     }
+    /* Before the daemon threads stop: the streams' locks are Python locks, which a daemon
+       stopped for good inside a write would hold for ever. */
     int status = flush_std_files();
     finalize_modules(interp);
     lu_gc_collect_shutdown(PyThreadState_Get());      /* __del__ of what only cycles held */
@@ -586,6 +589,8 @@ Py_FinalizeEx(void)
     flush_std_stream("stderr");
     PyErr_Clear();
     lu_sched_stop();
+    /* What is left are daemon threads: they hang when they next attach. */
+    lu_task_shutdown_others(interp);
     __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     release_interpreter(interp);
     return status;

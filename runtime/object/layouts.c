@@ -180,6 +180,37 @@ overflow:
     return -1;
 }
 
+Py_ssize_t
+PyLong_AsSsize_t(PyObject *op)
+{
+    long value;
+    if (!PyLong_Check(op)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    if (lu_long_as_long(op, &value) < 0) {
+        PyErr_Clear();
+        PyErr_SetString(PyExc_OverflowError, "Python int too large to convert to C ssize_t");
+        return -1;
+    }
+    return value;
+}
+
+PyObject *
+PyLong_FromSsize_t(Py_ssize_t value)
+{
+    return PyLong_FromLongLong(value);
+}
+
+/* An exact int with the digits of src, a subclass instance included. */
+PyObject *
+_PyLong_Copy(PyLongObject *src)
+{
+    Py_ssize_t n = (Py_ssize_t)(src->long_value.lv_tag >> _PyLong_NON_SIZE_BITS);
+    return lu_long_from_digits((src->long_value.lv_tag & _PyLong_SIGN_MASK) == 2, n,
+                               src->long_value.ob_digit);
+}
+
 static void
 plain_dealloc(PyObject *op)
 {

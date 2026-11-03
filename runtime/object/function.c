@@ -258,8 +258,9 @@ static int
 no_keywords(PyObject *callable, PyObject *kwnames)
 {
     if (kwnames != NULL && PyTuple_GET_SIZE(kwnames) != 0) {
-        lu_err_format(PyExc_TypeError, "%.200s() takes no keyword arguments",
-                      CFUNC(callable)->m_ml->ml_name);
+        char buf[300];
+        lu_err_format(PyExc_TypeError, "%.200s takes no keyword arguments",
+                      lu_function_str(callable, buf, sizeof buf));
         return -1;
     }
     return 0;
@@ -273,8 +274,9 @@ vectorcall_noargs(PyObject *callable, PyObject *const *args, size_t nargsf, PyOb
         return NULL;
     }
     if (nargs != 0) {
-        lu_err_format(PyExc_TypeError, "%.200s() takes no arguments (%zd given)",
-                      CFUNC(callable)->m_ml->ml_name, nargs);
+        char buf[300];
+        lu_err_format(PyExc_TypeError, "%.200s takes no arguments (%zd given)",
+                      lu_function_str(callable, buf, sizeof buf), nargs);
         return NULL;
     }
     return CFUNC(callable)->m_ml->ml_meth(CFUNC(callable)->m_self, NULL);
@@ -288,8 +290,9 @@ vectorcall_o(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject 
         return NULL;
     }
     if (nargs != 1) {
-        lu_err_format(PyExc_TypeError, "%.200s() takes exactly one argument (%zd given)",
-                      CFUNC(callable)->m_ml->ml_name, nargs);
+        char buf[300];
+        lu_err_format(PyExc_TypeError, "%.200s takes exactly one argument (%zd given)",
+                      lu_function_str(callable, buf, sizeof buf), nargs);
         return NULL;
     }
     return CFUNC(callable)->m_ml->ml_meth(CFUNC(callable)->m_self, args[0]);

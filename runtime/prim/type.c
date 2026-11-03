@@ -959,12 +959,8 @@ process_slots(PyObject *name, PyObject *slots, PyObject *dict, PyTypeObject *bas
             PyTuple_SET_ITEM(tuple, 0, Py_NewRef(slots));
         }
     }
-    else if (PyTuple_Check(slots) || PyList_Check(slots)) {
-        tuple = lu_args_as_tuple(Py_None, slots);
-    }
     else {
-        lu_err_format(PyExc_TypeError, "'%.200s' object is not iterable", Py_TYPE(slots)->tp_name);
-        return NULL;
+        tuple = lu_call_kernel(LU_K_tuple_of, &slots, 1);      /* PySequence_Tuple */
     }
     if (tuple == NULL) {
         return NULL;

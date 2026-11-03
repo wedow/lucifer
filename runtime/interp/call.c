@@ -49,7 +49,14 @@ lu_function_str(PyObject *func, char *buf, size_t size)
     }
     else if (PyCFunction_Check(func)) {
         PyCFunctionObject *c = (PyCFunctionObject *)func;
-        snprintf(buf, size, "%s()", c->m_ml->ml_name);
+        const char *module = c->m_module != NULL && PyUnicode_Check(c->m_module)
+            ? utf8(c->m_module) : "builtins";
+        if (strcmp(module, "builtins") == 0) {
+            snprintf(buf, size, "%s()", c->m_ml->ml_name);
+        }
+        else {
+            snprintf(buf, size, "%s.%s()", module, c->m_ml->ml_name);
+        }
         return buf;
     }
     if (qualname == NULL) {

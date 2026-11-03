@@ -137,12 +137,17 @@ PyModule_GetState(PyObject *m)
     return ((PyModuleObject *)m)->md_state;
 }
 
-/* PyModule_AddFunctions with interned names. */
-static int
-add_functions(PyObject *m, PyMethodDef *defs)
+/* PyModule_AddFunctions on a module made natively, by namespace stores:
+   the kernel's attribute code may not exist yet. */
+int
+lu_module_add_functions(PyObject *m, PyMethodDef *defs)
 {
     PyModuleObject *mo = (PyModuleObject *)m;
     for (PyMethodDef *ml = defs; ml->ml_name != NULL; ml++) {
+        if (ml->ml_flags & (METH_CLASS | METH_STATIC)) {
+            lu_err_format(PyExc_ValueError, "module functions cannot set METH_CLASS or METH_STATIC");
+            return -1;
+        }
         PyObject *f = PyCFunction_NewEx(ml, m, mo->md_name);
         PyObject *name = f != NULL ? PyUnicode_InternFromString(ml->ml_name) : NULL;
         int err = name == NULL || lu_ns_insert(mo->md_dict, name, f) < 0;
@@ -155,40 +160,32 @@ add_functions(PyObject *m, PyMethodDef *defs)
     return 0;
 }
 
-/* PyModule_FromDefAndSpec and PyModule_ExecDef, for builtin modules made
-   natively before importlib exists (no spec, no Py_mod_create). */
+#define add_functions lu_module_add_functions
+
+/* A builtin module from a multi-phase definition, made natively before
+   importlib exists: no spec, so no Py_mod_create. */
 PyObject *
 lu_module_from_def(PyModuleDef *def)
 {
+    PyModuleDef_Init(def);
     PyObject *m = lu_module_new(def->m_name);
     if (m == NULL) {
         return NULL;
     }
-    PyModuleObject *mo = (PyModuleObject *)m;
-    mo->md_def = def;
-    if (def->m_size > 0) {
-        mo->md_state = PyMem_Calloc(1, def->m_size);
-        if (mo->md_state == NULL) {
-            PyErr_NoMemory();
-            goto fail;
-        }
-    }
-    if (def->m_methods != NULL && add_functions(m, def->m_methods) < 0) {
-        goto fail;
-    }
+    ((PyModuleObject *)m)->md_def = def;
     for (PyModuleDef_Slot *slot = def->m_slots; slot != NULL && slot->slot != 0; slot++) {
         if (slot->slot == Py_mod_create) {
             lu_err_format(PyExc_SystemError, "module %s: Py_mod_create needs a spec", def->m_name);
-            goto fail;
-        }
-        if (slot->slot == Py_mod_exec && ((int (*)(PyObject *))slot->value)(m) < 0) {
-            goto fail;
+            Py_DECREF(m);
+            return NULL;
         }
     }
+    if ((def->m_methods != NULL && add_functions(m, def->m_methods) < 0)
+        || PyModule_ExecDef(m, def) < 0) {
+        Py_DECREF(m);
+        return NULL;
+    }
     return m;
-fail:
-    Py_DECREF(m);
-    return NULL;
 }
 
 /* _lucifer */

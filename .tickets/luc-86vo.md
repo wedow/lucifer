@@ -1,6 +1,6 @@
 ---
 id: luc-86vo
-status: open
+status: closed
 deps: [luc-a5u6]
 links: []
 created: 2026-11-03T01:39:45Z
@@ -17,3 +17,9 @@ dlopen of unmodified cp314t oracle lib-dynload extensions, PyModuleDef_Init mult
 
 make check-capi: _statistics, _bisect and _heapq from the oracle's lib-dynload import into bin/lucifer and every tests/capi program matches the oracle's output.
 - Foundations: tests/capi/exc_cross.c (C calls Python that raises, Python catches a C raise, PyErr_GetRaisedException/SetRaisedException round trip, traceback lists only user frames) matches the oracle; a tests/capi module with Py_mod_multiple_interpreters and Py_mod_gil slots loads, and an unknown slot fails as in the oracle (docs/FOUNDATIONS.md 2.8, 2.15).
+
+## Notes
+
+**2026-11-03T15:53:23Z**
+
+done: _statistics, _bisect, _heapq import unmodified; check-capi-ext compares 4 programs with the oracle
