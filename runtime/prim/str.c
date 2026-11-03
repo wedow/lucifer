@@ -1249,6 +1249,15 @@ prim_str_iter(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return (PyObject *)it;
 }
 
+/* str_iter_next(it): the next character, or MISSING when exhausted. */
+static PyObject *
+prim_str_iter_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    PyObject *v = striter_next(args[0]);
+    return v != NULL ? v : Py_NewRef(LU_MISSING);
+}
+
 /* str_subtype(cls, s): an instance of the str subclass cls, with the
    non-compact layout PyUnicode_DATA reads through data.any. */
 static PyObject *
@@ -1288,6 +1297,6 @@ PyMethodDef lu_prim_str_methods[] = {
     FAST(str_item), FAST(str_decimal), FAST(slice_parts), FAST(box_get), FAST(box_set), FAST(str_ord), FAST(str_chr), FAST(str_len), FAST(bytes_ord), FAST(str_sizeof), FAST(str_hash), FAST(str_cmp),
     FAST(str_concat), FAST(str_repeat), FAST(str_split), FAST(str_splitlines), FAST(str_strip),
     FAST(str_case), FAST(str_is), FAST(str_expandtabs), FAST(str_ascii), FAST(str_encode),
-    FAST(str_decode), FAST(str_iter), FAST(str_subtype),
+    FAST(str_decode), FAST(str_iter), FAST(str_iter_next), FAST(str_subtype),
     { NULL, NULL, 0, NULL },
 };

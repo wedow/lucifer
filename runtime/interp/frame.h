@@ -31,6 +31,8 @@ enum lu_frame_return {
     LU_RETURN_METHOD,           /* push the value, then NULL */
     LU_RETURN_DISCARD,
     LU_RETURN_PAIR,             /* the value is a 2-tuple: push both items */
+    LU_RETURN_UNPACK,           /* the value is a tuple: push its items, last first */
+    LU_RETURN_FOR_ITER,         /* the next item, or MISSING: the loop's exit */
 };
 
 struct lu_frame {
