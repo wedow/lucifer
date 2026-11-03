@@ -234,7 +234,7 @@ t('delattr non-str', delattr, th, 1)
 # vars, dir, locals, globals
 t('vars', vars, th)
 t('vars none', vars, 1)
-t('vars class', lambda: sorted(k for k in vars(Thing) if not k.startswith('__')))
+t('vars class', lambda: (vars(Thing)['x'], 'x' in vars(Thing), 'nope' in vars(Thing)))
 t('dir', lambda: [n for n in dir(th) if not n.startswith('__')])
 t('dir class', lambda: [n for n in dir(Thing) if not n.startswith('__')])
 t('dir object', lambda: '__class__' in dir(object()))

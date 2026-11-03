@@ -28,6 +28,15 @@ _THISCLASS, _SELF, _SELF_CLASS = 0, 1, 2
 _MAPPING = 0
 
 
+def _class_access(instance, owner):
+    """Whether __get__ was called for the class: a None instance of the
+    NoneType is an instance, which the C slots tell by a NULL pointer."""
+    return instance is None and owner is not _NoneType
+
+
+_NoneType = static_type('NoneType')
+
+
 def _quote(s):
     return str_join('', ("'", s, "'"))
 
@@ -44,7 +53,7 @@ def _descr_check(descr, obj):
 @kernel_type(static_type('function'))
 class function:
     def __get__(self, instance, owner=None):
-        if instance is None:
+        if _class_access(instance, owner):
             return self
         return method_new(self, instance)
 
@@ -75,7 +84,7 @@ _method_func = ns_get(type_dict(method), '__func__', MISSING)
 @kernel_type(static_type('method_descriptor'))
 class method_descriptor:
     def __get__(self, instance, owner=None):
-        if instance is None:
+        if _class_access(instance, owner):
             return self
         _descr_check(self, instance)
         return bind(self, instance)
@@ -98,7 +107,7 @@ class classmethod_descriptor:
 @kernel_type(static_type('wrapper_descriptor'))
 class wrapper_descriptor:
     def __get__(self, instance, owner=None):
-        if instance is None:
+        if _class_access(instance, owner):
             return self
         _descr_check(self, instance)
         return bind(self, instance)
@@ -107,7 +116,7 @@ class wrapper_descriptor:
 @kernel_type(static_type('member_descriptor'))
 class member_descriptor:
     def __get__(self, instance, owner=None):
-        if instance is None:
+        if _class_access(instance, owner):
             return self
         _descr_check(self, instance)
         return member_get(self, instance)
@@ -124,7 +133,7 @@ class member_descriptor:
 @kernel_type(static_type('getset_descriptor'))
 class getset_descriptor:
     def __get__(self, instance, owner=None):
-        if instance is None:
+        if _class_access(instance, owner):
             return self
         _descr_check(self, instance)
         functions = getset_kernel(self)

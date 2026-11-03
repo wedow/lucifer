@@ -5,6 +5,7 @@
    CPython's TypeError texts, and unpacking CALL_FUNCTION_EX operands. */
 
 #include "interp/frame.h"
+#include "interp/code.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -64,12 +65,48 @@ lu_function_str(PyObject *func, char *buf, size_t size)
     return buf;
 }
 
+/* A module-level kernel function of positional-only parameters stands for a
+   C builtin, whose refusals read as METH_NOARGS, METH_O and
+   _PyArg_CheckPositional word them. Sets the TypeError and returns 1 when
+   it does; `given` is -1 for a keyword argument. */
+static int
+builtin_style_error(PyFunctionObject *func, PyCodeObject *co, Py_ssize_t given)
+{
+    if (!(co->co_flags & LU_CO_KERNEL) || co->co_posonlyargcount != co->co_argcount
+        || (co->co_flags & (CO_VARARGS | CO_VARKEYWORDS)) || co->co_kwonlyargcount
+        || strchr(utf8(func->func_qualname), '.') != NULL) {
+        return 0;
+    }
+    const char *name = utf8(func->func_qualname);
+    Py_ssize_t n = co->co_argcount;
+    Py_ssize_t defcount = func->func_defaults == NULL ? 0 : PyTuple_GET_SIZE(func->func_defaults);
+    if (given < 0) {
+        lu_err_format(PyExc_TypeError, "%s() takes no keyword arguments", name);
+    }
+    else if (n == 0) {
+        lu_err_format(PyExc_TypeError, "%s() takes no arguments (%zd given)", name, given);
+    }
+    else if (n == 1 && defcount == 0) {
+        lu_err_format(PyExc_TypeError, "%s() takes exactly one argument (%zd given)", name, given);
+    }
+    else {
+        Py_ssize_t bound = given < n - defcount ? n - defcount : n;
+        lu_err_format(PyExc_TypeError, "%s expected %s%zd argument%s, got %zd", name,
+                      defcount == 0 ? "" : given < n - defcount ? "at least " : "at most ",
+                      bound, bound == 1 ? "" : "s", given);
+    }
+    return 1;
+}
+
 /* "'a'", "'a' and 'b'", "'a', 'b', and 'c'" over the names flagged in the
    frame's locals (format_missing, missing_arguments). */
 static void
 missing_arguments(PyFunctionObject *func, struct lu_frame *f, Py_ssize_t count, Py_ssize_t defcount)
 {
     PyCodeObject *co = f->code;
+    if (builtin_style_error(func, co, co->co_argcount - defcount - count)) {
+        return;
+    }
     int positional = defcount != -1;
     Py_ssize_t start = positional ? 0 : co->co_argcount;
     Py_ssize_t end = positional ? co->co_argcount - defcount : start + co->co_kwonlyargcount;
@@ -92,6 +129,9 @@ static void
 too_many_positional(PyFunctionObject *func, struct lu_frame *f, Py_ssize_t given)
 {
     PyCodeObject *co = f->code;
+    if (builtin_style_error(func, co, given)) {
+        return;
+    }
     Py_ssize_t kwonly_given = 0;
     for (Py_ssize_t i = co->co_argcount; i < co->co_argcount + co->co_kwonlyargcount; i++) {
         kwonly_given += f->localsplus[i] != NULL;
@@ -341,6 +381,9 @@ bind(struct lu_frame *f, PyObject **args, Py_ssize_t argcount, PyObject *kwnames
             continue;
         }
         if (kwdict == NULL) {
+            if (builtin_style_error(func, co, -1)) {
+                goto kw_fail;
+            }
             if (co->co_posonlyargcount
                 && positional_only_passed_as_keyword(func, co, kwnames)) {
                 goto kw_fail;

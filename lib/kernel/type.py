@@ -9,7 +9,7 @@ from _lucifer import (
     type_modified, type_static_module, is_subtype, ns_get, ns_set, ns_del, ns_items, cell_set, proxy_new,
     field_get, kernel_get,
 )
-from _lucifer import _boot
+from _lucifer import _boot, object as _object
 
 kernel_type = _boot.kernel_type
 classmethod_ = _boot.classmethod_
@@ -21,6 +21,7 @@ mro_of = _boot.mro_of
 calculate_metaclass = _boot.calculate_metaclass
 
 generic_setattr = kernel_get('generic_setattr')
+merge_class_dict = _object.merge_class_dict
 
 __all__ = ('type',)
 
@@ -292,6 +293,12 @@ type(name, bases, dict, **kwds) -> a new type"""
     def __prepare__(mcls, name, bases, **kwargs):
         """Create the namespace for the class statement"""
         return {}
+
+    def __dir__(cls):
+        """Specialized __dir__ implementation for types."""
+        d = {}
+        merge_class_dict(d, cls)
+        return list(d)
 
     def __subclasses__(cls):
         """Return a list of immediate subclasses."""

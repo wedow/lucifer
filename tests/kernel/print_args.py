@@ -65,7 +65,7 @@ t('bad end int', print, 1, 2, end=1)
 t('bad sep bytes', print, 1, sep=b' ')
 t('bad end list', print, 1, end=[])
 t('unknown kw', print, 1, foo=2)
-t('positional file', print, 1, s)
+t('bad str stdout', print, 'partial', Bad())
 
 
 class NoWrite:

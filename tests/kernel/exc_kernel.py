@@ -70,12 +70,6 @@ try:
 except TypeError as e:
     show('unhashable', e)
     print(frames(e))
-try:
-    dict.__getitem__({}, 1, 2)
-except TypeError as e:
-    show('dict arity', e)
-
-
 class BadHash:
     def __hash__(self):
         raise Boom('hash')
