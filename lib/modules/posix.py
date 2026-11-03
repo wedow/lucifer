@@ -223,3 +223,390 @@ environ = _create_environ()
 
 # No optional function is advertised: os builds empty supports_* sets from this.
 _have_functions = []
+
+
+# Everything below runs over os_call and the other os_* primitives.
+
+WNOHANG = 1
+WUNTRACED = 2
+EX_OK = 0
+SCHED_OTHER = 0
+_call = _lucifer.os_call
+
+
+def _no_dir_fd(function, dir_fd):
+    if dir_fd is not None:
+        raise NotImplementedError(function + ': dir_fd')
+
+
+def chdir(path):
+    """Change the current working directory to the specified path."""
+    _call('chdir', _path('chdir', path))
+
+
+def mkdir(path, mode=0o777, *, dir_fd=None):
+    """Create a directory."""
+    _no_dir_fd('mkdir', dir_fd)
+    _call('mkdir', _path('mkdir', path), mode)
+
+
+def rmdir(path, *, dir_fd=None):
+    """Remove a directory."""
+    _no_dir_fd('rmdir', dir_fd)
+    _call('rmdir', _path('rmdir', path))
+
+
+def unlink(path, *, dir_fd=None):
+    """Remove a file (same as remove())."""
+    _no_dir_fd('unlink', dir_fd)
+    _call('unlink', _path('unlink', path))
+
+
+remove = unlink
+
+
+def rename(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+    """Rename a file or directory."""
+    _no_dir_fd('rename', src_dir_fd or dst_dir_fd)
+    _call('rename', _path('rename', src), _path('rename', dst))
+
+
+replace = rename
+
+
+def link(src, dst, *, src_dir_fd=None, dst_dir_fd=None, follow_symlinks=True):
+    """Create a hard link to a file."""
+    _no_dir_fd('link', src_dir_fd or dst_dir_fd)
+    _call('link', _path('link', src), _path('link', dst))
+
+
+def symlink(src, dst, target_is_directory=False, *, dir_fd=None):
+    """Create a symbolic link pointing to src named dst."""
+    _no_dir_fd('symlink', dir_fd)
+    _call('symlink', _path('symlink', src), _path('symlink', dst))
+
+
+def readlink(path, *, dir_fd=None):
+    """Return a string representing the path to which the symbolic link points."""
+    _no_dir_fd('readlink', dir_fd)
+    path = _path('readlink', path)
+    target = _lucifer.os_readlink(path)
+    return target.encode('utf-8', 'surrogateescape') if isinstance(path, bytes) else target
+
+
+def chmod(path, mode, *, dir_fd=None, follow_symlinks=True):
+    """Change the access permissions of a file."""
+    _no_dir_fd('chmod', dir_fd)
+    if isinstance(path, int):
+        _call('fchmod', path, mode)
+    else:
+        _call('chmod', _path('chmod', path), mode)
+
+
+def chown(path, uid, gid, *, dir_fd=None, follow_symlinks=True):
+    """Change the owner and group id of path to the numeric uid and gid."""
+    _no_dir_fd('chown', dir_fd)
+    _call('chown' if follow_symlinks else 'lchown', _path('chown', path), uid, gid)
+
+
+def access(path, mode, *, dir_fd=None, effective_ids=False, follow_symlinks=True):
+    """Use the real uid/gid to test for access to a path."""
+    _no_dir_fd('access', dir_fd)
+    try:
+        _call('access', _path('access', path), mode)
+    except OSError:
+        return False
+    return True
+
+
+def utime(path, times=None, *, ns=None, dir_fd=None, follow_symlinks=True):
+    """Set the access and modified time of path."""
+    _no_dir_fd('utime', dir_fd)
+    if times is not None and ns is not None:
+        raise ValueError('utime: you may specify either \'times\' or \'ns\' but not both')
+    if times is not None:
+        if not isinstance(times, tuple) or len(times) != 2:
+            raise TypeError("utime: 'times' must be either a tuple of two ints or None")
+        ns = tuple(int(t * 1000000000) if isinstance(t, float) else t * 1000000000 for t in times)
+    if ns is None:
+        # UTIME_NOW in both slots
+        a = m = (0, (1 << 30) - 1)
+    else:
+        a, m = divmod(ns[0], 1000000000), divmod(ns[1], 1000000000)
+    _call('utime', _path('utime', path), a[0], a[1], m[0], m[1], 0 if follow_symlinks else 0x100)
+
+
+def truncate(path, length):
+    """Truncate a file, specified by path, to a specific length."""
+    if isinstance(path, int):
+        return ftruncate(path, length)
+    _call('truncate', _path('truncate', path), length)
+
+
+def fsync(fd):
+    """Force write of fd to disk."""
+    _call('fsync', fd if isinstance(fd, int) else fd.fileno())
+
+
+def fdatasync(fd):
+    """Force write of fd to disk without forcing update of metadata."""
+    _call('fdatasync', fd if isinstance(fd, int) else fd.fileno())
+
+
+def umask(mask):
+    """Set the current numeric umask and return the previous umask."""
+    return _call('umask', mask)
+
+
+def getuid():
+    """Return the current process's user id."""
+    return _call('getuid')
+
+
+def geteuid():
+    """Return the current process's effective user id."""
+    return _call('geteuid')
+
+
+def getgid():
+    """Return the current process's group id."""
+    return _call('getgid')
+
+
+def getegid():
+    """Return the current process's effective group id."""
+    return _call('getegid')
+
+
+def getppid():
+    """Return the parent's process id."""
+    return _call('getppid')
+
+
+def getpgrp():
+    """Return the current process group id."""
+    return _call('getpgrp')
+
+
+def kill(pid, signal, /):
+    """Kill a process with a signal."""
+    _call('kill', pid, signal)
+
+
+def waitpid(pid, options, /):
+    """Wait for completion of a given child process."""
+    return _lucifer.os_waitpid(pid, options)
+
+
+def WIFEXITED(status):
+    return (status & 0x7f) == 0
+
+
+def WEXITSTATUS(status):
+    return (status >> 8) & 0xff
+
+
+def WIFSIGNALED(status):
+    return 0 < (status & 0x7f) < 0x7f
+
+
+def WTERMSIG(status):
+    return status & 0x7f
+
+
+def WIFSTOPPED(status):
+    return (status & 0xff) == 0x7f
+
+
+def WSTOPSIG(status):
+    return (status >> 8) & 0xff
+
+
+def urandom(size, /):
+    """Return a bytes object containing random bytes suitable for cryptographic use."""
+    return _lucifer.os_urandom(size)
+
+
+def pipe():
+    """Create a pipe.  Returns a tuple of two file descriptors: (read_fd, write_fd)"""
+    return _lucifer.os_pipe()
+
+
+uname_result = _lucifer.structseq.structseq_type(
+    'posix.uname_result', 'uname_result: Result from os.uname().\n\n'
+    'This object may be accessed either as a tuple of\n'
+    '  (sysname, nodename, release, version, machine),\n'
+    'or via the attributes sysname, nodename, release, version, and machine.',
+    ('sysname', 'nodename', 'release', 'version', 'machine'), 5)
+
+
+def uname():
+    """Return an object identifying the current operating system."""
+    return _lucifer.structseq.structseq_make(uname_result, _lucifer.os_uname(), {})
+
+
+def putenv(name, value, /):
+    """Change or add an environment variable."""
+    if b'=' in name or not name:
+        raise ValueError('illegal environment variable name')
+    _lucifer.os_putenv(name, value)
+
+
+def unsetenv(name, /):
+    """Delete an environment variable."""
+    if b'=' in name or not name:
+        raise ValueError('illegal environment variable name')
+    _lucifer.os_putenv(name, None)
+
+
+_F_GETFD, _F_SETFD, _F_GETFL, _F_SETFL, _FD_CLOEXEC = 1, 2, 3, 4, 1
+
+
+def get_inheritable(fd, /):
+    """Get the close-on-exec flag of the specified file descriptor."""
+    return not _call('fcntl', fd, _F_GETFD, 0) & _FD_CLOEXEC
+
+
+def set_inheritable(fd, inheritable, /):
+    """Set the inheritable flag of the specified file descriptor."""
+    flags = _call('fcntl', fd, _F_GETFD, 0)
+    _call('fcntl', fd, _F_SETFD, flags & ~_FD_CLOEXEC if inheritable else flags | _FD_CLOEXEC)
+
+
+def get_blocking(fd, /):
+    """Get the blocking mode of the file descriptor."""
+    return not _call('fcntl', fd, _F_GETFL, 0) & O_NONBLOCK
+
+
+def set_blocking(fd, blocking, /):
+    """Set the blocking mode of the specified file descriptor."""
+    flags = _call('fcntl', fd, _F_GETFL, 0)
+    _call('fcntl', fd, _F_SETFL, flags & ~O_NONBLOCK if blocking else flags | O_NONBLOCK)
+
+
+def device_encoding(fd):
+    """Return a string describing the encoding of a terminal's file descriptor."""
+    return _lucifer.locale_encoding() if isatty(fd) else None
+
+
+class DirEntry:
+    """DirEntry: a directory entry, as scandir() yields it."""
+    __slots__ = ('name', 'path', '_type', '_ino', '_stat', '_lstat')
+
+    def __init__(self, name, path, type, ino):
+        self.name, self.path, self._type, self._ino = name, path, type, ino
+        self._stat = self._lstat = None
+
+    def __fspath__(self):
+        return self.path
+
+    def __repr__(self):
+        return '<DirEntry %r>' % (self.name,)
+
+    def inode(self):
+        return self._ino
+
+    def stat(self, *, follow_symlinks=True):
+        if follow_symlinks:
+            if self._stat is None:
+                self._stat = stat(self.path)
+            return self._stat
+        if self._lstat is None:
+            self._lstat = lstat(self.path)
+        return self._lstat
+
+    def _is(self, wanted, follow_symlinks):
+        if self._type == 0 or (self._type == 10 and follow_symlinks):
+            try:
+                mode = self.stat(follow_symlinks=follow_symlinks).st_mode
+            except FileNotFoundError:
+                return False
+            return (mode & 0o170000) == wanted
+        return self._type == {0o040000: 4, 0o100000: 8, 0o120000: 10}[wanted]
+
+    def is_dir(self, *, follow_symlinks=True):
+        return self._is(0o040000, follow_symlinks)
+
+    def is_file(self, *, follow_symlinks=True):
+        return self._is(0o100000, follow_symlinks)
+
+    def is_symlink(self):
+        return self._is(0o120000, False)
+
+    def is_junction(self):
+        return False
+
+    __class_getitem__ = classmethod(lambda cls, item: __import__('types').GenericAlias(cls, item))
+
+
+class _ScandirIterator:
+    def __init__(self, entries):
+        self._entries = iter(entries)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._entries)
+
+    def close(self):
+        self._entries = iter(())
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def scandir(path=None):
+    """Return an iterator of DirEntry objects for given path."""
+    if path is None:
+        path = '.'
+    path = _path('scandir', path, 'string, bytes, os.PathLike, integer or None')
+    raw = path.decode('utf-8', 'surrogateescape') if isinstance(path, bytes) else path
+    prefix = raw if raw.endswith('/') else raw + '/'
+    return _ScandirIterator([
+        DirEntry(name.encode('utf-8', 'surrogateescape') if isinstance(path, bytes) else name,
+                 (prefix + name).encode('utf-8', 'surrogateescape') if isinstance(path, bytes) else prefix + name,
+                 kind, ino)
+        for name, kind, ino in _lucifer.os_scandir(path)])
+
+
+def WCOREDUMP(status):
+    return bool(status & 0x80)
+
+
+def waitstatus_to_exitcode(status):
+    """Convert a wait status to an exit code."""
+    if not isinstance(status, int):
+        status = status.__index__()
+    if WIFEXITED(status):
+        return WEXITSTATUS(status)
+    if WIFSIGNALED(status):
+        return -WTERMSIG(status)
+    raise ValueError('invalid wait status: %d' % status)
+
+
+def _exec_bytes(value):
+    return value if isinstance(value, bytes) else fspath(value).encode('utf-8', 'surrogateescape') \
+        if isinstance(fspath(value), str) else fspath(value)
+
+
+def execv(path, argv, /):
+    """Execute an executable path with arguments, replacing current process."""
+    if not isinstance(argv, (tuple, list)):
+        raise TypeError('execv() arg 2 must be a tuple or list')
+    if not argv or not argv[0]:
+        raise ValueError('execv() arg 2 first element cannot be empty')
+    _lucifer.os_execve(_path('execv', path), tuple(_exec_bytes(a) for a in argv), None)
+
+
+def execve(path, argv, env):
+    """Execute an executable path with arguments, replacing current process."""
+    if not isinstance(argv, (tuple, list)):
+        raise TypeError('execve: argv must be a tuple or list')
+    if not argv or not argv[0]:
+        raise ValueError('execve: argv first element cannot be empty')
+    entries = tuple(_exec_bytes(k) + b'=' + _exec_bytes(v) for k, v in env.items())
+    _lucifer.os_execve(_path('execve', path), tuple(_exec_bytes(a) for a in argv), entries)

@@ -702,6 +702,38 @@ read_executable(PyConfig *config)
     return PyConfig_SetBytesString(config, &config->executable, path);
 }
 
+/* getpath's landmark search: from the executable's directory upward, the
+   first directory D holding lib/python3.14t/os.py (an installed tree) or
+   build/lib/python3.14t/os.py (a build tree). D (or D/build) is the prefix. */
+static PyStatus
+read_stdlib(PyConfig *config)
+{
+    char dir[PATH_MAX], probe[PATH_MAX + 64];
+    size_t n = config->executable == NULL ? (size_t)-1 : wcstombs(dir, config->executable, sizeof dir);
+    if (n == 0 || n >= sizeof dir) {
+        return PyStatus_Ok();
+    }
+    static const char *const layouts[] = { "", "/build" };
+    for (char *slash; (slash = strrchr(dir, '/')) != NULL; *slash = '\0') {
+        for (int i = 0; i < 2; i++) {
+            snprintf(probe, sizeof probe, "%.*s%s/lib/python3.14t/os.py", (int)(slash - dir), dir, layouts[i]);
+            if (access(probe, R_OK) != 0) {
+                continue;
+            }
+            snprintf(probe, sizeof probe, "%.*s%s", (int)(slash - dir), dir, layouts[i]);
+            PyStatus status = PyConfig_SetBytesString(config, &config->prefix, probe);
+            wchar_t **others[] = { &config->base_prefix, &config->exec_prefix, &config->base_exec_prefix };
+            for (int j = 0; j < 3 && !PyStatus_Exception(status); j++) {
+                status = PyConfig_SetString(config, others[j], config->prefix);
+            }
+            strcat(probe, "/lib/python3.14t");
+            return PyStatus_Exception(status) ? status
+                 : PyConfig_SetBytesString(config, &config->stdlib_dir, probe);
+        }
+    }
+    return PyStatus_Ok();
+}
+
 /* config_init_warnoptions: the dev mode filter first, then PYTHONWARNINGS
    and -W (already there, in that order), then the BytesWarning filter. */
 static PyStatus
@@ -829,6 +861,9 @@ PyConfig_Read(PyConfig *config)
     }
     if (!PyStatus_Exception(status)) {
         status = read_executable(config);
+    }
+    if (!PyStatus_Exception(status)) {
+        status = read_stdlib(config);
     }
     if (!PyStatus_Exception(status)) {
         status = finish_warnoptions(config);

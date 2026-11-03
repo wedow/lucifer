@@ -503,6 +503,17 @@ int
 Py_FinalizeEx(void)
 {
     struct _is *interp = &_PyRuntime.main_interp;
+    /* wait_for_thread_shutdown: threading._shutdown joins the non-daemon threads. */
+    PyObject *threading = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("threading"));
+    PyObject *shutdown = threading != NULL
+        ? lu_ns_lookup(PyModule_GetDict(threading), PyUnicode_InternFromString("_shutdown")) : NULL;
+    if (shutdown != NULL) {
+        PyObject *result = lu_call(shutdown, NULL, 0, NULL);
+        if (result == NULL) {
+            lu_err_unraisable_text("Exception ignored on threading shutdown", NULL);
+        }
+        Py_XDECREF(result);
+    }
     PyObject *atexit = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("atexit"));
     PyObject *run = atexit != NULL
         ? lu_ns_lookup(PyModule_GetDict(atexit), PyUnicode_InternFromString("_run_exitfuncs")) : NULL;

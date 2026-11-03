@@ -1787,7 +1787,7 @@ prim_kind(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return NULL;
 }
 
-/* cell_get(cell) -> value or MISSING; cell_set(cell, value). */
+/* cell_get(cell) -> value or MISSING; cell_set(cell, value or MISSING to empty it). */
 static PyObject *
 prim_cell_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -1807,7 +1807,7 @@ prim_cell_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "cell_set() needs a cell");
         return NULL;
     }
-    Py_XSETREF(((PyCellObject *)args[0])->ob_ref, Py_NewRef(args[1]));
+    Py_XSETREF(((PyCellObject *)args[0])->ob_ref, args[1] == LU_MISSING ? NULL : Py_NewRef(args[1]));
     return Py_NewRef(Py_None);
 }
 

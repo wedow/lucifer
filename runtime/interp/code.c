@@ -407,6 +407,18 @@ prim_code_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return lu_code_new(&c);
 }
 
+/* code_localsplus(code): (co_localsplusnames, co_localspluskinds) */
+static PyObject *
+prim_code_localsplus(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 1 || !PyCode_Check(args[0])) {
+        lu_err_format(PyExc_TypeError, "code_localsplus(code)");
+        return NULL;
+    }
+    PyCodeObject *co = (PyCodeObject *)args[0];
+    return PyTuple_Pack(2, co->co_localsplusnames, co->co_localspluskinds);
+}
+
 /* code_set_localsplusnames(code, names): Py_SETREF(co_localsplusnames), which
    codegen_finish_annotations_scope does to rename the __annotate__ parameter. */
 static PyObject *
@@ -538,6 +550,6 @@ prim_code_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_code_methods[] = {
-    FAST(code_new), FAST(code_set_localsplusnames), FAST(code_equal), FAST(code_hash),
+    FAST(code_new), FAST(code_localsplus), FAST(code_set_localsplusnames), FAST(code_equal), FAST(code_hash),
     { NULL, NULL, 0, NULL },
 };

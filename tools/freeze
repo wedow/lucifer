@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compile the frozen modules with the host CPython into a C file of marshal blobs.
 
-usage: freeze OUTPUT.c --kernel MODULE.py... --builtin MODULE.py... --frozen NAME:ORIGNAME:FILE...
+usage: freeze --pyc DEST SRC [NAME=FILE...]
+       freeze OUTPUT.c --kernel MODULE.py... --builtin MODULE.py... --frozen NAME:ORIGNAME:FILE...
               [--hidden NAME:ORIGNAME:FILE...]
 
 Run with a host CPython 3.14 (magic 3627). There are three tables:
@@ -14,6 +15,11 @@ Run with a host CPython 3.14 (magic 3627). There are three tables:
            _frozen_importlib).
   hidden   frozen modules whose frames tracebacks omit, as they would a C
            module's (the compiler).
+--pyc copies the tree SRC to DEST (timestamps kept, each FILE added as DEST/NAME) and writes the host's
+__pycache__/*.cpython-314.pyc beside every module: the installed standard
+library, so that no compiler is needed at run time. Files that do not
+compile (the test suite holds deliberate syntax errors) get no pyc.
+
 Each is compiled with the filename "<frozen NAME>" (ORIGNAME for the frozen
 table), as CPython names its frozen modules. Hashes are never computed here:
 the runtime hashes with its own secret.
@@ -35,9 +41,22 @@ def blob(name, data):
     return "\n".join(lines)
 
 
+def install(dest, src, extra):
+    import compileall
+    import shutil
+    shutil.copytree(src, dest, copy_function=shutil.copy2, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    for entry in extra:
+        name, _, file = entry.partition("=")
+        shutil.copy2(file, Path(dest) / name)
+    compileall.compile_dir(dest, quiet=2, workers=0)
+
+
 def main():
     if importlib.util.MAGIC_NUMBER != MAGIC:
         sys.exit("freeze: the host Python must be CPython 3.14 (magic 3627)")
+    if sys.argv[1] == "--pyc":
+        return install(sys.argv[2], sys.argv[3], sys.argv[4:])
     output, groups = sys.argv[1], {}
     for arg in sys.argv[2:]:
         if arg.startswith("--"):

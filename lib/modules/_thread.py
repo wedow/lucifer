@@ -193,14 +193,123 @@ to be available for other threads."""
             type(self).__qualname__, self._owner, self._count, id(self))
 
 
+class _localimpl:
+    """Thread-local data of one _local object: a dict per thread identifier."""
+    __slots__ = ('dicts', 'localargs', 'locallock', '__weakref__')
+
+
+_impls = []
+
+
+def _forget(ident):
+    """A thread has ended: its local dicts go."""
+    live = []
+    for ref in _impls:
+        impl = ref()
+        if impl is not None:
+            impl.dicts.pop(ident, None)
+            live.append(ref)
+    _impls[:] = live
+
+
 class _local:
-    """Thread-local data. Until threads can start, every thread's data is the one
-object's attributes."""
+    """Thread-local data."""
+    __slots__ = ('_local__impl', '__dict__')
+
+    def __new__(cls, /, *args, **kw):
+        if (args or kw) and (cls.__init__ is object.__init__):
+            raise TypeError('Initialization arguments are not supported')
+        self = object.__new__(cls)
+        impl = _localimpl()
+        impl.localargs = (args, kw)
+        impl.dicts = {}
+        impl.locallock = RLock()
+        object.__setattr__(self, '_local__impl', impl)
+        import _weakref
+        _impls.append(_weakref.ref(impl))
+        _local._enter(self)
+        impl.locallock.release()
+        return self
+
+    def _enter(self):
+        """Makes self.__dict__ this thread's; leaves locallock acquired."""
+        impl = object.__getattribute__(self, '_local__impl')
+        ident = get_ident()
+        impl.locallock.acquire()
+        dct = impl.dicts.get(ident)
+        if dct is None:
+            dct = impl.dicts[ident] = {}
+            object.__setattr__(self, '__dict__', dct)
+            args, kw = impl.localargs
+            self.__init__(*args, **kw)
+        else:
+            object.__setattr__(self, '__dict__', dct)
+        return impl
+
+    def __getattribute__(self, name):
+        impl = _local._enter(self)
+        try:
+            return object.__getattribute__(self, name)
+        finally:
+            impl.locallock.release()
+
+    def __setattr__(self, name, value):
+        if name == '__dict__':
+            raise AttributeError("%r object attribute '__dict__' is read-only" % self.__class__.__name__)
+        impl = _local._enter(self)
+        try:
+            return object.__setattr__(self, name, value)
+        finally:
+            impl.locallock.release()
+
+    def __delattr__(self, name):
+        if name == '__dict__':
+            raise AttributeError("%r object attribute '__dict__' is read-only" % self.__class__.__name__)
+        impl = _local._enter(self)
+        try:
+            return object.__delattr__(self, name)
+        finally:
+            impl.locallock.release()
+
+
+_running = 0
+_non_daemon = []
+
+
+def _run(function, args, kwargs, handle):
+    """The body of a thread: calls function, reports what it raises, and
+    marks the handle done."""
+    global _running
+    try:
+        function(*args, **(kwargs or {}))
+    except SystemExit:
+        pass
+    except BaseException as exc:
+        _lucifer.write_unraisable('Exception ignored in thread started by', function, exc)
+    finally:
+        _running -= 1
+        _forget(get_ident())
+        if handle is not None:
+            handle._set_done()
+            if handle in _non_daemon:
+                _non_daemon.remove(handle)
 
 
 def start_new_thread(function, args, kwargs=None, /):
     """Start a new thread and return its identifier."""
-    raise RuntimeError("can't start new thread")
+    global _running
+    if not callable(function):
+        raise TypeError('first arg must be callable')
+    if not isinstance(args, tuple):
+        raise TypeError('2nd arg must be a tuple')
+    if kwargs is not None and not isinstance(kwargs, dict):
+        raise TypeError('optional 3rd arg must be a dictionary')
+    _running += 1
+    try:
+        return _lucifer.thread_start(lambda: _run(function, args, kwargs, None))
+    except BaseException:
+        _running -= 1
+        raise
 
 
 start_new = start_new_thread
@@ -208,13 +317,33 @@ start_new = start_new_thread
 
 def start_joinable_thread(function, handle=None, daemon=True):
     """*For internal use only*: start a new thread."""
-    raise RuntimeError("can't start new thread")
+    global _running
+    if not callable(function):
+        raise TypeError('thread function must be callable')
+    if handle is None:
+        handle = _ThreadHandle()
+    if handle._started:
+        raise RuntimeError('thread already started')
+    handle._started = True
+    _lucifer.mutex_acquire(handle._done, 0)
+    if not daemon:
+        _non_daemon.append(handle)
+    _running += 1
+    try:
+        handle._ident = _lucifer.thread_start(lambda: _run(function, (), None, handle))
+    except BaseException:
+        _running -= 1
+        handle._set_done()
+        if handle in _non_daemon:
+            _non_daemon.remove(handle)
+        raise RuntimeError("can't start new thread")
+    return handle
 
 
 def _count():
     """Return the number of currently running Python threads, excluding
 the main thread."""
-    return 0
+    return _running
 
 
 def daemon_threads_allowed():
@@ -255,3 +384,52 @@ def interrupt_main(signum=2, /):
     """Simulate the arrival of the given signal in the main thread,
 where the corresponding signal handler will be executed."""
     _lucifer.signal_interrupt(signum)
+
+
+class _ThreadHandle:
+    """Handle of a thread: its identifier, and a lock held while it runs."""
+    __slots__ = ('_ident', '_done', '_started')
+
+    def __init__(self, ident=0, started=False):
+        self._ident = ident
+        self._done = _lucifer.mutex_new()
+        self._started = started
+
+    @property
+    def ident(self):
+        return self._ident
+
+    def is_done(self):
+        return not _lucifer.mutex_locked(self._done)
+
+    def _set_done(self):
+        _lucifer.mutex_release(self._done)
+
+    def join(self, timeout=None):
+        """Wait for the thread to finish."""
+        if not self._started:
+            raise RuntimeError('thread not started')
+        if self._ident == get_ident():
+            raise RuntimeError('Cannot join current thread')
+        if _lucifer.mutex_acquire(self._done, -1 if timeout is None else _timeout_ns(True, timeout)):
+            _lucifer.mutex_release(self._done)
+
+    def __repr__(self):
+        return '<_thread._ThreadHandle object: ident=%d>' % self._ident
+
+
+def _make_thread_handle(ident):
+    """Internal only. Make a thread handle for threads not spawned by the _thread module."""
+    handle = _ThreadHandle(ident, True)
+    _lucifer.mutex_acquire(handle._done, 0)
+    return handle
+
+
+def _shutdown():
+    """Wait for all non-daemon threads (other than the calling thread) to stop."""
+    while _non_daemon:
+        _non_daemon[0].join()
+
+
+def set_name(name):
+    """Set the name of the current thread."""

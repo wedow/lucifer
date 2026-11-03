@@ -19,7 +19,10 @@ KERNEL = lib/kernel/_boot.py lib/kernel/object.py lib/kernel/type.py lib/kernel/
 	lib/kernel/list.py lib/kernel/range.py lib/kernel/str.py lib/kernel/bytes.py lib/kernel/memoryview.py \
 	lib/kernel/dict.py lib/kernel/set.py lib/kernel/mappingproxy.py \
 	lib/kernel/generators.py lib/kernel/frame.py lib/kernel/code.py \
-	lib/kernel/iterators.py lib/kernel/builtins.py lib/kernel/weakref.py lib/kernel/module.py lib/kernel/structseq.py lib/kernel/sys.py lib/kernel/genericalias.py
+	lib/kernel/iterators.py lib/kernel/builtins.py lib/kernel/weakref.py lib/kernel/module.py lib/kernel/structseq.py lib/kernel/sys.py lib/kernel/genericalias.py \
+	lib/kernel/template.py \
+	lib/kernel/cell.py \
+	lib/kernel/match.py
 # The builtin modules, as Python over the _lucifer primitives, and the modules
 # importlib finds as frozen (NAME:ORIGNAME:FILE).
 MODULES = $(wildcard lib/modules/*.py)
@@ -74,7 +77,7 @@ HIDDEN = compiler:compiler:lib/compiler/__init__.py \
 EXPORTS = results/abi/cp314t-exports.tsv
 
 .PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel regen-abi check-harness check-compiler regen
-all: bin/lucifer
+all: bin/lucifer build/lib/stamp
 
 # The runtime is an archive so that an embedder can link it too. Every member
 # is kept: extensions bind to symbols that nothing in main.o refers to.
@@ -98,6 +101,13 @@ build/frozen.c: Makefile tools/freeze $(KERNEL) $(MODULES) $(foreach e,$(FROZEN)
 
 build/frozen.o: build/frozen.c $(HEADERS)
 	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<
+
+# The installed standard library next to the executable: Lib/ plus its pycs.
+STDLIB = build/lib/python3.14t
+SYSCONFIGDATA = _sysconfigdata_t_linux_x86_64-linux-gnu.py
+build/lib/stamp: tools/freeze lib/sysconfigdata.py $(shell find third_party/cpython/Lib -type f -not -name '*.pyc')
+	$(HOST_PYTHON) tools/freeze --pyc $(STDLIB) third_party/cpython/Lib $(SYSCONFIGDATA)=lib/sysconfigdata.py
+	touch $@
 
 abi-audit: bin/lucifer
 	python3 tools/abi/audit.py $(EXPORTS) bin/lucifer

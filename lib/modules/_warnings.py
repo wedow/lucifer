@@ -1,7 +1,8 @@
 """_warnings: warn() for importlib's bootstrap and warn_explicit() for the
 compiler, with the default filters and no others; the warnings module,
 once it can be imported, does the rest. Warnings that the default filters
-ignore are dropped and the others go to standard error."""
+ignore are dropped and the others go to standard error. Once the warnings
+module is imported, its Python implementation decides."""
 
 import _lucifer
 import sys
@@ -53,6 +54,10 @@ def _show(message, category, filename, lineno):
 def warn_explicit(message, category, filename, lineno, module=None, registry=None,
                   module_globals=None, source=None):
     """Issue a warning, or maybe ignore it or raise an exception."""
+    imported = sys.modules.get('warnings')
+    if imported is not None:
+        return imported.warn_explicit(message, category, filename, lineno, module, registry,
+                                      module_globals, source)
     if module is None:
         module = filename or '<unknown>'
         if module[-3:].lower() == '.py':
@@ -93,6 +98,10 @@ def warn_explicit(message, category, filename, lineno, module=None, registry=Non
 
 def warn(message, category=None, stacklevel=1, source=None, *, skip_file_prefixes=()):
     """Issue a warning, or maybe ignore it or raise an exception."""
+    module = sys.modules.get('warnings')
+    if module is not None:
+        return module.warn(message, category, stacklevel + 1, source,
+                           skip_file_prefixes=skip_file_prefixes)
     if isinstance(message, Warning):
         category = type(message)
     elif category is None:

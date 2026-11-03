@@ -791,9 +791,30 @@ prim_write_unraisable(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
+/* err_display(exc): prints exc and its chain with tracebacks to stderr, as the
+   default excepthook does; any other object is printed as its str. */
+static PyObject *
+prim_err_display(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    if (PyExceptionInstance_Check(args[0])) {
+        lu_err_display(args[0]);
+    }
+    else {
+        PyObject *text = PyObject_Str(args[0]);
+        if (text == NULL) {
+            return NULL;
+        }
+        lu_stderr_write(PyUnicode_AsUTF8(text), strlen(PyUnicode_AsUTF8(text)));
+        lu_stderr_write("\n", 1);
+        Py_DECREF(text);
+    }
+    return Py_NewRef(Py_None);
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_exc_methods[] = {
-    FAST(write_unraisable),
+    FAST(write_unraisable), FAST(err_display),
     FAST(exc_set_word), FAST(exc_word), FAST(handled_exception), FAST(set_handled_exception),
     FAST(is_exception), FAST(is_exception_class), FAST(list_append), FAST(caller_traceback),
     FAST(is_callable), FAST(int_text),
