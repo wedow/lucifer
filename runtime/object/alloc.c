@@ -40,19 +40,6 @@ _PyMem_mi_heap_collect_qsbr(mi_heap_t *heap)
 
 #include "static.c"
 
-/* A preloaded extension's constructor runs before this executable's, and may
-   allocate on worker threads. mimalloc takes any thread to be the main one
-   until it is initialized, so the first worker would share the main heap.
-   ld.so runs .preinit_array before every constructor, so initialize there. */
-static void
-init_mimalloc(void)
-{
-    mi_process_init();
-}
-
-__attribute__((section(".preinit_array"), used))
-static void (*const init_mimalloc_entry)(void) = init_mimalloc;
-
 /* Default hooks. */
 
 void *

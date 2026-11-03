@@ -5,8 +5,7 @@
 #include "lucifer.h"
 
 LU_EXPORT union lu_runtime _PyRuntime = { {
-    .debug_offsets = { .cookie = { 'x', 'd', 'e', 'b', 'u', 'g', 'p', 'y' }, .version = PY_VERSION_HEX,
-                       .free_threaded = 1 },
+    .debug_offsets = { .version = PY_VERSION_HEX, .free_threaded = 1 },
     .allocators = { LU_ALLOCATOR(lu_raw), LU_ALLOCATOR(lu_mem), LU_ALLOCATOR(lu_obj),
                     { PTHREAD_MUTEX_INITIALIZER, NULL } },
     .locks = { PTHREAD_MUTEX_INITIALIZER, NULL },

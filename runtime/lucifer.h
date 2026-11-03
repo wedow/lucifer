@@ -111,7 +111,8 @@ void lu_brc_queue_object(PyObject *ob);
 Py_ssize_t lu_explicit_merge_refcount(PyObject *op, Py_ssize_t extra);
 
 /* _Py_DebugOffsets: external inspectors find the runtime by its cookie. The
-   layout of tasks and frames is filled in with them (L3). */
+   cookie stays zero until L3 fills in real offsets, so no 3.14t reader trusts
+   a half-written table. */
 struct lu_debug_offsets {
     char cookie[8];
     uint64_t version;
