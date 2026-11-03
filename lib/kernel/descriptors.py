@@ -62,8 +62,6 @@ class function:
 
 @kernel_type(static_type('method'))
 class method:
-    """Create a bound instance method object."""
-
     def __new__(cls, function, instance, /):
         if not is_callable(function):
             error(TypeError, 'first argument must be callable')
