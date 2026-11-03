@@ -1,0 +1,2 @@
+print('before')
+True ^ None

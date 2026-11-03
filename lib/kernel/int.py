@@ -8,7 +8,7 @@ from _lucifer import (
     int_add, int_sub, int_mul, int_floordiv, int_mod, int_divmod, int_pow, int_truediv,
     int_neg, int_abs, int_invert, int_shift, int_bitwise, int_cmp, int_bit_length,
     int_bit_count, int_hash, int_to_bytes, int_from_bytes, int_format, int_from_text,
-    int_as_double, int_subtype, int_is_zero, text_repr,
+    int_as_double, int_subtype, int_is_zero, text_repr, new_check,
 )
 from _lucifer import _boot, operators
 
@@ -29,6 +29,15 @@ def _exact(x):
 
 def _name(x):
     return type_tp_name(type(x))
+
+
+def _check_new(cls, owner):
+    """tp_new_wrapper's checks of owner.__new__(cls)."""
+    if not kind(cls, 'type'):
+        error(TypeError, str_join('', (
+            type_tp_name(owner), '.__new__(X): X is not a type object (', _name(cls), ')')))
+    if cls is not owner:
+        new_check(cls, owner)
 
 
 def _decimal(n):
@@ -107,18 +116,17 @@ iteral.
 4"""
 
     def __new__(cls, *args, **kwargs):
+        _check_new(cls, int)
         n = size(args)
         x = MISSING
         base = MISSING
         if kwargs:
             for key, value in ns_items(kwargs):
                 if key != 'base':
-                    error(TypeError, str_join('', ("'", key, "' is an invalid keyword argument for int()")))
+                    error(TypeError, str_join('', ('int() got an unexpected keyword argument \'', key, "'")))
                 base = value
-            if n > 2:
-                error(TypeError, str_join('', ('int() takes at most 2 arguments (', _decimal(n), ' given)')))
-            if n == 2:
-                error(TypeError, "argument for int() given by name ('base') and position (2)")
+            if n > 1:
+                error(TypeError, str_join('', ('int() takes at most 2 arguments (', _decimal(n + 1), ' given)')))
         elif n > 2:
             error(TypeError, str_join('', ('int expected at most 2 arguments, got ', _decimal(n))))
         i = 0
@@ -483,6 +491,7 @@ The builtins True and False are the only two instances of the class bool.
 The class bool is a subclass of the class int, and cannot be subclassed."""
 
     def __new__(cls, *args, **kwargs):
+        _check_new(cls, bool)
         if kwargs:
             error(TypeError, 'bool() takes no keyword arguments')
         n = size(args)

@@ -25,7 +25,7 @@ _BINARY = (
     ('__mul__', '__rmul__', '__imul__', '*'),
     ('__mod__', '__rmod__', '__imod__', '%'),
     ('__or__', '__ror__', '__ior__', '|'),
-    ('__pow__', '__rpow__', '__ipow__', '** or pow()'),
+    ('__pow__', '__rpow__', '__ipow__', '**'),
     ('__rshift__', '__rrshift__', '__irshift__', '>>'),
     ('__sub__', '__rsub__', '__isub__', '-'),
     ('__truediv__', '__rtruediv__', '__itruediv__', '/'),
@@ -73,6 +73,8 @@ def binary_op(a, b, op):
             if r is not NotImplemented:
                 return r
         sym = str_join('', (sym, '='))
+    elif op == 8:
+        sym = '** or pow()'
     tb = type(b)
     fb = MISSING
     if tb is not ta:

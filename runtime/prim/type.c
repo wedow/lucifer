@@ -1294,18 +1294,16 @@ prim_is_subtype(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return bool_of(PyType_IsSubtype((PyTypeObject *)args[0], (PyTypeObject *)args[1]));
 }
 
-/* alloc(cls, owner): a new instance of cls for owner.__new__, refusing a
-   cls whose static base is not owner (tp_new_wrapper's safety check). */
-static PyObject *
-prim_alloc(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+/* tp_new_wrapper's checks for owner.__new__(cls): cls is a subtype of owner
+   and owner is its static base. */
+static int
+check_new(PyTypeObject *tp, PyTypeObject *owner)
 {
-    ARGS(2); TYPE_ARG(0); TYPE_ARG(1);
-    PyTypeObject *tp = (PyTypeObject *)args[0], *owner = (PyTypeObject *)args[1];
     PyTypeObject *staticbase = tp;
     if (!PyType_IsSubtype(tp, owner)) {
         lu_err_format(PyExc_TypeError, "%s.__new__(%s): %s is not a subtype of %s",
                       owner->tp_name, tp->tp_name, tp->tp_name, owner->tp_name);
-        return NULL;
+        return -1;
     }
     while (staticbase != NULL && (staticbase->tp_flags & Py_TPFLAGS_HEAPTYPE)) {
         staticbase = staticbase->tp_base;
@@ -1313,9 +1311,30 @@ prim_alloc(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (staticbase != owner) {
         lu_err_format(PyExc_TypeError, "%s.__new__(%s) is not safe, use %s.__new__()",
                       owner->tp_name, tp->tp_name, staticbase->tp_name);
+        return -1;
+    }
+    return 0;
+}
+
+/* alloc(cls, owner): a new instance of cls for owner.__new__, refusing a
+   cls whose static base is not owner. */
+static PyObject *
+prim_alloc(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2); TYPE_ARG(0); TYPE_ARG(1);
+    PyTypeObject *tp = (PyTypeObject *)args[0];
+    if (check_new(tp, (PyTypeObject *)args[1]) < 0) {
         return NULL;
     }
     return (tp->tp_alloc != NULL ? tp->tp_alloc : PyType_GenericAlloc)(tp, 0);
+}
+
+/* new_check(cls, owner): the same refusals, for a __new__ that allocates itself. */
+static PyObject *
+prim_new_check(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2); TYPE_ARG(0); TYPE_ARG(1);
+    return check_new((PyTypeObject *)args[0], (PyTypeObject *)args[1]) < 0 ? NULL : Py_NewRef(Py_None);
 }
 
 /* type_tp_name(t): tp_name, as error messages name a type. */
@@ -1631,7 +1650,7 @@ PyMethodDef lu_prim_type_methods[] = {
     FAST(type_lookup), FAST(type_dict), FAST(type_mro), FAST(type_bases), FAST(type_base),
     FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag),
     FAST(type_can_new), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
-    FAST(type_subclasses), FAST(type_modified), FAST(is_subtype), FAST(alloc),
+    FAST(type_subclasses), FAST(type_modified), FAST(is_subtype), FAST(alloc), FAST(new_check),
     FAST(type_tp_name), FAST(type_static_module), FAST(size),
     FAST(truth_exact), FAST(instance_dict), FAST(set_class), FAST(caller_globals), FAST(super_args),
     FAST(error), FAST(ns_get), FAST(ns_set), FAST(ns_del), FAST(ns_items),
