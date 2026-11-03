@@ -6,14 +6,14 @@ from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type,
     slice_new, slice_get, xxh_hash, int_add,
 )
-from _lucifer import _boot, operators
+from _lucifer import _boot, _format, operators
 
 kernel_type = _boot.kernel_type
 getset = _boot.getset
 index = operators.index
 decimal = operators.decimal
 hash_of = operators.hash_of
-object_repr = operators.object_repr
+object_repr = _format.to_repr
 
 __all__ = ()
 

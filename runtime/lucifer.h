@@ -143,7 +143,11 @@ struct lu_static_type_state {
     X(list_extend)              /* _PyList_Extend(list, iterable): LIST_EXTEND */ \
     X(unpack)                   /* the n items of an iterable, as a tuple: UNPACK_SEQUENCE */ \
     X(unpack_ex)                /* (before, starred list, after) as a tuple: UNPACK_EX */ \
-    X(tuple_of)                 /* PySequence_Tuple(iterable) */
+    X(tuple_of)                 /* PySequence_Tuple(iterable) */ \
+    X(str)                      /* PyObject_Str, for CONVERT_VALUE 1 */ \
+    X(repr)                     /* PyObject_Repr, for CONVERT_VALUE 2 */ \
+    X(ascii)                    /* PyObject_ASCII, for CONVERT_VALUE 3 */ \
+    X(format)                   /* PyObject_Format(value, spec): FORMAT_SIMPLE, FORMAT_WITH_SPEC */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
     LU_KERNEL_FUNCTIONS(LU_KERNEL_ID)

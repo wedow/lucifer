@@ -1,0 +1,1 @@
+'a'.removeprefix(1)

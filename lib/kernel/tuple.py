@@ -7,7 +7,7 @@ from _lucifer import (
  seq_get, seq_slice, seq_concat, seq_repeat, tuple_from, xxh_hash, repr_enter,
     repr_leave, iter_new, iter_state, iter_set, seqiter_next, list_append,
 )
-from _lucifer import _boot, operators, slice as _slice, iter as _iter
+from _lucifer import _boot, _format, operators, slice as _slice, iter as _iter
 
 kernel_type = _boot.kernel_type
 classmethod_ = _boot.classmethod_
@@ -15,7 +15,7 @@ index = operators.index
 as_ssize = operators.as_ssize
 decimal = operators.decimal
 hash_of = operators.hash_of
-object_repr = operators.object_repr
+object_repr = _format.to_repr
 slice_bounds = _slice.slice_bounds
 slice_index_not_none = _slice.slice_index_not_none
 
@@ -132,12 +132,11 @@ def compare(self, other, op, what):
 
 
 def repeat_count(other):
-    """The count of seq * other, or NotImplemented when other is neither an
-    int nor has __index__ (operators.binary_op words the refusal)."""
-    if kind(other, 'int') or type_lookup(type(other), '__index__') is not MISSING:
-        n = as_ssize(other, OverflowError)
-        return n if n > 0 else 0
-    return NotImplemented
+    """The count of seq * other (sequence_repeat)."""
+    if not kind(other, 'int') and type_lookup(type(other), '__index__') is MISSING:
+        error(TypeError, str_join('', ("can't multiply sequence by non-int of type '", _name(other), "'")))
+    n = as_ssize(other, OverflowError)
+    return n if n > 0 else 0
 
 
 def seq_repr(self, opener, closer):
@@ -195,7 +194,7 @@ If the argument is a tuple, the return value is the same object."""
 
     def __add__(self, other):
         if not kind(other, 'tuple'):
-            return NotImplemented
+            error(TypeError, str_join('', ('can only concatenate tuple (not "', _name(other), '") to tuple')))
         if size(other) == 0 and type(self) is tuple:
             return self
         if size(self) == 0 and type(other) is tuple:
@@ -204,8 +203,6 @@ If the argument is a tuple, the return value is the same object."""
 
     def __mul__(self, other):
         n = repeat_count(other)
-        if n is NotImplemented:
-            return n
         if n == 1 and type(self) is tuple:
             return self
         return seq_repeat(self, n, True)
@@ -267,11 +264,7 @@ Raises ValueError if the value is not present."""
         return n
 
 
-def _concat_error(a, b):
-    error(TypeError, str_join('', ('can only concatenate tuple (not "', _name(b), '") to tuple')))
-
-
-operators.register_sequence(tuple, _concat_error)
+operators.add_sequence(tuple)
 
 
 @kernel_type(static_type('tuple_iterator'))

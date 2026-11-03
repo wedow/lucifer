@@ -1,0 +1,1 @@
+'a'.startswith(1)

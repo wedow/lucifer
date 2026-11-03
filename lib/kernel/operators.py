@@ -6,7 +6,7 @@ functions' frames, so reflection never recurses in C (DESIGN 5.2)."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_tp_name, is_subtype, kernel_set, int_add,
-    truth_exact, int_format, int_hash, type_has_sequence, type_mro, list_append, new_check,
+    truth_exact, int_format, int_hash, type_has_sequence, list_append, new_check,
 )
 from _lucifer import _boot
 
@@ -43,6 +43,27 @@ _COMPARE = (
 )
 
 
+# Types whose __add__, __mul__ and __rmul__ are sequence slots (sq_concat,
+# sq_repeat). A method found on an operand's type that is one of theirs runs
+# only after the number slots of both operands have declined (PyNumber_Add,
+# PyNumber_Multiply), so a user __radd__ or __rmul__ wins, and a subclass that
+# overrides the method has a number slot instead.
+_SEQUENCES = []
+
+
+def add_sequence(t):
+    list_append(_SEQUENCES, t)
+
+
+def _sequence_slot(t, name):
+    """The function of t's method name when it is a sequence slot, else MISSING."""
+    f = type_lookup(t, name)
+    for s in _SEQUENCES:
+        if f is type_lookup(s, name):
+            return f
+    return MISSING
+
+
 def _entry(table, i):
     for e in table:
         if i == 0:
@@ -52,37 +73,6 @@ def _entry(table, i):
 
 def _name(x):
     return type_tp_name(type(x))
-
-
-# The types with sq_concat and sq_repeat, each with the function that words
-# the refusal of its `+`: PyNumber_Add and PyNumber_Multiply try them last.
-_SEQUENCES = []
-
-
-def register_sequence(tp, concat_error):
-    list_append(_SEQUENCES, (tp, concat_error))
-
-
-def _sequence(x):
-    for t in type_mro(type(x)):
-        for entry in _SEQUENCES:
-            if entry[0] is t:
-                return entry
-    return None
-
-
-def _refuse_sequence(op, a, b):
-    """PyNumber_Add and PyNumber_Multiply after every slot answered
-    NotImplemented: the sequence's own refusal."""
-    if op == 0 or op == 13:
-        entry = _sequence(a)
-        if entry is not None:
-            entry[1](a, b)
-    elif op == 5 or op == 18:
-        for seq, n in ((a, b), (b, a)):
-            if _sequence(seq) is not None:
-                error(TypeError, str_join('', (
-                    "can't multiply sequence by non-int of type '", _name(n), "'")))
 
 
 def _unsupported(sym, a, b):
@@ -106,15 +96,25 @@ def binary_op(a, b, op):
         sym = '** or pow()'
     tb = type(b)
     fb = MISSING
+    seq_a = seq_b = MISSING
     if tb is not ta:
         fb = type_lookup(tb, reverse)
+    f = type_lookup(ta, forward)
+    if op == 0 or op == 13:
+        seq_a = _sequence_slot(ta, forward)
+    elif op == 5 or op == 18:
+        seq_a = _sequence_slot(ta, forward)
+        seq_b = _sequence_slot(tb, reverse)
+    if f is seq_a:
+        f = MISSING
+    if fb is seq_b:
+        fb = MISSING
     # A subclass's own reflected method goes first (method_is_overloaded).
     if fb is not MISSING and is_subtype(tb, ta) and fb is not type_lookup(ta, reverse):
         r = call_special(fb, b, a)
         if r is not NotImplemented:
             return r
         fb = MISSING
-    f = type_lookup(ta, forward)
     if f is not MISSING:
         r = call_special(f, a, b)
         if r is not NotImplemented:
@@ -123,7 +123,10 @@ def binary_op(a, b, op):
         r = call_special(fb, b, a)
         if r is not NotImplemented:
             return r
-    _refuse_sequence(op, a, b)
+    if seq_a is not MISSING:
+        return call_special(seq_a, a, b)
+    if seq_b is not MISSING:
+        return call_special(seq_b, b, a)
     _unsupported(sym, a, b)
 
 
@@ -248,17 +251,6 @@ def as_ssize(x, exc):
             error(exc, "cannot fit 'int' into an index-sized integer")
         return _SSIZE_MAX if n > 0 else _SSIZE_MIN
     return n
-
-
-def object_repr(x):
-    """PyObject_Repr."""
-    f = type_lookup(type(x), '__repr__')
-    if f is MISSING:
-        error(TypeError, str_join('', ("'", _name(x), "' object has no __repr__")))
-    r = call_special(f, x)
-    if not kind(r, 'str'):
-        error(TypeError, str_join('', ('__repr__ returned non-string (type ', _name(r), ')')))
-    return r
 
 
 def hash_of(x):

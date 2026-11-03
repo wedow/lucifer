@@ -10,7 +10,7 @@ from _lucifer import (
     int_bit_count, int_hash, int_to_bytes, int_from_bytes, int_format, int_from_text,
     int_as_double, int_subtype, int_is_zero, text_repr, new_check,
 )
-from _lucifer import _boot, operators
+from _lucifer import _boot, operators, _format
 
 kernel_type = _boot.kernel_type
 classmethod_ = _boot.classmethod_
@@ -455,9 +455,7 @@ Rounding with an ndigits argument also returns an integer."""
         """Convert to a string according to format_spec."""
         if not kind(format_spec, 'str'):
             error(TypeError, str_join('', ('__format__() argument must be str, not ', _name(format_spec))))
-        if format_spec == '':
-            return call_special(type_lookup(type(self), '__str__'), self)
-        error(SystemError, 'int.__format__ with a format spec arrives with K1e')
+        return _format.format_int(self, format_spec)
 
     def __sizeof__(self):
         """Returns size in memory, in bytes."""

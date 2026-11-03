@@ -191,7 +191,7 @@ The argument must be an iterable if specified."""
 
     def __add__(self, other):
         if not kind(other, 'list'):
-            return NotImplemented
+            error(TypeError, str_join('', ('can only concatenate list (not "', _name(other), '") to list')))
         return seq_concat(self, other, False)
 
     def __iadd__(self, other):
@@ -200,16 +200,12 @@ The argument must be an iterable if specified."""
 
     def __mul__(self, other):
         n = repeat_count(other)
-        if n is NotImplemented:
-            return n
         return seq_repeat(self, n, False)
 
     __rmul__ = __mul__
 
     def __imul__(self, other):
         n = repeat_count(other)
-        if n is NotImplemented:
-            return n
         if n == 0:
             list_splice(self, 0, size(self), ())
         elif n > 1:
@@ -334,11 +330,7 @@ The reverse flag can be set to sort in descending order."""
         sort_into(self, key, reverse)
 
 
-def _concat_error(a, b):
-    error(TypeError, str_join('', ('can only concatenate list (not "', _name(b), '") to list')))
-
-
-operators.register_sequence(list, _concat_error)
+operators.add_sequence(list)
 
 
 @kernel_type(static_type('list_iterator'))

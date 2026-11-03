@@ -7,14 +7,14 @@ from _lucifer import (
     range_new, range_get, range_iter, range_iter_new, rangeiter_next, rangeiter_len,
     xxh_hash, int_add,
 )
-from _lucifer import _boot, operators, slice as _slice, iter as _iter
+from _lucifer import _boot, _format, operators, slice as _slice, iter as _iter
 
 kernel_type = _boot.kernel_type
 getset = _boot.getset
 index = operators.index
 decimal = operators.decimal
 hash_of = operators.hash_of
-object_repr = operators.object_repr
+object_repr = _format.to_repr
 slice_indices = _slice._indices
 
 __all__ = ()

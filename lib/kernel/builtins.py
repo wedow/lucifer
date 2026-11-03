@@ -1,25 +1,16 @@
 """builtins functions, over the _lucifer primitives."""
 
 from _lucifer import write, str_join, error, kind, type_lookup, MISSING, static_type
-from _lucifer import _boot, operators
+from _lucifer import _boot, _format, operators
 
 call_special = _boot.call_special
+kernel_type = _boot.kernel_type
 
-__all__ = ('print', 'isinstance', 'issubclass', 'len', 'hash', 'repr')
-
-
-def _str(x):
-    """PyObject_Str until str() arrives with K1e."""
-    if kind(x, 'str'):
-        return x
-    r = call_special(type_lookup(type(x), '__str__'), x)
-    if not kind(r, 'str'):
-        error(TypeError, str_join('', ('__str__ returned non-string (type ', type(r).__name__, ')')))
-    return r
+__all__ = ('print', 'isinstance', 'issubclass', 'len', 'hash')
 
 
 def print(*args, sep=' ', end='\n'):
-    write(1, str_join(sep, (*[_str(x) for x in args],)))
+    write(1, str_join(sep, (*[_format.to_str(x) for x in args],)))
     write(1, end)
 
 
@@ -64,20 +55,13 @@ reverse is not necessarily true."""
     return operators.hash_of(obj)
 
 
-def repr(obj, /):
-    """Return the canonical string representation of the object.
-
-For many object types, including most builtins, eval(repr(obj)) == obj."""
-    return operators.object_repr(obj)
-
-
-@_boot.kernel_type(static_type('NoneType'))
+@kernel_type(static_type('NoneType'))
 class NoneType:
     def __repr__(self):
         return 'None'
 
 
-@_boot.kernel_type(static_type('NotImplementedType'))
+@kernel_type(static_type('NotImplementedType'))
 class NotImplementedType:
     def __repr__(self):
         return 'NotImplemented'

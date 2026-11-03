@@ -197,3 +197,28 @@ spaces until the Unicode database exists. `runtime/prim/str.c`'s
   `GET_ITER`, `FOR_ITER`, `UNPACK_SEQUENCE`, `LIST_EXTEND` and
   `BINARY_OP` `NB_SUBSCR` from `Python/bytecodes.c`, with the exact list,
   tuple and range fast paths.
+- `runtime/prim/unicodetype_db.h` is `Objects/unicodetype_db.h` unchanged;
+  `runtime/prim/unicodedata.c` is `Objects/unicodectype.c` with the `Python.h`
+  and table includes pointed at `runtime/prim`. They are the database behind
+  the character predicates, case mappings and `repr` of `str`.
+- `runtime/prim/str.c` ports the loops of `Objects/unicodeobject.c` (`ADJUST_INDICES`,
+  `find`/`rfind`/`count`/`replace`, `split`/`rsplit`/`splitlines`, `do_strip`,
+  `handle_capital_sigma`, `do_upper_or_lower`, `do_title`, `do_capitalize`,
+  `do_swapcase`, `do_casefold`, `unicode_isalpha` and its siblings,
+  `unicode_expandtabs`, `unicode_repr`, `unicode_join`, `unicode_subtype_new`'s
+  non-compact layout) and of `Python/codecs.c` and `Objects/stringlib/codecs.h`
+  (the utf-8 decoder's error classes, the `strict`, `ignore`, `replace`,
+  `backslashreplace`, `xmlcharrefreplace`, `surrogateescape` and
+  `surrogatepass` handlers for utf-8, latin-1 and ascii). Results are built in
+  a UCS4 buffer and narrowed by `PyUnicode_FromKindAndData`; there is no
+  fast-search library (`memmem` for one-byte kinds, a scan otherwise); the
+  `namereplace` handler and codecs other than the three are absent.
+- `lib/kernel/_format.py` ports `Python/formatter_unicode.c` (the spec parser,
+  `calc_number_widths`, `fill_number`, `format_string_internal`,
+  `format_long_internal`; the float and complex paths are not ported),
+  `Python/thousands_grouping` (`InsertThousandsGrouping`),
+  `Objects/stringlib/unicode_format.h` (`str.format`, `format_map`) and
+  `Objects/unicodeobject.c` (`PyUnicode_Format`; `%e`/`%f`/`%g` become a format
+  spec for `float.__format__`), plus `PyObject_Str`, `PyObject_Repr`,
+  `PyObject_ASCII` and `PyObject_Format`. `lib/kernel/str.py` ports the argument
+  handling and messages of the `str` methods and `unicode_new_impl`.

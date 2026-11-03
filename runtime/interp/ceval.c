@@ -20,7 +20,9 @@
 #include "interp/code.h"
 #include "interp/exceptions.h"
 
+#include "opcode.h"
 #include "opcode_ids.h"
+#include "prim/prim.h"
 
 /* Include/internal/pycore_opcode_utils.h */
 #define MAKE_FUNCTION_DEFAULTS    0x01
@@ -370,6 +372,10 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
         [STORE_SLICE] = &&op_STORE_SLICE,
         [GET_LEN] = &&op_GET_LEN,
         [CALL_INTRINSIC_2] = &&op_CALL_INTRINSIC_2,
+        [FORMAT_SIMPLE] = &&op_FORMAT_SIMPLE,
+        [FORMAT_WITH_SPEC] = &&op_FORMAT_WITH_SPEC,
+        [CONVERT_VALUE] = &&op_CONVERT_VALUE,
+        [BUILD_STRING] = &&op_BUILD_STRING,
     };
 #pragma GCC diagnostic pop
     /* An activation never changes carrier: an unpinned park returns from it. */
@@ -1406,6 +1412,54 @@ op_COMPARE_OP: {
     DISPATCH();
 }
 
+op_FORMAT_SIMPLE: {
+    /* value -- str(value) through PyObject_Format(value, '') */
+    if (PyUnicode_CheckExact(TOP())) {
+        DISPATCH();
+    }
+    kargs[0] = POP();
+    kargs[1] = (PyObject *)&_PyRuntime.singletons.empty_str;
+    nk = 2;
+    kid = LU_K_format;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_FORMAT_WITH_SPEC: {
+    /* value, spec -- PyObject_Format(value, spec) */
+    sp -= 2;
+    kargs[0] = sp[0];
+    kargs[1] = sp[1];
+    nk = 2;
+    kid = LU_K_format;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_CONVERT_VALUE: {
+    /* value -- str(value), repr(value) or ascii(value) for oparg 1, 2, 3 */
+    kargs[0] = POP();
+    nk = 1;
+    kid = oparg == 1 ? LU_K_str : oparg == 2 ? LU_K_repr : LU_K_ascii;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_BUILD_STRING: {
+    /* pieces... -- the pieces joined; every piece is an exact str */
+    PyObject *pieces = PyTuple_New(oparg);
+    ERROR_IF(pieces == NULL);
+    sp -= oparg;
+    for (int i = 0; i < oparg; i++) {
+        PyTuple_SET_ITEM(pieces, i, sp[i]);
+    }
+    PyObject *res = lu_str_join_tuple((PyObject *)&_PyRuntime.singletons.empty_str, pieces);
+    Py_DECREF(pieces);
+    ERROR_IF(res == NULL);
+    PUSH(res);
+    DISPATCH();
+}
+
 op_BINARY_OP: {
     /* lhs, rhs -- res; exact ints here, everything else reflects in the kernel. */
     SKIP_CACHES();
@@ -1439,6 +1493,17 @@ op_BINARY_OP: {
             DISPATCH();
         }
         Py_DECREF(res);
+    }
+    else if ((oparg == NB_ADD || oparg == NB_INPLACE_ADD) && PyUnicode_CheckExact(left)
+             && PyUnicode_CheckExact(right)) {
+        SAVE_FRAME();
+        PyObject *res = lu_str_concat(left, right);
+        ERROR_IF(res == NULL);
+        sp--;
+        TOP() = res;
+        Py_DECREF(left);
+        Py_DECREF(right);
+        DISPATCH();
     }
     sp -= 2;
     kargs[0] = left;
