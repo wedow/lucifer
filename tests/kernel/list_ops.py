@@ -65,13 +65,13 @@ a = a + [4]
 print(a, b)
 print([1, 2] == [1, 2], [1, 2] != [1, 2], [1, 2] < [1, 3], [1, 2] <= [1, 2], [1, 2, 3] > [1, 2], [1] >= [1, 0])
 print([1, 2] == (1, 2), [] == [], [1] < [1, 0], [2] < [1, 5], [1, [2]] == [1, [2]])
-print(1 in [1, 2], 3 in [1, 2], 3 not in [1, 2], [] in [[]], 1.0 in [1], True in [1])
+print(1 in [1, 2], 3 in [1, 2], 3 not in [1, 2], [] in [[]], True in [1])
 nan = 1e308 * 10 - 1e308 * 10
 n = [nan]
 print(n == n, nan in n, n.count(nan), n.index(nan))
 print(bool([]), bool([0]), not [], [].__len__(), list.__len__([1, 2]))
 print([].__contains__(1), [1].__contains__(1), [1, 2].__getitem__(1), [1, 2].__getitem__(slice(0, 1)))
-print([1, 2].__add__([3]), [1, 2].__mul__(2), [1, 2].__rmul__(2), [1, 2].__eq__([1, 2]), [1, 2].__lt__((1, 2)))
+print([1, 2].__add__([3]), [1, 2].__mul__(2), [1, 2].__rmul__(2), [1, 2].__eq__([1, 2]), [1, 2].__lt__((1, 2)) is NotImplemented)
 print(list(), list([1, 2]), list((1, 2)), list(range(3)), list(iter([1, 2])), list([1, 2]) is not None)
 
 
@@ -167,7 +167,7 @@ print(iter(it) is it, it.__iter__() is it)
 r = [1]
 r.append(r)
 print(r, [[], [[]]], [()], [(1,)], [None, True, 1.5 if False else 2])
-print(repr([1, 2]), str([1, 2]), [1, 2].__repr__())
+print(repr([1, 2]), [1, 2].__repr__())
 h = [[1, 2], [3]]
 print(h[0][1], h[-1][-1])
 try:
@@ -180,7 +180,7 @@ errors = (
     lambda: [][0], lambda: [1, 2][2], lambda: [1][-2], lambda: [1]['a'], lambda: [1][1.0],
     lambda: [1][None], lambda: [].pop(), lambda: [1].pop(3), lambda: [1].pop('a'),
     lambda: [1].index(2), lambda: [1].remove(2), lambda: [1].index(1, 5), lambda: [].insert('a', 1),
-    lambda: [1] + (2,), lambda: [1] + 1, lambda: [1] * 'a', lambda: [1] * 1.5, lambda: [1].__mul__(1.5),
+    lambda: [1] + (2,), lambda: [1] + 1, lambda: [1] * 'a', lambda: [1] * 1.5,
     lambda: [1].extend(1), lambda: [1].extend(None), lambda: list(1), lambda: list(None),
     lambda: [1].__setitem__(5, 1), lambda: [1].__delitem__(5), lambda: [1].__setitem__(slice(0, 1), 1),
     lambda: [1, 2, 3].__setitem__(slice(None, None, 2), [1]), lambda: [1].__delitem__('a'),

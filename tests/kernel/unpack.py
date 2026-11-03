@@ -218,7 +218,7 @@ for k in (BadLen, FloatLen, BigLen):
 # subscript protocol on classes
 class Sub:
     def __getitem__(self, k):
-        return ('get', k)
+        return (0, k)
 
     def __setitem__(self, k, v):
         print('set', k, v)

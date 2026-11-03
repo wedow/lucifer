@@ -563,7 +563,7 @@ lu_layouts_init(void)
     lu_code_init();
     lu_function_init();
     lu_descr_init();
-    lu_iter_init();
+    lu_storage_init();
     lu_module_init();
     lu_exc_init();
 

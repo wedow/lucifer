@@ -462,15 +462,15 @@ lu_unpack_call(PyObject *callargs, PyObject *kwargs, Py_ssize_t *nargs, PyObject
     return array;
 }
 
-/* _Py_Check_ArgsIterable and PySequence_Tuple, over tuples and lists until
-   iteration exists (K1h). Returns a new tuple. */
+/* _Py_Check_ArgsIterable and PySequence_Tuple: lists and iterables, the
+   latter through the kernel's tuple_of in a nested loop. Returns a new tuple. */
 PyObject *
 lu_args_as_tuple(PyObject *func, PyObject *args)
 {
     if (PyTuple_CheckExact(args)) {
         return Py_NewRef(args);
     }
-    if (PyList_Check(args)) {
+    if (PyList_CheckExact(args)) {
         Py_ssize_t n = PyList_GET_SIZE(args);
         PyObject *t = PyTuple_New(n);
         for (Py_ssize_t i = 0; t != NULL && i < n; i++) {
@@ -478,9 +478,14 @@ lu_args_as_tuple(PyObject *func, PyObject *args)
         }
         return t;
     }
+    PyTypeObject *tp = Py_TYPE(args);
+    if (PyList_Check(args) || tp->tp_iter != NULL
+        || (tp->tp_as_sequence != NULL && tp->tp_as_sequence->sq_item != NULL)) {
+        return lu_call_kernel(LU_K_tuple_of, &args, 1);
+    }
     char buf[256];
     lu_err_format(PyExc_TypeError, "%s argument after * must be an iterable, not %.200s",
-                  lu_function_str(func, buf, sizeof buf), Py_TYPE(args)->tp_name);
+                  lu_function_str(func, buf, sizeof buf), tp->tp_name);
     return NULL;
 }
 

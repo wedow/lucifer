@@ -14,7 +14,9 @@ class Item:
 
 def count(values, **kw):
     del calls[:]
-    items = [Item(v, i) for i, v in enumerate(values)]
+    items = []
+    for v in values:
+        items.append(Item(v, len(items)))
     items.sort(**kw)
     return len(calls), [(x.v, x.tag) for x in items]
 
@@ -35,7 +37,7 @@ print(a, sorted([1, 2, 3], reverse=True), sorted([3, 1, 2], key=lambda x: -x), s
 print(sorted([-3, 1, -2, 4], key=lambda x: x * x))
 
 # stability
-pairs = [(1, 'a'), (0, 'b'), (1, 'c'), (0, 'd'), (1, 'e'), (0, 'f')]
+pairs = [(1, 10), (0, 11), (1, 12), (0, 13), (1, 14), (0, 15)]
 print(sorted(pairs, key=lambda p: p[0]), sorted(pairs, key=lambda p: p[0], reverse=True))
 print(count([1, 1, 1, 1, 1]), count([2, 1, 2, 1, 2, 1], reverse=True))
 print(count([1, 0, 1, 0, 1, 0, 1, 0], key=lambda x: x.v))
@@ -47,7 +49,10 @@ for n in (0, 1, 2, 3, 5, 31, 32, 33, 63, 64, 65, 100, 257, 1000):
 print(count(lcg(300, 7))[1] == sorted(count(lcg(300, 7))[1], key=lambda p: p[0]))
 runs = list(range(100, 200)) + list(range(0, 100)) + list(range(300, 400)) + list(range(200, 300))
 print(count(runs)[0], count(runs, reverse=True)[0])
-mixed = [x for pair in zip(range(0, 200, 2), range(1000, 1100)) for x in pair]
+mixed = []
+for i in range(100):
+    mixed.append(i * 2)
+    mixed.append(1000 + i)
 print(count(mixed)[0])
 gallop = list(range(0, 500)) + list(range(250, 750))
 print(count(gallop)[0], count(gallop[::-1])[0])

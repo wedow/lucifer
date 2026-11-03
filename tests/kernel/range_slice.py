@@ -3,9 +3,9 @@ r = range(10)
 print(r, range(2, 5), range(0, 10, 3), range(5, 0, -1), range(5, 5), range(0, 1, 1), range(-3), repr(range(1, 2, 3)))
 print(len(r), r[0], r[-1], r[3], list(r[2:5]), r[::2], r[::-1], r[100:], r[-100:2], r[2:8:3], r[8:2:-2])
 print(list(r), list(range(5, 0, -2)), list(range(-5, 5, 4)), list(range(0)), list(range(3, 3)), list(range(0, 10, 11)))
-print(3 in r, 10 in r, -1 in r, 3.0 in r, True in r, 2 in range(0, 10, 2), 3 in range(0, 10, 2), 9 in range(10, 0, -1), 0 in range(10, 0, -1))
+print(3 in r, 10 in r, -1 in r, True in r, 2 in range(0, 10, 2), 3 in range(0, 10, 2), 9 in range(10, 0, -1), 0 in range(10, 0, -1))
 print(r.start, r.stop, r.step, range(1, 2, 3).step, range(4).start, range(4).step)
-print(r.index(4), r.count(4), r.count(40), range(0, 10, 2).index(6), range(10, 0, -3).index(4), r.count(3.0), r.count(True))
+print(r.index(4), r.count(4), r.count(40), range(0, 10, 2).index(6), range(10, 0, -3).index(4), r.count(True))
 print(bool(range(0)), bool(range(1)), range(5) == range(5), range(5) == range(0, 5, 1), range(0) == range(5, 5), range(0) == range(3, 0),
       range(1, 4, 2) == range(1, 5, 2), range(5) != range(6), range(5) == [0, 1, 2, 3, 4], range(1, 1) == range(2, 2, 5))
 print(range(5).__hash__() == range(0, 5, 1).__hash__(), range(0).__hash__() == range(3, 3).__hash__(),

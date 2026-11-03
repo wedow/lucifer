@@ -1,11 +1,11 @@
 """builtins functions, over the _lucifer primitives."""
 
-from _lucifer import write, str_join, error, kind, type_lookup, MISSING
-from _lucifer import _boot
+from _lucifer import write, str_join, error, kind, type_lookup, MISSING, static_type
+from _lucifer import _boot, operators
 
 call_special = _boot.call_special
 
-__all__ = ('print', 'isinstance', 'issubclass')
+__all__ = ('print', 'isinstance', 'issubclass', 'len', 'hash', 'repr')
 
 
 def _str(x):
@@ -49,3 +49,35 @@ def issubclass(cls, class_or_tuple, /):
     """Return whether 'cls' is derived from another class or is the same class."""
     return _check('issubclass', class_or_tuple, cls, '__subclasscheck__',
                   'class, a tuple of classes, or a union')
+
+
+def len(obj, /):
+    """Return the number of items in a container."""
+    return operators.length(obj)
+
+
+def hash(obj, /):
+    """Return the hash value for the given object.
+
+Two objects that compare equal must also have the same hash value, but the
+reverse is not necessarily true."""
+    return operators.hash_of(obj)
+
+
+def repr(obj, /):
+    """Return the canonical string representation of the object.
+
+For many object types, including most builtins, eval(repr(obj)) == obj."""
+    return operators.object_repr(obj)
+
+
+@_boot.kernel_type(static_type('NoneType'))
+class NoneType:
+    def __repr__(self):
+        return 'None'
+
+
+@_boot.kernel_type(static_type('NotImplementedType'))
+class NotImplementedType:
+    def __repr__(self):
+        return 'NotImplemented'

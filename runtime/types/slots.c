@@ -275,6 +275,35 @@ slot_mp_subscript(PyObject *self, PyObject *key)
     return lu_call_special(self, LU_ID(__getitem__), &key, 1);
 }
 
+/* sq_item and sq_ass_item: the index as an int in __getitem__, __setitem__
+   or __delitem__ (PySequence_GetItem has already added the length to a
+   negative index). */
+static PyObject *
+slot_sq_item(PyObject *self, Py_ssize_t i)
+{
+    PyObject *key = PyLong_FromLong(i);
+    if (key == NULL) {
+        return NULL;
+    }
+    PyObject *r = lu_call_special(self, LU_ID(__getitem__), &key, 1);
+    Py_DECREF(key);
+    return r;
+}
+
+static int
+slot_sq_ass_item(PyObject *self, Py_ssize_t i, PyObject *value)
+{
+    PyObject *args[2] = { PyLong_FromLong(i), value };
+    if (args[0] == NULL) {
+        return -1;
+    }
+    PyObject *r = value != NULL ? lu_call_special(self, LU_ID(__setitem__), args, 2)
+                                : lu_call_special(self, LU_ID(__delitem__), args, 1);
+    Py_DECREF(args[0]);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
 static Py_ssize_t
 slot_length(PyObject *self)
 {
@@ -497,8 +526,8 @@ static const struct slot slots[] = {
     NB(nb_inplace_matrix_multiply, slot_nb_inplace_matrix_multiply),
     MP(mp_length, slot_length), MP(mp_subscript, slot_mp_subscript),
     MP(mp_ass_subscript, slot_mp_ass_subscript),
-    SQ(sq_length, slot_length), SQ(sq_concat, NULL), SQ(sq_repeat, NULL), SQ(sq_item, NULL),
-    SQ(sq_ass_item, NULL), SQ(sq_contains, slot_sq_contains), SQ(sq_inplace_concat, NULL),
+    SQ(sq_length, slot_length), SQ(sq_concat, NULL), SQ(sq_repeat, NULL), SQ(sq_item, slot_sq_item),
+    SQ(sq_ass_item, slot_sq_ass_item), SQ(sq_contains, slot_sq_contains), SQ(sq_inplace_concat, NULL),
     SQ(sq_inplace_repeat, NULL),
 };
 
