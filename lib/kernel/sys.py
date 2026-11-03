@@ -109,8 +109,7 @@ for _name, _value in (
         ('version', '3.14.10 free-threading build (lucifer) [lucifer]'),
         ('version_info', version_info), ('implementation', implementation),
         ('hash_info', hash_info), ('int_info', int_info), ('float_info', float_info),
-        ('thread_info', thread_info), ('prefix', ''), ('exec_prefix', ''), ('base_prefix', ''),
-        ('base_exec_prefix', ''), ('_framework', ''), ('_git', ('CPython', '', '')),
+        ('thread_info', thread_info), ('_framework', ''), ('_git', ('CPython', '', '')),
         ('copyright', 'Copyright (c) 2001 Python Software Foundation.\nAll Rights Reserved.'),
         ('meta_path', []), ('path_hooks', []), ('path_importer_cache', {})):
     ns_set(_dict, _name, _value)
@@ -235,7 +234,12 @@ def configure(c):
     put('_xoptions', xoptions)
     path = [c['sys_path_0']] if c['sys_path_0'] is not None else []
     path.extend(entry for entry in c['pythonpath'].split(':') if entry)
+    if c['stdlib_dir'] is not None:
+        path.append(c['stdlib_dir'])
     put('path', path)
+    for name in ('prefix', 'exec_prefix', 'base_prefix', 'base_exec_prefix'):
+        put(name, c[name] if c[name] is not None else '')
+    put('_stdlib_dir', c['stdlib_dir'])
 
 
 # The standard streams (Python/pylifecycle.c init_sys_streams)

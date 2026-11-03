@@ -62,7 +62,7 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 EXPORTS = results/abi/cp314t-exports.tsv
 
 .PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel regen-abi check-harness check-compiler regen
-all: bin/lucifer
+all: bin/lucifer build/lib/stamp
 
 # The runtime is an archive so that an embedder can link it too. Every member
 # is kept: extensions bind to symbols that nothing in main.o refers to.
@@ -86,6 +86,12 @@ build/frozen.c: Makefile tools/freeze $(KERNEL) $(MODULES) $(foreach e,$(FROZEN)
 
 build/frozen.o: build/frozen.c $(HEADERS)
 	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<
+
+# The installed standard library next to the executable: Lib/ plus its pycs.
+STDLIB = build/lib/python3.14t
+build/lib/stamp: tools/freeze $(shell find third_party/cpython/Lib -type f -not -name '*.pyc')
+	$(HOST_PYTHON) tools/freeze --pyc $(STDLIB) third_party/cpython/Lib
+	touch $@
 
 abi-audit: bin/lucifer
 	python3 tools/abi/audit.py $(EXPORTS) bin/lucifer
