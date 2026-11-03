@@ -15,6 +15,9 @@ def _final(cls):
     raise TypeError("type '%s.%s' is not an acceptable base type" % (_MODULE, cls.__name__))
 
 
+_MISSING = object()
+
+
 class Interpolation:
     """Interpolation object"""
     __slots__ = ('_value', '_expression', '_conversion', '_format_spec')
@@ -23,7 +26,9 @@ class Interpolation:
     def __init_subclass__(cls):
         _final(Interpolation)
 
-    def __new__(cls, value, expression='', conversion=None, format_spec=''):
+    def __new__(cls, value=_MISSING, expression='', conversion=None, format_spec=''):
+        if value is _MISSING:
+            raise TypeError("Interpolation() missing required argument 'value' (pos 1)")
         if not isinstance(expression, str):
             raise TypeError("Interpolation() argument 'expression' must be str, not %s"
                             % type(expression).__name__)

@@ -18,10 +18,13 @@ output, exit status and the .pyc files left behind must be identical.
 """
 import argparse
 import difflib
+import dis
+import importlib.machinery
 import importlib.util
 import os
 from pathlib import Path
 import py_compile
+import re
 import resource
 import shutil
 import subprocess
@@ -204,13 +207,75 @@ def describe(name, oracle, ours):
     return "\n".join(lines)
 
 
+# Base opcodes no compiled program can reach, so the eval loop has no handler.
+OPCODE_EXEMPT = {
+    "RESERVED": "unassigned",
+    "INTERPRETER_EXIT": "ends CPython's C-recursive entry shim; this loop has none",
+    "BINARY_OP_INPLACE_ADD_UNICODE": "a specialization of BINARY_OP, which the compiler never emits",
+}
+
+
+def opcode_table():
+    spec = importlib.util.spec_from_file_location("opcodes", ROOT / "lib" / "compiler" / "opcodes.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def corpus_opcodes():
+    """The opcode names the host emits for the closure, difftest and kernel corpora."""
+    loader = importlib.machinery.SourceFileLoader("compilercheck", str(ROOT / "tools" / "compilercheck"))
+    spec = importlib.util.spec_from_loader("compilercheck", loader)
+    compilercheck = importlib.util.module_from_spec(spec)
+    loader.exec_module(compilercheck)
+    names = set()
+    pending = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for corpus in ("closure", "difftest", "kernel"):
+            for path in compilercheck.corpus(corpus):
+                try:
+                    pending.append(compile(path.read_bytes(), str(path), "exec"))
+                except (SyntaxError, ValueError):
+                    pass
+    while pending:
+        code = pending.pop()
+        names.update(i.opname for i in dis.get_instructions(code, adaptive=False))
+        pending.extend(c for c in code.co_consts if hasattr(c, "co_code"))
+    return names
+
+
+def check_opcodes():
+    """Every base opcode has a handler in the eval loop; the corpora's too. Returns the failure count."""
+    source = (ROOT / "runtime" / "interp" / "ceval.c").read_text()
+    table = source[source.index("static void *const targets"):]
+    handled = set(re.findall(r"\[(\w+)\] = &&op_", table[:table.index("};")]))
+    opcodes = opcode_table()
+    base = {n for n, v in opcodes.opmap.items() if v < opcodes.MIN_SPECIALIZED_OPCODE}
+    occurring = corpus_opcodes()
+    missing = sorted(base - handled - OPCODE_EXEMPT.keys())
+    unreached = sorted(occurring - base - {"CACHE"})
+    for name in missing:
+        print(f"FAIL opcode {name} ({'occurs in the corpora' if name in occurring else 'never occurs'}) has no handler")
+    for name in unreached:
+        print(f"FAIL opcode {name} occurs in the corpora but is not a base opcode")
+    print(f"{len(base)} base opcodes: {len(base & handled)} handled, {len(OPCODE_EXEMPT)} exempt, "
+          f"{len(missing)} unhandled; {len(occurring & base)} occur in the corpora")
+    return len(missing) + len(unreached)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--oracle", required=True, help="free-threaded CPython 3.14")
+    parser.add_argument("--oracle", help="free-threaded CPython 3.14")
     parser.add_argument("--lucifer", default=str(ROOT / "bin" / "lucifer"))
     parser.add_argument("--programs", default="", help="space-separated names")
     parser.add_argument("--lane", default="plain")
+    parser.add_argument("--opcodes", action="store_true", help="check the eval loop handles every base opcode")
     args = parser.parse_args()
+    if args.opcodes:
+        return 1 if check_opcodes() else 0
+    if not args.oracle:
+        parser.error("--oracle is required")
 
     if importlib.util.MAGIC_NUMBER != MAGIC:
         sys.exit("kernelcheck: the host Python must be CPython 3.14 (magic 3627)")
