@@ -1642,6 +1642,7 @@ class FileIO(_RawIOBase):
             if fd < 0:
                 if not closefd:
                     raise ValueError('Cannot use closefd=False with file name')
+                sys.audit('open', file, mode, flags)
                 if opener is None:
                     fd = posix.open(file, flags, 0o666)
                 else:

@@ -168,6 +168,9 @@ _audit_hooks = []
 
 def addaudithook(hook):
     """Adds a new audit hook callback."""
+    if not _audit_hooks:
+        # The compiler loads on first use; its imports are not the program's.
+        compile('0', '<compiler>', 'eval')
     _audit_hooks.append(hook)
 
 
