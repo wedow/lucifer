@@ -1,6 +1,6 @@
 ---
 id: luc-52bm
-status: open
+status: closed
 deps: [luc-o9xh]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: sonnet.
 
 make check-kernel PROGRAMS="int_arith bigint bool_ops" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t).
 
+
+## Notes
+
+**2026-11-03T04:51:09Z**
+
+Done. int/bool kernel over runtime/prim/int.c digit primitives; BINARY_OP/COMPARE_OP/unary/CONTAINS/TO_BOOL with kernel reflection (operators.py); numeric slot thunks. Deferred: int.__format__ with a spec (K1e), non-ASCII digits in int(str), bytes-like other than bytes in from_bytes (K1g), sequence concat/repeat fallbacks (K1e/K1h).
