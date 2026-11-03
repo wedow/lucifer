@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -93,7 +94,6 @@ def artifact(entry, cache):
     if not path.exists():
         temp = path.with_suffix(path.suffix + '.download')
         with urllib.request.urlopen(entry['url'], timeout=60) as response, temp.open('wb') as output:
-            import shutil
             shutil.copyfileobj(response, output)
         if sha(temp) != entry['sha256']:
             temp.unlink()
@@ -164,6 +164,8 @@ def run(args, pin):
         manifest(target / (args.runtime + '.tsv'), rows)
     work =args.work / args.package / args.runtime
     work.mkdir(parents=True, exist_ok=True)
+    # Saved examples from an earlier run would change which examples this run draws.
+    shutil.rmtree(work / 'hypothesis', ignore_errors=True)
     env = os.environ.copy()
     for key in ['PYTHONHOME', 'PYTHONPATH', 'PYTHON_GIL', 'PYTEST_ADDOPTS', 'PYTEST_PLUGINS']:
         env.pop(key, None)
@@ -190,7 +192,6 @@ def run(args, pin):
         archive = artifact(pkg['source'], args.cache)
         source_parent = work / 'source'
         # Fresh source on every invocation; test side effects never contaminate a rerun.
-        import shutil
         if source_parent.exists():
             shutil.rmtree(source_parent)
         source_parent.mkdir()
@@ -224,6 +225,7 @@ def run(args, pin):
                      'sys.path[:]=s+[p for p in sys.path if p not in s]; '
                      'import importlib,json; [importlib.import_module(n) for n in json.loads(os.environ["CORPUS_IMPORTS"])]; ')
         argv = ['-s', '-c', bootstrap + 'import pytest; raise SystemExit(pytest.main(sys.argv[1:]))', '-p', 'recorder', '-p', 'pytest_timeout',
+                '-p', 'hypothesis.extra.pytestplugin', '--hypothesis-seed=0',
                 '-p', 'pytest_mock', '-p', 'pytest_benchmark.plugin',
                 *[part for plugin in pkg.get('plugins', []) for part in ('-p', plugin)],
                 '--rootdir', str(source), '--import-mode=' + pkg.get('import_mode', 'importlib'),
