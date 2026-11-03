@@ -14,6 +14,7 @@ HOST_PYTHON ?= python3
 
 # The kernel, in boot order.
 KERNEL = lib/kernel/_boot.py lib/kernel/object.py lib/kernel/type.py lib/kernel/descriptors.py \
+	lib/kernel/exceptions.py \
 	lib/kernel/builtins.py
 EXPORTS = results/abi/cp314t-exports.tsv
 

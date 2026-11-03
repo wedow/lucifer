@@ -122,7 +122,11 @@ struct lu_static_type_state {
     X(setattr)                  /* PyObject_SetAttr: __setattr__ */ \
     X(delattr)                  /* PyObject_DelAttr: __delattr__ */ \
     X(generic_setattr)          /* PyObject_GenericSetAttr, value or MISSING */ \
-    X(super_getattr)            /* _PySuper_Lookup(class, self, name) */
+    X(super_getattr)            /* _PySuper_Lookup(class, self, name) */ \
+    X(do_raise)                 /* RAISE_VARARGS: do_raise(exc, cause or MISSING) */ \
+    X(load_special)             /* LOAD_SPECIAL: load_special(owner, which) */ \
+    X(exc_group_match)          /* CHECK_EG_MATCH: (rest, match) of an exception and a type */ \
+    X(prep_reraise_star)        /* CALL_INTRINSIC_2 PREP_RERAISE_STAR */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
     LU_KERNEL_FUNCTIONS(LU_KERNEL_ID)

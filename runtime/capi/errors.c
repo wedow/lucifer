@@ -2,36 +2,13 @@
    current_exception (FOUNDATIONS 2.8). Native raising builds a
    BaseException-layout instance directly, as BaseException.__new__ does,
    because C must be able to raise before the kernel's exception classes
-   exist; chaining and the subclass layouts arrive with K1k. */
+   exist. Attributes beyond args stay unset, as when the class is not
+   initialised. */
 
 #include "lucifer.h"
+#include "interp/exceptions.h"
 
 #include <stdarg.h>
-
-extern PyTypeObject *const lu_exception_types[];
-
-static void
-exc_dealloc(PyObject *op)
-{
-    PyBaseExceptionObject *e = (PyBaseExceptionObject *)op;
-    Py_XDECREF(e->dict);
-    Py_XDECREF(e->args);
-    Py_XDECREF(e->notes);
-    Py_XDECREF(e->traceback);
-    Py_XDECREF(e->context);
-    Py_XDECREF(e->cause);
-    lu_object_free(op);
-}
-
-void
-lu_exc_init(void)
-{
-    for (PyTypeObject *const *tp = lu_exception_types; *tp != NULL; tp++) {
-        (*tp)->tp_basicsize = sizeof(PyBaseExceptionObject);
-        (*tp)->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
-        (*tp)->tp_dealloc = exc_dealloc;
-    }
-}
 
 /* An instance of `type` with the given args tuple (stolen). */
 static PyObject *
@@ -40,8 +17,9 @@ exc_new(PyObject *type, PyObject *args)
     if (args == NULL) {
         return NULL;
     }
-    PyBaseExceptionObject *e = (PyBaseExceptionObject *)lu_object_new(
-        (PyTypeObject *)type, sizeof(PyBaseExceptionObject));
+    PyTypeObject *tp = (PyTypeObject *)type;
+    PyBaseExceptionObject *e = (PyBaseExceptionObject *)(tp->tp_alloc != NULL
+        ? tp->tp_alloc(tp, 0) : lu_object_new(tp, tp->tp_basicsize));
     if (e == NULL) {
         Py_DECREF(args);
         return NULL;
@@ -85,28 +63,35 @@ PyErr_Occurred(void)
 void
 PyErr_SetObject(PyObject *type, PyObject *value)
 {
-    if (value != NULL && PyExceptionInstance_Check(value)
-        && PyErr_GivenExceptionMatches((PyObject *)Py_TYPE(value), type)) {
-        PyErr_SetRaisedException(Py_NewRef(value));
+    if (type != NULL && !PyExceptionClass_Check(type)) {
+        lu_err_format(PyExc_SystemError, "PyErr_SetObject: exception is not a BaseException subclass");
         return;
     }
-    PyObject *args;
-    if (value == NULL || value == Py_None) {
-        args = PyTuple_New(0);
-    }
-    else if (PyTuple_CheckExact(value)) {
-        args = Py_NewRef(value);
+    if (value != NULL && PyExceptionInstance_Check(value)
+        && PyErr_GivenExceptionMatches((PyObject *)Py_TYPE(value), type)) {
+        Py_INCREF(value);
     }
     else {
-        args = PyTuple_New(1);
-        if (args != NULL) {
-            PyTuple_SET_ITEM(args, 0, Py_NewRef(value));
+        PyObject *args;
+        if (value == NULL || value == Py_None) {
+            args = PyTuple_New(0);
+        }
+        else if (PyTuple_CheckExact(value)) {
+            args = Py_NewRef(value);
+        }
+        else {
+            args = PyTuple_New(1);
+            if (args != NULL) {
+                PyTuple_SET_ITEM(args, 0, Py_NewRef(value));
+            }
+        }
+        value = exc_new(type, args);
+        if (value == NULL) {
+            return;
         }
     }
-    PyObject *exc = exc_new(type, args);
-    if (exc != NULL) {
-        PyErr_SetRaisedException(exc);
-    }
+    lu_exc_chain_context(value);
+    PyErr_SetRaisedException(value);
 }
 
 void
@@ -156,14 +141,8 @@ PyErr_GivenExceptionMatches(PyObject *given, PyObject *exc)
     if (PyExceptionInstance_Check(given)) {
         given = (PyObject *)Py_TYPE(given);
     }
-    /* The static types' bases are filled in by the kernel; until then each
-       matches only itself. */
-    for (PyTypeObject *tp = (PyTypeObject *)given; tp != NULL; tp = tp->tp_base) {
-        if ((PyObject *)tp == exc) {
-            return 1;
-        }
-    }
-    return 0;
+    return PyType_Check(given) && PyType_Check(exc)
+        && PyType_IsSubtype((PyTypeObject *)given, (PyTypeObject *)exc);
 }
 
 int

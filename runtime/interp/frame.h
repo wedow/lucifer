@@ -30,6 +30,7 @@ enum lu_frame_return {
     LU_RETURN_PUSH,
     LU_RETURN_METHOD,           /* push the value, then NULL */
     LU_RETURN_DISCARD,
+    LU_RETURN_PAIR,             /* the value is a 2-tuple: push both items */
 };
 
 struct lu_frame {

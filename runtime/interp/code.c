@@ -24,9 +24,20 @@ code_dealloc(PyObject *op)
     lu_object_free(op);
 }
 
+/* The attributes the exception machinery and kernel read; the rest of
+   code's surface arrives with the code object's own ticket. */
+static PyMemberDef code_members[] = {
+    { "co_name", _Py_T_OBJECT, offsetof(PyCodeObject, co_name), Py_READONLY, NULL },
+    { "co_qualname", _Py_T_OBJECT, offsetof(PyCodeObject, co_qualname), Py_READONLY, NULL },
+    { "co_filename", _Py_T_OBJECT, offsetof(PyCodeObject, co_filename), Py_READONLY, NULL },
+    { "co_firstlineno", Py_T_INT, offsetof(PyCodeObject, co_firstlineno), Py_READONLY, NULL },
+    { NULL },
+};
+
 void
 lu_code_init(void)
 {
+    PyCode_Type.tp_members = code_members;
     PyCode_Type.tp_basicsize = offsetof(PyCodeObject, co_code_adaptive);
     PyCode_Type.tp_itemsize = sizeof(lu_codeunit);
     PyCode_Type.tp_flags |= Py_TPFLAGS_DEFAULT;

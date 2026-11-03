@@ -5,8 +5,11 @@
    activation (lu_eval). The loop polls the carrier's word at calls and
    back-edges, and RESUME compares the code's monitoring version.
 
-   Stack entries are strong references. Exception tables arrive with K1k: an
-   error unwinds every frame of the activation.
+   Stack entries are strong references. An error joins the exception's
+   traceback, then looks the raising instruction up in the frame's exception
+   table: a handler gets the stack cut to its depth, the raising offset when
+   it asks for it, and the exception; no handler pops the frame and the
+   caller's loop takes up the error (zero-cost exceptions, 3.11+).
 
    Attribute access, calls of kernel functions and class bodies stay in the
    loop too: where a type's slot is the kernel's (a thunk), the loop pushes
@@ -15,6 +18,7 @@
 
 #include "interp/frame.h"
 #include "interp/code.h"
+#include "interp/exceptions.h"
 
 #include "opcode_ids.h"
 
@@ -40,7 +44,30 @@ static const uint8_t caches[256] = {
 #define UNBOUNDLOCAL_ERROR_MSG \
     "cannot access local variable '%s' where it is not associated with a value"
 
-#define INTRINSIC_LIST_TO_TUPLE 6   /* pycore_intrinsics.h */
+#define INTRINSIC_PREP_RERAISE_STAR 1   /* pycore_intrinsics.h */
+#define INTRINSIC_LIST_TO_TUPLE 6
+
+#define CANNOT_CATCH_MSG \
+    "catching classes that do not inherit from BaseException is not allowed"
+
+/* _PyEval_CheckExceptTypeValid. */
+static int
+check_except_type(PyObject *right)
+{
+    if (PyTuple_Check(right)) {
+        for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(right); i++) {
+            if (!PyExceptionClass_Check(PyTuple_GET_ITEM(right, i))) {
+                lu_err_format(PyExc_TypeError, CANNOT_CATCH_MSG);
+                return -1;
+            }
+        }
+    }
+    else if (!PyExceptionClass_Check(right)) {
+        lu_err_format(PyExc_TypeError, CANNOT_CATCH_MSG);
+        return -1;
+    }
+    return 0;
+}
 
 #define UNBOUNDFREE_ERROR_MSG \
     "cannot access free variable '%s' where it is not associated with a value" \
@@ -339,6 +366,16 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
         [POP_ITER] = &&op_POP_TOP,
         [UNPACK_SEQUENCE] = &&op_UNPACK_SEQUENCE,
         [COMPARE_OP] = &&op_COMPARE_OP,
+        [RAISE_VARARGS] = &&op_RAISE_VARARGS,
+        [RERAISE] = &&op_RERAISE,
+        [PUSH_EXC_INFO] = &&op_PUSH_EXC_INFO,
+        [POP_EXCEPT] = &&op_POP_EXCEPT,
+        [CHECK_EXC_MATCH] = &&op_CHECK_EXC_MATCH,
+        [CHECK_EG_MATCH] = &&op_CHECK_EG_MATCH,
+        [WITH_EXCEPT_START] = &&op_WITH_EXCEPT_START,
+        [LOAD_SPECIAL] = &&op_LOAD_SPECIAL,
+        [LOAD_COMMON_CONSTANT] = &&op_LOAD_COMMON_CONSTANT,
+        [CALL_INTRINSIC_2] = &&op_CALL_INTRINSIC_2,
     };
 #pragma GCC diagnostic pop
     /* An activation never changes carrier: an unpinned park returns from it. */
@@ -352,6 +389,7 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
     PyObject **localsplus, **sp;
     lu_codeunit *next_instr;
     int opcode, oparg;
+    Py_ssize_t lasti;           /* the raising instruction, in code units, for the unwinder */
     PyObject *result;
     /* The call tail's operands: the callable and the owned argument values,
        positional first, then the keywords named by kwnames. */
@@ -363,6 +401,7 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
        value handled per kret. kret is also the value's fate for the callee
        push_callee enters. */
     PyObject *kargs[3];
+    PyObject *exit_args[5];     /* WITH_EXCEPT_START's call: a free slot, self, 3 arguments */
     int kid, nk;
     uint8_t kret;
 
@@ -380,6 +419,13 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
         goto *targets[opcode]; \
     } while (0)
 #define SKIP_CACHES() (next_instr += caches[opcode])
+/* The start of the instruction `next_instr` follows, caches included. */
+#define INSTR_START() ({ \
+        lu_codeunit *at = next_instr; \
+        while ((at - 1)->op.code == CACHE) { \
+            at--; \
+        } \
+        at - 1; })
 #define PUSH(v) (*sp++ = (v))
 #define POP() (*--sp)
 #define TOP() (sp[-1])
@@ -389,6 +435,11 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
 /* A returned value, per the callee's enum lu_frame_return. */
 #define PUSH_RETURNED(ret, v) do { \
         if ((ret) == LU_RETURN_DISCARD) { \
+            Py_DECREF(v); \
+        } \
+        else if ((ret) == LU_RETURN_PAIR) { \
+            PUSH(Py_NewRef(PyTuple_GET_ITEM(v, 0))); \
+            PUSH(Py_NewRef(PyTuple_GET_ITEM(v, 1))); \
             Py_DECREF(v); \
         } \
         else { \
@@ -1324,19 +1375,193 @@ op_UNPACK_SEQUENCE: {
     DISPATCH();
 }
 
-error:
-    /* Until exception tables (K1k): unwind the activation. */
-    for (;;) {
-        frame->stackpointer = sp;
-        struct lu_frame *caller = frame->previous;
-        lu_frame_pop(ts, frame);
-        if (caller->owner == LU_FRAME_C_ENTRY) {
-            ts->current_frame = (struct _PyInterpreterFrame *)caller->previous;
-            return NULL;
+op_RAISE_VARARGS: {
+    /* raise, raise exc, raise exc from cause */
+    SAVE_FRAME();
+    if (oparg == 0) {
+        PyObject *exc = lu_topmost_exc_info(ts)->exc_value;
+        if (exc == NULL || exc == Py_None) {
+            lu_err_format(PyExc_RuntimeError, "No active exception to reraise");
+            goto error;
         }
-        frame = caller;
-        sp = frame->stackpointer;
+        PyErr_SetRaisedException(Py_NewRef(exc));
+        lasti = INSTR_START() - lu_code_start(code);
+        goto exception_unwind;
     }
+    sp -= oparg;
+    kargs[0] = sp[0];
+    kargs[1] = oparg == 2 ? sp[1] : Py_NewRef(LU_MISSING);
+    kid = LU_K_do_raise;
+    nk = 2;
+    kret = LU_RETURN_DISCARD;
+    goto kernel_call;
+}
+
+op_RERAISE: {
+    PyObject *exc = POP();
+    long saved;
+    lasti = oparg && lu_long_as_long(sp[-oparg], &saved) == 0
+        ? saved : INSTR_START() - lu_code_start(code);
+    PyErr_SetRaisedException(exc);
+    goto exception_unwind;
+}
+
+op_PUSH_EXC_INFO: {
+    /* exc -- prev_exc, exc */
+    PyObject *exc = TOP();
+    _PyErr_StackItem *info = ts->exc_info;
+    PyObject *prev = info->exc_value;
+    info->exc_value = Py_NewRef(exc);
+    TOP() = prev != NULL ? prev : Py_NewRef(Py_None);
+    PUSH(exc);
+    DISPATCH();
+}
+
+op_POP_EXCEPT: {
+    PyObject *prev = POP();
+    _PyErr_StackItem *info = ts->exc_info;
+    PyObject *old = info->exc_value;
+    if (prev == Py_None) {
+        Py_DECREF(prev);
+        prev = NULL;
+    }
+    info->exc_value = prev;
+    Py_XDECREF(old);
+    DISPATCH();
+}
+
+op_CHECK_EXC_MATCH: {
+    /* left, right -- left, left matches right */
+    PyObject *right = POP();
+    int ok = check_except_type(right);
+    int match = ok == 0 && PyErr_GivenExceptionMatches(TOP(), right);
+    Py_DECREF(right);
+    if (ok < 0) {
+        SAVE_FRAME();
+        goto error;
+    }
+    PUSH(match ? Py_True : Py_False);
+    DISPATCH();
+}
+
+op_CHECK_EG_MATCH: {
+    /* exc_value, match_type -- rest, match */
+    SAVE_FRAME();
+    kargs[1] = POP();
+    kargs[0] = POP();
+    kid = LU_K_exc_group_match;
+    nk = 2;
+    kret = LU_RETURN_PAIR;
+    goto kernel_call;
+}
+
+op_CALL_INTRINSIC_2: {
+    /* Only INTRINSIC_PREP_RERAISE_STAR until the other intrinsics have users. */
+    SAVE_FRAME();
+    if (oparg != INTRINSIC_PREP_RERAISE_STAR) {
+        lu_err_format(PyExc_SystemError, "intrinsic %d arrives with its consumer", oparg);
+        goto error;
+    }
+    kargs[1] = POP();
+    kargs[0] = POP();
+    kid = LU_K_prep_reraise_star;
+    nk = 2;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_LOAD_SPECIAL: {
+    /* owner -- attr, self_or_null; looked up on the type, never the instance */
+    SAVE_FRAME();
+    kargs[0] = POP();
+    kargs[1] = lu_small_int(oparg);
+    kid = LU_K_load_special;
+    nk = 2;
+    kret = LU_RETURN_METHOD;
+    goto kernel_call;
+}
+
+op_WITH_EXCEPT_START: {
+    /* exit_func, exit_self, lasti, prev_exc, val -- ..., res: calls
+       exit_func([exit_self,] type(val), val, val.__traceback__) as a CALL
+       whose operands stay on the stack. */
+    PyObject *val = TOP();
+    PyObject *tb = ((PyBaseExceptionObject *)val)->traceback;
+    PyObject *exit_self = sp[-4];
+    exit_args[0] = NULL;
+    exit_args[1] = exit_self;
+    exit_args[2] = (PyObject *)Py_TYPE(val);
+    exit_args[3] = val;
+    exit_args[4] = tb ? tb : Py_None;
+    SAVE_FRAME();
+    callable = Py_NewRef(sp[-5]);
+    args = exit_self != NULL ? exit_args + 1 : exit_args + 2;
+    npos = total = exit_self != NULL ? 4 : 3;
+    for (Py_ssize_t i = 0; i < total; i++) {
+        Py_INCREF(args[i]);
+    }
+    kwnames = NULL;
+    base = sp;
+    free_self = exit_self == NULL;
+    to_free = NULL;
+    goto call_tail;
+}
+
+op_LOAD_COMMON_CONSTANT: {
+    /* _common_constants of Lib/opcode.py */
+    static const char *const names[] = { NULL, NULL, "tuple", "all", "any" };
+    PyObject *v = oparg == 0 ? PyExc_AssertionError : oparg == 1 ? PyExc_NotImplementedError : NULL;
+    if (v == NULL) {
+        SAVE_FRAME();
+        PyObject *name = oparg < 5 ? PyUnicode_InternFromString(names[oparg]) : NULL;
+        v = name != NULL ? lu_ns_lookup(ts->interp->builtins, name) : NULL;
+        Py_XDECREF(name);
+        if (v == NULL) {
+            lu_err_format(PyExc_SystemError, "common constant %d is not defined yet", oparg);
+            goto error;
+        }
+    }
+    PUSH(Py_NewRef(v));
+    DISPATCH();
+}
+
+error:
+    /* The raising frame joins the traceback; kernel frames look native and
+       do not. */
+    lasti = INSTR_START() - lu_code_start(code);
+    if (frame->owner != LU_FRAME_KERNEL_HIDDEN) {
+        lu_traceback_here(frame, lasti);
+    }
+exception_unwind: {
+    /* The handler of the instruction the loop is at (RERAISE and a bare
+       raise arrive here without a new traceback entry), or the caller's
+       turn. */
+    int level, handler, push_lasti;
+    int offset = (int)(next_instr - lu_code_start(code)) - 1;
+    if (lu_exception_handler(code, offset, &level, &handler, &push_lasti)) {
+        PyObject **new_top = localsplus + code->co_nlocalsplus + level;
+        while (sp > new_top) {
+            Py_XDECREF(*--sp);
+        }
+        if (push_lasti) {
+            PUSH(lasti <= 256 ? lu_small_int((int)lasti) : PyLong_FromLong((long)lasti));
+        }
+        PUSH(PyErr_GetRaisedException());
+        next_instr = lu_code_start(code) + handler;
+        DISPATCH();
+    }
+    frame->stackpointer = sp;
+    struct lu_frame *caller = frame->previous;
+    lu_frame_pop(ts, frame);
+    if (caller->owner == LU_FRAME_C_ENTRY) {
+        ts->current_frame = (struct _PyInterpreterFrame *)caller->previous;
+        return NULL;
+    }
+    ts->current_frame = (struct _PyInterpreterFrame *)caller;
+    frame = caller;
+    LOAD_FRAME();
+    goto error;
+}
 }
 
 PyObject *
