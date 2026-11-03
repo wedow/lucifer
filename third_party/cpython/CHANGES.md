@@ -4,6 +4,9 @@ Changes to `Lib/`:
   by hand instead of `eval()` of a lambda, until the runtime has a compiler.
   Argument errors keep CPython's wording.
 
+`Parser/Python.asdl` and `Parser/asdl.py` are copied verbatim from the same tag;
+tools/genast writes the node table of lib/modules/_ast.py from them.
+
 Tools/peg_generator/pegen/ is copied from the same tag to generate
 lib/compiler/parser.py. Modifications:
 

@@ -140,3 +140,4 @@ PEGEN = third_party/cpython/Tools/peg_generator
 
 regen:
 	PYTHONPATH=$(PEGEN) $(HOST_PYTHON) -m pegen -q python lib/compiler/python.gram -o lib/compiler/parser.py
+	$(HOST_PYTHON) tools/genast
