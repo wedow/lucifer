@@ -194,23 +194,27 @@ lu_gc_alloc(PyTypeObject *tp, size_t size, size_t presize)
 void
 PyMem_GetAllocator(PyMemAllocatorDomain domain, PyMemAllocatorEx *allocator)
 {
+    pthread_mutex_lock(&_PyRuntime.allocators.lock.mutex);
     switch (domain) {
     case PYMEM_DOMAIN_RAW: *allocator = _PyRuntime.allocators.raw; break;
     case PYMEM_DOMAIN_MEM: *allocator = _PyRuntime.allocators.mem; break;
     case PYMEM_DOMAIN_OBJ: *allocator = _PyRuntime.allocators.obj; break;
     default: memset(allocator, 0, sizeof *allocator);
     }
+    pthread_mutex_unlock(&_PyRuntime.allocators.lock.mutex);
 }
 
 void
 PyMem_SetAllocator(PyMemAllocatorDomain domain, PyMemAllocatorEx *allocator)
 {
+    pthread_mutex_lock(&_PyRuntime.allocators.lock.mutex);
     switch (domain) {
     case PYMEM_DOMAIN_RAW: _PyRuntime.allocators.raw = *allocator; break;
     case PYMEM_DOMAIN_MEM: _PyRuntime.allocators.mem = *allocator; break;
     case PYMEM_DOMAIN_OBJ: _PyRuntime.allocators.obj = *allocator; break;
     default: break;
     }
+    pthread_mutex_unlock(&_PyRuntime.allocators.lock.mutex);
 }
 
 #define LU_DOMAIN_ENTRY_POINTS(domain, malloc_name, calloc_name, realloc_name, free_name) \

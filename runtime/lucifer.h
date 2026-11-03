@@ -128,6 +128,7 @@ extern LU_EXPORT union lu_runtime {
         pthread_once_t started;
         struct {
             PyMemAllocatorEx raw, mem, obj;
+            struct lu_lock lock;        /* PyMem_SetAllocator/GetAllocator */
         } allocators;
         struct {
             PyRefTracer func;
