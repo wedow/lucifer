@@ -162,3 +162,45 @@ lu_set_immortal(PyObject *op)
     op->ob_ref_shared = 0;
     op->ob_gc_bits |= 1 << 6;   /* _PyGC_BITS_DEFERRED */
 }
+
+/* Finalizers from dealloc (Objects/object.c): tp_finalize runs once, on the
+   object resurrected for the call, which then dies unless the finalizer
+   kept it. The finalized bit is _PyGC_BITS_FINALIZED. */
+#define LU_GC_FINALIZED 2
+
+void
+PyObject_CallFinalizer(PyObject *self)
+{
+    PyTypeObject *tp = Py_TYPE(self);
+    if (tp->tp_finalize == NULL || (self->ob_gc_bits & LU_GC_FINALIZED)) {
+        return;
+    }
+    tp->tp_finalize(self);
+    self->ob_gc_bits |= LU_GC_FINALIZED;
+}
+
+int
+PyObject_CallFinalizerFromDealloc(PyObject *self)
+{
+    /* _PyObject_ResurrectStart */
+    _Py_atomic_store_uintptr_relaxed(&self->ob_tid, _Py_ThreadId());
+    _Py_atomic_store_uint32_relaxed(&self->ob_ref_local, 1);
+    _Py_atomic_store_ssize_relaxed(&self->ob_ref_shared, 0);
+    PyObject_CallFinalizer(self);
+    /* _PyObject_ResurrectEnd */
+    uint32_t local = _Py_atomic_load_uint32_relaxed(&self->ob_ref_local);
+    Py_ssize_t shared = _Py_atomic_load_ssize_acquire(&self->ob_ref_shared);
+    if (_Py_IsOwnedByCurrentThread(self) && local == 1 && shared == 0) {
+        _Py_atomic_store_uint32_relaxed(&self->ob_ref_local, 0);
+        return 0;
+    }
+    if (_Py_IsOwnedByCurrentThread(self)) {
+        return lu_explicit_merge_refcount(self, -1) == 0 ? 0 : -1;
+    }
+    /* Another thread owns it now: drop the resurrection's shared reference. */
+    Py_ssize_t new_shared;
+    do {
+        new_shared = shared - (1 << _Py_REF_SHARED_SHIFT);
+    } while (!_Py_atomic_compare_exchange_ssize(&self->ob_ref_shared, &shared, new_shared));
+    return new_shared == _Py_REF_MERGED ? 0 : -1;
+}

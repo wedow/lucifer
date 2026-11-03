@@ -24,6 +24,15 @@ int lu_exception_handler(PyCodeObject *code, int index, int *level, int *handler
 /* Makes the handled exception `value`'s __context__ (PyErr_SetObject). */
 void lu_exc_chain_context(PyObject *value);
 
+/* The frame object of a generator's frame, which the frame keeps: made on
+   first use, its position refreshed at each (gi_frame; the live frame
+   object arrives with K1s). */
+PyObject *lu_frame_object(struct lu_frame *f);
+
+/* An exception nothing can take, reported as the default unraisable hook
+   does: "Exception ignored while <what> <repr(obj)>:" and its traceback. */
+void lu_err_unraisable(const char *what, PyObject *obj);
+
 /* The code object a traceback's frame ran. */
 PyCodeObject *lu_frame_code(PyFrameObject *frame);
 

@@ -61,6 +61,16 @@ lu_prim_exc_methods	runtime/interp/exceptions.c	_lucifer's exception primitives,
 code_members	runtime/interp/code.c	PyMemberDef table of the code layout, never written; tp_members takes it non-const
 names.*	runtime/interp/ceval.c	the builtins LOAD_COMMON_CONSTANT names, a table never written
 lu_prim_storage_methods	runtime/prim/storage.c	_lucifer's storage primitives, a PyMethodDef table never written; the API takes it non-const
+gen_getset	runtime/interp/gen.c	PyGetSetDef table of generators, never written; tp_getset takes it non-const
+coro_getset	runtime/interp/gen.c	PyGetSetDef table of coroutines, never written; tp_getset takes it non-const
+coro_members	runtime/interp/gen.c	PyMemberDef table of coroutines, never written; tp_members takes it non-const
+async_gen_getset	runtime/interp/gen.c	PyGetSetDef table of async generators, never written; tp_getset takes it non-const
+async_gen_members	runtime/interp/gen.c	PyMemberDef table of async generators, never written; tp_members takes it non-const
+lu_coro_wrapper_type	runtime/interp/gen.c	coroutine_wrapper, a private static type; the kernel fills in its slots once at startup
+lu_async_gen_athrow_type	runtime/interp/gen.c	async_generator_athrow, a private static type; the kernel fills in its slots once at startup
+lu_async_gen_wrapped_type	runtime/interp/gen.c	async_generator_wrapped_value, a private static type; layout set once at startup
+lu_prim_gen_methods	runtime/interp/gen.c	_lucifer's generator primitives, a PyMethodDef table never written; the API takes it non-const
+lu_sys_frame_methods	runtime/interp/frame.c	sys's recursion-limit functions, a PyMethodDef table never written; the API takes it non-const
 lu_prim_bytes_methods	runtime/prim/bytes.c	_lucifer's bytes primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_mv_methods	runtime/prim/memoryview.c	_lucifer's memoryview primitives, a PyMethodDef table never written; the API takes it non-const
 bytes_as_buffer	runtime/prim/bytes.c	bytes' PyBufferProcs, never written after initialization; the type slot takes it non-const

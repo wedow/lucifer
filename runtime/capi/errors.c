@@ -95,6 +95,12 @@ PyErr_SetObject(PyObject *type, PyObject *value)
 }
 
 void
+PyErr_SetNone(PyObject *type)
+{
+    PyErr_SetObject(type, NULL);
+}
+
+void
 PyErr_SetString(PyObject *type, const char *message)
 {
     PyObject *value = PyUnicode_FromString(message);

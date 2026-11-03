@@ -18,6 +18,7 @@ KERNEL = lib/kernel/_boot.py lib/kernel/object.py lib/kernel/type.py lib/kernel/
 	lib/kernel/float.py lib/kernel/complex.py lib/kernel/slice.py lib/kernel/iter.py lib/kernel/tuple.py lib/kernel/_listsort.py \
 	lib/kernel/list.py lib/kernel/range.py lib/kernel/str.py lib/kernel/bytes.py lib/kernel/memoryview.py \
 	lib/kernel/dict.py lib/kernel/set.py \
+	lib/kernel/generators.py \
 	lib/kernel/builtins.py
 EXPORTS = results/abi/cp314t-exports.tsv
 

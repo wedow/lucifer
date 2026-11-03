@@ -219,14 +219,17 @@ boot_native(struct _is *interp)
         return -1;
     }
     Py_DECREF(modules_name);
-    for (PyMethodDef *ml = lu_sys_int_methods; ml->ml_name != NULL; ml++) {
-        PyObject *f = PyCFunction_NewEx(ml, sys, NULL);
-        PyObject *name = f != NULL ? PyUnicode_InternFromString(ml->ml_name) : NULL;
-        int err = name == NULL || lu_ns_insert(interp->sysdict, name, f) < 0;
-        Py_XDECREF(name);
-        Py_XDECREF(f);
-        if (err) {
-            return -1;
+    PyMethodDef *const sys_tables[] = { lu_sys_int_methods, lu_sys_frame_methods };
+    for (size_t i = 0; i < sizeof sys_tables / sizeof sys_tables[0]; i++) {
+        for (PyMethodDef *ml = sys_tables[i]; ml->ml_name != NULL; ml++) {
+            PyObject *f = PyCFunction_NewEx(ml, sys, NULL);
+            PyObject *name = f != NULL ? PyUnicode_InternFromString(ml->ml_name) : NULL;
+            int err = name == NULL || lu_ns_insert(interp->sysdict, name, f) < 0;
+            Py_XDECREF(name);
+            Py_XDECREF(f);
+            if (err) {
+                return -1;
+            }
         }
     }
     if (add_module(interp, builtins) < 0 || add_module(interp, sys) < 0) {

@@ -31,6 +31,7 @@ static PyMemberDef code_members[] = {
     { "co_qualname", _Py_T_OBJECT, offsetof(PyCodeObject, co_qualname), Py_READONLY, NULL },
     { "co_filename", _Py_T_OBJECT, offsetof(PyCodeObject, co_filename), Py_READONLY, NULL },
     { "co_firstlineno", Py_T_INT, offsetof(PyCodeObject, co_firstlineno), Py_READONLY, NULL },
+    { "co_flags", Py_T_INT, offsetof(PyCodeObject, co_flags), Py_READONLY, NULL },
     { NULL },
 };
 

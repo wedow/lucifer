@@ -570,6 +570,7 @@ lu_layouts_init(void)
     lu_storage_init();
     lu_module_init();
     lu_exc_init();
+    lu_gen_init();
 
     struct lu_static_objects *s = &_PyRuntime.singletons;
     for (int i = 0; i < LU_NSMALLNEGINTS + LU_NSMALLPOSINTS; i++) {

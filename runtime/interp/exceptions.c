@@ -363,15 +363,44 @@ frame_snapshot(struct lu_frame *lf, int lasti)
     return (PyObject *)f;
 }
 
+PyObject *
+lu_frame_object(struct lu_frame *lf)
+{
+    int lasti = (int)(lu_frame_lasti(lf) * sizeof(lu_codeunit));
+    if (lf->frame_obj == NULL) {
+        lf->frame_obj = (PyFrameObject *)frame_snapshot(lf, lasti);
+    }
+    else {
+        ((struct _frame *)lf->frame_obj)->f_lasti = lasti;
+    }
+    return Py_XNewRef((PyObject *)lf->frame_obj);
+}
+
 /* traceback (Python/traceback.c) */
 
+/* A traceback of 100,000 entries dies in a loop, not a recursion: an entry
+   held only by the one before it is freed here (CPython's trashcan). */
 static void
 tb_dealloc(PyObject *op)
 {
-    PyTracebackObject *tb = (PyTracebackObject *)op;
-    Py_XDECREF(tb->tb_next);
-    Py_XDECREF(tb->tb_frame);
-    lu_object_free(op);
+    while (op != NULL) {
+        PyTracebackObject *tb = (PyTracebackObject *)op;
+        PyObject *next = (PyObject *)tb->tb_next;
+        Py_XDECREF(tb->tb_frame);
+        lu_object_free(op);
+        op = NULL;
+        if (next == NULL) {
+            break;
+        }
+        if (_Py_IsOwnedByCurrentThread(next) && next->ob_ref_local == 1
+            && _Py_atomic_load_ssize_relaxed(&next->ob_ref_shared) == 0) {
+            next->ob_ref_local = 0;
+            op = next;
+        }
+        else {
+            Py_DECREF(next);
+        }
+    }
 }
 
 static PyObject *
@@ -794,11 +823,7 @@ prim_caller_traceback(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(0);
     PyThreadState *ts = PyThreadState_Get();
     struct lu_frame *f = ((struct lu_frame *)ts->current_frame)->previous;
-    lu_codeunit *at = f->instr;
-    while ((at - 1)->op.code == CACHE) {
-        at--;
-    }
-    PyObject *fr = frame_snapshot(f, (int)((at - 1 - lu_code_start(f->code)) * sizeof(lu_codeunit)));
+    PyObject *fr = frame_snapshot(f, (int)(lu_frame_lasti(f) * sizeof(lu_codeunit)));
     PyTracebackObject *tb = fr != NULL
         ? (PyTracebackObject *)lu_object_new(&PyTraceBack_Type, sizeof(PyTracebackObject)) : NULL;
     if (tb == NULL) {

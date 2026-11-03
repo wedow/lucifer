@@ -568,6 +568,33 @@ format_node(struct ctx *c, struct node *top)
 }
 
 void
+lu_err_unraisable(const char *what, PyObject *obj)
+{
+    PyObject *exc = PyErr_GetRaisedException();
+    PyObject *r = lu_call_kernel(LU_K_repr, &obj, 1);
+    const char *text = r != NULL && PyUnicode_Check(r) ? PyUnicode_AsUTF8(r) : NULL;
+    PyErr_Clear();
+    fprintf(stderr, "Exception ignored while %s %s:\n", what, text != NULL ? text : "<object repr() failed>");
+    Py_XDECREF(r);
+    if (exc != NULL && ((PyBaseExceptionObject *)exc)->traceback == NULL) {
+        /* format_unraisable_v: a traceback of the frame running now */
+        struct lu_frame *f = (struct lu_frame *)PyThreadState_Get()->current_frame;
+        while (f != NULL && (f->owner == LU_FRAME_C_ENTRY || f->owner == LU_FRAME_KERNEL_HIDDEN)) {
+            f = f->previous;
+        }
+        if (f != NULL) {
+            PyErr_SetRaisedException(exc);
+            lu_traceback_here(f, lu_frame_lasti(f));
+            exc = PyErr_GetRaisedException();
+        }
+    }
+    if (exc != NULL) {
+        lu_err_display(exc);
+        Py_DECREF(exc);
+    }
+}
+
+void
 lu_err_display(PyObject *exc)
 {
     struct out out = { 0 };
