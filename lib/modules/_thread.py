@@ -261,7 +261,7 @@ class _ThreadHandle:
     """Handle of a thread: its identifier and whether it has finished."""
     __slots__ = ('_ident', '_done')
 
-    def __init__(self, ident):
+    def __init__(self, ident=0):
         self._ident = ident
         self._done = False
 
