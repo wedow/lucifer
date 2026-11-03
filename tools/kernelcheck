@@ -104,6 +104,12 @@ SOURCE_ROWS = [
     ("script cookie", ["-S", "s.py"], {"s.py": b"# -*- coding: latin-1 -*-\nprint('caf\xe9')\n"}, b"", True),
     ("script warning", ["-S", "s.py"], {"s.py": "x = '\\d'\nprint(x)\n"}, b"", True),
     ("script syntax error", ["-S", "s.py"], {"s.py": "x = (\n"}, b"", False),
+    ("script uncaught", ["-S", "s.py"],
+     {"s.py": "def f(x):\n    return [1, 2][x] + (None + 1)\ntry:\n    f(0)\nexcept TypeError as e:\n"
+              "    raise ValueError('wrapped') from e\n"}, b"", True),
+    ("script excepthook", ["-S", "s.py"],
+     {"s.py": "import sys\nsys.excepthook = lambda t, v, tb: print('hooked', t.__name__, v, tb.tb_lineno)\n"
+              "raise KeyError('k')\n"}, b"", True),
     ("script import", ["-S", "main.py"],
      {"main.py": "import dep, pkg.mod\nprint(dep.VALUE, dep.__file__, dep.__cached__, pkg.mod.NAME, pkg.mod.__package__)\n",
       "dep.py": "VALUE = [i * i for i in range(5)]\n",

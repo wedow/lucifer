@@ -142,7 +142,16 @@ report_uncaught(void)
         }
     }
     else {
-        lu_err_display(exc);
+        /* sys.excepthook(type, value, traceback); without one, the default display */
+        PyObject *hook = lu_ns_lookup(_PyRuntime.main_interp.sysdict, PyUnicode_InternFromString("excepthook"));
+        PyObject *tb = ((PyBaseExceptionObject *)exc)->traceback;
+        PyObject *args[3] = { (PyObject *)Py_TYPE(exc), exc, tb != NULL ? tb : Py_None };
+        PyObject *result = hook != NULL && hook != Py_None ? lu_call(hook, args, 3, NULL) : NULL;
+        if (result == NULL) {
+            PyErr_Clear();
+            lu_err_display(exc);
+        }
+        Py_XDECREF(result);
     }
     Py_DECREF(exc);
     return status;
