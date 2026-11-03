@@ -7,7 +7,8 @@
    Also here: pending calls (Py_AddPendingCall) and PyThreadState_SetAsyncExc,
    the two reasons whose producers are other threads' calls. */
 
-#include "lucifer.h"
+#include "interp/frame.h"
+#include "interp/code.h"
 
 #define TASK(ts) ((struct lu_task *)(ts))
 
@@ -21,6 +22,14 @@ unset_targeted(struct lu_task *t, uintptr_t bits)
 
 /* Reasons with no producer yet: the GIL is never requested, there is no JIT
    or scheduler policy to preempt for, and the remote debugger arrives later. */
+/* Whether the task is running a kernel builtin's frame. */
+static int
+in_builtin(PyThreadState *ts)
+{
+    struct lu_frame *f = (struct lu_frame *)ts->current_frame;
+    return f != NULL && f->owner != LU_FRAME_C_ENTRY && (f->code->co_flags & LU_CO_KERNEL);
+}
+
 #define LU_POLL_NO_PRODUCER (LU_POLL_GIL_DROP_REQUEST | LU_POLL_JIT_INVALIDATE_COLD \
     | LU_POLL_PREEMPT | LU_POLL_DEOPT_SELF | LU_POLL_REMOTE_EXEC)
 
@@ -54,8 +63,10 @@ lu_poll_slow(PyThreadState *ts)
             lu_qsbr_process(c);
         }
     }
-    /* Collection runs only here. */
-    if (breaker & LU_POLL_GC_SCHEDULED) {
+    /* Collection runs only here, and not in a builtin's frame: CPython's
+       builtins are C and never poll, so the reason waits for the poll that
+       follows the builtin's return. */
+    if ((breaker & LU_POLL_GC_SCHEDULED) && !in_builtin(ts)) {
         lu_poll_clear(c, LU_POLL_GC_SCHEDULED);
         lu_gc_run(ts);
     }

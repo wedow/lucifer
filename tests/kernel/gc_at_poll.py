@@ -46,6 +46,20 @@ for i in range(5000):
 print("retained", 2 <= hits - before <= 5)
 del keep
 
+# A builtin allocates without polling, as CPython's C does: the collection it
+# schedules starts at the poll after its call, once.
+numbers = list(range(3000))
+before = hits
+pairs = list(zip(numbers, numbers))
+print("builtin zip", hits - before)
+before = hits
+items = list(dict.fromkeys(numbers).items())
+print("builtin items", hits - before)
+before = hits
+counted = list(enumerate(numbers))
+print("builtin enumerate", hits - before)
+del numbers, pairs, items, counted
+
 # A disabled collector schedules nothing, and enabling it does not schedule
 # the allocations made meanwhile.
 gc.disable()

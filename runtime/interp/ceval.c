@@ -836,6 +836,7 @@ op_RETURN_VALUE:
 return_frame: {
     struct lu_frame *caller = frame->previous;
     uint8_t ret = frame->ret;
+    int from_builtin = (code->co_flags & LU_CO_KERNEL) != 0;
     if (frame->owner == LU_FRAME_GENERATOR) {
         lu_gen_finish(ts, frame);
         if (ret == LU_RETURN_FOR_ITER) {
@@ -857,6 +858,9 @@ return_frame: {
         next_instr += instr_oparg(INSTR_START());       /* out of the yield-from loop */
     }
     PUSH_RETURNED(ret, retval);
+    if (from_builtin && !(code->co_flags & LU_CO_KERNEL)) {
+        POLL();                 /* after a builtin's call, as CPython's CALL polls */
+    }
     DISPATCH();
 }
 
