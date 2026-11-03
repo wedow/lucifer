@@ -10,6 +10,10 @@
 #define CO_FAST_CELL    0x40
 #define CO_FAST_FREE    0x80
 
+/* co_flags bit of code frozen into the kernel: its frames are kernel-hidden.
+   CPython leaves the bit unused. */
+#define LU_CO_KERNEL 0x40000000
+
 /* The fields marshal reads (_PyCodeConstructor), borrowed. */
 struct lu_code_fields {
     PyObject *filename, *name, *qualname;

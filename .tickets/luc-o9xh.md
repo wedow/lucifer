@@ -1,6 +1,6 @@
 ---
 id: luc-o9xh
-status: open
+status: closed
 deps: [luc-dr76]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: opus.
 
 make check-kernel PROGRAMS="classes descriptors" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t); make check-capi passes tests/capi/static_tp_dict.c (PyLong_Type.tp_dict reads NULL after kernel init while int.__dict__ maps names; FOUNDATIONS 2.1).
 
+
+## Notes
+
+**2026-11-03T04:21:02Z**
+
+Done: classes descriptors + 20 err_* programs match the oracle; static_tp_dict passes. Inline values behind shared keys deferred (managed dict only). For K1d/K1e/K1h/K1j: COMPARE_OP, FOR_ITER/GET_ITER, UNPACK_SEQUENCE and TO_BOOL have only exact-type fast paths with SystemError fallbacks; nb_*/sq_* slot thunks other than nb_bool/sq_length/sq_contains are absent (set_slot leaves those slots alone); kernel raises via _lucifer.error. K1k: getattr_hook's try/except AttributeError starts catching once exception tables exist. K1t: tp_version_tag assigned at readiness, cleared by lu_type_modified; subclass lists are strong lists.

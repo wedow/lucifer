@@ -13,7 +13,8 @@ LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o)) build/frozen.o
 HOST_PYTHON ?= python3
 
 # The kernel, in boot order.
-KERNEL = lib/kernel/builtins.py
+KERNEL = lib/kernel/_boot.py lib/kernel/object.py lib/kernel/type.py lib/kernel/descriptors.py \
+	lib/kernel/builtins.py
 EXPORTS = results/abi/cp314t-exports.tsv
 
 .PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel regen-abi check-harness check-compiler regen

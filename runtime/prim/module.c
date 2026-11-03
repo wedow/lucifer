@@ -24,6 +24,7 @@ lu_module_init(void)
     PyModule_Type.tp_basicsize = sizeof(PyModuleObject);
     PyModule_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyModule_Type.tp_dealloc = module_dealloc;
+    PyModule_Type.tp_dictoffset = offsetof(PyModuleObject, md_dict);
 }
 
 /* PyModule_NewObject: the dict starts with __name__, __doc__, __package__,
@@ -85,6 +86,24 @@ PyModule_GetState(PyObject *m)
     return ((PyModuleObject *)m)->md_state;
 }
 
+/* PyModule_AddFunctions with interned names. */
+static int
+add_functions(PyObject *m, PyMethodDef *defs)
+{
+    PyModuleObject *mo = (PyModuleObject *)m;
+    for (PyMethodDef *ml = defs; ml->ml_name != NULL; ml++) {
+        PyObject *f = PyCFunction_NewEx(ml, m, mo->md_name);
+        PyObject *name = f != NULL ? PyUnicode_InternFromString(ml->ml_name) : NULL;
+        int err = name == NULL || lu_ns_insert(mo->md_dict, name, f) < 0;
+        Py_XDECREF(name);
+        Py_XDECREF(f);
+        if (err) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 /* PyModule_FromDefAndSpec and PyModule_ExecDef, for builtin modules made
    natively before importlib exists (no spec, no Py_mod_create). */
 PyObject *
@@ -103,15 +122,8 @@ lu_module_from_def(PyModuleDef *def)
             goto fail;
         }
     }
-    for (PyMethodDef *ml = def->m_methods; ml != NULL && ml->ml_name != NULL; ml++) {
-        PyObject *f = PyCFunction_NewEx(ml, m, mo->md_name);
-        PyObject *name = f != NULL ? PyUnicode_InternFromString(ml->ml_name) : NULL;
-        int err = name == NULL || lu_ns_insert(mo->md_dict, name, f) < 0;
-        Py_XDECREF(name);
-        Py_XDECREF(f);
-        if (err) {
-            goto fail;
-        }
+    if (def->m_methods != NULL && add_functions(m, def->m_methods) < 0) {
+        goto fail;
     }
     for (PyModuleDef_Slot *slot = def->m_slots; slot != NULL && slot->slot != 0; slot++) {
         if (slot->slot == Py_mod_create) {
@@ -135,7 +147,14 @@ lucifer_exec(PyObject *m)
 {
     struct lu_prim_state *state = PyModule_GetState(m);
     state->interp = PyInterpreterState_Get();
-    return 0;
+    if (add_functions(m, lu_prim_type_methods) < 0 || add_functions(m, lu_prim_descr_methods) < 0
+        || add_functions(m, lu_prim_slot_methods) < 0) {
+        return -1;
+    }
+    PyObject *name = PyUnicode_InternFromString("MISSING");
+    int err = name == NULL || lu_ns_insert(PyModule_GetDict(m), name, LU_MISSING) < 0;
+    Py_XDECREF(name);
+    return err ? -1 : 0;
 }
 
 static PyMethodDef lucifer_methods[] = {

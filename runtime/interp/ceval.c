@@ -6,9 +6,15 @@
    back-edges, and RESUME compares the code's monitoring version.
 
    Stack entries are strong references. Exception tables arrive with K1k: an
-   error unwinds every frame of the activation. */
+   error unwinds every frame of the activation.
+
+   Attribute access, calls of kernel functions and class bodies stay in the
+   loop too: where a type's slot is the kernel's (a thunk), the loop pushes
+   the kernel Python function's frame instead of calling the slot, and the
+   frame's `ret` says what the caller does with its value (DESIGN 5.2). */
 
 #include "interp/frame.h"
+#include "interp/code.h"
 
 #include "opcode_ids.h"
 
@@ -53,8 +59,8 @@ format_unbound(PyCodeObject *co, int index)
     }
 }
 
-/* PyObject_IsTrue over the types that exist so far: the singletons, str, and
-   objects that define no truth. */
+/* PyObject_IsTrue over the types that exist so far: the singletons, str,
+   exact tuples, lists and dicts, and objects that define no truth. */
 static int
 to_bool(PyObject *v)
 {
@@ -66,6 +72,12 @@ to_bool(PyObject *v)
     }
     if (PyUnicode_CheckExact(v)) {
         return PyUnicode_GET_LENGTH(v) != 0;
+    }
+    if (PyTuple_CheckExact(v) || PyList_CheckExact(v)) {
+        return Py_SIZE(v) != 0;
+    }
+    if (PyDict_CheckExact(v)) {
+        return ((PyDictObject *)v)->ma_used != 0;
     }
     PyTypeObject *tp = Py_TYPE(v);
     if ((tp->tp_as_number == NULL || tp->tp_as_number->nb_bool == NULL)
@@ -125,6 +137,110 @@ import_from(PyObject *module, PyObject *name)
         return NULL;
     }
     return Py_NewRef(v);
+}
+
+/* GET_ITER and FOR_ITER over exact tuples and lists (_PyTupleIterObject,
+   _PyListIterObject); other iterables through their C slots until the
+   iteration protocol is kernel Python (K1h). */
+typedef struct {
+    PyObject_HEAD
+    Py_ssize_t it_index;
+    PyObject *it_seq;
+} seqiterobject;
+
+static PyObject *
+get_iter(PyObject *v)
+{
+    PyTypeObject *tp = Py_TYPE(v);
+    if (tp == &PyTuple_Type || tp == &PyList_Type) {
+        PyTypeObject *it_type = tp == &PyTuple_Type ? &PyTupleIter_Type : &PyListIter_Type;
+        seqiterobject *it = (seqiterobject *)lu_object_new(it_type, sizeof(seqiterobject));
+        if (it != NULL) {
+            it->it_seq = Py_NewRef(v);
+        }
+        return (PyObject *)it;
+    }
+    if (tp->tp_iter != NULL) {
+        return tp->tp_iter(v);
+    }
+    lu_err_format(PyExc_TypeError, "'%.200s' object is not iterable", tp->tp_name);
+    return NULL;
+}
+
+/* The next item, or NULL: exhausted when no error is set. */
+static PyObject *
+iter_next(PyObject *iter)
+{
+    PyTypeObject *tp = Py_TYPE(iter);
+    if (tp == &PyTupleIter_Type || tp == &PyListIter_Type) {
+        seqiterobject *it = (seqiterobject *)iter;
+        if (it->it_seq == NULL) {
+            return NULL;
+        }
+        if (it->it_index < Py_SIZE(it->it_seq)) {
+            PyObject *v = tp == &PyTupleIter_Type ? PyTuple_GET_ITEM(it->it_seq, it->it_index)
+                                                  : PyList_GET_ITEM(it->it_seq, it->it_index);
+            it->it_index++;
+            return Py_NewRef(v);
+        }
+        Py_CLEAR(it->it_seq);
+        return NULL;
+    }
+    if (tp->tp_iternext == NULL) {
+        lu_err_format(PyExc_TypeError, "'%.100s' object is not an iterator", tp->tp_name);
+        return NULL;
+    }
+    PyObject *v = tp->tp_iternext(iter);
+    if (v == NULL && PyErr_ExceptionMatches(PyExc_StopIteration)) {
+        PyErr_Clear();
+    }
+    return v;
+}
+
+static void
+seqiter_dealloc(PyObject *op)
+{
+    Py_XDECREF(((seqiterobject *)op)->it_seq);
+    lu_object_free(op);
+}
+
+void
+lu_iter_init(void)
+{
+    PyTypeObject *types[] = { &PyTupleIter_Type, &PyListIter_Type };
+    for (int i = 0; i < 2; i++) {
+        types[i]->tp_basicsize = sizeof(seqiterobject);
+        types[i]->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
+        types[i]->tp_dealloc = seqiter_dealloc;
+    }
+}
+
+/* UNPACK_SEQUENCE over exact tuples and lists: the items, last first. */
+static int
+unpack(PyObject *seq, int n, PyObject **out)
+{
+    if (!PyTuple_CheckExact(seq) && !PyList_CheckExact(seq)) {
+        lu_err_format(PyExc_SystemError, "unpacking a %s arrives with iteration (K1h)",
+                      Py_TYPE(seq)->tp_name);
+        return -1;
+    }
+    Py_ssize_t size = Py_SIZE(seq);
+    if (size != n) {
+        if (size < n) {
+            lu_err_format(PyExc_ValueError, "not enough values to unpack (expected %d, got %zd)",
+                          n, size);
+        }
+        else {
+            lu_err_format(PyExc_ValueError, "too many values to unpack (expected %d, got %zd)",
+                          n, size);
+        }
+        return -1;
+    }
+    PyObject **items = PyTuple_CheckExact(seq) ? &PyTuple_GET_ITEM(seq, 0) : ((PyListObject *)seq)->ob_item;
+    for (int i = 0; i < n; i++) {
+        out[n - 1 - i] = Py_NewRef(items[i]);
+    }
+    return 0;
 }
 
 static void
@@ -209,6 +325,20 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
         [IMPORT_NAME] = &&op_IMPORT_NAME,
         [IMPORT_FROM] = &&op_IMPORT_FROM,
         [JUMP_BACKWARD] = &&op_JUMP_BACKWARD,
+        [LOAD_ATTR] = &&op_LOAD_ATTR,
+        [STORE_ATTR] = &&op_STORE_ATTR,
+        [DELETE_ATTR] = &&op_DELETE_ATTR,
+        [LOAD_SUPER_ATTR] = &&op_LOAD_SUPER_ATTR,
+        [LOAD_BUILD_CLASS] = &&op_LOAD_BUILD_CLASS,
+        [LOAD_LOCALS] = &&op_LOAD_LOCALS,
+        [LOAD_FROM_DICT_OR_GLOBALS] = &&op_LOAD_FROM_DICT_OR_GLOBALS,
+        [SETUP_ANNOTATIONS] = &&op_SETUP_ANNOTATIONS,
+        [GET_ITER] = &&op_GET_ITER,
+        [FOR_ITER] = &&op_FOR_ITER,
+        [END_FOR] = &&op_POP_TOP,
+        [POP_ITER] = &&op_POP_TOP,
+        [UNPACK_SEQUENCE] = &&op_UNPACK_SEQUENCE,
+        [COMPARE_OP] = &&op_COMPARE_OP,
     };
 #pragma GCC diagnostic pop
     /* An activation never changes carrier: an unpinned park returns from it. */
@@ -227,7 +357,14 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
        positional first, then the keywords named by kwnames. */
     PyObject *callable, *kwnames, **args, **base, **to_free;
     Py_ssize_t total, npos;
+    int free_self;              /* args[-1] may take a prepended self */
     struct lu_frame *callee;
+    /* A kernel call's operands: kernel[kid] on kargs[0..nk), owned, its
+       value handled per kret. kret is also the value's fate for the callee
+       push_callee enters. */
+    PyObject *kargs[3];
+    int kid, nk;
+    uint8_t kret;
 
 #define LOAD_FRAME() do { \
         code = frame->code; \
@@ -249,6 +386,18 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
 #define GETLOCAL(i) (localsplus[i])
 #define NAME(i) PyTuple_GET_ITEM(code->co_names, i)
 #define ERROR_IF(cond) do { if (cond) goto error; } while (0)
+/* A returned value, per the callee's enum lu_frame_return. */
+#define PUSH_RETURNED(ret, v) do { \
+        if ((ret) == LU_RETURN_DISCARD) { \
+            Py_DECREF(v); \
+        } \
+        else { \
+            PUSH(v); \
+            if ((ret) == LU_RETURN_METHOD) { \
+                PUSH(NULL); \
+            } \
+        } \
+    } while (0)
 #define POLL() do { \
         if (*poll & LU_POLL_EVENTS_MASK) { \
             SAVE_FRAME(); \
@@ -413,44 +562,97 @@ call_stack_args:
         total++;
     }
     npos = total - (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
+    free_self = args[-1] == NULL;
     to_free = NULL;
 
-call_tail:
-    /* Consumes callable, args and kwnames; the stack is reset to base. */
+call_tail: {
+    /* Consumes callable, args and kwnames; the stack is reset to base. A
+       bound method, a kernel function and an object whose __call__ is
+       Python run in this loop; everything else is foreign C. */
     SAVE_FRAME();
+    if (Py_IS_TYPE(callable, &PyMethod_Type) && free_self) {
+        PyMethodObject *m = (PyMethodObject *)callable;
+        *--args = Py_NewRef(m->im_self);
+        npos++;
+        total++;
+        free_self = 0;
+        PyObject *func = Py_NewRef(m->im_func);
+        Py_SETREF(callable, func);
+    }
+    if (callable == (PyObject *)&PyType_Type && total == 1 && npos == 1) {
+        result = Py_NewRef((PyObject *)Py_TYPE(args[0]));       /* type(x) */
+        goto call_done;
+    }
+    PyObject *target = NULL, *self = NULL;
     if (Py_IS_TYPE(callable, &PyFunction_Type)) {
-        callee = lu_frame_call(ts, (PyFunctionObject *)callable, args, npos, kwnames);
+        target = callable;
+    }
+    else if (Py_IS_TYPE(callable, &PyCFunction_Type)
+             && (((PyCFunctionObject *)callable)->m_ml->ml_flags & LU_METH_FRAME)) {
+        if (kwnames != NULL) {
+            lu_err_format(PyExc_TypeError, "%s() takes no keyword arguments",
+                          ((PyCFunctionObject *)callable)->m_ml->ml_name);
+            result = NULL;
+            goto call_done;
+        }
+        struct lu_frame *(*prim)(PyThreadState *, PyObject *const *, Py_ssize_t) =
+            (struct lu_frame *(*)(PyThreadState *, PyObject *const *, Py_ssize_t))(void (*)(void))
+            ((PyCFunctionObject *)callable)->m_ml->ml_meth;
+        callee = prim(ts, args, npos);
+        for (Py_ssize_t i = 0; i < total; i++) {
+            Py_DECREF(args[i]);
+        }
+        Py_DECREF(callable);
+        PyMem_Free(to_free);
+        sp = base;
+        frame->stackpointer = sp;
+        ERROR_IF(callee == NULL);
+        kret = LU_RETURN_PUSH;
+        goto push_callee;
+    }
+    else {
+        int found = lu_kernel_target(callable, args, npos, &target, &self);
+        if (found < 0) {
+            result = NULL;
+            goto call_done;
+        }
+        if (!found && Py_TYPE(callable)->tp_call == lu_slot_tp_call) {
+            /* An instance whose type's __call__ is a function or kernel descriptor. */
+            PyObject *descr = _PyType_Lookup(Py_TYPE(callable), LU_ID(__call__));
+            PyObject *unused;
+            if (descr != NULL && (PyFunction_Check(descr)
+                                  || (lu_kernel_target(descr, &callable, 1, &target, &unused) > 0
+                                      && unused == NULL))) {
+                target = PyFunction_Check(descr) ? descr : target;
+                self = callable;
+            }
+            else {
+                target = NULL;
+            }
+        }
+    }
+    if (target != NULL && (self == NULL || free_self)) {
+        if (self != NULL) {
+            *--args = Py_NewRef(self);
+            npos++;
+        }
+        callee = lu_frame_call(ts, (PyFunctionObject *)target, args, npos, kwnames);
         Py_XDECREF(kwnames);
         Py_DECREF(callable);
         PyMem_Free(to_free);
         sp = base;
         frame->stackpointer = sp;
         ERROR_IF(callee == NULL);
-        if (!lu_enter_frame(ts, callee, &result)) {
-            ERROR_IF(result == NULL);
-            PUSH(result);
-            POLL();
-            DISPATCH();
-        }
-        callee->previous = frame;
-        ts->current_frame = (struct _PyInterpreterFrame *)callee;
-        frame = callee;
-        LOAD_FRAME();
-        DISPATCH();
+        kret = LU_RETURN_PUSH;
+        goto push_callee;
     }
-    vectorcallfunc vector = PyVectorcall_Function(callable);
-    if (vector == NULL) {
-        lu_err_format(PyExc_TypeError, "'%s' object is not callable", Py_TYPE(callable)->tp_name);
-        result = NULL;
-    }
-    else {
-        /* Foreign C pins the task; kernel primitives will be exempted when
-           migration is on (DESIGN 5.4). */
-        struct lu_task *t = (struct lu_task *)ts;
-        t->pin++;
-        result = vector(callable, args, npos, kwnames);
-        t->pin--;
-    }
+    /* Foreign C pins the task; kernel primitives will be exempted when
+       migration is on (DESIGN 5.4). */
+    struct lu_task *t = (struct lu_task *)ts;
+    t->pin++;
+    result = lu_call(callable, args, npos, kwnames);
+    t->pin--;
+call_done:
     for (Py_ssize_t i = 0; i < total; i++) {
         Py_DECREF(args[i]);
     }
@@ -461,6 +663,38 @@ call_tail:
     ERROR_IF(result == NULL);
     PUSH(result);
     POLL();
+    DISPATCH();
+}
+
+kernel_call: {
+    /* kernel[kid](*kargs[:nk]) in this loop. */
+    SAVE_FRAME();
+    PyObject *kf = ts->interp->kernel[kid];
+    if (kf == NULL) {
+        for (int i = 0; i < nk; i++) {
+            Py_DECREF(kargs[i]);
+        }
+        lu_err_format(PyExc_SystemError, "kernel function %d is not registered yet", kid);
+        goto error;
+    }
+    callee = lu_frame_call(ts, (PyFunctionObject *)kf, kargs, nk, NULL);
+    ERROR_IF(callee == NULL);
+    callee->ret = kret;
+    goto push_callee;
+}
+
+push_callee:
+    /* Enters callee, pushed and bound; frame->stackpointer is saved. */
+    if (!lu_enter_frame(ts, callee, &result)) {
+        ERROR_IF(result == NULL);
+        PUSH_RETURNED(kret, result);
+        POLL();
+        DISPATCH();
+    }
+    callee->previous = frame;
+    ts->current_frame = (struct _PyInterpreterFrame *)callee;
+    frame = callee;
+    LOAD_FRAME();
     DISPATCH();
 
 op_CALL_FUNCTION_EX: {
@@ -480,7 +714,8 @@ op_CALL_FUNCTION_EX: {
     Py_XDECREF(sp[-1]);
     Py_DECREF(callargs);
     base = sp = sp - 4;
-    to_free = args;
+    to_free = args - 1;
+    free_self = 1;
     goto call_tail;
 }
 
@@ -488,6 +723,7 @@ op_RETURN_VALUE: {
     PyObject *retval = POP();
     frame->stackpointer = sp;
     struct lu_frame *caller = frame->previous;
+    uint8_t ret = frame->ret;
     lu_frame_pop(ts, frame);
     if (caller->owner == LU_FRAME_C_ENTRY) {
         ts->current_frame = (struct _PyInterpreterFrame *)caller->previous;
@@ -496,7 +732,7 @@ op_RETURN_VALUE: {
     ts->current_frame = (struct _PyInterpreterFrame *)caller;
     frame = caller;
     LOAD_FRAME();
-    PUSH(retval);
+    PUSH_RETURNED(ret, retval);
     DISPATCH();
 }
 
@@ -855,6 +1091,238 @@ op_JUMP_BACKWARD:
     next_instr -= oparg;
     POLL();
     DISPATCH();
+
+op_LOAD_ATTR: {
+    /* owner -- attr, self_or_null[oparg & 1]; the method form pushes a NULL
+       self and CALL unpacks the bound method. */
+    PyObject *name = NAME(oparg >> 1);
+    PyObject *owner = TOP();
+    SKIP_CACHES();
+    kret = (oparg & 1) ? LU_RETURN_METHOD : LU_RETURN_PUSH;
+    if (PyModule_CheckExact(owner)) {
+        PyObject *v = lu_ns_lookup(((PyModuleObject *)owner)->md_dict, name);
+        if (v != NULL) {
+            TOP() = Py_NewRef(v);
+            Py_DECREF(owner);
+            if (oparg & 1) {
+                PUSH(NULL);
+            }
+            DISPATCH();
+        }
+    }
+    getattrofunc get = Py_TYPE(owner)->tp_getattro;
+    if (get == lu_slot_tp_getattro || get == PyObject_GenericGetAttr) {
+        kid = get == lu_slot_tp_getattro ? LU_K_getattr : LU_K_generic_getattr;
+        kargs[0] = POP();
+        kargs[1] = Py_NewRef(name);
+        nk = 2;
+        goto kernel_call;
+    }
+    SAVE_FRAME();
+    struct lu_task *t = (struct lu_task *)ts;
+    t->pin++;
+    PyObject *v = PyObject_GetAttr(owner, name);
+    t->pin--;
+    ERROR_IF(v == NULL);
+    TOP() = v;
+    Py_DECREF(owner);
+    if (oparg & 1) {
+        PUSH(NULL);
+    }
+    DISPATCH();
+}
+
+op_STORE_ATTR:
+op_DELETE_ATTR: {
+    /* v, owner -- (STORE_ATTR); owner -- (DELETE_ATTR) */
+    PyObject *name = NAME(oparg);
+    int store = opcode == STORE_ATTR;
+    PyObject *owner = sp[-1];
+    PyObject *v = store ? sp[-2] : NULL;
+    SKIP_CACHES();
+    setattrofunc set = Py_TYPE(owner)->tp_setattro;
+    if (set == lu_slot_tp_setattro || set == PyObject_GenericSetAttr) {
+        sp -= store ? 2 : 1;
+        kargs[0] = owner;
+        kargs[1] = Py_NewRef(name);
+        kargs[2] = v;
+        nk = store ? 3 : 2;
+        kid = set == PyObject_GenericSetAttr ? LU_K_generic_setattr : store ? LU_K_setattr : LU_K_delattr;
+        if (kid == LU_K_generic_setattr && !store) {
+            kargs[2] = Py_NewRef(LU_MISSING);
+            nk = 3;
+        }
+        kret = LU_RETURN_DISCARD;
+        goto kernel_call;
+    }
+    SAVE_FRAME();
+    struct lu_task *t = (struct lu_task *)ts;
+    t->pin++;
+    int err = PyObject_SetAttr(owner, name, v);
+    t->pin--;
+    Py_DECREF(owner);
+    Py_XDECREF(v);
+    sp -= store ? 2 : 1;
+    ERROR_IF(err < 0);
+    DISPATCH();
+}
+
+op_LOAD_SUPER_ATTR: {
+    /* global_super, class, self -- attr, self_or_null[oparg & 1] */
+    PyObject *name = NAME(oparg >> 2);
+    SKIP_CACHES();
+    kret = (oparg & 1) ? LU_RETURN_METHOD : LU_RETURN_PUSH;
+    if (sp[-3] == (PyObject *)&PySuper_Type && PyType_Check(sp[-2])) {
+        kargs[2] = Py_NewRef(name);
+        kargs[1] = POP();
+        kargs[0] = POP();
+        Py_DECREF(POP());
+        kid = LU_K_super_getattr;
+        nk = 3;
+        goto kernel_call;
+    }
+    /* super is shadowed: call it, then take the attribute, from C. */
+    SAVE_FRAME();
+    struct lu_task *t = (struct lu_task *)ts;
+    t->pin++;
+    PyObject *sup = lu_call(sp[-3], sp - 2, oparg & 2, NULL);
+    PyObject *v = sup != NULL ? PyObject_GetAttr(sup, name) : NULL;
+    t->pin--;
+    Py_XDECREF(sup);
+    for (int i = 0; i < 3; i++) {
+        Py_DECREF(POP());
+    }
+    ERROR_IF(v == NULL);
+    PUSH(v);
+    if (oparg & 1) {
+        PUSH(NULL);
+    }
+    DISPATCH();
+}
+
+op_LOAD_BUILD_CLASS: {
+    PyObject *bc = ns_get(frame->builtins, LU_ID(__build_class__));
+    if (bc == NULL) {
+        SAVE_FRAME();
+        if (!PyErr_Occurred()) {
+            lu_err_format(PyExc_NameError, "__build_class__ not found");
+        }
+        goto error;
+    }
+    PUSH(Py_NewRef(bc));
+    DISPATCH();
+}
+
+op_LOAD_LOCALS:
+    if (frame->locals == NULL) {
+        SAVE_FRAME();
+        lu_err_format(PyExc_SystemError, "no locals found");
+        goto error;
+    }
+    PUSH(Py_NewRef(frame->locals));
+    DISPATCH();
+
+op_LOAD_FROM_DICT_OR_GLOBALS: {
+    PyObject *dict = POP();
+    PyObject *name = NAME(oparg);
+    SAVE_FRAME();
+    PyObject *v;
+    if ((v = ns_get(dict, name)) == NULL && !PyErr_Occurred()
+        && (v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
+        && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
+        name_error(name);
+    }
+    Py_XINCREF(v);
+    Py_DECREF(dict);
+    ERROR_IF(v == NULL);
+    PUSH(v);
+    DISPATCH();
+}
+
+op_SETUP_ANNOTATIONS: {
+    SAVE_FRAME();
+    PyObject *name = PyUnicode_InternFromString("__annotations__");
+    int err = name == NULL;
+    if (!err && frame->locals == NULL) {
+        lu_err_format(PyExc_SystemError, "no locals found when setting up annotations");
+        err = 1;
+    }
+    if (!err && ns_get(frame->locals, name) == NULL) {
+        PyObject *d = PyErr_Occurred() ? NULL : PyDict_New();
+        err = d == NULL || lu_ns_insert(frame->locals, name, d) < 0;
+        Py_XDECREF(d);
+    }
+    Py_XDECREF(name);
+    ERROR_IF(err);
+    DISPATCH();
+}
+
+op_GET_ITER: {
+    PyObject *iterable = TOP();
+    SAVE_FRAME();
+    PyObject *it = get_iter(iterable);
+    ERROR_IF(it == NULL);
+    TOP() = it;
+    Py_DECREF(iterable);
+    DISPATCH();
+}
+
+op_FOR_ITER: {
+    /* iter -- iter, next; exhausted, jumps past the END_FOR at the target */
+    SKIP_CACHES();
+    SAVE_FRAME();
+    PyObject *v = iter_next(TOP());
+    if (v == NULL) {
+        ERROR_IF(PyErr_Occurred());
+        next_instr += oparg + 1;
+        DISPATCH();
+    }
+    PUSH(v);
+    DISPATCH();
+}
+
+op_COMPARE_OP: {
+    /* Exact str equality and compact ints; rich comparison is K1d's. */
+    SKIP_CACHES();
+    PyObject *right = POP();
+    PyObject *left = TOP();
+    int op = oparg >> 5, r;
+    if (PyUnicode_CheckExact(left) && PyUnicode_CheckExact(right) && (op == Py_EQ || op == Py_NE)) {
+        r = lu_str_eq(left, right) == (op == Py_EQ);
+    }
+    else if (PyLong_CheckExact(left) && PyLong_CheckExact(right)
+             && _PyLong_IsCompact((PyLongObject *)left) && _PyLong_IsCompact((PyLongObject *)right)) {
+        Py_ssize_t a = _PyLong_CompactValue((PyLongObject *)left);
+        Py_ssize_t b = _PyLong_CompactValue((PyLongObject *)right);
+        r = op == Py_LT ? a < b : op == Py_LE ? a <= b : op == Py_EQ ? a == b
+          : op == Py_NE ? a != b : op == Py_GT ? a > b : a >= b;
+    }
+    else {
+        SAVE_FRAME();
+        lu_err_format(PyExc_SystemError, "comparing '%s' and '%s' arrives with K1d",
+                      Py_TYPE(left)->tp_name, Py_TYPE(right)->tp_name);
+        Py_DECREF(right);
+        goto error;
+    }
+    TOP() = r ? Py_True : Py_False;
+    Py_DECREF(left);
+    Py_DECREF(right);
+    DISPATCH();
+}
+
+op_UNPACK_SEQUENCE: {
+    SKIP_CACHES();
+    PyObject *seq = POP();
+    SAVE_FRAME();
+    int err = unpack(seq, oparg, sp);
+    Py_DECREF(seq);
+    if (err < 0) {
+        frame->stackpointer = sp;
+        goto error;
+    }
+    sp += oparg;
+    DISPATCH();
+}
 
 error:
     /* Until exception tables (K1k): unwind the activation. */

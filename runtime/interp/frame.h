@@ -23,6 +23,15 @@ enum lu_frame_owner {
     LU_FRAME_C_ENTRY,           /* where C entered the eval loop; the task is pinned below it */
 };
 
+/* What the caller's loop does with the value the frame returns: an attribute
+   protocol the interpreter runs as a kernel call pushes nothing (STORE_ATTR)
+   or a NULL self after the value (LOAD_ATTR's method form). */
+enum lu_frame_return {
+    LU_RETURN_PUSH,
+    LU_RETURN_METHOD,           /* push the value, then NULL */
+    LU_RETURN_DISCARD,
+};
+
 struct lu_frame {
     PyCodeObject *code;         /* strong */
     struct lu_frame *previous;  /* single-store link, so a signal-time walker sees a chain */
@@ -34,6 +43,7 @@ struct lu_frame {
     lu_codeunit *instr;         /* the next instruction; valid at safepoints and C calls */
     PyObject **stackpointer;    /* the value stack's top, valid with instr */
     uint8_t owner;              /* enum lu_frame_owner */
+    uint8_t ret;                /* enum lu_frame_return */
     PyObject *localsplus[];     /* fast locals, cells and free variables, then the stack */
 };
 
@@ -63,8 +73,9 @@ struct lu_frame *lu_frame_call(PyThreadState *ts, PyFunctionObject *func, PyObje
 
 /* CALL_FUNCTION_EX and DICT_MERGE operands (runtime/interp/call.c). The array
    from lu_unpack_call holds owned references in vectorcall layout (positional
-   items, then keyword values) with *kwnames a new tuple or NULL; the caller
-   hands the references on and PyMem_Frees the array. */
+   items, then keyword values) with *kwnames a new tuple or NULL, and a spare
+   word before it; the caller hands the references on and frees it with
+   PyMem_Free(array - 1). */
 PyObject **lu_unpack_call(PyObject *callargs, PyObject *kwargs, Py_ssize_t *nargs,
                           PyObject **kwnames);
 PyObject *lu_args_as_tuple(PyObject *func, PyObject *args);
