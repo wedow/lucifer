@@ -43,3 +43,19 @@ lu_prim_int_methods	runtime/prim/int.c	_lucifer's int primitives, a PyMethodDef 
 lu_sys_int_methods	runtime/prim/int.c	sys's int-limit functions, a PyMethodDef table never written; the API takes it non-const
 objects.*	runtime/pylifecycle.c	const table of the static builtins names; relocated by ld.so, then read-only (RELRO)
 slots	runtime/types/slots.c	const table of the type slots and their thunks; relocated by ld.so, then read-only (RELRO)
+base_getset	runtime/interp/exceptions.c	PyGetSetDef table of BaseException, never written; tp_getset takes it non-const
+base_members	runtime/interp/exceptions.c	PyMemberDef table of BaseException, never written; tp_members takes it non-const
+*_error_members	runtime/interp/exceptions.c	PyMemberDef tables of the exception layouts, never written; tp_members takes them non-const
+system_exit_members	runtime/interp/exceptions.c	PyMemberDef table of SystemExit, never written; tp_members takes it non-const
+stop_iteration_members	runtime/interp/exceptions.c	PyMemberDef table of StopIteration, never written; tp_members takes it non-const
+group_members	runtime/interp/exceptions.c	PyMemberDef table of BaseExceptionGroup, never written; tp_members takes it non-const
+os_error_getset	runtime/interp/exceptions.c	PyGetSetDef table of OSError, never written; tp_getset takes it non-const
+frame_members	runtime/interp/exceptions.c	PyMemberDef table of the frame record, never written; tp_members takes it non-const
+frame_getset	runtime/interp/exceptions.c	PyGetSetDef table of the frame record, never written; tp_getset takes it non-const
+tb_members	runtime/interp/exceptions.c	PyMemberDef table of traceback, never written; tp_members takes it non-const
+tb_getset	runtime/interp/exceptions.c	PyGetSetDef table of traceback, never written; tp_getset takes it non-const
+layouts	runtime/interp/exceptions.c	the exception layouts' roots, a table never written
+own.*	runtime/interp/exceptions.c	which exception type gets which attribute tables, read once at startup
+lu_prim_exc_methods	runtime/interp/exceptions.c	_lucifer's exception primitives, a PyMethodDef table never written; the API takes it non-const
+code_members	runtime/interp/code.c	PyMemberDef table of the code layout, never written; tp_members takes it non-const
+names.*	runtime/interp/ceval.c	the builtins LOAD_COMMON_CONSTANT names, a table never written

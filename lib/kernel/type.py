@@ -162,7 +162,7 @@ class type:
     """type(object) -> the object's type
 type(name, bases, dict, **kwds) -> a new type"""
 
-    def __call__(cls, *args, **kwargs):
+    def __call__(cls, /, *args, **kwargs):
         if cls is type:
             n = size(args)
             if n == 1 and not kwargs:

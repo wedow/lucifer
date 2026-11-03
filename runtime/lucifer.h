@@ -129,7 +129,11 @@ struct lu_static_type_state {
     X(positive)                 /* PyNumber_Positive */ \
     X(invert)                   /* PyNumber_Invert */ \
     X(truth)                    /* PyObject_IsTrue, as a bool */ \
-    X(contains)                 /* a in b, or not in: (container, item, invert) */
+    X(contains)                 /* a in b, or not in: (container, item, invert) */ \
+    X(do_raise)                 /* RAISE_VARARGS: do_raise(exc, cause or MISSING) */ \
+    X(load_special)             /* LOAD_SPECIAL: load_special(owner, which) */ \
+    X(exc_group_match)          /* CHECK_EG_MATCH: (rest, match) of an exception and a type */ \
+    X(prep_reraise_star)        /* CALL_INTRINSIC_2 PREP_RERAISE_STAR */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
     LU_KERNEL_FUNCTIONS(LU_KERNEL_ID)

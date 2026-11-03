@@ -235,7 +235,7 @@ def is_data(descr):
     return type_lookup(t, '__set__') is not MISSING or type_lookup(t, '__delete__') is not MISSING
 
 
-def call_special(descr, obj, *args, **kwargs):
+def call_special(descr, obj, /, *args, **kwargs):
     """Calls a special method found on obj's type (call_attribute): functions
     and kernel descriptors unbound, anything else bound through __get__."""
     t = type(descr)

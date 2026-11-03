@@ -9,6 +9,7 @@
    3. interned names, sys.modules, _lucifer, builtins and sys;
    4. from here a failure prints the exception's type and message, exit 1. */
 
+#include "interp/exceptions.h"
 #include "interp/frozen.h"
 #include "prim/prim.h"
 #include "marshal.h"
@@ -56,8 +57,8 @@ hash_seed(const struct lu_options *opts, int *use_seed, unsigned long *seed)
     return 0;
 }
 
-/* Prints "Type: message" for the raised exception and returns 1. The
-   traceback module renders uncaught exceptions once it is frozen (K1k). */
+/* Prints "Type: message" for an exception raised before the program runs
+   (the kernel is not up, or the file is bad) and returns 1. */
 static int
 report(void)
 {
@@ -78,6 +79,45 @@ report(void)
     }
     Py_DECREF(exc);
     return 1;
+}
+
+/* The status of a program that ended by an exception nothing caught
+   (Python/pythonrun.c _Py_HandleSystemExit, then the excepthook): SystemExit
+   leaves quietly with its code, anything else prints a traceback. */
+static int
+report_uncaught(void)
+{
+    PyObject *exc = PyErr_GetRaisedException();
+    if (exc == NULL) {
+        fprintf(stderr, "lucifer: error return without an exception set\n");
+        return 1;
+    }
+    int status = 1;
+    if (PyType_IsSubtype(Py_TYPE(exc), (PyTypeObject *)PyExc_SystemExit)) {
+        PyObject *code = ((PySystemExitObject *)exc)->code;
+        long value;
+        if (code == NULL || code == Py_None) {
+            status = 0;
+        }
+        else if (PyLong_Check(code) && lu_long_as_long(code, &value) == 0) {
+            status = (int)value;
+        }
+        else {
+            PyObject *s = PyUnicode_Check(code) ? Py_NewRef(code) : NULL;
+            if (s == NULL) {
+                PyObject *str = _PyType_Lookup(Py_TYPE(code), LU_ID(__str__));
+                s = str != NULL ? lu_call(str, &code, 1, NULL) : NULL;
+                PyErr_Clear();
+            }
+            fprintf(stderr, "%s\n", s != NULL && PyUnicode_Check(s) ? PyUnicode_AsUTF8(s) : "");
+            Py_XDECREF(s);
+        }
+    }
+    else {
+        lu_err_display(exc);
+    }
+    Py_DECREF(exc);
+    return status;
 }
 
 static int
@@ -258,7 +298,7 @@ run_pyc(struct _is *interp, const char *program, const char *path)
     }
     Py_DECREF(code);
     if (result == NULL) {
-        return report();
+        return report_uncaught();
     }
     Py_DECREF(result);
     return 0;

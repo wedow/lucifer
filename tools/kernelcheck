@@ -15,6 +15,7 @@ import py_compile
 import resource
 import subprocess
 import sys
+import warnings
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ROOT / "tests" / "kernel"
@@ -39,14 +40,6 @@ def run(interpreter, flags, pyc):
     except subprocess.TimeoutExpired:
         return ("timeout", b"", b"")
     return (child.returncode, child.stdout, child.stderr)
-
-
-def last_line_only(oracle, ours):
-    """Until tracebacks exist, a failing program is judged on its last stderr line."""
-    if b"Traceback" not in oracle[2]:
-        return oracle, ours
-    last = lambda err: err.rstrip(b"\n").rsplit(b"\n", 1)[-1]
-    return ((oracle[0], oracle[1], last(oracle[2])), (ours[0], ours[1], last(ours[2])))
 
 
 def describe(name, oracle, ours):
@@ -87,10 +80,11 @@ def main():
         if not source.is_file():
             sys.exit(f"kernelcheck: no program {source}")
         pyc = BUILD / f"{name}.pyc"
-        py_compile.compile(str(source), str(pyc), dfile=f"{name}.py", doraise=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)    # the programs are odd on purpose
+            py_compile.compile(str(source), str(pyc), dfile=f"{name}.py", doraise=True)
         oracle = run(args.oracle, [], pyc)
         ours = run(lucifer, LANES[args.lane], pyc)
-        oracle, ours = last_line_only(oracle, ours)
         if oracle == ours:
             print(f"PASS {name}")
         else:

@@ -148,7 +148,8 @@ lucifer_exec(PyObject *m)
     struct lu_prim_state *state = PyModule_GetState(m);
     state->interp = PyInterpreterState_Get();
     if (add_functions(m, lu_prim_type_methods) < 0 || add_functions(m, lu_prim_descr_methods) < 0
-        || add_functions(m, lu_prim_slot_methods) < 0 || add_functions(m, lu_prim_int_methods) < 0) {
+        || add_functions(m, lu_prim_slot_methods) < 0 || add_functions(m, lu_prim_int_methods) < 0
+        || add_functions(m, lu_prim_exc_methods) < 0) {
         return -1;
     }
     PyObject *name = PyUnicode_InternFromString("MISSING");

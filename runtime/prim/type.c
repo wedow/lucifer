@@ -219,6 +219,27 @@ PyMember_SetOne(char *obj_addr, PyMemberDef *l, PyObject *v)
         return -1;
     }
     PyObject **addr = (PyObject **)(obj_addr + l->offset);
+    if (l->type == Py_T_BOOL) {
+        if (v == NULL) {
+            lu_err_format(PyExc_TypeError, "can't delete numeric/char attribute");
+            return -1;
+        }
+        if (v != Py_True && v != Py_False) {
+            lu_err_format(PyExc_TypeError, "attribute value type must be bool");
+            return -1;
+        }
+        *(char *)addr = v == Py_True;
+        return 0;
+    }
+    if (l->type == Py_T_PYSSIZET) {
+        long n;
+        if (v == NULL || !PyLong_Check(v) || lu_long_as_long(v, &n) < 0) {
+            lu_err_format(PyExc_TypeError, "an integer is required");
+            return -1;
+        }
+        *(Py_ssize_t *)addr = n;
+        return 0;
+    }
     if (l->type != Py_T_OBJECT_EX && l->type != _Py_T_OBJECT) {
         lu_err_format(PyExc_SystemError, "member '%s': storing type code %d arrives with its user",
                       l->name, l->type);
@@ -1308,7 +1329,10 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
     while (staticbase != NULL && (staticbase->tp_flags & Py_TPFLAGS_HEAPTYPE)) {
         staticbase = staticbase->tp_base;
     }
-    if (staticbase != owner) {
+    /* Exception types share one allocation rule: a static exception class
+       builds its instances with its base exception's __new__. */
+    if (staticbase != owner
+        && !(PyExceptionClass_Check(staticbase) && PyExceptionClass_Check(owner))) {
         lu_err_format(PyExc_TypeError, "%s.__new__(%s) is not safe, use %s.__new__()",
                       owner->tp_name, tp->tp_name, staticbase->tp_name);
         return -1;
@@ -1556,6 +1580,7 @@ prim_kind(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (!strcmp(kind, "bool")) return bool_of(PyBool_Check(x));
     if (!strcmp(kind, "bytes")) return bool_of(PyBytes_Check(x));
     if (!strcmp(kind, "tuple")) return bool_of(PyTuple_Check(x));
+    if (!strcmp(kind, "list")) return bool_of(PyList_Check(x));
     if (!strcmp(kind, "cell")) return bool_of(PyCell_Check(x));
     if (!strcmp(kind, "function")) return bool_of(PyFunction_Check(x));
     if (!strcmp(kind, "kernel")) {

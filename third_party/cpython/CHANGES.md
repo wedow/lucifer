@@ -145,3 +145,32 @@ results), and `int()` of a str maps only ASCII digits and the common Unicode
 spaces until the Unicode database exists. `runtime/prim/str.c`'s
 `text_repr` stands in for `unicode_repr` and `bytes_repr` in the
 `invalid literal` message with an approximate printable test for non-ASCII.
+  `__getattr__` (a kernel try/except, running on the exception tables).
+- `runtime/interp/exceptions.c` from `Objects/exceptions.c` (the layouts and
+  attribute tables of `PyBaseExceptionObject` and the subtype structs,
+  `PyException_*`), `Python/errors.c` (`_PyErr_SetObject`'s context chain,
+  the handled-exception functions), `Python/traceback.c` (the traceback
+  type, `PyTraceBack_Here`), `Python/ceval.c` (`get_exception_handler`) and
+  `Objects/codeobject.c` (`PyCode_Addr2Line` by a forward scan of the
+  location table). The frame a traceback holds is a record of the code,
+  globals and instruction, not yet a frame object.
+- `runtime/interp/ceval.c` from `Python/bytecodes.c` and `Python/ceval.c`:
+  the `error:` and `exception_unwind:` labels, `RAISE_VARARGS`, `RERAISE`,
+  `PUSH_EXC_INFO`, `POP_EXCEPT`, `CHECK_EXC_MATCH`, `CHECK_EG_MATCH`,
+  `WITH_EXCEPT_START`, `LOAD_SPECIAL`, `LOAD_COMMON_CONSTANT` and
+  `CALL_INTRINSIC_2` (`INTRINSIC_PREP_RERAISE_STAR`). `do_raise`, the
+  special-method lookup and the except* matching are kernel functions the
+  loop calls inline.
+- `lib/kernel/exceptions.py` ports `Objects/exceptions.c` (`BaseException`
+  and its subclasses' `__new__`, `__init__`, `__str__`, `__repr__`,
+  `__reduce__`; `OSError`'s errno mapping, with Linux errno values;
+  `BaseExceptionGroup`: `split`, `subgroup`, `derive`, `_PyExc_PrepReraiseStar`),
+  `Python/ceval.c` (`do_raise`, `_PyEval_ExceptionGroupMatch`) and
+  `Objects/typeobject.c` (`_PyObject_LookupSpecialMethod`). The
+  `UnicodeError` family's `__str__` and `OSError.__str__` format integers and
+  need `int` and `str` from the types that follow.
+- `runtime/interp/errdisplay.c` from `Lib/traceback.py`
+  (`TracebackException`, `StackSummary.format`, `_format_syntax_error`) and
+  `Python/pythonrun.c` (`_Py_HandleSystemExit` in `runtime/pylifecycle.c`):
+  the default excepthook's output without source lines, carets or
+  suggestions, until the traceback module itself is ported.
