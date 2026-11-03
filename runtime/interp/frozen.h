@@ -9,6 +9,7 @@ struct lu_frozen {
     const unsigned char *data;          /* marshal of its code object */
     int size;
     const char *orig;                   /* the module it is a copy of, or NULL (frozen table) */
+    int package;                        /* a frozen package */
 };
 
 /* NULL-terminated. The kernel is in boot order; builtin is lib/modules, the
@@ -16,6 +17,8 @@ struct lu_frozen {
 extern const struct lu_frozen lu_frozen_kernel[];
 extern const struct lu_frozen lu_frozen_builtin[];
 extern const struct lu_frozen lu_frozen_modules[];
+
+void lu_hide_frames(PyObject *code);
 
 /* Runs every frozen kernel module. Returns -1 with an exception set. */
 int lu_kernel_boot(PyInterpreterState *interp);

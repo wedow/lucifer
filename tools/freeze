@@ -59,13 +59,14 @@ def main():
             data = marshal.dumps(code)
             parts.append(blob(f"module{count}", data))
             origname = f'"{orig}"' if orig != name else "NULL"
-            rows.append(f'    {{ "{name}", module{count}, {len(data)}, {origname} }},')
+            package = int(table == "frozen" and Path(path).name == "__init__.py")
+            rows.append(f'    {{ "{name}", module{count}, {len(data)}, {origname}, {package} }},')
             count += 1
         tables.append((table, rows))
     for table, rows in tables:
         parts.append(f"\nconst struct lu_frozen lu_frozen_{SYMBOL[table]}[] = {{")
         parts.extend(rows)
-        parts.append("    { NULL, NULL, 0, NULL },\n};")
+        parts.append("    { NULL, NULL, 0, NULL, 0 },\n};")
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     Path(output).write_text("\n".join(parts) + "\n")
 

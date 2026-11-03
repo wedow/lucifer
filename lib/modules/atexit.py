@@ -49,6 +49,5 @@ If a callback raises an exception, it is printed and the rest still run."""
         except SystemExit:
             pass
         except BaseException as exc:
-            exc.__traceback__ = exc.__traceback__.tb_next      # not this frame
             _lucifer.write_unraisable('Exception ignored in atexit callback', func, exc)
     del _callbacks[:]

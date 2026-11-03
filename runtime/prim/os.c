@@ -8,6 +8,8 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <langinfo.h>
+#include <locale.h>
 #include <linux/futex.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -398,6 +400,90 @@ lu_prim_os_sleep(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
+/* lseek(fd, offset, whence): the new position. */
+static PyObject *
+prim_os_lseek(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd, offset, whence;
+    if (nargs != 3 || int_arg(args[0], &fd) < 0 || int_arg(args[1], &offset) < 0
+        || int_arg(args[2], &whence) < 0) {
+        return NULL;
+    }
+    off_t r = lseek((int)fd, (off_t)offset, (int)whence);
+    if (r < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return PyLong_FromLongLong(r);
+}
+
+/* isatty(fd) */
+static PyObject *
+prim_os_isatty(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd;
+    if (nargs != 1 || int_arg(args[0], &fd) < 0) {
+        return NULL;
+    }
+    return Py_NewRef(isatty((int)fd) ? Py_True : Py_False);
+}
+
+/* ftruncate(fd, length) */
+static PyObject *
+prim_os_ftruncate(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd, length;
+    if (nargs != 2 || int_arg(args[0], &fd) < 0 || int_arg(args[1], &length) < 0) {
+        return NULL;
+    }
+    if (ftruncate((int)fd, (off_t)length) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return Py_NewRef(Py_None);
+}
+
+/* dup(fd) and dup2(fd, fd2): the new descriptor. */
+static PyObject *
+prim_os_dup(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd, fd2 = -1;
+    if (nargs < 1 || nargs > 2 || int_arg(args[0], &fd) < 0 || (nargs == 2 && int_arg(args[1], &fd2) < 0)) {
+        return NULL;
+    }
+    int r = nargs == 1 ? dup((int)fd) : dup2((int)fd, (int)fd2);
+    if (r < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return PyLong_FromLong(r);
+}
+
+/* strerror(code) */
+static PyObject *
+prim_os_strerror(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long code;
+    if (nargs != 1 || int_arg(args[0], &code) < 0) {
+        return NULL;
+    }
+    return from_locale(strerror((int)code));
+}
+
+/* locale_encoding(): the codeset of the user's LC_CTYPE locale (nl_langinfo
+   CODESET), or utf-8 when the locale has none. */
+static PyObject *
+prim_os_locale_encoding(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    locale_t locale = newlocale(LC_CTYPE_MASK, "", (locale_t)0);
+    const char *codeset = locale != (locale_t)0 ? nl_langinfo_l(CODESET, locale) : NULL;
+    PyObject *name = PyUnicode_FromString(codeset != NULL && codeset[0] != '\0' ? codeset : "utf-8");
+    if (locale != (locale_t)0) {
+        freelocale(locale);
+    }
+    return name;
+}
+
 PyMethodDef lu_prim_os_methods[] = {
     { "os_getcwd", (PyCFunction)(void (*)(void))lu_prim_os_getcwd, METH_FASTCALL, NULL },
     { "os_stat", (PyCFunction)(void (*)(void))lu_prim_os_stat, METH_FASTCALL, NULL },
@@ -412,5 +498,11 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_exit", (PyCFunction)(void (*)(void))lu_prim_os_exit, METH_FASTCALL, NULL },
     { "os_clock_gettime", (PyCFunction)(void (*)(void))lu_prim_os_clock_gettime, METH_FASTCALL, NULL },
     { "os_sleep", (PyCFunction)(void (*)(void))lu_prim_os_sleep, METH_FASTCALL, NULL },
+    { "os_lseek", (PyCFunction)(void (*)(void))prim_os_lseek, METH_FASTCALL, NULL },
+    { "os_isatty", (PyCFunction)(void (*)(void))prim_os_isatty, METH_FASTCALL, NULL },
+    { "os_ftruncate", (PyCFunction)(void (*)(void))prim_os_ftruncate, METH_FASTCALL, NULL },
+    { "os_dup", (PyCFunction)(void (*)(void))prim_os_dup, METH_FASTCALL, NULL },
+    { "os_strerror", (PyCFunction)(void (*)(void))prim_os_strerror, METH_FASTCALL, NULL },
+    { "locale_encoding", (PyCFunction)(void (*)(void))prim_os_locale_encoding, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },
 };

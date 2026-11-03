@@ -43,6 +43,7 @@
 #define INTRINSIC_UNARY_POSITIVE 5  /* pycore_intrinsics.h */
 #define INTRINSIC_PREP_RERAISE_STAR 1   /* pycore_intrinsics.h */
 #define INTRINSIC_LIST_TO_TUPLE 6
+#define INTRINSIC_IMPORT_STAR 2
 #define INTRINSIC_STOPITERATION_ERROR 3
 #define INTRINSIC_ASYNC_GEN_WRAP 4
 
@@ -1485,6 +1486,19 @@ op_CALL_INTRINSIC_1: {
                                 : (code->co_flags & CO_COROUTINE) ? 1 : 0);
         nk = 2;
         kid = LU_K_stopiteration_error;
+        kret = LU_RETURN_PUSH;
+        goto kernel_call;
+    }
+    if (oparg == INTRINSIC_IMPORT_STAR) {
+        if (frame->locals == NULL) {
+            lu_err_format(PyExc_SystemError, "no locals found during 'import *'");
+            goto error;
+        }
+        kargs[0] = frame->locals;
+        Py_INCREF(kargs[0]);
+        kargs[1] = POP();
+        nk = 2;
+        kid = LU_K_import_star;
         kret = LU_RETURN_PUSH;
         goto kernel_call;
     }

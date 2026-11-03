@@ -99,6 +99,7 @@ prim_port_exec(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (code == NULL) {
         return NULL;
     }
+    lu_hide_frames(code);
     int err = exec_in_module(args[0], code);
     Py_DECREF(code);
     return err < 0 ? NULL : Py_NewRef(Py_None);
@@ -110,6 +111,14 @@ prim_frozen_find(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     const struct lu_frozen *f = nargs == 1 ? find_module(lu_frozen_modules, args[0]) : NULL;
     return f == NULL ? Py_NewRef(Py_None) : PyUnicode_FromString(f->orig != NULL ? f->orig : f->name);
+}
+
+/* frozen_is_package(name): is the frozen module a package? */
+static PyObject *
+prim_frozen_is_package(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    const struct lu_frozen *f = nargs == 1 ? find_module(lu_frozen_modules, args[0]) : NULL;
+    return Py_NewRef(f != NULL && f->package ? Py_True : Py_False);
 }
 
 /* frozen_code(name): the code object of a frozen module, or None. */
@@ -195,7 +204,8 @@ prim_marshal_loads(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_import_methods[] = {
-    FAST(port_exists), FAST(port_create), FAST(port_exec), FAST(frozen_find), FAST(frozen_code),
+    FAST(port_exists), FAST(port_create), FAST(port_exec), FAST(frozen_find), FAST(frozen_is_package),
+    FAST(frozen_code),
     FAST(frozen_names), FAST(import_state), FAST(fix_co_filename), FAST(marshal_loads),
     { NULL, NULL, 0, NULL },
 };

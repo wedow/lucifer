@@ -8,6 +8,7 @@ builtins of sys, as C functions are, so their frames never show.
 """
 
 from _lucifer import ns_set, ns_get, instance_dict, builtin_function, frame_at, MISSING
+from _lucifer import os_environ, os_fstat as fstat, locale_encoding
 from _lucifer import exceptions, generators, structseq
 import sys
 
@@ -193,7 +194,12 @@ _install(exit, getdefaultencoding, getfilesystemencoding, getfilesystemencodeerr
 
 # What the PyConfig decides
 
+_config = None
+
+
 def configure(c):
+    global _config
+    _config = c
     put = lambda name, value: ns_set(_dict, name, value)
     """Set flags, argv, the paths and the options from the config dict."""
     flag_names = (
@@ -230,3 +236,67 @@ def configure(c):
     path = [c['sys_path_0']] if c['sys_path_0'] is not None else []
     path.extend(entry for entry in c['pythonpath'].split(':') if entry)
     put('path', path)
+
+
+# The standard streams (Python/pylifecycle.c init_sys_streams)
+
+def _getenv(name):
+    prefix = name.encode() + b'='
+    for entry in os_environ():
+        if entry.startswith(prefix):
+            return entry[len(prefix):].decode('utf-8', 'surrogateescape')
+    return None
+
+
+def _stdio_encoding_and_errors():
+    """config_init_stdio_encoding: PyConfig.stdio_*, else PYTHONIOENCODING,
+else UTF-8 mode, else the locale. The default handler is surrogateescape in
+UTF-8 mode and in the C locale, whose codeset glibc names ANSI_X3.4-1968."""
+    c = _config
+    encoding, errors = c['stdio_encoding'], c['stdio_errors']
+    spec = _getenv('PYTHONIOENCODING') if c['use_environment'] else None
+    if spec and (encoding is None or errors is None):
+        name, _, handler = spec.partition(':')
+        if name:
+            encoding = encoding or name
+            handler = handler or 'strict'
+        errors = errors or handler or None
+    if encoding is None:
+        encoding = 'utf-8' if c['utf8_mode'] else locale_encoding()
+    try:
+        encoding = __import__('_codecs').lookup(encoding).name       # config_get_codec_name
+    except LookupError:
+        pass
+    if errors is None:
+        errors = 'surrogateescape' if c['utf8_mode'] or locale_encoding() == 'ANSI_X3.4-1968' else 'strict'
+    return encoding, errors
+
+
+def _create_stdio(io, fd, write, name, encoding, errors):
+    """A TextIOWrapper over file descriptor fd, or None when fd is not open."""
+    try:
+        fstat(fd)
+    except OSError:
+        return None
+    buffered = _config['buffered_stdio']
+    # stdin is always buffered: TextIOWrapper wants read1().
+    buffering = 0 if write and not buffered else -1
+    buf = io.open(fd, 'wb' if write else 'rb', buffering, None, None, None, False)
+    raw = buf.raw if buffering else buf
+    raw.name = name
+    stream = io.TextIOWrapper(buf, encoding, errors, '\n', bool(buffered and (raw.isatty() or fd == 2)),
+                              not buffered)
+    stream.mode = 'w' if write else 'r'
+    return stream
+
+
+def init_streams():
+    """Sets sys.stdin, stdout, stderr and their __std*__ twins, and builtins.open."""
+    io = __import__('_io')
+    encoding, errors = _stdio_encoding_and_errors()
+    for fd, write, name, handler in ((0, False, 'stdin', errors), (1, True, 'stdout', errors),
+                                     (2, True, 'stderr', 'backslashreplace')):
+        stream = _create_stdio(io, fd, write, '<' + name + '>', encoding, handler)
+        ns_set(_dict, '__' + name + '__', stream)
+        ns_set(_dict, name, stream)
+    ns_set(instance_dict(__import__('builtins'), True), 'open', io.open)

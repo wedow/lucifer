@@ -138,6 +138,36 @@ def write(fd, data, /):
     return _lucifer.os_write(fd, data if type(data) is bytes else bytes(data))
 
 
+def lseek(fd, position, whence, /):
+    """Set the position of a file descriptor.  Return the new position."""
+    return _lucifer.os_lseek(fd, position, whence)
+
+
+def isatty(fd, /):
+    """Return True if the fd is connected to a terminal."""
+    return _lucifer.os_isatty(fd)
+
+
+def ftruncate(fd, length, /):
+    """Truncate a file, specified by file descriptor, to a specific length."""
+    _lucifer.os_ftruncate(fd, length)
+
+
+def dup(fd, /):
+    """Return a duplicate of a file descriptor."""
+    return _lucifer.os_dup(fd)
+
+
+def dup2(fd, fd2, inheritable=True):
+    """Duplicate file descriptor."""
+    return _lucifer.os_dup(fd, fd2)
+
+
+def strerror(code, /):
+    """Translate an error code to a message string."""
+    return _lucifer.os_strerror(code)
+
+
 def getpid():
     """Return the current process id."""
     return _lucifer.os_getpid()

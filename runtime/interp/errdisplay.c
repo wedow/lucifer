@@ -567,6 +567,34 @@ format_node(struct ctx *c, struct node *top)
     }
 }
 
+/* Text for the error output: what sys.stderr's write takes, else (before
+   sys.stderr exists, or when it cannot be written to) the C stderr. A
+   sys.stderr of None swallows it, as it does in PyErr_Display. */
+void
+lu_stderr_write(const char *text, size_t n)
+{
+    PyObject *file = lu_ns_lookup(_PyRuntime.main_interp.sysdict, PyUnicode_InternFromString("stderr"));
+    if (file == Py_None) {
+        return;
+    }
+    if (file != NULL) {
+        PyObject *exc = PyErr_GetRaisedException();
+        PyObject *str = PyUnicode_FromStringAndSize(text, (Py_ssize_t)n);
+        PyObject *write = str != NULL ? PyObject_GetAttrString(file, "write") : NULL;
+        PyObject *result = write != NULL ? PyObject_CallOneArg(write, str) : NULL;
+        Py_XDECREF(str);
+        Py_XDECREF(write);
+        int done = result != NULL;
+        Py_XDECREF(result);
+        PyErr_Clear();
+        PyErr_SetRaisedException(exc);
+        if (done) {
+            return;
+        }
+    }
+    fwrite(text, 1, n, stderr);
+}
+
 void
 lu_err_unraisable(const char *what, PyObject *obj)
 {
@@ -575,8 +603,8 @@ lu_err_unraisable(const char *what, PyObject *obj)
     lu_err_unraisable_text(message, obj);
 }
 
-/* PyErr_FormatUnraisable: "message repr(obj):" (just "message:" without an
-   obj) then the exception being handled, which is cleared. */
+/* PyErr_FormatUnraisable: "message repr(obj):" then the exception being
+   handled, which is cleared. */
 void
 lu_err_unraisable_text(const char *message, PyObject *obj)
 {
@@ -584,11 +612,19 @@ lu_err_unraisable_text(const char *message, PyObject *obj)
     PyObject *r = obj != NULL ? lu_call_kernel(LU_K_repr, &obj, 1) : NULL;
     const char *text = r != NULL && PyUnicode_Check(r) ? PyUnicode_AsUTF8(r) : NULL;
     PyErr_Clear();
-    if (obj == NULL) {
-        fprintf(stderr, "%s:\n", message);
-    }
-    else {
-        fprintf(stderr, "%s %s:\n", message, text != NULL ? text : "<object repr() failed>");
+    const char *repr = text != NULL ? text : "<object repr() failed>";
+    int n = obj == NULL ? snprintf(NULL, 0, "%s:\n", message)
+                        : snprintf(NULL, 0, "%s %s:\n", message, repr);
+    char *head = malloc((size_t)n + 1);
+    if (head != NULL) {
+        if (obj == NULL) {
+            snprintf(head, (size_t)n + 1, "%s:\n", message);
+        }
+        else {
+            snprintf(head, (size_t)n + 1, "%s %s:\n", message, repr);
+        }
+        lu_stderr_write(head, (size_t)n);
+        free(head);
     }
     Py_XDECREF(r);
     if (exc != NULL && ((PyBaseExceptionObject *)exc)->traceback == NULL) {
@@ -614,6 +650,6 @@ lu_err_display(PyObject *exc)
     struct node *root = build(exc);
     format_node(&c, root);
     node_free(root);
-    fwrite(out.p, 1, out.n, stderr);
+    lu_stderr_write(out.p, out.n);
     free(out.p);
 }

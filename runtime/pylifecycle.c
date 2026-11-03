@@ -25,6 +25,58 @@
 
 #define LU_MAGIC (3627 | ((long)'\r' << 16) | ((long)'\n' << 24))
 
+/* file_is_closed */
+static int
+stream_closed(PyObject *stream)
+{
+    PyObject *closed = PyObject_GetAttrString(stream, "closed");
+    if (closed == NULL) {
+        PyErr_Clear();
+        return 0;
+    }
+    int result = lu_is_true(closed);
+    Py_DECREF(closed);
+    PyErr_Clear();
+    return result > 0;
+}
+
+/* Flushes sys.NAME unless it is unset, None or closed: 0, or -1 with the
+   exception set. */
+static int
+flush_std_stream(const char *name)
+{
+    PyObject *key = PyUnicode_InternFromString(name);
+    PyObject *stream = key != NULL ? lu_ns_lookup(_PyRuntime.main_interp.sysdict, key) : NULL;
+    Py_XDECREF(key);
+    if (stream == NULL || stream == Py_None) {
+        return 0;
+    }
+    Py_INCREF(stream);
+    int status = 0;
+    if (!stream_closed(stream)) {
+        PyObject *flush = PyObject_GetAttrString(stream, "flush");
+        PyObject *result = flush != NULL ? PyObject_CallNoArgs(flush) : NULL;
+        Py_XDECREF(flush);
+        Py_XDECREF(result);
+        status = result == NULL ? -1 : 0;
+    }
+    Py_DECREF(stream);
+    return status;
+}
+
+/* pythonrun.c flush_io: after the program ran, stderr then stdout, and the
+   exception being handled survives. */
+static void
+flush_io(void)
+{
+    PyObject *exc = PyErr_GetRaisedException();
+    flush_std_stream("stderr");
+    PyErr_Clear();
+    flush_std_stream("stdout");
+    PyErr_Clear();
+    PyErr_SetRaisedException(exc);
+}
+
 /* Prints "Type: message" for an exception raised before the program runs
    (the kernel is not up, or the file is bad), or its traceback when it has
    one, and returns 1. */
@@ -83,7 +135,9 @@ report_uncaught(void)
                 s = str != NULL ? lu_call(str, &code, 1, NULL) : NULL;
                 PyErr_Clear();
             }
-            fprintf(stderr, "%s\n", s != NULL && PyUnicode_Check(s) ? PyUnicode_AsUTF8(s) : "");
+            const char *text = s != NULL && PyUnicode_Check(s) ? PyUnicode_AsUTF8(s) : "";
+            lu_stderr_write(text, strlen(text));
+            lu_stderr_write("\n", 1);
             Py_XDECREF(s);
         }
     }
@@ -291,6 +345,7 @@ run_pyc(struct _is *interp, const char *program, const char *path)
         Py_DECREF(main);
     }
     Py_DECREF(code);
+    flush_io();
     if (result == NULL) {
         return report_uncaught();
     }
@@ -326,15 +381,33 @@ Py_InitializeFromConfig(const PyConfig *src)
     PyEval_RestoreThread(main_task);
     lu_layouts_init();
     if (boot_native(interp) < 0 || lu_kernel_boot(interp) < 0 || lu_sys_configure(interp) < 0
-        || lu_import_init(interp) < 0) {
+        || lu_import_init(interp) < 0 || lu_sys_init_streams(interp) < 0) {
         report();
         return PyStatus_Exit(1);
     }
     return PyStatus_Ok();
 }
 
+/* flush_std_files: stdout (a failure is reported and counts), then stderr
+   (a failure is ignored). */
+static int
+flush_std_files(void)
+{
+    int status = 0;
+    if (flush_std_stream("stdout") < 0) {
+        lu_err_unraisable_text("Exception ignored while flushing sys.stdout", NULL);
+        status = -1;
+    }
+    if (flush_std_stream("stderr") < 0) {
+        PyErr_Clear();
+    }
+    return status;
+}
+
 /* Py_FinalizeEx, as far as there is something to finalize: atexit's
-   callbacks run, then the runtime counts as finalizing. */
+   callbacks run, the standard streams are flushed, then the runtime counts
+   as finalizing. CPython flushes once more after tearing the modules down;
+   there is no teardown to print from yet. */
 int
 Py_FinalizeEx(void)
 {
@@ -349,8 +422,9 @@ Py_FinalizeEx(void)
         }
         Py_XDECREF(result);
     }
+    int status = flush_std_files();
     __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
-    return 0;
+    return status;
 }
 
 /* Modules/main.c: run the file the config names, then finalize. */

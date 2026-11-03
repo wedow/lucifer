@@ -1,6 +1,6 @@
 ---
 id: luc-8dqq
-status: open
+status: closed
 deps: [luc-qidc, luc-rjvn]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: sonnet.
 
 make check-kernel PROGRAMS="stdio" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t); every program from K1a-K1n still matches (make check-kernel).
 
+
+## Notes
+
+**2026-11-03T09:00:54Z**
+
+Done: _codecs, _io, encodings and the std streams; stdio, stdio_files, stdio_codecs, stdio_input, stdio_exit, stdio_flush_fail, stdio_buffered match the oracle (make check green). Follow-ups: luc-qiwk (import io needs GenericAlias), luc-mfrx.

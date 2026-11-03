@@ -2,7 +2,7 @@
 bootstrap uses, over the builtin and frozen tables of the runtime.
 
 Builtin modules are the ports in lib/modules and the three native ones.
-Frozen modules are the importlib bootstrap. Extension modules arrive with
+Frozen modules are the importlib bootstrap and the startup modules. Extension modules arrive with
 the C-API loader.
 """
 
@@ -75,7 +75,7 @@ def is_frozen_package(name, /):
     """Returns True if the module name is of a frozen package."""
     if _lucifer.frozen_find(name) is None:
         raise ImportError('No such frozen object named %r' % (name,), name=name)
-    return False
+    return _lucifer.frozen_is_package(name)
 
 
 def find_frozen(name, /, *, withdata=False):
@@ -91,7 +91,7 @@ The returned info (a 2-tuple):
     origname = _lucifer.frozen_find(name)
     if origname is None:
         return None
-    return (None, False, origname)
+    return (None, _lucifer.frozen_is_package(name), origname)
 
 
 def get_frozen_object(name, data=None, /):

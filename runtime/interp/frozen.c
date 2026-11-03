@@ -24,6 +24,23 @@ mark_kernel(PyObject *code)
     }
 }
 
+/* Marks the functions of a builtin module port, and those nested in them, so
+   that their frames are hidden: the port stands for a C module. */
+void
+lu_hide_frames(PyObject *code)
+{
+    PyCodeObject *co = (PyCodeObject *)code;
+    if (co->co_flags & CO_OPTIMIZED) {
+        co->co_flags |= LU_CO_HIDDEN;
+    }
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(co->co_consts); i++) {
+        PyObject *c = PyTuple_GET_ITEM(co->co_consts, i);
+        if (PyCode_Check(c)) {
+            lu_hide_frames(c);
+        }
+    }
+}
+
 /* __all__ into builtins; functions become builtins of the builtins module,
    so that they look native (DESIGN 4.4). */
 static int

@@ -28,6 +28,7 @@ void lu_exc_chain_context(PyObject *value);
    does: "Exception ignored while <what> <repr(obj)>:" and its traceback. */
 void lu_err_unraisable(const char *what, PyObject *obj);
 void lu_err_unraisable_text(const char *message, PyObject *obj);
+void lu_stderr_write(const char *text, size_t n);
 
 /* Prints an uncaught exception the way the default excepthook does. */
 void lu_err_display(PyObject *exc);
