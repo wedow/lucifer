@@ -32,7 +32,6 @@ _Py_DecRef(PyObject *o)
 void
 _Py_NewReference(PyObject *op)
 {
-    lu_brc_register_thread();
     op->ob_flags = 0;
     op->ob_mutex = (PyMutex){ 0 };
     op->ob_tid = _Py_ThreadId();
