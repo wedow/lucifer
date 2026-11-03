@@ -4,7 +4,7 @@ and the type getsets over the layout primitives)."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_dict, type_mro, type_bases,
-    type_base, type_name, type_qualname, type_set_name, type_tp_name, type_flag,
+    type_base, type_name, type_qualname, type_set_name, type_tp_name, type_flag, type_set_flag,
     type_can_new, type_new_layout, type_set_mro, type_set_bases, type_subclasses,
     type_modified, type_static_module, is_subtype, ns_get, ns_set, ns_del, ns_items, cell_set, proxy_new,
     field_get, kernel_get,
@@ -103,6 +103,32 @@ def _set_doc(cls, value):
             "cannot set '__doc__' attribute of immutable type '", type_tp_name(cls), "'")))
     ns_set(type_dict(cls), '__doc__', None if value is MISSING else value)
     type_modified(cls)
+
+
+_IS_ABSTRACT = 1 << 20
+
+
+def _get_abstractmethods(cls):
+    """type_abstractmethods: only the class's own, never type's."""
+    value = ns_get(type_dict(cls), '__abstractmethods__', MISSING) if cls is not type else MISSING
+    if value is MISSING:
+        error(AttributeError, '__abstractmethods__')
+    return value
+
+
+def _set_abstractmethods(cls, value):
+    """type_set_abstractmethods: Py_TPFLAGS_IS_ABSTRACT follows the truth of the value."""
+    d = type_dict(cls)
+    if value is MISSING:
+        if ns_get(d, '__abstractmethods__', MISSING) is MISSING:
+            error(AttributeError, '__abstractmethods__')
+        ns_del(d, '__abstractmethods__')
+        abstract = False
+    else:
+        abstract = True if value else False
+        ns_set(d, '__abstractmethods__', value)
+    type_modified(cls)
+    type_set_flag(cls, _IS_ABSTRACT, abstract)
 
 
 def _get_dict(cls):
@@ -322,6 +348,7 @@ type(name, bases, dict, **kwds) -> a new type"""
     __module__ = getset(_get_module, _set_module)
     __doc__ = getset(_get_doc, _set_doc)
     __dict__ = getset(_get_dict)
+    __abstractmethods__ = getset(_get_abstractmethods, _set_abstractmethods)
     __bases__ = getset(_get_bases, _set_bases)
     __mro__ = getset(_get_mro)
     __base__ = getset(_get_base)

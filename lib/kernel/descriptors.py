@@ -1,14 +1,14 @@
 """Descriptors and method binding (Objects/descrobject.c, funcobject.c,
 classobject.c, typeobject.c's super): __get__, __set__ and __delete__ of
 the descriptor types, function and method binding, property, classmethod,
-staticmethod, super and mappingproxy. Their layouts are native
+staticmethod and super. Their layouts are native
 (runtime/object/descr.c); fields are reached by index."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_dict, type_mro, type_tp_name,
-    type_qualname, is_subtype, ns_get, size, alloc, static_type, descr_type, bind,
+    type_qualname, is_subtype, ns_get, alloc, static_type, descr_type, bind,
     method_new, member_get, member_set, getset_kernel, getset_get, getset_set,
-    field_get, field_set, proxy_new, super_args, kernel_set, kernel_get, address,
+    field_get, field_set, super_args, is_callable, kernel_set, kernel_get, address,
 )
 from _lucifer import _boot
 
@@ -25,7 +25,6 @@ __all__ = ()
 _FGET, _FSET, _FDEL, _DOC, _NAME = 0, 1, 2, 3, 4
 _CALLABLE = 0
 _THISCLASS, _SELF, _SELF_CLASS = 0, 1, 2
-_MAPPING = 0
 
 
 def _class_access(instance, owner):
@@ -63,6 +62,15 @@ class function:
 
 @kernel_type(static_type('method'))
 class method:
+    """Create a bound instance method object."""
+
+    def __new__(cls, function, instance, /):
+        if not is_callable(function):
+            error(TypeError, 'first argument must be callable')
+        if instance is None:
+            error(TypeError, 'instance must not be None')
+        return method_new(function, instance)
+
     def __getattribute__(self, name):
         """method_getattro: the method type's attributes, then the function's."""
         tp = type(self)
@@ -190,6 +198,26 @@ def _property_set_name(self, value):
     field_set(self, _NAME, None if value is MISSING else value)
 
 
+def _property_abstract(self):
+    for i in (_FGET, _FSET, _FDEL):
+        f = field_get(self, i)
+        if f is not None:
+            try:
+                if getattr_hook(f, '__isabstractmethod__'):
+                    return True
+            except AttributeError:
+                pass
+    return False
+
+
+def _wrapped_abstract(self):
+    """The __isabstractmethod__ of classmethod and staticmethod: their function's."""
+    try:
+        return getattr_hook(field_get(self, _CALLABLE), '__isabstractmethod__')
+    except AttributeError:
+        return False
+
+
 @kernel_type(property)
 class property:
     """Property attribute."""
@@ -241,6 +269,7 @@ class property:
         return _property_copy(self, MISSING, MISSING, fdel)
 
     __name__ = getset(_property_get_name, _property_set_name)
+    __isabstractmethod__ = getset(_property_abstract)
 
 
 def _property_copy(old, fget, fset, fdel):
@@ -271,6 +300,8 @@ class classmethod:
             owner = type(instance)
         return method_new(field_get(self, _CALLABLE), owner)
 
+    __isabstractmethod__ = getset(_wrapped_abstract)
+
 
 @kernel_type(staticmethod)
 class staticmethod:
@@ -287,6 +318,8 @@ class staticmethod:
 
     def __call__(self, *args, **kwargs):
         return field_get(self, _CALLABLE)(*args, **kwargs)
+
+    __isabstractmethod__ = getset(_wrapped_abstract)
 
 
 def _supercheck(cls, obj):
@@ -373,25 +406,6 @@ super(type, type2) -> bound super object; requires issubclass(type2, type)"""
             return str_join('', ('<super: <class ', _quote(name), '>, NULL>'))
         return str_join('', ('<super: <class ', _quote(name), '>, <', type_tp_name(start),
                              ' object>>'))
-
-
-@kernel_type(static_type('mappingproxy'))
-class mappingproxy:
-    def __getitem__(self, key):
-        value = ns_get(field_get(self, _MAPPING), key, MISSING)
-        if value is MISSING:
-            error(KeyError, key)
-        return value
-
-    def get(self, key, default=None):
-        """Return the value for key if key is in the mapping, else default."""
-        return ns_get(field_get(self, _MAPPING), key, default)
-
-    def __contains__(self, key):
-        return ns_get(field_get(self, _MAPPING), key, MISSING) is not MISSING
-
-    def __len__(self):
-        return size(field_get(self, _MAPPING))
 
 
 kernel_set('super_getattr', super_getattr)
