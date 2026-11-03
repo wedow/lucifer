@@ -160,6 +160,29 @@ exit 139
         result = self.driver('ft-cpython', str(wrapper))
         self.assertEqual({r['status'] for r in self.manifest()}, {'CRASH'}, result.stderr)
 
+    def test_cpython_parallel_lane_scores_serial_fallback_against_oracle(self):
+        module, ids = self.profiled_case_fixture('parallel')
+        fake = self.root / 'fake'
+        for oracle_serial, mode, expected in [([], 'wrapped', ['PASS', 'PASS']), ([], 'serial', ['FAIL', 'FAIL']),
+                                              (ids[:1], 'serial', ['PASS', 'FAIL'])]:
+            (self.results / 'oracle.json').write_text(json.dumps({'units': {'parallel/' + module: [{'serial_cases': oracle_serial}]}}))
+            fake.write_text('''#!/usr/bin/env python3
+import json,os,pathlib,sys
+if '-c' in sys.argv:
+ print(json.dumps(dict(version=[3,14,10],implementation='cpython',free_threaded=True,gil_enabled=False)))
+ sys.exit(0)
+ids = %r
+pathlib.Path(os.environ['LIBTEST_STATE']).write_text(json.dumps(dict(module=%r,state='PASSED',seconds=0,errors=[],failures=[]))+'\\n')
+with open(os.environ['FT_OBSERVATIONS'],'w') as stream:
+ stream.write(json.dumps(dict(free_threaded=True,gil_enabled=False))+'\\n')
+ for i in ids: stream.write(json.dumps(dict(id=i,**({'threads':4} if %r == 'wrapped' else {'serial':True})))+'\\n')
+with open(os.environ['LIBTEST_EVENTS'],'w') as stream:
+ for i in ids: stream.write(json.dumps(dict(id=i,status='PASS',seconds=0))+'\\n')
+''' % (ids, module, mode))
+            fake.chmod(0o755)
+            result = self.driver('ft-cpython', str(fake), '--oracle-runtime', 'oracle')
+            self.assertEqual([r['status'] for r in self.manifest()], expected, (mode, result.stderr))
+
     def test_interpreter_symlink_is_preserved(self):
         self.fixture('ft-cpython')
         actual = self.root / 'actual-target'

@@ -72,6 +72,16 @@ def execute(command, env, cwd, timeout, log, stderr_log=None, worker_pid=None):
 lib.execute = execute
 
 
+def fail_serial_passes(args, name, rows, serial, fallback_key):
+    """A case the oracle ran parallel-wrapped must not pass serially."""
+    if not name.startswith('parallel/') or args.runtime == args.oracle_runtime:
+        return rows
+    oracle = json.loads((args.results / (args.oracle_runtime + '.json')).read_text())['units'][name]
+    allowed = {case for detail in oracle for case in detail[fallback_key]}
+    return {key: ('FAIL', seconds) if status == 'PASS' and key in serial - allowed else (status, seconds)
+            for key, (status, seconds) in rows.items()}
+
+
 def dump(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + '\n')
@@ -264,12 +274,7 @@ def package_run(args, name, cases, raw):
         rows = {key: ('ERROR', 0) for key in cases}
     parallelism = next((r for r in records if 'parallelism' in r), {})
     parallel = len(parallelism.get('parallelism', {}))
-    if lane == 'parallel' and args.runtime != args.oracle_runtime:
-        # A case the oracle ran parallel-wrapped must not pass serially.
-        oracle = json.loads((args.results / (args.oracle_runtime + '.json')).read_text())['units'][name]
-        serial = {case for detail in oracle for case in detail['serial_fallback']}
-        rows = {key: ('FAIL', seconds) if status == 'PASS' and key not in serial | set(parallelism.get('parallelism', {})) else (status, seconds)
-                for key, (status, seconds) in rows.items()}
+    rows = fail_serial_passes(args, name, rows, set(cases) - set(parallelism.get('parallelism', {})), 'serial_fallback')
     detail = {'artifact': artifact, 'unit_timeout': package_timeout(args, package), 'test_timeout': package_test_timeout(args, package), 'timed_out': bool(hung or timeout_report), 'returncode': code, 'seconds': elapsed, 'gil_valid': gil_valid(records),
               'parallel_collected': parallel,
               'parallel_threads': dict(Counter(parallelism.get('parallelism', {}).values())),
@@ -387,6 +392,7 @@ def run(args, env, raw):
                     detail['gil_valid'] = gil_valid(records)
                     detail['parallel_wrapped'] = len([r for r in records if 'threads' in r])
                     detail['serial_cases'] = sorted({r['id'] for r in records if r.get('serial')})
+                    local_rows = fail_serial_passes(args, name, local_rows, set(detail['serial_cases']), 'serial_cases')
                 else:
                     original_seed = args.seed
                     args.seed += iteration
