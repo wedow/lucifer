@@ -366,6 +366,11 @@ The separate `--parallel` lane uses four shared-process threads with
 and [the spin option translation](https://github.com/numpy/numpy/blob/v2.5.4/.spin/cmds.py).
 It retains the plugin's default single iteration and serial fallback for
 `thread_unsafe` cases; NumPy's explicit internally threaded tests are included.
+A case that passes but is neither parallel-wrapped under the interpreter nor in
+the oracle run's `serial_fallback` (`--oracle-runtime`, default
+`cpython-3.14.10t`) scores `FAIL`. The ftcorpus package `parallel` lane applies
+the same rule. A fatal-signal exit reported as 128+N by a shell wrapper scores
+as `CRASH` in the numpytest and pypi drivers.
 Unlike that CI job's default fast selection, this lane includes slow tests.
 Both lanes constrain OpenBLAS and OpenMP to one thread to avoid oversubscription.
 
