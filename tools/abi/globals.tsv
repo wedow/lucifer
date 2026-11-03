@@ -110,3 +110,4 @@ sys_table	runtime/prim/os.c	os_call's table of system calls, never written
 lu_prim_math_methods	runtime/prim/math.c	_lucifer's math primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_calendar_methods	runtime/prim/calendar.c	_lucifer's calendar primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_ucd_methods	runtime/prim/ucd.c	_lucifer's unicode database primitives, a PyMethodDef table never written; the API takes it non-const
+trash	-	the trashcan in refcount.c: a thread-local queue of deaths deferred while a death is deep in C recursion; its TLS symbol has no line
