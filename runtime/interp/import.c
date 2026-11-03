@@ -202,11 +202,23 @@ prim_marshal_loads(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyMarshal_ReadObjectFromString(PyBytes_AS_STRING(args[0]), PyBytes_GET_SIZE(args[0]));
 }
 
+/* marshal_dumps(obj, version, allow_code): the bytes marshal.dumps returns. */
+static PyObject *
+prim_marshal_dumps(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long version;
+    if (nargs != 3 || lu_long_as_long(args[1], &version) < 0) {
+        lu_err_format(PyExc_TypeError, "marshal_dumps(obj, version, allow_code)");
+        return NULL;
+    }
+    return lu_marshal_dumps(args[0], (int)version, lu_is_true(args[2]));
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_import_methods[] = {
     FAST(port_exists), FAST(port_create), FAST(port_exec), FAST(frozen_find), FAST(frozen_is_package),
     FAST(frozen_code),
-    FAST(frozen_names), FAST(import_state), FAST(fix_co_filename), FAST(marshal_loads),
+    FAST(frozen_names), FAST(import_state), FAST(fix_co_filename), FAST(marshal_loads), FAST(marshal_dumps),
     { NULL, NULL, 0, NULL },
 };
 

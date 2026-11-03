@@ -1,7 +1,7 @@
-"""marshal: reading code objects and other constants. Writing arrives
-with the compiler's need for it."""
+"""marshal (Python/marshal.c): reading and writing code objects and other
+constants, from and to bytes."""
 
-from _lucifer import marshal_loads as _loads
+from _lucifer import marshal_dumps as _dumps, marshal_loads as _loads
 
 version = 5
 
@@ -13,4 +13,4 @@ def loads(data, /, *, allow_code=True):
 
 def dumps(value, version=version, /, *, allow_code=True):
     """Return the bytes object that would be written to a file by dump(value, file)."""
-    raise NotImplementedError('marshal.dumps arrives with the writer')
+    return _dumps(value, version, allow_code)

@@ -6,6 +6,7 @@
 #include "interp/code.h"
 #include "interp/exceptions.h"
 #include "interp/frame.h"
+#include "object/set.h"
 
 #include "opcode.h"
 #include "opcode_ids.h"
@@ -105,6 +106,71 @@ lu_code_init(void)
     PyCode_Type.tp_dealloc = code_dealloc;
 }
 
+/* intern_strings: the items of a names tuple become the interned strings, in place. */
+static void
+intern_strings(PyObject *tuple)
+{
+    for (Py_ssize_t i = PyTuple_GET_SIZE(tuple); --i >= 0; ) {
+        lu_intern(PyInterpreterState_Get(), &PyTuple_GET_ITEM(tuple, i));
+    }
+}
+
+/* intern_constants for the free-threaded build, which interns every string
+   constant: in tuples, in place, and in frozensets, which are rebuilt when an
+   item was replaced. *modified is set when an item of this tuple changed. */
+static int
+intern_constants(PyObject *tuple, int *modified)
+{
+    for (Py_ssize_t i = PyTuple_GET_SIZE(tuple); --i >= 0; ) {
+        PyObject *v = PyTuple_GET_ITEM(tuple, i);
+        if (PyUnicode_CheckExact(v)) {
+            lu_intern(PyInterpreterState_Get(), &PyTuple_GET_ITEM(tuple, i));
+            if (PyTuple_GET_ITEM(tuple, i) != v && modified != NULL) {
+                *modified = 1;
+            }
+        }
+        else if (PyTuple_CheckExact(v)) {
+            if (intern_constants(v, NULL) < 0) {
+                return -1;
+            }
+        }
+        else if (PyFrozenSet_CheckExact(v)) {
+            PySetObject *so = (PySetObject *)v;
+            PyObject *items = PyTuple_New(PySet_GET_SIZE(v));
+            Py_ssize_t n = 0;
+            for (Py_ssize_t k = 0; items != NULL && k <= so->mask; k++) {
+                PyObject *key = so->table[k].key;
+                if (key != NULL && key != LU_SET_DUMMY && n < PyTuple_GET_SIZE(items)) {
+                    PyTuple_SET_ITEM(items, n++, Py_NewRef(key));
+                }
+            }
+            int changed = 0;
+            if (items == NULL || intern_constants(items, &changed) < 0) {
+                Py_XDECREF(items);
+                return -1;
+            }
+            if (changed) {
+                PyObject *set = lu_set_new(&PyFrozenSet_Type);
+                for (Py_ssize_t k = 0; set != NULL && k < n; k++) {
+                    if (lu_set_add(set, PyTuple_GET_ITEM(items, k)) < 0) {
+                        Py_CLEAR(set);
+                    }
+                }
+                if (set == NULL) {
+                    Py_DECREF(items);
+                    return -1;
+                }
+                Py_SETREF(PyTuple_GET_ITEM(tuple, i), set);
+                if (modified != NULL) {
+                    *modified = 1;
+                }
+            }
+            Py_DECREF(items);
+        }
+    }
+    return 0;
+}
+
 PyObject *
 lu_code_new(const struct lu_code_fields *c)
 {
@@ -118,6 +184,11 @@ lu_code_new(const struct lu_code_fields *c)
         || c->argcount < c->posonlyargcount || c->posonlyargcount < 0
         || c->kwonlyargcount < 0 || c->stacksize < 0) {
         lu_err_format(PyExc_SystemError, "bad argument to internal function");
+        return NULL;
+    }
+    intern_strings(c->names);
+    intern_strings(c->localsplusnames);
+    if (intern_constants(c->consts, NULL) < 0) {
         return NULL;
     }
     Py_ssize_t nbytes = PyBytes_GET_SIZE(c->code);
