@@ -234,10 +234,13 @@ Py_BytesMain(int argc, char **argv)
         return 1;
     }
     struct _is *interp = &_PyRuntime.main_interp;
-    if (lu_task_new(interp) == NULL) {
+    PyThreadState *main_task = PyThreadState_New(interp);
+    if (main_task == NULL) {
         fprintf(stderr, "Fatal Python error: lucifer: no memory for the main task\n");
         return 1;
     }
+    main_task->_whence = LU_WHENCE_INIT;
+    PyEval_RestoreThread(main_task);
     lu_layouts_init();
     if (boot_native(interp) < 0 || lu_kernel_boot(interp) < 0) {
         return report();

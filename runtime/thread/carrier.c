@@ -1,7 +1,7 @@
 /* The carrier record (DESIGN 5.3), reached through the one thread-local word.
-   It binds the per-(carrier, interpreter) entries: mimalloc heaps and the
-   biased-refcount owner record. Python/pystate.c does this for a thread
-   state, which does not exist yet; K1 binds the carrier with the first. */
+   It holds the per-(carrier, interpreter) entries: mimalloc heaps, bound at
+   the thread's first allocation, and the biased-refcount owner record, which
+   binding a task registers (runtime/thread/task.c). */
 
 #include "lucifer.h"
 
@@ -11,10 +11,10 @@ static void
 retire(void *arg)
 {
     struct lu_carrier *c = arg;
+    /* Unbinding merges the owner records, which may free objects and so
+       allocate: the heaps stay until the owner records are gone. */
+    lu_task_carrier_exit(c);
     for (struct lu_entry *e = c->entries; e != NULL; e = e->next) {
-        /* Merging may free objects and so allocate: the heaps stay until the
-           owner record is gone. */
-        lu_brc_retire(e);
         lu_mimalloc_abandon(e);
     }
     lu_carrier = NULL;
@@ -48,7 +48,6 @@ start_runtime(void)
     }
 }
 
-/* The carrier's entry in an interpreter. */
 static struct lu_entry *
 entry_new(struct lu_carrier *c, struct _is *interp)
 {
@@ -60,8 +59,17 @@ entry_new(struct lu_carrier *c, struct _is *interp)
     e->next = c->entries;
     c->entries = e;
     lu_mimalloc_bind(e);
-    lu_brc_register(e);
     return e;
+}
+
+struct lu_entry *
+lu_entry_of(struct lu_carrier *c, struct _is *interp)
+{
+    struct lu_entry *e = c->entries;
+    while (e != NULL && e->interp != interp) {
+        e = e->next;
+    }
+    return e != NULL ? e : entry_new(c, interp);
 }
 
 struct lu_entry *

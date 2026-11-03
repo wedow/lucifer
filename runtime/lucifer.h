@@ -153,6 +153,7 @@ struct lu_task {
     PyThreadState ts;
     uintptr_t pin;              /* transient pins: foreign C and nested evals (DESIGN 5.4) */
     int pinned_for_life;        /* main, foreign-thread and thread-scoped tasks */
+    struct lu_carrier *carrier; /* the carrier whose thread it is bound to, or NULL */
     uintptr_t pending;          /* targeted poll reasons, raised into the carrier's word at bind */
 };
 
@@ -160,19 +161,22 @@ struct lu_task {
 struct lu_entry {
     struct _is *interp;
     struct lu_entry *next;      /* the carrier's entries */
+    int nbound;                 /* tasks bound here; the owner record is registered while > 0 */
     struct lu_mimalloc_state mimalloc;
     struct lu_brc_owner brc;
 };
 
 /* The carrier record is per pthread, reached through the one thread-local
-   word (DESIGN 5.3). It is created by the thread's first allocation, or at
-   its start if pthread_create made it, and retired when the thread exits. */
+   word (DESIGN 5.3). It is created by the thread's first allocation or its
+   first task, and retired when the thread exits. */
 struct lu_carrier {
     struct lu_entry *current;   /* the entry of the interpreter running here */
     struct lu_entry *entries;
     uintptr_t poll;             /* the poll word */
     uint32_t wake;              /* the futex a park sleeps on; bumped by each unpark */
-    struct lu_task *task;       /* the task bound here, or NULL */
+    struct lu_task *task;       /* the task last attached here: the thread's tstate
+                                   while its state is attached */
+    struct lu_task *gilstate;   /* the thread's PyGILState tstate (CPython's autoTSSkey) */
 };
 
 extern _Thread_local struct lu_carrier *lu_carrier;
@@ -187,9 +191,30 @@ lu_current_entry(void)
     return c != NULL ? c->current : lu_carrier_bind();
 }
 
-/* Creates a task in `interp` and binds it to the calling carrier for life
-   (the degenerate scheduler). Returns NULL on memory exhaustion. */
-struct lu_task *lu_task_new(struct _is *interp);
+/* PyThreadState._whence values (Include/cpython/pystate.h). */
+enum {
+    LU_WHENCE_UNKNOWN = 0,
+    LU_WHENCE_INIT = 1,
+    LU_WHENCE_GILSTATE = 4,
+};
+
+/* The carrier's entry in `interp`, created on first use there. */
+struct lu_entry *lu_entry_of(struct lu_carrier *c, struct _is *interp);
+
+/* The task lifecycle (runtime/thread/task.c), after Python/pystate.c.
+   lu_task_new makes a task in `interp`, unbound and detached, pinned for life
+   (the degenerate scheduler). lu_task_bind binds it to the calling thread
+   (bind_tstate): thread ids, and the carrier's owner record in its
+   interpreter, registered by the first task bound there; and makes it the
+   thread's gilstate tstate if there is none. lu_task_attach makes a bound task
+   the one running on this carrier (_PyThreadState_Attach). lu_task_delete
+   unlinks, unbinds and frees a task that is not attached. The thread's exit
+   unbinds and frees the tasks still bound to it (lu_task_carrier_exit). */
+struct lu_task *lu_task_new(struct _is *interp, int whence);
+void lu_task_bind(struct lu_task *t);
+void lu_task_attach(PyThreadState *ts);
+void lu_task_delete(struct lu_task *t);
+void lu_task_carrier_exit(struct lu_carrier *c);
 
 /* The one handler for every poll reason (FOUNDATIONS 2.5), called by the
    interpreter and the JIT when the carrier's poll word has a reason set.

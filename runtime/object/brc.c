@@ -5,21 +5,16 @@
    by thread id in the interpreter's bucket table. If the owner is not
    registered, it has exited, and the queuing thread merges the counts itself.
 
-   An owner's record lives in its carrier's entry (runtime/thread/carrier.c), which is
-   created before the thread's first allocation, retired when it exits, and
-   registered here. A thread must register before its first refcount
+   An owner's record lives in its carrier's entry (runtime/thread/carrier.c).
+   It is registered when the first task of a thread is bound in the
+   interpreter, as CPython registers in bind_tstate, and retired when the last
+   is unbound. A thread must be registered before its first refcount
    operation: it may reuse an exited owner's TCB, and with it the thread id of
-   objects merged as abandoned under the bucket lock. CPython registers when a
-   thread state is bound. Until PyThreadState exists, a thread binds as it
-   starts, through the pthread_create below, or at its first allocation (the
-   main thread). It merges its queue when it exits; there is no eval breaker
-   yet to make it merge earlier. */
+   objects merged as abandoned under the bucket lock. A thread merges its
+   queue when it is unbound; there is no eval breaker yet to make it merge
+   earlier. */
 
-#define _GNU_SOURCE
 #include "lucifer.h"
-
-#include <dlfcn.h>
-#include <errno.h>
 
 static struct lu_brc_bucket *
 bucket_of(struct _is *interp, uintptr_t tid)
@@ -102,6 +97,7 @@ lu_brc_retire(struct lu_entry *entry)
     }
     free(t->to_merge.items);
     free(t->local.items);
+    memset(t, 0, sizeof *t);            /* a later bind registers it afresh */
 }
 
 /* Steals a reference to ob. */
@@ -131,37 +127,4 @@ lu_brc_queue_object(PyObject *ob)
     }
     push(&t->to_merge, ob);
     pthread_mutex_unlock(&b->lock.mutex);
-}
-
-struct start {
-    void *(*fn)(void *);
-    void *arg;
-};
-
-static void *
-start_registered(void *arg)
-{
-    struct start s = *(struct start *)arg;
-    free(arg);
-    lu_current_entry();
-    return s.fn(s.arg);
-}
-
-/* Interposes libc's for the runtime and every extension. */
-LU_EXPORT int
-pthread_create(pthread_t *thread, const pthread_attr_t *attr,
-               void *(*fn)(void *), void *arg)
-{
-    int (*create)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *) =
-        dlsym(RTLD_NEXT, "pthread_create");
-    struct start *s = malloc(sizeof *s);
-    if (s == NULL) {
-        return EAGAIN;
-    }
-    *s = (struct start){ fn, arg };
-    int err = create(thread, attr, start_registered, s);
-    if (err != 0) {
-        free(s);
-    }
-    return err;
 }

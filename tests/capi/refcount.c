@@ -100,6 +100,9 @@ check_local_refcount(void)
     CHECK(PyUnstable_IsImmortal(Py_None));
 }
 
+/* Every thread attaches through PyGILState_Ensure, which registers it as a
+   biased-refcount owner before its first reference count operation. */
+
 /* One reference owned by another thread, which outlives our decref. */
 static pthread_barrier_t barrier;
 static PyObject *shared_obj;
@@ -107,32 +110,40 @@ static PyObject *shared_obj;
 static void *
 owner_waits(void *arg)
 {
+    PyGILState_STATE gil = PyGILState_Ensure();
     shared_obj = counted_new();
     Py_INCREF(shared_obj);              /* the reference handed over */
     pthread_barrier_wait(&barrier);     /* main drops the handed-over one */
     pthread_barrier_wait(&barrier);
     Py_DECREF(shared_obj);              /* local count 0, queue still holds one */
+    PyGILState_Release(gil);
     return NULL;
 }
 
 static void *
 owner_exits(void *arg)
 {
+    PyGILState_STATE gil = PyGILState_Ensure();
     shared_obj = counted_new();
+    PyGILState_Release(gil);
     return NULL;
 }
 
 static void *
 other_incref(void *arg)
 {
+    PyGILState_STATE gil = PyGILState_Ensure();
     Py_INCREF(shared_obj);
+    PyGILState_Release(gil);
     return NULL;
 }
 
 static void *
 other_decref(void *arg)
 {
+    PyGILState_STATE gil = PyGILState_Ensure();
     Py_DECREF(shared_obj);
+    PyGILState_Release(gil);
     return NULL;
 }
 
@@ -187,11 +198,13 @@ static int reuse_cur, reuse_done, reuse_seen;
 static void *
 owner_makes_two_refs(void *arg)
 {
+    PyGILState_STATE gil = PyGILState_Ensure();
     reuse_tid = _Py_ThreadId();
     for (int i = 0; i < REUSE_OBJECTS; i++) {
         reuse_objs[i] = counted_new();
         Py_INCREF(reuse_objs[i]);
     }
+    PyGILState_Release(gil);
     return NULL;
 }
 
@@ -199,6 +212,7 @@ owner_makes_two_refs(void *arg)
 static void *
 heir_counts(void *arg)
 {
+    PyGILState_STATE gil = PyGILState_Ensure();
     __atomic_store_n(&reuse_seen, _Py_ThreadId() == reuse_tid, __ATOMIC_SEQ_CST);
     pthread_barrier_wait(&barrier);
     while (!__atomic_load_n(&reuse_done, __ATOMIC_SEQ_CST)) {
@@ -210,6 +224,7 @@ heir_counts(void *arg)
     for (int i = 0; i < REUSE_OBJECTS; i++) {
         Py_DECREF(reuse_objs[i]);
     }
+    PyGILState_Release(gil);
     return NULL;
 }
 
@@ -269,11 +284,13 @@ check(void)
     for (size_t i = 0; i < sizeof varargs / sizeof varargs[0]; i++) {
         CHECK(varargs[i] != NULL);
     }
+    PyGILState_STATE gil = PyGILState_Ensure();
     check_static_objects();
     check_allocators();
     check_local_refcount();
     check_shared_refcount();
     check_reused_thread_id();
+    PyGILState_Release(gil);
     if (failures == 0) {
         puts("capi refcount ok");
     }
