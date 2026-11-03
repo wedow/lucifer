@@ -23,11 +23,6 @@
     LU_EXPORT PyTypeObject sym = { PyVarObject_HEAD_INIT(&PyType_Type, 0) \
         .tp_name = name, .tp_flags = flags };
 
-#define LU_EXC(sym, name) \
-    static PyTypeObject lu_exc_##sym = { PyVarObject_HEAD_INIT(&PyType_Type, 0) \
-        .tp_name = name, .tp_flags = Py_TPFLAGS_BASE_EXC_SUBCLASS }; \
-    LU_EXPORT PyObject *PyExc_##sym = (PyObject *)&lu_exc_##sym;
-
 #define LU_PRIVATE(sym, size) LU_EXPORT _Alignas(16) unsigned char sym[size];
 
 /* Types (public and private); names from the oracle's tp_name. */
@@ -121,75 +116,86 @@ LU_TYPE(_PyWeakref_ProxyType, "weakref.ProxyType", 0)
 LU_TYPE(_PyWeakref_RefType, "weakref.ReferenceType", 0)
 
 /* Exceptions: the exported symbols are pointers to unexported types. */
-LU_EXC(ArithmeticError, "ArithmeticError")
-LU_EXC(AssertionError, "AssertionError")
-LU_EXC(AttributeError, "AttributeError")
-LU_EXC(BaseException, "BaseException")
-LU_EXC(BaseExceptionGroup, "BaseExceptionGroup")
-LU_EXC(BlockingIOError, "BlockingIOError")
-LU_EXC(BrokenPipeError, "BrokenPipeError")
-LU_EXC(BufferError, "BufferError")
-LU_EXC(BytesWarning, "BytesWarning")
-LU_EXC(ChildProcessError, "ChildProcessError")
-LU_EXC(ConnectionAbortedError, "ConnectionAbortedError")
-LU_EXC(ConnectionError, "ConnectionError")
-LU_EXC(ConnectionRefusedError, "ConnectionRefusedError")
-LU_EXC(ConnectionResetError, "ConnectionResetError")
-LU_EXC(DeprecationWarning, "DeprecationWarning")
-LU_EXC(EOFError, "EOFError")
-LU_EXC(EncodingWarning, "EncodingWarning")
-LU_EXC(Exception, "Exception")
-LU_EXC(FileExistsError, "FileExistsError")
-LU_EXC(FileNotFoundError, "FileNotFoundError")
-LU_EXC(FloatingPointError, "FloatingPointError")
-LU_EXC(FutureWarning, "FutureWarning")
-LU_EXC(GeneratorExit, "GeneratorExit")
-LU_EXC(ImportError, "ImportError")
-LU_EXC(ImportWarning, "ImportWarning")
-LU_EXC(IndentationError, "IndentationError")
-LU_EXC(IndexError, "IndexError")
-LU_EXC(InterpreterError, "concurrent.interpreters.InterpreterError")
-LU_EXC(InterpreterNotFoundError, "concurrent.interpreters.InterpreterNotFoundError")
-LU_EXC(InterruptedError, "InterruptedError")
-LU_EXC(IsADirectoryError, "IsADirectoryError")
-LU_EXC(KeyError, "KeyError")
-LU_EXC(KeyboardInterrupt, "KeyboardInterrupt")
-LU_EXC(LookupError, "LookupError")
-LU_EXC(MemoryError, "MemoryError")
-LU_EXC(ModuleNotFoundError, "ModuleNotFoundError")
-LU_EXC(NameError, "NameError")
-LU_EXC(NotADirectoryError, "NotADirectoryError")
-LU_EXC(NotImplementedError, "NotImplementedError")
-LU_EXC(OSError, "OSError")
-LU_EXC(OverflowError, "OverflowError")
-LU_EXC(PendingDeprecationWarning, "PendingDeprecationWarning")
-LU_EXC(PermissionError, "PermissionError")
-LU_EXC(ProcessLookupError, "ProcessLookupError")
-LU_EXC(PythonFinalizationError, "PythonFinalizationError")
-LU_EXC(RecursionError, "RecursionError")
-LU_EXC(ReferenceError, "ReferenceError")
-LU_EXC(ResourceWarning, "ResourceWarning")
-LU_EXC(RuntimeError, "RuntimeError")
-LU_EXC(RuntimeWarning, "RuntimeWarning")
-LU_EXC(StopAsyncIteration, "StopAsyncIteration")
-LU_EXC(StopIteration, "StopIteration")
-LU_EXC(SyntaxError, "SyntaxError")
-LU_EXC(SyntaxWarning, "SyntaxWarning")
-LU_EXC(SystemError, "SystemError")
-LU_EXC(SystemExit, "SystemExit")
-LU_EXC(TabError, "TabError")
-LU_EXC(TimeoutError, "TimeoutError")
-LU_EXC(TypeError, "TypeError")
-LU_EXC(UnboundLocalError, "UnboundLocalError")
-LU_EXC(UnicodeDecodeError, "UnicodeDecodeError")
-LU_EXC(UnicodeEncodeError, "UnicodeEncodeError")
-LU_EXC(UnicodeError, "UnicodeError")
-LU_EXC(UnicodeTranslateError, "UnicodeTranslateError")
-LU_EXC(UnicodeWarning, "UnicodeWarning")
-LU_EXC(UserWarning, "UserWarning")
-LU_EXC(ValueError, "ValueError")
-LU_EXC(Warning, "Warning")
-LU_EXC(ZeroDivisionError, "ZeroDivisionError")
+#define LU_EXCEPTIONS(X) \
+    X(ArithmeticError, "ArithmeticError") \
+    X(AssertionError, "AssertionError") \
+    X(AttributeError, "AttributeError") \
+    X(BaseException, "BaseException") \
+    X(BaseExceptionGroup, "BaseExceptionGroup") \
+    X(BlockingIOError, "BlockingIOError") \
+    X(BrokenPipeError, "BrokenPipeError") \
+    X(BufferError, "BufferError") \
+    X(BytesWarning, "BytesWarning") \
+    X(ChildProcessError, "ChildProcessError") \
+    X(ConnectionAbortedError, "ConnectionAbortedError") \
+    X(ConnectionError, "ConnectionError") \
+    X(ConnectionRefusedError, "ConnectionRefusedError") \
+    X(ConnectionResetError, "ConnectionResetError") \
+    X(DeprecationWarning, "DeprecationWarning") \
+    X(EOFError, "EOFError") \
+    X(EncodingWarning, "EncodingWarning") \
+    X(Exception, "Exception") \
+    X(FileExistsError, "FileExistsError") \
+    X(FileNotFoundError, "FileNotFoundError") \
+    X(FloatingPointError, "FloatingPointError") \
+    X(FutureWarning, "FutureWarning") \
+    X(GeneratorExit, "GeneratorExit") \
+    X(ImportError, "ImportError") \
+    X(ImportWarning, "ImportWarning") \
+    X(IndentationError, "IndentationError") \
+    X(IndexError, "IndexError") \
+    X(InterpreterError, "concurrent.interpreters.InterpreterError") \
+    X(InterpreterNotFoundError, "concurrent.interpreters.InterpreterNotFoundError") \
+    X(InterruptedError, "InterruptedError") \
+    X(IsADirectoryError, "IsADirectoryError") \
+    X(KeyError, "KeyError") \
+    X(KeyboardInterrupt, "KeyboardInterrupt") \
+    X(LookupError, "LookupError") \
+    X(MemoryError, "MemoryError") \
+    X(ModuleNotFoundError, "ModuleNotFoundError") \
+    X(NameError, "NameError") \
+    X(NotADirectoryError, "NotADirectoryError") \
+    X(NotImplementedError, "NotImplementedError") \
+    X(OSError, "OSError") \
+    X(OverflowError, "OverflowError") \
+    X(PendingDeprecationWarning, "PendingDeprecationWarning") \
+    X(PermissionError, "PermissionError") \
+    X(ProcessLookupError, "ProcessLookupError") \
+    X(PythonFinalizationError, "PythonFinalizationError") \
+    X(RecursionError, "RecursionError") \
+    X(ReferenceError, "ReferenceError") \
+    X(ResourceWarning, "ResourceWarning") \
+    X(RuntimeError, "RuntimeError") \
+    X(RuntimeWarning, "RuntimeWarning") \
+    X(StopAsyncIteration, "StopAsyncIteration") \
+    X(StopIteration, "StopIteration") \
+    X(SyntaxError, "SyntaxError") \
+    X(SyntaxWarning, "SyntaxWarning") \
+    X(SystemError, "SystemError") \
+    X(SystemExit, "SystemExit") \
+    X(TabError, "TabError") \
+    X(TimeoutError, "TimeoutError") \
+    X(TypeError, "TypeError") \
+    X(UnboundLocalError, "UnboundLocalError") \
+    X(UnicodeDecodeError, "UnicodeDecodeError") \
+    X(UnicodeEncodeError, "UnicodeEncodeError") \
+    X(UnicodeError, "UnicodeError") \
+    X(UnicodeTranslateError, "UnicodeTranslateError") \
+    X(UnicodeWarning, "UnicodeWarning") \
+    X(UserWarning, "UserWarning") \
+    X(ValueError, "ValueError") \
+    X(Warning, "Warning") \
+    X(ZeroDivisionError, "ZeroDivisionError")
+
+#define LU_EXC(sym, name) \
+    static PyTypeObject lu_exc_##sym = { PyVarObject_HEAD_INIT(&PyType_Type, 0) \
+        .tp_name = name, .tp_flags = Py_TPFLAGS_BASE_EXC_SUBCLASS }; \
+    LU_EXPORT PyObject *PyExc_##sym = (PyObject *)&lu_exc_##sym;
+LU_EXCEPTIONS(LU_EXC)
+
+/* Every exception type, for the native layout setup (runtime/capi/errors.c). */
+#define LU_EXC_ENTRY(sym, name) &lu_exc_##sym,
+PyTypeObject *const lu_exception_types[] = { LU_EXCEPTIONS(LU_EXC_ENTRY) NULL };
 PyObject *PyExc_EnvironmentError = (PyObject *)&lu_exc_OSError;
 PyObject *PyExc_IOError = (PyObject *)&lu_exc_OSError;
 
@@ -320,7 +326,6 @@ LU_PRIVATE(_PyOS_ReadlineTState, 8)
 LU_PRIVATE(_PyParser_TokenNames, 560)
 LU_PRIVATE(_PySet_Dummy, 8)
 LU_PRIVATE(_Py_FunctionAttributeOffsets, 136)
-LU_PRIVATE(_Py_HashSecret, 24)
 LU_PRIVATE(_Py_InitCleanup, 240)
 LU_PRIVATE(_Py_SpecialMethods, 96)
 LU_PRIVATE(_Py_SwappedOp, 24)

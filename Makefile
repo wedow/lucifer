@@ -7,8 +7,13 @@ LU_CFLAGS = -std=gnu11 -Wall -Wextra -Wno-unused-parameter -fvisibility=hidden \
 LU_LDFLAGS = -rdynamic -pthread
 
 SRCS = $(wildcard runtime/*.c runtime/*/*.c)
+HEADERS = $(wildcard runtime/*.h runtime/*/*.h)
 MAIN = build/runtime/main.o
-LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o))
+LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o)) build/frozen.o
+HOST_PYTHON ?= python3
+
+# The kernel, in boot order.
+KERNEL = lib/kernel/builtins.py
 EXPORTS = results/abi/cp314t-exports.tsv
 
 .PHONY: all abi-audit check-globals check-capi check-kernel regen-abi check-harness check-compiler regen
@@ -27,8 +32,14 @@ bin/lucifer: $(MAIN) build/liblucifer.a
 
 build/runtime/object/alloc.o: LU_CFLAGS += -Ithird_party/mimalloc/src
 
-build/%.o: %.c $(wildcard runtime/*.h)
+build/%.o: %.c $(HEADERS)
 	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<
+
+build/frozen.c: tools/freeze $(KERNEL)
+	$(HOST_PYTHON) tools/freeze $@ $(KERNEL)
+
+build/frozen.o: build/frozen.c $(HEADERS)
 	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<
 
 abi-audit: bin/lucifer
@@ -59,8 +70,6 @@ check-capi: bin/lucifer $(CAPI_TESTS)
 # Rerun when the headers or the export list change.
 regen-abi:
 	python3 tools/abi/stubs.py $(EXPORTS) include > runtime/capi/stubs.c
-
-HOST_PYTHON ?= python3
 
 check-harness:
 	python3 tools/oracle/test_harness.py

@@ -1,0 +1,19 @@
+/* The frozen kernel (build/frozen.c, written by tools/freeze). */
+#ifndef LU_FROZEN_H
+#define LU_FROZEN_H
+
+#include "lucifer.h"
+
+struct lu_frozen {
+    const char *name;                   /* the module the file implements */
+    const unsigned char *data;          /* marshal of its code object */
+    int size;
+};
+
+/* NULL-terminated, in boot order. */
+extern const struct lu_frozen lu_frozen_kernel[];
+
+/* Runs every frozen kernel module. Returns -1 with an exception set. */
+int lu_kernel_boot(PyInterpreterState *interp);
+
+#endif

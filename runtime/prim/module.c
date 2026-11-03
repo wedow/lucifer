@@ -1,0 +1,163 @@
+/* Module objects (Objects/moduleobject.c, layout half) and the _lucifer
+   builtin module, the primitive boundary kernel Python calls (DESIGN 4.4).
+   _lucifer uses multi-phase init with module state and keeps no file-scope
+   mutable data (FOUNDATIONS 2.1). */
+
+#include "prim/prim.h"
+
+static void
+module_dealloc(PyObject *op)
+{
+    PyModuleObject *m = (PyModuleObject *)op;
+    if (m->md_def != NULL && m->md_def->m_free != NULL) {
+        m->md_def->m_free(op);
+    }
+    PyMem_Free(m->md_state);
+    Py_XDECREF(m->md_dict);
+    Py_XDECREF(m->md_name);
+    lu_object_free(op);
+}
+
+void
+lu_module_init(void)
+{
+    PyModule_Type.tp_basicsize = sizeof(PyModuleObject);
+    PyModule_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
+    PyModule_Type.tp_dealloc = module_dealloc;
+}
+
+/* PyModule_NewObject: the dict starts with __name__, __doc__, __package__,
+   __loader__ and __spec__ (module_init_dict). */
+PyObject *
+PyModule_NewObject(PyObject *name)
+{
+    PyModuleObject *m = (PyModuleObject *)lu_object_new(&PyModule_Type, sizeof(PyModuleObject));
+    if (m == NULL) {
+        return NULL;
+    }
+    m->md_name = Py_NewRef(name);
+    m->md_dict = PyDict_New();
+    if (m->md_dict == NULL
+        || lu_ns_insert(m->md_dict, LU_ID(__name__), name) < 0
+        || lu_ns_insert(m->md_dict, LU_ID(__doc__), Py_None) < 0
+        || lu_ns_insert(m->md_dict, LU_ID(__package__), Py_None) < 0
+        || lu_ns_insert(m->md_dict, LU_ID(__loader__), Py_None) < 0
+        || lu_ns_insert(m->md_dict, LU_ID(__spec__), Py_None) < 0) {
+        Py_DECREF(m);
+        return NULL;
+    }
+    return (PyObject *)m;
+}
+
+PyObject *
+PyModule_New(const char *name)
+{
+    PyObject *s = PyUnicode_FromString(name);
+    if (s == NULL) {
+        return NULL;
+    }
+    PyObject *m = PyModule_NewObject(s);
+    Py_DECREF(s);
+    return m;
+}
+
+PyObject *
+lu_module_new(const char *name)
+{
+    PyObject *s = PyUnicode_InternFromString(name);
+    if (s == NULL) {
+        return NULL;
+    }
+    PyObject *m = PyModule_NewObject(s);
+    Py_DECREF(s);
+    return m;
+}
+
+PyObject *
+PyModule_GetDict(PyObject *m)
+{
+    return ((PyModuleObject *)m)->md_dict;
+}
+
+void *
+PyModule_GetState(PyObject *m)
+{
+    return ((PyModuleObject *)m)->md_state;
+}
+
+/* PyModule_FromDefAndSpec and PyModule_ExecDef, for builtin modules made
+   natively before importlib exists (no spec, no Py_mod_create). */
+PyObject *
+lu_module_from_def(PyModuleDef *def)
+{
+    PyObject *m = lu_module_new(def->m_name);
+    if (m == NULL) {
+        return NULL;
+    }
+    PyModuleObject *mo = (PyModuleObject *)m;
+    mo->md_def = def;
+    if (def->m_size > 0) {
+        mo->md_state = PyMem_Calloc(1, def->m_size);
+        if (mo->md_state == NULL) {
+            PyErr_NoMemory();
+            goto fail;
+        }
+    }
+    for (PyMethodDef *ml = def->m_methods; ml != NULL && ml->ml_name != NULL; ml++) {
+        PyObject *f = PyCFunction_NewEx(ml, m, mo->md_name);
+        PyObject *name = f != NULL ? PyUnicode_InternFromString(ml->ml_name) : NULL;
+        int err = name == NULL || lu_ns_insert(mo->md_dict, name, f) < 0;
+        Py_XDECREF(name);
+        Py_XDECREF(f);
+        if (err) {
+            goto fail;
+        }
+    }
+    for (PyModuleDef_Slot *slot = def->m_slots; slot != NULL && slot->slot != 0; slot++) {
+        if (slot->slot == Py_mod_create) {
+            lu_err_format(PyExc_SystemError, "module %s: Py_mod_create needs a spec", def->m_name);
+            goto fail;
+        }
+        if (slot->slot == Py_mod_exec && ((int (*)(PyObject *))slot->value)(m) < 0) {
+            goto fail;
+        }
+    }
+    return m;
+fail:
+    Py_DECREF(m);
+    return NULL;
+}
+
+/* _lucifer */
+
+static int
+lucifer_exec(PyObject *m)
+{
+    struct lu_prim_state *state = PyModule_GetState(m);
+    state->interp = PyInterpreterState_Get();
+    return 0;
+}
+
+static PyMethodDef lucifer_methods[] = {
+    { "write", (PyCFunction)(void (*)(void))lu_prim_write, METH_FASTCALL,
+      "write(fd, str): write str to fd as UTF-8, all of it." },
+    { "str_join", (PyCFunction)(void (*)(void))lu_prim_str_join, METH_FASTCALL,
+      "str_join(sep, items): the exact strs of a tuple, joined by sep." },
+    { NULL, NULL, 0, NULL },
+};
+
+static PyModuleDef_Slot lucifer_slots[] = {
+    { Py_mod_exec, (void *)lucifer_exec },
+    { Py_mod_multiple_interpreters, Py_MOD_PER_INTERPRETER_GIL_SUPPORTED },
+    { Py_mod_gil, Py_MOD_GIL_NOT_USED },
+    { 0, NULL },
+};
+
+PyModuleDef lu_lucifer_module = {
+    PyModuleDef_HEAD_INIT,
+    .m_name = "_lucifer",
+    .m_doc = "Native primitives under the kernel's Python builtins.",
+    .m_size = sizeof(struct lu_prim_state),
+    .m_methods = lucifer_methods,
+    .m_slots = lucifer_slots,
+};

@@ -26,3 +26,27 @@ copied verbatim except that `Include/internal/` is excluded. `include/pyconfig.h
 is not part of `Include/`: it is the file `configure --disable-gil` generated
 for the cp314t oracle build of this tag (`Py_GIL_DISABLED 1`). It contains no
 paths. `include/LICENSE` is a copy of this directory's `LICENSE`.
+
+## runtime/
+
+C under `runtime/` adapted from this tag's sources, under the PSF License
+(`LICENSE` in this directory):
+
+- `runtime/interp/marshal.c` from `Python/marshal.c` (`r_object` and its
+  helpers): reads from memory only; the reference list is a C array instead of
+  a list; ints are built from digits directly instead of through
+  `PyLongWriter`; version-0 floats parse with `strtod` instead of `dtoa.c`;
+  dict items require exact-str keys until the kernel's dict exists; no audit
+  event.
+- `runtime/object/hash.c` from `Python/pyhash.c` (SipHash-1-3,
+  `Py_HashBuffer`, `Py_HashPointer`, `_Py_HashDouble`), `Python/bootstrap_hash.c`
+  (`lcg_urandom`, the seed policy over `getrandom`), `Objects/longobject.c`
+  (`long_hash`) and the xxHash lanes of `Objects/tupleobject.c` and
+  `Objects/sliceobject.c`: one function serves tuples and slices; no other
+  algorithms are built.
+- `runtime/object/set.c` from `Objects/setobject.c` (probing, resize policy,
+  `frozenset_hash`): growth only, keys compared by layout equality until the
+  kernel's rich comparison exists.
+- `runtime/object/dict.h` and `runtime/object/dict.c` from
+  `Include/internal/pycore_dict.h` and `Objects/dictobject.c` (the keys-table
+  layout, unicode-keys lookup, insertion and resize): exact-str keys only.
