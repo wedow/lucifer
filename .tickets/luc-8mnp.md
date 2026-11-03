@@ -6,7 +6,6 @@ links: []
 created: 2026-11-03T01:38:06Z
 type: task
 priority: 2
-assignee: Greg Wedow
 tags: [validation]
 ---
 # Harness: verify parallel lanes really run in parallel; classify 128+N shell-wrapper exits as CRASH

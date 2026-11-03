@@ -6,7 +6,7 @@
 
 ## Workflow
 
-- Open work is tracked with `tk` (tickets in `.tickets/`). Run `tk help` before using it. `tk ready` lists unblocked work.
+- Open work is tracked with `tk` (tickets in `.tickets/`). Run `tk help` before using it, create tickets with `-a ""` (no assignee: the repo is public), and use `tk ready` to list unblocked work.
 - Each task runs in its own git worktree and branch, named after its ticket. The coordinator reviews and merges to master.
 - Tests are binary-level wherever possible. They run the real interpreter on Python source and compare against the CPython oracle, never against internal counters or struct offsets. Write the test first and show it failing.
 - `make check-harness` must pass before merge. Scores live in `results/` and are summarized with `tools/scoreboard`.

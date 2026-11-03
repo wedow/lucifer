@@ -6,7 +6,6 @@ links: []
 created: 2026-11-03T01:38:06Z
 type: task
 priority: 1
-assignee: Greg Wedow
 tags: [validation]
 ---
 # Run Lucifer's libtest and subprocesses against Lucifer's own stdlib and interpreter, not the oracle's

@@ -6,7 +6,6 @@ links: []
 created: 2026-11-03T01:38:06Z
 type: chore
 priority: 2
-assignee: Greg Wedow
 tags: [validation]
 ---
 # Re-record pypi oracle baselines with seeded Hypothesis

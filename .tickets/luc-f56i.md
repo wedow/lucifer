@@ -6,7 +6,6 @@ links: []
 created: 2026-11-03T02:02:34Z
 type: task
 priority: 1
-assignee: Greg Wedow
 tags: [runtime, review, concurrency]
 ---
 # Review biased refcounting and merge queue (runtime/object/brc.c, refcount.c) for races
