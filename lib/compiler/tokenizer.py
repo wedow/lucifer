@@ -1713,7 +1713,9 @@ def byte_offset_to_character_offset_raw(data, start, col_offset):
     length = (nul if nul >= 0 else len(data)) - start
     if col_offset > length + 1:
         col_offset = length + 1
-    return len(data[start:start + col_offset].decode("utf-8", "replace"))
+    # Reaching past the end decodes the terminating NUL as one more character.
+    terminator = 1 if col_offset > length else 0
+    return len(data[start:start + col_offset - terminator].decode("utf-8", "replace")) + terminator
 
 
 class TokenizerIter:
