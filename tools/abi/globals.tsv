@@ -1,0 +1,22 @@
+name	reason
+__bss_start	linker section boundary
+__data_start	linker section boundary
+data_start	linker section boundary
+_edata	linker section boundary
+_end	linker section boundary
+_DYNAMIC	dynamic section, written by ld.so before main
+_GLOBAL_OFFSET_TABLE_	relocation table, written by ld.so
+__TMC_END__	crt marker
+__dso_handle	crt marker
+completed.*	crt guard of the global destructors
+__do_global_dtors_aux_fini_array_entry	crt destructor entry
+__frame_dummy_init_array_entry	crt constructor entry
+environ*	libc, copy-relocated into the executable
+__environ*	libc, copy-relocated into the executable
+stdin*	libc, copy-relocated into the executable
+stdout*	libc, copy-relocated into the executable
+stderr*	libc, copy-relocated into the executable
+init_mimalloc_entry	.preinit_array entry that starts mimalloc; never written
+recurse	mimalloc per-thread recursion guard (options.c); its TLS symbol has no line
+lu_exc_*	exception type behind a PyExc_* pointer; the kernel fills in its slots once at startup
+lu_inittab	empty PyImport_Inittab terminator; replaced when the kernel registers builtin modules

@@ -11,7 +11,7 @@ MAIN = build/runtime/main.o
 LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o))
 EXPORTS = results/abi/cp314t-exports.tsv
 
-.PHONY: all abi-audit check-capi regen-abi check-harness
+.PHONY: all abi-audit check-globals check-capi regen-abi check-harness
 all: bin/lucifer
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -33,6 +33,10 @@ build/%.o: %.c $(wildcard runtime/*.h)
 
 abi-audit: bin/lucifer
 	python3 tools/abi/audit.py $(EXPORTS) bin/lucifer
+
+# Every writable symbol of the executable is accounted for.
+check-globals: bin/lucifer
+	python3 tools/abi/globals.py $(EXPORTS) tools/abi/globals.tsv bin/lucifer
 
 # Extensions built only against include/, preloaded with LD_BIND_NOW=1 so that
 # ld.so must bind every import to bin/lucifer before their checks run. Each
