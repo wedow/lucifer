@@ -405,24 +405,27 @@ prim_list_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
-/* list_splice(list, lo, hi, seq): replaces list[lo:hi] with the items of a
-   tuple or list (list_ass_slice_lock_held); 0 <= lo <= hi <= len. A result
-   with no items clears the list, which resets its storage. */
-static PyObject *
-prim_list_splice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+/* list_ass_slice: replaces l[lo:hi] with the items of a tuple or list. Bounds
+   are 0 <= lo <= hi <= len, or with `clamp` brought into range as slice
+   assignment does. A result with no items clears the list, which resets its
+   storage. */
+static int
+list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, int clamp)
 {
-    ARGS(4); LIST(0); SSIZE(1, lo); SSIZE(2, hi); SEQ(3);
-    PyListObject *l = (PyListObject *)args[0];
     Py_ssize_t d;
-    PyObject **fresh = snapshot(args[3], &d);
+    PyObject **fresh = snapshot(seq, &d);
     if (fresh == NULL) {
-        return NULL;
+        return -1;
     }
     PyObject **recycle = NULL;
     Py_ssize_t norig = 0;
     int err = 0, cleared = 0;
     Py_BEGIN_CRITICAL_SECTION(l);
     Py_ssize_t size = Py_SIZE(l);
+    if (clamp) {
+        lo = lo < 0 ? 0 : lo > size ? size : lo;
+        hi = hi < lo ? lo : hi > size ? size : hi;
+    }
     if (lo < 0 || lo > hi || hi > size) {
         lu_err_format(PyExc_SystemError, "list_splice() range out of bounds");
         err = -1;
@@ -474,7 +477,7 @@ prim_list_splice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (err < 0) {
         PyMem_Free(recycle);
         release(fresh, d);
-        return NULL;
+        return -1;
     }
     if (fresh != NULL) {
         PyMem_Free(fresh);              /* empty: nothing was inserted */
@@ -488,7 +491,69 @@ prim_list_splice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     else {
         PyMem_Free(recycle);
     }
-    return Py_NewRef(Py_None);
+    return 0;
+}
+
+static PyObject *
+prim_list_splice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(4); LIST(0); SSIZE(1, lo); SSIZE(2, hi); SEQ(3);
+    return list_splice((PyListObject *)args[0], lo, hi, args[3], 0) < 0 ? NULL : Py_NewRef(Py_None);
+}
+
+/* The list C-API (Objects/listobject.c). */
+
+int
+PyList_SetSlice(PyObject *a, Py_ssize_t ilow, Py_ssize_t ihigh, PyObject *v)
+{
+    if (!PyList_Check(a)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    PyObject *seq = v == NULL ? Py_NewRef((PyObject *)&_PyRuntime.singletons.empty_tuple)
+        : PyTuple_Check(v) || PyList_Check(v) ? Py_NewRef(v) : lu_call_kernel(LU_K_tuple_of, &v, 1);
+    if (seq == NULL) {
+        return -1;
+    }
+    int r = list_splice((PyListObject *)a, ilow, ihigh, seq, 1);
+    Py_DECREF(seq);
+    return r;
+}
+
+int
+PyList_Insert(PyObject *op, Py_ssize_t where, PyObject *newitem)
+{
+    if (!PyList_Check(op)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    PyListObject *l = (PyListObject *)op;
+    int err = 0;
+    Py_BEGIN_CRITICAL_SECTION(l);
+    Py_ssize_t n = Py_SIZE(l);
+    if (list_resize(l, n + 1) < 0) {
+        err = -1;
+    }
+    else {
+        where = where < 0 ? (where + n < 0 ? 0 : where + n) : where > n ? n : where;
+        memmove(l->ob_item + where + 1, l->ob_item + where, (n - where) * sizeof(PyObject *));
+        l->ob_item[where] = Py_NewRef(newitem);
+    }
+    Py_END_CRITICAL_SECTION();
+    return err;
+}
+
+/* _PyList_AppendTakeRef's slow path: the list is full and the caller holds its lock. */
+LU_EXPORT int
+_PyList_AppendTakeRefListResize(PyListObject *self, PyObject *newitem)
+{
+    Py_ssize_t len = Py_SIZE(self);
+    if (list_resize(self, len + 1) < 0) {
+        Py_DECREF(newitem);
+        return -1;
+    }
+    _Py_atomic_store_ptr_release(&self->ob_item[len], newitem);
+    return 0;
 }
 
 /* list_set_stride(list, start, step, seq): list[start + k * step] = seq[k]

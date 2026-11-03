@@ -30,6 +30,31 @@ PyThreadState_Get(void)
     return ts;
 }
 
+LU_EXPORT PyThreadState *
+_PyThreadState_GetCurrent(void)
+{
+    return PyThreadState_GetUnchecked();
+}
+
+/* C recursion shares the Python recursion budget (Python/ceval.c). */
+int
+Py_EnterRecursiveCall(const char *where)
+{
+    PyThreadState *ts = PyThreadState_Get();
+    if (ts->py_recursion_remaining-- <= 0) {
+        ts->py_recursion_remaining++;
+        PyErr_Format(PyExc_RecursionError, "maximum recursion depth exceeded%s", where);
+        return -1;
+    }
+    return 0;
+}
+
+void
+Py_LeaveRecursiveCall(void)
+{
+    PyThreadState_Get()->py_recursion_remaining++;
+}
+
 PyInterpreterState *
 PyInterpreterState_Get(void)
 {

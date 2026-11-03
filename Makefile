@@ -11,6 +11,7 @@ HEADERS = $(wildcard runtime/*.h runtime/*/*.h)
 MAIN = build/runtime/main.o
 LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o)) build/frozen.o
 HOST_PYTHON ?= python3
+ORACLE_T ?= python3.14t
 
 # The kernel, in boot order.
 KERNEL = lib/kernel/_boot.py lib/kernel/object.py lib/kernel/type.py lib/kernel/descriptors.py \
@@ -76,7 +77,7 @@ HIDDEN = compiler:compiler:lib/compiler/__init__.py \
 	$(foreach f,$(filter-out %/__init__.py,$(wildcard lib/compiler/*.py)),compiler.$(basename $(notdir $f)):compiler.$(basename $(notdir $f)):$f)
 EXPORTS = results/abi/cp314t-exports.tsv
 
-.PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel check-embed regen-abi check-harness check-compiler regen
+.PHONY: all abi-audit check check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler regen
 all: bin/lucifer build/lib/stamp
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -125,13 +126,47 @@ check-globals: bin/lucifer
 # Extensions built only against include/, preloaded with LD_BIND_NOW=1 so that
 # ld.so must bind every import to bin/lucifer before their checks run. Each
 # test runs 15 times: the thread tests fail only on some schedules.
-CAPI_TESTS = $(patsubst tests/capi/%.c,build/tests/capi/%.so,$(wildcard tests/capi/*.c))
+CAPI_TESTS = $(patsubst tests/capi/%.c,build/tests/capi/%.so,$(filter-out $(EXT_SOURCES),$(wildcard tests/capi/*.c)))
 
 build/tests/capi/%.so: tests/capi/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -std=gnu11 -Wall -fPIC -shared -pthread -Iinclude -o $@ $<
 
-check-capi: bin/lucifer $(CAPI_TESTS)
+# Extension modules, imported unmodified: the oracle's own _bisect, _heapq and
+# _statistics, found beside the oracle, and tests/capi's modules, built here.
+# Each EXT_PROGRAMS program prints the same stdout, stderr and exit status
+# under the oracle and bin/lucifer.
+EXT_DIR = build/tests/capi/ext
+EXT_SUFFIX = .cpython-314t-x86_64-linux-gnu.so
+EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c
+EXT_PROGRAMS = accel accel_use exc_cross_run slots_run
+SLOTS_MODULES = plain noshare shared_gil create two_exec unknown negative two_create two_interp \
+	two_gil not_module not_module_exec create_fails create_raises exec_fails exec_raises
+
+$(EXT_DIR)/%$(EXT_SUFFIX): tests/capi/%.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -std=gnu11 -Wall -fPIC -shared -pthread -Iinclude -o $@ $<
+
+# slots.c holds one PyInit_ per module; a file of each name loads it.
+$(EXT_DIR)/slots_%$(EXT_SUFFIX): $(EXT_DIR)/slots$(EXT_SUFFIX)
+	ln -sf slots$(EXT_SUFFIX) $@
+
+$(EXT_DIR)/accelerators:
+	@mkdir -p $(@D)
+	dir=$$($(ORACLE_T) -c 'import _bisect, os; print(os.path.dirname(_bisect.__file__))') && \
+	for m in _bisect _heapq _statistics; do ln -sf $$dir/$$m$(EXT_SUFFIX) $(EXT_DIR)/; done
+	touch $@
+
+check-capi-ext: bin/lucifer $(EXT_DIR)/accelerators $(EXT_DIR)/exc_cross$(EXT_SUFFIX) \
+	  $(foreach m,$(SLOTS_MODULES),$(EXT_DIR)/slots_$(m)$(EXT_SUFFIX))
+	@for p in $(EXT_PROGRAMS); do \
+	  { PYTHONPATH=$(EXT_DIR) $(ORACLE_T) tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.expected; \
+	  { PYTHONPATH=$(EXT_DIR) bin/lucifer tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.actual; \
+	  diff $(EXT_DIR)/$$p.expected $(EXT_DIR)/$$p.actual > $(EXT_DIR)/$$p.diff || { cat $(EXT_DIR)/$$p.diff; echo "FAIL $$p"; exit 1; }; \
+	  echo "PASS $$p"; \
+	done
+
+check-capi: bin/lucifer $(CAPI_TESTS) check-capi-ext
 	@for so in $(CAPI_TESTS); do \
 	  name=$$(basename $$so .so); \
 	  for run in $$(seq 15); do \
@@ -172,7 +207,6 @@ check-harness:
 
 # tests/kernel programs, host-compiled to .pyc, against the free-threaded
 # oracle under a 512 KiB stack. PROGRAMS="a b" selects; LANE= picks a policy.
-ORACLE_T ?= python3.14t
 
 check-kernel: bin/lucifer
 	$(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer \
