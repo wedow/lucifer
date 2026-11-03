@@ -1,6 +1,6 @@
 ---
 id: luc-at0e
-status: open
+status: closed
 deps: [luc-qidc, luc-dlik]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -28,3 +28,9 @@ make check-kernel PROGRAMS="gc_at_poll" (bin/lucifer -I -S on the host-compiled 
   - lu_task_attach fatal-errors when attaching over an attached tstate, as CPython does;
   - make the poll-word and t->pending rewrites in install()/release_slot() atomic against cross-thread reasons;
   - unbind the gilstate task last at carrier exit.
+
+## Notes
+
+**2026-11-03T08:57:40Z**
+
+K1q done: poll reasons, lu_poll_slow, GC trigger, STW, QSBR; gc_at_poll, signals_poll, capi stw/qsbr/poll

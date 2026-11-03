@@ -56,9 +56,11 @@ check_signals(PyThreadState *ts)
         if (func == NULL) {
             continue;
         }
-        PyObject *args[2] = { PyLong_FromLong(i), Py_None };
+        PyObject *frame = (PyObject *)PyThreadState_GetFrame(ts);
+        PyObject *args[2] = { PyLong_FromLong(i), frame != NULL ? frame : Py_None };
         PyObject *result = args[0] != NULL ? lu_call(func, args, 2, NULL) : NULL;
         Py_XDECREF(args[0]);
+        Py_XDECREF(frame);
         if (result == NULL) {
             __atomic_store_n(&_PyRuntime.signals.tripped, 1, __ATOMIC_SEQ_CST);
             signal_received();
@@ -124,7 +126,7 @@ PyOS_InterruptOccurred(void)
         return NULL; } } while (0)
 
 /* signal_install(signum, handler): handler is SIG_DFL (0), SIG_IGN (1) or a
-   callable that runs in the main task as handler(signum, None). Only the main
+   callable that runs in the main task as handler(signum, frame). Only the main
    thread installs. A system call interrupted by the signal fails with EINTR
    (no SA_RESTART), as CPython's handlers do. */
 static PyObject *

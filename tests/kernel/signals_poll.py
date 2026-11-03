@@ -9,6 +9,10 @@ got = []
 
 def handler(signum, frame):
     got.append(signum)
+    frames.append(type(frame).__name__)
+
+
+frames = []
 
 
 print(_signal.signal(SIGUSR1, handler) == _signal.SIG_DFL, _signal.getsignal(SIGUSR1) is handler)
@@ -29,6 +33,7 @@ for i in range(100):
         _signal.raise_signal(SIGUSR1)
     count += 1
 print("loop", count, len(got))
+print(set(frames))
 
 
 # A handler that raises raises where the signal was handled.
