@@ -288,14 +288,18 @@ prim_ext_create(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         PyErr_Clear();
         lu_err_format(PyExc_SystemError, "initialization of %s raised unreported exception", last);
     }
+    else if (PyModule_Check(def)) {
+        module = def;                   /* single-phase: PyInit_<name> returned the module */
+        def = NULL;
+    }
     else if (!Py_IS_TYPE(def, &PyModuleDef_Type)) {
-        lu_err_format(PyExc_ImportError, "initialization of %s is not multi-phase, which this "
-                      "runtime does not load yet", last);
+        lu_err_format(PyExc_ImportError, "initialization of %s did not return a module or a "
+                      "module definition", last);
     }
     else {
         module = PyModule_FromDefAndSpec2((PyModuleDef *)def, spec, PYTHON_API_VERSION);
     }
-    if (!Py_IS_TYPE(def, &PyModuleDef_Type)) {
+    if (def != NULL && !Py_IS_TYPE(def, &PyModuleDef_Type)) {
         Py_DECREF(def);
     }
 done:
