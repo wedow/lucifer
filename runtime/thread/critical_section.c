@@ -28,8 +28,8 @@ lock_fast(PyMutex *m)
     return _Py_atomic_compare_exchange_uint8(&m->_bits, &expected, _Py_LOCKED);
 }
 
-/* The world-stopped shortcut of CPython's slow paths arrives with
-   stop-the-world. */
+/* While the world is stopped no other task runs, so a section takes no lock
+   (and could deadlock on one held by a task that is stopped). */
 LU_EXPORT void
 _PyCriticalSection_BeginSlow(PyCriticalSection *c, PyMutex *m)
 {
@@ -56,6 +56,11 @@ _PyCriticalSection_BeginSlow(PyCriticalSection *c, PyMutex *m)
             }
         }
     }
+    if (lu_world_stopped(tstate->interp)) {
+        c->_cs_mutex = NULL;
+        c->_cs_prev = 0;
+        return;
+    }
     c->_cs_mutex = NULL;
     c->_cs_prev = (uintptr_t)tstate->critical_section;
     tstate->critical_section = (uintptr_t)c;
@@ -69,6 +74,12 @@ _PyCriticalSection2_BeginSlow(PyCriticalSection2 *c, PyMutex *m1, PyMutex *m2,
                               int is_m1_locked)
 {
     PyThreadState *tstate = PyThreadState_GetUnchecked();
+    if (lu_world_stopped(tstate->interp)) {
+        c->_cs_base._cs_mutex = NULL;
+        c->_cs_mutex2 = NULL;
+        c->_cs_base._cs_prev = 0;
+        return;
+    }
     // Same optimization as in _PyCriticalSection_BeginSlow: skip locking when
     // recursively acquiring the same locks.
     if (tstate->critical_section &&

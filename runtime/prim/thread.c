@@ -32,7 +32,8 @@ prim_mutex_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 /* mutex_acquire(mutex, timeout_ns): waits at most timeout_ns, for ever if it
    is negative and not at all if 0. True when the mutex is taken. Detached
-   while it waits, and retried after a signal. */
+   while it waits. A signal handler that raises ends the wait with its
+   exception; one that returns lets it go on. */
 static PyObject *
 prim_mutex_acquire(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -43,13 +44,11 @@ prim_mutex_acquire(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return NULL;
     }
     PyTime_t deadline = timeout > 0 ? lu_monotonic_ns() + timeout : 0;
-    PyLockStatus status;
-    for (;;) {
-        PyTime_t left = timeout > 0 ? deadline - lu_monotonic_ns() : timeout;
-        status = _PyMutex_LockTimed(mutex, left > 0 || timeout <= 0 ? left : 0, _PY_LOCK_DETACH);
-        if (status != PY_LOCK_INTR) {
-            break;
-        }
+    PyTime_t left = timeout > 0 ? deadline - lu_monotonic_ns() : timeout;
+    PyLockStatus status = _PyMutex_LockTimed(mutex, left > 0 || timeout <= 0 ? left : 0,
+                                             _PY_LOCK_DETACH | _PY_LOCK_HANDLE_SIGNALS);
+    if (status == PY_LOCK_INTR) {
+        return NULL;
     }
     return Py_NewRef(status == PY_LOCK_ACQUIRED ? Py_True : Py_False);
 }

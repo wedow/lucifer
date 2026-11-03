@@ -60,8 +60,18 @@ lu_park(struct lu_wait *w, PyTime_t deadline, int detach)
             break;
         }
         int err = lu_futex_wait(&c->wake, seq, deadline);
-        if (err == ETIMEDOUT || err == EINTR) {
-            ended = err == ETIMEDOUT ? LU_PARK_TIMEOUT : LU_PARK_INTR;
+        if (err == ETIMEDOUT) {
+            ended = LU_PARK_TIMEOUT;
+            break;
+        }
+        /* A signal handler ran on this thread. The wait ends only if it left a
+           Python handler to run (the signals reason, which only the main
+           thread's carrier ever has): the caller then runs pending calls and
+           parks again. Any other interruption changes nothing for the caller,
+           so the wait goes on. */
+        if (err == EINTR
+            && (__atomic_load_n(&c->poll, __ATOMIC_ACQUIRE) & LU_POLL_SIGNALS_PENDING)) {
+            ended = LU_PARK_INTR;
             break;
         }
     }

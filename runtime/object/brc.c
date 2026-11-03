@@ -10,9 +10,9 @@
    interpreter, as CPython registers in bind_tstate, and retired when the last
    is unbound. A thread must be registered before its first refcount
    operation: it may reuse an exited owner's TCB, and with it the thread id of
-   objects merged as abandoned under the bucket lock. A thread merges its
-   queue when it is unbound; there is no eval breaker yet to make it merge
-   earlier. */
+   objects merged as abandoned under the bucket lock. Queueing an object
+   raises the explicit-merge reason in the owner's carrier, which merges at its
+   next poll; an unbinding thread merges what is left. */
 
 #include "lucifer.h"
 
@@ -37,6 +37,13 @@ push(struct lu_stack *s, PyObject *ob)
         s->cap = cap;
     }
     s->items[s->n++] = ob;
+}
+
+/* The entry an owner record is part of. */
+static struct lu_entry *
+entry_of(struct lu_brc_owner *t)
+{
+    return (struct lu_entry *)((char *)t - offsetof(struct lu_entry, brc));
 }
 
 /* Move every item of src onto dst. */
@@ -126,5 +133,24 @@ lu_brc_queue_object(PyObject *ob)
         return;
     }
     push(&t->to_merge, ob);
+    /* The owner is registered, so its carrier is alive while the bucket lock
+       is held: it merges at its next poll. */
+    lu_poll_set(entry_of(t)->carrier, LU_POLL_EXPLICIT_MERGE);
     pthread_mutex_unlock(&b->lock.mutex);
+}
+
+/* _Py_brc_merge_refcounts: the poll handler's merge of what other threads
+   queued. */
+void
+lu_brc_merge(struct lu_entry *entry)
+{
+    struct lu_brc_owner *t = &entry->brc;
+    if (entry->nbound == 0) {
+        return;
+    }
+    struct lu_brc_bucket *b = bucket_of(entry->interp, t->tid);
+    pthread_mutex_lock(&b->lock.mutex);
+    take_all(&t->local, &t->to_merge);
+    pthread_mutex_unlock(&b->lock.mutex);
+    merge_queued_objects(&t->local);
 }

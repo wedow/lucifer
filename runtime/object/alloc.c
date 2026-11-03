@@ -161,7 +161,8 @@ lu_gc_alloc(PyTypeObject *tp, size_t size, size_t presize)
     if (size > (size_t)PY_SSIZE_T_MAX - presize) {
         return NULL;
     }
-    struct lu_mimalloc_state *m = &lu_current_entry()->mimalloc;
+    struct lu_entry *e = lu_current_entry();
+    struct lu_mimalloc_state *m = &e->mimalloc;
     m->current_object_heap =
         &m->heaps[(tp->tp_flags & Py_TPFLAGS_PREHEADER) ? LU_HEAP_GC_PRE : LU_HEAP_GC];
     char *mem = PyObject_Malloc(presize + size);
@@ -172,6 +173,11 @@ lu_gc_alloc(PyTypeObject *tp, size_t size, size_t presize)
     if (presize) {
         ((PyObject **)mem)[0] = NULL;
         ((PyObject **)mem)[1] = NULL;
+    }
+    lu_gc_record_allocation(e);
+    if (_PyRuntime.stress.gc != 0 && ++e->stress_count >= _PyRuntime.stress.gc) {
+        e->stress_count = 0;
+        lu_poll_set(e->carrier, LU_POLL_STRESS_TICK);   /* a collection, from M0.2 */
     }
     return mem + presize;
 }

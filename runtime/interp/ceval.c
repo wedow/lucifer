@@ -400,7 +400,8 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
     };
 #pragma GCC diagnostic pop
     /* An activation never changes carrier: an unpinned park returns from it. */
-    const uintptr_t *poll = &lu_carrier->poll;
+    struct lu_carrier *const carrier = lu_carrier;
+    const uintptr_t *poll = &carrier->poll;
     struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
     entry.previous = (struct lu_frame *)ts->current_frame;
     frame->previous = &entry;
@@ -493,7 +494,8 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
         } \
     } while (0)
 #define POLL() do { \
-        if (*poll & LU_POLL_EVENTS_MASK) { \
+        lu_qsbr_quiescent(carrier); \
+        if (__atomic_load_n(poll, __ATOMIC_RELAXED) & LU_POLL_EVENTS_MASK) { \
             SAVE_FRAME(); \
             ERROR_IF(lu_poll_slow(ts) < 0); \
         } \
@@ -527,7 +529,7 @@ op_NOP:
     DISPATCH();
 
 op_RESUME: {
-    uintptr_t version = *poll & ~LU_POLL_EVENTS_MASK;
+    uintptr_t version = __atomic_load_n(poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK;
     if (code->_co_instrumentation_version != version) {
         SAVE_FRAME();
         lu_err_format(PyExc_SystemError, "sys.monitoring arrives with M0.3");

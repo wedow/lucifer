@@ -1,5 +1,10 @@
-"""gc (Modules/gcmodule.c): the collector's controls. Collection arrives with
-the cycle collector; until then collect() finds nothing and the counts are zero."""
+"""gc (Modules/gcmodule.c): the collector's controls. The settings and counts
+live in the runtime (runtime/interp/gc.c), which schedules a collection at the
+first call or back-edge after the allocation counts pass the threshold. Until
+the cycle collector arrives, a collection runs the callbacks, stops the world,
+and finds nothing."""
+
+import _lucifer
 
 DEBUG_STATS = 1
 DEBUG_COLLECTABLE = 2
@@ -10,27 +15,43 @@ DEBUG_LEAK = DEBUG_COLLECTABLE | DEBUG_UNCOLLECTABLE | DEBUG_SAVEALL
 garbage = []
 callbacks = []
 
-_enabled = True
 _debug = 0
-_threshold = (2000, 10, 10)
 _frozen = 0
+
+# _lucifer.gc_get/gc_set fields.
+_ENABLED, _YOUNG, _OLD0, _OLD1, _COUNT_YOUNG, _COUNT_OLD0, _COUNT_OLD1 = range(7)
+
+
+def _run_callbacks(phase, generation, collected, uncollectable):
+    """Call each of callbacks with the phase and the collection's info, as the
+runtime starts and ends a collection. A callback that raises is reported and
+the rest still run."""
+    info = {'generation': generation, 'collected': collected,
+            'uncollectable': uncollectable}
+    for callback in callbacks[:]:
+        try:
+            callback(phase, info)
+        except BaseException as exc:
+            exc.__traceback__ = exc.__traceback__.tb_next      # not this frame
+            _lucifer.write_unraisable('Exception ignored while invoking gc callback', callback, exc)
+
+
+_lucifer.gc_hook(_run_callbacks)
 
 
 def enable():
     """Enable automatic garbage collection."""
-    global _enabled
-    _enabled = True
+    _lucifer.gc_set(_ENABLED, 1)
 
 
 def disable():
     """Disable automatic garbage collection."""
-    global _enabled
-    _enabled = False
+    _lucifer.gc_set(_ENABLED, 0)
 
 
 def isenabled():
     """Returns true if automatic garbage collection is enabled."""
-    return _enabled
+    return _lucifer.gc_get(_ENABLED) != 0
 
 
 def collect(generation=2):
@@ -43,25 +64,26 @@ is raised if the generation number is invalid.
 The number of unreachable objects is returned."""
     if not 0 <= generation <= 2:
         raise ValueError('invalid generation')
-    return 0
+    return _lucifer.gc_collect(generation)
 
 
 def get_threshold():
     """Return the current collection thresholds."""
-    return _threshold
+    return (_lucifer.gc_get(_YOUNG), _lucifer.gc_get(_OLD0), _lucifer.gc_get(_OLD1))
 
 
 def set_threshold(threshold0, threshold1=None, threshold2=None, /):
     """Set the collection thresholds (the collection frequency)."""
-    global _threshold
-    _threshold = (threshold0,
-                  _threshold[1] if threshold1 is None else threshold1,
-                  _threshold[2] if threshold2 is None else threshold2)
+    _lucifer.gc_set(_YOUNG, threshold0)
+    if threshold1 is not None:
+        _lucifer.gc_set(_OLD0, threshold1)
+    if threshold2 is not None:
+        _lucifer.gc_set(_OLD1, threshold2)
 
 
 def get_count():
     """Return a three-tuple of the current collection counts."""
-    return (0, 0, 0)
+    return (_lucifer.gc_get(_COUNT_YOUNG), _lucifer.gc_get(_COUNT_OLD0), _lucifer.gc_get(_COUNT_OLD1))
 
 
 def get_debug():

@@ -1,6 +1,5 @@
 /* PyMutex (Python/lock.c of CPython 3.14): a one-byte lock whose slow path
-   parks in the parking lot. The other lock kinds of that file (PyEvent,
-   _PyRawMutex, _PyRecursiveMutex, _PyRWMutex, _PySeqLock, _PyOnceFlag)
+   parks in the parking lot, and PyEvent. The other lock kinds of that file (_PyRawMutex, _PyRecursiveMutex, _PyRWMutex, _PySeqLock, _PyOnceFlag)
    arrive with their first users. */
 
 #include "thread/lock.h"
@@ -178,4 +177,47 @@ int
 PyMutex_IsLocked(PyMutex *m)
 {
     return _PyMutex_IsLocked(m);
+}
+
+/* PyEvent: a one-time notification. The byte is unlocked while unset and
+   unwatched, has-parked while a waiter sleeps, and locked once set. */
+
+LU_EXPORT int
+_PyEvent_IsSet(PyEvent *evt)
+{
+    return _Py_atomic_load_uint8(&evt->v) == _Py_LOCKED;
+}
+
+LU_EXPORT void
+_PyEvent_Notify(PyEvent *evt)
+{
+    uintptr_t v = _Py_atomic_exchange_uint8(&evt->v, _Py_LOCKED);
+    if (v == _Py_HAS_PARKED) {
+        _PyParkingLot_UnparkAll(&evt->v);
+    }
+}
+
+LU_EXPORT void
+PyEvent_Wait(PyEvent *evt)
+{
+    while (!PyEvent_WaitTimed(evt, -1, /*detach=*/1)) {
+    }
+}
+
+LU_EXPORT int
+PyEvent_WaitTimed(PyEvent *evt, PyTime_t timeout_ns, int detach)
+{
+    for (;;) {
+        uint8_t v = _Py_atomic_load_uint8(&evt->v);
+        if (v == _Py_LOCKED) {
+            return 1;
+        }
+        if (v == _Py_UNLOCKED
+            && !_Py_atomic_compare_exchange_uint8(&evt->v, &v, _Py_HAS_PARKED)) {
+            continue;
+        }
+        uint8_t expected = _Py_HAS_PARKED;
+        (void)_PyParkingLot_Park(&evt->v, &expected, sizeof(evt->v), timeout_ns, NULL, detach);
+        return _Py_atomic_load_uint8(&evt->v) == _Py_LOCKED;
+    }
 }

@@ -14,6 +14,10 @@ retire(void *arg)
     /* Unbinding merges the owner records, which may free objects and so
        allocate: the heaps stay until the owner records are gone. */
     lu_task_carrier_exit(c);
+    lu_qsbr_unregister(c);
+    if (_PyRuntime.main_carrier == c) {
+        __atomic_store_n(&_PyRuntime.main_carrier, NULL, __ATOMIC_RELEASE);
+    }
     for (struct lu_entry *e = c->entries; e != NULL; e = e->next) {
         lu_mimalloc_abandon(e);
     }
@@ -31,6 +35,12 @@ start_runtime(void)
 {
     struct _is *interp = &_PyRuntime.main_interp;
     interp->subproc = mi_subproc_main();
+    _PyRuntime.main_thread = pthread_self();
+    _PyRuntime.qsbr.wr_seq = _PyRuntime.qsbr.rd_seq = 1;        /* QSBR_INITIAL */
+    interp->gc.enabled = 1;
+    interp->gc.young_threshold = 2000;
+    interp->gc.old_threshold[0] = interp->gc.old_threshold[1] = 10;
+    lu_lock_register(&_PyRuntime.qsbr.lock);
     lu_lock_register(&_PyRuntime.allocators.lock);
     lu_lock_register(&interp->tasks_lock);
     for (int i = 0; i < LU_WAIT_BUCKETS; i++) {
@@ -56,6 +66,7 @@ entry_new(struct lu_carrier *c, struct _is *interp)
         abort();
     }
     e->interp = interp;
+    e->carrier = c;
     e->next = c->entries;
     c->entries = e;
     lu_mimalloc_bind(e);
@@ -82,6 +93,10 @@ lu_carrier_bind(void)
     }
     lu_carrier = c;
     c->current = entry_new(c, &_PyRuntime.main_interp);
+    if (pthread_equal(pthread_self(), _PyRuntime.main_thread)) {
+        __atomic_store_n(&_PyRuntime.main_carrier, c, __ATOMIC_RELEASE);
+    }
+    lu_qsbr_register(c);
     pthread_setspecific(_PyRuntime.carrier_key, c);
     return c->current;
 }
