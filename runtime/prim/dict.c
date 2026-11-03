@@ -177,7 +177,7 @@ static PyObject *
 prim_dict_keys_id(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1); DICT(0);
-    return PyLong_FromVoidPtr(((PyDictObject *)args[0])->ma_keys);
+    return PyLong_FromLongLong((long long)(intptr_t)(((PyDictObject *)args[0])->ma_keys));
 }
 
 /* dict_copy(d): PyDict_Copy, an exact dict. */

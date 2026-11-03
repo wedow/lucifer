@@ -289,7 +289,7 @@ prim_set_info(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     case 2: return int_of(so->mask);
     case 3: return int_of(so->finger);
     case 4: return int_of(so->hash);
-    default: return PyLong_FromVoidPtr(so->table);
+    default: return PyLong_FromLongLong((long long)(intptr_t)(so->table));
     }
 }
 
