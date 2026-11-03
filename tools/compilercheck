@@ -10,6 +10,10 @@ Each input the host compiles is compared on:
   optast    the same dump with PyCF_OPTIMIZED_AST (AST preprocessing)
   code      marshal.dumps of the code object compile() returns
 
+With --lucifer BIN --oracle PYTHON the code stage runs instead on BIN, the
+runtime's own compile(), against the free-threaded oracle: each file's
+marshal.dumps(compile(source, path, "exec")) must be the same bytes.
+
 Corpora: closure (tests/compiler/closure.txt: the vendored Lib files of the 64
 modules `-X importtime` reports on the oracle for the difftest probe and for
 tools/difftest/bridge.py running a one-line program), difftest (the
@@ -26,6 +30,7 @@ import marshal
 import os
 from pathlib import Path
 import signal
+import subprocess
 import sys
 import tokenize
 
@@ -145,6 +150,42 @@ def worker_init():
     signal.signal(signal.SIGALRM, alarm)
 
 
+# The free-threaded build frees code objects only when the cycle collector runs,
+# and a code object the compiler merged away until then still shares its tables
+# with the survivor, which marshal records. When the collector runs depends on
+# the process's memory, so both sides run without it.
+DRIVER = """
+import gc, marshal, sys
+gc.disable()
+for path in sys.argv[1:]:
+    try:
+        print(path, marshal.dumps(compile(open(path, "rb").read(), path, "exec", 0, True)).hex(), flush=True)
+    except BaseException as error:
+        print(path, "raised", type(error).__name__, error, flush=True)
+"""
+
+
+def run_driver(interpreter, paths):
+    """{path: output line} of DRIVER run by interpreter -I -S over paths (relative to ROOT)."""
+    child = subprocess.run([interpreter, "-I", "-S", "-c", DRIVER, *paths], cwd=ROOT,
+                           capture_output=True, text=True, errors="replace", timeout=TIMEOUT * len(paths))
+    lines = {line.split(" ", 1)[0]: line for line in child.stdout.splitlines()}
+    return {p: lines.get(p, f"{p} no output (exit {child.returncode}): {child.stderr.strip()[-300:]}")
+            for p in paths}
+
+
+def check_runtime(lucifer, oracle, paths, jobs):
+    """{path: None if the runtime's marshaled code equals the oracle's else a difference}."""
+    relative = [str(p.relative_to(ROOT)) for p in paths]
+    chunks = [chunk for chunk in (relative[i::jobs] for i in range(jobs)) if chunk]
+    with concurrent.futures.ThreadPoolExecutor(2 * jobs) as pool:
+        ours = pool.map(run_driver, [lucifer] * len(chunks), chunks)
+        theirs = pool.map(run_driver, [oracle] * len(chunks), chunks)
+        ours = {k: v for d in ours for k, v in d.items()}
+        theirs = {k: v for d in theirs for k, v in d.items()}
+    return {ROOT / p: None if ours[p] == theirs[p] else first_difference(theirs[p], ours[p]) for p in relative}
+
+
 def check_version():
     want = (LIB.parent / "VERSION").read_text().split()[1].lstrip("v")
     have = "%d.%d.%d" % sys.version_info[:3]
@@ -161,6 +202,8 @@ def main():
     parser.add_argument("--show", type=int, default=5, help="differences listed per corpus and stage")
     parser.add_argument("--host-parser", action="store_true",
                         help="feed later stages the host's AST, to check them before the parser is done")
+    parser.add_argument("--lucifer", help="check the code stage on this runtime (needs --oracle)")
+    parser.add_argument("--oracle", help="free-threaded CPython 3.14 that --lucifer is compared with")
     parser.add_argument("files", nargs="*", type=Path, help="check these files instead of corpora")
     args = parser.parse_args()
     check_version()
@@ -168,6 +211,15 @@ def main():
     corpora = {"files": [p.resolve() for p in args.files]} if args.files else {
         name: corpus(name) for name in args.corpus.split(",")}
     failed = False
+    if args.lucifer:
+        for name, paths in corpora.items():
+            results = check_runtime(args.lucifer, args.oracle, paths, args.jobs)
+            bad = {p: r for p, r in results.items() if r is not None}
+            print(f"{name}: {len(paths) - len(bad)} of {len(paths)} files marshal identically on {args.lucifer}")
+            for path, difference in list(bad.items())[:args.show]:
+                print(f"    {path.relative_to(ROOT)}: {difference}")
+            failed |= bool(bad) and name in args.require.split(",")
+        return 1 if failed else 0
     with concurrent.futures.ProcessPoolExecutor(args.jobs, initializer=worker_init) as pool:
         for name, paths in corpora.items():
             results = dict(zip(paths, pool.map(check_file, paths, [stages] * len(paths),

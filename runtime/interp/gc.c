@@ -14,6 +14,7 @@
 
 #include "prim/prim.h"
 #include "interp/exceptions.h"
+#include "interp/code.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -170,6 +171,7 @@ collect(PyThreadState *ts, int generation, int reason)
     }
     gc->last_mem = process_mem_usage();
     lu_stw_start(ts->interp);
+    lu_code_release_deferred(ts->interp);
 
     invoke_callback(ts, "stop", generation, 0, 0);
     __atomic_store_n(&gc->collecting, 0, __ATOMIC_SEQ_CST);

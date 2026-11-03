@@ -18,7 +18,7 @@ KERNEL = lib/kernel/_boot.py lib/kernel/object.py lib/kernel/type.py lib/kernel/
 	lib/kernel/float.py lib/kernel/complex.py lib/kernel/slice.py lib/kernel/_args.py lib/kernel/iter.py lib/kernel/tuple.py lib/kernel/_listsort.py \
 	lib/kernel/list.py lib/kernel/range.py lib/kernel/str.py lib/kernel/bytes.py lib/kernel/memoryview.py \
 	lib/kernel/dict.py lib/kernel/set.py lib/kernel/mappingproxy.py \
-	lib/kernel/generators.py lib/kernel/frame.py \
+	lib/kernel/generators.py lib/kernel/frame.py lib/kernel/code.py \
 	lib/kernel/iterators.py lib/kernel/builtins.py lib/kernel/weakref.py lib/kernel/module.py lib/kernel/structseq.py lib/kernel/sys.py lib/kernel/genericalias.py \
 	lib/kernel/template.py \
 	lib/kernel/cell.py
@@ -55,12 +55,24 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 	functools:functools:third_party/cpython/Lib/functools.py \
 	collections:collections:third_party/cpython/Lib/collections/__init__.py \
 	typing:typing:third_party/cpython/Lib/typing.py \
+	token:token:third_party/cpython/Lib/token.py \
+	__future__:__future__:third_party/cpython/Lib/__future__.py \
+	ast:ast:third_party/cpython/Lib/ast.py \
+	_ast_unparse:_ast_unparse:third_party/cpython/Lib/_ast_unparse.py \
 	enum:enum:third_party/cpython/Lib/enum.py \
+	contextlib:contextlib:third_party/cpython/Lib/contextlib.py \
+	os:os:third_party/cpython/Lib/os.py \
+	stat:stat:third_party/cpython/Lib/stat.py \
+	posixpath:posixpath:third_party/cpython/Lib/posixpath.py \
+	genericpath:genericpath:third_party/cpython/Lib/genericpath.py \
 	re:re:third_party/cpython/Lib/re/__init__.py \
 	re._casefix:re._casefix:third_party/cpython/Lib/re/_casefix.py \
 	re._compiler:re._compiler:third_party/cpython/Lib/re/_compiler.py \
 	re._constants:re._constants:third_party/cpython/Lib/re/_constants.py \
 	re._parser:re._parser:third_party/cpython/Lib/re/_parser.py
+# The compiler runs as a C module would: its frames are not in tracebacks.
+HIDDEN = compiler:compiler:lib/compiler/__init__.py \
+	$(foreach f,$(filter-out %/__init__.py,$(wildcard lib/compiler/*.py)),compiler.$(basename $(notdir $f)):compiler.$(basename $(notdir $f)):$f)
 EXPORTS = results/abi/cp314t-exports.tsv
 
 .PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel regen-abi check-harness check-compiler regen
@@ -83,8 +95,8 @@ build/%.o: %.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<
 
-build/frozen.c: Makefile tools/freeze $(KERNEL) $(MODULES) $(foreach e,$(FROZEN),$(lastword $(subst :, ,$(e))))
-	$(HOST_PYTHON) tools/freeze $@ --kernel $(KERNEL) --builtin $(MODULES) --frozen $(FROZEN)
+build/frozen.c: Makefile tools/freeze $(KERNEL) $(MODULES) $(foreach e,$(FROZEN) $(HIDDEN),$(lastword $(subst :, ,$(e))))
+	$(HOST_PYTHON) tools/freeze $@ --kernel $(KERNEL) --builtin $(MODULES) --frozen $(FROZEN) --hidden $(HIDDEN)
 
 build/frozen.o: build/frozen.c $(HEADERS)
 	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<
@@ -154,3 +166,4 @@ PEGEN = third_party/cpython/Tools/peg_generator
 
 regen:
 	PYTHONPATH=$(PEGEN) $(HOST_PYTHON) -m pegen -q python lib/compiler/python.gram -o lib/compiler/parser.py
+	$(HOST_PYTHON) tools/genast

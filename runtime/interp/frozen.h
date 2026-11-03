@@ -10,6 +10,7 @@ struct lu_frozen {
     int size;
     const char *orig;                   /* the module it is a copy of, or NULL (frozen table) */
     int package;                        /* a frozen package */
+    int hidden;                         /* its frames are omitted from tracebacks */
 };
 
 /* NULL-terminated. The kernel is in boot order; builtin is lib/modules, the

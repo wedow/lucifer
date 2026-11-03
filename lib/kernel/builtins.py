@@ -7,7 +7,7 @@ Clinic does."""
 from _lucifer import (
     str_join, error, kind, type_lookup, type_tp_name, MISSING, static_type, is_callable,
     is_subtype, size, int_format, int_add, int_as_double, str_chr, str_ord, bytes_ord, str_len,
-    object_id, caller_locals, caller_globals, eval_code, kernel_get, kernel_set,
+    object_id, caller_locals, caller_globals, caller_code_flags, eval_code, kernel_get, kernel_set,
     import_state, field_get,
 )
 from _lucifer import _boot, _format, operators, _args, iter as _iter
@@ -514,6 +514,48 @@ With two or more positional arguments, return the smallest argument."""
     return _min_max('min', args, kwargs, False)
 
 
+_PyCF_SOURCE_IS_UTF8 = 0x100
+_PyCF_ONLY_AST = 0x400
+_PyCF_OPTIMIZED_AST = 0x8400
+_PyCF_MASK = 0x1fe0000                  # the CO_FUTURE_* flags
+_PyCF_COMPILE_MASK = 0x400 | 0x2000 | 0x1000 | 0x200 | 0x4000 | 0x8400
+_CO_NESTED = 0x10
+_compiler = None
+
+
+def _compile(source, filename, mode, flags, dont_inherit, optimize, feature_version):
+    """The compiler's compile(); the compiler is imported on first use."""
+    global _compiler
+    if _compiler is None:
+        import compiler
+        _compiler = compiler
+    return _compiler.compile(source, filename, mode, flags, dont_inherit, optimize,
+                             _feature_version=feature_version)
+
+
+def _source_text(fname, source):
+    """The text of source for the compiler, or None when it is not source text:
+    a str as it is, bytes-like objects as bytes (_Py_SourceAsString)."""
+    if kind(source, 'str') or kind(source, 'bytes'):
+        return source
+    if kind(source, 'bytearray') or kind(source, 'memoryview'):
+        return bytes(source)
+    return None
+
+
+def _code_of(fname, source, mode):
+    """The code object of exec's or eval's source text: compiled as
+    PyRun_StringFlags does, with the caller's future statements."""
+    flags = caller_code_flags() & _PyCF_MASK
+    if kind(source, 'str'):
+        flags |= _PyCF_SOURCE_IS_UTF8
+        if mode == 'eval':
+            source = source.lstrip(' \t')
+    elif mode == 'eval':
+        source = source.lstrip(b' \t')
+    return _compile(source, '<string>', mode, flags, False, -1, -1)
+
+
 def _source(fname, source, globals_, locals_):
     """The code object of exec's and eval's source, and the namespaces it
     runs in: those of the calling frame unless given."""
@@ -534,12 +576,13 @@ def _source(fname, source, globals_, locals_):
     elif locals_ is None:
         locals_ = globals_
     if type(source) is not _code:
-        if kind(source, 'str') or kind(source, 'bytes') or kind(source, 'bytearray'):
-            raise NotImplementedError(str_join('', (fname, '() of source text waits for the compiler')))
-        error(TypeError, str_join('', (fname, '() arg 1 must be a string, bytes or code object')))
+        text = _source_text(fname, source)
+        if text is None:
+            error(TypeError, str_join('', (fname, '() arg 1 must be a string, bytes or code object')))
+        source = _code_of(fname, text, fname)
     if not kind(locals_, 'dict'):
         raise NotImplementedError(str_join('', (fname, '() with a locals mapping that is not a dict')))
-    return globals_, locals_
+    return source, globals_, locals_
 
 
 def eval(*args, **kwargs):
@@ -551,8 +594,8 @@ The globals must be a dictionary and locals can be any mapping,
 defaulting to the current globals and locals.
 If only globals is given, locals defaults to it."""
     source, globals_, locals_ = _args.unpack('eval', args, kwargs, ('source', 'globals', 'locals'), 1, 1)
-    globals_, locals_ = _source('eval', source, None if globals_ is MISSING else globals_,
-                                None if locals_ is MISSING else locals_)
+    source, globals_, locals_ = _source('eval', source, None if globals_ is MISSING else globals_,
+                                        None if locals_ is MISSING else locals_)
     return eval_code(source, globals_, locals_)
 
 
@@ -565,15 +608,79 @@ The globals must be a dictionary and locals can be any mapping,
 defaulting to the current globals and locals.
 If only globals is given, locals defaults to it."""
     source, globals_, locals_ = _args.unpack('exec', args, kwargs, ('source', 'globals', 'locals'), 1, 1)
-    globals_, locals_ = _source('exec', source, None if globals_ is MISSING else globals_,
-                                None if locals_ is MISSING else locals_)
+    source, globals_, locals_ = _source('exec', source, None if globals_ is MISSING else globals_,
+                                        None if locals_ is MISSING else locals_)
     eval_code(source, globals_, locals_)
     return None
 
 
-def compile(source, filename, mode, flags=0, dont_inherit=False, optimize=-1, *, _feature_version=-1):
-    """Compile source into a code object that can be executed by exec() or eval()."""
-    raise NotImplementedError('compile() waits for the runtime compiler')
+def _filename(filename):
+    """PyUnicode_FSDecoder"""
+    if kind(filename, 'str'):
+        return filename
+    if kind(filename, 'bytes'):
+        return filename.decode('utf-8', 'surrogateescape')
+    fspath = type_lookup(type(filename), '__fspath__')
+    if fspath is not MISSING:
+        path = fspath(filename)
+        if kind(path, 'str'):
+            return path
+        if kind(path, 'bytes'):
+            return path.decode('utf-8', 'surrogateescape')
+        error(TypeError, str_join('', (
+            'expected ', _name(filename), '.__fspath__() to return str or bytes, not ', _name(path))))
+    error(TypeError, str_join('', (
+        "compile() argument 'filename' must be str, bytes or os.PathLike, not ", _name(filename))))
+
+
+def compile(*args, **kwargs):
+    """Compile source into a code object that can be executed by exec() or eval().
+
+The source code may represent a Python module, statement or expression.
+The filename will be used for run-time error messages.
+The mode must be 'exec' to compile a module, 'single' to compile a
+single (interactive) statement, or 'eval' to compile an expression.
+The flags argument, if present, controls which future statements influence
+the compilation of the code.
+The dont_inherit argument, if true, stops the compilation inheriting
+the effects of any future statements in effect in the code calling
+compile; if absent or false these statements do influence the compilation,
+in addition to any features explicitly specified."""
+    if size(args) > 6:
+        error(TypeError, str_join('', ('compile() takes at most 6 positional arguments (',
+                                       decimal(size(args)), ' given)')))
+    source, filename, mode, flags, dont_inherit, optimize, feature_version = _args.unpack(
+        'compile', args, kwargs, ('source', 'filename', 'mode', 'flags', 'dont_inherit', 'optimize',
+                                  '_feature_version'), 0, 3)
+    flags = 0 if flags is MISSING else flags
+    dont_inherit = False if dont_inherit is MISSING else dont_inherit
+    optimize = -1 if optimize is MISSING else optimize
+    feature_version = -1 if feature_version is MISSING else index(feature_version)
+    filename = _filename(filename)
+    if not kind(mode, 'str'):
+        error(TypeError, str_join('', ("compile() argument 'mode' must be str, not ", _name(mode))))
+    flags = index(flags)
+    optimize = index(optimize)
+    if not -0x80000000 <= flags <= 0x7fffffff or not -0x80000000 <= optimize <= 0x7fffffff:
+        error(OverflowError, 'Python int too large to convert to C int')
+    if flags & ~(_PyCF_MASK | _CO_NESTED | _PyCF_COMPILE_MASK):
+        error(ValueError, 'compile(): unrecognised flags')
+    if optimize < -1 or optimize > 2:
+        error(ValueError, 'compile(): invalid optimize value')
+    if not truth(dont_inherit):
+        flags |= caller_code_flags() & _PyCF_MASK
+    if mode not in ('exec', 'eval', 'single', 'func_type'):
+        error(ValueError, "compile() mode must be 'exec', 'eval' or 'single'")
+    if mode == 'func_type' and not flags & _PyCF_ONLY_AST:
+        error(ValueError, "compile() mode 'func_type' requires flag PyCF_ONLY_AST")
+    import _ast
+    if not isinstance(source, _ast.AST):
+        text = _source_text('compile', source)
+        if text is None:
+            error(TypeError, 'compile() arg 1 must be a string, bytes or AST object')
+        source = text
+    sys.audit('compile', source, filename)
+    return _compile(source, filename, mode, flags, truth(dont_inherit), optimize, feature_version)
 
 
 def _resolve_name(name, globals_, level):

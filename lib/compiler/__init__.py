@@ -22,7 +22,7 @@ def compile(source, filename, mode, flags=0, dont_inherit=False, optimize=-1, *,
         mod = source
     else:
         if (b"\0" if isinstance(source, bytes) else "\0") in source:  # _Py_SourceAsString
-            raise ValueError("source code string cannot contain null bytes")
+            raise SyntaxError("source code string cannot contain null bytes")
         mod = parse(source, filename, mode, flags, _feature_version)
     from .preprocess import preprocess
     if flags & PyCF_ONLY_AST:

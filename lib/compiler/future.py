@@ -91,9 +91,9 @@ def raise_syntax_error(msg, filename, lineno, col_offset, end_lineno, end_col_of
 
 def emit_syntax_warning(msg, filename, lineno, col_offset, end_lineno, end_col_offset):
     """_PyErr_EmitSyntaxWarning: warn, or raise a SyntaxError if the warning is an error."""
-    import warnings
+    from _warnings import warn_explicit
     try:
-        warnings.warn_explicit(msg, SyntaxWarning, filename, lineno)
+        warn_explicit(msg, SyntaxWarning, filename, lineno)
     except SyntaxWarning:
         # Replace the SyntaxWarning exception with a SyntaxError
         # to get a more accurate error report

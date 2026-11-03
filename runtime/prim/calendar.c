@@ -45,14 +45,30 @@ prim_tm_tuple(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return os_error();
     }
     long long year = (long long)tm.tm_year + 1900;
-    PyObject *zone = PyUnicode_DecodeLocale(tm.tm_zone != NULL ? tm.tm_zone : "", "surrogateescape");
-    if (zone == NULL) {
-        return NULL;
+    long long f[9] = { year, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+                       (tm.tm_wday + 6) % 7, tm.tm_yday + 1, tm.tm_isdst };
+    PyObject *t_ = PyTuple_New(11);
+    for (int i = 0; t_ != NULL && i < 9; i++) {
+        PyObject *n = PyLong_FromLongLong(f[i]);
+        if (n == NULL) {
+            Py_CLEAR(t_);
+            break;
+        }
+        PyTuple_SET_ITEM(t_, i, n);
     }
-    PyObject *t_ = Py_BuildValue("(LiiiiiiiiOl)", year, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour,
-                                 tm.tm_min, tm.tm_sec, (tm.tm_wday + 6) % 7, tm.tm_yday + 1,
-                                 tm.tm_isdst, zone, (long)tm.tm_gmtoff);
-    Py_DECREF(zone);
+    if (t_ != NULL) {
+        PyObject *zone = PyUnicode_FromString(tm.tm_zone != NULL ? tm.tm_zone : "");
+        PyObject *off = PyLong_FromLong((long)tm.tm_gmtoff);
+        if (zone == NULL || off == NULL) {
+            Py_XDECREF(zone);
+            Py_XDECREF(off);
+            Py_CLEAR(t_);
+        }
+        else {
+            PyTuple_SET_ITEM(t_, 9, zone);
+            PyTuple_SET_ITEM(t_, 10, off);
+        }
+    }
     return t_;
 }
 
@@ -114,41 +130,33 @@ prim_strftime(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         || lu_long_as_long(args[3], &gmtoff) < 0) {
         return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "strftime(format, fields, zone, gmtoff)"), NULL);
     }
-    PyObject *format = PyUnicode_EncodeLocale(args[0], "surrogateescape");
-    PyObject *zone = args[2] == Py_None ? NULL : PyUnicode_EncodeLocale(args[2], "surrogateescape");
+    const char *format = PyUnicode_AsUTF8(args[0]);
+    const char *zone = args[2] == Py_None ? NULL : PyUnicode_AsUTF8(args[2]);
     if (format == NULL || (args[2] != Py_None && zone == NULL)) {
-        Py_XDECREF(format);
-        Py_XDECREF(zone);
         return NULL;
     }
     fill_tm(&tm, v);
     tm.tm_gmtoff = gmtoff;
-    tm.tm_zone = zone != NULL ? PyBytes_AS_STRING(zone) : NULL;
-    PyObject *result = NULL;
-    if (PyBytes_GET_SIZE(format) == 0) {
-        result = PyUnicode_FromString("");
+    tm.tm_zone = zone;
+    size_t flen = strlen(format);
+    if (flen == 0) {
+        return PyUnicode_FromString("");
     }
-    for (size_t size = 1024; result == NULL; size *= 2) {
+    /* strftime answers 0 for an empty result and for a full buffer alike:
+       grow until it fits, up to a bound no format can exceed. */
+    for (size_t size = 1024;; size *= 2) {
         char *buf = PyMem_RawMalloc(size);
         if (buf == NULL) {
-            PyErr_NoMemory();
-            break;
+            return PyErr_NoMemory();
         }
-        errno = 0;
-        size_t n = strftime(buf, size, PyBytes_AS_STRING(format), &tm);
-        if (n > 0 || (errno == 0 && size > 256 * PyBytes_GET_SIZE(format))) {
-            result = PyUnicode_DecodeLocaleAndSize(buf, (Py_ssize_t)n, "surrogateescape");
+        size_t n = strftime(buf, size, format, &tm);
+        if (n > 0 || size > 256 * flen) {
+            PyObject *result = PyUnicode_DecodeUTF8(buf, (Py_ssize_t)n, "surrogateescape");
             PyMem_RawFree(buf);
-            break;
+            return result;
         }
         PyMem_RawFree(buf);
-        if (size > 256 * (size_t)PyBytes_GET_SIZE(format) + 4096) {
-            result = PyUnicode_FromString("");
-        }
     }
-    Py_DECREF(format);
-    Py_XDECREF(zone);
-    return result;
 }
 
 /* tzset() */

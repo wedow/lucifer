@@ -19,6 +19,7 @@ extern PyMethodDef lu_prim_int_methods[];       /* runtime/prim/int.c */
 extern PyMethodDef lu_prim_float_methods[];     /* runtime/prim/float.c */
 extern PyMethodDef lu_prim_complex_methods[];   /* runtime/prim/complex.c */
 extern PyMethodDef lu_prim_math_methods[];      /* runtime/prim/math.c */
+extern PyMethodDef lu_prim_calendar_methods[];  /* runtime/prim/calendar.c */
 extern PyMethodDef lu_sys_int_methods[];        /* sys's int functions, runtime/prim/int.c */
 extern PyMethodDef lu_prim_exc_methods[];       /* runtime/interp/exceptions.c */
 extern PyMethodDef lu_prim_storage_methods[];   /* runtime/prim/storage.c */
@@ -33,6 +34,7 @@ extern PyMethodDef lu_prim_gc_methods[];        /* runtime/interp/gc.c */
 extern PyMethodDef lu_prim_signal_methods[];    /* runtime/interp/signals.c */
 extern PyMethodDef lu_prim_weakref_methods[];   /* runtime/object/weakref.c */
 extern PyMethodDef lu_prim_import_methods[];    /* runtime/interp/import.c */
+extern PyMethodDef lu_prim_code_methods[];      /* runtime/interp/code.c */
 extern PyMethodDef lu_sys_frame_methods[];      /* sys's recursion limit, runtime/interp/frame.c */
 PyObject *lu_prim_str_join(PyObject *module, PyObject *const *args, Py_ssize_t nargs);
 PyObject *lu_prim_text_repr(PyObject *module, PyObject *const *args, Py_ssize_t nargs);

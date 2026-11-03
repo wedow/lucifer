@@ -59,6 +59,7 @@ layouts	runtime/interp/exceptions.c	the exception layouts' roots, a table never 
 own.*	runtime/interp/exceptions.c	which exception type gets which attribute tables, read once at startup
 lu_prim_exc_methods	runtime/interp/exceptions.c	_lucifer's exception primitives, a PyMethodDef table never written; the API takes it non-const
 code_members	runtime/interp/code.c	PyMemberDef table of the code layout, never written; tp_members takes it non-const
+code_getset	runtime/interp/code.c	PyGetSetDef table of the code layout, never written; tp_getset takes it non-const
 names.*	runtime/interp/ceval.c	the builtins LOAD_COMMON_CONSTANT names, a table never written
 lu_prim_storage_methods	runtime/prim/storage.c	_lucifer's storage primitives, a PyMethodDef table never written; the API takes it non-const
 gen_getset	runtime/interp/gen.c	PyGetSetDef table of generators, never written; tp_getset takes it non-const
@@ -87,6 +88,7 @@ lu_prim_builtins_methods	runtime/prim/builtins.c	_lucifer's builtins primitives,
 lu_frozen_builtin	build/frozen.c	const table of the builtin module ports; relocated by ld.so, then read-only (RELRO)
 lu_frozen_modules	build/frozen.c	const table of the frozen modules; relocated by ld.so, then read-only (RELRO)
 lu_prim_import_methods	runtime/interp/import.c	_lucifer's import primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_code_methods	runtime/interp/code.c	_lucifer's code primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_os_methods	runtime/prim/os.c	_lucifer's operating system primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_thread_methods	runtime/prim/thread.c	_lucifer's lock primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_weakref_methods	runtime/object/weakref.c	_lucifer's weakref primitives, a PyMethodDef table never written; the API takes it non-const

@@ -272,6 +272,75 @@ lu_prim_os_open(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLong(fd);
 }
 
+/* mkdir(path, mode), rmdir(path), unlink(path) */
+static PyObject *
+path_call(PyObject *const *args, Py_ssize_t nargs, int which)
+{
+    long mode = 0777;
+    const char *path = nargs >= 1 ? path_arg(args[0]) : NULL;
+    if (path == NULL || (which == 0 && (nargs != 2 || int_arg(args[1], &mode) < 0))
+        || (which != 0 && nargs != 1)) {
+        return NULL;
+    }
+    int r = which == 0 ? LU_SYSCALL(mkdir(path, (mode_t)mode))
+        : which == 1 ? LU_SYSCALL(rmdir(path)) : LU_SYSCALL(unlink(path));
+    if (r < 0) {
+        set_oserror(errno, args[0]);
+        return NULL;
+    }
+    return Py_NewRef(Py_None);
+}
+
+static PyObject *
+prim_os_mkdir(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    return path_call(args, nargs, 0);
+}
+
+static PyObject *
+prim_os_rmdir(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    return path_call(args, nargs, 1);
+}
+
+static PyObject *
+prim_os_unlink(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    return path_call(args, nargs, 2);
+}
+
+/* cpu_count(): the processors online. */
+static PyObject *
+prim_os_cpu_count(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n < 1 ? Py_NewRef(Py_None) : PyLong_FromLong(n);
+}
+
+/* rename(src, dst): the OSError names both paths, as CPython's does. */
+static PyObject *
+prim_os_rename(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    const char *src = nargs == 2 ? path_arg(args[0]) : NULL;
+    const char *dst = src != NULL ? path_arg(args[1]) : NULL;
+    if (dst == NULL) {
+        return NULL;
+    }
+    if (LU_SYSCALL(rename(src, dst)) < 0) {
+        int err = errno;
+        PyObject *a[5] = { PyLong_FromLong(err), PyUnicode_FromString(strerror(err)), args[0], Py_None, args[1] };
+        PyObject *exc = a[0] != NULL && a[1] != NULL ? lu_call(PyExc_OSError, a, 5, NULL) : NULL;
+        Py_XDECREF(a[0]);
+        Py_XDECREF(a[1]);
+        if (exc != NULL) {
+            PyErr_SetObject((PyObject *)Py_TYPE(exc), exc);
+            Py_DECREF(exc);
+        }
+        return NULL;
+    }
+    return Py_NewRef(Py_None);
+}
+
 /* close(fd) */
 PyObject *
 lu_prim_os_close(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -754,6 +823,11 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_listdir", (PyCFunction)(void (*)(void))lu_prim_os_listdir, METH_FASTCALL, NULL },
     { "os_open", (PyCFunction)(void (*)(void))lu_prim_os_open, METH_FASTCALL, NULL },
     { "os_close", (PyCFunction)(void (*)(void))lu_prim_os_close, METH_FASTCALL, NULL },
+    { "os_cpu_count", (PyCFunction)(void (*)(void))prim_os_cpu_count, METH_FASTCALL, NULL },
+    { "os_mkdir", (PyCFunction)(void (*)(void))prim_os_mkdir, METH_FASTCALL, NULL },
+    { "os_rmdir", (PyCFunction)(void (*)(void))prim_os_rmdir, METH_FASTCALL, NULL },
+    { "os_unlink", (PyCFunction)(void (*)(void))prim_os_unlink, METH_FASTCALL, NULL },
+    { "os_rename", (PyCFunction)(void (*)(void))prim_os_rename, METH_FASTCALL, NULL },
     { "os_read", (PyCFunction)(void (*)(void))lu_prim_os_read, METH_FASTCALL, NULL },
     { "os_write", (PyCFunction)(void (*)(void))lu_prim_os_write, METH_FASTCALL, NULL },
     { "os_getpid", (PyCFunction)(void (*)(void))lu_prim_os_getpid, METH_FASTCALL, NULL },

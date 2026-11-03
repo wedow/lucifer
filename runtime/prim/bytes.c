@@ -574,6 +574,12 @@ prim_b_from_ints(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
         p[i] = (char)v;
     }
+    if (n == 1) {
+        /* _PyBytesWriter_Finish: a one-byte result is the cached object. */
+        char only = p[0];
+        Py_DECREF(r);
+        return PyBytes_FromStringAndSize(&only, 1);
+    }
     return r;
 }
 

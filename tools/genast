@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Generate the node table of lib/modules/_ast.py from Parser/Python.asdl.
+
+usage: genast [ASDL] [OUTPUT]
+
+Replaces the text between the BEGIN GENERATED and END GENERATED lines of
+OUTPUT with one row per node class, in the order Python/Python-ast.c makes
+them (Parser/asdl_c.py): (name, base, kind, fields, attributes, doc), with
+kind 'sum' or 'product' for a root, 'simple' for a constructor of a sum
+without fields (its instances are singletons) and 'ctor' otherwise, and a
+field or attribute as (name, type, flag) with flag '' , '?' or '*'.
+"""
+import importlib.util
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+BEGIN, END = "# BEGIN GENERATED\n", "# END GENERATED\n"
+
+
+def load_asdl():
+    spec = importlib.util.spec_from_file_location("asdl", ROOT / "third_party/cpython/Parser/asdl.py")
+    asdl = importlib.util.module_from_spec(spec)
+    sys.modules["asdl"] = asdl
+    spec.loader.exec_module(asdl)
+    return asdl
+
+
+def is_simple(sum_type):
+    return not sum_type.attributes and all(not t.fields for t in sum_type.types)
+
+
+def asdl_of(asdl, name, obj):
+    """The doc string of a class (asdl_c.py asdl_of)."""
+    if isinstance(obj, (asdl.Product, asdl.Constructor)):
+        fields = ", ".join(map(str, obj.fields))
+        return f"{name}({fields})" if fields else name
+    if is_simple(obj):
+        return f"{name} = " + " | ".join(t.name for t in obj.types)
+    sep = "\n" + " " * (len(name) + 1) + "| "
+    return f"{name} = " + sep.join(asdl_of(asdl, t.name, t) for t in obj.types)
+
+
+def spec(field):
+    return (field.name, field.type, "?" if field.opt else "*" if field.seq else "")
+
+
+def rows(asdl, module):
+    for dfn in module.dfns:
+        name, value = dfn.name, dfn.value
+        if isinstance(value, asdl.Product):
+            yield (name, None, "product", [spec(f) for f in value.fields],
+                   [spec(f) for f in value.attributes], asdl_of(asdl, name, value))
+            continue
+        yield (name, None, "sum", [], [spec(f) for f in value.attributes], asdl_of(asdl, name, value))
+        for cons in value.types:
+            kind = "simple" if is_simple(value) else "ctor"
+            yield (cons.name, name, kind, [spec(f) for f in cons.fields], [],
+                   asdl_of(asdl, cons.name, cons))
+
+
+def main():
+    asdl_path = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "third_party/cpython/Parser/Python.asdl"
+    output = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "lib/modules/_ast.py"
+    asdl = load_asdl()
+    module = asdl.parse(str(asdl_path))
+    lines = ["_NODES = ("]
+    for row in rows(asdl, module):
+        name, base, kind, fields, attributes, doc = row
+        lines.append(f"    ({name!r}, {base!r}, {kind!r}, {tuple(fields)!r}, {tuple(attributes)!r},")
+        lines.append(f"     {doc!r}),")
+    lines.append(")")
+    text = output.read_text()
+    head, rest = text.split(BEGIN)
+    tail = rest.split(END)[1]
+    output.write_text(head + BEGIN + "\n".join(lines) + "\n" + END + tail)
+
+
+if __name__ == "__main__":
+    main()

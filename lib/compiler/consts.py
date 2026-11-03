@@ -7,8 +7,12 @@ The cache maps a constant key to itself in C; tuples are mutated in place
 there.  Python tuples are immutable, so the cache maps the first key seen to
 the canonical key, whose item 1 is the merged constant.
 """
-from math import copysign
 from types import CodeType
+
+
+def _signbit(x):
+    """copysign(1.0, x) < 0.0, for the zeros the caller has found."""
+    return repr(x)[0] == "-"
 
 
 def constant_key(op):
@@ -24,13 +28,13 @@ def constant_key(op):
         return (t, op)
     if t is float:
         # Make the tuple different in the -0.0 case from all others.
-        if op == 0.0 and copysign(1.0, op) < 0.0:
+        if op == 0.0 and _signbit(op):
             return (t, op, None)
         return (t, op)
     if t is complex:
         # All four complex zeros must be distinguished.
-        real_negzero = op.real == 0.0 and copysign(1.0, op.real) < 0.0
-        imag_negzero = op.imag == 0.0 and copysign(1.0, op.imag) < 0.0
+        real_negzero = op.real == 0.0 and _signbit(op.real)
+        imag_negzero = op.imag == 0.0 and _signbit(op.imag)
         if real_negzero and imag_negzero:
             return (t, op, True)
         if imag_negzero:

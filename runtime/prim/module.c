@@ -161,6 +161,7 @@ lucifer_exec(PyObject *m)
         || add_functions(m, lu_prim_slot_methods) < 0 || add_functions(m, lu_prim_int_methods) < 0
         || add_functions(m, lu_prim_float_methods) < 0 || add_functions(m, lu_prim_complex_methods) < 0
         || add_functions(m, lu_prim_math_methods) < 0
+        || add_functions(m, lu_prim_calendar_methods) < 0
         || add_functions(m, lu_prim_str_methods) < 0 || add_functions(m, lu_prim_bytes_methods) < 0
         || add_functions(m, lu_prim_mv_methods) < 0
         || add_functions(m, lu_prim_exc_methods) < 0
@@ -171,6 +172,7 @@ lucifer_exec(PyObject *m)
         || add_functions(m, lu_prim_frame_methods) < 0
         || add_functions(m, lu_prim_builtins_methods) < 0
         || add_functions(m, lu_prim_import_methods) < 0
+        || add_functions(m, lu_prim_code_methods) < 0
         || add_functions(m, lu_prim_thread_methods) < 0
         || add_functions(m, lu_prim_gc_methods) < 0
         || add_functions(m, lu_prim_signal_methods) < 0

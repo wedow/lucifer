@@ -412,6 +412,22 @@ add_bytes(PyWideStringList *list, const char *text)
     return status;
 }
 
+/* argv for -c and for a program read from standard input: ["-c" or "", rest...]. */
+static PyStatus
+set_command_argv(PyConfig *config, wchar_t **rest, Py_ssize_t count)
+{
+    PyWideStringList argv = { 0, NULL };
+    PyStatus status = PyWideStringList_Append(&argv, config->run_command != NULL ? L"-c" : L"");
+    for (Py_ssize_t k = 0; !PyStatus_Exception(status) && k < count; k++) {
+        status = PyWideStringList_Append(&argv, rest[k]);
+    }
+    if (!PyStatus_Exception(status)) {
+        list_clear(&config->argv);
+        config->argv = argv;
+    }
+    return status;
+}
+
 /* config_parse_cmdline: the options, then the script and its arguments.
    argv is rebuilt to start at the script. */
 static PyStatus
@@ -478,9 +494,34 @@ parse_cmdline(PyConfig *config)
                 c = value + strlen(value) - 1;         /* the value ends the argument */
                 break;
             }
-            case 'c': case 'm':
+            case 'm':
                 PyMem_Free(arg);
-                return usage_error(config, "-c and -m need the compiler, which Lucifer does not have yet");
+                return usage_error(config, "-m needs runpy, which Lucifer does not have yet");
+            case 'c': {
+                /* The command is the rest of this argument or the next one, and ends the options. */
+                const char *command = c[1] != '\0' ? c + 1 : NULL;
+                char *next = NULL;
+                if (command == NULL && i + 1 < argc) {
+                    next = Py_EncodeLocale(argv[++i], NULL);
+                    command = next;
+                }
+                if (command == NULL) {
+                    PyMem_Free(arg);
+                    return usage_error(config, "Argument expected for the -c option");
+                }
+                wchar_t *w = Py_DecodeLocale(command, NULL);
+                PyMem_Free(next);
+                PyMem_Free(arg);
+                if (w == NULL) {
+                    return PyStatus_NoMemory();
+                }
+                status = PyConfig_SetString(config, &config->run_command, w);
+                PyMem_RawFree(w);
+                if (!PyStatus_Exception(status)) {
+                    status = set_command_argv(config, argv + i + 1, argc - i - 1);
+                }
+                return status;
+            }
             default: {
                 char message[32];
                 snprintf(message, sizeof message, "Unknown option: -%c", *c);
@@ -496,10 +537,10 @@ parse_cmdline(PyConfig *config)
         }
     }
     if (i >= argc) {
-        return usage_error(config, "lucifer: a .pyc file to run is required");
-    }
-    if (wcscmp(argv[i], L"-") == 0) {
-        return usage_error(config, "lucifer: reading the program from stdin needs the compiler");
+        if (isatty(0)) {
+            return usage_error(config, "lucifer: a program to run is required (no interactive mode yet)");
+        }
+        return set_command_argv(config, NULL, 0);       /* standard input; argv[0] is '' */
     }
     status = PyConfig_SetString(config, &config->run_filename, argv[i]);
     if (PyStatus_Exception(status)) {
@@ -715,6 +756,79 @@ finish_warnoptions(PyConfig *config)
     return status;
 }
 
+/* _Py_abspath and _Py_normpath: the program file as an absolute path whose
+   "." and ".." segments are collapsed, without resolving symbolic links. */
+static PyStatus
+run_filename_abspath(PyConfig *config)
+{
+    if (config->run_filename == NULL || config->run_command != NULL || wcscmp(config->run_filename, L"-") == 0) {
+        return PyStatus_Ok();
+    }
+    char *path = Py_EncodeLocale(config->run_filename, NULL);
+    if (path == NULL) {
+        return PyStatus_NoMemory();
+    }
+    char joined[PATH_MAX * 2] = "";
+    if (path[0] != '/') {
+        if (getcwd(joined, PATH_MAX) == NULL) {
+            joined[0] = '\0';
+        }
+        strcat(joined, "/");
+    }
+    snprintf(joined + strlen(joined), sizeof joined - strlen(joined), "%s", path);
+    PyMem_Free(path);
+    char normal[PATH_MAX * 2];
+    size_t length = 0;
+    for (char *save, *part = strtok_r(joined, "/", &save); part != NULL; part = strtok_r(NULL, "/", &save)) {
+        if (strcmp(part, ".") == 0) {
+            continue;
+        }
+        if (strcmp(part, "..") == 0) {
+            while (length > 0 && normal[--length] != '/') {
+            }
+            continue;
+        }
+        normal[length++] = '/';
+        length += (size_t)snprintf(normal + length, sizeof normal - length, "%s", part);
+    }
+    normal[length] = '\0';
+    return PyConfig_SetBytesString(config, &config->run_filename, length > 0 ? normal : "/");
+}
+
+/* _PyPathConfig_ComputeSysPath0: the directory of the program file, with
+   symbolic links resolved, or "" for -c and standard input; none when the
+   path is safe. */
+static PyStatus
+compute_sys_path_0(PyConfig *config)
+{
+    if (config->safe_path || config->sys_path_0 != NULL || !config->parse_argv) {
+        return PyStatus_Ok();
+    }
+    if (config->run_command != NULL || config->run_filename == NULL || wcscmp(config->run_filename, L"-") == 0) {
+        return PyConfig_SetString(config, &config->sys_path_0, L"");
+    }
+    char *path = Py_EncodeLocale(config->run_filename, NULL);
+    if (path == NULL) {
+        return PyStatus_NoMemory();
+    }
+    char resolved[PATH_MAX];
+    if (realpath(path, resolved) == NULL) {
+        snprintf(resolved, sizeof resolved, "%s", path);
+    }
+    PyMem_Free(path);
+    char *slash = strrchr(resolved, '/');
+    if (slash == NULL) {
+        resolved[0] = '\0';
+    }
+    else if (slash == resolved) {
+        slash[1] = '\0';
+    }
+    else {
+        *slash = '\0';
+    }
+    return PyConfig_SetBytesString(config, &config->sys_path_0, resolved);
+}
+
 PyStatus
 PyConfig_Read(PyConfig *config)
 {
@@ -732,6 +846,12 @@ PyConfig_Read(PyConfig *config)
     }
     if (config->use_environment) {
         status = read_env_flags(config);
+    }
+    if (!PyStatus_Exception(status) && config->parse_argv) {
+        status = run_filename_abspath(config);
+    }
+    if (!PyStatus_Exception(status)) {
+        status = compute_sys_path_0(config);
     }
     if (!PyStatus_Exception(status)) {
         status = read_hash_seed(config);

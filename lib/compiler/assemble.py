@@ -6,6 +6,10 @@ InternalDocs/exception_handling.md) and the code object construction of
 Objects/codeobject.c that assemble.c relies on.
 """
 import types
+try:
+    import _lucifer
+except ImportError:         # on a host CPython (make check-compiler)
+    _lucifer = None
 
 from .consts import const_cache_merge_one
 from .instruction_sequence import NO_LOCATION, SourceLocation, is_terminator_opcode, is_backwards_jump_opcode
@@ -439,13 +443,19 @@ def new_code(*, filename, name, qualname, flags, code, firstlineno, linetable, c
              stacksize, exceptiontable):
     """_PyCode_New with the fields of a _PyCodeConstructor.
 
-    On the host, types.CodeType runs _PyCode_New but cannot express this
+    Lucifer's code_new is _PyCode_New itself.  On a host CPython,
+    types.CodeType runs _PyCode_New but cannot express this
     constructor: it copies the names tuple, rebuilds localsplusnames from
     varnames/cellvars/freevars, and computes localspluskinds without the
     CO_FAST_ARG_* bits and with its own CO_FAST_HIDDEN rule.  marshal writes
     all three, and shares tuples by identity, so the host code object is
     built by CodeType and then given these exact objects.
     """
+    if _lucifer is not None:
+        # The kinds are a fresh bytes object, not the shared one-byte bytes that bytes(list) can return.
+        return _lucifer.code_new(filename, name, qualname, flags, code, firstlineno, linetable, consts,
+                                 names, localsplusnames, bytes(bytearray(localspluskinds)), argcount,
+                                 posonlyargcount, kwonlyargcount, stacksize, exceptiontable)
     varnames = tuple(n for n, k in zip(localsplusnames, localspluskinds) if k & CO_FAST_LOCAL)
     cellvars = tuple(n for n, k in zip(localsplusnames, localspluskinds) if k & CO_FAST_CELL)
     freevars = tuple(n for n, k in zip(localsplusnames, localspluskinds) if k & CO_FAST_FREE)
@@ -464,6 +474,9 @@ def set_localsplusnames(co, names):
     new_code, this is the one in-place code object mutation the compiler
     needs, so Lucifer's kernel must provide it as a primitive.
     """
+    if _lucifer is not None:
+        _lucifer.code_set_localsplusnames(co, names)
+        return
     offset = _host_code_layout().localsplusnames
     assert len(names) == len(_host_get_field(co, offset))
     _host_set_field(co, offset, names)
