@@ -381,8 +381,9 @@ def run(args, env, raw):
                 if args.suite == 'ft-cpython':
                     profile = json.loads((ROOT / 'results/libtest/resource-profile.json').read_text())
                     available = set(profile['free-threaded'].get(name.split('/', 1)[1], {}).get('cases', []))
+                    unavailable = dict.fromkeys(cases - available, 'resource-profile omission (conditional generation)')
                     local_rows, detail = lib.run_module(name.split('/', 1)[1], cases, args, args.command,
-                                                       env_iteration, raw_unit, cases - available)
+                                                       env_iteration, raw_unit, unavailable)
                     records = lib.json_lines(observations)
                     if not gil_valid(records):
                         # Whole-module upstream skips have no case execution.
