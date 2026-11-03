@@ -9,6 +9,7 @@
 #include "lucifer.h"
 
 #include <errno.h>
+#include <sched.h>
 
 static struct lu_wait_bucket *
 bucket_of(uint64_t id)
@@ -37,12 +38,41 @@ lu_wait_begin(struct lu_wait *w)
     w->status = LU_PARK_PENDING;
     w->result = 0;
     w->deadline = -1;
+    w->unpinned = w->parked = 0;
+    w->registered = 1;
     struct lu_wait_bucket *b = bucket_of(w->id);
     pthread_mutex_lock(&b->lock.mutex);
     w->next = b->head;
     b->head = w;
     pthread_mutex_unlock(&b->lock.mutex);
     return w->id;
+}
+
+/* The carrier thread's sleep on its wake word, which returns at once if the
+   word is no longer `seq`. `sleeping` lets a waker skip the futex call when
+   the thread is not asleep (a handoff finds it spinning): the sleeper sets
+   it, then looks at the word; the waker changes the word, then looks at it.
+   Both are sequentially consistent, so one of them sees the other's store. */
+static int
+carrier_sleep(struct lu_carrier *c, uint32_t seq, PyTime_t deadline)
+{
+    int err = 0;
+    __atomic_store_n(&c->sleeping, 1, __ATOMIC_SEQ_CST);
+    if (__atomic_load_n(&c->wake, __ATOMIC_SEQ_CST) == seq) {
+        err = lu_futex_wait(&c->wake, seq, deadline);
+    }
+    __atomic_store_n(&c->sleeping, 0, __ATOMIC_SEQ_CST);
+    return err;
+}
+
+void
+lu_wait_ready(struct lu_wait *w, struct lu_carrier *carrier)
+{
+    *w = (struct lu_wait){
+        .owner = lu_current_task(), .carrier = carrier,
+        .id = __atomic_add_fetch(&_PyRuntime.waits.last_id, 1, __ATOMIC_RELAXED),
+        .status = LU_PARK_OK, .deadline = -1, .unpinned = 1,
+    };
 }
 
 LU_EXPORT int
@@ -59,18 +89,17 @@ lu_park(struct lu_wait *w, PyTime_t deadline, int detach)
         if (__atomic_load_n(&w->status, __ATOMIC_SEQ_CST) != LU_PARK_PENDING) {
             break;
         }
-        int err = lu_futex_wait(&c->wake, seq, deadline);
+        int err = carrier_sleep(c, seq, deadline);
         if (err == ETIMEDOUT) {
             ended = LU_PARK_TIMEOUT;
             break;
         }
-        /* A signal handler ran on this thread. The wait ends only if it left a
-           Python handler to run (the signals reason, which only the main
-           thread's carrier ever has): the caller then runs pending calls and
-           parks again. Any other interruption changes nothing for the caller,
-           so the wait goes on. */
-        if (err == EINTR
-            && (__atomic_load_n(&c->poll, __ATOMIC_ACQUIRE) & LU_POLL_SIGNALS_PENDING)) {
+        /* A signal handler ran. The wait ends only if it left a Python handler
+           to run (the signals reason, which only the main task's carrier ever
+           has, and whose handler wakes that carrier): the caller then runs
+           pending calls and parks again. Any other wake changes nothing for
+           the caller, so the wait goes on. */
+        if (__atomic_load_n(&c->poll, __ATOMIC_ACQUIRE) & LU_POLL_SIGNALS_PENDING) {
             ended = LU_PARK_INTR;
             break;
         }
@@ -100,9 +129,74 @@ lu_unpark(uint64_t id, uintptr_t result)
         unlink_wait(b, w);
         w->result = result;
         __atomic_store_n(&w->status, LU_PARK_OK, __ATOMIC_SEQ_CST);
-        __atomic_add_fetch(&w->carrier->wake, 1, __ATOMIC_SEQ_CST);
-        lu_futex_wake(&w->carrier->wake);
+        if (w->parked) {
+            lu_sched_enqueue(w->owner, w->carrier);
+        }
+        else if (!w->unpinned) {
+            lu_carrier_wake(w->carrier);
+        }
     }
     pthread_mutex_unlock(&b->lock.mutex);
     return w != NULL;
+}
+
+/* The task has left its carrier. Under the bucket lock, the same one that
+   completes a wait: either the completion came first, and the task is queued
+   here, or it comes later and finds `parked` set. */
+void
+lu_park_commit(struct lu_wait *w)
+{
+    if (!w->registered) {
+        w->parked = 1;
+        lu_sched_enqueue(w->owner, w->carrier);
+        return;
+    }
+    struct lu_wait_bucket *b = bucket_of(w->id);
+    pthread_mutex_lock(&b->lock.mutex);
+    w->parked = 1;
+    if (w->status != LU_PARK_PENDING) {
+        lu_sched_enqueue(w->owner, w->carrier);
+    }
+    pthread_mutex_unlock(&b->lock.mutex);
+}
+
+uint32_t
+lu_carrier_wake_seq(struct lu_carrier *c)
+{
+    return __atomic_load_n(&c->wake, __ATOMIC_SEQ_CST);
+}
+
+void
+lu_carrier_wake(struct lu_carrier *c)
+{
+    __atomic_add_fetch(&c->wake, 1, __ATOMIC_SEQ_CST);
+    if (__atomic_load_n(&c->sleeping, __ATOMIC_SEQ_CST)) {
+        lu_futex_wake(&c->wake);
+    }
+}
+
+/* The wake word changes with every queued task, so a sleep that began after
+   `seq` was read returns at once if one was queued since. A handoff wakes the
+   other carrier within microseconds, so it spins first: on the processor's
+   pause hint, then yielding, then the futex. */
+void
+lu_carrier_sleep(struct lu_carrier *c, uint32_t seq)
+{
+    for (int i = 0; i < 4000; i++) {
+        if (__atomic_load_n(&c->wake, __ATOMIC_ACQUIRE) != seq) {
+            return;
+        }
+#if defined(__x86_64__)
+        __builtin_ia32_pause();
+#elif defined(__aarch64__)
+        __asm__ volatile("yield");
+#endif
+    }
+    for (int i = 0; i < 50; i++) {
+        if (__atomic_load_n(&c->wake, __ATOMIC_ACQUIRE) != seq) {
+            return;
+        }
+        sched_yield();
+    }
+    carrier_sleep(c, seq, -1);
 }
