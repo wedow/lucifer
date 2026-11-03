@@ -1,6 +1,6 @@
 ---
 id: luc-f40q
-status: open
+status: closed
 deps: [luc-o9xh]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -24,3 +24,9 @@ make check-kernel PROGRAMS="exceptions with_stmt" (bin/lucifer -I -S on the host
 
 
 - Remove the kernelcheck last-stderr-line relaxation added in K1b once tracebacks exist; compare full stderr again.
+
+## Notes
+
+**2026-11-03T04:49:25Z**
+
+Done: exceptions with_stmt exception_groups + 18 err_* programs match the oracle with full stderr compared (kernelcheck relaxation removed). Frames in tracebacks are records of code, globals and instruction, not frame objects (K1s). Kernel formatting of ints and str reprs (OSError.__str__, UnicodeError family, group repr with str members) awaits K1d/K1e; the loop has no BINARY_OP yet, so kernel exception code avoids arithmetic and subscripts on its tested paths. K1l: generator frames need their own exc_info item (PUSH_EXC_INFO and POP_EXCEPT already use ts->exc_info), CLEANUP_THROW, END_ASYNC_FOR and INTRINSIC_STOPITERATION_ERROR are not implemented.
