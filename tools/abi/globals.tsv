@@ -71,3 +71,12 @@ lu_async_gen_athrow_type	runtime/interp/gen.c	async_generator_athrow, a private 
 lu_async_gen_wrapped_type	runtime/interp/gen.c	async_generator_wrapped_value, a private static type; layout set once at startup
 lu_prim_gen_methods	runtime/interp/gen.c	_lucifer's generator primitives, a PyMethodDef table never written; the API takes it non-const
 lu_sys_frame_methods	runtime/interp/frame.c	sys's recursion-limit functions, a PyMethodDef table never written; the API takes it non-const
+lu_prim_bytes_methods	runtime/prim/bytes.c	_lucifer's bytes primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_mv_methods	runtime/prim/memoryview.c	_lucifer's memoryview primitives, a PyMethodDef table never written; the API takes it non-const
+bytes_as_buffer	runtime/prim/bytes.c	bytes' PyBufferProcs, never written after initialization; the type slot takes it non-const
+bytearray_as_buffer	runtime/prim/bytes.c	bytearray's PyBufferProcs, never written after initialization; the type slot takes it non-const
+memory_as_buffer	runtime/prim/memoryview.c	memoryview's PyBufferProcs, never written after initialization; the type slot takes it non-const
+lu_prim_float_methods	runtime/prim/float.c	_lucifer's float primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_complex_methods	runtime/prim/complex.c	_lucifer's complex primitives, a PyMethodDef table never written; the API takes it non-const
+lc_float_strings	runtime/prim/pystrtod.c	constant table of lower-case inf, nan and e, never written
+uc_float_strings	runtime/prim/pystrtod.c	constant table of upper-case INF, NAN and E, never written

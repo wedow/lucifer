@@ -1583,8 +1583,12 @@ prim_kind(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (!strcmp(kind, "type")) return bool_of(PyType_Check(x));
     if (!strcmp(kind, "dict")) return bool_of(PyDict_Check(x));
     if (!strcmp(kind, "int")) return bool_of(PyLong_Check(x));
+    if (!strcmp(kind, "float")) return bool_of(PyFloat_Check(x));
+    if (!strcmp(kind, "complex")) return bool_of(PyComplex_Check(x));
     if (!strcmp(kind, "bool")) return bool_of(PyBool_Check(x));
     if (!strcmp(kind, "bytes")) return bool_of(PyBytes_Check(x));
+    if (!strcmp(kind, "bytearray")) return bool_of(PyByteArray_Check(x));
+    if (!strcmp(kind, "memoryview")) return bool_of(PyMemoryView_Check(x));
     if (!strcmp(kind, "tuple")) return bool_of(PyTuple_Check(x));
     if (!strcmp(kind, "list")) return bool_of(PyList_Check(x));
     if (!strcmp(kind, "slice")) return bool_of(PySlice_Check(x));

@@ -8,7 +8,7 @@ from _lucifer import (
     is_subtype, int_format, text_repr, new_check, str_find, str_count, str_replace, str_slice,
     str_slice_step, str_item, str_ord, str_chr, str_len, str_hash, str_cmp, str_concat,
     str_repeat, str_split, str_splitlines, str_strip, str_case, str_is, str_expandtabs, str_ascii,
-    str_encode, str_decode, str_iter, str_iter_next, str_subtype, str_sizeof, list_append, slice_parts, kernel_set,
+    str_encode, str_decode, str_iter, str_iter_next, str_subtype, str_sizeof, list_append, slice_parts, kernel_set, b_check, b_bytes,
 )
 from _lucifer import _boot, operators, _format
 
@@ -294,9 +294,9 @@ def _str_new(args, kwargs):
         return to_str(obj)
     if kind(obj, 'str'):
         error(TypeError, 'decoding str is not supported')
-    if not kind(obj, 'bytes'):
+    if not b_check(obj):
         error(TypeError, _cat('decoding to str: need a bytes-like object, ', _name(obj), ' found'))
-    return _decode(obj, 'utf-8' if encoding is MISSING else encoding,
+    return _decode(b_bytes(obj), 'utf-8' if encoding is MISSING else encoding,
                    'strict' if errors is MISSING else errors)
 
 
