@@ -10,6 +10,7 @@
    4. from here a failure prints the exception's type and message, exit 1. */
 
 #include "interp/frozen.h"
+#include "prim/prim.h"
 #include "marshal.h"
 
 #include <errno.h>
@@ -143,6 +144,7 @@ add_builtins(PyObject *builtins)
 static int
 boot_native(struct _is *interp)
 {
+    interp->max_str_digits = 4300;      /* _PY_LONG_DEFAULT_MAX_STR_DIGITS */
     if ((interp->interned = PyDict_New()) == NULL) {
         return -1;
     }
@@ -177,6 +179,16 @@ boot_native(struct _is *interp)
         return -1;
     }
     Py_DECREF(modules_name);
+    for (PyMethodDef *ml = lu_sys_int_methods; ml->ml_name != NULL; ml++) {
+        PyObject *f = PyCFunction_NewEx(ml, sys, NULL);
+        PyObject *name = f != NULL ? PyUnicode_InternFromString(ml->ml_name) : NULL;
+        int err = name == NULL || lu_ns_insert(interp->sysdict, name, f) < 0;
+        Py_XDECREF(name);
+        Py_XDECREF(f);
+        if (err) {
+            return -1;
+        }
+    }
     if (add_module(interp, builtins) < 0 || add_module(interp, sys) < 0) {
         return -1;
     }

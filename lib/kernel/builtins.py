@@ -8,8 +8,18 @@ call_special = _boot.call_special
 __all__ = ('print', 'isinstance', 'issubclass')
 
 
+def _str(x):
+    """PyObject_Str until str() arrives with K1e."""
+    if kind(x, 'str'):
+        return x
+    r = call_special(type_lookup(type(x), '__str__'), x)
+    if not kind(r, 'str'):
+        error(TypeError, str_join('', ('__str__ returned non-string (type ', type(r).__name__, ')')))
+    return r
+
+
 def print(*args, sep=' ', end='\n'):
-    write(1, str_join(sep, args))
+    write(1, str_join(sep, (*[_str(x) for x in args],)))
     write(1, end)
 
 

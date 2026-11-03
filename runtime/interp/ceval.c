@@ -40,7 +40,8 @@ static const uint8_t caches[256] = {
 #define UNBOUNDLOCAL_ERROR_MSG \
     "cannot access local variable '%s' where it is not associated with a value"
 
-#define INTRINSIC_LIST_TO_TUPLE 6   /* pycore_intrinsics.h */
+#define INTRINSIC_UNARY_POSITIVE 5  /* pycore_intrinsics.h */
+#define INTRINSIC_LIST_TO_TUPLE 6
 
 #define UNBOUNDFREE_ERROR_MSG \
     "cannot access free variable '%s' where it is not associated with a value" \
@@ -59,16 +60,19 @@ format_unbound(PyCodeObject *co, int index)
     }
 }
 
-/* PyObject_IsTrue over the types that exist so far: the singletons, str,
-   exact tuples, lists and dicts, and objects that define no truth. */
-static int
-to_bool(PyObject *v)
+/* PyObject_IsTrue where truth is a layout: 1 or 0, or -1 when the type's
+   __bool__ or __len__ must run (kernel truth). */
+int
+lu_truth_exact(PyObject *v)
 {
     if (v == Py_True || v == Py_False) {
         return v == Py_True;
     }
     if (v == Py_None) {
         return 0;
+    }
+    if (PyLong_CheckExact(v)) {
+        return ((PyLongObject *)v)->long_value.lv_tag >= (1 << _PyLong_NON_SIZE_BITS);
     }
     if (PyUnicode_CheckExact(v)) {
         return PyUnicode_GET_LENGTH(v) != 0;
@@ -85,8 +89,24 @@ to_bool(PyObject *v)
         && (tp->tp_as_sequence == NULL || tp->tp_as_sequence->sq_length == NULL)) {
         return 1;
     }
-    lu_err_format(PyExc_SystemError, "truth of a %s arrives with its type", tp->tp_name);
     return -1;
+}
+
+/* PyObject_IsTrue for C callers: the kernel runs __bool__ and __len__. */
+int
+lu_is_true(PyObject *v)
+{
+    int t = lu_truth_exact(v);
+    if (t >= 0) {
+        return t;
+    }
+    PyObject *r = lu_call_kernel(LU_K_truth, &v, 1);
+    if (r == NULL) {
+        return -1;
+    }
+    t = r == Py_True;
+    Py_DECREF(r);
+    return t;
 }
 
 static void
@@ -339,6 +359,10 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
         [POP_ITER] = &&op_POP_TOP,
         [UNPACK_SEQUENCE] = &&op_UNPACK_SEQUENCE,
         [COMPARE_OP] = &&op_COMPARE_OP,
+        [BINARY_OP] = &&op_BINARY_OP,
+        [UNARY_NEGATIVE] = &&op_UNARY_NEGATIVE,
+        [UNARY_INVERT] = &&op_UNARY_INVERT,
+        [CONTAINS_OP] = &&op_CONTAINS_OP,
     };
 #pragma GCC diagnostic pop
     /* An activation never changes carrier: an unpinned park returns from it. */
@@ -829,10 +853,13 @@ op_POP_JUMP_IF_NOT_NONE: {
 op_TO_BOOL: {
     SKIP_CACHES();
     PyObject *v = TOP();
-    int truth = to_bool(v);
+    int truth = lu_truth_exact(v);
     if (truth < 0) {
-        SAVE_FRAME();
-        goto error;
+        kargs[0] = POP();
+        nk = 1;
+        kid = LU_K_truth;
+        kret = LU_RETURN_PUSH;
+        goto kernel_call;
     }
     Py_DECREF(v);
     TOP() = truth ? Py_True : Py_False;
@@ -1072,8 +1099,18 @@ op_DICT_UPDATE: {
 }
 
 op_CALL_INTRINSIC_1: {
-    /* Only INTRINSIC_LIST_TO_TUPLE until the other intrinsics have users. */
+    /* Only INTRINSIC_LIST_TO_TUPLE and UNARY_POSITIVE until the others have users. */
     SAVE_FRAME();
+    if (oparg == INTRINSIC_UNARY_POSITIVE) {
+        if (!PyLong_CheckExact(TOP())) {
+            kargs[0] = POP();
+            nk = 1;
+            kid = LU_K_positive;
+            kret = LU_RETURN_PUSH;
+            goto kernel_call;
+        }
+        DISPATCH();
+    }
     if (oparg != INTRINSIC_LIST_TO_TUPLE) {
         lu_err_format(PyExc_SystemError, "intrinsic %d arrives with its consumer", oparg);
         goto error;
@@ -1282,32 +1319,95 @@ op_FOR_ITER: {
 }
 
 op_COMPARE_OP: {
-    /* Exact str equality and compact ints; rich comparison is K1d's. */
+    /* Exact str equality and exact ints here; the rest is the kernel's compare. */
     SKIP_CACHES();
-    PyObject *right = POP();
-    PyObject *left = TOP();
+    PyObject *right = sp[-1];
+    PyObject *left = sp[-2];
     int op = oparg >> 5, r;
     if (PyUnicode_CheckExact(left) && PyUnicode_CheckExact(right) && (op == Py_EQ || op == Py_NE)) {
         r = lu_str_eq(left, right) == (op == Py_EQ);
     }
-    else if (PyLong_CheckExact(left) && PyLong_CheckExact(right)
-             && _PyLong_IsCompact((PyLongObject *)left) && _PyLong_IsCompact((PyLongObject *)right)) {
-        Py_ssize_t a = _PyLong_CompactValue((PyLongObject *)left);
-        Py_ssize_t b = _PyLong_CompactValue((PyLongObject *)right);
-        r = op == Py_LT ? a < b : op == Py_LE ? a <= b : op == Py_EQ ? a == b
-          : op == Py_NE ? a != b : op == Py_GT ? a > b : a >= b;
+    else if (PyLong_CheckExact(left) && PyLong_CheckExact(right)) {
+        int c = lu_long_compare(left, right);
+        r = op == Py_LT ? c < 0 : op == Py_LE ? c <= 0 : op == Py_EQ ? c == 0
+          : op == Py_NE ? c != 0 : op == Py_GT ? c > 0 : c >= 0;
     }
     else {
-        SAVE_FRAME();
-        lu_err_format(PyExc_SystemError, "comparing '%s' and '%s' arrives with K1d",
-                      Py_TYPE(left)->tp_name, Py_TYPE(right)->tp_name);
-        Py_DECREF(right);
-        goto error;
+        sp -= 2;
+        kargs[0] = left;
+        kargs[1] = right;
+        kargs[2] = lu_small_int(oparg);
+        nk = 3;
+        kid = LU_K_compare;
+        kret = LU_RETURN_PUSH;
+        goto kernel_call;
     }
+    sp--;
     TOP() = r ? Py_True : Py_False;
     Py_DECREF(left);
     Py_DECREF(right);
     DISPATCH();
+}
+
+op_BINARY_OP: {
+    /* lhs, rhs -- res; exact ints here, everything else reflects in the kernel. */
+    SKIP_CACHES();
+    PyObject *right = sp[-1];
+    PyObject *left = sp[-2];
+    if (PyLong_CheckExact(left) && PyLong_CheckExact(right)) {
+        SAVE_FRAME();
+        PyObject *res = lu_long_binary(oparg, left, right);
+        ERROR_IF(res == NULL);
+        if (res != Py_NotImplemented) {
+            sp--;
+            TOP() = res;
+            Py_DECREF(left);
+            Py_DECREF(right);
+            DISPATCH();
+        }
+        Py_DECREF(res);
+    }
+    sp -= 2;
+    kargs[0] = left;
+    kargs[1] = right;
+    kargs[2] = lu_small_int(oparg);
+    nk = 3;
+    kid = LU_K_binary_op;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_UNARY_NEGATIVE:
+op_UNARY_INVERT: {
+    PyObject *v = TOP();
+    if (PyLong_CheckExact(v)) {
+        PyObject *res = opcode == UNARY_NEGATIVE ? lu_long_negate(v) : lu_long_invert(v);
+        if (res == NULL) {
+            SAVE_FRAME();
+            goto error;
+        }
+        TOP() = res;
+        Py_DECREF(v);
+        DISPATCH();
+    }
+    kargs[0] = POP();
+    nk = 1;
+    kid = opcode == UNARY_NEGATIVE ? LU_K_negative : LU_K_invert;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_CONTAINS_OP: {
+    /* item, container -- bool; oparg 1 is `not in` */
+    SKIP_CACHES();
+    sp -= 2;
+    kargs[0] = sp[1];
+    kargs[1] = sp[0];
+    kargs[2] = lu_small_int(oparg);
+    nk = 3;
+    kid = LU_K_contains;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
 }
 
 op_UNPACK_SEQUENCE: {

@@ -14,6 +14,9 @@ PyObject *lu_prim_write(PyObject *module, PyObject *const *args, Py_ssize_t narg
 extern PyMethodDef lu_prim_type_methods[];      /* runtime/prim/type.c */
 extern PyMethodDef lu_prim_descr_methods[];     /* runtime/object/descr.c */
 extern PyMethodDef lu_prim_slot_methods[];      /* runtime/types/slots.c */
+extern PyMethodDef lu_prim_int_methods[];       /* runtime/prim/int.c */
+extern PyMethodDef lu_sys_int_methods[];        /* sys's int functions, runtime/prim/int.c */
 PyObject *lu_prim_str_join(PyObject *module, PyObject *const *args, Py_ssize_t nargs);
+PyObject *lu_prim_text_repr(PyObject *module, PyObject *const *args, Py_ssize_t nargs);
 
 #endif

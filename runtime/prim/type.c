@@ -1353,6 +1353,16 @@ prim_size(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return NULL;
 }
 
+/* truth_exact(x): True or False where truth is the layout's (None, bool, int,
+   str, tuple, list, dict, objects without __bool__ or __len__), else MISSING. */
+static PyObject *
+prim_truth_exact(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    int t = lu_truth_exact(args[0]);
+    return t < 0 ? Py_NewRef(LU_MISSING) : bool_of(t);
+}
+
 /* instance_dict(obj, create): the instance's dict, or None. */
 static PyObject *
 prim_instance_dict(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -1523,6 +1533,9 @@ prim_kind(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (!strcmp(kind, "str")) return bool_of(PyUnicode_Check(x));
     if (!strcmp(kind, "type")) return bool_of(PyType_Check(x));
     if (!strcmp(kind, "dict")) return bool_of(PyDict_Check(x));
+    if (!strcmp(kind, "int")) return bool_of(PyLong_Check(x));
+    if (!strcmp(kind, "bool")) return bool_of(PyBool_Check(x));
+    if (!strcmp(kind, "bytes")) return bool_of(PyBytes_Check(x));
     if (!strcmp(kind, "tuple")) return bool_of(PyTuple_Check(x));
     if (!strcmp(kind, "cell")) return bool_of(PyCell_Check(x));
     if (!strcmp(kind, "function")) return bool_of(PyFunction_Check(x));
@@ -1620,7 +1633,7 @@ PyMethodDef lu_prim_type_methods[] = {
     FAST(type_can_new), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
     FAST(type_subclasses), FAST(type_modified), FAST(is_subtype), FAST(alloc),
     FAST(type_tp_name), FAST(type_static_module), FAST(size),
-    FAST(instance_dict), FAST(set_class), FAST(caller_globals), FAST(super_args),
+    FAST(truth_exact), FAST(instance_dict), FAST(set_class), FAST(caller_globals), FAST(super_args),
     FAST(error), FAST(ns_get), FAST(ns_set), FAST(ns_del), FAST(ns_items),
     { "kind", (PyCFunction)(void (*)(void))prim_kind, METH_FASTCALL, NULL },
     FAST(cell_get), FAST(cell_set), FAST(address), FAST(object_hash),

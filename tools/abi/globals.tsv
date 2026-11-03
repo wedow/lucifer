@@ -39,5 +39,7 @@ types.*	runtime/object/descr.c	const table of the kernel-writable layouts; reloc
 lu_prim_type_methods	runtime/prim/type.c	_lucifer's type primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_descr_methods	runtime/object/descr.c	_lucifer's descriptor primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_slot_methods	runtime/types/slots.c	_lucifer's slot primitive, a PyMethodDef table never written; the API takes it non-const
+lu_prim_int_methods	runtime/prim/int.c	_lucifer's int primitives, a PyMethodDef table never written; the API takes it non-const
+lu_sys_int_methods	runtime/prim/int.c	sys's int-limit functions, a PyMethodDef table never written; the API takes it non-const
 objects.*	runtime/pylifecycle.c	const table of the static builtins names; relocated by ld.so, then read-only (RELRO)
 slots	runtime/types/slots.c	const table of the type slots and their thunks; relocated by ld.so, then read-only (RELRO)

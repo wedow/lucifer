@@ -6,7 +6,7 @@
    The slotdefs table itself, which dunders feed which slot, is kernel Python
    (lib/kernel/_boot.py); this file has the slot table it installs from:
    each slot's place and its thunk. A slot without a thunk yet is left as
-   it is (the numeric and sequence slots arrive with their types). */
+   it is (the sequence slots arrive with their types). */
 
 #include "interp/frame.h"
 #include "prim/prim.h"
@@ -290,18 +290,14 @@ slot_length(PyObject *self)
     return n;
 }
 
-/* A bool result until the kernel's truth protocol (K1d). */
+/* The truth of a special method's result; consumes r. */
 static int
 truth_result(PyObject *r)
 {
     if (r == NULL) {
         return -1;
     }
-    int t = r == Py_True ? 1 : r == Py_False ? 0 : -2;
-    if (t == -2) {
-        lu_err_format(PyExc_TypeError, "truth of a %s from C arrives with K1d", Py_TYPE(r)->tp_name);
-        t = -1;
-    }
+    int t = lu_is_true(r);
     Py_DECREF(r);
     return t;
 }
@@ -335,6 +331,126 @@ slot_mp_ass_subscript(PyObject *self, PyObject *key, PyObject *value)
     return r == NULL ? -1 : 0;
 }
 
+/* A special method called when the type has it, else NotImplemented
+   (vectorcall_maybe). */
+static PyObject *
+call_maybe(PyObject *self, PyObject *name, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (_PyType_Lookup(Py_TYPE(self), name) == NULL) {
+        return Py_NewRef(Py_NotImplemented);
+    }
+    return lu_call_special(self, name, args, nargs);
+}
+
+/* method_is_overloaded: other's type defines `name` differently from self's. */
+static int
+overloaded(PyObject *self, PyObject *other, PyObject *name)
+{
+    PyObject *b = _PyType_Lookup(Py_TYPE(other), name);
+    return b != NULL && b != _PyType_Lookup(Py_TYPE(self), name);
+}
+
+/* SLOT1BINFULL: the binary slots of kernel types and classes. `slot` is the
+   thunk itself, so a type counts when it inherits the thunk; the kernel's
+   binary_op does the same for the interpreter, in Python. */
+static PyObject *
+binary_slot(PyObject *self, PyObject *other, int offset, void *slot, PyObject *dunder,
+            PyObject *rdunder)
+{
+#define SLOT_OF(t) ((t)->tp_as_number != NULL ? *(void **)((char *)(t)->tp_as_number + offset) : NULL)
+    int do_other = Py_TYPE(self) != Py_TYPE(other) && SLOT_OF(Py_TYPE(other)) == slot;
+    if (SLOT_OF(Py_TYPE(self)) == slot) {
+        PyObject *r;
+        if (do_other && PyType_IsSubtype(Py_TYPE(other), Py_TYPE(self))
+            && overloaded(self, other, rdunder)) {
+            PyObject *swapped[2] = { self, NULL };
+            r = call_maybe(other, rdunder, swapped, 1);
+            if (r != Py_NotImplemented) {
+                return r;
+            }
+            Py_DECREF(r);
+            do_other = 0;
+        }
+        r = call_maybe(self, dunder, &other, 1);
+        if (r != Py_NotImplemented || Py_TYPE(other) == Py_TYPE(self)) {
+            return r;
+        }
+        Py_DECREF(r);
+    }
+    if (do_other) {
+        return call_maybe(other, rdunder, &self, 1);
+    }
+    return Py_NewRef(Py_NotImplemented);
+#undef SLOT_OF
+}
+
+#define BINARY_THUNK(fn, field, dunder, rdunder) \
+    static PyObject *fn(PyObject *a, PyObject *b) \
+    { return binary_slot(a, b, offsetof(PyNumberMethods, field), (void *)fn, \
+                         LU_ID(dunder), LU_ID(rdunder)); }
+BINARY_THUNK(slot_nb_add, nb_add, __add__, __radd__)
+BINARY_THUNK(slot_nb_subtract, nb_subtract, __sub__, __rsub__)
+BINARY_THUNK(slot_nb_multiply, nb_multiply, __mul__, __rmul__)
+BINARY_THUNK(slot_nb_remainder, nb_remainder, __mod__, __rmod__)
+BINARY_THUNK(slot_nb_divmod, nb_divmod, __divmod__, __rdivmod__)
+BINARY_THUNK(slot_nb_lshift, nb_lshift, __lshift__, __rlshift__)
+BINARY_THUNK(slot_nb_rshift, nb_rshift, __rshift__, __rrshift__)
+BINARY_THUNK(slot_nb_and, nb_and, __and__, __rand__)
+BINARY_THUNK(slot_nb_xor, nb_xor, __xor__, __rxor__)
+BINARY_THUNK(slot_nb_or, nb_or, __or__, __ror__)
+BINARY_THUNK(slot_nb_floor_divide, nb_floor_divide, __floordiv__, __rfloordiv__)
+BINARY_THUNK(slot_nb_true_divide, nb_true_divide, __truediv__, __rtruediv__)
+BINARY_THUNK(slot_nb_matrix_multiply, nb_matrix_multiply, __matmul__, __rmatmul__)
+
+/* pow(): the two-argument form reflects; the three-argument form only calls
+   self.__pow__, as ternary_op may offer another type's slot. */
+static PyObject *
+slot_nb_power(PyObject *self, PyObject *other, PyObject *modulus)
+{
+    if (modulus == Py_None) {
+        return binary_slot(self, other, offsetof(PyNumberMethods, nb_power),
+                           (void *)slot_nb_power, LU_ID(__pow__), LU_ID(__rpow__));
+    }
+    if (Py_TYPE(self)->tp_as_number != NULL && Py_TYPE(self)->tp_as_number->nb_power == slot_nb_power) {
+        PyObject *args[2] = { other, modulus };
+        return lu_call_special(self, LU_ID(__pow__), args, 2);
+    }
+    return Py_NewRef(Py_NotImplemented);
+}
+
+/* The in-place forms and the unary slots call one special method. */
+#define INPLACE_THUNK(fn, dunder) \
+    static PyObject *fn(PyObject *a, PyObject *b) \
+    { return lu_call_special(a, LU_ID(dunder), &b, 1); }
+INPLACE_THUNK(slot_nb_inplace_add, __iadd__)
+INPLACE_THUNK(slot_nb_inplace_subtract, __isub__)
+INPLACE_THUNK(slot_nb_inplace_multiply, __imul__)
+INPLACE_THUNK(slot_nb_inplace_remainder, __imod__)
+INPLACE_THUNK(slot_nb_inplace_lshift, __ilshift__)
+INPLACE_THUNK(slot_nb_inplace_rshift, __irshift__)
+INPLACE_THUNK(slot_nb_inplace_and, __iand__)
+INPLACE_THUNK(slot_nb_inplace_xor, __ixor__)
+INPLACE_THUNK(slot_nb_inplace_or, __ior__)
+INPLACE_THUNK(slot_nb_inplace_floor_divide, __ifloordiv__)
+INPLACE_THUNK(slot_nb_inplace_true_divide, __itruediv__)
+INPLACE_THUNK(slot_nb_inplace_matrix_multiply, __imatmul__)
+
+static PyObject *
+slot_nb_inplace_power(PyObject *self, PyObject *other, PyObject *modulus)
+{
+    return lu_call_special(self, LU_ID(__ipow__), &other, 1);
+}
+
+#define UNARY_THUNK(fn, dunder) \
+    static PyObject *fn(PyObject *a) { return lu_call_special(a, LU_ID(dunder), NULL, 0); }
+UNARY_THUNK(slot_nb_negative, __neg__)
+UNARY_THUNK(slot_nb_positive, __pos__)
+UNARY_THUNK(slot_nb_absolute, __abs__)
+UNARY_THUNK(slot_nb_invert, __invert__)
+UNARY_THUNK(slot_nb_int, __int__)
+UNARY_THUNK(slot_nb_float, __float__)
+UNARY_THUNK(slot_nb_index, __index__)
+
 /* The slot table: where each slot lives and its thunk. */
 enum { IN_TYPE, IN_NUMBER, IN_MAPPING, IN_SEQUENCE, IN_ASYNC, IN_BUFFER };
 
@@ -346,7 +462,7 @@ struct slot {
 };
 
 #define TP(f, t) { #f, IN_TYPE, offsetof(PyTypeObject, f), (void *)(t) }
-#define NB(f) { #f, IN_NUMBER, offsetof(PyNumberMethods, f), NULL }
+#define NB(f, t) { #f, IN_NUMBER, offsetof(PyNumberMethods, f), (void *)(t) }
 #define MP(f, t) { #f, IN_MAPPING, offsetof(PyMappingMethods, f), (void *)(t) }
 #define SQ(f, t) { #f, IN_SEQUENCE, offsetof(PySequenceMethods, f), (void *)(t) }
 #define AM(f) { #f, IN_ASYNC, offsetof(PyAsyncMethods, f), NULL }
@@ -360,16 +476,25 @@ static const struct slot slots[] = {
     TP(tp_descr_get, slot_tp_descr_get), TP(tp_descr_set, slot_tp_descr_set),
     TP(tp_init, slot_tp_init), TP(tp_new, slot_tp_new), TP(tp_finalize, NULL),
     BF(bf_getbuffer), BF(bf_releasebuffer), AM(am_await), AM(am_aiter), AM(am_anext),
-    NB(nb_add), NB(nb_subtract), NB(nb_multiply), NB(nb_remainder), NB(nb_divmod),
-    NB(nb_power), NB(nb_negative), NB(nb_positive), NB(nb_absolute),
-    { "nb_bool", IN_NUMBER, offsetof(PyNumberMethods, nb_bool), (void *)slot_nb_bool },
-    NB(nb_invert), NB(nb_lshift), NB(nb_rshift), NB(nb_and), NB(nb_xor), NB(nb_or),
-    NB(nb_int), NB(nb_float), NB(nb_inplace_add), NB(nb_inplace_subtract),
-    NB(nb_inplace_multiply), NB(nb_inplace_remainder), NB(nb_inplace_power),
-    NB(nb_inplace_lshift), NB(nb_inplace_rshift), NB(nb_inplace_and), NB(nb_inplace_xor),
-    NB(nb_inplace_or), NB(nb_floor_divide), NB(nb_true_divide), NB(nb_inplace_floor_divide),
-    NB(nb_inplace_true_divide), NB(nb_index), NB(nb_matrix_multiply),
-    NB(nb_inplace_matrix_multiply),
+    NB(nb_add, slot_nb_add), NB(nb_subtract, slot_nb_subtract),
+    NB(nb_multiply, slot_nb_multiply), NB(nb_remainder, slot_nb_remainder),
+    NB(nb_divmod, slot_nb_divmod), NB(nb_power, slot_nb_power),
+    NB(nb_negative, slot_nb_negative), NB(nb_positive, slot_nb_positive),
+    NB(nb_absolute, slot_nb_absolute), NB(nb_bool, slot_nb_bool),
+    NB(nb_invert, slot_nb_invert), NB(nb_lshift, slot_nb_lshift), NB(nb_rshift, slot_nb_rshift),
+    NB(nb_and, slot_nb_and), NB(nb_xor, slot_nb_xor), NB(nb_or, slot_nb_or),
+    NB(nb_int, slot_nb_int), NB(nb_float, slot_nb_float),
+    NB(nb_inplace_add, slot_nb_inplace_add), NB(nb_inplace_subtract, slot_nb_inplace_subtract),
+    NB(nb_inplace_multiply, slot_nb_inplace_multiply),
+    NB(nb_inplace_remainder, slot_nb_inplace_remainder),
+    NB(nb_inplace_power, slot_nb_inplace_power), NB(nb_inplace_lshift, slot_nb_inplace_lshift),
+    NB(nb_inplace_rshift, slot_nb_inplace_rshift), NB(nb_inplace_and, slot_nb_inplace_and),
+    NB(nb_inplace_xor, slot_nb_inplace_xor), NB(nb_inplace_or, slot_nb_inplace_or),
+    NB(nb_floor_divide, slot_nb_floor_divide), NB(nb_true_divide, slot_nb_true_divide),
+    NB(nb_inplace_floor_divide, slot_nb_inplace_floor_divide),
+    NB(nb_inplace_true_divide, slot_nb_inplace_true_divide), NB(nb_index, slot_nb_index),
+    NB(nb_matrix_multiply, slot_nb_matrix_multiply),
+    NB(nb_inplace_matrix_multiply, slot_nb_inplace_matrix_multiply),
     MP(mp_length, slot_length), MP(mp_subscript, slot_mp_subscript),
     MP(mp_ass_subscript, slot_mp_ass_subscript),
     SQ(sq_length, slot_length), SQ(sq_concat, NULL), SQ(sq_repeat, NULL), SQ(sq_item, NULL),

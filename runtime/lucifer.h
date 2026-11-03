@@ -122,7 +122,14 @@ struct lu_static_type_state {
     X(setattr)                  /* PyObject_SetAttr: __setattr__ */ \
     X(delattr)                  /* PyObject_DelAttr: __delattr__ */ \
     X(generic_setattr)          /* PyObject_GenericSetAttr, value or MISSING */ \
-    X(super_getattr)            /* _PySuper_Lookup(class, self, name) */
+    X(super_getattr)            /* _PySuper_Lookup(class, self, name) */ \
+    X(binary_op)                /* PyNumber_<op>(a, b) for BINARY_OP's oparg: reflection */ \
+    X(compare)                  /* PyObject_RichCompare(a, b, oparg >> 5), bool if oparg & 16 */ \
+    X(negative)                 /* PyNumber_Negative */ \
+    X(positive)                 /* PyNumber_Positive */ \
+    X(invert)                   /* PyNumber_Invert */ \
+    X(truth)                    /* PyObject_IsTrue, as a bool */ \
+    X(contains)                 /* a in b, or not in: (container, item, invert) */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
     LU_KERNEL_FUNCTIONS(LU_KERNEL_ID)
@@ -149,6 +156,7 @@ struct _is {
     struct lu_static_type_state static_types[LU_MAX_STATIC_TYPES];
     PyObject *kernel[LU_K_COUNT];       /* strong; NULL until registered */
     unsigned int next_version_tag;      /* heap types' tp_version_tag */
+    int max_str_digits;                 /* sys.get_int_max_str_digits() */
 };
 
 /* The poll word (FOUNDATIONS 2.5): each carrier's eval breaker. The low bits
@@ -312,7 +320,15 @@ struct lu_static_objects {
     X(__len__) X(__loader__) X(__main__) X(__name__) X(__new__) X(__next__) \
     X(__package__) X(__repr__) X(__set__) X(__spec__) X(__str__) X(__hash__) \
     X(__eq__) X(__ne__) X(__lt__) X(__le__) X(__gt__) X(__ge__) X(__contains__) \
-    X(__setitem__) X(__delitem__) X(__bool__) X(_lucifer) X(builtins)
+    X(__setitem__) X(__delitem__) X(__bool__) X(_lucifer) X(builtins) \
+    X(__add__) X(__radd__) X(__sub__) X(__rsub__) X(__mul__) X(__rmul__) X(__mod__) \
+    X(__rmod__) X(__divmod__) X(__rdivmod__) X(__pow__) X(__rpow__) X(__lshift__) \
+    X(__rlshift__) X(__rshift__) X(__rrshift__) X(__and__) X(__rand__) X(__xor__) \
+    X(__rxor__) X(__or__) X(__ror__) X(__floordiv__) X(__rfloordiv__) X(__truediv__) \
+    X(__rtruediv__) X(__matmul__) X(__rmatmul__) X(__iadd__) X(__isub__) X(__imul__) \
+    X(__imod__) X(__ipow__) X(__ilshift__) X(__irshift__) X(__iand__) X(__ixor__) \
+    X(__ior__) X(__ifloordiv__) X(__itruediv__) X(__imatmul__) X(__neg__) X(__pos__) \
+    X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__)
 struct lu_identifiers {
 #define LU_ID_FIELD(name) PyObject *name;
     LU_IDENTIFIERS(LU_ID_FIELD)
@@ -373,6 +389,21 @@ PyObject *lu_small_int(int value);
 PyObject *lu_long_from_digits(int negative, Py_ssize_t ndigits, const digit *digits);
 int lu_long_as_long(PyObject *v, long *result);
 Py_hash_t lu_long_hash(PyLongObject *v);
+/* Operations on ints (runtime/prim/int.c); operands are any PyLong. */
+PyObject *lu_long_add(PyObject *a, PyObject *b);
+PyObject *lu_long_sub(PyObject *a, PyObject *b);
+PyObject *lu_long_mul(PyObject *a, PyObject *b);
+PyObject *lu_long_floordiv(PyObject *a, PyObject *b);
+PyObject *lu_long_mod(PyObject *a, PyObject *b);
+PyObject *lu_long_truediv(PyObject *a, PyObject *b);
+PyObject *lu_long_pow(PyObject *a, PyObject *b, PyObject *c);
+PyObject *lu_long_negate(PyObject *a);
+PyObject *lu_long_invert(PyObject *a);
+int lu_long_compare(PyObject *a, PyObject *b);
+double lu_long_as_double(PyObject *a);
+PyObject *lu_long_from_double(double d);
+/* The NB_* binary operator `op` on two ints; NotImplemented when the kernel must. */
+PyObject *lu_long_binary(int op, PyObject *a, PyObject *b);
 Py_hash_t lu_xxhash_items(PyObject *const *items, Py_ssize_t n, int mangle_length);
 Py_hash_t lu_str_hash(PyObject *s);
 int lu_str_eq(PyObject *a, PyObject *b);
@@ -470,6 +501,11 @@ int lu_kernel_target(PyObject *callable, PyObject *const *args, Py_ssize_t nargs
 PyObject *lu_call(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames);
 /* Calls interp->kernel[id] from C, in a nested eval loop. */
 PyObject *lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t nargs);
+/* PyObject_IsTrue: 1, 0 or -1 with an error set. */
+int lu_is_true(PyObject *v);
+/* The truth of a value whose type's truth is its layout: 1, 0, or -1 when __bool__
+   or __len__ must run. */
+int lu_truth_exact(PyObject *v);
 
 /* Slots (runtime/types/slots.c): the C slot thunks that run kernel Python
    for C callers, and the slot table _lucifer.set_slot installs them from. */

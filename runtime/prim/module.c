@@ -148,7 +148,7 @@ lucifer_exec(PyObject *m)
     struct lu_prim_state *state = PyModule_GetState(m);
     state->interp = PyInterpreterState_Get();
     if (add_functions(m, lu_prim_type_methods) < 0 || add_functions(m, lu_prim_descr_methods) < 0
-        || add_functions(m, lu_prim_slot_methods) < 0) {
+        || add_functions(m, lu_prim_slot_methods) < 0 || add_functions(m, lu_prim_int_methods) < 0) {
         return -1;
     }
     PyObject *name = PyUnicode_InternFromString("MISSING");
@@ -162,6 +162,8 @@ static PyMethodDef lucifer_methods[] = {
       "write(fd, str): write str to fd as UTF-8, all of it." },
     { "str_join", (PyCFunction)(void (*)(void))lu_prim_str_join, METH_FASTCALL,
       "str_join(sep, items): the exact strs of a tuple, joined by sep." },
+    { "text_repr", (PyCFunction)(void (*)(void))lu_prim_text_repr, METH_FASTCALL,
+      "text_repr(obj, limit): repr() of a str or bytes, cut to limit characters." },
     { NULL, NULL, 0, NULL },
 };
 

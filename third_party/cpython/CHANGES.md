@@ -127,3 +127,21 @@ C under `runtime/` adapted from this tag's sources, under the PSF License
   `_lucifer.error` until f-strings and `raise` work in the kernel; a
   user `__getattribute__` that raises `AttributeError` reaches
   `__getattr__` once exception tables exist (K1k).
+
+## runtime/prim/int.c
+
+Adapted from `Objects/longobject.c` (`x_add`, `x_sub`, `x_mul`, `k_mul`,
+`k_lopsided_mul`, `x_divrem`, `inplace_divrem1`, `v_lshift`, `v_rshift`,
+`long_pow` and `long_invmod`, the shifts, the two's complement bitwise
+operations, `long_to_decimal_string_internal`, `long_format_binary`,
+`PyLong_FromString` with `long_from_binary_base` and
+`long_from_non_binary_base`, `_PyLong_AsByteArray`, `_PyLong_FromByteArray`,
+`_PyLong_Frexp`, `PyLong_AsDouble`, `PyLong_FromDouble`,
+`long_true_divide`) and `Python/sysmodule.c` (`get_int_max_str_digits`,
+`set_int_max_str_digits`): the algorithms run over raw digit arrays with no
+intermediate objects, results come back through `lu_long_from_digits`, the
+`_pylong` module's subquadratic paths are omitted (they give the same
+results), and `int()` of a str maps only ASCII digits and the common Unicode
+spaces until the Unicode database exists. `runtime/prim/str.c`'s
+`text_repr` stands in for `unicode_repr` and `bytes_repr` in the
+`invalid literal` message with an approximate printable test for non-ASCII.
