@@ -1,4 +1,6 @@
-.PHONY: check-harness
+.PHONY: check-harness check-compiler
+HOST_PYTHON ?= python3
+
 check-harness:
 	python3 tools/oracle/test_harness.py
 	python3 tools/libtest/check.py
@@ -7,3 +9,6 @@ check-harness:
 	python3 tools/difftest/check.py
 	python3 tools/ftcorpus/check.py
 	python3 tools/pypi/check.py
+
+check-compiler:
+	$(HOST_PYTHON) tools/compilercheck --corpus closure,difftest,kernel,lib --require closure,difftest,kernel
