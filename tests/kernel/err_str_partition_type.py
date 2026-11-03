@@ -1,0 +1,1 @@
+'a'.partition(1)
