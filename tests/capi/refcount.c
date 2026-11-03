@@ -114,9 +114,10 @@ owner_waits(void *arg)
     shared_obj = counted_new();
     Py_INCREF(shared_obj);              /* the reference handed over */
     pthread_barrier_wait(&barrier);     /* main drops the handed-over one */
+    Py_DECREF(shared_obj);              /* local count 1, the queue holds one */
     pthread_barrier_wait(&barrier);
-    Py_DECREF(shared_obj);              /* local count 0, queue still holds one */
-    PyGILState_Release(gil);
+    pthread_barrier_wait(&barrier);     /* main checks before the merge */
+    PyGILState_Release(gil);            /* unbinding merges the queue */
     return NULL;
 }
 
@@ -168,6 +169,7 @@ check_shared_refcount(void)
     Py_DECREF(shared_obj);
     pthread_barrier_wait(&barrier);
     CHECK(dealloc_count() == before);
+    pthread_barrier_wait(&barrier);
     pthread_join(t, NULL);
     CHECK(dealloc_count() == before + 1);
 
