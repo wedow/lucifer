@@ -45,6 +45,12 @@ lu_futex_wake(uint32_t *word)
     LU_PARKED(syscall(SYS_futex, word, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0));
 }
 
+void
+lu_join_thread(pthread_t thread)
+{
+    LU_SYSCALL(pthread_join(thread, NULL));
+}
+
 /* write(fd, str): the whole UTF-8 form of str, retrying short writes and
    EINTR. Raises OSError on failure; the errno-carrying OSError layout
    arrives with K1k. */

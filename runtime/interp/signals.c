@@ -11,20 +11,31 @@
 #include <signal.h>
 #include <string.h>
 
-/* _Py_ThreadCanHandleSignals: the main thread of the main interpreter. */
+/* _Py_ThreadCanHandleSignals: the main thread of the main interpreter. A
+   task's ident is the thread it first ran on, so this is the main task
+   wherever it runs. */
 int
 lu_thread_can_handle_signals(void)
 {
-    return pthread_equal(pthread_self(), _PyRuntime.main_thread);
+    struct lu_task *t = lu_current_task();
+    return t != NULL ? t->ts.thread_id == (unsigned long)_PyRuntime.main_thread
+                     : pthread_equal(pthread_self(), _PyRuntime.main_thread);
 }
 
-/* _PyEval_SignalReceived. Async-signal-safe: atomic stores only. */
+/* _PyEval_SignalReceived: the reason is aimed at the main task, which may be
+   on any carrier, and that carrier is woken in case the task sleeps in a
+   park. Async-signal-safe: atomic stores and a futex wake only. */
 static void
 signal_received(void)
 {
-    struct lu_carrier *main = __atomic_load_n(&_PyRuntime.main_carrier, __ATOMIC_ACQUIRE);
-    if (main != NULL) {
-        lu_poll_set(main, LU_POLL_SIGNALS_PENDING);
+    struct lu_task *main = __atomic_load_n(&_PyRuntime.main_task, __ATOMIC_ACQUIRE);
+    if (main == NULL) {
+        return;
+    }
+    lu_task_signal(main, LU_POLL_SIGNALS_PENDING);
+    struct lu_carrier *c = __atomic_load_n(&main->carrier, __ATOMIC_ACQUIRE);
+    if (c != NULL) {
+        lu_carrier_wake(c);
     }
 }
 
@@ -76,12 +87,12 @@ check_signals(PyThreadState *ts)
 int
 lu_signals_handle(PyThreadState *ts)
 {
-    lu_poll_clear(((struct lu_task *)ts)->carrier, LU_POLL_SIGNALS_PENDING);
+    lu_task_unsignal((struct lu_task *)ts, LU_POLL_SIGNALS_PENDING);
     if (!lu_thread_can_handle_signals()) {
         return 0;
     }
     if (check_signals(ts) < 0) {
-        lu_poll_set(((struct lu_task *)ts)->carrier, LU_POLL_SIGNALS_PENDING);
+        lu_task_signal((struct lu_task *)ts, LU_POLL_SIGNALS_PENDING);
         return -1;
     }
     return 0;

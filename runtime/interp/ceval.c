@@ -288,10 +288,26 @@ set_function_attribute(PyFunctionObject *func, int which, PyObject *attr)
     Py_XSETREF(*field, attr);
 }
 
-/* Runs `frame` in a new activation; with throwflag, by raising the
-   exception in flight at its current instruction (a generator's throw). */
+/* How eval_frame starts: by running `frame`, by raising the exception in
+   flight at its current instruction (a generator's throw), or by resuming
+   the task at its top frame (lu_resume). */
+enum { EVAL_RUN, EVAL_THROW, EVAL_RESUME };
+
+static struct lu_frame *
+base_entry(struct lu_task *t)
+{
+    if (t->base_entry == NULL) {
+        t->base_entry = PyMem_RawCalloc(1, sizeof(struct lu_frame));
+        if (t->base_entry == NULL) {
+            Py_FatalError("lucifer: out of memory");
+        }
+    }
+    return t->base_entry;
+}
+
+/* Runs a frame in a new activation. */
 static PyObject *
-eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
+eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
 {
     /* Ranges first, then the opcodes that override them. */
 #pragma GCC diagnostic push
@@ -426,10 +442,27 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
     /* An activation never changes carrier: an unpinned park returns from it. */
     struct lu_carrier *const carrier = lu_carrier;
     const uintptr_t *poll = &carrier->poll;
-    struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
-    entry.previous = (struct lu_frame *)ts->current_frame;
-    frame->previous = &entry;
-    ts->current_frame = (struct _PyInterpreterFrame *)frame;
+    struct lu_task *const task = (struct lu_task *)ts;
+    /* An activation that finds no frame running is the task's outermost, the
+       only one that can park: every other has C below it. Its C-entry marker
+       is in the task, not on the C stack, so that it outlives the activation
+       when the task resumes on another carrier. */
+    const int outermost = mode == EVAL_RESUME || ts->current_frame == NULL;
+    const int migratable = outermost && __atomic_load_n(&_PyRuntime.sched.active, __ATOMIC_RELAXED);
+    struct lu_frame local_entry, *entry = &local_entry;
+    if (mode == EVAL_RESUME) {
+        frame = (struct lu_frame *)ts->current_frame;
+    }
+    else {
+        if (outermost) {
+            entry = base_entry(task);
+            task->home = carrier;
+        }
+        *entry = (struct lu_frame){ .owner = LU_FRAME_C_ENTRY };
+        entry->previous = (struct lu_frame *)ts->current_frame;
+        frame->previous = entry;
+        ts->current_frame = (struct _PyInterpreterFrame *)frame;
+    }
 
     PyCodeObject *code;
     PyObject **localsplus, **sp;
@@ -520,10 +553,14 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
             SAVE_FRAME(); \
             ERROR_IF(lu_poll_slow(ts) < 0); \
         } \
+        if (migratable && lu_sched_safepoint(task)) { \
+            SAVE_FRAME(); \
+            return LU_EVAL_PARKED; \
+        } \
     } while (0)
 
     LOAD_FRAME();
-    if (throwflag) {
+    if (mode == EVAL_THROW) {
         goto error;
     }
     DISPATCH();
@@ -2440,13 +2477,21 @@ exception_unwind: {
 PyObject *
 lu_eval(PyThreadState *ts, struct lu_frame *frame)
 {
-    return eval_frame(ts, frame, 0);
+    PyObject *result = eval_frame(ts, frame, EVAL_RUN);
+    return result == LU_EVAL_PARKED ? lu_sched_home(ts) : result;
+}
+
+PyObject *
+lu_resume(PyThreadState *ts)
+{
+    return eval_frame(ts, NULL, EVAL_RESUME);
 }
 
 PyObject *
 _PyEval_EvalFrameDefault(PyThreadState *ts, struct _PyInterpreterFrame *f, int throwflag)
 {
-    return eval_frame(ts, (struct lu_frame *)f, throwflag);
+    PyObject *result = eval_frame(ts, (struct lu_frame *)f, throwflag ? EVAL_THROW : EVAL_RUN);
+    return result == LU_EVAL_PARKED ? lu_sched_home(ts) : result;
 }
 
 PyObject *
@@ -2466,9 +2511,14 @@ PyEval_EvalCode(PyObject *co, PyObject *globals, PyObject *locals)
     if (f == NULL) {
         return NULL;
     }
+    /* Called with a frame running, this is C calling Python: a nested eval. */
+    struct lu_task *t = (struct lu_task *)ts;
+    int nested = ts->current_frame != NULL;
     PyObject *result;
+    t->pin += nested;
     if (lu_enter_frame(ts, f, &result)) {
         result = lu_eval(ts, f);
     }
+    t->pin -= nested;
     return result;
 }

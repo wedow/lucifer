@@ -80,6 +80,8 @@ void lu_syscall_end(PyThreadState *ts);
    or ETIMEDOUT, EINTR or EAGAIN. */
 int lu_futex_wait(uint32_t *word, uint32_t expected, PyTime_t deadline);
 void lu_futex_wake(uint32_t *word);
+/* Waits for a thread to exit, detached (runtime/prim/os.c). */
+void lu_join_thread(pthread_t thread);
 
 /* Biased reference counting (runtime/object/brc.c). A thread that owns
    objects has an owner record in each interpreter; the interpreter's buckets
@@ -96,6 +98,8 @@ struct lu_brc_owner {
     struct lu_brc_owner *next;  /* in its bucket */
     struct lu_stack to_merge;   /* pushed by other threads, under the bucket lock */
     struct lu_stack local;      /* the owner's own copy, merged without the lock */
+    int idle;                   /* its carrier runs no task, so touches none of its objects:
+                                   a queuing thread merges them itself (under the bucket lock) */
 };
 
 struct lu_brc_bucket {
@@ -324,6 +328,18 @@ struct lu_task {
     struct lu_carrier *carrier; /* the carrier whose thread it is bound to, or NULL */
     uintptr_t pending;          /* targeted poll reasons, raised into the carrier's word at bind */
     int in_pending_calls;       /* running the pending calls: a poll inside them leaves the rest */
+    /* Scheduling (runtime/thread/sched.c). */
+    void *base_entry;           /* the C-entry marker of the task's outermost activation, which
+                                   outlives that activation's C stack when it parks */
+    struct lu_carrier *home;    /* the carrier whose C stack holds that activation's caller */
+    struct lu_wait wait;        /* the wait of an unpinned park: the activation is gone, so the
+                                   record cannot be on the stack */
+    struct lu_task *runq_next;  /* in a carrier's run queue */
+    PyObject *result;           /* what the outermost activation returned, on its way home */
+    int done;                   /* result is set: this task is going home to return it */
+    uint64_t rng;               /* seeded handoff's choices */
+    int gc_alloc_count;         /* the carrier's buffered GC allocation count, carried
+                                   while the task is between carriers */
 };
 
 /* Quiescent-state-based reclamation (runtime/thread/qsbr.c), after
@@ -366,9 +382,16 @@ struct lu_carrier {
     struct lu_entry *entries;
     uintptr_t poll;             /* the poll word */
     uint32_t wake;              /* the futex a park sleeps on; bumped by each unpark */
+    unsigned long native_id;    /* the thread's TID: a syscall, so read once */
+    uint32_t sleeping;          /* the carrier's thread is in, or about to enter, a futex sleep on `wake` */
     struct lu_task *task;       /* the task last attached here: the thread's tstate
                                    while its state is attached */
     struct lu_task *gilstate;   /* the thread's PyGILState tstate (CPython's autoTSSkey) */
+    /* A scheduler carrier (runtime/thread/sched.c) runs tasks from its queue,
+       guarded by _PyRuntime.sched.lock. It outlives its tasks, so its owner
+       record stays registered until the carrier exits. */
+    struct lu_task *runq_head, *runq_tail;
+    int scheduled;
 };
 
 extern _Thread_local struct lu_carrier *lu_carrier;
@@ -427,6 +450,31 @@ void lu_task_attach(PyThreadState *ts);
 void lu_task_detach(struct lu_task *t, int state);
 void lu_task_delete(struct lu_task *t);
 void lu_task_carrier_exit(struct lu_carrier *c);
+/* The task leaves its carrier at a migration point (DESIGN 5.4): detached,
+   unbound, and no longer the carrier's task. The carrier's owner record stays
+   registered. lu_task_bind and lu_task_attach put it on the next carrier. */
+void lu_task_leave(struct lu_task *t);
+/* Clears targeted reasons from the task and its carrier's word. */
+void lu_task_unsignal(struct lu_task *t, uintptr_t bits);
+
+/* The scheduler (runtime/thread/sched.c, DESIGN 5.5 and 5.8). Under -X
+   lucifer_handoff a second carrier runs, and an unpinned task parks at
+   safepoints and resumes on the other carrier.
+
+   An eval-loop activation that parks returns LU_EVAL_PARKED to its caller,
+   which is lu_eval on the carrier whose C stack holds the task's C caller (its
+   home). lu_sched_home commits the park and runs that carrier's loop until
+   the task is back, bound to the home carrier, with the result. */
+#define LU_EVAL_PARKED ((PyObject *)1)
+void lu_sched_start(void);
+void lu_sched_stop(void);
+/* A safepoint of a task's outermost activation: whether it parks here. When
+   it does, the task has registered and completed its wait, and the loop
+   must publish the frames and return LU_EVAL_PARKED. */
+int lu_sched_safepoint(struct lu_task *t);
+PyObject *lu_sched_home(PyThreadState *ts);
+/* Queues a detached task on `c` and wakes it. */
+void lu_sched_enqueue(struct lu_task *t, struct lu_carrier *c);
 
 /* The one handler for every poll reason (FOUNDATIONS 2.5), called by the
    interpreter and the JIT when the carrier's poll word has a reason set.
@@ -494,6 +542,8 @@ void lu_mimalloc_bind(struct lu_entry *entry);
 void lu_mimalloc_abandon(struct lu_entry *entry);
 void lu_brc_register(struct lu_entry *entry);
 void lu_brc_retire(struct lu_entry *entry);
+/* A scheduler carrier stops or starts running a task (runtime/thread/task.c). */
+void lu_brc_set_idle(struct lu_entry *entry, int idle);
 
 void lu_brc_queue_object(PyObject *ob);
 void lu_set_immortal(PyObject *op);
@@ -601,7 +651,15 @@ extern LU_EXPORT union lu_runtime {
         int finalizing;                 /* Py_FinalizeEx has begun */
         PyMutex specialize_lock;        /* one rewrite of an instruction's inline cache at a time */
         pthread_t main_thread;          /* the thread that started the runtime */
-        struct lu_carrier *main_carrier;    /* its carrier: signals are aimed at it */
+        struct lu_task *main_task;      /* signals and the main thread's pending calls are aimed at it */
+        struct {
+            struct lu_lock lock;        /* every carrier's run queue */
+            struct lu_carrier *carriers[2];     /* the main thread's, and the second */
+            pthread_t second;           /* the second carrier's thread */
+            uint64_t ready_id;          /* the wait the second carrier ends once it is a carrier */
+            int active;                 /* tasks migrate: the second carrier is running */
+            int stop;                   /* the second carrier is asked to exit */
+        } sched;
         struct {
             struct lu_lock lock;        /* the registry and the orphaned queue */
             uint64_t wr_seq;            /* always odd, advanced by 2 */

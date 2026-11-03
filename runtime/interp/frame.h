@@ -152,6 +152,11 @@ const char *lu_function_str(PyObject *func, char *buf, size_t size);
    own activation. Returns a new reference, or NULL with an exception set. */
 PyObject *lu_eval(PyThreadState *ts, struct lu_frame *f);
 
+/* Re-enters the loop for a task whose outermost activation parked, at its
+   top frame, on the carrier that now runs it. Returns what lu_eval would:
+   the outermost frame's result, or LU_EVAL_PARKED if it parks again. */
+PyObject *lu_resume(PyThreadState *ts);
+
 /* Every Python frame entry (FOUNDATIONS 2.18). Returns 1 when the caller's
    loop should run `f` inline; otherwise a PEP 523 hook ran it, under a pin,
    and *result holds what it returned. */

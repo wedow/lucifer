@@ -80,14 +80,14 @@ static PyObject *
 prim_thread_ident(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(0);
-    return PyLong_FromLongLong((long long)(uintptr_t)pthread_self());
+    return PyLong_FromLongLong((long long)PyThreadState_Get()->thread_id);
 }
 
 static PyObject *
 prim_thread_native_id(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(0);
-    return PyLong_FromLongLong(gettid());
+    return PyLong_FromLongLong((long long)lu_carrier->native_id);
 }
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }

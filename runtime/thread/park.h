@@ -33,6 +33,10 @@ struct lu_wait {
     int status;                 /* LU_PARK_PENDING until it ends, then lu_park's result */
     uintptr_t result;           /* the unparker's, once status is LU_PARK_OK */
     PyTime_t deadline;          /* absolute CLOCK_MONOTONIC ns, or -1 for none */
+    int registered;             /* linked in the wait table while pending: an unpark can find it */
+    int unpinned;               /* the waiter parks without sleeping: no one sleeps on `carrier`'s futex */
+    int parked;                 /* ... and its task has left its carrier (lu_park_commit):
+                                   completing the wait queues the task on `carrier` */
     struct lu_wait *next;       /* in the wait table while pending */
 };
 
@@ -40,16 +44,36 @@ struct lu_wait {
    unpark of the id is kept until lu_park consumes it. */
 uint64_t lu_wait_begin(struct lu_wait *w);
 
+/* A wait that is complete before anyone could hold its id, as an unpinned
+   task's handoff is: no unpark can find it, so it never enters the wait
+   table. `carrier` is the one whose queue the task joins. */
+void lu_wait_ready(struct lu_wait *w, struct lu_carrier *carrier);
+
 /* Waits until `w` is unparked or `deadline` (absolute CLOCK_MONOTONIC ns, -1
    for none) passes, then ends the wait: its id is stale from here on. A
    result that arrived before the call returns at once. With `detach` the
    task counts as detached while it sleeps (lu_syscall_begin), as it must
    unless the caller is CPython code that asked for _Py_LOCK_DONT_DETACH.
 
-   The degenerate scheduler sleeps on the carrier's futex for every task.
-   With migration (K1r) an unpinned task instead returns to its carrier's
-   loop, and the unpark queues it on the carrier that last ran it. */
+   lu_park is a C function and sleeps on the carrier's futex, which a pinned
+   task must. An unpinned task at a safepoint of the eval loop parks without
+   it (lu_park_commit below): its activation returns to the carrier's loop and
+   the unpark queues the task on `w->carrier`. */
 int lu_park(struct lu_wait *w, PyTime_t deadline, int detach);
+
+/* The loop side of an unpinned park. The task has filled `w` with
+   lu_wait_ready (complete), or registered it with lu_wait_begin and
+   published its id; its activation has returned to the carrier's loop, which
+   has detached the task. From here the completion of `w` queues the task on
+   `w->carrier`, at once if it has already completed. */
+void lu_park_commit(struct lu_wait *w);
+
+/* A carrier with no task to run sleeps until a task is queued for it:
+   `seq` is the carrier's wake word, read before the queue was found empty.
+   The queue's adder calls lu_carrier_wake. */
+void lu_carrier_sleep(struct lu_carrier *c, uint32_t seq);
+void lu_carrier_wake(struct lu_carrier *c);
+uint32_t lu_carrier_wake_seq(struct lu_carrier *c);
 
 /* Completes the wait `id` with `result` and wakes its carrier. Returns 1 if
    it did, or 0 if the id is stale or already completed. */

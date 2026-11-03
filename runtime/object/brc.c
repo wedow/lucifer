@@ -8,7 +8,8 @@
    An owner's record lives in its carrier's entry (runtime/thread/carrier.c).
    It is registered when the first task of a thread is bound in the
    interpreter, as CPython registers in bind_tstate, and retired when the last
-   is unbound. A thread must be registered before its first refcount
+   is unbound; a scheduler carrier (runtime/thread/sched.c) keeps it until it
+   exits, since tasks come and go while the carrier's objects stay. A thread must be registered before its first refcount
    operation: it may reuse an exited owner's TCB, and with it the thread id of
    objects merged as abandoned under the bucket lock. Queueing an object
    raises the explicit-merge reason in the owner's carrier, which merges at its
@@ -107,6 +108,15 @@ lu_brc_retire(struct lu_entry *entry)
     memset(t, 0, sizeof *t);            /* a later bind registers it afresh */
 }
 
+void
+lu_brc_set_idle(struct lu_entry *entry, int idle)
+{
+    struct lu_brc_bucket *b = bucket_of(entry->interp, entry->brc.tid);
+    pthread_mutex_lock(&b->lock.mutex);
+    entry->brc.idle = idle;
+    pthread_mutex_unlock(&b->lock.mutex);
+}
+
 /* Steals a reference to ob. */
 void
 lu_brc_queue_object(PyObject *ob)
@@ -123,8 +133,11 @@ lu_brc_queue_object(PyObject *ob)
     while (t != NULL && t->tid != tid) {
         t = t->next;
     }
-    if (t == NULL) {
-        /* The owner exited: merge here, dropping the stolen reference. */
+    if (t == NULL || t->idle) {
+        /* The owner exited, or runs no task and so touches none of its
+           objects: merge here, dropping the stolen reference. Waiting for an
+           idle owner would delay the free, and with it finalizers and weakref
+           callbacks, until a task next runs there. */
         Py_ssize_t refcount = lu_explicit_merge_refcount(ob, -1);
         pthread_mutex_unlock(&b->lock.mutex);
         if (refcount == 0) {
@@ -145,8 +158,8 @@ void
 lu_brc_merge(struct lu_entry *entry)
 {
     struct lu_brc_owner *t = &entry->brc;
-    if (entry->nbound == 0) {
-        return;
+    if (t->tid == 0) {
+        return;                 /* not registered: no task bound here yet */
     }
     struct lu_brc_bucket *b = bucket_of(entry->interp, t->tid);
     pthread_mutex_lock(&b->lock.mutex);
