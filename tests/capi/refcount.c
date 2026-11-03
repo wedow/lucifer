@@ -176,6 +176,76 @@ check_shared_refcount(void)
     CHECK(dealloc_count() == before + 3);
 }
 
+/* A joined thread's TCB, and so its thread id, is reused by the next thread.
+   The new thread sees the dead owner's objects as its own and counts them
+   locally, while another thread merges them as abandoned. */
+enum { REUSE_ROUNDS = 200, REUSE_OBJECTS = 64 };
+static PyObject *reuse_objs[REUSE_OBJECTS];
+static uintptr_t reuse_tid;
+static int reuse_cur, reuse_done, reuse_seen;
+
+static void *
+owner_makes_two_refs(void *arg)
+{
+    reuse_tid = _Py_ThreadId();
+    for (int i = 0; i < REUSE_OBJECTS; i++) {
+        reuse_objs[i] = counted_new();
+        Py_INCREF(reuse_objs[i]);
+    }
+    return NULL;
+}
+
+/* Holds the second reference of each object; creates no objects. */
+static void *
+heir_counts(void *arg)
+{
+    __atomic_store_n(&reuse_seen, _Py_ThreadId() == reuse_tid, __ATOMIC_SEQ_CST);
+    pthread_barrier_wait(&barrier);
+    while (!__atomic_load_n(&reuse_done, __ATOMIC_SEQ_CST)) {
+        PyObject *o = reuse_objs[__atomic_load_n(&reuse_cur, __ATOMIC_SEQ_CST)];
+        Py_INCREF(o);
+        Py_DECREF(o);
+    }
+    pthread_barrier_wait(&barrier);     /* main checks nothing was freed */
+    for (int i = 0; i < REUSE_OBJECTS; i++) {
+        Py_DECREF(reuse_objs[i]);
+    }
+    return NULL;
+}
+
+static void
+check_reused_thread_id(void)
+{
+    int reused = 0;
+    pthread_barrier_init(&barrier, NULL, 2);
+    for (int round = 0; round < REUSE_ROUNDS; round++) {
+        int before = dealloc_count();
+        run(owner_makes_two_refs);
+        reuse_cur = reuse_done = 0;
+        pthread_t t;
+        pthread_create(&t, NULL, heir_counts, NULL);
+        pthread_barrier_wait(&barrier);
+        reused += __atomic_load_n(&reuse_seen, __ATOMIC_SEQ_CST);
+        for (int i = 0; i < REUSE_OBJECTS; i++) {
+            __atomic_store_n(&reuse_cur, i, __ATOMIC_SEQ_CST);
+            for (volatile int spin = 0; spin < 200; spin++) {
+            }
+            Py_DECREF(reuse_objs[i]);   /* the owner exited: merged here */
+        }
+        __atomic_store_n(&reuse_done, 1, __ATOMIC_SEQ_CST);
+        int early = dealloc_count() - before;
+        pthread_barrier_wait(&barrier);
+        pthread_join(t, NULL);
+        if (early != 0 || dealloc_count() != before + REUSE_OBJECTS) {
+            fprintf(stderr, "round %d: %d freed early, %d of %d freed\n", round,
+                    early, dealloc_count() - before, REUSE_OBJECTS);
+            failures++;
+            return;
+        }
+    }
+    CHECK(reused > 0);
+}
+
 /* Varargs entry points: binding them is part of the check. */
 static void *const varargs[] = {
     (void *)PyArg_ParseTuple, (void *)PyArg_ParseTupleAndKeywords,
@@ -203,6 +273,7 @@ check(void)
     check_allocators();
     check_local_refcount();
     check_shared_refcount();
+    check_reused_thread_id();
     if (failures == 0) {
         puts("capi refcount ok");
     }
