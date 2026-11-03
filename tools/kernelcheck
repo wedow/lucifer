@@ -34,6 +34,9 @@ LANES = {"plain": []}
 # name -> [(flags, env)]: env None is -I -S with the inherited environment.
 RUNS = {
     "hash_seed": [([], {"PYTHONHASHSEED": "12345"}), ([], {"PYTHONHASHSEED": "0"})],
+    "stdio": [([], None), (["-u"], None), (["-X", "utf8=0"], {"LC_ALL": "C"}),
+              ([], {"LC_ALL": "C"}), ([], {"PYTHONIOENCODING": "latin-1:replace", "PYTHONUNBUFFERED": "1"}),
+              ([], {"PYTHONIOENCODING": "ascii:backslashreplace", "LANG": "en_US.UTF-8"})],
     "sys_flags": [([], None),
                   (["-X", "int_max_str_digits=1000", "-X", "foo=bar", "-X", "baz", "-W", "ignore"], None),
                   (["-B", "-b", "-q", "-O", "-E", "-X", "utf8=0"], None),
@@ -43,6 +46,8 @@ RUNS = {
                   (["-X", "dev"], {"PYTHONSAFEPATH": "1", "PYTHONNOUSERSITE": "1"})],
 }
 SEEDED = ("hash_seed",)
+# name -> bytes on the program's standard input; the others get an empty pipe.
+STDIN = {"stdio_input": "line one\nl\u00efne two\r\nlast, no newline".encode()}
 # (name, flags, exit status, text stderr must contain)
 FLAG_ROWS = [
     ("stress kind", ["-X", "lucifer_stress=bogus", "-I", "-S", "hello.pyc"], 2, "lucifer_stress"),
@@ -60,11 +65,12 @@ def limit_stack():
 
 def run(interpreter, flags, pyc, env=None):
     """env None: -I -S with the inherited environment; else -S with exactly env."""
+    stdin = STDIN.get(pyc.stem, b"")
     isolation = ["-I", "-S"] if env is None else ["-S"]
     try:
         child = subprocess.run([interpreter, *isolation, *flags, str(pyc)],
                                capture_output=True, timeout=TIMEOUT, env=env,
-                               preexec_fn=limit_stack, cwd=BUILD)
+                               input=stdin, preexec_fn=limit_stack, cwd=BUILD)
     except subprocess.TimeoutExpired:
         return ("timeout", b"", b"")
     return (child.returncode, child.stdout, child.stderr)

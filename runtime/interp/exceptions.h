@@ -33,6 +33,7 @@ PyObject *lu_frame_object(struct lu_frame *f);
    does: "Exception ignored while <what> <repr(obj)>:" and its traceback. */
 void lu_err_unraisable(const char *what, PyObject *obj);
 void lu_err_unraisable_text(const char *message, PyObject *obj);
+void lu_stderr_write(const char *text, size_t n);
 
 /* The code object a traceback's frame ran. */
 PyCodeObject *lu_frame_code(PyFrameObject *frame);

@@ -5,9 +5,9 @@ Those with keywords parse them with _args, which words theirs as Argument
 Clinic does."""
 
 from _lucifer import (
-    write, str_join, error, kind, type_lookup, type_tp_name, MISSING, static_type, is_callable,
+    str_join, error, kind, type_lookup, type_tp_name, MISSING, static_type, is_callable,
     is_subtype, size, int_format, int_add, int_as_double, str_chr, str_ord, bytes_ord, str_len,
-    object_id, caller_locals, caller_globals, eval_code, kernel_get, kernel_set, list_append,
+    object_id, caller_locals, caller_globals, eval_code, kernel_get, kernel_set,
     import_state,
 )
 from _lucifer import _boot, _format, operators, _args, iter as _iter
@@ -59,17 +59,12 @@ def print(*args, sep=' ', end='\n', file=None, flush=False):
     elif not kind(end, 'str'):
         error(TypeError, str_join('', ('end must be None or a string, not ', _name(end))))
     if file is None:
-        pieces = []
         try:
-            for x in args:
-                if pieces:
-                    list_append(pieces, to_str(sep))
-                list_append(pieces, to_str(x))
-        except BaseException:
-            write(1, str_join('', (*pieces,)))
-            raise
-        write(1, str_join('', (*pieces, to_str(end))))
-        return None
+            file = getattr_hook(sys, 'stdout')
+        except AttributeError:
+            error(RuntimeError, 'lost sys.stdout')
+        if file is None:
+            return None
     first = True
     for x in args:
         if not first:
@@ -765,6 +760,37 @@ def import_from(module, name):
 kernel_set('import_from', import_from)
 
 
+def import_star(namespace, module):
+    """Python/ceval.c import_all_from: from module import *, into namespace."""
+    skip_underscores = False
+    try:
+        names = getattr_hook(module, '__all__')
+    except AttributeError:
+        try:
+            names = getattr_hook(module, '__dict__').keys()
+        except AttributeError:
+            raise ImportError('from-import-* object has no __dict__ and no __all__') from None
+        skip_underscores = True
+    which = '__dict__' if skip_underscores else '__all__'
+    for name in [*names]:
+        if not isinstance(name, str):
+            try:
+                owner = getattr_hook(module, '__name__')
+            except AttributeError:
+                owner = None
+            raise TypeError(str_join('', (
+                'Key in ' if skip_underscores else 'Item in ',
+                '<module>' if not isinstance(owner, str) else owner, '.', which,
+                ' must be str, not ', _name(name))))
+        if skip_underscores and name[:1] == '_':
+            continue
+        namespace[name] = getattr_hook(module, name)
+    return None
+
+
+kernel_set('import_star', import_star)
+
+
 def breakpoint(*args, **kwargs):
     """Call sys.breakpointhook(*args, **kws).  sys.breakpointhook() must accept
 whatever arguments are passed.
@@ -783,7 +809,7 @@ def _stream(name):
     except AttributeError:
         stream = None
     if stream is None:
-        error(RuntimeError, str_join('', ('input(): lost sys.', name)))
+        error(RuntimeError, str_join('', ('lost sys.', name)))
     return stream
 
 
@@ -797,6 +823,11 @@ If the user hits EOF (*nix: Ctrl-D, Windows: Ctrl-Z+Return), raise EOFError.
 On *nix systems, readline is used if available."""
     stdin = _stream('stdin')
     stdout = _stream('stdout')
+    stderr = _stream('stderr')
+    try:
+        stderr.flush()
+    except BaseException:
+        pass
     if prompt is not MISSING:
         stdout.write(to_str(prompt))
     stdout.flush()

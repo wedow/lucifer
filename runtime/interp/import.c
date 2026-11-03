@@ -99,6 +99,7 @@ prim_port_exec(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (code == NULL) {
         return NULL;
     }
+    lu_hide_frames(code);
     int err = exec_in_module(args[0], code);
     Py_DECREF(code);
     return err < 0 ? NULL : Py_NewRef(Py_None);

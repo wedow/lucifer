@@ -160,7 +160,8 @@ struct lu_static_type_state {
     X(get_anext)                /* GET_ANEXT */ \
     X(stopiteration_error)      /* CALL_INTRINSIC_1 STOPITERATION_ERROR: (exc, kind) */ \
     X(gen_close)                /* close() of a generator or coroutine, from its finalizer */ \
-    X(import_from)              /* IMPORT_FROM: import_from(module, name) */
+    X(import_from)              /* IMPORT_FROM: import_from(module, name) */ \
+    X(import_star)              /* INTRINSIC_IMPORT_STAR: import_star(locals, module) */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
     LU_KERNEL_FUNCTIONS(LU_KERNEL_ID)
@@ -493,6 +494,7 @@ int lu_utf8_mode(const PyConfig *config);
 /* runtime/interp/sysmodule.c: sys's native functions, and sys.configure(config). */
 extern PyMethodDef lu_sys_native_methods[];
 int lu_sys_configure(struct _is *interp);
+int lu_sys_init_streams(struct _is *interp);
 
 /* runtime/interp/import.c: _imp, then _frozen_importlib and its install. */
 int lu_import_init(struct _is *interp);

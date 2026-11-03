@@ -14,6 +14,10 @@
    CPython leaves the bit unused. */
 #define LU_CO_KERNEL 0x40000000
 
+/* co_flags bit of the functions of a builtin module port: their frames are
+   hidden as a C module's are, but classes stay ordinary classes. */
+#define LU_CO_HIDDEN 0x20000000
+
 /* The fields marshal reads (_PyCodeConstructor), borrowed. */
 struct lu_code_fields {
     PyObject *filename, *name, *qualname;
