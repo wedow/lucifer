@@ -254,4 +254,4 @@ exit_thread = exit
 def interrupt_main(signum=2, /):
     """Simulate the arrival of the given signal in the main thread,
 where the corresponding signal handler will be executed."""
-    raise NotImplementedError('signals arrive with the _signal port')
+    _lucifer.signal_interrupt(signum)

@@ -27,15 +27,6 @@
         if (!PyErr_Occurred()) lu_err_format(PyExc_TypeError, "%s() needs an int", __func__ + 5); \
         return NULL; } var = v_; } while (0)
 
-/* The grace period of replaced storage: with one carrier running, no reader
-   holds the old array across a poll, so it is freed at once. The QSBR
-   port (K1q) turns this into a deferred free. */
-void
-lu_qsbr_retire(void *p)
-{
-    PyMem_Free(p);
-}
-
 static PyObject **
 seq_items(PyObject *seq)
 {

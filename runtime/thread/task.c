@@ -34,6 +34,7 @@ lu_task_new(struct _is *interp, int whence)
     ts->exc_info = &ts->exc_state;
     ts->context_ver = 1;
     pthread_mutex_lock(&interp->tasks_lock.mutex);
+    lu_stw_task_new(interp, t);
     ts->id = ++interp->next_task_id;
     ts->next = interp->tasks;
     if (ts->next != NULL) {
@@ -54,7 +55,7 @@ bind_tstate(struct lu_task *t)
     PyThreadState *ts = &t->ts;
     lu_current_entry();
     struct lu_entry *e = lu_entry_of(lu_carrier, ts->interp);
-    t->carrier = lu_carrier;
+    __atomic_store_n(&t->carrier, lu_carrier, __ATOMIC_RELEASE);
     ts->thread_id = (unsigned long)pthread_self();
     ts->native_thread_id = (unsigned long)gettid();
     if (e->nbound++ == 0) {
@@ -85,23 +86,47 @@ lu_task_bind(struct lu_task *t)
 }
 
 /* Makes `t` the task of the carrier, rewriting the fields the carrier owns:
-   the poll word and its mirror, with the reasons targeted at `t` raised. */
+   the poll word and its mirror. The word keeps the carrier's own reasons and
+   the monitoring version of `t`'s interpreter; the reasons targeted at the
+   old task leave with it and those targeted at `t` arrive. Other threads
+   raise reasons in the word meanwhile, so it is rewritten by compare and
+   exchange, reading the pending reasons afresh each time: a reason raised
+   after the read finds the word changed, one raised before is in the read. */
 static void
 install(struct lu_carrier *c, struct lu_task *t)
 {
     struct lu_task *old = c->task;
-    uintptr_t carried = c->poll & LU_POLL_EVENTS_MASK & ~(old != NULL ? old->pending : 0);
-    c->poll = t->ts.interp->monitoring_version | carried | t->pending;
-    t->ts.eval_breaker = c->poll;
+    uintptr_t version = t->ts.interp->monitoring_version;
+    uintptr_t cur = __atomic_load_n(&c->poll, __ATOMIC_RELAXED), next;
+    do {
+        uintptr_t old_pending = old != NULL ? __atomic_load_n(&old->pending, __ATOMIC_SEQ_CST) : 0;
+        next = version | (cur & LU_POLL_EVENTS_MASK & ~old_pending)
+            | __atomic_load_n(&t->pending, __ATOMIC_SEQ_CST);
+    } while (!__atomic_compare_exchange_n(&c->poll, &cur, next, 0,
+                                          __ATOMIC_SEQ_CST, __ATOMIC_RELAXED));
+    t->ts.eval_breaker = next;
     c->task = t;
 }
 
-/* _PyThreadState_Attach */
+void
+lu_task_signal(struct lu_task *t, uintptr_t bits)
+{
+    __atomic_fetch_or(&t->pending, bits, __ATOMIC_SEQ_CST);
+    struct lu_carrier *c = __atomic_load_n(&t->carrier, __ATOMIC_ACQUIRE);
+    if (c != NULL) {
+        lu_poll_set(c, bits);
+    }
+}
+
+/* _PyThreadState_Attach. */
 void
 lu_task_attach(PyThreadState *ts)
 {
     if (TASK(ts)->carrier != lu_carrier) {
         Py_FatalError("PyEval_RestoreThread: the thread state is bound to another thread");
+    }
+    if (PyThreadState_GetUnchecked() != NULL) {
+        Py_FatalError("non-NULL old thread state");
     }
     if (lu_carrier->task != TASK(ts)) {
         install(lu_carrier, TASK(ts));
@@ -109,8 +134,22 @@ lu_task_attach(PyThreadState *ts)
     lu_syscall_end(ts);
 }
 
-/* _PyThreadState_Detach. Stop-the-world (K1q) counts a detached task as
-   stopped. */
+/* detach_thread: the task stops using objects, so its critical sections
+   release their locks, its carrier goes offline for QSBR, and its state
+   becomes `state`: detached, or suspended for a stop-the-world. */
+void
+lu_task_detach(struct lu_task *t, int state)
+{
+    PyThreadState *ts = &t->ts;
+    if (ts->critical_section != 0) {
+        _PyCriticalSection_SuspendAll(ts);
+    }
+    lu_qsbr_detach(t->carrier);
+    ts->_status.active = 0;
+    __atomic_store_n(&ts->state, state, __ATOMIC_SEQ_CST);
+}
+
+/* _PyThreadState_Detach. */
 PyThreadState *
 lu_syscall_begin(void)
 {
@@ -118,17 +157,13 @@ lu_syscall_begin(void)
     if (t == NULL || t->ts.state != _Py_THREAD_ATTACHED) {
         return NULL;
     }
-    PyThreadState *ts = &t->ts;
-    if (ts->critical_section != 0) {
-        _PyCriticalSection_SuspendAll(ts);
-    }
-    ts->_status.active = 0;
-    __atomic_store_n(&ts->state, _Py_THREAD_DETACHED, __ATOMIC_SEQ_CST);
-    return ts;
+    lu_task_detach(t, _Py_THREAD_DETACHED);
+    return &t->ts;
 }
 
-/* _PyThreadState_Attach's second half. With stop-the-world (K1q) it waits
-   here while the world is stopped. */
+/* _PyThreadState_Attach's second half, tstate_wait_attach: a task that a
+   stop-the-world has suspended waits here until the world restarts, then
+   takes its detached state back and attaches. */
 void
 lu_syscall_end(PyThreadState *ts)
 {
@@ -136,7 +171,20 @@ lu_syscall_end(PyThreadState *ts)
         return;
     }
     int err = errno;
-    __atomic_store_n(&ts->state, _Py_THREAD_ATTACHED, __ATOMIC_SEQ_CST);
+    for (;;) {
+        int state = _Py_THREAD_DETACHED;
+        if (__atomic_compare_exchange_n(&ts->state, &state, _Py_THREAD_ATTACHED, 0,
+                                        __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+            break;
+        }
+        if (state == _Py_THREAD_SUSPENDED) {
+            _PyParkingLot_Park(&ts->state, &state, sizeof state, -1, NULL, 0);
+        }
+        else {
+            Py_FatalError("attaching a thread state that is attached");
+        }
+    }
+    lu_qsbr_attach(TASK(ts)->carrier);
     ts->_status.active = 1;
     if (ts->critical_section != 0) {
         _PyCriticalSection_Resume(ts);
@@ -144,9 +192,8 @@ lu_syscall_end(PyThreadState *ts)
     errno = err;
 }
 
-/* tstate_delete_common's unlink, unbind and free. The task is not attached,
-   or is the thread's current one: unbinding merges the owner record's queue,
-   which frees objects and so needs a tstate. */
+/* tstate_delete_common's unlink. A stop-the-world in progress stops
+   waiting for a task that goes. */
 static void
 unlink_task(struct lu_task *t)
 {
@@ -161,10 +208,15 @@ unlink_task(struct lu_task *t)
     if (t->ts.next != NULL) {
         t->ts.next->prev = t->ts.prev;
     }
+    lu_stw_task_delete(interp, t);
     pthread_mutex_unlock(&interp->tasks_lock.mutex);
 }
 
-/* unbind_gilstate_tstate and unbind_tstate */
+/* unbind_gilstate_tstate and unbind_tstate. The task is not attached, or is
+   the thread's current one: unbinding merges the owner record's queue, which
+   frees objects and so needs a tstate. The task is still linked in the
+   interpreter's list while it runs destructors, so that a stop-the-world
+   sees it, and keeps its carrier until the caller has unlinked it. */
 static void
 unbind(struct lu_task *t)
 {
@@ -182,7 +234,6 @@ unbind(struct lu_task *t)
         c->gilstate = NULL;
         t->ts._status.bound_gilstate = 0;
     }
-    t->carrier = NULL;
     t->ts._status.unbound = 1;
 }
 
@@ -199,12 +250,13 @@ free_task(struct lu_task *t)
     PyMem_RawFree(t);
 }
 
-/* Detaches `t` from its carrier's slot once it is unbound. */
+/* Detaches `t` from its carrier's slot once it is unlinked: no thread can
+   raise a reason at it any more, so its reasons leave the word. */
 static void
 release_slot(struct lu_carrier *c, struct lu_task *t)
 {
     if (c->task == t) {
-        c->poll &= ~t->pending;
+        lu_poll_clear(c, __atomic_load_n(&t->pending, __ATOMIC_SEQ_CST));
         c->task = NULL;
     }
 }
@@ -216,10 +268,14 @@ lu_task_delete(struct lu_task *t)
     if (c != NULL && c != lu_carrier) {
         Py_FatalError("PyThreadState_Delete: the thread state is bound to another thread");
     }
-    unlink_task(t);
     unbind(t);
+    unlink_task(t);
+    __atomic_store_n(&t->carrier, NULL, __ATOMIC_RELEASE);
     if (c != NULL) {
         release_slot(c, t);
+        if (t->ts.state == _Py_THREAD_ATTACHED) {
+            lu_qsbr_detach(c);          /* the thread leaves the interpreter with it */
+        }
     }
     t->ts.state = _Py_THREAD_DETACHED;
     t->ts._status.active = 0;
@@ -227,28 +283,37 @@ lu_task_delete(struct lu_task *t)
     free_task(t);
 }
 
+/* A task of `c` still linked in `interp`, the gilstate task only when no
+   other is left. */
+static struct lu_task *
+bound_task(struct _is *interp, struct lu_carrier *c)
+{
+    struct lu_task *found = NULL;
+    pthread_mutex_lock(&interp->tasks_lock.mutex);
+    for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
+        if (TASK(ts)->carrier == c && (found == NULL || found->ts._status.bound_gilstate)) {
+            found = TASK(ts);
+        }
+    }
+    pthread_mutex_unlock(&interp->tasks_lock.mutex);
+    return found;
+}
+
 /* The thread is exiting with tasks still bound to it (a foreign thread that
    never released, or the main task). Each is attached while it is unbound,
    which merging needs, and stays the carrier's task until all are; their
-   Python state is not cleared. */
+   Python state is not cleared. The gilstate task goes last: the merges may
+   run destructors that call PyGILState_Ensure. */
 void
 lu_task_carrier_exit(struct lu_carrier *c)
 {
     PyThreadState *done = NULL;
     for (struct lu_entry *e = c->entries; e != NULL; e = e->next) {
-        for (;;) {
-            struct lu_task *t = NULL;
-            pthread_mutex_lock(&e->interp->tasks_lock.mutex);
-            for (PyThreadState *ts = e->interp->tasks; ts != NULL && t == NULL; ts = ts->next) {
-                t = TASK(ts)->carrier == c ? TASK(ts) : NULL;
-            }
-            pthread_mutex_unlock(&e->interp->tasks_lock.mutex);
-            if (t == NULL) {
-                break;
-            }
+        struct lu_task *t;
+        while ((t = bound_task(e->interp, c)) != NULL) {
             PyThreadState_Swap(&t->ts);         /* unbind's merge may run destructors */
-            unlink_task(t);
             unbind(t);
+            unlink_task(t);
             t->ts.next = done;
             done = &t->ts;
         }
@@ -272,11 +337,4 @@ void
 _PyInterpreterState_SetEvalFrameFunc(PyInterpreterState *interp, _PyFrameEvalFunction eval_frame)
 {
     interp->eval_frame = eval_frame == _PyEval_EvalFrameDefault ? NULL : eval_frame;
-}
-
-int
-lu_poll_slow(PyThreadState *ts)
-{
-    /* No reason is raised yet: each arrives with its owner (K1q). */
-    return 0;
 }

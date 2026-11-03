@@ -469,6 +469,16 @@ Every blocking operation goes through one of two entry points from K1:
   - Tasks never acknowledge. A running task is covered by its carrier's ack.
     Parked and runnable tasks are quiescent by construction, so the cost is
     O(carriers), not O(tasks).
+- **Stale and aimed requests.**
+  - A stop-the-world sets the please-stop reason only on a carrier whose task is
+    attached. A task that detached first is stopped by the requester's retry
+    (every millisecond), and its stale reason finds no request at the next poll,
+    which then merely detaches and attaches.
+  - A task created during a stop starts suspended, and one deleted during it is
+    no longer waited for. Both are decided under the task list lock.
+  - A park returns `LU_PARK_INTR` only when a signal handler left the signals
+    reason in the carrier's word, which only the main thread's carrier has. Other
+    interruptions resume the wait.
 - **Walks over all tasks.** GC roots, `threading.settrace_all_threads` and
   `setprofile_all_threads`, and frame inspection walk the interpreter's task
   list, in every state.

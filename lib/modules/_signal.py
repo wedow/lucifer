@@ -1,6 +1,7 @@
 """_signal (Modules/signalmodule.c): the signal numbers and handler table.
-Handlers are recorded and returned but signals are not delivered yet; delivery
-arrives with the poll handler's signals-pending reason."""
+A Python handler is installed with the runtime's sigaction (runtime/interp/
+signals.c), which only records the signal: the handler runs in the main task
+at its next poll. SIGINT's default handler is not installed at startup yet."""
 
 import _lucifer
 
@@ -96,6 +97,7 @@ The previous action is returned.  See getsignal() for possible return values."""
     if handler not in (SIG_DFL, SIG_IGN) and not callable(handler):
         raise TypeError('signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable object')
     old = getsignal(signalnum)
+    _lucifer.signal_install(signalnum, handler)
     _handlers[signalnum] = handler
     return old
 
@@ -109,4 +111,4 @@ def strsignal(signalnum, /):
 def raise_signal(signalnum, /):
     """Send a signal to the executing process."""
     _check(signalnum)
-    raise NotImplementedError('signal delivery arrives with the poll handler')
+    _lucifer.signal_raise(signalnum)

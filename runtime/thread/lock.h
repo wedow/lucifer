@@ -17,6 +17,12 @@ typedef enum _PyLockFlags {
 PyLockStatus _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout_ns, _PyLockFlags flags);
 int _PyMutex_TryUnlock(PyMutex *m);
 
+/* PyEvent (Python/lock.c); the type is in lucifer.h. */
+int _PyEvent_IsSet(PyEvent *evt);
+void _PyEvent_Notify(PyEvent *evt);
+void PyEvent_Wait(PyEvent *evt);
+int PyEvent_WaitTimed(PyEvent *evt, PyTime_t timeout_ns, int detach);
+
 /* The parking lot: compare-and-sleep on an address, and wake. */
 enum {
     Py_PARK_OK = LU_PARK_OK,            /* unparked by another thread */
