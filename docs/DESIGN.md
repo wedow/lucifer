@@ -563,30 +563,15 @@ FAIL or PASS opportunistically; none may be NOTRUN after M0.0.
 | Specialization in shared `co_code` vs per-thread side tables | shared, atomic rewrite (cp314t does this) | `ft-cpython` parallel lane and a specialization-thrash microbench |
 | Heap-type field unboxing | off | difftest identity/state programs + AWFY NBody/CD with a flag |
 
-## 11. Owner decisions
+## 11. Decisions settled (2026-11-03)
 
-1. **C instead of fasm** for the runtime (§2). Recommended; fasm returns only for
-   a template tier if one is built.
-2. **`sys.implementation.name`.** "lucifer" is honest. But `packaging` then tags
-   the interpreter `lu314`, and pip will not select cp314t wheels. "cpython"
-   maximizes ecosystem compatibility. The harnesses work either way (numpytest uses
-   `PYTHONPATH`). Recommendation: "lucifer", plus a supported tag mapping before the
-   pypi lane needs pip.
-3. **Extensions without `Py_mod_gil`.** Recommendation: load with the GIL off,
-   exactly CPython 3.14t's `PYTHON_GIL=0`. The alternative is refusing the import.
-   A GIL is excluded either way.
-4. **Oracle-check `decimal` row** requires the `_decimal` backend. Lucifer's
-   stdlib uses `_pydecimal`. Either the row accepts `_pydecimal` for Lucifer, or we
-   add a Python facade over libmpdec, which is retained like zlib.
-5. **"Mostly Python" denominator.** Proposal: `tools/census` reports (a) builtin
-   types: `lib/kernel` Python lines vs `runtime/{object,types,prim}` C lines,
-   excluding `third_party`; and (b) stdlib modules: Python vs native lines. The owner
-   sets the thresholds.
-6. **Adapted CPython C** (§7 list, about 13k lines plus mimalloc) in the C-API
-   layer and runtime services. They are native by necessity (varargs, ABI-visible
-   locks, allocator), not builtin algorithms.
-7. **M:N scheduler and a lightweight-task API.** They are not needed for the bar.
-   Recommendation: none before M1.7.
+1. **C** is the runtime language (§2). Zig was considered and not adopted: the canonical headers are C, so it would add a toolchain without removing work.
+2. **`sys.implementation.name` is `"cpython"`**, and `platform.python_implementation()` returns `"CPython"`, so packaging tags the interpreter cp314t and libraries take their CPython paths. Lucifer identifies itself through `sys.implementation.lucifer` (a version tuple) and `sys.version`'s build string. The goal is a working runtime, and the ecosystem keys on the name.
+3. **Extensions without `Py_mod_gil`** load with the GIL off, as CPython 3.14t does under `PYTHON_GIL=0`.
+4. **`decimal`** uses `_pydecimal`. The oracle-check row accepts it for Lucifer.
+5. **"Mostly Python"** is measured by `tools/census` as proposed. Thresholds get set once the first measured numbers exist.
+6. **Adapted CPython C** is allowed where it is native by necessity (§7 list). Each adapted file is recorded in `third_party/cpython/CHANGES.md`.
+7. **No M:N scheduler or lightweight-task API** before M1.7.
 
 ## 12. Reproducing the counts
 
