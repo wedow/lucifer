@@ -41,6 +41,24 @@ C under `runtime/` adapted from this tag's sources, under the PSF License
   `PyLongWriter`; version-0 floats parse with `strtod` instead of `dtoa.c`;
   dict items require exact-str keys until the kernel's dict exists; no audit
   event.
+- `runtime/capi/module.c` from `Objects/moduleobject.c` (`PyModuleDef_Init`,
+  `PyModule_FromDefAndSpec2`, `PyModule_ExecDef`, `PyModule_AddFunctions`, the
+  name and filename getters) and `Python/modsupport.c` (`PyModule_Add*`):
+  `m_index` comes from a counter in `_PyRuntime`; no API-version warning, no
+  subinterpreter checks, no `Py_mod_gil` effect (the GIL is never enabled);
+  `PyModule_Create2` (single-phase initialization) raises ImportError.
+- `runtime/capi/modsupport.c` from `Python/modsupport.c` (`Py_BuildValue` and
+  its helpers, `_Py_VaBuildStack`, `_Py_convert_optional_to_ssize_t`): only the
+  includes and `_PyIndex_Check` differ.
+- `runtime/capi/getargs.c` from `Python/getargs.c` (`_PyArg_BadArgument`,
+  `_PyArg_CheckPositional`, `_PyArg_UnpackKeywords`, `_PyArg_NoKeywords`,
+  `_PyArg_NoPositional`, `error_unexpected_keyword_arg`): parsers with a format
+  string are not supported; the keyword tuple is built once under a runtime
+  mutex, interned with `PyUnicode_InternFromString`, and not registered for
+  `_PyArg_Fini`.
+- `runtime/prim/storage.c`: `PyList_Insert`, `PyList_SetSlice` and
+  `_PyList_AppendTakeRefListResize` from `Objects/listobject.c`, over the
+  runtime's `list_resize` and `list_ass_slice` (the kernel's splice).
 - `runtime/object/hash.c` from `Python/pyhash.c` (SipHash-1-3,
   `Py_HashBuffer`, `Py_HashPointer`, `_Py_HashDouble`), `Python/bootstrap_hash.c`
   (`lcg_urandom`, the seed policy over `getrandom`), `Objects/longobject.c`

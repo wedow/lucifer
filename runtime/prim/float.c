@@ -31,6 +31,40 @@ bool_of(int v)
 
 /* 0 for a float or int (as a double), 1 for another type, -1 with an error
    (an int too large for a double). */
+double
+PyFloat_AsDouble(PyObject *op)
+{
+    if (PyFloat_Check(op)) {
+        return PyFloat_AS_DOUBLE(op);
+    }
+    PyNumberMethods *nb = Py_TYPE(op)->tp_as_number;
+    if (nb == NULL || nb->nb_float == NULL) {
+        if (nb != NULL && nb->nb_index != NULL) {
+            PyObject *index = PyNumber_Index(op);
+            double value = index != NULL ? lu_long_as_double(index) : -1.0;
+            Py_XDECREF(index);
+            return value;
+        }
+        PyErr_Format(PyExc_TypeError, "must be real number, not %.50s", Py_TYPE(op)->tp_name);
+        return -1;
+    }
+    PyObject *res = nb->nb_float(op);
+    if (res == NULL) {
+        return -1;
+    }
+    if (!PyFloat_CheckExact(res)) {
+        if (!PyFloat_Check(res)) {
+            PyErr_Format(PyExc_TypeError, "%.50s.__float__ returned non-float (type %.50s)",
+                         Py_TYPE(op)->tp_name, Py_TYPE(res)->tp_name);
+            Py_DECREF(res);
+            return -1;
+        }
+    }
+    double value = PyFloat_AS_DOUBLE(res);
+    Py_DECREF(res);
+    return value;
+}
+
 int
 lu_as_double(PyObject *o, double *d)
 {
