@@ -3,13 +3,28 @@
 Port of Python/instruction_sequence.c, Include/internal/pycore_instruction_sequence.h,
 the _Py_SourceLocation type and the macros of Include/internal/pycore_opcode_utils.h.
 """
-from collections import namedtuple
+from _collections import _tuplegetter
 
 from .opcodes import *  # noqa: F403 -- opcode names are this module's vocabulary too
 from . import opcodes
 
-# Field order of _Py_SourceLocation (Include/internal/pycore_symtable.h)
-SourceLocation = namedtuple("SourceLocation", "lineno end_lineno col_offset end_col_offset")
+class SourceLocation(tuple):
+    """_Py_SourceLocation (Include/internal/pycore_symtable.h): a tuple of its
+    four fields.  It is built by hand, not by collections.namedtuple, which
+    compiles a lambda with eval() and so needs this compiler."""
+    __slots__ = ()
+    lineno = _tuplegetter(0, "")
+    end_lineno = _tuplegetter(1, "")
+    col_offset = _tuplegetter(2, "")
+    end_col_offset = _tuplegetter(3, "")
+
+    def __new__(cls, lineno, end_lineno, col_offset, end_col_offset):
+        return tuple.__new__(cls, (lineno, end_lineno, col_offset, end_col_offset))
+
+    def __repr__(self):
+        return "SourceLocation(lineno=%r, end_lineno=%r, col_offset=%r, end_col_offset=%r)" % self
+
+
 NO_LOCATION = SourceLocation(-1, -1, -1, -1)
 NEXT_LOCATION = SourceLocation(-2, -2, -2, -2)
 NO_LABEL = -1

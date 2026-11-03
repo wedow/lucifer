@@ -777,11 +777,13 @@ w_float_str(double v, WFILE *p)
     PyMem_Free(buf);
 }
 
-/* The refcount test of _PyObject_IsUniquelyReferenced. */
+/* The refcount test of _PyObject_IsUniquelyReferenced. The free-threaded
+   build gives code objects deferred reference counts, which keep ob_ref_shared
+   nonzero: a code object is never unique. */
 static int
 uniquely_referenced(PyObject *v)
 {
-    return _Py_IsOwnedByCurrentThread(v) && v->ob_ref_local == 1
+    return !PyCode_Check(v) && _Py_IsOwnedByCurrentThread(v) && v->ob_ref_local == 1
         && _Py_atomic_load_ssize_relaxed(&v->ob_ref_shared) == 0;
 }
 
@@ -934,12 +936,16 @@ w_set(PyObject *v, char flag, WFILE *p)
             p->error = WFERR_SET_CHANGED_SIZE;
             break;
         }
+        /* The element is held while it is dumped and while it waits in the sort list,
+           as _PySet_NextEntryRef and the list's tuples hold it in CPython: it is
+           never uniquely referenced, so marshal flags it. */
+        items[count].value = Py_NewRef(key);
         items[count].dump = write_to_bytes(key, p->version, p->allow_code);
         if (items[count].dump == NULL) {
+            Py_DECREF(items[count].value);
             p->error = WFERR_UNMARSHALLABLE;
             break;
         }
-        items[count].value = key;
         items[count].index = count;
         count++;
     }
@@ -954,6 +960,7 @@ w_set(PyObject *v, char flag, WFILE *p)
     }
     for (Py_ssize_t i = 0; i < count; i++) {
         Py_DECREF(items[i].dump);
+        Py_DECREF(items[i].value);
     }
     PyMem_Free(items);
 }

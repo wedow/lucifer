@@ -724,6 +724,45 @@ finish_warnoptions(PyConfig *config)
     return status;
 }
 
+/* _Py_abspath and _Py_normpath: the program file as an absolute path whose
+   "." and ".." segments are collapsed, without resolving symbolic links. */
+static PyStatus
+run_filename_abspath(PyConfig *config)
+{
+    if (config->run_filename == NULL || config->run_command != NULL || wcscmp(config->run_filename, L"-") == 0) {
+        return PyStatus_Ok();
+    }
+    char *path = Py_EncodeLocale(config->run_filename, NULL);
+    if (path == NULL) {
+        return PyStatus_NoMemory();
+    }
+    char joined[PATH_MAX * 2] = "";
+    if (path[0] != '/') {
+        if (getcwd(joined, PATH_MAX) == NULL) {
+            joined[0] = '\0';
+        }
+        strcat(joined, "/");
+    }
+    snprintf(joined + strlen(joined), sizeof joined - strlen(joined), "%s", path);
+    PyMem_Free(path);
+    char normal[PATH_MAX * 2];
+    size_t length = 0;
+    for (char *save, *part = strtok_r(joined, "/", &save); part != NULL; part = strtok_r(NULL, "/", &save)) {
+        if (strcmp(part, ".") == 0) {
+            continue;
+        }
+        if (strcmp(part, "..") == 0) {
+            while (length > 0 && normal[--length] != '/') {
+            }
+            continue;
+        }
+        normal[length++] = '/';
+        length += (size_t)snprintf(normal + length, sizeof normal - length, "%s", part);
+    }
+    normal[length] = '\0';
+    return PyConfig_SetBytesString(config, &config->run_filename, length > 0 ? normal : "/");
+}
+
 /* _PyPathConfig_ComputeSysPath0: the directory of the program file, with
    symbolic links resolved, or "" for -c and standard input; none when the
    path is safe. */
@@ -775,6 +814,9 @@ PyConfig_Read(PyConfig *config)
     }
     if (config->use_environment) {
         status = read_env_flags(config);
+    }
+    if (!PyStatus_Exception(status) && config->parse_argv) {
+        status = run_filename_abspath(config);
     }
     if (!PyStatus_Exception(status)) {
         status = compute_sys_path_0(config);

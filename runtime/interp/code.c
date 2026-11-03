@@ -11,6 +11,7 @@
 #include "opcode.h"
 #include "opcode_ids.h"
 
+#include <math.h>
 #include <string.h>
 
 /* Code watchers (codeobject.c): CREATE once a code object is built, DESTROY as
@@ -64,10 +65,55 @@ PyCode_ClearWatcher(int id)
     return 0;
 }
 
+/* The free-threaded build gives code objects deferred reference counts: one
+   whose count reaches zero is not freed then but by the next collection. A
+   duplicate that the compiler merged away therefore still holds the objects
+   it shared with the survivor, which marshal sees as shared. */
+static int
+defer_code(PyCodeObject *co)
+{
+    struct lu_gc *gc = &PyInterpreterState_Get()->gc;
+    PyMutex_Lock(&gc->deferred_lock);
+    if (gc->deferred_code_count == gc->deferred_code_capacity) {
+        Py_ssize_t capacity = gc->deferred_code_capacity ? gc->deferred_code_capacity * 2 : 64;
+        PyObject **grown = PyMem_RawRealloc(gc->deferred_code, capacity * sizeof *grown);
+        if (grown == NULL) {
+            PyMutex_Unlock(&gc->deferred_lock);
+            return 0;
+        }
+        gc->deferred_code = grown;
+        gc->deferred_code_capacity = capacity;
+    }
+    co->co_flags |= LU_CO_DEFERRED;
+    ((PyObject *)co)->ob_ref_local = 1;
+    gc->deferred_code[gc->deferred_code_count++] = (PyObject *)co;
+    PyMutex_Unlock(&gc->deferred_lock);
+    return 1;
+}
+
+void
+lu_code_release_deferred(PyInterpreterState *interp)
+{
+    struct lu_gc *gc = &interp->gc;
+    PyMutex_Lock(&gc->deferred_lock);
+    PyObject **list = gc->deferred_code;
+    Py_ssize_t count = gc->deferred_code_count;
+    gc->deferred_code = NULL;
+    gc->deferred_code_count = gc->deferred_code_capacity = 0;
+    PyMutex_Unlock(&gc->deferred_lock);
+    for (Py_ssize_t i = 0; i < count; i++) {
+        Py_DECREF(list[i]);
+    }
+    PyMem_RawFree(list);
+}
+
 static void
 code_dealloc(PyObject *op)
 {
     PyCodeObject *co = (PyCodeObject *)op;
+    if (!(co->co_flags & (LU_CO_DEFERRED | LU_CO_KERNEL)) && defer_code(co)) {
+        return;
+    }
     lu_resurrect_start(op);
     lu_code_notify(PY_CODE_EVENT_DESTROY, co);
     if (lu_resurrect_end(op) != 0) {
@@ -84,6 +130,8 @@ code_dealloc(PyObject *op)
     Py_XDECREF(co->co_linetable);
     lu_object_free(op);
 }
+
+static int code_same(PyCodeObject *a, PyCodeObject *b);
 
 /* co_varnames, co_cellvars and co_freevars: the names of one kind. */
 static PyObject *
@@ -272,6 +320,9 @@ lu_code_new(const struct lu_code_fields *c)
     co->co_filename = Py_NewRef(c->filename);
     co->co_name = Py_NewRef(c->name);
     co->co_qualname = Py_NewRef(c->qualname);
+    lu_intern(PyInterpreterState_Get(), &co->co_filename);
+    lu_intern(PyInterpreterState_Get(), &co->co_name);
+    lu_intern(PyInterpreterState_Get(), &co->co_qualname);
     co->co_linetable = Py_NewRef(c->linetable);
     co->_co_unique_id = -1;
     int nlocalsplus = (int)PyTuple_GET_SIZE(c->localsplusnames);
@@ -370,8 +421,123 @@ prim_code_set_localsplusnames(PyObject *m, PyObject *const *args, Py_ssize_t nar
     return Py_NewRef(Py_None);
 }
 
+/* Whether two constants are interchangeable, by _PyCode_ConstantKey: of the
+   same exact type and equal, with the zeros of floats and complex numbers
+   told apart and NaNs equal only to themselves. */
+static int
+const_equal(PyObject *a, PyObject *b)
+{
+    if (a == b) {
+        return !PyFloat_CheckExact(a) || ((PyFloatObject *)a)->ob_fval == ((PyFloatObject *)a)->ob_fval;
+    }
+    if (Py_TYPE(a) != Py_TYPE(b)) {
+        return 0;
+    }
+    if (PyFloat_CheckExact(a)) {
+        double x = ((PyFloatObject *)a)->ob_fval, y = ((PyFloatObject *)b)->ob_fval;
+        return x == y && signbit(x) == signbit(y);
+    }
+    if (PyComplex_CheckExact(a)) {
+        Py_complex x = ((PyComplexObject *)a)->cval, y = ((PyComplexObject *)b)->cval;
+        return x.real == y.real && x.imag == y.imag && signbit(x.real) == signbit(y.real)
+            && signbit(x.imag) == signbit(y.imag);
+    }
+    if (PyTuple_CheckExact(a)) {
+        if (PyTuple_GET_SIZE(a) != PyTuple_GET_SIZE(b)) {
+            return 0;
+        }
+        for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(a); i++) {
+            if (!const_equal(PyTuple_GET_ITEM(a, i), PyTuple_GET_ITEM(b, i))) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (PyFrozenSet_CheckExact(a)) {
+        PySetObject *x = (PySetObject *)a, *y = (PySetObject *)b;
+        if (x->used != y->used) {
+            return 0;
+        }
+        for (Py_ssize_t i = 0; i <= x->mask; i++) {
+            PyObject *key = x->table[i].key;
+            int found = 0;
+            for (Py_ssize_t j = 0; key != NULL && key != LU_SET_DUMMY && j <= y->mask && !found; j++) {
+                found = y->table[j].key != NULL && y->table[j].key != LU_SET_DUMMY
+                    && const_equal(key, y->table[j].key);
+            }
+            if (key != NULL && key != LU_SET_DUMMY && !found) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (PySlice_Check(a)) {
+        PySliceObject *x = (PySliceObject *)a, *y = (PySliceObject *)b;
+        return const_equal(x->start, y->start) && const_equal(x->stop, y->stop) && const_equal(x->step, y->step);
+    }
+    if (PyCode_Check(a)) {
+        return code_same((PyCodeObject *)a, (PyCodeObject *)b);
+    }
+    if (PyLong_CheckExact(a) || PyUnicode_CheckExact(a) || PyBytes_CheckExact(a)) {
+        return lu_eq(a, b) > 0;
+    }
+    return 0;
+}
+
+/* code_richcompare's equality: the same name, arguments, flags, first line,
+   bytecode, constants, names, locals and tables. */
+static int
+code_same(PyCodeObject *a, PyCodeObject *b)
+{
+    if (a == b) {
+        return 1;
+    }
+    if (a->co_argcount != b->co_argcount || a->co_posonlyargcount != b->co_posonlyargcount
+        || a->co_kwonlyargcount != b->co_kwonlyargcount
+        || (a->co_flags & ~(LU_CO_KERNEL | LU_CO_HIDDEN)) != (b->co_flags & ~(LU_CO_KERNEL | LU_CO_HIDDEN))
+        || a->co_firstlineno != b->co_firstlineno || Py_SIZE(a) != Py_SIZE(b)
+        || !lu_str_eq(a->co_name, b->co_name)) {
+        return 0;
+    }
+    PyObject *x = lu_code_bytes(a), *y = lu_code_bytes(b);
+    int same = x != NULL && y != NULL && lu_eq(x, y) > 0;
+    Py_XDECREF(x);
+    Py_XDECREF(y);
+    return same && const_equal(a->co_consts, b->co_consts) && lu_eq(a->co_names, b->co_names) > 0
+        && lu_eq(a->co_localsplusnames, b->co_localsplusnames) > 0
+        && lu_eq(a->co_linetable, b->co_linetable) > 0
+        && lu_eq(a->co_exceptiontable, b->co_exceptiontable) > 0;
+}
+
+/* code_equal(a, b) */
+static PyObject *
+prim_code_equal(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 2 || !PyCode_Check(args[0]) || !PyCode_Check(args[1])) {
+        lu_err_format(PyExc_TypeError, "code_equal(a, b)");
+        return NULL;
+    }
+    return Py_NewRef(code_same((PyCodeObject *)args[0], (PyCodeObject *)args[1]) ? Py_True : Py_False);
+}
+
+/* code_hash(code): consistent with code_equal, from the name, the argument
+   counts and the names. */
+static PyObject *
+prim_code_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 1 || !PyCode_Check(args[0])) {
+        lu_err_format(PyExc_TypeError, "code_hash(code)");
+        return NULL;
+    }
+    PyCodeObject *co = (PyCodeObject *)args[0];
+    Py_hash_t h = lu_str_hash(co->co_name) ^ lu_hash(co->co_names) ^ lu_hash(co->co_localsplusnames)
+        ^ lu_hash(co->co_linetable) ^ lu_hash(co->co_exceptiontable) ^ co->co_argcount
+        ^ co->co_posonlyargcount ^ co->co_kwonlyargcount ^ co->co_firstlineno;
+    return PyLong_FromLong(h == -1 ? -2 : h);
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_code_methods[] = {
-    FAST(code_new), FAST(code_set_localsplusnames),
+    FAST(code_new), FAST(code_set_localsplusnames), FAST(code_equal), FAST(code_hash),
     { NULL, NULL, 0, NULL },
 };

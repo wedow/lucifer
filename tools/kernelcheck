@@ -15,11 +15,14 @@ command lines whose exit status and stderr are checked directly.
 import argparse
 import difflib
 import importlib.util
+import os
 from pathlib import Path
 import py_compile
 import resource
+import shutil
 import subprocess
 import sys
+import tempfile
 import warnings
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -57,6 +60,82 @@ FLAG_ROWS = [
     ("int digits", ["-X", "int_max_str_digits=100", "-I", "-S", "hello.pyc"], 1, "int_max_str_digits"),
     ("no file", ["-I", "-S", "missing.pyc"], 2, "missing.pyc"),
 ]
+
+
+# Programs given as source: (name, interpreter arguments, files written first,
+# standard input, whether stderr is compared). Each runs in a fresh directory
+# on each interpreter; the directory's name is hidden from the output. The
+# __pycache__ files the run leaves behind must be the same bytes.
+SOURCE_MTIME = 1700000000
+SOURCE_ROWS = [
+    ("-c", ["-S", "-c", "import sys\nprint(sys.argv, repr(sys.path[0]), __name__, __loader__, sorted(globals()))", "a", "b"],
+     {}, b"", True),
+    ("-c exit", ["-S", "-c", "raise SystemExit(7)"], {}, b"", True),
+    ("-c error", ["-S", "-c", "1 / 0"], {}, b"", False),
+    ("-c syntax error", ["-S", "-c", "x = ("], {}, b"", False),
+    ("-c unicode", ["-S", "-c", "print('caf\u00e9', len('\U0001f600'))"], {}, b"", True),
+    ("-c isolated", ["-I", "-S", "-c", "import sys\nprint('' in sys.path, sys.flags.isolated)"], {}, b"", True),
+    ("script", ["-S", "script.py", "x", "y"],
+     {"script.py": "import sys\nprint(sys.argv, __name__, __file__, __cached__, __spec__, sys.path[0] == __file__.rpartition('/')[0])\n"
+                   "print(__loader__.__class__.__name__, sorted(k for k in globals() if k.startswith('__')))\n"}, b"", True),
+    ("script exit", ["-S", "s.py"], {"s.py": "import sys\nsys.exit('bye')\n"}, b"", True),
+    ("script future", ["-S", "s.py"], {"s.py": "from __future__ import annotations\nx: int = 1\nprint(__annotations__)\n"}, b"", True),
+    ("script cookie", ["-S", "s.py"], {"s.py": b"# -*- coding: latin-1 -*-\nprint('caf\xe9')\n"}, b"", True),
+    ("script warning", ["-S", "s.py"], {"s.py": "x = '\\d'\nprint(x)\n"}, b"", True),
+    ("script syntax error", ["-S", "s.py"], {"s.py": "x = (\n"}, b"", False),
+    ("script import", ["-S", "main.py"],
+     {"main.py": "import dep, pkg.mod\nprint(dep.VALUE, dep.__file__, dep.__cached__, pkg.mod.NAME, pkg.mod.__package__)\n",
+      "dep.py": "VALUE = [i * i for i in range(5)]\n",
+      "pkg/__init__.py": "", "pkg/mod.py": "NAME = __name__\n"}, b"", True),
+    ("script import twice", ["-S", "-c", "import dep\nprint(dep.VALUE, dep.__cached__)"],
+     {"dep.py": "VALUE = 'cached'\n"}, b"", True, 2),
+    ("script no bytecode", ["-S", "-B", "main.py"], {"main.py": "import dep\nprint(dep.VALUE)\n", "dep.py": "VALUE = 1\n"}, b"", True),
+    ("stdin", ["-S", "-"], {}, b"import sys\nprint(sys.argv, repr(sys.path[0]), __loader__)\n", True),
+    ("stdin default", ["-S"], {}, b"print('from stdin')\n", True),
+]
+
+
+def source_run(interpreter, directory, args, files, stdin, runs):
+    """(exit status, stdout, stderr, {pyc path: bytes}) of the last of `runs` runs of one source
+    program, in a new directory of the given name."""
+    shutil.rmtree(directory, ignore_errors=True)
+    directory.mkdir()
+    for name, text in files.items():
+        path = directory / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(text if isinstance(text, bytes) else text.encode())
+        os.utime(path, (SOURCE_MTIME, SOURCE_MTIME))
+    for _ in range(runs):
+        try:
+            child = subprocess.run([interpreter, *args], capture_output=True, timeout=TIMEOUT, input=stdin,
+                                   preexec_fn=limit_stack, cwd=directory)
+        except subprocess.TimeoutExpired:
+            return ("timeout", b"", b"", {})
+    pycs = {str(p.relative_to(directory)): p.read_bytes() for p in sorted(directory.rglob("*.pyc"))}
+    return (child.returncode, child.stdout, child.stderr, pycs)
+
+
+def check_source_programs(oracle, lucifer):
+    """Print one line per SOURCE_ROWS entry; the number of failures."""
+    failed = 0
+    with tempfile.TemporaryDirectory() as base:
+        directory = Path(base) / "program"
+        for name, args, files, stdin, compare_stderr, *runs in SOURCE_ROWS:
+            expected = source_run(oracle, directory, args, files, stdin, *runs or [1])
+            actual = source_run(lucifer, directory, args, files, stdin, *runs or [1])
+            ok_error = True
+            if not compare_stderr:
+                ok_error = (expected[0] == actual[0] and (expected[2] == b"") == (actual[2] == b"")
+                            and (not expected[2] or expected[2].splitlines()[-1] == actual[2].splitlines()[-1]))
+                expected, actual = (*expected[:2], b"", expected[3]), (*actual[:2], b"", actual[3])
+            if expected == actual and ok_error:
+                print(f"PASS source: {name}")
+            else:
+                failed += 1
+                print(describe(f"source: {name}", expected, actual))
+                if expected[3] != actual[3]:
+                    print(f"  __pycache__: oracle {sorted(expected[3])}, lucifer {sorted(actual[3])}")
+    return failed
 
 
 def limit_stack():
@@ -153,6 +232,9 @@ def main():
             failed += 1
             print(f"FAIL flags: {label}: exit {child.returncode}, stderr {child.stderr!r}")
         total += 1
+    source_failed = check_source_programs(args.oracle, lucifer)
+    failed += source_failed
+    total += len(SOURCE_ROWS)
     print(f"{total - failed}/{total} checks pass ({args.lane})")
     return 1 if failed else 0
 

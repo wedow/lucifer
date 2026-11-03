@@ -452,9 +452,10 @@ def new_code(*, filename, name, qualname, flags, code, firstlineno, linetable, c
     built by CodeType and then given these exact objects.
     """
     if _lucifer is not None:
+        # The kinds are a fresh bytes object, not the shared one-byte bytes that bytes(list) can return.
         return _lucifer.code_new(filename, name, qualname, flags, code, firstlineno, linetable, consts,
-                                 names, localsplusnames, bytes(localspluskinds), argcount, posonlyargcount,
-                                 kwonlyargcount, stacksize, exceptiontable)
+                                 names, localsplusnames, bytes(bytearray(localspluskinds)), argcount,
+                                 posonlyargcount, kwonlyargcount, stacksize, exceptiontable)
     varnames = tuple(n for n, k in zip(localsplusnames, localspluskinds) if k & CO_FAST_LOCAL)
     cellvars = tuple(n for n, k in zip(localsplusnames, localspluskinds) if k & CO_FAST_CELL)
     freevars = tuple(n for n, k in zip(localsplusnames, localspluskinds) if k & CO_FAST_FREE)

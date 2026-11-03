@@ -434,46 +434,17 @@ def namedtuple(typename, field_names, *, rename=False, defaults=None, module=Non
         arg_list += ','
     repr_fmt = '(' + ', '.join(f'{name}=%r' for name in field_names) + ')'
     tuple_new = tuple.__new__
-    _missing = object()
     _dict, _tuple, _len, _map, _zip = dict, tuple, len, map, zip
 
     # Create all the named tuple methods to be added to the class namespace
 
-    # Bound by hand: the lambda this replaces was compiled with eval(), which
-    # the runtime cannot do until it has a compiler.
-    def __new__(_cls, *args, **kwargs):
-        nargs = len(args)
-        if nargs > num_fields:
-            n_defaults = len(defaults) if defaults is not None else 0
-            if n_defaults:
-                takes = f'from {num_fields + 1 - n_defaults} to {num_fields + 1} positional arguments'
-            else:
-                takes = f'{num_fields + 1} positional argument' + ('' if num_fields == 0 else 's')
-            raise TypeError(f'{typename}.__new__() takes {takes} but {nargs + 1} '
-                            f'{"was" if nargs == 0 else "were"} given')
-        values = list(args)
-        for name in field_names[nargs:]:
-            if name in kwargs:
-                values.append(kwargs.pop(name))
-            elif name in field_defaults:
-                values.append(field_defaults[name])
-            else:
-                values.append(_missing)
-        for name in field_names[:nargs]:
-            if name in kwargs:
-                raise TypeError(f"{typename}.__new__() got multiple values for argument '{name}'")
-        if kwargs:
-            raise TypeError(f"{typename}.__new__() got an unexpected keyword argument '{next(iter(kwargs))}'")
-        missing = [name for name, v in zip(field_names, values) if v is _missing]
-        if missing:
-            quoted = [f"'{name}'" for name in missing]
-            if len(quoted) > 2:
-                names = ', '.join(quoted[:-1]) + ', and ' + quoted[-1]
-            else:
-                names = ' and '.join(quoted)
-            raise TypeError(f'{typename}.__new__() missing {len(missing)} required positional '
-                            f'argument{"" if len(missing) == 1 else "s"}: {names}')
-        return tuple_new(_cls, values)
+    namespace = {
+        '_tuple_new': tuple_new,
+        '__builtins__': {},
+        '__name__': f'namedtuple_{typename}',
+    }
+    code = f'lambda _cls, {arg_list}: _tuple_new(_cls, ({arg_list}))'
+    __new__ = eval(code, namespace)
     __new__.__name__ = '__new__'
     __new__.__doc__ = f'Create new instance of {typename}({arg_list})'
     if defaults is not None:

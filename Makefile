@@ -18,7 +18,7 @@ KERNEL = lib/kernel/_boot.py lib/kernel/object.py lib/kernel/type.py lib/kernel/
 	lib/kernel/float.py lib/kernel/complex.py lib/kernel/slice.py lib/kernel/_args.py lib/kernel/iter.py lib/kernel/tuple.py lib/kernel/_listsort.py \
 	lib/kernel/list.py lib/kernel/range.py lib/kernel/str.py lib/kernel/bytes.py lib/kernel/memoryview.py \
 	lib/kernel/dict.py lib/kernel/set.py lib/kernel/mappingproxy.py \
-	lib/kernel/generators.py lib/kernel/frame.py \
+	lib/kernel/generators.py lib/kernel/frame.py lib/kernel/code.py \
 	lib/kernel/iterators.py lib/kernel/builtins.py lib/kernel/weakref.py lib/kernel/module.py lib/kernel/structseq.py lib/kernel/sys.py lib/kernel/genericalias.py
 # The builtin modules, as Python over the _lucifer primitives, and the modules
 # importlib finds as frozen (NAME:ORIGNAME:FILE).
@@ -54,6 +54,7 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 	collections:collections:third_party/cpython/Lib/collections/__init__.py \
 	typing:typing:third_party/cpython/Lib/typing.py \
 	token:token:third_party/cpython/Lib/token.py \
+	__future__:__future__:third_party/cpython/Lib/__future__.py \
 	ast:ast:third_party/cpython/Lib/ast.py \
 	_ast_unparse:_ast_unparse:third_party/cpython/Lib/_ast_unparse.py \
 	enum:enum:third_party/cpython/Lib/enum.py \

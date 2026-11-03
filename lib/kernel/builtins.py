@@ -633,7 +633,7 @@ def _filename(filename):
         "compile() argument 'filename' must be str, bytes or os.PathLike, not ", _name(filename))))
 
 
-def compile(source, filename, mode, flags=0, dont_inherit=False, optimize=-1, *, _feature_version=-1):
+def compile(*args, **kwargs):
     """Compile source into a code object that can be executed by exec() or eval().
 
 The source code may represent a Python module, statement or expression.
@@ -646,11 +646,23 @@ The dont_inherit argument, if true, stops the compilation inheriting
 the effects of any future statements in effect in the code calling
 compile; if absent or false these statements do influence the compilation,
 in addition to any features explicitly specified."""
+    if size(args) > 6:
+        error(TypeError, str_join('', ('compile() takes at most 6 positional arguments (',
+                                       decimal(size(args)), ' given)')))
+    source, filename, mode, flags, dont_inherit, optimize, feature_version = _args.unpack(
+        'compile', args, kwargs, ('source', 'filename', 'mode', 'flags', 'dont_inherit', 'optimize',
+                                  '_feature_version'), 0, 3)
+    flags = 0 if flags is MISSING else flags
+    dont_inherit = False if dont_inherit is MISSING else dont_inherit
+    optimize = -1 if optimize is MISSING else optimize
+    feature_version = -1 if feature_version is MISSING else index(feature_version)
     filename = _filename(filename)
     if not kind(mode, 'str'):
         error(TypeError, str_join('', ("compile() argument 'mode' must be str, not ", _name(mode))))
     flags = index(flags)
     optimize = index(optimize)
+    if not -0x80000000 <= flags <= 0x7fffffff or not -0x80000000 <= optimize <= 0x7fffffff:
+        error(OverflowError, 'Python int too large to convert to C int')
     if flags & ~(_PyCF_MASK | _CO_NESTED | _PyCF_COMPILE_MASK):
         error(ValueError, 'compile(): unrecognised flags')
     if optimize < -1 or optimize > 2:
@@ -658,7 +670,7 @@ in addition to any features explicitly specified."""
     if not truth(dont_inherit):
         flags |= caller_code_flags() & _PyCF_MASK
     if mode not in ('exec', 'eval', 'single', 'func_type'):
-        error(ValueError, "compile() mode must be 'exec', 'eval', 'single' or 'func_type'")
+        error(ValueError, "compile() mode must be 'exec', 'eval' or 'single'")
     if mode == 'func_type' and not flags & _PyCF_ONLY_AST:
         error(ValueError, "compile() mode 'func_type' requires flag PyCF_ONLY_AST")
     import _ast
@@ -668,7 +680,7 @@ in addition to any features explicitly specified."""
             error(TypeError, 'compile() arg 1 must be a string, bytes or AST object')
         source = text
     sys.audit('compile', source, filename)
-    return _compile(source, filename, mode, flags, truth(dont_inherit), optimize, _feature_version)
+    return _compile(source, filename, mode, flags, truth(dont_inherit), optimize, feature_version)
 
 
 def _resolve_name(name, globals_, level):
