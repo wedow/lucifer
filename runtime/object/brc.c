@@ -5,7 +5,7 @@
    by thread id in the interpreter's bucket table. If the owner is not
    registered, it has exited, and the queuing thread merges the counts itself.
 
-   An owner's record lives in its carrier's entry (runtime/carrier.c), which is
+   An owner's record lives in its carrier's entry (runtime/thread/carrier.c), which is
    created before the thread's first allocation, retired when it exits, and
    registered here. A thread must register before its first refcount
    operation: it may reuse an exited owner's TCB, and with it the thread id of
