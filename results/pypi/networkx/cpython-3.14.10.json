@@ -4,10 +4,10 @@
   "runtime": "cpython-3.14.10",
   "source_sha256": "fd77a511bd90f39f3d016351345b52cf5319b813bdca01de3f755d3cca62e96a",
   "lock_sha256": "6652f33e0a7d4b5d978b182e5dff8a085d364bea5b49f38a61081745703eefb7",
-  "corpus_sha256": "6a0696d238c5318e3ae7cdf9bbd7181d63594152c3d1fbd84a4a9e141e0c8e9a",
+  "corpus_sha256": "8467b9c0cc798eaae4423e55914e7cf34709f666bc1d182847f964694752fb5c",
   "harness_sha256": {
-    "run.py": "60eaa2f90e6493ff40181ffd9755540353a80b420a530afcf364ad975ae7db31",
-    "recorder.py": "3690cc9db5fd541ae2cd4fcb28547c5521d7027338b7f7f6c3f6a858f865b267",
+    "run.py": "f368a0a58ad4acc282e08b87a8151eb8d0fb0f8647a3f8fedb6c45d0382ae557",
+    "recorder.py": "4d88a7e5a3ad65b88d501d87dcec59b21c07897083502bed31e8c5a9af233e26",
     "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
   },
   "test_sources": {},
@@ -27,6 +27,7 @@
     "abi": "",
     "package_version": "3.7",
     "native_modules": {
+      "hypothesis._native": "e40780bfbfb364b2fcc2b65e7baba953e4e1eaacb19fdd39578130889f0ec427",
       "markupsafe._speedups": "198503479e11bfc3d5d91f2f7282648986781f845fa3642d3d4953bac6f4ee7f",
       "numpy._core._multiarray_umath": "ffdecbe5382f6499d77fbb3fd034fbf3c0ac5a5516be76044610bb41f9934e04",
       "numpy.linalg._umath_linalg": "8b8bafe494052e3d5bb20138ee3dcbc1328dff386c1f23695c89b16722689e53",
@@ -196,42 +197,42 @@
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/approximation/tests/test_traveling_salesman.py', 956, 'Skipped: need --runslow option to run')"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/approximation/tests/test_traveling_salesman.py', 956, 'Skipped: need --runslow option to run')"
     },
     {
       "id": "networkx/algorithms/connectivity/tests/test_kcomponents.py::test_torrents_and_ferraro_graph",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/connectivity/tests/test_kcomponents.py', 116, 'Skipped: need --runslow option to run')"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/connectivity/tests/test_kcomponents.py', 116, 'Skipped: need --runslow option to run')"
     },
     {
       "id": "networkx/algorithms/connectivity/tests/test_kcomponents.py::test_random_gnp[50-0.2]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/connectivity/tests/test_kcomponents.py', 173, 'Skipped: need --runslow option to run')"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/connectivity/tests/test_kcomponents.py', 173, 'Skipped: need --runslow option to run')"
     },
     {
       "id": "networkx/algorithms/connectivity/tests/test_kcomponents.py::test_shell[constructor1]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/connectivity/tests/test_kcomponents.py', 182, 'Skipped: need --runslow option to run')"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/connectivity/tests/test_kcomponents.py', 182, 'Skipped: need --runslow option to run')"
     },
     {
       "id": "networkx/algorithms/flow/tests/test_gomory_hu.py::TestGomoryHuTree::test_les_miserables_graph_cutset",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/flow/tests/test_gomory_hu.py', 76, 'Skipped: need --runslow option to run')"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/flow/tests/test_gomory_hu.py', 76, 'Skipped: need --runslow option to run')"
     },
     {
       "id": "networkx/algorithms/flow/tests/test_maxflow_large_graph.py::TestMaxflowLargeGraph::test_gw1",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/flow/tests/test_maxflow_large_graph.py', 126, 'Skipped: need --runslow option to run')"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/flow/tests/test_maxflow_large_graph.py', 126, 'Skipped: need --runslow option to run')"
     },
     {
       "id": "networkx/algorithms/isomorphism/tests/test_common.py::test_single_graph[vf2-True-asymm_3triangles_kite-Graph]",
@@ -5425,14 +5426,14 @@
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/tree/tests/test_mst.py', 578, 'Skipped: need --runslow option to run')"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/tree/tests/test_mst.py', 578, 'Skipped: need --runslow option to run')"
     },
     {
       "id": "networkx/algorithms/tree/tests/test_mst.py::test_random_spanning_tree_additive_large",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/tree/tests/test_mst.py', 704, 'Skipped: need --runslow option to run')"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/algorithms/tree/tests/test_mst.py', 704, 'Skipped: need --runslow option to run')"
     },
     {
       "id": "networkx/classes/tests/test_special.py::TestThinGraph::test_cached_views_survive_pickle_and_deepcopy",
@@ -5467,322 +5468,322 @@
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1101, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1101, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_write_read_simple_directed_graphml",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1109, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1109, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_GraphMLWriter_add_graphs",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1121, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1121, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_write_read_simple_no_prettyprint",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1127, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1127, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_write_read_attribute_named_key_ids_graphml",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1140, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1140, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_write_read_attribute_numeric_type_graphml",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1185, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1185, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_more_multigraph_keys",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1211, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1211, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_default_attribute",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1226, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1226, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_mixed_type_attributes",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1241, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1241, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_str_number_mixed_type_attributes",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1256, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1256, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_mixed_int_type_number_attributes",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1271, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1271, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_multigraph_to_graph",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1287, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1287, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_write_generate_edge_id_from_attribute",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1307, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1307, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_multigraph_write_generate_edge_id_from_attribute",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1348, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1348, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_numpy_float64",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1403, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1403, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_numpy_float32",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1417, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1417, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_numpy_float64_inference",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1431, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1431, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_unicode_attributes",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1440, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1440, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestWriteGraphML::test_unicode_escape",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1451, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1451, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_write_interface",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1101, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1101, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_write_read_simple_directed_graphml",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1109, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1109, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_GraphMLWriter_add_graphs",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1121, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1121, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_write_read_simple_no_prettyprint",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1127, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1127, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_write_read_attribute_named_key_ids_graphml",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1140, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1140, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_write_read_attribute_numeric_type_graphml",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1185, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1185, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_more_multigraph_keys",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1211, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1211, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_default_attribute",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1226, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1226, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_mixed_type_attributes",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1241, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1241, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_str_number_mixed_type_attributes",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1256, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1256, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_mixed_int_type_number_attributes",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1271, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1271, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_multigraph_to_graph",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1287, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1287, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_write_generate_edge_id_from_attribute",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1307, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1307, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_multigraph_write_generate_edge_id_from_attribute",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1348, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1348, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_numpy_float64",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1403, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1403, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_numpy_float32",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1417, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1417, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_numpy_float64_inference",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1431, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1431, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_unicode_attributes",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1440, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1440, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::TestXMLGraphML::test_unicode_escape",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1451, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1451, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::test_exception_for_unsupported_datatype_node_attr",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1477, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1477, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::test_exception_for_unsupported_datatype_edge_attr",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1489, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1489, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/readwrite/tests/test_graphml.py::test_exception_for_unsupported_datatype_graph_attr",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1501, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/readwrite/tests/test_graphml.py', 1501, \"Skipped: could not import 'lxml.etree': No module named 'lxml'\")"
     },
     {
       "id": "networkx/tests/test_all_random_functions.py::test_rng_interface",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/tests/test_all_random_functions.py', 223, 'Skipped: need --runslow option to run')"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/tests/test_all_random_functions.py', 223, 'Skipped: need --runslow option to run')"
     },
     {
       "id": "networkx/utils/tests/test_backends.py::test_graph_converter_needs_backend",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/utils/tests/test_backends.py', 40, \"Skipped: condition: not nx.config.backend_priority.algos or nx.config.backend_priority.algos[0] != 'nx_loopback'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/utils/tests/test_backends.py', 40, \"Skipped: condition: not nx.config.backend_priority.algos or nx.config.backend_priority.algos[0] != 'nx_loopback'\")"
     },
     {
       "id": "networkx/utils/tests/test_backends.py::test_networkx_backend",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/utils/tests/test_backends.py', 97, \"Skipped: condition: not nx.config.backend_priority.algos or nx.config.backend_priority.algos[0] != 'nx_loopback'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/utils/tests/test_backends.py', 97, \"Skipped: condition: not nx.config.backend_priority.algos or nx.config.backend_priority.algos[0] != 'nx_loopback'\")"
     },
     {
       "id": "networkx/utils/tests/test_backends.py::test_mixing_backend_graphs",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/utils/tests/test_backends.py', 135, 'Skipped: condition: not nx.utils.backends.backends')"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/utils/tests/test_backends.py', 135, 'Skipped: condition: not nx.utils.backends.backends')"
     },
     {
       "id": "networkx/utils/tests/test_backends.py::test_dispatch_graph_new",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/utils/tests/test_backends.py', 190, \"Skipped: condition: not nx.config.backend_priority.algos or nx.config.backend_priority.algos[0] != 'nx_loopback'\")"
+      "reason": "('<work>/networkx/cpython-3.14.10/source/networkx-3.7/networkx/utils/tests/test_backends.py', 190, \"Skipped: condition: not nx.config.backend_priority.algos or nx.config.backend_priority.algos[0] != 'nx_loopback'\")"
     },
     {
       "id": "networkx/readwrite/graphml.py::networkx.readwrite.graphml.generate_graphml",

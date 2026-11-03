@@ -3,14 +3,16 @@
   "version": "2.1.6",
   "runtime": "cpython-3.14.10t",
   "source_sha256": "499eae5c9051efe96cb9a73ec2fbde8ffa4186f102b9094ebab8fcc9d3b99f52",
-  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
-  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "lock_sha256": "6652f33e0a7d4b5d978b182e5dff8a085d364bea5b49f38a61081745703eefb7",
+  "corpus_sha256": "8467b9c0cc798eaae4423e55914e7cf34709f666bc1d182847f964694752fb5c",
   "harness_sha256": {
-    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
-    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "run.py": "f368a0a58ad4acc282e08b87a8151eb8d0fb0f8647a3f8fedb6c45d0382ae557",
+    "recorder.py": "4d88a7e5a3ad65b88d501d87dcec59b21c07897083502bed31e8c5a9af233e26",
     "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
   },
-  "reason": "completed; explicit upstream GIL-only collection exclusions recorded as SKIP",
+  "test_sources": {},
+  "environment_omit": [],
+  "reason": "completed",
   "returncode": 0,
   "counts": {
     "PASS": 23055,
@@ -28,13 +30,20 @@
       "sqlalchemy.engine._processors_cy": "694a45b64c057726539889ed7cc865d05da63462b642d09bd32a0a7d379a7c08",
       "sqlalchemy.engine._util_cy": "0c1950d8b3bbc5637c24272ceac89d53a02499b89ed23f321d574a41de6586c7",
       "sqlalchemy.engine._row_cy": "77481a6a7477fce283e232de40a0f432863d992862b789af6754b2f1f70f537a",
-      "sqlalchemy.engine._result_cy": "5e998b2e574c00e1341bda91d5a56796f5c1e86f66bb89c9016e4703c95d7a52"
+      "sqlalchemy.engine._result_cy": "5e998b2e574c00e1341bda91d5a56796f5c1e86f66bb89c9016e4703c95d7a52",
+      "hypothesis._native": "adf18f3cda0e47a1053fc2b617c768e8d854b271194be09c7facab2fd458f4fa"
+    },
+    "native_library_versions": {
+      "zlib": "1.3.2",
+      "openssl": "OpenSSL 3.6.5 29 Sep 2026",
+      "sqlite": "3.54.0"
     },
     "gil_enabled": false,
     "free_threaded": true,
     "exitstatus": 0
   },
   "collection_sha256": "3c80b83b48f90ed2ee71c97edbef68c33b8ebf13d775c0fda7504916645530f2",
+  "upstream_ids": {},
   "outcomes": [
     {
       "id": "test/orm/test_attributes.py::AttributesTest::test_object_dereferenced_error",
@@ -55,63 +64,63 @@
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2382, 'Skipped: current base has no metaclass')"
+      "reason": "('<work>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2382, 'Skipped: current base has no metaclass')"
     },
     {
       "id": "test/orm/declarative/test_basic.py::DeclarativeMultiBaseTest_declarative_base_nometa_superclass::test_add_prop_auto[mapped_column]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2382, 'Skipped: current base has no metaclass')"
+      "reason": "('<work>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2382, 'Skipped: current base has no metaclass')"
     },
     {
       "id": "test/orm/declarative/test_basic.py::DeclarativeMultiBaseTest_declarative_base_nometa_superclass::test_alt_name_attr_subclass_column_attrset",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2478, 'Skipped: current base has no metaclass')"
+      "reason": "('<work>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2478, 'Skipped: current base has no metaclass')"
     },
     {
       "id": "test/orm/declarative/test_basic.py::DeclarativeMultiBaseTest_declarative_base_nometa_superclass::test_alt_name_attr_subclass_relationship_attrset",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2491, 'Skipped: current base has no metaclass')"
+      "reason": "('<work>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2491, 'Skipped: current base has no metaclass')"
     },
     {
       "id": "test/orm/declarative/test_basic.py::DeclarativeMultiBaseTest_declarative_base_nometa_superclass::test_column",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2805, 'Skipped: current base has no metaclass')"
+      "reason": "('<work>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2805, 'Skipped: current base has no metaclass')"
     },
     {
       "id": "test/orm/declarative/test_basic.py::DeclarativeMultiBaseTest_declarative_base_nometa_superclass::test_deferred_reflection_default_error",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 1340, 'Skipped: current base has no metaclass')"
+      "reason": "('<work>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 1340, 'Skipped: current base has no metaclass')"
     },
     {
       "id": "test/orm/declarative/test_basic.py::DeclarativeMultiBaseTest_declarative_base_nometa_superclass::test_expression",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2682, 'Skipped: current base has no metaclass')"
+      "reason": "('<work>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 2682, 'Skipped: current base has no metaclass')"
     },
     {
       "id": "test/orm/declarative/test_basic.py::DeclarativeMultiBaseTest_declarative_base_nometa_superclass::test_relationship_reference",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 3135, 'Skipped: current base has no metaclass')"
+      "reason": "('<work>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 3135, 'Skipped: current base has no metaclass')"
     },
     {
       "id": "test/orm/declarative/test_basic.py::DeclarativeMultiBaseTest_declarative_base_nometa_superclass::test_synonym_added",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 3064, 'Skipped: current base has no metaclass')"
+      "reason": "('<work>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/orm/declarative/test_basic.py', 3064, 'Skipped: current base has no metaclass')"
     },
     {
       "id": "test/orm/inheritance/test_basic.py::PassiveDeletesTest::test_a_only",
@@ -3709,7 +3718,7 @@
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/engine/test_reflection.py', 2172, \"Skipped: 'test/engine/test_reflection.py::ReverseCasingReflectTest_sqlite+pysqlite_3_54_0::test_direct_quoting (setup)' : Backend does not require denormalized names.\")"
+      "reason": "('<work>/sqlalchemy/cpython-3.14.10t/source/sqlalchemy-2.1.6/test/engine/test_reflection.py', 2172, \"Skipped: 'test/engine/test_reflection.py::ReverseCasingReflectTest_sqlite+pysqlite_3_54_0::test_direct_quoting (setup)' : Backend does not require denormalized names.\")"
     },
     {
       "id": "test/engine/test_reflection.py::SchemaTest_sqlite+pysqlite_3_54_0::test_blank_schema_arg",
@@ -4591,7 +4600,7 @@
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<env>/lib/python3.14t/site-packages/sqlalchemy/testing/config.py', 436, \"Skipped: 'test/orm/test_unitofworkv2.py::ORMOnlyPrimaryKeyTest::test_b (call)' : no sequence support\")"
+      "reason": "('<env>/lib/python3.14t/site-packages/sqlalchemy/testing/config.py', 436, \"Skipped: 'test/orm/test_unitofworkv2.py::ORMOnlyPrimaryKeyTest::test_b (call)' : doesn't support sequences as a server side default. and doesn't support sequences as a server side default. and doesn't support sequences as a server side default.\")"
     },
     {
       "id": "test/orm/test_unitofworkv2.py::TryToFoolInsertManyValuesTest_sqlite+pysqlite_3_54_0::test_original_use_case[default_string_uuid-identity]",
@@ -4831,17 +4840,5 @@
       "xfail": false,
       "reason": "upstream DocTest.__requires__ includes gil_enabled (test/base/test_tutorials.py:18)"
     }
-  ],
-  "reconciled_collection_skips": {
-    "test/base/test_tutorials.py::DocTest_sqlite+pysqlite_3_54_0::test_20_style": "upstream DocTest.__requires__ includes gil_enabled (test/base/test_tutorials.py:18)",
-    "test/base/test_tutorials.py::DocTest_sqlite+pysqlite_3_54_0::test_asyncio": "upstream DocTest.__requires__ includes gil_enabled (test/base/test_tutorials.py:18)",
-    "test/base/test_tutorials.py::DocTest_sqlite+pysqlite_3_54_0::test_core_operators": "upstream DocTest.__requires__ includes gil_enabled (test/base/test_tutorials.py:18)",
-    "test/base/test_tutorials.py::DocTest_sqlite+pysqlite_3_54_0::test_orm_large_collections": "upstream DocTest.__requires__ includes gil_enabled (test/base/test_tutorials.py:18)",
-    "test/base/test_tutorials.py::DocTest_sqlite+pysqlite_3_54_0::test_orm_queryguide_columns": "upstream DocTest.__requires__ includes gil_enabled (test/base/test_tutorials.py:18)",
-    "test/base/test_tutorials.py::DocTest_sqlite+pysqlite_3_54_0::test_orm_queryguide_dml": "upstream DocTest.__requires__ includes gil_enabled (test/base/test_tutorials.py:18)",
-    "test/base/test_tutorials.py::DocTest_sqlite+pysqlite_3_54_0::test_orm_queryguide_inheritance": "upstream DocTest.__requires__ includes gil_enabled (test/base/test_tutorials.py:18)",
-    "test/base/test_tutorials.py::DocTest_sqlite+pysqlite_3_54_0::test_orm_queryguide_select": "upstream DocTest.__requires__ includes gil_enabled (test/base/test_tutorials.py:18)",
-    "test/base/test_tutorials.py::DocTest_sqlite+pysqlite_3_54_0::test_orm_quickstart": "upstream DocTest.__requires__ includes gil_enabled (test/base/test_tutorials.py:18)"
-  },
-  "reconciliation_harness_sha256": "173fa8abd2d1d319580f231a30b17573ba25308192d853bacb631ac095589464"
+  ]
 }
