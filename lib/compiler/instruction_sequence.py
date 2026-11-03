@@ -11,6 +11,7 @@ from . import opcodes
 # Field order of _Py_SourceLocation (Include/internal/pycore_symtable.h)
 SourceLocation = namedtuple("SourceLocation", "lineno end_lineno col_offset end_col_offset")
 NO_LOCATION = SourceLocation(-1, -1, -1, -1)
+NEXT_LOCATION = SourceLocation(-2, -2, -2, -2)
 NO_LABEL = -1
 MAX_REAL_OPCODE = 254
 MAX_OPCODE = 511
