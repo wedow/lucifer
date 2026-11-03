@@ -1392,6 +1392,12 @@ prim_size(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (PyDict_Check(x)) {
         return PyLong_FromLongLong(((PyDictObject *)x)->ma_used);
     }
+    if (PyUnicode_Check(x)) {
+        return PyLong_FromLongLong(PyUnicode_GET_LENGTH(x));
+    }
+    if (PyBytes_Check(x)) {
+        return PyLong_FromLongLong(PyBytes_GET_SIZE(x));
+    }
     lu_err_format(PyExc_TypeError, "size() of a '%.200s'", Py_TYPE(x)->tp_name);
     return NULL;
 }

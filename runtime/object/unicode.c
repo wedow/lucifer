@@ -2,7 +2,7 @@
    UCS2 and UCS4 strings, the empty and Latin-1 singletons, UTF-8 decoding
    and the cached UTF-8 form, hashing and interning. */
 
-#include "lucifer.h"
+#include "prim/prim.h"
 
 #include <string.h>
 
@@ -11,6 +11,9 @@ str_dealloc(PyObject *op)
 {
     if (!PyUnicode_IS_ASCII(op)) {
         PyObject_Free(((PyCompactUnicodeObject *)op)->utf8);
+    }
+    if (!PyUnicode_IS_COMPACT(op)) {
+        PyObject_Free(((PyUnicodeObject *)op)->data.any);
     }
     lu_object_free(op);
 }
@@ -47,6 +50,7 @@ lu_str_init(void)
     PyUnicode_Type.tp_basicsize = sizeof(PyUnicodeObject);
     PyUnicode_Type.tp_flags |= Py_TPFLAGS_DEFAULT;
     PyUnicode_Type.tp_dealloc = str_dealloc;
+    lu_striter_init();
     struct lu_static_objects *s = &_PyRuntime.singletons;
     init_static((PyObject *)&s->empty_str, 0, 0);
     for (int i = 0; i < 256; i++) {
