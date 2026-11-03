@@ -30,7 +30,7 @@
 /* The grace period of replaced storage: with one carrier running, no reader
    holds the old array across a poll, so it is freed at once. The QSBR
    port (K1q) turns this into a deferred free. */
-static void
+void
 lu_qsbr_retire(void *p)
 {
     PyMem_Free(p);

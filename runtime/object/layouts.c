@@ -560,6 +560,8 @@ lu_layouts_init(void)
     lu_str_init();
     lu_set_init();
     lu_dict_init();
+    lu_dict_views_init();
+    lu_set_iter_init();
     lu_code_init();
     lu_function_init();
     lu_descr_init();

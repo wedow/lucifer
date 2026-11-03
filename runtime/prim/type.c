@@ -1392,6 +1392,9 @@ prim_size(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (PyDict_Check(x)) {
         return PyLong_FromLongLong(((PyDictObject *)x)->ma_used);
     }
+    if (PyAnySet_Check(x)) {
+        return PyLong_FromLongLong(((PySetObject *)x)->used);
+    }
     if (PyUnicode_Check(x)) {
         return PyLong_FromLongLong(PyUnicode_GET_LENGTH(x));
     }

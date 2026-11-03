@@ -151,7 +151,9 @@ lucifer_exec(PyObject *m)
         || add_functions(m, lu_prim_slot_methods) < 0 || add_functions(m, lu_prim_int_methods) < 0
         || add_functions(m, lu_prim_str_methods) < 0
         || add_functions(m, lu_prim_exc_methods) < 0
-        || add_functions(m, lu_prim_storage_methods) < 0) {
+        || add_functions(m, lu_prim_storage_methods) < 0
+        || add_functions(m, lu_prim_dict_methods) < 0
+        || add_functions(m, lu_prim_set_methods) < 0) {
         return -1;
     }
     PyObject *name = PyUnicode_InternFromString("MISSING");

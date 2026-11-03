@@ -327,7 +327,12 @@ struct lu_static_objects {
     PyBytesObject empty_bytes;
     PyTupleObject empty_tuple;
     PyObject missing;                   /* _lucifer.MISSING: "no value", distinct from None */
+    PyObject set_dummy;                 /* the key of a deleted set entry (setobject.c's dummy) */
+    /* Py_EMPTY_KEYS: the keys table of every empty dict, a PyDictKeysObject
+       (runtime/object/dict.h) with its eight index bytes. */
+    _Alignas(8) unsigned char empty_dict_keys[40];
 };
+#define LU_SET_DUMMY (&_PyRuntime.singletons.set_dummy)
 #define LU_MISSING (&_PyRuntime.singletons.missing)
 
 /* Interned names the runtime looks up, made immortal at startup (CPython's
@@ -397,6 +402,8 @@ void lu_object_free(PyObject *op);
 void lu_str_init(void);
 void lu_set_init(void);
 void lu_dict_init(void);
+void lu_dict_views_init(void);          /* dict iterators and views, runtime/prim/dict.c */
+void lu_set_iter_init(void);            /* the set iterator, runtime/prim/set.c */
 void lu_code_init(void);
 void lu_function_init(void);
 void lu_descr_init(void);
@@ -429,6 +436,9 @@ void lu_intern(PyInterpreterState *interp, PyObject **p);
 PyObject *lu_str_from_utf8(const char *s, Py_ssize_t n, int surrogatepass);
 Py_hash_t lu_hash(PyObject *v);
 int lu_eq(PyObject *a, PyObject *b);
+/* Whether two keys of an equal hash are equal when that needs no Python: 1, 0,
+   or -1 when __eq__ must decide (runtime/object/dict.c). */
+int lu_native_eq(PyObject *a, PyObject *b);
 PyObject *lu_set_new(PyTypeObject *type);
 int lu_set_add(PyObject *set, PyObject *key);
 Py_hash_t lu_frozenset_hash(PyObject *set);
@@ -535,6 +545,15 @@ PyObject *lu_slot_tp_call(PyObject *self, PyObject *args, PyObject *kwargs);
 int lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from);
 /* Calls special method `name` of self's type, as vectorcall_method does. */
 PyObject *lu_call_special(PyObject *self, PyObject *name, PyObject *const *args, Py_ssize_t nargs);
+
+/* The one path that tells watchers about a dict change (FOUNDATIONS 2.4):
+   the namespace primitives and the kernel's dict primitives call it before
+   they change `mp`. key and value are borrowed. */
+void lu_dict_notify(PyDictObject *mp, PyDict_WatchEvent event, PyObject *key, PyObject *value);
+
+/* Frees replaced storage (a list's array, a dict's keys table) once no
+   lock-free reader can still hold it (runtime/prim/storage.c). */
+void lu_qsbr_retire(void *p);
 
 /* Appends to a list (borrowed item), growing its storage. */
 int lu_list_append(PyObject *list, PyObject *item);
