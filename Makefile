@@ -1,4 +1,4 @@
-.PHONY: check-harness check-compiler
+.PHONY: check-harness check-compiler regen
 HOST_PYTHON ?= python3
 
 check-harness:
@@ -12,3 +12,8 @@ check-harness:
 
 check-compiler:
 	$(HOST_PYTHON) tools/compilercheck --corpus closure,difftest,kernel,lib --require closure,difftest,kernel
+
+PEGEN = third_party/cpython/Tools/peg_generator
+
+regen:
+	PYTHONPATH=$(PEGEN) $(HOST_PYTHON) -m pegen -q python lib/compiler/python.gram -o lib/compiler/parser.py
