@@ -64,7 +64,10 @@ lu_raw_malloc(void *ctx, size_t size)
 void *
 lu_raw_calloc(void *ctx, size_t nelem, size_t elsize)
 {
-    return calloc(nelem ? nelem : 1, elsize ? elsize : 1);
+    if (nelem == 0 || elsize == 0) {
+        nelem = elsize = 1;
+    }
+    return calloc(nelem, elsize);
 }
 
 void *
