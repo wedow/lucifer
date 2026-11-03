@@ -8,7 +8,8 @@
    An owner's record lives in its carrier's entry (runtime/thread/carrier.c).
    It is registered when the first task of a thread is bound in the
    interpreter, as CPython registers in bind_tstate, and retired when the last
-   is unbound. A thread must be registered before its first refcount
+   is unbound; a scheduler carrier (runtime/thread/sched.c) keeps it until it
+   exits, since tasks come and go while the carrier's objects stay. A thread must be registered before its first refcount
    operation: it may reuse an exited owner's TCB, and with it the thread id of
    objects merged as abandoned under the bucket lock. Queueing an object
    raises the explicit-merge reason in the owner's carrier, which merges at its
@@ -145,8 +146,8 @@ void
 lu_brc_merge(struct lu_entry *entry)
 {
     struct lu_brc_owner *t = &entry->brc;
-    if (entry->nbound == 0) {
-        return;
+    if (t->tid == 0) {
+        return;                 /* not registered: no task bound here yet */
     }
     struct lu_brc_bucket *b = bucket_of(entry->interp, t->tid);
     pthread_mutex_lock(&b->lock.mutex);

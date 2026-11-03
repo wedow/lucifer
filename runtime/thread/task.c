@@ -56,9 +56,12 @@ bind_tstate(struct lu_task *t)
     lu_current_entry();
     struct lu_entry *e = lu_entry_of(lu_carrier, ts->interp);
     __atomic_store_n(&t->carrier, lu_carrier, __ATOMIC_RELEASE);
-    ts->thread_id = (unsigned long)pthread_self();
+    if (ts->thread_id == 0) {
+        ts->thread_id = (unsigned long)pthread_self();      /* the task's ident, for life */
+    }
     ts->native_thread_id = (unsigned long)gettid();
-    if (e->nbound++ == 0) {
+    e->nbound++;
+    if (e->brc.tid == 0) {
         lu_brc_register(e);
     }
     ts->_status.bound = 1;
@@ -106,6 +109,13 @@ install(struct lu_carrier *c, struct lu_task *t)
                                           __ATOMIC_SEQ_CST, __ATOMIC_RELAXED));
     t->ts.eval_breaker = next;
     c->task = t;
+}
+
+void
+lu_task_unsignal(struct lu_task *t, uintptr_t bits)
+{
+    __atomic_fetch_and(&t->pending, ~bits, __ATOMIC_SEQ_CST);
+    lu_poll_clear(t->carrier, bits);
 }
 
 void
@@ -227,7 +237,9 @@ unbind(struct lu_task *t)
     /* The merge may run destructors that use PyGILState_Ensure, so the
        gilstate tstate stays bound through it. */
     struct lu_entry *e = lu_entry_of(c, t->ts.interp);
-    if (--e->nbound == 0) {
+    /* A scheduler carrier outlives its tasks and keeps owning objects, so
+       its record stays registered until the carrier exits. */
+    if (--e->nbound == 0 && !c->scheduled) {
         lu_brc_retire(e);
     }
     if (t->ts._status.bound_gilstate) {
@@ -247,6 +259,7 @@ free_task(struct lu_task *t)
         chunk = previous;
     }
     PyMem_RawFree(ts->datastack_cached_chunk);
+    PyMem_RawFree(t->base_entry);
     PyMem_RawFree(t);
 }
 
@@ -262,6 +275,22 @@ release_slot(struct lu_carrier *c, struct lu_task *t)
 }
 
 void
+lu_task_leave(struct lu_task *t)
+{
+    struct lu_carrier *c = t->carrier;
+    lu_task_detach(t, _Py_THREAD_DETACHED);
+    struct lu_entry *e = lu_entry_of(c, t->ts.interp);
+    e->nbound--;
+    if (t->ts._status.bound_gilstate) {
+        c->gilstate = NULL;
+        t->ts._status.bound_gilstate = 0;
+    }
+    t->ts._status.bound = 0;
+    release_slot(c, t);
+    __atomic_store_n(&t->carrier, NULL, __ATOMIC_RELEASE);
+}
+
+void
 lu_task_delete(struct lu_task *t)
 {
     struct lu_carrier *c = t->carrier;
@@ -270,6 +299,9 @@ lu_task_delete(struct lu_task *t)
     }
     unbind(t);
     unlink_task(t);
+    if (_PyRuntime.main_task == t) {
+        __atomic_store_n(&_PyRuntime.main_task, NULL, __ATOMIC_RELEASE);
+    }
     __atomic_store_n(&t->carrier, NULL, __ATOMIC_RELEASE);
     if (c != NULL) {
         release_slot(c, t);

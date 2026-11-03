@@ -378,12 +378,16 @@ Py_InitializeFromConfig(const PyConfig *src)
         return PyStatus_Error("lucifer: no memory for the main task");
     }
     main_task->_whence = LU_WHENCE_INIT;
+    __atomic_store_n(&_PyRuntime.main_task, (struct lu_task *)main_task, __ATOMIC_RELEASE);
     PyEval_RestoreThread(main_task);
     lu_layouts_init();
     if (boot_native(interp) < 0 || lu_kernel_boot(interp) < 0 || lu_sys_configure(interp) < 0
         || lu_import_init(interp) < 0 || lu_sys_init_streams(interp) < 0) {
         report();
         return PyStatus_Exit(1);
+    }
+    if (_PyRuntime.handoff.on) {
+        lu_sched_start();
     }
     return PyStatus_Ok();
 }
@@ -412,6 +416,7 @@ int
 Py_FinalizeEx(void)
 {
     struct _is *interp = &_PyRuntime.main_interp;
+    lu_sched_stop();
     PyObject *atexit = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("atexit"));
     PyObject *run = atexit != NULL
         ? lu_ns_lookup(PyModule_GetDict(atexit), PyUnicode_InternFromString("_run_exitfuncs")) : NULL;

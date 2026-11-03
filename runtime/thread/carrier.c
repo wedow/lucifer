@@ -15,9 +15,6 @@ retire(void *arg)
        allocate: the heaps stay until the owner records are gone. */
     lu_task_carrier_exit(c);
     lu_qsbr_unregister(c);
-    if (_PyRuntime.main_carrier == c) {
-        __atomic_store_n(&_PyRuntime.main_carrier, NULL, __ATOMIC_RELEASE);
-    }
     for (struct lu_entry *e = c->entries; e != NULL; e = e->next) {
         lu_mimalloc_abandon(e);
     }
@@ -43,6 +40,7 @@ start_runtime(void)
     lu_lock_register(&_PyRuntime.qsbr.lock);
     lu_lock_register(&_PyRuntime.allocators.lock);
     lu_lock_register(&interp->tasks_lock);
+    lu_lock_register(&_PyRuntime.sched.lock);
     for (int i = 0; i < LU_WAIT_BUCKETS; i++) {
         lu_lock_register(&_PyRuntime.waits.buckets[i].lock);
     }
@@ -93,9 +91,6 @@ lu_carrier_bind(void)
     }
     lu_carrier = c;
     c->current = entry_new(c, &_PyRuntime.main_interp);
-    if (pthread_equal(pthread_self(), _PyRuntime.main_thread)) {
-        __atomic_store_n(&_PyRuntime.main_carrier, c, __ATOMIC_RELEASE);
-    }
     lu_qsbr_register(c);
     pthread_setspecific(_PyRuntime.carrier_key, c);
     return c->current;

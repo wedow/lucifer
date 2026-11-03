@@ -80,7 +80,7 @@ static PyObject *
 prim_thread_ident(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(0);
-    return PyLong_FromLongLong((long long)(uintptr_t)pthread_self());
+    return PyLong_FromLongLong((long long)PyThreadState_Get()->thread_id);
 }
 
 static PyObject *

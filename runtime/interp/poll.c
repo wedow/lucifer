@@ -12,14 +12,6 @@
 
 #define TASK(ts) ((struct lu_task *)(ts))
 
-/* A reason aimed at the polling task: cleared from the task and the word. */
-static void
-unset_targeted(struct lu_task *t, uintptr_t bits)
-{
-    __atomic_fetch_and(&t->pending, ~bits, __ATOMIC_SEQ_CST);
-    lu_poll_clear(t->carrier, bits);
-}
-
 /* Reasons with no producer yet: the GIL is never requested, there is no JIT
    or scheduler policy to preempt for, and the remote debugger arrives later. */
 /* Whether the task is running a kernel builtin's frame. */
@@ -75,11 +67,11 @@ lu_poll_slow(PyThreadState *ts)
         lu_poll_clear(c, LU_POLL_STRESS_TICK);
     }
     if (breaker & LU_POLL_NO_PRODUCER) {
-        unset_targeted(t, breaker & LU_POLL_NO_PRODUCER);
+        lu_task_unsignal(t, breaker & LU_POLL_NO_PRODUCER);
     }
     /* An asynchronous exception, set by PyThreadState_SetAsyncExc. */
     if (breaker & LU_POLL_ASYNC_EXCEPTION) {
-        unset_targeted(t, LU_POLL_ASYNC_EXCEPTION);
+        lu_task_unsignal(t, LU_POLL_ASYNC_EXCEPTION);
         PyObject *exc = __atomic_exchange_n(&ts->async_exc, NULL, __ATOMIC_SEQ_CST);
         if (exc != NULL) {
             PyErr_SetNone(exc);
@@ -146,18 +138,16 @@ _PyEval_AddPendingCall(PyInterpreterState *interp, int (*func)(void *), void *ar
     PyMutex_Unlock(&p->mutex);
 
     if (call->main_only) {
-        struct lu_carrier *main = __atomic_load_n(&_PyRuntime.main_carrier, __ATOMIC_ACQUIRE);
-        if (main != NULL) {
-            lu_poll_set(main, LU_POLL_CALLS_TO_DO);
+        pthread_mutex_lock(&interp->tasks_lock.mutex);
+        if (_PyRuntime.main_task != NULL) {
+            lu_task_signal(_PyRuntime.main_task, LU_POLL_CALLS_TO_DO);
         }
+        pthread_mutex_unlock(&interp->tasks_lock.mutex);
     }
     else {
         pthread_mutex_lock(&interp->tasks_lock.mutex);
         for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
-            struct lu_carrier *c = TASK(ts)->carrier;
-            if (c != NULL) {
-                lu_poll_set(c, LU_POLL_CALLS_TO_DO);
-            }
+            lu_task_signal(TASK(ts), LU_POLL_CALLS_TO_DO);
         }
         pthread_mutex_unlock(&interp->tasks_lock.mutex);
     }
@@ -213,7 +203,7 @@ lu_pending_calls_handle(PyThreadState *ts)
 {
     struct lu_task *t = TASK(ts);
     struct lu_pending *p = &ts->interp->pending;
-    lu_poll_clear(t->carrier, LU_POLL_CALLS_TO_DO);
+    lu_task_unsignal(t, LU_POLL_CALLS_TO_DO);
     if (t->in_pending_calls) {
         return 0;
     }
@@ -234,7 +224,7 @@ lu_pending_calls_handle(PyThreadState *ts)
     }
     t->in_pending_calls = 0;
     if (res != 0 || count_calls(p, main_thread) > 0) {
-        lu_poll_set(t->carrier, LU_POLL_CALLS_TO_DO);
+        lu_task_signal(t, LU_POLL_CALLS_TO_DO);
     }
     return res;
 }

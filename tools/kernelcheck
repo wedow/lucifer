@@ -8,9 +8,10 @@ free-threaded oracle and once on bin/lucifer. stdout, stderr and the exit
 status must be identical. Exit status 1 when any program differs.
 
 Programs in RUNS run once per (flags, environment); an environment replaces
--I -S and the inherited environment. SEEDED programs are also run unseeded, twice: the runs must differ
-after the first line, which must equal the oracle's. FLAG_ROWS are bin/lucifer
-command lines whose exit status and stderr are checked directly.
+-I -S and the inherited environment. A lane's flags go to the oracle too.
+SEEDED programs are also run unseeded, twice: the runs must differ after the
+first line, which must equal the oracle's. FLAG_ROWS are bin/lucifer command
+lines whose exit status and stderr are checked directly.
 """
 import argparse
 import difflib
@@ -28,9 +29,14 @@ BUILD = ROOT / "build" / "tests" / "kernel"
 STACK = 512 * 1024
 TIMEOUT = 120
 MAGIC = (3627).to_bytes(2, "little") + b"\r\n"
-# Lanes are the -X policies a program runs under; only the plain lane exists
-# until the handoff scheduler does.
-LANES = {"plain": []}
+# Lanes are the -X policies a program runs under, on the oracle as well:
+# CPython only records an unknown -X option in sys._xoptions. "handoff:N" is
+# the handoff scheduler with seed N.
+LANES = {"plain": [], "handoff": ["-X", "lucifer_handoff"]}
+LANES.update({f"handoff:{n}": ["-X", f"lucifer_handoff={n}"] for n in range(1, 9)})
+# name -> stdout under the handoff lanes, where two carriers run the program:
+# the one place lucifer is meant to differ from the oracle.
+HANDOFF_STDOUT = {"handoff_witness": b"2\n"}
 # name -> [(flags, env)]: env None is -I -S with the inherited environment.
 RUNS = {
     "hash_seed": [([], {"PYTHONHASHSEED": "12345"}), ([], {"PYTHONHASHSEED": "0"})],
@@ -125,7 +131,9 @@ def main():
         for flags, env in RUNS.get(name, [([], None)]):
             label = name if not flags and env is None else f"{name} {flags} {env or ''}".rstrip()
             total += 1
-            oracle = run(args.oracle, flags, pyc, env)
+            oracle = run(args.oracle, LANES[args.lane] + flags, pyc, env)
+            if args.lane.startswith("handoff") and name in HANDOFF_STDOUT:
+                oracle = (oracle[0], HANDOFF_STDOUT[name], oracle[2])
             ours = run(lucifer, LANES[args.lane] + flags, pyc, env)
             if oracle == ours:
                 print(f"PASS {label}")
@@ -135,7 +143,7 @@ def main():
         if name in SEEDED:
             label = f"{name} unseeded"
             total += 1
-            oracle = run(args.oracle, [], pyc, {})
+            oracle = run(args.oracle, LANES[args.lane], pyc, {})
             first, second = (run(lucifer, LANES[args.lane], pyc, {}) for _ in range(2))
             head = lambda r: r[1].split(b"\n")[0]
             if first[0] == 0 and head(first) == head(oracle) and first[1] != second[1]:
