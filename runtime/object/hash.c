@@ -105,6 +105,13 @@ siphash13(uint64_t k0, uint64_t k1, const void *src, Py_ssize_t src_sz)
     return (v0 ^ v1) ^ (v2 ^ v3);
 }
 
+/* _Py_KeyedHash: siphash13 under a caller's 64-bit key (hash-based pycs). */
+uint64_t
+lu_keyed_hash(uint64_t key, const void *src, Py_ssize_t size)
+{
+    return siphash13(key, 0, src, size);
+}
+
 Py_hash_t
 Py_HashBuffer(const void *ptr, Py_ssize_t len)
 {

@@ -751,6 +751,7 @@ PyObject *lu_long_from_double(double d);
 PyObject *lu_long_binary(int op, PyObject *a, PyObject *b);
 Py_hash_t lu_xxhash_items(PyObject *const *items, Py_ssize_t n, int mangle_length);
 Py_hash_t lu_str_hash(PyObject *s);
+uint64_t lu_keyed_hash(uint64_t key, const void *src, Py_ssize_t size);
 int lu_str_eq(PyObject *a, PyObject *b);
 void lu_intern(PyInterpreterState *interp, PyObject **p);
 PyObject *lu_str_from_utf8(const char *s, Py_ssize_t n, int surrogatepass);
