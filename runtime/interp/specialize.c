@@ -14,7 +14,14 @@
    - An instance attribute is found by entry number in the instance's dict,
      and the key at that entry is compared on every execution.
    - Nothing is cached while the kernel boots: it fills static types' dicts
-     without telling anyone. */
+     without telling anyone.
+   - A cached descriptor is a borrowed pointer, kept alive only by the type
+     dict that holds it. That is safe while one task runs at a time, as under
+     -X lucifer_handoff, where each hand-over is an acquire and release of the
+     run-queue lock: no carrier is between a guard and its use while another
+     changes the type. Tasks running at once need what cp314t's specializer
+     requires, a cached object whose refcount is deferred (freed only by a
+     stopped-world collection), or reclamation through QSBR. */
 
 #include "interp/specialize.h"
 #include "interp/code.h"

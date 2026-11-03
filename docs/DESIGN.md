@@ -536,6 +536,19 @@ and io_uring is a §10 experiment after M1.8.
   safepoint with `pin == 0` then parks the task and unparks it on the other
   carrier, through the same `lu_park`, run-queue and bind code that M1.8
   migration uses.
+  - The main task's outermost eval-loop activation is the only one that can
+    park. Its C-entry marker lives in the task, so it outlives the C stack
+    when the task resumes on the other carrier. The C code that called the
+    activation (the main thread's `Py_RunMain`) waits in the carrier loop of
+    its **home** carrier. When the outermost frame returns, on either
+    carrier, the task is queued home and rebound there, and the loop returns
+    the result to its C caller. Nested activations, signal handlers, `atexit`
+    callbacks and any C call stay pinned, and so on one carrier.
+  - A scheduler carrier keeps its biased-refcount owner record until it
+    exits, because tasks come and go while its objects stay.
+  - Signal and pending-call reasons are aimed at the main task, not at a
+    carrier. A signal also wakes the carrier the task is bound to, in case
+    the task sleeps in a park.
   - Every `tests/kernel` program under the flag matches the oracle.
   - `tests/kernel/handoff_witness.py` prints how many distinct
     `_thread.get_native_id()` values it saw over 1,000 loop iterations. It
