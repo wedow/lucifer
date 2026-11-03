@@ -24,8 +24,7 @@ enum { LOCK_DETACH = 1, MS = 1000000 };
 #define _Py_HAS_PARKED 2
 #endif
 
-/* Few rounds: with a busy loop sharing the CPU every handoff costs a time slice. */
-enum { THREADS = 8, ROUNDS = 32 };
+enum { THREADS = 8, ROUNDS = 4000 };
 
 static int failures;
 
