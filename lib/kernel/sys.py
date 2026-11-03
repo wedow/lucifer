@@ -465,6 +465,16 @@ for _name in ('excepthook', 'displayhook', 'breakpointhook', 'unraisablehook'):
 ns_set(_dict, 'stdlib_module_names', stdlib_module_names)
 
 
+def _no():
+    return False
+
+
+_jit = type('_jit', (), {})()
+for _name in ('is_available', 'is_enabled', 'is_active'):
+    ns_set(instance_dict(_jit, True), _name, _no)
+ns_set(_dict, '_jit', _jit)
+
+
 # What the PyConfig decides
 
 _config = None
