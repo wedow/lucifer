@@ -6,6 +6,11 @@ compiled by the host into build/tests/kernel/NAME.pyc, then run as
 `INTERPRETER -I -S NAME.pyc` under a 512 KiB RLIMIT_STACK, once on the
 free-threaded oracle and once on bin/lucifer. stdout, stderr and the exit
 status must be identical. Exit status 1 when any program differs.
+
+Programs that read the environment run without -I, once per environment of
+ENV_RUNS. SEEDED programs are also run unseeded, twice: the runs must differ
+after the first line, which must equal the oracle's. FLAG_ROWS are bin/lucifer
+command lines whose exit status and stderr are checked directly.
 """
 import argparse
 import difflib
@@ -26,20 +31,44 @@ MAGIC = (3627).to_bytes(2, "little") + b"\r\n"
 # Lanes are the -X policies a program runs under; only the plain lane exists
 # until the handoff scheduler does.
 LANES = {"plain": []}
+ENV_RUNS = {"hash_seed": [{"PYTHONHASHSEED": "12345"}, {"PYTHONHASHSEED": "0"}]}
+SEEDED = ("hash_seed",)
+# (name, flags, exit status, text stderr must contain)
+FLAG_ROWS = [
+    ("stress kind", ["-X", "lucifer_stress=bogus", "-I", "-S"], 2, "lucifer_stress"),
+    ("stress count", ["-X", "lucifer_stress=gc:x", "-I", "-S"], 2, "lucifer_stress"),
+    ("stress ok", ["-X", "lucifer_stress=gc:5,deopt,seed:7", "-I", "-S", "hello.pyc"], 0, ""),
+    ("handoff seed", ["-X", "lucifer_handoff=x", "-I", "-S"], 2, "lucifer_handoff"),
+    ("int digits", ["-X", "int_max_str_digits=100", "-I", "-S"], 1, "int_max_str_digits"),
+    ("no file", ["-I", "-S", "missing.pyc"], 2, "missing.pyc"),
+]
 
 
 def limit_stack():
     resource.setrlimit(resource.RLIMIT_STACK, (STACK, STACK))
 
 
-def run(interpreter, flags, pyc):
+def run(interpreter, flags, pyc, env=None):
+    """env None: -I -S with the inherited environment; else -S with exactly env."""
+    isolation = ["-I", "-S"] if env is None else ["-S"]
     try:
-        child = subprocess.run([interpreter, *flags, "-I", "-S", str(pyc)],
-                               capture_output=True, timeout=TIMEOUT,
+        child = subprocess.run([interpreter, *flags, *isolation, str(pyc)],
+                               capture_output=True, timeout=TIMEOUT, env=env,
                                preexec_fn=limit_stack, cwd=BUILD)
     except subprocess.TimeoutExpired:
         return ("timeout", b"", b"")
     return (child.returncode, child.stdout, child.stderr)
+
+
+def compile_program(name):
+    source = SOURCES / f"{name}.py"
+    if not source.is_file():
+        sys.exit(f"kernelcheck: no program {source}")
+    pyc = BUILD / f"{name}.pyc"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SyntaxWarning)    # the programs are odd on purpose
+        py_compile.compile(str(source), str(pyc), dfile=f"{name}.py", doraise=True)
+    return pyc
 
 
 def describe(name, oracle, ours):
@@ -76,21 +105,40 @@ def main():
 
     failed = 0
     for name in names:
-        source = SOURCES / f"{name}.py"
-        if not source.is_file():
-            sys.exit(f"kernelcheck: no program {source}")
-        pyc = BUILD / f"{name}.pyc"
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", SyntaxWarning)    # the programs are odd on purpose
-            py_compile.compile(str(source), str(pyc), dfile=f"{name}.py", doraise=True)
-        oracle = run(args.oracle, [], pyc)
-        ours = run(lucifer, LANES[args.lane], pyc)
-        if oracle == ours:
-            print(f"PASS {name}")
+        pyc = compile_program(name)
+        for env in ENV_RUNS.get(name, [None]):
+            label = name if env is None else f"{name} {env}"
+            total += 1
+            oracle = run(args.oracle, [], pyc, env)
+            ours = run(lucifer, LANES[args.lane], pyc, env)
+            if oracle == ours:
+                print(f"PASS {label}")
+            else:
+                failed += 1
+                print(describe(label, oracle, ours))
+        if name in SEEDED:
+            label = f"{name} unseeded"
+            total += 1
+            oracle = run(args.oracle, [], pyc, {})
+            first, second = (run(lucifer, LANES[args.lane], pyc, {}) for _ in range(2))
+            head = lambda r: r[1].split(b"\n")[0]
+            if first[0] == 0 and head(first) == head(oracle) and first[1] != second[1]:
+                print(f"PASS {label}")
+            else:
+                failed += 1
+                print(f"FAIL {label}: exit {first[0]}, flag line {head(first)!r} vs {head(oracle)!r}, "
+                      f"runs {'differ' if first[1] != second[1] else 'are identical'}")
+    total = 0
+    compile_program("hello")
+    for label, flags, status, text in FLAG_ROWS:
+        child = subprocess.run([lucifer, *flags], capture_output=True, timeout=TIMEOUT, cwd=BUILD)
+        if child.returncode == status and text.encode() in child.stderr:
+            print(f"PASS flags: {label}")
         else:
             failed += 1
-            print(describe(name, oracle, ours))
-    print(f"{len(names) - failed}/{len(names)} programs match the oracle ({args.lane})")
+            print(f"FAIL flags: {label}: exit {child.returncode}, stderr {child.stderr!r}")
+        total += 1
+    print(f"{total - failed}/{total} checks pass ({args.lane})")
     return 1 if failed else 0
 
 
