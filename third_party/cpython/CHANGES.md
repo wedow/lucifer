@@ -60,3 +60,49 @@ C under `runtime/` adapted from this tag's sources, under the PSF License
   512-byte buffer and long lists of names are truncated; `*` operands are
   tuples and lists and `**` operands exact dicts until iteration and the
   mapping protocol exist.
+- `runtime/prim/type.c` from `Objects/typeobject.c` (`_PyType_Lookup`,
+  `PyType_IsSubtype`, the static builtin type index in `tp_subclasses`,
+  `best_base`, `solid_base`, `inherit_slots`, `type_new_slots`,
+  `type_new_copy_slots`, `type_new_alloc`, `type_new_set_attrs`,
+  `type_new_descriptors`, `compatible_for_assignment`,
+  `object_set_class`, `subtype_dealloc`, `subtype_dict`, the `__new__`
+  safety check of `tp_new_wrapper`) and `Python/structmember.c`
+  (`PyMember_GetOne`, `PyMember_SetOne`): types are made ready from a
+  static table instead of `PyType_Ready`; the MRO, slot dispatch and the
+  attribute semantics are kernel Python; subclass lists are lists of strong
+  references until weakrefs exist; instance attributes live in the managed
+  dict only (no inline values); `__slots__` are sorted by code point and
+  identifiers are checked for ASCII only; members support the object and
+  integer kinds.
+- `runtime/object/descr.c` from `Objects/descrobject.c` (descriptor and
+  `method-wrapper` layouts, members and getsets, `descr_check`'s and
+  `method_check_args`'s messages), `Objects/classobject.c` (`PyMethod_New`,
+  `method_vectorcall`) and `Objects/funcobject.c` (the classmethod and
+  staticmethod layouts): `__get__` and `__set__` are kernel Python; kernel
+  functions are descriptors and builtins over an `lu_kernel_def`.
+- `runtime/types/slots.c` from `Objects/typeobject.c` (`slot_tp_*`,
+  `slot_mp_*`, `slot_sq_contains`, `slot_nb_bool`, `vectorcall_method`, the
+  slot names of `slotdefs`): numeric and sequence slots other than
+  `nb_bool`, `sq_length` and `sq_contains` have no thunk yet.
+- `runtime/capi/object.c` from `Objects/call.c` (`_PyObject_MakeTpCall`,
+  `PyObject_Call`, `PyObject_CallFunctionObjArgs` up to 16 arguments) and
+  `Objects/object.c`/`abstract.c` (`PyObject_GetAttr`, `PyObject_SetAttr`,
+  `PyObject_GetItem` over the mapping slot only).
+- `lib/kernel/_boot.py`, `object.py`, `type.py`, `descriptors.py` and the
+  `isinstance`/`issubclass` of `builtins.py` port to Python the C of
+  `Python/bltinmodule.c` (`builtin___build_class__`, `update_bases`),
+  `Objects/typeobject.c` (`slotdefs` and `fixup_slot_dispatchers`,
+  `mro_implementation` and its C3 merge, `_PyType_CalculateMetaclass`,
+  `type_call`, `type_new`, `type_init`, `type_getattro`, `type_setattro`,
+  the type getsets, `object_new`, `object_init`, `object_repr`,
+  `object_richcompare`, `object_set_class`, `slot_tp_getattr_hook`,
+  `supercheck`, `do_super_lookup`, `super_init`, `super_getattro`),
+  `Objects/object.c` (`_PyObject_GenericGetAttrWithDict`,
+  `_PyObject_GenericSetAttrWithDict`, `PyObject_IsInstance`,
+  `PyObject_IsSubclass`), `Objects/descrobject.c` (the descriptors'
+  `__get__`/`__set__`, `property`, `mappingproxy`) and
+  `Objects/funcobject.c` (`func_descr_get`, `classmethod`,
+  `staticmethod`): messages are built with `str_join` and raised through
+  `_lucifer.error` until f-strings and `raise` work in the kernel; a
+  user `__getattribute__` that raises `AttributeError` reaches
+  `__getattr__` once exception tables exist (K1k).

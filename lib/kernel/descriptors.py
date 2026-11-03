@@ -1,0 +1,388 @@
+"""Descriptors and method binding (Objects/descrobject.c, funcobject.c,
+classobject.c, typeobject.c's super): __get__, __set__ and __delete__ of
+the descriptor types, function and method binding, property, classmethod,
+staticmethod, super and mappingproxy. Their layouts are native
+(runtime/object/descr.c); fields are reached by index."""
+
+from _lucifer import (
+    MISSING, error, str_join, kind, type_lookup, type_dict, type_mro, type_tp_name,
+    type_qualname, is_subtype, ns_get, size, alloc, static_type, descr_type, bind,
+    method_new, member_get, member_set, getset_kernel, getset_get, getset_set,
+    field_get, field_set, proxy_new, super_args, kernel_set, kernel_get, address,
+)
+from _lucifer import _boot
+
+kernel_type = _boot.kernel_type
+getset = _boot.getset
+call_special = _boot.call_special
+
+generic_getattr = kernel_get('generic_getattr')
+getattr_hook = kernel_get('getattr')
+
+__all__ = ()
+
+# Field indexes of the native layouts.
+_FGET, _FSET, _FDEL, _DOC, _NAME = 0, 1, 2, 3, 4
+_CALLABLE = 0
+_THISCLASS, _SELF, _SELF_CLASS = 0, 1, 2
+_MAPPING = 0
+
+
+def _quote(s):
+    return str_join('', ("'", s, "'"))
+
+
+def _descr_check(descr, obj):
+    """descr_check: obj must be an instance of the descriptor's class."""
+    owner = descr_type(descr)
+    if not is_subtype(type(obj), owner):
+        error(TypeError, str_join('', (
+            "descriptor '", descr.__name__, "' for '", type_tp_name(owner),
+            "' objects doesn't apply to a '", type_tp_name(type(obj)), "' object")))
+
+
+@kernel_type(static_type('function'))
+class function:
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        return method_new(self, instance)
+
+    def __repr__(self):
+        return str_join('', ('<function ', self.__qualname__, ' at ', address(self), '>'))
+
+
+@kernel_type(static_type('method'))
+class method:
+    def __getattribute__(self, name):
+        """method_getattro: the method type's attributes, then the function's."""
+        tp = type(self)
+        descr = type_lookup(tp, name)
+        if descr is not MISSING:
+            get = type_lookup(type(descr), '__get__')
+            if get is not MISSING:
+                return get(descr, self, tp)
+            return descr
+        return getattr_hook(member_get(_method_func, self), name)
+
+    def __get__(self, instance, owner=None):
+        return self
+
+
+_method_func = ns_get(type_dict(method), '__func__', MISSING)
+
+
+@kernel_type(static_type('method_descriptor'))
+class method_descriptor:
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        _descr_check(self, instance)
+        return bind(self, instance)
+
+
+@kernel_type(static_type('classmethod_descriptor'))
+class classmethod_descriptor:
+    def __get__(self, instance, owner=None):
+        if owner is None:
+            owner = type(instance)
+        cls = descr_type(self)
+        if not kind(owner, 'type') or not is_subtype(owner, cls):
+            error(TypeError, str_join('', (
+                "descriptor '", self.__name__, "' for type '", type_tp_name(cls),
+                "' doesn't apply to type '", type_tp_name(owner if kind(owner, 'type') else type(owner)),
+                "'")))
+        return bind(self, owner)
+
+
+@kernel_type(static_type('wrapper_descriptor'))
+class wrapper_descriptor:
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        _descr_check(self, instance)
+        return bind(self, instance)
+
+
+@kernel_type(static_type('member_descriptor'))
+class member_descriptor:
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        _descr_check(self, instance)
+        return member_get(self, instance)
+
+    def __set__(self, instance, value):
+        _descr_check(self, instance)
+        member_set(self, instance, value)
+
+    def __delete__(self, instance):
+        _descr_check(self, instance)
+        member_set(self, instance, MISSING)
+
+
+@kernel_type(static_type('getset_descriptor'))
+class getset_descriptor:
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        _descr_check(self, instance)
+        functions = getset_kernel(self)
+        if functions is MISSING:
+            return getset_get(self, instance)
+        fget, fset = functions
+        return fget(instance)
+
+    def __set__(self, instance, value):
+        _descr_check(self, instance)
+        _getset_store(self, instance, value)
+
+    def __delete__(self, instance):
+        _descr_check(self, instance)
+        _getset_store(self, instance, MISSING)
+
+
+def _getset_store(descr, instance, value):
+    functions = getset_kernel(descr)
+    if functions is MISSING:
+        getset_set(descr, instance, value)
+        return
+    fget, fset = functions
+    if fset is None:
+        error(AttributeError, str_join('', (
+            "attribute '", descr.__name__, "' of '", type_tp_name(descr_type(descr)),
+            "' objects is not writable")))
+    fset(instance, value)
+
+
+def _property_error(prop, obj, what):
+    name = field_get(prop, _NAME)
+    if name is None:
+        fget = field_get(prop, _FGET)
+        name = fget.__name__ if fget is not None else None
+    owner = _quote(type_qualname(type(obj)))
+    if name is None:
+        error(AttributeError, str_join('', ('property of ', owner, ' object has no ', what)))
+    error(AttributeError, str_join('', (
+        'property ', _quote(name), ' of ', owner, ' object has no ', what)))
+
+
+def _property_get_name(self):
+    name = field_get(self, _NAME)
+    if name is not None:
+        return name
+    fget = field_get(self, _FGET)
+    if fget is None:
+        error(AttributeError, "'property' object has no attribute '__name__'")
+    return fget.__name__
+
+
+def _property_set_name(self, value):
+    field_set(self, _NAME, None if value is MISSING else value)
+
+
+@kernel_type(property)
+class property:
+    """Property attribute."""
+
+    def __new__(cls, *args, **kwargs):
+        return alloc(cls, property)
+
+    def __init__(self, fget=None, fset=None, fdel=None, doc=None):
+        if doc is None and fget is not None:
+            doc = fget.__doc__
+        field_set(self, _FGET, fget)
+        field_set(self, _FSET, fset)
+        field_set(self, _FDEL, fdel)
+        field_set(self, _DOC, doc)
+
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        fget = field_get(self, _FGET)
+        if fget is None:
+            _property_error(self, instance, 'getter')
+        return fget(instance)
+
+    def __set__(self, instance, value):
+        fset = field_get(self, _FSET)
+        if fset is None:
+            _property_error(self, instance, 'setter')
+        fset(instance, value)
+
+    def __delete__(self, instance):
+        fdel = field_get(self, _FDEL)
+        if fdel is None:
+            _property_error(self, instance, 'deleter')
+        fdel(instance)
+
+    def __set_name__(self, owner, name):
+        field_set(self, _NAME, name)
+
+    def getter(self, fget):
+        """Descriptor to obtain a copy of the property with a different getter."""
+        return _property_copy(self, fget, MISSING, MISSING)
+
+    def setter(self, fset):
+        """Descriptor to obtain a copy of the property with a different setter."""
+        return _property_copy(self, MISSING, fset, MISSING)
+
+    def deleter(self, fdel):
+        """Descriptor to obtain a copy of the property with a different deleter."""
+        return _property_copy(self, MISSING, MISSING, fdel)
+
+    __name__ = getset(_property_get_name, _property_set_name)
+
+
+def _property_copy(old, fget, fset, fdel):
+    """property_copy: a doc taken from the old getter is taken anew."""
+    old_fget = field_get(old, _FGET)
+    doc = field_get(old, _DOC)
+    if old_fget is not None and doc is old_fget.__doc__:
+        doc = None
+    new = type(old)(old_fget if fget is MISSING else fget,
+                    field_get(old, _FSET) if fset is MISSING else fset,
+                    field_get(old, _FDEL) if fdel is MISSING else fdel, doc)
+    field_set(new, _NAME, field_get(old, _NAME))
+    return new
+
+
+@kernel_type(classmethod)
+class classmethod:
+    """Convert a function to be a class method."""
+
+    def __new__(cls, *args, **kwargs):
+        return alloc(cls, classmethod)
+
+    def __init__(self, f):
+        field_set(self, _CALLABLE, f)
+
+    def __get__(self, instance, owner=None):
+        if owner is None:
+            owner = type(instance)
+        return method_new(field_get(self, _CALLABLE), owner)
+
+
+@kernel_type(staticmethod)
+class staticmethod:
+    """Convert a function to be a static method."""
+
+    def __new__(cls, *args, **kwargs):
+        return alloc(cls, staticmethod)
+
+    def __init__(self, f):
+        field_set(self, _CALLABLE, f)
+
+    def __get__(self, instance, owner=None):
+        return field_get(self, _CALLABLE)
+
+    def __call__(self, *args, **kwargs):
+        return field_get(self, _CALLABLE)(*args, **kwargs)
+
+
+def _supercheck(cls, obj):
+    """supercheck: the type the MRO is searched from."""
+    if kind(obj, 'type') and is_subtype(obj, cls):
+        return obj
+    if is_subtype(type(obj), cls):
+        return type(obj)
+    c = generic_getattr(obj, '__class__', True)
+    if kind(c, 'type') and c is not type(obj) and is_subtype(c, cls):
+        return c
+    error(TypeError, str_join('', (
+        'super(type, obj): obj (instance of ', type_tp_name(type(obj)),
+        ') is not an instance or subtype of type (', type_tp_name(cls), ').')))
+
+
+def _super_lookup(cls, obj, starttype, name):
+    """do_super_lookup: name in the MRO of starttype after cls, bound."""
+    mro = type_mro(starttype)
+    if mro is None:
+        return MISSING
+    after = False
+    for t in mro:
+        if after:
+            res = ns_get(type_dict(t), name, MISSING)
+            if res is not MISSING:
+                get = type_lookup(type(res), '__get__')
+                if get is not MISSING:
+                    res = get(res, None if obj is starttype else obj, starttype)
+                return res
+        elif t is cls:
+            after = True
+    return MISSING
+
+
+def super_getattr(cls, obj, name):
+    """_PySuper_Lookup, for super().name in a method (LOAD_SUPER_ATTR)."""
+    res = _super_lookup(cls, obj, _supercheck(cls, obj), name)
+    if res is not MISSING:
+        return res
+    return generic_getattr(super(cls, obj), name)
+
+
+@kernel_type(super)
+class super:
+    """super() -> same as super(__class__, <first argument>)
+super(type) -> unbound super object
+super(type, obj) -> bound super object; requires isinstance(obj, type)
+super(type, type2) -> bound super object; requires issubclass(type2, type)"""
+
+    def __new__(cls, *args, **kwargs):
+        return alloc(cls, super)
+
+    def __init__(self, cls=MISSING, obj=MISSING, /):
+        if cls is MISSING:
+            cls, obj = super_args()
+        elif obj is MISSING:
+            obj = None
+        if not kind(cls, 'type'):
+            error(TypeError, str_join('', (
+                'super() argument 1 must be a type, not ', type_tp_name(type(cls)))))
+        field_set(self, _THISCLASS, cls)
+        field_set(self, _SELF, obj)
+        field_set(self, _SELF_CLASS, None if obj is None else _supercheck(cls, obj))
+
+    def __getattribute__(self, name):
+        starttype = field_get(self, _SELF_CLASS)
+        if starttype is not None and name != '__class__':
+            res = _super_lookup(field_get(self, _THISCLASS), field_get(self, _SELF), starttype, name)
+            if res is not MISSING:
+                return res
+        return generic_getattr(self, name)
+
+    def __get__(self, instance, owner=None):
+        if instance is None or field_get(self, _SELF) is not None:
+            return self
+        return type(self)(field_get(self, _THISCLASS), instance)
+
+    def __repr__(self):
+        cls = field_get(self, _THISCLASS)
+        name = type_tp_name(cls) if cls is not None else 'NULL'
+        start = field_get(self, _SELF_CLASS)
+        if start is None:
+            return str_join('', ('<super: <class ', _quote(name), '>, NULL>'))
+        return str_join('', ('<super: <class ', _quote(name), '>, <', type_tp_name(start),
+                             ' object>>'))
+
+
+@kernel_type(static_type('mappingproxy'))
+class mappingproxy:
+    def __getitem__(self, key):
+        value = ns_get(field_get(self, _MAPPING), key, MISSING)
+        if value is MISSING:
+            error(KeyError, key)
+        return value
+
+    def get(self, key, default=None):
+        """Return the value for key if key is in the mapping, else default."""
+        return ns_get(field_get(self, _MAPPING), key, default)
+
+    def __contains__(self, key):
+        return ns_get(field_get(self, _MAPPING), key, MISSING) is not MISSING
+
+    def __len__(self):
+        return size(field_get(self, _MAPPING))
+
+
+kernel_set('super_getattr', super_getattr)
