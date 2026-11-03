@@ -96,3 +96,17 @@ lu_sys_native_methods	runtime/interp/sysmodule.c	sys's native functions, a PyMet
 module_members	runtime/prim/module.c	the module type's __dict__ member, a table never written; the type takes it non-const
 lu_prim_gc_methods	runtime/interp/gc.c	_lucifer's collector primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_signal_methods	runtime/interp/signals.c	_lucifer's signal primitives, a PyMethodDef table never written; the API takes it non-const
+decomp_prefix	runtime/prim/unicodedata_db.h	unicodedata's decomposition prefix names, a table of string pointers never written
+derived_name_prefixes	runtime/prim/unicodename_db.h	unicodedata's derived-name prefixes, a table of string pointers never written
+hangul_syllables	runtime/prim/ucd.c	unicodedata's Hangul jamo names, a table of string pointers never written
+nfc_first	runtime/prim/unicodedata_db.h	unicodedata's NFC composition index, never written
+nfc_last	runtime/prim/unicodedata_db.h	unicodedata's NFC composition index, never written
+_PyUnicode_BidirectionalNames	runtime/prim/unicodedata_db.h	unicodedata's class names, a table of string pointers never written
+_PyUnicode_CategoryNames	runtime/prim/unicodedata_db.h	unicodedata's category names, a table of string pointers never written
+_PyUnicode_EastAsianWidthNames	runtime/prim/unicodedata_db.h	unicodedata's width names, a table of string pointers never written
+ucd_3_2_0	runtime/prim/ucd.c	unicodedata's 3.2.0 database descriptor, never written
+layouts.0	runtime/interp/config.c	the stdlib landmark layouts, a table of string pointers never written
+sys_table	runtime/prim/os.c	os_call's table of system calls, never written
+lu_prim_math_methods	runtime/prim/math.c	_lucifer's math primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_calendar_methods	runtime/prim/calendar.c	_lucifer's calendar primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_ucd_methods	runtime/prim/ucd.c	_lucifer's unicode database primitives, a PyMethodDef table never written; the API takes it non-const
