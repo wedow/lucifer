@@ -661,6 +661,9 @@ void
 lu_err_display(PyObject *exc)
 {
     struct _is *interp = &_PyRuntime.main_interp;
+    if (lu_ns_lookup(interp->sysdict, PyUnicode_InternFromString("stderr")) == Py_None) {
+        return;                         /* no stream to print on */
+    }
     PyObject *name = PyUnicode_InternFromString("traceback");
     PyObject *module = name != NULL && interp->import_func != NULL
         ? lu_call(interp->import_func, &name, 1, NULL) : NULL;
