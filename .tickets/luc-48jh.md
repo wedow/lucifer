@@ -1,6 +1,6 @@
 ---
 id: luc-48jh
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T06:10:13Z

@@ -1,11 +1,15 @@
 """_typing (Modules/_typingmodule.c, Objects/typevarobject.c): the
-primitives of typing.py. The PEP 695 intrinsics that build type parameters
-from lazy evaluators (_Py_make_typevar and friends) are not here; a type
-parameter always holds its values."""
+primitives of typing.py. The functions named _make_* and _set_* are the
+PEP 695 intrinsics (Python/intrinsics.c), which build type parameters and
+aliases whose bound, constraints, default and value are evaluated on first
+use."""
 
 import sys as _sys
 from _lucifer import MISSING as _MISSING, _args, genericalias as _genericalias
 from _types import UnionType as Union
+
+
+_LAZY = object()        # a bound, constraints, default or value not evaluated yet
 
 
 def _idfunc(x, /):
@@ -140,21 +144,26 @@ class _TypeParam:
     """What TypeVar, ParamSpec and TypeVarTuple share: a name, a default and
     a module taken from the caller."""
 
-    __slots__ = ('_name', '_default', '__dict__', '__weakref__')
+    __slots__ = ('_name', '_default', '_evaluate_default', '__dict__', '__weakref__')
 
     __name__ = _readonly('_name')
 
     def _init(self, name, default, module):
         self._name = name
         self._default = default
+        self._evaluate_default = None
         self.__module__ = module
 
     @property
     def __default__(self):
+        if self._default is _LAZY:
+            self._default = self._evaluate_default()
         return self._default
 
     @property
     def evaluate_default(self):
+        if self._evaluate_default is not None:
+            return self._evaluate_default
         return _evaluator(self._default)
 
     def has_default(self):
@@ -214,7 +223,8 @@ details.
 """
 
     __module__ = 'typing'
-    __slots__ = ('_bound', '_constraints', '_covariant', '_contravariant', '_infer_variance')
+    __slots__ = ('_bound', '_constraints', '_evaluate_bound', '_evaluate_constraints',
+                 '_covariant', '_contravariant', '_infer_variance')
 
     def __new__(cls, *args, **kwargs):
         names = ('name', 'bound', 'default', 'covariant', 'contravariant', 'infer_variance')
@@ -241,6 +251,7 @@ details.
         self = object.__new__(cls)
         self._bound = bound
         self._constraints = constraints
+        self._evaluate_bound = self._evaluate_constraints = None
         self._covariant = covariant
         self._contravariant = contravariant
         self._infer_variance = infer_variance
@@ -258,19 +269,23 @@ details.
 
     @property
     def __bound__(self):
+        if self._bound is _LAZY:
+            self._bound = self._evaluate_bound()
         return self._bound
 
     @property
     def __constraints__(self):
+        if self._constraints is _LAZY:
+            self._constraints = self._evaluate_constraints()
         return () if self._constraints is None else self._constraints
 
     @property
     def evaluate_bound(self):
-        return _evaluator(self._bound)
+        return self._evaluate_bound or _evaluator(self._bound)
 
     @property
     def evaluate_constraints(self):
-        return _evaluator(self._constraints)
+        return self._evaluate_constraints or _evaluator(self._constraints)
 
     def __typing_subst__(self, arg, /):
         return _typing('_typevar_subst')(self, arg)
@@ -283,7 +298,7 @@ details.
         if i < len(args):
             return args                                  # we already have a value for our TypeVar
         if i == len(args) and self._default is not NoDefault:
-            return args + (self._default,)
+            return args + (self.__default__,)
         raise TypeError('Too few arguments for %s; actual %d, expected at least %d' % (
             alias, len(args), i + 1))
 
@@ -571,7 +586,7 @@ See PEP 695 for more information.
 """
 
     __module__ = 'typing'
-    __slots__ = ('_name', '_type_params', '_value', '__dict__')
+    __slots__ = ('_name', '_type_params', '_value', '_compute_value', '__dict__')
 
     def __new__(cls, *args, **kwargs):
         if len(args) > 2:
@@ -595,6 +610,7 @@ See PEP 695 for more information.
         self._name = name
         self._type_params = type_params
         self._value = value
+        self._compute_value = None
         self.__module__ = _caller_module()
         return self
 
@@ -631,10 +647,14 @@ See PEP 695 for more information.
 
     @property
     def __value__(self):
+        if self._value is _LAZY:
+            self._value = self._compute_value()
         return self._value
 
     @property
     def evaluate_value(self):
+        if self._compute_value is not None:
+            return self._compute_value
         return _ConstEvaluator(self._value)
 
 
@@ -691,3 +711,57 @@ classes in the first place with `class Foo[T]: ...`.
 
 for _cls in (TypeVar, ParamSpec, TypeVarTuple, ParamSpecArgs, ParamSpecKwargs):
     _final(_cls)
+
+
+# The PEP 695 intrinsics: type parameters and aliases evaluated on first use.
+
+def _make_typevar(name, evaluate_bound, evaluate_constraints):
+    tv = object.__new__(TypeVar)
+    tv._bound = _LAZY if evaluate_bound is not None else None
+    tv._constraints = _LAZY if evaluate_constraints is not None else None
+    tv._evaluate_bound = evaluate_bound
+    tv._evaluate_constraints = evaluate_constraints
+    tv._covariant = tv._contravariant = False
+    tv._infer_variance = True
+    tv._init(name, NoDefault, _caller_module())
+    return tv
+
+
+def _make_paramspec(name):
+    ps = object.__new__(ParamSpec)
+    ps._bound = None
+    ps._covariant = ps._contravariant = False
+    ps._infer_variance = True
+    ps._init(name, NoDefault, _caller_module())
+    return ps
+
+
+def _make_typevartuple(name):
+    tvt = object.__new__(TypeVarTuple)
+    tvt._init(name, NoDefault, _caller_module())
+    return tvt
+
+
+def _set_typeparam_default(typeparam, evaluate_default):
+    if type(typeparam) not in (TypeVar, ParamSpec, TypeVarTuple):
+        raise TypeError('Expected a type param, got %r' % (typeparam,))
+    typeparam._default = _LAZY
+    typeparam._evaluate_default = evaluate_default
+    return typeparam
+
+
+def _make_typealias(args):
+    name, type_params, compute_value = args
+    alias = object.__new__(TypeAliasType)
+    alias._name = name
+    alias._type_params = () if type_params is None else type_params
+    alias._value = _LAZY
+    alias._compute_value = compute_value
+    alias.__module__ = _caller_module()
+    return alias
+
+
+def _subscript_generic(params):
+    """Generic[*params], with each TypeVarTuple unpacked."""
+    params = tuple([_unpack(p) if type(p) is TypeVarTuple else p for p in params])
+    return _typing('_GenericAlias')(Generic, params)

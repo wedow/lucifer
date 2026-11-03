@@ -1,6 +1,6 @@
 ---
 id: luc-n2hs
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T07:37:22Z

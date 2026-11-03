@@ -535,3 +535,34 @@ class _type_or:
 
     def __ror__(self, other):
         return union_type_or(other, self)
+
+
+# PEP 695: the type-parameter intrinsics (Python/intrinsics.c), built by _typing.
+
+def intrinsic_1(value, oparg):
+    typing = __import__('_typing')
+    if oparg == 7:
+        return typing._make_typevar(value, None, None)
+    if oparg == 8:
+        return typing._make_paramspec(value)
+    if oparg == 9:
+        return typing._make_typevartuple(value)
+    if oparg == 10:
+        return typing._subscript_generic(value)
+    return typing._make_typealias(value)
+
+
+def intrinsic_2(a, b, oparg):
+    typing = __import__('_typing')
+    if oparg == 2:
+        return typing._make_typevar(a, b, None)
+    if oparg == 3:
+        return typing._make_typevar(a, None, b)
+    if oparg == 4:
+        a.__type_params__ = b           # SET_FUNCTION_TYPE_PARAMS
+        return a
+    return typing._set_typeparam_default(a, b)
+
+
+kernel_set('intrinsic_1', intrinsic_1)
+kernel_set('intrinsic_2', intrinsic_2)

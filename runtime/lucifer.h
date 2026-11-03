@@ -162,6 +162,8 @@ struct lu_static_type_state {
     X(gen_close)                /* close() of a generator or coroutine, from its finalizer */ \
     X(import_from)              /* IMPORT_FROM: import_from(module, name) */ \
     X(import_star)              /* INTRINSIC_IMPORT_STAR: import_star(locals, module) */ \
+    X(intrinsic_1)              /* CALL_INTRINSIC_1 of PEP 695: (value, oparg) */ \
+    X(intrinsic_2)              /* CALL_INTRINSIC_2 of PEP 695: (a, b, oparg) */ \
     X(generic_alias)            /* Py_GenericAlias(origin, args): type[int] before the kernel has the type */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
