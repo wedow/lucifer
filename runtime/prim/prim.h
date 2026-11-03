@@ -16,10 +16,19 @@ extern PyMethodDef lu_prim_descr_methods[];     /* runtime/object/descr.c */
 extern PyMethodDef lu_prim_slot_methods[];      /* runtime/types/slots.c */
 extern PyMethodDef lu_prim_str_methods[];       /* runtime/prim/str.c */
 extern PyMethodDef lu_prim_int_methods[];       /* runtime/prim/int.c */
+extern PyMethodDef lu_prim_float_methods[];     /* runtime/prim/float.c */
+extern PyMethodDef lu_prim_complex_methods[];   /* runtime/prim/complex.c */
 extern PyMethodDef lu_sys_int_methods[];        /* sys's int functions, runtime/prim/int.c */
 extern PyMethodDef lu_prim_exc_methods[];       /* runtime/interp/exceptions.c */
 PyObject *lu_prim_str_join(PyObject *module, PyObject *const *args, Py_ssize_t nargs);
 PyObject *lu_prim_text_repr(PyObject *module, PyObject *const *args, Py_ssize_t nargs);
+
+/* float.c and complex.c */
+int lu_as_double(PyObject *o, double *d);
+PyObject *lu_float_richcompare(double i, PyObject *w, int op);
+PyObject *lu_complex_pow(PyObject *v, PyObject *w);
+char *lu_number_text(PyObject *s, Py_ssize_t *len);
+Py_ssize_t lu_strip_underscores(char *s, Py_ssize_t len);
 
 void lu_striter_init(void);
 PyObject *lu_str_join_tuple(PyObject *sep, PyObject *items);

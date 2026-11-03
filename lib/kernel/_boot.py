@@ -16,7 +16,7 @@ from _lucifer import (
     MISSING, error, str_join, ns_get, ns_set, ns_del, ns_items, kind, size,
     type_lookup, type_dict, type_mro, type_bases, type_base, type_tp_name,
     is_subtype, make_function, make_getset, set_slot, type_set_bases,
-    type_set_mro, call_with_locals, cell_get, static_type,
+    type_set_mro, call_with_locals, cell_get, static_type, new_check,
 )
 
 __all__ = ('__build_class__',)
@@ -109,6 +109,16 @@ def update_slots(cls, own_only):
             set_slot(cls, slot, _HASH_NOT_IMPLEMENTED, None)
         else:
             set_slot(cls, slot, _THUNK, None)
+
+
+def check_new(cls, owner):
+    """tp_new_wrapper's checks of owner.__new__(cls)."""
+    if not kind(cls, 'type'):
+        error(TypeError, str_join('', (
+            type_tp_name(owner), '.__new__(X): X is not a type object (',
+            type_tp_name(type(cls)), ')')))
+    if cls is not owner:
+        new_check(cls, owner)
 
 
 def classmethod_(func):
