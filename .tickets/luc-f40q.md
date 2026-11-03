@@ -22,3 +22,5 @@ Builder: sonnet.
 
 make check-kernel PROGRAMS="exceptions with_stmt" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t).
 
+
+- Remove the kernelcheck last-stderr-line relaxation added in K1b once tracebacks exist; compare full stderr again.
