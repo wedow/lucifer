@@ -298,8 +298,10 @@ def __build_class__(func, name, /, *bases, **kwds):
         ns = meta.__prepare__(name, bases, **kwds)
     else:
         ns = {}
-    if not kind(ns, 'dict'):
-        error(TypeError, '__prepare__() must return a mapping (a dict until K1j)')
+    if not kind(ns, 'dict') and type_lookup(type(ns), '__getitem__') is MISSING:
+        error(TypeError, str_join('', (
+            type_tp_name(meta) if kind(meta, 'type') else '<metaclass>',
+            '.__prepare__() must return a mapping, not ', type_tp_name(type(ns)))))
     cell = call_with_locals(func, ns)
     if bases is not orig_bases:
         ns_set(ns, '__orig_bases__', orig_bases)

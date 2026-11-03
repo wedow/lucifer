@@ -157,6 +157,22 @@ ns_get(PyObject *ns, PyObject *name)
     return lu_ns_lookup(ns, name);
 }
 
+/* The lookup in a frame's locals, which a metaclass's __prepare__ can make any
+   mapping: a new reference, or NULL without an error for a miss. */
+static PyObject *
+locals_get(PyObject *ns, PyObject *name)
+{
+    if (PyDict_CheckExact(ns)) {
+        return Py_XNewRef(lu_ns_lookup(ns, name));
+    }
+    PyObject *args[2] = { ns, name };
+    PyObject *v = lu_call_kernel(LU_K_getitem, args, 2);
+    if (v == NULL && PyErr_ExceptionMatches(PyExc_KeyError)) {
+        PyErr_Clear();
+    }
+    return v;
+}
+
 /* IMPORT_NAME: builtins.__import__(name, globals, locals, fromlist, level).
    Until builtins.py has defined it, while the kernel boots, a name is its
    sys.modules entry. */
@@ -561,13 +577,16 @@ op_LOAD_NAME: {
         lu_err_format(PyExc_SystemError, "no locals found");
         goto error;
     }
-    if ((v = ns_get(frame->locals, name)) == NULL && !PyErr_Occurred()
-        && (v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
-        && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
-        name_error(name);
+    v = locals_get(frame->locals, name);
+    if (v == NULL && !PyErr_Occurred()) {
+        if ((v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
+            && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
+            name_error(name);
+        }
+        Py_XINCREF(v);
     }
     ERROR_IF(v == NULL);
-    PUSH(Py_NewRef(v));
+    PUSH(v);
     DISPATCH();
 }
 
@@ -582,8 +601,16 @@ op_STORE_NAME: {
         err = -1;
     }
     else {
-        err = ns_get(frame->locals, name) == NULL && PyErr_Occurred()
-            ? -1 : lu_ns_insert(frame->locals, name, v);
+        if (PyDict_CheckExact(frame->locals)) {
+            err = ns_get(frame->locals, name) == NULL && PyErr_Occurred()
+                ? -1 : lu_ns_insert(frame->locals, name, v);
+        }
+        else {
+            PyObject *args[3] = { frame->locals, name, v };
+            PyObject *r = lu_call_kernel(LU_K_setitem, args, 3);
+            err = r == NULL ? -1 : 0;
+            Py_XDECREF(r);
+        }
     }
     Py_DECREF(v);
     ERROR_IF(err < 0);
@@ -1316,12 +1343,9 @@ op_LOAD_FROM_DICT_OR_DEREF: {
     PyObject *mod_or_class_dict = POP();
     SAVE_FRAME();
     PyObject *name = PyTuple_GET_ITEM(code->co_localsplusnames, oparg);
-    PyObject *v = ns_get(mod_or_class_dict, name);
+    PyObject *v = locals_get(mod_or_class_dict, name);
     int failed = v == NULL && PyErr_Occurred();
-    if (v != NULL) {
-        Py_INCREF(v);
-    }
-    else if (!failed) {
+    if (v == NULL && !failed) {
         v = ((PyCellObject *)GETLOCAL(oparg))->ob_ref;
         if (v == NULL) {
             format_unbound(code, oparg);
@@ -1375,9 +1399,15 @@ op_DELETE_NAME:
         goto error;
     }
     if (!PyDict_CheckExact(frame->locals)) {
-        lu_err_format(PyExc_SystemError, "namespace is a %s, not a dict",
-                      Py_TYPE(frame->locals)->tp_name);
-        goto error;
+        PyObject *args[2] = { frame->locals, NAME(oparg) };
+        PyObject *r = lu_call_kernel(LU_K_delitem, args, 2);
+        if (r == NULL && PyErr_ExceptionMatches(PyExc_KeyError)) {
+            PyErr_Clear();
+            name_error(NAME(oparg));
+        }
+        Py_XDECREF(r);
+        ERROR_IF(r == NULL);
+        DISPATCH();
     }
     if (!lu_ns_delete(frame->locals, NAME(oparg))) {
         name_error(NAME(oparg));
@@ -1798,12 +1828,14 @@ op_LOAD_FROM_DICT_OR_GLOBALS: {
     PyObject *name = NAME(oparg);
     SAVE_FRAME();
     PyObject *v;
-    if ((v = ns_get(dict, name)) == NULL && !PyErr_Occurred()
-        && (v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
-        && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
-        name_error(name);
+    v = locals_get(dict, name);
+    if (v == NULL && !PyErr_Occurred()) {
+        if ((v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
+            && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
+            name_error(name);
+        }
+        Py_XINCREF(v);
     }
-    Py_XINCREF(v);
     Py_DECREF(dict);
     ERROR_IF(v == NULL);
     PUSH(v);
@@ -1818,10 +1850,25 @@ op_SETUP_ANNOTATIONS: {
         lu_err_format(PyExc_SystemError, "no locals found when setting up annotations");
         err = 1;
     }
-    if (!err && ns_get(frame->locals, name) == NULL) {
-        PyObject *d = PyErr_Occurred() ? NULL : PyDict_New();
-        err = d == NULL || lu_ns_insert(frame->locals, name, d) < 0;
-        Py_XDECREF(d);
+    if (!err) {
+        PyObject *have = locals_get(frame->locals, name);
+        if (have == NULL) {
+            PyObject *d = PyErr_Occurred() ? NULL : PyDict_New();
+            if (d != NULL && PyDict_CheckExact(frame->locals)) {
+                err = lu_ns_insert(frame->locals, name, d) < 0;
+            }
+            else if (d != NULL) {
+                PyObject *args[3] = { frame->locals, name, d };
+                PyObject *r = lu_call_kernel(LU_K_setitem, args, 3);
+                err = r == NULL;
+                Py_XDECREF(r);
+            }
+            else {
+                err = 1;
+            }
+            Py_XDECREF(d);
+        }
+        Py_XDECREF(have);
     }
     Py_XDECREF(name);
     ERROR_IF(err);
