@@ -32,26 +32,13 @@ prim_suggest_keyword(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(s != NULL ? s : Py_None);
 }
 
-/* The frame of the user code that called a builtin: the nearest one that
-   is not kernel-hidden. */
-static struct lu_frame *
-user_frame(PyThreadState *ts)
-{
-    for (struct lu_frame *f = (struct lu_frame *)ts->current_frame; f != NULL; f = f->previous) {
-        if (f->owner == LU_FRAME_INTERPRETER || f->owner == LU_FRAME_GENERATOR) {
-            return f;
-        }
-    }
-    return NULL;
-}
-
 /* caller_locals(): the namespace a module, class body or exec runs in, or
    for a function a new dict of its bound variables (PEP 667's snapshot). */
 static PyObject *
 prim_caller_locals(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(0);
-    struct lu_frame *f = user_frame(PyThreadState_Get());
+    struct lu_frame *f = lu_frame_user((struct lu_frame *)PyThreadState_Get()->current_frame, 0);
     if (f == NULL) {
         return Py_NewRef(Py_None);
     }

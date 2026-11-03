@@ -571,6 +571,7 @@ lu_layouts_init(void)
     lu_module_init();
     lu_exc_init();
     lu_gen_init();
+    lu_frame_init();
     lu_weakref_init();
 
     struct lu_static_objects *s = &_PyRuntime.singletons;

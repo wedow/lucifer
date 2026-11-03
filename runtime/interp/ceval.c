@@ -2190,7 +2190,7 @@ exception_unwind: {
         next_instr = lu_code_start(code) + handler;
         DISPATCH();
     }
-    frame->stackpointer = sp;
+    SAVE_FRAME();
     struct lu_frame *caller = frame->previous;
     if (frame->owner == LU_FRAME_GENERATOR) {
         lu_gen_finish(ts, frame);

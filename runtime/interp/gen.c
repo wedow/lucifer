@@ -141,21 +141,27 @@ lu_gen_suspend(PyThreadState *ts, struct lu_frame *f, int oparg)
 }
 
 /* gen_clear_frame: what the frame holds goes, except its code, which
-   gi_code still reports. */
+   gi_code still reports. A frame object that outlives it takes the rest. */
 static void
 clear_frame(struct lu_gen *gen)
 {
     struct lu_frame *f = &gen->frame;
     gen->frame_state = LU_GEN_CLEARED;
+    int taken = lu_frame_retire(f);
     f->previous = NULL;
     PyObject **top = f->stackpointer;
     f->stackpointer = f->localsplus;
-    for (PyObject **p = f->localsplus; p < top; p++) {
-        Py_XDECREF(*p);
+    if (taken) {
+        f->locals = NULL;
+        f->func = NULL;
     }
-    Py_CLEAR(f->locals);
-    Py_CLEAR(f->func);
-    Py_CLEAR(f->frame_obj);
+    else {
+        for (PyObject **p = f->localsplus; p < top; p++) {
+            Py_XDECREF(*p);
+        }
+        Py_CLEAR(f->locals);
+        Py_CLEAR(f->func);
+    }
     Py_CLEAR(gen->exc_state.exc_value);
 }
 
@@ -167,6 +173,21 @@ lu_gen_finish(PyThreadState *ts, struct lu_frame *f)
     gen->exc_state.previous_item = NULL;
     ts->py_recursion_remaining++;
     clear_frame(gen);
+}
+
+int
+lu_gen_frame_clear(struct lu_frame *f)
+{
+    struct lu_gen *gen = lu_gen_of(f);
+    if (gen->frame_state == LU_GEN_EXECUTING || suspended(gen)) {
+        lu_err_format(PyExc_RuntimeError, "cannot clear %s frame",
+                      gen->frame_state == LU_GEN_EXECUTING ? "an executing" : "a suspended");
+        return -1;
+    }
+    if (gen->frame_state == LU_GEN_CREATED) {
+        clear_frame(gen);
+    }
+    return 0;
 }
 
 /* _PyGen_yf: what a generator suspended in `yield from` or `await` delegates
@@ -370,7 +391,8 @@ lu_gen_init(void)
     gen_layout(&PyCoro_Type, coro_getset, coro_members);
     gen_layout(&PyAsyncGen_Type, async_gen_getset, async_gen_members);
     PyTypeObject *const fields[] = { &lu_coro_wrapper_type, &_PyAsyncGenASend_Type,
-                                     &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type };
+                                     &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type,
+                                     &PyFrameLocalsProxy_Type /* field 0 is its frame */ };
     for (size_t i = 0; i < sizeof fields / sizeof fields[0]; i++) {
         fields[i]->tp_basicsize = sizeof(struct lu_fields);
         fields[i]->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
