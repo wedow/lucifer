@@ -1,6 +1,6 @@
 ---
 id: luc-dfbu
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T01:39:45Z
@@ -18,3 +18,9 @@ Makefile, include/ (verbatim v3.14.10 Include/ without internal/, cp314t pyconfi
 
 make abi-audit: bin/lucifer exports all 1,843 Py*/_Py* symbols of the cp314t oracle and all 215 data symbols have the oracle's nm -S sizes; the audit prints implemented vs stub counts.
 
+
+## Notes
+
+**2026-11-03T02:02:34Z**
+
+Merged 9cde773. 1843/1843 exports, 215/215 data sizes, 24 implemented, 1604 weak stubs. dlopen check via LD_BIND_NOW.
