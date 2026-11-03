@@ -33,7 +33,11 @@ lib.PROBE = lib.PROBE.replace("'test':test.__file__", "'venv':sys.prefix != sys.
 BAD = {'FAIL', 'ERROR', 'XPASS', 'TIMEOUT', 'CRASH', 'NOTRUN'}
 
 
+FATAL_SIGNALS = {int(s) for s in (signal.SIGSEGV, signal.SIGABRT, signal.SIGBUS, signal.SIGILL, signal.SIGFPE, signal.SIGKILL)}
+
+
 def execute(command, env, cwd, timeout, log, stderr_log=None, worker_pid=None):
+    """Run a command; a shell wrapper reports a fatal signal as exit 128+N, returned as -N."""
     started = time.monotonic()
     with log.open('wb') as output, (stderr_log.open('wb') if stderr_log else nullcontext(output)) as errors:
         try:
@@ -61,7 +65,8 @@ def execute(command, env, cwd, timeout, log, stderr_log=None, worker_pid=None):
                 except ProcessLookupError:
                     pass
             child.wait()
-    return child.returncode, hung, time.monotonic() - started
+    code = child.returncode
+    return 128 - code if code - 128 in FATAL_SIGNALS else code, hung, time.monotonic() - started
 
 
 lib.execute = execute

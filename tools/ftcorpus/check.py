@@ -20,8 +20,8 @@ class DriverChecks(unittest.TestCase):
         self.results = self.root / 'results'
         self.results.mkdir()
 
-    def fixture(self, suite, lane='serial'):
-        units = {'serial/test_module': ['test_module.C.test_a', 'test_module.C.test_b']}
+    def fixture(self, suite, lane='serial', module='test_module', cases=('test_module.C.test_a', 'test_module.C.test_b')):
+        units = {lane + '/' + module: list(cases)}
         if suite == 'ft-packages':
             units = {lane + '/pkg': ['tests/test_x.py::test_a', 'tests/test_x.py::test_b']}
         ids = [(unit.split('/')[0] + '/' + ('pkg/' if suite == 'ft-packages' else '') + case)
@@ -141,6 +141,24 @@ with open(os.environ['FT_OBSERVATIONS'],'w') as stream:
             fake.chmod(0o755)
             result = self.driver('ft-packages', str(fake), '--lock', str(lock), '--work', str(work), '--oracle-runtime', 'oracle')
             self.assertEqual([r['status'] for r in self.manifest()], expected, result.stderr)
+
+    def profiled_case_fixture(self, lane):
+        profile = json.loads((ROOT / 'results/libtest/resource-profile.json').read_text())['free-threaded']
+        module = next(m for m, v in sorted(profile.items()) if len(v['cases']) > 1)
+        cases = profile[module]['cases'][:2]
+        self.fixture('ft-cpython', lane, module, cases)
+        return module, cases
+
+    def test_shell_wrapper_crash_exit_is_crash(self):
+        self.profiled_case_fixture('serial')
+        wrapper = self.root / 'wrapper'
+        wrapper.write_text('''#!/bin/sh
+[ "$1" = -c ] && echo '{"version":[3,14,10],"implementation":"cpython","free_threaded":true,"gil_enabled":false}' && exit 0
+exit 139
+''')
+        wrapper.chmod(0o755)
+        result = self.driver('ft-cpython', str(wrapper))
+        self.assertEqual({r['status'] for r in self.manifest()}, {'CRASH'}, result.stderr)
 
     def test_interpreter_symlink_is_preserved(self):
         self.fixture('ft-cpython')
