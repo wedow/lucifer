@@ -9,7 +9,7 @@ dict, then non-data descriptors and plain class attributes.
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_dict, type_bases, type_tp_name, type_qualname,
     instance_dict, ns_get, ns_set, ns_del, alloc, set_class, kernel_set, address,
-    object_hash, type_flag,
+    object_hash, type_flag, object_size,
 )
 from _lucifer import _boot
 
@@ -166,6 +166,10 @@ class object:
 When called, it accepts no arguments and returns a new featureless
 instance that has no instance attributes and cannot be given any.
 """
+
+    def __sizeof__(self):
+        """Size of object in memory, in bytes."""
+        return object_size(self)
 
     def __getattribute__(self, name):
         return generic_getattr(self, name)
