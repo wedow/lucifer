@@ -1,6 +1,6 @@
 ---
 id: luc-dlik
-status: open
+status: closed
 deps: [luc-rjvn]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: opus.
 
 make check-capi passes, including check_reused_thread_id in tests/capi/refcount.c with no pthread_create wrapper in the binary (nm shows none) and tests/capi/tstate_bind.c (PyGILState_Ensure from 8 foreign threads, one stable PyThreadState_Get across each native extent, Save/Restore round trips, PyThreadState_Swap).
 
+
+## Notes
+
+**2026-11-03T04:00:27Z**
+
+done: tstate API on task/carrier, owners registered at bind, pthread_create wrapper removed
