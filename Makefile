@@ -103,8 +103,9 @@ build/frozen.o: build/frozen.c $(HEADERS)
 
 # The installed standard library next to the executable: Lib/ plus its pycs.
 STDLIB = build/lib/python3.14t
-build/lib/stamp: tools/freeze $(shell find third_party/cpython/Lib -type f -not -name '*.pyc')
-	$(HOST_PYTHON) tools/freeze --pyc $(STDLIB) third_party/cpython/Lib
+SYSCONFIGDATA = _sysconfigdata_t_linux_x86_64-linux-gnu.py
+build/lib/stamp: tools/freeze lib/sysconfigdata.py $(shell find third_party/cpython/Lib -type f -not -name '*.pyc')
+	$(HOST_PYTHON) tools/freeze --pyc $(STDLIB) third_party/cpython/Lib $(SYSCONFIGDATA)=lib/sysconfigdata.py
 	touch $@
 
 abi-audit: bin/lucifer
