@@ -200,6 +200,16 @@ def build(mod, filename, future):
     return st
 
 
+def free(st):
+    """_PySymtable_Free: drop the table's entries.
+
+    Entries point back at their table, so without this the table and what it
+    holds would outlive the compilation until the next garbage collection."""
+    st.st_blocks = None
+    st.st_stack = None
+    st.st_top = st.st_cur = st.st_global = None
+
+
 def lookup(st, key):
     """_PySymtable_Lookup: the entry for key (id(node), or id(node) + 1)."""
     try:

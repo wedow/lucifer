@@ -591,7 +591,11 @@ def compiler_mod(c, mod):
 
 def compile_ast(mod, filename, flags, optimize):
     """_PyAST_Compile: the code object for module mod."""
-    return compiler_mod(Compiler(mod, filename, flags, optimize), mod)
+    c = Compiler(mod, filename, flags, optimize)
+    try:
+        return compiler_mod(c, mod)
+    finally:
+        symtable.free(c.c_st)  # compiler_free
 
 
 def clean_doc(doc):
@@ -633,6 +637,7 @@ def codegen_for_test(mod, filename, flags, optimize, compile_mode=None):
     finally:
         if c.u is not None:
             c.exit_scope()
+        symtable.free(c.c_st)
 
 
 # codegen.py and this module call each other, as codegen.c and compile.c do;
