@@ -541,6 +541,7 @@ release_interpreter(struct _is *interp)
         _PyRuntime.signals.handlers[i].tripped = 0;
     }
     _PyRuntime.signals.tripped = 0;
+    interp->tasks_closed = 0;
     interp->modules = interp->builtins = interp->sysdict = interp->interned = NULL;
     interp->importlib = interp->import_func = NULL;
     interp->eval_frame = NULL;

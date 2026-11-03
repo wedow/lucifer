@@ -1,6 +1,6 @@
 ---
 id: luc-vvqv
-status: open
+status: closed
 deps: [luc-dfbu, luc-r6ny, luc-awzt]
 links: []
 created: 2026-11-03T01:39:45Z
@@ -88,3 +88,21 @@ make check-kernel: every tests/kernel program (at least 30, covering the familie
 - check-kernel passes under -X lucifer_handoff=1 through =8 (seeded park-or-continue); -X lucifer_stress=bogus exits 2 with a message.
 - make check-capi: a tests/capi program reads PyLong_Type.tp_dict as NULL after kernel init (the dict lives in interpreter state, as in the oracle) while int.__dict__ works (docs/FOUNDATIONS.md 2.1).
 - Register refcount owners when a thread state is bound, and delete the stopgap pthread_create wrapper in runtime/object/brc.c (luc-f56i). check_reused_thread_id still passes.
+
+## Notes
+
+**2026-11-03T18:02:57Z**
+
+K1 closed (checked against master plus branch luc-awzt, 2026-11-03). Evidence per coverage-map line:
+- >= 30 programs, families of DESIGN 9.3, -I -S, 512 KiB, oracle match: make check-kernel, 477/477 checks, 441 tests/kernel programs, plain lane; includes the new match_stmt, tstrings, scoping, control_flow. Families: int_arith/bigint, str_/bytes_ methods, list/dict/set/tuple, classes, descriptors, exceptions, generators, closures, comprehensions, with_stmt, fstrings, print_args, deep_recursion, handoff_witness all present.
+- deep_recursion.py: passes in every lane (plain, handoff, handoff:1..8).
+- every program under -X lucifer_handoff: 477/477 in handoff and handoff:1..8 (marshal_dumps is XFAIL, luc-ymb3, as agreed).
+- handoff_witness.py 2 vs 1: HANDOFF_STDOUT row in tools/kernelcheck; passes plain and all handoff lanes.
+- make check rejects unbracketed blocking syscalls: check-blocking is part of make check, green.
+- frames.py plain and under handoff; invalidate.py (plain and handoff); exc_kernel.py; gc_at_poll.py: all in the kernel set, green in all 10 lanes.
+- hash_seed.py at 12345 and 0, unseeded differ, hash_randomization == 1: RUNS/SEEDED rows in kernelcheck, green.
+- handoff=1..8 and lucifer_stress=bogus exits 2: lanes handoff:1..8 green; FLAG_ROWS stress rows pass.
+- capi PyLong_Type.tp_dict NULL: tests/capi/static_tp_dict.c in make check-capi, green.
+- refcount owners at bind, pthread_create wrapper deleted, check_reused_thread_id: tests/capi/tstate_bind.c and refcount.c green; no pthread_create left in runtime/object/brc.c.
+- make check (blocking, globals, capi, kernel, embed), make abi-audit (1843/1843, data sizes 215/215), make check-compiler (code stage identical on closure, difftest, kernel, lib): green.
+- kernelcheck --opcodes: 122 base opcodes, 119 handled, 3 exempt (RESERVED, INTERPRETER_EXIT, BINARY_OP_INPLACE_ADD_UNICODE), 0 unhandled.

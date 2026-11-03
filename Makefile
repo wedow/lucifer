@@ -209,7 +209,8 @@ check-harness:
 # tests/kernel programs, host-compiled to .pyc, against the free-threaded
 # oracle under a 512 KiB stack. PROGRAMS="a b" selects; LANE= picks a policy.
 
-check-kernel: bin/lucifer
+check-kernel: bin/lucifer build/lib/stamp
+	$(HOST_PYTHON) tools/kernelcheck --opcodes
 	$(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer \
 	  --programs "$(PROGRAMS)" $(if $(LANE),--lane $(LANE))
 

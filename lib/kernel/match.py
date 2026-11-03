@@ -30,6 +30,9 @@ def match_sequence(subject):
         return False
     if isinstance(subject, (list, tuple, range, memoryview)):
         return True
+    deque = getattr(sys.modules.get('_collections'), 'deque', None)    # a native sequence in CPython
+    if deque is not None and isinstance(subject, deque):
+        return True
     abc = _abc('Sequence')
     return abc is not None and isinstance(subject, abc)
 
