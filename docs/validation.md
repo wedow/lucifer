@@ -168,12 +168,15 @@ python3 tools/libtest/run.py collect --profile --python "$ORACLE_T" --source ins
 python3 tools/libtest/run.py collect --profile --python "$ORACLE_GIL" --source installed --runtime cpython-3.14.10
 python3 tools/libtest/run.py run --python "$ORACLE_T" --source installed --runtime cpython-3.14.10t
 python3 tools/libtest/run.py run --python "$ORACLE_GIL" --source installed --runtime cpython-3.14.10
-python3 tools/libtest/run.py run --python bin/lucifer --runtime lucifer
+python3 tools/libtest/run.py run --python bin/lucifer --source installed --runtime lucifer
 python3 tools/scoreboard --suite libtest
 python3 tools/libtest/check.py
 ```
 
-`--python` takes a shell-quoted command but never executes a shell. Oracle paths
+`--python` takes a shell-quoted command but never executes a shell. Lucifer is run
+with `--source installed`: it finds its own standard library and `test` package under
+`build/lib/python3.14t` (the vendored `Lib/` and the host's pycs, installed by `make`),
+so that no host `PYTHONPATH` puts CPython's modules ahead of its own. Oracle paths
 are supplied by the caller. The default `--source vendored` adds the vendored
 `Lib/` to the target's `PYTHONPATH`; `--source installed` uses the interpreter's
 own installed library and test extensions. The host never imports vendored code.

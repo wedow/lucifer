@@ -79,23 +79,24 @@ def lookup(s, key, h, found_first):
     """The entry index of key in s, or -1. A probe that meets a key it cannot
     judge natively returns it, and __eq__ runs here. When the comparison
     changed the table or the entry the probe starts over; set_add_entry
-    (found_first) accepts an equal key before it looks."""
-    after = -1
+    (found_first) accepts an equal key before it looks. judged counts the
+    candidates found unequal since the table last changed."""
+    judged = 0
     while True:
-        r = set_probe(s, key, h, after)
+        r = set_probe(s, key, h, judged)
         if r > -3:
             return r
         cand = -3 - r
         table = set_info(s, TABLE)
         startkey = set_key(s, cand)
         if startkey is MISSING:
-            after = -1
+            judged = 0
             continue
         equal = True if startkey is key or startkey == key else False
         unchanged = set_info(s, TABLE) == table and set_key(s, cand) is startkey
         if equal and (found_first or unchanged):
             return cand
-        after = cand if unchanged else -1
+        judged = judged + 1 if unchanged else 0
 
 
 def add_entry(s, key, h):

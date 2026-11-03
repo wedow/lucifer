@@ -610,3 +610,13 @@ def execve(path, argv, env):
         raise ValueError('execve: argv first element cannot be empty')
     entries = tuple(_exec_bytes(k) + b'=' + _exec_bytes(v) for k, v in env.items())
     _lucifer.os_execve(_path('execve', path), tuple(_exec_bytes(a) for a in argv), entries)
+
+
+terminal_size = _lucifer.structseq.structseq_type(
+    'os.terminal_size', 'A tuple of (columns, lines) for holding terminal window size',
+    ('columns', 'lines'), 2)
+
+
+def get_terminal_size(fd=1, /):
+    """Return the size of the terminal window as (columns, lines)."""
+    return _lucifer.structseq.structseq_make(terminal_size, _lucifer.os_get_terminal_size(fd), {})

@@ -7,7 +7,7 @@ from _lucifer import (
     type_base, type_name, type_qualname, type_set_name, type_tp_name, type_flag, type_set_flag,
     type_can_new, type_new_layout, type_set_mro, type_set_bases, type_subclasses,
     type_modified, type_static_module, is_subtype, ns_get, ns_set, ns_del, ns_items, cell_set, proxy_new,
-    field_get, kernel_get, is_callable,
+    field_get, kernel_get, is_callable, type_layout,
 )
 from _lucifer import _boot, object as _object
 
@@ -129,6 +129,44 @@ def _set_abstractmethods(cls, value):
         ns_set(d, '__abstractmethods__', value)
     type_modified(cls)
     type_set_flag(cls, _IS_ABSTRACT, abstract)
+
+
+def _get_flags(cls):
+    return type_layout(cls)[0]
+
+
+def _get_basicsize(cls):
+    return type_layout(cls)[1]
+
+
+def _get_itemsize(cls):
+    return type_layout(cls)[2]
+
+
+def _get_dictoffset(cls):
+    return type_layout(cls)[3]
+
+
+def _get_weakrefoffset(cls):
+    return type_layout(cls)[4]
+
+
+def _get_text_signature(cls):
+    return None
+
+
+def _get_type_params(cls):
+    return ns_get(type_dict(cls), '__type_params__', ())
+
+
+def _set_type_params(cls, value):
+    if not type_flag(cls, _HEAPTYPE):
+        error(TypeError, str_join('', (
+            "cannot set '__type_params__' attribute of immutable type '", type_tp_name(cls), "'")))
+    if not kind(value, 'tuple'):
+        error(TypeError, str_join('', ('__type_params__ must be set to a tuple, not ', type(value).__name__)))
+    ns_set(type_dict(cls), '__type_params__', value)
+    type_modified(cls)
 
 
 def _heap_only(cls, name):
@@ -443,6 +481,13 @@ type(name, bases, dict, **kwds) -> a new type"""
     __abstractmethods__ = getset(_get_abstractmethods, _set_abstractmethods)
     __bases__ = getset(_get_bases, _set_bases)
     __mro__ = getset(_get_mro)
+    __flags__ = getset(_get_flags)
+    __basicsize__ = getset(_get_basicsize)
+    __itemsize__ = getset(_get_itemsize)
+    __dictoffset__ = getset(_get_dictoffset)
+    __weakrefoffset__ = getset(_get_weakrefoffset)
+    __text_signature__ = getset(_get_text_signature)
+    __type_params__ = getset(_get_type_params, _set_type_params)
     __base__ = getset(_get_base)
 
 

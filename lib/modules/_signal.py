@@ -117,3 +117,8 @@ def raise_signal(signalnum, /):
 
 if not _lucifer.signal_ignored(SIGINT):
     _lucifer.signal_install(SIGINT, default_int_handler)
+
+
+def alarm(seconds, /):
+    """Arrange for SIGALRM to arrive after the given number of seconds."""
+    return _lucifer.os_call('alarm', seconds)

@@ -51,9 +51,20 @@ _Py_NewReferenceNoTotal(PyObject *op)
     _Py_NewReference(op);
 }
 
-/* The only death path. */
-void
-_Py_Dealloc(PyObject *op)
+/* The only death path, with the trashcan of Include/internal/pycore_object.h:
+   a death inside LU_TRASH_DEPTH nested deaths is queued, and the outermost
+   death runs the queue, so freeing a structure nested a million deep does not
+   take a million C frames. */
+#define LU_TRASH_DEPTH 100
+
+static _Thread_local struct {
+    int depth;
+    PyObject **queue;
+    size_t length, capacity;
+} trash;
+
+static void
+dealloc_now(PyObject *op)
 {
     destructor dealloc = Py_TYPE(op)->tp_dealloc;
     PyRefTracer tracer = _PyRuntime.ref_tracer.func;
@@ -61,6 +72,34 @@ _Py_Dealloc(PyObject *op)
         tracer(op, PyRefTracer_DESTROY, _PyRuntime.ref_tracer.data);
     }
     dealloc(op);
+}
+
+void
+_Py_Dealloc(PyObject *op)
+{
+    if (trash.depth >= LU_TRASH_DEPTH) {
+        if (trash.length == trash.capacity) {
+            size_t capacity = trash.capacity ? trash.capacity * 2 : 64;
+            PyObject **queue = realloc(trash.queue, capacity * sizeof *queue);
+            if (queue != NULL) {
+                trash.queue = queue;
+                trash.capacity = capacity;
+            }
+        }
+        if (trash.length < trash.capacity) {
+            trash.queue[trash.length++] = op;
+            return;
+        }
+    }
+    trash.depth++;
+    dealloc_now(op);
+    if (--trash.depth == 0) {
+        while (trash.length > 0) {
+            trash.depth++;
+            dealloc_now(trash.queue[--trash.length]);
+            trash.depth--;
+        }
+    }
 }
 
 int

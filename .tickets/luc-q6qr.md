@@ -1,6 +1,6 @@
 ---
 id: luc-q6qr
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T10:33:36Z
@@ -17,3 +17,9 @@ sys.path gets the stdlib (third_party/cpython/Lib, precompiled by the host to bu
 
 import os, unittest, test.support, warnings, traceback, pickle, copy, unicodedata, locale, contextlib, difflib, pprint succeed; tools/libtest run --python bin/lucifer --modules test_int test_bool test_list test_tuple test_dict test_set test_str test_bytes produces real PASS/FAIL rows (not all NOTRUN) and the scores are committed under results/libtest/lucifer.tsv
 
+
+## Notes
+
+**2026-11-03T12:24:05Z**
+
+stdlib on sys.path from the executable (build/lib pycs), unittest/test.support closure, threads, subprocess, libtest runs lucifer with --source installed; remaining test failures are VM gaps (iterator pickling, gc tracking, _testlimitedcapi skip of test_bytes)

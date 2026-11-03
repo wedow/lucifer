@@ -64,6 +64,22 @@ with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
 """)
         self.assertEqual(self.run_fake(body, timeout=2, interpreter=str(venv / 'bin/python')), ['PASS'] * 3)
 
+    def test_installed_source_leaves_the_stdlib_to_the_target(self):
+        # An interpreter with its own standard library is tested with that
+        # library: the host adds no PYTHONPATH of its own (and drops the
+        # caller's), so no vendored Lib/ shadows the target's modules.
+        body = ('import os\nassert "PYTHONPATH" not in os.environ, os.environ["PYTHONPATH"]\n'
+                + self.fake_probe() + """
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'PASSED'}) + '\\n')
+with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
+    for name in ('first','second','third'):
+        stream.write(json.dumps({'id':'test_fixture.Example.test_' + name,'status':'PASS','seconds':0}) + '\\n')
+""")
+        os.environ['PYTHONPATH'] = str(self.root)
+        self.addCleanup(os.environ.pop, 'PYTHONPATH')
+        self.assertEqual(self.run_fake(body, timeout=2), ['PASS'] * 3)
+
     def test_startup_hang(self):
         self.assertEqual(self.run_fake('import time; time.sleep(60)\n'), ['NOTRUN'] * 3)
 

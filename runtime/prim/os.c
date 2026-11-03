@@ -11,6 +11,8 @@
 #include <grp.h>
 #include <langinfo.h>
 #include <poll.h>
+#include <sys/resource.h>
+#include <sys/ioctl.h>
 #include <locale.h>
 #include <linux/futex.h>
 #include <signal.h>
@@ -601,6 +603,7 @@ union sys_arg {
     X(sys_setsid, "", setsid()) \
     X(sys_kill, "ii", kill((pid_t)a[0].i, (int)a[1].i)) \
     X(sys_fcntl, "iii", LU_SYSCALL(fcntl((int)a[0].i, (int)a[1].i, a[2].i))) \
+    X(sys_alarm, "i", alarm((unsigned)a[0].i)) \
     X(sys_sysconf, "i", sysconf((int)a[0].i)) \
     X(sys_utime, "piiiii", utimensat(AT_FDCWD, a[0].p, (struct timespec[2]){ { a[1].i, a[2].i }, { a[3].i, a[4].i } }, (int)a[5].i))
 
@@ -886,6 +889,94 @@ prim_os_execve(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyMem_RawFree(argv);
     PyMem_RawFree(envp);
     return NULL;
+}
+
+/* getrlimit(resource): (soft, hard); setrlimit(resource, soft, hard). RLIM_INFINITY is -1. */
+static PyObject *
+prim_os_getrlimit(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long resource;
+    struct rlimit rl;
+    if (nargs != 1 || int_arg(args[0], &resource) < 0) {
+        return NULL;
+    }
+    if (getrlimit((__rlimit_resource_t)resource, &rl) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    PyObject *soft = PyLong_FromLongLong(rl.rlim_cur == RLIM_INFINITY ? -1 : (long long)rl.rlim_cur);
+    PyObject *hard = PyLong_FromLongLong(rl.rlim_max == RLIM_INFINITY ? -1 : (long long)rl.rlim_max);
+    PyObject *t = soft != NULL && hard != NULL ? PyTuple_Pack(2, soft, hard) : NULL;
+    Py_XDECREF(soft);
+    Py_XDECREF(hard);
+    return t;
+}
+
+static PyObject *
+prim_os_setrlimit(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long resource, soft, hard;
+    if (nargs != 3 || int_arg(args[0], &resource) < 0 || int_arg(args[1], &soft) < 0
+        || int_arg(args[2], &hard) < 0) {
+        return NULL;
+    }
+    struct rlimit rl = { soft < 0 ? RLIM_INFINITY : (rlim_t)soft, hard < 0 ? RLIM_INFINITY : (rlim_t)hard };
+    if (setrlimit((__rlimit_resource_t)resource, &rl) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return Py_NewRef(Py_None);
+}
+
+/* getrusage(who): the sixteen fields of struct_rusage. */
+static PyObject *
+prim_os_getrusage(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long who;
+    struct rusage ru;
+    if (nargs != 1 || int_arg(args[0], &who) < 0) {
+        return NULL;
+    }
+    if (getrusage((int)who, &ru) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    PyObject *t = PyTuple_New(16);
+    double utime = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec * 1e-6;
+    double stime = ru.ru_stime.tv_sec + ru.ru_stime.tv_usec * 1e-6;
+    long long v[14] = { ru.ru_maxrss, ru.ru_ixrss, ru.ru_idrss, ru.ru_isrss, ru.ru_minflt, ru.ru_majflt,
+        ru.ru_nswap, ru.ru_inblock, ru.ru_oublock, ru.ru_msgsnd, ru.ru_msgrcv, ru.ru_nsignals,
+        ru.ru_nvcsw, ru.ru_nivcsw };
+    for (int i = 0; t != NULL && i < 16; i++) {
+        PyObject *n = i == 0 ? PyFloat_FromDouble(utime) : i == 1 ? PyFloat_FromDouble(stime)
+                                                                  : PyLong_FromLongLong(v[i - 2]);
+        if (n == NULL) {
+            Py_CLEAR(t);
+            break;
+        }
+        PyTuple_SET_ITEM(t, i, n);
+    }
+    return t;
+}
+
+/* get_terminal_size(fd): (columns, lines) */
+static PyObject *
+prim_os_get_terminal_size(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd;
+    struct winsize w;
+    if (nargs != 1 || int_arg(args[0], &fd) < 0) {
+        return NULL;
+    }
+    if (LU_SYSCALL(ioctl((int)fd, TIOCGWINSZ, &w)) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    PyObject *c = PyLong_FromLong(w.ws_col), *l = PyLong_FromLong(w.ws_row);
+    PyObject *t = c != NULL && l != NULL ? PyTuple_Pack(2, c, l) : NULL;
+    Py_XDECREF(c);
+    Py_XDECREF(l);
+    return t;
 }
 
 /* waitpid(pid, options): (pid, status) */
@@ -1267,6 +1358,10 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_fork_exec", (PyCFunction)(void (*)(void))prim_os_fork_exec, METH_FASTCALL, NULL },
     { "os_poll", (PyCFunction)(void (*)(void))prim_os_poll, METH_FASTCALL, NULL },
     { "os_execve", (PyCFunction)(void (*)(void))prim_os_execve, METH_FASTCALL, NULL },
+    { "os_getrlimit", (PyCFunction)(void (*)(void))prim_os_getrlimit, METH_FASTCALL, NULL },
+    { "os_setrlimit", (PyCFunction)(void (*)(void))prim_os_setrlimit, METH_FASTCALL, NULL },
+    { "os_getrusage", (PyCFunction)(void (*)(void))prim_os_getrusage, METH_FASTCALL, NULL },
+    { "os_get_terminal_size", (PyCFunction)(void (*)(void))prim_os_get_terminal_size, METH_FASTCALL, NULL },
     { "os_waitpid", (PyCFunction)(void (*)(void))prim_os_waitpid, METH_FASTCALL, NULL },
     { "locale_encoding", (PyCFunction)(void (*)(void))prim_os_locale_encoding, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },

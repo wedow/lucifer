@@ -61,3 +61,90 @@ the code was compiled with."""
 
     def __replace__(self, **changes):
         return self.replace(**changes)
+
+    def co_positions(self):
+        """Return an iterator over the source code positions of each bytecode instruction."""
+        return _positions(self.co_linetable, self.co_firstlineno)
+
+    def co_lines(self):
+        """Return an iterator that produces (start, end, lineno) for each line range."""
+        return _lines(self.co_linetable, self.co_firstlineno)
+
+
+def _varint(table, i):
+    shift = 0
+    value = 0
+    while True:
+        b = table[i]
+        i += 1
+        value |= (b & 63) << shift
+        shift += 6
+        if not b & 64:
+            return value, i
+
+
+def _svarint(table, i):
+    value, i = _varint(table, i)
+    return (-(value >> 1) if value & 1 else value >> 1), i
+
+
+def _entries(table, firstlineno):
+    """The location table's entries: (length in code units, line, end line,
+    column, end column), line -1 for no location and columns None when absent."""
+    i = 0
+    line = firstlineno
+    n = len(table)
+    while i < n:
+        first = table[i]
+        i += 1
+        kind = (first >> 3) & 15
+        length = (first & 7) + 1
+        if kind == 15:
+            yield length, None, None, None, None
+            while i < n and not table[i] & 128:
+                i += 1
+            continue
+        if kind == 14:
+            delta, i = _svarint(table, i)
+            line += delta
+            extra, i = _varint(table, i)
+            col, i = _varint(table, i)
+            end_col, i = _varint(table, i)
+            yield length, line, line + extra, (col - 1 if col else None), (end_col - 1 if end_col else None)
+        elif kind == 13:
+            delta, i = _svarint(table, i)
+            line += delta
+            yield length, line, line, None, None
+        elif kind >= 10:
+            line += kind - 10
+            col = table[i]
+            end_col = table[i + 1]
+            i += 2
+            yield length, line, line, col, end_col
+        else:
+            second = table[i]
+            i += 1
+            col = (kind << 3) | ((second >> 4) & 7)
+            yield length, line, line, col, col + (second & 15)
+
+
+def _positions(table, firstlineno):
+    for length, line, end_line, col, end_col in _entries(table, firstlineno):
+        for _ in range(length):
+            yield (line, end_line, col, end_col)
+
+
+def _lines(table, firstlineno):
+    start = end = 0
+    line = -1
+    for length, entry_line, end_line, col, end_col in _entries(table, firstlineno):
+        if end and entry_line == line:
+            end += 2 * length
+            continue
+        if end:
+            yield (start, end, line)
+        start = end
+        end = start + 2 * length
+        line = entry_line
+    if end:
+        yield (start, end, line)

@@ -1300,6 +1300,40 @@ prim_type_set_name(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
+/* type_layout(t): (tp_flags, tp_basicsize, tp_itemsize, tp_dictoffset, tp_weaklistoffset) */
+static PyObject *
+prim_type_layout(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); TYPE_ARG(0);
+    PyTypeObject *tp = (PyTypeObject *)args[0];
+    PyObject *t = PyTuple_New(5);
+    long long v[5] = { (long long)tp->tp_flags, tp->tp_basicsize, tp->tp_itemsize, tp->tp_dictoffset,
+                       tp->tp_weaklistoffset };
+    for (int i = 0; t != NULL && i < 5; i++) {
+        PyObject *n = PyLong_FromLongLong(v[i]);
+        if (n == NULL) {
+            Py_CLEAR(t);
+            break;
+        }
+        PyTuple_SET_ITEM(t, i, n);
+    }
+    return t;
+}
+
+/* object_size(obj): the allocation's size, as object.__sizeof__ answers. */
+static PyObject *
+prim_object_size(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    PyTypeObject *tp = Py_TYPE(args[0]);
+    Py_ssize_t n = tp->tp_basicsize;
+    if (tp->tp_itemsize != 0) {
+        Py_ssize_t count = Py_SIZE(args[0]);
+        n += (count < 0 ? -count : count) * tp->tp_itemsize;
+    }
+    return PyLong_FromLongLong(n);
+}
+
 /* type_flag(t, flag): whether every bit of flag is set in tp_flags. */
 static PyObject *
 prim_type_flag(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -1869,7 +1903,7 @@ prim_static_type(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 PyMethodDef lu_prim_type_methods[] = {
     FAST(static_type),
     FAST(type_lookup), FAST(type_dict), FAST(type_mro), FAST(type_bases), FAST(type_base),
-    FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag), FAST(type_set_flag),
+    FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag), FAST(type_set_flag), FAST(type_layout), FAST(object_size),
     FAST(type_can_new), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
     FAST(type_subclasses), FAST(type_modified), FAST(is_subtype), FAST(alloc), FAST(new_check),
     FAST(type_tp_name), FAST(type_static_module), FAST(size),
