@@ -1,6 +1,6 @@
 ---
 id: luc-fom3
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T07:36:04Z

@@ -12,12 +12,17 @@
 #include <sched.h>
 #include <stdio.h>
 #include <time.h>
+#include <string.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 /* Exported by cp314t; _thread.lock.acquire(timeout=...) calls it. */
 PyAPI_FUNC(PyLockStatus) _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout_ns,
                                             int flags);
 enum { LOCK_DETACH = 1, MS = 1000000 };
+#ifndef _Py_HAS_PARKED
+#define _Py_HAS_PARKED 2
+#endif
 
 enum { THREADS = 8, ROUNDS = 4000 };
 
@@ -82,29 +87,31 @@ contend(void *arg)
     return NULL;
 }
 
-static void
-sleep_ms(int ms)
-{
-    struct timespec ts = { 0, ms * MS };
-    nanosleep(&ts, NULL);
-}
+#define LOAD(v) __atomic_load_n(&(v), __ATOMIC_SEQ_CST)
+#define STORE(v, x) __atomic_store_n(&(v), (x), __ATOMIC_SEQ_CST)
 
-/* T waits 50 ms for `timed` inside a section on `a` and times out; U1 has
-   taken `a` meanwhile, so T's resume waits for U1. U1 holds `a` until U2
-   gets `timed`, which the holder releases at 100 ms. U2 must get it then:
-   T's timed-out wait must not still be first in the queue. */
+/* The main thread holds `timed`. T waits for it inside a section on `a` and
+   times out; U1 has taken `a` meanwhile, so T's resume waits for U1. U1 holds
+   `a` until U2 gets `timed`, which main releases once T has timed out and
+   U2 is parked behind it. U2 must get it: T's timed-out wait must not still
+   be first in the queue. Every step waits on a flag or on queue state, never
+   on a delay; the timeout only bounds how long T waits, and main releases
+   `timed` after T has given up, whenever that is. */
 static PyMutex timed;
-static int t_status, u2_got;
+static int t_status = -1, t_in, t_done, u1_in, u2_tid, u2_got;
 
 static void *
 timed_waiter(void *arg)
 {
     PyGILState_Ensure();
     Py_BEGIN_CRITICAL_SECTION(a);
-    t_status = _PyMutex_LockTimed(&timed, 50 * MS, LOCK_DETACH);
-    if (t_status == PY_LOCK_ACQUIRED) {
+    STORE(t_in, 1);
+    int status = _PyMutex_LockTimed(&timed, 50 * MS, LOCK_DETACH);
+    if (status == PY_LOCK_ACQUIRED) {
         PyMutex_Unlock(&timed);
     }
+    STORE(t_status, status);
+    STORE(t_done, 1);
     Py_END_CRITICAL_SECTION();
     return NULL;
 }
@@ -113,12 +120,14 @@ static void *
 section_holder(void *arg)
 {
     PyGILState_Ensure();
-    sleep_ms(20);
     Py_BEGIN_CRITICAL_SECTION(a);
-    for (int i = 0; i < 1000 && !__atomic_load_n(&u2_got, __ATOMIC_SEQ_CST); i++) {
-        sleep_ms(1);
+    STORE(u1_in, 1);
+    /* Watchdog: a correct runtime sets u2_got long before this runs out. */
+    for (int i = 0; i < 10000 && !LOAD(u2_got); i++) {
+        struct timespec ts = { 0, MS };
+        nanosleep(&ts, NULL);
     }
-    CHECK(__atomic_load_n(&u2_got, __ATOMIC_SEQ_CST));
+    CHECK(LOAD(u2_got));
     Py_END_CRITICAL_SECTION();
     return NULL;
 }
@@ -127,11 +136,28 @@ static void *
 next_waiter(void *arg)
 {
     PyGILState_Ensure();
-    sleep_ms(70);
+    STORE(u2_tid, (int)syscall(SYS_gettid));
     PyMutex_Lock(&timed);
-    __atomic_store_n(&u2_got, 1, __ATOMIC_SEQ_CST);
+    STORE(u2_got, 1);
     PyMutex_Unlock(&timed);
     return NULL;
+}
+
+/* True once thread `tid` is blocked in the kernel. */
+static int
+sleeping(int tid)
+{
+    char path[64], buf[256];
+    snprintf(path, sizeof path, "/proc/self/task/%d/stat", tid);
+    FILE *f = fopen(path, "r");
+    if (f == NULL) {
+        return 0;
+    }
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    char *state = strrchr(buf, ')');
+    return state != NULL && state[2] == 'S';
 }
 
 static void
@@ -140,9 +166,20 @@ check_timeout_leaves_queue(void)
     PyMutex_Lock(&timed);
     pthread_t th[3];
     pthread_create(&th[0], NULL, timed_waiter, NULL);
+    while (!LOAD(t_in)) {
+        sched_yield();
+    }
     pthread_create(&th[1], NULL, section_holder, NULL);
+    /* T has timed out once it finished, or once it waits to resume its
+       section: U1 holds `a` and a thread is parked on a's lock. */
+    while (!LOAD(t_done) &&
+           !(LOAD(u1_in) && (a->ob_mutex._bits & _Py_HAS_PARKED))) {
+        sched_yield();
+    }
     pthread_create(&th[2], NULL, next_waiter, NULL);
-    sleep_ms(100);
+    while (!LOAD(u2_tid) || !sleeping(LOAD(u2_tid))) {
+        sched_yield();
+    }
     PyMutex_Unlock(&timed);
     for (int i = 0; i < 3; i++) {
         pthread_join(th[i], NULL);
