@@ -242,3 +242,23 @@ spaces until the Unicode database exists. `runtime/prim/str.c`'s
   spec for `float.__format__`), plus `PyObject_Str`, `PyObject_Repr`,
   `PyObject_ASCII` and `PyObject_Format`. `lib/kernel/str.py` ports the argument
   handling and messages of the `str` methods and `unicode_new_impl`.
+- `lib/modules/_io.py` is `Lib/_pyio.py` made the builtin `_io`. The base
+  classes are `_IOBase`, `_RawIOBase`, `_BufferedIOBase` and `_TextIOBase`
+  without `abc` (`io.py` derives the abstract ones); the file layer is the
+  posix port (no `os`, `stat`, `locale`; `readinto` is a read and a copy);
+  `BufferedReader`, `BufferedWriter` and `BufferedRandom` derive from
+  `_BufferedIOBase` alone, as in C, and borrow the shared methods; the raw
+  reads and writes of `read`, `read1`, `peek`, `readline` and `write` follow
+  `Modules/_io/bufferedio.c`; `TextIOWrapper` keeps encoded text pending up to
+  its chunk size as `textio.c` does, encodes utf-8, ascii and latin-1 without
+  an encoder object, and takes its error messages from C; `StringIO` is its
+  own class after `stringio.c`; the closed-file and unsupported-operation
+  messages are C's; `open`, `open_code` and `text_encoding` are builtin
+  functions; the unclosed-file `ResourceWarning` path is unchanged.
+- `lib/modules/_codecs.py` ports `Python/codecs.c` (the search registry, the
+  error handlers, `PyCodec_Lookup` normalization) and `Modules/_codecsmodule.c`
+  with the decoders and encoders of `Objects/unicodeobject.c` for utf-16,
+  utf-32, the escape codecs and charmap; utf-8, latin-1 and ascii run on the
+  string primitives. utf-7 is absent.
+- `lib/kernel/builtins.py` `import_star` is `import_all_from` of
+  `Python/ceval.c`.
