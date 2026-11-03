@@ -11,6 +11,7 @@
 
 #include "marshal.h"
 
+#include <dlfcn.h>
 #include <string.h>
 
 static const struct lu_frozen *
@@ -218,8 +219,109 @@ prim_marshal_dumps(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return lu_marshal_dumps(args[0], (int)version, lu_is_true(args[2]));
 }
 
+/* Extension modules (Python/importdl.c). */
+
+static void
+import_error(const char *what, PyObject *name, PyObject *path)
+{
+    PyObject *msg = PyUnicode_FromString(what);
+    PyObject *kwnames = PyTuple_Pack(2, PyUnicode_InternFromString("name"),
+                                     PyUnicode_InternFromString("path"));
+    PyObject *args[3] = { msg, name, path };
+    PyObject *exc = msg != NULL && kwnames != NULL ? lu_call(PyExc_ImportError, args, 1, kwnames) : NULL;
+    Py_XDECREF(kwnames);
+    Py_XDECREF(msg);
+    if (exc != NULL) {
+        PyErr_SetObject((PyObject *)Py_TYPE(exc), exc);
+        Py_DECREF(exc);
+    }
+}
+
+/* ext_create(spec): the module a shared object's PyInit_<name> describes,
+   made from its definition and the spec. */
+static PyObject *
+prim_ext_create(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    PyObject *spec = nargs == 1 ? args[0] : NULL;
+    PyObject *name = spec != NULL ? PyObject_GetAttrString(spec, "name") : NULL;
+    PyObject *path = name != NULL ? PyObject_GetAttrString(spec, "origin") : NULL;
+    PyObject *module = NULL;
+    if (path == NULL) {
+        goto done;
+    }
+    if (!PyUnicode_Check(name) || !PyUnicode_Check(path)) {
+        lu_err_format(PyExc_TypeError, "create_dynamic(spec): name and origin must be str");
+        goto done;
+    }
+    const char *full = PyUnicode_AsUTF8(name);
+    const char *last = strrchr(full, '.');
+    last = last != NULL ? last + 1 : full;
+    for (const char *c = last; *c; c++) {
+        if ((unsigned char)*c >= 0x80) {
+            lu_err_format(PyExc_ImportError, "extension module names must be ASCII here: %s", full);
+            goto done;
+        }
+    }
+    void *handle = dlopen(PyUnicode_AsUTF8(path), RTLD_NOW);
+    if (handle == NULL) {
+        import_error(dlerror(), name, path);
+        goto done;
+    }
+    char hook[300];
+    snprintf(hook, sizeof hook, "PyInit_%s", last);
+    PyObject *(*init)(void) = (PyObject *(*)(void))dlsym(handle, hook);
+    if (init == NULL) {
+        char msg[400];
+        snprintf(msg, sizeof msg, "dynamic module does not define module export function (%s)", hook);
+        import_error(msg, name, path);
+        goto done;
+    }
+    PyObject *def = init();
+    if (def == NULL) {
+        if (!PyErr_Occurred()) {
+            lu_err_format(PyExc_SystemError, "initialization of %s failed without raising an exception",
+                          last);
+        }
+        goto done;
+    }
+    if (PyErr_Occurred()) {
+        PyErr_Clear();
+        lu_err_format(PyExc_SystemError, "initialization of %s raised unreported exception", last);
+    }
+    else if (!Py_IS_TYPE(def, &PyModuleDef_Type)) {
+        lu_err_format(PyExc_ImportError, "initialization of %s is not multi-phase, which this "
+                      "runtime does not load yet", last);
+    }
+    else {
+        module = PyModule_FromDefAndSpec2((PyModuleDef *)def, spec, PYTHON_API_VERSION);
+    }
+    if (!Py_IS_TYPE(def, &PyModuleDef_Type)) {
+        Py_DECREF(def);
+    }
+done:
+    Py_XDECREF(path);
+    Py_XDECREF(name);
+    return module;
+}
+
+/* ext_exec(module): runs a module's exec slots once; a module that has state
+   already ran them (reload does nothing), and a module with no definition has none. */
+static PyObject *
+prim_ext_exec(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 1 || !PyModule_Check(args[0])) {
+        return Py_NewRef(Py_None);
+    }
+    PyModuleObject *mo = (PyModuleObject *)args[0];
+    if (mo->md_def == NULL || mo->md_state != NULL) {
+        return Py_NewRef(Py_None);
+    }
+    return PyModule_ExecDef(args[0], mo->md_def) < 0 ? NULL : Py_NewRef(Py_None);
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_import_methods[] = {
+    FAST(ext_create), FAST(ext_exec),
     FAST(port_exists), FAST(port_create), FAST(port_exec), FAST(frozen_find), FAST(frozen_is_package),
     FAST(frozen_code),
     FAST(frozen_names), FAST(import_state), FAST(fix_co_filename), FAST(marshal_loads), FAST(marshal_dumps),

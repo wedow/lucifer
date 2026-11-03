@@ -2,8 +2,8 @@
 bootstrap uses, over the builtin and frozen tables of the runtime.
 
 Builtin modules are the ports in lib/modules and the three native ones.
-Frozen modules are the importlib bootstrap and the startup modules. Extension modules arrive with
-the C-API loader.
+Frozen modules are the importlib bootstrap and the startup modules. Extension
+modules are shared objects loaded by the runtime (Python/importdl.c).
 """
 
 import _lucifer
@@ -124,7 +124,18 @@ def _fix_co_filename(code, path, /):
 
 def extension_suffixes():
     """Returns the list of file suffixes used to identify extension modules."""
-    return []
+    return ['.cpython-314t-x86_64-linux-gnu.so', '.abi3.so', '.so']
+
+
+def create_dynamic(spec, file=None, /):
+    """Create an extension module."""
+    return _lucifer.ext_create(spec)
+
+
+def exec_dynamic(mod, /):
+    """Initialize an extension module."""
+    _lucifer.ext_exec(mod)
+    return 0
 
 
 def source_hash(key, source):
