@@ -622,10 +622,9 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
 op_CACHE:
 unknown_opcode:
     SAVE_FRAME();
-    { int u = (int)(next_instr - 1 - lu_code_start(code)); char buf[200]; int n = 0;
-      for (int k = u - 8; k < u + 4; k++) n += snprintf(buf + n, sizeof buf - n, " %d", k >= 0 ? lu_code_start(code)[k].op.code : -1);
-    lu_err_format(PyExc_SystemError, "%s:%d: unknown opcode %d at unit %d:%s prev %d(op %d)",
-                  PyUnicode_AsUTF8(code->co_filename), code->co_firstlineno, opcode, u, buf, (int)(prev_instr - lu_code_start(code)), prev_instr->op.code); }
+    lu_err_format(PyExc_SystemError, "%s:%d: unknown opcode %d at unit %d",
+                  PyUnicode_AsUTF8(code->co_filename), code->co_firstlineno, opcode,
+                  (int)(next_instr - 1 - lu_code_start(code)));
     goto error;
 
 instrumented_opcode:
