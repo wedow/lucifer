@@ -1,6 +1,6 @@
 ---
 id: luc-qidc
-status: open
+status: closed
 deps: [luc-xljo]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: sonnet.
 
 make check-kernel PROGRAMS="hash_seed sys_exit import_builtin" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t) with PYTHONHASHSEED=12345 and =0 for hash_seed; two unseeded runs print different hash('abc') and sys.flags.hash_randomization == 1; bin/lucifer -X lucifer_stress=bogus exits 2 with a message (a kernelcheck flag row).
 
+
+## Notes
+
+**2026-11-03T08:13:05Z**
+
+K1n landed on branch luc-qidc: PyConfig/Py_InitializeFromConfig/Py_RunMain, one -X parser, sys with structseq, frozen importlib on _imp, builtin ports; hash_seed, sys_exit, import_builtin match the oracle
