@@ -92,23 +92,26 @@ _PyParkingLot_Park(const void *addr, const void *expected, size_t size,
     enqueue(bucket, &wait);
     pthread_mutex_unlock(&bucket->lock.mutex);
 
+    // Detached until the entry has left the bucket: reattaching may wait to
+    // resume a critical section, and a wait still queued meanwhile would
+    // take a wakeup or a handoff that belongs to the next waiter.
+    PyThreadState *tstate = detach ? lu_syscall_begin() : NULL;
     PyTime_t deadline = timeout_ns < 0 ? -1 : lu_monotonic_ns() + timeout_ns;
-    int res = lu_park(&wait.wait, deadline, detach);
-    if (res == Py_PARK_OK) {
-        return res;
+    int res = lu_park(&wait.wait, deadline, 0);
+    if (res != Py_PARK_OK) {
+        // timeout or interrupt
+        pthread_mutex_lock(&bucket->lock.mutex);
+        if (wait.is_unparking) {
+            // Another thread has dequeued us and run its callback: we are
+            // unparked, and its lu_unpark will find our id stale.
+            res = Py_PARK_OK;
+        }
+        else {
+            remove_entry(bucket, &wait);
+        }
+        pthread_mutex_unlock(&bucket->lock.mutex);
     }
-
-    // timeout or interrupt
-    pthread_mutex_lock(&bucket->lock.mutex);
-    if (wait.is_unparking) {
-        // Another thread has dequeued us and run its callback: we are
-        // unparked, and its lu_unpark will find our id stale.
-        res = Py_PARK_OK;
-    }
-    else {
-        remove_entry(bucket, &wait);
-    }
-    pthread_mutex_unlock(&bucket->lock.mutex);
+    lu_syscall_end(tstate);
     return res;
 }
 

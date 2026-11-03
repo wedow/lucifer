@@ -2,14 +2,22 @@
    thread state from PyGILState_Ensure, take one PyMutex, a two-object
    critical section in both argument orders, and a two-object section nested
    inside a one-object section on the same object, which must suspend the
-   outer section to proceed and resume it after. Every count must be exact. */
+   outer section to proceed and resume it after. Every count must be exact.
+   Then a timed lock that times out inside a critical section must leave the
+   mutex's queue before it waits to resume the section. */
 
 #include "Python.h"
 
 #include <pthread.h>
 #include <sched.h>
 #include <stdio.h>
+#include <time.h>
 #include <unistd.h>
+
+/* Exported by cp314t; _thread.lock.acquire(timeout=...) calls it. */
+PyAPI_FUNC(PyLockStatus) _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout_ns,
+                                            int flags);
+enum { LOCK_DETACH = 1, MS = 1000000 };
 
 enum { THREADS = 8, ROUNDS = 4000 };
 
@@ -74,6 +82,75 @@ contend(void *arg)
     return NULL;
 }
 
+static void
+sleep_ms(int ms)
+{
+    struct timespec ts = { 0, ms * MS };
+    nanosleep(&ts, NULL);
+}
+
+/* T waits 50 ms for `timed` inside a section on `a` and times out; U1 has
+   taken `a` meanwhile, so T's resume waits for U1. U1 holds `a` until U2
+   gets `timed`, which the holder releases at 100 ms. U2 must get it then:
+   T's timed-out wait must not still be first in the queue. */
+static PyMutex timed;
+static int t_status, u2_got;
+
+static void *
+timed_waiter(void *arg)
+{
+    PyGILState_Ensure();
+    Py_BEGIN_CRITICAL_SECTION(a);
+    t_status = _PyMutex_LockTimed(&timed, 50 * MS, LOCK_DETACH);
+    if (t_status == PY_LOCK_ACQUIRED) {
+        PyMutex_Unlock(&timed);
+    }
+    Py_END_CRITICAL_SECTION();
+    return NULL;
+}
+
+static void *
+section_holder(void *arg)
+{
+    PyGILState_Ensure();
+    sleep_ms(20);
+    Py_BEGIN_CRITICAL_SECTION(a);
+    for (int i = 0; i < 1000 && !__atomic_load_n(&u2_got, __ATOMIC_SEQ_CST); i++) {
+        sleep_ms(1);
+    }
+    CHECK(__atomic_load_n(&u2_got, __ATOMIC_SEQ_CST));
+    Py_END_CRITICAL_SECTION();
+    return NULL;
+}
+
+static void *
+next_waiter(void *arg)
+{
+    PyGILState_Ensure();
+    sleep_ms(70);
+    PyMutex_Lock(&timed);
+    __atomic_store_n(&u2_got, 1, __ATOMIC_SEQ_CST);
+    PyMutex_Unlock(&timed);
+    return NULL;
+}
+
+static void
+check_timeout_leaves_queue(void)
+{
+    PyMutex_Lock(&timed);
+    pthread_t th[3];
+    pthread_create(&th[0], NULL, timed_waiter, NULL);
+    pthread_create(&th[1], NULL, section_holder, NULL);
+    pthread_create(&th[2], NULL, next_waiter, NULL);
+    sleep_ms(100);
+    PyMutex_Unlock(&timed);
+    for (int i = 0; i < 3; i++) {
+        pthread_join(th[i], NULL);
+    }
+    CHECK(t_status == PY_LOCK_FAILURE);
+    CHECK(!PyMutex_IsLocked(&timed) && !PyMutex_IsLocked(&a->ob_mutex));
+}
+
 static struct PyModuleDef mutex_module = {
     PyModuleDef_HEAD_INIT, .m_name = "mutex",
 };
@@ -109,6 +186,7 @@ check(void)
     CHECK(b_count == THREADS * ROUNDS + nested);
     CHECK(!PyMutex_IsLocked(&mutex));
     CHECK(!PyMutex_IsLocked(&a->ob_mutex) && !PyMutex_IsLocked(&b->ob_mutex));
+    check_timeout_leaves_queue();
     if (failures == 0) {
         puts("capi mutex ok");
     }
