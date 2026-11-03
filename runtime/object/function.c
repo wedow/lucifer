@@ -14,21 +14,21 @@ function_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
 {
     PyFunctionObject *func = (PyFunctionObject *)callable;
     Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
-    if (kwnames != NULL && PyTuple_GET_SIZE(kwnames) != 0) {
-        lu_err_format(PyExc_SystemError, "keyword arguments arrive with K1b");
-        return NULL;
-    }
+    Py_ssize_t total = nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
     PyThreadState *ts = PyThreadState_Get();
-    struct lu_frame *f = lu_frame_push(ts, func, NULL);
-    if (f == NULL) {
-        return NULL;
+    PyObject *small[16];
+    PyObject **owned = total <= 16 ? small : PyMem_Malloc(total * sizeof(PyObject *));
+    if (owned == NULL) {
+        return PyErr_NoMemory();
     }
-    PyObject *owned[nargs > 0 ? nargs : 1];
-    for (Py_ssize_t i = 0; i < nargs; i++) {
+    for (Py_ssize_t i = 0; i < total; i++) {
         owned[i] = Py_NewRef(args[i]);
     }
-    if (lu_frame_bind(ts, f, owned, nargs) < 0) {
-        lu_frame_pop(ts, f);
+    struct lu_frame *f = lu_frame_call(ts, func, owned, nargs, kwnames);
+    if (owned != small) {
+        PyMem_Free(owned);
+    }
+    if (f == NULL) {
         return NULL;
     }
     PyObject *result;
@@ -181,7 +181,8 @@ vectorcall_fastcall_keywords(PyObject *callable, PyObject *const *args, size_t n
 static PyObject *
 vectorcall_varargs(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
-    if (no_keywords(callable, kwnames) < 0) {
+    PyMethodDef *ml = CFUNC(callable)->m_ml;
+    if (!(ml->ml_flags & METH_KEYWORDS) && no_keywords(callable, kwnames) < 0) {
         return NULL;
     }
     Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
@@ -192,10 +193,24 @@ vectorcall_varargs(PyObject *callable, PyObject *const *args, size_t nargsf, PyO
     for (Py_ssize_t i = 0; i < nargs; i++) {
         PyTuple_SET_ITEM(tuple, i, Py_NewRef(args[i]));
     }
-    PyMethodDef *ml = CFUNC(callable)->m_ml;
+    PyObject *kwargs = NULL;
+    Py_ssize_t nkw = kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0;
+    if (nkw) {
+        kwargs = PyDict_New();
+        for (Py_ssize_t i = 0; kwargs != NULL && i < nkw; i++) {
+            if (lu_ns_insert(kwargs, PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) < 0) {
+                Py_CLEAR(kwargs);
+            }
+        }
+        if (kwargs == NULL) {
+            Py_DECREF(tuple);
+            return NULL;
+        }
+    }
     PyObject *result = (ml->ml_flags & METH_KEYWORDS)
-        ? ((PyCFunctionWithKeywords)(void (*)(void))ml->ml_meth)(CFUNC(callable)->m_self, tuple, NULL)
+        ? ((PyCFunctionWithKeywords)(void (*)(void))ml->ml_meth)(CFUNC(callable)->m_self, tuple, kwargs)
         : ml->ml_meth(CFUNC(callable)->m_self, tuple);
+    Py_XDECREF(kwargs);
     Py_DECREF(tuple);
     return result;
 }

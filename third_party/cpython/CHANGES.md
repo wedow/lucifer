@@ -50,3 +50,13 @@ C under `runtime/` adapted from this tag's sources, under the PSF License
 - `runtime/object/dict.h` and `runtime/object/dict.c` from
   `Include/internal/pycore_dict.h` and `Objects/dictobject.c` (the keys-table
   layout, unicode-keys lookup, insertion and resize): exact-str keys only.
+  Deletion (`delitem_common`'s dummy index) and in-order iteration over the
+  entries are added for the namespace primitives.
+- `runtime/interp/call.c` from `Python/ceval.c` (`initialize_locals`,
+  `missing_arguments`, `too_many_positional`, `positional_only_passed_as_keyword`,
+  `_PyEval_FormatKwargsError`, `_Py_Check_ArgsIterable`), `Python/suggestions.c`
+  (`levenshtein_distance`, `_Py_CalculateSuggestions`) and `Objects/object.c`
+  (`_PyObject_FunctionStr`): messages are formatted with printf into a
+  512-byte buffer and long lists of names are truncated; `*` operands are
+  tuples and lists and `**` operands exact dicts until iteration and the
+  mapping protocol exist.

@@ -53,9 +53,24 @@ struct lu_frame *lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObje
    be the task's topmost. */
 void lu_frame_pop(PyThreadState *ts, struct lu_frame *f);
 
-/* Binds call arguments to the frame's locals, taking the references in
-   args[0..nargs). Returns -1 with TypeError set (initialize_locals). */
-int lu_frame_bind(PyThreadState *ts, struct lu_frame *f, PyObject **args, Py_ssize_t nargs);
+/* Pushes a frame for `func` and binds the call arguments to it
+   (initialize_locals): args[0..nargs) are positional, then one value per
+   name in `kwnames` (a tuple of str, or NULL). Takes the references in
+   args on every path. Returns NULL with an exception set, the frame
+   already popped (runtime/interp/call.c). */
+struct lu_frame *lu_frame_call(PyThreadState *ts, PyFunctionObject *func, PyObject **args,
+                               Py_ssize_t nargs, PyObject *kwnames);
+
+/* CALL_FUNCTION_EX and DICT_MERGE operands (runtime/interp/call.c). The array
+   from lu_unpack_call holds owned references in vectorcall layout (positional
+   items, then keyword values) with *kwnames a new tuple or NULL; the caller
+   hands the references on and PyMem_Frees the array. */
+PyObject **lu_unpack_call(PyObject *callargs, PyObject *kwargs, Py_ssize_t *nargs,
+                          PyObject **kwnames);
+PyObject *lu_args_as_tuple(PyObject *func, PyObject *args);
+int lu_dict_merge(PyObject *func, PyObject *dict, PyObject *update);
+/* "module.qualname()" as the argument errors name a callable. */
+const char *lu_function_str(PyObject *func, char *buf, size_t size);
 
 /* Runs `f`, already pushed and bound, in a new activation of the eval loop
    until it returns. C callers only: the interpreter runs Python calls in its

@@ -1,7 +1,6 @@
 /* Frames on the task's chunked datastack (Python/pystate.c push_chunk,
-   _PyThreadState_PushFrame, _PyThreadState_PopFrame) and argument binding
-   (Python/ceval.c initialize_locals, the positional and default subset; the
-   rest, with CPython's exact messages, is K1b). */
+   _PyThreadState_PushFrame, _PyThreadState_PopFrame). Binding arguments to
+   a frame is runtime/interp/call.c. */
 
 #include "interp/frame.h"
 
@@ -36,10 +35,16 @@ lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals)
 {
     PyCodeObject *code = (PyCodeObject *)func->func_code;
     size_t words = (size_t)code->co_framesize;
+    if (ts->py_recursion_remaining-- <= 0) {
+        ts->py_recursion_remaining++;
+        lu_err_format(PyExc_RecursionError, "maximum recursion depth exceeded");
+        return NULL;
+    }
     PyObject **base = ts->datastack_top;
     if (base == NULL || (size_t)(ts->datastack_limit - base) < words) {
         base = push_chunk(ts, words);
         if (base == NULL) {
+            ts->py_recursion_remaining++;
             PyErr_NoMemory();
             return NULL;
         }
@@ -71,6 +76,7 @@ lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
     Py_XDECREF(f->locals);
     Py_DECREF(f->func);
     Py_DECREF(f->code);
+    ts->py_recursion_remaining++;
     _PyStackChunk *c = ts->datastack_chunk;
     if ((PyObject **)f != &c->data[0]) {
         ts->datastack_top = (PyObject **)f;
@@ -82,82 +88,4 @@ lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
     ts->datastack_chunk = prev;
     ts->datastack_top = prev != NULL ? &prev->data[prev->top] : NULL;
     ts->datastack_limit = prev != NULL ? (PyObject **)((char *)prev + prev->size) : NULL;
-}
-
-static void
-too_many(PyFunctionObject *func, int argcount, Py_ssize_t given)
-{
-    lu_err_format(PyExc_TypeError, "%s() takes %d positional argument%s but %zd %s given",
-                  PyUnicode_AsUTF8(func->func_qualname), argcount, argcount == 1 ? "" : "s",
-                  given, given == 1 ? "was" : "were");
-}
-
-static void
-missing(PyFunctionObject *func, PyObject *name, int kwonly)
-{
-    lu_err_format(PyExc_TypeError, "%s() missing 1 required %s argument: '%s'",
-                  PyUnicode_AsUTF8(func->func_qualname), kwonly ? "keyword-only" : "positional",
-                  PyUnicode_AsUTF8(name));
-}
-
-int
-lu_frame_bind(PyThreadState *ts, struct lu_frame *f, PyObject **args, Py_ssize_t nargs)
-{
-    PyCodeObject *co = f->code;
-    PyFunctionObject *func = (PyFunctionObject *)f->func;
-    PyObject **locals = f->localsplus;
-    int argcount = co->co_argcount;
-    int total = argcount + co->co_kwonlyargcount;
-    Py_ssize_t n = nargs < argcount ? nargs : argcount;
-    for (Py_ssize_t i = 0; i < n; i++) {
-        locals[i] = args[i];
-    }
-    if (co->co_flags & CO_VARARGS) {
-        PyObject *rest = PyTuple_New(nargs - n);
-        if (rest == NULL) {
-            goto drop_rest;
-        }
-        for (Py_ssize_t i = n; i < nargs; i++) {
-            PyTuple_SET_ITEM(rest, i - n, args[i]);
-        }
-        locals[total] = rest;
-    }
-    else if (nargs > argcount) {
-        too_many(func, argcount, nargs);
-        goto drop_rest;
-    }
-    if (co->co_flags & CO_VARKEYWORDS) {
-        int slot = total + ((co->co_flags & CO_VARARGS) != 0);
-        locals[slot] = PyDict_New();
-        if (locals[slot] == NULL) {
-            return -1;
-        }
-    }
-    PyObject *defaults = func->func_defaults;
-    Py_ssize_t ndefaults = defaults != NULL ? PyTuple_GET_SIZE(defaults) : 0;
-    for (Py_ssize_t i = n; i < argcount; i++) {
-        Py_ssize_t d = i - (argcount - ndefaults);
-        if (d < 0) {
-            missing(func, PyTuple_GET_ITEM(co->co_localsplusnames, i), 0);
-            return -1;
-        }
-        locals[i] = Py_NewRef(PyTuple_GET_ITEM(defaults, d));
-    }
-    for (int i = argcount; i < total; i++) {
-        PyObject *name = PyTuple_GET_ITEM(co->co_localsplusnames, i);
-        PyObject *value = func->func_kwdefaults != NULL
-            ? lu_ns_lookup(func->func_kwdefaults, name) : NULL;
-        if (value == NULL) {
-            missing(func, name, 1);
-            return -1;
-        }
-        locals[i] = Py_NewRef(value);
-    }
-    return 0;
-
-drop_rest:
-    for (Py_ssize_t i = n; i < nargs; i++) {
-        Py_DECREF(args[i]);
-    }
-    return -1;
 }
