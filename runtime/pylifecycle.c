@@ -583,15 +583,14 @@ Py_FinalizeEx(void)
     /* Before the daemon threads stop: the streams' locks are Python locks, which a daemon
        stopped for good inside a write would hold for ever. */
     int status = flush_std_files();
-    lu_sched_stop();
-    /* What is left are daemon threads: they hang when they next attach. As in
-       CPython they stop before the modules are torn down. */
-    lu_task_shutdown_others(interp);
-    __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     finalize_modules(interp);
     flush_std_stream("stdout");
     flush_std_stream("stderr");
     PyErr_Clear();
+    lu_sched_stop();
+    /* What is left are daemon threads: they hang when they next attach. */
+    lu_task_shutdown_others(interp);
+    __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     release_interpreter(interp);
     return status;
 }
