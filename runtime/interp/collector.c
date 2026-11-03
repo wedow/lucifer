@@ -485,8 +485,10 @@ clear_weakrefs(struct collection_state *state, int enqueue_callbacks)
             if (!enqueue_callbacks) {
                 continue;
             }
-            /* No callback for a weakref that is itself unreachable. */
-            if (wr->wr_callback == NULL || gc_is_unreachable((PyObject *)wr)) {
+            /* No callback for a weakref that is itself unreachable, or dead
+               already: its free waits in a deep dealloc chain's queue. */
+            if (wr->wr_callback == NULL || gc_is_unreachable((PyObject *)wr)
+                || Py_REFCNT((PyObject *)wr) == 0) {
                 continue;
             }
             merge_refcount((PyObject *)wr, 1);
