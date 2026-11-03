@@ -241,10 +241,11 @@ _local_refs = set()
 def _thread_exit():
     """The current thread ends: its locals' data goes with it, now, not at some collection."""
     tdict = _lucifer.thread_dict()
-    for ref, _ in list(tdict.values()):
-        impl = ref()
-        if impl is not None:
-            impl.forget(tdict)
+    for key, entry in list(tdict.items()):
+        if type(key) is str and key.startswith('_thread._local.'):
+            impl = entry[0]()
+            if impl is not None:
+                impl.forget(tdict)
     tdict.clear()
 
 

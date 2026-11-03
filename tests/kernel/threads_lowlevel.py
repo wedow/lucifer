@@ -230,3 +230,8 @@ def early():
 
 wait_done(_thread.start_joinable_thread(early, daemon=False))
 print(tail)
+
+# The thread's dict holds more than the locals' data: a repr in a thread leaves its marker there.
+reprs = []
+wait_done(_thread.start_joinable_thread(lambda: reprs.append(repr({1}) + repr([local])), daemon=False))
+print(reprs[0][:4], _thread._count())
