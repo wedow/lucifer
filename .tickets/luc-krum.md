@@ -1,6 +1,6 @@
 ---
 id: luc-krum
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T01:42:38Z
@@ -15,3 +15,9 @@ tags: [validation]
 
 fake shell-wrapper crash scores CRASH in ftcorpus; ft-cpython parallel-wrapped cases run serially score FAIL
 
+
+## Notes
+
+**2026-11-03T02:05:46Z**
+
+ftcorpus execute maps 128+N fatal-signal exits to -N (CRASH); ft-cpython parallel lane shares fail_serial_passes with the package lane. Checks added in tools/ftcorpus/check.py; make check-harness passes.
