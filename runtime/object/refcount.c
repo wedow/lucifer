@@ -152,3 +152,13 @@ PyUnstable_IsImmortal(PyObject *op)
 {
     return _Py_IsImmortal(op);
 }
+
+/* _Py_SetImmortal: the object is never freed and owned by no thread. */
+void
+lu_set_immortal(PyObject *op)
+{
+    op->ob_tid = 0;
+    op->ob_ref_local = _Py_IMMORTAL_REFCNT_LOCAL;
+    op->ob_ref_shared = 0;
+    op->ob_gc_bits |= 1 << 6;   /* _PyGC_BITS_DEFERRED */
+}

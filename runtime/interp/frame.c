@@ -3,6 +3,7 @@
    a frame is runtime/interp/call.c. */
 
 #include "interp/frame.h"
+#include "interp/code.h"
 
 static PyObject **
 push_chunk(PyThreadState *ts, size_t words)
@@ -59,7 +60,8 @@ lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals)
     f->locals = Py_XNewRef(locals);
     f->frame_obj = NULL;
     f->instr = lu_code_start(code);
-    f->owner = LU_FRAME_INTERPRETER;
+    f->owner = (code->co_flags & LU_CO_KERNEL) ? LU_FRAME_KERNEL_HIDDEN : LU_FRAME_INTERPRETER;
+    f->ret = LU_RETURN_PUSH;
     for (int i = 0; i < code->co_nlocalsplus; i++) {
         f->localsplus[i] = NULL;
     }

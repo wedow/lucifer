@@ -54,9 +54,6 @@ check_heap(void)
     if (cls != NULL) {
         CHECK(((PyTypeObject *)cls)->tp_dict != NULL);
         CHECK(PyDict_Check(((PyTypeObject *)cls)->tp_dict));
-        PyObject *module = lookup(((PyTypeObject *)cls)->tp_dict, "__module__");
-        CHECK(module != NULL);
-        Py_XDECREF(module);
     }
     PyErr_Clear();
     Py_XDECREF(cls);

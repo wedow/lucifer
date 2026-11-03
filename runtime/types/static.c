@@ -17,185 +17,206 @@
     .ob_gc_bits = 1 << 6, \
     .ob_type = (type) }
 
-/* Flags hold only the fast-subclass bits, which inline checks such as
-   PyLong_Check read; values from the oracle's types. */
-#define LU_TYPE(sym, name, flags) \
+/* Flags hold the fast-subclass bits, which inline checks such as
+   PyLong_Check read, and Py_TPFLAGS_BASETYPE; values from the oracle's
+   types. tp_base is the oracle's too; the runtime derives tp_bases and
+   tp_mro from it at startup (runtime/prim/type.c). */
+#define LU_TYPE(sym, name, flags, base) \
     LU_EXPORT PyTypeObject sym = { PyVarObject_HEAD_INIT(&PyType_Type, 0) \
-        .tp_name = name, .tp_flags = flags };
+        .tp_name = name, .tp_flags = flags, .tp_base = base };
 
 #define LU_PRIVATE(sym, size) LU_EXPORT _Alignas(16) unsigned char sym[size];
 
 /* Types (public and private); names from the oracle's tp_name. */
-LU_TYPE(PyAsyncGen_Type, "async_generator", 0)
-LU_TYPE(PyBaseObject_Type, "object", 0)
-LU_TYPE(PyBool_Type, "bool", Py_TPFLAGS_LONG_SUBCLASS)
-LU_TYPE(PyByteArrayIter_Type, "bytearray_iterator", 0)
-LU_TYPE(PyByteArray_Type, "bytearray", 0)
-LU_TYPE(PyBytesIter_Type, "bytes_iterator", 0)
-LU_TYPE(PyBytes_Type, "bytes", Py_TPFLAGS_BYTES_SUBCLASS)
-LU_TYPE(PyCFunction_Type, "builtin_function_or_method", 0)
-LU_TYPE(PyCMethod_Type, "builtin_method", 0)
-LU_TYPE(PyCallIter_Type, "callable_iterator", 0)
-LU_TYPE(PyCapsule_Type, "PyCapsule", 0)
-LU_TYPE(PyCell_Type, "cell", 0)
-LU_TYPE(PyClassMethodDescr_Type, "classmethod_descriptor", 0)
-LU_TYPE(PyClassMethod_Type, "classmethod", 0)
-LU_TYPE(PyCode_Type, "code", 0)
-LU_TYPE(PyComplex_Type, "complex", 0)
-LU_TYPE(PyContextToken_Type, "_contextvars.Token", 0)
-LU_TYPE(PyContextVar_Type, "_contextvars.ContextVar", 0)
-LU_TYPE(PyContext_Type, "_contextvars.Context", 0)
-LU_TYPE(PyCoro_Type, "coroutine", 0)
-LU_TYPE(PyDictItems_Type, "dict_items", 0)
-LU_TYPE(PyDictIterItem_Type, "dict_itemiterator", 0)
-LU_TYPE(PyDictIterKey_Type, "dict_keyiterator", 0)
-LU_TYPE(PyDictIterValue_Type, "dict_valueiterator", 0)
-LU_TYPE(PyDictKeys_Type, "dict_keys", 0)
-LU_TYPE(PyDictProxy_Type, "mappingproxy", 0)
-LU_TYPE(PyDictRevIterItem_Type, "dict_reverseitemiterator", 0)
-LU_TYPE(PyDictRevIterKey_Type, "dict_reversekeyiterator", 0)
-LU_TYPE(PyDictRevIterValue_Type, "dict_reversevalueiterator", 0)
-LU_TYPE(PyDictValues_Type, "dict_values", 0)
-LU_TYPE(PyDict_Type, "dict", Py_TPFLAGS_DICT_SUBCLASS)
-LU_TYPE(PyEllipsis_Type, "ellipsis", 0)
-LU_TYPE(PyEnum_Type, "enumerate", 0)
-LU_TYPE(PyFilter_Type, "filter", 0)
-LU_TYPE(PyFloat_Type, "float", 0)
-LU_TYPE(PyFrameLocalsProxy_Type, "FrameLocalsProxy", 0)
-LU_TYPE(PyFrame_Type, "frame", 0)
-LU_TYPE(PyFrozenSet_Type, "frozenset", 0)
-LU_TYPE(PyFunction_Type, "function", 0)
-LU_TYPE(PyGen_Type, "generator", 0)
-LU_TYPE(PyGetSetDescr_Type, "getset_descriptor", 0)
-LU_TYPE(PyInstanceMethod_Type, "instancemethod", 0)
-LU_TYPE(PyListIter_Type, "list_iterator", 0)
-LU_TYPE(PyListRevIter_Type, "list_reverseiterator", 0)
-LU_TYPE(PyList_Type, "list", Py_TPFLAGS_LIST_SUBCLASS)
-LU_TYPE(PyLongRangeIter_Type, "longrange_iterator", 0)
-LU_TYPE(PyLong_Type, "int", Py_TPFLAGS_LONG_SUBCLASS)
-LU_TYPE(PyMap_Type, "map", 0)
-LU_TYPE(PyMemberDescr_Type, "member_descriptor", 0)
-LU_TYPE(PyMemoryView_Type, "memoryview", 0)
-LU_TYPE(PyMethodDescr_Type, "method_descriptor", 0)
-LU_TYPE(PyMethod_Type, "method", 0)
-LU_TYPE(PyModuleDef_Type, "moduledef", 0)
-LU_TYPE(PyModule_Type, "module", 0)
-LU_TYPE(PyODictItems_Type, "odict_items", 0)
-LU_TYPE(PyODictIter_Type, "odict_iterator", 0)
-LU_TYPE(PyODictKeys_Type, "odict_keys", 0)
-LU_TYPE(PyODictValues_Type, "odict_values", 0)
-LU_TYPE(PyODict_Type, "collections.OrderedDict", Py_TPFLAGS_DICT_SUBCLASS)
-LU_TYPE(PyPickleBuffer_Type, "pickle.PickleBuffer", 0)
-LU_TYPE(PyProperty_Type, "property", 0)
-LU_TYPE(PyRangeIter_Type, "range_iterator", 0)
-LU_TYPE(PyRange_Type, "range", 0)
-LU_TYPE(PyReversed_Type, "reversed", 0)
-LU_TYPE(PySeqIter_Type, "iterator", 0)
-LU_TYPE(PySetIter_Type, "set_iterator", 0)
-LU_TYPE(PySet_Type, "set", 0)
-LU_TYPE(PySlice_Type, "slice", 0)
-LU_TYPE(PyStaticMethod_Type, "staticmethod", 0)
-LU_TYPE(PyStdPrinter_Type, "stderrprinter", 0)
-LU_TYPE(PySuper_Type, "super", 0)
-LU_TYPE(PyTraceBack_Type, "traceback", 0)
-LU_TYPE(PyTupleIter_Type, "tuple_iterator", 0)
-LU_TYPE(PyTuple_Type, "tuple", Py_TPFLAGS_TUPLE_SUBCLASS)
-LU_TYPE(PyType_Type, "type", Py_TPFLAGS_TYPE_SUBCLASS)
-LU_TYPE(PyUnicodeIter_Type, "str_iterator", 0)
-LU_TYPE(PyUnicode_Type, "str", Py_TPFLAGS_UNICODE_SUBCLASS)
-LU_TYPE(PyWrapperDescr_Type, "wrapper_descriptor", 0)
-LU_TYPE(PyZip_Type, "zip", 0)
-LU_TYPE(Py_GenericAliasType, "types.GenericAlias", 0)
-LU_TYPE(_PyAsyncGenASend_Type, "async_generator_asend", 0)
-LU_TYPE(_PyExc_IncompleteInputError, "_IncompleteInputError", Py_TPFLAGS_BASE_EXC_SUBCLASS)
-LU_TYPE(_PyNone_Type, "NoneType", 0)
-LU_TYPE(_PyNotImplemented_Type, "NotImplementedType", 0)
-LU_TYPE(_PyUnion_Type, "typing.Union", 0)
-LU_TYPE(_PyWeakref_CallableProxyType, "weakref.CallableProxyType", 0)
-LU_TYPE(_PyWeakref_ProxyType, "weakref.ProxyType", 0)
-LU_TYPE(_PyWeakref_RefType, "weakref.ReferenceType", 0)
+#define LU_STATIC_TYPES(X) \
+    X(PyAsyncGen_Type, "async_generator", 0, &PyBaseObject_Type) \
+    X(PyBaseObject_Type, "object", Py_TPFLAGS_BASETYPE, NULL) \
+    X(PyBool_Type, "bool", Py_TPFLAGS_LONG_SUBCLASS, &PyLong_Type) \
+    X(PyByteArrayIter_Type, "bytearray_iterator", 0, &PyBaseObject_Type) \
+    X(PyByteArray_Type, "bytearray", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyBytesIter_Type, "bytes_iterator", 0, &PyBaseObject_Type) \
+    X(PyBytes_Type, "bytes", Py_TPFLAGS_BYTES_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyCFunction_Type, "builtin_function_or_method", 0, &PyBaseObject_Type) \
+    X(PyCMethod_Type, "builtin_method", 0, &PyCFunction_Type) \
+    X(PyCallIter_Type, "callable_iterator", 0, &PyBaseObject_Type) \
+    X(PyCapsule_Type, "PyCapsule", 0, &PyBaseObject_Type) \
+    X(PyCell_Type, "cell", 0, &PyBaseObject_Type) \
+    X(PyClassMethodDescr_Type, "classmethod_descriptor", 0, &PyBaseObject_Type) \
+    X(PyClassMethod_Type, "classmethod", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyCode_Type, "code", 0, &PyBaseObject_Type) \
+    X(PyComplex_Type, "complex", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyContextToken_Type, "_contextvars.Token", 0, &PyBaseObject_Type) \
+    X(PyContextVar_Type, "_contextvars.ContextVar", 0, &PyBaseObject_Type) \
+    X(PyContext_Type, "_contextvars.Context", 0, &PyBaseObject_Type) \
+    X(PyCoro_Type, "coroutine", 0, &PyBaseObject_Type) \
+    X(PyDictItems_Type, "dict_items", 0, &PyBaseObject_Type) \
+    X(PyDictIterItem_Type, "dict_itemiterator", 0, &PyBaseObject_Type) \
+    X(PyDictIterKey_Type, "dict_keyiterator", 0, &PyBaseObject_Type) \
+    X(PyDictIterValue_Type, "dict_valueiterator", 0, &PyBaseObject_Type) \
+    X(PyDictKeys_Type, "dict_keys", 0, &PyBaseObject_Type) \
+    X(PyDictProxy_Type, "mappingproxy", 0, &PyBaseObject_Type) \
+    X(PyDictRevIterItem_Type, "dict_reverseitemiterator", 0, &PyBaseObject_Type) \
+    X(PyDictRevIterKey_Type, "dict_reversekeyiterator", 0, &PyBaseObject_Type) \
+    X(PyDictRevIterValue_Type, "dict_reversevalueiterator", 0, &PyBaseObject_Type) \
+    X(PyDictValues_Type, "dict_values", 0, &PyBaseObject_Type) \
+    X(PyDict_Type, "dict", Py_TPFLAGS_DICT_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyEllipsis_Type, "ellipsis", 0, &PyBaseObject_Type) \
+    X(PyEnum_Type, "enumerate", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyFilter_Type, "filter", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyFloat_Type, "float", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyFrameLocalsProxy_Type, "FrameLocalsProxy", 0, &PyBaseObject_Type) \
+    X(PyFrame_Type, "frame", 0, &PyBaseObject_Type) \
+    X(PyFrozenSet_Type, "frozenset", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyFunction_Type, "function", 0, &PyBaseObject_Type) \
+    X(PyGen_Type, "generator", 0, &PyBaseObject_Type) \
+    X(PyGetSetDescr_Type, "getset_descriptor", 0, &PyBaseObject_Type) \
+    X(PyInstanceMethod_Type, "instancemethod", 0, &PyBaseObject_Type) \
+    X(PyListIter_Type, "list_iterator", 0, &PyBaseObject_Type) \
+    X(PyListRevIter_Type, "list_reverseiterator", 0, &PyBaseObject_Type) \
+    X(PyList_Type, "list", Py_TPFLAGS_LIST_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyLongRangeIter_Type, "longrange_iterator", 0, &PyBaseObject_Type) \
+    X(PyLong_Type, "int", Py_TPFLAGS_LONG_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyMap_Type, "map", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyMemberDescr_Type, "member_descriptor", 0, &PyBaseObject_Type) \
+    X(PyMemoryView_Type, "memoryview", 0, &PyBaseObject_Type) \
+    X(PyMethodDescr_Type, "method_descriptor", 0, &PyBaseObject_Type) \
+    X(PyMethod_Type, "method", 0, &PyBaseObject_Type) \
+    X(PyModuleDef_Type, "moduledef", 0, &PyBaseObject_Type) \
+    X(PyModule_Type, "module", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyODictItems_Type, "odict_items", 0, &PyDictItems_Type) \
+    X(PyODictIter_Type, "odict_iterator", 0, &PyBaseObject_Type) \
+    X(PyODictKeys_Type, "odict_keys", 0, &PyDictKeys_Type) \
+    X(PyODictValues_Type, "odict_values", 0, &PyDictValues_Type) \
+    X(PyODict_Type, "collections.OrderedDict", Py_TPFLAGS_DICT_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyDict_Type) \
+    X(PyPickleBuffer_Type, "pickle.PickleBuffer", 0, &PyBaseObject_Type) \
+    X(PyProperty_Type, "property", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyRangeIter_Type, "range_iterator", 0, &PyBaseObject_Type) \
+    X(PyRange_Type, "range", 0, &PyBaseObject_Type) \
+    X(PyReversed_Type, "reversed", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PySeqIter_Type, "iterator", 0, &PyBaseObject_Type) \
+    X(PySetIter_Type, "set_iterator", 0, &PyBaseObject_Type) \
+    X(PySet_Type, "set", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PySlice_Type, "slice", 0, &PyBaseObject_Type) \
+    X(PyStaticMethod_Type, "staticmethod", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyStdPrinter_Type, "stderrprinter", 0, &PyBaseObject_Type) \
+    X(PySuper_Type, "super", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyTraceBack_Type, "traceback", 0, &PyBaseObject_Type) \
+    X(PyTupleIter_Type, "tuple_iterator", 0, &PyBaseObject_Type) \
+    X(PyTuple_Type, "tuple", Py_TPFLAGS_TUPLE_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyType_Type, "type", Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyUnicodeIter_Type, "str_iterator", 0, &PyBaseObject_Type) \
+    X(PyUnicode_Type, "str", Py_TPFLAGS_UNICODE_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyWrapperDescr_Type, "wrapper_descriptor", 0, &PyBaseObject_Type) \
+    X(PyZip_Type, "zip", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(Py_GenericAliasType, "types.GenericAlias", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(_PyAsyncGenASend_Type, "async_generator_asend", 0, &PyBaseObject_Type) \
+    X(_PyExc_IncompleteInputError, "_IncompleteInputError", Py_TPFLAGS_BASE_EXC_SUBCLASS | Py_TPFLAGS_BASETYPE, &lu_exc_SyntaxError) \
+    X(_PyNone_Type, "NoneType", 0, &PyBaseObject_Type) \
+    X(_PyNotImplemented_Type, "NotImplementedType", 0, &PyBaseObject_Type) \
+    X(_PyUnion_Type, "typing.Union", 0, &PyBaseObject_Type) \
+    X(_PyWeakref_CallableProxyType, "weakref.CallableProxyType", 0, &PyBaseObject_Type) \
+    X(_PyWeakref_ProxyType, "weakref.ProxyType", 0, &PyBaseObject_Type) \
+    X(_PyWeakref_RefType, "weakref.ReferenceType", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type)
 
 /* Exceptions: the exported symbols are pointers to unexported types. */
 #define LU_EXCEPTIONS(X) \
-    X(ArithmeticError, "ArithmeticError") \
-    X(AssertionError, "AssertionError") \
-    X(AttributeError, "AttributeError") \
-    X(BaseException, "BaseException") \
-    X(BaseExceptionGroup, "BaseExceptionGroup") \
-    X(BlockingIOError, "BlockingIOError") \
-    X(BrokenPipeError, "BrokenPipeError") \
-    X(BufferError, "BufferError") \
-    X(BytesWarning, "BytesWarning") \
-    X(ChildProcessError, "ChildProcessError") \
-    X(ConnectionAbortedError, "ConnectionAbortedError") \
-    X(ConnectionError, "ConnectionError") \
-    X(ConnectionRefusedError, "ConnectionRefusedError") \
-    X(ConnectionResetError, "ConnectionResetError") \
-    X(DeprecationWarning, "DeprecationWarning") \
-    X(EOFError, "EOFError") \
-    X(EncodingWarning, "EncodingWarning") \
-    X(Exception, "Exception") \
-    X(FileExistsError, "FileExistsError") \
-    X(FileNotFoundError, "FileNotFoundError") \
-    X(FloatingPointError, "FloatingPointError") \
-    X(FutureWarning, "FutureWarning") \
-    X(GeneratorExit, "GeneratorExit") \
-    X(ImportError, "ImportError") \
-    X(ImportWarning, "ImportWarning") \
-    X(IndentationError, "IndentationError") \
-    X(IndexError, "IndexError") \
-    X(InterpreterError, "concurrent.interpreters.InterpreterError") \
-    X(InterpreterNotFoundError, "concurrent.interpreters.InterpreterNotFoundError") \
-    X(InterruptedError, "InterruptedError") \
-    X(IsADirectoryError, "IsADirectoryError") \
-    X(KeyError, "KeyError") \
-    X(KeyboardInterrupt, "KeyboardInterrupt") \
-    X(LookupError, "LookupError") \
-    X(MemoryError, "MemoryError") \
-    X(ModuleNotFoundError, "ModuleNotFoundError") \
-    X(NameError, "NameError") \
-    X(NotADirectoryError, "NotADirectoryError") \
-    X(NotImplementedError, "NotImplementedError") \
-    X(OSError, "OSError") \
-    X(OverflowError, "OverflowError") \
-    X(PendingDeprecationWarning, "PendingDeprecationWarning") \
-    X(PermissionError, "PermissionError") \
-    X(ProcessLookupError, "ProcessLookupError") \
-    X(PythonFinalizationError, "PythonFinalizationError") \
-    X(RecursionError, "RecursionError") \
-    X(ReferenceError, "ReferenceError") \
-    X(ResourceWarning, "ResourceWarning") \
-    X(RuntimeError, "RuntimeError") \
-    X(RuntimeWarning, "RuntimeWarning") \
-    X(StopAsyncIteration, "StopAsyncIteration") \
-    X(StopIteration, "StopIteration") \
-    X(SyntaxError, "SyntaxError") \
-    X(SyntaxWarning, "SyntaxWarning") \
-    X(SystemError, "SystemError") \
-    X(SystemExit, "SystemExit") \
-    X(TabError, "TabError") \
-    X(TimeoutError, "TimeoutError") \
-    X(TypeError, "TypeError") \
-    X(UnboundLocalError, "UnboundLocalError") \
-    X(UnicodeDecodeError, "UnicodeDecodeError") \
-    X(UnicodeEncodeError, "UnicodeEncodeError") \
-    X(UnicodeError, "UnicodeError") \
-    X(UnicodeTranslateError, "UnicodeTranslateError") \
-    X(UnicodeWarning, "UnicodeWarning") \
-    X(UserWarning, "UserWarning") \
-    X(ValueError, "ValueError") \
-    X(Warning, "Warning") \
-    X(ZeroDivisionError, "ZeroDivisionError")
+    X(ArithmeticError, "ArithmeticError", &lu_exc_Exception) \
+    X(AssertionError, "AssertionError", &lu_exc_Exception) \
+    X(AttributeError, "AttributeError", &lu_exc_Exception) \
+    X(BaseException, "BaseException", &PyBaseObject_Type) \
+    X(BaseExceptionGroup, "BaseExceptionGroup", &lu_exc_BaseException) \
+    X(BlockingIOError, "BlockingIOError", &lu_exc_OSError) \
+    X(BrokenPipeError, "BrokenPipeError", &lu_exc_ConnectionError) \
+    X(BufferError, "BufferError", &lu_exc_Exception) \
+    X(BytesWarning, "BytesWarning", &lu_exc_Warning) \
+    X(ChildProcessError, "ChildProcessError", &lu_exc_OSError) \
+    X(ConnectionAbortedError, "ConnectionAbortedError", &lu_exc_ConnectionError) \
+    X(ConnectionError, "ConnectionError", &lu_exc_OSError) \
+    X(ConnectionRefusedError, "ConnectionRefusedError", &lu_exc_ConnectionError) \
+    X(ConnectionResetError, "ConnectionResetError", &lu_exc_ConnectionError) \
+    X(DeprecationWarning, "DeprecationWarning", &lu_exc_Warning) \
+    X(EOFError, "EOFError", &lu_exc_Exception) \
+    X(EncodingWarning, "EncodingWarning", &lu_exc_Warning) \
+    X(Exception, "Exception", &lu_exc_BaseException) \
+    X(FileExistsError, "FileExistsError", &lu_exc_OSError) \
+    X(FileNotFoundError, "FileNotFoundError", &lu_exc_OSError) \
+    X(FloatingPointError, "FloatingPointError", &lu_exc_ArithmeticError) \
+    X(FutureWarning, "FutureWarning", &lu_exc_Warning) \
+    X(GeneratorExit, "GeneratorExit", &lu_exc_BaseException) \
+    X(ImportError, "ImportError", &lu_exc_Exception) \
+    X(ImportWarning, "ImportWarning", &lu_exc_Warning) \
+    X(IndentationError, "IndentationError", &lu_exc_SyntaxError) \
+    X(IndexError, "IndexError", &lu_exc_LookupError) \
+    X(InterpreterError, "concurrent.interpreters.InterpreterError", &lu_exc_Exception) \
+    X(InterpreterNotFoundError, "concurrent.interpreters.InterpreterNotFoundError", &lu_exc_InterpreterError) \
+    X(InterruptedError, "InterruptedError", &lu_exc_OSError) \
+    X(IsADirectoryError, "IsADirectoryError", &lu_exc_OSError) \
+    X(KeyError, "KeyError", &lu_exc_LookupError) \
+    X(KeyboardInterrupt, "KeyboardInterrupt", &lu_exc_BaseException) \
+    X(LookupError, "LookupError", &lu_exc_Exception) \
+    X(MemoryError, "MemoryError", &lu_exc_Exception) \
+    X(ModuleNotFoundError, "ModuleNotFoundError", &lu_exc_ImportError) \
+    X(NameError, "NameError", &lu_exc_Exception) \
+    X(NotADirectoryError, "NotADirectoryError", &lu_exc_OSError) \
+    X(NotImplementedError, "NotImplementedError", &lu_exc_RuntimeError) \
+    X(OSError, "OSError", &lu_exc_Exception) \
+    X(OverflowError, "OverflowError", &lu_exc_ArithmeticError) \
+    X(PendingDeprecationWarning, "PendingDeprecationWarning", &lu_exc_Warning) \
+    X(PermissionError, "PermissionError", &lu_exc_OSError) \
+    X(ProcessLookupError, "ProcessLookupError", &lu_exc_OSError) \
+    X(PythonFinalizationError, "PythonFinalizationError", &lu_exc_RuntimeError) \
+    X(RecursionError, "RecursionError", &lu_exc_RuntimeError) \
+    X(ReferenceError, "ReferenceError", &lu_exc_Exception) \
+    X(ResourceWarning, "ResourceWarning", &lu_exc_Warning) \
+    X(RuntimeError, "RuntimeError", &lu_exc_Exception) \
+    X(RuntimeWarning, "RuntimeWarning", &lu_exc_Warning) \
+    X(StopAsyncIteration, "StopAsyncIteration", &lu_exc_Exception) \
+    X(StopIteration, "StopIteration", &lu_exc_Exception) \
+    X(SyntaxError, "SyntaxError", &lu_exc_Exception) \
+    X(SyntaxWarning, "SyntaxWarning", &lu_exc_Warning) \
+    X(SystemError, "SystemError", &lu_exc_Exception) \
+    X(SystemExit, "SystemExit", &lu_exc_BaseException) \
+    X(TabError, "TabError", &lu_exc_IndentationError) \
+    X(TimeoutError, "TimeoutError", &lu_exc_OSError) \
+    X(TypeError, "TypeError", &lu_exc_Exception) \
+    X(UnboundLocalError, "UnboundLocalError", &lu_exc_NameError) \
+    X(UnicodeDecodeError, "UnicodeDecodeError", &lu_exc_UnicodeError) \
+    X(UnicodeEncodeError, "UnicodeEncodeError", &lu_exc_UnicodeError) \
+    X(UnicodeError, "UnicodeError", &lu_exc_ValueError) \
+    X(UnicodeTranslateError, "UnicodeTranslateError", &lu_exc_UnicodeError) \
+    X(UnicodeWarning, "UnicodeWarning", &lu_exc_Warning) \
+    X(UserWarning, "UserWarning", &lu_exc_Warning) \
+    X(ValueError, "ValueError", &lu_exc_Exception) \
+    X(Warning, "Warning", &lu_exc_Exception) \
+    X(ZeroDivisionError, "ZeroDivisionError", &lu_exc_ArithmeticError)
 
-#define LU_EXC(sym, name) \
+#define LU_EXC_DECLARE(sym, name, base) static PyTypeObject lu_exc_##sym;
+LU_EXCEPTIONS(LU_EXC_DECLARE)
+LU_STATIC_TYPES(LU_TYPE)
+
+#define LU_EXC(sym, name, base) \
     static PyTypeObject lu_exc_##sym = { PyVarObject_HEAD_INIT(&PyType_Type, 0) \
-        .tp_name = name, .tp_flags = Py_TPFLAGS_BASE_EXC_SUBCLASS }; \
+        .tp_name = name, .tp_flags = Py_TPFLAGS_BASE_EXC_SUBCLASS | Py_TPFLAGS_BASETYPE, \
+        .tp_base = base }; \
     LU_EXPORT PyObject *PyExc_##sym = (PyObject *)&lu_exc_##sym;
 LU_EXCEPTIONS(LU_EXC)
 
 /* Every exception type, for the native layout setup (runtime/capi/errors.c). */
-#define LU_EXC_ENTRY(sym, name) &lu_exc_##sym,
+#define LU_EXC_ENTRY(sym, name, base) &lu_exc_##sym,
 PyTypeObject *const lu_exception_types[] = { LU_EXCEPTIONS(LU_EXC_ENTRY) NULL };
+
+/* method-wrapper (Objects/descrobject.c wrapperobject): a slot wrapper bound
+   to an instance. CPython does not export it. */
+PyTypeObject lu_method_wrapper_type = { PyVarObject_HEAD_INIT(&PyType_Type, 0)
+    .tp_name = "method-wrapper", .tp_base = &PyBaseObject_Type };
+
+/* Every static builtin type, in index order: its dict and subclasses live in
+   each interpreter's static_types[index] (FOUNDATIONS 2.1). Object first,
+   then type, so that both are ready before any other. */
+#define LU_TYPE_ENTRY(sym, name, flags, base) &sym,
+PyTypeObject *const lu_static_types[] = {
+    &PyBaseObject_Type, &PyType_Type, LU_STATIC_TYPES(LU_TYPE_ENTRY)
+    LU_EXCEPTIONS(LU_EXC_ENTRY) &lu_method_wrapper_type, NULL };
 PyObject *PyExc_EnvironmentError = (PyObject *)&lu_exc_OSError;
 PyObject *PyExc_IOError = (PyObject *)&lu_exc_OSError;
 

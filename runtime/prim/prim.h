@@ -11,6 +11,9 @@ struct lu_prim_state {
 };
 
 PyObject *lu_prim_write(PyObject *module, PyObject *const *args, Py_ssize_t nargs);
+extern PyMethodDef lu_prim_type_methods[];      /* runtime/prim/type.c */
+extern PyMethodDef lu_prim_descr_methods[];     /* runtime/object/descr.c */
+extern PyMethodDef lu_prim_slot_methods[];      /* runtime/types/slots.c */
 PyObject *lu_prim_str_join(PyObject *module, PyObject *const *args, Py_ssize_t nargs);
 
 #endif

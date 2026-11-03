@@ -90,6 +90,56 @@ add_module(struct _is *interp, PyObject *module)
     return err;
 }
 
+extern PyTypeObject *const lu_exception_types[];
+extern PyTypeObject _PyExc_IncompleteInputError;
+
+/* _PyBuiltin_Init and _PyBuiltins_AddExceptions: the static objects and
+   types builtins names. */
+static int
+add_builtins(PyObject *builtins)
+{
+    static const struct { const char *name; PyObject *value; } objects[] = {
+        { "None", Py_None }, { "Ellipsis", Py_Ellipsis }, { "NotImplemented", Py_NotImplemented },
+        { "False", Py_False }, { "True", Py_True }, { "__debug__", Py_True },
+        { "bool", (PyObject *)&PyBool_Type }, { "memoryview", (PyObject *)&PyMemoryView_Type },
+        { "bytearray", (PyObject *)&PyByteArray_Type }, { "bytes", (PyObject *)&PyBytes_Type },
+        { "classmethod", (PyObject *)&PyClassMethod_Type },
+        { "complex", (PyObject *)&PyComplex_Type }, { "dict", (PyObject *)&PyDict_Type },
+        { "enumerate", (PyObject *)&PyEnum_Type }, { "filter", (PyObject *)&PyFilter_Type },
+        { "float", (PyObject *)&PyFloat_Type }, { "frozenset", (PyObject *)&PyFrozenSet_Type },
+        { "property", (PyObject *)&PyProperty_Type }, { "int", (PyObject *)&PyLong_Type },
+        { "list", (PyObject *)&PyList_Type }, { "map", (PyObject *)&PyMap_Type },
+        { "object", (PyObject *)&PyBaseObject_Type }, { "range", (PyObject *)&PyRange_Type },
+        { "reversed", (PyObject *)&PyReversed_Type }, { "set", (PyObject *)&PySet_Type },
+        { "slice", (PyObject *)&PySlice_Type }, { "staticmethod", (PyObject *)&PyStaticMethod_Type },
+        { "str", (PyObject *)&PyUnicode_Type }, { "super", (PyObject *)&PySuper_Type },
+        { "tuple", (PyObject *)&PyTuple_Type }, { "type", (PyObject *)&PyType_Type },
+        { "zip", (PyObject *)&PyZip_Type }, { "EnvironmentError", NULL }, { "IOError", NULL },
+        { "_IncompleteInputError", (PyObject *)&_PyExc_IncompleteInputError },
+    };
+    for (size_t i = 0; i < sizeof objects / sizeof objects[0]; i++) {
+        PyObject *name = PyUnicode_InternFromString(objects[i].name);
+        PyObject *value = objects[i].value != NULL ? objects[i].value : PyExc_OSError;
+        int err = name == NULL || lu_ns_insert(builtins, name, value) < 0;
+        Py_XDECREF(name);
+        if (err) {
+            return -1;
+        }
+    }
+    for (PyTypeObject *const *tp = lu_exception_types; *tp != NULL; tp++) {
+        if (strchr((*tp)->tp_name, '.') != NULL) {
+            continue;                   /* concurrent.interpreters' own */
+        }
+        PyObject *name = PyUnicode_InternFromString((*tp)->tp_name);
+        int err = name == NULL || lu_ns_insert(builtins, name, (PyObject *)*tp) < 0;
+        Py_XDECREF(name);
+        if (err) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static int
 boot_native(struct _is *interp)
 {
@@ -114,6 +164,11 @@ boot_native(struct _is *interp)
     }
     interp->builtins = Py_NewRef(PyModule_GetDict(builtins));
     interp->sysdict = Py_NewRef(PyModule_GetDict(sys));
+    if (lu_types_init(interp) < 0 || add_builtins(interp->builtins) < 0) {
+        Py_DECREF(builtins);
+        Py_DECREF(sys);
+        return -1;
+    }
     PyObject *modules_name = PyUnicode_InternFromString("modules");
     if (modules_name == NULL || lu_ns_insert(interp->sysdict, modules_name, interp->modules) < 0) {
         Py_XDECREF(modules_name);
@@ -197,6 +252,33 @@ run_pyc(struct _is *interp, const char *program, const char *path)
     return 0;
 }
 
+/* The native bootstrap, then the frozen kernel: 0, or an exit status
+   after reporting. */
+static int
+initialize(const struct lu_options *opts)
+{
+    int use_seed;
+    unsigned long seed = 0;
+    if (hash_seed(opts, &use_seed, &seed) < 0) {
+        return 1;
+    }
+    if (lu_hash_secret_init(use_seed, seed) < 0) {
+        fprintf(stderr, "Fatal Python error: _Py_HashRandomization_Init: failed to get "
+                "random numbers to initialize Python\n");
+        return 1;
+    }
+    struct _is *interp = &_PyRuntime.main_interp;
+    if (lu_task_new(interp) == NULL) {
+        fprintf(stderr, "Fatal Python error: lucifer: no memory for the main task\n");
+        return 1;
+    }
+    lu_layouts_init();
+    if (boot_native(interp) < 0 || lu_kernel_boot(interp) < 0) {
+        return report();
+    }
+    return 0;
+}
+
 int
 Py_BytesMain(int argc, char **argv)
 {
@@ -223,24 +305,27 @@ Py_BytesMain(int argc, char **argv)
     }
     opts.script = argv[i];
 
-    int use_seed;
-    unsigned long seed = 0;
-    if (hash_seed(&opts, &use_seed, &seed) < 0) {
-        return 1;
+    int err = initialize(&opts);
+    if (err != 0) {
+        return err;
     }
-    if (lu_hash_secret_init(use_seed, seed) < 0) {
-        fprintf(stderr, "Fatal Python error: _Py_HashRandomization_Init: failed to get "
-                "random numbers to initialize Python\n");
-        return 1;
+    return run_pyc(&_PyRuntime.main_interp, program, opts.script);
+}
+
+/* Embedding (Py_InitializeEx): the same startup without a program; signal
+   handlers arrive with K1n. A failure is fatal. */
+void
+Py_InitializeEx(int install_sigs)
+{
+    struct lu_options opts = { .isolated = 1, .no_site = 1 };
+    if (_PyRuntime.main_interp.builtins == NULL && initialize(&opts) != 0) {
+        fprintf(stderr, "Fatal Python error: Py_InitializeEx: initialization failed\n");
+        exit(1);
     }
-    struct _is *interp = &_PyRuntime.main_interp;
-    if (lu_task_new(interp) == NULL) {
-        fprintf(stderr, "Fatal Python error: lucifer: no memory for the main task\n");
-        return 1;
-    }
-    lu_layouts_init();
-    if (boot_native(interp) < 0 || lu_kernel_boot(interp) < 0) {
-        return report();
-    }
-    return run_pyc(interp, program, opts.script);
+}
+
+void
+Py_Initialize(void)
+{
+    Py_InitializeEx(1);
 }

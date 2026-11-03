@@ -215,11 +215,36 @@ vectorcall_varargs(PyObject *callable, PyObject *const *args, size_t nargsf, PyO
     return result;
 }
 
+/* A frame primitive called from C runs its frame in a nested eval loop. */
+static PyObject *
+vectorcall_frame(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames)
+{
+    if (no_keywords(callable, kwnames) < 0) {
+        return NULL;
+    }
+    struct lu_frame *(*prim)(PyThreadState *, PyObject *const *, Py_ssize_t) =
+        (struct lu_frame *(*)(PyThreadState *, PyObject *const *, Py_ssize_t))(void (*)(void))
+        CFUNC(callable)->m_ml->ml_meth;
+    PyThreadState *ts = PyThreadState_Get();
+    struct lu_frame *f = prim(ts, args, PyVectorcall_NARGS(nargsf));
+    if (f == NULL) {
+        return NULL;
+    }
+    PyObject *result;
+    if (lu_enter_frame(ts, f, &result)) {
+        struct lu_task *t = (struct lu_task *)ts;
+        t->pin++;
+        result = lu_eval(ts, f);
+        t->pin--;
+    }
+    return result;
+}
+
 PyObject *
 PyCMethod_New(PyMethodDef *ml, PyObject *self, PyObject *module, PyTypeObject *cls)
 {
     vectorcallfunc vectorcall;
-    switch (ml->ml_flags & (METH_VARARGS | METH_FASTCALL | METH_NOARGS | METH_O
+    switch (ml->ml_flags & (LU_METH_FRAME | METH_VARARGS | METH_FASTCALL | METH_NOARGS | METH_O
                             | METH_KEYWORDS | METH_METHOD)) {
     case METH_VARARGS:
     case METH_VARARGS | METH_KEYWORDS: vectorcall = vectorcall_varargs; break;
@@ -227,6 +252,7 @@ PyCMethod_New(PyMethodDef *ml, PyObject *self, PyObject *module, PyTypeObject *c
     case METH_FASTCALL | METH_KEYWORDS: vectorcall = vectorcall_fastcall_keywords; break;
     case METH_NOARGS: vectorcall = vectorcall_noargs; break;
     case METH_O: vectorcall = vectorcall_o; break;
+    case LU_METH_FRAME | METH_FASTCALL: vectorcall = vectorcall_frame; break;
     default:
         lu_err_format(PyExc_SystemError, "%s() method: bad call flags", ml->ml_name);
         return NULL;
@@ -269,9 +295,89 @@ cfunction_dealloc(PyObject *op)
     lu_object_free(op);
 }
 
+/* function attributes over the layout (Objects/funcobject.c func_memberlist
+   and func_getsetlist). */
+
+static PyObject *
+func_get_name(PyObject *op, void *closure)
+{
+    return Py_NewRef(((PyFunctionObject *)op)->func_name);
+}
+
+static int
+func_set_name(PyObject *op, PyObject *value, void *closure)
+{
+    if (value == NULL || !PyUnicode_Check(value)) {
+        lu_err_format(PyExc_TypeError, "__name__ must be set to a string object");
+        return -1;
+    }
+    Py_XSETREF(((PyFunctionObject *)op)->func_name, Py_NewRef(value));
+    return 0;
+}
+
+static PyObject *
+func_get_qualname(PyObject *op, void *closure)
+{
+    return Py_NewRef(((PyFunctionObject *)op)->func_qualname);
+}
+
+static int
+func_set_qualname(PyObject *op, PyObject *value, void *closure)
+{
+    if (value == NULL || !PyUnicode_Check(value)) {
+        lu_err_format(PyExc_TypeError, "__qualname__ must be set to a string object");
+        return -1;
+    }
+    Py_XSETREF(((PyFunctionObject *)op)->func_qualname, Py_NewRef(value));
+    return 0;
+}
+
+static PyObject *
+func_get_code(PyObject *op, void *closure)
+{
+    return Py_NewRef(((PyFunctionObject *)op)->func_code);
+}
+
+static PyObject *
+func_get_defaults(PyObject *op, void *closure)
+{
+    PyObject *d = ((PyFunctionObject *)op)->func_defaults;
+    return Py_NewRef(d != NULL ? d : Py_None);
+}
+
+static PyObject *
+func_get_kwdefaults(PyObject *op, void *closure)
+{
+    PyObject *d = ((PyFunctionObject *)op)->func_kwdefaults;
+    return Py_NewRef(d != NULL ? d : Py_None);
+}
+
+static PyMemberDef func_members[] = {
+    { "__closure__", _Py_T_OBJECT, offsetof(PyFunctionObject, func_closure), Py_READONLY, NULL },
+    { "__doc__", _Py_T_OBJECT, offsetof(PyFunctionObject, func_doc), 0, NULL },
+    { "__globals__", _Py_T_OBJECT, offsetof(PyFunctionObject, func_globals), Py_READONLY, NULL },
+    { "__module__", _Py_T_OBJECT, offsetof(PyFunctionObject, func_module), 0, NULL },
+    { "__builtins__", _Py_T_OBJECT, offsetof(PyFunctionObject, func_builtins), Py_READONLY, NULL },
+    { NULL },
+};
+
+static PyGetSetDef func_getset[] = {
+    { "__code__", func_get_code, NULL, NULL, NULL },
+    { "__defaults__", func_get_defaults, NULL, NULL, NULL },
+    { "__kwdefaults__", func_get_kwdefaults, NULL, NULL, NULL },
+    { "__dict__", PyObject_GenericGetDict, PyObject_GenericSetDict, NULL, NULL },
+    { "__name__", func_get_name, func_set_name, NULL, NULL },
+    { "__qualname__", func_get_qualname, func_set_qualname, NULL, NULL },
+    { NULL },
+};
+
 void
 lu_function_init(void)
 {
+    PyFunction_Type.tp_members = func_members;
+    PyFunction_Type.tp_getset = func_getset;
+    PyFunction_Type.tp_dictoffset = offsetof(PyFunctionObject, func_dict);
+    PyFunction_Type.tp_call = PyVectorcall_Call;
     unsigned long flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_HAVE_VECTORCALL;
     PyFunction_Type.tp_basicsize = sizeof(PyFunctionObject);
     PyFunction_Type.tp_flags |= flags | Py_TPFLAGS_METHOD_DESCRIPTOR;

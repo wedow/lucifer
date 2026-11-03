@@ -6,6 +6,7 @@
 
 #include "lucifer.h"
 
+#include <stdarg.h>
 #include <string.h>
 
 #define LU_GC_TRACKED 1         /* _PyGC_BITS_TRACKED in ob_gc_bits */
@@ -42,7 +43,9 @@ void
 lu_object_free(PyObject *op)
 {
     op->ob_gc_bits &= ~LU_GC_TRACKED;
-    PyObject_Free(op);
+    /* A heap subclass's instances start at the preheader. */
+    size_t presize = (Py_TYPE(op)->tp_flags & Py_TPFLAGS_PREHEADER) ? 2 * sizeof(PyObject *) : 0;
+    PyObject_Free((char *)op - presize);
 }
 
 static void
@@ -261,6 +264,22 @@ PyTuple_New(Py_ssize_t size)
     Py_SET_SIZE(op, size);
     op->ob_hash = -1;
     return (PyObject *)op;
+}
+
+PyObject *
+PyTuple_Pack(Py_ssize_t n, ...)
+{
+    PyObject *t = PyTuple_New(n);
+    if (t == NULL) {
+        return NULL;
+    }
+    va_list ap;
+    va_start(ap, n);
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyTuple_SET_ITEM(t, i, Py_NewRef(va_arg(ap, PyObject *)));
+    }
+    va_end(ap);
+    return t;
 }
 
 static void
@@ -543,6 +562,8 @@ lu_layouts_init(void)
     lu_dict_init();
     lu_code_init();
     lu_function_init();
+    lu_descr_init();
+    lu_iter_init();
     lu_module_init();
     lu_exc_init();
 

@@ -431,8 +431,9 @@ lu_frame_call(PyThreadState *ts, PyFunctionObject *func, PyObject **args, Py_ssi
 
 /* The operands of f(*callargs, **kwargs) as a vectorcall array of owned
    references: positional items, then one value per keyword. *kwnames is a
-   new tuple of the keys, or NULL. The array is PyMem memory; the caller
-   frees it after handing the references on. */
+   new tuple of the keys, or NULL. The array is PyMem memory with a spare
+   word before it, where a call can prepend self; the caller frees it with
+   PyMem_Free(array - 1) after handing the references on. */
 PyObject **
 lu_unpack_call(PyObject *callargs, PyObject *kwargs, Py_ssize_t *nargs, PyObject **kwnames)
 {
@@ -446,6 +447,8 @@ lu_unpack_call(PyObject *callargs, PyObject *kwargs, Py_ssize_t *nargs, PyObject
         PyErr_NoMemory();
         return NULL;
     }
+    array[0] = NULL;
+    array++;
     for (Py_ssize_t i = 0; i < npos; i++) {
         array[i] = Py_NewRef(PyTuple_GET_ITEM(callargs, i));
     }

@@ -12,6 +12,11 @@
 #define LU_STUB __attribute__((weak))
 #define LU_UNIMPLEMENTED(name) lu_unimplemented(name)
 
+/* A PyMethodDef flag of the runtime's own: ml_meth is a frame primitive,
+   struct lu_frame *(*)(PyThreadState *, PyObject *const *, Py_ssize_t),
+   which returns a frame for the interpreter to push (DESIGN 5.2). */
+#define LU_METH_FRAME 0x4000
+
 /* Report an unported C-API function by name and abort. */
 _Noreturn void lu_unimplemented(const char *name);
 
@@ -64,6 +69,33 @@ struct lu_brc_bucket {
     struct lu_brc_owner *head;
 };
 
+/* A static builtin type's per-interpreter state (FOUNDATIONS 2.1): what
+   CPython keeps in managed_static_type_state. The type's tp_subclasses holds
+   its index + 1 and _Py_TPFLAGS_STATIC_BUILTIN is set. */
+#define LU_MAX_STATIC_TYPES 200         /* _Py_MAX_MANAGED_STATIC_BUILTIN_TYPES */
+
+struct lu_static_type_state {
+    PyObject *tp_dict;
+    PyObject *tp_subclasses;    /* a list of the heap subclasses, or NULL */
+};
+
+/* Kernel functions the runtime calls (FOUNDATIONS 2.1): per interpreter,
+   since they bind its module globals. Kernel Python registers each one
+   with _lucifer.kernel_set(NAME, function). */
+#define LU_KERNEL_FUNCTIONS(X) \
+    X(getattr)                  /* PyObject_GetAttr: __getattribute__, then __getattr__ */ \
+    X(generic_getattr)          /* PyObject_GenericGetAttr */ \
+    X(setattr)                  /* PyObject_SetAttr: __setattr__ */ \
+    X(delattr)                  /* PyObject_DelAttr: __delattr__ */ \
+    X(generic_setattr)          /* PyObject_GenericSetAttr, value or MISSING */ \
+    X(super_getattr)            /* _PySuper_Lookup(class, self, name) */
+enum lu_kernel_id {
+#define LU_KERNEL_ID(name) LU_K_##name,
+    LU_KERNEL_FUNCTIONS(LU_KERNEL_ID)
+#undef LU_KERNEL_ID
+    LU_K_COUNT
+};
+
 /* PyInterpreterState (private layout; DESIGN 4.1). */
 struct _is {
     mi_subproc_id_t subproc;    /* segments abandoned by one interpreter's carriers
@@ -79,6 +111,9 @@ struct _is {
     PyObject *interned;         /* interned str -> itself */
     _PyFrameEvalFunction eval_frame;    /* PEP 523; NULL runs frames inline */
     uintptr_t monitoring_version;       /* a multiple of LU_POLL_VERSION_UNIT */
+    struct lu_static_type_state static_types[LU_MAX_STATIC_TYPES];
+    PyObject *kernel[LU_K_COUNT];       /* strong; NULL until registered */
+    unsigned int next_version_tag;      /* heap types' tp_version_tag */
 };
 
 /* The poll word (FOUNDATIONS 2.5): each carrier's eval breaker. The low bits
@@ -166,6 +201,7 @@ void lu_brc_register(struct lu_entry *entry);
 void lu_brc_retire(struct lu_entry *entry);
 
 void lu_brc_queue_object(PyObject *ob);
+void lu_set_immortal(PyObject *op);
 Py_ssize_t lu_explicit_merge_refcount(PyObject *op, Py_ssize_t extra);
 
 /* _Py_DebugOffsets: external inspectors find the runtime by its cookie. The
@@ -196,13 +232,19 @@ struct lu_static_objects {
     PyBytesObject bytes_chars[256];     /* ob_sval[1] plus padding holds char and NUL */
     PyBytesObject empty_bytes;
     PyTupleObject empty_tuple;
+    PyObject missing;                   /* _lucifer.MISSING: "no value", distinct from None */
 };
+#define LU_MISSING (&_PyRuntime.singletons.missing)
 
 /* Interned names the runtime looks up, made immortal at startup (CPython's
    _Py_ID strings). LU_ID(__name__) is the str "__name__". */
 #define LU_IDENTIFIERS(X) \
-    X(__all__) X(__builtins__) X(__doc__) X(__loader__) X(__main__) X(__name__) \
-    X(__package__) X(__spec__) X(builtins)
+    X(__all__) X(__build_class__) X(__builtins__) X(__call__) X(__class__) X(__delete__) \
+    X(__doc__) X(__get__) X(__getitem__) X(__init__) X(__iter__) \
+    X(__len__) X(__loader__) X(__main__) X(__name__) X(__new__) X(__next__) \
+    X(__package__) X(__repr__) X(__set__) X(__spec__) X(__str__) X(__hash__) \
+    X(__eq__) X(__ne__) X(__lt__) X(__le__) X(__gt__) X(__ge__) X(__contains__) \
+    X(__setitem__) X(__delitem__) X(__bool__) X(_lucifer) X(builtins)
 struct lu_identifiers {
 #define LU_ID_FIELD(name) PyObject *name;
     LU_IDENTIFIERS(LU_ID_FIELD)
@@ -248,6 +290,8 @@ void lu_set_init(void);
 void lu_dict_init(void);
 void lu_code_init(void);
 void lu_function_init(void);
+void lu_descr_init(void);
+void lu_iter_init(void);
 void lu_module_init(void);
 void lu_exc_init(void);
 PyObject *lu_small_int(int value);
@@ -296,6 +340,72 @@ int lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value);
 int lu_ns_delete(PyObject *dict, PyObject *key);
 /* PyDict_Next over the namespace: *pos starts at 0; key and value are borrowed. */
 int lu_ns_next(PyObject *dict, Py_ssize_t *pos, PyObject **key, PyObject **value);
+
+/* Types (runtime/prim/type.c). Static builtin types are made ready natively
+   at startup: bases, MRO and an empty dict in the interpreter's state, which
+   the kernel's @kernel_type then fills. */
+#define LU_VERSION_TAG_STATIC_MAX ((1u << 17) - 1)     /* _Py_MAX_GLOBAL_TYPE_VERSION_TAG */
+extern PyTypeObject lu_method_wrapper_type;
+int lu_types_init(PyInterpreterState *interp);
+/* Fills each static type's unset slots from its bases (inherit_slots); run
+   after every kernel module, as kernel classes install slots. */
+void lu_static_types_inherit(void);
+/* The type's dict: in interpreter state for static builtin types. Borrowed. */
+PyObject *lu_type_dict(PyTypeObject *tp);
+/* PyType_Modified: the version tag of tp and its subclasses becomes 0. */
+void lu_type_modified(PyTypeObject *tp);
+/* "__name__" of a type, new: ht_name, or tp_name after its last dot. */
+PyObject *lu_type_name(PyTypeObject *tp);
+/* Adds descriptors for tp_members and tp_getset to the type's dict. */
+int lu_type_add_descriptors(PyTypeObject *tp);
+/* The module of the nearest frame that is not kernel-hidden (PyEval_GetGlobals). */
+PyObject *lu_caller_globals(PyThreadState *ts);
+
+/* Descriptors and kernel functions (runtime/object/descr.c). A kernel
+   function is a Python function that looks native: a PyCFunctionObject or
+   a method, wrapper or classmethod descriptor whose PyMethodDef is the head
+   of an lu_kernel_def (DESIGN 4.4). */
+struct lu_kernel_def {
+    PyMethodDef def;
+    PyObject *func;             /* the Python function; strong */
+    PyObject *name;             /* keeps def.ml_name's UTF-8 alive */
+    int bind;                   /* a PyCFunction made from it passes m_self first */
+};
+PyObject *lu_kernel_meth(PyObject *self, PyObject *args);
+static inline struct lu_kernel_def *
+lu_kernel_def_of(PyMethodDef *ml)
+{
+    return ml != NULL && ml->ml_meth == lu_kernel_meth ? (struct lu_kernel_def *)ml : NULL;
+}
+struct lu_kernel_def *lu_kernel_def_new(PyObject *name, PyObject *func, int flags, int bind);
+/* A kernel function as a builtin of `module` (builtin_function_or_method). */
+PyObject *lu_kernel_builtin(PyObject *module, PyObject *name, PyObject *func);
+PyObject *lu_descr_new_method(PyTypeObject *type, PyMethodDef *ml);
+PyObject *lu_descr_new_classmethod(PyTypeObject *type, PyMethodDef *ml);
+PyObject *lu_descr_new_wrapper(PyTypeObject *type, PyObject *name, struct lu_kernel_def *k);
+PyObject *lu_descr_new_member(PyTypeObject *type, PyMemberDef *member);
+PyObject *lu_descr_new_getset(PyTypeObject *type, PyGetSetDef *getset);
+PyObject *lu_method_wrapper_new(PyObject *descr, PyObject *self);
+/* The Python function the interpreter runs for a kernel callable, and the
+   self it prepends (borrowed, or NULL). NULL when callable is none. Checks
+   an unbound descriptor's first argument: -1 with TypeError set. */
+int lu_kernel_target(PyObject *callable, PyObject *const *args, Py_ssize_t nargs,
+                     PyObject **func, PyObject **self);
+/* Calls a callable from C (PyObject_Vectorcall): vectorcall, else tp_call. */
+PyObject *lu_call(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames);
+/* Calls interp->kernel[id] from C, in a nested eval loop. */
+PyObject *lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t nargs);
+
+/* Slots (runtime/types/slots.c): the C slot thunks that run kernel Python
+   for C callers, and the slot table _lucifer.set_slot installs them from. */
+PyObject *lu_slot_tp_getattro(PyObject *self, PyObject *name);
+int lu_slot_tp_setattro(PyObject *self, PyObject *name, PyObject *value);
+PyObject *lu_slot_tp_call(PyObject *self, PyObject *args, PyObject *kwargs);
+/* Sets slot `name` of tp: how 0 clears it, 1 installs the thunk, 2 copies
+   it from `from`, 3 installs PyObject_HashNotImplemented (tp_hash only). */
+int lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from);
+/* Calls special method `name` of self's type, as vectorcall_method does. */
+PyObject *lu_call_special(PyObject *self, PyObject *name, PyObject *const *args, Py_ssize_t nargs);
 
 /* Appends to a list (borrowed item), growing its storage. */
 int lu_list_append(PyObject *list, PyObject *item);

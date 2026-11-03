@@ -26,3 +26,18 @@ targets.*	runtime/interp/ceval.c	const dispatch table of label addresses; reloca
 lucifer_methods	runtime/prim/module.c	_lucifer's PyMethodDef table, never written; the API takes it non-const
 lucifer_slots	runtime/prim/module.c	_lucifer's PyModuleDef_Slot table, never written; the API takes it non-const
 lu_lucifer_module	runtime/prim/module.c	_lucifer's PyModuleDef, never written; one per process, as every extension's def
+lu_method_wrapper_type	runtime/types/static.c	method-wrapper, a private static type; the kernel fills in its slots once at startup
+lu_static_types	runtime/types/static.c	const table of the static builtin types; relocated by ld.so, then read-only (RELRO)
+*_members	runtime/object/descr.c	PyMemberDef table of a native layout, never written; tp_members takes it non-const
+*_getset	runtime/object/descr.c	PyGetSetDef table of a native layout, never written; tp_getset takes it non-const
+func_members	runtime/object/function.c	PyMemberDef table of the function layout, never written; tp_members takes it non-const
+func_getset	runtime/object/function.c	PyGetSetDef table of the function layout, never written; tp_getset takes it non-const
+subtype_getsets_full	runtime/prim/type.c	PyGetSetDef table of heap-type instances' __dict__ and __weakref__, never written
+kernel_wrapperbase	runtime/object/descr.c	the wrapperbase every kernel slot wrapper shares, never written
+kernel_names	runtime/object/descr.c	const table of the kernel function names; relocated by ld.so, then read-only (RELRO)
+types.*	runtime/object/descr.c	const table of the kernel-writable layouts; relocated by ld.so, then read-only (RELRO)
+lu_prim_type_methods	runtime/prim/type.c	_lucifer's type primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_descr_methods	runtime/object/descr.c	_lucifer's descriptor primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_slot_methods	runtime/types/slots.c	_lucifer's slot primitive, a PyMethodDef table never written; the API takes it non-const
+objects.*	runtime/pylifecycle.c	const table of the static builtins names; relocated by ld.so, then read-only (RELRO)
+slots	runtime/types/slots.c	const table of the type slots and their thunks; relocated by ld.so, then read-only (RELRO)
