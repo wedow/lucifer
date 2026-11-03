@@ -107,7 +107,7 @@ def _split_number(s):
     return str_slice(s, 0, i), str_slice(s, i, n)
 
 
-def format_parts(x, parsed):
+def format_parts(x, parsed, add_dot_0=True):
     """format_float_internal up to the padding: (sign char, digits, remainder)
     of x under the parsed spec."""
     fill, align, alternate, no_neg_0, sign, width, thousands, precision, frac, ty = parsed
@@ -121,7 +121,8 @@ def format_parts(x, parsed):
     code = ty
     default_precision = 6
     if ty == '':
-        flags |= _ADD_DOT_0
+        if add_dot_0:
+            flags |= _ADD_DOT_0
         code = 'r'
         default_precision = 0
     if code == 'n':

@@ -747,8 +747,8 @@ prim_float_as_ratio(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         exponent--;
     }
     PyObject *numerator = lu_long_from_double(float_part);
-    PyObject *denominator = lu_small_int(1);
-    PyObject *shift = lu_small_int(exponent < 0 ? -exponent : exponent);
+    PyObject *denominator = PyLong_FromLong(1);
+    PyObject *shift = PyLong_FromLong(exponent < 0 ? -exponent : exponent);
     PyObject *pair = NULL;
     if (numerator != NULL && denominator != NULL && shift != NULL) {
         PyObject *shifted = lu_long_binary(NB_LSHIFT, exponent > 0 ? numerator : denominator, shift);

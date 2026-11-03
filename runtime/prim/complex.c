@@ -533,6 +533,10 @@ prim_complex_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return NULL;
     }
     PyTypeObject *tp = (PyTypeObject *)args[0];
+    if (tp == &PyComplex_Type) {
+        return PyComplex_FromCComplex((Py_complex){ PyFloat_AS_DOUBLE(args[1]),
+                                                    PyFloat_AS_DOUBLE(args[2]) });
+    }
     PyObject *r = tp->tp_alloc(tp, 0);
     if (r != NULL) {
         CVAL(r).real = PyFloat_AS_DOUBLE(args[1]);
@@ -638,7 +642,8 @@ prim_complex_repr(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return result;
 }
 
-/* complex_from_text(str): the complex, or MISSING for a malformed string
+/* complex_from_text(str): the complex, MISSING for a malformed string, or None
+   for a misplaced underscore
    (complex_from_string_inner). */
 static PyObject *
 prim_complex_from_text(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -657,6 +662,8 @@ prim_complex_from_text(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     len = lu_strip_underscores(buf, len);
     if (len < 0) {
+        Py_DECREF(result);
+        result = Py_NewRef(Py_None);        /* a misplaced underscore */
         goto done;
     }
     start = s = buf;

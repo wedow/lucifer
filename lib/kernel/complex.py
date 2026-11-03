@@ -54,6 +54,8 @@ def _from_string(cls, x):
     if not kind(x, 'str'):
         error(TypeError, _cat('complex() argument must be a string or a number, not ', _name(x)))
     r = complex_from_text(x)
+    if r is None:
+        error(ValueError, _cat('could not convert string to complex: ', _format.to_repr(x)))
     if r is MISSING:
         error(ValueError, 'complex() arg is a malformed string')
     return _make(cls, complex_part(r, False), complex_part(r, True))
@@ -141,7 +143,7 @@ def format_complex(z, spec):
     re, im = _parts(z)
     skip_re = False
     add_parens = False
-    if ty == '' and float_cmp(re, 0, _EQ) and float_format(re, 'r', 0, 0) == '0.0':
+    if ty == '' and float_cmp(re, 0, _EQ) and float_format(re, 'r', 0, 2) == '0.0':
         skip_re = True
     elif ty == '':
         add_parens = True
@@ -166,7 +168,7 @@ def format_complex(z, spec):
 
 
 def _unpadded(x, parsed):
-    sign_char, digits, rest = float.format_parts(x, parsed)
+    sign_char, digits, rest = float.format_parts(x, parsed, False)
     return _format.number_field(sign_char, '', digits, rest, parsed, False)
 
 
@@ -182,8 +184,9 @@ with the specified real and imaginary components."""
     def __new__(cls, *args, **kwargs):
         _boot.check_new(cls, complex)
         n = size(args)
-        if n > 2:
-            error(TypeError, _cat('complex() takes at most 2 arguments (', _decimal(n), ' given)'))
+        given = n + size(kwargs)
+        if given > 2:
+            error(TypeError, _cat('complex() takes at most 2 arguments (', _decimal(given), ' given)'))
         r = MISSING
         i = MISSING
         k = 0
