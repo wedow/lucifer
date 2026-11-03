@@ -333,6 +333,8 @@ struct lu_task {
     PyObject *result;           /* what the outermost activation returned, on its way home */
     int done;                   /* result is set: this task is going home to return it */
     uint64_t rng;               /* seeded handoff's choices */
+    int gc_alloc_count;         /* the carrier's buffered GC allocation count, carried
+                                   while the task is between carriers */
 };
 
 /* Quiescent-state-based reclamation (runtime/thread/qsbr.c), after

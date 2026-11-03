@@ -61,11 +61,11 @@ void lu_wait_ready(struct lu_wait *w, struct lu_carrier *carrier);
    the unpark queues the task on `w->carrier`. */
 int lu_park(struct lu_wait *w, PyTime_t deadline, int detach);
 
-/* The loop side of an unpinned park. The task has registered `w` with
-   lu_wait_begin, published its id (or completed it), and its activation has
-   returned to the carrier's loop, which has detached the task. From here the
-   completion of `w` queues the task on `w->carrier`, at once if it has
-   already completed. */
+/* The loop side of an unpinned park. The task has filled `w` with
+   lu_wait_ready (complete), or registered it with lu_wait_begin and
+   published its id; its activation has returned to the carrier's loop, which
+   has detached the task. From here the completion of `w` queues the task on
+   `w->carrier`, at once if it has already completed. */
 void lu_park_commit(struct lu_wait *w);
 
 /* A carrier with no task to run sleeps until a task is queued for it:

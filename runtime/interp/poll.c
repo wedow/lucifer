@@ -65,7 +65,7 @@ lu_poll_slow(PyThreadState *ts)
     }
     /* Collection runs only here. */
     if ((breaker & LU_POLL_GC_SCHEDULED) && visible) {
-        lu_poll_clear(c, LU_POLL_GC_SCHEDULED);
+        lu_task_unsignal(t, LU_POLL_GC_SCHEDULED);
         lu_gc_run(ts);
     }
     /* The stress tick (FOUNDATIONS 2.7) becomes a collection with M0.2. */

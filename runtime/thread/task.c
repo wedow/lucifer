@@ -60,6 +60,8 @@ bind_tstate(struct lu_task *t)
         ts->thread_id = (unsigned long)pthread_self();      /* the task's ident, for life */
     }
     ts->native_thread_id = lu_carrier->native_id;
+    e->gc_alloc_count += t->gc_alloc_count;
+    t->gc_alloc_count = 0;
     e->nbound++;
     if (e->brc.tid == 0) {
         lu_brc_register(e);
@@ -280,6 +282,17 @@ lu_task_leave(struct lu_task *t)
     struct lu_carrier *c = t->carrier;
     lu_task_detach(t, _Py_THREAD_DETACHED);
     struct lu_entry *e = lu_entry_of(c, t->ts.interp);
+    /* The collector's trigger counts a task's allocations as one thread's:
+       the carrier's buffer follows the task, or a task that moves every few
+       hundred allocations would never fill either buffer. */
+    t->gc_alloc_count = e->gc_alloc_count;
+    e->gc_alloc_count = 0;
+    /* A collection those allocations scheduled is the task's to run, at its
+       next poll wherever that is. */
+    if (__atomic_fetch_and(&c->poll, ~(uintptr_t)LU_POLL_GC_SCHEDULED, __ATOMIC_SEQ_CST)
+        & LU_POLL_GC_SCHEDULED) {
+        __atomic_fetch_or(&t->pending, LU_POLL_GC_SCHEDULED, __ATOMIC_SEQ_CST);
+    }
     e->nbound--;
     if (t->ts._status.bound_gilstate) {
         c->gilstate = NULL;
