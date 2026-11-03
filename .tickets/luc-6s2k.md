@@ -1,6 +1,6 @@
 ---
 id: luc-6s2k
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T02:21:42Z
