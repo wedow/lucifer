@@ -348,7 +348,8 @@ def codegen_finish_annotations_scope(c, loc):
     # name (.format) in the symtable; if the name "format" appears in the
     # annotations, it doesn't get clobbered by this name.  This code is
     # essentially: co.co_localsplusnames = ("format", *co.co_localsplusnames[1:])
-    co = co.replace(co_varnames=("format",) + co.co_varnames[1:])
+    from .assemble import set_localsplusname
+    set_localsplusname(co, 0, "format")
     codegen_make_closure(c, loc, co, 0)
 
 
@@ -587,7 +588,7 @@ def codegen_wrap_in_stopiteration_handler(c):
 
 
 def codegen_type_param_bound_or_default(c, e, name, key, allow_starred):
-    addop_load_const(c, LOC(e), (1,))
+    addop_load_const(c, LOC(e), tuple([1]))  # a new tuple, as PyTuple_Pack makes
     codegen_setup_annotations_scope(c, LOC(e), key, name)
     if allow_starred and type(e) is _ast.Starred:
         visit_expr(c, e.value)
@@ -839,7 +840,7 @@ def codegen_class(c, s):
 def codegen_typealias_body(c, s):
     loc = LOC(s)
     name = s.name.id
-    addop_load_const(c, loc, (1,))
+    addop_load_const(c, loc, tuple([1]))  # a new tuple, as PyTuple_Pack makes
     codegen_setup_annotations_scope(c, LOC(s), id(s), name)
     assert not c.u.u_ste.ste_has_docstring
     visit_expr(c, s.value)
