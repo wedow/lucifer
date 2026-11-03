@@ -1,16 +1,23 @@
-# Daemon threads busy on the buffer under sys.stdout when the main program ends: the exit flushes the standard
-# streams and does not wait for a lock that a daemon, stopped for good, still holds.
+# A daemon thread busy on the buffer under sys.stdout when the program ends: the exit flushes the
+# standard streams and does not wait for a lock that the daemon, stopped for good, may hold. Each
+# child process is one such exit; one daemon only, since CPython aborts if daemons contend for it.
+import subprocess
 import sys
-import threading
-import time
 
-
+CHILD = '''
+import sys, threading, time
 def flusher():
     while True:
         sys.stdout.buffer.flush()
-
-
-for _ in range(4):
-    threading.Thread(target=flusher, daemon=True).start()
+threading.Thread(target=flusher, daemon=True).start()
 time.sleep(0.02)
-print('main done')
+print('child done')
+'''
+results = []
+for _ in range(10):
+    try:
+        child = subprocess.run([sys.executable, '-I', '-S', '-c', CHILD], capture_output=True, timeout=20)
+        results.append((child.returncode, child.stdout))
+    except subprocess.TimeoutExpired:
+        results.append('hung')
+print(set(map(str, results)))
