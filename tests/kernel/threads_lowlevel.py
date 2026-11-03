@@ -271,3 +271,23 @@ _thread.start_joinable_thread(lambda: reuse.append(join_first()), daemon=False).
 pair = [_thread.start_joinable_thread(f, daemon=False) for f in (joiner, poller)]
 [h.join() for h in pair]
 print(flips, reuse)
+
+# A thread's local data goes when the thread ends, though the local last served that thread.
+import weakref
+
+
+class Data:
+    pass
+
+
+gone = []
+
+
+def keep():
+    data = Data()
+    local.data = data
+    gone.append(weakref.ref(data))
+
+
+wait_done(_thread.start_joinable_thread(keep, daemon=False))
+print(gone[0]() is None, hasattr(local, 'data'))

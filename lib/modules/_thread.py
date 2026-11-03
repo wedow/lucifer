@@ -246,6 +246,7 @@ def _thread_exit():
             impl = entry[0]()
             if impl is not None:
                 impl.forget(tdict)
+            entry[1].clear()        # a local's __dict__ may still be this dict
     tdict.clear()
 
 
