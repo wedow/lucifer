@@ -48,8 +48,14 @@ if 'CORPUS_JOURNAL' not in os.environ:
 f=open(os.environ['CORPUS_JOURNAL'],'a',buffering=1)
 def emit(x): f.write(json.dumps(x)+'\\n')
 if mode=='empty': emit({'collection':[]}); emit({'state':{'exitstatus':0}}); raise SystemExit()
-emit({'collection':['a','b']})
-emit({'id':'a','phase':'call','outcome':'passed','seconds':0.01,'xfail':False,'reason':''})
+if mode=='hypothesis':
+ # Each run must draw the same examples, with no replay of earlier runs.
+ store=os.path.join(os.environ['HYPOTHESIS_STORAGE_DIRECTORY'],'replay')
+ seeded='--hypothesis-seed=0' in sys.argv and not os.path.exists(store)
+ os.makedirs(store,exist_ok=True)
+ if not seeded: mode='fail-a'
+emit({'collection':['a','b']+(['z'] if mode=='extra' else [])})
+emit({'id':'a','phase':'call','outcome':'failed' if mode=='fail-a' else 'passed','seconds':0.01,'xfail':False,'reason':''})
 emit({'active':'b'})
 if mode=='timeout': time.sleep(10)
 if mode=='crash': os.kill(os.getpid(),signal.SIGTERM)
@@ -73,6 +79,16 @@ emit({'state':{'exitstatus':0,'free_threaded':mode=='collection-skip','gil_enabl
             assert 'a\tPASS\t' in rows and 'b\t'+status+'\t' in rows, (p.stderr,rows)
             assert p.returncode == (0 if mode=='pass' else 1)
             checks += 1
+        # A refused run must not leave an earlier run's passes in place.
+        (result/'stale.tsv').write_text(expected.replace('NOTRUN', 'PASS'))
+        p = run(f'{sys.executable} {fake} extra', 'stale')
+        assert p.returncode == 2 and 'unexpected test IDs' in p.stderr, p.stderr
+        assert 'PASS' not in (result/'stale.tsv').read_text()
+        checks += 1
+        for attempt in range(2):
+            p = run(f'{sys.executable} {fake} hypothesis', 'hypothesis')
+            assert 'a\tPASS\t' in (result/'hypothesis.tsv').read_text(), (attempt, p.stderr)
+        checks += 1
         linked = root / 'linked-python'
         linked.symlink_to(sys.executable)
         p = run(f'{linked} {fake} symlink', 'symlink')

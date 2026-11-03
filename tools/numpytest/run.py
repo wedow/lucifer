@@ -289,7 +289,10 @@ def run(args):
     if args.shard and destination.exists():
         rows.update({i: v for i, v in read_manifest(destination).items() if i in expected})
         rows.update({i: ("NOTRUN", 0.0) for i in selected})
-    metadata = {"numpy": PIN["version"], "abi": args.abi, "shards": shards,
+    if expected and not args.collect:
+        # A run refused below must not leave an earlier run's outcomes in place.
+        write_manifest(destination, rows)
+    metadata ={"numpy": PIN["version"], "abi": args.abi, "shards": shards,
                 "parallel_threads": 4 if args.parallel else 1, "timeout": args.timeout,
                 "requirements_sha256": digest(HERE / "requirements.txt") if (HERE / "requirements.txt").exists() else None}
     optional_lock = HERE / "optional-requirements.txt"

@@ -78,9 +78,9 @@ class HarnessChecks(unittest.TestCase):
             " if not i and mode=='xpass':E.SubElement(props,'property',name='outcome',value='XPASS')\n"
             " if not i and mode=='error':E.SubElement(case,'error',message='setup failed')\n"
             " if not i and mode=='threadwarn' and 'error::pytest.PytestUnhandledThreadExceptionWarning' in sys.argv:E.SubElement(case,'error',message='unhandled thread exception')\n"
-            " if not i and mode=='failcase':E.SubElement(case,'failure',message='assertion failed')\n"
+            " if not i and mode in ('failcase','badstate'):E.SubElement(case,'failure',message='assertion failed')\n"
             "E.ElementTree(root).write(sys.argv[sys.argv.index('--junitxml')+1])\n"
-            "pathlib.Path(os.environ['NUMPYTEST_STATE']).write_text(json.dumps(dict(gil_enabled=False)))\n"
+            "pathlib.Path(os.environ['NUMPYTEST_STATE']).write_text('{' if mode=='badstate' else json.dumps(dict(gil_enabled=False)))\n"
         )
         self.fake.chmod(0o755)
         self.mode("pass")
@@ -179,6 +179,12 @@ class HarnessChecks(unittest.TestCase):
         self.mode("failcase")
         self.assertNotEqual(self.invoke("--shard", self.ids[0].split("[")[0]).returncode, 0)
         self.assertEqual(self.rows(), dict(zip(self.ids, ["FAIL", "XFAIL"])))
+
+    def test_refused_run_clears_previous_outcomes(self):
+        self.assertEqual(self.invoke().returncode, 0)
+        self.mode('badstate')
+        self.assertNotEqual(self.invoke().returncode, 0)
+        self.assertNotIn('PASS', self.rows().values())
 
     def test_failing_startup_clears_unselected_shard_results(self):
         self.assertEqual(self.invoke().returncode, 0)
