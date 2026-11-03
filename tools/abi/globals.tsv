@@ -82,3 +82,4 @@ lc_float_strings	runtime/prim/pystrtod.c	constant table of lower-case inf, nan a
 uc_float_strings	runtime/prim/pystrtod.c	constant table of upper-case INF, NAN and E, never written
 lu_prim_dict_methods	runtime/prim/dict.c	_lucifer's dict primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_set_methods	runtime/prim/set.c	_lucifer's set primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_builtins_methods	runtime/prim/builtins.c	_lucifer's builtins primitives, a PyMethodDef table never written; the API takes it non-const

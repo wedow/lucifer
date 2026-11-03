@@ -691,9 +691,6 @@ layout(PyTypeObject *tp, Py_ssize_t size, unsigned long flags, destructor deallo
     tp->tp_getset = getset;
 }
 
-static PyTypeObject *const iter_types[] = { &PyMap_Type, &PyFilter_Type, &PyZip_Type,
-    &PyEnum_Type, &PyReversed_Type, &PyCallIter_Type };
-
 void
 lu_descr_init(void)
 {
@@ -730,10 +727,14 @@ lu_descr_init(void)
     layout(&PyProperty_Type, sizeof(propertyobject), 0, property_dealloc, property_members, NULL);
     layout(&PySuper_Type, sizeof(superobject), 0, super_dealloc, super_members, NULL);
     layout(&PyDictProxy_Type, sizeof(mappingproxyobject), 0, proxy_dealloc, NULL, NULL);
-    for (size_t i = 0; i < sizeof iter_types / sizeof iter_types[0]; i++) {
-        layout(iter_types[i], sizeof(PyObject) + LU_ITER_FIELDS * sizeof(PyObject *), 0,
-               iter_dealloc, NULL, NULL);
-    }
+#define ITER_LAYOUT(tp) layout(&tp, sizeof(PyObject) + LU_ITER_FIELDS * sizeof(PyObject *), 0, \
+                               iter_dealloc, NULL, NULL)
+    ITER_LAYOUT(PyMap_Type);
+    ITER_LAYOUT(PyFilter_Type);
+    ITER_LAYOUT(PyZip_Type);
+    ITER_LAYOUT(PyEnum_Type);
+    ITER_LAYOUT(PyReversed_Type);
+    ITER_LAYOUT(PyCallIter_Type);
 }
 
 /* The _lucifer primitives over descriptors. */
