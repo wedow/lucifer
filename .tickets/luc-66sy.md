@@ -1,6 +1,6 @@
 ---
 id: luc-66sy
-status: open
+status: closed
 deps: [luc-llzg, luc-vvqv, luc-774h, luc-e01x, luc-q6qr]
 links: []
 created: 2026-11-03T01:39:45Z
@@ -24,3 +24,7 @@ tools/difftest run --oracle $ORACLE_T --python bin/lucifer: probe accepted, 0 of
 **2026-11-03T02:48:33Z**
 
 Owns uncaught-exception rendering (sys.excepthook -> traceback._print_exception_bltin, DESIGN 9.3 startup row): K1 programs end normally or by SystemExit (see luc-vvqv Bootstrap order).
+
+**2026-11-03T13:52:59Z**
+
+closed: probe accepted; 164 rows run, 153 PASS 11 FAIL 0 ERROR; foundations programs, embed, excepthook rendering done
