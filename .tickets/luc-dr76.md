@@ -1,6 +1,6 @@
 ---
 id: luc-dr76
-status: open
+status: closed
 deps: [luc-1dl8]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: sonnet.
 
 make check-kernel PROGRAMS="calls closures" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t).
 
+
+## Notes
+
+**2026-11-03T03:30:33Z**
+
+Done: check-kernel calls closures + 34 err_* programs match the oracle; check-globals, check-capi, abi-audit, check-compiler pass.
