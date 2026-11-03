@@ -17,7 +17,6 @@ from _lucifer import (
     bytes_ord,
 )
 from _lucifer import _boot
-import sys
 
 kernel_type = _boot.kernel_type
 call_special = _boot.call_special
@@ -939,7 +938,7 @@ kernel_set('exc_group_match', exc_group_match)
 kernel_set('prep_reraise_star', prep_reraise_star)
 
 
-# sys.exception and sys.exc_info
+# sys.exception and sys.exc_info (sys.py installs them)
 
 def exception():
     """Return the current exception.
@@ -957,6 +956,3 @@ def exc_info():
     return (type(e), e, e.__traceback__)
 
 
-_sys_dict = instance_dict(sys, True)
-ns_set(_sys_dict, 'exception', exception)
-ns_set(_sys_dict, 'exc_info', exc_info)

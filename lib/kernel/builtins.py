@@ -7,7 +7,8 @@ Clinic does."""
 from _lucifer import (
     write, str_join, error, kind, type_lookup, type_tp_name, MISSING, static_type, is_callable,
     is_subtype, size, int_format, int_add, int_as_double, str_chr, str_ord, bytes_ord, str_len,
-    object_id, caller_locals, caller_globals, eval_code, kernel_get, list_append,
+    object_id, caller_locals, caller_globals, eval_code, kernel_get, kernel_set, list_append,
+    import_state,
 )
 from _lucifer import _boot, _format, operators, _args, iter as _iter
 import sys
@@ -577,9 +578,191 @@ def compile(source, filename, mode, flags=0, dont_inherit=False, optimize=-1, *,
     raise NotImplementedError('compile() waits for the runtime compiler')
 
 
+def _resolve_name(name, globals_, level):
+    """Python/import.c resolve_name: the absolute name of a relative import."""
+    if not isinstance(globals_, dict):
+        error(ImportError if globals_ is None else TypeError,
+              'attempted relative import with no known parent package' if globals_ is None
+              else 'globals must be a dict')
+    package = globals_.get('__package__')
+    spec = globals_.get('__spec__')
+    if package is not None:
+        if not isinstance(package, str):
+            error(TypeError, 'package must be a string')
+    elif spec is not None:
+        package = spec.parent
+        if not isinstance(package, str):
+            error(TypeError, '__spec__.parent must be a string')
+    else:
+        if '__name__' not in globals_:
+            error(KeyError, "'__name__' not in globals")
+        package = globals_['__name__']
+        if not isinstance(package, str):
+            error(TypeError, '__name__ must be a string')
+        if '__path__' not in globals_:
+            package = package.rpartition('.')[0]
+    last_dot = len(package)
+    if last_dot == 0:
+        error(ImportError, 'attempted relative import with no known parent package')
+    for _ in range(level - 1):
+        last_dot = package.rfind('.', 0, last_dot)
+        if last_dot == -1:
+            error(ImportError, 'attempted relative import beyond top-level package')
+    base = package[:last_dot]
+    return base + '.' + name if name else base
+
+
+_IMPORTLIB_FILES = ('<frozen importlib._bootstrap>', '<frozen importlib._bootstrap_external>')
+
+
+def _remove_importlib_frames(exc):
+    """Python/import.c remove_importlib_frames: an ImportError loses every
+    importlib frame, anything else the ones between _call_with_frames_removed
+    and its callee. A link is the traceback entry whose tb_next points at the
+    next one, or None for the exception's own __traceback__."""
+    always = isinstance(exc, ImportError)
+
+    def relink(holder, target):
+        if holder is None:
+            exc.__traceback__ = target
+        else:
+            holder.tb_next = target
+
+    tb = exc.__traceback__
+    previous = outer = None
+    in_importlib = False
+    while tb is not None:
+        following = tb.tb_next
+        code = tb.tb_frame.f_code
+        now_in_importlib = code.co_filename in _IMPORTLIB_FILES
+        if now_in_importlib and not in_importlib:
+            outer = previous
+        in_importlib = now_in_importlib
+        if in_importlib and (always or code.co_name == '_call_with_frames_removed'):
+            relink(outer, following)
+            previous = outer
+        else:
+            previous = tb
+        tb = following
+
+
+def _initializing(module):
+    """Is the module's spec still being loaded (_PyModuleSpec_IsInitializing)?"""
+    try:
+        spec = getattr_hook(module, '__spec__')
+    except AttributeError:
+        return False
+    if spec is None:
+        return False
+    try:
+        return truth(getattr_hook(spec, '_initializing'))
+    except AttributeError:
+        return False
+
+
+def _import(name, globals_, fromlist, level):
+    """Python/import.c PyImport_ImportModuleLevelObject."""
+    if level < 0:
+        error(ValueError, 'level must be >= 0')
+    if level > 0:
+        abs_name = _resolve_name(name, globals_, level)
+    else:
+        if not name:
+            error(ValueError, 'Empty module name')
+        abs_name = name
+    importlib, import_func = import_state()
+    mod = sys.modules.get(abs_name)
+    if mod is not None:
+        if _initializing(mod):
+            importlib._lock_unlock_module(abs_name)
+    else:
+        if importlib is None:
+            error(ModuleNotFoundError, str_join('', ("No module named '", abs_name, "'")))
+        mod = importlib._find_and_load(abs_name, import_func)
+    if not truth(fromlist):
+        if level == 0 or name:
+            dot = name.find('.')
+            if dot == -1:
+                return mod
+            if level == 0:
+                return _import(name[:dot], None, None, 0)
+            to_return = abs_name[:len(abs_name) - (len(name) - dot)]
+            if to_return not in sys.modules:
+                error(KeyError, str_join('', (repr(to_return), ' not in sys.modules as expected')))
+            return sys.modules[to_return]
+        return mod
+    try:
+        getattr_hook(mod, '__path__')
+    except AttributeError:
+        return mod
+    return importlib._handle_fromlist(mod, fromlist, import_func)
+
+
 def __import__(name, globals=None, locals=None, fromlist=(), level=0):
-    """Import a module.  The importlib bootstrap replaces this placeholder."""
-    raise ModuleNotFoundError(str_join('', ("No module named '", name, "'")), name=name)
+    """Import a module.
+
+The globals are only used to determine the context;
+they are not modified.  The locals are currently unused.  The fromlist
+should be a list of names to emulate ``from name import ...``, or an
+empty list to emulate ``import name``.
+When importing a module from a package, note that __import__('A.B', ...)
+returns package A when fromlist is empty, but its submodule B when
+fromlist is not empty.  The level argument is used to determine whether to
+perform absolute or relative imports: 0 is absolute, while a positive number
+is the number of parent directories to search relative to the current module."""
+    if not isinstance(name, str):
+        error(TypeError, 'module name must be a string')
+    level = index(level)
+    try:
+        return _import(name, globals, fromlist, level)
+    except BaseException as exc:
+        _remove_importlib_frames(exc)
+        raise
+
+
+def import_from(module, name):
+    """Python/ceval.c import_from: module.name, else the submodule of that
+    name in sys.modules, else an ImportError that says where the module is."""
+    try:
+        return getattr_hook(module, name)
+    except AttributeError:
+        pass
+    try:
+        package = getattr_hook(module, '__name__')
+    except AttributeError:
+        package = None
+    if isinstance(package, str):
+        found = sys.modules.get(package + '.' + name)
+        if found is not None:
+            return found
+    if not isinstance(package, str):
+        exc = ImportError(str_join('', ('cannot import name ', repr(name))))
+    else:
+        origin = None
+        try:
+            spec = getattr_hook(module, '__spec__')
+            if spec is not None and truth(getattr_hook(spec, 'has_location')):
+                origin = getattr_hook(spec, 'origin')
+        except AttributeError:
+            pass
+        if not isinstance(origin, str):
+            origin = None
+        text = str_join('', ('cannot import name ', repr(name), ' from '))
+        if _initializing(module):
+            text = str_join('', (text, 'partially initialized module ', repr(package),
+                                 ' (most likely due to a circular import)'))
+            if origin is not None:
+                text = str_join('', (text, ' (', origin, ')'))
+        elif origin is None:
+            text = str_join('', (text, repr(package), ' (unknown location)'))
+        else:
+            text = str_join('', (text, repr(package), ' (', origin, ')'))
+        exc = ImportError(text, name=package, path=origin)
+        exc.name_from = name
+    raise exc
+
+
+kernel_set('import_from', import_from)
 
 
 def breakpoint(*args, **kwargs):

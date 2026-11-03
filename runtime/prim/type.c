@@ -375,6 +375,7 @@ static void
 subtype_dealloc(PyObject *self)
 {
     PyTypeObject *tp = Py_TYPE(self), *base = tp;
+    lu_clear_weakrefs(self);
     /* Clear the slots of every heap type in the chain, then the dict. */
     for (; base->tp_flags & Py_TPFLAGS_HEAPTYPE; base = base->tp_base) {
         PyMemberDef *mp = base->tp_members;

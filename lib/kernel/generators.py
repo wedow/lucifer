@@ -13,12 +13,11 @@ recursion: a throw resumes the whole chain at once (gen_throw's depth).
 from _lucifer import (
     MISSING, error, str_join, static_type, kernel_set, kernel_get, address, alloc, field_get,
     field_set, type_lookup, type_tp_name, is_subtype, is_exception, is_exception_class,
-    is_callable, instance_dict, ns_set, gen_send, gen_throw, gen_state, gen_yieldfrom,
+    is_callable, gen_send, gen_throw, gen_state, gen_yieldfrom,
     gen_set_running, gen_clear, gen_flag, gen_set_finalizer, asyncgen_hooks, size,
 )
 from _lucifer import set_asyncgen_hooks as _set_hooks
 from _lucifer import _boot
-import sys
 
 kernel_type = _boot.kernel_type
 call_special = _boot.call_special
@@ -683,7 +682,7 @@ return next yielded value or raise StopIteration."""
         return _awaitable_close(self, _athrow_throw)
 
 
-# sys's async generator hooks
+# sys.set_asyncgen_hooks (sys.py installs it)
 
 def set_asyncgen_hooks(firstiter=MISSING, finalizer=MISSING):
     """Set a finalizer for async generators objects."""
@@ -693,7 +692,6 @@ def set_asyncgen_hooks(firstiter=MISSING, finalizer=MISSING):
         error(TypeError, str_join('', ('callable firstiter expected, got ', _name(firstiter))))
     _set_hooks(firstiter, finalizer)
 
-ns_set(instance_dict(sys, True), 'set_asyncgen_hooks', set_asyncgen_hooks)
 
 kernel_set('send', send)
 kernel_set('get_awaitable', get_awaitable)
