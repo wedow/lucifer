@@ -11,6 +11,20 @@ instantiable can only be made by structseq_make, as C code does.
 __all__ = ()
 
 _dict = dict
+_fields = {}                    # class -> its field names, for the C-API
+
+
+def structseq_blank(cls):
+    """PyStructSequence_New: an instance whose fields are all None."""
+    fields = _fields[cls]
+    n_visible = cls.n_sequence_fields
+    return structseq_make(cls, (None,) * n_visible,
+                          {f: None for f in fields[n_visible:] if f is not None})
+
+
+def structseq_set_hidden(self, index, value):
+    """PyStructSequence_SetItem of a field that is not an item."""
+    self.__dict__[_fields[type(self)][index]] = value
 
 
 def structseq_make(cls, visible, hidden=None):
@@ -98,6 +112,8 @@ def structseq_type(name, doc, fields, n_visible, instantiable=True):
     for index, field_name in enumerate(fields):
         if field_name is not None:
             ns[field_name] = field(index, field_name)
-    return type(short, (tuple,), ns)
+    cls = type(short, (tuple,), ns)
+    _fields[cls] = fields
+    return cls
 
 

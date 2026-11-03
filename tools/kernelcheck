@@ -36,7 +36,11 @@ RUNS = {
     "hash_seed": [([], {"PYTHONHASHSEED": "12345"}), ([], {"PYTHONHASHSEED": "0"})],
     "sys_flags": [([], None),
                   (["-X", "int_max_str_digits=1000", "-X", "foo=bar", "-X", "baz", "-W", "ignore"], None),
-                  (["-B", "-b", "-q", "-O", "-E", "-X", "utf8=0"], None)],
+                  (["-B", "-b", "-q", "-O", "-E", "-X", "utf8=0"], None),
+                  ([], {"PYTHONINTMAXSTRDIGITS": "2000", "PYTHONDONTWRITEBYTECODE": "1",
+                        "PYTHONWARNINGS": "ignore,error::ResourceWarning", "PYTHONUTF8": "0",
+                        "PYTHONHASHSEED": "7", "PYTHONDEVMODE": "1"}),
+                  (["-X", "dev"], {"PYTHONSAFEPATH": "1", "PYTHONNOUSERSITE": "1"})],
 }
 SEEDED = ("hash_seed",)
 # (name, flags, exit status, text stderr must contain)
