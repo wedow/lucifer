@@ -14,11 +14,16 @@ static const uint8_t event_types[3] = {
 
 /* fire(kind, code, offset, arg): enters the scope and fires when a tool watches. */
 static PyObject *
-fire(PyObject *self, PyObject *args)
+fire(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
 {
-    int kind, offset, arg;
-    PyObject *code;
-    if (!PyArg_ParseTuple(args, "iOii", &kind, &code, &offset, &arg)) {
+    if (nargs != 4) {
+        PyErr_SetString(PyExc_TypeError, "fire(kind, code, offset, arg)");
+        return NULL;
+    }
+    Py_ssize_t kind = PyLong_AsSsize_t(args[0]), offset = PyLong_AsSsize_t(args[2]);
+    Py_ssize_t arg = PyLong_AsSsize_t(args[3]);
+    PyObject *code = args[1];
+    if (PyErr_Occurred()) {
         return NULL;
     }
     if (PyMonitoring_EnterScope(states, &version, event_types, 3) < 0) {
@@ -30,15 +35,15 @@ fire(PyObject *self, PyObject *args)
     }
     int err = 0;
     if (kind == 0) {
-        err = _PyMonitoring_FirePyStartEvent(state, code, offset);
+        err = _PyMonitoring_FirePyStartEvent(state, code, (int32_t)offset);
     }
     else if (kind == 1) {
-        PyObject *callable = PyLong_FromLong(arg);
-        err = _PyMonitoring_FireCallEvent(state, code, offset, callable, Py_None);
+        PyObject *callable = PyLong_FromSsize_t(arg);
+        err = _PyMonitoring_FireCallEvent(state, code, (int32_t)offset, callable, Py_None);
         Py_DECREF(callable);
     }
     else {
-        err = _PyMonitoring_FireLineEvent(state, code, offset, arg);
+        err = _PyMonitoring_FireLineEvent(state, code, (int32_t)offset, (int)arg);
     }
     PyMonitoring_ExitScope();
     if (err < 0) {
@@ -48,7 +53,7 @@ fire(PyObject *self, PyObject *args)
 }
 
 static PyMethodDef methods[] = {
-    { "fire", fire, METH_VARARGS, "fire(kind, code, offset, arg)" },
+    { "fire", (PyCFunction)(void (*)(void))fire, METH_FASTCALL, "fire(kind, code, offset, arg)" },
     { NULL, NULL, 0, NULL },
 };
 
