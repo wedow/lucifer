@@ -5,6 +5,7 @@
    Python-level behaviour of these types is kernel Python (DESIGN 4.4). */
 
 #include "lucifer.h"
+#include "prim/bytes.h"
 
 #include <stdarg.h>
 #include <string.h>
@@ -558,6 +559,7 @@ lu_layouts_init(void)
     set_layout(&PyList_Type, sizeof(PyListObject), 0, Py_TPFLAGS_HAVE_GC, list_dealloc);
     set_layout(&PySlice_Type, sizeof(PySliceObject), 0, Py_TPFLAGS_HAVE_GC, slice_dealloc);
     lu_str_init();
+    lu_bytes_init();
     lu_set_init();
     lu_dict_init();
     lu_dict_views_init();

@@ -3,7 +3,7 @@
    _lucifer uses multi-phase init with module state and keeps no file-scope
    mutable data (FOUNDATIONS 2.1). */
 
-#include "prim/prim.h"
+#include "prim/bytes.h"
 
 static void
 module_dealloc(PyObject *op)
@@ -150,7 +150,8 @@ lucifer_exec(PyObject *m)
     if (add_functions(m, lu_prim_type_methods) < 0 || add_functions(m, lu_prim_descr_methods) < 0
         || add_functions(m, lu_prim_slot_methods) < 0 || add_functions(m, lu_prim_int_methods) < 0
         || add_functions(m, lu_prim_float_methods) < 0 || add_functions(m, lu_prim_complex_methods) < 0
-        || add_functions(m, lu_prim_str_methods) < 0
+        || add_functions(m, lu_prim_str_methods) < 0 || add_functions(m, lu_prim_bytes_methods) < 0
+        || add_functions(m, lu_prim_mv_methods) < 0
         || add_functions(m, lu_prim_exc_methods) < 0
         || add_functions(m, lu_prim_storage_methods) < 0
         || add_functions(m, lu_prim_dict_methods) < 0

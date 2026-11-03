@@ -1,6 +1,6 @@
 ---
 id: luc-fha1
-status: open
+status: closed
 deps: [luc-2yau, luc-rjvn]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: sonnet.
 
 make check-kernel PROGRAMS="bytes_methods" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t).
 
+
+## Notes
+
+**2026-11-03T05:55:42Z**
+
+bytes, bytearray, memoryview landed on branch luc-fha1
