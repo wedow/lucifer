@@ -43,6 +43,9 @@ lu_object_new(PyTypeObject *tp, size_t size)
 void
 lu_object_free(PyObject *op)
 {
+    if (Py_TYPE(op)->tp_flags & Py_TPFLAGS_HAVE_GC) {
+        lu_gc_record_deallocation(lu_current_entry());
+    }
     op->ob_gc_bits &= ~LU_GC_TRACKED;
     /* A heap subclass's instances start at the preheader. */
     size_t presize = (Py_TYPE(op)->tp_flags & Py_TPFLAGS_PREHEADER) ? 2 * sizeof(PyObject *) : 0;

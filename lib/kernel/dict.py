@@ -126,6 +126,11 @@ def setitem(d, key, value):
     store(d, key, key_hash(key), value)
 
 
+def delitem(d, key):
+    if delete(d, key, key_hash(key)) is MISSING:
+        key_error(key)
+
+
 def setdefault(d, key, default):
     h = key_hash(key)
     while True:
@@ -420,8 +425,7 @@ dict(**kwargs) -> new dictionary initialized with the name=value pairs
         store(self, key, key_hash(key), value)
 
     def __delitem__(self, key):
-        if delete(self, key, key_hash(key)) is MISSING:
-            key_error(key)
+        delitem(self, key)
 
     def __contains__(self, key, /):
         """True if the dictionary has the specified key, else False."""
@@ -878,5 +882,7 @@ class dict_values:
 
 
 kernel_set('build_map', build_map)
+kernel_set('dict_setitem', setitem)
+kernel_set('dict_delitem', delitem)
 kernel_set('dict_update', update_op)
 kernel_set('dict_merge', merge_kwargs)

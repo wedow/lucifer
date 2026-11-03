@@ -137,6 +137,8 @@ struct lu_static_type_state {
     X(getitem)                  /* PyObject_GetItem: BINARY_OP NB_SUBSCR, BINARY_SLICE */ \
     X(setitem)                  /* PyObject_SetItem(container, key, value): STORE_SUBSCR, STORE_SLICE */ \
     X(delitem)                  /* PyObject_DelItem: DELETE_SUBSCR */ \
+    X(dict_setitem)             /* PyDict_SetItem(dict, key, value): the dict's own, whatever the subclass overrides */ \
+    X(dict_delitem)             /* PyDict_DelItem(dict, key) */ \
     X(length)                   /* PyObject_Size as an int: GET_LEN */ \
     X(get_iter)                 /* PyObject_GetIter: GET_ITER */ \
     X(next_item)                /* the next item of an iterator, or MISSING: FOR_ITER */ \
@@ -180,6 +182,53 @@ enum lu_kernel_id {
 #define LU_MAX_WATCHERS 8
 typedef void (*lu_watcher)(void);
 
+/* PyEvent (Include/internal/pycore_lock.h): a one-time notification. */
+typedef struct PyEvent {
+    uint8_t v;
+} PyEvent;
+
+/* Stop-the-world (runtime/thread/stw.c), after struct _stoptheworld_state.
+   The task list lock guards everything but the mutex, which serializes
+   requests, and world_stopped, which the requester writes. */
+struct lu_stw {
+    PyMutex mutex;
+    int requested;
+    int world_stopped;
+    int countdown;              /* attached tasks that have yet to stop */
+    struct lu_task *requester;  /* its own task, or NULL */
+    PyEvent stop_event;         /* set when countdown reaches 0 */
+};
+
+/* The collector's policy state (runtime/interp/gc.c), after GCState in
+   Python/gc_free_threading.c. Until the cycle collector arrives (M0.2) a
+   collection is a stop-the-world with an empty body. */
+struct lu_gc {
+    int enabled;
+    int collecting;
+    int young_count;            /* GC objects allocated since the last collection */
+    int young_threshold;
+    int old_threshold[2];
+    int old_count[2];
+    Py_ssize_t deferred_count;
+    Py_ssize_t last_mem;
+    Py_ssize_t long_lived_total;
+    PyObject *hook;             /* gc.py's callback runner; strong */
+};
+
+/* A function queued by Py_AddPendingCall (runtime/interp/poll.c). */
+struct lu_pending_call {
+    struct lu_pending_call *next;
+    int (*func)(void *);
+    void *arg;
+    int main_only;
+    int rawfree;                /* arg is PyMem_RawFree'd after the call */
+};
+struct lu_pending {
+    PyMutex mutex;
+    struct lu_pending_call *head, **tail;
+    struct lu_task *handling;   /* the task running the queue: it is not re-entered */
+};
+
 /* PyInterpreterState (private layout; DESIGN 4.1). */
 struct _is {
     mi_subproc_id_t subproc;    /* segments abandoned by one interpreter's carriers
@@ -212,6 +261,9 @@ struct _is {
     PyObject *importlib;                /* _frozen_importlib, once installed */
     PyObject *import_func;              /* the original builtins.__import__ */
     PyConfig config;                    /* what Py_InitializeFromConfig was given, read */
+    struct lu_stw stw;
+    struct lu_gc gc;
+    struct lu_pending pending;
 };
 
 /* -X lucifer_stress and -X lucifer_handoff (FOUNDATIONS 2.7), parsed once by
@@ -268,12 +320,35 @@ struct lu_task {
     int pinned_for_life;        /* main, foreign-thread and thread-scoped tasks */
     struct lu_carrier *carrier; /* the carrier whose thread it is bound to, or NULL */
     uintptr_t pending;          /* targeted poll reasons, raised into the carrier's word at bind */
+    int in_pending_calls;       /* running the pending calls: a poll inside them leaves the rest */
+};
+
+/* Quiescent-state-based reclamation (runtime/thread/qsbr.c), after
+   Python/qsbr.c: storage retired by lu_qsbr_retire is freed once every
+   attached carrier has passed a poll since. Each carrier holds its queue. */
+struct lu_qsbr_item {
+    void *ptr;
+    uint64_t goal;              /* the write sequence readers must reach */
+};
+struct lu_qsbr_queue {
+    struct lu_qsbr_item *items;
+    size_t first, n, cap;
+};
+struct lu_qsbr {
+    uint64_t seq;               /* the write sequence last observed; 0 while detached */
+    struct lu_qsbr_queue queue;
+    int deferred_count;         /* retired since the sequence last advanced */
+    int should_process;
+    struct lu_carrier *next;    /* the registry's list */
 };
 
 /* A carrier's state in one interpreter, created on first use there. */
 struct lu_entry {
     struct _is *interp;
+    struct lu_carrier *carrier;
     struct lu_entry *next;      /* the carrier's entries */
+    int gc_alloc_count;         /* GC allocations not yet added to the interpreter's count */
+    unsigned long stress_count; /* allocations since the last stress tick */
     int nbound;                 /* tasks bound here; the owner record is registered while > 0 */
     struct lu_mimalloc_state mimalloc;
     struct lu_brc_owner brc;
@@ -284,6 +359,7 @@ struct lu_entry {
    first task, and retired when the thread exits. */
 struct lu_carrier {
     struct lu_entry *current;   /* the entry of the interpreter running here */
+    struct lu_qsbr qsbr;
     struct lu_entry *entries;
     uintptr_t poll;             /* the poll word */
     uint32_t wake;              /* the futex a park sleeps on; bumped by each unpark */
@@ -293,6 +369,22 @@ struct lu_carrier {
 };
 
 extern _Thread_local struct lu_carrier *lu_carrier;
+
+/* Raising and clearing reasons from any thread. A reason aimed at a task
+   (lu_task_signal) is kept in the task, so that binding it raises the
+   reason in whichever word the task runs under; the rest belong to the
+   carrier. A set is a release: the data it announces is published first. */
+static inline void
+lu_poll_set(struct lu_carrier *c, uintptr_t bits)
+{
+    __atomic_fetch_or(&c->poll, bits, __ATOMIC_SEQ_CST);
+}
+
+static inline void
+lu_poll_clear(struct lu_carrier *c, uintptr_t bits)
+{
+    __atomic_fetch_and(&c->poll, ~bits, __ATOMIC_SEQ_CST);
+}
 
 /* Creates the calling thread's carrier and its entry in the main interpreter. */
 struct lu_entry *lu_carrier_bind(void);
@@ -326,6 +418,10 @@ struct lu_entry *lu_entry_of(struct lu_carrier *c, struct _is *interp);
 struct lu_task *lu_task_new(struct _is *interp, int whence);
 void lu_task_bind(struct lu_task *t);
 void lu_task_attach(PyThreadState *ts);
+/* The task stops using objects: its critical sections release their locks,
+   its carrier goes offline for QSBR, and its state becomes `state`, detached
+   or (for a stop-the-world) suspended. */
+void lu_task_detach(struct lu_task *t, int state);
 void lu_task_delete(struct lu_task *t);
 void lu_task_carrier_exit(struct lu_carrier *c);
 
@@ -333,6 +429,56 @@ void lu_task_carrier_exit(struct lu_carrier *c);
    interpreter and the JIT when the carrier's poll word has a reason set.
    Returns -1 with an exception set when the reason raises. */
 int lu_poll_slow(PyThreadState *ts);
+
+/* Raises `bits` (targeted reasons) at task `t`: kept in the task, and set in
+   its carrier's word when it is bound. The caller holds the interpreter's
+   task list lock, which keeps the task and its carrier alive. */
+void lu_task_signal(struct lu_task *t, uintptr_t bits);
+
+/* Stop-the-world (runtime/thread/stw.c). A stop completes when every other
+   task has stopped: attached ones at their next poll, detached ones at once.
+   The world restarts at the matching start. The requester stays attached. */
+void lu_stw_stop(struct _is *interp);
+void lu_stw_start(struct _is *interp);
+/* A poll found the please-stop reason: acknowledge, wait out the stop, and
+   attach again. */
+void lu_stw_acknowledge(struct lu_task *t);
+/* Whether the interpreter's world is stopped. */
+static inline int
+lu_world_stopped(struct _is *interp)
+{
+    return __atomic_load_n(&interp->stw.world_stopped, __ATOMIC_ACQUIRE);
+}
+/* Task creation and deletion tell a stop in progress (called with the task
+   list lock held): a new task starts suspended; a deleted one is not waited for. */
+void lu_stw_task_new(struct _is *interp, struct lu_task *t);
+void lu_stw_task_delete(struct _is *interp, struct lu_task *t);
+
+/* The collector's trigger (runtime/interp/gc.c). */
+void lu_gc_record_allocation(struct lu_entry *entry);
+void lu_gc_record_deallocation(struct lu_entry *entry);
+/* Runs a collection of `generation`: the callbacks, a stop-the-world, and the
+   counters. Returns the number of objects collected. */
+Py_ssize_t lu_gc_collect(PyThreadState *ts, int generation, int heap_reason);
+/* The poll handler's GC reason: collects the youngest generation if the
+   collector is enabled and still wants to. */
+void lu_gc_run(PyThreadState *ts);
+
+/* Signals (runtime/interp/signals.c): the trip handler sets a flag and the
+   main task's poll reason; the main task runs the Python handlers. */
+int lu_signals_handle(PyThreadState *ts);
+int lu_pending_calls_handle(PyThreadState *ts);
+int lu_thread_can_handle_signals(void);
+
+/* QSBR (runtime/thread/qsbr.c). A carrier reports a quiescent state at every
+   poll, goes offline when it detaches and online when it attaches. */
+void lu_qsbr_register(struct lu_carrier *c);
+void lu_qsbr_unregister(struct lu_carrier *c);
+void lu_qsbr_attach(struct lu_carrier *c);
+void lu_qsbr_detach(struct lu_carrier *c);
+void lu_qsbr_process(struct lu_carrier *c);
+/* Drains the carrier's queued biased-refcount merges for `interp`. */
+void lu_brc_merge(struct lu_entry *entry);
 
 static inline struct lu_task *
 lu_current_task(void)
@@ -415,6 +561,8 @@ struct lu_identifiers {
 };
 #define LU_ID(name) (_PyRuntime.ids.name)
 
+#define LU_NSIG 65                      /* the _signal module's NSIG */
+
 /* The runtime record (FOUNDATIONS 2.1). Its size is the oracle's. */
 #define LU_RUNTIME_SIZE 365624
 
@@ -449,11 +597,36 @@ extern LU_EXPORT union lu_runtime {
         unsigned int next_static_version_tag;   /* last tag of the range static types share */
         int finalizing;                 /* Py_FinalizeEx has begun */
         PyMutex specialize_lock;        /* one rewrite of an instruction's inline cache at a time */
+        pthread_t main_thread;          /* the thread that started the runtime */
+        struct lu_carrier *main_carrier;    /* its carrier: signals are aimed at it */
+        struct {
+            struct lu_lock lock;        /* the registry and the orphaned queue */
+            uint64_t wr_seq;            /* always odd, advanced by 2 */
+            uint64_t rd_seq;            /* the least sequence any attached carrier has seen */
+            struct lu_carrier *head;    /* every carrier */
+            struct lu_qsbr_queue orphans;   /* what exited carriers left */
+        } qsbr;
+        struct {
+            int tripped;                /* some handler's flag is set */
+            struct {
+                int tripped;
+                PyObject *func;         /* the Python handler, strong; NULL for none */
+            } handlers[LU_NSIG];
+        } signals;
         PyMutex weakref_locks[64];      /* guard the weakref lists, by referent address */
         struct _is main_interp;
     };
     unsigned char oracle_size[LU_RUNTIME_SIZE];
 } _PyRuntime;
+
+static inline void
+lu_qsbr_quiescent(struct lu_carrier *c)
+{
+    uint64_t seq = __atomic_load_n(&_PyRuntime.qsbr.wr_seq, __ATOMIC_ACQUIRE);
+    if (seq != c->qsbr.seq) {
+        __atomic_store_n(&c->qsbr.seq, seq, __ATOMIC_RELEASE);
+    }
+}
 
 /* Layouts (runtime/object/). Constructors return a new reference, or NULL
    with an exception set. lu_hash and lu_eq cover the layouts marshal yields,

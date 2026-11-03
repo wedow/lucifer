@@ -92,3 +92,5 @@ lu_prim_thread_methods	runtime/prim/thread.c	_lucifer's lock primitives, a PyMet
 lu_prim_weakref_methods	runtime/object/weakref.c	_lucifer's weakref primitives, a PyMethodDef table never written; the API takes it non-const
 lu_sys_native_methods	runtime/interp/sysmodule.c	sys's native functions, a PyMethodDef table never written; the API takes it non-const
 module_members	runtime/prim/module.c	the module type's __dict__ member, a table never written; the type takes it non-const
+lu_prim_gc_methods	runtime/interp/gc.c	_lucifer's collector primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_signal_methods	runtime/interp/signals.c	_lucifer's signal primitives, a PyMethodDef table never written; the API takes it non-const
