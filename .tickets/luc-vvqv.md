@@ -22,3 +22,5 @@ make check-kernel: every tests/kernel program (at least 30, covering the familie
 - tests/kernel/handoff_witness.py prints 2 distinct _thread.get_native_id() values under -X lucifer_handoff and 1 without.
 - make check rejects any blocking syscall in runtime/ outside the lu_syscall_begin/end bracket.
 
+
+- Register refcount owners when a thread state is bound, and delete the stopgap pthread_create wrapper in runtime/object/brc.c (luc-f56i). check_reused_thread_id still passes.
