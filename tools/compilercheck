@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Check lib/compiler against the host CPython's own compiler, stage by stage.
+
+Run with a host CPython whose version matches third_party/cpython/VERSION.
+Each input the host compiles is compared on:
+
+  tokens    _tokenize.TokenizerIter output, with and without extra tokens
+  ast       ast.dump(include_attributes=True) of compile(..., PyCF_ONLY_AST)
+  symtable  the _symtable tree: type, name, lineno, nested, symbols, varnames
+  optast    the same dump with PyCF_OPTIMIZED_AST (AST preprocessing)
+  code      marshal.dumps of the code object compile() returns
+
+Corpora: closure (tests/compiler/closure.txt: the vendored Lib files of the 64
+modules `-X importtime` reports on the oracle for the difftest probe and for
+tools/difftest/bridge.py running a one-line program), difftest (the
+cases and dependencies of tests/diff/inventory.json), kernel (tests/kernel),
+lib (every vendored Lib/**/*.py).  Exit status 1 when a corpus named with
+--require is not fully identical on every stage checked.
+"""
+import argparse
+import ast
+import concurrent.futures
+import io
+import json
+import marshal
+import os
+from pathlib import Path
+import signal
+import sys
+import tokenize
+
+ROOT = Path(__file__).resolve().parent.parent
+LIB = ROOT / "third_party" / "cpython" / "Lib"
+STAGES = ("tokens", "ast", "symtable", "optast", "code")
+TIMEOUT = 120
+
+
+def corpus(name):
+    if name == "closure":
+        return [LIB / line for line in (ROOT / "tests/compiler/closure.txt").read_text().split()]
+    if name == "difftest":
+        inventory = json.loads((ROOT / "tests/diff/inventory.json").read_text())
+        return sorted(ROOT / p for p in [*inventory["cases"], *inventory.get("dependencies", {})]
+                      if p.endswith(".py"))
+    if name == "kernel":
+        return sorted((ROOT / "tests/kernel").rglob("*.py"))
+    if name == "lib":
+        return sorted(LIB.rglob("*.py"))
+    raise SystemExit(f"unknown corpus {name}")
+
+
+def outcome(function):
+    """The value of function(), or its exception as comparable data."""
+    try:
+        return function()
+    except Exception as error:
+        return ("raised", type(error).__name__, str(error))
+
+
+def tokens(module, text, extra):
+    return list(module.TokenizerIter(io.StringIO(text).readline, extra_tokens=extra))
+
+
+def symtable_tree(table):
+    return (table.type, table.name, table.lineno, bool(table.nested), dict(table.symbols),
+            list(table.varnames), [symtable_tree(child) for child in table.children])
+
+
+def dump(tree):
+    return ast.dump(tree, include_attributes=True) if isinstance(tree, ast.AST) else tree
+
+
+def views(source, path):
+    """For each stage, a function from a compiler implementation to comparable data."""
+    text = source.decode(tokenize.detect_encoding(io.BytesIO(source).readline)[0])
+    filename = str(path)
+    only_ast = ast.PyCF_ONLY_AST
+    optimized = ast.PyCF_ONLY_AST | ast.PyCF_OPTIMIZED_AST
+    return {
+        "tokens": lambda c: [outcome(lambda: tokens(c.tokenizer, text, extra)) for extra in (False, True)],
+        "ast": lambda c: dump(outcome(lambda: c.compile(source, filename, "exec", only_ast, dont_inherit=True))),
+        "symtable": lambda c: outcome(lambda: symtable_tree(c.symtable.symtable(text, filename, "exec"))),
+        "optast": lambda c: dump(outcome(lambda: c.compile(source, filename, "exec", optimized, dont_inherit=True))),
+        "code": lambda c: outcome(lambda: marshal.dumps(c.compile(source, filename, "exec", dont_inherit=True))),
+    }
+
+
+class Host:
+    """The host compiler behind the same interface lib/compiler provides."""
+    import _tokenize as tokenizer
+    import _symtable as symtable
+    compile = staticmethod(compile)
+
+
+class Ours:
+    def __init__(self, host_parser):
+        self.host_parser = host_parser
+
+    def __getattr__(self, name):
+        import compiler
+        if self.host_parser:
+            compiler.parse = lambda source, filename, mode, flags=0, feature_version=-1: compile(
+                source, filename, mode, flags & ~ast.PyCF_OPTIMIZED_AST | ast.PyCF_ONLY_AST, dont_inherit=True,
+                _feature_version=feature_version)
+        if name in ("tokenizer", "symtable"):
+            __import__("compiler." + name)
+        return getattr(compiler, name)
+
+
+def first_difference(a, b):
+    a, b = repr(a), repr(b)
+    i = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+    return f"host …{a[max(0, i - 60):i + 60]}… ours …{b[max(0, i - 60):i + 60]}…"
+
+
+def check_file(path, stages, host_parser=False):
+    """{stage: None if identical else a one-line difference}; None if the host rejects the file."""
+    signal.alarm(TIMEOUT)
+    try:
+        source = path.read_bytes()
+        try:
+            compile(source, str(path), "exec", dont_inherit=True)
+        except (SyntaxError, ValueError):
+            return None
+        result = {}
+        for stage, view in views(source, path).items():
+            if stage in stages:
+                try:
+                    host, ours = view(Host), view(Ours(host_parser=host_parser))
+                except BaseException as error:  # timeouts and recursion land here
+                    host, ours = None, ("crashed", type(error).__name__, str(error))
+                result[stage] = None if host == ours else first_difference(host, ours)
+        return result
+    finally:
+        signal.alarm(0)
+
+
+def alarm(signum, frame):
+    raise TimeoutError(f"over {TIMEOUT} s")
+
+
+def worker_init():
+    sys.path.insert(0, str(ROOT / "lib"))
+    sys.setrecursionlimit(20000)
+    signal.signal(signal.SIGALRM, alarm)
+
+
+def check_version():
+    want = (LIB.parent / "VERSION").read_text().split()[1].lstrip("v")
+    have = "%d.%d.%d" % sys.version_info[:3]
+    if have != want or sys.version_info.releaselevel != "final":
+        raise SystemExit(f"host Python {have} does not match vendored CPython {want}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--corpus", default="closure,difftest,kernel,lib", help="comma-separated corpora")
+    parser.add_argument("--stage", default=",".join(STAGES), help="comma-separated stages")
+    parser.add_argument("--require", default="", help="corpora that must be fully identical")
+    parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--show", type=int, default=5, help="differences listed per corpus and stage")
+    parser.add_argument("--host-parser", action="store_true",
+                        help="feed later stages the host's AST, to check them before the parser is done")
+    parser.add_argument("files", nargs="*", type=Path, help="check these files instead of corpora")
+    args = parser.parse_args()
+    check_version()
+    stages = args.stage.split(",")
+    corpora = {"files": [p.resolve() for p in args.files]} if args.files else {
+        name: corpus(name) for name in args.corpus.split(",")}
+    failed = False
+    with concurrent.futures.ProcessPoolExecutor(args.jobs, initializer=worker_init) as pool:
+        for name, paths in corpora.items():
+            results = dict(zip(paths, pool.map(check_file, paths, [stages] * len(paths),
+                                                    [args.host_parser] * len(paths), chunksize=1)))
+            checked = {p: r for p, r in results.items() if r is not None}
+            print(f"{name}: {len(checked)} of {len(paths)} files compile on the host")
+            for stage in stages:
+                bad = {p: r[stage] for p, r in checked.items() if r[stage] is not None}
+                share = 100 * (len(checked) - len(bad)) / len(checked) if checked else 100
+                print(f"  {stage:9} {len(checked) - len(bad):5} identical  {share:6.2f}%")
+                for path, difference in list(bad.items())[:args.show]:
+                    print(f"    {path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}: {difference}")
+                failed |= bool(bad) and name in args.require.split(",")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

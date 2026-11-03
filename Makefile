@@ -10,7 +10,7 @@ SRCS = $(wildcard runtime/*.c runtime/*/*.c)
 OBJS = $(SRCS:%.c=build/%.o)
 EXPORTS = results/abi/cp314t-exports.tsv
 
-.PHONY: all abi-audit check-capi regen-abi check-harness
+.PHONY: all abi-audit check-capi regen-abi check-harness check-compiler regen
 all: bin/lucifer
 
 bin/lucifer: $(OBJS)
@@ -46,6 +46,8 @@ check-capi: bin/lucifer $(CAPI_TESTS)
 regen-abi:
 	python3 tools/abi/stubs.py $(EXPORTS) include > runtime/capi/stubs.c
 
+HOST_PYTHON ?= python3
+
 check-harness:
 	python3 tools/oracle/test_harness.py
 	python3 tools/libtest/check.py
@@ -54,3 +56,11 @@ check-harness:
 	python3 tools/difftest/check.py
 	python3 tools/ftcorpus/check.py
 	python3 tools/pypi/check.py
+
+check-compiler:
+	$(HOST_PYTHON) tools/compilercheck --corpus closure,difftest,kernel,lib --require closure,difftest,kernel
+
+PEGEN = third_party/cpython/Tools/peg_generator
+
+regen:
+	PYTHONPATH=$(PEGEN) $(HOST_PYTHON) -m pegen -q python lib/compiler/python.gram -o lib/compiler/parser.py
