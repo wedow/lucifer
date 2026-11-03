@@ -15,6 +15,10 @@ assert fire(0, f.__code__, 4, 0) == 1
 assert fire(1, f.__code__, 6, 42) == 1
 assert fire(2, f.__code__, 8, 7) == 1
 assert log == [('start', 4), ('call', 6, 42, None), ('line', 7)], log
+log.clear()
+assert fire(2, fcode, 8, 100000) == 1     # a line no small int caches: the callback keeps it
+junk = [i * 7 + 100001 for i in range(1000)]
+assert log == [('line', 100000)], log
 mon.set_events(3, E.CALL)
 assert fire(0, f.__code__, 4, 0) == 0 and fire(1, f.__code__, 6, 1) == 1
 def bad(code, off):
