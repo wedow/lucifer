@@ -19,6 +19,19 @@ prim_object_id(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLongLong((long long)(uintptr_t)args[0]);
 }
 
+/* suggest_keyword(name, names): the closest of the tuple names, or None. */
+static PyObject *
+prim_suggest_keyword(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2);
+    if (!PyUnicode_CheckExact(args[0]) || !PyTuple_CheckExact(args[1])) {
+        lu_err_format(PyExc_TypeError, "suggest_keyword(name, names)");
+        return NULL;
+    }
+    PyObject *s = lu_suggest_keyword(&PyTuple_GET_ITEM(args[1], 0), PyTuple_GET_SIZE(args[1]), args[0]);
+    return Py_NewRef(s != NULL ? s : Py_None);
+}
+
 /* The frame of the user code that called a builtin: the nearest one that
    is not kernel-hidden. */
 static struct lu_frame *
@@ -95,7 +108,7 @@ prim_eval_code(PyThreadState *ts, PyObject *const *args, Py_ssize_t nargs)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_builtins_methods[] = {
-    FAST(object_id), FAST(caller_locals),
+    FAST(object_id), FAST(caller_locals), FAST(suggest_keyword),
     { "eval_code", (PyCFunction)(void (*)(void))prim_eval_code, METH_FASTCALL | LU_METH_FRAME, NULL },
     { NULL, NULL, 0, NULL },
 };

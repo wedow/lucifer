@@ -99,6 +99,8 @@ PyObject **lu_unpack_call(PyObject *callargs, PyObject *kwargs, Py_ssize_t *narg
                           PyObject **kwnames);
 PyObject *lu_args_as_tuple(PyObject *func, PyObject *args);
 int lu_dict_merge(PyObject *func, PyObject *dict, PyObject *update);
+/* _Py_CalculateSuggestions: the closest of `count` candidate names to `name`, or NULL. */
+PyObject *lu_suggest_keyword(PyObject *const *candidates, Py_ssize_t count, PyObject *name);
 /* "module.qualname()" as the argument errors name a callable. */
 const char *lu_function_str(PyObject *func, char *buf, size_t size);
 

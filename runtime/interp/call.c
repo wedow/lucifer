@@ -260,8 +260,8 @@ levenshtein_distance(const char *a, size_t a_size, const char *b, size_t b_size,
     return result;
 }
 
-static PyObject *
-suggest_keyword(PyObject *const *candidates, Py_ssize_t count, PyObject *name)
+PyObject *
+lu_suggest_keyword(PyObject *const *candidates, Py_ssize_t count, PyObject *name)
 {
     if (count >= MAX_CANDIDATE_ITEMS) {
         return NULL;
@@ -295,7 +295,7 @@ unexpected_keyword(PyFunctionObject *func, PyCodeObject *co, PyObject *keyword)
 {
     int total_args = co->co_argcount + co->co_kwonlyargcount;
     PyObject *const *names = &PyTuple_GET_ITEM(co->co_localsplusnames, 0);
-    PyObject *suggestion = suggest_keyword(names + co->co_posonlyargcount,
+    PyObject *suggestion = lu_suggest_keyword(names + co->co_posonlyargcount,
                                            total_args - co->co_posonlyargcount, keyword);
     if (suggestion != NULL) {
         lu_err_format(PyExc_TypeError,

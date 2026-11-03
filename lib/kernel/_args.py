@@ -3,7 +3,7 @@ refusals of the Argument Clinic parser (Python/getargs.c
 _PyArg_UnpackKeywords). Functions of positional-only parameters need none:
 the interpreter words their arity errors as a C builtin's."""
 
-from _lucifer import MISSING, error, str_join, size, ns_get, ns_items
+from _lucifer import MISSING, error, str_join, size, ns_get, ns_items, suggest_keyword
 from _lucifer import _boot, operators
 
 __all__ = ()
@@ -54,7 +54,9 @@ def unpack(fname, args, kwargs, names, posonly, minpos):
                     decimal(i + 1), ')')))
         for key, _ in ns_items(kwargs):
             if key not in names[posonly:]:
+                near = suggest_keyword(key, names[posonly:])
                 error(TypeError, str_join('', (
-                    fname, "() got an unexpected keyword argument '", key, "'")))
+                    fname, "() got an unexpected keyword argument '", key, "'",
+                    "" if near is None else str_join('', (". Did you mean '", near, "'?")))))
     return values
 

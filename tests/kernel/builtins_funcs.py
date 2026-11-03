@@ -477,3 +477,100 @@ t('breakpoint', lambda: callable(breakpoint))
 t('input', lambda: callable(input))
 t('aiter', lambda: callable(aiter))
 t('compile', lambda: callable(compile))
+
+
+# aiter and anext, driven by hand
+class Counter:
+    def __init__(self, n):
+        self.n = n
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.n == 0:
+            raise StopAsyncIteration
+        self.n -= 1
+        return self.n
+
+
+def drive(coro):
+    try:
+        coro.send(None)
+    except StopIteration as e:
+        return e.value
+
+
+def collect(aiterator, *default):
+    out = []
+    while True:
+        r = drive(anext(aiterator, *default))
+        if r == 'done':
+            return out
+        out.append(r)
+
+
+async def first_two():
+    it = aiter(Counter(5))
+    return [await anext(it), await anext(it)]
+
+
+async def exhausted():
+    it = aiter(Counter(0))
+    return await anext(it, 'dflt')
+
+
+async def raises():
+    return await anext(aiter(Counter(0)))
+
+
+t('aiter anext', drive, first_two())
+t('anext default', drive, exhausted())
+t('anext stop', drive, raises())
+t('collect', collect, Counter(3), 'done')
+t('aiter non', aiter, 1)
+t('anext non', anext, 1)
+t('anext 0', anext)
+t('aiter 2', aiter, 1, 2)
+t('aiter bad', aiter, type('A', (), {'__aiter__': lambda self: 1})())
+t('__import__', __import__, 'nothing_here')
+t('sum floats', sum, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
+t('sum floats start', sum, [1e308, 1e308, -1e308], 0.0)
+t('sum floats overflow', sum, [1e308, 1e308])
+t('sum floats neg zero', sum, [-0.0, -0.0])
+t('sum floats neg zero start', sum, [], -0.0)
+t('sum complex parts', sum, [1e100 + 1j, 1 + 1e100j, -1e100 + 0j, 0 - 1e100j])
+t('sum complex int', sum, [1, 2], 0j)
+t('sum float subclass', sum, [True, 1.5, 2])
+t('sum custom after int', sum, [1, 2, 0.5, Num(1)])
+t('sum start None', sum, [], None)
+t('sum big then float', sum, [1 << 70, 0.5])
+t('map multiple', lambda: list(map(lambda a, b, c: (a, b, c), 'ab', [1, 2], (3, 4))))
+t('map strict long', lambda: list(map(pow, [2], [3, 4], strict=True)))
+t('map strict third', lambda: list(map(lambda *a: a, 'ab', 'ab', 'a', strict=True)))
+t('zip star', lambda: list(zip(*[[1, 2], [3, 4]])))
+t('filter bool', lambda: list(filter(bool, [0, 1, 2])))
+t('filter obj', lambda: list(filter(Num, [0, 1])))
+t('max ties', lambda: max([1, 1.0, True]))
+t('min ties', lambda: min([1.0, 1, True]))
+t('max key kw twice', max, [1, 2], key=None, default=0)
+t('round ndigits none kw', round, 7.5, ndigits=None)
+t('round near key', round, 1.5, ndigit=1)
+t('pow near key', pow, 2, 3, mdo=1)
+t('pow base kw only', pow, base=2)
+t('pow exp twice', pow, 2, 3, exp=3)
+t('pow too many kw', pow, 1, 2, 3, mod=4)
+t('sum iterable kw', sum, iterable=[1])
+t('enumerate iterable kw', lambda: list(enumerate(iterable='ab', start=1)))
+t('enumerate both kw rev', lambda: list(enumerate(start=1, iterable='ab')))
+t('enumerate bad kw pair', enumerate, 'ab', stat=1)
+t('eval locals bad', eval, (lambda: 1).__code__, 1)
+t('eval globals mapping', eval, (lambda: 1).__code__, type('M', (), {'__getitem__': 1})())
+t('eval value', eval, (lambda: 41 + 1).__code__)
+
+
+def uses_eval(x):
+    return eval((lambda: 7).__code__), locals(), dir()
+
+
+t('eval in function', uses_eval, 3)
