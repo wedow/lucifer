@@ -247,6 +247,20 @@ instance that has no instance attributes and cannot be given any.
     def __ge__(self, other):
         return NotImplemented
 
+    def __getstate__(self):
+        """Helper for pickle."""
+        return _getstate_default(self, False)
+
+    def __reduce__(self):
+        """Helper for pickle."""
+        return _common_reduce(self, 0)
+
+    def __reduce_ex__(self, protocol, /):
+        """Helper for pickle."""
+        if type_lookup(type(self), '__reduce__') is not _object_reduce:
+            return getattr_hook(self, '__reduce__')()
+        return _common_reduce(self, protocol)
+
     @classmethod_
     def __init_subclass__(cls):
         """This method is called when a class is subclassed.
@@ -263,7 +277,80 @@ overridden to extend subclasses.
     __class__ = getset(_get_class, _set_class)
 
 
+def _getstate_default(obj, required):
+    """object_getstate_default: the instance dict, or (dict, slots)."""
+    d = instance_dict(obj, False)
+    state = d if d else None
+    import copyreg
+    slotnames = copyreg._slotnames(type(obj))
+    if slotnames:
+        slots = {}
+        for name in slotnames:
+            try:
+                slots[name] = getattr_hook(obj, name)
+            except AttributeError:
+                pass
+        if slots:
+            state = (state, slots)
+    return state
+
+
+def _new_arguments(obj):
+    """_PyObject_GetNewArguments: (args, kwargs) of __getnewargs_ex__ or __getnewargs__."""
+    cls = type(obj)
+    getnewargs_ex = type_lookup(cls, '__getnewargs_ex__')
+    if getnewargs_ex is not MISSING:
+        r = call_special(getnewargs_ex, obj)
+        if not kind(r, 'tuple'):
+            error(TypeError, str_join('', (
+                '__getnewargs_ex__ should return a tuple, not \'', type_tp_name(type(r)), '\'')))
+        if len(r) != 2:
+            error(ValueError, '__getnewargs_ex__ should return a tuple of length 2, not %d' % len(r))
+        args, kwargs = r
+        if not kind(args, 'tuple'):
+            error(TypeError, str_join('', (
+                'first item of the tuple returned by __getnewargs_ex__ must be a tuple, not \'',
+                type_tp_name(type(args)), '\'')))
+        if not kind(kwargs, 'dict'):
+            error(TypeError, str_join('', (
+                'second item of the tuple returned by __getnewargs_ex__ must be a dict, not \'',
+                type_tp_name(type(kwargs)), '\'')))
+        return args, kwargs
+    getnewargs = type_lookup(cls, '__getnewargs__')
+    if getnewargs is not MISSING:
+        args = call_special(getnewargs, obj)
+        if not kind(args, 'tuple'):
+            error(TypeError, str_join('', (
+                '__getnewargs__ should return a tuple, not \'', type_tp_name(type(args)), '\'')))
+        return args, None
+    return None, None
+
+
+def _common_reduce(obj, proto):
+    import copyreg
+    if proto < 2:
+        return copyreg._reduce_ex(obj, proto)
+    cls = type(obj)
+    args, kwargs = _new_arguments(obj)
+    if kwargs:
+        newobj = copyreg.__newobj_ex__
+        newargs = (cls, args, kwargs)
+    else:
+        newobj = copyreg.__newobj__
+        newargs = (cls, *(args or ()))
+    getstate = type_lookup(cls, '__getstate__')
+    if getstate is _object_getstate:
+        state = _getstate_default(obj, args is None)
+    else:
+        state = call_special(getstate, obj)
+    listitems = iter(obj) if kind(obj, 'list') else None
+    dictitems = iter(obj.items()) if kind(obj, 'dict') else None
+    return newobj, newargs, state, listitems, dictitems
+
+
 _object_dict = type_dict(object)
+_object_reduce = ns_get(_object_dict, '__reduce__', MISSING)
+_object_getstate = ns_get(_object_dict, '__getstate__', MISSING)
 _object_new = ns_get(_object_dict, '__new__', MISSING)
 _object_init = ns_get(_object_dict, '__init__', MISSING)
 _object_getattribute = ns_get(_object_dict, '__getattribute__', MISSING)
