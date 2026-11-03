@@ -40,6 +40,41 @@ LU_ALLOCATOR_HOOKS(lu_obj)
    Python/gc_free_threading.c. Returns NULL without setting an error. */
 void *lu_gc_alloc(PyTypeObject *tp, size_t size, size_t presize);
 
+/* ob_gc_bits (Include/internal/pycore_gc.h): tracked objects are the
+   collector's; the rest of the bits are its working state. */
+enum {
+    LU_GC_TRACKED = 1 << 0,
+    LU_GC_FINALIZED = 1 << 1,   /* tp_finalize has run */
+    LU_GC_UNREACHABLE = 1 << 2, /* working: not (yet) known to be reachable */
+    LU_GC_FROZEN = 1 << 3,      /* gc.freeze(): skipped by collections */
+    LU_GC_ALIVE = 1 << 5,       /* working: known reachable */
+    LU_GC_DEFERRED = 1 << 6,    /* ob_ref_shared carries LU_REF_DEFERRED */
+};
+/* _Py_REF_DEFERRED: added to the shared count of an object whose references
+   from frames are not counted, so that its count never reaches zero by
+   decrefs; only a collection frees it. */
+#define LU_REF_DEFERRED (PY_SSIZE_T_MAX / 8)
+
+static inline int
+lu_gc_is_tracked(PyObject *op)
+{
+    return (op->ob_gc_bits & LU_GC_TRACKED) != 0;
+}
+
+/* PyObject_IS_GC: whether the collector can hold the object. */
+static inline int
+lu_is_gc(PyObject *op)
+{
+    PyTypeObject *tp = Py_TYPE(op);
+    return (tp->tp_flags & Py_TPFLAGS_HAVE_GC) && (tp->tp_is_gc == NULL || tp->tp_is_gc(op));
+}
+
+static inline int
+lu_has_deferred_refcount(PyObject *op)
+{
+    return (op->ob_gc_bits & LU_GC_DEFERRED) != 0;
+}
+
 /* The lock registry (FOUNDATIONS 2.9): every runtime-internal mutex is a
    lu_lock registered once, so that fork can take and reset them all. */
 struct lu_lock {
@@ -209,9 +244,8 @@ struct lu_stw {
     PyEvent stop_event;         /* set when countdown reaches 0 */
 };
 
-/* The collector's policy state (runtime/interp/gc.c), after GCState in
-   Python/gc_free_threading.c. Until the cycle collector arrives (M0.2) a
-   collection is a stop-the-world with an empty body. */
+/* The collector's state (runtime/interp/gc.c), after GCState in
+   Python/gc_free_threading.c. */
 struct lu_gc {
     int enabled;
     int collecting;
@@ -223,9 +257,12 @@ struct lu_gc {
     Py_ssize_t last_mem;
     Py_ssize_t long_lived_total;
     PyObject *hook;             /* gc.py's callback runner; strong */
-    PyMutex deferred_lock;
-    PyObject **deferred_code;   /* code objects that lost their last reference, resurrected */
-    Py_ssize_t deferred_code_count, deferred_code_capacity;
+    PyObject *garbage;          /* gc.garbage; strong */
+    int debug;                  /* gc.set_debug flags */
+    int freeze_active;          /* gc.freeze() was used */
+    Py_ssize_t stress_allocs;   /* allocations since the last stress collection */
+    Py_ssize_t stress_live;     /* GC blocks that collection saw */
+    Py_ssize_t stats[3][3];     /* per generation: collections, collected, uncollectable */
 };
 
 /* A function queued by Py_AddPendingCall (runtime/interp/poll.c). */
@@ -514,12 +551,37 @@ void lu_stw_task_delete(struct _is *interp, struct lu_task *t);
 /* The collector's trigger (runtime/interp/gc.c). */
 void lu_gc_record_allocation(struct lu_entry *entry);
 void lu_gc_record_deallocation(struct lu_entry *entry);
-/* Runs a collection of `generation`: the callbacks, a stop-the-world, and the
-   counters. Returns the number of objects collected. */
-Py_ssize_t lu_gc_collect(PyThreadState *ts, int generation, int heap_reason);
+/* Why a collection runs (runtime/interp/collector.c). */
+enum { LU_GC_REASON_HEAP, LU_GC_REASON_MANUAL, LU_GC_REASON_SHUTDOWN, LU_GC_REASON_STRESS };
+/* gc.set_debug flags. */
+enum {
+    LU_GC_DEBUG_STATS = 1,
+    LU_GC_DEBUG_COLLECTABLE = 2,
+    LU_GC_DEBUG_UNCOLLECTABLE = 4,
+    LU_GC_DEBUG_SAVEALL = 32,
+};
+/* The cycle collector (runtime/interp/collector.c): one collection of
+   `generation`, with the counters it keeps, finalizers, weakref callbacks and
+   tp_clear run; reports what it collected and could not. */
+void lu_gc_collect_garbage(PyThreadState *ts, int generation, int reason, Py_ssize_t *collected,
+                           Py_ssize_t *uncollectable);
+/* gc.get_objects and gc.get_referrers: new lists. */
+PyObject *lu_gc_get_objects(struct _is *interp);
+PyObject *lu_gc_get_referrers(struct _is *interp, PyObject *objs);
+/* gc.freeze (mode 1), gc.unfreeze (0) and gc.get_freeze_count (-1): the count. */
+Py_ssize_t lu_gc_freeze(struct _is *interp, int mode);
+/* Resident plus swapped memory in KB, or -1. */
+Py_ssize_t lu_gc_mem_usage(void);
+/* The last collection, before the interpreter ends: finalizes what only cycles hold. */
+void lu_gc_collect_shutdown(PyThreadState *ts);
 /* The poll handler's GC reason: collects the youngest generation if the
    collector is enabled and still wants to. */
 void lu_gc_run(PyThreadState *ts);
+/* The stress tick's collection (-X lucifer_stress=gc:N), `every` allocations after
+   the last tick: as a manual one, but it leaves the counts, statistics and callbacks
+   as they were. A collection costs the heap, so ticks are skipped until the
+   allocations since the last one are an eighth of it. */
+void lu_gc_stress(PyThreadState *ts, unsigned long every);
 
 /* Signals (runtime/interp/signals.c): the trip handler sets a flag and the
    main task's poll reason; the main task runs the Python handlers. */
@@ -552,7 +614,11 @@ void lu_brc_retire(struct lu_entry *entry);
 void lu_brc_set_idle(struct lu_entry *entry, int idle);
 
 void lu_brc_queue_object(PyObject *ob);
+void lu_stack_push(struct lu_stack *s, PyObject *ob);
+void lu_brc_take_queued(struct _is *interp, void (*fn)(PyObject *, void *), void *arg);
 void lu_set_immortal(PyObject *op);
+/* _PyObject_SetDeferredRefcount: for a new object its creator owns. */
+void lu_set_deferred(PyObject *op);
 /* Gives a dying object one reference for a call that may look at it; End
    returns 0 when it is dead again, -1 when the call kept it. */
 void lu_resurrect_start(PyObject *self);
@@ -681,6 +747,9 @@ extern LU_EXPORT union lu_runtime {
             } handlers[LU_NSIG];
         } signals;
         PyMutex weakref_locks[64];      /* guard the weakref lists, by referent address */
+        struct lu_lock heaps_lock;      /* a carrier's heaps are in the registry or abandoned,
+                                           never between: held by its retirement and by the
+                                           collector's walk, and by entry creation */
         struct _is main_interp;
     };
     unsigned char oracle_size[LU_RUNTIME_SIZE];
@@ -701,6 +770,18 @@ lu_qsbr_quiescent(struct lu_carrier *c)
 void lu_layouts_init(void);
 PyObject *lu_object_new(PyTypeObject *tp, size_t size);    /* zeroed; GC types tracked */
 void lu_object_free(PyObject *op);
+/* tp_traverse and tp_clear of a layout whose references are the object
+   pointers in [first, end) bytes of the object. LU_GC_FIELDS names the first
+   and last member and defines NAME_traverse and NAME_clear. */
+int lu_fields_traverse(PyObject *op, Py_ssize_t first, Py_ssize_t end, visitproc visit, void *arg);
+int lu_fields_clear(PyObject *op, Py_ssize_t first, Py_ssize_t end);
+#define LU_GC_FIELDS(name, type, first_member, last_member) \
+    static int name##_traverse(PyObject *op, visitproc visit, void *arg) \
+    { return lu_fields_traverse(op, offsetof(type, first_member), \
+                                offsetof(type, last_member) + sizeof(PyObject *), visit, arg); } \
+    static int name##_clear(PyObject *op) \
+    { return lu_fields_clear(op, offsetof(type, first_member), \
+                             offsetof(type, last_member) + sizeof(PyObject *)); }
 /* Drops one reference. When it was the last, returns 1 with the count at 0
    and the object not yet freed, so that a dealloc can free a chain in a loop. */
 static inline int
@@ -709,6 +790,7 @@ lu_release_last(PyObject *op)
     if (_Py_IsOwnedByCurrentThread(op) && op->ob_ref_local == 1
         && _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared) == 0) {
         op->ob_ref_local = 0;
+        op->ob_gc_bits &= ~LU_GC_TRACKED;       /* dying: see _Py_Dealloc */
         return 1;
     }
     Py_DECREF(op);
@@ -724,6 +806,9 @@ void lu_function_init(void);
 void lu_weakref_init(void);
 /* The referent is dying: its references go dead and their callbacks run. */
 void lu_clear_weakrefs(PyObject *ob);
+PyObject *lu_weakref_new(PyTypeObject *type, PyObject *ob, PyObject *callback);
+/* The head of ob's list of weak references, or NULL if its type has none. */
+PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
 void lu_storage_init(void);
 void lu_module_init(void);

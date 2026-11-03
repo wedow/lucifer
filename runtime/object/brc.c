@@ -23,8 +23,8 @@ bucket_of(struct _is *interp, uintptr_t tid)
     return &interp->brc.buckets[tid % LU_BRC_NUM_BUCKETS];
 }
 
-static void
-push(struct lu_stack *s, PyObject *ob)
+void
+lu_stack_push(struct lu_stack *s, PyObject *ob)
 {
     if (s->n == s->cap) {
         size_t cap = s->cap ? 2 * s->cap : 16;
@@ -52,7 +52,7 @@ static void
 take_all(struct lu_stack *dst, struct lu_stack *src)
 {
     for (size_t i = 0; i < src->n; i++) {
-        push(dst, src->items[i]);
+        lu_stack_push(dst, src->items[i]);
     }
     src->n = 0;
 }
@@ -145,7 +145,7 @@ lu_brc_queue_object(PyObject *ob)
         }
         return;
     }
-    push(&t->to_merge, ob);
+    lu_stack_push(&t->to_merge, ob);
     /* The owner is registered, so its carrier is alive while the bucket lock
        is held: it merges at its next poll. */
     lu_poll_set(entry_of(t)->carrier, LU_POLL_EXPLICIT_MERGE);
@@ -166,4 +166,25 @@ lu_brc_merge(struct lu_entry *entry)
     take_all(&t->local, &t->to_merge);
     pthread_mutex_unlock(&b->lock.mutex);
     merge_queued_objects(&t->local);
+}
+
+/* Hands each object that other threads queued for an owner in the interpreter
+   to fn, with the queue's reference (the collector's merge, in a stopped
+   world). */
+void
+lu_brc_take_queued(struct _is *interp, void (*fn)(PyObject *, void *), void *arg)
+{
+    for (int i = 0; i < LU_BRC_NUM_BUCKETS; i++) {
+        struct lu_brc_bucket *b = &interp->brc.buckets[i];
+        pthread_mutex_lock(&b->lock.mutex);
+        for (struct lu_brc_owner *t = b->head; t != NULL; t = t->next) {
+            take_all(&t->local, &t->to_merge);
+        }
+        pthread_mutex_unlock(&b->lock.mutex);
+        for (struct lu_brc_owner *t = b->head; t != NULL; t = t->next) {
+            while (t->local.n > 0) {
+                fn(t->local.items[--t->local.n], arg);
+            }
+        }
+    }
 }

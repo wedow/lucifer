@@ -17,10 +17,14 @@ retire(void *arg)
     /* Unbinding merges the owner records, which may free objects and so
        allocate: the heaps stay until the owner records are gone. */
     lu_task_carrier_exit(c);
+    /* The heaps pass from the registry to the abandoned segments in one step
+       as far as a collection can see (runtime/interp/collector.c). */
+    pthread_mutex_lock(&_PyRuntime.heaps_lock.mutex);
     lu_qsbr_unregister(c);
     for (struct lu_entry *e = c->entries; e != NULL; e = e->next) {
         lu_mimalloc_abandon(e);
     }
+    pthread_mutex_unlock(&_PyRuntime.heaps_lock.mutex);
     lu_carrier = NULL;
     while (c->entries != NULL) {
         struct lu_entry *e = c->entries;
@@ -41,6 +45,7 @@ start_runtime(void)
     interp->gc.young_threshold = 2000;
     interp->gc.old_threshold[0] = interp->gc.old_threshold[1] = 10;
     lu_lock_register(&_PyRuntime.qsbr.lock);
+    lu_lock_register(&_PyRuntime.heaps_lock);
     lu_lock_register(&_PyRuntime.allocators.lock);
     lu_lock_register(&interp->tasks_lock);
     lu_lock_register(&_PyRuntime.sched.lock);
@@ -68,9 +73,11 @@ entry_new(struct lu_carrier *c, struct _is *interp)
     }
     e->interp = interp;
     e->carrier = c;
+    lu_mimalloc_bind(e);
+    pthread_mutex_lock(&_PyRuntime.heaps_lock.mutex);
     e->next = c->entries;
     c->entries = e;
-    lu_mimalloc_bind(e);
+    pthread_mutex_unlock(&_PyRuntime.heaps_lock.mutex);
     return e;
 }
 

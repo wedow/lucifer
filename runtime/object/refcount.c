@@ -77,6 +77,10 @@ dealloc_now(PyObject *op)
 void
 _Py_Dealloc(PyObject *op)
 {
+    /* A dying object is the collector's no longer, before any code of its
+       dealloc runs: the collector must not find a zero count over live fields,
+       or an object parked in the trash queue. */
+    op->ob_gc_bits &= ~LU_GC_TRACKED;
     if (trash.depth >= LU_TRASH_DEPTH) {
         if (trash.length == trash.capacity) {
             size_t capacity = trash.capacity ? trash.capacity * 2 : 64;
@@ -199,14 +203,19 @@ lu_set_immortal(PyObject *op)
     op->ob_tid = 0;
     op->ob_ref_local = _Py_IMMORTAL_REFCNT_LOCAL;
     op->ob_ref_shared = 0;
-    op->ob_gc_bits |= 1 << 6;   /* _PyGC_BITS_DEFERRED */
+    op->ob_gc_bits |= LU_GC_DEFERRED;
+}
+
+void
+lu_set_deferred(PyObject *op)
+{
+    op->ob_gc_bits |= LU_GC_DEFERRED;
+    op->ob_ref_shared = _Py_REF_SHARED(LU_REF_DEFERRED, 0);
 }
 
 /* Finalizers from dealloc (Objects/object.c): tp_finalize runs once, on the
    object resurrected for the call, which then dies unless the finalizer
    kept it. The finalized bit is _PyGC_BITS_FINALIZED. */
-#define LU_GC_FINALIZED 2
-
 void
 PyObject_CallFinalizer(PyObject *self)
 {
@@ -252,7 +261,17 @@ lu_resurrect_end(PyObject *self)
 int
 PyObject_CallFinalizerFromDealloc(PyObject *self)
 {
+    /* The finalizer sees a tracked object: it may be found by gc calls, or
+       resurrect it, and then it must stay tracked. */
+    int gc = (Py_TYPE(self)->tp_flags & Py_TPFLAGS_HAVE_GC) != 0;
+    if (gc) {
+        self->ob_gc_bits |= LU_GC_TRACKED;
+    }
     lu_resurrect_start(self);
     PyObject_CallFinalizer(self);
-    return lu_resurrect_end(self);
+    int resurrected = lu_resurrect_end(self);
+    if (gc && resurrected == 0) {
+        self->ob_gc_bits &= ~LU_GC_TRACKED;
+    }
+    return resurrected;
 }

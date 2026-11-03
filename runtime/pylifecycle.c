@@ -581,6 +581,7 @@ Py_FinalizeEx(void)
     }
     int status = flush_std_files();
     finalize_modules(interp);
+    lu_gc_collect_shutdown(PyThreadState_Get());      /* __del__ of what only cycles held */
     flush_std_stream("stdout");
     flush_std_stream("stderr");
     PyErr_Clear();
