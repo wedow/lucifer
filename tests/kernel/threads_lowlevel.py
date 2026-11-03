@@ -301,3 +301,29 @@ for args in ((False, 1), (True, -2)):
     except ValueError as e:
         print('ValueError', e, r._recursion_count())
 r.release()
+
+# A local whose __init__ fails in a thread runs it again at the next access there.
+class Flaky(_thread._local):
+    calls = 0
+
+    def __init__(self):
+        type(self).calls += 1
+        if type(self).calls == 2:
+            raise ValueError('once')
+        self.v = type(self).calls
+
+
+flaky = Flaky()
+tries = []
+
+
+def touch():
+    for _ in range(2):
+        try:
+            tries.append(flaky.v)
+        except ValueError as e:
+            tries.append(str(e))
+
+
+wait_done(_thread.start_joinable_thread(touch, daemon=False))
+print(tries, Flaky.calls)

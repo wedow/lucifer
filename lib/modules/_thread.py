@@ -280,7 +280,13 @@ class _local:
             dct = impl.create_dict()
             args, kw = impl.localargs
             object.__setattr__(self, '__dict__', dct)
-            self.__init__(*args, **kw)
+            try:
+                self.__init__(*args, **kw)
+            except BaseException:
+                tdict = _lucifer.thread_dict()      # the next access runs __init__ again
+                tdict.pop(impl.key, None)
+                impl.forget(tdict)
+                raise
         impl.locallock.acquire()
         object.__setattr__(self, '__dict__', dct)
         return impl
