@@ -1,6 +1,6 @@
 ---
 id: luc-awzt
-status: open
+status: closed
 deps: [luc-a0sq, luc-ahq7, luc-abar]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: sonnet.
 
 make check-kernel: at least 30 programs, all matching the oracle plain, with LANE=handoff and with LANE=handoff:1 ... :8; kernelcheck --opcodes reports 0 unhandled base opcodes; make check passes.
 
+
+## Notes
+
+**2026-11-03T18:02:57Z**
+
+Done: kernelcheck --opcodes (also run by check-kernel); programs match_stmt, tstrings, scoping, control_flow; deque matches sequence patterns; Interpolation() error wording; unicodedata_module sampled (it timed out under handoff); second Py_Initialize reopens the task list (check-embed hung). Lanes plain, handoff, handoff:1..8 all green.
