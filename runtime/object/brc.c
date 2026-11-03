@@ -5,12 +5,19 @@
    by thread id in a fixed hash table. If the owner is not registered, it has
    exited, and the queuing thread merges the counts itself.
 
-   Until PyThreadState exists, a thread registers when it creates its first
-   object and merges its queue when it exits; there is no eval breaker yet to
-   make it merge earlier. */
+   A thread must register before its first refcount operation: it may reuse
+   an exited owner's TCB, and with it the thread id of objects merged as
+   abandoned under the bucket lock. CPython registers when a thread state is
+   bound. Until PyThreadState exists, a thread registers as it starts, through
+   the pthread_create below, or when it creates its first object (the main
+   thread). It merges its queue when it exits; there is no eval breaker yet
+   to make it merge earlier. */
 
+#define _GNU_SOURCE
 #include "lucifer.h"
 
+#include <dlfcn.h>
+#include <errno.h>
 #include <pthread.h>
 
 #define NUM_BUCKETS 257         /* _Py_BRC_NUM_BUCKETS */
@@ -164,4 +171,37 @@ lu_brc_queue_object(PyObject *ob)
     }
     push(&t->to_merge, ob);
     pthread_mutex_unlock(&b->mutex);
+}
+
+struct start {
+    void *(*fn)(void *);
+    void *arg;
+};
+
+static void *
+start_registered(void *arg)
+{
+    struct start s = *(struct start *)arg;
+    PyMem_RawFree(arg);
+    lu_brc_register_thread();
+    return s.fn(s.arg);
+}
+
+/* Interposes libc's for the runtime and every extension. */
+LU_EXPORT int
+pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+               void *(*fn)(void *), void *arg)
+{
+    int (*create)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *) =
+        dlsym(RTLD_NEXT, "pthread_create");
+    struct start *s = PyMem_RawMalloc(sizeof *s);
+    if (s == NULL) {
+        return EAGAIN;
+    }
+    *s = (struct start){ fn, arg };
+    int err = create(thread, attr, start_registered, s);
+    if (err != 0) {
+        PyMem_RawFree(s);
+    }
+    return err;
 }
