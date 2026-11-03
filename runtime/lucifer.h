@@ -242,6 +242,15 @@ struct lu_pending {
     struct lu_task *handling;   /* the task running the queue: it is not re-entered */
 };
 
+/* sys.monitoring (runtime/interp/instrument.c): the tool ids, event counts
+   and tables of which tools watch which events (pycore_instruments.h). */
+#define LU_MON_TOOL_IDS 8
+#define LU_MON_LOCAL_EVENTS 11      /* events that instrument bytecode */
+#define LU_MON_UNGROUPED_EVENTS 16  /* events a tool can ask for singly */
+#define LU_MON_EVENTS 19
+typedef struct { uint8_t tools[LU_MON_LOCAL_EVENTS]; } lu_local_monitors;
+typedef struct { uint8_t tools[LU_MON_UNGROUPED_EVENTS]; } lu_global_monitors;
+
 /* PyInterpreterState (private layout; DESIGN 4.1). */
 struct _is {
     mi_subproc_id_t subproc;    /* segments abandoned by one interpreter's carriers
@@ -259,6 +268,11 @@ struct _is {
     PyObject *interned;         /* interned str -> itself */
     _PyFrameEvalFunction eval_frame;    /* PEP 523; NULL runs frames inline */
     uintptr_t monitoring_version;       /* a multiple of LU_POLL_VERSION_UNIT */
+    uintptr_t last_restart_version;     /* sys.monitoring.restart_events */
+    lu_global_monitors monitors;        /* the tools watching each event, everywhere */
+    PyObject *monitoring_callables[LU_MON_TOOL_IDS][LU_MON_EVENTS];     /* strong */
+    PyObject *monitoring_tool_names[LU_MON_TOOL_IDS];                   /* strong */
+    uintptr_t monitoring_tool_versions[LU_MON_TOOL_IDS];
     struct lu_static_type_state static_types[LU_MAX_STATIC_TYPES];
     PyObject *kernel[LU_K_COUNT];       /* strong; NULL until registered */
     unsigned int next_version_tag;      /* heap types' tp_version_tag; 0 once spent */

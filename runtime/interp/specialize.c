@@ -65,15 +65,22 @@ fail(lu_codeunit *site)
 }
 
 /* Rewriting a site, one writer at a time: begin makes it generic and clears
-   its guard word; end sets the guard, the cooldown, and last the opcode. */
-static void
+   its guard word; end sets the guard, the cooldown, and last the opcode.
+   A site that monitoring has instrumented (INSTRUMENTED_LINE runs the
+   instruction under it) is left alone: begin returns 0, holding nothing. */
+static int
 begin(lu_codeunit *site, int generic, lu_codeunit *guard, int guard_words)
 {
     PyMutex_Lock(&_PyRuntime.specialize_lock);
+    if (site->op.code >= MIN_INSTRUMENTED_OPCODE) {
+        PyMutex_Unlock(&_PyRuntime.specialize_lock);
+        return 0;
+    }
     __atomic_store_n(&site->op.code, (uint8_t)generic, __ATOMIC_RELEASE);
     for (int i = 0; i < guard_words; i++) {
         lu_cache_store(guard + i, 0);
     }
+    return 1;
 }
 
 static void
@@ -113,7 +120,9 @@ lu_specialize_load_global(PyObject *globals, PyObject *builtins, lu_codeunit *si
         if (index > UINT16_MAX || globals_version == 0) {
             return fail(site);
         }
-        begin(site, LOAD_GLOBAL, c + LG_MODULE_KEYS_VERSION, 2);
+        if (!begin(site, LOAD_GLOBAL, c + LG_MODULE_KEYS_VERSION, 2)) {
+            return;
+        }
         lu_cache_store(c + LG_INDEX, (uint16_t)index);
         lu_cache_store(c + LG_MODULE_KEYS_VERSION, (uint16_t)globals_version);
         end(site, LOAD_GLOBAL_MODULE);
@@ -127,7 +136,9 @@ lu_specialize_load_global(PyObject *globals, PyObject *builtins, lu_codeunit *si
     if (index < 0 || index > UINT16_MAX || globals_version == 0 || builtins_version == 0) {
         return fail(site);
     }
-    begin(site, LOAD_GLOBAL, c + LG_MODULE_KEYS_VERSION, 2);
+    if (!begin(site, LOAD_GLOBAL, c + LG_MODULE_KEYS_VERSION, 2)) {
+        return;
+    }
     lu_cache_store(c + LG_INDEX, (uint16_t)index);
     lu_cache_store(c + LG_BUILTIN_KEYS_VERSION, (uint16_t)builtins_version);
     lu_cache_store(c + LG_MODULE_KEYS_VERSION, (uint16_t)globals_version);
@@ -174,7 +185,9 @@ static void
 set_attr_cache(lu_codeunit *site, int opcode, uint32_t version, uint32_t second, PyObject *descr)
 {
     lu_codeunit *c = site + 1;
-    begin(site, LOAD_ATTR, c + LA_VERSION, 2);
+    if (!begin(site, LOAD_ATTR, c + LA_VERSION, 2)) {
+        return;
+    }
     lu_cache_store32(c + LA_KEYS_VERSION, second);
     lu_cache_store_ptr(c + LA_DESCR, descr);
     lu_cache_store32(c + LA_VERSION, version);
