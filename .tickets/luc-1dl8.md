@@ -1,6 +1,6 @@
 ---
 id: luc-1dl8
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: opus.
 
 make check-kernel PROGRAMS="hello" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t); make check-globals and check-capi still pass.
 
+
+## Notes
+
+**2026-11-03T03:17:59Z**
+
+Done: check-kernel PROGRAMS=hello matches the 3.14.10t oracle (-I -S, 512 KiB stack); check-globals, check-capi, abi-audit, check-compiler pass. Deviations: print joins via a _lucifer.str_join primitive beside write (no loops or str methods yet); MAKE_FUNCTION, SET_FUNCTION_ATTRIBUTE, BUILD_MAP, IMPORT_NAME, IMPORT_FROM, JUMP_BACKWARD added (the kernel module needs them; JUMP_BACKWARD carries the poll site); kernel modules run in their own namespace and export __all__ (a tuple) into builtins; minimal argument binding with generic TypeError texts (K1b owns exact ones); errors unwind the whole activation until exception tables; uncaught exceptions print Type: message (no traceback).
