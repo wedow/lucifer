@@ -18,6 +18,7 @@
 #include <signal.h>
 #include <string.h>
 #include <sys/random.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
@@ -477,10 +478,47 @@ lu_prim_os_sleep(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (nargs != 1 || int_arg(args[0], &ns) < 0) {
         return NULL;
     }
-    struct lu_wait w;
-    lu_wait_begin(&w);
-    lu_park(&w, lu_monotonic_ns() + ns, 1);
-    return Py_NewRef(Py_None);
+    /* PEP 475: a signal ends the park; its Python handler runs, and the sleep
+       goes on for the time left unless the handler raised. */
+    PyTime_t deadline = lu_monotonic_ns() + ns;
+    for (;;) {
+        struct lu_wait w;
+        lu_wait_begin(&w);
+        if (lu_park(&w, deadline, 1) != LU_PARK_INTR) {
+            return Py_NewRef(Py_None);
+        }
+        if (PyErr_CheckSignals() < 0) {
+            return NULL;
+        }
+    }
+}
+
+/* itimer(which, value_us, interval_us): setitimer, or getitimer when value_us
+   is negative. Returns the previous (value_us, interval_us). */
+static PyObject *
+prim_os_itimer(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long which, value, interval;
+    if (nargs != 3 || int_arg(args[0], &which) < 0 || int_arg(args[1], &value) < 0
+        || int_arg(args[2], &interval) < 0) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "itimer(which, value, interval)"), NULL);
+    }
+    struct itimerval next = { { interval / 1000000, interval % 1000000 }, { value / 1000000, value % 1000000 } };
+    struct itimerval old;
+    if ((value < 0 ? getitimer((int)which, &old) : setitimer((int)which, &next, &old)) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    PyObject *t = PyTuple_New(2);
+    PyObject *v = PyLong_FromLongLong((long long)old.it_value.tv_sec * 1000000 + old.it_value.tv_usec);
+    PyObject *i = PyLong_FromLongLong((long long)old.it_interval.tv_sec * 1000000 + old.it_interval.tv_usec);
+    if (t == NULL || v == NULL || i == NULL) {
+        Py_XDECREF(t); Py_XDECREF(v); Py_XDECREF(i);
+        return NULL;
+    }
+    PyTuple_SET_ITEM(t, 0, v);
+    PyTuple_SET_ITEM(t, 1, i);
+    return t;
 }
 
 /* lseek(fd, offset, whence): the new position. */
@@ -1343,6 +1381,7 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_exit", (PyCFunction)(void (*)(void))lu_prim_os_exit, METH_FASTCALL, NULL },
     { "os_clock_gettime", (PyCFunction)(void (*)(void))lu_prim_os_clock_gettime, METH_FASTCALL, NULL },
     { "os_sleep", (PyCFunction)(void (*)(void))lu_prim_os_sleep, METH_FASTCALL, NULL },
+    { "os_itimer", (PyCFunction)(void (*)(void))prim_os_itimer, METH_FASTCALL, NULL },
     { "os_lseek", (PyCFunction)(void (*)(void))prim_os_lseek, METH_FASTCALL, NULL },
     { "os_isatty", (PyCFunction)(void (*)(void))prim_os_isatty, METH_FASTCALL, NULL },
     { "os_ftruncate", (PyCFunction)(void (*)(void))prim_os_ftruncate, METH_FASTCALL, NULL },

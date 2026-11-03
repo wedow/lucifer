@@ -117,3 +117,26 @@ def raise_signal(signalnum, /):
 def alarm(seconds, /):
     """Arrange for SIGALRM to arrive after the given number of seconds."""
     return _lucifer.os_call('alarm', seconds)
+
+
+class ItimerError(OSError):
+    pass
+
+
+def _timer(seconds):
+    if seconds < 0:
+        raise ItimerError(22, 'Invalid argument')
+    return round(seconds * 1e6)
+
+
+def setitimer(which, seconds, interval=0.0, /):
+    """Sets given itimer (one of ITIMER_REAL, ITIMER_VIRTUAL or ITIMER_PROF) especially
+to seconds, with an interval, and returns the old (seconds, interval) tuple."""
+    old = _lucifer.os_itimer(which, _timer(seconds), _timer(interval))
+    return old[0] / 1e6, old[1] / 1e6
+
+
+def getitimer(which, /):
+    """Returns current value of given itimer."""
+    old = _lucifer.os_itimer(which, -1, 0)
+    return old[0] / 1e6, old[1] / 1e6
