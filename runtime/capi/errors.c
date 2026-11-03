@@ -171,3 +171,11 @@ PyErr_ExceptionMatches(PyObject *exc)
 {
     return PyErr_GivenExceptionMatches(PyErr_Occurred(), exc);
 }
+
+/* Without the faulthandler dump and the finalization CPython attempts. */
+void
+_Py_FatalErrorFunc(const char *func, const char *msg)
+{
+    fprintf(stderr, "Fatal Python error: %s: %s\n", func, msg);
+    abort();
+}

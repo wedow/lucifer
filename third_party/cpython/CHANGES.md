@@ -50,3 +50,22 @@ C under `runtime/` adapted from this tag's sources, under the PSF License
 - `runtime/object/dict.h` and `runtime/object/dict.c` from
   `Include/internal/pycore_dict.h` and `Objects/dictobject.c` (the keys-table
   layout, unicode-keys lookup, insertion and resize): exact-str keys only.
+- `runtime/thread/parking_lot.c` from `Python/parking_lot.c`: each waiter
+  sleeps on a Lucifer wait record (`lu_park`) instead of a `_PySemaphore`,
+  and is woken by its wait id (`lu_unpark`); bucket locks are registered
+  `pthread_mutex_t`s instead of `_PyRawMutex`; the waiter list is a
+  NULL-terminated doubly linked list instead of `llist`. A waiter that times
+  out after an unparker dequeued it returns `Py_PARK_OK` without waiting for
+  the wake (the wake's id is stale by then), so `_PyParkingLot_UnparkAll`
+  wakes under the bucket lock. `_PyParkingLot_AfterFork` is not ported yet.
+- `runtime/thread/lock.c` from `Python/lock.c`: `PyMutex` only
+  (`_PyMutex_LockTimed`, `mutex_unpark`, `_PyMutex_TryUnlock`,
+  `PyMutex_Lock`/`Unlock`/`IsLocked`); the clock is `CLOCK_MONOTONIC` read
+  directly. The other lock kinds of that file are not ported yet.
+- `runtime/thread/critical_section.c` from `Python/critical_section.c` and the
+  inline functions of `Include/internal/pycore_critical_section.h`: the
+  exported functions carry the inline bodies; the world-stopped shortcut of
+  the slow paths is omitted until stop-the-world exists.
+- `runtime/thread/lock.h` from `Include/internal/pycore_lock.h`,
+  `pycore_parking_lot.h` and `pycore_critical_section.h`: the declarations
+  the three files above share.

@@ -4,6 +4,7 @@
 
 #include "Python.h"
 #include "lu_mimalloc.h"
+#include "thread/park.h"
 
 #include <pthread.h>
 #include <stdint.h>
@@ -42,6 +43,39 @@ struct lu_lock {
 };
 void lu_lock_register(struct lu_lock *lock);
 
+/* The wait table (runtime/thread/park.c): pending waits by id. */
+#define LU_WAIT_BUCKETS 257
+
+struct lu_wait_bucket {
+    struct lu_lock lock;
+    struct lu_wait *head;
+};
+
+/* The parking lot (runtime/thread/parking_lot.c): waiters by address. */
+#define LU_LOT_BUCKETS 257              /* NUM_BUCKETS */
+
+struct lu_lot_entry;
+struct lu_lot_bucket {
+    struct lu_lock lock;
+    struct lu_lot_entry *head, *tail;   /* in park order */
+    size_t num_waiters;
+};
+
+/* The syscall bracket (DESIGN 5.5), cp314t's detach and attach. begin
+   suspends the task's critical sections and marks it detached; it returns
+   the task's tstate, or NULL if the thread had no attached task, in which
+   case end does nothing. end reattaches, resumes the top critical section
+   and keeps errno. Blocking calls are made only in runtime/prim/os.c,
+   inside the bracket (tools/blockcheck). */
+PyThreadState *lu_syscall_begin(void);
+void lu_syscall_end(PyThreadState *ts);
+
+/* lu_park's sleep (runtime/prim/os.c): waits while *word == expected, until
+   a wake or the absolute CLOCK_MONOTONIC deadline (-1 for none). Returns 0,
+   or ETIMEDOUT, EINTR or EAGAIN. */
+int lu_futex_wait(uint32_t *word, uint32_t expected, PyTime_t deadline);
+void lu_futex_wake(uint32_t *word);
+
 /* Biased reference counting (runtime/object/brc.c). A thread that owns
    objects has an owner record in each interpreter; the interpreter's buckets
    find it by thread id. */
@@ -71,6 +105,7 @@ struct _is {
     struct {
         struct lu_brc_bucket buckets[LU_BRC_NUM_BUCKETS];
     } brc;
+    struct lu_lock tasks_lock;  /* the task list (HEAD_LOCK) */
     PyThreadState *tasks;       /* every task of this interpreter, in any state */
     uint64_t next_task_id;
     PyObject *modules;          /* sys.modules */
@@ -104,6 +139,13 @@ enum {
 #define LU_POLL_EVENTS_MASK (((uintptr_t)1 << LU_POLL_EVENTS_BITS) - 1)
 #define LU_POLL_VERSION_UNIT ((uintptr_t)1 << LU_POLL_EVENTS_BITS)
 
+/* PyThreadState.state (Include/internal/pycore_pystate.h). */
+enum {
+    _Py_THREAD_DETACHED = 0,
+    _Py_THREAD_ATTACHED = 1,
+    _Py_THREAD_SUSPENDED = 2,
+};
+
 /* The task record (DESIGN 5.3): a Python thread of control. The PyThreadState
    comes first, so a task is its tstate; the tail is Lucifer's. The datastack
    fields of the tstate hold the task's frames. */
@@ -129,6 +171,7 @@ struct lu_carrier {
     struct lu_entry *current;   /* the entry of the interpreter running here */
     struct lu_entry *entries;
     uintptr_t poll;             /* the poll word */
+    uint32_t wake;              /* the futex a park sleeps on; bumped by each unpark */
     struct lu_task *task;       /* the task bound here, or NULL */
 };
 
@@ -230,6 +273,13 @@ extern LU_EXPORT union lu_runtime {
             struct lu_lock *head;
         } locks;
         pthread_key_t carrier_key;      /* retires a thread's carrier */
+        /* The locks below start zeroed, which is PTHREAD_MUTEX_INITIALIZER:
+           a thread may take one before the runtime has started. */
+        struct {
+            struct lu_wait_bucket buckets[LU_WAIT_BUCKETS];
+            uint64_t last_id;
+        } waits;
+        struct lu_lot_bucket parking_lot[LU_LOT_BUCKETS];
         struct lu_static_objects singletons;
         struct lu_identifiers ids;
         struct _is main_interp;
