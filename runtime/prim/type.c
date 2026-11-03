@@ -1434,7 +1434,7 @@ prim_object_size(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyTypeObject *tp = Py_TYPE(args[0]);
     Py_ssize_t n = tp->tp_basicsize;
     if (tp->tp_itemsize != 0) {
-        Py_ssize_t count = Py_SIZE(args[0]);
+        Py_ssize_t count = ((PyVarObject *)args[0])->ob_size;   /* not Py_SIZE: ints are sized by lv_tag */
         n += (count < 0 ? -count : count) * tp->tp_itemsize;
     }
     return PyLong_FromLongLong(n);
