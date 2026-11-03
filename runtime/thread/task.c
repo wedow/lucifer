@@ -172,13 +172,15 @@ unbind(struct lu_task *t)
     if (c == NULL) {
         return;
     }
-    if (t->ts._status.bound_gilstate) {
-        c->gilstate = NULL;
-        t->ts._status.bound_gilstate = 0;
-    }
+    /* The merge may run destructors that use PyGILState_Ensure, so the
+       gilstate tstate stays bound through it. */
     struct lu_entry *e = lu_entry_of(c, t->ts.interp);
     if (--e->nbound == 0) {
         lu_brc_retire(e);
+    }
+    if (t->ts._status.bound_gilstate) {
+        c->gilstate = NULL;
+        t->ts._status.bound_gilstate = 0;
     }
     t->carrier = NULL;
     t->ts._status.unbound = 1;
@@ -226,9 +228,9 @@ lu_task_delete(struct lu_task *t)
 }
 
 /* The thread is exiting with tasks still bound to it (a foreign thread that
-   never released, or the main task). They are unbound while the last one
-   is still the carrier's task, which merging needs; their Python state is
-   not cleared. */
+   never released, or the main task). Each is attached while it is unbound,
+   which merging needs, and stays the carrier's task until all are; their
+   Python state is not cleared. */
 void
 lu_task_carrier_exit(struct lu_carrier *c)
 {
@@ -244,6 +246,7 @@ lu_task_carrier_exit(struct lu_carrier *c)
             if (t == NULL) {
                 break;
             }
+            PyThreadState_Swap(&t->ts);         /* unbind's merge may run destructors */
             unlink_task(t);
             unbind(t);
             t->ts.next = done;

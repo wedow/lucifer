@@ -137,6 +137,71 @@ check_swap_on_main(void)
     check_bound_here(main_ts);
 }
 
+/* A destructor that takes the GIL itself (gh-119585). The owner record's
+   merge runs it on the owning thread when that thread releases its last
+   tstate or exits with one still bound, attached or not. */
+static int reentrant_runs, reentrant_bad;
+
+static void
+reentrant_dealloc(PyObject *op)
+{
+    int bad = PyThreadState_GetUnchecked() == NULL;
+    PyGILState_STATE gil = PyGILState_Ensure();
+    bad |= gil != PyGILState_LOCKED;
+    PyGILState_Release(gil);
+    bad |= PyThreadState_GetUnchecked() == NULL;
+    __atomic_add_fetch(&reentrant_bad, bad, __ATOMIC_SEQ_CST);
+    __atomic_add_fetch(&reentrant_runs, 1, __ATOMIC_SEQ_CST);
+    PyObject_Free(op);
+}
+
+static PyTypeObject Reentrant_Type = {
+    PyVarObject_HEAD_INIT(&PyType_Type, 0)
+    .tp_name = "reentrant",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_dealloc = reentrant_dealloc,
+};
+
+enum { RELEASE, EXIT_ATTACHED, EXIT_DETACHED };
+static PyObject *handed;
+static pthread_barrier_t pair;
+
+static void *
+owner_hands_over(void *arg)
+{
+    PyGILState_STATE gil = PyGILState_Ensure();
+    handed = PyObject_Init(PyObject_Malloc(sizeof(PyObject)), &Reentrant_Type);
+    Py_INCREF(handed);                  /* main drops both: the merge frees it */
+    pthread_barrier_wait(&pair);
+    pthread_barrier_wait(&pair);
+    switch ((int)(intptr_t)arg) {
+    case RELEASE:
+        PyGILState_Release(gil);
+        break;
+    case EXIT_DETACHED:
+        PyEval_SaveThread();
+        break;
+    }
+    return NULL;
+}
+
+static void
+check_reentrant_merge(int how)
+{
+    int runs = reentrant_runs, bad = reentrant_bad;
+    pthread_t th;
+    pthread_barrier_init(&pair, NULL, 2);
+    pthread_create(&th, NULL, owner_hands_over, (void *)(intptr_t)how);
+    pthread_barrier_wait(&pair);
+    Py_DECREF(handed);                  /* queued to the owner */
+    Py_DECREF(handed);
+    pthread_barrier_wait(&pair);
+    pthread_join(th, NULL);
+    pthread_barrier_destroy(&pair);
+    CHECK(__atomic_load_n(&reentrant_runs, __ATOMIC_SEQ_CST) == runs + 1);
+    CHECK(__atomic_load_n(&reentrant_bad, __ATOMIC_SEQ_CST) == bad);
+}
+
 __attribute__((constructor)) static void
 check(void)
 {
@@ -158,6 +223,10 @@ check(void)
     }
     pthread_create(&th[0], NULL, new_and_swap, NULL);
     pthread_join(th[0], NULL);
+    check_bound_here(main_ts);
+    check_reentrant_merge(RELEASE);
+    check_reentrant_merge(EXIT_ATTACHED);
+    check_reentrant_merge(EXIT_DETACHED);
     check_bound_here(main_ts);
     PyGILState_Release(gil);
     CHECK(PyGILState_GetThisThreadState() == NULL);

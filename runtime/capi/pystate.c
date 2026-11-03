@@ -172,11 +172,11 @@ PyGILState_Release(PyGILState_STATE oldstate)
         Py_FatalError("PyGILState_Release: thread state must be current when releasing");
     }
     if (--tstate->gilstate_counter == 0) {
-        /* Clearing may run destructors that use PyGILState_Ensure/Release
-           themselves, so the counter is not zero while it runs. */
+        /* Clearing, and the owner record's merge in deleting, may run
+           destructors that use PyGILState_Ensure/Release themselves, so the
+           counter is not zero while they run (gh-119585). */
         ++tstate->gilstate_counter;
         PyThreadState_Clear(tstate);
-        --tstate->gilstate_counter;
         PyThreadState_DeleteCurrent();
     }
     else if (oldstate == PyGILState_UNLOCKED) {
