@@ -411,6 +411,8 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
         [FORMAT_WITH_SPEC] = &&op_FORMAT_WITH_SPEC,
         [CONVERT_VALUE] = &&op_CONVERT_VALUE,
         [BUILD_STRING] = &&op_BUILD_STRING,
+        [BUILD_TEMPLATE] = &&op_BUILD_TEMPLATE,
+        [BUILD_INTERPOLATION] = &&op_BUILD_INTERPOLATION,
         [RETURN_GENERATOR] = &&op_RETURN_GENERATOR,
         [YIELD_VALUE] = &&op_YIELD_VALUE,
         [SEND] = &&op_SEND,
@@ -447,7 +449,7 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
     /* A kernel call's operands: kernel[kid] on kargs[0..nk), owned, its
        value handled per kret. kret is also the value's fate for the callee
        push_callee enters. */
-    PyObject *kargs[3];
+    PyObject *kargs[4];
     PyObject *exit_args[5];     /* WITH_EXCEPT_START's call: a free slot, self, 3 arguments */
     int kid, nk;
     uint8_t kret;
@@ -2013,6 +2015,29 @@ op_BUILD_STRING: {
     ERROR_IF(res == NULL);
     PUSH(res);
     DISPATCH();
+}
+
+op_BUILD_TEMPLATE: {
+    /* strings, interpolations -- template */
+    sp -= 2;
+    kargs[0] = sp[0];
+    kargs[1] = sp[1];
+    nk = 2;
+    kid = LU_K_build_template;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_BUILD_INTERPOLATION: {
+    /* value, expression [, format_spec] -- interpolation; oparg >> 2 is the conversion */
+    kargs[3] = (oparg & 1) ? POP() : Py_NewRef((PyObject *)&_PyRuntime.singletons.empty_str);
+    kargs[2] = lu_small_int(oparg >> 2);
+    kargs[1] = POP();
+    kargs[0] = POP();
+    nk = 4;
+    kid = LU_K_build_interpolation;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
 }
 
 op_BINARY_OP: {

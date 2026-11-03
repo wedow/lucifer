@@ -19,7 +19,7 @@ KERNEL = lib/kernel/_boot.py lib/kernel/object.py lib/kernel/type.py lib/kernel/
 	lib/kernel/list.py lib/kernel/range.py lib/kernel/str.py lib/kernel/bytes.py lib/kernel/memoryview.py \
 	lib/kernel/dict.py lib/kernel/set.py lib/kernel/mappingproxy.py \
 	lib/kernel/generators.py lib/kernel/frame.py \
-	lib/kernel/iterators.py lib/kernel/builtins.py lib/kernel/weakref.py lib/kernel/module.py lib/kernel/structseq.py lib/kernel/sys.py lib/kernel/genericalias.py
+	lib/kernel/iterators.py lib/kernel/builtins.py lib/kernel/weakref.py lib/kernel/module.py lib/kernel/structseq.py lib/kernel/sys.py lib/kernel/genericalias.py lib/kernel/template.py
 # The builtin modules, as Python over the _lucifer primitives, and the modules
 # importlib finds as frozen (NAME:ORIGNAME:FILE).
 MODULES = $(wildcard lib/modules/*.py)

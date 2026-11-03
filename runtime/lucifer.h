@@ -166,6 +166,8 @@ struct lu_static_type_state {
     X(import_star)              /* INTRINSIC_IMPORT_STAR: import_star(locals, module) */ \
     X(intrinsic_1)              /* CALL_INTRINSIC_1 of PEP 695: (value, oparg) */ \
     X(intrinsic_2)              /* CALL_INTRINSIC_2 of PEP 695: (a, b, oparg) */ \
+    X(build_template)           /* BUILD_TEMPLATE: (strings, interpolations) */ \
+    X(build_interpolation)      /* BUILD_INTERPOLATION: (value, expression, conversion, format_spec) */ \
     X(generic_alias)            /* Py_GenericAlias(origin, args): type[int] before the kernel has the type */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
