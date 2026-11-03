@@ -861,8 +861,23 @@ prim_is_exception_class(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(PyExceptionClass_Check(args[0]) ? Py_True : Py_False);
 }
 
+/* write_unraisable(message, obj, exc): prints "message repr(obj):" and exc
+   with its traceback to stderr, as PyErr_FormatUnraisable does. */
+static PyObject *
+prim_write_unraisable(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 3 || !PyUnicode_Check(args[0]) || !PyExceptionInstance_Check(args[2])) {
+        lu_err_format(PyExc_TypeError, "write_unraisable(message, obj, exc)");
+        return NULL;
+    }
+    PyErr_SetRaisedException(Py_NewRef(args[2]));
+    lu_err_unraisable_text(PyUnicode_AsUTF8(args[0]), args[1]);
+    return Py_NewRef(Py_None);
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_exc_methods[] = {
+    FAST(write_unraisable),
     FAST(exc_set_word), FAST(exc_word), FAST(handled_exception), FAST(set_handled_exception),
     FAST(is_exception), FAST(is_exception_class), FAST(list_append), FAST(caller_traceback),
     FAST(is_callable), FAST(int_text),

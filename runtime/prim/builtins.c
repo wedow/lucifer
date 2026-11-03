@@ -106,9 +106,22 @@ prim_eval_code(PyThreadState *ts, PyObject *const *args, Py_ssize_t nargs)
     return f;
 }
 
+/* builtin_function(module, name, func): a kernel function as a builtin of
+   module, as a C function of it would be. */
+static PyObject *
+prim_builtin_function(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(3);
+    if (!PyModule_CheckExact(args[0]) || !PyUnicode_CheckExact(args[1]) || !PyFunction_Check(args[2])) {
+        lu_err_format(PyExc_TypeError, "builtin_function(module, name, function)");
+        return NULL;
+    }
+    return lu_kernel_builtin(args[0], args[1], args[2]);
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_builtins_methods[] = {
-    FAST(object_id), FAST(caller_locals), FAST(suggest_keyword),
+    FAST(object_id), FAST(caller_locals), FAST(suggest_keyword), FAST(builtin_function),
     { "eval_code", (PyCFunction)(void (*)(void))prim_eval_code, METH_FASTCALL | LU_METH_FRAME, NULL },
     { NULL, NULL, 0, NULL },
 };

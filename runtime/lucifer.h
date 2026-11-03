@@ -159,7 +159,8 @@ struct lu_static_type_state {
     X(get_aiter)                /* GET_AITER */ \
     X(get_anext)                /* GET_ANEXT */ \
     X(stopiteration_error)      /* CALL_INTRINSIC_1 STOPITERATION_ERROR: (exc, kind) */ \
-    X(gen_close)                /* close() of a generator or coroutine, from its finalizer */
+    X(gen_close)                /* close() of a generator or coroutine, from its finalizer */ \
+    X(import_from)              /* IMPORT_FROM: import_from(module, name) */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
     LU_KERNEL_FUNCTIONS(LU_KERNEL_ID)
@@ -187,6 +188,24 @@ struct _is {
     PyObject *kernel[LU_K_COUNT];       /* strong; NULL until registered */
     unsigned int next_version_tag;      /* heap types' tp_version_tag */
     int max_str_digits;                 /* sys.get_int_max_str_digits() */
+    PyObject *importlib;                /* _frozen_importlib, once installed */
+    PyObject *import_func;              /* the original builtins.__import__ */
+    PyConfig config;                    /* what Py_InitializeFromConfig was given, read */
+};
+
+/* -X lucifer_stress and -X lucifer_handoff (FOUNDATIONS 2.7), parsed once by
+   lu_runtime_options from the config's -X options. The rungs that act on
+   them read these fields; a count of 0 is off. */
+struct lu_stress {
+    unsigned long gc;           /* gc:N, every Nth allocation */
+    unsigned long deopt;        /* deopt:N, every Nth guard execution */
+    unsigned long seed;
+    int seeded;
+};
+struct lu_handoff {
+    int on;
+    unsigned long seed;
+    int seeded;
 };
 
 /* The poll word (FOUNDATIONS 2.5): each carrier's eval breaker. The low bits
@@ -362,7 +381,7 @@ struct lu_static_objects {
     X(__rxor__) X(__or__) X(__ror__) X(__floordiv__) X(__rfloordiv__) X(__truediv__) \
     X(__rtruediv__) X(__matmul__) X(__rmatmul__) X(__iadd__) X(__isub__) X(__imul__) \
     X(__imod__) X(__ipow__) X(__ilshift__) X(__irshift__) X(__iand__) X(__ixor__) \
-    X(__ior__) X(__ifloordiv__) X(__itruediv__) X(__imatmul__) X(__neg__) X(__pos__) \
+    X(__ior__) X(__import__) X(__ifloordiv__) X(__itruediv__) X(__imatmul__) X(__neg__) X(__pos__) \
     X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__)
 struct lu_identifiers {
 #define LU_ID_FIELD(name) PyObject *name;
@@ -400,6 +419,10 @@ extern LU_EXPORT union lu_runtime {
         struct lu_lot_bucket parking_lot[LU_LOT_BUCKETS];
         struct lu_static_objects singletons;
         struct lu_identifiers ids;
+        struct lu_stress stress;
+        struct lu_handoff handoff;
+        int finalizing;                 /* Py_FinalizeEx has begun */
+        PyMutex weakref_locks[64];      /* guard the weakref lists, by referent address */
         struct _is main_interp;
     };
     unsigned char oracle_size[LU_RUNTIME_SIZE];
@@ -418,6 +441,9 @@ void lu_dict_views_init(void);          /* dict iterators and views, runtime/pri
 void lu_set_iter_init(void);            /* the set iterator, runtime/prim/set.c */
 void lu_code_init(void);
 void lu_function_init(void);
+void lu_weakref_init(void);
+/* The referent is dying: its references go dead and their callbacks run. */
+void lu_clear_weakrefs(PyObject *ob);
 void lu_descr_init(void);
 void lu_storage_init(void);
 void lu_module_init(void);
@@ -458,6 +484,18 @@ PyObject *lu_set_new(PyTypeObject *type);
 int lu_set_add(PyObject *set, PyObject *key);
 Py_hash_t lu_frozenset_hash(PyObject *set);
 int lu_hash_secret_init(int use_seed, unsigned long seed);
+
+/* runtime/interp/config.c */
+PyStatus lu_runtime_options(const PyConfig *config);
+PyStatus lu_config_read_copy(PyConfig *dst, const PyConfig *src);
+int lu_utf8_mode(const PyConfig *config);
+
+/* runtime/interp/sysmodule.c: sys's native functions, and sys.configure(config). */
+extern PyMethodDef lu_sys_native_methods[];
+int lu_sys_configure(struct _is *interp);
+
+/* runtime/interp/import.c: _imp, then _frozen_importlib and its install. */
+int lu_import_init(struct _is *interp);
 
 /* PyModuleObject (Include/internal/pycore_moduleobject.h). */
 typedef struct {

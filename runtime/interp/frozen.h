@@ -8,10 +8,14 @@ struct lu_frozen {
     const char *name;                   /* the module the file implements */
     const unsigned char *data;          /* marshal of its code object */
     int size;
+    const char *orig;                   /* the module it is a copy of, or NULL (frozen table) */
 };
 
-/* NULL-terminated, in boot order. */
+/* NULL-terminated. The kernel is in boot order; builtin is lib/modules, the
+   builtin modules; frozen is what importlib's FrozenImporter finds. */
 extern const struct lu_frozen lu_frozen_kernel[];
+extern const struct lu_frozen lu_frozen_builtin[];
+extern const struct lu_frozen lu_frozen_modules[];
 
 /* Runs every frozen kernel module. Returns -1 with an exception set. */
 int lu_kernel_boot(PyInterpreterState *interp);

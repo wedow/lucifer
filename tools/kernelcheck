@@ -35,11 +35,11 @@ ENV_RUNS = {"hash_seed": [{"PYTHONHASHSEED": "12345"}, {"PYTHONHASHSEED": "0"}]}
 SEEDED = ("hash_seed",)
 # (name, flags, exit status, text stderr must contain)
 FLAG_ROWS = [
-    ("stress kind", ["-X", "lucifer_stress=bogus", "-I", "-S"], 2, "lucifer_stress"),
-    ("stress count", ["-X", "lucifer_stress=gc:x", "-I", "-S"], 2, "lucifer_stress"),
+    ("stress kind", ["-X", "lucifer_stress=bogus", "-I", "-S", "hello.pyc"], 2, "lucifer_stress"),
+    ("stress count", ["-X", "lucifer_stress=gc:x", "-I", "-S", "hello.pyc"], 2, "lucifer_stress"),
     ("stress ok", ["-X", "lucifer_stress=gc:5,deopt,seed:7", "-I", "-S", "hello.pyc"], 0, ""),
-    ("handoff seed", ["-X", "lucifer_handoff=x", "-I", "-S"], 2, "lucifer_handoff"),
-    ("int digits", ["-X", "int_max_str_digits=100", "-I", "-S"], 1, "int_max_str_digits"),
+    ("handoff seed", ["-X", "lucifer_handoff=x", "-I", "-S", "hello.pyc"], 2, "lucifer_handoff"),
+    ("int digits", ["-X", "int_max_str_digits=100", "-I", "-S", "hello.pyc"], 1, "int_max_str_digits"),
     ("no file", ["-I", "-S", "missing.pyc"], 2, "missing.pyc"),
 ]
 
@@ -103,7 +103,7 @@ def main():
     lucifer = str(Path(args.lucifer).resolve())
     BUILD.mkdir(parents=True, exist_ok=True)
 
-    failed = 0
+    failed = total = 0
     for name in names:
         pyc = compile_program(name)
         for env in ENV_RUNS.get(name, [None]):
@@ -128,7 +128,6 @@ def main():
                 failed += 1
                 print(f"FAIL {label}: exit {first[0]}, flag line {head(first)!r} vs {head(oracle)!r}, "
                       f"runs {'differ' if first[1] != second[1] else 'are identical'}")
-    total = 0
     compile_program("hello")
     for label, flags, status, text in FLAG_ROWS:
         child = subprocess.run([lucifer, *flags], capture_output=True, timeout=TIMEOUT, cwd=BUILD)

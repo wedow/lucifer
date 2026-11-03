@@ -19,7 +19,12 @@ KERNEL = lib/kernel/_boot.py lib/kernel/object.py lib/kernel/type.py lib/kernel/
 	lib/kernel/list.py lib/kernel/range.py lib/kernel/str.py lib/kernel/bytes.py lib/kernel/memoryview.py \
 	lib/kernel/dict.py lib/kernel/set.py \
 	lib/kernel/generators.py \
-	lib/kernel/iterators.py lib/kernel/builtins.py
+	lib/kernel/iterators.py lib/kernel/builtins.py lib/kernel/weakref.py lib/kernel/module.py lib/kernel/structseq.py lib/kernel/sys.py
+# The builtin modules, as Python over the _lucifer primitives, and the modules
+# importlib finds as frozen (NAME:ORIGNAME:FILE).
+MODULES = $(wildcard lib/modules/*.py)
+FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importlib/_bootstrap.py \
+	_frozen_importlib_external:importlib._bootstrap_external:third_party/cpython/Lib/importlib/_bootstrap_external.py
 EXPORTS = results/abi/cp314t-exports.tsv
 
 .PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel regen-abi check-harness check-compiler regen
@@ -42,8 +47,8 @@ build/%.o: %.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<
 
-build/frozen.c: tools/freeze $(KERNEL)
-	$(HOST_PYTHON) tools/freeze $@ $(KERNEL)
+build/frozen.c: tools/freeze $(KERNEL) $(MODULES) third_party/cpython/Lib/importlib/_bootstrap.py third_party/cpython/Lib/importlib/_bootstrap_external.py
+	$(HOST_PYTHON) tools/freeze $@ --kernel $(KERNEL) --builtin $(MODULES) --frozen $(FROZEN)
 
 build/frozen.o: build/frozen.c $(HEADERS)
 	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<

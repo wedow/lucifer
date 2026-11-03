@@ -570,11 +570,21 @@ format_node(struct ctx *c, struct node *top)
 void
 lu_err_unraisable(const char *what, PyObject *obj)
 {
+    char message[128];
+    snprintf(message, sizeof message, "Exception ignored while %s", what);
+    lu_err_unraisable_text(message, obj);
+}
+
+/* PyErr_FormatUnraisable: "message repr(obj):" then the exception being
+   handled, which is cleared. */
+void
+lu_err_unraisable_text(const char *message, PyObject *obj)
+{
     PyObject *exc = PyErr_GetRaisedException();
     PyObject *r = lu_call_kernel(LU_K_repr, &obj, 1);
     const char *text = r != NULL && PyUnicode_Check(r) ? PyUnicode_AsUTF8(r) : NULL;
     PyErr_Clear();
-    fprintf(stderr, "Exception ignored while %s %s:\n", what, text != NULL ? text : "<object repr() failed>");
+    fprintf(stderr, "%s %s:\n", message, text != NULL ? text : "<object repr() failed>");
     Py_XDECREF(r);
     if (exc != NULL && ((PyBaseExceptionObject *)exc)->traceback == NULL) {
         /* format_unraisable_v: a traceback of the frame running now */

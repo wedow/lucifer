@@ -159,36 +159,38 @@ ns_get(PyObject *ns, PyObject *name)
     return lu_ns_lookup(ns, name);
 }
 
+/* IMPORT_NAME: builtins.__import__(name, globals, locals, fromlist, level).
+   Until builtins.py has defined it, while the kernel boots, a name is its
+   sys.modules entry. */
 static PyObject *
-import_name(PyThreadState *ts, PyObject *name, PyObject *fromlist, PyObject *level)
+import_name(PyThreadState *ts, struct lu_frame *frame, PyObject *name, PyObject *fromlist,
+            PyObject *level)
 {
-    /* PyImport_ImportModuleLevelObject's sys.modules hit for absolute imports;
-       importlib takes over the rest at K1n. */
-    if (level != lu_small_int(0)) {
-        lu_err_format(PyExc_ImportError, "relative imports arrive with importlib");
-        return NULL;
+    PyObject *import_func = lu_ns_lookup(ts->interp->builtins, LU_ID(__import__));
+    if (import_func == NULL) {
+        PyObject *mod = lu_ns_lookup(ts->interp->modules, name);
+        if (mod == NULL) {
+            lu_err_format(PyExc_ModuleNotFoundError, "No module named '%s'", PyUnicode_AsUTF8(name));
+        }
+        return Py_XNewRef(mod);
     }
-    PyObject *mod = lu_ns_lookup(ts->interp->modules, name);
-    if (mod == NULL) {
-        lu_err_format(PyExc_ModuleNotFoundError, "No module named '%s'", PyUnicode_AsUTF8(name));
-        return NULL;
-    }
-    return Py_NewRef(mod);
+    PyObject *args[5] = { name, frame->globals, frame->locals != NULL ? frame->locals : Py_None,
+                          fromlist, level };
+    return lu_call(import_func, args, 5, NULL);
 }
 
+/* IMPORT_FROM: the attribute of an exact module's dict, else the kernel's
+   import_from, which falls back to sys.modules and words the error. */
 static PyObject *
 import_from(PyObject *module, PyObject *name)
 {
     PyObject *v = PyModule_CheckExact(module)
         ? lu_ns_lookup(((PyModuleObject *)module)->md_dict, name) : NULL;
-    if (v == NULL) {
-        lu_err_format(PyExc_ImportError, "cannot import name '%s' from '%s' (unknown location)",
-                      PyUnicode_AsUTF8(name),
-                      PyModule_CheckExact(module)
-                          ? PyUnicode_AsUTF8(((PyModuleObject *)module)->md_name) : "?");
-        return NULL;
+    if (v != NULL) {
+        return Py_NewRef(v);
     }
-    return Py_NewRef(v);
+    PyObject *args[2] = { module, name };
+    return lu_call_kernel(LU_K_import_from, args, 2);
 }
 
 /* GET_ITER of the exact types the loop iterates itself; NULL without an
@@ -1112,7 +1114,7 @@ op_IMPORT_NAME: {
     PyObject *fromlist = POP();
     PyObject *level = POP();
     SAVE_FRAME();
-    PyObject *res = import_name(ts, NAME(oparg), fromlist, level);
+    PyObject *res = import_name(ts, frame, NAME(oparg), fromlist, level);
     Py_DECREF(fromlist);
     Py_DECREF(level);
     ERROR_IF(res == NULL);

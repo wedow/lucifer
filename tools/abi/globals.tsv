@@ -83,3 +83,11 @@ uc_float_strings	runtime/prim/pystrtod.c	constant table of upper-case INF, NAN a
 lu_prim_dict_methods	runtime/prim/dict.c	_lucifer's dict primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_set_methods	runtime/prim/set.c	_lucifer's set primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_builtins_methods	runtime/prim/builtins.c	_lucifer's builtins primitives, a PyMethodDef table never written; the API takes it non-const
+lu_frozen_builtin	build/frozen.c	const table of the builtin module ports; relocated by ld.so, then read-only (RELRO)
+lu_frozen_modules	build/frozen.c	const table of the frozen modules; relocated by ld.so, then read-only (RELRO)
+lu_prim_import_methods	runtime/interp/import.c	_lucifer's import primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_os_methods	runtime/prim/os.c	_lucifer's operating system primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_thread_methods	runtime/prim/thread.c	_lucifer's lock primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_weakref_methods	runtime/object/weakref.c	_lucifer's weakref primitives, a PyMethodDef table never written; the API takes it non-const
+lu_sys_native_methods	runtime/interp/sysmodule.c	sys's native functions, a PyMethodDef table never written; the API takes it non-const
+module_members	runtime/prim/module.c	the module type's __dict__ member, a table never written; the type takes it non-const

@@ -1,13 +1,15 @@
-/* Startup (Python/pylifecycle.c, Modules/main.c): the native bootstrap order
-   of DESIGN 4.4, then the frozen kernel, then the program. Command-line
-   handling is minimal until the config ticket (K1n): -I, -S and a .pyc path.
+/* Startup (Python/pylifecycle.c, Modules/main.c): Py_BytesMain reads a
+   PyConfig, Py_InitializeFromConfig runs the native bootstrap order of DESIGN
+   4.4, the frozen kernel, sys and importlib, and Py_RunMain runs the program
+   and finalizes.
 
    Native order:
-   1. the runtime record, the main interpreter, the main carrier and task,
-      and the hash secret before anything is hashed;
+   1. the config, the runtime record, the main interpreter, the main carrier
+      and task, and the hash secret before anything is hashed;
    2. layouts and singletons;
    3. interned names, sys.modules, _lucifer, builtins and sys;
-   4. from here a failure prints the exception's type and message, exit 1. */
+   4. from here a failure prints the exception's type and message, exit 1;
+   5. the kernel, sys.configure, importlib. */
 
 #include "interp/exceptions.h"
 #include "interp/frozen.h"
@@ -19,52 +21,24 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <wchar.h>
 
 #define LU_MAGIC (3627 | ((long)'\r' << 16) | ((long)'\n' << 24))
 
-struct lu_options {
-    int isolated;               /* -I: also -E and -s */
-    int no_site;                /* -S */
-    const char *script;
-};
-
-static int
-usage(const char *program, const char *message)
-{
-    fprintf(stderr, "%s\nusage: %s [-I] [-S] file.pyc\n", message, program);
-    return 2;
-}
-
-/* config_init_hash_seed: PYTHONHASHSEED unless -E or -I. */
-static int
-hash_seed(const struct lu_options *opts, int *use_seed, unsigned long *seed)
-{
-    const char *env = opts->isolated ? NULL : getenv("PYTHONHASHSEED");
-    *use_seed = 0;
-    if (env == NULL || *env == '\0' || strcmp(env, "random") == 0) {
-        return 0;
-    }
-    char *end;
-    errno = 0;
-    unsigned long value = strtoul(env, &end, 10);
-    if (*end != '\0' || errno != 0 || value > 4294967295UL || *env == '-') {
-        fprintf(stderr, "Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be "
-                "\"random\" or an integer in range [0; 4294967295]\n");
-        return -1;
-    }
-    *use_seed = 1;
-    *seed = value;
-    return 0;
-}
-
 /* Prints "Type: message" for an exception raised before the program runs
-   (the kernel is not up, or the file is bad) and returns 1. */
+   (the kernel is not up, or the file is bad), or its traceback when it has
+   one, and returns 1. */
 static int
 report(void)
 {
     PyObject *exc = PyErr_GetRaisedException();
     if (exc == NULL) {
         fprintf(stderr, "lucifer: error return without an exception set\n");
+        return 1;
+    }
+    if (((PyBaseExceptionObject *)exc)->traceback != NULL) {
+        lu_err_display(exc);            /* the kernel or importlib failed: show where */
+        Py_DECREF(exc);
         return 1;
     }
     PyObject *args = ((PyBaseExceptionObject *)exc)->args;
@@ -184,7 +158,7 @@ add_builtins(PyObject *builtins)
 static int
 boot_native(struct _is *interp)
 {
-    interp->max_str_digits = 4300;      /* _PY_LONG_DEFAULT_MAX_STR_DIGITS */
+    interp->max_str_digits = interp->config.int_max_str_digits;
     if ((interp->interned = PyDict_New()) == NULL) {
         return -1;
     }
@@ -219,7 +193,7 @@ boot_native(struct _is *interp)
         return -1;
     }
     Py_DECREF(modules_name);
-    PyMethodDef *const sys_tables[] = { lu_sys_int_methods, lu_sys_frame_methods };
+    PyMethodDef *const sys_tables[] = { lu_sys_int_methods, lu_sys_frame_methods, lu_sys_native_methods };
     for (size_t i = 0; i < sizeof sys_tables / sizeof sys_tables[0]; i++) {
         for (PyMethodDef *ml = sys_tables[i]; ml->ml_name != NULL; ml++) {
             PyObject *f = PyCFunction_NewEx(ml, sys, NULL);
@@ -238,17 +212,33 @@ boot_native(struct _is *interp)
     return add_module(interp, lu_module_from_def(&lu_lucifer_module));
 }
 
+/* __main__ as pyrun_file leaves it for a .pyc: __file__ and the
+   SourcelessFileLoader importlib's external half provides. */
+static int
+set_main_file(struct _is *interp, PyObject *main, const wchar_t *path)
+{
+    PyObject *file = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, path, (Py_ssize_t)wcslen(path));
+    PyObject *external = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("_frozen_importlib_external"));
+    PyObject *cls = external != NULL
+        ? lu_ns_lookup(PyModule_GetDict(external), PyUnicode_InternFromString("SourcelessFileLoader")) : NULL;
+    PyObject *args[2] = { LU_ID(__main__), file };
+    PyObject *loader = file != NULL && cls != NULL ? lu_call(cls, args, 2, NULL) : NULL;
+    PyObject *ns = PyModule_GetDict(main);
+    int err = loader == NULL || lu_ns_insert(ns, LU_ID(__loader__), loader) < 0
+        || lu_ns_insert(ns, PyUnicode_InternFromString("__file__"), file) < 0;
+    Py_XDECREF(file);
+    Py_XDECREF(loader);
+    return err ? -1 : 0;
+}
+
 /* run_pyc_file: the 16-byte header, then the code object. */
 static int
 run_pyc(struct _is *interp, const char *program, const char *path)
 {
     FILE *fp = fopen(path, "rb");
     if (fp == NULL) {
-        char cwd[4096];
         int err = errno;
-        int relative = path[0] != '/' && getcwd(cwd, sizeof cwd) != NULL;
-        fprintf(stderr, "%s: can't open file '%s%s%s': [Errno %d] %s\n", program,
-                relative ? cwd : "", relative ? "/" : "", path, err, strerror(err));
+        fprintf(stderr, "%s: can't open file '%s': [Errno %d] %s\n", program, path, err, strerror(err));
         return 2;
     }
     char *data = NULL;
@@ -294,7 +284,8 @@ run_pyc(struct _is *interp, const char *program, const char *path)
         PyObject *ns = PyModule_GetDict(main);
         PyObject *builtins = lu_ns_lookup(interp->modules, LU_ID(builtins));
         if (lu_ns_insert(ns, LU_ID(__builtins__), builtins) == 0
-            && lu_ns_insert(interp->modules, LU_ID(__main__), main) == 0) {
+            && lu_ns_insert(interp->modules, LU_ID(__main__), main) == 0
+            && set_main_file(interp, main, interp->config.run_filename) == 0) {
             result = PyEval_EvalCode(code, ns, ns);
         }
         Py_DECREF(main);
@@ -307,78 +298,109 @@ run_pyc(struct _is *interp, const char *program, const char *path)
     return 0;
 }
 
-/* The native bootstrap, then the frozen kernel: 0, or an exit status
-   after reporting. */
-static int
-initialize(const struct lu_options *opts)
+/* The native bootstrap, then the frozen kernel, sys and importlib. */
+PyStatus
+Py_InitializeFromConfig(const PyConfig *src)
 {
-    int use_seed;
-    unsigned long seed = 0;
-    if (hash_seed(opts, &use_seed, &seed) < 0) {
-        return 1;
-    }
-    if (lu_hash_secret_init(use_seed, seed) < 0) {
-        fprintf(stderr, "Fatal Python error: _Py_HashRandomization_Init: failed to get "
-                "random numbers to initialize Python\n");
-        return 1;
-    }
     struct _is *interp = &_PyRuntime.main_interp;
+    if (interp->builtins != NULL) {
+        return PyStatus_Error("the runtime is already initialized");
+    }
+    PyConfig config;
+    PyStatus status = lu_config_read_copy(&config, src);
+    if (!PyStatus_Exception(status)) {
+        status = lu_runtime_options(&config);
+    }
+    if (PyStatus_Exception(status)) {
+        return status;
+    }
+    interp->config = config;
+    if (lu_hash_secret_init(config.use_hash_seed, config.hash_seed) < 0) {
+        return PyStatus_Error("_Py_HashRandomization_Init: failed to get random numbers to initialize Python");
+    }
     PyThreadState *main_task = PyThreadState_New(interp);
     if (main_task == NULL) {
-        fprintf(stderr, "Fatal Python error: lucifer: no memory for the main task\n");
-        return 1;
+        return PyStatus_Error("lucifer: no memory for the main task");
     }
     main_task->_whence = LU_WHENCE_INIT;
     PyEval_RestoreThread(main_task);
     lu_layouts_init();
-    if (boot_native(interp) < 0 || lu_kernel_boot(interp) < 0) {
-        return report();
+    if (boot_native(interp) < 0 || lu_kernel_boot(interp) < 0 || lu_sys_configure(interp) < 0
+        || lu_import_init(interp) < 0) {
+        report();
+        return PyStatus_Exit(1);
     }
+    return PyStatus_Ok();
+}
+
+/* Py_FinalizeEx, as far as there is something to finalize: atexit's
+   callbacks run, then the runtime counts as finalizing. */
+int
+Py_FinalizeEx(void)
+{
+    struct _is *interp = &_PyRuntime.main_interp;
+    PyObject *atexit = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("atexit"));
+    PyObject *run = atexit != NULL
+        ? lu_ns_lookup(PyModule_GetDict(atexit), PyUnicode_InternFromString("_run_exitfuncs")) : NULL;
+    if (run != NULL) {
+        PyObject *result = lu_call(run, NULL, 0, NULL);
+        if (result == NULL) {
+            PyErr_Clear();
+        }
+        Py_XDECREF(result);
+    }
+    __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     return 0;
+}
+
+/* Modules/main.c: run the file the config names, then finalize. */
+int
+Py_RunMain(void)
+{
+    struct _is *interp = &_PyRuntime.main_interp;
+    const PyConfig *config = &interp->config;
+    char *program = Py_EncodeLocale(config->orig_argv.length > 0 ? config->orig_argv.items[0] : L"lucifer", NULL);
+    char *path = Py_EncodeLocale(config->run_filename, NULL);
+    int status = run_pyc(interp, program, path);
+    PyMem_Free(program);
+    PyMem_Free(path);
+    if (Py_FinalizeEx() < 0 && status == 0) {
+        status = 120;
+    }
+    return status;
 }
 
 int
 Py_BytesMain(int argc, char **argv)
 {
-    struct lu_options opts = { 0 };
-    const char *program = argc > 0 ? argv[0] : "lucifer";
-    int i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1] != '\0'; i++) {
-        for (const char *c = argv[i] + 1; *c; c++) {
-            if (*c == 'I') {
-                opts.isolated = 1;
-            }
-            else if (*c == 'S') {
-                opts.no_site = 1;
-            }
-            else {
-                char message[64];
-                snprintf(message, sizeof message, "Unknown option: -%c", *c);
-                return usage(program, message);
-            }
-        }
+    PyConfig config;
+    PyConfig_InitPythonConfig(&config);
+    PyStatus status = PyConfig_SetBytesArgv(&config, argc, argv);
+    if (!PyStatus_Exception(status)) {
+        status = Py_InitializeFromConfig(&config);
     }
-    if (i >= argc) {
-        return usage(program, "lucifer: a .pyc file to run is required");
+    PyConfig_Clear(&config);
+    if (PyStatus_Exception(status)) {
+        Py_ExitStatusException(status);
     }
-    opts.script = argv[i];
-
-    int err = initialize(&opts);
-    if (err != 0) {
-        return err;
-    }
-    return run_pyc(&_PyRuntime.main_interp, program, opts.script);
+    return Py_RunMain();
 }
 
-/* Embedding (Py_InitializeEx): the same startup without a program; signal
-   handlers arrive with K1n. A failure is fatal. */
+/* Embedding (Py_InitializeEx): the same startup without a program. A
+   failure is fatal. */
 void
 Py_InitializeEx(int install_sigs)
 {
-    struct lu_options opts = { .isolated = 1, .no_site = 1 };
-    if (_PyRuntime.main_interp.builtins == NULL && initialize(&opts) != 0) {
-        fprintf(stderr, "Fatal Python error: Py_InitializeEx: initialization failed\n");
-        exit(1);
+    if (_PyRuntime.main_interp.builtins != NULL) {
+        return;
+    }
+    PyConfig config;
+    PyConfig_InitIsolatedConfig(&config);
+    config.site_import = 0;
+    PyStatus status = Py_InitializeFromConfig(&config);
+    PyConfig_Clear(&config);
+    if (PyStatus_Exception(status)) {
+        Py_ExitStatusException(status);
     }
 }
 

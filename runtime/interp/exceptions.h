@@ -32,6 +32,7 @@ PyObject *lu_frame_object(struct lu_frame *f);
 /* An exception nothing can take, reported as the default unraisable hook
    does: "Exception ignored while <what> <repr(obj)>:" and its traceback. */
 void lu_err_unraisable(const char *what, PyObject *obj);
+void lu_err_unraisable_text(const char *message, PyObject *obj);
 
 /* The code object a traceback's frame ran. */
 PyCodeObject *lu_frame_code(PyFrameObject *frame);

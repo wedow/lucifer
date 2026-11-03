@@ -18,6 +18,11 @@ module_dealloc(PyObject *op)
     lu_object_free(op);
 }
 
+static PyMemberDef module_members[] = {
+    { "__dict__", _Py_T_OBJECT, offsetof(PyModuleObject, md_dict), Py_READONLY, NULL },
+    { NULL },
+};
+
 void
 lu_module_init(void)
 {
@@ -25,27 +30,32 @@ lu_module_init(void)
     PyModule_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyModule_Type.tp_dealloc = module_dealloc;
     PyModule_Type.tp_dictoffset = offsetof(PyModuleObject, md_dict);
+    PyModule_Type.tp_members = module_members;
 }
 
-/* PyModule_NewObject: the dict starts with __name__, __doc__, __package__,
-   __loader__ and __spec__ (module_init_dict). */
+/* module_init_dict: name the module and give its dict __name__, __doc__,
+   __package__, __loader__ and __spec__. */
+static int
+module_init_dict(PyModuleObject *m, PyObject *name, PyObject *doc)
+{
+    Py_XSETREF(m->md_name, Py_NewRef(name));
+    if (m->md_dict == NULL && (m->md_dict = PyDict_New()) == NULL) {
+        return -1;
+    }
+    return lu_ns_insert(m->md_dict, LU_ID(__name__), name) < 0
+        || lu_ns_insert(m->md_dict, LU_ID(__doc__), doc) < 0
+        || lu_ns_insert(m->md_dict, LU_ID(__package__), Py_None) < 0
+        || lu_ns_insert(m->md_dict, LU_ID(__loader__), Py_None) < 0
+        || lu_ns_insert(m->md_dict, LU_ID(__spec__), Py_None) < 0 ? -1 : 0;
+}
+
+/* PyModule_NewObject */
 PyObject *
 PyModule_NewObject(PyObject *name)
 {
     PyModuleObject *m = (PyModuleObject *)lu_object_new(&PyModule_Type, sizeof(PyModuleObject));
-    if (m == NULL) {
-        return NULL;
-    }
-    m->md_name = Py_NewRef(name);
-    m->md_dict = PyDict_New();
-    if (m->md_dict == NULL
-        || lu_ns_insert(m->md_dict, LU_ID(__name__), name) < 0
-        || lu_ns_insert(m->md_dict, LU_ID(__doc__), Py_None) < 0
-        || lu_ns_insert(m->md_dict, LU_ID(__package__), Py_None) < 0
-        || lu_ns_insert(m->md_dict, LU_ID(__loader__), Py_None) < 0
-        || lu_ns_insert(m->md_dict, LU_ID(__spec__), Py_None) < 0) {
-        Py_DECREF(m);
-        return NULL;
+    if (m != NULL && module_init_dict(m, name, Py_None) < 0) {
+        Py_CLEAR(m);
     }
     return (PyObject *)m;
 }
@@ -157,7 +167,11 @@ lucifer_exec(PyObject *m)
         || add_functions(m, lu_prim_dict_methods) < 0
         || add_functions(m, lu_prim_set_methods) < 0
         || add_functions(m, lu_prim_gen_methods) < 0
-        || add_functions(m, lu_prim_builtins_methods) < 0) {
+        || add_functions(m, lu_prim_builtins_methods) < 0
+        || add_functions(m, lu_prim_import_methods) < 0
+        || add_functions(m, lu_prim_thread_methods) < 0
+        || add_functions(m, lu_prim_weakref_methods) < 0
+        || add_functions(m, lu_prim_os_methods) < 0) {
         return -1;
     }
     PyObject *name = PyUnicode_InternFromString("MISSING");
@@ -166,7 +180,20 @@ lucifer_exec(PyObject *m)
     return err ? -1 : 0;
 }
 
+/* module_init(module, name, doc): module.__init__'s dict. */
+static PyObject *
+prim_module_init(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 3 || !PyModule_Check(args[0]) || !PyUnicode_Check(args[1])) {
+        lu_err_format(PyExc_TypeError, "module_init(module, name, doc)");
+        return NULL;
+    }
+    return module_init_dict((PyModuleObject *)args[0], args[1], args[2]) < 0 ? NULL : Py_NewRef(Py_None);
+}
+
 static PyMethodDef lucifer_methods[] = {
+    { "module_init", (PyCFunction)(void (*)(void))prim_module_init, METH_FASTCALL,
+      "module_init(module, name, doc): the namespace of a new module." },
     { "write", (PyCFunction)(void (*)(void))lu_prim_write, METH_FASTCALL,
       "write(fd, str): write str to fd as UTF-8, all of it." },
     { "str_join", (PyCFunction)(void (*)(void))lu_prim_str_join, METH_FASTCALL,
