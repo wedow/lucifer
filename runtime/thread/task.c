@@ -66,6 +66,9 @@ bind_tstate(struct lu_task *t)
     if (e->brc.tid == 0) {
         lu_brc_register(e);
     }
+    else if (e->brc.idle) {
+        lu_brc_set_idle(e, 0);
+    }
     ts->_status.bound = 1;
 }
 
@@ -293,7 +296,9 @@ lu_task_leave(struct lu_task *t)
         & LU_POLL_GC_SCHEDULED) {
         __atomic_fetch_or(&t->pending, LU_POLL_GC_SCHEDULED, __ATOMIC_SEQ_CST);
     }
-    e->nbound--;
+    if (--e->nbound == 0) {
+        lu_brc_set_idle(e, 1);          /* the carrier's last refcount operation is behind it */
+    }
     if (t->ts._status.bound_gilstate) {
         c->gilstate = NULL;
         t->ts._status.bound_gilstate = 0;

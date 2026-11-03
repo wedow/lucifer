@@ -545,7 +545,10 @@ and io_uring is a §10 experiment after M1.8.
     the result to its C caller. Nested activations, signal handlers, `atexit`
     callbacks and any C call stay pinned, and so on one carrier.
   - A scheduler carrier keeps its biased-refcount owner record until it
-    exits, because tasks come and go while its objects stay.
+    exits, because tasks come and go while its objects stay. While it runs no
+    task, a thread that would queue one of its objects merges it instead, so
+    a migrated task's frees, finalizers and weakref callbacks run at once, as
+    on one thread.
   - Signal and pending-call reasons are aimed at the main task, not at a
     carrier. A signal also wakes the carrier the task is bound to, in case
     the task sleeps in a park.

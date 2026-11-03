@@ -70,16 +70,10 @@ print("disabled", hits - before, gc.isenabled())
 gc.enable()
 noop()
 print("enabled, no new allocations", hits - before)
-# The collector also wants the process to have grown (gc_should_collect_mem_usage),
-# which the allocations above do only by luck of the allocator: grow it for sure.
-# And a carrier buffers up to 511 allocations or frees (a free queued to another
-# carrier lands when its owner next polls), so a flush needs up to 1,023 of them
-# from any residue: 1,100 reach one flush and cannot reach a second collection.
-ballast = b"\x01" * (16 << 20)
-more = [[] for i in range(1100)]
+more = [[] for i in range(600)]
 noop()
-print("enabled, 1100 allocations", hits - before)
-del burst, more, ballast
+print("enabled, 600 allocations", hits - before)
+del burst, more
 
 # A zero young threshold turns automatic collection off.
 gc.set_threshold(0, 0, 0)

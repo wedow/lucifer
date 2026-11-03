@@ -98,6 +98,8 @@ struct lu_brc_owner {
     struct lu_brc_owner *next;  /* in its bucket */
     struct lu_stack to_merge;   /* pushed by other threads, under the bucket lock */
     struct lu_stack local;      /* the owner's own copy, merged without the lock */
+    int idle;                   /* its carrier runs no task, so touches none of its objects:
+                                   a queuing thread merges them itself (under the bucket lock) */
 };
 
 struct lu_brc_bucket {
@@ -537,6 +539,8 @@ void lu_mimalloc_bind(struct lu_entry *entry);
 void lu_mimalloc_abandon(struct lu_entry *entry);
 void lu_brc_register(struct lu_entry *entry);
 void lu_brc_retire(struct lu_entry *entry);
+/* A scheduler carrier stops or starts running a task (runtime/thread/task.c). */
+void lu_brc_set_idle(struct lu_entry *entry, int idle);
 
 void lu_brc_queue_object(PyObject *ob);
 void lu_set_immortal(PyObject *op);

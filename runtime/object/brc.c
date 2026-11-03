@@ -108,6 +108,15 @@ lu_brc_retire(struct lu_entry *entry)
     memset(t, 0, sizeof *t);            /* a later bind registers it afresh */
 }
 
+void
+lu_brc_set_idle(struct lu_entry *entry, int idle)
+{
+    struct lu_brc_bucket *b = bucket_of(entry->interp, entry->brc.tid);
+    pthread_mutex_lock(&b->lock.mutex);
+    entry->brc.idle = idle;
+    pthread_mutex_unlock(&b->lock.mutex);
+}
+
 /* Steals a reference to ob. */
 void
 lu_brc_queue_object(PyObject *ob)
@@ -124,8 +133,11 @@ lu_brc_queue_object(PyObject *ob)
     while (t != NULL && t->tid != tid) {
         t = t->next;
     }
-    if (t == NULL) {
-        /* The owner exited: merge here, dropping the stolen reference. */
+    if (t == NULL || t->idle) {
+        /* The owner exited, or runs no task and so touches none of its
+           objects: merge here, dropping the stolen reference. Waiting for an
+           idle owner would delay the free, and with it finalizers and weakref
+           callbacks, until a task next runs there. */
         Py_ssize_t refcount = lu_explicit_merge_refcount(ob, -1);
         pthread_mutex_unlock(&b->lock.mutex);
         if (refcount == 0) {
