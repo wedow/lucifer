@@ -407,6 +407,12 @@ lu_dict_prev_entry(PyDictObject *mp, Py_ssize_t ix)
     return -1;
 }
 
+int
+lu_dict_str_keys(PyObject *dict)
+{
+    return lu_dk_is_unicode(((PyDictObject *)dict)->ma_keys);
+}
+
 /* Copying and merging. */
 
 /* clone_combined_dict_keys: the same table, entries referenced again. */

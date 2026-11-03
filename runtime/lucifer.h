@@ -141,6 +141,11 @@ struct lu_static_type_state {
     X(get_iter)                 /* PyObject_GetIter: GET_ITER */ \
     X(next_item)                /* the next item of an iterator, or MISSING: FOR_ITER */ \
     X(list_extend)              /* _PyList_Extend(list, iterable): LIST_EXTEND */ \
+    X(build_map)                /* BUILD_MAP of keys that are not all exact strs: a tuple of key, value, ... */ \
+    X(build_set)                /* BUILD_SET: a tuple of the items */ \
+    X(dict_update)              /* DICT_UPDATE: dict.update(mapping) for {**mapping} */ \
+    X(set_add)                  /* SET_ADD: (set, item) */ \
+    X(set_update)               /* SET_UPDATE: (set, iterable) */ \
     X(unpack)                   /* the n items of an iterable, as a tuple: UNPACK_SEQUENCE */ \
     X(unpack_ex)                /* (before, starred list, after) as a tuple: UNPACK_EX */ \
     X(tuple_of)                 /* PySequence_Tuple(iterable) */ \
@@ -439,6 +444,8 @@ int lu_eq(PyObject *a, PyObject *b);
 /* Whether two keys of an equal hash are equal when that needs no Python: 1, 0,
    or -1 when __eq__ must decide (runtime/object/dict.c). */
 int lu_native_eq(PyObject *a, PyObject *b);
+/* Whether the dict's keys are all exact strs, which its unicode table guarantees. */
+int lu_dict_str_keys(PyObject *dict);
 PyObject *lu_set_new(PyTypeObject *type);
 int lu_set_add(PyObject *set, PyObject *key);
 Py_hash_t lu_frozenset_hash(PyObject *set);

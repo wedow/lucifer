@@ -334,6 +334,10 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
         [MAKE_FUNCTION] = &&op_MAKE_FUNCTION,
         [SET_FUNCTION_ATTRIBUTE] = &&op_SET_FUNCTION_ATTRIBUTE,
         [BUILD_MAP] = &&op_BUILD_MAP,
+        [BUILD_SET] = &&op_BUILD_SET,
+        [SET_ADD] = &&op_SET_ADD,
+        [SET_UPDATE] = &&op_SET_UPDATE,
+        [MAP_ADD] = &&op_MAP_ADD,
         [IMPORT_NAME] = &&op_IMPORT_NAME,
         [IMPORT_FROM] = &&op_IMPORT_FROM,
         [JUMP_BACKWARD] = &&op_JUMP_BACKWARD,
@@ -819,9 +823,85 @@ op_SET_FUNCTION_ATTRIBUTE: {
     DISPATCH();
 }
 
+/* The oparg items below the stack top as one tuple, for a kernel builder. */
+build_items: {
+    PyObject **values = sp - oparg;
+    PyObject *items = PyTuple_New(oparg);
+    if (items == NULL) {
+        for (int i = 0; i < oparg; i++) {
+            Py_DECREF(values[i]);
+        }
+        sp = values;
+        goto error;
+    }
+    for (int i = 0; i < oparg; i++) {
+        PyTuple_SET_ITEM(items, i, values[i]);
+    }
+    sp = values;
+    kargs[0] = items;
+    nk = 1;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_BUILD_SET:
+    SAVE_FRAME();
+    kid = LU_K_build_set;
+    goto build_items;
+
+op_SET_ADD: {
+    PyObject *v = POP();
+    SAVE_FRAME();
+    kargs[0] = Py_NewRef(sp[-oparg]);
+    kargs[1] = v;
+    nk = 2;
+    kid = LU_K_set_add;
+    kret = LU_RETURN_DISCARD;
+    goto kernel_call;
+}
+
+op_SET_UPDATE: {
+    PyObject *iterable = POP();
+    SAVE_FRAME();
+    kargs[0] = Py_NewRef(sp[-oparg]);
+    kargs[1] = iterable;
+    nk = 2;
+    kid = LU_K_set_update;
+    kret = LU_RETURN_DISCARD;
+    goto kernel_call;
+}
+
+op_MAP_ADD: {
+    PyObject *value = POP();
+    PyObject *key = POP();
+    PyObject *map = sp[-oparg];
+    SAVE_FRAME();
+    if (PyDict_CheckExact(map) && PyUnicode_CheckExact(key)) {
+        int err = lu_ns_insert(map, key, value);
+        Py_DECREF(key);
+        Py_DECREF(value);
+        ERROR_IF(err < 0);
+        DISPATCH();
+    }
+    kargs[0] = Py_NewRef(map);
+    kargs[1] = key;
+    kargs[2] = value;
+    nk = 3;
+    kid = LU_K_setitem;
+    kret = LU_RETURN_DISCARD;
+    goto kernel_call;
+}
+
 op_BUILD_MAP: {
     SAVE_FRAME();
     PyObject **values = sp - 2 * oparg;
+    for (int i = 0; i < oparg; i++) {
+        if (!PyUnicode_CheckExact(values[2 * i])) {
+            oparg *= 2;
+            kid = LU_K_build_map;
+            goto build_items;
+        }
+    }
     PyObject *map = PyDict_New();
     for (int i = 0; map != NULL && i < oparg; i++) {
         if (lu_ns_insert(map, values[2 * i], values[2 * i + 1]) < 0) {
@@ -1122,9 +1202,13 @@ op_DICT_UPDATE: {
     PyObject *dict = sp[-oparg];
     SAVE_FRAME();
     int err = 0;
-    if (!PyDict_CheckExact(update)) {
-        lu_err_format(PyExc_TypeError, "'%.200s' object is not a mapping", Py_TYPE(update)->tp_name);
-        err = -1;
+    if (!PyDict_CheckExact(update) || !lu_dict_str_keys(update)) {
+        kargs[0] = Py_NewRef(dict);
+        kargs[1] = update;
+        nk = 2;
+        kid = LU_K_dict_update;
+        kret = LU_RETURN_DISCARD;
+        goto kernel_call;
     }
     else {
         Py_ssize_t pos = 0;
