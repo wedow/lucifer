@@ -188,108 +188,71 @@ import_from(PyObject *module, PyObject *name)
     return Py_NewRef(v);
 }
 
-/* GET_ITER and FOR_ITER over exact tuples and lists (_PyTupleIterObject,
-   _PyListIterObject); other iterables through their C slots until the
-   iteration protocol is kernel Python (K1h). */
-typedef struct {
-    PyObject_HEAD
-    Py_ssize_t it_index;
-    PyObject *it_seq;
-} seqiterobject;
-
+/* GET_ITER of the exact types the loop iterates itself; NULL without an
+   error for every other iterable, which the kernel's get_iter handles. */
 static PyObject *
-get_iter(PyObject *v)
+get_iter_exact(PyObject *v)
 {
     PyTypeObject *tp = Py_TYPE(v);
     if (tp == &PyTuple_Type || tp == &PyList_Type) {
-        PyTypeObject *it_type = tp == &PyTuple_Type ? &PyTupleIter_Type : &PyListIter_Type;
-        seqiterobject *it = (seqiterobject *)lu_object_new(it_type, sizeof(seqiterobject));
+        seqiterobject *it = (seqiterobject *)lu_object_new(
+            tp == &PyTuple_Type ? &PyTupleIter_Type : &PyListIter_Type, sizeof(seqiterobject));
         if (it != NULL) {
             it->it_seq = Py_NewRef(v);
+            return (PyObject *)it;
         }
-        return (PyObject *)it;
+        return NULL;
     }
-    if (tp->tp_iter != NULL) {
-        return tp->tp_iter(v);
+    if (tp == &PyRange_Type) {
+        return lu_range_iter(v);
     }
-    lu_err_format(PyExc_TypeError, "'%.200s' object is not iterable", tp->tp_name);
     return NULL;
 }
 
-/* The next item, or NULL: exhausted when no error is set. */
-static PyObject *
-iter_next(PyObject *iter)
-{
-    PyTypeObject *tp = Py_TYPE(iter);
-    if (tp == &PyTupleIter_Type || tp == &PyListIter_Type) {
-        seqiterobject *it = (seqiterobject *)iter;
-        if (it->it_seq == NULL) {
-            return NULL;
-        }
-        if (it->it_index < Py_SIZE(it->it_seq)) {
-            PyObject *v = tp == &PyTupleIter_Type ? PyTuple_GET_ITEM(it->it_seq, it->it_index)
-                                                  : PyList_GET_ITEM(it->it_seq, it->it_index);
-            it->it_index++;
-            return Py_NewRef(v);
-        }
-        Py_CLEAR(it->it_seq);
-        return NULL;
-    }
-    if (tp->tp_iternext == NULL) {
-        lu_err_format(PyExc_TypeError, "'%.100s' object is not an iterator", tp->tp_name);
-        return NULL;
-    }
-    PyObject *v = tp->tp_iternext(iter);
-    if (v == NULL && PyErr_ExceptionMatches(PyExc_StopIteration)) {
-        PyErr_Clear();
-    }
-    return v;
-}
-
-static void
-seqiter_dealloc(PyObject *op)
-{
-    Py_XDECREF(((seqiterobject *)op)->it_seq);
-    lu_object_free(op);
-}
-
-void
-lu_iter_init(void)
-{
-    PyTypeObject *types[] = { &PyTupleIter_Type, &PyListIter_Type };
-    for (int i = 0; i < 2; i++) {
-        types[i]->tp_basicsize = sizeof(seqiterobject);
-        types[i]->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
-        types[i]->tp_dealloc = seqiter_dealloc;
-    }
-}
-
-/* UNPACK_SEQUENCE over exact tuples and lists: the items, last first. */
+/* UNPACK_SEQUENCE of an exact tuple or list of n items: the items, last
+   first. Other sizes and iterables go to the kernel for its messages. */
 static int
-unpack(PyObject *seq, int n, PyObject **out)
+unpack_exact(PyObject *seq, int n, PyObject **out)
 {
-    if (!PyTuple_CheckExact(seq) && !PyList_CheckExact(seq)) {
-        lu_err_format(PyExc_SystemError, "unpacking a %s arrives with iteration (K1h)",
-                      Py_TYPE(seq)->tp_name);
-        return -1;
-    }
-    Py_ssize_t size = Py_SIZE(seq);
-    if (size != n) {
-        if (size < n) {
-            lu_err_format(PyExc_ValueError, "not enough values to unpack (expected %d, got %zd)",
-                          n, size);
-        }
-        else {
-            lu_err_format(PyExc_ValueError, "too many values to unpack (expected %d, got %zd)",
-                          n, size);
-        }
-        return -1;
+    if ((!PyTuple_CheckExact(seq) && !PyList_CheckExact(seq)) || Py_SIZE(seq) != n) {
+        return 0;
     }
     PyObject **items = PyTuple_CheckExact(seq) ? &PyTuple_GET_ITEM(seq, 0) : ((PyListObject *)seq)->ob_item;
     for (int i = 0; i < n; i++) {
         out[n - 1 - i] = Py_NewRef(items[i]);
     }
-    return 0;
+    return 1;
+}
+
+/* The oparg of the instruction at `at`, with its EXTENDED_ARG prefixes. */
+static int
+instr_oparg(lu_codeunit *at)
+{
+    int arg = at->op.arg, shift = 8;
+    for (lu_codeunit *p = at - 1; p->op.code == EXTENDED_ARG; p--, shift += 8) {
+        arg |= p->op.arg << shift;
+    }
+    return arg;
+}
+
+/* BINARY_OP NB_SUBSCR and STORE_SUBSCR on an exact list or tuple with a
+   compact int index in range: the item's address, or NULL. */
+static PyObject **
+subscr_slot(PyObject *container, PyObject *sub)
+{
+    if (!PyLong_CheckExact(sub) || !_PyLong_IsCompact((PyLongObject *)sub)
+        || _PyLong_CompactValue((PyLongObject *)sub) < 0) {
+        return NULL;
+    }
+    Py_ssize_t i = (Py_ssize_t)_PyLong_CompactValue((PyLongObject *)sub);
+    if (PyList_CheckExact(container) && i < Py_SIZE(container)
+        && _Py_IsOwnedByCurrentThread(container)) {
+        return &((PyListObject *)container)->ob_item[i];
+    }
+    if (PyTuple_CheckExact(container) && i < Py_SIZE(container)) {
+        return &((PyTupleObject *)container)->ob_item[i];
+    }
+    return NULL;
 }
 
 static void
@@ -401,6 +364,13 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
         [WITH_EXCEPT_START] = &&op_WITH_EXCEPT_START,
         [LOAD_SPECIAL] = &&op_LOAD_SPECIAL,
         [LOAD_COMMON_CONSTANT] = &&op_LOAD_COMMON_CONSTANT,
+        [UNPACK_EX] = &&op_UNPACK_EX,
+        [STORE_SUBSCR] = &&op_STORE_SUBSCR,
+        [DELETE_SUBSCR] = &&op_DELETE_SUBSCR,
+        [BUILD_SLICE] = &&op_BUILD_SLICE,
+        [BINARY_SLICE] = &&op_BINARY_SLICE,
+        [STORE_SLICE] = &&op_STORE_SLICE,
+        [GET_LEN] = &&op_GET_LEN,
         [CALL_INTRINSIC_2] = &&op_CALL_INTRINSIC_2,
         [FORMAT_SIMPLE] = &&op_FORMAT_SIMPLE,
         [FORMAT_WITH_SPEC] = &&op_FORMAT_WITH_SPEC,
@@ -471,6 +441,20 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
             PUSH(Py_NewRef(PyTuple_GET_ITEM(v, 0))); \
             PUSH(Py_NewRef(PyTuple_GET_ITEM(v, 1))); \
             Py_DECREF(v); \
+        } \
+        else if ((ret) == LU_RETURN_UNPACK) { \
+            for (Py_ssize_t i_ = PyTuple_GET_SIZE(v); --i_ >= 0; ) { \
+                PUSH(Py_NewRef(PyTuple_GET_ITEM(v, i_))); \
+            } \
+            Py_DECREF(v); \
+        } \
+        else if ((ret) == LU_RETURN_FOR_ITER) { \
+            if ((v) == LU_MISSING) { \
+                next_instr += instr_oparg(INSTR_START()) + 1; \
+            } \
+            else { \
+                PUSH(v); \
+            } \
         } \
         else { \
             PUSH(v); \
@@ -1102,27 +1086,26 @@ op_LIST_APPEND: {
 }
 
 op_LIST_EXTEND: {
-    /* Tuples and lists until iteration exists (K1h). */
     PyObject *iterable = POP();
     PyObject *list = sp[-oparg];
     SAVE_FRAME();
-    int err = 0;
-    if (PyTuple_Check(iterable) || PyList_Check(iterable)) {
-        Py_ssize_t n = PyTuple_Check(iterable) ? PyTuple_GET_SIZE(iterable)
-                                               : PyList_GET_SIZE(iterable);
-        for (Py_ssize_t i = 0; err == 0 && i < n; i++) {
-            err = lu_list_append(list, PyTuple_Check(iterable) ? PyTuple_GET_ITEM(iterable, i)
-                                                              : PyList_GET_ITEM(iterable, i));
+    if (PyTuple_CheckExact(iterable) || PyList_CheckExact(iterable)) {
+        Py_ssize_t n = Py_SIZE(iterable);
+        int err = 0;
+        for (Py_ssize_t i = 0; err == 0 && i < n && i < Py_SIZE(iterable); i++) {
+            err = lu_list_append(list, PyTuple_CheckExact(iterable) ? PyTuple_GET_ITEM(iterable, i)
+                                                                    : PyList_GET_ITEM(iterable, i));
         }
+        Py_DECREF(iterable);
+        ERROR_IF(err < 0);
+        DISPATCH();
     }
-    else {
-        lu_err_format(PyExc_TypeError, "Value after * must be an iterable, not %.200s",
-                      Py_TYPE(iterable)->tp_name);
-        err = -1;
-    }
-    Py_DECREF(iterable);
-    ERROR_IF(err < 0);
-    DISPATCH();
+    kargs[0] = Py_NewRef(list);
+    kargs[1] = iterable;
+    nk = 2;
+    kid = LU_K_list_extend;
+    kret = LU_RETURN_DISCARD;
+    goto kernel_call;
 }
 
 op_DICT_MERGE: {
@@ -1354,8 +1337,15 @@ op_SETUP_ANNOTATIONS: {
 op_GET_ITER: {
     PyObject *iterable = TOP();
     SAVE_FRAME();
-    PyObject *it = get_iter(iterable);
-    ERROR_IF(it == NULL);
+    PyObject *it = get_iter_exact(iterable);
+    if (it == NULL) {
+        ERROR_IF(PyErr_Occurred());
+        kargs[0] = POP();
+        nk = 1;
+        kid = LU_K_get_iter;
+        kret = LU_RETURN_PUSH;
+        goto kernel_call;
+    }
     TOP() = it;
     Py_DECREF(iterable);
     DISPATCH();
@@ -1364,9 +1354,25 @@ op_GET_ITER: {
 op_FOR_ITER: {
     /* iter -- iter, next; exhausted, jumps past the END_FOR at the target */
     SKIP_CACHES();
-    SAVE_FRAME();
-    PyObject *v = iter_next(TOP());
+    PyObject *iter = TOP();
+    PyTypeObject *itp = Py_TYPE(iter);
+    PyObject *v;
+    if (itp == &PyListIter_Type || itp == &PyTupleIter_Type) {
+        v = lu_seqiter_next(iter);
+    }
+    else if (itp == &PyRangeIter_Type) {
+        v = lu_rangeiter_next(iter);
+    }
+    else {
+        SAVE_FRAME();
+        kargs[0] = Py_NewRef(iter);
+        nk = 1;
+        kid = LU_K_next_item;
+        kret = LU_RETURN_FOR_ITER;
+        goto kernel_call;
+    }
     if (v == NULL) {
+        SAVE_FRAME();
         ERROR_IF(PyErr_Occurred());
         next_instr += oparg + 1;
         DISPATCH();
@@ -1459,6 +1465,22 @@ op_BINARY_OP: {
     SKIP_CACHES();
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
+    if (oparg == 26) {   /* NB_SUBSCR */ 
+        PyObject **slot = subscr_slot(left, right);
+        sp -= 2;
+        if (slot != NULL) {
+            PUSH(Py_NewRef(*slot));
+            Py_DECREF(left);
+            Py_DECREF(right);
+            DISPATCH();
+        }
+        kargs[0] = left;
+        kargs[1] = right;
+        nk = 2;
+        kid = LU_K_getitem;
+        kret = LU_RETURN_PUSH;
+        goto kernel_call;
+    }
     if (PyLong_CheckExact(left) && PyLong_CheckExact(right)) {
         SAVE_FRAME();
         PyObject *res = lu_long_binary(oparg, left, right);
@@ -1529,15 +1551,133 @@ op_CONTAINS_OP: {
 op_UNPACK_SEQUENCE: {
     SKIP_CACHES();
     PyObject *seq = POP();
+    if (unpack_exact(seq, oparg, sp)) {
+        Py_DECREF(seq);
+        sp += oparg;
+        DISPATCH();
+    }
     SAVE_FRAME();
-    int err = unpack(seq, oparg, sp);
-    Py_DECREF(seq);
-    if (err < 0) {
-        frame->stackpointer = sp;
+    kargs[0] = seq;
+    kargs[1] = lu_small_int(oparg);
+    nk = 2;
+    kid = LU_K_unpack;
+    kret = LU_RETURN_UNPACK;
+    goto kernel_call;
+}
+
+op_UNPACK_EX: {
+    SAVE_FRAME();
+    kargs[0] = POP();
+    kargs[1] = lu_small_int(oparg & 0xFF);
+    kargs[2] = lu_small_int(oparg >> 8);
+    nk = 3;
+    kid = LU_K_unpack_ex;
+    kret = LU_RETURN_UNPACK;
+    goto kernel_call;
+}
+
+op_STORE_SUBSCR: {
+    /* value, container, sub -- */
+    SKIP_CACHES();
+    PyObject *sub = sp[-1];
+    PyObject *container = sp[-2];
+    PyObject **slot = subscr_slot(container, sub);
+    if (slot != NULL && PyList_CheckExact(container)) {
+        PyObject *value = sp[-3];
+        PyObject *old = *slot;
+        *slot = value;
+        sp -= 3;
+        Py_DECREF(old);
+        Py_DECREF(container);
+        Py_DECREF(sub);
+        DISPATCH();
+    }
+    sp -= 3;
+    kargs[0] = container;
+    kargs[1] = sub;
+    kargs[2] = sp[0];
+    nk = 3;
+    kid = LU_K_setitem;
+    kret = LU_RETURN_DISCARD;
+    goto kernel_call;
+}
+
+op_DELETE_SUBSCR: {
+    /* container, sub -- */
+    sp -= 2;
+    kargs[0] = sp[0];
+    kargs[1] = sp[1];
+    nk = 2;
+    kid = LU_K_delitem;
+    kret = LU_RETURN_DISCARD;
+    goto kernel_call;
+}
+
+op_BUILD_SLICE: {
+    /* start, stop[, step] -- slice */
+    PyObject *step = oparg == 3 ? POP() : NULL;
+    PyObject *stop = POP();
+    PyObject *start = TOP();
+    SAVE_FRAME();
+    PyObject *slice = PySlice_New(start, stop, step);
+    Py_DECREF(start);
+    Py_DECREF(stop);
+    Py_XDECREF(step);
+    ERROR_IF(slice == NULL);
+    TOP() = slice;
+    DISPATCH();
+}
+
+op_BINARY_SLICE: {
+    /* container, start, stop -- container[start:stop] */
+    SAVE_FRAME();
+    PyObject *stop = POP();
+    PyObject *start = POP();
+    PyObject *slice = PySlice_New(start, stop, NULL);
+    Py_DECREF(start);
+    Py_DECREF(stop);
+    if (slice == NULL) {
+        Py_DECREF(POP());
         goto error;
     }
-    sp += oparg;
-    DISPATCH();
+    kargs[0] = POP();
+    kargs[1] = slice;
+    nk = 2;
+    kid = LU_K_getitem;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_STORE_SLICE: {
+    /* value, container, start, stop -- container[start:stop] = value */
+    SAVE_FRAME();
+    PyObject *stop = POP();
+    PyObject *start = POP();
+    PyObject *slice = PySlice_New(start, stop, NULL);
+    Py_DECREF(start);
+    Py_DECREF(stop);
+    if (slice == NULL) {
+        Py_DECREF(POP());
+        Py_DECREF(POP());
+        goto error;
+    }
+    kargs[1] = slice;
+    kargs[0] = POP();
+    kargs[2] = POP();
+    nk = 3;
+    kid = LU_K_setitem;
+    kret = LU_RETURN_DISCARD;
+    goto kernel_call;
+}
+
+op_GET_LEN: {
+    /* obj -- obj, len(obj) */
+    SAVE_FRAME();
+    kargs[0] = Py_NewRef(TOP());
+    nk = 1;
+    kid = LU_K_length;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
 }
 
 op_RAISE_VARARGS: {

@@ -20,6 +20,7 @@ extern PyMethodDef lu_prim_float_methods[];     /* runtime/prim/float.c */
 extern PyMethodDef lu_prim_complex_methods[];   /* runtime/prim/complex.c */
 extern PyMethodDef lu_sys_int_methods[];        /* sys's int functions, runtime/prim/int.c */
 extern PyMethodDef lu_prim_exc_methods[];       /* runtime/interp/exceptions.c */
+extern PyMethodDef lu_prim_storage_methods[];   /* runtime/prim/storage.c */
 PyObject *lu_prim_str_join(PyObject *module, PyObject *const *args, Py_ssize_t nargs);
 PyObject *lu_prim_text_repr(PyObject *module, PyObject *const *args, Py_ssize_t nargs);
 

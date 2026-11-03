@@ -1589,6 +1589,7 @@ prim_kind(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (!strcmp(kind, "bytes")) return bool_of(PyBytes_Check(x));
     if (!strcmp(kind, "tuple")) return bool_of(PyTuple_Check(x));
     if (!strcmp(kind, "list")) return bool_of(PyList_Check(x));
+    if (!strcmp(kind, "slice")) return bool_of(PySlice_Check(x));
     if (!strcmp(kind, "cell")) return bool_of(PyCell_Check(x));
     if (!strcmp(kind, "function")) return bool_of(PyFunction_Check(x));
     if (!strcmp(kind, "kernel")) {

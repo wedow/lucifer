@@ -60,3 +60,4 @@ own.*	runtime/interp/exceptions.c	which exception type gets which attribute tabl
 lu_prim_exc_methods	runtime/interp/exceptions.c	_lucifer's exception primitives, a PyMethodDef table never written; the API takes it non-const
 code_members	runtime/interp/code.c	PyMemberDef table of the code layout, never written; tp_members takes it non-const
 names.*	runtime/interp/ceval.c	the builtins LOAD_COMMON_CONSTANT names, a table never written
+lu_prim_storage_methods	runtime/prim/storage.c	_lucifer's storage primitives, a PyMethodDef table never written; the API takes it non-const

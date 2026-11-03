@@ -134,6 +134,16 @@ struct lu_static_type_state {
     X(load_special)             /* LOAD_SPECIAL: load_special(owner, which) */ \
     X(exc_group_match)          /* CHECK_EG_MATCH: (rest, match) of an exception and a type */ \
     X(prep_reraise_star)        /* CALL_INTRINSIC_2 PREP_RERAISE_STAR */ \
+    X(getitem)                  /* PyObject_GetItem: BINARY_OP NB_SUBSCR, BINARY_SLICE */ \
+    X(setitem)                  /* PyObject_SetItem(container, key, value): STORE_SUBSCR, STORE_SLICE */ \
+    X(delitem)                  /* PyObject_DelItem: DELETE_SUBSCR */ \
+    X(length)                   /* PyObject_Size as an int: GET_LEN */ \
+    X(get_iter)                 /* PyObject_GetIter: GET_ITER */ \
+    X(next_item)                /* the next item of an iterator, or MISSING: FOR_ITER */ \
+    X(list_extend)              /* _PyList_Extend(list, iterable): LIST_EXTEND */ \
+    X(unpack)                   /* the n items of an iterable, as a tuple: UNPACK_SEQUENCE */ \
+    X(unpack_ex)                /* (before, starred list, after) as a tuple: UNPACK_EX */ \
+    X(tuple_of)                 /* PySequence_Tuple(iterable) */ \
     X(str)                      /* PyObject_Str, for CONVERT_VALUE 1 */ \
     X(repr)                     /* PyObject_Repr, for CONVERT_VALUE 2 */ \
     X(ascii)                    /* PyObject_ASCII, for CONVERT_VALUE 3 */ \
@@ -390,7 +400,7 @@ void lu_dict_init(void);
 void lu_code_init(void);
 void lu_function_init(void);
 void lu_descr_init(void);
-void lu_iter_init(void);
+void lu_storage_init(void);
 void lu_module_init(void);
 void lu_exc_init(void);
 PyObject *lu_small_int(int value);
@@ -528,6 +538,20 @@ PyObject *lu_call_special(PyObject *self, PyObject *name, PyObject *const *args,
 
 /* Appends to a list (borrowed item), growing its storage. */
 int lu_list_append(PyObject *list, PyObject *item);
+
+/* The tuple, list, reverse list and sequence-protocol iterators' layout
+   (runtime/prim/storage.c); it_seq is NULL once exhausted. */
+typedef struct {
+    PyObject_HEAD
+    Py_ssize_t it_index;
+    PyObject *it_seq;
+} seqiterobject;
+/* The next item of a tuple, list or list_reverseiterator, or a range_iterator's
+   next int; NULL when exhausted. */
+PyObject *lu_seqiter_next(PyObject *iter);
+PyObject *lu_rangeiter_next(PyObject *iter);
+/* A new range_iterator or longrange_iterator over the range r, or NULL with an error. */
+PyObject *lu_range_iter(PyObject *r);
 
 /* Exceptions raised natively (runtime/capi/errors.c), before and beneath the
    kernel's exception classes. */

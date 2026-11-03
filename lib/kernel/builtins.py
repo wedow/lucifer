@@ -1,12 +1,12 @@
 """builtins functions, over the _lucifer primitives."""
 
 from _lucifer import write, str_join, error, kind, type_lookup, MISSING, static_type
-from _lucifer import _boot, _format
+from _lucifer import _boot, _format, operators
 
 call_special = _boot.call_special
 kernel_type = _boot.kernel_type
 
-__all__ = ('print', 'isinstance', 'issubclass')
+__all__ = ('print', 'isinstance', 'issubclass', 'len', 'hash')
 
 
 def print(*args, sep=' ', end='\n'):
@@ -42,7 +42,26 @@ def issubclass(cls, class_or_tuple, /):
                   'class, a tuple of classes, or a union')
 
 
+def len(obj, /):
+    """Return the number of items in a container."""
+    return operators.length(obj)
+
+
+def hash(obj, /):
+    """Return the hash value for the given object.
+
+Two objects that compare equal must also have the same hash value, but the
+reverse is not necessarily true."""
+    return operators.hash_of(obj)
+
+
 @kernel_type(static_type('NoneType'))
 class NoneType:
     def __repr__(self):
         return 'None'
+
+
+@kernel_type(static_type('NotImplementedType'))
+class NotImplementedType:
+    def __repr__(self):
+        return 'NotImplemented'

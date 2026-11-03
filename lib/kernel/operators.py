@@ -6,7 +6,7 @@ functions' frames, so reflection never recurses in C (DESIGN 5.2)."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_tp_name, is_subtype, kernel_set, int_add,
-    truth_exact, list_append,
+    truth_exact, int_format, int_hash, type_has_sequence, list_append, new_check,
 )
 from _lucifer import _boot
 
@@ -44,8 +44,10 @@ _COMPARE = (
 
 
 # Types whose __add__, __mul__ and __rmul__ are sequence slots (sq_concat,
-# sq_repeat): they run after the number slots of both operands have declined,
-# so a user __radd__ or __rmul__ wins against a str on the left.
+# sq_repeat). A method found on an operand's type that is one of theirs runs
+# only after the number slots of both operands have declined (PyNumber_Add,
+# PyNumber_Multiply), so a user __radd__ or __rmul__ wins, and a subclass that
+# overrides the method has a number slot instead.
 _SEQUENCES = []
 
 
@@ -53,11 +55,13 @@ def add_sequence(t):
     list_append(_SEQUENCES, t)
 
 
-def _is_sequence(t):
+def _sequence_slot(t, name):
+    """The function of t's method name when it is a sequence slot, else MISSING."""
+    f = type_lookup(t, name)
     for s in _SEQUENCES:
-        if s is t:
-            return True
-    return False
+        if f is type_lookup(s, name):
+            return f
+    return MISSING
 
 
 def _entry(table, i):
@@ -78,8 +82,6 @@ def _unsupported(sym, a, b):
 
 def binary_op(a, b, op):
     """PyNumber_<op>(a, b) and PyNumber_InPlace<op>(a, b) for BINARY_OP's oparg."""
-    if op == 26:
-        error(SystemError, 'subscripting arrives with K1h')
     inplace = op >= 13
     forward, reverse, iname, sym = _entry(_BINARY, op - 13 if inplace else op)
     ta = type(a)
@@ -94,17 +96,25 @@ def binary_op(a, b, op):
         sym = '** or pow()'
     tb = type(b)
     fb = MISSING
-    seq_a = (op == 0 or op == 5 or op == 13 or op == 18) and _is_sequence(ta)
-    seq_b = (op == 5 or op == 18) and _is_sequence(tb)
-    if tb is not ta and not seq_b:
+    seq_a = seq_b = MISSING
+    if tb is not ta:
         fb = type_lookup(tb, reverse)
+    f = type_lookup(ta, forward)
+    if op == 0 or op == 13:
+        seq_a = _sequence_slot(ta, forward)
+    elif op == 5 or op == 18:
+        seq_a = _sequence_slot(ta, forward)
+        seq_b = _sequence_slot(tb, reverse)
+    if f is seq_a:
+        f = MISSING
+    if fb is seq_b:
+        fb = MISSING
     # A subclass's own reflected method goes first (method_is_overloaded).
     if fb is not MISSING and is_subtype(tb, ta) and fb is not type_lookup(ta, reverse):
         r = call_special(fb, b, a)
         if r is not NotImplemented:
             return r
         fb = MISSING
-    f = MISSING if seq_a else type_lookup(ta, forward)
     if f is not MISSING:
         r = call_special(f, a, b)
         if r is not NotImplemented:
@@ -113,10 +123,10 @@ def binary_op(a, b, op):
         r = call_special(fb, b, a)
         if r is not NotImplemented:
             return r
-    if seq_a:
-        return call_special(type_lookup(ta, forward), a, b)
-    if seq_b:
-        return call_special(type_lookup(tb, reverse), b, a)
+    if seq_a is not MISSING:
+        return call_special(seq_a, a, b)
+    if seq_b is not MISSING:
+        return call_special(seq_b, b, a)
     _unsupported(sym, a, b)
 
 
@@ -194,20 +204,6 @@ def invert(v):
     return _unary(v, '__invert__', '~')
 
 
-def contains(container, item, invert):
-    """CONTAINS_OP: item in container (or not in, when invert)."""
-    f = type_lookup(type(container), '__contains__')
-    if f is MISSING:
-        if type_lookup(type(container), '__iter__') is not MISSING:
-            error(SystemError, 'containment by iteration arrives with K1h')
-        error(TypeError, str_join('', (
-            "argument of type '", _name(container), "' is not a container or iterable")))
-    r = truth(call_special(f, container, item))
-    if invert:
-        return not r
-    return r
-
-
 def index(x):
     """PyNumber_Index: x as an exact int, through __index__."""
     if kind(x, 'int'):
@@ -227,4 +223,99 @@ kernel_set('negative', negative)
 kernel_set('positive', positive)
 kernel_set('invert', invert)
 kernel_set('truth', truth)
-kernel_set('contains', contains)
+
+
+_SSIZE_MAX = 9223372036854775807
+_SSIZE_MIN = -9223372036854775808
+
+
+def check_new(cls, owner):
+    """tp_new_wrapper's checks of owner.__new__(cls)."""
+    if not kind(cls, 'type'):
+        error(TypeError, str_join('', (
+            type_tp_name(owner), '.__new__(X): X is not a type object (', _name(cls), ')')))
+    if cls is not owner:
+        new_check(cls, owner)
+
+
+def decimal(n):
+    return int_format(n, 10, False)
+
+
+def as_ssize(x, exc):
+    """PyNumber_AsSsize_t: x through __index__, as a machine-sized int; one
+    that does not fit is clipped, or raises exc when exc is not None."""
+    n = index(x)
+    if n > _SSIZE_MAX or n < _SSIZE_MIN:
+        if exc is not None:
+            error(exc, "cannot fit 'int' into an index-sized integer")
+        return _SSIZE_MAX if n > 0 else _SSIZE_MIN
+    return n
+
+
+def hash_of(x):
+    """PyObject_Hash, as an int that fits Py_hash_t."""
+    f = type_lookup(type(x), '__hash__')
+    if f is MISSING or f is None:
+        error(TypeError, str_join('', ("unhashable type: '", _name(x), "'")))
+    h = call_special(f, x)
+    if not kind(h, 'int'):
+        error(TypeError, '__hash__ method should return an integer')
+    h = index(h)
+    if h > _SSIZE_MAX or h < _SSIZE_MIN:
+        h = int_hash(h)
+    return -2 if h == -1 else h
+
+
+def length(obj):
+    """PyObject_Size: len(obj), through __len__."""
+    f = type_lookup(type(obj), '__len__')
+    if f is MISSING:
+        error(TypeError, str_join('', ("object of type '", _name(obj), "' has no len()")))
+    n = as_ssize(call_special(f, obj), OverflowError)
+    if n < 0:
+        error(ValueError, '__len__() should return >= 0')
+    return n
+
+
+def getitem(obj, key):
+    """PyObject_GetItem: obj[key], which a class answers with __class_getitem__."""
+    f = type_lookup(type(obj), '__getitem__')
+    if f is not MISSING:
+        return call_special(f, obj, key)
+    if kind(obj, 'type'):
+        try:
+            meth = obj.__class_getitem__
+        except AttributeError:
+            meth = None
+        if meth is not None:
+            return meth(key)
+        error(TypeError, str_join('', ("type '", type_tp_name(obj), "' is not subscriptable")))
+    error(TypeError, str_join('', ("'", _name(obj), "' object is not subscriptable")))
+
+
+def setitem(obj, key, value):
+    """PyObject_SetItem: obj[key] = value."""
+    f = type_lookup(type(obj), '__setitem__')
+    if f is MISSING:
+        error(TypeError, str_join('', ("'", _name(obj), "' object does not support item assignment")))
+    call_special(f, obj, key, value)
+
+
+def delitem(obj, key):
+    """PyObject_DelItem: del obj[key]. A type with sequence slots words the
+    refusal of an index key as PySequence_DelItem does."""
+    f = type_lookup(type(obj), '__delitem__')
+    if f is not MISSING:
+        call_special(f, obj, key)
+        return
+    if type_has_sequence(type(obj)) and type_lookup(type(key), '__index__') is not MISSING:
+        as_ssize(key, IndexError)
+        error(TypeError, str_join('', ("'", _name(obj), "' object doesn't support item deletion")))
+    error(TypeError, str_join('', ("'", _name(obj), "' object does not support item deletion")))
+
+
+kernel_set('getitem', getitem)
+kernel_set('setitem', setitem)
+kernel_set('delitem', delitem)
+kernel_set('length', length)

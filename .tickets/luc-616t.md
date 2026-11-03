@@ -1,6 +1,6 @@
 ---
 id: luc-616t
-status: open
+status: closed
 deps: [luc-52bm, luc-rjvn]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: sonnet.
 
 make check-kernel PROGRAMS="list_ops tuple_ops range_slice sort unpack" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t).
 
+
+## Notes
+
+**2026-11-03T05:24:35Z**
+
+check-kernel list_ops tuple_ops range_slice sort unpack match the oracle (plain lane); full check-kernel 176/176, check, abi-audit, check-compiler green. Sort follows CPython 3.14 powersort (not PyPy's older merge order) so comparison counts match.
