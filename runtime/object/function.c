@@ -144,10 +144,57 @@ PyFunction_New(PyObject *code, PyObject *globals)
     return lu_function_new(code, globals);
 }
 
+static int
+function_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    PyFunctionObject *f = (PyFunctionObject *)op;
+    Py_VISIT(f->func_code);
+    Py_VISIT(f->func_globals);
+    Py_VISIT(f->func_builtins);
+    Py_VISIT(f->func_module);
+    Py_VISIT(f->func_defaults);
+    Py_VISIT(f->func_kwdefaults);
+    Py_VISIT(f->func_doc);
+    Py_VISIT(f->func_name);
+    Py_VISIT(f->func_dict);
+    Py_VISIT(f->func_closure);
+    Py_VISIT(f->func_annotations);
+    Py_VISIT(f->func_annotate);
+    Py_VISIT(f->func_typeparams);
+    Py_VISIT(f->func_qualname);
+    return 0;
+}
+
+/* func_clear: the code stays (it is never NULL), and so do the names, which
+   a str subclass could make a cycle, so they become the empty string. */
+static int
+function_clear(PyObject *op)
+{
+    PyFunctionObject *f = (PyFunctionObject *)op;
+    Py_CLEAR(f->func_globals);
+    Py_CLEAR(f->func_builtins);
+    Py_CLEAR(f->func_module);
+    Py_CLEAR(f->func_defaults);
+    Py_CLEAR(f->func_kwdefaults);
+    Py_CLEAR(f->func_doc);
+    Py_CLEAR(f->func_dict);
+    Py_CLEAR(f->func_closure);
+    Py_CLEAR(f->func_annotations);
+    Py_CLEAR(f->func_annotate);
+    Py_CLEAR(f->func_typeparams);
+    PyObject *empty = PyUnicode_FromStringAndSize("", 0);
+    if (empty != NULL) {
+        Py_SETREF(f->func_name, Py_NewRef(empty));
+        Py_SETREF(f->func_qualname, empty);
+    }
+    return 0;
+}
+
 static void
 function_dealloc(PyObject *op)
 {
     PyFunctionObject *f = (PyFunctionObject *)op;
+    lu_clear_weakrefs(op);
     lu_resurrect_start(op);
     lu_func_notify(PyFunction_EVENT_DESTROY, f, NULL);
     if (lu_resurrect_end(op) != 0) {
@@ -180,6 +227,20 @@ PyCell_New(PyObject *obj)
         op->ob_ref = Py_XNewRef(obj);
     }
     return (PyObject *)op;
+}
+
+static int
+cell_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    Py_VISIT(((PyCellObject *)op)->ob_ref);
+    return 0;
+}
+
+static int
+cell_clear(PyObject *op)
+{
+    Py_CLEAR(((PyCellObject *)op)->ob_ref);
+    return 0;
 }
 
 static void
@@ -360,6 +421,14 @@ PyObject *
 PyCFunction_New(PyMethodDef *ml, PyObject *self)
 {
     return PyCMethod_New(ml, self, NULL, NULL);
+}
+
+static int
+cfunction_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    Py_VISIT(CFUNC(op)->m_self);
+    Py_VISIT(CFUNC(op)->m_module);
+    return 0;
 }
 
 static void
@@ -592,13 +661,19 @@ lu_function_init(void)
     PyFunction_Type.tp_flags |= flags | Py_TPFLAGS_METHOD_DESCRIPTOR;
     PyFunction_Type.tp_vectorcall_offset = offsetof(PyFunctionObject, vectorcall);
     PyFunction_Type.tp_dealloc = function_dealloc;
+    PyFunction_Type.tp_traverse = function_traverse;
+    PyFunction_Type.tp_clear = function_clear;
+    PyFunction_Type.tp_weaklistoffset = offsetof(PyFunctionObject, func_weakreflist);
     PyCFunction_Type.tp_basicsize = sizeof(PyCFunctionObject);
     PyCFunction_Type.tp_flags |= flags;
     PyCFunction_Type.tp_vectorcall_offset = offsetof(PyCFunctionObject, vectorcall);
     PyCFunction_Type.tp_dealloc = cfunction_dealloc;
+    PyCFunction_Type.tp_traverse = cfunction_traverse;
     PyCell_Type.tp_basicsize = sizeof(PyCellObject);
     PyCell_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyCell_Type.tp_dealloc = cell_dealloc;
+    PyCell_Type.tp_traverse = cell_traverse;
+    PyCell_Type.tp_clear = cell_clear;
 }
 
 /* Objects/call.c. */

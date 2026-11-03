@@ -59,6 +59,18 @@ subclasses_ref(PyTypeObject *tp)
     return is_static_builtin(tp) ? &static_state(tp)->tp_subclasses : (PyObject **)&tp->tp_subclasses;
 }
 
+/* A type's subclasses are weak references: a class nothing else holds dies
+   (CPython's tp_subclasses is a dict of weakrefs). The list keeps creation
+   order, which __subclasses__ shows. */
+
+/* The subclass a reference in the list names, or NULL once it is dead. */
+static PyTypeObject *
+subclass_of(PyObject *ref)
+{
+    PyObject *ob = ((PyWeakReference *)ref)->wr_object;
+    return ob == Py_None ? NULL : (PyTypeObject *)ob;
+}
+
 static int
 add_subclass(PyTypeObject *base, PyTypeObject *tp)
 {
@@ -66,23 +78,28 @@ add_subclass(PyTypeObject *base, PyTypeObject *tp)
     if (*list == NULL && (*list = PyList_New(0)) == NULL) {
         return -1;
     }
-    return lu_list_append(*list, (PyObject *)tp);
+    PyObject *ref = lu_weakref_new(&_PyWeakref_RefType, (PyObject *)tp, NULL);
+    if (ref == NULL) {
+        return -1;
+    }
+    int err = lu_list_append(*list, ref);
+    Py_DECREF(ref);
+    return err;
 }
 
+/* Drops tp from base's subclasses, and every entry already dead. */
 static void
 remove_subclass(PyTypeObject *base, PyTypeObject *tp)
 {
     PyListObject *list = (PyListObject *)*subclasses_ref(base);
-    if (list == NULL) {
-        return;
-    }
-    for (Py_ssize_t i = 0; i < Py_SIZE(list); i++) {
-        if (list->ob_item[i] == (PyObject *)tp) {
+    for (Py_ssize_t i = list != NULL ? Py_SIZE(list) : 0; --i >= 0; ) {
+        PyTypeObject *sub = subclass_of(list->ob_item[i]);
+        if (sub == NULL || sub == tp) {
+            PyObject *ref = list->ob_item[i];
             memmove(&list->ob_item[i], &list->ob_item[i + 1],
                     (Py_SIZE(list) - i - 1) * sizeof(PyObject *));
             Py_SET_SIZE(list, Py_SIZE(list) - 1);
-            Py_DECREF(tp);
-            return;
+            Py_DECREF(ref);
         }
     }
 }
@@ -175,7 +192,10 @@ lu_type_modified(PyTypeObject *tp)
     }
     PyListObject *list = (PyListObject *)*subclasses_ref(tp);
     for (Py_ssize_t i = 0; list != NULL && i < Py_SIZE(list); i++) {
-        lu_type_modified((PyTypeObject *)list->ob_item[i]);
+        PyTypeObject *sub = subclass_of(list->ob_item[i]);
+        if (sub != NULL) {
+            lu_type_modified(sub);
+        }
     }
     notify_type_watchers(tp);
     set_version(tp, 0);
@@ -506,7 +526,7 @@ PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
         Py_SET_SIZE(op, nitems);
     }
     if (gc) {
-        op->ob_gc_bits |= 1;    /* _PyGC_BITS_TRACKED */
+        op->ob_gc_bits |= LU_GC_TRACKED;
     }
     return op;
 }
@@ -539,6 +559,84 @@ subtype_dealloc(PyObject *self)
     Py_DECREF(tp);
 }
 
+/* subtype_traverse and subtype_clear: the slots of every heap type in the
+   chain, the managed dict, and the instance's reference to its type, then
+   the first base that is not a heap type's. */
+static int
+subtype_traverse(PyObject *self, visitproc visit, void *arg)
+{
+    PyTypeObject *type = Py_TYPE(self), *base = type;
+    traverseproc basetraverse;
+    while ((basetraverse = base->tp_traverse) == subtype_traverse) {
+        PyMemberDef *mp = base->tp_members;
+        for (Py_ssize_t i = 0; mp != NULL && i < Py_SIZE(base); i++, mp++) {
+            Py_VISIT(*(PyObject **)((char *)self + mp->offset));
+        }
+        base = base->tp_base;
+    }
+    if (type->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
+        Py_VISIT(LU_MANAGED_DICT(self));
+    }
+    /* An instance counts as a reference to its heap type, unless the base's
+       traverse visits the type. */
+    if ((type->tp_flags & Py_TPFLAGS_HEAPTYPE)
+        && (basetraverse == NULL || !(base->tp_flags & Py_TPFLAGS_HEAPTYPE))) {
+        Py_VISIT(type);
+    }
+    return basetraverse != NULL ? basetraverse(self, visit, arg) : 0;
+}
+
+static int
+subtype_clear(PyObject *self)
+{
+    PyTypeObject *type = Py_TYPE(self), *base = type;
+    inquiry baseclear;
+    while ((baseclear = base->tp_clear) == subtype_clear) {
+        PyMemberDef *mp = base->tp_members;
+        for (Py_ssize_t i = 0; mp != NULL && i < Py_SIZE(base); i++, mp++) {
+            Py_CLEAR(*(PyObject **)((char *)self + mp->offset));
+        }
+        base = base->tp_base;
+    }
+    /* The instance dict goes too: it breaks cycles through __dict__ alone. */
+    if (type->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
+        Py_CLEAR(LU_MANAGED_DICT(self));
+    }
+    return baseclear != NULL ? baseclear(self) : 0;
+}
+
+/* The collector holds only heap types; static ones are immortal. */
+static int
+type_is_gc(PyObject *self)
+{
+    return (((PyTypeObject *)self)->tp_flags & Py_TPFLAGS_HEAPTYPE) != 0;
+}
+
+static int
+type_traverse(PyObject *self, visitproc visit, void *arg)
+{
+    PyTypeObject *tp = (PyTypeObject *)self;
+    Py_VISIT(tp->tp_dict);
+    Py_VISIT(tp->tp_mro);
+    Py_VISIT(tp->tp_bases);
+    Py_VISIT(tp->tp_base);
+    return 0;
+}
+
+/* The method cache is invalidated before the dict is cleared, so that other
+   objects of the cycle never call into a destroyed method. */
+static int
+type_clear(PyObject *self)
+{
+    PyTypeObject *tp = (PyTypeObject *)self;
+    lu_type_modified(tp);
+    if (tp->tp_dict != NULL) {
+        PyDict_Clear(tp->tp_dict);
+    }
+    Py_CLEAR(tp->tp_mro);
+    return 0;
+}
+
 /* type_dealloc: a heap type's references. A class is normally kept alive
    by the cycle through its MRO; this runs when creating one fails. */
 static void
@@ -546,6 +644,10 @@ type_dealloc(PyObject *self)
 {
     PyTypeObject *tp = (PyTypeObject *)self;
     PyHeapTypeObject *et = (PyHeapTypeObject *)self;
+    for (Py_ssize_t i = 0; tp->tp_bases != NULL && i < PyTuple_GET_SIZE(tp->tp_bases); i++) {
+        remove_subclass((PyTypeObject *)PyTuple_GET_ITEM(tp->tp_bases, i), tp);
+    }
+    lu_clear_weakrefs(self);
     Py_CLEAR(tp->tp_dict);
     Py_CLEAR(tp->tp_bases);
     Py_CLEAR(tp->tp_mro);
@@ -640,6 +742,9 @@ lu_types_init(PyInterpreterState *interp)
     PyType_Type.tp_itemsize = sizeof(PyMemberDef);
     PyType_Type.tp_flags |= Py_TPFLAGS_HAVE_GC;
     PyType_Type.tp_dealloc = type_dealloc;
+    PyType_Type.tp_traverse = type_traverse;
+    PyType_Type.tp_clear = type_clear;
+    PyType_Type.tp_is_gc = type_is_gc;
     PyType_Type.tp_dictoffset = offsetof(PyTypeObject, tp_dict);
     PyType_Type.tp_weaklistoffset = offsetof(PyTypeObject, tp_weaklist);
     size_t index = 0;
@@ -1013,6 +1118,8 @@ type_new_layout(PyTypeObject *meta, PyObject *name, PyObject *bases, PyObject *n
     bases = NULL;
     tp->tp_base = (PyTypeObject *)Py_NewRef(base);
     tp->tp_dealloc = subtype_dealloc;
+    tp->tp_traverse = subtype_traverse;
+    tp->tp_clear = subtype_clear;
     tp->tp_alloc = PyType_GenericAlloc;
     tp->tp_dictoffset = base->tp_dictoffset;
     tp->tp_weaklistoffset = base->tp_weaklistoffset;
@@ -1511,7 +1618,8 @@ prim_type_subclasses(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *list = *subclasses_ref((PyTypeObject *)args[0]);
     PyObject *copy = PyList_New(0);
     for (Py_ssize_t i = 0; copy != NULL && list != NULL && i < PyList_GET_SIZE(list); i++) {
-        if (lu_list_append(copy, PyList_GET_ITEM(list, i)) < 0) {
+        PyTypeObject *sub = subclass_of(PyList_GET_ITEM(list, i));
+        if (sub != NULL && lu_list_append(copy, (PyObject *)sub) < 0) {
             Py_CLEAR(copy);
         }
     }

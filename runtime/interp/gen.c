@@ -222,6 +222,40 @@ gen_finalize(PyObject *self)
     PyErr_SetRaisedException(exc);
 }
 
+static int
+gen_traverse(PyObject *self, visitproc visit, void *arg)
+{
+    struct lu_gen *gen = (struct lu_gen *)self;
+    Py_VISIT(gen->name);
+    Py_VISIT(gen->qualname);
+    Py_VISIT(gen->exc_state.exc_value);
+    Py_VISIT(gen->origin_or_finalizer);
+    Py_VISIT(gen->frame.code);
+    /* The frame of a running generator is a task's, its stack pointer valid
+       only where that task published it; the generator is held by its caller
+       and so are the frame's references. */
+    if (gen->frame_state != LU_GEN_CLEARED && gen->frame_state != LU_GEN_EXECUTING) {
+        Py_VISIT(gen->frame.func);
+        Py_VISIT(gen->frame.locals);
+        for (PyObject **p = gen->frame.localsplus; p < gen->frame.stackpointer; p++) {
+            Py_VISIT(*p);
+        }
+    }
+    return 0;
+}
+
+/* A generator in a cycle is closed by its finalizer; one that never started,
+   or was finalized already, has its frame cleared here so the cycle breaks. */
+static int
+gen_clear(PyObject *self)
+{
+    struct lu_gen *gen = (struct lu_gen *)self;
+    if (gen->frame_state != LU_GEN_EXECUTING && gen->frame_state != LU_GEN_CLEARED) {
+        clear_frame(gen);
+    }
+    return 0;
+}
+
 static void
 gen_dealloc(PyObject *self)
 {
@@ -229,6 +263,7 @@ gen_dealloc(PyObject *self)
     if (suspended(gen) && PyObject_CallFinalizerFromDealloc(self) < 0) {
         return;                         /* resurrected */
     }
+    lu_clear_weakrefs(self);
     if (gen->frame_state != LU_GEN_CLEARED) {
         clear_frame(gen);
     }
@@ -352,12 +387,12 @@ PyTypeObject lu_async_gen_athrow_type = { PyVarObject_HEAD_INIT(&PyType_Type, 0)
 PyTypeObject lu_async_gen_wrapped_type = { PyVarObject_HEAD_INIT(&PyType_Type, 0)
     .tp_name = "async_generator_wrapped_value", .tp_base = &PyBaseObject_Type };
 
+LU_GC_FIELDS(fields, struct lu_fields, field[0], field[2])
+
 static void
 fields_dealloc(PyObject *self)
 {
-    for (int i = 0; i < 3; i++) {
-        Py_CLEAR(((struct lu_fields *)self)->field[i]);
-    }
+    fields_clear(self);
     lu_object_free(self);
 }
 
@@ -379,6 +414,9 @@ gen_layout(PyTypeObject *tp, PyGetSetDef *getset, PyMemberDef *members)
     tp->tp_itemsize = sizeof(PyObject *);
     tp->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     tp->tp_dealloc = gen_dealloc;
+    tp->tp_traverse = gen_traverse;
+    tp->tp_weaklistoffset = offsetof(struct lu_gen, weakreflist);
+    tp->tp_clear = gen_clear;
     tp->tp_finalize = gen_finalize;
     tp->tp_getset = getset;
     tp->tp_members = members;
@@ -397,6 +435,8 @@ lu_gen_init(void)
         fields[i]->tp_basicsize = sizeof(struct lu_fields);
         fields[i]->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
         fields[i]->tp_dealloc = fields_dealloc;
+        fields[i]->tp_traverse = fields_traverse;
+        fields[i]->tp_clear = fields_clear;
     }
 }
 

@@ -760,6 +760,8 @@ prim_iter_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
+LU_GC_FIELDS(seqiter, seqiterobject, it_seq, it_seq)
+
 static void
 seqiter_dealloc(PyObject *op)
 {
@@ -1024,6 +1026,8 @@ lu_storage_init(void)
         iters[i]->tp_basicsize = sizeof(seqiterobject);
         iters[i]->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
         iters[i]->tp_dealloc = seqiter_dealloc;
+        iters[i]->tp_traverse = seqiter_traverse;
+        iters[i]->tp_clear = seqiter_clear;
     }
     PyRange_Type.tp_basicsize = sizeof(rangeobject);
     PyRange_Type.tp_flags |= Py_TPFLAGS_DEFAULT;

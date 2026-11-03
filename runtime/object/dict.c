@@ -265,6 +265,27 @@ free_entries(PyDictKeysObject *dk)
     PyMem_Free(dk);
 }
 
+static int
+dict_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    PyDictKeysObject *dk = ((PyDictObject *)op)->ma_keys;
+    if (dk == LU_EMPTY_KEYS) {
+        return 0;
+    }
+    for (Py_ssize_t i = 0; i < dk->dk_nentries; i++) {
+        Py_VISIT(lu_dk_key(dk, i));
+        Py_VISIT(lu_dk_value(dk, i));
+    }
+    return 0;
+}
+
+static int
+dict_clear(PyObject *op)
+{
+    lu_dict_clear((PyDictObject *)op);
+    return 0;
+}
+
 static void
 dict_dealloc(PyObject *op)
 {
@@ -286,6 +307,8 @@ lu_dict_init(void)
     PyDict_Type.tp_basicsize = sizeof(PyDictObject);
     PyDict_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyDict_Type.tp_dealloc = dict_dealloc;
+    PyDict_Type.tp_traverse = dict_traverse;
+    PyDict_Type.tp_clear = dict_clear;
 }
 
 /* Probing. */

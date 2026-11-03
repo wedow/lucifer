@@ -145,35 +145,7 @@ static PyObject *
 prim_set_clear(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1); SET(0);
-    PySetObject *so = (PySetObject *)args[0];
-    setentry *table, small_copy[PySet_MINSIZE];
-    Py_ssize_t used;
-    int malloced;
-    Py_BEGIN_CRITICAL_SECTION(so);
-    table = so->table;
-    used = so->used;
-    malloced = table != so->smalltable;
-    if (!malloced && so->fill > 0) {
-        memcpy(small_copy, table, sizeof small_copy);
-        table = small_copy;
-    }
-    if (malloced || so->fill > 0) {
-        memset(so->smalltable, 0, sizeof so->smalltable);
-        so->fill = so->used = 0;
-        so->mask = PySet_MINSIZE - 1;
-        so->table = so->smalltable;
-        so->hash = -1;
-    }
-    Py_END_CRITICAL_SECTION();
-    for (setentry *e = table; used > 0; e++) {
-        if (e->key != NULL && e->key != LU_SET_DUMMY) {
-            used--;
-            Py_DECREF(e->key);
-        }
-    }
-    if (malloced) {
-        lu_qsbr_retire(table);
-    }
+    lu_set_clear((PySetObject *)args[0]);
     return Py_NewRef(Py_None);
 }
 
@@ -342,6 +314,20 @@ setiter_dealloc(PyObject *op)
     lu_object_free(op);
 }
 
+static int
+setiter_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    Py_VISIT(((setiterobject *)op)->si_set);
+    return 0;
+}
+
+static int
+setiter_clear(PyObject *op)
+{
+    Py_CLEAR(((setiterobject *)op)->si_set);
+    return 0;
+}
+
 static PyObject *
 prim_setiter_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -422,6 +408,8 @@ lu_set_iter_init(void)
     PySetIter_Type.tp_basicsize = sizeof(setiterobject);
     PySetIter_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PySetIter_Type.tp_dealloc = setiter_dealloc;
+    PySetIter_Type.tp_traverse = setiter_traverse;
+    PySetIter_Type.tp_clear = setiter_clear;
 }
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }

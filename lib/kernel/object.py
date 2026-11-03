@@ -114,19 +114,19 @@ def getattr_hook(obj, name):
     tp = type(obj)
     getattribute = type_lookup(tp, '__getattribute__')
     getattr_ = type_lookup(tp, '__getattr__')
-    if getattribute is _object_getattribute:
-        if getattr_ is MISSING:
+    if getattr_ is MISSING:
+        if getattribute is _object_getattribute:
             return generic_getattr(obj, name)
-        v = generic_getattr(obj, name, True)
-        if v is not MISSING:
-            return v
-    elif getattr_ is MISSING:
         return call_special(getattribute, obj, name)
-    else:
-        try:
+    try:
+        if getattribute is _object_getattribute:
+            v = generic_getattr(obj, name, True)
+            if v is not MISSING:
+                return v
+        else:
             return call_special(getattribute, obj, name)
-        except AttributeError:
-            pass
+    except AttributeError:
+        pass
     return call_special(getattr_, obj, name)
 
 

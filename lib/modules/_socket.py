@@ -1,9 +1,13 @@
-"""_socket (Modules/socketmodule.c): the constants, the error classes and the
-address conversion functions. Creating a socket raises OSError: networking
+"""_socket (Modules/socketmodule.c): the constants, the error classes, the
+address conversion functions, and sockets made from descriptors: socketpair()
+and socket(fileno=...), which read, write and shut down as nonblocking or
+blocking descriptors do. Creating a network socket raises OSError: networking
 arrives with the scheduler's I/O layer, and until then importing socket,
 asyncio and everything that imports them works."""
 
 import errno as _errno
+import _lucifer
+import posix as _posix
 
 error = OSError
 
@@ -98,30 +102,109 @@ def _unsupported(*args, **kwargs):
 
 
 class socket:
-    """socket(family=AF_INET, type=SOCK_STREAM, proto=0) -> socket object"""
-    __slots__ = ()
+    """socket(family=AF_INET, type=SOCK_STREAM, proto=0) -> socket object
+
+Only sockets over an existing descriptor (fileno=) exist yet."""
+    __slots__ = ('_fd', '_timeout', '_family', '_type', '_proto')
 
     def __init__(self, family=-1, type=-1, proto=-1, fileno=None):
-        _unsupported()
+        if fileno is None:
+            _unsupported()
+        if not isinstance(fileno, int):
+            raise TypeError('an integer is required')
+        if fileno < 0:
+            raise ValueError('negative file descriptor')
+        _posix.fstat(fileno)
+        self._fd = fileno
+        self._family = AF_UNIX if family == -1 else family
+        self._type = (SOCK_STREAM if type == -1 else type) & ~(SOCK_NONBLOCK | SOCK_CLOEXEC)
+        self._proto = 0 if proto == -1 else proto
+        self._timeout = _default_timeout if _posix.get_blocking(fileno) else 0.0
+        if self._timeout is not None and self._timeout > 0:
+            _posix.set_blocking(fileno, False)
 
     def __repr__(self):
-        return '<socket object>'
+        return '<socket object, fd=%d, family=%d, type=%d, proto=%d>' % (
+            self._fd, self._family, self._type, self._proto)
+
+    family = property(lambda self: self._family)
+    type = property(lambda self: self._type)
+    proto = property(lambda self: self._proto)
+
+    def _check(self):
+        if self._fd < 0:
+            raise OSError(_errno.EBADF, 'Bad file descriptor')
+        return self._fd
+
+    def _wait(self, events):
+        """Waits up to the timeout for the descriptor; a timeout of 0 or None does not wait."""
+        if self._timeout:
+            ready = _lucifer.os_poll([(self._fd, events)], int(self._timeout * 1000) or 1)
+            if ready is not None and not ready:      # None: interrupted by a signal
+                raise timeout('timed out')
+
+    def __del__(self):
+        if self._fd >= 0:
+            self.close()
 
     def close(self):
-        pass
+        fd, self._fd = self._fd, -1
+        if fd >= 0:
+            _posix.close(fd)
 
     def detach(self):
-        return -1
+        fd, self._fd = self._fd, -1
+        return fd
+
+    def fileno(self):
+        return self._fd
 
     def gettimeout(self):
-        return _default_timeout
+        return self._timeout
 
-    def settimeout(self, timeout):
-        _unsupported()
+    def settimeout(self, value):
+        if value is not None:
+            value = float(value)
+            if value < 0:
+                raise ValueError('Timeout value out of range')
+        self._timeout = value
+        _posix.set_blocking(self._check(), value is None)
 
-    connect = connect_ex = bind = listen = accept = recv = send = sendall = _unsupported
-    recvfrom = sendto = shutdown = setsockopt = getsockopt = getsockname = getpeername = _unsupported
-    setblocking = getblocking = fileno = dup = _unsupported
+    def setblocking(self, flag):
+        self.settimeout(None if flag else 0.0)
+
+    def getblocking(self):
+        self._check()
+        return self._timeout is None
+
+    def recv(self, bufsize, flags=0, /):
+        if bufsize < 0:
+            raise ValueError('negative buffersize in recv')
+        fd = self._check()
+        self._wait(_POLLIN)
+        return _posix.read(fd, bufsize)
+
+    def send(self, data, flags=0, /):
+        fd = self._check()
+        self._wait(_POLLOUT)
+        return _posix.write(fd, data)
+
+    def sendall(self, data, flags=0, /):
+        view = memoryview(data).cast('B')
+        while view:
+            view = view[self.send(view):]
+
+    def shutdown(self, how, /):
+        _posix._call('shutdown', self._check(), how)
+
+    def dup(self):
+        return socket(self._family, self._type, self._proto, _posix.dup(self._check()))
+
+    connect = connect_ex = bind = listen = accept = recvfrom = sendto = _unsupported
+    setsockopt = getsockopt = getsockname = getpeername = _unsupported
+
+
+_POLLIN, _POLLOUT = 1, 4
 
 
 SocketType = socket
@@ -219,7 +302,8 @@ def getservbyname(servicename, protocolname=None, /):
 
 def socketpair(family=AF_UNIX, type=SOCK_STREAM, proto=0):
     """Create a pair of socket objects from the sockets returned by the platform socketpair() function."""
-    _unsupported()
+    a, b = _lucifer.os_socketpair(family, type | SOCK_CLOEXEC, proto)
+    return socket(family, type, proto, a), socket(family, type, proto, b)
 
 
 def close(fd, /):

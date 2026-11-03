@@ -10,8 +10,6 @@
 #include <stdarg.h>
 #include <string.h>
 
-#define LU_GC_TRACKED 1         /* _PyGC_BITS_TRACKED in ob_gc_bits */
-
 /* Every type whose objects the runtime frees natively gets its size,
    GC flag and dealloc here; the kernel installs everything else. */
 static void
@@ -50,6 +48,24 @@ lu_object_free(PyObject *op)
     /* A heap subclass's instances start at the preheader. */
     size_t presize = (Py_TYPE(op)->tp_flags & Py_TPFLAGS_PREHEADER) ? 2 * sizeof(PyObject *) : 0;
     PyObject_Free((char *)op - presize);
+}
+
+int
+lu_fields_traverse(PyObject *op, Py_ssize_t first, Py_ssize_t end, visitproc visit, void *arg)
+{
+    for (Py_ssize_t off = first; off < end; off += sizeof(PyObject *)) {
+        Py_VISIT(*(PyObject **)((char *)op + off));
+    }
+    return 0;
+}
+
+int
+lu_fields_clear(PyObject *op, Py_ssize_t first, Py_ssize_t end)
+{
+    for (Py_ssize_t off = first; off < end; off += sizeof(PyObject *)) {
+        Py_CLEAR(*(PyObject **)((char *)op + off));
+    }
+    return 0;
 }
 
 static void
@@ -296,6 +312,16 @@ tuple_dealloc(PyObject *op)
     lu_object_free(op);
 }
 
+static int
+tuple_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    PyTupleObject *t = (PyTupleObject *)op;
+    for (Py_ssize_t i = Py_SIZE(t); --i >= 0; ) {
+        Py_VISIT(t->ob_item[i]);
+    }
+    return 0;
+}
+
 /* list */
 
 PyObject *
@@ -353,6 +379,35 @@ list_dealloc(PyObject *op)
     lu_object_free(op);
 }
 
+static int
+list_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    PyListObject *l = (PyListObject *)op;
+    for (Py_ssize_t i = Py_SIZE(l); --i >= 0; ) {
+        Py_VISIT(l->ob_item[i]);
+    }
+    return 0;
+}
+
+/* _list_clear: the items go once the list is empty. */
+static int
+list_clear(PyObject *op)
+{
+    PyListObject *l = (PyListObject *)op;
+    PyObject **items = l->ob_item;
+    if (items != NULL) {
+        Py_ssize_t i = Py_SIZE(l);
+        Py_SET_SIZE(l, 0);
+        l->ob_item = NULL;
+        l->allocated = 0;
+        while (--i >= 0) {
+            Py_XDECREF(items[i]);
+        }
+        lu_qsbr_retire(items);
+    }
+    return 0;
+}
+
 /* slice */
 
 PyObject *
@@ -376,6 +431,16 @@ slice_dealloc(PyObject *op)
     Py_DECREF(s->stop);
     Py_DECREF(s->step);
     lu_object_free(op);
+}
+
+static int
+slice_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    PySliceObject *s = (PySliceObject *)op;
+    Py_VISIT(s->start);
+    Py_VISIT(s->stop);
+    Py_VISIT(s->step);
+    return 0;
 }
 
 /* Layout hash and equality. */
@@ -561,6 +626,10 @@ lu_layouts_init(void)
                Py_TPFLAGS_HAVE_GC, tuple_dealloc);
     set_layout(&PyList_Type, sizeof(PyListObject), 0, Py_TPFLAGS_HAVE_GC, list_dealloc);
     set_layout(&PySlice_Type, sizeof(PySliceObject), 0, Py_TPFLAGS_HAVE_GC, slice_dealloc);
+    PyTuple_Type.tp_traverse = tuple_traverse;
+    PyList_Type.tp_traverse = list_traverse;
+    PyList_Type.tp_clear = list_clear;
+    PySlice_Type.tp_traverse = slice_traverse;
     lu_str_init();
     lu_bytes_init();
     lu_set_init();
@@ -601,4 +670,5 @@ lu_layouts_init(void)
     _Py_COMP_DIAG_POP
     immortal_header((PyObject *)&s->empty_tuple, &PyTuple_Type);
     s->empty_tuple.ob_hash = -1;
+    immortal_header(&s->missing, &PyBaseObject_Type);   /* a tuple may hold it: the collector reads its type */
 }

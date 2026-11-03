@@ -24,6 +24,8 @@ setentry *lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_
 int lu_set_insert(PySetObject *so, PyObject *key, Py_hash_t hash);
 void lu_set_insert_clean(setentry *table, size_t mask, PyObject *key, Py_hash_t hash);
 int lu_set_resize(PySetObject *so, Py_ssize_t minused);
+/* set_clear_internal: empties the set, releasing its keys. */
+void lu_set_clear(PySetObject *so);
 /* frozenset_hash_impl: the hash from the entries' hashes, uncached. */
 Py_hash_t lu_set_hash_impl(PySetObject *so);
 

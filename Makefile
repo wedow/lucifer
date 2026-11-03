@@ -66,6 +66,7 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 	stat:stat:third_party/cpython/Lib/stat.py \
 	posixpath:posixpath:third_party/cpython/Lib/posixpath.py \
 	genericpath:genericpath:third_party/cpython/Lib/genericpath.py \
+	runpy:runpy:third_party/cpython/Lib/runpy.py \
 	re:re:third_party/cpython/Lib/re/__init__.py \
 	re._casefix:re._casefix:third_party/cpython/Lib/re/_casefix.py \
 	re._compiler:re._compiler:third_party/cpython/Lib/re/_compiler.py \
