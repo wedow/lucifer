@@ -3,19 +3,27 @@ CFLAGS = -O2 -g
 # Hidden by default: only what the headers declare PyAPI_FUNC/PyAPI_DATA, or
 # LU_EXPORT marks, reaches the dynamic symbol table that -rdynamic fills.
 LU_CFLAGS = -std=gnu11 -Wall -Wextra -Wno-unused-parameter -fvisibility=hidden \
-	-pthread -Iinclude -Iruntime
+	-fno-omit-frame-pointer -pthread -Iinclude -Iruntime
 LU_LDFLAGS = -rdynamic -pthread
 
 SRCS = $(wildcard runtime/*.c runtime/*/*.c)
-OBJS = $(SRCS:%.c=build/%.o)
+MAIN = build/runtime/main.o
+LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o))
 EXPORTS = results/abi/cp314t-exports.tsv
 
 .PHONY: all abi-audit check-capi regen-abi check-harness
 all: bin/lucifer
 
-bin/lucifer: $(OBJS)
+# The runtime is an archive so that an embedder can link it too. Every member
+# is kept: extensions bind to symbols that nothing in main.o refers to.
+build/liblucifer.a: $(LIB_OBJS)
 	@mkdir -p $(@D)
-	$(CC) $(LU_LDFLAGS) -o $@ $(OBJS)
+	rm -f $@
+	ar rcs $@ $^
+
+bin/lucifer: $(MAIN) build/liblucifer.a
+	@mkdir -p $(@D)
+	$(CC) $(LU_LDFLAGS) -o $@ $(MAIN) -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive
 
 build/runtime/object/alloc.o: LU_CFLAGS += -Ithird_party/mimalloc/include -Ithird_party/mimalloc/src
 
