@@ -1,6 +1,6 @@
 ---
 id: luc-d47e
-status: open
+status: closed
 deps: [luc-52bm, luc-2yau]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,13 @@ Builder: sonnet.
 
 make check-kernel PROGRAMS="float_ops complex_ops" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t).
 
+
+## Notes
+
+**2026-11-03T05:45:30Z**
+
+K1f in progress: gates running
+
+**2026-11-03T05:48:37Z**
+
+K1f done: float and complex, dtoa/pystrtod adapted, float_ops complex_ops float_random match the oracle

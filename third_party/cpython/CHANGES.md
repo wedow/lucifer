@@ -44,6 +44,26 @@ C under `runtime/` adapted from this tag's sources, under the PSF License
   (`long_hash`) and the xxHash lanes of `Objects/tupleobject.c` and
   `Objects/sliceobject.c`: one function serves tuples and slices; no other
   algorithms are built.
+- `runtime/prim/dtoa.c` from `Python/dtoa.c` (`_Py_dg_strtod`, `_Py_dg_dtoa`,
+  `_Py_dg_freedtoa`): always the short-repr code; the headers are replaced by
+  `lucifer.h`, `struct Bigint` is declared in the file, Bigints are allocated
+  with `PyMem_Malloc` directly (the `Py_USING_MEMORY_DEBUGGER` paths: no
+  per-interpreter freelist or cached powers of 5), and `_PyDtoa_Init` and
+  `_PyDtoa_Fini` are dropped.
+- `runtime/prim/pystrtod.c` from `Python/pystrtod.c` (`_Py_parse_inf_or_nan`,
+  `PyOS_string_to_double`, `PyOS_double_to_string` over `format_float_short`):
+  the `_PY_SHORT_FLOAT_REPR == 1` paths only; errors are raised with
+  `lu_err_format` instead of `PyErr_Format`; no x87 precision control.
+- `runtime/prim/float.c` from `Objects/floatobject.c` (arithmetic, `float_pow`,
+  `float_richcompare` with ints, `double_round`, `hex`/`fromhex`,
+  `as_integer_ratio`, `float_from_string_inner`) and
+  `_Py_string_to_number_with_underscores`: operations take and return plain
+  objects through primitives (NotImplemented for non-numbers), the libm error
+  of `float_pow` is built without `PyErr_SetFromErrno`.
+- `runtime/prim/complex.c` from `Objects/complexobject.c` (`_Py_c_*`,
+  `_Py_cr_*`, `_Py_rc_*`, `c_powi`, the binary operators, `complex_repr`,
+  `complex_hash`, `complex_richcompare`, `complex_from_string_inner`): no
+  deprecation warnings (the warnings module does not exist yet).
 - `runtime/object/set.c` from `Objects/setobject.c` (probing, resize policy,
   `frozenset_hash`): growth only, keys compared by layout equality until the
   kernel's rich comparison exists.
