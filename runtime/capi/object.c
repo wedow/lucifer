@@ -236,3 +236,28 @@ PyObject_GetItem(PyObject *o, PyObject *key)
     lu_err_format(PyExc_TypeError, "'%.200s' object is not subscriptable", Py_TYPE(o)->tp_name);
     return NULL;
 }
+
+/* mp_ass_subscript with a NULL value deletes. */
+static int
+ass_subscript(PyObject *o, PyObject *key, PyObject *v)
+{
+    PyMappingMethods *m = Py_TYPE(o)->tp_as_mapping;
+    if (m != NULL && m->mp_ass_subscript != NULL) {
+        return m->mp_ass_subscript(o, key, v);
+    }
+    lu_err_format(PyExc_TypeError, "'%.200s' object does not support item %s",
+                  Py_TYPE(o)->tp_name, v == NULL ? "deletion" : "assignment");
+    return -1;
+}
+
+int
+PyObject_SetItem(PyObject *o, PyObject *key, PyObject *v)
+{
+    return ass_subscript(o, key, v);
+}
+
+int
+PyObject_DelItem(PyObject *o, PyObject *key)
+{
+    return ass_subscript(o, key, NULL);
+}
