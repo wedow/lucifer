@@ -16,7 +16,7 @@ HOST_PYTHON ?= python3
 KERNEL = lib/kernel/builtins.py
 EXPORTS = results/abi/cp314t-exports.tsv
 
-.PHONY: all abi-audit check-globals check-capi check-kernel regen-abi check-harness check-compiler regen
+.PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel regen-abi check-harness check-compiler regen
 all: bin/lucifer
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -44,6 +44,12 @@ build/frozen.o: build/frozen.c $(HEADERS)
 
 abi-audit: bin/lucifer
 	python3 tools/abi/audit.py $(EXPORTS) bin/lucifer
+
+check: check-blocking check-globals check-capi check-kernel
+
+# Blocking calls only in runtime/prim/os.c, inside the syscall bracket.
+check-blocking: $(MAIN) $(LIB_OBJS)
+	$(HOST_PYTHON) tools/blockcheck runtime/prim/os.c $(MAIN) $(LIB_OBJS)
 
 # Every writable symbol of the executable is accounted for.
 check-globals: bin/lucifer

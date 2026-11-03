@@ -4,8 +4,9 @@
    arrives with K1p; this is the record and its one binding. */
 
 #define _GNU_SOURCE
-#include "lucifer.h"
+#include "thread/lock.h"
 
+#include <errno.h>
 #include <unistd.h>
 
 #define LU_DEFAULT_RECURSION_LIMIT 1000         /* Py_DEFAULT_RECURSION_LIMIT */
@@ -23,7 +24,7 @@ bind(struct lu_carrier *c, struct lu_task *t)
     ts->native_thread_id = (unsigned long)gettid();
     ts->_status.bound = 1;
     ts->_status.active = 1;
-    ts->state = 1;                              /* _Py_THREAD_ATTACHED */
+    ts->state = _Py_THREAD_ATTACHED;
 }
 
 struct lu_task *
@@ -36,7 +37,6 @@ lu_task_new(struct _is *interp)
     }
     PyThreadState *ts = &t->ts;
     ts->interp = interp;
-    ts->id = ++interp->next_task_id;
     ts->_whence = 1;                            /* _PyThreadState_WHENCE_INIT */
     ts->_status.initialized = 1;
     ts->py_recursion_limit = LU_DEFAULT_RECURSION_LIMIT;
@@ -44,16 +44,70 @@ lu_task_new(struct _is *interp)
     ts->what_event = -1;
     ts->exc_info = &ts->exc_state;
     ts->context_ver = 1;
-    /* The interpreter's task list takes a lock once a second task exists
-       (K1p). */
+    pthread_mutex_lock(&interp->tasks_lock.mutex);
+    ts->id = ++interp->next_task_id;
     ts->next = interp->tasks;
     if (ts->next != NULL) {
         ts->next->prev = ts;
     }
     interp->tasks = ts;
+    pthread_mutex_unlock(&interp->tasks_lock.mutex);
     t->pinned_for_life = 1;
     bind(lu_carrier, t);
     return t;
+}
+
+/* _PyThreadState_Detach. Stop-the-world (K1q) counts a detached task as
+   stopped. */
+PyThreadState *
+lu_syscall_begin(void)
+{
+    struct lu_task *t = lu_current_task();
+    if (t == NULL || t->ts.state != _Py_THREAD_ATTACHED) {
+        return NULL;
+    }
+    PyThreadState *ts = &t->ts;
+    if (ts->critical_section != 0) {
+        _PyCriticalSection_SuspendAll(ts);
+    }
+    __atomic_store_n(&ts->state, _Py_THREAD_DETACHED, __ATOMIC_SEQ_CST);
+    return ts;
+}
+
+/* _PyThreadState_Attach. With stop-the-world (K1q) it waits here while the
+   world is stopped. */
+void
+lu_syscall_end(PyThreadState *ts)
+{
+    if (ts == NULL) {
+        return;
+    }
+    int err = errno;
+    __atomic_store_n(&ts->state, _Py_THREAD_ATTACHED, __ATOMIC_SEQ_CST);
+    if (ts->critical_section != 0) {
+        _PyCriticalSection_Resume(ts);
+    }
+    errno = err;
+}
+
+/* The foreign-thread half of PyGILState_Ensure: a thread without a task gets
+   one, pinned for life. Release and the gilstate counter arrive with the
+   rest of the tstate API (K1p). */
+PyGILState_STATE
+PyGILState_Ensure(void)
+{
+    struct lu_task *t = lu_current_task();
+    if (t == NULL) {
+        if (lu_task_new(&_PyRuntime.main_interp) == NULL) {
+            Py_FatalError("Couldn't create thread-state for new thread");
+        }
+        return PyGILState_UNLOCKED;
+    }
+    if (t->ts.state != _Py_THREAD_ATTACHED) {
+        lu_syscall_end(&t->ts);
+        return PyGILState_UNLOCKED;
+    }
+    return PyGILState_LOCKED;
 }
 
 PyThreadState *

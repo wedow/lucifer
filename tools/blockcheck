@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Reject blocking calls outside the syscall bracket (DESIGN 5.5).
+
+usage: blockcheck WRAPPERS.c OBJECT...
+
+Every blocking operation goes through lu_park or a wrapper in WRAPPERS.c
+(runtime/prim/os.c) that brackets the call with lu_syscall_begin/end. Three
+rules make that checkable:
+
+1. Only the wrappers' object references a blocking libc symbol (nm over
+   every OBJECT of the executable, by path: archive members are named by
+   basename alone). The vendored allocator is the one exception: mimalloc
+   reads /proc once at startup through syscall() and sleeps in its
+   out-of-memory retry.
+2. In WRAPPERS.c each mention of a blocking name lies inside LU_SYSCALL(...),
+   which brackets the call, or is the futex syscall inside LU_PARKED(...):
+   lu_park's own sleep, bracketed by lu_park itself, or a wake, which never
+   blocks.
+3. Only park.o references the futex helpers lu_futex_wait and lu_futex_wake.
+
+stdio is outside these rules: the runtime uses it for diagnostics and the
+startup read of the main .pyc only; file I/O for Python goes through the
+wrappers.
+"""
+import re
+import subprocess
+import sys
+
+BLOCKING = set("""
+    read readv pread preadv preadv2 write writev pwrite pwritev pwritev2
+    open openat creat close fsync fdatasync sync syncfs
+    poll ppoll select pselect epoll_wait epoll_pwait epoll_pwait2
+    accept accept4 connect recv recvfrom recvmsg recvmmsg
+    send sendto sendmsg sendmmsg sendfile splice tee copy_file_range
+    nanosleep clock_nanosleep sleep usleep pause
+    wait waitpid waitid wait3 wait4 sigwait sigwaitinfo sigtimedwait sigsuspend
+    flock lockf fcntl ioctl
+    getaddrinfo getnameinfo gethostbyname gethostbyname_r gethostbyaddr gethostbyaddr_r
+    pthread_join pthread_cond_wait pthread_cond_timedwait pthread_cond_clockwait
+    sem_wait sem_timedwait sem_clockwait
+    msgrcv msgsnd mq_receive mq_send mq_timedreceive mq_timedsend
+    system popen pclose syscall
+    thrd_sleep thrd_join cnd_wait cnd_timedwait pthread_timedjoin_np
+    pthread_clockjoin_np pthread_barrier_wait semop semtimedop
+    tcdrain msync sync_file_range
+""".split())
+
+WRAPPERS = "build/runtime/prim/os.o"
+ALLOCATOR = ("build/runtime/object/alloc.o", {"syscall", "sleep"})
+FUTEX = {"lu_futex_wait", "lu_futex_wake"}
+PARK = "build/runtime/thread/park.o"
+
+
+def base(name):
+    """read for read@GLIBC_2.2.5, __read, __read_chk, __read_nocancel,
+    __pread64_chk or __open64_2: libc exports these aliases too."""
+    name = name.split("@")[0].lstrip("_")
+    while True:
+        stripped = re.sub(r"(_chk|_2|_nocancel|_nostatus|64)$", "", name)
+        if stripped == name:
+            return name
+        name = stripped
+
+
+def check_objects(objects):
+    out = subprocess.run(["nm", "-A", "--undefined-only", *objects],
+                         capture_output=True, text=True, check=True).stdout
+    problems = []
+    for line in out.splitlines():
+        obj, symbol = re.fullmatch(r"([^:]+):\s+U\s+(\S+)", line).groups()
+        name = base(symbol)
+        if name in BLOCKING and obj != WRAPPERS and not (
+                obj == ALLOCATOR[0] and name in ALLOCATOR[1]):
+            problems.append(f"{obj} calls {symbol} outside the wrappers")
+        if symbol in FUTEX and obj != PARK:
+            problems.append(f"{obj} calls {symbol}; only lu_park sleeps on the futex")
+    return problems
+
+
+def strip(source):
+    """Blank out comments, literals and #include lines, keeping lines."""
+    def blank(m):
+        return re.sub(r"[^\n]", " ", m.group(0))
+    return re.sub(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\''
+                  r'|^[ \t]*#[ \t]*include[^\n]*',
+                  blank, source, flags=re.S | re.M)
+
+
+def spans(code):
+    """(start, end, macro) of every LU_SYSCALL(...) and LU_PARKED(...) argument."""
+    found = []
+    for m in re.finditer(r"\b(LU_SYSCALL|LU_PARKED)\s*\(", code):
+        depth, i = 1, m.end()
+        while depth and i < len(code):
+            depth += {"(": 1, ")": -1}.get(code[i], 0)
+            i += 1
+        found.append((m.end(), i - 1, m.group(1)))
+    return found
+
+
+def check_wrappers(path):
+    with open(path) as f:
+        code = strip(f.read())
+    brackets = spans(code)
+    problems = []
+    for m in re.finditer(r"\b[A-Za-z_]\w*\b", code):
+        if base(m.group(0)) not in BLOCKING:
+            continue
+        inner = [s for s in brackets if s[0] <= m.start() < s[1]]
+        macro = max(inner)[2] if inner else None
+        futex = re.match(r"syscall\s*\(\s*SYS_futex\b", code[m.start():])
+        if macro == "LU_SYSCALL" or (macro == "LU_PARKED" and futex):
+            continue
+        line = code.count("\n", 0, m.start()) + 1
+        problems.append(f"{path}:{line}: {m.group(0)} outside LU_SYSCALL")
+    return problems
+
+
+def main():
+    if len(sys.argv) < 3:
+        sys.exit(__doc__.splitlines()[2])
+    wrappers, objects = sys.argv[1], sys.argv[2:]
+    problems = check_objects(objects) + check_wrappers(wrappers)
+    for p in problems:
+        print("blockcheck: " + p)
+    sys.exit(1 if problems else 0)
+
+
+if __name__ == "__main__":
+    main()

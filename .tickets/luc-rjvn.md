@@ -1,6 +1,6 @@
 ---
 id: luc-rjvn
-status: open
+status: closed
 deps: [luc-1dl8]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: opus.
 
 make check-capi passes tests/capi/park.c (unpark from another thread, stale and duplicate ids ignored, early result kept, deadline expiry) and tests/capi/mutex.c (8 threads contending a PyMutex and a PyCriticalSection2 on two objects, counts exact over 15 runs); make check-blocking fails on a planted unbracketed read() and passes on master.
 
+
+## Notes
+
+**2026-11-03T03:37:04Z**
+
+check-capi passes park.c and mutex.c (15 runs); check-blocking fails on a planted read() in task.c and in os.c outside LU_SYSCALL, passes on the branch.

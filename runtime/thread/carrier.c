@@ -32,6 +32,13 @@ start_runtime(void)
     struct _is *interp = &_PyRuntime.main_interp;
     interp->subproc = mi_subproc_main();
     lu_lock_register(&_PyRuntime.allocators.lock);
+    lu_lock_register(&interp->tasks_lock);
+    for (int i = 0; i < LU_WAIT_BUCKETS; i++) {
+        lu_lock_register(&_PyRuntime.waits.buckets[i].lock);
+    }
+    for (int i = 0; i < LU_LOT_BUCKETS; i++) {
+        lu_lock_register(&_PyRuntime.parking_lot[i].lock);
+    }
     for (int i = 0; i < LU_BRC_NUM_BUCKETS; i++) {
         pthread_mutex_init(&interp->brc.buckets[i].lock.mutex, NULL);
         lu_lock_register(&interp->brc.buckets[i].lock);
