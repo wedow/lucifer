@@ -178,7 +178,7 @@ check-capi: bin/lucifer $(CAPI_TESTS) check-capi-ext
 	@for so in $(CAPI_TESTS); do \
 	  name=$$(basename $$so .so); \
 	  for run in $$(seq 15); do \
-	    out=$$(LD_BIND_NOW=1 LD_PRELOAD=./$$so $(RUN) bin/lucifer 2>&1); \
+	    out=$$($(RUN) env LD_BIND_NOW=1 LD_PRELOAD=./$$so bin/lucifer 2>&1); \
 	    [ "$$out" = "capi $$name ok" ] || { echo "FAIL $$name (run $$run)"; exit 1; }; \
 	  done; echo "PASS $$name"; \
 	done
