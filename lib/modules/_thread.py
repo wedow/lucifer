@@ -128,11 +128,12 @@ In all other cases, the method will return True immediately.
 Precisely, if the current thread already holds the lock, its
 internal counter is simply incremented. If nobody holds the lock,
 the lock is taken and its internal counter initialized to 1."""
+        wait = _timeout_ns(blocking, timeout)
         me = get_ident()
         if self._count and self._owner == me:
             self._count += 1
             return True
-        if self._block.acquire(blocking, timeout):
+        if _lucifer.mutex_acquire(self._block._mutex, wait):
             self._owner = me
             self._count = 1
             return True

@@ -291,3 +291,13 @@ def keep():
 
 wait_done(_thread.start_joinable_thread(keep, daemon=False))
 print(gone[0]() is None, hasattr(local, 'data'))
+
+# RLock checks its arguments before it counts a recursive acquire.
+r = _thread.RLock()
+r.acquire()
+for args in ((False, 1), (True, -2)):
+    try:
+        r.acquire(*args)
+    except ValueError as e:
+        print('ValueError', e, r._recursion_count())
+r.release()
