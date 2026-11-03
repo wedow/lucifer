@@ -1042,12 +1042,8 @@ compatible_for_assignment(PyTypeObject *oldto, PyTypeObject *newto, const char *
 PyObject *
 lu_caller_globals(PyThreadState *ts)
 {
-    for (struct lu_frame *f = (struct lu_frame *)ts->current_frame; f != NULL; f = f->previous) {
-        if (f->owner == LU_FRAME_INTERPRETER || f->owner == LU_FRAME_GENERATOR) {
-            return f->globals;
-        }
-    }
-    return NULL;
+    struct lu_frame *f = lu_frame_user((struct lu_frame *)ts->current_frame, 0);
+    return f != NULL ? f->globals : NULL;
 }
 
 /* The _lucifer primitives over types and objects. Arguments are checked:
@@ -1469,10 +1465,7 @@ static PyObject *
 prim_super_args(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(0);
-    struct lu_frame *f = (struct lu_frame *)PyThreadState_Get()->current_frame;
-    while (f != NULL && f->owner != LU_FRAME_INTERPRETER && f->owner != LU_FRAME_GENERATOR) {
-        f = f->previous;
-    }
+    struct lu_frame *f = lu_frame_user((struct lu_frame *)PyThreadState_Get()->current_frame, 0);
     if (f == NULL) {
         lu_err_format(PyExc_RuntimeError, "super(): no current frame");
         return NULL;

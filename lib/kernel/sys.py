@@ -7,7 +7,7 @@ limit and int digits; this module adds the rest. Functions are installed as
 builtins of sys, as C functions are, so their frames never show.
 """
 
-from _lucifer import ns_set, ns_get, instance_dict, builtin_function, MISSING
+from _lucifer import ns_set, ns_get, instance_dict, builtin_function, frame_at, MISSING
 from _lucifer import exceptions, generators, structseq
 import sys
 
@@ -178,8 +178,12 @@ def audit(event, /, *args):
 
 
 def _getframe(depth=0, /):
-    """Return a frame object from the call stack (arrives with frame objects)."""
-    raise ValueError('call stack is not deep enough')
+    """Return a frame object from the call stack."""
+    f = frame_at(depth)
+    if f is None:
+        raise ValueError('call stack is not deep enough')
+    audit('sys._getframe', f)
+    return f
 
 
 _install(exit, getdefaultencoding, getfilesystemencoding, getfilesystemencodeerrors,

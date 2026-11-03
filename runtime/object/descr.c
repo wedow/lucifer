@@ -948,8 +948,9 @@ field_offset(PyObject *obj, PyObject *index)
                                            &lu_coro_wrapper_type, &_PyAsyncGenASend_Type,
                                            &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type,
                                            &PyMap_Type, &PyFilter_Type, &PyZip_Type,
-                                           &PyEnum_Type, &PyReversed_Type, &PyCallIter_Type };
-    static const int counts[] = { 5, 2, 2, 3, 1, 1, 3, 3, 1, 3, 3, 3, 3, 3, 3 };
+                                           &PyEnum_Type, &PyReversed_Type, &PyCallIter_Type,
+                                           &PyFrameLocalsProxy_Type };
+    static const int counts[] = { 5, 2, 2, 3, 1, 1, 3, 3, 1, 3, 3, 3, 3, 3, 3, 1 };
     long i;
     if (!PyLong_CheckExact(index) || lu_long_as_long(index, &i) < 0) {
         return -1;

@@ -51,8 +51,8 @@ system_exit_members	runtime/interp/exceptions.c	PyMemberDef table of SystemExit,
 stop_iteration_members	runtime/interp/exceptions.c	PyMemberDef table of StopIteration, never written; tp_members takes it non-const
 group_members	runtime/interp/exceptions.c	PyMemberDef table of BaseExceptionGroup, never written; tp_members takes it non-const
 os_error_getset	runtime/interp/exceptions.c	PyGetSetDef table of OSError, never written; tp_getset takes it non-const
-frame_members	runtime/interp/exceptions.c	PyMemberDef table of the frame record, never written; tp_members takes it non-const
-frame_getset	runtime/interp/exceptions.c	PyGetSetDef table of the frame record, never written; tp_getset takes it non-const
+frame_members	runtime/interp/frame.c	PyMemberDef table of frame objects, never written; tp_members takes it non-const
+frame_getset	runtime/interp/frame.c	PyGetSetDef table of frame objects, never written; tp_getset takes it non-const
 tb_members	runtime/interp/exceptions.c	PyMemberDef table of traceback, never written; tp_members takes it non-const
 tb_getset	runtime/interp/exceptions.c	PyGetSetDef table of traceback, never written; tp_getset takes it non-const
 layouts	runtime/interp/exceptions.c	the exception layouts' roots, a table never written
@@ -70,6 +70,7 @@ lu_coro_wrapper_type	runtime/interp/gen.c	coroutine_wrapper, a private static ty
 lu_async_gen_athrow_type	runtime/interp/gen.c	async_generator_athrow, a private static type; the kernel fills in its slots once at startup
 lu_async_gen_wrapped_type	runtime/interp/gen.c	async_generator_wrapped_value, a private static type; layout set once at startup
 lu_prim_gen_methods	runtime/interp/gen.c	_lucifer's generator primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_frame_methods	runtime/interp/frame.c	_lucifer's frame primitives, a PyMethodDef table never written; the API takes it non-const
 lu_sys_frame_methods	runtime/interp/frame.c	sys's recursion-limit functions, a PyMethodDef table never written; the API takes it non-const
 lu_prim_bytes_methods	runtime/prim/bytes.c	_lucifer's bytes primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_mv_methods	runtime/prim/memoryview.c	_lucifer's memoryview primitives, a PyMethodDef table never written; the API takes it non-const

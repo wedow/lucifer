@@ -228,7 +228,6 @@ LU_STUB PyObject * PyEval_EvalCodeEx(PyObject *co, PyObject *globals, PyObject *
 LU_STUB PyObject * PyEval_EvalFrame(PyFrameObject *) { LU_UNIMPLEMENTED("PyEval_EvalFrame"); }
 LU_STUB PyObject * PyEval_EvalFrameEx(PyFrameObject *f, int exc) { LU_UNIMPLEMENTED("PyEval_EvalFrameEx"); }
 LU_STUB PyObject * PyEval_GetBuiltins(void) { LU_UNIMPLEMENTED("PyEval_GetBuiltins"); }
-LU_STUB PyFrameObject * PyEval_GetFrame(void) { LU_UNIMPLEMENTED("PyEval_GetFrame"); }
 LU_STUB PyObject * PyEval_GetFrameBuiltins(void) { LU_UNIMPLEMENTED("PyEval_GetFrameBuiltins"); }
 LU_STUB PyObject * PyEval_GetFrameGlobals(void) { LU_UNIMPLEMENTED("PyEval_GetFrameGlobals"); }
 LU_STUB PyObject * PyEval_GetFrameLocals(void) { LU_UNIMPLEMENTED("PyEval_GetFrameLocals"); }
@@ -276,16 +275,6 @@ LU_STUB double PyFloat_Unpack4(const char *p, int le) { LU_UNIMPLEMENTED("PyFloa
 LU_STUB double PyFloat_Unpack8(const char *p, int le) { LU_UNIMPLEMENTED("PyFloat_Unpack8"); }
 LU_STUB void PyFrame_FastToLocals(PyFrameObject *) { LU_UNIMPLEMENTED("PyFrame_FastToLocals"); }
 LU_STUB int PyFrame_FastToLocalsWithError(PyFrameObject *f) { LU_UNIMPLEMENTED("PyFrame_FastToLocalsWithError"); }
-LU_STUB PyFrameObject * PyFrame_GetBack(PyFrameObject *frame) { LU_UNIMPLEMENTED("PyFrame_GetBack"); }
-LU_STUB PyObject * PyFrame_GetBuiltins(PyFrameObject *frame) { LU_UNIMPLEMENTED("PyFrame_GetBuiltins"); }
-LU_STUB PyCodeObject * PyFrame_GetCode(PyFrameObject *frame) { LU_UNIMPLEMENTED("PyFrame_GetCode"); }
-LU_STUB PyObject * PyFrame_GetGenerator(PyFrameObject *frame) { LU_UNIMPLEMENTED("PyFrame_GetGenerator"); }
-LU_STUB PyObject * PyFrame_GetGlobals(PyFrameObject *frame) { LU_UNIMPLEMENTED("PyFrame_GetGlobals"); }
-LU_STUB int PyFrame_GetLasti(PyFrameObject *frame) { LU_UNIMPLEMENTED("PyFrame_GetLasti"); }
-LU_STUB int PyFrame_GetLineNumber(PyFrameObject *) { LU_UNIMPLEMENTED("PyFrame_GetLineNumber"); }
-LU_STUB PyObject * PyFrame_GetLocals(PyFrameObject *frame) { LU_UNIMPLEMENTED("PyFrame_GetLocals"); }
-LU_STUB PyObject* PyFrame_GetVar(PyFrameObject *frame, PyObject *name) { LU_UNIMPLEMENTED("PyFrame_GetVar"); }
-LU_STUB PyObject* PyFrame_GetVarString(PyFrameObject *frame, const char *name) { LU_UNIMPLEMENTED("PyFrame_GetVarString"); }
 LU_STUB void PyFrame_LocalsToFast(PyFrameObject *, int) { LU_UNIMPLEMENTED("PyFrame_LocalsToFast"); }
 LU_STUB PyFrameObject * PyFrame_New(PyThreadState *, PyCodeObject *, PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyFrame_New"); }
 LU_STUB PyObject * PyFrozenSet_New(PyObject *) { LU_UNIMPLEMENTED("PyFrozenSet_New"); }
@@ -752,7 +741,6 @@ LU_STUB void PyThreadState_DeleteCurrent(void) { LU_UNIMPLEMENTED("PyThreadState
 LU_STUB void PyThreadState_EnterTracing(PyThreadState *tstate) { LU_UNIMPLEMENTED("PyThreadState_EnterTracing"); }
 LU_STUB PyThreadState * PyThreadState_Get(void) { LU_UNIMPLEMENTED("PyThreadState_Get"); }
 LU_STUB PyObject * PyThreadState_GetDict(void) { LU_UNIMPLEMENTED("PyThreadState_GetDict"); }
-LU_STUB PyFrameObject* PyThreadState_GetFrame(PyThreadState *tstate) { LU_UNIMPLEMENTED("PyThreadState_GetFrame"); }
 LU_STUB uint64_t PyThreadState_GetID(PyThreadState *tstate) { LU_UNIMPLEMENTED("PyThreadState_GetID"); }
 LU_STUB PyInterpreterState* PyThreadState_GetInterpreter(PyThreadState *tstate) { LU_UNIMPLEMENTED("PyThreadState_GetInterpreter"); }
 LU_STUB PyThreadState * PyThreadState_GetUnchecked(void) { LU_UNIMPLEMENTED("PyThreadState_GetUnchecked"); }

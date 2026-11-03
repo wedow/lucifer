@@ -296,86 +296,6 @@ oserror_alloc(PyTypeObject *tp, Py_ssize_t nitems)
     return op;
 }
 
-/* The frame record a traceback keeps: what the loop's frame held at the
-   moment of the raise, since the frame itself is popped as the exception
-   unwinds. The lazy observable frame object arrives with K1s. */
-struct _frame {
-    PyObject_HEAD
-    PyCodeObject *f_code;
-    PyObject *f_globals;
-    PyObject *f_builtins;
-    int f_lasti;                /* bytes */
-};
-
-static void
-frame_dealloc(PyObject *op)
-{
-    struct _frame *f = (struct _frame *)op;
-    Py_XDECREF(f->f_code);
-    Py_XDECREF(f->f_globals);
-    Py_XDECREF(f->f_builtins);
-    lu_object_free(op);
-}
-
-static PyObject *
-frame_get_lineno(PyObject *op, void *closure)
-{
-    struct _frame *f = (struct _frame *)op;
-    return PyLong_FromLong(PyCode_Addr2Line(f->f_code, f->f_lasti));
-}
-
-static PyObject *
-frame_get_back(PyObject *op, void *closure)
-{
-    return Py_NewRef(Py_None);
-}
-
-static PyMemberDef frame_members[] = {
-    { "f_code", _Py_T_OBJECT, RWORD(struct _frame, f_code) },
-    { "f_globals", _Py_T_OBJECT, RWORD(struct _frame, f_globals) },
-    { "f_builtins", _Py_T_OBJECT, RWORD(struct _frame, f_builtins) },
-    { "f_lasti", Py_T_INT, RWORD(struct _frame, f_lasti) },
-    { NULL },
-};
-
-static PyGetSetDef frame_getset[] = {
-    { "f_lineno", frame_get_lineno, NULL, NULL, NULL },
-    { "f_back", frame_get_back, NULL, NULL, NULL },
-    { NULL },
-};
-
-PyCodeObject *
-lu_frame_code(PyFrameObject *frame)
-{
-    return ((struct _frame *)frame)->f_code;
-}
-
-static PyObject *
-frame_snapshot(struct lu_frame *lf, int lasti)
-{
-    struct _frame *f = (struct _frame *)lu_object_new(&PyFrame_Type, sizeof(struct _frame));
-    if (f != NULL) {
-        f->f_code = (PyCodeObject *)Py_NewRef(lf->code);
-        f->f_globals = Py_NewRef(lf->globals);
-        f->f_builtins = Py_NewRef(lf->builtins);
-        f->f_lasti = lasti;
-    }
-    return (PyObject *)f;
-}
-
-PyObject *
-lu_frame_object(struct lu_frame *lf)
-{
-    int lasti = (int)(lu_frame_lasti(lf) * sizeof(lu_codeunit));
-    if (lf->frame_obj == NULL) {
-        lf->frame_obj = (PyFrameObject *)frame_snapshot(lf, lasti);
-    }
-    else {
-        ((struct _frame *)lf->frame_obj)->f_lasti = lasti;
-    }
-    return Py_XNewRef((PyObject *)lf->frame_obj);
-}
-
 /* traceback (Python/traceback.c) */
 
 /* A traceback of 100,000 entries dies in a loop, not a recursion: an entry
@@ -392,13 +312,8 @@ tb_dealloc(PyObject *op)
         if (next == NULL) {
             break;
         }
-        if (_Py_IsOwnedByCurrentThread(next) && next->ob_ref_local == 1
-            && _Py_atomic_load_ssize_relaxed(&next->ob_ref_shared) == 0) {
-            next->ob_ref_local = 0;
+        if (lu_release_last(next)) {
             op = next;
-        }
-        else {
-            Py_DECREF(next);
         }
     }
 }
@@ -442,7 +357,7 @@ tb_get_lineno(PyObject *op, void *closure)
     PyTracebackObject *tb = (PyTracebackObject *)op;
     int line = tb->tb_lineno;
     if (line == -1) {
-        line = PyCode_Addr2Line(((struct _frame *)tb->tb_frame)->f_code, tb->tb_lasti);
+        line = PyCode_Addr2Line(lu_frame_code(tb->tb_frame), tb->tb_lasti);
     }
     return line < 0 ? Py_NewRef(Py_None) : PyLong_FromLong(line);
 }
@@ -459,6 +374,21 @@ static PyGetSetDef tb_getset[] = {
     { NULL },
 };
 
+/* A traceback entry for `frame` (a new reference taken), at byte offset `lasti`. */
+static PyTracebackObject *
+tb_new(PyObject *frame, PyTracebackObject *next, int lasti)
+{
+    PyTracebackObject *tb = (PyTracebackObject *)lu_object_new(&PyTraceBack_Type,
+                                                               sizeof(PyTracebackObject));
+    if (tb != NULL) {
+        tb->tb_next = (PyTracebackObject *)Py_XNewRef((PyObject *)next);
+        tb->tb_frame = (PyFrameObject *)Py_NewRef(frame);
+        tb->tb_lasti = lasti;
+        tb->tb_lineno = -1;
+    }
+    return tb;
+}
+
 /* PyTraceBack_Here: the unwinding frame joins the exception's traceback. */
 int
 lu_traceback_here(struct lu_frame *lf, Py_ssize_t lasti_unit)
@@ -466,18 +396,16 @@ lu_traceback_here(struct lu_frame *lf, Py_ssize_t lasti_unit)
     /* The exception is set aside while the entry is made, so that running
        out of memory leaves it as it was. */
     PyBaseExceptionObject *exc = (PyBaseExceptionObject *)PyErr_GetRaisedException();
-    PyObject *fr = frame_snapshot(lf, (int)(lasti_unit * sizeof(lu_codeunit)));
+    PyObject *fr = lu_frame_object(lf);
     PyTracebackObject *tb = fr != NULL
-        ? (PyTracebackObject *)lu_object_new(&PyTraceBack_Type, sizeof(PyTracebackObject)) : NULL;
+        ? tb_new(fr, (PyTracebackObject *)exc->traceback, (int)(lasti_unit * sizeof(lu_codeunit)))
+        : NULL;
+    Py_XDECREF(fr);
     if (tb == NULL) {
-        Py_XDECREF(fr);
         PyErr_Clear();
     }
     else {
-        tb->tb_next = (PyTracebackObject *)exc->traceback;
-        tb->tb_frame = (PyFrameObject *)fr;
-        tb->tb_lasti = ((struct _frame *)fr)->f_lasti;
-        tb->tb_lineno = -1;
+        Py_XDECREF(exc->traceback);
         exc->traceback = (PyObject *)tb;
     }
     PyErr_SetRaisedException((PyObject *)exc);
@@ -487,18 +415,13 @@ lu_traceback_here(struct lu_frame *lf, Py_ssize_t lasti_unit)
 int
 PyTraceBack_Here(PyFrameObject *frame)
 {
-    struct _frame *f = (struct _frame *)frame;
-    PyThreadState *ts = PyThreadState_Get();
-    PyBaseExceptionObject *exc = (PyBaseExceptionObject *)ts->current_exception;
-    PyTracebackObject *tb = (PyTracebackObject *)lu_object_new(&PyTraceBack_Type,
-                                                                sizeof(PyTracebackObject));
+    PyBaseExceptionObject *exc = (PyBaseExceptionObject *)PyThreadState_Get()->current_exception;
+    PyTracebackObject *tb = tb_new((PyObject *)frame, (PyTracebackObject *)exc->traceback,
+                                   PyFrame_GetLasti(frame));
     if (tb == NULL) {
         return -1;
     }
-    tb->tb_next = (PyTracebackObject *)exc->traceback;
-    tb->tb_frame = (PyFrameObject *)Py_NewRef(f);
-    tb->tb_lasti = f->f_lasti;
-    tb->tb_lineno = -1;
+    Py_XDECREF(exc->traceback);
     exc->traceback = (PyObject *)tb;
     return 0;
 }
@@ -821,19 +744,12 @@ static PyObject *
 prim_caller_traceback(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(0);
-    PyThreadState *ts = PyThreadState_Get();
-    struct lu_frame *f = ((struct lu_frame *)ts->current_frame)->previous;
-    PyObject *fr = frame_snapshot(f, (int)(lu_frame_lasti(f) * sizeof(lu_codeunit)));
-    PyTracebackObject *tb = fr != NULL
-        ? (PyTracebackObject *)lu_object_new(&PyTraceBack_Type, sizeof(PyTracebackObject)) : NULL;
-    if (tb == NULL) {
-        Py_XDECREF(fr);
-        return NULL;
-    }
-    tb->tb_frame = (PyFrameObject *)fr;
-    tb->tb_lasti = ((struct _frame *)fr)->f_lasti;
-    tb->tb_lineno = -1;
-    return (PyObject *)tb;
+    struct lu_frame *f = ((struct lu_frame *)PyThreadState_Get()->current_frame)->previous;
+    PyObject *fr = lu_frame_object(f);
+    PyObject *tb = fr != NULL
+        ? (PyObject *)tb_new(fr, NULL, (int)(lu_frame_lasti(f) * sizeof(lu_codeunit))) : NULL;
+    Py_XDECREF(fr);
+    return tb;
 }
 
 /* handled_exception(): the exception being handled, or None. */
@@ -915,11 +831,6 @@ lu_exc_init(void)
         tp->tp_getset = own[i].getset;
     }
     ((PyTypeObject *)PyExc_OSError)->tp_alloc = oserror_alloc;
-    PyFrame_Type.tp_basicsize = sizeof(struct _frame);
-    PyFrame_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
-    PyFrame_Type.tp_dealloc = frame_dealloc;
-    PyFrame_Type.tp_members = frame_members;
-    PyFrame_Type.tp_getset = frame_getset;
     PyTraceBack_Type.tp_basicsize = sizeof(PyTracebackObject);
     PyTraceBack_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyTraceBack_Type.tp_dealloc = tb_dealloc;

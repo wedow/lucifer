@@ -588,10 +588,7 @@ lu_err_unraisable_text(const char *message, PyObject *obj)
     Py_XDECREF(r);
     if (exc != NULL && ((PyBaseExceptionObject *)exc)->traceback == NULL) {
         /* format_unraisable_v: a traceback of the frame running now */
-        struct lu_frame *f = (struct lu_frame *)PyThreadState_Get()->current_frame;
-        while (f != NULL && (f->owner == LU_FRAME_C_ENTRY || f->owner == LU_FRAME_KERNEL_HIDDEN)) {
-            f = f->previous;
-        }
+        struct lu_frame *f = lu_frame_user((struct lu_frame *)PyThreadState_Get()->current_frame, 0);
         if (f != NULL) {
             PyErr_SetRaisedException(exc);
             lu_traceback_here(f, lu_frame_lasti(f));

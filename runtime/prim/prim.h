@@ -24,6 +24,7 @@ extern PyMethodDef lu_prim_storage_methods[];   /* runtime/prim/storage.c */
 extern PyMethodDef lu_prim_dict_methods[];      /* runtime/prim/dict.c */
 extern PyMethodDef lu_prim_set_methods[];       /* runtime/prim/set.c */
 extern PyMethodDef lu_prim_gen_methods[];       /* runtime/interp/gen.c */
+extern PyMethodDef lu_prim_frame_methods[];     /* runtime/interp/frame.c */
 extern PyMethodDef lu_prim_builtins_methods[];  /* runtime/prim/builtins.c */
 extern PyMethodDef lu_prim_os_methods[];        /* runtime/prim/os.c */
 extern PyMethodDef lu_prim_thread_methods[];    /* runtime/prim/thread.c */
