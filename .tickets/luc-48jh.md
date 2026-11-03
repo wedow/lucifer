@@ -1,5 +1,5 @@
 ---
-id: lr-60kc
+id: luc-48jh
 status: open
 deps: []
 links: []
@@ -8,5 +8,5 @@ type: task
 priority: 3
 parent: luc-r5qm
 ---
-# K1j gap: dict watcher delivery: lu_dict_notify send_event stub (K1t)
+# K1j gap: mappingproxy and dict_keys.mapping, dict.__class_getitem__ (needs GenericAlias)
 
