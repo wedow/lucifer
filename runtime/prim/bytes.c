@@ -158,7 +158,7 @@ bytearray_dealloc(PyObject *op)
     if (self->ob_bytes != NULL) {
         PyObject_Free(self->ob_bytes);
     }
-    Py_TYPE(op)->tp_free(op);
+    lu_object_free(op);
 }
 
 static int
@@ -473,7 +473,7 @@ PRIM(ba_irepeat, 2)
 /* ba_alloc(ba) -> allocated size */
 PRIM(ba_alloc, 1)
 {
-    return PyLong_FromSsize_t(BA(args[0])->ob_alloc);
+    return PyLong_FromLongLong(BA(args[0])->ob_alloc);
 }
 
 /* ba_new(cls): an empty bytearray of the class. */
@@ -496,7 +496,7 @@ prim_ba_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 /* ba_exports(ba) */
 PRIM(ba_exports, 1)
 {
-    return PyLong_FromSsize_t(BA(args[0])->ob_exports);
+    return PyLong_FromLongLong(BA(args[0])->ob_exports);
 }
 
 /* bytes storage ----------------------------------------------------- */
@@ -507,12 +507,12 @@ prim_b_len(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1);
     if (PyByteArray_Check(args[0])) {
-        return PyLong_FromSsize_t(PyByteArray_GET_SIZE(args[0]));
+        return PyLong_FromLongLong(PyByteArray_GET_SIZE(args[0]));
     }
     BV(v, 0);
     Py_ssize_t n = v.n;
     lu_bv_put(&v);
-    return PyLong_FromSsize_t(n);
+    return PyLong_FromLongLong(n);
 }
 
 /* b_check(x): whether x supports the buffer protocol. */
@@ -709,7 +709,7 @@ PRIM(b_hash, 1)
     BV(v, 0);
     Py_hash_t h = Py_HashBuffer(v.p, v.n);
     lu_bv_put(&v);
-    return PyLong_FromSsize_t(h);
+    return PyLong_FromLongLong(h);
 }
 
 /* b_concat(a, b) */
@@ -830,7 +830,7 @@ PRIM(b_find, 5)
     }
     lu_bv_put(&v);
     lu_bv_put(&sub);
-    return PyLong_FromSsize_t(r);
+    return PyLong_FromLongLong(r);
 }
 
 /* b_count(data, sub, start, end) */
@@ -866,7 +866,7 @@ PRIM(b_count, 4)
     }
     lu_bv_put(&v);
     lu_bv_put(&sub);
-    return PyLong_FromSsize_t(count);
+    return PyLong_FromLongLong(count);
 }
 
 /* b_match(data, sub, start, end, at_end): startswith and endswith. */
@@ -1461,9 +1461,9 @@ prim_b_sizeof(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(1);
     PyTypeObject *tp = Py_TYPE(args[0]);
     if (PyByteArray_Check(args[0])) {
-        return PyLong_FromSsize_t(tp->tp_basicsize + BA(args[0])->ob_alloc);
+        return PyLong_FromLongLong(tp->tp_basicsize + BA(args[0])->ob_alloc);
     }
-    return PyLong_FromSsize_t(tp->tp_basicsize + (PyBytes_GET_SIZE(args[0]) + 1) * tp->tp_itemsize);
+    return PyLong_FromLongLong(tp->tp_basicsize + PyBytes_GET_SIZE(args[0]) * tp->tp_itemsize);
 }
 
 /* The buffer protocol of bytes and bytearray ------------------------------ */
@@ -1543,7 +1543,7 @@ int
 PyBytes_AsStringAndSize(PyObject *obj, char **s, Py_ssize_t *len)
 {
     if (s == NULL) {
-        PyErr_BadInternalCall();
+        lu_err_format(PyExc_SystemError, "bad argument to internal function");
         return -1;
     }
     if (!PyBytes_Check(obj)) {
@@ -1617,7 +1617,7 @@ _PyBytes_Resize(PyObject **pv, Py_ssize_t size)
     if (!PyBytes_CheckExact(v) || Py_REFCNT(v) != 1 || size < 0) {
         *pv = NULL;
         Py_DECREF(v);
-        PyErr_BadInternalCall();
+        lu_err_format(PyExc_SystemError, "bad argument to internal function");
         return -1;
     }
     if (size == PyBytes_GET_SIZE(v)) {

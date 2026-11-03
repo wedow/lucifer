@@ -8,7 +8,7 @@ from _lucifer import (
     int_add, int_sub, int_mul, int_floordiv, int_mod, int_divmod, int_pow, int_truediv,
     int_neg, int_abs, int_invert, int_shift, int_bitwise, int_cmp, int_bit_length,
     int_bit_count, int_hash, int_to_bytes, int_from_bytes, int_format, int_from_text,
-    int_as_double, int_subtype, int_is_zero, text_repr, new_check,
+    int_as_double, int_subtype, int_is_zero, text_repr, new_check, b_check, b_bytes, b_from_ints,
 )
 from _lucifer import _boot, operators, _format
 
@@ -67,8 +67,8 @@ def to_int(x):
         return _exact(r)
     if type_lookup(type(x), '__index__') is not MISSING:
         return index(x)
-    if kind(x, 'str') or kind(x, 'bytes'):
-        return _parse(x, 10)
+    if kind(x, 'str') or b_check(x):
+        return _parse(x if kind(x, 'str') else b_bytes(x), 10)
     error(TypeError, str_join('', (
         "int() argument must be a string, a bytes-like object or a real number, not '",
         _name(x), "'")))
@@ -81,9 +81,27 @@ def _with_base(x, base):
     base = index(base)
     if (base != 0 and base < 2) or base > 36:
         error(ValueError, 'int() base must be >= 2 and <= 36, or 0')
-    if kind(x, 'str') or kind(x, 'bytes'):
-        return _parse(x, base)
+    if kind(x, 'str') or b_check(x):
+        return _parse(x if kind(x, 'str') else b_bytes(x), base)
     error(TypeError, "int() can't convert non-string with explicit base")
+
+
+def _bytes_of(x):
+    """PyObject_Bytes: __bytes__, a bytes-like object, or an iterable of ints."""
+    if type(x) is not str and kind(x, 'bytes'):
+        return b_bytes(x)
+    f = type_lookup(type(x), '__bytes__')
+    if f is not MISSING:
+        r = call_special(f, x)
+        if not kind(r, 'bytes'):
+            error(TypeError, str_join('', ('__bytes__ returned non-bytes (type ', _name(r), ')')))
+        return b_bytes(r)
+    if b_check(x):
+        return b_bytes(x)
+    if kind(x, 'str') or (type_lookup(type(x), '__iter__') is MISSING
+                          and type_lookup(type(x), '__getitem__') is MISSING):
+        error(TypeError, str_join('', ("cannot convert '", _name(x), "' object to bytes")))
+    return b_from_ints([index(v) for v in x])
 
 
 def _byteorder(byteorder, fname):
@@ -399,9 +417,7 @@ Also known as the population count.
   signed
     Indicates whether two's complement is used to represent the integer."""
         little = _byteorder(byteorder, 'from_bytes')
-        if not kind(bytes, 'bytes'):
-            error(TypeError, str_join('', ("cannot convert '", _name(bytes), "' object to bytes")))
-        value = int_from_bytes(bytes, little, truth(signed))
+        value = int_from_bytes(_bytes_of(bytes), little, truth(signed))
         if cls is int:
             return value
         return cls(value)

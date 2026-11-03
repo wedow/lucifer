@@ -115,6 +115,14 @@ fmt_char(const char *fmt, char *out)
 }
 
 static PyObject *
+from_u64(unsigned long long v)
+{
+    digit d[3] = { (digit)(v & PyLong_MASK), (digit)((v >> PyLong_SHIFT) & PyLong_MASK), (digit)(v >> (2 * PyLong_SHIFT)) };
+    Py_ssize_t n = d[2] ? 3 : d[1] ? 2 : d[0] ? 1 : 0;
+    return lu_long_from_digits(0, n, d);
+}
+
+static PyObject *
 unpack_item(const char *p, char c)
 {
     switch (c) {
@@ -125,10 +133,10 @@ unpack_item(const char *p, char c)
     case 'h': { short v; memcpy(&v, p, sizeof v); return PyLong_FromLong(v); }
     case 'H': { unsigned short v; memcpy(&v, p, sizeof v); return PyLong_FromLong(v); }
     case 'i': { int v; memcpy(&v, p, sizeof v); return PyLong_FromLong(v); }
-    case 'I': { unsigned int v; memcpy(&v, p, sizeof v); return PyLong_FromUnsignedLong(v); }
+    case 'I': { unsigned int v; memcpy(&v, p, sizeof v); return PyLong_FromLongLong(v); }
     case 'l': case 'q': case 'n': { long v; memcpy(&v, p, sizeof v); return PyLong_FromLong(v); }
     case 'L': case 'Q': case 'N': case 'P': {
-        unsigned long v; memcpy(&v, p, sizeof v); return PyLong_FromUnsignedLong(v);
+        unsigned long v; memcpy(&v, p, sizeof v); return from_u64(v);
     }
     case 'f': { float v; memcpy(&v, p, sizeof v); return PyFloat_FromDouble(v); }
     case 'd': { double v; memcpy(&v, p, sizeof v); return PyFloat_FromDouble(v); }
@@ -477,9 +485,9 @@ prim_mv_attr(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     Py_buffer *v = &mv->view;
     const char *name = PyUnicode_AsUTF8(args[1]);
     if (!strcmp(name, "obj")) return v->obj ? Py_NewRef(v->obj) : Py_NewRef(Py_None);
-    if (!strcmp(name, "nbytes")) return PyLong_FromSsize_t(v->len);
+    if (!strcmp(name, "nbytes")) return PyLong_FromLongLong(v->len);
     if (!strcmp(name, "readonly")) return bool_of(v->readonly);
-    if (!strcmp(name, "itemsize")) return PyLong_FromSsize_t(v->itemsize);
+    if (!strcmp(name, "itemsize")) return PyLong_FromLongLong(v->itemsize);
     if (!strcmp(name, "format")) return PyUnicode_FromString(v->format);
     if (!strcmp(name, "ndim")) return PyLong_FromLong(v->ndim);
     if (!strcmp(name, "c_contiguous")) return bool_of(mv->flags & _Py_MEMORYVIEW_C);
@@ -492,7 +500,7 @@ prim_mv_attr(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     PyObject *t = PyTuple_New(v->ndim);
     for (int i = 0; t != NULL && i < v->ndim; i++) {
-        PyObject *x = PyLong_FromSsize_t(a[i]);
+        PyObject *x = PyLong_FromLongLong(a[i]);
         if (x == NULL) {
             Py_CLEAR(t);
             break;
@@ -512,7 +520,7 @@ prim_mv_len(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         PyErr_SetString(PyExc_TypeError, "0-dim memory has no length");
         return NULL;
     }
-    return PyLong_FromSsize_t(mv->view.shape[0]);
+    return PyLong_FromLongLong(mv->view.shape[0]);
 }
 
 /* Copying ---------------------------------------------------------------- */
@@ -900,7 +908,7 @@ prim_mv_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(1);
     SELF(mv);
     if (mv->hash != -1) {
-        return PyLong_FromSsize_t(mv->hash);
+        return PyLong_FromLongLong(mv->hash);
     }
     if (!mv->view.readonly) {
         PyErr_SetString(PyExc_ValueError, "cannot hash writable memoryview object");
@@ -918,7 +926,7 @@ prim_mv_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     mv->hash = Py_HashBuffer(PyBytes_AS_STRING(bytes), PyBytes_GET_SIZE(bytes));
     Py_DECREF(bytes);
-    return PyLong_FromSsize_t(mv->hash);
+    return PyLong_FromLongLong(mv->hash);
 }
 
 /* The buffer protocol of memoryview (memory_getbuf). */

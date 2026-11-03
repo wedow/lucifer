@@ -50,7 +50,7 @@ PyBuffer_FillInfo(Py_buffer *view, PyObject *obj, void *buf, Py_ssize_t len, int
     }
     if (flags != PyBUF_SIMPLE) {
         if (flags == PyBUF_READ || flags == PyBUF_WRITE) {
-            PyErr_BadInternalCall();
+            lu_err_format(PyExc_SystemError, "bad argument to internal function");
             return -1;
         }
         if ((flags & PyBUF_WRITABLE) == PyBUF_WRITABLE && readonly == 1) {

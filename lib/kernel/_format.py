@@ -7,7 +7,8 @@ str primitives; this module makes no str method calls, as str is built on it."""
 from _lucifer import (
     MISSING, error, str_join, kind, ns_get, type_lookup, type_tp_name, static_type, int_format,
     int_as_double, str_len, str_ord, str_slice, str_item, str_repeat, str_decimal, str_case,
-    str_ascii, str_chr, str_find, list_append, text_repr, box_get, box_set,
+    str_ascii, str_chr, str_find, list_append, text_repr, box_get, box_set, str_encode,
+    str_decode, b_check, b_bytes, b_len,
 )
 from _lucifer import _boot, operators, object as _object
 
@@ -665,8 +666,8 @@ def _is_length(c):
     return c == 104 or c == 108 or c == 76
 
 
-def pct_format(fmt, args):
-    """PyUnicode_Format(fmt, args)."""
+def pct_format(fmt, args, bm=False):
+    """PyUnicode_Format(fmt, args); bm formats bytes (PEP 461) in latin-1 text."""
     n = str_len(fmt)
     out = []
     ctx = [0, -1, args]
@@ -710,7 +711,8 @@ def pct_format(fmt, args):
                 error(ValueError, 'incomplete format key')
             if mapping is None:
                 error(TypeError, 'format requires a mapping')
-            key = _getitem(mapping, _sub(fmt, i + 1, k - 1))
+            key = _sub(fmt, i + 1, k - 1)
+            key = _getitem(mapping, str_encode(key, 'latin-1', 'strict') if bm else key)
             i = k
         while i < n and _is_flag(str_ord(fmt, i)):
             flags = _cat(flags, str_item(fmt, i))
@@ -751,9 +753,10 @@ def pct_format(fmt, args):
         ty = str_item(fmt, i)
         i += 1
         v = key if key is not MISSING else _next_arg(ctx)
-        list_append(out, _convert_arg(ty, v, flags, width, precision, fmt, i))
+        list_append(out, _convert_arg(ty, v, flags, width, precision, fmt, i, bm))
     if box_get(ctx, 0) < box_get(ctx, 1) and mapping is None:
-        error(TypeError, 'not all arguments converted during string formatting')
+        error(TypeError, _cat('not all arguments converted during ', 'bytes' if bm else 'string',
+                              ' formatting'))
     return str_join('', (*out,))
 
 
@@ -766,7 +769,41 @@ def _justify(body, flags, width):
     return _cat(_pad(' ', width - n), body)
 
 
-def _convert_arg(ty, v, flags, width, precision, fmt, i):
+def _bytes_arg(ty, v, flags, width, precision):
+    """%s, %b, %a, %r and %c of a bytes format, as latin-1 text."""
+    if ty == 'c':
+        if b_check(v):
+            if b_len(v) != 1:
+                error(TypeError, '%c requires an integer in range(256) or a single byte')
+            return _justify(str_decode(b_bytes(v), 'latin-1', 'strict'), flags, width)
+        if not kind(v, 'int') and type_lookup(type(v), '__index__') is MISSING:
+            error(TypeError, _cat('%c requires an integer in range(256) or a single byte, not ', _name(v)))
+        c = index(v)
+        if c < 0 or c > 255:
+            error(OverflowError, '%c arg not in range(256)')
+        return _justify(str_chr(c), flags, width)
+    if ty == 's' or ty == 'b':
+        if b_check(v):
+            data = b_bytes(v)
+        else:
+            f = type_lookup(type(v), '__bytes__')
+            if f is MISSING:
+                error(TypeError, _cat('%b requires a bytes-like object, or an object that implements ',
+                                      '__bytes__, not ', "'", _name(v), "'"))
+            data = call_special(f, v)
+            if not kind(data, 'bytes'):
+                error(TypeError, _cat('__bytes__ returned non-bytes (type ', _name(data), ')'))
+        s = str_decode(data, 'latin-1', 'strict')
+    else:
+        s = to_ascii(v)
+    if precision >= 0 and str_len(s) > precision:
+        s = _sub(s, 0, precision)
+    return _justify(s, flags, width)
+
+
+def _convert_arg(ty, v, flags, width, precision, fmt, i, bm=False):
+    if bm and (ty in 'sbarc'):
+        return _bytes_arg(ty, v, flags, width, precision)
     if ty in 'sra':
         s = to_str(v) if ty == 's' else to_repr(v) if ty == 'r' else to_ascii(v)
         if precision >= 0 and str_len(s) > precision:
