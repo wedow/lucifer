@@ -575,16 +575,21 @@ lu_err_unraisable(const char *what, PyObject *obj)
     lu_err_unraisable_text(message, obj);
 }
 
-/* PyErr_FormatUnraisable: "message repr(obj):" then the exception being
-   handled, which is cleared. */
+/* PyErr_FormatUnraisable: "message repr(obj):" (just "message:" without an
+   obj) then the exception being handled, which is cleared. */
 void
 lu_err_unraisable_text(const char *message, PyObject *obj)
 {
     PyObject *exc = PyErr_GetRaisedException();
-    PyObject *r = lu_call_kernel(LU_K_repr, &obj, 1);
+    PyObject *r = obj != NULL ? lu_call_kernel(LU_K_repr, &obj, 1) : NULL;
     const char *text = r != NULL && PyUnicode_Check(r) ? PyUnicode_AsUTF8(r) : NULL;
     PyErr_Clear();
-    fprintf(stderr, "%s %s:\n", message, text != NULL ? text : "<object repr() failed>");
+    if (obj == NULL) {
+        fprintf(stderr, "%s:\n", message);
+    }
+    else {
+        fprintf(stderr, "%s %s:\n", message, text != NULL ? text : "<object repr() failed>");
+    }
     Py_XDECREF(r);
     if (exc != NULL && ((PyBaseExceptionObject *)exc)->traceback == NULL) {
         /* format_unraisable_v: a traceback of the frame running now */

@@ -12,6 +12,7 @@
    treat such an entry as unequal. */
 
 #include "object/dict.h"
+#include "interp/exceptions.h"
 
 #include <string.h>
 
@@ -86,20 +87,130 @@ PyDict_New(void)
 }
 
 /* PyDict_WatchEvent, sent to the watchers whose bits are set in
-   _ma_watcher_tag. The delivery itself arrives with K1t. */
+   _ma_watcher_tag (_PyDict_SendEvent). */
+static const char *
+event_name(PyDict_WatchEvent event)
+{
+    switch (event) {
+    case PyDict_EVENT_ADDED: return "PyDict_EVENT_ADDED";
+    case PyDict_EVENT_MODIFIED: return "PyDict_EVENT_MODIFIED";
+    case PyDict_EVENT_DELETED: return "PyDict_EVENT_DELETED";
+    case PyDict_EVENT_CLONED: return "PyDict_EVENT_CLONED";
+    case PyDict_EVENT_CLEARED: return "PyDict_EVENT_CLEARED";
+    case PyDict_EVENT_DEALLOCATED: return "PyDict_EVENT_DEALLOCATED";
+    }
+    return "PyDict_EVENT_?";
+}
+
 static void
 send_event(int watcher_bits, PyDict_WatchEvent event, PyDictObject *mp, PyObject *key,
            PyObject *value)
 {
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    for (int i = 0; watcher_bits != 0; i++, watcher_bits >>= 1) {
+        PyDict_WatchCallback cb = (PyDict_WatchCallback)interp->dict_watchers[i];
+        if ((watcher_bits & 1) && cb != NULL && cb(event, (PyObject *)mp, key, value) < 0) {
+            /* Not the dict as context: a hook could keep it alive. */
+            char message[128];
+            snprintf(message, sizeof message, "Exception ignored in %s watcher callback for <dict at %p>",
+                     event_name(event), (void *)mp);
+            lu_err_unraisable_text(message, NULL);
+        }
+    }
 }
 
 void
 lu_dict_notify(PyDictObject *mp, PyDict_WatchEvent event, PyObject *key, PyObject *value)
 {
-    int bits = (int)(__atomic_load_n(&mp->_ma_watcher_tag, __ATOMIC_ACQUIRE) & ((1 << 8) - 1));
+    int bits = (int)(__atomic_load_n(&mp->_ma_watcher_tag, __ATOMIC_ACQUIRE) & ((1 << LU_MAX_WATCHERS) - 1));
     if (bits) {
         send_event(bits, event, mp, key, value);
     }
+}
+
+/* The watcher API (dictobject.c). Ids 0 and 1 are CPython's own. */
+
+static lu_watcher *
+dict_watchers(void)
+{
+    return PyInterpreterState_Get()->dict_watchers;
+}
+
+int
+PyDict_AddWatcher(PyDict_WatchCallback callback)
+{
+    return lu_watcher_add(dict_watchers(), 2, (lu_watcher)callback, "dict");
+}
+
+static int
+check_dict_watcher(int id)
+{
+    return lu_watcher_check(dict_watchers(), id, "Invalid dict watcher ID %d",
+                            "No dict watcher set for ID %d");
+}
+
+int
+PyDict_ClearWatcher(int id)
+{
+    if (check_dict_watcher(id) < 0) {
+        return -1;
+    }
+    dict_watchers()[id] = NULL;
+    return 0;
+}
+
+int
+PyDict_Watch(int id, PyObject *dict)
+{
+    if (!PyDict_Check(dict)) {
+        lu_err_format(PyExc_ValueError, "Cannot watch non-dictionary");
+        return -1;
+    }
+    if (check_dict_watcher(id) < 0) {
+        return -1;
+    }
+    __atomic_or_fetch(&((PyDictObject *)dict)->_ma_watcher_tag, 1ULL << id, __ATOMIC_RELEASE);
+    return 0;
+}
+
+int
+PyDict_Unwatch(int id, PyObject *dict)
+{
+    if (!PyDict_Check(dict)) {
+        lu_err_format(PyExc_ValueError, "Cannot watch non-dictionary");
+        return -1;
+    }
+    if (check_dict_watcher(id) < 0) {
+        return -1;
+    }
+    __atomic_and_fetch(&((PyDictObject *)dict)->_ma_watcher_tag, ~(1ULL << id), __ATOMIC_RELEASE);
+    return 0;
+}
+
+/* Keys versions (get_next_dict_keys_version). A cache word holds 16 bits, so
+   an asker that stores it there gets 0 past 65535, as CPython's specializer
+   does; the shared empty table is never versioned. */
+uint32_t
+lu_dict_keys_version(PyDictObject *mp)
+{
+    PyDictKeysObject *dk = __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE);
+    if (dk == LU_EMPTY_KEYS) {
+        return 0;
+    }
+    uint32_t version = __atomic_load_n(&dk->dk_version, __ATOMIC_RELAXED);
+    if (version != 0) {
+        return version;
+    }
+    uint32_t *next = &PyInterpreterState_Get()->next_keys_version;
+    version = __atomic_load_n(next, __ATOMIC_RELAXED);
+    do {
+        if (version == 0 || version > UINT16_MAX) {
+            return 0;
+        }
+    } while (!__atomic_compare_exchange_n(next, &version, version + 1, 0,
+                                          __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+    __atomic_store_n(&dk->dk_version, version, __ATOMIC_RELEASE);
+    return version;
 }
 
 static void

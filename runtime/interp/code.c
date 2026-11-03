@@ -4,14 +4,71 @@
    an interpreter that never enabled monitoring (FOUNDATIONS 2.3). */
 
 #include "interp/code.h"
+#include "interp/exceptions.h"
 #include "interp/frame.h"
 
 #include <string.h>
+
+/* Code watchers (codeobject.c): CREATE once a code object is built, DESTROY as
+   it dies. The kernel's own code is made before any watcher exists and makes
+   no events. */
+
+static const char *
+event_name(PyCodeEvent event)
+{
+    return event == PY_CODE_EVENT_CREATE ? "PY_CODE_EVENT_CREATE" : "PY_CODE_EVENT_DESTROY";
+}
+
+void
+lu_code_notify(PyCodeEvent event, PyCodeObject *co)
+{
+    if (co->co_flags & LU_CO_KERNEL) {
+        return;
+    }
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    for (int i = 0; i < LU_MAX_WATCHERS; i++) {
+        PyCode_WatchCallback cb = (PyCode_WatchCallback)interp->code_watchers[i];
+        if (cb != NULL && cb(event, co) < 0) {
+            char message[96];
+            snprintf(message, sizeof message, "Exception ignored in %s watcher callback for",
+                     event_name(event));
+            lu_err_unraisable_text(message, (PyObject *)co);
+        }
+    }
+}
+
+static lu_watcher *
+code_watchers(void)
+{
+    return PyInterpreterState_Get()->code_watchers;
+}
+
+int
+PyCode_AddWatcher(PyCode_WatchCallback callback)
+{
+    return lu_watcher_add(code_watchers(), 0, (lu_watcher)callback, "code");
+}
+
+int
+PyCode_ClearWatcher(int id)
+{
+    if (lu_watcher_check(code_watchers(), id, "Invalid code watcher ID %d",
+                         "No code watcher set for ID %d") < 0) {
+        return -1;
+    }
+    code_watchers()[id] = NULL;
+    return 0;
+}
 
 static void
 code_dealloc(PyObject *op)
 {
     PyCodeObject *co = (PyCodeObject *)op;
+    lu_resurrect_start(op);
+    lu_code_notify(PY_CODE_EVENT_DESTROY, co);
+    if (lu_resurrect_end(op) != 0) {
+        return;
+    }
     Py_XDECREF(co->co_consts);
     Py_XDECREF(co->co_names);
     Py_XDECREF(co->co_exceptiontable);
@@ -93,5 +150,11 @@ lu_code_new(const struct lu_code_fields *c)
     co->co_nlocalsplus = nlocalsplus;
     co->co_framesize = nlocalsplus + c->stacksize + (int)LU_FRAME_SPECIALS;
     memcpy(co->co_code_adaptive, PyBytes_AS_STRING(c->code), nbytes);
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    co->co_version = interp->next_func_version;
+    if (co->co_version != 0) {
+        interp->next_func_version++;            /* stays 0 once spent */
+    }
+    lu_code_notify(PY_CODE_EVENT_CREATE, co);
     return (PyObject *)co;
 }

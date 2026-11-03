@@ -168,6 +168,10 @@ enum lu_kernel_id {
     LU_K_COUNT
 };
 
+/* Watcher ids per kind, as CPython's TYPE_/DICT_/FUNC_/CODE_MAX_WATCHERS. */
+#define LU_MAX_WATCHERS 8
+typedef void (*lu_watcher)(void);
+
 /* PyInterpreterState (private layout; DESIGN 4.1). */
 struct _is {
     mi_subproc_id_t subproc;    /* segments abandoned by one interpreter's carriers
@@ -186,7 +190,15 @@ struct _is {
     uintptr_t monitoring_version;       /* a multiple of LU_POLL_VERSION_UNIT */
     struct lu_static_type_state static_types[LU_MAX_STATIC_TYPES];
     PyObject *kernel[LU_K_COUNT];       /* strong; NULL until registered */
-    unsigned int next_version_tag;      /* heap types' tp_version_tag */
+    unsigned int next_version_tag;      /* heap types' tp_version_tag; 0 once spent */
+    uint32_t next_keys_version;         /* dk_version of the next keys table versioned; 0 once spent */
+    uint32_t next_func_version;         /* co_version of the next code object; 0 once spent */
+    /* Watchers (FOUNDATIONS 2.4): a callback per id; a type, dict, function
+       or code is watched by the ids set in its own bits. */
+    lu_watcher type_watchers[LU_MAX_WATCHERS];      /* PyType_WatchCallback */
+    lu_watcher dict_watchers[LU_MAX_WATCHERS];      /* PyDict_WatchCallback */
+    lu_watcher func_watchers[LU_MAX_WATCHERS];      /* PyFunction_WatchCallback */
+    lu_watcher code_watchers[LU_MAX_WATCHERS];      /* PyCode_WatchCallback */
     int max_str_digits;                 /* sys.get_int_max_str_digits() */
     PyObject *importlib;                /* _frozen_importlib, once installed */
     PyObject *import_func;              /* the original builtins.__import__ */
@@ -327,6 +339,10 @@ void lu_brc_retire(struct lu_entry *entry);
 
 void lu_brc_queue_object(PyObject *ob);
 void lu_set_immortal(PyObject *op);
+/* Gives a dying object one reference for a call that may look at it; End
+   returns 0 when it is dead again, -1 when the call kept it. */
+void lu_resurrect_start(PyObject *self);
+int lu_resurrect_end(PyObject *self);
 Py_ssize_t lu_explicit_merge_refcount(PyObject *op, Py_ssize_t extra);
 
 /* _Py_DebugOffsets: external inspectors find the runtime by its cookie. The
@@ -382,7 +398,7 @@ struct lu_static_objects {
     X(__rtruediv__) X(__matmul__) X(__rmatmul__) X(__iadd__) X(__isub__) X(__imul__) \
     X(__imod__) X(__ipow__) X(__ilshift__) X(__irshift__) X(__iand__) X(__ixor__) \
     X(__ior__) X(__import__) X(__ifloordiv__) X(__itruediv__) X(__imatmul__) X(__neg__) X(__pos__) \
-    X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__)
+    X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__) X(mro) X(__getattribute__)
 struct lu_identifiers {
 #define LU_ID_FIELD(name) PyObject *name;
     LU_IDENTIFIERS(LU_ID_FIELD)
@@ -421,6 +437,7 @@ extern LU_EXPORT union lu_runtime {
         struct lu_identifiers ids;
         struct lu_stress stress;
         struct lu_handoff handoff;
+        unsigned int next_static_version_tag;   /* last tag of the range static types share */
         int finalizing;                 /* Py_FinalizeEx has begun */
         PyMutex weakref_locks[64];      /* guard the weakref lists, by referent address */
         struct _is main_interp;
@@ -553,8 +570,13 @@ int lu_types_init(PyInterpreterState *interp);
 void lu_static_types_inherit(void);
 /* The type's dict: in interpreter state for static builtin types. Borrowed. */
 PyObject *lu_type_dict(PyTypeObject *tp);
-/* PyType_Modified: the version tag of tp and its subclasses becomes 0. */
+/* PyType_Modified: tells tp's watchers, then tp and its subclasses lose
+   their version tags; only a type that has one is touched. */
 void lu_type_modified(PyTypeObject *tp);
+/* assign_version_tag: tp (bases first) gets a tag if it has none. 1 when it
+   has one; 0 when the type is not ready, has used its 1000 tags, or the
+   counter is spent. The caller needs the tag to cache anything about tp. */
+int lu_type_assign_version(PyTypeObject *tp);
 /* "__name__" of a type, new: ht_name, or tp_name after its last dot. */
 PyObject *lu_type_name(PyTypeObject *tp);
 /* Adds descriptors for tp_members and tp_getset to the type's dict. */
@@ -617,6 +639,25 @@ PyObject *lu_call_special(PyObject *self, PyObject *name, PyObject *const *args,
    the namespace primitives and the kernel's dict primitives call it before
    they change `mp`. key and value are borrowed. */
 void lu_dict_notify(PyDictObject *mp, PyDict_WatchEvent event, PyObject *key, PyObject *value);
+/* The version of mp's keys table as it stands (1..65535 for a caller that
+   keeps it in a cache word), assigned on first ask and cleared by any change
+   to the table's keys; 0 when none can be given. */
+uint32_t lu_dict_keys_version(PyDictObject *mp);
+
+/* Function versions (FOUNDATIONS 2.4): MAKE_FUNCTION sets func_version from
+   the code's co_version; changing __code__, __defaults__ or __kwdefaults__
+   clears it. lu_func_notify tells function watchers. */
+void lu_function_set_version(PyFunctionObject *func);
+void lu_func_notify(PyFunction_WatchEvent event, PyFunctionObject *func, PyObject *new_value);
+/* Tells code watchers that co was created or is being destroyed. */
+void lu_code_notify(PyCodeEvent event, PyCodeObject *co);
+
+/* The watcher tables (runtime/object/watchers.c). Add puts callback in the
+   first free id from `first` and returns it, or raises RuntimeError. Clear
+   frees an id; Check raises ValueError, formatted with the id from `invalid`
+   or `unset`, unless the id has a callback. -1 on error. */
+int lu_watcher_add(lu_watcher *table, int first, lu_watcher callback, const char *kind);
+int lu_watcher_check(lu_watcher *table, int id, const char *invalid, const char *unset);
 
 /* Frees replaced storage (a list's array, a dict's keys table) once no
    lock-free reader can still hold it (runtime/prim/storage.c). */

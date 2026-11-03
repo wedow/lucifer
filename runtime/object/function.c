@@ -3,11 +3,64 @@
    from C runs in a nested eval-loop activation, which pins the task
    (DESIGN 5.2); the interpreter itself calls functions inline. */
 
+#include "interp/code.h"
+#include "interp/exceptions.h"
 #include "interp/frame.h"
 
 #include <string.h>
 
 /* function */
+
+/* Watchers and versions (FOUNDATIONS 2.4). Kernel functions are the
+   runtime's own: they make no events, so a watcher sees what CPython's would. */
+
+static const char *
+event_name(PyFunction_WatchEvent event)
+{
+    switch (event) {
+    case PyFunction_EVENT_CREATE: return "PyFunction_EVENT_CREATE";
+    case PyFunction_EVENT_DESTROY: return "PyFunction_EVENT_DESTROY";
+    case PyFunction_EVENT_MODIFY_CODE: return "PyFunction_EVENT_MODIFY_CODE";
+    case PyFunction_EVENT_MODIFY_DEFAULTS: return "PyFunction_EVENT_MODIFY_DEFAULTS";
+    case PyFunction_EVENT_MODIFY_KWDEFAULTS: return "PyFunction_EVENT_MODIFY_KWDEFAULTS";
+    }
+    return "PyFunction_EVENT_?";
+}
+
+void
+lu_func_notify(PyFunction_WatchEvent event, PyFunctionObject *func, PyObject *new_value)
+{
+    if (((PyCodeObject *)func->func_code)->co_flags & LU_CO_KERNEL) {
+        return;
+    }
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    for (int i = 0; i < LU_MAX_WATCHERS; i++) {
+        PyFunction_WatchCallback cb = (PyFunction_WatchCallback)interp->func_watchers[i];
+        if (cb != NULL && cb(event, func, new_value) < 0) {
+            char message[256];
+            snprintf(message, sizeof message,
+                     "Exception ignored in %s watcher callback for function %.100s at %p",
+                     event_name(event), PyUnicode_AsUTF8(func->func_qualname), (void *)func);
+            lu_err_unraisable_text(message, NULL);
+        }
+    }
+}
+
+void
+lu_function_set_version(PyFunctionObject *func)
+{
+    func->func_version = ((PyCodeObject *)func->func_code)->co_version;
+}
+
+/* func_clear_version: a function whose code, defaults or keyword defaults
+   changed is never specialized on again (FUNC_VERSION_CLEARED). */
+static void
+clear_version(PyFunctionObject *func)
+{
+    if (func->func_version >= 2) {
+        __atomic_store_n(&func->func_version, 1, __ATOMIC_RELEASE);
+    }
+}
 
 static PyObject *
 function_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames)
@@ -71,13 +124,35 @@ lu_function_new(PyObject *code, PyObject *globals)
     op->func_doc = Py_NewRef(doc);
     op->func_module = Py_XNewRef(lu_ns_lookup(globals, LU_ID(__name__)));
     op->vectorcall = function_vectorcall;
+    lu_func_notify(PyFunction_EVENT_CREATE, op, NULL);
     return (PyObject *)op;
+}
+
+PyObject *
+PyFunction_NewWithQualName(PyObject *code, PyObject *globals, PyObject *qualname)
+{
+    PyObject *op = lu_function_new(code, globals);
+    if (op != NULL && qualname != NULL) {
+        Py_SETREF(((PyFunctionObject *)op)->func_qualname, Py_NewRef(qualname));
+    }
+    return op;
+}
+
+PyObject *
+PyFunction_New(PyObject *code, PyObject *globals)
+{
+    return lu_function_new(code, globals);
 }
 
 static void
 function_dealloc(PyObject *op)
 {
     PyFunctionObject *f = (PyFunctionObject *)op;
+    lu_resurrect_start(op);
+    lu_func_notify(PyFunction_EVENT_DESTROY, f, NULL);
+    if (lu_resurrect_end(op) != 0) {
+        return;
+    }
     Py_XDECREF(f->func_globals);
     Py_XDECREF(f->func_builtins);
     Py_XDECREF(f->func_name);
@@ -352,6 +427,124 @@ func_get_kwdefaults(PyObject *op, void *closure)
     return Py_NewRef(d != NULL ? d : Py_None);
 }
 
+/* Replaces a critical field: the event, then the version, then the field.
+   `value` is borrowed; NULL clears. */
+static void
+modify(PyFunctionObject *func, PyFunction_WatchEvent event, PyObject **field, PyObject *value)
+{
+    lu_func_notify(event, func, value);
+    clear_version(func);
+    PyObject *old = *field;
+    *field = Py_XNewRef(value);
+    Py_XDECREF(old);
+}
+
+static int
+func_set_code(PyObject *op, PyObject *value, void *closure)
+{
+    PyFunctionObject *func = (PyFunctionObject *)op;
+    if (value == NULL || !PyCode_Check(value)) {
+        lu_err_format(PyExc_TypeError, "__code__ must be set to a code object");
+        return -1;
+    }
+    int nfree = ((PyCodeObject *)value)->co_nfreevars;
+    Py_ssize_t nclosure = func->func_closure == NULL ? 0 : PyTuple_GET_SIZE(func->func_closure);
+    if (nclosure != nfree) {
+        lu_err_format(PyExc_ValueError, "%.200s() requires a code object with %zd free vars, not %d",
+                      PyUnicode_AsUTF8(func->func_name), nclosure, nfree);
+        return -1;
+    }
+    /* CPython warns when the new code is a different kind (generator, coroutine);
+       the warnings machinery arrives with its own ticket. */
+    modify(func, PyFunction_EVENT_MODIFY_CODE, &func->func_code, value);
+    return 0;
+}
+
+static int
+func_set_defaults(PyObject *op, PyObject *value, void *closure)
+{
+    if (value == Py_None) {
+        value = NULL;
+    }
+    if (value != NULL && !PyTuple_Check(value)) {
+        lu_err_format(PyExc_TypeError, "__defaults__ must be set to a tuple object");
+        return -1;
+    }
+    PyFunctionObject *func = (PyFunctionObject *)op;
+    modify(func, PyFunction_EVENT_MODIFY_DEFAULTS, &func->func_defaults, value);
+    return 0;
+}
+
+static int
+func_set_kwdefaults(PyObject *op, PyObject *value, void *closure)
+{
+    if (value == Py_None) {
+        value = NULL;
+    }
+    if (value != NULL && !PyDict_Check(value)) {
+        lu_err_format(PyExc_TypeError, "__kwdefaults__ must be set to a dict object");
+        return -1;
+    }
+    PyFunctionObject *func = (PyFunctionObject *)op;
+    modify(func, PyFunction_EVENT_MODIFY_KWDEFAULTS, &func->func_kwdefaults, value);
+    return 0;
+}
+
+/* The C-API setters (PyFunction_SetDefaults, PyFunction_SetKwDefaults). */
+
+int
+PyFunction_SetDefaults(PyObject *op, PyObject *defaults)
+{
+    if (!PyFunction_Check(op)) {
+        lu_err_format(PyExc_SystemError, "bad argument to internal function");
+        return -1;
+    }
+    if (defaults != Py_None && (defaults == NULL || !PyTuple_Check(defaults))) {
+        lu_err_format(PyExc_SystemError, "non-tuple default args");
+        return -1;
+    }
+    return func_set_defaults(op, defaults, NULL);
+}
+
+int
+PyFunction_SetKwDefaults(PyObject *op, PyObject *defaults)
+{
+    if (!PyFunction_Check(op)) {
+        lu_err_format(PyExc_SystemError, "bad argument to internal function");
+        return -1;
+    }
+    if (defaults != Py_None && (defaults == NULL || !PyDict_Check(defaults))) {
+        lu_err_format(PyExc_SystemError, "non-dict keyword only default args");
+        return -1;
+    }
+    return func_set_kwdefaults(op, defaults, NULL);
+}
+
+/* The watcher API (funcobject.c). */
+
+static lu_watcher *
+func_watchers(void)
+{
+    return PyInterpreterState_Get()->func_watchers;
+}
+
+int
+PyFunction_AddWatcher(PyFunction_WatchCallback callback)
+{
+    return lu_watcher_add(func_watchers(), 0, (lu_watcher)callback, "func");
+}
+
+int
+PyFunction_ClearWatcher(int id)
+{
+    if (lu_watcher_check(func_watchers(), id, "invalid func watcher ID %d",
+                         "no func watcher set for ID %d") < 0) {
+        return -1;
+    }
+    func_watchers()[id] = NULL;
+    return 0;
+}
+
 static PyMemberDef func_members[] = {
     { "__closure__", _Py_T_OBJECT, offsetof(PyFunctionObject, func_closure), Py_READONLY, NULL },
     { "__doc__", _Py_T_OBJECT, offsetof(PyFunctionObject, func_doc), 0, NULL },
@@ -362,9 +555,9 @@ static PyMemberDef func_members[] = {
 };
 
 static PyGetSetDef func_getset[] = {
-    { "__code__", func_get_code, NULL, NULL, NULL },
-    { "__defaults__", func_get_defaults, NULL, NULL, NULL },
-    { "__kwdefaults__", func_get_kwdefaults, NULL, NULL, NULL },
+    { "__code__", func_get_code, func_set_code, NULL, NULL },
+    { "__defaults__", func_get_defaults, func_set_defaults, NULL, NULL },
+    { "__kwdefaults__", func_get_kwdefaults, func_set_kwdefaults, NULL, NULL },
     { "__dict__", PyObject_GenericGetDict, PyObject_GenericSetDict, NULL, NULL },
     { "__name__", func_get_name, func_set_name, NULL, NULL },
     { "__qualname__", func_get_qualname, func_set_qualname, NULL, NULL },

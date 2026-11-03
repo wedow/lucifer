@@ -1004,6 +1004,7 @@ op_MAKE_FUNCTION: {
     PyObject *func = lu_function_new(codeobj, frame->globals);
     Py_DECREF(codeobj);
     ERROR_IF(func == NULL);
+    lu_function_set_version((PyFunctionObject *)func);
     PUSH(func);
     DISPATCH();
 }

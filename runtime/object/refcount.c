@@ -179,15 +179,20 @@ PyObject_CallFinalizer(PyObject *self)
     self->ob_gc_bits |= LU_GC_FINALIZED;
 }
 
-int
-PyObject_CallFinalizerFromDealloc(PyObject *self)
+/* _PyObject_ResurrectStart / _PyObject_ResurrectEnd: a dying object, given
+   one reference for the call to something that may look at it. End returns 0
+   when the object is dead again and -1 when the call kept it. */
+void
+lu_resurrect_start(PyObject *self)
 {
-    /* _PyObject_ResurrectStart */
     _Py_atomic_store_uintptr_relaxed(&self->ob_tid, _Py_ThreadId());
     _Py_atomic_store_uint32_relaxed(&self->ob_ref_local, 1);
     _Py_atomic_store_ssize_relaxed(&self->ob_ref_shared, 0);
-    PyObject_CallFinalizer(self);
-    /* _PyObject_ResurrectEnd */
+}
+
+int
+lu_resurrect_end(PyObject *self)
+{
     uint32_t local = _Py_atomic_load_uint32_relaxed(&self->ob_ref_local);
     Py_ssize_t shared = _Py_atomic_load_ssize_acquire(&self->ob_ref_shared);
     if (_Py_IsOwnedByCurrentThread(self) && local == 1 && shared == 0) {
@@ -203,4 +208,12 @@ PyObject_CallFinalizerFromDealloc(PyObject *self)
         new_shared = shared - (1 << _Py_REF_SHARED_SHIFT);
     } while (!_Py_atomic_compare_exchange_ssize(&self->ob_ref_shared, &shared, new_shared));
     return new_shared == _Py_REF_MERGED ? 0 : -1;
+}
+
+int
+PyObject_CallFinalizerFromDealloc(PyObject *self)
+{
+    lu_resurrect_start(self);
+    PyObject_CallFinalizer(self);
+    return lu_resurrect_end(self);
 }

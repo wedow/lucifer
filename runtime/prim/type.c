@@ -8,14 +8,16 @@
    at -1 word and the weakref list at -2. Attribute values stay in that dict;
    inline values behind shared keys are not built yet.
 
-   Version tags: a static type's tp_version_tag is fixed at startup from the
-   runtime-wide range below _Py_TYPE_BASE_VERSION_TAG, a heap type's comes
-   from its interpreter's counter above it, and Py_TPFLAGS_VALID_VERSION_TAG
-   marks a valid one. lu_type_modified invalidates a type and its subclasses;
-   reassignment and watchers are K1t's. */
+   Version tags follow 3.14: 0 means none. A static builtin type gets its tag
+   at startup from the runtime-wide range below _Py_TYPE_BASE_VERSION_TAG; any
+   other type gets one when something needs it (a lookup, PyType_Watch, the
+   specializer), from its interpreter's counter above that range, after its
+   bases. lu_type_modified tells the type's watchers, then clears its tag and
+   its subclasses'; the next lookup assigns a new one. */
 
 #include "interp/frame.h"
 #include "interp/code.h"
+#include "interp/exceptions.h"
 #include "prim/prim.h"
 
 #include <string.h>
@@ -86,18 +88,98 @@ remove_subclass(PyTypeObject *base, PyTypeObject *tp)
     }
 }
 
+/* A type gets at most this many tags (MAX_VERSIONS_PER_CLASS); _Py_ATTR_CACHE_UNUSED
+   marks one that may never be cached again. */
+#define MAX_VERSIONS_PER_CLASS 1000
+#define MCACHE_MAX_ATTR_SIZE 100
+
+static void
+set_version(PyTypeObject *tp, unsigned int version)
+{
+    if (version != 0) {
+        tp->tp_versions_used++;
+    }
+    __atomic_store_n(&tp->tp_version_tag, version, __ATOMIC_RELEASE);
+}
+
+/* next_global_version_tag: the runtime-wide range, shared by all interpreters. */
+static unsigned int
+next_global_version_tag(void)
+{
+    unsigned int old = __atomic_load_n(&_PyRuntime.next_static_version_tag, __ATOMIC_RELAXED);
+    do {
+        if (old >= LU_VERSION_TAG_STATIC_MAX) {
+            return 0;
+        }
+    } while (!__atomic_compare_exchange_n(&_PyRuntime.next_static_version_tag, &old, old + 1, 0,
+                                          __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+    return old + 1;
+}
+
+int
+lu_type_assign_version(PyTypeObject *tp)
+{
+    if (tp->tp_version_tag != 0) {
+        return 1;
+    }
+    if (!(tp->tp_flags & Py_TPFLAGS_READY) || tp->tp_versions_used >= MAX_VERSIONS_PER_CLASS) {
+        return 0;
+    }
+    PyObject *bases = tp->tp_bases;
+    for (Py_ssize_t i = 0; bases != NULL && i < PyTuple_GET_SIZE(bases); i++) {
+        if (!lu_type_assign_version((PyTypeObject *)PyTuple_GET_ITEM(bases, i))) {
+            return 0;
+        }
+    }
+    unsigned int tag;
+    if (tp->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) {
+        tag = next_global_version_tag();
+    }
+    else {
+        tag = PyInterpreterState_Get()->next_version_tag;
+        if (tag != 0) {
+            PyInterpreterState_Get()->next_version_tag = tag + 1;      /* wraps to 0 when spent */
+        }
+    }
+    if (tag == 0) {
+        return 0;
+    }
+    set_version(tp, tag);
+    return 1;
+}
+
+int
+PyUnstable_Type_AssignVersionTag(PyTypeObject *tp)
+{
+    return lu_type_assign_version(tp);
+}
+
+static void
+notify_type_watchers(PyTypeObject *tp)
+{
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    for (int i = 0, bits = tp->tp_watched; bits != 0; i++, bits >>= 1) {
+        PyType_WatchCallback cb = (PyType_WatchCallback)interp->type_watchers[i];
+        if ((bits & 1) && cb != NULL && cb(tp) < 0) {
+            char message[64];
+            snprintf(message, sizeof message, "Exception ignored in type watcher callback #%d for", i);
+            lu_err_unraisable_text(message, (PyObject *)tp);
+        }
+    }
+}
+
 void
 lu_type_modified(PyTypeObject *tp)
 {
-    if (!(tp->tp_flags & Py_TPFLAGS_VALID_VERSION_TAG)) {
+    if (tp->tp_version_tag == 0) {
         return;
     }
-    tp->tp_flags &= ~Py_TPFLAGS_VALID_VERSION_TAG;
-    tp->tp_version_tag = 0;
     PyListObject *list = (PyListObject *)*subclasses_ref(tp);
     for (Py_ssize_t i = 0; list != NULL && i < Py_SIZE(list); i++) {
         lu_type_modified((PyTypeObject *)list->ob_item[i]);
     }
+    notify_type_watchers(tp);
+    set_version(tp, 0);
 }
 
 void
@@ -106,16 +188,75 @@ PyType_Modified(PyTypeObject *tp)
     lu_type_modified(tp);
 }
 
-static void
-assign_version_tag(PyTypeObject *tp, unsigned int tag)
+/* The watcher API (typeobject.c). Id 0 is CPython's own, so ids start at 1. */
+
+static lu_watcher *
+type_watchers(void)
 {
-    tp->tp_version_tag = tag;
-    tp->tp_flags |= Py_TPFLAGS_VALID_VERSION_TAG;
+    return PyInterpreterState_Get()->type_watchers;
+}
+
+int
+PyType_AddWatcher(PyType_WatchCallback callback)
+{
+    return lu_watcher_add(type_watchers(), 1, (lu_watcher)callback, "type");
+}
+
+static int
+check_type_watcher(int id)
+{
+    return lu_watcher_check(type_watchers(), id, "Invalid type watcher ID %d",
+                            "No type watcher set for ID %d");
+}
+
+int
+PyType_ClearWatcher(int id)
+{
+    if (check_type_watcher(id) < 0) {
+        return -1;
+    }
+    type_watchers()[id] = NULL;
+    return 0;
+}
+
+int
+PyType_Watch(int id, PyObject *obj)
+{
+    if (!PyType_Check(obj)) {
+        lu_err_format(PyExc_ValueError, "Cannot watch non-type");
+        return -1;
+    }
+    if (check_type_watcher(id) < 0) {
+        return -1;
+    }
+    /* A tag is what makes the next change deliver an event. */
+    lu_type_assign_version((PyTypeObject *)obj);
+    ((PyTypeObject *)obj)->tp_watched |= (unsigned char)(1 << id);
+    return 0;
+}
+
+int
+PyType_Unwatch(int id, PyObject *obj)
+{
+    if (!PyType_Check(obj)) {
+        lu_err_format(PyExc_ValueError, "Cannot watch non-type");
+        return -1;
+    }
+    if (check_type_watcher(id) < 0) {
+        return -1;
+    }
+    ((PyTypeObject *)obj)->tp_watched &= (unsigned char)~(1 << id);
+    return 0;
 }
 
 PyObject *
 _PyType_Lookup(PyTypeObject *tp, PyObject *name)
 {
+    /* The method cache's assignment: a lookup is what gives a type its tag. */
+    if (tp->tp_version_tag == 0 && tp->tp_versions_used < MAX_VERSIONS_PER_CLASS
+        && PyUnicode_CheckExact(name) && PyUnicode_GET_LENGTH(name) <= MCACHE_MAX_ATTR_SIZE) {
+        lu_type_assign_version(tp);
+    }
     PyObject *mro = tp->tp_mro;
     if (mro == NULL) {
         /* During creation, before the MRO exists: the type, then its bases. */
@@ -483,7 +624,7 @@ ready_static(PyTypeObject *tp, size_t index, unsigned int tag)
     lu_set_immortal(bases);
     tp->tp_mro = mro;
     tp->tp_bases = bases;
-    assign_version_tag(tp, tag);
+    set_version(tp, tag);
     tp->tp_flags |= Py_TPFLAGS_READY;
     return 0;
 }
@@ -500,13 +641,12 @@ lu_types_init(PyInterpreterState *interp)
     PyType_Type.tp_dictoffset = offsetof(PyTypeObject, tp_dict);
     PyType_Type.tp_weaklistoffset = offsetof(PyTypeObject, tp_weaklist);
     size_t index = 0;
-    unsigned int tag = 1;
     for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
         PyTypeObject *tp = *t;
         if (tp->tp_subclasses != NULL && tp->tp_mro != NULL) {
             continue;                   /* listed twice, or another interpreter readied it */
         }
-        if (ready_static(tp, index++, tag++) < 0) {
+        if (ready_static(tp, index++, next_global_version_tag()) < 0) {
             return -1;
         }
     }
@@ -522,6 +662,8 @@ lu_types_init(PyInterpreterState *interp)
         }
     }
     interp->next_version_tag = VERSION_TAG_BASE;
+    interp->next_keys_version = 2;                  /* 0 is none, 1 reserved as in 3.14 */
+    interp->next_func_version = 2;                  /* FUNC_VERSION_FIRST_VALID */
     return 0;
 }
 
@@ -964,8 +1106,6 @@ type_new_layout(PyTypeObject *meta, PyObject *name, PyObject *bases, PyObject *n
         }
     }
     inherit_slots(tp, base);
-    PyInterpreterState *interp = PyInterpreterState_Get();
-    assign_version_tag(tp, interp->next_version_tag++);
     for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(tp->tp_bases); i++) {
         if (add_subclass((PyTypeObject *)PyTuple_GET_ITEM(tp->tp_bases, i), tp) < 0) {
             goto fail_type;
@@ -1200,6 +1340,31 @@ prim_type_new_layout(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return type_new_layout((PyTypeObject *)args[0], args[1], args[2], args[3]);
 }
 
+/* has_custom_mro: type(tp).mro is not type.mro. */
+static int
+has_custom_mro(PyTypeObject *tp)
+{
+    return _PyType_Lookup(Py_TYPE(tp), LU_ID(mro)) != _PyType_Lookup(&PyType_Type, LU_ID(mro));
+}
+
+/* type_mro_modified: a type whose MRO the interpreter cannot trust to be the
+   linearization of its bases is never cached again. That is a custom mro()
+   on a metaclass, or a MRO that hides one of the bases. */
+static void
+mro_modified(PyTypeObject *tp, PyObject *bases)
+{
+    int clear = Py_TYPE(tp) != &PyType_Type && has_custom_mro(tp);
+    for (Py_ssize_t i = 0; !clear && i < PyTuple_GET_SIZE(bases); i++) {
+        PyTypeObject *base = (PyTypeObject *)PyTuple_GET_ITEM(bases, i);
+        clear = base->tp_versions_used >= _Py_ATTR_CACHE_UNUSED
+            || !PyType_IsSubtype(tp, base);
+    }
+    if (clear) {
+        set_version(tp, 0);
+        tp->tp_versions_used = _Py_ATTR_CACHE_UNUSED;
+    }
+}
+
 /* type_set_mro(t, mro): mro a tuple of types starting with t. */
 static PyObject *
 prim_type_set_mro(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -1228,9 +1393,10 @@ prim_type_set_mro(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_set_immortal(mro);
     }
     Py_XSETREF(tp->tp_mro, Py_NewRef(mro));
-    lu_type_modified(tp);
     if (!(tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)) {
-        assign_version_tag(tp, PyInterpreterState_Get()->next_version_tag++);
+        mro_modified(tp, mro);
+        mro_modified(tp, tp->tp_bases);
+        lu_type_modified(tp);
     }
     return Py_NewRef(Py_None);
 }
