@@ -157,12 +157,15 @@ def kernel_type(cls):
             type_set_bases(cls, bases)
             type_set_mro(cls, mro_of(cls))
         d = type_dict(cls)
+        slots = False
         for key, value in ns_items(ns):
             if key == '__doc__' and ns_get(d, key, None) is not None:
                 continue            # the layout's own __doc__ member
             if ns_get(_BODY_ONLY, key, MISSING) is MISSING or kind(value, 'tuple'):
                 ns_set(d, key, _kernel_value(cls, key, value))
-        update_slots(cls, True)
+                slots = slots or ns_get(SLOT_DUNDERS, key, False)
+        if slots:
+            update_slots(cls, True)     # a body without dunders leaves what the type's own code set
         return cls
     return install
 
