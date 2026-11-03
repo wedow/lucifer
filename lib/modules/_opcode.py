@@ -28,13 +28,17 @@ def stack_effect(opcode, oparg=None, /, *, jump=None):
     return effect
 
 
+def is_valid(opcode, /):
+    """Return True if opcode is valid, False otherwise."""
+    return opcode in opcodes.flags
+
+
 def _has(flag):
     def has(opcode, /):
         return opcode in opcodes.flags and opcodes.flags[opcode] & flag != 0
     return has
 
 
-is_valid = _has(0)
 has_arg = _has(opcodes.HAS_ARG_FLAG)
 has_const = _has(opcodes.HAS_CONST_FLAG)
 has_name = _has(opcodes.HAS_NAME_FLAG)

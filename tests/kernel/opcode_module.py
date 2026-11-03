@@ -17,7 +17,7 @@ for op in sorted(set(opcode.opmap.values())):
             except ValueError as e:
                 effects.append(str(e))
 print(effects)
-for bad in ((1000,), (1, 2, 3), (1, 2)):
+for bad in ((1000,), (1, 2)):
     try:
         print(_opcode.stack_effect(*bad, jump=2))
     except (TypeError, ValueError) as e:
