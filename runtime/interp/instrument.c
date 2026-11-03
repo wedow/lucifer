@@ -285,7 +285,7 @@ lu_range_advance(struct lu_addr_range *r)
     r->line += delta;
     r->start = r->end;
     r->end = r->start + ((*r->p & 7) + 1) * (int)sizeof(lu_codeunit);
-    r->no_line = code == 0x1f;
+    r->no_line = code == PY_CODE_LOCATION_INFO_NONE;
     do {
         r->p++;
     } while (r->p < r->limit && (*r->p & 128) == 0);

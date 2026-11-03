@@ -511,6 +511,8 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
     /* The start of the instruction being executed and of the one before it,
        for the events that name a source (LINE, NOT_TAKEN, POP_ITER). */
     lu_codeunit *cur_instr, *prev_instr;
+    /* Where a RERAISE puts the frame for the tools: the instruction that first raised. */
+    lu_codeunit *reraise_at = NULL;
     struct lu_frame *callee;
     /* A kernel call's operands: kernel[kid] on kargs[0..nk), owned, its
        value handled per kret. kret is also the value's fate for the callee
@@ -605,12 +607,13 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
     if (mode == EVAL_THROW) {
         /* The throw skipped RESUME, which would have brought the code up to date. */
         SAVE_FRAME();
+        PyObject *thrown = PyErr_GetRaisedException();
         if (lu_instrument(code, ts->interp) < 0) {
+            Py_DECREF(thrown);
             goto error;
         }
-        if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_PY_THROW)) {
-            lu_monitor_throw(ts, frame, next_instr);
-        }
+        PyErr_SetRaisedException(thrown);
+        lu_monitor_throw(ts, frame, INSTR_START());
         goto error;
     }
     DISPATCH();
@@ -1078,7 +1081,20 @@ resume_linked:
     ts->current_frame = (struct _PyInterpreterFrame *)callee;
     frame = callee;
     LOAD_FRAME();
-    ERROR_IF(ts->current_exception != NULL);
+    if (ts->current_exception != NULL) {
+        /* A throw skips the RESUME that brings the code up to date. */
+        SAVE_FRAME();
+        PyObject *thrown = PyErr_GetRaisedException();
+        int err = lu_instrument(code, ts->interp);
+        if (err == 0) {
+            PyErr_SetRaisedException(thrown);
+            lu_monitor_throw(ts, frame, INSTR_START());
+        }
+        else {
+            Py_DECREF(thrown);
+        }
+        goto error;
+    }
     DISPATCH();
 
 op_INSTRUMENTED_CALL_FUNCTION_EX:
@@ -2692,8 +2708,11 @@ op_RERAISE: {
     lasti = oparg && lu_long_as_long(sp[-oparg], &saved) == 0
         ? saved : INSTR_START() - lu_code_start(code);
     PyErr_SetRaisedException(exc);
+    reraise_at = lu_code_start(code) + lasti;
+    reraise_at += 1 + lu_caches_at(code, reraise_at);
     if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RERAISE)) {
         SAVE_FRAME();
+        frame->instr = reraise_at;
         lu_monitor_reraise(ts, frame, INSTR_START());
     }
     goto exception_unwind;
@@ -2829,6 +2848,7 @@ op_LOAD_COMMON_CONSTANT: {
 error:
     /* The raising frame joins the traceback; kernel frames look native and
        do not. */
+    reraise_at = NULL;
     lasti = INSTR_START() - lu_code_start(code);
     if (frame->owner != LU_FRAME_KERNEL_HIDDEN) {
         lu_traceback_here(frame, lasti);
@@ -2853,6 +2873,7 @@ exception_unwind: {
         }
         PUSH(PyErr_GetRaisedException());
         next_instr = lu_code_start(code) + handler;
+        reraise_at = NULL;
         if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_EXCEPTION_HANDLED)) {
             SAVE_FRAME();
             if (lu_monitor_handled(ts, frame, next_instr, TOP()) < 0) {
@@ -2862,6 +2883,9 @@ exception_unwind: {
         DISPATCH();
     }
     SAVE_FRAME();
+    if (reraise_at != NULL) {
+        frame->instr = reraise_at;
+    }
     if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_PY_UNWIND)) {
         lu_monitor_unwind(ts, frame, INSTR_START());
     }
