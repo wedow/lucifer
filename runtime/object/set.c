@@ -55,12 +55,11 @@ lu_set_new(PyTypeObject *type)
 }
 
 setentry *
-lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, setentry *after, int *verdict)
+lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, int *verdict)
 {
     size_t perturb = hash;
     size_t mask = so->mask;
     size_t i = (size_t)hash & mask;
-    int skipping = after != NULL;
     for (;;) {
         setentry *entry = &so->table[i];
         int probes = (i + LINEAR_PROBES <= mask) ? LINEAR_PROBES : 0;
@@ -69,14 +68,15 @@ lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, setentry *after, in
                 *verdict = LU_SET_ABSENT;
                 return entry;
             }
-            if (skipping) {
-                skipping = entry != after;
-            }
-            else if (entry->hash == hash) {
+            if (entry->hash == hash) {
                 PyObject *startkey = entry->key;
                 int eq = startkey == key ? 1 : lu_native_eq(startkey, key);
-                if (eq != 0) {
-                    *verdict = eq > 0 ? LU_SET_FOUND : LU_SET_CANDIDATE;
+                if (eq > 0) {
+                    *verdict = LU_SET_FOUND;
+                    return entry;
+                }
+                if (eq < 0 && skip-- <= 0) {
+                    *verdict = LU_SET_CANDIDATE;
                     return entry;
                 }
             }
@@ -210,10 +210,10 @@ lu_set_add(PyObject *set, PyObject *key)
     if (hash == -1) {
         return -1;
     }
-    setentry *after = NULL;
+    Py_ssize_t judged = 0;
     for (;;) {
         int verdict;
-        setentry *entry = lu_set_probe(so, key, hash, after, &verdict);
+        setentry *entry = lu_set_probe(so, key, hash, judged, &verdict);
         if (verdict == LU_SET_FOUND) {
             return 0;
         }
@@ -224,7 +224,7 @@ lu_set_add(PyObject *set, PyObject *key)
         if (cmp != 0) {
             return cmp < 0 ? -1 : 0;
         }
-        after = entry;
+        judged++;
     }
 }
 

@@ -12,6 +12,7 @@
 #include <langinfo.h>
 #include <poll.h>
 #include <sys/resource.h>
+#include <sys/ioctl.h>
 #include <locale.h>
 #include <linux/futex.h>
 #include <signal.h>
@@ -596,6 +597,7 @@ union sys_arg {
     X(sys_setsid, "", setsid()) \
     X(sys_kill, "ii", kill((pid_t)a[0].i, (int)a[1].i)) \
     X(sys_fcntl, "iii", LU_SYSCALL(fcntl((int)a[0].i, (int)a[1].i, a[2].i))) \
+    X(sys_alarm, "i", alarm((unsigned)a[0].i)) \
     X(sys_sysconf, "i", sysconf((int)a[0].i)) \
     X(sys_utime, "piiiii", utimensat(AT_FDCWD, a[0].p, (struct timespec[2]){ { a[1].i, a[2].i }, { a[3].i, a[4].i } }, (int)a[5].i))
 
@@ -948,6 +950,26 @@ prim_os_getrusage(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
         PyTuple_SET_ITEM(t, i, n);
     }
+    return t;
+}
+
+/* get_terminal_size(fd): (columns, lines) */
+static PyObject *
+prim_os_get_terminal_size(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd;
+    struct winsize w;
+    if (nargs != 1 || int_arg(args[0], &fd) < 0) {
+        return NULL;
+    }
+    if (LU_SYSCALL(ioctl((int)fd, TIOCGWINSZ, &w)) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    PyObject *c = PyLong_FromLong(w.ws_col), *l = PyLong_FromLong(w.ws_row);
+    PyObject *t = c != NULL && l != NULL ? PyTuple_Pack(2, c, l) : NULL;
+    Py_XDECREF(c);
+    Py_XDECREF(l);
     return t;
 }
 
@@ -1333,6 +1355,7 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_getrlimit", (PyCFunction)(void (*)(void))prim_os_getrlimit, METH_FASTCALL, NULL },
     { "os_setrlimit", (PyCFunction)(void (*)(void))prim_os_setrlimit, METH_FASTCALL, NULL },
     { "os_getrusage", (PyCFunction)(void (*)(void))prim_os_getrusage, METH_FASTCALL, NULL },
+    { "os_get_terminal_size", (PyCFunction)(void (*)(void))prim_os_get_terminal_size, METH_FASTCALL, NULL },
     { "os_waitpid", (PyCFunction)(void (*)(void))prim_os_waitpid, METH_FASTCALL, NULL },
     { "locale_encoding", (PyCFunction)(void (*)(void))prim_os_locale_encoding, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },

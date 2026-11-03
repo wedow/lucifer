@@ -51,17 +51,16 @@ prim_set_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return lu_set_new((PyTypeObject *)args[0]);
 }
 
-/* set_probe(s, key, hash, after) -> entry index of an equal key, -1 when
-   absent, or -3 - the index of a candidate to compare. after is -1 or the
-   candidate to pass. */
+/* set_probe(s, key, hash, skip) -> entry index of an equal key, -1 when
+   absent, or -3 - the index of a candidate to compare. skip is the
+   number of candidates already judged unequal. */
 static PyObject *
 prim_set_probe(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(4); SET(0); SSIZE(2, hash); SSIZE(3, after);
     PySetObject *so = (PySetObject *)args[0];
     int verdict;
-    setentry *entry = lu_set_probe(so, args[1], hash, after >= 0 ? &so->table[after] : NULL,
-                                   &verdict);
+    setentry *entry = lu_set_probe(so, args[1], hash, after > 0 ? after : 0, &verdict);
     Py_ssize_t i = entry - so->table;
     return int_of(verdict == LU_SET_FOUND ? i : verdict == LU_SET_ABSENT ? -1 : -3 - i);
 }

@@ -112,3 +112,8 @@ def raise_signal(signalnum, /):
     """Send a signal to the executing process."""
     _check(signalnum)
     _lucifer.signal_raise(signalnum)
+
+
+def alarm(seconds, /):
+    """Arrange for SIGALRM to arrive after the given number of seconds."""
+    return _lucifer.os_call('alarm', seconds)
