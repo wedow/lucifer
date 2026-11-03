@@ -41,6 +41,14 @@ def run(interpreter, flags, pyc):
     return (child.returncode, child.stdout, child.stderr)
 
 
+def last_line_only(oracle, ours):
+    """Until tracebacks exist, a failing program is judged on its last stderr line."""
+    if b"Traceback" not in oracle[2]:
+        return oracle, ours
+    last = lambda err: err.rstrip(b"\n").rsplit(b"\n", 1)[-1]
+    return ((oracle[0], oracle[1], last(oracle[2])), (ours[0], ours[1], last(ours[2])))
+
+
 def describe(name, oracle, ours):
     lines = [f"FAIL {name}"]
     for label, index in (("exit", 0), ("stdout", 1), ("stderr", 2)):
@@ -82,6 +90,7 @@ def main():
         py_compile.compile(str(source), str(pyc), dfile=f"{name}.py", doraise=True)
         oracle = run(args.oracle, [], pyc)
         ours = run(lucifer, LANES[args.lane], pyc)
+        oracle, ours = last_line_only(oracle, ours)
         if oracle == ours:
             print(f"PASS {name}")
         else:

@@ -1,0 +1,5 @@
+def forever():
+    forever()
+
+
+forever()
