@@ -1,6 +1,6 @@
 ---
 id: luc-xljo
-status: open
+status: closed
 deps: [luc-d47e, luc-fha1, luc-r5qm, luc-5w74]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: sonnet.
 
 make check-kernel PROGRAMS="builtins_funcs print_args exc_kernel" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t).
 
+
+## Notes
+
+**2026-11-03T07:35:34Z**
+
+K1m done: builtins functions, iterators.py, callable_iterator; builtins_funcs, print_args, exc_kernel match the oracle; 356/356 kernel programs.
