@@ -28,7 +28,7 @@ def main():
     opmap = {name: int(num) for name, num in re.findall(r"#define (\w+) +(\d+)\n", ids)}
     constants = {k: opmap.pop(k) for k in ("HAVE_ARGUMENT", "MIN_SPECIALIZED_OPCODE", "MIN_INSTRUMENTED_OPCODE")}
     flag_names = re.findall(r"#define (HAS_\w+_FLAG) \((\d+)\)", meta)
-    flags = {op: f for op, f in re.findall(r"\[(\w+)\] = \{ true, \w+, (.*?) \}", table(meta, "_PyOpcode_opcode_metadata"))}
+    flags = {op: f for op, f in re.findall(r"\[(\w+)\] = \{ true, [\w-]+, (.*?) \}", table(meta, "_PyOpcode_opcode_metadata"))}
     caches = re.findall(r"\[(\w+)\] = (\d+),", table(meta, "_PyOpcode_Caches"))
     deopt = re.findall(r"\[(\w+)\] = (\w+),", table(meta, "_PyOpcode_Deopt"))
     pseudo = re.findall(r"\[(\w+)-256\] = \{ (\d+), \{ ([\w, ]*) \} \}", table(meta, "_PyOpcode_PseudoTargets"))
