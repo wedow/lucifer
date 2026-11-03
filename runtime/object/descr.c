@@ -924,9 +924,12 @@ prim_method_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static Py_ssize_t
 field_offset(PyObject *obj, PyObject *index)
 {
+    extern PyTypeObject lu_coro_wrapper_type, lu_async_gen_athrow_type, lu_async_gen_wrapped_type;
     static PyTypeObject *const types[] = { &PyProperty_Type, &PyClassMethod_Type,
-                                           &PyStaticMethod_Type, &PySuper_Type, &PyDictProxy_Type };
-    static const int counts[] = { 5, 2, 2, 3, 1 };
+                                           &PyStaticMethod_Type, &PySuper_Type, &PyDictProxy_Type,
+                                           &lu_coro_wrapper_type, &_PyAsyncGenASend_Type,
+                                           &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type };
+    static const int counts[] = { 5, 2, 2, 3, 1, 1, 3, 3, 1 };
     long i;
     if (!PyLong_CheckExact(index) || lu_long_as_long(index, &i) < 0) {
         return -1;

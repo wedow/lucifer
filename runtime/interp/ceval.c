@@ -19,6 +19,7 @@
 #include "interp/frame.h"
 #include "interp/code.h"
 #include "interp/exceptions.h"
+#include "interp/gen.h"
 
 #include "opcode.h"
 #include "opcode_ids.h"
@@ -49,6 +50,8 @@ static const uint8_t caches[256] = {
 #define INTRINSIC_UNARY_POSITIVE 5  /* pycore_intrinsics.h */
 #define INTRINSIC_PREP_RERAISE_STAR 1   /* pycore_intrinsics.h */
 #define INTRINSIC_LIST_TO_TUPLE 6
+#define INTRINSIC_STOPITERATION_ERROR 3
+#define INTRINSIC_ASYNC_GEN_WRAP 4
 
 #define CANNOT_CATCH_MSG \
     "catching classes that do not inherit from BaseException is not allowed"
@@ -269,8 +272,10 @@ set_function_attribute(PyFunctionObject *func, int which, PyObject *attr)
     Py_XSETREF(*field, attr);
 }
 
-PyObject *
-lu_eval(PyThreadState *ts, struct lu_frame *frame)
+/* Runs `frame` in a new activation; with throwflag, by raising the
+   exception in flight at its current instruction (a generator's throw). */
+static PyObject *
+eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
 {
     /* Ranges first, then the opcodes that override them. */
 #pragma GCC diagnostic push
@@ -376,6 +381,16 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
         [FORMAT_WITH_SPEC] = &&op_FORMAT_WITH_SPEC,
         [CONVERT_VALUE] = &&op_CONVERT_VALUE,
         [BUILD_STRING] = &&op_BUILD_STRING,
+        [RETURN_GENERATOR] = &&op_RETURN_GENERATOR,
+        [YIELD_VALUE] = &&op_YIELD_VALUE,
+        [SEND] = &&op_SEND,
+        [END_SEND] = &&op_END_SEND,
+        [GET_YIELD_FROM_ITER] = &&op_GET_YIELD_FROM_ITER,
+        [GET_AWAITABLE] = &&op_GET_AWAITABLE,
+        [GET_AITER] = &&op_GET_AITER,
+        [GET_ANEXT] = &&op_GET_ANEXT,
+        [END_ASYNC_FOR] = &&op_END_ASYNC_FOR,
+        [CLEANUP_THROW] = &&op_CLEANUP_THROW,
     };
 #pragma GCC diagnostic pop
     /* An activation never changes carrier: an unpinned park returns from it. */
@@ -391,6 +406,7 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
     int opcode, oparg;
     Py_ssize_t lasti;           /* the raising instruction, in code units, for the unwinder */
     PyObject *result;
+    PyObject *retval;           /* what a returning or yielding frame hands its caller */
     /* The call tail's operands: the callable and the owned argument values,
        positional first, then the keywords named by kwnames. */
     PyObject *callable, *kwnames, **args, **base, **to_free;
@@ -448,6 +464,13 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
             } \
             Py_DECREF(v); \
         } \
+        else if ((ret) == LU_RETURN_SENT) { \
+            PUSH(Py_NewRef(PyTuple_GET_ITEM(v, 0))); \
+            if (PyTuple_GET_ITEM(v, 1) == Py_True) { \
+                next_instr += instr_oparg(INSTR_START()); \
+            } \
+            Py_DECREF(v); \
+        } \
         else if ((ret) == LU_RETURN_FOR_ITER) { \
             if ((v) == LU_MISSING) { \
                 next_instr += instr_oparg(INSTR_START()) + 1; \
@@ -471,6 +494,9 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
     } while (0)
 
     LOAD_FRAME();
+    if (throwflag) {
+        goto error;
+    }
     DISPATCH();
 
 op_CACHE:
@@ -672,6 +698,9 @@ call_tail: {
         sp = base;
         frame->stackpointer = sp;
         ERROR_IF(callee == NULL);
+        if (callee->owner == LU_FRAME_GENERATOR) {
+            goto resume_linked;
+        }
         kret = LU_RETURN_PUSH;
         goto push_callee;
     }
@@ -762,6 +791,15 @@ push_callee:
     LOAD_FRAME();
     DISPATCH();
 
+resume_linked:
+    /* A generator's frame, linked above this one by its resumption; a throw
+       enters it by raising. */
+    ts->current_frame = (struct _PyInterpreterFrame *)callee;
+    frame = callee;
+    LOAD_FRAME();
+    ERROR_IF(ts->current_exception != NULL);
+    DISPATCH();
+
 op_CALL_FUNCTION_EX: {
     /* func, null, callargs, kwargs or NULL */
     PyObject *callargs = sp[-2];
@@ -784,12 +822,49 @@ op_CALL_FUNCTION_EX: {
     goto call_tail;
 }
 
-op_RETURN_VALUE: {
-    PyObject *retval = POP();
+op_RETURN_VALUE:
+    retval = POP();
     frame->stackpointer = sp;
+return_frame: {
     struct lu_frame *caller = frame->previous;
     uint8_t ret = frame->ret;
-    lu_frame_pop(ts, frame);
+    if (frame->owner == LU_FRAME_GENERATOR) {
+        lu_gen_finish(ts, frame);
+        if (ret == LU_RETURN_FOR_ITER) {
+            Py_DECREF(retval);
+            retval = LU_MISSING;
+        }
+    }
+    else {
+        lu_frame_pop(ts, frame);
+    }
+    if (caller->owner == LU_FRAME_C_ENTRY) {
+        ts->current_frame = (struct _PyInterpreterFrame *)caller->previous;
+        return retval;
+    }
+    ts->current_frame = (struct _PyInterpreterFrame *)caller;
+    frame = caller;
+    LOAD_FRAME();
+    if (ret == LU_RETURN_SEND) {
+        next_instr += instr_oparg(INSTR_START());       /* out of the yield-from loop */
+    }
+    PUSH_RETURNED(ret, retval);
+    DISPATCH();
+}
+
+op_RETURN_GENERATOR:
+    /* The function's frame moves into a new generator, which it returns. */
+    SAVE_FRAME();
+    retval = lu_gen_new(ts, frame);
+    ERROR_IF(retval == NULL);
+    goto return_frame;
+
+op_YIELD_VALUE: {
+    retval = POP();
+    SAVE_FRAME();
+    struct lu_frame *caller = frame->previous;
+    uint8_t ret = frame->ret;
+    lu_gen_suspend(ts, frame, oparg);
     if (caller->owner == LU_FRAME_C_ENTRY) {
         ts->current_frame = (struct _PyInterpreterFrame *)caller->previous;
         return retval;
@@ -799,6 +874,122 @@ op_RETURN_VALUE: {
     LOAD_FRAME();
     PUSH_RETURNED(ret, retval);
     DISPATCH();
+}
+
+op_SEND: {
+    /* receiver, v -- receiver, retval; when the receiver returns, jumps by
+       oparg past the yield-from loop. Generators and coroutines run in
+       this loop; other receivers are the kernel's. */
+    SKIP_CACHES();
+    PyObject *receiver = sp[-2];
+    if ((Py_IS_TYPE(receiver, &PyGen_Type) || Py_IS_TYPE(receiver, &PyCoro_Type))
+        && ts->interp->eval_frame == NULL) {
+        PyObject *v = POP();
+        SAVE_FRAME();
+        callee = lu_gen_resume(ts, receiver, v);
+        if (callee == NULL) {
+            ERROR_IF(PyErr_Occurred());
+            PUSH(Py_NewRef(Py_None));
+            next_instr += oparg;
+            DISPATCH();
+        }
+        callee->ret = LU_RETURN_SEND;
+        goto resume_linked;
+    }
+    kargs[1] = POP();
+    kargs[0] = Py_NewRef(receiver);
+    nk = 2;
+    kid = LU_K_send;
+    kret = LU_RETURN_SENT;
+    goto kernel_call;
+}
+
+op_END_SEND: {
+    /* receiver, value -- value */
+    PyObject *v = POP();
+    Py_DECREF(TOP());
+    TOP() = v;
+    DISPATCH();
+}
+
+op_GET_YIELD_FROM_ITER: {
+    PyObject *v = TOP();
+    if (Py_IS_TYPE(v, &PyCoro_Type)) {
+        if (!(code->co_flags & (CO_COROUTINE | CO_ITERABLE_COROUTINE))) {
+            SAVE_FRAME();
+            lu_err_format(PyExc_TypeError, "cannot 'yield from' a coroutine object "
+                          "in a non-coroutine generator");
+            goto error;
+        }
+        DISPATCH();
+    }
+    goto op_GET_ITER;
+}
+
+op_GET_AWAITABLE: {
+    PyObject *v = TOP();
+    if (Py_IS_TYPE(v, &PyCoro_Type)) {
+        if (((struct lu_gen *)v)->frame_state == LU_GEN_SUSPENDED_YIELD_FROM) {
+            SAVE_FRAME();
+            lu_err_format(PyExc_RuntimeError, "coroutine is being awaited already");
+            goto error;
+        }
+        DISPATCH();
+    }
+    kargs[0] = POP();
+    kargs[1] = lu_small_int(oparg);
+    nk = 2;
+    kid = LU_K_get_awaitable;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+}
+
+op_GET_AITER:
+    kargs[0] = POP();
+    nk = 1;
+    kid = LU_K_get_aiter;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+
+op_GET_ANEXT:
+    /* aiter -- aiter, awaitable */
+    kargs[0] = Py_NewRef(TOP());
+    nk = 1;
+    kid = LU_K_get_anext;
+    kret = LU_RETURN_PUSH;
+    goto kernel_call;
+
+op_END_ASYNC_FOR:
+    /* awaitable, exc -- ; StopAsyncIteration ends the loop, anything else
+       propagates */
+    if (PyErr_GivenExceptionMatches(TOP(), PyExc_StopAsyncIteration)) {
+        Py_DECREF(POP());
+        Py_DECREF(POP());
+        DISPATCH();
+    }
+    SAVE_FRAME();
+    PyErr_SetRaisedException(POP());
+    lasti = INSTR_START() - lu_code_start(code);
+    goto exception_unwind;
+
+op_CLEANUP_THROW: {
+    /* sub_iter, last_sent_val, exc -- None, value: a throw or close that
+       ended the delegate with StopIteration gives `yield from` its value */
+    PyObject *exc = TOP();
+    if (PyErr_GivenExceptionMatches(exc, PyExc_StopIteration)) {
+        PyObject *value = ((PyStopIterationObject *)exc)->value;
+        value = Py_NewRef(value != NULL ? value : Py_None);
+        for (int i = 0; i < 3; i++) {
+            Py_DECREF(POP());
+        }
+        PUSH(Py_NewRef(Py_None));
+        PUSH(value);
+        DISPATCH();
+    }
+    SAVE_FRAME();
+    PyErr_SetRaisedException(POP());
+    lasti = INSTR_START() - lu_code_start(code);
+    goto exception_unwind;
 }
 
 op_MAKE_FUNCTION: {
@@ -1139,8 +1330,23 @@ op_DICT_UPDATE: {
 }
 
 op_CALL_INTRINSIC_1: {
-    /* Only INTRINSIC_LIST_TO_TUPLE and UNARY_POSITIVE until the others have users. */
     SAVE_FRAME();
+    if (oparg == INTRINSIC_STOPITERATION_ERROR) {
+        /* PEP 479: StopIteration leaving a generator's body becomes RuntimeError */
+        kargs[0] = POP();
+        kargs[1] = lu_small_int((code->co_flags & CO_ASYNC_GENERATOR) ? 2
+                                : (code->co_flags & CO_COROUTINE) ? 1 : 0);
+        nk = 2;
+        kid = LU_K_stopiteration_error;
+        kret = LU_RETURN_PUSH;
+        goto kernel_call;
+    }
+    if (oparg == INTRINSIC_ASYNC_GEN_WRAP) {
+        PyObject *w = lu_async_gen_wrap(TOP());
+        ERROR_IF(w == NULL);
+        Py_SETREF(TOP(), w);
+        DISPATCH();
+    }
     if (oparg == INTRINSIC_UNARY_POSITIVE) {
         if (!PyLong_CheckExact(TOP())) {
             kargs[0] = POP();
@@ -1336,6 +1542,9 @@ op_SETUP_ANNOTATIONS: {
 
 op_GET_ITER: {
     PyObject *iterable = TOP();
+    if (Py_IS_TYPE(iterable, &PyGen_Type)) {
+        DISPATCH();
+    }
     SAVE_FRAME();
     PyObject *it = get_iter_exact(iterable);
     if (it == NULL) {
@@ -1362,6 +1571,17 @@ op_FOR_ITER: {
     }
     else if (itp == &PyRangeIter_Type) {
         v = lu_rangeiter_next(iter);
+    }
+    else if (itp == &PyGen_Type && ts->interp->eval_frame == NULL) {
+        SAVE_FRAME();
+        callee = lu_gen_resume(ts, iter, NULL);
+        if (callee == NULL) {
+            ERROR_IF(PyErr_Occurred());
+            next_instr += oparg + 1;
+            DISPATCH();
+        }
+        callee->ret = LU_RETURN_FOR_ITER;
+        goto resume_linked;
     }
     else {
         SAVE_FRAME();
@@ -1857,7 +2077,12 @@ exception_unwind: {
     }
     frame->stackpointer = sp;
     struct lu_frame *caller = frame->previous;
-    lu_frame_pop(ts, frame);
+    if (frame->owner == LU_FRAME_GENERATOR) {
+        lu_gen_finish(ts, frame);
+    }
+    else {
+        lu_frame_pop(ts, frame);
+    }
     if (caller->owner == LU_FRAME_C_ENTRY) {
         ts->current_frame = (struct _PyInterpreterFrame *)caller->previous;
         return NULL;
@@ -1870,14 +2095,15 @@ exception_unwind: {
 }
 
 PyObject *
+lu_eval(PyThreadState *ts, struct lu_frame *frame)
+{
+    return eval_frame(ts, frame, 0);
+}
+
+PyObject *
 _PyEval_EvalFrameDefault(PyThreadState *ts, struct _PyInterpreterFrame *f, int throwflag)
 {
-    if (throwflag) {
-        lu_err_format(PyExc_SystemError, "throwing into a frame arrives with K1l");
-        lu_frame_pop(ts, (struct lu_frame *)f);
-        return NULL;
-    }
-    return lu_eval(ts, (struct lu_frame *)f);
+    return eval_frame(ts, (struct lu_frame *)f, throwflag);
 }
 
 PyObject *

@@ -209,6 +209,8 @@ PyTypeObject *const lu_exception_types[] = { LU_EXCEPTIONS(LU_EXC_ENTRY) NULL };
    to an instance. CPython does not export it. */
 PyTypeObject lu_method_wrapper_type = { PyVarObject_HEAD_INIT(&PyType_Type, 0)
     .tp_name = "method-wrapper", .tp_base = &PyBaseObject_Type };
+/* Defined with their code (runtime/interp/gen.c). */
+extern PyTypeObject lu_coro_wrapper_type, lu_async_gen_athrow_type, lu_async_gen_wrapped_type;
 
 /* Every static builtin type, in index order: its dict and subclasses live in
    each interpreter's static_types[index] (FOUNDATIONS 2.1). Object first,
@@ -216,7 +218,8 @@ PyTypeObject lu_method_wrapper_type = { PyVarObject_HEAD_INIT(&PyType_Type, 0)
 #define LU_TYPE_ENTRY(sym, name, flags, base) &sym,
 PyTypeObject *const lu_static_types[] = {
     &PyBaseObject_Type, &PyType_Type, LU_STATIC_TYPES(LU_TYPE_ENTRY)
-    LU_EXCEPTIONS(LU_EXC_ENTRY) &lu_method_wrapper_type, NULL };
+    LU_EXCEPTIONS(LU_EXC_ENTRY) &lu_method_wrapper_type, &lu_coro_wrapper_type,
+    &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type, NULL };
 PyObject *PyExc_EnvironmentError = (PyObject *)&lu_exc_OSError;
 PyObject *PyExc_IOError = (PyObject *)&lu_exc_OSError;
 

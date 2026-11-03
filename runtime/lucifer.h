@@ -147,7 +147,13 @@ struct lu_static_type_state {
     X(str)                      /* PyObject_Str, for CONVERT_VALUE 1 */ \
     X(repr)                     /* PyObject_Repr, for CONVERT_VALUE 2 */ \
     X(ascii)                    /* PyObject_ASCII, for CONVERT_VALUE 3 */ \
-    X(format)                   /* PyObject_Format(value, spec): FORMAT_SIMPLE, FORMAT_WITH_SPEC */
+    X(format)                   /* PyObject_Format(value, spec): FORMAT_SIMPLE, FORMAT_WITH_SPEC */ \
+    X(send)                     /* SEND to a receiver that is not a generator: (value, returned) */ \
+    X(get_awaitable)            /* GET_AWAITABLE: get_awaitable(obj, oparg) */ \
+    X(get_aiter)                /* GET_AITER */ \
+    X(get_anext)                /* GET_ANEXT */ \
+    X(stopiteration_error)      /* CALL_INTRINSIC_1 STOPITERATION_ERROR: (exc, kind) */ \
+    X(gen_close)                /* close() of a generator or coroutine, from its finalizer */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
     LU_KERNEL_FUNCTIONS(LU_KERNEL_ID)
@@ -403,6 +409,7 @@ void lu_descr_init(void);
 void lu_storage_init(void);
 void lu_module_init(void);
 void lu_exc_init(void);
+void lu_gen_init(void);
 PyObject *lu_small_int(int value);
 PyObject *lu_long_from_digits(int negative, Py_ssize_t ndigits, const digit *digits);
 int lu_long_as_long(PyObject *v, long *result);

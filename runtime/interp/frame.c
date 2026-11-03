@@ -91,3 +91,64 @@ lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
     ts->datastack_top = prev != NULL ? &prev->data[prev->top] : NULL;
     ts->datastack_limit = prev != NULL ? (PyObject **)((char *)prev + prev->size) : NULL;
 }
+
+/* The recursion limit (Python/ceval.c Py_SetRecursionLimit, sys's
+   setrecursionlimit): each task keeps its depth when the limit moves. */
+int
+Py_GetRecursionLimit(void)
+{
+    return PyThreadState_Get()->py_recursion_limit;
+}
+
+void
+Py_SetRecursionLimit(int limit)
+{
+    struct _is *interp = PyThreadState_Get()->interp;
+    pthread_mutex_lock(&interp->tasks_lock.mutex);
+    for (PyThreadState *p = interp->tasks; p != NULL; p = p->next) {
+        int depth = p->py_recursion_limit - p->py_recursion_remaining;
+        p->py_recursion_limit = limit;
+        p->py_recursion_remaining = limit - depth;
+    }
+    pthread_mutex_unlock(&interp->tasks_lock.mutex);
+}
+
+static PyObject *
+sys_getrecursionlimit(PyObject *m, PyObject *unused)
+{
+    return PyLong_FromLong(Py_GetRecursionLimit());
+}
+
+static PyObject *
+sys_setrecursionlimit(PyObject *m, PyObject *arg)
+{
+    long limit;
+    if (!PyLong_Check(arg)) {
+        lu_err_format(PyExc_TypeError, "'%.200s' object cannot be interpreted as an integer",
+                      Py_TYPE(arg)->tp_name);
+        return NULL;
+    }
+    if (lu_long_as_long(arg, &limit) < 0 || limit > INT_MAX || limit < INT_MIN) {
+        lu_err_format(PyExc_OverflowError, "Python int too large to convert to C int");
+        return NULL;
+    }
+    if (limit < 1) {
+        lu_err_format(PyExc_ValueError, "recursion limit must be greater or equal than 1");
+        return NULL;
+    }
+    PyThreadState *ts = PyThreadState_Get();
+    int depth = ts->py_recursion_limit - ts->py_recursion_remaining;
+    if (depth >= limit) {
+        lu_err_format(PyExc_RecursionError, "cannot set the recursion limit to %ld at the "
+                      "recursion depth %d: the limit is too low", limit, depth);
+        return NULL;
+    }
+    Py_SetRecursionLimit((int)limit);
+    return Py_NewRef(Py_None);
+}
+
+PyMethodDef lu_sys_frame_methods[] = {
+    { "getrecursionlimit", sys_getrecursionlimit, METH_NOARGS, NULL },
+    { "setrecursionlimit", sys_setrecursionlimit, METH_O, NULL },
+    { NULL, NULL, 0, NULL },
+};

@@ -6,6 +6,7 @@
 #define LU_FRAME_H
 
 #include "lucifer.h"
+#include "opcode_ids.h"
 
 typedef union {
     uint16_t cache;
@@ -33,6 +34,9 @@ enum lu_frame_return {
     LU_RETURN_PAIR,             /* the value is a 2-tuple: push both items */
     LU_RETURN_UNPACK,           /* the value is a tuple: push its items, last first */
     LU_RETURN_FOR_ITER,         /* the next item, or MISSING: the loop's exit */
+    LU_RETURN_SEND,             /* a generator resumed by SEND: a yield pushes the value, a
+                                   return pushes it and leaves the yield-from loop */
+    LU_RETURN_SENT,             /* the kernel's SEND: (value, returned), as SEND's two outcomes */
 };
 
 struct lu_frame {
@@ -56,6 +60,18 @@ static inline lu_codeunit *
 lu_code_start(PyCodeObject *code)
 {
     return (lu_codeunit *)code->co_code_adaptive;
+}
+
+/* The code unit of the instruction the frame last started: the one before
+   instr, caches skipped. */
+static inline Py_ssize_t
+lu_frame_lasti(struct lu_frame *f)
+{
+    lu_codeunit *at = f->instr;
+    while ((at - 1)->op.code == CACHE) {
+        at--;
+    }
+    return at - 1 - lu_code_start(f->code);
 }
 
 /* Pushes a frame for `func` on the current task's datastack, with every
