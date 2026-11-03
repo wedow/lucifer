@@ -66,8 +66,13 @@ def read_manifest(path):
     return rows
 
 
+FATAL_SIGNALS = {int(s) for s in (signal.SIGSEGV, signal.SIGABRT, signal.SIGBUS, signal.SIGILL, signal.SIGFPE, signal.SIGKILL)}
+
+
 def execute(command, cwd, env, log, timeout):
-    """Bound the whole process group, including compilers and pytest children."""
+    """Bound the whole process group, including compilers and pytest children.
+
+    A shell wrapper reports a fatal signal as exit 128+N; return it as -N."""
     with log.open("wb") as output:
         try:
             child = subprocess.Popen(command, cwd=cwd, env=env, stdout=output,
@@ -76,7 +81,8 @@ def execute(command, cwd, env, log, timeout):
             output.write(str(exc).encode())
             return None
         try:
-            return child.wait(timeout=timeout)
+            code = child.wait(timeout=timeout)
+            return 128 - code if code - 128 in FATAL_SIGNALS else code
         except subprocess.TimeoutExpired:
             os.killpg(child.pid, signal.SIGKILL)
             child.wait()

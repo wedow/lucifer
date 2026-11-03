@@ -167,6 +167,14 @@ class HarnessChecks(unittest.TestCase):
         self.assertNotEqual(self.invoke().returncode, 0)
         self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "CRASH"])))
 
+    def test_shell_wrapper_crash_exit_is_crash(self):
+        wrapper = self.root / "wrapper"
+        wrapper.write_text('#!/bin/sh\n"' + str(self.fake) + '" "$@"\n')
+        wrapper.chmod(0o755)
+        self.mode("crash")
+        self.assertNotEqual(self.invoke(python=wrapper).returncode, 0)
+        self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "CRASH"])))
+
     def test_parallel_lane_scores_serial_fallback_against_oracle(self):
         lane = self.root / "results/numpytest-parallel"
         lane.mkdir()
