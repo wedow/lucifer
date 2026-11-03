@@ -174,3 +174,26 @@ spaces until the Unicode database exists. `runtime/prim/str.c`'s
   `Python/pythonrun.c` (`_Py_HandleSystemExit` in `runtime/pylifecycle.c`):
   the default excepthook's output without source lines, carets or
   suggestions, until the traceback module itself is ported.
+- `lib/kernel/_listsort.py` from `Objects/listobject.c` (`list_sort_impl`
+  and its helpers: the pre-sort comparison choice, `count_run`,
+  `binarysort`, `gallop_left`, `gallop_right`, `merge_lo`, `merge_hi`,
+  `merge_at`, `powerloop`, `found_new_run`, `merge_force_collapse`,
+  `merge_compute_minrun`). CPython 3.14 merges by powersort, where PyPy's
+  `listsort.py` keeps the older stack invariants, so comparison counts follow
+  this port. A key sorts indexes into the key list, so keys never move.
+- `runtime/prim/storage.c` from `Objects/listobject.c` (`list_resize`,
+  `list_ass_slice_lock_held`, the extended-slice delete loop of
+  `list_ass_subscript`, `list_sort_impl`'s emptying of the list) and
+  `Objects/rangeobject.c` (`range_iter`, `fast_range_iter`): layouts and
+  storage moves only, each list mutator inside the list's critical section.
+- `lib/kernel/{tuple,list,range,slice,iter}.py` port `Objects/tupleobject.c`,
+  `Objects/listobject.c`, `Objects/rangeobject.c`, `Objects/sliceobject.c`,
+  `Objects/iterobject.c` and the sequence and iteration parts of
+  `Objects/abstract.c` (`PyObject_GetItem`, `SetItem`, `DelItem`,
+  `PyObject_GetIter`, `_PySequence_IterSearch`, `unpack_iterable`,
+  `_PyEval_ExtendList`) with `PySlice_Unpack` and `PySlice_AdjustIndices`.
+- `runtime/interp/ceval.c`: `STORE_SUBSCR`, `DELETE_SUBSCR`, `BUILD_SLICE`,
+  `BINARY_SLICE`, `STORE_SLICE`, `UNPACK_EX`, `GET_LEN` and the general
+  `GET_ITER`, `FOR_ITER`, `UNPACK_SEQUENCE`, `LIST_EXTEND` and
+  `BINARY_OP` `NB_SUBSCR` from `Python/bytecodes.c`, with the exact list,
+  tuple and range fast paths.
