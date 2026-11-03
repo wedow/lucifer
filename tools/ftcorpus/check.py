@@ -160,6 +160,15 @@ exit 139
         result = self.driver('ft-cpython', str(wrapper))
         self.assertEqual({r['status'] for r in self.manifest()}, {'CRASH'}, result.stderr)
 
+    def test_unknown_module_is_scored_not_crashed(self):
+        self.fixture('ft-cpython', module='test_no_such_module')
+        fake = self.root / 'fake'
+        fake.write_text('#!/usr/bin/env python3\nimport json\nprint(json.dumps(dict(version=[3,14,10],implementation="cpython",free_threaded=True,gil_enabled=False)))\n')
+        fake.chmod(0o755)
+        result = self.driver('ft-cpython', str(fake))
+        self.assertNotIn('Traceback', result.stderr)
+        self.assertEqual({r['status'] for r in self.manifest()}, {'ERROR'}, result.stderr)
+
     def test_cpython_parallel_lane_scores_serial_fallback_against_oracle(self):
         module, ids = self.profiled_case_fixture('parallel')
         fake = self.root / 'fake'

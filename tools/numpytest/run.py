@@ -21,6 +21,8 @@ import tarfile
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+from exitcode import exit_code
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -66,9 +68,6 @@ def read_manifest(path):
     return rows
 
 
-FATAL_SIGNALS = {int(s) for s in (signal.SIGSEGV, signal.SIGABRT, signal.SIGBUS, signal.SIGILL, signal.SIGFPE, signal.SIGKILL)}
-
-
 def execute(command, cwd, env, log, timeout):
     """Bound the whole process group, including compilers and pytest children.
 
@@ -82,7 +81,7 @@ def execute(command, cwd, env, log, timeout):
             return None
         try:
             code = child.wait(timeout=timeout)
-            return 128 - code if code - 128 in FATAL_SIGNALS else code
+            return exit_code(code)
         except subprocess.TimeoutExpired:
             os.killpg(child.pid, signal.SIGKILL)
             child.wait()

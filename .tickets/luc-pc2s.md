@@ -1,6 +1,6 @@
 ---
 id: luc-pc2s
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T02:06:40Z

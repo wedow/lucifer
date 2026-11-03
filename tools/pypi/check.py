@@ -20,6 +20,8 @@ def main():
         harness = root / 'tools/pypi'
         harness.mkdir(parents=True)
         shutil.copy(HERE / 'run.py', harness)
+        (root / 'tools/lib').mkdir()
+        shutil.copy(HERE.parent / 'lib/exitcode.py', root / 'tools/lib')
         for name in ('recorder.py', 'unittest_worker.py'):
             shutil.copy(HERE / name, harness)
         (harness / 'requirements.lock').write_text('# fixture\n')
