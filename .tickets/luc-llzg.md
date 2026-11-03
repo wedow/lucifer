@@ -1,6 +1,6 @@
 ---
 id: luc-llzg
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T01:39:45Z
@@ -17,3 +17,9 @@ Port tokenizer, pegen parser (python.gram with Python actions), _ast, symtable, 
 
 make check-compiler: marshal.dumps and ast.dump(include_attributes=True) byte-identical to the host for the 42 Python modules of the difftest probe+bridge import closure, all 164 difftest programs and tests/kernel; the run reports the identical share of all vendored Lib/**/*.py the host compiles.
 
+
+## Notes
+
+**2026-11-03T02:37:45Z**
+
+Merged. make check-compiler: closure 42/42, difftest 198/198, Lib 1868/1868, byte-identical at all five stages vs CPython 3.14.10.
