@@ -337,7 +337,7 @@ class Tokenizer:
                 return c
             if self.done != E_OK:
                 return EOF
-            rc = self.underflow()
+            rc = self.underflow(self)
             if not rc:
                 self.cur = self.inp
                 return EOF
@@ -1644,7 +1644,7 @@ def from_string(source, exec_input, preserve_crlf=False):
     decoded = decode_str(tok, bytes(source), exec_input, preserve_crlf)
     tok.data = decoded
     tok.buf = tok.cur = tok.inp = 0
-    tok.underflow = tok.tok_underflow_string
+    tok.underflow = Tokenizer.tok_underflow_string  # a plain function, as in C, so tok stays acyclic
     return tok
 
 
@@ -1659,7 +1659,7 @@ def from_utf8(source, exec_input, preserve_crlf=False):
     tok.encoding = "utf-8"
     tok.data = translated
     tok.buf = tok.cur = tok.inp = 0
-    tok.underflow = tok.tok_underflow_string
+    tok.underflow = Tokenizer.tok_underflow_string  # a plain function, as in C, so tok stays acyclic
     return tok
 
 
@@ -1669,7 +1669,7 @@ def from_readline(readline, enc, exec_input, preserve_crlf):
     tok.data = bytearray()
     tok.encoding = enc
     tok.decoding_state = STATE_NORMAL
-    tok.underflow = tok.tok_underflow_readline
+    tok.underflow = Tokenizer.tok_underflow_readline  # a plain function, as in C, so tok stays acyclic
     tok.readline = readline
     return tok
 
