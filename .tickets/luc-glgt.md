@@ -16,5 +16,5 @@ The fixed public bar: numpy's own suite against the unmodified cp314t wheel.
 
 ## Acceptance Criteria
 
-tools/numpytest/run.py run, serial and --parallel, --python bin/lucifer: 50,049 PASS each (oracle parity), no FAIL/ERROR/TIMEOUT/CRASH, GIL disabled after every shard.
+tools/numpytest/run.py run, serial and --parallel, --python bin/lucifer: every case the current cpython-3.14.10t oracle manifest marks PASS is PASS (oracle parity; 51,140 as of the 11-02 widened baseline), no FAIL/ERROR/TIMEOUT/CRASH, GIL disabled after every shard.
 

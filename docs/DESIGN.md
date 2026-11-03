@@ -46,7 +46,7 @@ Counts from the pinned artifacts (commands in §12).
 | difftest probe+bridge import closure | 64 modules; 42 Python files, 22,238 lines | `-X importtime` on the oracle |
 | `import numpy` closure | 172 modules (needs `_ctypes`, `math`, `_struct`, `_pickle`/`pickle`, `_datetime`/`_pydatetime`, `_ast`, `_tokenize`, `_opcode`, `_typing`) | same |
 | `import pytest, numpy.testing` closure | 376 modules | same |
-| Harness denominators | difftest 164; libtest 53,973; numpytest 52,273 (oracle t: 50,049 PASS); AWFY 14; pyperformance 9; oracle check 11 | `results/*/expected.tsv` |
+| Harness denominators | difftest 164; libtest 56,200; numpytest 52,273 (oracle t: 51,140 PASS); AWFY 14; pyperformance 9; oracle check 11 | `results/*/expected.tsv` |
 | Donor VM | 210,057 lines fasm in 215 `vm/*.inc|asm`; SSA optimizer 56,465 / 51 files; scheduler 13,575; GC 7,349 | `git ls-tree` at 88754eb; research 04 §1 |
 
 ## 2. Implementation language
@@ -461,7 +461,7 @@ parallel.
 | M1.4 | `tools/numpytest run --collect --python bin/lucifer` | `import numpy` and pytest collection succeed under Lucifer, so rows leave NOTRUN; ≥ 1 PASS | M1.2, M1.1 |
 | M1.5 | `tools/numpytest run` | ≥ 13,069 PASS (25%) | M1.4 |
 | M1.6 | same | ≥ 39,205 PASS (75%), 0 CRASH | M1.5 |
-| M1.7 | serial and `--parallel` | 50,049 PASS each (oracle parity), no FAIL/ERROR/TIMEOUT/CRASH, GIL disabled throughout. **This is the public bar.** | M1.6, M1.3 |
+| M1.7 | serial and `--parallel` | every case the current cpython-3.14.10t oracle manifest marks PASS is PASS (oracle parity; 51,140 as of the 11-02 widened baseline), no FAIL/ERROR/TIMEOUT/CRASH, GIL disabled throughout. **This is the public bar.** | M1.6, M1.3 |
 | P0 | `tools/bench/awfy --python bin/lucifer` | 14/14 PASS with the SSA tier on (no speed target) | M0.2 |
 | P1 | `tools/bench/compare --suite awfy` | geomean time/CPython ≤ 1.189 (parity with the oracle) | P0 |
 | P2 | same | ≤ 0.594 (2× faster than the oracle); pyperformance 9/9 PASS | P1 |
