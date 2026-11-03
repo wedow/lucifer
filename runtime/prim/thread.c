@@ -9,6 +9,8 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#define LU_DEFAULT_THREAD_STACK ((size_t)8 << 20)
+
 #define ARGS(n) do { if (nargs != (n)) { \
         lu_err_format(PyExc_TypeError, "%s() takes %d arguments (%zd given)", __func__ + 5, (n), nargs); \
         return NULL; } } while (0)
@@ -91,10 +93,11 @@ prim_thread_native_id(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLongLong((long long)lu_carrier->native_id);
 }
 
-/* thread_start(callable): runs callable() in a new OS thread with its own
-   task, and answers the thread's identifier. The thread is detached; the
-   Python side keeps the lock a join waits on. What callable raises is
-   reported as an unraisable exception. */
+/* thread_start(callable, stack_size): runs callable() in a new OS thread with its own
+   task (bound to that carrier for life, DESIGN 5.7), and answers the thread's identifier,
+   which is the pthread_t the task's ident is taken from. A stack_size of 0 is the default.
+   The thread is detached; the Python side keeps the lock a join waits on. Whatever
+   callable raises is reported as an unraisable exception. */
 static void *
 thread_main(void *arg)
 {
@@ -113,11 +116,19 @@ thread_main(void *arg)
 static PyObject *
 prim_thread_start(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(1);
+    ARGS(2);
+    long stack_size;
+    if (!PyLong_Check(args[1]) || lu_long_as_long(args[1], &stack_size) < 0) {
+        return NULL;
+    }
+    if (__atomic_load_n(&_PyRuntime.finalizing, __ATOMIC_RELAXED)) {
+        lu_err_format(PyExc_PythonFinalizationError, "can't create new thread at interpreter shutdown");
+        return NULL;
+    }
     pthread_attr_t attr;
     pthread_t thread;
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 8 << 20);
+    pthread_attr_setstacksize(&attr, stack_size > 0 ? (size_t)stack_size : LU_DEFAULT_THREAD_STACK);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     Py_INCREF(args[0]);
     int err = pthread_create(&thread, &attr, thread_main, args[0]);
@@ -127,12 +138,34 @@ prim_thread_start(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_RuntimeError, "can't start new thread");
         return NULL;
     }
-    return PyLong_FromLongLong((long long)(uintptr_t)thread);
+    return PyLong_FromLongLong((long long)thread);
+}
+
+/* main_thread_ident(): the ident of the main task, from any thread. */
+static PyObject *
+prim_main_thread_ident(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(0);
+    return PyLong_FromLongLong((long long)_PyRuntime.main_thread);
+}
+
+/* thread_dict(): the current task's dict, made on first use. It dies with the task
+   (PyThreadState_Clear), which is what makes _thread._local per task. */
+static PyObject *
+prim_thread_dict(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(0);
+    PyThreadState *ts = PyThreadState_Get();
+    if (ts->dict == NULL && (ts->dict = PyDict_New()) == NULL) {
+        return NULL;
+    }
+    return Py_NewRef(ts->dict);
 }
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_thread_methods[] = {
     FAST(mutex_new), FAST(mutex_acquire), FAST(mutex_release), FAST(mutex_locked),
-    FAST(thread_ident), FAST(thread_native_id), FAST(thread_start),
+    FAST(thread_ident), FAST(thread_native_id), FAST(thread_start), FAST(main_thread_ident),
+    FAST(thread_dict),
     { NULL, NULL, 0, NULL },
 };

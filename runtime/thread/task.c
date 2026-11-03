@@ -41,6 +41,9 @@ lu_task_new(struct _is *interp, int whence)
         ts->next->prev = ts;
     }
     interp->tasks = ts;
+    if (interp->tasks_closed) {
+        ts->state = _Py_THREAD_SHUTTING_DOWN;
+    }
     pthread_mutex_unlock(&interp->tasks_lock.mutex);
     t->pinned_for_life = 1;
     return t;
@@ -192,7 +195,7 @@ lu_syscall_end(PyThreadState *ts)
                                         __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
             break;
         }
-        if (state == _Py_THREAD_SUSPENDED) {
+        if (state == _Py_THREAD_SUSPENDED || state == _Py_THREAD_SHUTTING_DOWN) {
             _PyParkingLot_Park(&ts->state, &state, sizeof state, -1, NULL, 0);
         }
         else {
@@ -375,6 +378,36 @@ lu_task_carrier_exit(struct lu_carrier *c)
         free_task(TASK(done));
         done = next;
     }
+}
+
+void
+lu_task_shutdown_others(struct _is *interp)
+{
+    lu_stw_stop(interp);
+    struct lu_task *self = lu_current_task();
+    /* Every other task is suspended now. It leaves the list, so no later stop waits
+       for it and no collection scans its frames, and it is never resumed: its thread
+       hangs in lu_syscall_end. Tasks created from here on start in that state. */
+    pthread_mutex_lock(&interp->tasks_lock.mutex);
+    interp->tasks_closed = 1;
+    PyThreadState *next;
+    for (PyThreadState *ts = interp->tasks; ts != NULL; ts = next) {
+        next = ts->next;
+        if (TASK(ts) != self) {
+            if (ts->prev != NULL) {
+                ts->prev->next = ts->next;
+            }
+            else {
+                interp->tasks = ts->next;
+            }
+            if (ts->next != NULL) {
+                ts->next->prev = ts->prev;
+            }
+            __atomic_store_n(&ts->state, _Py_THREAD_SHUTTING_DOWN, __ATOMIC_SEQ_CST);
+        }
+    }
+    pthread_mutex_unlock(&interp->tasks_lock.mutex);
+    lu_stw_start(interp);
 }
 
 _PyFrameEvalFunction
