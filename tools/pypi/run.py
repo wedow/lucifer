@@ -16,6 +16,8 @@ import subprocess
 import sys
 import tarfile
 import urllib.request
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+from exitcode import exit_code
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -61,9 +63,6 @@ def inventory(path):
     return ids
 
 
-FATAL_SIGNALS = {int(s) for s in (signal.SIGSEGV, signal.SIGABRT, signal.SIGBUS, signal.SIGILL, signal.SIGFPE, signal.SIGKILL)}
-
-
 def execute(command, cwd, env, log, timeout):
     """Run a command; a shell wrapper reports a fatal signal as exit 128+N, returned as -N."""
     with log.open('wb') as stream:
@@ -74,7 +73,7 @@ def execute(command, cwd, env, log, timeout):
             return None
         try:
             code = proc.wait(timeout=timeout)
-            return 128 - code if code - 128 in FATAL_SIGNALS else code
+            return exit_code(code)
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()

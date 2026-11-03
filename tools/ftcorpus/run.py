@@ -22,6 +22,8 @@ from contextlib import nullcontext
 
 from artifacts import verify
 from prepare import stage_tests
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+from exitcode import exit_code
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
@@ -31,9 +33,6 @@ spec.loader.exec_module(lib)
 lib.BRIDGE = HERE / 'regrtest.py'
 lib.PROBE = lib.PROBE.replace("'test':test.__file__", "'venv':sys.prefix != sys.base_prefix,'test':test.__file__")
 BAD = {'FAIL', 'ERROR', 'XPASS', 'TIMEOUT', 'CRASH', 'NOTRUN'}
-
-
-FATAL_SIGNALS = {int(s) for s in (signal.SIGSEGV, signal.SIGABRT, signal.SIGBUS, signal.SIGILL, signal.SIGFPE, signal.SIGKILL)}
 
 
 def execute(command, env, cwd, timeout, log, stderr_log=None, worker_pid=None):
@@ -66,7 +65,7 @@ def execute(command, env, cwd, timeout, log, stderr_log=None, worker_pid=None):
                     pass
             child.wait()
     code = child.returncode
-    return 128 - code if code - 128 in FATAL_SIGNALS else code, hung, time.monotonic() - started
+    return exit_code(code), hung, time.monotonic() - started
 
 
 lib.execute = execute

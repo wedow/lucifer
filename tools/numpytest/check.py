@@ -29,6 +29,8 @@ class HarnessChecks(unittest.TestCase):
         self.tool = self.root / "tools/numpytest"
         self.tool.mkdir(parents=True)
         shutil.copyfile(HERE / "run.py", self.tool / "run.py")
+        (self.root / "tools/lib").mkdir()
+        shutil.copyfile(HERE.parent / "lib/exitcode.py", self.root / "tools/lib/exitcode.py")
         self.site = self.root / "site"
         self.site.mkdir()
         (self.site / "fixture.so").write_bytes(b"unmodified")
