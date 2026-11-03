@@ -252,6 +252,7 @@ struct _is {
     struct lu_lock tasks_lock;  /* the task list (HEAD_LOCK) */
     PyThreadState *tasks;       /* every task of this interpreter, in any state */
     uint64_t next_task_id;
+    int tasks_closed;           /* finalization removed the other tasks: new ones hang at attach */
     PyObject *modules;          /* sys.modules */
     PyObject *builtins;         /* builtins.__dict__ */
     PyObject *sysdict;          /* sys.__dict__ */
@@ -322,6 +323,7 @@ enum {
     _Py_THREAD_DETACHED = 0,
     _Py_THREAD_ATTACHED = 1,
     _Py_THREAD_SUSPENDED = 2,
+    _Py_THREAD_SHUTTING_DOWN = 3,       /* a daemon thread at finalization: it hangs when it attaches */
 };
 
 /* The task record (DESIGN 5.3): a Python thread of control. The PyThreadState
@@ -455,6 +457,10 @@ void lu_task_attach(PyThreadState *ts);
    or (for a stop-the-world) suspended. */
 void lu_task_detach(struct lu_task *t, int state);
 void lu_task_delete(struct lu_task *t);
+/* Finalization (CPython's _PyEval_StopTheWorldAll and _PyThreadState_RemoveExcept): every task
+   but the caller's is dropped from the interpreter and marked shutting down, so a daemon thread
+   hangs when it next attaches. The caller is attached. */
+void lu_task_shutdown_others(struct _is *interp);
 void lu_task_carrier_exit(struct lu_carrier *c);
 /* The task leaves its carrier at a migration point (DESIGN 5.4): detached,
    unbound, and no longer the carrier's task. The carrier's owner record stays
@@ -600,7 +606,7 @@ struct lu_static_objects {
    _Py_ID strings). LU_ID(__name__) is the str "__name__". */
 #define LU_IDENTIFIERS(X) \
     X(__all__) X(__build_class__) X(__builtins__) X(__call__) X(__class__) X(__delete__) \
-    X(__doc__) X(__get__) X(__getitem__) X(__init__) X(__iter__) \
+    X(__del__) X(__doc__) X(__get__) X(__getitem__) X(__init__) X(__iter__) \
     X(__len__) X(__loader__) X(__main__) X(__name__) X(__new__) X(__next__) \
     X(__package__) X(__repr__) X(__set__) X(__spec__) X(__str__) X(__hash__) \
     X(__eq__) X(__ne__) X(__lt__) X(__le__) X(__gt__) X(__ge__) X(__contains__) \
@@ -751,6 +757,7 @@ PyObject *lu_long_from_double(double d);
 PyObject *lu_long_binary(int op, PyObject *a, PyObject *b);
 Py_hash_t lu_xxhash_items(PyObject *const *items, Py_ssize_t n, int mangle_length);
 Py_hash_t lu_str_hash(PyObject *s);
+uint64_t lu_keyed_hash(uint64_t key, const void *src, Py_ssize_t size);
 int lu_str_eq(PyObject *a, PyObject *b);
 void lu_intern(PyInterpreterState *interp, PyObject **p);
 PyObject *lu_str_from_utf8(const char *s, Py_ssize_t n, int surrogatepass);

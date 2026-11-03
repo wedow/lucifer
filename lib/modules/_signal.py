@@ -1,7 +1,8 @@
 """_signal (Modules/signalmodule.c): the signal numbers and handler table.
 A Python handler is installed with the runtime's sigaction (runtime/interp/
 signals.c), which only records the signal: the handler runs in the main task
-at its next poll. SIGINT's default handler is not installed at startup yet."""
+at its next poll. Importing this module installs SIGINT's default handler, unless
+the process ignores SIGINT; the runtime's startup does not import it."""
 
 import _lucifer
 
@@ -114,6 +115,33 @@ def raise_signal(signalnum, /):
     _lucifer.signal_raise(signalnum)
 
 
+if not _lucifer.signal_ignored(SIGINT):
+    _lucifer.signal_install(SIGINT, default_int_handler)
+
+
 def alarm(seconds, /):
     """Arrange for SIGALRM to arrive after the given number of seconds."""
     return _lucifer.os_call('alarm', seconds)
+
+
+class ItimerError(OSError):
+    pass
+
+
+def _timer(seconds):
+    if seconds < 0:
+        raise ItimerError(22, 'Invalid argument')
+    return round(seconds * 1e6)
+
+
+def setitimer(which, seconds, interval=0.0, /):
+    """Sets given itimer (one of ITIMER_REAL, ITIMER_VIRTUAL or ITIMER_PROF) especially
+to seconds, with an interval, and returns the old (seconds, interval) tuple."""
+    old = _lucifer.os_itimer(which, _timer(seconds), _timer(interval))
+    return old[0] / 1e6, old[1] / 1e6
+
+
+def getitimer(which, /):
+    """Returns current value of given itimer."""
+    old = _lucifer.os_itimer(which, -1, 0)
+    return old[0] / 1e6, old[1] / 1e6

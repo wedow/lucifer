@@ -547,6 +547,7 @@ def _code_of(fname, source, mode):
     """The code object of exec's or eval's source text: compiled as
     PyRun_StringFlags does, with the caller's future statements."""
     flags = caller_code_flags() & _PyCF_MASK
+    sys.audit('compile', source, '<string>')
     if kind(source, 'str'):
         flags |= _PyCF_SOURCE_IS_UTF8
         if mode == 'eval':
@@ -596,6 +597,7 @@ If only globals is given, locals defaults to it."""
     source, globals_, locals_ = _args.unpack('eval', args, kwargs, ('source', 'globals', 'locals'), 1, 1)
     source, globals_, locals_ = _source('eval', source, None if globals_ is MISSING else globals_,
                                         None if locals_ is MISSING else locals_)
+    sys.audit('exec', source)
     return eval_code(source, globals_, locals_)
 
 
@@ -610,6 +612,7 @@ If only globals is given, locals defaults to it."""
     source, globals_, locals_ = _args.unpack('exec', args, kwargs, ('source', 'globals', 'locals'), 1, 1)
     source, globals_, locals_ = _source('exec', source, None if globals_ is MISSING else globals_,
                                         None if locals_ is MISSING else locals_)
+    sys.audit('exec', source)
     eval_code(source, globals_, locals_)
     return None
 
@@ -783,6 +786,7 @@ def _import(name, globals_, fromlist, level):
     else:
         if importlib is None:
             error(ModuleNotFoundError, str_join('', ("No module named '", abs_name, "'")))
+        sys.audit('import', abs_name, None, sys.path, sys.meta_path, sys.path_hooks)
         mod = importlib._find_and_load(abs_name, import_func)
     if not truth(fromlist):
         if level == 0 or name:

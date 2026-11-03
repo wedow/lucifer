@@ -268,6 +268,29 @@ start_module(struct _is *interp, const struct lu_frozen *m, int frozen)
     return module;
 }
 
+/* _PyImportZip_Init: zipimport's path hook goes first in sys.path_hooks. A
+   failure leaves sys.path without zip support, as CPython does. */
+static void
+install_zipimport(struct _is *interp)
+{
+    PyObject *name = PyUnicode_InternFromString("zipimport");
+    PyObject *module = name != NULL ? lu_call(interp->import_func, &name, 1, NULL) : NULL;
+    PyObject *hook = module != NULL ? PyObject_GetAttrString(module, "zipimporter") : NULL;
+    PyObject *hooks = lu_ns_lookup(interp->sysdict, PyUnicode_InternFromString("path_hooks"));
+    PyObject *insert = hook != NULL && hooks != NULL ? PyObject_GetAttrString(hooks, "insert") : NULL;
+    PyObject *args[2] = { PyLong_FromLong(0), hook };
+    PyObject *result = insert != NULL && args[0] != NULL ? lu_call(insert, args, 2, NULL) : NULL;
+    if (result == NULL) {
+        PyErr_Clear();
+    }
+    Py_XDECREF(result);
+    Py_XDECREF(args[0]);
+    Py_XDECREF(insert);
+    Py_XDECREF(hook);
+    Py_XDECREF(module);
+    Py_XDECREF(name);
+}
+
 int
 lu_import_init(struct _is *interp)
 {
@@ -297,6 +320,10 @@ lu_import_init(struct _is *interp)
     }
     Py_DECREF(result);
     result = call_function(importlib, "_install_external_importers", NULL, 0);
-    Py_XDECREF(result);
-    return result == NULL ? -1 : 0;
+    if (result == NULL) {
+        return -1;
+    }
+    Py_DECREF(result);
+    install_zipimport(interp);
+    return 0;
 }

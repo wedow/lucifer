@@ -1,6 +1,6 @@
 ---
 id: luc-ojvv
-status: open
+status: closed
 deps: [luc-a0sq]
 links: []
 created: 2026-11-03T09:39:23Z
@@ -16,3 +16,9 @@ Found by luc-wg2d: lucifer cannot start a Python thread. Each new thread is a ta
 
 tests/kernel threads_basic.py (start, join, locks, Condition, Event, Barrier, threading.local, daemon exit, exceptions in threads via threading.excepthook) matches the oracle plain and under handoff; the luc-wg2d signal-during-sort case gets a kernel test that matches the oracle
 
+
+## Notes
+
+**2026-11-03T13:16:23Z**
+
+threads_basic, threads_lowlevel, threads_signal_sort match the oracle plain and handoff; daemon threads hang at finalization (lu_task_shutdown_others)

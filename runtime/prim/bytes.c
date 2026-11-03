@@ -727,6 +727,19 @@ PRIM(b_hash, 1)
     return PyLong_FromLongLong(h);
 }
 
+/* b_keyed_hash(key, data): the 8 bytes _imp.source_hash returns. */
+PRIM(b_keyed_hash, 2)
+{
+    long key;
+    if (lu_long_as_long(args[0], &key) < 0) {
+        return NULL;
+    }
+    BV(v, 1);
+    uint64_t h = lu_keyed_hash((uint64_t)key, v.p, v.n);
+    lu_bv_put(&v);
+    return PyBytes_FromStringAndSize((const char *)&h, sizeof h);
+}
+
 /* b_concat(a, b) */
 PRIM(b_concat, 2)
 {
@@ -1725,7 +1738,7 @@ PyMethodDef lu_prim_bytes_methods[] = {
     FAST(ba_remove), FAST(ba_reverse), FAST(ba_resize), FAST(ba_irepeat), FAST(ba_alloc),
     FAST(ba_new), FAST(ba_wrap), FAST(ba_exports), FAST(b_len), FAST(b_check), FAST(b_bytes),
     FAST(b_from_ints), FAST(b_zeros), FAST(b_subtype), FAST(b_item), FAST(b_slice),
-    FAST(b_slice_step), FAST(b_cmp), FAST(b_hash), FAST(b_concat), FAST(b_repeat), FAST(b_find),
+    FAST(b_slice_step), FAST(b_cmp), FAST(b_hash), FAST(b_keyed_hash), FAST(b_concat), FAST(b_repeat), FAST(b_find),
     FAST(b_count), FAST(b_match), FAST(b_replace), FAST(b_join), FAST(b_split),
     FAST(b_splitlines), FAST(b_strip), FAST(b_case), FAST(b_is), FAST(b_expandtabs),
     FAST(b_translate), FAST(b_hex), FAST(b_fromhex), FAST(b_iter), FAST(b_next), FAST(b_hint), FAST(b_sizeof),

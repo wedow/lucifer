@@ -147,6 +147,12 @@ sys.exit(code)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(set(rows.values()), {'PASS'})
 
+    def test_committed_inventory_is_current(self):
+        inventory = json.loads((ROOT / 'tests/diff/inventory.json').read_text())
+        stale = [name for name, sha in inventory['dependencies'].items()
+                 if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != sha]
+        self.assertEqual(stale, [], 'rerun `tools/difftest collect`')
+
     def test_normalization_is_narrow(self):
         self.assertEqual(normalize(b'<X at 0xabc> 0xabc\n'), b'<X at <ADDRESS>> 0xabc\n')
         self.assertNotEqual(normalize(b'ValueError: a\n'), normalize(b'ValueError: b\n'))

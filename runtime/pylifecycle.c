@@ -142,7 +142,16 @@ report_uncaught(void)
         }
     }
     else {
-        lu_err_display(exc);
+        /* sys.excepthook(type, value, traceback); without one, the default display */
+        PyObject *hook = lu_ns_lookup(_PyRuntime.main_interp.sysdict, PyUnicode_InternFromString("excepthook"));
+        PyObject *tb = ((PyBaseExceptionObject *)exc)->traceback;
+        PyObject *args[3] = { (PyObject *)Py_TYPE(exc), exc, tb != NULL ? tb : Py_None };
+        PyObject *result = hook != NULL && hook != Py_None ? lu_call(hook, args, 3, NULL) : NULL;
+        if (result == NULL) {
+            PyErr_Clear();
+            lu_err_display(exc);
+        }
+        Py_XDECREF(result);
     }
     Py_DECREF(exc);
     return status;
@@ -357,27 +366,36 @@ compile_main(struct _is *interp, PyObject *source, PyObject *filename)
     return code;
 }
 
+/* A fresh __main__ in sys.modules, as pyrun_file leaves it: __builtins__,
+   and the loader of the file it came from, or the builtin importer for -c,
+   standard input and embedded strings (loader_class NULL). Borrowed. */
+static PyObject *
+new_main(struct _is *interp, const wchar_t *path, const char *loader_class)
+{
+    PyObject *main = lu_module_new("__main__");
+    if (main == NULL) {
+        return NULL;
+    }
+    PyObject *ns = PyModule_GetDict(main);
+    PyObject *builtins = lu_ns_lookup(interp->modules, LU_ID(builtins));
+    PyObject *importlib = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("_frozen_importlib"));
+    PyObject *builtin_importer = importlib != NULL
+        ? lu_ns_lookup(PyModule_GetDict(importlib), PyUnicode_InternFromString("BuiltinImporter")) : NULL;
+    int err = lu_ns_insert(ns, LU_ID(__builtins__), builtins) < 0
+        || lu_ns_insert(interp->modules, LU_ID(__main__), main) < 0
+        || (loader_class != NULL ? set_main_file(interp, main, path, loader_class) < 0
+            : builtin_importer != NULL && lu_ns_insert(ns, LU_ID(__loader__), builtin_importer) < 0);
+    Py_DECREF(main);                    /* sys.modules holds it */
+    return err ? NULL : main;
+}
+
 /* Runs code as __main__. loader_class is NULL for -c and standard input,
    which have no file. */
 static int
 run_main_code(struct _is *interp, PyObject *code, const wchar_t *path, const char *loader_class)
 {
-    PyObject *main = lu_module_new("__main__");
-    PyObject *result = NULL;
-    if (main != NULL) {
-        PyObject *ns = PyModule_GetDict(main);
-        PyObject *builtins = lu_ns_lookup(interp->modules, LU_ID(builtins));
-        PyObject *importlib = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("_frozen_importlib"));
-        PyObject *builtin_importer = importlib != NULL
-            ? lu_ns_lookup(PyModule_GetDict(importlib), PyUnicode_InternFromString("BuiltinImporter")) : NULL;
-        if (lu_ns_insert(ns, LU_ID(__builtins__), builtins) == 0
-            && lu_ns_insert(interp->modules, LU_ID(__main__), main) == 0
-            && (loader_class != NULL ? set_main_file(interp, main, path, loader_class) == 0
-                : builtin_importer == NULL || lu_ns_insert(ns, LU_ID(__loader__), builtin_importer) == 0)) {
-            result = PyEval_EvalCode(code, ns, ns);
-        }
-        Py_DECREF(main);
-    }
+    PyObject *main = new_main(interp, path, loader_class);
+    PyObject *result = main != NULL ? PyEval_EvalCode(code, PyModule_GetDict(main), PyModule_GetDict(main)) : NULL;
     flush_io();
     if (result == NULL) {
         return report_uncaught();
@@ -457,6 +475,7 @@ Py_InitializeFromConfig(const PyConfig *src)
         return status;
     }
     interp->config = config;
+    __atomic_store_n(&_PyRuntime.finalizing, 0, __ATOMIC_RELAXED);
     if (lu_hash_secret_init(config.use_hash_seed, config.hash_seed) < 0) {
         return PyStatus_Error("_Py_HashRandomization_Init: failed to get random numbers to initialize Python");
     }
@@ -495,10 +514,47 @@ flush_std_files(void)
     return status;
 }
 
-/* Py_FinalizeEx, as far as there is something to finalize: atexit's
-   callbacks run, the standard streams are flushed, then the runtime counts
-   as finalizing. CPython flushes once more after tearing the modules down;
-   there is no teardown to print from yet. */
+/* finalize_modules: __main__'s namespace is emptied so that what only it
+   held dies, __del__ methods running. The other modules stay: their code
+   (weakref callbacks, stream finalizers) still runs during teardown. */
+static void
+finalize_modules(struct _is *interp)
+{
+    PyObject *main = lu_ns_lookup(interp->modules, LU_ID(__main__));
+    if (main != NULL && PyModule_Check(main)) {
+        PyDict_Clear(PyModule_GetDict(main));
+    }
+}
+
+/* The interpreter ends: its task is deleted and its state forgotten, so that
+   Py_Initialize starts a new one. The objects it made are not freed: modules
+   and types reach each other in cycles, and the collector does not run yet. */
+static void
+release_interpreter(struct _is *interp)
+{
+    PyThreadState *main_task = PyThreadState_Get();
+    PyThreadState_Clear(main_task);
+    PyEval_SaveThread();
+    PyThreadState_Delete(main_task);
+    for (int i = 0; i < LU_NSIG; i++) {
+        _PyRuntime.signals.handlers[i].func = NULL;
+        _PyRuntime.signals.handlers[i].tripped = 0;
+    }
+    _PyRuntime.signals.tripped = 0;
+    interp->modules = interp->builtins = interp->sysdict = interp->interned = NULL;
+    interp->importlib = interp->import_func = NULL;
+    interp->eval_frame = NULL;
+    interp->specializing = 0;
+    memset(interp->static_types, 0, sizeof interp->static_types);
+    memset(interp->kernel, 0, sizeof interp->kernel);
+    PyConfig_Clear(&interp->config);
+}
+
+/* Py_FinalizeEx, as far as there is something to finalize: the non-daemon
+   threads are joined, atexit's callbacks run, the standard streams are flushed,
+   the other threads are shut down, then the runtime counts as finalizing.
+   CPython flushes once more after tearing the modules down; there is no
+   teardown to print from yet. */
 int
 Py_FinalizeEx(void)
 {
@@ -524,9 +580,19 @@ Py_FinalizeEx(void)
         }
         Py_XDECREF(result);
     }
+    /* Before the daemon threads stop: the streams' locks are Python locks, which a daemon
+       stopped for good inside a write would hold for ever. */
     int status = flush_std_files();
     lu_sched_stop();
+    /* What is left are daemon threads: they hang when they next attach. As in
+       CPython they stop before the modules are torn down. */
+    lu_task_shutdown_others(interp);
     __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
+    finalize_modules(interp);
+    flush_std_stream("stdout");
+    flush_std_stream("stderr");
+    PyErr_Clear();
+    release_interpreter(interp);
     return status;
 }
 
@@ -585,4 +651,48 @@ void
 Py_Initialize(void)
 {
     Py_InitializeEx(1);
+}
+
+int
+Py_IsInitialized(void)
+{
+    return _PyRuntime.main_interp.builtins != NULL;
+}
+
+void
+Py_Finalize(void)
+{
+    Py_FinalizeEx();
+}
+
+/* pythonrun.c PyRun_SimpleStringFlags: the string runs in __main__, which is
+   made on first use and kept for the next call. An uncaught exception is
+   printed (SystemExit leaves quietly) and the result is -1. */
+int
+PyRun_SimpleStringFlags(const char *command, PyCompilerFlags *flags)
+{
+    struct _is *interp = &_PyRuntime.main_interp;
+    PyObject *main = lu_ns_lookup(interp->modules, LU_ID(__main__));
+    main = main != NULL ? main : new_main(interp, NULL, NULL);
+    PyObject *source = main != NULL ? PyUnicode_FromString(command) : NULL;
+    PyObject *name = source != NULL ? PyUnicode_FromString("<string>") : NULL;
+    PyObject *code = name != NULL ? compile_main(interp, source, name) : NULL;
+    PyObject *result = code != NULL ? PyEval_EvalCode(code, PyModule_GetDict(main), PyModule_GetDict(main)) : NULL;
+    Py_XDECREF(source);
+    Py_XDECREF(name);
+    Py_XDECREF(code);
+    flush_io();
+    if (result == NULL) {
+        report_uncaught();
+        return -1;
+    }
+    Py_DECREF(result);
+    return 0;
+}
+
+#undef PyRun_SimpleString
+int
+PyRun_SimpleString(const char *command)
+{
+    return PyRun_SimpleStringFlags(command, NULL);
 }

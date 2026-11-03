@@ -128,7 +128,7 @@ def extension_suffixes():
 
 
 def source_hash(key, source):
-    raise NotImplementedError('_imp.source_hash needs the hash-based pyc support')
+    return _lucifer.b_keyed_hash(key, source)
 
 
 def _override_frozen_modules_for_tests(override, /):

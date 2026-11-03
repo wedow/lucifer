@@ -8,6 +8,7 @@
    each slot's place and its thunk. A slot without a thunk yet is left as
    it is (the sequence slots arrive with their types). */
 
+#include "interp/exceptions.h"
 #include "interp/frame.h"
 #include "prim/prim.h"
 
@@ -244,6 +245,23 @@ slot_tp_init(PyObject *self, PyObject *args, PyObject *kwargs)
     }
     Py_DECREF(r);
     return 0;
+}
+
+/* slot_tp_finalize: __del__, run on a dying object with the pending
+   exception set aside; an error in it is reported, not raised. */
+static void
+slot_tp_finalize(PyObject *self)
+{
+    PyObject *exc = PyErr_GetRaisedException();
+    PyObject *r = lu_call_special(self, LU_ID(__del__), NULL, 0);
+    if (r == NULL) {
+        PyObject *del = PyObject_GetAttr((PyObject *)Py_TYPE(self), LU_ID(__del__));
+        PyErr_Clear();
+        lu_err_unraisable_text("Exception ignored while calling deallocator", del);
+        Py_XDECREF(del);
+    }
+    Py_XDECREF(r);
+    PyErr_SetRaisedException(exc);
 }
 
 /* slot_tp_new: type.__new__ as an attribute of the type, called with the
@@ -503,7 +521,7 @@ static const struct slot slots[] = {
     TP(tp_str, slot_tp_str), TP(tp_richcompare, slot_tp_richcompare),
     TP(tp_iter, slot_tp_iter), TP(tp_iternext, slot_tp_iternext),
     TP(tp_descr_get, slot_tp_descr_get), TP(tp_descr_set, slot_tp_descr_set),
-    TP(tp_init, slot_tp_init), TP(tp_new, slot_tp_new), TP(tp_finalize, NULL),
+    TP(tp_init, slot_tp_init), TP(tp_new, slot_tp_new), TP(tp_finalize, slot_tp_finalize),
     BF(bf_getbuffer), BF(bf_releasebuffer), AM(am_await), AM(am_aiter), AM(am_anext),
     NB(nb_add, slot_nb_add), NB(nb_subtract, slot_nb_subtract),
     NB(nb_multiply, slot_nb_multiply), NB(nb_remainder, slot_nb_remainder),

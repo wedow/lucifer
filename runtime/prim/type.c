@@ -515,6 +515,9 @@ static void
 subtype_dealloc(PyObject *self)
 {
     PyTypeObject *tp = Py_TYPE(self), *base = tp;
+    if (tp->tp_finalize != NULL && PyObject_CallFinalizerFromDealloc(self) < 0) {
+        return;                         /* resurrected */
+    }
     lu_clear_weakrefs(self);
     /* Clear the slots of every heap type in the chain, then the dict. */
     for (; base->tp_flags & Py_TPFLAGS_HEAPTYPE; base = base->tp_base) {

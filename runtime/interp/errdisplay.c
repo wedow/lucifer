@@ -1,10 +1,10 @@
-/* The default excepthook's output (Python/pythonrun.c _PyErr_Display, Lib/
-   traceback.py TracebackException.format) for an exception nothing caught:
-   the chain of causes and contexts, each traceback, the exception line and
-   its notes, and exception groups as a tree. It prints frame lines without
-   source text, which is what CPython prints when the source file cannot be
-   found; source lines, caret markers and name suggestions arrive with the
-   ported traceback module. */
+/* The native renderer of an exception nothing caught (Python/pythonrun.c
+   _PyErr_Display, Lib/traceback.py TracebackException.format): the chain of
+   causes and contexts, each traceback, the exception line and its notes, and
+   exception groups as a tree. It prints frame lines without source text. It
+   runs only where traceback._print_exception_bltin cannot, the fallback
+   CPython also keeps; lu_err_display, last in this file, tries traceback
+   first. */
 
 #include "interp/exceptions.h"
 #include "interp/frame.h"
@@ -642,8 +642,8 @@ lu_err_unraisable_text(const char *message, PyObject *obj)
     }
 }
 
-void
-lu_err_display(PyObject *exc)
+static void
+display_native(PyObject *exc)
 {
     struct out out = { 0 };
     struct ctx c = { .out = &out };
@@ -652,4 +652,29 @@ lu_err_display(PyObject *exc)
     node_free(root);
     lu_stderr_write(out.p, out.n);
     free(out.p);
+}
+
+/* _PyErr_Display: traceback._print_exception_bltin prints the exception, source
+   lines and position markers included. Where the traceback module cannot be
+   imported or fails, the native renderer above stands in. */
+void
+lu_err_display(PyObject *exc)
+{
+    struct _is *interp = &_PyRuntime.main_interp;
+    if (lu_ns_lookup(interp->sysdict, PyUnicode_InternFromString("stderr")) == Py_None) {
+        return;                         /* no stream to print on */
+    }
+    PyObject *name = PyUnicode_InternFromString("traceback");
+    PyObject *module = name != NULL && interp->import_func != NULL
+        ? lu_call(interp->import_func, &name, 1, NULL) : NULL;
+    PyObject *print = module != NULL ? PyObject_GetAttrString(module, "_print_exception_bltin") : NULL;
+    PyObject *result = print != NULL ? lu_call(print, &exc, 1, NULL) : NULL;
+    if (result == NULL) {
+        PyErr_Clear();
+        display_native(exc);
+    }
+    Py_XDECREF(result);
+    Py_XDECREF(print);
+    Py_XDECREF(module);
+    Py_XDECREF(name);
 }

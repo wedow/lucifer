@@ -76,7 +76,7 @@ HIDDEN = compiler:compiler:lib/compiler/__init__.py \
 	$(foreach f,$(filter-out %/__init__.py,$(wildcard lib/compiler/*.py)),compiler.$(basename $(notdir $f)):compiler.$(basename $(notdir $f)):$f)
 EXPORTS = results/abi/cp314t-exports.tsv
 
-.PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel regen-abi check-harness check-compiler regen
+.PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel check-embed regen-abi check-harness check-compiler regen
 all: bin/lucifer build/lib/stamp
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -112,7 +112,7 @@ build/lib/stamp: tools/freeze lib/sysconfigdata.py $(shell find third_party/cpyt
 abi-audit: bin/lucifer
 	python3 tools/abi/audit.py $(EXPORTS) bin/lucifer
 
-check: check-blocking check-globals check-capi check-kernel
+check: check-blocking check-globals check-capi check-kernel check-embed
 
 # Blocking calls only in runtime/prim/os.c, inside the syscall bracket.
 check-blocking: $(MAIN) $(LIB_OBJS)
@@ -139,6 +139,23 @@ check-capi: bin/lucifer $(CAPI_TESTS)
 	    [ "$$out" = "capi $$name ok" ] || { echo "FAIL $$name (run $$run)"; exit 1; }; \
 	  done; echo "PASS $$name"; \
 	done
+
+# An embedder links the archive: its programs, each in its own initialize and
+# finalize cycle, print what the executable prints for the same -c programs.
+EMBED_PROGRAMS = 'import os; x = 1; print("first", x)' \
+	'print("second", globals().get("x"))' \
+	'import atexit; atexit.register(print, "exit"); d = type("D", (), {"__del__": lambda s: print("del")})()' \
+	'1 / 0' \
+	'print("after error")'
+
+build/tests/embed/run: tests/embed/run.c build/liblucifer.a
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -std=gnu11 -Wall -Iinclude -pthread -o $@ $< -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive -lm
+
+check-embed: build/tests/embed/run bin/lucifer
+	@build/tests/embed/run $(EMBED_PROGRAMS) > build/tests/embed/actual 2>&1; \
+	{ for p in $(EMBED_PROGRAMS); do bin/lucifer -c "$$p" 2>&1; done; } > build/tests/embed/expected; \
+	diff build/tests/embed/expected build/tests/embed/actual && echo "PASS embed"
 
 # Rerun when the headers or the export list change.
 regen-abi:

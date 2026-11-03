@@ -365,20 +365,21 @@ class _IOBase:
         """Destructor.  Calls close()."""
         try:
             closed = self.closed
-        except AttributeError:
+            if closed:
+                return
+        except Exception:
             # If getting closed fails, then the object is probably
             # in an unusable state, so ignore.
             return
 
-        if closed:
-            return
-
-        if dealloc_warn := getattr(self, "_dealloc_warn", None):
-            dealloc_warn(self)
-
-        # If close() fails, the caller logs the exception with
-        # sys.unraisablehook. close() must be called at the end at __del__().
-        self.close()
+        # iobase_finalize: a failing close() is reported only in dev mode.
+        try:
+            if dealloc_warn := getattr(self, "_dealloc_warn", None):
+                dealloc_warn(self)
+            self.close()
+        except Exception:
+            if sys.flags.dev_mode:
+                raise
 
     ### Inquiries ###
 
@@ -1642,6 +1643,7 @@ class FileIO(_RawIOBase):
             if fd < 0:
                 if not closefd:
                     raise ValueError('Cannot use closefd=False with file name')
+                sys.audit('open', file, mode, flags)
                 if opener is None:
                     fd = posix.open(file, flags, 0o666)
                 else:
