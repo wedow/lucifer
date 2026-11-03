@@ -10,6 +10,9 @@ import sys
 import token
 
 from . import tokenizer
+from .tokenizer import (E_OK, E_EOF, E_INTR, E_TOKEN, E_NOMEM, E_DONE, E_TABSPACE, E_TOODEEP, E_DEDENT,
+                        E_DECODE, E_EOFS, E_EOLS, E_LINECONT, E_BADSINGLE, E_COLUMNOVERFLOW,
+                        IUNDERFLOW_STOP)
 
 ENDMARKER = token.ENDMARKER
 NAME = token.NAME
@@ -43,10 +46,6 @@ PyPARSE_ALLOW_INCOMPLETE_INPUT = 0x0100
 
 CURRENT_POS = -5
 
-# Parser/errcode.h
-E_OK, E_EOF, E_INTR, E_TOKEN, E_SYNTAX, E_NOMEM, E_DONE, E_ERROR = range(10, 18)
-E_TABSPACE, E_OVERFLOW, E_TOODEEP, E_DEDENT, E_DECODE, E_EOFS, E_EOLS, E_LINECONT = range(18, 26)
-E_BADSINGLE, E_INTERACT_STOP, E_COLUMNOVERFLOW = 27, 28, 29
 
 IncompleteInputError = getattr(builtins, "_IncompleteInputError", SyntaxError)
 
@@ -55,6 +54,12 @@ LOAD = _ast.Load()
 DUMMY_NAME = _ast.Name("", LOAD, lineno=1, col_offset=0, end_lineno=1, end_col_offset=0)
 
 STACK_OVERFLOW = "Parser stack overflowed - Python source too complex to parse"
+# The C parser fails with STACK_OVERFLOW past MAXSTACK nested rule calls.  A
+# rule call here takes up to three Python frames (the rule, its memo wrapper,
+# a lookahead), so the parse runs with room for that many more frames, and Python's
+# RecursionError stands for the C check.
+MAXSTACK = 6000
+FRAMES_PER_LEVEL = 3
 
 
 class Token:
@@ -315,13 +320,21 @@ class Parser:
         self.call_invalid_rules = True
         # Don't try to get extra tokens in interactive mode when trying to
         # raise specialized errors in the second pass.
-        self.tok.interactive_underflow = 1  # IUNDERFLOW_STOP
+        self.tok.interactive_underflow = IUNDERFLOW_STOP
 
     def is_end_of_source(self):
         return self.tok.done in (E_EOF, E_EOFS, E_EOLS)
 
     def run_parser(self):
         """_PyPegen_run_parser"""
+        limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(limit + MAXSTACK * FRAMES_PER_LEVEL)
+        try:
+            return self._run_parser()
+        finally:
+            sys.setrecursionlimit(limit)
+
+    def _run_parser(self):
         error = None
         try:
             res = self.parse()
@@ -611,14 +624,11 @@ def parsenumber_raw(s):
     """parsenumber_raw: the value of a NUMBER token without underscores."""
     if s[-1] in "jJ":
         return complex(0.0, float(s[:-1]))
-    if s[0] == "0" and len(s) > 1 and s[1] in "xXoObB":
+    if s[:2].lower() in ("0x", "0o", "0b"):
         return int(s, 0)
-    try:
-        return int(s, 10) if s.isdigit() else float(s)
-    except ValueError:
-        if s.isdigit():
-            raise
-        return float(s)
+    if s.isdigit():
+        return int(s)
+    return float(s)
 
 
 def parsenumber(s):

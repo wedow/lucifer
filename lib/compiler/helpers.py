@@ -6,7 +6,7 @@ constructor, the action passes [] (ast2obj turns NULL into an empty list).
 """
 import sys
 from _ast import (
-    AST, Add, And, Attribute, BitAnd, BitOr, BitXor, Call, ClassDef, Compare, Constant, Del, Div, Eq,
+    Add, And, Attribute, BitAnd, BitOr, BitXor, Call, ClassDef, Compare, Constant, Del, Div, Eq,
     FloorDiv, FormattedValue, FunctionDef, AsyncFunctionDef, Gt, GtE, In, Interpolation, Invert, Is,
     IsNot, JoinedStr, LShift, List, Load, Lt, LtE, MatMult, Mod, Module, Mult, Name, Not, NotEq, NotIn,
     Or, Pow, RShift, Starred, Store, Sub, Subscript, TemplateStr, Tuple, TypeIgnore, UAdd, USub,
