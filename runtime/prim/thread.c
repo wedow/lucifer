@@ -4,6 +4,7 @@
 #define _GNU_SOURCE
 #include "prim/prim.h"
 #include "thread/lock.h"
+#include "interp/exceptions.h"
 
 #include <pthread.h>
 #include <unistd.h>
@@ -90,9 +91,48 @@ prim_thread_native_id(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLongLong(gettid());
 }
 
+/* thread_start(callable): runs callable() in a new OS thread with its own
+   task, and answers the thread's identifier. The thread is detached; the
+   Python side keeps the lock a join waits on. What callable raises is
+   reported as an unraisable exception. */
+static void *
+thread_main(void *arg)
+{
+    PyObject *callable = arg;
+    PyGILState_STATE gstate = PyGILState_Ensure();
+    PyObject *result = lu_call(callable, NULL, 0, NULL);
+    if (result == NULL) {
+        lu_err_unraisable_text("Exception ignored in thread started by", callable);
+    }
+    Py_XDECREF(result);
+    Py_DECREF(callable);
+    PyGILState_Release(gstate);
+    return NULL;
+}
+
+static PyObject *
+prim_thread_start(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    pthread_attr_t attr;
+    pthread_t thread;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 8 << 20);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    Py_INCREF(args[0]);
+    int err = pthread_create(&thread, &attr, thread_main, args[0]);
+    pthread_attr_destroy(&attr);
+    if (err != 0) {
+        Py_DECREF(args[0]);
+        lu_err_format(PyExc_RuntimeError, "can't start new thread");
+        return NULL;
+    }
+    return PyLong_FromLongLong((long long)(uintptr_t)thread);
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_thread_methods[] = {
     FAST(mutex_new), FAST(mutex_acquire), FAST(mutex_release), FAST(mutex_locked),
-    FAST(thread_ident), FAST(thread_native_id),
+    FAST(thread_ident), FAST(thread_native_id), FAST(thread_start),
     { NULL, NULL, 0, NULL },
 };
