@@ -1,4 +1,8 @@
-No changes to `Lib/`.
+Changes to `Lib/`:
+
+- `Lib/collections/__init__.py`: `namedtuple` binds the arguments of `__new__`
+  by hand instead of `eval()` of a lambda, until the runtime has a compiler.
+  Argument errors keep CPython's wording.
 
 Tools/peg_generator/pegen/ is copied from the same tag to generate
 lib/compiler/parser.py. Modifications:
@@ -262,3 +266,16 @@ spaces until the Unicode database exists. `runtime/prim/str.c`'s
   string primitives. utf-7 is absent.
 - `lib/kernel/builtins.py` `import_star` is `import_all_from` of
   `Python/ceval.c`.
+- `lib/kernel/genericalias.py` ports `Objects/genericaliasobject.c` and
+  `Objects/unionobject.c` (types.GenericAlias, typing.Union, `type | type`,
+  the `__class_getitem__` of the builtin generics) and runs the PEP 695
+  intrinsics through `lib/modules/_typing.py`, a port of
+  `Objects/typevarobject.c` (type parameters, aliases and `Generic`; the bound,
+  constraints, default and alias value are evaluated on first use).
+  `lib/kernel/mappingproxy.py` ports the methods of `mappingproxy` and the
+  `mapping` of the dict views (`Objects/descrobject.c`, `Objects/dictobject.c`).
+  `lib/modules/_types.py` is `Modules/_typesmodule.c`.
+- `lib/modules/_collections.py` (deque, defaultdict, `_count_elements`,
+  `_tuplegetter`) and `lib/modules/itertools.py` follow
+  `Modules/_collectionsmodule.c` and `Modules/itertoolsmodule.c`; the deque is
+  a list and the itertools classes cannot be pickled yet.

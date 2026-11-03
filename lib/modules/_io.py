@@ -13,6 +13,8 @@ import _lucifer
 # Import _thread instead of threading to reduce startup cost
 from _thread import allocate_lock as Lock
 
+BlockingIOError = BlockingIOError   # _io.BlockingIOError is the builtin
+
 SEEK_SET = 0
 SEEK_CUR = 1
 SEEK_END = 2

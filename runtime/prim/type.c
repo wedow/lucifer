@@ -1313,6 +1313,28 @@ prim_type_flag(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return bool_of((((PyTypeObject *)args[0])->tp_flags & (unsigned long)flag) == (unsigned long)flag);
 }
 
+/* type_set_flag(t, flag, on): sets or clears bits of tp_flags: only
+   Py_TPFLAGS_IS_ABSTRACT, which __abstractmethods__ assignment toggles. */
+static PyObject *
+prim_type_set_flag(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(3); TYPE_ARG(0);
+    long flag;
+    if (!PyLong_CheckExact(args[1]) || lu_long_as_long(args[1], &flag) < 0
+        || (unsigned long)flag != Py_TPFLAGS_IS_ABSTRACT) {
+        lu_err_format(PyExc_TypeError, "type_set_flag(t, flag, on): flag is Py_TPFLAGS_IS_ABSTRACT");
+        return NULL;
+    }
+    PyTypeObject *tp = (PyTypeObject *)args[0];
+    if (args[2] == Py_True) {
+        tp->tp_flags |= (unsigned long)flag;
+    }
+    else {
+        tp->tp_flags &= ~(unsigned long)flag;
+    }
+    return Py_NewRef(Py_None);
+}
+
 /* type_can_new(t): tp_new is set (else "cannot create instances"). */
 static PyObject *
 prim_type_can_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -1847,7 +1869,7 @@ prim_static_type(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 PyMethodDef lu_prim_type_methods[] = {
     FAST(static_type),
     FAST(type_lookup), FAST(type_dict), FAST(type_mro), FAST(type_bases), FAST(type_base),
-    FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag),
+    FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag), FAST(type_set_flag),
     FAST(type_can_new), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
     FAST(type_subclasses), FAST(type_modified), FAST(is_subtype), FAST(alloc), FAST(new_check),
     FAST(type_tp_name), FAST(type_static_module), FAST(size),

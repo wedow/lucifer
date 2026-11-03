@@ -8,7 +8,7 @@ from _lucifer import (
     str_join, error, kind, type_lookup, type_tp_name, MISSING, static_type, is_callable,
     is_subtype, size, int_format, int_add, int_as_double, str_chr, str_ord, bytes_ord, str_len,
     object_id, caller_locals, caller_globals, eval_code, kernel_get, kernel_set,
-    import_state,
+    import_state, field_get,
 )
 from _lucifer import _boot, _format, operators, _args, iter as _iter
 import sys
@@ -33,6 +33,7 @@ __all__ = (
 )
 
 _code = type((lambda: 0).__code__)
+_Union = static_type('typing.Union')
 
 
 def _name(x):
@@ -79,6 +80,8 @@ def print(*args, sep=' ', end='\n', file=None, flush=False):
 def _check(name, cls, inst, method, what):
     """PyObject_IsInstance and PyObject_IsSubclass: exact type, tuples of
     classes, then the metaclass's __instancecheck__ or __subclasscheck__."""
+    if type(cls) is _Union:
+        cls = field_get(cls, 0)
     if kind(cls, 'tuple'):
         for c in cls:
             if _check(name, c, inst, method, what):

@@ -46,6 +46,10 @@
 #define INTRINSIC_IMPORT_STAR 2
 #define INTRINSIC_STOPITERATION_ERROR 3
 #define INTRINSIC_ASYNC_GEN_WRAP 4
+#define INTRINSIC_TYPEVAR 7             /* the PEP 695 intrinsics, run by the kernel */
+#define INTRINSIC_TYPEALIAS 11
+#define INTRINSIC_TYPEVAR_WITH_BOUND 2  /* INTRINSIC_2 */
+#define INTRINSIC_SET_TYPEPARAM_DEFAULT 5
 
 #define CANNOT_CATCH_MSG \
     "catching classes that do not inherit from BaseException is not allowed"
@@ -1524,6 +1528,14 @@ op_CALL_INTRINSIC_1: {
         }
         DISPATCH();
     }
+    if (oparg >= INTRINSIC_TYPEVAR && oparg <= INTRINSIC_TYPEALIAS) {
+        kargs[0] = POP();
+        kargs[1] = lu_small_int(oparg);
+        nk = 2;
+        kid = LU_K_intrinsic_1;
+        kret = LU_RETURN_PUSH;
+        goto kernel_call;
+    }
     if (oparg != INTRINSIC_LIST_TO_TUPLE) {
         lu_err_format(PyExc_SystemError, "intrinsic %d arrives with its consumer", oparg);
         goto error;
@@ -2257,8 +2269,16 @@ op_CHECK_EG_MATCH: {
 }
 
 op_CALL_INTRINSIC_2: {
-    /* Only INTRINSIC_PREP_RERAISE_STAR until the other intrinsics have users. */
     SAVE_FRAME();
+    if (oparg >= INTRINSIC_TYPEVAR_WITH_BOUND && oparg <= INTRINSIC_SET_TYPEPARAM_DEFAULT) {
+        kargs[1] = POP();
+        kargs[0] = POP();
+        kargs[2] = lu_small_int(oparg);
+        nk = 3;
+        kid = LU_K_intrinsic_2;
+        kret = LU_RETURN_PUSH;
+        goto kernel_call;
+    }
     if (oparg != INTRINSIC_PREP_RERAISE_STAR) {
         lu_err_format(PyExc_SystemError, "intrinsic %d arrives with its consumer", oparg);
         goto error;

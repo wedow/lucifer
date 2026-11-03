@@ -1,6 +1,6 @@
 ---
 id: luc-qiwk
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T09:00:47Z
@@ -12,3 +12,9 @@ tags: [runtime, kernel]
 
 The frozen io, abc, _py_abc, _weakrefset and _collections_abc modules are in the build, but import io stops in types.py: list[int] is not subscriptable (types.GenericAlias and __class_getitem__ on list, dict, tuple, set, frozenset, type), int | str has no UnionType, the _types module port is absent, and exc.__traceback__.tb_frame is needed by types.FrameType. abc falls back to _py_abc, which imports _weakrefset, which imports types. Acceptance: import io, abc, collections.abc and typing succeed under bin/lucifer -I -S, and a tests/kernel program that uses io.StringIO, io.TextIOWrapper(io.BytesIO()) and an abc.ABC subclass matches the oracle. Relates luc-48jh.
 
+
+## Notes
+
+**2026-11-03T09:38:22Z**
+
+import io, abc, collections.abc and typing under -I -S; GenericAlias, UnionType, _types, _typing, _collections, itertools; tests generic_alias union_type import_io import_typing types_module

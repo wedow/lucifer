@@ -6,7 +6,7 @@ functions' frames, so reflection never recurses in C (DESIGN 5.2)."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_tp_name, is_subtype, kernel_set, int_add,
-    truth_exact, int_format, int_hash, type_has_sequence, list_append, new_check,
+    truth_exact, int_format, int_hash, type_has_sequence, list_append, new_check, kernel_get,
 )
 from _lucifer import _boot
 
@@ -284,6 +284,8 @@ def getitem(obj, key):
     if f is not MISSING:
         return call_special(f, obj, key)
     if kind(obj, 'type'):
+        if obj is type:
+            return kernel_get('generic_alias')(obj, key)
         try:
             meth = obj.__class_getitem__
         except AttributeError:
