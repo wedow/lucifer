@@ -51,6 +51,10 @@ struct lu_frame *lu_gen_resume(PyThreadState *ts, PyObject *gen, PyObject *arg);
 void lu_gen_suspend(PyThreadState *ts, struct lu_frame *f, int oparg);
 void lu_gen_finish(PyThreadState *ts, struct lu_frame *f);
 
+/* frame.clear() on a generator's frame: refused while it runs or is suspended;
+   a generator not yet started is closed. */
+int lu_gen_frame_clear(struct lu_frame *f);
+
 /* ASYNC_GEN_WRAP: an async generator's yielded value, as asend unwraps it. */
 PyObject *lu_async_gen_wrap(PyObject *value);
 

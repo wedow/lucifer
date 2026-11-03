@@ -22,6 +22,7 @@ enum lu_frame_owner {
     LU_FRAME_JIT,               /* values published through safepoint descriptors */
     LU_FRAME_KERNEL_HIDDEN,     /* a kernel builtin: skipped by every user-visible walker */
     LU_FRAME_C_ENTRY,           /* where C entered the eval loop; the task is pinned below it */
+    LU_FRAME_FRAME_OBJECT,      /* the copy a frame object took when its frame stopped executing */
 };
 
 /* What the caller's loop does with the value the frame returns: an attribute
@@ -73,6 +74,36 @@ lu_frame_lasti(struct lu_frame *f)
     }
     return at - 1 - lu_code_start(f->code);
 }
+
+/* The walker (FOUNDATIONS 2.2): calls visit(f, arg) on `from` and then each
+   frame outward until it returns nonzero, and returns that frame, or NULL.
+   Every owner appears, entry markers and kernel-hidden frames included. */
+struct lu_frame *lu_frame_walk(struct lu_frame *from, int (*visit)(struct lu_frame *, void *),
+                               void *arg);
+
+/* What a user sees of the stack: frames of Python code, not C entry markers
+   and not kernel builtins, which look like C. The `depth`th such frame at or
+   outward of `from` (0 is the first), or NULL. */
+struct lu_frame *lu_frame_user(struct lu_frame *from, Py_ssize_t depth);
+
+/* The frame's PyFrameObject, made on first use and kept by the record. It
+   owns nothing and reads through the record until the frame stops executing.
+   Returns a new reference, or NULL with an exception set. */
+PyObject *lu_frame_object(struct lu_frame *f);
+
+/* The code a frame object ran. */
+PyCodeObject *lu_frame_code(PyFrameObject *frame);
+
+/* The frame is about to stop executing (popped, or its generator finished).
+   Its frame object, if observers still hold one, takes the locals, stack,
+   function and locals dict (_PyFrame_ClearExceptCode's take_ownership) and
+   a share of the code; 1 then, and the caller must not release those. Else
+   0, with the frame object dropped. */
+int lu_frame_retire(struct lu_frame *f);
+
+/* frame.clear() (frame_clear_impl): 0, or -1 with RuntimeError for a frame
+   that is executing or suspended. */
+int lu_frame_clear(PyFrameObject *frame);
 
 /* Pushes a frame for `func` on the current task's datastack, with every
    local unbound. Returns NULL with MemoryError set. */

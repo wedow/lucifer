@@ -605,6 +605,19 @@ lu_qsbr_quiescent(struct lu_carrier *c)
 void lu_layouts_init(void);
 PyObject *lu_object_new(PyTypeObject *tp, size_t size);    /* zeroed; GC types tracked */
 void lu_object_free(PyObject *op);
+/* Drops one reference. When it was the last, returns 1 with the count at 0
+   and the object not yet freed, so that a dealloc can free a chain in a loop. */
+static inline int
+lu_release_last(PyObject *op)
+{
+    if (_Py_IsOwnedByCurrentThread(op) && op->ob_ref_local == 1
+        && _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared) == 0) {
+        op->ob_ref_local = 0;
+        return 1;
+    }
+    Py_DECREF(op);
+    return 0;
+}
 void lu_str_init(void);
 void lu_set_init(void);
 void lu_dict_init(void);
@@ -620,6 +633,7 @@ void lu_storage_init(void);
 void lu_module_init(void);
 void lu_exc_init(void);
 void lu_gen_init(void);
+void lu_frame_init(void);
 PyObject *lu_small_int(int value);
 PyObject *lu_long_from_digits(int negative, Py_ssize_t ndigits, const digit *digits);
 int lu_long_as_long(PyObject *v, long *result);

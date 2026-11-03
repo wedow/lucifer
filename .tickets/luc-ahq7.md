@@ -1,6 +1,6 @@
 ---
 id: luc-ahq7
-status: open
+status: closed
 deps: [luc-qidc]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: opus.
 
 make check-kernel PROGRAMS="frames" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t); the handoff lanes for it are checked in K1u.
 
+
+## Notes
+
+**2026-11-03T08:32:40Z**
+
+frame objects, FrameLocalsProxy, lu_frame_walk/lu_frame_user and take-ownership landed; tests/kernel/frames.py matches the oracle
