@@ -299,6 +299,26 @@ PyList_New(Py_ssize_t size)
     return (PyObject *)op;
 }
 
+int
+lu_list_append(PyObject *op, PyObject *item)
+{
+    PyListObject *l = (PyListObject *)op;
+    Py_ssize_t n = Py_SIZE(l);
+    if (n == l->allocated) {
+        Py_ssize_t grown = n < 4 ? 4 : 2 * n;
+        PyObject **items = PyMem_Realloc(l->ob_item, grown * sizeof(PyObject *));
+        if (items == NULL) {
+            PyErr_NoMemory();
+            return -1;
+        }
+        l->ob_item = items;
+        l->allocated = grown;
+    }
+    l->ob_item[n] = Py_NewRef(item);
+    Py_SET_SIZE(l, n + 1);
+    return 0;
+}
+
 static void
 list_dealloc(PyObject *op)
 {

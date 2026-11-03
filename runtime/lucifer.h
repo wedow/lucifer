@@ -292,6 +292,13 @@ PyObject *lu_function_new(PyObject *code, PyObject *globals);
    and never raises. */
 PyObject *lu_ns_lookup(PyObject *dict, PyObject *key);
 int lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value);
+/* Removes `key`: 1 when it was there, 0 when not. */
+int lu_ns_delete(PyObject *dict, PyObject *key);
+/* PyDict_Next over the namespace: *pos starts at 0; key and value are borrowed. */
+int lu_ns_next(PyObject *dict, Py_ssize_t *pos, PyObject **key, PyObject **value);
+
+/* Appends to a list (borrowed item), growing its storage. */
+int lu_list_append(PyObject *list, PyObject *item);
 
 /* Exceptions raised natively (runtime/capi/errors.c), before and beneath the
    kernel's exception classes. */

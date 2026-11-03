@@ -78,8 +78,10 @@ lu_dict_init(void)
     PyDict_Type.tp_dealloc = dict_dealloc;
 }
 
+/* The entry number of `key`, or DKIX_EMPTY; *slot_out, when given, is its
+   index slot. */
 static Py_ssize_t
-lookup(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash)
+lookup(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash, size_t *slot_out)
 {
     PyDictUnicodeEntry *ep0 = lu_dk_entries(dk);
     size_t mask = DK_MASK(dk);
@@ -90,6 +92,9 @@ lookup(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash)
         if (ix >= 0) {
             PyObject *k = ep0[ix].me_key;
             if (k == key || (lu_str_hash(k) == hash && lu_str_eq(k, key))) {
+                if (slot_out != NULL) {
+                    *slot_out = i;
+                }
                 return ix;
             }
         }
@@ -117,7 +122,7 @@ PyObject *
 lu_ns_lookup(PyObject *dict, PyObject *key)
 {
     PyDictKeysObject *dk = ((PyDictObject *)dict)->ma_keys;
-    Py_ssize_t ix = lookup(dk, key, lu_str_hash(key));
+    Py_ssize_t ix = lookup(dk, key, lu_str_hash(key), NULL);
     return ix >= 0 ? ((PyDictUnicodeEntry *)lu_dk_entries(dk))[ix].me_value : NULL;
 }
 
@@ -156,7 +161,7 @@ lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value)
     }
     PyDictObject *mp = (PyDictObject *)dict;
     Py_hash_t hash = lu_str_hash(key);
-    Py_ssize_t ix = lookup(mp->ma_keys, key, hash);
+    Py_ssize_t ix = lookup(mp->ma_keys, key, hash, NULL);
     if (ix >= 0) {
         PyDictUnicodeEntry *ep = &((PyDictUnicodeEntry *)lu_dk_entries(mp->ma_keys))[ix];
         PyObject *old = ep->me_value;
@@ -177,5 +182,42 @@ lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value)
     dk->dk_usable--;
     dk->dk_nentries = n + 1;
     mp->ma_used++;
+    return 0;
+}
+
+int
+lu_ns_delete(PyObject *dict, PyObject *key)
+{
+    PyDictObject *mp = (PyDictObject *)dict;
+    PyDictKeysObject *dk = mp->ma_keys;
+    size_t slot;
+    Py_ssize_t ix = lookup(dk, key, lu_str_hash(key), &slot);
+    if (ix < 0) {
+        return 0;
+    }
+    PyDictUnicodeEntry *ep = &((PyDictUnicodeEntry *)lu_dk_entries(dk))[ix];
+    PyObject *old_key = ep->me_key, *old_value = ep->me_value;
+    lu_dk_set_index(dk, slot, DKIX_DUMMY);
+    ep->me_key = ep->me_value = NULL;
+    dk->dk_version = 0;
+    mp->ma_used--;
+    Py_DECREF(old_key);
+    Py_DECREF(old_value);
+    return 1;
+}
+
+int
+lu_ns_next(PyObject *dict, Py_ssize_t *pos, PyObject **key, PyObject **value)
+{
+    PyDictKeysObject *dk = ((PyDictObject *)dict)->ma_keys;
+    PyDictUnicodeEntry *ep = lu_dk_entries(dk);
+    for (Py_ssize_t i = *pos; i < dk->dk_nentries; i++) {
+        if (ep[i].me_value != NULL) {
+            *pos = i + 1;
+            *key = ep[i].me_key;
+            *value = ep[i].me_value;
+            return 1;
+        }
+    }
     return 0;
 }
