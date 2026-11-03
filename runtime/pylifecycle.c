@@ -495,6 +495,52 @@ flush_std_files(void)
     return status;
 }
 
+/* finalize_modules: the modules' namespaces are emptied so that what only
+   they held dies, __del__ methods running. __main__ goes first, then the rest
+   in reverse import order. Built-in and frozen modules stay: the standard
+   streams still run their code. */
+static void
+finalize_modules(struct _is *interp)
+{
+    Py_ssize_t pos = 0, n = 0;
+    PyObject *key, *value;
+    while (lu_ns_next(interp->modules, &pos, &key, &value)) {
+        n++;
+    }
+    PyObject **spaces = malloc((size_t)n * sizeof *spaces);
+    if (spaces == NULL) {
+        return;
+    }
+    PyObject *main_module = lu_ns_lookup(interp->modules, PyUnicode_InternFromString("__main__"));
+    PyObject *main = NULL;
+    Py_ssize_t count = 0;
+    for (pos = 0; lu_ns_next(interp->modules, &pos, &key, &value) && count < n; ) {
+        if (!PyModule_Check(value)) {
+            continue;
+        }
+        PyObject *ns = PyModule_GetDict(value);
+        if (value != main_module && lu_ns_lookup(ns, PyUnicode_InternFromString("__file__")) == NULL) {
+            continue;       /* built-in and frozen modules serve the streams to the end */
+        }
+        Py_INCREF(ns);
+        if (value == main_module) {
+            main = ns;
+        }
+        else {
+            spaces[count++] = ns;
+        }
+    }
+    if (main != NULL) {
+        PyDict_Clear(main);
+        Py_DECREF(main);
+    }
+    while (count > 0) {
+        PyDict_Clear(spaces[--count]);
+        Py_DECREF(spaces[count]);
+    }
+    free(spaces);
+}
+
 /* Py_FinalizeEx, as far as there is something to finalize: atexit's
    callbacks run, the standard streams are flushed, then the runtime counts
    as finalizing. CPython flushes once more after tearing the modules down;
@@ -525,6 +571,10 @@ Py_FinalizeEx(void)
         Py_XDECREF(result);
     }
     int status = flush_std_files();
+    finalize_modules(interp);
+    if (flush_std_files() < 0) {
+        status = -1;
+    }
     lu_sched_stop();
     __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     return status;
