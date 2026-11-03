@@ -11,11 +11,16 @@ PyCF_ONLY_AST = _ast.PyCF_ONLY_AST
 PyCF_OPTIMIZED_AST = _ast.PyCF_OPTIMIZED_AST
 
 
+def parse(source, filename, mode, flags=0, feature_version=-1):
+    """The AST of source, unpreprocessed (Parser/peg_api.c)."""
+    from .parser import parse
+    return parse(source, filename, mode, flags, feature_version)
+
+
 def compile(source, filename, mode, flags=0, dont_inherit=False, optimize=-1, *, _feature_version=-1):
     if isinstance(source, _ast.AST):
         mod = source
     else:
-        from .parser import parse
         mod = parse(source, filename, mode, flags, _feature_version)
     from .preprocess import preprocess
     if flags & PyCF_ONLY_AST:

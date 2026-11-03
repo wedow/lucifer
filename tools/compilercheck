@@ -93,8 +93,15 @@ class Host:
 
 
 class Ours:
+    def __init__(self, host_parser):
+        self.host_parser = host_parser
+
     def __getattr__(self, name):
         import compiler
+        if self.host_parser:
+            compiler.parse = lambda source, filename, mode, flags=0, feature_version=-1: compile(
+                source, filename, mode, flags & ~ast.PyCF_OPTIMIZED_AST | ast.PyCF_ONLY_AST, dont_inherit=True,
+                _feature_version=feature_version)
         if name in ("tokenizer", "symtable"):
             __import__("compiler." + name)
         return getattr(compiler, name)
@@ -106,7 +113,7 @@ def first_difference(a, b):
     return f"host …{a[max(0, i - 60):i + 60]}… ours …{b[max(0, i - 60):i + 60]}…"
 
 
-def check_file(path, stages):
+def check_file(path, stages, host_parser=False):
     """{stage: None if identical else a one-line difference}; None if the host rejects the file."""
     signal.alarm(TIMEOUT)
     try:
@@ -119,7 +126,7 @@ def check_file(path, stages):
         for stage, view in views(source, path).items():
             if stage in stages:
                 try:
-                    host, ours = view(Host), view(Ours())
+                    host, ours = view(Host), view(Ours(host_parser=host_parser))
                 except BaseException as error:  # timeouts and recursion land here
                     host, ours = None, ("crashed", type(error).__name__, str(error))
                 result[stage] = None if host == ours else first_difference(host, ours)
@@ -152,6 +159,8 @@ def main():
     parser.add_argument("--require", default="", help="corpora that must be fully identical")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--show", type=int, default=5, help="differences listed per corpus and stage")
+    parser.add_argument("--host-parser", action="store_true",
+                        help="feed later stages the host's AST, to check them before the parser is done")
     parser.add_argument("files", nargs="*", type=Path, help="check these files instead of corpora")
     args = parser.parse_args()
     check_version()
@@ -161,7 +170,8 @@ def main():
     failed = False
     with concurrent.futures.ProcessPoolExecutor(args.jobs, initializer=worker_init) as pool:
         for name, paths in corpora.items():
-            results = dict(zip(paths, pool.map(check_file, paths, [stages] * len(paths), chunksize=1)))
+            results = dict(zip(paths, pool.map(check_file, paths, [stages] * len(paths),
+                                                    [args.host_parser] * len(paths), chunksize=1)))
             checked = {p: r for p, r in results.items() if r is not None}
             print(f"{name}: {len(checked)} of {len(paths)} files compile on the host")
             for stage in stages:
