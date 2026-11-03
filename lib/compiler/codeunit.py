@@ -539,16 +539,21 @@ def optimize_and_assemble_code_unit(u, const_cache, code_flags, filename):
     from . import assemble, flowgraph
     consts = consts_dict_keys_inorder(u.u_metadata.u_consts)
     g = flowgraph.cfg_from_instruction_sequence(u.u_instr_sequence)
-    nlocals = len(u.u_metadata.u_varnames)
-    nparams = len(u.u_ste.ste_varnames)
-    assert u.u_metadata.u_firstlineno
-    flowgraph.optimize_code_unit(g, consts, const_cache, nlocals, nparams,
-                                 u.u_metadata.u_firstlineno)
-    optimized_instrs = InstructionSequence()
-    stackdepth, nlocalsplus = flowgraph.optimized_cfg_to_instruction_sequence(
-        g, u.u_metadata, code_flags, optimized_instrs)
-    return assemble.make_code_object(u.u_metadata, const_cache, consts, stackdepth,
-                                     optimized_instrs, nlocalsplus, code_flags, filename)
+    try:
+        nlocals = len(u.u_metadata.u_varnames)
+        nparams = len(u.u_ste.ste_varnames)
+        assert u.u_metadata.u_firstlineno
+        flowgraph.optimize_code_unit(g, consts, const_cache, nlocals, nparams,
+                                     u.u_metadata.u_firstlineno)
+        optimized_instrs = InstructionSequence()
+        stackdepth, nlocalsplus = flowgraph.optimized_cfg_to_instruction_sequence(
+            g, u.u_metadata, code_flags, optimized_instrs)
+        return assemble.make_code_object(u.u_metadata, const_cache, consts, stackdepth,
+                                         optimized_instrs, nlocalsplus, code_flags, filename)
+    finally:
+        # The blocks link to each other; free them now, not at the next
+        # collection, so that no constant outlives the compilation.
+        flowgraph.cfg_builder_free(g)
 
 
 def start_location(stmts):
