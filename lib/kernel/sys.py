@@ -62,7 +62,7 @@ SimpleNamespace = type('SimpleNamespace', (object,), {
 # Values that never change
 
 version_info = _make(_structseq(
-    'sys.version_info', 'Version information as a named tuple.',
+    'sys.version_info', 'sys.version_info\n\nVersion information as a named tuple.',
     ('major', 'minor', 'micro', 'releaselevel', 'serial'), 5, False), (3, 14, 10, 'final', 0))
 hexversion = 0x030E0AF0
 
@@ -78,13 +78,13 @@ hash_info = _make(_structseq(
     9, False), (64, 2305843009213693951, 314159, 0, 1000003, 'siphash13', 64, 128, 0))
 
 int_info = _make(_structseq(
-    'sys.int_info', 'A named tuple that holds information about Python\'s\n'
+    'sys.int_info', 'sys.int_info\n\nA named tuple that holds information about Python\'s\n'
     'internal representation of integers.  The attributes are read only.',
     ('bits_per_digit', 'sizeof_digit', 'default_max_str_digits', 'str_digits_check_threshold'),
     4, False), (30, 4, 4300, 640))
 
 float_info = _make(_structseq(
-    'sys.float_info', 'A named tuple holding information about the float type. It contains '
+    'sys.float_info', 'sys.float_info\n\nA named tuple holding information about the float type. It contains '
     'low level\ninformation about the precision and internal representation. Please study\n'
     'your system\'s :file:`float.h` for more information.',
     ('max', 'max_exp', 'max_10_exp', 'min', 'min_exp', 'min_10_exp', 'dig', 'mant_dig',
@@ -93,11 +93,11 @@ float_info = _make(_structseq(
      2.220446049250313e-16, 2, 1))
 
 thread_info = _make(_structseq(
-    'sys.thread_info', 'A named tuple holding information about the thread implementation.',
+    'sys.thread_info', 'sys.thread_info\n\nA named tuple holding information about the thread implementation.',
     ('name', 'lock', 'version'), 3, False), ('pthread', 'semaphore', None))
 
 _asyncgen_hooks = _structseq(
-    'asyncgen_hooks', 'A named tuple providing information about asynchronous\n'
+    'asyncgen_hooks', 'asyncgen_hooks\n\nA named tuple providing information about asynchronous\n'
     'generators hooks.  The attributes are read only.', ('firstiter', 'finalizer'), 2, False)
 _asyncgen_hooks.__module__ = 'sys'
 
@@ -198,8 +198,8 @@ def configure(c):
         'hash_randomization', 'isolated', 'dev_mode', 'utf8_mode', 'warn_default_encoding',
         'safe_path', 'int_max_str_digits', 'gil', 'thread_inherit_context',
         'context_aware_warnings')
-    flags_type = _structseq('sys.flags', 'Flags provided through command line arguments or '
-                            'environment vars.', flag_names, 18, False)
+    flags_type = _structseq('sys.flags', 'sys.flags\n\nFlags provided through command line '
+                            'arguments or environment vars.', flag_names, 18, False)
     flag_values = (
         c['parser_debug'], c['inspect'], c['interactive'], c['optimization_level'],
         int(not c['write_bytecode']), int(not c['user_site_directory']), int(not c['site_import']),

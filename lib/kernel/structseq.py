@@ -26,9 +26,12 @@ def structseq_type(name, doc, fields, n_visible, instantiable=True):
     n_fields = len(fields)
     names = tuple(f for f in fields if f is not None)
 
-    def __new__(cls, sequence, dict=None):
+    def __new__(cls, *args, **kwargs):
         if not instantiable:
             raise TypeError("cannot create '" + name + "' instances")
+        return _new(cls, *args, **kwargs)
+
+    def _new(cls, sequence, dict=None):
         try:
             items = tuple(sequence)
         except TypeError:

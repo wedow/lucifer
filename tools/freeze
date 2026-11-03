@@ -9,7 +9,7 @@ Run with a host CPython 3.14 (magic 3627). There are three tables:
   builtin  lib/modules ports, named after their files: the builtin modules
            that sys.builtin_module_names lists;
   frozen   modules importlib finds as frozen, as NAME with the dotted module
-           ORIGNAME the file implements (importlib.\_bootstrap is frozen as
+           ORIGNAME the file implements (importlib._bootstrap is frozen as
            _frozen_importlib).
 Each is compiled with the filename "<frozen NAME>" (ORIGNAME for the frozen
 table), as CPython names its frozen modules. Hashes are never computed here:

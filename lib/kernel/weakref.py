@@ -23,6 +23,17 @@ def _type_name(ob):
     return str_join('', (module, '.', tp.__qualname__))
 
 
+def _unpack(name, args, kwargs):
+    """parse_weakref_init_args: the object and the optional callback."""
+    if kwargs:
+        error(TypeError, str_join('', (name, ' takes no keyword arguments')))
+    n = len(args)
+    if n < 1:
+        error(TypeError, str_join('', (name, ' expected at least 1 argument, got ', str(n))))
+    if n > 2:
+        error(TypeError, str_join('', (name, ' expected at most 2 arguments, got ', str(n))))
+
+
 @kernel_type(static_type('weakref.ReferenceType'))
 class ReferenceType:
     """Create a weak reference to 'object'.
@@ -30,11 +41,12 @@ class ReferenceType:
 When 'object' is deleted or finalized, 'callback' is called with the weak
 reference as argument if it was given."""
 
-    def __new__(cls, ob, callback=None, /):
-        return weakref_new(cls, ob, callback)
+    def __new__(cls, *args, **kwargs):
+        _unpack('__new__', args, kwargs)
+        return weakref_new(cls, args[0], args[1] if len(args) > 1 else None)
 
-    def __init__(self, ob, callback=None, /):
-        pass
+    def __init__(self, *args, **kwargs):
+        _unpack('__init__', args, kwargs)
 
     def __call__(self):
         return weakref_get(self)

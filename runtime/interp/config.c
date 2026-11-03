@@ -537,9 +537,6 @@ read_env_flags(PyConfig *config)
     if (env_set("PYTHONOPTIMIZE") && config->optimization_level == 0) {
         config->optimization_level = atoi(getenv("PYTHONOPTIMIZE")) > 0 ? atoi(getenv("PYTHONOPTIMIZE")) : 1;
     }
-    if (env_set("PYTHONDEVMODE") && config->dev_mode < 0) {
-        config->dev_mode = strcmp(getenv("PYTHONDEVMODE"), "0") != 0;
-    }
     PyStatus status = PyStatus_Ok();
     if (env_set("PYTHONPYCACHEPREFIX") && config->pycache_prefix == NULL) {
         status = PyConfig_SetBytesString(config, &config->pycache_prefix, getenv("PYTHONPYCACHEPREFIX"));
@@ -664,6 +661,28 @@ read_executable(PyConfig *config)
     return PyConfig_SetBytesString(config, &config->executable, path);
 }
 
+/* config_init_warnoptions: the dev mode filter first, then PYTHONWARNINGS
+   and -W (already there, in that order), then the BytesWarning filter. */
+static PyStatus
+finish_warnoptions(PyConfig *config)
+{
+    if (config->dev_mode < 0) {
+        const wchar_t *x = xoption(config, L"dev");
+        config->dev_mode = x != NULL || (config->use_environment && env_set("PYTHONDEVMODE")
+                                         && strcmp(getenv("PYTHONDEVMODE"), "0") != 0);
+    }
+    PyStatus status = PyStatus_Ok();
+    if (config->dev_mode) {
+        status = PyWideStringList_Insert(&config->warnoptions, 0, L"default");
+    }
+    if (!PyStatus_Exception(status) && config->bytes_warning > 0) {
+        status = PyWideStringList_Append(&config->warnoptions,
+                                         config->bytes_warning > 1 ? L"error::BytesWarning"
+                                                                   : L"default::BytesWarning");
+    }
+    return status;
+}
+
 PyStatus
 PyConfig_Read(PyConfig *config)
 {
@@ -691,8 +710,8 @@ PyConfig_Read(PyConfig *config)
     if (!PyStatus_Exception(status)) {
         status = read_executable(config);
     }
-    if (config->dev_mode < 0) {
-        config->dev_mode = xoption(config, L"dev") != NULL;
+    if (!PyStatus_Exception(status)) {
+        status = finish_warnoptions(config);
     }
     if (config->thread_inherit_context < 0) {
         config->thread_inherit_context = 1;            /* the free-threaded default */

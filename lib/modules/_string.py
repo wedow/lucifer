@@ -55,39 +55,39 @@ tuples, as str.format does."""
 
 
 def _parse(s):
+    """MarkupIterator_next: a literal ends at a doubled brace, which yields
+    the literal with one brace, or at a field, which yields it too."""
     i = 0
     n = len(s)
-    literal = []
     while i < n:
+        start = i
+        while i < n and s[i] not in '{}':
+            i += 1
+        literal = s[start:i]
+        if i >= n:
+            yield literal, None, None, None
+            return
         c = s[i]
-        if c in '{}':
-            if i + 1 < n and s[i + 1] == c:
-                literal.append(c)
-                i += 2
-                continue
-            if c == '}':
-                raise ValueError("Single '}' encountered in format string")
+        if i + 1 < n and s[i + 1] == c:
+            yield literal + c, None, None, None
+            i += 2
+            continue
+        if c == '}':
+            raise ValueError("Single '}' encountered in format string")
+        i += 1
+        field_start = i
+        depth = 1
+        while i < n and depth:
+            if s[i] == '{':
+                depth += 1
+            elif s[i] == '}':
+                depth -= 1
             i += 1
-            depth = 1
-            start = i
-            while i < n and depth:
-                if s[i] == '{':
-                    depth += 1
-                elif s[i] == '}':
-                    depth -= 1
-                i += 1
-            if depth:
-                raise ValueError("expected '}' before end of string" if start < n
-                                 else "Single '{' encountered in format string")
-            field = s[start:i - 1]
-            name, conversion, spec = _split_field(field)
-            yield ''.join(literal), name, spec, conversion
-            literal = []
-        else:
-            literal.append(c)
-            i += 1
-    if literal:
-        yield ''.join(literal), None, None, None
+        if depth:
+            raise ValueError("expected '}' before end of string" if field_start < n
+                             else "Single '{' encountered in format string")
+        name, conversion, spec = _split_field(s[field_start:i - 1])
+        yield literal, name, spec, conversion
 
 
 def _split_field(field):

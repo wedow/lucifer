@@ -76,6 +76,17 @@ types raise a TypeError."""
                     % (type(path).__name__, type(result).__name__))
 
 
+def _path(function, path, allowed='string, bytes or os.PathLike'):
+    """path_converter: a str or bytes path, or the one a PathLike gives."""
+    if not isinstance(path, (str, bytes)):
+        if not hasattr(path, '__fspath__'):
+            raise TypeError('%s: path should be %s, not %s' % (function, allowed, type(path).__name__))
+        path = fspath(path)
+    if ('\0' if isinstance(path, str) else b'\0') in path:
+        raise ValueError('%s: embedded null character in path' % function)
+    return path
+
+
 def getcwd():
     """Return a unicode string representing the current working directory."""
     return _lucifer.os_getcwd()
@@ -87,7 +98,8 @@ def stat(path, *, dir_fd=None, follow_symlinks=True):
         raise NotImplementedError('stat: dir_fd')
     if isinstance(path, int):
         return _stat_result(_lucifer.os_fstat(path))
-    return _stat_result(_lucifer.os_stat(fspath(path), bool(follow_symlinks)))
+    path = _path('stat', path, 'string, bytes, os.PathLike or integer')
+    return _stat_result(_lucifer.os_stat(path, bool(follow_symlinks)))
 
 
 def lstat(path, *, dir_fd=None):
@@ -102,12 +114,13 @@ def fstat(fd):
 
 def listdir(path=None):
     """Return a list containing the names of the files in the directory."""
-    return _lucifer.os_listdir('.' if path is None else fspath(path))
+    return _lucifer.os_listdir('.' if path is None else _path(
+        'listdir', path, 'string, bytes, os.PathLike, integer or None'))
 
 
 def open(path, flags, mode=0o777, *, dir_fd=None):
     """Open a file for low level IO.  Returns a file descriptor (integer)."""
-    return _lucifer.os_open(fspath(path), flags, mode)
+    return _lucifer.os_open(_path('open', path), flags, mode)
 
 
 def close(fd):

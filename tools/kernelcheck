@@ -7,8 +7,8 @@ compiled by the host into build/tests/kernel/NAME.pyc, then run as
 free-threaded oracle and once on bin/lucifer. stdout, stderr and the exit
 status must be identical. Exit status 1 when any program differs.
 
-Programs that read the environment run without -I, once per environment of
-ENV_RUNS. SEEDED programs are also run unseeded, twice: the runs must differ
+Programs in RUNS run once per (flags, environment); an environment replaces
+-I -S and the inherited environment. SEEDED programs are also run unseeded, twice: the runs must differ
 after the first line, which must equal the oracle's. FLAG_ROWS are bin/lucifer
 command lines whose exit status and stderr are checked directly.
 """
@@ -31,7 +31,13 @@ MAGIC = (3627).to_bytes(2, "little") + b"\r\n"
 # Lanes are the -X policies a program runs under; only the plain lane exists
 # until the handoff scheduler does.
 LANES = {"plain": []}
-ENV_RUNS = {"hash_seed": [{"PYTHONHASHSEED": "12345"}, {"PYTHONHASHSEED": "0"}]}
+# name -> [(flags, env)]: env None is -I -S with the inherited environment.
+RUNS = {
+    "hash_seed": [([], {"PYTHONHASHSEED": "12345"}), ([], {"PYTHONHASHSEED": "0"})],
+    "sys_flags": [([], None),
+                  (["-X", "int_max_str_digits=1000", "-X", "foo=bar", "-X", "baz", "-W", "ignore"], None),
+                  (["-B", "-b", "-q", "-O", "-E", "-X", "utf8=0"], None)],
+}
 SEEDED = ("hash_seed",)
 # (name, flags, exit status, text stderr must contain)
 FLAG_ROWS = [
@@ -52,7 +58,7 @@ def run(interpreter, flags, pyc, env=None):
     """env None: -I -S with the inherited environment; else -S with exactly env."""
     isolation = ["-I", "-S"] if env is None else ["-S"]
     try:
-        child = subprocess.run([interpreter, *flags, *isolation, str(pyc)],
+        child = subprocess.run([interpreter, *isolation, *flags, str(pyc)],
                                capture_output=True, timeout=TIMEOUT, env=env,
                                preexec_fn=limit_stack, cwd=BUILD)
     except subprocess.TimeoutExpired:
@@ -106,11 +112,11 @@ def main():
     failed = total = 0
     for name in names:
         pyc = compile_program(name)
-        for env in ENV_RUNS.get(name, [None]):
-            label = name if env is None else f"{name} {env}"
+        for flags, env in RUNS.get(name, [([], None)]):
+            label = name if not flags and env is None else f"{name} {flags} {env or ''}".rstrip()
             total += 1
-            oracle = run(args.oracle, [], pyc, env)
-            ours = run(lucifer, LANES[args.lane], pyc, env)
+            oracle = run(args.oracle, flags, pyc, env)
+            ours = run(lucifer, LANES[args.lane] + flags, pyc, env)
             if oracle == ours:
                 print(f"PASS {label}")
             else:
