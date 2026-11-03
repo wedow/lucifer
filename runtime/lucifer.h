@@ -252,6 +252,8 @@ struct _is {
     struct lu_lock tasks_lock;  /* the task list (HEAD_LOCK) */
     PyThreadState *tasks;       /* every task of this interpreter, in any state */
     uint64_t next_task_id;
+    int finalizing;             /* Py_FinalizeEx has begun: no thread starts */
+    int tasks_closed;           /* finalization removed the other tasks: new ones hang at attach */
     PyObject *modules;          /* sys.modules */
     PyObject *builtins;         /* builtins.__dict__ */
     PyObject *sysdict;          /* sys.__dict__ */
@@ -322,6 +324,7 @@ enum {
     _Py_THREAD_DETACHED = 0,
     _Py_THREAD_ATTACHED = 1,
     _Py_THREAD_SUSPENDED = 2,
+    _Py_THREAD_SHUTTING_DOWN = 3,       /* a daemon thread at finalization: it hangs when it attaches */
 };
 
 /* The task record (DESIGN 5.3): a Python thread of control. The PyThreadState
@@ -455,6 +458,10 @@ void lu_task_attach(PyThreadState *ts);
    or (for a stop-the-world) suspended. */
 void lu_task_detach(struct lu_task *t, int state);
 void lu_task_delete(struct lu_task *t);
+/* Finalization (CPython's _PyEval_StopTheWorldAll and _PyThreadState_RemoveExcept): every task
+   but the caller's is dropped from the interpreter and marked shutting down, so a daemon thread
+   hangs when it next attaches. The caller is attached. */
+void lu_task_shutdown_others(struct _is *interp);
 void lu_task_carrier_exit(struct lu_carrier *c);
 /* The task leaves its carrier at a migration point (DESIGN 5.4): detached,
    unbound, and no longer the carrier's task. The carrier's owner record stays
