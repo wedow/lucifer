@@ -104,6 +104,59 @@ check_async_exc(int detached, int clear)
     CHECK(bystander.raised == 0);
 }
 
+/* Async exceptions wait for the end of a builtin: a sort running when the
+   exception is set finishes, leaves the list sorted, and the exception comes
+   at the next poll, as in CPython where sort is C and never polls. */
+
+static void *
+raiser_thread(void *arg)
+{
+    unsigned long id = (unsigned long)(uintptr_t)arg;
+    usleep(20000);
+    PyGILState_STATE gil = PyGILState_Ensure();
+    CHECK(PyThreadState_SetAsyncExc(id, PyExc_KeyboardInterrupt) == 1);
+    PyGILState_Release(gil);
+    return NULL;
+}
+
+static void
+check_async_exc_waits_for_builtin(void)
+{
+    enum { N = 300000 };
+    PyThreadState *ts = PyThreadState_Get();
+    PyObject *list = PyList_New(0);
+    PyObject *append = PyObject_GetAttrString(list, "append");
+    long x = 12345;
+    for (int i = 0; i < N; i++) {
+        x = (x * 1103515245 + 12345) % 2147483648;
+        PyObject *n = PyLong_FromLong(x);
+        Py_DECREF(PyObject_CallOneArg(append, n));
+        Py_DECREF(n);
+    }
+    Py_DECREF(append);
+    PyObject *expected = PyObject_CallNoArgs(PyObject_GetAttrString(list, "copy"));
+    Py_DECREF(PyObject_CallNoArgs(PyObject_GetAttrString(expected, "sort")));
+    pthread_t t;
+    pthread_create(&t, NULL, raiser_thread, (void *)(uintptr_t)ts->thread_id);
+    PyObject *sort = PyObject_GetAttrString(list, "sort");
+    PyObject *res = PyObject_CallNoArgs(sort);
+    CHECK(res != NULL && !PyErr_Occurred());
+    Py_XDECREF(res);
+    Py_DECREF(sort);
+    PyErr_Clear();
+    PyObject *same = PyObject_CallOneArg(PyObject_GetAttrString(list, "__eq__"), expected);
+    CHECK(same == Py_True);
+    Py_XDECREF(same);
+    Py_DECREF(expected);
+    Py_BEGIN_ALLOW_THREADS
+    pthread_join(t, NULL);
+    Py_END_ALLOW_THREADS
+    CHECK(_Py_HandlePending(ts) == -1);
+    CHECK(PyErr_ExceptionMatches(PyExc_KeyboardInterrupt));
+    PyErr_Clear();
+    Py_DECREF(list);
+}
+
 /* Pending calls */
 
 #define CALLS 200
@@ -296,6 +349,7 @@ check(void)
     check_async_exc(1, 0);
     check_async_exc(1, 1);              /* cleared before it can poll */
     CHECK(PyThreadState_SetAsyncExc(0, PyExc_KeyboardInterrupt) == 0);
+    check_async_exc_waits_for_builtin();
     check_pending_calls();
     check_merge_at_poll();
 

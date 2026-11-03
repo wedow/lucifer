@@ -55,7 +55,7 @@ bind_tstate(struct lu_task *t)
     PyThreadState *ts = &t->ts;
     lu_current_entry();
     struct lu_entry *e = lu_entry_of(lu_carrier, ts->interp);
-    __atomic_store_n(&t->carrier, lu_carrier, __ATOMIC_RELEASE);
+    __atomic_store_n(&t->carrier, lu_carrier, __ATOMIC_SEQ_CST);
     ts->thread_id = (unsigned long)pthread_self();
     ts->native_thread_id = (unsigned long)gettid();
     if (e->nbound++ == 0) {
