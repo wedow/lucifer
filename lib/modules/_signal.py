@@ -1,0 +1,112 @@
+"""_signal (Modules/signalmodule.c): the signal numbers and handler table.
+Handlers are recorded and returned but signals are not delivered yet; delivery
+arrives with the poll handler's signals-pending reason."""
+
+import _lucifer
+
+ITIMER_PROF = 2
+ITIMER_REAL = 0
+ITIMER_VIRTUAL = 1
+NSIG = 65
+SIGABRT = 6
+SIGALRM = 14
+SIGBUS = 7
+SIGCHLD = 17
+SIGCLD = 17
+SIGCONT = 18
+SIGFPE = 8
+SIGHUP = 1
+SIGILL = 4
+SIGINT = 2
+SIGIO = 29
+SIGIOT = 6
+SIGKILL = 9
+SIGPIPE = 13
+SIGPOLL = 29
+SIGPROF = 27
+SIGPWR = 30
+SIGQUIT = 3
+SIGRTMAX = 64
+SIGRTMIN = 34
+SIGSEGV = 11
+SIGSTKFLT = 16
+SIGSTOP = 19
+SIGSYS = 31
+SIGTERM = 15
+SIGTRAP = 5
+SIGTSTP = 20
+SIGTTIN = 21
+SIGTTOU = 22
+SIGURG = 23
+SIGUSR1 = 10
+SIGUSR2 = 12
+SIGVTALRM = 26
+SIGWINCH = 28
+SIGXCPU = 24
+SIGXFSZ = 25
+SIG_BLOCK = 0
+SIG_DFL = 0
+SIG_IGN = 1
+SIG_SETMASK = 2
+SIG_UNBLOCK = 1
+
+SIG_DFL = 0
+SIG_IGN = 1
+
+_handlers = {}
+
+
+def default_int_handler(signalnum, frame, /):
+    """The default handler for SIGINT installed by Python.
+
+It raises KeyboardInterrupt."""
+    raise KeyboardInterrupt
+
+
+def valid_signals():
+    """Return a set of valid signal numbers on this platform."""
+    return set(range(1, NSIG)) - {32, 33}
+
+
+def _check(signalnum):
+    if not isinstance(signalnum, int):
+        raise TypeError("'%s' object cannot be interpreted as an integer" % type(signalnum).__name__)
+    if not 1 <= signalnum < NSIG:
+        raise ValueError('signal number out of range')
+
+
+def getsignal(signalnum, /):
+    """Return the current action for the given signal.
+
+The return value can be:
+  SIG_IGN -- if the signal is being ignored
+  SIG_DFL -- if the default action for the signal is in effect
+  None    -- if an unknown handler is in effect
+  anything else -- the callable Python object used as a handler"""
+    _check(signalnum)
+    return _handlers.get(signalnum, default_int_handler if signalnum == SIGINT else SIG_DFL)
+
+
+def signal(signalnum, handler, /):
+    """Set the action for the given signal.
+
+The action can be SIG_DFL, SIG_IGN, or a callable Python object.
+The previous action is returned.  See getsignal() for possible return values."""
+    _check(signalnum)
+    if handler not in (SIG_DFL, SIG_IGN) and not callable(handler):
+        raise TypeError('signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable object')
+    old = getsignal(signalnum)
+    _handlers[signalnum] = handler
+    return old
+
+
+def strsignal(signalnum, /):
+    """Return the system description of the signal signalnum."""
+    _check(signalnum)
+    return None
+
+
+def raise_signal(signalnum, /):
+    """Send a signal to the executing process."""
+    _check(signalnum)
+    raise NotImplementedError('signal delivery arrives with the poll handler')
