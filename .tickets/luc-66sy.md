@@ -1,7 +1,7 @@
 ---
 id: luc-66sy
 status: open
-deps: [luc-llzg, luc-vvqv, luc-774h, luc-e01x]
+deps: [luc-llzg, luc-vvqv, luc-774h, luc-e01x, luc-q6qr]
 links: []
 created: 2026-11-03T01:39:45Z
 type: feature

@@ -1,6 +1,6 @@
 ---
 id: luc-e01x
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T09:48:24Z
@@ -17,3 +17,9 @@ Port _sre (CPython Modules/_sre/sre.c semantics; PyPy rpython/rlib/rsre as struc
 
 tests/kernel re programs (including a seeded random differential over patterns and inputs) match the oracle; libtest test_re pass rate reported
 
+
+## Notes
+
+**2026-11-03T10:28:40Z**
+
+_sre ported as lib/modules/_sre.py; re, enum frozen; re_* kernel programs match the oracle (corpus of re_tests, 3 seeded differentials, long inputs). test_re not runnable: unittest, os, warnings, locale, copy, pickle, unicodedata, test.support are not importable. \N{name} needs a unicodedata module.

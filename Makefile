@@ -62,7 +62,12 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 	os:os:third_party/cpython/Lib/os.py \
 	stat:stat:third_party/cpython/Lib/stat.py \
 	posixpath:posixpath:third_party/cpython/Lib/posixpath.py \
-	genericpath:genericpath:third_party/cpython/Lib/genericpath.py
+	genericpath:genericpath:third_party/cpython/Lib/genericpath.py \
+	re:re:third_party/cpython/Lib/re/__init__.py \
+	re._casefix:re._casefix:third_party/cpython/Lib/re/_casefix.py \
+	re._compiler:re._compiler:third_party/cpython/Lib/re/_compiler.py \
+	re._constants:re._constants:third_party/cpython/Lib/re/_constants.py \
+	re._parser:re._parser:third_party/cpython/Lib/re/_parser.py
 # The compiler runs as a C module would: its frames are not in tracebacks.
 HIDDEN = compiler:compiler:lib/compiler/__init__.py \
 	$(foreach f,$(filter-out %/__init__.py,$(wildcard lib/compiler/*.py)),compiler.$(basename $(notdir $f)):compiler.$(basename $(notdir $f)):$f)

@@ -166,10 +166,7 @@ struct lu_static_type_state {
     X(import_star)              /* INTRINSIC_IMPORT_STAR: import_star(locals, module) */ \
     X(intrinsic_1)              /* CALL_INTRINSIC_1 of PEP 695: (value, oparg) */ \
     X(intrinsic_2)              /* CALL_INTRINSIC_2 of PEP 695: (a, b, oparg) */ \
-    X(generic_alias)            /* Py_GenericAlias(origin, args): type[int] before the kernel has the type */ \
-    X(load_name)                /* LOAD_NAME and LOAD_FROM_DICT_OR_GLOBALS over a locals mapping that is not an exact dict: (ns, globals, builtins, name) */ \
-    X(load_name_or_cell)        /* LOAD_FROM_DICT_OR_DEREF over such a mapping: (ns, name, cell) */ \
-    X(delete_name)              /* DELETE_NAME over such a mapping: (ns, name) */
+    X(generic_alias)            /* Py_GenericAlias(origin, args): type[int] before the kernel has the type */
 enum lu_kernel_id {
 #define LU_KERNEL_ID(name) LU_K_##name,
     LU_KERNEL_FUNCTIONS(LU_KERNEL_ID)
@@ -216,9 +213,6 @@ struct lu_gc {
     Py_ssize_t last_mem;
     Py_ssize_t long_lived_total;
     PyObject *hook;             /* gc.py's callback runner; strong */
-    PyMutex deferred_lock;
-    PyObject **deferred_code;   /* code objects that lost their last reference, resurrected */
-    Py_ssize_t deferred_code_count, deferred_code_capacity;
 };
 
 /* A function queued by Py_AddPendingCall (runtime/interp/poll.c). */
@@ -717,9 +711,6 @@ int lu_sys_init_streams(struct _is *interp);
 
 /* runtime/interp/import.c: _imp, then _frozen_importlib and its install. */
 int lu_import_init(struct _is *interp);
-
-/* runtime/interp/marshal.c: marshal.dumps. */
-PyObject *lu_marshal_dumps(PyObject *x, int version, int allow_code);
 
 /* PyModuleObject (Include/internal/pycore_moduleobject.h). */
 typedef struct {
