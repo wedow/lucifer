@@ -372,11 +372,10 @@ class _IOBase:
             # in an unusable state, so ignore.
             return
 
-        if dealloc_warn := getattr(self, "_dealloc_warn", None):
-            dealloc_warn(self)
-
         # iobase_finalize: a failing close() is reported only in dev mode.
         try:
+            if dealloc_warn := getattr(self, "_dealloc_warn", None):
+                dealloc_warn(self)
             self.close()
         except Exception:
             if sys.flags.dev_mode:
