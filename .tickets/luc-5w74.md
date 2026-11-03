@@ -1,6 +1,6 @@
 ---
 id: luc-5w74
-status: open
+status: closed
 deps: [luc-f40q, luc-616t]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: opus.
 
 make check-kernel PROGRAMS="generators coroutines deep_recursion" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t).
 
+
+## Notes
+
+**2026-11-03T06:17:44Z**
+
+Done. Follow-ups: gi_frame is a cached traceback-style snapshot refreshed on access (K1s replaces it with the live frame object); generator frames bypass PEP 523 hooks when resumed inline; throw()'s (type, val, tb) DeprecationWarning and the never-awaited coroutine RuntimeWarning wait for warnings; sys.get_asyncgen_hooks is missing (needs a struct sequence); tasks created after setrecursionlimit start at the default limit; C-API PyIter_Send/PyGen_* stay stubs.
