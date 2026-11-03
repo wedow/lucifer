@@ -24,7 +24,20 @@ KERNEL = lib/kernel/_boot.py lib/kernel/object.py lib/kernel/type.py lib/kernel/
 # importlib finds as frozen (NAME:ORIGNAME:FILE).
 MODULES = $(wildcard lib/modules/*.py)
 FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importlib/_bootstrap.py \
-	_frozen_importlib_external:importlib._bootstrap_external:third_party/cpython/Lib/importlib/_bootstrap_external.py
+	_frozen_importlib_external:importlib._bootstrap_external:third_party/cpython/Lib/importlib/_bootstrap_external.py \
+	codecs:codecs:third_party/cpython/Lib/codecs.py \
+	encodings:encodings:third_party/cpython/Lib/encodings/__init__.py \
+	encodings.aliases:encodings.aliases:third_party/cpython/Lib/encodings/aliases.py \
+	encodings.utf_8:encodings.utf_8:third_party/cpython/Lib/encodings/utf_8.py \
+	encodings.ascii:encodings.ascii:third_party/cpython/Lib/encodings/ascii.py \
+	encodings.latin_1:encodings.latin_1:third_party/cpython/Lib/encodings/latin_1.py \
+	encodings.utf_16:encodings.utf_16:third_party/cpython/Lib/encodings/utf_16.py \
+	encodings.utf_32:encodings.utf_32:third_party/cpython/Lib/encodings/utf_32.py \
+	abc:abc:third_party/cpython/Lib/abc.py \
+	_py_abc:_py_abc:third_party/cpython/Lib/_py_abc.py \
+	_weakrefset:_weakrefset:third_party/cpython/Lib/_weakrefset.py \
+	_collections_abc:_collections_abc:third_party/cpython/Lib/_collections_abc.py \
+	io:io:third_party/cpython/Lib/io.py
 EXPORTS = results/abi/cp314t-exports.tsv
 
 .PHONY: all abi-audit check check-blocking check-globals check-capi check-kernel regen-abi check-harness check-compiler regen
@@ -47,7 +60,7 @@ build/%.o: %.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<
 
-build/frozen.c: tools/freeze $(KERNEL) $(MODULES) third_party/cpython/Lib/importlib/_bootstrap.py third_party/cpython/Lib/importlib/_bootstrap_external.py
+build/frozen.c: tools/freeze $(KERNEL) $(MODULES) $(foreach e,$(FROZEN),$(lastword $(subst :, ,$(e))))
 	$(HOST_PYTHON) tools/freeze $@ --kernel $(KERNEL) --builtin $(MODULES) --frozen $(FROZEN)
 
 build/frozen.o: build/frozen.c $(HEADERS)
