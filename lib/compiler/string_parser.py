@@ -2,8 +2,7 @@
 calls (Objects/unicodeobject.c _PyUnicode_DecodeUnicodeEscapeInternal2,
 Objects/bytesobject.c _PyBytes_DecodeEscape2).  f-strings and t-strings are
 assembled by the grammar's actions (helpers.py)."""
-import warnings
-
+from _warnings import warn_explicit
 from token import FSTRING_MIDDLE, FSTRING_END, TSTRING_MIDDLE, TSTRING_END
 
 _SIMPLE_ESCAPES = {
@@ -65,7 +64,7 @@ def warn_invalid_escape_sequence(p, buffer, first_invalid_escape, t):
         col_offset += quote_count
 
     try:
-        warnings.warn_explicit(msg, category, p.tok.filename, lineno)
+        warn_explicit(msg, category, p.tok.filename, lineno)
     except category:
         # Replace the Syntax/DeprecationWarning exception with a SyntaxError
         # to get a more accurate error report.  The SyntaxError points to the

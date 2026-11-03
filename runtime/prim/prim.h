@@ -32,6 +32,7 @@ extern PyMethodDef lu_prim_gc_methods[];        /* runtime/interp/gc.c */
 extern PyMethodDef lu_prim_signal_methods[];    /* runtime/interp/signals.c */
 extern PyMethodDef lu_prim_weakref_methods[];   /* runtime/object/weakref.c */
 extern PyMethodDef lu_prim_import_methods[];    /* runtime/interp/import.c */
+extern PyMethodDef lu_prim_code_methods[];      /* runtime/interp/code.c */
 extern PyMethodDef lu_sys_frame_methods[];      /* sys's recursion limit, runtime/interp/frame.c */
 PyObject *lu_prim_str_join(PyObject *module, PyObject *const *args, Py_ssize_t nargs);
 PyObject *lu_prim_text_repr(PyObject *module, PyObject *const *args, Py_ssize_t nargs);

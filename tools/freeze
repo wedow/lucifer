@@ -2,6 +2,7 @@
 """Compile the frozen modules with the host CPython into a C file of marshal blobs.
 
 usage: freeze OUTPUT.c --kernel MODULE.py... --builtin MODULE.py... --frozen NAME:ORIGNAME:FILE...
+              [--hidden NAME:ORIGNAME:FILE...]
 
 Run with a host CPython 3.14 (magic 3627). There are three tables:
   kernel   lib/kernel files in boot order; each is named after its file
@@ -11,6 +12,8 @@ Run with a host CPython 3.14 (magic 3627). There are three tables:
   frozen   modules importlib finds as frozen, as NAME with the dotted module
            ORIGNAME the file implements (importlib._bootstrap is frozen as
            _frozen_importlib).
+  hidden   frozen modules whose frames tracebacks omit, as they would a C
+           module's (the compiler).
 Each is compiled with the filename "<frozen NAME>" (ORIGNAME for the frozen
 table), as CPython names its frozen modules. Hashes are never computed here:
 the runtime hashes with its own secret.
@@ -45,9 +48,10 @@ def main():
              '#include "interp/frozen.h"', ""]
     tables = []
     count = 0
+    hidden = set(groups.get("hidden", []))
     for table, entries in (("kernel", groups.get("kernel", [])),
                            ("builtin", groups.get("builtin", [])),
-                           ("frozen", groups.get("frozen", []))):
+                           ("frozen", groups.get("frozen", []) + groups.get("hidden", []))):
         rows = []
         for entry in entries:
             if table == "frozen":
@@ -60,13 +64,13 @@ def main():
             parts.append(blob(f"module{count}", data))
             origname = f'"{orig}"' if orig != name else "NULL"
             package = int(table == "frozen" and Path(path).name == "__init__.py")
-            rows.append(f'    {{ "{name}", module{count}, {len(data)}, {origname}, {package} }},')
+            rows.append(f'    {{ "{name}", module{count}, {len(data)}, {origname}, {package}, {int(entry in hidden)} }},')
             count += 1
         tables.append((table, rows))
     for table, rows in tables:
         parts.append(f"\nconst struct lu_frozen lu_frozen_{SYMBOL[table]}[] = {{")
         parts.extend(rows)
-        parts.append("    { NULL, NULL, 0, NULL, 0 },\n};")
+        parts.append("    { NULL, NULL, 0, NULL, 0, 0 },\n};")
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     Path(output).write_text("\n".join(parts) + "\n")
 

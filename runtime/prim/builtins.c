@@ -63,6 +63,16 @@ prim_caller_locals(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return d;
 }
 
+/* caller_code_flags(): co_flags of the code the calling user frame runs, 0 without one
+   (the future statements that compile() inherits). */
+static PyObject *
+prim_caller_code_flags(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(0);
+    struct lu_frame *f = lu_frame_user((struct lu_frame *)PyThreadState_Get()->current_frame, 0);
+    return PyLong_FromLong(f == NULL ? 0 : f->code->co_flags);
+}
+
 /* eval_code(code, globals, locals): a frame primitive that runs a code
    object, which takes no closure, as exec and eval do; globals gets
    __builtins__ when it has none. */
@@ -108,7 +118,7 @@ prim_builtin_function(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_builtins_methods[] = {
-    FAST(object_id), FAST(caller_locals), FAST(suggest_keyword), FAST(builtin_function),
+    FAST(object_id), FAST(caller_locals), FAST(caller_code_flags), FAST(suggest_keyword), FAST(builtin_function),
     { "eval_code", (PyCFunction)(void (*)(void))prim_eval_code, METH_FASTCALL | LU_METH_FRAME, NULL },
     { NULL, NULL, 0, NULL },
 };

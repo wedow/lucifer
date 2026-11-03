@@ -33,7 +33,7 @@ Parser interface (what pegen.c uses of struct tok_state):
 TokenizerIter(readline, *, extra_tokens, encoding=None) is
 _tokenize.TokenizerIter.
 """
-import warnings
+from _warnings import warn_explicit
 from token import (ENDMARKER, NAME, NUMBER, STRING, NEWLINE, INDENT, DEDENT, OP, COMMENT, NL, ERRORTOKEN,
                    TYPE_IGNORE, TYPE_COMMENT, FSTRING_START, FSTRING_MIDDLE, FSTRING_END, TSTRING_START,
                    TSTRING_MIDDLE, TSTRING_END, ELLIPSIS, DOT, NOTEQUAL, EXACT_TOKEN_TYPES)
@@ -290,7 +290,7 @@ class Tokenizer:
     def _warn(self, category, msg):
         """PyErr_WarnExplicitObject; the exception it raises, if any."""
         try:
-            warnings.warn_explicit(msg, category, self.filename, self.lineno)
+            warn_explicit(msg, category, self.filename, self.lineno)
         except Exception as error:
             return error
         return None

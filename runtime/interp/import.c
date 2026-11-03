@@ -126,7 +126,11 @@ static PyObject *
 prim_frozen_code(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     const struct lu_frozen *f = nargs == 1 ? find_module(lu_frozen_modules, args[0]) : NULL;
-    return f == NULL ? Py_NewRef(Py_None) : load_code(f);
+    PyObject *code = f == NULL ? Py_NewRef(Py_None) : load_code(f);
+    if (code != NULL && f != NULL && f->hidden) {
+        lu_hide_frames(code);
+    }
+    return code;
 }
 
 /* frozen_names(): the names of the frozen modules, in a tuple. */

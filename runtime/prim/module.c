@@ -170,6 +170,7 @@ lucifer_exec(PyObject *m)
         || add_functions(m, lu_prim_frame_methods) < 0
         || add_functions(m, lu_prim_builtins_methods) < 0
         || add_functions(m, lu_prim_import_methods) < 0
+        || add_functions(m, lu_prim_code_methods) < 0
         || add_functions(m, lu_prim_thread_methods) < 0
         || add_functions(m, lu_prim_gc_methods) < 0
         || add_functions(m, lu_prim_signal_methods) < 0

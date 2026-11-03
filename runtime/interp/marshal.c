@@ -959,8 +959,8 @@ w_set(PyObject *v, char flag, WFILE *p)
 }
 
 /* co_code as CPython marshals it: the original opcodes, caches cleared. */
-static PyObject *
-code_bytes(PyCodeObject *co)
+PyObject *
+lu_code_bytes(PyCodeObject *co)
 {
     Py_ssize_t n = Py_SIZE(co);
     PyObject *bytes = PyBytes_FromStringAndSize(NULL, n * (Py_ssize_t)sizeof(lu_codeunit));
@@ -994,7 +994,7 @@ w_code(PyObject *v, char flag, WFILE *p)
         return;
     }
     PyCodeObject *co = (PyCodeObject *)v;
-    PyObject *co_code = code_bytes(co);
+    PyObject *co_code = lu_code_bytes(co);
     if (co_code == NULL) {
         p->error = WFERR_NOMEMORY;
         return;

@@ -85,9 +85,68 @@ code_dealloc(PyObject *op)
     lu_object_free(op);
 }
 
-/* The attributes the exception machinery and kernel read; the rest of
-   code's surface arrives with the code object's own ticket. */
+/* co_varnames, co_cellvars and co_freevars: the names of one kind. */
+static PyObject *
+code_names_of_kind(PyCodeObject *co, int select)
+{
+    const char *kinds = PyBytes_AS_STRING(co->co_localspluskinds);
+    Py_ssize_t n = 0;
+    for (Py_ssize_t i = 0; i < co->co_nlocalsplus; i++) {
+        n += (kinds[i] & select) != 0;
+    }
+    PyObject *tuple = PyTuple_New(n);
+    for (Py_ssize_t i = 0, k = 0; tuple != NULL && i < co->co_nlocalsplus; i++) {
+        if (kinds[i] & select) {
+            PyTuple_SET_ITEM(tuple, k++, Py_NewRef(PyTuple_GET_ITEM(co->co_localsplusnames, i)));
+        }
+    }
+    return tuple;
+}
+
+static PyObject *
+code_get_varnames(PyObject *co, void *closure)
+{
+    return code_names_of_kind((PyCodeObject *)co, CO_FAST_LOCAL);
+}
+
+static PyObject *
+code_get_cellvars(PyObject *co, void *closure)
+{
+    return code_names_of_kind((PyCodeObject *)co, CO_FAST_CELL);
+}
+
+static PyObject *
+code_get_freevars(PyObject *co, void *closure)
+{
+    return code_names_of_kind((PyCodeObject *)co, CO_FAST_FREE);
+}
+
+static PyObject *
+code_get_code(PyObject *co, void *closure)
+{
+    return lu_code_bytes((PyCodeObject *)co);
+}
+
+static PyGetSetDef code_getset[] = {
+    { "co_code", code_get_code, NULL, NULL, NULL },
+    { "co_varnames", code_get_varnames, NULL, NULL, NULL },
+    { "co_cellvars", code_get_cellvars, NULL, NULL, NULL },
+    { "co_freevars", code_get_freevars, NULL, NULL, NULL },
+    { NULL },
+};
+
+/* The attributes the exception machinery, kernel and compiler read; co_lines,
+   co_positions and replace arrive with the code object's own ticket. */
 static PyMemberDef code_members[] = {
+    { "co_argcount", Py_T_INT, offsetof(PyCodeObject, co_argcount), Py_READONLY, NULL },
+    { "co_posonlyargcount", Py_T_INT, offsetof(PyCodeObject, co_posonlyargcount), Py_READONLY, NULL },
+    { "co_kwonlyargcount", Py_T_INT, offsetof(PyCodeObject, co_kwonlyargcount), Py_READONLY, NULL },
+    { "co_stacksize", Py_T_INT, offsetof(PyCodeObject, co_stacksize), Py_READONLY, NULL },
+    { "co_nlocals", Py_T_INT, offsetof(PyCodeObject, co_nlocals), Py_READONLY, NULL },
+    { "co_consts", _Py_T_OBJECT, offsetof(PyCodeObject, co_consts), Py_READONLY, NULL },
+    { "co_names", _Py_T_OBJECT, offsetof(PyCodeObject, co_names), Py_READONLY, NULL },
+    { "co_linetable", _Py_T_OBJECT, offsetof(PyCodeObject, co_linetable), Py_READONLY, NULL },
+    { "co_exceptiontable", _Py_T_OBJECT, offsetof(PyCodeObject, co_exceptiontable), Py_READONLY, NULL },
     { "co_name", _Py_T_OBJECT, offsetof(PyCodeObject, co_name), Py_READONLY, NULL },
     { "co_qualname", _Py_T_OBJECT, offsetof(PyCodeObject, co_qualname), Py_READONLY, NULL },
     { "co_filename", _Py_T_OBJECT, offsetof(PyCodeObject, co_filename), Py_READONLY, NULL },
@@ -100,6 +159,7 @@ void
 lu_code_init(void)
 {
     PyCode_Type.tp_members = code_members;
+    PyCode_Type.tp_getset = code_getset;
     PyCode_Type.tp_basicsize = offsetof(PyCodeObject, co_code_adaptive);
     PyCode_Type.tp_itemsize = sizeof(lu_codeunit);
     PyCode_Type.tp_flags |= Py_TPFLAGS_DEFAULT;
@@ -264,3 +324,54 @@ PyCode_NewEmpty(const char *filename, const char *funcname, int firstlineno)
     Py_XDECREF(name);
     return (PyCodeObject *)result;
 }
+
+/* code_new(filename, name, qualname, flags, code, firstlineno, linetable,
+   consts, names, localsplusnames, localspluskinds, argcount, posonlyargcount,
+   kwonlyargcount, stacksize, exceptiontable): _PyCode_New with exactly these
+   fields, which the compiler's assembler has computed (types.CodeType would
+   recompute some of them). */
+static PyObject *
+prim_code_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long ints[6];
+    static const int int_args[6] = { 3, 5, 11, 12, 13, 14 };
+    if (nargs != 16) {
+        lu_err_format(PyExc_TypeError, "code_new() takes 16 arguments");
+        return NULL;
+    }
+    for (int i = 0; i < 6; i++) {
+        if (!PyLong_CheckExact(args[int_args[i]]) || lu_long_as_long(args[int_args[i]], &ints[i]) < 0) {
+            PyErr_Clear();
+            lu_err_format(PyExc_TypeError, "code_new(): argument %d must be an int", int_args[i] + 1);
+            return NULL;
+        }
+    }
+    struct lu_code_fields c = {
+        .filename = args[0], .name = args[1], .qualname = args[2], .flags = (int)ints[0],
+        .code = args[4], .firstlineno = (int)ints[1], .linetable = args[6], .consts = args[7],
+        .names = args[8], .localsplusnames = args[9], .localspluskinds = args[10],
+        .argcount = (int)ints[2], .posonlyargcount = (int)ints[3], .kwonlyargcount = (int)ints[4],
+        .stacksize = (int)ints[5], .exceptiontable = args[15],
+    };
+    return lu_code_new(&c);
+}
+
+/* code_set_localsplusnames(code, names): Py_SETREF(co_localsplusnames), which
+   codegen_finish_annotations_scope does to rename the __annotate__ parameter. */
+static PyObject *
+prim_code_set_localsplusnames(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 2 || !PyCode_Check(args[0]) || !PyTuple_CheckExact(args[1])
+        || PyTuple_GET_SIZE(args[1]) != PyTuple_GET_SIZE(((PyCodeObject *)args[0])->co_localsplusnames)) {
+        lu_err_format(PyExc_TypeError, "code_set_localsplusnames(code, names of the same length)");
+        return NULL;
+    }
+    Py_SETREF(((PyCodeObject *)args[0])->co_localsplusnames, Py_NewRef(args[1]));
+    return Py_NewRef(Py_None);
+}
+
+#define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
+PyMethodDef lu_prim_code_methods[] = {
+    FAST(code_new), FAST(code_set_localsplusnames),
+    { NULL, NULL, 0, NULL },
+};

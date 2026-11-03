@@ -34,4 +34,7 @@ struct lu_code_fields {
 
 PyObject *lu_code_new(const struct lu_code_fields *fields);
 
+/* co_code: the bytecode with specialized opcodes made generic and caches cleared. */
+PyObject *lu_code_bytes(PyCodeObject *co);
+
 #endif
