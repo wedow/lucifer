@@ -3,13 +3,15 @@
   "version": "2.4.0",
   "runtime": "cpython-3.14.10",
   "source_sha256": "70e22f4fd29b204f75f989e3c1e847aa1de267a028aab4233c0db783aaff78c1",
-  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
-  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "lock_sha256": "6652f33e0a7d4b5d978b182e5dff8a085d364bea5b49f38a61081745703eefb7",
+  "corpus_sha256": "8467b9c0cc798eaae4423e55914e7cf34709f666bc1d182847f964694752fb5c",
   "harness_sha256": {
-    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
-    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "run.py": "f368a0a58ad4acc282e08b87a8151eb8d0fb0f8647a3f8fedb6c45d0382ae557",
+    "recorder.py": "4d88a7e5a3ad65b88d501d87dcec59b21c07897083502bed31e8c5a9af233e26",
     "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
   },
+  "test_sources": {},
+  "environment_omit": [],
   "reason": "completed",
   "returncode": 0,
   "counts": {
@@ -19,11 +21,19 @@
     "version": "3.14.10",
     "abi": "",
     "package_version": "2.4.0",
-    "native_modules": {},
+    "native_modules": {
+      "hypothesis._native": "e40780bfbfb364b2fcc2b65e7baba953e4e1eaacb19fdd39578130889f0ec427"
+    },
+    "native_library_versions": {
+      "zlib": "1.3.2",
+      "openssl": "OpenSSL 3.6.5 29 Sep 2026",
+      "sqlite": null
+    },
     "gil_enabled": true,
     "free_threaded": false,
     "exitstatus": 0
   },
   "collection_sha256": "15618b6690c191fb01c9866cbe756e964c3ddfc4753d9e37c5950e59c2689b22",
+  "upstream_ids": {},
   "outcomes": []
 }

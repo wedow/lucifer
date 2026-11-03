@@ -4,13 +4,14 @@
   "runtime": "cpython-3.14.10t",
   "source_sha256": "1b0e8dc3932cf4e9ed5727570325cacc716b9409ffc794a221c0ccc72e8eb775",
   "lock_sha256": "6652f33e0a7d4b5d978b182e5dff8a085d364bea5b49f38a61081745703eefb7",
-  "corpus_sha256": "0fc3f60b3670a3ef5cd74136b4f44f07cf9c6034b17b25bce3ebc6ea0a869cd3",
+  "corpus_sha256": "8467b9c0cc798eaae4423e55914e7cf34709f666bc1d182847f964694752fb5c",
   "harness_sha256": {
-    "run.py": "173fa8abd2d1d319580f231a30b17573ba25308192d853bacb631ac095589464",
-    "recorder.py": "4b2205a94f148834372183fd28637e41fcb36e21ba83fc1758988a71535ef1b1",
+    "run.py": "f368a0a58ad4acc282e08b87a8151eb8d0fb0f8647a3f8fedb6c45d0382ae557",
+    "recorder.py": "4d88a7e5a3ad65b88d501d87dcec59b21c07897083502bed31e8c5a9af233e26",
     "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
   },
   "test_sources": {},
+  "environment_omit": [],
   "reason": "completed",
   "returncode": 0,
   "counts": {
@@ -81,6 +82,11 @@
       "pandas._libs.parsers": "ee9f7718ca10d4085fd3fb8a9c916e3304254b5ef3f03057896ce8e6221c1191",
       "pandas._libs.testing": "91ba14f715994ba4844424ffc6c704c0f4fec92cc2183105e0a495ee2ffe1008"
     },
+    "native_library_versions": {
+      "zlib": "1.3.2",
+      "openssl": "OpenSSL 3.6.5 29 Sep 2026",
+      "sqlite": null
+    },
     "gil_enabled": false,
     "free_threaded": true,
     "exitstatus": 0
@@ -111,7 +117,7 @@
     "tests/serializers/test_any.py::test_any_json_round_trip[value=5]": "tests/serializers/test_any.py::test_any_json_round_trip[value5]",
     "tests/serializers/test_any.py::test_any_json_round_trip[value=6]": "tests/serializers/test_any.py::test_any_json_round_trip[value6]",
     "tests/serializers/test_any.py::test_any_python[expected_json_obj=0,expected_plain=0,input_value=0]": "tests/serializers/test_any.py::test_any_python[MyDataclass(a=1, b='foo')-{'a': 1, 'b': 'foo'}-{'a': 1, 'b': 'foo'}]",
-    "tests/serializers/test_any.py::test_any_python[expected_json_obj=1,expected_plain=1,input_value=1]": "tests/serializers/test_any.py::test_any_python[MyModel({'a': 1, 'b': 'foo', '__pydantic_serializer__': SchemaSerializer(serializer=PolymorphismTrampoline(\\n    PolymorphismTrampoline {\\n        class: Py(\\n            0x000004e8b7ab6000,\\n        ),\\n        serializer: Model(\\n            ModelSerializer {\\n                class: Py(\\n                    0x000004e8b7ab6000,\\n                ),\\n                serializer: Fields(\\n                    GeneralFieldsSerializer {\\n                        fields: {\\n                            \"b\": SerField {\\n                                key: \"b\",\\n                                alias: None,\\n                                serializer: Some(\\n                                    Any(\\n                                        AnySerializer,\\n                                    ),\\n                                ),\\n                                required: true,\\n                                serialize_by_alias: None,\\n                                serialization_exclude_if: None,\\n                            },\\n                            \"a\": SerField {\\n                                key: \"a\",\\n                                alias: None,\\n                                serializer: Some(\\n                                    Any(\\n                                        AnySerializer,\\n                                    ),\\n                                ),\\n                                required: true,\\n                                serialize_by_alias: None,\\n                                serialization_exclude_if: None,\\n                            },\\n                        },\\n                        computed_fields: None,\\n                        mode: SimpleDict,\\n                        extra_serializer: None,\\n                        filter: SchemaFilter {\\n                            include: None,\\n                            exclude: None,\\n                        },\\n                        required_fields: 2,\\n                    },\\n                ),\\n                has_extra: false,\\n                root_model: false,\\n                name: \"MyModel\",\\n            },\\n        ),\\n        enabled_from_config: false,\\n    },\\n), definitions=[])})-{'a': 1, 'b': 'foo'}-{'a': 1, 'b': 'foo'}]",
+    "tests/serializers/test_any.py::test_any_python[expected_json_obj=1,expected_plain=1,input_value=1]": "tests/serializers/test_any.py::test_any_python[MyModel({'a': 1, 'b': 'foo', '__pydantic_serializer__': SchemaSerializer(serializer=PolymorphismTrampoline(\\n    PolymorphismTrampoline {\\n        class: Py(\\n            0x0000053414ed6400,\\n        ),\\n        serializer: Model(\\n            ModelSerializer {\\n                class: Py(\\n                    0x0000053414ed6400,\\n                ),\\n                serializer: Fields(\\n                    GeneralFieldsSerializer {\\n                        fields: {\\n                            \"a\": SerField {\\n                                key: \"a\",\\n                                alias: None,\\n                                serializer: Some(\\n                                    Any(\\n                                        AnySerializer,\\n                                    ),\\n                                ),\\n                                required: true,\\n                                serialize_by_alias: None,\\n                                serialization_exclude_if: None,\\n                            },\\n                            \"b\": SerField {\\n                                key: \"b\",\\n                                alias: None,\\n                                serializer: Some(\\n                                    Any(\\n                                        AnySerializer,\\n                                    ),\\n                                ),\\n                                required: true,\\n                                serialize_by_alias: None,\\n                                serialization_exclude_if: None,\\n                            },\\n                        },\\n                        computed_fields: None,\\n                        mode: SimpleDict,\\n                        extra_serializer: None,\\n                        filter: SchemaFilter {\\n                            include: None,\\n                            exclude: None,\\n                        },\\n                        required_fields: 2,\\n                    },\\n                ),\\n                has_extra: false,\\n                root_model: false,\\n                name: \"MyModel\",\\n            },\\n        ),\\n        enabled_from_config: false,\\n    },\\n), definitions=[])})-{'a': 1, 'b': 'foo'}-{'a': 1, 'b': 'foo'}]",
     "tests/serializers/test_any.py::test_any_python[expected_json_obj=2,expected_plain=2,input_value=2]": "tests/serializers/test_any.py::test_any_python[{1, 2, 3}-{1, 2, 3}-IsList(1, 2, 3, check_order=False)]",
     "tests/serializers/test_any.py::test_any_python[expected_json_obj=3,expected_plain=3,input_value=3]": "tests/serializers/test_any.py::test_any_python[{1, '2', b'3'}-{1, '2', b'3'}-IsList(1, '2', '3', check_order=False)]",
     "tests/serializers/test_any.py::test_any_json[expected_json=0,value=0]": "tests/serializers/test_any.py::test_any_json[None-null]",
@@ -606,8 +612,8 @@
     "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left=19,core_schema_right=19,expected_value=19,input_value=19,reverse=19]": "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left9-core_schema_right9-_1-_1-True]",
     "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left=20,core_schema_right=20,expected_value=20,input_value=20,reverse=20]": "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left10-core_schema_right10-input_value10-expected_value10-False]",
     "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left=21,core_schema_right=21,expected_value=21,input_value=21,reverse=21]": "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left10-core_schema_right10-input_value10-expected_value10-True]",
-    "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left=22,core_schema_right=22,expected_value=22,input_value=22,reverse=22]": "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left11-core_schema_right11-b8dd4573-3044-430c-8f14-8d707b414790-b8dd4573-3044-430c-8f14-8d707b414790-False]",
-    "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left=23,core_schema_right=23,expected_value=23,input_value=23,reverse=23]": "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left11-core_schema_right11-b8dd4573-3044-430c-8f14-8d707b414790-b8dd4573-3044-430c-8f14-8d707b414790-True]",
+    "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left=22,core_schema_right=22,expected_value=22,input_value=22,reverse=22]": "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left11-core_schema_right11-ba65b9bc-a8be-4517-93a7-4d086d0beb6d-ba65b9bc-a8be-4517-93a7-4d086d0beb6d-False]",
+    "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left=23,core_schema_right=23,expected_value=23,input_value=23,reverse=23]": "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass[core_schema_left11-core_schema_right11-ba65b9bc-a8be-4517-93a7-4d086d0beb6d-ba65b9bc-a8be-4517-93a7-4d086d0beb6d-True]",
     "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass_json[core_schema_left=0,core_schema_right=0,expected_value=0,input_value=0,reverse=0]": "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass_json[core_schema_left0-core_schema_right0-True-True-False]",
     "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass_json[core_schema_left=1,core_schema_right=1,expected_value=1,input_value=1,reverse=1]": "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass_json[core_schema_left0-core_schema_right0-True-True-True]",
     "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass_json[core_schema_left=2,core_schema_right=2,expected_value=2,input_value=2,reverse=2]": "tests/serializers/test_union.py::test_union_serializer_picks_exact_type_over_subclass_json[core_schema_left1-core_schema_right1-1-1-False]",
@@ -948,13 +954,13 @@
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=42,expected_schema=42,function=42]": "tests/test_schema_functions.py::test_schema_functions[ordered_dict_schema-({'type': 'str'}, {'type': 'int'})-{'type': 'ordered-dict', 'keys_schema': {'type': 'str'}, 'values_schema': {'type': 'int'}}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=43,expected_schema=43,function=43]": "tests/test_schema_functions.py::test_schema_functions[counter_schema-()-{'type': 'counter'}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=44,expected_schema=44,function=44]": "tests/test_schema_functions.py::test_schema_functions[counter_schema-({'type': 'str'}, {'type': 'int'})-{'type': 'counter', 'keys_schema': {'type': 'str'}, 'values_schema': {'type': 'int'}}]",
-    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=45,expected_schema=45,function=45]": "tests/test_schema_functions.py::test_schema_functions[with_info_before_validator_function-(<function val_function at 0x4e8b9fedbc0>, {'type': 'int'})-{'type': 'function-before', 'function': {'type': 'with-info', 'function': <function val_function at 0x4e8b9fedbc0>}, 'schema': {'type': 'int'}}]",
-    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=46,expected_schema=46,function=46]": "tests/test_schema_functions.py::test_schema_functions[with_info_after_validator_function-(<function val_function at 0x4e8b9fedbc0>, {'type': 'int'})-{'type': 'function-after', 'function': {'type': 'with-info', 'function': <function val_function at 0x4e8b9fedbc0>}, 'schema': {'type': 'int'}}]",
-    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=47,expected_schema=47,function=47]": "tests/test_schema_functions.py::test_schema_functions[with_info_wrap_validator_function-(<function val_function at 0x4e8b9fedbc0>, {'type': 'int'})-{'type': 'function-wrap', 'function': {'type': 'with-info', 'function': <function val_function at 0x4e8b9fedbc0>}, 'schema': {'type': 'int'}}]",
-    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=48,expected_schema=48,function=48]": "tests/test_schema_functions.py::test_schema_functions[with_info_plain_validator_function-(<function val_function at 0x4e8b9fedbc0>)-{'type': 'function-plain', 'function': {'type': 'with-info', 'function': <function val_function at 0x4e8b9fedbc0>}}]",
+    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=45,expected_schema=45,function=45]": "tests/test_schema_functions.py::test_schema_functions[with_info_before_validator_function-(<function val_function at 0x53417f2d580>, {'type': 'int'})-{'type': 'function-before', 'function': {'type': 'with-info', 'function': <function val_function at 0x53417f2d580>}, 'schema': {'type': 'int'}}]",
+    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=46,expected_schema=46,function=46]": "tests/test_schema_functions.py::test_schema_functions[with_info_after_validator_function-(<function val_function at 0x53417f2d580>, {'type': 'int'})-{'type': 'function-after', 'function': {'type': 'with-info', 'function': <function val_function at 0x53417f2d580>}, 'schema': {'type': 'int'}}]",
+    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=47,expected_schema=47,function=47]": "tests/test_schema_functions.py::test_schema_functions[with_info_wrap_validator_function-(<function val_function at 0x53417f2d580>, {'type': 'int'})-{'type': 'function-wrap', 'function': {'type': 'with-info', 'function': <function val_function at 0x53417f2d580>}, 'schema': {'type': 'int'}}]",
+    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=48,expected_schema=48,function=48]": "tests/test_schema_functions.py::test_schema_functions[with_info_plain_validator_function-(<function val_function at 0x53417f2d580>)-{'type': 'function-plain', 'function': {'type': 'with-info', 'function': <function val_function at 0x53417f2d580>}}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=49,expected_schema=49,function=49]": "tests/test_schema_functions.py::test_schema_functions[with_default_schema-({'type': 'int'}, default=5)-{'type': 'default', 'schema': {'type': 'int'}, 'default': 5}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=50,expected_schema=50,function=50]": "tests/test_schema_functions.py::test_schema_functions[with_default_schema-({'type': 'int'}, default=None)-{'type': 'default', 'schema': {'type': 'int'}, 'default': None}]",
-    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=51,expected_schema=51,function=51]": "tests/test_schema_functions.py::test_schema_functions[with_default_schema-({'type': 'int'}, default_factory=<function make_5 at 0x4e8b9fed740>)-{'type': 'default', 'schema': {'type': 'int'}, 'default_factory': <function make_5 at 0x4e8b9fed740>}]",
+    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=51,expected_schema=51,function=51]": "tests/test_schema_functions.py::test_schema_functions[with_default_schema-({'type': 'int'}, default_factory=<function make_5 at 0x53417f2d100>)-{'type': 'default', 'schema': {'type': 'int'}, 'default_factory': <function make_5 at 0x53417f2d100>}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=52,expected_schema=52,function=52]": "tests/test_schema_functions.py::test_schema_functions[nullable_schema-({'type': 'int'})-{'type': 'nullable', 'schema': {'type': 'int'}}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=53,expected_schema=53,function=53]": "tests/test_schema_functions.py::test_schema_functions[union_schema-([{'type': 'int'}, {'type': 'str'}])-{'type': 'union', 'choices': [{'type': 'int'}, {'type': 'str'}]}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=54,expected_schema=54,function=54]": "tests/test_schema_functions.py::test_schema_functions[union_schema-([{'type': 'int'}, {'type': 'str'}], custom_error_type='foobar', custom_error_message='This is Foobar')-{'type': 'union', 'choices': [{'type': 'int'}, {'type': 'str'}], 'custom_error_type': 'foobar', 'custom_error_message': 'This is Foobar'}]",
@@ -968,7 +974,7 @@
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=62,expected_schema=62,function=62]": "tests/test_schema_functions.py::test_schema_functions[arguments_parameter-('foo', {'type': 'int'})-{'name': 'foo', 'schema': {'type': 'int'}}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=63,expected_schema=63,function=63]": "tests/test_schema_functions.py::test_schema_functions[arguments_schema-([{'name': 'foo', 'schema': {'type': 'int'}}, {'name': 'bar', 'schema': {'type': 'str'}}], serialization={'type': 'format', 'formatting_string': 'd'})-{'type': 'arguments', 'arguments_schema': [{'name': 'foo', 'schema': {'type': 'int'}}, {'name': 'bar', 'schema': {'type': 'str'}}], 'serialization': {'type': 'format', 'formatting_string': 'd'}}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=64,expected_schema=64,function=64]": "tests/test_schema_functions.py::test_schema_functions[arguments_v3_schema-([{'name': 'foo', 'schema': {'type': 'int'}}, {'name': 'bar', 'schema': {'type': 'str'}}], serialization={'type': 'format', 'formatting_string': 'd'})-{'type': 'arguments-v3', 'arguments_schema': [{'name': 'foo', 'schema': {'type': 'int'}}, {'name': 'bar', 'schema': {'type': 'str'}}], 'serialization': {'type': 'format', 'formatting_string': 'd'}}]",
-    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=65,expected_schema=65,function=65]": "tests/test_schema_functions.py::test_schema_functions[call_schema-({'type': 'arguments', 'arguments_schema': [{'name': 'foo', 'schema': {'type': 'int'}}]}, <function val_function at 0x4e8b9fedbc0>)-{'type': 'call', 'function': <function val_function at 0x4e8b9fedbc0>, 'arguments_schema': {'type': 'arguments', 'arguments_schema': [{'name': 'foo', 'schema': {'type': 'int'}}]}}]",
+    "tests/test_schema_functions.py::test_schema_functions[args_kwargs=65,expected_schema=65,function=65]": "tests/test_schema_functions.py::test_schema_functions[call_schema-({'type': 'arguments', 'arguments_schema': [{'name': 'foo', 'schema': {'type': 'int'}}]}, <function val_function at 0x53417f2d580>)-{'type': 'call', 'function': <function val_function at 0x53417f2d580>, 'arguments_schema': {'type': 'arguments', 'arguments_schema': [{'name': 'foo', 'schema': {'type': 'int'}}]}}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=66,expected_schema=66,function=66]": "tests/test_schema_functions.py::test_schema_functions[custom_error_schema-({'type': 'int'}, 'foobar', custom_error_message='Hello')-{'type': 'custom-error', 'schema': {'type': 'int'}, 'custom_error_type': 'foobar', 'custom_error_message': 'Hello'}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=67,expected_schema=67,function=67]": "tests/test_schema_functions.py::test_schema_functions[json_schema-({'type': 'int'})-{'type': 'json', 'schema': {'type': 'int'}}]",
     "tests/test_schema_functions.py::test_schema_functions[args_kwargs=68,expected_schema=68,function=68]": "tests/test_schema_functions.py::test_schema_functions[url_schema-()-{'type': 'url'}]",
@@ -1653,7 +1659,7 @@
     "tests/validators/test_complex.py::test_complex_cases[expected=17,input_value=17]": "tests/validators/test_complex.py::test_complex_cases[[('x', 'y')]-Err('Input should be a valid python complex object, a number, or a valid complex string following the rules at https://docs.python.org/3/library/functions.html#complex')]",
     "tests/validators/test_complex.py::test_complex_cases[expected=18,input_value=18]": "tests/validators/test_complex.py::test_complex_cases[()-Err('Input should be a valid python complex object, a number, or a valid complex string following the rules at https://docs.python.org/3/library/functions.html#complex')]",
     "tests/validators/test_complex.py::test_complex_cases[expected=19,input_value=19]": "tests/validators/test_complex.py::test_complex_cases[(('x', 'y'),)-Err('Input should be a valid python complex object, a number, or a valid complex string following the rules at https://docs.python.org/3/library/functions.html#complex')]",
-    "tests/validators/test_complex.py::test_complex_cases[expected=20,input_value=20]": "tests/validators/test_complex.py::test_complex_cases[<tests.validators.test_complex.Foobar object at 0x4e8ba500210>-Err('Input should be a valid python complex object, a number, or a valid complex string following the rules at https://docs.python.org/3/library/functions.html#complex')]",
+    "tests/validators/test_complex.py::test_complex_cases[expected=20,input_value=20]": "tests/validators/test_complex.py::test_complex_cases[<tests.validators.test_complex.Foobar object at 0x53418870190>-Err('Input should be a valid python complex object, a number, or a valid complex string following the rules at https://docs.python.org/3/library/functions.html#complex')]",
     "tests/validators/test_complex.py::test_complex_strict[expected=0,input_value=0]": "tests/validators/test_complex.py::test_complex_strict[(2+4j)-(2+4j)]",
     "tests/validators/test_complex.py::test_complex_strict[expected=1,input_value=1]": "tests/validators/test_complex.py::test_complex_strict['2'-Err('Input should be an instance of complex')]",
     "tests/validators/test_complex.py::test_complex_strict[expected=2,input_value=2]": "tests/validators/test_complex.py::test_complex_strict['2j'-Err('Input should be an instance of complex')]",
@@ -1670,15 +1676,15 @@
     "tests/validators/test_complex.py::test_complex_strict[expected=13,input_value=13]": "tests/validators/test_complex.py::test_complex_strict[{'real': 'test', 'imag': 1}-Err('Input should be an instance of complex')]",
     "tests/validators/test_complex.py::test_complex_strict[expected=14,input_value=14]": "tests/validators/test_complex.py::test_complex_strict[{'real': True, 'imag': 1}-Err('Input should be an instance of complex')]",
     "tests/validators/test_complex.py::test_complex_strict[expected=15,input_value=15]": "tests/validators/test_complex.py::test_complex_strict['foobar'-Err('Input should be an instance of complex')]",
-    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=0,input_value=0]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithComplex object at 0x4e8ba500390>-(5+0j)]",
-    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=1,input_value=1]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithComplex object at 0x4e8b716ea10>-(3.14+0j)]",
-    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=2,input_value=2]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithFloat object at 0x4e8ba500510>-(7+0j)]",
-    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=3,input_value=3]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithFloat object at 0x4e8b716eb50>-(2.5+0j)]",
-    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=4,input_value=4]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithIndex object at 0x4e8ba500690>-(10+0j)]",
-    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=5,input_value=5]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithIndex object at 0x4e8b716ec90>-(42+0j)]",
-    "tests/validators/test_complex.py::test_complex_with_special_methods_strict[expected=0,input_value=0]": "tests/validators/test_complex.py::test_complex_with_special_methods_strict[<tests.validators.test_complex.ComplexWithComplex object at 0x4e8b716edd0>-Err('Input should be an instance of complex')]",
-    "tests/validators/test_complex.py::test_complex_with_special_methods_strict[expected=1,input_value=1]": "tests/validators/test_complex.py::test_complex_with_special_methods_strict[<tests.validators.test_complex.ComplexWithFloat object at 0x4e8b716ef10>-Err('Input should be an instance of complex')]",
-    "tests/validators/test_complex.py::test_complex_with_special_methods_strict[expected=2,input_value=2]": "tests/validators/test_complex.py::test_complex_with_special_methods_strict[<tests.validators.test_complex.ComplexWithIndex object at 0x4e8b716f050>-Err('Input should be an instance of complex')]",
+    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=0,input_value=0]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithComplex object at 0x53418870310>-(5+0j)]",
+    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=1,input_value=1]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithComplex object at 0x53412cfe2d0>-(3.14+0j)]",
+    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=2,input_value=2]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithFloat object at 0x53418870490>-(7+0j)]",
+    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=3,input_value=3]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithFloat object at 0x53412cfe410>-(2.5+0j)]",
+    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=4,input_value=4]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithIndex object at 0x53418870610>-(10+0j)]",
+    "tests/validators/test_complex.py::test_complex_with_special_methods[expected=5,input_value=5]": "tests/validators/test_complex.py::test_complex_with_special_methods[<tests.validators.test_complex.ComplexWithIndex object at 0x53412cfe550>-(42+0j)]",
+    "tests/validators/test_complex.py::test_complex_with_special_methods_strict[expected=0,input_value=0]": "tests/validators/test_complex.py::test_complex_with_special_methods_strict[<tests.validators.test_complex.ComplexWithComplex object at 0x53412cfe690>-Err('Input should be an instance of complex')]",
+    "tests/validators/test_complex.py::test_complex_with_special_methods_strict[expected=1,input_value=1]": "tests/validators/test_complex.py::test_complex_with_special_methods_strict[<tests.validators.test_complex.ComplexWithFloat object at 0x53412cfe7d0>-Err('Input should be an instance of complex')]",
+    "tests/validators/test_complex.py::test_complex_with_special_methods_strict[expected=2,input_value=2]": "tests/validators/test_complex.py::test_complex_with_special_methods_strict[<tests.validators.test_complex.ComplexWithIndex object at 0x53412cfe910>-Err('Input should be an instance of complex')]",
     "tests/validators/test_counter.py::test_counter[py_and_json=0]": "tests/validators/test_counter.py::test_counter[python]",
     "tests/validators/test_counter.py::test_counter[py_and_json=1]": "tests/validators/test_counter.py::test_counter[json]",
     "tests/validators/test_counter.py::test_counter_cases[expected=0,input_value=0]": "tests/validators/test_counter.py::test_counter_cases[{'1': b'1', '2': b'2'}-Counter({'2': '2', '1': '1'})]",
@@ -1688,7 +1694,7 @@
     "tests/validators/test_counter.py::test_counter_cases[expected=4,input_value=4]": "tests/validators/test_counter.py::test_counter_cases[[]-Err('Input should be a valid Counter [type=counter_type,')]",
     "tests/validators/test_counter.py::test_counter_cases[expected=5,input_value=5]": "tests/validators/test_counter.py::test_counter_cases[[('x', 'y')]-Err('Input should be a valid Counter [type=counter_type,')]",
     "tests/validators/test_counter.py::test_counter_cases[expected=6,input_value=6]": "tests/validators/test_counter.py::test_counter_cases[()-Err('Input should be a valid Counter [type=counter_type,')]",
-    "tests/validators/test_counter.py::test_counter_cases[expected=7,input_value=7]": "tests/validators/test_counter.py::test_counter_cases[<tests.validators.test_counter.Foobar object at 0x4e8ba500e10>-Err('Input should be a valid Counter [type=counter_type,')]",
+    "tests/validators/test_counter.py::test_counter_cases[expected=7,input_value=7]": "tests/validators/test_counter.py::test_counter_cases[<tests.validators.test_counter.Foobar object at 0x53418870d90>-Err('Input should be a valid Counter [type=counter_type,')]",
     "tests/validators/test_counter.py::test_counter_key_value_errors[py_and_json=0]": "tests/validators/test_counter.py::test_counter_key_value_errors[python]",
     "tests/validators/test_counter.py::test_counter_key_value_errors[py_and_json=1]": "tests/validators/test_counter.py::test_counter_key_value_errors[json]",
     "tests/validators/test_custom_error.py::test_custom_error[py_and_json=0]": "tests/validators/test_custom_error.py::test_custom_error[python]",
@@ -2636,7 +2642,7 @@
     "tests/validators/test_dict.py::test_dict_cases[expected=6,input_value=6]": "tests/validators/test_dict.py::test_dict_cases[[('x', 'y'), ('z', 'z')]-Err('Input should be a valid dictionary [type=dict_type,')]",
     "tests/validators/test_dict.py::test_dict_cases[expected=7,input_value=7]": "tests/validators/test_dict.py::test_dict_cases[()-Err('Input should be a valid dictionary [type=dict_type,')]",
     "tests/validators/test_dict.py::test_dict_cases[expected=8,input_value=8]": "tests/validators/test_dict.py::test_dict_cases[(('x', 'y'),)-Err('Input should be a valid dictionary [type=dict_type,')]",
-    "tests/validators/test_dict.py::test_dict_cases[expected=9,input_value=9]": "tests/validators/test_dict.py::test_dict_cases[<tests.validators.test_dict.Foobar object at 0x4e8ba501d10>-Err('Input should be a valid dictionary [type=dict_type,')]",
+    "tests/validators/test_dict.py::test_dict_cases[expected=9,input_value=9]": "tests/validators/test_dict.py::test_dict_cases[<tests.validators.test_dict.Foobar object at 0x53418871c90>-Err('Input should be a valid dictionary [type=dict_type,')]",
     "tests/validators/test_dict.py::test_dict_value_error[py_and_json=0]": "tests/validators/test_dict.py::test_dict_value_error[python]",
     "tests/validators/test_dict.py::test_dict_value_error[py_and_json=1]": "tests/validators/test_dict.py::test_dict_value_error[json]",
     "tests/validators/test_dict.py::test_mapping_error_yield_1[mapping_items=0]": "tests/validators/test_dict.py::test_mapping_error_yield_1[mapping_items0]",
@@ -3396,12 +3402,12 @@
     "tests/validators/test_list.py::test_list_int[expected=1,input_value=1]": "tests/validators/test_list.py::test_list_int[(1, 2, '3')-[1, 2, 3]]",
     "tests/validators/test_list.py::test_list_int[expected=2,input_value=2]": "tests/validators/test_list.py::test_list_int[deque([1, 2, '3'])-[1, 2, 3]]",
     "tests/validators/test_list.py::test_list_int[expected=3,input_value=3]": "tests/validators/test_list.py::test_list_int[{1, 2, '3'}-IsList(1, 2, 3, check_order=False)]",
-    "tests/validators/test_list.py::test_list_int[expected=4,input_value=4]": "tests/validators/test_list.py::test_list_int[<generator object gen_ints at 0x4e8baaa2780>-[1, 2, 3]]",
+    "tests/validators/test_list.py::test_list_int[expected=4,input_value=4]": "tests/validators/test_list.py::test_list_int[<generator object gen_ints at 0x534197b2fc0>-[1, 2, 3]]",
     "tests/validators/test_list.py::test_list_int[expected=5,input_value=5]": "tests/validators/test_list.py::test_list_int[frozenset({1, 2, '3'})-IsList(1, 2, 3, check_order=False)]",
     "tests/validators/test_list.py::test_list_int[expected=6,input_value=6]": "tests/validators/test_list.py::test_list_int[dict_keys([1, 2, '3'])-[1, 2, 3]]",
     "tests/validators/test_list.py::test_list_int[expected=7,input_value=7]": "tests/validators/test_list.py::test_list_int[dict_values([10, 20, '30'])-[10, 20, 30]]",
     "tests/validators/test_list.py::test_list_int[expected=8,input_value=8]": "tests/validators/test_list.py::test_list_int[{1: 10, 2: 20, '3': '30'}-Err('Input should be a valid list [type=list_type,')]",
-    "tests/validators/test_list.py::test_list_int[expected=9,input_value=9]": "tests/validators/test_list.py::test_list_int[<generator object <genexpr> at 0x4e8baa52160>-[1, 2, 3]]",
+    "tests/validators/test_list.py::test_list_int[expected=9,input_value=9]": "tests/validators/test_list.py::test_list_int[<generator object <genexpr> at 0x534183c21c0>-[1, 2, 3]]",
     "tests/validators/test_list.py::test_list_int[expected=10,input_value=10]": "tests/validators/test_list.py::test_list_int['456'-Err(\"Input should be a valid list [type=list_type, input_value='456', input_type=str]\")]",
     "tests/validators/test_list.py::test_list_int[expected=11,input_value=11]": "tests/validators/test_list.py::test_list_int[b'789'-Err(\"Input should be a valid list [type=list_type, input_value=b'789', input_type=bytes]\")]",
     "tests/validators/test_list.py::test_list_any[expected=0,input_value=0]": "tests/validators/test_list.py::test_list_any[input_value0-expected0]",
@@ -3451,7 +3457,7 @@
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=9]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=MySequence([1, 2, 3]), output=Err('Input should be a valid list [type=list_type,'), strict=True)]",
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=10]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=KeysView(MyMapping({1: 'a', 2: 'b', 3: 'c'})), output=Err('Input should be a valid list [type=list_type,'), strict=True)]",
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=11]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=ValuesView(MyMapping({'a': 1, 'b': 2, 'c': 3})), output=Err('Input should be a valid list [type=list_type,'), strict=True)]",
-    "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=12]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=<generator object <genexpr> at 0x4e8baa53580>, output=Err('Input should be a valid list [type=list_type,'), strict=True)]",
+    "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=12]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=<generator object <genexpr> at 0x534183c35e0>, output=Err('Input should be a valid list [type=list_type,'), strict=True)]",
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=13]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input='123', output=Err('Input should be a valid list [type=list_type,'), strict=True)]",
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=14]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=b'123', output=Err('Input should be a valid list [type=list_type,'), strict=True)]",
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=15]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=(1, 2, 3), output=[1, 2, 3], strict=False)]",
@@ -3463,7 +3469,7 @@
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=21]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=MySequence([1, 2, 3]), output=[1, 2, 3], strict=False)]",
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=22]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=KeysView(MyMapping({1: 'a', 2: 'b', 3: 'c'})), output=[1, 2, 3], strict=False)]",
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=23]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=ValuesView(MyMapping({'a': 1, 'b': 2, 'c': 3})), output=[1, 2, 3], strict=False)]",
-    "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=24]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=<generator object <genexpr> at 0x4e8baa53580>, output=[1, 2, 3], strict=False)]",
+    "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=24]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=<generator object <genexpr> at 0x534183c35e0>, output=[1, 2, 3], strict=False)]",
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=25]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input='123', output=Err('Input should be a valid list [type=list_type,'), strict=False)]",
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=26]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=b'123', output=Err('Input should be a valid list [type=list_type,'), strict=False)]",
     "tests/validators/test_list.py::test_list_allowed_inputs_python[testcase=27]": "tests/validators/test_list.py::test_list_allowed_inputs_python[ListInputTestCase(input=MyMapping({1: 'a', 2: 'b', 3: 'c'}), output=Err('Input should be a valid list [type=list_type,'), strict=False)]",
@@ -3604,7 +3610,7 @@
     "tests/validators/test_model_fields.py::test_alias_error_loc_alias[py_and_json=1]": "tests/validators/test_model_fields.py::test_alias_error_loc_alias[json]",
     "tests/validators/test_model_fields.py::test_alias_error_loc_field_names[py_and_json=0]": "tests/validators/test_model_fields.py::test_alias_error_loc_field_names[python]",
     "tests/validators/test_model_fields.py::test_alias_error_loc_field_names[py_and_json=1]": "tests/validators/test_model_fields.py::test_alias_error_loc_field_names[json]",
-    "tests/validators/test_model_fields.py::test_from_attributes[expected=0,from_attributes_mode=0,input_value=0]": "tests/validators/test_model_fields.py::test_from_attributes[schema-<tests.validators.test_model_fields.ClassWithAttributes object at 0x4e8ba501e90>-({'a': 1, 'b': 2, 'c': 'ham'}, None, {'c', 'a', 'b'})]",
+    "tests/validators/test_model_fields.py::test_from_attributes[expected=0,from_attributes_mode=0,input_value=0]": "tests/validators/test_model_fields.py::test_from_attributes[schema-<tests.validators.test_model_fields.ClassWithAttributes object at 0x53418871e10>-({'a': 1, 'b': 2, 'c': 'ham'}, None, {'c', 'a', 'b'})]",
     "tests/validators/test_model_fields.py::test_from_attributes[expected=1,from_attributes_mode=1,input_value=1]": "tests/validators/test_model_fields.py::test_from_attributes[schema-MyDataclass(a=1, b=2, c='ham')-({'a': 1, 'b': 2, 'c': 'ham'}, None, {'c', 'a', 'b'})]",
     "tests/validators/test_model_fields.py::test_from_attributes[expected=2,from_attributes_mode=2,input_value=2]": "tests/validators/test_model_fields.py::test_from_attributes[schema-Cls(a=1, b=2, c='ham')-({'a': 1, 'b': 2, 'c': 'ham'}, None, {'c', 'a', 'b'})]",
     "tests/validators/test_model_fields.py::test_from_attributes[expected=3,from_attributes_mode=3,input_value=3]": "tests/validators/test_model_fields.py::test_from_attributes[schema-{'a': 1, 'b': 2, 'c': 'ham'}-({'a': 1, 'b': 2, 'c': 'ham'}, None, {'c', 'a', 'b'})]",
@@ -3617,7 +3623,7 @@
     "tests/validators/test_model_fields.py::test_from_attributes[expected=10,from_attributes_mode=10,input_value=10]": "tests/validators/test_model_fields.py::test_from_attributes[schema-'123'-Err('Input should be a valid dictionary or object to extract fields from [type=model_attributes_type,')]",
     "tests/validators/test_model_fields.py::test_from_attributes[expected=11,from_attributes_mode=11,input_value=11]": "tests/validators/test_model_fields.py::test_from_attributes[schema-[(1, 2)]-Err('type=model_attributes_type,')]",
     "tests/validators/test_model_fields.py::test_from_attributes[expected=12,from_attributes_mode=12,input_value=12]": "tests/validators/test_model_fields.py::test_from_attributes[schema-((1, 2),)-Err('type=model_attributes_type,')]",
-    "tests/validators/test_model_fields.py::test_from_attributes[expected=13,from_attributes_mode=13,input_value=13]": "tests/validators/test_model_fields.py::test_from_attributes[validation-<tests.validators.test_model_fields.ClassWithAttributes object at 0x4e8ba501e90>-({'a': 1, 'b': 2, 'c': 'ham'}, None, {'c', 'a', 'b'})]",
+    "tests/validators/test_model_fields.py::test_from_attributes[expected=13,from_attributes_mode=13,input_value=13]": "tests/validators/test_model_fields.py::test_from_attributes[validation-<tests.validators.test_model_fields.ClassWithAttributes object at 0x53418871e10>-({'a': 1, 'b': 2, 'c': 'ham'}, None, {'c', 'a', 'b'})]",
     "tests/validators/test_model_fields.py::test_from_attributes[expected=14,from_attributes_mode=14,input_value=14]": "tests/validators/test_model_fields.py::test_from_attributes[validation-MyDataclass(a=1, b=2, c='ham')-({'a': 1, 'b': 2, 'c': 'ham'}, None, {'c', 'a', 'b'})]",
     "tests/validators/test_model_fields.py::test_from_attributes[expected=15,from_attributes_mode=15,input_value=15]": "tests/validators/test_model_fields.py::test_from_attributes[validation-Cls(a=1, b=2, c='ham')-({'a': 1, 'b': 2, 'c': 'ham'}, None, {'c', 'a', 'b'})]",
     "tests/validators/test_model_fields.py::test_from_attributes[expected=16,from_attributes_mode=16,input_value=16]": "tests/validators/test_model_fields.py::test_from_attributes[validation-{'a': 1, 'b': 2, 'c': 'ham'}-({'a': 1, 'b': 2, 'c': 'ham'}, None, {'c', 'a', 'b'})]",
@@ -3631,10 +3637,10 @@
     "tests/validators/test_model_fields.py::test_from_attributes[expected=24,from_attributes_mode=24,input_value=24]": "tests/validators/test_model_fields.py::test_from_attributes[validation-[(1, 2)]-Err('type=model_attributes_type,')]",
     "tests/validators/test_model_fields.py::test_from_attributes[expected=25,from_attributes_mode=25,input_value=25]": "tests/validators/test_model_fields.py::test_from_attributes[validation-((1, 2),)-Err('type=model_attributes_type,')]",
     "tests/validators/test_model_fields.py::test_from_attributes_function[expected=0,input_value=0]": "tests/validators/test_model_fields.py::test_from_attributes_function[Cls(a=1)-{'a': 1}]",
-    "tests/validators/test_model_fields.py::test_from_attributes_function[expected=1,input_value=1]": "tests/validators/test_model_fields.py::test_from_attributes_function[Cls(a=<built-in method now of type object at 0x55c64d4713c0>)-{'a': <built-in method now of type object at 0x55c64d4713c0>}]",
-    "tests/validators/test_model_fields.py::test_from_attributes_function[expected=2,input_value=2]": "tests/validators/test_model_fields.py::test_from_attributes_function[Cls(a=<function <lambda> at 0x4e8baee3c00>)-{'a': HasRepr(IsStr(regex='.+<lambda>.+'))}]",
-    "tests/validators/test_model_fields.py::test_from_attributes_function[expected=3,input_value=3]": "tests/validators/test_model_fields.py::test_from_attributes_function[Cls(a=['<env>/lib/python3.14t/site-packages', '', '<external>/tools/pypi', '<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2', '<python>/lib/python314t.zip', '<python>/lib/python3.14t', '<python>/lib/python3.14t/lib-dynload'])-{'a': ['<env>/lib/python3.14t/site-packages', '', '<external>/tools/pypi', '<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2', '<python>/lib/python314t.zip', '<python>/lib/python3.14t', '<python>/lib/python3.14t/lib-dynload']}]",
-    "tests/validators/test_model_fields.py::test_from_attributes_function[expected=4,input_value=4]": "tests/validators/test_model_fields.py::test_from_attributes_function[Cls(a=<function foobar at 0x4e8baee39c0>)-{'a': <function foobar at 0x4e8baee39c0>}]",
+    "tests/validators/test_model_fields.py::test_from_attributes_function[expected=1,input_value=1]": "tests/validators/test_model_fields.py::test_from_attributes_function[Cls(a=<built-in method now of type object at 0x5637419723c0>)-{'a': <built-in method now of type object at 0x5637419723c0>}]",
+    "tests/validators/test_model_fields.py::test_from_attributes_function[expected=2,input_value=2]": "tests/validators/test_model_fields.py::test_from_attributes_function[Cls(a=<function <lambda> at 0x53419a7bac0>)-{'a': HasRepr(IsStr(regex='.+<lambda>.+'))}]",
+    "tests/validators/test_model_fields.py::test_from_attributes_function[expected=3,input_value=3]": "tests/validators/test_model_fields.py::test_from_attributes_function[Cls(a=['<env>/lib/python3.14t/site-packages', '', '<repo>/tools/pypi', '<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2', '<python>/lib/python314t.zip', '<python>/lib/python3.14t', '<python>/lib/python3.14t/lib-dynload'])-{'a': ['<env>/lib/python3.14t/site-packages', '', '<repo>/tools/pypi', '<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2', '<python>/lib/python314t.zip', '<python>/lib/python3.14t', '<python>/lib/python3.14t/lib-dynload']}]",
+    "tests/validators/test_model_fields.py::test_from_attributes_function[expected=4,input_value=4]": "tests/validators/test_model_fields.py::test_from_attributes_function[Cls(a=<function foobar at 0x53419a7bb80>)-{'a': <function foobar at 0x53419a7bb80>}]",
     "tests/validators/test_model_fields.py::test_from_attributes_path[expected=0,input_value=0]": "tests/validators/test_model_fields.py::test_from_attributes_path[{'foo': {'bar': {'bat': '123'}}}-{'my_field': 123}]",
     "tests/validators/test_model_fields.py::test_from_attributes_path[expected=1,input_value=1]": "tests/validators/test_model_fields.py::test_from_attributes_path[Cls(foo=Cls(bar=Cls(bat='123')))-{'my_field': 123}]",
     "tests/validators/test_model_fields.py::test_from_attributes_path[expected=2,input_value=2]": "tests/validators/test_model_fields.py::test_from_attributes_path[Cls(foo={'bar': {'bat': '123'}})-{'my_field': 123}]",
@@ -3805,7 +3811,7 @@
     "tests/validators/test_ordered_dict.py::test_ordered_dict_cases[expected=4,input_value=4]": "tests/validators/test_ordered_dict.py::test_ordered_dict_cases[[]-Err('Input should be a valid OrderedDict [type=ordered_dict_type,')]",
     "tests/validators/test_ordered_dict.py::test_ordered_dict_cases[expected=5,input_value=5]": "tests/validators/test_ordered_dict.py::test_ordered_dict_cases[[('x', 'y')]-Err('Input should be a valid OrderedDict [type=ordered_dict_type,')]",
     "tests/validators/test_ordered_dict.py::test_ordered_dict_cases[expected=6,input_value=6]": "tests/validators/test_ordered_dict.py::test_ordered_dict_cases[()-Err('Input should be a valid OrderedDict [type=ordered_dict_type,')]",
-    "tests/validators/test_ordered_dict.py::test_ordered_dict_cases[expected=7,input_value=7]": "tests/validators/test_ordered_dict.py::test_ordered_dict_cases[<tests.validators.test_ordered_dict.Foobar object at 0x4e8ba503690>-Err('Input should be a valid OrderedDict [type=ordered_dict_type,')]",
+    "tests/validators/test_ordered_dict.py::test_ordered_dict_cases[expected=7,input_value=7]": "tests/validators/test_ordered_dict.py::test_ordered_dict_cases[<tests.validators.test_ordered_dict.Foobar object at 0x53418873610>-Err('Input should be a valid OrderedDict [type=ordered_dict_type,')]",
     "tests/validators/test_ordered_dict.py::test_ordered_dict_key_value_errors[py_and_json=0]": "tests/validators/test_ordered_dict.py::test_ordered_dict_key_value_errors[python]",
     "tests/validators/test_ordered_dict.py::test_ordered_dict_key_value_errors[py_and_json=1]": "tests/validators/test_ordered_dict.py::test_ordered_dict_key_value_errors[json]",
     "tests/validators/test_set.py::test_set_ints_both[expected=0,input_value=0,py_and_json=0]": "tests/validators/test_set.py::test_set_ints_both[python-input_value0-expected0]",
@@ -3862,8 +3868,8 @@
     "tests/validators/test_set.py::test_set_kwargs[expected=12,input_value=12,kwargs=12]": "tests/validators/test_set.py::test_set_kwargs[{'max_length': 3, 'items_schema': {'type': 'int'}}-{1, 2, 3, 4}-Err('type=too_long,')]",
     "tests/validators/test_set.py::test_set_kwargs[expected=13,input_value=13,kwargs=13]": "tests/validators/test_set.py::test_set_kwargs[{'max_length': 3, 'items_schema': {'type': 'int'}}-[1, 2, 3, 4]-Err('type=too_long,')]",
     "tests/validators/test_set.py::test_set_kwargs[expected=14,input_value=14,kwargs=14]": "tests/validators/test_set.py::test_set_kwargs[{'max_length': 3}-[1, 1, 2, 2, 3, 3]-{1, 2, 3}]",
-    "tests/validators/test_set.py::test_set_kwargs[expected=15,input_value=15,kwargs=15]": "tests/validators/test_set.py::test_set_kwargs[{'max_length': 3}-<generator object generate_repeats at 0x4e8baecf740>-{1, 2, 3}]",
-    "tests/validators/test_set.py::test_set_kwargs[expected=16,input_value=16,kwargs=16]": "tests/validators/test_set.py::test_set_kwargs[{'max_length': 3}-<generator object infinite_generator at 0x4e8baecec00>-Err('Set should have at most 3 items after validation, not more [type=too_long,')]",
+    "tests/validators/test_set.py::test_set_kwargs[expected=15,input_value=15,kwargs=15]": "tests/validators/test_set.py::test_set_kwargs[{'max_length': 3}-<generator object generate_repeats at 0x53419701180>-{1, 2, 3}]",
+    "tests/validators/test_set.py::test_set_kwargs[expected=16,input_value=16,kwargs=16]": "tests/validators/test_set.py::test_set_kwargs[{'max_length': 3}-<generator object infinite_generator at 0x53419704cc0>-Err('Set should have at most 3 items after validation, not more [type=too_long,')]",
     "tests/validators/test_set.py::test_union_set_list[expected=0,input_value=0]": "tests/validators/test_set.py::test_union_set_list[input_value0-expected0]",
     "tests/validators/test_set.py::test_union_set_list[expected=1,input_value=1]": "tests/validators/test_set.py::test_union_set_list[input_value1-expected1]",
     "tests/validators/test_set.py::test_union_set_int_set_str[expected=0,input_value=0]": "tests/validators/test_set.py::test_union_set_int_set_str[input_value0-expected0]",
@@ -4205,7 +4211,7 @@
     "tests/validators/test_tuple.py::test_tuple_var_len_kwargs[expected=3,input_value=3,kwargs=3]": "tests/validators/test_tuple.py::test_tuple_var_len_kwargs[{'max_length': 4}-(1, 2, 3, 4)-(1, 2, 3, 4)]",
     "tests/validators/test_tuple.py::test_tuple_var_len_kwargs[expected=4,input_value=4,kwargs=4]": "tests/validators/test_tuple.py::test_tuple_var_len_kwargs[{'max_length': 3}-(1, 2, 3, 4)-Err('Tuple should have at most 3 items after validation, not 4 [type=too_long,')]",
     "tests/validators/test_tuple.py::test_tuple_var_len_kwargs[expected=5,input_value=5,kwargs=5]": "tests/validators/test_tuple.py::test_tuple_var_len_kwargs[{'max_length': 3}-[1, 2, 3, 4, 5]-Err('Tuple should have at most 3 items after validation, not 5 [type=too_long,')]",
-    "tests/validators/test_tuple.py::test_tuple_var_len_kwargs[expected=6,input_value=6,kwargs=6]": "tests/validators/test_tuple.py::test_tuple_var_len_kwargs[{'max_length': 3}-<generator object infinite_generator at 0x4e8ba552d00>-Err('Tuple should have at most 3 items after validation, not more [type=too_long,')]",
+    "tests/validators/test_tuple.py::test_tuple_var_len_kwargs[expected=6,input_value=6,kwargs=6]": "tests/validators/test_tuple.py::test_tuple_var_len_kwargs[{'max_length': 3}-<generator object infinite_generator at 0x53418969540>-Err('Tuple should have at most 3 items after validation, not more [type=too_long,')]",
     "tests/validators/test_tuple.py::test_tuple_validate[expected=0,input_value=0,items=0,variadic_item_index=0]": "tests/validators/test_tuple.py::test_tuple_validate[(1, 2, '3')-(1, 2, 3)-0-items0]",
     "tests/validators/test_tuple.py::test_tuple_validate[expected=1,input_value=1,items=1,variadic_item_index=1]": "tests/validators/test_tuple.py::test_tuple_validate[(1, 2, '3')-(1, 2, 3)-None-items1]",
     "tests/validators/test_tuple.py::test_tuple_validate[expected=2,input_value=2,items=2,variadic_item_index=2]": "tests/validators/test_tuple.py::test_tuple_validate[[1, 2, '3']-(1, 2, 3)-0-items0]",
@@ -5086,7 +5092,7 @@
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/serializers/test_any.py', 101, 'Skipped: Path output different on windows')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/serializers/test_any.py', 101, 'Skipped: Path output different on windows')"
     },
     {
       "id": "tests/serializers/test_dataclasses.py::test_extra_custom_serializer",
@@ -5100,840 +5106,840 @@
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/test_docstrings.py', 32, 'Skipped: requires python 3.15')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/test_docstrings.py', 32, 'Skipped: requires python 3.15')"
     },
     {
       "id": "tests/test_errors.py::test_validation_error_cause_contents_legacy",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/test_errors.py', 624, 'Skipped: This is the backport/legacy version used pre 3.11 only.')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/test_errors.py', 624, 'Skipped: This is the backport/legacy version used pre 3.11 only.')"
     },
     {
       "id": "tests/validators/arguments_v3/test_alias.py::test_alias[expected=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_alias.py::test_alias[expected=6,input_value=6,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_alias.py::test_alias[expected=7,input_value=7,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_alias.py::test_alias_validate_by_name[expected=7,input_value=7,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_alias.py::test_alias_validate_by_name[expected=8,input_value=8,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_alias.py::test_alias_validate_by_name[expected=9,input_value=9,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_alias.py::test_alias_validate_by_name[expected=10,input_value=10,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_alias.py::test_alias_validate_by_name[expected=11,input_value=11,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_alias.py::test_only_validate_by_name[py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_alias.py::test_only_allow_alias[py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_alias.py::test_by_alias_and_name_config_interaction[config_by_alias=80,config_by_name=80,runtime_by_alias=80,runtime_by_name=80]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/arguments_v3/test_alias.py', 131, \"Skipped: Can't have both by_alias and by_name as effectively False\")"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/arguments_v3/test_alias.py', 131, \"Skipped: Can't have both by_alias and by_name as effectively False\")"
     },
     {
       "id": "tests/validators/arguments_v3/test_extra.py::test_extra_forbid[err_type=8,input_value=8,py_and_json=1,schema_extra_behavior=8,validate_fn_extra_kw=8]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_extra.py::test_extra_forbid[err_type=9,input_value=9,py_and_json=1,schema_extra_behavior=9,validate_fn_extra_kw=9]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_extra.py::test_extra_forbid[err_type=10,input_value=10,py_and_json=1,schema_extra_behavior=10,validate_fn_extra_kw=10]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_extra.py::test_extra_forbid[err_type=11,input_value=11,py_and_json=1,schema_extra_behavior=11,validate_fn_extra_kw=11]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_extra.py::test_extra_ignore[input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_extra.py::test_extra_ignore[input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_general.py::test_no_args[expected=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_general.py::test_no_args[expected=6,input_value=6,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_general.py::test_no_args[expected=7,input_value=7,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_general.py::test_default_factory[expected=6,input_value=6,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_general.py::test_default_factory[expected=7,input_value=7,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_general.py::test_default_factory[expected=8,input_value=8,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_general.py::test_default_factory[expected=9,input_value=9,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_general.py::test_internal_error[py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_general.py::test_full[expected=2,input_value=2,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_keyword_only.py::test_keyword_only[input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_keyword_only.py::test_keyword_only[input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_keyword_only.py::test_keyword_only_validation_error[input_value=2,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_keyword_only.py::test_keyword_only_error_required[input_value=2,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_positional_only.py::test_positional_only[input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_positional_only.py::test_positional_only[input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_positional_only.py::test_positional_only_validation_error[py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_positional_only.py::test_positional_only_error_required[py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_positional_or_keyword.py::test_positional_or_keyword[expected=6,input_value=6,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_positional_or_keyword.py::test_positional_or_keyword[expected=7,input_value=7,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_positional_or_keyword.py::test_positional_or_keyword[expected=8,input_value=8,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_positional_or_keyword.py::test_positional_or_keyword[expected=9,input_value=9,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_positional_or_keyword.py::test_positional_or_keyword_validation_error[err_loc=3,input_value=3,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_positional_or_keyword.py::test_positional_or_keyword_validation_error[err_loc=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_positional_or_keyword.py::test_positional_only_error_required[input_value=2,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_args.py::test_var_args[expected=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_args.py::test_var_args[expected=6,input_value=6,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_args.py::test_var_args_validation_error[err_loc=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_args.py::test_var_args_validation_error[err_loc=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_kwargs_uniform.py::test_var_kwargs[expected=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_kwargs_uniform.py::test_var_kwargs[expected=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_kwargs_uniform.py::test_var_kwargs_validation_error[err_loc=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_kwargs_uniform.py::test_var_kwargs_validation_error[err_loc=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_kwargs_unpacked_typed_dict.py::test_var_kwargs[expected=11,input_value=11,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_kwargs_unpacked_typed_dict.py::test_var_kwargs[expected=12,input_value=12,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_kwargs_unpacked_typed_dict.py::test_var_kwargs[expected=13,input_value=13,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_kwargs_unpacked_typed_dict.py::test_var_kwargs[expected=14,input_value=14,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/arguments_v3/test_var_kwargs_unpacked_typed_dict.py::test_var_kwargs[expected=15,input_value=15,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_positional_args[expected=13,input_value=13,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_positional_args[expected=16,input_value=16,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_positional_args[expected=21,input_value=21,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_keyword_args[expected=8,input_value=8,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_keyword_args[expected=10,input_value=10,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_keyword_args[expected=11,input_value=11,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_keyword_args[expected=12,input_value=12,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_keyword_args[expected=13,input_value=13,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_keyword_args[expected=14,input_value=14,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_keyword_args[expected=15,input_value=15,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_positional_or_keyword[expected=8,input_value=8,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_positional_or_keyword[expected=9,input_value=9,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_positional_or_keyword[expected=10,input_value=10,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_positional_or_keyword[expected=11,input_value=11,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_positional_or_keyword[expected=12,input_value=12,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_positional_or_keyword[expected=13,input_value=13,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_p_or_k_optional[expected=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_p_or_k_optional[expected=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_var_args_only[expected=6,input_value=6,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_var_args_only[expected=9,input_value=9,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_args_var_args_only[expected=13,input_value=13,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_both[expected=3,input_value=3,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_both[expected=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_both[expected=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_no_args[expected=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_no_args[expected=9,input_value=9,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_default_factory[expected=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_default_factory[expected=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_default_factory[expected=6,input_value=6,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_default_factory[expected=7,input_value=7,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_kwargs_uniform[expected=3,input_value=3,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_kwargs_uniform[expected=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_kwargs_uniform[expected=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_kwargs_typed_dict[expected=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_kwargs_typed_dict[expected=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_kwargs_typed_dict[expected=6,input_value=6,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_kwargs_typed_dict[expected=7,input_value=7,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_alias[expected=3,input_value=3,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_alias[expected=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_alias[expected=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_alias_validate_by_name[expected=5,input_value=5,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_alias_validate_by_name[expected=6,input_value=6,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_alias_validate_by_name[expected=7,input_value=7,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_alias_validate_by_name[expected=8,input_value=8,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_alias_validate_by_name[expected=9,input_value=9,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_only_validate_by_name[py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_only_allow_alias[py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_arguments.py::test_by_alias_and_name_config_interaction[config_by_alias=80,config_by_name=80,runtime_by_alias=80,runtime_by_name=80]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_arguments.py', 1194, \"Skipped: Can't have both by_alias and by_name as effectively False\")"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_arguments.py', 1194, \"Skipped: Can't have both by_alias and by_name as effectively False\")"
     },
     {
       "id": "tests/validators/test_dataclasses.py::test_dataclass_args[expected=7,input_value=7,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_dataclasses.py::test_dataclass_args[expected=10,input_value=10,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_dataclasses.py::test_dataclass_args[expected=11,input_value=11,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_dataclasses.py::test_dataclass_args[expected=12,input_value=12,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_dataclasses.py::test_dataclass_args_init_only[expected=7,input_value=7,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_dataclasses.py::test_dataclass_args_init_only[expected=8,input_value=8,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_dataclasses.py::test_dataclass_args_init_only[expected=9,input_value=9,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_dataclasses.py::test_dataclass_args_init_only[expected=10,input_value=10,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_dataclasses.py::test_dataclass_args_init_only[expected=11,input_value=11,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_dataclasses.py::test_dataclass_args_init_only_no_fields[expected=4,input_value=4,py_and_json=1]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/conftest.py', 188, 'Skipped: JSON skipping ArgsKwargs')"
     },
     {
       "id": "tests/validators/test_dataclasses.py::test_by_alias_and_name_config_interaction[config_by_alias=80,config_by_name=80,runtime_by_alias=80,runtime_by_name=80]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_dataclasses.py', 1798, \"Skipped: Can't have both by_alias and by_name as effectively False\")"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_dataclasses.py', 1798, \"Skipped: Can't have both by_alias and by_name as effectively False\")"
     },
     {
       "id": "tests/validators/test_enums.py::test_enum_int_validation_should_succeed_for_custom_type",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_enums.py', 383, 'Skipped: Python 3.13+ enum initialization is different, see https://github.com/python/cpython/blob/ec610069637d56101896803a70d418a89afe0b4b/Lib/enum.py#L1159-L1163')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_enums.py', 383, 'Skipped: Python 3.13+ enum initialization is different, see https://github.com/python/cpython/blob/ec610069637d56101896803a70d418a89afe0b4b/Lib/enum.py#L1159-L1163')"
     },
     {
       "id": "tests/validators/test_model.py::test_model_with_enum_int_field_validation_should_succeed_for_any_type_equality_checks",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_model.py', 1301, 'Skipped: Python 3.13+ enum initialization is different, see https://github.com/python/cpython/blob/ec610069637d56101896803a70d418a89afe0b4b/Lib/enum.py#L1159-L1163')"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_model.py', 1301, 'Skipped: Python 3.13+ enum initialization is different, see https://github.com/python/cpython/blob/ec610069637d56101896803a70d418a89afe0b4b/Lib/enum.py#L1159-L1163')"
     },
     {
       "id": "tests/validators/test_model_fields.py::test_by_alias_and_name_config_interaction[config_by_alias=80,config_by_name=80,runtime_by_alias=80,runtime_by_name=80]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_model_fields.py', 1868, \"Skipped: Can't have both by_alias and by_name as effectively False\")"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_model_fields.py', 1868, \"Skipped: Can't have both by_alias and by_name as effectively False\")"
     },
     {
       "id": "tests/validators/test_typed_dict.py::test_by_alias_and_name_config_interaction[config_by_alias=80,config_by_name=80,runtime_by_alias=80,runtime_by_name=80]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_typed_dict.py', 1258, \"Skipped: Can't have both by_alias and by_name as effectively False\")"
+      "reason": "('<work>/pydantic-core/cpython-3.14.10t/source/pydantic_core-2.50.2/tests/validators/test_typed_dict.py', 1258, \"Skipped: Can't have both by_alias and by_name as effectively False\")"
     },
     {
       "id": "tests/validators/test_union.py::test_smart_union_json_string_types_str_first[input_value=0,schema=0]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": true,
-      "reason": "source/pydantic_core-2.50.2/tests/validators/test_union.py:591: in test_smart_union_json_string_types_str_first\n    assert validator.validate_json(f'\"{input_value}\"') == input_value\nE   assert UUID('12345678-1234-5678-1234-567812345678') == '12345678-1234-5678-1234-567812345678'\nE    +  where UUID('12345678-1234-5678-1234-567812345678') = <built-in method validate_json of pydantic_core._pydantic_core.SchemaValidator object at 0x4e8bf6931e0>('\"12345678-1234-5678-1234-567812345678\"')\nE    +    where <built-in method validate_json of pydantic_core._pydantic_core.SchemaValidator object at 0x4e8bf6931e0> = SchemaValidator(title=\"union[str,uuid]\", validator=Union(\\n    UnionValidator {\\n        mode: Smart,\\n        choices: [...,\\n        ],\\n        custom_error: None,\\n        name: \"union[str,uuid]\",\\n    },\\n), definitions=[], cache_strings=True).validate_json"
+      "reason": "source/pydantic_core-2.50.2/tests/validators/test_union.py:591: in test_smart_union_json_string_types_str_first\n    assert validator.validate_json(f'\"{input_value}\"') == input_value\nE   assert UUID('12345678-1234-5678-1234-567812345678') == '12345678-1234-5678-1234-567812345678'\nE    +  where UUID('12345678-1234-5678-1234-567812345678') = <built-in method validate_json of pydantic_core._pydantic_core.SchemaValidator object at 0x5341c6c3040>('\"12345678-1234-5678-1234-567812345678\"')\nE    +    where <built-in method validate_json of pydantic_core._pydantic_core.SchemaValidator object at 0x5341c6c3040> = SchemaValidator(title=\"union[str,uuid]\", validator=Union(\\n    UnionValidator {\\n        mode: Smart,\\n        choices: [...,\\n        ],\\n        custom_error: None,\\n        name: \"union[str,uuid]\",\\n    },\\n), definitions=[], cache_strings=True).validate_json"
     },
     {
       "id": "tests/validators/test_url.py::test_url_build_not_encode_credentials[include_kwarg=0,url_type=0]",

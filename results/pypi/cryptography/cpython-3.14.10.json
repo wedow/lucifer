@@ -3,13 +3,15 @@
   "version": "50.0.2",
   "runtime": "cpython-3.14.10",
   "source_sha256": "7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5",
-  "lock_sha256": "a0bba1dd7ffbb698b6e1a5300d8d99c57300b47c3bd8938a07bad3be9f5dca71",
-  "corpus_sha256": "cfae3a4b8b843bb01c1cabae24ab2795467246edf2c6fd685deedf4c67e5199c",
+  "lock_sha256": "6652f33e0a7d4b5d978b182e5dff8a085d364bea5b49f38a61081745703eefb7",
+  "corpus_sha256": "8467b9c0cc798eaae4423e55914e7cf34709f666bc1d182847f964694752fb5c",
   "harness_sha256": {
-    "run.py": "35fddb5b5c2790fd52427b59f2c51db2dc0f37ebc761b7c7c623c061a56da955",
-    "recorder.py": "5864e76bea89fb09f49ca50532a7ced6ab540e3aa65f6cda3e84d894d32d5db7",
+    "run.py": "f368a0a58ad4acc282e08b87a8151eb8d0fb0f8647a3f8fedb6c45d0382ae557",
+    "recorder.py": "4d88a7e5a3ad65b88d501d87dcec59b21c07897083502bed31e8c5a9af233e26",
     "unittest_worker.py": "7bd9839fe9a96aef249f0d519d5f4389d8fe765d91b0f2ea1152ec1034230753"
   },
+  "test_sources": {},
+  "environment_omit": [],
   "reason": "completed",
   "returncode": 0,
   "counts": {
@@ -22,13 +24,20 @@
     "package_version": "50.0.2",
     "native_modules": {
       "_cffi_backend": "7d1eff7fbb874ee72228fd426103da2b9eef528979156077bdec736d5b4f61a2",
-      "cryptography.hazmat.bindings._rust": "1e5d23fa66915204b9b67202a46993844d81cda56f6ad52cead2def37617ee29"
+      "cryptography.hazmat.bindings._rust": "1e5d23fa66915204b9b67202a46993844d81cda56f6ad52cead2def37617ee29",
+      "hypothesis._native": "e40780bfbfb364b2fcc2b65e7baba953e4e1eaacb19fdd39578130889f0ec427"
+    },
+    "native_library_versions": {
+      "zlib": "1.3.2",
+      "openssl": "OpenSSL 3.6.5 29 Sep 2026",
+      "sqlite": null
     },
     "gil_enabled": true,
     "free_threaded": false,
     "exitstatus": 0
   },
   "collection_sha256": "b64d6291bc857e08d560cde20b3be39881466b128e1339a068e0d1b720e66049",
+  "upstream_ids": {},
   "outcomes": [
     {
       "id": "tests/bench/test_x509.py::test_verify_docs_python_org",
@@ -42,252 +51,252 @@
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_aead.py', 48, 'Skipped: Requires OpenSSL without ChaCha20Poly1305 support')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_aead.py', 48, 'Skipped: Requires OpenSSL without ChaCha20Poly1305 support')"
     },
     {
       "id": "tests/hazmat/primitives/test_aead.py::test_aesocb3_unsupported_on_older_openssl",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_aead.py', 757, 'Skipped: Requires OpenSSL without AESOCB3 support')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_aead.py', 757, 'Skipped: Requires OpenSSL without AESOCB3 support')"
     },
     {
       "id": "tests/hazmat/primitives/test_aes.py::test_buffer_protocol_alternate_modes[mode6]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_aes.py', 264, 'Skipped: AES-256 in dummy-mode mode not supported')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_aes.py', 264, 'Skipped: AES-256 in dummy-mode mode not supported')"
     },
     {
       "id": "tests/hazmat/primitives/test_argon2.py::test_unsupported_backend",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_argon2.py', 37, \"Skipped: Supports argon2 so can't test unsupported path (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)\")"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_argon2.py', 37, \"Skipped: Supports argon2 so can't test unsupported path (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)\")"
     },
     {
       "id": "tests/hazmat/primitives/test_dh.py::TestDH::test_dh_vectors[vector0]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_dh.py', 447, 'Skipped: DH keys less than 512 bits are unsupported')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_dh.py', 447, 'Skipped: DH keys less than 512 bits are unsupported')"
     },
     {
       "id": "tests/hazmat/primitives/test_ec.py::TestECDSAVectors::test_unsupported_deterministic_nonce",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ec.py', 564, 'Skipped: ECDSA deterministic signing is supported by this backend <OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ec.py', 564, 'Skipped: ECDSA deterministic signing is supported by this backend <OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>')"
     },
     {
       "id": "tests/hazmat/primitives/test_ec.py::TestECSerialization::test_traditional_serialization_fips",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ec.py', 853, 'Skipped: Requires FIPS (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ec.py', 853, 'Skipped: Requires FIPS (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_ed448.py::test_ed448_unsupported",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ed448.py', 29, 'Skipped: Requires OpenSSL without Ed448 support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ed448.py', 29, 'Skipped: Requires OpenSSL without Ed448 support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_ed448.py::TestEd448Signing::test_sign_input[vector2]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ed448.py', 64, 'Skipped: ed448 contexts are not currently supported')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ed448.py', 64, 'Skipped: ed448 contexts are not currently supported')"
     },
     {
       "id": "tests/hazmat/primitives/test_mldsa.py::test_mldsa_unsupported",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_mldsa.py', 87, 'Skipped: Requires a backend without ML-DSA support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_mldsa.py', 87, 'Skipped: Requires a backend without ML-DSA support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_mldsa.py::TestMLDSA::test_mu_hasher_unsupported",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_mldsa.py', 465, 'Skipped: Requires a backend without SHAKE256 support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_mldsa.py', 465, 'Skipped: Requires a backend without SHAKE256 support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_mlkem.py::test_mlkem_unsupported",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_mlkem.py', 65, 'Skipped: Requires a backend without ML-KEM support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_mlkem.py', 65, 'Skipped: Requires a backend without ML-KEM support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_pkcs7.py::TestPKCS7EnvelopeBuilderUnsupported::test_envelope_builder_unsupported",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_pkcs7.py', 1579, 'Skipped: Requires OpenSSL with no PKCS1 v1.5 padding support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_pkcs7.py', 1579, 'Skipped: Requires OpenSSL with no PKCS1 v1.5 padding support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_pkcs7.py::TestPKCS7DecryptUnsupported::test_pkcs7_decrypt_unsupported",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_pkcs7.py', 1591, 'Skipped: Requires OpenSSL with no PKCS1 v1.5 padding support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_pkcs7.py', 1591, 'Skipped: Requires OpenSSL with no PKCS1 v1.5 padding support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_poly1305.py::test_poly1305_unsupported",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_poly1305.py', 26, 'Skipped: Requires OpenSSL without poly1305 support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_poly1305.py', 26, 'Skipped: Requires OpenSSL without poly1305 support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_rsa.py::TestRSADecryption::test_decrypt_invalid_decrypt",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_rsa.py', 1778, 'Skipped: Does not support PKCS1v1.5. (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_rsa.py', 1778, 'Skipped: Does not support PKCS1v1.5. (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_rsa.py::TestRSAEncryption::test_rsa_fips_small_key",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_rsa.py', 2152, 'Skipped: Requires FIPS (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_rsa.py', 2152, 'Skipped: Requires FIPS (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_rsa.py::TestRSAPrivateKeySerialization::test_traditional_serialization_fips",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_rsa.py', 2491, 'Skipped: Requires FIPS (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_rsa.py', 2491, 'Skipped: Requires FIPS (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_scrypt.py::test_unsupported_backend",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_scrypt.py', 52, \"Skipped: Supports scrypt so can't test unsupported path (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)\")"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_scrypt.py', 52, \"Skipped: Supports scrypt so can't test unsupported path (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)\")"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_load_ssh_private_key[rsa-psw.key]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 176, 'Skipped: Requires bcrypt module')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 176, 'Skipped: Requires bcrypt module')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_load_ssh_private_key[dsa-psw.key]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 176, 'Skipped: Requires bcrypt module')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 176, 'Skipped: Requires bcrypt module')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_load_ssh_private_key[ecdsa-psw.key]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 176, 'Skipped: Requires bcrypt module')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 176, 'Skipped: Requires bcrypt module')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_load_ssh_private_key[ed25519-psw.key]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 176, 'Skipped: Requires bcrypt module')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 176, 'Skipped: Requires bcrypt module')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_load_ssh_private_key[ed25519-aesgcm-psw.key]",
       "phase": "call",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 176, 'Skipped: Requires bcrypt module')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 176, 'Skipped: Requires bcrypt module')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_load_ssh_private_key_invalid_tag",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 281, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 281, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_load_ssh_private_key_tag_incorrect_length",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 300, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 300, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_bcrypt_encryption",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 315, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 315, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_serialize_ssh_private_key_with_password[1-1234]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_serialize_ssh_private_key_with_password[1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_serialize_ssh_private_key_with_password[10-1234]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_serialize_ssh_private_key_with_password[10-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_serialize_ssh_private_key_with_password[18-1234]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_ssh.py::TestOpenSSHSerialization::test_serialize_ssh_private_key_with_password[18-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_ssh.py', 661, 'Skipped: Requires that bcrypt exists (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_x25519.py::test_x25519_unsupported",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_x25519.py', 30, 'Skipped: Requires OpenSSL without X25519 support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_x25519.py', 30, 'Skipped: Requires OpenSSL without X25519 support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_x448.py::test_x448_unsupported",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_x448.py', 29, 'Skipped: Requires OpenSSL without X448 support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_x448.py', 29, 'Skipped: Requires OpenSSL without X448 support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/hazmat/primitives/test_xofhash.py::test_unsupported_xof",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_xofhash.py', 29, 'Skipped: Requires backend without XOF support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/hazmat/primitives/test_xofhash.py', 29, 'Skipped: Requires backend without XOF support (<OpenSSLBackend(version: OpenSSL 4.0.3 29 Sep 2026, FIPS: False, Legacy: True)>)')"
     },
     {
       "id": "tests/wycheproof/test_aes.py::test_aes_cbc_pkcs5[aes_cbc_pkcs5_test.json]",
@@ -1372,28 +1381,28 @@
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/x509/verification/test_limbo.py', 204, \"Skipped: no 'x509_limbo_root' option found\")"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/x509/verification/test_limbo.py', 204, \"Skipped: no 'x509_limbo_root' option found\")"
     },
     {
       "id": "tests/x509/verification/test_limbo.py::test_limbo[1]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/x509/verification/test_limbo.py', 204, \"Skipped: no 'x509_limbo_root' option found\")"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/x509/verification/test_limbo.py', 204, \"Skipped: no 'x509_limbo_root' option found\")"
     },
     {
       "id": "tests/x509/verification/test_limbo.py::test_limbo[2]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/x509/verification/test_limbo.py', 204, \"Skipped: no 'x509_limbo_root' option found\")"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/x509/verification/test_limbo.py', 204, \"Skipped: no 'x509_limbo_root' option found\")"
     },
     {
       "id": "tests/x509/verification/test_limbo.py::test_limbo[3]",
       "phase": "setup",
       "outcome": "skipped",
       "xfail": false,
-      "reason": "('<external>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/x509/verification/test_limbo.py', 204, \"Skipped: no 'x509_limbo_root' option found\")"
+      "reason": "('<work>/cryptography/cpython-3.14.10/source/cryptography-50.0.2/tests/x509/verification/test_limbo.py', 204, \"Skipped: no 'x509_limbo_root' option found\")"
     }
   ]
 }
