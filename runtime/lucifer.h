@@ -655,6 +655,8 @@ extern LU_EXPORT union lu_runtime {
         struct lu_handoff handoff;
         unsigned int next_static_version_tag;   /* last tag of the range static types share */
         int finalizing;                 /* Py_FinalizeEx has begun */
+        Py_ssize_t next_module_index;   /* the last PyModuleDef_Base.m_index given */
+        PyMutex getargs_lock;           /* builds an argument parser's keyword tuple once */
         PyMutex specialize_lock;        /* one rewrite of an instruction's inline cache at a time */
         pthread_t main_thread;          /* the thread that started the runtime */
         struct lu_task *main_task;      /* signals and the main thread's pending calls are aimed at it */
@@ -798,6 +800,8 @@ typedef struct {
 PyObject *lu_module_new(const char *name);
 /* A builtin module from a multi-phase definition: create, then exec slots. */
 PyObject *lu_module_from_def(PyModuleDef *def);
+/* PyModule_AddFunctions by namespace stores (a module the runtime made itself). */
+int lu_module_add_functions(PyObject *m, PyMethodDef *defs);
 extern PyModuleDef lu_lucifer_module;
 
 /* A function for `code` closing over `globals` (runtime/object/function.c). */
