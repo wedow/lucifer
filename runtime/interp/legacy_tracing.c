@@ -371,7 +371,7 @@ maybe_set_opcode_trace(PyThreadState *ts)
     return set_opcode_trace_world_stopped(f->code, 1);
 }
 
-int
+LU_EXPORT int
 _PyEval_SetProfile(PyThreadState *ts, Py_tracefunc func, PyObject *arg)
 {
     PyInterpreterState *interp = ts->interp;

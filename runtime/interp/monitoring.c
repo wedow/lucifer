@@ -9,8 +9,6 @@
 #define C_RETURN_EVENTS ((1 << PY_MONITORING_EVENT_C_RETURN) | (1 << PY_MONITORING_EVENT_C_RAISE))
 #define C_CALL_EVENTS (C_RETURN_EVENTS | (1 << PY_MONITORING_EVENT_CALL))
 
-const char *lu_monitoring_event_name(int event);        /* instrument.c */
-
 static int
 check_valid_tool(int tool_id)
 {

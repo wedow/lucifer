@@ -75,21 +75,15 @@ static const int8_t EVENT_FOR_OPCODE[256] = {
     X(POP_JUMP_IF_NONE) X(POP_JUMP_IF_NOT_NONE) X(FOR_ITER) X(POP_ITER) X(END_FOR) \
     X(END_SEND) X(LOAD_SUPER_ATTR) X(NOT_TAKEN) X(END_ASYNC_FOR)
 
-static uint8_t DE_INSTRUMENT[256], INSTRUMENTED_OPCODES[256];
+#define DEINSTRUMENT_ENTRY(op) [INSTRUMENTED_##op] = op,
+#define INSTRUMENT_ENTRY(op) [op] = INSTRUMENTED_##op, [INSTRUMENTED_##op] = INSTRUMENTED_##op,
 
-/* The instrumented form of each opcode, and the cache words of every opcode a
-   scan may meet. The tables are filled before the first code object runs. */
-void
-lu_instrument_init(void)
-{
-#define PAIR(op) \
-    DE_INSTRUMENT[INSTRUMENTED_##op] = op; \
-    INSTRUMENTED_OPCODES[op] = INSTRUMENTED_OPCODES[INSTRUMENTED_##op] = INSTRUMENTED_##op;
-    INSTRUMENTED_PAIRS(PAIR)
-#undef PAIR
-    INSTRUMENTED_OPCODES[INSTRUMENTED_LINE] = INSTRUMENTED_LINE;
-    INSTRUMENTED_OPCODES[INSTRUMENTED_INSTRUCTION] = INSTRUMENTED_INSTRUCTION;
-}
+static const uint8_t DE_INSTRUMENT[256] = { INSTRUMENTED_PAIRS(DEINSTRUMENT_ENTRY) };
+static const uint8_t INSTRUMENTED_OPCODES[256] = {
+    INSTRUMENTED_PAIRS(INSTRUMENT_ENTRY)
+    [INSTRUMENTED_LINE] = INSTRUMENTED_LINE,
+    [INSTRUMENTED_INSTRUCTION] = INSTRUMENTED_INSTRUCTION,
+};
 
 static inline int
 opcode_has_event(int opcode)
@@ -569,8 +563,8 @@ remove_per_instruction_tools(PyCodeObject *code, int offset, int tools)
 /* 1 if the callback returned DISABLE, -1 on error, 0 otherwise. The callable
    is held across the call: a registration made meanwhile, with the world
    stopped, drops its own reference only after the call has one. */
-static int
-call_one_instrument(PyInterpreterState *interp, PyThreadState *ts, PyObject **args,
+int
+lu_call_one_instrument(PyInterpreterState *interp, PyThreadState *ts, PyObject **args,
                     size_t nargsf, int8_t tool, int event)
 {
     PyObject *instrument = __atomic_load_n(&interp->monitoring_callables[tool][event], __ATOMIC_ACQUIRE);
@@ -614,6 +608,7 @@ static void
 set_global_version(PyInterpreterState *interp, uint32_t version)
 {
     __atomic_store_n(&interp->monitoring_version, version, __ATOMIC_SEQ_CST);
+    pthread_mutex_lock(&interp->tasks_lock.mutex);      /* tasks come and go during a stop */
     for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
         struct lu_carrier *c = __atomic_load_n(&((struct lu_task *)ts)->carrier, __ATOMIC_ACQUIRE);
         if (c == NULL) {
@@ -626,6 +621,7 @@ set_global_version(PyInterpreterState *interp, uint32_t version)
                                               __ATOMIC_RELAXED));
         ts->eval_breaker = new;
     }
+    pthread_mutex_unlock(&interp->tasks_lock.mutex);
 }
 
 static int
@@ -699,7 +695,7 @@ call_instrumentation_vector(lu_codeunit *instr, PyThreadState *ts, int event, st
     while (tools) {
         int tool = most_significant_bit(tools);
         tools ^= (1 << tool);
-        int res = call_one_instrument(interp, ts, callargs, nargsf, tool, event);
+        int res = lu_call_one_instrument(interp, ts, callargs, nargsf, tool, event);
         if (res < 0) {
             err = -1;
             break;
@@ -853,7 +849,7 @@ lu_fire_line(PyThreadState *ts, struct lu_frame *frame, lu_codeunit *instr, lu_c
     do {
         int tool = most_significant_bit(tools);
         tools &= ~(1 << tool);
-        int res = call_one_instrument(interp, ts, &args[1], 2 | PY_VECTORCALL_ARGUMENTS_OFFSET,
+        int res = lu_call_one_instrument(interp, ts, &args[1], 2 | PY_VECTORCALL_ARGUMENTS_OFFSET,
                                       tool, PY_MONITORING_EVENT_LINE);
         if (res < 0) {
             Py_DECREF(line_obj);
@@ -899,7 +895,7 @@ lu_fire_instruction(PyThreadState *ts, struct lu_frame *frame, lu_codeunit *inst
     while (tools) {
         int tool = most_significant_bit(tools);
         tools &= ~(1 << tool);
-        int res = call_one_instrument(interp, ts, &args[1], 2 | PY_VECTORCALL_ARGUMENTS_OFFSET,
+        int res = lu_call_one_instrument(interp, ts, &args[1], 2 | PY_VECTORCALL_ARGUMENTS_OFFSET,
                                       tool, PY_MONITORING_EVENT_INSTRUCTION);
         if (res < 0) {
             Py_DECREF(offset_obj);
@@ -1280,17 +1276,18 @@ lu_instrument(PyCodeObject *code, PyInterpreterState *interp)
 static int
 instrument_all_executing_code_objects(PyInterpreterState *interp)
 {
-    for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
-        for (struct lu_frame *f = (struct lu_frame *)ts->current_frame; f != NULL; f = f->previous) {
-            if (f->owner == LU_FRAME_C_ENTRY || f->code == NULL) {
-                continue;
-            }
-            if (instrument_lock_held(f->code, interp)) {
-                return -1;
+    int err = 0;
+    pthread_mutex_lock(&interp->tasks_lock.mutex);
+    for (PyThreadState *ts = interp->tasks; ts != NULL && !err; ts = ts->next) {
+        for (struct lu_frame *f = (struct lu_frame *)ts->current_frame; f != NULL && !err;
+             f = f->previous) {
+            if (f->owner != LU_FRAME_C_ENTRY && f->code != NULL) {
+                err = instrument_lock_held(f->code, interp);
             }
         }
     }
-    return 0;
+    pthread_mutex_unlock(&interp->tasks_lock.mutex);
+    return err;
 }
 
 static void

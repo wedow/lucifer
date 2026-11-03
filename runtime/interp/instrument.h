@@ -59,9 +59,6 @@ struct lu_addr_range {
 void lu_range_init(PyCodeObject *co, struct lu_addr_range *r);
 int lu_range_advance(struct lu_addr_range *r);       /* 0 at the end of the table */
 
-/* Fills the opcode tables, once. */
-void lu_instrument_init(void);
-
 /* The opcode of unit `i` with instrumentation and specialization stripped. */
 int lu_base_opcode(PyCodeObject *code, Py_ssize_t i);
 /* The instruction at `at` is INSTRUMENTED_LINE or INSTRUMENTED_INSTRUCTION:
@@ -88,6 +85,13 @@ int lu_monitoring_set_local_events(PyCodeObject *code, int tool_id, lu_event_set
 int lu_monitoring_clear_tool(int tool_id);
 int lu_monitoring_restart(void);
 PyObject *lu_monitoring_register_callback(int tool_id, int event_id, PyObject *callback);
+
+const char *lu_monitoring_event_name(int event);
+
+/* Calls tool's callback for event with args, which is offset by one slot:
+   1 if it returned DISABLE, -1 on error, 0 otherwise. */
+int lu_call_one_instrument(PyInterpreterState *interp, PyThreadState *ts, PyObject **args,
+                           size_t nargsf, int8_t tool, int event);
 
 /* Firing events from the eval loop. `instr` is the instruction that fires;
    the frame's `instr` must be saved after it, and a callback that moved the

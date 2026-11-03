@@ -214,7 +214,6 @@ lu_code_init(void)
     PyCode_Type.tp_itemsize = sizeof(lu_codeunit);
     PyCode_Type.tp_flags |= Py_TPFLAGS_DEFAULT;
     PyCode_Type.tp_dealloc = code_dealloc;
-    lu_instrument_init();
 }
 
 /* intern_strings: the items of a names tuple become the interned strings, in place. */

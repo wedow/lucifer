@@ -111,3 +111,11 @@ lu_prim_math_methods	runtime/prim/math.c	_lucifer's math primitives, a PyMethodD
 lu_prim_calendar_methods	runtime/prim/calendar.c	_lucifer's calendar primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_ucd_methods	runtime/prim/ucd.c	_lucifer's unicode database primitives, a PyMethodDef table never written; the API takes it non-const
 trash	-	the trashcan in refcount.c: a thread-local queue of deaths deferred while a death is deep in C recursion; its TLS symbol has no line
+lu_instrumentation_disable	runtime/interp/instrument.c	the sys.monitoring.DISABLE sentinel, a static immortal object compared by address, never written
+lu_instrumentation_missing	runtime/interp/instrument.c	the sys.monitoring.MISSING sentinel, a static immortal object compared by address, never written
+event_names	runtime/interp/instrument.c	const table of the monitoring event names; relocated by ld.so, then read-only (RELRO)
+branch_handler_def	runtime/interp/instrument.c	the PyMethodDef of the legacy BRANCH handler, never written; PyCFunction_NewEx takes it non-const
+handler_defs	runtime/interp/legacy_tracing.c	the PyMethodDefs of the sys.settrace and sys.setprofile handlers, never written; the API takes them non-const
+whatstrings	runtime/interp/legacy_tracing.c	const table of the trace event names; relocated by ld.so, then read-only (RELRO)
+lu_sys_tracing_methods	runtime/interp/legacy_tracing.c	sys's tracing functions, a PyMethodDef table never written; the API takes it non-const
+monitoring_methods	runtime/interp/monitoring.c	sys.monitoring's functions, a PyMethodDef table never written; the API takes it non-const
