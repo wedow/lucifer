@@ -278,3 +278,28 @@ spaces until the Unicode database exists. `runtime/prim/str.c`'s
   `_tuplegetter`) and `lib/modules/itertools.py` follow
   `Modules/_collectionsmodule.c` and `Modules/itertoolsmodule.c`; the deque is
   a list and the itertools classes cannot be pickled yet.
+- `runtime/prim/ucd.c` is `Modules/unicodedata.c` without its Python bindings:
+  the database lookups, decomposition, the NFC/NFD/NFKC/NFKD algorithms and the
+  name and lookup code (DAWG) are kept, each lookup a primitive whose first
+  argument selects the 3.2.0 database; `unicodedata_db.h` and
+  `unicodename_db.h` are copied verbatim into `runtime/prim/`.
+  `PyOS_mystrnicmp` and `PyOS_mystricmp` are `Python/pystrcmp.c`.
+  `lib/modules/unicodedata.py` supplies the argument handling and messages.
+- `runtime/prim/math.c` holds `PyFloat_Pack2` and `PyFloat_Unpack2`
+  (`Objects/floatobject.c`) for `lib/modules/_struct.py`; `lib/modules/math.py`
+  follows `Modules/mathmodule.c` (`math_1`/`math_2` error rules, `m_tgamma`,
+  `m_lgamma`, `vector_norm`, `fsum`, the factorial and isqrt algorithms, `nextafter`)
+  over the libm primitives. `lib/modules/_struct.py`, `_random.py` (MT19937),
+  `_contextvars.py`, `_templatelib.py` (`Objects/templateobject.c`,
+  `Objects/interpolationobject.c`), `_opcode.py`, `_blake2.py`, `_sha3.py`,
+  `pyexpat.py` and `faulthandler.py` are Python ports of the C modules of the
+  same names; `_md5.py`, `_sha1.py`, `_sha2.py`, `_sha256.py` and `_sha512.py`
+  are PyPy's `lib_pypy` modules with `name` attributes added.
+- `runtime/prim/os.c` gains `fork_exec`, the child half of
+  `Modules/_posixsubprocess.c` (`child_exec` without `preexec_fn`), and
+  `lib/modules/posix.py` the `posix` functions `os`, `shutil`, `tempfile` and
+  `subprocess` use.
+- `lib/kernel/match.py` is `_PyEval_MatchClass` and `match_keys` of
+  `Python/ceval.c`; `lib/kernel/cell.py` is `Objects/cellobject.c`.
+- `lib/modules/sysconfigdata.py` is the Makefile and `pyconfig.h` values of
+  the free-threaded 3.14 ABI, installed as `_sysconfigdata_t_linux_x86_64-linux-gnu`.
