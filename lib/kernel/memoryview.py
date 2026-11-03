@@ -11,6 +11,8 @@ from _lucifer import (
 )
 from _lucifer import _boot, operators, _format, slice as _slice, iter as _iter, bytes as _b
 
+_nokw = _b._nokw
+
 kernel_type = _boot.kernel_type
 getset = _boot.getset
 as_ssize = operators.as_ssize
@@ -29,6 +31,11 @@ def _cat(*parts):
 
 def _is_index(x):
     return kind(x, 'int') or type_lookup(type(x), '__index__') is not MISSING
+
+
+def _noargs(self, name, args):
+    if size(args):
+        error(TypeError, _cat('memoryview.', name, '() takes no arguments (', int_format(size(args), 10, False), ' given)'))
 
 
 def _attr(name):
@@ -134,7 +141,8 @@ class memoryview:
     def __exit__(self, *args):
         mv_release(self)
 
-    def release(self):
+    def release(self, *args):
+        _noargs(self, 'release', args)
         """Release the underlying buffer exposed by the memoryview object."""
         mv_release(self)
 
@@ -143,12 +151,13 @@ class memoryview:
         if order is None:
             order = 'C'
         if not kind(order, 'str'):
-            error(TypeError, _cat("tobytes() argument 'order' must be str, not ", _name(order)))
+            error(TypeError, _cat("tobytes() argument 'order' must be str or None, not ", _name(order)))
         if order != 'C' and order != 'F' and order != 'A':
             error(ValueError, "order must be 'C', 'F' or 'A'")
         return mv_tobytes(self, 67 if order == 'C' else 70 if order == 'F' else 65)
 
-    def tolist(self):
+    def tolist(self, *args):
+        _noargs(self, 'tolist', args)
         """Return the data in the buffer as a list of elements."""
         return mv_tolist(self)
 
@@ -160,8 +169,11 @@ class memoryview:
         """Return a readonly version of the memoryview."""
         return mv_toreadonly(self)
 
-    def cast(self, format, shape=None):
+    def cast(self, *args, **kwargs):
         """Cast a memoryview to a new format or shape."""
+        format, shape = _b._parse('cast', args, kwargs, ('format', 'shape'), 1)
+        if shape is MISSING:
+            shape = None
         if shape is not None:
             if not kind(shape, 'list') and not kind(shape, 'tuple'):
                 error(TypeError, 'shape must be a list or a tuple')
@@ -170,7 +182,8 @@ class memoryview:
             error(TypeError, _cat("cast() argument 'format' must be str, not ", _name(format)))
         return mv_cast(self, format, shape)
 
-    def count(self, value, /):
+    def count(self, *args, **kwargs):
+        value = _b._o(self, 'count', args, kwargs)
         """Count the number of occurrences of a value."""
         n = 0
         for x in mv_tolist(self):

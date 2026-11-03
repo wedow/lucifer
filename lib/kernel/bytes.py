@@ -62,9 +62,18 @@ def _args(name, args, lo, hi):
     return args
 
 
+def _ssize(x):
+    n = index(x)
+    if n > _SSIZE_MAX or n < -_SSIZE_MAX - 1:
+        error(OverflowError, 'Python int too large to convert to C ssize_t')
+    return n
+
+
 def _tname(self):
     """The type named in a method's messages: the class of self, or self for a classmethod."""
-    return type_tp_name(self if kind(self, 'type') else _bytearray if kind(self, 'bytearray') else _bytes)
+    if kind(self, 'type'):
+        return type_tp_name(self)
+    return 'memoryview' if kind(self, 'memoryview') else _kind(self)
 
 
 def _nokw(self, name, kwargs):
@@ -114,8 +123,11 @@ def _parse(name, args, kwargs, names, lo, posonly=0):
         if not found:
             error(TypeError, _cat(name, "() got an unexpected keyword argument '", key, "'"))
     if lo > 0 and values[lo - 1] is MISSING:
-        error(TypeError, _cat(name, '() takes at least ', _decimal(lo), ' positional ', _plural(lo),
-                              ' (', _decimal(n), ' given)'))
+        if posonly:
+            error(TypeError, _cat(name, '() takes at least ', _decimal(lo), ' positional ', _plural(lo),
+                                  ' (', _decimal(n), ' given)'))
+        error(TypeError, _cat(name, "() missing required argument '", names[lo - 1], "' (pos ",
+                              _decimal(lo), ')'))
     return values
 
 
@@ -1054,7 +1066,7 @@ Construct a mutable bytearray object from:
 
     def resize(self, *args, **kwargs):
         """Resize the internal buffer of bytearray to len."""
-        ba_resize(self, as_ssize(_o(self, 'resize', args, kwargs), OverflowError))
+        ba_resize(self, _ssize(_o(self, 'resize', args, kwargs)))
 
 
 operators.add_sequence(bytes)

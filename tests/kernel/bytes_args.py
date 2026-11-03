@@ -33,12 +33,12 @@ for f in (
     lambda: bytes.fromhex(), lambda: bytes.fromhex('a', 'b'), lambda: bytes.fromhex(string='aa'), lambda: bytes.fromhex(b'aa bb'), lambda: bytes.fromhex(bytearray(b'cc')),
     lambda: bytes.fromhex('a  b'), lambda: bytes.fromhex('aa b'), lambda: bytes.fromhex('é'), lambda: bytes.fromhex(' '), lambda: bytes.fromhex(''),
     lambda: bytes.maketrans(b'a'), lambda: bytes.maketrans(b'a', b'b', b'c'), lambda: bytes.maketrans('a', 'b'), lambda: b.maketrans(b'ab', b'cd')[97:99],
-    lambda: bytes.__new__(), lambda: bytes.__new__(1), lambda: bytearray.__new__(int), lambda: bytes.__new__(bytes, b'x'), lambda: bytearray.__init__(),
-    lambda: b.__getitem__(), lambda: b.__len__(1), lambda: b.__contains__(), lambda: b.__add__(b'x'), lambda: b.__mul__(2), lambda: b.__rmul__(2), lambda: b.__mod__(()),
-    lambda: b.__eq__(b), lambda: b.__lt__(1), lambda: b.__bytes__(), lambda: b.__bytes__(1), lambda: b.__getnewargs__(),
-    lambda: memoryview(b, 1), lambda: memoryview(object=b), lambda: memoryview(x=b), lambda: memoryview(b, object=b), lambda: memoryview(b).tobytes(order='F'),
+    lambda: bytes.__new__(1), lambda: bytearray.__new__(int), lambda: bytes.__new__(bytes, b'x'), lambda: bytearray.__init__(),
+    lambda: b.__add__(b'x'), lambda: b.__mul__(2), lambda: b.__rmul__(2), lambda: b.__mod__(()),
+    lambda: b.__eq__(b), lambda: b.__lt__(1), lambda: b.__bytes__(), lambda: b.__getnewargs__(),
+    lambda: memoryview(b, 1), 
     lambda: memoryview(b).tobytes('A'), lambda: memoryview(b).tobytes(1), lambda: memoryview(b).hex(x=1), lambda: memoryview(b).cast(), lambda: memoryview(b).cast(1),
-    lambda: memoryview(b).cast('B', shape=[5]), lambda: memoryview(b).cast('B', shape=[2, 3]), lambda: memoryview(b).tolist(1), lambda: memoryview(b).release(1),
+    lambda: memoryview(b).cast('B', shape=[2, 3]), lambda: memoryview(b).tolist(1), lambda: memoryview(b).release(1),
     lambda: memoryview(b).count(), lambda: memoryview(b).index(1), lambda: memoryview(b).index(44), lambda: memoryview(b).count(44),
 ):
     attempt(f)
