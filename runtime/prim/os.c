@@ -11,8 +11,12 @@
 #include <langinfo.h>
 #include <locale.h>
 #include <linux/futex.h>
+#include <signal.h>
 #include <string.h>
+#include <sys/random.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
@@ -484,6 +488,265 @@ prim_os_locale_encoding(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return name;
 }
 
+/* The calls with a plain integer result, by name: os_call(name, arg...) with
+   each argument a path (str or bytes) or an int, as the entry's spec says
+   ('p' or 'i'). A result of -1 with errno set raises, naming the first path. */
+union sys_arg {
+    const char *p;
+    long i;
+};
+
+/* The calls on the blocking list carry their own LU_SYSCALL. */
+#define SYS_CALLS(X) \
+    X(sys_unlink, "p", unlink(a[0].p)) \
+    X(sys_rmdir, "p", rmdir(a[0].p)) \
+    X(sys_mkdir, "pi", mkdir(a[0].p, (mode_t)a[1].i)) \
+    X(sys_mkfifo, "pi", mkfifo(a[0].p, (mode_t)a[1].i)) \
+    X(sys_chdir, "p", chdir(a[0].p)) \
+    X(sys_chmod, "pi", chmod(a[0].p, (mode_t)a[1].i)) \
+    X(sys_fchmod, "ii", fchmod((int)a[0].i, (mode_t)a[1].i)) \
+    X(sys_chown, "pii", chown(a[0].p, (uid_t)a[1].i, (gid_t)a[2].i)) \
+    X(sys_lchown, "pii", lchown(a[0].p, (uid_t)a[1].i, (gid_t)a[2].i)) \
+    X(sys_access, "pi", access(a[0].p, (int)a[1].i)) \
+    X(sys_rename, "pp", rename(a[0].p, a[1].p)) \
+    X(sys_link, "pp", link(a[0].p, a[1].p)) \
+    X(sys_symlink, "pp", symlink(a[0].p, a[1].p)) \
+    X(sys_truncate, "pi", truncate(a[0].p, (off_t)a[1].i)) \
+    X(sys_fsync, "i", LU_SYSCALL(fsync((int)a[0].i))) \
+    X(sys_fdatasync, "i", LU_SYSCALL(fdatasync((int)a[0].i))) \
+    X(sys_umask, "i", umask((mode_t)a[0].i)) \
+    X(sys_getuid, "", getuid()) \
+    X(sys_geteuid, "", geteuid()) \
+    X(sys_getgid, "", getgid()) \
+    X(sys_getegid, "", getegid()) \
+    X(sys_getppid, "", getppid()) \
+    X(sys_getpgrp, "", getpgrp()) \
+    X(sys_setsid, "", setsid()) \
+    X(sys_kill, "ii", kill((pid_t)a[0].i, (int)a[1].i)) \
+    X(sys_fcntl, "iii", LU_SYSCALL(fcntl((int)a[0].i, (int)a[1].i, a[2].i))) \
+    X(sys_sysconf, "i", sysconf((int)a[0].i)) \
+    X(sys_utime, "piiiii", utimensat(AT_FDCWD, a[0].p, (struct timespec[2]){ { a[1].i, a[2].i }, { a[3].i, a[4].i } }, (int)a[5].i))
+
+#define X(NAME, SPEC, EXPR) static long NAME(union sys_arg *a) { return EXPR; }
+SYS_CALLS(X)
+#undef X
+
+static const struct sys_entry {
+    const char *name, *spec;
+    long (*fn)(union sys_arg *);
+} sys_table[] = {
+#define X(NAME, SPEC, EXPR) { #NAME + 4, SPEC, NAME },
+    SYS_CALLS(X)
+#undef X
+};
+
+static PyObject *
+prim_os_call(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    const char *name = nargs >= 1 && PyUnicode_Check(args[0]) ? PyUnicode_AsUTF8(args[0]) : NULL;
+    if (name == NULL) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "os_call(name, ...)"), NULL);
+    }
+    for (size_t k = 0; k < sizeof sys_table / sizeof sys_table[0]; k++) {
+        const struct sys_entry *e = &sys_table[k];
+        if (strcmp(e->name, name) != 0) {
+            continue;
+        }
+        union sys_arg a[6];
+        PyObject *filename = NULL;
+        if ((size_t)nargs != strlen(e->spec) + 1) {
+            lu_err_format(PyExc_TypeError, "%s takes %zu arguments", name, strlen(e->spec));
+            return NULL;
+        }
+        for (Py_ssize_t i = 0; i < nargs - 1; i++) {
+            if (e->spec[i] == 'p') {
+                filename = filename != NULL ? filename : args[i + 1];
+                if ((a[i].p = path_arg(args[i + 1])) == NULL) {
+                    return NULL;
+                }
+            }
+            else if (int_arg(args[i + 1], &a[i].i) < 0) {
+                return NULL;
+            }
+        }
+        errno = 0;
+        long r = e->fn(a);
+        if (r < 0 && errno != 0) {
+            set_oserror(errno, filename);
+            return NULL;
+        }
+        return PyLong_FromLong(r);
+    }
+    lu_err_format(PyExc_ValueError, "no such call: %s", name);
+    return NULL;
+}
+
+/* readlink(path) */
+static PyObject *
+prim_os_readlink(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    const char *path = nargs == 1 ? path_arg(args[0]) : NULL;
+    char buf[4096];
+    if (path == NULL) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "readlink(path)"), NULL);
+    }
+    ssize_t n = LU_SYSCALL(readlink(path, buf, sizeof buf - 1));
+    if (n < 0) {
+        set_oserror(errno, args[0]);
+        return NULL;
+    }
+    buf[n] = '\0';
+    return from_locale(buf);
+}
+
+/* urandom(size) */
+static PyObject *
+prim_os_urandom(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long size;
+    if (nargs != 1 || int_arg(args[0], &size) < 0) {
+        return NULL;
+    }
+    if (size < 0) {
+        lu_err_format(PyExc_ValueError, "negative argument not allowed");
+        return NULL;
+    }
+    PyObject *bytes = PyBytes_FromStringAndSize(NULL, size);
+    char *p = bytes != NULL ? PyBytes_AS_STRING(bytes) : NULL;
+    for (long left = size; p != NULL && left > 0;) {
+        ssize_t n = LU_SYSCALL(getrandom(p + (size - left), (size_t)left, 0));
+        if (n < 0 && errno != EINTR) {
+            set_oserror(errno, NULL);
+            Py_CLEAR(bytes);
+            break;
+        }
+        left -= n > 0 ? n : 0;
+    }
+    return bytes;
+}
+
+/* pipe(): (read end, write end), close-on-exec. */
+static PyObject *
+prim_os_pipe(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    int fds[2];
+    if (pipe2(fds, O_CLOEXEC) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    PyObject *r = PyLong_FromLong(fds[0]), *w = PyLong_FromLong(fds[1]);
+    PyObject *t = r != NULL && w != NULL ? PyTuple_Pack(2, r, w) : NULL;
+    Py_XDECREF(r);
+    Py_XDECREF(w);
+    return t;
+}
+
+/* uname(): (sysname, nodename, release, version, machine) */
+static PyObject *
+prim_os_uname(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    struct utsname u;
+    if (uname(&u) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    const char *f[5] = { u.sysname, u.nodename, u.release, u.version, u.machine };
+    PyObject *t = PyTuple_New(5);
+    for (int i = 0; t != NULL && i < 5; i++) {
+        PyObject *s = from_locale(f[i]);
+        if (s == NULL) {
+            Py_CLEAR(t);
+            break;
+        }
+        PyTuple_SET_ITEM(t, i, s);
+    }
+    return t;
+}
+
+/* putenv(name, value) and, with value None, unsetenv(name): both bytes. */
+static PyObject *
+prim_os_putenv(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    const char *name = nargs == 2 ? path_arg(args[0]) : NULL;
+    const char *value = name != NULL && args[1] != Py_None ? path_arg(args[1]) : NULL;
+    if (name == NULL || (args[1] != Py_None && value == NULL)) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "putenv(name, value)"), NULL);
+    }
+    if ((value != NULL ? setenv(name, value, 1) : unsetenv(name)) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return Py_NewRef(Py_None);
+}
+
+/* scandir(path): the entries as (name, d_type, inode), without . and .. */
+static PyObject *
+prim_os_scandir(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    const char *path = nargs == 1 ? path_arg(args[0]) : NULL;
+    if (path == NULL) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "scandir(path)"), NULL);
+    }
+    DIR *dir = LU_SYSCALL(opendir(path));
+    if (dir == NULL) {
+        set_oserror(errno, args[0]);
+        return NULL;
+    }
+    PyObject *entries = PyList_New(0);
+    for (;;) {
+        errno = 0;
+        struct dirent *e = LU_SYSCALL(readdir(dir));
+        if (e == NULL) {
+            if (errno != 0) {
+                set_oserror(errno, args[0]);
+                Py_CLEAR(entries);
+            }
+            break;
+        }
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) {
+            continue;
+        }
+        PyObject *name = from_locale(e->d_name);
+        PyObject *type = PyLong_FromLong(e->d_type), *ino = PyLong_FromLongLong((long long)e->d_ino);
+        PyObject *entry = name != NULL && type != NULL && ino != NULL ? PyTuple_Pack(3, name, type, ino) : NULL;
+        Py_XDECREF(name);
+        Py_XDECREF(type);
+        Py_XDECREF(ino);
+        if (entry == NULL || lu_list_append(entries, entry) < 0) {
+            Py_XDECREF(entry);
+            Py_CLEAR(entries);
+            break;
+        }
+        Py_DECREF(entry);
+    }
+    LU_SYSCALL(closedir(dir));
+    return entries;
+}
+
+/* waitpid(pid, options): (pid, status) */
+static PyObject *
+prim_os_waitpid(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long pid, options;
+    int status = 0;
+    if (nargs != 2 || int_arg(args[0], &pid) < 0 || int_arg(args[1], &options) < 0) {
+        return NULL;
+    }
+    pid_t r;
+    do {
+        r = LU_SYSCALL(waitpid((pid_t)pid, &status, (int)options));
+    } while (r < 0 && errno == EINTR);
+    if (r < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    PyObject *p = PyLong_FromLong(r), *s = PyLong_FromLong(status);
+    PyObject *t = p != NULL && s != NULL ? PyTuple_Pack(2, p, s) : NULL;
+    Py_XDECREF(p);
+    Py_XDECREF(s);
+    return t;
+}
+
 PyMethodDef lu_prim_os_methods[] = {
     { "os_getcwd", (PyCFunction)(void (*)(void))lu_prim_os_getcwd, METH_FASTCALL, NULL },
     { "os_stat", (PyCFunction)(void (*)(void))lu_prim_os_stat, METH_FASTCALL, NULL },
@@ -503,6 +766,14 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_ftruncate", (PyCFunction)(void (*)(void))prim_os_ftruncate, METH_FASTCALL, NULL },
     { "os_dup", (PyCFunction)(void (*)(void))prim_os_dup, METH_FASTCALL, NULL },
     { "os_strerror", (PyCFunction)(void (*)(void))prim_os_strerror, METH_FASTCALL, NULL },
+    { "os_call", (PyCFunction)(void (*)(void))prim_os_call, METH_FASTCALL, NULL },
+    { "os_readlink", (PyCFunction)(void (*)(void))prim_os_readlink, METH_FASTCALL, NULL },
+    { "os_urandom", (PyCFunction)(void (*)(void))prim_os_urandom, METH_FASTCALL, NULL },
+    { "os_pipe", (PyCFunction)(void (*)(void))prim_os_pipe, METH_FASTCALL, NULL },
+    { "os_uname", (PyCFunction)(void (*)(void))prim_os_uname, METH_FASTCALL, NULL },
+    { "os_putenv", (PyCFunction)(void (*)(void))prim_os_putenv, METH_FASTCALL, NULL },
+    { "os_scandir", (PyCFunction)(void (*)(void))prim_os_scandir, METH_FASTCALL, NULL },
+    { "os_waitpid", (PyCFunction)(void (*)(void))prim_os_waitpid, METH_FASTCALL, NULL },
     { "locale_encoding", (PyCFunction)(void (*)(void))prim_os_locale_encoding, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },
 };
