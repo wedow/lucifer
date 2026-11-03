@@ -20,10 +20,10 @@ class DriverChecks(unittest.TestCase):
         self.results = self.root / 'results'
         self.results.mkdir()
 
-    def fixture(self, suite):
+    def fixture(self, suite, lane='serial'):
         units = {'serial/test_module': ['test_module.C.test_a', 'test_module.C.test_b']}
         if suite == 'ft-packages':
-            units = {'serial/pkg': ['tests/test_x.py::test_a', 'tests/test_x.py::test_b']}
+            units = {lane + '/pkg': ['tests/test_x.py::test_a', 'tests/test_x.py::test_b']}
         ids = [(unit.split('/')[0] + '/' + ('pkg/' if suite == 'ft-packages' else '') + case)
                for unit, cases in units.items() for case in cases]
         (self.results / 'inventory.json').write_text(json.dumps({'units': units}))
@@ -61,8 +61,7 @@ class DriverChecks(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual({r['status'] for r in self.manifest()}, {'NOTRUN'})
 
-    def test_package_outcomes_and_watchdogs(self):
-        self.fixture('ft-packages')
+    def package_workspace(self):
         import hashlib
         import zipfile
         work = self.root / 'work'
@@ -82,6 +81,11 @@ class DriverChecks(unittest.TestCase):
                                                        'test_files': ['tests']}},
                                     'artifacts': [{'name': 'pkg', 'filename': 'pkg.whl',
                                                    'sha256': hashlib.sha256(wheel.read_bytes()).hexdigest()}]}))
+        return work, lock, site
+
+    def test_package_outcomes_and_watchdogs(self):
+        self.fixture('ft-packages')
+        work, lock, site = self.package_workspace()
         fake = self.root / 'fake'
         for mode, expected in [('outcomes', {'XFAIL', 'SKIP'}), ('crash', {'CRASH'}),
                                ('hang', {'TIMEOUT'}), ('invalid_id', {'ERROR'}),
@@ -116,6 +120,27 @@ with open(os.environ['FT_OBSERVATIONS'],'w') as stream:
         (site / 'pkg.py').write_text('changed')
         result = self.driver('ft-packages', str(fake), '--lock', str(lock), '--work', str(work))
         self.assertEqual({r['status'] for r in self.manifest()}, {'ERROR'}, result.stderr)
+
+    def test_parallel_lane_scores_serial_fallback_against_oracle(self):
+        self.fixture('ft-packages', 'parallel')
+        work, lock, _ = self.package_workspace()
+        (self.results / 'oracle.json').write_text(json.dumps({'units': {'parallel/pkg': [{'serial_fallback': {}}]}}))
+        fake = self.root / 'fake'
+        for mode, expected in [('wrapped', ['PASS', 'PASS']), ('serial', ['FAIL', 'FAIL'])]:
+            fake.write_text("""#!/usr/bin/env python3
+import json,os,sys
+if '-c' in sys.argv:
+ print(json.dumps(dict(version=[3,14,10],implementation='cpython',free_threaded=True,gil_enabled=False)))
+ sys.exit(0)
+ids = ['tests/test_x.py::test_a', 'tests/test_x.py::test_b']
+with open(os.environ['FT_OBSERVATIONS'],'w') as stream:
+ for row in [dict(stage='completion',free_threaded=True,gil_enabled=False)] + [dict(id=i,status='PASS',seconds=.1) for i in ids] + [
+         dict(exitstatus=0), dict(parallelism={} if MODE == 'serial' else dict.fromkeys(ids, 4), serial_fallback={})]:
+  stream.write(json.dumps(row)+'\\n')
+""".replace('MODE', repr(mode)))
+            fake.chmod(0o755)
+            result = self.driver('ft-packages', str(fake), '--lock', str(lock), '--work', str(work), '--oracle-runtime', 'oracle')
+            self.assertEqual([r['status'] for r in self.manifest()], expected, result.stderr)
 
     def test_interpreter_symlink_is_preserved(self):
         self.fixture('ft-cpython')

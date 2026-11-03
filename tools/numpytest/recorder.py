@@ -108,6 +108,7 @@ def pytest_sessionfinish(session, exitstatus):
     parallel = session.config.pluginmanager.get_plugin("_run-parallel")
     if parallel is not None:
         state["parallel_cases"] = len(parallel.run_in_parallel)
+        state["parallel_ids"] = sorted(i.replace(os.environ["NUMPYTEST_SITE"] + "/", "") for i in parallel.run_in_parallel)
         state["serial_fallback"] = {
             ident.replace(os.environ["NUMPYTEST_SITE"] + "/", ""): reason
             for ident, reason in parallel.thread_unsafe.items()

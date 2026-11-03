@@ -386,6 +386,17 @@ def run(args):
             rows[active] = ("TIMEOUT" if code == "TIMEOUT" else "CRASH", 0.0)
     if (work / "state.json").exists():
         metadata["finish"] = json.loads((work / "state.json").read_text())
+    if args.parallel and args.runtime != args.oracle_runtime:
+        # A case the oracle ran parallel-wrapped must not pass serially.
+        try:
+            oracle = json.loads((directory / (args.oracle_runtime + ("-" + label if args.shard else "") + ".json")).read_text())
+        except OSError as exc:
+            raise ValueError("parallel lane needs the oracle run recorded as " + args.oracle_runtime) from exc
+        wrapped = set(metadata.get("finish", {}).get("parallel_ids", ()))
+        serial = set(oracle["finish"]["serial_fallback"])
+        for ident in selected:
+            if rows[ident][0] == "PASS" and ident not in wrapped | serial:
+                rows[ident] = ("FAIL", rows[ident][1])
     metadata["reasons"] = reasons
     # Confirm tests did not modify the acceptance artifact.
     try:
@@ -426,6 +437,7 @@ def main():
     p.add_argument("--results", type=Path, default=ROOT / "results")
     p.add_argument("--collect", action="store_true", help="union oracle nodeids into expected.tsv")
     p.add_argument("--parallel", action="store_true")
+    p.add_argument("--oracle-runtime", default="cpython-3.14.10t", help="recorded oracle run the parallel lane is compared with")
     p.add_argument("--shard", action="append", help="installed numpy/ file or directory prefix; repeat to group files")
     p.add_argument("--timeout", type=int, default=540, help="whole shard timeout in seconds")
     args = parser.parse_args()
