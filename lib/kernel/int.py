@@ -510,6 +510,12 @@ The class bool is a subclass of the class int, and cannot be subclassed."""
         return 'True' if self is True else 'False'
 
     def __invert__(self):
+        __import__('warnings').warn(
+            "Bitwise inversion '~' on bool is deprecated and will be removed in Python 3.16. "
+            "This returns the bitwise inversion of the underlying int object and is usually not "
+            "what you expect from negating a bool. Use the 'not' operator for boolean negation or "
+            "~int(x) if you really want the bitwise inversion of the underlying int.",
+            DeprecationWarning, 1)
         return int_invert(self)
 
     def __and__(self, other):
