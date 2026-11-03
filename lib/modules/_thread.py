@@ -255,3 +255,43 @@ def interrupt_main(signum=2, /):
     """Simulate the arrival of the given signal in the main thread,
 where the corresponding signal handler will be executed."""
     _lucifer.signal_interrupt(signum)
+
+
+class _ThreadHandle:
+    """Handle of a thread: its identifier and whether it has finished."""
+    __slots__ = ('_ident', '_done')
+
+    def __init__(self, ident):
+        self._ident = ident
+        self._done = False
+
+    @property
+    def ident(self):
+        return self._ident
+
+    def is_done(self):
+        return self._done
+
+    def _set_done(self):
+        self._done = True
+
+    def join(self, timeout=None):
+        """Wait for the thread to finish; no other thread can be running."""
+        if not self._done:
+            raise RuntimeError("cannot join current thread")
+
+    def __repr__(self):
+        return '<_thread._ThreadHandle object: ident=%d>' % self._ident
+
+
+def _make_thread_handle(ident):
+    """Internal only. Make a thread handle for threads not spawned by the _thread module."""
+    return _ThreadHandle(ident)
+
+
+def _shutdown():
+    """Wait for all non-daemon threads (other than the calling thread) to stop."""
+
+
+def set_name(name):
+    """Set the name of the current thread."""
