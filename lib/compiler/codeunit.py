@@ -14,7 +14,7 @@ import sys
 
 import _ast
 
-from . import future, preprocess, symtable
+from . import assemble, flowgraph, future, preprocess, symtable
 from .consts import merge_consts_recursive
 from .instruction_sequence import InstructionSequence
 
@@ -536,7 +536,6 @@ class Compiler:
 
 
 def optimize_and_assemble_code_unit(u, const_cache, code_flags, filename):
-    from . import assemble, flowgraph
     consts = consts_dict_keys_inorder(u.u_metadata.u_consts)
     g = flowgraph.cfg_from_instruction_sequence(u.u_instr_sequence)
     try:

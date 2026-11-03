@@ -8,6 +8,7 @@ and scope cleanup on error are gone.
 import _ast
 
 from . import symtable
+from .assemble import set_localsplusnames
 from .codeunit import (
     COMPILE_FBLOCK_ASYNC_COMPREHENSION_GENERATOR, COMPILE_FBLOCK_ASYNC_WITH,
     COMPILE_FBLOCK_EXCEPTION_GROUP_HANDLER, COMPILE_FBLOCK_EXCEPTION_HANDLER,
@@ -348,8 +349,12 @@ def codegen_finish_annotations_scope(c, loc):
     # name (.format) in the symtable; if the name "format" appears in the
     # annotations, it doesn't get clobbered by this name.  This code is
     # essentially: co.co_localsplusnames = ("format", *co.co_localsplusnames[1:])
-    from .assemble import set_localsplusname
-    set_localsplusname(co, 0, "format")
+    # (Cells that are also arguments share the argument's slot.)
+    localsplusnames = (co.co_varnames
+                       + tuple(name for name in co.co_cellvars if name not in co.co_varnames)
+                       + co.co_freevars)
+    # A new tuple: a literal would be shared with this module's code object.
+    set_localsplusnames(co, tuple(["format", *localsplusnames[1:]]))
     codegen_make_closure(c, loc, co, 0)
 
 
