@@ -1,6 +1,6 @@
 ---
 id: luc-r5qm
-status: open
+status: closed
 deps: [luc-2yau, luc-616t, luc-rjvn]
 links: []
 created: 2026-11-03T02:47:56Z
@@ -22,3 +22,9 @@ Builder: sonnet.
 
 make check-kernel PROGRAMS="dict_ops set_ops comprehensions" (bin/lucifer -I -S on the host-compiled .pyc, 512 KiB RLIMIT_STACK, stdout+stderr+exit equal to cpython-3.14.10t).
 
+
+## Notes
+
+**2026-11-03T06:14:22Z**
+
+dict, set, frozenset, views and comprehensions landed on branch luc-r5qm; gaps ticketed (mappingproxy, watcher delivery, cross-carrier commit)

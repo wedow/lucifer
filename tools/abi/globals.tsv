@@ -70,3 +70,5 @@ lu_prim_float_methods	runtime/prim/float.c	_lucifer's float primitives, a PyMeth
 lu_prim_complex_methods	runtime/prim/complex.c	_lucifer's complex primitives, a PyMethodDef table never written; the API takes it non-const
 lc_float_strings	runtime/prim/pystrtod.c	constant table of lower-case inf, nan and e, never written
 uc_float_strings	runtime/prim/pystrtod.c	constant table of upper-case INF, NAN and E, never written
+lu_prim_dict_methods	runtime/prim/dict.c	_lucifer's dict primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_set_methods	runtime/prim/set.c	_lucifer's set primitives, a PyMethodDef table never written; the API takes it non-const
