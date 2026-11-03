@@ -307,3 +307,115 @@ for n in range(WARM):
     if n % 100 == 99:
         Live.v = n
 show('mid-loop', sorted(set(seen)))
+
+
+# The same code object under two globals dicts.
+def probe():
+    out.append(shared)
+
+
+out = []
+g1 = {'shared': 'one', 'out': out, '__builtins__': builtins}
+g2 = {'shared': 'two', 'out': out, '__builtins__': builtins}
+for _ in range(WARM):
+    exec(probe.__code__, g1)
+    exec(probe.__code__, g2)
+del out[:-2]
+g1['shared'] = 'one2'
+del g2['shared']
+exec(probe.__code__, g1)
+try:
+    exec(probe.__code__, g2)
+except NameError as e:
+    out.append(str(e))
+g2['shared'] = 'two2'
+exec(probe.__code__, g2)
+show('two globals', out)
+
+
+# A module gains enough attributes to resize its dict.
+mod2 = type(sys)('probe2')
+mod2.z = 1
+r = run(read_z, mod2)
+for n in range(50):
+    setattr(mod2, 'a%d' % n, n)
+mod2.z = 2
+r += run(read_z, mod2)
+show('module resize', r)
+
+
+# __getattribute__ and __getattr__ come to a class after its attributes are cached.
+class G:
+    v = 'class'
+
+    def m(self):
+        return 'm'
+
+
+gg = G()
+gg.w = 'inst'
+r = run(read_v, gg) + run(call_f, M()) + run(lambda o: o.w, gg) + run(lambda o: o.m(), gg)
+G.__getattribute__ = lambda self, name: 'hook ' + name
+r += run(read_v, gg) + run(lambda o: o.w, gg) + run(lambda o: o.m, gg)
+del G.__getattribute__
+r += run(read_v, gg) + run(lambda o: o.w, gg) + run(lambda o: o.m(), gg)
+show('__getattribute__', r)
+
+
+# A subclass of a builtin: its method is replaced, then hidden by an instance attribute.
+class L(list):
+    pass
+
+
+def push(o):
+    o.append(1)
+    return len(o)
+
+
+lst = L()
+r = run(push, lst)
+L.append = lambda self, x: None
+r += run(push, lst)
+del L.append
+lst.append = lambda x: None
+r += run(push, lst)
+show('builtin subclass', r)
+
+
+# A class attribute through the class, as the bases change.
+class Q1:
+    k = 'q1'
+
+
+class Q2:
+    k = 'q2'
+
+
+class Q(Q1):
+    pass
+
+
+def read_k(c):
+    return c.k
+
+
+r = run(read_k, Q)
+Q.__bases__ = (Q2,)
+r += run(read_k, Q)
+Q.k = 'own'
+r += run(read_k, Q)
+show('class via bases', r)
+
+
+# A class that is modified more often than a type keeps a version for.
+class Busy:
+    v = 0
+
+
+busy = Busy()
+seen = []
+for n in range(1500):
+    Busy.v = n
+    seen.append(read_v(busy) == n)
+    seen.append(read_v(Busy) == n)
+show('busy class', (len(seen), all(seen)))

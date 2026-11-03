@@ -22,7 +22,6 @@
 
 #include <string.h>
 
-#define MANAGED_DICT_OFFSET (-(Py_ssize_t)sizeof(PyObject *))
 #define MANAGED_WEAKREF_OFFSET (-2 * (Py_ssize_t)sizeof(PyObject *))
 #define PREHEADER_SIZE (2 * sizeof(PyObject *))
 #define VERSION_TAG_BASE (2u << 16)     /* _Py_TYPE_BASE_VERSION_TAG */
@@ -412,7 +411,7 @@ dict_ptr(PyObject *obj)
         return NULL;
     }
     if (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
-        return (PyObject **)((char *)obj + MANAGED_DICT_OFFSET);
+        return (PyObject **)((char *)obj + LU_MANAGED_DICT_OFFSET);
     }
     return tp->tp_dictoffset > 0 ? (PyObject **)((char *)obj + tp->tp_dictoffset) : NULL;
 }
@@ -526,7 +525,7 @@ subtype_dealloc(PyObject *self)
         }
     }
     if (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
-        Py_CLEAR(*(PyObject **)((char *)self + MANAGED_DICT_OFFSET));
+        Py_CLEAR(*(PyObject **)((char *)self + LU_MANAGED_DICT_OFFSET));
     }
     if (base->tp_dealloc != NULL && base != &PyBaseObject_Type) {
         base->tp_dealloc(self);

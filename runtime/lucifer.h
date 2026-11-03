@@ -168,6 +168,10 @@ enum lu_kernel_id {
     LU_K_COUNT
 };
 
+/* The dict pointer a Py_TPFLAGS_MANAGED_DICT instance carries before its header. */
+#define LU_MANAGED_DICT_OFFSET (-(Py_ssize_t)sizeof(PyObject *))
+#define LU_MANAGED_DICT(obj) (*(PyObject **)((char *)(obj) + LU_MANAGED_DICT_OFFSET))
+
 /* Watcher ids per kind, as CPython's TYPE_/DICT_/FUNC_/CODE_MAX_WATCHERS. */
 #define LU_MAX_WATCHERS 8
 typedef void (*lu_watcher)(void);
@@ -199,6 +203,7 @@ struct _is {
     lu_watcher dict_watchers[LU_MAX_WATCHERS];      /* PyDict_WatchCallback */
     lu_watcher func_watchers[LU_MAX_WATCHERS];      /* PyFunction_WatchCallback */
     lu_watcher code_watchers[LU_MAX_WATCHERS];      /* PyCode_WatchCallback */
+    int specializing;                   /* set once the kernel has booted: instructions may specialize */
     int max_str_digits;                 /* sys.get_int_max_str_digits() */
     PyObject *importlib;                /* _frozen_importlib, once installed */
     PyObject *import_func;              /* the original builtins.__import__ */
@@ -439,6 +444,7 @@ extern LU_EXPORT union lu_runtime {
         struct lu_handoff handoff;
         unsigned int next_static_version_tag;   /* last tag of the range static types share */
         int finalizing;                 /* Py_FinalizeEx has begun */
+        PyMutex specialize_lock;        /* one rewrite of an instruction's inline cache at a time */
         PyMutex weakref_locks[64];      /* guard the weakref lists, by referent address */
         struct _is main_interp;
     };

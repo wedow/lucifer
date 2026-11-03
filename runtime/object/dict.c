@@ -670,6 +670,13 @@ ns_find(PyObject *dict, PyObject *key)
     return ix;
 }
 
+Py_ssize_t
+lu_ns_index(PyObject *dict, PyObject *key)
+{
+    Py_ssize_t ix = ns_find(dict, key);
+    return ix >= 0 ? ix : -1;
+}
+
 PyObject *
 lu_ns_lookup(PyObject *dict, PyObject *key)
 {

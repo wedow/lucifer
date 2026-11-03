@@ -20,6 +20,8 @@
 #include "interp/code.h"
 #include "interp/exceptions.h"
 #include "interp/gen.h"
+#include "interp/specialize.h"
+#include "object/dict.h"
 
 #include "opcode.h"
 #include "opcode_ids.h"
@@ -33,15 +35,6 @@
 #define MAKE_FUNCTION_ANNOTATE    0x10
 #define RESUME_AFTER_YIELD_FROM 2
 #define RESUME_OPARG_LOCATION_MASK 0x3
-
-/* _PyOpcode_Caches: CACHE entries after each instruction. */
-static const uint8_t caches[256] = {
-    [TO_BOOL] = 3, [STORE_SUBSCR] = 1, [SEND] = 1, [UNPACK_SEQUENCE] = 1,
-    [STORE_ATTR] = 4, [LOAD_GLOBAL] = 4, [LOAD_SUPER_ATTR] = 1, [LOAD_ATTR] = 9,
-    [COMPARE_OP] = 1, [CONTAINS_OP] = 1, [JUMP_BACKWARD] = 1, [POP_JUMP_IF_TRUE] = 1,
-    [POP_JUMP_IF_FALSE] = 1, [POP_JUMP_IF_NONE] = 1, [POP_JUMP_IF_NOT_NONE] = 1,
-    [FOR_ITER] = 1, [CALL] = 3, [CALL_KW] = 3, [CALL_FUNCTION_EX] = 0, [BINARY_OP] = 5,
-};
 
 #define NAME_ERROR_MSG "name '%.200s' is not defined"
 #define UNBOUNDLOCAL_ERROR_MSG \
@@ -294,6 +287,8 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
         [LOAD_NAME] = &&op_LOAD_NAME,
         [STORE_NAME] = &&op_STORE_NAME,
         [LOAD_GLOBAL] = &&op_LOAD_GLOBAL,
+        [LOAD_GLOBAL_MODULE] = &&op_LOAD_GLOBAL_MODULE,
+        [LOAD_GLOBAL_BUILTIN] = &&op_LOAD_GLOBAL_BUILTIN,
         [LOAD_FAST] = &&op_LOAD_FAST,
         [LOAD_FAST_BORROW] = &&op_LOAD_FAST,
         [LOAD_FAST_CHECK] = &&op_LOAD_FAST_CHECK,
@@ -349,6 +344,14 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
         [IMPORT_FROM] = &&op_IMPORT_FROM,
         [JUMP_BACKWARD] = &&op_JUMP_BACKWARD,
         [LOAD_ATTR] = &&op_LOAD_ATTR,
+        [LOAD_ATTR_MODULE] = &&op_LOAD_ATTR_MODULE,
+        [LOAD_ATTR_CLASS] = &&op_LOAD_ATTR_CLASS,
+        [LOAD_ATTR_CLASS_WITH_METACLASS_CHECK] = &&op_LOAD_ATTR_CLASS,
+        [LOAD_ATTR_WITH_HINT] = &&op_LOAD_ATTR_WITH_HINT,
+        [LOAD_ATTR_METHOD_NO_DICT] = &&op_LOAD_ATTR_METHOD,
+        [LOAD_ATTR_METHOD_WITH_VALUES] = &&op_LOAD_ATTR_METHOD,
+        [LOAD_ATTR_NONDESCRIPTOR_NO_DICT] = &&op_LOAD_ATTR_METHOD,
+        [LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES] = &&op_LOAD_ATTR_METHOD,
         [STORE_ATTR] = &&op_STORE_ATTR,
         [DELETE_ATTR] = &&op_DELETE_ATTR,
         [LOAD_SUPER_ATTR] = &&op_LOAD_SUPER_ATTR,
@@ -440,14 +443,11 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
         next_instr++; \
         goto *targets[opcode]; \
     } while (0)
-#define SKIP_CACHES() (next_instr += caches[opcode])
+#define SKIP_CACHES() (next_instr += lu_opcode_caches[opcode])
 /* The start of the instruction `next_instr` follows, caches included. */
-#define INSTR_START() ({ \
-        lu_codeunit *at = next_instr; \
-        while ((at - 1)->op.code == CACHE) { \
-            at--; \
-        } \
-        at - 1; })
+#define INSTR_START() lu_instr_before(code, next_instr)
+/* The same for the instructions that resume a linked frame: they have one cache word. */
+#define SEND_START() (next_instr - 1 - lu_opcode_caches[SEND])
 #define PUSH(v) (*sp++ = (v))
 #define POP() (*--sp)
 #define TOP() (sp[-1])
@@ -473,13 +473,13 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int throwflag)
         else if ((ret) == LU_RETURN_SENT) { \
             PUSH(Py_NewRef(PyTuple_GET_ITEM(v, 0))); \
             if (PyTuple_GET_ITEM(v, 1) == Py_True) { \
-                next_instr += instr_oparg(INSTR_START()); \
+                next_instr += instr_oparg(SEND_START()); \
             } \
             Py_DECREF(v); \
         } \
         else if ((ret) == LU_RETURN_FOR_ITER) { \
             if ((v) == LU_MISSING) { \
-                next_instr += instr_oparg(INSTR_START()) + 1; \
+                next_instr += instr_oparg(SEND_START()) + 1; \
             } \
             else { \
                 PUSH(v); \
@@ -583,14 +583,59 @@ op_STORE_NAME: {
     DISPATCH();
 }
 
+/* A specialized instruction whose guard fails runs the generic one, which
+   counts the miss; a spent counter makes it try again. */
+#define ADAPT(specialize_call) do { \
+        lu_codeunit *counter_ = next_instr; \
+        if (LU_COUNTER_SPENT(counter_->cache)) { \
+            specialize_call; \
+        } \
+        else { \
+            lu_cache_store(counter_, counter_->cache - LU_COUNTER_STEP); \
+        } \
+    } while (0)
+
 op_LOAD_GLOBAL: {
     PyObject *name = NAME(oparg >> 1), *v;
+    ADAPT(lu_specialize_load_global(frame->globals, frame->builtins, next_instr - 1, name));
     SKIP_CACHES();
     if ((v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
         && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
         name_error(name);
     }
     ERROR_IF(v == NULL);
+    PUSH(Py_NewRef(v));
+    if (oparg & 1) {
+        PUSH(NULL);
+    }
+    DISPATCH();
+}
+
+/* The value at the cached entry of a keys table that still has the cached
+   version, or NULL: a different table, or the entry is gone. */
+op_LOAD_GLOBAL_MODULE:
+op_LOAD_GLOBAL_BUILTIN: {
+    lu_codeunit *site = next_instr - 1;
+    uint16_t module_version = lu_cache_load(next_instr + LG_MODULE_KEYS_VERSION);
+    uint16_t builtin_version = lu_cache_load(next_instr + LG_BUILTIN_KEYS_VERSION);
+    Py_ssize_t index = lu_cache_load(next_instr + LG_INDEX);
+    int from_builtins = opcode == LOAD_GLOBAL_BUILTIN;
+    PyObject *v = NULL;
+    if (module_version != 0 && PyDict_CheckExact(frame->globals)
+        && (!from_builtins || (builtin_version != 0 && PyDict_CheckExact(frame->builtins)))) {
+        PyDictKeysObject *gk = __atomic_load_n(&((PyDictObject *)frame->globals)->ma_keys, __ATOMIC_ACQUIRE);
+        PyDictKeysObject *dk = from_builtins
+            ? __atomic_load_n(&((PyDictObject *)frame->builtins)->ma_keys, __ATOMIC_ACQUIRE) : gk;
+        if (gk->dk_version == module_version && dk->dk_version == (from_builtins ? builtin_version : module_version)
+            && lu_dk_is_unicode(dk) && index < dk->dk_nentries) {
+            v = lu_dk_value(dk, index);
+        }
+    }
+    if (v == NULL || !lu_site_unchanged(site, opcode)
+        || lu_cache_load(next_instr + LG_MODULE_KEYS_VERSION) != module_version) {
+        goto op_LOAD_GLOBAL;
+    }
+    SKIP_CACHES();
     PUSH(Py_NewRef(v));
     if (oparg & 1) {
         PUSH(NULL);
@@ -852,7 +897,7 @@ return_frame: {
     frame = caller;
     LOAD_FRAME();
     if (ret == LU_RETURN_SEND) {
-        next_instr += instr_oparg(INSTR_START());       /* out of the yield-from loop */
+        next_instr += instr_oparg(SEND_START());        /* out of the yield-from loop */
     }
     PUSH_RETURNED(ret, retval);
     DISPATCH();
@@ -1477,11 +1522,120 @@ op_JUMP_BACKWARD:
     POLL();
     DISPATCH();
 
+/* The specialized forms of LOAD_ATTR (owner -- attr, self_or_null[oparg & 1]). */
+
+op_LOAD_ATTR_MODULE: {
+    PyObject *owner = TOP();
+    uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
+    PyObject *v = NULL;
+    if (version != 0 && PyModule_CheckExact(owner) && PyDict_CheckExact(((PyModuleObject *)owner)->md_dict)) {
+        PyDictObject *md = (PyDictObject *)((PyModuleObject *)owner)->md_dict;
+        PyDictKeysObject *dk = __atomic_load_n(&md->ma_keys, __ATOMIC_ACQUIRE);
+        Py_ssize_t index = lu_cache_load(next_instr + LA_INDEX);
+        if (dk->dk_version == version && lu_dk_is_unicode(dk) && index < dk->dk_nentries) {
+            v = lu_dk_value(dk, index);
+        }
+    }
+    if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
+        || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        goto op_LOAD_ATTR;
+    }
+    SKIP_CACHES();
+    TOP() = Py_NewRef(v);
+    Py_DECREF(owner);
+    if (oparg & 1) {
+        PUSH(NULL);
+    }
+    DISPATCH();
+}
+
+op_LOAD_ATTR_CLASS: {
+    PyObject *owner = TOP();
+    uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
+    int meta_checked = opcode == LOAD_ATTR_CLASS_WITH_METACLASS_CHECK;
+    uint32_t meta_version = meta_checked ? lu_cache_load32(next_instr + LA_KEYS_VERSION) : 0;
+    PyObject *descr = lu_cache_load_ptr(next_instr + LA_DESCR);
+    if (version == 0 || !PyType_Check(owner) || ((PyTypeObject *)owner)->tp_version_tag != version
+        || (meta_checked && (meta_version == 0 || Py_TYPE(owner)->tp_version_tag != meta_version))
+        || !lu_site_unchanged(next_instr - 1, opcode)
+        || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        goto op_LOAD_ATTR;
+    }
+    SKIP_CACHES();
+    TOP() = Py_NewRef(descr);
+    Py_DECREF(owner);
+    if (oparg & 1) {
+        PUSH(NULL);
+    }
+    DISPATCH();
+}
+
+op_LOAD_ATTR_WITH_HINT: {
+    PyObject *owner = TOP();
+    uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
+    PyObject *v = NULL;
+    if (version != 0 && Py_TYPE(owner)->tp_version_tag == version) {
+        PyObject *dict = LU_MANAGED_DICT(owner);
+        if (dict != NULL && PyDict_CheckExact(dict)) {
+            PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)dict)->ma_keys, __ATOMIC_ACQUIRE);
+            Py_ssize_t index = lu_cache_load(next_instr + LA_INDEX);
+            if (lu_dk_is_unicode(dk) && index < dk->dk_nentries && lu_dk_key(dk, index) == NAME(oparg >> 1)) {
+                v = lu_dk_value(dk, index);
+            }
+        }
+    }
+    if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
+        || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        goto op_LOAD_ATTR;
+    }
+    SKIP_CACHES();
+    TOP() = Py_NewRef(v);
+    Py_DECREF(owner);
+    if (oparg & 1) {
+        PUSH(NULL);
+    }
+    DISPATCH();
+}
+
+/* A method of the type, or a plain value of it, unless the instance's dict
+   has the name: a method is pushed under its owner, a value alone. */
+op_LOAD_ATTR_METHOD: {
+    PyObject *owner = TOP();
+    uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
+    PyObject *descr = lu_cache_load_ptr(next_instr + LA_DESCR);
+    int with_dict = opcode == LOAD_ATTR_METHOD_WITH_VALUES || opcode == LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES;
+    if (version == 0 || Py_TYPE(owner)->tp_version_tag != version) {
+        goto op_LOAD_ATTR;
+    }
+    if (with_dict) {
+        PyObject *dict = LU_MANAGED_DICT(owner);
+        if (dict != NULL && (!PyDict_CheckExact(dict) || lu_ns_lookup(dict, NAME(oparg >> 1)) != NULL)) {
+            goto op_LOAD_ATTR;
+        }
+    }
+    if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        goto op_LOAD_ATTR;
+    }
+    SKIP_CACHES();
+    TOP() = Py_NewRef(descr);
+    if (opcode == LOAD_ATTR_METHOD_NO_DICT || opcode == LOAD_ATTR_METHOD_WITH_VALUES) {
+        PUSH(owner);
+    }
+    else {
+        Py_DECREF(owner);
+        if (oparg & 1) {
+            PUSH(NULL);
+        }
+    }
+    DISPATCH();
+}
+
 op_LOAD_ATTR: {
     /* owner -- attr, self_or_null[oparg & 1]; the method form pushes a NULL
        self and CALL unpacks the bound method. */
     PyObject *name = NAME(oparg >> 1);
     PyObject *owner = TOP();
+    ADAPT(lu_specialize_load_attr(owner, next_instr - 1, name));
     SKIP_CACHES();
     kret = (oparg & 1) ? LU_RETURN_METHOD : LU_RETURN_PUSH;
     if (PyModule_CheckExact(owner)) {

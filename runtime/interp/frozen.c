@@ -87,5 +87,8 @@ lu_kernel_boot(PyInterpreterState *interp)
             return -1;
         }
     }
+    /* The kernel fills static types' dicts without telling anyone; from here
+       on a change to one is a PyType_Modified. */
+    interp->specializing = 1;
     return 0;
 }

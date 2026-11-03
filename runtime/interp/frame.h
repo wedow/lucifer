@@ -63,16 +63,28 @@ lu_code_start(PyCodeObject *code)
     return (lu_codeunit *)code->co_code_adaptive;
 }
 
+/* CACHE entries after each opcode, specialized forms included
+   (_PyOpcode_Caches; runtime/interp/specialize.c). Cache words hold any
+   16 bits, so an instruction's start is found from the front. */
+extern const uint8_t lu_opcode_caches[256];
+
+/* The instruction that ends just before `after`, caches skipped. */
+static inline lu_codeunit *
+lu_instr_before(PyCodeObject *code, lu_codeunit *after)
+{
+    lu_codeunit *at = lu_code_start(code);
+    while (at + 1 + lu_opcode_caches[at->op.code] < after) {
+        at += 1 + lu_opcode_caches[at->op.code];
+    }
+    return at;
+}
+
 /* The code unit of the instruction the frame last started: the one before
    instr, caches skipped. */
 static inline Py_ssize_t
 lu_frame_lasti(struct lu_frame *f)
 {
-    lu_codeunit *at = f->instr;
-    while ((at - 1)->op.code == CACHE) {
-        at--;
-    }
-    return at - 1 - lu_code_start(f->code);
+    return lu_instr_before(f->code, f->instr) - lu_code_start(f->code);
 }
 
 /* The walker (FOUNDATIONS 2.2): calls visit(f, arg) on `from` and then each

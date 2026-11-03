@@ -133,6 +133,8 @@ PyObject *lu_dict_copy(PyDictObject *mp);
 /* The first step of updating mp from a dict: clones the table when mp is empty
    and the other is clean (1), else makes room for the entries (0); -1 on error. */
 int lu_dict_merge_prepare(PyDictObject *mp, PyDictObject *other);
+/* The entry number of exact-str `key` in a namespace dict, or -1. */
+Py_ssize_t lu_ns_index(PyObject *dict, PyObject *key);
 /* A new dict of type tp with no entries. */
 PyObject *lu_dict_alloc(PyTypeObject *tp);
 Py_ssize_t lu_dict_sizeof(PyDictObject *mp);
