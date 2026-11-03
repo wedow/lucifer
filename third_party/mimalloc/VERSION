@@ -1,0 +1,4 @@
+mimalloc v2.5.2 (MI_MALLOC_VERSION 20502), as vendored by CPython
+tag: v3.14.10
+commit: b703b2c5e704341d61e367b9b940b77ed11dded0
+source: https://github.com/python/cpython.git
