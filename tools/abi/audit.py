@@ -20,8 +20,9 @@ def main():
         want = {r["name"]: (r["kind"], None if r["size"] == "-" else int(r["size"]))
                 for r in csv.DictReader(f, delimiter="\t")}
     have = exports(binary)
+    data = sum(kind in DATA for kind, _ in want.values())
     problems = []
-    present = sizes = data = implemented = stubs = 0
+    present = sizes = implemented = stubs = 0
     for name, (kind, size) in sorted(want.items()):
         if name not in have:
             problems.append(f"missing {name}")
@@ -29,7 +30,6 @@ def main():
         present += 1
         got_kind, got_size = have[name]
         if kind in DATA:
-            data += 1
             if got_kind not in DATA:
                 problems.append(f"{name}: data in oracle, {got_kind} here")
             elif got_size != size:
