@@ -27,7 +27,7 @@ _Py_c_sum(Py_complex a, Py_complex b)
     return r;
 }
 
-Py_complex
+LU_EXPORT Py_complex
 _Py_cr_sum(Py_complex a, double b)
 {
     Py_complex r = a;
@@ -50,7 +50,7 @@ _Py_c_diff(Py_complex a, Py_complex b)
     return r;
 }
 
-Py_complex
+LU_EXPORT Py_complex
 _Py_cr_diff(Py_complex a, double b)
 {
     Py_complex r = a;
@@ -58,7 +58,7 @@ _Py_cr_diff(Py_complex a, double b)
     return r;
 }
 
-Py_complex
+LU_EXPORT Py_complex
 _Py_rc_diff(double a, Py_complex b)
 {
     Py_complex r;
@@ -137,7 +137,7 @@ _Py_c_prod(Py_complex z, Py_complex w)
     return r;
 }
 
-Py_complex
+LU_EXPORT Py_complex
 _Py_cr_prod(Py_complex a, double b)
 {
     Py_complex r = a;
@@ -235,7 +235,7 @@ _Py_c_quot(Py_complex a, Py_complex b)
     return r;
 }
 
-Py_complex
+LU_EXPORT Py_complex
 _Py_cr_quot(Py_complex a, double b)
 {
     Py_complex r = a;
@@ -251,7 +251,7 @@ _Py_cr_quot(Py_complex a, double b)
 }
 
 /* an equivalent of _Py_c_quot() function, when 1st argument is real */
-Py_complex
+LU_EXPORT Py_complex
 _Py_rc_quot(double a, Py_complex b)
 {
     Py_complex r;

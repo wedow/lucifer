@@ -61,3 +61,7 @@ lu_prim_exc_methods	runtime/interp/exceptions.c	_lucifer's exception primitives,
 code_members	runtime/interp/code.c	PyMemberDef table of the code layout, never written; tp_members takes it non-const
 names.*	runtime/interp/ceval.c	the builtins LOAD_COMMON_CONSTANT names, a table never written
 lu_prim_storage_methods	runtime/prim/storage.c	_lucifer's storage primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_float_methods	runtime/prim/float.c	_lucifer's float primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_complex_methods	runtime/prim/complex.c	_lucifer's complex primitives, a PyMethodDef table never written; the API takes it non-const
+lc_float_strings	runtime/prim/pystrtod.c	constant table of lower-case inf, nan and e, never written
+uc_float_strings	runtime/prim/pystrtod.c	constant table of upper-case INF, NAN and E, never written
