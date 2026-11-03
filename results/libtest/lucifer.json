@@ -31,8 +31,7 @@
         "test_bool"
       ],
       "counts": {
-        "FAIL": 1,
-        "PASS": 30
+        "PASS": 31
       },
       "environment": {
         "LC_ALL": "C.UTF-8",
@@ -42,10 +41,10 @@
         "TZ": "UTC"
       },
       "observation_error": false,
-      "returncode": 2,
-      "seconds": 17.09053829801269,
+      "returncode": 0,
+      "seconds": 32.24304364412092,
       "skip_reasons": {},
-      "state": "FAILED",
+      "state": "PASSED",
       "unexpected_ids": []
     },
     "test_bytes": {
@@ -81,7 +80,7 @@
       },
       "observation_error": false,
       "returncode": 0,
-      "seconds": 15.337791567202657,
+      "seconds": 30.176682640099898,
       "skip_reason": "No module named '_testlimitedcapi'",
       "skip_reasons": {
         "test.test_bytes.AssortedBytesTest.test_bytearray_repr": "No module named '_testlimitedcapi'",
@@ -435,9 +434,9 @@
         "test_dict"
       ],
       "counts": {
-        "ERROR": 11,
+        "ERROR": 10,
         "FAIL": 5,
-        "PASS": 105,
+        "PASS": 106,
         "SKIP": 1
       },
       "environment": {
@@ -449,7 +448,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 32.18469670601189,
+      "seconds": 54.18730495404452,
       "skip_reasons": {
         "test.test_dict.CAPITest.test_getitem_knownhash": "No module named '_testinternalcapi'"
       },
@@ -492,7 +491,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 35.97125143511221,
+      "seconds": 51.8595064538531,
       "skip_reasons": {
         "test.test_int.IntStrDigitLimitsTests.test_int_max_str_digits_is_per_interpreter": "requires _testcapi",
         "test.test_int.IntSubclassStrDigitLimitsTests.test_int_max_str_digits_is_per_interpreter": "requires _testcapi",
@@ -525,9 +524,9 @@
         "test_list"
       ],
       "counts": {
-        "ERROR": 5,
+        "ERROR": 4,
         "FAIL": 2,
-        "PASS": 60,
+        "PASS": 61,
         "SKIP": 1
       },
       "environment": {
@@ -539,7 +538,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 23.374521764926612,
+      "seconds": 34.931995609775186,
       "skip_reasons": {
         "test.test_list.ListTest.test_no_memory": "No module named '_testcapi'"
       },
@@ -581,7 +580,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 132.75279882200994,
+      "seconds": 155.07059276895598,
       "skip_reasons": {},
       "state": "FAILED",
       "unexpected_ids": []
@@ -622,7 +621,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 133.08818820491433,
+      "seconds": 185.53206429304555,
       "skip_reasons": {
         "test.test_str.StrTest.test_case_operation_overflow": "requires 32-bit system",
         "test.test_str.StrTest.test_expandtabs_overflows_gracefully": "only applies to 32-bit platforms",
@@ -670,7 +669,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 22.17551760096103,
+      "seconds": 24.690952057018876,
       "skip_reasons": {},
       "state": "FAILED",
       "unexpected_ids": []
