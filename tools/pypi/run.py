@@ -180,10 +180,13 @@ def run(args, pin):
     for name in pkg.get('unset_env', []):
         env.pop(name, None)
     command = target_command(args.python)
-    if Path(command[0]).is_absolute():
-        env['PATH'] = str(Path(command[0]).parent) + os.pathsep + env.get('PATH', '')
-    probe = execute(command + ['-c', 'import json,sys,site; print(json.dumps({"ok":True,"version":sys.version.split()[0],"sites":site.getsitepackages()}))'],
+    # Pinned PATH: the interpreter's directory (a venv's bin), then the system bins unless the package
+    # opts out. A system viewer such as ImageMagick display changes pillow's collected ids.
+    bins = [str(Path(command[0]).parent)] if Path(command[0]).is_absolute() else []
+    env['PATH'] = os.pathsep.join(bins + (['/usr/bin', '/bin'] if pkg.get('system_path', True) else []))
+    probe = execute(command + ['-c', 'import json,sys,site; print(json.dumps({"ok":True,"version":sys.version.split()[0],"prefix":sys.prefix,"sites":site.getsitepackages()}))'],
                     work, env, work / 'probe.log', min(args.timeout, 20))
+    info = {}
     try:
         info = json.loads((work / 'probe.log').read_text())
         ready = probe == 0 and info.get('ok') is True
@@ -307,7 +310,8 @@ def run(args, pin):
     def public(value):
         text = json.dumps(value, ensure_ascii=True)
         python = Path(shlex.split(args.python)[0]).resolve()
-        for path, label in [(args.work, '<work>'), (args.cache, '<cache>'), (args.env, '<env>'),
+        environment = args.env or info.get('prefix')
+        for path, label in [(args.work, '<work>'), (args.cache, '<cache>'), (environment, '<env>'),
                             (python.parent.parent, '<python>'), (ROOT, '<repo>'), (Path.home(), '<external>')]:
             if path:
                 text = text.replace(str(Path(path).resolve()), label).replace(str(path), label)
