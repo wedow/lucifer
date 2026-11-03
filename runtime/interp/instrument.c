@@ -348,6 +348,18 @@ lu_base_opcode(PyCodeObject *code, Py_ssize_t i)
 }
 
 int
+lu_line_original_opcode(PyCodeObject *code, lu_codeunit *at)
+{
+    return get_original_opcode(code->_co_monitoring->lines, (int)(at - lu_code_start(code)));
+}
+
+int
+lu_instrumented_opcode_at(PyCodeObject *code, lu_codeunit *at)
+{
+    return original_opcode_at(code, at - lu_code_start(code));
+}
+
+int
 lu_instrumented_caches(PyCodeObject *code, lu_codeunit *at)
 {
     return lu_opcode_caches[lu_base_opcode(code, at - lu_code_start(code))];
@@ -769,6 +781,12 @@ lu_fire_exc2(PyThreadState *ts, int event, struct lu_frame *frame, lu_codeunit *
     else {
         PyErr_SetRaisedException(exc);
     }
+}
+
+int
+lu_instrumentation_line(PyCodeObject *code, int index)
+{
+    return compute_line(code, get_line_delta(code->_co_monitoring->lines, index));
 }
 
 static int
@@ -1381,6 +1399,27 @@ lu_monitoring_clear_tool(int tool_id)
     return res;
 }
 
+/* sys.monitoring.restart_events: DISABLEd events fire again. The restart
+   version must exceed every code's version and stay below the current one. */
+int
+lu_monitoring_restart(void)
+{
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    lu_stw_stop(interp);
+    uint32_t restart_version = global_version(interp) + MONITORING_VERSION_INCREMENT;
+    uint32_t new_version = restart_version + MONITORING_VERSION_INCREMENT;
+    if (new_version <= MONITORING_VERSION_INCREMENT) {
+        lu_stw_start(interp);
+        PyErr_Format(PyExc_OverflowError, "events set too many times");
+        return -1;
+    }
+    interp->last_restart_version = restart_version;
+    set_global_version(interp, new_version);
+    int res = instrument_all_executing_code_objects(interp);
+    lu_stw_start(interp);
+    return res;
+}
+
 void
 lu_monitoring_free(PyCodeObject *code)
 {
@@ -1489,9 +1528,9 @@ branch_handler(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
 {
     PyObject *handler = PyTuple_GET_ITEM(self, 0);
     int right = PyObject_IsTrue(PyTuple_GET_ITEM(self, 1));
-    long tool_id = PyLong_AsLong(PyTuple_GET_ITEM(self, 2));
+    long tool_id = lu_as_long(PyTuple_GET_ITEM(self, 2));
     PyCodeObject *code = (PyCodeObject *)args[0];
-    int src_offset = (int)PyLong_AsLong(args[1]);
+    int src_offset = (int)lu_as_long(args[1]);
     if (PyErr_Occurred()) {
         return NULL;
     }

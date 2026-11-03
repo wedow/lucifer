@@ -68,13 +68,25 @@ lu_code_start(PyCodeObject *code)
    16 bits, so an instruction's start is found from the front. */
 extern const uint8_t lu_opcode_caches[256];
 
+/* The cache words of the instruction at `at`: INSTRUMENTED_LINE and
+   INSTRUMENTED_INSTRUCTION stand for another opcode (runtime/interp/instrument.c). */
+int lu_instrumented_caches(PyCodeObject *code, lu_codeunit *at);
+
+static inline int
+lu_caches_at(PyCodeObject *code, lu_codeunit *at)
+{
+    int op = at->op.code;
+    return op == INSTRUMENTED_LINE || op == INSTRUMENTED_INSTRUCTION
+        ? lu_instrumented_caches(code, at) : lu_opcode_caches[op];
+}
+
 /* The instruction that ends just before `after`, caches skipped. */
 static inline lu_codeunit *
 lu_instr_before(PyCodeObject *code, lu_codeunit *after)
 {
     lu_codeunit *at = lu_code_start(code);
-    while (at + 1 + lu_opcode_caches[at->op.code] < after) {
-        at += 1 + lu_opcode_caches[at->op.code];
+    while (at + 1 + lu_caches_at(code, at) < after) {
+        at += 1 + lu_caches_at(code, at);
     }
     return at;
 }
@@ -102,6 +114,12 @@ struct lu_frame *lu_frame_user(struct lu_frame *from, Py_ssize_t depth);
    owns nothing and reads through the record until the frame stops executing.
    Returns a new reference, or NULL with an exception set. */
 PyObject *lu_frame_object(struct lu_frame *f);
+
+/* The tracing state of a frame object: where f_trace lives, f_trace_lines
+   and f_trace_opcodes. */
+PyObject **lu_frame_trace_slot(PyObject *frame);
+int lu_frame_trace_lines(PyObject *frame);
+int lu_frame_trace_opcodes(PyObject *frame);
 
 /* The code a frame object ran. */
 PyCodeObject *lu_frame_code(PyFrameObject *frame);

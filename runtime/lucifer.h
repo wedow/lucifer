@@ -248,6 +248,7 @@ struct lu_pending {
 #define LU_MON_LOCAL_EVENTS 11      /* events that instrument bytecode */
 #define LU_MON_UNGROUPED_EVENTS 16  /* events a tool can ask for singly */
 #define LU_MON_EVENTS 19
+#define _PY_MONITORING_LOCAL_EVENTS LU_MON_LOCAL_EVENTS    /* cpython/monitoring.h */
 typedef struct { uint8_t tools[LU_MON_LOCAL_EVENTS]; } lu_local_monitors;
 typedef struct { uint8_t tools[LU_MON_UNGROUPED_EVENTS]; } lu_global_monitors;
 
@@ -268,6 +269,9 @@ struct _is {
     PyObject *interned;         /* interned str -> itself */
     _PyFrameEvalFunction eval_frame;    /* PEP 523; NULL runs frames inline */
     uintptr_t monitoring_version;       /* a multiple of LU_POLL_VERSION_UNIT */
+    PyMutex tracing_setup_lock;         /* the first sys.settrace or setprofile registers callbacks */
+    int sys_trace_setup, sys_profile_setup;
+    int sys_tracing_threads, sys_profiling_threads;     /* tasks with a trace or profile function */
     uintptr_t last_restart_version;     /* sys.monitoring.restart_events */
     lu_global_monitors monitors;        /* the tools watching each event, everywhere */
     PyObject *monitoring_callables[LU_MON_TOOL_IDS][LU_MON_EVENTS];     /* strong */

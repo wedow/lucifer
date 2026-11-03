@@ -20,6 +20,7 @@
 #include "interp/code.h"
 #include "interp/exceptions.h"
 #include "interp/gen.h"
+#include "interp/instrument.h"
 #include "interp/specialize.h"
 #include "object/dict.h"
 
@@ -444,6 +445,27 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
         [GET_ANEXT] = &&op_GET_ANEXT,
         [END_ASYNC_FOR] = &&op_END_ASYNC_FOR,
         [CLEANUP_THROW] = &&op_CLEANUP_THROW,
+        [INSTRUMENTED_RESUME] = &&op_INSTRUMENTED_RESUME,
+        [INSTRUMENTED_RETURN_VALUE] = &&op_INSTRUMENTED_RETURN_VALUE,
+        [INSTRUMENTED_YIELD_VALUE] = &&op_INSTRUMENTED_YIELD_VALUE,
+        [INSTRUMENTED_CALL] = &&op_INSTRUMENTED_CALL,
+        [INSTRUMENTED_CALL_KW] = &&op_INSTRUMENTED_CALL_KW,
+        [INSTRUMENTED_CALL_FUNCTION_EX] = &&op_INSTRUMENTED_CALL_FUNCTION_EX,
+        [INSTRUMENTED_LOAD_SUPER_ATTR] = &&op_INSTRUMENTED_LOAD_SUPER_ATTR,
+        [INSTRUMENTED_JUMP_FORWARD] = &&op_INSTRUMENTED_JUMP_FORWARD,
+        [INSTRUMENTED_JUMP_BACKWARD] = &&op_INSTRUMENTED_JUMP_BACKWARD,
+        [INSTRUMENTED_POP_JUMP_IF_FALSE] = &&op_INSTRUMENTED_POP_JUMP_IF_FALSE,
+        [INSTRUMENTED_POP_JUMP_IF_TRUE] = &&op_INSTRUMENTED_POP_JUMP_IF_TRUE,
+        [INSTRUMENTED_POP_JUMP_IF_NONE] = &&op_INSTRUMENTED_POP_JUMP_IF_NONE,
+        [INSTRUMENTED_POP_JUMP_IF_NOT_NONE] = &&op_INSTRUMENTED_POP_JUMP_IF_NOT_NONE,
+        [INSTRUMENTED_NOT_TAKEN] = &&op_INSTRUMENTED_NOT_TAKEN,
+        [INSTRUMENTED_FOR_ITER] = &&op_FOR_ITER,
+        [INSTRUMENTED_END_FOR] = &&op_INSTRUMENTED_END_FOR,
+        [INSTRUMENTED_POP_ITER] = &&op_INSTRUMENTED_POP_ITER,
+        [INSTRUMENTED_END_SEND] = &&op_INSTRUMENTED_END_SEND,
+        [INSTRUMENTED_END_ASYNC_FOR] = &&op_INSTRUMENTED_END_ASYNC_FOR,
+        [INSTRUMENTED_LINE] = &&op_INSTRUMENTED_LINE,
+        [INSTRUMENTED_INSTRUCTION] = &&op_INSTRUMENTED_INSTRUCTION,
     };
 #pragma GCC diagnostic pop
     /* An activation never changes carrier: an unpinned park returns from it. */
@@ -483,6 +505,10 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
     PyObject *callable, *kwnames, **args, **base, **to_free;
     Py_ssize_t total, npos;
     int free_self;              /* args[-1] may take a prepended self */
+    int monitored = 0;          /* the call being made is an INSTRUMENTED_CALL */
+    /* The start of the instruction being executed and of the one before it,
+       for the events that name a source (LINE, NOT_TAKEN, POP_ITER). */
+    lu_codeunit *cur_instr, *prev_instr;
     struct lu_frame *callee;
     /* A kernel call's operands: kernel[kid] on kargs[0..nk), owned, its
        value handled per kret. kret is also the value's fate for the callee
@@ -497,9 +523,12 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
         localsplus = frame->localsplus; \
         sp = frame->stackpointer; \
         next_instr = frame->instr; \
+        cur_instr = next_instr > lu_code_start(code) ? next_instr - 1 : next_instr; \
     } while (0)
 #define SAVE_FRAME() do { frame->instr = next_instr; frame->stackpointer = sp; } while (0)
 #define DISPATCH() do { \
+        prev_instr = cur_instr; \
+        cur_instr = next_instr; \
         opcode = next_instr->op.code; \
         oparg = next_instr->op.arg; \
         next_instr++; \
@@ -545,6 +574,10 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
             } \
             else { \
                 PUSH(v); \
+                if (lu_instrumented_opcode_at(code, SEND_START()) == INSTRUMENTED_FOR_ITER) { \
+                    lu_codeunit *this_instr = SEND_START(); \
+                    INSTRUMENTED_JUMP(this_instr, next_instr, PY_MONITORING_EVENT_BRANCH_LEFT); \
+                } \
             } \
         } \
         else { \
@@ -568,6 +601,14 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
 
     LOAD_FRAME();
     if (mode == EVAL_THROW) {
+        /* The throw skipped RESUME, which would have brought the code up to date. */
+        SAVE_FRAME();
+        if (lu_instrument(code, ts->interp) < 0) {
+            goto error;
+        }
+        if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_PY_THROW)) {
+            lu_monitor_throw(ts, frame, next_instr);
+        }
         goto error;
     }
     DISPATCH();
@@ -584,6 +625,25 @@ instrumented_opcode:
     lu_err_format(PyExc_SystemError, "instrumented opcode %d without monitoring", opcode);
     goto error;
 
+/* The jump an instrumented instruction makes, once the tools have seen it:
+   `src` names the branch, `dest` is where it goes. A callback may have moved
+   the frame (f_lineno), which decides where the loop goes instead. */
+#define INSTRUMENTED_JUMP(src, dest, event) do { \
+        lu_codeunit *dest_ = (dest); \
+        if (ts->tracing) { \
+            next_instr = dest_; \
+        } \
+        else { \
+            SAVE_FRAME(); \
+            lu_codeunit *to_ = lu_fire_jump(this_instr, ts, event, frame, src, dest_); \
+            if (to_ == NULL) { \
+                next_instr = dest_ + 1; \
+                goto error; \
+            } \
+            next_instr = to_; \
+        } \
+    } while (0)
+
 op_EXTENDED_ARG:
     opcode = next_instr->op.code;
     oparg = oparg << 8 | next_instr->op.arg;
@@ -595,15 +655,70 @@ op_NOP:
 
 op_RESUME: {
     uintptr_t version = __atomic_load_n(poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK;
-    if (code->_co_instrumentation_version != version) {
+    if (__atomic_load_n(&code->_co_instrumentation_version, __ATOMIC_ACQUIRE) != version) {
+        /* Instrument the code, then run this instruction again: it may be INSTRUMENTED_RESUME now. */
         SAVE_FRAME();
-        lu_err_format(PyExc_SystemError, "sys.monitoring arrives with M0.3");
-        goto error;
+        ERROR_IF(lu_instrument(code, ts->interp) < 0);
+        next_instr--;
+        DISPATCH();
     }
     if ((oparg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM) {
         POLL();
     }
     DISPATCH();
+}
+
+op_INSTRUMENTED_RESUME: {
+    lu_codeunit *this_instr = next_instr - 1;
+    uintptr_t version = __atomic_load_n(poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK;
+    SAVE_FRAME();
+    if (__atomic_load_n(&code->_co_instrumentation_version, __ATOMIC_ACQUIRE) != version) {
+        ERROR_IF(lu_instrument(code, ts->interp) < 0);
+        next_instr--;
+        DISPATCH();
+    }
+    /* The event first: a park at the poll resumes after this instruction. */
+    ERROR_IF(lu_fire(ts, oparg > 0, frame, this_instr) < 0);
+    if (frame->instr != next_instr) {
+        next_instr = frame->instr;      /* the tool moved the frame */
+        DISPATCH();
+    }
+    if ((oparg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM) {
+        POLL();
+    }
+    DISPATCH();
+}
+
+op_INSTRUMENTED_LINE: {
+    lu_codeunit *this_instr = next_instr - 1;
+    int original;
+    if (ts->tracing) {
+        original = lu_line_original_opcode(code, this_instr);
+    }
+    else {
+        SAVE_FRAME();
+        original = lu_fire_line(ts, frame, this_instr, prev_instr);
+        if (original < 0) {
+            goto error;
+        }
+        if (frame->instr != next_instr) {
+            next_instr = frame->instr;      /* the tool moved the frame */
+            DISPATCH();
+        }
+    }
+    opcode = original;
+    goto *targets[opcode];
+}
+
+op_INSTRUMENTED_INSTRUCTION: {
+    lu_codeunit *this_instr = next_instr - 1;
+    SAVE_FRAME();
+    int next_opcode = lu_fire_instruction(ts, frame, this_instr);
+    if (next_opcode < 0) {
+        goto error;
+    }
+    opcode = next_opcode;
+    goto *targets[opcode];
 }
 
 op_LOAD_CONST:
@@ -763,11 +878,15 @@ op_POP_TOP:
     Py_XDECREF(POP());
     DISPATCH();
 
+op_INSTRUMENTED_CALL_KW:
+    monitored = 1;
 op_CALL_KW:
     SKIP_CACHES();
     kwnames = POP();
     goto call_stack_args;
 
+op_INSTRUMENTED_CALL:
+    monitored = 1;
 op_CALL:
     SKIP_CACHES();
     kwnames = NULL;
@@ -788,7 +907,12 @@ call_stack_args:
 call_tail: {
     /* Consumes callable, args and kwnames; the stack is reset to base. A
        bound method, a kernel function and an object whose __call__ is
-       Python run in this loop; everything else is foreign C. */
+       Python run in this loop; everything else is foreign C. An
+       INSTRUMENTED_CALL tells the tools of the call, and of the return of
+       anything that is not a Python function: kernel functions and the type
+       fast path then run as C does, under lu_call. */
+    const int mon = monitored;
+    monitored = 0;
     SAVE_FRAME();
     if (Py_IS_TYPE(callable, &PyMethod_Type) && free_self) {
         PyMethodObject *m = (PyMethodObject *)callable;
@@ -799,7 +923,16 @@ call_tail: {
         PyObject *func = Py_NewRef(m->im_func);
         Py_SETREF(callable, func);
     }
-    if (callable == (PyObject *)&PyType_Type && total == 1 && npos == 1) {
+    PyObject *arg0 = total > 0 ? args[0] : &lu_instrumentation_missing;
+    if (mon) {
+        /* The instruction that fires is the one before the saved position. */
+        if (lu_fire_2args(ts, PY_MONITORING_EVENT_CALL, frame, INSTR_START(), callable, arg0) < 0) {
+            result = NULL;
+            goto call_done;
+        }
+        SAVE_FRAME();
+    }
+    if (!mon && callable == (PyObject *)&PyType_Type && total == 1 && npos == 1) {
         result = Py_NewRef((PyObject *)Py_TYPE(args[0]));       /* type(x) */
         goto call_done;
     }
@@ -854,6 +987,10 @@ call_tail: {
             }
         }
     }
+    if (mon && target != NULL && (((PyFunctionObject *)target)->func_code != NULL)
+        && (((PyCodeObject *)((PyFunctionObject *)target)->func_code)->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN))) {
+        target = NULL;          /* a builtin: the tools see it return */
+    }
     if (target != NULL && (self == NULL || free_self)) {
         if (self != NULL) {
             *--args = Py_NewRef(self);
@@ -875,6 +1012,14 @@ call_tail: {
     t->pin++;
     result = lu_call(callable, args, npos, kwnames);
     t->pin--;
+    if (mon) {
+        if (result == NULL) {
+            lu_fire_exc2(ts, PY_MONITORING_EVENT_C_RAISE, frame, INSTR_START(), callable, arg0);
+        }
+        else if (lu_fire_2args(ts, PY_MONITORING_EVENT_C_RETURN, frame, INSTR_START(), callable, arg0) < 0) {
+            Py_CLEAR(result);
+        }
+    }
 call_done:
     for (Py_ssize_t i = 0; i < total; i++) {
         Py_DECREF(args[i]);
@@ -929,6 +1074,8 @@ resume_linked:
     ERROR_IF(ts->current_exception != NULL);
     DISPATCH();
 
+op_INSTRUMENTED_CALL_FUNCTION_EX:
+    monitored = 1;
 op_CALL_FUNCTION_EX: {
     /* func, null, callargs, kwargs or NULL */
     PyObject *callargs = sp[-2];
@@ -951,6 +1098,11 @@ op_CALL_FUNCTION_EX: {
     goto call_tail;
 }
 
+op_INSTRUMENTED_RETURN_VALUE: {
+    lu_codeunit *this_instr = next_instr - 1;
+    SAVE_FRAME();
+    ERROR_IF(lu_fire_arg(ts, PY_MONITORING_EVENT_PY_RETURN, frame, this_instr, TOP()) < 0);
+}
 op_RETURN_VALUE:
     retval = POP();
     frame->stackpointer = sp;
@@ -992,6 +1144,15 @@ op_RETURN_GENERATOR:
     ERROR_IF(retval == NULL);
     goto return_frame;
 
+op_INSTRUMENTED_YIELD_VALUE: {
+    lu_codeunit *this_instr = next_instr - 1;
+    SAVE_FRAME();
+    ERROR_IF(lu_fire_arg(ts, PY_MONITORING_EVENT_PY_YIELD, frame, this_instr, TOP()) < 0);
+    if (frame->instr != next_instr) {
+        next_instr = frame->instr;      /* the tool moved the frame */
+        DISPATCH();
+    }
+}
 op_YIELD_VALUE: {
     retval = POP();
     SAVE_FRAME();
@@ -1037,6 +1198,14 @@ op_SEND: {
     goto kernel_call;
 }
 
+op_INSTRUMENTED_END_SEND: {
+    lu_codeunit *this_instr = next_instr - 1;
+    PyObject *receiver = sp[-2];
+    if (Py_IS_TYPE(receiver, &PyGen_Type) || Py_IS_TYPE(receiver, &PyCoro_Type)) {
+        SAVE_FRAME();
+        ERROR_IF(lu_monitor_stop_iteration(ts, frame, this_instr, TOP()) < 0);
+    }
+}
 op_END_SEND: {
     /* receiver, value -- value */
     PyObject *v = POP();
@@ -1092,6 +1261,10 @@ op_GET_ANEXT:
     kret = LU_RETURN_PUSH;
     goto kernel_call;
 
+op_INSTRUMENTED_END_ASYNC_FOR: {
+    lu_codeunit *this_instr = next_instr - 1;
+    INSTRUMENTED_JUMP(next_instr - oparg, this_instr + 1, PY_MONITORING_EVENT_BRANCH_RIGHT);
+}
 op_END_ASYNC_FOR:
     /* awaitable, exc -- ; StopAsyncIteration ends the loop, anything else
        propagates */
@@ -1255,6 +1428,86 @@ op_IMPORT_FROM: {
     PyObject *res = import_from(TOP(), NAME(oparg));
     ERROR_IF(res == NULL);
     PUSH(res);
+    DISPATCH();
+}
+
+op_INSTRUMENTED_END_FOR: {
+    lu_codeunit *this_instr = next_instr - 1;
+    PyObject *receiver = sp[-2];
+    if (Py_IS_TYPE(receiver, &PyGen_Type) || Py_IS_TYPE(receiver, &PyCoro_Type)) {
+        SAVE_FRAME();
+        ERROR_IF(lu_monitor_stop_iteration(ts, frame, this_instr, TOP()) < 0);
+    }
+    Py_XDECREF(POP());
+    DISPATCH();
+}
+
+op_INSTRUMENTED_POP_ITER: {
+    lu_codeunit *this_instr = next_instr - 1;
+    INSTRUMENTED_JUMP(prev_instr, this_instr + 1, PY_MONITORING_EVENT_BRANCH_RIGHT);
+    Py_XDECREF(POP());
+    DISPATCH();
+}
+
+op_INSTRUMENTED_NOT_TAKEN: {
+    lu_codeunit *this_instr = next_instr - 1;
+    INSTRUMENTED_JUMP(prev_instr, next_instr, PY_MONITORING_EVENT_BRANCH_LEFT);
+    DISPATCH();
+}
+
+op_INSTRUMENTED_JUMP_FORWARD: {
+    lu_codeunit *this_instr = next_instr - 1;
+    INSTRUMENTED_JUMP(this_instr, next_instr + oparg, PY_MONITORING_EVENT_JUMP);
+    DISPATCH();
+}
+
+op_INSTRUMENTED_JUMP_BACKWARD: {
+    lu_codeunit *this_instr = next_instr - 1;
+    SKIP_CACHES();
+    INSTRUMENTED_JUMP(this_instr, next_instr - oparg, PY_MONITORING_EVENT_JUMP);
+    POLL();
+    DISPATCH();
+}
+
+op_INSTRUMENTED_POP_JUMP_IF_FALSE: {
+    lu_codeunit *this_instr = next_instr - 1;
+    SKIP_CACHES();
+    if (POP() == Py_False) {
+        INSTRUMENTED_JUMP(this_instr, next_instr + oparg, PY_MONITORING_EVENT_BRANCH_RIGHT);
+    }
+    DISPATCH();
+}
+
+op_INSTRUMENTED_POP_JUMP_IF_TRUE: {
+    lu_codeunit *this_instr = next_instr - 1;
+    SKIP_CACHES();
+    if (POP() == Py_True) {
+        INSTRUMENTED_JUMP(this_instr, next_instr + oparg, PY_MONITORING_EVENT_BRANCH_RIGHT);
+    }
+    DISPATCH();
+}
+
+op_INSTRUMENTED_POP_JUMP_IF_NONE: {
+    lu_codeunit *this_instr = next_instr - 1;
+    SKIP_CACHES();
+    PyObject *v = POP();
+    int jump = v == Py_None;
+    Py_DECREF(v);
+    if (jump) {
+        INSTRUMENTED_JUMP(this_instr, next_instr + oparg, PY_MONITORING_EVENT_BRANCH_RIGHT);
+    }
+    DISPATCH();
+}
+
+op_INSTRUMENTED_POP_JUMP_IF_NOT_NONE: {
+    lu_codeunit *this_instr = next_instr - 1;
+    SKIP_CACHES();
+    PyObject *v = POP();
+    int jump = v != Py_None;
+    Py_DECREF(v);
+    if (jump) {
+        INSTRUMENTED_JUMP(this_instr, next_instr + oparg, PY_MONITORING_EVENT_BRANCH_RIGHT);
+    }
     DISPATCH();
 }
 
@@ -1812,6 +2065,45 @@ op_DELETE_ATTR: {
     DISPATCH();
 }
 
+op_INSTRUMENTED_LOAD_SUPER_ATTR: {
+    /* LOAD_SUPER_ATTR as a call of super: the tools see the call, and its return. */
+    lu_codeunit *this_instr = next_instr - 1;
+    PyObject *name = NAME(oparg >> 2);
+    SKIP_CACHES();
+    SAVE_FRAME();
+    PyObject *global_super = sp[-3];
+    PyObject *arg = (oparg & 2) ? sp[-2] : &lu_instrumentation_missing;
+    ERROR_IF(lu_fire_2args(ts, PY_MONITORING_EVENT_CALL, frame, this_instr, global_super, arg) < 0);
+    PyObject *v;
+    struct lu_task *t = (struct lu_task *)ts;
+    t->pin++;
+    if (global_super == (PyObject *)&PySuper_Type && PyType_Check(sp[-2])) {
+        PyObject *kargs3[3] = { sp[-2], sp[-1], name };
+        v = lu_call_kernel(LU_K_super_getattr, kargs3, 3);
+    }
+    else {
+        PyObject *sup = lu_call(global_super, sp - 2, oparg & 2, NULL);
+        v = sup != NULL ? PyObject_GetAttr(sup, name) : NULL;
+        Py_XDECREF(sup);
+    }
+    t->pin--;
+    if (v == NULL) {
+        lu_fire_exc2(ts, PY_MONITORING_EVENT_C_RAISE, frame, this_instr, global_super, arg);
+    }
+    else if (lu_fire_2args(ts, PY_MONITORING_EVENT_C_RETURN, frame, this_instr, global_super, arg) < 0) {
+        Py_CLEAR(v);
+    }
+    for (int i = 0; i < 3; i++) {
+        Py_DECREF(POP());
+    }
+    ERROR_IF(v == NULL);
+    PUSH(v);
+    if (oparg & 1) {
+        PUSH(NULL);
+    }
+    DISPATCH();
+}
+
 op_LOAD_SUPER_ATTR: {
     /* global_super, class, self -- attr, self_or_null[oparg & 1] */
     PyObject *name = NAME(oparg >> 2);
@@ -1941,6 +2233,7 @@ op_GET_ITER: {
 
 op_FOR_ITER: {
     /* iter -- iter, next; exhausted, jumps past the END_FOR at the target */
+    lu_codeunit *this_instr = next_instr - 1;
     SKIP_CACHES();
     PyObject *iter = TOP();
     PyTypeObject *itp = Py_TYPE(iter);
@@ -1977,6 +2270,9 @@ op_FOR_ITER: {
         DISPATCH();
     }
     PUSH(v);
+    if (opcode == INSTRUMENTED_FOR_ITER) {
+        INSTRUMENTED_JUMP(this_instr, next_instr, PY_MONITORING_EVENT_BRANCH_LEFT);
+    }
     DISPATCH();
 }
 
@@ -2388,6 +2684,10 @@ op_RERAISE: {
     lasti = oparg && lu_long_as_long(sp[-oparg], &saved) == 0
         ? saved : INSTR_START() - lu_code_start(code);
     PyErr_SetRaisedException(exc);
+    if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RERAISE)) {
+        SAVE_FRAME();
+        lu_monitor_reraise(ts, frame, INSTR_START());
+    }
     goto exception_unwind;
 }
 
@@ -2525,6 +2825,10 @@ error:
     if (frame->owner != LU_FRAME_KERNEL_HIDDEN) {
         lu_traceback_here(frame, lasti);
     }
+    if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RAISE)) {
+        SAVE_FRAME();
+        lu_monitor_raise(ts, frame, lu_code_start(code) + lasti);
+    }
 exception_unwind: {
     /* The handler of the instruction the loop is at (RERAISE and a bare
        raise arrive here without a new traceback entry), or the caller's
@@ -2541,9 +2845,18 @@ exception_unwind: {
         }
         PUSH(PyErr_GetRaisedException());
         next_instr = lu_code_start(code) + handler;
+        if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_EXCEPTION_HANDLED)) {
+            SAVE_FRAME();
+            if (lu_monitor_handled(ts, frame, next_instr, TOP()) < 0) {
+                goto exception_unwind;
+            }
+        }
         DISPATCH();
     }
     SAVE_FRAME();
+    if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_PY_UNWIND)) {
+        lu_monitor_unwind(ts, frame, INSTR_START());
+    }
     struct lu_frame *caller = frame->previous;
     if (frame->owner == LU_FRAME_GENERATOR) {
         lu_gen_finish(ts, frame);

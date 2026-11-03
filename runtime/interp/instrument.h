@@ -9,6 +9,14 @@
 
 typedef uint32_t lu_event_set;
 
+/* PyLong_AsLong, with -1 and an error for anything else. */
+static inline long
+lu_as_long(PyObject *o)
+{
+    long v;
+    return lu_long_as_long(o, &v) < 0 ? -1 : v;
+}
+
 /* Tool ids: PEP 669's, then the two sys.setprofile and sys.settrace use. */
 #define LU_TOOL_DEBUGGER 0
 #define LU_TOOL_COVERAGE 1
@@ -29,7 +37,7 @@ typedef struct {
    ever added, never replaced, so a running task may read them while another
    instruments the same code (under the code's critical section, or with the
    world stopped); the pointers are published with release stores. */
-typedef struct lu_monitoring {
+typedef struct _PyCoMonitoringData {
     lu_local_monitors local_monitors;   /* sys.monitoring.set_local_events */
     lu_local_monitors active_monitors;  /* global or local: what the bytecode shows */
     uint8_t *tools;                     /* per unit, once two tools share an event */
@@ -42,11 +50,18 @@ typedef struct lu_monitoring {
 
 #define LU_CO_NO_MONITORING_EVENTS 0x2000000    /* CO_NO_MONITORING_EVENTS */
 
+/* Fills the opcode tables, once. */
+void lu_instrument_init(void);
+
 /* The opcode of unit `i` with instrumentation and specialization stripped. */
 int lu_base_opcode(PyCodeObject *code, Py_ssize_t i);
 /* The instruction at `at` is INSTRUMENTED_LINE or INSTRUMENTED_INSTRUCTION:
    its cache words, found from the opcode it stands for. */
 int lu_instrumented_caches(PyCodeObject *code, lu_codeunit *at);
+/* The opcode INSTRUMENTED_LINE at `at` stands for. */
+int lu_line_original_opcode(PyCodeObject *code, lu_codeunit *at);
+/* The opcode at `at`, seen through INSTRUMENTED_LINE and INSTRUMENTED_INSTRUCTION. */
+int lu_instrumented_opcode_at(PyCodeObject *code, lu_codeunit *at);
 /* An opcode with specialization removed. */
 int lu_opcode_deopt(int opcode);
 
@@ -55,10 +70,11 @@ int lu_instrument(PyCodeObject *code, PyInterpreterState *interp);
 /* Frees a code object's monitoring data. */
 void lu_monitoring_free(PyCodeObject *code);
 
-/* Setting events: the caller has stopped the world. */
+/* Setting events and local events: the caller has stopped the world. */
 int lu_monitoring_set_events(int tool_id, lu_event_set events);
 int lu_monitoring_set_local_events(PyCodeObject *code, int tool_id, lu_event_set events);
 int lu_monitoring_clear_tool(int tool_id);
+int lu_monitoring_restart(void);
 PyObject *lu_monitoring_register_callback(int tool_id, int event_id, PyObject *callback);
 
 /* Firing events from the eval loop. `instr` is the instruction that fires;
@@ -97,6 +113,9 @@ lu_no_tools_for_global_event(PyThreadState *ts, int event)
 PyObject *lu_monitoring_module_new(void);
 /* sys.setprofile, sys.settrace and the C-API (runtime/interp/legacy_tracing.c). */
 extern PyMethodDef lu_sys_tracing_methods[];
+
+/* The line of code unit `index`, from the line table instrumentation built. */
+int lu_instrumentation_line(PyCodeObject *code, int index);
 
 extern PyObject lu_instrumentation_disable, lu_instrumentation_missing;
 

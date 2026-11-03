@@ -4,6 +4,7 @@
    an interpreter that never enabled monitoring (FOUNDATIONS 2.3). */
 
 #include "interp/code.h"
+#include "interp/instrument.h"
 #include "interp/exceptions.h"
 #include "interp/frame.h"
 #include "object/set.h"
@@ -128,6 +129,7 @@ code_dealloc(PyObject *op)
     Py_XDECREF(co->co_name);
     Py_XDECREF(co->co_qualname);
     Py_XDECREF(co->co_linetable);
+    lu_monitoring_free(co);
     lu_object_free(op);
 }
 
@@ -212,6 +214,7 @@ lu_code_init(void)
     PyCode_Type.tp_itemsize = sizeof(lu_codeunit);
     PyCode_Type.tp_flags |= Py_TPFLAGS_DEFAULT;
     PyCode_Type.tp_dealloc = code_dealloc;
+    lu_instrument_init();
 }
 
 /* intern_strings: the items of a names tuple become the interned strings, in place. */
@@ -335,6 +338,11 @@ lu_code_new(const struct lu_code_fields *c)
     co->co_nlocalsplus = nlocalsplus;
     co->co_framesize = nlocalsplus + c->stacksize + (int)LU_FRAME_SPECIALS;
     memcpy(co->co_code_adaptive, PyBytes_AS_STRING(c->code), nbytes);
+    /* Instrumentation starts at the first RESUME. */
+    while (co->_co_firsttraceable < Py_SIZE(co)
+           && lu_code_start(co)[co->_co_firsttraceable].op.code != RESUME) {
+        co->_co_firsttraceable++;
+    }
     PyInterpreterState *interp = PyInterpreterState_Get();
     co->co_version = interp->next_func_version;
     if (co->co_version != 0) {

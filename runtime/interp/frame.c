@@ -153,6 +153,25 @@ struct lu_frameobj {
 
 #define FO(op) ((struct lu_frameobj *)(op))
 
+/* The tracing state of a frame object (runtime/interp/legacy_tracing.c). */
+PyObject **
+lu_frame_trace_slot(PyObject *op)
+{
+    return &FO(op)->f_trace;
+}
+
+int
+lu_frame_trace_lines(PyObject *op)
+{
+    return FO(op)->f_trace_lines;
+}
+
+int
+lu_frame_trace_opcodes(PyObject *op)
+{
+    return FO(op)->f_trace_opcodes;
+}
+
 PyObject *
 lu_frame_object(struct lu_frame *f)
 {
