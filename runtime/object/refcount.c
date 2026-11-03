@@ -29,6 +29,7 @@ _Py_DecRef(PyObject *o)
     Py_DECREF(o);
 }
 
+/* The only birth path (Objects/object.c new_reference). */
 void
 _Py_NewReference(PyObject *op)
 {
@@ -38,6 +39,10 @@ _Py_NewReference(PyObject *op)
     op->ob_gc_bits = 0;
     op->ob_ref_local = 1;
     op->ob_ref_shared = 0;
+    PyRefTracer tracer = _PyRuntime.ref_tracer.func;
+    if (tracer != NULL) {
+        tracer(op, PyRefTracer_CREATE, _PyRuntime.ref_tracer.data);
+    }
 }
 
 void
@@ -46,10 +51,33 @@ _Py_NewReferenceNoTotal(PyObject *op)
     _Py_NewReference(op);
 }
 
+/* The only death path. */
 void
 _Py_Dealloc(PyObject *op)
 {
-    Py_TYPE(op)->tp_dealloc(op);
+    destructor dealloc = Py_TYPE(op)->tp_dealloc;
+    PyRefTracer tracer = _PyRuntime.ref_tracer.func;
+    if (tracer != NULL) {
+        tracer(op, PyRefTracer_DESTROY, _PyRuntime.ref_tracer.data);
+    }
+    dealloc(op);
+}
+
+int
+PyRefTracer_SetTracer(PyRefTracer tracer, void *data)
+{
+    _PyRuntime.ref_tracer.data = data;
+    _PyRuntime.ref_tracer.func = tracer;
+    return 0;
+}
+
+PyRefTracer
+PyRefTracer_GetTracer(void **data)
+{
+    if (data != NULL) {
+        *data = _PyRuntime.ref_tracer.data;
+    }
+    return _PyRuntime.ref_tracer.func;
 }
 
 /* A non-owner's decref. If the shared count was zero, the object goes to the
