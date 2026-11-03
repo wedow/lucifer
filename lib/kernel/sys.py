@@ -9,7 +9,7 @@ builtins of sys, as C functions are, so their frames never show.
 
 from _lucifer import ns_set, ns_get, instance_dict, builtin_function, frame_at, MISSING
 from _lucifer import os_environ, os_fstat as fstat, locale_encoding
-from _lucifer import exceptions, generators, structseq
+from _lucifer import exceptions, generators, structseq, write_unraisable, err_display
 import sys
 
 __all__ = ()
@@ -186,9 +186,283 @@ def _getframe(depth=0, /):
     return f
 
 
+def excepthook(exctype, value, traceback, /):
+    """Handle an exception by displaying it with a traceback on sys.stderr."""
+    if isinstance(value, BaseException) and value.__traceback__ is not traceback:
+        value.__traceback__ = traceback
+    err_display(value)
+
+
+def displayhook(object, /):
+    """Print an object to sys.stdout and also save it in builtins._"""
+    if object is None:
+        return
+    builtins = __import__('builtins')
+    ns_set(instance_dict(builtins, True), '_', None)
+    text = repr(object)
+    stdout = ns_get(_dict, 'stdout', None)
+    if stdout is None:
+        raise RuntimeError('lost sys.stdout')
+    try:
+        stdout.write(text)
+    except UnicodeEncodeError:
+        stdout.buffer.write(text.encode(stdout.encoding, 'backslashreplace'))
+    stdout.write('\n')
+    ns_set(instance_dict(builtins, True), '_', object)
+
+
+def breakpointhook(*args, **kws):
+    """This hook function is called by built-in breakpoint()."""
+    hookname = _getenv('PYTHONBREAKPOINT') if _config['use_environment'] else None
+    if hookname is None or len(hookname) == 0:
+        hookname = 'pdb.set_trace'
+    elif hookname == '0':
+        return None
+    modname, dot, attr = hookname.rpartition('.')
+    if not dot:
+        modname, attr = 'builtins', hookname
+    try:
+        hook = getattr(__import__(modname, fromlist=[attr]), attr)
+    except (ImportError, AttributeError):
+        __import__('warnings').warn('Ignoring unimportable $PYTHONBREAKPOINT: "%s"' % hookname,
+                                    RuntimeWarning)
+        return None
+    return hook(*args, **kws)
+
+
+def unraisablehook(unraisable, /):
+    """Handle an unraisable exception.
+
+The unraisable argument has the following attributes:
+
+* exc_type: Exception type.
+* exc_value: Exception value, can be None.
+* exc_traceback: Exception traceback, can be None.
+* err_msg: Error message, can be None.
+* object: Object causing the exception, can be None."""
+    message = unraisable.err_msg
+    if message is None:
+        message = 'Exception ignored in'
+    exc = unraisable.exc_value
+    if exc is None:
+        exc = unraisable.exc_type()
+    if exc.__traceback__ is not unraisable.exc_traceback:
+        exc.__traceback__ = unraisable.exc_traceback
+    write_unraisable(message, unraisable.object, exc)
+
+
+def getsizeof(object, default=MISSING, /):
+    """getsizeof(object [, default]) -> int
+
+Return the size of object in bytes."""
+    try:
+        method = type(object).__sizeof__
+    except AttributeError:
+        if default is not MISSING:
+            return default
+        raise TypeError("Type %s doesn't define __sizeof__" % type(object).__name__) from None
+    try:
+        size = method(object)
+        size = size.__index__() if not isinstance(size, int) else size
+    except TypeError:
+        if default is not MISSING:
+            return default
+        raise
+    if size < 0:
+        raise ValueError('__sizeof__() should return >= 0')
+    return size
+
+
+_trace = _profile = None
+_origin_depth = 0
+_dlopen_flags = 2
+_switch_interval = 0.005
+
+
+def settrace(function, /):
+    """Set the global debug tracing function."""
+    global _trace
+    _trace = function
+
+
+def gettrace():
+    """Return the global debug tracing function set with sys.settrace."""
+    return _trace
+
+
+def setprofile(function, /):
+    """Set the profiling function."""
+    global _profile
+    _profile = function
+
+
+def getprofile():
+    """Return the profiling function set with sys.setprofile."""
+    return _profile
+
+
+def _settraceallthreads(function, /):
+    settrace(function)
+
+
+def _setprofileallthreads(function, /):
+    setprofile(function)
+
+
+def call_tracing(func, args, /):
+    """Call func(*args), while tracing is enabled."""
+    return func(*args)
+
+
+def get_coroutine_origin_tracking_depth():
+    """Check status of origin tracking for coroutine objects in this thread."""
+    return _origin_depth
+
+
+def set_coroutine_origin_tracking_depth(depth):
+    """Enable or disable origin tracking for coroutine objects in this thread."""
+    global _origin_depth
+    if depth < 0:
+        raise ValueError('depth must be >= 0')
+    _origin_depth = depth
+
+
+def setswitchinterval(interval, /):
+    """Set the ideal thread switch delay inside the Python interpreter."""
+    global _switch_interval
+    if interval <= 0.0:
+        raise ValueError('switch interval must be strictly positive')
+    _switch_interval = interval
+
+
+def getdlopenflags():
+    """Return the current value of the flags that are used for dlopen calls."""
+    return _dlopen_flags
+
+
+def setdlopenflags(flags, /):
+    """Set the flags used by the interpreter for dlopen calls."""
+    global _dlopen_flags
+    _dlopen_flags = flags
+
+
+def getallocatedblocks():
+    """Return the number of memory blocks currently allocated."""
+    return 0
+
+
+def getunicodeinternedsize(*, _only_immortal=False):
+    """Return the number of elements of the unicode interned dictionary"""
+    return 0
+
+
+def _is_interned(string, /):
+    """Return True if the given string is "interned"."""
+    return True
+
+
+def _is_immortal(op, /):
+    """Return True if the given object is "immortal" per PEP 683."""
+    return False
+
+
+def _clear_type_cache():
+    """Clear the internal type lookup cache."""
+
+
+def _clear_internal_caches():
+    """Clear all internal performance-related caches."""
+
+
+def _clear_type_descriptors(type, /):
+    """Clear type descriptors caches."""
+
+
+def _debugmallocstats():
+    """Print summary info to stderr about the state of pymalloc's structures."""
+
+
+def _getframemodulename(depth=0):
+    """Return the name of the module for a calling frame."""
+    f = frame_at(depth)
+    if f is None:
+        return None
+    return f.f_globals.get('__name__')
+
+
+def _current_frames():
+    """Return a dict mapping each thread's thread id to its current stack frame."""
+    return {__import__('_thread').get_ident(): frame_at(1)}
+
+
+def _current_exceptions():
+    """Return a dict mapping each thread's identifier to its current raised exception."""
+    return {__import__('_thread').get_ident(): exceptions.exception()}
+
+
+def _get_cpu_count_config():
+    """Private function for getting PyConfig.cpu_count"""
+    return -1
+
+
+def is_remote_debug_enabled():
+    """Return True if remote debugging is enabled, False otherwise."""
+    return False
+
+
+def is_stack_trampoline_active():
+    """Return *True* if a stack profiler trampoline is active."""
+    return False
+
+
+stdlib_module_names = frozenset((
+    '__future__ _abc _aix_support _android_support _apple_support _ast _ast_unparse _asyncio '
+    '_bisect _blake2 _bz2 _codecs _codecs_cn _codecs_hk _codecs_iso2022 _codecs_jp _codecs_kr '
+    '_codecs_tw _collections _collections_abc _colorize _compat_pickle _contextvars _csv '
+    '_ctypes _curses _curses_panel _datetime _dbm _decimal _elementtree _frozen_importlib '
+    '_frozen_importlib_external _functools _gdbm _hashlib _heapq _hmac _imp _interpchannels '
+    '_interpqueues _interpreters _io _ios_support _json _locale _lsprof _lzma _markupbase _md5 '
+    '_multibytecodec _multiprocessing _opcode _opcode_metadata _operator _osx_support '
+    '_overlapped _pickle _posixshmem _posixsubprocess _py_abc _py_warnings _pydatetime '
+    '_pydecimal _pyio _pylong _pyrepl _queue _random _remote_debugging _scproxy _sha1 _sha2 '
+    '_sha3 _signal _sitebuiltins _socket _sqlite3 _sre _ssl _stat _statistics _string _strptime '
+    '_struct _suggestions _symtable _sysconfig _thread _threading_local _tkinter _tokenize '
+    '_tracemalloc _types _typing _uuid _warnings _weakref _weakrefset _winapi _wmi _zoneinfo '
+    '_zstd abc annotationlib antigravity argparse array ast asyncio atexit base64 bdb binascii '
+    'bisect builtins bz2 cProfile calendar cmath cmd code codecs codeop collections colorsys '
+    'compileall compression concurrent configparser contextlib contextvars copy copyreg csv '
+    'ctypes curses dataclasses datetime dbm decimal difflib dis doctest email encodings '
+    'ensurepip enum errno faulthandler fcntl filecmp fileinput fnmatch fractions ftplib '
+    'functools gc genericpath getopt getpass gettext glob graphlib grp gzip hashlib heapq hmac '
+    'html http idlelib imaplib importlib inspect io ipaddress itertools json keyword linecache '
+    'locale logging lzma mailbox marshal math mimetypes mmap modulefinder msvcrt '
+    'multiprocessing netrc nt ntpath nturl2path numbers opcode operator optparse os pathlib pdb '
+    'pickle pickletools pkgutil platform plistlib poplib posix posixpath pprint profile pstats '
+    'pty pwd py_compile pyclbr pydoc pydoc_data pyexpat queue quopri random re readline reprlib '
+    'resource rlcompleter runpy sched secrets select selectors shelve shlex shutil signal site '
+    'smtplib socket socketserver sqlite3 sre_compile sre_constants sre_parse ssl stat '
+    'statistics string stringprep struct subprocess symtable sys sysconfig syslog tabnanny '
+    'tarfile tempfile termios textwrap this threading time timeit tkinter token tokenize '
+    'tomllib trace traceback tracemalloc tty turtle turtledemo types typing unicodedata '
+    'unittest urllib uuid venv warnings wave weakref webbrowser winreg winsound wsgiref xml '
+    'xmlrpc zipapp zipfile zipimport zlib zoneinfo '
+).split())
+
+
 _install(exit, getdefaultencoding, getfilesystemencoding, getfilesystemencodeerrors,
          getswitchinterval, _is_gil_enabled, get_asyncgen_hooks, addaudithook,
-         audit, _getframe, exceptions.exception, exceptions.exc_info, generators.set_asyncgen_hooks)
+         audit, _getframe, exceptions.exception, exceptions.exc_info, generators.set_asyncgen_hooks,
+         excepthook, displayhook, breakpointhook, unraisablehook, getsizeof, settrace, gettrace,
+         setprofile, getprofile, _settraceallthreads, _setprofileallthreads, call_tracing,
+         get_coroutine_origin_tracking_depth, set_coroutine_origin_tracking_depth,
+         setswitchinterval, getdlopenflags, setdlopenflags, getallocatedblocks,
+         getunicodeinternedsize, _is_interned, _is_immortal, _clear_type_cache,
+         _clear_internal_caches, _clear_type_descriptors, _debugmallocstats, _getframemodulename,
+         _current_frames, _current_exceptions, _get_cpu_count_config, is_remote_debug_enabled,
+         is_stack_trampoline_active)
+for _name in ('excepthook', 'displayhook', 'breakpointhook', 'unraisablehook'):
+    ns_set(_dict, '__' + _name + '__', ns_get(_dict, _name, None))
+ns_set(_dict, 'stdlib_module_names', stdlib_module_names)
 
 
 # What the PyConfig decides
