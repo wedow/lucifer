@@ -460,7 +460,7 @@ void lu_task_delete(struct lu_task *t);
 /* Finalization (CPython's _PyEval_StopTheWorldAll and _PyThreadState_RemoveExcept): every task
    but the caller's is dropped from the interpreter and marked shutting down, so a daemon thread
    hangs when it next attaches. The caller is attached. */
-void lu_task_shutdown_others(struct _is *interp);
+int lu_task_shutdown_others(struct _is *interp);    /* how many it stopped */
 void lu_task_carrier_exit(struct lu_carrier *c);
 /* The task leaves its carrier at a migration point (DESIGN 5.4): detached,
    unbound, and no longer the carrier's task. The carrier's owner record stays

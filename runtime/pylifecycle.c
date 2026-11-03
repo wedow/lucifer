@@ -541,6 +541,7 @@ release_interpreter(struct _is *interp)
         _PyRuntime.signals.handlers[i].tripped = 0;
     }
     _PyRuntime.signals.tripped = 0;
+    interp->tasks_closed = 0;
     interp->modules = interp->builtins = interp->sysdict = interp->interned = NULL;
     interp->importlib = interp->import_func = NULL;
     interp->eval_frame = NULL;
@@ -586,11 +587,14 @@ Py_FinalizeEx(void)
     lu_sched_stop();
     /* What is left are daemon threads: they hang when they next attach. As in
        CPython they stop before the modules are torn down. */
-    lu_task_shutdown_others(interp);
+    int daemons = lu_task_shutdown_others(interp);
     __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     finalize_modules(interp);
-    flush_std_stream("stdout");
-    flush_std_stream("stderr");
+    /* A daemon stopped inside a write holds its stream's lock for ever: the flush would wait for it. */
+    if (daemons == 0) {
+        flush_std_stream("stdout");
+        flush_std_stream("stderr");
+    }
     PyErr_Clear();
     release_interpreter(interp);
     return status;

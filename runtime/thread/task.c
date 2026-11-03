@@ -380,7 +380,7 @@ lu_task_carrier_exit(struct lu_carrier *c)
     }
 }
 
-void
+int
 lu_task_shutdown_others(struct _is *interp)
 {
     lu_stw_stop(interp);
@@ -390,6 +390,7 @@ lu_task_shutdown_others(struct _is *interp)
        hangs in lu_syscall_end. Tasks created from here on start in that state. */
     pthread_mutex_lock(&interp->tasks_lock.mutex);
     interp->tasks_closed = 1;
+    int stopped = 0;
     PyThreadState *next;
     for (PyThreadState *ts = interp->tasks; ts != NULL; ts = next) {
         next = ts->next;
@@ -404,10 +405,12 @@ lu_task_shutdown_others(struct _is *interp)
                 ts->next->prev = ts->prev;
             }
             __atomic_store_n(&ts->state, _Py_THREAD_SHUTTING_DOWN, __ATOMIC_SEQ_CST);
+            stopped++;
         }
     }
     pthread_mutex_unlock(&interp->tasks_lock.mutex);
     lu_stw_start(interp);
+    return stopped;
 }
 
 _PyFrameEvalFunction
