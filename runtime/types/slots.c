@@ -134,7 +134,12 @@ lu_slot_tp_setattro(PyObject *self, PyObject *name, PyObject *value)
 PyObject *
 lu_slot_tp_call(PyObject *self, PyObject *args, PyObject *kwargs)
 {
-    return call_special_tuple(self, LU_ID(__call__), args, kwargs);
+    if (Py_EnterRecursiveCall(" while calling a Python object")) {
+        return NULL;
+    }
+    PyObject *result = call_special_tuple(self, LU_ID(__call__), args, kwargs);
+    Py_LeaveRecursiveCall();
+    return result;
 }
 
 static PyObject *
