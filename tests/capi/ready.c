@@ -494,10 +494,19 @@ static PyTypeObject OldAttr_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "ready.OldAttr",
     .tp_basicsize = sizeof(PyObject),
-    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_new = PyType_GenericNew,
     .tp_getattr = oldattr_getattr,
     .tp_setattr = oldattr_setattr,
+};
+
+/* ready.OldAttrSub: a static subtype that inherits tp_getattr and tp_setattr. */
+static PyTypeObject OldAttrSub_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.OldAttrSub",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_base = &OldAttr_Type,
 };
 
 /* ready.DocSig: a tp_doc that starts with a signature. */
@@ -1215,7 +1224,8 @@ PyInit_ready(void)
         || PyType_Ready(&Counter_Type) < 0 || PyType_Ready(&MyList_Type) < 0 || PyType_Ready(&FloatSub_Type) < 0
         || PyType_Ready(&Delegate_Type) < 0 || PyType_Ready(&Mapped_Type) < 0
         || PyType_Ready(&Unhashable_Type) < 0
-        || PyType_Ready(&CmpOnly_Type) < 0 || PyType_Ready(&OldAttr_Type) < 0 || PyType_Ready(&DocSig_Type) < 0) {
+        || PyType_Ready(&CmpOnly_Type) < 0 || PyType_Ready(&OldAttr_Type) < 0 || PyType_Ready(&DocSig_Type) < 0
+        || PyType_Ready(&OldAttrSub_Type) < 0) {
         return NULL;
     }
     BytesCopy_Type.tp_richcompare = PyBytes_Type.tp_richcompare;
@@ -1240,6 +1250,7 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "Unhashable", (PyObject *)&Unhashable_Type) < 0
         || PyModule_AddObjectRef(m, "CmpOnly", (PyObject *)&CmpOnly_Type) < 0
         || PyModule_AddObjectRef(m, "OldAttr", (PyObject *)&OldAttr_Type) < 0
+        || PyModule_AddObjectRef(m, "OldAttrSub", (PyObject *)&OldAttrSub_Type) < 0
         || PyModule_AddObjectRef(m, "DocSig", (PyObject *)&DocSig_Type) < 0
         || PyModule_AddObjectRef(m, "BytesCopy", (PyObject *)&BytesCopy_Type) < 0
         || PyModule_AddObjectRef(m, "Mul", (PyObject *)&Mul_Type) < 0

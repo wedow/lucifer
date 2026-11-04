@@ -745,10 +745,15 @@ slotptr(PyTypeObject *type, int ioffset)
 }
 
 /* The old tp_getattr and tp_setattr take a C string. A type with only those
-   answers through the new slots, which are what attribute access runs. */
+   answers through the new slots, which are what attribute access runs. A class
+   made from it reaches these through its slot thunk and their wrappers; it
+   gets object's generic access, as the slot CPython gives such a class does. */
 static PyObject *
 getattro_from_getattr(PyObject *self, PyObject *name)
 {
+    if (Py_TYPE(self)->tp_getattro != getattro_from_getattr) {
+        return PyObject_GenericGetAttr(self, name);
+    }
     const char *text = PyUnicode_AsUTF8(name);
     return text != NULL ? Py_TYPE(self)->tp_getattr(self, (char *)text) : NULL;
 }
@@ -756,6 +761,9 @@ getattro_from_getattr(PyObject *self, PyObject *name)
 static int
 setattro_from_setattr(PyObject *self, PyObject *name, PyObject *value)
 {
+    if (Py_TYPE(self)->tp_setattro != setattro_from_setattr) {
+        return PyObject_GenericSetAttr(self, name, value);
+    }
     const char *text = PyUnicode_AsUTF8(name);
     return text != NULL ? Py_TYPE(self)->tp_setattr(self, (char *)text, value) : -1;
 }

@@ -815,7 +815,16 @@ best_base(PyObject *bases)
 static void
 inherit_slots(PyTypeObject *tp, PyTypeObject *base)
 {
-    LU_COPY(tp_getattro); LU_COPY(tp_setattro); LU_COPY(tp_repr); LU_COPY(tp_str);
+    /* The old C-string attribute slots come with the new ones, as a pair. */
+    if (tp->tp_getattr == NULL && tp->tp_getattro == NULL) {
+        tp->tp_getattr = base->tp_getattr;
+        tp->tp_getattro = base->tp_getattro;
+    }
+    if (tp->tp_setattr == NULL && tp->tp_setattro == NULL) {
+        tp->tp_setattr = base->tp_setattr;
+        tp->tp_setattro = base->tp_setattro;
+    }
+    LU_COPY(tp_repr); LU_COPY(tp_str);
     LU_COPY(tp_call); LU_COPY(tp_iter);
     LU_COPY(tp_iternext); LU_COPY(tp_descr_get); LU_COPY(tp_descr_set); LU_COPY(tp_init);
     LU_COPY(tp_finalize);
