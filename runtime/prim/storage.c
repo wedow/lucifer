@@ -773,18 +773,26 @@ lu_seqiter_next(PyObject *iter)
     }
     PyTypeObject *tp = Py_TYPE(iter);
     PyObject *v = NULL;
-    if (tp == &PyListRevIter_Type) {
-        if (it->it_index >= 0 && it->it_index < Py_SIZE(seq)) {
-            v = Py_NewRef(((PyListObject *)seq)->ob_item[it->it_index--]);
-        }
-        else {
-            it->it_index = -1;
+    if (tp == &PyTupleIter_Type) {
+        if (it->it_index < Py_SIZE(seq)) {
+            v = Py_NewRef(PyTuple_GET_ITEM(seq, it->it_index++));
         }
     }
-    else if (it->it_index < Py_SIZE(seq)) {
-        v = Py_NewRef(tp == &PyTupleIter_Type ? PyTuple_GET_ITEM(seq, it->it_index)
-                                              : ((PyListObject *)seq)->ob_item[it->it_index]);
-        it->it_index++;
+    else {
+        /* A list's array and size change apart, under its critical section. */
+        Py_BEGIN_CRITICAL_SECTION(seq);
+        if (tp == &PyListRevIter_Type) {
+            if (it->it_index >= 0 && it->it_index < Py_SIZE(seq)) {
+                v = Py_NewRef(((PyListObject *)seq)->ob_item[it->it_index--]);
+            }
+            else {
+                it->it_index = -1;
+            }
+        }
+        else if (it->it_index < Py_SIZE(seq)) {
+            v = Py_NewRef(((PyListObject *)seq)->ob_item[it->it_index++]);
+        }
+        Py_END_CRITICAL_SECTION();
     }
     if (v == NULL) {
         it->it_seq = NULL;

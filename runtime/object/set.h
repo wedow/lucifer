@@ -13,13 +13,17 @@ enum {
     LU_SET_FOUND,           /* the entry holds an equal key */
     LU_SET_ABSENT,          /* the entry is the unused slot that ends the probe */
     LU_SET_CANDIDATE,       /* the entry has an equal hash and a key to compare */
+    LU_SET_CHANGED,         /* only inside the probe: a key was being freed */
 };
 
-/* The probe of set_lookkey for `key`. `skip` is the number of candidates the
+/* The probe of set_lookkey for `key`, answering the entry's index in the table
+   it probed. It holds no lock (a discard may free a key under it: the probe
+   takes a reference first, and redoes itself under the critical section when
+   it cannot). `skip` is the number of candidates the
    caller has found unequal since the table last changed: the probe resumes
    past them, counted in the order it meets them (the windows of the probe
    sequence overlap, so an entry can be met twice). */
-setentry *lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, int *verdict);
+Py_ssize_t lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, int *verdict);
 /* set_add_entry's last step, for a key known to be absent. */
 int lu_set_insert(PySetObject *so, PyObject *key, Py_hash_t hash);
 void lu_set_insert_clean(setentry *table, size_t mask, PyObject *key, Py_hash_t hash);

@@ -1859,8 +1859,8 @@ static PyObject *
 prim_ns_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(3); DICT_ARG(0); STR_ARG(1);
-    PyObject *v = lu_ns_lookup(args[0], args[1]);
-    return Py_NewRef(v != NULL ? v : args[2]);
+    PyObject *v = lu_ns_get(args[0], args[1]);
+    return v != NULL ? v : Py_NewRef(args[2]);
 }
 
 static PyObject *
@@ -1874,11 +1874,7 @@ static PyObject *
 prim_ns_del(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); DICT_ARG(0); STR_ARG(1);
-    int found;
-    Py_BEGIN_CRITICAL_SECTION(args[0]);
-    found = lu_ns_delete(args[0], args[1]);
-    Py_END_CRITICAL_SECTION();
-    return bool_of(found);
+    return bool_of(lu_ns_delete(args[0], args[1]));
 }
 
 static PyObject *

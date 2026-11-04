@@ -19,6 +19,15 @@
 #define PERTURB_SHIFT 5
 #define GROWTH_RATE(mp) ((mp)->ma_used * 3)
 
+/* Table serials: never reused, and dict.h says what they are for. */
+static int64_t next_serial_counter;
+
+static Py_ssize_t
+next_serial(void)
+{
+    return (Py_ssize_t)(__atomic_add_fetch(&next_serial_counter, 1, __ATOMIC_RELAXED) & 0x7fffffff);
+}
+
 static uint8_t
 calculate_log2_keysize(Py_ssize_t minsize)
 {
@@ -59,7 +68,7 @@ new_keys(uint8_t log2_size, int unicode)
         return NULL;
     }
     memset(dk, 0, sizeof *dk);
-    dk->dk_refcnt = 1;
+    dk->dk_serial = next_serial();
     dk->dk_log2_size = log2_size;
     dk->dk_log2_index_bytes = log2_bytes;
     dk->dk_kind = unicode ? DICT_KEYS_UNICODE : DICT_KEYS_GENERAL;
@@ -300,7 +309,6 @@ lu_dict_init(void)
 {
     PyDictKeysObject *dk = LU_EMPTY_KEYS;
     memset(dk, 0, sizeof(PyDictKeysObject));
-    dk->dk_refcnt = _Py_IMMORTAL_REFCNT_LOCAL;
     dk->dk_log2_size = dk->dk_log2_index_bytes = 3;
     dk->dk_kind = DICT_KEYS_UNICODE;
     memset(dk->dk_indices, 0xff, PyDict_MINSIZE);
@@ -342,11 +350,13 @@ lu_native_eq(PyObject *a, PyObject *b)
     return lu_eq(a, b);
 }
 
-/* The probe of lu_dict_probe in one keys table. A lock-free reader can meet
-   an entry that a concurrent deletion has cleared: its key is NULL, and it
-   is passed over like any unequal key. */
+/* The probe of lu_dict_probe in one keys table. Without the lock a concurrent
+   deletion may have cleared an entry (its key is NULL: passed over like any
+   unequal key) or be freeing its key, which a probe reads only after a
+   try-incref; a key that is already gone answers LU_PROBE_CHANGED and the
+   caller probes again under the lock, as CPython's DKIX_KEY_CHANGED. */
 static Py_ssize_t
-probe_keys(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash, Py_ssize_t after)
+probe_keys(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash, Py_ssize_t after, int locked)
 {
     size_t mask = DK_MASK(dk);
     size_t perturb = hash;
@@ -359,12 +369,23 @@ probe_keys(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash, Py_ssize_t after
                 skipping = ix != after;
             }
             else {
-                PyObject *k = lu_dk_key(dk, ix);
+                PyObject **slot = lu_dk_key_slot(dk, ix);
+                PyObject *k = _Py_atomic_load_ptr(slot);
                 if (k == key) {
                     return ix;
                 }
-                if (k != NULL && lu_dk_hash(dk, ix) == hash) {
-                    int eq = lu_native_eq(k, key);
+                if (k != NULL) {
+                    int held = !locked && !_Py_IsImmortal(k);
+                    if (held && !lu_try_incref_compare(slot, k)) {
+                        return LU_PROBE_CHANGED;
+                    }
+                    int eq = 0;
+                    if (lu_dk_hash_of(dk, ix, k) == hash) {
+                        eq = lu_native_eq(k, key);
+                    }
+                    if (held) {
+                        Py_DECREF(k);
+                    }
                     if (eq > 0) {
                         return ix;
                     }
@@ -385,7 +406,13 @@ probe_keys(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash, Py_ssize_t after
 Py_ssize_t
 lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t after)
 {
-    return probe_keys(__atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE), key, hash, after);
+    Py_ssize_t ix = probe_keys(__atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE), key, hash, after, 0);
+    if (ix == LU_PROBE_CHANGED) {
+        Py_BEGIN_CRITICAL_SECTION(mp);
+        ix = probe_keys(mp->ma_keys, key, hash, after, 1);
+        Py_END_CRITICAL_SECTION();
+    }
+    return ix;
 }
 
 /* The hash of a key that needs no Python: an exact str or int, or a class
@@ -407,32 +434,52 @@ native_hash(PyObject *key, Py_hash_t *hash)
 }
 
 /* The entry number of a native key in the table dk: -1 when absent, -2 when
-   Python must judge. */
+   Python must judge, -3 when a lock-free probe must be redone under the lock. */
 static Py_ssize_t
-probe_native(PyDictKeysObject *dk, PyObject *key, Py_hash_t *hash)
+probe_native(PyDictKeysObject *dk, PyObject *key, Py_hash_t *hash, int locked)
 {
     if (!native_hash(key, hash)) {
         return -2;
     }
-    Py_ssize_t ix = probe_keys(dk, key, *hash, -1);
-    return ix <= -3 ? -2 : ix;
+    Py_ssize_t ix = probe_keys(dk, key, *hash, -1, locked);
+    return ix == LU_PROBE_CHANGED ? -3 : ix <= -3 ? -2 : ix;
 }
 
 int
 lu_dict_find_native(PyObject *d, PyObject *key, PyObject **value)
 {
-    /* One table for the probe and the read, which a resize may replace. */
-    PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)d)->ma_keys, __ATOMIC_ACQUIRE);
+    PyDictObject *mp = (PyDictObject *)d;
     Py_hash_t hash;
-    Py_ssize_t ix = probe_native(dk, key, &hash);
-    if (ix == -2) {
-        return -1;
-    }
+    /* One table for the probe and the read, which a resize may replace. */
+    PyDictKeysObject *dk = __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE);
+    Py_ssize_t ix = probe_native(dk, key, &hash, 0);
     if (ix == -1) {
         return 0;
     }
-    *value = lu_dk_value(dk, ix);
-    return *value != NULL ? 1 : -1;
+    if (ix == -2) {
+        return -1;
+    }
+    if (ix >= 0) {
+        PyObject *v = lu_try_xget_ref(lu_dk_value_slot(dk, ix));
+        if (v != NULL && dk == __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE)) {
+            *value = v;
+            return 1;
+        }
+        Py_XDECREF(v);
+    }
+    int result = -1;
+    Py_BEGIN_CRITICAL_SECTION(d);
+    dk = mp->ma_keys;
+    ix = probe_native(dk, key, &hash, 1);
+    if (ix == -1) {
+        result = 0;
+    }
+    else if (ix >= 0 && *lu_dk_value_slot(dk, ix) != NULL) {
+        *value = lu_new_ref_with_lock(*lu_dk_value_slot(dk, ix));
+        result = 1;
+    }
+    Py_END_CRITICAL_SECTION();
+    return result;
 }
 
 int
@@ -441,7 +488,7 @@ lu_dict_put_native(PyObject *d, PyObject *key, PyObject *value)
     int result = -1;
     Py_hash_t hash;
     Py_BEGIN_CRITICAL_SECTION(d);
-    Py_ssize_t ix = probe_native(((PyDictObject *)d)->ma_keys, key, &hash);
+    Py_ssize_t ix = probe_native(((PyDictObject *)d)->ma_keys, key, &hash, 1);
     if (ix >= 0) {
         lu_dict_replace((PyDictObject *)d, ix, value);
         result = 1;
@@ -558,6 +605,20 @@ lu_dict_insert(PyDictObject *mp, PyObject *key, Py_hash_t hash, PyObject *value)
     return 0;
 }
 
+uint64_t
+lu_dict_stamp(PyDictObject *mp)
+{
+    PyDictKeysObject *dk = __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE);
+    return ((uint64_t)dk->dk_serial << 32) | (uint64_t)dk->dk_nentries;
+}
+
+int
+lu_dict_stamp_holds(PyDictObject *mp, uint64_t stamp, int exact)
+{
+    uint64_t now = lu_dict_stamp(mp);
+    return exact ? now == stamp : LU_STAMP_SERIAL(now) == LU_STAMP_SERIAL(stamp);
+}
+
 void
 lu_dict_replace(PyDictObject *mp, Py_ssize_t ix, PyObject *value)
 {
@@ -604,6 +665,7 @@ lu_dict_popitem(PyDictObject *mp)
     PyObject *key = Py_NewRef(lu_dk_key(dk, ix));
     PyObject *value = lu_dict_remove(mp, ix);
     dk->dk_nentries = ix;       /* the entries after it are deleted too */
+    dk->dk_serial = next_serial();  /* the numbers it frees are used again */
     PyTuple_SET_ITEM(pair, 0, key);
     PyTuple_SET_ITEM(pair, 1, value);
     return pair;
@@ -672,7 +734,7 @@ clone_keys(PyDictKeysObject *keys)
         return NULL;
     }
     memcpy(dk, keys, size);
-    dk->dk_refcnt = 1;
+    dk->dk_serial = next_serial();
     dk->dk_version = 0;
     for (Py_ssize_t i = 0; i < dk->dk_nentries; i++) {
         Py_XINCREF(lu_dk_key(dk, i));
@@ -781,6 +843,13 @@ lu_ns_lookup(PyObject *dict, PyObject *key)
     return ix >= 0 ? lu_dk_value(((PyDictObject *)dict)->ma_keys, ix) : NULL;
 }
 
+PyObject *
+lu_ns_get(PyObject *dict, PyObject *key)
+{
+    PyObject *value;
+    return lu_dict_find_native(dict, key, &value) > 0 ? value : NULL;
+}
+
 int
 lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value)
 {
@@ -810,12 +879,15 @@ lu_ns_store(PyObject *dict, PyObject *key, PyObject *value)
 int
 lu_ns_delete(PyObject *dict, PyObject *key)
 {
+    int found = 0;
+    Py_BEGIN_CRITICAL_SECTION(dict);
     Py_ssize_t ix = ns_find(dict, key);
-    if (ix < 0) {
-        return 0;
+    if (ix >= 0) {
+        Py_DECREF(lu_dict_remove((PyDictObject *)dict, ix));
+        found = 1;
     }
-    Py_DECREF(lu_dict_remove((PyDictObject *)dict, ix));
-    return 1;
+    Py_END_CRITICAL_SECTION();
+    return found;
 }
 
 int

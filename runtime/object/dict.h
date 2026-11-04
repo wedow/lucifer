@@ -20,7 +20,9 @@ enum {
 };
 
 struct _dictkeysobject {
-    Py_ssize_t dk_refcnt;
+    Py_ssize_t dk_serial;               /* names the table: no other table of this runtime
+                                           has it (the slot of CPython's dk_refcnt, which
+                                           only shared split tables use) */
     uint8_t dk_log2_size;               /* dk_indices has 1 << dk_log2_size slots */
     uint8_t dk_log2_index_bytes;        /* and 1 << dk_log2_index_bytes bytes */
     uint8_t dk_kind;
@@ -81,12 +83,28 @@ lu_dk_set_index(PyDictKeysObject *dk, size_t i, Py_ssize_t ix)
    compares it outside any commit region and probes again. */
 
 #define LU_PROBE_CANDIDATE(ix) (-3 - (ix))      /* a probe's answer: compare entry ix */
+#define LU_PROBE_CHANGED (-2)                   /* a lock-free probe's: redo it under the lock */
 #define LU_EMPTY_KEYS ((PyDictKeysObject *)_PyRuntime.singletons.empty_dict_keys)
 
 static inline int
 lu_dk_is_unicode(PyDictKeysObject *dk)
 {
     return dk->dk_kind != DICT_KEYS_GENERAL;
+}
+
+/* The address of entry ix's key and value. */
+static inline PyObject **
+lu_dk_key_slot(PyDictKeysObject *dk, Py_ssize_t ix)
+{
+    return lu_dk_is_unicode(dk) ? &((PyDictUnicodeEntry *)lu_dk_entries(dk))[ix].me_key
+                                : &((PyDictKeyEntry *)lu_dk_entries(dk))[ix].me_key;
+}
+
+static inline PyObject **
+lu_dk_value_slot(PyDictKeysObject *dk, Py_ssize_t ix)
+{
+    return lu_dk_is_unicode(dk) ? &((PyDictUnicodeEntry *)lu_dk_entries(dk))[ix].me_value
+                                : &((PyDictKeyEntry *)lu_dk_entries(dk))[ix].me_value;
 }
 
 /* Entry ix of a combined table: its key, value (NULL once deleted) and hash. */
@@ -111,11 +129,31 @@ lu_dk_hash(PyDictKeysObject *dk, Py_ssize_t ix)
                                 : ((PyDictKeyEntry *)lu_dk_entries(dk))[ix].me_hash;
 }
 
+/* The hash of entry ix whose key is k, which the caller holds: a lock-free
+   reader must not read the key again from the entry. */
+static inline Py_hash_t
+lu_dk_hash_of(PyDictKeysObject *dk, Py_ssize_t ix, PyObject *k)
+{
+    return lu_dk_is_unicode(dk) ? lu_str_hash(k) : ((PyDictKeyEntry *)lu_dk_entries(dk))[ix].me_hash;
+}
+
 /* The entry number of `key` in mp, DKIX_EMPTY when it is absent, or
    LU_PROBE_CANDIDATE(ix) when entry ix has an equal hash and a key that only
    __eq__ can judge. `after` >= 0 resumes the probe past the candidate it
    named, which the caller found unequal. */
 Py_ssize_t lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t after);
+/* A caller that finds an entry without the lock commits under the critical
+   section with a stamp read before it looked: the serial of the table says
+   that the entry numbers it found are still that table's (entries never move
+   in a table, and a resize, clear or popitem names a new serial), and the
+   entry count that no key was added since. lu_dict_stamp_holds(exact=0) is
+   enough to replace or remove an entry; adding a key needs exact=1, so that
+   the key is still absent. */
+uint64_t lu_dict_stamp(PyDictObject *mp);
+int lu_dict_stamp_holds(PyDictObject *mp, uint64_t stamp, int exact);
+/* The serial part of the stamp, which a lookup that compares with __eq__
+   uses to see its table replaced. */
+#define LU_STAMP_SERIAL(stamp) ((stamp) >> 32)
 /* Adds key (known to be absent) or replaces the value of entry ix. */
 int lu_dict_insert(PyDictObject *mp, PyObject *key, Py_hash_t hash, PyObject *value);
 void lu_dict_replace(PyDictObject *mp, Py_ssize_t ix, PyObject *value);
@@ -136,9 +174,11 @@ int lu_dict_merge_prepare(PyDictObject *mp, PyDictObject *other);
 /* The entry number of exact-str `key` in a namespace dict, or -1. */
 Py_ssize_t lu_ns_index(PyObject *dict, PyObject *key);
 /* Lookup and store of an exact str or int key in any dict, decided without
-   Python: find answers 1 with *value borrowed, 0 absent, or -1 when the key
-   is another type or an equal-hash entry needs __eq__; put answers 1 stored,
-   -1 undecided, -2 with an exception set. */
+   Python: find answers 1 with *value a new reference, 0 absent, or -1 when
+   the key is another type or an equal-hash entry needs __eq__; put answers
+   1 stored, -1 undecided, -2 with an exception set. Find holds no lock: it
+   takes the reference only if the value is alive (lu_try_xget_ref) and else
+   reads under the dict's critical section. */
 int lu_dict_find_native(PyObject *d, PyObject *key, PyObject **value);
 int lu_dict_put_native(PyObject *d, PyObject *key, PyObject *value);
 /* A new dict of type tp with no entries. */

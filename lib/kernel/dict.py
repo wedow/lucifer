@@ -8,7 +8,7 @@ protocols and the error texts."""
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, list_append,
     repr_enter, repr_leave, set_slot, kernel_set,
-    dict_new, dict_probe, dict_find, dict_put, dict_key, dict_value, dict_hash, dict_insert, dict_replace, dict_remove,
+    dict_new, dict_probe, dict_find, dict_put, dict_key, dict_value, dict_hash, dict_stamp, dict_insert, dict_replace, dict_remove,
     dict_popitem, dict_clear, dict_next, dict_prev, dict_keys_id, dict_copy, dict_merge_prepare,
     dict_sizeof, dictiter_new, dictiter_next, dictiter_len, dictiter_copy, dictview_new,
     dictview_dict, set_next, set_key, set_hash,
@@ -97,23 +97,27 @@ def find_value(d, key, h):
 
 
 def store(d, key, h, value):
-    """insertdict: d[key] = value for a key of hash h."""
+    """insertdict: d[key] = value for a key of hash h. The commit takes the
+    stamp read before the lookup, and fails when another thread resized the
+    dict or added a key since: the entry number or the absence is stale."""
     while True:
+        stamp = dict_stamp(d)
         ix = lookup(d, key, h)
         if ix < 0:
-            dict_insert(d, key, h, value)
-            return
-        if dict_replace(d, ix, value):
+            if dict_insert(d, stamp, key, h, value):
+                return
+        elif dict_replace(d, stamp, ix, value):
             return
 
 
 def delete(d, key, h):
     """Removes key and returns its value, or MISSING when it is absent."""
     while True:
+        stamp = dict_stamp(d)
         ix = lookup(d, key, h)
         if ix < 0:
             return MISSING
-        value = dict_remove(d, ix)
+        value = dict_remove(d, stamp, ix)
         if value is not MISSING:
             return value
 
@@ -138,10 +142,12 @@ def delitem(d, key):
 def setdefault(d, key, default):
     h = key_hash(key)
     while True:
+        stamp = dict_stamp(d)
         ix = lookup(d, key, h)
         if ix < 0:
-            dict_insert(d, key, h, default)
-            return default
+            if dict_insert(d, stamp, key, h, default):
+                return default
+            continue
         value = dict_value(d, ix)
         if value is not MISSING:
             return value

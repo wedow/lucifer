@@ -23,6 +23,16 @@
         if (!PyErr_Occurred()) lu_err_format(PyExc_TypeError, "%s() needs an int", __func__ + 5); \
         return NULL; } var = v_; } while (0)
 
+/* Whether entry ix of the dict is live; the caller holds its critical section. */
+static int
+live_entry(PyObject *d, Py_ssize_t ix)
+{
+    PyDictKeysObject *dk = ((PyDictObject *)d)->ma_keys;
+    return ix >= 0 && ix < dk->dk_nentries && lu_dk_value(dk, ix) != NULL;
+}
+
+enum { READ_KEY, READ_VALUE, READ_HASH };
+
 static PyObject *
 int_of(Py_ssize_t n)
 {
@@ -35,12 +45,43 @@ bool_of(int v)
     return Py_NewRef(v ? Py_True : Py_False);
 }
 
-/* The live entry ix of the dict: its key table, or NULL. */
-static PyDictKeysObject *
-live_entry(PyObject *d, Py_ssize_t ix)
+/* The key, value or hash of live entry ix, else MISSING. Lock-free it takes
+   a reference to the key or value only if that is alive and the entry is
+   still in the dict's table (lu_try_xget_ref); when it cannot, it reads
+   under the dict's critical section. */
+static PyObject *
+read_entry(PyObject *d, Py_ssize_t ix, int what)
 {
-    PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)d)->ma_keys, __ATOMIC_ACQUIRE);
-    return ix >= 0 && ix < dk->dk_nentries && lu_dk_value(dk, ix) != NULL ? dk : NULL;
+    PyDictObject *mp = (PyDictObject *)d;
+    PyObject *result = NULL;
+    PyDictKeysObject *dk = __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE);
+    if (ix >= 0 && ix < dk->dk_nentries) {
+        PyObject *ref = lu_try_xget_ref(what == READ_VALUE ? lu_dk_value_slot(dk, ix)
+                                                           : lu_dk_key_slot(dk, ix));
+        if (ref != NULL && dk == __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE)
+            && lu_dk_value(dk, ix) != NULL) {
+            if (what == READ_HASH) {
+                result = int_of(lu_dk_hash_of(dk, ix, ref));
+                Py_DECREF(ref);
+            }
+            else {
+                result = ref;
+            }
+        }
+        else {
+            Py_XDECREF(ref);
+        }
+    }
+    if (result == NULL) {
+        Py_BEGIN_CRITICAL_SECTION(d);
+        dk = mp->ma_keys;
+        if (ix >= 0 && ix < dk->dk_nentries && lu_dk_value(dk, ix) != NULL) {
+            result = what == READ_HASH ? int_of(lu_dk_hash(dk, ix))
+                   : lu_new_ref_with_lock(what == READ_VALUE ? lu_dk_value(dk, ix) : lu_dk_key(dk, ix));
+        }
+        Py_END_CRITICAL_SECTION();
+    }
+    return result != NULL ? result : Py_NewRef(LU_MISSING);
 }
 
 /* dict_new(cls): an empty dict of the class cls, a subclass of dict. */
@@ -72,7 +113,7 @@ prim_dict_find(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(2); DICT(0);
     PyObject *value;
     int found = lu_dict_find_native(args[0], args[1], &value);
-    return Py_NewRef(found < 0 ? Py_NotImplemented : found ? value : LU_MISSING);
+    return found > 0 ? value : Py_NewRef(found < 0 ? Py_NotImplemented : LU_MISSING);
 }
 
 /* dict_put(d, key, value) -> True when stored, NotImplemented as dict_find. */
@@ -84,69 +125,83 @@ prim_dict_put(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return done == -2 ? NULL : Py_NewRef(done == 1 ? Py_True : Py_NotImplemented);
 }
 
-/* dict_key(d, ix), dict_value(d, ix): the live entry's key or value, else MISSING. */
+/* dict_key(d, ix), dict_value(d, ix), dict_hash(d, ix): the live entry's key,
+   value or hash, else MISSING. */
 static PyObject *
 prim_dict_key(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); DICT(0); SSIZE(1, ix);
-    PyDictKeysObject *dk = live_entry(args[0], ix);
-    return Py_NewRef(dk != NULL ? lu_dk_key(dk, ix) : LU_MISSING);
+    return read_entry(args[0], ix, READ_KEY);
 }
 
 static PyObject *
 prim_dict_value(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); DICT(0); SSIZE(1, ix);
-    PyDictKeysObject *dk = live_entry(args[0], ix);
-    PyObject *value = dk != NULL ? lu_dk_value(dk, ix) : NULL;
-    return Py_NewRef(value != NULL ? value : LU_MISSING);
+    return read_entry(args[0], ix, READ_VALUE);
 }
 
-/* dict_hash(d, ix): the hash stored for live entry ix. */
 static PyObject *
 prim_dict_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); DICT(0); SSIZE(1, ix);
-    PyDictKeysObject *dk = live_entry(args[0], ix);
-    return dk != NULL ? int_of(lu_dk_hash(dk, ix)) : Py_NewRef(LU_MISSING);
+    return read_entry(args[0], ix, READ_HASH);
 }
 
-/* dict_insert(d, key, hash, value): adds a key that is not in d. */
+/* dict_stamp(d): what the commits below take, read before the lookup. */
+static PyObject *
+prim_dict_stamp(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); DICT(0);
+    return PyLong_FromLongLong((long long)lu_dict_stamp((PyDictObject *)args[0]));
+}
+
+#define STAMP(i, var) uint64_t var; do { long v_; if (!PyLong_CheckExact(args[i]) \
+        || lu_long_as_long(args[i], &v_) < 0) { \
+        if (!PyErr_Occurred()) lu_err_format(PyExc_TypeError, "%s() needs an int", __func__ + 5); \
+        return NULL; } var = (uint64_t)v_; } while (0)
+
+/* dict_insert(d, stamp, key, hash, value): adds a key that the lookup that began
+   at the stamp did not find; False when the dict changed since. */
 static PyObject *
 prim_dict_insert(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(4); DICT(0); SSIZE(2, hash);
-    int err;
+    ARGS(5); DICT(0); STAMP(1, stamp); SSIZE(3, hash);
+    int err = 0, held;
     Py_BEGIN_CRITICAL_SECTION(args[0]);
-    err = lu_dict_insert((PyDictObject *)args[0], args[1], hash, args[3]);
+    held = lu_dict_stamp_holds((PyDictObject *)args[0], stamp, 1);
+    if (held) {
+        err = lu_dict_insert((PyDictObject *)args[0], args[2], hash, args[4]);
+    }
     Py_END_CRITICAL_SECTION();
-    return err < 0 ? NULL : Py_NewRef(Py_None);
+    return err < 0 ? NULL : bool_of(held);
 }
 
-/* dict_replace(d, ix, value): sets the value of live entry ix; False when
-   the entry is gone. */
+/* dict_replace(d, stamp, ix, value): sets the value of live entry ix found
+   after the stamp; False when the entry is gone or the table replaced. */
 static PyObject *
 prim_dict_replace(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(3); DICT(0); SSIZE(1, ix);
+    ARGS(4); DICT(0); STAMP(1, stamp); SSIZE(2, ix);
     int live;
     Py_BEGIN_CRITICAL_SECTION(args[0]);
-    live = live_entry(args[0], ix) != NULL;
+    live = lu_dict_stamp_holds((PyDictObject *)args[0], stamp, 0) && live_entry(args[0], ix);
     if (live) {
-        lu_dict_replace((PyDictObject *)args[0], ix, args[2]);
+        lu_dict_replace((PyDictObject *)args[0], ix, args[3]);
     }
     Py_END_CRITICAL_SECTION();
     return bool_of(live);
 }
 
-/* dict_remove(d, ix): deletes live entry ix and returns its value, else MISSING. */
+/* dict_remove(d, stamp, ix): deletes live entry ix found after the stamp and
+   returns its value, else MISSING. */
 static PyObject *
 prim_dict_remove(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(2); DICT(0); SSIZE(1, ix);
+    ARGS(3); DICT(0); STAMP(1, stamp); SSIZE(2, ix);
     PyObject *value = NULL;
     Py_BEGIN_CRITICAL_SECTION(args[0]);
-    if (live_entry(args[0], ix) != NULL) {
+    if (lu_dict_stamp_holds((PyDictObject *)args[0], stamp, 0) && live_entry(args[0], ix)) {
         value = lu_dict_remove((PyDictObject *)args[0], ix);
     }
     Py_END_CRITICAL_SECTION();
@@ -192,12 +247,12 @@ prim_dict_prev(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return int_of(lu_dict_prev_entry((PyDictObject *)args[0], ix));
 }
 
-/* dict_keys_id(d): identifies d's current keys table, to see a replacement. */
+/* dict_keys_id(d): names d's current keys table, to see a replacement. */
 static PyObject *
 prim_dict_keys_id(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1); DICT(0);
-    return PyLong_FromLongLong((long long)(intptr_t)(((PyDictObject *)args[0])->ma_keys));
+    return PyLong_FromLongLong(LU_STAMP_SERIAL(lu_dict_stamp((PyDictObject *)args[0])));
 }
 
 /* dict_copy(d): PyDict_Copy, an exact dict. */
@@ -430,7 +485,7 @@ lu_dict_views_init(void)
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_dict_methods[] = {
     FAST(dict_new), FAST(dict_probe), FAST(dict_find), FAST(dict_put), FAST(dict_key), FAST(dict_value), FAST(dict_hash),
-    FAST(dict_insert), FAST(dict_replace), FAST(dict_remove), FAST(dict_popitem),
+    FAST(dict_stamp), FAST(dict_insert), FAST(dict_replace), FAST(dict_remove), FAST(dict_popitem),
     FAST(dict_clear), FAST(dict_next), FAST(dict_prev), FAST(dict_keys_id), FAST(dict_copy),
     FAST(dict_merge_prepare), FAST(dict_sizeof), FAST(dictiter_new), FAST(dictiter_next),
     FAST(dictiter_len), FAST(dictiter_copy), FAST(dictview_new), FAST(dictview_dict),

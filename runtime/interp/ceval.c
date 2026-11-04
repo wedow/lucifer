@@ -147,8 +147,8 @@ name_error(PyObject *name)
     lu_err_format(PyExc_NameError, NAME_ERROR_MSG, PyUnicode_AsUTF8(name));
 }
 
-/* LOAD_NAME and LOAD_GLOBAL over namespace dicts; mappings that are not
-   exact dicts arrive with the kernel's mapping protocol (K1c). */
+/* LOAD_NAME and LOAD_GLOBAL over namespace dicts, a new reference; mappings
+   that are not exact dicts arrive with the kernel's mapping protocol (K1c). */
 static PyObject *
 ns_get(PyObject *ns, PyObject *name)
 {
@@ -156,7 +156,7 @@ ns_get(PyObject *ns, PyObject *name)
         lu_err_format(PyExc_SystemError, "namespace is a %s, not a dict", Py_TYPE(ns)->tp_name);
         return NULL;
     }
-    return lu_ns_lookup(ns, name);
+    return lu_ns_get(ns, name);
 }
 
 /* The lookup in a frame's locals, which a metaclass's __prepare__ can make any
@@ -165,7 +165,7 @@ static PyObject *
 locals_get(PyObject *ns, PyObject *name)
 {
     if (PyDict_CheckExact(ns)) {
-        return Py_XNewRef(lu_ns_lookup(ns, name));
+        return lu_ns_get(ns, name);
     }
     PyObject *args[2] = { ns, name };
     PyObject *v = lu_call_kernel(LU_K_getitem, args, 2);
@@ -201,9 +201,9 @@ static PyObject *
 import_from(PyObject *module, PyObject *name)
 {
     PyObject *v = PyModule_CheckExact(module)
-        ? lu_ns_lookup(((PyModuleObject *)module)->md_dict, name) : NULL;
+        ? lu_ns_get(((PyModuleObject *)module)->md_dict, name) : NULL;
     if (v != NULL) {
-        return Py_NewRef(v);
+        return v;
     }
     PyObject *args[2] = { module, name };
     return lu_call_kernel(LU_K_import_from, args, 2);
@@ -238,11 +238,22 @@ unpack_exact(PyObject *seq, int n, PyObject **out)
     if ((!PyTuple_CheckExact(seq) && !PyList_CheckExact(seq)) || Py_SIZE(seq) != n) {
         return 0;
     }
-    PyObject **items = PyTuple_CheckExact(seq) ? &PyTuple_GET_ITEM(seq, 0) : ((PyListObject *)seq)->ob_item;
-    for (int i = 0; i < n; i++) {
-        out[n - 1 - i] = Py_NewRef(items[i]);
+    if (PyTuple_CheckExact(seq)) {
+        for (int i = 0; i < n; i++) {
+            out[n - 1 - i] = Py_NewRef(PyTuple_GET_ITEM(seq, i));
+        }
+        return 1;
     }
-    return 1;
+    int done = 0;
+    Py_BEGIN_CRITICAL_SECTION(seq);
+    if (Py_SIZE(seq) == n) {
+        for (int i = 0; i < n; i++) {
+            out[n - 1 - i] = Py_NewRef(((PyListObject *)seq)->ob_item[i]);
+        }
+        done = 1;
+    }
+    Py_END_CRITICAL_SECTION();
+    return done;
 }
 
 /* The oparg of the instruction at `at`, with its EXTENDED_ARG prefixes, which
@@ -258,24 +269,56 @@ instr_oparg(PyCodeObject *code, lu_codeunit *at)
     return arg;
 }
 
-/* BINARY_OP NB_SUBSCR and STORE_SUBSCR on an exact list or tuple with a
-   compact int index in range: the item's address, or NULL. */
-static PyObject **
-subscr_slot(PyObject *container, PyObject *sub)
+/* The compact non-negative int index of sub, or -1. */
+static Py_ssize_t
+small_index(PyObject *sub)
 {
-    if (!PyLong_CheckExact(sub) || !_PyLong_IsCompact((PyLongObject *)sub)
-        || _PyLong_CompactValue((PyLongObject *)sub) < 0) {
+    return PyLong_CheckExact(sub) && _PyLong_IsCompact((PyLongObject *)sub)
+        && _PyLong_CompactValue((PyLongObject *)sub) >= 0
+        ? (Py_ssize_t)_PyLong_CompactValue((PyLongObject *)sub) : -1;
+}
+
+/* BINARY_OP NB_SUBSCR on an exact list or tuple with a compact int index in
+   range: the item (a new reference), or NULL. A list is read in its critical
+   section, which its mutators hold: they replace the array and the size
+   apart, and free items. */
+static PyObject *
+subscr_item(PyObject *container, PyObject *sub)
+{
+    Py_ssize_t i = small_index(sub);
+    PyObject *item = NULL;
+    if (i < 0) {
         return NULL;
     }
-    Py_ssize_t i = (Py_ssize_t)_PyLong_CompactValue((PyLongObject *)sub);
-    if (PyList_CheckExact(container) && i < Py_SIZE(container)
-        && _Py_IsOwnedByCurrentThread(container)) {
-        return &((PyListObject *)container)->ob_item[i];
+    if (PyList_CheckExact(container)) {
+        Py_BEGIN_CRITICAL_SECTION(container);
+        if (i < Py_SIZE(container)) {
+            item = Py_NewRef(((PyListObject *)container)->ob_item[i]);
+        }
+        Py_END_CRITICAL_SECTION();
     }
-    if (PyTuple_CheckExact(container) && i < Py_SIZE(container)) {
-        return &((PyTupleObject *)container)->ob_item[i];
+    else if (PyTuple_CheckExact(container) && i < Py_SIZE(container)) {
+        item = Py_NewRef(((PyTupleObject *)container)->ob_item[i]);
     }
-    return NULL;
+    return item;
+}
+
+/* STORE_SUBSCR into an exact list at a compact int index in range: the
+   replaced item (a new reference to release), or NULL. */
+static PyObject *
+store_subscr_list(PyObject *container, PyObject *sub, PyObject *value)
+{
+    Py_ssize_t i = small_index(sub);
+    PyObject *old = NULL;
+    if (i >= 0 && PyList_CheckExact(container)) {
+        Py_BEGIN_CRITICAL_SECTION(container);
+        if (i < Py_SIZE(container)) {
+            old = ((PyListObject *)container)->ob_item[i];
+            _Py_atomic_store_ptr_release(&((PyListObject *)container)->ob_item[i], value);
+        }
+        Py_END_CRITICAL_SECTION();
+    }
+    return old;
 }
 
 /* Whether one of n items is item, as lu_native_eq decides: 1, 0, or -1. */
@@ -310,7 +353,11 @@ contains_native(PyObject *container, PyObject *item)
         return verdict == LU_SET_FOUND ? 1 : verdict == LU_SET_ABSENT ? 0 : -1;
     }
     if (PyDict_CheckExact(container)) {
-        return lu_dict_find_native(container, item, &value);
+        int hit = lu_dict_find_native(container, item, &value);
+        if (hit > 0) {
+            Py_DECREF(value);
+        }
+        return hit;
     }
     if (PyTuple_CheckExact(container)) {
         return items_contain(((PyTupleObject *)container)->ob_item, Py_SIZE(container), item);
@@ -364,7 +411,7 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
         if ((npos == 2 || npos == 3) && PyDict_CheckExact(args[0])) {
             int hit = lu_dict_find_native(args[0], args[1], &found);
             if (hit >= 0) {
-                return Py_NewRef(hit ? found : npos == 3 ? args[2] : Py_None);
+                return hit ? found : Py_NewRef(npos == 3 ? args[2] : Py_None);
             }
         }
     }
@@ -874,7 +921,6 @@ op_LOAD_NAME: {
             && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
             name_error(name);
         }
-        Py_XINCREF(v);
     }
     ERROR_IF(v == NULL);
     PUSH(v);
@@ -893,8 +939,9 @@ op_STORE_NAME: {
     }
     else {
         if (PyDict_CheckExact(frame->locals)) {
-            err = ns_get(frame->locals, name) == NULL && PyErr_Occurred()
-                ? -1 : lu_ns_insert(frame->locals, name, v);
+            PyObject *old = ns_get(frame->locals, name);
+            err = old == NULL && PyErr_Occurred() ? -1 : lu_ns_insert(frame->locals, name, v);
+            Py_XDECREF(old);
         }
         else {
             PyObject *args[3] = { frame->locals, name, v };
@@ -929,7 +976,7 @@ op_LOAD_GLOBAL: {
         name_error(name);
     }
     ERROR_IF(v == NULL);
-    PUSH(Py_NewRef(v));
+    PUSH(v);
     if (oparg & 1) {
         PUSH(NULL);
     }
@@ -953,15 +1000,20 @@ op_LOAD_GLOBAL_BUILTIN: {
             ? __atomic_load_n(&((PyDictObject *)frame->builtins)->ma_keys, __ATOMIC_ACQUIRE) : gk;
         if (gk->dk_version == module_version && dk->dk_version == (from_builtins ? builtin_version : module_version)
             && lu_dk_is_unicode(dk) && index < dk->dk_nentries) {
-            v = lu_dk_value(dk, index);
+            v = lu_try_xget_ref(lu_dk_value_slot(dk, index));
+            if (v != NULL && dk != __atomic_load_n(&((PyDictObject *)(from_builtins ? frame->builtins : frame->globals))->ma_keys,
+                                                   __ATOMIC_ACQUIRE)) {
+                Py_CLEAR(v);
+            }
         }
     }
     if (v == NULL || !lu_site_unchanged(site, opcode)
         || lu_cache_load(next_instr + LG_MODULE_KEYS_VERSION) != module_version) {
+        Py_XDECREF(v);
         goto op_LOAD_GLOBAL;
     }
     SKIP_CACHES();
-    PUSH(Py_NewRef(v));
+    PUSH(v);
     if (oparg & 1) {
         PUSH(NULL);
     }
@@ -2056,15 +2108,19 @@ op_LOAD_ATTR_MODULE: {
         PyDictKeysObject *dk = __atomic_load_n(&md->ma_keys, __ATOMIC_ACQUIRE);
         Py_ssize_t index = lu_cache_load(next_instr + LA_INDEX);
         if (dk->dk_version == version && lu_dk_is_unicode(dk) && index < dk->dk_nentries) {
-            v = lu_dk_value(dk, index);
+            v = lu_try_xget_ref(lu_dk_value_slot(dk, index));
+            if (v != NULL && dk != __atomic_load_n(&md->ma_keys, __ATOMIC_ACQUIRE)) {
+                Py_CLEAR(v);
+            }
         }
     }
     if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
         || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        Py_XDECREF(v);
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
-    TOP() = Py_NewRef(v);
+    TOP() = v;
     Py_DECREF(owner);
     if (oparg & 1) {
         PUSH(NULL);
@@ -2103,16 +2159,20 @@ op_LOAD_ATTR_WITH_HINT: {
             PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)dict)->ma_keys, __ATOMIC_ACQUIRE);
             Py_ssize_t index = lu_cache_load(next_instr + LA_INDEX);
             if (lu_dk_is_unicode(dk) && index < dk->dk_nentries && lu_dk_key(dk, index) == NAME(oparg >> 1)) {
-                v = lu_dk_value(dk, index);
+                v = lu_try_xget_ref(lu_dk_value_slot(dk, index));
+                if (v != NULL && dk != __atomic_load_n(&((PyDictObject *)dict)->ma_keys, __ATOMIC_ACQUIRE)) {
+                    Py_CLEAR(v);
+                }
             }
         }
     }
     if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
         || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        Py_XDECREF(v);
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
-    TOP() = Py_NewRef(v);
+    TOP() = v;
     Py_DECREF(owner);
     if (oparg & 1) {
         PUSH(NULL);
@@ -2183,9 +2243,9 @@ op_LOAD_ATTR: {
     SKIP_CACHES();
     kret = (oparg & 1) ? LU_RETURN_METHOD : LU_RETURN_PUSH;
     if (PyModule_CheckExact(owner)) {
-        PyObject *v = lu_ns_lookup(((PyModuleObject *)owner)->md_dict, name);
+        PyObject *v = lu_ns_get(((PyModuleObject *)owner)->md_dict, name);
         if (v != NULL) {
-            TOP() = Py_NewRef(v);
+            TOP() = v;
             Py_DECREF(owner);
             if (oparg & 1) {
                 PUSH(NULL);
@@ -2422,7 +2482,7 @@ op_LOAD_BUILD_CLASS: {
         }
         goto error;
     }
-    PUSH(Py_NewRef(bc));
+    PUSH(bc);
     DISPATCH();
 }
 
@@ -2446,7 +2506,6 @@ op_LOAD_FROM_DICT_OR_GLOBALS: {
             && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
             name_error(name);
         }
-        Py_XINCREF(v);
     }
     Py_DECREF(dict);
     ERROR_IF(v == NULL);
@@ -2726,10 +2785,10 @@ op_BINARY_OP: {
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
     if (oparg == 26) {   /* NB_SUBSCR */ 
-        PyObject **slot = subscr_slot(left, right);
+        PyObject *item = subscr_item(left, right);
         sp -= 2;
-        if (slot != NULL) {
-            PUSH(Py_NewRef(*slot));
+        if (item != NULL) {
+            PUSH(item);
             Py_DECREF(left);
             Py_DECREF(right);
             DISPATCH();
@@ -2744,7 +2803,7 @@ op_BINARY_OP: {
         }
         PyObject *value;
         if (PyDict_CheckExact(left) && lu_dict_find_native(left, right, &value) > 0) {
-            PUSH(Py_NewRef(value));
+            PUSH(value);
             Py_DECREF(left);
             Py_DECREF(right);
             DISPATCH();
@@ -2869,11 +2928,8 @@ op_STORE_SUBSCR: {
     SKIP_CACHES();
     PyObject *sub = sp[-1];
     PyObject *container = sp[-2];
-    PyObject **slot = subscr_slot(container, sub);
-    if (slot != NULL && PyList_CheckExact(container)) {
-        PyObject *value = sp[-3];
-        PyObject *old = *slot;
-        *slot = value;
+    PyObject *old = store_subscr_list(container, sub, sp[-3]);
+    if (old != NULL) {
         sp -= 3;
         Py_DECREF(old);
         Py_DECREF(container);
@@ -3138,14 +3194,17 @@ op_LOAD_COMMON_CONSTANT: {
     if (v == NULL) {
         SAVE_FRAME();
         PyObject *name = oparg < 5 ? PyUnicode_InternFromString(names[oparg]) : NULL;
-        v = name != NULL ? lu_ns_lookup(ts->interp->builtins, name) : NULL;
+        v = name != NULL ? lu_ns_get(ts->interp->builtins, name) : NULL;
         Py_XDECREF(name);
         if (v == NULL) {
             lu_err_format(PyExc_SystemError, "common constant %d is not defined yet", oparg);
             goto error;
         }
     }
-    PUSH(Py_NewRef(v));
+    else {
+        Py_INCREF(v);
+    }
+    PUSH(v);
     DISPATCH();
 }
 
