@@ -131,3 +131,11 @@ lu_prim_faulthandler_methods	runtime/prim/faulthandler.c	_lucifer's faulthandler
 lu_prim_mt_methods	runtime/prim/mt.c	_lucifer's Mersenne Twister primitives, a PyMethodDef table never written; the API takes it non-const
 tp_new_methoddef	runtime/capi/typespec.c	the PyMethodDef of the bound __new__ of a type made from a spec, never written; the API takes it non-const
 next_serial_counter	runtime/object/dict.c	the serials of dict keys tables, process-wide so that no two tables share one; atomic
+slotdefs	runtime/types/wrappers.c	the slotdefs table (dunder, slot offset, wrapper), never written
+lu_prim_datetime_methods	runtime/capi/datetime.c	_lucifer's datetime C API primitive, a PyMethodDef table never written; the API takes it non-const
+lu_prim_zlib_methods	runtime/prim/zlib.c	_lucifer's zlib primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_passwd_methods	runtime/prim/passwd.c	_lucifer's pwd and grp primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_ctypes_methods	runtime/prim/ctypes.c	_lucifer's ctypes primitives, a PyMethodDef table never written; the API takes it non-const
+saved_errno	-	the errno of a thread's use_errno ctypes calls, per thread (its TLS symbol has no line)
+new_check_skipped	-	per thread (its TLS symbol has no line): C is calling a builtin's tp_new, whose safety check has no wrapper to run in
+ffi_type_*	-	libffi's type descriptors, copy-relocated into the executable; the library never writes them

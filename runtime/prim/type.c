@@ -334,91 +334,6 @@ lu_type_name(PyTypeObject *tp)
     return PyUnicode_FromString(dot != NULL ? dot + 1 : tp->tp_name);
 }
 
-/* Members (Python/structmember.c PyMember_GetOne/SetOne) for the kinds the
-   runtime's layouts use. */
-
-PyObject *
-PyMember_GetOne(const char *obj_addr, PyMemberDef *l)
-{
-    const char *addr = obj_addr + l->offset;
-    switch (l->type) {
-    case Py_T_OBJECT_EX: {
-        PyObject *v = *(PyObject **)addr;
-        if (v == NULL) {
-            PyObject *obj = (PyObject *)obj_addr;
-            PyObject *name = lu_type_name(Py_TYPE(obj));
-            lu_err_format(PyExc_AttributeError, "'%s' object has no attribute '%s'",
-                          name != NULL ? PyUnicode_AsUTF8(name) : "?", l->name);
-            Py_XDECREF(name);
-            return NULL;
-        }
-        return Py_NewRef(v);
-    }
-    case _Py_T_OBJECT: {
-        PyObject *v = *(PyObject **)addr;
-        return Py_NewRef(v != NULL ? v : Py_None);
-    }
-    case Py_T_INT: return PyLong_FromLong(*(int *)addr);
-    case Py_T_UINT: return PyLong_FromLongLong(*(unsigned int *)addr);
-    case Py_T_LONG: return PyLong_FromLong(*(long *)addr);
-    case Py_T_ULONG: return PyLong_FromLongLong((long long)*(unsigned long *)addr);
-    case Py_T_PYSSIZET: return PyLong_FromLongLong(*(Py_ssize_t *)addr);
-    case Py_T_BOOL: return Py_NewRef(*(char *)addr ? Py_True : Py_False);
-    default:
-        lu_err_format(PyExc_SystemError, "member '%s': type code %d arrives with its user",
-                      l->name, l->type);
-        return NULL;
-    }
-}
-
-int
-PyMember_SetOne(char *obj_addr, PyMemberDef *l, PyObject *v)
-{
-    if (l->flags & Py_READONLY) {
-        lu_err_format(PyExc_AttributeError, "readonly attribute");
-        return -1;
-    }
-    PyObject **addr = (PyObject **)(obj_addr + l->offset);
-    if (l->type == Py_T_BOOL) {
-        if (v == NULL) {
-            lu_err_format(PyExc_TypeError, "can't delete numeric/char attribute");
-            return -1;
-        }
-        if (v != Py_True && v != Py_False) {
-            lu_err_format(PyExc_TypeError, "attribute value type must be bool");
-            return -1;
-        }
-        *(char *)addr = v == Py_True;
-        return 0;
-    }
-    if (l->type == Py_T_PYSSIZET) {
-        long n;
-        if (v == NULL || !PyLong_Check(v) || lu_long_as_long(v, &n) < 0) {
-            lu_err_format(PyExc_TypeError, "an integer is required");
-            return -1;
-        }
-        *(Py_ssize_t *)addr = n;
-        return 0;
-    }
-    if (l->type != Py_T_OBJECT_EX && l->type != _Py_T_OBJECT) {
-        lu_err_format(PyExc_SystemError, "member '%s': storing type code %d arrives with its user",
-                      l->name, l->type);
-        return -1;
-    }
-    PyObject *old = *addr;
-    if (v == NULL && old == NULL && l->type == Py_T_OBJECT_EX) {
-        PyObject *obj = (PyObject *)obj_addr;
-        PyObject *name = lu_type_name(Py_TYPE(obj));
-        lu_err_format(PyExc_AttributeError, "'%s' object has no attribute '%s'",
-                      name != NULL ? PyUnicode_AsUTF8(name) : "?", l->name);
-        Py_XDECREF(name);
-        return -1;
-    }
-    *addr = Py_XNewRef(v);
-    Py_XDECREF(old);
-    return 0;
-}
-
 /* Instance dicts. */
 
 /* A static builtin type's dict is reached through lu_type_dict: its own
@@ -711,6 +626,13 @@ lu_type_add_descriptors(PyTypeObject *tp)
     return 0;
 }
 
+/* tp_free of a class: what a base's dealloc calls last, which must know the preheader. */
+static void
+heap_free(void *self)
+{
+    lu_object_free(self);
+}
+
 static void
 object_dealloc(PyObject *self)
 {
@@ -920,29 +842,6 @@ lu_static_types_inherit(void)
    lock does: two interpreters importing one extension ready the same shared
    struct exactly once. */
 
-/* The interpreter state array slot for a foreign static type; the index is
-   claimed once, process-wide (type_ready_lock held). */
-static int
-claim_static_slot(PyTypeObject *tp, size_t *slot)
-{
-    if (tp->tp_subclasses != NULL) {
-        *slot = (size_t)tp->tp_subclasses - 1;      /* readied somewhere else */
-        return 0;
-    }
-    if (_PyRuntime.next_static_type == 0) {
-        for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
-            _PyRuntime.next_static_type++;
-        }
-    }
-    if (_PyRuntime.next_static_type >= LU_MAX_STATIC_TYPES) {
-        lu_err_format(PyExc_SystemError, "more than %d static builtin types", LU_MAX_STATIC_TYPES);
-        return -1;
-    }
-    *slot = _PyRuntime.next_static_type++;
-    tp->tp_subclasses = (PyObject *)(*slot + 1);
-    return 0;
-}
-
 static int ready_type(PyTypeObject *tp, PyTypeObject *base, struct lu_static_type_state *state);
 
 static int
@@ -967,7 +866,9 @@ ready_foreign(PyTypeObject *tp)
         }
         return ready_type(tp, base, NULL);
     }
-    tp->tp_flags |= Py_TPFLAGS_IMMUTABLETYPE | _Py_TPFLAGS_STATIC_BUILTIN;
+    /* A static extension type keeps its dict and MRO in itself, as in CPython: only the
+       runtime's own types use the interpreter's table, which is for a fixed few. */
+    tp->tp_flags |= Py_TPFLAGS_IMMUTABLETYPE;
     if (tp->tp_base == NULL) {
         tp->tp_base = &PyBaseObject_Type;
     }
@@ -984,12 +885,7 @@ ready_foreign(PyTypeObject *tp)
     if (Py_IS_TYPE(tp, NULL)) {
         Py_SET_TYPE(tp, Py_TYPE(base));
     }
-    lu_set_immortal((PyObject *)tp);        /* the dict that holds it never counts */
-    size_t slot;
-    if (claim_static_slot(tp, &slot) < 0) {
-        return -1;
-    }
-    return ready_type(tp, base, &PyInterpreterState_Get()->static_types[slot]);
+    return ready_type(tp, base, NULL);
 }
 
 /* What type_ready does after the registration differs by kind: a static
@@ -1038,23 +934,37 @@ ready_type(PyTypeObject *tp, PyTypeObject *base, struct lu_static_type_state *st
         }
     }
 
-    /* MRO and bases: the type has one base (type_ready_mro). */
-    Py_ssize_t depth = 0;
-    for (PyTypeObject *b = tp; b != NULL; b = b->tp_base) {
-        depth++;
+    /* MRO and bases (type_ready_mro): the base's MRO behind the type, or, for a
+       type that names several bases (numpy.float64 stands on numpy.floating and float),
+       the kernel's C3 merge of them. */
+    PyObject *bases = tp->tp_bases != NULL && PyTuple_GET_SIZE(tp->tp_bases) > 1 ? Py_NewRef(tp->tp_bases)
+                                                                                : PyTuple_Pack(1, (PyObject *)base);
+    PyObject *mro = NULL;
+    if (bases != NULL && PyTuple_GET_SIZE(bases) > 1) {
+        tp->tp_bases = bases;
+        mro = lu_call(PyDict_GetItemString(lu_type_dict(&PyType_Type), "mro"), (PyObject *[]){ (PyObject *)tp }, 1, NULL);
+        if (mro != NULL && !PyTuple_CheckExact(mro)) {
+            PyObject *t = PySequence_Tuple(mro);
+            Py_DECREF(mro);
+            mro = t;
+        }
     }
-    PyObject *mro = PyTuple_New(depth);
-    PyObject *bases = PyTuple_New(1);
+    else if (bases != NULL) {
+        Py_ssize_t depth = 0;
+        for (PyTypeObject *b = tp; b != NULL; b = b->tp_base) {
+            depth++;
+        }
+        mro = PyTuple_New(depth);
+        Py_ssize_t i = 0;
+        for (PyTypeObject *b = tp; mro != NULL && b != NULL; b = b->tp_base) {
+            PyTuple_SET_ITEM(mro, i++, Py_NewRef(b));      /* a no-op on immortals */
+        }
+    }
     if (mro == NULL || bases == NULL) {
         Py_XDECREF(mro);
         Py_XDECREF(bases);
         return -1;
     }
-    Py_ssize_t i = 0;
-    for (PyTypeObject *b = tp; b != NULL; b = b->tp_base) {
-        PyTuple_SET_ITEM(mro, i++, Py_NewRef(b));      /* a no-op on immortals */
-    }
-    PyTuple_SET_ITEM(bases, 0, Py_NewRef(base));
     if (state != NULL) {
         lu_set_immortal(mro);
         lu_set_immortal(bases);
@@ -1080,7 +990,7 @@ ready_type(PyTypeObject *tp, PyTypeObject *base, struct lu_static_type_state *st
         *dict_slot = dict;
     }
     PyObject *dict = *dict_slot;
-    if (lu_type_add_descriptors(tp) < 0 || lu_type_add_methods(tp, dict) < 0) {
+    if (lu_type_add_operators(tp) < 0 || lu_type_add_descriptors(tp) < 0 || lu_type_add_methods(tp, dict) < 0) {
         return -1;
     }
 
@@ -1137,14 +1047,15 @@ ready_type(PyTypeObject *tp, PyTypeObject *base, struct lu_static_type_state *st
     /* tp_new: a static type with no tp_new on object cannot be instantiated
        (type_ready_set_new); any other came with the slots above. */
     if (tp->tp_new == NULL) {
-        if (state != NULL && base == &PyBaseObject_Type) {
+        if (!(tp->tp_flags & Py_TPFLAGS_HEAPTYPE) && base == &PyBaseObject_Type) {
             tp->tp_flags |= Py_TPFLAGS_DISALLOW_INSTANTIATION;
         }
         else if (base->tp_new != NULL) {
             tp->tp_new = base->tp_new;
         }
     }
-    else if (tp->tp_new != base->tp_new && lu_type_add_new_wrapper(tp, dict) < 0) {
+    else if (tp->tp_new != base->tp_new && !lu_tp_new_is_thunk(tp->tp_new)
+             && lu_type_add_new_wrapper(tp, dict) < 0) {
         return -1;
     }
     /* Still no tp_hash after all that: the type is unhashable
@@ -1160,7 +1071,18 @@ ready_type(PyTypeObject *tp, PyTypeObject *base, struct lu_static_type_state *st
     }
     set_version(tp, next_global_version_tag());
     tp->tp_flags |= Py_TPFLAGS_READY;
-    return add_subclass(base, tp);
+    for (Py_ssize_t b = 0; b < PyTuple_GET_SIZE(tp->tp_bases); b++) {
+        if (add_subclass((PyTypeObject *)PyTuple_GET_ITEM(tp->tp_bases, b), tp) < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+PyObject *
+PyType_GenericNew(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+    return type->tp_alloc(type, 0);
 }
 
 int
@@ -1418,6 +1340,7 @@ type_new_layout(PyTypeObject *meta, PyObject *name, PyObject *bases, PyObject *n
     tp->tp_traverse = subtype_traverse;
     tp->tp_clear = subtype_clear;
     tp->tp_alloc = PyType_GenericAlloc;
+    tp->tp_free = heap_free;
     tp->tp_dictoffset = base->tp_dictoffset;
     tp->tp_weaklistoffset = base->tp_weaklistoffset;
     tp->tp_dict = dict;
@@ -1837,6 +1760,7 @@ prim_type_set_mro(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "mro() returned a non-tuple or an empty tuple");
         return NULL;
     }
+    PyTypeObject *solid = solid_base(tp);       /* mro_check: the type's own solid base, not the type */
     for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); i++) {
         PyObject *b = PyTuple_GET_ITEM(mro, i);
         if (!PyType_Check(b)) {
@@ -1844,7 +1768,7 @@ prim_type_set_mro(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
                           Py_TYPE(b)->tp_name);
             return NULL;
         }
-        if (!PyType_IsSubtype(tp, solid_base((PyTypeObject *)b))) {
+        if (!PyType_IsSubtype(solid, solid_base((PyTypeObject *)b))) {
             lu_err_format(PyExc_TypeError, "mro() returned base with unsuitable layout ('%.500s')",
                           ((PyTypeObject *)b)->tp_name);
             return NULL;
@@ -1941,10 +1865,37 @@ prim_is_subtype(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* tp_new_wrapper's checks for owner.__new__(cls): cls is a subtype of owner
-   and owner is its static base. */
+   and owner is its static base, or an extension type inherited owner's tp_new. */
+/* One of the runtime's own static types, not an extension's. */
+static int
+is_runtime_type(PyTypeObject *tp)
+{
+    for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
+        if (*t == tp) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Set by C calling a builtin's tp_new directly (slot_tp_new_builtin): there is
+   no tp_new_wrapper in that call to check, and the first check made on behalf
+   of the call is the one it stands for. */
+static __thread int new_check_skipped;
+
+void
+lu_new_check_skip(int on)
+{
+    new_check_skipped = on;
+}
+
 static int
 check_new(PyTypeObject *tp, PyTypeObject *owner)
 {
+    if (new_check_skipped) {
+        new_check_skipped = 0;
+        return 0;
+    }
     PyTypeObject *staticbase = tp;
     if (!PyType_IsSubtype(tp, owner)) {
         lu_err_format(PyExc_TypeError, "%s.__new__(%s): %s is not a subtype of %s",
@@ -1956,7 +1907,8 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
     }
     /* Exception types share one allocation rule: a static exception class
        builds its instances with its base exception's __new__. */
-    if (staticbase != owner
+    int inherited = !is_runtime_type(staticbase) && staticbase->tp_new == owner->tp_new;
+    if (staticbase != owner && !inherited
         && !(PyExceptionClass_Check(staticbase) && PyExceptionClass_Check(owner))) {
         lu_err_format(PyExc_TypeError, "%s.__new__(%s) is not safe, use %s.__new__()",
                       owner->tp_name, tp->tp_name, staticbase->tp_name);

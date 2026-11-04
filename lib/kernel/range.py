@@ -88,7 +88,7 @@ start defaults to 0, and stop is omitted!  range(4) produces 0, 1, 2, 3.
 These are exactly the valid indices for a list of 4 elements.
 When step is given, it specifies the increment (or decrement)."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         if cls is not range:
             operators.check_new(cls, range)
         if kwargs:

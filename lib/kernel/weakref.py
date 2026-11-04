@@ -41,11 +41,11 @@ class ReferenceType:
 When 'object' is deleted or finalized, 'callback' is called with the weak
 reference as argument if it was given."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         _unpack('__new__', args, kwargs)
         return weakref_new(cls, args[0], args[1] if len(args) > 1 else None)
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, /, *args, **kwargs):
         _unpack('__init__', args, kwargs)
 
     def __call__(self):

@@ -383,6 +383,23 @@ def getppid():
     return _call('getppid')
 
 
+sysconf_names = {
+    'SC_ARG_MAX': 0, 'SC_CHILD_MAX': 1, 'SC_CLK_TCK': 2, 'SC_NGROUPS_MAX': 3, 'SC_OPEN_MAX': 4,
+    'SC_PAGESIZE': 30, 'SC_PAGE_SIZE': 30, 'SC_NPROCESSORS_CONF': 83, 'SC_NPROCESSORS_ONLN': 84,
+    'SC_PHYS_PAGES': 85, 'SC_AVPHYS_PAGES': 86,
+}
+
+
+def sysconf(name, /):
+    """Return an integer-valued system configuration variable."""
+    if isinstance(name, str):
+        try:
+            name = sysconf_names[name]
+        except KeyError:
+            raise ValueError('unrecognized configuration name') from None
+    return _call('sysconf', name)
+
+
 def getpgrp():
     """Return the current process group id."""
     return _call('getpgrp')
@@ -445,17 +462,20 @@ def uname():
     return _lucifer.structseq.structseq_make(uname_result, _lucifer.os_uname(), {})
 
 
+def _check_envname(name):
+    if not name or ('=' if isinstance(name, str) else b'=') in name:
+        raise ValueError('illegal environment variable name')
+
+
 def putenv(name, value, /):
     """Change or add an environment variable."""
-    if b'=' in name or not name:
-        raise ValueError('illegal environment variable name')
+    _check_envname(name)
     _lucifer.os_putenv(name, value)
 
 
 def unsetenv(name, /):
     """Delete an environment variable."""
-    if b'=' in name or not name:
-        raise ValueError('illegal environment variable name')
+    _check_envname(name)
     _lucifer.os_putenv(name, None)
 
 

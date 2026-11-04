@@ -18,6 +18,7 @@ getset = _boot.getset
 call_special = _boot.call_special
 
 generic_getattr = kernel_get('generic_getattr')
+generic_setattr = kernel_get('generic_setattr')
 getattr_hook = kernel_get('getattr')
 
 __all__ = ()
@@ -282,7 +283,7 @@ def _wrapped_abstract(self):
 class property:
     """Property attribute."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         return alloc(cls, property)
 
     def __init__(self, fget=None, fset=None, fdel=None, doc=None):
@@ -345,15 +346,26 @@ def _property_copy(old, fget, fset, fdel):
     return new
 
 
+def _wraps(wrapper, wrapped):
+    """functools_wraps: the wrapped callable's name, qualname, module and doc."""
+    for name in ('__module__', '__name__', '__qualname__', '__doc__'):
+        try:
+            value = getattr_hook(wrapped, name)
+        except AttributeError:
+            continue
+        generic_setattr(wrapper, name, value)
+
+
 @kernel_type(classmethod)
 class classmethod:
     """Convert a function to be a class method."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         return alloc(cls, classmethod)
 
     def __init__(self, f):
         field_set(self, _CALLABLE, f)
+        _wraps(self, f)
 
     def __get__(self, instance, owner=None):
         if owner is None:
@@ -367,11 +379,12 @@ class classmethod:
 class staticmethod:
     """Convert a function to be a static method."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         return alloc(cls, staticmethod)
 
     def __init__(self, f):
         field_set(self, _CALLABLE, f)
+        _wraps(self, f)
 
     def __get__(self, instance, owner=None):
         return field_get(self, _CALLABLE)
@@ -430,7 +443,7 @@ super(type) -> unbound super object
 super(type, obj) -> bound super object; requires isinstance(obj, type)
 super(type, type2) -> bound super object; requires issubclass(type2, type)"""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         return alloc(cls, super)
 
     def __init__(self, cls=MISSING, obj=MISSING, /):

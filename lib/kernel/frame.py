@@ -67,7 +67,7 @@ def _merge(self, other):
 
 @kernel_type(_FrameLocalsProxy)
 class FrameLocalsProxy:
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         if len(args) != 1:
             error(TypeError, str_join('', ('FrameLocalsProxy expected 1 argument, got ',
                                            str(len(args)))))

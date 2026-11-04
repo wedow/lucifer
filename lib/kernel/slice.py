@@ -130,7 +130,7 @@ slice(start, stop[, step])
 
 Create a slice object.  This is used for extended slicing (e.g. a[0:10:2])."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         operators.check_new(cls, slice)
         if kwargs:
             error(TypeError, 'slice() takes no keyword arguments')

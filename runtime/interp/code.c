@@ -529,3 +529,71 @@ PyMethodDef lu_prim_code_methods[] = {
     FAST(code_new), FAST(code_localsplus), FAST(code_set_localsplusnames), FAST(code_equal), FAST(code_hash),
     { NULL, NULL, 0, NULL },
 };
+
+/* PyUnstable_Code_NewWithPosOnlyArgs: the locals-plus tables of _PyCode_New
+   from the three name tuples: a name is a local, a cell, a local that is also
+   a cell, or a free variable. */
+PyCodeObject *
+PyUnstable_Code_NewWithPosOnlyArgs(int argcount, int posonlyargcount, int kwonlyargcount, int nlocals,
+                                   int stacksize, int flags, PyObject *code, PyObject *consts,
+                                   PyObject *names, PyObject *varnames, PyObject *freevars,
+                                   PyObject *cellvars, PyObject *filename, PyObject *name,
+                                   PyObject *qualname, int firstlineno, PyObject *linetable,
+                                   PyObject *exceptiontable)
+{
+    Py_ssize_t nvar = PyTuple_GET_SIZE(varnames), ncell = PyTuple_GET_SIZE(cellvars);
+    Py_ssize_t nfree = PyTuple_GET_SIZE(freevars);
+    PyObject *all = PyList_New(0);
+    PyObject *kinds = PyBytes_FromStringAndSize(NULL, nvar + ncell + nfree);
+    PyObject *result = NULL;
+    if (all == NULL || kinds == NULL) {
+        goto done;
+    }
+    char *kind = PyBytes_AS_STRING(kinds);
+    Py_ssize_t n = 0;
+    for (Py_ssize_t i = 0; i < nvar; i++) {
+        PyObject *v = PyTuple_GET_ITEM(varnames, i);
+        int cell = PySequence_Contains(cellvars, v);
+        if (cell < 0 || lu_list_append(all, v) < 0) {
+            goto done;
+        }
+        kind[n++] = (char)(CO_FAST_LOCAL | (cell ? CO_FAST_CELL : 0));
+    }
+    for (Py_ssize_t i = 0; i < ncell; i++) {
+        PyObject *v = PyTuple_GET_ITEM(cellvars, i);
+        int local = PySequence_Contains(varnames, v);
+        if (local < 0) {
+            goto done;
+        }
+        if (!local) {
+            if (lu_list_append(all, v) < 0) {
+                goto done;
+            }
+            kind[n++] = (char)CO_FAST_CELL;
+        }
+    }
+    for (Py_ssize_t i = 0; i < nfree; i++) {
+        if (lu_list_append(all, PyTuple_GET_ITEM(freevars, i)) < 0) {
+            goto done;
+        }
+        kind[n++] = (char)CO_FAST_FREE;
+    }
+    PyObject *localsplusnames = PyList_AsTuple(all);
+    PyObject *localspluskinds = PyBytes_FromStringAndSize(kind, n);
+    if (localsplusnames != NULL && localspluskinds != NULL) {
+        struct lu_code_fields c = {
+            .filename = filename, .name = name, .qualname = qualname, .flags = flags, .code = code,
+            .firstlineno = firstlineno, .linetable = linetable, .consts = consts, .names = names,
+            .localsplusnames = localsplusnames, .localspluskinds = localspluskinds,
+            .argcount = argcount, .posonlyargcount = posonlyargcount, .kwonlyargcount = kwonlyargcount,
+            .stacksize = stacksize, .exceptiontable = exceptiontable,
+        };
+        result = lu_code_new(&c);
+    }
+    Py_XDECREF(localsplusnames);
+    Py_XDECREF(localspluskinds);
+done:
+    Py_XDECREF(all);
+    Py_XDECREF(kinds);
+    return (PyCodeObject *)result;
+}
