@@ -706,7 +706,7 @@ parallel.
 
 | Rung | Harness and command | Acceptance score | Depends on |
 |---|---|---|---|
-| C0 | `make check-compiler` (host) | 100% byte-identical marshal and AST for the 42 closure modules, 164 difftest programs and `tests/kernel`; report the share of all vendored `Lib/**/*.py` the host compiles | none |
+| C0 | `make check-compiler` | 100% byte-identical marshal on `bin/lucifer` and the oracle for the 42 closure modules, the difftest programs, `tests/kernel` and every vendored `Lib/**/*.py` | none |
 | K0 | `make abi-audit` | `bin/lucifer` exports all 1,843 `Py*`/`_Py*` symbols; all 215 data symbols have the oracle's `nm -S` sizes; unimplemented functions abort naming themselves and are counted | none |
 | K1 | `make check-kernel` | every `tests/kernel` program (≥ 30) run as host-compiled `.pyc` under `-I -S` with a 512 KiB stack limit matches the oracle on stdout, stderr and exit, both plain and under `-X lucifer_handoff`, including `deep_recursion` and `handoff_witness` (§5.8) | K0 |
 | M0.0 | `tools/difftest run --python bin/lucifer` | probe accepted: 0 NOTRUN of 164 | C0, K1 |
@@ -739,17 +739,14 @@ probe accepted and 46 PASS. One task (a second carrier only under
 (`gc.collect()` returns 0 and collects nothing until M0.2), no JIT. All 1,843
 symbols are exported, most as aborting stubs.
 
-### 9.1 C0: compiler on the host
+### 9.1 C0: the compiler
 
-Files: `lib/compiler/{tokenizer,python.gram,parser,helpers,_ast,symtable,preprocess,codegen,flowgraph,assemble,__init__}.py`,
-`tools/compilercheck`, a Makefile target.
+Files: `runtime/compiler/` (§3.2), `tools/compilercheck`, a Makefile target.
 
-Mechanism (§3.2): pegen generates `parser.py` from our `python.gram`. The port
-order is the dependency order (tokenizer → parser → symtable → codegen →
-flowgraph → assemble). Each stage is checked against the host: tokens against
-`tokenize`; AST via `ast.dump(include_attributes=True)`; symbols against
-`symtable`; code objects via `marshal.dumps` equality, which compares bytecode,
-consts, names, line, position and exception tables.
+C0 began as a Python port checked on the host, stage by stage. It is now
+CPython's own C compiler (§3.2), so the check is one comparison: each file of
+the corpora is compiled on `bin/lucifer` and on the oracle, and
+`marshal.dumps` of the code objects must be the same bytes.
 
 Done when: C0 in §8.
 
