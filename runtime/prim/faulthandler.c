@@ -32,17 +32,7 @@
 static void
 out(int fd, const char *s, size_t n)
 {
-    while (n > 0) {
-        ssize_t w = write(fd, s, n);
-        if (w < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            return;
-        }
-        s += w;
-        n -= (size_t)w;
-    }
+    lu_write_signal_safe(fd, s, n);
 }
 
 static void
@@ -482,7 +472,10 @@ prim_fh_dump(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "fh_dump(fd, all_threads)");
         return NULL;
     }
-    dump_threads((int)fd, PyThreadState_Get(), args[1] == Py_True);
+    PyThreadState *ts = PyThreadState_Get();
+    PyThreadState *detached = lu_syscall_begin();      /* the writes may block */
+    dump_threads((int)fd, ts, args[1] == Py_True);
+    lu_syscall_end(detached);
     return Py_NewRef(Py_None);
 }
 
@@ -494,13 +487,17 @@ prim_fh_dump_c_stack(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "fh_dump_c_stack(fd)");
         return NULL;
     }
+    PyThreadState *detached = lu_syscall_begin();
     dump_c_stack((int)fd);
+    lu_syscall_end(detached);
     return Py_NewRef(Py_None);
 }
 
-/* dump_traceback_later: one watchdog thread, waiting on a condition. */
+/* dump_traceback_later: one watchdog thread, waiting on a condition. The
+   tasks that arm and cancel it take `control` in turn, which parks them. */
 
 static struct {
+    PyMutex control;
     pthread_t thread;
     int running;
     pthread_mutex_t lock;
@@ -514,6 +511,9 @@ static struct {
 static void *
 watchdog(void *arg)
 {
+    sigset_t all;
+    sigfillset(&all);
+    pthread_sigmask(SIG_SETMASK, &all, NULL);   /* the signals go to the program's threads */
     pthread_mutex_lock(&later.lock);
     while (!later.cancel) {
         struct timespec deadline;
@@ -526,7 +526,7 @@ watchdog(void *arg)
         }
         int err = 0;
         while (!later.cancel && err != ETIMEDOUT) {
-            err = pthread_cond_timedwait(&later.cond, &later.lock, &deadline);
+            err = lu_cond_timedwait(&later.cond, &later.lock, &deadline);
         }
         if (later.cancel) {
             break;
@@ -554,7 +554,7 @@ stop_watchdog(void)
     later.cancel = 1;
     pthread_cond_signal(&later.cond);
     pthread_mutex_unlock(&later.lock);
-    pthread_join(later.thread, NULL);
+    lu_join_thread(later.thread);
     later.running = 0;
 }
 
@@ -568,6 +568,7 @@ prim_fh_dump_later(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "fh_dump_later(timeout_us, repeat, fd, exit, header)");
         return NULL;
     }
+    PyMutex_Lock(&later.control);
     stop_watchdog();
     pthread_condattr_t attr;
     pthread_condattr_init(&attr);
@@ -580,18 +581,22 @@ prim_fh_dump_later(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     later.fd = (int)fd;
     later.exit_process = args[3] == Py_True;
     snprintf(later.header, sizeof later.header, "%s", PyUnicode_AsUTF8(args[4]));
-    if (pthread_create(&later.thread, NULL, watchdog, NULL) != 0) {
+    int err = pthread_create(&later.thread, NULL, watchdog, NULL);
+    later.running = err == 0;
+    PyMutex_Unlock(&later.control);
+    if (err != 0) {
         lu_err_format(PyExc_RuntimeError, "unable to start watchdog thread");
         return NULL;
     }
-    later.running = 1;
     return Py_NewRef(Py_None);
 }
 
 static PyObject *
 prim_fh_cancel_later(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
+    PyMutex_Lock(&later.control);
     stop_watchdog();
+    PyMutex_Unlock(&later.control);
     return Py_NewRef(Py_None);
 }
 
@@ -603,25 +608,40 @@ static struct user_signal {
     struct sigaction previous;
 } user_signals[NSIG];
 
+static int install_user(int signum, int chain, struct sigaction *previous);
+
+/* Dumps, then with chain runs the previous action whatever it is (SIG_DFL
+   included) by restoring it and raising the signal again, which SA_NODEFER
+   delivers at once, then reinstalls itself (faulthandler_user). */
 static void
 user_handler(int signum, siginfo_t *info, void *context)
 {
     int saved_errno = errno;
     struct user_signal *u = &user_signals[signum];
+    if (!u->registered) {
+        return;
+    }
     PyThreadState *ts = PyThreadState_GetUnchecked();
     dump_threads(u->fd, ts != NULL ? ts : u->ts, u->all_threads);
     if (u->chain) {
-        if (u->previous.sa_flags & SA_SIGINFO) {
-            if (u->previous.sa_sigaction != NULL) {
-                u->previous.sa_sigaction(signum, info, context);
-            }
-        }
-        else if (u->previous.sa_handler != SIG_DFL && u->previous.sa_handler != SIG_IGN
-                 && u->previous.sa_handler != NULL) {
-            u->previous.sa_handler(signum);
-        }
+        sigaction(signum, &u->previous, NULL);
+        errno = saved_errno;
+        raise(signum);
+        saved_errno = errno;
+        install_user(signum, 1, NULL);
     }
     errno = saved_errno;
+}
+
+static int
+install_user(int signum, int chain, struct sigaction *previous)
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = user_handler;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK | (chain ? SA_NODEFER : 0);
+    sigemptyset(&sa.sa_mask);
+    return sigaction(signum, &sa, previous);
 }
 
 /* fh_register(signum, fd, all_threads, chain): 1, or 0 when the signal is not valid here. */
@@ -643,12 +663,7 @@ prim_fh_register(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     u->ts = PyThreadState_Get();
     if (!u->registered) {
         install_altstack();
-        struct sigaction sa;
-        memset(&sa, 0, sizeof sa);
-        sa.sa_sigaction = user_handler;
-        sa.sa_flags = SA_SIGINFO | SA_ONSTACK | (u->chain ? 0 : SA_NODEFER);
-        sigemptyset(&sa.sa_mask);
-        if (sigaction((int)signum, &sa, &u->previous) < 0) {
+        if (install_user((int)signum, u->chain, &u->previous) < 0) {
             return Py_NewRef(Py_False);
         }
         u->registered = 1;
@@ -733,7 +748,7 @@ prim_fh_fatal_error_c_thread(PyObject *m, PyObject *const *args, Py_ssize_t narg
         lu_err_format(PyExc_RuntimeError, "unable to create the thread");
         return NULL;
     }
-    pthread_join(thread, NULL);
+    lu_join_thread(thread);
     return Py_NewRef(Py_None);
 }
 

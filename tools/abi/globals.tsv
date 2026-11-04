@@ -124,7 +124,7 @@ fatal	runtime/prim/faulthandler.c	the fatal-signal handler's configuration and t
 fatal_signals	runtime/prim/faulthandler.c	const table of the fatal signals and their names; relocated by ld.so, then read-only (RELRO)
 fh_threads	runtime/prim/faulthandler.c	the list of threads a dump of all threads covers, under fh_threads_lock
 fh_threads_lock	runtime/prim/faulthandler.c	the lock of fh_threads
-later	runtime/prim/faulthandler.c	the dump_traceback_later watchdog, one per process as in CPython, under its own lock
+later	runtime/prim/faulthandler.c	the dump_traceback_later watchdog, one per process as in CPython, under its own lock; tasks arm and cancel it under its control mutex
 user_signals	runtime/prim/faulthandler.c	faulthandler.register's per-signal state; signal dispositions are process-wide
 sink	runtime/prim/faulthandler.c	defeats optimizing away the stack overflow test's recursion
 lu_prim_faulthandler_methods	runtime/prim/faulthandler.c	_lucifer's faulthandler primitives, a PyMethodDef table never written; the API takes it non-const

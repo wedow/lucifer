@@ -117,6 +117,9 @@ int lu_futex_wait(uint32_t *word, uint32_t expected, PyTime_t deadline);
 void lu_futex_wake(uint32_t *word);
 /* Waits for a thread to exit, detached (runtime/prim/os.c). */
 void lu_join_thread(pthread_t thread);
+/* The fault handler's write(2), safe in a signal handler, and its watchdog's wait (runtime/prim/os.c). */
+void lu_write_signal_safe(int fd, const char *s, size_t n);
+int lu_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *deadline);
 
 /* Biased reference counting (runtime/object/brc.c). A thread that owns
    objects has an owner record in each interpreter; the interpreter's buckets
