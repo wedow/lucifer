@@ -2286,7 +2286,7 @@ op_STORE_ATTR_FAST: {
     }
     else {
         SAVE_FRAME();
-        err = lu_ns_insert(dict, NAME(oparg), v);
+        err = lu_ns_store(dict, NAME(oparg), v);
         Py_DECREF(v);
     }
     Py_DECREF(owner);

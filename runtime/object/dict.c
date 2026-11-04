@@ -798,6 +798,16 @@ lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value)
 }
 
 int
+lu_ns_store(PyObject *dict, PyObject *key, PyObject *value)
+{
+    int err;
+    Py_BEGIN_CRITICAL_SECTION(dict);
+    err = lu_ns_insert(dict, key, value);
+    Py_END_CRITICAL_SECTION();
+    return err;
+}
+
+int
 lu_ns_delete(PyObject *dict, PyObject *key)
 {
     Py_ssize_t ix = ns_find(dict, key);

@@ -1,6 +1,7 @@
 """Lock-free reads of shared containers while another thread mutates them:
 dict lookups whose entry a deletion clears or a resize moves, and `in` on a
-list whose array a resize replaces."""
+list whose array a resize replaces; attribute stores into a shared instance
+dict, and the first ones, which make it."""
 import threading
 
 
@@ -64,3 +65,45 @@ def read_list():
 
 
 print('list', race(churn_list, read_list))
+
+
+# Threads store and remove attributes of one object, and store distinct
+# names on a fresh object at once, which makes its dict: none is lost.
+class Plain:
+    pass
+
+
+shared = Plain()
+
+
+def churn_attrs(k):
+    for _ in range(100):
+        for i in range(20):
+            name = 'n%d_%d' % (k, i)
+            setattr(shared, name, i)
+            delattr(shared, name)
+
+
+def fresh_attrs(o, bar, k):
+    bar.wait()
+    for i in range(8):
+        setattr(o, 'a%d_%d' % (k, i), i)
+        o.__dict__
+
+
+ts = [threading.Thread(target=churn_attrs, args=(k,)) for k in range(4)]
+for t in ts:
+    t.start()
+for t in ts:
+    t.join()
+lost = 0
+for _ in range(50):
+    o = Plain()
+    bar = threading.Barrier(4)
+    ts = [threading.Thread(target=fresh_attrs, args=(o, bar, k)) for k in range(4)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    lost += 32 - len(o.__dict__)
+print('attrs', len(shared.__dict__), lost)
