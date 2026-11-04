@@ -54,6 +54,7 @@ class HarnessChecks(unittest.TestCase):
             "pathlib.Path(__file__+'.started').touch()\n"
             "mode=pathlib.Path(__file__+'.mode').read_text()\n"
             "if mode=='pass':assert os.environ['NUMPYTEST_SITE'] not in os.environ['PYTHONPATH'].split(os.pathsep)\n"
+            "if mode=='pass':assert not os.environ['PYTHONPYCACHEPREFIX'].startswith(os.environ['NUMPYTEST_SITE'])\n"
             "if mode=='fail':sys.exit(42)\n"
             "if mode=='badprobe':print('[]');sys.exit()\n"
             "if mode=='wrongsite':print(json.dumps(dict(numpy='1.0',numpy_file='/different/numpy/__init__.py')));sys.exit()\n"
@@ -68,6 +69,13 @@ class HarnessChecks(unittest.TestCase):
             " pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[1])\n"
             " pathlib.Path(os.environ['NUMPYTEST_REPORTS']).write_text(json.dumps(dict(id=ids[0],when='call',outcome='passed',seconds=0.125,wasxfail=False))+'\\n')\n"
             " import signal;os.kill(os.getpid(),signal.SIGKILL)\n"
+            "if mode=='resume':\n"
+            " skip=pathlib.Path(os.environ['NUMPYTEST_SKIP'])\n"
+            " done=skip.read_text().split() if skip.exists() else []\n"
+            " if not done:\n"
+            "  pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[0])\n"
+            "  import signal;os.kill(os.getpid(),signal.SIGSEGV)\n"
+            " ids=[i for i in ids if i not in done]\n"
             "if mode=='timeout':\n"
             " pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[0]);time.sleep(10)\n"
             "import base64,xml.etree.ElementTree as E\n"
@@ -168,6 +176,11 @@ class HarnessChecks(unittest.TestCase):
         self.mode("crash")
         self.assertNotEqual(self.invoke().returncode, 0)
         self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "CRASH"])))
+
+    def test_crash_restarts_without_the_crashed_test(self):
+        self.mode("resume")
+        self.assertEqual(self.invoke().returncode, 1)
+        self.assertEqual(self.rows(), dict(zip(self.ids, ["CRASH", "PASS"])))
 
     def test_shell_wrapper_crash_exit_is_crash(self):
         wrapper = self.root / "wrapper"

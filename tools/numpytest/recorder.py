@@ -29,6 +29,8 @@ def pytest_collection_modifyitems(config, items):
     selected = []
     deselected = []
     shards = json.loads(os.environ.get("NUMPYTEST_SHARDS", '[""]'))
+    skip = Path(os.environ["NUMPYTEST_SKIP"]) if "NUMPYTEST_SKIP" in os.environ else None
+    done = set(skip.read_text().splitlines()) if skip and skip.exists() else set()
     for item in items:
         ident = nodeid(item)
         if not any((ident == shard or ident.startswith(shard + "::") or ident.startswith(shard + "["))
@@ -38,11 +40,13 @@ def pytest_collection_modifyitems(config, items):
             continue
         item.user_properties.append(("nodeid64", base64.b64encode(ident.encode()).decode()))
         selected.append(item)
-    items[:] = selected
-    config.hook.pytest_deselected(items=deselected)
+    # The collection record is the whole selection; a restart runs only the rest.
     Path(os.environ["NUMPYTEST_COLLECTION"]).write_text(
-        json.dumps(sorted(nodeid(item) for item in items)) + "\n"
+        json.dumps(sorted(nodeid(item) for item in selected)) + "\n"
     )
+    deselected += [item for item in selected if nodeid(item) in done]
+    items[:] = [item for item in selected if nodeid(item) not in done]
+    config.hook.pytest_deselected(items=deselected)
 
 
 @pytest.hookimpl(hookwrapper=True)
