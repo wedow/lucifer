@@ -20,6 +20,8 @@ extern PyMethodDef lu_prim_float_methods[];     /* runtime/prim/float.c */
 extern PyMethodDef lu_prim_complex_methods[];   /* runtime/prim/complex.c */
 extern PyMethodDef lu_prim_math_methods[];      /* runtime/prim/math.c */
 extern PyMethodDef lu_prim_calendar_methods[];  /* runtime/prim/calendar.c */
+extern PyMethodDef lu_prim_mt_methods[];        /* runtime/prim/mt.c */
+extern PyMethodDef lu_prim_faulthandler_methods[];  /* runtime/prim/faulthandler.c */
 extern PyMethodDef lu_prim_ucd_methods[];       /* runtime/prim/ucd.c */
 extern PyMethodDef lu_sys_int_methods[];        /* sys's int functions, runtime/prim/int.c */
 extern PyMethodDef lu_prim_exc_methods[];       /* runtime/interp/exceptions.c */

@@ -161,6 +161,5 @@ PyErr_ExceptionMatches(PyObject *exc)
 void
 _Py_FatalErrorFunc(const char *func, const char *msg)
 {
-    fprintf(stderr, "Fatal Python error: %s: %s\n", func, msg);
-    abort();
+    lu_fh_fatal(func, msg);
 }

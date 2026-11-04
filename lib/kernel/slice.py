@@ -32,6 +32,9 @@ def slice_index_not_none(x):
     error(TypeError, 'slice indices must be integers or have an __index__ method')
 
 
+_SSIZE_MAX = 0x7fffffffffffffff
+
+
 def slice_bounds(slc, length):
     """PySlice_Unpack and PySlice_AdjustIndices: (start, step, count) of slc
     over a sequence of the given length. Ints are unbounded, so a bound
@@ -43,6 +46,10 @@ def slice_bounds(slc, length):
         step = slice_index(step)
         if step == 0:
             error(ValueError, 'slice step cannot be zero')
+        if step > _SSIZE_MAX:
+            step = _SSIZE_MAX
+        elif step < -_SSIZE_MAX:
+            step = -_SSIZE_MAX
     start = slice_get(slc, 0)
     stop = slice_get(slc, 1)
     if start is None:

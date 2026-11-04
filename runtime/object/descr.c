@@ -293,13 +293,31 @@ descr_new(PyTypeObject *descrtype, PyTypeObject *type, const char *name)
     return d;
 }
 
+/* A native method descriptor called unbound: the method over args[0], bound. */
+static PyObject *
+native_method_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames)
+{
+    PyMethodDescrObject *d = (PyMethodDescrObject *)callable;
+    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    if (check_self((PyDescrObject *)d, args, nargs, 0) < 0) {
+        return NULL;
+    }
+    PyObject *bound = PyCFunction_NewEx(d->d_method, args[0], NULL);
+    if (bound == NULL) {
+        return NULL;
+    }
+    PyObject *result = lu_call(bound, args + 1, (size_t)(nargs - 1), kwnames);
+    Py_DECREF(bound);
+    return result;
+}
+
 PyObject *
 lu_descr_new_method(PyTypeObject *type, PyMethodDef *ml)
 {
     PyMethodDescrObject *d = (PyMethodDescrObject *)descr_new(&PyMethodDescr_Type, type, ml->ml_name);
     if (d != NULL) {
         d->d_method = ml;
-        d->vectorcall = lu_kernel_def_of(ml) != NULL ? kernel_method_vectorcall : NULL;
+        d->vectorcall = lu_kernel_def_of(ml) != NULL ? kernel_method_vectorcall : native_method_vectorcall;
     }
     return (PyObject *)d;
 }
@@ -307,10 +325,6 @@ lu_descr_new_method(PyTypeObject *type, PyMethodDef *ml)
 PyObject *
 PyDescr_NewMethod(PyTypeObject *type, PyMethodDef *ml)
 {
-    if (lu_kernel_def_of(ml) == NULL) {
-        lu_err_format(PyExc_SystemError, "PyDescr_NewMethod: native methods arrive with M0.2");
-        return NULL;
-    }
     return lu_descr_new_method(type, ml);
 }
 

@@ -116,7 +116,7 @@ The argument must be an iterable if specified."""
         return list_alloc(cls)
 
     def __init__(self, *args, **kwargs):
-        if kwargs:
+        if kwargs and (type(self) is list or type_lookup(type(self), '__new__') is type_lookup(list, '__new__')):
             error(TypeError, 'list() takes no keyword arguments')
         n = size(args)
         if n > 1:
@@ -241,7 +241,7 @@ The argument must be an iterable if specified."""
 
     def extend(self, iterable, /):
         """Extend list by appending elements from the iterable."""
-        if kind(iterable, 'list') or kind(iterable, 'tuple'):
+        if type(iterable) is list or type(iterable) is tuple:
             list_splice(self, size(self), size(self), iterable)
             return
         _iter.extend(self, iterable)

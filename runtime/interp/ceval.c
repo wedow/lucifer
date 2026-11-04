@@ -47,6 +47,7 @@
 #define INTRINSIC_LIST_TO_TUPLE 6
 #define INTRINSIC_IMPORT_STAR 2
 #define INTRINSIC_STOPITERATION_ERROR 3
+#define INTRINSIC_PRINT 1
 #define INTRINSIC_ASYNC_GEN_WRAP 4
 #define INTRINSIC_TYPEVAR 7             /* the PEP 695 intrinsics, run by the kernel */
 #define INTRINSIC_TYPEALIAS 11
@@ -145,6 +146,11 @@ static void
 name_error(PyObject *name)
 {
     lu_err_format(PyExc_NameError, NAME_ERROR_MSG, PyUnicode_AsUTF8(name));
+    PyObject *exc = PyErr_GetRaisedException();
+    if (exc != NULL && PyObject_SetAttrString(exc, "name", name) < 0) {
+        PyErr_Clear();
+    }
+    PyErr_SetRaisedException(exc);
 }
 
 /* LOAD_NAME and LOAD_GLOBAL over namespace dicts, a new reference; mappings
@@ -171,6 +177,19 @@ locals_get(PyObject *ns, PyObject *name)
     PyObject *v = lu_call_kernel(LU_K_getitem, args, 2);
     if (v == NULL && PyErr_ExceptionMatches(PyExc_KeyError)) {
         PyErr_Clear();
+    }
+    return v;
+}
+
+/* LOAD_GLOBAL's lookup: the globals, then the builtins, either of which may be
+   a dict subclass or other mapping (annotationlib runs __annotate__ over one).
+   A new reference, or NULL without an error for a miss. */
+static PyObject *
+global_get(struct lu_frame *frame, PyObject *name)
+{
+    PyObject *v = locals_get(frame->globals, name);
+    if (v == NULL && !PyErr_Occurred()) {
+        v = locals_get(frame->builtins, name);
     }
     return v;
 }
@@ -916,11 +935,8 @@ op_LOAD_NAME: {
         goto error;
     }
     v = locals_get(frame->locals, name);
-    if (v == NULL && !PyErr_Occurred()) {
-        if ((v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
-            && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
-            name_error(name);
-        }
+    if (v == NULL && !PyErr_Occurred() && (v = global_get(frame, name)) == NULL && !PyErr_Occurred()) {
+        name_error(name);
     }
     ERROR_IF(v == NULL);
     PUSH(v);
@@ -971,8 +987,7 @@ op_LOAD_GLOBAL: {
     PyObject *name = NAME(oparg >> 1), *v;
     ADAPT(lu_specialize_load_global(frame->globals, frame->builtins, next_instr - 1, name));
     SKIP_CACHES();
-    if ((v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
-        && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
+    if ((v = global_get(frame, name)) == NULL && !PyErr_Occurred()) {
         name_error(name);
     }
     ERROR_IF(v == NULL);
@@ -2055,6 +2070,22 @@ op_CALL_INTRINSIC_1: {
         kret = LU_RETURN_PUSH;
         goto kernel_call;
     }
+    if (oparg == INTRINSIC_PRINT) {
+        /* the value of an expression statement in interactive code: sys.displayhook(value) */
+        PyObject *value = POP();
+        PyObject *sys = lu_ns_lookup(ts->interp->modules, PyUnicode_InternFromString("sys"));
+        PyObject *hook = sys != NULL ? PyObject_GetAttrString(sys, "displayhook") : NULL;
+        if (hook == NULL && (!PyErr_Occurred() || PyErr_ExceptionMatches(PyExc_AttributeError))) {
+            PyErr_Clear();
+            lu_err_format(PyExc_RuntimeError, "lost sys.displayhook");
+        }
+        PyObject *r = hook != NULL ? lu_call(hook, &value, 1, NULL) : NULL;
+        Py_XDECREF(hook);
+        Py_DECREF(value);
+        ERROR_IF(r == NULL);
+        PUSH(r);
+        DISPATCH();
+    }
     if (oparg == INTRINSIC_ASYNC_GEN_WRAP) {
         PyObject *w = lu_async_gen_wrap(TOP());
         ERROR_IF(w == NULL);
@@ -2501,11 +2532,8 @@ op_LOAD_FROM_DICT_OR_GLOBALS: {
     SAVE_FRAME();
     PyObject *v;
     v = locals_get(dict, name);
-    if (v == NULL && !PyErr_Occurred()) {
-        if ((v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
-            && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
-            name_error(name);
-        }
+    if (v == NULL && !PyErr_Occurred() && (v = global_get(frame, name)) == NULL && !PyErr_Occurred()) {
+        name_error(name);
     }
     Py_DECREF(dict);
     ERROR_IF(v == NULL);
@@ -3245,6 +3273,11 @@ exception_unwind: {
             }
         }
         DISPATCH();
+    }
+    /* The frame ends at the instruction that last raised in it: a RERAISE out of
+       a cleanup handler restores that (f_lasti, f_lineno of a dead frame). */
+    if (lasti != offset) {
+        next_instr = lu_code_start(code) + lasti + 1;
     }
     SAVE_FRAME();
     if (reraise_at != NULL) {

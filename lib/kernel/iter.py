@@ -23,6 +23,28 @@ def _name(x):
     return type_tp_name(type(x))
 
 
+def seqiter_reduce(self, empty, builtin_iter):
+    """__reduce__ of an iterator over a sequence: iter(seq) and the index; an
+    exhausted one rebuilds as an iterator over `empty`. The caller passes the
+    builtin iter, which this module's own iter shadows."""
+    seq, i = iter_state(self)
+    if seq is None:
+        return (builtin_iter, (empty,))
+    return (builtin_iter, (seq,), i)
+
+
+def seqiter_setstate(self, state):
+    """__setstate__ of an iterator over a sequence: the index, clipped to the sequence."""
+    seq, i = iter_state(self)
+    if seq is not None:
+        i = index(state)
+        if i < 0:
+            i = 0
+        elif i > operators.length(seq):
+            i = operators.length(seq)
+        iter_set(self, seq, i)
+
+
 def _has_sequence_protocol(obj):
     """PySequence_Check: __getitem__ on a type that is not a mapping."""
     return type_lookup(type(obj), '__getitem__') is not MISSING and not kind(obj, 'dict')

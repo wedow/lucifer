@@ -130,12 +130,33 @@ PyModule_GetDef(PyObject *m)
     return ((PyModuleObject *)m)->md_def;
 }
 
+/* Single-phase initialization: the module is made, filled and returned by PyInit_<name>. */
 PyObject *
 PyModule_Create2(PyModuleDef *def, int apiver)
 {
-    PyErr_Format(PyExc_ImportError, "module %s uses single-phase initialization, which this runtime "
-                 "does not load yet", def->m_name);
-    return NULL;
+    PyModuleDef_Init(def);
+    PyObject *name = PyUnicode_FromString(def->m_name);
+    PyObject *m = name != NULL ? PyModule_NewObject(name) : NULL;
+    Py_XDECREF(name);
+    if (m == NULL) {
+        return NULL;
+    }
+    PyModuleObject *mo = (PyModuleObject *)m;
+    mo->md_def = def;
+    mo->md_gil = Py_MOD_GIL_USED;
+    if (def->m_size > 0) {
+        mo->md_state = PyMem_Calloc(1, def->m_size);
+        if (mo->md_state == NULL) {
+            Py_DECREF(m);
+            return PyErr_NoMemory();
+        }
+    }
+    if ((def->m_methods != NULL && PyModule_AddFunctions(m, def->m_methods) < 0)
+        || (def->m_doc != NULL && PyModule_SetDocString(m, def->m_doc) < 0)) {
+        Py_DECREF(m);
+        return NULL;
+    }
+    return m;
 }
 
 /* Python/getargs-free helpers for what an exec function adds to its module. */
@@ -336,5 +357,16 @@ PyModule_ExecDef(PyObject *m, PyModuleDef *def)
             return -1;
         }
     }
+    return 0;
+}
+
+int
+PyUnstable_Module_SetGIL(PyObject *module, void *gil)
+{
+    if (!PyModule_Check(module)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    ((PyModuleObject *)module)->md_gil = gil;
     return 0;
 }
