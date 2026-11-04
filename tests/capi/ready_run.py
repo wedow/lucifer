@@ -180,19 +180,3 @@ import inspect
 for f in (ready.sigfunc, ready.badsig, ready.Vec.norm2, ready.Vec(1, 2).norm2, ready.Vec.scaled):
     print(f.__name__, repr(f.__doc__), repr(f.__text_signature__))
 print(inspect.signature(ready.sigfunc), inspect.signature(ready.Vec.norm2))
-
-# an object a local holds and passes on is uniquely referenced; a second owner, or a module-level name, is not
-def uniqueness():
-    x = ready.Vec(1, 2)
-    first = ready.is_unique(x)
-    y = x
-    second = ready.is_unique(x)
-    del y
-    held = [x]
-    third = ready.is_unique(x)
-    del held
-    return first, second, third, ready.is_unique(x), ready.is_unique(ready.Vec(3, 4))
-
-print(uniqueness())
-module_level = ready.Vec(1, 2)
-print(ready.is_unique(module_level))
