@@ -430,6 +430,8 @@ def run(args):
     for ident, how in crashed.items():
         if ident in selected and ident not in outcomes:
             rows[ident] = ("TIMEOUT" if how == "TIMEOUT" else "CRASH", 0.0)
+    # Every process that died stays on record, even one whose tests had all reported.
+    metadata["crashed"] = crashed
     if (work / "state.json").exists():
         metadata["finish"] = json.loads((work / "state.json").read_text())
     if args.parallel and args.runtime != args.oracle_runtime:
@@ -461,7 +463,7 @@ def run(args):
     if args.abi == "cp314t" and finish.get("gil_enabled") is not False:
         return 1
     failed = any(rows[i][0] in {"FAIL", "ERROR", "XPASS", "TIMEOUT", "CRASH"} for i in selected)
-    return int(code != 0 or failed or bool(metadata["unexpected"]) or bool(metadata["not_collected"])
+    return int(code != 0 or failed or bool(crashed) or bool(metadata["unexpected"]) or bool(metadata["not_collected"])
                or metadata.get("artifact_changed", False) or metadata.get("invalid_junit", False))
 
 

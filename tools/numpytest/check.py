@@ -80,6 +80,10 @@ class HarnessChecks(unittest.TestCase):
             " pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[1])\n"
             " pathlib.Path(os.environ['NUMPYTEST_REPORTS']).write_text(json.dumps(dict(id=ids[0],when='call',outcome='failed',seconds=0.5,wasxfail=False,reason='boom in /tmp/x.py'))+'\\n')\n"
             " import signal;os.kill(os.getpid(),signal.SIGKILL)\n"
+            "if mode=='shutdowncrash' and not os.path.exists(os.environ['NUMPYTEST_SKIP']):\n"
+            " import atexit,signal;atexit.register(lambda:os.kill(os.getpid(),signal.SIGSEGV))\n"
+            " pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[1])\n"
+            "if mode=='shutdowncrash' and os.path.exists(os.environ['NUMPYTEST_SKIP']):ids=[]\n"
             "if mode=='timeout':\n"
             " pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[0]);time.sleep(10)\n"
             "import base64,xml.etree.ElementTree as E\n"
@@ -194,6 +198,12 @@ class HarnessChecks(unittest.TestCase):
         self.mode("resume")
         self.assertEqual(self.invoke().returncode, 1)
         self.assertEqual(self.rows(), dict(zip(self.ids, ["CRASH", "PASS"])))
+
+    def test_crash_after_the_last_test_stays_on_record(self):
+        self.mode("shutdowncrash")
+        self.assertEqual(self.invoke().returncode, 1)
+        self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "XFAIL"])))
+        self.assertEqual(json.loads((self.expected.parent / "fake.json").read_text())["crashed"], {self.ids[1]: -11})
 
     def test_paths_never_reach_public_reasons(self):
         scrub = runpy.run_path(str(self.tool / "run.py"))["scrub"]
