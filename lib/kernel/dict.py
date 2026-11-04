@@ -376,6 +376,24 @@ def equal(a, b):
     return True
 
 
+def _get(self, key, default=None, /):
+    """Return the value for key if key is in the dictionary, else default."""
+    value = dict_find(self, key)
+    if value is NotImplemented:
+        value = find_value(self, key, key_hash(key))
+    return default if value is MISSING else value
+
+
+def _items(self):
+    """Return a set-like object providing a view on the dict's items."""
+    return dictview_new(static_type('dict_items'), self)
+
+
+# Registered for the call instruction, which compares them: named as the methods.
+_get.__qualname__ = 'dict.get'
+_items.__qualname__ = 'dict.items'
+
+
 @kernel_type(static_type('dict'))
 class dict:
     """dict() -> new empty dictionary
@@ -389,7 +407,8 @@ dict(**kwargs) -> new dictionary initialized with the name=value pairs
     in the keyword argument list.  For example:  dict(one=1, two=2)"""
 
     def __new__(cls, /, *args, **kwargs):
-        _boot.check_new(cls, dict)
+        if cls is not dict:
+            _boot.check_new(cls, dict)
         return dict_new(cls)
 
     def __init__(self, /, *args, **kwargs):
@@ -479,12 +498,7 @@ dict(**kwargs) -> new dictionary initialized with the name=value pairs
         update_arg(self, other)
         return self
 
-    def get(self, key, default=None, /):
-        """Return the value for key if key is in the dictionary, else default."""
-        value = dict_find(self, key)
-        if value is NotImplemented:
-            value = find_value(self, key, key_hash(key))
-        return default if value is MISSING else value
+    get = _get
 
     def setdefault(self, key, default=None, /):
         """Insert key with a value of default if key is not in the dictionary.
@@ -520,9 +534,7 @@ Raises KeyError if the dict is empty."""
         """Return a set-like object providing a view on the dict's keys."""
         return dictview_new(static_type('dict_keys'), self)
 
-    def items(self):
-        """Return a set-like object providing a view on the dict's items."""
-        return dictview_new(static_type('dict_items'), self)
+    items = _items
 
     def values(self):
         """Return an object providing a view on the dict's values."""
@@ -903,7 +915,8 @@ class dict_values:
 
 
 kernel_set('build_map', build_map)
-kernel_set('dict_get', type_lookup(dict, 'get'))
+kernel_set('dict_get', _get)
+kernel_set('dict_items', _items)
 kernel_set('dict_setitem', setitem)
 kernel_set('dict_delitem', delitem)
 kernel_set('dict_update', update_op)

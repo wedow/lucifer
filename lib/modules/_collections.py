@@ -3,7 +3,7 @@ defaultdict, _count_elements and _tuplegetter. OrderedDict stays the
 pure-Python fallback of collections."""
 
 import sys
-from _lucifer import repr_enter, repr_leave, kind, size, seq_get
+from _lucifer import repr_enter, repr_leave, kind, size, seq_get, kernel_set
 from _types import GenericAlias
 
 __all__ = ('deque', 'defaultdict', '_deque_iterator', '_deque_reverse_iterator',
@@ -506,3 +506,4 @@ class _tuplegetter:
 
 
 _tuplegetter.__module__ = 'collections'
+kernel_set('tuplegetter', _tuplegetter)

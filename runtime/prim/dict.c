@@ -327,6 +327,37 @@ is_reverse(PyTypeObject *tp)
         || tp == &PyDictRevIterItem_Type;
 }
 
+static PyObject *
+dictiter_make(PyTypeObject *tp, PyObject *dict)
+{
+    dictiterobject *di = (dictiterobject *)lu_object_new(tp, sizeof(dictiterobject));
+    if (di == NULL) {
+        return NULL;
+    }
+    PyDictObject *d = (PyDictObject *)dict;
+    di->di_dict = (PyDictObject *)Py_NewRef(d);
+    di->di_used = di->len = d->ma_used;
+    di->di_pos = is_reverse(tp) ? d->ma_keys->dk_nentries - 1 : 0;
+    return (PyObject *)di;
+}
+
+/* The iterator of an exact dict or dict view, as GET_ITER makes it; NULL
+   without an error for any other object. */
+PyObject *
+lu_dict_iter(PyObject *obj)
+{
+    PyTypeObject *tp = Py_TYPE(obj);
+    if (tp == &PyDict_Type) {
+        return dictiter_make(&PyDictIterKey_Type, obj);
+    }
+    if (tp != &PyDictKeys_Type && tp != &PyDictValues_Type && tp != &PyDictItems_Type) {
+        return NULL;
+    }
+    return dictiter_make(tp == &PyDictKeys_Type ? &PyDictIterKey_Type
+                         : tp == &PyDictValues_Type ? &PyDictIterValue_Type : &PyDictIterItem_Type,
+                         (PyObject *)((dictviewobject *)obj)->dv_dict);
+}
+
 /* dictiter_new(type, d): an iterator of the given dict_*iterator type. */
 static PyObject *
 prim_dictiter_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -338,15 +369,7 @@ prim_dictiter_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "dictiter_new() needs a dict iterator type");
         return NULL;
     }
-    dictiterobject *di = (dictiterobject *)lu_object_new(tp, sizeof(dictiterobject));
-    if (di == NULL) {
-        return NULL;
-    }
-    PyDictObject *d = (PyDictObject *)args[1];
-    di->di_dict = (PyDictObject *)Py_NewRef(d);
-    di->di_used = di->len = d->ma_used;
-    di->di_pos = is_reverse(tp) ? d->ma_keys->dk_nentries - 1 : 0;
-    return (PyObject *)di;
+    return dictiter_make(tp, args[1]);
 }
 
 /* dictiter_next(it): the next key, value or (key, value) pair, MISSING when
@@ -435,6 +458,16 @@ prim_dictiter_copy(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return (PyObject *)copy;
 }
 
+PyObject *
+lu_dict_view(PyObject *dict, PyTypeObject *tp)
+{
+    dictviewobject *dv = (dictviewobject *)lu_object_new(tp, sizeof(dictviewobject));
+    if (dv != NULL) {
+        dv->dv_dict = (PyDictObject *)Py_NewRef(dict);
+    }
+    return (PyObject *)dv;
+}
+
 /* dictview_new(type, d), dictview_dict(view). */
 static PyObject *
 prim_dictview_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -445,11 +478,7 @@ prim_dictview_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "dictview_new() needs a dict view type");
         return NULL;
     }
-    dictviewobject *dv = (dictviewobject *)lu_object_new(tp, sizeof(dictviewobject));
-    if (dv != NULL) {
-        dv->dv_dict = (PyDictObject *)Py_NewRef(args[1]);
-    }
-    return (PyObject *)dv;
+    return lu_dict_view(args[1], tp);
 }
 
 static PyObject *
