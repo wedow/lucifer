@@ -286,10 +286,8 @@ OPCODE_EXEMPT = {
 
 
 def opcode_table():
-    spec = importlib.util.spec_from_file_location("opcodes", ROOT / "lib" / "compiler" / "opcodes.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    import opcode
+    return opcode
 
 
 def corpus_opcodes():
