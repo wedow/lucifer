@@ -680,6 +680,14 @@ lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from)
     return 0;
 }
 
+/* Whether f is a tp_new that runs a kernel __new__ (a class's or builtin's), which a
+   wrapper in the type's dict must not call back. */
+int
+lu_tp_new_is_thunk(newfunc f)
+{
+    return f == (newfunc)slot_tp_new || f == (newfunc)slot_tp_new_builtin;
+}
+
 Py_hash_t
 PyObject_HashNotImplemented(PyObject *self)
 {

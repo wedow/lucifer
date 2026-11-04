@@ -370,6 +370,31 @@ static PyTypeObject FloatSub_Type = {
     .tp_new = floatsub_new,
 };
 
+/* A metatype that cannot be called, and a class made with it (Cython's common types). */
+static PyObject *
+make_meta_class(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    PyType_Slot meta_slots[] = { { Py_tp_base, &PyType_Type }, { 0, NULL } };
+    PyType_Spec meta_spec = { "ready.Meta", 0, 0,
+                              Py_TPFLAGS_DEFAULT | Py_TPFLAGS_IMMUTABLETYPE | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+                              meta_slots };
+    PyObject *meta = PyType_FromSpec(&meta_spec);
+    if (meta == NULL) {
+        return NULL;
+    }
+    PyType_Slot slots[] = { { 0, NULL } };
+    PyType_Spec spec = { "ready.Made", sizeof(PyObject), 0, Py_TPFLAGS_DEFAULT, slots };
+    PyObject *cls = PyType_FromMetaclass((PyTypeObject *)meta, NULL, &spec, NULL);
+    if (cls == NULL) {
+        Py_DECREF(meta);
+        return NULL;
+    }
+    PyObject *r = Py_BuildValue("(OO)", meta, cls);
+    Py_DECREF(meta);
+    Py_DECREF(cls);
+    return r;
+}
+
 /* Capsules. */
 
 static int destroyed;
@@ -727,6 +752,7 @@ objects(PyObject *self, PyObject *arg)
 }
 
 static PyMethodDef module_methods[] = {
+    { "make_meta_class", make_meta_class, METH_NOARGS, NULL },
     { "capsule_roundtrip", capsule_roundtrip, METH_NOARGS, NULL },
     { "capsule_import", capsule_import, METH_O, NULL },
     { "imports", imports, METH_NOARGS, NULL },

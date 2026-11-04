@@ -87,6 +87,12 @@ class PyFloatSub(ready.FloatSub):
 
 print(PyFloatSub(1.5), type(PyFloatSub(1.5)).__name__)
 
+# a metatype nobody can call still makes classes
+meta, made = ready.make_meta_class()
+print(meta.__name__, made.__name__, type(made) is meta, isinstance(made, type), made.__mro__)
+show(meta, 'X', (), {})
+print(type(made()).__name__)
+
 # capsules, imports
 print(ready.capsule_roundtrip())
 show(ready.capsule_import, 'datetime.datetime_CAPI')

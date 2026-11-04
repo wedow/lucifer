@@ -195,8 +195,12 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
         || (modname != NULL && PyDict_SetItemString(ns, "__module__", modname) < 0)) {
         goto done;
     }
-    PyObject *args[3] = { name, bases, ns };
-    cls = lu_call(metaclass != NULL ? (PyObject *)metaclass : (PyObject *)&PyType_Type, args, 3, NULL);
+    /* type.__new__ itself: the metaclass may forbid instantiation (Cython's does),
+       which only stops code calling it. */
+    PyObject *type_new = PyObject_GetAttr((PyObject *)&PyType_Type, LU_ID(__new__));
+    PyObject *args[4] = { metaclass != NULL ? (PyObject *)metaclass : (PyObject *)&PyType_Type, name, bases, ns };
+    cls = type_new != NULL ? lu_call(type_new, args, 4, NULL) : NULL;
+    Py_XDECREF(type_new);
     if (cls == NULL) {
         goto done;
     }

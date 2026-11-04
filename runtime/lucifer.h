@@ -966,6 +966,7 @@ int lu_type_add_descriptors(PyTypeObject *tp);
 int lu_type_add_operators(PyTypeObject *tp);
 /* The next tp_new_wrapper check (owner.__new__(cls) is safe) passes: C called owner's tp_new itself. */
 void lu_new_check_skip(int on);
+int lu_tp_new_is_thunk(newfunc f);
 /* Fills tp's dict from its C definition: wrappers for its slots, descriptors,
    methods, __new__ and __doc__ (runtime/types/ready.c). */
 int lu_type_fill_dict(PyTypeObject *tp);

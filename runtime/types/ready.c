@@ -83,7 +83,7 @@ lu_type_fill_dict(PyTypeObject *tp)
         }
         Py_DECREF(d);
     }
-    if (tp->tp_new != NULL && tp->tp_new != tp->tp_base->tp_new
+    if (tp->tp_new != NULL && tp->tp_new != tp->tp_base->tp_new && !lu_tp_new_is_thunk(tp->tp_new)
         && PyDict_GetItemString(dict, "__new__") == NULL) {
         PyObject *new = PyCFunction_NewEx(&tp_new_methoddef, (PyObject *)tp, NULL);
         if (new == NULL || PyDict_SetItemString(dict, "__new__", new) < 0) {
