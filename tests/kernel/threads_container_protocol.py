@@ -339,3 +339,24 @@ def read_shifting():
 
 
 print('tuple key values', race(shift_entries, [read_shifting] * 3))
+
+# Slices of a list that another thread empties and refills: the bounds the
+# slice computed from the length may be past the end once it takes the lock.
+SL = [(i, i) for i in range(50)]
+
+
+def refill():
+    SL.extend([(i, i) for i in range(50)])
+    del SL[:]
+
+
+def read_slices():
+    bad = 0
+    for _ in range(20000):
+        for v in SL[:10] + SL[-5:] + SL[::-7]:
+            if torn(v):
+                bad += 1
+    return bad
+
+
+print('list slices', race(refill, [read_slices] * 3))
