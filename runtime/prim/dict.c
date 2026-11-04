@@ -169,7 +169,7 @@ prim_dict_insert(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(5); DICT(0); STAMP(1, stamp); SSIZE(3, hash);
     int err = 0, held;
     Py_BEGIN_CRITICAL_SECTION(args[0]);
-    held = lu_dict_stamp_holds((PyDictObject *)args[0], stamp, 1);
+    held = lu_dict_stamp_holds((PyDictObject *)args[0], stamp, &(Py_hash_t){ hash });
     if (held) {
         err = lu_dict_insert((PyDictObject *)args[0], args[2], hash, args[4]);
     }
@@ -185,7 +185,7 @@ prim_dict_replace(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(4); DICT(0); STAMP(1, stamp); SSIZE(2, ix);
     int live;
     Py_BEGIN_CRITICAL_SECTION(args[0]);
-    live = lu_dict_stamp_holds((PyDictObject *)args[0], stamp, 0) && live_entry(args[0], ix);
+    live = lu_dict_stamp_holds((PyDictObject *)args[0], stamp, NULL) && live_entry(args[0], ix);
     if (live) {
         lu_dict_replace((PyDictObject *)args[0], ix, args[3]);
     }
@@ -201,7 +201,7 @@ prim_dict_remove(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(3); DICT(0); STAMP(1, stamp); SSIZE(2, ix);
     PyObject *value = NULL;
     Py_BEGIN_CRITICAL_SECTION(args[0]);
-    if (lu_dict_stamp_holds((PyDictObject *)args[0], stamp, 0) && live_entry(args[0], ix)) {
+    if (lu_dict_stamp_holds((PyDictObject *)args[0], stamp, NULL) && live_entry(args[0], ix)) {
         value = lu_dict_remove((PyDictObject *)args[0], ix);
     }
     Py_END_CRITICAL_SECTION();

@@ -613,10 +613,19 @@ lu_dict_stamp(PyDictObject *mp)
 }
 
 int
-lu_dict_stamp_holds(PyDictObject *mp, uint64_t stamp, int exact)
+lu_dict_stamp_holds(PyDictObject *mp, uint64_t stamp, Py_hash_t *absent_hash)
 {
-    uint64_t now = lu_dict_stamp(mp);
-    return exact ? now == stamp : LU_STAMP_SERIAL(now) == LU_STAMP_SERIAL(stamp);
+    PyDictKeysObject *dk = mp->ma_keys;
+    if (LU_STAMP_SERIAL((uint64_t)dk->dk_serial << 32) != LU_STAMP_SERIAL(stamp)) {
+        return 0;
+    }
+    /* A key is absent still if none added since has its hash. */
+    for (Py_ssize_t ix = (Py_ssize_t)(stamp & 0xffffffff); absent_hash != NULL && ix < dk->dk_nentries; ix++) {
+        if (lu_dk_key(dk, ix) != NULL && lu_dk_hash(dk, ix) == *absent_hash) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 void

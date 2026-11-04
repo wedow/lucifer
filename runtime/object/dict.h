@@ -146,11 +146,12 @@ Py_ssize_t lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssi
    section with a stamp read before it looked: the serial of the table says
    that the entry numbers it found are still that table's (entries never move
    in a table, and a resize, clear or popitem names a new serial), and the
-   entry count that no key was added since. lu_dict_stamp_holds(exact=0) is
-   enough to replace or remove an entry; adding a key needs exact=1, so that
-   the key is still absent. */
+   entry count says which entries were added since. lu_dict_stamp_holds is
+   enough to replace or remove an entry; to add a key it also takes the key's
+   hash, and fails if an entry added since has it: the key may be that one.
+   Under the critical section only. */
 uint64_t lu_dict_stamp(PyDictObject *mp);
-int lu_dict_stamp_holds(PyDictObject *mp, uint64_t stamp, int exact);
+int lu_dict_stamp_holds(PyDictObject *mp, uint64_t stamp, Py_hash_t *absent_hash);
 /* The serial part of the stamp, which a lookup that compares with __eq__
    uses to see its table replaced. */
 #define LU_STAMP_SERIAL(stamp) ((stamp) >> 32)
