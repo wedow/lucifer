@@ -2,7 +2,7 @@
 """The optimizing tier's correctness lane on AWFY.
 
 Runs each benchmark through the AWFY harness on the oracle and on bin/lucifer
-in every JIT mode: -X lucifer_jit=on, -X lucifer_jit=always,
+in every JIT mode: the default (-X lucifer_jit=on), -X lucifer_jit=always,
 and always with every 7th guard failing (-X lucifer_stress=deopt:7). Output
 must match the oracle's line for line once the timings are masked, and in the
 compiling modes the tier must have compiled and entered code (its
@@ -22,7 +22,7 @@ AWFY = ROOT / 'third_party' / 'awfy' / 'Python'
 RUNS = {'Sieve': (3, 1), 'Bounce': (3, 1), 'NBody': (3, 1), 'Richards': (2, 1)}
 MODES = {
     'off': ['-X', 'lucifer_jit=off'],
-    'on': ['-X', 'lucifer_jit=on'],
+    'on': [],
     'always': ['-X', 'lucifer_jit=always'],
     'deopt:7': ['-X', 'lucifer_jit=always', '-X', 'lucifer_stress=deopt:7'],
 }

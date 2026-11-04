@@ -987,7 +987,7 @@ parse_handoff(const char *value, struct lu_handoff *out)
     return PyStatus_Ok();
 }
 
-/* lucifer_jit=off|on|always; off when the option is absent, until the jit lanes pass (luc-efyg). */
+/* lucifer_jit=off|on|always; on when the option is absent. */
 static PyStatus
 parse_jit(const char *value, struct lu_jit_options *out)
 {
@@ -1008,7 +1008,7 @@ lu_runtime_options(const PyConfig *config)
 {
     struct lu_stress stress = { 0 };
     struct lu_handoff handoff = { 0 };
-    struct lu_jit_options jit = { .mode = LU_JIT_OFF };
+    struct lu_jit_options jit = { .mode = 1 };
     PyStatus status = PyStatus_Ok();
     for (Py_ssize_t i = 0; i < config->xoptions.length && !PyStatus_Exception(status); i++) {
         char *text = Py_EncodeLocale(config->xoptions.items[i], NULL);
