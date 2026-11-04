@@ -599,6 +599,32 @@ instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **init)
     return f != NULL && PyFunction_Check(f);
 }
 
+/* isinstance(obj, cls) for an exact class, or a tuple of them, as
+   object_isinstance has it: a negative answer asks obj.__class__, which is
+   the type unless the type overrides __class__ or __getattribute__. 1, 0, or
+   -1 for the kernel. */
+static int
+isinstance_native(PyObject *obj, PyObject *cls, int depth)
+{
+    PyTypeObject *t = Py_TYPE(obj);
+    if (PyType_CheckExact(cls)) {
+        if (PyType_IsSubtype(t, (PyTypeObject *)cls)) {
+            return 1;
+        }
+        return object_attr_hook(t, LU_ID(__class__)) && object_attr_hook(t, LU_ID(__getattribute__)) ? 0 : -1;
+    }
+    if (PyTuple_CheckExact(cls) && depth < 16) {
+        for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(cls); i++) {
+            int is = isinstance_native(obj, PyTuple_GET_ITEM(cls, i), depth + 1);
+            if (is != 0) {
+                return is;
+            }
+        }
+        return 0;
+    }
+    return -1;
+}
+
 /* The kernel functions that C answers for plain arguments, so that the common
    call of dict.get, len and isinstance runs no frame: the result, or NULL
    when the kernel must run. */
@@ -620,6 +646,20 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
             return getattr_native(args[0], args[1]);
         }
     }
+    else if (target == kernel[LU_K_list_append]) {
+        if (npos == 2 && PyList_CheckExact(args[0])) {
+            int err;
+            Py_BEGIN_CRITICAL_SECTION(args[0]);
+            err = lu_list_append(args[0], args[1]);
+            Py_END_CRITICAL_SECTION();
+            return err < 0 ? NULL : Py_NewRef(Py_None);
+        }
+    }
+    else if (target == kernel[LU_K_dict_items]) {
+        if (npos == 1 && PyDict_Check(args[0])) {
+            return lu_dict_view(args[0], &PyDictItems_Type);
+        }
+    }
     else if (target == kernel[LU_K_len]) {
         PyTypeObject *t = npos == 1 ? Py_TYPE(args[0]) : NULL;
         if (t == &PyList_Type || t == &PyTuple_Type) {
@@ -633,16 +673,9 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
         }
     }
     else if (target == kernel[LU_K_isinstance]) {
-        /* object_isinstance: a negative answer asks obj.__class__, which is
-           the type unless the type overrides __class__ or __getattribute__. */
-        PyTypeObject *t = npos == 2 && PyType_CheckExact(args[1]) ? Py_TYPE(args[0]) : NULL;
-        if (t != NULL) {
-            if (PyType_IsSubtype(t, (PyTypeObject *)args[1])) {
-                return Py_NewRef(Py_True);
-            }
-            if (object_attr_hook(t, LU_ID(__class__)) && object_attr_hook(t, LU_ID(__getattribute__))) {
-                return Py_NewRef(Py_False);
-            }
+        int is = npos == 2 ? isinstance_native(args[0], args[1], 0) : -1;
+        if (is >= 0) {
+            return Py_NewRef(is ? Py_True : Py_False);
         }
     }
     return NULL;

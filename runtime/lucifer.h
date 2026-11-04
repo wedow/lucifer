@@ -182,6 +182,8 @@ struct lu_static_type_state {
     X(dict_get)                 /* dict.get, len and isinstance: CALL answers them itself */ \
     X(len)                      /* for exact builtin types */ \
     X(builtin_getattr)          /* the builtin getattr: CALL answers the common reads itself */ \
+    X(list_append)              /* list.append, dict.items: CALL answers them for builtin lists and dicts */ \
+    X(dict_items)               /* */ \
     X(isinstance)               /* */ \
     X(dict_setitem)             /* PyDict_SetItem(dict, key, value): the dict's own, whatever the subclass overrides */ \
     X(dict_delitem)             /* PyDict_DelItem(dict, key) */ \
@@ -1266,6 +1268,8 @@ PyObject *lu_seqiter_next(PyObject *iter);
 PyObject *lu_dictiter_next(PyObject *it);
 /* The key, value or item iterator of an exact dict or dict view; NULL (no error) for another object. */
 PyObject *lu_dict_iter(PyObject *obj);
+/* A new dict_keys, dict_values or dict_items view (by its type) of a dict. */
+PyObject *lu_dict_view(PyObject *dict, PyTypeObject *view_type);
 PyObject *lu_rangeiter_next(PyObject *iter);
 /* The count items of an exact tuple or list from start by step, as a new tuple or list. */
 PyObject *lu_seq_slice(PyObject *seq, Py_ssize_t start, Py_ssize_t step, Py_ssize_t count, int as_tuple);

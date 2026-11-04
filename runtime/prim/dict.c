@@ -458,6 +458,16 @@ prim_dictiter_copy(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return (PyObject *)copy;
 }
 
+PyObject *
+lu_dict_view(PyObject *dict, PyTypeObject *tp)
+{
+    dictviewobject *dv = (dictviewobject *)lu_object_new(tp, sizeof(dictviewobject));
+    if (dv != NULL) {
+        dv->dv_dict = (PyDictObject *)Py_NewRef(dict);
+    }
+    return (PyObject *)dv;
+}
+
 /* dictview_new(type, d), dictview_dict(view). */
 static PyObject *
 prim_dictview_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -468,11 +478,7 @@ prim_dictview_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "dictview_new() needs a dict view type");
         return NULL;
     }
-    dictviewobject *dv = (dictviewobject *)lu_object_new(tp, sizeof(dictviewobject));
-    if (dv != NULL) {
-        dv->dv_dict = (PyDictObject *)Py_NewRef(args[1]);
-    }
-    return (PyObject *)dv;
+    return lu_dict_view(args[1], tp);
 }
 
 static PyObject *
