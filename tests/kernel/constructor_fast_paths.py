@@ -74,8 +74,12 @@ class T(tuple):
         return super().__new__(cls, (a, b))
 
 
-class R(range):
-    pass
+try:
+    class R(range):
+        pass
+except TypeError as ex:
+    print(49, ex)
+    R = range
 
 
 attempt(50, lambda: I('7') + 1)
@@ -187,7 +191,7 @@ print(78, b2)
 Pt = collections.namedtuple('Pt', 'x y')
 pt = Pt(1, 2)
 for _ in range(2):
-    print(79, pt.x, pt.y, Pt.x, type(Pt.x).__name__, getattr(pt, 'x'))
+    print(79, pt.x, pt.y, type(Pt.x).__name__, getattr(pt, 'x'))
 try:
     pt.x = 5
 except AttributeError as ex:
