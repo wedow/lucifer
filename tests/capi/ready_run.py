@@ -246,3 +246,10 @@ print(sorted(meta.__dict__), sorted(made.__dict__), made in {made: 1}, hash(made
 # a builtin that is a kernel function is not called through its ml_meth by C code that checks ml_flags
 print([ready.call_direct(f, a) for f, a in ((len, [1, 2]), (ord, 'a'), (abs, -3), (ready.is_sequence, []), (repr, 5),
                                            ([].append, 1), (bool, 0), (str.isalpha, 'abc'), (str.upper, 'abc'), (list.copy, [1]), (dict.keys, {1: 2}))])
+
+# tp_getattr and tp_setattr, the slots that take a C string, answer attribute access
+oa = ready.OldAttr()
+print(oa.magic, getattr(oa, 'magic'), hasattr(oa, 'magic'), hasattr(oa, 'other'), getattr(oa, 'other', 'dflt'))
+oa.magic = 1
+show(setattr, oa, 'other', 1)
+show(getattr, oa, 'other')

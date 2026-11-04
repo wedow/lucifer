@@ -469,6 +469,37 @@ static PyTypeObject CmpOnly_Type = {
     .tp_richcompare = delegate_richcompare,
 };
 
+/* ready.OldAttr: the old tp_getattr and tp_setattr slots, which take a C string, as NumPy's Fortran objects do. */
+static PyObject *
+oldattr_getattr(PyObject *self, char *name)
+{
+    if (strcmp(name, "magic") == 0) {
+        return PyLong_FromLong(42);
+    }
+    PyErr_Format(PyExc_AttributeError, "no %s here", name);
+    return NULL;
+}
+
+static int
+oldattr_setattr(PyObject *self, char *name, PyObject *value)
+{
+    if (strcmp(name, "magic") != 0) {
+        PyErr_Format(PyExc_AttributeError, "cannot set %s", name);
+        return -1;
+    }
+    return value == NULL ? 0 : 0;
+}
+
+static PyTypeObject OldAttr_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.OldAttr",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = PyType_GenericNew,
+    .tp_getattr = oldattr_getattr,
+    .tp_setattr = oldattr_setattr,
+};
+
 /* ready.Mapped: indexing through mp_subscript only, as numpy's scalars do:
    not a sequence for PySequence_Check, which looks at sq_item. */
 static PyObject *
@@ -1166,7 +1197,7 @@ PyInit_ready(void)
         || PyType_Ready(&Counter_Type) < 0 || PyType_Ready(&MyList_Type) < 0 || PyType_Ready(&FloatSub_Type) < 0
         || PyType_Ready(&Delegate_Type) < 0 || PyType_Ready(&Mapped_Type) < 0
         || PyType_Ready(&Unhashable_Type) < 0
-        || PyType_Ready(&CmpOnly_Type) < 0) {
+        || PyType_Ready(&CmpOnly_Type) < 0 || PyType_Ready(&OldAttr_Type) < 0) {
         return NULL;
     }
     BytesCopy_Type.tp_richcompare = PyBytes_Type.tp_richcompare;
@@ -1190,6 +1221,7 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "Mapped", (PyObject *)&Mapped_Type) < 0
         || PyModule_AddObjectRef(m, "Unhashable", (PyObject *)&Unhashable_Type) < 0
         || PyModule_AddObjectRef(m, "CmpOnly", (PyObject *)&CmpOnly_Type) < 0
+        || PyModule_AddObjectRef(m, "OldAttr", (PyObject *)&OldAttr_Type) < 0
         || PyModule_AddObjectRef(m, "BytesCopy", (PyObject *)&BytesCopy_Type) < 0
         || PyModule_AddObjectRef(m, "Mul", (PyObject *)&Mul_Type) < 0
         || PyModule_AddObjectRef(m, "BytesMul", (PyObject *)&BytesMul_Type) < 0) {

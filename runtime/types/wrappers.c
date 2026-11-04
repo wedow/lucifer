@@ -744,6 +744,22 @@ slotptr(PyTypeObject *type, int ioffset)
     return (void **)ptr;
 }
 
+/* The old tp_getattr and tp_setattr take a C string. A type with only those
+   answers through the new slots, which are what attribute access runs. */
+static PyObject *
+getattro_from_getattr(PyObject *self, PyObject *name)
+{
+    const char *text = PyUnicode_AsUTF8(name);
+    return text != NULL ? Py_TYPE(self)->tp_getattr(self, (char *)text) : NULL;
+}
+
+static int
+setattro_from_setattr(PyObject *self, PyObject *name, PyObject *value)
+{
+    const char *text = PyUnicode_AsUTF8(name);
+    return text != NULL ? Py_TYPE(self)->tp_setattr(self, (char *)text, value) : -1;
+}
+
 /* Adds a wrapper descriptor to tp's dict for each slot tp has of its own
    (one its base does not have too, and not a thunk) whose dunder the dict
    lacks, as add_operators does. */
@@ -751,6 +767,12 @@ int
 lu_type_add_operators(PyTypeObject *tp)
 {
     PyObject *dict = lu_type_dict(tp);
+    if (tp->tp_getattr != NULL && tp->tp_getattro == NULL) {
+        tp->tp_getattro = getattro_from_getattr;
+    }
+    if (tp->tp_setattr != NULL && tp->tp_setattro == NULL) {
+        tp->tp_setattro = setattro_from_setattr;
+    }
     for (struct wrapperbase *p = slotdefs; p->name != NULL; p++) {
         if (p->wrapper == NULL) {
             continue;
