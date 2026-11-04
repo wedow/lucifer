@@ -9,6 +9,7 @@ results merge by node ID. Arguments after `--` go to `run.py run`."""
 import argparse
 import collections
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
@@ -49,6 +50,7 @@ def main():
     parser.add_argument("--size", type=int, default=900, help="tests per shard")
     parser.add_argument("--results", type=Path, default=ROOT / "results")
     parser.add_argument("--parallel", action="store_true")
+    parser.add_argument("--launcher", default="", help="command prefix each shard's run.py runs under")
     parser.add_argument("run_args", nargs="*", help="after --: arguments for `run.py run`")
     args = parser.parse_args()
     suite = "numpytest-parallel" if args.parallel else "numpytest"
@@ -56,7 +58,7 @@ def main():
     groups = shard_groups([line.split("\t")[0] for line in expected], args.size)
     status = 0
     for group in groups:
-        command = [sys.executable, str(HERE / "run.py"), "run", "--results", str(args.results),
+        command = [*shlex.split(args.launcher), sys.executable, str(HERE / "run.py"), "run", "--results", str(args.results),
                    *(["--parallel"] if args.parallel else []), *args.run_args]
         for prefix in group:
             command += ["--shard", prefix]

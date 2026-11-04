@@ -209,6 +209,19 @@ class HarnessChecks(unittest.TestCase):
         scrub = runpy.run_path(str(self.tool / "run.py"))["scrub"]
         self.assertEqual(scrub("bad '-I/home/user/a/b.py' and /tmp/x/y"), "bad '-I<path>' and <path>")
 
+    def test_runall_runs_each_shard_under_the_launcher(self):
+        shutil.copyfile(HERE / "runall.py", self.tool / "runall.py")
+        launcher = self.root / "launcher"
+        launcher.write_text('#!/bin/sh\necho "$@" >> "$0.log"\nexec "$@"\n')
+        launcher.chmod(0o755)
+        outcome = subprocess.run([sys.executable, str(self.tool / "runall.py"), "--results", str(self.root / "results"),
+                                  "--launcher", str(launcher), "--", "--python", str(self.fake), "--runtime", "fake",
+                                  "--site", str(self.site), "--cache", str(self.cache), "--work", str(self.root / "raw")],
+                                 capture_output=True, text=True)
+        self.assertEqual(outcome.returncode, 0, outcome.stderr)
+        self.assertEqual(len(Path(str(launcher) + ".log").read_text().splitlines()), 1)
+        self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "XFAIL"])))
+
     def test_runall_shards_cover_each_id_once(self):
         shard_groups = runpy.run_path(str(HERE / "runall.py"))["shard_groups"]
         ids = [f"numpy/a/test_{n}.py::{c}::t[{i}]" for n in range(5) for c in "XY" for i in range(7)]
