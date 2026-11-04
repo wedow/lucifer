@@ -2,7 +2,8 @@
 A Python handler is installed with the runtime's sigaction (runtime/interp/
 signals.c), which only records the signal: the handler runs in the main task
 at its next poll. Importing this module installs SIGINT's default handler, unless
-the process ignores SIGINT; the runtime's startup does not import it."""
+the process ignores SIGINT, as a background job does: the inherited SIG_IGN is
+recorded instead; the runtime's startup does not import it."""
 
 import _lucifer
 
@@ -115,7 +116,9 @@ def raise_signal(signalnum, /):
     _lucifer.signal_raise(signalnum)
 
 
-if not _lucifer.signal_ignored(SIGINT):
+if _lucifer.signal_ignored(SIGINT):
+    _handlers[SIGINT] = SIG_IGN
+else:
     _lucifer.signal_install(SIGINT, default_int_handler)
 
 
