@@ -38,6 +38,8 @@ enum lu_frame_return {
     LU_RETURN_SEND,             /* a generator resumed by SEND: a yield pushes the value, a
                                    return pushes it and leaves the yield-from loop */
     LU_RETURN_SENT,             /* the kernel's SEND: (value, returned), as SEND's two outcomes */
+    LU_RETURN_INIT,             /* an __init__ called for a new instance already on the stack: the
+                                   value must be None and is dropped */
 };
 
 struct lu_frame {

@@ -1082,6 +1082,9 @@ int lu_type_add_descriptors(PyTypeObject *tp);
 /* Adds wrapper descriptors (__add__, __len__, ...) for the C slots tp has
    of its own (runtime/types/wrappers.c). */
 int lu_type_add_operators(PyTypeObject *tp);
+/* object.__new__(tp): a new instance of tp, refusing a tp whose static base is not owner. */
+PyObject *lu_alloc_instance(PyTypeObject *tp, PyTypeObject *owner);
+
 /* The next tp_new_wrapper check (owner.__new__(cls) is safe) passes: C called owner's tp_new itself. */
 void lu_new_check_skip(int on);
 int lu_tp_new_is_thunk(newfunc f);

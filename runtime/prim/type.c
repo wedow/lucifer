@@ -1917,17 +1917,22 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
     return 0;
 }
 
+PyObject *
+lu_alloc_instance(PyTypeObject *tp, PyTypeObject *owner)
+{
+    if (check_new(tp, owner) < 0) {
+        return NULL;
+    }
+    return (tp->tp_alloc != NULL ? tp->tp_alloc : PyType_GenericAlloc)(tp, 0);
+}
+
 /* alloc(cls, owner): a new instance of cls for owner.__new__, refusing a
    cls whose static base is not owner. */
 static PyObject *
 prim_alloc(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); TYPE_ARG(0); TYPE_ARG(1);
-    PyTypeObject *tp = (PyTypeObject *)args[0];
-    if (check_new(tp, (PyTypeObject *)args[1]) < 0) {
-        return NULL;
-    }
-    return (tp->tp_alloc != NULL ? tp->tp_alloc : PyType_GenericAlloc)(tp, 0);
+    return lu_alloc_instance((PyTypeObject *)args[0], (PyTypeObject *)args[1]);
 }
 
 /* new_check(cls, owner): the same refusals, for a __new__ that allocates itself. */
