@@ -11,7 +11,38 @@ import sys
 import _codecs
 import _lucifer
 # Import _thread instead of threading to reduce startup cost
-from _thread import allocate_lock as Lock
+from _thread import allocate_lock as Lock, get_ident
+import _weakref
+
+class _BufferLock:
+    """The lock of a buffered stream (_enter_buffered_busy, Modules/_io/bufferedio.c). It is not
+    reentrant: a signal handler that uses the stream its own thread is in the middle of gets a
+    RuntimeError instead of a deadlock. A daemon thread stops for good at its next poll once the
+    interpreter finalizes, which may be inside a stream: the finalizing thread, the only one left
+    running, then takes the stream over instead of waiting for ever."""
+
+    __slots__ = ('_lock', '_owner', '_stream')
+
+    def __init__(self, stream):
+        self._lock = Lock()
+        self._owner = 0
+        self._stream = _weakref.ref(stream)
+
+    def __enter__(self):
+        me = get_ident()
+        if self._owner == me:
+            raise RuntimeError('reentrant call inside %r' % self._stream())
+        if not sys.is_finalizing():
+            self._lock.acquire()
+        elif not self._lock.acquire(False):
+            self._lock = Lock()
+            self._lock.acquire()
+        self._owner = me
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._owner = 0
+        self._lock.release()
+
 
 BlockingIOError = BlockingIOError   # _io.BlockingIOError is the builtin
 
@@ -1005,7 +1036,7 @@ class BufferedReader(_BufferedIOBase):
             raise ValueError("invalid buffer size")
         self.buffer_size = buffer_size
         self._reset_read_buf()
-        self._read_lock = Lock()
+        self._read_lock = _BufferLock(self)
 
     def readable(self):
         return self.raw.readable()
@@ -1272,7 +1303,7 @@ class BufferedWriter(_BufferedIOBase):
             raise ValueError("invalid buffer size")
         self.buffer_size = buffer_size
         self._write_buf = bytearray()
-        self._write_lock = Lock()
+        self._write_lock = _BufferLock(self)
 
     def writable(self):
         return self.raw.writable()

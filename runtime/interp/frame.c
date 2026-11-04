@@ -761,6 +761,8 @@ void
 Py_SetRecursionLimit(int limit)
 {
     struct _is *interp = PyThreadState_Get()->interp;
+    /* The world is stopped: a running task changes its own count without a lock. */
+    lu_stw_stop(interp);
     pthread_mutex_lock(&interp->tasks_lock.mutex);
     for (PyThreadState *p = interp->tasks; p != NULL; p = p->next) {
         int depth = p->py_recursion_limit - p->py_recursion_remaining;
@@ -768,6 +770,7 @@ Py_SetRecursionLimit(int limit)
         p->py_recursion_remaining = limit - depth;
     }
     pthread_mutex_unlock(&interp->tasks_lock.mutex);
+    lu_stw_start(interp);
 }
 
 static PyObject *

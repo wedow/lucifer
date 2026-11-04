@@ -568,12 +568,12 @@ faulthandler (§2.2).
 - `Py_FinalizeEx` follows `Python/pylifecycle.c` order:
   1. `threading._shutdown`;
   2. atexit (per interpreter);
-  3. flush stdio;
+  3. daemon tasks park forever at their next attach;
   4. set `_PyRuntime` finalizing;
-  5. GC;
-  6. module teardown;
-  7. subinterpreters ended;
-  8. daemon tasks park forever at their next attach.
+  5. flush stdio;
+  6. GC;
+  7. module teardown;
+  8. subinterpreters ended.
 - `bin/lucifer` links `main.o` with `build/liblucifer.a` (K0.1).
 
 **Checks.**

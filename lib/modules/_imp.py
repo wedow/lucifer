@@ -40,6 +40,16 @@ On platforms without threads, this function does nothing."""
     _lock.release()
 
 
+def _reinit_lock(held):
+    """After a fork: the import lock is a new one, held by the surviving thread `held` times."""
+    global _lock, _lock_count
+    import _thread
+    _lock = _thread.RLock()
+    _lock_count = 0
+    for _ in range(held):
+        acquire_lock()
+
+
 def lock_held():
     """Return True if the import lock is currently held, else False.
 

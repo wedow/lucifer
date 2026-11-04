@@ -5,6 +5,7 @@ carrier of its own (DESIGN 5.7); _lucifer.thread_start runs a function in it.
 """
 
 import _lucifer
+from sys import is_finalizing as _is_finalizing
 
 TIMEOUT_MAX = 9223372036.0
 _NAME_MAXLEN = 15
@@ -50,7 +51,10 @@ A lock is not owned by the thread that locked it; another thread may
 unlock it.  A thread attempting to lock a lock that it has already locked
 will block until another thread unlocks it.  Deadlocks may ensue."""
 
-    __slots__ = ('_mutex',)
+    __slots__ = ('_mutex', '__weakref__')
+
+    def __init_subclass__(cls, **kwargs):
+        raise TypeError("type '_thread.lock' is not an acceptable base type")
 
     def __init__(self):
         self._mutex = _lucifer.mutex_new()
@@ -96,19 +100,17 @@ but it needn't be locked by the same thread that unlocks it."""
 LockType = lock
 
 
-def allocate_lock():
-    """Create a new lock object. See help(type(threading.Lock())) for
-information about locks."""
-    return lock()
-
-
-allocate = allocate_lock
+# A builtin, not a function: kept as a class attribute it does not bind (test_thread.LockTests).
+allocate_lock = allocate = lock
 
 
 class RLock:
     """Lock that can be acquired multiple times by the same thread."""
 
-    __slots__ = ('_block', '_owner', '_count')
+    __slots__ = ('_block', '_owner', '_count', '__weakref__')
+
+    def __init_subclass__(cls, **kwargs):
+        raise TypeError("type '_thread.RLock' is not an acceptable base type")
 
     def __init__(self):
         self._block = lock()
@@ -322,6 +324,7 @@ class _local:
 _state = lock()
 _running = 0
 _non_daemon = []
+_live = {}                      # the handles of threads that have not finished, by id
 _stack_size = 0
 _STACK_MIN = 53248              # _PyOS_MIN_STACK_SIZE + SYSTEM_PAGE_SIZE
 
@@ -343,6 +346,8 @@ def _run(function, args, kwargs, handle):
             _running -= 1
             if handle is not None and handle in _non_daemon:
                 _non_daemon.remove(handle)
+            if handle is not None:
+                _live.pop(id(handle), None)
         if handle is not None:
             handle._set_done()
 
@@ -359,6 +364,8 @@ def _spawn(function, args, kwargs, handle):
             _running -= 1
             if handle is not None and handle in _non_daemon:
                 _non_daemon.remove(handle)
+            if handle is not None:
+                _live.pop(id(handle), None)
         if handle is not None:
             handle._set_done()
         raise
@@ -402,6 +409,7 @@ returned that can be used to wait for the thread to finish."""
         if handle._started:
             raise RuntimeError('thread already started')
         handle._started = True
+        _live[id(handle)] = handle
         _lucifer.mutex_acquire(handle._done, 0)
         if not daemon:
             _non_daemon.append(handle)
@@ -492,6 +500,8 @@ class _ThreadHandle:
         return self._exited         # not the lock's state: a join holds the lock for a moment
 
     def _set_done(self):
+        if not self._started:
+            raise RuntimeError('thread not started')
         self._exited = True
         _lucifer.mutex_release(self._done)
 
@@ -501,6 +511,8 @@ class _ThreadHandle:
             raise RuntimeError('thread not started')
         if self._ident == get_ident() and not self.is_done():
             raise RuntimeError('Cannot join current thread')
+        if not self._exited and _is_finalizing():
+            raise PythonFinalizationError('cannot join thread at interpreter shutdown')
         if timeout is None:
             wait = -1
         else:
@@ -516,7 +528,23 @@ def _make_thread_handle(ident):
     """Internal only. Make a thread handle for threads not spawned by the _thread module."""
     handle = _ThreadHandle(ident, True)
     _lucifer.mutex_acquire(handle._done, 0)
+    _live[id(handle)] = handle
     return handle
+
+
+def _after_fork():
+    """In the child of a fork the other threads are gone: their handles are done, and the
+bookkeeping locks are new. The surviving thread keeps its own handle, running."""
+    global _state, _running
+    me = get_ident()
+    _state = lock()
+    for handle in list(_live.values()):
+        if handle._ident != me:
+            if not handle._exited:
+                handle._set_done()
+            del _live[id(handle)]
+    _non_daemon[:] = []
+    _running = 0
 
 
 def _shutdown():

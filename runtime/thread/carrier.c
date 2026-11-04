@@ -101,6 +101,7 @@ lu_carrier_bind(void)
     }
     lu_carrier = c;
     c->native_id = (unsigned long)gettid();
+    c->thread = pthread_self();
     c->current = entry_new(c, &_PyRuntime.main_interp);
     lu_qsbr_register(c);
     pthread_setspecific(_PyRuntime.carrier_key, c);

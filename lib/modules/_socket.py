@@ -285,13 +285,31 @@ def inet_ntop(address_family, packed_ip, /):
     raise ValueError('unknown address family %d' % address_family)
 
 
+def _bytes_or_none(value, what):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.encode('idna') if what == 'host' else value.encode()
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if what == 'port' and isinstance(value, int):
+        return str(value).encode()
+    raise OSError('Int or String expected' if what == 'port' else 'str, bytes or bytearray expected, not %s' % type(value).__name__)
+
+
 def getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     """Resolve host and port into addrinfo struct."""
-    raise gaierror(-2, 'Name or service not known')
+    found = _lucifer.os_getaddrinfo(_bytes_or_none(host, 'host'), _bytes_or_none(port, 'port'),
+                                    int(family), int(type), int(proto), int(flags))
+    if isinstance(found, tuple):
+        raise gaierror(*found)
+    return found
 
 
 def gethostbyname(hostname, /):
     """Return the IP address (a string of the form '255.255.255.255') for a host."""
+    for family, _, _, _, address in getaddrinfo(hostname, None, AF_INET, SOCK_STREAM):
+        return address[0]
     raise gaierror(-2, 'Name or service not known')
 
 
