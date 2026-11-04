@@ -98,15 +98,16 @@ for name, send in (("raise", via_raise), ("kill", via_kill), ("interrupt_main", 
             n = 0
             while True:
                 n += 1
-                if n == 50:
+                if n < 50:
+                    yield n
+                elif n == 50:
                     send()
-                yield n
         except KeyboardInterrupt:
             yield "gen caught"
 
     g = gen()
     out = None
-    for _ in range(100):
+    for _ in range(100):  # the generator spins in its try from n == 50 on
         out = next(g)
         if out == "gen caught":
             break
