@@ -57,12 +57,20 @@ redirect_to_main_task(int signum)
 }
 
 static void
-trip_signal(int signum)
+trip(int signum)
 {
-    int save_errno = errno;
     __atomic_store_n(&_PyRuntime.signals.handlers[signum].tripped, 1, __ATOMIC_SEQ_CST);
     __atomic_store_n(&_PyRuntime.signals.tripped, 1, __ATOMIC_SEQ_CST);
     signal_received();
+}
+
+/* The sigaction handler. PyErr_SetInterruptEx trips without it: no signal
+   was sent, so there is none to redirect (it would trip a second time). */
+static void
+trip_signal(int signum)
+{
+    int save_errno = errno;
+    trip(signum);
     redirect_to_main_task(signum);
     errno = save_errno;
 }
@@ -130,7 +138,7 @@ PyErr_SetInterruptEx(int signum)
         return -1;
     }
     if (_PyRuntime.signals.handlers[signum].func != NULL) {
-        trip_signal(signum);
+        trip(signum);
     }
     return 0;
 }
