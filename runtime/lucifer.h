@@ -719,7 +719,7 @@ struct lu_static_objects {
    _Py_ID strings). LU_ID(__name__) is the str "__name__". */
 #define LU_IDENTIFIERS(X) \
     X(__all__) X(__build_class__) X(__builtins__) X(__call__) X(__class__) X(__delete__) \
-    X(__del__) X(__doc__) X(__get__) X(__getitem__) X(__init__) X(__iter__) \
+    X(__class_getitem__) X(__del__) X(__doc__) X(__get__) X(__getitem__) X(__init__) X(__iter__) \
     X(__len__) X(__loader__) X(__main__) X(__name__) X(__new__) X(__next__) \
     X(__package__) X(__repr__) X(__set__) X(__spec__) X(__str__) X(__hash__) \
     X(__eq__) X(__ne__) X(__lt__) X(__le__) X(__gt__) X(__ge__) X(__contains__) \

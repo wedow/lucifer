@@ -257,3 +257,14 @@ show(getattr, oa, 'other')
 # a static type's tp_doc that starts with a signature is its __text_signature__, and not its __doc__
 print(ready.DocSig.__text_signature__, repr(ready.DocSig.__doc__), inspect.signature(ready.DocSig),
       ready.Vec.__text_signature__, ready.Counter.__text_signature__)
+
+# PyObject_GetItem on a class asks for __class_getitem__
+class Generic:
+    def __class_getitem__(cls, item):
+        return ('generic', cls.__name__, item)
+class Plain:
+    pass
+for o, k in ((list, int), (type, int), (dict, (str, int)), (Generic, 5), (Plain, 5), ((7, 8, 9), 1), ('abc', 2),
+             ((7, 8), 'x'), (5, 0), (Generic(), 0), ([1, 2, 3], slice(0, 2)), ({'a': 1}, 'a'), (ready.Mapped(), 'k'),
+             (ready.Vec(1, 2), 1), ((1, 2), 2**80)):
+    show(ready.subscript, o, k)

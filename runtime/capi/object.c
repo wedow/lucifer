@@ -233,6 +233,32 @@ PyObject_GetItem(PyObject *o, PyObject *key)
     if (m != NULL && m->mp_subscript != NULL) {
         return m->mp_subscript(o, key);
     }
+    PySequenceMethods *sq = Py_TYPE(o)->tp_as_sequence;
+    if (sq != NULL && sq->sq_item != NULL) {
+        if (!PyIndex_Check(key)) {
+            lu_err_format(PyExc_TypeError, "sequence index must be integer, not '%.200s'",
+                          Py_TYPE(key)->tp_name);
+            return NULL;
+        }
+        Py_ssize_t i = PyNumber_AsSsize_t(key, PyExc_IndexError);
+        return i == -1 && PyErr_Occurred() ? NULL : PySequence_GetItem(o, i);
+    }
+    if (PyType_Check(o)) {          /* list[int]: the class's __class_getitem__ */
+        if (o == (PyObject *)&PyType_Type) {
+            return Py_GenericAlias(o, key);
+        }
+        PyObject *method;
+        if (PyObject_GetOptionalAttr(o, LU_ID(__class_getitem__), &method) < 0) {
+            return NULL;
+        }
+        if (method != NULL) {
+            PyObject *result = PyObject_CallOneArg(method, key);
+            Py_DECREF(method);
+            return result;
+        }
+        lu_err_format(PyExc_TypeError, "type '%.200s' is not subscriptable", ((PyTypeObject *)o)->tp_name);
+        return NULL;
+    }
     lu_err_format(PyExc_TypeError, "'%.200s' object is not subscriptable", Py_TYPE(o)->tp_name);
     return NULL;
 }

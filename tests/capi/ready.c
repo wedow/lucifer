@@ -546,6 +546,13 @@ repeat_twice(PyObject *self, PyObject *arg)
 }
 
 static PyObject *
+subscript(PyObject *self, PyObject *args)
+{
+    PyObject *o, *key;
+    return PyArg_ParseTuple(args, "OO", &o, &key) ? PyObject_GetItem(o, key) : NULL;
+}
+
+static PyObject *
 is_sequence(PyObject *self, PyObject *arg)
 {
     return PyBool_FromLong(PySequence_Check(arg));
@@ -1182,6 +1189,7 @@ static PyMethodDef module_methods[] = {
     { "call_direct", call_direct, METH_VARARGS, NULL },
     { "raise_from_frame", raise_from_frame, METH_VARARGS, NULL },
     { "is_sequence", is_sequence, METH_O, NULL },
+    { "subscript", subscript, METH_VARARGS, NULL },
     { "seq_shape", seq_shape, METH_O, NULL },
     { "repeat_twice", repeat_twice, METH_O, NULL },
     { "sigfunc", is_sequence, METH_O, "sigfunc($module, a, b=1, /)\n--\n\nReal doc." },
