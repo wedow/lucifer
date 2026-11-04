@@ -383,6 +383,23 @@ def getppid():
     return _call('getppid')
 
 
+sysconf_names = {
+    'SC_ARG_MAX': 0, 'SC_CHILD_MAX': 1, 'SC_CLK_TCK': 2, 'SC_NGROUPS_MAX': 3, 'SC_OPEN_MAX': 4,
+    'SC_PAGESIZE': 30, 'SC_PAGE_SIZE': 30, 'SC_NPROCESSORS_CONF': 83, 'SC_NPROCESSORS_ONLN': 84,
+    'SC_PHYS_PAGES': 85, 'SC_AVPHYS_PAGES': 86,
+}
+
+
+def sysconf(name, /):
+    """Return an integer-valued system configuration variable."""
+    if isinstance(name, str):
+        try:
+            name = sysconf_names[name]
+        except KeyError:
+            raise ValueError('unrecognized configuration name') from None
+    return _call('sysconf', name)
+
+
 def getpgrp():
     """Return the current process group id."""
     return _call('getpgrp')
