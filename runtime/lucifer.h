@@ -1033,6 +1033,20 @@ int lu_hash_secret_init(int use_seed, unsigned long seed);
 
 /* runtime/interp/config.c */
 PyStatus lu_runtime_options(const PyConfig *config);
+
+/* CPython's compiler (runtime/compiler/lu_cc.c). lu_cc_init runs at interpreter
+   start; lu_cc_compile is compile() after its arguments are checked: source is
+   a str, a bytes or an AST object. */
+int lu_cc_init(void);
+
+/* The builtin modules written in C, by their PyInit_ function (runtime/interp/import.c). */
+struct lu_native {
+    const char *name;
+    PyObject *(*init)(void);
+};
+extern const struct lu_native lu_native_modules[];
+PyObject *lu_cc_compile(PyObject *source, PyObject *filename, const char *mode, int flags,
+                        int optimize, int feature_version);
 PyStatus lu_config_read_copy(PyConfig *dst, const PyConfig *src);
 int lu_utf8_mode(const PyConfig *config);
 

@@ -16,7 +16,7 @@ suite passing against the unmodified cp314t wheel. This document decides how.
 |---|---|---|---|
 | 1 | Runtime language | **C11** for all native code (ABI layer, interpreter, GC, threads, primitives, JIT). No fasm, Zig or Rust. | 1,843 exported `Py*`/`_Py*` symbols, 33 C-varargs entry points, 539 layout definitions and 448 inline wrappers fixed by headers; extensions need glibc's loader and TLS. C compiles the canonical headers unchanged; every other option re-derives them. §2 |
 | 2 | Execution format | **CPython 3.14 bytecode**, the same marshal format and magic number (3627), and `cache_tag` `cpython-314`. | Code objects, `dis`, frames, tracebacks, `.pyc`, `PyCodeObject` (`cpython/code.h`) and the monitoring API are all defined over it. Byte-identical output from the host's `compile()` is a free oracle. §3 |
-| 3 | Compiler | Python: a tokenizer, a pegen-generated parser, then a port of symtable/codegen/flowgraph/assemble. It must produce output byte-identical to CPython's. | 17.3k lines of C (`Python/{compile,codegen,flowgraph,assemble,symtable,ast_preprocess}.c`). The generator is `Tools/peg_generator/pegen/python_generator.py`. §3 |
+| 3 | Compiler | **CPython 3.14's own C compiler**, vendored in `runtime/compiler/`: lexer, pegen parser, AST, symtable, codegen, flowgraph, assembler, with `_ast`, `_tokenize`, `_symtable` and `_opcode` as C modules. Output is byte-identical to CPython's by construction. | A Python port was the bootstrap convenience (before the runtime could run C-heavy code, a Python compiler could be developed on the host). It was byte-identical but ran about 70x slower than C on large inputs, and compiling dominates short-lived startup (traceback imports, `dataclasses`, `namedtuple`, pytest's assertion rewriting). The compiler is not on the JIT speed path: it runs once per source, so it does not need the object model's optimizations. §3 |
 | 4 | Bootstrap | The host CPython 3.14 compiles the kernel and stdlib to `.pyc`/frozen marshal at build time. Self-hosting means Lucifer reproduces those bytes. There is no heap snapshot at first. | Bytecode is CPython's, so the host is a perfect stage-0 compiler. Snapshots wait on a startup measurement. §3 |
 | 5 | Object model | The cp314t headers are canonical. Every materialized object sits at a stable address with the exact layout. Unboxing and scalar replacement happen only inside JIT code, before escape. | `PyObject` is 32 B on t vs 16 B on GIL builds. `PyTypeObject` symbols are 0x1b0 B in the oracle. Research 01 §6–7. §4 |
 | 6 | Memory | Vendored mimalloc with per-carrier heaps (cp314t's allocator); biased refcounting exactly as `Include/refcount.h`; trial-deletion cycle collector over the GC heaps; QSBR for container storage. | Extensions hold references the runtime cannot see (statics, module state), so only refcount-informed collection is sound. Root tracing is not. §4.3 |
@@ -101,25 +101,29 @@ The interpreter may rewrite instructions into its own specialized forms (the
 replicate CPython's specialization set. Lucifer-private opcodes never appear in
 user-visible code objects.
 
-### 3.2 Compiler in Python (`lib/compiler/`)
+### 3.2 Compiler in C (`runtime/compiler/`)
 
-| Stage | Source of truth | Lucifer file | Method |
-|---|---|---|---|
-| Tokenizer | `Parser/lexer/*.c` (1,859 lines) | `tokenizer.py` | Port. It also provides `_tokenize` for `tokenize.py`, which uses the C tokenizer since 3.12. |
-| Parser | `Grammar/python.gram` (1,569 lines, C actions) + `Parser/action_helpers.c` | `python.gram` (Python actions), generated `parser.py`, `helpers.py` | Translate the actions; generate with pegen's `python_generator.py` at dev time; commit the output (CPython commits `parser.c` the same way); `make regen` checks it is current. |
-| AST | `Parser/Python.asdl` (154 lines) | generated `_ast.py` | Node classes with `_fields`, `_attributes`, `__match_args__`. |
-| Symtable, AST optimizer, codegen, CFG optimizer, assembler | `Python/{symtable,ast_preprocess,codegen,compile,flowgraph,assemble}.c` (17,350 lines) | `symtable.py`, `preprocess.py`, `codegen.py`, `flowgraph.py`, `assemble.py` | Faithful port, so output is byte-identical. |
-| Entry | `builtins.compile`, `exec`, `eval`, import | `__init__.py` | Called by the kernel's `compile`. |
+The compiler is CPython 3.14.10's C source, vendored with its license header and
+kept as a diff against the tag. Local changes are marked `LU:` in the file and
+listed in `third_party/cpython/CHANGES.md`.
 
-The compiler is ordinary Python that depends only on the kernel and `_ast`. It
-is developed and tested on the host CPython before Lucifer can run it, against a
-byte-for-byte oracle:
+| Stage | CPython file | Here |
+|---|---|---|
+| Tokenizer | `Parser/lexer/*.c`, `Parser/tokenizer/*.c` | unchanged; `_tokenize` is `Python-tokenize.c` |
+| Parser | `Parser/{parser,pegen,pegen_errors,action_helpers,string_parser,peg_api,token}.c` | unchanged except where marked |
+| AST | `Python/Python-ast.c`, `Python/ast.c` | the AST state is process-wide; `_ast` is a C module |
+| Symtable, AST optimizer, codegen, CFG optimizer, assembler | `Python/{symtable,ast_preprocess,future,codegen,compile,flowgraph,assemble,instruction_sequence}.c` | unchanged |
+| Entry | `builtins.compile`, `exec`, `eval`, import | the kernel's `compile` merges the caller's future flags and calls `lu_cc_compile` (`lu_cc.c`), which is `builtin_compile_impl` |
 
-```
-make check-compiler   # host python3.14 runs lib/compiler on each input;
-                      # marshal.dumps(ours) == marshal.dumps(compile(src)), and
-                      # ast.dump(ours, include_attributes=True) == ast.dump(ast.parse(src))
-```
+The internal headers the files include (`pycore_*.h`) are CPython's where they are
+self-contained (AST, symtable, flow graph, opcode metadata) and one-line shims to
+`include/lu_cc.h` elsewhere. `lu_cc.h` and `lu_cc.c` are the only place the
+compiler meets the runtime: interned names, `_PyCode_New` over `lu_code_new`,
+the escape decoders and the few `Python/errors.c` helpers.
+
+Python runs only at build time, where the host CPython freezes the kernel and
+the standard library (§3.3). `make check-compiler` compiles every corpus file
+on `bin/lucifer` and on the oracle and compares `marshal.dumps`.
 
 ### 3.3 Bootstrap and build-time host
 
@@ -129,7 +133,7 @@ marshal bytes.
 
 1. `tools/freeze` compiles the **frozen set** with the host's `compile()` and
    emits `build/frozen.c` (marshal blobs). The frozen set is `lib/kernel/**`,
-   `lib/compiler/**`, the `lib/modules/` ports, and the CPython startup modules
+   the `lib/modules/` ports, and the CPython startup modules
    CPython itself freezes (`importlib._bootstrap[_external]`, `zipimport`, `codecs`,
    `encodings{,.aliases,.utf_8}`, `io`, `abc`, `site`, `os`, `posixpath`, `stat`,
    `genericpath`, `_collections_abc`, `_sitebuiltins`).
@@ -658,7 +662,6 @@ runtime/
 lib/
   kernel/                Python builtins (§4.4) + sys/builtins module population + startup
   modules/               Python replacements for CPython C modules (§9.3), e.g. _io.py marshal.py _sre.py itertools.py
-  compiler/              tokenizer, python.gram, parser.py (generated), symtable, codegen, flowgraph, assemble, _ast.py
   _sysconfigdata_t_linux_x86_64-linux-gnu.py   ABIFLAGS 't', Py_GIL_DISABLED 1, EXT_SUFFIX .cpython-314t-x86_64-linux-gnu.so
 third_party/cpython/     existing vendored Lib/ (unchanged; CHANGES.md records adapted C sources)
 third_party/mimalloc/    from CPython v3.14.10 Objects/mimalloc (MIT)
@@ -703,7 +706,7 @@ parallel.
 
 | Rung | Harness and command | Acceptance score | Depends on |
 |---|---|---|---|
-| C0 | `make check-compiler` (host) | 100% byte-identical marshal and AST for the 42 closure modules, 164 difftest programs and `tests/kernel`; report the share of all vendored `Lib/**/*.py` the host compiles | none |
+| C0 | `make check-compiler` | 100% byte-identical marshal on `bin/lucifer` and the oracle for the 42 closure modules, the difftest programs, `tests/kernel` and every vendored `Lib/**/*.py` | none |
 | K0 | `make abi-audit` | `bin/lucifer` exports all 1,843 `Py*`/`_Py*` symbols; all 215 data symbols have the oracle's `nm -S` sizes; unimplemented functions abort naming themselves and are counted | none |
 | K1 | `make check-kernel` | every `tests/kernel` program (≥ 30) run as host-compiled `.pyc` under `-I -S` with a 512 KiB stack limit matches the oracle on stdout, stderr and exit, both plain and under `-X lucifer_handoff`, including `deep_recursion` and `handoff_witness` (§5.8) | K0 |
 | M0.0 | `tools/difftest run --python bin/lucifer` | probe accepted: 0 NOTRUN of 164 | C0, K1 |
@@ -736,17 +739,14 @@ probe accepted and 46 PASS. One task (a second carrier only under
 (`gc.collect()` returns 0 and collects nothing until M0.2), no JIT. All 1,843
 symbols are exported, most as aborting stubs.
 
-### 9.1 C0: compiler on the host
+### 9.1 C0: the compiler
 
-Files: `lib/compiler/{tokenizer,python.gram,parser,helpers,_ast,symtable,preprocess,codegen,flowgraph,assemble,__init__}.py`,
-`tools/compilercheck`, a Makefile target.
+Files: `runtime/compiler/` (§3.2), `tools/compilercheck`, a Makefile target.
 
-Mechanism (§3.2): pegen generates `parser.py` from our `python.gram`. The port
-order is the dependency order (tokenizer → parser → symtable → codegen →
-flowgraph → assemble). Each stage is checked against the host: tokens against
-`tokenize`; AST via `ast.dump(include_attributes=True)`; symbols against
-`symtable`; code objects via `marshal.dumps` equality, which compares bytecode,
-consts, names, line, position and exception tables.
+C0 began as a Python port checked on the host, stage by stage. It is now
+CPython's own C compiler (§3.2), so the check is one comparison: each file of
+the corpora is compiled on `bin/lucifer` and on the oracle, and
+`marshal.dumps` of the code objects must be the same bytes.
 
 Done when: C0 in §8.
 

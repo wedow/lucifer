@@ -52,6 +52,28 @@ exec_in_module(PyObject *module, PyObject *code)
     return result == NULL ? -1 : 0;
 }
 
+PyObject *PyInit__ast(void);
+PyObject *PyInit__tokenize(void);
+PyObject *PyInit__symtable(void);
+PyObject *PyInit__opcode(void);
+const struct lu_native lu_native_modules[] = {
+    { "_ast", PyInit__ast }, { "_tokenize", PyInit__tokenize }, { "_symtable", PyInit__symtable },
+    { "_opcode", PyInit__opcode },
+    { NULL, NULL },
+};
+
+static const struct lu_native *
+find_native(PyObject *name)
+{
+    const char *s = PyUnicode_Check(name) ? PyUnicode_AsUTF8(name) : NULL;
+    for (const struct lu_native *n = lu_native_modules; s != NULL && n->name != NULL; n++) {
+        if (strcmp(n->name, s) == 0) {
+            return n;
+        }
+    }
+    return NULL;
+}
+
 /* The builtin modules that are not ports: made before any Python runs. */
 static int
 is_native_module(PyObject *name)
@@ -64,7 +86,8 @@ is_native_module(PyObject *name)
 static PyObject *
 prim_port_exists(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    int yes = nargs == 1 && (is_native_module(args[0]) || find_module(lu_frozen_builtin, args[0]) != NULL);
+    int yes = nargs == 1 && (is_native_module(args[0]) || find_native(args[0]) != NULL
+                             || find_module(lu_frozen_builtin, args[0]) != NULL);
     return Py_NewRef(yes ? Py_True : Py_False);
 }
 
@@ -80,6 +103,10 @@ prim_port_create(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *native = lu_ns_lookup(PyInterpreterState_Get()->modules, args[0]);
     if (native != NULL && PyModule_CheckExact(native) && is_native_module(args[0])) {
         return Py_NewRef(native);
+    }
+    const struct lu_native *c_module = find_native(args[0]);
+    if (c_module != NULL) {
+        return lu_module_from_def((PyModuleDef *)c_module->init());
     }
     if (find_module(lu_frozen_builtin, args[0]) == NULL) {
         return Py_NewRef(Py_None);
