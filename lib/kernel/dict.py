@@ -64,14 +64,21 @@ def has_keys(obj):
 def lookup(d, key, h):
     """The entry number of key in d, or -1. A probe that meets a key it cannot
     judge natively returns it; __eq__ runs here, and when it changed the keys
-    table or the entry the probe starts over, as _Py_dict_lookup does."""
+    table or the entry the probe starts over, as _Py_dict_lookup does. A probe
+    that resumes past an unequal candidate counts only if the table and the
+    candidate stayed: in another table, or with the candidate deleted, the
+    skip to it passes the key."""
     after = -1
     while True:
+        if after < 0:
+            table = dict_keys_id(d)
         ix = dict_probe(d, key, h, after)
         if ix > -3:
-            return ix
+            if after < 0 or dict_keys_id(d) == table and dict_key(d, after) is startkey:
+                return ix
+            after = -1
+            continue
         cand = -3 - ix
-        table = dict_keys_id(d)
         startkey = dict_key(d, cand)
         if startkey is MISSING:
             after = -1
@@ -86,13 +93,15 @@ def lookup(d, key, h):
 
 
 def find_value(d, key, h):
-    """The value of key, or MISSING."""
+    """The value of key, or MISSING. The entry number is the table's that the
+    lookup probed, so the value counts only if that table is still d's."""
     while True:
+        table = dict_keys_id(d)
         ix = lookup(d, key, h)
         if ix < 0:
             return MISSING
         value = dict_value(d, ix)
-        if value is not MISSING:
+        if value is not MISSING and dict_keys_id(d) == table:
             return value
 
 
@@ -149,7 +158,7 @@ def setdefault(d, key, default):
                 return default
             continue
         value = dict_value(d, ix)
-        if value is not MISSING:
+        if value is not MISSING and dict_keys_id(d) == stamp >> 32:
             return value
 
 
@@ -358,8 +367,7 @@ def equal(a, b):
     e = next_entry(a, 0)
     while e is not None:
         i, key, aval, h = e
-        ix = lookup(b, key, h)
-        bval = dict_value(b, ix) if ix >= 0 else MISSING
+        bval = find_value(b, key, h)
         if bval is MISSING:
             return False
         if not (aval is bval or aval == bval):
@@ -707,8 +715,7 @@ def items_xor(a, b):
     e = next_entry(d2, 0)
     while e is not None:
         i, key, val2, h = e
-        ix = lookup(temp, key, h)
-        val1 = dict_value(temp, ix) if ix >= 0 else MISSING
+        val1 = find_value(temp, key, h)
         if val1 is not MISSING and (val1 is val2 or val1 == val2):
             delete(temp, key, h)
         else:
