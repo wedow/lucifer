@@ -2222,6 +2222,14 @@ prim_object_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLongLong(Py_HashPointer(args[0]));
 }
 
+/* object_is_immortal(x): sys._is_immortal. */
+static PyObject *
+prim_object_is_immortal(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    return bool_of(_Py_IsImmortal(args[0]));
+}
+
 /* call_with_locals(func, ns): runs a class body with ns as its locals. A
    frame primitive: the interpreter pushes the frame it returns. */
 static struct lu_frame *
@@ -2271,6 +2279,7 @@ PyMethodDef lu_prim_type_methods[] = {
     FAST(error), FAST(ns_get), FAST(ns_set), FAST(ns_del), FAST(ns_items),
     { "kind", (PyCFunction)(void (*)(void))prim_kind, METH_FASTCALL, NULL },
     FAST(cell_get), FAST(cell_set), FAST(address), FAST(object_hash),
+    FAST(object_is_immortal),
     { "call_with_locals", (PyCFunction)(void (*)(void))prim_call_with_locals,
       METH_FASTCALL | LU_METH_FRAME, NULL },
     { NULL, NULL, 0, NULL },

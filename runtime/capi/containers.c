@@ -301,13 +301,8 @@ PyCFunction_Call(PyObject *callable, PyObject *args, PyObject *kwargs)
     return PyObject_Call(callable, args, kwargs);
 }
 
-/* Bytes. */
-
-PyObject *
-PyBytes_FromObject(PyObject *x)
-{
-    return PyObject_CallOneArg((PyObject *)&PyBytes_Type, x);
-}
+/* Bytes. PyBytes_FromObject, PyBytes_Join and PyBytes_Repr are the
+   Objects/bytesobject.c ports in runtime/prim/bytes.c. */
 
 PyObject *
 PyByteArray_FromObject(PyObject *x)
@@ -351,18 +346,6 @@ PyByteArray_Concat(PyObject *a, PyObject *b)
     if (vb.len != -1)
         PyBuffer_Release(&vb);
     return (PyObject *)result;
-}
-
-PyObject *
-PyBytes_Join(PyObject *sep, PyObject *iterable)
-{
-    return call_method(sep, "join", "(O)", iterable);
-}
-
-PyObject *
-PyBytes_Repr(PyObject *obj, int smartquotes)
-{
-    return PyObject_Repr(obj);
 }
 
 PyObject *

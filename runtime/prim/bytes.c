@@ -1635,30 +1635,366 @@ PyBytes_FromString(const char *str)
     return PyBytes_FromStringAndSize(str, (Py_ssize_t)strlen(str));
 }
 
+/* Objects/bytesobject.c PyBytes_Repr. */
+PyObject *
+PyBytes_Repr(PyObject *obj, int smartquotes)
+{
+    PyBytesObject *op = (PyBytesObject *)obj;
+    Py_ssize_t i, length = Py_SIZE(op);
+    Py_ssize_t newsize, squotes, dquotes;
+    PyObject *v;
+    unsigned char quote;
+    const unsigned char *s;
+
+    /* Compute size of output string */
+    squotes = dquotes = 0;
+    newsize = 3; /* b'' */
+    s = (const unsigned char *)op->ob_sval;
+    for (i = 0; i < length; i++) {
+        Py_ssize_t incr = 1;
+        switch (s[i]) {
+        case '\'': squotes++; break;
+        case '"':  dquotes++; break;
+        case '\\': case '\t': case '\n': case '\r':
+            incr = 2; break; /* \C */
+        default:
+            if (s[i] < ' ' || s[i] >= 0x7f)
+                incr = 4; /* \xHH */
+        }
+        if (newsize > PY_SSIZE_T_MAX - incr)
+            goto overflow;
+        newsize += incr;
+    }
+    quote = '\'';
+    if (smartquotes && squotes && !dquotes)
+        quote = '"';
+    if (squotes && quote == '\'') {
+        if (newsize > PY_SSIZE_T_MAX - squotes)
+            goto overflow;
+        newsize += squotes;
+    }
+
+    v = PyUnicode_New(newsize, 127);
+    if (v == NULL) {
+        return NULL;
+    }
+    Py_UCS1 *p = PyUnicode_1BYTE_DATA(v);
+
+    *p++ = 'b', *p++ = quote;
+    for (i = 0; i < length; i++) {
+        unsigned char c = (unsigned char)op->ob_sval[i];
+        if (c == quote || c == '\\')
+            *p++ = '\\', *p++ = c;
+        else if (c == '\t')
+            *p++ = '\\', *p++ = 't';
+        else if (c == '\n')
+            *p++ = '\\', *p++ = 'n';
+        else if (c == '\r')
+            *p++ = '\\', *p++ = 'r';
+        else if (c < ' ' || c >= 0x7f) {
+            *p++ = '\\';
+            *p++ = 'x';
+            *p++ = Py_hexdigits[(c & 0xf0) >> 4];
+            *p++ = Py_hexdigits[c & 0xf];
+        }
+        else
+            *p++ = c;
+    }
+    *p++ = quote;
+    return v;
+
+  overflow:
+    PyErr_SetString(PyExc_OverflowError,
+                    "bytes object is too large to make repr");
+    return NULL;
+}
+
+/* Objects/bytesobject.c PyBytes_DecodeEscape (over _PyBytes_DecodeEscape2).
+   The unescaped result is never longer than the input, so len bytes are
+   allocated up front and trimmed after. */
+PyObject *
+PyBytes_DecodeEscape(const char *s, Py_ssize_t len, const char *errors,
+                     Py_ssize_t Py_UNUSED(unicode), const char *Py_UNUSED(recode_encoding))
+{
+    PyObject *r = PyBytes_FromStringAndSize(NULL, len);
+    if (r == NULL) {
+        return NULL;
+    }
+    char *p = PyBytes_AS_STRING(r);
+    const char *start = s, *end = s + len;
+    int c;
+    int bad_escape = -1;
+
+    while (s < end) {
+        if (*s != '\\') {
+            *p++ = *s++;
+            continue;
+        }
+
+        s++;
+        if (s == end) {
+            PyErr_SetString(PyExc_ValueError,
+                            "Trailing \\ in string");
+            goto failed;
+        }
+
+        switch (*s++) {
+        /* XXX This assumes ASCII! */
+        case '\n': break;
+        case '\\': *p++ = '\\'; break;
+        case '\'': *p++ = '\''; break;
+        case '\"': *p++ = '\"'; break;
+        case 'b': *p++ = '\b'; break;
+        case 'f': *p++ = '\014'; break; /* FF */
+        case 't': *p++ = '\t'; break;
+        case 'n': *p++ = '\n'; break;
+        case 'r': *p++ = '\r'; break;
+        case 'v': *p++ = '\013'; break; /* VT */
+        case 'a': *p++ = '\007'; break; /* BEL, not classic C */
+        case '0': case '1': case '2': case '3':
+        case '4': case '5': case '6': case '7':
+            c = s[-1] - '0';
+            if (s < end && '0' <= *s && *s <= '7') {
+                c = (c << 3) + *s++ - '0';
+                if (s < end && '0' <= *s && *s <= '7')
+                    c = (c << 3) + *s++ - '0';
+            }
+            if (c > 0377) {
+                if (bad_escape == -1) {
+                    bad_escape = c;
+                }
+            }
+            *p++ = (char)c;
+            break;
+        case 'x':
+            if (s + 1 < end) {
+                int digit1, digit2;
+                digit1 = hexval(Py_CHARMASK(s[0]));
+                digit2 = hexval(Py_CHARMASK(s[1]));
+                if (digit1 >= 0 && digit2 >= 0) {
+                    *p++ = (char)((digit1 << 4) + digit2);
+                    s += 2;
+                    break;
+                }
+            }
+            /* invalid hexadecimal digits */
+
+            if (!errors || strcmp(errors, "strict") == 0) {
+                PyErr_Format(PyExc_ValueError,
+                             "invalid \\x escape at position %zd",
+                             s - 2 - start);
+                goto failed;
+            }
+            if (strcmp(errors, "replace") == 0) {
+                *p++ = '?';
+            }
+            else if (strcmp(errors, "ignore") == 0) {
+                /* do nothing */
+            }
+            else {
+                PyErr_Format(PyExc_ValueError,
+                             "decoding error; unknown "
+                             "error handling code: %.400s",
+                             errors);
+                goto failed;
+            }
+            /* skip \x */
+            if (s < end && Py_ISXDIGIT(s[0]))
+                s++; /* and a hexdigit */
+            break;
+
+        default:
+            if (bad_escape == -1) {
+                bad_escape = (unsigned char)s[-1];
+            }
+            *p++ = '\\';
+            s--;
+        }
+    }
+
+    if (_PyBytes_Resize(&r, p - PyBytes_AS_STRING(r)) < 0) {
+        return NULL;
+    }
+    if (bad_escape != -1) {
+        if (bad_escape > 0xff) {
+            if (PyErr_WarnFormat(PyExc_DeprecationWarning, 1,
+                                 "b\"\\%o\" is an invalid octal escape sequence. "
+                                 "Such sequences will not work in the future. ",
+                                 bad_escape) < 0)
+            {
+                Py_DECREF(r);
+                return NULL;
+            }
+        }
+        else {
+            if (PyErr_WarnFormat(PyExc_DeprecationWarning, 1,
+                                 "b\"\\%c\" is an invalid escape sequence. "
+                                 "Such sequences will not work in the future. ",
+                                 bad_escape) < 0)
+            {
+                Py_DECREF(r);
+                return NULL;
+            }
+        }
+    }
+    return r;
+
+  failed:
+    Py_DECREF(r);
+    return NULL;
+}
+
+/* An iterator of ints, as bytes: the _PyBytes_FromIterator tail of
+   Objects/bytesobject.c PyBytes_FromObject. */
+static PyObject *
+bytes_from_iterator(PyObject *it)
+{
+    wbuf b = { 0 };
+    int err = 0;
+    PyObject *item;
+    while (!err && (item = PyIter_Next(it)) != NULL) {
+        Py_ssize_t value = PyNumber_AsSsize_t(item, NULL);
+        if (value == -1 && PyErr_Occurred()) {
+            err = 1;
+        }
+        else if (value < 0 || value >= 256) {
+            PyErr_SetString(PyExc_ValueError,
+                            "bytes must be in range(0, 256)");
+            err = 1;
+        }
+        else {
+            unsigned char c = (unsigned char)value;
+            err = wb_put(&b, &c, 1);
+        }
+        Py_DECREF(item);
+    }
+    if (PyErr_Occurred()) {
+        err = 1;
+    }
+    return wb_finish(&b, err);
+}
+
+/* Objects/bytesobject.c PyBytes_FromObject. */
+PyObject *
+PyBytes_FromObject(PyObject *x)
+{
+    if (x == NULL) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+
+    if (PyBytes_CheckExact(x)) {
+        return Py_NewRef(x);
+    }
+
+    /* Use the modern buffer interface */
+    if (PyObject_CheckBuffer(x)) {
+        PyObject *args[1] = { x };
+        return prim_b_bytes(NULL, args, 1);
+    }
+
+    if (PyList_CheckExact(x) || PyTuple_CheckExact(x)) {
+        PyObject *args[1] = { x };
+        return prim_b_from_ints(NULL, args, 1);
+    }
+
+    if (!PyUnicode_Check(x)) {
+        PyObject *it = PyObject_GetIter(x);
+        if (it != NULL) {
+            PyObject *result = bytes_from_iterator(it);
+            Py_DECREF(it);
+            return result;
+        }
+        if (!PyErr_ExceptionMatches(PyExc_TypeError)) {
+            return NULL;
+        }
+    }
+
+    lu_err_format(PyExc_TypeError,
+                  "cannot convert '%.200s' object to bytes",
+                  Py_TYPE(x)->tp_name);
+    return NULL;
+}
+
+/* Objects/bytesobject.c PyBytes_Join (over stringlib/join.h): the joining
+   itself is prim b_join over the items as a tuple. */
+PyObject *
+PyBytes_Join(PyObject *sep, PyObject *iterable)
+{
+    if (sep == NULL) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+    if (!PyBytes_Check(sep)) {
+        PyErr_Format(PyExc_TypeError,
+                     "sep: expected bytes, got %T", sep);
+        return NULL;
+    }
+
+    PyObject *seq = PySequence_Fast(iterable, "can only join an iterable");
+    if (seq == NULL) {
+        return NULL;
+    }
+    PyObject *items = PyTuple_CheckExact(seq) ? Py_NewRef(seq) : PySequence_Tuple(seq);
+    Py_DECREF(seq);
+    if (items == NULL) {
+        return NULL;
+    }
+    PyObject *args[2] = { sep, items };
+    PyObject *r = prim_b_join(NULL, args, 2);
+    Py_DECREF(items);
+    return r;
+}
+
+/* Objects/bytesobject.c PyBytes_Concat over bytes_concat: raw buffers on
+   both sides, so a strided view or a non-buffer raises TypeError rather
+   than going through the constructor.  CPython appends in place when the
+   left side is uniquely referenced; lucifer's allocator cannot realloc an
+   object, so the result is always fresh, which the contract allows. */
 void
 PyBytes_Concat(PyObject **pv, PyObject *w)
 {
     if (*pv == NULL) {
         return;
     }
-    lu_bv a, b;
-    if (w == NULL || lu_bv_get(*pv, &a) < 0) {
+    if (w == NULL) {
         Py_CLEAR(*pv);
         return;
     }
-    if (lu_bv_get(w, &b) < 0) {
-        lu_bv_put(&a);
-        Py_CLEAR(*pv);
-        return;
+    Py_buffer va, vb;
+    PyObject *result = NULL;
+    va.len = -1;
+    vb.len = -1;
+    if (PyObject_GetBuffer(*pv, &va, PyBUF_SIMPLE) != 0 ||
+        PyObject_GetBuffer(w, &vb, PyBUF_SIMPLE) != 0) {
+        PyErr_Format(PyExc_TypeError, "can't concat %.100s to %.100s",
+                     Py_TYPE(w)->tp_name, Py_TYPE(*pv)->tp_name);
+        goto done;
     }
-    PyObject *r = PyBytes_FromStringAndSize(NULL, a.n + b.n);
-    if (r != NULL) {
-        memcpy(PyBytes_AS_STRING(r), a.p, a.n);
-        memcpy(PyBytes_AS_STRING(r) + a.n, b.p, b.n);
+    /* Optimize end cases */
+    if (va.len == 0 && PyBytes_CheckExact(w)) {
+        result = Py_NewRef(w);
+        goto done;
     }
-    lu_bv_put(&a);
-    lu_bv_put(&b);
-    Py_SETREF(*pv, r);
+    if (vb.len == 0 && PyBytes_CheckExact(*pv)) {
+        result = Py_NewRef(*pv);
+        goto done;
+    }
+    if (va.len > PY_SSIZE_T_MAX - vb.len) {
+        PyErr_NoMemory();
+        goto done;
+    }
+    result = PyBytes_FromStringAndSize(NULL, va.len + vb.len);
+    if (result != NULL) {
+        memcpy(PyBytes_AS_STRING(result), va.buf, va.len);
+        memcpy(PyBytes_AS_STRING(result) + va.len, vb.buf, vb.len);
+    }
+  done:
+    if (va.len != -1)
+        PyBuffer_Release(&va);
+    if (vb.len != -1)
+        PyBuffer_Release(&vb);
+    Py_SETREF(*pv, result);
 }
 
 void
@@ -1668,26 +2004,32 @@ PyBytes_ConcatAndDel(PyObject **pv, PyObject *w)
     Py_XDECREF(w);
 }
 
+/* Objects/bytesobject.c _PyBytes_Resize: the contract allows the result to
+   be the same object or a copy, so this always copies (lucifer's allocator
+   cannot realloc an object in place).  A copy is required anyway whenever
+   the object is shared or its hash was computed (gh-156995), and a fresh
+   object is never one of the 0- and 1-byte singletons. */
 int
 _PyBytes_Resize(PyObject **pv, Py_ssize_t size)
 {
     PyObject *v = *pv;
-    if (!PyBytes_CheckExact(v) || Py_REFCNT(v) != 1 || size < 0) {
+    if (!PyBytes_Check(v) || size < 0) {
         *pv = NULL;
         Py_DECREF(v);
-        lu_err_format(PyExc_SystemError, "bad argument to internal function");
+        PyErr_BadInternalCall();
         return -1;
     }
-    if (size == PyBytes_GET_SIZE(v)) {
+    Py_ssize_t oldsize = PyBytes_GET_SIZE(v);
+    if (oldsize == size) {
+        /* Leave the object unchanged if the new size is the same as the old
+           size, even if the object is not uniquely referenced or if the hash
+           value was already computed. */
         return 0;
     }
-    PyObject *r = PyBytes_FromStringAndSize(PyBytes_AS_STRING(v), size < PyBytes_GET_SIZE(v) ? size : PyBytes_GET_SIZE(v));
-    if (r != NULL && size > PyBytes_GET_SIZE(v)) {
-        Py_DECREF(r);
-        r = PyBytes_FromStringAndSize(NULL, size);
-        if (r != NULL) {
-            memcpy(PyBytes_AS_STRING(r), PyBytes_AS_STRING(v), PyBytes_GET_SIZE(v));
-        }
+    PyObject *r = PyBytes_FromStringAndSize(NULL, size);
+    if (r != NULL && oldsize > 0) {
+        memcpy(PyBytes_AS_STRING(r), PyBytes_AS_STRING(v),
+               oldsize < size ? oldsize : size);
     }
     *pv = r;
     Py_DECREF(v);
