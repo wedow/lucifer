@@ -695,7 +695,6 @@ collect_internal(struct collection_state *state, int generation)
     if (state->reason != LU_GC_REASON_STRESS) {
         gc->long_lived_total = state->long_lived_total;
     }
-    gc->stress_live = state->long_lived_total;
     start_the_world(interp);
 
     delete_garbage(state);

@@ -260,8 +260,6 @@ struct lu_gc {
     PyObject *garbage;          /* gc.garbage; strong */
     int debug;                  /* gc.set_debug flags */
     int freeze_active;          /* gc.freeze() was used */
-    Py_ssize_t stress_allocs;   /* allocations since the last stress collection */
-    Py_ssize_t stress_live;     /* GC blocks that collection saw */
     Py_ssize_t stats[3][3];     /* per generation: collections, collected, uncollectable */
 };
 
@@ -583,11 +581,9 @@ void lu_gc_collect_shutdown(PyThreadState *ts);
 /* The poll handler's GC reason: collects the youngest generation if the
    collector is enabled and still wants to. */
 void lu_gc_run(PyThreadState *ts);
-/* The stress tick's collection (-X lucifer_stress=gc:N), `every` allocations after
-   the last tick: as a manual one, but it leaves the counts, statistics and callbacks
-   as they were. A collection costs the heap, so ticks are skipped until the
-   allocations since the last one are half of it. */
-void lu_gc_stress(PyThreadState *ts, unsigned long every);
+/* The stress tick's collection (-X lucifer_stress=gc:N), every N GC allocations:
+   as a manual one, but it leaves the counts, statistics and callbacks as they were. */
+void lu_gc_stress(PyThreadState *ts);
 
 /* Signals (runtime/interp/signals.c): the trip handler sets a flag and the
    main task's poll reason; the main task runs the Python handlers. */

@@ -203,12 +203,9 @@ lu_gc_run(PyThreadState *ts)
 }
 
 void
-lu_gc_stress(PyThreadState *ts, unsigned long every)
+lu_gc_stress(PyThreadState *ts)
 {
-    struct lu_gc *gc = &ts->interp->gc;
-    gc->stress_allocs += (Py_ssize_t)every;
-    if (__atomic_load_n(&gc->enabled, __ATOMIC_RELAXED) && gc->stress_allocs >= gc->stress_live / 2) {
-        gc->stress_allocs = 0;
+    if (__atomic_load_n(&ts->interp->gc.enabled, __ATOMIC_RELAXED)) {
         collect(ts, 2, LU_GC_REASON_STRESS);
     }
 }
