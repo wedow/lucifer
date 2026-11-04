@@ -1038,3 +1038,13 @@ _PyDict_GetItem_KnownHash(PyObject *op, PyObject *key, Py_hash_t hash)
 {
     return PyDict_GetItemWithError(op, key);
 }
+
+LU_EXPORT void
+_PyErr_SetKeyError(PyObject *arg)
+{
+    PyObject *tup = PyTuple_Pack(1, arg);
+    if (tup != NULL) {
+        PyErr_SetObject(PyExc_KeyError, tup);
+        Py_DECREF(tup);
+    }
+}

@@ -368,7 +368,7 @@ type(name, bases, dict, **kwds) -> a new type"""
                 'type.__new__() argument 3 must be dict, not ', type_tp_name(type(ns)))))
         if bases:
             for base in bases:
-                if not kind(base, 'type') and type_lookup(type(base), '__mro_entries__') is not MISSING:
+                if not kind(base, 'type') and hasattr(base, '__mro_entries__'):
                     error(TypeError, "type() doesn't support MRO entry resolution; use types.new_class()")
             winner = calculate_metaclass(metatype, bases)
             if winner is not metatype:

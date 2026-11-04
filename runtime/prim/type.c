@@ -476,8 +476,8 @@ PyObject_GenericSetDict(PyObject *obj, PyObject *value, void *closure)
         return -1;
     }
     if (value == NULL) {
-        lu_err_format(PyExc_TypeError, "cannot delete __dict__");
-        return -1;
+        Py_CLEAR(*p);                   /* recreated empty on the next use */
+        return 0;
     }
     if (!PyDict_Check(value)) {
         lu_err_format(PyExc_TypeError, "__dict__ must be set to a dictionary, not a '%.200s'",

@@ -103,13 +103,17 @@ convert_string(struct parse *p, PyObject *arg, int code, int mod, va_list *va)
         }
         return 0;
     }
-    if (!PyUnicode_Check(arg)) {
+    Py_ssize_t size;
+    const char *data;
+    if (mod == '#' && PyBytes_Check(arg)) {         /* s# and z# take read-only bytes too */
+        data = PyBytes_AS_STRING(arg);
+        size = PyBytes_GET_SIZE(arg);
+    }
+    else if (!PyUnicode_Check(arg)) {
         type_error(p, none_ok ? "str or None" : "str", arg);
         return -1;
     }
-    Py_ssize_t size;
-    const char *data = PyUnicode_AsUTF8AndSize(arg, &size);
-    if (data == NULL) {
+    else if ((data = PyUnicode_AsUTF8AndSize(arg, &size)) == NULL) {
         return -1;
     }
     if (mod != '#' && strlen(data) != (size_t)size) {

@@ -265,10 +265,15 @@ def _update_bases(bases):
     changed = False
     result = []
     for base in bases:
-        if kind(base, 'type') or type_lookup(type(base), '__mro_entries__') is MISSING:
+        if kind(base, 'type'):
             result = [*result, base]
             continue
-        entries = base.__mro_entries__(bases)
+        try:
+            mro_entries = base.__mro_entries__
+        except AttributeError:
+            result = [*result, base]
+            continue
+        entries = mro_entries(bases)
         if not kind(entries, 'tuple'):
             error(TypeError, '__mro_entries__ must return a tuple')
         result = [*result, *entries]
