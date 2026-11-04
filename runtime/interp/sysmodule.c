@@ -113,6 +113,9 @@ config_dict(struct _is *interp)
     for (const struct lu_frozen *m = lu_frozen_builtin; names != NULL && m->name != NULL; m++) {
         err = err || append_name(names, m->name);
     }
+    for (const struct lu_native *n = lu_native_modules; names != NULL && n->name != NULL; n++) {
+        err = err || append_name(names, n->name);
+    }
     err = err || append_name(names, "builtins") || append_name(names, "sys")
         || append_name(names, "_lucifer");
     err = err || put(d, "hash_seed", PyLong_FromLongLong((long long)c->hash_seed))

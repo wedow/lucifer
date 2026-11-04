@@ -6,8 +6,8 @@ LU_CFLAGS = -std=gnu11 -Wall -Wextra -Wno-unused-parameter -fvisibility=hidden \
 	-fno-omit-frame-pointer -pthread -Iinclude -Iruntime -Ithird_party/mimalloc/include
 LU_LDFLAGS = -rdynamic -pthread
 
-SRCS = $(wildcard runtime/*.c runtime/*/*.c)
-HEADERS = $(wildcard runtime/*.h runtime/*/*.h)
+SRCS = $(wildcard runtime/*.c runtime/*/*.c runtime/compiler/*/*.c)
+HEADERS = $(wildcard runtime/*.h runtime/*/*.h runtime/compiler/*/*.h)
 MAIN = build/runtime/main.o
 LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o)) build/frozen.o
 HOST_PYTHON ?= python3
@@ -73,9 +73,6 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 	re._compiler:re._compiler:third_party/cpython/Lib/re/_compiler.py \
 	re._constants:re._constants:third_party/cpython/Lib/re/_constants.py \
 	re._parser:re._parser:third_party/cpython/Lib/re/_parser.py
-# The compiler runs as a C module would: its frames are not in tracebacks.
-HIDDEN = compiler:compiler:lib/compiler/__init__.py \
-	$(foreach f,$(filter-out %/__init__.py,$(wildcard lib/compiler/*.py)),compiler.$(basename $(notdir $f)):compiler.$(basename $(notdir $f)):$f)
 EXPORTS = results/abi/cp314t-exports.tsv
 
 # Every gate step runs under timeout: on expiry the whole process group is
@@ -86,7 +83,7 @@ STEP_TMO = 3600
 RUN = timeout -k 10 $(TMO)
 STEP = timeout -k 10 $(STEP_TMO)
 
-.PHONY: all oracle-exts abi-audit check check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler check-timing regen
+.PHONY: all oracle-exts abi-audit check check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler check-timing
 all: bin/lucifer build/lib/stamp
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -102,12 +99,17 @@ bin/lucifer: $(MAIN) build/liblucifer.a
 
 build/runtime/object/alloc.o: LU_CFLAGS += -Ithird_party/mimalloc/src
 
+# CPython's compiler, as CPython's own files with the internal headers beside them.
+build/runtime/compiler/%.o: LU_CFLAGS += -DPy_BUILD_CORE -DPy_BUILD_CORE_MODULE -Iruntime/compiler \
+	-Iruntime/compiler/include -Iruntime/compiler/lexer -Iruntime/compiler/tokenizer -Wno-unused-function \
+	-Wno-sign-compare -Wno-missing-field-initializers -Wno-type-limits -Wno-implicit-fallthrough -Wno-unused-variable
+
 build/%.o: %.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<
 
-build/frozen.c: Makefile tools/freeze $(KERNEL) $(MODULES) $(foreach e,$(FROZEN) $(HIDDEN),$(lastword $(subst :, ,$(e))))
-	$(HOST_PYTHON) tools/freeze $@ --kernel $(KERNEL) --builtin $(MODULES) --frozen $(FROZEN) --hidden $(HIDDEN)
+build/frozen.c: Makefile tools/freeze $(KERNEL) $(MODULES) $(foreach e,$(FROZEN),$(lastword $(subst :, ,$(e))))
+	$(HOST_PYTHON) tools/freeze $@ --kernel $(KERNEL) --builtin $(MODULES) --frozen $(FROZEN)
 
 build/frozen.o: build/frozen.c $(HEADERS)
 	$(CC) $(CFLAGS) $(LU_CFLAGS) -c -o $@ $<
@@ -236,11 +238,7 @@ check-kernel: bin/lucifer build/lib/stamp
 check-timing: bin/lucifer build/lib/stamp
 	$(STEP) python3 tools/timecheck --lucifer bin/lucifer --oracle $(ORACLE_T)
 
-check-compiler:
-	$(HOST_PYTHON) tools/compilercheck --corpus closure,difftest,kernel,lib --require closure,difftest,kernel
+check-compiler: bin/lucifer build/lib/stamp
+	$(STEP) $(HOST_PYTHON) tools/compilercheck --lucifer bin/lucifer --oracle $(ORACLE_T) \
+	  --corpus closure,difftest,kernel,lib --require closure,difftest,kernel,lib
 
-PEGEN = third_party/cpython/Tools/peg_generator
-
-regen:
-	PYTHONPATH=$(PEGEN) $(HOST_PYTHON) -m pegen -q python lib/compiler/python.gram -o lib/compiler/parser.py
-	$(HOST_PYTHON) tools/genast

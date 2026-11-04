@@ -18,6 +18,12 @@ exc_new(PyObject *type, PyObject *args)
         return NULL;
     }
     PyTypeObject *tp = (PyTypeObject *)type;
+    if (PyType_IsSubtype(tp, (PyTypeObject *)PyExc_SyntaxError)) {
+        /* its __init__ reads msg, filename, lineno... out of the args */
+        PyObject *exc = PyObject_Call(type, args, NULL);
+        Py_DECREF(args);
+        return exc;
+    }
     PyBaseExceptionObject *e = (PyBaseExceptionObject *)(tp->tp_alloc != NULL
         ? tp->tp_alloc(tp, 0) : lu_object_new(tp, tp->tp_basicsize));
     if (e == NULL) {

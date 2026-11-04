@@ -8,7 +8,7 @@ from _lucifer import (
     str_join, error, kind, type_lookup, type_tp_name, MISSING, static_type, is_callable,
     is_subtype, size, int_format, int_add, int_as_double, str_chr, str_ord, bytes_ord, str_len,
     object_id, caller_locals, caller_globals, caller_code_flags, eval_code, kernel_get, kernel_set,
-    import_state, field_get, setattr_native,
+    import_state, field_get, setattr_native, compile as _lucifer_compile,
 )
 from _lucifer import _boot, _format, operators, _args, iter as _iter
 import sys
@@ -532,17 +532,11 @@ _PyCF_OPTIMIZED_AST = 0x8400
 _PyCF_MASK = 0x1fe0000                  # the CO_FUTURE_* flags
 _PyCF_COMPILE_MASK = 0x400 | 0x2000 | 0x1000 | 0x200 | 0x4000 | 0x8400
 _CO_NESTED = 0x10
-_compiler = None
 
 
 def _compile(source, filename, mode, flags, dont_inherit, optimize, feature_version):
-    """The compiler's compile(); the compiler is imported on first use."""
-    global _compiler
-    if _compiler is None:
-        import compiler
-        _compiler = compiler
-    return _compiler.compile(source, filename, mode, flags, dont_inherit, optimize,
-                             _feature_version=feature_version)
+    """CPython's compiler (runtime/compiler); the caller has merged the future flags."""
+    return _lucifer_compile(source, filename, mode, flags, optimize, feature_version)
 
 
 def _source_text(fname, source):
@@ -686,12 +680,9 @@ in addition to any features explicitly specified."""
         error(ValueError, "compile() mode must be 'exec', 'eval' or 'single'")
     if mode == 'func_type' and not flags & _PyCF_ONLY_AST:
         error(ValueError, "compile() mode 'func_type' requires flag PyCF_ONLY_AST")
-    import _ast
-    if not isinstance(source, _ast.AST):
-        text = _source_text('compile', source)
-        if text is None:
-            error(TypeError, 'compile() arg 1 must be a string, bytes or AST object')
-        source = text
+    text = _source_text('compile', source)
+    if text is not None:
+        source = text           # anything else is for the compiler: an AST or a TypeError
     sys.audit('compile', source, filename)
     return _compile(source, filename, mode, flags, truth(dont_inherit), optimize, feature_version)
 
