@@ -775,17 +775,21 @@ lu_seqiter_next(PyObject *iter)
 {
     seqiterobject *it = (seqiterobject *)iter;
     PyTypeObject *tp = Py_TYPE(iter);
-    /* The iterator's state under its own lock and a list's array and size,
-       which change apart, under the list's: both at once, on a reference
-       taken first so the sequence outlives a racing exhaustion. */
-    PyObject *v = NULL, *dead = NULL, *seq;
-    Py_BEGIN_CRITICAL_SECTION(iter);
-    seq = Py_XNewRef(it->it_seq);
-    Py_END_CRITICAL_SECTION();
+    /* The iterator's state under its own lock, and a list's array and size,
+       which change apart, under the list's too. The sequence is taken first,
+       as a lock-free reader takes an item, so that it outlives an exhaustion
+       racing to drop it. */
+    PyObject *v = NULL, *dead = NULL;
+    PyObject *seq = lu_try_xget_ref(&it->it_seq);
     if (seq == NULL) {
-        return NULL;
+        Py_BEGIN_CRITICAL_SECTION(iter);
+        seq = it->it_seq != NULL ? lu_new_ref_with_lock(it->it_seq) : NULL;
+        Py_END_CRITICAL_SECTION();
+        if (seq == NULL) {
+            return NULL;
+        }
     }
-    Py_BEGIN_CRITICAL_SECTION2(iter, seq);
+    Py_BEGIN_CRITICAL_SECTION2(iter, tp == &PyTupleIter_Type ? iter : seq);
     if (it->it_seq == seq) {
         if (tp == &PyListRevIter_Type) {
             if (it->it_index >= 0 && it->it_index < Py_SIZE(seq)) {
