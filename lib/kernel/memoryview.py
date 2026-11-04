@@ -69,7 +69,7 @@ def _count(self, key):
 class memoryview:
     """Create a new memoryview object which references the given object."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         if not kind(cls, 'type'):
             error(TypeError, _cat('memoryview.__new__(X): X is not a type object (', _name(cls), ')'))
         obj = MISSING

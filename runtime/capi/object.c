@@ -261,3 +261,273 @@ PyObject_DelItem(PyObject *o, PyObject *key)
 {
     return ass_subscript(o, key, NULL);
 }
+
+/* Allocation and initialization of objects that are not GC types
+   (Objects/object.c _PyObject_New, _PyObject_NewVar). */
+
+PyObject *
+_PyObject_New(PyTypeObject *tp)
+{
+    return PyObject_Init(PyObject_Malloc(_PyObject_SIZE(tp)), tp);
+}
+
+PyVarObject *
+PyObject_InitVar(PyVarObject *op, PyTypeObject *tp, Py_ssize_t size)
+{
+    if (op == NULL) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+    Py_SET_SIZE(op, size);
+    PyObject_Init((PyObject *)op, tp);
+    return op;
+}
+
+PyVarObject *
+_PyObject_NewVar(PyTypeObject *tp, Py_ssize_t nitems)
+{
+    return PyObject_InitVar(PyObject_Malloc(_PyObject_VAR_SIZE(tp, nitems)), tp, nitems);
+}
+
+void
+PyObject_ClearWeakRefs(PyObject *ob)
+{
+    lu_clear_weakrefs(ob);
+}
+
+/* The dict of a Py_TPFLAGS_MANAGED_DICT instance. */
+
+void
+PyObject_ClearManagedDict(PyObject *obj)
+{
+    if (Py_TYPE(obj)->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
+        Py_CLEAR(LU_MANAGED_DICT(obj));
+    }
+}
+
+int
+PyObject_VisitManagedDict(PyObject *obj, visitproc visit, void *arg)
+{
+    if (Py_TYPE(obj)->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
+        Py_VISIT(LU_MANAGED_DICT(obj));
+    }
+    return 0;
+}
+
+PyObject *
+PyObject_SelfIter(PyObject *obj)
+{
+    return Py_NewRef(obj);
+}
+
+unsigned long
+PyType_GetFlags(PyTypeObject *tp)
+{
+    return tp->tp_flags;
+}
+
+/* Attribute and call protocols. */
+
+int
+PyObject_GetOptionalAttr(PyObject *v, PyObject *name, PyObject **result)
+{
+    *result = PyObject_GetAttr(v, name);
+    if (*result != NULL) {
+        return 1;
+    }
+    if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+        return -1;
+    }
+    PyErr_Clear();
+    return 0;
+}
+
+PyObject *
+PyObject_VectorcallMethod(PyObject *name, PyObject *const *args, size_t nargsf, PyObject *kwnames)
+{
+    PyObject *method = PyObject_GetAttr(args[0], name);
+    if (method == NULL) {
+        return NULL;
+    }
+    PyObject *result = PyObject_Vectorcall(method, args + 1, (nargsf & ~PY_VECTORCALL_ARGUMENTS_OFFSET) - 1,
+                                           kwnames);
+    Py_DECREF(method);
+    return result;
+}
+
+PyObject *
+PyObject_VectorcallDict(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwargs)
+{
+    if (kwargs == NULL || PyDict_GET_SIZE(kwargs) == 0) {
+        return PyObject_Vectorcall(callable, args, nargsf, NULL);
+    }
+    PyObject *tuple = PyTuple_New(PyVectorcall_NARGS(nargsf));
+    for (Py_ssize_t i = 0; tuple != NULL && i < PyVectorcall_NARGS(nargsf); i++) {
+        PyTuple_SET_ITEM(tuple, i, Py_NewRef(args[i]));
+    }
+    PyObject *result = tuple != NULL ? PyObject_Call(callable, tuple, kwargs) : NULL;
+    Py_XDECREF(tuple);
+    return result;
+}
+
+PyObject *
+PyObject_CallMethodObjArgs(PyObject *obj, PyObject *name, ...)
+{
+    PyObject *stack[16], **args = stack;
+    Py_ssize_t n = 1, cap = 16;
+    va_list ap;
+    stack[0] = obj;
+    va_start(ap, name);
+    for (PyObject *a; (a = va_arg(ap, PyObject *)) != NULL; ) {
+        if (n == cap) {
+            PyObject **bigger = PyMem_Malloc(2 * cap * sizeof(PyObject *));
+            if (bigger == NULL) {
+                va_end(ap);
+                if (args != stack) {
+                    PyMem_Free(args);
+                }
+                return PyErr_NoMemory();
+            }
+            memcpy(bigger, args, n * sizeof(PyObject *));
+            if (args != stack) {
+                PyMem_Free(args);
+            }
+            args = bigger;
+            cap *= 2;
+        }
+        args[n++] = a;
+    }
+    va_end(ap);
+    PyObject *result = PyObject_VectorcallMethod(name, args, n, NULL);
+    if (args != stack) {
+        PyMem_Free(args);
+    }
+    return result;
+}
+
+Py_ssize_t
+PyObject_LengthHint(PyObject *o, Py_ssize_t defaultvalue)
+{
+    PyTypeObject *tp = Py_TYPE(o);
+    if ((tp->tp_as_sequence != NULL && tp->tp_as_sequence->sq_length != NULL)
+        || (tp->tp_as_mapping != NULL && tp->tp_as_mapping->mp_length != NULL)) {
+        Py_ssize_t len = PyObject_Size(o);
+        if (len >= 0) {
+            return len;
+        }
+        if (!PyErr_ExceptionMatches(PyExc_TypeError)) {
+            return -1;
+        }
+        PyErr_Clear();
+    }
+    PyObject *name = PyUnicode_InternFromString("__length_hint__");
+    PyObject *hint = name != NULL ? _PyType_Lookup(tp, name) : NULL;
+    if (hint == NULL) {
+        Py_XDECREF(name);
+        return PyErr_Occurred() ? -1 : defaultvalue;
+    }
+    PyObject *result = lu_call_special(o, name, NULL, 0);
+    Py_DECREF(name);
+    if (result == NULL) {
+        if (!PyErr_ExceptionMatches(PyExc_TypeError)) {
+            return -1;
+        }
+        PyErr_Clear();
+        return defaultvalue;
+    }
+    if (result == Py_NotImplemented) {
+        Py_DECREF(result);
+        return defaultvalue;
+    }
+    if (!PyLong_Check(result)) {
+        PyErr_Format(PyExc_TypeError, "__length_hint__ must be an integer, not %.100s",
+                     Py_TYPE(result)->tp_name);
+        Py_DECREF(result);
+        return -1;
+    }
+    Py_ssize_t res = PyLong_AsSsize_t(result);
+    Py_DECREF(result);
+    if (res < 0 && PyErr_Occurred()) {
+        return -1;
+    }
+    if (res < 0) {
+        PyErr_Format(PyExc_ValueError, "__length_hint__() should return >= 0");
+        return -1;
+    }
+    return res;
+}
+
+int
+PyObject_AsFileDescriptor(PyObject *o)
+{
+    PyObject *meth = NULL, *fno = NULL;
+    int fd;
+    if (PyLong_Check(o)) {
+        fd = PyLong_AsInt(o);
+    }
+    else {
+        meth = PyObject_GetAttrString(o, "fileno");
+        if (meth == NULL) {
+            if (PyErr_ExceptionMatches(PyExc_AttributeError)) {
+                PyErr_SetString(PyExc_TypeError, "argument must be an int, or have a fileno() method.");
+            }
+            return -1;
+        }
+        fno = PyObject_CallNoArgs(meth);
+        Py_DECREF(meth);
+        if (fno == NULL) {
+            return -1;
+        }
+        if (!PyLong_Check(fno)) {
+            Py_DECREF(fno);
+            PyErr_SetString(PyExc_TypeError, "fileno() returned a non-integer");
+            return -1;
+        }
+        fd = PyLong_AsInt(fno);
+        Py_DECREF(fno);
+    }
+    if (fd == -1 && PyErr_Occurred()) {
+        return -1;
+    }
+    if (fd < 0) {
+        PyErr_Format(PyExc_ValueError, "file descriptor cannot be a negative integer (%i)", fd);
+        return -1;
+    }
+    return fd;
+}
+
+int
+PyObject_Print(PyObject *op, FILE *fp, int flags)
+{
+    PyObject *s = op == NULL ? PyUnicode_FromString("<nil>")
+        : (flags & Py_PRINT_RAW) ? PyObject_Str(op) : PyObject_Repr(op);
+    const char *text = s != NULL ? PyUnicode_AsUTF8(s) : NULL;
+    if (text == NULL) {
+        Py_XDECREF(s);
+        return -1;
+    }
+    fputs(text, fp);
+    Py_DECREF(s);
+    return ferror(fp) ? -1 : 0;
+}
+
+PyObject *
+PySeqIter_New(PyObject *seq)
+{
+    if (!PySequence_Check(seq)) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+    seqiterobject *it = (seqiterobject *)lu_object_new(&PySeqIter_Type, sizeof(seqiterobject));
+    if (it != NULL) {
+        it->it_seq = Py_NewRef(seq);
+    }
+    return (PyObject *)it;
+}
+
+PyObject *
+Py_GenericAlias(PyObject *origin, PyObject *args)
+{
+    PyObject *a[2] = { origin, args };
+    return lu_call_kernel(LU_K_generic_alias, a, 2);
+}

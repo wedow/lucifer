@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/file.h>
 #include <grp.h>
 #include <langinfo.h>
 #include <arpa/inet.h>

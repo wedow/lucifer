@@ -292,6 +292,41 @@ slot_tp_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
     return result;
 }
 
+/* tp_new of a static builtin type whose __new__ is kernel Python (float, int,
+   str, ...). C code calls it with the type it wants an instance of, often a
+   subtype with a __new__ of its own that has called it: the __new__ to run is
+   the builtin's, found in the first builtin of the subtype's MRO that has this
+   slot, never the subtype's. */
+static PyObject *
+slot_tp_new_builtin(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+{
+    PyObject *mro = type->tp_mro;
+    PyTypeObject *owner = NULL;
+    for (Py_ssize_t i = 0; mro != NULL && i < PyTuple_GET_SIZE(mro) && owner == NULL; i++) {
+        PyTypeObject *base = (PyTypeObject *)PyTuple_GET_ITEM(mro, i);
+        if ((base->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN) && base->tp_new == slot_tp_new_builtin) {
+            owner = base;
+        }
+    }
+    PyObject *func = owner != NULL ? lu_ns_lookup(lu_type_dict(owner), LU_ID(__new__)) : NULL;
+    if (func == NULL) {
+        return slot_tp_new(type, args, kwargs);
+    }
+    Py_ssize_t nargs;
+    PyObject *kwnames;
+    PyObject **stack = lu_unpack_call(args, kwargs != NULL && ((PyDictObject *)kwargs)->ma_used
+                                      ? kwargs : NULL, &nargs, &kwnames);
+    PyObject *result = NULL;
+    if (stack != NULL) {
+        stack[-1] = (PyObject *)type;
+        lu_new_check_skip(1);
+        result = lu_call(func, stack - 1, nargs + 1, kwnames);
+        lu_new_check_skip(0);
+        release_args(stack, nargs, kwnames);
+    }
+    return result;
+}
+
 static PyObject *
 slot_mp_subscript(PyObject *self, PyObject *key)
 {
@@ -503,6 +538,29 @@ UNARY_THUNK(slot_nb_int, __int__)
 UNARY_THUNK(slot_nb_float, __float__)
 UNARY_THUNK(slot_nb_index, __index__)
 
+/* bf_getbuffer of a class that defines __buffer__ (PEP 688): the memoryview it
+   returns exports the buffer, and the caller releases through the view. */
+static int
+slot_bf_getbuffer(PyObject *self, Py_buffer *view, int flags)
+{
+    PyObject *name = PyUnicode_InternFromString("__buffer__");
+    PyObject *arg = PyLong_FromLong(flags);
+    PyObject *mv = name != NULL && arg != NULL ? lu_call_special(self, name, &arg, 1) : NULL;
+    Py_XDECREF(name);
+    Py_XDECREF(arg);
+    if (mv == NULL) {
+        return -1;
+    }
+    if (!PyMemoryView_Check(mv)) {
+        lu_err_format(PyExc_TypeError, "__buffer__ returned non-memoryview object");
+        Py_DECREF(mv);
+        return -1;
+    }
+    int r = PyObject_GetBuffer(mv, view, flags);
+    Py_DECREF(mv);
+    return r;
+}
+
 /* The slot table: where each slot lives and its thunk. */
 enum { IN_TYPE, IN_NUMBER, IN_MAPPING, IN_SEQUENCE, IN_ASYNC, IN_BUFFER };
 
@@ -518,7 +576,7 @@ struct slot {
 #define MP(f, t) { #f, IN_MAPPING, offsetof(PyMappingMethods, f), (void *)(t) }
 #define SQ(f, t) { #f, IN_SEQUENCE, offsetof(PySequenceMethods, f), (void *)(t) }
 #define AM(f) { #f, IN_ASYNC, offsetof(PyAsyncMethods, f), NULL }
-#define BF(f) { #f, IN_BUFFER, offsetof(PyBufferProcs, f), NULL }
+#define BF(f, t) { #f, IN_BUFFER, offsetof(PyBufferProcs, f), (void *)(t) }
 static const struct slot slots[] = {
     TP(tp_getattr, NULL), TP(tp_setattr, NULL),
     TP(tp_getattro, lu_slot_tp_getattro), TP(tp_setattro, lu_slot_tp_setattro),
@@ -527,7 +585,7 @@ static const struct slot slots[] = {
     TP(tp_iter, slot_tp_iter), TP(tp_iternext, slot_tp_iternext),
     TP(tp_descr_get, slot_tp_descr_get), TP(tp_descr_set, slot_tp_descr_set),
     TP(tp_init, slot_tp_init), TP(tp_new, slot_tp_new), TP(tp_finalize, slot_tp_finalize),
-    BF(bf_getbuffer), BF(bf_releasebuffer), AM(am_await), AM(am_aiter), AM(am_anext),
+    BF(bf_getbuffer, slot_bf_getbuffer), BF(bf_releasebuffer, NULL), AM(am_await), AM(am_aiter), AM(am_anext),
     NB(nb_add, slot_nb_add), NB(nb_subtract, slot_nb_subtract),
     NB(nb_multiply, slot_nb_multiply), NB(nb_remainder, slot_nb_remainder),
     NB(nb_divmod, slot_nb_divmod), NB(nb_power, slot_nb_power),
@@ -593,7 +651,10 @@ lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from)
     void *value;
     switch (how) {
     case 0: value = NULL; break;
-    case 1: value = s->thunk; break;
+    case 1:
+        value = s->thunk == (void *)slot_tp_new && (tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)
+            ? (void *)slot_tp_new_builtin : s->thunk;
+        break;
     case 2: {
         char *src = from != NULL ? slot_base(from, s->where, 0) : NULL;
         value = src != NULL ? *(void **)(src + s->offset) : NULL;
@@ -617,6 +678,14 @@ lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from)
     }
     *(void **)(base + s->offset) = value;
     return 0;
+}
+
+/* Whether f is a tp_new that runs a kernel __new__ (a class's or builtin's), which a
+   wrapper in the type's dict must not call back. */
+int
+lu_tp_new_is_thunk(newfunc f)
+{
+    return f == (newfunc)slot_tp_new || f == (newfunc)slot_tp_new_builtin;
 }
 
 Py_hash_t

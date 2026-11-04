@@ -183,7 +183,7 @@ instance that has no instance attributes and cannot be given any.
     def __delattr__(self, name):
         generic_setattr(self, name, MISSING)
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         if not kind(cls, 'type'):
             error(TypeError, str_join('', (
                 'object.__new__(X): X is not a type object (', type_tp_name(type(cls)), ')')))
@@ -196,7 +196,7 @@ instance that has no instance attributes and cannot be given any.
             _abstract_error(cls)
         return alloc(cls, object)
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, /, *args, **kwargs):
         if args or kwargs:
             tp = type(self)
             if type_lookup(tp, '__init__') is not _object_init:

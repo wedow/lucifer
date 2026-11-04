@@ -420,8 +420,23 @@ run_main_code(struct _is *interp, PyObject *code, const wchar_t *path, const cha
     return finish_main(main != NULL ? PyEval_EvalCode(code, PyModule_GetDict(main), PyModule_GetDict(main)) : NULL);
 }
 
-/* The program the config names: -c's command, a file (source or .pyc), or
-   standard input. */
+/* -m: runpy runs the module as __main__. */
+static int
+run_module(struct _is *interp, const wchar_t *name)
+{
+    PyObject *runpy = PyImport_ImportModule("runpy");
+    PyObject *module = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, name, (Py_ssize_t)wcslen(name));
+    PyObject *result = NULL;
+    if (runpy != NULL && module != NULL && new_main(interp, NULL, NULL) != NULL) {
+        result = PyObject_CallMethod(runpy, "_run_module_as_main", "OO", module, Py_True);
+    }
+    Py_XDECREF(runpy);
+    Py_XDECREF(module);
+    return finish_main(result);
+}
+
+/* The program the config names: -m's module, -c's command, a file (source or
+   .pyc), or standard input. */
 static int
 run_program(struct _is *interp, const char *program, const char *path)
 {
@@ -429,6 +444,9 @@ run_program(struct _is *interp, const char *program, const char *path)
     PyObject *code = NULL;
     const wchar_t *file = NULL;
     const char *loader = NULL;
+    if (config->run_module != NULL) {
+        return run_module(interp, config->run_module);
+    }
     if (config->run_command != NULL) {
         PyObject *source = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, config->run_command,
                                                      (Py_ssize_t)wcslen(config->run_command));

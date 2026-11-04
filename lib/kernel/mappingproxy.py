@@ -32,7 +32,7 @@ def _unwrap(x):
 class mappingproxy:
     """Read-only proxy of a mapping."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         mapping, = _args.unpack('mappingproxy', args, kwargs, ('mapping',), 0, 1)
         _check_mapping(mapping)
         return proxy_new(mapping)

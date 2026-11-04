@@ -275,3 +275,32 @@ PyObject_CallFinalizerFromDealloc(PyObject *self)
     }
     return resurrected;
 }
+
+/* The refcount test of _PyObject_IsUniquelyReferenced. */
+int
+PyUnstable_Object_IsUniquelyReferenced(PyObject *op)
+{
+    return _Py_IsOwnedByCurrentThread(op) && op->ob_ref_local == 1
+        && _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared) == 0;
+}
+
+/* The runtime keeps no temporaries on a value stack C can see, and ignores
+   a request for deferred reference counting; both answers are the API's
+   "no". */
+int
+PyUnstable_Object_IsUniqueReferencedTemporary(PyObject *op)
+{
+    return 0;
+}
+
+int
+PyUnstable_Object_EnableDeferredRefcount(PyObject *op)
+{
+    return 0;
+}
+
+LU_EXPORT void
+_Py_SetImmortal(PyObject *op)
+{
+    lu_set_immortal(op);
+}

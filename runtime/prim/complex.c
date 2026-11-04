@@ -753,3 +753,54 @@ PyMethodDef lu_prim_complex_methods[] = {
     FAST(complex_from_text),
     { NULL, NULL, 0, NULL },
 };
+
+/* The C API's complex accessors (Objects/complexobject.c). */
+
+PyObject *
+PyComplex_FromDoubles(double real, double imag)
+{
+    return PyComplex_FromCComplex((Py_complex){ real, imag });
+}
+
+double
+PyComplex_RealAsDouble(PyObject *op)
+{
+    return PyComplex_Check(op) ? CVAL(op).real : PyFloat_AsDouble(op);
+}
+
+double
+PyComplex_ImagAsDouble(PyObject *op)
+{
+    return PyComplex_Check(op) ? CVAL(op).imag : 0.0;
+}
+
+/* A complex, else its __complex__ result, else the float it converts to. */
+Py_complex
+PyComplex_AsCComplex(PyObject *op)
+{
+    Py_complex cv = { -1.0, 0.0 };
+    if (PyComplex_Check(op)) {
+        return CVAL(op);
+    }
+    PyObject *name = PyUnicode_InternFromString("__complex__");
+    PyObject *special = name != NULL ? _PyType_Lookup(Py_TYPE(op), name) : NULL;
+    if (special != NULL) {
+        PyObject *res = lu_call_special(op, name, NULL, 0);
+        if (res != NULL && !PyComplex_Check(res)) {
+            PyErr_Format(PyExc_TypeError, "__complex__ returned non-complex (type %.200s)",
+                         Py_TYPE(res)->tp_name);
+            Py_CLEAR(res);
+        }
+        if (res != NULL) {
+            cv = CVAL(res);
+            Py_DECREF(res);
+        }
+        Py_DECREF(name);
+        return cv;
+    }
+    Py_XDECREF(name);
+    if (!PyErr_Occurred()) {
+        cv.real = PyFloat_AsDouble(op);
+    }
+    return cv;
+}

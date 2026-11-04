@@ -98,7 +98,7 @@ build/liblucifer.a: $(LIB_OBJS)
 
 bin/lucifer: $(MAIN) build/liblucifer.a
 	@mkdir -p $(@D)
-	$(CC) $(LU_LDFLAGS) -o $@ $(MAIN) -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive -lm
+	$(CC) $(LU_LDFLAGS) -o $@ $(MAIN) -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive -lm -lz -lffi
 
 build/runtime/object/alloc.o: LU_CFLAGS += -Ithird_party/mimalloc/src
 
@@ -147,8 +147,8 @@ build/tests/capi/%.so: tests/capi/%.c
 # under the oracle and bin/lucifer.
 EXT_DIR = build/tests/capi/ext
 EXT_SUFFIX = .cpython-314t-x86_64-linux-gnu.so
-EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c tests/capi/capi_monitoring.c tests/capi/capi_conv.c
-EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run capi_conv_run
+EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c tests/capi/capi_monitoring.c tests/capi/capi_conv.c tests/capi/ready.c
+EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run capi_conv_run testcapi_import ready_run
 SLOTS_MODULES = plain noshare shared_gil create two_exec unknown negative two_create two_interp \
 	two_gil not_module not_module_exec create_fails create_raises exec_fails exec_raises
 
@@ -161,8 +161,8 @@ $(EXT_DIR)/slots_%$(EXT_SUFFIX): $(EXT_DIR)/slots$(EXT_SUFFIX)
 	ln -sf slots$(EXT_SUFFIX) $@
 
 # The oracle's own C test modules, beside the installed standard library, for
-# the libtest modules that import them (libtest runs with --source installed).
-LIBTEST_EXTS = _testlimitedcapi _testinternalcapi
+# the libtest modules and the capi gate programs that import them.
+LIBTEST_EXTS = _testcapi _testlimitedcapi _testinternalcapi
 oracle-exts: build/lib/stamp
 	dir=$$($(ORACLE_T) -c 'import _testcapi, os; print(os.path.dirname(_testcapi.__file__))') && \
 	for m in $(LIBTEST_EXTS); do ln -sf $$dir/$$m$(EXT_SUFFIX) $(STDLIB)/; done
@@ -173,8 +173,8 @@ $(EXT_DIR)/accelerators:
 	for m in _bisect _heapq _statistics; do ln -sf $$dir/$$m$(EXT_SUFFIX) $(EXT_DIR)/; done
 	touch $@
 
-check-capi-ext: bin/lucifer $(EXT_DIR)/accelerators $(EXT_DIR)/exc_cross$(EXT_SUFFIX) \
-	  $(EXT_DIR)/capi_monitoring$(EXT_SUFFIX) $(EXT_DIR)/capi_conv$(EXT_SUFFIX) \
+check-capi-ext: bin/lucifer oracle-exts $(EXT_DIR)/accelerators $(EXT_DIR)/exc_cross$(EXT_SUFFIX) \
+	  $(EXT_DIR)/capi_monitoring$(EXT_SUFFIX) $(EXT_DIR)/capi_conv$(EXT_SUFFIX) $(EXT_DIR)/ready$(EXT_SUFFIX) \
 	  $(foreach m,$(SLOTS_MODULES),$(EXT_DIR)/slots_$(m)$(EXT_SUFFIX))
 	@for p in $(EXT_PROGRAMS); do \
 	  { PYTHONPATH=$(EXT_DIR) $(RUN) $(ORACLE_T) tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.expected; \
@@ -202,7 +202,7 @@ EMBED_PROGRAMS = 'import os; x = 1; print("first", x)' \
 
 build/tests/embed/run: tests/embed/run.c build/liblucifer.a
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) -std=gnu11 -Wall -Iinclude -pthread -o $@ $< -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive -lm
+	$(CC) $(CFLAGS) -std=gnu11 -Wall -Iinclude -pthread -o $@ $< -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive -lm -lz -lffi
 
 check-embed: build/tests/embed/run bin/lucifer
 	@$(RUN) build/tests/embed/run $(EMBED_PROGRAMS) > build/tests/embed/actual 2>&1; \
