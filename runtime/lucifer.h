@@ -181,6 +181,14 @@ struct lu_static_type_state {
     X(delitem)                  /* PyObject_DelItem: DELETE_SUBSCR */ \
     X(dict_get)                 /* dict.get, len and isinstance: CALL answers them itself */ \
     X(len)                      /* for exact builtin types */ \
+    X(builtin_getattr)          /* the builtin getattr: CALL answers the common reads itself */ \
+    X(builtin_hasattr)          /* the builtin hasattr */ \
+    X(builtin_setattr)          /* the builtin setattr */ \
+    X(index)                    /* PyNumber_Index: CALL answers it for an exact int */ \
+    X(bytearray_append)         /* bytearray.append */ \
+    X(tuplegetter)              /* _collections._tuplegetter, a class: LOAD_ATTR reads its items itself */ \
+    X(list_append)              /* list.append, dict.items: CALL answers them for builtin lists and dicts */ \
+    X(dict_items)               /* */ \
     X(isinstance)               /* */ \
     X(dict_setitem)             /* PyDict_SetItem(dict, key, value): the dict's own, whatever the subclass overrides */ \
     X(dict_delitem)             /* PyDict_DelItem(dict, key) */ \
@@ -294,6 +302,7 @@ typedef struct { uint8_t tools[LU_MON_LOCAL_EVENTS]; } lu_local_monitors;
 typedef struct { uint8_t tools[LU_MON_UNGROUPED_EVENTS]; } lu_global_monitors;
 
 /* PyInterpreterState (private layout; DESIGN 4.1). */
+#define LU_MCACHE_SIZE 4096
 struct _is {
     mi_subproc_id_t subproc;    /* segments abandoned by one interpreter's carriers
                                    are reclaimed only by its own */
@@ -331,6 +340,16 @@ struct _is {
     lu_watcher func_watchers[LU_MAX_WATCHERS];      /* PyFunction_WatchCallback */
     lu_watcher code_watchers[LU_MAX_WATCHERS];      /* PyCode_WatchCallback */
     int specializing;                   /* set once the kernel has booted: instructions may specialize */
+    /* The type attribute cache (CPython's method cache): what _PyType_Lookup
+       found for an interned name in a type of that version. Read without a
+       lock: an entry is valid when its sequence is even and the same before
+       and after the read; a writer claims an even sequence by making it odd. */
+    struct lu_mcache_entry {
+        uint32_t seq;
+        uint32_t version;
+        PyObject *name;
+        PyObject *value;            /* borrowed; NULL for an absent name */
+    } mcache[LU_MCACHE_SIZE];
     int kernel_booted;                  /* set with it: the kernel's functions are all registered */
     int max_str_digits;                 /* sys.get_int_max_str_digits() */
     PyObject *importlib;                /* _frozen_importlib, once installed */
@@ -721,7 +740,7 @@ struct lu_static_objects {
     X(__len__) X(__loader__) X(__main__) X(__name__) X(__new__) X(__next__) \
     X(__package__) X(__repr__) X(__set__) X(__spec__) X(__str__) X(__hash__) \
     X(__eq__) X(__ne__) X(__lt__) X(__le__) X(__gt__) X(__ge__) X(__contains__) \
-    X(__setitem__) X(__delitem__) X(__bool__) X(_lucifer) X(builtins) \
+    X(__setitem__) X(__delitem__) X(__bool__) X(_lucifer) X(_index) X(builtins) \
     X(__add__) X(__radd__) X(__sub__) X(__rsub__) X(__mul__) X(__rmul__) X(__mod__) \
     X(__rmod__) X(__divmod__) X(__rdivmod__) X(__pow__) X(__rpow__) X(__lshift__) \
     X(__rlshift__) X(__rshift__) X(__rrshift__) X(__and__) X(__rand__) X(__xor__) \
@@ -973,6 +992,28 @@ PyObject *lu_long_from_double(double d);
 /* The NB_* binary operator `op` on two ints; NotImplemented when the kernel must. */
 PyObject *lu_long_binary(int op, PyObject *a, PyObject *b);
 Py_hash_t lu_xxhash_items(PyObject *const *items, Py_ssize_t n, int mangle_length);
+/* The xxHash lanes of tuple_hash and slice_hash (pycore_tuple.h): start from
+   LU_XXHASH_START, add each item's hash with lu_xxhash_step, and finish with
+   lu_xxhash_end over the item count (mangle_length for a tuple). */
+#define LU_XXPRIME_1 11400714785074694791ULL
+#define LU_XXPRIME_2 14029467366897019727ULL
+#define LU_XXPRIME_5 2870177450012600261ULL
+#define LU_XXHASH_START ((Py_uhash_t)LU_XXPRIME_5)
+static inline Py_uhash_t
+lu_xxhash_step(Py_uhash_t acc, Py_hash_t lane)
+{
+    acc += (Py_uhash_t)lane * LU_XXPRIME_2;
+    acc = (acc << 31) | (acc >> 33);
+    return acc * LU_XXPRIME_1;
+}
+static inline Py_hash_t
+lu_xxhash_end(Py_uhash_t acc, Py_ssize_t n, int mangle_length)
+{
+    if (mangle_length) {
+        acc += (Py_uhash_t)n ^ (LU_XXPRIME_5 ^ 3527539UL);
+    }
+    return acc == (Py_uhash_t)-1 ? 1546275796 : (Py_hash_t)acc;
+}
 Py_hash_t lu_str_hash(PyObject *s);
 uint64_t lu_keyed_hash(uint64_t key, const void *src, Py_ssize_t size);
 int lu_str_eq(PyObject *a, PyObject *b);
@@ -1097,6 +1138,9 @@ int lu_type_add_descriptors(PyTypeObject *tp);
 /* Adds wrapper descriptors (__add__, __len__, ...) for the C slots tp has
    of its own (runtime/types/wrappers.c). */
 int lu_type_add_operators(PyTypeObject *tp);
+/* object.__new__(tp): a new instance of tp, refusing a tp whose static base is not owner. */
+PyObject *lu_alloc_instance(PyTypeObject *tp, PyTypeObject *owner);
+
 /* The next tp_new_wrapper check (owner.__new__(cls) is safe) passes: C called owner's tp_new itself. */
 void lu_new_check_skip(int on);
 int lu_tp_new_is_thunk(newfunc f);
@@ -1133,6 +1177,8 @@ PyObject *lu_descr_new_getset(PyTypeObject *type, PyGetSetDef *getset);
    descriptor, an unset member, a getset with no setter), -1 with an exception
    set. */
 int lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out);
+/* The Python or kernel function a class's __new__ entry runs, called with the class first: 1 with *func, else 0. */
+int lu_new_function(PyObject *new_, PyObject **func);
 int lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value);
 /* obj.name = value (value NULL deletes) when C alone can do it: object's own
    __setattr__, then a native data descriptor or, for a name the type lacks,
@@ -1276,7 +1322,14 @@ PyObject *lu_seqiter_next(PyObject *iter);
 /* The next key, value or (key, value) of a dict iterator, LU_MISSING when it
    is exhausted, NULL with RuntimeError when the dict changed. */
 PyObject *lu_dictiter_next(PyObject *it);
+/* The key, value or item iterator of an exact dict or dict view; NULL (no error) for another object. */
+PyObject *lu_dict_iter(PyObject *obj);
+/* A new dict_keys, dict_values or dict_items view (by its type) of a dict. */
+PyObject *lu_dict_view(PyObject *dict, PyTypeObject *view_type);
 PyObject *lu_rangeiter_next(PyObject *iter);
+/* The count items of an exact tuple or list from start by step, as a new tuple or list. */
+PyObject *lu_seq_slice(PyObject *seq, Py_ssize_t start, Py_ssize_t step, Py_ssize_t count, int as_tuple);
+int lu_enum_next(PyObject *e, PyObject **v);
 /* A new range_iterator or longrange_iterator over the range r, or NULL with an error. */
 PyObject *lu_range_iter(PyObject *r);
 

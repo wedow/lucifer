@@ -486,14 +486,10 @@ def _min_max(name, args, kwargs, greater):
     if positional and default is not MISSING:
         error(TypeError, str_join('', (
             'Cannot specify a default for ', name, '() with multiple positional arguments')))
-    it = get_iter(args if positional else args[0])
     if key is None:
         key = MISSING
     best = bestval = MISSING
-    while True:
-        item = next_item(it)
-        if item is MISSING:
-            break
+    for item in args if positional else args[0]:
         val = item if key is MISSING else key(item)
         if bestval is MISSING:
             best = item
@@ -1009,4 +1005,7 @@ class NotImplementedType:
 
 
 kernel_set('len', len)
+kernel_set('builtin_getattr', getattr)
+kernel_set('builtin_hasattr', hasattr)
+kernel_set('builtin_setattr', setattr)
 kernel_set('isinstance', isinstance)

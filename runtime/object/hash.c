@@ -195,29 +195,18 @@ lu_long_hash(PyLongObject *v)
     return x == (Py_uhash_t)-1 ? -2 : (Py_hash_t)x;
 }
 
-/* The xxHash lanes of tuple_hash and slice_hash (pycore_tuple.h). */
-#define XXPRIME_1 11400714785074694791ULL
-#define XXPRIME_2 14029467366897019727ULL
-#define XXPRIME_5 2870177450012600261ULL
-#define XXROTATE(x) ((x << 31) | (x >> 33))
-
 /* Hashes n items with lu_hash; -1 with an error set if one is unhashable.
    `mangle_length` adds the length as tuple_hash does; slice_hash does not. */
 Py_hash_t
 lu_xxhash_items(PyObject *const *items, Py_ssize_t n, int mangle_length)
 {
-    Py_uhash_t acc = XXPRIME_5;
+    Py_uhash_t acc = LU_XXHASH_START;
     for (Py_ssize_t i = 0; i < n; i++) {
-        Py_uhash_t lane = (Py_uhash_t)lu_hash(items[i]);
-        if (lane == (Py_uhash_t)-1) {
+        Py_hash_t lane = lu_hash(items[i]);
+        if (lane == -1) {
             return -1;
         }
-        acc += lane * XXPRIME_2;
-        acc = XXROTATE(acc);
-        acc *= XXPRIME_1;
+        acc = lu_xxhash_step(acc, lane);
     }
-    if (mangle_length) {
-        acc += (Py_uhash_t)n ^ (XXPRIME_5 ^ 3527539UL);
-    }
-    return acc == (Py_uhash_t)-1 ? 1546275796 : (Py_hash_t)acc;
+    return lu_xxhash_end(acc, n, mangle_length);
 }

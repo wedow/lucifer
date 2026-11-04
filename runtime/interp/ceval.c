@@ -28,6 +28,7 @@
 #include "opcode.h"
 #include "opcode_ids.h"
 #include "prim/prim.h"
+#include "prim/bytes.h"
 
 /* Include/internal/pycore_opcode_utils.h */
 #define MAKE_FUNCTION_DEFAULTS    0x01
@@ -246,7 +247,13 @@ get_iter_exact(PyObject *v)
     if (tp == &PyRange_Type) {
         return lu_range_iter(v);
     }
-    return NULL;
+    if (tp == &PyEnum_Type || tp == &PyZip_Type || tp == &PyMap_Type || tp == &PyFilter_Type
+        || tp == &PyReversed_Type || tp == &PyListIter_Type || tp == &PyTupleIter_Type
+        || tp == &PyRangeIter_Type || tp == &PyDictIterKey_Type || tp == &PyDictIterValue_Type
+        || tp == &PyDictIterItem_Type) {
+        return Py_NewRef(v);        /* an iterator: its __iter__ returns itself */
+    }
+    return lu_dict_iter(v);
 }
 
 /* UNPACK_SEQUENCE of an exact tuple or list of n items: the items, last
@@ -298,22 +305,105 @@ small_index(PyObject *sub)
 }
 
 /* BINARY_OP NB_SUBSCR on an exact list or tuple with a compact int index in
-   range: the item (a new reference), or NULL. */
+   range, negative ones counted from the end: the item (a new reference), or NULL. */
 static PyObject *
 subscr_item(PyObject *container, PyObject *sub)
 {
-    Py_ssize_t i = small_index(sub);
-    PyObject *item = NULL;
-    if (i < 0) {
+    if (!PyLong_CheckExact(sub) || !_PyLong_IsCompact((PyLongObject *)sub)) {
         return NULL;
     }
+    Py_ssize_t i = _PyLong_CompactValue((PyLongObject *)sub);
+    PyObject *item = NULL;
     if (PyList_CheckExact(container)) {
-        item = lu_list_item_ref((PyListObject *)container, i);
+        i += i < 0 ? Py_SIZE(container) : 0;
+        item = i >= 0 ? lu_list_item_ref((PyListObject *)container, i) : NULL;
     }
-    else if (PyTuple_CheckExact(container) && i < Py_SIZE(container)) {
-        item = Py_NewRef(((PyTupleObject *)container)->ob_item[i]);
+    else if (PyTuple_CheckExact(container)) {
+        i += i < 0 ? Py_SIZE(container) : 0;
+        item = i >= 0 && i < Py_SIZE(container) ? Py_NewRef(((PyTupleObject *)container)->ob_item[i]) : NULL;
     }
     return item;
+}
+
+/* A slice bound that is None (*v stays) or an exact compact int (*v is set). */
+static int
+slice_bound(PyObject *bound, Py_ssize_t *v)
+{
+    if (bound == NULL || bound == Py_None) {
+        return 1;
+    }
+    if (!PyLong_CheckExact(bound) || !_PyLong_IsCompact((PyLongObject *)bound)) {
+        return 0;
+    }
+    *v = _PyLong_CompactValue((PyLongObject *)bound);
+    return 1;
+}
+
+/* PySlice_Unpack and PySlice_AdjustIndices for bounds of None or compact
+   ints over a sequence of `length`: 1 with the first position, the step and
+   the count, or 0 when the kernel must decide (another bound type, a zero step). */
+static int
+slice_unpack(PyObject *start_o, PyObject *stop_o, PyObject *step_o, Py_ssize_t length,
+             Py_ssize_t *start, Py_ssize_t *step, Py_ssize_t *count)
+{
+    Py_ssize_t stop;
+    *step = 1;
+    if (!slice_bound(step_o, step) || *step == 0) {
+        return 0;
+    }
+    int down = *step < 0;
+    *start = down ? length - 1 : 0;
+    stop = down ? -1 : length;
+    if (!slice_bound(start_o, start) || !slice_bound(stop_o, &stop)) {
+        return 0;
+    }
+    if (start_o != NULL && start_o != Py_None) {
+        *start += *start < 0 ? length : 0;
+        *start = *start < 0 ? (down ? -1 : 0) : *start >= length ? (down ? length - 1 : length) : *start;
+    }
+    if (stop_o != NULL && stop_o != Py_None) {
+        stop += stop < 0 ? length : 0;
+        stop = stop < 0 ? (down ? -1 : 0) : stop >= length ? (down ? length - 1 : length) : stop;
+    }
+    *count = down ? (stop < *start ? (*start - stop - 1) / -*step + 1 : 0)
+                  : (*start < stop ? (stop - *start - 1) / *step + 1 : 0);
+    return 1;
+}
+
+/* container[start:stop:step] for an exact list, tuple, str or bytes and bounds
+   that slice_unpack takes, where the step of a str or bytes is 1: a new
+   reference. NULL without an error when the kernel must slice. */
+static PyObject *
+slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObject *step_o)
+{
+    PyTypeObject *tp = Py_TYPE(container);
+    Py_ssize_t length, start, step, count;
+    if (tp == &PyList_Type || tp == &PyTuple_Type) {
+        length = Py_SIZE(container);
+    }
+    else if (tp == &PyUnicode_Type) {
+        length = PyUnicode_GET_LENGTH(container);
+    }
+    else if (tp == &PyBytes_Type) {
+        length = PyBytes_GET_SIZE(container);
+    }
+    else {
+        return NULL;
+    }
+    if (!slice_unpack(start_o, stop_o, step_o, length, &start, &step, &count)
+        || (tp != &PyList_Type && tp != &PyTuple_Type && step != 1)) {
+        return NULL;
+    }
+    if (tp != &PyList_Type && start == 0 && count == length) {
+        return Py_NewRef(container);
+    }
+    if (tp == &PyUnicode_Type) {
+        return PyUnicode_Substring(container, start, start + count);
+    }
+    if (tp == &PyBytes_Type) {
+        return PyBytes_FromStringAndSize(PyBytes_AS_STRING(container) + start, count);
+    }
+    return lu_seq_slice(container, start, step, count, tp == &PyTuple_Type);
 }
 
 /* STORE_SUBSCR into an exact list at a compact int index in range: the
@@ -404,12 +494,202 @@ attr_shortcut(PyObject *owner, PyObject *name)
             && object_attr_hook(tp, LU_ID(__getattribute__)) ? (PyObject *)tp : NULL;
     }
     if (!PyType_Check(owner) || !PyUnicode_CheckExact(name)
-        || _PyType_Lookup(tp, LU_ID(__getattribute__)) != _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__))
-        || _PyType_Lookup(tp, name) != NULL) {
+        || _PyType_Lookup(tp, LU_ID(__getattribute__)) != _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__))) {
         return NULL;
+    }
+    PyObject *meta_attr = _PyType_Lookup(tp, name);
+    if (meta_attr != NULL && Py_TYPE(meta_attr)->tp_descr_set != NULL) {
+        return NULL;            /* a data descriptor of the metaclass wins */
     }
     PyObject *v = _PyType_Lookup((PyTypeObject *)owner, name);
     return v != NULL && (Py_TYPE(v)->tp_descr_get == NULL || PyFunction_Check(v)) ? v : NULL;
+}
+
+/* obj.name for an exact str name, answered when no Python code decides: a
+   data member or getset of the type, then the instance's dict, then a plain
+   value or function of the type (bound as a method). NULL, with no error, for
+   everything else, which is the kernel's: a missing attribute, __getattr__,
+   __getattribute__, properties and other descriptors. A new reference. */
+static PyObject *
+getattr_native(PyObject *owner, PyObject *name)
+{
+    PyTypeObject *tp = Py_TYPE(owner);
+    PyObject *v;
+    if (!PyUnicode_CheckExact(name)) {
+        return NULL;
+    }
+    if (PyModule_CheckExact(owner)) {
+        return lu_ns_get(((PyModuleObject *)owner)->md_dict, name);        /* as LOAD_ATTR reads it */
+    }
+    if ((v = attr_shortcut(owner, name)) != NULL) {
+        return Py_NewRef(v);
+    }
+    if (!object_attr_hook(tp, LU_ID(__getattribute__))) {
+        return NULL;
+    }
+    PyObject *descr = _PyType_Lookup(tp, name);
+    if (descr != NULL && Py_TYPE(descr)->tp_descr_set != NULL) {
+        return lu_descr_get_native(descr, owner, &v) > 0 ? v : NULL;
+    }
+    if (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
+        PyObject *dict = LU_MANAGED_DICT(owner);
+        if (dict != NULL && PyDict_CheckExact(dict) && (v = lu_ns_get(dict, name)) != NULL) {
+            return v;
+        }
+    }
+    else if (tp->tp_dictoffset != 0) {
+        return NULL;            /* a dict of another layout */
+    }
+    if (descr == NULL) {
+        return NULL;
+    }
+    if (Py_TYPE(descr)->tp_descr_get == NULL) {
+        return Py_NewRef(descr);
+    }
+    return PyFunction_Check(descr) ? PyMethod_New(descr, owner) : NULL;
+}
+
+/* Whether tp compares for equality as `base` does: the same __eq__ and __ne__. */
+static int
+eq_as(PyTypeObject *tp, PyTypeObject *base)
+{
+    return _PyType_Lookup(tp, LU_ID(__eq__)) == _PyType_Lookup(base, LU_ID(__eq__))
+        && _PyType_Lookup(tp, LU_ID(__ne__)) == _PyType_Lookup(base, LU_ID(__ne__));
+}
+
+/* a == b as PyObject_RichCompare answers it when no Python code decides:
+   builtin scalars by value, objects with object's equality by identity,
+   tuples item by item (an identical pair of items is equal, as
+   PyObject_RichCompareBool has it). 1, 0, or -1 when the kernel must compare. */
+static int
+eq_native(PyObject *a, PyObject *b, int depth)
+{
+    if (a == b && PyFloat_CheckExact(a)) {
+        return -1;              /* lu_native_eq treats a key as equal to itself: not a nan */
+    }
+    int r = lu_native_eq(a, b);
+    if (r >= 0) {
+        return r;
+    }
+    PyTypeObject *ta = Py_TYPE(a), *tb = Py_TYPE(b);
+    if (eq_as(ta, &PyBaseObject_Type) && eq_as(tb, &PyBaseObject_Type)) {
+        return a == b;
+    }
+    if (PyTuple_Check(a) && PyTuple_Check(b) && depth < 16 && eq_as(ta, &PyTuple_Type)
+        && eq_as(tb, &PyTuple_Type)) {
+        Py_ssize_t n = Py_MIN(Py_SIZE(a), Py_SIZE(b));
+        for (Py_ssize_t i = 0; i < n; i++) {
+            PyObject *x = PyTuple_GET_ITEM(a, i), *y = PyTuple_GET_ITEM(b, i);
+            if (x != y && (r = eq_native(x, y, depth + 1)) != 1) {
+                return r;
+            }
+        }
+        return Py_SIZE(a) == Py_SIZE(b);
+    }
+    return -1;
+}
+
+/* How `cls(...)` with `total` arguments runs when type.__call__ has nothing to
+   decide, for a class whose metaclass is type: 2 when it only allocates (its
+   __new__ and __init__ are object's, and no arguments), 1 when it also calls
+   the Python function *func (its __new__ is object's), 3 when *func is its
+   __new__, called with the class (its __init__ is object's, so that only an
+   instance of a subclass may need one), 0 for the kernel. */
+static int
+instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **func)
+{
+    PyTypeObject *object = &PyBaseObject_Type;
+    PyObject *new_ = _PyType_Lookup(cls, LU_ID(__new__)), *init = _PyType_Lookup(cls, LU_ID(__init__));
+    PyObject *object_init = _PyType_Lookup(object, LU_ID(__init__));
+    if (cls->tp_new == NULL || new_ == NULL) {
+        return 0;
+    }
+    if (new_ != _PyType_Lookup(object, LU_ID(__new__))) {
+        return init == object_init && lu_new_function(new_, func) ? 3 : 0;
+    }
+    if ((cls->tp_flags & Py_TPFLAGS_IS_ABSTRACT)) {
+        return 0;
+    }
+    if (init == object_init) {
+        return total == 0 ? 2 : 0;
+    }
+    *func = init;
+    return init != NULL && PyFunction_Check(init);
+}
+
+/* The rest of type.__call__ once the class's __new__ returned obj (a
+   reference this takes): when obj is an instance of cls, its type's __init__
+   with the call's positional args, unless that is object's and has nothing to
+   refuse. obj, or NULL with an error. */
+static PyObject *
+init_new_instance(PyThreadState *ts, PyTypeObject *cls, PyObject *obj, PyObject *args)
+{
+    PyTypeObject *tp = Py_TYPE(obj), *object = &PyBaseObject_Type;
+    PyObject *init = PyType_IsSubtype(tp, cls) ? _PyType_Lookup(tp, LU_ID(__init__)) : NULL;
+    Py_ssize_t n = PyTuple_GET_SIZE(args);
+    if (init == NULL
+        || (init == _PyType_Lookup(object, LU_ID(__init__))
+            && (n == 0 || _PyType_Lookup(tp, LU_ID(__new__)) != _PyType_Lookup(object, LU_ID(__new__))))) {
+        return obj;
+    }
+    struct lu_task *t = (struct lu_task *)ts;
+    t->pin++;
+    PyObject *r = lu_call_special(obj, LU_ID(__init__), &PyTuple_GET_ITEM(args, 0), n);
+    t->pin--;
+    if (r != Py_None) {
+        if (r != NULL) {
+            lu_err_format(PyExc_TypeError, "__init__() should return None, not '%.200s'",
+                          Py_TYPE(r)->tp_name);
+            Py_DECREF(r);
+        }
+        Py_DECREF(obj);
+        return NULL;
+    }
+    Py_DECREF(r);
+    return obj;
+}
+
+/* isinstance(obj, cls) for an exact class, or a tuple of them, as
+   object_isinstance has it: a negative answer asks obj.__class__, which is
+   the type unless the type overrides __class__ or __getattribute__. 1, 0, or
+   -1 for the kernel. */
+static int
+isinstance_native(PyObject *obj, PyObject *cls, int depth)
+{
+    PyTypeObject *t = Py_TYPE(obj);
+    if (PyType_CheckExact(cls)) {
+        if (PyType_IsSubtype(t, (PyTypeObject *)cls)) {
+            return 1;
+        }
+        return object_attr_hook(t, LU_ID(__class__)) && object_attr_hook(t, LU_ID(__getattribute__)) ? 0 : -1;
+    }
+    if (PyTuple_CheckExact(cls) && depth < 16) {
+        for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(cls); i++) {
+            int is = isinstance_native(obj, PyTuple_GET_ITEM(cls, i), depth + 1);
+            if (is != 0) {
+                return is;
+            }
+        }
+        return 0;
+    }
+    return -1;
+}
+
+/* list(seq) and tuple(seq) of an exact list or tuple, or of nothing (seq
+   NULL): a new reference; NULL for any other argument, which is the kernel's. */
+static PyObject *
+seq_copy_native(int as_tuple, PyObject *seq)
+{
+    if (seq == NULL) {
+        return as_tuple ? PyTuple_New(0) : PyList_New(0);
+    }
+    if (as_tuple && PyTuple_CheckExact(seq)) {
+        return Py_NewRef(seq);
+    }
+    if (PyTuple_CheckExact(seq) || PyList_CheckExact(seq)) {
+        return lu_seq_slice(seq, 0, 1, Py_SIZE(seq), as_tuple);
+    }
+    return NULL;
 }
 
 /* The kernel functions that C answers for plain arguments, so that the common
@@ -428,6 +708,50 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
             }
         }
     }
+    else if (target == kernel[LU_K_builtin_getattr]) {
+        if (npos == 2 || npos == 3) {
+            return getattr_native(args[0], args[1]);
+        }
+    }
+    else if (target == kernel[LU_K_builtin_hasattr]) {
+        PyObject *v = npos == 2 ? getattr_native(args[0], args[1]) : NULL;
+        if (v != NULL) {
+            Py_DECREF(v);
+            return Py_NewRef(Py_True);
+        }
+    }
+    else if (target == kernel[LU_K_builtin_setattr]) {
+        if (npos == 3 && lu_setattr_native(args[0], args[1], args[2]) > 0) {
+            return Py_NewRef(Py_None);
+        }
+    }
+    else if (target == kernel[LU_K_index]) {
+        if (npos == 1 && PyLong_CheckExact(args[0])) {
+            return Py_NewRef(args[0]);
+        }
+    }
+    else if (target == kernel[LU_K_bytearray_append]) {
+        if (npos == 2 && PyByteArray_CheckExact(args[0]) && PyLong_CheckExact(args[1])
+            && _PyLong_IsCompact((PyLongObject *)args[1])
+            && (size_t)_PyLong_CompactValue((PyLongObject *)args[1]) < 256) {
+            return lu_bytearray_append(args[0], (int)_PyLong_CompactValue((PyLongObject *)args[1])) < 0
+                ? NULL : Py_NewRef(Py_None);
+        }
+    }
+    else if (target == kernel[LU_K_list_append]) {
+        if (npos == 2 && PyList_CheckExact(args[0])) {
+            int err;
+            Py_BEGIN_CRITICAL_SECTION(args[0]);
+            err = lu_list_append(args[0], args[1]);
+            Py_END_CRITICAL_SECTION();
+            return err < 0 ? NULL : Py_NewRef(Py_None);
+        }
+    }
+    else if (target == kernel[LU_K_dict_items]) {
+        if (npos == 1 && PyDict_Check(args[0])) {
+            return lu_dict_view(args[0], &PyDictItems_Type);
+        }
+    }
     else if (target == kernel[LU_K_len]) {
         PyTypeObject *t = npos == 1 ? Py_TYPE(args[0]) : NULL;
         if (t == &PyList_Type || t == &PyTuple_Type) {
@@ -441,16 +765,9 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
         }
     }
     else if (target == kernel[LU_K_isinstance]) {
-        /* object_isinstance: a negative answer asks obj.__class__, which is
-           the type unless the type overrides __class__ or __getattribute__. */
-        PyTypeObject *t = npos == 2 && PyType_CheckExact(args[1]) ? Py_TYPE(args[0]) : NULL;
-        if (t != NULL) {
-            if (PyType_IsSubtype(t, (PyTypeObject *)args[1])) {
-                return Py_NewRef(Py_True);
-            }
-            if (object_attr_hook(t, LU_ID(__class__)) && object_attr_hook(t, LU_ID(__getattribute__))) {
-                return Py_NewRef(Py_False);
-            }
+        int is = npos == 2 ? isinstance_native(args[0], args[1], 0) : -1;
+        if (is >= 0) {
+            return Py_NewRef(is ? Py_True : Py_False);
         }
     }
     return NULL;
@@ -468,6 +785,16 @@ set_function_attribute(PyFunctionObject *func, int which, PyObject *attr)
     default: field = &func->func_annotate; break;
     }
     Py_XSETREF(*field, attr);
+}
+
+/* SAVE_FRAME as an expression, for a condition that may raise. */
+static inline int
+save_frame_then(struct lu_frame *f, lu_codeunit *instr, PyObject **sp, lu_codeunit *last)
+{
+    f->instr = instr;
+    f->stackpointer = sp;
+    f->last = last;
+    return 1;
 }
 
 /* How eval_frame starts: by running `frame`, by raising the exception in
@@ -753,6 +1080,24 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
                 next_instr += instr_oparg(code, SEND_START()); \
             } \
             Py_DECREF(v); \
+        } \
+        else if ((ret) == LU_RETURN_INIT) { \
+            if ((v) != Py_None) { \
+                lu_err_format(PyExc_TypeError, "__init__() should return None, not '%.200s'", \
+                              Py_TYPE(v)->tp_name); \
+                Py_DECREF(v); \
+                goto error; \
+            } \
+            Py_DECREF(v); \
+        } \
+        else if ((ret) == LU_RETURN_NEW) { \
+            PyObject *args_ = POP(), *cls_ = POP(); \
+            SAVE_FRAME(); \
+            PyObject *obj_ = init_new_instance(ts, (PyTypeObject *)cls_, (v), args_); \
+            Py_DECREF(args_); \
+            Py_DECREF(cls_); \
+            ERROR_IF(obj_ == NULL); \
+            PUSH(obj_); \
         } \
         else if ((ret) == LU_RETURN_FOR_ITER) { \
             if ((v) == LU_MISSING) { \
@@ -1142,7 +1487,64 @@ call_tail: {
             goto call_done;
         }
     }
+    if (!mon && kwnames == NULL && total <= 1 && (callable == (PyObject *)&PyList_Type || callable == (PyObject *)&PyTuple_Type)
+        && (result = seq_copy_native(callable == (PyObject *)&PyTuple_Type, total == 1 ? args[0] : NULL)) != NULL) {
+        goto call_done;
+    }
     PyObject *target = NULL, *self = NULL;
+    PyObject *init = NULL;
+    int plan = free_self && !mon && Py_IS_TYPE(callable, &PyType_Type) && callable != (PyObject *)&PyType_Type
+        ? instance_plan((PyTypeObject *)callable, total, &init) : 0;
+    if (plan == 3 && kwnames == NULL) {
+        /* The class's __new__ (in init) run in this loop, the class and the
+           arguments kept below it for the __init__ of what it returns. */
+        PyObject *kept = PyTuple_New(npos);
+        if (kept == NULL) {
+            result = NULL;
+            goto call_done;
+        }
+        for (Py_ssize_t i = 0; i < npos; i++) {
+            PyTuple_SET_ITEM(kept, i, Py_NewRef(args[i]));
+        }
+        *--args = Py_NewRef(callable);
+        callee = lu_frame_call(ts, (PyFunctionObject *)init, args, npos + 1, NULL);
+        PyMem_Free(to_free);
+        sp = base;
+        if (callee == NULL) {
+            Py_DECREF(kept);
+            Py_DECREF(callable);
+            frame->stackpointer = sp;
+            goto error;
+        }
+        PUSH(callable);
+        PUSH(kept);
+        frame->stackpointer = sp;
+        callee->ret = kret = LU_RETURN_NEW;
+        goto push_callee;
+    }
+    if (plan == 1 || plan == 2) {
+        /* A class instance: allocated here, its __init__ run in this loop. */
+        PyObject *obj = lu_alloc_instance((PyTypeObject *)callable, &PyBaseObject_Type);
+        if (obj == NULL || plan == 2) {
+            result = obj;
+            goto call_done;
+        }
+        *--args = Py_NewRef(obj);
+        callee = lu_frame_call(ts, (PyFunctionObject *)init, args, npos + 1, kwnames);
+        Py_XDECREF(kwnames);
+        Py_DECREF(callable);
+        PyMem_Free(to_free);
+        sp = base;
+        if (callee == NULL) {
+            Py_DECREF(obj);
+            frame->stackpointer = sp;
+            goto error;
+        }
+        PUSH(obj);
+        frame->stackpointer = sp;
+        callee->ret = kret = LU_RETURN_INIT;
+        goto push_callee;
+    }
     if (Py_IS_TYPE(callable, &PyFunction_Type)) {
         target = callable;
     }
@@ -1199,7 +1601,7 @@ call_tail: {
     }
     if (target != NULL && self == NULL && kwnames == NULL
         && (((PyCodeObject *)((PyFunctionObject *)target)->func_code)->co_flags & LU_CO_KERNEL)
-        && (result = native_call(ts, target, args, npos)) != NULL) {
+        && ((result = native_call(ts, target, args, npos)) != NULL || PyErr_Occurred())) {
         goto call_done;
     }
     if (target != NULL && (self == NULL || free_self)) {
@@ -2336,6 +2738,14 @@ op_LOAD_ATTR: {
                 goto push_callee;
             }
         }
+        if ((v = getattr_native(owner, name)) != NULL) {
+            TOP() = v;
+            Py_DECREF(owner);
+            if (oparg & 1) {
+                PUSH(NULL);
+            }
+            DISPATCH();
+        }
         kid = get == lu_slot_tp_getattro ? LU_K_getattr : LU_K_generic_getattr;
         kargs[0] = POP();
         kargs[1] = Py_NewRef(name);
@@ -2625,6 +3035,9 @@ op_FOR_ITER: {
             v = NULL;
         }
     }
+    else if (itp == &PyEnum_Type && save_frame_then(frame, next_instr, sp, cur_instr) && lu_enum_next(iter, &v)) {
+        /* v is the pair, or NULL when the inner iterator ended or failed */
+    }
     else if (itp == &PyGen_Type && ts->interp->eval_frame == NULL) {
         SAVE_FRAME();
         callee = lu_gen_resume(ts, iter, NULL);
@@ -2658,18 +3071,18 @@ op_FOR_ITER: {
 }
 
 op_COMPARE_OP: {
-    /* Exact str equality and exact ints here; the rest is the kernel's compare. */
+    /* Ints (bools too) and equality that needs no Python code here; the rest is the kernel's compare. */
     SKIP_CACHES();
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
-    int op = oparg >> 5, r;
-    if (PyUnicode_CheckExact(left) && PyUnicode_CheckExact(right) && (op == Py_EQ || op == Py_NE)) {
-        r = lu_str_eq(left, right) == (op == Py_EQ);
-    }
-    else if (PyLong_CheckExact(left) && PyLong_CheckExact(right)) {
+    int op = oparg >> 5, r, eq;
+    if ((PyLong_CheckExact(left) || PyBool_Check(left)) && (PyLong_CheckExact(right) || PyBool_Check(right))) {
         int c = lu_long_compare(left, right);
         r = op == Py_LT ? c < 0 : op == Py_LE ? c <= 0 : op == Py_EQ ? c == 0
           : op == Py_NE ? c != 0 : op == Py_GT ? c > 0 : c >= 0;
+    }
+    else if ((op == Py_EQ || op == Py_NE) && (eq = eq_native(left, right, 0)) >= 0) {
+        r = eq == (op == Py_EQ);
     }
     else {
         sp -= 2;
@@ -2845,6 +3258,21 @@ op_BINARY_OP: {
             Py_DECREF(left);
             Py_DECREF(right);
             DISPATCH();
+        }
+        if (Py_IS_TYPE(right, &PySlice_Type)) {
+            PySliceObject *slc = (PySliceObject *)right;
+            item = slice_native(left, slc->start, slc->stop, slc->step);
+            if (item != NULL) {
+                PUSH(item);
+                Py_DECREF(left);
+                Py_DECREF(right);
+                DISPATCH();
+            }
+            if (PyErr_Occurred()) {
+                Py_DECREF(left);
+                Py_DECREF(right);
+                goto error;
+            }
         }
         kargs[0] = left;
         kargs[1] = right;
@@ -3026,6 +3454,16 @@ op_BUILD_SLICE: {
 op_BINARY_SLICE: {
     /* container, start, stop -- container[start:stop] */
     SAVE_FRAME();
+    PyObject *sliced = slice_native(sp[-3], sp[-2], sp[-1], NULL);
+    if (sliced != NULL) {
+        Py_DECREF(sp[-3]);
+        Py_DECREF(sp[-2]);
+        Py_DECREF(sp[-1]);
+        sp -= 2;
+        TOP() = sliced;
+        DISPATCH();
+    }
+    ERROR_IF(PyErr_Occurred());
     PyObject *stop = POP();
     PyObject *start = POP();
     PyObject *slice = PySlice_New(start, stop, NULL);
