@@ -31,6 +31,11 @@ STATUSES = "PASS FAIL ERROR SKIP XFAIL XPASS TIMEOUT CRASH NOTRUN".split()
 PIN = json.loads((HERE / "PIN").read_text())
 
 
+def scrub(text):
+    """Absolute paths out of text bound for public JSON, including one glued to a flag (-I/dir)."""
+    return re.sub(r"(?<!\w)/[^\s'\"<>]+|/(?:home|tmp|var|usr|opt)/[^\s'\"<>]+", "<path>", text)
+
+
 def digest(path):
     with open(path, "rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -157,7 +162,7 @@ def junit_rows(path):
                 status = "TIMEOUT"
             reason = child.get("message", "").splitlines()[0] if child.get("message") else kind
             # Raw XML/logs remain external. Public diagnostics contain no host paths.
-            reasons[ident] = re.sub(r"(?<!\w)/[^\s'\"<>]+", "<path>", reason)[:300]
+            reasons[ident] = scrub(reason)[:300]
         value = (status, float(case.get("time", "0")))
         if ident in rows:
             # JUnit may emit separate call and teardown failures for one item.
@@ -343,7 +348,7 @@ def run(args):
         if executable:
             metadata["interpreter_sha256"] = digest(executable)
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
-        metadata["unavailable"] = re.sub(r"(?<!\w)/[^\s'\"<>]+", "<path>", str(exc))
+        metadata["unavailable"] = scrub(str(exc))
         if args.collect:
             raise ValueError("cannot establish collection: " + metadata["unavailable"]) from exc
         if not expected:
@@ -417,7 +422,7 @@ def run(args):
             reasons.update(why)
     completed = journal_rows(work / "reports.jsonl")
     for ident, why in journal_reasons(work / "reports.jsonl").items():
-        reasons.setdefault(ident, re.sub(r"(?<!\w)/[^\s'\"<>]+", "<path>", why)[:300])
+        reasons.setdefault(ident, scrub(why)[:300])
     completed.update(outcomes)
     rows.update(completed)
     if code == "TIMEOUT" or isinstance(code, int) and code < 0:

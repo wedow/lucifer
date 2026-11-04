@@ -195,6 +195,10 @@ class HarnessChecks(unittest.TestCase):
         self.assertEqual(self.invoke().returncode, 1)
         self.assertEqual(self.rows(), dict(zip(self.ids, ["CRASH", "PASS"])))
 
+    def test_paths_never_reach_public_reasons(self):
+        scrub = runpy.run_path(str(self.tool / "run.py"))["scrub"]
+        self.assertEqual(scrub("bad '-I/home/user/a/b.py' and /tmp/x/y"), "bad '-I<path>' and <path>")
+
     def test_runall_shards_cover_each_id_once(self):
         shard_groups = runpy.run_path(str(HERE / "runall.py"))["shard_groups"]
         ids = [f"numpy/a/test_{n}.py::{c}::t[{i}]" for n in range(5) for c in "XY" for i in range(7)]
