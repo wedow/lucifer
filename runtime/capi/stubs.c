@@ -23,12 +23,6 @@ LU_STUB int PyBuffer_IsContiguous(const Py_buffer *view, char fort) { LU_UNIMPLE
 LU_STUB void PyBuffer_Release(Py_buffer *view) { LU_UNIMPLEMENTED("PyBuffer_Release"); }
 LU_STUB Py_ssize_t PyBuffer_SizeFromFormat(const char *format) { LU_UNIMPLEMENTED("PyBuffer_SizeFromFormat"); }
 LU_STUB int PyBuffer_ToContiguous(void *buf, const Py_buffer *view, Py_ssize_t len, char order) { LU_UNIMPLEMENTED("PyBuffer_ToContiguous"); }
-LU_STUB char * PyByteArray_AsString(PyObject *) { LU_UNIMPLEMENTED("PyByteArray_AsString"); }
-LU_STUB PyObject * PyByteArray_Concat(PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyByteArray_Concat"); }
-LU_STUB PyObject * PyByteArray_FromObject(PyObject *) { LU_UNIMPLEMENTED("PyByteArray_FromObject"); }
-LU_STUB PyObject * PyByteArray_FromStringAndSize(const char *, Py_ssize_t) { LU_UNIMPLEMENTED("PyByteArray_FromStringAndSize"); }
-LU_STUB int PyByteArray_Resize(PyObject *, Py_ssize_t) { LU_UNIMPLEMENTED("PyByteArray_Resize"); }
-LU_STUB Py_ssize_t PyByteArray_Size(PyObject *) { LU_UNIMPLEMENTED("PyByteArray_Size"); }
 LU_STUB char * PyBytes_AsString(PyObject *) { LU_UNIMPLEMENTED("PyBytes_AsString"); }
 LU_STUB int PyBytes_AsStringAndSize(PyObject *obj, char **s, Py_ssize_t *len) { LU_UNIMPLEMENTED("PyBytes_AsStringAndSize"); }
 LU_STUB void PyBytes_Concat(PyObject **, PyObject *) { LU_UNIMPLEMENTED("PyBytes_Concat"); }

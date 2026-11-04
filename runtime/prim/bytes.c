@@ -1701,6 +1701,9 @@ PyByteArray_FromStringAndSize(const char *bytes, Py_ssize_t size)
         PyErr_SetString(PyExc_SystemError, "Negative size passed to PyByteArray_FromStringAndSize");
         return NULL;
     }
+    if (size == PY_SSIZE_T_MAX) {
+        return PyErr_NoMemory();
+    }
     PyObject *ba = PyByteArray_Type.tp_alloc(&PyByteArray_Type, 0);
     if (ba == NULL) {
         return NULL;
@@ -1731,7 +1734,8 @@ int
 PyByteArray_Resize(PyObject *self, Py_ssize_t size)
 {
     if (size < 0) {
-        PyErr_SetString(PyExc_ValueError, "Can only resize to positive sizes");
+        PyErr_Format(PyExc_ValueError,
+                     "Can only resize to positive sizes, got %zd", size);
         return -1;
     }
     int r;
