@@ -4,6 +4,7 @@
    callers see one behaviour. */
 
 #include "lucifer.h"
+#include "object/dict.h"
 #include "opcode.h"
 
 #include <string.h>
@@ -681,6 +682,23 @@ mapping_list(PyObject *o, const char *method)
     return r;
 }
 
+/* The dict's own keys/values/items as a list, whatever a subclass overrides:
+   the method out of PyDict_Type's own dict (PyDict_Keys' contract). */
+static PyObject *
+dict_own_list(PyObject *o, const char *method)
+{
+    PyObject *name = PyUnicode_InternFromString(method);
+    PyObject *func = name != NULL ? _PyType_Lookup(&PyDict_Type, name) : NULL;
+    Py_XDECREF(name);
+    PyObject *view = func != NULL ? lu_call(func, &o, 1, NULL) : NULL;
+    if (view == NULL) {
+        return NULL;
+    }
+    PyObject *r = call_builtin("list", &view, 1);
+    Py_DECREF(view);
+    return r;
+}
+
 PyObject *
 PyMapping_Keys(PyObject *o)
 {
@@ -794,13 +812,50 @@ PyDict_GetItemWithError(PyObject *op, PyObject *key)
     return v;
 }
 
+/* PyDict_GetItem swallows every error, reporting one that is not a missing
+   key as unraisable, the hash failure raw (Objects/dictobject.c
+   dict_getitem). An exception already raised stays aside and is restored.
+   Reporting one while another is being reported would not end, and before
+   the kernel is up - static types inherit through here while it boots - a
+   failed lookup is only silence. */
+static _Thread_local int reporting_unraisable;
+
+static int
+report_unraisable(void)
+{
+    return !reporting_unraisable && PyInterpreterState_Get()->kernel_booted;
+}
+
 PyObject *
 PyDict_GetItem(PyObject *op, PyObject *key)
 {
-    PyObject *v = PyDict_GetItemWithError(op, key);
-    if (v == NULL) {
-        PyErr_Clear();
+    if (!PyDict_Check(op)) {
+        return NULL;
     }
+    /* the raw slot hash: PyObject_Hash goes through builtins.hash, whose own
+       lookup lands here again (dict_getitem hashes with _PyObject_HashFast) */
+    hashfunc hash_of = Py_TYPE(key)->tp_hash;
+    Py_hash_t hash = hash_of != NULL ? hash_of(key) : -1;
+    if (hash_of == NULL || (hash == -1 && PyErr_Occurred())) {
+        if (PyErr_Occurred() && !PyErr_ExceptionMatches(PyExc_KeyError) && report_unraisable()) {
+            reporting_unraisable = 1;
+            PyErr_FormatUnraisable("Exception ignored in PyDict_GetItem(); consider "
+                                   "using PyDict_GetItemRef() or PyDict_GetItemWithError()");
+            reporting_unraisable = 0;
+        }
+        PyErr_Clear();
+        return NULL;
+    }
+    PyObject *exc = PyErr_GetRaisedException();
+    PyObject *v = PyDict_GetItemWithError(op, key);
+    if (v == NULL && PyErr_Occurred() && !PyErr_ExceptionMatches(PyExc_KeyError) && report_unraisable()) {
+        reporting_unraisable = 1;
+        PyErr_FormatUnraisable("Exception ignored in PyDict_GetItem(); consider "
+                               "using PyDict_GetItemRef() or PyDict_GetItemWithError()");
+        reporting_unraisable = 0;
+    }
+    PyErr_Clear();
+    PyErr_SetRaisedException(exc);
     return v;
 }
 
@@ -808,33 +863,42 @@ PyObject *
 PyDict_GetItemString(PyObject *op, const char *key)
 {
     PyObject *k = PyUnicode_FromString(key);
-    PyObject *v = k != NULL ? PyDict_GetItem(op, k) : NULL;
-    Py_XDECREF(k);
+    if (k == NULL) {
+        PyErr_FormatUnraisable("Exception ignored in PyDict_GetItemString(); consider "
+                               "using PyDict_GetItemStringRef()");
+        PyErr_Clear();
+        return NULL;
+    }
+    PyObject *v = PyDict_GetItem(op, k);
+    Py_DECREF(k);
     return v;
 }
 
 PyObject *
 PyDict_Copy(PyObject *op)
 {
-    return dict_arg(op) != NULL ? call_method(op, "copy", NULL, 0) : NULL;
+    if (dict_arg(op) == NULL) {
+        return NULL;
+    }
+    return lu_dict_copy((PyDictObject *)op);    /* an exact dict, subclasses too */
 }
 
 PyObject *
 PyDict_Keys(PyObject *op)
 {
-    return dict_arg(op) != NULL ? mapping_list(op, "keys") : NULL;
+    return dict_arg(op) != NULL ? dict_own_list(op, "keys") : NULL;
 }
 
 PyObject *
 PyDict_Values(PyObject *op)
 {
-    return dict_arg(op) != NULL ? mapping_list(op, "values") : NULL;
+    return dict_arg(op) != NULL ? dict_own_list(op, "values") : NULL;
 }
 
 PyObject *
 PyDict_Items(PyObject *op)
 {
-    return dict_arg(op) != NULL ? mapping_list(op, "items") : NULL;
+    return dict_arg(op) != NULL ? dict_own_list(op, "items") : NULL;
 }
 
 int
@@ -856,7 +920,18 @@ PyDict_Next(PyObject *op, Py_ssize_t *pos, PyObject **key, PyObject **value)
 int
 PyDict_Update(PyObject *a, PyObject *b)
 {
-    PyObject *r = dict_arg(a) != NULL ? call_method(a, "update", &b, 1) : NULL;
+    if (a == NULL || b == NULL || dict_arg(a) == NULL) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    /* a plain non-mapping has no keys to merge: the AttributeError is
+       PyDict_Update's own contract (dict_update_common) */
+    PyObject *keys = PyObject_GetAttrString(b, "keys");
+    if (keys == NULL) {
+        return -1;
+    }
+    Py_DECREF(keys);
+    PyObject *r = call_method(a, "update", &b, 1);
     Py_XDECREF(r);
     return r == NULL ? -1 : 0;
 }
@@ -864,7 +939,11 @@ PyDict_Update(PyObject *a, PyObject *b)
 int
 PyDict_Merge(PyObject *a, PyObject *b, int override)
 {
-    if (override == 1 || dict_arg(a) == NULL) {
+    if (a == NULL || b == NULL || !PyDict_Check(a)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    if (override != 0) {
         return PyDict_Update(a, b);
     }
     PyObject *items = PyMapping_Items(b);
@@ -876,15 +955,8 @@ PyDict_Merge(PyObject *a, PyObject *b, int override)
         PyObject *pair = PyList_GET_ITEM(items, i);
         PyObject *key = PyTuple_GET_ITEM(pair, 0), *value = PyTuple_GET_ITEM(pair, 1);
         int has = PyDict_Contains(a, key);
-        if (has == 0) {
-            err = PyDict_SetItem(a, key, value);
-        }
-        else if (has > 0 && override != 0) {
-            PyErr_SetObject(PyExc_KeyError, key);
-            err = -1;
-        }
-        else if (has < 0) {
-            err = -1;
+        if (has <= 0) {
+            err = has < 0 ? -1 : PyDict_SetItem(a, key, value);
         }
     }
     Py_DECREF(items);
@@ -1024,7 +1096,11 @@ PyTuple_GetItem(PyObject *op, Py_ssize_t i)
 int
 PyTuple_SetItem(PyObject *op, Py_ssize_t i, PyObject *newitem)
 {
-    if (op == NULL || !PyTuple_Check(op)) {
+    PyObject *ob = op;
+    int unique = op != NULL && PyTuple_Check(op)
+        && _Py_IsOwnedByCurrentThread(ob) && ob->ob_ref_local == 1
+        && _Py_atomic_load_ssize_relaxed(&ob->ob_ref_shared) == 0;
+    if (!unique) {
         Py_XDECREF(newitem);
         PyErr_BadInternalCall();
         return -1;

@@ -410,3 +410,55 @@ lu_frozenset_hash(PyObject *set)
     }
     return so->hash;
 }
+
+
+/* _PySet_NextEntryRef (setobject.c): the entry at pos onward, its key as a
+   new reference, under the set's lock: a concurrent discard cannot take the
+   key between the read and the reference. */
+LU_EXPORT int
+_PySet_NextEntryRef(PyObject *set, Py_ssize_t *pos, PyObject **key, Py_hash_t *hash)
+{
+    if (!PyAnySet_Check(set)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    PySetObject *so = (PySetObject *)set;
+    int found = 0;
+    Py_BEGIN_CRITICAL_SECTION(set);
+    while (*pos <= so->mask) {
+        setentry *entry = &so->table[(*pos)++];
+        if (entry->key != NULL && entry->key != LU_SET_DUMMY) {
+            *key = Py_NewRef(entry->key);
+            *hash = entry->hash;
+            found = 1;
+            break;
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    return found;
+}
+
+/* _PySet_Update (set_update_internal): every item of iterable into the set. */
+LU_EXPORT int
+_PySet_Update(PyObject *set, PyObject *iterable)
+{
+    if (!PySet_Check(set)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    PyObject *it = PyObject_GetIter(iterable);
+    if (it == NULL) {
+        return -1;
+    }
+    PyObject *item;
+    while ((item = PyIter_Next(it)) != NULL) {
+        int err = lu_set_add(set, item);
+        Py_DECREF(item);
+        if (err < 0) {
+            Py_DECREF(it);
+            return -1;
+        }
+    }
+    Py_DECREF(it);
+    return PyErr_Occurred() ? -1 : 0;
+}
