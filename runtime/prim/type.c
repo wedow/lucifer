@@ -1000,13 +1000,12 @@ ready_type(PyTypeObject *tp, PyTypeObject *base, struct lu_static_type_state *st
         return -1;
     }
 
-    /* The slots the type leaves NULL, from every base, bases first; a type
+    /* The slots the type leaves NULL, from each type of its MRO in turn (only the type changes); a type
        whose dict defines __eq__ or __hash__ inherits neither of the pair
        (inherit_slots, overrides_hash). */
     int hash_pair = tp->tp_hash == NULL && tp->tp_richcompare == NULL;
-    for (Py_ssize_t j = PyTuple_GET_SIZE(mro) - 1; j > 0; j--) {
-        inherit_slots((PyTypeObject *)PyTuple_GET_ITEM(mro, j - 1),
-                      (PyTypeObject *)PyTuple_GET_ITEM(mro, j));
+    for (Py_ssize_t j = 1; j < PyTuple_GET_SIZE(mro); j++) {
+        inherit_slots(tp, (PyTypeObject *)PyTuple_GET_ITEM(mro, j));
     }
     if (hash_pair
         && (PyDict_GetItemString(dict, "__eq__") != NULL || PyDict_GetItemString(dict, "__hash__") != NULL)) {

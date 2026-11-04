@@ -430,6 +430,34 @@ static PyTypeObject BytesCopy_Type = {
     .tp_base = &PyBytes_Type,
 };
 
+/* ready.Mul and ready.BytesMul(bytes, Mul): readying a type with a second base must
+   not fill the first base's empty slots from it (NumPy's bytes_ and generic). */
+static PyObject *
+mul_multiply(PyObject *a, PyObject *b)
+{
+    return Py_NewRef(Py_NotImplemented);
+}
+
+static PyNumberMethods mul_as_number = { .nb_multiply = mul_multiply };
+
+static PyTypeObject Mul_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.Mul",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_as_number = &mul_as_number,
+};
+
+static PyTypeObject BytesMul_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.BytesMul",
+    .tp_basicsize = sizeof(PyBytesObject),
+    .tp_itemsize = 1,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_base = &PyBytes_Type,
+};
+
 /* ready.CmpOnly: a tp_richcompare and no tp_hash, as ndarray: unhashable. */
 static PyTypeObject CmpOnly_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -458,6 +486,22 @@ static PyTypeObject Mapped_Type = {
     .tp_new = PyType_GenericNew,
     .tp_as_mapping = &mapped_as_mapping,
 };
+
+/* seq_shape(obj): whether its type has sq_repeat and nb_multiply, then PySequence_Repeat(obj, 2). */
+static PyObject *
+seq_shape(PyObject *self, PyObject *arg)
+{
+    PyTypeObject *tp = Py_TYPE(arg);
+    int repeat = tp->tp_as_sequence != NULL && tp->tp_as_sequence->sq_repeat != NULL;
+    int multiply = tp->tp_as_number != NULL && tp->tp_as_number->nb_multiply != NULL;
+    return Py_BuildValue("(ii)", repeat, multiply);
+}
+
+static PyObject *
+repeat_twice(PyObject *self, PyObject *arg)
+{
+    return PySequence_Repeat(arg, 2);
+}
 
 static PyObject *
 is_sequence(PyObject *self, PyObject *arg)
@@ -1035,6 +1079,8 @@ static PyMethodDef module_methods[] = {
     { "errors", errors, METH_NOARGS, NULL },
     { "raise_object", raise_object, METH_VARARGS, NULL },
     { "is_sequence", is_sequence, METH_O, NULL },
+    { "seq_shape", seq_shape, METH_O, NULL },
+    { "repeat_twice", repeat_twice, METH_O, NULL },
     { "sigfunc", is_sequence, METH_O, "sigfunc($module, a, b=1, /)\n--\n\nReal doc." },
     { "badsig", is_sequence, METH_O, "badsig(a, b\nno marker" },
     { "dict_ops", dict_ops, METH_NOARGS, NULL },
@@ -1063,7 +1109,11 @@ PyInit_ready(void)
     }
     BytesCopy_Type.tp_richcompare = PyBytes_Type.tp_richcompare;
     BytesCopy_Type.tp_hash = PyBytes_Type.tp_hash;
-    if (PyType_Ready(&BytesCopy_Type) < 0) {
+    if (PyType_Ready(&BytesCopy_Type) < 0 || PyType_Ready(&Mul_Type) < 0) {
+        return NULL;
+    }
+    BytesMul_Type.tp_bases = Py_BuildValue("(OO)", &PyBytes_Type, &Mul_Type);
+    if (BytesMul_Type.tp_bases == NULL || PyType_Ready(&BytesMul_Type) < 0) {
         return NULL;
     }
     PyObject *m = PyModule_Create(&module);
@@ -1078,7 +1128,9 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "Mapped", (PyObject *)&Mapped_Type) < 0
         || PyModule_AddObjectRef(m, "Unhashable", (PyObject *)&Unhashable_Type) < 0
         || PyModule_AddObjectRef(m, "CmpOnly", (PyObject *)&CmpOnly_Type) < 0
-        || PyModule_AddObjectRef(m, "BytesCopy", (PyObject *)&BytesCopy_Type) < 0) {
+        || PyModule_AddObjectRef(m, "BytesCopy", (PyObject *)&BytesCopy_Type) < 0
+        || PyModule_AddObjectRef(m, "Mul", (PyObject *)&Mul_Type) < 0
+        || PyModule_AddObjectRef(m, "BytesMul", (PyObject *)&BytesMul_Type) < 0) {
         Py_XDECREF(m);
         return NULL;
     }

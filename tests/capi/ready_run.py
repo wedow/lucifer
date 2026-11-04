@@ -220,3 +220,11 @@ print([kind(o) for o in (ready.Vec(1, 2), ready.MyList(), ready.Counter(), ready
 bc = ready.BytesCopy(b'ab')
 print(bc == b'ab', bc == bytearray(b'ab'), bc.__eq__(5), bc.__lt__(b'b'), bc != 'ab', hash(bc) == hash(b'ab'),
       ready.BytesCopy.__eq__(bc, bytearray(b'ab')))
+
+# builtin sequences repeat through sq_repeat and have no nb_multiply; a class defining __mul__ has the reverse
+class Repeats:
+    def __mul__(self, n): return ('repeated', n)
+print([ready.seq_shape(o) for o in ([], (), 'a', b'', bytearray(), 1, 1.5, {}, Repeats(), ready.Vec(1, 2), ready.Mul())])
+print(ready.BytesMul.__mro__, ready.seq_shape(ready.BytesMul(b'x')))
+print(ready.repeat_twice([1]), ready.repeat_twice((1,)), ready.repeat_twice('ab'), ready.repeat_twice(b'ab'),
+      ready.repeat_twice(bytearray(b'ab')))

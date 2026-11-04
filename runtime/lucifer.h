@@ -1144,7 +1144,8 @@ PyObject *lu_slot_tp_getattro(PyObject *self, PyObject *name);
 int lu_slot_tp_setattro(PyObject *self, PyObject *name, PyObject *value);
 PyObject *lu_slot_tp_call(PyObject *self, PyObject *args, PyObject *kwargs);
 /* Sets slot `name` of tp: how 0 clears it, 1 installs the thunk, 2 copies
-   it from `from`, 3 installs PyObject_HashNotImplemented (tp_hash only). */
+   it from `from`, 3 installs PyObject_HashNotImplemented (tp_hash only), 4 installs
+   the repeat of a builtin sequence over its __mul__ (sq_repeat only). */
 int lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from);
 /* Calls special method `name` of self's type, as vectorcall_method does. */
 PyObject *lu_call_special(PyObject *self, PyObject *name, PyObject *const *args, Py_ssize_t nargs);

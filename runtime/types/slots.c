@@ -606,6 +606,16 @@ slot_bf_getbuffer(PyObject *self, Py_buffer *view, int flags)
     return r;
 }
 
+/* sq_repeat of a builtin sequence: its __mul__. Heap types get none, as in CPython. */
+static PyObject *
+slot_sq_repeat(PyObject *self, Py_ssize_t n)
+{
+    PyObject *count = PyLong_FromSsize_t(n);
+    PyObject *r = count != NULL ? lu_call_special(self, LU_ID(__mul__), &count, 1) : NULL;
+    Py_XDECREF(count);
+    return r;
+}
+
 /* The slot table: where each slot lives and its thunk. */
 enum { IN_TYPE, IN_NUMBER, IN_MAPPING, IN_SEQUENCE, IN_ASYNC, IN_BUFFER };
 
@@ -707,6 +717,7 @@ lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from)
         break;
     }
     case 3: value = (void *)PyObject_HashNotImplemented; break;
+    case 4: value = (void *)slot_sq_repeat; break;
     default:
         lu_err_format(PyExc_SystemError, "set_slot: bad how %d", how);
         return -1;

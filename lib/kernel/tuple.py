@@ -300,3 +300,6 @@ class tuple_iterator:
             elif i > size(seq):
                 i = size(seq)
             iter_set(self, seq, i)
+
+
+_boot.builtin_sequence(tuple)

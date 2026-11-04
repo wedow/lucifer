@@ -1121,3 +1121,7 @@ class bytearray_iterator:
 
     def __setstate__(self, state):
         _iter.seqiter_setstate(self, state)
+
+
+_boot.builtin_sequence(bytes)
+_boot.builtin_sequence(bytearray)
