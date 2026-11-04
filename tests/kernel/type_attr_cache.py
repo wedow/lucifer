@@ -145,3 +145,26 @@ f.a = 1
 print(36, f.a)
 del F.a2
 print(37, getattr(f, 'a2', 'gone'))
+
+
+# A replaced or deleted class attribute's finalizer, which runs as the
+# class changes, sees the class as it is after the change.
+class Host:
+    pass
+
+
+class Dying:
+    def __init__(self, name):
+        self.name = name
+
+    def __del__(self):
+        print(38, self.name, getattr(Host, self.name, 'gone'), getattr(Host(), self.name, 'gone'))
+
+
+for name, how in (('x', 'set'), ('x', 'del'), ('__doc__', 'set'), ('__module__', 'set')):
+    setattr(Host, name, Dying(name))
+    print(39, name, type(getattr(Host, name)).__name__, type(getattr(Host(), name)).__name__)
+    if how == 'set':
+        setattr(Host, name, 'replaced')
+    else:
+        delattr(Host, name)

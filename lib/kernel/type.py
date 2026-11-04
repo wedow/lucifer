@@ -509,10 +509,14 @@ type(name, bases, dict, **kwds) -> a new type"""
 
 
 def _type_set(cls, name, value):
-    """type_setattro: immutable types refuse; a dunder updates the slots."""
+    """type_setattro: immutable types refuse; a dunder updates the slots.
+    The cached lookups go before the dict changes, as the replaced value's
+    finalizer may look the name up, and again after, for a lookup another
+    thread made in between."""
     if not type_flag(cls, _HEAPTYPE):
         error(TypeError, str_join('', (
             "cannot set '", name, "' attribute of immutable type '", type_tp_name(cls), "'")))
+    type_modified(cls)
     generic_setattr(cls, name, value)
     type_modified(cls)
     if ns_get(_boot.SLOT_DUNDERS, name, False):
