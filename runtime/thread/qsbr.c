@@ -49,17 +49,20 @@ lu_qsbr_detach(struct lu_carrier *c)
     __atomic_store_n(&c->qsbr.seq, QSBR_OFFLINE, __ATOMIC_RELEASE);
 }
 
-static uint64_t
-advance(void)
+uint64_t
+lu_qsbr_advance(void)
 {
     return __atomic_add_fetch(&_PyRuntime.qsbr.wr_seq, QSBR_INCR, __ATOMIC_SEQ_CST);
 }
 
-static uint64_t
-next_goal(void)
+uint64_t
+lu_qsbr_next_goal(void)
 {
     return __atomic_load_n(&_PyRuntime.qsbr.wr_seq, __ATOMIC_ACQUIRE) + QSBR_INCR;
 }
+
+#define advance lu_qsbr_advance
+#define next_goal lu_qsbr_next_goal
 
 /* The read sequence: the least sequence an attached carrier has seen, or the
    write sequence when none is attached. */
@@ -86,12 +89,14 @@ scan(void)
     return rd;
 }
 
-static int
-goal_reached(uint64_t goal)
+int
+lu_qsbr_goal_reached(uint64_t goal)
 {
     uint64_t rd = __atomic_load_n(&_PyRuntime.qsbr.rd_seq, __ATOMIC_ACQUIRE);
     return QSBR_LEQ(goal, rd) || QSBR_LEQ(goal, scan());
 }
+
+#define goal_reached lu_qsbr_goal_reached
 
 static void
 push(struct lu_qsbr_queue *q, void *ptr, uint64_t goal)

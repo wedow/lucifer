@@ -1,6 +1,6 @@
 ---
 id: luc-n6cx
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-04T04:33:39Z

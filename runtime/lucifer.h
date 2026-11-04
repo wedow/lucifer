@@ -424,6 +424,7 @@ struct lu_qsbr {
     uint64_t seq;               /* the write sequence last observed; 0 while detached */
     struct lu_qsbr_queue queue;
     int deferred_count;         /* retired since the sequence last advanced */
+    size_t deferred_page_memory;/* bytes of empty mimalloc pages waiting for a goal */
     int should_process;
     struct lu_carrier *next;    /* the registry's list */
 };
@@ -637,6 +638,12 @@ void lu_qsbr_unregister(struct lu_carrier *c);
 void lu_qsbr_attach(struct lu_carrier *c);
 void lu_qsbr_detach(struct lu_carrier *c);
 void lu_qsbr_process(struct lu_carrier *c);
+/* The goals that readers must reach before something is freed: for mimalloc
+   pages (runtime/object/alloc.c). Advance moves the write sequence on and
+   answers the goal that follows; next answers it without moving. */
+int lu_qsbr_goal_reached(uint64_t goal);
+uint64_t lu_qsbr_advance(void);
+uint64_t lu_qsbr_next_goal(void);
 /* Drains the carrier's queued biased-refcount merges for `interp`. */
 void lu_brc_merge(struct lu_entry *entry);
 
@@ -808,6 +815,87 @@ lu_qsbr_quiescent(struct lu_carrier *c)
     }
 }
 
+/* Lock-free reads of a container's items (Include/internal/pycore_object.h).
+   A reader that holds no lock may find the item freed or replaced between its
+   load and its incref, so it takes a reference only if the object is still
+   alive (try-incref) and the container's slot still holds it. A failed try
+   sends the reader to the locked path, whose Py_NewRef marks the object
+   shared so that later tries succeed. */
+static inline int
+lu_try_incref_fast(PyObject *op)
+{
+    uint32_t local = _Py_atomic_load_uint32_relaxed(&op->ob_ref_local) + 1;
+    if (local == 0) {
+        return 1;                       /* immortal */
+    }
+    if (_Py_IsOwnedByCurrentThread(op)) {
+        _Py_atomic_store_uint32_relaxed(&op->ob_ref_local, local);
+        return 1;
+    }
+    return 0;
+}
+
+static inline int
+lu_try_incref_shared(PyObject *op)
+{
+    Py_ssize_t shared = _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared);
+    for (;;) {
+        /* Zero shared count: the owner may free it at any time. */
+        if (shared == 0 || shared == _Py_REF_MERGED) {
+            return 0;
+        }
+        if (_Py_atomic_compare_exchange_ssize(&op->ob_ref_shared, &shared,
+                                              shared + (1 << _Py_REF_SHARED_SHIFT))) {
+            return 1;
+        }
+    }
+}
+
+/* A reference to op, if it is alive and *src still points to it. */
+static inline int
+lu_try_incref_compare(PyObject **src, PyObject *op)
+{
+    if (lu_try_incref_fast(op)) {
+        return 1;
+    }
+    if (!lu_try_incref_shared(op)) {
+        return 0;
+    }
+    if (op != _Py_atomic_load_ptr(src)) {
+        Py_DECREF(op);
+        return 0;
+    }
+    return 1;
+}
+
+/* A new reference to *ptr, NULL if it holds NULL or a try fails. */
+static inline PyObject *
+lu_try_xget_ref(PyObject **ptr)
+{
+    PyObject *value = _Py_atomic_load_ptr(ptr);
+    return value != NULL && lu_try_incref_compare(ptr, value) ? value : NULL;
+}
+
+/* Py_NewRef under the container's lock: marks an object another thread owns
+   as possibly shared, so that lock-free tries on it can succeed. */
+static inline PyObject *
+lu_new_ref_with_lock(PyObject *op)
+{
+    if (lu_try_incref_fast(op)) {
+        return op;
+    }
+    for (;;) {
+        Py_ssize_t shared = _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared);
+        Py_ssize_t new_shared = shared + (1 << _Py_REF_SHARED_SHIFT);
+        if ((shared & _Py_REF_SHARED_FLAG_MASK) == 0) {
+            new_shared |= _Py_REF_MAYBE_WEAKREF;
+        }
+        if (_Py_atomic_compare_exchange_ssize(&op->ob_ref_shared, &shared, new_shared)) {
+            return op;
+        }
+    }
+}
+
 /* Layouts (runtime/object/). Constructors return a new reference, or NULL
    with an exception set. lu_hash and lu_eq cover the layouts marshal yields,
    before the kernel installs Python-level __hash__ and __eq__. */
@@ -945,6 +1033,10 @@ PyObject *lu_function_from_args(PyObject *const *args);
    dict code all use (DESIGN 4.4). Lookup returns a borrowed value or NULL,
    and never raises. */
 PyObject *lu_ns_lookup(PyObject *dict, PyObject *key);
+/* The same as a new reference, which is what a reader needs when other
+   threads may replace or delete the value (the borrowed form is for
+   startup and for dicts that nothing else writes). */
+PyObject *lu_ns_get(PyObject *dict, PyObject *key);
 int lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value);
 /* lu_ns_insert in the dict's critical section, for a dict that other
    threads may write: an instance's, or one the kernel stores into. */
