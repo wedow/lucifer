@@ -853,8 +853,17 @@ lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value)
     if (descr != NULL) {
         return lu_descr_set_native(descr, obj, value);
     }
-    PyObject *dict = (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) ? LU_MANAGED_DICT(obj) : NULL;
-    if (value == NULL || dict == NULL || !PyDict_CheckExact(dict)) {
+    if (value == NULL || !(tp->tp_flags & Py_TPFLAGS_MANAGED_DICT)) {
+        return 0;
+    }
+    PyObject *dict = LU_MANAGED_DICT(obj);
+    if (dict == NULL) {
+        dict = LU_MANAGED_DICT(obj) = PyDict_New();
+        if (dict == NULL) {
+            return -1;
+        }
+    }
+    if (!PyDict_CheckExact(dict)) {
         return 0;
     }
     return lu_ns_insert(dict, name, value) < 0 ? -1 : 1;

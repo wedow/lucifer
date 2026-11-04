@@ -1890,7 +1890,7 @@ op_STORE_ATTR_FAST: {
     if (opcode == STORE_ATTR_WITH_HINT) {
         dict = LU_MANAGED_DICT(owner);
         if (dict == NULL || !PyDict_CheckExact(dict)) {
-            goto op_STORE_ATTR;
+            goto op_STORE_ATTR;     /* the generic form makes the dict */
         }
     }
     if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
