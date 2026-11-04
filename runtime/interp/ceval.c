@@ -2552,6 +2552,11 @@ exception_unwind: {
         next_instr = lu_code_start(code) + handler;
         DISPATCH();
     }
+    /* The frame ends at the instruction that last raised in it: a RERAISE out of
+       a cleanup handler restores that (f_lasti, f_lineno of a dead frame). */
+    if (lasti != offset) {
+        next_instr = lu_code_start(code) + lasti + 1;
+    }
     SAVE_FRAME();
     struct lu_frame *caller = frame->previous;
     if (frame->owner == LU_FRAME_GENERATOR) {

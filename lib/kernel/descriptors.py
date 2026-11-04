@@ -9,6 +9,7 @@ from _lucifer import (
     type_qualname, is_subtype, ns_get, alloc, static_type, descr_type, bind,
     method_new, member_get, member_set, getset_kernel, getset_get, getset_set,
     field_get, field_set, super_args, is_callable, kernel_set, kernel_get, address, function_new,
+    object_hash,
 )
 from _lucifer import _boot
 
@@ -101,8 +102,44 @@ class method:
     def __get__(self, instance, owner=None):
         return self
 
+    def __call__(self, /, *args, **kwargs):
+        return member_get(_method_func, self)(member_get(_method_self, self), *args, **kwargs)
+
+    def __repr__(self):
+        func = member_get(_method_func, self)
+        name = '?'
+        for attr in ('__qualname__', '__name__'):
+            try:
+                found = getattr_hook(func, attr)
+            except AttributeError:
+                continue
+            if kind(found, 'str'):
+                name = found
+            break
+        return str_join('', ('<bound method ', name, ' of ', repr(member_get(_method_self, self)), '>'))
+
+    def __eq__(self, other):
+        if not kind_method(other):
+            return NotImplemented
+        return (member_get(_method_self, self) is member_get(_method_self, other)
+                and member_get(_method_func, self) == member_get(_method_func, other))
+
+    def __hash__(self):
+        return object_hash(member_get(_method_self, self)) ^ hash(member_get(_method_func, self))
+
+    def __reduce__(self):
+        func = member_get(_method_func, self)
+        return (getattr, (member_get(_method_self, self), getattr_hook(func, '__name__')))
+
+    __doc__ = getset(lambda self: getattr_hook(member_get(_method_func, self), '__doc__'))
+
+
+def kind_method(x):
+    return type(x) is method
+
 
 _method_func = ns_get(type_dict(method), '__func__', MISSING)
+_method_self = ns_get(type_dict(method), '__self__', MISSING)
 
 
 @kernel_type(static_type('method_descriptor'))

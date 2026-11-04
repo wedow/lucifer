@@ -768,29 +768,31 @@ PyObject *
 lu_seqiter_next(PyObject *iter)
 {
     seqiterobject *it = (seqiterobject *)iter;
-    PyObject *seq = it->it_seq;
-    if (seq == NULL) {
-        return NULL;
-    }
     PyTypeObject *tp = Py_TYPE(iter);
-    PyObject *v = NULL;
-    if (tp == &PyListRevIter_Type) {
-        if (it->it_index >= 0 && it->it_index < Py_SIZE(seq)) {
-            v = Py_NewRef(((PyListObject *)seq)->ob_item[it->it_index--]);
+    PyObject *v = NULL, *dead = NULL;
+    Py_BEGIN_CRITICAL_SECTION(iter);
+    PyObject *seq = it->it_seq;
+    if (seq != NULL) {
+        if (tp == &PyListRevIter_Type) {
+            if (it->it_index >= 0 && it->it_index < Py_SIZE(seq)) {
+                v = Py_NewRef(((PyListObject *)seq)->ob_item[it->it_index--]);
+            }
+            else {
+                it->it_index = -1;
+            }
         }
-        else {
-            it->it_index = -1;
+        else if (it->it_index < Py_SIZE(seq)) {
+            v = Py_NewRef(tp == &PyTupleIter_Type ? PyTuple_GET_ITEM(seq, it->it_index)
+                                                  : ((PyListObject *)seq)->ob_item[it->it_index]);
+            it->it_index++;
+        }
+        if (v == NULL) {
+            it->it_seq = NULL;
+            dead = seq;
         }
     }
-    else if (it->it_index < Py_SIZE(seq)) {
-        v = Py_NewRef(tp == &PyTupleIter_Type ? PyTuple_GET_ITEM(seq, it->it_index)
-                                              : ((PyListObject *)seq)->ob_item[it->it_index]);
-        it->it_index++;
-    }
-    if (v == NULL) {
-        it->it_seq = NULL;
-        Py_DECREF(seq);
-    }
+    Py_END_CRITICAL_SECTION();
+    Py_XDECREF(dead);
     return v;
 }
 
@@ -808,9 +810,18 @@ prim_iter_state(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1);
     seqiterobject *it = (seqiterobject *)args[0];
-    PyObject *index = PyLong_FromLong(it->it_index);
-    PyObject *r = index != NULL ? PyTuple_Pack(2, it->it_seq != NULL ? it->it_seq : Py_None, index) : NULL;
+    PyObject *seq, *r = NULL;
+    Py_ssize_t i;
+    Py_BEGIN_CRITICAL_SECTION(it);
+    seq = Py_XNewRef(it->it_seq);
+    i = it->it_index;
+    Py_END_CRITICAL_SECTION();
+    PyObject *index = PyLong_FromSsize_t(i);
+    if (index != NULL) {
+        r = PyTuple_Pack(2, seq != NULL ? seq : Py_None, index);
+    }
     Py_XDECREF(index);
+    Py_XDECREF(seq);
     return r;
 }
 
@@ -819,9 +830,12 @@ prim_iter_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(3); SSIZE(2, index);
     seqiterobject *it = (seqiterobject *)args[0];
-    PyObject *old = it->it_seq;
+    PyObject *old;
+    Py_BEGIN_CRITICAL_SECTION(it);
+    old = it->it_seq;
     it->it_seq = args[1] == Py_None ? NULL : Py_NewRef(args[1]);
     it->it_index = index;
+    Py_END_CRITICAL_SECTION();
     Py_XDECREF(old);
     return Py_NewRef(Py_None);
 }
