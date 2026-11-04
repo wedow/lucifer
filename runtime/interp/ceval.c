@@ -319,6 +319,27 @@ object_attr_hook(PyTypeObject *tp, PyObject *id)
     return _PyType_Lookup(tp, id) == _PyType_Lookup(&PyBaseObject_Type, id);
 }
 
+/* LOAD_ATTR answers that need no Python: obj.__class__ for an object whose
+   type keeps object's __class__, and a plain class attribute (no __get__, or
+   a function, which a class returns unbound) of a class whose metaclass keeps
+   type's __getattribute__ and does not have the name. NULL otherwise. */
+static PyObject *
+attr_shortcut(PyObject *owner, PyObject *name)
+{
+    PyTypeObject *tp = Py_TYPE(owner);
+    if (name == LU_ID(__class__)) {
+        return _PyType_Lookup(tp, name) == _PyType_Lookup(&PyBaseObject_Type, name)
+            && object_attr_hook(tp, LU_ID(__getattribute__)) ? (PyObject *)tp : NULL;
+    }
+    if (!PyType_Check(owner) || !PyUnicode_CheckExact(name)
+        || _PyType_Lookup(tp, LU_ID(__getattribute__)) != _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__))
+        || _PyType_Lookup(tp, name) != NULL) {
+        return NULL;
+    }
+    PyObject *v = _PyType_Lookup((PyTypeObject *)owner, name);
+    return v != NULL && (Py_TYPE(v)->tp_descr_get == NULL || PyFunction_Check(v)) ? v : NULL;
+}
+
 static void
 set_function_attribute(PyFunctionObject *func, int which, PyObject *attr)
 {
@@ -1843,6 +1864,14 @@ op_LOAD_ATTR: {
     getattrofunc get = Py_TYPE(owner)->tp_getattro;
     if (get == lu_slot_tp_getattro || get == PyObject_GenericGetAttr) {
         PyObject *descr = _PyType_Lookup(Py_TYPE(owner), name), *v;
+        if ((v = attr_shortcut(owner, name)) != NULL) {
+            TOP() = Py_NewRef(v);
+            Py_DECREF(owner);
+            if (oparg & 1) {
+                PUSH(NULL);
+            }
+            DISPATCH();
+        }
         if (descr != NULL) {
             SAVE_FRAME();       /* a getter may read the frame: f_lineno, f_locals */
         }
