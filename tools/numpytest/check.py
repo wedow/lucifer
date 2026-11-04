@@ -167,6 +167,8 @@ class HarnessChecks(unittest.TestCase):
             functions = runpy.run_path(str(HERE / 'recorder.py'))
         info = functions['relocate_typing_inputs'](module, self.root / 'work')
         self.assertEqual(info['files'], 1)
+        again = types.SimpleNamespace(DATA_DIR=str(source), api=types.SimpleNamespace(run=fake_run))
+        self.assertEqual(functions['relocate_typing_inputs'](again, self.root / 'work'), info)    # after a restart
         self.assertEqual(module.api.run([str(source / 'pass')]), (str(fixture) + ':1: error: sentinel\n', '', 1))
         self.assertEqual(fixture.read_text(), 'invalid fixture\n')
 

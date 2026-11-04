@@ -69,6 +69,7 @@ def relocate_typing_inputs(module, work):
     """Keep installed dependency modules out of mypy's source search root."""
     original = Path(module.DATA_DIR)
     copied = work / 'typing-inputs'
+    shutil.rmtree(copied, ignore_errors=True)       # a restarted shard copies again
     shutil.copytree(original, copied, ignore=shutil.ignore_patterns('__pycache__', '.mypy_cache'))
     digest = hashlib.sha256()
     files = 0
