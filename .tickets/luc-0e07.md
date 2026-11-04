@@ -26,3 +26,7 @@ threads_basic's threading.local check is a runtime race, not timing: 200 rounds 
 **2026-11-04T22:03:06Z**
 
 faulthandler_later_threads: the oracle (CPython) times out under load (1 of 5 isolated runs, and once in make check); lucifer output is correct. Needs a longer oracle bound or a less timing-bound program.
+
+**2026-11-04T22:57:31Z**
+
+Fixed on branch luc-0e07: threads_basic (threading.local lock now covers dict creation and __init__; 25/48 failing under load before, 0/48 after, new threads_local_race), threads_signal_sort (see luc-bx6c), faulthandler_later_threads (the free-threaded oracle itself deadlocks in join about 1 run in 25 when threads arm and cancel at once; arm+cancel now serialized by a lock; oracle 0/150 hung after). unicodedata_module: 6 s on plain lanes, 59 s alone on handoff against its 600 s bound, left alone. trace_opcodes_threads is not addressed here.

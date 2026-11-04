@@ -2,6 +2,7 @@
 # large list. The handler and the KeyboardInterrupt run in the main thread; the sort is unharmed.
 # The sorting thread's key function sends the signals; the main thread waits in join, so the
 # handler runs when the wait is interrupted or right after it. The results are printed after join.
+# The interrupt waits until the main thread is inside its try.
 import _thread
 import os
 import signal
@@ -13,6 +14,7 @@ data = [(i * 7919) % N for i in range(N)]
 handled = []
 calls = [0]
 result = []
+in_try = threading.Event()
 
 
 def handler(signum, frame):
@@ -27,6 +29,7 @@ def key(x):
     if calls[0] == N // 3:
         os.kill(os.getpid(), signal.SIGUSR1)
     elif calls[0] == N // 2:
+        in_try.wait()
         _thread.interrupt_main()
     return x
 
@@ -40,6 +43,7 @@ t.start()
 interrupted = 0
 while t.is_alive():
     try:
+        in_try.set()
         t.join()
     except KeyboardInterrupt:
         interrupted += 1

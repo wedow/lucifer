@@ -17,3 +17,9 @@ Under the jit lane (every function compiled at its first call) four tests/kernel
 
 make check-kernel LANE=jit and LANE=jit-deopt pass all programs.
 
+
+## Notes
+
+**2026-11-04T22:57:31Z**
+
+Seen once 11-04 (luc-0e07 branch, JIT default): make check-compiler's lucifer driver (bin/lucifer -I -S -c DRIVER over a chunk of the corpus, gc disabled) spun at 100% CPU, 48 MB RSS for 36 min and never finished; the same chunks completed in under 150 s on three reruns. Not reproduced since; unknown whether the JIT is involved.

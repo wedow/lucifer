@@ -1,6 +1,6 @@
 ---
 id: luc-bx6c
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-04T21:17:15Z
