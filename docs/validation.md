@@ -481,25 +481,58 @@ collects exactly the oracle's **52,273** IDs, with the same collection hash. The
 wheel needs no change: the runtime supplies the C-API and the standard-library
 modules the pytest, hypothesis and numpy test closure imports.
 
-Run it as the oracles' commands above, with `--python bin/lucifer --runtime
-lucifer` and `--timeout 1300`. The first collection takes 20 to 30 minutes:
-pytest's assertion rewriter parses and compiles every test file from source
-with the compiler that runs on Lucifer itself, and caches the result in the
-site's `__pycache__`; a collection with that cache takes a few minutes.
+Run the whole suite as bounded shards (the 540-second deadline is per shard; Lucifer
+needs the larger `--timeout 1100` for the big ones):
+
+```sh
+python3 tools/numpytest/runall.py -- --python bin/lucifer --runtime lucifer \
+  --site "$SITE_T" --cache "$WHEEL_CACHE" --work "$RAW" --timeout 1100
+```
+
+`runall.py` reads `expected.tsv`, keeps each test file of at most 900 tests whole,
+packs small files together and splits a larger file by top-level class or
+function, then runs `run.py run --shard ...` once per group. Results merge by
+node ID. The runs are independent, so groups can also run concurrently into
+separate `--results` directories whose manifests are then merged. `PATH`
+carries the venv's `bin`, so f2py and the Cython tests find `meson`; they build
+extensions with the host compiler against `build/include/python3.14t`.
+
+Two things in `run.py` exist for Lucifer's speed:
+
+- `PYTHONPYCACHEPREFIX` points at `build/numpytest-pycache/<runtime>`. Pytest's
+  assertion rewriter compiles each test file with the compiler that runs on
+  Lucifer, so the first collection takes 20 to 30 minutes; the cache is
+  reproducible and the oracle venv is left untouched. The startup probe waits
+  up to ten minutes for the same reason.
+- A fatal signal costs one test. `run.py` scores the active test CRASH, then
+  restarts pytest on the same shard without it and without the tests the journal
+  already holds (`NUMPYTEST_SKIP`), until the shard's deadline. The journal also
+  keeps each failure's reason line, for runs whose JUnit died with the process.
 
 System libraries the build links beyond libc and libm: zlib (`-lz`, for the
 `zlib` module) and libffi (`-lffi`, for `_ctypes`); both were already installed
 (zlib 1.3.2, libffi 3.8.0), so this work installed no package.
 
-Recorded 2026-11-04, first shards (`results/numpytest/lucifer.tsv`): collection
-passes; six shard groups, run with the default 540-second deadline, give
+Recorded 2026-11-04 (`results/numpytest/lucifer.tsv`, with the shard JSON beside it): the
+same shard recipe, run as concurrent groups on a loaded host, with reruns of the
+shards that failed after each fix and a last pass over the remaining failing
+classes. Before this work (2026-11-04, six groups, one deadline each) the run
+gave 2,184 PASS, 4.18%. Now:
 
-| Suite | Runtime | Expected | PASS | FAIL | TIMEOUT | XFAIL | SKIP | NOTRUN | PASS / expected |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| numpytest | lucifer | 52,273 | 2,184 | 16 | 1 | 2 | 1 | 50,069 | 4.18% |
+| Suite | Runtime | Expected | PASS | FAIL | ERROR | CRASH | TIMEOUT | XPASS | XFAIL | SKIP | NOTRUN | PASS / expected |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| numpytest | lucifer | 52,273 | 50,835 | 76 | 205 | 2 | 3 | 2 | 30 | 1,103 | 17 | 97.25% |
 
-The run that reaches the deadline records the test running then as TIMEOUT and
-leaves later tests NOTRUN. The 16 FAIL rows are the next work.
+What is left, by cause (each has a ticket): 178 `test_typing.py` ERRORs, because
+the mypyc-compiled mypy aborts in an unimplemented C-API function; 27
+`test_cython.py` ERRORs, where `meson compile` fails; 10 `ndarray.resize`
+refusals, because CPython 3.14 lends a local to the call (`Py_REFCNT(a)` in
+`a.resize(...)` is 1) and the interpreter's stack owns a reference; 9
+`operator.matmul` calls, because the functions of the Python-written builtin
+modules bind as methods; and about a dozen rows in single files (ctypes
+argument kinds and buffer formats, the `cmath` module, `__release_buffer__`).
+The NOTRUN rows are mostly `test_mem_overlap.py`, whose slowest test exceeds
+the shard deadline.
 
 ## Benchmarks
 

@@ -2,15 +2,11 @@
   "numpy": "2.5.4",
   "abi": "cp314t",
   "shards": [
-    "numpy/_core/tests/test_numeric.py",
-    "numpy/_core/tests/test_dtype.py",
-    "numpy/_core/tests/test_scalarmath.py",
-    "numpy/_core/tests/test_indexing.py",
-    "numpy/lib/tests/test_function_base.py",
+    "numpy/_core/tests/test_nep50_promotions.py",
     "numpy/_core/tests/test_regression.py"
   ],
   "parallel_threads": 1,
-  "timeout": 540,
+  "timeout": 1100,
   "requirements_sha256": "13a20f27474bc0e98445882b51cdbd8d88bc3c6d9b53a3f6c13ff9de2ec752b7",
   "optional_requirements_sha256": "cf8cd005aaf1955846e0927c0084c3117a0613035211af019ddfb55d0e39d73e",
   "artifact": {
@@ -116,11 +112,22 @@
     "free_threaded_build": true,
     "gil_enabled": false
   },
-  "interpreter_sha256": "58dac5dd341e5cf10970cf52129755c2b66d3cbe99779df7ddeff60ee459818b",
-  "exitstatus": "TIMEOUT",
+  "interpreter_sha256": "1f1d86ddeeac7bae53475b76df601c8b050c8c8fc2b4be51a136b166c4690183",
+  "exitstatus": 1,
   "unexpected": [],
   "not_collected": [],
-  "reasons": {},
+  "finish": {
+    "version": "3.14.10",
+    "abiflags": "t",
+    "free_threaded_build": true,
+    "gil_enabled": false,
+    "exitstatus": 1
+  },
+  "reasons": {
+    "numpy/_core/tests/test_nep50_promotions.py::test_nep50_weak_integers_with_inexact[g]": "`huge_int -> string -> longdouble` failed",
+    "numpy/_core/tests/test_regression.py::TestRegression::test_blasdot_uninitialized_memory": "ValueError: cannot resize an array that may be referenced by another object.",
+    "numpy/_core/tests/test_regression.py::TestRegression::test_buffer_hashlib": "ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()"
+  },
   "artifact_after": {
     "wheel": "numpy-2.5.4-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
     "sha256": "c9b80cdf5cedba0e90d93fa5f9a333c4d65bd545cd669b71bb97ce2b703c9d73",
@@ -218,12 +225,11 @@
     "url": "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz"
   },
   "counts": {
-    "PASS": 2184,
-    "NOTRUN": 50069,
-    "FAIL": 16,
-    "TIMEOUT": 1,
-    "XFAIL": 2,
-    "SKIP": 1
+    "NOTRUN": 49247,
+    "PASS": 3009,
+    "FAIL": 9,
+    "XFAIL": 5,
+    "SKIP": 3
   },
-  "recorded_at": "2026-11-04T10:32:21.247800+00:00"
+  "recorded_at": "2026-11-04T17:09:22.071257+00:00"
 }
