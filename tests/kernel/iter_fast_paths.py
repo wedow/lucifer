@@ -39,3 +39,32 @@ try:
     enumerate([], 1.5)
 except TypeError as ex:
     print(12, ex)
+
+# GET_ITER makes the dict and dict-view iterators itself; subclasses keep their __iter__.
+d = {1: 'a', 2: 'b'}
+print(13, list(d), list(d.keys()), list(d.values()), list(d.items()))
+it = iter(d.items())
+print(14, type(it).__name__, next(it), length_hint := it.__length_hint__())
+
+
+class D(dict):
+    def __iter__(self):
+        return iter('sub')
+
+
+class V(type({}.keys())):
+    pass
+
+
+print(15, list(D(a=1)), [x for x in D(a=1)])
+import collections
+print(16, list(collections.OrderedDict(a=1, b=2)), list(collections.defaultdict(int, z=1).items()))
+try:
+    for k in d.items():
+        d[3] = 4
+except RuntimeError as ex:
+    print(17, ex)
+for k in {}:
+    print(18)
+for k in reversed(d):
+    print(19, k)

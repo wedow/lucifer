@@ -1260,6 +1260,8 @@ PyObject *lu_seqiter_next(PyObject *iter);
 /* The next key, value or (key, value) of a dict iterator, LU_MISSING when it
    is exhausted, NULL with RuntimeError when the dict changed. */
 PyObject *lu_dictiter_next(PyObject *it);
+/* The key, value or item iterator of an exact dict or dict view; NULL (no error) for another object. */
+PyObject *lu_dict_iter(PyObject *obj);
 PyObject *lu_rangeiter_next(PyObject *iter);
 int lu_enum_next(PyObject *e, PyObject **v);
 /* A new range_iterator or longrange_iterator over the range r, or NULL with an error. */

@@ -246,7 +246,7 @@ get_iter_exact(PyObject *v)
     if (tp == &PyRange_Type) {
         return lu_range_iter(v);
     }
-    return NULL;
+    return lu_dict_iter(v);
 }
 
 /* UNPACK_SEQUENCE of an exact tuple or list of n items: the items, last
