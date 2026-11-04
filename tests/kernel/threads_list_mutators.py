@@ -1,9 +1,12 @@
 """List mutators racing each other and lock-free readers: bounds are read
 under the list's critical section, so no mutator sees a size that another
 thread has already changed (no SystemError, no lost or doubled items)."""
+import sys
 import threading
 
-ROUNDS = 3000
+# A collection after every allocation (-X lucifer_stress) leaves time for far fewer rounds.
+STRESS = 'lucifer_stress' in sys._xoptions
+ROUNDS = 40 if STRESS else 3000
 errors = []
 
 
@@ -51,7 +54,7 @@ run(
 print('mutators', errors[:3], all(type(x) is int for x in L))
 
 # Items are neither lost nor doubled: producers insert tokens, consumers take each exactly once.
-PER = 2000
+PER = 100 if STRESS else 2000
 L = []
 taken = []
 done = []
