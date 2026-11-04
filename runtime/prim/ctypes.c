@@ -136,7 +136,12 @@ prim_ct_errno(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLong(old);
 }
 
-/* call(address, restype, argtypes, args, use_errno): the call's result */
+/* The _flags_ of a function pointer type (FUNCFLAG_* of _ctypes.py). */
+#define CT_FUNCFLAG_PYTHONAPI 4
+#define CT_FUNCFLAG_USE_ERRNO 8
+
+/* call(address, restype, argtypes, args, flags): the call's result */
+
 static PyObject *
 prim_ct_call(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -168,8 +173,10 @@ prim_ct_call(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     value result;
     memset(&result, 0, sizeof result);
-    int use_errno = PyObject_IsTrue(args[4]);
-    PyThreadState *ts = lu_syscall_begin();
+    long flags = PyLong_AsLong(args[4]);
+    int use_errno = (flags & CT_FUNCFLAG_USE_ERRNO) != 0;
+    /* A PyDLL function calls the C API and keeps the thread attached. */
+    PyThreadState *ts = (flags & CT_FUNCFLAG_PYTHONAPI) ? NULL : lu_syscall_begin();
     if (use_errno) {
         errno = saved_errno;
     }
@@ -177,7 +184,9 @@ prim_ct_call(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (use_errno) {
         saved_errno = errno;
     }
-    lu_syscall_end(ts);
+    if (ts != NULL) {
+        lu_syscall_end(ts);
+    }
     widen(rcode, &result);
     return from_value(rcode, &result);
 }
