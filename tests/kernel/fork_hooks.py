@@ -1,6 +1,6 @@
 # os.register_at_fork: before hooks run in reverse registration order in the parent, the after hooks
-# in registration order; the child inherits the import lock held by the forking thread, which
-# imports in the child need; fork is audited.
+# in registration order; the child holds the import lock only as often as the forking thread held it
+# before the fork, so a new thread of the child can import; fork is audited.
 import os
 import sys
 
@@ -21,8 +21,14 @@ sys.addaudithook(lambda event, args: events.append(event) if event == "os.fork" 
 r, w = os.pipe()
 pid = os.fork()
 if pid == 0:
-    import json                      # an import in the child: the import lock must be usable
-    os.write(w, json.dumps(log).encode())
+    import _imp
+    import threading
+    held = _imp.lock_held()
+    imported = []
+    t = threading.Thread(target=lambda: imported.append(__import__("json").dumps(log)))
+    t.start()
+    t.join(10)
+    os.write(w, ("%s %s %s" % (held, t.is_alive(), imported)).encode())
     os._exit(0)
 os.waitpid(pid, 0)
 print(log)
