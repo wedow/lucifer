@@ -93,6 +93,16 @@ PyThreadState_Clear(PyThreadState *ts)
     Py_CLEAR(ts->async_exc);
     Py_CLEAR(ts->current_exception);
     Py_CLEAR(ts->exc_state.exc_value);
+    /* Atomic: tasks exiting together clear at once; a stop-the-world that
+       swaps functions has stopped this one. */
+    if (ts->c_profilefunc != NULL) {
+        __atomic_fetch_sub(&ts->interp->sys_profiling_threads, 1, __ATOMIC_RELAXED);
+        ts->c_profilefunc = NULL;
+    }
+    if (ts->c_tracefunc != NULL) {
+        __atomic_fetch_sub(&ts->interp->sys_tracing_threads, 1, __ATOMIC_RELAXED);
+        ts->c_tracefunc = NULL;
+    }
     Py_CLEAR(ts->c_profileobj);
     Py_CLEAR(ts->c_traceobj);
     Py_CLEAR(ts->async_gen_firstiter);

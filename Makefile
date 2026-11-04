@@ -147,8 +147,8 @@ build/tests/capi/%.so: tests/capi/%.c
 # under the oracle and bin/lucifer.
 EXT_DIR = build/tests/capi/ext
 EXT_SUFFIX = .cpython-314t-x86_64-linux-gnu.so
-EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c
-EXT_PROGRAMS = accel accel_use exc_cross_run slots_run
+EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c tests/capi/capi_monitoring.c
+EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run
 SLOTS_MODULES = plain noshare shared_gil create two_exec unknown negative two_create two_interp \
 	two_gil not_module not_module_exec create_fails create_raises exec_fails exec_raises
 
@@ -167,6 +167,7 @@ $(EXT_DIR)/accelerators:
 	touch $@
 
 check-capi-ext: bin/lucifer $(EXT_DIR)/accelerators $(EXT_DIR)/exc_cross$(EXT_SUFFIX) \
+	  $(EXT_DIR)/capi_monitoring$(EXT_SUFFIX) \
 	  $(foreach m,$(SLOTS_MODULES),$(EXT_DIR)/slots_$(m)$(EXT_SUFFIX))
 	@for p in $(EXT_PROGRAMS); do \
 	  { PYTHONPATH=$(EXT_DIR) $(RUN) $(ORACLE_T) tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.expected; \

@@ -276,45 +276,9 @@ Return the size of object in bytes."""
     return size
 
 
-_trace = _profile = None
 _origin_depth = 0
 _dlopen_flags = 2
 _switch_interval = 0.005
-
-
-def settrace(function, /):
-    """Set the global debug tracing function."""
-    global _trace
-    _trace = function
-
-
-def gettrace():
-    """Return the global debug tracing function set with sys.settrace."""
-    return _trace
-
-
-def setprofile(function, /):
-    """Set the profiling function."""
-    global _profile
-    _profile = function
-
-
-def getprofile():
-    """Return the profiling function set with sys.setprofile."""
-    return _profile
-
-
-def _settraceallthreads(function, /):
-    settrace(function)
-
-
-def _setprofileallthreads(function, /):
-    setprofile(function)
-
-
-def call_tracing(func, args, /):
-    """Call func(*args), while tracing is enabled."""
-    return func(*args)
 
 
 def get_coroutine_origin_tracking_depth():
@@ -455,8 +419,7 @@ stdlib_module_names = frozenset((
 _install(exit, getdefaultencoding, getfilesystemencoding, getfilesystemencodeerrors,
          getswitchinterval, _is_gil_enabled, get_asyncgen_hooks, addaudithook,
          audit, _getframe, exceptions.exception, exceptions.exc_info, generators.set_asyncgen_hooks,
-         excepthook, displayhook, breakpointhook, unraisablehook, getsizeof, settrace, gettrace,
-         setprofile, getprofile, _settraceallthreads, _setprofileallthreads, call_tracing,
+         excepthook, displayhook, breakpointhook, unraisablehook, getsizeof,
          get_coroutine_origin_tracking_depth, set_coroutine_origin_tracking_depth,
          setswitchinterval, getdlopenflags, setdlopenflags, getallocatedblocks,
          getunicodeinternedsize, _is_interned, _is_immortal, _clear_type_cache,

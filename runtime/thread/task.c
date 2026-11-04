@@ -107,9 +107,11 @@ static void
 install(struct lu_carrier *c, struct lu_task *t)
 {
     struct lu_task *old = c->task;
-    uintptr_t version = t->ts.interp->monitoring_version;
-    uintptr_t cur = __atomic_load_n(&c->poll, __ATOMIC_RELAXED), next;
+    uintptr_t version, cur = __atomic_load_n(&c->poll, __ATOMIC_RELAXED), next;
+    cur = __atomic_load_n(&c->poll, __ATOMIC_RELAXED);
     do {
+        /* Read afresh: a version change published meanwhile has changed the word. */
+        version = __atomic_load_n(&t->ts.interp->monitoring_version, __ATOMIC_SEQ_CST);
         uintptr_t old_pending = old != NULL ? __atomic_load_n(&old->pending, __ATOMIC_SEQ_CST) : 0;
         next = version | (cur & LU_POLL_EVENTS_MASK & ~old_pending)
             | __atomic_load_n(&t->pending, __ATOMIC_SEQ_CST);

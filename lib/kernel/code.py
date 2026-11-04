@@ -70,6 +70,51 @@ the code was compiled with."""
         """Return an iterator that produces (start, end, lineno) for each line range."""
         return _lines(self.co_linetable, self.co_firstlineno)
 
+    def co_branches(self):
+        """Return an iterator of (source, destination-not-taken, destination-taken) code offsets."""
+        return _branches(self.co_code)
+
+    def _varname_from_oparg(self, oparg):
+        """Return the name of the local variable that an oparg names."""
+        return code_localsplus(self)[0][oparg]
+
+
+_EXTENDED_ARG, _FOR_ITER, _END_ASYNC_FOR = 69, 70, 68
+_POP_JUMP_IF = (100, 101, 102, 103)
+
+
+def _branches(co_code):
+    """The branches of bytecode (_PyInstrumentation_BranchesIterator): FOR_ITER,
+    the conditional jumps (past their NOT_TAKEN) and END_ASYNC_FOR. Cache units
+    are zero opcodes."""
+    n = len(co_code) // 2
+    offset = 0
+    oparg = 0
+    while offset < n:
+        op = co_code[2 * offset]
+        arg = co_code[2 * offset + 1]
+        next_offset = offset + 1
+        while next_offset < n and co_code[2 * next_offset] == 0:
+            next_offset += 1
+        if op == _EXTENDED_ARG:
+            oparg = (oparg << 8) | arg
+        elif op == _FOR_ITER:
+            oparg = (oparg << 8) | arg
+            yield (offset * 2, next_offset * 2, (next_offset + oparg + 2) * 2)
+            oparg = 0
+        elif op in _POP_JUMP_IF:
+            oparg = (oparg << 8) | arg
+            yield (offset * 2, (next_offset + 1) * 2, (next_offset + oparg) * 2)
+            oparg = 0
+        elif op == _END_ASYNC_FOR:
+            oparg = (oparg << 8) | arg
+            src = next_offset - oparg
+            yield (src * 2, (src + 2) * 2, next_offset * 2)
+            oparg = 0
+        else:
+            oparg = 0
+        offset = next_offset
+
 
 def _varint(table, i):
     shift = 0

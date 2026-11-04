@@ -39,6 +39,10 @@ const uint8_t lu_opcode_caches[256] = {
     [LOAD_ATTR_WITH_HINT] = 9, [LOAD_ATTR_METHOD_NO_DICT] = 9, [LOAD_ATTR_METHOD_WITH_VALUES] = 9,
     [LOAD_ATTR_NONDESCRIPTOR_NO_DICT] = 9, [LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES] = 9,
     [LOAD_ATTR_SLOT] = 9, [STORE_ATTR_SLOT] = 4, [STORE_ATTR_WITH_HINT] = 4,
+    [INSTRUMENTED_LOAD_SUPER_ATTR] = 1, [INSTRUMENTED_JUMP_BACKWARD] = 1,
+    [INSTRUMENTED_POP_JUMP_IF_TRUE] = 1, [INSTRUMENTED_POP_JUMP_IF_FALSE] = 1,
+    [INSTRUMENTED_POP_JUMP_IF_NONE] = 1, [INSTRUMENTED_POP_JUMP_IF_NOT_NONE] = 1,
+    [INSTRUMENTED_FOR_ITER] = 1, [INSTRUMENTED_CALL] = 3, [INSTRUMENTED_CALL_KW] = 3,
 };
 
 #define BACKOFF_MAX 12
@@ -66,15 +70,24 @@ fail(lu_codeunit *site)
 }
 
 /* Rewriting a site, one writer at a time: begin makes it generic and clears
-   its guard word; end sets the guard, the cooldown, and last the opcode. */
-static void
+   its guard word; end sets the guard, the cooldown, and last the opcode.
+   A site that monitoring has instrumented (INSTRUMENTED_LINE runs the
+   instruction under it) is left alone and backs off as a failure would
+   (CPython pauses its counter): begin returns 0, holding nothing. */
+static int
 begin(lu_codeunit *site, int generic, lu_codeunit *guard, int guard_words)
 {
     PyMutex_Lock(&_PyRuntime.specialize_lock);
+    if (site->op.code >= MIN_INSTRUMENTED_OPCODE) {
+        PyMutex_Unlock(&_PyRuntime.specialize_lock);
+        fail(site);
+        return 0;
+    }
     __atomic_store_n(&site->op.code, (uint8_t)generic, __ATOMIC_RELEASE);
     for (int i = 0; i < guard_words; i++) {
         lu_cache_store(guard + i, 0);
     }
+    return 1;
 }
 
 static void
@@ -114,7 +127,9 @@ lu_specialize_load_global(PyObject *globals, PyObject *builtins, lu_codeunit *si
         if (index > UINT16_MAX || globals_version == 0) {
             return fail(site);
         }
-        begin(site, LOAD_GLOBAL, c + LG_MODULE_KEYS_VERSION, 2);
+        if (!begin(site, LOAD_GLOBAL, c + LG_MODULE_KEYS_VERSION, 2)) {
+            return;
+        }
         lu_cache_store(c + LG_INDEX, (uint16_t)index);
         lu_cache_store(c + LG_MODULE_KEYS_VERSION, (uint16_t)globals_version);
         end(site, LOAD_GLOBAL_MODULE);
@@ -128,7 +143,9 @@ lu_specialize_load_global(PyObject *globals, PyObject *builtins, lu_codeunit *si
     if (index < 0 || index > UINT16_MAX || globals_version == 0 || builtins_version == 0) {
         return fail(site);
     }
-    begin(site, LOAD_GLOBAL, c + LG_MODULE_KEYS_VERSION, 2);
+    if (!begin(site, LOAD_GLOBAL, c + LG_MODULE_KEYS_VERSION, 2)) {
+        return;
+    }
     lu_cache_store(c + LG_INDEX, (uint16_t)index);
     lu_cache_store(c + LG_BUILTIN_KEYS_VERSION, (uint16_t)builtins_version);
     lu_cache_store(c + LG_MODULE_KEYS_VERSION, (uint16_t)globals_version);
@@ -175,7 +192,9 @@ static void
 set_attr_cache(lu_codeunit *site, int opcode, uint32_t version, uint32_t second, PyObject *descr)
 {
     lu_codeunit *c = site + 1;
-    begin(site, LOAD_ATTR, c + LA_VERSION, 2);
+    if (!begin(site, LOAD_ATTR, c + LA_VERSION, 2)) {
+        return;
+    }
     lu_cache_store32(c + LA_KEYS_VERSION, second);
     lu_cache_store_ptr(c + LA_DESCR, descr);
     lu_cache_store32(c + LA_VERSION, version);
@@ -314,13 +333,17 @@ lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
     PyObject *descr = _PyType_Lookup(tp, name);
     lu_codeunit *c = site + 1;
     if (is_slot_member(descr) && !(((PyMemberDescrObject *)descr)->d_member->flags & Py_READONLY)) {
-        begin(site, STORE_ATTR, c + LA_VERSION, 3);
+        if (!begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
+            return;
+        }
         lu_cache_store(c + LA_INDEX, (uint16_t)((PyMemberDescrObject *)descr)->d_member->offset);
         lu_cache_store32(c + LA_VERSION, tp->tp_version_tag);
         end(site, STORE_ATTR_SLOT);
     }
     else if (descr == NULL && (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT)) {
-        begin(site, STORE_ATTR, c + LA_VERSION, 3);
+        if (!begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
+            return;
+        }
         lu_cache_store32(c + LA_VERSION, tp->tp_version_tag);
         end(site, STORE_ATTR_WITH_HINT);
     }

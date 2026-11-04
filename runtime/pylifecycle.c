@@ -13,6 +13,7 @@
 
 #include "interp/exceptions.h"
 #include "interp/frozen.h"
+#include "interp/instrument.h"
 #include "prim/prim.h"
 #include "marshal.h"
 
@@ -256,7 +257,7 @@ boot_native(struct _is *interp)
         return -1;
     }
     Py_DECREF(modules_name);
-    PyMethodDef *const sys_tables[] = { lu_sys_int_methods, lu_sys_frame_methods, lu_sys_native_methods };
+    PyMethodDef *const sys_tables[] = { lu_sys_int_methods, lu_sys_frame_methods, lu_sys_native_methods, lu_sys_tracing_methods };
     for (size_t i = 0; i < sizeof sys_tables / sizeof sys_tables[0]; i++) {
         for (PyMethodDef *ml = sys_tables[i]; ml->ml_name != NULL; ml++) {
             PyObject *f = PyCFunction_NewEx(ml, sys, NULL);
@@ -268,6 +269,14 @@ boot_native(struct _is *interp)
                 return -1;
             }
         }
+    }
+    PyObject *monitoring = lu_monitoring_module_new();
+    PyObject *monitoring_name = monitoring != NULL ? PyUnicode_InternFromString("monitoring") : NULL;
+    int monitoring_err = monitoring_name == NULL || lu_ns_insert(interp->sysdict, monitoring_name, monitoring) < 0;
+    Py_XDECREF(monitoring_name);
+    Py_XDECREF(monitoring);
+    if (monitoring_err) {
+        return -1;
     }
     if (add_module(interp, builtins) < 0 || add_module(interp, sys) < 0) {
         return -1;

@@ -5,6 +5,7 @@
    C array. Dicts take exact-str keys until the kernel's dict exists. */
 
 #include "interp/code.h"
+#include "interp/instrument.h"
 
 #include "marshal.h"
 
@@ -976,12 +977,7 @@ lu_code_bytes(PyCodeObject *co)
     lu_codeunit *out = (lu_codeunit *)PyBytes_AS_STRING(bytes);
     const lu_codeunit *in = (const lu_codeunit *)co->co_code_adaptive;
     for (Py_ssize_t i = 0; i < n; i++) {
-        uint8_t op = in[i].op.code;
-        switch (op) {
-#define DEOPT(special, generic) case special: op = generic; break;
-        LU_SPECIALIZED_OPCODES(DEOPT)
-#undef DEOPT
-        }
+        uint8_t op = lu_base_opcode(co, i);
         out[i] = in[i];
         out[i].op.code = op;
         out[i].op.arg = in[i].op.arg;
