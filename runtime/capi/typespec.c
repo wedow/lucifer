@@ -187,11 +187,13 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
     PyObject *name = PyUnicode_FromString(dot != NULL ? dot + 1 : spec->name);
     PyObject *ns = PyDict_New();
     PyObject *slots = PyTuple_New(0);
+    /* A type with managed dict or weakref storage is a class without __slots__; any other has no dict. */
+    int managed = (spec->flags & (Py_TPFLAGS_MANAGED_DICT | Py_TPFLAGS_MANAGED_WEAKREF)) != 0;
     PyObject *modname = dot != NULL ? PyUnicode_FromStringAndSize(spec->name, dot - spec->name) : NULL;
     PyObject *cls = NULL;
     if (bases == NULL || name == NULL || ns == NULL || slots == NULL
         || (dot != NULL && modname == NULL)
-        || PyDict_SetItemString(ns, "__slots__", slots) < 0
+        || (!managed && PyDict_SetItemString(ns, "__slots__", slots) < 0)
         || (modname != NULL && PyDict_SetItemString(ns, "__module__", modname) < 0)) {
         goto done;
     }
@@ -302,7 +304,7 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
         tp->tp_doc = copy;
     }
     PyObject *dict = lu_type_dict(tp);
-    if (PyDict_DelItemString(dict, "__slots__") < 0) {   /* only there to keep the instances free of a __dict__ */
+    if (!managed && PyDict_DelItemString(dict, "__slots__") < 0) {   /* only there to keep the instances free of a __dict__ */
         goto fail;
     }
     if (lu_type_fill_dict(tp) < 0) {

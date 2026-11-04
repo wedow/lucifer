@@ -395,6 +395,20 @@ make_meta_class(PyObject *self, PyObject *Py_UNUSED(ignored))
     return r;
 }
 
+/* A spec type whose instances keep a managed __dict__ and weakref list (Cython's functions). */
+static PyObject *
+make_managed(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    static PyGetSetDef getset[] = {
+        { "__dict__", PyObject_GenericGetDict, PyObject_GenericSetDict, NULL, NULL },
+        { NULL }
+    };
+    PyType_Slot slots[] = { { Py_tp_new, PyType_GenericNew }, { Py_tp_getset, getset }, { 0, NULL } };
+    PyType_Spec spec = { "ready.Managed", sizeof(PyObject), 0,
+                         Py_TPFLAGS_DEFAULT | Py_TPFLAGS_MANAGED_DICT | Py_TPFLAGS_MANAGED_WEAKREF, slots };
+    return PyType_FromSpec(&spec);
+}
+
 /* Capsules. */
 
 static int destroyed;
@@ -752,6 +766,7 @@ objects(PyObject *self, PyObject *arg)
 }
 
 static PyMethodDef module_methods[] = {
+    { "make_managed", make_managed, METH_NOARGS, NULL },
     { "make_meta_class", make_meta_class, METH_NOARGS, NULL },
     { "capsule_roundtrip", capsule_roundtrip, METH_NOARGS, NULL },
     { "capsule_import", capsule_import, METH_O, NULL },

@@ -93,6 +93,14 @@ print(meta.__name__, made.__name__, type(made) is meta, isinstance(made, type), 
 show(meta, 'X', (), {})
 print(type(made()).__name__)
 
+# a spec type with a managed dict and weakref list
+import weakref
+Managed = ready.make_managed()
+mg = Managed()
+mg.x = 5
+mg.__dict__['y'] = 6
+print(mg.x, mg.y, mg.__dict__, weakref.ref(mg)() is mg, Managed.__dictoffset__ != 0)
+
 # capsules, imports
 print(ready.capsule_roundtrip())
 show(ready.capsule_import, 'datetime.datetime_CAPI')
