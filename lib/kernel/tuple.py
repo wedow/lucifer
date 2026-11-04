@@ -167,7 +167,8 @@ If iterable is specified the tuple is initialized from iterable's items.
 If the argument is a tuple, the return value is the same object."""
 
     def __new__(cls, /, *args, **kwargs):
-        operators.check_new(cls, tuple)
+        if cls is not tuple:
+            operators.check_new(cls, tuple)
         if kwargs and (cls is tuple or type_lookup(cls, '__init__') is type_lookup(tuple, '__init__')):
             error(TypeError, 'tuple() takes no keyword arguments')
         n = size(args)

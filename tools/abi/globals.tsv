@@ -140,6 +140,43 @@ lu_prim_ctypes_methods	runtime/prim/ctypes.c	_lucifer's ctypes primitives, a PyM
 saved_errno	-	the errno of a thread's use_errno ctypes calls, per thread (its TLS symbol has no line)
 new_check_skipped	-	per thread (its TLS symbol has no line): C is calling a builtin's tp_new, whose safety check has no wrapper to run in
 ffi_type_*	-	libffi's type descriptors, copy-relocated into the executable; the library never writes them
+*_fields	runtime/compiler/Python-ast.c	a node's field names, CPython's non-const table; never written
+*_attributes	runtime/compiler/Python-ast.c	a node kind's attribute names, CPython's non-const table; never written
+_astmodule	runtime/compiler/Python-ast.c	_ast's PyModuleDef, never written; one per process, as every extension's def
+astmodule_slots	runtime/compiler/Python-ast.c	_ast's PyModuleDef_Slot table, never written
+ast_type_*	runtime/compiler/Python-ast.c	ast.AST's method, member and getset tables, never written; the API takes them non-const
+AST_type_*	runtime/compiler/Python-ast.c	ast.AST's type slots and spec, never written
+lu_ast_state.*	runtime/compiler/Python-ast.c	the AST types, made once under lu_cc's once flag and kept for the process
+forbidden.*	runtime/compiler/ast.c	a table of the names a constant may not be, never written
+forbidden.*	runtime/compiler/pegen.c	a table of the names a constant may not be, never written
+inst_seq_*	runtime/compiler/instruction_sequence.c	InstructionSequence's method, member and getset tables, never written
+_PyInstructionSequence_Type	runtime/compiler/instruction_sequence.c	a static type, written by PyType_Ready once (lu_cc_compile)
+PySTEntry_Type	runtime/compiler/symtable.c	a static type, written by PyType_Ready
+ste_memberlist	runtime/compiler/symtable.c	symtable entry's member table, never written
+_PyOpcode_OpName	runtime/compiler/include/pycore_opcode_metadata.h	opcode names, CPython's non-const table; never written
+reserved_keywords	runtime/compiler/parser.c	the parser's keyword table, never written
+soft_keywords	runtime/compiler/parser.c	the parser's soft keyword table, never written
+opcode_functions	runtime/compiler/_opcode.c	_opcode's PyMethodDef table, never written
+opcodemodule	runtime/compiler/_opcode.c	_opcode's PyModuleDef, never written
+module_slots	runtime/compiler/_opcode.c	_opcode's PyModuleDef_Slot table, never written
+symtable_*	runtime/compiler/symtablemodule.c	_symtable's method and slot tables, never written
+symtablemodule	runtime/compiler/symtablemodule.c	_symtable's PyModuleDef, never written
+tokenize*	runtime/compiler/Python-tokenize.c	_tokenize's method, slot and spec tables, never written
+_tokenizemodule	runtime/compiler/Python-tokenize.c	_tokenize's PyModuleDef, never written
+lu_cc_strings	runtime/compiler/lu_cc.c	the compiler's interned names, written by lu_cc_init at interpreter start
+lu_cc_dummy_name	runtime/compiler/lu_cc.c	the parser's dummy name, written by lu_cc_init at interpreter start
+lu_cc_template_type	runtime/compiler/lu_cc.c	a const type of which codegen reads only the name; never written
+lu_prim_compiler_methods	runtime/compiler/lu_cc.c	_lucifer's compile primitive, a PyMethodDef table never written; the API takes it non-const
+lu_native_modules	runtime/interp/import.c	the builtin modules written in C; never written
+types_ready.*	runtime/compiler/lu_cc.c	once flag of the compiler's static types
+mutex.*	runtime/compiler/lu_cc.c	the mutex every once flag runs under
+ids.*	runtime/compiler/lu_cc.c	the text of the compiler's interned names, never written
+names.*	runtime/compiler/lu_cc.c	the names of the intrinsic opargs, never written
+names.*	runtime/capi/compiler_api.c	the names of the keys of a syntax error's location, never written
+stack_floor.*	-	per thread (its TLS symbol has no line): the lowest address of the thread's C stack, as _Py_ReachedRecursionLimitWithMargin reads it
+__compound_literal.*	-	CPython's static initializers of the compiler (a PyUnicodeWriter spec, argument parsers); never written
+_keywords.*	.c.h	Argument Clinic's keyword-name table of a method, never written
+_parser.*	.c.h	Argument Clinic's argument parser of a method; _PyArg_UnpackKeywords fills its keyword tuple once under a mutex
 stats	runtime/jit/jit.c	the optimizing tier's process-wide counts (-X lucifer_jit_stats); compiled units are process-wide too
 binary_names	runtime/jit/ssa_build.c	const table of BINARY_OP method names; relocated by ld.so, then read-only (RELRO)
 compare_names	runtime/jit/ssa_build.c	const table of COMPARE_OP method names; relocated by ld.so, then read-only (RELRO)

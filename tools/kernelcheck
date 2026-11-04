@@ -290,10 +290,8 @@ OPCODE_EXEMPT = {
 
 
 def opcode_table():
-    spec = importlib.util.spec_from_file_location("opcodes", ROOT / "lib" / "compiler" / "opcodes.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    import opcode
+    return opcode
 
 
 def corpus_opcodes():
@@ -325,7 +323,8 @@ def check_opcodes():
     table = source[source.index("static void *const targets"):]
     handled = set(re.findall(r"\[(\w+)\] = &&op_", table[:table.index("};")]))
     opcodes = opcode_table()
-    base = {n for n, v in opcodes.opmap.items() if v < opcodes.MIN_SPECIALIZED_OPCODE}
+    first_specialized = 129      # BINARY_OP_ADD_FLOAT: the first of the specialized opcodes (include/opcode_ids.h)
+    base = {n for n, v in opcodes.opmap.items() if v < first_specialized}
     occurring = corpus_opcodes()
     missing = sorted(base - handled - OPCODE_EXEMPT.keys())
     unreached = sorted(occurring - base - {"CACHE"})

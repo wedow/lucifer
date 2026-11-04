@@ -35,12 +35,17 @@ push_chunk(PyThreadState *ts, size_t words)
     return &c->data[0];
 }
 
+/* Kernel code stands in for C, which CPython's limit does not count: it runs
+   a little past the limit, so an exception raised at the limit can be built. */
+#define LU_KERNEL_HEADROOM 50
+
 struct lu_frame *
 lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals)
 {
     PyCodeObject *code = (PyCodeObject *)func->func_code;
     size_t words = (size_t)code->co_framesize;
-    if (ts->py_recursion_remaining-- <= 0) {
+    int floor = (code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) ? -LU_KERNEL_HEADROOM : 0;
+    if (ts->py_recursion_remaining-- <= floor) {
         ts->py_recursion_remaining++;
         lu_err_format(PyExc_RecursionError, "maximum recursion depth exceeded");
         return NULL;

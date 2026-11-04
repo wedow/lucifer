@@ -246,7 +246,7 @@ boot_native(struct _is *interp)
     }
     interp->builtins = Py_NewRef(PyModule_GetDict(builtins));
     interp->sysdict = Py_NewRef(PyModule_GetDict(sys));
-    if (lu_types_init(interp) < 0 || add_builtins(interp->builtins) < 0) {
+    if (lu_types_init(interp) < 0 || add_builtins(interp->builtins) < 0 || lu_cc_init() < 0) {
         Py_DECREF(builtins);
         Py_DECREF(sys);
         return -1;
@@ -615,6 +615,7 @@ release_interpreter(struct _is *interp)
     interp->importlib = interp->import_func = NULL;
     interp->eval_frame = NULL;
     interp->specializing = 0;
+    memset(interp->mcache, 0, sizeof interp->mcache);
     interp->kernel_booted = 0;
     memset(interp->static_types, 0, sizeof interp->static_types);
     memset(interp->kernel, 0, sizeof interp->kernel);

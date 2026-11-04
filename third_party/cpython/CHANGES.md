@@ -1,10 +1,12 @@
 No file of `Lib/` is modified.
 
-`Parser/Python.asdl` and `Parser/asdl.py` are copied verbatim from the same tag;
-tools/genast writes the node table of lib/modules/_ast.py from them.
+`Parser/Python.asdl` and `Parser/asdl.py` are copied verbatim from the same tag
+(for Lib/test/test_asdl_parser.py).
 
-Tools/peg_generator/pegen/ is copied from the same tag to generate
-lib/compiler/parser.py. Modifications:
+Tools/peg_generator/pegen/ is copied from the same tag (for
+Lib/test/test_peg_generator). It no longer generates the runtime's parser,
+which is the tag's own Parser/parser.c (see runtime/compiler/ below).
+Modifications:
 
 - Tools/peg_generator/pegen/python_generator.py: the generated Python parser
   follows the C generator's semantics, so that it parses exactly what the C
@@ -330,3 +332,35 @@ spaces until the Unicode database exists. `runtime/prim/str.c`'s
 - `runtime/interp/opcode_stack.c` holds `_PyOpcode_num_popped` and
   `_PyOpcode_num_pushed` of `Include/internal/pycore_opcode_metadata.h`, copied,
   and the stack-effect functions of `Python/flowgraph.c`.
+
+## runtime/compiler/
+
+CPython's compiler, vendored from this tag with each file's license header
+kept. Files not listed under Local changes are unchanged.
+
+- `Parser/{lexer,tokenizer}/*.c|h`, `Parser/{parser,pegen,pegen_errors,action_helpers,string_parser,peg_api,token}.c`,
+  `Parser/{pegen,string_parser}.h`, `Python/{Python-ast,ast,ast_preprocess,future,symtable,codegen,compile,flowgraph,assemble,instruction_sequence,Python-tokenize,pyarena}.c`,
+  `Modules/{symtablemodule,_opcode}.c` and their `clinic/` headers.
+- `include/pycore_*.h`: `asdl ast ast_state symtable flowgraph instruction_sequence compile opcode_utils token pyarena c_array intrinsics opcode_metadata uop_ids parser format hashtable` are copied from
+  `Include/internal/`; the other `pycore_*.h` names there are one line each and
+  include `include/lu_cc.h`, which declares the rest of what the compiler takes
+  from CPython's internals (not a CPython file).
+- `lu_cc.c` (not a CPython file) maps those internals to the runtime and holds
+  `lu_cc_compile`, which is `builtin_compile_impl` from `Python/bltinmodule.c`
+  after argument checks and without the parser's audit event. It contains
+  `_PyErr_RaiseSyntaxError`, `_PyErr_EmitSyntaxWarning`,
+  `_PyErr_ProgramDecodedTextObject` (`Python/errors.c`),
+  `_Py_UniversalNewlineFgetsWithSize` (`Objects/fileobject.c`),
+  `_PyBytes_DecodeEscape2` and `_PyUnicode_DecodeUnicodeEscapeInternal2`
+  (`Objects/bytesobject.c`, `Objects/unicodeobject.c`; strict error handling
+  only), `_PyUnicode_ScanIdentifier`, `_Py_SourceAsString`.
+
+Local changes (each marked `LU:` in the file):
+
+- `Python-ast.c`: the `ast_state` is a function-local static, not
+  `interp->ast`; `_PyAST_Fini` does nothing.
+- `action_helpers.c`: the dummy name is `lu_cc_dummy_name`, not
+  `_PyRuntime.parser.dummy_name`.
+- `_opcode.c`: the special method names come from `lu_cc_strings`.
+- Compiled with `Py_BUILD_CORE_MODULE` so that the clinic code keeps its
+  keyword tuples out of static storage.

@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Wall-clock bounds for two costs that grow with the Python-side compiler.
+"""Wall-clock bounds for two costs that grow with the compiler.
 
   uncaught   a script that raises and is not caught: the traceback display
              imports `traceback`, whose modules compile source at import
+             (namedtuple, dataclasses) and create the _ast classes
   huge       exec of a 100,000-line function, the size of the one in
              test_sys_settrace.test_jump_extended_args_for_iter
 
 Each case runs on BIN, and on the oracle when --oracle is given, and prints
 both times. Exit status 1 when BIN is slower than a bound or its stderr
-differs from the oracle's. The bounds are generous: they catch a return of
-the quadratic or per-import costs, not a few percent.
+differs from the oracle's. An idle host measures uncaught 0.17 s and huge
+1.2 s; the bounds leave room for the load the test gates run under (0.64 s and
+3.2 s seen). They catch a return of a quadratic or per-import cost, not a few
+percent.
 
 usage: timecheck --lucifer BIN [--oracle PYTHON] [--max-uncaught S] [--max-huge S]
 """
@@ -44,8 +47,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--lucifer", required=True)
     parser.add_argument("--oracle")
-    parser.add_argument("--max-uncaught", type=float, default=2.0)
-    parser.add_argument("--max-huge", type=float, default=300.0)
+    parser.add_argument("--max-uncaught", type=float, default=0.6)
+    parser.add_argument("--max-huge", type=float, default=5.0)
     args = parser.parse_args()
     failed = False
     with tempfile.TemporaryDirectory() as tmp:

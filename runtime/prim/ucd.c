@@ -1299,6 +1299,20 @@ prim_ucd_lookup(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, &code, 1);
 }
 
+/* lu_ucd_getcode: the code point a \N{name} escape names, for the compiler
+   (CPython's capi_getcode with named sequences refused and aliases resolved). */
+int
+lu_ucd_getcode(const char *name, int namelen, Py_UCS4 *code)
+{
+    if (!_getcode(name, namelen, code) || IS_NAMED_SEQ(*code)) {
+        return 0;
+    }
+    if (IS_ALIAS(*code)) {
+        *code = name_aliases[*code - aliases_start];
+    }
+    return 1;
+}
+
 /* The normalization form as 0 NFD, 1 NFKD, 2 NFC, 3 NFKC, or -1. */
 static int
 form_arg(PyObject *form)

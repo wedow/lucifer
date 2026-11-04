@@ -191,15 +191,13 @@ prim_seq_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return v;
 }
 
-/* seq_slice(seq, start, step, count, as_tuple): the count items from start
-   by step, as an exact tuple or list. The caller took the bounds from a
-   length that another thread may have shrunk since: positions past the end
-   are left out. A list result is filled in its own array. */
-static PyObject *
-prim_seq_slice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+/* The count items of a tuple or list from start by step, as an exact tuple
+   or list. The caller took the bounds from a length that another thread may
+   have shrunk since: positions past the end are left out. A list result is
+   filled in its own array. */
+PyObject *
+lu_seq_slice(PyObject *seq, Py_ssize_t start, Py_ssize_t step, Py_ssize_t count, int as_tuple)
 {
-    ARGS(5); SEQ(0); SSIZE(1, start); SSIZE(2, step); SSIZE(3, count);
-    int as_tuple = args[4] == Py_True;
     PyObject *list = as_tuple ? NULL : PyList_New(count);
     PyObject **items = as_tuple ? PyMem_Malloc((count > 0 ? count : 1) * sizeof(PyObject *))
                        : list != NULL ? ((PyListObject *)list)->ob_item : NULL;
@@ -207,7 +205,6 @@ prim_seq_slice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         Py_XDECREF(list);
         return as_tuple ? PyErr_NoMemory() : NULL;
     }
-    PyObject *seq = args[0];
     Py_ssize_t n = 0;
     Py_BEGIN_CRITICAL_SECTION(seq);
     PyObject **src = seq_items(seq);
@@ -223,6 +220,14 @@ prim_seq_slice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return list;
     }
     return seq_take(items, n, 1);
+}
+
+/* seq_slice(seq, start, step, count, as_tuple) */
+static PyObject *
+prim_seq_slice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(5); SEQ(0); SSIZE(1, start); SSIZE(2, step); SSIZE(3, count);
+    return lu_seq_slice(args[0], start, step, count, args[4] == Py_True);
 }
 
 /* seq_concat(a, b, as_tuple) */
@@ -317,21 +322,16 @@ prim_xxh_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); SEQ(0);
     Py_ssize_t n = Py_SIZE(args[0]);
-    Py_uhash_t acc = 2870177450012600261ULL;            /* XXPRIME_5 */
+    Py_uhash_t acc = LU_XXHASH_START;
     for (Py_ssize_t i = 0; i < n; i++) {
         long lane;
         PyObject *h = seq_items(args[0])[i];
         if (!PyLong_CheckExact(h) || lu_long_as_long(h, &lane) < 0) {
             return NULL;
         }
-        acc += (Py_uhash_t)lane * 14029467366897019727ULL;      /* XXPRIME_2 */
-        acc = (acc << 31) | (acc >> 33);
-        acc *= 11400714785074694791ULL;                 /* XXPRIME_1 */
+        acc = lu_xxhash_step(acc, lane);
     }
-    if (args[1] == Py_True) {
-        acc += (Py_uhash_t)n ^ (2870177450012600261ULL ^ 3527539UL);
-    }
-    return PyLong_FromLong(acc == (Py_uhash_t)-1 ? 1546275796 : (Py_hash_t)acc);
+    return PyLong_FromLong(lu_xxhash_end(acc, n, args[1] == Py_True));
 }
 
 /* repr_enter(obj): whether obj is already being repr'd by this task, else
@@ -1199,22 +1199,3 @@ PyMethodDef lu_prim_storage_methods[] = {
     FAST(slice_new), FAST(slice_get), FAST(type_has_sequence),
     { NULL, NULL, 0, NULL },
 };
-
-PyObject *
-lu_get_iter_exact(PyObject *v)
-{
-    PyTypeObject *tp = Py_TYPE(v);
-    if (tp == &PyTuple_Type || tp == &PyList_Type) {
-        seqiterobject *it = (seqiterobject *)lu_object_new(
-            tp == &PyTuple_Type ? &PyTupleIter_Type : &PyListIter_Type, sizeof(seqiterobject));
-        if (it != NULL) {
-            it->it_seq = Py_NewRef(v);
-            return (PyObject *)it;
-        }
-        return NULL;
-    }
-    if (tp == &PyRange_Type) {
-        return lu_range_iter(v);
-    }
-    return NULL;
-}

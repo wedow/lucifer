@@ -1,35 +1,24 @@
-import _thread
-import time
-import threading
+import signal
 
 # The default SIGINT handler runs at a poll made at the recursion limit: it
 # must not need a frame there, or its KeyboardInterrupt is lost and the
-# RecursionError handlers below keep the program running.
-gave_up = False
+# RecursionError handlers below keep the program running. The signal is
+# raised from inside the recursion, so no timing is involved.
+calls = 0
 
 
 def f():
-    if gave_up:
+    global calls
+    calls += 1
+    if calls > 100000:
         raise SystemError("interrupt lost")
     try:
         f()
     except RecursionError:
+        signal.raise_signal(signal.SIGINT)
         f()
 
 
-def interrupt():
-    time.sleep(0.3)
-    _thread.interrupt_main()
-
-
-def watchdog():
-    global gave_up
-    time.sleep(5)
-    gave_up = True
-
-
-threading.Thread(target=interrupt).start()
-threading.Thread(target=watchdog, daemon=True).start()
 try:
     f()
 except KeyboardInterrupt:

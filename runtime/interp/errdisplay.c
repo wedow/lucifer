@@ -153,19 +153,32 @@ build(PyObject *exc)
     return root;
 }
 
+/* Frees the tree without recursing: a context chain can be deeper than the
+   C stack. Each node's children are queued in the node's own storage. */
 static void
-node_free(struct node *n)
+node_free(struct node *root)
 {
-    if (n == NULL) {
-        return;
+    struct node **todo = NULL;
+    size_t n = 0, cap = 0;
+    for (struct node *e = root; e != NULL; ) {
+        struct node *kids[2] = { e->cause, e->context };
+        if (n + (size_t)e->nexcs + 2 > cap) {
+            cap = 2 * (n + (size_t)e->nexcs + 2);
+            todo = realloc(todo, cap * sizeof *todo);
+        }
+        for (int i = 0; i < 2; i++) {
+            if (kids[i] != NULL) {
+                todo[n++] = kids[i];
+            }
+        }
+        for (Py_ssize_t i = 0; i < e->nexcs; i++) {
+            todo[n++] = e->excs[i];
+        }
+        free(e->excs);
+        free(e);
+        e = n > 0 ? todo[--n] : NULL;
     }
-    node_free(n->cause);
-    node_free(n->context);
-    for (Py_ssize_t i = 0; i < n->nexcs; i++) {
-        node_free(n->excs[i]);
-    }
-    free(n->excs);
-    free(n);
+    free(todo);
 }
 
 /* Text out: the margin of the exception group levels (_ExceptionPrintContext). */

@@ -286,7 +286,7 @@ lu_code_new(const struct lu_code_fields *c)
     co->co_argcount = c->argcount;
     co->co_posonlyargcount = c->posonlyargcount;
     co->co_kwonlyargcount = c->kwonlyargcount;
-    co->co_stacksize = c->stacksize;
+    co->co_stacksize = c->stacksize != 0 ? c->stacksize : 1;     /* init_code: a frame has a stack slot */
     co->co_firstlineno = c->firstlineno;
     co->co_localsplusnames = Py_NewRef(c->localsplusnames);
     co->co_localspluskinds = Py_NewRef(c->localspluskinds);
@@ -306,7 +306,7 @@ lu_code_new(const struct lu_code_fields *c)
         co->co_nfreevars += (kinds[i] & CO_FAST_FREE) != 0;
     }
     co->co_nlocalsplus = nlocalsplus;
-    co->co_framesize = nlocalsplus + c->stacksize + (int)LU_FRAME_SPECIALS;
+    co->co_framesize = nlocalsplus + co->co_stacksize + (int)LU_FRAME_SPECIALS;
     memcpy(co->co_code_adaptive, PyBytes_AS_STRING(c->code), nbytes);
     /* Instrumentation starts at the first RESUME. */
     while (co->_co_firsttraceable < Py_SIZE(co)

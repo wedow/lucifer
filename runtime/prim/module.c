@@ -209,6 +209,7 @@ lucifer_exec(PyObject *m)
         || add_functions(m, lu_prim_mt_methods) < 0
         || add_functions(m, lu_prim_faulthandler_methods) < 0
         || add_functions(m, lu_prim_ucd_methods) < 0
+        || add_functions(m, lu_prim_compiler_methods) < 0
         || add_functions(m, lu_prim_str_methods) < 0 || add_functions(m, lu_prim_bytes_methods) < 0
         || add_functions(m, lu_prim_mv_methods) < 0
         || add_functions(m, lu_prim_exc_methods) < 0
