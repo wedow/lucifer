@@ -253,3 +253,7 @@ print(oa.magic, getattr(oa, 'magic'), hasattr(oa, 'magic'), hasattr(oa, 'other')
 oa.magic = 1
 show(setattr, oa, 'other', 1)
 show(getattr, oa, 'other')
+
+# a static type's tp_doc that starts with a signature is its __text_signature__, and not its __doc__
+print(ready.DocSig.__text_signature__, repr(ready.DocSig.__doc__), inspect.signature(ready.DocSig),
+      ready.Vec.__text_signature__, ready.Counter.__text_signature__)

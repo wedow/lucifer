@@ -658,6 +658,8 @@ descr_get_qualname(PyObject *self, void *closure)
 static const char *
 find_signature(const char *name, const char *doc, const char **end)
 {
+    const char *dot = strrchr(name, '.');
+    name = dot != NULL ? dot + 1 : name;        /* tp_name is dotted */
     size_t skip = strlen(name);
     *end = NULL;
     if (doc == NULL || strncmp(doc, name, skip) != 0 || doc[skip] != '(') {
@@ -702,15 +704,28 @@ signature_from_flags(int flags)
 }
 
 static PyObject *
-internal_text_signature(const PyMethodDef *ml)
+text_signature(const char *name, const char *doc, int flags)
 {
     const char *end;
-    const char *start = find_signature(ml->ml_name, ml->ml_doc, &end);
+    const char *start = find_signature(name, doc, &end);
     if (start != NULL) {
         return PyUnicode_FromStringAndSize(start, end - start - (sizeof SIGNATURE_END_MARKER - 2));
     }
-    const char *by_flags = signature_from_flags(ml->ml_flags);
+    const char *by_flags = signature_from_flags(flags);
     return by_flags != NULL ? PyUnicode_FromString(by_flags) : Py_NewRef(Py_None);
+}
+
+static PyObject *
+internal_text_signature(const PyMethodDef *ml)
+{
+    return text_signature(ml->ml_name, ml->ml_doc, ml->ml_flags);
+}
+
+/* type.__text_signature__ of a static type: the signature its tp_doc starts with. */
+PyObject *
+lu_type_text_signature(PyTypeObject *tp)
+{
+    return text_signature(tp->tp_name, tp->tp_doc, 0);
 }
 
 static PyObject *

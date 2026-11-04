@@ -1951,6 +1951,14 @@ prim_type_tp_name(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyUnicode_FromString(((PyTypeObject *)args[0])->tp_name);
 }
 
+/* type_text_signature(t): the signature a static type's tp_doc starts with, or None. */
+static PyObject *
+prim_type_text_signature(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); TYPE_ARG(0);
+    return lu_type_text_signature((PyTypeObject *)args[0]);
+}
+
 /* type_static_module(t): a static type's __module__, the part of tp_name
    before its last dot, else "builtins". */
 static PyObject *
@@ -2271,7 +2279,7 @@ PyMethodDef lu_prim_type_methods[] = {
     FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag), FAST(type_set_flag), FAST(type_layout), FAST(object_size),
     FAST(type_can_new), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
     FAST(type_subclasses), FAST(type_modified), FAST(is_subtype), FAST(alloc), FAST(new_check),
-    FAST(type_tp_name), FAST(type_static_module), FAST(size),
+    FAST(type_tp_name), FAST(type_text_signature), FAST(type_static_module), FAST(size),
     FAST(truth_exact), FAST(instance_dict), FAST(set_class), FAST(caller_globals), FAST(super_args),
     FAST(error), FAST(ns_get), FAST(ns_set), FAST(ns_del), FAST(ns_items),
     { "kind", (PyCFunction)(void (*)(void))prim_kind, METH_FASTCALL, NULL },
