@@ -6,8 +6,11 @@ LU_CFLAGS = -std=gnu11 -Wall -Wextra -Wno-unused-parameter -fvisibility=hidden \
 	-fno-omit-frame-pointer -pthread -Iinclude -Iruntime -Ithird_party/mimalloc/include
 LU_LDFLAGS = -rdynamic -pthread
 
-SRCS = $(wildcard runtime/*.c runtime/*/*.c)
-HEADERS = $(wildcard runtime/*.h runtime/*/*.h)
+# The optimizing tier's backend (runtime/jit/target.h): x86_64, or "stub"
+# where there is none, which runs everything interpreted.
+JIT_TARGET ?= $(if $(filter x86_64,$(shell uname -m)),x86_64,stub)
+SRCS = $(wildcard runtime/*.c runtime/*/*.c runtime/jit/$(JIT_TARGET)/*.c)
+HEADERS = $(wildcard runtime/*.h runtime/*/*.h runtime/jit/$(JIT_TARGET)/*.h)
 MAIN = build/runtime/main.o
 LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o)) build/frozen.o
 HOST_PYTHON ?= python3

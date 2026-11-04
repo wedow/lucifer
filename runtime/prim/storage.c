@@ -929,12 +929,7 @@ typedef struct {
     PyObject *start, *stop, *step, *length;
 } rangeobject;
 
-/* range_iterator: the values as C longs; longrange_iterator: as ints. */
-typedef struct {
-    PyObject_HEAD
-    long start, step, len;
-} rangeiterobject;
-
+/* longrange_iterator: range_iterator's values as ints. */
 typedef struct {
     PyObject_HEAD
     PyObject *start, *step, *len;
@@ -1204,3 +1199,22 @@ PyMethodDef lu_prim_storage_methods[] = {
     FAST(slice_new), FAST(slice_get), FAST(type_has_sequence),
     { NULL, NULL, 0, NULL },
 };
+
+PyObject *
+lu_get_iter_exact(PyObject *v)
+{
+    PyTypeObject *tp = Py_TYPE(v);
+    if (tp == &PyTuple_Type || tp == &PyList_Type) {
+        seqiterobject *it = (seqiterobject *)lu_object_new(
+            tp == &PyTuple_Type ? &PyTupleIter_Type : &PyListIter_Type, sizeof(seqiterobject));
+        if (it != NULL) {
+            it->it_seq = Py_NewRef(v);
+            return (PyObject *)it;
+        }
+        return NULL;
+    }
+    if (tp == &PyRange_Type) {
+        return lu_range_iter(v);
+    }
+    return NULL;
+}
