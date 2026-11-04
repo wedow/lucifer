@@ -46,6 +46,7 @@
 #define INTRINSIC_LIST_TO_TUPLE 6
 #define INTRINSIC_IMPORT_STAR 2
 #define INTRINSIC_STOPITERATION_ERROR 3
+#define INTRINSIC_PRINT 1
 #define INTRINSIC_ASYNC_GEN_WRAP 4
 #define INTRINSIC_TYPEVAR 7             /* the PEP 695 intrinsics, run by the kernel */
 #define INTRINSIC_TYPEALIAS 11
@@ -1881,6 +1882,21 @@ op_CALL_INTRINSIC_1: {
         kid = LU_K_import_star;
         kret = LU_RETURN_PUSH;
         goto kernel_call;
+    }
+    if (oparg == INTRINSIC_PRINT) {
+        /* the value of an expression statement in interactive code: sys.displayhook(value) */
+        PyObject *value = POP();
+        PyObject *sys = lu_ns_lookup(ts->interp->modules, PyUnicode_InternFromString("sys"));
+        PyObject *hook = sys != NULL ? PyObject_GetAttrString(sys, "displayhook") : NULL;
+        PyObject *r = hook != NULL ? lu_call(hook, &value, 1, NULL) : NULL;
+        if (hook == NULL && !PyErr_Occurred()) {
+            lu_err_format(PyExc_RuntimeError, "lost sys.displayhook");
+        }
+        Py_XDECREF(hook);
+        Py_DECREF(value);
+        ERROR_IF(r == NULL);
+        PUSH(r);
+        DISPATCH();
     }
     if (oparg == INTRINSIC_ASYNC_GEN_WRAP) {
         PyObject *w = lu_async_gen_wrap(TOP());
