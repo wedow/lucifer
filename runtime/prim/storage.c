@@ -505,7 +505,9 @@ list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, int cl
                 }
             }
             if (err == 0) {
-                memcpy(l->ob_item + lo, fresh, d * sizeof(PyObject *));
+                for (Py_ssize_t k = 0; k < d; k++) {
+                    _Py_atomic_store_ptr_release(&l->ob_item[lo + k], fresh[k]);
+                }
                 PyMem_Free(fresh);
                 fresh = NULL;
             }
@@ -574,8 +576,10 @@ PyList_Insert(PyObject *op, Py_ssize_t where, PyObject *newitem)
     }
     else {
         where = where < 0 ? (where + n < 0 ? 0 : where + n) : where > n ? n : where;
-        memmove(l->ob_item + where + 1, l->ob_item + where, (n - where) * sizeof(PyObject *));
-        l->ob_item[where] = Py_NewRef(newitem);
+        for (Py_ssize_t i = n; --i >= where; ) {
+            _Py_atomic_store_ptr_relaxed(&l->ob_item[i + 1], l->ob_item[i]);
+        }
+        _Py_atomic_store_ptr_release(&l->ob_item[where], Py_NewRef(newitem));
     }
     Py_END_CRITICAL_SECTION();
     return err;
@@ -607,7 +611,7 @@ prim_list_set_stride(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
             break;
         }
         old[k] = l->ob_item[at];
-        l->ob_item[at] = fresh[k];
+        _Py_atomic_store_ptr_release(&l->ob_item[at], fresh[k]);
     }
     Py_END_CRITICAL_SECTION();
     if (bad) {
