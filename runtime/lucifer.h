@@ -1261,6 +1261,7 @@ PyObject *lu_seqiter_next(PyObject *iter);
    is exhausted, NULL with RuntimeError when the dict changed. */
 PyObject *lu_dictiter_next(PyObject *it);
 PyObject *lu_rangeiter_next(PyObject *iter);
+int lu_enum_next(PyObject *e, PyObject **v);
 /* A new range_iterator or longrange_iterator over the range r, or NULL with an error. */
 PyObject *lu_range_iter(PyObject *r);
 

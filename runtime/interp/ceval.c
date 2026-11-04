@@ -470,6 +470,16 @@ set_function_attribute(PyFunctionObject *func, int which, PyObject *attr)
     Py_XSETREF(*field, attr);
 }
 
+/* SAVE_FRAME as an expression, for a condition that may raise. */
+static inline int
+save_frame_then(struct lu_frame *f, lu_codeunit *instr, PyObject **sp, lu_codeunit *last)
+{
+    f->instr = instr;
+    f->stackpointer = sp;
+    f->last = last;
+    return 1;
+}
+
 /* How eval_frame starts: by running `frame`, by raising the exception in
    flight at its current instruction (a generator's throw), or by resuming
    the task at its top frame (lu_resume). */
@@ -2624,6 +2634,9 @@ op_FOR_ITER: {
             Py_DECREF(v);
             v = NULL;
         }
+    }
+    else if (itp == &PyEnum_Type && save_frame_then(frame, next_instr, sp, cur_instr) && lu_enum_next(iter, &v)) {
+        /* v is the pair, or NULL when the inner iterator ended or failed */
     }
     else if (itp == &PyGen_Type && ts->interp->eval_frame == NULL) {
         SAVE_FRAME();

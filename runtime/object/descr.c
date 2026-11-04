@@ -13,6 +13,7 @@
 
 #include "interp/frame.h"
 #include "prim/prim.h"
+#include "opcode.h"
 
 #include <string.h>
 
@@ -843,6 +844,53 @@ FIELDS(descr, PyDescrObject, d_type, d_qualname)
 #define LU_ITER_FIELDS 3
 typedef struct { PyObject_HEAD PyObject *f[LU_ITER_FIELDS]; } iterfields;
 FIELDS(iter, iterfields, f[0], f[LU_ITER_FIELDS - 1])
+
+/* The next (index, item) of an exact enumerate over a tuple, list, range or dict
+   iterator: 1 with *v the pair, or NULL when it is exhausted or failed; 0 when
+   the kernel must step it. */
+int
+lu_enum_next(PyObject *e, PyObject **v)
+{
+    iterfields *f = (iterfields *)e;
+    PyObject *inner = f->f[0], *i = f->f[1];
+    PyTypeObject *t = Py_TYPE(inner);
+    PyObject *item;
+    if (!PyLong_CheckExact(i)) {
+        return 0;
+    }
+    if (t == &PyListIter_Type || t == &PyTupleIter_Type) {
+        item = lu_seqiter_next(inner);
+    }
+    else if (t == &PyRangeIter_Type) {
+        item = lu_rangeiter_next(inner);
+    }
+    else if (t == &PyDictIterKey_Type || t == &PyDictIterValue_Type || t == &PyDictIterItem_Type) {
+        item = lu_dictiter_next(inner);
+        if (item == LU_MISSING) {
+            Py_DECREF(item);
+            item = NULL;
+        }
+    }
+    else {
+        return 0;
+    }
+    *v = NULL;
+    if (item == NULL) {
+        return 1;
+    }
+    PyObject *next = lu_long_binary(NB_ADD, i, lu_small_int(1));
+    PyObject *pair = next != NULL ? PyTuple_New(2) : NULL;
+    if (pair == NULL) {
+        Py_XDECREF(next);
+        Py_DECREF(item);
+        return 1;
+    }
+    PyTuple_SET_ITEM(pair, 0, Py_NewRef(i));
+    PyTuple_SET_ITEM(pair, 1, item);
+    Py_XSETREF(f->f[1], next);
+    *v = pair;
+    return 1;
+}
 
 /* types.GenericAlias and typing.Union hold four object fields: origin,
    args, parameters and starred; args, hashable_args, unhashable_args and
