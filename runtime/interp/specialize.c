@@ -38,6 +38,7 @@ const uint8_t lu_opcode_caches[256] = {
     [LOAD_ATTR_MODULE] = 9, [LOAD_ATTR_CLASS] = 9, [LOAD_ATTR_CLASS_WITH_METACLASS_CHECK] = 9,
     [LOAD_ATTR_WITH_HINT] = 9, [LOAD_ATTR_METHOD_NO_DICT] = 9, [LOAD_ATTR_METHOD_WITH_VALUES] = 9,
     [LOAD_ATTR_NONDESCRIPTOR_NO_DICT] = 9, [LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES] = 9,
+    [LOAD_ATTR_SLOT] = 9, [STORE_ATTR_SLOT] = 4, [STORE_ATTR_WITH_HINT] = 4,
     [INSTRUMENTED_LOAD_SUPER_ATTR] = 1, [INSTRUMENTED_JUMP_BACKWARD] = 1,
     [INSTRUMENTED_POP_JUMP_IF_TRUE] = 1, [INSTRUMENTED_POP_JUMP_IF_FALSE] = 1,
     [INSTRUMENTED_POP_JUMP_IF_NONE] = 1, [INSTRUMENTED_POP_JUMP_IF_NOT_NONE] = 1,
@@ -240,6 +241,18 @@ specialize_class(PyObject *owner, lu_codeunit *site, PyObject *name)
     }
 }
 
+/* A __slots__ member that is an object reference: its byte offset in the
+   instance fits an index word, and the descriptor type is immutable. */
+static int
+is_slot_member(PyObject *descr)
+{
+    if (descr == NULL || !Py_IS_TYPE(descr, &PyMemberDescr_Type)) {
+        return 0;
+    }
+    PyMemberDef *m = ((PyMemberDescrObject *)descr)->d_member;
+    return m->type == Py_T_OBJECT_EX && m->offset >= 0 && m->offset <= UINT16_MAX;
+}
+
 /* An instance's attribute, for a type whose __getattribute__ is object's. */
 static void
 specialize_instance(PyObject *owner, lu_codeunit *site, PyObject *name, int method)
@@ -257,7 +270,11 @@ specialize_instance(PyObject *owner, lu_codeunit *site, PyObject *name, int meth
     if (!managed && tp->tp_dictoffset != 0) {
         return fail(site);
     }
-    if (kind == DESCR_ABSENT) {
+    if (is_slot_member(descr)) {
+        set_attr_cache(site, LOAD_ATTR_SLOT, tp->tp_version_tag,
+                       (uint32_t)((PyMemberDescrObject *)descr)->d_member->offset, NULL);
+    }
+    else if (kind == DESCR_ABSENT) {
         /* In the instance's dict, at an entry whose key is this very str. */
         PyObject *dict = managed ? LU_MANAGED_DICT(owner) : NULL;
         Py_ssize_t index = dict != NULL && unicode_dict(dict) ? lu_ns_index(dict, name) : -1;
@@ -299,5 +316,38 @@ lu_specialize_load_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
     }
     else {
         specialize_instance(owner, site, name, site->op.arg & 1);
+    }
+}
+
+/* STORE_ATTR on an instance of a type whose __setattr__ is object's: a
+   writable __slots__ member is stored at its offset; a name the type does not
+   have goes into the instance's dict. */
+void
+lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
+{
+    PyTypeObject *tp = Py_TYPE(owner);
+    if (!enabled() || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))
+        || !lu_type_assign_version(tp)) {
+        return;
+    }
+    PyObject *descr = _PyType_Lookup(tp, name);
+    lu_codeunit *c = site + 1;
+    if (is_slot_member(descr) && !(((PyMemberDescrObject *)descr)->d_member->flags & Py_READONLY)) {
+        if (!begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
+            return;
+        }
+        lu_cache_store(c + LA_INDEX, (uint16_t)((PyMemberDescrObject *)descr)->d_member->offset);
+        lu_cache_store32(c + LA_VERSION, tp->tp_version_tag);
+        end(site, STORE_ATTR_SLOT);
+    }
+    else if (descr == NULL && (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT)) {
+        if (!begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
+            return;
+        }
+        lu_cache_store32(c + LA_VERSION, tp->tp_version_tag);
+        end(site, STORE_ATTR_WITH_HINT);
+    }
+    else {
+        fail(site);
     }
 }

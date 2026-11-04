@@ -89,10 +89,14 @@ These are exactly the valid indices for a list of 4 elements.
 When step is given, it specifies the increment (or decrement)."""
 
     def __new__(cls, *args, **kwargs):
-        operators.check_new(cls, range)
+        if cls is not range:
+            operators.check_new(cls, range)
         if kwargs:
             error(TypeError, 'range() takes no keyword arguments')
         n = size(args)
+        if n == 1 and type(args[0]) is int:
+            stop = args[0]
+            return range_new(0, stop, 1, stop if stop > 0 else 0)
         if n == 0:
             error(TypeError, 'range expected at least 1 argument, got 0')
         if n > 3:

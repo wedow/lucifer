@@ -64,6 +64,26 @@ prim_dict_probe(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return int_of(lu_dict_probe((PyDictObject *)args[0], args[1], hash, after));
 }
 
+/* dict_find(d, key) -> the value, MISSING when absent, NotImplemented when
+   the key is not an exact str or int or an equal-hash entry needs __eq__. */
+static PyObject *
+prim_dict_find(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2); DICT(0);
+    PyObject *value;
+    int found = lu_dict_find_native(args[0], args[1], &value);
+    return Py_NewRef(found < 0 ? Py_NotImplemented : found ? value : LU_MISSING);
+}
+
+/* dict_put(d, key, value) -> True when stored, NotImplemented as dict_find. */
+static PyObject *
+prim_dict_put(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(3); DICT(0);
+    int done = lu_dict_put_native(args[0], args[1], args[2]);
+    return done == -2 ? NULL : Py_NewRef(done == 1 ? Py_True : Py_NotImplemented);
+}
+
 /* dict_key(d, ix), dict_value(d, ix): the live entry's key or value, else MISSING. */
 static PyObject *
 prim_dict_key(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -277,11 +297,10 @@ prim_dictiter_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 /* dictiter_next(it): the next key, value or (key, value) pair, MISSING when
    exhausted; RuntimeError when the dict changed size or its entries
    during the iteration. */
-static PyObject *
-prim_dictiter_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+PyObject *
+lu_dictiter_next(PyObject *it)
 {
-    ARGS(1);
-    dictiterobject *di = (dictiterobject *)args[0];
+    dictiterobject *di = (dictiterobject *)it;
     PyTypeObject *tp = Py_TYPE(di);
     int reverse = is_reverse(tp);
     PyDictObject *d = di->di_dict;
@@ -325,6 +344,13 @@ prim_dictiter_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     Py_END_CRITICAL_SECTION();
     return result;
+}
+
+static PyObject *
+prim_dictiter_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    return lu_dictiter_next(args[0]);
 }
 
 /* dictiter_len(it): the entries left, 0 once the dict changed size. */
@@ -403,7 +429,7 @@ lu_dict_views_init(void)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_dict_methods[] = {
-    FAST(dict_new), FAST(dict_probe), FAST(dict_key), FAST(dict_value), FAST(dict_hash),
+    FAST(dict_new), FAST(dict_probe), FAST(dict_find), FAST(dict_put), FAST(dict_key), FAST(dict_value), FAST(dict_hash),
     FAST(dict_insert), FAST(dict_replace), FAST(dict_remove), FAST(dict_popitem),
     FAST(dict_clear), FAST(dict_next), FAST(dict_prev), FAST(dict_keys_id), FAST(dict_copy),
     FAST(dict_merge_prepare), FAST(dict_sizeof), FAST(dictiter_new), FAST(dictiter_next),

@@ -23,6 +23,7 @@
 #include "interp/instrument.h"
 #include "interp/specialize.h"
 #include "object/dict.h"
+#include "object/set.h"
 
 #include "opcode.h"
 #include "opcode_ids.h"
@@ -277,6 +278,124 @@ subscr_slot(PyObject *container, PyObject *sub)
     return NULL;
 }
 
+/* Whether one of n items is item, as lu_native_eq decides: 1, 0, or -1. */
+static int
+items_contain(PyObject *const *items, Py_ssize_t n, PyObject *item)
+{
+    for (Py_ssize_t i = 0; i < n; i++) {
+        int eq = items[i] == item ? 1 : lu_native_eq(items[i], item);
+        if (eq != 0) {
+            return eq;
+        }
+    }
+    return 0;
+}
+
+/* `item in container` for an exact set, frozenset, dict, tuple or list, as
+   lu_dict_find_native decides it: 1, 0, or -1 for the kernel. A list is
+   scanned in its critical section, which its mutators hold: a resize
+   replaces the array and the size apart. */
+static int
+contains_native(PyObject *container, PyObject *item)
+{
+    PyObject *value;
+    int found = -1;
+    if (PyAnySet_CheckExact(container)) {
+        PyTypeObject *kt = Py_TYPE(item);
+        int verdict;
+        if (kt != &PyUnicode_Type && kt != &PyLong_Type) {
+            return -1;
+        }
+        lu_set_probe((PySetObject *)container, item, lu_hash(item), 0, &verdict);
+        return verdict == LU_SET_FOUND ? 1 : verdict == LU_SET_ABSENT ? 0 : -1;
+    }
+    if (PyDict_CheckExact(container)) {
+        return lu_dict_find_native(container, item, &value);
+    }
+    if (PyTuple_CheckExact(container)) {
+        return items_contain(((PyTupleObject *)container)->ob_item, Py_SIZE(container), item);
+    }
+    if (PyList_CheckExact(container)) {
+        Py_BEGIN_CRITICAL_SECTION(container);
+        found = items_contain(((PyListObject *)container)->ob_item, Py_SIZE(container), item);
+        Py_END_CRITICAL_SECTION();
+    }
+    return found;
+}
+
+/* Whether instances of `tp` use object's attribute hook `id` (__getattribute__
+   or __setattr__), so that a data descriptor of the type decides the access. */
+static int
+object_attr_hook(PyTypeObject *tp, PyObject *id)
+{
+    return _PyType_Lookup(tp, id) == _PyType_Lookup(&PyBaseObject_Type, id);
+}
+
+/* LOAD_ATTR answers that need no Python: obj.__class__ for an object whose
+   type keeps object's __class__, and a plain class attribute (no __get__, or
+   a function, which a class returns unbound) of a class whose metaclass keeps
+   type's __getattribute__ and does not have the name. NULL otherwise. */
+static PyObject *
+attr_shortcut(PyObject *owner, PyObject *name)
+{
+    PyTypeObject *tp = Py_TYPE(owner);
+    if (name == LU_ID(__class__)) {
+        return _PyType_Lookup(tp, name) == _PyType_Lookup(&PyBaseObject_Type, name)
+            && object_attr_hook(tp, LU_ID(__getattribute__)) ? (PyObject *)tp : NULL;
+    }
+    if (!PyType_Check(owner) || !PyUnicode_CheckExact(name)
+        || _PyType_Lookup(tp, LU_ID(__getattribute__)) != _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__))
+        || _PyType_Lookup(tp, name) != NULL) {
+        return NULL;
+    }
+    PyObject *v = _PyType_Lookup((PyTypeObject *)owner, name);
+    return v != NULL && (Py_TYPE(v)->tp_descr_get == NULL || PyFunction_Check(v)) ? v : NULL;
+}
+
+/* The kernel functions that C answers for plain arguments, so that the common
+   call of dict.get, len and isinstance runs no frame: the result, or NULL
+   when the kernel must run. */
+static PyObject *
+native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize_t npos)
+{
+    PyObject *const *kernel = ts->interp->kernel;
+    if (target == kernel[LU_K_dict_get]) {
+        PyObject *found;
+        if ((npos == 2 || npos == 3) && PyDict_CheckExact(args[0])) {
+            int hit = lu_dict_find_native(args[0], args[1], &found);
+            if (hit >= 0) {
+                return Py_NewRef(hit ? found : npos == 3 ? args[2] : Py_None);
+            }
+        }
+    }
+    else if (target == kernel[LU_K_len]) {
+        PyTypeObject *t = npos == 1 ? Py_TYPE(args[0]) : NULL;
+        if (t == &PyList_Type || t == &PyTuple_Type) {
+            return PyLong_FromSsize_t(Py_SIZE(args[0]));
+        }
+        if (t == &PyDict_Type) {
+            return PyLong_FromSsize_t(((PyDictObject *)args[0])->ma_used);
+        }
+        if (t == &PyUnicode_Type) {
+            return PyLong_FromSsize_t(PyUnicode_GET_LENGTH(args[0]));
+        }
+    }
+    else if (target == kernel[LU_K_isinstance]) {
+        /* object_isinstance: a negative answer asks obj.__class__, which is
+           the type unless the type overrides __class__ or __getattribute__. */
+        PyTypeObject *t = npos == 2 && PyType_CheckExact(args[1]) ? Py_TYPE(args[0]) : NULL;
+        if (t != NULL) {
+            if (PyType_IsSubtype(t, (PyTypeObject *)args[1])) {
+                return Py_NewRef(Py_True);
+            }
+            if (object_attr_hook(t, LU_ID(__class__)) && object_attr_hook(t, LU_ID(__getattribute__))) {
+                return Py_NewRef(Py_False);
+            }
+        }
+    }
+    return NULL;
+}
+
 static void
 set_function_attribute(PyFunctionObject *func, int which, PyObject *attr)
 {
@@ -392,7 +511,10 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
         [LOAD_ATTR_METHOD_WITH_VALUES] = &&op_LOAD_ATTR_METHOD,
         [LOAD_ATTR_NONDESCRIPTOR_NO_DICT] = &&op_LOAD_ATTR_METHOD,
         [LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES] = &&op_LOAD_ATTR_METHOD,
+        [LOAD_ATTR_SLOT] = &&op_LOAD_ATTR_SLOT,
         [STORE_ATTR] = &&op_STORE_ATTR,
+        [STORE_ATTR_SLOT] = &&op_STORE_ATTR_FAST,
+        [STORE_ATTR_WITH_HINT] = &&op_STORE_ATTR_FAST,
         [DELETE_ATTR] = &&op_DELETE_ATTR,
         [LOAD_SUPER_ATTR] = &&op_LOAD_SUPER_ATTR,
         [LOAD_BUILD_CLASS] = &&op_LOAD_BUILD_CLASS,
@@ -945,6 +1067,13 @@ call_tail: {
         result = Py_NewRef((PyObject *)Py_TYPE(args[0]));       /* type(x) */
         goto call_done;
     }
+    if (callable == (PyObject *)&PyBool_Type && total == 1 && npos == 1) {
+        int truth = lu_truth_exact(args[0]);
+        if (truth >= 0) {
+            result = Py_NewRef(truth ? Py_True : Py_False);
+            goto call_done;
+        }
+    }
     PyObject *target = NULL, *self = NULL;
     if (Py_IS_TYPE(callable, &PyFunction_Type)) {
         target = callable;
@@ -999,6 +1128,11 @@ call_tail: {
     if (mon && target != NULL && (((PyFunctionObject *)target)->func_code != NULL)
         && (((PyCodeObject *)((PyFunctionObject *)target)->func_code)->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN))) {
         target = NULL;          /* a builtin: the tools see it return */
+    }
+    if (target != NULL && self == NULL && kwnames == NULL
+        && (((PyCodeObject *)((PyFunctionObject *)target)->func_code)->co_flags & LU_CO_KERNEL)
+        && (result = native_call(ts, target, args, npos)) != NULL) {
+        goto call_done;
     }
     if (target != NULL && (self == NULL || free_self)) {
         if (self != NULL) {
@@ -1986,6 +2120,27 @@ op_LOAD_ATTR_WITH_HINT: {
     DISPATCH();
 }
 
+/* A __slots__ member of the owner's type, read at its cached offset. */
+op_LOAD_ATTR_SLOT: {
+    PyObject *owner = TOP();
+    uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
+    PyObject *v = NULL;
+    if (version != 0 && Py_TYPE(owner)->tp_version_tag == version) {
+        v = *(PyObject **)((char *)owner + lu_cache_load(next_instr + LA_INDEX));
+    }
+    if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
+        || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        goto op_LOAD_ATTR;
+    }
+    SKIP_CACHES();
+    TOP() = Py_NewRef(v);
+    Py_DECREF(owner);
+    if (oparg & 1) {
+        PUSH(NULL);
+    }
+    DISPATCH();
+}
+
 /* A method of the type, or a plain value of it, unless the instance's dict
    has the name: a method is pushed under its owner, a value alone. */
 op_LOAD_ATTR_METHOD: {
@@ -2040,6 +2195,46 @@ op_LOAD_ATTR: {
     }
     getattrofunc get = Py_TYPE(owner)->tp_getattro;
     if (get == lu_slot_tp_getattro || get == PyObject_GenericGetAttr) {
+        PyObject *descr = _PyType_Lookup(Py_TYPE(owner), name), *v;
+        if ((v = attr_shortcut(owner, name)) != NULL) {
+            TOP() = Py_NewRef(v);
+            Py_DECREF(owner);
+            if (oparg & 1) {
+                PUSH(NULL);
+            }
+            DISPATCH();
+        }
+        if (descr != NULL) {
+            SAVE_FRAME();       /* a getter may read the frame: f_lineno, f_locals */
+        }
+        if (descr != NULL && object_attr_hook(Py_TYPE(owner), LU_ID(__getattribute__))
+            && lu_descr_get_native(descr, owner, &v) > 0) {
+            TOP() = v;
+            Py_DECREF(owner);
+            if (oparg & 1) {
+                PUSH(NULL);
+            }
+            DISPATCH();
+        }
+        if (descr != NULL && object_attr_hook(Py_TYPE(owner), LU_ID(__getattribute__))) {
+            /* A data descriptor whose __get__ is a Python function decides the
+               access: run it in this loop, as generic_getattr would, unless
+               an AttributeError from it must go to __getattr__. */
+            PyTypeObject *dt = Py_TYPE(descr);
+            PyObject *getter = _PyType_Lookup(dt, LU_ID(__get__));
+            if (getter != NULL && Py_IS_TYPE(getter, &PyFunction_Type)
+                && _PyType_Lookup(Py_TYPE(owner), LU_ID(__getattr__)) == NULL
+                && (_PyType_Lookup(dt, LU_ID(__set__)) != NULL || _PyType_Lookup(dt, LU_ID(__delete__)) != NULL)) {
+                kargs[0] = Py_NewRef(descr);
+                kargs[1] = POP();
+                kargs[2] = Py_NewRef((PyObject *)Py_TYPE(kargs[1]));
+                SAVE_FRAME();
+                callee = lu_frame_call(ts, (PyFunctionObject *)getter, kargs, 3, NULL);
+                ERROR_IF(callee == NULL);
+                callee->ret = kret;
+                goto push_callee;
+            }
+        }
         kid = get == lu_slot_tp_getattro ? LU_K_getattr : LU_K_generic_getattr;
         kargs[0] = POP();
         kargs[1] = Py_NewRef(name);
@@ -2060,16 +2255,67 @@ op_LOAD_ATTR: {
     DISPATCH();
 }
 
+/* v, owner -- : a __slots__ member written at its cached offset, or a name
+   the type lacks inserted into the instance's dict. */
+op_STORE_ATTR_FAST: {
+    PyObject *owner = sp[-1];
+    uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
+    PyObject *dict = NULL;
+    if (version == 0 || Py_TYPE(owner)->tp_version_tag != version) {
+        goto op_STORE_ATTR;
+    }
+    if (opcode == STORE_ATTR_WITH_HINT) {
+        dict = LU_MANAGED_DICT(owner);
+        if (dict == NULL || !PyDict_CheckExact(dict)) {
+            goto op_STORE_ATTR;     /* the generic form makes the dict */
+        }
+    }
+    if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        goto op_STORE_ATTR;
+    }
+    PyObject *v = sp[-2];
+    unsigned offset = lu_cache_load(next_instr + LA_INDEX);
+    SKIP_CACHES();
+    sp -= 2;
+    int err = 0;
+    if (opcode == STORE_ATTR_SLOT) {
+        PyObject **slot = (PyObject **)((char *)owner + offset);
+        PyObject *old = *slot;
+        *slot = v;
+        Py_XDECREF(old);
+    }
+    else {
+        SAVE_FRAME();
+        err = lu_ns_store(dict, NAME(oparg), v);
+        Py_DECREF(v);
+    }
+    Py_DECREF(owner);
+    ERROR_IF(err < 0);
+    DISPATCH();
+}
+
 op_STORE_ATTR:
 op_DELETE_ATTR: {
     /* v, owner -- (STORE_ATTR); owner -- (DELETE_ATTR) */
     PyObject *name = NAME(oparg);
-    int store = opcode == STORE_ATTR;
+    int store = opcode != DELETE_ATTR;
     PyObject *owner = sp[-1];
     PyObject *v = store ? sp[-2] : NULL;
+    if (store) {
+        ADAPT(lu_specialize_store_attr(owner, next_instr - 1, name));
+    }
     SKIP_CACHES();
     setattrofunc set = Py_TYPE(owner)->tp_setattro;
     if (set == lu_slot_tp_setattro || set == PyObject_GenericSetAttr) {
+        SAVE_FRAME();
+        int done = lu_setattr_native(owner, name, v);
+        if (done != 0) {
+            sp -= store ? 2 : 1;
+            Py_DECREF(owner);
+            Py_XDECREF(v);
+            ERROR_IF(done < 0);
+            DISPATCH();
+        }
         sp -= store ? 2 : 1;
         kargs[0] = owner;
         kargs[1] = Py_NewRef(name);
@@ -2273,6 +2519,14 @@ op_FOR_ITER: {
     }
     else if (itp == &PyRangeIter_Type) {
         v = lu_rangeiter_next(iter);
+    }
+    else if (itp == &PyDictIterKey_Type || itp == &PyDictIterValue_Type || itp == &PyDictIterItem_Type) {
+        SAVE_FRAME();
+        v = lu_dictiter_next(iter);
+        if (v == LU_MISSING) {
+            Py_DECREF(v);
+            v = NULL;
+        }
     }
     else if (itp == &PyGen_Type && ts->interp->eval_frame == NULL) {
         SAVE_FRAME();
@@ -2480,6 +2734,21 @@ op_BINARY_OP: {
             Py_DECREF(right);
             DISPATCH();
         }
+        if (PyBytes_CheckExact(left) && PyLong_CheckExact(right) && _PyLong_IsCompact((PyLongObject *)right)
+            && _PyLong_CompactValue((PyLongObject *)right) >= 0
+            && _PyLong_CompactValue((PyLongObject *)right) < PyBytes_GET_SIZE(left)) {
+            PUSH(lu_small_int((unsigned char)PyBytes_AS_STRING(left)[_PyLong_CompactValue((PyLongObject *)right)]));
+            Py_DECREF(left);
+            Py_DECREF(right);
+            DISPATCH();
+        }
+        PyObject *value;
+        if (PyDict_CheckExact(left) && lu_dict_find_native(left, right, &value) > 0) {
+            PUSH(Py_NewRef(value));
+            Py_DECREF(left);
+            Py_DECREF(right);
+            DISPATCH();
+        }
         kargs[0] = left;
         kargs[1] = right;
         nk = 2;
@@ -2487,7 +2756,11 @@ op_BINARY_OP: {
         kret = LU_RETURN_PUSH;
         goto kernel_call;
     }
-    if (PyLong_CheckExact(left) && PyLong_CheckExact(right)) {
+    int bitwise = oparg == NB_AND || oparg == NB_OR || oparg == NB_XOR
+                  || oparg == NB_INPLACE_AND || oparg == NB_INPLACE_OR || oparg == NB_INPLACE_XOR;
+    /* A bool computes as an int, except under the bitwise operators, which keep bool. */
+    if ((PyLong_CheckExact(left) || (!bitwise && PyBool_Check(left)))
+        && (PyLong_CheckExact(right) || (!bitwise && PyBool_Check(right)))) {
         SAVE_FRAME();
         PyObject *res = lu_long_binary(oparg, left, right);
         ERROR_IF(res == NULL);
@@ -2544,6 +2817,15 @@ op_UNARY_INVERT: {
 op_CONTAINS_OP: {
     /* item, container -- bool; oparg 1 is `not in` */
     SKIP_CACHES();
+    int found = contains_native(sp[-1], sp[-2]);
+    if (found >= 0) {
+        PyObject *item = sp[-2], *container = sp[-1];
+        sp -= 2;
+        PUSH(Py_NewRef((found ^ oparg) ? Py_True : Py_False));
+        Py_DECREF(item);
+        Py_DECREF(container);
+        DISPATCH();
+    }
     sp -= 2;
     kargs[0] = sp[1];
     kargs[1] = sp[0];
@@ -2597,6 +2879,19 @@ op_STORE_SUBSCR: {
         Py_DECREF(container);
         Py_DECREF(sub);
         DISPATCH();
+    }
+    if (PyDict_CheckExact(container)) {
+        SAVE_FRAME();
+        int done = lu_dict_put_native(container, sub, sp[-3]);
+        ERROR_IF(done == -2);
+        if (done == 1) {
+            PyObject *value = sp[-3];
+            sp -= 3;
+            Py_DECREF(value);
+            Py_DECREF(container);
+            Py_DECREF(sub);
+            DISPATCH();
+        }
     }
     sp -= 3;
     kargs[0] = container;

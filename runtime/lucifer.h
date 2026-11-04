@@ -176,6 +176,9 @@ struct lu_static_type_state {
     X(getitem)                  /* PyObject_GetItem: BINARY_OP NB_SUBSCR, BINARY_SLICE */ \
     X(setitem)                  /* PyObject_SetItem(container, key, value): STORE_SUBSCR, STORE_SLICE */ \
     X(delitem)                  /* PyObject_DelItem: DELETE_SUBSCR */ \
+    X(dict_get)                 /* dict.get, len and isinstance: CALL answers them itself */ \
+    X(len)                      /* for exact builtin types */ \
+    X(isinstance)               /* */ \
     X(dict_setitem)             /* PyDict_SetItem(dict, key, value): the dict's own, whatever the subclass overrides */ \
     X(dict_delitem)             /* PyDict_DelItem(dict, key) */ \
     X(length)                   /* PyObject_Size as an int: GET_LEN */ \
@@ -708,7 +711,7 @@ struct lu_static_objects {
     X(__rtruediv__) X(__matmul__) X(__rmatmul__) X(__iadd__) X(__isub__) X(__imul__) \
     X(__imod__) X(__ipow__) X(__ilshift__) X(__irshift__) X(__iand__) X(__ixor__) \
     X(__ior__) X(__import__) X(__ifloordiv__) X(__itruediv__) X(__imatmul__) X(__neg__) X(__pos__) \
-    X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__) X(mro) X(__getattribute__)
+    X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__) X(mro) X(__getattribute__) X(__getattr__) X(__setattr__)
 struct lu_identifiers {
 #define LU_ID_FIELD(name) PyObject *name;
     LU_IDENTIFIERS(LU_ID_FIELD)
@@ -929,6 +932,9 @@ PyObject *lu_function_new(PyObject *code, PyObject *globals);
    and never raises. */
 PyObject *lu_ns_lookup(PyObject *dict, PyObject *key);
 int lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value);
+/* lu_ns_insert in the dict's critical section, for a dict that other
+   threads may write: an instance's, or one the kernel stores into. */
+int lu_ns_store(PyObject *dict, PyObject *key, PyObject *value);
 /* Removes `key`: 1 when it was there, 0 when not. */
 int lu_ns_delete(PyObject *dict, PyObject *key);
 /* PyDict_Next over the namespace: *pos starts at 0; key and value are borrowed. */
@@ -983,6 +989,17 @@ PyObject *lu_descr_new_classmethod(PyTypeObject *type, PyMethodDef *ml);
 PyObject *lu_descr_new_wrapper(PyTypeObject *type, PyObject *name, struct lu_kernel_def *k);
 PyObject *lu_descr_new_member(PyTypeObject *type, PyMemberDef *member);
 PyObject *lu_descr_new_getset(PyTypeObject *type, PyGetSetDef *getset);
+/* A member or native getset descriptor read or written by C alone, for an
+   instance of a type that has it: 1 done (*out a new reference when reading;
+   value NULL deletes), 0 when kernel code must decide (another kind of
+   descriptor, an unset member, a getset with no setter), -1 with an exception
+   set. */
+int lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out);
+int lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value);
+/* obj.name = value (value NULL deletes) when C alone can do it: object's own
+   __setattr__, then a native data descriptor or, for a name the type lacks,
+   the instance's dict. Same results as lu_descr_set_native. */
+int lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value);
 PyObject *lu_method_wrapper_new(PyObject *descr, PyObject *self);
 /* The Python function the interpreter runs for a kernel callable, and the
    self it prepends (borrowed, or NULL). NULL when callable is none. Checks
@@ -1053,6 +1070,9 @@ typedef struct {
 /* The next item of a tuple, list or list_reverseiterator, or a range_iterator's
    next int; NULL when exhausted. */
 PyObject *lu_seqiter_next(PyObject *iter);
+/* The next key, value or (key, value) of a dict iterator, LU_MISSING when it
+   is exhausted, NULL with RuntimeError when the dict changed. */
+PyObject *lu_dictiter_next(PyObject *it);
 PyObject *lu_rangeiter_next(PyObject *iter);
 /* A new range_iterator or longrange_iterator over the range r, or NULL with an error. */
 PyObject *lu_range_iter(PyObject *r);

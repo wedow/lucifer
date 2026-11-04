@@ -6,7 +6,7 @@ functions' frames, so reflection never recurses in C (DESIGN 5.2)."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_tp_name, is_subtype, kernel_set, int_add,
-    truth_exact, int_format, int_hash, type_has_sequence, list_append, new_check, kernel_get,
+    truth_exact, int_format, int_hash, str_hash, size, object_hash, type_has_sequence, list_append, new_check, kernel_get,
 )
 from _lucifer import _boot
 
@@ -245,7 +245,7 @@ def decimal(n):
 def as_ssize(x, exc):
     """PyNumber_AsSsize_t: x through __index__, as a machine-sized int; one
     that does not fit is clipped, or raises exc when exc is not None."""
-    n = index(x)
+    n = x if type(x) is int else index(x)
     if n > _SSIZE_MAX or n < _SSIZE_MIN:
         if exc is not None:
             error(exc, "cannot fit 'int' into an index-sized integer")
@@ -255,7 +255,14 @@ def as_ssize(x, exc):
 
 def hash_of(x):
     """PyObject_Hash, as an int that fits Py_hash_t."""
-    f = type_lookup(type(x), '__hash__')
+    t = type(x)
+    if t is str:
+        return str_hash(x)
+    if t is int:
+        return int_hash(x)
+    f = type_lookup(t, '__hash__')
+    if f is not MISSING and f is type_lookup(object, '__hash__'):
+        return object_hash(x)
     if f is MISSING or f is None:
         error(TypeError, str_join('', ("unhashable type: '", _name(x), "'")))
     h = call_special(f, x)
@@ -269,6 +276,9 @@ def hash_of(x):
 
 def length(obj):
     """PyObject_Size: len(obj), through __len__."""
+    t = type(obj)
+    if t is list or t is tuple or t is dict or t is str or t is set or t is frozenset or t is bytes:
+        return size(obj)
     f = type_lookup(type(obj), '__len__')
     if f is MISSING:
         error(TypeError, str_join('', ("object of type '", _name(obj), "' has no len()")))
