@@ -267,6 +267,16 @@ def _get_bases(cls):
     return type_bases(cls)
 
 
+def _base_chain_has(base, cls):
+    """Whether cls is on base's tp_base chain, which a reentrant mro() may have
+    changed before the MRO caught up."""
+    while base is not None:
+        if base is cls:
+            return True
+        base = type_base(base)
+    return False
+
+
 def _set_bases(cls, value):
     _check_heap_set(cls, '__bases__', value, 'tuple', 'tuple')
     for base in value:
@@ -274,7 +284,7 @@ def _set_bases(cls, value):
             error(TypeError, str_join('', (
                 type_tp_name(cls), '.__bases__ must be tuple of classes, not ',
                 _repr_str(type_tp_name(type(base))))))
-        if base is cls or is_subtype(base, cls):
+        if is_subtype(base, cls) or _base_chain_has(base, cls):
             error(TypeError, 'a __bases__ item causes an inheritance cycle')
     type_set_bases(cls, value)
     _remro(cls)
