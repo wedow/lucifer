@@ -213,6 +213,17 @@ class CmpHashed(ready.CmpOnly):
 show(hash, CmpSub())
 print(hash(CmpHashed()))
 
+# a spec type made with only one of the pair gets an unhashable type or object's compare, not both inherited
+SpecCmp, SpecHash = ready.make_half_pairs()
+print(SpecCmp.__dict__.get('__hash__', 'missing'), sorted(k for k in SpecCmp.__dict__ if k in ('__eq__', '__hash__')),
+      sorted(k for k in SpecHash.__dict__ if k in ('__eq__', '__hash__')))
+show(hash, SpecCmp())
+sh = SpecHash()
+print(hash(sh), sh == sh, sh == SpecHash(), sh != sh)
+class SpecCmpSub(SpecCmp):
+    pass
+show(hash, SpecCmpSub())
+
 # Py_TPFLAGS_SEQUENCE and Py_TPFLAGS_MAPPING decide what a pattern matches
 def kind(subject):
     match subject:

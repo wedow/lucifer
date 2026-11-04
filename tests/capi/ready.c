@@ -469,6 +469,31 @@ static PyTypeObject CmpOnly_Type = {
     .tp_richcompare = delegate_richcompare,
 };
 
+/* Spec types with one of tp_richcompare and tp_hash: the other is not inherited. */
+static Py_hash_t
+seven_hash(PyObject *self)
+{
+    return 7;
+}
+
+static PyObject *
+make_half_pairs(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    PyType_Slot cmp_slots[] = { { Py_tp_new, PyType_GenericNew }, { Py_tp_richcompare, delegate_richcompare },
+                                { 0, NULL } };
+    PyType_Slot hash_slots[] = { { Py_tp_new, PyType_GenericNew }, { Py_tp_hash, seven_hash }, { 0, NULL } };
+    PyType_Spec cmp_spec = { "ready.SpecCmp", sizeof(PyObject), 0, Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+                             cmp_slots };
+    PyType_Spec hash_spec = { "ready.SpecHash", sizeof(PyObject), 0, Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+                              hash_slots };
+    PyObject *cmp = PyType_FromSpec(&cmp_spec);
+    PyObject *hash = cmp != NULL ? PyType_FromSpec(&hash_spec) : NULL;
+    PyObject *r = hash != NULL ? Py_BuildValue("(OO)", cmp, hash) : NULL;
+    Py_XDECREF(cmp);
+    Py_XDECREF(hash);
+    return r;
+}
+
 /* ready.OldAttr: the old tp_getattr and tp_setattr slots, which take a C string, as NumPy's Fortran objects do. */
 static PyObject *
 oldattr_getattr(PyObject *self, char *name)
@@ -1195,6 +1220,7 @@ static PyMethodDef module_methods[] = {
     { "strings", strings, METH_O, NULL },
     { "errors", errors, METH_NOARGS, NULL },
     { "raise_object", raise_object, METH_VARARGS, NULL },
+    { "make_half_pairs", make_half_pairs, METH_NOARGS, NULL },
     { "call_direct", call_direct, METH_VARARGS, NULL },
     { "raise_from_frame", raise_from_frame, METH_VARARGS, NULL },
     { "is_sequence", is_sequence, METH_O, NULL },
