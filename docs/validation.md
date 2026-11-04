@@ -499,8 +499,7 @@ passes; six shard groups, run with the default 540-second deadline, give
 | numpytest | lucifer | 52,273 | 2,184 | 16 | 1 | 2 | 1 | 50,069 | 4.18% |
 
 The run that reaches the deadline records the test running then as TIMEOUT and
-leaves later tests NOTRUN. The 16 FAIL rows are the next work (luc-h4gc takes
-the suite to 25%).
+leaves later tests NOTRUN. The 16 FAIL rows are the next work.
 
 ## Benchmarks
 
