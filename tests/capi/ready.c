@@ -36,6 +36,21 @@ vec_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return (PyObject *)v;
 }
 
+static int vec_deallocs;
+
+static void
+vec_dealloc(PyObject *self)
+{
+    vec_deallocs++;
+    Py_TYPE(self)->tp_free(self);       /* a subclass's tp_free knows the layout */
+}
+
+static PyObject *
+dealloc_count(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    return PyLong_FromLong(vec_deallocs);
+}
+
 static PyObject *
 vec_repr(PyObject *self)
 {
@@ -255,6 +270,7 @@ static PyTypeObject Vec_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_doc = "Vec(x=0, y=0)\n--\n\nA pair of numbers.",
     .tp_new = vec_new,
+    .tp_dealloc = vec_dealloc,
     .tp_repr = vec_repr,
     .tp_as_number = &vec_as_number,
     .tp_as_sequence = &vec_as_sequence,
@@ -855,6 +871,7 @@ objects(PyObject *self, PyObject *arg)
 }
 
 static PyMethodDef module_methods[] = {
+    { "dealloc_count", dealloc_count, METH_NOARGS, NULL },
     { "containers", containers, METH_NOARGS, NULL },
     { "codecs", codecs, METH_NOARGS, NULL },
     { "make_managed", make_managed, METH_NOARGS, NULL },

@@ -68,6 +68,17 @@ print(p, -p, p.norm2(), p + p, type(p + p).__name__, len(p), list(p), p == PyVec
 p.extra = 5
 print(p.extra, p.__dict__)
 
+# instances die through their own tp_dealloc, and a subclass's through tp_free
+before = ready.dealloc_count()
+a1 = Vec(1, 2)
+del a1
+a2 = PyVec(1, 2)
+a2.extra = [1]
+del a2
+a3 = Vec3(1, 2)
+del a3
+print(ready.dealloc_count() - before)
+
 # iteration protocol, a list subclass
 c = Counter(4)
 print(list(c), list(Counter()), next(Counter(2)), iter(c) is c)

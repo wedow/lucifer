@@ -626,6 +626,13 @@ lu_type_add_descriptors(PyTypeObject *tp)
     return 0;
 }
 
+/* tp_free of a class: what a base's dealloc calls last, which must know the preheader. */
+static void
+heap_free(void *self)
+{
+    lu_object_free(self);
+}
+
 static void
 object_dealloc(PyObject *self)
 {
@@ -1054,6 +1061,7 @@ type_new_layout(PyTypeObject *meta, PyObject *name, PyObject *bases, PyObject *n
     tp->tp_traverse = subtype_traverse;
     tp->tp_clear = subtype_clear;
     tp->tp_alloc = PyType_GenericAlloc;
+    tp->tp_free = heap_free;
     tp->tp_dictoffset = base->tp_dictoffset;
     tp->tp_weaklistoffset = base->tp_weaklistoffset;
     tp->tp_dict = dict;
