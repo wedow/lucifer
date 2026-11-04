@@ -8,7 +8,7 @@ from _lucifer import (
     str_join, error, kind, type_lookup, type_tp_name, MISSING, static_type, is_callable,
     is_subtype, size, int_format, int_add, int_as_double, str_chr, str_ord, bytes_ord, str_len,
     object_id, caller_locals, caller_globals, caller_code_flags, eval_code, kernel_get, kernel_set,
-    import_state, field_get,
+    import_state, field_get, setattr_native,
 )
 from _lucifer import _boot, _format, operators, _args, iter as _iter
 import sys
@@ -256,6 +256,8 @@ def setattr(obj, name, value, /):
     """Sets the named attribute on the given object to the specified value.
 
 setattr(x, 'y', v) is equivalent to ``x.y = v``"""
+    if setattr_native(obj, name, value):
+        return
     _attribute_name(name)
     setattr_hook(obj, name, value)
 

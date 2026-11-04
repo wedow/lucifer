@@ -961,6 +961,10 @@ PyObject *lu_descr_new_getset(PyTypeObject *type, PyGetSetDef *getset);
    set. */
 int lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out);
 int lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value);
+/* obj.name = value (value NULL deletes) when C alone can do it: object's own
+   __setattr__, then a native data descriptor or, for a name the type lacks,
+   the instance's dict. Same results as lu_descr_set_native. */
+int lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value);
 PyObject *lu_method_wrapper_new(PyObject *descr, PyObject *self);
 /* The Python function the interpreter runs for a kernel callable, and the
    self it prepends (borrowed, or NULL). NULL when callable is none. Checks

@@ -1930,17 +1930,14 @@ op_DELETE_ATTR: {
     SKIP_CACHES();
     setattrofunc set = Py_TYPE(owner)->tp_setattro;
     if (set == lu_slot_tp_setattro || set == PyObject_GenericSetAttr) {
-        PyObject *descr = _PyType_Lookup(Py_TYPE(owner), name);
-        if (descr != NULL && object_attr_hook(Py_TYPE(owner), LU_ID(__setattr__))) {
-            SAVE_FRAME();
-            int done = lu_descr_set_native(descr, owner, v);
-            if (done != 0) {
-                sp -= store ? 2 : 1;
-                Py_DECREF(owner);
-                Py_XDECREF(v);
-                ERROR_IF(done < 0);
-                DISPATCH();
-            }
+        SAVE_FRAME();
+        int done = lu_setattr_native(owner, name, v);
+        if (done != 0) {
+            sp -= store ? 2 : 1;
+            Py_DECREF(owner);
+            Py_XDECREF(v);
+            ERROR_IF(done < 0);
+            DISPATCH();
         }
         sp -= store ? 2 : 1;
         kargs[0] = owner;

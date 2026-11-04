@@ -31,10 +31,14 @@ class AST:
             n = len(fields)
             raise TypeError('%s constructor takes at most %d positional argument%s'
                             % (cls.__name__, n, '' if n == 1 else 's'))
-        remaining = list(fields)
-        for name, value in zip(fields, args):
-            setattr(self, name, value)
-            remaining.remove(name)
+        n = len(args)
+        i = 0
+        while i < n:
+            setattr(self, fields[i], args[i])
+            i += 1
+        if not kw and n == len(fields):
+            return
+        remaining = list(fields[n:])
         attributes = None
         for key, value in kw.items():
             if key in fields:

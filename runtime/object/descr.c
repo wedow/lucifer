@@ -840,6 +840,35 @@ lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value)
     return 0;
 }
 
+int
+lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value)
+{
+    PyTypeObject *tp = Py_TYPE(obj);
+    if ((tp->tp_setattro != lu_slot_tp_setattro && tp->tp_setattro != PyObject_GenericSetAttr)
+        || !PyUnicode_CheckExact(name)
+        || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))) {
+        return 0;
+    }
+    PyObject *descr = _PyType_Lookup(tp, name);
+    if (descr != NULL) {
+        return lu_descr_set_native(descr, obj, value);
+    }
+    PyObject *dict = (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) ? LU_MANAGED_DICT(obj) : NULL;
+    if (value == NULL || dict == NULL || !PyDict_CheckExact(dict)) {
+        return 0;
+    }
+    return lu_ns_insert(dict, name, value) < 0 ? -1 : 1;
+}
+
+/* setattr_native(obj, name, value) -> True when done, else False */
+static PyObject *
+prim_setattr_native(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(3);
+    int done = lu_setattr_native(args[0], args[1], args[2]);
+    return done < 0 ? NULL : Py_NewRef(done ? Py_True : Py_False);
+}
+
 /* make_getset(type, name, fget, fset or None) */
 static PyObject *
 prim_make_getset(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -1098,7 +1127,7 @@ prim_kernel_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_descr_methods[] = {
-    FAST(kernel_get),
+    FAST(kernel_get), FAST(setattr_native),
     FAST(make_function), FAST(make_getset), FAST(getset_kernel), FAST(getset_get),
     FAST(getset_set), FAST(member_get), FAST(member_set), FAST(descr_type), FAST(bind),
     FAST(method_new), FAST(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set),

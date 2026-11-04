@@ -245,7 +245,7 @@ def decimal(n):
 def as_ssize(x, exc):
     """PyNumber_AsSsize_t: x through __index__, as a machine-sized int; one
     that does not fit is clipped, or raises exc when exc is not None."""
-    n = index(x)
+    n = x if type(x) is int else index(x)
     if n > _SSIZE_MAX or n < _SSIZE_MIN:
         if exc is not None:
             error(exc, "cannot fit 'int' into an index-sized integer")
