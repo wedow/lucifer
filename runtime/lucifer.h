@@ -331,6 +331,7 @@ struct _is {
     lu_watcher func_watchers[LU_MAX_WATCHERS];      /* PyFunction_WatchCallback */
     lu_watcher code_watchers[LU_MAX_WATCHERS];      /* PyCode_WatchCallback */
     int specializing;                   /* set once the kernel has booted: instructions may specialize */
+    int kernel_booted;                  /* set with it: the kernel's functions are all registered */
     int max_str_digits;                 /* sys.get_int_max_str_digits() */
     PyObject *importlib;                /* _frozen_importlib, once installed */
     PyObject *import_func;              /* the original builtins.__import__ */

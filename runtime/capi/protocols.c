@@ -823,7 +823,7 @@ static _Thread_local int reporting_unraisable;
 static int
 report_unraisable(void)
 {
-    return !reporting_unraisable && PyInterpreterState_Get()->specializing;
+    return !reporting_unraisable && PyInterpreterState_Get()->kernel_booted;
 }
 
 PyObject *
