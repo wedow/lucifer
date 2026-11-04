@@ -123,6 +123,30 @@ PyIter_Next(PyObject *iter)
     return r;
 }
 
+/* PyIter_NextItem (Objects/abstract.c): 1 with the next item, 0 at the end
+   without an exception, -1 on error. */
+int
+PyIter_NextItem(PyObject *iter, PyObject **item)
+{
+    if (Py_TYPE(iter)->tp_iternext == NULL) {
+        *item = NULL;
+        lu_err_format(PyExc_TypeError, "expected an iterator, got '%.200s'", Py_TYPE(iter)->tp_name);
+        return -1;
+    }
+    PyObject *r = lu_call_kernel(LU_K_next_item, &iter, 1);
+    if (r == NULL) {
+        *item = NULL;
+        return -1;
+    }
+    if (r == LU_MISSING) {
+        Py_DECREF(r);
+        *item = NULL;
+        return 0;
+    }
+    *item = r;
+    return 1;
+}
+
 PyObject *
 PyObject_CallObject(PyObject *callable, PyObject *args)
 {
@@ -971,6 +995,33 @@ int
 PyList_Reverse(PyObject *op)
 {
     PyObject *r = list_arg(op) ? call_method(op, "reverse", NULL, 0) : NULL;
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
+/* list.clear() / list.extend(), like PyList_Reverse above over the kernel
+   method: a subclass that overrides one takes the call, where CPython's
+   PyList_* always work on the list state itself. */
+int
+PyList_Clear(PyObject *op)
+{
+    if (!list_arg(op)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    PyObject *r = call_method(op, "clear", NULL, 0);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
+int
+PyList_Extend(PyObject *op, PyObject *iterable)
+{
+    if (!list_arg(op)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    PyObject *r = call_method(op, "extend", &iterable, 1);
     Py_XDECREF(r);
     return r == NULL ? -1 : 0;
 }

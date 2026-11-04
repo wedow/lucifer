@@ -139,7 +139,10 @@ list_resize(PyListObject *self, Py_ssize_t newsize)
     return 0;
 }
 
-/* seq_get(seq, i): item i of a tuple or list, 0 <= i < len. */
+/* seq_get(seq, i): item i of a tuple or list, 0 <= i < len. A NULL slot of
+   an uninitialized list answers the NULL_ITEM singleton ("<NULL>", what its
+   repr shows, CPython's list_repr); every other reader of one is undefined
+   in CPython too. */
 static PyObject *
 prim_seq_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -148,7 +151,8 @@ prim_seq_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (PyList_Check(args[0])) {
         Py_BEGIN_CRITICAL_SECTION(args[0]);
         if (0 <= i && i < Py_SIZE(args[0])) {
-            v = Py_NewRef(((PyListObject *)args[0])->ob_item[i]);
+            PyObject *item = ((PyListObject *)args[0])->ob_item[i];
+            v = item != NULL ? Py_NewRef(item) : Py_NewRef(_PyRuntime.singletons.null_item);
         }
         Py_END_CRITICAL_SECTION();
     }

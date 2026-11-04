@@ -224,6 +224,16 @@ lucifer_exec(PyObject *m)
     PyObject *name = PyUnicode_InternFromString("MISSING");
     int err = name == NULL || lu_ns_insert(PyModule_GetDict(m), name, LU_MISSING) < 0;
     Py_XDECREF(name);
+    /* What an uninitialized list's slots answer, its repr's "<NULL>" */
+    PyObject *null_item = PyUnicode_InternFromString("<NULL>");
+    if (null_item == NULL) {
+        return -1;
+    }
+    lu_set_immortal(null_item);
+    _PyRuntime.singletons.null_item = null_item;
+    name = PyUnicode_InternFromString("NULL_ITEM");
+    err = name == NULL || lu_ns_insert(PyModule_GetDict(m), name, null_item) < 0;
+    Py_XDECREF(name);
     return err ? -1 : 0;
 }
 

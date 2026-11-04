@@ -184,6 +184,8 @@ struct lu_static_type_state {
     X(isinstance)               /* */ \
     X(dict_setitem)             /* PyDict_SetItem(dict, key, value): the dict's own, whatever the subclass overrides */ \
     X(dict_delitem)             /* PyDict_DelItem(dict, key) */ \
+    X(dict_pop)                 /* PyDict_Pop(dict, key): the value, or MISSING */ \
+    X(dict_setdefault)          /* PyDict_SetDefault(dict, key, default) */ \
     X(length)                   /* PyObject_Size as an int: GET_LEN */ \
     X(get_iter)                 /* PyObject_GetIter: GET_ITER */ \
     X(next_item)                /* the next item of an iterator, or MISSING: FOR_ITER */ \
@@ -688,6 +690,7 @@ struct lu_static_objects {
     PyBytesObject empty_bytes;
     PyTupleObject empty_tuple;
     PyObject missing;                   /* _lucifer.MISSING: "no value", distinct from None */
+    PyObject *null_item;                /* "<NULL>", what an uninitialized list's repr shows */
     PyObject set_dummy;                 /* the key of a deleted set entry (setobject.c's dummy) */
     /* Py_EMPTY_KEYS: the keys table of every empty dict, a PyDictKeysObject
        (runtime/object/dict.h) with its eight index bytes. */

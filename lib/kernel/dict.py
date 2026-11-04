@@ -131,6 +131,11 @@ def delete(d, key, h):
             return value
 
 
+def pop_value(d, key):
+    """delete without the pre-hashed key: PyDict_Pop."""
+    return delete(d, key, key_hash(key))
+
+
 def contains(d, key):
     found = dict_find(d, key)
     if found is NotImplemented:
@@ -906,5 +911,7 @@ kernel_set('build_map', build_map)
 kernel_set('dict_get', type_lookup(dict, 'get'))
 kernel_set('dict_setitem', setitem)
 kernel_set('dict_delitem', delitem)
+kernel_set('dict_pop', pop_value)
+kernel_set('dict_setdefault', setdefault)
 kernel_set('dict_update', update_op)
 kernel_set('dict_merge', merge_kwargs)
