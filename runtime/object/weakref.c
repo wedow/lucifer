@@ -214,6 +214,22 @@ prim_weakref_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 #define REF(i) (nargs == 1 && PyObject_TypeCheck(args[0], &_PyWeakref_RefType) \
     ? (PyWeakReference *)args[0] : (lu_err_format(PyExc_TypeError, "a weak reference is needed"), NULL))
 
+/* A new reference to the referent of the weak reference `ref`, NULL once it is dead. */
+PyObject *
+lu_weakref_get(PyObject *ref)
+{
+    PyObject *ob = __atomic_load_n(&((PyWeakReference *)ref)->wr_object, __ATOMIC_ACQUIRE);
+    if (ob == Py_None) {
+        return NULL;
+    }
+    PyMutex *m = stripe(ob);
+    PyMutex_Lock(m);
+    ob = ((PyWeakReference *)ref)->wr_object;
+    PyObject *result = ob != Py_None && Py_REFCNT(ob) > 0 ? Py_NewRef(ob) : NULL;
+    PyMutex_Unlock(m);
+    return result;
+}
+
 /* weakref_get(ref): the referent, or None once it is dead. */
 static PyObject *
 prim_weakref_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -222,16 +238,8 @@ prim_weakref_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (ref == NULL) {
         return NULL;
     }
-    PyObject *ob = __atomic_load_n(&ref->wr_object, __ATOMIC_ACQUIRE);
-    if (ob == Py_None) {
-        return Py_NewRef(Py_None);
-    }
-    PyMutex *m2 = stripe(ob);
-    PyMutex_Lock(m2);
-    ob = ref->wr_object;
-    PyObject *result = ob != Py_None && Py_REFCNT(ob) > 0 ? Py_NewRef(ob) : Py_NewRef(Py_None);
-    PyMutex_Unlock(m2);
-    return result;
+    PyObject *ob = lu_weakref_get((PyObject *)ref);
+    return ob != NULL ? ob : Py_NewRef(Py_None);
 }
 
 /* weakref_callback(ref): the callback, or None. */

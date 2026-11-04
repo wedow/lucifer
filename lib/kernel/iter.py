@@ -175,7 +175,7 @@ def unpack_ex(obj, before, after):
     last = rest[tail:]
     del rest[tail:]
     list_append(items, rest)
-    list_splice(items, size(items), size(items), last)
+    list_splice(items, size(items), size(items), last, -1)
     return tuple_from(items, tuple)
 
 
