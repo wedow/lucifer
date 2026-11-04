@@ -389,7 +389,10 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
         [LOAD_ATTR_METHOD_WITH_VALUES] = &&op_LOAD_ATTR_METHOD,
         [LOAD_ATTR_NONDESCRIPTOR_NO_DICT] = &&op_LOAD_ATTR_METHOD,
         [LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES] = &&op_LOAD_ATTR_METHOD,
+        [LOAD_ATTR_SLOT] = &&op_LOAD_ATTR_SLOT,
         [STORE_ATTR] = &&op_STORE_ATTR,
+        [STORE_ATTR_SLOT] = &&op_STORE_ATTR_FAST,
+        [STORE_ATTR_WITH_HINT] = &&op_STORE_ATTR_FAST,
         [DELETE_ATTR] = &&op_DELETE_ATTR,
         [LOAD_SUPER_ATTR] = &&op_LOAD_SUPER_ATTR,
         [LOAD_BUILD_CLASS] = &&op_LOAD_BUILD_CLASS,
@@ -1703,6 +1706,27 @@ op_LOAD_ATTR_WITH_HINT: {
     DISPATCH();
 }
 
+/* A __slots__ member of the owner's type, read at its cached offset. */
+op_LOAD_ATTR_SLOT: {
+    PyObject *owner = TOP();
+    uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
+    PyObject *v = NULL;
+    if (version != 0 && Py_TYPE(owner)->tp_version_tag == version) {
+        v = *(PyObject **)((char *)owner + lu_cache_load(next_instr + LA_INDEX));
+    }
+    if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
+        || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        goto op_LOAD_ATTR;
+    }
+    SKIP_CACHES();
+    TOP() = Py_NewRef(v);
+    Py_DECREF(owner);
+    if (oparg & 1) {
+        PUSH(NULL);
+    }
+    DISPATCH();
+}
+
 /* A method of the type, or a plain value of it, unless the instance's dict
    has the name: a method is pushed under its owner, a value alone. */
 op_LOAD_ATTR_METHOD: {
@@ -1777,13 +1801,55 @@ op_LOAD_ATTR: {
     DISPATCH();
 }
 
+/* v, owner -- : a __slots__ member written at its cached offset, or a name
+   the type lacks inserted into the instance's dict. */
+op_STORE_ATTR_FAST: {
+    PyObject *owner = sp[-1];
+    uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
+    PyObject *dict = NULL;
+    if (version == 0 || Py_TYPE(owner)->tp_version_tag != version) {
+        goto op_STORE_ATTR;
+    }
+    if (opcode == STORE_ATTR_WITH_HINT) {
+        dict = LU_MANAGED_DICT(owner);
+        if (dict == NULL || !PyDict_CheckExact(dict)) {
+            goto op_STORE_ATTR;
+        }
+    }
+    if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        goto op_STORE_ATTR;
+    }
+    PyObject *v = sp[-2];
+    unsigned offset = lu_cache_load(next_instr + LA_INDEX);
+    SKIP_CACHES();
+    sp -= 2;
+    int err = 0;
+    if (opcode == STORE_ATTR_SLOT) {
+        PyObject **slot = (PyObject **)((char *)owner + offset);
+        PyObject *old = *slot;
+        *slot = v;
+        Py_XDECREF(old);
+    }
+    else {
+        SAVE_FRAME();
+        err = lu_ns_insert(dict, NAME(oparg), v);
+        Py_DECREF(v);
+    }
+    Py_DECREF(owner);
+    ERROR_IF(err < 0);
+    DISPATCH();
+}
+
 op_STORE_ATTR:
 op_DELETE_ATTR: {
     /* v, owner -- (STORE_ATTR); owner -- (DELETE_ATTR) */
     PyObject *name = NAME(oparg);
-    int store = opcode == STORE_ATTR;
+    int store = opcode != DELETE_ATTR;
     PyObject *owner = sp[-1];
     PyObject *v = store ? sp[-2] : NULL;
+    if (store) {
+        ADAPT(lu_specialize_store_attr(owner, next_instr - 1, name));
+    }
     SKIP_CACHES();
     setattrofunc set = Py_TYPE(owner)->tp_setattro;
     if (set == lu_slot_tp_setattro || set == PyObject_GenericSetAttr) {
