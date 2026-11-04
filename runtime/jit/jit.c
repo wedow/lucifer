@@ -34,6 +34,7 @@ struct lu_jit_code {
     int ncode;
     uint8_t *nospec;            /* per code unit: do not speculate */
     uint16_t *fails;            /* per code unit: guard failures */
+    int noinline;               /* a side exit in an inlined copy keeps leaving: call it instead */
 };
 
 static struct {
@@ -91,6 +92,13 @@ lu_jit_nospec(PyCodeObject *code, int pc)
 {
     struct lu_jit_code *jc = state_of(code);
     return jc != NULL && pc >= 0 && pc < jc->ncode && __atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED);
+}
+
+int
+lu_jit_noinline(PyCodeObject *code)
+{
+    struct lu_jit_code *jc = state_of(code);
+    return jc != NULL && __atomic_load_n(&jc->noinline, __ATOMIC_RELAXED);
 }
 
 int
@@ -183,11 +191,14 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
         *u->stress_counter = (long)(_PyRuntime.stress.seed % _PyRuntime.stress.deopt) + 1;
     }
     double t0 = now();
-    int ok = lu_ssa_build(&f, frame) == 0 && lu_ssa_optimize(&f) == 0;
     static int dump = -1;
     if (dump < 0) {
         dump = getenv("LUCIFER_JIT_DUMP") != NULL;
     }
+    if (dump) {
+        fprintf(stderr, "jit: compiling %s@%d\n", PyUnicode_AsUTF8(frame->code->co_qualname), pc);
+    }
+    int ok = lu_ssa_build(&f, frame) == 0 && lu_ssa_optimize(&f) == 0;
     if (ok && lu_regalloc(&f) == 0) {
         if (dump) {
             lu_ir_dump(&f, stderr);
@@ -332,7 +343,7 @@ lu_jit_note_exit(struct lu_deopt *d)
     __atomic_fetch_add(&d->count, 1, __ATOMIC_RELAXED);
     count(&stats.exits[d->reason], 1);
     count(&stats.taken[d->opcode & 0xff], 1);
-    if (d->reason != EXIT_GUARD) {
+    if (d->reason != EXIT_GUARD && !(d->reason == EXIT_SIDE && d->nframes > 1)) {
         return;
     }
     struct lu_deopt_frame *inner = &d->frames[d->nframes - 1];
@@ -342,7 +353,14 @@ lu_jit_note_exit(struct lu_deopt *d)
     }
     uint16_t n = __atomic_add_fetch(&jc->fails[inner->pc], 1, __ATOMIC_RELAXED);
     if (n == GUARD_FAILS) {
-        __atomic_store_n(&jc->nospec[inner->pc], 1, __ATOMIC_RELAXED);
+        if (d->reason == EXIT_SIDE) {
+            /* The inlined copy keeps leaving here: it is called instead from
+               now on (and if that call leaves its caller's copy, the caller next). */
+            __atomic_store_n(&jc->noinline, 1, __ATOMIC_RELAXED);
+        }
+        else {
+            __atomic_store_n(&jc->nospec[inner->pc], 1, __ATOMIC_RELAXED);
+        }
         /* Every unit of the root code is recompiled at its next entry. */
         struct lu_jit_code *root = state_for(d->frames[0].code);
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {

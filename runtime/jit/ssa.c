@@ -117,6 +117,9 @@ void
 lu_ir_edge(struct lu_func *f, int from, int to)
 {
     struct lu_block *a = &f->blocks[from], *b = &f->blocks[to];
+    if (a->nsucc >= 2) {
+        Py_FatalError("lucifer jit: a block with a third successor");
+    }
     a->succ[a->nsucc++] = to;
     b->preds = grow(b->preds, &b->cappreds, b->npreds + 1, sizeof(int));
     b->preds[b->npreds++] = from;

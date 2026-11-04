@@ -240,6 +240,16 @@ alu_ri(struct asm_ *a, int alu, int dst, int32_t imm)
     b4(a, imm);
 }
 
+/* cmp r32, imm8 (sign-extended) */
+static void
+cmp32_ri8(struct asm_ *a, int r, int imm)
+{
+    rex(a, 0, 0, 0, r);
+    b1(a, 0x83);
+    modrm_rr(a, ALU_CMP, r);
+    b1(a, imm);
+}
+
 /* cmp qword/dword [base+disp], imm32 */
 static void
 cmp_mi(struct asm_ *a, int w, int base, int32_t disp, int32_t imm)
@@ -325,6 +335,40 @@ call_abs(struct asm_ *a, const void *fn)
     mov_ri(a, RAX, (int64_t)(intptr_t)fn);
     b1(a, 0xFF);
     b1(a, 0xD0);
+}
+
+/* A call on a slow path that keeps every allocatable register: the
+   caller-saved ones go to the stack around it (rsi, rdi, r8-r10 and
+   xmm2-14; 160 bytes keep the stack aligned). Its arguments are set by
+   `setup` after the saves. */
+static void sse_rm(struct asm_ *a, int prefix, int op, int reg, int base, int32_t disp);
+
+static void
+save_volatile(struct asm_ *a)
+{
+    static const int regs[] = { RSI, RDI, R8, R9, R10 };
+    for (int i = 0; i < 5; i++) {
+        rex(a, 0, 0, 0, regs[i]);
+        b1(a, 0x50 + (regs[i] & 7));            /* push */
+    }
+    alu_ri(a, ALU_SUB, RSP, 120);
+    for (int x = 2; x <= 14; x++) {
+        sse_rm(a, 0xF2, 0x11, x, RSP, 8 * (x - 2));
+    }
+}
+
+static void
+restore_volatile(struct asm_ *a)
+{
+    static const int regs[] = { RSI, RDI, R8, R9, R10 };
+    for (int x = 2; x <= 14; x++) {
+        sse_rm(a, 0xF2, 0x10, x, RSP, 8 * (x - 2));
+    }
+    alu_ri(a, ALU_ADD, RSP, 120);
+    for (int i = 4; i >= 0; i--) {
+        rex(a, 0, 0, 0, regs[i]);
+        b1(a, 0x58 + (regs[i] & 7));            /* pop */
+    }
 }
 
 /* SSE2: prefix, 0F, op, with xmm registers as 0..15. */
@@ -822,6 +866,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     case OP_UNBOX_INT: {
         int fail = guard_exit(a, in);
         r = gpr_of(a, in->a, RDX);
+        test_rr(a, r, r);
+        jcc(a, CC_E, fail);                     /* an unbound local */
         mov_ri(a, RAX, (int64_t)(intptr_t)&PyLong_Type);
         cmp_rm(a, RAX, r, offsetof(PyObject, ob_type));
         jcc(a, CC_NE, fail);
@@ -843,6 +889,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     case OP_UNBOX_FLOAT: {
         int fail = guard_exit(a, in);
         r = gpr_of(a, in->a, RDX);
+        test_rr(a, r, r);
+        jcc(a, CC_E, fail);                     /* an unbound local */
         mov_ri(a, RAX, (int64_t)(intptr_t)&PyFloat_Type);
         cmp_rm(a, RAX, r, offsetof(PyObject, ob_type));
         jcc(a, CC_NE, fail);
@@ -874,6 +922,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             def_gpr(a, v, RAX);
             return 0;
         }
+        save_volatile(a);
         if (in->op == OP_BOX_INT) {
             to_gpr(a, RDI, in->a);
             call_abs(a, (void *)lu_jit_box_int);
@@ -882,6 +931,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             to_fpr(a, 0, in->a);
             call_abs(a, (void *)lu_jit_box_float);
         }
+        restore_volatile(a);
         /* An allocation failure leaves through the instruction's state. */
         def_gpr(a, v, RAX);
         return 0;
@@ -1095,6 +1145,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     case OP_GUARD_TYPE: {
         int fail = guard_exit(a, in);
         r = gpr_of(a, in->a, RDX);
+        test_rr(a, r, r);
+        jcc(a, CC_E, fail);
         mov_ri(a, RAX, in->imm);
         cmp_rm(a, RAX, r, offsetof(PyObject, ob_type));
         jcc(a, CC_NE, fail);
@@ -1105,6 +1157,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         r = gpr_of(a, in->a, RDX);
         switch (in->imm2) {
         case GV_TYPE_OF:
+            test_rr(a, r, r);
+            jcc(a, CC_E, fail);
             load(a, RAX, r, offsetof(PyObject, ob_type));
             cmp_mi(a, 0, RAX, offsetof(PyTypeObject, tp_version_tag), (int32_t)in->imm);
             break;
@@ -1186,14 +1240,63 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         return 0;
     }
     case OP_ATTR_LOAD: {
-        struct move m[2] = { { RDI, in->a, 0, 0 }, { RCX, in->c, 0, 0 } };
+        /* LOAD_ATTR_WITH_HINT in line: the type's version, the instance's
+           exact dict, a unicode keys table with entry imm2 holding the name,
+           and the value with a reference the owning thread takes in place.
+           Anything else leaves: another thread's object is not taken here
+           (biased counting lets only the owner skip the atomic try). */
         int fail = guard_exit(a, in);
-        parallel_moves(a, m, 2);
-        mov_ri(a, RSI, in->imm);
-        mov_ri(a, RDX, in->imm2);
-        call_abs(a, (void *)lu_jit_attr_load);
+        int64_t entry = 16 * in->imm2;
+        r = gpr_of(a, in->a, RDX);
+        test_rr(a, r, r);
+        jcc(a, CC_E, fail);
+        load(a, RAX, r, offsetof(PyObject, ob_type));
+        cmp_mi(a, 0, RAX, offsetof(PyTypeObject, tp_version_tag), (int32_t)in->imm);
+        jcc(a, CC_NE, fail);
+        load(a, R11, r, LU_MANAGED_DICT_OFFSET);
+        test_rr(a, R11, R11);
+        jcc(a, CC_E, fail);
+        mov_ri(a, RAX, (int64_t)(intptr_t)&PyDict_Type);
+        cmp_rm(a, RAX, R11, offsetof(PyObject, ob_type));
+        jcc(a, CC_NE, fail);
+        load(a, R11, R11, offsetof(PyDictObject, ma_keys));
+        rex(a, 0, 0, 0, R11);
+        b1(a, 0x80);
+        modrm_mem(a, ALU_CMP, R11, offsetof(PyDictKeysObject, dk_kind));
+        b1(a, DICT_KEYS_GENERAL);               /* cmp byte [r11+kind], GENERAL */
+        jcc(a, CC_E, fail);
+        cmp_mi(a, 1, R11, offsetof(PyDictKeysObject, dk_nentries), (int32_t)in->imm2);
+        jcc(a, CC_LE, fail);
+        rex(a, 0, RCX, 0, R11);
+        b1(a, 0x0F);
+        b1(a, 0xB6);
+        modrm_mem(a, RCX, R11, offsetof(PyDictKeysObject, dk_log2_index_bytes));   /* movzx ecx, byte */
+        mov_ri(a, RAX, 1);
+        shift_cl(a, 4, RAX);                    /* the index bytes */
+        alu_rr(a, ALU_ADD, RAX, R11);
+        to_gpr(a, RCX, in->c);                  /* the name */
+        cmp_rm(a, RCX, RAX, (int32_t)(offsetof(PyDictKeysObject, dk_indices) + entry));
+        jcc(a, CC_NE, fail);
+        load(a, RAX, RAX, (int32_t)(offsetof(PyDictKeysObject, dk_indices) + entry + 8));
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
+        int done = new_label(a);
+        load32(a, RCX, RAX, offsetof(PyObject, ob_ref_local));
+        rex(a, 0, 0, 0, RCX);
+        b1(a, 0x83);
+        modrm_rr(a, ALU_ADD, RCX);
+        b1(a, 1);                               /* add ecx, 1 */
+        jcc(a, CC_E, done);                     /* immortal */
+        b1(a, 0x64);
+        b1(a, 0x4C);
+        b1(a, 0x8B);
+        b1(a, 0x1C);
+        b1(a, 0x25);
+        b4(a, 0);                               /* mov r11, fs:[0] */
+        cmp_rm(a, R11, RAX, offsetof(PyObject, ob_tid));
+        jcc(a, CC_NE, fail);
+        op_rm(a, 0, 0x89, RCX, RAX, offsetof(PyObject, ob_ref_local));
+        bind(a, done);
         def_gpr(a, v, RAX);
         return 0;
     }
@@ -1201,10 +1304,41 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         r = gpr_of(a, in->a, RDX);
         incref(a, r);
         return 0;
-    case OP_DECREF:
-        to_gpr(a, RDI, in->a);
+    case OP_DECREF: {
+        /* Py_DECREF: the owning thread's count above one drops in place;
+           anything else (immortal, last reference, another thread's object)
+           goes to C, which keeps the registers. */
+        int done = new_label(a), slow = new_label(a);
+        r = gpr_of(a, in->a, RDX);
+        test_rr(a, r, r);
+        jcc(a, CC_E, done);
+        load32(a, RCX, r, offsetof(PyObject, ob_ref_local));
+        cmp32_ri8(a, RCX, -1);
+        jcc(a, CC_E, done);                     /* immortal */
+        cmp32_ri8(a, RCX, 1);
+        jcc(a, CC_BE, slow);                    /* the last local reference, or none */
+        b1(a, 0x64);
+        b1(a, 0x48);
+        b1(a, 0x8B);
+        b1(a, 0x04);
+        b1(a, 0x25);
+        b4(a, 0);                               /* mov rax, fs:[0] */
+        cmp_rm(a, RAX, r, offsetof(PyObject, ob_tid));
+        jcc(a, CC_NE, slow);
+        rex(a, 0, 0, 0, RCX);
+        b1(a, 0x83);
+        modrm_rr(a, ALU_SUB, RCX);
+        b1(a, 1);                               /* sub ecx, 1 */
+        op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
+        jmp(a, done);
+        bind(a, slow);
+        save_volatile(a);
+        mov_rr(a, RDI, r);
         call_abs(a, (void *)lu_jit_decref);
+        restore_volatile(a);
+        bind(a, done);
         return 0;
+    }
     case OP_STORE_LOCAL:
         to_gpr(a, RDX, in->a);
         mov_rr(a, RDI, R15);

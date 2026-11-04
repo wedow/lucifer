@@ -81,6 +81,7 @@ struct ctx {
 
 /* Per-code JIT state the builder consults: pcs not to speculate at. */
 int lu_jit_nospec(PyCodeObject *code, int pc);
+int lu_jit_noinline(PyCodeObject *code);
 
 static int build_block(struct ctx *c, int bi);
 static PyTypeObject *known_type(struct ctx *c, lu_v v);
@@ -146,7 +147,14 @@ before(struct ctx *c)
 static lu_v
 emit(struct ctx *c, int op, int rep, lu_v a, lu_v b, lu_v cc, int64_t imm)
 {
-    return lu_ir_emit(c->f, c->cur, op, rep, a, b, cc, imm);
+    if (c->cur < 0) {
+        Py_FatalError("lucifer jit: an instruction where control cannot reach");
+    }
+    lu_v v = lu_ir_emit(c->f, c->cur, op, rep, a, b, cc, imm);
+    if (lu_op_flags[op] & IF_GUARD) {
+        c->f->ins[v].fs = c->snap;      /* it leaves before the instruction it belongs to */
+    }
+    return v;
 }
 
 static lu_v
@@ -387,26 +395,22 @@ side_exit(struct ctx *c, int reason)
     c->cur = -1;
 }
 
+
+/* What the tier does not compile here leaves to the interpreter: a side
+   exit, which in an inlined frame rebuilds that frame and its callers. */
 static void
 unsupported(struct ctx *c)
 {
-    if (c->parent != NULL) {
-        c->failed = 1;
-        return;
-    }
     c->f->bailouts[c->base]++;
     side_exit(c, EXIT_SIDE);
 }
 
-/* Python-running helpers need a real frame for everything below them. */
+/* Python-running helpers need a real frame for everything below them, so
+   inlined frames leave instead. */
 static int
 root_only(struct ctx *c)
 {
-    if (c->parent != NULL) {
-        c->failed = 1;
-        return 0;
-    }
-    return 1;
+    return c->parent == NULL;
 }
 
 /* --- edges and blocks --- */
@@ -952,6 +956,7 @@ binary_op(struct ctx *c)
     }
     if (r == LU_NOV) {
         if (!root_only(c)) {
+            unsupported(c);
             return -1;
         }
         lu_v args[3] = { a, b, const_i(c, op) };
@@ -1023,6 +1028,7 @@ compare_op(struct ctx *c)
     }
     if (r == LU_NOV) {
         if (!root_only(c)) {
+            unsupported(c);
             return -1;
         }
         lu_v args[3] = { a, b, const_i(c, c->oparg) };
@@ -1075,7 +1081,7 @@ inlinable(struct ctx *c, PyFunctionObject *fn, int nargs)
         || (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE
                             | CO_VARARGS | CO_VARKEYWORDS))
         || !(co->co_flags & CO_OPTIMIZED) || co->co_kwonlyargcount != 0 || co->_co_monitoring != NULL
-        || co->co_argcount < nargs) {
+        || co->co_argcount < nargs || lu_jit_noinline(co)) {
         return 0;
     }
     int defaults = fn->func_defaults != NULL ? (int)PyTuple_GET_SIZE(fn->func_defaults) : 0;
@@ -1197,6 +1203,9 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         }
         for (int i = save_consts; i < f->nconsts; i++) {
             Py_XDECREF(f->consts[i]);
+        }
+        for (int i = save_nins; i < f->nins && i < f->capknown; i++) {
+            f->known[i] = NULL;         /* the ids are reused */
         }
         f->nconsts = save_consts;
         f->nins = save_nins;
@@ -1664,9 +1673,9 @@ call(struct ctx *c)
         state_copy(c, &saved, &c->st);
         c->st.sp -= n + 2;
         if (inline_call(c, fn, args, own, nargs, &r, &rown)) {
-            release(c, callable, owncallable);
-            release(c, descr, owndescr);
-            if (c->cur >= 0) {
+            if (c->cur >= 0) {          /* else every path of the callee left */
+                release(c, callable, owncallable);
+                release(c, descr, owndescr);
                 push(c, r, rown);
             }
             return 0;
