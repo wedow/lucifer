@@ -993,20 +993,15 @@ LU_STUB int Py_FrozenMain(int argc, char **argv) { LU_UNIMPLEMENTED("Py_FrozenMa
 LU_STUB char* Py_GETENV(const char *name) { LU_UNIMPLEMENTED("Py_GETENV"); }
 LU_STUB PyObject * Py_GenericAlias(PyObject *, PyObject *) { LU_UNIMPLEMENTED("Py_GenericAlias"); }
 LU_STUB void Py_GetArgcArgv(int *argc, wchar_t ***argv) { LU_UNIMPLEMENTED("Py_GetArgcArgv"); }
-LU_STUB const char * Py_GetBuildInfo(void) { LU_UNIMPLEMENTED("Py_GetBuildInfo"); }
-LU_STUB const char * Py_GetCompiler(void) { LU_UNIMPLEMENTED("Py_GetCompiler"); }
 LU_STUB PyObject* Py_GetConstant(unsigned int constant_id) { LU_UNIMPLEMENTED("Py_GetConstant"); }
 LU_STUB PyObject* Py_GetConstantBorrowed(unsigned int constant_id) { LU_UNIMPLEMENTED("Py_GetConstantBorrowed"); }
-LU_STUB const char * Py_GetCopyright(void) { LU_UNIMPLEMENTED("Py_GetCopyright"); }
 LU_STUB wchar_t * Py_GetExecPrefix(void) { LU_UNIMPLEMENTED("Py_GetExecPrefix"); }
 LU_STUB wchar_t * Py_GetPath(void) { LU_UNIMPLEMENTED("Py_GetPath"); }
-LU_STUB const char * Py_GetPlatform(void) { LU_UNIMPLEMENTED("Py_GetPlatform"); }
 LU_STUB wchar_t * Py_GetPrefix(void) { LU_UNIMPLEMENTED("Py_GetPrefix"); }
 LU_STUB wchar_t * Py_GetProgramFullPath(void) { LU_UNIMPLEMENTED("Py_GetProgramFullPath"); }
 LU_STUB wchar_t * Py_GetProgramName(void) { LU_UNIMPLEMENTED("Py_GetProgramName"); }
 LU_STUB wchar_t * Py_GetPythonHome(void) { LU_UNIMPLEMENTED("Py_GetPythonHome"); }
 LU_STUB int Py_GetRecursionLimit(void) { LU_UNIMPLEMENTED("Py_GetRecursionLimit"); }
-LU_STUB const char * Py_GetVersion(void) { LU_UNIMPLEMENTED("Py_GetVersion"); }
 LU_STUB Py_hash_t Py_HashBuffer(const void *ptr, Py_ssize_t len) { LU_UNIMPLEMENTED("Py_HashBuffer"); }
 LU_STUB Py_hash_t Py_HashPointer(const void *ptr) { LU_UNIMPLEMENTED("Py_HashPointer"); }
 LU_STUB void Py_IncRef(PyObject *) { LU_UNIMPLEMENTED("Py_IncRef"); }
@@ -1580,7 +1575,6 @@ LU_STUB LU_EXPORT void _Py_DisplaySourceLine(void) { LU_UNIMPLEMENTED("_Py_Displ
 LU_STUB LU_EXPORT void _Py_DumpStack(void) { LU_UNIMPLEMENTED("_Py_DumpStack"); }
 LU_STUB LU_EXPORT void _Py_EncodeLocaleEx(void) { LU_UNIMPLEMENTED("_Py_EncodeLocaleEx"); }
 LU_STUB LU_EXPORT void _Py_FatalRefcountErrorFunc(void) { LU_UNIMPLEMENTED("_Py_FatalRefcountErrorFunc"); }
-LU_STUB LU_EXPORT void _Py_GetBuiltWithAssert(void) { LU_UNIMPLEMENTED("_Py_GetBuiltWithAssert"); }
 LU_STUB LU_EXPORT void _Py_GetConfig(void) { LU_UNIMPLEMENTED("_Py_GetConfig"); }
 LU_STUB LU_EXPORT void _Py_GetConfigsAsDict(void) { LU_UNIMPLEMENTED("_Py_GetConfigsAsDict"); }
 LU_STUB LU_EXPORT void _Py_GetErrorHandler(void) { LU_UNIMPLEMENTED("_Py_GetErrorHandler"); }

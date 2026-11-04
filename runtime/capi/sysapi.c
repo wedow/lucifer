@@ -109,6 +109,52 @@ PySys_Audit(const char *event, const char *argformat, ...)
     return r;
 }
 
+/* Interpreter build information (Python/getversion.c, getplatform.c,
+   getcopyright.c, getcompiler.c, Modules/getbuildinfo.c). The strings match
+   lib/kernel/sys.py, which reports them as sys.version, sys.platform and
+   sys.copyright. */
+
+const char *
+Py_GetVersion(void)
+{
+    return "3.14.10 free-threading build (lucifer) [lucifer]";
+}
+
+const char *
+Py_GetPlatform(void)
+{
+    return "linux";
+}
+
+const char *
+Py_GetCopyright(void)
+{
+    return "Copyright (c) 2001 Python Software Foundation.\nAll Rights Reserved.";
+}
+
+const char *
+Py_GetCompiler(void)
+{
+    return "[lucifer]";
+}
+
+const char *
+Py_GetBuildInfo(void)
+{
+    return "lucifer";
+}
+
+/* Exported for _testlimitedcapi only (Modules/getbuildinfo.c). */
+LU_EXPORT int
+_Py_GetBuiltWithAssert(void)
+{
+#ifdef NDEBUG
+    return 0;
+#else
+    return 1;
+#endif
+}
+
 /* Thread identity and thread-specific storage. */
 
 unsigned long
