@@ -11,6 +11,7 @@
    4. from here a failure prints the exception's type and message, exit 1;
    5. the kernel, sys.configure, importlib. */
 
+#include "jit/jit.h"
 #include "interp/exceptions.h"
 #include "interp/frozen.h"
 #include "interp/instrument.h"
@@ -659,6 +660,7 @@ Py_FinalizeEx(void)
     lu_task_shutdown_others(interp);
     __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     int status = flush_std_files();
+    lu_jit_report();
     finalize_modules(interp);
     lu_gc_collect_shutdown(PyThreadState_Get());
     flush_std_stream("stdout");

@@ -6,6 +6,7 @@
    -W arg, -X opt[=value], --version, and a .pyc path with its arguments.
    -c, -m and source scripts need the compiler and stay unsupported. */
 
+#include "jit/jit.h"
 #include "lucifer.h"
 
 #include <errno.h>
@@ -986,6 +987,20 @@ parse_handoff(const char *value, struct lu_handoff *out)
     return PyStatus_Ok();
 }
 
+/* lucifer_jit=off|on|always; on when the option is absent. */
+static PyStatus
+parse_jit(const char *value, struct lu_jit_options *out)
+{
+    int mode = strcmp(value, "off") == 0 ? LU_JIT_OFF : strcmp(value, "on") == 0 ? LU_JIT_ON
+        : strcmp(value, "always") == 0 ? LU_JIT_ALWAYS : -1;
+    if (mode >= 0) {
+        out->mode = mode;
+        return PyStatus_Ok();
+    }
+    return exit_with(2, "lucifer: -X lucifer_jit: bad mode '%s'\n%s", value,
+                     "usage: -X lucifer_jit=off|on|always\n");
+}
+
 /* Every lucifer_* -X option in one place; an unknown one is an error, so
    that a typo cannot silently turn a check off. */
 PyStatus
@@ -993,6 +1008,7 @@ lu_runtime_options(const PyConfig *config)
 {
     struct lu_stress stress = { 0 };
     struct lu_handoff handoff = { 0 };
+    struct lu_jit_options jit = { .mode = 1 };
     PyStatus status = PyStatus_Ok();
     for (Py_ssize_t i = 0; i < config->xoptions.length && !PyStatus_Exception(status); i++) {
         char *text = Py_EncodeLocale(config->xoptions.items[i], NULL);
@@ -1011,6 +1027,12 @@ lu_runtime_options(const PyConfig *config)
             else if (strcmp(text, "lucifer_handoff") == 0) {
                 status = parse_handoff(value, &handoff);
             }
+            else if (strcmp(text, "lucifer_jit") == 0) {
+                status = parse_jit(value, &jit);
+            }
+            else if (strcmp(text, "lucifer_jit_stats") == 0 && eq == NULL) {
+                jit.stats = 1;
+            }
             else {
                 status = exit_with(2, "lucifer: unknown option -X %s\n", text, "");
             }
@@ -1020,6 +1042,10 @@ lu_runtime_options(const PyConfig *config)
     if (!PyStatus_Exception(status)) {
         _PyRuntime.stress = stress;
         _PyRuntime.handoff = handoff;
+        jit.debug = getenv("LUCIFER_JIT_DEBUG") != NULL;
+        jit.dump = getenv("LUCIFER_JIT_DUMP") != NULL;
+        jit.only = getenv("LUCIFER_JIT_ONLY");
+        _PyRuntime.jit = jit;
     }
     return status;
 }
