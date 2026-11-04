@@ -119,3 +119,54 @@ PyEval_GetBuiltins(void)
 {
     return PyInterpreterState_Get()->builtins;
 }
+
+PyObject *
+PyImport_ImportModuleLevel(const char *name, PyObject *globals, PyObject *locals, PyObject *fromlist,
+                           int level)
+{
+    PyObject *pname = PyUnicode_FromString(name);
+    if (pname == NULL) {
+        return NULL;
+    }
+    PyObject *result = PyImport_ImportModuleLevelObject(pname, globals, locals, fromlist, level);
+    Py_DECREF(pname);
+    return result;
+}
+
+PyObject *
+PyImport_ImportModuleNoBlock(const char *name)
+{
+    return PyImport_ImportModule(name);
+}
+
+PyObject *
+PyImport_AddModuleObject(PyObject *name)
+{
+    PyObject *m = PyImport_GetModule(name);
+    if (m == NULL && !PyErr_Occurred()) {
+        m = PyModule_NewObject(name);
+        if (m != NULL && PyObject_SetItem(PyImport_GetModuleDict(), name, m) < 0) {
+            Py_CLEAR(m);
+        }
+    }
+    Py_XDECREF(m);              /* sys.modules holds it: borrowed */
+    return m;
+}
+
+PyObject *
+PyImport_AddModule(const char *name)
+{
+    PyObject *pname = PyUnicode_FromString(name);
+    PyObject *m = pname != NULL ? PyImport_AddModuleObject(pname) : NULL;
+    Py_XDECREF(pname);
+    return m;
+}
+
+PyObject *
+PyImport_ReloadModule(PyObject *m)
+{
+    PyObject *importlib = PyImport_ImportModule("importlib");
+    PyObject *r = importlib != NULL ? PyObject_CallMethod(importlib, "reload", "(O)", m) : NULL;
+    Py_XDECREF(importlib);
+    return r;
+}

@@ -116,6 +116,11 @@ print(mg.x, mg.y, mg.__dict__, weakref.ref(mg)() is mg, Managed.__dictoffset__ !
 print(ready.containers())
 print(ready.codecs())
 
+# sys, thread-specific storage, running code
+import sys
+sys.addaudithook(lambda event, args: print('audit', event, args) if event == 'ready.event' else None)
+print(ready.runtime_services())
+
 # capsules, imports
 print(ready.capsule_roundtrip())
 show(ready.capsule_import, 'datetime.datetime_CAPI')

@@ -514,6 +514,50 @@ codecs(PyObject *self, PyObject *Py_UNUSED(ignored))
     return out;
 }
 
+/* sys, thread-specific storage, running code, frame globals. */
+static PyObject *
+runtime_services(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    PyObject *out = PyList_New(0);
+    PySys_WriteStdout("stdout %d %s\n", 7, "text");
+    PyList_Append(out, PyLong_FromLong(PySys_SetObject("ready_attr", PyLong_FromLong(9))));
+    PyList_Append(out, PySys_GetObject("ready_attr"));
+    PyList_Append(out, PyLong_FromLong(PySys_SetObject("ready_attr", NULL)));
+    PyList_Append(out, PySys_GetObject("ready_attr") ? Py_True : Py_False);
+    PyList_Append(out, PyLong_FromLong(PySys_Audit("ready.event", "(is)", 1, "x")));
+    Py_tss_t *key = PyThread_tss_alloc();
+    PyList_Append(out, PyLong_FromLong(PyThread_tss_is_created(key)));
+    PyList_Append(out, PyLong_FromLong(PyThread_tss_create(key)));
+    PyList_Append(out, PyLong_FromLong(PyThread_tss_is_created(key)));
+    PyThread_tss_set(key, &out);
+    PyList_Append(out, PyBool_FromLong(PyThread_tss_get(key) == &out));
+    PyThread_tss_free(key);
+    PyObject *d1 = PyThreadState_GetDict(), *d2 = PyThreadState_GetDict();
+    PyList_Append(out, PyBool_FromLong(d1 != NULL && d1 == d2));
+    PyObject *globals = PyDict_New();
+    PyDict_SetItemString(globals, "k", PyLong_FromLong(40));
+    PyList_Append(out, PyRun_String("k + 2", Py_eval_input, globals, globals));
+    PyList_Append(out, PyRun_String("j = k * 2", Py_file_input, globals, globals));
+    PyList_Append(out, PyDict_GetItemString(globals, "j"));
+    PyList_Append(out, PyRun_String("1 +", Py_eval_input, globals, globals) ? Py_None : (PyErr_Clear(), PyUnicode_FromString("syntax error")));
+    PyObject *code = Py_CompileString("a = 1", "<ready>", Py_file_input);
+    PyList_Append(out, PyObject_GetAttrString(code, "co_filename"));
+    PyList_Append(out, PyBool_FromLong(PyEval_GetGlobals() != NULL));
+    PyList_Append(out, PyOS_FSPath(PyUnicode_FromString("some/path")));
+    PyObject *token_var = PyContextVar_New("reset_me", NULL);
+    PyObject *token = PyContextVar_Set(token_var, PyLong_FromLong(1));
+    PyList_Append(out, PyLong_FromLong(PyContextVar_Reset(token_var, token)));
+    PyObject *val;
+    PyContextVar_Get(token_var, NULL, &val);
+    PyList_Append(out, val ? Py_True : Py_False);
+    PyObject *fromlist = Py_BuildValue("[s]", "join");
+    PyObject *m = PyImport_ImportModuleLevel("os.path", NULL, NULL, fromlist, 0);
+    PyList_Append(out, PyObject_GetAttrString(m, "__name__"));
+    PyObject *added = PyImport_AddModule("ready_added2");
+    PyList_Append(out, PyBool_FromLong(added == PyImport_AddModule("ready_added2")));
+    return out;
+}
+
 /* Capsules. */
 
 static int destroyed;
@@ -871,6 +915,7 @@ objects(PyObject *self, PyObject *arg)
 }
 
 static PyMethodDef module_methods[] = {
+    { "runtime_services", runtime_services, METH_NOARGS, NULL },
     { "dealloc_count", dealloc_count, METH_NOARGS, NULL },
     { "containers", containers, METH_NOARGS, NULL },
     { "codecs", codecs, METH_NOARGS, NULL },
