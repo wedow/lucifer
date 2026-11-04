@@ -518,6 +518,9 @@ getattr_native(PyObject *owner, PyObject *name)
     if (!PyUnicode_CheckExact(name)) {
         return NULL;
     }
+    if (PyModule_CheckExact(owner)) {
+        return lu_ns_get(((PyModuleObject *)owner)->md_dict, name);        /* as LOAD_ATTR reads it */
+    }
     if ((v = attr_shortcut(owner, name)) != NULL) {
         return Py_NewRef(v);
     }
@@ -676,6 +679,13 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
     else if (target == kernel[LU_K_builtin_getattr]) {
         if (npos == 2 || npos == 3) {
             return getattr_native(args[0], args[1]);
+        }
+    }
+    else if (target == kernel[LU_K_builtin_hasattr]) {
+        PyObject *v = npos == 2 ? getattr_native(args[0], args[1]) : NULL;
+        if (v != NULL) {
+            Py_DECREF(v);
+            return Py_NewRef(Py_True);
         }
     }
     else if (target == kernel[LU_K_builtin_setattr]) {

@@ -234,3 +234,20 @@ try:
     setattr(Fr(1), 'x', 2)
 except dataclasses.FrozenInstanceError as ex:
     print(25, ex)
+
+
+# modules and hasattr
+mod2 = types.ModuleType('m2')
+mod2.v = 1
+print(40, getattr(mod2, 'v'), getattr(mod2, '__name__'), getattr(mod2, 'zz', 'd'), hasattr(mod2, 'v'), hasattr(mod2, 'zz'),
+      hasattr(mod2, '__dict__'), getattr(mod2, '__dict__')['v'])
+mod2.__getattr__ = lambda n: 'dyn ' + n
+print(41, getattr(mod2, 'dyn1'), hasattr(mod2, 'dyn2'), getattr(mod2, 'v'))
+import os
+print(42, getattr(os, 'sep'), hasattr(os, 'getcwd'), hasattr(os, 'nonesuch'), getattr(os, 'path').__name__.split('.')[-1] in ('posixpath', 'path'))
+for obj, name in ((b, 'x'), (b, 'm'), (b, 'p'), (b, 'nope'), (A, 'cv'), (int, 'real'), (1, 'real'), (None, 'nope'), (sa, 'p')):
+    print(43, name, hasattr(obj, name))
+try:
+    hasattr(b, 3)
+except TypeError as ex:
+    print(44, ex)

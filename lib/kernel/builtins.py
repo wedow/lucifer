@@ -1015,5 +1015,6 @@ class NotImplementedType:
 
 kernel_set('len', len)
 kernel_set('builtin_getattr', getattr)
+kernel_set('builtin_hasattr', hasattr)
 kernel_set('builtin_setattr', setattr)
 kernel_set('isinstance', isinstance)

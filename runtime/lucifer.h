@@ -182,6 +182,7 @@ struct lu_static_type_state {
     X(dict_get)                 /* dict.get, len and isinstance: CALL answers them itself */ \
     X(len)                      /* for exact builtin types */ \
     X(builtin_getattr)          /* the builtin getattr: CALL answers the common reads itself */ \
+    X(builtin_hasattr)          /* the builtin hasattr */ \
     X(builtin_setattr)          /* the builtin setattr */ \
     X(index)                    /* PyNumber_Index: CALL answers it for an exact int */ \
     X(bytearray_append)         /* bytearray.append */ \
