@@ -890,6 +890,7 @@ class dict_values:
 
 
 kernel_set('build_map', build_map)
+kernel_set('dict_get', type_lookup(dict, 'get'))
 kernel_set('dict_setitem', setitem)
 kernel_set('dict_delitem', delitem)
 kernel_set('dict_update', update_op)

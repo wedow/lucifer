@@ -60,28 +60,42 @@ class Instruction:
         return f"Instruction({self.i_opcode}, {self.i_oparg}, {tuple(self.i_loc)})"
 
 
+def _opcodes_with(flag):
+    return frozenset(op for op, flags in opcodes.flags.items() if flags & flag)
+
+
+_HAS_ARG = _opcodes_with(HAS_ARG_FLAG)
+_HAS_CONST = _opcodes_with(HAS_CONST_FLAG)
+_HAS_NAME = _opcodes_with(HAS_NAME_FLAG)
+_HAS_JUMP = _opcodes_with(HAS_JUMP_FLAG)
+_HAS_FREE = _opcodes_with(HAS_FREE_FLAG)
+_HAS_LOCAL = _opcodes_with(HAS_LOCAL_FLAG)
+_BLOCK_PUSH = frozenset((SETUP_FINALLY, SETUP_WITH, SETUP_CLEANUP))
+_HAS_TARGET = _HAS_JUMP | _BLOCK_PUSH
+
+
 def opcode_has_arg(op):
-    return bool(opcodes.flags.get(op, 0) & HAS_ARG_FLAG)
+    return op in _HAS_ARG
 
 
 def opcode_has_const(op):
-    return bool(opcodes.flags.get(op, 0) & HAS_CONST_FLAG)
+    return op in _HAS_CONST
 
 
 def opcode_has_name(op):
-    return bool(opcodes.flags.get(op, 0) & HAS_NAME_FLAG)
+    return op in _HAS_NAME
 
 
 def opcode_has_jump(op):
-    return bool(opcodes.flags.get(op, 0) & HAS_JUMP_FLAG)
+    return op in _HAS_JUMP
 
 
 def opcode_has_free(op):
-    return bool(opcodes.flags.get(op, 0) & HAS_FREE_FLAG)
+    return op in _HAS_FREE
 
 
 def opcode_has_local(op):
-    return bool(opcodes.flags.get(op, 0) & HAS_LOCAL_FLAG)
+    return op in _HAS_LOCAL
 
 
 def is_within_opcode_range(op):
@@ -89,11 +103,11 @@ def is_within_opcode_range(op):
 
 
 def is_block_push_opcode(op):
-    return op in (SETUP_FINALLY, SETUP_WITH, SETUP_CLEANUP)
+    return op in _BLOCK_PUSH
 
 
 def has_target(op):
-    return opcode_has_jump(op) or is_block_push_opcode(op)
+    return op in _HAS_TARGET
 
 
 def is_terminator_opcode(op):

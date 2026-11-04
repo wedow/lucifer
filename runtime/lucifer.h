@@ -176,6 +176,7 @@ struct lu_static_type_state {
     X(getitem)                  /* PyObject_GetItem: BINARY_OP NB_SUBSCR, BINARY_SLICE */ \
     X(setitem)                  /* PyObject_SetItem(container, key, value): STORE_SUBSCR, STORE_SLICE */ \
     X(delitem)                  /* PyObject_DelItem: DELETE_SUBSCR */ \
+    X(dict_get)                 /* dict.get, which CALL answers itself for an exact dict */ \
     X(dict_setitem)             /* PyDict_SetItem(dict, key, value): the dict's own, whatever the subclass overrides */ \
     X(dict_delitem)             /* PyDict_DelItem(dict, key) */ \
     X(length)                   /* PyObject_Size as an int: GET_LEN */ \

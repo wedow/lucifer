@@ -22,6 +22,7 @@
 #include "interp/gen.h"
 #include "interp/specialize.h"
 #include "object/dict.h"
+#include "object/set.h"
 
 #include "opcode.h"
 #include "opcode_ids.h"
@@ -280,6 +281,15 @@ static int
 contains_native(PyObject *container, PyObject *item)
 {
     PyObject *value, **items;
+    if (PyAnySet_CheckExact(container)) {
+        PyTypeObject *kt = Py_TYPE(item);
+        int verdict;
+        if (kt != &PyUnicode_Type && kt != &PyLong_Type) {
+            return -1;
+        }
+        lu_set_probe((PySetObject *)container, item, lu_hash(item), 0, &verdict);
+        return verdict == LU_SET_FOUND ? 1 : verdict == LU_SET_ABSENT ? 0 : -1;
+    }
     if (PyDict_CheckExact(container)) {
         return lu_dict_find_native(container, item, &value);
     }
@@ -897,6 +907,15 @@ call_tail: {
             else {
                 target = NULL;
             }
+        }
+    }
+    if (target != NULL && self == NULL && kwnames == NULL && (npos == 2 || npos == 3)
+        && target == ts->interp->kernel[LU_K_dict_get] && PyDict_CheckExact(args[0])) {
+        PyObject *found;
+        int hit = lu_dict_find_native(args[0], args[1], &found);
+        if (hit >= 0) {
+            result = Py_NewRef(hit ? found : npos == 3 ? args[2] : Py_None);
+            goto call_done;
         }
     }
     if (target != NULL && (self == NULL || free_self)) {
