@@ -69,34 +69,44 @@ HANDLER(sys_profile_call_or_return)
     Py_RETURN_NONE;
 }
 
-static int
-set_opcode_trace_world_stopped(PyCodeObject *code, int enable)
+/* SYS_TRACE's local events on `code`. */
+static lu_event_set
+trace_local_events(PyCodeObject *code)
 {
     lu_event_set events = 0;
-    lu_monitoring *data = code->_co_monitoring;
+    lu_monitoring *data = __atomic_load_n(&code->_co_monitoring, __ATOMIC_ACQUIRE);
     for (int e = 0; data != NULL && e < LU_MON_LOCAL_EVENTS; e++) {
         events |= (lu_event_set)((data->local_monitors.tools[e] >> LU_TOOL_SYS_TRACE) & 1) << e;
     }
-    if (enable) {
-        if (events & (1 << PY_MONITORING_EVENT_INSTRUCTION)) {
-            return 0;
-        }
-        events |= (1 << PY_MONITORING_EVENT_INSTRUCTION);
+    return events;
+}
+
+/* Whether `code` already has instruction events as `enable` asks. */
+static int
+opcode_trace_is(PyCodeObject *code, int enable)
+{
+    return !(trace_local_events(code) & (1 << PY_MONITORING_EVENT_INSTRUCTION)) == !enable;
+}
+
+static int
+set_opcode_trace_world_stopped(PyCodeObject *code, int enable)
+{
+    if (opcode_trace_is(code, enable)) {
+        return 0;
     }
-    else {
-        if (!(events & (1 << PY_MONITORING_EVENT_INSTRUCTION))) {
-            return 0;
-        }
-        events &= ~(1 << PY_MONITORING_EVENT_INSTRUCTION);
-    }
+    lu_event_set events = trace_local_events(code) ^ (1 << PY_MONITORING_EVENT_INSTRUCTION);
     return lu_monitoring_set_local_events(code, LU_TOOL_SYS_TRACE, events);
 }
 
-/* f_trace_opcodes: instruction events for this frame's code. */
+/* f_trace_opcodes: instruction events for this frame's code. Every trace
+   event of such a frame asks again, so only a change stops the world. */
 int
 lu_set_opcode_trace(PyObject *frame, int enable)
 {
     PyCodeObject *code = lu_frame_code((PyFrameObject *)frame);
+    if (opcode_trace_is(code, enable)) {
+        return 0;
+    }
     PyInterpreterState *interp = PyInterpreterState_Get();
     lu_stw_stop(interp);
     int res = set_opcode_trace_world_stopped(code, enable);
