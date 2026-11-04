@@ -86,7 +86,7 @@ STEP_TMO = 3600
 RUN = timeout -k 10 $(TMO)
 STEP = timeout -k 10 $(STEP_TMO)
 
-.PHONY: all abi-audit check check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler regen
+.PHONY: all oracle-exts abi-audit check check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler regen
 all: bin/lucifer build/lib/stamp
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -159,6 +159,13 @@ $(EXT_DIR)/%$(EXT_SUFFIX): tests/capi/%.c
 # slots.c holds one PyInit_ per module; a file of each name loads it.
 $(EXT_DIR)/slots_%$(EXT_SUFFIX): $(EXT_DIR)/slots$(EXT_SUFFIX)
 	ln -sf slots$(EXT_SUFFIX) $@
+
+# The oracle's own C test modules, beside the installed standard library, for
+# the libtest modules that import them (libtest runs with --source installed).
+LIBTEST_EXTS = _testlimitedcapi _testinternalcapi
+oracle-exts: build/lib/stamp
+	dir=$$($(ORACLE_T) -c 'import _testcapi, os; print(os.path.dirname(_testcapi.__file__))') && \
+	for m in $(LIBTEST_EXTS); do ln -sf $$dir/$$m$(EXT_SUFFIX) $(STDLIB)/; done
 
 $(EXT_DIR)/accelerators:
 	@mkdir -p $(@D)

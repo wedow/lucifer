@@ -656,6 +656,7 @@ type_dealloc(PyObject *self)
     Py_CLEAR(et->ht_name);
     Py_CLEAR(et->ht_qualname);
     Py_CLEAR(et->ht_slots);
+    Py_CLEAR(et->ht_module);
     PyMem_Free((void *)tp->tp_doc);
     lu_object_free(self);       /* a heap metatype's subtype_dealloc releases it */
 }

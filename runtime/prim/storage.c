@@ -620,18 +620,19 @@ prim_list_del_stride(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     else if (count > 0) {
         PyObject **items = l->ob_item;
+        /* size_t arithmetic, as list_ass_subscript's: the step may be near PY_SSIZE_T_MAX. */
         Py_ssize_t cur = start, i = 0;
-        for (; i < count; cur += step, i++) {
+        for (; i < count; cur = (Py_ssize_t)((size_t)cur + (size_t)step), i++) {
             garbage[i] = items[cur];
             Py_ssize_t lim = step - 1;
-            if (cur + step >= size) {
+            if ((size_t)cur + (size_t)step >= (size_t)size) {
                 lim = size - cur - 1;
             }
             memmove(items + cur - i, items + cur + 1, lim * sizeof(PyObject *));
         }
-        cur = start + count * step;
-        if (cur < size) {
-            memmove(items + cur - count, items + cur, (size - cur) * sizeof(PyObject *));
+        size_t after = (size_t)start + (size_t)count * (size_t)step;
+        if (after < (size_t)size) {
+            memmove(items + after - count, items + after, (size - after) * sizeof(PyObject *));
         }
         if (list_resize(l, size - count) < 0) {
             Py_SET_SIZE(l, size - count);   /* the shrink failed; the items are in place */
