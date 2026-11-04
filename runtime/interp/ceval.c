@@ -22,6 +22,7 @@
 #include "interp/gen.h"
 #include "interp/instrument.h"
 #include "interp/specialize.h"
+#include "jit/jit.h"
 #include "object/dict.h"
 #include "object/set.h"
 
@@ -231,8 +232,8 @@ import_from(PyObject *module, PyObject *name)
 
 /* GET_ITER of the exact types the loop iterates itself; NULL without an
    error for every other iterable, which the kernel's get_iter handles. */
-static PyObject *
-get_iter_exact(PyObject *v)
+PyObject *
+lu_get_iter_exact(PyObject *v)
 {
     PyTypeObject *tp = Py_TYPE(v);
     if (tp == &PyTuple_Type || tp == &PyList_Type) {
@@ -1207,6 +1208,9 @@ op_RESUME: {
     if ((oparg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM) {
         POLL();
     }
+    if (oparg == 0 && lu_jit_on() && lu_jit_call_hot(code)) {
+        goto jit_enter;
+    }
     DISPATCH();
 }
 
@@ -1433,6 +1437,9 @@ op_CALL_KW:
 op_INSTRUMENTED_CALL:
     monitored = next_instr - 1;
 op_CALL:
+    if (oparg >= 1) {
+        lu_jit_observe(next_instr, sp[-oparg], oparg >= 2 ? sp[-oparg + 1] : sp[-oparg]);
+    }
     SKIP_CACHES();
     kwnames = NULL;
 call_stack_args:
@@ -2537,8 +2544,31 @@ op_JUMP_BACKWARD: {
     lu_codeunit *after = next_instr;
     next_instr -= oparg;
     POLL_AFTER(after);
+    if (lu_jit_on() && lu_jit_backedge_hot(code, after - 1 - lu_opcode_caches[JUMP_BACKWARD])) {
+        goto jit_enter;
+    }
     DISPATCH();
 }
+
+jit_enter:
+    /* Compiled code runs the frame from next_instr (runtime/jit/jit.h). */
+    SAVE_FRAME();
+    switch (lu_jit_enter(ts, frame, &result)) {
+    case LU_JIT_NONE:
+        DISPATCH();
+    case LU_JIT_RETURN:
+        retval = result;
+        goto return_frame;
+    case LU_JIT_DEOPT:
+        frame = (struct lu_frame *)ts->current_frame;
+        LOAD_FRAME();
+        DISPATCH();
+    case LU_JIT_ERROR:
+        frame = (struct lu_frame *)ts->current_frame;
+        LOAD_FRAME();
+        goto error;
+    }
+    Py_UNREACHABLE();
 
 /* The specialized forms of LOAD_ATTR (owner -- attr, self_or_null[oparg & 1]). */
 
@@ -3000,7 +3030,7 @@ op_GET_ITER: {
         DISPATCH();
     }
     SAVE_FRAME();
-    PyObject *it = get_iter_exact(iterable);
+    PyObject *it = lu_get_iter_exact(iterable);
     if (it == NULL) {
         ERROR_IF(PyErr_Occurred());
         kargs[0] = POP();
@@ -3017,9 +3047,10 @@ op_GET_ITER: {
 op_FOR_ITER: {
     /* iter -- iter, next; exhausted, jumps past the END_FOR at the target */
     lu_codeunit *this_instr = next_instr - 1;
-    SKIP_CACHES();
     PyObject *iter = TOP();
     PyTypeObject *itp = Py_TYPE(iter);
+    lu_jit_observe_iter(next_instr, itp);
+    SKIP_CACHES();
     PyObject *v;
     if (itp == &PyListIter_Type || itp == &PyTupleIter_Type) {
         v = lu_seqiter_next(iter);
@@ -3072,9 +3103,10 @@ op_FOR_ITER: {
 
 op_COMPARE_OP: {
     /* Ints (bools too) and equality that needs no Python code here; the rest is the kernel's compare. */
-    SKIP_CACHES();
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
+    lu_jit_observe(next_instr, left, right);
+    SKIP_CACHES();
     int op = oparg >> 5, r, eq;
     if ((PyLong_CheckExact(left) || PyBool_Check(left)) && (PyLong_CheckExact(right) || PyBool_Check(right))) {
         int c = lu_long_compare(left, right);
@@ -3232,9 +3264,10 @@ op_BUILD_INTERPOLATION: {
 
 op_BINARY_OP: {
     /* lhs, rhs -- res; exact ints here, everything else reflects in the kernel. */
-    SKIP_CACHES();
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
+    lu_jit_observe(next_instr + 1, left, right);
+    SKIP_CACHES();
     if (oparg == 26) {   /* NB_SUBSCR */ 
         PyObject *item = subscr_item(left, right);
         sp -= 2;
@@ -3391,9 +3424,10 @@ op_UNPACK_EX: {
 
 op_STORE_SUBSCR: {
     /* value, container, sub -- */
-    SKIP_CACHES();
     PyObject *sub = sp[-1];
     PyObject *container = sp[-2];
+    lu_jit_observe(next_instr, container, sub);
+    SKIP_CACHES();
     PyObject *old = store_subscr_list(container, sub, sp[-3]);
     if (old != NULL) {
         sp -= 3;

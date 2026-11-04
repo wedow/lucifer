@@ -374,6 +374,16 @@ struct lu_handoff {
     unsigned long seed;
     int seeded;
 };
+/* -X lucifer_jit=off|on|always and -X lucifer_jit_stats (runtime/jit/jit.h). */
+struct lu_jit_options {
+    int mode;                   /* enum lu_jit_mode */
+    int stats;                  /* print the tier's counts at exit */
+    /* Debugging aids, from the environment: LUCIFER_JIT_DEBUG logs entries
+       and exits, LUCIFER_JIT_DUMP prints each unit's IR, LUCIFER_JIT_ONLY
+       compiles only the qualnames it lists, comma-separated. */
+    int debug, dump;
+    const char *only;
+};
 
 /* The poll word (FOUNDATIONS 2.5): each carrier's eval breaker. The low bits
    are CPython's _PY_*_BIT reasons, then Lucifer's; the bits above them hold
@@ -789,6 +799,7 @@ extern LU_EXPORT union lu_runtime {
         struct lu_identifiers ids;
         struct lu_stress stress;
         struct lu_handoff handoff;
+        struct lu_jit_options jit;
         unsigned int next_static_version_tag;   /* last tag of the range static types share */
         unsigned next_static_type;      /* the interpreter state slots after the startup list */
         PyMutex type_lock;              /* every type's subclass list */
@@ -817,6 +828,7 @@ extern LU_EXPORT union lu_runtime {
         } qsbr;
         struct {
             int tripped;                /* some handler's flag is set */
+            int unhandled_keyboard_interrupt;   /* a KeyboardInterrupt ended the program: exit by SIGINT */
             struct {
                 int tripped;
                 PyObject *func;         /* the Python handler, strong; NULL for none */
@@ -876,6 +888,13 @@ lu_try_incref_shared(PyObject *op)
     }
 }
 
+/* A reference to op, if it is alive (_Py_TryIncref). */
+static inline int
+lu_try_incref(PyObject *op)
+{
+    return lu_try_incref_fast(op) || lu_try_incref_shared(op);
+}
+
 /* A reference to op, if it is alive and *src still points to it. */
 static inline int
 lu_try_incref_compare(PyObject **src, PyObject *op)
@@ -899,6 +918,21 @@ lu_try_xget_ref(PyObject **ptr)
 {
     PyObject *value = _Py_atomic_load_ptr(ptr);
     return value != NULL && lu_try_incref_compare(ptr, value) ? value : NULL;
+}
+
+/* _PyObject_SetMaybeWeakref: op is about to be reachable through a weak
+   reference, so its shared count is nonzero and a try-incref from another
+   thread can succeed while the owner holds it. */
+static inline void
+lu_set_maybe_weakref(PyObject *op)
+{
+    if (_Py_IsImmortal(op)) {
+        return;
+    }
+    Py_ssize_t shared = _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared);
+    while ((shared & _Py_REF_SHARED_FLAG_MASK) == 0
+           && !_Py_atomic_compare_exchange_ssize(&op->ob_ref_shared, &shared, shared | _Py_REF_MAYBE_WEAKREF)) {
+    }
 }
 
 /* Py_NewRef under the container's lock: marks an object another thread owns
@@ -1193,6 +1227,10 @@ PyObject *lu_method_wrapper_new(PyObject *descr, PyObject *self);
    an unbound descriptor's first argument: -1 with TypeError set. */
 int lu_kernel_target(PyObject *callable, PyObject *const *args, Py_ssize_t nargs,
                      PyObject **func, PyObject **self);
+/* The Python function of a kernel callable, as lu_kernel_target finds it
+   but without checking an argument (the optimizing tier knows it), and the
+   self a builtin binds (borrowed, or NULL). NULL when callable is none. */
+PyObject *lu_kernel_function_of(PyObject *callable, PyObject **self);
 /* Calls a callable from C (PyObject_Vectorcall): vectorcall, else tp_call. */
 PyObject *lu_call(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames);
 /* Calls interp->kernel[id] from C, in a nested eval loop. */
@@ -1319,6 +1357,15 @@ typedef struct {
     Py_ssize_t it_index;
     PyObject *it_seq;
 } seqiterobject;
+/* range_iterator (runtime/prim/storage.c): the values as C longs, which
+   compiled code steps in place (runtime/jit). */
+typedef struct {
+    PyObject_HEAD
+    long start, step, len;
+} rangeiterobject;
+/* GET_ITER of the types the loop iterates natively (runtime/interp/ceval.c);
+   NULL without an error for every other iterable, which the kernel handles. */
+PyObject *lu_get_iter_exact(PyObject *v);
 /* The next item of a tuple, list or list_reverseiterator, or a range_iterator's
    next int; NULL when exhausted. */
 PyObject *lu_seqiter_next(PyObject *iter);

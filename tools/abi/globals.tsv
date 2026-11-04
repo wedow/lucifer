@@ -180,3 +180,15 @@ stack_floor.*	-	per thread (its TLS symbol has no line): the lowest address of t
 __compound_literal.*	-	CPython's static initializers of the compiler (a PyUnicodeWriter spec, argument parsers); never written
 _keywords.*	.c.h	Argument Clinic's keyword-name table of a method, never written
 _parser.*	.c.h	Argument Clinic's argument parser of a method; _PyArg_UnpackKeywords fills its keyword tuple once under a mutex
+stats	runtime/jit/jit.c	the optimizing tier's process-wide counts (-X lucifer_jit_stats); compiled units are process-wide too
+binary_names	runtime/jit/ssa_build.c	const table of BINARY_OP method names; relocated by ld.so, then read-only (RELRO)
+compare_names	runtime/jit/ssa_build.c	const table of COMPARE_OP method names; relocated by ld.so, then read-only (RELRO)
+fops.*	runtime/jit/ssa_build.c	const table of float primitives and their IR; relocated by ld.so, then read-only (RELRO)
+lu_helpers	runtime/jit/helpers.c	const table of the helpers compiled code calls; relocated by ld.so, then read-only (RELRO)
+lu_op_names	runtime/jit/ssa.c	const table of IR operation names; relocated by ld.so, then read-only (RELRO)
+lu_target	runtime/jit/x86_64/emit.c	const description of the backend; relocated by ld.so, then read-only (RELRO)
+fwd	-	thread-local: the optimizer pass running on this thread; its TLS symbol has no line
+istart	-	thread-local: the register allocation running on this thread; its TLS symbol has no line
+iend	-	thread-local: the register allocation running on this thread; its TLS symbol has no line
+eq_seen	-	thread-local: the last type compiled code asked whether == is identity for; its TLS symbol has no line
+stack_floor	-	thread-local: the lowest C stack address a call from compiled code may recurse to; its TLS symbol has no line

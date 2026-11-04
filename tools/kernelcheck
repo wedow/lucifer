@@ -53,6 +53,10 @@ LANES.update({f"handoff:{n}": ["-X", f"lucifer_handoff={n}"] for n in range(1, 9
 # (about a millisecond), so the lanes trade rate for programs (FOUNDATIONS 2.7):
 # gc:1 runs the programs below, which finish in under 40 s at that rate; gc:100000 runs them all.
 LANES.update({f"gc:{n}": ["-X", f"lucifer_stress=gc:{n}"] for n in (1, 100000)})
+# "jit" compiles every function at its first call or back-edge; "jit-deopt" also
+# fails every 7th guard execution, so each exit path runs (FOUNDATIONS 2.7).
+LANES["jit"] = ["-X", "lucifer_jit=always"]
+LANES["jit-deopt"] = ["-X", "lucifer_jit=always", "-X", "lucifer_stress=deopt:7"]
 STRICT_PROGRAMS = """
     ast_nodes audit bigint binascii_module bool_ops builtins_funcs bytes_args bytes_errors bytes_methods
     bytes_repr calls cell_type classes class_prepare closures code_positions code_replace collections_deque
@@ -152,6 +156,8 @@ SOURCE_ROWS = [
     ("script uncaught", ["-S", "s.py"],
      {"s.py": "def f(x):\n    return [1, 2][x] + (None + 1)\ntry:\n    f(0)\nexcept TypeError as e:\n"
               "    raise ValueError('wrapped') from e\n"}, b"", True),
+    ("script keyboard interrupt", ["-S", "s.py"],
+     {"s.py": "import atexit\natexit.register(print, 'atexit')\nraise KeyboardInterrupt\n"}, b"", True),
     ("script excepthook", ["-S", "s.py"],
      {"s.py": "import sys\nsys.excepthook = lambda t, v, tb: print('hooked', t.__name__, v, tb.tb_lineno)\n"
               "raise KeyError('k')\n"}, b"", True),
