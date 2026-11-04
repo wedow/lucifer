@@ -27,6 +27,7 @@ extern PyMethodDef lu_prim_ctypes_methods[];    /* runtime/prim/ctypes.c */
 extern PyMethodDef lu_prim_mt_methods[];        /* runtime/prim/mt.c */
 extern PyMethodDef lu_prim_faulthandler_methods[];  /* runtime/prim/faulthandler.c */
 extern PyMethodDef lu_prim_ucd_methods[];       /* runtime/prim/ucd.c */
+extern PyMethodDef lu_prim_compiler_methods[];  /* runtime/compiler/lu_cc.c */
 extern PyMethodDef lu_sys_int_methods[];        /* sys's int functions, runtime/prim/int.c */
 extern PyMethodDef lu_prim_exc_methods[];       /* runtime/interp/exceptions.c */
 extern PyMethodDef lu_prim_storage_methods[];   /* runtime/prim/storage.c */
