@@ -179,14 +179,18 @@ prim_seq_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 /* seq_slice(seq, start, step, count, as_tuple): the count items from start
    by step, as an exact tuple or list. The caller took the bounds from a
    length that another thread may have shrunk since: positions past the end
-   are left out. */
+   are left out. A list result is filled in its own array. */
 static PyObject *
 prim_seq_slice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(5); SEQ(0); SSIZE(1, start); SSIZE(2, step); SSIZE(3, count);
-    PyObject **items = PyMem_Malloc((count > 0 ? count : 1) * sizeof(PyObject *));
-    if (items == NULL) {
-        return PyErr_NoMemory();
+    int as_tuple = args[4] == Py_True;
+    PyObject *list = as_tuple ? NULL : PyList_New(count);
+    PyObject **items = as_tuple ? PyMem_Malloc((count > 0 ? count : 1) * sizeof(PyObject *))
+                       : list != NULL ? ((PyListObject *)list)->ob_item : NULL;
+    if (items == NULL && (as_tuple || count > 0)) {
+        Py_XDECREF(list);
+        return as_tuple ? PyErr_NoMemory() : NULL;
     }
     PyObject *seq = args[0];
     Py_ssize_t n = 0;
@@ -199,7 +203,11 @@ prim_seq_slice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
     }
     Py_END_CRITICAL_SECTION();
-    return seq_take(items, n, args[4] == Py_True);
+    if (list != NULL) {
+        Py_SET_SIZE(list, n);
+        return list;
+    }
+    return seq_take(items, n, 1);
 }
 
 /* seq_concat(a, b, as_tuple) */
