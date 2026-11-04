@@ -75,6 +75,46 @@ lu_set_clear(PySetObject *so)
     }
 }
 
+/* Readers of `a` probe its table without the lock, so a's table is never
+   written in place: a gets a whole table, b's malloced one or a new copy of
+   b's smalltable, and b takes a's old one, or a copy of a's smalltable. A
+   table b takes may still be probed: set_dealloc frees it through QSBR. */
+int
+lu_set_swap(PySetObject *a, PySetObject *b)
+{
+    int err = 0;
+    Py_BEGIN_CRITICAL_SECTION2(a, b);
+    setentry *at = a->table, *bt = b->table;
+    if (bt == b->smalltable) {
+        bt = table_new(PySet_MINSIZE);
+        if (bt == NULL) {
+            err = -1;
+        }
+        else {
+            memcpy(bt, b->smalltable, sizeof b->smalltable);
+        }
+    }
+    if (err == 0) {
+        if (at == a->smalltable) {
+            memcpy(b->smalltable, a->smalltable, sizeof b->smalltable);
+            at = b->smalltable;
+        }
+        b->table = at;
+        _Py_atomic_store_ptr_release(&a->table, bt);
+        Py_ssize_t t = a->fill; a->fill = b->fill; b->fill = t;
+        t = a->used; a->used = b->used; b->used = t;
+        t = a->mask; a->mask = b->mask; b->mask = t;
+        if (PyType_IsSubtype(Py_TYPE(a), &PyFrozenSet_Type) && PyType_IsSubtype(Py_TYPE(b), &PyFrozenSet_Type)) {
+            Py_hash_t h = a->hash; a->hash = b->hash; b->hash = h;
+        }
+        else {
+            a->hash = b->hash = -1;
+        }
+    }
+    Py_END_CRITICAL_SECTION2();
+    return err;
+}
+
 static int
 set_clear(PyObject *op)
 {
@@ -107,7 +147,7 @@ set_dealloc(PyObject *op)
         }
     }
     if (so->table != so->smalltable) {
-        PyMem_Free(table_block(so->table));
+        lu_qsbr_retire(table_block(so->table));     /* it may have been swapped from a set readers probe */
     }
     lu_object_free(op);
 }

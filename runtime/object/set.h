@@ -30,6 +30,9 @@ void lu_set_insert_clean(setentry *table, size_t mask, PyObject *key, Py_hash_t 
 int lu_set_resize(PySetObject *so, Py_ssize_t minused);
 /* set_clear_internal: empties the set, releasing its keys. */
 void lu_set_clear(PySetObject *so);
+/* set_swap_bodies, for an `a` that lock-free readers may probe and a `b`
+   that only the caller holds. */
+int lu_set_swap(PySetObject *a, PySetObject *b);
 /* frozenset_hash_impl: the hash from the entries' hashes, uncached. */
 Py_hash_t lu_set_hash_impl(PySetObject *so);
 
