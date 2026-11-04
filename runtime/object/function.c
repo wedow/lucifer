@@ -780,8 +780,8 @@ lu_function_from_args(PyObject *const *a)
     }
     Py_ssize_t nclosure = closure == Py_None ? 0 : PyTuple_GET_SIZE(closure);
     if (nfree != nclosure) {
-        lu_err_format(PyExc_ValueError, "%U requires closure of length %d, not %zd",
-                      ((PyCodeObject *)code)->co_name, nfree, nclosure);
+        lu_err_format(PyExc_ValueError, "%s requires closure of length %d, not %zd",
+                      PyUnicode_AsUTF8(((PyCodeObject *)code)->co_name), nfree, nclosure);
         return NULL;
     }
     for (Py_ssize_t i = 0; i < nclosure; i++) {

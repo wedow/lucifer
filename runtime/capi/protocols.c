@@ -1032,3 +1032,9 @@ PyTuple_GetSlice(PyObject *op, Py_ssize_t low, Py_ssize_t high)
     }
     return r;
 }
+
+PyObject *
+_PyDict_GetItem_KnownHash(PyObject *op, PyObject *key, Py_hash_t hash)
+{
+    return PyDict_GetItemWithError(op, key);
+}

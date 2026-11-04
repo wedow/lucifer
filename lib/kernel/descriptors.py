@@ -78,6 +78,13 @@ class builtin_function_or_method:
             return self.__name__
         return (getattr, (owner, self.__name__))
 
+    def __repr__(self):
+        owner = self.__self__
+        if owner is None or is_subtype(type(owner), _Module):
+            return str_join('', ('<built-in function ', self.__name__, '>'))
+        return str_join('', ('<built-in method ', self.__name__, ' of ', type_tp_name(type(owner)),
+                             ' object at ', address(owner), '>'))
+
 
 @kernel_type(static_type('method'))
 class method:

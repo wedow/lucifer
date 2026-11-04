@@ -100,7 +100,7 @@ fixed(PyObject *op, long long min, long long max, const char *ctype, long long *
 int
 PyLong_AsInt32(PyObject *op, int32_t *value)
 {
-    long long v;
+    long long v = 0;
     int r = fixed(op, INT32_MIN, INT32_MAX, "int32_t", &v);
     *value = (int32_t)v;
     return r;
@@ -109,7 +109,7 @@ PyLong_AsInt32(PyObject *op, int32_t *value)
 int
 PyLong_AsInt64(PyObject *op, int64_t *value)
 {
-    long long v;
+    long long v = 0;
     int r = fixed(op, INT64_MIN, INT64_MAX, "int64_t", &v);
     *value = (int64_t)v;
     return r;
@@ -197,7 +197,7 @@ fixed_unsigned(PyObject *op, unsigned long long max, const char *ctype, unsigned
 int
 PyLong_AsUInt32(PyObject *op, uint32_t *value)
 {
-    unsigned long long v;
+    unsigned long long v = 0;
     int r = fixed_unsigned(op, UINT32_MAX, "uint32_t", &v);
     *value = (uint32_t)v;
     return r;
@@ -206,7 +206,7 @@ PyLong_AsUInt32(PyObject *op, uint32_t *value)
 int
 PyLong_AsUInt64(PyObject *op, uint64_t *value)
 {
-    unsigned long long v;
+    unsigned long long v = 0;
     int r = fixed_unsigned(op, UINT64_MAX, "uint64_t", &v);
     *value = (uint64_t)v;
     return r;
