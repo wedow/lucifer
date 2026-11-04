@@ -168,5 +168,35 @@ for j in joiners:
     j.join()
 results.append(("join", t.is_alive(), [j.is_alive() for j in joiners]))
 
+# A SimpleQueue.get that a signal handler's exception ends leaves no waiter behind: the next put
+# wakes the getter that is still waiting.
+import signal
+import time
+
+
+class Interrupted(Exception):
+    pass
+
+
+def interrupt(signum, frame):
+    raise Interrupted
+
+
+q = queue.SimpleQueue()
+old = signal.signal(signal.SIGALRM, interrupt)
+signal.setitimer(signal.ITIMER_REAL, 0.05)
+try:
+    q.get()
+except Interrupted:
+    results.append(("get interrupted",))
+signal.signal(signal.SIGALRM, old)
+got = []
+t = threading.Thread(target=lambda: got.append(q.get(timeout=10)))
+t.start()
+time.sleep(0.2)                  # the getter waits by now, or finds the item when it looks
+q.put("item")
+t.join()
+results.append(("woken getter", got))
+
 for r in results:
     print(*r)

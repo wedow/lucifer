@@ -59,10 +59,19 @@ in that case)."""
                 waiter = allocate_lock()
                 waiter.acquire()
                 self._waiters.append(waiter)
-            if deadline is None:
-                woken = waiter.acquire()
-            else:
-                woken = waiter.acquire(True, max(0.0, deadline - time.monotonic()))
+            try:
+                if deadline is None:
+                    woken = waiter.acquire()
+                else:
+                    woken = waiter.acquire(True, max(0.0, deadline - time.monotonic()))
+            except BaseException:
+                # A signal handler raised: the wait leaves, and a put's wake meant for it goes on.
+                with self._lock:
+                    if waiter in self._waiters:
+                        self._waiters.remove(waiter)
+                    elif self._waiters:
+                        self._waiters.popleft().release()
+                raise
             if not woken:
                 with self._lock:
                     try:
