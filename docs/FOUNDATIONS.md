@@ -365,12 +365,23 @@ within 1,000 bytes of 1 MB in a snapshot diff. The wheel imports
 **Shape.**
 - **One parser.** `-X lucifer_stress=KIND[:N][,…][,seed:S]` sets flags in
   `_PyRuntime` at config time. Unknown kinds are a startup error.
-- **`gc:N` (M0.2).** The allocation choke point sets the GC poll bit every N
-  allocations. The collection
-  runs at the next poll as a silent full collection (no callbacks, counts or
-  statistics). A collection costs the heap, so ticks are skipped until the
-  allocations since the last collection reach half the heap's blocks;
-  `gc:1` is thus "as often as is affordable", deterministic in allocations.
+- **`gc:N` (M0.2).** The allocation choke point counts GC-object allocations
+  per carrier and sets the GC poll bit at every Nth. The collection runs at the
+  next poll as a silent full collection (no callbacks, counts or statistics),
+  with no skipping, so N sets the rate: under `gc:N` a dropped cycle is
+  collected within about N allocations whatever the heap size. A collection
+  costs the whole heap (about a millisecond), so `gc:1` costs a millisecond per
+  allocation and only suits short programs.
+- **Lanes.** `make check-kernel LANE=gc:N` picks the programs by the cost of
+  the rate:
+  - `gc:1` runs the curated `STRICT_PROGRAMS` in `tools/kernelcheck`: the
+    programs that finish in under 40 s at that rate, which are the ones that
+    exercise refcount and traverse paths without importing the compiler's
+    Python (an uncaught exception does, and costs tens of millions of
+    allocations).
+  - `gc:100000` runs every program.
+  - `tools/kernelcheck` also checks that a dropped cycle dies within N
+    allocations under `gc:1`, `gc:10` and `gc:100`.
 - **`deopt:N` (P0).** Guards are compiled to fail at a seeded phase on every
   Nth execution. Code compiled without the flag has no stress instructions.
 - **`switch` and `sched`.** These are `-X lucifer_handoff` (DESIGN §5.8) with an
@@ -381,7 +392,7 @@ within 1,000 bytes of 1 MB in a snapshot diff. The wheel imports
 **Checks.**
 - **K1** `check-kernel` passes under `-X lucifer_handoff=1` … `=8`, and
   `-X lucifer_stress=bogus` exits 2 with a message.
-- **M0.2** `check-kernel` passes under `-X lucifer_stress=gc:1`, and difftest
+- **M0.2** `check-kernel` passes under `LANE=gc:1` and `LANE=gc:100000`, and difftest
   164/164 under `gc:100`.
 - **P0** AWFY 14/14 and difftest 164/164 pass under `-X lucifer_jit=always
   -X lucifer_stress=deopt:7,gc:1000`.
