@@ -94,6 +94,7 @@ def _check(name, cls, inst, method, what):
 
 
 _object_class = type_lookup(object, '__class__')
+_object_getattribute = type_lookup(object, '__getattribute__')
 
 
 def isinstance(obj, class_or_tuple, /):
@@ -101,8 +102,12 @@ def isinstance(obj, class_or_tuple, /):
     t = type(obj)
     if t is class_or_tuple:
         return True
-    if type(class_or_tuple) is type and type_lookup(t, '__class__') is _object_class:
-        return is_subtype(t, class_or_tuple)
+    if type(class_or_tuple) is type:
+        if is_subtype(t, class_or_tuple):
+            return True
+        # A negative answer asks obj.__class__ (object_isinstance).
+        if type_lookup(t, '__class__') is _object_class and type_lookup(t, '__getattribute__') is _object_getattribute:
+            return False
     return _check('isinstance', class_or_tuple, obj, '__instancecheck__',
                   'type, a tuple of types, or a union')
 

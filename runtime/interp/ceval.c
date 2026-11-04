@@ -372,9 +372,16 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
         }
     }
     else if (target == kernel[LU_K_isinstance]) {
-        if (npos == 2 && PyType_CheckExact(args[1])
-            && _PyType_Lookup(Py_TYPE(args[0]), LU_ID(__class__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__class__))) {
-            return Py_NewRef(PyType_IsSubtype(Py_TYPE(args[0]), (PyTypeObject *)args[1]) ? Py_True : Py_False);
+        /* object_isinstance: a negative answer asks obj.__class__, which is
+           the type unless the type overrides __class__ or __getattribute__. */
+        PyTypeObject *t = npos == 2 && PyType_CheckExact(args[1]) ? Py_TYPE(args[0]) : NULL;
+        if (t != NULL) {
+            if (PyType_IsSubtype(t, (PyTypeObject *)args[1])) {
+                return Py_NewRef(Py_True);
+            }
+            if (object_attr_hook(t, LU_ID(__class__)) && object_attr_hook(t, LU_ID(__getattribute__))) {
+                return Py_NewRef(Py_False);
+            }
         }
     }
     return NULL;
@@ -2202,10 +2209,12 @@ op_LOAD_ATTR: {
         }
         if (descr != NULL && object_attr_hook(Py_TYPE(owner), LU_ID(__getattribute__))) {
             /* A data descriptor whose __get__ is a Python function decides the
-               access: run it in this loop, as generic_getattr would. */
+               access: run it in this loop, as generic_getattr would, unless
+               an AttributeError from it must go to __getattr__. */
             PyTypeObject *dt = Py_TYPE(descr);
             PyObject *getter = _PyType_Lookup(dt, LU_ID(__get__));
             if (getter != NULL && Py_IS_TYPE(getter, &PyFunction_Type)
+                && _PyType_Lookup(Py_TYPE(owner), LU_ID(__getattr__)) == NULL
                 && (_PyType_Lookup(dt, LU_ID(__set__)) != NULL || _PyType_Lookup(dt, LU_ID(__delete__)) != NULL)) {
                 kargs[0] = Py_NewRef(descr);
                 kargs[1] = POP();
