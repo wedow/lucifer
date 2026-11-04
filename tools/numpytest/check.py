@@ -182,6 +182,18 @@ class HarnessChecks(unittest.TestCase):
         self.assertEqual(self.invoke().returncode, 1)
         self.assertEqual(self.rows(), dict(zip(self.ids, ["CRASH", "PASS"])))
 
+    def test_runall_shards_cover_each_id_once(self):
+        shard_groups = runpy.run_path(str(HERE / "runall.py"))["shard_groups"]
+        ids = [f"numpy/a/test_{n}.py::{c}::t[{i}]" for n in range(5) for c in "XY" for i in range(7)]
+        ids += ["numpy/b/test_big.py::test_f[%d]" % i for i in range(30)] + ["numpy/b/test_big.py::C::t"]
+        groups = shard_groups(ids, 20)
+        for ident in ids:
+            hits = [s for g in groups for s in g if (
+                ident == s or ident.startswith(s + "::") or ident.startswith(s + "[") if "::" in s
+                else ident.split("::", 1)[0] == s)]
+            self.assertEqual(len(hits), 1, ident)
+        self.assertIn("numpy/b/test_big.py::test_f", [s for g in groups for s in g])
+
     def test_shell_wrapper_crash_exit_is_crash(self):
         wrapper = self.root / "wrapper"
         wrapper.write_text('#!/bin/sh\n"' + str(self.fake) + '" "$@"\n')
