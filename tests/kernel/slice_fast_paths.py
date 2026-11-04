@@ -38,7 +38,7 @@ class Ix:
         return 2
 
 
-print(6, lst[Ix():], tup[:Ix()], text[Ix():Ix() + 2], data[::Ix()])
+print(6, lst[Ix():], tup[:Ix()], text[Ix():Ix().__index__() + 2], data[::Ix()])
 t = (1, 2, 3)
 print(7, t[:] is t, t[0:3] is t, text[:] is text, data[:] is data, lst[:] is lst, t[:2] is t)
 

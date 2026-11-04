@@ -34,7 +34,7 @@ for i, x in e:
     print(9, i, x)
 print(10, list(e))
 e = enumerate(iter([5, 6]), big - 1)
-print(11, [i for i, _ in e], next(iter(enumerate([], 1.5)), 'empty'))
+print(11, [i for i, _ in e])
 try:
     enumerate([], 1.5)
 except TypeError as ex:
@@ -50,10 +50,6 @@ print(14, type(it).__name__, next(it), length_hint := it.__length_hint__())
 class D(dict):
     def __iter__(self):
         return iter('sub')
-
-
-class V(type({}.keys())):
-    pass
 
 
 print(15, list(D(a=1)), [x for x in D(a=1)])
