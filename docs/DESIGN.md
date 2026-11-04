@@ -403,9 +403,11 @@ A task may leave its carrier only at a park or a safepoint, and only when
   - tasks attached for a foreign OS thread (`PyGILState_Ensure`,
     `PyThreadState_New`);
   - the main task (signal masks, Tk and other main-thread C libraries);
-  - any task that calls a platform primitive whose descriptor is
-    `thread_scoped`: `os.sched_setaffinity(0, …)`, `signal.pthread_sigmask`,
-    `os.unshare`/`setns`, and the like.
+  - any task that calls a platform primitive whose effect belongs to the
+    calling OS thread: `os.sched_setaffinity(0, …)`, `signal.pthread_sigmask`,
+    `os.unshare`/`setns`. These call `lu_task_pin_for_life` (`os_call` does it
+    for the `SCOPED_CALLS` table), and `tools/blockcheck` rejects one that does
+    not.
 - **A pinned park blocks its carrier in place** on that carrier's futex and
   counts as detached. That is exactly cp314t.
 - **Invariants at a migration point:**
@@ -443,6 +445,11 @@ Every blocking operation goes through one of two entry points from K1:
     `handoffp`).
   - Users: file I/O, `waitpid`, `getaddrinfo`, `select`/`poll`/`epoll_wait`,
     socket calls, `flock` and tty reads.
+- **`os.fork`** (`runtime/thread/fork.c`, FOUNDATIONS 2.9) stops the world, takes every lock of the
+  registry, forks, and in the child retires every other carrier as if its thread had exited. The
+  surviving task becomes the main task; the child runs without a second scheduler carrier.
+  Under `-X lucifer_handoff` the main task first comes home and the second carrier is stopped,
+  and the parent starts it again.
 - **io_uring comes later and is measured.** Socket, poll, pidfd and file
   operations move from the bracket to `lu_park` over a per-carrier ring. The
   running carrier submits and reaps, as in donor `execution-model-DESIGN.md`

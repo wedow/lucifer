@@ -11,9 +11,14 @@
 #include <sys/file.h>
 #include <grp.h>
 #include <langinfo.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <poll.h>
+#include <sched.h>
+#include <pthread.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <locale.h>
 #include <linux/futex.h>
@@ -179,6 +184,14 @@ from_locale(const char *s)
     return r;
 }
 
+/* PEP 475: a call that failed with EINTR runs the Python signal handlers, then is retried; a
+   handler that raises ends it, with its exception set. */
+static int
+interrupted(void)
+{
+    return errno == EINTR && PyErr_CheckSignals() == 0;
+}
+
 static int
 int_arg(PyObject *o, long *out)
 {
@@ -307,9 +320,11 @@ lu_prim_os_open(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     int fd;
     do {
         fd = LU_SYSCALL(open(path, (int)flags | O_CLOEXEC, (mode_t)mode));
-    } while (fd < 0 && errno == EINTR);
+    } while (fd < 0 && interrupted());
     if (fd < 0) {
-        set_oserror(errno, args[0]);
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, args[0]);
+        }
         return NULL;
     }
     return PyLong_FromLong(fd);
@@ -418,9 +433,11 @@ lu_prim_os_read(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ssize_t n;
     do {
         n = LU_SYSCALL(read((int)fd, PyBytes_AS_STRING(bytes), (size_t)size));
-    } while (n < 0 && errno == EINTR);
+    } while (n < 0 && interrupted());
     if (n < 0) {
-        set_oserror(errno, NULL);
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
         Py_DECREF(bytes);
         return NULL;
     }
@@ -444,9 +461,11 @@ lu_prim_os_write(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ssize_t n;
     do {
         n = LU_SYSCALL(write((int)fd, PyBytes_AS_STRING(args[1]), (size_t)PyBytes_GET_SIZE(args[1])));
-    } while (n < 0 && errno == EINTR);
+    } while (n < 0 && interrupted());
     if (n < 0) {
-        set_oserror(errno, NULL);
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
         return NULL;
     }
     return PyLong_FromLongLong(n);
@@ -674,21 +693,31 @@ union sys_arg {
     X(sys_kill, "ii", kill((pid_t)a[0].i, (int)a[1].i)) \
     X(sys_shutdown, "ii", LU_SYSCALL(shutdown((int)a[0].i, (int)a[1].i))) \
     X(sys_fcntl, "iii", LU_SYSCALL(fcntl((int)a[0].i, (int)a[1].i, a[2].i))) \
-    X(sys_flock, "ii", LU_SYSCALL(flock((int)a[0].i, (int)a[1].i))) \
     X(sys_alarm, "i", alarm((unsigned)a[0].i)) \
     X(sys_sysconf, "i", sysconf((int)a[0].i)) \
     X(sys_utime, "piiiii", utimensat(AT_FDCWD, a[0].p, (struct timespec[2]){ { a[1].i, a[2].i }, { a[3].i, a[4].i } }, (int)a[5].i))
 
+/* The calls whose effect belongs to the calling OS thread: the task that makes one stays on
+   its carrier for life (DESIGN 5.4). */
+#define SCOPED_CALLS(X) \
+    X(sys_unshare, "i", unshare((int)a[0].i)) \
+    X(sys_setns, "ii", setns((int)a[0].i, (int)a[1].i))
+
 #define X(NAME, SPEC, EXPR) static long NAME(union sys_arg *a) { return EXPR; }
 SYS_CALLS(X)
+SCOPED_CALLS(X)
 #undef X
 
 static const struct sys_entry {
     const char *name, *spec;
     long (*fn)(union sys_arg *);
+    int thread_scoped;
 } sys_table[] = {
-#define X(NAME, SPEC, EXPR) { #NAME + 4, SPEC, NAME },
+#define X(NAME, SPEC, EXPR) { #NAME + 4, SPEC, NAME, 0 },
     SYS_CALLS(X)
+#undef X
+#define X(NAME, SPEC, EXPR) { #NAME + 4, SPEC, NAME, 1 },
+    SCOPED_CALLS(X)
 #undef X
 };
 
@@ -720,6 +749,9 @@ prim_os_call(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
             else if (int_arg(args[i + 1], &a[i].i) < 0) {
                 return NULL;
             }
+        }
+        if (e->thread_scoped) {
+            lu_task_pin_for_life();
         }
         errno = 0;
         long r = e->fn(a);
@@ -1084,9 +1116,11 @@ prim_os_waitpid(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     pid_t r;
     do {
         r = LU_SYSCALL(waitpid((pid_t)pid, &status, (int)options));
-    } while (r < 0 && errno == EINTR);
+    } while (r < 0 && interrupted());
     if (r < 0) {
-        set_oserror(errno, NULL);
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
         return NULL;
     }
     PyObject *p = PyLong_FromLong(r), *s = PyLong_FromLong(status);
@@ -1094,6 +1128,278 @@ prim_os_waitpid(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     Py_XDECREF(p);
     Py_XDECREF(s);
     return t;
+}
+
+/* getaddrinfo(host, port, family, type, proto, flags): [(family, type, proto, canonname, sockaddr)],
+   or (code, message) when the resolver fails. host and port are bytes or None. It may wait for a
+   name server, so it runs in the bracket. */
+static PyObject *
+prim_os_getaddrinfo(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long family, type, proto, flags;
+    if (nargs != 6 || int_arg(args[2], &family) < 0 || int_arg(args[3], &type) < 0
+        || int_arg(args[4], &proto) < 0 || int_arg(args[5], &flags) < 0) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "getaddrinfo(host, port, family, type, proto, flags)"), NULL);
+    }
+    const char *host = args[0] == Py_None ? NULL : PyBytes_AsString(args[0]);
+    const char *port = args[1] == Py_None ? NULL : PyBytes_AsString(args[1]);
+    if ((host == NULL && args[0] != Py_None) || (port == NULL && args[1] != Py_None)) {
+        return NULL;
+    }
+    struct addrinfo hints = { .ai_family = (int)family, .ai_socktype = (int)type,
+                              .ai_protocol = (int)proto, .ai_flags = (int)flags };
+    struct addrinfo *res = NULL;
+    int err = LU_SYSCALL(getaddrinfo(host, port, &hints, &res));
+    if (err != 0) {
+        PyObject *code = PyLong_FromLong(err), *text = PyUnicode_FromString(gai_strerror(err));
+        PyObject *t = code != NULL && text != NULL ? PyTuple_Pack(2, code, text) : NULL;
+        Py_XDECREF(code);
+        Py_XDECREF(text);
+        return t;
+    }
+    Py_ssize_t n = 0;
+    for (struct addrinfo *a = res; a != NULL; a = a->ai_next) {
+        n++;
+    }
+    PyObject *list = PyList_New(n);
+    Py_ssize_t i = 0;
+    for (struct addrinfo *a = res; list != NULL && a != NULL; a = a->ai_next, i++) {
+        char ip[INET6_ADDRSTRLEN] = "";
+        PyObject *address;
+        if (a->ai_family == AF_INET) {
+            struct sockaddr_in *sa = (struct sockaddr_in *)a->ai_addr;
+            inet_ntop(AF_INET, &sa->sin_addr, ip, sizeof ip);
+            address = Py_BuildValue("(si)", ip, ntohs(sa->sin_port));
+        }
+        else if (a->ai_family == AF_INET6) {
+            struct sockaddr_in6 *sa = (struct sockaddr_in6 *)a->ai_addr;
+            inet_ntop(AF_INET6, &sa->sin6_addr, ip, sizeof ip);
+            address = Py_BuildValue("(siii)", ip, ntohs(sa->sin6_port), (int)ntohl(sa->sin6_flowinfo), (int)sa->sin6_scope_id);
+        }
+        else {
+            address = PyBytes_FromStringAndSize((const char *)a->ai_addr, a->ai_addrlen);
+        }
+        PyObject *item = address != NULL ? Py_BuildValue("(iiisN)", a->ai_family, a->ai_socktype, a->ai_protocol,
+                                                         a->ai_canonname != NULL ? a->ai_canonname : "", address) : NULL;
+        if (item == NULL) {
+            Py_CLEAR(list);
+            break;
+        }
+        PyList_SET_ITEM(list, i, item);
+    }
+    freeaddrinfo(res);
+    return list;
+}
+
+/* flock(fd, operation): waits in the bracket; a signal's handler runs, and the wait goes on unless
+   the handler raised. */
+static PyObject *
+prim_os_flock(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd, operation;
+    if (nargs != 2 || int_arg(args[0], &fd) < 0 || int_arg(args[1], &operation) < 0) {
+        return NULL;
+    }
+    int r;
+    do {
+        r = LU_SYSCALL(flock((int)fd, (int)operation));
+    } while (r < 0 && interrupted());
+    if (r < 0) {
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
+        return NULL;
+    }
+    return Py_NewRef(Py_None);
+}
+
+/* lockf(fd, cmd, len, start, whence): the record lock fcntl.lockf names, cmd being a LOCK_ flag. */
+static PyObject *
+prim_os_lockf(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd, cmd, len, start, whence;
+    if (nargs != 5 || int_arg(args[0], &fd) < 0 || int_arg(args[1], &cmd) < 0 || int_arg(args[2], &len) < 0
+        || int_arg(args[3], &start) < 0 || int_arg(args[4], &whence) < 0) {
+        return NULL;
+    }
+    struct flock lock = { .l_type = cmd & 8 ? F_UNLCK : cmd & 1 ? F_RDLCK : F_WRLCK,
+                          .l_whence = (short)whence, .l_start = start, .l_len = len };
+    int r;
+    do {
+        r = LU_SYSCALL(fcntl((int)fd, cmd & 4 ? F_SETLK : F_SETLKW, &lock));
+    } while (r < 0 && interrupted());
+    if (r < 0) {
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
+        return NULL;
+    }
+    return Py_NewRef(Py_None);
+}
+
+static PyObject *
+int_list(const int *v, int n)
+{
+    PyObject *list = PyList_New(n);
+    for (int i = 0; list != NULL && i < n; i++) {
+        PyObject *item = PyLong_FromLong(v[i]);
+        if (item == NULL) {
+            Py_CLEAR(list);
+            break;
+        }
+        PyList_SET_ITEM(list, i, item);
+    }
+    return list;
+}
+
+/* sched_getaffinity(pid): the CPUs the thread may run on, ascending. */
+static PyObject *
+prim_os_sched_getaffinity(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long pid;
+    cpu_set_t set;
+    if (nargs != 1 || int_arg(args[0], &pid) < 0) {
+        return NULL;
+    }
+    if (sched_getaffinity((pid_t)pid, sizeof set, &set) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    int cpus[CPU_SETSIZE], n = 0;
+    for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+        if (CPU_ISSET(cpu, &set)) {
+            cpus[n++] = cpu;
+        }
+    }
+    return int_list(cpus, n);
+}
+
+/* sched_setaffinity(pid, cpus): the calling thread's own affinity (pid 0) is thread-scoped. */
+static PyObject *
+prim_os_sched_setaffinity(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long pid;
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    if (nargs != 2 || int_arg(args[0], &pid) < 0 || !PyList_Check(args[1])) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "sched_setaffinity(pid, cpus)"), NULL);
+    }
+    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(args[1]); i++) {
+        long cpu;
+        if (int_arg(PyList_GET_ITEM(args[1], i), &cpu) < 0) {
+            return NULL;
+        }
+        if (cpu < 0 || cpu >= CPU_SETSIZE) {
+            lu_err_format(PyExc_ValueError, "invalid CPU number");
+            return NULL;
+        }
+        CPU_SET((int)cpu, &set);
+    }
+    if (pid == 0) {
+        lu_task_pin_for_life();
+    }
+    if (sched_setaffinity((pid_t)pid, sizeof set, &set) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return Py_NewRef(Py_None);
+}
+
+/* pthread_sigmask(how, signals): the calling thread's mask is thread-scoped. Answers the previous
+   mask as a list of signal numbers, then lets a handler for a signal this unblocked run. */
+static PyObject *
+prim_os_pthread_sigmask(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long how;
+    sigset_t set, old;
+    sigemptyset(&set);
+    if (nargs != 2 || int_arg(args[0], &how) < 0 || !PyList_Check(args[1])) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "pthread_sigmask(how, signals)"), NULL);
+    }
+    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(args[1]); i++) {
+        long signum;
+        if (int_arg(PyList_GET_ITEM(args[1], i), &signum) < 0) {
+            return NULL;
+        }
+        if (signum < 1 || signum >= LU_NSIG || sigaddset(&set, (int)signum) < 0) {
+            lu_err_format(PyExc_ValueError, "signal number %ld out of range [1; %d]", signum, LU_NSIG - 1);
+            return NULL;
+        }
+    }
+    lu_task_pin_for_life();
+    int err = pthread_sigmask((int)how, &set, &old);
+    if (err != 0) {
+        set_oserror(err, NULL);
+        return NULL;
+    }
+    int signals[LU_NSIG], n = 0;
+    for (int signum = 1; signum < LU_NSIG; signum++) {
+        if (sigismember(&old, signum) == 1) {
+            signals[n++] = signum;
+        }
+    }
+    PyObject *list = int_list(signals, n);
+    if (list != NULL && PyErr_CheckSignals() < 0) {
+        Py_CLEAR(list);
+    }
+    return list;
+}
+
+/* pthread_kill(ident, signum): the thread whose task has that ident. */
+static PyObject *
+prim_os_pthread_kill(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long ident, signum;
+    if (nargs != 2 || int_arg(args[0], &ident) < 0 || int_arg(args[1], &signum) < 0) {
+        return NULL;
+    }
+    int err = pthread_kill((pthread_t)ident, (int)signum);
+    if (err != 0) {
+        set_oserror(err, NULL);
+        return NULL;
+    }
+    if (PyErr_CheckSignals() < 0) {
+        return NULL;
+    }
+    return Py_NewRef(Py_None);
+}
+
+/* fork(): the pid in the parent, 0 in the child (runtime/thread/fork.c). */
+static PyObject *
+prim_os_fork(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 0) {
+        lu_err_format(PyExc_TypeError, "fork() takes no arguments");
+        return NULL;
+    }
+    long pid = lu_fork();
+    if (pid < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return PyLong_FromLong(pid);
+}
+
+/* The Python threads in this process that the runtime did not start: the OS's count of the
+   threads, less the second scheduler carrier. */
+static PyObject *
+prim_os_thread_count(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long count = 0;
+    char buf[1024];
+    int fd = LU_SYSCALL(open("/proc/self/stat", O_RDONLY | O_CLOEXEC));
+    if (fd >= 0) {
+        ssize_t n = LU_SYSCALL(read(fd, buf, sizeof buf - 1));
+        LU_SYSCALL(close(fd));
+        buf[n > 0 ? n : 0] = '\0';
+        /* Fields after the name: state ppid pgrp session tty tpgid flags minflt cminflt majflt
+           cmajflt utime stime cutime cstime priority nice num_threads. */
+        char *p = strrchr(buf, ')');
+        if (p == NULL || sscanf(p + 1, " %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %*u %*u %*d %*d %*d %*d %ld", &count) != 1) {
+            count = 0;
+        }
+    }
+    return PyLong_FromLong(count - (__atomic_load_n(&_PyRuntime.sched.active, __ATOMIC_RELAXED) ? 1 : 0));
 }
 
 /* fork_exec(argv, executables, close_fds, fds_to_keep, cwd, env, p2cread,
@@ -1458,6 +1764,15 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_getrusage", (PyCFunction)(void (*)(void))prim_os_getrusage, METH_FASTCALL, NULL },
     { "os_get_terminal_size", (PyCFunction)(void (*)(void))prim_os_get_terminal_size, METH_FASTCALL, NULL },
     { "os_waitpid", (PyCFunction)(void (*)(void))prim_os_waitpid, METH_FASTCALL, NULL },
+    { "os_sched_getaffinity", (PyCFunction)(void (*)(void))prim_os_sched_getaffinity, METH_FASTCALL, NULL },
+    { "os_sched_setaffinity", (PyCFunction)(void (*)(void))prim_os_sched_setaffinity, METH_FASTCALL, NULL },
+    { "os_pthread_sigmask", (PyCFunction)(void (*)(void))prim_os_pthread_sigmask, METH_FASTCALL, NULL },
+    { "os_pthread_kill", (PyCFunction)(void (*)(void))prim_os_pthread_kill, METH_FASTCALL, NULL },
+    { "os_getaddrinfo", (PyCFunction)(void (*)(void))prim_os_getaddrinfo, METH_FASTCALL, NULL },
+    { "os_flock", (PyCFunction)(void (*)(void))prim_os_flock, METH_FASTCALL, NULL },
+    { "os_lockf", (PyCFunction)(void (*)(void))prim_os_lockf, METH_FASTCALL, NULL },
+    { "os_fork", (PyCFunction)(void (*)(void))prim_os_fork, METH_FASTCALL, NULL },
+    { "os_thread_count", (PyCFunction)(void (*)(void))prim_os_thread_count, METH_FASTCALL, NULL },
     { "locale_encoding", (PyCFunction)(void (*)(void))prim_os_locale_encoding, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },
 };

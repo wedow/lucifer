@@ -1,4 +1,5 @@
-"""fcntl (Modules/fcntlmodule.c): file descriptor control over fcntl(2) and flock(2)."""
+"""fcntl (Modules/fcntlmodule.c): file descriptor control over fcntl(2) and flock(2). flock
+and lockf may wait for another process, so they run inside the syscall bracket."""
 
 import _lucifer
 
@@ -93,16 +94,16 @@ def fcntl(fd, cmd, arg=0, /):
 
 def flock(fd, operation, /):
     """Perform the lock operation `operation` on file descriptor fd."""
-    _lucifer.os_call('flock', _fd(fd), operation)
+    _lucifer.os_flock(_fd(fd), operation)
 
 
 def lockf(fd, cmd, len=0, start=0, whence=0):
-    """A wrapper around the fcntl() locking calls (whole-file and record locks need a struct flock)."""
+    """A wrapper around the fcntl() locking calls."""
     fd = _fd(fd)
-    if cmd in (LOCK_UN, LOCK_SH, LOCK_EX, LOCK_UN | LOCK_NB, LOCK_SH | LOCK_NB, LOCK_EX | LOCK_NB) and not len and not start:
-        _lucifer.os_call('flock', fd, cmd)
-        return
-    raise NotImplementedError('lockf on a byte range')
+    if cmd in (LOCK_UN, LOCK_SH, LOCK_EX, LOCK_SH | LOCK_NB, LOCK_EX | LOCK_NB):
+        _lucifer.os_lockf(fd, cmd, len, start, whence)
+    else:
+        raise ValueError('unrecognized lockf argument')
 
 
 def ioctl(fd, request, arg=0, mutate_flag=True, /):
