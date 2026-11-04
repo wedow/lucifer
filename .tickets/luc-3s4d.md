@@ -1,6 +1,6 @@
 ---
 id: luc-3s4d
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-04T16:14:00Z
