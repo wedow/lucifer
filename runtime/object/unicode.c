@@ -212,8 +212,11 @@ PyUnicode_DecodeUTF8(const char *s, Py_ssize_t size, const char *errors)
 {
     int surrogatepass = errors != NULL && strcmp(errors, "surrogatepass") == 0;
     if (errors != NULL && !surrogatepass && strcmp(errors, "strict") != 0) {
-        lu_err_format(PyExc_LookupError, "unknown error handler name '%s'", errors);
-        return NULL;
+        /* another error handler: the codec's, as bytes.decode runs it */
+        PyObject *bytes = PyBytes_FromStringAndSize(s, size);
+        PyObject *result = bytes != NULL ? PyObject_CallMethod(bytes, "decode", "ss", "utf-8", errors) : NULL;
+        Py_XDECREF(bytes);
+        return result;
     }
     return lu_str_from_utf8(s, size, surrogatepass);
 }
