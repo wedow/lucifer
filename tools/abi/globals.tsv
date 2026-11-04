@@ -119,3 +119,14 @@ handler_defs	runtime/interp/legacy_tracing.c	the PyMethodDefs of the sys.settrac
 whatstrings	runtime/interp/legacy_tracing.c	const table of the trace event names; relocated by ld.so, then read-only (RELRO)
 lu_sys_tracing_methods	runtime/interp/legacy_tracing.c	sys's tracing functions, a PyMethodDef table never written; the API takes it non-const
 monitoring_methods	runtime/interp/monitoring.c	sys.monitoring's functions, a PyMethodDef table never written; the API takes it non-const
+altstack	runtime/prim/faulthandler.c	the alternate signal stack of the thread that enabled the fault handler; set once
+fatal	runtime/prim/faulthandler.c	the fatal-signal handler's configuration and the previous dispositions; process-wide because signal dispositions are
+fatal_signals	runtime/prim/faulthandler.c	const table of the fatal signals and their names; relocated by ld.so, then read-only (RELRO)
+fh_threads	runtime/prim/faulthandler.c	the list of threads a dump of all threads covers, under fh_threads_lock
+fh_threads_lock	runtime/prim/faulthandler.c	the lock of fh_threads
+later	runtime/prim/faulthandler.c	the dump_traceback_later watchdog, one per process as in CPython, under its own lock
+user_signals	runtime/prim/faulthandler.c	faulthandler.register's per-signal state; signal dispositions are process-wide
+sink	runtime/prim/faulthandler.c	defeats optimizing away the stack overflow test's recursion
+lu_prim_faulthandler_methods	runtime/prim/faulthandler.c	_lucifer's faulthandler primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_mt_methods	runtime/prim/mt.c	_lucifer's Mersenne Twister primitives, a PyMethodDef table never written; the API takes it non-const
+tp_new_methoddef	runtime/capi/typespec.c	the PyMethodDef of the bound __new__ of a type made from a spec, never written; the API takes it non-const
