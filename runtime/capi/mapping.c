@@ -21,6 +21,13 @@ PyDict_Pop(PyObject *dict, PyObject *key, PyObject **result)
     }
     PyObject *value = NULL;
     int found;
+    if (PyDict_Size(dict) == 0) {
+        /* empty: the key is not even hashed (pop_lock_held's fast path) */
+        if (result != NULL) {
+            *result = NULL;
+        }
+        return 0;
+    }
     Py_BEGIN_CRITICAL_SECTION(dict);
     found = PyDict_GetItemRef(dict, key, &value);
     if (found > 0 && PyDict_DelItem(dict, key) < 0) {

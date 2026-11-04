@@ -18,6 +18,7 @@ stdout*	-	libc, copy-relocated into the executable
 stderr*	-	libc, copy-relocated into the executable
 init_mimalloc_entry	runtime/object/alloc.c	.preinit_array entry that starts mimalloc; never written
 recurse	-	mimalloc per-thread recursion guard (options.c); its TLS symbol has no line
+reporting_unraisable	-	thread-local guard: PyDict_GetItem reports at most one unraisable, never one while another is being reported; its TLS symbol has no line
 lu_exc_*	runtime/types/static.c	exception type behind a PyExc_* pointer; the kernel fills in its slots once at startup
 lu_inittab	runtime/types/static.c	empty PyImport_Inittab terminator; replaced when the kernel registers builtin modules
 lu_exception_types	runtime/types/static.c	const table of the exception types; relocated by ld.so, then read-only (RELRO)
