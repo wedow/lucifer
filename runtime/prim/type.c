@@ -61,7 +61,9 @@ subclasses_ref(PyTypeObject *tp)
 
 /* A type's subclasses are weak references: a class nothing else holds dies
    (CPython's tp_subclasses is a dict of weakrefs). The list keeps creation
-   order, which __subclasses__ shows. */
+   order, which __subclasses__ shows. Every change to a list, and every read
+   of one, is under _PyRuntime.type_lock (CPython's TYPE_LOCK): a read that must outlive
+   the lock, or call out, takes a snapshot of strong references first. */
 
 /* The subclass a reference in the list names, or NULL once it is dead. */
 static PyTypeObject *
@@ -74,15 +76,20 @@ subclass_of(PyObject *ref)
 static int
 add_subclass(PyTypeObject *base, PyTypeObject *tp)
 {
-    PyObject **list = subclasses_ref(base);
-    if (*list == NULL && (*list = PyList_New(0)) == NULL) {
-        return -1;
-    }
     PyObject *ref = lu_weakref_new(&_PyWeakref_RefType, (PyObject *)tp, NULL);
     if (ref == NULL) {
         return -1;
     }
-    int err = lu_list_append(*list, ref);
+    int err = 0;
+    PyMutex_Lock(&_PyRuntime.type_lock);
+    PyObject **list = subclasses_ref(base);
+    if (*list == NULL) {
+        *list = PyList_New(0);
+    }
+    if (*list == NULL || lu_list_append(*list, ref) < 0) {
+        err = -1;
+    }
+    PyMutex_Unlock(&_PyRuntime.type_lock);
     Py_DECREF(ref);
     return err;
 }
@@ -91,6 +98,7 @@ add_subclass(PyTypeObject *base, PyTypeObject *tp)
 static void
 remove_subclass(PyTypeObject *base, PyTypeObject *tp)
 {
+    PyMutex_Lock(&_PyRuntime.type_lock);
     PyListObject *list = (PyListObject *)*subclasses_ref(base);
     for (Py_ssize_t i = list != NULL ? Py_SIZE(list) : 0; --i >= 0; ) {
         PyTypeObject *sub = subclass_of(list->ob_item[i]);
@@ -102,6 +110,25 @@ remove_subclass(PyTypeObject *base, PyTypeObject *tp)
             Py_DECREF(ref);
         }
     }
+    PyMutex_Unlock(&_PyRuntime.type_lock);
+}
+
+/* A new list of the live subclasses of tp, or NULL with an exception set. */
+static PyObject *
+subclasses_snapshot(PyTypeObject *tp)
+{
+    PyObject *copy = PyList_New(0);
+    PyMutex_Lock(&_PyRuntime.type_lock);
+    PyObject *list = *subclasses_ref(tp);
+    for (Py_ssize_t i = 0; copy != NULL && list != NULL && i < PyList_GET_SIZE(list); i++) {
+        PyObject *sub = lu_weakref_get(PyList_GET_ITEM(list, i));
+        if (sub != NULL && lu_list_append(copy, sub) < 0) {
+            Py_CLEAR(copy);
+        }
+        Py_XDECREF(sub);
+    }
+    PyMutex_Unlock(&_PyRuntime.type_lock);
+    return copy;
 }
 
 /* A type gets at most this many tags (MAX_VERSIONS_PER_CLASS); _Py_ATTR_CACHE_UNUSED
@@ -192,13 +219,14 @@ lu_type_modified(PyTypeObject *tp)
     if (tp->tp_version_tag == 0) {
         return;
     }
-    PyListObject *list = (PyListObject *)*subclasses_ref(tp);
-    for (Py_ssize_t i = 0; list != NULL && i < Py_SIZE(list); i++) {
-        PyTypeObject *sub = subclass_of(list->ob_item[i]);
-        if (sub != NULL) {
-            lu_type_modified(sub);
-        }
+    PyObject *subs = subclasses_snapshot(tp);
+    if (subs == NULL) {
+        Py_FatalError("out of memory invalidating a type's subclasses");
     }
+    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(subs); i++) {
+        lu_type_modified((PyTypeObject *)PyList_GET_ITEM(subs, i));
+    }
+    Py_DECREF(subs);
     notify_type_watchers(tp);
     set_version(tp, 0);
 }
@@ -1874,15 +1902,7 @@ static PyObject *
 prim_type_subclasses(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1); TYPE_ARG(0);
-    PyObject *list = *subclasses_ref((PyTypeObject *)args[0]);
-    PyObject *copy = PyList_New(0);
-    for (Py_ssize_t i = 0; copy != NULL && list != NULL && i < PyList_GET_SIZE(list); i++) {
-        PyTypeObject *sub = subclass_of(PyList_GET_ITEM(list, i));
-        if (sub != NULL && lu_list_append(copy, (PyObject *)sub) < 0) {
-            Py_CLEAR(copy);
-        }
-    }
-    return copy;
+    return subclasses_snapshot((PyTypeObject *)args[0]);
 }
 
 /* type_modified(t): PyType_Modified, after a change to the type's dict. */
