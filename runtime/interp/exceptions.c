@@ -782,18 +782,6 @@ prim_int_text(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyUnicode_FromString(buf);
 }
 
-/* list_append(list, item). */
-static PyObject *
-prim_list_append(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
-{
-    ARGS(2);
-    if (!PyList_CheckExact(args[0])) {
-        lu_err_format(PyExc_TypeError, "list_append() needs a list");
-        return NULL;
-    }
-    return lu_list_append(args[0], args[1]) < 0 ? NULL : Py_NewRef(Py_None);
-}
-
 /* caller_traceback(): a traceback of one entry for the Python frame that
    called the running kernel function, as of its current instruction. */
 static PyObject *
@@ -872,7 +860,7 @@ prim_err_display(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 PyMethodDef lu_prim_exc_methods[] = {
     FAST(write_unraisable), FAST(err_display),
     FAST(exc_set_word), FAST(exc_word), FAST(handled_exception), FAST(set_handled_exception),
-    FAST(is_exception), FAST(is_exception_class), FAST(list_append), FAST(caller_traceback),
+    FAST(is_exception), FAST(is_exception_class), FAST(caller_traceback),
     FAST(is_callable), FAST(int_text),
     { NULL, NULL, 0, NULL },
 };

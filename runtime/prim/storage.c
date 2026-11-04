@@ -382,25 +382,42 @@ prim_list_alloc(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return tp == &PyList_Type ? PyList_New(0) : tp->tp_alloc(tp, 0);
 }
 
+/* _PyList_AppendTakeRef's slow path: the list is full and the caller holds its lock. */
+LU_EXPORT int
+_PyList_AppendTakeRefListResize(PyListObject *self, PyObject *newitem)
+{
+    Py_ssize_t len = Py_SIZE(self);
+    if (list_resize(self, len + 1) < 0) {
+        Py_DECREF(newitem);
+        return -1;
+    }
+    _Py_atomic_store_ptr_release(&self->ob_item[len], newitem);
+    return 0;
+}
+
+/* _PyList_AppendTakeRef: the item is stored before the size that admits
+   lock-free readers to it, and released so that they see it whole. */
+int
+lu_list_append(PyObject *op, PyObject *item)
+{
+    PyListObject *l = (PyListObject *)op;
+    Py_ssize_t n = Py_SIZE(l);
+    if (n < l->allocated) {
+        _Py_atomic_store_ptr_release(&l->ob_item[n], Py_NewRef(item));
+        Py_SET_SIZE(l, n + 1);
+        return 0;
+    }
+    return _PyList_AppendTakeRefListResize(l, Py_NewRef(item));
+}
+
 /* list_append(list, item) */
 static PyObject *
 prim_list_append(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); LIST(0);
-    PyListObject *l = (PyListObject *)args[0];
-    int err = 0;
-    Py_BEGIN_CRITICAL_SECTION(l);
-    Py_ssize_t n = Py_SIZE(l);
-    if (n < l->allocated) {
-        l->ob_item[n] = Py_NewRef(args[1]);
-        Py_SET_SIZE(l, n + 1);
-    }
-    else if (list_resize(l, n + 1) < 0) {
-        err = -1;
-    }
-    else {
-        l->ob_item[n] = Py_NewRef(args[1]);
-    }
+    int err;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
+    err = lu_list_append(args[0], args[1]);
     Py_END_CRITICAL_SECTION();
     return err < 0 ? NULL : Py_NewRef(Py_None);
 }
@@ -562,19 +579,6 @@ PyList_Insert(PyObject *op, Py_ssize_t where, PyObject *newitem)
     }
     Py_END_CRITICAL_SECTION();
     return err;
-}
-
-/* _PyList_AppendTakeRef's slow path: the list is full and the caller holds its lock. */
-LU_EXPORT int
-_PyList_AppendTakeRefListResize(PyListObject *self, PyObject *newitem)
-{
-    Py_ssize_t len = Py_SIZE(self);
-    if (list_resize(self, len + 1) < 0) {
-        Py_DECREF(newitem);
-        return -1;
-    }
-    _Py_atomic_store_ptr_release(&self->ob_item[len], newitem);
-    return 0;
 }
 
 /* list_set_stride(list, start, step, seq): list[start + k * step] = seq[k]

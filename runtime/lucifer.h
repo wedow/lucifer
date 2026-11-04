@@ -1163,7 +1163,8 @@ int lu_watcher_check(lu_watcher *table, int id, const char *invalid, const char 
    lock-free reader can still hold it (runtime/prim/storage.c). */
 void lu_qsbr_retire(void *p);
 
-/* Appends to a list (borrowed item), growing its storage. */
+/* Appends to a list (borrowed item), growing its storage: a list whose lock
+   the caller holds, or that no other thread sees (runtime/prim/storage.c). */
 int lu_list_append(PyObject *list, PyObject *item);
 
 /* A list's ob_item points into a block that starts with its capacity

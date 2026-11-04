@@ -916,7 +916,11 @@ PyList_Append(PyObject *op, PyObject *item)
         PyErr_BadInternalCall();
         return -1;
     }
-    return lu_list_append(op, item);
+    int err;
+    Py_BEGIN_CRITICAL_SECTION(op);
+    err = lu_list_append(op, item);
+    Py_END_CRITICAL_SECTION();
+    return err;
 }
 
 PyObject *
@@ -935,7 +939,15 @@ PyList_GetItem(PyObject *op, Py_ssize_t i)
 PyObject *
 PyList_GetItemRef(PyObject *op, Py_ssize_t i)
 {
-    return Py_XNewRef(PyList_GetItem(op, i));
+    if (!PyList_Check(op)) {
+        PyErr_SetString(PyExc_TypeError, "expected a list");
+        return NULL;
+    }
+    PyObject *item = lu_list_item_ref((PyListObject *)op, i);
+    if (item == NULL) {
+        PyErr_SetString(PyExc_IndexError, "list index out of range");
+    }
+    return item;
 }
 
 int
