@@ -1430,19 +1430,25 @@ static PyObject *
 biter_next(PyObject *op)
 {
     biterobject *it = (biterobject *)op;
+    PyObject *result = NULL, *dead = NULL;
+    Py_BEGIN_CRITICAL_SECTION(op);
     PyObject *seq = it->seq;
-    if (seq == NULL) {
-        return NULL;
+    if (seq != NULL) {
+        Py_ssize_t n = PyBytes_Check(seq) ? PyBytes_GET_SIZE(seq) : PyByteArray_GET_SIZE(seq);
+        if (it->index < n) {
+            unsigned char c = PyBytes_Check(seq) ? (unsigned char)PyBytes_AS_STRING(seq)[it->index]
+                                                 : (unsigned char)BA(seq)->ob_bytes[it->index];
+            it->index++;
+            result = PyLong_FromLong(c);
+        }
+        else {
+            it->seq = NULL;
+            dead = seq;
+        }
     }
-    Py_ssize_t n = PyBytes_Check(seq) ? PyBytes_GET_SIZE(seq) : PyByteArray_GET_SIZE(seq);
-    if (it->index < n) {
-        unsigned char c = PyBytes_Check(seq) ? (unsigned char)PyBytes_AS_STRING(seq)[it->index]
-                                             : (unsigned char)BA(seq)->ob_bytes[it->index];
-        it->index++;
-        return PyLong_FromLong(c);
-    }
-    Py_CLEAR(it->seq);
-    return NULL;
+    Py_END_CRITICAL_SECTION();
+    Py_XDECREF(dead);
+    return result;
 }
 
 static PyObject *
@@ -1496,11 +1502,14 @@ prim_b_hint(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1);
     biterobject *it = (biterobject *)args[0];
-    if (it->seq == NULL) {
-        return PyLong_FromLong(0);
+    Py_ssize_t left = 0;
+    Py_BEGIN_CRITICAL_SECTION(it);
+    if (it->seq != NULL) {
+        Py_ssize_t n = PyBytes_Check(it->seq) ? PyBytes_GET_SIZE(it->seq) : PyByteArray_GET_SIZE(it->seq);
+        left = n > it->index ? n - it->index : 0;
     }
-    Py_ssize_t n = PyBytes_Check(it->seq) ? PyBytes_GET_SIZE(it->seq) : PyByteArray_GET_SIZE(it->seq);
-    return PyLong_FromLongLong(n > it->index ? n - it->index : 0);
+    Py_END_CRITICAL_SECTION();
+    return PyLong_FromSsize_t(left);
 }
 
 /* b_sizeof(x) */

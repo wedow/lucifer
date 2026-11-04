@@ -168,7 +168,7 @@ class float:
 
     def __new__(cls, *args, **kwargs):
         _boot.check_new(cls, float)
-        if kwargs:
+        if kwargs and (cls is float or type_lookup(cls, '__init__') is type_lookup(float, '__init__')):
             error(TypeError, 'float() takes no keyword arguments')
         n = size(args)
         if n > 1:

@@ -117,6 +117,9 @@ int lu_futex_wait(uint32_t *word, uint32_t expected, PyTime_t deadline);
 void lu_futex_wake(uint32_t *word);
 /* Waits for a thread to exit, detached (runtime/prim/os.c). */
 void lu_join_thread(pthread_t thread);
+/* The fault handler's write(2), safe in a signal handler, and its watchdog's wait (runtime/prim/os.c). */
+void lu_write_signal_safe(int fd, const char *s, size_t n);
+int lu_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *deadline);
 
 /* Biased reference counting (runtime/object/brc.c). A thread that owns
    objects has an owner record in each interpreter; the interpreter's buckets
@@ -929,7 +932,13 @@ int lu_module_add_functions(PyObject *m, PyMethodDef *defs);
 extern PyModuleDef lu_lucifer_module;
 
 /* A function for `code` closing over `globals` (runtime/object/function.c). */
+/* The threads a dump of all threads lists, and the fatal-error report (runtime/prim/faulthandler.c). */
+void lu_fh_thread_enter(PyThreadState *ts);
+void lu_fh_thread_exit(PyThreadState *ts);
+void lu_fh_fatal(const char *func, const char *msg) __attribute__((noreturn));
 PyObject *lu_function_new(PyObject *code, PyObject *globals);
+/* function.__new__ over (code, globals, name, defaults, closure, kwdefaults). */
+PyObject *lu_function_from_args(PyObject *const *args);
 
 /* The namespace dict (runtime/object/dict.c): lookups and stores with exact
    str keys, which LOAD_NAME/LOAD_GLOBAL, module attributes and the kernel's

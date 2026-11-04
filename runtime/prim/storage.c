@@ -620,18 +620,19 @@ prim_list_del_stride(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     else if (count > 0) {
         PyObject **items = l->ob_item;
+        /* size_t arithmetic, as list_ass_subscript's: the step may be near PY_SSIZE_T_MAX. */
         Py_ssize_t cur = start, i = 0;
-        for (; i < count; cur += step, i++) {
+        for (; i < count; cur = (Py_ssize_t)((size_t)cur + (size_t)step), i++) {
             garbage[i] = items[cur];
             Py_ssize_t lim = step - 1;
-            if (cur + step >= size) {
+            if ((size_t)cur + (size_t)step >= (size_t)size) {
                 lim = size - cur - 1;
             }
             memmove(items + cur - i, items + cur + 1, lim * sizeof(PyObject *));
         }
-        cur = start + count * step;
-        if (cur < size) {
-            memmove(items + cur - count, items + cur, (size - cur) * sizeof(PyObject *));
+        size_t after = (size_t)start + (size_t)count * (size_t)step;
+        if (after < (size_t)size) {
+            memmove(items + after - count, items + after, (size - after) * sizeof(PyObject *));
         }
         if (list_resize(l, size - count) < 0) {
             Py_SET_SIZE(l, size - count);   /* the shrink failed; the items are in place */
@@ -767,29 +768,31 @@ PyObject *
 lu_seqiter_next(PyObject *iter)
 {
     seqiterobject *it = (seqiterobject *)iter;
-    PyObject *seq = it->it_seq;
-    if (seq == NULL) {
-        return NULL;
-    }
     PyTypeObject *tp = Py_TYPE(iter);
-    PyObject *v = NULL;
-    if (tp == &PyListRevIter_Type) {
-        if (it->it_index >= 0 && it->it_index < Py_SIZE(seq)) {
-            v = Py_NewRef(((PyListObject *)seq)->ob_item[it->it_index--]);
+    PyObject *v = NULL, *dead = NULL;
+    Py_BEGIN_CRITICAL_SECTION(iter);
+    PyObject *seq = it->it_seq;
+    if (seq != NULL) {
+        if (tp == &PyListRevIter_Type) {
+            if (it->it_index >= 0 && it->it_index < Py_SIZE(seq)) {
+                v = Py_NewRef(((PyListObject *)seq)->ob_item[it->it_index--]);
+            }
+            else {
+                it->it_index = -1;
+            }
         }
-        else {
-            it->it_index = -1;
+        else if (it->it_index < Py_SIZE(seq)) {
+            v = Py_NewRef(tp == &PyTupleIter_Type ? PyTuple_GET_ITEM(seq, it->it_index)
+                                                  : ((PyListObject *)seq)->ob_item[it->it_index]);
+            it->it_index++;
+        }
+        if (v == NULL) {
+            it->it_seq = NULL;
+            dead = seq;
         }
     }
-    else if (it->it_index < Py_SIZE(seq)) {
-        v = Py_NewRef(tp == &PyTupleIter_Type ? PyTuple_GET_ITEM(seq, it->it_index)
-                                              : ((PyListObject *)seq)->ob_item[it->it_index]);
-        it->it_index++;
-    }
-    if (v == NULL) {
-        it->it_seq = NULL;
-        Py_DECREF(seq);
-    }
+    Py_END_CRITICAL_SECTION();
+    Py_XDECREF(dead);
     return v;
 }
 
@@ -807,9 +810,18 @@ prim_iter_state(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1);
     seqiterobject *it = (seqiterobject *)args[0];
-    PyObject *index = PyLong_FromLong(it->it_index);
-    PyObject *r = index != NULL ? PyTuple_Pack(2, it->it_seq != NULL ? it->it_seq : Py_None, index) : NULL;
+    PyObject *seq, *r = NULL;
+    Py_ssize_t i;
+    Py_BEGIN_CRITICAL_SECTION(it);
+    seq = Py_XNewRef(it->it_seq);
+    i = it->it_index;
+    Py_END_CRITICAL_SECTION();
+    PyObject *index = PyLong_FromSsize_t(i);
+    if (index != NULL) {
+        r = PyTuple_Pack(2, seq != NULL ? seq : Py_None, index);
+    }
     Py_XDECREF(index);
+    Py_XDECREF(seq);
     return r;
 }
 
@@ -818,9 +830,12 @@ prim_iter_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(3); SSIZE(2, index);
     seqiterobject *it = (seqiterobject *)args[0];
-    PyObject *old = it->it_seq;
+    PyObject *old;
+    Py_BEGIN_CRITICAL_SECTION(it);
+    old = it->it_seq;
     it->it_seq = args[1] == Py_None ? NULL : Py_NewRef(args[1]);
     it->it_index = index;
+    Py_END_CRITICAL_SECTION();
     Py_XDECREF(old);
     return Py_NewRef(Py_None);
 }

@@ -1087,6 +1087,12 @@ class bytes_iterator:
     def __length_hint__(self):
         return b_hint(self)
 
+    def __reduce__(self):
+        return _iter.seqiter_reduce(self, (), iter)
+
+    def __setstate__(self, state):
+        _iter.seqiter_setstate(self, state)
+
 
 @kernel_type(static_type('bytearray_iterator'))
 class bytearray_iterator:
@@ -1101,3 +1107,9 @@ class bytearray_iterator:
 
     def __length_hint__(self):
         return b_hint(self)
+
+    def __reduce__(self):
+        return _iter.seqiter_reduce(self, (), iter)
+
+    def __setstate__(self, state):
+        _iter.seqiter_setstate(self, state)

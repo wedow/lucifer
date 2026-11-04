@@ -176,8 +176,11 @@ python3 tools/libtest/check.py
 `--python` takes a shell-quoted command but never executes a shell. Lucifer is run
 with `--source installed`: it finds its own standard library and `test` package under
 `build/lib/python3.14t` (the vendored `Lib/` and the host's pycs, installed by `make`),
-so that no host `PYTHONPATH` puts CPython's modules ahead of its own. Oracle paths
-are supplied by the caller. The default `--source vendored` adds the vendored
+so that no host `PYTHONPATH` puts CPython's modules ahead of its own. The modules
+that import the oracle's C test extensions (`test_bytes`, `test_class`) find
+`_testlimitedcapi` and `_testinternalcapi` after `make oracle-exts ORACLE_T=...`,
+which links them beside the installed library; rerun it after `make` recreates
+the library. Oracle paths are supplied by the caller. The default `--source vendored` adds the vendored
 `Lib/` to the target's `PYTHONPATH`; `--source installed` uses the interpreter's
 own installed library and test extensions. The host never imports vendored code.
 A bounded startup probe checks JSON output after importing `test`; an absent,

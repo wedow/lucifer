@@ -66,6 +66,36 @@ lu_join_thread(pthread_t thread)
     LU_SYSCALL(pthread_join(thread, NULL));
 }
 
+/* The fault handler's calls (runtime/prim/faulthandler.c). Its output is
+   written from fatal-signal handlers, where the interrupted task's state may
+   be half changed and no bracket is safe, so the write is bare, under
+   LU_SIGNAL, which blockcheck accepts like LU_SYSCALL; a task that dumps on
+   request brackets the whole dump itself. The watchdog thread is no task, so
+   its bracket is empty. */
+#define LU_SIGNAL(call) (call)
+
+void
+lu_write_signal_safe(int fd, const char *s, size_t n)
+{
+    while (n > 0) {
+        ssize_t w = LU_SIGNAL(write(fd, s, n));
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return;
+        }
+        s += w;
+        n -= (size_t)w;
+    }
+}
+
+int
+lu_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *deadline)
+{
+    return LU_SYSCALL(pthread_cond_timedwait(cond, lock, deadline));
+}
+
 /* write(fd, str): the whole UTF-8 form of str, retrying short writes and
    EINTR. Raises OSError on failure; the errno-carrying OSError layout
    arrives with K1k. */

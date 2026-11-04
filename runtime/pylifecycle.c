@@ -474,6 +474,32 @@ run_program(struct _is *interp, const char *program, const char *path)
     return status;
 }
 
+/* -X faulthandler, PYTHONFAULTHANDLER and the dev mode enable the fault handler
+   once sys.stderr exists. */
+static void
+faulthandler_start(struct _is *interp)
+{
+    const PyConfig *config = &interp->config;
+    int on = config->faulthandler > 0 || config->dev_mode > 0;
+    for (Py_ssize_t i = 0; i < config->xoptions.length; i++) {
+        on |= wcscmp(config->xoptions.items[i], L"faulthandler") == 0;
+    }
+    const char *env = config->use_environment ? getenv("PYTHONFAULTHANDLER") : NULL;
+    on |= env != NULL && *env != '\0';
+    if (!on) {
+        return;
+    }
+    PyObject *name = PyUnicode_FromString("faulthandler");
+    PyObject *module = name != NULL ? lu_call(interp->import_func, &name, 1, NULL) : NULL;
+    PyObject *result = module != NULL ? PyObject_CallMethod(module, "enable", NULL) : NULL;
+    if (result == NULL) {
+        PyErr_Clear();
+    }
+    Py_XDECREF(result);
+    Py_XDECREF(module);
+    Py_XDECREF(name);
+}
+
 /* The native bootstrap, then the frozen kernel, sys and importlib. */
 PyStatus
 Py_InitializeFromConfig(const PyConfig *src)
@@ -514,6 +540,7 @@ Py_InitializeFromConfig(const PyConfig *src)
         report();
         return PyStatus_Exit(1);
     }
+    faulthandler_start(interp);
     if (_PyRuntime.handoff.on) {
         lu_sched_start();
     }

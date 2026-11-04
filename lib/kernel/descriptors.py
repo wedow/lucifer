@@ -8,7 +8,8 @@ from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_dict, type_mro, type_tp_name,
     type_qualname, is_subtype, ns_get, alloc, static_type, descr_type, bind,
     method_new, member_get, member_set, getset_kernel, getset_get, getset_set,
-    field_get, field_set, super_args, is_callable, kernel_set, kernel_get, address,
+    field_get, field_set, super_args, is_callable, kernel_set, kernel_get, address, function_new,
+    object_hash,
 )
 from _lucifer import _boot
 
@@ -34,6 +35,7 @@ def _class_access(instance, owner):
 
 
 _NoneType = static_type('NoneType')
+_Module = static_type('module')
 
 
 def _quote(s):
@@ -51,6 +53,13 @@ def _descr_check(descr, obj):
 
 @kernel_type(static_type('function'))
 class function:
+    def __new__(cls, code, globals, name=None, argdefs=None, closure=None, kwdefaults=None):
+        """Create a function object."""
+        return function_new(code, globals, name, argdefs, closure, kwdefaults)
+
+    def __call__(self, /, *args, **kwargs):
+        return self(*args, **kwargs)
+
     def __get__(self, instance, owner=None):
         if _class_access(instance, owner):
             return self
@@ -58,6 +67,23 @@ class function:
 
     def __repr__(self):
         return str_join('', ('<function ', self.__qualname__, ' at ', address(self), '>'))
+
+
+@kernel_type(static_type('builtin_function_or_method'))
+class builtin_function_or_method:
+    def __reduce__(self):
+        """meth_reduce: a module-level builtin pickles as its name, a bound one as getattr(self, name)."""
+        owner = self.__self__
+        if owner is None or is_subtype(type(owner), _Module):
+            return self.__name__
+        return (getattr, (owner, self.__name__))
+
+    def __repr__(self):
+        owner = self.__self__
+        if owner is None or is_subtype(type(owner), _Module):
+            return str_join('', ('<built-in function ', self.__name__, '>'))
+        return str_join('', ('<built-in method ', self.__name__, ' of ', type_tp_name(type(owner)),
+                             ' object at ', address(owner), '>'))
 
 
 @kernel_type(static_type('method'))
@@ -83,8 +109,44 @@ class method:
     def __get__(self, instance, owner=None):
         return self
 
+    def __call__(self, /, *args, **kwargs):
+        return member_get(_method_func, self)(member_get(_method_self, self), *args, **kwargs)
+
+    def __repr__(self):
+        func = member_get(_method_func, self)
+        name = '?'
+        for attr in ('__qualname__', '__name__'):
+            try:
+                found = getattr_hook(func, attr)
+            except AttributeError:
+                continue
+            if kind(found, 'str'):
+                name = found
+            break
+        return str_join('', ('<bound method ', name, ' of ', repr(member_get(_method_self, self)), '>'))
+
+    def __eq__(self, other):
+        if not kind_method(other):
+            return NotImplemented
+        return (member_get(_method_self, self) is member_get(_method_self, other)
+                and member_get(_method_func, self) == member_get(_method_func, other))
+
+    def __hash__(self):
+        return object_hash(member_get(_method_self, self)) ^ hash(member_get(_method_func, self))
+
+    def __reduce__(self):
+        func = member_get(_method_func, self)
+        return (getattr, (member_get(_method_self, self), getattr_hook(func, '__name__')))
+
+    __doc__ = getset(lambda self: getattr_hook(member_get(_method_func, self), '__doc__'))
+
+
+def kind_method(x):
+    return type(x) is method
+
 
 _method_func = ns_get(type_dict(method), '__func__', MISSING)
+_method_self = ns_get(type_dict(method), '__self__', MISSING)
 
 
 @kernel_type(static_type('method_descriptor'))

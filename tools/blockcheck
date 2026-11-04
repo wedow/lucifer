@@ -14,7 +14,8 @@ rules make that checkable:
    out-of-memory retry.
 2. In WRAPPERS.c each mention of a blocking name lies inside LU_SYSCALL(...),
    which brackets the call, or LU_FORKED(...), the same call made bare in the
-   child of a fork, where no task can be stopped, or is the futex syscall inside LU_PARKED(...):
+   child of a fork, where no task can be stopped, or LU_SIGNAL(...), the same
+   call made bare where a signal handler may run it, or is the futex syscall inside LU_PARKED(...):
    lu_park's own sleep, bracketed by lu_park itself, or a wake, which never
    blocks.
 3. Only park.o references the futex helpers lu_futex_wait and lu_futex_wake.
@@ -95,7 +96,7 @@ def strip(source):
 def spans(code):
     """(start, end, macro) of every LU_SYSCALL(...) and LU_PARKED(...) argument."""
     found = []
-    for m in re.finditer(r"\b(LU_SYSCALL|LU_PARKED|LU_FORKED)\s*\(", code):
+    for m in re.finditer(r"\b(LU_SYSCALL|LU_PARKED|LU_FORKED|LU_SIGNAL)\s*\(", code):
         depth, i = 1, m.end()
         while depth and i < len(code):
             depth += {"(": 1, ")": -1}.get(code[i], 0)
@@ -115,7 +116,7 @@ def check_wrappers(path):
         inner = [s for s in brackets if s[0] <= m.start() < s[1]]
         macro = max(inner)[2] if inner else None
         futex = re.match(r"syscall\s*\(\s*SYS_futex\b", code[m.start():])
-        if macro in ("LU_SYSCALL", "LU_FORKED") or (macro == "LU_PARKED" and futex):
+        if macro in ("LU_SYSCALL", "LU_FORKED", "LU_SIGNAL") or (macro == "LU_PARKED" and futex):
             continue
         line = code.count("\n", 0, m.start()) + 1
         problems.append(f"{path}:{line}: {m.group(0)} outside LU_SYSCALL")

@@ -268,6 +268,16 @@ def _get_bases(cls):
     return type_bases(cls)
 
 
+def _base_chain_has(base, cls):
+    """Whether cls is on base's tp_base chain, which a reentrant mro() may have
+    changed before the MRO caught up."""
+    while base is not None:
+        if base is cls:
+            return True
+        base = type_base(base)
+    return False
+
+
 def _set_bases(cls, value):
     _check_heap_set(cls, '__bases__', value, 'tuple', 'tuple')
     for base in value:
@@ -275,7 +285,7 @@ def _set_bases(cls, value):
             error(TypeError, str_join('', (
                 type_tp_name(cls), '.__bases__ must be tuple of classes, not ',
                 _repr_str(type_tp_name(type(base))))))
-        if base is cls or is_subtype(base, cls):
+        if is_subtype(base, cls) or _base_chain_has(base, cls):
             error(TypeError, 'a __bases__ item causes an inheritance cycle')
     type_set_bases(cls, value)
     _remro(cls)
@@ -362,7 +372,7 @@ type(name, bases, dict, **kwds) -> a new type"""
                 'type.__new__() argument 3 must be dict, not ', type_tp_name(type(ns)))))
         if bases:
             for base in bases:
-                if not kind(base, 'type') and type_lookup(type(base), '__mro_entries__') is not MISSING:
+                if not kind(base, 'type') and hasattr(base, '__mro_entries__'):
                     error(TypeError, "type() doesn't support MRO entry resolution; use types.new_class()")
             winner = calculate_metaclass(metatype, bases)
             if winner is not metatype:
@@ -428,8 +438,8 @@ type(name, bases, dict, **kwds) -> a new type"""
             return meta_get(meta_attr, cls, meta)
         if meta_attr is not MISSING:
             return meta_attr
-        error(AttributeError, str_join('', (
-            "type object '", type_tp_name(cls), "' has no attribute '", name, "'")))
+        raise AttributeError(str_join('', (
+            "type object '", type_tp_name(cls), "' has no attribute '", name, "'")), name=name, obj=cls)
 
     def __setattr__(cls, name, value):
         _type_set(cls, name, value)

@@ -103,12 +103,15 @@ thread_main(void *arg)
 {
     PyObject *callable = arg;
     PyGILState_STATE gstate = PyGILState_Ensure();
+    PyThreadState *ts = PyThreadState_Get();
+    lu_fh_thread_enter(ts);
     PyObject *result = lu_call(callable, NULL, 0, NULL);
     if (result == NULL) {
         lu_err_unraisable_text("Exception ignored in thread started by", callable);
     }
     Py_XDECREF(result);
     Py_DECREF(callable);
+    lu_fh_thread_exit(ts);
     PyGILState_Release(gstate);
     return NULL;
 }

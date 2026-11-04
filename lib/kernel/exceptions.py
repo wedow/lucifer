@@ -33,7 +33,7 @@ def _first(seq):
 
 def _text(x):
     """str(x) for the messages."""
-    if kind(x, 'str'):
+    if type(x) is str:
         return x
     return call_special(type_lookup(type(x), '__str__'), x)
 
@@ -211,7 +211,13 @@ class ImportError:
 
     def __init__(self, /, *args, **kwds):
         self.args = args
-        _store_keywords(self, 'ImportError', kwds, ('name', 'path', 'name_from'))
+        for key, value in ns_items(kwds):
+            if key != 'name' and key != 'path' and key != 'name_from':
+                error(TypeError, str_join('', (
+                    "ImportError() got an unexpected keyword argument '", key, "'")))
+        self.name = ns_get(kwds, 'name', None)
+        self.path = ns_get(kwds, 'path', None)
+        self.name_from = ns_get(kwds, 'name_from', None)
         self.msg = _first(args) if size(args) == 1 else None
 
     def __str__(self):
@@ -507,7 +513,7 @@ class UnicodeEncodeError:
         self.encoding, self.object, self.start, self.end, self.reason = args
 
     def __str__(self):
-        return _unicode_str(self, 'encode', self.object, False)
+        return _unicode_str(self, 'encode', False)
 
 
 @kernel_type(UnicodeDecodeError)
@@ -517,10 +523,11 @@ class UnicodeDecodeError:
     def __init__(self, /, *args, **kwds):
         _init(self, args, kwds)
         _unicode_args(self, args, 'sbnns', 'UnicodeDecodeError')
-        self.encoding, self.object, self.start, self.end, self.reason = args
+        self.encoding, obj, self.start, self.end, self.reason = args
+        self.object = obj if kind(obj, 'bytes') else bytes(obj)
 
     def __str__(self):
-        return _unicode_str(self, 'decode', self.object, True)
+        return _unicode_str(self, 'decode', True)
 
 
 @kernel_type(UnicodeTranslateError)
@@ -534,16 +541,20 @@ class UnicodeTranslateError:
         self.encoding = None
 
     def __str__(self):
-        obj = self.object
-        if obj is None:
+        try:
+            if self.object is None:
+                return ''
+        except AttributeError:
             return ''
+        reason = _text(self.reason)
+        obj = _error_object(self, False)
         start = self.start
         end = self.end
         if start >= 0 and start < _length(obj) and end == start + 1:
             return str_join('', ("can't translate character '", _escape(obj, start),
-                                 "' in position ", _text(start), ': ', _text(self.reason)))
+                                 "' in position ", _text(start), ': ', reason))
         return str_join('', ("can't translate characters in position ", _text(start), '-',
-                             _text(end - 1), ': ', _text(self.reason)))
+                             _text(end - 1), ': ', reason))
 
 
 def _length(seq):
@@ -570,11 +581,28 @@ def _escape(obj, index):
     return str_join('', ('\\U', _hex(code, 8)))
 
 
-def _unicode_str(self, verb, obj, decoding):
-    if obj is None:
+def _error_object(self, decoding):
+    """The object of a Unicode error, which str() reads after the side effects
+    of its other attributes' __str__: it must still be there, and the right type."""
+    try:
+        obj = self.object
+    except AttributeError:
+        error(TypeError, "UnicodeError 'object' attribute is not set")
+    if not kind(obj, 'bytes' if decoding else 'str'):
+        error(TypeError, str_join('', ("UnicodeError 'object' attribute must be a ",
+                                       'bytes' if decoding else 'string')))
+    return obj
+
+
+def _unicode_str(self, verb, decoding):
+    try:
+        if self.object is None:
+            return ''
+    except AttributeError:
         return ''
     reason = _text(self.reason)
     encoding = _text(self.encoding)
+    obj = _error_object(self, decoding)
     start = self.start
     end = self.end
     if start >= 0 and start < _length(obj) and end <= _length(obj) and end == start + 1:
