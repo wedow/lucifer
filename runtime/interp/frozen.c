@@ -98,7 +98,7 @@ lu_kernel_boot(PyInterpreterState *interp)
         int err = result == NULL || export_all(ns, builtins_module) < 0
             || lu_ns_insert(PyModule_GetDict(lucifer), ((PyModuleObject *)module)->md_name, module) < 0;
         Py_XDECREF(result);
-        lu_static_types_inherit();
+        err = lu_static_types_inherit() < 0 || err;
         Py_DECREF(module);
         if (err) {
             return -1;

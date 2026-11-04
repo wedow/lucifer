@@ -71,8 +71,9 @@ slot_known(int id)
     return id > 0 && (size_t)id < NSLOTS && (slot_offsets[id].slot != 0 || slot_offsets[id].sub != 0);
 }
 
-static void
-free_object(void *p)
+/* tp_free over the runtime's object free (a freefunc takes void *). */
+void
+lu_free_object(void *p)
 {
     lu_object_free(p);
 }
@@ -169,8 +170,8 @@ bases_tuple(PyObject *bases_in, PyType_Spec *spec)
 
 /* The doc after its introspection signature, "Name(...)\n--\n\n", if it starts
    with one (Objects/typeobject.c _PyType_DocWithoutSignature). */
-static const char *
-doc_without_signature(const char *name, const char *doc)
+const char *
+lu_doc_without_signature(const char *name, const char *doc)
 {
     const char *dot = strrchr(name, '.');
     name = dot != NULL ? dot + 1 : name;
@@ -187,6 +188,40 @@ doc_without_signature(const char *name, const char *doc)
         }
     }
     return doc;
+}
+
+/* tp_methods into a type's dict (Objects/typeobject.c type_add_methods). */
+int
+lu_type_add_methods(PyTypeObject *tp, PyObject *dict)
+{
+    for (PyMethodDef *ml = tp->tp_methods; ml != NULL && ml->ml_name != NULL; ml++) {
+        PyObject *d = (ml->ml_flags & METH_CLASS) ? lu_descr_new_classmethod(tp, ml)
+                    : (ml->ml_flags & METH_STATIC) ? PyCFunction_NewEx(ml, NULL, NULL)
+                    : PyDescr_NewMethod(tp, ml);
+        if (d == NULL || PyDict_SetItemString(dict, ml->ml_name, d) < 0) {
+            Py_XDECREF(d);
+            return -1;
+        }
+        Py_DECREF(d);
+    }
+    return 0;
+}
+
+/* The bound __new__ of a type with a tp_new (add_tp_new_wrapper): the first
+   argument names the type to make an instance of. The insert is native: the
+   kernel's dict functions are not up when static types are readied. */
+int
+lu_type_add_new_wrapper(PyTypeObject *tp, PyObject *dict)
+{
+    PyObject *new = PyCFunction_NewEx(&tp_new_methoddef, (PyObject *)tp, NULL);
+    int err = new == NULL;
+    if (!err) {
+        PyObject *name = PyUnicode_InternFromString("__new__");
+        err = name == NULL || lu_ns_insert(dict, name, new) < 0;
+        Py_XDECREF(name);
+    }
+    Py_XDECREF(new);
+    return err ? -1 : 0;
 }
 
 #define REPLACED_FLAGS (Py_TPFLAGS_BASETYPE | Py_TPFLAGS_IMMUTABLETYPE \
@@ -344,7 +379,7 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
         tp->tp_new = NULL;
     }
     if (tp->tp_free == NULL) {
-        tp->tp_free = free_object;
+        tp->tp_free = lu_free_object;
     }
     if (doc != NULL) {
         char *copy = PyMem_Malloc(strlen(doc) + 1);
@@ -359,29 +394,14 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
     if (PyDict_DelItemString(dict, "__slots__") < 0) {   /* only there to keep the instances free of a __dict__ */
         goto fail;
     }
-    if (lu_type_add_descriptors(tp) < 0) {
+    if (lu_type_add_descriptors(tp) < 0
+        || lu_type_add_methods(tp, dict) < 0
+        || (tp->tp_new != NULL && tp->tp_new != base->tp_new
+            && lu_type_add_new_wrapper(tp, dict) < 0)) {
         goto fail;
     }
-    for (PyMethodDef *ml = tp->tp_methods; ml != NULL && ml->ml_name != NULL; ml++) {
-        PyObject *d = (ml->ml_flags & METH_CLASS) ? lu_descr_new_classmethod(tp, ml)
-                    : (ml->ml_flags & METH_STATIC) ? PyCFunction_NewEx(ml, NULL, NULL)
-                    : PyDescr_NewMethod(tp, ml);
-        if (d == NULL || PyDict_SetItemString(dict, ml->ml_name, d) < 0) {
-            Py_XDECREF(d);
-            goto fail;
-        }
-        Py_DECREF(d);
-    }
-    if (tp->tp_new != NULL && tp->tp_new != base->tp_new) {
-        PyObject *new = PyCFunction_NewEx(&tp_new_methoddef, cls, NULL);
-        if (new == NULL || PyDict_SetItemString(dict, "__new__", new) < 0) {
-            Py_XDECREF(new);
-            goto fail;
-        }
-        Py_DECREF(new);
-    }
     if (doc != NULL) {
-        const char *text = doc_without_signature(spec->name, doc);
+        const char *text = lu_doc_without_signature(spec->name, doc);
         PyObject *d = *text != '\0' ? PyUnicode_FromString(text) : Py_NewRef(Py_None);
         if (d == NULL || PyDict_SetItemString(dict, "__doc__", d) < 0) {
             Py_XDECREF(d);

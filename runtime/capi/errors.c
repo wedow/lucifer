@@ -9,6 +9,7 @@
 #include "interp/exceptions.h"
 
 #include <stdarg.h>
+#include <string.h>
 
 /* An instance of `type` with the given args tuple (stolen). */
 static PyObject *
@@ -155,6 +156,77 @@ int
 PyErr_ExceptionMatches(PyObject *exc)
 {
     return PyErr_GivenExceptionMatches(PyErr_Occurred(), exc);
+}
+
+/* A new exception class, a real class over base (or Exception) whose dict
+   carries __module__ from the name's prefix (Python/errors.c
+   PyErr_NewException). */
+PyObject *
+PyErr_NewException(const char *name, PyObject *base, PyObject *dict)
+{
+    PyObject *mydict = NULL, *modulename = NULL, *bases = NULL, *result = NULL;
+    const char *dot = strrchr(name, '.');
+    if (dot == NULL) {
+        PyErr_SetString(PyExc_SystemError, "PyErr_NewException: name must be module.class");
+        return NULL;
+    }
+    if (base == NULL) {
+        base = PyExc_Exception;
+    }
+    if (dict == NULL) {
+        dict = mydict = PyDict_New();
+        if (dict == NULL) {
+            return NULL;
+        }
+    }
+    if (PyDict_GetItemString(dict, "__module__") == NULL) {
+        modulename = PyUnicode_FromStringAndSize(name, dot - name);
+        if (modulename == NULL || PyDict_SetItemString(dict, "__module__", modulename) < 0) {
+            goto done;
+        }
+    }
+    if (PyTuple_Check(base)) {
+        bases = Py_NewRef(base);
+    }
+    else {
+        bases = PyTuple_Pack(1, base);
+        if (bases == NULL) {
+            goto done;
+        }
+    }
+    PyObject *clsname = PyUnicode_FromString(dot + 1);
+    PyObject *args[3] = { clsname, bases, dict };
+    result = clsname == NULL ? NULL : lu_call((PyObject *)&PyType_Type, args, 3, NULL);
+    Py_XDECREF(clsname);
+done:
+    Py_XDECREF(bases);
+    Py_XDECREF(mydict);
+    Py_XDECREF(modulename);
+    return result;
+}
+
+PyObject *
+PyErr_NewExceptionWithDoc(const char *name, const char *doc, PyObject *base, PyObject *dict)
+{
+    PyObject *mydict = NULL;
+    if (dict == NULL) {
+        dict = mydict = PyDict_New();
+        if (dict == NULL) {
+            return NULL;
+        }
+    }
+    if (doc != NULL) {
+        PyObject *docobj = PyUnicode_FromString(doc);
+        int err = docobj == NULL || PyDict_SetItemString(dict, "__doc__", docobj) < 0;
+        Py_XDECREF(docobj);
+        if (err) {
+            Py_DECREF(mydict);
+            return NULL;
+        }
+    }
+    PyObject *result = PyErr_NewException(name, base, dict);
+    Py_XDECREF(mydict);
+    return result;
 }
 
 /* Without the faulthandler dump and the finalization CPython attempts. */
