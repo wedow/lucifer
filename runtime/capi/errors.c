@@ -138,6 +138,13 @@ PyErr_NoMemory(void)
 }
 
 int
+PyErr_BadArgument(void)
+{
+    PyErr_SetString(PyExc_TypeError, "bad argument type for built-in operation");
+    return 0;
+}
+
+int
 PyErr_GivenExceptionMatches(PyObject *given, PyObject *exc)
 {
     if (given == NULL || exc == NULL) {
