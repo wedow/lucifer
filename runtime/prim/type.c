@@ -327,6 +327,7 @@ _PyType_Lookup(PyTypeObject *tp, PyObject *name)
     PyObject *value = lookup_in_mro(tp, name);
     if (!(seq & 1) && __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) == version
         && __atomic_compare_exchange_n(&e->seq, &seq, seq + 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+        __atomic_thread_fence(__ATOMIC_RELEASE);        /* the odd sequence before the fields (_PySeqLock_LockWrite) */
         __atomic_store_n(&e->version, version, __ATOMIC_RELAXED);
         __atomic_store_n(&e->name, name, __ATOMIC_RELAXED);
         __atomic_store_n(&e->value, value, __ATOMIC_RELAXED);
