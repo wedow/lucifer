@@ -188,6 +188,27 @@ lu_kernel_target(PyObject *callable, PyObject *const *args, Py_ssize_t nargs,
     return 0;
 }
 
+PyObject *
+lu_kernel_function_of(PyObject *callable, PyObject **self)
+{
+    PyTypeObject *tp = Py_TYPE(callable);
+    struct lu_kernel_def *k = NULL;
+    *self = NULL;
+    if (tp == &PyCFunction_Type) {
+        k = lu_kernel_def_of(((PyCFunctionObject *)callable)->m_ml);
+        if (k != NULL && k->bind) {
+            *self = ((PyCFunctionObject *)callable)->m_self;
+        }
+    }
+    else if (tp == &PyMethodDescr_Type) {
+        k = lu_kernel_def_of(((PyMethodDescrObject *)callable)->d_method);
+    }
+    else if (tp == &PyWrapperDescr_Type && ((PyWrapperDescrObject *)callable)->d_base == &kernel_wrapperbase) {
+        k = (struct lu_kernel_def *)((PyWrapperDescrObject *)callable)->d_wrapped;
+    }
+    return k != NULL ? k->func : NULL;
+}
+
 int
 lu_new_function(PyObject *new_, PyObject **func)
 {

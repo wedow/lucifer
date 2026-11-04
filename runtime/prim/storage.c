@@ -956,12 +956,7 @@ typedef struct {
     PyObject *start, *stop, *step, *length;
 } rangeobject;
 
-/* range_iterator: the values as C longs; longrange_iterator: as ints. */
-typedef struct {
-    PyObject_HEAD
-    long start, step, len;
-} rangeiterobject;
-
+/* longrange_iterator: range_iterator's values as ints. */
 typedef struct {
     PyObject_HEAD
     PyObject *start, *step, *len;

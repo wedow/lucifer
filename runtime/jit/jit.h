@@ -1,0 +1,143 @@
+/* The optimizing tier as the interpreter sees it (DESIGN 6.2).
+
+   Counters at JUMP_BACKWARD (one per site, in its cache word) and at a
+   function's RESUME (one per code object) ask for a compile once hot. A
+   compiled unit starts at one bytecode boundary, the loop header the
+   back-edge jumps to or the instruction after RESUME, with the frame
+   exactly as the interpreter left it there, and runs until the function
+   returns, an exception is raised, or a guard fails. The interpreter is
+   the deopt landing: a unit hands back a frame (and any frames of inlined
+   calls above it) at a bytecode boundary that has not executed. */
+#ifndef LU_JIT_H
+#define LU_JIT_H
+
+#include "interp/frame.h"
+
+enum lu_jit_mode { LU_JIT_OFF, LU_JIT_ON, LU_JIT_ALWAYS };
+
+/* What lu_jit_enter did. */
+enum lu_jit_result {
+    LU_JIT_NONE,        /* nothing ran: interpret on from the frame as saved */
+    LU_JIT_RETURN,      /* the frame's function returned *result (a new reference); the
+                           frame is still pushed, its stack empty */
+    LU_JIT_DEOPT,       /* frames were handed back at an unexecuted boundary: continue
+                           with ts->current_frame, which may be an inlined callee's */
+    LU_JIT_ERROR,       /* ts->current_frame raised: unwind from its instr */
+};
+
+/* Back-edges and calls before a function is compiled (-X lucifer_jit=on). */
+#define LU_JIT_BACKEDGE_THRESHOLD 1000
+#define LU_JIT_CALL_THRESHOLD 1000
+
+static inline int
+lu_jit_on(void)
+{
+    return _PyRuntime.jit.mode != LU_JIT_OFF;
+}
+
+/* Counts the back-edge at `site` (a JUMP_BACKWARD; its cache word is the
+   counter): whether to try lu_jit_enter at the jump's target. */
+static inline int
+lu_jit_backedge_hot(PyCodeObject *code, lu_codeunit *site)
+{
+    if (code->co_executors != NULL && !((uintptr_t)code->co_executors & 1)) {
+        return 1;               /* compiled, or tried: lu_jit_enter knows */
+    }
+    lu_codeunit *counter = site + 1;
+    uint16_t n = __atomic_load_n(&counter->cache, __ATOMIC_RELAXED);
+    unsigned threshold = _PyRuntime.jit.mode == LU_JIT_ALWAYS ? 1 : LU_JIT_BACKEDGE_THRESHOLD;
+    if (n + 1u >= threshold) {
+        return 1;
+    }
+    __atomic_store_n(&counter->cache, (uint16_t)(n + 1), __ATOMIC_RELAXED);
+    return 0;
+}
+
+/* Counts a call of `code` at its RESUME. Until the code has JIT state,
+   co_executors holds the count, tagged with bit 0. */
+static inline int
+lu_jit_call_hot(PyCodeObject *code)
+{
+    uintptr_t v = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
+    if (v != 0 && !(v & 1)) {
+        return 1;
+    }
+    unsigned threshold = _PyRuntime.jit.mode == LU_JIT_ALWAYS ? 1 : LU_JIT_CALL_THRESHOLD;
+    uintptr_t n = v >> 1;
+    if (n + 1 >= threshold) {
+        return 1;
+    }
+    /* A lost count under a race only delays the compile. */
+    __atomic_compare_exchange_n((uintptr_t *)&code->co_executors, &v, ((n + 1) << 1) | 1, 0,
+                                __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+    return 0;
+}
+
+/* Type feedback: the kinds of operands an instruction has met, OR-ed into
+   a cache word the interpreter does not otherwise use (BINARY_OP's second,
+   COMPARE_OP's, STORE_SUBSCR's and CALL's first): the left operand's (a
+   call's first argument's) kinds in the low byte, the right's (the second
+   argument's) in the high byte. The tier speculates on a site
+   only when it has met nothing else. */
+enum {
+    LU_KIND_INT = 1,            /* an exact int of one digit (compact) */
+    LU_KIND_FLOAT = 2,
+    LU_KIND_NONE = 4,
+    LU_KIND_LIST = 8,
+    LU_KIND_TUPLE = 16,
+    LU_KIND_STR = 32,
+    LU_KIND_OTHER = 128,
+};
+
+static inline unsigned
+lu_jit_kind(PyObject *o)
+{
+    PyTypeObject *t = Py_TYPE(o);
+    return t == &PyLong_Type ? (_PyLong_IsCompact((PyLongObject *)o) ? LU_KIND_INT : LU_KIND_OTHER)
+        : t == &PyFloat_Type ? LU_KIND_FLOAT : o == Py_None ? LU_KIND_NONE
+        : t == &PyList_Type ? LU_KIND_LIST : t == &PyTuple_Type ? LU_KIND_TUPLE
+        : t == &PyUnicode_Type ? LU_KIND_STR : LU_KIND_OTHER;
+}
+
+static inline void
+lu_jit_observe(lu_codeunit *word, PyObject *left, PyObject *right)
+{
+    if (_PyRuntime.jit.mode == LU_JIT_OFF) {
+        return;
+    }
+    uint16_t seen = __atomic_load_n(&word->cache, __ATOMIC_RELAXED);
+    uint16_t now = seen | lu_jit_kind(left) | lu_jit_kind(right) << 8;
+    if (now != seen) {
+        __atomic_store_n(&word->cache, now, __ATOMIC_RELAXED);
+    }
+}
+
+/* FOR_ITER's cache word: the iterators it has met. */
+enum { LU_ITER_RANGE = 1, LU_ITER_LIST = 2, LU_ITER_OTHER = 4 };
+
+static inline void
+lu_jit_observe_iter(lu_codeunit *word, PyTypeObject *t)
+{
+    if (_PyRuntime.jit.mode == LU_JIT_OFF) {
+        return;
+    }
+    uint16_t seen = __atomic_load_n(&word->cache, __ATOMIC_RELAXED);
+    uint16_t now = seen | (t == &PyRangeIter_Type ? LU_ITER_RANGE : t == &PyListIter_Type ? LU_ITER_LIST
+                           : LU_ITER_OTHER);
+    if (now != seen) {
+        __atomic_store_n(&word->cache, now, __ATOMIC_RELAXED);
+    }
+}
+
+/* Runs compiled code for `frame` from frame->instr, compiling it first if
+   it is due. The frame is saved (instr, stackpointer) and is the task's
+   current frame. */
+enum lu_jit_result lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
+
+/* Releases a code object's compiled units (code_dealloc). */
+void lu_jit_code_free(PyCodeObject *code);
+
+/* Prints the tier's counts to stderr (-X lucifer_jit_stats), at exit. */
+void lu_jit_report(void);
+
+#endif

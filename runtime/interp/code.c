@@ -3,6 +3,7 @@
    Instrumentation starts at version 0 with no monitoring data, which equals
    an interpreter that never enabled monitoring (FOUNDATIONS 2.3). */
 
+#include "jit/jit.h"
 #include "interp/code.h"
 #include "interp/instrument.h"
 #include "interp/exceptions.h"
@@ -86,6 +87,7 @@ code_dealloc(PyObject *op)
     Py_XDECREF(co->co_qualname);
     Py_XDECREF(co->co_linetable);
     lu_monitoring_free(co);
+    lu_jit_code_free(co);
     lu_object_free(op);
 }
 
