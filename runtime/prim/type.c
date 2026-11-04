@@ -1578,9 +1578,24 @@ prim_is_subtype(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 /* tp_new_wrapper's checks for owner.__new__(cls): cls is a subtype of owner
    and owner is its static base, or an extension type inherited owner's tp_new. */
+/* Set by C calling a builtin's tp_new directly (slot_tp_new_builtin): there is
+   no tp_new_wrapper in that call to check, and the first check made on behalf
+   of the call is the one it stands for. */
+static __thread int new_check_skipped;
+
+void
+lu_new_check_skip(int on)
+{
+    new_check_skipped = on;
+}
+
 static int
 check_new(PyTypeObject *tp, PyTypeObject *owner)
 {
+    if (new_check_skipped) {
+        new_check_skipped = 0;
+        return 0;
+    }
     PyTypeObject *staticbase = tp;
     if (!PyType_IsSubtype(tp, owner)) {
         lu_err_format(PyExc_TypeError, "%s.__new__(%s): %s is not a subtype of %s",

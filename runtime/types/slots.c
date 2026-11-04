@@ -292,6 +292,41 @@ slot_tp_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
     return result;
 }
 
+/* tp_new of a static builtin type whose __new__ is kernel Python (float, int,
+   str, ...). C code calls it with the type it wants an instance of, often a
+   subtype with a __new__ of its own that has called it: the __new__ to run is
+   the builtin's, found in the first builtin of the subtype's MRO that has this
+   slot, never the subtype's. */
+static PyObject *
+slot_tp_new_builtin(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+{
+    PyObject *mro = type->tp_mro;
+    PyTypeObject *owner = NULL;
+    for (Py_ssize_t i = 0; mro != NULL && i < PyTuple_GET_SIZE(mro) && owner == NULL; i++) {
+        PyTypeObject *base = (PyTypeObject *)PyTuple_GET_ITEM(mro, i);
+        if ((base->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN) && base->tp_new == slot_tp_new_builtin) {
+            owner = base;
+        }
+    }
+    PyObject *func = owner != NULL ? lu_ns_lookup(lu_type_dict(owner), LU_ID(__new__)) : NULL;
+    if (func == NULL) {
+        return slot_tp_new(type, args, kwargs);
+    }
+    Py_ssize_t nargs;
+    PyObject *kwnames;
+    PyObject **stack = lu_unpack_call(args, kwargs != NULL && ((PyDictObject *)kwargs)->ma_used
+                                      ? kwargs : NULL, &nargs, &kwnames);
+    PyObject *result = NULL;
+    if (stack != NULL) {
+        stack[-1] = (PyObject *)type;
+        lu_new_check_skip(1);
+        result = lu_call(func, stack - 1, nargs + 1, kwnames);
+        lu_new_check_skip(0);
+        release_args(stack, nargs, kwnames);
+    }
+    return result;
+}
+
 static PyObject *
 slot_mp_subscript(PyObject *self, PyObject *key)
 {
@@ -616,7 +651,10 @@ lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from)
     void *value;
     switch (how) {
     case 0: value = NULL; break;
-    case 1: value = s->thunk; break;
+    case 1:
+        value = s->thunk == (void *)slot_tp_new && (tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)
+            ? (void *)slot_tp_new_builtin : s->thunk;
+        break;
     case 2: {
         char *src = from != NULL ? slot_base(from, s->where, 0) : NULL;
         value = src != NULL ? *(void **)(src + s->offset) : NULL;

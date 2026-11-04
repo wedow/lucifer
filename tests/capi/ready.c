@@ -353,6 +353,23 @@ static PyTypeObject MyList_Type = {
     .tp_base = &PyList_Type,
 };
 
+/* ready.FloatSub: a float subtype whose tp_new asks float's tp_new for the instance, as
+   numpy's float64 does. */
+static PyObject *
+floatsub_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+    return PyFloat_Type.tp_new(type, args, kwds);
+}
+
+static PyTypeObject FloatSub_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.FloatSub",
+    .tp_basicsize = sizeof(PyFloatObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_base = &PyFloat_Type,
+    .tp_new = floatsub_new,
+};
+
 /* Capsules. */
 
 static int destroyed;
@@ -733,7 +750,7 @@ PyMODINIT_FUNC
 PyInit_ready(void)
 {
     if (PyType_Ready(&Vec_Type) < 0 || PyType_Ready(&Vec3_Type) < 0 || PyType_Ready(&Locked_Type) < 0
-        || PyType_Ready(&Counter_Type) < 0 || PyType_Ready(&MyList_Type) < 0) {
+        || PyType_Ready(&Counter_Type) < 0 || PyType_Ready(&MyList_Type) < 0 || PyType_Ready(&FloatSub_Type) < 0) {
         return NULL;
     }
     PyObject *m = PyModule_Create(&module);
@@ -742,7 +759,8 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "Vec3", (PyObject *)&Vec3_Type) < 0
         || PyModule_AddObjectRef(m, "Locked", (PyObject *)&Locked_Type) < 0
         || PyModule_AddObjectRef(m, "Counter", (PyObject *)&Counter_Type) < 0
-        || PyModule_AddObjectRef(m, "MyList", (PyObject *)&MyList_Type) < 0) {
+        || PyModule_AddObjectRef(m, "MyList", (PyObject *)&MyList_Type) < 0
+        || PyModule_AddObjectRef(m, "FloatSub", (PyObject *)&FloatSub_Type) < 0) {
         Py_XDECREF(m);
         return NULL;
     }

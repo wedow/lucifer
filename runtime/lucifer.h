@@ -964,6 +964,8 @@ int lu_type_add_descriptors(PyTypeObject *tp);
 /* Adds wrapper descriptors (__add__, __len__, ...) for the C slots tp has
    of its own (runtime/types/wrappers.c). */
 int lu_type_add_operators(PyTypeObject *tp);
+/* The next tp_new_wrapper check (owner.__new__(cls) is safe) passes: C called owner's tp_new itself. */
+void lu_new_check_skip(int on);
 /* Fills tp's dict from its C definition: wrappers for its slots, descriptors,
    methods, __new__ and __doc__ (runtime/types/ready.c). */
 int lu_type_fill_dict(PyTypeObject *tp);

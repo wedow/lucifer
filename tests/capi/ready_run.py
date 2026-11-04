@@ -75,6 +75,18 @@ ml = MyList([3, 1, 2])
 ml.append(0)
 print(ml, len(ml), sorted(ml), type(ml).__mro__, isinstance(ml, list), ml + [9], ml == [3, 1, 2, 0])
 
+# a subtype of a builtin whose tp_new defers to the builtin's
+f = ready.FloatSub(2.5)
+print(f, type(f).__name__, f + 1, isinstance(f, float), ready.FloatSub('3'), ready.FloatSub.__mro__)
+show(ready.FloatSub, 'x')
+
+
+class PyFloatSub(ready.FloatSub):
+    pass
+
+
+print(PyFloatSub(1.5), type(PyFloatSub(1.5)).__name__)
+
 # capsules, imports
 print(ready.capsule_roundtrip())
 show(ready.capsule_import, 'datetime.datetime_CAPI')
