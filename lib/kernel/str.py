@@ -842,7 +842,7 @@ class str_iterator:
         return v
 
     def __reduce__(self):
-        return _iter.seqiter_reduce(self, '')
+        return _iter.seqiter_reduce(self, '', iter)
 
     def __setstate__(self, state):
         _iter.seqiter_setstate(self, state)

@@ -322,6 +322,9 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
         tp->tp_doc = copy;
     }
     PyObject *dict = lu_type_dict(tp);
+    if (PyDict_DelItemString(dict, "__slots__") < 0) {   /* only there to keep the instances free of a __dict__ */
+        goto fail;
+    }
     if (lu_type_add_descriptors(tp) < 0) {
         goto fail;
     }

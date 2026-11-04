@@ -23,13 +23,14 @@ def _name(x):
     return type_tp_name(type(x))
 
 
-def seqiter_reduce(self, empty):
+def seqiter_reduce(self, empty, builtin_iter):
     """__reduce__ of an iterator over a sequence: iter(seq) and the index; an
-    exhausted one rebuilds as an iterator over `empty`."""
+    exhausted one rebuilds as an iterator over `empty`. The caller passes the
+    builtin iter, which this module's own iter shadows."""
     seq, i = iter_state(self)
     if seq is None:
-        return (iter, (empty,))
-    return (iter, (seq,), i)
+        return (builtin_iter, (empty,))
+    return (builtin_iter, (seq,), i)
 
 
 def seqiter_setstate(self, state):
