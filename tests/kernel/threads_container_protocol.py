@@ -398,10 +398,41 @@ def read_resizing():
         for v in RL[1:50:3] + RL[-4:]:
             if torn(v):
                 bad += 1
+        for v in [*RL]:
+            if torn(v):
+                bad += 1
     return bad
 
 
 print('list resizing', race(resize_list, [read_resizing] * 3))
+
+# One list iterator shared by readers, over items another thread made: the
+# first read of each takes the list's lock, which a copying thread keeps
+# contended, so a reader may park inside next(). The iterator must still hand
+# out whole items, and drop its reference to the list exactly once.
+
+
+def made_elsewhere(n):
+    out = []
+    t = threading.Thread(target=lambda: out.append([(i, i) for i in range(n)]))
+    t.start()
+    t.join()
+    return out[0]
+
+
+def share_iterator(rounds):
+    bad = 0
+    for _ in range(rounds):
+        L = made_elsewhere(300)
+        before = sys.getrefcount(L)
+        it = iter(L)
+        bad += sum(race(lambda: L[:], [lambda: sum(torn(v) for v in it)] * 4))
+        del it
+        bad += sys.getrefcount(L) != before
+    return bad
+
+
+print('shared list iterator', share_iterator(100))
 
 # In-place intersections swap a set's body with a temporary's: a key that is
 # in the set before and after must stay findable while the body changes, in
