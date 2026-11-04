@@ -1,8 +1,8 @@
 /* The raised exception (Python/errors.c): one object in the task's
-   current_exception (FOUNDATIONS 2.8). Native raising before the kernel has
-   booted builds a BaseException-layout instance directly, as
-   BaseException.__new__ does, because C must be able to raise before the
-   kernel's exception classes exist; attributes beyond args stay unset. */
+   current_exception (FOUNDATIONS 2.8). Native raising builds a
+   BaseException-layout instance directly, as BaseException.__new__ does,
+   because C must be able to raise before the kernel's exception classes
+   exist, and without running Python; only the classes runs_class names run. */
 
 #include "lucifer.h"
 #include "interp/exceptions.h"
@@ -66,6 +66,31 @@ PyErr_Occurred(void)
         ? (PyObject *)Py_TYPE(ts->current_exception) : NULL;
 }
 
+/* Whether an instance of tp needs its class run (_PyErr_CreateException always
+   runs it): a class defined in Python, or a builtin whose __new__ or __init__
+   reads its arguments into attributes (errno, value, code, msg, lineno, the
+   OSError subclass). Any other builtin's instance is its args alone, built
+   natively so that raising one (RecursionError at the limit, AttributeError in
+   hasattr) never runs Python; so is every instance before the kernel boots. */
+static int
+runs_class(PyTypeObject *tp)
+{
+    if (!PyInterpreterState_Get()->kernel_booted) {
+        return 0;
+    }
+    if (!(tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)) {
+        return 1;
+    }
+    PyObject *const reads_args[] = { PyExc_OSError, PyExc_StopIteration, PyExc_SystemExit, PyExc_ImportError,
+                                     PyExc_SyntaxError, PyExc_UnicodeError, PyExc_BaseExceptionGroup };
+    for (size_t i = 0; i < sizeof reads_args / sizeof reads_args[0]; i++) {
+        if (PyType_IsSubtype(tp, (PyTypeObject *)reads_args[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void
 PyErr_SetObject(PyObject *type, PyObject *value)
 {
@@ -91,10 +116,7 @@ PyErr_SetObject(PyObject *type, PyObject *value)
                 PyTuple_SET_ITEM(args, 0, Py_NewRef(value));
             }
         }
-        /* _PyErr_CreateException: the class runs, so its __new__ and __init__
-           set errno, value and the like; before the kernel's classes exist
-           there is nothing to run. */
-        if (!PyInterpreterState_Get()->kernel_booted) {
+        if (!runs_class((PyTypeObject *)type)) {
             value = exc_new(type, args);
         }
         else {
