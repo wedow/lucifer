@@ -419,6 +419,17 @@ static PyTypeObject Unhashable_Type = {
     .tp_richcompare = delegate_richcompare,
 };
 
+/* ready.BytesCopy: a bytes subtype that copies the base's richcompare and hash
+   slots at module init, as NumPy's bytes_ does. */
+static PyTypeObject BytesCopy_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.BytesCopy",
+    .tp_basicsize = sizeof(PyBytesObject),
+    .tp_itemsize = 1,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_base = &PyBytes_Type,
+};
+
 /* ready.CmpOnly: a tp_richcompare and no tp_hash, as ndarray: unhashable. */
 static PyTypeObject CmpOnly_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -1050,6 +1061,11 @@ PyInit_ready(void)
         || PyType_Ready(&CmpOnly_Type) < 0) {
         return NULL;
     }
+    BytesCopy_Type.tp_richcompare = PyBytes_Type.tp_richcompare;
+    BytesCopy_Type.tp_hash = PyBytes_Type.tp_hash;
+    if (PyType_Ready(&BytesCopy_Type) < 0) {
+        return NULL;
+    }
     PyObject *m = PyModule_Create(&module);
     if (m == NULL
         || PyModule_AddObjectRef(m, "Vec", (PyObject *)&Vec_Type) < 0
@@ -1061,7 +1077,8 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "Delegate", (PyObject *)&Delegate_Type) < 0
         || PyModule_AddObjectRef(m, "Mapped", (PyObject *)&Mapped_Type) < 0
         || PyModule_AddObjectRef(m, "Unhashable", (PyObject *)&Unhashable_Type) < 0
-        || PyModule_AddObjectRef(m, "CmpOnly", (PyObject *)&CmpOnly_Type) < 0) {
+        || PyModule_AddObjectRef(m, "CmpOnly", (PyObject *)&CmpOnly_Type) < 0
+        || PyModule_AddObjectRef(m, "BytesCopy", (PyObject *)&BytesCopy_Type) < 0) {
         Py_XDECREF(m);
         return NULL;
     }

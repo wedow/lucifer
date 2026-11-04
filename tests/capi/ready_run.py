@@ -215,3 +215,8 @@ def kind(subject):
             return 'neither'
 
 print([kind(o) for o in (ready.Vec(1, 2), ready.MyList(), ready.Counter(), ready.CmpOnly(), ready.Mapped(), [1], {1: 2}, 'ab')])
+
+# copied slots of a builtin run that builtin's methods on the subtype's instances
+bc = ready.BytesCopy(b'ab')
+print(bc == b'ab', bc == bytearray(b'ab'), bc.__eq__(5), bc.__lt__(b'b'), bc != 'ab', hash(bc) == hash(b'ab'),
+      ready.BytesCopy.__eq__(bc, bytearray(b'ab')))
