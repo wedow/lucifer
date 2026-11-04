@@ -4,6 +4,7 @@
    which may go negative until the owner merges the two. */
 
 #include "lucifer.h"
+#include "interp/frame.h"
 
 void
 Py_IncRef(PyObject *o)
@@ -276,12 +277,34 @@ PyObject_CallFinalizerFromDealloc(PyObject *self)
     return resurrected;
 }
 
-/* The refcount test of _PyObject_IsUniquelyReferenced. */
+/* The refcount test of _PyObject_IsUniquelyReferenced. CPython 3.14 lends a
+   fast local to the call that uses it (LOAD_FAST_BORROW), so an object held by
+   one local and passed on is still unique there. The value stack here owns
+   what it holds: those references do not count against an object that a local
+   of the calling frame also holds. A temporary only the stack holds is the
+   owner, and counts. */
 int
 PyUnstable_Object_IsUniquelyReferenced(PyObject *op)
 {
-    return _Py_IsOwnedByCurrentThread(op) && op->ob_ref_local == 1
-        && _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared) == 0;
+    if (!_Py_IsOwnedByCurrentThread(op) || _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared) != 0) {
+        return 0;
+    }
+    Py_ssize_t refs = op->ob_ref_local;
+    struct lu_frame *f = (struct lu_frame *)PyThreadState_Get()->current_frame;
+    if (f != NULL && f->stackpointer != NULL) {
+        PyObject **locals = f->localsplus, **stack = locals + f->code->co_nlocalsplus;
+        Py_ssize_t held = 0, lent = 0;
+        for (PyObject **p = locals; p < stack; p++) {
+            held += *p == op;
+        }
+        for (PyObject **p = stack; p < f->stackpointer; p++) {
+            lent += *p == op;
+        }
+        if (held > 0) {
+            refs -= lent;
+        }
+    }
+    return refs == 1;
 }
 
 /* The runtime keeps no temporaries on a value stack C can see, and ignores

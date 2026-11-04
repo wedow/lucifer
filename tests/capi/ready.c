@@ -428,6 +428,12 @@ static PyTypeObject Mapped_Type = {
 };
 
 static PyObject *
+is_unique(PyObject *self, PyObject *arg)
+{
+    return PyBool_FromLong(PyUnstable_Object_IsUniquelyReferenced(arg));
+}
+
+static PyObject *
 is_sequence(PyObject *self, PyObject *arg)
 {
     return PyBool_FromLong(PySequence_Check(arg));
@@ -1003,6 +1009,7 @@ static PyMethodDef module_methods[] = {
     { "errors", errors, METH_NOARGS, NULL },
     { "raise_object", raise_object, METH_VARARGS, NULL },
     { "is_sequence", is_sequence, METH_O, NULL },
+    { "is_unique", is_unique, METH_O, NULL },
     { "sigfunc", is_sequence, METH_O, "sigfunc($module, a, b=1, /)\n--\n\nReal doc." },
     { "badsig", is_sequence, METH_O, "badsig(a, b\nno marker" },
     { "dict_ops", dict_ops, METH_NOARGS, NULL },
