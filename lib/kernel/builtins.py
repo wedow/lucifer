@@ -115,6 +115,9 @@ def issubclass(cls, class_or_tuple, /):
 
 def len(obj, /):
     """Return the number of items in a container."""
+    t = type(obj)
+    if t is list or t is tuple or t is dict or t is str or t is set or t is frozenset or t is bytes:
+        return size(obj)
     return operators.length(obj)
 
 

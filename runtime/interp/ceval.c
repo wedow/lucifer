@@ -274,36 +274,14 @@ subscr_slot(PyObject *container, PyObject *sub)
     return NULL;
 }
 
-/* Whether exact dict `d` has `key`, decided without Python: 1 with *value
-   borrowed, 0 absent, -1 when `key` is not an exact str or int, or an
-   equal-hash entry needs __eq__. */
-static int
-dict_lookup_native(PyObject *d, PyObject *key, PyObject **value)
-{
-    PyTypeObject *kt = Py_TYPE(key);
-    if (!PyDict_CheckExact(d) || (kt != &PyUnicode_Type && kt != &PyLong_Type)) {
-        return -1;
-    }
-    Py_hash_t hash = lu_hash(key);
-    Py_ssize_t ix = lu_dict_probe((PyDictObject *)d, key, hash, -1);
-    if (ix <= -3) {
-        return -1;
-    }
-    if (ix < 0) {
-        return 0;
-    }
-    *value = lu_dk_value(((PyDictObject *)d)->ma_keys, ix);
-    return *value != NULL ? 1 : -1;
-}
-
-/* `item in container` for an exact dict, tuple or list, as dict_lookup_native
+/* `item in container` for an exact dict, tuple or list, as lu_dict_find_native
    decides it: 1, 0, or -1 for the kernel. */
 static int
 contains_native(PyObject *container, PyObject *item)
 {
     PyObject *value, **items;
     if (PyDict_CheckExact(container)) {
-        return dict_lookup_native(container, item, &value);
+        return lu_dict_find_native(container, item, &value);
     }
     if (PyTuple_CheckExact(container)) {
         items = ((PyTupleObject *)container)->ob_item;
@@ -2331,8 +2309,16 @@ op_BINARY_OP: {
             Py_DECREF(right);
             DISPATCH();
         }
+        if (PyBytes_CheckExact(left) && PyLong_CheckExact(right) && _PyLong_IsCompact((PyLongObject *)right)
+            && _PyLong_CompactValue((PyLongObject *)right) >= 0
+            && _PyLong_CompactValue((PyLongObject *)right) < PyBytes_GET_SIZE(left)) {
+            PUSH(lu_small_int((unsigned char)PyBytes_AS_STRING(left)[_PyLong_CompactValue((PyLongObject *)right)]));
+            Py_DECREF(left);
+            Py_DECREF(right);
+            DISPATCH();
+        }
         PyObject *value;
-        if (dict_lookup_native(left, right, &value) > 0) {
+        if (PyDict_CheckExact(left) && lu_dict_find_native(left, right, &value) > 0) {
             PUSH(Py_NewRef(value));
             Py_DECREF(left);
             Py_DECREF(right);
@@ -2468,6 +2454,19 @@ op_STORE_SUBSCR: {
         Py_DECREF(container);
         Py_DECREF(sub);
         DISPATCH();
+    }
+    if (PyDict_CheckExact(container)) {
+        SAVE_FRAME();
+        int done = lu_dict_put_native(container, sub, sp[-3]);
+        ERROR_IF(done == -2);
+        if (done == 1) {
+            PyObject *value = sp[-3];
+            sp -= 3;
+            Py_DECREF(value);
+            Py_DECREF(container);
+            Py_DECREF(sub);
+            DISPATCH();
+        }
     }
     sp -= 3;
     kargs[0] = container;

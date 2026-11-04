@@ -135,6 +135,12 @@ PyObject *lu_dict_copy(PyDictObject *mp);
 int lu_dict_merge_prepare(PyDictObject *mp, PyDictObject *other);
 /* The entry number of exact-str `key` in a namespace dict, or -1. */
 Py_ssize_t lu_ns_index(PyObject *dict, PyObject *key);
+/* Lookup and store of an exact str or int key in any dict, decided without
+   Python: find answers 1 with *value borrowed, 0 absent, or -1 when the key
+   is another type or an equal-hash entry needs __eq__; put answers 1 stored,
+   -1 undecided, -2 with an exception set. */
+int lu_dict_find_native(PyObject *d, PyObject *key, PyObject **value);
+int lu_dict_put_native(PyObject *d, PyObject *key, PyObject *value);
 /* A new dict of type tp with no entries. */
 PyObject *lu_dict_alloc(PyTypeObject *tp);
 Py_ssize_t lu_dict_sizeof(PyDictObject *mp);
