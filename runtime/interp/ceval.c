@@ -2022,10 +2022,11 @@ op_CALL_INTRINSIC_1: {
         PyObject *value = POP();
         PyObject *sys = lu_ns_lookup(ts->interp->modules, PyUnicode_InternFromString("sys"));
         PyObject *hook = sys != NULL ? PyObject_GetAttrString(sys, "displayhook") : NULL;
-        PyObject *r = hook != NULL ? lu_call(hook, &value, 1, NULL) : NULL;
-        if (hook == NULL && !PyErr_Occurred()) {
+        if (hook == NULL && (!PyErr_Occurred() || PyErr_ExceptionMatches(PyExc_AttributeError))) {
+            PyErr_Clear();
             lu_err_format(PyExc_RuntimeError, "lost sys.displayhook");
         }
+        PyObject *r = hook != NULL ? lu_call(hook, &value, 1, NULL) : NULL;
         Py_XDECREF(hook);
         Py_DECREF(value);
         ERROR_IF(r == NULL);

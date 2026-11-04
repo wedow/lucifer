@@ -764,7 +764,9 @@ lu_function_from_args(PyObject *const *a)
 {
     PyObject *code = a[0], *globals = a[1], *name = a[2], *defaults = a[3], *closure = a[4], *kwdefaults = a[5];
     if (!PyCode_Check(code) || !PyDict_Check(globals)) {
-        lu_err_format(PyExc_TypeError, "function() argument 'code' must be code and 'globals' dict");
+        PyObject *bad = !PyCode_Check(code) ? code : globals;
+        lu_err_format(PyExc_TypeError, "function() argument '%s' must be %s, not %.200s",
+                      bad == code ? "code" : "globals", bad == code ? "code" : "dict", Py_TYPE(bad)->tp_name);
         return NULL;
     }
     int nfree = ((PyCodeObject *)code)->co_nfreevars;

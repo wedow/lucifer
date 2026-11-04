@@ -473,25 +473,39 @@ PyObject_GenericGetDict(PyObject *obj, void *closure)
     return Py_XNewRef(d);
 }
 
-int
-PyObject_GenericSetDict(PyObject *obj, PyObject *value, void *closure)
+/* Stores or (value NULL) deletes the instance dict; a deleted one is recreated empty on the next use. */
+static int
+set_dict(PyObject *obj, PyObject *value)
 {
     PyObject **p = dict_ptr(obj);
     if (p == NULL) {
         lu_err_format(PyExc_AttributeError, "This object has no __dict__");
         return -1;
     }
-    if (value == NULL) {
-        Py_CLEAR(*p);                   /* recreated empty on the next use */
-        return 0;
-    }
-    if (!PyDict_Check(value)) {
+    if (value != NULL && !PyDict_Check(value)) {
         lu_err_format(PyExc_TypeError, "__dict__ must be set to a dictionary, not a '%.200s'",
                       Py_TYPE(value)->tp_name);
         return -1;
     }
     Py_XSETREF(*p, Py_XNewRef(value));
     return 0;
+}
+
+int
+PyObject_GenericSetDict(PyObject *obj, PyObject *value, void *closure)
+{
+    if (value == NULL) {
+        lu_err_format(PyExc_TypeError, "cannot delete __dict__");
+        return -1;
+    }
+    return set_dict(obj, value);
+}
+
+/* A class instance's __dict__ (subtype_setdict) may be deleted too. */
+static int
+subtype_setdict(PyObject *obj, PyObject *value, void *closure)
+{
+    return set_dict(obj, value);
 }
 
 static PyObject *
@@ -502,7 +516,7 @@ subtype_getweakref(PyObject *obj, void *closure)
 }
 
 static PyGetSetDef subtype_getsets_full[] = {
-    { "__dict__", PyObject_GenericGetDict, PyObject_GenericSetDict,
+    { "__dict__", PyObject_GenericGetDict, subtype_setdict,
       "dictionary for instance variables", NULL },
     { "__weakref__", subtype_getweakref, NULL,
       "list of weak references to the object", NULL },
