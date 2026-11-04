@@ -42,7 +42,7 @@
       },
       "observation_error": false,
       "returncode": 0,
-      "seconds": 24.40368340490386,
+      "seconds": 6.6240069849882275,
       "skip_reasons": {},
       "state": "PASSED",
       "unexpected_ids": []
@@ -83,7 +83,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 144.17749108397402,
+      "seconds": 89.00540939019993,
       "skip_reasons": {
         "test.test_bytes.AssortedBytesTest.test_compare": "BytesWarning is needed for this test: use -bb option",
         "test.test_bytes.ByteArrayAsStringTest.test_replace_overflow": "only applies to 32-bit platforms",
@@ -135,7 +135,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 27.554130346048623,
+      "seconds": 10.679104681126773,
       "skip_reasons": {
         "test.test_class.ClassTests.testSFBug532646": "the C stack is large enough for 150000 recursive calls",
         "test.test_class.TestInlineValues.test_detach_materialized_dict_no_memory": "No module named '_testcapi'"
@@ -180,7 +180,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 79.76299839210697,
+      "seconds": 37.60501781804487,
       "skip_reasons": {
         "test.test_descr.ClassPropertiesAndMethods.test_bpo25750": "need the _testcapi module",
         "test.test_descr.ClassPropertiesAndMethods.test_classmethods_in_c": "requires xxsubtype module",
@@ -232,7 +232,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 37.28288164618425,
+      "seconds": 13.298119216924533,
       "skip_reasons": {
         "test.test_dict.DictTest.test_repr_deep": "the C stack is large enough for 150000 recursive calls"
       },
@@ -275,7 +275,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 77.35671782679856,
+      "seconds": 30.09995411289856,
       "skip_reasons": {
         "test.test_exceptions.ExceptionTests.testMemoryErrorBigSource": "not enough memory: 4.0G minimum needed",
         "test.test_exceptions.ExceptionTests.testSettingException": "requires _testcapi",
@@ -328,7 +328,7 @@
       },
       "observation_error": false,
       "returncode": 0,
-      "seconds": 44.92363638803363,
+      "seconds": 31.47215560800396,
       "skip_reasons": {
         "test.test_faulthandler.FaultHandlerTests.test_disable_windows_exc_handler": "specific to Windows",
         "test.test_faulthandler.FaultHandlerTests.test_fatal_error": "need _testcapi",
@@ -378,7 +378,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 42.437742771115154,
+      "seconds": 11.430031980853528,
       "skip_reasons": {
         "test.test_float.GeneralFloatCases.test_float_with_comma": "decimal_point is not \",\"",
         "test.test_float.IEEEFormatTestCase.test_serialized_float_rounding": "needs _testcapi"
@@ -422,7 +422,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 36.602322914870456,
+      "seconds": 13.766150612849742,
       "skip_reasons": {
         "test.test_generators.SignalAndYieldFromTest.test_raise_and_yield_from": "needs _testcapi.raise_SIGINT_then_send_None"
       },
@@ -463,7 +463,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 26.45768291805871,
+      "seconds": 8.177565193967894,
       "skip_reasons": {},
       "state": "FAILED",
       "unexpected_ids": []
@@ -504,7 +504,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 46.01546599599533,
+      "seconds": 22.00062623503618,
       "skip_reasons": {
         "test.test_int.IntStrDigitLimitsTests.test_int_max_str_digits_is_per_interpreter": "requires _testcapi",
         "test.test_int.IntSubclassStrDigitLimitsTests.test_int_max_str_digits_is_per_interpreter": "requires _testcapi",
@@ -549,7 +549,7 @@
       },
       "observation_error": false,
       "returncode": 0,
-      "seconds": 26.73469029716216,
+      "seconds": 8.12645204178989,
       "skip_reasons": {
         "test.test_list.ListTest.test_no_memory": "No module named '_testcapi'",
         "test.test_list.ListTest.test_repr_deep": "the C stack is large enough for 200000 recursive calls"
@@ -590,7 +590,7 @@
       },
       "observation_error": false,
       "returncode": 0,
-      "seconds": 56.488276711897925,
+      "seconds": 24.234697178937495,
       "skip_reasons": {},
       "state": "PASSED",
       "unexpected_ids": []
@@ -628,7 +628,7 @@
       },
       "observation_error": false,
       "returncode": 0,
-      "seconds": 18.53614739701152,
+      "seconds": 5.025777347153053,
       "skip_reasons": {},
       "state": "PASSED",
       "unexpected_ids": []
@@ -668,7 +668,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 168.61931695207022,
+      "seconds": 89.70217241789214,
       "skip_reasons": {},
       "state": "FAILED",
       "unexpected_ids": []
@@ -709,7 +709,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 130.88386779488064,
+      "seconds": 51.62929411302321,
       "skip_reasons": {
         "test.test_str.StrTest.test_case_operation_overflow": "requires 32-bit system",
         "test.test_str.StrTest.test_expandtabs_overflows_gracefully": "only applies to 32-bit platforms",
@@ -758,7 +758,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 26.742455147905275,
+      "seconds": 7.1714344311039895,
       "skip_reasons": {
         "test.test_tuple.TupleTest.test_hash_deeply_nested": "the C stack is large enough for 500000 recursive calls"
       },
@@ -801,7 +801,7 @@
       },
       "observation_error": false,
       "returncode": 2,
-      "seconds": 27.6327334290836,
+      "seconds": 11.11771970312111,
       "skip_reasons": {
         "test.test_types.SubinterpreterTests.test_static_types_inherited_slots": "subinterpreters required",
         "test.test_types.UnionTests.test_or_type_operator_reference_cycle": "Cannot get total reference count."
