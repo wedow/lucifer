@@ -5,7 +5,7 @@ deps: []
 links: []
 created: 2026-11-03T23:49:57Z
 type: bug
-priority: 2
+priority: 1
 ---
 # Compiler is superlinear on huge functions: a 100,000-line function takes ~12 min vs 1.8 s on CPython
 
