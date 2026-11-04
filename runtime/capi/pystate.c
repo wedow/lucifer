@@ -218,3 +218,78 @@ PyGILState_Release(PyGILState_STATE oldstate)
         PyEval_SaveThread();
     }
 }
+
+/* Single-phase modules, indexed in the interpreter for PyState_FindModule
+   (Python/pystate.c). The index lives in the def, as PyModuleDef_Init
+   assigned it; a def that reached us without one takes the next. */
+
+static Py_ssize_t
+module_index(PyModuleDef *def)
+{
+    Py_ssize_t index = def->m_base.m_index;
+    if (index == 0) {
+        index = __atomic_add_fetch(&_PyRuntime.next_module_index, 1, __ATOMIC_RELAXED);
+        def->m_base.m_index = index;
+    }
+    return index;
+}
+
+int
+PyState_AddModule(PyObject *module, PyModuleDef *def)
+{
+    if (def == NULL) {
+        Py_FatalError("module definition is NULL");
+        return -1;
+    }
+    if (def->m_slots != NULL) {
+        PyErr_SetString(PyExc_SystemError, "PyState_AddModule called on module with slots");
+        return -1;
+    }
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    PyObject *list = interp->modules_by_index;
+    if (list == NULL) {
+        interp->modules_by_index = list = PyList_New(0);
+        if (list == NULL) {
+            return -1;
+        }
+    }
+    Py_ssize_t index = module_index(def);
+    while (PyList_GET_SIZE(list) <= index) {
+        if (PyList_Append(list, Py_None) < 0) {
+            return -1;
+        }
+    }
+    return PyList_SetItem(list, index, Py_NewRef(module));
+}
+
+PyObject *
+PyState_FindModule(PyModuleDef *def)
+{
+    if (def->m_slots != NULL) {
+        return NULL;
+    }
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    PyObject *list = interp->modules_by_index;
+    Py_ssize_t index = def->m_base.m_index;
+    if (list == NULL || index <= 0 || index >= PyList_GET_SIZE(list)) {
+        return NULL;
+    }
+    PyObject *module = PyList_GET_ITEM(list, index);
+    return PyModule_Check(module) ? module : NULL;     /* borrowed */
+}
+
+int
+PyState_RemoveModule(PyModuleDef *def)
+{
+    if (def->m_slots != NULL) {
+        PyErr_SetString(PyExc_SystemError, "PyState_RemoveModule called on module with slots");
+        return -1;
+    }
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    PyObject *list = interp->modules_by_index;
+    Py_ssize_t index = def->m_base.m_index;
+    if (list != NULL && index > 0 && index < PyList_GET_SIZE(list)) {
+        PyList_SetItem(list, index, Py_NewRef(Py_None));
+    }
+    return 0;
+}
