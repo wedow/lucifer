@@ -539,6 +539,46 @@ getattr_native(PyObject *owner, PyObject *name)
     return PyFunction_Check(descr) ? PyMethod_New(descr, owner) : NULL;
 }
 
+/* Whether tp compares for equality as `base` does: the same __eq__ and __ne__. */
+static int
+eq_as(PyTypeObject *tp, PyTypeObject *base)
+{
+    return _PyType_Lookup(tp, LU_ID(__eq__)) == _PyType_Lookup(base, LU_ID(__eq__))
+        && _PyType_Lookup(tp, LU_ID(__ne__)) == _PyType_Lookup(base, LU_ID(__ne__));
+}
+
+/* a == b as PyObject_RichCompare answers it when no Python code decides:
+   builtin scalars by value, objects with object's equality by identity,
+   tuples item by item (an identical pair of items is equal, as
+   PyObject_RichCompareBool has it). 1, 0, or -1 when the kernel must compare. */
+static int
+eq_native(PyObject *a, PyObject *b, int depth)
+{
+    if (a == b && PyFloat_CheckExact(a)) {
+        return -1;              /* lu_native_eq treats a key as equal to itself: not a nan */
+    }
+    int r = lu_native_eq(a, b);
+    if (r >= 0) {
+        return r;
+    }
+    PyTypeObject *ta = Py_TYPE(a), *tb = Py_TYPE(b);
+    if (eq_as(ta, &PyBaseObject_Type) && eq_as(tb, &PyBaseObject_Type)) {
+        return a == b;
+    }
+    if (PyTuple_Check(a) && PyTuple_Check(b) && depth < 16 && eq_as(ta, &PyTuple_Type)
+        && eq_as(tb, &PyTuple_Type)) {
+        Py_ssize_t n = Py_MIN(Py_SIZE(a), Py_SIZE(b));
+        for (Py_ssize_t i = 0; i < n; i++) {
+            PyObject *x = PyTuple_GET_ITEM(a, i), *y = PyTuple_GET_ITEM(b, i);
+            if (x != y && (r = eq_native(x, y, depth + 1)) != 1) {
+                return r;
+            }
+        }
+        return Py_SIZE(a) == Py_SIZE(b);
+    }
+    return -1;
+}
+
 /* The kernel functions that C answers for plain arguments, so that the common
    call of dict.get, len and isinstance runs no frame: the result, or NULL
    when the kernel must run. */
@@ -2811,18 +2851,18 @@ op_FOR_ITER: {
 }
 
 op_COMPARE_OP: {
-    /* Exact str equality and exact ints here; the rest is the kernel's compare. */
+    /* Ints (bools too) and equality that needs no Python code here; the rest is the kernel's compare. */
     SKIP_CACHES();
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
-    int op = oparg >> 5, r;
-    if (PyUnicode_CheckExact(left) && PyUnicode_CheckExact(right) && (op == Py_EQ || op == Py_NE)) {
-        r = lu_str_eq(left, right) == (op == Py_EQ);
-    }
-    else if (PyLong_CheckExact(left) && PyLong_CheckExact(right)) {
+    int op = oparg >> 5, r, eq;
+    if ((PyLong_CheckExact(left) || PyBool_Check(left)) && (PyLong_CheckExact(right) || PyBool_Check(right))) {
         int c = lu_long_compare(left, right);
         r = op == Py_LT ? c < 0 : op == Py_LE ? c <= 0 : op == Py_EQ ? c == 0
           : op == Py_NE ? c != 0 : op == Py_GT ? c > 0 : c >= 0;
+    }
+    else if ((op == Py_EQ || op == Py_NE) && (eq = eq_native(left, right, 0)) >= 0) {
+        r = eq == (op == Py_EQ);
     }
     else {
         sp -= 2;
