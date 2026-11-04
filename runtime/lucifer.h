@@ -838,6 +838,7 @@ PyObject *lu_weakref_new(PyTypeObject *type, PyObject *ob, PyObject *callback);
 /* The head of ob's list of weak references, or NULL if its type has none. */
 PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
+void lu_capsule_init(void);
 void lu_storage_init(void);
 void lu_module_init(void);
 void lu_exc_init(void);
@@ -960,6 +961,14 @@ int lu_type_assign_version(PyTypeObject *tp);
 PyObject *lu_type_name(PyTypeObject *tp);
 /* Adds descriptors for tp_members and tp_getset to the type's dict. */
 int lu_type_add_descriptors(PyTypeObject *tp);
+/* Adds wrapper descriptors (__add__, __len__, ...) for the C slots tp has
+   of its own (runtime/types/wrappers.c). */
+int lu_type_add_operators(PyTypeObject *tp);
+/* Fills tp's dict from its C definition: wrappers for its slots, descriptors,
+   methods, __new__ and __doc__ (runtime/types/ready.c). */
+int lu_type_fill_dict(PyTypeObject *tp);
+/* Lists tp among base's subclasses. */
+int lu_type_add_subclass(PyTypeObject *base, PyTypeObject *tp);
 /* The module of the nearest frame that is not kernel-hidden (PyEval_GetGlobals). */
 PyObject *lu_caller_globals(PyThreadState *ts);
 

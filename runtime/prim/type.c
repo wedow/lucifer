@@ -71,8 +71,8 @@ subclass_of(PyObject *ref)
     return ob == Py_None ? NULL : (PyTypeObject *)ob;
 }
 
-static int
-add_subclass(PyTypeObject *base, PyTypeObject *tp)
+int
+lu_type_add_subclass(PyTypeObject *base, PyTypeObject *tp)
 {
     PyObject **list = subclasses_ref(base);
     if (*list == NULL && (*list = PyList_New(0)) == NULL) {
@@ -332,91 +332,6 @@ lu_type_name(PyTypeObject *tp)
     }
     const char *dot = strrchr(tp->tp_name, '.');
     return PyUnicode_FromString(dot != NULL ? dot + 1 : tp->tp_name);
-}
-
-/* Members (Python/structmember.c PyMember_GetOne/SetOne) for the kinds the
-   runtime's layouts use. */
-
-PyObject *
-PyMember_GetOne(const char *obj_addr, PyMemberDef *l)
-{
-    const char *addr = obj_addr + l->offset;
-    switch (l->type) {
-    case Py_T_OBJECT_EX: {
-        PyObject *v = *(PyObject **)addr;
-        if (v == NULL) {
-            PyObject *obj = (PyObject *)obj_addr;
-            PyObject *name = lu_type_name(Py_TYPE(obj));
-            lu_err_format(PyExc_AttributeError, "'%s' object has no attribute '%s'",
-                          name != NULL ? PyUnicode_AsUTF8(name) : "?", l->name);
-            Py_XDECREF(name);
-            return NULL;
-        }
-        return Py_NewRef(v);
-    }
-    case _Py_T_OBJECT: {
-        PyObject *v = *(PyObject **)addr;
-        return Py_NewRef(v != NULL ? v : Py_None);
-    }
-    case Py_T_INT: return PyLong_FromLong(*(int *)addr);
-    case Py_T_UINT: return PyLong_FromLongLong(*(unsigned int *)addr);
-    case Py_T_LONG: return PyLong_FromLong(*(long *)addr);
-    case Py_T_ULONG: return PyLong_FromLongLong((long long)*(unsigned long *)addr);
-    case Py_T_PYSSIZET: return PyLong_FromLongLong(*(Py_ssize_t *)addr);
-    case Py_T_BOOL: return Py_NewRef(*(char *)addr ? Py_True : Py_False);
-    default:
-        lu_err_format(PyExc_SystemError, "member '%s': type code %d arrives with its user",
-                      l->name, l->type);
-        return NULL;
-    }
-}
-
-int
-PyMember_SetOne(char *obj_addr, PyMemberDef *l, PyObject *v)
-{
-    if (l->flags & Py_READONLY) {
-        lu_err_format(PyExc_AttributeError, "readonly attribute");
-        return -1;
-    }
-    PyObject **addr = (PyObject **)(obj_addr + l->offset);
-    if (l->type == Py_T_BOOL) {
-        if (v == NULL) {
-            lu_err_format(PyExc_TypeError, "can't delete numeric/char attribute");
-            return -1;
-        }
-        if (v != Py_True && v != Py_False) {
-            lu_err_format(PyExc_TypeError, "attribute value type must be bool");
-            return -1;
-        }
-        *(char *)addr = v == Py_True;
-        return 0;
-    }
-    if (l->type == Py_T_PYSSIZET) {
-        long n;
-        if (v == NULL || !PyLong_Check(v) || lu_long_as_long(v, &n) < 0) {
-            lu_err_format(PyExc_TypeError, "an integer is required");
-            return -1;
-        }
-        *(Py_ssize_t *)addr = n;
-        return 0;
-    }
-    if (l->type != Py_T_OBJECT_EX && l->type != _Py_T_OBJECT) {
-        lu_err_format(PyExc_SystemError, "member '%s': storing type code %d arrives with its user",
-                      l->name, l->type);
-        return -1;
-    }
-    PyObject *old = *addr;
-    if (v == NULL && old == NULL && l->type == Py_T_OBJECT_EX) {
-        PyObject *obj = (PyObject *)obj_addr;
-        PyObject *name = lu_type_name(Py_TYPE(obj));
-        lu_err_format(PyExc_AttributeError, "'%s' object has no attribute '%s'",
-                      name != NULL ? PyUnicode_AsUTF8(name) : "?", l->name);
-        Py_XDECREF(name);
-        return -1;
-    }
-    *addr = Py_XNewRef(v);
-    Py_XDECREF(old);
-    return 0;
 }
 
 /* Instance dicts. */
@@ -1233,7 +1148,7 @@ type_new_layout(PyTypeObject *meta, PyObject *name, PyObject *bases, PyObject *n
     }
     inherit_slots(tp, base);
     for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(tp->tp_bases); i++) {
-        if (add_subclass((PyTypeObject *)PyTuple_GET_ITEM(tp->tp_bases, i), tp) < 0) {
+        if (lu_type_add_subclass((PyTypeObject *)PyTuple_GET_ITEM(tp->tp_bases, i), tp) < 0) {
             goto fail_type;
         }
     }
@@ -1616,7 +1531,7 @@ prim_type_set_bases(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         Py_INCREF(base);
         Py_SETREF(tp->tp_base, base);
         for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); i++) {
-            if (add_subclass((PyTypeObject *)PyTuple_GET_ITEM(bases, i), tp) < 0) {
+            if (lu_type_add_subclass((PyTypeObject *)PyTuple_GET_ITEM(bases, i), tp) < 0) {
                 return NULL;
             }
         }
@@ -1662,7 +1577,7 @@ prim_is_subtype(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* tp_new_wrapper's checks for owner.__new__(cls): cls is a subtype of owner
-   and owner is its static base. */
+   and owner is its static base, or an extension type inherited owner's tp_new. */
 static int
 check_new(PyTypeObject *tp, PyTypeObject *owner)
 {
@@ -1677,7 +1592,8 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
     }
     /* Exception types share one allocation rule: a static exception class
        builds its instances with its base exception's __new__. */
-    if (staticbase != owner
+    int inherited = !is_static_builtin(staticbase) && staticbase->tp_new == owner->tp_new;
+    if (staticbase != owner && !inherited
         && !(PyExceptionClass_Check(staticbase) && PyExceptionClass_Check(owner))) {
         lu_err_format(PyExc_TypeError, "%s.__new__(%s) is not safe, use %s.__new__()",
                       owner->tp_name, tp->tp_name, staticbase->tp_name);

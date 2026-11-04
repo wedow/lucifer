@@ -56,8 +56,10 @@ struct lu_kernel_getset {
 };
 
 /* Kernel wrapper descriptors share this wrapperbase; d_wrapped is the def. */
-static PyObject *kernel_wrapper(PyObject *self, PyObject *args, void *wrapped);
-static struct wrapperbase kernel_wrapperbase = { .name = "kernel", .wrapper = kernel_wrapper };
+static PyObject *kernel_wrapper(PyObject *self, PyObject *args, void *wrapped, PyObject *kwargs);
+static struct wrapperbase kernel_wrapperbase = {
+    .name = "kernel", .wrapper = (wrapperfunc)(void (*)(void))kernel_wrapper,
+    .flags = PyWrapperFlag_KEYWORDS };
 
 PyObject *
 lu_kernel_meth(PyObject *self, PyObject *args)
@@ -207,13 +209,42 @@ kernel_method_vectorcall(PyObject *callable, PyObject *const *args, size_t nargs
     return lu_call(((struct lu_kernel_def *)d->d_method)->func, args, nargsf, kwnames);
 }
 
-/* A wrapperfunc for kernel slot wrappers called with a tuple from C. */
+/* A wrapperfunc for kernel slot wrappers called with a tuple and dict from C. */
 static PyObject *
-kernel_wrapper(PyObject *self, PyObject *args, void *wrapped)
+kernel_wrapper(PyObject *self, PyObject *args, void *wrapped, PyObject *kwargs)
 {
-    Py_ssize_t n = PyTuple_GET_SIZE(args);
-    return call_prepended(((struct lu_kernel_def *)wrapped)->func, self,
-                          &PyTuple_GET_ITEM(args, 0), n, NULL);
+    Py_ssize_t n;
+    PyObject *kwnames;
+    PyObject **stack = lu_unpack_call(args, kwargs != NULL && ((PyDictObject *)kwargs)->ma_used ? kwargs : NULL,
+                                      &n, &kwnames);
+    if (stack == NULL) {
+        return NULL;
+    }
+    PyObject *result = call_prepended(((struct lu_kernel_def *)wrapped)->func, self, stack, n, kwnames);
+    Py_ssize_t total = n + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
+    for (Py_ssize_t i = 0; i < total; i++) {
+        Py_DECREF(stack[i]);
+    }
+    Py_XDECREF(kwnames);
+    PyMem_Free(stack - 1);
+    return result;
+}
+
+/* wrapperdescr_call's last step: only a wrapper flagged
+   PyWrapperFlag_KEYWORDS takes keyword arguments. */
+static PyObject *
+call_wrapper(PyWrapperDescrObject *d, PyObject *self, PyObject *args, void *wrapped,
+             PyObject *kwargs)
+{
+    if (d->d_base->flags & PyWrapperFlag_KEYWORDS) {
+        return ((wrapperfunc_kwds)(void (*)(void))d->d_base->wrapper)(self, args, wrapped, kwargs);
+    }
+    if (kwargs != NULL && ((PyDictObject *)kwargs)->ma_used) {
+        lu_err_format(PyExc_TypeError, "wrapper %s() takes no keyword arguments",
+                      PyUnicode_AsUTF8(d->d_common.d_name));
+        return NULL;
+    }
+    return d->d_base->wrapper(self, args, wrapped);
 }
 
 static PyObject *
@@ -224,11 +255,6 @@ wrapperdescr_call(PyObject *callable, PyObject *args, PyObject *kwargs)
     if (check_self((PyDescrObject *)d, &PyTuple_GET_ITEM(args, 0), n, 1) < 0) {
         return NULL;
     }
-    if (kwargs != NULL && ((PyDictObject *)kwargs)->ma_used) {
-        lu_err_format(PyExc_TypeError, "wrapper %s() takes no keyword arguments",
-                      PyUnicode_AsUTF8(d->d_common.d_name));
-        return NULL;
-    }
     PyObject *rest = PyTuple_New(n - 1);
     for (Py_ssize_t i = 1; rest != NULL && i < n; i++) {
         PyTuple_SET_ITEM(rest, i - 1, Py_NewRef(PyTuple_GET_ITEM(args, i)));
@@ -236,7 +262,7 @@ wrapperdescr_call(PyObject *callable, PyObject *args, PyObject *kwargs)
     if (rest == NULL) {
         return NULL;
     }
-    PyObject *result = d->d_base->wrapper(PyTuple_GET_ITEM(args, 0), rest, d->d_wrapped);
+    PyObject *result = call_wrapper(d, PyTuple_GET_ITEM(args, 0), rest, d->d_wrapped, kwargs);
     Py_DECREF(rest);
     return result;
 }
@@ -245,12 +271,7 @@ static PyObject *
 method_wrapper_call(PyObject *callable, PyObject *args, PyObject *kwargs)
 {
     wrapperobject *w = (wrapperobject *)callable;
-    if (kwargs != NULL && ((PyDictObject *)kwargs)->ma_used) {
-        lu_err_format(PyExc_TypeError, "wrapper %s() takes no keyword arguments",
-                      PyUnicode_AsUTF8(w->descr->d_common.d_name));
-        return NULL;
-    }
-    return w->descr->d_base->wrapper(w->self, args, w->descr->d_wrapped);
+    return call_wrapper(w->descr, w->self, args, w->descr->d_wrapped, kwargs);
 }
 
 static PyObject *
@@ -347,6 +368,17 @@ lu_descr_new_wrapper(PyTypeObject *type, PyObject *name, struct lu_kernel_def *k
     if (d != NULL) {
         d->d_base = &kernel_wrapperbase;
         d->d_wrapped = k;
+    }
+    return (PyObject *)d;
+}
+
+PyObject *
+PyDescr_NewWrapper(PyTypeObject *type, struct wrapperbase *base, void *wrapped)
+{
+    PyWrapperDescrObject *d = (PyWrapperDescrObject *)descr_new(&PyWrapperDescr_Type, type, base->name);
+    if (d != NULL) {
+        d->d_base = base;
+        d->d_wrapped = wrapped;
     }
     return (PyObject *)d;
 }
@@ -529,6 +561,17 @@ static PyGetSetDef method_descr_getset[] = {
 };
 static PyGetSetDef getset_descr_getset[] = {
     { "__doc__", getset_descr_get_doc, NULL, NULL, NULL },
+    { "__qualname__", descr_get_qualname, NULL, NULL, NULL },
+    { NULL },
+};
+static PyObject *
+member_descr_get_doc(PyObject *self, void *closure)
+{
+    const char *doc = ((PyMemberDescrObject *)self)->d_member->doc;
+    return doc != NULL ? PyUnicode_FromString(doc) : Py_NewRef(Py_None);
+}
+static PyGetSetDef member_descr_getset[] = {
+    { "__doc__", member_descr_get_doc, NULL, NULL, NULL },
     { "__qualname__", descr_get_qualname, NULL, NULL, NULL },
     { NULL },
 };
@@ -726,7 +769,7 @@ lu_descr_init(void)
            descr, descr_members, plain_descr_getset);
     PyWrapperDescr_Type.tp_call = wrapperdescr_call;
     layout(&PyMemberDescr_Type, sizeof(PyMemberDescrObject), 0, descr,
-           descr_members, plain_descr_getset);
+           descr_members, member_descr_getset);
     layout(&PyGetSetDescr_Type, sizeof(PyGetSetDescrObject), 0, descr,
            descr_members, getset_descr_getset);
     layout(&lu_method_wrapper_type, sizeof(wrapperobject), 0, wrapper,
