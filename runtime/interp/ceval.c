@@ -1858,6 +1858,23 @@ op_LOAD_ATTR: {
             }
             DISPATCH();
         }
+        if (descr != NULL && object_attr_hook(Py_TYPE(owner), LU_ID(__getattribute__))) {
+            /* A data descriptor whose __get__ is a Python function decides the
+               access: run it in this loop, as generic_getattr would. */
+            PyTypeObject *dt = Py_TYPE(descr);
+            PyObject *getter = _PyType_Lookup(dt, LU_ID(__get__));
+            if (getter != NULL && Py_IS_TYPE(getter, &PyFunction_Type)
+                && (_PyType_Lookup(dt, LU_ID(__set__)) != NULL || _PyType_Lookup(dt, LU_ID(__delete__)) != NULL)) {
+                kargs[0] = Py_NewRef(descr);
+                kargs[1] = POP();
+                kargs[2] = Py_NewRef((PyObject *)Py_TYPE(kargs[1]));
+                SAVE_FRAME();
+                callee = lu_frame_call(ts, (PyFunctionObject *)getter, kargs, 3, NULL);
+                ERROR_IF(callee == NULL);
+                callee->ret = kret;
+                goto push_callee;
+            }
+        }
         kid = get == lu_slot_tp_getattro ? LU_K_getattr : LU_K_generic_getattr;
         kargs[0] = POP();
         kargs[1] = Py_NewRef(name);
