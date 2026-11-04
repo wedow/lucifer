@@ -828,6 +828,7 @@ extern LU_EXPORT union lu_runtime {
         } qsbr;
         struct {
             int tripped;                /* some handler's flag is set */
+            int unhandled_keyboard_interrupt;   /* a KeyboardInterrupt ended the program: exit by SIGINT */
             struct {
                 int tripped;
                 PyObject *func;         /* the Python handler, strong; NULL for none */

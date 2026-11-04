@@ -110,9 +110,6 @@ report(void)
     return 1;
 }
 
-/* Set when a KeyboardInterrupt ended the program: the process then dies of SIGINT. */
-static int unhandled_keyboard_interrupt;
-
 /* The status of a program that ended by an exception nothing caught
    (Python/pythonrun.c _Py_HandleSystemExit, then the excepthook): SystemExit
    leaves quietly with its code, anything else prints a traceback. */
@@ -149,7 +146,7 @@ report_uncaught(void)
     }
     else {
         if (PyType_IsSubtype(Py_TYPE(exc), (PyTypeObject *)PyExc_KeyboardInterrupt)) {
-            unhandled_keyboard_interrupt = 1;
+            _PyRuntime.signals.unhandled_keyboard_interrupt = 1;
         }
         /* sys.excepthook(type, value, traceback); without one, the default display */
         PyObject *hook = lu_ns_lookup(_PyRuntime.main_interp.sysdict, PyUnicode_InternFromString("excepthook"));
@@ -690,7 +687,7 @@ static int
 finalize_status(int status)
 {
     status = Py_FinalizeEx() < 0 && status == 0 ? 120 : status;
-    return __atomic_load_n(&unhandled_keyboard_interrupt, __ATOMIC_RELAXED) ? exit_sigint() : status;
+    return __atomic_load_n(&_PyRuntime.signals.unhandled_keyboard_interrupt, __ATOMIC_RELAXED) ? exit_sigint() : status;
 }
 
 /* Modules/main.c: run the file the config names, then finalize. */
