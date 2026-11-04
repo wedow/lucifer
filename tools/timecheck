@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Wall-clock bounds for two costs that grow with the Python-side compiler.
+
+  uncaught   a script that raises and is not caught: the traceback display
+             imports `traceback`, whose modules compile source at import
+  huge       exec of a 100,000-line function, the size of the one in
+             test_sys_settrace.test_jump_extended_args_for_iter
+
+Each case runs on BIN, and on the oracle when --oracle is given, and prints
+both times. Exit status 1 when BIN is slower than a bound or its stderr
+differs from the oracle's. The bounds are generous: they catch a return of
+the quadratic or per-import costs, not a few percent.
+
+usage: timecheck --lucifer BIN [--oracle PYTHON] [--max-uncaught S] [--max-huge S]
+"""
+import argparse
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+HUGE = "\n".join([
+    "def f(output):",
+    "    output.append(1)",
+    "    for _ in spam:",
+    *(f"        output.append({i})" for i in range(3, 100_000)),
+    "    output.append(100_000)",
+    "f([])",
+])
+UNCAUGHT = 'raise ValueError("x")\n'
+
+
+def run(interpreter, script, limit):
+    start = time.monotonic()
+    try:
+        child = subprocess.run([interpreter, "-I", "-S", script], capture_output=True, timeout=limit)
+    except subprocess.TimeoutExpired:
+        return limit, None
+    return time.monotonic() - start, child
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--lucifer", required=True)
+    parser.add_argument("--oracle")
+    parser.add_argument("--max-uncaught", type=float, default=2.0)
+    parser.add_argument("--max-huge", type=float, default=300.0)
+    args = parser.parse_args()
+    failed = False
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, source, bound in (("uncaught", UNCAUGHT, args.max_uncaught),
+                                    ("huge", HUGE.replace("f([])", "spam = ()\nf([])"), args.max_huge)):
+            script = Path(tmp, name + ".py")
+            script.write_text(source)
+            seconds, child = run(args.lucifer, str(script), bound * 2)
+            bad = False
+            line = f"{name}: lucifer {seconds:.2f}s (bound {bound:g}s)"
+            if args.oracle:
+                oracle_seconds, expected = run(args.oracle, str(script), 600)
+                line += f", oracle {oracle_seconds:.2f}s"
+                if child is not None and (child.stderr, child.returncode) != (expected.stderr, expected.returncode):
+                    line += ", OUTPUT DIFFERS"
+                    bad = True
+            if child is None or seconds > bound:
+                line += ", TOO SLOW"
+                bad = True
+            failed |= bad
+            print(("FAIL " if bad else "PASS ") + line, flush=True)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

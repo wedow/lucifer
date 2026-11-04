@@ -8,7 +8,7 @@ protocols and the error texts."""
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, list_append,
     repr_enter, repr_leave, set_slot, kernel_set,
-    dict_new, dict_probe, dict_key, dict_value, dict_hash, dict_insert, dict_replace, dict_remove,
+    dict_new, dict_probe, dict_find, dict_put, dict_key, dict_value, dict_hash, dict_insert, dict_replace, dict_remove,
     dict_popitem, dict_clear, dict_next, dict_prev, dict_keys_id, dict_copy, dict_merge_prepare,
     dict_sizeof, dictiter_new, dictiter_next, dictiter_len, dictiter_copy, dictview_new,
     dictview_dict, set_next, set_key, set_hash,
@@ -119,11 +119,15 @@ def delete(d, key, h):
 
 
 def contains(d, key):
-    return lookup(d, key, key_hash(key)) >= 0
+    found = dict_find(d, key)
+    if found is NotImplemented:
+        return lookup(d, key, key_hash(key)) >= 0
+    return found is not MISSING
 
 
 def setitem(d, key, value):
-    store(d, key, key_hash(key), value)
+    if dict_put(d, key, value) is NotImplemented:
+        store(d, key, key_hash(key), value)
 
 
 def delitem(d, key):
@@ -412,7 +416,9 @@ dict(**kwargs) -> new dictionary initialized with the name=value pairs
 
     def __getitem__(self, key, /):
         """Return self[key]."""
-        value = find_value(self, key, key_hash(key))
+        value = dict_find(self, key)
+        if value is NotImplemented:
+            value = find_value(self, key, key_hash(key))
         if value is not MISSING:
             return value
         if type(self) is not dict:
@@ -422,7 +428,7 @@ dict(**kwargs) -> new dictionary initialized with the name=value pairs
         key_error(key)
 
     def __setitem__(self, key, value):
-        store(self, key, key_hash(key), value)
+        setitem(self, key, value)
 
     def __delitem__(self, key):
         delitem(self, key)
@@ -461,7 +467,9 @@ dict(**kwargs) -> new dictionary initialized with the name=value pairs
 
     def get(self, key, default=None, /):
         """Return the value for key if key is in the dictionary, else default."""
-        value = find_value(self, key, key_hash(key))
+        value = dict_find(self, key)
+        if value is NotImplemented:
+            value = find_value(self, key, key_hash(key))
         return default if value is MISSING else value
 
     def setdefault(self, key, default=None, /):
@@ -882,6 +890,7 @@ class dict_values:
 
 
 kernel_set('build_map', build_map)
+kernel_set('dict_get', type_lookup(dict, 'get'))
 kernel_set('dict_setitem', setitem)
 kernel_set('dict_delitem', delitem)
 kernel_set('dict_update', update_op)

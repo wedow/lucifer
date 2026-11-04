@@ -4,7 +4,7 @@ fields of its native layout; the kernel reaches them by index."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, alloc,
-    field_get, field_set, iter_new, tuple_from,
+    field_get, field_set, iter_new, tuple_from, list_append,
 )
 from _lucifer import _boot, operators, _args, iter as _iter
 
@@ -45,13 +45,12 @@ def _lengths(fname, i, shorter):
 
 def _check_strict(fname, iters, i):
     """The strict ending after the iterator at i ended: the ones before it
-    ended too, and every later one ends as well."""
+    ended too, and every later one ends as well; else a ValueError."""
     if i:
         _lengths(fname, i, True)
     for j in range(1, size(iters)):
         if next_item(iters[j]) is not MISSING:
             _lengths(fname, j, False)
-    raise StopIteration
 
 
 @kernel_type(static_type('map'))
@@ -127,6 +126,32 @@ is true. If function is None, return the items that are true."""
                 return item
 
 
+def _zip_next(self):
+    """The next tuple of a zip, or MISSING at its end."""
+    iters = field_get(self, 0)
+    if not size(iters):
+        return MISSING
+    values = []
+    for i in range(size(iters)):
+        v = next_item(iters[i])
+        if v is MISSING:
+            if field_get(self, 2):
+                _check_strict('zip', iters, i)
+            return MISSING
+        list_append(values, v)
+    return tuple_from(values, tuple)
+
+
+def _enumerate_next(self):
+    """The next (index, item) of an enumerate, or MISSING at its end."""
+    item = next_item(field_get(self, 0))
+    if item is MISSING:
+        return MISSING
+    i = field_get(self, 1)
+    field_set(self, 1, i + 1)
+    return (i, item)
+
+
 @kernel_type(static_type('zip'))
 class zip:
     """The zip object yields n-length tuples, where n is the number of iterables
@@ -152,18 +177,10 @@ raise a ValueError."""
         return self
 
     def __next__(self):
-        iters = field_get(self, 0)
-        if not size(iters):
+        v = _zip_next(self)
+        if v is MISSING:
             raise StopIteration
-        values = []
-        for i in range(size(iters)):
-            v = next_item(iters[i])
-            if v is MISSING:
-                if field_get(self, 2):
-                    _check_strict('zip', iters, i)
-                raise StopIteration
-            values = [*values, v]
-        return tuple_from(values, tuple)
+        return v
 
 
 @kernel_type(static_type('enumerate'))
@@ -200,12 +217,10 @@ enumerate is useful for obtaining an indexed list:
         return self
 
     def __next__(self):
-        item = next_item(field_get(self, 0))
-        if item is MISSING:
+        v = _enumerate_next(self)
+        if v is MISSING:
             raise StopIteration
-        i = field_get(self, 1)
-        field_set(self, 1, i + 1)
-        return (i, item)
+        return v
 
 
 @kernel_type(static_type('reversed'))
@@ -257,3 +272,7 @@ class reversed:
         n = operators.length(seq)
         position = field_get(self, 1) + 1
         return 0 if position > n else position
+
+
+_iter.NEXT_MISSING[zip] = _zip_next
+_iter.NEXT_MISSING[enumerate] = _enumerate_next

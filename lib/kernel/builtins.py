@@ -8,7 +8,7 @@ from _lucifer import (
     str_join, error, kind, type_lookup, type_tp_name, MISSING, static_type, is_callable,
     is_subtype, size, int_format, int_add, int_as_double, str_chr, str_ord, bytes_ord, str_len,
     object_id, caller_locals, caller_globals, caller_code_flags, eval_code, kernel_get, kernel_set,
-    import_state, field_get,
+    import_state, field_get, setattr_native,
 )
 from _lucifer import _boot, _format, operators, _args, iter as _iter
 import sys
@@ -93,10 +93,21 @@ def _check(name, cls, inst, method, what):
     return True if call_special(check, cls, inst) else False
 
 
+_object_class = type_lookup(object, '__class__')
+_object_getattribute = type_lookup(object, '__getattribute__')
+
+
 def isinstance(obj, class_or_tuple, /):
     """Return whether an object is an instance of a class or of a subclass thereof."""
-    if type(obj) is class_or_tuple:
+    t = type(obj)
+    if t is class_or_tuple:
         return True
+    if type(class_or_tuple) is type:
+        if is_subtype(t, class_or_tuple):
+            return True
+        # A negative answer asks obj.__class__ (object_isinstance).
+        if type_lookup(t, '__class__') is _object_class and type_lookup(t, '__getattribute__') is _object_getattribute:
+            return False
     return _check('isinstance', class_or_tuple, obj, '__instancecheck__',
                   'type, a tuple of types, or a union')
 
@@ -109,6 +120,9 @@ def issubclass(cls, class_or_tuple, /):
 
 def len(obj, /):
     """Return the number of items in a container."""
+    t = type(obj)
+    if t is list or t is tuple or t is dict or t is str or t is set or t is frozenset or t is bytes:
+        return size(obj)
     return operators.length(obj)
 
 
@@ -250,6 +264,8 @@ def setattr(obj, name, value, /):
     """Sets the named attribute on the given object to the specified value.
 
 setattr(x, 'y', v) is equivalent to ``x.y = v``"""
+    if setattr_native(obj, name, value):
+        return
     _attribute_name(name)
     setattr_hook(obj, name, value)
 
@@ -999,3 +1015,7 @@ class NoneType:
 class NotImplementedType:
     def __repr__(self):
         return 'NotImplemented'
+
+
+kernel_set('len', len)
+kernel_set('isinstance', isinstance)

@@ -6,7 +6,7 @@ table that tools/genast writes from Parser/Python.asdl, in the same order
 and with the same attributes as Python-ast.c's init_types.
 """
 
-from _lucifer import repr_enter, repr_leave
+from _lucifer import repr_enter, repr_leave, setattr_native
 from _warnings import warn as _warn
 
 PyCF_ONLY_AST = 0x400
@@ -31,10 +31,15 @@ class AST:
             n = len(fields)
             raise TypeError('%s constructor takes at most %d positional argument%s'
                             % (cls.__name__, n, '' if n == 1 else 's'))
-        remaining = list(fields)
-        for name, value in zip(fields, args):
-            setattr(self, name, value)
-            remaining.remove(name)
+        n = len(args)
+        i = 0
+        while i < n:
+            if not setattr_native(self, fields[i], args[i]):
+                setattr(self, fields[i], args[i])
+            i += 1
+        if not kw and n == len(fields):
+            return
+        remaining = list(fields[n:])
         attributes = None
         for key, value in kw.items():
             if key in fields:

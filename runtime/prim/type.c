@@ -451,10 +451,16 @@ instance_dict(PyObject *obj, int create)
     if (p == NULL) {
         return NULL;
     }
-    if (*p == NULL && create) {
-        *p = PyDict_New();
+    PyObject *d = __atomic_load_n(p, __ATOMIC_ACQUIRE);
+    if (d == NULL && create && (d = PyDict_New()) != NULL) {
+        /* Threads that make it at once keep the first one. */
+        PyObject *first = NULL;
+        if (!__atomic_compare_exchange_n(p, &first, d, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            Py_DECREF(d);
+            d = first;
+        }
     }
-    return *p;
+    return d;
 }
 
 PyObject *
@@ -1862,14 +1868,18 @@ static PyObject *
 prim_ns_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(3); DICT_ARG(0); STR_ARG(1);
-    return lu_ns_insert(args[0], args[1], args[2]) < 0 ? NULL : Py_NewRef(Py_None);
+    return lu_ns_store(args[0], args[1], args[2]) < 0 ? NULL : Py_NewRef(Py_None);
 }
 
 static PyObject *
 prim_ns_del(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); DICT_ARG(0); STR_ARG(1);
-    return bool_of(lu_ns_delete(args[0], args[1]));
+    int found;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
+    found = lu_ns_delete(args[0], args[1]);
+    Py_END_CRITICAL_SECTION();
+    return bool_of(found);
 }
 
 static PyObject *

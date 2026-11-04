@@ -3,7 +3,7 @@ defaultdict, _count_elements and _tuplegetter. OrderedDict stays the
 pure-Python fallback of collections."""
 
 import sys
-from _lucifer import repr_enter, repr_leave
+from _lucifer import repr_enter, repr_leave, kind, size, seq_get
 from _types import GenericAlias
 
 __all__ = ('deque', 'defaultdict', '_deque_iterator', '_deque_reverse_iterator',
@@ -488,12 +488,12 @@ class _tuplegetter:
     def __get__(self, instance, owner=None, /):
         if instance is None:
             return self
-        if not isinstance(instance, tuple):
+        if not kind(instance, 'tuple'):
             raise TypeError("descriptor for index '%d' for tuple subclasses doesn't apply to '%s' object"
                             % (self._index, type(instance).__name__))
-        if self._index >= len(instance):
+        if self._index >= size(instance):
             raise IndexError('tuple index out of range')
-        return instance[self._index]
+        return seq_get(instance, self._index)
 
     def __set__(self, instance, value, /):
         raise AttributeError("can't set attribute")

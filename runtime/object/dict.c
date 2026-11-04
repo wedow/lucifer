@@ -342,10 +342,12 @@ lu_native_eq(PyObject *a, PyObject *b)
     return lu_eq(a, b);
 }
 
-Py_ssize_t
-lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t after)
+/* The probe of lu_dict_probe in one keys table. A lock-free reader can meet
+   an entry that a concurrent deletion has cleared: its key is NULL, and it
+   is passed over like any unequal key. */
+static Py_ssize_t
+probe_keys(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash, Py_ssize_t after)
 {
-    PyDictKeysObject *dk = __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE);
     size_t mask = DK_MASK(dk);
     size_t perturb = hash;
     size_t i = (size_t)hash & mask;
@@ -361,7 +363,7 @@ lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t after)
                 if (k == key) {
                     return ix;
                 }
-                if (lu_dk_hash(dk, ix) == hash) {
+                if (k != NULL && lu_dk_hash(dk, ix) == hash) {
                     int eq = lu_native_eq(k, key);
                     if (eq > 0) {
                         return ix;
@@ -378,6 +380,77 @@ lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t after)
         perturb >>= PERTURB_SHIFT;
         i = mask & (i * 5 + perturb + 1);
     }
+}
+
+Py_ssize_t
+lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t after)
+{
+    return probe_keys(__atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE), key, hash, after);
+}
+
+/* The hash of a key that needs no Python: an exact str or int, or a class
+   (object's hash, equal only to itself). 0 when Python must hash it. */
+static int
+native_hash(PyObject *key, Py_hash_t *hash)
+{
+    PyTypeObject *kt = Py_TYPE(key);
+    if (kt == &PyUnicode_Type || kt == &PyLong_Type) {
+        *hash = lu_hash(key);
+    }
+    else if (kt == &PyType_Type) {
+        *hash = Py_HashPointer(key);
+    }
+    else {
+        return 0;
+    }
+    return 1;
+}
+
+/* The entry number of a native key in the table dk: -1 when absent, -2 when
+   Python must judge. */
+static Py_ssize_t
+probe_native(PyDictKeysObject *dk, PyObject *key, Py_hash_t *hash)
+{
+    if (!native_hash(key, hash)) {
+        return -2;
+    }
+    Py_ssize_t ix = probe_keys(dk, key, *hash, -1);
+    return ix <= -3 ? -2 : ix;
+}
+
+int
+lu_dict_find_native(PyObject *d, PyObject *key, PyObject **value)
+{
+    /* One table for the probe and the read, which a resize may replace. */
+    PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)d)->ma_keys, __ATOMIC_ACQUIRE);
+    Py_hash_t hash;
+    Py_ssize_t ix = probe_native(dk, key, &hash);
+    if (ix == -2) {
+        return -1;
+    }
+    if (ix == -1) {
+        return 0;
+    }
+    *value = lu_dk_value(dk, ix);
+    return *value != NULL ? 1 : -1;
+}
+
+int
+lu_dict_put_native(PyObject *d, PyObject *key, PyObject *value)
+{
+    int result = -1;
+    Py_hash_t hash;
+    Py_BEGIN_CRITICAL_SECTION(d);
+    Py_ssize_t ix = probe_native(((PyDictObject *)d)->ma_keys, key, &hash);
+    if (ix >= 0) {
+        lu_dict_replace((PyDictObject *)d, ix, value);
+        result = 1;
+    }
+    else if (ix == -1) {
+        result = lu_dict_insert((PyDictObject *)d, key, hash, value) < 0 ? -2 : 1;
+    }
+    Py_END_CRITICAL_SECTION();
+    return result;
 }
 
 static size_t
@@ -722,6 +795,16 @@ lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value)
         return 0;
     }
     return lu_dict_insert((PyDictObject *)dict, key, lu_str_hash(key), value);
+}
+
+int
+lu_ns_store(PyObject *dict, PyObject *key, PyObject *value)
+{
+    int err;
+    Py_BEGIN_CRITICAL_SECTION(dict);
+    err = lu_ns_insert(dict, key, value);
+    Py_END_CRITICAL_SECTION();
+    return err;
 }
 
 int

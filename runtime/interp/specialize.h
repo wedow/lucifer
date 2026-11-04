@@ -21,7 +21,10 @@
     X(LOAD_ATTR_METHOD_NO_DICT, LOAD_ATTR) \
     X(LOAD_ATTR_METHOD_WITH_VALUES, LOAD_ATTR) \
     X(LOAD_ATTR_NONDESCRIPTOR_NO_DICT, LOAD_ATTR) \
-    X(LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES, LOAD_ATTR)
+    X(LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES, LOAD_ATTR) \
+    X(LOAD_ATTR_SLOT, LOAD_ATTR) \
+    X(STORE_ATTR_SLOT, STORE_ATTR) \
+    X(STORE_ATTR_WITH_HINT, STORE_ATTR)
 
 /* LOAD_GLOBAL's cache words (_PyLoadGlobalCache). */
 enum {
@@ -110,5 +113,6 @@ lu_site_unchanged(const lu_codeunit *site, int opcode)
    site that cannot be specialized backs off. */
 void lu_specialize_load_global(PyObject *globals, PyObject *builtins, lu_codeunit *site, PyObject *name);
 void lu_specialize_load_attr(PyObject *owner, lu_codeunit *site, PyObject *name);
+void lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name);
 
 #endif
