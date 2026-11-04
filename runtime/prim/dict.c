@@ -64,6 +64,55 @@ prim_dict_probe(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return int_of(lu_dict_probe((PyDictObject *)args[0], args[1], hash, after));
 }
 
+/* The entry number of an exact str or int key, the probe settled without
+   __eq__: -1 when absent, or -2 when Python must judge. */
+static Py_ssize_t
+probe_native(PyObject *d, PyObject *key)
+{
+    PyTypeObject *kt = Py_TYPE(key);
+    if (kt != &PyUnicode_Type && kt != &PyLong_Type) {
+        return -2;
+    }
+    Py_ssize_t ix = lu_dict_probe((PyDictObject *)d, key, lu_hash(key), -1);
+    return ix <= -3 ? -2 : ix;
+}
+
+/* dict_find(d, key) -> the value, MISSING when absent, NotImplemented when
+   the key is not an exact str or int or an equal-hash entry needs __eq__. */
+static PyObject *
+prim_dict_find(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2); DICT(0);
+    Py_ssize_t ix = probe_native(args[0], args[1]);
+    if (ix == -2) {
+        return Py_NewRef(Py_NotImplemented);
+    }
+    PyDictKeysObject *dk = live_entry(args[0], ix);
+    return Py_NewRef(dk != NULL ? lu_dk_value(dk, ix) : LU_MISSING);
+}
+
+/* dict_put(d, key, value) -> True when stored, NotImplemented as dict_find. */
+static PyObject *
+prim_dict_put(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(3); DICT(0);
+    int err = 0;
+    Py_ssize_t ix = -2;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
+    ix = probe_native(args[0], args[1]);
+    if (ix >= 0) {
+        lu_dict_replace((PyDictObject *)args[0], ix, args[2]);
+    }
+    else if (ix == -1) {
+        err = lu_dict_insert((PyDictObject *)args[0], args[1], lu_hash(args[1]), args[2]);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (err < 0) {
+        return NULL;
+    }
+    return Py_NewRef(ix == -2 ? Py_NotImplemented : Py_True);
+}
+
 /* dict_key(d, ix), dict_value(d, ix): the live entry's key or value, else MISSING. */
 static PyObject *
 prim_dict_key(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -403,7 +452,7 @@ lu_dict_views_init(void)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_dict_methods[] = {
-    FAST(dict_new), FAST(dict_probe), FAST(dict_key), FAST(dict_value), FAST(dict_hash),
+    FAST(dict_new), FAST(dict_probe), FAST(dict_find), FAST(dict_put), FAST(dict_key), FAST(dict_value), FAST(dict_hash),
     FAST(dict_insert), FAST(dict_replace), FAST(dict_remove), FAST(dict_popitem),
     FAST(dict_clear), FAST(dict_next), FAST(dict_prev), FAST(dict_keys_id), FAST(dict_copy),
     FAST(dict_merge_prepare), FAST(dict_sizeof), FAST(dictiter_new), FAST(dictiter_next),

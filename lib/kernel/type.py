@@ -333,7 +333,7 @@ type(name, bases, dict, **kwds) -> a new type"""
         if not is_subtype(type(obj), cls):
             return obj
         init = type_lookup(type(obj), '__init__')
-        if init is not MISSING:
+        if init is not MISSING and (init is not _object._object_init or args or kwargs):
             res = call_special(init, obj, *args, **kwargs)
             if res is not None:
                 error(TypeError, str_join('', (

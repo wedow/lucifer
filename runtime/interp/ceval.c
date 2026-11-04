@@ -863,6 +863,13 @@ call_tail: {
         result = Py_NewRef((PyObject *)Py_TYPE(args[0]));       /* type(x) */
         goto call_done;
     }
+    if (callable == (PyObject *)&PyBool_Type && total == 1 && npos == 1) {
+        int truth = lu_truth_exact(args[0]);
+        if (truth >= 0) {
+            result = Py_NewRef(truth ? Py_True : Py_False);
+            goto call_done;
+        }
+    }
     PyObject *target = NULL, *self = NULL;
     if (Py_IS_TYPE(callable, &PyFunction_Type)) {
         target = callable;
