@@ -3,6 +3,7 @@ primitive. epoll and kqueue are absent, so selectors uses poll."""
 
 import _lucifer
 import time as _time
+from operator import index as _index
 
 error = OSError
 
@@ -19,7 +20,7 @@ def _fileno(obj):
             fd = obj.fileno()
         except AttributeError:
             raise TypeError('argument must be an int, or have a fileno() method.') from None
-        fd = fd.__index__()
+        fd = _index(fd)
     if fd < 0:
         raise ValueError('file descriptor cannot be a negative integer (%d)' % fd)
     return fd

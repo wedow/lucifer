@@ -146,9 +146,28 @@ lu_brc_queue_object(PyObject *ob)
         return;
     }
     lu_stack_push(&t->to_merge, ob);
-    /* The owner is registered, so its carrier is alive while the bucket lock
-       is held: it merges at its next poll. */
-    lu_poll_set(entry_of(t)->carrier, LU_POLL_EXPLICIT_MERGE);
+    /* The owner is registered, so its carrier is alive while the bucket lock is held. */
+    struct lu_carrier *c = entry_of(t)->carrier;
+    struct lu_task *owner = __atomic_load_n(&c->task, __ATOMIC_ACQUIRE);
+    if (owner != NULL && lu_task_try_suspend_detached(owner)) {
+        /* The owner is detached (blocked in a lock, a sleep or a system call) and may not run
+           Python code for a long time, so its queue is merged on its behalf. Held suspended it
+           cannot attach, and so cannot touch an object's local count or owner. */
+        struct lu_stack merged = { 0 };
+        take_all(&merged, &t->to_merge);
+        for (size_t i = 0; i < merged.n; i++) {
+            lu_explicit_merge_refcount(merged.items[i], 0);
+        }
+        lu_task_resume_detached(owner);
+        pthread_mutex_unlock(&b->lock.mutex);
+        while (merged.n > 0) {
+            Py_DECREF(merged.items[--merged.n]);        /* the queue's reference: may run destructors */
+        }
+        free(merged.items);
+        return;
+    }
+    /* It merges at its next poll. */
+    lu_poll_set(c, LU_POLL_EXPLICIT_MERGE);
     pthread_mutex_unlock(&b->lock.mutex);
 }
 

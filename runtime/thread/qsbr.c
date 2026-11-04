@@ -193,7 +193,7 @@ lu_qsbr_retire(void *p)
         return;
     }
     struct lu_entry *e = lu_current_entry();
-    if (lu_world_stopped(e->interp) || __atomic_load_n(&_PyRuntime.finalizing, __ATOMIC_RELAXED)) {
+    if (lu_world_stopped(e->interp) || e->interp->tasks_closed) {
         PyMem_Free(p);
         return;
     }

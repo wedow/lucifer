@@ -17,8 +17,7 @@ import _weakref
 class _BufferLock:
     """The lock of a buffered stream (_enter_buffered_busy, Modules/_io/bufferedio.c). It is not
     reentrant: a signal handler that uses the stream its own thread is in the middle of gets a
-    RuntimeError instead of a deadlock. At shutdown the daemon threads are stopped for good, and one
-    may have stopped inside the stream: after a grace period the lock is taken from it."""
+    RuntimeError instead of a deadlock."""
 
     __slots__ = ('_lock', '_owner', '_stream')
 
@@ -31,11 +30,7 @@ class _BufferLock:
         me = get_ident()
         if self._owner == me:
             raise RuntimeError('reentrant call inside %r' % self._stream())
-        if not sys.is_finalizing():
-            self._lock.acquire()
-        elif not self._lock.acquire(True, 1.0):
-            self._lock = Lock()
-            self._lock.acquire()
+        self._lock.acquire()
         self._owner = me
 
     def __exit__(self, exc_type, exc_value, traceback):

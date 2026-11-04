@@ -313,6 +313,26 @@ lu_task_leave(struct lu_task *t)
     __atomic_store_n(&t->carrier, NULL, __ATOMIC_RELEASE);
 }
 
+/* _PyThreadState_TrySuspendDetached: a task that is detached (blocked in a park or a syscall) is held
+   suspended, so that it cannot attach and touch its objects while another thread acts for it. */
+int
+lu_task_try_suspend_detached(struct lu_task *t)
+{
+    int expected = _Py_THREAD_DETACHED;
+    return __atomic_compare_exchange_n(&t->ts.state, &expected, _Py_THREAD_SUSPENDED, 0,
+                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+}
+
+void
+lu_task_resume_detached(struct lu_task *t)
+{
+    int expected = _Py_THREAD_SUSPENDED;
+    if (__atomic_compare_exchange_n(&t->ts.state, &expected, _Py_THREAD_DETACHED, 0,
+                                    __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+        _PyParkingLot_UnparkAll(&t->ts.state);
+    }
+}
+
 void
 lu_task_pin_for_life(void)
 {

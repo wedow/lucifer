@@ -526,6 +526,10 @@ void lu_task_leave(struct lu_task *t);
 /* The calling task calls a platform primitive whose effect belongs to its OS thread
    (sched_setaffinity(0, ...), pthread_sigmask, unshare, setns): it stays on this carrier for life. */
 void lu_task_pin_for_life(void);
+/* Holds a detached task suspended while another thread acts for it, and lets it go: it cannot attach
+   in between. The first answers whether the task was detached. */
+int lu_task_try_suspend_detached(struct lu_task *t);
+void lu_task_resume_detached(struct lu_task *t);
 /* Clears targeted reasons from the task and its carrier's word. */
 void lu_task_unsignal(struct lu_task *t, uintptr_t bits);
 
