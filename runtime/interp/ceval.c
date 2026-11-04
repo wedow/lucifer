@@ -298,9 +298,7 @@ small_index(PyObject *sub)
 }
 
 /* BINARY_OP NB_SUBSCR on an exact list or tuple with a compact int index in
-   range: the item (a new reference), or NULL. A list is read in its critical
-   section, which its mutators hold: they replace the array and the size
-   apart, and free items. */
+   range: the item (a new reference), or NULL. */
 static PyObject *
 subscr_item(PyObject *container, PyObject *sub)
 {
@@ -310,11 +308,7 @@ subscr_item(PyObject *container, PyObject *sub)
         return NULL;
     }
     if (PyList_CheckExact(container)) {
-        Py_BEGIN_CRITICAL_SECTION(container);
-        if (i < Py_SIZE(container)) {
-            item = Py_NewRef(((PyListObject *)container)->ob_item[i]);
-        }
-        Py_END_CRITICAL_SECTION();
+        item = lu_list_item_ref((PyListObject *)container, i);
     }
     else if (PyTuple_CheckExact(container) && i < Py_SIZE(container)) {
         item = Py_NewRef(((PyTupleObject *)container)->ob_item[i]);
@@ -779,17 +773,24 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
             } \
         } \
     } while (0)
-#define POLL() do { \
+/* A poll's exception belongs to the instruction that polled, whose end is
+   `after`: a back-edge has already moved next_instr to its target, which
+   would look the handler up at the wrong offset. A park resumes at next_instr. */
+#define POLL_AFTER(after) do { \
         lu_qsbr_quiescent(carrier); \
         if (__atomic_load_n(poll, __ATOMIC_RELAXED) & LU_POLL_EVENTS_MASK) { \
             SAVE_FRAME(); \
-            ERROR_IF(lu_poll_slow(ts) < 0); \
+            if (lu_poll_slow(ts) < 0) { \
+                next_instr = (after); \
+                goto error; \
+            } \
         } \
         if (migratable && lu_sched_safepoint(task)) { \
             SAVE_FRAME(); \
             return LU_EVAL_PARKED; \
         } \
     } while (0)
+#define POLL() POLL_AFTER(next_instr)
 
     LOAD_FRAME();
     if (mode == EVAL_THROW) {
@@ -1695,8 +1696,9 @@ op_INSTRUMENTED_JUMP_FORWARD: {
 op_INSTRUMENTED_JUMP_BACKWARD: {
     lu_codeunit *this_instr = next_instr - 1;
     SKIP_CACHES();
+    lu_codeunit *after = next_instr;
     INSTRUMENTED_JUMP(this_instr, next_instr - oparg, PY_MONITORING_EVENT_JUMP);
-    POLL();
+    POLL_AFTER(after);
     DISPATCH();
 }
 
@@ -1978,11 +1980,17 @@ op_LIST_EXTEND: {
     PyObject *list = sp[-oparg];
     SAVE_FRAME();
     if (PyTuple_CheckExact(iterable) || PyList_CheckExact(iterable)) {
+        /* A list source is read as subscripts are: another thread may resize it. */
         Py_ssize_t n = Py_SIZE(iterable);
         int err = 0;
-        for (Py_ssize_t i = 0; err == 0 && i < n && i < Py_SIZE(iterable); i++) {
-            err = lu_list_append(list, PyTuple_CheckExact(iterable) ? PyTuple_GET_ITEM(iterable, i)
-                                                                    : PyList_GET_ITEM(iterable, i));
+        for (Py_ssize_t i = 0; err == 0 && i < n; i++) {
+            PyObject *v = PyTuple_CheckExact(iterable) ? Py_NewRef(PyTuple_GET_ITEM(iterable, i))
+                                                       : lu_list_item_ref((PyListObject *)iterable, i);
+            if (v == NULL) {
+                break;
+            }
+            err = lu_list_append(list, v);
+            Py_DECREF(v);
         }
         Py_DECREF(iterable);
         ERROR_IF(err < 0);
@@ -2122,11 +2130,13 @@ op_CALL_INTRINSIC_1: {
     DISPATCH();
 }
 
-op_JUMP_BACKWARD:
+op_JUMP_BACKWARD: {
     SKIP_CACHES();
+    lu_codeunit *after = next_instr;
     next_instr -= oparg;
-    POLL();
+    POLL_AFTER(after);
     DISPATCH();
+}
 
 /* The specialized forms of LOAD_ATTR (owner -- attr, self_or_null[oparg & 1]). */
 

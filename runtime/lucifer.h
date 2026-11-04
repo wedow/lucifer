@@ -1182,8 +1182,73 @@ int lu_watcher_check(lu_watcher *table, int id, const char *invalid, const char 
    lock-free reader can still hold it (runtime/prim/storage.c). */
 void lu_qsbr_retire(void *p);
 
-/* Appends to a list (borrowed item), growing its storage. */
+/* Appends to a list (borrowed item), growing its storage: a list whose lock
+   the caller holds, or that no other thread sees (runtime/prim/storage.c). */
 int lu_list_append(PyObject *list, PyObject *item);
+
+/* A list's ob_item points into a block that starts with its capacity
+   (_PyListArray), so that a reader holding only the pointer can bound its
+   index by the array it loaded, whichever size it read before. The slots are
+   zeroed, so a slot past the size reads as NULL, not as garbage. */
+struct lu_list_array {
+    Py_ssize_t allocated;
+    PyObject *ob_item[];
+};
+
+#define LU_LIST_ARRAY(items) ((struct lu_list_array *)((char *)(items) - offsetof(struct lu_list_array, ob_item)))
+
+/* A zeroed array of room for capacity items (its ob_item), NULL on failure. */
+static inline PyObject **
+lu_list_array_new(Py_ssize_t capacity)
+{
+    struct lu_list_array *a = PyMem_Calloc(1, sizeof(*a) + capacity * sizeof(PyObject *));
+    if (a == NULL) {
+        return NULL;
+    }
+    a->allocated = capacity;
+    return a->ob_item;
+}
+
+static inline void
+lu_list_array_free(PyObject **items)
+{
+    if (items != NULL) {
+        PyMem_Free(LU_LIST_ARRAY(items));
+    }
+}
+
+/* Frees an array a lock-free reader may still hold. */
+static inline void
+lu_list_array_retire(PyObject **items)
+{
+    if (items != NULL) {
+        lu_qsbr_retire(LU_LIST_ARRAY(items));
+    }
+}
+
+/* l[i] as a new reference, read without the list's lock; NULL when i is out
+   of range or the item changed under the read (lu_list_item_ref then asks
+   again under the lock). */
+static inline PyObject *
+lu_list_try_item_ref(PyListObject *l, Py_ssize_t i)
+{
+    Py_ssize_t size = _Py_atomic_load_ssize_relaxed(&((PyVarObject *)l)->ob_size);
+    PyObject **items = _Py_atomic_load_ptr(&l->ob_item);
+    if ((size_t)i >= (size_t)size || items == NULL || i >= LU_LIST_ARRAY(items)->allocated) {
+        return NULL;
+    }
+    return lu_try_xget_ref(&items[i]);
+}
+
+/* l[i] as a new reference, NULL when i is out of range (runtime/prim/storage.c). */
+PyObject *lu_list_item_ref_locked(PyListObject *l, Py_ssize_t i);
+
+static inline PyObject *
+lu_list_item_ref(PyListObject *l, Py_ssize_t i)
+{
+    PyObject *item = lu_list_try_item_ref(l, i);
+    return item != NULL ? item : lu_list_item_ref_locked(l, i);
+}
 
 /* The tuple, list, reverse list and sequence-protocol iterators' layout
    (runtime/prim/storage.c); it_seq is NULL once exhausted. */

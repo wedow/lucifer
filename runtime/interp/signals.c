@@ -57,12 +57,20 @@ redirect_to_main_task(int signum)
 }
 
 static void
-trip_signal(int signum)
+trip(int signum)
 {
-    int save_errno = errno;
     __atomic_store_n(&_PyRuntime.signals.handlers[signum].tripped, 1, __ATOMIC_SEQ_CST);
     __atomic_store_n(&_PyRuntime.signals.tripped, 1, __ATOMIC_SEQ_CST);
     signal_received();
+}
+
+/* The sigaction handler. PyErr_SetInterruptEx trips without it: no signal
+   was sent, so there is none to redirect (it would trip a second time). */
+static void
+trip_signal(int signum)
+{
+    int save_errno = errno;
+    trip(signum);
     redirect_to_main_task(signum);
     errno = save_errno;
 }
@@ -130,7 +138,7 @@ PyErr_SetInterruptEx(int signum)
         return -1;
     }
     if (_PyRuntime.signals.handlers[signum].func != NULL) {
-        trip_signal(signum);
+        trip(signum);
     }
     return 0;
 }
@@ -229,6 +237,16 @@ prim_signal_interrupt(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
+/* default_int_handler(signalnum, frame, /): signal.default_int_handler. It is a C
+   function as in CPython, so that it runs at the recursion limit. */
+static PyObject *
+prim_default_int_handler(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2);
+    PyErr_SetNone(PyExc_KeyboardInterrupt);
+    return NULL;
+}
+
 /* signal_ignored(signum): whether the process ignores the signal (SIG_IGN), as it does for
    SIGINT when started in the background. */
 static PyObject *
@@ -248,5 +266,6 @@ prim_signal_ignored(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_signal_methods[] = {
     FAST(signal_install), FAST(signal_raise), FAST(signal_interrupt), FAST(signal_ignored),
+    FAST(default_int_handler),
     { NULL, NULL, 0, NULL },
 };
