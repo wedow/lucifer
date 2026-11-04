@@ -8,7 +8,7 @@ from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_dict, type_mro, type_tp_name,
     type_qualname, is_subtype, ns_get, alloc, static_type, descr_type, bind,
     method_new, member_get, member_set, getset_kernel, getset_get, getset_set,
-    field_get, field_set, super_args, is_callable, kernel_set, kernel_get, address,
+    field_get, field_set, super_args, is_callable, kernel_set, kernel_get, address, function_new,
 )
 from _lucifer import _boot
 
@@ -34,6 +34,7 @@ def _class_access(instance, owner):
 
 
 _NoneType = static_type('NoneType')
+_Module = static_type('module')
 
 
 def _quote(s):
@@ -51,6 +52,13 @@ def _descr_check(descr, obj):
 
 @kernel_type(static_type('function'))
 class function:
+    def __new__(cls, code, globals, name=None, argdefs=None, closure=None, kwdefaults=None):
+        """Create a function object."""
+        return function_new(code, globals, name, argdefs, closure, kwdefaults)
+
+    def __call__(self, /, *args, **kwargs):
+        return self(*args, **kwargs)
+
     def __get__(self, instance, owner=None):
         if _class_access(instance, owner):
             return self
@@ -58,6 +66,16 @@ class function:
 
     def __repr__(self):
         return str_join('', ('<function ', self.__qualname__, ' at ', address(self), '>'))
+
+
+@kernel_type(static_type('builtin_function_or_method'))
+class builtin_function_or_method:
+    def __reduce__(self):
+        """meth_reduce: a module-level builtin pickles as its name, a bound one as getattr(self, name)."""
+        owner = self.__self__
+        if owner is None or is_subtype(type(owner), _Module):
+            return self.__name__
+        return (getattr, (owner, self.__name__))
 
 
 @kernel_type(static_type('method'))

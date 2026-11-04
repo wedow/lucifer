@@ -65,7 +65,7 @@ The name must be a string; the optional doc argument can have any type."""
                 text = str_join('', ("module '", module_name, "' has no attribute '", name, "'"))
         else:
             text = str_join('', ("module has no attribute '", name, "'"))
-        error(AttributeError, text)
+        raise AttributeError(text, name=name, obj=self)
 
     def __dir__(self):
         d = instance_dict(self, True)

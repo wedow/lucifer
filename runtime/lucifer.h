@@ -897,6 +897,8 @@ extern PyModuleDef lu_lucifer_module;
 
 /* A function for `code` closing over `globals` (runtime/object/function.c). */
 PyObject *lu_function_new(PyObject *code, PyObject *globals);
+/* function.__new__ over (code, globals, name, defaults, closure, kwdefaults). */
+PyObject *lu_function_from_args(PyObject *const *args);
 
 /* The namespace dict (runtime/object/dict.c): lookups and stores with exact
    str keys, which LOAD_NAME/LOAD_GLOBAL, module attributes and the kernel's

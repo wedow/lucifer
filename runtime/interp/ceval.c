@@ -143,6 +143,11 @@ static void
 name_error(PyObject *name)
 {
     lu_err_format(PyExc_NameError, NAME_ERROR_MSG, PyUnicode_AsUTF8(name));
+    PyObject *exc = PyErr_GetRaisedException();
+    if (exc != NULL && PyObject_SetAttrString(exc, "name", name) < 0) {
+        PyErr_Clear();
+    }
+    PyErr_SetRaisedException(exc);
 }
 
 /* LOAD_NAME and LOAD_GLOBAL over namespace dicts; mappings that are not
@@ -169,6 +174,19 @@ locals_get(PyObject *ns, PyObject *name)
     PyObject *v = lu_call_kernel(LU_K_getitem, args, 2);
     if (v == NULL && PyErr_ExceptionMatches(PyExc_KeyError)) {
         PyErr_Clear();
+    }
+    return v;
+}
+
+/* LOAD_GLOBAL's lookup: the globals, then the builtins, either of which may be
+   a dict subclass or other mapping (annotationlib runs __annotate__ over one).
+   A new reference, or NULL without an error for a miss. */
+static PyObject *
+global_get(struct lu_frame *frame, PyObject *name)
+{
+    PyObject *v = locals_get(frame->globals, name);
+    if (v == NULL && !PyErr_Occurred()) {
+        v = locals_get(frame->builtins, name);
     }
     return v;
 }
@@ -622,12 +640,8 @@ op_LOAD_NAME: {
         goto error;
     }
     v = locals_get(frame->locals, name);
-    if (v == NULL && !PyErr_Occurred()) {
-        if ((v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
-            && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
-            name_error(name);
-        }
-        Py_XINCREF(v);
+    if (v == NULL && !PyErr_Occurred() && (v = global_get(frame, name)) == NULL && !PyErr_Occurred()) {
+        name_error(name);
     }
     ERROR_IF(v == NULL);
     PUSH(v);
@@ -677,12 +691,11 @@ op_LOAD_GLOBAL: {
     PyObject *name = NAME(oparg >> 1), *v;
     ADAPT(lu_specialize_load_global(frame->globals, frame->builtins, next_instr - 1, name));
     SKIP_CACHES();
-    if ((v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
-        && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
+    if ((v = global_get(frame, name)) == NULL && !PyErr_Occurred()) {
         name_error(name);
     }
     ERROR_IF(v == NULL);
-    PUSH(Py_NewRef(v));
+    PUSH(v);
     if (oparg & 1) {
         PUSH(NULL);
     }
@@ -1873,12 +1886,8 @@ op_LOAD_FROM_DICT_OR_GLOBALS: {
     SAVE_FRAME();
     PyObject *v;
     v = locals_get(dict, name);
-    if (v == NULL && !PyErr_Occurred()) {
-        if ((v = ns_get(frame->globals, name)) == NULL && !PyErr_Occurred()
-            && (v = ns_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
-            name_error(name);
-        }
-        Py_XINCREF(v);
+    if (v == NULL && !PyErr_Occurred() && (v = global_get(frame, name)) == NULL && !PyErr_Occurred()) {
+        name_error(name);
     }
     Py_DECREF(dict);
     ERROR_IF(v == NULL);

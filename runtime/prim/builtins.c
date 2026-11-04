@@ -103,6 +103,17 @@ prim_eval_code(PyThreadState *ts, PyObject *const *args, Py_ssize_t nargs)
     return f;
 }
 
+/* function_new(code, globals, name, defaults, closure, kwdefaults): types.FunctionType(...). */
+static PyObject *
+prim_function_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 6) {
+        lu_err_format(PyExc_TypeError, "function_new() takes 6 arguments");
+        return NULL;
+    }
+    return lu_function_from_args(args);
+}
+
 /* builtin_function(module, name, func): a kernel function as a builtin of
    module, as a C function of it would be. */
 static PyObject *
@@ -118,7 +129,7 @@ prim_builtin_function(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_builtins_methods[] = {
-    FAST(object_id), FAST(caller_locals), FAST(caller_code_flags), FAST(suggest_keyword), FAST(builtin_function),
+    FAST(object_id), FAST(caller_locals), FAST(caller_code_flags), FAST(suggest_keyword), FAST(builtin_function), FAST(function_new),
     { "eval_code", (PyCFunction)(void (*)(void))prim_eval_code, METH_FASTCALL | LU_METH_FRAME, NULL },
     { NULL, NULL, 0, NULL },
 };

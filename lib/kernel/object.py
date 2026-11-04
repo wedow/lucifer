@@ -35,8 +35,8 @@ def _abstract_error(cls):
 
 
 def _no_attribute(obj, name):
-    error(AttributeError, str_join('', (
-        "'", type_tp_name(type(obj)), "' object has no attribute '", name, "'")))
+    raise AttributeError(str_join('', (
+        "'", type_tp_name(type(obj)), "' object has no attribute '", name, "'")), name=name, obj=obj)
 
 
 def _check_name(name):

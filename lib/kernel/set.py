@@ -483,7 +483,7 @@ class set:
         return set_new(cls)
 
     def __init__(self, *args, **kwargs):
-        if kwargs:
+        if kwargs and (type(self) is set or type_lookup(type(self), '__new__') is type_lookup(set, '__new__')):
             error(TypeError, 'set() takes no keyword arguments')
         iterable = unpack_one(type(self), args)
         if set_info(self, FILL):

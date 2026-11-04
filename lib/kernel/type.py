@@ -434,8 +434,8 @@ type(name, bases, dict, **kwds) -> a new type"""
             return meta_get(meta_attr, cls, meta)
         if meta_attr is not MISSING:
             return meta_attr
-        error(AttributeError, str_join('', (
-            "type object '", type_tp_name(cls), "' has no attribute '", name, "'")))
+        raise AttributeError(str_join('', (
+            "type object '", type_tp_name(cls), "' has no attribute '", name, "'")), name=name, obj=cls)
 
     def __setattr__(cls, name, value):
         _type_set(cls, name, value)

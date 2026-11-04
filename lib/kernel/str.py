@@ -10,7 +10,7 @@ from _lucifer import (
     str_repeat, str_split, str_splitlines, str_strip, str_case, str_is, str_expandtabs, str_ascii,
     str_encode, str_decode, str_iter, str_iter_next, str_subtype, str_sizeof, list_append, slice_parts, kernel_set, b_check, b_bytes,
 )
-from _lucifer import _boot, operators, _format
+from _lucifer import _boot, operators, _format, iter as _iter
 
 kernel_type = _boot.kernel_type
 classmethod_ = _boot.classmethod_
@@ -840,6 +840,12 @@ class str_iterator:
         if v is MISSING:
             raise StopIteration
         return v
+
+    def __reduce__(self):
+        return _iter.seqiter_reduce(self, '')
+
+    def __setstate__(self, state):
+        _iter.seqiter_setstate(self, state)
 
 
 def repr(obj, /):

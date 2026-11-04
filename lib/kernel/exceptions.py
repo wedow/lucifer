@@ -211,7 +211,13 @@ class ImportError:
 
     def __init__(self, /, *args, **kwds):
         self.args = args
-        _store_keywords(self, 'ImportError', kwds, ('name', 'path', 'name_from'))
+        for key, value in ns_items(kwds):
+            if key != 'name' and key != 'path' and key != 'name_from':
+                error(TypeError, str_join('', (
+                    "ImportError() got an unexpected keyword argument '", key, "'")))
+        self.name = ns_get(kwds, 'name', None)
+        self.path = ns_get(kwds, 'path', None)
+        self.name_from = ns_get(kwds, 'name_from', None)
         self.msg = _first(args) if size(args) == 1 else None
 
     def __str__(self):

@@ -633,6 +633,177 @@ PyFunction_ClearWatcher(int id)
     return 0;
 }
 
+/* __annotations__ and __annotate__ (Objects/funcobject.c): the annotations
+   are a dict, a tuple of pairs a MAKE_FUNCTION flag stored, or built on first
+   use by calling __annotate__(1). */
+
+static PyObject *
+func_annotation_dict(PyFunctionObject *op)
+{
+    if (op->func_annotations == NULL) {
+        if (op->func_annotate == NULL || !PyCallable_Check(op->func_annotate)) {
+            Py_RETURN_NONE;
+        }
+        PyObject *one = PyLong_FromLong(1);
+        PyObject *ann = one != NULL ? lu_call(op->func_annotate, &one, 1, NULL) : NULL;
+        Py_XDECREF(one);
+        if (ann != NULL && !PyDict_Check(ann)) {
+            lu_err_format(PyExc_TypeError, "__annotate__ returned non-dict of type '%.100s'",
+                          Py_TYPE(ann)->tp_name);
+            Py_CLEAR(ann);
+        }
+        if (ann != NULL) {
+            Py_XSETREF(op->func_annotations, Py_NewRef(ann));
+        }
+        return ann;
+    }
+    if (PyTuple_CheckExact(op->func_annotations)) {
+        PyObject *pairs = op->func_annotations;
+        PyObject *ann = PyDict_New();
+        for (Py_ssize_t i = 0; ann != NULL && i < PyTuple_GET_SIZE(pairs); i += 2) {
+            if (PyDict_SetItem(ann, PyTuple_GET_ITEM(pairs, i), PyTuple_GET_ITEM(pairs, i + 1)) < 0) {
+                Py_CLEAR(ann);
+            }
+        }
+        if (ann == NULL) {
+            return NULL;
+        }
+        Py_SETREF(op->func_annotations, ann);
+    }
+    return Py_NewRef(op->func_annotations);
+}
+
+PyObject *
+PyFunction_GetAnnotations(PyObject *op)
+{
+    if (!PyFunction_Check(op)) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+    PyObject *ann = func_annotation_dict((PyFunctionObject *)op);
+    Py_XDECREF(ann);                    /* borrowed, as the C-API returns it */
+    return ann;
+}
+
+static PyObject *
+func_get_annotations(PyObject *op, void *closure)
+{
+    PyFunctionObject *f = (PyFunctionObject *)op;
+    if (f->func_annotations == NULL && (f->func_annotate == NULL || !PyCallable_Check(f->func_annotate))) {
+        f->func_annotations = PyDict_New();
+        if (f->func_annotations == NULL) {
+            return NULL;
+        }
+    }
+    return func_annotation_dict(f);
+}
+
+static int
+func_set_annotations(PyObject *op, PyObject *value, void *closure)
+{
+    PyFunctionObject *f = (PyFunctionObject *)op;
+    if (value == Py_None) {
+        value = NULL;
+    }
+    if (value != NULL && !PyDict_Check(value)) {
+        lu_err_format(PyExc_TypeError, "__annotations__ must be set to a dict object");
+        return -1;
+    }
+    Py_XSETREF(f->func_annotations, Py_XNewRef(value));
+    Py_CLEAR(f->func_annotate);
+    return 0;
+}
+
+static PyObject *
+func_get_annotate(PyObject *op, void *closure)
+{
+    PyObject *a = ((PyFunctionObject *)op)->func_annotate;
+    return Py_NewRef(a != NULL ? a : Py_None);
+}
+
+static int
+func_set_annotate(PyObject *op, PyObject *value, void *closure)
+{
+    PyFunctionObject *f = (PyFunctionObject *)op;
+    if (value == NULL) {
+        lu_err_format(PyExc_TypeError, "__annotate__ cannot be deleted");
+        return -1;
+    }
+    if (value != Py_None && !PyCallable_Check(value)) {
+        lu_err_format(PyExc_TypeError, "__annotate__ must be callable or None");
+        return -1;
+    }
+    Py_XSETREF(f->func_annotate, Py_NewRef(value));
+    if (value != Py_None) {
+        Py_CLEAR(f->func_annotations);
+    }
+    return 0;
+}
+
+static PyObject *
+func_get_type_params(PyObject *op, void *closure)
+{
+    PyObject *t = ((PyFunctionObject *)op)->func_typeparams;
+    return t != NULL ? Py_NewRef(t) : PyTuple_New(0);
+}
+
+static int
+func_set_type_params(PyObject *op, PyObject *value, void *closure)
+{
+    if (value == NULL || !PyTuple_Check(value)) {
+        lu_err_format(PyExc_TypeError, "__type_params__ must be set to a tuple");
+        return -1;
+    }
+    Py_XSETREF(((PyFunctionObject *)op)->func_typeparams, Py_NewRef(value));
+    return 0;
+}
+
+/* function_new(code, globals, name, defaults, closure, kwdefaults): func_new_impl. */
+PyObject *
+lu_function_from_args(PyObject *const *a)
+{
+    PyObject *code = a[0], *globals = a[1], *name = a[2], *defaults = a[3], *closure = a[4], *kwdefaults = a[5];
+    if (!PyCode_Check(code) || !PyDict_Check(globals)) {
+        lu_err_format(PyExc_TypeError, "function() argument 'code' must be code and 'globals' dict");
+        return NULL;
+    }
+    int nfree = ((PyCodeObject *)code)->co_nfreevars;
+    const char *bad = name != Py_None && !PyUnicode_Check(name) ? "arg 3 (name) must be None or string"
+        : defaults != Py_None && !PyTuple_Check(defaults) ? "arg 4 (defaults) must be None or tuple"
+        : !PyTuple_Check(closure) && nfree && closure == Py_None ? "arg 5 (closure) must be tuple"
+        : !PyTuple_Check(closure) && closure != Py_None ? "arg 5 (closure) must be None or tuple"
+        : kwdefaults != Py_None && !PyDict_Check(kwdefaults) ? "arg 6 (kwdefaults) must be None or dict"
+        : NULL;
+    if (bad != NULL) {
+        lu_err_format(PyExc_TypeError, "%s", bad);
+        return NULL;
+    }
+    Py_ssize_t nclosure = closure == Py_None ? 0 : PyTuple_GET_SIZE(closure);
+    if (nfree != nclosure) {
+        lu_err_format(PyExc_ValueError, "%U requires closure of length %d, not %zd",
+                      ((PyCodeObject *)code)->co_name, nfree, nclosure);
+        return NULL;
+    }
+    for (Py_ssize_t i = 0; i < nclosure; i++) {
+        PyObject *cell = PyTuple_GET_ITEM(closure, i);
+        if (!PyCell_Check(cell)) {
+            lu_err_format(PyExc_TypeError, "arg 5 (closure) expected cell, found %s", Py_TYPE(cell)->tp_name);
+            return NULL;
+        }
+    }
+    PyFunctionObject *f = (PyFunctionObject *)lu_function_new(code, globals);
+    if (f == NULL) {
+        return NULL;
+    }
+    if (name != Py_None) {
+        Py_SETREF(f->func_name, Py_NewRef(name));
+    }
+    f->func_defaults = defaults != Py_None ? Py_NewRef(defaults) : NULL;
+    f->func_closure = closure != Py_None ? Py_NewRef(closure) : NULL;
+    f->func_kwdefaults = kwdefaults != Py_None ? Py_NewRef(kwdefaults) : NULL;
+    return (PyObject *)f;
+}
+
 static PyMemberDef func_members[] = {
     { "__closure__", _Py_T_OBJECT, offsetof(PyFunctionObject, func_closure), Py_READONLY, NULL },
     { "__doc__", _Py_T_OBJECT, offsetof(PyFunctionObject, func_doc), 0, NULL },
@@ -649,6 +820,9 @@ static PyGetSetDef func_getset[] = {
     { "__dict__", PyObject_GenericGetDict, PyObject_GenericSetDict, NULL, NULL },
     { "__name__", func_get_name, func_set_name, NULL, NULL },
     { "__qualname__", func_get_qualname, func_set_qualname, NULL, NULL },
+    { "__annotations__", func_get_annotations, func_set_annotations, NULL, NULL },
+    { "__annotate__", func_get_annotate, func_set_annotate, NULL, NULL },
+    { "__type_params__", func_get_type_params, func_set_type_params, NULL, NULL },
     { NULL },
 };
 

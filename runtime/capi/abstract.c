@@ -182,3 +182,9 @@ _PyObject_CallMethod(PyObject *obj, PyObject *name, const char *format, ...)
     Py_DECREF(method);
     return result;
 }
+
+int
+PyCallable_Check(PyObject *x)
+{
+    return x != NULL && Py_TYPE(x)->tp_call != NULL;
+}
