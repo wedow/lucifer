@@ -1,6 +1,6 @@
 ---
 id: luc-sx8l
-status: open
+status: closed
 deps: []
 links: [luc-njhp]
 created: 2026-11-04T03:04:03Z
