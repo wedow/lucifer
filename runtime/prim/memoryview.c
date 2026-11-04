@@ -941,7 +941,10 @@ memory_getbuf(PyObject *self, Py_buffer *view, int flags)
     if (!(flags & PyBUF_FORMAT)) {
         /* the data is read as unsigned bytes */
     }
+    /* start with complete information; obj is taken only on success, so a
+       failed getbuffer leaves a view PyBuffer_Release can safely ignore */
     *view = *base;
+    view->obj = NULL;
     if (!(flags & PyBUF_FORMAT)) {
         view->format = NULL;
     }
