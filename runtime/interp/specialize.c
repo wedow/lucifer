@@ -71,13 +71,15 @@ fail(lu_codeunit *site)
 /* Rewriting a site, one writer at a time: begin makes it generic and clears
    its guard word; end sets the guard, the cooldown, and last the opcode.
    A site that monitoring has instrumented (INSTRUMENTED_LINE runs the
-   instruction under it) is left alone: begin returns 0, holding nothing. */
+   instruction under it) is left alone and backs off as a failure would
+   (CPython pauses its counter): begin returns 0, holding nothing. */
 static int
 begin(lu_codeunit *site, int generic, lu_codeunit *guard, int guard_words)
 {
     PyMutex_Lock(&_PyRuntime.specialize_lock);
     if (site->op.code >= MIN_INSTRUMENTED_OPCODE) {
         PyMutex_Unlock(&_PyRuntime.specialize_lock);
+        fail(site);
         return 0;
     }
     __atomic_store_n(&site->op.code, (uint8_t)generic, __ATOMIC_RELEASE);
