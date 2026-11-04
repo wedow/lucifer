@@ -858,16 +858,17 @@ FIELDS(iter, iterfields, f[0], f[LU_ITER_FIELDS - 1])
 
 /* The next (index, item) of an exact enumerate over a tuple, list, range or dict
    iterator: 1 with *v the pair, or NULL when it is exhausted or failed; 0 when
-   the kernel must step it. */
+   the kernel must step it. The index is the field_get/field_set field, swapped
+   under the enumerate's lock: tasks may step one enumerate at once. */
 int
 lu_enum_next(PyObject *e, PyObject **v)
 {
     iterfields *f = (iterfields *)e;
-    PyObject *inner = f->f[0], *i = f->f[1];
+    PyObject *inner = f->f[0];
     PyTypeObject *t = Py_TYPE(inner);
-    PyObject *item;
-    if (!PyLong_CheckExact(i)) {
-        return 0;
+    PyObject *item, *i, *next;
+    if (!PyLong_CheckExact(__atomic_load_n(&f->f[1], __ATOMIC_RELAXED))) {
+        return 0;               /* an exact int index stays one */
     }
     if (t == &PyListIter_Type || t == &PyTupleIter_Type) {
         item = lu_seqiter_next(inner);
@@ -889,16 +890,23 @@ lu_enum_next(PyObject *e, PyObject **v)
     if (item == NULL) {
         return 1;
     }
-    PyObject *next = lu_long_binary(NB_ADD, i, lu_small_int(1));
+    Py_BEGIN_CRITICAL_SECTION(e);
+    i = f->f[1];
+    next = lu_long_binary(NB_ADD, i, lu_small_int(1));
+    if (next != NULL) {
+        f->f[1] = next;         /* the field's reference to i is the pair's */
+    }
+    Py_END_CRITICAL_SECTION();
     PyObject *pair = next != NULL ? PyTuple_New(2) : NULL;
     if (pair == NULL) {
-        Py_XDECREF(next);
+        if (next != NULL) {
+            Py_DECREF(i);
+        }
         Py_DECREF(item);
         return 1;
     }
-    PyTuple_SET_ITEM(pair, 0, Py_NewRef(i));
+    PyTuple_SET_ITEM(pair, 0, i);
     PyTuple_SET_ITEM(pair, 1, item);
-    Py_XSETREF(f->f[1], next);
     *v = pair;
     return 1;
 }
@@ -1322,8 +1330,12 @@ prim_field_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (off < 0) {
         return NULL;
     }
-    PyObject *v = *(PyObject **)((char *)args[0] + off);
-    return Py_NewRef(v != NULL ? v : Py_None);
+    PyObject *v;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
+    v = *(PyObject **)((char *)args[0] + off);
+    v = Py_NewRef(v != NULL ? v : Py_None);
+    Py_END_CRITICAL_SECTION();
+    return v;
 }
 
 static PyObject *
@@ -1334,7 +1346,12 @@ prim_field_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (off < 0) {
         return NULL;
     }
-    Py_XSETREF(*(PyObject **)((char *)args[0] + off), Py_NewRef(args[2]));
+    PyObject *old;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
+    old = *(PyObject **)((char *)args[0] + off);
+    *(PyObject **)((char *)args[0] + off) = Py_NewRef(args[2]);
+    Py_END_CRITICAL_SECTION();
+    Py_XDECREF(old);            /* outside the lock: a finalizer may run */
     return Py_NewRef(Py_None);
 }
 

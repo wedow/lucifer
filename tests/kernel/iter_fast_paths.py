@@ -78,3 +78,24 @@ for bad in (lambda: min(), lambda: max(5), lambda: min([]), lambda: min(1, 2, de
         bad()
     except (TypeError, ValueError) as ex:
         print(22, type(ex).__name__, ex)
+
+# Threads stepping one enumerate at once, by for and by next(), never crash.
+import threading
+for rounds in range(10):
+    shared = enumerate(list(range(5000)), 1000)
+
+    def drain(by_next):
+        if by_next:
+            for _ in range(5000):
+                if next(shared, None) is None:
+                    break
+        else:
+            for _ in shared:
+                pass
+
+    workers = [threading.Thread(target=drain, args=(k % 2,)) for k in range(6)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+print(23, next(shared, 'drained'))
