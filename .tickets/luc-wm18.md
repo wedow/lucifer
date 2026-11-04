@@ -12,3 +12,9 @@ assignee: Greg Wedow
 
 A KeyboardInterrupt raised at a loop back-edge signal poll is not caught by the enclosing try/except; test_threading hangs on test_print_exception_gh_102056 because of it. Present on master. Found in luc-c702. The pending-signal check must raise at an instruction boundary covered by the exception table, as CPython's eval breaker does.
 
+
+## Notes
+
+**2026-11-04T12:49:18Z**
+
+From the luc-vb3n review: threads_signal_sort failed once in handoff:3 with interrupt_main's KeyboardInterrupt landing in 'while t.is_alive()' outside its try. Check whether this is the back-edge bug or a test race.
