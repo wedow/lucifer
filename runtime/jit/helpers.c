@@ -76,7 +76,11 @@ lu_jit_list_store(PyObject *list, int64_t i, PyObject *v)
 static int
 h_list_append(PyObject *list, PyObject *v)
 {
-    return lu_list_append(list, v);
+    int err;
+    Py_BEGIN_CRITICAL_SECTION(list);    /* as list_append's primitive commits */
+    err = lu_list_append(list, v);
+    Py_END_CRITICAL_SECTION();
+    return err;
 }
 
 static PyObject *
@@ -204,12 +208,27 @@ h_store_attr(PyObject *owner, PyObject *name, PyObject *v)
 
 /* --- operators --- */
 
+/* The last answer per thread, valid while the type keeps its version. */
+static __thread struct {
+    PyTypeObject *type;
+    unsigned int version;
+    int answer;
+} eq_seen;
+
 static int
 uses_object_eq(PyObject *o)
 {
     PyTypeObject *t = Py_TYPE(o);
-    return _PyType_Lookup(t, LU_ID(__eq__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__eq__))
+    unsigned int version = t->tp_version_tag;
+    if (version != 0 && eq_seen.type == t && eq_seen.version == version) {
+        return eq_seen.answer;
+    }
+    int answer = _PyType_Lookup(t, LU_ID(__eq__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__eq__))
         && _PyType_Lookup(t, LU_ID(__ne__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__ne__));
+    eq_seen.type = t;
+    eq_seen.version = version;
+    eq_seen.answer = answer;
+    return answer;
 }
 
 /* Whether `a == b` (or !=) is identity: both types keep object's __eq__

@@ -45,9 +45,9 @@ static struct {
     unsigned long taken[256];           /* exits taken, per base opcode at the exit */
     unsigned long code_bytes;
     double compile_seconds;
-    const char *last_failure;
     unsigned long failure_reasons[8];
     const char *failure_names[8];
+    PyMutex perf_map;           /* one writer of /tmp/perf-PID.map at a time */
 } stats;
 
 static void
@@ -165,8 +165,7 @@ perf_map(PyCodeObject *code, struct lu_unit *u)
     if (ts->interp->config.perf_profiling <= 0) {
         return;
     }
-    static PyMutex lock;
-    PyMutex_Lock(&lock);
+    PyMutex_Lock(&stats.perf_map);
     char path[64];
     snprintf(path, sizeof path, "/tmp/perf-%d.map", (int)getpid());
     FILE *out = fopen(path, "a");
@@ -175,7 +174,7 @@ perf_map(PyCodeObject *code, struct lu_unit *u)
                 PyUnicode_AsUTF8(code->co_qualname), PyUnicode_AsUTF8(code->co_filename), u->entry_pc);
         fclose(out);
     }
-    PyMutex_Unlock(&lock);
+    PyMutex_Unlock(&stats.perf_map);
 }
 
 static struct lu_unit *
@@ -191,10 +190,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
         *u->stress_counter = (long)(_PyRuntime.stress.seed % _PyRuntime.stress.deopt) + 1;
     }
     double t0 = now();
-    static int dump = -1;
-    if (dump < 0) {
-        dump = getenv("LUCIFER_JIT_DUMP") != NULL;
-    }
+    int dump = _PyRuntime.jit.dump;
     if (dump) {
         fprintf(stderr, "jit: compiling %s@%d\n", PyUnicode_AsUTF8(frame->code->co_qualname), pc);
     }
@@ -256,6 +252,22 @@ failed_at(struct lu_jit_code *jc, int pc)
     return 0;
 }
 
+/* LUCIFER_JIT_ONLY: a comma-separated list of qualnames. */
+static int
+listed(const char *list, const char *name)
+{
+    size_t n = strlen(name);
+    for (const char *p = list; *p != '\0';) {
+        const char *end = strchr(p, ',');
+        size_t len = end != NULL ? (size_t)(end - p) : strlen(p);
+        if (len == n && strncmp(p, name, n) == 0) {
+            return 1;
+        }
+        p += len + (end != NULL);
+    }
+    return 0;
+}
+
 enum lu_jit_result
 lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
 {
@@ -269,11 +281,8 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
            != (__atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK)) {
         return LU_JIT_NONE;
     }
-    static const char *only = (const char *)1;
-    if (only == (const char *)1) {
-        only = getenv("LUCIFER_JIT_ONLY");     /* debugging: compile only matching qualnames */
-    }
-    if (only != NULL && strstr(PyUnicode_AsUTF8(code->co_qualname), only) == NULL) {
+    const char *only = _PyRuntime.jit.only;
+    if (only != NULL && !listed(only, PyUnicode_AsUTF8(code->co_qualname))) {
         return LU_JIT_NONE;
     }
     struct lu_jit_code *jc = state_for(code);
@@ -310,10 +319,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     }
     count(&stats.entries, 1);
     __atomic_fetch_add(&u->entries, 1, __ATOMIC_RELAXED);
-    static int debug = -1;
-    if (debug < 0) {
-        debug = getenv("LUCIFER_JIT_DEBUG") != NULL;
-    }
+    int debug = _PyRuntime.jit.debug;
     if (debug) {
         fprintf(stderr, "jit: enter %s@%d\n", PyUnicode_AsUTF8(code->co_qualname), pc);
     }
@@ -395,7 +401,7 @@ lu_jit_report(void)
     if (!_PyRuntime.jit.stats) {
         return;
     }
-    static const char *const reasons[EXIT_REASONS] = { "guard", "stress", "poll", "side", "error" };
+    static const char reasons[EXIT_REASONS][8] = { "guard", "stress", "poll", "side", "error" };
     fprintf(stderr, "jit: backend %s, mode %s\n", lu_target.name != NULL ? lu_target.name : "none",
             _PyRuntime.jit.mode == LU_JIT_ALWAYS ? "always" : _PyRuntime.jit.mode == LU_JIT_ON ? "on" : "off");
     fprintf(stderr, "jit: compiles %lu, failed %lu, units recompiled %lu, inlined calls %lu, "

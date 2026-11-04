@@ -53,8 +53,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(ENTRY_LOCAL, REP_OBJ, 0)          /* imm: frame->localsplus[imm], borrowed from the slot */ \
     X(ENTRY_STACK, REP_OBJ, 0)          /* imm: the stack entry, owned */ \
     X(PHI, REP_NONE, 0)                 /* args: one input per predecessor; rep set by the builder */ \
-    X(UNBOX_INT, REP_I64, IF_GUARD)     /* a: an exact int that fits one digit */ \
-    X(UNBOX_FLOAT, REP_F64, IF_GUARD)   /* a: an exact float */ \
+    X(UNBOX_INT, REP_I64, IF_GUARD | IF_EFFECT)     /* a: an exact int that fits one digit; kept, since */ \
+    X(UNBOX_FLOAT, REP_F64, IF_GUARD | IF_EFFECT)   /* a's known type lets later code fold */ \
     X(BOX_INT, REP_OBJ, IF_CALL)        /* a: i64; a new reference; b: the object it was unboxed from */ \
     X(BOX_FLOAT, REP_OBJ, IF_CALL)      /* a: f64; a new reference; b: the same */ \
     X(I2F, REP_F64, IF_PURE)            /* a: i64, rounded as int.__float__ */ \

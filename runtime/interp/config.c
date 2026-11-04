@@ -6,6 +6,7 @@
    -W arg, -X opt[=value], --version, and a .pyc path with its arguments.
    -c, -m and source scripts need the compiler and stay unsupported. */
 
+#include "jit/jit.h"
 #include "lucifer.h"
 
 #include <errno.h>
@@ -990,12 +991,11 @@ parse_handoff(const char *value, struct lu_handoff *out)
 static PyStatus
 parse_jit(const char *value, struct lu_jit_options *out)
 {
-    static const char *const modes[] = { "off", "on", "always" };
-    for (int i = 0; i < 3; i++) {
-        if (strcmp(value, modes[i]) == 0) {
-            out->mode = i;
-            return PyStatus_Ok();
-        }
+    int mode = strcmp(value, "off") == 0 ? LU_JIT_OFF : strcmp(value, "on") == 0 ? LU_JIT_ON
+        : strcmp(value, "always") == 0 ? LU_JIT_ALWAYS : -1;
+    if (mode >= 0) {
+        out->mode = mode;
+        return PyStatus_Ok();
     }
     return exit_with(2, "lucifer: -X lucifer_jit: bad mode '%s'\n%s", value,
                      "usage: -X lucifer_jit=off|on|always\n");
@@ -1042,6 +1042,9 @@ lu_runtime_options(const PyConfig *config)
     if (!PyStatus_Exception(status)) {
         _PyRuntime.stress = stress;
         _PyRuntime.handoff = handoff;
+        jit.debug = getenv("LUCIFER_JIT_DEBUG") != NULL;
+        jit.dump = getenv("LUCIFER_JIT_DUMP") != NULL;
+        jit.only = getenv("LUCIFER_JIT_ONLY");
         _PyRuntime.jit = jit;
     }
     return status;
