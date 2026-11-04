@@ -182,7 +182,8 @@ If the 'real' or 'imag' arguments are given, create a complex number
 with the specified real and imaginary components."""
 
     def __new__(cls, /, *args, **kwargs):
-        _boot.check_new(cls, complex)
+        if cls is not complex:
+            _boot.check_new(cls, complex)
         n = size(args)
         given = n + size(kwargs)
         if given > 2:

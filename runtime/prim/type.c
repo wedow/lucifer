@@ -152,9 +152,11 @@ lu_type_assign_version(PyTypeObject *tp)
         tag = next_global_version_tag();
     }
     else {
-        tag = PyInterpreterState_Get()->next_version_tag;
-        if (tag != 0) {
-            PyInterpreterState_Get()->next_version_tag = tag + 1;      /* wraps to 0 when spent */
+        /* One tag per type across threads: the attribute cache is keyed by it. */
+        unsigned int *next = &PyInterpreterState_Get()->next_version_tag;
+        tag = __atomic_load_n(next, __ATOMIC_RELAXED);
+        while (tag != 0 && !__atomic_compare_exchange_n(next, &tag, tag + 1, 0,     /* wraps to 0 when spent */
+                                                         __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
         }
     }
     if (tag == 0) {
@@ -268,14 +270,10 @@ PyType_Unwatch(int id, PyObject *obj)
     return 0;
 }
 
-PyObject *
-_PyType_Lookup(PyTypeObject *tp, PyObject *name)
+/* The walk of the MRO: the first dict that has the name. */
+static PyObject *
+lookup_in_mro(PyTypeObject *tp, PyObject *name)
 {
-    /* The method cache's assignment: a lookup is what gives a type its tag. */
-    if (tp->tp_version_tag == 0 && tp->tp_versions_used < MAX_VERSIONS_PER_CLASS
-        && PyUnicode_CheckExact(name) && PyUnicode_GET_LENGTH(name) <= MCACHE_MAX_ATTR_SIZE) {
-        lu_type_assign_version(tp);
-    }
     PyObject *mro = tp->tp_mro;
     if (mro == NULL) {
         /* During creation, before the MRO exists: the type, then its bases. */
@@ -296,6 +294,46 @@ _PyType_Lookup(PyTypeObject *tp, PyObject *name)
         }
     }
     return NULL;
+}
+
+PyObject *
+_PyType_Lookup(PyTypeObject *tp, PyObject *name)
+{
+    /* The method cache's assignment: a lookup is what gives a type its tag. */
+    if (tp->tp_version_tag == 0 && tp->tp_versions_used < MAX_VERSIONS_PER_CLASS
+        && PyUnicode_CheckExact(name) && PyUnicode_GET_LENGTH(name) <= MCACHE_MAX_ATTR_SIZE) {
+        lu_type_assign_version(tp);
+    }
+    struct _is *interp = PyInterpreterState_Get();
+    uint32_t version = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE);
+    /* A type's tag changes whenever it or a base changes, and interned names
+       are immortal: an entry for (tag, name) cannot go stale. Before the
+       kernel has booted, static types change without a tag change. */
+    if (version == 0 || !interp->specializing || tp->tp_mro == NULL
+        || !PyUnicode_CheckExact(name) || !PyUnicode_CHECK_INTERNED(name)) {
+        return lookup_in_mro(tp, name);
+    }
+    struct lu_mcache_entry *e = &interp->mcache[(version ^ (uint32_t)((uintptr_t)name >> 3)) & (LU_MCACHE_SIZE - 1)];
+    uint32_t seq = __atomic_load_n(&e->seq, __ATOMIC_ACQUIRE);
+    if (!(seq & 1)) {
+        uint32_t v = __atomic_load_n(&e->version, __ATOMIC_RELAXED);
+        PyObject *n = __atomic_load_n(&e->name, __ATOMIC_RELAXED);
+        PyObject *value = __atomic_load_n(&e->value, __ATOMIC_RELAXED);
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if (v == version && n == name && __atomic_load_n(&e->seq, __ATOMIC_RELAXED) == seq) {
+            return value;
+        }
+    }
+    PyObject *value = lookup_in_mro(tp, name);
+    if (!(seq & 1) && __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) == version
+        && __atomic_compare_exchange_n(&e->seq, &seq, seq + 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+        __atomic_thread_fence(__ATOMIC_RELEASE);        /* the odd sequence before the fields (_PySeqLock_LockWrite) */
+        __atomic_store_n(&e->version, version, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->name, name, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->value, value, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->seq, seq + 2, __ATOMIC_RELEASE);
+    }
+    return value;
 }
 
 PyObject *
@@ -1917,17 +1955,22 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
     return 0;
 }
 
+PyObject *
+lu_alloc_instance(PyTypeObject *tp, PyTypeObject *owner)
+{
+    if (check_new(tp, owner) < 0) {
+        return NULL;
+    }
+    return (tp->tp_alloc != NULL ? tp->tp_alloc : PyType_GenericAlloc)(tp, 0);
+}
+
 /* alloc(cls, owner): a new instance of cls for owner.__new__, refusing a
    cls whose static base is not owner. */
 static PyObject *
 prim_alloc(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); TYPE_ARG(0); TYPE_ARG(1);
-    PyTypeObject *tp = (PyTypeObject *)args[0];
-    if (check_new(tp, (PyTypeObject *)args[1]) < 0) {
-        return NULL;
-    }
-    return (tp->tp_alloc != NULL ? tp->tp_alloc : PyType_GenericAlloc)(tp, 0);
+    return lu_alloc_instance((PyTypeObject *)args[0], (PyTypeObject *)args[1]);
 }
 
 /* new_check(cls, owner): the same refusals, for a __new__ that allocates itself. */

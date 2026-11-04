@@ -125,7 +125,8 @@ iteral.
 4"""
 
     def __new__(cls, /, *args, **kwargs):
-        _boot.check_new(cls, int)
+        if cls is not int:
+            _boot.check_new(cls, int)
         n = size(args)
         x = MISSING
         base = MISSING
@@ -496,7 +497,8 @@ The builtins True and False are the only two instances of the class bool.
 The class bool is a subclass of the class int, and cannot be subclassed."""
 
     def __new__(cls, /, *args, **kwargs):
-        _boot.check_new(cls, bool)
+        if cls is not bool:
+            _boot.check_new(cls, bool)
         if kwargs:
             error(TypeError, 'bool() takes no keyword arguments')
         n = size(args)

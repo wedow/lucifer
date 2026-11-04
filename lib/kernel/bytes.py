@@ -6,7 +6,7 @@ each class body binds; a primitive that mutates a bytearray takes its
 critical section, so a method that is one primitive is atomic."""
 
 from _lucifer import (
-    MISSING, error, str_join, kind, size, ns_items, static_type, type_tp_name, type_lookup,
+    MISSING, error, str_join, kind, size, ns_items, static_type, type_tp_name, type_lookup, kernel_set,
     int_format, text_repr, str_replace, new_check, str_encode, instance_dict,
     b_len, b_check, b_bytes, b_from_ints, b_zeros, b_subtype, b_item, b_slice, b_slice_step,
     b_cmp, b_hash, b_concat, b_repeat, b_find, b_count, b_match, b_replace, b_join, b_split,
@@ -929,6 +929,17 @@ def _m_ba_reduce(self):
     return _m_ba_reduce_ex(self, 0)
 
 
+def _ba_append(self, *args, **kwargs):
+    """Append a single item to the end of the bytearray."""
+    item = _o(self, 'append', args, kwargs)
+    ba_splice(self, _SSIZE_MAX, _SSIZE_MAX, b_from_ints((_byte(item),)))
+
+
+# Registered for the call instruction, which compares it: named as the method.
+_ba_append.__qualname__ = 'bytearray.append'
+kernel_set('bytearray_append', _ba_append)
+
+
 @kernel_type(_bytearray)
 class bytearray:
     """bytearray(iterable_of_ints) -> bytearray
@@ -1017,10 +1028,7 @@ Construct a mutable bytearray object from:
     def __alloc__(self):
         return ba_alloc(self)
 
-    def append(self, *args, **kwargs):
-        """Append a single item to the end of the bytearray."""
-        item = _o(self, 'append', args, kwargs)
-        ba_splice(self, _SSIZE_MAX, _SSIZE_MAX, b_from_ints((_byte(item),)))
+    append = _ba_append
 
     def clear(self, *args):
         _noargs(self, 'clear', args)

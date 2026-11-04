@@ -215,6 +215,20 @@ ba_resize(PyObject *op, Py_ssize_t size)
     return 0;
 }
 
+int
+lu_bytearray_append(PyObject *op, int byte)
+{
+    int err;
+    Py_BEGIN_CRITICAL_SECTION(op);
+    Py_ssize_t n = Py_SIZE(op);
+    err = ba_resize(op, n + 1);
+    if (err == 0) {
+        BA(op)->ob_bytes[n] = (char)byte;
+    }
+    Py_END_CRITICAL_SECTION();
+    return err;
+}
+
 /* The data of a bytes-like argument that a bytearray may be about to
    overwrite: a private copy when it is the bytearray itself. */
 static int
