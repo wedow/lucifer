@@ -881,9 +881,10 @@ static PyObject *
 dict_own_list(PyObject *o, const char *method)
 {
     PyObject *name = PyUnicode_InternFromString(method);
-    PyObject *func = name != NULL ? _PyType_Lookup(&PyDict_Type, name) : NULL;
+    PyObject *func = name != NULL ? _PyType_LookupRef(&PyDict_Type, name) : NULL;
     Py_XDECREF(name);
     PyObject *view = func != NULL ? lu_call(func, &o, 1, NULL) : NULL;
+    Py_XDECREF(func);
     if (view == NULL) {
         return NULL;
     }

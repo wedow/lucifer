@@ -486,25 +486,31 @@ object_attr_hook(PyTypeObject *tp, PyObject *id)
 /* LOAD_ATTR answers that need no Python: obj.__class__ for an object whose
    type keeps object's __class__, and a plain class attribute (no __get__, or
    a function, which a class returns unbound) of a class whose metaclass keeps
-   type's __getattribute__ and does not have the name. NULL otherwise. */
+   type's __getattribute__ and does not have the name. A new reference, or
+   NULL. */
 static PyObject *
 attr_shortcut(PyObject *owner, PyObject *name)
 {
     PyTypeObject *tp = Py_TYPE(owner);
     if (name == LU_ID(__class__)) {
         return _PyType_Lookup(tp, name) == _PyType_Lookup(&PyBaseObject_Type, name)
-            && object_attr_hook(tp, LU_ID(__getattribute__)) ? (PyObject *)tp : NULL;
+            && object_attr_hook(tp, LU_ID(__getattribute__)) ? Py_NewRef((PyObject *)tp) : NULL;
     }
     if (!PyType_Check(owner) || !PyUnicode_CheckExact(name)
         || _PyType_Lookup(tp, LU_ID(__getattribute__)) != _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__))) {
         return NULL;
     }
-    PyObject *meta_attr = _PyType_Lookup(tp, name);
-    if (meta_attr != NULL && Py_TYPE(meta_attr)->tp_descr_set != NULL) {
+    PyObject *meta_attr = _PyType_LookupRef(tp, name);
+    int data = meta_attr != NULL && Py_TYPE(meta_attr)->tp_descr_set != NULL;
+    Py_XDECREF(meta_attr);
+    if (data) {
         return NULL;            /* a data descriptor of the metaclass wins */
     }
-    PyObject *v = _PyType_Lookup((PyTypeObject *)owner, name);
-    return v != NULL && (Py_TYPE(v)->tp_descr_get == NULL || PyFunction_Check(v)) ? v : NULL;
+    PyObject *v = _PyType_LookupRef((PyTypeObject *)owner, name);
+    if (v != NULL && Py_TYPE(v)->tp_descr_get != NULL && !PyFunction_Check(v)) {
+        Py_CLEAR(v);
+    }
+    return v;
 }
 
 /* obj.name for an exact str name, answered when no Python code decides: a
@@ -524,31 +530,37 @@ getattr_native(PyObject *owner, PyObject *name)
         return lu_ns_get(((PyModuleObject *)owner)->md_dict, name);        /* as LOAD_ATTR reads it */
     }
     if ((v = attr_shortcut(owner, name)) != NULL) {
-        return Py_NewRef(v);
+        return v;
     }
     if (!object_attr_hook(tp, LU_ID(__getattribute__))) {
         return NULL;
     }
-    PyObject *descr = _PyType_Lookup(tp, name);
+    PyObject *descr = _PyType_LookupRef(tp, name);
     if (descr != NULL && Py_TYPE(descr)->tp_descr_set != NULL) {
-        return lu_descr_get_native(descr, owner, &v) > 0 ? v : NULL;
+        v = lu_descr_get_native(descr, owner, &v) > 0 ? v : NULL;
+        Py_DECREF(descr);
+        return v;
     }
     if (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
         PyObject *dict = LU_MANAGED_DICT(owner);
         if (dict != NULL && PyDict_CheckExact(dict) && (v = lu_ns_get(dict, name)) != NULL) {
+            Py_XDECREF(descr);
             return v;
         }
     }
     else if (tp->tp_dictoffset != 0) {
+        Py_XDECREF(descr);
         return NULL;            /* a dict of another layout */
     }
     if (descr == NULL) {
         return NULL;
     }
     if (Py_TYPE(descr)->tp_descr_get == NULL) {
-        return Py_NewRef(descr);
+        return descr;
     }
-    return PyFunction_Check(descr) ? PyMethod_New(descr, owner) : NULL;
+    v = PyFunction_Check(descr) ? PyMethod_New(descr, owner) : NULL;
+    Py_DECREF(descr);
+    return v;
 }
 
 /* Whether tp compares for equality as `base` does: the same __eq__ and __ne__. */
@@ -598,10 +610,9 @@ eq_native(PyObject *a, PyObject *b, int depth)
    __new__, called with the class (its __init__ is object's, so that only an
    instance of a subclass may need one), 0 for the kernel. */
 static int
-instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **func)
+plan_for(PyTypeObject *cls, Py_ssize_t total, PyObject *new_, PyObject *init, PyObject **func)
 {
     PyTypeObject *object = &PyBaseObject_Type;
-    PyObject *new_ = _PyType_Lookup(cls, LU_ID(__new__)), *init = _PyType_Lookup(cls, LU_ID(__init__));
     PyObject *object_init = _PyType_Lookup(object, LU_ID(__init__));
     if (cls->tp_new == NULL || new_ == NULL) {
         return 0;
@@ -617,6 +628,20 @@ instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **func)
     }
     *func = init;
     return init != NULL && PyFunction_Check(init);
+}
+
+/* plan_for over the class's __new__ and __init__, which another thread may
+   replace: *func, when the plan is 1 or 3, is a new reference. */
+static int
+instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **func)
+{
+    PyObject *new_ = _PyType_LookupRef(cls, LU_ID(__new__)), *init = _PyType_LookupRef(cls, LU_ID(__init__));
+    PyObject *f = NULL;
+    int plan = plan_for(cls, total, new_, init, &f);
+    *func = plan == 1 || plan == 3 ? Py_NewRef(f) : NULL;
+    Py_XDECREF(new_);
+    Py_XDECREF(init);
+    return plan;
 }
 
 /* The rest of type.__call__ once the class's __new__ returned obj (a
@@ -1500,14 +1525,18 @@ call_tail: {
         goto call_done;
     }
     PyObject *target = NULL, *self = NULL;
-    PyObject *init = NULL;
+    PyObject *init = NULL, *held = NULL;      /* references that keep target alive */
     int plan = free_self && !mon && Py_IS_TYPE(callable, &PyType_Type) && callable != (PyObject *)&PyType_Type
         ? instance_plan((PyTypeObject *)callable, total, &init) : 0;
+    if (plan == 3 && kwnames != NULL) {
+        Py_CLEAR(init);         /* the kernel runs __new__ with keywords */
+    }
     if (plan == 3 && kwnames == NULL) {
         /* The class's __new__ (in init) run in this loop, the class and the
            arguments kept below it for the __init__ of what it returns. */
         PyObject *kept = PyTuple_New(npos);
         if (kept == NULL) {
+            Py_DECREF(init);
             result = NULL;
             goto call_done;
         }
@@ -1516,6 +1545,7 @@ call_tail: {
         }
         *--args = Py_NewRef(callable);
         callee = lu_frame_call(ts, (PyFunctionObject *)init, args, npos + 1, NULL);
+        Py_DECREF(init);
         PyMem_Free(to_free);
         sp = base;
         if (callee == NULL) {
@@ -1534,11 +1564,13 @@ call_tail: {
         /* A class instance: allocated here, its __init__ run in this loop. */
         PyObject *obj = lu_alloc_instance((PyTypeObject *)callable, &PyBaseObject_Type);
         if (obj == NULL || plan == 2) {
+            Py_XDECREF(init);
             result = obj;
             goto call_done;
         }
         *--args = Py_NewRef(obj);
         callee = lu_frame_call(ts, (PyFunctionObject *)init, args, npos + 1, kwnames);
+        Py_DECREF(init);
         Py_XDECREF(kwnames);
         Py_DECREF(callable);
         PyMem_Free(to_free);
@@ -1590,26 +1622,30 @@ call_tail: {
         }
         if (!found && Py_TYPE(callable)->tp_call == lu_slot_tp_call) {
             /* An instance whose type's __call__ is a function or kernel descriptor. */
-            PyObject *descr = _PyType_Lookup(Py_TYPE(callable), LU_ID(__call__));
+            PyObject *descr = _PyType_LookupRef(Py_TYPE(callable), LU_ID(__call__));
             PyObject *unused;
             if (descr != NULL && (PyFunction_Check(descr)
                                   || (lu_kernel_target(descr, &callable, 1, &target, &unused) > 0
                                       && unused == NULL))) {
                 target = PyFunction_Check(descr) ? descr : target;
                 self = callable;
+                held = descr;
             }
             else {
                 target = NULL;
+                Py_XDECREF(descr);
             }
         }
     }
     if (mon && target != NULL && (((PyFunctionObject *)target)->func_code != NULL)
         && (((PyCodeObject *)((PyFunctionObject *)target)->func_code)->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN))) {
         target = NULL;          /* a builtin: the tools see it return */
+        Py_CLEAR(held);
     }
     if (target != NULL && self == NULL && kwnames == NULL
         && (((PyCodeObject *)((PyFunctionObject *)target)->func_code)->co_flags & LU_CO_KERNEL)
         && ((result = native_call(ts, target, args, npos)) != NULL || PyErr_Occurred())) {
+        Py_XDECREF(held);
         goto call_done;
     }
     if (target != NULL && (self == NULL || free_self)) {
@@ -1618,6 +1654,7 @@ call_tail: {
             npos++;
         }
         callee = lu_frame_call(ts, (PyFunctionObject *)target, args, npos, kwnames);
+        Py_XDECREF(held);
         Py_XDECREF(kwnames);
         Py_DECREF(callable);
         PyMem_Free(to_free);
@@ -1629,6 +1666,7 @@ call_tail: {
     }
     /* Foreign C pins the task; kernel primitives will be exempted when
        migration is on (DESIGN 5.4). */
+    Py_XDECREF(held);
     struct lu_task *t = (struct lu_task *)ts;
     t->pin++;
     result = lu_call(callable, args, npos, kwnames);
@@ -2611,11 +2649,12 @@ op_LOAD_ATTR_CLASS: {
     if (version == 0 || !PyType_Check(owner) || ((PyTypeObject *)owner)->tp_version_tag != version
         || (meta_checked && (meta_version == 0 || Py_TYPE(owner)->tp_version_tag != meta_version))
         || !lu_site_unchanged(next_instr - 1, opcode)
-        || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        || lu_cache_load32(next_instr + LA_VERSION) != version
+        || !lu_try_incref(descr)) {         /* the cache does not own it: it may be freed */
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
-    TOP() = Py_NewRef(descr);
+    TOP() = descr;
     Py_DECREF(owner);
     if (oparg & 1) {
         PUSH(NULL);
@@ -2691,11 +2730,12 @@ op_LOAD_ATTR_METHOD: {
             goto op_LOAD_ATTR;
         }
     }
-    if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
+    if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version
+        || !lu_try_incref(descr)) {         /* the cache does not own it: it may be freed */
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
-    TOP() = Py_NewRef(descr);
+    TOP() = descr;
     if (opcode == LOAD_ATTR_METHOD_NO_DICT || opcode == LOAD_ATTR_METHOD_WITH_VALUES) {
         PUSH(owner);
     }
@@ -2729,9 +2769,10 @@ op_LOAD_ATTR: {
     }
     getattrofunc get = Py_TYPE(owner)->tp_getattro;
     if (get == lu_slot_tp_getattro || get == PyObject_GenericGetAttr) {
-        PyObject *descr = _PyType_Lookup(Py_TYPE(owner), name), *v;
+        PyObject *descr = _PyType_LookupRef(Py_TYPE(owner), name), *v;
         if ((v = attr_shortcut(owner, name)) != NULL) {
-            TOP() = Py_NewRef(v);
+            Py_XDECREF(descr);
+            TOP() = v;
             Py_DECREF(owner);
             if (oparg & 1) {
                 PUSH(NULL);
@@ -2743,6 +2784,7 @@ op_LOAD_ATTR: {
         }
         if (descr != NULL && object_attr_hook(Py_TYPE(owner), LU_ID(__getattribute__))
             && lu_descr_get_native(descr, owner, &v) > 0) {
+            Py_DECREF(descr);
             TOP() = v;
             Py_DECREF(owner);
             if (oparg & 1) {
@@ -2755,20 +2797,23 @@ op_LOAD_ATTR: {
                access: run it in this loop, as generic_getattr would, unless
                an AttributeError from it must go to __getattr__. */
             PyTypeObject *dt = Py_TYPE(descr);
-            PyObject *getter = _PyType_Lookup(dt, LU_ID(__get__));
+            PyObject *getter = _PyType_LookupRef(dt, LU_ID(__get__));
             if (getter != NULL && Py_IS_TYPE(getter, &PyFunction_Type)
                 && _PyType_Lookup(Py_TYPE(owner), LU_ID(__getattr__)) == NULL
                 && (_PyType_Lookup(dt, LU_ID(__set__)) != NULL || _PyType_Lookup(dt, LU_ID(__delete__)) != NULL)) {
-                kargs[0] = Py_NewRef(descr);
+                kargs[0] = descr;
                 kargs[1] = POP();
                 kargs[2] = Py_NewRef((PyObject *)Py_TYPE(kargs[1]));
                 SAVE_FRAME();
                 callee = lu_frame_call(ts, (PyFunctionObject *)getter, kargs, 3, NULL);
+                Py_DECREF(getter);
                 ERROR_IF(callee == NULL);
                 callee->ret = kret;
                 goto push_callee;
             }
+            Py_XDECREF(getter);
         }
+        Py_XDECREF(descr);
         if ((v = getattr_native(owner, name)) != NULL) {
             TOP() = v;
             Py_DECREF(owner);
