@@ -782,36 +782,58 @@ prim_iter_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return (PyObject *)it;
 }
 
+/* Moves the iterator past v, the item at its index, or with v NULL leaves
+   it exhausted; the sequence it lets go of is in *dead. */
+static void
+seqiter_step(seqiterobject *it, PyObject *v, PyObject **dead)
+{
+    int rev = Py_TYPE(it) == &PyListRevIter_Type;
+    if (v != NULL) {
+        it->it_index += rev ? -1 : 1;
+    }
+    else {
+        it->it_index = rev ? -1 : it->it_index;
+        *dead = it->it_seq;
+        it->it_seq = NULL;
+    }
+}
+
 /* The next item of a tuple, list or reverse list iterator, or NULL when
    exhausted. */
 PyObject *
 lu_seqiter_next(PyObject *iter)
 {
     seqiterobject *it = (seqiterobject *)iter;
-    PyTypeObject *tp = Py_TYPE(iter);
-    /* The iterator's state changes under its own lock; the list is read
-       without its own. */
-    PyObject *v = NULL, *dead = NULL;
+    /* The iterator's state changes under its own lock. A list item is read
+       first without the list's lock; when that fails, the list's lock is
+       taken together with the iterator's, never inside it: a contended lock
+       parks, which suspends the sections the task holds, and another thread
+       could advance or exhaust the iterator meanwhile. */
+    PyObject *v = NULL, *seq = NULL, *dead = NULL;
     Py_BEGIN_CRITICAL_SECTION(iter);
-    PyObject *seq = it->it_seq;
-    if (seq != NULL) {
-        Py_ssize_t i = it->it_index;
-        if (tp == &PyTupleIter_Type) {
-            v = i < Py_SIZE(seq) ? Py_NewRef(PyTuple_GET_ITEM(seq, i)) : NULL;
-        }
-        else {
-            v = i >= 0 ? lu_list_item_ref((PyListObject *)seq, i) : NULL;
-        }
-        if (v != NULL) {
-            it->it_index += tp == &PyListRevIter_Type ? -1 : 1;
-        }
-        else {
-            it->it_index = tp == &PyListRevIter_Type ? -1 : i;
-            it->it_seq = NULL;
-            dead = seq;
-        }
+    PyObject *s = it->it_seq;
+    Py_ssize_t i = it->it_index;
+    if (s != NULL && Py_TYPE(iter) == &PyTupleIter_Type) {
+        v = i < Py_SIZE(s) ? Py_NewRef(PyTuple_GET_ITEM(s, i)) : NULL;
+        seqiter_step(it, v, &dead);
+    }
+    else if (s != NULL && i >= 0 && (v = lu_list_try_item_ref((PyListObject *)s, i)) != NULL) {
+        seqiter_step(it, v, &dead);
+    }
+    else if (s != NULL) {
+        seq = Py_NewRef(s);
     }
     Py_END_CRITICAL_SECTION();
+    if (seq != NULL) {
+        Py_BEGIN_CRITICAL_SECTION2(iter, seq);
+        if (it->it_seq == seq) {
+            Py_ssize_t i = it->it_index;
+            v = 0 <= i && i < Py_SIZE(seq) ? lu_new_ref_with_lock(((PyListObject *)seq)->ob_item[i]) : NULL;
+            seqiter_step(it, v, &dead);
+        }
+        Py_END_CRITICAL_SECTION2();
+        Py_DECREF(seq);
+    }
     Py_XDECREF(dead);
     return v;
 }
