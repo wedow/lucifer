@@ -657,7 +657,7 @@ def _bytes_of(args, kwargs):
         r = call_special(f, x)
         if not kind(r, 'bytes'):
             error(TypeError, _cat('__bytes__ returned non-bytes (type ', _name(r), ')'))
-        return b_bytes(r)
+        return r
     if kind(x, 'str'):
         error(TypeError, 'string argument without an encoding')
     if kind(x, 'int') or type_lookup(type(x), '__index__') is not MISSING:

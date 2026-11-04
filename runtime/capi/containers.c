@@ -235,6 +235,13 @@ PyObject_DelItemString(PyObject *o, const char *key)
 int
 PyObject_GetOptionalAttrString(PyObject *obj, const char *name, PyObject **result)
 {
+    *result = NULL;      /* every failure leaves it NULL, CPython's contract */
+    if (obj == NULL || name == NULL) {
+        if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_SystemError, "null argument to internal routine");
+        }
+        return -1;
+    }
     PyObject *n = PyUnicode_FromString(name);
     int r = n != NULL ? PyObject_GetOptionalAttr(obj, n, result) : -1;
     Py_XDECREF(n);

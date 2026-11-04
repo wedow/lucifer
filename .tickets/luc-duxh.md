@@ -1,0 +1,16 @@
+---
+id: luc-duxh
+status: open
+deps: []
+links: []
+created: 2026-11-04T17:16:05Z
+type: feature
+priority: 1
+assignee: Greg Wedow
+---
+# replace lib/compiler with CPython's C compiler, byte-identical
+
+The Python port of CPython's compiler (lib/compiler) is byte-identical but runs ~70x slower than CPython's C compiler on large inputs and dominates short-lived startup (traceback import, dataclasses, namedtuple, pytest rewrite). The Python compiler was a bootstrap convenience (DESIGN decision 3); the compiler is not on the speed path. Vendor CPython 3.14's tokenizer (Parser/lexer, Parser/tokenizer), generated parser (Parser/parser.c, action_helpers, pegen.c, string_parser), AST (Python/Python-ast.c, _ast), and Python/{symtable,ast_preprocess,codegen,compile,flowgraph,assemble,instruction_sequence}.c into runtime/, adapting CPython-internal helpers to Lucifer's equivalents. Keep _tokenize and _ast as CPython has them in C. Update DESIGN.md decision 3.
+
+Acceptance: make check-compiler stays 100% byte-identical on all corpora (now through the C compiler); make check, difftest, abi-audit green; lib/compiler deleted (or kept only if a tool needs it, with the reason); check-timing: 100,000-line function under 5 s, uncaught exception exit under 0.15 s; numpy test_multiarray.py compiles in under 1 s.
+

@@ -900,7 +900,8 @@ prim_str_ascii(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1); STR(0);
     PyObject *s = args[0];
-    if (PyUnicode_IS_ASCII(s)) return substring(s, 0, LEN(s));
+    /* an ASCII repr is returned as it is, subclass included (PyObject_ASCII) */
+    if (PyUnicode_IS_ASCII(s)) return Py_NewRef(s);
     ubuf b = { 0 };
     for (Py_ssize_t i = 0; i < LEN(s); i++) {
         Py_UCS4 c = CH(s, i);
