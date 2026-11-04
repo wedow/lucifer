@@ -1972,11 +1972,17 @@ op_LIST_EXTEND: {
     PyObject *list = sp[-oparg];
     SAVE_FRAME();
     if (PyTuple_CheckExact(iterable) || PyList_CheckExact(iterable)) {
+        /* A list source is read as subscripts are: another thread may resize it. */
         Py_ssize_t n = Py_SIZE(iterable);
         int err = 0;
-        for (Py_ssize_t i = 0; err == 0 && i < n && i < Py_SIZE(iterable); i++) {
-            err = lu_list_append(list, PyTuple_CheckExact(iterable) ? PyTuple_GET_ITEM(iterable, i)
-                                                                    : PyList_GET_ITEM(iterable, i));
+        for (Py_ssize_t i = 0; err == 0 && i < n; i++) {
+            PyObject *v = PyTuple_CheckExact(iterable) ? Py_NewRef(PyTuple_GET_ITEM(iterable, i))
+                                                       : lu_list_item_ref((PyListObject *)iterable, i);
+            if (v == NULL) {
+                break;
+            }
+            err = lu_list_append(list, v);
+            Py_DECREF(v);
         }
         Py_DECREF(iterable);
         ERROR_IF(err < 0);
