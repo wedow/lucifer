@@ -850,7 +850,7 @@ lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value)
         return 0;
     }
     PyObject *descr = _PyType_Lookup(tp, name);
-    if (descr != NULL) {
+    if (descr != NULL && Py_TYPE(descr)->tp_descr_set != NULL) {
         return lu_descr_set_native(descr, obj, value);
     }
     if (value == NULL || !(tp->tp_flags & Py_TPFLAGS_MANAGED_DICT)) {
