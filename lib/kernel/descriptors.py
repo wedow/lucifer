@@ -8,7 +8,7 @@ from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_dict, type_mro, type_tp_name,
     type_qualname, is_subtype, ns_get, alloc, static_type, descr_type, bind,
     method_new, member_get, member_set, getset_kernel, getset_get, getset_set,
-    field_get, field_set, super_args, is_callable, kernel_set, kernel_get, address, function_new,
+    field_get, field_set, ns_set, super_args, is_callable, kernel_set, kernel_get, address, function_new,
     object_hash,
 )
 from _lucifer import _boot
@@ -180,6 +180,17 @@ class wrapper_descriptor:
             return self
         _descr_check(self, instance)
         return bind(self, instance)
+
+
+def _call(self, /, *args, **kwargs):
+    return self(*args, **kwargs)
+
+
+# The types the runtime calls natively also have a __call__ attribute. It goes
+# into the dict alone: update_slots would make the slot call this function.
+for _t in (builtin_function_or_method, method_descriptor, classmethod_descriptor,
+           wrapper_descriptor, static_type('method-wrapper')):
+    ns_set(type_dict(_t), '__call__', _call)
 
 
 @kernel_type(static_type('member_descriptor'))
