@@ -686,12 +686,9 @@ in addition to any features explicitly specified."""
         error(ValueError, "compile() mode must be 'exec', 'eval' or 'single'")
     if mode == 'func_type' and not flags & _PyCF_ONLY_AST:
         error(ValueError, "compile() mode 'func_type' requires flag PyCF_ONLY_AST")
-    import _ast
-    if not isinstance(source, _ast.AST):
-        text = _source_text('compile', source)
-        if text is None:
-            error(TypeError, 'compile() arg 1 must be a string, bytes or AST object')
-        source = text
+    text = _source_text('compile', source)
+    if text is not None:
+        source = text           # anything else is for the compiler: an AST or a TypeError
     sys.audit('compile', source, filename)
     return _compile(source, filename, mode, flags, truth(dont_inherit), optimize, feature_version)
 

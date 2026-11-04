@@ -803,7 +803,7 @@ lu_cc_compile(PyObject *source, PyObject *filename, const char *mode, int flags,
         return NULL;
     }
     PyObject *result = NULL;
-    int is_ast = PyAST_Check(source);
+    int is_ast = PyUnicode_Check(source) || PyBytes_Check(source) ? 0 : PyAST_Check(source);
     mod_ty mod;
     if (is_ast < 0) {
         goto done;
