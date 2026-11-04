@@ -287,3 +287,55 @@ for _ in range(ROUNDS):
     dupes += len(taken) - len(set(taken))
     dupes += abs(len(taken) - 240)
 print('dict pop', lost, dupes)
+
+# Keys that only __eq__ can judge (tuples), each thread storing and deleting
+# its own while the others' resize and compact the table: a lookup must not
+# miss a present key, nor read a value by an entry number of another table.
+own = {}
+missed = []
+
+
+def own_keys(w):
+    for n in range(1500):
+        for k in range(100):
+            own[(w, k)] = n
+        for k in range(100):
+            try:
+                del own[(w, k)]
+            except KeyError:
+                missed.append((w, k))
+
+
+ts = [threading.Thread(target=own_keys, args=(w,)) for w in range(4)]
+for t in ts:
+    t.start()
+for t in ts:
+    t.join()
+print('own tuple keys', len(missed), len(own))
+
+shifting = {}
+for i in range(100):
+    shifting[('x', i)] = -1
+for i in range(64):
+    shifting[('k', i)] = i
+
+
+SH = [0]
+
+
+def shift_entries():
+    n = SH[0] = SH[0] + 1
+    del shifting[('x', n % 100)]
+    shifting[('x', n % 100)] = -1
+
+
+def read_shifting():
+    bad = 0
+    for _ in range(3000):
+        for i in range(0, 64, 7):
+            if shifting.get(('k', i)) != i:
+                bad += 1
+    return bad
+
+
+print('tuple key values', race(shift_entries, [read_shifting] * 3))
