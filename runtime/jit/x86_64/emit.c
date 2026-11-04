@@ -1392,12 +1392,13 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     }
     case OP_POLL: {
         guard_exit(a, in);                          /* the stress count */
+        /* The poll word: an event, or a monitoring version other than the
+           one the code was compiled under (tools turned on), leaves. */
         load(a, RAX, R14, offsetof(struct lu_task, carrier));
-        rex(a, 1, 0, 0, RAX);
-        b1(a, 0xF7);
-        modrm_mem(a, 0, RAX, offsetof(struct lu_carrier, poll));
-        b4(a, (int32_t)LU_POLL_EVENTS_MASK);   /* test qword [rax+poll], mask */
+        load(a, RCX, RAX, offsetof(struct lu_carrier, poll));
         int poll = exit_to(a, in->fs, EXIT_POLL, 0, 0);
+        mov_ri(a, R11, (int64_t)a->f->code->_co_instrumentation_version);
+        alu_rr(a, ALU_CMP, RCX, R11);
         jcc(a, CC_NE, poll);
         /* The carrier passes a quiescent state, as the interpreter's poll does. */
         int same = new_label(a);

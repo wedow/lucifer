@@ -1129,7 +1129,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
     k->depth = c->depth + 1;
     if (!k->kernel) {
         /* The function's code is part of what was compiled: f.__code__ = ... changes its version. */
-        if (fn->func_version == 0) {
+        if (fn->func_version < 2) {     /* 1: changed code or defaults, never specialized on again */
             free(k);
             return 0;
         }
