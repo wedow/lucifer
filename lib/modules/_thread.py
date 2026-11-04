@@ -51,7 +51,7 @@ A lock is not owned by the thread that locked it; another thread may
 unlock it.  A thread attempting to lock a lock that it has already locked
 will block until another thread unlocks it.  Deadlocks may ensue."""
 
-    __slots__ = ('_mutex',)
+    __slots__ = ('_mutex', '__weakref__')
 
     def __init__(self):
         self._mutex = _lucifer.mutex_new()

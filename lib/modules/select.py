@@ -64,6 +64,10 @@ def select(rlist, wlist, xlist, timeout=None, /):
     return result
 
 
+# A builtin, not a function: kept as a class attribute (selectors.SelectSelector._select) it does not bind.
+select = staticmethod(select)
+
+
 class poll:
     """Returns a polling object."""
 

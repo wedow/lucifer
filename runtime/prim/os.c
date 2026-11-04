@@ -153,6 +153,14 @@ from_locale(const char *s)
     return r;
 }
 
+/* PEP 475: a call that failed with EINTR runs the Python signal handlers, then is retried; a
+   handler that raises ends it, with its exception set. */
+static int
+interrupted(void)
+{
+    return errno == EINTR && PyErr_CheckSignals() == 0;
+}
+
 static int
 int_arg(PyObject *o, long *out)
 {
@@ -281,9 +289,11 @@ lu_prim_os_open(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     int fd;
     do {
         fd = LU_SYSCALL(open(path, (int)flags | O_CLOEXEC, (mode_t)mode));
-    } while (fd < 0 && errno == EINTR);
+    } while (fd < 0 && interrupted());
     if (fd < 0) {
-        set_oserror(errno, args[0]);
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, args[0]);
+        }
         return NULL;
     }
     return PyLong_FromLong(fd);
@@ -392,9 +402,11 @@ lu_prim_os_read(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ssize_t n;
     do {
         n = LU_SYSCALL(read((int)fd, PyBytes_AS_STRING(bytes), (size_t)size));
-    } while (n < 0 && errno == EINTR);
+    } while (n < 0 && interrupted());
     if (n < 0) {
-        set_oserror(errno, NULL);
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
         Py_DECREF(bytes);
         return NULL;
     }
@@ -418,9 +430,11 @@ lu_prim_os_write(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ssize_t n;
     do {
         n = LU_SYSCALL(write((int)fd, PyBytes_AS_STRING(args[1]), (size_t)PyBytes_GET_SIZE(args[1])));
-    } while (n < 0 && errno == EINTR);
+    } while (n < 0 && interrupted());
     if (n < 0) {
-        set_oserror(errno, NULL);
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
         return NULL;
     }
     return PyLong_FromLongLong(n);
@@ -1071,9 +1085,11 @@ prim_os_waitpid(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     pid_t r;
     do {
         r = LU_SYSCALL(waitpid((pid_t)pid, &status, (int)options));
-    } while (r < 0 && errno == EINTR);
+    } while (r < 0 && interrupted());
     if (r < 0) {
-        set_oserror(errno, NULL);
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
         return NULL;
     }
     PyObject *p = PyLong_FromLong(r), *s = PyLong_FromLong(status);
@@ -1156,7 +1172,7 @@ prim_os_flock(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     int r;
     do {
         r = LU_SYSCALL(flock((int)fd, (int)operation));
-    } while (r < 0 && errno == EINTR && PyErr_CheckSignals() == 0);
+    } while (r < 0 && interrupted());
     if (r < 0) {
         if (!PyErr_Occurred()) {
             set_oserror(errno, NULL);
@@ -1180,7 +1196,7 @@ prim_os_lockf(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     int r;
     do {
         r = LU_SYSCALL(fcntl((int)fd, cmd & 4 ? F_SETLK : F_SETLKW, &lock));
-    } while (r < 0 && errno == EINTR && PyErr_CheckSignals() == 0);
+    } while (r < 0 && interrupted());
     if (r < 0) {
         if (!PyErr_Occurred()) {
             set_oserror(errno, NULL);
