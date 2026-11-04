@@ -177,8 +177,14 @@ int
 PyDict_PopString(PyObject *dict, const char *key, PyObject **result)
 {
     PyObject *k = PyUnicode_FromString(key);
-    int r = k != NULL ? PyDict_Pop(dict, k, result) : -1;
-    Py_XDECREF(k);
+    if (k == NULL) {
+        if (result != NULL) {
+            *result = NULL;     /* every failure leaves it NULL, CPython's contract */
+        }
+        return -1;
+    }
+    int r = PyDict_Pop(dict, k, result);
+    Py_DECREF(k);
     return r;
 }
 

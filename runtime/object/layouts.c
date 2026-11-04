@@ -304,6 +304,9 @@ PyTuple_New(Py_ssize_t size)
         lu_err_format(PyExc_SystemError, "Negative size passed to PyTuple_New");
         return NULL;
     }
+    if (size > (PY_SSIZE_T_MAX - sizeof(PyTupleObject) - sizeof(PyObject *)) / sizeof(PyObject *)) {
+        return PyErr_NoMemory();
+    }
     if (size == 0) {
         return (PyObject *)&_PyRuntime.singletons.empty_tuple;
     }
@@ -314,6 +317,9 @@ PyTuple_New(Py_ssize_t size)
     }
     Py_SET_SIZE(op, size);
     op->ob_hash = -1;
+    for (Py_ssize_t i = 0; i < size; i++) {
+        op->ob_item[i] = NULL;
+    }
     return (PyObject *)op;
 }
 
@@ -326,10 +332,16 @@ PyTuple_Pack(Py_ssize_t n, ...)
     }
     va_list ap;
     va_start(ap, n);
+    int track = 0;
     for (Py_ssize_t i = 0; i < n; i++) {
-        PyTuple_SET_ITEM(t, i, Py_NewRef(va_arg(ap, PyObject *)));
+        PyObject *item = va_arg(ap, PyObject *);
+        track |= PyType_IS_GC(Py_TYPE(item));
+        PyTuple_SET_ITEM(t, i, Py_NewRef(item));
     }
     va_end(ap);
+    if (!track) {
+        t->ob_gc_bits &= ~LU_GC_TRACKED;    /* all items atomic: CPython's PyTuple_Pack */
+    }
     return t;
 }
 
@@ -364,6 +376,12 @@ _PyTuple_Resize(PyObject **pv, Py_ssize_t newsize)
         *pv = PyTuple_New(newsize);
         return *pv != NULL ? 0 : -1;
     }
+    if (newsize > (PY_SSIZE_T_MAX - sizeof(PyTupleObject) - sizeof(PyObject *)) / sizeof(PyObject *)) {
+        PyErr_NoMemory();
+        Py_DECREF(v);           /* the caller's stolen reference, as every failure takes it */
+        *pv = NULL;
+        return -1;
+    }
     PyTupleObject *resized = (PyTupleObject *)lu_object_new(&PyTuple_Type,
         offsetof(PyTupleObject, ob_item) + newsize * sizeof(PyObject *));
     if (resized == NULL) {
@@ -372,7 +390,7 @@ _PyTuple_Resize(PyObject **pv, Py_ssize_t newsize)
     Py_SET_SIZE(resized, newsize);
     resized->ob_hash = -1;
     for (Py_ssize_t i = 0; i < newsize; i++) {
-        resized->ob_item[i] = v->ob_item[i];
+        resized->ob_item[i] = i < oldsize ? v->ob_item[i] : NULL;
     }
     for (Py_ssize_t i = newsize; i < oldsize; i++) {
         Py_XDECREF(v->ob_item[i]);

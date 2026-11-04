@@ -182,7 +182,8 @@ prim_seq_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
     }
     else if (0 <= i && i < Py_SIZE(args[0])) {
-        v = Py_NewRef(((PyTupleObject *)args[0])->ob_item[i]);
+        PyObject *item = ((PyTupleObject *)args[0])->ob_item[i];
+        v = item != NULL ? Py_NewRef(item) : Py_NewRef(_PyRuntime.singletons.null_item);
     }
     if (v == NULL && !PyErr_Occurred()) {
         lu_err_format(PyExc_IndexError, "index out of range");

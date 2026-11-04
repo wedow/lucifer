@@ -176,7 +176,6 @@ LU_STUB void PyErr_DisplayException(PyObject *) { LU_UNIMPLEMENTED("PyErr_Displa
 LU_STUB int PyErr_ExceptionMatches(PyObject *) { LU_UNIMPLEMENTED("PyErr_ExceptionMatches"); }
 LU_STUB void PyErr_Fetch(PyObject **, PyObject **, PyObject **) { LU_UNIMPLEMENTED("PyErr_Fetch"); }
 LU_STUB PyObject * PyErr_Format(PyObject *exception, const char *format, ...) { LU_UNIMPLEMENTED("PyErr_Format"); }
-LU_STUB void PyErr_FormatUnraisable(const char *, ...) { LU_UNIMPLEMENTED("PyErr_FormatUnraisable"); }
 LU_STUB PyObject * PyErr_FormatV(PyObject *exception, const char *format, va_list vargs) { LU_UNIMPLEMENTED("PyErr_FormatV"); }
 LU_STUB void PyErr_GetExcInfo(PyObject **, PyObject **, PyObject **) { LU_UNIMPLEMENTED("PyErr_GetExcInfo"); }
 LU_STUB PyObject* PyErr_GetHandledException(void) { LU_UNIMPLEMENTED("PyErr_GetHandledException"); }
@@ -1470,8 +1469,6 @@ LU_STUB LU_EXPORT void _PySeqLock_UnlockWrite(void) { LU_UNIMPLEMENTED("_PySeqLo
 LU_STUB LU_EXPORT void _PySet_AddTakeRef(void) { LU_UNIMPLEMENTED("_PySet_AddTakeRef"); }
 LU_STUB LU_EXPORT void _PySet_Contains(void) { LU_UNIMPLEMENTED("_PySet_Contains"); }
 LU_STUB LU_EXPORT void _PySet_NextEntry(void) { LU_UNIMPLEMENTED("_PySet_NextEntry"); }
-LU_STUB LU_EXPORT void _PySet_NextEntryRef(void) { LU_UNIMPLEMENTED("_PySet_NextEntryRef"); }
-LU_STUB LU_EXPORT void _PySet_Update(void) { LU_UNIMPLEMENTED("_PySet_Update"); }
 LU_STUB LU_EXPORT void _PyState_AddModule(void) { LU_UNIMPLEMENTED("_PyState_AddModule"); }
 LU_STUB LU_EXPORT void _PyStaticType_GetBuiltins(void) { LU_UNIMPLEMENTED("_PyStaticType_GetBuiltins"); }
 LU_STUB LU_EXPORT void _PyStaticType_InitForExtension(void) { LU_UNIMPLEMENTED("_PyStaticType_InitForExtension"); }

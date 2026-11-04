@@ -411,118 +411,54 @@ lu_frozenset_hash(PyObject *set)
     return so->hash;
 }
 
-/* The C-API over the table (Objects/setobject.c's PySet_*). The lookups and
-   removals the kernel owns go through its methods, under the set's protocol. */
 
-/* make_new_set: an empty set of the exact type, filled from iterable. */
-static PyObject *
-make_set(PyTypeObject *type, PyObject *iterable)
+/* _PySet_NextEntryRef (setobject.c): the entry at pos onward, its key as a
+   new reference, under the set's lock: a concurrent discard cannot take the
+   key between the read and the reference. */
+LU_EXPORT int
+_PySet_NextEntryRef(PyObject *set, Py_ssize_t *pos, PyObject **key, Py_hash_t *hash)
 {
-    PyObject *set = lu_set_new(type);
-    if (set == NULL || iterable == NULL) {
-        return set;
+    if (!PyAnySet_Check(set)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    PySetObject *so = (PySetObject *)set;
+    int found = 0;
+    Py_BEGIN_CRITICAL_SECTION(set);
+    while (*pos <= so->mask) {
+        setentry *entry = &so->table[(*pos)++];
+        if (entry->key != NULL && entry->key != LU_SET_DUMMY) {
+            *key = Py_NewRef(entry->key);
+            *hash = entry->hash;
+            found = 1;
+            break;
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    return found;
+}
+
+/* _PySet_Update (set_update_internal): every item of iterable into the set. */
+LU_EXPORT int
+_PySet_Update(PyObject *set, PyObject *iterable)
+{
+    if (!PySet_Check(set)) {
+        PyErr_BadInternalCall();
+        return -1;
     }
     PyObject *it = PyObject_GetIter(iterable);
     if (it == NULL) {
-        Py_DECREF(set);
-        return NULL;
+        return -1;
     }
     PyObject *item;
     while ((item = PyIter_Next(it)) != NULL) {
         int err = lu_set_add(set, item);
         Py_DECREF(item);
         if (err < 0) {
-            Py_DECREF(set);
             Py_DECREF(it);
-            return NULL;
+            return -1;
         }
     }
     Py_DECREF(it);
-    if (PyErr_Occurred()) {
-        Py_DECREF(set);
-        return NULL;
-    }
-    return set;
-}
-
-PyObject *
-PySet_New(PyObject *iterable)
-{
-    return make_set(&PySet_Type, iterable);
-}
-
-PyObject *
-PyFrozenSet_New(PyObject *iterable)
-{
-    return make_set(&PyFrozenSet_Type, iterable);
-}
-
-int
-PySet_Add(PyObject *anyset, PyObject *key)
-{
-    PyObject *ob = anyset;
-    int unique = _Py_IsOwnedByCurrentThread(ob) && ob->ob_ref_local == 1
-        && _Py_atomic_load_ssize_relaxed(&ob->ob_ref_shared) == 0;
-    if (!PySet_Check(anyset) && (!PyFrozenSet_Check(anyset) || !unique)) {
-        PyErr_BadInternalCall();
-        return -1;
-    }
-    return lu_set_add(anyset, key);
-}
-
-int
-PySet_Clear(PyObject *set)
-{
-    if (!PySet_Check(set)) {
-        PyErr_BadInternalCall();
-        return -1;
-    }
-    lu_set_clear((PySetObject *)set);
-    return 0;
-}
-
-Py_ssize_t
-PySet_Size(PyObject *anyset)
-{
-    if (!PyAnySet_Check(anyset)) {
-        PyErr_BadInternalCall();
-        return -1;
-    }
-    return ((PySetObject *)anyset)->used;
-}
-
-int
-PySet_Contains(PyObject *anyset, PyObject *key)
-{
-    if (!PyAnySet_Check(anyset)) {
-        PyErr_BadInternalCall();
-        return -1;
-    }
-    return PySequence_Contains(anyset, key);
-}
-
-int
-PySet_Discard(PyObject *set, PyObject *key)
-{
-    if (!PySet_Check(set)) {
-        PyErr_BadInternalCall();
-        return -1;
-    }
-    PyObject *r = PyObject_CallMethod(set, "discard", "O", key);
-    if (r == NULL) {
-        return -1;
-    }
-    int found = r == Py_True;
-    Py_DECREF(r);
-    return found;
-}
-
-PyObject *
-PySet_Pop(PyObject *set)
-{
-    if (!PySet_Check(set)) {
-        PyErr_BadInternalCall();
-        return NULL;
-    }
-    return PyObject_CallMethod(set, "pop", NULL);
+    return PyErr_Occurred() ? -1 : 0;
 }
