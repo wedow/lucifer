@@ -14,17 +14,14 @@ class Node:
 N = 20000
 latest = [None, None]       # the newest reference, and its key
 wvd = weakref.WeakValueDictionary()
-lock = threading.Lock()
-fired = [0]
-bad = [0]
-seen = [0]
+fired = []                  # appends are atomic, and a lock could be held when a callback runs
+bad = []
 done = [False]
 keep = []                   # every reference stays alive, so every callback fires
 
 
 def callback(ref):
-    with lock:
-        fired[0] += 1
+    fired.append(ref)
 
 
 def owner():
@@ -39,7 +36,6 @@ def owner():
 
 
 def reader():
-    mine = 0
     wrong = 0
     while not done[0]:
         ref = latest[0]
@@ -47,12 +43,9 @@ def reader():
             continue
         for found in (ref(), ref(), ref(), wvd.get(latest[1])):
             if found is not None:
-                mine += 1
                 if found.payload != [found.i] * 4:
                     wrong += 1
-    with lock:
-        seen[0] += mine
-        bad[0] += wrong
+    bad.append(wrong)
 
 
 threads = [threading.Thread(target=reader) for _ in range(5)]
@@ -61,7 +54,7 @@ for t in threads:
 owner()
 for t in threads:
     t.join()
-print("bad", bad[0])
-print("callbacks", fired[0])
+print("bad", sum(bad))
+print("callbacks", len(fired))
 print("table", len(wvd))
 print("dead", sum(ref() is None for ref in keep))
