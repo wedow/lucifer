@@ -278,7 +278,7 @@ PyCFunction_GetFlags(PyObject *op)
     return ((PyCFunctionObject *)op)->m_ml->ml_flags;
 }
 
-PyObject *
+LU_EXPORT PyObject *
 PyCFunction_Call(PyObject *callable, PyObject *args, PyObject *kwargs)
 {
     return PyObject_Call(callable, args, kwargs);
@@ -607,7 +607,7 @@ PyUnicode_ReadChar(PyObject *unicode, Py_ssize_t index)
     return PyUnicode_READ(PyUnicode_KIND(unicode), PyUnicode_DATA(unicode), index);
 }
 
-Py_ssize_t
+LU_EXPORT Py_ssize_t
 PyUnicode_GetSize(PyObject *unicode)
 {
     return PyUnicode_GetLength(unicode);
