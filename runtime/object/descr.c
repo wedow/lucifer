@@ -1046,10 +1046,29 @@ prim_make_function(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return NULL;
 }
 
+/* _tuplegetter.__get__ for a tuple that has the item: its _index slot is the position. */
+static PyObject *
+tuplegetter_get(PyObject *descr, PyObject *obj)
+{
+    PyObject *slot = _PyType_Lookup(Py_TYPE(descr), LU_ID(_index));
+    if (!PyTuple_Check(obj) || slot == NULL || !Py_IS_TYPE(slot, &PyMemberDescr_Type)) {
+        return NULL;
+    }
+    PyObject *index = *(PyObject **)((char *)descr + ((PyMemberDescrObject *)slot)->d_member->offset);
+    if (index == NULL || !PyLong_CheckExact(index) || !_PyLong_IsCompact((PyLongObject *)index)) {
+        return NULL;
+    }
+    Py_ssize_t i = _PyLong_CompactValue((PyLongObject *)index);
+    return 0 <= i && i < Py_SIZE(obj) ? Py_NewRef(PyTuple_GET_ITEM(obj, i)) : NULL;
+}
+
 int
 lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out)
 {
     PyObject *v;
+    if (Py_TYPE(descr) == (PyTypeObject *)PyInterpreterState_Get()->kernel[LU_K_tuplegetter]) {
+        return (*out = tuplegetter_get(descr, obj)) != NULL;
+    }
     if (Py_IS_TYPE(descr, &PyMemberDescr_Type)) {
         v = PyMember_GetOne((const char *)obj, ((PyMemberDescrObject *)descr)->d_member);
     }

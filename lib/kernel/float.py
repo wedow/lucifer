@@ -167,7 +167,8 @@ class float:
     """Convert a string or number to a floating-point number, if possible."""
 
     def __new__(cls, /, *args, **kwargs):
-        _boot.check_new(cls, float)
+        if cls is not float:
+            _boot.check_new(cls, float)
         if kwargs and (cls is float or type_lookup(cls, '__init__') is type_lookup(float, '__init__')):
             error(TypeError, 'float() takes no keyword arguments')
         n = size(args)

@@ -407,7 +407,8 @@ dict(**kwargs) -> new dictionary initialized with the name=value pairs
     in the keyword argument list.  For example:  dict(one=1, two=2)"""
 
     def __new__(cls, /, *args, **kwargs):
-        _boot.check_new(cls, dict)
+        if cls is not dict:
+            _boot.check_new(cls, dict)
         return dict_new(cls)
 
     def __init__(self, /, *args, **kwargs):

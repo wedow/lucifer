@@ -62,7 +62,8 @@ If strict is true and one of the arguments is exhausted before the others,
 raise a ValueError."""
 
     def __new__(cls, /, *args, **kwargs):
-        _boot.check_new(cls, map)
+        if cls is not map:
+            _boot.check_new(cls, map)
         strict = _strict_option('map', kwargs)
         if size(args) < 2:
             error(TypeError, 'map() must have at least two arguments.')
@@ -97,7 +98,8 @@ class filter:
 is true. If function is None, return the items that are true."""
 
     def __new__(cls, /, *args, **kwargs):
-        _boot.check_new(cls, filter)
+        if cls is not filter:
+            _boot.check_new(cls, filter)
         if kwargs and (cls is filter or type_lookup(cls, '__init__') is type_lookup(filter, '__init__')):
             error(TypeError, 'filter() takes no keyword arguments')
         if size(args) != 2:
@@ -163,7 +165,8 @@ If strict is true and one of the arguments is exhausted before the others,
 raise a ValueError."""
 
     def __new__(cls, /, *args, **kwargs):
-        _boot.check_new(cls, zip)
+        if cls is not zip:
+            _boot.check_new(cls, zip)
         strict = _strict_option('zip', kwargs)
         iters = []
         for arg in args:
@@ -197,7 +200,8 @@ enumerate is useful for obtaining an indexed list:
     (0, seq[0]), (1, seq[1]), (2, seq[2]), ..."""
 
     def __new__(cls, /, *args, **kwargs):
-        _boot.check_new(cls, enumerate)
+        if cls is not enumerate:
+            _boot.check_new(cls, enumerate)
         if not args and not kwargs:
             error(TypeError, "enumerate() missing required argument 'iterable'")
         if size(args) + size(kwargs) == 2:
@@ -228,7 +232,8 @@ class reversed:
     """Return a reverse iterator over the values of the given sequence."""
 
     def __new__(cls, /, *args, **kwargs):
-        _boot.check_new(cls, reversed)
+        if cls is not reversed:
+            _boot.check_new(cls, reversed)
         if kwargs and (cls is reversed or type_lookup(cls, '__init__') is type_lookup(reversed, '__init__')):
             error(TypeError, 'reversed() takes no keyword arguments')
         if size(args) != 1:

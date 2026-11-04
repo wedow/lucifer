@@ -28,6 +28,7 @@
 #include "opcode.h"
 #include "opcode_ids.h"
 #include "prim/prim.h"
+#include "prim/bytes.h"
 
 /* Include/internal/pycore_opcode_utils.h */
 #define MAKE_FUNCTION_DEFAULTS    0x01
@@ -633,6 +634,23 @@ isinstance_native(PyObject *obj, PyObject *cls, int depth)
     return -1;
 }
 
+/* list(seq) and tuple(seq) of an exact list or tuple, or of nothing (seq
+   NULL): a new reference; NULL for any other argument, which is the kernel's. */
+static PyObject *
+seq_copy_native(int as_tuple, PyObject *seq)
+{
+    if (seq == NULL) {
+        return as_tuple ? PyTuple_New(0) : PyList_New(0);
+    }
+    if (as_tuple && PyTuple_CheckExact(seq)) {
+        return Py_NewRef(seq);
+    }
+    if (PyTuple_CheckExact(seq) || PyList_CheckExact(seq)) {
+        return lu_seq_slice(seq, 0, 1, Py_SIZE(seq), as_tuple);
+    }
+    return NULL;
+}
+
 /* The kernel functions that C answers for plain arguments, so that the common
    call of dict.get, len and isinstance runs no frame: the result, or NULL
    when the kernel must run. */
@@ -662,6 +680,14 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
     else if (target == kernel[LU_K_index]) {
         if (npos == 1 && PyLong_CheckExact(args[0])) {
             return Py_NewRef(args[0]);
+        }
+    }
+    else if (target == kernel[LU_K_bytearray_append]) {
+        if (npos == 2 && PyByteArray_CheckExact(args[0]) && PyLong_CheckExact(args[1])
+            && _PyLong_IsCompact((PyLongObject *)args[1])
+            && (size_t)_PyLong_CompactValue((PyLongObject *)args[1]) < 256) {
+            return lu_bytearray_append(args[0], (int)_PyLong_CompactValue((PyLongObject *)args[1])) < 0
+                ? NULL : Py_NewRef(Py_None);
         }
     }
     else if (target == kernel[LU_K_list_append]) {
@@ -1403,6 +1429,10 @@ call_tail: {
             result = Py_NewRef(truth ? Py_True : Py_False);
             goto call_done;
         }
+    }
+    if (!mon && kwnames == NULL && total <= 1 && (callable == (PyObject *)&PyList_Type || callable == (PyObject *)&PyTuple_Type)
+        && (result = seq_copy_native(callable == (PyObject *)&PyTuple_Type, total == 1 ? args[0] : NULL)) != NULL) {
+        goto call_done;
     }
     PyObject *target = NULL, *self = NULL;
     PyObject *init = NULL;

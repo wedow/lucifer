@@ -130,3 +130,76 @@ class WithNewKw:
 
 attempt(65, lambda: WithNewKw(flag=True))
 attempt(66, lambda: WithNewKw(1))
+
+
+# list() and tuple() of an exact list or tuple, or nothing, are copied by the loop.
+src = [1, [2], 3]
+cp = list(src)
+cp.append(4)
+print(70, src, cp, cp[1] is src[1], list(), tuple(), tuple(src), list((1, 2)), list([]), tuple([]))
+tt = (1, 2)
+print(71, tuple(tt) is tt, list(tt) == [1, 2], tuple(src) == (1, [2], 3), type(tuple(src)).__name__)
+
+
+class LS(list):
+    pass
+
+
+class TS(tuple):
+    pass
+
+
+print(72, list(LS([1])), type(list(LS([1]))).__name__, tuple(TS((1,))), type(tuple(TS((1,)))).__name__)
+for bad in (lambda: list(1), lambda: tuple(None), lambda: list(1, 2), lambda: list(sequence=[1]), lambda: tuple([1], 2)):
+    try:
+        bad()
+    except TypeError as ex:
+        print(73, ex)
+print(74, list(range(3)), tuple('ab'), list({1: 2}), list(x for x in 'xy'), list(iter([1, 2])))
+print(75, bytearray(b'ab') + bytearray([1]), end=' ')
+ba = bytearray()
+for i in (0, 255, 7):
+    ba.append(i)
+print(ba)
+for bad in (256, -1, 1.5, 'a', None, 2**70, True):
+    try:
+        ba.append(bad)
+        print(76, bad, 'ok', ba[-1])
+    except (TypeError, ValueError) as ex:
+        print(76, type(ex).__name__, ex)
+view = memoryview(ba)
+try:
+    ba.append(1)
+except BufferError as ex:
+    print(77, ex)
+view.release()
+ba.append(9)
+
+
+class BA(bytearray):
+    def append(self, x):
+        super().append(x + 1)
+
+
+b2 = BA()
+b2.append(1)
+print(78, b2)
+Pt = collections.namedtuple('Pt', 'x y')
+pt = Pt(1, 2)
+for _ in range(2):
+    print(79, pt.x, pt.y, Pt.x, type(Pt.x).__name__, getattr(pt, 'x'))
+try:
+    pt.x = 5
+except AttributeError as ex:
+    print(80, ex)
+
+
+class PtSub(Pt):
+    pass
+
+
+print(81, PtSub(3, 4).x, PtSub(3, 4).y)
+try:
+    Pt.x.__get__(5, int)
+except TypeError as ex:
+    print(82, ex)

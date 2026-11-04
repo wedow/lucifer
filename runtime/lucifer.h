@@ -184,6 +184,8 @@ struct lu_static_type_state {
     X(builtin_getattr)          /* the builtin getattr: CALL answers the common reads itself */ \
     X(builtin_setattr)          /* the builtin setattr */ \
     X(index)                    /* PyNumber_Index: CALL answers it for an exact int */ \
+    X(bytearray_append)         /* bytearray.append */ \
+    X(tuplegetter)              /* _collections._tuplegetter, a class: LOAD_ATTR reads its items itself */ \
     X(list_append)              /* list.append, dict.items: CALL answers them for builtin lists and dicts */ \
     X(dict_items)               /* */ \
     X(isinstance)               /* */ \
@@ -724,7 +726,7 @@ struct lu_static_objects {
     X(__len__) X(__loader__) X(__main__) X(__name__) X(__new__) X(__next__) \
     X(__package__) X(__repr__) X(__set__) X(__spec__) X(__str__) X(__hash__) \
     X(__eq__) X(__ne__) X(__lt__) X(__le__) X(__gt__) X(__ge__) X(__contains__) \
-    X(__setitem__) X(__delitem__) X(__bool__) X(_lucifer) X(builtins) \
+    X(__setitem__) X(__delitem__) X(__bool__) X(_lucifer) X(_index) X(builtins) \
     X(__add__) X(__radd__) X(__sub__) X(__rsub__) X(__mul__) X(__rmul__) X(__mod__) \
     X(__rmod__) X(__divmod__) X(__rdivmod__) X(__pow__) X(__rpow__) X(__lshift__) \
     X(__rlshift__) X(__rshift__) X(__rrshift__) X(__and__) X(__rand__) X(__xor__) \
