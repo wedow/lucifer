@@ -93,10 +93,16 @@ def _check(name, cls, inst, method, what):
     return True if call_special(check, cls, inst) else False
 
 
+_object_class = type_lookup(object, '__class__')
+
+
 def isinstance(obj, class_or_tuple, /):
     """Return whether an object is an instance of a class or of a subclass thereof."""
-    if type(obj) is class_or_tuple:
+    t = type(obj)
+    if t is class_or_tuple:
         return True
+    if type(class_or_tuple) is type and type_lookup(t, '__class__') is _object_class:
+        return is_subtype(t, class_or_tuple)
     return _check('isinstance', class_or_tuple, obj, '__instancecheck__',
                   'type, a tuple of types, or a union')
 
