@@ -1,6 +1,6 @@
 ---
 id: luc-duxh
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-04T17:16:05Z
@@ -20,3 +20,7 @@ Acceptance: make check-compiler stays 100% byte-identical on all corpora (now th
 **2026-11-04T19:55:42Z**
 
 Done on branch luc-duxh: runtime/compiler vendors CPython 3.14.10's compiler (lexer, pegen parser, AST, symtable, codegen, flowgraph, assembler; _ast, _tokenize, _symtable, _opcode as C modules); lib/compiler, genast, opcodegen deleted. check-compiler 100% on closure, difftest, kernel and lib (1873 files); make check, abi-audit, difftest 164/164 green; compile_threads passes in plain and handoff lanes. Idle host: uncaught exit 0.71 s -> 0.17 s (target 0.15 not met: compile is 11% of it, the rest is interpreting the traceback import), 100k-line function 126 s -> 1.2 s, numpy test_multiarray.py 18.6 s -> 0.52 s.
+
+**2026-11-04T20:02:07Z**
+
+Merged. Compile targets met (100k-line 1.2 s, test_multiarray 0.52 s, 2606/2606 files marshal-identical). Uncaught exit 0.17 s vs 0.15 s target: compile is 11% of it, the rest is interpreting the traceback import chain, so it moves to interpreter/JIT work.
