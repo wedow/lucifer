@@ -1,9 +1,8 @@
 /* The raised exception (Python/errors.c): one object in the task's
-   current_exception (FOUNDATIONS 2.8). Native raising builds a
-   BaseException-layout instance directly, as BaseException.__new__ does,
-   because C must be able to raise before the kernel's exception classes
-   exist. Attributes beyond args stay unset, as when the class is not
-   initialised. */
+   current_exception (FOUNDATIONS 2.8). Native raising before the kernel has
+   booted builds a BaseException-layout instance directly, as
+   BaseException.__new__ does, because C must be able to raise before the
+   kernel's exception classes exist; attributes beyond args stay unset. */
 
 #include "lucifer.h"
 #include "interp/exceptions.h"
@@ -86,12 +85,14 @@ PyErr_SetObject(PyObject *type, PyObject *value)
                 PyTuple_SET_ITEM(args, 0, Py_NewRef(value));
             }
         }
-        /* _PyErr_CreateException: a class defined in Python runs, so its
-           __init__ does too; a builtin exception needs no call. */
-        if (((PyTypeObject *)type)->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN) {
+        /* _PyErr_CreateException: the class runs, so its __new__ and __init__
+           set errno, value and the like; before the kernel's classes exist
+           there is nothing to run. */
+        if (!PyInterpreterState_Get()->kernel_booted) {
             value = exc_new(type, args);
         }
         else {
+            PyErr_Clear();      /* the class runs with no exception set */
             value = args != NULL ? PyObject_Call(type, args, NULL) : NULL;
             Py_XDECREF(args);
         }

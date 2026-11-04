@@ -164,6 +164,15 @@ for value in (('add', 'f8'), 'single', ('only',)):
     except TypeError as e:
         print(type(e).__name__, e.args, e.ufunc, e.dtypes)
 
+# and so does a builtin class: its __init__ and __new__ set errno, value and the OSError subclass
+for exc, value in ((StopIteration, 5), (StopIteration, None), (OSError, (2, 'gone')), (FileNotFoundError, (2, 'gone')),
+                   (OSError, (2, 'gone', 'f.txt')), (KeyError, ('k',)), (SystemExit, 3)):
+    try:
+        ready.raise_object(exc, value)
+    except BaseException as e:
+        print(type(e).__name__, e.args, getattr(e, 'value', '-'), getattr(e, 'errno', '-'),
+              getattr(e, 'filename', '-'), getattr(e, 'code', '-'))
+
 # PySequence_Check asks for sq_item, which mp_subscript alone does not give
 class Indexed:
     def __getitem__(self, i): return i
