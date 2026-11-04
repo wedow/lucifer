@@ -11,6 +11,36 @@
 #define LINEAR_PROBES 9
 #define PERTURB_SHIFT 5
 
+/* A malloced table keeps its mask in a header before the entries, so that a
+   reader that holds no lock gets the table and its mask from one load of
+   so->table: the mask in the set object is replaced apart from the table.
+   The smalltable's mask is PySet_MINSIZE - 1. */
+#define TABLE_HEADER 16
+
+static setentry *
+table_new(size_t size)
+{
+    char *block = PyMem_Malloc(TABLE_HEADER + size * sizeof(setentry));
+    if (block == NULL) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+    *(size_t *)block = size - 1;
+    return (setentry *)(block + TABLE_HEADER);
+}
+
+static size_t
+table_mask(PySetObject *so, setentry *table)
+{
+    return table == so->smalltable ? PySet_MINSIZE - 1 : ((size_t *)table)[-TABLE_HEADER / sizeof(size_t)];
+}
+
+static void *
+table_block(setentry *table)
+{
+    return (char *)table - TABLE_HEADER;
+}
+
 /* set_clear_internal. */
 void
 lu_set_clear(PySetObject *so)
@@ -30,7 +60,7 @@ lu_set_clear(PySetObject *so)
         memset(so->smalltable, 0, sizeof so->smalltable);
         so->fill = so->used = 0;
         so->mask = PySet_MINSIZE - 1;
-        so->table = so->smalltable;
+        _Py_atomic_store_ptr_release(&so->table, so->smalltable);
         so->hash = -1;
     }
     Py_END_CRITICAL_SECTION();
@@ -41,8 +71,48 @@ lu_set_clear(PySetObject *so)
         }
     }
     if (malloced) {
-        lu_qsbr_retire(table);
+        lu_qsbr_retire(table_block(table));
     }
+}
+
+/* Readers of `a` probe its table without the lock, so a's table is never
+   written in place: a gets a whole table, b's malloced one or a new copy of
+   b's smalltable, and b takes a's old one, or a copy of a's smalltable. A
+   table b takes may still be probed: set_dealloc frees it through QSBR. */
+int
+lu_set_swap(PySetObject *a, PySetObject *b)
+{
+    int err = 0;
+    Py_BEGIN_CRITICAL_SECTION2(a, b);
+    setentry *at = a->table, *bt = b->table;
+    if (bt == b->smalltable) {
+        bt = table_new(PySet_MINSIZE);
+        if (bt == NULL) {
+            err = -1;
+        }
+        else {
+            memcpy(bt, b->smalltable, sizeof b->smalltable);
+        }
+    }
+    if (err == 0) {
+        if (at == a->smalltable) {
+            memcpy(b->smalltable, a->smalltable, sizeof b->smalltable);
+            at = b->smalltable;
+        }
+        b->table = at;
+        _Py_atomic_store_ptr_release(&a->table, bt);
+        Py_ssize_t t = a->fill; a->fill = b->fill; b->fill = t;
+        t = a->used; a->used = b->used; b->used = t;
+        t = a->mask; a->mask = b->mask; b->mask = t;
+        if (PyType_IsSubtype(Py_TYPE(a), &PyFrozenSet_Type) && PyType_IsSubtype(Py_TYPE(b), &PyFrozenSet_Type)) {
+            Py_hash_t h = a->hash; a->hash = b->hash; b->hash = h;
+        }
+        else {
+            a->hash = b->hash = -1;
+        }
+    }
+    Py_END_CRITICAL_SECTION2();
+    return err;
 }
 
 static int
@@ -77,7 +147,7 @@ set_dealloc(PyObject *op)
         }
     }
     if (so->table != so->smalltable) {
-        PyMem_Free(so->table);
+        lu_qsbr_retire(table_block(so->table));     /* it may have been swapped from a set readers probe */
     }
     lu_object_free(op);
 }
@@ -112,30 +182,49 @@ lu_set_new(PyTypeObject *type)
     return (PyObject *)so;
 }
 
-setentry *
-lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, int *verdict)
+/* The probe of set_lookkey. Without the lock an entry's key may be being
+   freed by a discard, so a key is read only after a try-incref; one that is
+   gone answers LU_SET_CHANGED (the locked probe below redoes it). The table
+   and its mask come from one load. */
+static Py_ssize_t
+probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, int *verdict, int locked)
 {
+    setentry *table = _Py_atomic_load_ptr_acquire(&so->table);
     size_t perturb = hash;
-    size_t mask = so->mask;
+    size_t mask = table_mask(so, table);
     size_t i = (size_t)hash & mask;
     for (;;) {
-        setentry *entry = &so->table[i];
+        setentry *entry = &table[i];
         int probes = (i + LINEAR_PROBES <= mask) ? LINEAR_PROBES : 0;
         do {
             if (entry->hash == 0 && entry->key == NULL) {
                 *verdict = LU_SET_ABSENT;
-                return entry;
+                return entry - table;
             }
             if (entry->hash == hash) {
-                PyObject *startkey = entry->key;
-                int eq = startkey == key ? 1 : lu_native_eq(startkey, key);
-                if (eq > 0) {
+                PyObject *startkey = _Py_atomic_load_ptr(&entry->key);
+                if (startkey == key) {
                     *verdict = LU_SET_FOUND;
-                    return entry;
+                    return entry - table;
                 }
-                if (eq < 0 && skip-- <= 0) {
-                    *verdict = LU_SET_CANDIDATE;
-                    return entry;
+                if (startkey != NULL && startkey != LU_SET_DUMMY) {
+                    int held = !locked && !_Py_IsImmortal(startkey);
+                    if (held && !lu_try_incref_compare(&entry->key, startkey)) {
+                        *verdict = LU_SET_CHANGED;
+                        return entry - table;
+                    }
+                    int eq = lu_native_eq(startkey, key);
+                    if (held) {
+                        Py_DECREF(startkey);
+                    }
+                    if (eq > 0) {
+                        *verdict = LU_SET_FOUND;
+                        return entry - table;
+                    }
+                    if (eq < 0 && skip-- <= 0) {
+                        *verdict = LU_SET_CANDIDATE;
+                        return entry - table;
+                    }
                 }
             }
             entry++;
@@ -143,6 +232,18 @@ lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, in
         perturb >>= PERTURB_SHIFT;
         i = (i * 5 + 1 + perturb) & mask;
     }
+}
+
+Py_ssize_t
+lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, int *verdict)
+{
+    Py_ssize_t i = probe(so, key, hash, skip, verdict, 0);
+    if (*verdict == LU_SET_CHANGED) {
+        Py_BEGIN_CRITICAL_SECTION(so);
+        i = probe(so, key, hash, skip, verdict, 1);
+        Py_END_CRITICAL_SECTION();
+    }
+    return i;
 }
 
 void
@@ -173,49 +274,34 @@ lu_set_insert_clean(setentry *table, size_t mask, PyObject *key, Py_hash_t hash)
     }
 }
 
-/* set_table_resize. */
+/* set_table_resize. The new table is filled before it is published, and the
+   smalltable is never refilled under a reader: a table is always a new one. */
 int
 lu_set_resize(PySetObject *so, Py_ssize_t minused)
 {
-    Py_ssize_t oldmask = so->mask;
     size_t newsize = PySet_MINSIZE;
     while (newsize <= (size_t)minused) {
         newsize <<= 1;
     }
-    setentry *oldtable = so->table, *newtable;
-    setentry small_copy[PySet_MINSIZE];
-    int is_oldtable_malloced = oldtable != so->smalltable;
-    if (newsize == PySet_MINSIZE) {
-        /* A large table is shrinking, or we cannot get any smaller. */
-        newtable = so->smalltable;
-        if (newtable == oldtable) {
-            if (so->fill == so->used) {
-                return 0;               /* no dummies, so nothing to do */
-            }
-            memcpy(small_copy, oldtable, sizeof small_copy);
-            oldtable = small_copy;
-        }
+    setentry *oldtable = so->table;
+    if (newsize == PySet_MINSIZE && oldtable == so->smalltable && so->fill == so->used) {
+        return 0;               /* we cannot get any smaller, and no dummies */
     }
-    else {
-        newtable = PyMem_Malloc(newsize * sizeof(setentry));
-        if (newtable == NULL) {
-            PyErr_NoMemory();
-            return -1;
-        }
+    setentry *newtable = table_new(newsize);
+    if (newtable == NULL) {
+        return -1;
     }
     memset(newtable, 0, sizeof(setentry) * newsize);
-    so->mask = newsize - 1;
-    so->table = newtable;
-    if (so->fill != so->used) {
-        so->fill = so->used;
-    }
-    for (setentry *entry = oldtable; entry <= oldtable + oldmask; entry++) {
+    for (setentry *entry = oldtable; entry <= oldtable + so->mask; entry++) {
         if (entry->key != NULL && entry->key != LU_SET_DUMMY) {
-            lu_set_insert_clean(newtable, so->mask, entry->key, entry->hash);
+            lu_set_insert_clean(newtable, newsize - 1, entry->key, entry->hash);
         }
     }
-    if (is_oldtable_malloced) {
-        lu_qsbr_retire(oldtable);
+    so->fill = so->used;
+    _Py_atomic_store_ptr_release(&so->table, newtable);
+    so->mask = newsize - 1;
+    if (oldtable != so->smalltable) {
+        lu_qsbr_retire(table_block(oldtable));
     }
     return 0;
 }
@@ -271,14 +357,14 @@ lu_set_add(PyObject *set, PyObject *key)
     Py_ssize_t judged = 0;
     for (;;) {
         int verdict;
-        setentry *entry = lu_set_probe(so, key, hash, judged, &verdict);
+        Py_ssize_t at = lu_set_probe(so, key, hash, judged, &verdict);
         if (verdict == LU_SET_FOUND) {
             return 0;
         }
         if (verdict == LU_SET_ABSENT) {
             return lu_set_insert(so, key, hash);
         }
-        int cmp = lu_eq(entry->key, key);
+        int cmp = lu_eq(so->table[at].key, key);
         if (cmp != 0) {
             return cmp < 0 ? -1 : 0;
         }

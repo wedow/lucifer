@@ -187,8 +187,6 @@ LU_STUB void PyErr_GetExcInfo(PyObject **, PyObject **, PyObject **) { LU_UNIMPL
 LU_STUB PyObject* PyErr_GetHandledException(void) { LU_UNIMPLEMENTED("PyErr_GetHandledException"); }
 LU_STUB PyObject * PyErr_GetRaisedException(void) { LU_UNIMPLEMENTED("PyErr_GetRaisedException"); }
 LU_STUB int PyErr_GivenExceptionMatches(PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyErr_GivenExceptionMatches"); }
-LU_STUB PyObject * PyErr_NewException(const char *name, PyObject *base, PyObject *dict) { LU_UNIMPLEMENTED("PyErr_NewException"); }
-LU_STUB PyObject * PyErr_NewExceptionWithDoc(const char *name, const char *doc, PyObject *base, PyObject *dict) { LU_UNIMPLEMENTED("PyErr_NewExceptionWithDoc"); }
 LU_STUB PyObject * PyErr_NoMemory(void) { LU_UNIMPLEMENTED("PyErr_NoMemory"); }
 LU_STUB void PyErr_NormalizeException(PyObject**, PyObject**, PyObject**) { LU_UNIMPLEMENTED("PyErr_NormalizeException"); }
 LU_STUB PyObject * PyErr_Occurred(void) { LU_UNIMPLEMENTED("PyErr_Occurred"); }
@@ -344,8 +342,6 @@ LU_STUB int PyInitConfig_HasOption(PyInitConfig *config, const char *name) { LU_
 LU_STUB int PyInitConfig_SetInt(PyInitConfig *config, const char *name, int64_t value) { LU_UNIMPLEMENTED("PyInitConfig_SetInt"); }
 LU_STUB int PyInitConfig_SetStr(PyInitConfig *config, const char *name, const char *value) { LU_UNIMPLEMENTED("PyInitConfig_SetStr"); }
 LU_STUB int PyInitConfig_SetStrList(PyInitConfig *config, const char *name, size_t length, char * const *items) { LU_UNIMPLEMENTED("PyInitConfig_SetStrList"); }
-LU_STUB PyObject * PyInstanceMethod_Function(PyObject *) { LU_UNIMPLEMENTED("PyInstanceMethod_Function"); }
-LU_STUB PyObject * PyInstanceMethod_New(PyObject *) { LU_UNIMPLEMENTED("PyInstanceMethod_New"); }
 LU_STUB void PyInterpreterState_Clear(PyInterpreterState *) { LU_UNIMPLEMENTED("PyInterpreterState_Clear"); }
 LU_STUB void PyInterpreterState_Delete(PyInterpreterState *) { LU_UNIMPLEMENTED("PyInterpreterState_Delete"); }
 LU_STUB PyInterpreterState * PyInterpreterState_Get(void) { LU_UNIMPLEMENTED("PyInterpreterState_Get"); }
@@ -705,9 +701,6 @@ LU_STUB int PySlice_GetIndices(PyObject *r, Py_ssize_t length, Py_ssize_t *start
 LU_STUB int PySlice_GetIndicesEx(PyObject *r, Py_ssize_t length, Py_ssize_t *start, Py_ssize_t *stop, Py_ssize_t *step, Py_ssize_t *slicelength) { LU_UNIMPLEMENTED("PySlice_GetIndicesEx"); }
 LU_STUB PyObject * PySlice_New(PyObject* start, PyObject* stop, PyObject* step) { LU_UNIMPLEMENTED("PySlice_New"); }
 LU_STUB int PySlice_Unpack(PyObject *slice, Py_ssize_t *start, Py_ssize_t *stop, Py_ssize_t *step) { LU_UNIMPLEMENTED("PySlice_Unpack"); }
-LU_STUB int PyState_AddModule(PyObject*, PyModuleDef*) { LU_UNIMPLEMENTED("PyState_AddModule"); }
-LU_STUB PyObject* PyState_FindModule(PyModuleDef*) { LU_UNIMPLEMENTED("PyState_FindModule"); }
-LU_STUB int PyState_RemoveModule(PyModuleDef*) { LU_UNIMPLEMENTED("PyState_RemoveModule"); }
 LU_STUB PyObject * PyStaticMethod_New(PyObject *) { LU_UNIMPLEMENTED("PyStaticMethod_New"); }
 LU_STUB PyStatus PyStatus_Error(const char *err_msg) { LU_UNIMPLEMENTED("PyStatus_Error"); }
 LU_STUB int PyStatus_Exception(PyStatus err) { LU_UNIMPLEMENTED("PyStatus_Exception"); }
@@ -816,7 +809,6 @@ LU_STUB void* PyType_GetSlot(PyTypeObject*, int) { LU_UNIMPLEMENTED("PyType_GetS
 LU_STUB Py_ssize_t PyType_GetTypeDataSize(PyTypeObject *cls) { LU_UNIMPLEMENTED("PyType_GetTypeDataSize"); }
 LU_STUB int PyType_IsSubtype(PyTypeObject *, PyTypeObject *) { LU_UNIMPLEMENTED("PyType_IsSubtype"); }
 LU_STUB void PyType_Modified(PyTypeObject *) { LU_UNIMPLEMENTED("PyType_Modified"); }
-LU_STUB int PyType_Ready(PyTypeObject *) { LU_UNIMPLEMENTED("PyType_Ready"); }
 LU_STUB int PyType_SUPPORTS_WEAKREFS(PyTypeObject *type) { LU_UNIMPLEMENTED("PyType_SUPPORTS_WEAKREFS"); }
 LU_STUB int PyType_Unwatch(int watcher_id, PyObject *type) { LU_UNIMPLEMENTED("PyType_Unwatch"); }
 LU_STUB int PyType_Watch(int watcher_id, PyObject *type) { LU_UNIMPLEMENTED("PyType_Watch"); }

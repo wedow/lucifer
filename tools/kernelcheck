@@ -15,6 +15,8 @@ lines whose exit status and stderr are checked directly. SOURCE_ROWS are
 programs given as source (-c, a .py script, standard input, imports that write
 __pycache__): the oracle and bin/lucifer run each in the same directory, and the
 output, exit status and the .pyc files left behind must be identical.
+The SIGINT probe runs a -c program at both launch dispositions: default, and
+SIGINT ignored, as a background job starts.
 """
 import argparse
 import difflib
@@ -27,6 +29,7 @@ import py_compile
 import re
 import resource
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -118,6 +121,11 @@ print(n)
 """
 STRESS_CYCLE_SLACK = 8    # allocations the loop's own bookkeeping may add
 STRESS_CYCLE_COUNTS = (1, 10, 100)
+# signal.getsignal(SIGINT) at both launch dispositions: a process started with
+# SIGINT ignored (a background job of a non-interactive shell) keeps it ignored.
+SIGINT_SOURCE = ("import signal\n"
+                 "print(signal.getsignal(signal.SIGINT) == signal.SIG_IGN,\n"
+                 "      signal.getsignal(signal.SIGINT) is signal.default_int_handler)\n")
 
 
 # Programs given as source: (name, interpreter arguments, files written first,
@@ -206,6 +214,11 @@ def limit_stack():
     resource.setrlimit(resource.RLIMIT_STACK, (STACK, STACK))
 
 
+def ignore_int():
+    limit_stack()
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
 def run(interpreter, flags, pyc, env=None):
     """env None: -I -S with the inherited environment; else -S with exactly env."""
     stdin = STDIN.get(pyc.stem, b"")
@@ -245,6 +258,23 @@ def describe(name, oracle, ours):
         lines.extend("    " + line for line in difflib.unified_diff(
             expected, actual, "oracle", "lucifer", lineterm=""))
     return "\n".join(lines)
+
+
+def check_sigint(oracle, lucifer):
+    """One line per SIGINT launch disposition; the number of failures."""
+    failed = 0
+    for label, preexec in (("default", limit_stack), ("ignored", ignore_int)):
+        runs = [subprocess.run([interpreter, "-I", "-S", "-c", SIGINT_SOURCE],
+                               capture_output=True, timeout=TIMEOUT,
+                               preexec_fn=preexec, cwd=BUILD)
+                for interpreter in (oracle, lucifer)]
+        results = [(child.returncode, child.stdout, child.stderr) for child in runs]
+        if results[0] == results[1]:
+            print(f"PASS sigint: {label}")
+        else:
+            failed += 1
+            print(describe(f"sigint: {label}", *results))
+    return failed
 
 
 # Base opcodes no compiled program can reach, so the eval loop has no handler.
@@ -373,6 +403,8 @@ def main():
             failed += 1
             print(f"FAIL stress: gc:{n}: exit {child.returncode}, {took} allocations, stderr {child.stderr!r}")
         total += 1
+    failed += check_sigint(args.oracle, lucifer)
+    total += 2
     source_failed = check_source_programs(args.oracle, lucifer)
     failed += source_failed
     total += len(SOURCE_ROWS)

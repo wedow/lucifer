@@ -129,7 +129,9 @@ user_signals	runtime/prim/faulthandler.c	faulthandler.register's per-signal stat
 sink	runtime/prim/faulthandler.c	defeats optimizing away the stack overflow test's recursion
 lu_prim_faulthandler_methods	runtime/prim/faulthandler.c	_lucifer's faulthandler primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_mt_methods	runtime/prim/mt.c	_lucifer's Mersenne Twister primitives, a PyMethodDef table never written; the API takes it non-const
-tp_new_methoddef	runtime/types/ready.c	the PyMethodDef of the bound __new__ of a type made from a spec, never written; the API takes it non-const
+tp_new_methoddef	runtime/capi/typespec.c	the PyMethodDef of the bound __new__ of a type made from a spec, never written; the API takes it non-const
+next_serial_counter	runtime/object/dict.c	the serials of dict keys tables, process-wide so that no two tables share one; atomic
+	the PyMethodDef of the bound __new__ of a type made from a spec, never written; the API takes it non-const
 slotdefs	runtime/types/wrappers.c	the slotdefs table (dunder, slot offset, wrapper), never written
 lu_prim_datetime_methods	runtime/capi/datetime.c	_lucifer's datetime C API primitive, a PyMethodDef table never written; the API takes it non-const
 lu_prim_zlib_methods	runtime/prim/zlib.c	_lucifer's zlib primitives, a PyMethodDef table never written; the API takes it non-const

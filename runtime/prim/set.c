@@ -32,6 +32,7 @@ bool_of(int v)
     return Py_NewRef(v ? Py_True : Py_False);
 }
 
+/* Whether entry i is in use; the caller holds the set's critical section. */
 static int
 active(PySetObject *so, Py_ssize_t i)
 {
@@ -60,8 +61,7 @@ prim_set_probe(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(4); SET(0); SSIZE(2, hash); SSIZE(3, after);
     PySetObject *so = (PySetObject *)args[0];
     int verdict;
-    setentry *entry = lu_set_probe(so, args[1], hash, after > 0 ? after : 0, &verdict);
-    Py_ssize_t i = entry - so->table;
+    Py_ssize_t i = lu_set_probe(so, args[1], hash, after > 0 ? after : 0, &verdict);
     return int_of(verdict == LU_SET_FOUND ? i : verdict == LU_SET_ABSENT ? -1 : -3 - i);
 }
 
@@ -77,13 +77,19 @@ prim_set_insert(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return err < 0 ? NULL : Py_NewRef(Py_None);
 }
 
-/* set_key(s, i), set_hash(s, i): an active entry's key or hash, else MISSING. */
+/* set_key(s, i), set_hash(s, i): an active entry's key or hash, else MISSING.
+   Read under the set's critical section: a discard frees keys, and the table
+   is replaced apart from its mask. */
 static PyObject *
 prim_set_key(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); SET(0); SSIZE(1, i);
     PySetObject *so = (PySetObject *)args[0];
-    return Py_NewRef(active(so, i) ? so->table[i].key : LU_MISSING);
+    PyObject *key = NULL;
+    Py_BEGIN_CRITICAL_SECTION(so);
+    key = active(so, i) ? Py_NewRef(so->table[i].key) : NULL;
+    Py_END_CRITICAL_SECTION();
+    return key != NULL ? key : Py_NewRef(LU_MISSING);
 }
 
 static PyObject *
@@ -91,7 +97,15 @@ prim_set_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); SET(0); SSIZE(1, i);
     PySetObject *so = (PySetObject *)args[0];
-    return active(so, i) ? int_of(so->table[i].hash) : Py_NewRef(LU_MISSING);
+    Py_hash_t hash = 0;
+    int is_active;
+    Py_BEGIN_CRITICAL_SECTION(so);
+    is_active = active(so, i);
+    if (is_active) {
+        hash = so->table[i].hash;
+    }
+    Py_END_CRITICAL_SECTION();
+    return is_active ? int_of(hash) : Py_NewRef(LU_MISSING);
 }
 
 /* set_next(s, i): the active entry at or after i, or -1. */
@@ -100,12 +114,16 @@ prim_set_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); SET(0); SSIZE(1, i);
     PySetObject *so = (PySetObject *)args[0];
+    Py_ssize_t found = -1;
+    Py_BEGIN_CRITICAL_SECTION(so);
     for (; i <= so->mask; i++) {
         if (active(so, i)) {
-            return int_of(i);
+            found = i;
+            break;
         }
     }
-    return int_of(-1);
+    Py_END_CRITICAL_SECTION();
+    return int_of(found);
 }
 
 /* set_discard_at(s, i): turns the active entry i into a dummy; False if it
@@ -181,34 +199,7 @@ static PyObject *
 prim_set_swap(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); SET(0); SET(1);
-    PySetObject *a = (PySetObject *)args[0], *b = (PySetObject *)args[1];
-    Py_BEGIN_CRITICAL_SECTION2(a, b);
-    Py_ssize_t t = a->fill; a->fill = b->fill; b->fill = t;
-    t = a->used; a->used = b->used; b->used = t;
-    t = a->mask; a->mask = b->mask; b->mask = t;
-    setentry *u = a->table;
-    if (a->table == a->smalltable) {
-        u = b->smalltable;
-    }
-    a->table = b->table;
-    if (b->table == b->smalltable) {
-        a->table = a->smalltable;
-    }
-    b->table = u;
-    if (a->table == a->smalltable || b->table == b->smalltable) {
-        setentry tab[PySet_MINSIZE];
-        memcpy(tab, a->smalltable, sizeof tab);
-        memcpy(a->smalltable, b->smalltable, sizeof tab);
-        memcpy(b->smalltable, tab, sizeof tab);
-    }
-    if (PyType_IsSubtype(Py_TYPE(a), &PyFrozenSet_Type) && PyType_IsSubtype(Py_TYPE(b), &PyFrozenSet_Type)) {
-        Py_hash_t h = a->hash; a->hash = b->hash; b->hash = h;
-    }
-    else {
-        a->hash = b->hash = -1;
-    }
-    Py_END_CRITICAL_SECTION2();
-    return Py_NewRef(Py_None);
+    return lu_set_swap((PySetObject *)args[0], (PySetObject *)args[1]) < 0 ? NULL : Py_NewRef(Py_None);
 }
 
 /* set_merge_clean(so, other): the first two cases of set_merge_lock_held,
@@ -292,7 +283,7 @@ prim_set_sizeof(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(1); SET(0);
     PySetObject *so = (PySetObject *)args[0];
     Py_ssize_t size = Py_TYPE(so)->tp_basicsize;
-    if (so->table != so->smalltable) {
+    if (so->mask + 1 > PySet_MINSIZE) {
         size += (so->mask + 1) * (Py_ssize_t)sizeof(setentry);
     }
     return int_of(size);

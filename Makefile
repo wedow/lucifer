@@ -148,7 +148,7 @@ build/tests/capi/%.so: tests/capi/%.c
 EXT_DIR = build/tests/capi/ext
 EXT_SUFFIX = .cpython-314t-x86_64-linux-gnu.so
 EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c tests/capi/capi_monitoring.c tests/capi/capi_conv.c tests/capi/ready.c
-EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run capi_conv_run ready_run
+EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run capi_conv_run testcapi_import ready_run
 SLOTS_MODULES = plain noshare shared_gil create two_exec unknown negative two_create two_interp \
 	two_gil not_module not_module_exec create_fails create_raises exec_fails exec_raises
 
@@ -161,8 +161,8 @@ $(EXT_DIR)/slots_%$(EXT_SUFFIX): $(EXT_DIR)/slots$(EXT_SUFFIX)
 	ln -sf slots$(EXT_SUFFIX) $@
 
 # The oracle's own C test modules, beside the installed standard library, for
-# the libtest modules that import them (libtest runs with --source installed).
-LIBTEST_EXTS = _testlimitedcapi _testinternalcapi
+# the libtest modules and the capi gate programs that import them.
+LIBTEST_EXTS = _testcapi _testlimitedcapi _testinternalcapi
 oracle-exts: build/lib/stamp
 	dir=$$($(ORACLE_T) -c 'import _testcapi, os; print(os.path.dirname(_testcapi.__file__))') && \
 	for m in $(LIBTEST_EXTS); do ln -sf $$dir/$$m$(EXT_SUFFIX) $(STDLIB)/; done
@@ -173,7 +173,7 @@ $(EXT_DIR)/accelerators:
 	for m in _bisect _heapq _statistics; do ln -sf $$dir/$$m$(EXT_SUFFIX) $(EXT_DIR)/; done
 	touch $@
 
-check-capi-ext: bin/lucifer $(EXT_DIR)/accelerators $(EXT_DIR)/exc_cross$(EXT_SUFFIX) \
+check-capi-ext: bin/lucifer oracle-exts $(EXT_DIR)/accelerators $(EXT_DIR)/exc_cross$(EXT_SUFFIX) \
 	  $(EXT_DIR)/capi_monitoring$(EXT_SUFFIX) $(EXT_DIR)/capi_conv$(EXT_SUFFIX) $(EXT_DIR)/ready$(EXT_SUFFIX) \
 	  $(foreach m,$(SLOTS_MODULES),$(EXT_DIR)/slots_$(m)$(EXT_SUFFIX))
 	@for p in $(EXT_PROGRAMS); do \

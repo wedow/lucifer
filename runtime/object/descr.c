@@ -470,6 +470,125 @@ PyMethod_New(PyObject *func, PyObject *self)
     return (PyObject *)m;
 }
 
+/* The instance method (Objects/classobject.c): a function bound to a class,
+   callable through, and attribute-transparent over, the function it wraps. */
+typedef struct {
+    PyObject_HEAD
+    PyObject *func;
+} instancemethodobject;
+
+PyObject *
+PyInstanceMethod_New(PyObject *func)
+{
+    instancemethodobject *im = (instancemethodobject *)lu_object_new(&PyInstanceMethod_Type,
+                                                                     sizeof(instancemethodobject));
+    if (im != NULL) {
+        im->func = Py_NewRef(func);
+    }
+    return (PyObject *)im;
+}
+
+PyObject *
+PyInstanceMethod_Function(PyObject *im)
+{
+    if (!Py_IS_TYPE(im, &PyInstanceMethod_Type)) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+    return Py_NewRef(((instancemethodobject *)im)->func);
+}
+
+static PyObject *
+instancemethod_get_doc(PyObject *self, void *context)
+{
+    return PyObject_GetAttrString(((instancemethodobject *)self)->func, "__doc__");
+}
+
+static PyGetSetDef instancemethod_getset[] = {
+    {"__doc__", instancemethod_get_doc, NULL, NULL, NULL},
+    {NULL},
+};
+
+static PyMemberDef instancemethod_members[] = {
+    {"__func__", _Py_T_OBJECT, offsetof(instancemethodobject, func), Py_READONLY, NULL},
+    {NULL},
+};
+
+static PyObject *
+instancemethod_getattro(PyObject *self, PyObject *name)
+{
+    PyObject *descr = _PyType_Lookup(Py_TYPE(self), name);
+    if (descr != NULL) {
+        descrgetfunc get = Py_TYPE(descr)->tp_descr_get;
+        return get != NULL ? get(descr, self, (PyObject *)Py_TYPE(self)) : Py_NewRef(descr);
+    }
+    return PyObject_GetAttr(((instancemethodobject *)self)->func, name);
+}
+
+static PyObject *
+instancemethod_call(PyObject *self, PyObject *args, PyObject *kw)
+{
+    return PyObject_Call(((instancemethodobject *)self)->func, args, kw);
+}
+
+static PyObject *
+instancemethod_descr_get(PyObject *descr, PyObject *obj, PyObject *type)
+{
+    PyObject *func = ((instancemethodobject *)descr)->func;
+    return obj == NULL ? Py_NewRef(func) : PyMethod_New(func, obj);
+}
+
+static PyObject *
+instancemethod_richcompare(PyObject *self, PyObject *other, int op)
+{
+    if ((op != Py_EQ && op != Py_NE) || !Py_IS_TYPE(self, &PyInstanceMethod_Type)
+        || !Py_IS_TYPE(other, &PyInstanceMethod_Type)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    int eq = PyObject_RichCompareBool(((instancemethodobject *)self)->func,
+                                      ((instancemethodobject *)other)->func, Py_EQ);
+    if (eq < 0) {
+        return NULL;
+    }
+    return Py_NewRef((op == Py_EQ) == eq ? Py_True : Py_False);
+}
+
+static PyObject *
+instancemethod_repr(PyObject *self)
+{
+    PyObject *funcname = PyObject_GetAttrString(((instancemethodobject *)self)->func, "__name__");
+    if (funcname != NULL && !PyUnicode_Check(funcname)) {
+        Py_CLEAR(funcname);
+    }
+    if (funcname == NULL) {
+        PyErr_Clear();
+    }
+    char buf[160];
+    snprintf(buf, sizeof buf, "<instancemethod %s at %p>",
+             funcname != NULL ? PyUnicode_AsUTF8(funcname) : "?", (void *)self);
+    Py_XDECREF(funcname);
+    return PyUnicode_FromString(buf);
+}
+
+static PyObject *
+instancemethod_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+    if (kwds != NULL && ((PyDictObject *)kwds)->ma_used) {
+        lu_err_format(PyExc_TypeError, "instancemethod() takes no keyword arguments");
+        return NULL;
+    }
+    if (PyTuple_GET_SIZE(args) != 1) {
+        lu_err_format(PyExc_TypeError, "instancemethod() takes exactly one argument (%zd given)",
+                      PyTuple_GET_SIZE(args));
+        return NULL;
+    }
+    if (!PyCallable_Check(PyTuple_GET_ITEM(args, 0))) {
+        lu_err_format(PyExc_TypeError, "first argument must be callable");
+        return NULL;
+    }
+    return PyInstanceMethod_New(PyTuple_GET_ITEM(args, 0));
+}
+
 PyObject *
 PyDictProxy_New(PyObject *mapping)
 {
@@ -734,6 +853,7 @@ FIELDS(alias, aliasfields, f[0], f[LU_ALIAS_FIELDS - 1])
 
 FIELDS(wrapper, wrapperobject, descr, self)
 FIELDS(method, PyMethodObject, im_func, im_self)
+FIELDS(instancemethod, instancemethodobject, func, func)
 FIELDS(classmethod, classmethod, cm_callable, cm_dict)
 FIELDS(property, propertyobject, prop_get, prop_name)
 FIELDS(super, superobject, type, obj_type)
@@ -779,6 +899,15 @@ lu_descr_init(void)
            method_members, NULL);
     PyMethod_Type.tp_vectorcall_offset = offsetof(PyMethodObject, vectorcall);
     PyMethod_Type.tp_call = PyVectorcall_Call;
+    layout(&PyInstanceMethod_Type, sizeof(instancemethodobject), 0, instancemethod,
+           instancemethod_members, instancemethod_getset);
+    PyInstanceMethod_Type.tp_repr = instancemethod_repr;
+    PyInstanceMethod_Type.tp_call = instancemethod_call;
+    PyInstanceMethod_Type.tp_getattro = instancemethod_getattro;
+    PyInstanceMethod_Type.tp_setattro = PyObject_GenericSetAttr;
+    PyInstanceMethod_Type.tp_richcompare = instancemethod_richcompare;
+    PyInstanceMethod_Type.tp_descr_get = instancemethod_descr_get;
+    PyInstanceMethod_Type.tp_new = instancemethod_new;
     PyCFunction_Type.tp_members = cfunction_members;
     PyCFunction_Type.tp_getset = cfunction_getset;
     PyCFunction_Type.tp_call = PyVectorcall_Call;

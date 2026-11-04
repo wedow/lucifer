@@ -162,7 +162,9 @@ prim_seq_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* seq_slice(seq, start, step, count, as_tuple): the count items from start
-   by step, as an exact tuple or list. */
+   by step, as an exact tuple or list. The caller took the bounds from a
+   length that another thread may have shrunk since: positions past the end
+   are left out. */
 static PyObject *
 prim_seq_slice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -172,13 +174,17 @@ prim_seq_slice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return PyErr_NoMemory();
     }
     PyObject *seq = args[0];
+    Py_ssize_t n = 0;
     Py_BEGIN_CRITICAL_SECTION(seq);
     PyObject **src = seq_items(seq);
     for (Py_ssize_t k = 0; k < count; k++) {
-        items[k] = Py_NewRef(src[start + k * step]);
+        Py_ssize_t at = start + k * step;
+        if (at < Py_SIZE(seq)) {
+            items[n++] = Py_NewRef(src[at]);
+        }
     }
     Py_END_CRITICAL_SECTION();
-    return seq_take(items, count, args[4] == Py_True);
+    return seq_take(items, n, args[4] == Py_True);
 }
 
 /* seq_concat(a, b, as_tuple) */
@@ -769,10 +775,22 @@ lu_seqiter_next(PyObject *iter)
 {
     seqiterobject *it = (seqiterobject *)iter;
     PyTypeObject *tp = Py_TYPE(iter);
+    /* The iterator's state under its own lock, and a list's array and size,
+       which change apart, under the list's too. The sequence is taken first,
+       as a lock-free reader takes an item, so that it outlives an exhaustion
+       racing to drop it. */
     PyObject *v = NULL, *dead = NULL;
-    Py_BEGIN_CRITICAL_SECTION(iter);
-    PyObject *seq = it->it_seq;
-    if (seq != NULL) {
+    PyObject *seq = lu_try_xget_ref(&it->it_seq);
+    if (seq == NULL) {
+        Py_BEGIN_CRITICAL_SECTION(iter);
+        seq = it->it_seq != NULL ? lu_new_ref_with_lock(it->it_seq) : NULL;
+        Py_END_CRITICAL_SECTION();
+        if (seq == NULL) {
+            return NULL;
+        }
+    }
+    Py_BEGIN_CRITICAL_SECTION2(iter, tp == &PyTupleIter_Type ? iter : seq);
+    if (it->it_seq == seq) {
         if (tp == &PyListRevIter_Type) {
             if (it->it_index >= 0 && it->it_index < Py_SIZE(seq)) {
                 v = Py_NewRef(((PyListObject *)seq)->ob_item[it->it_index--]);
@@ -791,8 +809,9 @@ lu_seqiter_next(PyObject *iter)
             dead = seq;
         }
     }
-    Py_END_CRITICAL_SECTION();
+    Py_END_CRITICAL_SECTION2();
     Py_XDECREF(dead);
+    Py_DECREF(seq);
     return v;
 }
 
