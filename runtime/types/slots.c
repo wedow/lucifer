@@ -667,6 +667,17 @@ static const struct slot slots[] = {
     SQ(sq_inplace_repeat, NULL),
 };
 
+int
+lu_is_slot_thunk(void *f)
+{
+    for (size_t i = 0; i < sizeof slots / sizeof slots[0]; i++) {
+        if (slots[i].thunk == f) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* The sub-structure a slot lives in, allocated for a static type on first
    use (heap types embed theirs). */
 static char *

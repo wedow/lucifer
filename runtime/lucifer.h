@@ -1147,6 +1147,8 @@ PyObject *lu_slot_tp_call(PyObject *self, PyObject *args, PyObject *kwargs);
    it from `from`, 3 installs PyObject_HashNotImplemented (tp_hash only), 4 installs
    the repeat of a builtin sequence over its __mul__ (sq_repeat only). */
 int lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from);
+/* Whether f is one of the slot thunks, which look the dunder up by name. */
+int lu_is_slot_thunk(void *f);
 /* Calls special method `name` of self's type, as vectorcall_method does. */
 PyObject *lu_call_special(PyObject *self, PyObject *name, PyObject *const *args, Py_ssize_t nargs);
 

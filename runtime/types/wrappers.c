@@ -745,8 +745,8 @@ slotptr(PyTypeObject *type, int ioffset)
 }
 
 /* Adds a wrapper descriptor to tp's dict for each slot tp has of its own
-   (one its base does not have too) whose dunder the dict lacks, as
-   add_operators does. */
+   (one its base does not have too, and not a thunk) whose dunder the dict
+   lacks, as add_operators does. */
 int
 lu_type_add_operators(PyTypeObject *tp)
 {
@@ -756,8 +756,8 @@ lu_type_add_operators(PyTypeObject *tp)
             continue;
         }
         void **ptr = slotptr(tp, p->offset);
-        if (ptr == NULL || *ptr == NULL) {
-            continue;
+        if (ptr == NULL || *ptr == NULL || lu_is_slot_thunk(*ptr)) {
+            continue;       /* a thunk would wrap the lookup that finds this very wrapper */
         }
         void **base = tp->tp_base != NULL ? slotptr(tp->tp_base, p->offset) : NULL;
         if (base != NULL && *base == *ptr) {

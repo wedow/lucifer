@@ -239,3 +239,6 @@ except ValueError as e:
     traceback.clear_frames(e.__traceback__)
     traceback.clear_frames(e.__traceback__)
     print(tb.tb_frame.f_locals, [s.name for s in traceback.extract_tb(e.__traceback__)])
+
+# a spec type adds wrappers only for the slots its spec gives; a class made with the metatype is hashable
+print(sorted(meta.__dict__), sorted(made.__dict__), made in {made: 1}, hash(made) == hash(made))
