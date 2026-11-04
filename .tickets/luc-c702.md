@@ -1,6 +1,6 @@
 ---
 id: luc-c702
-status: open
+status: closed
 deps: [luc-vvqv, luc-74bf, luc-ojvv]
 links: []
 created: 2026-11-03T02:08:33Z
@@ -23,3 +23,7 @@ tools/libtest run --python bin/lucifer --modules test_threading,test_thread,test
 **2026-11-04T08:07:17Z**
 
 Branch luc-c702. Landed: os.fork with threads (runtime/thread/fork.c, register_at_fork, fork_threads/fork_hooks/fork_import/fork_exit under every handoff lane), thread-scoped pins (lu_task_pin_for_life; blockcheck rule 4), pthread_kill/flock/lockf/getaddrinfo in the bracket, _queue.SimpleQueue, PEP 475 EINTR handlers, SIGPIPE ignored, _BufferLock (reentrant stream use), detached-owner BRC merge, STW in setrecursionlimit, signal forwarding to the main task's thread under handoff. Kernel programs for every primitive pass plain and handoff, handoff:1-3. tools/libtest modules: same PASS sets plain vs handoff (via per-module unittest runs). Open: ftcorpus test_weakref cannot import (doctest->pdb->_pyrepl FunctionType(), core types) and test_free_threading.test_gc callbacks race (list slice assignment SystemError); test_threading.test_print_exception_gh_102056 hangs (poll-raised KeyboardInterrupt on a back-edge escapes the enclosing try, also on master); network sockets (socket(), connect, accept) still absent, so only getaddrinfo and socketpair I/O are bracketed; daemons alive during module teardown make test_io daemon_threads_shutdown_* flaky.
+
+**2026-11-04T11:33:22Z**
+
+Merged after Opus review (4 defects fixed, luc-o8b8 fixed on branch). Remaining acceptance moved: weakref corpus import -> luc-s2pu; gc.callbacks list_splice -> list-mutator stale bounds ticket; sockets -> luc-zj23; unproven review concerns -> luc-kvev.
