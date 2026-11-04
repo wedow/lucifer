@@ -360,3 +360,57 @@ def read_slices():
 
 
 print('list slices', race(refill, [read_slices] * 3))
+
+# In-place intersections swap a set's body with a temporary's: a key that is
+# in the set before and after must stay findable while the body changes, in
+# a smalltable laid out in another order (all the keys collide) and in a
+# malloced table that the temporary takes away and frees.
+
+
+def built(order):
+    s = set()
+    for k in order:
+        s.add(k)
+    return s
+
+
+V1 = built([1, 9, 17, 25])
+V2 = built([25, 17, 9, 1])
+SW = built([25, 17, 9, 1])
+
+
+def swap_small():
+    SW.add(33)
+    SW.__iand__(V1)
+    SW.add(33)
+    SW.__iand__(V2)
+
+
+def read_small():
+    missing = 0
+    for _ in range(100000):
+        if 1 not in SW or 25 not in SW:
+            missing += 1
+    return missing
+
+
+print('set swap small', race(swap_small, [read_small] * 3))
+
+BW = set(range(1000))
+BU = set(range(2000))
+
+
+def swap_big():
+    BW.__iand__(BU)
+
+
+def read_big():
+    missing = 0
+    for _ in range(5000):
+        for k in (1, 500, 999):
+            if k not in BW:
+                missing += 1
+    return missing
+
+
+print('set swap big', race(swap_big, [read_big] * 3))
