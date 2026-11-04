@@ -18,6 +18,7 @@ getset = _boot.getset
 call_special = _boot.call_special
 
 generic_getattr = kernel_get('generic_getattr')
+generic_setattr = kernel_get('generic_setattr')
 getattr_hook = kernel_get('getattr')
 
 __all__ = ()
@@ -345,6 +346,16 @@ def _property_copy(old, fget, fset, fdel):
     return new
 
 
+def _wraps(wrapper, wrapped):
+    """functools_wraps: the wrapped callable's name, qualname, module and doc."""
+    for name in ('__module__', '__name__', '__qualname__', '__doc__'):
+        try:
+            value = getattr_hook(wrapped, name)
+        except AttributeError:
+            continue
+        generic_setattr(wrapper, name, value)
+
+
 @kernel_type(classmethod)
 class classmethod:
     """Convert a function to be a class method."""
@@ -354,6 +365,7 @@ class classmethod:
 
     def __init__(self, f):
         field_set(self, _CALLABLE, f)
+        _wraps(self, f)
 
     def __get__(self, instance, owner=None):
         if owner is None:
@@ -372,6 +384,7 @@ class staticmethod:
 
     def __init__(self, f):
         field_set(self, _CALLABLE, f)
+        _wraps(self, f)
 
     def __get__(self, instance, owner=None):
         return field_get(self, _CALLABLE)

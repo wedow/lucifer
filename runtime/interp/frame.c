@@ -192,7 +192,7 @@ lu_frame_object(struct lu_frame *f)
 
 /* PyFrame_New: a frame that is not executing and owns its own record, as a
    frame object does once its frame has stopped. */
-PyFrameObject *
+LU_EXPORT PyFrameObject *
 PyFrame_New(PyThreadState *tstate, PyCodeObject *code, PyObject *globals, PyObject *locals)
 {
     PyObject *func = PyFunction_New((PyObject *)code, globals);

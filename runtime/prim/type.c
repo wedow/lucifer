@@ -1473,6 +1473,7 @@ prim_type_set_mro(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "mro() returned a non-tuple or an empty tuple");
         return NULL;
     }
+    PyTypeObject *solid = solid_base(tp);       /* mro_check: the type's own solid base, not the type */
     for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); i++) {
         PyObject *b = PyTuple_GET_ITEM(mro, i);
         if (!PyType_Check(b)) {
@@ -1480,7 +1481,7 @@ prim_type_set_mro(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
                           Py_TYPE(b)->tp_name);
             return NULL;
         }
-        if (!PyType_IsSubtype(tp, solid_base((PyTypeObject *)b))) {
+        if (!PyType_IsSubtype(solid, solid_base((PyTypeObject *)b))) {
             lu_err_format(PyExc_TypeError, "mro() returned base with unsuitable layout ('%.500s')",
                           ((PyTypeObject *)b)->tp_name);
             return NULL;
