@@ -4,26 +4,95 @@
    them per thread state: raw memory, objects, GC objects, and GC objects with
    a pre-header. mimalloc is compiled into this file as CPython does.
 
-   There is no QSBR yet: a free page is freed at once, not after a grace
-   period. */
+   A free page of the object heaps is freed after a QSBR grace period. */
 
 #include "lucifer.h"
 
-/* CPython's mimalloc page hooks, without QSBR: a free page is freed now. */
+/* CPython's mimalloc page hooks (defined below, after mimalloc's own code,
+   whose private functions they use). */
+static void _PyMem_mi_page_clear_qsbr(mi_page_t *page);
+static bool _PyMem_mi_page_is_safe_to_free(mi_page_t *page);
+static bool _PyMem_mi_page_maybe_free(mi_page_t *page, mi_page_queue_t *pq, bool force);
+static void _PyMem_mi_page_reclaimed(mi_page_t *page);
+static void _PyMem_mi_heap_collect_qsbr(mi_heap_t *heap);
+
+#include "static.c"
+
+/* CPython's mimalloc page hooks (Objects/obmalloc.c). A lock-free reader may
+   hold a pointer to a freed object and try to take a reference to it (see
+   lu_try_incref_compare), so the page of an object must not be reused for
+   anything else until every reader has passed a poll: an empty page of the
+   object heaps waits for a QSBR goal on its carrier's list before it is freed. */
+
+#define QSBR_PAGE_MEM_LIMIT (4096 * 20)
+
+static struct lu_entry *
+entry_of_heap(mi_heap_t *heap)
+{
+    return (struct lu_entry *)((char *)heap->tld - offsetof(struct lu_entry, mimalloc.tld));
+}
+
 static void
 _PyMem_mi_page_clear_qsbr(mi_page_t *page)
 {
+    page->qsbr_goal = 0;
+    if (page->qsbr_node.next != NULL) {
+        llist_remove(&page->qsbr_node);
+    }
 }
 
+/* An empty, newly reclaimed page is safe to free now. */
 static bool
 _PyMem_mi_page_is_safe_to_free(mi_page_t *page)
 {
+    if (page->use_qsbr && page->qsbr_goal != 0) {
+        return lu_qsbr_goal_reached(page->qsbr_goal);
+    }
     return true;
+}
+
+/* Whether the write sequence should move on for this page: when much memory
+   waits, so that it can be reused in another size class. */
+static int
+should_advance_for_page(struct lu_entry *entry, mi_page_t *page)
+{
+    struct lu_qsbr *q = &entry->carrier->qsbr;
+    size_t page_size = page->capacity * mi_page_block_size(page);
+    if (page_size > QSBR_PAGE_MEM_LIMIT) {
+        q->deferred_page_memory = 0;
+        return 1;
+    }
+    q->deferred_page_memory += page_size;
+    if (q->deferred_page_memory > QSBR_PAGE_MEM_LIMIT) {
+        q->deferred_page_memory = 0;
+        return 1;
+    }
+    return 0;
 }
 
 static bool
 _PyMem_mi_page_maybe_free(mi_page_t *page, mi_page_queue_t *pq, bool force)
 {
+    /* The process's default heap, which reclaims pages at exit, is not ours. */
+    if (page->use_qsbr && mi_page_heap(page)->page_use_qsbr) {
+        struct lu_entry *entry = lu_current_entry();
+        if (page->qsbr_goal != 0 && lu_qsbr_goal_reached(page->qsbr_goal)) {
+            _PyMem_mi_page_clear_qsbr(page);
+            _mi_page_free(page, pq, force);
+            return true;
+        }
+        /* Not freed yet: keep it available for allocations. */
+        if (mi_page_is_in_full(page)) {
+            _mi_page_unfull(page);
+        }
+        _PyMem_mi_page_clear_qsbr(page);
+        page->retire_expire = 0;
+        page->qsbr_goal = should_advance_for_page(entry, page) ? lu_qsbr_advance() : lu_qsbr_next_goal();
+        /* In a stop-the-world the page may belong to another carrier. */
+        llist_insert_tail(&entry_of_heap(mi_page_heap(page))->mimalloc.page_list, &page->qsbr_node);
+        return false;
+    }
+    _PyMem_mi_page_clear_qsbr(page);
     _mi_page_free(page, pq, force);
     return true;
 }
@@ -31,14 +100,43 @@ _PyMem_mi_page_maybe_free(mi_page_t *page, mi_page_queue_t *pq, bool force)
 static void
 _PyMem_mi_page_reclaimed(mi_page_t *page)
 {
+    if (page->qsbr_goal != 0) {
+        if (!mi_page_heap(page)->page_use_qsbr) {
+            page->qsbr_goal = 0;
+        }
+        else if (mi_page_all_free(page)) {
+            page->retire_expire = 0;
+            llist_insert_tail(&entry_of_heap(mi_page_heap(page))->mimalloc.page_list, &page->qsbr_node);
+        }
+        else {
+            page->qsbr_goal = 0;
+        }
+    }
 }
 
 static void
 _PyMem_mi_heap_collect_qsbr(mi_heap_t *heap)
 {
+    if (!heap->page_use_qsbr) {
+        return;
+    }
+    struct llist_node *head = &lu_current_entry()->mimalloc.page_list;
+    for (struct llist_node *node = head->next, *next; node != head; node = next) {
+        next = node->next;
+        mi_page_t *page = (mi_page_t *)((char *)node - offsetof(mi_page_t, qsbr_node));
+        if (!mi_page_all_free(page)) {
+            /* Allocated from again since the delayed free. */
+            _PyMem_mi_page_clear_qsbr(page);
+            continue;
+        }
+        if (!lu_qsbr_goal_reached(page->qsbr_goal)) {
+            return;
+        }
+        _PyMem_mi_page_clear_qsbr(page);
+        _mi_page_free(page, mi_page_queue_of(page), false);
+    }
 }
 
-#include "static.c"
 
 /* Default hooks. */
 
@@ -141,6 +239,10 @@ lu_mimalloc_bind(struct lu_entry *entry)
         _mi_heap_init(&m->heaps[i], &m->tld, _mi_arena_id_none(), false, i);
         m->heaps[i].debug_offset = (uint8_t)debug_offsets[i];
     }
+    llist_init(&m->page_list);
+    m->heaps[LU_HEAP_OBJECT].page_use_qsbr = true;
+    m->heaps[LU_HEAP_GC].page_use_qsbr = true;
+    m->heaps[LU_HEAP_GC_PRE].page_use_qsbr = true;
     m->current_object_heap = &m->heaps[LU_HEAP_OBJECT];
 }
 

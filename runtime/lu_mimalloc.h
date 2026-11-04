@@ -13,6 +13,27 @@ struct llist_node {             /* pycore_llist.h; embedded in mi_page_t */
 };
 
 static inline void
+llist_init(struct llist_node *head)
+{
+    head->next = head->prev = head;
+}
+
+static inline int
+llist_empty(struct llist_node *head)
+{
+    return head->next == head;
+}
+
+static inline void
+llist_insert_tail(struct llist_node *head, struct llist_node *node)
+{
+    node->prev = head->prev;
+    node->next = head;
+    head->prev->next = node;
+    head->prev = node;
+}
+
+static inline void
 llist_remove(struct llist_node *node)
 {
     node->prev->next = node->next;
@@ -46,6 +67,7 @@ struct lu_mimalloc_state {
     mi_heap_t *current_object_heap;     /* where PyObject_Malloc allocates */
     mi_heap_t heaps[LU_HEAP_COUNT];
     mi_tld_t tld;
+    struct llist_node page_list;        /* empty pages waiting for their QSBR goal */
 };
 
 #endif
