@@ -1,7 +1,9 @@
 # Threads at interpreter exit (FOUNDATIONS 2.13): a non-daemon thread is joined before the exit, a
 # daemon thread still running when the interpreter finalizes is left behind, an exception in a
 # thread leaves the exit code alone, and joining a daemon thread from a finalizer raises
-# PythonFinalizationError instead of hanging. Each child process is one exit.
+# PythonFinalizationError instead of hanging. Daemon threads are stopped before the main module is
+# torn down, so they never see its globals gone, even while they stop the world. Each child process
+# is one exit.
 import subprocess
 import sys
 
@@ -43,6 +45,26 @@ import sys, threading
 t = threading.Thread(target=lambda: None)
 t.start()
 sys.exit(3)
+''',
+    "daemon reading globals": '''
+import threading
+counter = [0]
+def count():
+    while True:
+        counter[0] += 1
+for _ in range(2):
+    threading.Thread(target=count, daemon=True).start()
+print("main done", flush=True)
+''',
+    "daemons stopping the world": '''
+import sys, threading
+def stop_the_world():
+    while True:
+        sys.setrecursionlimit(1000)
+for _ in range(4):
+    threading.Thread(target=stop_the_world, daemon=True).start()
+threading.Event().wait(0.3)
+print("main done", flush=True)
 ''',
     "join daemon in finalizer": '''
 import threading

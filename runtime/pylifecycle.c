@@ -591,6 +591,7 @@ release_interpreter(struct _is *interp)
     }
     _PyRuntime.signals.tripped = 0;
     interp->tasks_closed = 0;
+    interp->stw.mutex = (PyMutex){ 0 };     /* held for good since the other tasks were shut down */
     interp->modules = interp->builtins = interp->sysdict = interp->interned = NULL;
     interp->importlib = interp->import_func = NULL;
     interp->eval_frame = NULL;
@@ -601,8 +602,8 @@ release_interpreter(struct _is *interp)
 }
 
 /* Py_FinalizeEx, as far as there is something to finalize: the non-daemon
-   threads are joined, atexit's callbacks run, the standard streams are flushed,
-   the other threads are shut down, then the runtime counts as finalizing.
+   threads are joined, atexit's callbacks run, the other threads are shut down,
+   the runtime counts as finalizing, then the standard streams are flushed.
    CPython flushes once more after tearing the modules down; there is no
    teardown to print from yet. */
 int
@@ -630,21 +631,19 @@ Py_FinalizeEx(void)
         }
         Py_XDECREF(result);
     }
-    /* Before the daemon threads stop: the streams' locks are Python locks, which a daemon
-       stopped for good inside a write would hold for ever. */
-    int status = flush_std_files();
-    /* From here a join of a thread that has not finished raises PythonFinalizationError, so the
-       __del__ of what only cycles held cannot hang on a daemon thread (gh-130402). */
+    lu_sched_stop();
+    /* What is left are daemon threads: they hang when they next attach (FOUNDATIONS 2.13 step 8), so
+       the teardown runs without them. From here a join of a thread that has not finished raises
+       PythonFinalizationError, so the __del__ of what only cycles held cannot hang on a daemon
+       thread (gh-130402), and a stream lock a daemon froze holding fails after a grace period. */
+    lu_task_shutdown_others(interp);
     __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
+    int status = flush_std_files();
     finalize_modules(interp);
     lu_gc_collect_shutdown(PyThreadState_Get());
     flush_std_stream("stdout");
     flush_std_stream("stderr");
     PyErr_Clear();
-    lu_sched_stop();
-    /* What is left are daemon threads: they hang when they next attach (FOUNDATIONS 2.13 step 8).
-       Stopped sooner they could freeze holding a lock that the teardown needs. */
-    lu_task_shutdown_others(interp);
     release_interpreter(interp);
     return status;
 }
