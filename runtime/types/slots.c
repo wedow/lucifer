@@ -503,6 +503,29 @@ UNARY_THUNK(slot_nb_int, __int__)
 UNARY_THUNK(slot_nb_float, __float__)
 UNARY_THUNK(slot_nb_index, __index__)
 
+/* bf_getbuffer of a class that defines __buffer__ (PEP 688): the memoryview it
+   returns exports the buffer, and the caller releases through the view. */
+static int
+slot_bf_getbuffer(PyObject *self, Py_buffer *view, int flags)
+{
+    PyObject *name = PyUnicode_InternFromString("__buffer__");
+    PyObject *arg = PyLong_FromLong(flags);
+    PyObject *mv = name != NULL && arg != NULL ? lu_call_special(self, name, &arg, 1) : NULL;
+    Py_XDECREF(name);
+    Py_XDECREF(arg);
+    if (mv == NULL) {
+        return -1;
+    }
+    if (!PyMemoryView_Check(mv)) {
+        lu_err_format(PyExc_TypeError, "__buffer__ returned non-memoryview object");
+        Py_DECREF(mv);
+        return -1;
+    }
+    int r = PyObject_GetBuffer(mv, view, flags);
+    Py_DECREF(mv);
+    return r;
+}
+
 /* The slot table: where each slot lives and its thunk. */
 enum { IN_TYPE, IN_NUMBER, IN_MAPPING, IN_SEQUENCE, IN_ASYNC, IN_BUFFER };
 
@@ -518,7 +541,7 @@ struct slot {
 #define MP(f, t) { #f, IN_MAPPING, offsetof(PyMappingMethods, f), (void *)(t) }
 #define SQ(f, t) { #f, IN_SEQUENCE, offsetof(PySequenceMethods, f), (void *)(t) }
 #define AM(f) { #f, IN_ASYNC, offsetof(PyAsyncMethods, f), NULL }
-#define BF(f) { #f, IN_BUFFER, offsetof(PyBufferProcs, f), NULL }
+#define BF(f, t) { #f, IN_BUFFER, offsetof(PyBufferProcs, f), (void *)(t) }
 static const struct slot slots[] = {
     TP(tp_getattr, NULL), TP(tp_setattr, NULL),
     TP(tp_getattro, lu_slot_tp_getattro), TP(tp_setattro, lu_slot_tp_setattro),
@@ -527,7 +550,7 @@ static const struct slot slots[] = {
     TP(tp_iter, slot_tp_iter), TP(tp_iternext, slot_tp_iternext),
     TP(tp_descr_get, slot_tp_descr_get), TP(tp_descr_set, slot_tp_descr_set),
     TP(tp_init, slot_tp_init), TP(tp_new, slot_tp_new), TP(tp_finalize, slot_tp_finalize),
-    BF(bf_getbuffer), BF(bf_releasebuffer), AM(am_await), AM(am_aiter), AM(am_anext),
+    BF(bf_getbuffer, slot_bf_getbuffer), BF(bf_releasebuffer, NULL), AM(am_await), AM(am_aiter), AM(am_anext),
     NB(nb_add, slot_nb_add), NB(nb_subtract, slot_nb_subtract),
     NB(nb_multiply, slot_nb_multiply), NB(nb_remainder, slot_nb_remainder),
     NB(nb_divmod, slot_nb_divmod), NB(nb_power, slot_nb_power),

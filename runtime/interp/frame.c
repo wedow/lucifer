@@ -190,6 +190,36 @@ lu_frame_object(struct lu_frame *f)
     return Py_NewRef((PyObject *)f->frame_obj);
 }
 
+/* PyFrame_New: a frame that is not executing and owns its own record, as a
+   frame object does once its frame has stopped. */
+PyFrameObject *
+PyFrame_New(PyThreadState *tstate, PyCodeObject *code, PyObject *globals, PyObject *locals)
+{
+    PyObject *func = PyFunction_New((PyObject *)code, globals);
+    if (func == NULL) {
+        return NULL;
+    }
+    size_t words = (size_t)code->co_framesize;
+    struct lu_frameobj *fo = (struct lu_frameobj *)lu_object_new(
+        &PyFrame_Type, offsetof(struct lu_frameobj, own) + words * sizeof(PyObject *));
+    if (fo == NULL) {
+        Py_DECREF(func);
+        return NULL;
+    }
+    struct lu_frame *f = &fo->own;
+    f->code = (PyCodeObject *)Py_NewRef(code);
+    f->func = func;
+    f->globals = ((PyFunctionObject *)func)->func_globals;
+    f->builtins = ((PyFunctionObject *)func)->func_builtins;
+    f->locals = Py_XNewRef(locals);
+    f->instr = f->last = lu_code_start(code);
+    f->owner = LU_FRAME_FRAME_OBJECT;
+    f->stackpointer = f->localsplus + code->co_nlocalsplus;
+    fo->f_frame = f;
+    fo->f_trace_lines = 1;
+    return (PyFrameObject *)fo;
+}
+
 PyCodeObject *
 lu_frame_code(PyFrameObject *frame)
 {

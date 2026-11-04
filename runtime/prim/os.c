@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/file.h>
 #include <grp.h>
 #include <langinfo.h>
 #include <poll.h>
@@ -673,6 +674,7 @@ union sys_arg {
     X(sys_kill, "ii", kill((pid_t)a[0].i, (int)a[1].i)) \
     X(sys_shutdown, "ii", LU_SYSCALL(shutdown((int)a[0].i, (int)a[1].i))) \
     X(sys_fcntl, "iii", LU_SYSCALL(fcntl((int)a[0].i, (int)a[1].i, a[2].i))) \
+    X(sys_flock, "ii", LU_SYSCALL(flock((int)a[0].i, (int)a[1].i))) \
     X(sys_alarm, "i", alarm((unsigned)a[0].i)) \
     X(sys_sysconf, "i", sysconf((int)a[0].i)) \
     X(sys_utime, "piiiii", utimensat(AT_FDCWD, a[0].p, (struct timespec[2]){ { a[1].i, a[2].i }, { a[3].i, a[4].i } }, (int)a[5].i))

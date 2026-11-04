@@ -98,7 +98,7 @@ build/liblucifer.a: $(LIB_OBJS)
 
 bin/lucifer: $(MAIN) build/liblucifer.a
 	@mkdir -p $(@D)
-	$(CC) $(LU_LDFLAGS) -o $@ $(MAIN) -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive -lm
+	$(CC) $(LU_LDFLAGS) -o $@ $(MAIN) -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive -lm -lz -lffi
 
 build/runtime/object/alloc.o: LU_CFLAGS += -Ithird_party/mimalloc/src
 
@@ -202,7 +202,7 @@ EMBED_PROGRAMS = 'import os; x = 1; print("first", x)' \
 
 build/tests/embed/run: tests/embed/run.c build/liblucifer.a
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) -std=gnu11 -Wall -Iinclude -pthread -o $@ $< -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive -lm
+	$(CC) $(CFLAGS) -std=gnu11 -Wall -Iinclude -pthread -o $@ $< -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive -lm -lz -lffi
 
 check-embed: build/tests/embed/run bin/lucifer
 	@$(RUN) build/tests/embed/run $(EMBED_PROGRAMS) > build/tests/embed/actual 2>&1; \
