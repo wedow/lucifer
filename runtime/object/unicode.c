@@ -160,9 +160,30 @@ lu_str_from_utf8(const char *str, Py_ssize_t size, int surrogatepass)
         Py_UCS4 ch;
         int n = utf8_char(s + i, size - i, surrogatepass, &ch);
         if (n == 0) {
-            lu_err_format(PyExc_UnicodeDecodeError,
-                          "'utf-8' codec can't decode byte 0x%02x in position %zd",
-                          s[i], i);
+            /* CPython's 5-argument UnicodeDecodeError, whose __str__ is the
+               message Python sees (unicode_decode_utf8) */
+            unsigned c = s[i];
+            const char *reason = c < 0x80 || (c >= 0xc2 && c <= 0xf4)
+                ? "unexpected end of data" : "invalid start byte";
+            if ((c & 0xc0) == 0x80) {
+                reason = "invalid continuation byte";
+            }
+            PyObject *input = PyBytes_FromStringAndSize(str, size);
+            PyObject *args[5] = { NULL, input, PyLong_FromSsize_t(i),
+                                  PyLong_FromSsize_t(i + 1), NULL };
+            args[0] = PyUnicode_FromString("utf-8");
+            args[4] = PyUnicode_FromString(reason);
+            PyObject *exc = input != NULL && args[2] != NULL && args[3] != NULL
+                ? lu_call(PyExc_UnicodeDecodeError, args, 5, NULL) : NULL;
+            int failed = exc == NULL;
+            PyErr_Clear();
+            for (int k = 0; k < 5; k++) {
+                Py_XDECREF(args[k]);
+            }
+            if (failed) {
+                return PyErr_NoMemory();
+            }
+            PyErr_SetRaisedException(exc);
             return NULL;
         }
         maxchar = ch > maxchar ? ch : maxchar;

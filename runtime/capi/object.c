@@ -165,6 +165,12 @@ PyObject_GetAttr(PyObject *v, PyObject *name)
 PyObject *
 PyObject_GetAttrString(PyObject *v, const char *name)
 {
+    if (v == NULL || name == NULL) {
+        if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_SystemError, "null argument to internal routine");
+        }
+        return NULL;
+    }
     PyObject *s = PyUnicode_FromString(name);
     if (s == NULL) {
         return NULL;
@@ -201,6 +207,12 @@ PyObject_DelAttr(PyObject *v, PyObject *name)
 int
 PyObject_SetAttrString(PyObject *v, const char *name, PyObject *value)
 {
+    if (v == NULL || name == NULL) {
+        if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_SystemError, "null argument to internal routine");
+        }
+        return -1;
+    }
     PyObject *s = PyUnicode_FromString(name);
     if (s == NULL) {
         return -1;
@@ -229,6 +241,12 @@ PyObject_GenericSetAttr(PyObject *obj, PyObject *name, PyObject *value)
 PyObject *
 PyObject_GetItem(PyObject *o, PyObject *key)
 {
+    if (o == NULL || key == NULL) {
+        if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_SystemError, "null argument to internal routine");
+        }
+        return NULL;
+    }
     PyMappingMethods *m = Py_TYPE(o)->tp_as_mapping;
     if (m != NULL && m->mp_subscript != NULL) {
         return m->mp_subscript(o, key);
@@ -279,12 +297,26 @@ ass_subscript(PyObject *o, PyObject *key, PyObject *v)
 int
 PyObject_SetItem(PyObject *o, PyObject *key, PyObject *v)
 {
+    /* a NULL value is not a delete here: that is PyObject_DelItem's call
+       (Objects/abstract.c PyObject_SetItem) */
+    if (o == NULL || key == NULL || v == NULL) {
+        if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_SystemError, "null argument to internal routine");
+        }
+        return -1;
+    }
     return ass_subscript(o, key, v);
 }
 
 int
 PyObject_DelItem(PyObject *o, PyObject *key)
 {
+    if (o == NULL || key == NULL) {
+        if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_SystemError, "null argument to internal routine");
+        }
+        return -1;
+    }
     return ass_subscript(o, key, NULL);
 }
 

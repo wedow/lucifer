@@ -335,6 +335,7 @@ struct _is {
     lu_watcher func_watchers[LU_MAX_WATCHERS];      /* PyFunction_WatchCallback */
     lu_watcher code_watchers[LU_MAX_WATCHERS];      /* PyCode_WatchCallback */
     int specializing;                   /* set once the kernel has booted: instructions may specialize */
+    int kernel_booted;                  /* set with it: the kernel's functions are all registered */
     int max_str_digits;                 /* sys.get_int_max_str_digits() */
     PyObject *importlib;                /* _frozen_importlib, once installed */
     PyObject *import_func;              /* the original builtins.__import__ */
@@ -707,6 +708,7 @@ struct lu_static_objects {
     PyBytesObject empty_bytes;
     PyTupleObject empty_tuple;
     PyObject missing;                   /* _lucifer.MISSING: "no value", distinct from None */
+    PyObject *null_item;                /* "<NULL>", what an uninitialized list's repr shows */
     PyObject set_dummy;                 /* the key of a deleted set entry (setobject.c's dummy) */
     /* Py_EMPTY_KEYS: the keys table of every empty dict, a PyDictKeysObject
        (runtime/object/dict.h) with its eight index bytes. */

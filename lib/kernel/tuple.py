@@ -3,7 +3,7 @@ iterator. Indexing, slicing and concatenation are primitives of
 runtime/prim/storage.c; the rest is the protocol around them."""
 
 from _lucifer import (
-    MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, kernel_set,
+    MISSING, NULL_ITEM, error, str_join, kind, size, type_lookup, type_tp_name, static_type, kernel_set,
  seq_get, seq_slice, seq_concat, seq_repeat, tuple_from, xxh_hash, repr_enter,
     repr_leave, iter_new, iter_state, iter_set, seqiter_next, list_append,
 )
@@ -149,7 +149,8 @@ def seq_repr(self, opener, closer):
         parts = []
         i = 0
         while i < size(self):
-            list_append(parts, object_repr(seq_get(self, i)))
+            item = seq_get(self, i)
+            list_append(parts, item if item is NULL_ITEM else object_repr(item))
             i += 1
     finally:
         repr_leave(self)

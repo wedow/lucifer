@@ -396,6 +396,59 @@ PyErr_WriteUnraisable(PyObject *obj)
     lu_err_unraisable_text(NULL, obj);
 }
 
+/* PyErr_FormatUnraisable: the current exception, handed to
+   sys.unraisablehook as an object with err_msg, exc_type, exc_value and
+   object, as CPython's does; the native display is the fallback
+   (Python/errors.c PyErr_FormatUnraisable). */
+void
+PyErr_FormatUnraisable(const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    char message[512];
+    vsnprintf(message, sizeof message, format, ap);
+    va_end(ap);
+    PyObject *exc = PyErr_GetRaisedException();
+    PyObject *hook = PyDict_GetItemString(PyInterpreterState_Get()->sysdict, "unraisablehook");
+    PyObject *types_mod = hook != NULL ? PyImport_ImportModule("types") : NULL;
+    PyObject *factory = types_mod != NULL ? PyObject_GetAttrString(types_mod, "SimpleNamespace") : NULL;
+    Py_XDECREF(types_mod);
+    PyObject *args = factory != NULL ? PyTuple_New(0) : NULL;
+    PyObject *kwargs = factory != NULL ? PyDict_New() : NULL;
+    int built = 0;
+    if (kwargs != NULL) {
+        PyObject *msg = PyUnicode_FromString(message);
+        built = msg != NULL
+            && PyDict_SetItemString(kwargs, "err_msg", msg) == 0
+            && PyDict_SetItemString(kwargs, "exc_type",
+                                    exc != NULL ? (PyObject *)Py_TYPE(exc) : Py_None) == 0
+            && PyDict_SetItemString(kwargs, "exc_value", exc != NULL ? exc : Py_None) == 0
+            && PyDict_SetItemString(kwargs, "object", Py_None) == 0;
+        Py_XDECREF(msg);
+    }
+    if (built) {
+        PyObject *unraisable = PyObject_Call(factory, args, kwargs);
+        if (unraisable != NULL) {
+            PyObject *r = PyObject_CallOneArg(hook, unraisable);
+            Py_DECREF(unraisable);
+            Py_XDECREF(r);
+            PyErr_Clear();     /* an error the hook made is not raisable here either */
+            Py_XDECREF(args);
+            Py_XDECREF(kwargs);
+            Py_XDECREF(factory);
+            Py_XDECREF(exc);
+            return;
+        }
+    }
+    Py_XDECREF(args);
+    Py_XDECREF(kwargs);
+    Py_XDECREF(factory);
+    if (exc != NULL) {
+        PyErr_SetRaisedException(exc);
+    }
+    lu_err_unraisable_text(message, NULL);
+}
+
 /* PyErr_Print: SystemExit leaves the process; anything else goes to
    sys.excepthook, else the native renderer. */
 void

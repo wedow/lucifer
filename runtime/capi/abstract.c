@@ -46,22 +46,23 @@ PyObject_IsTrue(PyObject *v)
     return lu_is_true(v);
 }
 
+/* A NULL is its own "<NULL>" text in repr, str and ascii (Objects/object.c). */
 PyObject *
 PyObject_Repr(PyObject *v)
 {
-    return lu_call_kernel(LU_K_repr, &v, 1);
+    return v == NULL ? PyUnicode_FromString("<NULL>") : lu_call_kernel(LU_K_repr, &v, 1);
 }
 
 PyObject *
 PyObject_Str(PyObject *v)
 {
-    return lu_call_kernel(LU_K_str, &v, 1);
+    return v == NULL ? PyUnicode_FromString("<NULL>") : lu_call_kernel(LU_K_str, &v, 1);
 }
 
 PyObject *
 PyObject_ASCII(PyObject *v)
 {
-    return lu_call_kernel(LU_K_ascii, &v, 1);
+    return v == NULL ? PyUnicode_FromString("<NULL>") : lu_call_kernel(LU_K_ascii, &v, 1);
 }
 
 Py_ssize_t
