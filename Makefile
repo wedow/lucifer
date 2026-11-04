@@ -6,8 +6,11 @@ LU_CFLAGS = -std=gnu11 -Wall -Wextra -Wno-unused-parameter -fvisibility=hidden \
 	-fno-omit-frame-pointer -pthread -Iinclude -Iruntime -Ithird_party/mimalloc/include
 LU_LDFLAGS = -rdynamic -pthread
 
-SRCS = $(wildcard runtime/*.c runtime/*/*.c runtime/compiler/*/*.c)
-HEADERS = $(wildcard runtime/*.h runtime/*/*.h runtime/compiler/*/*.h)
+# The optimizing tier's backend (runtime/jit/target.h): x86_64, or "stub"
+# where there is none, which runs everything interpreted.
+JIT_TARGET ?= $(if $(filter x86_64,$(shell uname -m)),x86_64,stub)
+SRCS = $(wildcard runtime/*.c runtime/*/*.c runtime/compiler/*/*.c runtime/jit/$(JIT_TARGET)/*.c)
+HEADERS = $(wildcard runtime/*.h runtime/*/*.h runtime/compiler/*/*.h runtime/jit/$(JIT_TARGET)/*.h)
 MAIN = build/runtime/main.o
 LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o)) build/frozen.o
 HOST_PYTHON ?= python3
@@ -83,7 +86,7 @@ STEP_TMO = 3600
 RUN = timeout -k 10 $(TMO)
 STEP = timeout -k 10 $(STEP_TMO)
 
-.PHONY: all oracle-exts abi-audit check check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler check-timing
+.PHONY: all oracle-exts abi-audit check check-jit check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler check-timing
 all: bin/lucifer build/lib/stamp
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -233,6 +236,10 @@ check-kernel: bin/lucifer build/lib/stamp
 	$(STEP) $(HOST_PYTHON) tools/kernelcheck --opcodes
 	$(STEP) $(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer \
 	  --programs "$(PROGRAMS)" $(if $(LANE),--lane $(LANE))
+
+# The optimizing tier on AWFY: every JIT mode against the oracle.
+check-jit: bin/lucifer build/lib/stamp
+	$(STEP) python3 tools/jitcheck --lucifer bin/lucifer --oracle $(ORACLE_T)
 
 # Wall-clock bounds: an uncaught exception, a 100,000-line function.
 check-timing: bin/lucifer build/lib/stamp

@@ -1,12 +1,15 @@
 """list (Objects/listobject.c) over the PyListObject layout, and its
 iterators. Every mutation is one primitive of runtime/prim/storage.c, which
 takes the list's critical section; this file is the protocol around them:
-indices, slices, argument checks, comparison and sorting."""
+indices, slices, argument checks, comparison and sorting. A primitive brings
+an index or range into the list under its lock; slice bounds, which are computed
+here from a length, go with that length, and the primitive answers MISSING when
+another thread has changed it, for the bounds to be computed again."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, ns_items, type_lookup, type_tp_name, static_type,
  seq_get, seq_slice, seq_concat, seq_repeat, tuple_from, list_alloc, list_append,
-    list_set, list_splice, list_set_stride, list_del_stride, list_reverse, list_pop,
+    list_set, list_insert, list_splice, list_set_stride, list_del_stride, list_reverse, list_pop,
     list_sort_begin, list_sort_end, iter_new, iter_state, iter_set, seqiter_next, kernel_set,
 )
 from _lucifer import _boot, operators, slice as _slice, tuple as _tuple, iter as _iter, _listsort
@@ -28,6 +31,11 @@ seq_repr = _tuple.seq_repr
 __all__ = ('sorted',)
 
 _SSIZE_MAX = 9223372036854775807
+
+
+def splice(lst, lo, hi, seq):
+    """list_ass_slice: lo and hi are clamped into the list under its lock."""
+    list_splice(lst, lo, hi, seq, -1)
 
 
 def _name(x):
@@ -131,8 +139,7 @@ The argument must be an iterable if specified."""
         n = size(args)
         if n > 1:
             error(TypeError, str_join('', ('list expected at most 1 argument, got ', decimal(n))))
-        if size(self):
-            list_splice(self, 0, size(self), ())
+        splice(self, 0, _SSIZE_MAX, ())
         if n == 1:
             list.extend(self, args[0])
 
@@ -144,10 +151,7 @@ The argument must be an iterable if specified."""
 
     def __setitem__(self, key, value):
         if kind(key, 'int') or type_lookup(type(key), '__index__') is not MISSING:
-            i = as_ssize(key, IndexError)
-            if i < 0:
-                i += size(self)
-            list_set(self, i, value)
+            list_set(self, as_ssize(key, IndexError), value)
             return
         if not kind(key, 'slice'):
             error(TypeError, str_join('', (
@@ -155,34 +159,41 @@ The argument must be an iterable if specified."""
         if value is self:
             value = seq_slice(self, 0, 1, size(self), False)
         seq = sequence_fast(value, 'must assign iterable to extended slice')
-        start, step, count = slice_bounds(key, size(self))
-        if step == 1:
-            list_splice(self, start, start + count, seq)
-            return
-        if size(seq) != count:
-            error(ValueError, str_join('', (
-                'attempt to assign sequence of size ', decimal(size(seq)),
-                ' to extended slice of size ', decimal(count))))
-        if count:
-            list_set_stride(self, start, step, seq)
+        while True:
+            n = size(self)
+            start, step, count = slice_bounds(key, n)
+            if step == 1:
+                done = list_splice(self, start, start + count, seq, n)
+            elif size(seq) != count:
+                error(ValueError, str_join('', (
+                    'attempt to assign sequence of size ', decimal(size(seq)),
+                    ' to extended slice of size ', decimal(count))))
+            elif count:
+                done = list_set_stride(self, start, step, seq, n)
+            else:
+                return
+            if done is not MISSING:
+                return
 
     def __delitem__(self, key):
         if kind(key, 'int') or type_lookup(type(key), '__index__') is not MISSING:
-            i = as_ssize(key, IndexError)
-            if i < 0:
-                i += size(self)
-            if i < 0 or i >= size(self):
+            if list_pop(self, as_ssize(key, IndexError)) is MISSING:
                 error(IndexError, 'list assignment index out of range')
-            list_splice(self, i, i + 1, ())
             return
         if not kind(key, 'slice'):
             error(TypeError, str_join('', (
                 'list indices must be integers or slices, not ', _name(key))))
-        start, step, count = slice_bounds(key, size(self))
-        if step == 1:
-            list_splice(self, start, start + count, ())
-        elif count > 0:
-            list_del_stride(self, start, step, count)
+        while True:
+            n = size(self)
+            start, step, count = slice_bounds(key, n)
+            if step == 1:
+                done = list_splice(self, start, start + count, (), n)
+            elif count > 0:
+                done = list_del_stride(self, start, step, count, n)
+            else:
+                return
+            if done is not MISSING:
+                return
 
     def __iter__(self):
         return iter_new(static_type('list_iterator'), self)
@@ -217,9 +228,9 @@ The argument must be an iterable if specified."""
     def __imul__(self, other):
         n = repeat_count(other)
         if n == 0:
-            list_splice(self, 0, size(self), ())
+            splice(self, 0, _SSIZE_MAX, ())
         elif n > 1:
-            list_splice(self, 0, size(self), seq_repeat(self, n, False))
+            splice(self, 0, _SSIZE_MAX, seq_repeat(self, n, False))
         return self
 
     def __eq__(self, other):
@@ -250,21 +261,13 @@ The argument must be an iterable if specified."""
     def extend(self, iterable, /):
         """Extend list by appending elements from the iterable."""
         if type(iterable) is list or type(iterable) is tuple:
-            list_splice(self, size(self), size(self), iterable)
+            splice(self, _SSIZE_MAX, _SSIZE_MAX, iterable)
             return
         _iter.extend(self, iterable)
 
     def insert(self, index, object, /):
         """Insert object before index."""
-        i = ssize_arg(index)
-        n = size(self)
-        if i < 0:
-            i += n
-            if i < 0:
-                i = 0
-        elif i > n:
-            i = n
-        list_splice(self, i, i, (object,))
+        list_insert(self, ssize_arg(index), object)
 
     def remove(self, value, /):
         """Remove first occurrence of value.
@@ -273,7 +276,7 @@ Raises ValueError if the value is not present."""
         i = 0
         while i < size(self):
             if eq_bool(seq_get(self, i), value):
-                list_splice(self, i, i + 1, ())
+                splice(self, i, i + 1, ())
                 return
             i += 1
         error(ValueError, 'list.remove(x): x not in list')
@@ -282,14 +285,9 @@ Raises ValueError if the value is not present."""
         """Remove and return item at index (default last).
 
 Raises IndexError if list is empty or index is out of range."""
-        i = ssize_arg(index)
-        if size(self) == 0:
-            error(IndexError, 'pop from empty list')
-        if i < 0:
-            i += size(self)
-        v = list_pop(self, i)
+        v = list_pop(self, ssize_arg(index))
         if v is MISSING:
-            error(IndexError, 'pop index out of range')
+            error(IndexError, 'pop from empty list' if size(self) == 0 else 'pop index out of range')
         return v
 
     def index(self, *args):
@@ -322,7 +320,7 @@ Raises ValueError if the value is not present."""
 
     def clear(self, /):
         """Remove all items from list."""
-        list_splice(self, 0, size(self), ())
+        splice(self, 0, _SSIZE_MAX, ())
 
     def sort(self, /, *args, **kwargs):
         """Sort the list in ascending order and return None.
