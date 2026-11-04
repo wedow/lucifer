@@ -275,22 +275,28 @@ class _local:
         return self
 
     def _enter(self):
-        """Makes self.__dict__ this thread's, and returns the impl with its lock held."""
+        """Makes self.__dict__ this thread's, and returns the impl with its lock held. The lock
+        covers creating the dict and running __init__, so no other thread's access swaps
+        self.__dict__ in between."""
         impl = object.__getattribute__(self, '_local__impl')
-        dct = impl.get_dict()
-        if dct is None:
-            dct = impl.create_dict()
-            args, kw = impl.localargs
-            object.__setattr__(self, '__dict__', dct)
-            try:
-                self.__init__(*args, **kw)
-            except BaseException:
-                tdict = _lucifer.thread_dict()      # the next access runs __init__ again
-                tdict.pop(impl.key, None)
-                impl.forget(tdict)
-                raise
         impl.locallock.acquire()
-        object.__setattr__(self, '__dict__', dct)
+        try:
+            dct = impl.get_dict()
+            if dct is None:
+                dct = impl.create_dict()
+                args, kw = impl.localargs
+                object.__setattr__(self, '__dict__', dct)
+                try:
+                    self.__init__(*args, **kw)
+                except BaseException:
+                    tdict = _lucifer.thread_dict()      # the next access runs __init__ again
+                    tdict.pop(impl.key, None)
+                    impl.forget(tdict)
+                    raise
+            object.__setattr__(self, '__dict__', dct)
+        except BaseException:
+            impl.locallock.release()
+            raise
         return impl
 
     def __getattribute__(self, name):

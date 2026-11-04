@@ -145,6 +145,9 @@ report_uncaught(void)
         }
     }
     else {
+        if (PyType_IsSubtype(Py_TYPE(exc), (PyTypeObject *)PyExc_KeyboardInterrupt)) {
+            _PyRuntime.signals.unhandled_keyboard_interrupt = 1;
+        }
         /* sys.excepthook(type, value, traceback); without one, the default display */
         PyObject *hook = lu_ns_lookup(_PyRuntime.main_interp.sysdict, PyUnicode_InternFromString("excepthook"));
         PyObject *tb = ((PyBaseExceptionObject *)exc)->traceback;
@@ -670,10 +673,21 @@ Py_FinalizeEx(void)
     return status;
 }
 
+/* Modules/main.c exit_sigint: leave by SIGINT's default action so that the caller learns of
+   the interrupt; the status is the fallback if the signal does not end the process. */
+static int
+exit_sigint(void)
+{
+    signal(SIGINT, SIG_DFL);
+    kill(getpid(), SIGINT);
+    return SIGINT + 128;
+}
+
 static int
 finalize_status(int status)
 {
-    return Py_FinalizeEx() < 0 && status == 0 ? 120 : status;
+    status = Py_FinalizeEx() < 0 && status == 0 ? 120 : status;
+    return __atomic_load_n(&_PyRuntime.signals.unhandled_keyboard_interrupt, __ATOMIC_RELAXED) ? exit_sigint() : status;
 }
 
 /* Modules/main.c: run the file the config names, then finalize. */
