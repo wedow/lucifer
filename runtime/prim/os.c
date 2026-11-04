@@ -367,10 +367,15 @@ prim_os_unlink(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return path_call(args, nargs, 2);
 }
 
-/* cpu_count(): the processors online. */
+/* cpu_count(): PyConfig.cpu_count when it overrides (config_set or -X
+   cpu_count), else the processors online. */
 static PyObject *
 prim_os_cpu_count(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
+    int override = PyInterpreterState_Get()->config.cpu_count;
+    if (override > 0) {
+        return PyLong_FromLong(override);
+    }
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     return n < 1 ? Py_NewRef(Py_None) : PyLong_FromLong(n);
 }

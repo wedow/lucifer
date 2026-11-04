@@ -75,13 +75,9 @@ LU_STUB PyObject * PyComplex_FromDoubles(double real, double imag) { LU_UNIMPLEM
 LU_STUB double PyComplex_ImagAsDouble(PyObject *op) { LU_UNIMPLEMENTED("PyComplex_ImagAsDouble"); }
 LU_STUB double PyComplex_RealAsDouble(PyObject *op) { LU_UNIMPLEMENTED("PyComplex_RealAsDouble"); }
 LU_STUB void PyConfig_Clear(PyConfig *) { LU_UNIMPLEMENTED("PyConfig_Clear"); }
-LU_STUB PyObject* PyConfig_Get(const char *name) { LU_UNIMPLEMENTED("PyConfig_Get"); }
-LU_STUB int PyConfig_GetInt(const char *name, int *value) { LU_UNIMPLEMENTED("PyConfig_GetInt"); }
 LU_STUB void PyConfig_InitIsolatedConfig(PyConfig *config) { LU_UNIMPLEMENTED("PyConfig_InitIsolatedConfig"); }
 LU_STUB void PyConfig_InitPythonConfig(PyConfig *config) { LU_UNIMPLEMENTED("PyConfig_InitPythonConfig"); }
-LU_STUB PyObject* PyConfig_Names(void) { LU_UNIMPLEMENTED("PyConfig_Names"); }
 LU_STUB PyStatus PyConfig_Read(PyConfig *config) { LU_UNIMPLEMENTED("PyConfig_Read"); }
-LU_STUB int PyConfig_Set(const char *name, PyObject *value) { LU_UNIMPLEMENTED("PyConfig_Set"); }
 LU_STUB PyStatus PyConfig_SetArgv(PyConfig *config, Py_ssize_t argc, wchar_t * const *argv) { LU_UNIMPLEMENTED("PyConfig_SetArgv"); }
 LU_STUB PyStatus PyConfig_SetBytesArgv(PyConfig *config, Py_ssize_t argc, char * const *argv) { LU_UNIMPLEMENTED("PyConfig_SetBytesArgv"); }
 LU_STUB PyStatus PyConfig_SetBytesString(PyConfig *config, wchar_t **config_str, const char *str) { LU_UNIMPLEMENTED("PyConfig_SetBytesString"); }
@@ -1536,7 +1532,6 @@ LU_STUB LU_EXPORT void _Py_DumpStack(void) { LU_UNIMPLEMENTED("_Py_DumpStack"); 
 LU_STUB LU_EXPORT void _Py_EncodeLocaleEx(void) { LU_UNIMPLEMENTED("_Py_EncodeLocaleEx"); }
 LU_STUB LU_EXPORT void _Py_FatalRefcountErrorFunc(void) { LU_UNIMPLEMENTED("_Py_FatalRefcountErrorFunc"); }
 LU_STUB LU_EXPORT void _Py_GetConfig(void) { LU_UNIMPLEMENTED("_Py_GetConfig"); }
-LU_STUB LU_EXPORT void _Py_GetConfigsAsDict(void) { LU_UNIMPLEMENTED("_Py_GetConfigsAsDict"); }
 LU_STUB LU_EXPORT void _Py_GetErrorHandler(void) { LU_UNIMPLEMENTED("_Py_GetErrorHandler"); }
 LU_STUB LU_EXPORT void _Py_Get_Getpath_CodeObject(void) { LU_UNIMPLEMENTED("_Py_Get_Getpath_CodeObject"); }
 LU_STUB LU_EXPORT void _Py_Gid_Converter(void) { LU_UNIMPLEMENTED("_Py_Gid_Converter"); }
