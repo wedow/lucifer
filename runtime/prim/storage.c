@@ -445,7 +445,7 @@ prim_list_append(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return err < 0 ? NULL : Py_NewRef(Py_None);
 }
 
-/* list_set(list, i, item): 0 <= i < len. */
+/* list_set(list, i, item): a negative i counts from the end, as the lock sees the length. */
 static PyObject *
 prim_list_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -453,6 +453,7 @@ prim_list_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyListObject *l = (PyListObject *)args[0];
     PyObject *old = NULL;
     Py_BEGIN_CRITICAL_SECTION(l);
+    i += i < 0 ? Py_SIZE(l) : 0;
     if (0 <= i && i < Py_SIZE(l)) {
         old = l->ob_item[i];
         _Py_atomic_store_ptr_release(&l->ob_item[i], Py_NewRef(args[2]));
@@ -466,12 +467,14 @@ prim_list_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
-/* list_ass_slice: replaces l[lo:hi] with the items of a tuple or list. Bounds
-   are 0 <= lo <= hi <= len, or with `clamp` brought into range as slice
-   assignment does. A result with no items clears the list, which resets its
-   storage. */
+/* list_ass_slice: replaces l[lo:hi] with the items of a tuple or list, the
+   bounds brought into range under the lock as list_ass_slice does. A caller
+   that computed them from a length passes it as `expect`: when the list has
+   another length by the time the lock is held, nothing happens and the result
+   is 1, for the caller to compute again. A result with no items clears the
+   list, which resets its storage. */
 static int
-list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, int clamp)
+list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, Py_ssize_t expect)
 {
     Py_ssize_t d;
     PyObject **fresh = snapshot(seq, &d);
@@ -480,16 +483,13 @@ list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, int cl
     }
     PyObject **recycle = NULL;
     Py_ssize_t norig = 0;
-    int err = 0, cleared = 0;
+    int err = 0, cleared = 0, stale = 0;
     Py_BEGIN_CRITICAL_SECTION(l);
     Py_ssize_t size = Py_SIZE(l);
-    if (clamp) {
-        lo = lo < 0 ? 0 : lo > size ? size : lo;
-        hi = hi < lo ? lo : hi > size ? size : hi;
-    }
-    if (lo < 0 || lo > hi || hi > size) {
-        lu_err_format(PyExc_SystemError, "list_splice() range out of bounds");
-        err = -1;
+    lo = lo < 0 ? 0 : lo > size ? size : lo;
+    hi = hi < lo ? lo : hi > size ? size : hi;
+    if (expect >= 0 && expect != size) {
+        stale = 1;
     }
     else if (size - (hi - lo) + d == 0) {
         /* list_clear: the old array and its items go once the list is empty;
@@ -542,6 +542,10 @@ list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, int cl
         release(fresh, d);
         return -1;
     }
+    if (stale) {
+        release(fresh, d);
+        return 1;
+    }
     if (fresh != NULL) {
         PyMem_Free(fresh);              /* empty: nothing was inserted */
     }
@@ -560,8 +564,9 @@ list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, int cl
 static PyObject *
 prim_list_splice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(4); LIST(0); SSIZE(1, lo); SSIZE(2, hi); SEQ(3);
-    return list_splice((PyListObject *)args[0], lo, hi, args[3], 0) < 0 ? NULL : Py_NewRef(Py_None);
+    ARGS(5); LIST(0); SSIZE(1, lo); SSIZE(2, hi); SEQ(3); SSIZE(4, expect);
+    int r = list_splice((PyListObject *)args[0], lo, hi, args[3], expect);
+    return r < 0 ? NULL : Py_NewRef(r ? LU_MISSING : Py_None);
 }
 
 /* The list C-API (Objects/listobject.c). */
@@ -578,7 +583,7 @@ PyList_SetSlice(PyObject *a, Py_ssize_t ilow, Py_ssize_t ihigh, PyObject *v)
     if (seq == NULL) {
         return -1;
     }
-    int r = list_splice((PyListObject *)a, ilow, ihigh, seq, 1);
+    int r = list_splice((PyListObject *)a, ilow, ihigh, seq, -1);
     Py_DECREF(seq);
     return r;
 }
@@ -608,12 +613,22 @@ PyList_Insert(PyObject *op, Py_ssize_t where, PyObject *newitem)
     return err;
 }
 
-/* list_set_stride(list, start, step, seq): list[start + k * step] = seq[k]
-   for each item of seq, positions in range. */
+/* list_insert(list, i, item): i counts from the end when negative and is
+   clamped into the list, as list.insert does. */
+static PyObject *
+prim_list_insert(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(3); LIST(0); SSIZE(1, i);
+    return PyList_Insert(args[0], i, args[2]) < 0 ? NULL : Py_NewRef(Py_None);
+}
+
+/* list_set_stride(list, start, step, seq, expect): list[start + k * step] = seq[k]
+   for each item of seq, positions in range; MISSING when the list is not of
+   length expect (as list_splice). */
 static PyObject *
 prim_list_set_stride(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(4); LIST(0); SSIZE(1, start); SSIZE(2, step); SEQ(3);
+    ARGS(5); LIST(0); SSIZE(1, start); SSIZE(2, step); SEQ(3); SSIZE(4, expect);
     PyListObject *l = (PyListObject *)args[0];
     Py_ssize_t n;
     PyObject **fresh = snapshot(args[3], &n);
@@ -625,9 +640,10 @@ prim_list_set_stride(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         release(fresh, n);
         return PyErr_NoMemory();
     }
-    int bad = 0;
+    int bad = 0, stale = 0;
     Py_BEGIN_CRITICAL_SECTION(l);
-    for (Py_ssize_t k = 0; k < n; k++) {
+    stale = Py_SIZE(l) != expect;
+    for (Py_ssize_t k = 0; !stale && k < n; k++) {
         Py_ssize_t at = start + k * step;
         if (at < 0 || at >= Py_SIZE(l)) {
             bad = 1;
@@ -637,6 +653,11 @@ prim_list_set_stride(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         _Py_atomic_store_ptr_release(&l->ob_item[at], fresh[k]);
     }
     Py_END_CRITICAL_SECTION();
+    if (stale) {
+        PyMem_Free(old);
+        release(fresh, n);
+        return Py_NewRef(LU_MISSING);
+    }
     if (bad) {
         lu_err_format(PyExc_SystemError, "list_set_stride() position out of bounds");
         PyMem_Free(old);
@@ -648,25 +669,29 @@ prim_list_set_stride(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
-/* list_del_stride(list, start, step, count): removes the count items at
-   start + k * step, in either direction (the loop of list_ass_subscript). */
+/* list_del_stride(list, start, step, count, expect): removes the count items
+   at start + k * step, in either direction (the loop of list_ass_subscript);
+   MISSING when the list is not of length expect. */
 static PyObject *
 prim_list_del_stride(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(4); LIST(0); SSIZE(1, start); SSIZE(2, step); SSIZE(3, count);
+    ARGS(5); LIST(0); SSIZE(1, start); SSIZE(2, step); SSIZE(3, count); SSIZE(4, expect);
     PyListObject *l = (PyListObject *)args[0];
     PyObject **garbage = PyMem_Malloc((count > 0 ? count : 1) * sizeof(PyObject *));
     if (garbage == NULL) {
         return PyErr_NoMemory();
     }
-    int err = 0;
+    int err = 0, stale = 0;
     Py_BEGIN_CRITICAL_SECTION(l);
     Py_ssize_t size = Py_SIZE(l);
     if (step < 0) {
         start += (count - 1) * step;
         step = -step;
     }
-    if (count > 0 && (start < 0 || start + (count - 1) * step >= size)) {
+    if (size != expect) {
+        stale = 1;
+    }
+    else if (count > 0 && (start < 0 || start + (count - 1) * step >= size)) {
         lu_err_format(PyExc_SystemError, "list_del_stride() position out of bounds");
         err = -1;
     }
@@ -692,15 +717,16 @@ prim_list_del_stride(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
     }
     Py_END_CRITICAL_SECTION();
-    if (err < 0) {
+    if (err < 0 || stale) {
         PyMem_Free(garbage);
-        return NULL;
+        return err < 0 ? NULL : Py_NewRef(LU_MISSING);
     }
     release(garbage, count);
     return Py_NewRef(Py_None);
 }
 
-/* list_pop(list, i): removes and returns item i, or MISSING when i is out of range. */
+/* list_pop(list, i): removes and returns item i, a negative i counting from
+   the end, or MISSING when i is out of range. */
 static PyObject *
 prim_list_pop(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -709,6 +735,7 @@ prim_list_pop(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *v = NULL;
     Py_BEGIN_CRITICAL_SECTION(l);
     Py_ssize_t size = Py_SIZE(l);
+    i += i < 0 ? size : 0;
     if (0 <= i && i < size) {
         v = l->ob_item[i];
         memmove(l->ob_item + i, l->ob_item + i + 1, (size - i - 1) * sizeof(PyObject *));
@@ -1192,7 +1219,7 @@ lu_storage_init(void)
 PyMethodDef lu_prim_storage_methods[] = {
     FAST(seq_get), FAST(seq_slice), FAST(seq_concat), FAST(seq_repeat), FAST(tuple_from),
     FAST(xxh_hash), FAST(repr_enter), FAST(repr_leave), FAST(list_alloc), FAST(list_append),
-    FAST(list_set), FAST(list_splice), FAST(list_set_stride), FAST(list_del_stride),
+    FAST(list_set), FAST(list_splice), FAST(list_insert), FAST(list_insert), FAST(list_set_stride), FAST(list_del_stride),
     FAST(list_reverse), FAST(list_pop), FAST(list_sort_begin), FAST(list_sort_end), FAST(iter_new),
     FAST(seqiter_next), FAST(iter_state), FAST(iter_set), FAST(range_new), FAST(range_get),
     FAST(range_iter_new), FAST(rangeiter_next), FAST(rangeiter_len), FAST(range_iter),

@@ -1,6 +1,6 @@
 ---
 id: luc-njhp
-status: open
+status: closed
 deps: []
 links: [luc-sx8l]
 created: 2026-11-03T23:49:57Z
@@ -25,3 +25,7 @@ Profiled: compiler passes are linear (host: 2.5k..40k lines doubles per doubling
 **2026-11-04T04:33:39Z**
 
 Merged progress at e3f9738: 100k-line function 720 s -> ~120 s, uncaught exception 3.07 s -> 0.66 s; the review fixed 5 defects. The remaining 2x+ is luc-sx8l.
+
+**2026-11-04T20:23:07Z**
+
+Fixed by luc-duxh (CPython's C compiler): 100,000-line function 1.2 s vs 0.90 s on CPython.

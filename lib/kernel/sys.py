@@ -8,6 +8,7 @@ builtins of sys, as C functions are, so their frames never show.
 """
 
 from _lucifer import ns_set, ns_get, instance_dict, builtin_function, frame_at, MISSING
+from _lucifer import object_is_immortal
 from _lucifer import os_environ, os_fstat as fstat, locale_encoding
 from _lucifer import exceptions, generators, structseq, write_unraisable, err_display
 import sys
@@ -327,7 +328,7 @@ def _is_interned(string, /):
 
 def _is_immortal(op, /):
     """Return True if the given object is "immortal" per PEP 683."""
-    return False
+    return object_is_immortal(op)
 
 
 def _clear_type_cache():

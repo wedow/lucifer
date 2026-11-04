@@ -23,24 +23,14 @@ LU_STUB int PyBuffer_IsContiguous(const Py_buffer *view, char fort) { LU_UNIMPLE
 LU_STUB void PyBuffer_Release(Py_buffer *view) { LU_UNIMPLEMENTED("PyBuffer_Release"); }
 LU_STUB Py_ssize_t PyBuffer_SizeFromFormat(const char *format) { LU_UNIMPLEMENTED("PyBuffer_SizeFromFormat"); }
 LU_STUB int PyBuffer_ToContiguous(void *buf, const Py_buffer *view, Py_ssize_t len, char order) { LU_UNIMPLEMENTED("PyBuffer_ToContiguous"); }
-LU_STUB char * PyByteArray_AsString(PyObject *) { LU_UNIMPLEMENTED("PyByteArray_AsString"); }
-LU_STUB PyObject * PyByteArray_Concat(PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyByteArray_Concat"); }
-LU_STUB PyObject * PyByteArray_FromObject(PyObject *) { LU_UNIMPLEMENTED("PyByteArray_FromObject"); }
-LU_STUB PyObject * PyByteArray_FromStringAndSize(const char *, Py_ssize_t) { LU_UNIMPLEMENTED("PyByteArray_FromStringAndSize"); }
-LU_STUB int PyByteArray_Resize(PyObject *, Py_ssize_t) { LU_UNIMPLEMENTED("PyByteArray_Resize"); }
-LU_STUB Py_ssize_t PyByteArray_Size(PyObject *) { LU_UNIMPLEMENTED("PyByteArray_Size"); }
 LU_STUB char * PyBytes_AsString(PyObject *) { LU_UNIMPLEMENTED("PyBytes_AsString"); }
 LU_STUB int PyBytes_AsStringAndSize(PyObject *obj, char **s, Py_ssize_t *len) { LU_UNIMPLEMENTED("PyBytes_AsStringAndSize"); }
 LU_STUB void PyBytes_Concat(PyObject **, PyObject *) { LU_UNIMPLEMENTED("PyBytes_Concat"); }
 LU_STUB void PyBytes_ConcatAndDel(PyObject **, PyObject *) { LU_UNIMPLEMENTED("PyBytes_ConcatAndDel"); }
-LU_STUB PyObject * PyBytes_DecodeEscape(const char *, Py_ssize_t, const char *, Py_ssize_t, const char *) { LU_UNIMPLEMENTED("PyBytes_DecodeEscape"); }
 LU_STUB PyObject * PyBytes_FromFormat(const char*, ...) { LU_UNIMPLEMENTED("PyBytes_FromFormat"); }
 LU_STUB PyObject * PyBytes_FromFormatV(const char*, va_list) { LU_UNIMPLEMENTED("PyBytes_FromFormatV"); }
-LU_STUB PyObject * PyBytes_FromObject(PyObject *) { LU_UNIMPLEMENTED("PyBytes_FromObject"); }
 LU_STUB PyObject * PyBytes_FromString(const char *) { LU_UNIMPLEMENTED("PyBytes_FromString"); }
 LU_STUB PyObject * PyBytes_FromStringAndSize(const char *, Py_ssize_t) { LU_UNIMPLEMENTED("PyBytes_FromStringAndSize"); }
-LU_STUB PyObject* PyBytes_Join(PyObject *sep, PyObject *iterable) { LU_UNIMPLEMENTED("PyBytes_Join"); }
-LU_STUB PyObject * PyBytes_Repr(PyObject *, int) { LU_UNIMPLEMENTED("PyBytes_Repr"); }
 LU_STUB Py_ssize_t PyBytes_Size(PyObject *) { LU_UNIMPLEMENTED("PyBytes_Size"); }
 LU_STUB int PyCFunction_GetFlags(PyObject *) { LU_UNIMPLEMENTED("PyCFunction_GetFlags"); }
 LU_STUB PyCFunction PyCFunction_GetFunction(PyObject *) { LU_UNIMPLEMENTED("PyCFunction_GetFunction"); }
@@ -167,8 +157,6 @@ LU_STUB int PyDict_Update(PyObject *mp, PyObject *other) { LU_UNIMPLEMENTED("PyD
 LU_STUB PyObject * PyDict_Values(PyObject *mp) { LU_UNIMPLEMENTED("PyDict_Values"); }
 LU_STUB int PyDict_Watch(int watcher_id, PyObject* dict) { LU_UNIMPLEMENTED("PyDict_Watch"); }
 LU_STUB int PyErr_BadArgument(void) { LU_UNIMPLEMENTED("PyErr_BadArgument"); }
-#undef PyErr_BadInternalCall
-LU_STUB void PyErr_BadInternalCall(void) { LU_UNIMPLEMENTED("PyErr_BadInternalCall"); }
 LU_STUB int PyErr_CheckSignals(void) { LU_UNIMPLEMENTED("PyErr_CheckSignals"); }
 LU_STUB void PyErr_Clear(void) { LU_UNIMPLEMENTED("PyErr_Clear"); }
 LU_STUB void PyErr_Display(PyObject *, PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyErr_Display"); }
@@ -993,20 +981,15 @@ LU_STUB int Py_FrozenMain(int argc, char **argv) { LU_UNIMPLEMENTED("Py_FrozenMa
 LU_STUB char* Py_GETENV(const char *name) { LU_UNIMPLEMENTED("Py_GETENV"); }
 LU_STUB PyObject * Py_GenericAlias(PyObject *, PyObject *) { LU_UNIMPLEMENTED("Py_GenericAlias"); }
 LU_STUB void Py_GetArgcArgv(int *argc, wchar_t ***argv) { LU_UNIMPLEMENTED("Py_GetArgcArgv"); }
-LU_STUB const char * Py_GetBuildInfo(void) { LU_UNIMPLEMENTED("Py_GetBuildInfo"); }
-LU_STUB const char * Py_GetCompiler(void) { LU_UNIMPLEMENTED("Py_GetCompiler"); }
 LU_STUB PyObject* Py_GetConstant(unsigned int constant_id) { LU_UNIMPLEMENTED("Py_GetConstant"); }
 LU_STUB PyObject* Py_GetConstantBorrowed(unsigned int constant_id) { LU_UNIMPLEMENTED("Py_GetConstantBorrowed"); }
-LU_STUB const char * Py_GetCopyright(void) { LU_UNIMPLEMENTED("Py_GetCopyright"); }
 LU_STUB wchar_t * Py_GetExecPrefix(void) { LU_UNIMPLEMENTED("Py_GetExecPrefix"); }
 LU_STUB wchar_t * Py_GetPath(void) { LU_UNIMPLEMENTED("Py_GetPath"); }
-LU_STUB const char * Py_GetPlatform(void) { LU_UNIMPLEMENTED("Py_GetPlatform"); }
 LU_STUB wchar_t * Py_GetPrefix(void) { LU_UNIMPLEMENTED("Py_GetPrefix"); }
 LU_STUB wchar_t * Py_GetProgramFullPath(void) { LU_UNIMPLEMENTED("Py_GetProgramFullPath"); }
 LU_STUB wchar_t * Py_GetProgramName(void) { LU_UNIMPLEMENTED("Py_GetProgramName"); }
 LU_STUB wchar_t * Py_GetPythonHome(void) { LU_UNIMPLEMENTED("Py_GetPythonHome"); }
 LU_STUB int Py_GetRecursionLimit(void) { LU_UNIMPLEMENTED("Py_GetRecursionLimit"); }
-LU_STUB const char * Py_GetVersion(void) { LU_UNIMPLEMENTED("Py_GetVersion"); }
 LU_STUB Py_hash_t Py_HashBuffer(const void *ptr, Py_ssize_t len) { LU_UNIMPLEMENTED("Py_HashBuffer"); }
 LU_STUB Py_hash_t Py_HashPointer(const void *ptr) { LU_UNIMPLEMENTED("Py_HashPointer"); }
 LU_STUB void Py_IncRef(PyObject *) { LU_UNIMPLEMENTED("Py_IncRef"); }
@@ -1062,7 +1045,6 @@ LU_STUB PyObject * _PyDict_GetItemStringWithError(PyObject *, const char *) { LU
 LU_STUB PyObject * _PyDict_GetItem_KnownHash(PyObject *mp, PyObject *key, Py_hash_t hash) { LU_UNIMPLEMENTED("_PyDict_GetItem_KnownHash"); }
 LU_STUB PyObject * _PyDict_NewPresized(Py_ssize_t minused) { LU_UNIMPLEMENTED("_PyDict_NewPresized"); }
 LU_STUB PyObject * _PyDict_Pop(PyObject *dict, PyObject *key, PyObject *default_value) { LU_UNIMPLEMENTED("_PyDict_Pop"); }
-LU_STUB void _PyErr_BadInternalCall(const char *filename, int lineno) { LU_UNIMPLEMENTED("_PyErr_BadInternalCall"); }
 LU_STUB void _PyErr_ChainExceptions1(PyObject *) { LU_UNIMPLEMENTED("_PyErr_ChainExceptions1"); }
 LU_STUB PyObject * _PyEval_EvalFrameDefault(PyThreadState *tstate, struct _PyInterpreterFrame *f, int exc) { LU_UNIMPLEMENTED("_PyEval_EvalFrameDefault"); }
 LU_STUB int _PyEval_SliceIndex(PyObject *, Py_ssize_t *) { LU_UNIMPLEMENTED("_PyEval_SliceIndex"); }
@@ -1580,7 +1562,6 @@ LU_STUB LU_EXPORT void _Py_DisplaySourceLine(void) { LU_UNIMPLEMENTED("_Py_Displ
 LU_STUB LU_EXPORT void _Py_DumpStack(void) { LU_UNIMPLEMENTED("_Py_DumpStack"); }
 LU_STUB LU_EXPORT void _Py_EncodeLocaleEx(void) { LU_UNIMPLEMENTED("_Py_EncodeLocaleEx"); }
 LU_STUB LU_EXPORT void _Py_FatalRefcountErrorFunc(void) { LU_UNIMPLEMENTED("_Py_FatalRefcountErrorFunc"); }
-LU_STUB LU_EXPORT void _Py_GetBuiltWithAssert(void) { LU_UNIMPLEMENTED("_Py_GetBuiltWithAssert"); }
 LU_STUB LU_EXPORT void _Py_GetConfig(void) { LU_UNIMPLEMENTED("_Py_GetConfig"); }
 LU_STUB LU_EXPORT void _Py_GetConfigsAsDict(void) { LU_UNIMPLEMENTED("_Py_GetConfigsAsDict"); }
 LU_STUB LU_EXPORT void _Py_GetErrorHandler(void) { LU_UNIMPLEMENTED("_Py_GetErrorHandler"); }

@@ -274,6 +274,10 @@ PyBytes_FromStringAndSize(const char *str, Py_ssize_t size)
     if (size == 1 && str != NULL) {
         return (PyObject *)&_PyRuntime.singletons.bytes_chars[(unsigned char)*str];
     }
+    if ((size_t)size > (size_t)PY_SSIZE_T_MAX - (BYTES_HEADER + 1)) {
+        PyErr_SetString(PyExc_OverflowError, "byte string is too large");
+        return NULL;
+    }
     PyBytesObject *op = (PyBytesObject *)lu_object_new(&PyBytes_Type, BYTES_HEADER + size + 1);
     if (op == NULL) {
         return NULL;

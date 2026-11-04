@@ -301,13 +301,8 @@ PyCFunction_Call(PyObject *callable, PyObject *args, PyObject *kwargs)
     return PyObject_Call(callable, args, kwargs);
 }
 
-/* Bytes. */
-
-PyObject *
-PyBytes_FromObject(PyObject *x)
-{
-    return PyObject_CallOneArg((PyObject *)&PyBytes_Type, x);
-}
+/* Bytes. PyBytes_FromObject, PyBytes_Join and PyBytes_Repr are the
+   Objects/bytesobject.c ports in runtime/prim/bytes.c. */
 
 PyObject *
 PyByteArray_FromObject(PyObject *x)
@@ -315,25 +310,42 @@ PyByteArray_FromObject(PyObject *x)
     return PyObject_CallOneArg((PyObject *)&PyByteArray_Type, x);
 }
 
+/* Objects/bytearrayobject.c PyByteArray_Concat: raw buffers, so a strided
+   view or a non-buffer raises rather than going through the constructor. */
 PyObject *
 PyByteArray_Concat(PyObject *a, PyObject *b)
 {
-    PyObject *copy = PyObject_CallOneArg((PyObject *)&PyByteArray_Type, a);
-    PyObject *r = copy != NULL ? PyNumber_InPlaceAdd(copy, b) : NULL;
-    Py_XDECREF(copy);
-    return r;
-}
+    Py_buffer va, vb;
+    PyByteArrayObject *result = NULL;
 
-PyObject *
-PyBytes_Join(PyObject *sep, PyObject *iterable)
-{
-    return call_method(sep, "join", "(O)", iterable);
-}
+    va.len = -1;
+    vb.len = -1;
+    if (PyObject_GetBuffer(a, &va, PyBUF_SIMPLE) != 0 ||
+        PyObject_GetBuffer(b, &vb, PyBUF_SIMPLE) != 0) {
+            PyErr_Format(PyExc_TypeError, "can't concat %.100s to %.100s",
+                         Py_TYPE(b)->tp_name, Py_TYPE(a)->tp_name);
+            goto done;
+    }
 
-PyObject *
-PyBytes_Repr(PyObject *obj, int smartquotes)
-{
-    return PyObject_Repr(obj);
+    if (va.len > PY_SSIZE_T_MAX - vb.len) {
+        PyErr_NoMemory();
+        goto done;
+    }
+
+    result = (PyByteArrayObject *) \
+        PyByteArray_FromStringAndSize(NULL, va.len + vb.len);
+    /* result->ob_bytes is NULL if result is an empty bytearray. */
+    if (result != NULL && result->ob_bytes != NULL) {
+        memcpy(result->ob_bytes, va.buf, va.len);
+        memcpy(result->ob_bytes + va.len, vb.buf, vb.len);
+    }
+
+  done:
+    if (va.len != -1)
+        PyBuffer_Release(&va);
+    if (vb.len != -1)
+        PyBuffer_Release(&vb);
+    return (PyObject *)result;
 }
 
 PyObject *

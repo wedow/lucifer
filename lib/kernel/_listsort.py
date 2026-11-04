@@ -103,7 +103,7 @@ def sort(items, keyfunc, reverse):
             _timsort(order, n, islt, reverse)
     finally:
         if keyfunc is not None:
-            list_splice(items, 0, n, [items[i] for i in order])
+            list_splice(items, 0, n, [items[i] for i in order], -1)
 
 
 def _timsort(a, n, islt, reverse):
