@@ -48,6 +48,11 @@ _seq0, _seq1 = _SEQ_ITERATORS
 _dict0, _dict1, _dict2 = _DICT_ITERATORS
 
 
+# Exact iterator type -> a function giving its next item, or MISSING at the end,
+# without raising StopIteration (iterators.py registers zip and enumerate).
+NEXT_MISSING = {}
+
+
 def next_item(it):
     """The step of FOR_ITER and next(): the next item, or MISSING when the
     iterator is exhausted."""
@@ -56,6 +61,9 @@ def next_item(it):
         return seqiter_next(it)
     if t is _dict0 or t is _dict1 or t is _dict2:
         return dictiter_next(it)
+    f = NEXT_MISSING.get(t)
+    if f is not None:
+        return f(it)
     f = type_lookup(type(it), '__next__')
     if f is MISSING:
         error(TypeError, str_join('', ("'", _name(it), "' object is not an iterator")))
