@@ -146,3 +146,8 @@ print(ready.datetimes())
 print(ready.numbers())
 for o in ([1, 2, 3], iter([1, 2]), 5, 'text', range(7)):
     show(ready.objects, o)
+
+# slots that delegate to object's own
+d = ready.Delegate()
+print(hash(d) == object.__hash__(d), repr(d) == object.__repr__(d), str(d) == object.__repr__(d),
+      d == d, d == ready.Delegate(), d != ready.Delegate())

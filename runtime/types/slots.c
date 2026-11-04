@@ -30,10 +30,10 @@ lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t nargs)
    type, bound unless it is a plain function or a kernel descriptor, then
    called with self first. */
 static PyObject *
-call_special_kw(PyObject *self, PyObject *name, PyObject *const *args, Py_ssize_t nargs,
-                PyObject *kwnames)
+call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *const *args,
+                Py_ssize_t nargs, PyObject *kwnames)
 {
-    PyObject *descr = _PyType_Lookup(Py_TYPE(self), name);
+    PyObject *descr = _PyType_Lookup(tp, name);
     if (descr == NULL) {
         lu_err_format(PyExc_AttributeError, "'%.100s' object has no attribute '%s'",
                       Py_TYPE(self)->tp_name, PyUnicode_AsUTF8(name));
@@ -71,6 +71,13 @@ call_special_kw(PyObject *self, PyObject *name, PyObject *const *args, Py_ssize_
         PyMem_Free(stack);
     }
     return result;
+}
+
+static PyObject *
+call_special_kw(PyObject *self, PyObject *name, PyObject *const *args, Py_ssize_t nargs,
+                PyObject *kwnames)
+{
+    return call_special_in(Py_TYPE(self), self, name, args, nargs, kwnames);
 }
 
 PyObject *
@@ -204,6 +211,44 @@ slot_tp_richcompare(PyObject *self, PyObject *other, int op)
         return Py_NewRef(Py_NotImplemented);
     }
     return lu_call_special(self, names[op], &other, 1);
+}
+
+/* object's own slots run object's methods, not the receiver type's: a type that
+   delegates to PyBaseObject_Type.tp_repr (or _str, _richcompare) would recurse
+   into itself through the lookup. */
+static PyObject *
+object_tp_repr(PyObject *self)
+{
+    return string_result(call_special_in(&PyBaseObject_Type, self, LU_ID(__repr__), NULL, 0, NULL),
+                         "__repr__");
+}
+
+static PyObject *
+object_tp_str(PyObject *self)
+{
+    return string_result(call_special_in(&PyBaseObject_Type, self, LU_ID(__str__), NULL, 0, NULL),
+                         "__str__");
+}
+
+static PyObject *
+object_tp_richcompare(PyObject *self, PyObject *other, int op)
+{
+    PyObject *const names[] = { LU_ID(__lt__), LU_ID(__le__), LU_ID(__eq__), LU_ID(__ne__),
+                                LU_ID(__gt__), LU_ID(__ge__) };
+    if (_PyType_Lookup(&PyBaseObject_Type, names[op]) == NULL) {
+        return Py_NewRef(Py_NotImplemented);
+    }
+    return call_special_in(&PyBaseObject_Type, self, names[op], &other, 1, NULL);
+}
+
+static void *
+object_thunk(void *thunk)
+{
+    return thunk == (void *)slot_tp_hash ? (void *)PyObject_GenericHash
+         : thunk == (void *)slot_tp_repr ? (void *)object_tp_repr
+         : thunk == (void *)slot_tp_str ? (void *)object_tp_str
+         : thunk == (void *)slot_tp_richcompare ? (void *)object_tp_richcompare
+         : thunk;
 }
 
 static PyObject *
@@ -653,7 +698,8 @@ lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from)
     case 0: value = NULL; break;
     case 1:
         value = s->thunk == (void *)slot_tp_new && (tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)
-            ? (void *)slot_tp_new_builtin : s->thunk;
+            ? (void *)slot_tp_new_builtin
+            : tp == &PyBaseObject_Type ? object_thunk(s->thunk) : s->thunk;
         break;
     case 2: {
         char *src = from != NULL ? slot_base(from, s->where, 0) : NULL;

@@ -370,6 +370,44 @@ static PyTypeObject MyList_Type = {
     .tp_base = &PyList_Type,
 };
 
+/* ready.Delegate: slots that hand back to object's own, as numpy's NaT hash and
+   scalar reprs do through PyBaseObject_Type. */
+static Py_hash_t
+delegate_hash(PyObject *self)
+{
+    return PyBaseObject_Type.tp_hash(self);
+}
+
+static PyObject *
+delegate_repr(PyObject *self)
+{
+    return PyBaseObject_Type.tp_repr(self);
+}
+
+static PyObject *
+delegate_str(PyObject *self)
+{
+    return PyBaseObject_Type.tp_str(self);
+}
+
+static PyObject *
+delegate_richcompare(PyObject *self, PyObject *other, int op)
+{
+    return PyBaseObject_Type.tp_richcompare(self, other, op);
+}
+
+static PyTypeObject Delegate_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.Delegate",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_hash = delegate_hash,
+    .tp_repr = delegate_repr,
+    .tp_str = delegate_str,
+    .tp_richcompare = delegate_richcompare,
+};
+
 /* ready.FloatSub: a float subtype whose tp_new asks float's tp_new for the instance, as
    numpy's float64 does. */
 static PyObject *
@@ -944,7 +982,8 @@ PyMODINIT_FUNC
 PyInit_ready(void)
 {
     if (PyType_Ready(&Vec_Type) < 0 || PyType_Ready(&Vec3_Type) < 0 || PyType_Ready(&Locked_Type) < 0
-        || PyType_Ready(&Counter_Type) < 0 || PyType_Ready(&MyList_Type) < 0 || PyType_Ready(&FloatSub_Type) < 0) {
+        || PyType_Ready(&Counter_Type) < 0 || PyType_Ready(&MyList_Type) < 0 || PyType_Ready(&FloatSub_Type) < 0
+        || PyType_Ready(&Delegate_Type) < 0) {
         return NULL;
     }
     PyObject *m = PyModule_Create(&module);
@@ -954,7 +993,8 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "Locked", (PyObject *)&Locked_Type) < 0
         || PyModule_AddObjectRef(m, "Counter", (PyObject *)&Counter_Type) < 0
         || PyModule_AddObjectRef(m, "MyList", (PyObject *)&MyList_Type) < 0
-        || PyModule_AddObjectRef(m, "FloatSub", (PyObject *)&FloatSub_Type) < 0) {
+        || PyModule_AddObjectRef(m, "FloatSub", (PyObject *)&FloatSub_Type) < 0
+        || PyModule_AddObjectRef(m, "Delegate", (PyObject *)&Delegate_Type) < 0) {
         Py_XDECREF(m);
         return NULL;
     }
