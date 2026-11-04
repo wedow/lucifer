@@ -16,4 +16,4 @@ Review of luc-njhp: there is no try-incref and no deferred freeing, so values re
 
 **2026-11-04T05:58:12Z**
 
-Done: try-incref reads, page and storage QSBR, set publish order; threads_container_protocol is red on master, green plain and handoff, handoff:1-4. Follow-up lr-ojw0.
+Done: try-incref reads, page and storage QSBR, set publish order; threads_container_protocol is red on master, green plain and handoff, handoff:1-4. Follow-up luc-ojw0.
