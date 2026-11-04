@@ -174,3 +174,9 @@ class Both(list):
 print([ready.is_sequence(o) for o in ([], (), 'a', b'', range(2), bytearray(), memoryview(b''), {}, set(), object(),
                                        5, ready.Mapped(), ready.Vec(), Indexed(), Keyed(), Both(), ready.MyList(),
                                        iter([]), {}.keys(), 1.5, None)])
+
+# a doc that starts "name(signature)\n--\n\n" is a text signature and a doc
+import inspect
+for f in (ready.sigfunc, ready.badsig, ready.Vec.norm2, ready.Vec(1, 2).norm2, ready.Vec.scaled):
+    print(f.__name__, repr(f.__doc__), repr(f.__text_signature__))
+print(inspect.signature(ready.sigfunc), inspect.signature(ready.Vec.norm2))

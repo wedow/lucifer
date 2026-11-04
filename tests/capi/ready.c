@@ -1003,6 +1003,8 @@ static PyMethodDef module_methods[] = {
     { "errors", errors, METH_NOARGS, NULL },
     { "raise_object", raise_object, METH_VARARGS, NULL },
     { "is_sequence", is_sequence, METH_O, NULL },
+    { "sigfunc", is_sequence, METH_O, "sigfunc($module, a, b=1, /)\n--\n\nReal doc." },
+    { "badsig", is_sequence, METH_O, "badsig(a, b\nno marker" },
     { "dict_ops", dict_ops, METH_NOARGS, NULL },
     { "slices", slices, METH_VARARGS, NULL },
     { "locks", locks, METH_NOARGS, NULL },
