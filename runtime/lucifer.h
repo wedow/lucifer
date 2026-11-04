@@ -910,6 +910,10 @@ int lu_module_add_functions(PyObject *m, PyMethodDef *defs);
 extern PyModuleDef lu_lucifer_module;
 
 /* A function for `code` closing over `globals` (runtime/object/function.c). */
+/* The threads a dump of all threads lists, and the fatal-error report (runtime/prim/faulthandler.c). */
+void lu_fh_thread_enter(PyThreadState *ts);
+void lu_fh_thread_exit(PyThreadState *ts);
+void lu_fh_fatal(const char *func, const char *msg) __attribute__((noreturn));
 PyObject *lu_function_new(PyObject *code, PyObject *globals);
 /* function.__new__ over (code, globals, name, defaults, closure, kwdefaults). */
 PyObject *lu_function_from_args(PyObject *const *args);
