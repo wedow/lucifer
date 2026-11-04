@@ -21,12 +21,6 @@ sys_fopen(const char *path, const char *mode)
     return f;
 }
 
-static Py_ssize_t
-sys_write(int fd, const void *buf, size_t count)
-{
-    return LU_SYSCALL(write(fd, buf, count));
-}
-
 /* PyFile_FromFd: _io.open() with the raw C arguments (the name attribute of
    _BufferedIOMixin and TextIOWrapper is read only, so it is ignored). */
 PyObject *
@@ -231,7 +225,7 @@ stdprinter_write(PyObject *op, PyObject *args)
     }
 
     do {
-        n = sys_write(self->fd, str, (size_t)n);
+        n = lu_write_fd(self->fd, str, (size_t)n);
     } while (n < 0 && errno == EINTR && PyErr_CheckSignals() == 0);
     /* save errno, it can be modified indirectly by Py_XDECREF() */
     err = errno;
@@ -349,8 +343,7 @@ lu_fileobject_init(void)
 static int
 set_cloexec(int fd)
 {
-    int flags = LU_SYSCALL(fcntl(fd, F_GETFD));
-    if (flags < 0 || LU_SYSCALL(fcntl(fd, F_SETFD, flags | FD_CLOEXEC)) < 0) {
+    if (lu_set_cloexec(fd) < 0) {
         PyErr_SetFromErrno(PyExc_OSError);
         return -1;
     }

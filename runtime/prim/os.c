@@ -67,6 +67,21 @@ lu_join_thread(pthread_t thread)
    its bracket is empty. */
 #define LU_SIGNAL(call) (call)
 
+/* write(2) and fcntl(F_SETFD) for the file C-API (Objects/fileobject.c's
+   stdprinter and Py_fopen): the blocking symbols live only here. */
+Py_ssize_t
+lu_write_fd(int fd, const void *buf, size_t count)
+{
+    return LU_SYSCALL(write(fd, buf, count));
+}
+
+int
+lu_set_cloexec(int fd)
+{
+    int flags = LU_SYSCALL(fcntl(fd, F_GETFD));
+    return flags < 0 ? -1 : LU_SYSCALL(fcntl(fd, F_SETFD, flags | FD_CLOEXEC));
+}
+
 void
 lu_write_signal_safe(int fd, const char *s, size_t n)
 {

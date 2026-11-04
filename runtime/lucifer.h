@@ -109,6 +109,8 @@ struct lu_lot_bucket {
    inside the bracket (tools/blockcheck). */
 PyThreadState *lu_syscall_begin(void);
 void lu_syscall_end(PyThreadState *ts);
+Py_ssize_t lu_write_fd(int fd, const void *buf, size_t count);
+int lu_set_cloexec(int fd);
 /* Evaluates the blocking call `call` between the two, which keeps errno. */
 #define LU_SYSCALL(call) ({ \
         PyThreadState *lu_ts_ = lu_syscall_begin(); \
