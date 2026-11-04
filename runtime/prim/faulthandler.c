@@ -436,6 +436,44 @@ prim_fh_is_enabled(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(fatal.enabled ? Py_True : Py_False);
 }
 
+/* The extension modules of sys.modules, minus sys.stdlib_module_names
+   (Python/pylifecycle.c _Py_DumpExtensionModules). A C-made module is one
+   with a def, or one of sys.builtin_module_names, which the kernel's are. */
+static void
+dump_extension_modules(int fd)
+{
+    PyThreadState *ts = PyThreadState_GetUnchecked();
+    struct _is *interp = ts != NULL ? ts->interp : NULL;
+    PyObject *builtins = interp != NULL
+        ? PyDict_GetItemString(interp->sysdict, "builtin_module_names") : NULL;
+    PyObject *stdlib = interp != NULL
+        ? PyDict_GetItemString(interp->sysdict, "stdlib_module_names") : NULL;
+    if (stdlib != NULL && !PyFrozenSet_Check(stdlib)) {
+        stdlib = NULL;          /* anything else does not exclude modules */
+    }
+    int header = 1, count = 0;
+    Py_ssize_t pos = 0;
+    PyObject *key, *value;
+    while (interp != NULL && lu_ns_next(interp->modules, &pos, &key, &value)) {
+        int is_ext = PyModule_Check(value) && PyModule_GetDef(value) != NULL;
+        if (!is_ext && builtins != NULL && PySequence_Contains(builtins, key) == 1) {
+            is_ext = 1;
+        }
+        if (!is_ext || (stdlib != NULL && PySet_Contains(stdlib, key) == 1)) {
+            continue;
+        }
+        outs(fd, header ? "\nExtension modules: " : ", ");
+        outs(fd, PyUnicode_AsUTF8(key));
+        header = 0;
+        count++;
+    }
+    if (count != 0) {
+        char total[32];
+        snprintf(total, sizeof total, " (total: %d)\n", count);
+        outs(fd, total);
+    }
+}
+
 /* Py_FatalError and its relatives: the message, then the stack. */
 void
 lu_fh_fatal(const char *func, const char *msg)
@@ -458,6 +496,7 @@ lu_fh_fatal(const char *func, const char *msg)
     }
     outs(fd, "\n");
     dump_c_stack(fd);
+    dump_extension_modules(fd);
     abort();
 }
 

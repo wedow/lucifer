@@ -543,6 +543,228 @@ PyException_SetArgs(PyObject *self, PyObject *args)
     Py_XSETREF(((PyBaseExceptionObject *)self)->args, Py_NewRef(args));
 }
 
+/* The UnicodeError attributes (Objects/exceptions.c PyUnicode*Error_*): the
+   five words of the layout. Any UnicodeError subclass passes the type check,
+   as in CPython. */
+
+static int
+check_unicode_error_type(PyObject *self, const char *expect_type)
+{
+    if (!PyObject_TypeCheck(self, (PyTypeObject *)PyExc_UnicodeError)) {
+        lu_err_format(PyExc_TypeError, "expecting a %s object, got %s", expect_type,
+                      Py_TYPE(self)->tp_name);
+        return -1;
+    }
+    return 0;
+}
+
+/* A UnicodeError attribute that must be a str, or bytes when as_bytes. */
+static int
+check_unicode_error_attr(PyObject *attr, const char *name, int as_bytes)
+{
+    if (attr == NULL) {
+        lu_err_format(PyExc_TypeError, "UnicodeError '%s' attribute is not set", name);
+        return -1;
+    }
+    if (!(as_bytes ? PyBytes_Check(attr) : PyUnicode_Check(attr))) {
+        lu_err_format(PyExc_TypeError, "UnicodeError '%s' attribute must be a %s",
+                      name, as_bytes ? "bytes" : "string");
+        return -1;
+    }
+    return 0;
+}
+
+static PyObject *
+unicode_error_attr(PyObject *attr, const char *name, int as_bytes)
+{
+    return check_unicode_error_attr(attr, name, as_bytes) < 0 ? NULL : Py_NewRef(attr);
+}
+
+/* The length of the 'object' attribute, checked (bytes when decoding). */
+static int
+unicode_error_object_len(PyObject *self, Py_ssize_t *objlen, int as_bytes)
+{
+    PyObject *object = ((PyUnicodeErrorObject *)self)->object;
+    if (check_unicode_error_attr(object, "object", as_bytes) < 0) {
+        return -1;
+    }
+    *objlen = as_bytes ? PyBytes_GET_SIZE(object) : PyUnicode_GET_LENGTH(object);
+    return 0;
+}
+
+/* The 'start' clipped to [0, max(0, objlen - 1)], the 'end' to
+   [min(1, objlen), max(min(1, objlen), objlen)]. */
+static Py_ssize_t
+unicode_error_clip_start(Py_ssize_t start, Py_ssize_t objlen)
+{
+    if (start < 0) {
+        start = 0;
+    }
+    if (start >= objlen) {
+        start = objlen == 0 ? 0 : objlen - 1;
+    }
+    return start;
+}
+
+static Py_ssize_t
+unicode_error_clip_end(Py_ssize_t end, Py_ssize_t objlen)
+{
+    if (end < 1) {
+        end = 1;
+    }
+    if (end > objlen) {
+        end = objlen;
+    }
+    return end;
+}
+
+PyObject *
+PyUnicodeEncodeError_GetEncoding(PyObject *self)
+{
+    return check_unicode_error_type(self, "UnicodeEncodeError") < 0 ? NULL
+        : unicode_error_attr(((PyUnicodeErrorObject *)self)->encoding, "encoding", 0);
+}
+
+PyObject *
+PyUnicodeDecodeError_GetEncoding(PyObject *self)
+{
+    return check_unicode_error_type(self, "UnicodeDecodeError") < 0 ? NULL
+        : unicode_error_attr(((PyUnicodeErrorObject *)self)->encoding, "encoding", 0);
+}
+
+PyObject *
+PyUnicodeEncodeError_GetObject(PyObject *self)
+{
+    return check_unicode_error_type(self, "UnicodeEncodeError") < 0 ? NULL
+        : unicode_error_attr(((PyUnicodeErrorObject *)self)->object, "object", 0);
+}
+
+PyObject *
+PyUnicodeDecodeError_GetObject(PyObject *self)
+{
+    return check_unicode_error_type(self, "UnicodeDecodeError") < 0 ? NULL
+        : unicode_error_attr(((PyUnicodeErrorObject *)self)->object, "object", 1);
+}
+
+PyObject *
+PyUnicodeTranslateError_GetObject(PyObject *self)
+{
+    return check_unicode_error_type(self, "UnicodeTranslateError") < 0 ? NULL
+        : unicode_error_attr(((PyUnicodeErrorObject *)self)->object, "object", 0);
+}
+
+#define UNICODE_ERROR_GET_RANGE(name, expect, as_bytes, field, clip) \
+int \
+name(PyObject *self, Py_ssize_t *value) \
+{ \
+    if (check_unicode_error_type(self, expect) < 0) { \
+        return -1; \
+    } \
+    Py_ssize_t objlen; \
+    if (unicode_error_object_len(self, &objlen, as_bytes) < 0) { \
+        return -1; \
+    } \
+    *value = clip(((PyUnicodeErrorObject *)self)->field, objlen); \
+    return 0; \
+}
+
+UNICODE_ERROR_GET_RANGE(PyUnicodeEncodeError_GetStart, "UnicodeEncodeError", 0, start, unicode_error_clip_start)
+UNICODE_ERROR_GET_RANGE(PyUnicodeDecodeError_GetStart, "UnicodeDecodeError", 1, start, unicode_error_clip_start)
+UNICODE_ERROR_GET_RANGE(PyUnicodeTranslateError_GetStart, "UnicodeTranslateError", 0, start, unicode_error_clip_start)
+UNICODE_ERROR_GET_RANGE(PyUnicodeEncodeError_GetEnd, "UnicodeEncodeError", 0, end, unicode_error_clip_end)
+UNICODE_ERROR_GET_RANGE(PyUnicodeDecodeError_GetEnd, "UnicodeDecodeError", 1, end, unicode_error_clip_end)
+UNICODE_ERROR_GET_RANGE(PyUnicodeTranslateError_GetEnd, "UnicodeTranslateError", 0, end, unicode_error_clip_end)
+
+#define UNICODE_ERROR_SET_RANGE(name, expect, which) \
+int \
+name(PyObject *self, Py_ssize_t value) \
+{ \
+    if (check_unicode_error_type(self, expect) < 0) { \
+        return -1; \
+    } \
+    ((PyUnicodeErrorObject *)self)->which = value; \
+    return 0; \
+}
+
+UNICODE_ERROR_SET_RANGE(PyUnicodeEncodeError_SetStart, "UnicodeEncodeError", start)
+UNICODE_ERROR_SET_RANGE(PyUnicodeDecodeError_SetStart, "UnicodeDecodeError", start)
+UNICODE_ERROR_SET_RANGE(PyUnicodeTranslateError_SetStart, "UnicodeTranslateError", start)
+UNICODE_ERROR_SET_RANGE(PyUnicodeEncodeError_SetEnd, "UnicodeEncodeError", end)
+UNICODE_ERROR_SET_RANGE(PyUnicodeDecodeError_SetEnd, "UnicodeDecodeError", end)
+UNICODE_ERROR_SET_RANGE(PyUnicodeTranslateError_SetEnd, "UnicodeTranslateError", end)
+
+PyObject *
+PyUnicodeEncodeError_GetReason(PyObject *self)
+{
+    return check_unicode_error_type(self, "UnicodeEncodeError") < 0 ? NULL
+        : unicode_error_attr(((PyUnicodeErrorObject *)self)->reason, "reason", 0);
+}
+
+PyObject *
+PyUnicodeDecodeError_GetReason(PyObject *self)
+{
+    return check_unicode_error_type(self, "UnicodeDecodeError") < 0 ? NULL
+        : unicode_error_attr(((PyUnicodeErrorObject *)self)->reason, "reason", 0);
+}
+
+PyObject *
+PyUnicodeTranslateError_GetReason(PyObject *self)
+{
+    return check_unicode_error_type(self, "UnicodeTranslateError") < 0 ? NULL
+        : unicode_error_attr(((PyUnicodeErrorObject *)self)->reason, "reason", 0);
+}
+
+#define UNICODE_ERROR_SET_REASON(name, expect) \
+int \
+name(PyObject *self, const char *reason) \
+{ \
+    if (check_unicode_error_type(self, expect) < 0) { \
+        return -1; \
+    } \
+    PyObject *value = PyUnicode_FromString(reason); \
+    if (value == NULL) { \
+        return -1; \
+    } \
+    Py_XSETREF(((PyUnicodeErrorObject *)self)->reason, value); \
+    return 0; \
+}
+
+UNICODE_ERROR_SET_REASON(PyUnicodeEncodeError_SetReason, "UnicodeEncodeError")
+UNICODE_ERROR_SET_REASON(PyUnicodeDecodeError_SetReason, "UnicodeDecodeError")
+UNICODE_ERROR_SET_REASON(PyUnicodeTranslateError_SetReason, "UnicodeTranslateError")
+
+/* The exception group to raise after a try-except* ran (Objects/exceptions.c
+   PyUnstable_Exc_PrepReraiseStar): the computation is the kernel's
+   prep_reraise_star, which CALL_INTRINSIC_1 reaches for the opcode. */
+PyObject *
+PyUnstable_Exc_PrepReraiseStar(PyObject *orig, PyObject *excs)
+{
+    if (orig == NULL || !PyExceptionInstance_Check(orig)) {
+        PyErr_SetString(PyExc_TypeError, "orig must be an exception instance");
+        return NULL;
+    }
+    if (excs == NULL || !PyList_Check(excs)) {
+        PyErr_SetString(PyExc_TypeError, "excs must be a list of exception instances");
+        return NULL;
+    }
+    Py_ssize_t numexcs = PyList_GET_SIZE(excs);
+    for (Py_ssize_t i = 0; i < numexcs; i++) {
+        PyObject *exc = PyList_GET_ITEM(excs, i);
+        if (!(PyExceptionInstance_Check(exc) || exc == Py_None)) {
+            PyErr_Format(PyExc_TypeError, "item %zd of excs is not an exception", i);
+            return NULL;
+        }
+    }
+    PyObject *tb = PyException_GetTraceback(orig);
+    if (tb == NULL) {
+        PyErr_Format(PyExc_ValueError, "orig must be a raised exception");
+        return NULL;
+    }
+    Py_DECREF(tb);
+    PyObject *args[2] = { orig, excs };
+    return lu_call_kernel(LU_K_prep_reraise_star, args, 2);
+}
+
 /* The handled exceptions (Python/errors.c): the topmost one that is not
    unset, walking the task's exc_info chain. */
 
