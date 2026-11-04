@@ -28,7 +28,8 @@ def work(results, n):
                 out.append((j, zlib.crc32(marshal.dumps(code))))
                 tree = ast.parse(src)
                 out.append((j, zlib.crc32(ast.dump(tree, include_attributes=True).encode())))
-                out.append((j, zlib.crc32(marshal.dumps(compile(tree, f"<s{j}>", "exec")))))
+                code = compile(tree, f"<s{j}>", "exec")
+                out.append((j, code.co_code, code.co_names, len(code.co_consts)))
                 out.append((j, len(list(tokenize.generate_tokens(io.StringIO(src).readline)))))
             except SyntaxError as e:
                 out.append((j, e.msg, e.lineno, e.offset))
