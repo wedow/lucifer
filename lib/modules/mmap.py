@@ -36,7 +36,7 @@ _MAP_FAILED = 2**64 - 1
 
 
 def _call(function, rtype, types, args):
-    result = _lucifer.ct_call(function, rtype, types, args, True)
+    result = _lucifer.ct_call(function, rtype, types, args, 8)  # FUNCFLAG_USE_ERRNO
     return result
 
 

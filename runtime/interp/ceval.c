@@ -773,17 +773,24 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
             } \
         } \
     } while (0)
-#define POLL() do { \
+/* A poll's exception belongs to the instruction that polled, whose end is
+   `after`: a back-edge has already moved next_instr to its target, which
+   would look the handler up at the wrong offset. A park resumes at next_instr. */
+#define POLL_AFTER(after) do { \
         lu_qsbr_quiescent(carrier); \
         if (__atomic_load_n(poll, __ATOMIC_RELAXED) & LU_POLL_EVENTS_MASK) { \
             SAVE_FRAME(); \
-            ERROR_IF(lu_poll_slow(ts) < 0); \
+            if (lu_poll_slow(ts) < 0) { \
+                next_instr = (after); \
+                goto error; \
+            } \
         } \
         if (migratable && lu_sched_safepoint(task)) { \
             SAVE_FRAME(); \
             return LU_EVAL_PARKED; \
         } \
     } while (0)
+#define POLL() POLL_AFTER(next_instr)
 
     LOAD_FRAME();
     if (mode == EVAL_THROW) {
@@ -1689,8 +1696,9 @@ op_INSTRUMENTED_JUMP_FORWARD: {
 op_INSTRUMENTED_JUMP_BACKWARD: {
     lu_codeunit *this_instr = next_instr - 1;
     SKIP_CACHES();
+    lu_codeunit *after = next_instr;
     INSTRUMENTED_JUMP(this_instr, next_instr - oparg, PY_MONITORING_EVENT_JUMP);
-    POLL();
+    POLL_AFTER(after);
     DISPATCH();
 }
 
@@ -2122,11 +2130,13 @@ op_CALL_INTRINSIC_1: {
     DISPATCH();
 }
 
-op_JUMP_BACKWARD:
+op_JUMP_BACKWARD: {
     SKIP_CACHES();
+    lu_codeunit *after = next_instr;
     next_instr -= oparg;
-    POLL();
+    POLL_AFTER(after);
     DISPATCH();
+}
 
 /* The specialized forms of LOAD_ATTR (owner -- attr, self_or_null[oparg & 1]). */
 

@@ -1274,7 +1274,7 @@ class CFuncPtr(_CData, metaclass=PyCFuncPtrType):
         else:
             rffi = 'i'
         number = _lucifer.ct_call(address, ord(rffi), tuple(ord(c) for c, _ in flat), tuple(v for _, v in flat),
-                                  bool(self._flags_ & FUNCFLAG_USE_ERRNO))
+                                  self._flags_)
         result = _result_value(restype, number, rffi)
         if self.errcheck is not None:
             checked = self.errcheck(result, self, args)
