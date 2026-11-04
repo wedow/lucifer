@@ -344,6 +344,9 @@ type(name, bases, dict, **kwds) -> a new type"""
         if not is_subtype(type(obj), cls):
             return obj
         init = type_lookup(type(obj), '__init__')
+        # object.__init__ refuses arguments only when __new__ is object's too.
+        if init is _object._object_init and (args or kwargs) and type_lookup(type(obj), '__new__') is not _object._object_new:
+            return obj
         if init is not MISSING and (init is not _object._object_init or args or kwargs):
             if type(init) is _function:
                 res = init(obj, *args, **kwargs)

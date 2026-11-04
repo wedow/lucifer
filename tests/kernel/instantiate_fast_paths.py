@@ -3,6 +3,7 @@ function runs in the eval loop; every other class, and every error, takes
 type.__call__ with the same results, messages and tracebacks."""
 
 import abc
+import collections
 import dataclasses
 import sys
 import traceback
@@ -230,3 +231,30 @@ del Late.__init__
 attempt(29, lambda: Late(5))
 Late.__new__ = lambda cls, *a: object.__new__(cls)
 attempt(30, lambda: Late())
+
+
+P = collections.namedtuple('P', 'x y')
+
+
+class OnlyNew:
+    def __new__(cls, *args, **kwargs):
+        self = super().__new__(cls)
+        self.args = args
+        return self
+
+
+class NewInherits(OnlyNew):
+    pass
+
+
+class NewAndOtherInit(OnlyNew):
+    def __init__(self, *args):
+        self.init = args
+
+
+attempt(31, lambda: OnlyNew(1, 2, k=3).args)
+attempt(32, lambda: NewInherits(1).args)
+attempt(33, lambda: NewAndOtherInit(4, 5).init)
+attempt(34, lambda: tuple.__new__(P, (1, 2)))
+attempt(35, lambda: P(3, y=4))
+attempt(36, lambda: P(1, 2, 3))

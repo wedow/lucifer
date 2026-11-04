@@ -175,3 +175,62 @@ del c1.v
 print(19, getattr(c1, 'v'))
 Chg.__getattr__ = lambda self, n: 'late ' + n
 print(20, getattr(c1, 'zz'))
+
+
+# setattr(): the same shortcuts, and the cases that run Python.
+class SA:
+    def __init__(self):
+        self.a = 1
+
+    @property
+    def p(self):
+        return self._p
+
+    @p.setter
+    def p(self, v):
+        self._p = v * 2
+
+    @property
+    def ro(self):
+        return 0
+
+
+class SB:
+    __slots__ = ('x',)
+
+
+class SC:
+    def __setattr__(self, n, v):
+        print('SC set', n, v)
+        object.__setattr__(self, n, v)
+
+
+sa = SA()
+setattr(sa, 'a', 2)
+setattr(sa, 'b', 3)
+setattr(sa, 'p', 4)
+print(21, sa.a, sa.b, sa.p, sa.__dict__)
+for target, name, value in ((sa, 'ro', 1), (SB(), 'x', 1), (SB(), 'y', 1), (SC(), 'z', 1), (1, 'x', 1), ([], 'x', 1),
+                            (sa, 1, 1), (None, '__class__', 1), (sa, '__class__', int), (sa, '__dict__', 5), (SA, 'cls', 1),
+                            (int, 'cls', 1), (object(), 'a', 1), (f, 'attr2', 8), (types.ModuleType('m'), 'v', 2)):
+    try:
+        print(22, setattr(target, name, value), getattr(target, name, 'unset') if not isinstance(name, int) else '')
+    except (AttributeError, TypeError) as ex:
+        print(22, type(ex).__name__, ex)
+print(23, SA.cls, f.attr2)
+try:
+    setattr(sa)
+except TypeError as ex:
+    print(24, ex)
+import dataclasses
+
+
+@dataclasses.dataclass(frozen=True)
+class Fr:
+    x: int
+
+
+try:
+    setattr(Fr(1), 'x', 2)
+except dataclasses.FrozenInstanceError as ex:
+    print(25, ex)

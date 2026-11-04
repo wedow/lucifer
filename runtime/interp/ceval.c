@@ -646,6 +646,16 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
             return getattr_native(args[0], args[1]);
         }
     }
+    else if (target == kernel[LU_K_builtin_setattr]) {
+        if (npos == 3 && lu_setattr_native(args[0], args[1], args[2]) > 0) {
+            return Py_NewRef(Py_None);
+        }
+    }
+    else if (target == kernel[LU_K_index]) {
+        if (npos == 1 && PyLong_CheckExact(args[0])) {
+            return Py_NewRef(args[0]);
+        }
+    }
     else if (target == kernel[LU_K_list_append]) {
         if (npos == 2 && PyList_CheckExact(args[0])) {
             int err;
@@ -1469,7 +1479,7 @@ call_tail: {
     }
     if (target != NULL && self == NULL && kwnames == NULL
         && (((PyCodeObject *)((PyFunctionObject *)target)->func_code)->co_flags & LU_CO_KERNEL)
-        && (result = native_call(ts, target, args, npos)) != NULL) {
+        && ((result = native_call(ts, target, args, npos)) != NULL || PyErr_Occurred())) {
         goto call_done;
     }
     if (target != NULL && (self == NULL || free_self)) {
