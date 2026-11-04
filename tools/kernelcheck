@@ -46,8 +46,23 @@ MAGIC = (3627).to_bytes(2, "little") + b"\r\n"
 # the handoff scheduler with seed N.
 LANES = {"plain": [], "handoff": ["-X", "lucifer_handoff"]}
 LANES.update({f"handoff:{n}": ["-X", f"lucifer_handoff={n}"] for n in range(1, 9)})
-# "gc:N" collects at every Nth allocation (-X lucifer_stress=gc:N).
-LANES.update({f"gc:{n}": ["-X", f"lucifer_stress=gc:{n}"] for n in (1, 100)})
+# "gc:N" collects after every N GC allocations (-X lucifer_stress=gc:N). A collection costs the whole heap
+# (about a millisecond), so the lanes trade rate for programs (FOUNDATIONS 2.7):
+# gc:1 runs the programs below, which finish in under 40 s at that rate; gc:100000 runs them all.
+LANES.update({f"gc:{n}": ["-X", f"lucifer_stress=gc:{n}"] for n in (1, 100000)})
+STRICT_PROGRAMS = """
+    ast_nodes audit bigint binascii_module bool_ops builtins_funcs bytes_args bytes_errors bytes_methods
+    bytes_repr calls cell_type classes class_prepare closures code_positions code_replace collections_deque
+    complex_ops comprehensions contextvars_basic control_flow coroutines deep_recursion descriptors dict_ops
+    exception_groups exceptions float_ops fstrings gc_at_poll gc_dead_weakref gc_thread_queues generators
+    generic_alias handoff_finalize handoff_pinned handoff_state handoff_witness hash_seed hello import_io
+    int_arith int_errors int_random int_reflect invalidate itertools_basic list_ops mapping_views
+    marshal_dumps match_stmt math_functions memoryview object_reduce posix_basic print_args range_slice
+    resurrect scoping set_colliding_keys set_ops set_random signals signals_poll str_format
+    str_methods str_sizeof struct_basic sysconfig_vars thread_lock threads_lowlevel tstrings
+    tuple_ops types_module typing_primitives unpack with_stmt
+""".split()
+LANE_PROGRAMS = {"gc:1": STRICT_PROGRAMS}
 # name -> stdout under the handoff lanes, where two carriers run the program:
 # the one place lucifer is meant to differ from the oracle.
 HANDOFF_STDOUT = {
@@ -86,6 +101,23 @@ FLAG_ROWS = [
     ("int digits", ["-X", "int_max_str_digits=100", "-I", "-S", "hello.pyc"], 1, "int_max_str_digits"),
     ("no file", ["-I", "-S", "missing.pyc"], 2, "missing.pyc"),
 ]
+# A dropped cycle must be collected within about N GC allocations under gc:N, whatever the heap size
+# (lucifer only: the oracle has no stress collections). The program prints the allocations it took.
+STRESS_CYCLE = """\
+import gc, weakref
+gc.set_threshold(0)
+class Node: pass
+keep = [[] for _ in range(1000)]   # a large heap must not slow the rate
+a = Node(); b = Node(); a.other = b; b.other = a
+r = weakref.ref(a)
+del a, b
+n = 0
+while r() is not None and n < 100000:
+    [] ; n += 1
+print(n)
+"""
+STRESS_CYCLE_SLACK = 8    # allocations the loop's own bookkeeping may add
+STRESS_CYCLE_COUNTS = (1, 10, 100)
 
 
 # Programs given as source: (name, interpreter arguments, files written first,
@@ -289,7 +321,7 @@ def main():
         sys.exit("kernelcheck: the host Python must be CPython 3.14 (magic 3627)")
     if args.lane not in LANES:
         sys.exit(f"kernelcheck: unknown lane {args.lane!r}")
-    names = args.programs.split() or sorted(p.stem for p in SOURCES.glob("*.py"))
+    names = args.programs.split() or LANE_PROGRAMS.get(args.lane) or sorted(p.stem for p in SOURCES.glob("*.py"))
     lucifer = str(Path(args.lucifer).resolve())
     BUILD.mkdir(parents=True, exist_ok=True)
 
@@ -330,6 +362,16 @@ def main():
         else:
             failed += 1
             print(f"FAIL flags: {label}: exit {child.returncode}, stderr {child.stderr!r}")
+        total += 1
+    for n in STRESS_CYCLE_COUNTS:
+        child = subprocess.run([lucifer, "-I", "-S", "-X", f"lucifer_stress=gc:{n}", "-c", STRESS_CYCLE],
+                               capture_output=True, timeout=TIMEOUT, cwd=BUILD)
+        took = int(child.stdout or -1)
+        if child.returncode == 0 and 0 <= took <= n + STRESS_CYCLE_SLACK:
+            print(f"PASS stress: gc:{n} collects a dropped cycle in {took} allocations")
+        else:
+            failed += 1
+            print(f"FAIL stress: gc:{n}: exit {child.returncode}, {took} allocations, stderr {child.stderr!r}")
         total += 1
     source_failed = check_source_programs(args.oracle, lucifer)
     failed += source_failed

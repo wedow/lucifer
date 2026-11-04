@@ -260,8 +260,6 @@ struct lu_gc {
     PyObject *garbage;          /* gc.garbage; strong */
     int debug;                  /* gc.set_debug flags */
     int freeze_active;          /* gc.freeze() was used */
-    Py_ssize_t stress_allocs;   /* allocations since the last stress collection */
-    Py_ssize_t stress_live;     /* GC blocks that collection saw */
     Py_ssize_t stats[3][3];     /* per generation: collections, collected, uncollectable */
 };
 
@@ -278,6 +276,16 @@ struct lu_pending {
     struct lu_pending_call *head, **tail;
     struct lu_task *handling;   /* the task running the queue: it is not re-entered */
 };
+
+/* sys.monitoring (runtime/interp/instrument.c): the tool ids, event counts
+   and tables of which tools watch which events (pycore_instruments.h). */
+#define LU_MON_TOOL_IDS 8
+#define LU_MON_LOCAL_EVENTS 11      /* events that instrument bytecode */
+#define LU_MON_UNGROUPED_EVENTS 16  /* events a tool can ask for singly */
+#define LU_MON_EVENTS 19
+#define _PY_MONITORING_LOCAL_EVENTS LU_MON_LOCAL_EVENTS    /* cpython/monitoring.h */
+typedef struct { uint8_t tools[LU_MON_LOCAL_EVENTS]; } lu_local_monitors;
+typedef struct { uint8_t tools[LU_MON_UNGROUPED_EVENTS]; } lu_global_monitors;
 
 /* PyInterpreterState (private layout; DESIGN 4.1). */
 struct _is {
@@ -296,6 +304,14 @@ struct _is {
     PyObject *interned;         /* interned str -> itself */
     _PyFrameEvalFunction eval_frame;    /* PEP 523; NULL runs frames inline */
     uintptr_t monitoring_version;       /* a multiple of LU_POLL_VERSION_UNIT */
+    PyMutex tracing_setup_lock;         /* the first sys.settrace or setprofile registers callbacks */
+    int sys_trace_setup, sys_profile_setup;
+    int sys_tracing_threads, sys_profiling_threads;     /* tasks with a trace or profile function */
+    uintptr_t last_restart_version;     /* sys.monitoring.restart_events */
+    lu_global_monitors monitors;        /* the tools watching each event, everywhere */
+    PyObject *monitoring_callables[LU_MON_TOOL_IDS][LU_MON_EVENTS];     /* strong */
+    PyObject *monitoring_tool_names[LU_MON_TOOL_IDS];                   /* strong */
+    uintptr_t monitoring_tool_versions[LU_MON_TOOL_IDS];
     struct lu_static_type_state static_types[LU_MAX_STATIC_TYPES];
     PyObject *kernel[LU_K_COUNT];       /* strong; NULL until registered */
     unsigned int next_version_tag;      /* heap types' tp_version_tag; 0 once spent */
@@ -583,11 +599,9 @@ void lu_gc_collect_shutdown(PyThreadState *ts);
 /* The poll handler's GC reason: collects the youngest generation if the
    collector is enabled and still wants to. */
 void lu_gc_run(PyThreadState *ts);
-/* The stress tick's collection (-X lucifer_stress=gc:N), `every` allocations after
-   the last tick: as a manual one, but it leaves the counts, statistics and callbacks
-   as they were. A collection costs the heap, so ticks are skipped until the
-   allocations since the last one are half of it. */
-void lu_gc_stress(PyThreadState *ts, unsigned long every);
+/* The stress tick's collection (-X lucifer_stress=gc:N), every N GC allocations:
+   as a manual one, but it leaves the counts, statistics and callbacks as they were. */
+void lu_gc_stress(PyThreadState *ts);
 
 /* Signals (runtime/interp/signals.c): the trip handler sets a flag and the
    main task's poll reason; the main task runs the Python handlers. */

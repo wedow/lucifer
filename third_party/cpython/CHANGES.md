@@ -321,3 +321,12 @@ spaces until the Unicode database exists. `runtime/prim/str.c`'s
   `Python/ceval.c`; `lib/kernel/cell.py` is `Objects/cellobject.c`.
 - `lib/sysconfigdata.py` is the Makefile and `pyconfig.h` values of
   the free-threaded 3.14 ABI, installed as `_sysconfigdata_t_linux_x86_64-linux-gnu`.
+- `runtime/interp/instrument.c`, `monitoring.c`, `legacy_tracing.c` and
+  `runtime/capi/monitoring.c` are `Python/instrumentation.c` and
+  `Python/legacy_tracing.c`, with the trampolines of `Python/sysmodule.c` and
+  the `monitor_*` functions of `Python/ceval.c`, over this runtime's frames,
+  stop-the-world and poll word; `runtime/interp/frame_lineno.c` is the
+  `f_lineno` setter of `Objects/frameobject.c`.
+- `runtime/interp/opcode_stack.c` holds `_PyOpcode_num_popped` and
+  `_PyOpcode_num_pushed` of `Include/internal/pycore_opcode_metadata.h`, copied,
+  and the stack-effect functions of `Python/flowgraph.c`.
