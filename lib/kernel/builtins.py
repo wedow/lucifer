@@ -1010,3 +1010,7 @@ class NoneType:
 class NotImplementedType:
     def __repr__(self):
         return 'NotImplemented'
+
+
+kernel_set('len', len)
+kernel_set('isinstance', isinstance)

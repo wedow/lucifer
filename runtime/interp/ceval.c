@@ -340,6 +340,43 @@ attr_shortcut(PyObject *owner, PyObject *name)
     return v != NULL && (Py_TYPE(v)->tp_descr_get == NULL || PyFunction_Check(v)) ? v : NULL;
 }
 
+/* The kernel functions that C answers for plain arguments, so that the common
+   call of dict.get, len and isinstance runs no frame: the result, or NULL
+   when the kernel must run. */
+static PyObject *
+native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize_t npos)
+{
+    PyObject *const *kernel = ts->interp->kernel;
+    if (target == kernel[LU_K_dict_get]) {
+        PyObject *found;
+        if ((npos == 2 || npos == 3) && PyDict_CheckExact(args[0])) {
+            int hit = lu_dict_find_native(args[0], args[1], &found);
+            if (hit >= 0) {
+                return Py_NewRef(hit ? found : npos == 3 ? args[2] : Py_None);
+            }
+        }
+    }
+    else if (target == kernel[LU_K_len]) {
+        PyTypeObject *t = npos == 1 ? Py_TYPE(args[0]) : NULL;
+        if (t == &PyList_Type || t == &PyTuple_Type) {
+            return PyLong_FromSsize_t(Py_SIZE(args[0]));
+        }
+        if (t == &PyDict_Type) {
+            return PyLong_FromSsize_t(((PyDictObject *)args[0])->ma_used);
+        }
+        if (t == &PyUnicode_Type) {
+            return PyLong_FromSsize_t(PyUnicode_GET_LENGTH(args[0]));
+        }
+    }
+    else if (target == kernel[LU_K_isinstance]) {
+        if (npos == 2 && PyType_CheckExact(args[1])
+            && _PyType_Lookup(Py_TYPE(args[0]), LU_ID(__class__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__class__))) {
+            return Py_NewRef(PyType_IsSubtype(Py_TYPE(args[0]), (PyTypeObject *)args[1]) ? Py_True : Py_False);
+        }
+    }
+    return NULL;
+}
+
 static void
 set_function_attribute(PyFunctionObject *func, int which, PyObject *attr)
 {
@@ -930,14 +967,10 @@ call_tail: {
             }
         }
     }
-    if (target != NULL && self == NULL && kwnames == NULL && (npos == 2 || npos == 3)
-        && target == ts->interp->kernel[LU_K_dict_get] && PyDict_CheckExact(args[0])) {
-        PyObject *found;
-        int hit = lu_dict_find_native(args[0], args[1], &found);
-        if (hit >= 0) {
-            result = Py_NewRef(hit ? found : npos == 3 ? args[2] : Py_None);
-            goto call_done;
-        }
+    if (target != NULL && self == NULL && kwnames == NULL
+        && (((PyCodeObject *)((PyFunctionObject *)target)->func_code)->co_flags & LU_CO_KERNEL)
+        && (result = native_call(ts, target, args, npos)) != NULL) {
+        goto call_done;
     }
     if (target != NULL && (self == NULL || free_self)) {
         if (self != NULL) {
