@@ -151,27 +151,31 @@ set_oserror(int err, PyObject *filename)
     }
 }
 
-/* A path argument as a C string: a str (UTF-8) or bytes without a NUL. */
-static const char *
-path_arg(PyObject *o)
+/* A path argument as bytes, os.fsencode of a str, without a NUL: a new
+   reference the caller drops when it is done with the string. */
+static PyObject *
+path_bytes(PyObject *o)
 {
-    const char *s = NULL;
-    Py_ssize_t n = 0;
+    PyObject *b;
     if (PyUnicode_Check(o)) {
-        s = PyUnicode_AsUTF8AndSize(o, &n);
+        b = PyUnicode_EncodeFSDefault(o);
     }
     else if (PyBytes_Check(o)) {
-        s = PyBytes_AS_STRING(o);
-        n = PyBytes_GET_SIZE(o);
+        b = Py_NewRef(o);
     }
     else {
         lu_err_format(PyExc_TypeError, "expected str or bytes, not %.200s", Py_TYPE(o)->tp_name);
-    }
-    if (s != NULL && (Py_ssize_t)strlen(s) != n) {
-        lu_err_format(PyExc_ValueError, "embedded null byte");
         return NULL;
     }
-    return s;
+    if (b == NULL) {
+        return NULL;
+    }
+    if ((Py_ssize_t)strlen(PyBytes_AS_STRING(b)) != PyBytes_GET_SIZE(b)) {
+        lu_err_format(PyExc_ValueError, "embedded null byte");
+        Py_DECREF(b);
+        return NULL;
+    }
+    return b;
 }
 
 static PyObject *
@@ -240,12 +244,14 @@ stat_tuple(const struct stat *st)
 PyObject *
 lu_prim_os_stat(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const char *path = nargs == 2 ? path_arg(args[0]) : NULL;
+    PyObject *path = nargs == 2 ? path_bytes(args[0]) : NULL;
     if (path == NULL) {
         return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "stat(path, follow)"), NULL);
     }
     struct stat st;
-    int r = args[1] == Py_True ? LU_SYSCALL(stat(path, &st)) : LU_SYSCALL(lstat(path, &st));
+    int r = args[1] == Py_True ? LU_SYSCALL(stat(PyBytes_AS_STRING(path), &st))
+                               : LU_SYSCALL(lstat(PyBytes_AS_STRING(path), &st));
+    Py_DECREF(path);
     if (r < 0) {
         set_oserror(errno, args[0]);
         return NULL;
@@ -273,13 +279,14 @@ lu_prim_os_fstat(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 PyObject *
 lu_prim_os_listdir(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const char *path = nargs == 1 ? path_arg(args[0]) : NULL;
+    PyObject *path = nargs == 1 ? path_bytes(args[0]) : NULL;
     if (path == NULL) {
         return NULL;
     }
-    DIR *dir = LU_SYSCALL(opendir(path));
+    DIR *dir = LU_SYSCALL(opendir(PyBytes_AS_STRING(path)));
     if (dir == NULL) {
         set_oserror(errno, args[0]);
+        Py_DECREF(path);
         return NULL;
     }
     PyObject *names = PyList_New(0);
@@ -305,6 +312,7 @@ lu_prim_os_listdir(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         Py_DECREF(name);
     }
     LU_SYSCALL(closedir(dir));
+    Py_DECREF(path);
     return names;
 }
 
@@ -313,20 +321,23 @@ PyObject *
 lu_prim_os_open(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     long flags, mode;
-    const char *path = nargs == 3 ? path_arg(args[0]) : NULL;
+    PyObject *path = nargs == 3 ? path_bytes(args[0]) : NULL;
     if (path == NULL || int_arg(args[1], &flags) < 0 || int_arg(args[2], &mode) < 0) {
+        Py_XDECREF(path);
         return NULL;
     }
     int fd;
     do {
-        fd = LU_SYSCALL(open(path, (int)flags | O_CLOEXEC, (mode_t)mode));
+        fd = LU_SYSCALL(open(PyBytes_AS_STRING(path), (int)flags | O_CLOEXEC, (mode_t)mode));
     } while (fd < 0 && interrupted());
     if (fd < 0) {
         if (!PyErr_Occurred()) {
             set_oserror(errno, args[0]);
         }
+        Py_DECREF(path);
         return NULL;
     }
+    Py_DECREF(path);
     return PyLong_FromLong(fd);
 }
 
@@ -335,13 +346,16 @@ static PyObject *
 path_call(PyObject *const *args, Py_ssize_t nargs, int which)
 {
     long mode = 0777;
-    const char *path = nargs >= 1 ? path_arg(args[0]) : NULL;
+    PyObject *path = nargs >= 1 ? path_bytes(args[0]) : NULL;
     if (path == NULL || (which == 0 && (nargs != 2 || int_arg(args[1], &mode) < 0))
         || (which != 0 && nargs != 1)) {
+        Py_XDECREF(path);
         return NULL;
     }
-    int r = which == 0 ? LU_SYSCALL(mkdir(path, (mode_t)mode))
-        : which == 1 ? LU_SYSCALL(rmdir(path)) : LU_SYSCALL(unlink(path));
+    int r = which == 0 ? LU_SYSCALL(mkdir(PyBytes_AS_STRING(path), (mode_t)mode))
+        : which == 1 ? LU_SYSCALL(rmdir(PyBytes_AS_STRING(path)))
+        : LU_SYSCALL(unlink(PyBytes_AS_STRING(path)));
+    Py_DECREF(path);
     if (r < 0) {
         set_oserror(errno, args[0]);
         return NULL;
@@ -384,12 +398,13 @@ prim_os_cpu_count(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyObject *
 prim_os_rename(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const char *src = nargs == 2 ? path_arg(args[0]) : NULL;
-    const char *dst = src != NULL ? path_arg(args[1]) : NULL;
+    PyObject *src = nargs == 2 ? path_bytes(args[0]) : NULL;
+    PyObject *dst = src != NULL ? path_bytes(args[1]) : NULL;
     if (dst == NULL) {
+        Py_XDECREF(src);
         return NULL;
     }
-    if (LU_SYSCALL(rename(src, dst)) < 0) {
+    if (LU_SYSCALL(rename(PyBytes_AS_STRING(src), PyBytes_AS_STRING(dst))) < 0) {
         int err = errno;
         PyObject *a[5] = { PyLong_FromLong(err), PyUnicode_FromString(strerror(err)), args[0], Py_None, args[1] };
         PyObject *exc = a[0] != NULL && a[1] != NULL ? lu_call(PyExc_OSError, a, 5, NULL) : NULL;
@@ -399,8 +414,12 @@ prim_os_rename(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
             PyErr_SetObject((PyObject *)Py_TYPE(exc), exc);
             Py_DECREF(exc);
         }
+        Py_DECREF(src);
+        Py_DECREF(dst);
         return NULL;
     }
+    Py_DECREF(src);
+    Py_DECREF(dst);
     return Py_NewRef(Py_None);
 }
 
@@ -739,32 +758,40 @@ prim_os_call(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
             continue;
         }
         union sys_arg a[6];
+        PyObject *paths[6] = { NULL, NULL, NULL, NULL, NULL, NULL };
         PyObject *filename = NULL;
-        if ((size_t)nargs != strlen(e->spec) + 1) {
+        int failed = (size_t)nargs != strlen(e->spec) + 1;
+        if (failed) {
             lu_err_format(PyExc_TypeError, "%s takes %zu arguments", name, strlen(e->spec));
-            return NULL;
         }
-        for (Py_ssize_t i = 0; i < nargs - 1; i++) {
+        for (Py_ssize_t i = 0; !failed && i < nargs - 1; i++) {
             if (e->spec[i] == 'p') {
                 filename = filename != NULL ? filename : args[i + 1];
-                if ((a[i].p = path_arg(args[i + 1])) == NULL) {
-                    return NULL;
+                failed = (paths[i] = path_bytes(args[i + 1])) == NULL;
+                if (!failed) {
+                    a[i].p = PyBytes_AS_STRING(paths[i]);
                 }
             }
             else if (int_arg(args[i + 1], &a[i].i) < 0) {
-                return NULL;
+                failed = 1;
             }
         }
-        if (e->thread_scoped) {
-            lu_task_pin_for_life();
+        long r = 0;
+        if (!failed) {
+            if (e->thread_scoped) {
+                lu_task_pin_for_life();
+            }
+            errno = 0;
+            r = e->fn(a);
+            failed = r < 0 && errno != 0;
+            if (failed) {
+                set_oserror(errno, filename);
+            }
         }
-        errno = 0;
-        long r = e->fn(a);
-        if (r < 0 && errno != 0) {
-            set_oserror(errno, filename);
-            return NULL;
+        for (Py_ssize_t i = 0; i < 6; i++) {
+            Py_XDECREF(paths[i]);
         }
-        return PyLong_FromLong(r);
+        return failed ? NULL : PyLong_FromLong(r);
     }
     lu_err_format(PyExc_ValueError, "no such call: %s", name);
     return NULL;
@@ -774,12 +801,13 @@ prim_os_call(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyObject *
 prim_os_readlink(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const char *path = nargs == 1 ? path_arg(args[0]) : NULL;
+    PyObject *path = nargs == 1 ? path_bytes(args[0]) : NULL;
     char buf[4096];
     if (path == NULL) {
         return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "readlink(path)"), NULL);
     }
-    ssize_t n = LU_SYSCALL(readlink(path, buf, sizeof buf - 1));
+    ssize_t n = LU_SYSCALL(readlink(PyBytes_AS_STRING(path), buf, sizeof buf - 1));
+    Py_DECREF(path);
     if (n < 0) {
         set_oserror(errno, args[0]);
         return NULL;
@@ -877,12 +905,18 @@ prim_os_uname(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyObject *
 prim_os_putenv(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const char *name = nargs == 2 ? path_arg(args[0]) : NULL;
-    const char *value = name != NULL && args[1] != Py_None ? path_arg(args[1]) : NULL;
+    PyObject *name = nargs == 2 ? path_bytes(args[0]) : NULL;
+    PyObject *value = name != NULL && args[1] != Py_None ? path_bytes(args[1]) : NULL;
     if (name == NULL || (args[1] != Py_None && value == NULL)) {
+        Py_XDECREF(name);
+        Py_XDECREF(value);
         return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "putenv(name, value)"), NULL);
     }
-    if ((value != NULL ? setenv(name, value, 1) : unsetenv(name)) < 0) {
+    int r = value != NULL ? setenv(PyBytes_AS_STRING(name), PyBytes_AS_STRING(value), 1)
+                          : unsetenv(PyBytes_AS_STRING(name));
+    Py_DECREF(name);
+    Py_XDECREF(value);
+    if (r < 0) {
         set_oserror(errno, NULL);
         return NULL;
     }
@@ -893,13 +927,14 @@ prim_os_putenv(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyObject *
 prim_os_scandir(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const char *path = nargs == 1 ? path_arg(args[0]) : NULL;
+    PyObject *path = nargs == 1 ? path_bytes(args[0]) : NULL;
     if (path == NULL) {
         return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "scandir(path)"), NULL);
     }
-    DIR *dir = LU_SYSCALL(opendir(path));
+    DIR *dir = LU_SYSCALL(opendir(PyBytes_AS_STRING(path)));
     if (dir == NULL) {
         set_oserror(errno, args[0]);
+        Py_DECREF(path);
         return NULL;
     }
     PyObject *entries = PyList_New(0);
@@ -930,6 +965,7 @@ prim_os_scandir(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         Py_DECREF(entry);
     }
     LU_SYSCALL(closedir(dir));
+    Py_DECREF(path);
     return entries;
 }
 
@@ -997,27 +1033,30 @@ prim_os_poll(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyObject *
 prim_os_execve(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const char *path = nargs == 3 ? path_arg(args[0]) : NULL;
+    PyObject *path = nargs == 3 ? path_bytes(args[0]) : NULL;
     char **argv, **envp;
     if (path == NULL) {
         return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "execve(path, argv, env)"), NULL);
     }
     if (bytes_array(args[1], &argv) < 0 || argv == NULL) {
+        Py_DECREF(path);
         return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "execve(path, argv, env)"), NULL);
     }
     if (bytes_array(args[2], &envp) < 0) {
         PyMem_RawFree(argv);
+        Py_DECREF(path);
         return NULL;
     }
     if (envp != NULL) {
-        execve(path, argv, envp);
+        execve(PyBytes_AS_STRING(path), argv, envp);
     }
     else {
-        execv(path, argv);
+        execv(PyBytes_AS_STRING(path), argv);
     }
     set_oserror(errno, args[0]);
     PyMem_RawFree(argv);
     PyMem_RawFree(envp);
+    Py_DECREF(path);
     return NULL;
 }
 
@@ -1654,8 +1693,10 @@ prim_os_fork_exec(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     sp.gid = (gid_t)gid;
     sp.uid = (uid_t)uid;
     sp.umask = (int)umask_;
-    sp.cwd = args[4] == Py_None ? NULL : path_arg(args[4]);
+    PyObject *cwd = args[4] == Py_None ? NULL : path_bytes(args[4]);
+    sp.cwd = cwd != NULL ? PyBytes_AS_STRING(cwd) : NULL;
     if ((args[4] != Py_None && sp.cwd == NULL) || bytes_array(args[0], &sp.argv) < 0) {
+        Py_XDECREF(cwd);
         return NULL;
     }
     PyObject *result = NULL;
@@ -1720,6 +1761,7 @@ prim_os_fork_exec(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         result = PyLong_FromLong(pid);
     }
 done:
+    Py_XDECREF(cwd);
     PyMem_RawFree(sp.argv);
     PyMem_RawFree(sp.exec_array);
     PyMem_RawFree(sp.envp);

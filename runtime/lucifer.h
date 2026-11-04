@@ -969,6 +969,7 @@ PyObject *lu_weakref_get(PyObject *ref);
 PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
 void lu_capsule_init(void);
+int lu_fileobject_init(void);
 void lu_storage_init(void);
 void lu_module_init(void);
 void lu_exc_init(void);

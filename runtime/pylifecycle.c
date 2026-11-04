@@ -245,7 +245,8 @@ boot_native(struct _is *interp)
     }
     interp->builtins = Py_NewRef(PyModule_GetDict(builtins));
     interp->sysdict = Py_NewRef(PyModule_GetDict(sys));
-    if (lu_types_init(interp) < 0 || add_builtins(interp->builtins) < 0 || lu_cc_init() < 0) {
+    if (lu_types_init(interp) < 0 || lu_fileobject_init() < 0
+        || add_builtins(interp->builtins) < 0 || lu_cc_init() < 0) {
         Py_DECREF(builtins);
         Py_DECREF(sys);
         return -1;

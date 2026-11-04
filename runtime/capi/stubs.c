@@ -205,14 +205,9 @@ LU_STUB void PyException_SetArgs(PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyE
 LU_STUB void PyException_SetCause(PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyException_SetCause"); }
 LU_STUB void PyException_SetContext(PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyException_SetContext"); }
 LU_STUB int PyException_SetTraceback(PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyException_SetTraceback"); }
-LU_STUB PyObject * PyFile_FromFd(int, const char *, const char *, int, const char *, const char *, const char *, int) { LU_UNIMPLEMENTED("PyFile_FromFd"); }
-LU_STUB PyObject * PyFile_GetLine(PyObject *, int) { LU_UNIMPLEMENTED("PyFile_GetLine"); }
-LU_STUB PyObject * PyFile_NewStdPrinter(int) { LU_UNIMPLEMENTED("PyFile_NewStdPrinter"); }
 LU_STUB PyObject * PyFile_OpenCode(const char *utf8path) { LU_UNIMPLEMENTED("PyFile_OpenCode"); }
 LU_STUB PyObject * PyFile_OpenCodeObject(PyObject *path) { LU_UNIMPLEMENTED("PyFile_OpenCodeObject"); }
 LU_STUB int PyFile_SetOpenCodeHook(Py_OpenCodeHookFunction hook, void *userData) { LU_UNIMPLEMENTED("PyFile_SetOpenCodeHook"); }
-LU_STUB int PyFile_WriteObject(PyObject *, PyObject *, int) { LU_UNIMPLEMENTED("PyFile_WriteObject"); }
-LU_STUB int PyFile_WriteString(const char *, PyObject *) { LU_UNIMPLEMENTED("PyFile_WriteString"); }
 LU_STUB double PyFloat_AsDouble(PyObject*) { LU_UNIMPLEMENTED("PyFloat_AsDouble"); }
 LU_STUB PyObject* PyFloat_FromDouble(double) { LU_UNIMPLEMENTED("PyFloat_FromDouble"); }
 LU_STUB PyObject* PyFloat_FromString(PyObject*) { LU_UNIMPLEMENTED("PyFloat_FromString"); }
@@ -495,7 +490,6 @@ LU_STUB long PyOS_strtol(const char *, char **, int) { LU_UNIMPLEMENTED("PyOS_st
 LU_STUB unsigned long PyOS_strtoul(const char *, char **, int) { LU_UNIMPLEMENTED("PyOS_strtoul"); }
 LU_STUB int PyOS_vsnprintf(char *str, size_t size, const char *format, va_list va) { LU_UNIMPLEMENTED("PyOS_vsnprintf"); }
 LU_STUB PyObject * PyObject_ASCII(PyObject *) { LU_UNIMPLEMENTED("PyObject_ASCII"); }
-LU_STUB int PyObject_AsFileDescriptor(PyObject *) { LU_UNIMPLEMENTED("PyObject_AsFileDescriptor"); }
 LU_STUB PyObject * PyObject_Bytes(PyObject *) { LU_UNIMPLEMENTED("PyObject_Bytes"); }
 LU_STUB PyObject * PyObject_Call(PyObject *callable, PyObject *args, PyObject *kwargs) { LU_UNIMPLEMENTED("PyObject_Call"); }
 LU_STUB void PyObject_CallFinalizer(PyObject *) { LU_UNIMPLEMENTED("PyObject_CallFinalizer"); }
@@ -814,7 +808,6 @@ LU_STUB PyObject* PyUnicode_EncodeLocale(PyObject *unicode, const char *errors) 
 LU_STUB int PyUnicode_Equal(PyObject *str1, PyObject *str2) { LU_UNIMPLEMENTED("PyUnicode_Equal"); }
 LU_STUB int PyUnicode_EqualToUTF8(PyObject *, const char *) { LU_UNIMPLEMENTED("PyUnicode_EqualToUTF8"); }
 LU_STUB int PyUnicode_EqualToUTF8AndSize(PyObject *, const char *, Py_ssize_t) { LU_UNIMPLEMENTED("PyUnicode_EqualToUTF8AndSize"); }
-LU_STUB int PyUnicode_FSConverter(PyObject*, void*) { LU_UNIMPLEMENTED("PyUnicode_FSConverter"); }
 LU_STUB int PyUnicode_FSDecoder(PyObject*, void*) { LU_UNIMPLEMENTED("PyUnicode_FSDecoder"); }
 LU_STUB Py_ssize_t PyUnicode_Fill(PyObject *unicode, Py_ssize_t start, Py_ssize_t length, Py_UCS4 fill_char) { LU_UNIMPLEMENTED("PyUnicode_Fill"); }
 LU_STUB Py_ssize_t PyUnicode_Find(PyObject *str, PyObject *substr, Py_ssize_t start, Py_ssize_t end, int direction) { LU_UNIMPLEMENTED("PyUnicode_Find"); }
@@ -971,12 +964,9 @@ LU_STUB void Py_SetPythonHome(const wchar_t *) { LU_UNIMPLEMENTED("Py_SetPythonH
 LU_STUB void Py_SetRecursionLimit(int) { LU_UNIMPLEMENTED("Py_SetRecursionLimit"); }
 #undef Py_TYPE
 LU_STUB PyTypeObject* Py_TYPE(PyObject *ob) { LU_UNIMPLEMENTED("Py_TYPE"); }
-LU_STUB char * Py_UniversalNewlineFgets(char *, int, FILE*, PyObject *) { LU_UNIMPLEMENTED("Py_UniversalNewlineFgets"); }
 LU_STUB PyObject * Py_VaBuildValue(const char *, va_list) { LU_UNIMPLEMENTED("Py_VaBuildValue"); }
 #undef Py_XNewRef
 LU_STUB PyObject* Py_XNewRef(PyObject *obj) { LU_UNIMPLEMENTED("Py_XNewRef"); }
-LU_STUB int Py_fclose(FILE *file) { LU_UNIMPLEMENTED("Py_fclose"); }
-LU_STUB FILE* Py_fopen(PyObject *path, const char *mode) { LU_UNIMPLEMENTED("Py_fopen"); }
 LU_STUB int _PyArg_ParseTupleAndKeywordsFast(PyObject *, PyObject *, struct _PyArg_Parser *, ...) { LU_UNIMPLEMENTED("_PyArg_ParseTupleAndKeywordsFast"); }
 LU_STUB int _PyBytes_Resize(PyObject **, Py_ssize_t) { LU_UNIMPLEMENTED("_PyBytes_Resize"); }
 LU_STUB int _PyCode_CheckLineNumber(int lasti, PyCodeAddressRange *bounds) { LU_UNIMPLEMENTED("_PyCode_CheckLineNumber"); }
