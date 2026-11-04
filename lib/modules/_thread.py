@@ -318,6 +318,7 @@ class _local:
 _state = lock()
 _running = 0
 _non_daemon = []
+_live = {}                      # the handles of threads that have not finished, by id
 _stack_size = 0
 _STACK_MIN = 53248              # _PyOS_MIN_STACK_SIZE + SYSTEM_PAGE_SIZE
 
@@ -339,6 +340,8 @@ def _run(function, args, kwargs, handle):
             _running -= 1
             if handle is not None and handle in _non_daemon:
                 _non_daemon.remove(handle)
+            if handle is not None:
+                _live.pop(id(handle), None)
         if handle is not None:
             handle._set_done()
 
@@ -355,6 +358,8 @@ def _spawn(function, args, kwargs, handle):
             _running -= 1
             if handle is not None and handle in _non_daemon:
                 _non_daemon.remove(handle)
+            if handle is not None:
+                _live.pop(id(handle), None)
         if handle is not None:
             handle._set_done()
         raise
@@ -398,6 +403,7 @@ returned that can be used to wait for the thread to finish."""
         if handle._started:
             raise RuntimeError('thread already started')
         handle._started = True
+        _live[id(handle)] = handle
         _lucifer.mutex_acquire(handle._done, 0)
         if not daemon:
             _non_daemon.append(handle)
@@ -516,7 +522,23 @@ def _make_thread_handle(ident):
     """Internal only. Make a thread handle for threads not spawned by the _thread module."""
     handle = _ThreadHandle(ident, True)
     _lucifer.mutex_acquire(handle._done, 0)
+    _live[id(handle)] = handle
     return handle
+
+
+def _after_fork():
+    """In the child of a fork the other threads are gone: their handles are done, and the
+bookkeeping locks are new. The surviving thread keeps its own handle, running."""
+    global _state, _running
+    me = get_ident()
+    _state = lock()
+    for handle in list(_live.values()):
+        if handle._ident != me:
+            if not handle._exited:
+                handle._set_done()
+            del _live[id(handle)]
+    _non_daemon[:] = []
+    _running = 0
 
 
 def _shutdown():

@@ -314,6 +314,12 @@ lu_task_leave(struct lu_task *t)
 }
 
 void
+lu_task_pin_for_life(void)
+{
+    lu_current_task()->pinned_for_life = 1;
+}
+
+void
 lu_task_delete(struct lu_task *t)
 {
     struct lu_carrier *c = t->carrier;

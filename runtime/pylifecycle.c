@@ -18,6 +18,7 @@
 #include "marshal.h"
 
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -398,19 +399,25 @@ new_main(struct _is *interp, const wchar_t *path, const char *loader_class)
     return err ? NULL : main;
 }
 
-/* Runs code as __main__. loader_class is NULL for -c and standard input,
-   which have no file. */
+/* What follows the main code's activation: the exit status of its result. */
 static int
-run_main_code(struct _is *interp, PyObject *code, const wchar_t *path, const char *loader_class)
+finish_main(PyObject *result)
 {
-    PyObject *main = new_main(interp, path, loader_class);
-    PyObject *result = main != NULL ? PyEval_EvalCode(code, PyModule_GetDict(main), PyModule_GetDict(main)) : NULL;
     flush_io();
     if (result == NULL) {
         return report_uncaught();
     }
     Py_DECREF(result);
     return 0;
+}
+
+/* Runs code as __main__. loader_class is NULL for -c and standard input,
+   which have no file. */
+static int
+run_main_code(struct _is *interp, PyObject *code, const wchar_t *path, const char *loader_class)
+{
+    PyObject *main = new_main(interp, path, loader_class);
+    return finish_main(main != NULL ? PyEval_EvalCode(code, PyModule_GetDict(main), PyModule_GetDict(main)) : NULL);
 }
 
 /* The program the config names: -c's command, a file (source or .pyc), or
@@ -484,6 +491,12 @@ Py_InitializeFromConfig(const PyConfig *src)
         return status;
     }
     interp->config = config;
+    if (config.install_signal_handlers) {
+        /* init_signals: a write to a closed pipe or past a file size limit fails with EPIPE or
+           EFBIG, as OSError, instead of killing the process. */
+        signal(SIGPIPE, SIG_IGN);
+        signal(SIGXFSZ, SIG_IGN);
+    }
     __atomic_store_n(&_PyRuntime.finalizing, 0, __ATOMIC_RELAXED);
     if (lu_hash_secret_init(config.use_hash_seed, config.hash_seed) < 0) {
         return PyStatus_Error("_Py_HashRandomization_Init: failed to get random numbers to initialize Python");
@@ -608,6 +621,12 @@ Py_FinalizeEx(void)
     return status;
 }
 
+static int
+finalize_status(int status)
+{
+    return Py_FinalizeEx() < 0 && status == 0 ? 120 : status;
+}
+
 /* Modules/main.c: run the file the config names, then finalize. */
 int
 Py_RunMain(void)
@@ -619,10 +638,13 @@ Py_RunMain(void)
     int status = run_program(interp, program, path);
     PyMem_Free(program);
     PyMem_Free(path);
-    if (Py_FinalizeEx() < 0 && status == 0) {
-        status = 120;
-    }
-    return status;
+    return finalize_status(status);
+}
+
+void
+lu_main_finished(PyObject *result)
+{
+    exit(finalize_status(finish_main(result)));
 }
 
 int

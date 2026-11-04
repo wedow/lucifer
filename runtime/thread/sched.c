@@ -138,7 +138,11 @@ run_loop(struct lu_carrier *c, struct lu_task *waiting)
             /* Nothing runs here, so nothing reads storage this carrier has
                retired: free what it can before sleeping. */
             if (c->qsbr.queue.first < c->qsbr.queue.n) {
+                /* Under the scheduler lock, which os.fork takes: a fork never finds this carrier
+                   in the middle of a free. */
+                pthread_mutex_lock(&_PyRuntime.sched.lock.mutex);
                 lu_qsbr_process(c);
+                pthread_mutex_unlock(&_PyRuntime.sched.lock.mutex);
             }
             lu_carrier_sleep(c, seq);
             continue;
@@ -159,6 +163,9 @@ run_loop(struct lu_carrier *c, struct lu_task *waiting)
             commit(t);
         }
         else if (c == t->home) {
+            if (_PyRuntime.sched.orphaned) {
+                lu_main_finished(result);
+            }
             if (t != waiting) {
                 Py_FatalError("lucifer: a task finished on a home carrier that is not waiting for it");
             }
