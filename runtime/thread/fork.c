@@ -132,7 +132,7 @@ child_after_fork(struct _is *interp, struct lu_task *self)
     self->ts.native_thread_id = lu_carrier->native_id;
     lu_carrier->scheduled = 0;
     lu_carrier->runq_head = lu_carrier->runq_tail = NULL;
-    _PyRuntime.main_thread = pthread_self();
+    _PyRuntime.main_thread = (pthread_t)self->ts.thread_id;    /* the main thread's ident: the task's */
     _PyRuntime.main_task = self;
     _PyRuntime.sched.active = 0;
     _PyRuntime.sched.carriers[0] = _PyRuntime.sched.carriers[1] = NULL;
