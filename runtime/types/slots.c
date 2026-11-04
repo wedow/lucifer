@@ -29,11 +29,36 @@ lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t nargs)
 /* vectorcall_method/lookup_maybe_method: the special method of self's
    type, bound unless it is a plain function or a kernel descriptor, then
    called with self first. */
+static int is_slot_thunk(void *f);
+
+/* _PyType_Lookup, except that a slot wrapper of one of these thunks is passed
+   over for the next type of the MRO that has the name. C code subclasses a
+   builtin by copying its slots (NumPy's bytes_ takes PyBytes_Type.tp_richcompare);
+   the copied thunk would find the subclass's wrapper of itself and never end. */
+static PyObject *
+lookup_past_thunks(PyTypeObject *tp, PyObject *name)
+{
+    PyObject *descr = _PyType_Lookup(tp, name);
+    while (descr != NULL && Py_IS_TYPE(descr, &PyWrapperDescr_Type)
+           && is_slot_thunk(((PyWrapperDescrObject *)descr)->d_wrapped)) {
+        PyObject *mro = tp->tp_mro;
+        Py_ssize_t n = PyTuple_GET_SIZE(mro), i = 0;
+        while (i < n && PyTuple_GET_ITEM(mro, i) != (PyObject *)PyDescr_TYPE(descr)) {
+            i++;
+        }
+        descr = NULL;
+        for (i++; i < n && descr == NULL; i++) {
+            descr = lu_ns_lookup(lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i)), name);
+        }
+    }
+    return descr;
+}
+
 static PyObject *
 call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *const *args,
                 Py_ssize_t nargs, PyObject *kwnames)
 {
-    PyObject *descr = _PyType_Lookup(tp, name);
+    PyObject *descr = lookup_past_thunks(tp, name);
     if (descr == NULL) {
         lu_err_format(PyExc_AttributeError, "'%.100s' object has no attribute '%s'",
                       Py_TYPE(self)->tp_name, PyUnicode_AsUTF8(name));
@@ -207,7 +232,7 @@ slot_tp_richcompare(PyObject *self, PyObject *other, int op)
 {
     PyObject *const names[] = { LU_ID(__lt__), LU_ID(__le__), LU_ID(__eq__), LU_ID(__ne__),
                                 LU_ID(__gt__), LU_ID(__ge__) };
-    if (_PyType_Lookup(Py_TYPE(self), names[op]) == NULL) {
+    if (lookup_past_thunks(Py_TYPE(self), names[op]) == NULL) {
         return Py_NewRef(Py_NotImplemented);
     }
     return lu_call_special(self, names[op], &other, 1);
@@ -656,6 +681,17 @@ static const struct slot slots[] = {
     SQ(sq_ass_item, slot_sq_ass_item), SQ(sq_contains, slot_sq_contains), SQ(sq_inplace_concat, NULL),
     SQ(sq_inplace_repeat, NULL),
 };
+
+static int
+is_slot_thunk(void *f)
+{
+    for (size_t i = 0; i < sizeof slots / sizeof slots[0]; i++) {
+        if (slots[i].thunk == f) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 /* The sub-structure a slot lives in, allocated for a static type on first
    use (heap types embed theirs). */
