@@ -86,8 +86,22 @@ PyErr_SetObject(PyObject *type, PyObject *value)
                 PyTuple_SET_ITEM(args, 0, Py_NewRef(value));
             }
         }
-        value = exc_new(type, args);
+        /* _PyErr_CreateException: a class defined in Python runs, so its
+           __init__ does too; a builtin exception needs no call. */
+        if (((PyTypeObject *)type)->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN) {
+            value = exc_new(type, args);
+        }
+        else {
+            value = args != NULL ? PyObject_Call(type, args, NULL) : NULL;
+            Py_XDECREF(args);
+        }
         if (value == NULL) {
+            return;
+        }
+        if (!PyExceptionInstance_Check(value)) {
+            PyErr_Format(PyExc_TypeError, "calling %R should have returned an instance of "
+                         "BaseException, not %s", type, Py_TYPE(value)->tp_name);
+            Py_DECREF(value);
             return;
         }
     }

@@ -151,3 +151,26 @@ for o in ([1, 2, 3], iter([1, 2]), 5, 'text', range(7)):
 d = ready.Delegate()
 print(hash(d) == object.__hash__(d), repr(d) == object.__repr__(d), str(d) == object.__repr__(d),
       d == d, d == ready.Delegate(), d != ready.Delegate())
+
+# PyErr_SetObject runs the exception class, so its __init__ does too
+class Resolution(TypeError):
+    def __init__(self, ufunc, dtypes=None):
+        super().__init__(ufunc)
+        self.ufunc, self.dtypes = ufunc, dtypes
+
+for value in (('add', 'f8'), 'single', ('only',)):
+    try:
+        ready.raise_object(Resolution, value)
+    except TypeError as e:
+        print(type(e).__name__, e.args, e.ufunc, e.dtypes)
+
+# PySequence_Check asks for sq_item, which mp_subscript alone does not give
+class Indexed:
+    def __getitem__(self, i): return i
+class Keyed(dict):
+    def __getitem__(self, i): return i
+class Both(list):
+    pass
+print([ready.is_sequence(o) for o in ([], (), 'a', b'', range(2), bytearray(), memoryview(b''), {}, set(), object(),
+                                       5, ready.Mapped(), ready.Vec(), Indexed(), Keyed(), Both(), ready.MyList(),
+                                       iter([]), {}.keys(), 1.5, None)])

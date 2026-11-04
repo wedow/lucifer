@@ -408,6 +408,31 @@ static PyTypeObject Delegate_Type = {
     .tp_richcompare = delegate_richcompare,
 };
 
+/* ready.Mapped: indexing through mp_subscript only, as numpy's scalars do:
+   not a sequence for PySequence_Check, which looks at sq_item. */
+static PyObject *
+mapped_subscript(PyObject *self, PyObject *key)
+{
+    return Py_NewRef(key);
+}
+
+static PyMappingMethods mapped_as_mapping = { .mp_subscript = mapped_subscript };
+
+static PyTypeObject Mapped_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.Mapped",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = PyType_GenericNew,
+    .tp_as_mapping = &mapped_as_mapping,
+};
+
+static PyObject *
+is_sequence(PyObject *self, PyObject *arg)
+{
+    return PyBool_FromLong(PySequence_Check(arg));
+}
+
 /* ready.FloatSub: a float subtype whose tp_new asks float's tp_new for the instance, as
    numpy's float64 does. */
 static PyObject *
@@ -783,6 +808,18 @@ errors(PyObject *self, PyObject *Py_UNUSED(ignored))
     return out;
 }
 
+/* ready.raise_object(type, value): PyErr_SetObject, which runs the class. */
+static PyObject *
+raise_object(PyObject *self, PyObject *args)
+{
+    PyObject *type, *value;
+    if (!PyArg_ParseTuple(args, "OO", &type, &value)) {
+        return NULL;
+    }
+    PyErr_SetObject(type, value);
+    return NULL;
+}
+
 /* Dict updates and slices. */
 
 static PyObject *
@@ -964,6 +1001,8 @@ static PyMethodDef module_methods[] = {
     { "imports", imports, METH_NOARGS, NULL },
     { "strings", strings, METH_O, NULL },
     { "errors", errors, METH_NOARGS, NULL },
+    { "raise_object", raise_object, METH_VARARGS, NULL },
+    { "is_sequence", is_sequence, METH_O, NULL },
     { "dict_ops", dict_ops, METH_NOARGS, NULL },
     { "slices", slices, METH_VARARGS, NULL },
     { "locks", locks, METH_NOARGS, NULL },
@@ -983,7 +1022,7 @@ PyInit_ready(void)
 {
     if (PyType_Ready(&Vec_Type) < 0 || PyType_Ready(&Vec3_Type) < 0 || PyType_Ready(&Locked_Type) < 0
         || PyType_Ready(&Counter_Type) < 0 || PyType_Ready(&MyList_Type) < 0 || PyType_Ready(&FloatSub_Type) < 0
-        || PyType_Ready(&Delegate_Type) < 0) {
+        || PyType_Ready(&Delegate_Type) < 0 || PyType_Ready(&Mapped_Type) < 0) {
         return NULL;
     }
     PyObject *m = PyModule_Create(&module);
@@ -994,7 +1033,8 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "Counter", (PyObject *)&Counter_Type) < 0
         || PyModule_AddObjectRef(m, "MyList", (PyObject *)&MyList_Type) < 0
         || PyModule_AddObjectRef(m, "FloatSub", (PyObject *)&FloatSub_Type) < 0
-        || PyModule_AddObjectRef(m, "Delegate", (PyObject *)&Delegate_Type) < 0) {
+        || PyModule_AddObjectRef(m, "Delegate", (PyObject *)&Delegate_Type) < 0
+        || PyModule_AddObjectRef(m, "Mapped", (PyObject *)&Mapped_Type) < 0) {
         Py_XDECREF(m);
         return NULL;
     }
