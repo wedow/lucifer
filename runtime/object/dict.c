@@ -380,23 +380,40 @@ lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t after)
     }
 }
 
-/* The entry number of an exact str or int key: -1 when absent, -2 when
-   Python must judge. */
-static Py_ssize_t
-probe_native(PyObject *d, PyObject *key)
+/* The hash of a key that needs no Python: an exact str or int, or a class
+   (object's hash, equal only to itself). 0 when Python must hash it. */
+static int
+native_hash(PyObject *key, Py_hash_t *hash)
 {
     PyTypeObject *kt = Py_TYPE(key);
-    if (kt != &PyUnicode_Type && kt != &PyLong_Type) {
+    if (kt == &PyUnicode_Type || kt == &PyLong_Type) {
+        *hash = lu_hash(key);
+    }
+    else if (kt == &PyType_Type) {
+        *hash = Py_HashPointer(key);
+    }
+    else {
+        return 0;
+    }
+    return 1;
+}
+
+/* The entry number of a native key: -1 when absent, -2 when Python must judge. */
+static Py_ssize_t
+probe_native(PyObject *d, PyObject *key, Py_hash_t *hash)
+{
+    if (!native_hash(key, hash)) {
         return -2;
     }
-    Py_ssize_t ix = lu_dict_probe((PyDictObject *)d, key, lu_hash(key), -1);
+    Py_ssize_t ix = lu_dict_probe((PyDictObject *)d, key, *hash, -1);
     return ix <= -3 ? -2 : ix;
 }
 
 int
 lu_dict_find_native(PyObject *d, PyObject *key, PyObject **value)
 {
-    Py_ssize_t ix = probe_native(d, key);
+    Py_hash_t hash;
+    Py_ssize_t ix = probe_native(d, key, &hash);
     if (ix == -2) {
         return -1;
     }
@@ -411,14 +428,15 @@ int
 lu_dict_put_native(PyObject *d, PyObject *key, PyObject *value)
 {
     int result = -1;
+    Py_hash_t hash;
     Py_BEGIN_CRITICAL_SECTION(d);
-    Py_ssize_t ix = probe_native(d, key);
+    Py_ssize_t ix = probe_native(d, key, &hash);
     if (ix >= 0) {
         lu_dict_replace((PyDictObject *)d, ix, value);
         result = 1;
     }
     else if (ix == -1) {
-        result = lu_dict_insert((PyDictObject *)d, key, lu_hash(key), value) < 0 ? -2 : 1;
+        result = lu_dict_insert((PyDictObject *)d, key, hash, value) < 0 ? -2 : 1;
     }
     Py_END_CRITICAL_SECTION();
     return result;

@@ -6,7 +6,7 @@ functions' frames, so reflection never recurses in C (DESIGN 5.2)."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_tp_name, is_subtype, kernel_set, int_add,
-    truth_exact, int_format, int_hash, str_hash, size, type_has_sequence, list_append, new_check, kernel_get,
+    truth_exact, int_format, int_hash, str_hash, size, object_hash, type_has_sequence, list_append, new_check, kernel_get,
 )
 from _lucifer import _boot
 
@@ -260,7 +260,9 @@ def hash_of(x):
         return str_hash(x)
     if t is int:
         return int_hash(x)
-    f = type_lookup(type(x), '__hash__')
+    f = type_lookup(t, '__hash__')
+    if f is not MISSING and f is type_lookup(object, '__hash__'):
+        return object_hash(x)
     if f is MISSING or f is None:
         error(TypeError, str_join('', ("unhashable type: '", _name(x), "'")))
     h = call_special(f, x)
