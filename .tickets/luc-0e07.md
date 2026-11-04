@@ -22,3 +22,7 @@ trace_opcodes_threads (timing-ratio test from the luc-2vif review) failed 2 of 5
 **2026-11-04T17:19:30Z**
 
 threads_basic's threading.local check is a runtime race, not timing: 200 rounds of a threading.local subclass with __init__ read by three new threads (the threads_basic block in a loop) raise AttributeError: 'Mine' object has no attribute 'value' in 1-3 rounds per run, on master as well as luc-sx8l. A thread's first access to the local sometimes misses the value its __init__ just set.
+
+**2026-11-04T22:03:06Z**
+
+faulthandler_later_threads: the oracle (CPython) times out under load (1 of 5 isolated runs, and once in make check); lucifer output is correct. Needs a longer oracle bound or a less timing-bound program.
