@@ -48,6 +48,7 @@ static void
 module_dealloc(PyObject *op)
 {
     PyModuleObject *m = (PyModuleObject *)op;
+    lu_clear_weakrefs(op);
     if (m->md_def != NULL && m->md_def->m_free != NULL) {
         m->md_def->m_free(op);
     }
@@ -71,6 +72,7 @@ lu_module_init(void)
     PyModule_Type.tp_traverse = module_traverse;
     PyModule_Type.tp_clear = module_clear;
     PyModule_Type.tp_dictoffset = offsetof(PyModuleObject, md_dict);
+    PyModule_Type.tp_weaklistoffset = offsetof(PyModuleObject, md_weaklist);
     PyModule_Type.tp_members = module_members;
 }
 
