@@ -305,6 +305,7 @@ struct _is {
     uint64_t next_task_id;
     int tasks_closed;           /* finalization removed the other tasks: new ones hang at attach */
     PyObject *modules;          /* sys.modules */
+    PyObject *modules_by_index; /* single-phase modules, for PyState_FindModule */
     PyObject *builtins;         /* builtins.__dict__ */
     PyObject *sysdict;          /* sys.__dict__ */
     PyObject *interned;         /* interned str -> itself */
@@ -746,6 +747,8 @@ extern LU_EXPORT union lu_runtime {
         struct lu_stress stress;
         struct lu_handoff handoff;
         unsigned int next_static_version_tag;   /* last tag of the range static types share */
+        unsigned next_static_type;      /* the interpreter state slots after the startup list */
+        PyMutex type_ready_lock;        /* PyType_Ready of a type defined outside the runtime */
         int finalizing;                 /* Py_FinalizeEx has begun */
         Py_ssize_t next_module_index;   /* the last PyModuleDef_Base.m_index given */
         PyMutex getargs_lock;           /* builds an argument parser's keyword tuple once */
@@ -946,9 +949,15 @@ extern PyTypeObject lu_method_wrapper_type;
 int lu_types_init(PyInterpreterState *interp);
 /* Fills each static type's unset slots from its bases (inherit_slots); run
    after every kernel module, as kernel classes install slots. */
-void lu_static_types_inherit(void);
+int lu_static_types_inherit(void);
 /* The type's dict: in interpreter state for static builtin types. Borrowed. */
 PyObject *lu_type_dict(PyTypeObject *tp);
+/* The doc after its introspection signature, and tp_methods / the bound
+   __new__ of a type with a tp_new into its dict (typespec.c). */
+const char *lu_doc_without_signature(const char *name, const char *doc);
+int lu_type_add_methods(PyTypeObject *tp, PyObject *dict);
+int lu_type_add_new_wrapper(PyTypeObject *tp, PyObject *dict);
+void lu_free_object(void *p);
 /* PyType_Modified: tells tp's watchers, then tp and its subclasses lose
    their version tags; only a type that has one is touched. */
 void lu_type_modified(PyTypeObject *tp);
