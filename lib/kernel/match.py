@@ -18,8 +18,12 @@ def _abc(name):
     return None if module is None else getattr(module, name)
 
 
+_TPFLAGS_SEQUENCE = 1 << 5      # what an extension type sets to match as a sequence
+_TPFLAGS_MAPPING = 1 << 6
+
+
 def match_mapping(subject):
-    if isinstance(subject, dict):
+    if isinstance(subject, dict) or type(subject).__flags__ & _TPFLAGS_MAPPING:
         return True
     abc = _abc('Mapping')
     return abc is not None and isinstance(subject, abc)
@@ -28,7 +32,7 @@ def match_mapping(subject):
 def match_sequence(subject):
     if isinstance(subject, _NOT_SEQUENCES):
         return False
-    if isinstance(subject, (list, tuple, range, memoryview)):
+    if isinstance(subject, (list, tuple, range, memoryview)) or type(subject).__flags__ & _TPFLAGS_SEQUENCE:
         return True
     deque = getattr(sys.modules.get('_collections'), 'deque', None)    # a native sequence in CPython
     if deque is not None and isinstance(subject, deque):

@@ -778,9 +778,15 @@ static void
 inherit_slots(PyTypeObject *tp, PyTypeObject *base)
 {
     LU_COPY(tp_getattro); LU_COPY(tp_setattro); LU_COPY(tp_repr); LU_COPY(tp_str);
-    LU_COPY(tp_hash); LU_COPY(tp_call); LU_COPY(tp_richcompare); LU_COPY(tp_iter);
+    LU_COPY(tp_call); LU_COPY(tp_iter);
     LU_COPY(tp_iternext); LU_COPY(tp_descr_get); LU_COPY(tp_descr_set); LU_COPY(tp_init);
     LU_COPY(tp_finalize);
+    /* tp_hash and tp_richcompare are inherited together or not at all: a type
+       that compares and does not hash is unhashable. */
+    if (tp->tp_richcompare == NULL && tp->tp_hash == NULL) {
+        tp->tp_richcompare = base->tp_richcompare;
+        tp->tp_hash = base->tp_hash;
+    }
     if (!(base == &PyBaseObject_Type && !(tp->tp_flags & Py_TPFLAGS_HEAPTYPE))) {
         LU_COPY(tp_new);
     }

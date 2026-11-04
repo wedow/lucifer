@@ -192,3 +192,26 @@ class HashedSub(ready.Unhashable):
     def __hash__(self): return 7
 print(SubU.__hash__, hash(HashedSub()))
 show(hash, SubU())
+
+# a tp_richcompare without a tp_hash does not inherit object's hash
+c = ready.CmpOnly()
+print(ready.CmpOnly.__dict__.get('__hash__', 'missing'), isinstance(c, collections.abc.Hashable))
+show(hash, c)
+class CmpSub(ready.CmpOnly):
+    pass
+class CmpHashed(ready.CmpOnly):
+    def __hash__(self): return 9
+show(hash, CmpSub())
+print(hash(CmpHashed()))
+
+# Py_TPFLAGS_SEQUENCE and Py_TPFLAGS_MAPPING decide what a pattern matches
+def kind(subject):
+    match subject:
+        case [*_]:
+            return 'sequence'
+        case {}:
+            return 'mapping'
+        case _:
+            return 'neither'
+
+print([kind(o) for o in (ready.Vec(1, 2), ready.MyList(), ready.Counter(), ready.CmpOnly(), ready.Mapped(), [1], {1: 2}, 'ab')])

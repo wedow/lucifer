@@ -419,6 +419,16 @@ static PyTypeObject Unhashable_Type = {
     .tp_richcompare = delegate_richcompare,
 };
 
+/* ready.CmpOnly: a tp_richcompare and no tp_hash, as ndarray: unhashable. */
+static PyTypeObject CmpOnly_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.CmpOnly",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_richcompare = delegate_richcompare,
+};
+
 /* ready.Mapped: indexing through mp_subscript only, as numpy's scalars do:
    not a sequence for PySequence_Check, which looks at sq_item. */
 static PyObject *
@@ -433,7 +443,7 @@ static PyTypeObject Mapped_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "ready.Mapped",
     .tp_basicsize = sizeof(PyObject),
-    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_SEQUENCE,
     .tp_new = PyType_GenericNew,
     .tp_as_mapping = &mapped_as_mapping,
 };
@@ -1036,7 +1046,8 @@ PyInit_ready(void)
     if (PyType_Ready(&Vec_Type) < 0 || PyType_Ready(&Vec3_Type) < 0 || PyType_Ready(&Locked_Type) < 0
         || PyType_Ready(&Counter_Type) < 0 || PyType_Ready(&MyList_Type) < 0 || PyType_Ready(&FloatSub_Type) < 0
         || PyType_Ready(&Delegate_Type) < 0 || PyType_Ready(&Mapped_Type) < 0
-        || PyType_Ready(&Unhashable_Type) < 0) {
+        || PyType_Ready(&Unhashable_Type) < 0
+        || PyType_Ready(&CmpOnly_Type) < 0) {
         return NULL;
     }
     PyObject *m = PyModule_Create(&module);
@@ -1049,7 +1060,8 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "FloatSub", (PyObject *)&FloatSub_Type) < 0
         || PyModule_AddObjectRef(m, "Delegate", (PyObject *)&Delegate_Type) < 0
         || PyModule_AddObjectRef(m, "Mapped", (PyObject *)&Mapped_Type) < 0
-        || PyModule_AddObjectRef(m, "Unhashable", (PyObject *)&Unhashable_Type) < 0) {
+        || PyModule_AddObjectRef(m, "Unhashable", (PyObject *)&Unhashable_Type) < 0
+        || PyModule_AddObjectRef(m, "CmpOnly", (PyObject *)&CmpOnly_Type) < 0) {
         Py_XDECREF(m);
         return NULL;
     }
