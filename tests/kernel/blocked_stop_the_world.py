@@ -55,7 +55,7 @@ sleeper = threading.Thread(target=gate.wait)
 sleeper.start()
 blocked("join", sleeper.join, gate.set)
 
-blocked("sleep", lambda: time.sleep(0.7), lambda: None)
+blocked("sleep", lambda: time.sleep(2.5), lambda: None)
 
 r, w = os.pipe()
 blocked("pipe read", lambda: os.read(r, 1), lambda: os.write(w, b"x"))
@@ -74,7 +74,7 @@ def poll_wait():
 
 blocked("poll", poll_wait, lambda: os.write(w3, b"x"))
 
-proc = subprocess.Popen(["sleep", "0.7"])
+proc = subprocess.Popen(["sleep", "2.5"])
 blocked("waitpid", lambda: os.waitpid(proc.pid, 0), lambda: None)
 
 path = "/tmp/lucifer-blocked-stw.%d" % os.getpid()
@@ -86,7 +86,7 @@ blocked("flock", lambda: fcntl.flock(fd2, fcntl.LOCK_EX), lambda: fcntl.flock(fd
 a, b = socket.socketpair()
 blocked("socket recv", lambda: a.recv(1), lambda: b.send(b"x"))
 
-time.sleep(0.3)                                    # let them all block
+time.sleep(0.6)                                    # let them all block
 alive = sum(t.is_alive() for t, _ in release)
 for i in range(3):
     gc.collect()

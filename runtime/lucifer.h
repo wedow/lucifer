@@ -447,6 +447,7 @@ struct lu_carrier {
     uintptr_t poll;             /* the poll word */
     uint32_t wake;              /* the futex a park sleeps on; bumped by each unpark */
     unsigned long native_id;    /* the thread's TID: a syscall, so read once */
+    pthread_t thread;           /* the carrier's thread */
     uint32_t sleeping;          /* the carrier's thread is in, or about to enter, a futex sleep on `wake` */
     struct lu_task *task;       /* the task last attached here: the thread's tstate
                                    while its state is attached */

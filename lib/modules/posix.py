@@ -398,6 +398,11 @@ def waitpid(pid, options, /):
     return _lucifer.os_waitpid(pid, options)
 
 
+def wait():
+    """Wait for completion of a child process."""
+    return waitpid(-1, 0)
+
+
 def sched_getaffinity(pid, /):
     """Return the affinity of the process identified by pid (or the current process if zero)."""
     return set(_lucifer.os_sched_getaffinity(pid))

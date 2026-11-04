@@ -53,6 +53,9 @@ will block until another thread unlocks it.  Deadlocks may ensue."""
 
     __slots__ = ('_mutex', '__weakref__')
 
+    def __init_subclass__(cls, **kwargs):
+        raise TypeError("type '_thread.lock' is not an acceptable base type")
+
     def __init__(self):
         self._mutex = _lucifer.mutex_new()
 
@@ -104,7 +107,10 @@ allocate_lock = allocate = lock
 class RLock:
     """Lock that can be acquired multiple times by the same thread."""
 
-    __slots__ = ('_block', '_owner', '_count')
+    __slots__ = ('_block', '_owner', '_count', '__weakref__')
+
+    def __init_subclass__(cls, **kwargs):
+        raise TypeError("type '_thread.RLock' is not an acceptable base type")
 
     def __init__(self):
         self._block = lock()
