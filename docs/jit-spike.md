@@ -31,7 +31,8 @@ other machines).
     `func_version` and cell contents.
 - **Inlining** of kernel and user functions with known identity, with the
   callee's frame state chained to its caller's.
-  - Kernel module globals fold to constants.
+  - Kernel module globals fold to constants, except those a kernel function
+    rebinds (`global`), which are guarded as user globals are.
   - Primitives become IR: `float_add` becomes `ADD_F`, `m_sqrt` becomes
     `SQRT_F`, `size` becomes a load of `ob_size`, and `type_lookup` on an
     immutable type becomes a constant.
@@ -80,10 +81,10 @@ other machines).
 |---|---|
 | `make check` (JIT on, default thresholds) | pass (536/536 kernel checks) |
 | `make abi-audit`, `make check-compiler` | pass |
-| difftest, default / `always` / `always` + `deopt:7` | 164/164 each |
+| difftest, default / `always` / `always` + `deopt:7` | 164/164 each; `make check-jit` runs the last two |
 | `make check-jit`: AWFY Sieve, Bounce, NBody, Richards against the oracle in off, on, always, deopt:7 | 16/16 |
 | `tests/kernel/jit_loops.py` (exits of every kind), `jit_threads.py` (global, method and attribute changed by another thread mid-loop) | pass in all three modes |
-| `check-kernel LANE=jit` / `LANE=jit-deopt` | 530/536 and 533/536 in the full run; two fixes after it (cleared function versions, polls that see the monitoring version) pass `invalidate` and `threads_basic` on a rerun of the failing programs, which leaves 4 and 2: luc-efyg (tracing mid-loop, interrupt at a call's return, a frame-depth read) |
+| `check-kernel LANE=jit` / `LANE=jit-deopt` | pass; `make check` runs both (`check-kernel-jit`). The last failures were a call from compiled code that did not poll after it (an interrupt at a call's return), an inlined call that skipped its `RESUME` (tracing turned on just before it), and kernel globals a kernel function rebinds folded to their compile-time value |
 
 AddressSanitizer found most of the builder bugs; the three test programs run
 clean under it.
@@ -234,7 +235,5 @@ The top runtime symbols for each:
    both the kernel and the JIT. The three C folds then go away.
 6. Recompile on a hot side exit or a newly warm site. Use per-call-site argument
    types as feedback.
-7. luc-efyg: the four `always`-lane programs (tracing on the same task
-   mid-loop, an interrupt at a call's return, a frame-depth read).
-8. Background compilation, a perf jitdump, and dependency invalidation that
+7. Background compilation, a perf jitdump, and dependency invalidation that
    removes in-line version guards (DESIGN 6.2 steps 1, 4 and 7).
