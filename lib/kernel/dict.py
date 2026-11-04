@@ -319,11 +319,12 @@ def merge_kwargs(d, update, fname):
     for key in mapping_keys(update):
         if not kind(key, 'str'):
             error(TypeError, 'keywords must be strings')
+        value = operators.getitem(update, key)
         if type(key) is not str:
             key = str_join('', (key,))      # a str subclass's keyword is its exact text
         if contains(d, key):
             error(TypeError, _cat(fname, " got multiple values for keyword argument '", key, "'"))
-        setitem(d, key, operators.getitem(update, key))
+        setitem(d, key, value)
 
 
 def update_op(d, update):

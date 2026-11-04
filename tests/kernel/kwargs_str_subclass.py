@@ -25,3 +25,12 @@ try:
     g(1, **{1: 5})
 except TypeError as e:
     print(e)
+
+
+class Hashed(str):
+    """A key the dict finds only as itself: its hash is not the str's."""
+    def __hash__(self):
+        return 1
+
+
+print(f(1, **{Hashed('x'): 2}), g(1, **{Hashed('b'): 7}), dict(**{Hashed('k'): 3}))
