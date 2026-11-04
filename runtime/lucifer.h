@@ -887,6 +887,13 @@ lu_try_incref_shared(PyObject *op)
     }
 }
 
+/* A reference to op, if it is alive (_Py_TryIncref). */
+static inline int
+lu_try_incref(PyObject *op)
+{
+    return lu_try_incref_fast(op) || lu_try_incref_shared(op);
+}
+
 /* A reference to op, if it is alive and *src still points to it. */
 static inline int
 lu_try_incref_compare(PyObject **src, PyObject *op)
@@ -910,6 +917,21 @@ lu_try_xget_ref(PyObject **ptr)
 {
     PyObject *value = _Py_atomic_load_ptr(ptr);
     return value != NULL && lu_try_incref_compare(ptr, value) ? value : NULL;
+}
+
+/* _PyObject_SetMaybeWeakref: op is about to be reachable through a weak
+   reference, so its shared count is nonzero and a try-incref from another
+   thread can succeed while the owner holds it. */
+static inline void
+lu_set_maybe_weakref(PyObject *op)
+{
+    if (_Py_IsImmortal(op)) {
+        return;
+    }
+    Py_ssize_t shared = _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared);
+    while ((shared & _Py_REF_SHARED_FLAG_MASK) == 0
+           && !_Py_atomic_compare_exchange_ssize(&op->ob_ref_shared, &shared, shared | _Py_REF_MAYBE_WEAKREF)) {
+    }
 }
 
 /* Py_NewRef under the container's lock: marks an object another thread owns

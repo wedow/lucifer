@@ -5,9 +5,10 @@
    ReferenceType methods on.
 
    A list is guarded by the striped mutex of its referent's address. A
-   reference reaches its referent only through weakref_get, which counts it
-   alive while its refcount is above zero; that is exact until threads start,
-   and then wants the free-threaded try-incref of the biased counts. */
+   reference reaches its referent only through lu_weakref_get, a try-incref
+   under that mutex, so a thread never takes a reference to an object whose
+   owner is freeing it. A referent and its references are marked maybe-weakref
+   when linked, which keeps their shared count nonzero. */
 
 #include "interp/exceptions.h"
 #include "prim/prim.h"
@@ -59,7 +60,7 @@ _PyWeakref_ClearRef(PyWeakReference *ref)
         PyMutex_Lock(m);
         if (ref->wr_object == ob) {
             unlink_ref(ref);
-            ref->wr_object = Py_None;
+            __atomic_store_n(&ref->wr_object, Py_None, __ATOMIC_RELEASE);
             PyMutex_Unlock(m);
             return;
         }
@@ -122,9 +123,8 @@ lu_clear_weakrefs(PyObject *ob)
     PyMutex_Lock(m);
     PyObject *calls = PyList_New(0);
     for (PyWeakReference *ref = *head; ref != NULL; ref = ref->wr_next) {
-        ref->wr_object = Py_None;
-        if (ref->wr_callback != NULL && calls != NULL && Py_REFCNT(ref) > 0) {
-            Py_INCREF(ref);
+        __atomic_store_n(&ref->wr_object, Py_None, __ATOMIC_RELEASE);
+        if (ref->wr_callback != NULL && calls != NULL && lu_try_incref((PyObject *)ref)) {
             lu_list_append(calls, (PyObject *)ref);
             Py_DECREF(ref);
         }
@@ -163,8 +163,7 @@ lu_weakref_new(PyTypeObject *type, PyObject *ob, PyObject *callback)
         PyMutex_Lock(lock);
         PyWeakReference *basic = *head;
         if (basic != NULL && basic->wr_callback == NULL && Py_TYPE(basic) == &_PyWeakref_RefType
-            && Py_REFCNT(basic) > 0) {
-            Py_INCREF(basic);
+            && lu_try_incref((PyObject *)basic)) {
             PyMutex_Unlock(lock);
             return (PyObject *)basic;
         }
@@ -177,6 +176,8 @@ lu_weakref_new(PyTypeObject *type, PyObject *ob, PyObject *callback)
     ref->wr_object = ob;
     ref->wr_callback = Py_XNewRef(callback);
     ref->hash = -1;
+    lu_set_maybe_weakref(ob);
+    lu_set_maybe_weakref((PyObject *)ref);
     PyMutex_Lock(lock);
     PyWeakReference *first = *head;
     int basic = callback == NULL && type == &_PyWeakref_RefType;
@@ -214,7 +215,10 @@ prim_weakref_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 #define REF(i) (nargs == 1 && PyObject_TypeCheck(args[0], &_PyWeakref_RefType) \
     ? (PyWeakReference *)args[0] : (lu_err_format(PyExc_TypeError, "a weak reference is needed"), NULL))
 
-/* A new reference to the referent of the weak reference `ref`, NULL once it is dead. */
+/* A new reference to the referent of the weak reference `ref`, NULL once it is dead
+   (_PyWeakref_GET_REF): under the referent's stripe, a try-incref, which fails once its
+   last strong reference has gone. The owner of a referent whose count is zero is
+   deallocating it, so a try-incref would revive it: that is dead too. */
 PyObject *
 lu_weakref_get(PyObject *ref)
 {
@@ -224,8 +228,11 @@ lu_weakref_get(PyObject *ref)
     }
     PyMutex *m = stripe(ob);
     PyMutex_Lock(m);
-    ob = ((PyWeakReference *)ref)->wr_object;
-    PyObject *result = ob != Py_None && Py_REFCNT(ob) > 0 ? Py_NewRef(ob) : NULL;
+    PyObject *result = NULL;
+    if (((PyWeakReference *)ref)->wr_object != Py_None
+        && !(_Py_IsOwnedByCurrentThread(ob) && ob->ob_ref_local == 0) && lu_try_incref(ob)) {
+        result = ob;
+    }
     PyMutex_Unlock(m);
     return result;
 }
@@ -284,8 +291,9 @@ prim_weakrefs_of(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyMutex *lock = stripe(args[0]);
     PyMutex_Lock(lock);
     for (PyWeakReference *ref = *head; ref != NULL; ref = ref->wr_next) {
-        if (Py_REFCNT(ref) > 0) {
+        if (lu_try_incref((PyObject *)ref)) {
             lu_list_append(list, (PyObject *)ref);
+            Py_DECREF(ref);
         }
     }
     PyMutex_Unlock(lock);
