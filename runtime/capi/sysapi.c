@@ -7,7 +7,6 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 
 #undef Py_CompileString
@@ -121,7 +120,7 @@ PyThread_get_thread_ident(void)
 unsigned long
 PyThread_get_thread_native_id(void)
 {
-    return (unsigned long)syscall(SYS_gettid);
+    return (unsigned long)gettid();
 }
 
 Py_tss_t *

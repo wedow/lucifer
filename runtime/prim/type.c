@@ -842,29 +842,6 @@ lu_static_types_inherit(void)
    lock does: two interpreters importing one extension ready the same shared
    struct exactly once. */
 
-/* The interpreter state array slot for a foreign static type; the index is
-   claimed once, process-wide (type_ready_lock held). */
-static int
-claim_static_slot(PyTypeObject *tp, size_t *slot)
-{
-    if (tp->tp_subclasses != NULL) {
-        *slot = (size_t)tp->tp_subclasses - 1;      /* readied somewhere else */
-        return 0;
-    }
-    if (_PyRuntime.next_static_type == 0) {
-        for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
-            _PyRuntime.next_static_type++;
-        }
-    }
-    if (_PyRuntime.next_static_type >= LU_MAX_STATIC_TYPES) {
-        lu_err_format(PyExc_SystemError, "more than %d static builtin types", LU_MAX_STATIC_TYPES);
-        return -1;
-    }
-    *slot = _PyRuntime.next_static_type++;
-    tp->tp_subclasses = (PyObject *)(*slot + 1);
-    return 0;
-}
-
 static int ready_type(PyTypeObject *tp, PyTypeObject *base, struct lu_static_type_state *state);
 
 static int
@@ -889,7 +866,9 @@ ready_foreign(PyTypeObject *tp)
         }
         return ready_type(tp, base, NULL);
     }
-    tp->tp_flags |= Py_TPFLAGS_IMMUTABLETYPE | _Py_TPFLAGS_STATIC_BUILTIN;
+    /* A static extension type keeps its dict and MRO in itself, as in CPython: only the
+       runtime's own types use the interpreter's table, which is for a fixed few. */
+    tp->tp_flags |= Py_TPFLAGS_IMMUTABLETYPE;
     if (tp->tp_base == NULL) {
         tp->tp_base = &PyBaseObject_Type;
     }
@@ -906,12 +885,7 @@ ready_foreign(PyTypeObject *tp)
     if (Py_IS_TYPE(tp, NULL)) {
         Py_SET_TYPE(tp, Py_TYPE(base));
     }
-    lu_set_immortal((PyObject *)tp);        /* the dict that holds it never counts */
-    size_t slot;
-    if (claim_static_slot(tp, &slot) < 0) {
-        return -1;
-    }
-    return ready_type(tp, base, &PyInterpreterState_Get()->static_types[slot]);
+    return ready_type(tp, base, NULL);
 }
 
 /* What type_ready does after the registration differs by kind: a static
@@ -1073,7 +1047,7 @@ ready_type(PyTypeObject *tp, PyTypeObject *base, struct lu_static_type_state *st
     /* tp_new: a static type with no tp_new on object cannot be instantiated
        (type_ready_set_new); any other came with the slots above. */
     if (tp->tp_new == NULL) {
-        if (state != NULL && base == &PyBaseObject_Type) {
+        if (!(tp->tp_flags & Py_TPFLAGS_HEAPTYPE) && base == &PyBaseObject_Type) {
             tp->tp_flags |= Py_TPFLAGS_DISALLOW_INSTANTIATION;
         }
         else if (base->tp_new != NULL) {
