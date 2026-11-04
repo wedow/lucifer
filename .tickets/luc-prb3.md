@@ -12,3 +12,9 @@ assignee: Greg Wedow
 
 CPython's signal_install_handlers ignores SIGPIPE and SIGXFSZ at init; lucifer leaves them at SIG_DFL, so getsignal(SIGPIPE) is 1 on the oracle and 0 here, and a write to a closed pipe kills the process instead of raising BrokenPipeError. Found by GLM during luc-sgn1.
 
+
+## Notes
+
+**2026-11-04T09:32:32Z**
+
+Fixed on branch luc-c702 (SIGPIPE ignored at startup); close when c702 merges. Check SIGXFSZ too.
