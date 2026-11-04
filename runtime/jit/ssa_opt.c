@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static lu_v *fwd;
+static __thread lu_v *fwd;      /* the pass in progress on this thread */
 
 static lu_v
 resolve(lu_v v)

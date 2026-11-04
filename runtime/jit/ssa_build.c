@@ -1582,6 +1582,10 @@ call(struct ctx *c)
     PyObject *bound;
     PyFunctionObject *fn = call_target(c, callable, &bound);
     const char *prim = primitive_name(kc);
+    if (kc != NULL && PyCFunction_Check(kc) && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_FRAME)) {
+        unsupported(c);         /* it hands the interpreter a frame to run */
+        return -1;
+    }
     lu_v r = LU_NOV;
     int rown = 1;
     if (fn != NULL && bound == NULL) {

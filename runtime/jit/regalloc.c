@@ -154,7 +154,7 @@ struct interval {
     int crosses;
 };
 
-static int *istart, *iend;
+static __thread int *istart, *iend;     /* the allocation in progress on this thread */
 
 static void
 extend(struct lu_func *f, lu_v v, int pos)

@@ -387,7 +387,11 @@ stack_low(void)
 static PyObject *
 h_call(PyObject **argv, intptr_t n)
 {
-    if (stack_low()) {
+    if (stack_low()
+        || (Py_IS_TYPE(argv[0], &PyCFunction_Type)
+            && (((PyCFunctionObject *)argv[0])->m_ml->ml_flags & LU_METH_FRAME))) {
+        /* Too deep to recurse, or a primitive that hands the interpreter a
+           frame to run (a generator's resumption): the interpreter calls it. */
         return LU_JIT_DECLINED;
     }
     struct lu_task *t = (struct lu_task *)PyThreadState_Get();
