@@ -43,6 +43,7 @@ as_int(PyObject *op)
 static int
 signed_value(PyObject *op, long long min, long long max, long long *value, int *overflow)
 {
+    *overflow = 0;
     PyObject *v = as_int(op);
     if (v == NULL) {
         return -1;
@@ -50,7 +51,6 @@ signed_value(PyObject *op, long long min, long long max, long long *value, int *
     unsigned long long m = 0;
     int neg, big = magnitude(v, &m, &neg);
     Py_DECREF(v);
-    *overflow = 0;
     if (big || (!neg && m > (unsigned long long)max) || (neg && m > 0ULL - (unsigned long long)min)) {
         *overflow = neg ? -1 : 1;
         return -1;
@@ -60,12 +60,12 @@ signed_value(PyObject *op, long long min, long long max, long long *value, int *
 }
 
 static long long
-as_signed(PyObject *op, long long min, long long max, const char *ctype)
+as_signed(PyObject *op, long long min, long long max, const char *too_large)
 {
     long long value = -1;
     int overflow;
     if (signed_value(op, min, max, &value, &overflow) < 0 && overflow) {
-        PyErr_Format(PyExc_OverflowError, "Python int too large to convert to C %s", ctype);
+        PyErr_SetString(PyExc_OverflowError, too_large);
         return -1;
     }
     return value;
@@ -74,26 +74,26 @@ as_signed(PyObject *op, long long min, long long max, const char *ctype)
 long
 PyLong_AsLong(PyObject *op)
 {
-    return (long)as_signed(op, LONG_MIN, LONG_MAX, "long");
+    return (long)as_signed(op, LONG_MIN, LONG_MAX, "Python int too large to convert to C long");
 }
 
 long long
 PyLong_AsLongLong(PyObject *op)
 {
-    return as_signed(op, LLONG_MIN, LLONG_MAX, "long long");
+    return as_signed(op, LLONG_MIN, LLONG_MAX, "int too big to convert");
 }
 
 int
 PyLong_AsInt(PyObject *op)
 {
-    return (int)as_signed(op, INT_MIN, INT_MAX, "int");
+    return (int)as_signed(op, INT_MIN, INT_MAX, "Python int too large to convert to C int");
 }
 
 /* The fixed-width conversions return 0 and store through value, or -1 with an error. */
 static int
-fixed(PyObject *op, long long min, long long max, const char *ctype, long long *out)
+fixed(PyObject *op, long long min, long long max, const char *too_large, long long *out)
 {
-    *out = as_signed(op, min, max, ctype);
+    *out = as_signed(op, min, max, too_large);
     return *out == -1 && PyErr_Occurred() ? -1 : 0;
 }
 
@@ -101,7 +101,7 @@ int
 PyLong_AsInt32(PyObject *op, int32_t *value)
 {
     long long v = 0;
-    int r = fixed(op, INT32_MIN, INT32_MAX, "int32_t", &v);
+    int r = fixed(op, INT32_MIN, INT32_MAX, "Python int too large to convert to C int32_t", &v);
     *value = (int32_t)v;
     return r;
 }
@@ -110,7 +110,7 @@ int
 PyLong_AsInt64(PyObject *op, int64_t *value)
 {
     long long v = 0;
-    int r = fixed(op, INT64_MIN, INT64_MAX, "int64_t", &v);
+    int r = fixed(op, INT64_MIN, INT64_MAX, "Python int too large to convert to C int64_t", &v);
     *value = (int64_t)v;
     return r;
 }
@@ -138,9 +138,11 @@ PyLong_AsLongLongAndOverflow(PyObject *op, int *overflow)
     return as_signed_overflow(op, overflow);
 }
 
-/* The unsigned value of an int (not of an __index__ object), exact in range. */
+/* The unsigned value of an int (not of an __index__ object), exact in range;
+   the errors name the C type as each CPython conversion does. */
 static unsigned long long
-as_unsigned(PyObject *op, unsigned long long max, const char *ctype)
+as_unsigned(PyObject *op, unsigned long long max, PyObject *neg_type, const char *negative,
+            const char *too_large)
 {
     if (op == NULL || !PyLong_Check(op)) {
         if (op != NULL) {
@@ -154,11 +156,11 @@ as_unsigned(PyObject *op, unsigned long long max, const char *ctype)
     unsigned long long m = 0;
     int neg, big = magnitude(op, &m, &neg);
     if (neg && m != 0) {
-        PyErr_SetString(PyExc_OverflowError, "can't convert negative value to unsigned int");
+        PyErr_SetString(neg_type, negative);
         return (unsigned long long)-1;
     }
     if (big || m > max) {
-        PyErr_Format(PyExc_OverflowError, "Python int too large to convert to C %s", ctype);
+        PyErr_SetString(PyExc_OverflowError, too_large);
         return (unsigned long long)-1;
     }
     return m;
@@ -167,29 +169,33 @@ as_unsigned(PyObject *op, unsigned long long max, const char *ctype)
 unsigned long
 PyLong_AsUnsignedLong(PyObject *op)
 {
-    return (unsigned long)as_unsigned(op, ULONG_MAX, "unsigned long");
+    return (unsigned long)as_unsigned(op, ULONG_MAX, PyExc_OverflowError,
+                                      "can't convert negative value to unsigned int",
+                                      "Python int too large to convert to C unsigned long");
 }
 
 unsigned long long
 PyLong_AsUnsignedLongLong(PyObject *op)
 {
-    return as_unsigned(op, ULLONG_MAX, "unsigned long long");
+    return as_unsigned(op, ULLONG_MAX, PyExc_OverflowError, "can't convert negative int to unsigned",
+                       "int too big to convert");
 }
 
 size_t
 PyLong_AsSize_t(PyObject *op)
 {
-    return (size_t)as_unsigned(op, SIZE_MAX, "size_t");
+    return (size_t)as_unsigned(op, SIZE_MAX, PyExc_OverflowError, "can't convert negative value to size_t",
+                               "Python int too large to convert to C size_t");
 }
 
 static int
-fixed_unsigned(PyObject *op, unsigned long long max, const char *ctype, unsigned long long *out)
+fixed_unsigned(PyObject *op, unsigned long long max, const char *too_large, unsigned long long *out)
 {
     PyObject *v = as_int(op);
     if (v == NULL) {
         return -1;
     }
-    *out = as_unsigned(v, max, ctype);
+    *out = as_unsigned(v, max, PyExc_ValueError, "Cannot convert negative int", too_large);
     Py_DECREF(v);
     return *out == (unsigned long long)-1 && PyErr_Occurred() ? -1 : 0;
 }
@@ -198,7 +204,7 @@ int
 PyLong_AsUInt32(PyObject *op, uint32_t *value)
 {
     unsigned long long v = 0;
-    int r = fixed_unsigned(op, UINT32_MAX, "uint32_t", &v);
+    int r = fixed_unsigned(op, UINT32_MAX, "Python int too large to convert to C uint32_t", &v);
     *value = (uint32_t)v;
     return r;
 }
@@ -207,7 +213,7 @@ int
 PyLong_AsUInt64(PyObject *op, uint64_t *value)
 {
     unsigned long long v = 0;
-    int r = fixed_unsigned(op, UINT64_MAX, "uint64_t", &v);
+    int r = fixed_unsigned(op, UINT64_MAX, "Python int too large to convert to C uint64_t", &v);
     *value = (uint64_t)v;
     return r;
 }
@@ -249,7 +255,7 @@ PyLong_AsUnsignedLongLongMask(PyObject *op)
 void *
 PyLong_AsVoidPtr(PyObject *op)
 {
-    long long v = as_signed(op, LLONG_MIN, LLONG_MAX, "long long");
+    long long v = as_signed(op, LLONG_MIN, LLONG_MAX, "int too big to convert");
     if (v == -1 && PyErr_Occurred() && PyErr_ExceptionMatches(PyExc_OverflowError)) {
         PyErr_Clear();
         return (void *)(uintptr_t)PyLong_AsUnsignedLongLong(op);
@@ -260,8 +266,12 @@ PyLong_AsVoidPtr(PyObject *op)
 double
 PyLong_AsDouble(PyObject *op)
 {
-    if (op == NULL || !PyLong_Check(op)) {
+    if (op == NULL) {
         PyErr_BadInternalCall();
+        return -1.0;
+    }
+    if (!PyLong_Check(op)) {
+        PyErr_SetString(PyExc_TypeError, "an integer is required");
         return -1.0;
     }
     return lu_long_as_double(op);

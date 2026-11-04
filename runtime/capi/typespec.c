@@ -167,6 +167,28 @@ bases_tuple(PyObject *bases_in, PyType_Spec *spec)
     return PyTuple_Pack(1, (PyObject *)&PyBaseObject_Type);
 }
 
+/* The doc after its introspection signature, "Name(...)\n--\n\n", if it starts
+   with one (Objects/typeobject.c _PyType_DocWithoutSignature). */
+static const char *
+doc_without_signature(const char *name, const char *doc)
+{
+    const char *dot = strrchr(name, '.');
+    name = dot != NULL ? dot + 1 : name;
+    size_t n = strlen(name);
+    if (strncmp(doc, name, n) != 0 || doc[n] != '(') {
+        return doc;
+    }
+    for (const char *p = doc + n; *p; p++) {
+        if (strncmp(p, ")\n--\n\n", 6) == 0) {
+            return p + 6;
+        }
+        if (p[0] == '\n' && p[1] == '\n') {
+            break;
+        }
+    }
+    return doc;
+}
+
 #define REPLACED_FLAGS (Py_TPFLAGS_BASETYPE | Py_TPFLAGS_IMMUTABLETYPE \
     | Py_TPFLAGS_DISALLOW_INSTANTIATION | Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_ITEMS_AT_END \
     | Py_TPFLAGS_METHOD_DESCRIPTOR | Py_TPFLAGS_SEQUENCE | Py_TPFLAGS_MAPPING \
@@ -261,7 +283,9 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
     tp->tp_flags = (tp->tp_flags & ~(unsigned long)REPLACED_FLAGS) | (spec->flags & REPLACED_FLAGS)
         | (base->tp_flags & Py_TPFLAGS_HAVE_GC);
     tp->tp_basicsize = basicsize;
-    tp->tp_itemsize = spec->itemsize;
+    if (spec->itemsize != 0) {
+        tp->tp_itemsize = spec->itemsize;        /* 0 inherits the base's */
+    }
     tp->tp_vectorcall_offset = vectorcalloffset;
     if (weaklistoffset) {
         tp->tp_weaklistoffset = weaklistoffset;
@@ -270,6 +294,13 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
         tp->tp_dictoffset = dictoffset;
     }
     Py_XSETREF(et->ht_module, Py_XNewRef(module));
+    et->_ht_tpname = PyMem_Malloc(strlen(spec->name) + 1);   /* tp_name is the full dotted name */
+    if (et->_ht_tpname == NULL) {
+        PyErr_NoMemory();
+        goto fail;
+    }
+    strcpy(et->_ht_tpname, spec->name);
+    tp->tp_name = et->_ht_tpname;
 
     PyMemberDef *own_members = NULL;
     for (PyType_Slot *s = spec->slots; s->slot; s++) {
@@ -309,6 +340,9 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
         }
         }
     }
+    if (spec->flags & Py_TPFLAGS_DISALLOW_INSTANTIATION) {
+        tp->tp_new = NULL;
+    }
     if (tp->tp_free == NULL) {
         tp->tp_free = free_object;
     }
@@ -347,7 +381,8 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
         Py_DECREF(new);
     }
     if (doc != NULL) {
-        PyObject *d = PyUnicode_FromString(doc);
+        const char *text = doc_without_signature(spec->name, doc);
+        PyObject *d = *text != '\0' ? PyUnicode_FromString(text) : Py_NewRef(Py_None);
         if (d == NULL || PyDict_SetItemString(dict, "__doc__", d) < 0) {
             Py_XDECREF(d);
             goto fail;

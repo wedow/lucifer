@@ -291,6 +291,12 @@ prim_ext_create(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     else if (PyModule_Check(def)) {
         module = def;                   /* single-phase: PyInit_<name> returned the module */
         def = NULL;
+        /* named for its package too (_PyImport_ResolveNameWithPackageContext) */
+        PyModuleDef *md = PyModule_GetDef(module);
+        if (last != full && md != NULL && md->m_name != NULL && strcmp(md->m_name, last) == 0
+            && PyObject_SetAttrString(module, "__name__", name) < 0) {
+            Py_CLEAR(module);
+        }
     }
     else if (!Py_IS_TYPE(def, &PyModuleDef_Type)) {
         lu_err_format(PyExc_ImportError, "initialization of %s did not return a module or a "

@@ -738,8 +738,10 @@ PyDict_DelItemString(PyObject *op, const char *key)
 int
 PyDict_Contains(PyObject *op, PyObject *key)
 {
-    PyObject *args[3] = { op, key, Py_False };
-    return as_bool(lu_call_kernel(LU_K_contains, args, 3));
+    PyObject *v;
+    int r = PyDict_GetItemRef(op, key, &v);
+    Py_XDECREF(v);
+    return r;
 }
 
 int
@@ -751,14 +753,25 @@ PyDict_ContainsString(PyObject *op, const char *key)
     return r;
 }
 
+/* The dict's own lookup, as dict.get: a subclass's __getitem__ or __missing__ takes no part. */
 int
 PyDict_GetItemRef(PyObject *op, PyObject *key, PyObject **result)
 {
+    *result = NULL;
     if (dict_arg(op) == NULL) {
-        *result = NULL;
         return -1;
     }
-    return PyMapping_GetOptionalItem(op, key, result);
+    PyObject *args[3] = { op, key, LU_MISSING };
+    PyObject *v = lu_call_kernel(LU_K_dict_get, args, 3);
+    if (v == NULL) {
+        return -1;
+    }
+    if (v == LU_MISSING) {
+        Py_DECREF(v);
+        return 0;
+    }
+    *result = v;
+    return 1;
 }
 
 int

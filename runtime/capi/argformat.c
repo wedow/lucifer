@@ -23,21 +23,18 @@ type_error(struct parse *p, const char *expected, PyObject *arg)
         PyErr_SetString(PyExc_TypeError, p->message);
         return;
     }
-    PyErr_Format(PyExc_TypeError, "%.200s%s argument %d must be %.50s, not %.50s",
-                 p->fname != NULL ? p->fname : "function", p->fname != NULL ? "()" : "", p->unit,
+    PyErr_Format(PyExc_TypeError, "%.200s%sargument %d must be %.50s, not %.50s",
+                 p->fname != NULL ? p->fname : "", p->fname != NULL ? "() " : "", p->unit,
                  expected, arg == Py_None ? "None" : Py_TYPE(arg)->tp_name);
 }
 
-/* A converted integer of C type `name`, range-checked to [min, max]. */
+/* The value of an int (or __index__ object) range-checked to [min, max]; the
+   conversion's own error passes through, as getargs.c's does. */
 static int
-small_int(struct parse *p, PyObject *arg, long min, long max, const char *what, long *out)
+ranged_int(PyObject *arg, long min, long max, const char *what, long *out)
 {
     long v = PyLong_AsLong(arg);
     if (v == -1 && PyErr_Occurred()) {
-        if (PyErr_ExceptionMatches(PyExc_TypeError)) {
-            PyErr_Clear();
-            type_error(p, "int", arg);
-        }
         return -1;
     }
     if (v < min) {
@@ -50,6 +47,14 @@ small_int(struct parse *p, PyObject *arg, long min, long max, const char *what, 
     }
     *out = v;
     return 0;
+}
+
+/* A bitfield unit (B, H, I, k, K): the value modulo 2**64, both signs allowed. */
+static int
+masked_int(PyObject *arg, unsigned long long *out)
+{
+    *out = PyLong_AsUnsignedLongLongMask(arg);
+    return *out == (unsigned long long)-1 && PyErr_Occurred() ? -1 : 0;
 }
 
 static int convert_unit(struct parse *p, PyObject *arg, const char **fmt, va_list *va);
@@ -178,66 +183,61 @@ convert_unit(struct parse *p, PyObject *arg, const char **fmt, va_list *va)
     int code = *(*fmt)++;
     long v;
     switch (code) {
-    case 'b': case 'B': {
-        if (small_int(p, arg, code == 'b' ? 0 : INT_MIN, code == 'b' ? UCHAR_MAX : INT_MAX,
-                      code == 'b' ? "unsigned byte integer" : "byte", &v) < 0) {
+    case 'b':
+        if (ranged_int(arg, 0, UCHAR_MAX, "unsigned byte integer", &v) < 0) {
             return -1;
         }
         *va_arg(*va, unsigned char *) = (unsigned char)v;
         return 0;
-    }
-    case 'h': case 'H': {
-        if (small_int(p, arg, code == 'h' ? SHRT_MIN : INT_MIN, code == 'h' ? SHRT_MAX : INT_MAX,
-                      "signed short integer", &v) < 0) {
+    case 'h':
+        if (ranged_int(arg, SHRT_MIN, SHRT_MAX, "signed short integer", &v) < 0) {
             return -1;
         }
         *va_arg(*va, short *) = (short)v;
         return 0;
-    }
-    case 'i': case 'I': {
-        int x = PyLong_AsInt(arg);
-        if (x == -1 && PyErr_Occurred()) {
-            if (PyErr_ExceptionMatches(PyExc_TypeError)) {
-                PyErr_Clear();
-                type_error(p, "int", arg);
-            }
+    case 'i':
+        if (ranged_int(arg, INT_MIN, INT_MAX, "signed integer", &v) < 0) {
             return -1;
         }
-        *va_arg(*va, int *) = x;
+        *va_arg(*va, int *) = (int)v;
+        return 0;
+    case 'B': case 'H': case 'I': case 'k': case 'K': {
+        unsigned long long m;
+        if ((code == 'k' || code == 'K') && !PyIndex_Check(arg)) {
+            type_error(p, "int", arg);
+            return -1;
+        }
+        if (masked_int(arg, &m) < 0) {
+            return -1;
+        }
+        if (code == 'B') {
+            *va_arg(*va, unsigned char *) = (unsigned char)m;
+        }
+        else if (code == 'H') {
+            *va_arg(*va, unsigned short *) = (unsigned short)m;
+        }
+        else if (code == 'I') {
+            *va_arg(*va, unsigned int *) = (unsigned int)m;
+        }
+        else if (code == 'k') {
+            *va_arg(*va, unsigned long *) = (unsigned long)m;
+        }
+        else {
+            *va_arg(*va, unsigned long long *) = m;
+        }
         return 0;
     }
     case 'l': {
         long x = PyLong_AsLong(arg);
         if (x == -1 && PyErr_Occurred()) {
-            if (PyErr_ExceptionMatches(PyExc_TypeError)) {
-                PyErr_Clear();
-                type_error(p, "int", arg);
-            }
             return -1;
         }
         *va_arg(*va, long *) = x;
         return 0;
     }
-    case 'k': case 'K': {
-        if (!PyLong_Check(arg)) {
-            type_error(p, "int", arg);
-            return -1;
-        }
-        if (code == 'k') {
-            *va_arg(*va, unsigned long *) = PyLong_AsUnsignedLongMask(arg);
-        }
-        else {
-            *va_arg(*va, unsigned long long *) = PyLong_AsUnsignedLongLongMask(arg);
-        }
-        return 0;
-    }
     case 'L': {
         long long x = PyLong_AsLongLong(arg);
         if (x == -1 && PyErr_Occurred()) {
-            if (PyErr_ExceptionMatches(PyExc_TypeError)) {
-                PyErr_Clear();
-                type_error(p, "int", arg);
-            }
             return -1;
         }
         *va_arg(*va, long long *) = x;
@@ -245,15 +245,8 @@ convert_unit(struct parse *p, PyObject *arg, const char **fmt, va_list *va)
     }
     case 'n': {
         PyObject *index = _PyNumber_Index(arg);
-        if (index == NULL) {
-            if (PyErr_ExceptionMatches(PyExc_TypeError)) {
-                PyErr_Clear();
-                type_error(p, "int", arg);
-            }
-            return -1;
-        }
-        Py_ssize_t x = PyLong_AsSsize_t(index);
-        Py_DECREF(index);
+        Py_ssize_t x = index != NULL ? PyLong_AsSsize_t(index) : -1;
+        Py_XDECREF(index);
         if (x == -1 && PyErr_Occurred()) {
             return -1;
         }
@@ -263,10 +256,6 @@ convert_unit(struct parse *p, PyObject *arg, const char **fmt, va_list *va)
     case 'f': case 'd': {
         double x = PyFloat_AsDouble(arg);
         if (x == -1.0 && PyErr_Occurred()) {
-            if (PyErr_ExceptionMatches(PyExc_TypeError)) {
-                PyErr_Clear();
-                type_error(p, "float", arg);
-            }
             return -1;
         }
         if (code == 'f') {
@@ -362,7 +351,8 @@ skip_unit(const char **fmt, va_list *va)
     int code = *(*fmt)++;
     switch (code) {
     case 'b': case 'B': va_arg(*va, unsigned char *); break;
-    case 'h': case 'H': va_arg(*va, short *); break;
+    case 'h': va_arg(*va, short *); break;
+    case 'H': va_arg(*va, unsigned short *); break;
     case 'i': case 'I': case 'p': va_arg(*va, int *); break;
     case 'l': va_arg(*va, long *); break;
     case 'k': va_arg(*va, unsigned long *); break;
