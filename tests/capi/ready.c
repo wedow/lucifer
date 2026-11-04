@@ -408,6 +408,17 @@ static PyTypeObject Delegate_Type = {
     .tp_richcompare = delegate_richcompare,
 };
 
+/* ready.Unhashable: tp_hash stored as PyObject_HashNotImplemented, as numpy's ndarray does. */
+static PyTypeObject Unhashable_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.Unhashable",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_hash = PyObject_HashNotImplemented,
+    .tp_richcompare = delegate_richcompare,
+};
+
 /* ready.Mapped: indexing through mp_subscript only, as numpy's scalars do:
    not a sequence for PySequence_Check, which looks at sq_item. */
 static PyObject *
@@ -1024,7 +1035,8 @@ PyInit_ready(void)
 {
     if (PyType_Ready(&Vec_Type) < 0 || PyType_Ready(&Vec3_Type) < 0 || PyType_Ready(&Locked_Type) < 0
         || PyType_Ready(&Counter_Type) < 0 || PyType_Ready(&MyList_Type) < 0 || PyType_Ready(&FloatSub_Type) < 0
-        || PyType_Ready(&Delegate_Type) < 0 || PyType_Ready(&Mapped_Type) < 0) {
+        || PyType_Ready(&Delegate_Type) < 0 || PyType_Ready(&Mapped_Type) < 0
+        || PyType_Ready(&Unhashable_Type) < 0) {
         return NULL;
     }
     PyObject *m = PyModule_Create(&module);
@@ -1036,7 +1048,8 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "MyList", (PyObject *)&MyList_Type) < 0
         || PyModule_AddObjectRef(m, "FloatSub", (PyObject *)&FloatSub_Type) < 0
         || PyModule_AddObjectRef(m, "Delegate", (PyObject *)&Delegate_Type) < 0
-        || PyModule_AddObjectRef(m, "Mapped", (PyObject *)&Mapped_Type) < 0) {
+        || PyModule_AddObjectRef(m, "Mapped", (PyObject *)&Mapped_Type) < 0
+        || PyModule_AddObjectRef(m, "Unhashable", (PyObject *)&Unhashable_Type) < 0) {
         Py_XDECREF(m);
         return NULL;
     }

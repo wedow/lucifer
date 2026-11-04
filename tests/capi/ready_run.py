@@ -180,3 +180,15 @@ import inspect
 for f in (ready.sigfunc, ready.badsig, ready.Vec.norm2, ready.Vec(1, 2).norm2, ready.Vec.scaled):
     print(f.__name__, repr(f.__doc__), repr(f.__text_signature__))
 print(inspect.signature(ready.sigfunc), inspect.signature(ready.Vec.norm2))
+
+# tp_hash = PyObject_HashNotImplemented makes the type unhashable and __hash__ None
+import collections.abc
+u = ready.Unhashable()
+print(ready.Unhashable.__dict__.get('__hash__', 'missing'), isinstance(u, collections.abc.Hashable))
+show(hash, u)
+class SubU(ready.Unhashable):
+    pass
+class HashedSub(ready.Unhashable):
+    def __hash__(self): return 7
+print(SubU.__hash__, hash(HashedSub()))
+show(hash, SubU())
