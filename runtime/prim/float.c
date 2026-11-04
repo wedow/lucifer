@@ -1064,3 +1064,15 @@ PyMethodDef lu_prim_float_methods[] = {
     FAST(float_round), FAST(float_as_ratio), FAST(float_hex), FAST(float_fromhex),
     { NULL, NULL, 0, NULL },
 };
+
+/* float(v) for a str, bytes or other bytes-like object only. */
+PyObject *
+PyFloat_FromString(PyObject *v)
+{
+    if (!PyUnicode_Check(v) && !PyBytes_Check(v) && !PyByteArray_Check(v) && !PyObject_CheckBuffer(v)) {
+        PyErr_Format(PyExc_TypeError, "float() argument must be a string or a bytes-like object, not '%.200s'",
+                     Py_TYPE(v)->tp_name);
+        return NULL;
+    }
+    return PyObject_CallOneArg((PyObject *)&PyFloat_Type, v);
+}

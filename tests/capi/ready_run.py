@@ -1,0 +1,102 @@
+import sys
+import ready
+from ready import Vec, Vec3, Locked, Counter, MyList
+
+
+def show(f, *args):
+    try:
+        print(repr(f(*args)))
+    except BaseException as e:
+        print(type(e).__name__, e)
+
+
+# PyType_Ready: names, bases, the dict's wrappers and descriptors
+print(Vec.__name__, Vec.__module__, Vec.__qualname__, Vec.__mro__, Vec.__bases__, Vec.__base__)
+print(Vec.__doc__, Vec3.__doc__ is None, Locked.__doc__)
+for name in ('__add__', '__radd__', '__neg__', '__bool__', '__pow__', '__len__', '__getitem__', '__setitem__',
+             '__delitem__', '__contains__', '__lt__', '__eq__', '__hash__', '__call__', '__iter__', '__repr__',
+             '__new__', '__getattribute__', '__sub__', '__init__'):
+    print(name, name in Vec.__dict__, type(Vec.__dict__.get(name)).__name__)
+print(sorted(k for k in Vec.__dict__ if not k.startswith('__')))
+print(type(Vec.__dict__['sum']).__name__, type(Vec.__dict__['x']).__name__,
+      type(Vec.__dict__['norm2']).__name__, Vec.__dict__['x'].__doc__, Vec.__dict__['sum'].__doc__)
+print(Vec3.__mro__, Vec3.__base__, '__add__' in Vec3.__dict__, sorted(k for k in Vec3.__dict__ if not k.startswith('__')))
+
+# instances
+v = Vec(1, 2)
+w = Vec(3, 4)
+print(v, repr(w), v + w, -v, bool(v), bool(Vec()), len(v), v[0], v[1], list(v), list(iter(w)))
+print(v == v, v == w, v != w, v < w, v <= w, v > w, v >= w, v == 3, hash(v) == hash(Vec(1, 2)))
+print(2.0 in v, 5.0 in v, v.x, v.y, v.tag, v.sum, v.magic, v.norm2(), v.scaled(2.0), Vec.origin(), Vec.twice(21))
+print(v(1, 2, k=3), v(), pow(v, 2), pow(v, 2, 5), v.__add__(w), w.__radd__(v), Vec.__add__(v, w))
+v[0] = 10.5
+v.x = 11
+v.sum = 20
+print(v, v.sum)
+show(setattr, v, 'tag', 1)
+show(delattr, v, 'sum')
+show(lambda: v[2])
+show(lambda: v + 3)
+show(lambda: 3 + v)
+show(lambda: v < 3)
+show(Vec, 'x')
+show(Locked)
+show(Counter, 'x')
+show(lambda: Vec.__add__(3, v))
+show(lambda: Vec.__add__(v))
+show(lambda: v.__add__(w, w))
+show(lambda: v.__add__(other=w))
+show(lambda: v(1, 2)['a'])
+show(lambda: delattr(v, 'x'))
+
+# subclassing in C and in Python
+v3 = Vec3(1, 2)
+v3.z = 9
+print(v3, v3.z, v3 + v, type(v3 + v3).__name__, isinstance(v3, Vec), len(v3), v3.sum)
+
+
+class PyVec(Vec):
+    def __neg__(self):
+        return 'negated'
+
+    def norm2(self):
+        return 'overridden ' + str(super().norm2())
+
+
+p = PyVec(3, 4)
+print(p, -p, p.norm2(), p + p, type(p + p).__name__, len(p), list(p), p == PyVec(4, 3), p.__dict__)
+p.extra = 5
+print(p.extra, p.__dict__)
+
+# iteration protocol, a list subclass
+c = Counter(4)
+print(list(c), list(Counter()), next(Counter(2)), iter(c) is c)
+ml = MyList([3, 1, 2])
+ml.append(0)
+print(ml, len(ml), sorted(ml), type(ml).__mro__, isinstance(ml, list), ml + [9], ml == [3, 1, 2, 0])
+
+# capsules, imports
+print(ready.capsule_roundtrip())
+show(ready.capsule_import, 'datetime.datetime_CAPI')
+show(ready.capsule_import, 'datetime.no_such_capsule')
+show(ready.capsule_import, 'no_such_package.capsule')
+print(ready.imports())
+
+# strings
+for s in ('abc', 'h\xe9llo', 'ab€b', 'a\U0001f600b'):
+    print(ready.strings(s))
+
+# errors, dicts, slices, locks, context variables, datetime, numbers, objects
+print(ready.errors())
+print(ready.dict_ops())
+for sl, n in [(slice(None), 5), (slice(1, 4), 10), (slice(None, None, -1), 5), (slice(-2, None), 5),
+              (slice(10, 2, -3), 20), (slice(2**70, -2**70, -1), 7)]:
+    print(ready.slices(sl, n))
+show(ready.slices, slice(0, 1, 0), 5)
+show(ready.slices, slice('a', 1), 5)
+print(ready.locks())
+print(ready.contextvars())
+print(ready.datetimes())
+print(ready.numbers())
+for o in ([1, 2, 3], iter([1, 2]), 5, 'text', range(7)):
+    show(ready.objects, o)
