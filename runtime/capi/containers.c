@@ -222,6 +222,10 @@ PyDict_MergeFromSeq2(PyObject *d, PyObject *seq2, int override)
 int
 PyObject_DelItemString(PyObject *o, const char *key)
 {
+    if (o == NULL || key == NULL) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
     PyObject *k = PyUnicode_FromString(key);
     int r = k != NULL ? PyObject_DelItem(o, k) : -1;
     Py_XDECREF(k);
