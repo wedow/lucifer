@@ -791,6 +791,7 @@ extern LU_EXPORT union lu_runtime {
         struct lu_handoff handoff;
         unsigned int next_static_version_tag;   /* last tag of the range static types share */
         unsigned next_static_type;      /* the interpreter state slots after the startup list */
+        PyMutex type_lock;              /* every type's subclass list */
         PyMutex type_ready_lock;        /* PyType_Ready of a type defined outside the runtime */
         int finalizing;                 /* Py_FinalizeEx has begun */
         Py_ssize_t next_module_index;   /* the last PyModuleDef_Base.m_index given */
@@ -963,6 +964,7 @@ void lu_weakref_init(void);
 /* The referent is dying: its references go dead and their callbacks run. */
 void lu_clear_weakrefs(PyObject *ob);
 PyObject *lu_weakref_new(PyTypeObject *type, PyObject *ob, PyObject *callback);
+PyObject *lu_weakref_get(PyObject *ref);
 /* The head of ob's list of weak references, or NULL if its type has none. */
 PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);

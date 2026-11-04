@@ -1,6 +1,6 @@
 ---
 id: luc-9v1j
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-04T16:59:24Z
