@@ -111,11 +111,11 @@ class list:
 If no argument is given, the constructor creates a new empty list.
 The argument must be an iterable if specified."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         operators.check_new(cls, list)
         return list_alloc(cls)
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, /, *args, **kwargs):
         if kwargs and (type(self) is list or type_lookup(type(self), '__new__') is type_lookup(list, '__new__')):
             error(TypeError, 'list() takes no keyword arguments')
         n = size(args)

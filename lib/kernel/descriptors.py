@@ -283,7 +283,7 @@ def _wrapped_abstract(self):
 class property:
     """Property attribute."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         return alloc(cls, property)
 
     def __init__(self, fget=None, fset=None, fdel=None, doc=None):
@@ -360,7 +360,7 @@ def _wraps(wrapper, wrapped):
 class classmethod:
     """Convert a function to be a class method."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         return alloc(cls, classmethod)
 
     def __init__(self, f):
@@ -379,7 +379,7 @@ class classmethod:
 class staticmethod:
     """Convert a function to be a static method."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         return alloc(cls, staticmethod)
 
     def __init__(self, f):
@@ -443,7 +443,7 @@ super(type) -> unbound super object
 super(type, obj) -> bound super object; requires isinstance(obj, type)
 super(type, type2) -> bound super object; requires issubclass(type2, type)"""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         return alloc(cls, super)
 
     def __init__(self, cls=MISSING, obj=MISSING, /):

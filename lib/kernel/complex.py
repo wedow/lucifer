@@ -181,7 +181,7 @@ If a single number is given, convert it to a complex number.
 If the 'real' or 'imag' arguments are given, create a complex number
 with the specified real and imaginary components."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         _boot.check_new(cls, complex)
         n = size(args)
         given = n + size(kwargs)

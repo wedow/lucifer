@@ -753,7 +753,7 @@ Construct an immutable array of bytes from:
   - any object implementing the buffer API.
   - an integer"""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         if not kind(cls, 'type'):
             error(TypeError, _cat('bytes.__new__(X): X is not a type object (', _name(cls), ')'))
         if cls is not bytes:

@@ -354,7 +354,7 @@ type(name, bases, dict, **kwds) -> a new type"""
                     "__init__() should return None, not '", type_tp_name(type(res)), "'")))
         return obj
 
-    def __new__(metatype, *args, **kwargs):
+    def __new__(metatype, /, *args, **kwargs):
         n = size(args)
         if metatype is type and n == 1 and not kwargs:
             return type(_first(args))

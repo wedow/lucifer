@@ -246,7 +246,7 @@ class GenericAlias:
 For example, for t = list[int], t.__origin__ is list and t.__args__
 is (int,)."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         if kwargs:
             raise TypeError('GenericAlias() takes no keyword arguments')
         if len(args) != 2:

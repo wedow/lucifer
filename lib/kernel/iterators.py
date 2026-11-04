@@ -61,7 +61,7 @@ each of the iterables.  Stops when the shortest iterable is exhausted.
 If strict is true and one of the arguments is exhausted before the others,
 raise a ValueError."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         _boot.check_new(cls, map)
         strict = _strict_option('map', kwargs)
         if size(args) < 2:
@@ -96,7 +96,7 @@ class filter:
     """Return an iterator yielding those items of iterable for which function(item)
 is true. If function is None, return the items that are true."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         _boot.check_new(cls, filter)
         if kwargs and (cls is filter or type_lookup(cls, '__init__') is type_lookup(filter, '__init__')):
             error(TypeError, 'filter() takes no keyword arguments')
@@ -162,7 +162,7 @@ shortest argument is exhausted.
 If strict is true and one of the arguments is exhausted before the others,
 raise a ValueError."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         _boot.check_new(cls, zip)
         strict = _strict_option('zip', kwargs)
         iters = []
@@ -196,7 +196,7 @@ defaults to zero) and a value yielded by the iterable argument.
 enumerate is useful for obtaining an indexed list:
     (0, seq[0]), (1, seq[1]), (2, seq[2]), ..."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         _boot.check_new(cls, enumerate)
         if not args and not kwargs:
             error(TypeError, "enumerate() missing required argument 'iterable'")
@@ -227,7 +227,7 @@ enumerate is useful for obtaining an indexed list:
 class reversed:
     """Return a reverse iterator over the values of the given sequence."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         _boot.check_new(cls, reversed)
         if kwargs and (cls is reversed or type_lookup(cls, '__init__') is type_lookup(reversed, '__init__')):
             error(TypeError, 'reversed() takes no keyword arguments')
