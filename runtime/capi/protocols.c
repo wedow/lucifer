@@ -214,7 +214,9 @@ PyObject_HasAttr(PyObject *o, PyObject *name)
 {
     int r = PyObject_HasAttrWithError(o, name);
     if (r < 0) {
-        PyErr_Clear();
+        PyErr_FormatUnraisable(
+            "Exception ignored in PyObject_HasAttr(); consider using "
+            "PyObject_HasAttrWithError(), PyObject_GetOptionalAttr() or PyObject_GetAttr()");
         return 0;
     }
     return r;
@@ -223,6 +225,10 @@ PyObject_HasAttr(PyObject *o, PyObject *name)
 int
 PyObject_HasAttrStringWithError(PyObject *o, const char *name)
 {
+    if (o == NULL || name == NULL) {
+        null_error();
+        return -1;
+    }
     PyObject *key = PyUnicode_FromString(name);
     int r = key != NULL ? PyObject_HasAttrWithError(o, key) : -1;
     Py_XDECREF(key);
@@ -234,7 +240,10 @@ PyObject_HasAttrString(PyObject *o, const char *name)
 {
     int r = PyObject_HasAttrStringWithError(o, name);
     if (r < 0) {
-        PyErr_Clear();
+        PyErr_FormatUnraisable(
+            "Exception ignored in PyObject_HasAttrString(); consider using "
+            "PyObject_HasAttrStringWithError(), PyObject_GetOptionalAttrString() "
+            "or PyObject_GetAttrString()");
         return 0;
     }
     return r;
@@ -243,6 +252,10 @@ PyObject_HasAttrString(PyObject *o, const char *name)
 int
 PyObject_DelAttrString(PyObject *o, const char *name)
 {
+    if (o == NULL || name == NULL) {
+        null_error();
+        return -1;
+    }
     return PyObject_SetAttrString(o, name, NULL);
 }
 
@@ -274,9 +287,36 @@ PyObject_Not(PyObject *o)
 }
 
 PyObject *
-PyObject_Bytes(PyObject *o)
+PyObject_Bytes(PyObject *v)
 {
-    return o == NULL ? null_error() : call_builtin("bytes", &o, 1);
+    /* Objects/object.c PyObject_Bytes: __bytes__'s result as it is, then the
+       from-object conversion. An int is not a byte source here: that repeat
+       belongs to the bytes() constructor alone. */
+    if (v == NULL) {
+        return PyBytes_FromString("<NULL>");
+    }
+    if (PyBytes_CheckExact(v)) {
+        return Py_NewRef(v);
+    }
+    PyObject *name = PyUnicode_InternFromString("__bytes__");
+    PyObject *special = name != NULL ? _PyType_Lookup(Py_TYPE(v), name) : NULL;
+    if (special != NULL) {
+        PyObject *r = lu_call_special(v, name, NULL, 0);
+        Py_DECREF(name);
+        if (r != NULL && !PyBytes_Check(r)) {
+            PyErr_Format(PyExc_TypeError, "__bytes__ returned non-bytes (type %.200s)",
+                         Py_TYPE(r)->tp_name);
+            Py_CLEAR(r);
+        }
+        return r;
+    }
+    Py_XDECREF(name);
+    if (PyIndex_Check(v) || PyUnicode_Check(v)) {
+        PyErr_Format(PyExc_TypeError, "cannot convert '%.200s' object to bytes",
+                     Py_TYPE(v)->tp_name);
+        return NULL;
+    }
+    return call_builtin("bytes", &v, 1);
 }
 
 PyObject *
@@ -420,8 +460,9 @@ PySequence_GetItem(PyObject *s, Py_ssize_t i)
         return null_error();
     }
     if (!PySequence_Check(s)) {
+        /* only a mapping: "%.200s is not a sequence"; anything else has no indexing */
         PyErr_Format(PyExc_TypeError, Py_TYPE(s)->tp_as_mapping != NULL && Py_TYPE(s)->tp_as_mapping->mp_subscript
-                     ? "'%.200s' object does not support indexing" : "'%.200s' object is not a sequence",
+                     ? "%.200s is not a sequence" : "'%.200s' object does not support indexing",
                      Py_TYPE(s)->tp_name);
         return NULL;
     }
@@ -458,19 +499,47 @@ PySequence_GetSlice(PyObject *s, Py_ssize_t i1, Py_ssize_t i2)
     return r;
 }
 
+/* The fallthrough when s supports no item assignment: a mapping answers
+   "%.200s is not a sequence", anything else the given complaint. */
+static int
+not_a_sequence(PyObject *s, const char *what)
+{
+    PyMappingMethods *m = Py_TYPE(s)->tp_as_mapping;
+    PyErr_Format(PyExc_TypeError, m != NULL && m->mp_ass_subscript != NULL ? "%.200s is not a sequence" : what,
+                 Py_TYPE(s)->tp_name);
+    return -1;
+}
+
 int
 PySequence_SetItem(PyObject *s, Py_ssize_t i, PyObject *v)
 {
-    PyObject *index = PyLong_FromSsize_t(i);
-    int r = index != NULL ? (v != NULL ? PyObject_SetItem(s, index, v) : PyObject_DelItem(s, index)) : -1;
-    Py_XDECREF(index);
-    return r;
+    if (s == NULL) {
+        null_error();
+        return -1;
+    }
+    if (PySequence_Check(s)) {
+        PyObject *index = PyLong_FromSsize_t(i);
+        int r = index != NULL ? (v != NULL ? PyObject_SetItem(s, index, v) : PyObject_DelItem(s, index)) : -1;
+        Py_XDECREF(index);
+        return r;
+    }
+    return not_a_sequence(s, "'%.200s' object does not support item assignment");
 }
 
 int
 PySequence_DelItem(PyObject *s, Py_ssize_t i)
 {
-    return PySequence_SetItem(s, i, NULL);
+    if (s == NULL) {
+        null_error();
+        return -1;
+    }
+    if (PySequence_Check(s)) {
+        PyObject *index = PyLong_FromSsize_t(i);
+        int r = index != NULL ? PyObject_DelItem(s, index) : -1;
+        Py_XDECREF(index);
+        return r;
+    }
+    return not_a_sequence(s, "'%.200s' object doesn't support item deletion");
 }
 
 int
@@ -491,6 +560,19 @@ PySequence_DelSlice(PyObject *s, Py_ssize_t i1, Py_ssize_t i2)
 int
 PySequence_Contains(PyObject *seq, PyObject *ob)
 {
+    /* an empty sequence never compares, CPython's list_contains; a NULL
+       value in a non-empty one is the internal-argument error */
+    if (seq == NULL) {
+        null_error();
+        return -1;
+    }
+    if (ob == NULL) {
+        if (PyObject_Size(seq) == 0) {
+            return 0;
+        }
+        null_error();
+        return -1;
+    }
     PyObject *invert = Py_False;
     PyObject *args[3] = { seq, ob, invert };
     return as_bool(lu_call_kernel(LU_K_contains, args, 3));
@@ -502,46 +584,138 @@ PySequence_In(PyObject *seq, PyObject *ob)
     return PySequence_Contains(seq, ob);
 }
 
+/* The kernel's own +, +=, * and *= for a sequence: CPython's sq_concat and
+   sq_repeat slots and their nb fallbacks are the one operation there. */
 PyObject *
 PySequence_Concat(PyObject *a, PyObject *b)
 {
-    return binary(a, b, NB_ADD);
+    if (a == NULL || b == NULL) {
+        return null_error();
+    }
+    if (PySequence_Check(a)) {
+        return binary(a, b, NB_ADD);
+    }
+    PyErr_Format(PyExc_TypeError, "'%.200s' object can't be concatenated", Py_TYPE(a)->tp_name);
+    return NULL;
 }
 
 PyObject *
 PySequence_InPlaceConcat(PyObject *a, PyObject *b)
 {
-    return binary(a, b, NB_INPLACE_ADD);
+    if (a == NULL || b == NULL) {
+        return null_error();
+    }
+    if (PySequence_Check(a)) {
+        return binary(a, b, NB_INPLACE_ADD);
+    }
+    PyErr_Format(PyExc_TypeError, "'%.200s' object can't be concatenated", Py_TYPE(a)->tp_name);
+    return NULL;
 }
 
 PyObject *
 PySequence_Repeat(PyObject *a, Py_ssize_t n)
 {
-    PyObject *count = PyLong_FromSsize_t(n);
-    PyObject *r = count != NULL ? binary(a, count, NB_MULTIPLY) : NULL;
-    Py_XDECREF(count);
-    return r;
+    if (a == NULL) {
+        return null_error();
+    }
+    if (PySequence_Check(a)) {
+        PyObject *count = PyLong_FromSsize_t(n);
+        PyObject *r = count != NULL ? binary(a, count, NB_MULTIPLY) : NULL;
+        Py_XDECREF(count);
+        return r;
+    }
+    PyErr_Format(PyExc_TypeError, "'%.200s' object can't be repeated", Py_TYPE(a)->tp_name);
+    return NULL;
 }
 
 PyObject *
 PySequence_InPlaceRepeat(PyObject *a, Py_ssize_t n)
 {
-    PyObject *count = PyLong_FromSsize_t(n);
-    PyObject *r = count != NULL ? binary(a, count, NB_INPLACE_MULTIPLY) : NULL;
-    Py_XDECREF(count);
-    return r;
+    if (a == NULL) {
+        return null_error();
+    }
+    if (PySequence_Check(a)) {
+        PyObject *count = PyLong_FromSsize_t(n);
+        PyObject *r = count != NULL ? binary(a, count, NB_INPLACE_MULTIPLY) : NULL;
+        Py_XDECREF(count);
+        return r;
+    }
+    PyErr_Format(PyExc_TypeError, "'%.200s' object can't be repeated", Py_TYPE(a)->tp_name);
+    return NULL;
+}
+
+/* _PySequence_IterSearch for COUNT and INDEX: every iterable answers, not
+   only the sequences with count and index methods. */
+enum { PY_ITERSEARCH_COUNT, PY_ITERSEARCH_INDEX };
+
+static Py_ssize_t
+iter_search(PyObject *seq, PyObject *obj, int operation)
+{
+    if (seq == NULL || obj == NULL) {
+        null_error();
+        return -1;
+    }
+    PyObject *it = PyObject_GetIter(seq);
+    if (it == NULL) {
+        if (PyErr_ExceptionMatches(PyExc_TypeError)) {
+            PyErr_Format(PyExc_TypeError, "argument of type '%.200s' is not iterable",
+                         Py_TYPE(seq)->tp_name);
+        }
+        return -1;
+    }
+    Py_ssize_t n = 0;
+    PyObject *item;
+    while ((item = PyIter_Next(it)) != NULL) {
+        int cmp = PyObject_RichCompareBool(item, obj, Py_EQ);
+        Py_DECREF(item);
+        if (cmp < 0) {
+            goto Fail;
+        }
+        if (cmp > 0) {
+            if (operation == PY_ITERSEARCH_COUNT) {
+                if (n == PY_SSIZE_T_MAX) {
+                    PyErr_SetString(PyExc_OverflowError, "count exceeds C integer size");
+                    goto Fail;
+                }
+                ++n;
+            }
+            else {
+                goto Done;
+            }
+        }
+        else if (operation == PY_ITERSEARCH_INDEX) {
+            if (n == PY_SSIZE_T_MAX) {
+                PyErr_SetString(PyExc_OverflowError, "index exceeds C integer size");
+                goto Fail;
+            }
+            ++n;
+        }
+    }
+    if (PyErr_Occurred()) {
+        goto Fail;
+    }
+    if (operation == PY_ITERSEARCH_INDEX) {
+        PyErr_SetString(PyExc_ValueError, "sequence.index(x): x not in sequence");
+        goto Fail;
+    }
+Done:
+    Py_DECREF(it);
+    return n;
+Fail:
+    Py_DECREF(it);
+    return -1;
 }
 
 Py_ssize_t
 PySequence_Count(PyObject *s, PyObject *v)
 {
-    return as_ssize(call_method(s, "count", &v, 1));
+    return iter_search(s, v, PY_ITERSEARCH_COUNT);
 }
 
 Py_ssize_t
 PySequence_Index(PyObject *s, PyObject *v)
 {
-    return as_ssize(call_method(s, "index", &v, 1));
+    return iter_search(s, v, PY_ITERSEARCH_INDEX);
 }
 
 PyObject *
@@ -595,6 +769,9 @@ PyMapping_Length(PyObject *o)
 PyObject *
 PyMapping_GetItemString(PyObject *o, const char *key)
 {
+    if (o == NULL || key == NULL) {
+        return null_error();
+    }
     PyObject *k = PyUnicode_FromString(key);
     PyObject *r = k != NULL ? PyObject_GetItem(o, k) : NULL;
     Py_XDECREF(k);
@@ -604,6 +781,10 @@ PyMapping_GetItemString(PyObject *o, const char *key)
 int
 PyMapping_SetItemString(PyObject *o, const char *key, PyObject *v)
 {
+    if (o == NULL || key == NULL) {
+        null_error();
+        return -1;
+    }
     PyObject *k = PyUnicode_FromString(key);
     int r = k != NULL ? PyObject_SetItem(o, k, v) : -1;
     Py_XDECREF(k);
@@ -627,6 +808,11 @@ PyMapping_GetOptionalItem(PyObject *o, PyObject *key, PyObject **result)
 int
 PyMapping_GetOptionalItemString(PyObject *o, const char *key, PyObject **result)
 {
+    if (o == NULL || key == NULL) {
+        *result = NULL;
+        null_error();
+        return -1;
+    }
     PyObject *k = PyUnicode_FromString(key);
     int r = k != NULL ? PyMapping_GetOptionalItem(o, k, result) : (*result = NULL, -1);
     Py_XDECREF(k);
@@ -647,7 +833,9 @@ PyMapping_HasKey(PyObject *o, PyObject *key)
 {
     int r = PyMapping_HasKeyWithError(o, key);
     if (r < 0) {
-        PyErr_Clear();
+        PyErr_FormatUnraisable(
+            "Exception ignored in PyMapping_HasKey(); consider using "
+            "PyMapping_HasKeyWithError(), PyMapping_GetOptionalItem() or PyObject_GetItem()");
         return 0;
     }
     return r;
@@ -665,12 +853,17 @@ PyMapping_HasKeyStringWithError(PyObject *o, const char *key)
 int
 PyMapping_HasKeyString(PyObject *o, const char *key)
 {
-    int r = PyMapping_HasKeyStringWithError(o, key);
-    if (r < 0) {
-        PyErr_Clear();
+    PyObject *v;
+    int rc = o == NULL ? (null_error(), -1) : PyMapping_GetOptionalItemString(o, key, &v);
+    if (rc < 0) {
+        PyErr_FormatUnraisable(
+            "Exception ignored in PyMapping_HasKeyString(); consider using "
+            "PyMapping_HasKeyStringWithError(), PyMapping_GetOptionalItemString() "
+            "or PyMapping_GetItemString()");
         return 0;
     }
-    return r;
+    Py_XDECREF(v);
+    return rc;
 }
 
 static PyObject *
@@ -702,18 +895,27 @@ dict_own_list(PyObject *o, const char *method)
 PyObject *
 PyMapping_Keys(PyObject *o)
 {
+    if (o == NULL) {
+        return null_error();
+    }
     return mapping_list(o, "keys");
 }
 
 PyObject *
 PyMapping_Values(PyObject *o)
 {
+    if (o == NULL) {
+        return null_error();
+    }
     return mapping_list(o, "values");
 }
 
 PyObject *
 PyMapping_Items(PyObject *o)
 {
+    if (o == NULL) {
+        return null_error();
+    }
     return mapping_list(o, "items");
 }
 
