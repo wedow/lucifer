@@ -412,12 +412,14 @@ add_bytes(PyWideStringList *list, const char *text)
     return status;
 }
 
-/* argv for -c and for a program read from standard input: ["-c" or "", rest...]. */
+/* argv for -c, -m and for a program read from standard input:
+   ["-c", "-m" or "", rest...]. */
 static PyStatus
 set_command_argv(PyConfig *config, wchar_t **rest, Py_ssize_t count)
 {
     PyWideStringList argv = { 0, NULL };
-    PyStatus status = PyWideStringList_Append(&argv, config->run_command != NULL ? L"-c" : L"");
+    PyStatus status = PyWideStringList_Append(&argv, config->run_command != NULL ? L"-c"
+                                              : config->run_module != NULL ? L"-m" : L"");
     for (Py_ssize_t k = 0; !PyStatus_Exception(status) && k < count; k++) {
         status = PyWideStringList_Append(&argv, rest[k]);
     }
@@ -494,11 +496,10 @@ parse_cmdline(PyConfig *config)
                 c = value + strlen(value) - 1;         /* the value ends the argument */
                 break;
             }
-            case 'm':
-                PyMem_Free(arg);
-                return usage_error(config, "-m needs runpy, which Lucifer does not have yet");
-            case 'c': {
-                /* The command is the rest of this argument or the next one, and ends the options. */
+            case 'c':
+            case 'm': {
+                /* The command or module is the rest of this argument or the next one, and ends the options. */
+                int is_module = *c == 'm';
                 const char *command = c[1] != '\0' ? c + 1 : NULL;
                 char *next = NULL;
                 if (command == NULL && i + 1 < argc) {
@@ -507,7 +508,8 @@ parse_cmdline(PyConfig *config)
                 }
                 if (command == NULL) {
                     PyMem_Free(arg);
-                    return usage_error(config, "Argument expected for the -c option");
+                    return usage_error(config, is_module ? "Argument expected for the -m option"
+                                                         : "Argument expected for the -c option");
                 }
                 wchar_t *w = Py_DecodeLocale(command, NULL);
                 PyMem_Free(next);
@@ -515,7 +517,7 @@ parse_cmdline(PyConfig *config)
                 if (w == NULL) {
                     return PyStatus_NoMemory();
                 }
-                status = PyConfig_SetString(config, &config->run_command, w);
+                status = PyConfig_SetString(config, is_module ? &config->run_module : &config->run_command, w);
                 PyMem_RawFree(w);
                 if (!PyStatus_Exception(status)) {
                     status = set_command_argv(config, argv + i + 1, argc - i - 1);
@@ -803,6 +805,10 @@ compute_sys_path_0(PyConfig *config)
 {
     if (config->safe_path || config->sys_path_0 != NULL || !config->parse_argv) {
         return PyStatus_Ok();
+    }
+    if (config->run_module != NULL) {
+        char cwd[PATH_MAX];                 /* -m puts the working directory first */
+        return PyConfig_SetBytesString(config, &config->sys_path_0, getcwd(cwd, sizeof cwd) ? cwd : "");
     }
     if (config->run_command != NULL || config->run_filename == NULL || wcscmp(config->run_filename, L"-") == 0) {
         return PyConfig_SetString(config, &config->sys_path_0, L"");
