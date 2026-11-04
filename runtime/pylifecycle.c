@@ -593,15 +593,17 @@ Py_FinalizeEx(void)
     /* Before the daemon threads stop: the streams' locks are Python locks, which a daemon
        stopped for good inside a write would hold for ever. */
     int status = flush_std_files();
+    /* From here a join of a thread that has not finished raises PythonFinalizationError, so the
+       __del__ of what only cycles held cannot hang on a daemon thread (gh-130402). */
+    __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     finalize_modules(interp);
-    lu_gc_collect_shutdown(PyThreadState_Get());      /* __del__ of what only cycles held */
+    lu_gc_collect_shutdown(PyThreadState_Get());
     flush_std_stream("stdout");
     flush_std_stream("stderr");
     PyErr_Clear();
     lu_sched_stop();
     /* What is left are daemon threads: they hang when they next attach. */
     lu_task_shutdown_others(interp);
-    __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     release_interpreter(interp);
     return status;
 }

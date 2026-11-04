@@ -5,6 +5,7 @@ carrier of its own (DESIGN 5.7); _lucifer.thread_start runs a function in it.
 """
 
 import _lucifer
+from sys import is_finalizing as _is_finalizing
 
 TIMEOUT_MAX = 9223372036.0
 _NAME_MAXLEN = 15
@@ -96,13 +97,8 @@ but it needn't be locked by the same thread that unlocks it."""
 LockType = lock
 
 
-def allocate_lock():
-    """Create a new lock object. See help(type(threading.Lock())) for
-information about locks."""
-    return lock()
-
-
-allocate = allocate_lock
+# A builtin, not a function: kept as a class attribute it does not bind (test_thread.LockTests).
+allocate_lock = allocate = lock
 
 
 class RLock:
@@ -492,6 +488,8 @@ class _ThreadHandle:
         return self._exited         # not the lock's state: a join holds the lock for a moment
 
     def _set_done(self):
+        if not self._started:
+            raise RuntimeError('thread not started')
         self._exited = True
         _lucifer.mutex_release(self._done)
 
@@ -501,6 +499,8 @@ class _ThreadHandle:
             raise RuntimeError('thread not started')
         if self._ident == get_ident() and not self.is_done():
             raise RuntimeError('Cannot join current thread')
+        if not self._exited and _is_finalizing():
+            raise PythonFinalizationError('cannot join thread at interpreter shutdown')
         if timeout is None:
             wait = -1
         else:
