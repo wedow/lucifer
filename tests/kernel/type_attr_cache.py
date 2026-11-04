@@ -170,22 +170,28 @@ for name, how in (('x', 'set'), ('x', 'del'), ('__doc__', 'set'), ('__module__',
         delattr(Host, name)
 
 
-# Classes made and read on several threads at once each see their own
-# attributes: no two types share a version.
+# Classes read on several threads at once, each lookup giving its class a
+# new version, each see their own attributes: no two types share a version.
+# The classes are made, and their versions dropped, before the threads start.
 import threading
 
+classes = [[type('K%d_%d' % (k, r), (), {'x': (k, r)}) for r in range(400)] for k in range(8)]
+for row in classes:
+    for cls in row:
+        cls.y = 0
 mixed = []
+start = threading.Barrier(8)
 
 
-def make_classes(k):
-    for r in range(400):
-        cls = type('K%d_%d' % (k, r), (), {'x': (k, r)})
+def read_classes(k):
+    start.wait()
+    for r, cls in enumerate(classes[k]):
         obj = cls()
         if cls.x != (k, r) or obj.x != (k, r) or getattr(obj, 'x') != (k, r):
             mixed.append((k, r))
 
 
-workers = [threading.Thread(target=make_classes, args=(k,)) for k in range(8)]
+workers = [threading.Thread(target=read_classes, args=(k,)) for k in range(8)]
 for w in workers:
     w.start()
 for w in workers:
