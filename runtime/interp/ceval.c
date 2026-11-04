@@ -323,6 +323,14 @@ contains_native(PyObject *container, PyObject *item)
     return 0;
 }
 
+/* Whether instances of `tp` use object's attribute hook `id` (__getattribute__
+   or __setattr__), so that a data descriptor of the type decides the access. */
+static int
+object_attr_hook(PyTypeObject *tp, PyObject *id)
+{
+    return _PyType_Lookup(tp, id) == _PyType_Lookup(&PyBaseObject_Type, id);
+}
+
 static void
 set_function_attribute(PyFunctionObject *func, int which, PyObject *attr)
 {
@@ -1830,6 +1838,16 @@ op_LOAD_ATTR: {
     }
     getattrofunc get = Py_TYPE(owner)->tp_getattro;
     if (get == lu_slot_tp_getattro || get == PyObject_GenericGetAttr) {
+        PyObject *descr = _PyType_Lookup(Py_TYPE(owner), name), *v;
+        if (descr != NULL && object_attr_hook(Py_TYPE(owner), LU_ID(__getattribute__))
+            && lu_descr_get_native(descr, owner, &v) > 0) {
+            TOP() = v;
+            Py_DECREF(owner);
+            if (oparg & 1) {
+                PUSH(NULL);
+            }
+            DISPATCH();
+        }
         kid = get == lu_slot_tp_getattro ? LU_K_getattr : LU_K_generic_getattr;
         kargs[0] = POP();
         kargs[1] = Py_NewRef(name);
@@ -1902,6 +1920,18 @@ op_DELETE_ATTR: {
     SKIP_CACHES();
     setattrofunc set = Py_TYPE(owner)->tp_setattro;
     if (set == lu_slot_tp_setattro || set == PyObject_GenericSetAttr) {
+        PyObject *descr = _PyType_Lookup(Py_TYPE(owner), name);
+        if (descr != NULL && object_attr_hook(Py_TYPE(owner), LU_ID(__setattr__))) {
+            SAVE_FRAME();
+            int done = lu_descr_set_native(descr, owner, v);
+            if (done != 0) {
+                sp -= store ? 2 : 1;
+                Py_DECREF(owner);
+                Py_XDECREF(v);
+                ERROR_IF(done < 0);
+                DISPATCH();
+            }
+        }
         sp -= store ? 2 : 1;
         kargs[0] = owner;
         kargs[1] = Py_NewRef(name);

@@ -954,6 +954,13 @@ PyObject *lu_descr_new_classmethod(PyTypeObject *type, PyMethodDef *ml);
 PyObject *lu_descr_new_wrapper(PyTypeObject *type, PyObject *name, struct lu_kernel_def *k);
 PyObject *lu_descr_new_member(PyTypeObject *type, PyMemberDef *member);
 PyObject *lu_descr_new_getset(PyTypeObject *type, PyGetSetDef *getset);
+/* A member or native getset descriptor read or written by C alone, for an
+   instance of a type that has it: 1 done (*out a new reference when reading;
+   value NULL deletes), 0 when kernel code must decide (another kind of
+   descriptor, an unset member, a getset with no setter), -1 with an exception
+   set. */
+int lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out);
+int lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value);
 PyObject *lu_method_wrapper_new(PyObject *descr, PyObject *self);
 /* The Python function the interpreter runs for a kernel callable, and the
    self it prepends (borrowed, or NULL). NULL when callable is none. Checks

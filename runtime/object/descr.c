@@ -801,6 +801,45 @@ prim_make_function(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return NULL;
 }
 
+int
+lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out)
+{
+    PyObject *v;
+    if (Py_IS_TYPE(descr, &PyMemberDescr_Type)) {
+        v = PyMember_GetOne((const char *)obj, ((PyMemberDescrObject *)descr)->d_member);
+    }
+    else if (Py_IS_TYPE(descr, &PyGetSetDescr_Type)
+             && ((PyGetSetDescrObject *)descr)->d_getset->get != NULL
+             && ((PyGetSetDescrObject *)descr)->d_getset->get != kernel_getset_get) {
+        PyGetSetDef *def = ((PyGetSetDescrObject *)descr)->d_getset;
+        v = def->get(obj, def->closure);
+    }
+    else {
+        return 0;
+    }
+    if (v == NULL) {
+        PyErr_Clear();      /* AttributeError and __getattr__ are the kernel's */
+        return 0;
+    }
+    *out = v;
+    return 1;
+}
+
+int
+lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value)
+{
+    if (Py_IS_TYPE(descr, &PyMemberDescr_Type)) {
+        return PyMember_SetOne((char *)obj, ((PyMemberDescrObject *)descr)->d_member, value) < 0 ? -1 : 1;
+    }
+    if (Py_IS_TYPE(descr, &PyGetSetDescr_Type)) {
+        PyGetSetDef *def = ((PyGetSetDescrObject *)descr)->d_getset;
+        if (def->set != NULL && def->set != kernel_getset_set) {
+            return def->set(obj, value, def->closure) < 0 ? -1 : 1;
+        }
+    }
+    return 0;
+}
+
 /* make_getset(type, name, fget, fset or None) */
 static PyObject *
 prim_make_getset(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
