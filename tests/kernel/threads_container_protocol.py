@@ -409,7 +409,9 @@ print('list resizing', race(resize_list, [read_resizing] * 3))
 # One list iterator shared by readers, over items another thread made: the
 # first read of each takes the list's lock, which a copying thread keeps
 # contended, so a reader may park inside next(). The iterator must still hand
-# out whole items, and drop its reference to the list exactly once.
+# out whole items, and drop its reference to the list exactly once. The
+# list is the main thread's own, so its count reads exactly before the race;
+# a decrement another thread queues for merging can only make it read higher.
 
 
 def made_elsewhere(n):
@@ -423,12 +425,12 @@ def made_elsewhere(n):
 def share_iterator(rounds):
     bad = 0
     for _ in range(rounds):
-        L = made_elsewhere(300)
+        L = list(made_elsewhere(300))
         before = sys.getrefcount(L)
         it = iter(L)
         bad += sum(race(lambda: L[:], [lambda: sum(torn(v) for v in it)] * 4))
         del it
-        bad += sys.getrefcount(L) != before
+        bad += sys.getrefcount(L) < before
     return bad
 
 
