@@ -274,6 +274,55 @@ subscr_slot(PyObject *container, PyObject *sub)
     return NULL;
 }
 
+/* Whether exact dict `d` has `key`, decided without Python: 1 with *value
+   borrowed, 0 absent, -1 when `key` is not an exact str or int, or an
+   equal-hash entry needs __eq__. */
+static int
+dict_lookup_native(PyObject *d, PyObject *key, PyObject **value)
+{
+    PyTypeObject *kt = Py_TYPE(key);
+    if (!PyDict_CheckExact(d) || (kt != &PyUnicode_Type && kt != &PyLong_Type)) {
+        return -1;
+    }
+    Py_hash_t hash = lu_hash(key);
+    Py_ssize_t ix = lu_dict_probe((PyDictObject *)d, key, hash, -1);
+    if (ix <= -3) {
+        return -1;
+    }
+    if (ix < 0) {
+        return 0;
+    }
+    *value = lu_dk_value(((PyDictObject *)d)->ma_keys, ix);
+    return *value != NULL ? 1 : -1;
+}
+
+/* `item in container` for an exact dict, tuple or list, as dict_lookup_native
+   decides it: 1, 0, or -1 for the kernel. */
+static int
+contains_native(PyObject *container, PyObject *item)
+{
+    PyObject *value, **items;
+    if (PyDict_CheckExact(container)) {
+        return dict_lookup_native(container, item, &value);
+    }
+    if (PyTuple_CheckExact(container)) {
+        items = ((PyTupleObject *)container)->ob_item;
+    }
+    else if (PyList_CheckExact(container) && _Py_IsOwnedByCurrentThread(container)) {
+        items = ((PyListObject *)container)->ob_item;
+    }
+    else {
+        return -1;
+    }
+    for (Py_ssize_t i = 0; i < Py_SIZE(container); i++) {
+        int eq = items[i] == item ? 1 : lu_native_eq(items[i], item);
+        if (eq != 0) {
+            return eq;
+        }
+    }
+    return 0;
+}
+
 static void
 set_function_attribute(PyFunctionObject *func, int which, PyObject *attr)
 {
@@ -2220,6 +2269,13 @@ op_BINARY_OP: {
             Py_DECREF(right);
             DISPATCH();
         }
+        PyObject *value;
+        if (dict_lookup_native(left, right, &value) > 0) {
+            PUSH(Py_NewRef(value));
+            Py_DECREF(left);
+            Py_DECREF(right);
+            DISPATCH();
+        }
         kargs[0] = left;
         kargs[1] = right;
         nk = 2;
@@ -2284,6 +2340,15 @@ op_UNARY_INVERT: {
 op_CONTAINS_OP: {
     /* item, container -- bool; oparg 1 is `not in` */
     SKIP_CACHES();
+    int found = contains_native(sp[-1], sp[-2]);
+    if (found >= 0) {
+        PyObject *item = sp[-2], *container = sp[-1];
+        sp -= 2;
+        PUSH(Py_NewRef((found ^ oparg) ? Py_True : Py_False));
+        Py_DECREF(item);
+        Py_DECREF(container);
+        DISPATCH();
+    }
     sp -= 2;
     kargs[0] = sp[1];
     kargs[1] = sp[0];
