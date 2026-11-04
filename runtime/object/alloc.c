@@ -268,10 +268,6 @@ lu_gc_alloc(PyTypeObject *tp, size_t size, size_t presize)
     m->current_object_heap =
         &m->heaps[(tp->tp_flags & Py_TPFLAGS_PREHEADER) ? LU_HEAP_GC_PRE : LU_HEAP_GC];
     char *mem = PyObject_Malloc(presize + size);
-    llist_init(&m->page_list);
-    m->heaps[LU_HEAP_OBJECT].page_use_qsbr = true;
-    m->heaps[LU_HEAP_GC].page_use_qsbr = true;
-    m->heaps[LU_HEAP_GC_PRE].page_use_qsbr = true;
     m->current_object_heap = &m->heaps[LU_HEAP_OBJECT];
     if (mem == NULL) {
         return NULL;
