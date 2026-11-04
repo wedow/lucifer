@@ -9,7 +9,7 @@ in), and the error texts."""
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, list_append,
     repr_enter, repr_leave, is_subtype, kernel_set,
-    set_new, set_probe, set_insert, set_key, set_discard_at, set_resize,
+    set_new, set_probe, set_add_entry, set_discard_entry, set_resize,
     set_clear, set_pop, set_swap, set_merge_clean, set_info, set_hash_impl, set_reset_hash,
     set_sizeof, setiter_new, setiter_next, setiter_len, setiter_copy,
 )
@@ -27,7 +27,7 @@ next_dict_entry = _dict.next_entry
 __all__ = ()
 
 # set_info fields
-FILL, USED, MASK, FINGER, HASH, TABLE = 0, 1, 2, 3, 4, 5
+FILL, USED, MASK, FINGER, HASH = 0, 1, 2, 3, 4
 
 
 def _name(x):
@@ -75,43 +75,52 @@ def probe_hash(key):
     raise_unhashable(key, failure)
 
 
-def lookup(s, key, h, found_first):
-    """The entry index of key in s, or -1. A probe that meets a key it cannot
-    judge natively returns it, and __eq__ runs here. When the comparison
-    changed the table or the entry the probe starts over; set_add_entry
-    (found_first) accepts an equal key before it looks. judged counts the
-    candidates found unequal since the table last changed."""
-    judged = 0
+def contains_entry(s, key, h):
+    """Whether s holds a key equal to key. A probe that meets a key it cannot
+    judge natively returns it, and __eq__ runs here; judged holds the ones
+    found unequal, which the next probe passes over."""
+    judged = ()
     while True:
         r = set_probe(s, key, h, judged)
-        if r > -3:
+        if type(r) is bool:
             return r
-        cand = -3 - r
-        table = set_info(s, TABLE)
-        startkey = set_key(s, cand)
-        if startkey is MISSING:
-            judged = 0
-            continue
-        equal = True if startkey is key or startkey == key else False
-        unchanged = set_info(s, TABLE) == table and set_key(s, cand) is startkey
-        if equal and (found_first or unchanged):
-            return cand
-        judged = judged + 1 if unchanged else 0
+        cand = r[0]
+        if cand is key or cand == key:
+            return True
+        judged += (cand,)
 
 
 def add_entry(s, key, h):
-    if lookup(s, key, h, True) < 0:
-        set_insert(s, key, h)
-
-
-def contains_entry(s, key, h):
-    return lookup(s, key, h, False) >= 0
+    """set_add_entry: the probe and the commit are one critical section, so
+    a candidate is judged outside it and the commit starts over, where an
+    equal key is accepted as found."""
+    judged = ()
+    while True:
+        r = set_add_entry(s, key, h, judged)
+        if type(r) is bool:
+            return
+        cand = r[0]
+        if cand is key or cand == key:
+            return
+        judged += (cand,)
 
 
 def discard_entry(s, key, h):
-    """Whether key was in s (and is no longer)."""
-    i = lookup(s, key, h, False)
-    return i >= 0 and set_discard_at(s, i)
+    """Whether key was in s (and is no longer). A key __eq__ judged equal is
+    removed by identity; if another thread removed it first, the search starts
+    over."""
+    judged = ()
+    while True:
+        r = set_discard_entry(s, key, h, judged, False)
+        if type(r) is bool:
+            return r
+        cand = r[0]
+        if cand is key or cand == key:
+            if set_discard_entry(s, cand, h, (), True):
+                return True
+            judged = ()
+        else:
+            judged += (cand,)
 
 
 def add_key(s, key):

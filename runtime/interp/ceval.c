@@ -449,11 +449,12 @@ contains_native(PyObject *container, PyObject *item)
     int found = -1;
     if (PyAnySet_CheckExact(container)) {
         PyTypeObject *kt = Py_TYPE(item);
-        int verdict;
+        PyObject *candidate = NULL;
         if (kt != &PyUnicode_Type && kt != &PyLong_Type) {
             return -1;
         }
-        lu_set_probe((PySetObject *)container, item, lu_hash(item), 0, &verdict);
+        int verdict = lu_set_probe((PySetObject *)container, item, lu_hash(item), NULL, &candidate);
+        Py_XDECREF(candidate);
         return verdict == LU_SET_FOUND ? 1 : verdict == LU_SET_ABSENT ? 0 : -1;
     }
     if (PyDict_CheckExact(container)) {
