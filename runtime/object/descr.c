@@ -670,39 +670,10 @@ descr_get_qualname(PyObject *self, void *closure)
 /* A C function's ml_doc may start with "name(signature)\n--\n\n": the signature
    is __text_signature__ and the rest is __doc__ (typeobject.c's
    _PyType_GetDocFromInternalDoc and _PyType_GetTextSignatureFromInternalDoc). */
-#define SIGNATURE_END_MARKER ")\n--\n\n"
-
-/* The "(" opening the signature, or NULL; *end is past the marker, or NULL. */
-static const char *
-find_signature(const char *name, const char *doc, const char **end)
-{
-    const char *dot = strrchr(name, '.');
-    name = dot != NULL ? dot + 1 : name;        /* tp_name is dotted */
-    size_t skip = strlen(name);
-    *end = NULL;
-    if (doc == NULL || strncmp(doc, name, skip) != 0 || doc[skip] != '(') {
-        return NULL;
-    }
-    doc += skip;
-    for (const char *p = doc; *p; p++) {
-        if (*p == ')' && strncmp(p, SIGNATURE_END_MARKER, sizeof SIGNATURE_END_MARKER - 1) == 0) {
-            *end = p + sizeof SIGNATURE_END_MARKER - 1;
-            return doc;
-        }
-        if (*p == '\n' && p[1] == '\n') {
-            break;
-        }
-    }
-    return NULL;
-}
-
 static PyObject *
 internal_doc(const char *name, const char *doc)
 {
-    const char *end;
-    if (find_signature(name, doc, &end) != NULL) {
-        doc = end;
-    }
+    doc = doc != NULL ? lu_doc_without_signature(name, doc) : NULL;
     return doc != NULL && *doc ? PyUnicode_FromString(doc) : Py_NewRef(Py_None);
 }
 
@@ -724,10 +695,11 @@ signature_from_flags(int flags)
 static PyObject *
 text_signature(const char *name, const char *doc, int flags)
 {
-    const char *end;
-    const char *start = find_signature(name, doc, &end);
-    if (start != NULL) {
-        return PyUnicode_FromStringAndSize(start, end - start - (sizeof SIGNATURE_END_MARKER - 2));
+    const char *rest = doc != NULL ? lu_doc_without_signature(name, doc) : NULL;
+    if (rest != doc) {          /* the signature: from its "(" through the ")" of the marker */
+        const char *dot = strrchr(name, '.');
+        const char *start = doc + strlen(dot != NULL ? dot + 1 : name);
+        return PyUnicode_FromStringAndSize(start, rest - start - (sizeof ")\n--\n\n" - 2));
     }
     const char *by_flags = signature_from_flags(flags);
     return by_flags != NULL ? PyUnicode_FromString(by_flags) : Py_NewRef(Py_None);
