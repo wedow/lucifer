@@ -507,7 +507,7 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
     PyObject *callable, *kwnames, **args, **base, **to_free;
     Py_ssize_t total, npos;
     int free_self;              /* args[-1] may take a prepended self */
-    int monitored = 0;          /* the call being made is an INSTRUMENTED_CALL */
+    lu_codeunit *monitored = NULL;      /* the INSTRUMENTED_CALL making the call being made */
     /* The start of the instruction being executed and of the one before it,
        for the events that name a source (LINE, NOT_TAKEN, POP_ITER). */
     lu_codeunit *cur_instr, *prev_instr;
@@ -889,14 +889,14 @@ op_POP_TOP:
     DISPATCH();
 
 op_INSTRUMENTED_CALL_KW:
-    monitored = 1;
+    monitored = next_instr - 1;
 op_CALL_KW:
     SKIP_CACHES();
     kwnames = POP();
     goto call_stack_args;
 
 op_INSTRUMENTED_CALL:
-    monitored = 1;
+    monitored = next_instr - 1;
 op_CALL:
     SKIP_CACHES();
     kwnames = NULL;
@@ -921,8 +921,8 @@ call_tail: {
        INSTRUMENTED_CALL tells the tools of the call, and of the return of
        anything that is not a Python function: kernel functions and the type
        fast path then run as C does, under lu_call. */
-    const int mon = monitored;
-    monitored = 0;
+    lu_codeunit *const mon = monitored;
+    monitored = NULL;
     SAVE_FRAME();
     if (Py_IS_TYPE(callable, &PyMethod_Type) && free_self) {
         PyMethodObject *m = (PyMethodObject *)callable;
@@ -935,8 +935,7 @@ call_tail: {
     }
     PyObject *arg0 = total > 0 ? args[0] : &lu_instrumentation_missing;
     if (mon) {
-        /* The instruction that fires is the one before the saved position. */
-        if (lu_fire_2args(ts, PY_MONITORING_EVENT_CALL, frame, INSTR_START(), callable, arg0) < 0) {
+        if (lu_fire_2args(ts, PY_MONITORING_EVENT_CALL, frame, mon, callable, arg0) < 0) {
             result = NULL;
             goto call_done;
         }
@@ -1024,9 +1023,9 @@ call_tail: {
     t->pin--;
     if (mon) {
         if (result == NULL) {
-            lu_fire_exc2(ts, PY_MONITORING_EVENT_C_RAISE, frame, INSTR_START(), callable, arg0);
+            lu_fire_exc2(ts, PY_MONITORING_EVENT_C_RAISE, frame, mon, callable, arg0);
         }
-        else if (lu_fire_2args(ts, PY_MONITORING_EVENT_C_RETURN, frame, INSTR_START(), callable, arg0) < 0) {
+        else if (lu_fire_2args(ts, PY_MONITORING_EVENT_C_RETURN, frame, mon, callable, arg0) < 0) {
             Py_CLEAR(result);
         }
     }
@@ -1099,7 +1098,7 @@ resume_linked:
     DISPATCH();
 
 op_INSTRUMENTED_CALL_FUNCTION_EX:
-    monitored = 1;
+    monitored = next_instr - 1;
 op_CALL_FUNCTION_EX: {
     /* func, null, callargs, kwargs or NULL */
     PyObject *callargs = sp[-2];
@@ -2859,6 +2858,7 @@ error:
     /* The raising frame joins the traceback; kernel frames look native and
        do not. */
     reraise_at = NULL;
+    monitored = NULL;          /* a monitored call that failed before its tail */
     lasti = INSTR_START() - lu_code_start(code);
     if (frame->owner != LU_FRAME_KERNEL_HIDDEN) {
         lu_traceback_here(frame, lasti);
