@@ -42,7 +42,7 @@ class _Keccak:
     def __init__(self, data=b'', /, *, usedforsecurity=True):
         self._state = [0] * 25
         self._buffer = b''
-        if data:
+        if data is not None:
             self.update(data)
 
     @property
