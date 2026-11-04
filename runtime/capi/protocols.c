@@ -21,7 +21,7 @@ static PyObject *
 builtin(const char *name)
 {
     PyObject *key = PyUnicode_InternFromString(name);
-    PyObject *f = key != NULL ? lu_ns_lookup(PyThreadState_Get()->interp->builtins, key) : NULL;
+    PyObject *f = key != NULL ? lu_ns_get(PyThreadState_Get()->interp->builtins, key) : NULL;
     Py_XDECREF(key);
     if (f == NULL && !PyErr_Occurred()) {
         PyErr_Format(PyExc_SystemError, "builtins.%s is missing", name);
@@ -33,7 +33,9 @@ static PyObject *
 call_builtin(const char *name, PyObject *const *args, Py_ssize_t n)
 {
     PyObject *f = builtin(name);
-    return f != NULL ? lu_call(f, args, n, NULL) : NULL;
+    PyObject *r = f != NULL ? lu_call(f, args, n, NULL) : NULL;
+    Py_XDECREF(f);
+    return r;
 }
 
 /* obj.name(*args) through the type's special method. */

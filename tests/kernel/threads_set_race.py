@@ -86,3 +86,19 @@ def churn(k):
 
 
 print('churn', sum(run(churn)), s == stable, len(s))
+
+src = set(range(200, 260))
+off = 0
+for _ in range(30):
+    s = set()
+
+    def update_or_add(k):
+        if k % 2:
+            s.update(src)
+        else:
+            for i in range(100):
+                s.add(i)
+
+    run(update_or_add)
+    off += abs(len(s) - 160)
+print('update', off)

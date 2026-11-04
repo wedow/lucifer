@@ -212,18 +212,25 @@ prim_set_swap(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 /* set_merge_clean(so, other): the first two cases of set_merge_lock_held,
    for a so with no entries (fill 0) and an other with some: copy the table
-   when the sizes agree and there are no dummies, else insert each key. */
+   when the sizes agree and there are no dummies, else insert each key. False,
+   with nothing done, when another thread has added to so since the caller
+   looked. */
 static PyObject *
 prim_set_merge_clean(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); SET(0); SET(1);
     PySetObject *so = (PySetObject *)args[0], *other = (PySetObject *)args[1];
-    if (so->fill != 0 || so == other) {
-        lu_err_format(PyExc_SystemError, "set_merge_clean() needs an empty set");
+    if (so == other) {
+        lu_err_format(PyExc_SystemError, "set_merge_clean() needs two sets");
         return NULL;
     }
+    int merged = 0;
     Py_BEGIN_CRITICAL_SECTION2(so, other);
-    if (so->mask == other->mask && other->fill == other->used) {
+    if (so->fill != 0) {
+        /* not clean */
+    }
+    else if (so->mask == other->mask && other->fill == other->used) {
+        merged = 1;
         for (Py_ssize_t i = 0; i <= other->mask; i++) {
             if (other->table[i].key != NULL) {
                 so->table[i].key = Py_NewRef(other->table[i].key);
@@ -234,6 +241,7 @@ prim_set_merge_clean(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         so->used = other->used;
     }
     else {
+        merged = 1;
         so->fill = so->used = other->used;
         for (Py_ssize_t i = 0; i <= other->mask; i++) {
             PyObject *key = other->table[i].key;
@@ -243,7 +251,7 @@ prim_set_merge_clean(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
     }
     Py_END_CRITICAL_SECTION2();
-    return Py_NewRef(Py_None);
+    return bool_of(merged);
 }
 
 /* set_info(s, which): 0 fill, 1 used, 2 mask, 3 finger, 4 the cached hash. */

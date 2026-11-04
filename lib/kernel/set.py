@@ -157,8 +157,7 @@ def merge(so, other):
         return
     if (set_info(so, FILL) + size(other)) * 5 >= set_info(so, MASK) * 3:
         set_resize(so, (size(so) + size(other)) * 2)
-    if set_info(so, FILL) == 0:
-        set_merge_clean(so, other)
+    if set_info(so, FILL) == 0 and set_merge_clean(so, other):
         return
     e = next_set_entry(other, 0)
     while e is not None:

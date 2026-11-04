@@ -203,17 +203,19 @@ static PyObject *
 import_name(PyThreadState *ts, struct lu_frame *frame, PyObject *name, PyObject *fromlist,
             PyObject *level)
 {
-    PyObject *import_func = lu_ns_lookup(ts->interp->builtins, LU_ID(__import__));
+    PyObject *import_func = lu_ns_get(ts->interp->builtins, LU_ID(__import__));
     if (import_func == NULL) {
-        PyObject *mod = lu_ns_lookup(ts->interp->modules, name);
+        PyObject *mod = lu_ns_get(ts->interp->modules, name);
         if (mod == NULL) {
             lu_err_format(PyExc_ModuleNotFoundError, "No module named '%s'", PyUnicode_AsUTF8(name));
         }
-        return Py_XNewRef(mod);
+        return mod;
     }
     PyObject *args[5] = { name, frame->globals, frame->locals != NULL ? frame->locals : Py_None,
                           fromlist, level };
-    return lu_call(import_func, args, 5, NULL);
+    PyObject *r = lu_call(import_func, args, 5, NULL);
+    Py_DECREF(import_func);
+    return r;
 }
 
 /* IMPORT_FROM: the attribute of an exact module's dict, else the kernel's
