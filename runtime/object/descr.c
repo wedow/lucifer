@@ -188,6 +188,17 @@ lu_kernel_target(PyObject *callable, PyObject *const *args, Py_ssize_t nargs,
     return 0;
 }
 
+int
+lu_new_function(PyObject *new_, PyObject **func)
+{
+    PyObject *self;
+    if (Py_IS_TYPE(new_, &PyStaticMethod_Type)) {
+        *func = ((classmethod *)new_)->cm_callable;
+        return PyFunction_Check(*func);
+    }
+    return lu_kernel_target(new_, NULL, 0, func, &self) > 0 && self == NULL;
+}
+
 /* The C entry points of kernel functions. */
 
 static PyObject *

@@ -580,23 +580,31 @@ eq_native(PyObject *a, PyObject *b, int depth)
 }
 
 /* How `cls(...)` with `total` arguments runs when type.__call__ has nothing to
-   decide: 2 when it only allocates, 1 when it also calls the Python function
-   *init, 0 for the kernel. The class's metaclass is type, its __new__ is
-   object's, its __init__ object's (and no arguments) or a function. */
+   decide, for a class whose metaclass is type: 2 when it only allocates (its
+   __new__ and __init__ are object's, and no arguments), 1 when it also calls
+   the Python function *func (its __new__ is object's), 3 when *func is its
+   __new__, called with the class (its __init__ is object's, and so no-op),
+   0 for the kernel. */
 static int
-instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **init)
+instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **func)
 {
     PyTypeObject *object = &PyBaseObject_Type;
-    if (cls->tp_new == NULL || (cls->tp_flags & Py_TPFLAGS_IS_ABSTRACT)
-        || _PyType_Lookup(cls, LU_ID(__new__)) != _PyType_Lookup(object, LU_ID(__new__))) {
+    PyObject *new_ = _PyType_Lookup(cls, LU_ID(__new__)), *init = _PyType_Lookup(cls, LU_ID(__init__));
+    PyObject *object_init = _PyType_Lookup(object, LU_ID(__init__));
+    if (cls->tp_new == NULL || new_ == NULL) {
         return 0;
     }
-    PyObject *f = _PyType_Lookup(cls, LU_ID(__init__));
-    if (f == _PyType_Lookup(object, LU_ID(__init__))) {
+    if (new_ != _PyType_Lookup(object, LU_ID(__new__))) {
+        return init == object_init && lu_new_function(new_, func) ? 3 : 0;
+    }
+    if ((cls->tp_flags & Py_TPFLAGS_IS_ABSTRACT)) {
+        return 0;
+    }
+    if (init == object_init) {
         return total == 0 ? 2 : 0;
     }
-    *init = f;
-    return f != NULL && PyFunction_Check(f);
+    *func = init;
+    return init != NULL && PyFunction_Check(init);
 }
 
 /* isinstance(obj, cls) for an exact class, or a tuple of them, as
@@ -1398,9 +1406,13 @@ call_tail: {
     }
     PyObject *target = NULL, *self = NULL;
     PyObject *init = NULL;
-    int plan;
+    int plan = 0;
     if (free_self && !mon && Py_IS_TYPE(callable, &PyType_Type) && callable != (PyObject *)&PyType_Type
-        && (plan = instance_plan((PyTypeObject *)callable, total, &init)) != 0) {
+        && (plan = instance_plan((PyTypeObject *)callable, total, &init)) == 3) {
+        target = init;          /* __new__ makes the instance: run it in this loop */
+        self = callable;
+    }
+    else if (plan != 0) {
         /* A class instance: allocated here, its __init__ run in this loop. */
         PyObject *obj = lu_alloc_instance((PyTypeObject *)callable, &PyBaseObject_Type);
         if (obj == NULL || plan == 2) {
@@ -1423,7 +1435,10 @@ call_tail: {
         callee->ret = kret = LU_RETURN_INIT;
         goto push_callee;
     }
-    if (Py_IS_TYPE(callable, &PyFunction_Type)) {
+    if (target != NULL) {
+        /* the class's __new__ */
+    }
+    else if (Py_IS_TYPE(callable, &PyFunction_Type)) {
         target = callable;
     }
     else if (Py_IS_TYPE(callable, &PyCFunction_Type)
