@@ -101,6 +101,10 @@ mg.x = 5
 mg.__dict__['y'] = 6
 print(mg.x, mg.y, mg.__dict__, weakref.ref(mg)() is mg, Managed.__dictoffset__ != 0)
 
+# sets, iterators, lists, bytes, weak references, codecs
+print(ready.containers())
+print(ready.codecs())
+
 # capsules, imports
 print(ready.capsule_roundtrip())
 show(ready.capsule_import, 'datetime.datetime_CAPI')

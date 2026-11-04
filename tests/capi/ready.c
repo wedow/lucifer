@@ -4,6 +4,7 @@
    context variables and the datetime C API, as an unmodified extension
    module (tests/capi/ready_run.py drives it). */
 
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <datetime.h>
@@ -409,6 +410,94 @@ make_managed(PyObject *self, PyObject *Py_UNUSED(ignored))
     return PyType_FromSpec(&spec);
 }
 
+/* Sets, iterators, lists, bytes, weak references and str codecs. */
+static PyObject *
+containers(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    PyObject *out = PyList_New(0);
+    PyObject *set = PySet_New(NULL), *one = PyLong_FromLong(1), *two = PyLong_FromLong(2);
+    PySet_Add(set, one);
+    PySet_Add(set, two);
+    PyList_Append(out, PyLong_FromSsize_t(PySet_Size(set)));
+    PyList_Append(out, PyLong_FromLong(PySet_Contains(set, one)));
+    PyList_Append(out, PyLong_FromLong(PySet_Discard(set, one)));
+    PyList_Append(out, PyLong_FromLong(PySet_Discard(set, one)));
+    PyList_Append(out, PySet_Pop(set));
+    PyList_Append(out, PySet_Pop(set) ? Py_None : (PyErr_Clear(), PyUnicode_FromString("empty")));
+    PyObject *items = Py_BuildValue("[iii]", 3, 3, 4);
+    PyObject *fs = PyFrozenSet_New(items);
+    PyList_Append(out, PyObject_Repr(fs));
+    PyList_Append(out, PyLong_FromLong(PySet_Add(fs, one)));
+    PyErr_Clear();
+    PySet_Clear(set);
+    PyObject *it = PyObject_GetIter(items), *item;
+    PyList_Append(out, PyLong_FromLong(PyIter_NextItem(it, &item)));
+    PyList_Append(out, item);
+    PyList_Append(out, PyLong_FromLong(PyIter_NextItem(it, &item)));
+    PyList_Append(out, PyLong_FromLong(PyIter_NextItem(it, &item)));
+    PyList_Append(out, PyLong_FromLong(PyIter_NextItem(it, &item)));
+    PyList_Append(out, PyLong_FromLong(PyIter_NextItem(it, &item)));
+    PyErr_Clear();
+    PyList_Extend(items, two) < 0 ? PyErr_Clear() : (void)0;
+    PyList_Extend(items, Py_BuildValue("(ii)", 8, 9));
+    PyList_Append(out, PyObject_Repr(items));
+    PyList_Clear(items);
+    PyList_Append(out, PyObject_Repr(items));
+    PyObject *d = PyDict_New();
+    PyDict_SetItemString(d, "a", one);
+    PyObject *popped;
+    PyList_Append(out, PyLong_FromLong(PyDict_PopString(d, "a", &popped)));
+    PyList_Append(out, popped);
+    PyList_Append(out, PyLong_FromLong(PyDict_PopString(d, "a", &popped)));
+    PyDict_MergeFromSeq2(d, Py_BuildValue("[(ii)(ii)]", 1, 2, 1, 3), 0);
+    PyList_Append(out, PyObject_Repr(d));
+    PyList_Append(out, PyNumber_ToBase(PyLong_FromLong(255), 16));
+    PyList_Append(out, PyNumber_ToBase(PyLong_FromLong(5), 2));
+    PyObject *b = PyBytes_FromObject(Py_BuildValue("[iii]", 65, 66, 67));
+    PyList_Append(out, b);
+    PyList_Append(out, PyBytes_Join(PyBytes_FromString("-"), Py_BuildValue("[yy]", "a", "b")));
+    PyList_Append(out, PyBytes_FromFormat("%s=%d %c %%", "x", 42, 'z'));
+    PyList_Append(out, PyByteArray_FromObject(b));
+    PyObject *w = PyWeakref_NewRef(set, NULL);
+    PyObject *alive;
+    PyList_Append(out, PyLong_FromLong(PyWeakref_GetRef(w, &alive)));
+    PyList_Append(out, PyBool_FromLong(alive == set));
+    PyList_Append(out, PyBool_FromLong(PyWeakref_GetObject(w) == set));
+    PyList_Append(out, PyLong_FromLong(PyWeakref_IsDead(w)));
+    return out;
+}
+
+static PyObject *
+codecs(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    PyObject *out = PyList_New(0);
+    PyList_Append(out, PyUnicode_Decode("caf\xc3\xa9", 5, "utf-8", NULL));
+    PyList_Append(out, PyUnicode_DecodeLatin1("caf\xe9", 4, NULL));
+    PyList_Append(out, PyUnicode_DecodeASCII("abc", 3, NULL));
+    PyList_Append(out, PyUnicode_DecodeASCII("\xff", 1, NULL) ? Py_None : (PyErr_Clear(), PyUnicode_FromString("ascii error")));
+    PyList_Append(out, PyUnicode_DecodeASCII("\xff", 1, "replace"));
+    PyList_Append(out, PyUnicode_DecodeUTF16("a\0b\0", 4, NULL, &(int){ -1 }));
+    PyList_Append(out, PyUnicode_DecodeUTF32("a\0\0\0", 4, NULL, &(int){ -1 }));
+    PyList_Append(out, PyUnicode_DecodeUnicodeEscape("\\u00e9\\n", 8, NULL));
+    PyList_Append(out, PyUnicode_DecodeFSDefault("path/name"));
+    PyObject *u = PyUnicode_FromString("h\xc3\xa9");
+    PyList_Append(out, PyUnicode_AsUnicodeEscapeString(u));
+    PyList_Append(out, PyLong_FromLong(PyUnicode_ReadChar(u, 1)));
+    PyList_Append(out, PyUnicode_ReadChar(u, 9) == (Py_UCS4)-1 ? (PyErr_Clear(), PyUnicode_FromString("index error")) : Py_None);
+    wchar_t buf[8];
+    PyList_Append(out, PyLong_FromSsize_t(PyUnicode_AsWideChar(u, buf, 8)));
+    PyList_Append(out, PyLong_FromLong(buf[1]));
+    PyList_Append(out, PyUnicode_FromWideChar(buf, 2));
+    Py_ssize_t n;
+    wchar_t *copy = PyUnicode_AsWideCharString(u, &n);
+    PyList_Append(out, PyLong_FromSsize_t(n));
+    PyMem_Free(copy);
+    PyList_Append(out, PyLong_FromLong(PyUnicode_IsIdentifier(u)));
+    PyList_Append(out, PyLong_FromLong(PyUnicode_IsIdentifier(PyUnicode_FromString("a b"))));
+    PyList_Append(out, PyUnicode_FromString(PyUnicode_GetDefaultEncoding()));
+    return out;
+}
+
 /* Capsules. */
 
 static int destroyed;
@@ -766,6 +855,8 @@ objects(PyObject *self, PyObject *arg)
 }
 
 static PyMethodDef module_methods[] = {
+    { "containers", containers, METH_NOARGS, NULL },
+    { "codecs", codecs, METH_NOARGS, NULL },
     { "make_managed", make_managed, METH_NOARGS, NULL },
     { "make_meta_class", make_meta_class, METH_NOARGS, NULL },
     { "capsule_roundtrip", capsule_roundtrip, METH_NOARGS, NULL },
