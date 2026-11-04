@@ -1846,6 +1846,9 @@ op_LOAD_ATTR: {
     getattrofunc get = Py_TYPE(owner)->tp_getattro;
     if (get == lu_slot_tp_getattro || get == PyObject_GenericGetAttr) {
         PyObject *descr = _PyType_Lookup(Py_TYPE(owner), name), *v;
+        if (descr != NULL) {
+            SAVE_FRAME();       /* a getter may read the frame: f_lineno, f_locals */
+        }
         if (descr != NULL && object_attr_hook(Py_TYPE(owner), LU_ID(__getattribute__))
             && lu_descr_get_native(descr, owner, &v) > 0) {
             TOP() = v;
