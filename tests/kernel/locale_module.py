@@ -18,9 +18,11 @@ for name in ('C', 'POSIX', 'fr_FR.UTF-8', 'de_DE.UTF-8', 'no_SUCH.locale'):
     print(locale.format_string('%.2f', 1234.5, grouping=True), locale.atof('1,5' if name.startswith(('fr', 'de')) else '1.5'))
 _locale.setlocale(_locale.LC_ALL, 'C')
 for bad in (lambda: _locale.setlocale(_locale.LC_ALL, 5), lambda: _locale.nl_langinfo(12345),
-            lambda: _locale.strcoll('a', b'b'), lambda: _locale.strxfrm(1)):
+            lambda: _locale.strcoll('a', b'b'), lambda: _locale.strxfrm(1), lambda: _locale.setlocale(99),
+            lambda: _locale.strcoll('a\0b', 'a'), lambda: _locale.strxfrm('a\0b'),
+            lambda: _locale.setlocale(_locale.LC_ALL, 'C\0x'), lambda: _locale.gettext('a\0b')):
     try:
         bad()
-    except (TypeError, ValueError) as e:
+    except (TypeError, ValueError, _locale.Error) as e:
         print(type(e).__name__, e)
 print(_locale.gettext('hello'), _locale.dgettext('nodomain', 'hi'), _locale.textdomain(None))

@@ -54,8 +54,14 @@ def _text(address):
     return _lucifer.ct_read(address, _lucifer.ct_strlen(address, False)).decode('utf-8', 'surrogateescape')
 
 
+def _no_nul(text):
+    if '\0' in text:
+        raise ValueError('embedded null character')
+
+
 def _cstring(text):
     """(buffer, address) of text as a zero-terminated string; keep the buffer alive."""
+    _no_nul(text)
     data = text.encode('utf-8', 'surrogateescape') + b'\0'
     return data, _lucifer.ct_address(data)
 
@@ -68,6 +74,7 @@ def _aligned(size):
 
 
 def _wide(text):
+    _no_nul(text)
     raw = text.encode('utf-32-le', 'surrogatepass') + b'\0\0\0\0'
     buffer, address, skip = _aligned(len(raw))
     buffer[skip:skip + len(raw)] = raw
@@ -77,7 +84,10 @@ def _wide(text):
 def setlocale(category, locale=None, /):
     """Activates/queries locale processing."""
     if locale is None:
-        return _text(_call(_setlocale, 'P', 'iP', (category, 0)))
+        result = _call(_setlocale, 'P', 'iP', (category, 0))
+        if not result:
+            raise Error('locale query failed')
+        return _text(result)
     if not isinstance(locale, str):
         raise TypeError('setlocale() argument 2 must be str or None, not ' + type(locale).__name__)
     data, address = _cstring(locale)
