@@ -534,10 +534,10 @@ PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
 static void
 subtype_dealloc(PyObject *self)
 {
-    PyTypeObject *tp = Py_TYPE(self), *base = tp;
-    if (tp->tp_finalize != NULL && PyObject_CallFinalizerFromDealloc(self) < 0) {
+    if (Py_TYPE(self)->tp_finalize != NULL && PyObject_CallFinalizerFromDealloc(self) < 0) {
         return;                         /* resurrected */
     }
+    PyTypeObject *tp = Py_TYPE(self), *base = tp;     /* __del__ may have assigned __class__ */
     lu_clear_weakrefs(self);
     /* Clear the slots of every heap type in the chain, then the dict. */
     for (; base->tp_flags & Py_TPFLAGS_HEAPTYPE; base = base->tp_base) {
