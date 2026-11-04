@@ -1018,4 +1018,5 @@ class NotImplementedType:
 
 
 kernel_set('len', len)
+kernel_set('builtin_getattr', getattr)
 kernel_set('isinstance', isinstance)

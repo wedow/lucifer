@@ -298,22 +298,105 @@ small_index(PyObject *sub)
 }
 
 /* BINARY_OP NB_SUBSCR on an exact list or tuple with a compact int index in
-   range: the item (a new reference), or NULL. */
+   range, negative ones counted from the end: the item (a new reference), or NULL. */
 static PyObject *
 subscr_item(PyObject *container, PyObject *sub)
 {
-    Py_ssize_t i = small_index(sub);
-    PyObject *item = NULL;
-    if (i < 0) {
+    if (!PyLong_CheckExact(sub) || !_PyLong_IsCompact((PyLongObject *)sub)) {
         return NULL;
     }
+    Py_ssize_t i = _PyLong_CompactValue((PyLongObject *)sub);
+    PyObject *item = NULL;
     if (PyList_CheckExact(container)) {
-        item = lu_list_item_ref((PyListObject *)container, i);
+        i += i < 0 ? Py_SIZE(container) : 0;
+        item = i >= 0 ? lu_list_item_ref((PyListObject *)container, i) : NULL;
     }
-    else if (PyTuple_CheckExact(container) && i < Py_SIZE(container)) {
-        item = Py_NewRef(((PyTupleObject *)container)->ob_item[i]);
+    else if (PyTuple_CheckExact(container)) {
+        i += i < 0 ? Py_SIZE(container) : 0;
+        item = i >= 0 && i < Py_SIZE(container) ? Py_NewRef(((PyTupleObject *)container)->ob_item[i]) : NULL;
     }
     return item;
+}
+
+/* A slice bound that is None (*v stays) or an exact compact int (*v is set). */
+static int
+slice_bound(PyObject *bound, Py_ssize_t *v)
+{
+    if (bound == NULL || bound == Py_None) {
+        return 1;
+    }
+    if (!PyLong_CheckExact(bound) || !_PyLong_IsCompact((PyLongObject *)bound)) {
+        return 0;
+    }
+    *v = _PyLong_CompactValue((PyLongObject *)bound);
+    return 1;
+}
+
+/* PySlice_Unpack and PySlice_AdjustIndices for bounds of None or compact
+   ints over a sequence of `length`: 1 with the first position, the step and
+   the count, or 0 when the kernel must decide (another bound type, a zero step). */
+static int
+slice_unpack(PyObject *start_o, PyObject *stop_o, PyObject *step_o, Py_ssize_t length,
+             Py_ssize_t *start, Py_ssize_t *step, Py_ssize_t *count)
+{
+    Py_ssize_t stop;
+    *step = 1;
+    if (!slice_bound(step_o, step) || *step == 0) {
+        return 0;
+    }
+    int down = *step < 0;
+    *start = down ? length - 1 : 0;
+    stop = down ? -1 : length;
+    if (!slice_bound(start_o, start) || !slice_bound(stop_o, &stop)) {
+        return 0;
+    }
+    if (start_o != NULL && start_o != Py_None) {
+        *start += *start < 0 ? length : 0;
+        *start = *start < 0 ? (down ? -1 : 0) : *start >= length ? (down ? length - 1 : length) : *start;
+    }
+    if (stop_o != NULL && stop_o != Py_None) {
+        stop += stop < 0 ? length : 0;
+        stop = stop < 0 ? (down ? -1 : 0) : stop >= length ? (down ? length - 1 : length) : stop;
+    }
+    *count = down ? (stop < *start ? (*start - stop - 1) / -*step + 1 : 0)
+                  : (*start < stop ? (stop - *start - 1) / *step + 1 : 0);
+    return 1;
+}
+
+/* container[start:stop:step] for an exact list, tuple, str or bytes and bounds
+   that slice_unpack takes, where the step of a str or bytes is 1: a new
+   reference. NULL without an error when the kernel must slice. */
+static PyObject *
+slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObject *step_o)
+{
+    PyTypeObject *tp = Py_TYPE(container);
+    Py_ssize_t length, start, step, count;
+    if (tp == &PyList_Type || tp == &PyTuple_Type) {
+        length = Py_SIZE(container);
+    }
+    else if (tp == &PyUnicode_Type) {
+        length = PyUnicode_GET_LENGTH(container);
+    }
+    else if (tp == &PyBytes_Type) {
+        length = PyBytes_GET_SIZE(container);
+    }
+    else {
+        return NULL;
+    }
+    if (!slice_unpack(start_o, stop_o, step_o, length, &start, &step, &count)
+        || (tp != &PyList_Type && tp != &PyTuple_Type && step != 1)) {
+        return NULL;
+    }
+    if (tp != &PyList_Type && start == 0 && count == length) {
+        return Py_NewRef(container);
+    }
+    if (tp == &PyUnicode_Type) {
+        return PyUnicode_Substring(container, start, start + count);
+    }
+    if (tp == &PyBytes_Type) {
+        return PyBytes_FromStringAndSize(PyBytes_AS_STRING(container) + start, count);
+    }
+    return lu_seq_slice(container, start, step, count, tp == &PyTuple_Type);
 }
 
 /* STORE_SUBSCR into an exact list at a compact int index in range: the
@@ -404,12 +487,56 @@ attr_shortcut(PyObject *owner, PyObject *name)
             && object_attr_hook(tp, LU_ID(__getattribute__)) ? (PyObject *)tp : NULL;
     }
     if (!PyType_Check(owner) || !PyUnicode_CheckExact(name)
-        || _PyType_Lookup(tp, LU_ID(__getattribute__)) != _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__))
-        || _PyType_Lookup(tp, name) != NULL) {
+        || _PyType_Lookup(tp, LU_ID(__getattribute__)) != _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__))) {
         return NULL;
+    }
+    PyObject *meta_attr = _PyType_Lookup(tp, name);
+    if (meta_attr != NULL && Py_TYPE(meta_attr)->tp_descr_set != NULL) {
+        return NULL;            /* a data descriptor of the metaclass wins */
     }
     PyObject *v = _PyType_Lookup((PyTypeObject *)owner, name);
     return v != NULL && (Py_TYPE(v)->tp_descr_get == NULL || PyFunction_Check(v)) ? v : NULL;
+}
+
+/* obj.name for an exact str name, answered when no Python code decides: a
+   data member or getset of the type, then the instance's dict, then a plain
+   value or function of the type (bound as a method). NULL, with no error, for
+   everything else, which is the kernel's: a missing attribute, __getattr__,
+   __getattribute__, properties and other descriptors. A new reference. */
+static PyObject *
+getattr_native(PyObject *owner, PyObject *name)
+{
+    PyTypeObject *tp = Py_TYPE(owner);
+    PyObject *v;
+    if (!PyUnicode_CheckExact(name)) {
+        return NULL;
+    }
+    if ((v = attr_shortcut(owner, name)) != NULL) {
+        return Py_NewRef(v);
+    }
+    if (!object_attr_hook(tp, LU_ID(__getattribute__))) {
+        return NULL;
+    }
+    PyObject *descr = _PyType_Lookup(tp, name);
+    if (descr != NULL && Py_TYPE(descr)->tp_descr_set != NULL) {
+        return lu_descr_get_native(descr, owner, &v) > 0 ? v : NULL;
+    }
+    if (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
+        PyObject *dict = LU_MANAGED_DICT(owner);
+        if (dict != NULL && PyDict_CheckExact(dict) && (v = lu_ns_get(dict, name)) != NULL) {
+            return v;
+        }
+    }
+    else if (tp->tp_dictoffset != 0) {
+        return NULL;            /* a dict of another layout */
+    }
+    if (descr == NULL) {
+        return NULL;
+    }
+    if (Py_TYPE(descr)->tp_descr_get == NULL) {
+        return Py_NewRef(descr);
+    }
+    return PyFunction_Check(descr) ? PyMethod_New(descr, owner) : NULL;
 }
 
 /* The kernel functions that C answers for plain arguments, so that the common
@@ -426,6 +553,11 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
             if (hit >= 0) {
                 return hit ? found : Py_NewRef(npos == 3 ? args[2] : Py_None);
             }
+        }
+    }
+    else if (target == kernel[LU_K_builtin_getattr]) {
+        if (npos == 2 || npos == 3) {
+            return getattr_native(args[0], args[1]);
         }
     }
     else if (target == kernel[LU_K_len]) {
@@ -2346,6 +2478,14 @@ op_LOAD_ATTR: {
                 goto push_callee;
             }
         }
+        if ((v = getattr_native(owner, name)) != NULL) {
+            TOP() = v;
+            Py_DECREF(owner);
+            if (oparg & 1) {
+                PUSH(NULL);
+            }
+            DISPATCH();
+        }
         kid = get == lu_slot_tp_getattro ? LU_K_getattr : LU_K_generic_getattr;
         kargs[0] = POP();
         kargs[1] = Py_NewRef(name);
@@ -2859,6 +2999,21 @@ op_BINARY_OP: {
             Py_DECREF(right);
             DISPATCH();
         }
+        if (Py_IS_TYPE(right, &PySlice_Type)) {
+            PySliceObject *slc = (PySliceObject *)right;
+            item = slice_native(left, slc->start, slc->stop, slc->step);
+            if (item != NULL) {
+                PUSH(item);
+                Py_DECREF(left);
+                Py_DECREF(right);
+                DISPATCH();
+            }
+            if (PyErr_Occurred()) {
+                Py_DECREF(left);
+                Py_DECREF(right);
+                goto error;
+            }
+        }
         kargs[0] = left;
         kargs[1] = right;
         nk = 2;
@@ -3039,6 +3194,16 @@ op_BUILD_SLICE: {
 op_BINARY_SLICE: {
     /* container, start, stop -- container[start:stop] */
     SAVE_FRAME();
+    PyObject *sliced = slice_native(sp[-3], sp[-2], sp[-1], NULL);
+    if (sliced != NULL) {
+        Py_DECREF(sp[-3]);
+        Py_DECREF(sp[-2]);
+        Py_DECREF(sp[-1]);
+        sp -= 2;
+        TOP() = sliced;
+        DISPATCH();
+    }
+    ERROR_IF(PyErr_Occurred());
     PyObject *stop = POP();
     PyObject *start = POP();
     PyObject *slice = PySlice_New(start, stop, NULL);
