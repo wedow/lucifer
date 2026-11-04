@@ -201,6 +201,30 @@ def _is_error(exc, *kinds):
     return isinstance(exc, kinds)
 
 
+def _error_range(exc, decode):
+    """The exception's start and end as the error handlers see them
+    (_PyUnicodeError_GetParams of Objects/exceptions.c): the object checked
+    to be the str of an encode or translate error or the bytes of a decode
+    one, then the positions clamped into it. The ranges the codecs raise are
+    in range, where this changes nothing."""
+    obj = exc.object
+    if not isinstance(obj, bytes if decode else str):
+        raise TypeError("UnicodeError 'object' attribute must be a %s"
+                        % ('bytes' if decode else 'string'))
+    n = len(obj)
+    start = exc.start
+    if start < 0:
+        start = 0
+    if start >= n:
+        start = 0 if n == 0 else n - 1
+    end = exc.end
+    if end < 1:
+        end = 1
+    if end > n:
+        end = n
+    return start, end
+
+
 def _hex_escape(ch):
     c = ord(ch)
     if c >= 0x10000:
@@ -223,31 +247,36 @@ def _strict_errors(exc):
 def _ignore_errors(exc):
     if not isinstance(exc, (UnicodeEncodeError, UnicodeDecodeError, UnicodeTranslateError)):
         _unknown(exc)
-    return ('', exc.end)
+    return ('', _error_range(exc, isinstance(exc, UnicodeDecodeError))[1])
 
 
 def _replace_errors(exc):
     if isinstance(exc, UnicodeEncodeError):
-        return ('?' * (exc.end - exc.start), exc.end)
+        start, end = _error_range(exc, False)
+        return ('?' * (end - start), end)
     if isinstance(exc, UnicodeDecodeError):
-        return ('\ufffd', exc.end)
+        return ('\ufffd', _error_range(exc, True)[1])
     if isinstance(exc, UnicodeTranslateError):
-        return ('\ufffd' * (exc.end - exc.start), exc.end)
+        start, end = _error_range(exc, False)
+        return ('\ufffd' * (end - start), end)
     _unknown(exc)
 
 
 def _xmlcharrefreplace_errors(exc):
     if not isinstance(exc, UnicodeEncodeError):
         _unknown(exc)
-    return (''.join('&#%d;' % ord(c) for c in exc.object[exc.start:exc.end]), exc.end)
+    start, end = _error_range(exc, False)
+    return (''.join('&#%d;' % ord(c) for c in exc.object[start:end]), end)
 
 
 def _backslashreplace_errors(exc):
     if isinstance(exc, UnicodeDecodeError):
-        return (''.join('\\x%02x' % b for b in exc.object[exc.start:exc.end]), exc.end)
+        start, end = _error_range(exc, True)
+        return (''.join('\\x%02x' % b for b in exc.object[start:end]), end)
     if not isinstance(exc, (UnicodeEncodeError, UnicodeTranslateError)):
         _unknown(exc)
-    return (''.join(_hex_escape(c) for c in exc.object[exc.start:exc.end]), exc.end)
+    start, end = _error_range(exc, False)
+    return (''.join(_hex_escape(c) for c in exc.object[start:end]), end)
 
 
 def _namereplace_errors(exc):
@@ -258,13 +287,14 @@ def _namereplace_errors(exc):
         name = unicodedata.name
     except ImportError:
         name = None
+    start, end = _error_range(exc, False)
     out = []
-    for c in exc.object[exc.start:exc.end]:
+    for c in exc.object[start:end]:
         try:
             out.append('\\N{%s}' % name(c))
         except (TypeError, ValueError):
             out.append(_hex_escape(c))
-    return (''.join(out), exc.end)
+    return (''.join(out), end)
 
 
 def _surrogateescape_errors(exc):

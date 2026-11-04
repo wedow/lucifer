@@ -461,37 +461,6 @@ PyUnicode_DecodeLatin1(const char *s, Py_ssize_t size, const char *errors)
 }
 
 PyObject *
-PyUnicode_DecodeUTF8Stateful(const char *s, Py_ssize_t size, const char *errors, Py_ssize_t *consumed)
-{
-    if (consumed != NULL) {
-        *consumed = size;
-    }
-    return decode(s, size, "utf-8", errors);
-}
-
-static PyObject *
-decode_wide(const char *s, Py_ssize_t size, const char *errors, int *byteorder, const char *base)
-{
-    const char *name = base[4] == '1' ? (byteorder == NULL || *byteorder == 0 ? "utf-16"
-                                         : *byteorder < 0 ? "utf-16-le" : "utf-16-be")
-                                      : (byteorder == NULL || *byteorder == 0 ? "utf-32"
-                                         : *byteorder < 0 ? "utf-32-le" : "utf-32-be");
-    return decode(s, size, name, errors);
-}
-
-PyObject *
-PyUnicode_DecodeUTF16(const char *s, Py_ssize_t size, const char *errors, int *byteorder)
-{
-    return decode_wide(s, size, errors, byteorder, "utf-16");
-}
-
-PyObject *
-PyUnicode_DecodeUTF32(const char *s, Py_ssize_t size, const char *errors, int *byteorder)
-{
-    return decode_wide(s, size, errors, byteorder, "utf-32");
-}
-
-PyObject *
 PyUnicode_DecodeUnicodeEscape(const char *s, Py_ssize_t size, const char *errors)
 {
     return decode(s, size, "unicode_escape", errors);

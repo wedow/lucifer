@@ -762,16 +762,83 @@ PyComplex_FromDoubles(double real, double imag)
     return PyComplex_FromCComplex((Py_complex){ real, imag });
 }
 
+/* op's __complex__ result: an exact complex, or with a deprecation warning a
+   strict subclass of complex; NULL without an error when op has no
+   __complex__ (complexobject.c's try_complex_special_method). */
+static PyObject *
+try_complex_special_method(PyObject *op)
+{
+    PyObject *name = PyUnicode_InternFromString("__complex__");
+    if (name == NULL) {
+        return NULL;
+    }
+    int has = _PyType_Lookup(Py_TYPE(op), name) != NULL;
+    PyObject *res = has ? lu_call_special(op, name, NULL, 0) : NULL;
+    Py_DECREF(name);
+    if (res == NULL || PyComplex_CheckExact(res)) {
+        return res;
+    }
+    if (!PyComplex_Check(res)) {
+        PyErr_Format(PyExc_TypeError, "__complex__ returned non-complex (type %.200s)",
+                     Py_TYPE(res)->tp_name);
+        Py_DECREF(res);
+        return NULL;
+    }
+    /* Issue #29894: warn if res is not of exact type complex. */
+    if (PyErr_WarnFormat(PyExc_DeprecationWarning, 1,
+            "__complex__ returned non-complex (type %.200s).  "
+            "The ability to return an instance of a strict subclass of complex "
+            "is deprecated, and may be removed in a future version of Python.",
+            Py_TYPE(res)->tp_name)) {
+        Py_DECREF(res);
+        return NULL;
+    }
+    return res;
+}
+
 double
 PyComplex_RealAsDouble(PyObject *op)
 {
-    return PyComplex_Check(op) ? CVAL(op).real : PyFloat_AsDouble(op);
+    double real = -1.0;
+
+    if (PyComplex_Check(op)) {
+        real = CVAL(op).real;
+    }
+    else {
+        PyObject *newop = try_complex_special_method(op);
+        if (newop != NULL) {
+            real = CVAL(newop).real;
+            Py_DECREF(newop);
+        }
+        else if (!PyErr_Occurred()) {
+            real = PyFloat_AsDouble(op);
+        }
+    }
+    return real;
 }
 
 double
 PyComplex_ImagAsDouble(PyObject *op)
 {
-    return PyComplex_Check(op) ? CVAL(op).imag : 0.0;
+    double imag = -1.0;
+
+    if (PyComplex_Check(op)) {
+        imag = CVAL(op).imag;
+    }
+    else {
+        PyObject *newop = try_complex_special_method(op);
+        if (newop != NULL) {
+            imag = CVAL(newop).imag;
+            Py_DECREF(newop);
+        }
+        else if (!PyErr_Occurred()) {
+            PyFloat_AsDouble(op);
+            if (!PyErr_Occurred()) {
+                imag = 0.0;
+            }
+        }
+    }
+    return imag;
 }
 
 /* A complex, else its __complex__ result, else the float it converts to. */
@@ -782,25 +849,15 @@ PyComplex_AsCComplex(PyObject *op)
     if (PyComplex_Check(op)) {
         return CVAL(op);
     }
-    PyObject *name = PyUnicode_InternFromString("__complex__");
-    PyObject *special = name != NULL ? _PyType_Lookup(Py_TYPE(op), name) : NULL;
-    if (special != NULL) {
-        PyObject *res = lu_call_special(op, name, NULL, 0);
-        if (res != NULL && !PyComplex_Check(res)) {
-            PyErr_Format(PyExc_TypeError, "__complex__ returned non-complex (type %.200s)",
-                         Py_TYPE(res)->tp_name);
-            Py_CLEAR(res);
-        }
-        if (res != NULL) {
-            cv = CVAL(res);
-            Py_DECREF(res);
-        }
-        Py_DECREF(name);
+    PyObject *newop = try_complex_special_method(op);
+    if (newop != NULL) {
+        cv = CVAL(newop);
+        Py_DECREF(newop);
         return cv;
     }
-    Py_XDECREF(name);
-    if (!PyErr_Occurred()) {
-        cv.real = PyFloat_AsDouble(op);
+    if (PyErr_Occurred()) {
+        return cv;
     }
+    cv.real = PyFloat_AsDouble(op);
     return cv;
 }

@@ -67,25 +67,6 @@ LU_STUB PyObject * PyCode_GetFreevars(PyCodeObject *code) { LU_UNIMPLEMENTED("Py
 LU_STUB PyObject * PyCode_GetVarnames(PyCodeObject *code) { LU_UNIMPLEMENTED("PyCode_GetVarnames"); }
 LU_STUB PyCodeObject * PyCode_NewEmpty(const char *filename, const char *funcname, int firstlineno) { LU_UNIMPLEMENTED("PyCode_NewEmpty"); }
 LU_STUB PyObject* PyCode_Optimize(PyObject *code, PyObject* consts, PyObject *names, PyObject *lnotab) { LU_UNIMPLEMENTED("PyCode_Optimize"); }
-LU_STUB PyObject * PyCodec_BackslashReplaceErrors(PyObject *exc) { LU_UNIMPLEMENTED("PyCodec_BackslashReplaceErrors"); }
-LU_STUB PyObject * PyCodec_Decode(PyObject *object, const char *encoding, const char *errors) { LU_UNIMPLEMENTED("PyCodec_Decode"); }
-LU_STUB PyObject * PyCodec_Decoder(const char *encoding) { LU_UNIMPLEMENTED("PyCodec_Decoder"); }
-LU_STUB PyObject * PyCodec_Encode(PyObject *object, const char *encoding, const char *errors) { LU_UNIMPLEMENTED("PyCodec_Encode"); }
-LU_STUB PyObject * PyCodec_Encoder(const char *encoding) { LU_UNIMPLEMENTED("PyCodec_Encoder"); }
-LU_STUB PyObject * PyCodec_IgnoreErrors(PyObject *exc) { LU_UNIMPLEMENTED("PyCodec_IgnoreErrors"); }
-LU_STUB PyObject * PyCodec_IncrementalDecoder(const char *encoding, const char *errors) { LU_UNIMPLEMENTED("PyCodec_IncrementalDecoder"); }
-LU_STUB PyObject * PyCodec_IncrementalEncoder(const char *encoding, const char *errors) { LU_UNIMPLEMENTED("PyCodec_IncrementalEncoder"); }
-LU_STUB int PyCodec_KnownEncoding(const char *encoding) { LU_UNIMPLEMENTED("PyCodec_KnownEncoding"); }
-LU_STUB PyObject * PyCodec_LookupError(const char *name) { LU_UNIMPLEMENTED("PyCodec_LookupError"); }
-LU_STUB PyObject * PyCodec_NameReplaceErrors(PyObject *exc) { LU_UNIMPLEMENTED("PyCodec_NameReplaceErrors"); }
-LU_STUB int PyCodec_Register(PyObject *search_function) { LU_UNIMPLEMENTED("PyCodec_Register"); }
-LU_STUB int PyCodec_RegisterError(const char *name, PyObject *error) { LU_UNIMPLEMENTED("PyCodec_RegisterError"); }
-LU_STUB PyObject * PyCodec_ReplaceErrors(PyObject *exc) { LU_UNIMPLEMENTED("PyCodec_ReplaceErrors"); }
-LU_STUB PyObject * PyCodec_StreamReader(const char *encoding, PyObject *stream, const char *errors) { LU_UNIMPLEMENTED("PyCodec_StreamReader"); }
-LU_STUB PyObject * PyCodec_StreamWriter(const char *encoding, PyObject *stream, const char *errors) { LU_UNIMPLEMENTED("PyCodec_StreamWriter"); }
-LU_STUB PyObject * PyCodec_StrictErrors(PyObject *exc) { LU_UNIMPLEMENTED("PyCodec_StrictErrors"); }
-LU_STUB int PyCodec_Unregister(PyObject *search_function) { LU_UNIMPLEMENTED("PyCodec_Unregister"); }
-LU_STUB PyObject * PyCodec_XMLCharRefReplaceErrors(PyObject *exc) { LU_UNIMPLEMENTED("PyCodec_XMLCharRefReplaceErrors"); }
 LU_STUB int PyCompile_OpcodeStackEffect(int opcode, int oparg) { LU_UNIMPLEMENTED("PyCompile_OpcodeStackEffect"); }
 LU_STUB int PyCompile_OpcodeStackEffectWithJump(int opcode, int oparg, int jump) { LU_UNIMPLEMENTED("PyCompile_OpcodeStackEffectWithJump"); }
 LU_STUB Py_complex PyComplex_AsCComplex(PyObject *op) { LU_UNIMPLEMENTED("PyComplex_AsCComplex"); }
@@ -94,13 +75,9 @@ LU_STUB PyObject * PyComplex_FromDoubles(double real, double imag) { LU_UNIMPLEM
 LU_STUB double PyComplex_ImagAsDouble(PyObject *op) { LU_UNIMPLEMENTED("PyComplex_ImagAsDouble"); }
 LU_STUB double PyComplex_RealAsDouble(PyObject *op) { LU_UNIMPLEMENTED("PyComplex_RealAsDouble"); }
 LU_STUB void PyConfig_Clear(PyConfig *) { LU_UNIMPLEMENTED("PyConfig_Clear"); }
-LU_STUB PyObject* PyConfig_Get(const char *name) { LU_UNIMPLEMENTED("PyConfig_Get"); }
-LU_STUB int PyConfig_GetInt(const char *name, int *value) { LU_UNIMPLEMENTED("PyConfig_GetInt"); }
 LU_STUB void PyConfig_InitIsolatedConfig(PyConfig *config) { LU_UNIMPLEMENTED("PyConfig_InitIsolatedConfig"); }
 LU_STUB void PyConfig_InitPythonConfig(PyConfig *config) { LU_UNIMPLEMENTED("PyConfig_InitPythonConfig"); }
-LU_STUB PyObject* PyConfig_Names(void) { LU_UNIMPLEMENTED("PyConfig_Names"); }
 LU_STUB PyStatus PyConfig_Read(PyConfig *config) { LU_UNIMPLEMENTED("PyConfig_Read"); }
-LU_STUB int PyConfig_Set(const char *name, PyObject *value) { LU_UNIMPLEMENTED("PyConfig_Set"); }
 LU_STUB PyStatus PyConfig_SetArgv(PyConfig *config, Py_ssize_t argc, wchar_t * const *argv) { LU_UNIMPLEMENTED("PyConfig_SetArgv"); }
 LU_STUB PyStatus PyConfig_SetBytesArgv(PyConfig *config, Py_ssize_t argc, char * const *argv) { LU_UNIMPLEMENTED("PyConfig_SetBytesArgv"); }
 LU_STUB PyStatus PyConfig_SetBytesString(PyConfig *config, wchar_t **config_str, const char *str) { LU_UNIMPLEMENTED("PyConfig_SetBytesString"); }
@@ -156,7 +133,6 @@ LU_STUB int PyDict_Unwatch(int watcher_id, PyObject* dict) { LU_UNIMPLEMENTED("P
 LU_STUB int PyDict_Update(PyObject *mp, PyObject *other) { LU_UNIMPLEMENTED("PyDict_Update"); }
 LU_STUB PyObject * PyDict_Values(PyObject *mp) { LU_UNIMPLEMENTED("PyDict_Values"); }
 LU_STUB int PyDict_Watch(int watcher_id, PyObject* dict) { LU_UNIMPLEMENTED("PyDict_Watch"); }
-LU_STUB int PyErr_BadArgument(void) { LU_UNIMPLEMENTED("PyErr_BadArgument"); }
 LU_STUB int PyErr_CheckSignals(void) { LU_UNIMPLEMENTED("PyErr_CheckSignals"); }
 LU_STUB void PyErr_Clear(void) { LU_UNIMPLEMENTED("PyErr_Clear"); }
 LU_STUB void PyErr_Display(PyObject *, PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyErr_Display"); }
@@ -823,7 +799,6 @@ LU_STUB int PyUnicodeWriter_WriteWideChar(PyUnicodeWriter *writer, const wchar_t
 LU_STUB void PyUnicode_Append(PyObject **pleft, PyObject *right) { LU_UNIMPLEMENTED("PyUnicode_Append"); }
 LU_STUB void PyUnicode_AppendAndDel(PyObject **pleft, PyObject *right) { LU_UNIMPLEMENTED("PyUnicode_AppendAndDel"); }
 LU_STUB PyObject* PyUnicode_AsASCIIString(PyObject *unicode) { LU_UNIMPLEMENTED("PyUnicode_AsASCIIString"); }
-LU_STUB PyObject* PyUnicode_AsCharmapString(PyObject *unicode, PyObject *mapping) { LU_UNIMPLEMENTED("PyUnicode_AsCharmapString"); }
 LU_STUB PyObject* PyUnicode_AsDecodedObject(PyObject *unicode, const char *encoding, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_AsDecodedObject"); }
 LU_STUB PyObject* PyUnicode_AsDecodedUnicode(PyObject *unicode, const char *encoding, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_AsDecodedUnicode"); }
 LU_STUB PyObject* PyUnicode_AsEncodedObject(PyObject *unicode, const char *encoding, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_AsEncodedObject"); }
@@ -852,21 +827,15 @@ LU_STUB Py_ssize_t PyUnicode_Count(PyObject *str, PyObject *substr, Py_ssize_t s
 LU_STUB void* PyUnicode_DATA(PyObject *op) { LU_UNIMPLEMENTED("PyUnicode_DATA"); }
 LU_STUB PyObject* PyUnicode_Decode(const char *s, Py_ssize_t size, const char *encoding, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_Decode"); }
 LU_STUB PyObject* PyUnicode_DecodeASCII(const char *string, Py_ssize_t length, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_DecodeASCII"); }
-LU_STUB PyObject* PyUnicode_DecodeCharmap(const char *string, Py_ssize_t length, PyObject *mapping, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_DecodeCharmap"); }
 LU_STUB PyObject* PyUnicode_DecodeFSDefault(const char *s) { LU_UNIMPLEMENTED("PyUnicode_DecodeFSDefault"); }
 LU_STUB PyObject* PyUnicode_DecodeFSDefaultAndSize(const char *s, Py_ssize_t size) { LU_UNIMPLEMENTED("PyUnicode_DecodeFSDefaultAndSize"); }
 LU_STUB PyObject* PyUnicode_DecodeLatin1(const char *string, Py_ssize_t length, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_DecodeLatin1"); }
 LU_STUB PyObject* PyUnicode_DecodeLocale(const char *str, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_DecodeLocale"); }
 LU_STUB PyObject* PyUnicode_DecodeLocaleAndSize(const char *str, Py_ssize_t len, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_DecodeLocaleAndSize"); }
 LU_STUB PyObject* PyUnicode_DecodeRawUnicodeEscape(const char *string, Py_ssize_t length, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_DecodeRawUnicodeEscape"); }
-LU_STUB PyObject* PyUnicode_DecodeUTF16(const char *string, Py_ssize_t length, const char *errors, int *byteorder) { LU_UNIMPLEMENTED("PyUnicode_DecodeUTF16"); }
-LU_STUB PyObject* PyUnicode_DecodeUTF16Stateful(const char *string, Py_ssize_t length, const char *errors, int *byteorder, Py_ssize_t *consumed) { LU_UNIMPLEMENTED("PyUnicode_DecodeUTF16Stateful"); }
-LU_STUB PyObject* PyUnicode_DecodeUTF32(const char *string, Py_ssize_t length, const char *errors, int *byteorder) { LU_UNIMPLEMENTED("PyUnicode_DecodeUTF32"); }
-LU_STUB PyObject* PyUnicode_DecodeUTF32Stateful(const char *string, Py_ssize_t length, const char *errors, int *byteorder, Py_ssize_t *consumed) { LU_UNIMPLEMENTED("PyUnicode_DecodeUTF32Stateful"); }
 LU_STUB PyObject* PyUnicode_DecodeUTF7(const char *string, Py_ssize_t length, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_DecodeUTF7"); }
 LU_STUB PyObject* PyUnicode_DecodeUTF7Stateful(const char *string, Py_ssize_t length, const char *errors, Py_ssize_t *consumed) { LU_UNIMPLEMENTED("PyUnicode_DecodeUTF7Stateful"); }
 LU_STUB PyObject* PyUnicode_DecodeUTF8(const char *string, Py_ssize_t length, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_DecodeUTF8"); }
-LU_STUB PyObject* PyUnicode_DecodeUTF8Stateful(const char *string, Py_ssize_t length, const char *errors, Py_ssize_t *consumed) { LU_UNIMPLEMENTED("PyUnicode_DecodeUTF8Stateful"); }
 LU_STUB PyObject* PyUnicode_DecodeUnicodeEscape(const char *string, Py_ssize_t length, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_DecodeUnicodeEscape"); }
 LU_STUB PyObject* PyUnicode_EncodeFSDefault(PyObject *unicode) { LU_UNIMPLEMENTED("PyUnicode_EncodeFSDefault"); }
 LU_STUB PyObject* PyUnicode_EncodeLocale(PyObject *unicode, const char *errors) { LU_UNIMPLEMENTED("PyUnicode_EncodeLocale"); }
@@ -1563,7 +1532,6 @@ LU_STUB LU_EXPORT void _Py_DumpStack(void) { LU_UNIMPLEMENTED("_Py_DumpStack"); 
 LU_STUB LU_EXPORT void _Py_EncodeLocaleEx(void) { LU_UNIMPLEMENTED("_Py_EncodeLocaleEx"); }
 LU_STUB LU_EXPORT void _Py_FatalRefcountErrorFunc(void) { LU_UNIMPLEMENTED("_Py_FatalRefcountErrorFunc"); }
 LU_STUB LU_EXPORT void _Py_GetConfig(void) { LU_UNIMPLEMENTED("_Py_GetConfig"); }
-LU_STUB LU_EXPORT void _Py_GetConfigsAsDict(void) { LU_UNIMPLEMENTED("_Py_GetConfigsAsDict"); }
 LU_STUB LU_EXPORT void _Py_GetErrorHandler(void) { LU_UNIMPLEMENTED("_Py_GetErrorHandler"); }
 LU_STUB LU_EXPORT void _Py_Get_Getpath_CodeObject(void) { LU_UNIMPLEMENTED("_Py_Get_Getpath_CodeObject"); }
 LU_STUB LU_EXPORT void _Py_Gid_Converter(void) { LU_UNIMPLEMENTED("_Py_Gid_Converter"); }

@@ -266,6 +266,14 @@ convert_unit(struct parse *p, PyObject *arg, const char **fmt, va_list *va)
         }
         return 0;
     }
+    case 'D': {
+        Py_complex cval = PyComplex_AsCComplex(arg);
+        if (PyErr_Occurred()) {
+            return -1;
+        }
+        *va_arg(*va, Py_complex *) = cval;
+        return 0;
+    }
     case 'p': {
         int t = PyObject_IsTrue(arg);
         if (t < 0) {
@@ -361,6 +369,7 @@ skip_unit(const char **fmt, va_list *va)
     case 'n': va_arg(*va, Py_ssize_t *); break;
     case 'f': va_arg(*va, float *); break;
     case 'd': va_arg(*va, double *); break;
+    case 'D': va_arg(*va, Py_complex *); break;
     case 'c': va_arg(*va, char *); break;
     case 'C': va_arg(*va, int *); break;
     case 's': case 'z': case 'y': {
