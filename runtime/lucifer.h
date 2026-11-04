@@ -17,6 +17,10 @@
    struct lu_frame *(*)(PyThreadState *, PyObject *const *, Py_ssize_t),
    which returns a frame for the interpreter to push (DESIGN 5.2). */
 #define LU_METH_FRAME 0x4000
+/* Set on the def of a kernel function: its ml_meth is a stub, so a C caller that
+   dispatches on ml_flags (Cython does) sees a calling convention it does not know
+   and takes the generic call. */
+#define LU_METH_KERNEL 0x2000
 
 /* Report an unported C-API function by name and abort. */
 _Noreturn void lu_unimplemented(const char *name);

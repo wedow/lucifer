@@ -911,6 +911,39 @@ raise_from_frame(PyObject *self, PyObject *args)
     return NULL;
 }
 
+/* call_direct(f, self_or_arg): what Cython does with a builtin whose flags it knows,
+   a call of ml_meth itself, else the generic call. */
+static PyObject *
+call_direct(PyObject *self, PyObject *args)
+{
+    PyObject *f, *arg;
+    if (!PyArg_ParseTuple(args, "OO", &f, &arg)) {
+        return NULL;
+    }
+    if (PyCFunction_Check(f)) {
+        int flags = PyCFunction_GET_FLAGS(f) & ~(METH_CLASS | METH_STATIC | METH_COEXIST);
+        if (flags == METH_O) {
+            return PyCFunction_GET_FUNCTION(f)(PyCFunction_GET_SELF(f), arg);
+        }
+        if (flags == (METH_FASTCALL | METH_KEYWORDS)) {
+            PyObject *stack[1] = { arg };
+            return ((_PyCFunctionFastWithKeywords)(void (*)(void))PyCFunction_GET_FUNCTION(f))(
+                PyCFunction_GET_SELF(f), stack, 1, NULL);
+        }
+    }
+    if (Py_IS_TYPE(f, &PyMethodDescr_Type)) {      /* unbound method, self = arg */
+        PyMethodDef *ml = ((PyMethodDescrObject *)f)->d_method;
+        int flags = ml->ml_flags & ~(METH_CLASS | METH_STATIC | METH_COEXIST);
+        if (flags == METH_NOARGS) {
+            return ml->ml_meth(arg, NULL);
+        }
+        if (flags == (METH_FASTCALL | METH_KEYWORDS)) {
+            return ((_PyCFunctionFastWithKeywords)(void (*)(void))ml->ml_meth)(arg, NULL, 0, NULL);
+        }
+    }
+    return PyObject_CallOneArg(f, arg);
+}
+
 /* ready.raise_object(type, value): PyErr_SetObject, which runs the class. */
 static PyObject *
 raise_object(PyObject *self, PyObject *args)
@@ -1105,6 +1138,7 @@ static PyMethodDef module_methods[] = {
     { "strings", strings, METH_O, NULL },
     { "errors", errors, METH_NOARGS, NULL },
     { "raise_object", raise_object, METH_VARARGS, NULL },
+    { "call_direct", call_direct, METH_VARARGS, NULL },
     { "raise_from_frame", raise_from_frame, METH_VARARGS, NULL },
     { "is_sequence", is_sequence, METH_O, NULL },
     { "seq_shape", seq_shape, METH_O, NULL },

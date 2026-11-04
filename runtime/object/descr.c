@@ -78,7 +78,7 @@ lu_kernel_def_new(PyObject *name, PyObject *func, int flags, int bind)
     }
     k->def.ml_name = PyUnicode_AsUTF8(name);
     k->def.ml_meth = lu_kernel_meth;
-    k->def.ml_flags = METH_FASTCALL | METH_KEYWORDS | flags;
+    k->def.ml_flags = METH_FASTCALL | METH_KEYWORDS | LU_METH_KERNEL | flags;
     PyObject *doc = ((PyFunctionObject *)func)->func_doc;
     k->def.ml_doc = doc != NULL && PyUnicode_Check(doc) ? PyUnicode_AsUTF8(doc) : NULL;
     k->func = Py_NewRef(func);
