@@ -326,11 +326,10 @@ prim_dictiter_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 /* dictiter_next(it): the next key, value or (key, value) pair, MISSING when
    exhausted; RuntimeError when the dict changed size or its entries
    during the iteration. */
-static PyObject *
-prim_dictiter_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+PyObject *
+lu_dictiter_next(PyObject *it)
 {
-    ARGS(1);
-    dictiterobject *di = (dictiterobject *)args[0];
+    dictiterobject *di = (dictiterobject *)it;
     PyTypeObject *tp = Py_TYPE(di);
     int reverse = is_reverse(tp);
     PyDictObject *d = di->di_dict;
@@ -374,6 +373,13 @@ prim_dictiter_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     Py_END_CRITICAL_SECTION();
     return result;
+}
+
+static PyObject *
+prim_dictiter_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    return lu_dictiter_next(args[0]);
 }
 
 /* dictiter_len(it): the entries left, 0 once the dict changed size. */

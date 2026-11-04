@@ -2103,6 +2103,14 @@ op_FOR_ITER: {
     else if (itp == &PyRangeIter_Type) {
         v = lu_rangeiter_next(iter);
     }
+    else if (itp == &PyDictIterKey_Type || itp == &PyDictIterValue_Type || itp == &PyDictIterItem_Type) {
+        SAVE_FRAME();
+        v = lu_dictiter_next(iter);
+        if (v == LU_MISSING) {
+            Py_DECREF(v);
+            v = NULL;
+        }
+    }
     else if (itp == &PyGen_Type && ts->interp->eval_frame == NULL) {
         SAVE_FRAME();
         callee = lu_gen_resume(ts, iter, NULL);
@@ -2320,7 +2328,11 @@ op_BINARY_OP: {
         kret = LU_RETURN_PUSH;
         goto kernel_call;
     }
-    if (PyLong_CheckExact(left) && PyLong_CheckExact(right)) {
+    int bitwise = oparg == NB_AND || oparg == NB_OR || oparg == NB_XOR
+                  || oparg == NB_INPLACE_AND || oparg == NB_INPLACE_OR || oparg == NB_INPLACE_XOR;
+    /* A bool computes as an int, except under the bitwise operators, which keep bool. */
+    if ((PyLong_CheckExact(left) || (!bitwise && PyBool_Check(left)))
+        && (PyLong_CheckExact(right) || (!bitwise && PyBool_Check(right)))) {
         SAVE_FRAME();
         PyObject *res = lu_long_binary(oparg, left, right);
         ERROR_IF(res == NULL);

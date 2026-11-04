@@ -7,7 +7,7 @@ exact tuple, list and range loops never come here."""
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, kernel_set,
     iter_new, iter_state, iter_set, list_append, list_splice, tuple_from, is_callable,
-    alloc, field_get, field_set,
+    alloc, field_get, field_set, seqiter_next, dictiter_next,
 )
 from _lucifer import _boot, operators
 
@@ -41,9 +41,21 @@ def get_iter(obj):
     return iter_new(static_type('iterator'), obj)
 
 
+_SEQ_ITERATORS = (static_type('tuple_iterator'), static_type('list_iterator'))
+_DICT_ITERATORS = (static_type('dict_keyiterator'), static_type('dict_valueiterator'),
+                   static_type('dict_itemiterator'))
+_seq0, _seq1 = _SEQ_ITERATORS
+_dict0, _dict1, _dict2 = _DICT_ITERATORS
+
+
 def next_item(it):
     """The step of FOR_ITER and next(): the next item, or MISSING when the
     iterator is exhausted."""
+    t = type(it)
+    if t is _seq0 or t is _seq1:
+        return seqiter_next(it)
+    if t is _dict0 or t is _dict1 or t is _dict2:
+        return dictiter_next(it)
     f = type_lookup(type(it), '__next__')
     if f is MISSING:
         error(TypeError, str_join('', ("'", _name(it), "' object is not an iterator")))

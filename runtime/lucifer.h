@@ -1031,6 +1031,9 @@ typedef struct {
 /* The next item of a tuple, list or list_reverseiterator, or a range_iterator's
    next int; NULL when exhausted. */
 PyObject *lu_seqiter_next(PyObject *iter);
+/* The next key, value or (key, value) of a dict iterator, LU_MISSING when it
+   is exhausted, NULL with RuntimeError when the dict changed. */
+PyObject *lu_dictiter_next(PyObject *it);
 PyObject *lu_rangeiter_next(PyObject *iter);
 /* A new range_iterator or longrange_iterator over the range r, or NULL with an error. */
 PyObject *lu_range_iter(PyObject *r);
