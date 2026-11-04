@@ -278,12 +278,28 @@ subscr_slot(PyObject *container, PyObject *sub)
     return NULL;
 }
 
-/* `item in container` for an exact dict, tuple or list, as lu_dict_find_native
-   decides it: 1, 0, or -1 for the kernel. */
+/* Whether one of n items is item, as lu_native_eq decides: 1, 0, or -1. */
+static int
+items_contain(PyObject *const *items, Py_ssize_t n, PyObject *item)
+{
+    for (Py_ssize_t i = 0; i < n; i++) {
+        int eq = items[i] == item ? 1 : lu_native_eq(items[i], item);
+        if (eq != 0) {
+            return eq;
+        }
+    }
+    return 0;
+}
+
+/* `item in container` for an exact set, frozenset, dict, tuple or list, as
+   lu_dict_find_native decides it: 1, 0, or -1 for the kernel. A list is
+   scanned in its critical section, which its mutators hold: a resize
+   replaces the array and the size apart. */
 static int
 contains_native(PyObject *container, PyObject *item)
 {
-    PyObject *value, **items;
+    PyObject *value;
+    int found = -1;
     if (PyAnySet_CheckExact(container)) {
         PyTypeObject *kt = Py_TYPE(item);
         int verdict;
@@ -297,21 +313,14 @@ contains_native(PyObject *container, PyObject *item)
         return lu_dict_find_native(container, item, &value);
     }
     if (PyTuple_CheckExact(container)) {
-        items = ((PyTupleObject *)container)->ob_item;
+        return items_contain(((PyTupleObject *)container)->ob_item, Py_SIZE(container), item);
     }
-    else if (PyList_CheckExact(container) && _Py_IsOwnedByCurrentThread(container)) {
-        items = ((PyListObject *)container)->ob_item;
+    if (PyList_CheckExact(container)) {
+        Py_BEGIN_CRITICAL_SECTION(container);
+        found = items_contain(((PyListObject *)container)->ob_item, Py_SIZE(container), item);
+        Py_END_CRITICAL_SECTION();
     }
-    else {
-        return -1;
-    }
-    for (Py_ssize_t i = 0; i < Py_SIZE(container); i++) {
-        int eq = items[i] == item ? 1 : lu_native_eq(items[i], item);
-        if (eq != 0) {
-            return eq;
-        }
-    }
-    return 0;
+    return found;
 }
 
 /* Whether instances of `tp` use object's attribute hook `id` (__getattribute__
