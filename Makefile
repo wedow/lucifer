@@ -86,7 +86,7 @@ STEP_TMO = 3600
 RUN = timeout -k 10 $(TMO)
 STEP = timeout -k 10 $(STEP_TMO)
 
-.PHONY: all abi-audit check check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler regen
+.PHONY: all abi-audit check check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler check-timing regen
 all: bin/lucifer build/lib/stamp
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -222,6 +222,10 @@ check-kernel: bin/lucifer build/lib/stamp
 	$(STEP) $(HOST_PYTHON) tools/kernelcheck --opcodes
 	$(STEP) $(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer \
 	  --programs "$(PROGRAMS)" $(if $(LANE),--lane $(LANE))
+
+# Wall-clock bounds: an uncaught exception, a 100,000-line function.
+check-timing: bin/lucifer build/lib/stamp
+	$(STEP) python3 tools/timecheck --lucifer bin/lucifer --oracle $(ORACLE_T)
 
 check-compiler:
 	$(HOST_PYTHON) tools/compilercheck --corpus closure,difftest,kernel,lib --require closure,difftest,kernel
