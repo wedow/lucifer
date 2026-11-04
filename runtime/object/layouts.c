@@ -367,8 +367,7 @@ PyList_New(Py_ssize_t size)
         return NULL;
     }
     if (size > 0) {
-        /* Storage is reclaimed through QSBR once lists grow concurrently (K1h). */
-        op->ob_item = PyMem_Calloc(size, sizeof(PyObject *));
+        op->ob_item = lu_list_array_new(size);
         if (op->ob_item == NULL) {
             Py_DECREF(op);
             return PyErr_NoMemory();
@@ -386,13 +385,18 @@ lu_list_append(PyObject *op, PyObject *item)
     Py_ssize_t n = Py_SIZE(l);
     if (n == l->allocated) {
         Py_ssize_t grown = n < 4 ? 4 : 2 * n;
-        PyObject **items = PyMem_Realloc(l->ob_item, grown * sizeof(PyObject *));
+        PyObject **items = lu_list_array_new(grown);
         if (items == NULL) {
             PyErr_NoMemory();
             return -1;
         }
-        l->ob_item = items;
+        if (n > 0) {
+            memcpy(items, l->ob_item, n * sizeof(PyObject *));
+        }
+        PyObject **old = l->ob_item;
+        _Py_atomic_store_ptr_release(&l->ob_item, items);
         l->allocated = grown;
+        lu_list_array_retire(old);
     }
     l->ob_item[n] = Py_NewRef(item);
     Py_SET_SIZE(l, n + 1);
@@ -406,7 +410,7 @@ list_dealloc(PyObject *op)
     for (Py_ssize_t i = Py_SIZE(l); --i >= 0; ) {
         Py_XDECREF(l->ob_item[i]);
     }
-    PyMem_Free(l->ob_item);
+    lu_list_array_free(l->ob_item);
     lu_object_free(op);
 }
 
@@ -429,12 +433,12 @@ list_clear(PyObject *op)
     if (items != NULL) {
         Py_ssize_t i = Py_SIZE(l);
         Py_SET_SIZE(l, 0);
-        l->ob_item = NULL;
+        _Py_atomic_store_ptr_release(&l->ob_item, NULL);
         l->allocated = 0;
         while (--i >= 0) {
             Py_XDECREF(items[i]);
         }
-        lu_qsbr_retire(items);
+        lu_list_array_retire(items);
     }
     return 0;
 }

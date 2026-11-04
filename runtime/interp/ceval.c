@@ -298,9 +298,7 @@ small_index(PyObject *sub)
 }
 
 /* BINARY_OP NB_SUBSCR on an exact list or tuple with a compact int index in
-   range: the item (a new reference), or NULL. A list is read in its critical
-   section, which its mutators hold: they replace the array and the size
-   apart, and free items. */
+   range: the item (a new reference), or NULL. */
 static PyObject *
 subscr_item(PyObject *container, PyObject *sub)
 {
@@ -310,11 +308,7 @@ subscr_item(PyObject *container, PyObject *sub)
         return NULL;
     }
     if (PyList_CheckExact(container)) {
-        Py_BEGIN_CRITICAL_SECTION(container);
-        if (i < Py_SIZE(container)) {
-            item = Py_NewRef(((PyListObject *)container)->ob_item[i]);
-        }
-        Py_END_CRITICAL_SECTION();
+        item = lu_list_item_ref((PyListObject *)container, i);
     }
     else if (PyTuple_CheckExact(container) && i < Py_SIZE(container)) {
         item = Py_NewRef(((PyTupleObject *)container)->ob_item[i]);

@@ -88,8 +88,15 @@ seq_take(PyObject **items, Py_ssize_t n, int as_tuple)
         PyMem_Free(items);
     }
     else if (n > 0) {
-        PyMem_Free(((PyListObject *)r)->ob_item);
-        ((PyListObject *)r)->ob_item = items;
+        PyObject **array = lu_list_array_new(n);
+        if (array == NULL) {
+            release(items, n);
+            Py_DECREF(r);
+            return PyErr_NoMemory();
+        }
+        memcpy(array, items, n * sizeof(PyObject *));
+        PyMem_Free(items);
+        ((PyListObject *)r)->ob_item = array;
         ((PyListObject *)r)->allocated = n;
         Py_SET_SIZE(r, n);
     }
@@ -120,7 +127,7 @@ list_resize(PyListObject *self, Py_ssize_t newsize)
     PyObject **items = NULL;
     if (new_allocated > 0) {
         if (new_allocated > (size_t)PY_SSIZE_T_MAX / sizeof(PyObject *)
-            || (items = PyMem_Malloc(new_allocated * sizeof(PyObject *))) == NULL) {
+            || (items = lu_list_array_new(new_allocated)) == NULL) {
             PyErr_NoMemory();
             return -1;
         }
@@ -133,10 +140,22 @@ list_resize(PyListObject *self, Py_ssize_t newsize)
     _Py_atomic_store_ptr_release(&self->ob_item, items);
     Py_SET_SIZE(self, newsize);
     self->allocated = (Py_ssize_t)new_allocated;
-    if (old != NULL) {
-        lu_qsbr_retire(old);
-    }
+    lu_list_array_retire(old);
     return 0;
+}
+
+/* l[i] under the list's lock, the reference marked as shared so that
+   lock-free reads can take the item from then on; NULL when out of range. */
+PyObject *
+lu_list_item_ref_locked(PyListObject *l, Py_ssize_t i)
+{
+    PyObject *v = NULL;
+    Py_BEGIN_CRITICAL_SECTION(l);
+    if (0 <= i && i < Py_SIZE(l)) {
+        v = lu_new_ref_with_lock(l->ob_item[i]);
+    }
+    Py_END_CRITICAL_SECTION();
+    return v;
 }
 
 /* seq_get(seq, i): item i of a tuple or list, 0 <= i < len. */
@@ -146,11 +165,7 @@ prim_seq_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(2); SEQ(0); SSIZE(1, i);
     PyObject *v = NULL;
     if (PyList_Check(args[0])) {
-        Py_BEGIN_CRITICAL_SECTION(args[0]);
-        if (0 <= i && i < Py_SIZE(args[0])) {
-            v = Py_NewRef(((PyListObject *)args[0])->ob_item[i]);
-        }
-        Py_END_CRITICAL_SECTION();
+        v = lu_list_item_ref((PyListObject *)args[0], i);
     }
     else if (0 <= i && i < Py_SIZE(args[0])) {
         v = Py_NewRef(((PyTupleObject *)args[0])->ob_item[i]);
@@ -492,7 +507,7 @@ list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, int cl
         Py_DECREF(recycle[k]);
     }
     if (cleared) {
-        lu_qsbr_retire(recycle);        /* the old array, which readers may still hold */
+        lu_list_array_retire(recycle);  /* the old array, which readers may still hold */
     }
     else {
         PyMem_Free(recycle);
@@ -706,7 +721,6 @@ prim_list_sort_begin(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     PyListObject *held = (PyListObject *)items;
     Py_BEGIN_CRITICAL_SECTION(l);
-    PyMem_Free(held->ob_item);
     held->ob_item = l->ob_item;
     held->allocated = l->allocated;
     Py_SET_SIZE(held, Py_SIZE(l));
@@ -739,7 +753,7 @@ prim_list_sort_end(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         while (--n >= 0) {
             Py_XDECREF(grown[n]);
         }
-        lu_qsbr_retire(grown);
+        lu_list_array_retire(grown);
     }
     return Py_NewRef(modified ? Py_True : Py_False);
 }
@@ -775,43 +789,30 @@ lu_seqiter_next(PyObject *iter)
 {
     seqiterobject *it = (seqiterobject *)iter;
     PyTypeObject *tp = Py_TYPE(iter);
-    /* The iterator's state under its own lock, and a list's array and size,
-       which change apart, under the list's too. The sequence is taken first,
-       as a lock-free reader takes an item, so that it outlives an exhaustion
-       racing to drop it. */
+    /* The iterator's state changes under its own lock; the list is read
+       without its own. */
     PyObject *v = NULL, *dead = NULL;
-    PyObject *seq = lu_try_xget_ref(&it->it_seq);
-    if (seq == NULL) {
-        Py_BEGIN_CRITICAL_SECTION(iter);
-        seq = it->it_seq != NULL ? lu_new_ref_with_lock(it->it_seq) : NULL;
-        Py_END_CRITICAL_SECTION();
-        if (seq == NULL) {
-            return NULL;
+    Py_BEGIN_CRITICAL_SECTION(iter);
+    PyObject *seq = it->it_seq;
+    if (seq != NULL) {
+        Py_ssize_t i = it->it_index;
+        if (tp == &PyTupleIter_Type) {
+            v = i < Py_SIZE(seq) ? Py_NewRef(PyTuple_GET_ITEM(seq, i)) : NULL;
         }
-    }
-    Py_BEGIN_CRITICAL_SECTION2(iter, tp == &PyTupleIter_Type ? iter : seq);
-    if (it->it_seq == seq) {
-        if (tp == &PyListRevIter_Type) {
-            if (it->it_index >= 0 && it->it_index < Py_SIZE(seq)) {
-                v = Py_NewRef(((PyListObject *)seq)->ob_item[it->it_index--]);
-            }
-            else {
-                it->it_index = -1;
-            }
+        else {
+            v = i >= 0 ? lu_list_item_ref((PyListObject *)seq, i) : NULL;
         }
-        else if (it->it_index < Py_SIZE(seq)) {
-            v = Py_NewRef(tp == &PyTupleIter_Type ? PyTuple_GET_ITEM(seq, it->it_index)
-                                                  : ((PyListObject *)seq)->ob_item[it->it_index]);
-            it->it_index++;
+        if (v != NULL) {
+            it->it_index += tp == &PyListRevIter_Type ? -1 : 1;
         }
-        if (v == NULL) {
+        else {
+            it->it_index = tp == &PyListRevIter_Type ? -1 : i;
             it->it_seq = NULL;
             dead = seq;
         }
     }
-    Py_END_CRITICAL_SECTION2();
+    Py_END_CRITICAL_SECTION();
     Py_XDECREF(dead);
-    Py_DECREF(seq);
     return v;
 }
 
