@@ -268,14 +268,10 @@ PyType_Unwatch(int id, PyObject *obj)
     return 0;
 }
 
-PyObject *
-_PyType_Lookup(PyTypeObject *tp, PyObject *name)
+/* The walk of the MRO: the first dict that has the name. */
+static PyObject *
+lookup_in_mro(PyTypeObject *tp, PyObject *name)
 {
-    /* The method cache's assignment: a lookup is what gives a type its tag. */
-    if (tp->tp_version_tag == 0 && tp->tp_versions_used < MAX_VERSIONS_PER_CLASS
-        && PyUnicode_CheckExact(name) && PyUnicode_GET_LENGTH(name) <= MCACHE_MAX_ATTR_SIZE) {
-        lu_type_assign_version(tp);
-    }
     PyObject *mro = tp->tp_mro;
     if (mro == NULL) {
         /* During creation, before the MRO exists: the type, then its bases. */
@@ -296,6 +292,45 @@ _PyType_Lookup(PyTypeObject *tp, PyObject *name)
         }
     }
     return NULL;
+}
+
+PyObject *
+_PyType_Lookup(PyTypeObject *tp, PyObject *name)
+{
+    /* The method cache's assignment: a lookup is what gives a type its tag. */
+    if (tp->tp_version_tag == 0 && tp->tp_versions_used < MAX_VERSIONS_PER_CLASS
+        && PyUnicode_CheckExact(name) && PyUnicode_GET_LENGTH(name) <= MCACHE_MAX_ATTR_SIZE) {
+        lu_type_assign_version(tp);
+    }
+    struct _is *interp = PyInterpreterState_Get();
+    uint32_t version = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE);
+    /* A type's tag changes whenever it or a base changes, and interned names
+       are immortal: an entry for (tag, name) cannot go stale. Before the
+       kernel has booted, static types change without a tag change. */
+    if (version == 0 || !interp->specializing || tp->tp_mro == NULL
+        || !PyUnicode_CheckExact(name) || !PyUnicode_CHECK_INTERNED(name)) {
+        return lookup_in_mro(tp, name);
+    }
+    struct lu_mcache_entry *e = &interp->mcache[(version ^ (uint32_t)((uintptr_t)name >> 3)) & (LU_MCACHE_SIZE - 1)];
+    uint32_t seq = __atomic_load_n(&e->seq, __ATOMIC_ACQUIRE);
+    if (!(seq & 1)) {
+        uint32_t v = __atomic_load_n(&e->version, __ATOMIC_RELAXED);
+        PyObject *n = __atomic_load_n(&e->name, __ATOMIC_RELAXED);
+        PyObject *value = __atomic_load_n(&e->value, __ATOMIC_RELAXED);
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if (v == version && n == name && __atomic_load_n(&e->seq, __ATOMIC_RELAXED) == seq) {
+            return value;
+        }
+    }
+    PyObject *value = lookup_in_mro(tp, name);
+    if (!(seq & 1) && __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) == version
+        && __atomic_compare_exchange_n(&e->seq, &seq, seq + 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+        __atomic_store_n(&e->version, version, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->name, name, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->value, value, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->seq, seq + 2, __ATOMIC_RELEASE);
+    }
+    return value;
 }
 
 PyObject *

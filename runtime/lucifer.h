@@ -301,6 +301,7 @@ typedef struct { uint8_t tools[LU_MON_LOCAL_EVENTS]; } lu_local_monitors;
 typedef struct { uint8_t tools[LU_MON_UNGROUPED_EVENTS]; } lu_global_monitors;
 
 /* PyInterpreterState (private layout; DESIGN 4.1). */
+#define LU_MCACHE_SIZE 4096
 struct _is {
     mi_subproc_id_t subproc;    /* segments abandoned by one interpreter's carriers
                                    are reclaimed only by its own */
@@ -338,6 +339,16 @@ struct _is {
     lu_watcher func_watchers[LU_MAX_WATCHERS];      /* PyFunction_WatchCallback */
     lu_watcher code_watchers[LU_MAX_WATCHERS];      /* PyCode_WatchCallback */
     int specializing;                   /* set once the kernel has booted: instructions may specialize */
+    /* The type attribute cache (CPython's method cache): what _PyType_Lookup
+       found for an interned name in a type of that version. Read without a
+       lock: an entry is valid when its sequence is even and the same before
+       and after the read; a writer claims an even sequence by making it odd. */
+    struct lu_mcache_entry {
+        uint32_t seq;
+        uint32_t version;
+        PyObject *name;
+        PyObject *value;            /* borrowed; NULL for an absent name */
+    } mcache[LU_MCACHE_SIZE];
     int max_str_digits;                 /* sys.get_int_max_str_digits() */
     PyObject *importlib;                /* _frozen_importlib, once installed */
     PyObject *import_func;              /* the original builtins.__import__ */

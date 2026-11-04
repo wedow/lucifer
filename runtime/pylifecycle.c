@@ -614,6 +614,7 @@ release_interpreter(struct _is *interp)
     interp->importlib = interp->import_func = NULL;
     interp->eval_frame = NULL;
     interp->specializing = 0;
+    memset(interp->mcache, 0, sizeof interp->mcache);
     memset(interp->static_types, 0, sizeof interp->static_types);
     memset(interp->kernel, 0, sizeof interp->kernel);
     PyConfig_Clear(&interp->config);
