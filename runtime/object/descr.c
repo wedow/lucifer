@@ -604,6 +604,12 @@ instancemethod_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 PyObject *
 PyDictProxy_New(PyObject *mapping)
 {
+    PyMappingMethods *mm = Py_TYPE(mapping)->tp_as_mapping;
+    if (mm == NULL || mm->mp_subscript == NULL || PyList_Check(mapping) || PyTuple_Check(mapping)) {
+        lu_err_format(PyExc_TypeError, "mappingproxy() argument must be a mapping, not %.200s",
+                      Py_TYPE(mapping)->tp_name);
+        return NULL;
+    }
     mappingproxyobject *p = (mappingproxyobject *)lu_object_new(&PyDictProxy_Type,
                                                                 sizeof(mappingproxyobject));
     if (p != NULL) {

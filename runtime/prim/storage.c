@@ -145,20 +145,24 @@ list_resize(PyListObject *self, Py_ssize_t newsize)
 }
 
 /* l[i] under the list's lock, the reference marked as shared so that
-   lock-free reads can take the item from then on; NULL when out of range. */
+   lock-free reads can take the item from then on; NULL when out of range or
+   the slot is one of an uninitialized list's. */
 PyObject *
 lu_list_item_ref_locked(PyListObject *l, Py_ssize_t i)
 {
     PyObject *v = NULL;
     Py_BEGIN_CRITICAL_SECTION(l);
-    if (0 <= i && i < Py_SIZE(l)) {
+    if (0 <= i && i < Py_SIZE(l) && l->ob_item[i] != NULL) {
         v = lu_new_ref_with_lock(l->ob_item[i]);
     }
     Py_END_CRITICAL_SECTION();
     return v;
 }
 
-/* seq_get(seq, i): item i of a tuple or list, 0 <= i < len. */
+/* seq_get(seq, i): item i of a tuple or list, 0 <= i < len. A NULL slot of
+   an uninitialized list answers the NULL_ITEM singleton ("<NULL>", what its
+   repr shows, CPython's list_repr); every other reader of one is undefined
+   in CPython too. */
 static PyObject *
 prim_seq_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -166,9 +170,20 @@ prim_seq_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *v = NULL;
     if (PyList_Check(args[0])) {
         v = lu_list_item_ref((PyListObject *)args[0], i);
+        if (v == NULL) {
+            /* out of range, or a NULL slot of an uninitialized list, which
+               no other thread is racing into existence: the locked read
+               tells them apart */
+            Py_BEGIN_CRITICAL_SECTION(args[0]);
+            if (0 <= i && i < Py_SIZE(args[0]) && ((PyListObject *)args[0])->ob_item[i] == NULL) {
+                v = Py_NewRef(_PyRuntime.singletons.null_item);
+            }
+            Py_END_CRITICAL_SECTION();
+        }
     }
     else if (0 <= i && i < Py_SIZE(args[0])) {
-        v = Py_NewRef(((PyTupleObject *)args[0])->ob_item[i]);
+        PyObject *item = ((PyTupleObject *)args[0])->ob_item[i];
+        v = item != NULL ? Py_NewRef(item) : Py_NewRef(_PyRuntime.singletons.null_item);
     }
     if (v == NULL && !PyErr_Occurred()) {
         lu_err_format(PyExc_IndexError, "index out of range");
