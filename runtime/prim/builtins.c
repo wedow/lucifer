@@ -74,12 +74,12 @@ prim_caller_code_flags(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* eval_code(code, globals, locals): a frame primitive that runs a code
-   object, which takes no closure, as exec and eval do; globals gets
+   object (locals any mapping), which takes no closure, as exec and eval do; globals gets
    __builtins__ when it has none. */
 static struct lu_frame *
 prim_eval_code(PyThreadState *ts, PyObject *const *args, Py_ssize_t nargs)
 {
-    if (nargs != 3 || !PyCode_Check(args[0]) || !PyDict_Check(args[1]) || !PyDict_Check(args[2])) {
+    if (nargs != 3 || !PyCode_Check(args[0]) || !PyDict_Check(args[1])) {
         lu_err_format(PyExc_TypeError, "eval_code(code, globals, locals)");
         return NULL;
     }

@@ -597,8 +597,6 @@ def _source(fname, source, globals_, locals_):
         if text is None:
             error(TypeError, str_join('', (fname, '() arg 1 must be a string, bytes or code object')))
         source = _code_of(fname, text, fname)
-    if not kind(locals_, 'dict'):
-        raise NotImplementedError(str_join('', (fname, '() with a locals mapping that is not a dict')))
     return source, globals_, locals_
 
 
