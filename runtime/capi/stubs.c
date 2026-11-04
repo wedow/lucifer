@@ -211,15 +211,6 @@ LU_STUB int PyFile_SetOpenCodeHook(Py_OpenCodeHookFunction hook, void *userData)
 LU_STUB double PyFloat_AsDouble(PyObject*) { LU_UNIMPLEMENTED("PyFloat_AsDouble"); }
 LU_STUB PyObject* PyFloat_FromDouble(double) { LU_UNIMPLEMENTED("PyFloat_FromDouble"); }
 LU_STUB PyObject* PyFloat_FromString(PyObject*) { LU_UNIMPLEMENTED("PyFloat_FromString"); }
-LU_STUB PyObject* PyFloat_GetInfo(void) { LU_UNIMPLEMENTED("PyFloat_GetInfo"); }
-LU_STUB double PyFloat_GetMax(void) { LU_UNIMPLEMENTED("PyFloat_GetMax"); }
-LU_STUB double PyFloat_GetMin(void) { LU_UNIMPLEMENTED("PyFloat_GetMin"); }
-LU_STUB int PyFloat_Pack2(double x, char *p, int le) { LU_UNIMPLEMENTED("PyFloat_Pack2"); }
-LU_STUB int PyFloat_Pack4(double x, char *p, int le) { LU_UNIMPLEMENTED("PyFloat_Pack4"); }
-LU_STUB int PyFloat_Pack8(double x, char *p, int le) { LU_UNIMPLEMENTED("PyFloat_Pack8"); }
-LU_STUB double PyFloat_Unpack2(const char *p, int le) { LU_UNIMPLEMENTED("PyFloat_Unpack2"); }
-LU_STUB double PyFloat_Unpack4(const char *p, int le) { LU_UNIMPLEMENTED("PyFloat_Unpack4"); }
-LU_STUB double PyFloat_Unpack8(const char *p, int le) { LU_UNIMPLEMENTED("PyFloat_Unpack8"); }
 LU_STUB void PyFrame_FastToLocals(PyFrameObject *) { LU_UNIMPLEMENTED("PyFrame_FastToLocals"); }
 LU_STUB int PyFrame_FastToLocalsWithError(PyFrameObject *f) { LU_UNIMPLEMENTED("PyFrame_FastToLocalsWithError"); }
 LU_STUB void PyFrame_LocalsToFast(PyFrameObject *, int) { LU_UNIMPLEMENTED("PyFrame_LocalsToFast"); }
