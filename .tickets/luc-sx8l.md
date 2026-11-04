@@ -1,5 +1,5 @@
 ---
-id: ln-sx8l
+id: luc-sx8l
 status: open
 deps: []
 links: [luc-njhp]
