@@ -593,8 +593,8 @@ eq_native(PyObject *a, PyObject *b, int depth)
    decide, for a class whose metaclass is type: 2 when it only allocates (its
    __new__ and __init__ are object's, and no arguments), 1 when it also calls
    the Python function *func (its __new__ is object's), 3 when *func is its
-   __new__, called with the class (its __init__ is object's, and so no-op),
-   0 for the kernel. */
+   __new__, called with the class (its __init__ is object's, so that only an
+   instance of a subclass may need one), 0 for the kernel. */
 static int
 instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **func)
 {
@@ -615,6 +615,38 @@ instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **func)
     }
     *func = init;
     return init != NULL && PyFunction_Check(init);
+}
+
+/* The rest of type.__call__ once the class's __new__ returned obj (a
+   reference this takes): when obj is an instance of cls, its type's __init__
+   with the call's positional args, unless that is object's and has nothing to
+   refuse. obj, or NULL with an error. */
+static PyObject *
+init_new_instance(PyThreadState *ts, PyTypeObject *cls, PyObject *obj, PyObject *args)
+{
+    PyTypeObject *tp = Py_TYPE(obj), *object = &PyBaseObject_Type;
+    PyObject *init = PyType_IsSubtype(tp, cls) ? _PyType_Lookup(tp, LU_ID(__init__)) : NULL;
+    Py_ssize_t n = PyTuple_GET_SIZE(args);
+    if (init == NULL
+        || (init == _PyType_Lookup(object, LU_ID(__init__))
+            && (n == 0 || _PyType_Lookup(tp, LU_ID(__new__)) != _PyType_Lookup(object, LU_ID(__new__))))) {
+        return obj;
+    }
+    struct lu_task *t = (struct lu_task *)ts;
+    t->pin++;
+    PyObject *r = lu_call_special(obj, LU_ID(__init__), &PyTuple_GET_ITEM(args, 0), n);
+    t->pin--;
+    if (r != Py_None) {
+        if (r != NULL) {
+            lu_err_format(PyExc_TypeError, "__init__() should return None, not '%.200s'",
+                          Py_TYPE(r)->tp_name);
+            Py_DECREF(r);
+        }
+        Py_DECREF(obj);
+        return NULL;
+    }
+    Py_DECREF(r);
+    return obj;
 }
 
 /* isinstance(obj, cls) for an exact class, or a tuple of them, as
@@ -1058,6 +1090,15 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
             } \
             Py_DECREF(v); \
         } \
+        else if ((ret) == LU_RETURN_NEW) { \
+            PyObject *args_ = POP(), *cls_ = POP(); \
+            SAVE_FRAME(); \
+            PyObject *obj_ = init_new_instance(ts, (PyTypeObject *)cls_, (v), args_); \
+            Py_DECREF(args_); \
+            Py_DECREF(cls_); \
+            ERROR_IF(obj_ == NULL); \
+            PUSH(obj_); \
+        } \
         else if ((ret) == LU_RETURN_FOR_ITER) { \
             if ((v) == LU_MISSING) { \
                 next_instr += instr_oparg(code, SEND_START()) + 1; \
@@ -1452,13 +1493,36 @@ call_tail: {
     }
     PyObject *target = NULL, *self = NULL;
     PyObject *init = NULL;
-    int plan = 0;
-    if (free_self && !mon && Py_IS_TYPE(callable, &PyType_Type) && callable != (PyObject *)&PyType_Type
-        && (plan = instance_plan((PyTypeObject *)callable, total, &init)) == 3) {
-        target = init;          /* __new__ makes the instance: run it in this loop */
-        self = callable;
+    int plan = free_self && !mon && Py_IS_TYPE(callable, &PyType_Type) && callable != (PyObject *)&PyType_Type
+        ? instance_plan((PyTypeObject *)callable, total, &init) : 0;
+    if (plan == 3 && kwnames == NULL) {
+        /* The class's __new__ (in init) run in this loop, the class and the
+           arguments kept below it for the __init__ of what it returns. */
+        PyObject *kept = PyTuple_New(npos);
+        if (kept == NULL) {
+            result = NULL;
+            goto call_done;
+        }
+        for (Py_ssize_t i = 0; i < npos; i++) {
+            PyTuple_SET_ITEM(kept, i, Py_NewRef(args[i]));
+        }
+        *--args = Py_NewRef(callable);
+        callee = lu_frame_call(ts, (PyFunctionObject *)init, args, npos + 1, NULL);
+        PyMem_Free(to_free);
+        sp = base;
+        if (callee == NULL) {
+            Py_DECREF(kept);
+            Py_DECREF(callable);
+            frame->stackpointer = sp;
+            goto error;
+        }
+        PUSH(callable);
+        PUSH(kept);
+        frame->stackpointer = sp;
+        callee->ret = kret = LU_RETURN_NEW;
+        goto push_callee;
     }
-    else if (plan != 0) {
+    if (plan == 1 || plan == 2) {
         /* A class instance: allocated here, its __init__ run in this loop. */
         PyObject *obj = lu_alloc_instance((PyTypeObject *)callable, &PyBaseObject_Type);
         if (obj == NULL || plan == 2) {
@@ -1481,10 +1545,7 @@ call_tail: {
         callee->ret = kret = LU_RETURN_INIT;
         goto push_callee;
     }
-    if (target != NULL) {
-        /* the class's __new__ */
-    }
-    else if (Py_IS_TYPE(callable, &PyFunction_Type)) {
+    if (Py_IS_TYPE(callable, &PyFunction_Type)) {
         target = callable;
     }
     else if (Py_IS_TYPE(callable, &PyCFunction_Type)

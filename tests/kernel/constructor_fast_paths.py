@@ -207,3 +207,42 @@ try:
     Pt.x.__get__(5, int)
 except TypeError as ex:
     print(82, ex)
+
+
+# A __new__ that returns an instance of a subclass: type.__call__ then runs
+# that subclass's __init__ with the call's arguments.
+class Shape:
+    def __new__(cls, *args):
+        return object.__new__(Square)
+
+
+class Square(Shape):
+    def __init__(self, *args):
+        print(83, 'Square.__init__', args)
+
+
+for _ in range(2):
+    Shape()
+    print(84, type(Shape(1, 2)).__name__)
+
+
+class Plain:
+    def __new__(cls, *args):
+        return object.__new__(Bare)
+
+
+class Bare(Plain):
+    pass
+
+
+attempt(85, lambda: Plain(1))
+
+
+class Late:
+    def __new__(cls, *args):
+        cls.__init__ = lambda self, *a: print(86, 'set during __new__', a)
+        return object.__new__(cls)
+
+
+Late(7)
+Late(8)

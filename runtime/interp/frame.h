@@ -40,6 +40,8 @@ enum lu_frame_return {
     LU_RETURN_SENT,             /* the kernel's SEND: (value, returned), as SEND's two outcomes */
     LU_RETURN_INIT,             /* an __init__ called for a new instance already on the stack: the
                                    value must be None and is dropped */
+    LU_RETURN_NEW,              /* a class's __new__, below which the stack holds the class and the
+                                   call's arguments: type.__call__ finishes the instance */
 };
 
 struct lu_frame {
