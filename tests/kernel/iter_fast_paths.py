@@ -68,3 +68,17 @@ for k in {}:
     print(18)
 for k in reversed(d):
     print(19, k)
+
+# an iterator is its own iterator
+for make in (lambda: enumerate('ab'), lambda: zip('ab', 'cd'), lambda: map(str, [1, 2]), lambda: filter(None, [0, 1]),
+             lambda: reversed([1, 2]), lambda: iter([1, 2]), lambda: iter((1, 2)), lambda: iter(range(2)),
+             lambda: iter({1: 2}), lambda: iter({1: 2}.values()), lambda: iter({1: 2}.items())):
+    it = make()
+    print(20, type(it).__name__, iter(it) is it, [x for x in it], list(it))
+print(21, min(3, 1, 2), max([4, 9, 2]), min('abc'), max((1, 5), (1, 7)), min([3, 1], key=lambda v: -v), max([], default='d'),
+      min({3: 1, 2: 1}), max(x for x in range(5)))
+for bad in (lambda: min(), lambda: max(5), lambda: min([]), lambda: min(1, 2, default=3), lambda: max(1, key=1, c=2)):
+    try:
+        bad()
+    except (TypeError, ValueError) as ex:
+        print(22, type(ex).__name__, ex)

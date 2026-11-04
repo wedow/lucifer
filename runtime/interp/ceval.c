@@ -247,6 +247,12 @@ get_iter_exact(PyObject *v)
     if (tp == &PyRange_Type) {
         return lu_range_iter(v);
     }
+    if (tp == &PyEnum_Type || tp == &PyZip_Type || tp == &PyMap_Type || tp == &PyFilter_Type
+        || tp == &PyReversed_Type || tp == &PyListIter_Type || tp == &PyTupleIter_Type
+        || tp == &PyRangeIter_Type || tp == &PyDictIterKey_Type || tp == &PyDictIterValue_Type
+        || tp == &PyDictIterItem_Type) {
+        return Py_NewRef(v);        /* an iterator: its __iter__ returns itself */
+    }
     return lu_dict_iter(v);
 }
 
