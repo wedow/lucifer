@@ -168,3 +168,26 @@ for name, how in (('x', 'set'), ('x', 'del'), ('__doc__', 'set'), ('__module__',
         setattr(Host, name, 'replaced')
     else:
         delattr(Host, name)
+
+
+# Classes made and read on several threads at once each see their own
+# attributes: no two types share a version.
+import threading
+
+mixed = []
+
+
+def make_classes(k):
+    for r in range(400):
+        cls = type('K%d_%d' % (k, r), (), {'x': (k, r)})
+        obj = cls()
+        if cls.x != (k, r) or obj.x != (k, r) or getattr(obj, 'x') != (k, r):
+            mixed.append((k, r))
+
+
+workers = [threading.Thread(target=make_classes, args=(k,)) for k in range(8)]
+for w in workers:
+    w.start()
+for w in workers:
+    w.join()
+print(40, mixed[:3])

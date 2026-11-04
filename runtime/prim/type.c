@@ -152,9 +152,11 @@ lu_type_assign_version(PyTypeObject *tp)
         tag = next_global_version_tag();
     }
     else {
-        tag = PyInterpreterState_Get()->next_version_tag;
-        if (tag != 0) {
-            PyInterpreterState_Get()->next_version_tag = tag + 1;      /* wraps to 0 when spent */
+        /* One tag per type across threads: the attribute cache is keyed by it. */
+        unsigned int *next = &PyInterpreterState_Get()->next_version_tag;
+        tag = __atomic_load_n(next, __ATOMIC_RELAXED);
+        while (tag != 0 && !__atomic_compare_exchange_n(next, &tag, tag + 1, 0,     /* wraps to 0 when spent */
+                                                         __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
         }
     }
     if (tag == 0) {
