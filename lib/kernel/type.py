@@ -344,6 +344,9 @@ type(name, bases, dict, **kwds) -> a new type"""
         if not is_subtype(type(obj), cls):
             return obj
         init = type_lookup(type(obj), '__init__')
+        # object.__init__ refuses arguments only when __new__ is object's too.
+        if init is _object._object_init and (args or kwargs) and type_lookup(type(obj), '__new__') is not _object._object_new:
+            return obj
         if init is not MISSING and (init is not _object._object_init or args or kwargs):
             if type(init) is _function:
                 res = init(obj, *args, **kwargs)
@@ -506,10 +509,14 @@ type(name, bases, dict, **kwds) -> a new type"""
 
 
 def _type_set(cls, name, value):
-    """type_setattro: immutable types refuse; a dunder updates the slots."""
+    """type_setattro: immutable types refuse; a dunder updates the slots.
+    The cached lookups go before the dict changes, as the replaced value's
+    finalizer may look the name up, and again after, for a lookup another
+    thread made in between."""
     if not type_flag(cls, _HEAPTYPE):
         error(TypeError, str_join('', (
             "cannot set '", name, "' attribute of immutable type '", type_tp_name(cls), "'")))
+    type_modified(cls)
     generic_setattr(cls, name, value)
     type_modified(cls)
     if ns_get(_boot.SLOT_DUNDERS, name, False):

@@ -7,7 +7,7 @@ from _lucifer import (
     MISSING, error, str_join, kind, size, ns_items, type_lookup, type_tp_name, static_type,
  seq_get, seq_slice, seq_concat, seq_repeat, tuple_from, list_alloc, list_append,
     list_set, list_splice, list_set_stride, list_del_stride, list_reverse, list_pop,
-    list_sort_begin, list_sort_end, iter_new, iter_state, iter_set, seqiter_next,
+    list_sort_begin, list_sort_end, iter_new, iter_state, iter_set, seqiter_next, kernel_set,
 )
 from _lucifer import _boot, operators, slice as _slice, tuple as _tuple, iter as _iter, _listsort
 
@@ -104,6 +104,15 @@ reverse flag can be set to request the result in descending order."""
     return result
 
 
+def _append(self, object, /):
+    """Append object to the end of the list."""
+    list_append(self, object)
+
+
+# Registered for the call instruction, which compares it: named as the method.
+_append.__qualname__ = 'list.append'
+
+
 @kernel_type(static_type('list'))
 class list:
     """Built-in mutable sequence.
@@ -112,7 +121,8 @@ If no argument is given, the constructor creates a new empty list.
 The argument must be an iterable if specified."""
 
     def __new__(cls, /, *args, **kwargs):
-        operators.check_new(cls, list)
+        if cls is not list:
+            operators.check_new(cls, list)
         return list_alloc(cls)
 
     def __init__(self, /, *args, **kwargs):
@@ -235,9 +245,7 @@ The argument must be an iterable if specified."""
     def __repr__(self):
         return seq_repr(self, '[', ']')
 
-    def append(self, object, /):
-        """Append object to the end of the list."""
-        list_append(self, object)
+    append = _append
 
     def extend(self, iterable, /):
         """Extend list by appending elements from the iterable."""
@@ -331,6 +339,9 @@ The reverse flag can be set to sort in descending order."""
 
 
 operators.add_sequence(list)
+
+
+kernel_set('list_append', _append)
 
 
 @kernel_type(static_type('list_iterator'))

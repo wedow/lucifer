@@ -321,11 +321,15 @@ lu_dict_init(void)
 
 /* Probing. */
 
+/* How deep native hashing and equality follow nested tuples. */
+#define LU_NATIVE_DEPTH 16
+
 /* Whether two distinct keys of an equal hash are equal, when the answer needs
    no Python: 1, 0, or -1 when __eq__ must decide. Exact strs, ints, floats
-   and bytes compare by value; an exact int and float are left to their
-   methods, and any other pair of those types is unequal. */
-enum { EQ_STR, EQ_INT, EQ_FLOAT, EQ_BYTES, EQ_OTHER };
+   and bytes compare by value, None and classes by identity, tuples item by
+   item (an identical pair of items is equal); an exact int and float are
+   left to their methods, and any other pair of those types is unequal. */
+enum { EQ_STR, EQ_INT, EQ_FLOAT, EQ_BYTES, EQ_TUPLE, EQ_IDENT, EQ_OTHER };
 
 static int
 eq_class(PyObject *v)
@@ -334,11 +338,13 @@ eq_class(PyObject *v)
     return tp == &PyUnicode_Type ? EQ_STR
          : tp == &PyLong_Type || tp == &PyBool_Type ? EQ_INT
          : tp == &PyFloat_Type ? EQ_FLOAT
-         : tp == &PyBytes_Type ? EQ_BYTES : EQ_OTHER;
+         : tp == &PyBytes_Type ? EQ_BYTES
+         : tp == &PyTuple_Type ? EQ_TUPLE
+         : v == Py_None || tp == &PyType_Type ? EQ_IDENT : EQ_OTHER;
 }
 
-int
-lu_native_eq(PyObject *a, PyObject *b)
+static int
+native_eq(PyObject *a, PyObject *b, int depth)
 {
     int ca = eq_class(a), cb = eq_class(b);
     if (ca == EQ_OTHER || cb == EQ_OTHER) {
@@ -347,7 +353,30 @@ lu_native_eq(PyObject *a, PyObject *b)
     if (ca != cb) {
         return (ca == EQ_INT && cb == EQ_FLOAT) || (ca == EQ_FLOAT && cb == EQ_INT) ? -1 : 0;
     }
-    return lu_eq(a, b);
+    if (ca == EQ_IDENT) {
+        return a == b;
+    }
+    if (ca != EQ_TUPLE) {
+        return lu_eq(a, b);
+    }
+    if (depth >= LU_NATIVE_DEPTH) {
+        return -1;
+    }
+    Py_ssize_t n = Py_MIN(Py_SIZE(a), Py_SIZE(b));
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject *x = PyTuple_GET_ITEM(a, i), *y = PyTuple_GET_ITEM(b, i);
+        int eq = x == y ? 1 : native_eq(x, y, depth + 1);
+        if (eq != 1) {
+            return eq;
+        }
+    }
+    return Py_SIZE(a) == Py_SIZE(b);
+}
+
+int
+lu_native_eq(PyObject *a, PyObject *b)
+{
+    return native_eq(a, b, 0);
 }
 
 /* The probe of lu_dict_probe in one keys table. Without the lock a concurrent
@@ -415,22 +444,45 @@ lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t after)
     return ix;
 }
 
-/* The hash of a key that needs no Python: an exact str or int, or a class
-   (object's hash, equal only to itself). 0 when Python must hash it. */
+/* The hash of a key that needs no Python: an exact str, int, bool, float or
+   bytes, None, a class (object's hash, equal only to itself), or a tuple of
+   those. 0 when Python must hash it. */
 static int
-native_hash(PyObject *key, Py_hash_t *hash)
+hash_native(PyObject *key, Py_hash_t *hash, int depth)
 {
     PyTypeObject *kt = Py_TYPE(key);
-    if (kt == &PyUnicode_Type || kt == &PyLong_Type) {
+    if (kt == &PyUnicode_Type || kt == &PyLong_Type || kt == &PyBool_Type || kt == &PyFloat_Type
+        || kt == &PyBytes_Type || key == Py_None) {
         *hash = lu_hash(key);
     }
     else if (kt == &PyType_Type) {
         *hash = Py_HashPointer(key);
     }
+    else if (kt == &PyTuple_Type && depth < LU_NATIVE_DEPTH) {
+        PyTupleObject *t = (PyTupleObject *)key;
+        if (t->ob_hash == -1) {
+            Py_uhash_t acc = LU_XXHASH_START;
+            for (Py_ssize_t i = 0; i < Py_SIZE(t); i++) {
+                Py_hash_t lane;
+                if (!hash_native(t->ob_item[i], &lane, depth + 1)) {
+                    return 0;
+                }
+                acc = lu_xxhash_step(acc, lane);
+            }
+            t->ob_hash = lu_xxhash_end(acc, Py_SIZE(t), 1);
+        }
+        *hash = t->ob_hash;
+    }
     else {
         return 0;
     }
     return 1;
+}
+
+static int
+native_hash(PyObject *key, Py_hash_t *hash)
+{
+    return hash_native(key, hash, 0);
 }
 
 /* The entry number of a native key in the table dk: -1 when absent, -2 when

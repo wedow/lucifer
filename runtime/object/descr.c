@@ -13,6 +13,7 @@
 
 #include "interp/frame.h"
 #include "prim/prim.h"
+#include "opcode.h"
 
 #include <string.h>
 
@@ -185,6 +186,17 @@ lu_kernel_target(PyObject *callable, PyObject *const *args, Py_ssize_t nargs,
         return 1;
     }
     return 0;
+}
+
+int
+lu_new_function(PyObject *new_, PyObject **func)
+{
+    PyObject *self;
+    if (Py_IS_TYPE(new_, &PyStaticMethod_Type)) {
+        *func = ((classmethod *)new_)->cm_callable;
+        return PyFunction_Check(*func);
+    }
+    return lu_kernel_target(new_, NULL, 0, func, &self) > 0 && self == NULL;
 }
 
 /* The C entry points of kernel functions. */
@@ -943,6 +955,61 @@ FIELDS(descr, PyDescrObject, d_type, d_qualname)
 typedef struct { PyObject_HEAD PyObject *f[LU_ITER_FIELDS]; } iterfields;
 FIELDS(iter, iterfields, f[0], f[LU_ITER_FIELDS - 1])
 
+/* The next (index, item) of an exact enumerate over a tuple, list, range or dict
+   iterator: 1 with *v the pair, or NULL when it is exhausted or failed; 0 when
+   the kernel must step it. The index is the field_get/field_set field, swapped
+   under the enumerate's lock: tasks may step one enumerate at once. */
+int
+lu_enum_next(PyObject *e, PyObject **v)
+{
+    iterfields *f = (iterfields *)e;
+    PyObject *inner = f->f[0];
+    PyTypeObject *t = Py_TYPE(inner);
+    PyObject *item, *i, *next;
+    if (!PyLong_CheckExact(__atomic_load_n(&f->f[1], __ATOMIC_RELAXED))) {
+        return 0;               /* an exact int index stays one */
+    }
+    if (t == &PyListIter_Type || t == &PyTupleIter_Type) {
+        item = lu_seqiter_next(inner);
+    }
+    else if (t == &PyRangeIter_Type) {
+        item = lu_rangeiter_next(inner);
+    }
+    else if (t == &PyDictIterKey_Type || t == &PyDictIterValue_Type || t == &PyDictIterItem_Type) {
+        item = lu_dictiter_next(inner);
+        if (item == LU_MISSING) {
+            Py_DECREF(item);
+            item = NULL;
+        }
+    }
+    else {
+        return 0;
+    }
+    *v = NULL;
+    if (item == NULL) {
+        return 1;
+    }
+    Py_BEGIN_CRITICAL_SECTION(e);
+    i = f->f[1];
+    next = lu_long_binary(NB_ADD, i, lu_small_int(1));
+    if (next != NULL) {
+        f->f[1] = next;         /* the field's reference to i is the pair's */
+    }
+    Py_END_CRITICAL_SECTION();
+    PyObject *pair = next != NULL ? PyTuple_New(2) : NULL;
+    if (pair == NULL) {
+        if (next != NULL) {
+            Py_DECREF(i);
+        }
+        Py_DECREF(item);
+        return 1;
+    }
+    PyTuple_SET_ITEM(pair, 0, i);
+    PyTuple_SET_ITEM(pair, 1, item);
+    *v = pair;
+    return 1;
+}
+
 /* types.GenericAlias and typing.Union hold four object fields: origin,
    args, parameters and starred; args, hashable_args, unhashable_args and
    parameters. */
@@ -1086,10 +1153,29 @@ prim_make_function(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return NULL;
 }
 
+/* _tuplegetter.__get__ for a tuple that has the item: its _index slot is the position. */
+static PyObject *
+tuplegetter_get(PyObject *descr, PyObject *obj)
+{
+    PyObject *slot = _PyType_Lookup(Py_TYPE(descr), LU_ID(_index));
+    if (!PyTuple_Check(obj) || slot == NULL || !Py_IS_TYPE(slot, &PyMemberDescr_Type)) {
+        return NULL;
+    }
+    PyObject *index = *(PyObject **)((char *)descr + ((PyMemberDescrObject *)slot)->d_member->offset);
+    if (index == NULL || !PyLong_CheckExact(index) || !_PyLong_IsCompact((PyLongObject *)index)) {
+        return NULL;
+    }
+    Py_ssize_t i = _PyLong_CompactValue((PyLongObject *)index);
+    return 0 <= i && i < Py_SIZE(obj) ? Py_NewRef(PyTuple_GET_ITEM(obj, i)) : NULL;
+}
+
 int
 lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out)
 {
     PyObject *v;
+    if (Py_TYPE(descr) == (PyTypeObject *)PyInterpreterState_Get()->kernel[LU_K_tuplegetter]) {
+        return (*out = tuplegetter_get(descr, obj)) != NULL;
+    }
     if (Py_IS_TYPE(descr, &PyMemberDescr_Type)) {
         v = PyMember_GetOne((const char *)obj, ((PyMemberDescrObject *)descr)->d_member);
     }
@@ -1343,8 +1429,12 @@ prim_field_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (off < 0) {
         return NULL;
     }
-    PyObject *v = *(PyObject **)((char *)args[0] + off);
-    return Py_NewRef(v != NULL ? v : Py_None);
+    PyObject *v;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
+    v = *(PyObject **)((char *)args[0] + off);
+    v = Py_NewRef(v != NULL ? v : Py_None);
+    Py_END_CRITICAL_SECTION();
+    return v;
 }
 
 static PyObject *
@@ -1355,7 +1445,12 @@ prim_field_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (off < 0) {
         return NULL;
     }
-    Py_XSETREF(*(PyObject **)((char *)args[0] + off), Py_NewRef(args[2]));
+    PyObject *old;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
+    old = *(PyObject **)((char *)args[0] + off);
+    *(PyObject **)((char *)args[0] + off) = Py_NewRef(args[2]);
+    Py_END_CRITICAL_SECTION();
+    Py_XDECREF(old);            /* outside the lock: a finalizer may run */
     return Py_NewRef(Py_None);
 }
 

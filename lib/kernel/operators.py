@@ -217,6 +217,7 @@ def index(x):
     return r if type(r) is int else int_add(r, 0)
 
 
+kernel_set('index', index)
 kernel_set('binary_op', binary_op)
 kernel_set('compare', compare)
 kernel_set('negative', negative)
