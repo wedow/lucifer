@@ -76,6 +76,10 @@ class HarnessChecks(unittest.TestCase):
             "  pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[0])\n"
             "  import signal;os.kill(os.getpid(),signal.SIGSEGV)\n"
             " ids=[i for i in ids if i not in done]\n"
+            "if mode=='crashreason':\n"
+            " pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[1])\n"
+            " pathlib.Path(os.environ['NUMPYTEST_REPORTS']).write_text(json.dumps(dict(id=ids[0],when='call',outcome='failed',seconds=0.5,wasxfail=False,reason='boom in /tmp/x.py'))+'\\n')\n"
+            " import signal;os.kill(os.getpid(),signal.SIGKILL)\n"
             "if mode=='timeout':\n"
             " pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[0]);time.sleep(10)\n"
             "import base64,xml.etree.ElementTree as E\n"
@@ -176,6 +180,13 @@ class HarnessChecks(unittest.TestCase):
         self.mode("crash")
         self.assertNotEqual(self.invoke().returncode, 0)
         self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "CRASH"])))
+
+    def test_crash_keeps_the_reason_of_a_failure_in_the_journal(self):
+        self.mode("crashreason")
+        self.invoke()
+        self.assertEqual(self.rows(), dict(zip(self.ids, ["FAIL", "CRASH"])))
+        reasons = json.loads((self.expected.parent / "fake.json").read_text())["reasons"]
+        self.assertEqual(reasons, {self.ids[0]: "boom in <path>"})
 
     def test_crash_restarts_without_the_crashed_test(self):
         self.mode("resume")

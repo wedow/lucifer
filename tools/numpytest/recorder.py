@@ -57,10 +57,12 @@ def pytest_runtest_makereport(item, call):
         item.user_properties.append(("outcome", "XPASS"))
     journal = os.environ.get("NUMPYTEST_REPORTS")
     if journal:
+        crash = getattr(report.longrepr, "reprcrash", None)
         with open(journal, "a") as stream:
             stream.write(json.dumps({"id": nodeid(item), "when": report.when,
                                      "outcome": report.outcome, "seconds": report.duration,
-                                     "wasxfail": hasattr(report, "wasxfail")}) + "\n")
+                                     "wasxfail": hasattr(report, "wasxfail"),
+                                     "reason": crash.message.splitlines()[0] if crash and crash.message else ""}) + "\n")
 
 
 def relocate_typing_inputs(module, work):

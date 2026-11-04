@@ -194,6 +194,20 @@ def journal_rows(path):
     return rows
 
 
+def journal_reasons(path):
+    """The reason line of each failed report in the journal, for tests whose JUnit died with a crash."""
+    reasons = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            try:
+                report = json.loads(line)
+            except ValueError:
+                continue
+            if report.get("outcome") == "failed" and report.get("reason"):
+                reasons.setdefault(report["id"], report["reason"])
+    return reasons
+
+
 def prepare_docs(cache, site):
     """Supply upstream's omitted Fortran examples beside the immutable wheel."""
     source = PIN['sdist']
@@ -402,6 +416,8 @@ def run(args):
             outcomes.update(found)
             reasons.update(why)
     completed = journal_rows(work / "reports.jsonl")
+    for ident, why in journal_reasons(work / "reports.jsonl").items():
+        reasons.setdefault(ident, re.sub(r"(?<!\w)/[^\s'\"<>]+", "<path>", why)[:300])
     completed.update(outcomes)
     rows.update(completed)
     if code == "TIMEOUT" or isinstance(code, int) and code < 0:
