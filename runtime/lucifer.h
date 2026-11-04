@@ -974,6 +974,28 @@ PyObject *lu_long_from_double(double d);
 /* The NB_* binary operator `op` on two ints; NotImplemented when the kernel must. */
 PyObject *lu_long_binary(int op, PyObject *a, PyObject *b);
 Py_hash_t lu_xxhash_items(PyObject *const *items, Py_ssize_t n, int mangle_length);
+/* The xxHash lanes of tuple_hash and slice_hash (pycore_tuple.h): start from
+   LU_XXHASH_START, add each item's hash with lu_xxhash_step, and finish with
+   lu_xxhash_end over the item count (mangle_length for a tuple). */
+#define LU_XXPRIME_1 11400714785074694791ULL
+#define LU_XXPRIME_2 14029467366897019727ULL
+#define LU_XXPRIME_5 2870177450012600261ULL
+#define LU_XXHASH_START ((Py_uhash_t)LU_XXPRIME_5)
+static inline Py_uhash_t
+lu_xxhash_step(Py_uhash_t acc, Py_hash_t lane)
+{
+    acc += (Py_uhash_t)lane * LU_XXPRIME_2;
+    acc = (acc << 31) | (acc >> 33);
+    return acc * LU_XXPRIME_1;
+}
+static inline Py_hash_t
+lu_xxhash_end(Py_uhash_t acc, Py_ssize_t n, int mangle_length)
+{
+    if (mangle_length) {
+        acc += (Py_uhash_t)n ^ (LU_XXPRIME_5 ^ 3527539UL);
+    }
+    return acc == (Py_uhash_t)-1 ? 1546275796 : (Py_hash_t)acc;
+}
 Py_hash_t lu_str_hash(PyObject *s);
 uint64_t lu_keyed_hash(uint64_t key, const void *src, Py_ssize_t size);
 int lu_str_eq(PyObject *a, PyObject *b);

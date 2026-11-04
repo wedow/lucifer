@@ -307,21 +307,16 @@ prim_xxh_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); SEQ(0);
     Py_ssize_t n = Py_SIZE(args[0]);
-    Py_uhash_t acc = 2870177450012600261ULL;            /* XXPRIME_5 */
+    Py_uhash_t acc = LU_XXHASH_START;
     for (Py_ssize_t i = 0; i < n; i++) {
         long lane;
         PyObject *h = seq_items(args[0])[i];
         if (!PyLong_CheckExact(h) || lu_long_as_long(h, &lane) < 0) {
             return NULL;
         }
-        acc += (Py_uhash_t)lane * 14029467366897019727ULL;      /* XXPRIME_2 */
-        acc = (acc << 31) | (acc >> 33);
-        acc *= 11400714785074694791ULL;                 /* XXPRIME_1 */
+        acc = lu_xxhash_step(acc, lane);
     }
-    if (args[1] == Py_True) {
-        acc += (Py_uhash_t)n ^ (2870177450012600261ULL ^ 3527539UL);
-    }
-    return PyLong_FromLong(acc == (Py_uhash_t)-1 ? 1546275796 : (Py_hash_t)acc);
+    return PyLong_FromLong(lu_xxhash_end(acc, n, args[1] == Py_True));
 }
 
 /* repr_enter(obj): whether obj is already being repr'd by this task, else
