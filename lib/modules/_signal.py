@@ -59,11 +59,7 @@ SIG_IGN = 1
 _handlers = {}
 
 
-def default_int_handler(signalnum, frame, /):
-    """The default handler for SIGINT installed by Python.
-
-It raises KeyboardInterrupt."""
-    raise KeyboardInterrupt
+default_int_handler = _lucifer.default_int_handler
 
 
 def valid_signals():

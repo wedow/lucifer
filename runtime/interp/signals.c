@@ -237,6 +237,16 @@ prim_signal_interrupt(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
+/* default_int_handler(signalnum, frame, /): signal.default_int_handler. It is a C
+   function as in CPython, so that it runs at the recursion limit. */
+static PyObject *
+prim_default_int_handler(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2);
+    PyErr_SetNone(PyExc_KeyboardInterrupt);
+    return NULL;
+}
+
 /* signal_ignored(signum): whether the process ignores the signal (SIG_IGN), as it does for
    SIGINT when started in the background. */
 static PyObject *
@@ -256,5 +266,6 @@ prim_signal_ignored(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_signal_methods[] = {
     FAST(signal_install), FAST(signal_raise), FAST(signal_interrupt), FAST(signal_ignored),
+    FAST(default_int_handler),
     { NULL, NULL, 0, NULL },
 };
