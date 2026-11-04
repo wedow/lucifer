@@ -8,6 +8,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <datetime.h>
+#include <frameobject.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -884,6 +885,32 @@ errors(PyObject *self, PyObject *Py_UNUSED(ignored))
     return out;
 }
 
+/* A traceback entry for a frame made the way Cython makes one: PyCode_NewEmpty,
+   PyFrame_New, then a store of the line into f_lineno, at its offset in the
+   free-threaded build's PyFrameObject. */
+static PyObject *
+raise_from_frame(PyObject *self, PyObject *args)
+{
+    int line;
+    if (!PyArg_ParseTuple(args, "i", &line)) {
+        return NULL;
+    }
+    PyCodeObject *code = PyCode_NewEmpty("ready.pyx", "ready.fake", line);
+    if (code == NULL) {
+        return NULL;
+    }
+    PyFrameObject *frame = PyFrame_New(PyThreadState_Get(), code, PyModule_GetDict(self), NULL);
+    Py_DECREF(code);
+    if (frame == NULL) {
+        return NULL;
+    }
+    *(int *)((char *)frame + 0x38) = line;
+    PyErr_SetString(PyExc_ValueError, "from a made frame");
+    PyTraceBack_Here(frame);
+    Py_DECREF(frame);
+    return NULL;
+}
+
 /* ready.raise_object(type, value): PyErr_SetObject, which runs the class. */
 static PyObject *
 raise_object(PyObject *self, PyObject *args)
@@ -1078,6 +1105,7 @@ static PyMethodDef module_methods[] = {
     { "strings", strings, METH_O, NULL },
     { "errors", errors, METH_NOARGS, NULL },
     { "raise_object", raise_object, METH_VARARGS, NULL },
+    { "raise_from_frame", raise_from_frame, METH_VARARGS, NULL },
     { "is_sequence", is_sequence, METH_O, NULL },
     { "seq_shape", seq_shape, METH_O, NULL },
     { "repeat_twice", repeat_twice, METH_O, NULL },

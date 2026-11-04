@@ -228,3 +228,14 @@ print([ready.seq_shape(o) for o in ([], (), 'a', b'', bytearray(), 1, 1.5, {}, R
 print(ready.BytesMul.__mro__, ready.seq_shape(ready.BytesMul(b'x')))
 print(ready.repeat_twice([1]), ready.repeat_twice((1,)), ready.repeat_twice('ab'), ready.repeat_twice(b'ab'),
       ready.repeat_twice(bytearray(b'ab')))
+
+# a frame made with PyFrame_New takes a line number stored at f_lineno, and can be cleared
+import traceback
+try:
+    ready.raise_from_frame(41)
+except ValueError as e:
+    tb = e.__traceback__.tb_next
+    print(tb.tb_frame.f_code.co_name, tb.tb_frame.f_code.co_filename, tb.tb_frame.f_lineno, tb.tb_lineno)
+    traceback.clear_frames(e.__traceback__)
+    traceback.clear_frames(e.__traceback__)
+    print(tb.tb_frame.f_locals, [s.name for s in traceback.extract_tb(e.__traceback__)])
