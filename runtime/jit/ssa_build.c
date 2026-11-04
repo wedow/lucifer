@@ -1234,7 +1234,7 @@ name_at(struct ctx *c, int i)
 static PyObject *
 global_const(struct ctx *c, PyObject *name)
 {
-    if (c->kernel) {
+    if (c->kernel && lu_ns_lookup(PyThreadState_Get()->interp->kernel_rebound, name) == NULL) {
         return kernel_global(c, name);
     }
     if (!PyDict_CheckExact(c->globals) || !PyDict_CheckExact(c->builtins)) {
