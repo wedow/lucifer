@@ -473,7 +473,34 @@ All **ten binary-level harness checks passed**, including malformed startup
 output and shard merging. The final content audit verified all seven TSV files:
 exact expected coverage, sorted unique IDs, LF endings, finite nonnegative
 durations, valid statuses, no unrun oracle cases and all-zero Lucifer scores.
-Actual Lucifer interoperability remains unverified until its executable exists.
+### Lucifer under the suite
+
+`bin/lucifer` imports the unmodified `cp314t` wheel (`import numpy` takes about
+a second) and `tools/numpytest/run.py run --collect --python bin/lucifer`
+collects exactly the oracle's **52,273** IDs, with the same collection hash. The
+wheel needs no change: the runtime supplies the C-API and the standard-library
+modules the pytest, hypothesis and numpy test closure imports.
+
+Run it as the oracles' commands above, with `--python bin/lucifer --runtime
+lucifer` and `--timeout 1300`. The first collection takes 20 to 30 minutes:
+pytest's assertion rewriter parses and compiles every test file from source
+with the compiler that runs on Lucifer itself, and caches the result in the
+site's `__pycache__`; a collection with that cache takes a few minutes.
+
+System libraries the build links beyond libc and libm: zlib (`-lz`, for the
+`zlib` module) and libffi (`-lffi`, for `_ctypes`); both were already installed
+(zlib 1.3.2, libffi 3.8.0), so this work installed no package.
+
+Recorded 2026-11-04, first shards (`results/numpytest/lucifer.tsv`): collection
+passes; six shard groups, run with the default 540-second deadline, give
+
+| Suite | Runtime | Expected | PASS | FAIL | TIMEOUT | XFAIL | SKIP | NOTRUN | PASS / expected |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| numpytest | lucifer | 52,273 | 2,184 | 16 | 1 | 2 | 1 | 50,069 | 4.18% |
+
+The run that reaches the deadline records the test running then as TIMEOUT and
+leaves later tests NOTRUN. The 16 FAIL rows are the next work (luc-h4gc takes
+the suite to 25%).
 
 ## Benchmarks
 
