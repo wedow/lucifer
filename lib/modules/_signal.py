@@ -59,11 +59,7 @@ SIG_IGN = 1
 _handlers = {}
 
 
-def default_int_handler(signalnum, frame, /):
-    """The default handler for SIGINT installed by Python.
-
-It raises KeyboardInterrupt."""
-    raise KeyboardInterrupt
+default_int_handler = _lucifer.default_int_handler
 
 
 def valid_signals():
@@ -148,3 +144,13 @@ def getitimer(which, /):
     """Returns current value of given itimer."""
     old = _lucifer.os_itimer(which, -1, 0)
     return old[0] / 1e6, old[1] / 1e6
+
+
+def pthread_sigmask(how, mask, /):
+    """Fetch and/or change the signal mask of the calling thread."""
+    return set(_lucifer.os_pthread_sigmask(how, sorted(mask)))
+
+
+def pthread_kill(thread_id, signalnum, /):
+    """Send a signal to a thread."""
+    _lucifer.os_pthread_kill(thread_id, signalnum)

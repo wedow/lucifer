@@ -383,6 +383,23 @@ def getppid():
     return _call('getppid')
 
 
+sysconf_names = {
+    'SC_ARG_MAX': 0, 'SC_CHILD_MAX': 1, 'SC_CLK_TCK': 2, 'SC_NGROUPS_MAX': 3, 'SC_OPEN_MAX': 4,
+    'SC_PAGESIZE': 30, 'SC_PAGE_SIZE': 30, 'SC_NPROCESSORS_CONF': 83, 'SC_NPROCESSORS_ONLN': 84,
+    'SC_PHYS_PAGES': 85, 'SC_AVPHYS_PAGES': 86,
+}
+
+
+def sysconf(name, /):
+    """Return an integer-valued system configuration variable."""
+    if isinstance(name, str):
+        try:
+            name = sysconf_names[name]
+        except KeyError:
+            raise ValueError('unrecognized configuration name') from None
+    return _call('sysconf', name)
+
+
 def getpgrp():
     """Return the current process group id."""
     return _call('getpgrp')
@@ -396,6 +413,92 @@ def kill(pid, signal, /):
 def waitpid(pid, options, /):
     """Wait for completion of a given child process."""
     return _lucifer.os_waitpid(pid, options)
+
+
+def wait():
+    """Wait for completion of a child process."""
+    return waitpid(-1, 0)
+
+
+def sched_getaffinity(pid, /):
+    """Return the affinity of the process identified by pid (or the current process if zero)."""
+    return set(_lucifer.os_sched_getaffinity(pid))
+
+
+def sched_setaffinity(pid, mask, /):
+    """Set the CPU affinity of the process identified by pid to mask."""
+    _lucifer.os_sched_setaffinity(pid, sorted(mask))
+
+
+def unshare(flags):
+    """Disassociate parts of a process (or thread) execution context."""
+    _call('unshare', flags)
+
+
+def setns(fd, nstype=0):
+    """Move the calling thread into different namespaces."""
+    _call('setns', fd if isinstance(fd, int) else fd.fileno(), nstype)
+
+
+_at_fork = {'before': [], 'after_in_parent': [], 'after_in_child': []}
+
+
+def register_at_fork(*, before=None, after_in_parent=None, after_in_child=None):
+    """Register callables to be called when forking a new process."""
+    if before is None and after_in_parent is None and after_in_child is None:
+        raise TypeError('At least one argument is required.')
+    for name, func in (('before', before), ('after_in_child', after_in_child),
+                       ('after_in_parent', after_in_parent)):
+        if func is not None and not callable(func):
+            raise TypeError("'%s' must be callable, not %s" % (name, type(func).__name__))
+    # All three are validated before any is kept.
+    for name, func in (('before', before), ('after_in_child', after_in_child),
+                       ('after_in_parent', after_in_parent)):
+        if func is not None:
+            _at_fork[name].append(func)
+
+
+def _run_at_fork(kind):
+    """The registered callables of one kind: `before` in reverse registration order, the others in it."""
+    funcs = _at_fork[kind]
+    for func in (reversed(funcs) if kind == 'before' else list(funcs)):
+        try:
+            func()
+        except BaseException as exc:
+            _lucifer.write_unraisable('Exception ignored in', func, exc)
+
+
+def fork():
+    """Fork a child process.
+
+Return 0 to child process and PID of child to parent process."""
+    import sys
+    import _imp
+    import _thread
+    if sys.is_finalizing():
+        raise PythonFinalizationError("can't fork at interpreter shutdown")
+    sys.audit('os.fork')
+    _run_at_fork('before')
+    _imp.acquire_lock()
+    held = _imp._lock_count - 1         # the forking thread's own holds: the lock is exclusive
+    try:
+        pid = _lucifer.os_fork()
+    except BaseException:
+        _imp.release_lock()
+        raise
+    if pid == 0:
+        _imp._reinit_lock(held)
+        _thread._after_fork()
+        _run_at_fork('after_in_child')
+        return 0
+    threads = _lucifer.os_thread_count()
+    _imp.release_lock()
+    _run_at_fork('after_in_parent')
+    if threads > 1:
+        import warnings
+        warnings.warn('This process (pid=%d) is multi-threaded, use of fork() may lead to deadlocks in the child.'
+                      % getpid(), DeprecationWarning, 2)
+    return pid
 
 
 def WIFEXITED(status):
@@ -445,17 +548,20 @@ def uname():
     return _lucifer.structseq.structseq_make(uname_result, _lucifer.os_uname(), {})
 
 
+def _check_envname(name):
+    if not name or ('=' if isinstance(name, str) else b'=') in name:
+        raise ValueError('illegal environment variable name')
+
+
 def putenv(name, value, /):
     """Change or add an environment variable."""
-    if b'=' in name or not name:
-        raise ValueError('illegal environment variable name')
+    _check_envname(name)
     _lucifer.os_putenv(name, value)
 
 
 def unsetenv(name, /):
     """Delete an environment variable."""
-    if b'=' in name or not name:
-        raise ValueError('illegal environment variable name')
+    _check_envname(name)
     _lucifer.os_putenv(name, None)
 
 

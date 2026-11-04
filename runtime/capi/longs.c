@@ -4,6 +4,8 @@
 
 #include "lucifer.h"
 
+#include <ctype.h>
+#include <string.h>
 #include <math.h>
 
 extern PyObject *_PyNumber_Index(PyObject *item);
@@ -342,4 +344,105 @@ PyObject *
 PyLong_FromDouble(double value)
 {
     return lu_long_from_double(value);
+}
+
+/* int(text, base) over a str; the error is int()'s. */
+PyObject *
+PyLong_FromUnicodeObject(PyObject *u, int base)
+{
+    PyObject *b = PyLong_FromLong(base);
+    PyObject *args[2] = { u, b };
+    PyObject *r = b != NULL ? lu_call((PyObject *)&PyLong_Type, args, 2, NULL) : NULL;
+    Py_XDECREF(b);
+    return r;
+}
+
+/* PyLong_FromString (Objects/longobject.c): optional whitespace, sign and
+   base prefix, digits with single underscores between them, then only
+   whitespace to the end of the string. *pend is the end, or where the syntax
+   went wrong. */
+PyObject *
+PyLong_FromString(const char *str, char **pend, int base)
+{
+    if ((base != 0 && base < 2) || base > 36) {
+        PyErr_SetString(PyExc_ValueError, "int() arg 2 must be >= 2 and <= 36");
+        return NULL;
+    }
+    const char *p = str, *sign;
+    int error_if_nonzero = 0;
+    while (isspace((unsigned char)*p)) {
+        p++;
+    }
+    sign = p;
+    if (*p == '+' || *p == '-') {
+        p++;
+    }
+    if (base == 0) {
+        base = p[0] != '0' ? 10 : (p[1] | 0x20) == 'x' ? 16 : (p[1] | 0x20) == 'o' ? 8
+             : (p[1] | 0x20) == 'b' ? 2 : (error_if_nonzero = 1, 10);
+    }
+    if (p[0] == '0' && ((base == 16 && (p[1] | 0x20) == 'x') || (base == 8 && (p[1] | 0x20) == 'o')
+                        || (base == 2 && (p[1] | 0x20) == 'b'))) {
+        p += 2;
+        if (*p == '_') {
+            p++;
+        }
+    }
+    const char *digits = p, *prev = NULL;
+    for (; *p; p++) {
+        int c = (unsigned char)*p;
+        int d = isdigit(c) ? c - '0' : isalpha(c) ? (c | 0x20) - 'a' + 10 : 99;
+        if (*p == '_' ? (prev != NULL && *prev == '_') || p == digits : d >= base) {
+            break;
+        }
+        prev = p;
+    }
+    const char *end = p;
+    int valid = end != digits && *prev != '_', ok;
+    while (valid && isspace((unsigned char)*p)) {
+        p++;
+    }
+    ok = valid && *p == '\0';
+    PyObject *r = NULL;
+    if (ok) {
+        PyObject *text = PyUnicode_FromStringAndSize(digits, end - digits);
+        PyObject *value = text != NULL ? PyLong_FromUnicodeObject(text, base) : NULL;
+        Py_XDECREF(text);
+        r = value != NULL && *sign == '-' ? PyNumber_Negative(value) : value;
+        if (r != value) {
+            Py_DECREF(value);
+        }
+        if (r != NULL && error_if_nonzero && !(_PyLong_IsCompact((PyLongObject *)r)
+                                               && _PyLong_CompactValue((PyLongObject *)r) == 0)) {
+            Py_CLEAR(r);
+            ok = 0;
+            base = 0;
+        }
+        else if (r == NULL) {
+            return NULL;
+        }
+    }
+    if (pend != NULL) {
+        *pend = (char *)(valid ? p : end);
+    }
+    if (!ok) {
+        Py_XDECREF(r);
+        PyObject *orig = PyUnicode_FromStringAndSize(str, strlen(str) < 200 ? (Py_ssize_t)strlen(str) : 200);
+        if (orig != NULL) {
+            PyErr_Format(PyExc_ValueError, "invalid literal for int() with base %d: %.200R", base, orig);
+            Py_DECREF(orig);
+        }
+        return NULL;
+    }
+    return r;
+}
+
+int
+PyLong_IsZero(PyObject *obj)
+{
+    if (!PyLong_Check(obj)) {
+        PyErr_Format(PyExc_TypeError, "expected int, got %s", Py_TYPE(obj)->tp_name);
+        return -1;
+    }
+    return _PyLong_IsCompact((PyLongObject *)obj) && _PyLong_CompactValue((PyLongObject *)obj) == 0;
 }

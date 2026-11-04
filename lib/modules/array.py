@@ -148,27 +148,27 @@ a bytes-like object, or iterable over elements of the appropriate type."""
             index += n
         if not 0 <= index < n:
             raise IndexError('array index out of range')
-        return self._values()[index]
+        item = self._struct.unpack_from(self, index * self._struct.size)[0]
+        return chr(item) if self._typecode in 'uw' else item
 
     def __setitem__(self, index, value):
-        values = self._values()
-        if isinstance(index, slice):
-            if not isinstance(value, array):
-                raise TypeError('can only assign array (not "%s") to array slice' % type(value).__name__)
-            if value._typecode != self._typecode:
-                raise TypeError('bad argument type for built-in operation')
-            if index.step not in (None, 1) and len(range(*index.indices(len(values)))) != len(value):
-                raise ValueError('attempt to assign array of size %d to extended slice of size %d'
-                                 % (len(value), len(range(*index.indices(len(values))))))
-            values[index] = value._values()
-        else:
+        if not isinstance(index, slice):
             index = _index(index)
             if index < 0:
-                index += len(values)
-            if not 0 <= index < len(values):
+                index += len(self)
+            if not 0 <= index < len(self):
                 raise IndexError('array assignment index out of range')
-            _encode(self._typecode, value)
-            values[index] = value
+            self._struct.pack_into(self, index * self._struct.size, _encode(self._typecode, value))
+            return
+        values = self._values()
+        if not isinstance(value, array):
+            raise TypeError('can only assign array (not "%s") to array slice' % type(value).__name__)
+        if value._typecode != self._typecode:
+            raise TypeError('bad argument type for built-in operation')
+        if index.step not in (None, 1) and len(range(*index.indices(len(values)))) != len(value):
+            raise ValueError('attempt to assign array of size %d to extended slice of size %d'
+                             % (len(value), len(range(*index.indices(len(values))))))
+        values[index] = value._values()
         self._replace(values)
 
     def __delitem__(self, index):

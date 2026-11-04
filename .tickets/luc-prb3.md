@@ -1,6 +1,6 @@
 ---
 id: luc-prb3
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-04T08:00:59Z
@@ -18,3 +18,7 @@ CPython's signal_install_handlers ignores SIGPIPE and SIGXFSZ at init; lucifer l
 **2026-11-04T09:32:32Z**
 
 Fixed on branch luc-c702 (SIGPIPE ignored at startup); close when c702 merges. Check SIGXFSZ too.
+
+**2026-11-04T11:33:22Z**
+
+Fixed by luc-c702 (pylifecycle ignores SIGPIPE and SIGXFSZ; exec restores them).

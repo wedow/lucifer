@@ -18,6 +18,7 @@
 #include "marshal.h"
 
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -398,13 +399,10 @@ new_main(struct _is *interp, const wchar_t *path, const char *loader_class)
     return err ? NULL : main;
 }
 
-/* Runs code as __main__. loader_class is NULL for -c and standard input,
-   which have no file. */
+/* What follows the main code's activation: the exit status of its result. */
 static int
-run_main_code(struct _is *interp, PyObject *code, const wchar_t *path, const char *loader_class)
+finish_main(PyObject *result)
 {
-    PyObject *main = new_main(interp, path, loader_class);
-    PyObject *result = main != NULL ? PyEval_EvalCode(code, PyModule_GetDict(main), PyModule_GetDict(main)) : NULL;
     flush_io();
     if (result == NULL) {
         return report_uncaught();
@@ -413,8 +411,32 @@ run_main_code(struct _is *interp, PyObject *code, const wchar_t *path, const cha
     return 0;
 }
 
-/* The program the config names: -c's command, a file (source or .pyc), or
-   standard input. */
+/* Runs code as __main__. loader_class is NULL for -c and standard input,
+   which have no file. */
+static int
+run_main_code(struct _is *interp, PyObject *code, const wchar_t *path, const char *loader_class)
+{
+    PyObject *main = new_main(interp, path, loader_class);
+    return finish_main(main != NULL ? PyEval_EvalCode(code, PyModule_GetDict(main), PyModule_GetDict(main)) : NULL);
+}
+
+/* -m: runpy runs the module as __main__. */
+static int
+run_module(struct _is *interp, const wchar_t *name)
+{
+    PyObject *runpy = PyImport_ImportModule("runpy");
+    PyObject *module = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, name, (Py_ssize_t)wcslen(name));
+    PyObject *result = NULL;
+    if (runpy != NULL && module != NULL && new_main(interp, NULL, NULL) != NULL) {
+        result = PyObject_CallMethod(runpy, "_run_module_as_main", "OO", module, Py_True);
+    }
+    Py_XDECREF(runpy);
+    Py_XDECREF(module);
+    return finish_main(result);
+}
+
+/* The program the config names: -m's module, -c's command, a file (source or
+   .pyc), or standard input. */
 static int
 run_program(struct _is *interp, const char *program, const char *path)
 {
@@ -422,6 +444,9 @@ run_program(struct _is *interp, const char *program, const char *path)
     PyObject *code = NULL;
     const wchar_t *file = NULL;
     const char *loader = NULL;
+    if (config->run_module != NULL) {
+        return run_module(interp, config->run_module);
+    }
     if (config->run_command != NULL) {
         PyObject *source = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, config->run_command,
                                                      (Py_ssize_t)wcslen(config->run_command));
@@ -510,6 +535,12 @@ Py_InitializeFromConfig(const PyConfig *src)
         return status;
     }
     interp->config = config;
+    if (config.install_signal_handlers) {
+        /* init_signals: a write to a closed pipe or past a file size limit fails with EPIPE or
+           EFBIG, as OSError, instead of killing the process. */
+        signal(SIGPIPE, SIG_IGN);
+        signal(SIGXFSZ, SIG_IGN);
+    }
     __atomic_store_n(&_PyRuntime.finalizing, 0, __ATOMIC_RELAXED);
     if (lu_hash_secret_init(config.use_hash_seed, config.hash_seed) < 0) {
         return PyStatus_Error("_Py_HashRandomization_Init: failed to get random numbers to initialize Python");
@@ -578,6 +609,7 @@ release_interpreter(struct _is *interp)
     }
     _PyRuntime.signals.tripped = 0;
     interp->tasks_closed = 0;
+    interp->stw.mutex = (PyMutex){ 0 };     /* held for good since the other tasks were shut down */
     interp->modules = interp->builtins = interp->sysdict = interp->interned = NULL;
     interp->importlib = interp->import_func = NULL;
     interp->eval_frame = NULL;
@@ -588,8 +620,8 @@ release_interpreter(struct _is *interp)
 }
 
 /* Py_FinalizeEx, as far as there is something to finalize: the non-daemon
-   threads are joined, atexit's callbacks run, the standard streams are flushed,
-   the other threads are shut down, then the runtime counts as finalizing.
+   threads are joined, atexit's callbacks run, the other threads are shut down,
+   the runtime counts as finalizing, then the standard streams are flushed.
    CPython flushes once more after tearing the modules down; there is no
    teardown to print from yet. */
 int
@@ -617,20 +649,27 @@ Py_FinalizeEx(void)
         }
         Py_XDECREF(result);
     }
-    /* Before the daemon threads stop: the streams' locks are Python locks, which a daemon
-       stopped for good inside a write would hold for ever. */
+    lu_sched_stop();
+    /* What is left are daemon threads: they hang when they next attach (FOUNDATIONS 2.13 step 8), so
+       the teardown runs without them. From here a join of a thread that has not finished raises
+       PythonFinalizationError, so the __del__ of what only cycles held cannot hang on a daemon
+       thread (gh-130402), and a stream lock a daemon froze holding fails after a grace period. */
+    lu_task_shutdown_others(interp);
+    __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     int status = flush_std_files();
     finalize_modules(interp);
-    lu_gc_collect_shutdown(PyThreadState_Get());      /* __del__ of what only cycles held */
+    lu_gc_collect_shutdown(PyThreadState_Get());
     flush_std_stream("stdout");
     flush_std_stream("stderr");
     PyErr_Clear();
-    lu_sched_stop();
-    /* What is left are daemon threads: they hang when they next attach. */
-    lu_task_shutdown_others(interp);
-    __atomic_store_n(&_PyRuntime.finalizing, 1, __ATOMIC_RELAXED);
     release_interpreter(interp);
     return status;
+}
+
+static int
+finalize_status(int status)
+{
+    return Py_FinalizeEx() < 0 && status == 0 ? 120 : status;
 }
 
 /* Modules/main.c: run the file the config names, then finalize. */
@@ -644,10 +683,13 @@ Py_RunMain(void)
     int status = run_program(interp, program, path);
     PyMem_Free(program);
     PyMem_Free(path);
-    if (Py_FinalizeEx() < 0 && status == 0) {
-        status = 120;
-    }
-    return status;
+    return finalize_status(status);
+}
+
+void
+lu_main_finished(PyObject *result)
+{
+    exit(finalize_status(finish_main(result)));
 }
 
 int

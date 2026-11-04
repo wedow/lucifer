@@ -454,6 +454,7 @@ struct lu_carrier {
     uintptr_t poll;             /* the poll word */
     uint32_t wake;              /* the futex a park sleeps on; bumped by each unpark */
     unsigned long native_id;    /* the thread's TID: a syscall, so read once */
+    pthread_t thread;           /* the carrier's thread */
     uint32_t sleeping;          /* the carrier's thread is in, or about to enter, a futex sleep on `wake` */
     struct lu_task *task;       /* the task last attached here: the thread's tstate
                                    while its state is attached */
@@ -529,6 +530,13 @@ void lu_task_carrier_exit(struct lu_carrier *c);
    unbound, and no longer the carrier's task. The carrier's owner record stays
    registered. lu_task_bind and lu_task_attach put it on the next carrier. */
 void lu_task_leave(struct lu_task *t);
+/* The calling task calls a platform primitive whose effect belongs to its OS thread
+   (sched_setaffinity(0, ...), pthread_sigmask, unshare, setns): it stays on this carrier for life. */
+void lu_task_pin_for_life(void);
+/* Holds a detached task suspended while another thread acts for it, and lets it go: it cannot attach
+   in between. The first answers whether the task was detached. */
+int lu_task_try_suspend_detached(struct lu_task *t);
+void lu_task_resume_detached(struct lu_task *t);
 /* Clears targeted reasons from the task and its carrier's word. */
 void lu_task_unsignal(struct lu_task *t, uintptr_t bits);
 
@@ -560,6 +568,13 @@ int lu_poll_slow(PyThreadState *ts);
    its carrier's word when it is bound. The caller holds the interpreter's
    task list lock, which keeps the task and its carrier alive. */
 void lu_task_signal(struct lu_task *t, uintptr_t bits);
+
+/* os.fork (runtime/thread/fork.c): the pid in the parent, 0 in the child, -1 with errno set. */
+long lu_fork(void);
+/* The child of a fork made by the main task on the second carrier has no home carrier thread to
+   return the program's result to: the thread that finished it finishes the program
+   (runtime/pylifecycle.c). */
+void lu_main_finished(PyObject *result);
 
 /* Stop-the-world (runtime/thread/stw.c). A stop completes when every other
    task has stopped: attached ones at their next poll, detached ones at once.
@@ -772,6 +787,7 @@ extern LU_EXPORT union lu_runtime {
             uint64_t ready_id;          /* the wait the second carrier ends once it is a carrier */
             int active;                 /* tasks migrate: the second carrier is running */
             int stop;                   /* the second carrier is asked to exit */
+            int orphaned;               /* a fork left the main task without its home carrier's thread */
         } sched;
         struct {
             struct lu_lock lock;        /* the registry and the orphaned queue */
@@ -932,6 +948,7 @@ PyObject *lu_weakref_new(PyTypeObject *type, PyObject *ob, PyObject *callback);
 /* The head of ob's list of weak references, or NULL if its type has none. */
 PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
+void lu_capsule_init(void);
 void lu_storage_init(void);
 void lu_module_init(void);
 void lu_exc_init(void);
@@ -1064,6 +1081,12 @@ int lu_type_assign_version(PyTypeObject *tp);
 PyObject *lu_type_name(PyTypeObject *tp);
 /* Adds descriptors for tp_members and tp_getset to the type's dict. */
 int lu_type_add_descriptors(PyTypeObject *tp);
+/* Adds wrapper descriptors (__add__, __len__, ...) for the C slots tp has
+   of its own (runtime/types/wrappers.c). */
+int lu_type_add_operators(PyTypeObject *tp);
+/* The next tp_new_wrapper check (owner.__new__(cls) is safe) passes: C called owner's tp_new itself. */
+void lu_new_check_skip(int on);
+int lu_tp_new_is_thunk(newfunc f);
 /* The module of the nearest frame that is not kernel-hidden (PyEval_GetGlobals). */
 PyObject *lu_caller_globals(PyThreadState *ts);
 
@@ -1159,8 +1182,73 @@ int lu_watcher_check(lu_watcher *table, int id, const char *invalid, const char 
    lock-free reader can still hold it (runtime/prim/storage.c). */
 void lu_qsbr_retire(void *p);
 
-/* Appends to a list (borrowed item), growing its storage. */
+/* Appends to a list (borrowed item), growing its storage: a list whose lock
+   the caller holds, or that no other thread sees (runtime/prim/storage.c). */
 int lu_list_append(PyObject *list, PyObject *item);
+
+/* A list's ob_item points into a block that starts with its capacity
+   (_PyListArray), so that a reader holding only the pointer can bound its
+   index by the array it loaded, whichever size it read before. The slots are
+   zeroed, so a slot past the size reads as NULL, not as garbage. */
+struct lu_list_array {
+    Py_ssize_t allocated;
+    PyObject *ob_item[];
+};
+
+#define LU_LIST_ARRAY(items) ((struct lu_list_array *)((char *)(items) - offsetof(struct lu_list_array, ob_item)))
+
+/* A zeroed array of room for capacity items (its ob_item), NULL on failure. */
+static inline PyObject **
+lu_list_array_new(Py_ssize_t capacity)
+{
+    struct lu_list_array *a = PyMem_Calloc(1, sizeof(*a) + capacity * sizeof(PyObject *));
+    if (a == NULL) {
+        return NULL;
+    }
+    a->allocated = capacity;
+    return a->ob_item;
+}
+
+static inline void
+lu_list_array_free(PyObject **items)
+{
+    if (items != NULL) {
+        PyMem_Free(LU_LIST_ARRAY(items));
+    }
+}
+
+/* Frees an array a lock-free reader may still hold. */
+static inline void
+lu_list_array_retire(PyObject **items)
+{
+    if (items != NULL) {
+        lu_qsbr_retire(LU_LIST_ARRAY(items));
+    }
+}
+
+/* l[i] as a new reference, read without the list's lock; NULL when i is out
+   of range or the item changed under the read (lu_list_item_ref then asks
+   again under the lock). */
+static inline PyObject *
+lu_list_try_item_ref(PyListObject *l, Py_ssize_t i)
+{
+    Py_ssize_t size = _Py_atomic_load_ssize_relaxed(&((PyVarObject *)l)->ob_size);
+    PyObject **items = _Py_atomic_load_ptr(&l->ob_item);
+    if ((size_t)i >= (size_t)size || items == NULL || i >= LU_LIST_ARRAY(items)->allocated) {
+        return NULL;
+    }
+    return lu_try_xget_ref(&items[i]);
+}
+
+/* l[i] as a new reference, NULL when i is out of range (runtime/prim/storage.c). */
+PyObject *lu_list_item_ref_locked(PyListObject *l, Py_ssize_t i);
+
+static inline PyObject *
+lu_list_item_ref(PyListObject *l, Py_ssize_t i)
+{
+    PyObject *item = lu_list_try_item_ref(l, i);
+    return item != NULL ? item : lu_list_item_ref_locked(l, i);
+}
 
 /* The tuple, list, reverse list and sequence-protocol iterators' layout
    (runtime/prim/storage.c); it_seq is NULL once exhausted. */

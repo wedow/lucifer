@@ -57,7 +57,11 @@ void
 lu_stw_stop(struct _is *interp)
 {
     struct lu_stw *stw = &interp->stw;
-    PyMutex_Lock(&stw->mutex);
+    /* Once the other tasks are shut down (lu_task_shutdown_others) this one is the only one left and
+       keeps the mutex for good: a daemon thread waiting for it may have been handed it as it hung. */
+    if (!interp->tasks_closed) {
+        PyMutex_Lock(&stw->mutex);
+    }
 
     HEAD_LOCK(interp);
     stw->requested = 1;
@@ -109,7 +113,9 @@ lu_stw_start(struct _is *interp)
     }
     stw->requester = NULL;
     HEAD_UNLOCK(interp);
-    PyMutex_Unlock(&stw->mutex);
+    if (!interp->tasks_closed) {
+        PyMutex_Unlock(&stw->mutex);
+    }
 }
 
 /* _PyThreadState_Suspend, then the attach that waits out the stop

@@ -280,16 +280,22 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
     PyObject *name = PyUnicode_FromString(dot != NULL ? dot + 1 : spec->name);
     PyObject *ns = PyDict_New();
     PyObject *slots = PyTuple_New(0);
+    /* A type with managed dict or weakref storage is a class without __slots__; any other has no dict. */
+    int managed = (spec->flags & (Py_TPFLAGS_MANAGED_DICT | Py_TPFLAGS_MANAGED_WEAKREF)) != 0;
     PyObject *modname = dot != NULL ? PyUnicode_FromStringAndSize(spec->name, dot - spec->name) : NULL;
     PyObject *cls = NULL;
     if (bases == NULL || name == NULL || ns == NULL || slots == NULL
         || (dot != NULL && modname == NULL)
-        || PyDict_SetItemString(ns, "__slots__", slots) < 0
+        || (!managed && PyDict_SetItemString(ns, "__slots__", slots) < 0)
         || (modname != NULL && PyDict_SetItemString(ns, "__module__", modname) < 0)) {
         goto done;
     }
-    PyObject *args[3] = { name, bases, ns };
-    cls = lu_call(metaclass != NULL ? (PyObject *)metaclass : (PyObject *)&PyType_Type, args, 3, NULL);
+    /* type.__new__ itself: the metaclass may forbid instantiation (Cython's does),
+       which only stops code calling it. */
+    PyObject *type_new = PyObject_GetAttr((PyObject *)&PyType_Type, LU_ID(__new__));
+    PyObject *args[4] = { metaclass != NULL ? (PyObject *)metaclass : (PyObject *)&PyType_Type, name, bases, ns };
+    cls = type_new != NULL ? lu_call(type_new, args, 4, NULL) : NULL;
+    Py_XDECREF(type_new);
     if (cls == NULL) {
         goto done;
     }
@@ -391,12 +397,13 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
         tp->tp_doc = copy;
     }
     PyObject *dict = lu_type_dict(tp);
-    if (PyDict_DelItemString(dict, "__slots__") < 0) {   /* only there to keep the instances free of a __dict__ */
+    if (!managed && PyDict_DelItemString(dict, "__slots__") < 0) {   /* only there to keep the instances free of a __dict__ */
         goto fail;
     }
-    if (lu_type_add_descriptors(tp) < 0
+    if (lu_type_add_operators(tp) < 0
+        || lu_type_add_descriptors(tp) < 0
         || lu_type_add_methods(tp, dict) < 0
-        || (tp->tp_new != NULL && tp->tp_new != base->tp_new
+        || (tp->tp_new != NULL && tp->tp_new != base->tp_new && !lu_tp_new_is_thunk(tp->tp_new)
             && lu_type_add_new_wrapper(tp, dict) < 0)) {
         goto fail;
     }

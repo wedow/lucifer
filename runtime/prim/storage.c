@@ -88,8 +88,15 @@ seq_take(PyObject **items, Py_ssize_t n, int as_tuple)
         PyMem_Free(items);
     }
     else if (n > 0) {
-        PyMem_Free(((PyListObject *)r)->ob_item);
-        ((PyListObject *)r)->ob_item = items;
+        PyObject **array = lu_list_array_new(n);
+        if (array == NULL) {
+            release(items, n);
+            Py_DECREF(r);
+            return PyErr_NoMemory();
+        }
+        memcpy(array, items, n * sizeof(PyObject *));
+        PyMem_Free(items);
+        ((PyListObject *)r)->ob_item = array;
         ((PyListObject *)r)->allocated = n;
         Py_SET_SIZE(r, n);
     }
@@ -120,7 +127,7 @@ list_resize(PyListObject *self, Py_ssize_t newsize)
     PyObject **items = NULL;
     if (new_allocated > 0) {
         if (new_allocated > (size_t)PY_SSIZE_T_MAX / sizeof(PyObject *)
-            || (items = PyMem_Malloc(new_allocated * sizeof(PyObject *))) == NULL) {
+            || (items = lu_list_array_new(new_allocated)) == NULL) {
             PyErr_NoMemory();
             return -1;
         }
@@ -133,10 +140,23 @@ list_resize(PyListObject *self, Py_ssize_t newsize)
     _Py_atomic_store_ptr_release(&self->ob_item, items);
     Py_SET_SIZE(self, newsize);
     self->allocated = (Py_ssize_t)new_allocated;
-    if (old != NULL) {
-        lu_qsbr_retire(old);
-    }
+    lu_list_array_retire(old);
     return 0;
+}
+
+/* l[i] under the list's lock, the reference marked as shared so that
+   lock-free reads can take the item from then on; NULL when out of range or
+   the slot is one of an uninitialized list's. */
+PyObject *
+lu_list_item_ref_locked(PyListObject *l, Py_ssize_t i)
+{
+    PyObject *v = NULL;
+    Py_BEGIN_CRITICAL_SECTION(l);
+    if (0 <= i && i < Py_SIZE(l) && l->ob_item[i] != NULL) {
+        v = lu_new_ref_with_lock(l->ob_item[i]);
+    }
+    Py_END_CRITICAL_SECTION();
+    return v;
 }
 
 /* seq_get(seq, i): item i of a tuple or list, 0 <= i < len. A NULL slot of
@@ -149,12 +169,17 @@ prim_seq_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(2); SEQ(0); SSIZE(1, i);
     PyObject *v = NULL;
     if (PyList_Check(args[0])) {
-        Py_BEGIN_CRITICAL_SECTION(args[0]);
-        if (0 <= i && i < Py_SIZE(args[0])) {
-            PyObject *item = ((PyListObject *)args[0])->ob_item[i];
-            v = item != NULL ? Py_NewRef(item) : Py_NewRef(_PyRuntime.singletons.null_item);
+        v = lu_list_item_ref((PyListObject *)args[0], i);
+        if (v == NULL) {
+            /* out of range, or a NULL slot of an uninitialized list, which
+               no other thread is racing into existence: the locked read
+               tells them apart */
+            Py_BEGIN_CRITICAL_SECTION(args[0]);
+            if (0 <= i && i < Py_SIZE(args[0]) && ((PyListObject *)args[0])->ob_item[i] == NULL) {
+                v = Py_NewRef(_PyRuntime.singletons.null_item);
+            }
+            Py_END_CRITICAL_SECTION();
         }
-        Py_END_CRITICAL_SECTION();
     }
     else if (0 <= i && i < Py_SIZE(args[0])) {
         v = Py_NewRef(((PyTupleObject *)args[0])->ob_item[i]);
@@ -168,14 +193,18 @@ prim_seq_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 /* seq_slice(seq, start, step, count, as_tuple): the count items from start
    by step, as an exact tuple or list. The caller took the bounds from a
    length that another thread may have shrunk since: positions past the end
-   are left out. */
+   are left out. A list result is filled in its own array. */
 static PyObject *
 prim_seq_slice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(5); SEQ(0); SSIZE(1, start); SSIZE(2, step); SSIZE(3, count);
-    PyObject **items = PyMem_Malloc((count > 0 ? count : 1) * sizeof(PyObject *));
-    if (items == NULL) {
-        return PyErr_NoMemory();
+    int as_tuple = args[4] == Py_True;
+    PyObject *list = as_tuple ? NULL : PyList_New(count);
+    PyObject **items = as_tuple ? PyMem_Malloc((count > 0 ? count : 1) * sizeof(PyObject *))
+                       : list != NULL ? ((PyListObject *)list)->ob_item : NULL;
+    if (items == NULL && (as_tuple || count > 0)) {
+        Py_XDECREF(list);
+        return as_tuple ? PyErr_NoMemory() : NULL;
     }
     PyObject *seq = args[0];
     Py_ssize_t n = 0;
@@ -188,7 +217,11 @@ prim_seq_slice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
     }
     Py_END_CRITICAL_SECTION();
-    return seq_take(items, n, args[4] == Py_True);
+    if (list != NULL) {
+        Py_SET_SIZE(list, n);
+        return list;
+    }
+    return seq_take(items, n, 1);
 }
 
 /* seq_concat(a, b, as_tuple) */
@@ -371,25 +404,42 @@ prim_list_alloc(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return tp == &PyList_Type ? PyList_New(0) : tp->tp_alloc(tp, 0);
 }
 
+/* _PyList_AppendTakeRef's slow path: the list is full and the caller holds its lock. */
+LU_EXPORT int
+_PyList_AppendTakeRefListResize(PyListObject *self, PyObject *newitem)
+{
+    Py_ssize_t len = Py_SIZE(self);
+    if (list_resize(self, len + 1) < 0) {
+        Py_DECREF(newitem);
+        return -1;
+    }
+    _Py_atomic_store_ptr_release(&self->ob_item[len], newitem);
+    return 0;
+}
+
+/* _PyList_AppendTakeRef: the item is stored before the size that admits
+   lock-free readers to it, and released so that they see it whole. */
+int
+lu_list_append(PyObject *op, PyObject *item)
+{
+    PyListObject *l = (PyListObject *)op;
+    Py_ssize_t n = Py_SIZE(l);
+    if (n < l->allocated) {
+        _Py_atomic_store_ptr_release(&l->ob_item[n], Py_NewRef(item));
+        Py_SET_SIZE(l, n + 1);
+        return 0;
+    }
+    return _PyList_AppendTakeRefListResize(l, Py_NewRef(item));
+}
+
 /* list_append(list, item) */
 static PyObject *
 prim_list_append(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); LIST(0);
-    PyListObject *l = (PyListObject *)args[0];
-    int err = 0;
-    Py_BEGIN_CRITICAL_SECTION(l);
-    Py_ssize_t n = Py_SIZE(l);
-    if (n < l->allocated) {
-        l->ob_item[n] = Py_NewRef(args[1]);
-        Py_SET_SIZE(l, n + 1);
-    }
-    else if (list_resize(l, n + 1) < 0) {
-        err = -1;
-    }
-    else {
-        l->ob_item[n] = Py_NewRef(args[1]);
-    }
+    int err;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
+    err = lu_list_append(args[0], args[1]);
     Py_END_CRITICAL_SECTION();
     return err < 0 ? NULL : Py_NewRef(Py_None);
 }
@@ -477,7 +527,9 @@ list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, int cl
                 }
             }
             if (err == 0) {
-                memcpy(l->ob_item + lo, fresh, d * sizeof(PyObject *));
+                for (Py_ssize_t k = 0; k < d; k++) {
+                    _Py_atomic_store_ptr_release(&l->ob_item[lo + k], fresh[k]);
+                }
                 PyMem_Free(fresh);
                 fresh = NULL;
             }
@@ -496,7 +548,7 @@ list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, int cl
         Py_DECREF(recycle[k]);
     }
     if (cleared) {
-        lu_qsbr_retire(recycle);        /* the old array, which readers may still hold */
+        lu_list_array_retire(recycle);  /* the old array, which readers may still hold */
     }
     else {
         PyMem_Free(recycle);
@@ -546,24 +598,13 @@ PyList_Insert(PyObject *op, Py_ssize_t where, PyObject *newitem)
     }
     else {
         where = where < 0 ? (where + n < 0 ? 0 : where + n) : where > n ? n : where;
-        memmove(l->ob_item + where + 1, l->ob_item + where, (n - where) * sizeof(PyObject *));
-        l->ob_item[where] = Py_NewRef(newitem);
+        for (Py_ssize_t i = n; --i >= where; ) {
+            _Py_atomic_store_ptr_relaxed(&l->ob_item[i + 1], l->ob_item[i]);
+        }
+        _Py_atomic_store_ptr_release(&l->ob_item[where], Py_NewRef(newitem));
     }
     Py_END_CRITICAL_SECTION();
     return err;
-}
-
-/* _PyList_AppendTakeRef's slow path: the list is full and the caller holds its lock. */
-LU_EXPORT int
-_PyList_AppendTakeRefListResize(PyListObject *self, PyObject *newitem)
-{
-    Py_ssize_t len = Py_SIZE(self);
-    if (list_resize(self, len + 1) < 0) {
-        Py_DECREF(newitem);
-        return -1;
-    }
-    _Py_atomic_store_ptr_release(&self->ob_item[len], newitem);
-    return 0;
 }
 
 /* list_set_stride(list, start, step, seq): list[start + k * step] = seq[k]
@@ -592,7 +633,7 @@ prim_list_set_stride(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
             break;
         }
         old[k] = l->ob_item[at];
-        l->ob_item[at] = fresh[k];
+        _Py_atomic_store_ptr_release(&l->ob_item[at], fresh[k]);
     }
     Py_END_CRITICAL_SECTION();
     if (bad) {
@@ -710,7 +751,6 @@ prim_list_sort_begin(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     PyListObject *held = (PyListObject *)items;
     Py_BEGIN_CRITICAL_SECTION(l);
-    PyMem_Free(held->ob_item);
     held->ob_item = l->ob_item;
     held->allocated = l->allocated;
     Py_SET_SIZE(held, Py_SIZE(l));
@@ -743,7 +783,7 @@ prim_list_sort_end(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         while (--n >= 0) {
             Py_XDECREF(grown[n]);
         }
-        lu_qsbr_retire(grown);
+        lu_list_array_retire(grown);
     }
     return Py_NewRef(modified ? Py_True : Py_False);
 }
@@ -772,50 +812,59 @@ prim_iter_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return (PyObject *)it;
 }
 
+/* Moves the iterator past v, the item at its index, or with v NULL leaves
+   it exhausted; the sequence it lets go of is in *dead. */
+static void
+seqiter_step(seqiterobject *it, PyObject *v, PyObject **dead)
+{
+    int rev = Py_TYPE(it) == &PyListRevIter_Type;
+    if (v != NULL) {
+        it->it_index += rev ? -1 : 1;
+    }
+    else {
+        it->it_index = rev ? -1 : it->it_index;
+        *dead = it->it_seq;
+        it->it_seq = NULL;
+    }
+}
+
 /* The next item of a tuple, list or reverse list iterator, or NULL when
    exhausted. */
 PyObject *
 lu_seqiter_next(PyObject *iter)
 {
     seqiterobject *it = (seqiterobject *)iter;
-    PyTypeObject *tp = Py_TYPE(iter);
-    /* The iterator's state under its own lock, and a list's array and size,
-       which change apart, under the list's too. The sequence is taken first,
-       as a lock-free reader takes an item, so that it outlives an exhaustion
-       racing to drop it. */
-    PyObject *v = NULL, *dead = NULL;
-    PyObject *seq = lu_try_xget_ref(&it->it_seq);
-    if (seq == NULL) {
-        Py_BEGIN_CRITICAL_SECTION(iter);
-        seq = it->it_seq != NULL ? lu_new_ref_with_lock(it->it_seq) : NULL;
-        Py_END_CRITICAL_SECTION();
-        if (seq == NULL) {
-            return NULL;
-        }
+    /* The iterator's state changes under its own lock. A list item is read
+       first without the list's lock; when that fails, the list's lock is
+       taken together with the iterator's, never inside it: a contended lock
+       parks, which suspends the sections the task holds, and another thread
+       could advance or exhaust the iterator meanwhile. */
+    PyObject *v = NULL, *seq = NULL, *dead = NULL;
+    Py_BEGIN_CRITICAL_SECTION(iter);
+    PyObject *s = it->it_seq;
+    Py_ssize_t i = it->it_index;
+    if (s != NULL && Py_TYPE(iter) == &PyTupleIter_Type) {
+        v = i < Py_SIZE(s) ? Py_NewRef(PyTuple_GET_ITEM(s, i)) : NULL;
+        seqiter_step(it, v, &dead);
     }
-    Py_BEGIN_CRITICAL_SECTION2(iter, tp == &PyTupleIter_Type ? iter : seq);
-    if (it->it_seq == seq) {
-        if (tp == &PyListRevIter_Type) {
-            if (it->it_index >= 0 && it->it_index < Py_SIZE(seq)) {
-                v = Py_NewRef(((PyListObject *)seq)->ob_item[it->it_index--]);
-            }
-            else {
-                it->it_index = -1;
-            }
-        }
-        else if (it->it_index < Py_SIZE(seq)) {
-            v = Py_NewRef(tp == &PyTupleIter_Type ? PyTuple_GET_ITEM(seq, it->it_index)
-                                                  : ((PyListObject *)seq)->ob_item[it->it_index]);
-            it->it_index++;
-        }
-        if (v == NULL) {
-            it->it_seq = NULL;
-            dead = seq;
-        }
+    else if (s != NULL && i >= 0 && (v = lu_list_try_item_ref((PyListObject *)s, i)) != NULL) {
+        seqiter_step(it, v, &dead);
     }
-    Py_END_CRITICAL_SECTION2();
+    else if (s != NULL) {
+        seq = Py_NewRef(s);
+    }
+    Py_END_CRITICAL_SECTION();
+    if (seq != NULL) {
+        Py_BEGIN_CRITICAL_SECTION2(iter, seq);
+        if (it->it_seq == seq) {
+            Py_ssize_t i = it->it_index;
+            v = 0 <= i && i < Py_SIZE(seq) ? lu_new_ref_with_lock(((PyListObject *)seq)->ob_item[i]) : NULL;
+            seqiter_step(it, v, &dead);
+        }
+        Py_END_CRITICAL_SECTION2();
+        Py_DECREF(seq);
+    }
     Py_XDECREF(dead);
-    Py_DECREF(seq);
     return v;
 }
 

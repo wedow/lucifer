@@ -352,7 +352,7 @@ or repr(object).
 encoding defaults to 'utf-8'.
 errors defaults to 'strict'."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         if not kind(cls, 'type'):
             error(TypeError, _cat('str.__new__(X): X is not a type object (', _name(cls), ')'))
         if cls is not str:

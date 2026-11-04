@@ -361,6 +361,81 @@ def read_slices():
 
 print('list slices', race(refill, [read_slices] * 3))
 
+# Lock-free list reads against appends, pops, clears and resizes: an index
+# read, an iteration and a slice may land on any of the arrays the writer
+# publishes, and must see a whole item or a plain IndexError, never a freed
+# or uninitialised one.
+RL = [(i, i) for i in range(64)]
+
+
+def resize_list():
+    RL.extend([(i, i) for i in range(300)])
+    for _ in range(250):
+        RL.pop()
+    RL.append((7, 7))
+    del RL[40:]
+    RL.insert(3, (3, 3))
+    RL[:] = [(i, i) for i in range(5)]
+    RL.clear()
+    RL.extend([(i, i) for i in range(64)])
+
+
+def read_resizing():
+    bad = 0
+    for _ in range(4000):
+        for i in (0, 3, 40, 63, 200, -1):
+            try:
+                if torn(RL[i]):
+                    bad += 1
+            except IndexError:
+                pass
+        for v in RL:
+            if torn(v):
+                bad += 1
+        for v in reversed(RL):
+            if torn(v):
+                bad += 1
+        for v in RL[1:50:3] + RL[-4:]:
+            if torn(v):
+                bad += 1
+        for v in [*RL]:
+            if torn(v):
+                bad += 1
+    return bad
+
+
+print('list resizing', race(resize_list, [read_resizing] * 3))
+
+# One list iterator shared by readers, over items another thread made: the
+# first read of each takes the list's lock, which a copying thread keeps
+# contended, so a reader may park inside next(). The iterator must still hand
+# out whole items, and drop its reference to the list exactly once. The
+# list is the main thread's own, so its count reads exactly before the race;
+# a decrement another thread queues for merging can only make it read higher.
+
+
+def made_elsewhere(n):
+    out = []
+    t = threading.Thread(target=lambda: out.append([(i, i) for i in range(n)]))
+    t.start()
+    t.join()
+    return out[0]
+
+
+def share_iterator(rounds):
+    bad = 0
+    for _ in range(rounds):
+        L = list(made_elsewhere(300))
+        before = sys.getrefcount(L)
+        it = iter(L)
+        bad += sum(race(lambda: L[:], [lambda: sum(torn(v) for v in it)] * 4))
+        del it
+        bad += sys.getrefcount(L) < before
+    return bad
+
+
+print('shared list iterator', share_iterator(100))
+
 # In-place intersections swap a set's body with a temporary's: a key that is
 # in the set before and after must stay findable while the body changes, in
 # a smalltable laid out in another order (all the keys collide) and in a

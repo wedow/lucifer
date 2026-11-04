@@ -19,6 +19,10 @@ rules make that checkable:
    lu_park's own sleep, bracketed by lu_park itself, or a wake, which never
    blocks.
 3. Only park.o references the futex helpers lu_futex_wait and lu_futex_wake.
+4. A call whose effect belongs to the calling OS thread (sched_setaffinity,
+   pthread_sigmask, unshare, setns) is made in a function that first calls
+   lu_task_pin_for_life, or in the SCOPED_CALLS table, whose entries
+   os_call pins for. The task then never migrates (DESIGN 5.4).
 
 stdio is outside these rules: the runtime uses it for diagnostics and the
 startup read of the main .pyc only; file I/O for Python goes through the
@@ -47,6 +51,7 @@ BLOCKING = set("""
     tcdrain msync sync_file_range
 """.split())
 
+THREAD_SCOPED = {"sched_setaffinity", "pthread_sigmask", "sigprocmask", "unshare", "setns"}
 WRAPPERS = "build/runtime/prim/os.o"
 ALLOCATOR = ("build/runtime/object/alloc.o", {"syscall", "sleep"})
 FUTEX = {"lu_futex_wait", "lu_futex_wake"}
@@ -106,8 +111,8 @@ def check_wrappers(path):
     brackets = spans(code)
     problems = []
     for m in re.finditer(r"\b[A-Za-z_]\w*\b", code):
-        if base(m.group(0)) not in BLOCKING:
-            continue
+        if base(m.group(0)) not in BLOCKING or code[:m.start()].endswith("struct "):
+            continue                    # a struct tag (struct flock) is not a call
         inner = [s for s in brackets if s[0] <= m.start() < s[1]]
         macro = max(inner)[2] if inner else None
         futex = re.match(r"syscall\s*\(\s*SYS_futex\b", code[m.start():])
@@ -118,11 +123,28 @@ def check_wrappers(path):
     return problems
 
 
+def check_thread_scoped(path):
+    with open(path) as f:
+        code = strip(f.read())
+    problems = []
+    for m in re.finditer(r"\b[A-Za-z_]\w*\b", code):
+        if m.group(0) not in THREAD_SCOPED:
+            continue
+        start = code.rfind("\n{\n", 0, m.start())      # the opening brace of the enclosing function
+        line_start = code.rfind("\n", 0, m.start()) + 1
+        table = re.search(r"#define SCOPED_CALLS\b(?:[^\n]*\\\n)*[^\n]*$", code[:code.index("\n", m.start())])
+        if "lu_task_pin_for_life" in code[start:m.start()] or (table and table.end() > line_start):
+            continue
+        line = code.count("\n", 0, m.start()) + 1
+        problems.append(f"{path}:{line}: {m.group(0)} without lu_task_pin_for_life")
+    return problems
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__.splitlines()[2])
     wrappers, objects = sys.argv[1], sys.argv[2:]
-    problems = check_objects(objects) + check_wrappers(wrappers)
+    problems = check_objects(objects) + check_wrappers(wrappers) + check_thread_scoped(wrappers)
     for p in problems:
         print("blockcheck: " + p)
     sys.exit(1 if problems else 0)

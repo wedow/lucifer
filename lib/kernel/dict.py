@@ -393,11 +393,11 @@ dict(iterable) -> new dictionary initialized as if via:
 dict(**kwargs) -> new dictionary initialized with the name=value pairs
     in the keyword argument list.  For example:  dict(one=1, two=2)"""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         _boot.check_new(cls, dict)
         return dict_new(cls)
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, /, *args, **kwargs):
         update_common(self, args, kwargs, 'dict')
 
     def __repr__(self):

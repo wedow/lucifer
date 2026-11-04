@@ -478,11 +478,11 @@ def unpack_one(cls, args):
 class set:
     """Build an unordered collection of unique elements."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         _boot.check_new(cls, set)
         return set_new(cls)
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, /, *args, **kwargs):
         if kwargs and (type(self) is set or type_lookup(type(self), '__new__') is type_lookup(set, '__new__')):
             error(TypeError, 'set() takes no keyword arguments')
         iterable = unpack_one(type(self), args)
@@ -668,7 +668,7 @@ Raises KeyError if the set is empty."""
 class frozenset:
     """Build an immutable unordered collection of unique elements."""
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, /, *args, **kwargs):
         _boot.check_new(cls, frozenset)
         if kwargs and (cls is frozenset or type_lookup(cls, '__init__') is type_lookup(frozenset, '__init__')):
             error(TypeError, 'frozenset() takes no keyword arguments')
