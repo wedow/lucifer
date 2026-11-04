@@ -24,10 +24,7 @@ sys_fopen(const char *path, const char *mode)
 static Py_ssize_t
 sys_write(int fd, const void *buf, size_t count)
 {
-    PyThreadState *ts = lu_syscall_begin();
-    Py_ssize_t n = write(fd, buf, count);
-    lu_syscall_end(ts);
-    return n;
+    return LU_SYSCALL(write(fd, buf, count));
 }
 
 /* PyFile_FromFd: _io.open() with the raw C arguments (the name attribute of
@@ -352,8 +349,8 @@ lu_fileobject_init(void)
 static int
 set_cloexec(int fd)
 {
-    int flags = fcntl(fd, F_GETFD);
-    if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0) {
+    int flags = LU_SYSCALL(fcntl(fd, F_GETFD));
+    if (flags < 0 || LU_SYSCALL(fcntl(fd, F_SETFD, flags | FD_CLOEXEC)) < 0) {
         PyErr_SetFromErrno(PyExc_OSError);
         return -1;
     }

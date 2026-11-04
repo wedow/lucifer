@@ -33,14 +33,6 @@
 #include <time.h>
 #include <unistd.h>
 
-/* Evaluates the blocking call `call` between lu_syscall_begin and
-   lu_syscall_end, which keeps errno. */
-#define LU_SYSCALL(call) ({ \
-        PyThreadState *lu_ts_ = lu_syscall_begin(); \
-        __typeof__(call) lu_r_ = (call); \
-        lu_syscall_end(lu_ts_); \
-        lu_r_; })
-
 /* lu_park's own futex calls, outside the bracket: lu_park brackets its
    whole sleep, and a wake never blocks. */
 #define LU_PARKED(call) (call)

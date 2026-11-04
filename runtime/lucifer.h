@@ -109,6 +109,12 @@ struct lu_lot_bucket {
    inside the bracket (tools/blockcheck). */
 PyThreadState *lu_syscall_begin(void);
 void lu_syscall_end(PyThreadState *ts);
+/* Evaluates the blocking call `call` between the two, which keeps errno. */
+#define LU_SYSCALL(call) ({ \
+        PyThreadState *lu_ts_ = lu_syscall_begin(); \
+        __typeof__(call) lu_r_ = (call); \
+        lu_syscall_end(lu_ts_); \
+        lu_r_; })
 
 /* lu_park's sleep (runtime/prim/os.c): waits while *word == expected, until
    a wake or the absolute CLOCK_MONOTONIC deadline (-1 for none). Returns 0,
