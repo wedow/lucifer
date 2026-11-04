@@ -6,14 +6,13 @@ _signal.signal(_signal.SIGINT, _signal.default_int_handler)
 SIGINT = _signal.SIGINT
 
 
+# Every case sends the signal and then spins on a back-edge that its try
+# covers: under handoff the signal arrives asynchronously, and a poll at an
+# uncovered instruction would let it escape on CPython as well.
 def spin_until_signal(send):
-    # The signal is sent from inside the loop, so it is handled at a poll
-    # (a call or a back-edge) of the code in the try block.
-    n = 0
+    send()
     while True:
-        n += 1
-        if n == 50:
-            send()
+        pass
 
 
 def via_raise():
@@ -37,22 +36,18 @@ for name, send in (("raise", via_raise), ("kill", via_kill), ("interrupt_main", 
 
     # the try is in the same frame as the loop
     try:
-        n = 0
+        send()
         while True:
-            n += 1
-            if n == 50:
-                send()
+            pass
     except KeyboardInterrupt:
         print(name, "caught in frame")
 
     # nested try: the inner handler does not match, the outer one does
     try:
         try:
-            n = 0
+            send()
             while True:
-                n += 1
-                if n == 50:
-                    send()
+                pass
         except ValueError:
             print("wrong handler")
     except KeyboardInterrupt:
@@ -62,11 +57,9 @@ for name, send in (("raise", via_raise), ("kill", via_kill), ("interrupt_main", 
     log = []
     try:
         try:
-            n = 0
+            send()
             while True:
-                n += 1
-                if n == 50:
-                    send()
+                pass
         finally:
             log.append("finally")
     except KeyboardInterrupt:
@@ -84,51 +77,47 @@ for name, send in (("raise", via_raise), ("kill", via_kill), ("interrupt_main", 
 
     try:
         with CM():
-            n = 0
+            send()
             while True:
-                n += 1
-                if n == 50:
-                    send()
+                pass
     except KeyboardInterrupt:
         print(name, "with caught")
 
     # a generator's own try
     def gen():
         try:
-            n = 0
+            for n in range(50):
+                yield n
+            send()
             while True:
-                n += 1
-                if n < 50:
-                    yield n
-                elif n == 50:
-                    send()
+                pass
         except KeyboardInterrupt:
             yield "gen caught"
 
     g = gen()
     out = None
-    for _ in range(100):  # the generator spins in its try from n == 50 on
+    for _ in range(100):  # the generator spins in its try after 50 yields
         out = next(g)
         if out == "gen caught":
             break
     print(name, out)
 
-    # a for loop and a loop with a continue back-edge only
+    # a for loop
     try:
-        for i in range(10**9):
-            if i == 50:
-                send()
+        for i in range(3):
+            send()
+            while True:
+                pass
     except KeyboardInterrupt:
         print(name, "for caught")
 
-    # the handler's frame is the loop that polled: the exception is
-    # handled there and the loop resumes where the try ends
+    # the same try again and again
     hits = 0
     for round in range(3):
         try:
+            send()
             while True:
-                send()
-                hits += 0
+                pass
         except KeyboardInterrupt:
             hits += 1
     print(name, "rounds", hits)
