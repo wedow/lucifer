@@ -338,6 +338,7 @@ descr_new(PyTypeObject *descrtype, PyTypeObject *type, const char *name)
     if (d == NULL) {
         return NULL;
     }
+    lu_set_deferred((PyObject *)d);
     d->d_type = (PyTypeObject *)Py_NewRef(type);
     d->d_name = PyUnicode_InternFromString(name);
     if (d->d_name == NULL) {

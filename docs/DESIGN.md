@@ -586,6 +586,12 @@ and io_uring is a §10 experiment after M1.8.
   `tp_version_tag`, dict keys versions, `func_version` and global-dict watcher
   tags. These caches are also the JIT's type feedback: a site's identity is
   (code, offset), the donor's caller+opcode site.
+- A cache names an object without owning it only when the object is immortal
+  or has a deferred refcount (cp314t's rule). Only a collection frees a
+  deferred object, and before it does, with the world stopped, it clears every
+  cache entry naming it. So a cached pointer never dangles: the interpreter and
+  the JIT translator take a reference with a plain incref, and a compiled
+  unit owns every object it embeds.
 - Fast paths for exact builtin types call primitives directly
   (`BINARY_OP_ADD_INT` → compact add, `LOAD_GLOBAL` → namespace lookup). Everything
   else goes through type slots.

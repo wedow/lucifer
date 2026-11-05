@@ -284,8 +284,7 @@ PyUnstable_Object_IsUniquelyReferenced(PyObject *op)
         && _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared) == 0;
 }
 
-/* The runtime keeps no temporaries on a value stack C can see, and ignores
-   a request for deferred reference counting; both answers are the API's
+/* The runtime keeps no temporaries on a value stack C can see: the API's
    "no". */
 int
 PyUnstable_Object_IsUniqueReferencedTemporary(PyObject *op)
@@ -293,10 +292,22 @@ PyUnstable_Object_IsUniqueReferencedTemporary(PyObject *op)
     return 0;
 }
 
+/* Deferred reference counting for an object others may already hold: only
+   a tracked GC object, since only a collection frees it from now on. */
 int
 PyUnstable_Object_EnableDeferredRefcount(PyObject *op)
 {
-    return 0;
+    if (!lu_is_gc(op) || !lu_gc_is_tracked(op)) {
+        return 0;
+    }
+    uint8_t bits = __atomic_load_n(&op->ob_gc_bits, __ATOMIC_RELAXED);
+    if ((bits & LU_GC_DEFERRED)
+        || !__atomic_compare_exchange_n(&op->ob_gc_bits, &bits, (uint8_t)(bits | LU_GC_DEFERRED), 0,
+                                        __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+        return 0;
+    }
+    __atomic_fetch_add(&op->ob_ref_shared, _Py_REF_SHARED(LU_REF_DEFERRED, 0), __ATOMIC_RELAXED);
+    return 1;
 }
 
 LU_EXPORT void

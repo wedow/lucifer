@@ -151,19 +151,18 @@ h_attr_store(PyObject *owner, PyObject *v, PyObject *name, int64_t version)
     return 1;
 }
 
+/* LOAD_ATTR_SLOT and STORE_ATTR_SLOT, as the interpreter runs them: NULL
+   when the slot is empty or its value is being replaced. */
 static PyObject *
 h_slot_load(PyObject *owner, int64_t offset)
 {
-    return Py_XNewRef(*(PyObject **)((char *)owner + offset));
+    return lu_try_xget_ref((PyObject **)((char *)owner + offset));
 }
 
 static void
 h_slot_store(PyObject *owner, int64_t offset, PyObject *v)
 {
-    PyObject **slot = (PyObject **)((char *)owner + offset);
-    PyObject *old = *slot;
-    *slot = Py_NewRef(v);
-    Py_XDECREF(old);
+    Py_XDECREF(lu_member_exchange(owner, (PyObject **)((char *)owner + offset), v));
 }
 
 /* LOAD_ATTR_METHOD_WITH_VALUES: the instance's dict does not shadow name. */

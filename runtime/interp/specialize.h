@@ -114,5 +114,8 @@ lu_site_unchanged(const lu_codeunit *site, int opcode)
 void lu_specialize_load_global(PyObject *globals, PyObject *builtins, lu_codeunit *site, PyObject *name);
 void lu_specialize_load_attr(PyObject *owner, lu_codeunit *site, PyObject *name);
 void lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name);
+/* Makes the code's caches forget every object `dead` says a collection
+   will free; the world is stopped. */
+void lu_specialize_forget(PyCodeObject *code, int (*dead)(PyObject *));
 
 #endif
