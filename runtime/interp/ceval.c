@@ -2653,12 +2653,11 @@ op_LOAD_ATTR_CLASS: {
     if (version == 0 || !PyType_Check(owner) || ((PyTypeObject *)owner)->tp_version_tag != version
         || (meta_checked && (meta_version == 0 || Py_TYPE(owner)->tp_version_tag != meta_version))
         || !lu_site_unchanged(next_instr - 1, opcode)
-        || lu_cache_load32(next_instr + LA_VERSION) != version
-        || !lu_try_incref(descr)) {         /* the cache does not own it: it may be freed */
+        || lu_cache_load32(next_instr + LA_VERSION) != version) {
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
-    TOP() = descr;
+    TOP() = Py_NewRef(descr);       /* deferred: no collection since the load (specialize.c) */
     Py_DECREF(owner);
     if (oparg & 1) {
         PUSH(NULL);
@@ -2736,12 +2735,11 @@ op_LOAD_ATTR_METHOD: {
             goto op_LOAD_ATTR;
         }
     }
-    if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version
-        || !lu_try_incref(descr)) {         /* the cache does not own it: it may be freed */
+    if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
-    TOP() = descr;
+    TOP() = Py_NewRef(descr);       /* deferred: no collection since the load (specialize.c) */
     if (opcode == LOAD_ATTR_METHOD_NO_DICT || opcode == LOAD_ATTR_METHOD_WITH_VALUES) {
         PUSH(owner);
     }

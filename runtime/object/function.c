@@ -129,6 +129,11 @@ lu_function_new(PyObject *code, PyObject *globals)
     op->func_doc = Py_NewRef(doc);
     op->func_module = lu_ns_get(globals, LU_ID(__name__));
     op->vectorcall = function_vectorcall;
+    if (!(co->co_flags & CO_NESTED) || (co->co_flags & CO_METHOD)) {
+        /* cp314t: top-level functions and methods are freed by a collection
+           only, which lets inline caches name them (specialize.c). */
+        lu_set_deferred((PyObject *)op);
+    }
     lu_func_notify(PyFunction_EVENT_CREATE, op, NULL);
     return (PyObject *)op;
 }

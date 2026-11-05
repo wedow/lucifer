@@ -32,9 +32,15 @@
    6. Objects other carriers own are handled alike: their counts are merged
       first (the biased queues), so each object's count is its true count.
       Garbage is merged and held by the collector's worklist reference, so
-      finalizers running on any carrier use the shared path on it. */
+      finalizers running on any carrier use the shared path on it.
+   7. Inline caches name deferred objects without owning them, and only a
+      collection frees those: before the world restarts, every code object's
+      caches forget the garbage (lu_specialize_forget), so a cache never
+      names freed memory. A shutdown collection ends deferral for all, so
+      the caches forget everything they name. */
 
 #include "interp/exceptions.h"
+#include "interp/specialize.h"
 #include "prim/prim.h"
 #include "lucifer.h"
 
@@ -382,8 +388,15 @@ has_legacy_finalizer(PyObject *op)
     return Py_TYPE(op)->tp_del != NULL;
 }
 
+static int
+not_immortal(PyObject *op)
+{
+    return !_Py_IsImmortal(op);
+}
+
 /* Collects the remaining unreachable objects, merged and held by a
-   reference of the worklist; restores ob_tid of the rest. */
+   reference of the worklist; restores ob_tid of the rest. Code objects'
+   caches forget the garbage first (invariant 7). */
 static bool
 scan_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area, void *block, size_t block_size,
                   void *args)
@@ -395,7 +408,14 @@ scan_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area, void *block
     PyObject *op = (PyObject *)((char *)block + state->base.offset);
     /* The cost of a collection is the number of blocks, tracked or not. */
     state->long_lived_total++;
-    if (!lu_gc_is_tracked(op) || gc_is_frozen(op)) {
+    if (!lu_gc_is_tracked(op)) {
+        return true;
+    }
+    if (PyCode_Check(op)) {
+        lu_specialize_forget((PyCodeObject *)op,
+                             state->reason == LU_GC_REASON_SHUTDOWN ? not_immortal : gc_is_unreachable);
+    }
+    if (gc_is_frozen(op)) {
         return true;
     }
     if (gc_is_unreachable(op)) {
