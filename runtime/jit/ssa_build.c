@@ -1668,14 +1668,6 @@ call(struct ctx *c)
     }
     lu_v r = LU_NOV;
     int rown = 1;
-    if (fn != NULL && bound == NULL && n >= 1 && __atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED) == 0
-        && (known_type(c, peek(c, n)) == NULL || (n >= 2 && known_type(c, peek(c, n - 1)) == NULL))) {
-        /* The interpreter has never run this call: the callee would inline
-           blind to its arguments' types. It runs there first, and the code
-           recompiles with what it saw (lu_jit_note_exit). */
-        unsupported(c);
-        return -1;
-    }
     if (fn != NULL && bound == NULL) {
         speculate_args(c, n);
     }
