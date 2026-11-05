@@ -63,33 +63,33 @@ def has_keys(obj):
 
 def lookup(d, key, h):
     """The entry number of key in d, or -1. A probe that meets a key it cannot
-    judge natively returns it; __eq__ runs here, and when it changed the keys
-    table or the entry the probe starts over, as _Py_dict_lookup does. A probe
-    that resumes past an unequal candidate counts only if the table and the
-    candidate stayed: in another table, or with the candidate deleted, the
-    skip to it passes the key."""
-    after = -1
+    judge natively returns it with its position in the probe sequence; __eq__
+    runs here, and when it changed the keys table or the entry the probe
+    starts over, as _Py_dict_lookup does. A probe that resumes past an unequal
+    candidate counts only if the table and the candidate stayed: in another
+    table, or with the candidate deleted, the skip to it passes the key."""
+    steps = 0
     while True:
-        if after < 0:
+        if steps == 0:
             table = dict_keys_id(d)
-        ix = dict_probe(d, key, h, after)
-        if ix > -3:
-            if after < 0 or dict_keys_id(d) == table and dict_key(d, after) is startkey:
-                return ix
-            after = -1
+        r = dict_probe(d, key, h, steps)
+        if type(r) is int:
+            if steps == 0 or dict_keys_id(d) == table and dict_key(d, cand) is startkey:
+                return r
+            steps = 0
             continue
-        cand = -3 - ix
+        cand = r[0]
         startkey = dict_key(d, cand)
         if startkey is MISSING:
-            after = -1
+            steps = 0
             continue
         equal = True if startkey is key or startkey == key else False
         if dict_keys_id(d) == table and dict_key(d, cand) is startkey:
             if equal:
                 return cand
-            after = cand
+            steps = r[1]
         else:
-            after = -1
+            steps = 0
 
 
 def find_value(d, key, h):
