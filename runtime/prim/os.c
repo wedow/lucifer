@@ -839,8 +839,10 @@ prim_os_urandom(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     char *p = bytes != NULL ? PyBytes_AS_STRING(bytes) : NULL;
     for (long left = size; p != NULL && left > 0;) {
         ssize_t n = LU_SYSCALL(getrandom(p + (size - left), (size_t)left, 0));
-        if (n < 0 && errno != EINTR) {
-            set_oserror(errno, NULL);
+        if (n < 0 && !interrupted()) {
+            if (!PyErr_Occurred()) {
+                set_oserror(errno, NULL);
+            }
             Py_CLEAR(bytes);
             break;
         }
