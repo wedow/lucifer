@@ -277,14 +277,11 @@ static PyObject *
 h_binary_op(PyObject *a, PyObject *b, int64_t op)
 {
     if (op == NB_SUBSCR) {
-        PyObject *args[2] = { a, b };
-        if (PyList_CheckExact(a) && PyLong_CheckExact(b) && _PyLong_IsCompact((PyLongObject *)b)
-            && _PyLong_CompactValue((PyLongObject *)b) >= 0) {
-            PyObject *item = lu_list_item_ref((PyListObject *)a, (Py_ssize_t)_PyLong_CompactValue((PyLongObject *)b));
-            if (item != NULL) {
-                return item;
-            }
+        PyObject *item = lu_subscr_native(a, b);
+        if (item != NULL || PyErr_Occurred()) {
+            return item;
         }
+        PyObject *args[2] = { a, b };
         return lu_call_kernel(LU_K_getitem, args, 2);
     }
     int bitwise = op == NB_AND || op == NB_OR || op == NB_XOR || op == NB_INPLACE_AND
@@ -307,16 +304,8 @@ h_binary_op(PyObject *a, PyObject *b, int64_t op)
 static PyObject *
 h_compare_op(PyObject *a, PyObject *b, int64_t oparg)
 {
-    int op = (int)oparg >> 5, r;
-    if (PyUnicode_CheckExact(a) && PyUnicode_CheckExact(b) && (op == Py_EQ || op == Py_NE)) {
-        r = lu_str_eq(a, b) == (op == Py_EQ);
-    }
-    else if (PyLong_CheckExact(a) && PyLong_CheckExact(b)) {
-        int c = lu_long_compare(a, b);
-        r = op == Py_LT ? c < 0 : op == Py_LE ? c <= 0 : op == Py_EQ ? c == 0
-          : op == Py_NE ? c != 0 : op == Py_GT ? c > 0 : c >= 0;
-    }
-    else {
+    int r = lu_compare_native(a, b, (int)oparg);
+    if (r < 0) {
         PyObject *args[3] = { a, b, lu_small_int((int)oparg) };
         return lu_call_kernel(LU_K_compare, args, 3);
     }
@@ -451,9 +440,20 @@ h_call(PyObject **argv, intptr_t n)
     PyObject *callable = argv[0];
     PyObject *const *args = argv[1] != NULL ? argv + 1 : argv + 2;
     size_t nargs = (size_t)(argv[1] != NULL ? n - 1 : n - 2);
-    t->pin++;
-    PyObject *r = lu_call(callable, args, nargs, NULL);
-    t->pin--;
+    /* A kernel function C answers runs no frame, as from the interpreter. */
+    PyObject *target, *self, *r = NULL;
+    int kernel = lu_kernel_target(callable, args, (Py_ssize_t)nargs, &target, &self);
+    if (kernel < 0) {
+        return NULL;
+    }
+    if (kernel && self == NULL) {
+        r = lu_native_call(&t->ts, target, args, (Py_ssize_t)nargs);
+    }
+    if (r == NULL && !PyErr_Occurred()) {
+        t->pin++;
+        r = lu_call(callable, args, nargs, NULL);
+        t->pin--;
+    }
     /* The interpreter polls after a call: a signal the callee tripped is
        handled here, and its exception is the call's. */
     if (r != NULL && (__atomic_load_n(&t->carrier->poll, __ATOMIC_RELAXED) & LU_POLL_EVENTS_MASK)

@@ -1,7 +1,8 @@
 # Calls the optimizing tier should inline once it has run: a method reached
 # through a function that was compiled before the interpreter ever ran it
 # (-X lucifer_jit=always compiles at the first call), and builtins whose
-# kernel code calls primitives that run no Python (len of a dict or a str).
+# kernel code calls primitives that run no Python (len of a dict or a str),
+# and operations the interpreter answers in C without the kernel.
 # Each result must be the interpreter's; tools/jitcheck also runs this at two
 # sizes and requires that entries into compiled code do not grow with the
 # iterations.
@@ -39,4 +40,15 @@ def lengths(n):
     return s
 
 
-print(methods(N), lengths(N))
+def generic(n, pair, other):
+    """Subscripts and comparisons compiled as generic operations, which the
+    interpreter answers in C (a tuple's item, tuples' equality)."""
+    s = 0
+    for i in range(n):
+        s += pair[0]
+        if pair == other:
+            s += 1
+    return s
+
+
+print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)))

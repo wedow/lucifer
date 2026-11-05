@@ -1254,6 +1254,17 @@ PyObject *lu_kernel_function_of(PyObject *callable, PyObject **self);
 PyObject *lu_call(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames);
 /* Calls interp->kernel[id] from C, in a nested eval loop. */
 PyObject *lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t nargs);
+/* What the interpreter answers in C without running the kernel, which the
+   optimizing tier's helpers answer the same way (runtime/interp/ceval.c):
+   container[sub] for exact lists, tuples, bytes, dicts and slices, a new
+   reference or NULL (with an error only for a bad slice) when the kernel
+   must; COMPARE_OP's oparg for ints and equality no Python code decides,
+   1, 0 or -1 for the kernel; and the kernel function `target` called with
+   plain arguments (dict.get, len, isinstance, ...), its result, or NULL
+   (without an error) when the kernel must run. */
+PyObject *lu_subscr_native(PyObject *container, PyObject *sub);
+int lu_compare_native(PyObject *a, PyObject *b, int oparg);
+PyObject *lu_native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize_t npos);
 /* PyObject_IsTrue: 1, 0 or -1 with an error set. */
 int lu_is_true(PyObject *v);
 /* The truth of a value whose type's truth is its layout: 1, 0, or -1 when __bool__
