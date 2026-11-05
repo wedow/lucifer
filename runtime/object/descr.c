@@ -1282,6 +1282,12 @@ lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out)
     return 1;
 }
 
+PyObject *
+lu_staticmethod_get(PyObject *descr)
+{
+    return Py_IS_TYPE(descr, &PyStaticMethod_Type) ? lu_try_xget_ref(&((classmethod *)descr)->cm_callable) : NULL;
+}
+
 int
 lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value)
 {

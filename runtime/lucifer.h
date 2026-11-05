@@ -1321,6 +1321,8 @@ PyObject *lu_descr_new_getset(PyTypeObject *type, PyGetSetDef *getset);
    descriptor, an unset member, a getset with no setter), -1 with an exception
    set. */
 int lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out);
+/* An exact staticmethod's callable, as its __get__ returns it (a new reference), or NULL. */
+PyObject *lu_staticmethod_get(PyObject *descr);
 /* The Python or kernel function a class's __new__ entry runs, called with the class first: 1 with *func, else 0. */
 int lu_new_function(PyObject *new_, PyObject **func);
 int lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value);

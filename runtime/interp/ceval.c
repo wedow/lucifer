@@ -572,7 +572,7 @@ lu_getattr_native(PyObject *owner, PyObject *name)
     if (Py_TYPE(descr)->tp_descr_get == NULL) {
         return descr;
     }
-    v = PyFunction_Check(descr) ? PyMethod_New(descr, owner) : NULL;
+    v = PyFunction_Check(descr) ? PyMethod_New(descr, owner) : lu_staticmethod_get(descr);
     Py_DECREF(descr);
     return v;
 }
