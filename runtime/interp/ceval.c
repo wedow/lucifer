@@ -2494,9 +2494,11 @@ op_DICT_UPDATE: {
     else {
         Py_ssize_t pos = 0;
         PyObject *key, *value;
+        Py_BEGIN_CRITICAL_SECTION(update);
         while (err == 0 && lu_ns_next(update, &pos, &key, &value)) {
             err = lu_ns_insert(dict, key, value);
         }
+        Py_END_CRITICAL_SECTION();
     }
     Py_DECREF(update);
     ERROR_IF(err < 0);

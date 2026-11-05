@@ -1141,7 +1141,9 @@ int lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value);
 int lu_ns_store(PyObject *dict, PyObject *key, PyObject *value);
 /* Removes `key`: 1 when it was there, 0 when not. */
 int lu_ns_delete(PyObject *dict, PyObject *key);
-/* PyDict_Next over the namespace: *pos starts at 0; key and value are borrowed. */
+/* PyDict_Next over the namespace: *pos starts at 0; key and value are
+   borrowed. A dict other threads may write is iterated in its critical
+   section, as cp314t's dict_merge and PyDict_Copy do. */
 int lu_ns_next(PyObject *dict, Py_ssize_t *pos, PyObject **key, PyObject **value);
 
 /* Types (runtime/prim/type.c). Static builtin types are made ready natively

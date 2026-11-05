@@ -1144,10 +1144,12 @@ w_complex_object(PyObject *v, char flag, WFILE *p)
         W_TYPE(TYPE_DICT, p);
         Py_ssize_t pos = 0;
         PyObject *key, *value;
+        Py_BEGIN_CRITICAL_SECTION(v);
         while (lu_ns_next(v, &pos, &key, &value)) {
             w_object(key, p);
             w_object(value, p);
         }
+        Py_END_CRITICAL_SECTION();
         w_object(NULL, p);
     }
     else if (PyAnySet_CheckExact(v)) {

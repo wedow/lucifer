@@ -1393,11 +1393,13 @@ type_new_layout(PyTypeObject *meta, PyObject *name, PyObject *bases, PyObject *n
     dict = PyDict_New();
     Py_ssize_t pos = 0;
     PyObject *key, *value;
+    Py_BEGIN_CRITICAL_SECTION(ns);
     while (dict != NULL && lu_ns_next(ns, &pos, &key, &value)) {
         if (lu_ns_insert(dict, key, value) < 0) {
             Py_CLEAR(dict);
         }
     }
+    Py_END_CRITICAL_SECTION();
     if (dict == NULL) {
         Py_DECREF(bases);
         return NULL;
@@ -2223,6 +2225,7 @@ prim_ns_items(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *list = PyList_New(0);
     Py_ssize_t pos = 0;
     PyObject *key, *value;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
     while (list != NULL && lu_ns_next(args[0], &pos, &key, &value)) {
         PyObject *pair = PyTuple_New(2);
         if (pair == NULL) {
@@ -2237,6 +2240,7 @@ prim_ns_items(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
             Py_CLEAR(list);
         }
     }
+    Py_END_CRITICAL_SECTION();
     return list;
 }
 
