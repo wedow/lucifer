@@ -440,51 +440,70 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     return (enum lu_jit_result)r;
 }
 
-/* An exit was taken: its counts; for a guard that keeps failing, no
-   more speculation there and a recompile of the code it left; for a unit
-   without loops that keeps leaving, the interpreter at its entry. */
+/* Marks every unit of a code dead: each recompiles at its next entry. */
+static void
+recompile(struct lu_jit_code *root)
+{
+    for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
+        if (!__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
+            count(&stats.units_dead, 1);
+        }
+    }
+    root->nfailed = 0;
+}
+
+/* An exit was taken: its counts; for a guard that keeps failing, no more
+   speculation there and a recompile of the code it left; for a side exit
+   that keeps being taken, a recompile with what the interpreter has since
+   seen there (the site was cold at the first compile), then, in an inlined
+   copy that still leaves, a call instead; for a unit without loops that
+   keeps leaving, the interpreter at its entry. */
 void
 lu_jit_note_exit(struct lu_deopt *d)
 {
     count(&stats.exits[d->reason], 1);
     count(&stats.taken[d->opcode & 0xff], 1);
     struct lu_unit *u = d->unit;
-    if (d->reason == EXIT_ERROR || (d->reason == EXIT_SIDE && d->nframes == 1)) {
-        unsigned long n = bump(&u->leaves);
-        if (!u->loops && n >= LEAVES && 2 * n >= __atomic_load_n(&u->entries, __ATOMIC_RELAXED)) {
-            retire(state_for(d->frames[0].code), u);
+    struct lu_deopt_frame *inner = &d->frames[d->nframes - 1];
+    struct lu_jit_code *jc = state_for(inner->code), *root = state_for(d->frames[0].code);
+    int side = d->reason == EXIT_SIDE;
+    if (d->reason != EXIT_GUARD && !side) {
+        if (d->reason == EXIT_ERROR) {
+            unsigned long n = bump(&u->leaves);
+            if (!u->loops && n >= LEAVES && 2 * n >= __atomic_load_n(&u->entries, __ATOMIC_RELAXED)) {
+                retire(root, u);
+            }
         }
         return;
     }
-    if (d->reason != EXIT_GUARD && !(d->reason == EXIT_SIDE && d->nframes > 1)) {
-        return;
-    }
-    struct lu_deopt_frame *inner = &d->frames[d->nframes - 1];
-    struct lu_jit_code *jc = state_for(inner->code);
     if (inner->pc < 0 || inner->pc >= jc->ncode) {
         return;
     }
     /* Past the threshold too: another root that inlined the same copy before
        the flag was set leaves here as well, and is recompiled when it does. */
     uint16_t n = __atomic_add_fetch(&jc->fails[inner->pc], 1, __ATOMIC_RELAXED);
-    if (n >= GUARD_FAILS) {
-        if (d->reason == EXIT_SIDE) {
-            /* The inlined copy keeps leaving here: it is called instead from
-               now on (and if that call leaves its caller's copy, the caller next). */
-            __atomic_store_n(&jc->noinline, 1, __ATOMIC_RELAXED);
+    if (side && d->nframes == 1) {
+        unsigned long leaves = bump(&u->leaves);
+        if (n == GUARD_FAILS) {
+            recompile(root);
         }
-        else {
-            __atomic_store_n(&jc->nospec[inner->pc], 1, __ATOMIC_RELAXED);
+        else if (!u->loops && leaves >= LEAVES && 2 * leaves >= __atomic_load_n(&u->entries, __ATOMIC_RELAXED)) {
+            retire(root, u);
         }
-        /* Every unit of the root code is recompiled at its next entry. */
-        struct lu_jit_code *root = state_for(d->frames[0].code);
-        for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
-            if (!__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
-                count(&stats.units_dead, 1);
-            }
-        }
-        root->nfailed = 0;
+        return;
     }
+    if (n < GUARD_FAILS || (side && n > GUARD_FAILS && n < 2 * GUARD_FAILS)) {
+        return;
+    }
+    if (!side) {
+        __atomic_store_n(&jc->nospec[inner->pc], 1, __ATOMIC_RELAXED);
+    }
+    else if (n >= 2 * GUARD_FAILS) {
+        /* The inlined copy keeps leaving here: it is called instead from
+           now on (and if that call leaves its caller's copy, the caller next). */
+        __atomic_store_n(&jc->noinline, 1, __ATOMIC_RELAXED);
+    }
+    recompile(root);
 }
 
 void
