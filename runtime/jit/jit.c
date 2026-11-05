@@ -302,6 +302,11 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
 static void
 retire(struct lu_jit_code *jc, struct lu_unit *u)
 {
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: retire %s@%d after %lu entries, %lu leaves\n",
+                PyUnicode_AsUTF8(u->deopts != NULL && u->ndeopts > 0 ? u->deopts[0]->frames[0].code->co_qualname
+                                                                     : Py_None), u->entry_pc, u->entries, u->leaves);
+    }
     __atomic_store_n(&jc->wait[u->entry_pc], FOREVER, __ATOMIC_RELAXED);
     if (!__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
         count(&stats.units_dead, 1);
@@ -401,6 +406,9 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
         }
     }
     if (jc->compiles >= MAX_COMPILES && u == NULL) {
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: disabled %s\n", PyUnicode_AsUTF8(code->co_qualname));
+        }
         __atomic_store_n(&jc->disabled, 1, __ATOMIC_RELAXED);
     }
     __atomic_store_n(&jc->compiling, 0, __ATOMIC_RELEASE);

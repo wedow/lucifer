@@ -521,6 +521,19 @@ called:
     return r;
 }
 
+/* call_special(descr, obj, *args) for a function, wrapper or method
+   descriptor, which it calls unbound: descr(obj, *args). Anything else is
+   bound through its __get__ first, which the interpreter does. */
+static PyObject *
+h_call_special(PyObject **argv, intptr_t n)
+{
+    PyTypeObject *t = Py_TYPE(argv[0]);
+    if (t != &PyFunction_Type && t != &PyWrapperDescr_Type && t != &PyMethodDescr_Type) {
+        return LU_JIT_DECLINED;
+    }
+    return h_call(argv, n);     /* obj as the self word: args are argv + 1 */
+}
+
 const struct lu_helper lu_helpers[H_COUNT] = {
     [H_box_int] = { (void *)lu_jit_box_int, "box_int", REP_OBJ, 0, 1 },
     [H_box_float] = { (void *)lu_jit_box_float, "box_float", REP_OBJ, 0, 1 },
@@ -543,6 +556,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_load_method] = { (void *)h_load_method, "load_method", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 3 },
     [H_call] = { (void *)h_call, "call", REP_OBJ, IF_RAISE | IF_PY, 0 },
+    [H_call_special] = { (void *)h_call_special, "call_special", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_prim] = { (void *)h_prim, "prim", REP_OBJ, IF_RAISE, 0 },
     [H_make_function] = { (void *)h_make_function, "make_function", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, 0, 3 },

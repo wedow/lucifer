@@ -1752,6 +1752,23 @@ call(struct ctx *c)
             nargs--;
         }
     }
+    else if (fn != NULL && bound == NULL && fn->func_code != NULL
+             && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
+             && PyUnicode_CompareWithASCIIString(fn->func_qualname, "call_special") == 0
+             && self == LU_NOV && n >= 2 && n <= 32 && root_only(c) && !lu_jit_nospec(c->code, c->pc)) {
+        /* A descriptor known only at run time: called unbound when it is a
+           function or a kernel descriptor, which is what call_special's
+           first test does, without its *args call the tier leaves at. */
+        lu_v hargs[32];
+        for (int i = 0; i < n; i++) {
+            hargs[i] = peek(c, n - i);
+        }
+        r = helper_raising(c, H_call_special, n, hargs, n + 2);
+        guard_after(c, OP_GUARD_NOT_NULL, r, 1);
+        pop_call(c, n);
+        push(c, r, 1);
+        return 0;
+    }
     if (fn != NULL && bound == NULL) {
         /* The callee takes the arguments' references; the rest go here. */
         int owncallable = peek_owned(c, n + 2);
