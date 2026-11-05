@@ -874,6 +874,7 @@ extern LU_EXPORT union lu_runtime {
         Py_ssize_t next_module_index;   /* the last PyModuleDef_Base.m_index given */
         PyMutex getargs_lock;           /* builds an argument parser's keyword tuple once */
         PyMutex specialize_lock;        /* one rewrite of an instruction's inline cache at a time */
+        PyMutex shared_names_lock;      /* a class's shared names grow one at a time (object/attrs.c) */
         pthread_t main_thread;          /* the thread that started the runtime */
         struct lu_task *main_task;      /* signals and the main thread's pending calls are aimed at it */
         struct {

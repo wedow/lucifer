@@ -34,8 +34,6 @@ struct lu_shared_names {
     PyObject *names[];
 };
 
-static PyMutex names_lock;
-
 static struct lu_shared_names *
 shared_names(PyTypeObject *tp)
 {
@@ -140,7 +138,7 @@ static Py_ssize_t
 add_name(PyTypeObject *tp, PyObject *name)
 {
     struct lu_shared_names *names = shared_names(tp);
-    PyMutex_Lock(&names_lock);
+    PyMutex_Lock(&_PyRuntime.shared_names_lock);
     Py_ssize_t i = lu_inline_index(tp, name);
     int added = 0;
     if (i < 0 && names->count < names->capacity) {
@@ -151,7 +149,7 @@ add_name(PyTypeObject *tp, PyObject *name)
         __atomic_store_n(&names->count, i + 1, __ATOMIC_RELEASE);
         added = 1;
     }
-    PyMutex_Unlock(&names_lock);
+    PyMutex_Unlock(&_PyRuntime.shared_names_lock);
     if (added && _PyType_Lookup(tp, name) != NULL) {
         lu_type_modified(tp);           /* the name shadows a class attribute */
     }
