@@ -2469,7 +2469,7 @@ op_LIST_EXTEND: {
 op_DICT_MERGE: {
     PyObject *update = POP();
     SAVE_FRAME();
-    if (!PyDict_CheckExact(update) || !lu_dict_str_keys(update)) {
+    if (!PyDict_CheckExact(update) || !lu_dict_str_keys(update) || !lu_dict_str_keys(sp[-oparg])) {
         char buf[256];
         PyObject *name = PyUnicode_FromString(lu_function_str(sp[-oparg - 3], buf, sizeof buf));
         if (name == NULL) {

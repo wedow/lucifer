@@ -129,22 +129,29 @@ lu_freelists_clear(struct lu_entry *e)
     freelist_clear(&e->free_ints);
 }
 
-static PyLongObject *
-long_alloc(Py_ssize_t ndigits)
-{
-    PyLongObject *v = ndigits <= 1 ? (PyLongObject *)freelist_pop(&lu_current_entry()->free_ints) : NULL;
-    if (v != NULL) {
-        v->long_value.ob_digit[0] = 0;          /* as zeroed memory has it */
-        return v;
-    }
-    return (PyLongObject *)lu_object_new(&PyLong_Type, LONG_HEADER + (ndigits > 0 ? ndigits : 1) * sizeof(digit));
-}
-
 static void
 set_tag(PyLongObject *v, int sign, Py_ssize_t ndigits)
 {
     /* TAG_FROM_SIGN_AND_SIZE: 0 positive, 1 zero, 2 negative. */
     v->long_value.lv_tag = ((uintptr_t)ndigits << _PyLong_NON_SIZE_BITS) | (uintptr_t)(1 - sign);
+}
+
+/* long_alloc: an int with ndigits digits, positive sign (zero when ndigits
+   is 0) and a zeroed first digit (CPython's long_alloc). */
+PyLongObject *
+lu_long_alloc(Py_ssize_t ndigits)
+{
+    PyLongObject *v = ndigits <= 1 ? (PyLongObject *)freelist_pop(&lu_current_entry()->free_ints) : NULL;
+    if (v != NULL) {
+        v->long_value.ob_digit[0] = 0;
+    }
+    else {
+        v = (PyLongObject *)lu_object_new(&PyLong_Type, LONG_HEADER + (ndigits > 0 ? ndigits : 1) * sizeof(digit));
+    }
+    if (v != NULL) {
+        set_tag(v, ndigits != 0, ndigits);
+    }
+    return v;
 }
 
 PyObject *
@@ -189,7 +196,7 @@ lu_long_from_digits(int negative, Py_ssize_t ndigits, const digit *digits)
             return lu_small_int((int)v);
         }
     }
-    PyLongObject *v = long_alloc(ndigits);
+    PyLongObject *v = lu_long_alloc(ndigits);
     if (v == NULL) {
         return NULL;
     }
@@ -237,8 +244,12 @@ Py_ssize_t
 PyLong_AsSsize_t(PyObject *op)
 {
     long value;
-    if (!PyLong_Check(op)) {
+    if (op == NULL) {
         PyErr_BadInternalCall();
+        return -1;
+    }
+    if (!PyLong_Check(op)) {
+        PyErr_SetString(PyExc_TypeError, "an integer is required");
         return -1;
     }
     if (lu_long_as_long(op, &value) < 0) {
@@ -659,14 +670,25 @@ number_value(PyObject *v, Py_complex *c)
     return 1;
 }
 
+/* Equality by value (long_richcompare): the small ints carry the
+   immortality bit in lv_tag, so equal ints may differ in the tag (1 == True). */
 static int
 long_eq(PyLongObject *a, PyLongObject *b)
 {
-    if (a->long_value.lv_tag != b->long_value.lv_tag) {
+    if (_PyLong_IsCompact(a) && _PyLong_IsCompact(b)) {
+        return _PyLong_CompactValue(a) == _PyLong_CompactValue(b);
+    }
+    if (_PyLong_IsCompact(a) || _PyLong_IsCompact(b)) {
+        return 0;       /* a non-compact int has at least two digits */
+    }
+    if ((a->long_value.lv_tag & _PyLong_SIGN_MASK) != (b->long_value.lv_tag & _PyLong_SIGN_MASK)) {
         return 0;
     }
-    Py_ssize_t n = (Py_ssize_t)(a->long_value.lv_tag >> _PyLong_NON_SIZE_BITS);
-    return memcmp(a->long_value.ob_digit, b->long_value.ob_digit, n * sizeof(digit)) == 0;
+    Py_ssize_t na = (Py_ssize_t)(a->long_value.lv_tag >> _PyLong_NON_SIZE_BITS);
+    if (na != (Py_ssize_t)(b->long_value.lv_tag >> _PyLong_NON_SIZE_BITS)) {
+        return 0;
+    }
+    return memcmp(a->long_value.ob_digit, b->long_value.ob_digit, na * sizeof(digit)) == 0;
 }
 
 /* 1 if equal, 0 if not, -1 with an error set. */
@@ -789,6 +811,7 @@ lu_layouts_init(void)
         immortal_header((PyObject *)v, &PyLong_Type);
         v->long_value.ob_digit[0] = (digit)(value < 0 ? -value : value);
         set_tag(v, value < 0 ? -1 : value > 0, value != 0);
+        v->long_value.lv_tag |= _PyLong_IMMORTALITY_BIT_MASK;
     }
     for (int i = 0; i < 256; i++) {
         PyBytesObject *b = &s->bytes_chars[i];

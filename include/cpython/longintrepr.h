@@ -116,6 +116,8 @@ Py_DEPRECATED(3.14) PyAPI_FUNC(PyLongObject*) _PyLong_FromDigits(
 
 #define _PyLong_SIGN_MASK 3
 #define _PyLong_NON_SIZE_BITS 3
+/* Bit 2 of lv_tag marks the small ints (_PyLong_IsSmallInt). */
+#define _PyLong_IMMORTALITY_BIT_MASK 4
 
 
 static inline int

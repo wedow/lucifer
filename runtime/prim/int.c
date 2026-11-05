@@ -1234,8 +1234,8 @@ long_to_bytes(PyObject *a, Py_ssize_t length, int little, int is_signed)
 }
 
 /* from_bytes: `n` bytes of two's complement or magnitude. */
-static PyObject *
-long_from_bytes(const unsigned char *s, Py_ssize_t n, int little, int is_signed)
+PyObject *
+lu_long_from_bytes(const unsigned char *s, Py_ssize_t n, int little, int is_signed)
 {
     int neg = n > 0 && is_signed && (s[little ? n - 1 : 0] & 0x80);
     Py_ssize_t cap = (n * 8) / SHIFT + 2;
@@ -1698,7 +1698,7 @@ prim_int_from_bytes(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "int_from_bytes() needs bytes");
         return NULL;
     }
-    return long_from_bytes((const unsigned char *)PyBytes_AS_STRING(args[0]),
+    return lu_long_from_bytes((const unsigned char *)PyBytes_AS_STRING(args[0]),
                            PyBytes_GET_SIZE(args[0]), args[1] == Py_True, args[2] == Py_True);
 }
 
