@@ -1997,6 +1997,12 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
     int inherited = !is_runtime_type(staticbase) && staticbase->tp_new == owner->tp_new;
     if (staticbase != owner && !inherited
         && !(PyExceptionClass_Check(staticbase) && PyExceptionClass_Check(owner))) {
+        if (staticbase->tp_new == NULL) {
+            /* A static type with no tp_new cannot be instantiated
+               (type_ready_set_new). */
+            lu_err_format(PyExc_TypeError, "cannot create '%s' instances", tp->tp_name);
+            return -1;
+        }
         lu_err_format(PyExc_TypeError, "%s.__new__(%s) is not safe, use %s.__new__()",
                       owner->tp_name, tp->tp_name, staticbase->tp_name);
         return -1;

@@ -109,10 +109,25 @@ _PyNumber_Index(PyObject *item)
         return NULL;
     }
     PyObject *result = Py_TYPE(item)->tp_as_number->nb_index(item);
-    if (result != NULL && !PyLong_Check(result)) {
-        PyErr_Format(PyExc_TypeError, "__index__ returned non-int (type %.200s)",
-                     Py_TYPE(result)->tp_name);
-        Py_CLEAR(result);
+    if (result == NULL) {
+        return NULL;
+    }
+    if (!PyLong_CheckExact(result)) {
+        if (!PyLong_Check(result)) {
+            PyErr_Format(PyExc_TypeError, "__index__ returned non-int (type %.200s)",
+                         Py_TYPE(result)->tp_name);
+            Py_DECREF(result);
+            return NULL;
+        }
+        /* Issue #17576: warn if 'result' not of exact type int. */
+        if (PyErr_WarnFormat(PyExc_DeprecationWarning, 1,
+                "__index__ returned non-int (type %.200s).  "
+                "The ability to return an instance of a strict subclass of int "
+                "is deprecated, and may be removed in a future version of Python.",
+                Py_TYPE(result)->tp_name)) {
+            Py_DECREF(result);
+            return NULL;
+        }
     }
     return result;
 }
