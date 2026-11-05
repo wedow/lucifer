@@ -43,6 +43,14 @@ import struct, copy
 # Bit-Manipulation helpers
 # ======================================================================
 
+
+def _bytes(data):
+    """The bytes of a bytes-like object (PyObject_GetBuffer), never a str."""
+    if isinstance(data, str):
+        raise TypeError('Strings must be encoded before hashing')
+    return data if type(data) is bytes else bytes(memoryview(data))
+
+
 def _bytelist2long(list):
     "Transform a list of characters into a list of longs."
 
@@ -133,7 +141,7 @@ class md5:
         # to start from scratch on the same object.
         self.init()
 
-        if arg:
+        if arg is not None:
             self.update(arg)
 
 
@@ -257,6 +265,10 @@ class md5:
     # API of the md5 module.
 
     def update(self, inBuf):
+        """Add bytes-like data to the current message."""
+        self._update(_bytes(inBuf))
+
+    def _update(self, inBuf):
         """Add to the current message.
 
         Update the md5 object with the string arg. Repeated calls
@@ -321,7 +333,7 @@ class md5:
             padLen = 120 - index
 
         padding = [128] + [0] * 63
-        self.update(padding[:padLen])
+        self._update(padding[:padLen])
 
         # Append length (before padding).
         bits = _bytelist2long(self.input[:56]) + count

@@ -8,6 +8,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <datetime.h>
+#include <frameobject.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -369,6 +370,227 @@ static PyTypeObject MyList_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_base = &PyList_Type,
 };
+
+/* ready.Delegate: slots that hand back to object's own, as numpy's NaT hash and
+   scalar reprs do through PyBaseObject_Type. */
+static Py_hash_t
+delegate_hash(PyObject *self)
+{
+    return PyBaseObject_Type.tp_hash(self);
+}
+
+static PyObject *
+delegate_repr(PyObject *self)
+{
+    return PyBaseObject_Type.tp_repr(self);
+}
+
+static PyObject *
+delegate_str(PyObject *self)
+{
+    return PyBaseObject_Type.tp_str(self);
+}
+
+static PyObject *
+delegate_richcompare(PyObject *self, PyObject *other, int op)
+{
+    return PyBaseObject_Type.tp_richcompare(self, other, op);
+}
+
+static PyTypeObject Delegate_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.Delegate",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_hash = delegate_hash,
+    .tp_repr = delegate_repr,
+    .tp_str = delegate_str,
+    .tp_richcompare = delegate_richcompare,
+};
+
+/* ready.Unhashable: tp_hash stored as PyObject_HashNotImplemented, as numpy's ndarray does. */
+static PyTypeObject Unhashable_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.Unhashable",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_hash = PyObject_HashNotImplemented,
+    .tp_richcompare = delegate_richcompare,
+};
+
+/* ready.BytesCopy: a bytes subtype that copies the base's richcompare and hash
+   slots at module init, as NumPy's bytes_ does. */
+static PyTypeObject BytesCopy_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.BytesCopy",
+    .tp_basicsize = sizeof(PyBytesObject),
+    .tp_itemsize = 1,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_base = &PyBytes_Type,
+};
+
+/* ready.Mul and ready.BytesMul(bytes, Mul): readying a type with a second base must
+   not fill the first base's empty slots from it (NumPy's bytes_ and generic). */
+static PyObject *
+mul_multiply(PyObject *a, PyObject *b)
+{
+    return Py_NewRef(Py_NotImplemented);
+}
+
+static PyNumberMethods mul_as_number = { .nb_multiply = mul_multiply };
+
+static PyTypeObject Mul_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.Mul",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_as_number = &mul_as_number,
+};
+
+static PyTypeObject BytesMul_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.BytesMul",
+    .tp_basicsize = sizeof(PyBytesObject),
+    .tp_itemsize = 1,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_base = &PyBytes_Type,
+};
+
+/* ready.CmpOnly: a tp_richcompare and no tp_hash, as ndarray: unhashable. */
+static PyTypeObject CmpOnly_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.CmpOnly",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_richcompare = delegate_richcompare,
+};
+
+/* Spec types with one of tp_richcompare and tp_hash: the other is not inherited. */
+static Py_hash_t
+seven_hash(PyObject *self)
+{
+    return 7;
+}
+
+static PyObject *
+make_half_pairs(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    PyType_Slot cmp_slots[] = { { Py_tp_new, PyType_GenericNew }, { Py_tp_richcompare, delegate_richcompare },
+                                { 0, NULL } };
+    PyType_Slot hash_slots[] = { { Py_tp_new, PyType_GenericNew }, { Py_tp_hash, seven_hash }, { 0, NULL } };
+    PyType_Spec cmp_spec = { "ready.SpecCmp", sizeof(PyObject), 0, Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+                             cmp_slots };
+    PyType_Spec hash_spec = { "ready.SpecHash", sizeof(PyObject), 0, Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+                              hash_slots };
+    PyObject *cmp = PyType_FromSpec(&cmp_spec);
+    PyObject *hash = cmp != NULL ? PyType_FromSpec(&hash_spec) : NULL;
+    PyObject *r = hash != NULL ? Py_BuildValue("(OO)", cmp, hash) : NULL;
+    Py_XDECREF(cmp);
+    Py_XDECREF(hash);
+    return r;
+}
+
+/* ready.OldAttr: the old tp_getattr and tp_setattr slots, which take a C string, as NumPy's Fortran objects do. */
+static PyObject *
+oldattr_getattr(PyObject *self, char *name)
+{
+    if (strcmp(name, "magic") == 0) {
+        return PyLong_FromLong(42);
+    }
+    PyErr_Format(PyExc_AttributeError, "no %s here", name);
+    return NULL;
+}
+
+static int
+oldattr_setattr(PyObject *self, char *name, PyObject *value)
+{
+    if (strcmp(name, "magic") != 0) {
+        PyErr_Format(PyExc_AttributeError, "cannot set %s", name);
+        return -1;
+    }
+    return value == NULL ? 0 : 0;
+}
+
+static PyTypeObject OldAttr_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.OldAttr",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_getattr = oldattr_getattr,
+    .tp_setattr = oldattr_setattr,
+};
+
+/* ready.OldAttrSub: a static subtype that inherits tp_getattr and tp_setattr. */
+static PyTypeObject OldAttrSub_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.OldAttrSub",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_base = &OldAttr_Type,
+};
+
+/* ready.DocSig: a tp_doc that starts with a signature. */
+static PyTypeObject DocSig_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.DocSig",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = PyType_GenericNew,
+    .tp_doc = "DocSig(x, /, y=1)\n--\n\nA documented type.",
+};
+
+/* ready.Mapped: indexing through mp_subscript only, as numpy's scalars do:
+   not a sequence for PySequence_Check, which looks at sq_item. */
+static PyObject *
+mapped_subscript(PyObject *self, PyObject *key)
+{
+    return Py_NewRef(key);
+}
+
+static PyMappingMethods mapped_as_mapping = { .mp_subscript = mapped_subscript };
+
+static PyTypeObject Mapped_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.Mapped",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_SEQUENCE,
+    .tp_new = PyType_GenericNew,
+    .tp_as_mapping = &mapped_as_mapping,
+};
+
+/* seq_shape(obj): whether its type has sq_repeat and nb_multiply, then PySequence_Repeat(obj, 2). */
+static PyObject *
+seq_shape(PyObject *self, PyObject *arg)
+{
+    PyTypeObject *tp = Py_TYPE(arg);
+    int repeat = tp->tp_as_sequence != NULL && tp->tp_as_sequence->sq_repeat != NULL;
+    int multiply = tp->tp_as_number != NULL && tp->tp_as_number->nb_multiply != NULL;
+    return Py_BuildValue("(ii)", repeat, multiply);
+}
+
+static PyObject *
+repeat_twice(PyObject *self, PyObject *arg)
+{
+    return PySequence_Repeat(arg, 2);
+}
+
+static PyObject *
+subscript(PyObject *self, PyObject *args)
+{
+    PyObject *o, *key;
+    return PyArg_ParseTuple(args, "OO", &o, &key) ? PyObject_GetItem(o, key) : NULL;
+}
+
+static PyObject *
+is_sequence(PyObject *self, PyObject *arg)
+{
+    return PyBool_FromLong(PySequence_Check(arg));
+}
 
 /* ready.FloatSub: a float subtype whose tp_new asks float's tp_new for the instance, as
    numpy's float64 does. */
@@ -745,6 +967,92 @@ errors(PyObject *self, PyObject *Py_UNUSED(ignored))
     return out;
 }
 
+/* A traceback entry for a frame made the way Cython makes one: PyCode_NewEmpty,
+   PyFrame_New, then a store of the line into f_lineno, at its offset in the
+   free-threaded build's PyFrameObject. */
+static PyObject *
+raise_from_frame(PyObject *self, PyObject *args)
+{
+    int line;
+    if (!PyArg_ParseTuple(args, "i", &line)) {
+        return NULL;
+    }
+    PyCodeObject *code = PyCode_NewEmpty("ready.pyx", "ready.fake", line);
+    if (code == NULL) {
+        return NULL;
+    }
+    PyFrameObject *frame = PyFrame_New(PyThreadState_Get(), code, PyModule_GetDict(self), NULL);
+    Py_DECREF(code);
+    if (frame == NULL) {
+        return NULL;
+    }
+    *(int *)((char *)frame + 0x38) = line;
+    PyErr_SetString(PyExc_ValueError, "from a made frame");
+    PyTraceBack_Here(frame);
+    Py_DECREF(frame);
+    return NULL;
+}
+
+/* call_direct(f, self_or_arg): what Cython does with a builtin whose flags it knows,
+   a call of ml_meth itself, else the generic call. */
+static PyObject *
+call_direct(PyObject *self, PyObject *args)
+{
+    PyObject *f, *arg;
+    if (!PyArg_ParseTuple(args, "OO", &f, &arg)) {
+        return NULL;
+    }
+    if (PyCFunction_Check(f)) {
+        int flags = PyCFunction_GET_FLAGS(f) & ~(METH_CLASS | METH_STATIC | METH_COEXIST);
+        if (flags == METH_O) {
+            return PyCFunction_GET_FUNCTION(f)(PyCFunction_GET_SELF(f), arg);
+        }
+        if (flags == (METH_FASTCALL | METH_KEYWORDS)) {
+            PyObject *stack[1] = { arg };
+            return ((_PyCFunctionFastWithKeywords)(void (*)(void))PyCFunction_GET_FUNCTION(f))(
+                PyCFunction_GET_SELF(f), stack, 1, NULL);
+        }
+    }
+    if (Py_IS_TYPE(f, &PyMethodDescr_Type)) {      /* unbound method, self = arg */
+        PyMethodDef *ml = ((PyMethodDescrObject *)f)->d_method;
+        int flags = ml->ml_flags & ~(METH_CLASS | METH_STATIC | METH_COEXIST);
+        if (flags == METH_NOARGS) {
+            return ml->ml_meth(arg, NULL);
+        }
+        if (flags == (METH_FASTCALL | METH_KEYWORDS)) {
+            return ((_PyCFunctionFastWithKeywords)(void (*)(void))ml->ml_meth)(arg, NULL, 0, NULL);
+        }
+    }
+    return PyObject_CallOneArg(f, arg);
+}
+
+/* ready.raise_object(type, value): PyErr_SetObject, which runs the class. */
+static PyObject *
+raise_object(PyObject *self, PyObject *args)
+{
+    PyObject *type, *value;
+    if (!PyArg_ParseTuple(args, "OO", &type, &value)) {
+        return NULL;
+    }
+    PyErr_SetObject(type, value);
+    return NULL;
+}
+
+/* ready.format_over(str): PyUnicode_Concat and PyErr_Format while another error
+   is set, as NumPy's converters and indexing replace an error; the new one wins. */
+static PyObject *
+format_over(PyObject *self, PyObject *obj)
+{
+    PyErr_SetString(PyExc_KeyError, "pending");
+    PyObject *joined = PyUnicode_Concat(obj, obj);  /* NumPy builds its message so, before it raises */
+    if (joined == NULL) {
+        return NULL;
+    }
+    PyErr_Format(PyExc_ValueError, "got %R and %S", obj, joined);
+    Py_DECREF(joined);
+    return NULL;
+}
+
 /* Dict updates and slices. */
 
 static PyObject *
@@ -926,6 +1234,17 @@ static PyMethodDef module_methods[] = {
     { "imports", imports, METH_NOARGS, NULL },
     { "strings", strings, METH_O, NULL },
     { "errors", errors, METH_NOARGS, NULL },
+    { "raise_object", raise_object, METH_VARARGS, NULL },
+    { "make_half_pairs", make_half_pairs, METH_NOARGS, NULL },
+    { "format_over", format_over, METH_O, NULL },
+    { "call_direct", call_direct, METH_VARARGS, NULL },
+    { "raise_from_frame", raise_from_frame, METH_VARARGS, NULL },
+    { "is_sequence", is_sequence, METH_O, NULL },
+    { "subscript", subscript, METH_VARARGS, NULL },
+    { "seq_shape", seq_shape, METH_O, NULL },
+    { "repeat_twice", repeat_twice, METH_O, NULL },
+    { "sigfunc", is_sequence, METH_O, "sigfunc($module, a, b=1, /)\n--\n\nReal doc." },
+    { "badsig", is_sequence, METH_O, "badsig(a, b\nno marker" },
     { "dict_ops", dict_ops, METH_NOARGS, NULL },
     { "slices", slices, METH_VARARGS, NULL },
     { "locks", locks, METH_NOARGS, NULL },
@@ -944,7 +1263,20 @@ PyMODINIT_FUNC
 PyInit_ready(void)
 {
     if (PyType_Ready(&Vec_Type) < 0 || PyType_Ready(&Vec3_Type) < 0 || PyType_Ready(&Locked_Type) < 0
-        || PyType_Ready(&Counter_Type) < 0 || PyType_Ready(&MyList_Type) < 0 || PyType_Ready(&FloatSub_Type) < 0) {
+        || PyType_Ready(&Counter_Type) < 0 || PyType_Ready(&MyList_Type) < 0 || PyType_Ready(&FloatSub_Type) < 0
+        || PyType_Ready(&Delegate_Type) < 0 || PyType_Ready(&Mapped_Type) < 0
+        || PyType_Ready(&Unhashable_Type) < 0
+        || PyType_Ready(&CmpOnly_Type) < 0 || PyType_Ready(&OldAttr_Type) < 0 || PyType_Ready(&DocSig_Type) < 0
+        || PyType_Ready(&OldAttrSub_Type) < 0) {
+        return NULL;
+    }
+    BytesCopy_Type.tp_richcompare = PyBytes_Type.tp_richcompare;
+    BytesCopy_Type.tp_hash = PyBytes_Type.tp_hash;
+    if (PyType_Ready(&BytesCopy_Type) < 0 || PyType_Ready(&Mul_Type) < 0) {
+        return NULL;
+    }
+    BytesMul_Type.tp_bases = Py_BuildValue("(OO)", &PyBytes_Type, &Mul_Type);
+    if (BytesMul_Type.tp_bases == NULL || PyType_Ready(&BytesMul_Type) < 0) {
         return NULL;
     }
     PyObject *m = PyModule_Create(&module);
@@ -954,7 +1286,17 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "Locked", (PyObject *)&Locked_Type) < 0
         || PyModule_AddObjectRef(m, "Counter", (PyObject *)&Counter_Type) < 0
         || PyModule_AddObjectRef(m, "MyList", (PyObject *)&MyList_Type) < 0
-        || PyModule_AddObjectRef(m, "FloatSub", (PyObject *)&FloatSub_Type) < 0) {
+        || PyModule_AddObjectRef(m, "FloatSub", (PyObject *)&FloatSub_Type) < 0
+        || PyModule_AddObjectRef(m, "Delegate", (PyObject *)&Delegate_Type) < 0
+        || PyModule_AddObjectRef(m, "Mapped", (PyObject *)&Mapped_Type) < 0
+        || PyModule_AddObjectRef(m, "Unhashable", (PyObject *)&Unhashable_Type) < 0
+        || PyModule_AddObjectRef(m, "CmpOnly", (PyObject *)&CmpOnly_Type) < 0
+        || PyModule_AddObjectRef(m, "OldAttr", (PyObject *)&OldAttr_Type) < 0
+        || PyModule_AddObjectRef(m, "OldAttrSub", (PyObject *)&OldAttrSub_Type) < 0
+        || PyModule_AddObjectRef(m, "DocSig", (PyObject *)&DocSig_Type) < 0
+        || PyModule_AddObjectRef(m, "BytesCopy", (PyObject *)&BytesCopy_Type) < 0
+        || PyModule_AddObjectRef(m, "Mul", (PyObject *)&Mul_Type) < 0
+        || PyModule_AddObjectRef(m, "BytesMul", (PyObject *)&BytesMul_Type) < 0) {
         Py_XDECREF(m);
         return NULL;
     }

@@ -25,6 +25,14 @@ import struct, copy
 #   and is reused here with tiny modifications.
 # ======================================================================
 
+
+def _bytes(data):
+    """The bytes of a bytes-like object (PyObject_GetBuffer), never a str."""
+    if isinstance(data, str):
+        raise TypeError('Strings must be encoded before hashing')
+    return data if type(data) is bytes else bytes(memoryview(data))
+
+
 def _long2bytesBigEndian(n, blocksize=0):
     """Convert a long integer to a byte string.
 
@@ -228,6 +236,10 @@ class sha(metaclass=Immutable):
     # API of the sha module.
 
     def update(self, inBuf):
+        """Add bytes-like data to the current message."""
+        self._update(_bytes(inBuf))
+
+    def _update(self, inBuf):
         """Add to the current message.
 
         Update the md5 object with the string arg. Repeated calls
@@ -242,9 +254,6 @@ class sha(metaclass=Immutable):
         make minimal recalculation if we call update() to add more data
         to the hashed string.
         """
-
-        if isinstance(inBuf, str):
-            raise TypeError("Unicode strings must be encoded before hashing")
 
         leninBuf = len(inBuf)
 
@@ -297,7 +306,7 @@ class sha(metaclass=Immutable):
             padLen = 120 - index
 
         padding = [0o200] + [0] * 63
-        self.update(padding[:padLen])
+        self._update(padding[:padLen])
 
         # Append length (before padding).
         bits = _bytelist2longBigEndian(self.input[:56]) + count
@@ -364,7 +373,7 @@ def sha1(arg=None, usedforsecurity=True):
 
     crypto = sha()
     crypto.name = 'sha1'
-    if arg:
+    if arg is not None:
         crypto.update(arg)
 
     return crypto

@@ -2,13 +2,25 @@
   "numpy": "2.5.4",
   "abi": "cp314t",
   "shards": [
-    "numpy/_core/tests/test__exceptions.py",
-    "numpy/_core/tests/test_abc.py",
-    "numpy/_core/tests/test_argparse.py",
-    "numpy/_core/tests/test_array_api_info.py"
+    "numpy/_core/tests/test_strings.py::TestMethodsWithUnicode",
+    "numpy/_core/tests/test_strings.py::test_string_comparisons",
+    "numpy/_core/tests/test_strings.py::TestOverride",
+    "numpy/_core/tests/test_strings.py::test_string_comparisons_empty",
+    "numpy/_core/tests/test_strings.py::test_float_to_string_cast",
+    "numpy/_core/tests/test_strings.py::TestReplaceOnArrays",
+    "numpy/_core/tests/test_strings.py::test_mixed_string_comparison_ufuncs_fail",
+    "numpy/_core/tests/test_strings.py::test_mixed_string_comparisons_ufuncs_with_cast",
+    "numpy/_core/tests/test_strings.py::test_string_size_dtype_errors",
+    "numpy/_core/tests/test_strings.py::TestMixedTypeMethods",
+    "numpy/_core/tests/test_strings.py::TestUnicodeOnlyMethodsRaiseWithBytes",
+    "numpy/_core/tests/test_strings.py::test_in_place_multiply_no_overflow",
+    "numpy/_core/tests/test_strings.py::test_large_string_addition_error",
+    "numpy/_core/tests/test_strings.py::test_large_string_coercion_error",
+    "numpy/_core/tests/test_strings.py::test_string_size_dtype_large_repr",
+    "numpy/_core/tests/test_strings.py::test_large_string_cast"
   ],
   "parallel_threads": 1,
-  "timeout": 540,
+  "timeout": 1100,
   "requirements_sha256": "13a20f27474bc0e98445882b51cdbd8d88bc3c6d9b53a3f6c13ff9de2ec752b7",
   "optional_requirements_sha256": "cf8cd005aaf1955846e0927c0084c3117a0613035211af019ddfb55d0e39d73e",
   "artifact": {
@@ -114,20 +126,19 @@
     "free_threaded_build": true,
     "gil_enabled": false
   },
-  "interpreter_sha256": "58dac5dd341e5cf10970cf52129755c2b66d3cbe99779df7ddeff60ee459818b",
-  "exitstatus": 1,
+  "interpreter_sha256": "40e7eeb496f3c46669ec839bad356e173e27ca0b21ddb1db9b3f4b15ab12916a",
+  "exitstatus": 0,
   "unexpected": [],
   "not_collected": [],
+  "crashed": {},
   "finish": {
     "version": "3.14.10",
     "abiflags": "t",
     "free_threaded_build": true,
     "gil_enabled": false,
-    "exitstatus": 1
+    "exitstatus": 0
   },
-  "reasons": {
-    "numpy/_core/tests/test_argparse.py::test_string_fallbacks": "TypeError: keywords must be strings"
-  },
+  "reasons": {},
   "artifact_after": {
     "wheel": "numpy-2.5.4-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
     "sha256": "c9b80cdf5cedba0e90d93fa5f9a333c4d65bd545cd669b71bb97ce2b703c9d73",
@@ -225,9 +236,11 @@
     "url": "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz"
   },
   "counts": {
-    "PASS": 37,
-    "NOTRUN": 52235,
-    "FAIL": 1
+    "NOTRUN": 21697,
+    "PASS": 29726,
+    "FAIL": 28,
+    "SKIP": 818,
+    "XFAIL": 4
   },
-  "recorded_at": "2026-11-04T10:23:09.729892+00:00"
+  "recorded_at": "2026-11-05T07:34:08.185346+00:00"
 }

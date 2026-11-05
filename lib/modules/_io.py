@@ -2879,6 +2879,7 @@ class StringIO(_TextIOBase):
     _closed = False
     _buffer = ''
     _chunks = None      # while only appending: the pieces after _buffer
+    _chunklen = 0       # their total length
     _pos = 0
     _newline = '\n'
 
@@ -2898,6 +2899,7 @@ class StringIO(_TextIOBase):
                          if self._readuniversal else None)
         self._buffer = ''
         self._chunks = []
+        self._chunklen = 0
         self._pos = 0
         if initial_value:
             self._write(initial_value)
@@ -2911,10 +2913,11 @@ class StringIO(_TextIOBase):
         if self._chunks:
             self._buffer += ''.join(self._chunks)
             self._chunks = []
+            self._chunklen = 0
         return self._buffer
 
     def _size(self):
-        return len(self._buffer) + sum(len(c) for c in self._chunks)
+        return len(self._buffer) + self._chunklen
 
     def _write(self, text):
         if self._decoder is not None:
@@ -2926,6 +2929,7 @@ class StringIO(_TextIOBase):
         size = self._size()
         if self._pos == size:
             self._chunks.append(text)
+            self._chunklen += len(text)
         else:
             buffer = self._realize()
             if self._pos > size:
@@ -3048,6 +3052,7 @@ class StringIO(_TextIOBase):
         self._closed = True
         self._buffer = ''
         self._chunks = []
+        self._chunklen = 0
 
     @property
     def closed(self):

@@ -54,6 +54,7 @@ class HarnessChecks(unittest.TestCase):
             "pathlib.Path(__file__+'.started').touch()\n"
             "mode=pathlib.Path(__file__+'.mode').read_text()\n"
             "if mode=='pass':assert os.environ['NUMPYTEST_SITE'] not in os.environ['PYTHONPATH'].split(os.pathsep)\n"
+            "if mode=='pass':assert not os.environ['PYTHONPYCACHEPREFIX'].startswith(os.environ['NUMPYTEST_SITE'])\n"
             "if mode=='fail':sys.exit(42)\n"
             "if mode=='badprobe':print('[]');sys.exit()\n"
             "if mode=='wrongsite':print(json.dumps(dict(numpy='1.0',numpy_file='/different/numpy/__init__.py')));sys.exit()\n"
@@ -68,6 +69,21 @@ class HarnessChecks(unittest.TestCase):
             " pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[1])\n"
             " pathlib.Path(os.environ['NUMPYTEST_REPORTS']).write_text(json.dumps(dict(id=ids[0],when='call',outcome='passed',seconds=0.125,wasxfail=False))+'\\n')\n"
             " import signal;os.kill(os.getpid(),signal.SIGKILL)\n"
+            "if mode=='resume':\n"
+            " skip=pathlib.Path(os.environ['NUMPYTEST_SKIP'])\n"
+            " done=skip.read_text().split() if skip.exists() else []\n"
+            " if not done:\n"
+            "  pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[0])\n"
+            "  import signal;os.kill(os.getpid(),signal.SIGSEGV)\n"
+            " ids=[i for i in ids if i not in done]\n"
+            "if mode=='crashreason':\n"
+            " pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[1])\n"
+            " pathlib.Path(os.environ['NUMPYTEST_REPORTS']).write_text(json.dumps(dict(id=ids[0],when='call',outcome='failed',seconds=0.5,wasxfail=False,reason='boom in /tmp/x.py'))+'\\n')\n"
+            " import signal;os.kill(os.getpid(),signal.SIGKILL)\n"
+            "if mode=='shutdowncrash' and not os.path.exists(os.environ['NUMPYTEST_SKIP']):\n"
+            " import atexit,signal;atexit.register(lambda:os.kill(os.getpid(),signal.SIGSEGV))\n"
+            " pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[1])\n"
+            "if mode=='shutdowncrash' and os.path.exists(os.environ['NUMPYTEST_SKIP']):ids=[]\n"
             "if mode=='timeout':\n"
             " pathlib.Path(os.environ['NUMPYTEST_ACTIVE']).write_text(ids[0]);time.sleep(10)\n"
             "import base64,xml.etree.ElementTree as E\n"
@@ -155,6 +171,8 @@ class HarnessChecks(unittest.TestCase):
             functions = runpy.run_path(str(HERE / 'recorder.py'))
         info = functions['relocate_typing_inputs'](module, self.root / 'work')
         self.assertEqual(info['files'], 1)
+        again = types.SimpleNamespace(DATA_DIR=str(source), api=types.SimpleNamespace(run=fake_run))
+        self.assertEqual(functions['relocate_typing_inputs'](again, self.root / 'work'), info)    # after a restart
         self.assertEqual(module.api.run([str(source / 'pass')]), (str(fixture) + ':1: error: sentinel\n', '', 1))
         self.assertEqual(fixture.read_text(), 'invalid fixture\n')
 
@@ -168,6 +186,53 @@ class HarnessChecks(unittest.TestCase):
         self.mode("crash")
         self.assertNotEqual(self.invoke().returncode, 0)
         self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "CRASH"])))
+
+    def test_crash_keeps_the_reason_of_a_failure_in_the_journal(self):
+        self.mode("crashreason")
+        self.invoke()
+        self.assertEqual(self.rows(), dict(zip(self.ids, ["FAIL", "CRASH"])))
+        reasons = json.loads((self.expected.parent / "fake.json").read_text())["reasons"]
+        self.assertEqual(reasons, {self.ids[0]: "boom in <path>"})
+
+    def test_crash_restarts_without_the_crashed_test(self):
+        self.mode("resume")
+        self.assertEqual(self.invoke().returncode, 1)
+        self.assertEqual(self.rows(), dict(zip(self.ids, ["CRASH", "PASS"])))
+
+    def test_crash_after_the_last_test_stays_on_record(self):
+        self.mode("shutdowncrash")
+        self.assertEqual(self.invoke().returncode, 1)
+        self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "XFAIL"])))
+        self.assertEqual(json.loads((self.expected.parent / "fake.json").read_text())["crashed"], {self.ids[1]: -11})
+
+    def test_paths_never_reach_public_reasons(self):
+        scrub = runpy.run_path(str(self.tool / "run.py"))["scrub"]
+        self.assertEqual(scrub("bad '-I/home/user/a/b.py' and /tmp/x/y"), "bad '-I<path>' and <path>")
+
+    def test_runall_runs_each_shard_under_the_launcher(self):
+        shutil.copyfile(HERE / "runall.py", self.tool / "runall.py")
+        launcher = self.root / "launcher"
+        launcher.write_text('#!/bin/sh\necho "$@" >> "$0.log"\nexec "$@"\n')
+        launcher.chmod(0o755)
+        outcome = subprocess.run([sys.executable, str(self.tool / "runall.py"), "--results", str(self.root / "results"),
+                                  "--launcher", str(launcher), "--", "--python", str(self.fake), "--runtime", "fake",
+                                  "--site", str(self.site), "--cache", str(self.cache), "--work", str(self.root / "raw")],
+                                 capture_output=True, text=True)
+        self.assertEqual(outcome.returncode, 0, outcome.stderr)
+        self.assertEqual(len(Path(str(launcher) + ".log").read_text().splitlines()), 1)
+        self.assertEqual(self.rows(), dict(zip(self.ids, ["PASS", "XFAIL"])))
+
+    def test_runall_shards_cover_each_id_once(self):
+        shard_groups = runpy.run_path(str(HERE / "runall.py"))["shard_groups"]
+        ids = [f"numpy/a/test_{n}.py::{c}::t[{i}]" for n in range(5) for c in "XY" for i in range(7)]
+        ids += ["numpy/b/test_big.py::test_f[%d]" % i for i in range(30)] + ["numpy/b/test_big.py::C::t"]
+        groups = shard_groups(ids, 20)
+        for ident in ids:
+            hits = [s for g in groups for s in g if (
+                ident == s or ident.startswith(s + "::") or ident.startswith(s + "[") if "::" in s
+                else ident.split("::", 1)[0] == s)]
+            self.assertEqual(len(hits), 1, ident)
+        self.assertIn("numpy/b/test_big.py::test_f", [s for g in groups for s in g])
 
     def test_shell_wrapper_crash_exit_is_crash(self):
         wrapper = self.root / "wrapper"

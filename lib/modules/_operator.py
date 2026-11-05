@@ -4,6 +4,9 @@ are operator's own, for C extensions that import _operator by name."""
 
 import operator as _operator_py
 from operator import *
+from _lucifer import operators as _kernel_operators
+
+index = _kernel_operators.index     # PyNumber_Index: a TypeError for what has no __index__
 
 
 def _compare_digest(a, b, /):

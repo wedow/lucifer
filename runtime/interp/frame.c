@@ -146,15 +146,18 @@ lu_frame_user(struct lu_frame *from, Py_ssize_t depth)
 
 /* PyFrameObject */
 
+/* The first fields lie where CPython's PyFrameObject has them: Cython writes
+   f_lineno of the frame it makes with PyFrame_New, at that offset. */
 struct lu_frameobj {
     PyObject_HEAD
-    struct lu_frame *f_frame;   /* the record it reads through: live, or `own` */
     PyObject *f_back;           /* when it owns its frame: the frame object that called it */
+    struct lu_frame *f_frame;   /* the record it reads through: live, or `own` */
     PyObject *f_trace;
+    int f_lineno;               /* when not 0, the line number to report */
+    char f_trace_lines, f_trace_opcodes;
     PyObject *f_extra_locals;   /* dict: names the proxy was given that are not fast locals */
     PyObject *f_locals_cache;   /* dict PyEval_GetLocals keeps for a fast-locals frame */
     PyObject *f_overwritten;    /* list: fast-local values the proxy replaced, kept alive */
-    char f_trace_lines, f_trace_opcodes;
     struct lu_frame own;        /* last: its localsplus follow */
 };
 
@@ -368,8 +371,7 @@ frame_get_lasti(PyObject *op, void *closure)
 static PyObject *
 frame_get_lineno(PyObject *op, void *closure)
 {
-    struct lu_frame *f = FO(op)->f_frame;
-    int line = PyCode_Addr2Line(f->code, (int)(lu_frame_lasti(f) * sizeof(lu_codeunit)));
+    int line = PyFrame_GetLineNumber((PyFrameObject *)op);
     return line < 0 ? Py_NewRef(Py_None) : PyLong_FromLong(line);
 }
 
@@ -715,8 +717,10 @@ PyFrame_GetLasti(PyFrameObject *f)
 int
 PyFrame_GetLineNumber(PyFrameObject *f)
 {
-    struct lu_frame *lf = FO(f)->f_frame;
-    return PyCode_Addr2Line(lf->code, PyFrame_GetLasti(f));
+    if (FO(f)->f_lineno > 0) {
+        return FO(f)->f_lineno;
+    }
+    return PyCode_Addr2Line(FO(f)->f_frame->code, PyFrame_GetLasti(f));
 }
 
 PyObject *

@@ -70,39 +70,48 @@ release(PyObject **items, Py_ssize_t n)
     PyMem_Free(items);
 }
 
-/* An exact tuple (copied; the empty tuple is shared) or list (adopted) of
-   the n items in a PyMem array. The items and the array are consumed, also
-   on failure. */
+/* An exact tuple (the empty tuple is shared) or list of n NULL items, and in
+   *slots the array the caller fills before the result is used. */
+static PyObject *
+seq_alloc(Py_ssize_t n, int as_tuple, PyObject ***slots)
+{
+    if (as_tuple) {
+        PyObject *r = PyTuple_New(n);
+        *slots = r != NULL ? ((PyTupleObject *)r)->ob_item : NULL;
+        return r;
+    }
+    PyObject *r = PyList_New(0);
+    if (r == NULL || n == 0) {
+        *slots = NULL;
+        return r;
+    }
+    PyObject **array = lu_list_array_new(n);
+    if (array == NULL) {
+        Py_DECREF(r);
+        return PyErr_NoMemory();
+    }
+    ((PyListObject *)r)->ob_item = array;
+    ((PyListObject *)r)->allocated = n;
+    Py_SET_SIZE(r, n);
+    *slots = array;
+    return r;
+}
+
+/* An exact tuple or list of the n items in a PyMem array. The items and the
+   array are consumed, also on failure. */
 static PyObject *
 seq_take(PyObject **items, Py_ssize_t n, int as_tuple)
 {
-    PyObject *r = as_tuple ? PyTuple_New(n) : PyList_New(0);
+    PyObject **slots;
+    PyObject *r = seq_alloc(n, as_tuple, &slots);
     if (r == NULL) {
         release(items, n);
         return NULL;
     }
-    if (as_tuple) {
-        if (n > 0) {
-            memcpy(((PyTupleObject *)r)->ob_item, items, n * sizeof(PyObject *));
-        }
-        PyMem_Free(items);
+    if (n > 0) {
+        memcpy(slots, items, n * sizeof(PyObject *));
     }
-    else if (n > 0) {
-        PyObject **array = lu_list_array_new(n);
-        if (array == NULL) {
-            release(items, n);
-            Py_DECREF(r);
-            return PyErr_NoMemory();
-        }
-        memcpy(array, items, n * sizeof(PyObject *));
-        PyMem_Free(items);
-        ((PyListObject *)r)->ob_item = array;
-        ((PyListObject *)r)->allocated = n;
-        Py_SET_SIZE(r, n);
-    }
-    else {
-        PyMem_Free(items);
-    }
+    PyMem_Free(items);
     return r;
 }
 
@@ -270,16 +279,13 @@ prim_seq_repeat(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return PyErr_NoMemory();
     }
     Py_ssize_t total = size * n;
-    PyObject **all = PyMem_Malloc((total > 0 ? total : 1) * sizeof(PyObject *));
-    if (all == NULL) {
-        release(src, size);
-        return PyErr_NoMemory();
-    }
-    for (Py_ssize_t k = 0; k < total; k++) {
-        all[k] = Py_NewRef(src[k % size]);
+    PyObject **slots;
+    PyObject *r = seq_alloc(total, args[2] == Py_True, &slots);   /* filled in place: one allocation */
+    for (Py_ssize_t k = 0; r != NULL && k < total; k++) {
+        slots[k] = Py_NewRef(src[k % size]);
     }
     release(src, size);
-    return seq_take(all, total, args[2] == Py_True);
+    return r;
 }
 
 /* tuple_from(seq, cls): the items of a tuple or list as an instance of the

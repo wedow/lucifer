@@ -21,6 +21,10 @@
    code (it may allocate and raise), so compiled code calls it directly, also
    from an inlined frame. */
 #define LU_METH_NOPY 0x8000
+/* Set on the def of a kernel function: its ml_meth is a stub, so a C caller that
+   dispatches on ml_flags (Cython does) sees a calling convention it does not know
+   and takes the generic call. */
+#define LU_METH_KERNEL 0x2000
 
 /* Report an unported C-API function by name and abort. */
 _Noreturn void lu_unimplemented(const char *name);
@@ -759,7 +763,7 @@ struct lu_static_objects {
    _Py_ID strings). LU_ID(__name__) is the str "__name__". */
 #define LU_IDENTIFIERS(X) \
     X(__all__) X(__build_class__) X(__builtins__) X(__call__) X(__class__) X(__delete__) \
-    X(__del__) X(__doc__) X(__get__) X(__getitem__) X(__init__) X(__iter__) \
+    X(__class_getitem__) X(__del__) X(__doc__) X(__get__) X(__getitem__) X(__init__) X(__iter__) \
     X(__len__) X(__loader__) X(__main__) X(__name__) X(__new__) X(__next__) \
     X(__package__) X(__repr__) X(__set__) X(__spec__) X(__str__) X(__hash__) \
     X(__eq__) X(__ne__) X(__lt__) X(__le__) X(__gt__) X(__ge__) X(__contains__) \
@@ -1288,8 +1292,13 @@ PyObject *lu_slot_tp_getattro(PyObject *self, PyObject *name);
 int lu_slot_tp_setattro(PyObject *self, PyObject *name, PyObject *value);
 PyObject *lu_slot_tp_call(PyObject *self, PyObject *args, PyObject *kwargs);
 /* Sets slot `name` of tp: how 0 clears it, 1 installs the thunk, 2 copies
-   it from `from`, 3 installs PyObject_HashNotImplemented (tp_hash only). */
+   it from `from`, 3 installs PyObject_HashNotImplemented (tp_hash only), 4 installs
+   the repeat of a builtin sequence over its __mul__ (sq_repeat only). */
 int lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from);
+/* type.__text_signature__: the signature tp_doc starts with, or None. */
+PyObject *lu_type_text_signature(PyTypeObject *tp);
+/* Whether f is one of the slot thunks, which look the dunder up by name. */
+int lu_is_slot_thunk(void *f);
 /* Calls special method `name` of self's type, as vectorcall_method does. */
 PyObject *lu_call_special(PyObject *self, PyObject *name, PyObject *const *args, Py_ssize_t nargs);
 

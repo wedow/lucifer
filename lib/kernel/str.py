@@ -869,3 +869,6 @@ kernel_set('str', to_str)
 kernel_set('repr', to_repr)
 kernel_set('ascii', to_ascii)
 kernel_set('format', format_value)
+
+
+_boot.builtin_sequence(str)
