@@ -436,6 +436,37 @@ stack_low(void)
     return &here < stack_floor;
 }
 
+/* A Python function's call, as CALL makes it: the frame is pushed and
+   bound (by plain stores when the arguments are exactly its positional
+   parameters), then run by lu_eval, which enters a compiled unit directly. */
+static PyObject *
+call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs)
+{
+    PyCodeObject *co = (PyCodeObject *)func->func_code;
+    struct lu_frame *f;
+    if (co->co_argcount == nargs && co->co_kwonlyargcount == 0
+        && !(co->co_flags & (CO_VARARGS | CO_VARKEYWORDS))) {
+        if ((f = lu_frame_push(&t->ts, func, NULL)) == NULL) {
+            return NULL;
+        }
+        for (Py_ssize_t i = 0; i < nargs; i++) {
+            f->localsplus[i] = Py_NewRef(args[i]);
+        }
+    }
+    else {
+        for (Py_ssize_t i = 0; i < nargs; i++) {
+            Py_INCREF(args[i]);
+        }
+        if ((f = lu_frame_call(&t->ts, func, (PyObject **)args, nargs, NULL)) == NULL) {
+            return NULL;
+        }
+    }
+    t->pin++;
+    PyObject *r = lu_eval(&t->ts, f);
+    t->pin--;
+    return r;
+}
+
 /* argv: the callable, self or NULL, then the arguments. */
 static PyObject *
 h_call(PyObject **argv, intptr_t n)
@@ -447,12 +478,27 @@ h_call(PyObject **argv, intptr_t n)
            frame to run (a generator's resumption): the interpreter calls it. */
         return LU_JIT_DECLINED;
     }
-    struct lu_task *t = (struct lu_task *)PyThreadState_Get();
+    struct lu_task *t = lu_current_task();
     PyObject *callable = argv[0];
     PyObject *const *args = argv[1] != NULL ? argv + 1 : argv + 2;
     size_t nargs = (size_t)(argv[1] != NULL ? n - 1 : n - 2);
-    /* A kernel function C answers runs no frame, as from the interpreter. */
     PyObject *target, *self, *r = NULL;
+    if (t->ts.interp->eval_frame == NULL) {
+        if (PyFunction_Check(callable)) {
+            r = call_function(t, (PyFunctionObject *)callable, args, (Py_ssize_t)nargs);
+            goto called;
+        }
+        if (Py_IS_TYPE(callable, &PyMethod_Type) && argv[1] == NULL
+            && PyFunction_Check(PyMethod_GET_FUNCTION(callable))) {
+            /* A bound method: its self goes in the free word before the arguments. */
+            argv[1] = PyMethod_GET_SELF(callable);
+            r = call_function(t, (PyFunctionObject *)PyMethod_GET_FUNCTION(callable), argv + 1,
+                              (Py_ssize_t)nargs + 1);
+            argv[1] = NULL;
+            goto called;
+        }
+    }
+    /* A kernel function C answers runs no frame, as from the interpreter. */
     int kernel = lu_kernel_target(callable, args, (Py_ssize_t)nargs, &target, &self);
     if (kernel < 0) {
         return NULL;
@@ -467,6 +513,7 @@ h_call(PyObject **argv, intptr_t n)
     }
     /* The interpreter polls after a call: a signal the callee tripped is
        handled here, and its exception is the call's. */
+called:
     if (r != NULL && (__atomic_load_n(&t->carrier->poll, __ATOMIC_RELAXED) & LU_POLL_EVENTS_MASK)
         && lu_poll_slow(&t->ts) < 0) {
         Py_CLEAR(r);

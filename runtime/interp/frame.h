@@ -176,6 +176,12 @@ const char *lu_function_str(PyObject *func, char *buf, size_t size);
    An exception pending at entry is set again on success. */
 PyObject *lu_eval(PyThreadState *ts, struct lu_frame *f);
 
+/* Runs the task's current frame, from its saved instruction (or unwinding
+   the exception set, if `error`), in a new activation until a frame returns
+   into the C-entry marker the caller linked below it. Returns what lu_eval
+   would. For callers that ran part of the frame themselves (compiled code). */
+PyObject *lu_eval_continue(PyThreadState *ts, int error);
+
 /* Re-enters the loop for a task whose outermost activation parked, at its
    top frame, on the carrier that now runs it. Returns what lu_eval would:
    the outermost frame's result, or LU_EVAL_PARKED if it parks again. */

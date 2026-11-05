@@ -134,6 +134,15 @@ lu_jit_observe_iter(lu_codeunit *word, PyTypeObject *t)
    current frame. */
 enum lu_jit_result lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
 
+/* Runs `frame`, pushed and bound for a call from C (lu_eval) with a frame
+   running below, through the compiled unit at its entry after RESUME, with
+   no activation of the eval loop until a unit leaves. A C-entry marker
+   below the frame stands for the caller's C stack, as under lu_eval:
+   walkers skip it, and an activation runs the frames a unit leaves until
+   the frame returns into it. 1 with *result the frame's value (NULL with
+   an exception), or 0 with nothing done when there is no unit to enter. */
+int lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
+
 /* Releases a code object's compiled units (code_dealloc). */
 void lu_jit_code_free(PyCodeObject *code);
 

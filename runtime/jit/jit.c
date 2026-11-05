@@ -57,10 +57,11 @@ struct lu_jit_code {
     uint16_t *wait;             /* per code unit: entries to leave to the interpreter, or FOREVER */
     uint8_t *warmed;            /* per code unit: an entry whose compile was put off for feedback once */
     int noinline;               /* a side exit in an inlined copy keeps leaving: call it instead */
+    int call_pc;                /* where a call enters (call_entry), or -1 */
 };
 
 static struct {
-    unsigned long compiles, failures, entries, returns, units_dead;
+    unsigned long compiles, failures, entries, returns, units_dead, direct;
     unsigned long exits[EXIT_REASONS];
     unsigned long inlined;
     unsigned long bailouts[256];        /* side exits planted, per base opcode */
@@ -97,6 +98,26 @@ state_of(PyCodeObject *code)
     return v != 0 && !(v & 1) ? (struct lu_jit_code *)v : NULL;
 }
 
+int lu_jit_next_pc(PyCodeObject *code, int pc);
+
+/* Where a call enters compiled code: the instruction after the RESUME
+   that starts the code, past a prologue of MAKE_CELL and COPY_FREE_VARS,
+   or -1 when the code starts otherwise. */
+static int
+call_entry(PyCodeObject *code)
+{
+    for (int pc = 0; pc < (int)Py_SIZE(code); pc++) {
+        int op = lu_base_opcode(code, pc);
+        if (op == RESUME) {
+            return lu_code_start(code)[pc].op.arg == 0 ? lu_jit_next_pc(code, pc) : -1;
+        }
+        if (op != MAKE_CELL && op != COPY_FREE_VARS) {
+            return -1;
+        }
+    }
+    return -1;
+}
+
 static struct lu_jit_code *
 state_for(PyCodeObject *code)
 {
@@ -110,6 +131,7 @@ state_for(PyCodeObject *code)
     jc->fails = calloc((size_t)jc->ncode + 1, sizeof(uint16_t));
     jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint16_t));
     jc->warmed = calloc((size_t)jc->ncode + 1, 1);
+    jc->call_pc = call_entry(code);
     uintptr_t seen = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
     while (seen == 0 || (seen & 1)) {
         if (__atomic_compare_exchange_n((uintptr_t *)&code->co_executors, &seen, (uintptr_t)jc, 0,
@@ -440,6 +462,81 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     return (enum lu_jit_result)r;
 }
 
+/* MAKE_CELL and COPY_FREE_VARS as the interpreter runs them: 0, or -1
+   with an exception and frame->instr after the instruction that raised. */
+static int
+prologue(struct lu_frame *frame)
+{
+    PyCodeObject *code = frame->code;
+    for (lu_codeunit *at = lu_code_start(code); at->op.code != RESUME; at++) {
+        if (at->op.code == COPY_FREE_VARS) {
+            PyObject **closure = &PyTuple_GET_ITEM(((PyFunctionObject *)frame->func)->func_closure, 0);
+            PyObject **free = frame->localsplus + code->co_nlocalsplus - at->op.arg;
+            for (int i = 0; i < at->op.arg; i++) {
+                free[i] = Py_NewRef(closure[i]);
+            }
+            continue;
+        }
+        PyObject **local = &frame->localsplus[at->op.arg];
+        PyObject *cell = PyCell_New(*local);
+        Py_XSETREF(*local, cell);
+        if (cell == NULL) {
+            frame->instr = frame->last = at + 1;
+            return -1;
+        }
+    }
+    return 0;
+}
+
+int
+lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
+{
+    PyCodeObject *code = frame->code;
+    struct lu_jit_code *jc = state_of(code);
+    struct lu_task *task = (struct lu_task *)ts;
+    /* lu_jit_enter's conditions, and RESUME's: no poll pending, the code
+       instrumented for the tools as they are now. */
+    uintptr_t poll = __atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED);
+    if (jc == NULL || jc->call_pc <= 0 || frame->locals != NULL || frame->owner == LU_FRAME_GENERATOR
+        || (poll & LU_POLL_EVENTS_MASK)
+        || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) || code->_co_monitoring != NULL
+        || ts->tracing || code->_co_instrumentation_version != (poll & ~LU_POLL_EVENTS_MASK)) {
+        return 0;
+    }
+    /* A unit is live only while its entry is not left to the interpreter
+       (retire marks it dead). */
+    struct lu_unit *u = find(jc, jc->call_pc);
+    if (u == NULL) {
+        return 0;
+    }
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: call %s\n", PyUnicode_AsUTF8(code->co_qualname));
+    }
+    int pc = u->entry_pc;
+    struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
+    entry.previous = (struct lu_frame *)ts->current_frame;
+    frame->previous = &entry;
+    ts->current_frame = (struct _PyInterpreterFrame *)frame;
+    if (pc > 1 && prologue(frame) < 0) {
+        *result = lu_eval_continue(ts, 1);
+        return 1;
+    }
+    frame->instr = lu_code_start(code) + pc;
+    frame->last = frame->instr - 1 - lu_opcode_caches[RESUME];
+    lu_qsbr_quiescent(task->carrier);
+    count(&stats.direct, 1);
+    bump(&u->entries);
+    int r = u->fn(ts, frame, result);
+    if (r == LU_JIT_RETURN) {
+        lu_frame_pop(ts, frame);
+        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
+    }
+    else {
+        *result = lu_eval_continue(ts, r == LU_JIT_ERROR);
+    }
+    return 1;
+}
+
 /* An exit was taken: its counts; for a guard that keeps failing, no
    more speculation there and a recompile of the code it left; for a unit
    without loops that keeps leaving, the interpreter at its entry. */
@@ -525,7 +622,8 @@ lu_jit_report(void)
     for (int i = 0; i < 8 && stats.failure_names[i] != NULL; i++) {
         fprintf(stderr, "jit:   failed: %s: %lu\n", stats.failure_names[i], stats.failure_reasons[i]);
     }
-    fprintf(stderr, "jit: entries %lu, returns %lu, exits", stats.entries, stats.returns);
+    fprintf(stderr, "jit: entries %lu, returns %lu, direct calls %lu, exits", stats.entries, stats.returns,
+            stats.direct);
     for (int i = 0; i < EXIT_REASONS; i++) {
         fprintf(stderr, " %s %lu", reasons[i], stats.exits[i]);
     }

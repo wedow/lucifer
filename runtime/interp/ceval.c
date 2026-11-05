@@ -839,7 +839,7 @@ save_frame_then(struct lu_frame *f, lu_codeunit *instr, PyObject **sp, lu_codeun
 /* How eval_frame starts: by running `frame`, by raising the exception in
    flight at its current instruction (a generator's throw), or by resuming
    the task at its top frame (lu_resume). */
-enum { EVAL_RUN, EVAL_THROW, EVAL_RESUME };
+enum { EVAL_RUN, EVAL_THROW, EVAL_RESUME, EVAL_CONTINUE, EVAL_CONTINUE_ERROR };
 
 static struct lu_frame *
 base_entry(struct lu_task *t)
@@ -1031,7 +1031,7 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
     const int outermost = mode == EVAL_RESUME || ts->current_frame == NULL;
     const int migratable = outermost && __atomic_load_n(&_PyRuntime.sched.active, __ATOMIC_RELAXED);
     struct lu_frame local_entry, *entry = &local_entry;
-    if (mode == EVAL_RESUME) {
+    if (mode >= EVAL_RESUME) {
         frame = (struct lu_frame *)ts->current_frame;
     }
     else {
@@ -1190,6 +1190,9 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
         }
         PyErr_SetRaisedException(thrown);
         lu_monitor_throw(ts, frame, INSTR_START());
+        goto error;
+    }
+    if (mode == EVAL_CONTINUE_ERROR) {
         goto error;
     }
     DISPATCH();
@@ -3828,7 +3831,10 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
        the call succeeds. */
     PyObject *pending = ts->current_exception;
     ts->current_exception = NULL;
-    PyObject *result = eval_frame(ts, frame, EVAL_RUN);
+    PyObject *result;
+    if (!(ts->current_frame != NULL && lu_jit_on() && lu_jit_run(ts, frame, &result))) {
+        result = eval_frame(ts, frame, EVAL_RUN);
+    }
     if (result == LU_EVAL_PARKED) {
         result = lu_sched_home(ts);
     }
@@ -3839,6 +3845,12 @@ lu_eval(PyThreadState *ts, struct lu_frame *frame)
         Py_XDECREF(pending);
     }
     return result;
+}
+
+PyObject *
+lu_eval_continue(PyThreadState *ts, int error)
+{
+    return eval_frame(ts, NULL, error ? EVAL_CONTINUE_ERROR : EVAL_CONTINUE);
 }
 
 PyObject *
