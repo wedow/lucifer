@@ -1031,7 +1031,9 @@ void lu_exc_init(void);
 void lu_gen_init(void);
 void lu_frame_init(void);
 PyObject *lu_small_int(int value);
+PyLongObject *lu_long_alloc(Py_ssize_t ndigits);
 PyObject *lu_long_from_digits(int negative, Py_ssize_t ndigits, const digit *digits);
+PyObject *lu_long_from_bytes(const unsigned char *s, Py_ssize_t n, int little, int is_signed);
 int lu_long_as_long(PyObject *v, long *result);
 Py_hash_t lu_long_hash(PyLongObject *v);
 /* Operations on ints (runtime/prim/int.c); operands are any PyLong. */

@@ -57,28 +57,6 @@ PyImport_ImportModuleAttrString(const char *modname, const char *attrname)
     return attr;
 }
 
-int
-PyLong_IsPositive(PyObject *obj)
-{
-    if (!PyLong_Check(obj)) {
-        PyErr_Format(PyExc_TypeError, "expected int, got %s", Py_TYPE(obj)->tp_name);
-        return -1;
-    }
-    return PyObject_RichCompareBool(obj, Py_GetConstantBorrowed(Py_CONSTANT_ZERO), Py_GT);
-}
-
-int64_t
-_PyLong_NumBits(PyObject *v)
-{
-    PyObject *bits = PyObject_CallMethod(v, "bit_length", NULL);
-    if (bits == NULL) {
-        return -1;
-    }
-    int64_t n = PyLong_AsLongLong(bits);
-    Py_DECREF(bits);
-    return n;
-}
-
 /* Objects/typeobject.c: the type's name without its module. */
 const char *
 _PyType_Name(PyTypeObject *type)
