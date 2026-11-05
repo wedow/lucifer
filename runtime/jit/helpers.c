@@ -217,6 +217,10 @@ h_cell_load(PyObject *cell)
 static PyObject *
 h_load_attr(PyObject *owner, PyObject *name)
 {
+    PyObject *native = lu_getattr_native(owner, name);
+    if (native != NULL || PyErr_Occurred()) {
+        return native;
+    }
     struct lu_task *t = (struct lu_task *)PyThreadState_Get();
     t->pin++;
     PyObject *v = PyObject_GetAttr(owner, name);
@@ -233,6 +237,10 @@ h_load_method(PyObject *owner, PyObject *name, int64_t unused)
 static int
 h_store_attr(PyObject *owner, PyObject *name, PyObject *v)
 {
+    int done = lu_setattr_native(owner, name, v);
+    if (done != 0) {
+        return done < 0 ? -1 : 0;
+    }
     struct lu_task *t = (struct lu_task *)PyThreadState_Get();
     t->pin++;
     int r = PyObject_SetAttr(owner, name, v);

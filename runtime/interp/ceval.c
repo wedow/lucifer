@@ -532,13 +532,8 @@ attr_shortcut(PyObject *owner, PyObject *name)
     return v;
 }
 
-/* obj.name for an exact str name, answered when no Python code decides: a
-   data member or getset of the type, then the instance's dict, then a plain
-   value or function of the type (bound as a method). NULL, with no error, for
-   everything else, which is the kernel's: a missing attribute, __getattr__,
-   __getattribute__, properties and other descriptors. A new reference. */
-static PyObject *
-getattr_native(PyObject *owner, PyObject *name)
+PyObject *
+lu_getattr_native(PyObject *owner, PyObject *name)
 {
     PyTypeObject *tp = Py_TYPE(owner);
     PyObject *v;
@@ -768,11 +763,11 @@ lu_native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ss
     }
     else if (target == kernel[LU_K_builtin_getattr]) {
         if (npos == 2 || npos == 3) {
-            return getattr_native(args[0], args[1]);
+            return lu_getattr_native(args[0], args[1]);
         }
     }
     else if (target == kernel[LU_K_builtin_hasattr]) {
-        PyObject *v = npos == 2 ? getattr_native(args[0], args[1]) : NULL;
+        PyObject *v = npos == 2 ? lu_getattr_native(args[0], args[1]) : NULL;
         if (v != NULL) {
             Py_DECREF(v);
             return Py_NewRef(Py_True);
@@ -2833,7 +2828,7 @@ op_LOAD_ATTR: {
             Py_XDECREF(getter);
         }
         Py_XDECREF(descr);
-        if ((v = getattr_native(owner, name)) != NULL) {
+        if ((v = lu_getattr_native(owner, name)) != NULL) {
             TOP() = v;
             Py_DECREF(owner);
             if (oparg & 1) {

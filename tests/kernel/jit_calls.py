@@ -2,7 +2,8 @@
 # through a function that was compiled before the interpreter ever ran it
 # (-X lucifer_jit=always compiles at the first call), and builtins whose
 # kernel code calls primitives that run no Python (len of a dict or a str),
-# and operations the interpreter answers in C without the kernel.
+# and operations the interpreter answers in C without the kernel (subscripts,
+# comparisons, attributes of several classes).
 # Each result must be the interpreter's; tools/jitcheck also runs this at two
 # sizes and requires that entries into compiled code do not grow with the
 # iterations.
@@ -51,4 +52,32 @@ def generic(n, pair, other):
     return s
 
 
-print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)))
+class A:
+    def __init__(self):
+        self.x = 1
+
+
+class B(A):
+    pass
+
+
+class C(A):
+    pass
+
+
+class D(A):
+    pass
+
+
+def attributes(n):
+    """Attribute sites that met several classes and stay generic."""
+    objs = [A(), B(), C(), D()]
+    s = 0
+    for i in range(n):
+        o = objs[i & 3]
+        o.y = i
+        s += o.x + o.y
+    return s
+
+
+print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N))

@@ -1240,6 +1240,13 @@ int lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value);
    __setattr__, then a native data descriptor or, for a name the type lacks,
    the instance's dict. Same results as lu_descr_set_native. */
 int lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value);
+/* obj.name for an exact str name, answered when no Python code decides: a
+   data member or getset of the type, then the instance's dict, then a plain
+   value or function of the type (bound as a method). NULL, with no error, for
+   everything else, which is the kernel's: a missing attribute, __getattr__,
+   __getattribute__, properties and other descriptors. A new reference
+   (runtime/interp/ceval.c, which LOAD_ATTR and the optimizing tier share). */
+PyObject *lu_getattr_native(PyObject *owner, PyObject *name);
 PyObject *lu_method_wrapper_new(PyObject *descr, PyObject *self);
 /* The Python function the interpreter runs for a kernel callable, and the
    self it prepends (borrowed, or NULL). NULL when callable is none. Checks
