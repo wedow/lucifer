@@ -73,10 +73,20 @@ PyErr_Occurred(void)
 static PyObject *
 create_exception(PyObject *type, PyObject *value)
 {
-    if (value == NULL || value == Py_None) {
-        return PyObject_CallNoArgs(type);
+    /* The class call runs Python at whatever depth the raise itself came
+       from. At the recursion limit there is no room for it (and the limit's
+       own RecursionError must not recurse back through here), so the
+       instance is built directly, as before the kernel exists. */
+    PyThreadState *ts = PyThreadState_Get();
+    if (ts->py_recursion_remaining <= 0) {
+        PyObject *args = value == NULL || value == Py_None ? PyTuple_New(0)
+            : PyTuple_Check(value) ? Py_NewRef(value) : PyTuple_Pack(1, value);
+        return args != NULL ? exc_new(type, args) : NULL;
     }
-    return PyTuple_Check(value) ? PyObject_Call(type, value, NULL) : PyObject_CallOneArg(type, value);
+    PyObject *exc = value == NULL || value == Py_None
+        ? PyObject_CallNoArgs(type)
+        : PyTuple_Check(value) ? PyObject_Call(type, value, NULL) : PyObject_CallOneArg(type, value);
+    return exc;
 }
 
 /* The exception raised while creating one becomes the raised exception, with
