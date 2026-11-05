@@ -54,30 +54,28 @@ def run(argv, prefix="", cwd=ROOT):
 
 # --- timing -----------------------------------------------------------------
 
-def time_one(name, iters, commands):
-    """Worker: best-of-iters microseconds per labelled command, as JSON on stdout."""
-    inner = awfy_inner()[name]
-    best = {}
-    for label, command in commands.items():
-        done = subprocess.run(shlex.split(command) + ["harness.py", name, str(iters), str(inner)], cwd=AWFY,
-                              text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        samples = [int(m[1]) for m in re.finditer(rf"^{name}: iterations=1 runtime: (\d+)us$", done.stdout, re.M)]
-        best[label] = min(samples) if done.returncode == 0 and len(samples) == iters else None
-    print(json.dumps(best))
-
-
-def timings(names, iters, commands, out):
-    """Each benchmark is one prefixed step, so a lock is held for one benchmark at a time."""
+def time_one(names, iters, commands):
+    """Worker: per benchmark, best-of-iters microseconds per labelled command, as JSON on stdout."""
+    inner = awfy_inner()
     result = {}
     for name in names:
-        done = run([sys.executable, __file__, "time", name, "--iters", str(iters)]
-                   + [f"--run={label}={command}" for label, command in commands.items()], "TIMING_PREFIX")
-        try:
-            result[name] = json.loads(done.stdout.strip().splitlines()[-1])
-        except (ValueError, IndexError):
-            result[name] = {label: None for label in commands}
-        (out / "awfy.log").open("a").write(f"{name}: {result[name]}\n")
-    return result
+        result[name] = {}
+        for label, command in commands.items():
+            done = subprocess.run(shlex.split(command) + ["harness.py", name, str(iters), str(inner[name])], cwd=AWFY,
+                                  text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            samples = [int(m[1]) for m in re.finditer(rf"^{name}: iterations=1 runtime: (\d+)us$", done.stdout, re.M)]
+            result[name][label] = min(samples) if done.returncode == 0 and len(samples) == iters else None
+    print(json.dumps(result))
+
+
+def timings(names, iters, commands):
+    """All benchmarks in one prefixed step: one wait for the host, however busy."""
+    done = run([sys.executable, __file__, "time", ",".join(names), "--iters", str(iters)]
+               + [f"--run={label}={command}" for label, command in commands.items()], "TIMING_PREFIX")
+    try:
+        return json.loads(done.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return {name: {label: None for label in commands} for name in names}
 
 
 def oracle_version(oracle):
@@ -85,11 +83,9 @@ def oracle_version(oracle):
 
 
 def refresh_reference(names, iters, oracle):
-    result = {}
-    for name in names:
-        done = run([sys.executable, __file__, "time", name, "--iters", str(iters), f"--run=cpython={oracle}"], "TIMING_PREFIX")
-        result[name] = json.loads(done.stdout.strip().splitlines()[-1])["cpython"]
-    REFERENCE.write_text(json.dumps({"version": oracle_version(oracle), "best_us": result}, indent=1) + "\n")
+    times = timings(names, iters, {"cpython": oracle})
+    REFERENCE.write_text(json.dumps({"version": oracle_version(oracle),
+                                     "best_us": {n: times[n]["cpython"] for n in names}}, indent=1) + "\n")
 
 
 # --- gates and conformance --------------------------------------------------
@@ -211,13 +207,13 @@ def main():
     p.add_argument("--refresh-reference", action="store_true", help="re-time CPython into results/status-reference.json and exit")
     sub = p.add_subparsers(dest="worker")
     t = sub.add_parser("time", help=argparse.SUPPRESS)
-    t.add_argument("name")
+    t.add_argument("names")
     t.add_argument("--iters", type=int, dest="witers")
     t.add_argument("--run", action="append", dest="runs")
     args = p.parse_args()
     oracle = os.environ.get("ORACLE_T", "python3.14t")
     if args.worker:
-        return time_one(args.name, args.witers, dict(r.split("=", 1) for r in args.runs))
+        return time_one(args.names.split(","), args.witers, dict(r.split("=", 1) for r in args.runs))
     names = sorted(awfy_inner())
     if args.refresh_reference:
         return refresh_reference(names, args.iters, oracle)
@@ -228,7 +224,7 @@ def main():
     gate_rows = gates(out)
     problems += [f"gate {t} failed" for t, (ok, _) in gate_rows.items() if not ok]
     commands = {"on": f"{LUCIFER} -X lucifer_jit=on", "off": f"{LUCIFER} -X lucifer_jit=off"}
-    times = timings(names, args.iters, commands, out)
+    times = timings(names, args.iters, commands)
     ref = json.loads(REFERENCE.read_text()) if REFERENCE.exists() else {"version": None, "best_us": {}}
     if not REFERENCE.exists():
         problems.append("no CPython reference; run --refresh-reference")
