@@ -554,7 +554,7 @@ supported(int op)
     case POP_JUMP_IF_NOT_NONE: case JUMP_FORWARD: case JUMP_BACKWARD:
     case JUMP_BACKWARD_NO_INTERRUPT: case GET_ITER: case FOR_ITER: case CALL:
     case RETURN_VALUE: case STORE_SUBSCR: case COPY_FREE_VARS: case LOAD_DEREF:
-    case BUILD_LIST: case BUILD_TUPLE: case CONTAINS_OP:
+    case BUILD_LIST: case BUILD_TUPLE: case CONTAINS_OP: case UNPACK_SEQUENCE:
     case MAKE_FUNCTION: case SET_FUNCTION_ATTRIBUTE: case STORE_DEREF:
         return 1;
     default:
@@ -2163,6 +2163,28 @@ translate(struct ctx *c)
             release(c, args[i], owns[i]);
         }
         push(c, v, 1);
+        return 0;
+    }
+    case UNPACK_SEQUENCE: {
+        /* An exact tuple of oparg items, its items pushed last first; any
+           other sequence leaves, and after enough of that it always does. */
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        if (oparg > 30 || lu_jit_nospec(c->code, c->pc)) {
+            unsupported(c);
+            return -1;
+        }
+        guard_type(c, v, &PyTuple_Type);
+        lu_v size = emit(c, OP_LOAD, REP_I64, v, LU_NOV, LU_NOV, offsetof(PyVarObject, ob_size));
+        guard(c, OP_GUARD_BIT, emit(c, OP_CMP_I, REP_BIT, size, const_i(c, oparg), LU_NOV, Py_EQ), 1);
+        pop(c, NULL);
+        for (int i = oparg - 1; i >= 0; i--) {
+            lu_v item = emit(c, OP_LOAD, REP_OBJ, v, LU_NOV, LU_NOV,
+                             (int64_t)(offsetof(PyTupleObject, ob_item) + sizeof(PyObject *) * (size_t)i));
+            incref(c, item);
+            push(c, item, 1);
+        }
+        release(c, v, own);
         return 0;
     }
     case MAKE_FUNCTION: {
