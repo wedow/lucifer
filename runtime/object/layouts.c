@@ -219,14 +219,52 @@ plain_dealloc(PyObject *op)
 
 /* float and complex */
 
+/* Floats come and go in arithmetic: up to FREE_FLOATS freed ones per
+   carrier wait for reuse, linked through ob_fval. A lock-free reader of a
+   stale pointer finds a float's header there, as it would in a reused
+   mimalloc block. */
+#define FREE_FLOATS 100
+#define NEXT_FREE(op) (*(PyObject **)&((PyFloatObject *)(op))->ob_fval)
+
 PyObject *
 PyFloat_FromDouble(double value)
 {
-    PyFloatObject *op = (PyFloatObject *)lu_object_new(&PyFloat_Type, sizeof(PyFloatObject));
+    struct lu_entry *e = lu_current_entry();
+    PyObject *op = e->free_floats;
     if (op != NULL) {
-        op->ob_fval = value;
+        e->free_floats = NEXT_FREE(op);
+        e->nfree_floats--;
+        _Py_NewReference(op);
     }
-    return (PyObject *)op;
+    else if ((op = lu_object_new(&PyFloat_Type, sizeof(PyFloatObject))) == NULL) {
+        return NULL;
+    }
+    ((PyFloatObject *)op)->ob_fval = value;
+    return op;
+}
+
+static void
+float_dealloc(PyObject *op)
+{
+    struct lu_entry *e = lu_current_entry();
+    if (!PyFloat_CheckExact(op) || e->nfree_floats >= FREE_FLOATS) {
+        lu_object_free(op);
+        return;
+    }
+    NEXT_FREE(op) = e->free_floats;
+    e->free_floats = op;
+    e->nfree_floats++;
+}
+
+void
+lu_free_floats_clear(struct lu_entry *e)
+{
+    while (e->free_floats != NULL) {
+        PyObject *op = e->free_floats;
+        e->free_floats = NEXT_FREE(op);
+        lu_object_free(op);
+    }
+    e->nfree_floats = 0;
 }
 
 PyObject *
@@ -683,7 +721,7 @@ lu_layouts_init(void)
 {
     set_layout(&PyLong_Type, LONG_HEADER, sizeof(digit), 0, plain_dealloc);
     set_layout(&PyBool_Type, LONG_HEADER, sizeof(digit), 0, NULL);
-    set_layout(&PyFloat_Type, sizeof(PyFloatObject), 0, 0, plain_dealloc);
+    set_layout(&PyFloat_Type, sizeof(PyFloatObject), 0, 0, float_dealloc);
     set_layout(&PyComplex_Type, sizeof(PyComplexObject), 0, 0, plain_dealloc);
     set_layout(&PyBytes_Type, BYTES_HEADER + 1, 1, 0, bytes_dealloc);
     set_layout(&PyTuple_Type, offsetof(PyTupleObject, ob_item), sizeof(PyObject *),
