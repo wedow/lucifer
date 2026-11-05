@@ -19,3 +19,7 @@ Spike luc-c1cx (docs/jit-spike.md): JIT equals CPython on Sieve/NBody and is ~2.
 **2026-11-05T03:59:48Z**
 
 Include luc-jh5s: on havlak the default JIT (18.7 s) is slower than -X lucifer_jit=off (12.5 s; CPython 3.14 17.4 s) — 20M side exits/run, mostly two opcodes. The JIT must never lose to the interpreter; measure off vs on for every AWFY program in this round.
+
+**2026-11-05T07:04:48Z**
+
+Daily 2026-11-05 (busy host): JIT on vs CPython is worst on CD 12.4x, Storage 11.2x, DeltaBlue 10.9x, Json 6.8x, Havlak 5.3x; geomean 2.64x. Report these five alongside the bar benchmarks; on DeltaBlue, Json and Havlak the JIT is slower than off (luc-jh5s covers the exit mechanism).
