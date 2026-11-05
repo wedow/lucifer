@@ -201,13 +201,25 @@ boxed_locked(PyObject **word)
     return v;
 }
 
+/* A new reference to the object a value word holds, read without the lock:
+   NULL when it holds none (*seen tells absent from unboxed), or when a try
+   fails. The word is loaded once: a compiled store may make it a marker at
+   any moment, and only the value tested is the one taken. */
+static PyObject *
+try_word_ref(PyObject **word, PyObject **seen)
+{
+    PyObject *w = __atomic_load_n(word, __ATOMIC_ACQUIRE);
+    *seen = w;
+    return w != NULL && !lu_unboxed(w) && lu_try_incref_compare(word, w) ? w : NULL;
+}
+
 PyObject *
 lu_inline_get(PyObject *obj, PyObject **word)
 {
-    if (!lu_unboxed(__atomic_load_n(word, __ATOMIC_ACQUIRE))) {
-        return lu_try_xget_ref(word);
+    PyObject *seen, *v = try_word_ref(word, &seen);
+    if (v != NULL || !lu_unboxed(seen)) {
+        return v;
     }
-    PyObject *v = NULL;
     Py_BEGIN_CRITICAL_SECTION(obj);
     if (lu_inline_live(obj)) {
         v = boxed_locked(word);
@@ -316,8 +328,8 @@ lu_attr_lookup(PyObject *obj, PyObject *name, PyObject **v)
     if (lu_inline_live(obj) && PyUnicode_CheckExact(name)) {
         Py_ssize_t i = lu_inline_index(Py_TYPE(obj), name);
         PyObject **slot = i >= 0 ? &LU_INLINE_WORD(lu_inline_values(obj), i) : NULL;
-        if (slot != NULL && !lu_unboxed(__atomic_load_n(slot, __ATOMIC_ACQUIRE))
-            && (*v = lu_try_xget_ref(slot)) != NULL) {
+        PyObject *seen;
+        if (slot != NULL && (*v = try_word_ref(slot, &seen)) != NULL) {
             return 1;
         }
         int live;
