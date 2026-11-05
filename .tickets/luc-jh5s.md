@@ -21,3 +21,9 @@ entries 262M, side exits 20.3M (opcode 79 alone 15.6M, opcode 23 1.9M, 56 0.13M)
 Cause: not compile time, not deopt churn. Compiled code side-exits to the interpreter millions of times
 at a few opcodes, and each re-entry pays lu_jit_enter; default mode is already slower than jit=off.
 Fix belongs to the tier (side-exit opcodes, entry cost), not the gate.
+
+## Notes
+
+**2026-11-05T05:08:15Z**
+
+Still flaking the gate after the 8x-oracle timeout: havlak TIMEOUT at 97.5 s in difftest deopt:7 on the dawf checkpoint-4 merge under load. Fixing the side exits is what makes this lane reliable; raise priority.
