@@ -15,6 +15,7 @@
 #include "prim/prim.h"
 #include "opcode.h"
 
+#include <math.h>
 #include <string.h>
 
 extern PyTypeObject _PyUnion_Type;      /* internal in CPython, defined in types/static.c */
@@ -476,7 +477,11 @@ PyObject *
 lu_kernel_builtin(PyObject *module, PyObject *name, PyObject *func)
 {
     struct lu_kernel_def *k = lu_kernel_def_new(name, func, 0, 0);
-    return k != NULL ? cfunction_bound(&k->def, module, ((PyModuleObject *)module)->md_name) : NULL;
+    PyObject *f = k != NULL ? cfunction_bound(&k->def, module, ((PyModuleObject *)module)->md_name) : NULL;
+    if (f != NULL) {
+        lu_set_deferred(f);     /* as the top-level function it wraps: inline caches may name it */
+    }
+    return f;
 }
 
 /* PyMethod (Objects/classobject.c). */
@@ -883,10 +888,95 @@ cfunction_get_doc(PyObject *self, void *closure)
     return internal_doc(ml->ml_name, ml->ml_doc);
 }
 
+/* Appends item, which it steals; -1 when item is NULL or the append fails. */
+static int
+append(PyObject *list, PyObject *item)
+{
+    int err = item == NULL || PyList_Append(list, item) < 0 ? -1 : 0;
+    Py_XDECREF(item);
+    return err;
+}
+
+/* "name" or "name=default"; None when the default has no literal repr that
+   inspect could parse back. */
+static PyObject *
+parameter(PyObject *name, PyObject *deflt)
+{
+    if (deflt == NULL) {
+        return Py_NewRef(name);
+    }
+    if (!(deflt == Py_None || PyBool_Check(deflt) || PyLong_CheckExact(deflt) || PyUnicode_CheckExact(deflt)
+          || PyBytes_CheckExact(deflt) || (PyFloat_CheckExact(deflt) && isfinite(PyFloat_AS_DOUBLE(deflt))))) {
+        return Py_NewRef(Py_None);
+    }
+    PyObject *repr = PyObject_Repr(deflt);
+    PyObject *text = repr != NULL ? PyUnicode_FromFormat("%U=%U", name, repr) : NULL;
+    Py_XDECREF(repr);
+    return text;
+}
+
+/* A kernel builtin's __text_signature__, from its code as Argument Clinic
+   writes one: $module, or $self when it binds its first argument, is
+   positional-only. None when a default has no literal repr. */
+static PyObject *
+kernel_text_signature(struct lu_kernel_def *k)
+{
+    PyFunctionObject *f = (PyFunctionObject *)k->func;
+    PyCodeObject *co = (PyCodeObject *)f->func_code;
+    PyObject *names = co->co_localsplusnames;
+    int npos = co->co_argcount, nkw = co->co_kwonlyargcount;
+    Py_ssize_t ndefaults = f->func_defaults != NULL ? PyTuple_GET_SIZE(f->func_defaults) : 0;
+    Py_ssize_t slash = k->bind ? (co->co_posonlyargcount > 0 ? co->co_posonlyargcount : 1)
+                               : 1 + co->co_posonlyargcount;
+    PyObject *parts = PyList_New(0);
+    int err = parts == NULL || (!k->bind && append(parts, PyUnicode_FromString("$module")) < 0);
+    for (int i = 0; !err && i < npos + nkw; i++) {
+        PyObject *name = PyTuple_GET_ITEM(names, i), *deflt = NULL;
+        if (i == npos) {
+            err = append(parts, (co->co_flags & CO_VARARGS)
+                         ? PyUnicode_FromFormat("*%U", PyTuple_GET_ITEM(names, npos + nkw))
+                         : PyUnicode_FromString("*")) < 0;
+        }
+        if (i < npos && i >= npos - ndefaults) {
+            deflt = PyTuple_GET_ITEM(f->func_defaults, i - (npos - ndefaults));
+        }
+        else if (i >= npos && f->func_kwdefaults != NULL) {
+            deflt = PyDict_GetItemWithError(f->func_kwdefaults, name);
+            err = err || PyErr_Occurred() != NULL;
+        }
+        PyObject *text = err ? NULL : i == 0 && k->bind ? PyUnicode_FromString("$self") : parameter(name, deflt);
+        if (text == Py_None) {
+            Py_DECREF(parts);
+            return text;
+        }
+        err = err || append(parts, text) < 0;
+    }
+    if (!err && nkw == 0 && (co->co_flags & CO_VARARGS)) {
+        err = append(parts, PyUnicode_FromFormat("*%U", PyTuple_GET_ITEM(names, npos))) < 0;
+    }
+    if (!err && (co->co_flags & CO_VARKEYWORDS)) {
+        int at = npos + nkw + ((co->co_flags & CO_VARARGS) != 0);
+        err = append(parts, PyUnicode_FromFormat("**%U", PyTuple_GET_ITEM(names, at))) < 0;
+    }
+    PyObject *slash_text = err ? NULL : PyUnicode_FromString("/");
+    err = err || slash_text == NULL || PyList_Insert(parts, slash, slash_text) < 0;
+    Py_XDECREF(slash_text);
+    PyObject *sep = err ? NULL : PyUnicode_FromString(", ");
+    PyObject *joined = sep != NULL ? PyUnicode_Join(sep, parts) : NULL;
+    PyObject *result = joined != NULL ? PyUnicode_FromFormat("(%U)", joined) : NULL;
+    Py_XDECREF(joined);
+    Py_XDECREF(sep);
+    Py_XDECREF(parts);
+    return result;
+}
+
+/* A kernel builtin documents no signature: it has its code's. */
 static PyObject *
 cfunction_get_text_signature(PyObject *self, void *closure)
 {
-    return internal_text_signature(((PyCFunctionObject *)self)->m_ml);
+    PyMethodDef *ml = ((PyCFunctionObject *)self)->m_ml;
+    struct lu_kernel_def *k = lu_kernel_def_of(ml);
+    return k != NULL ? kernel_text_signature(k) : internal_text_signature(ml);
 }
 
 static PyMemberDef cfunction_members[] = {

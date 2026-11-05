@@ -3082,15 +3082,3 @@ class StringIO(_TextIOBase):
         self._pos = pos
         if extra:
             self.__dict__.update(extra)
-
-
-# open and its relatives are builtin functions: stored in a class they do not
-# become methods.
-def _make_builtins():
-    module = sys.modules[__name__]
-    names = globals()
-    for name in ('open', 'open_code', 'text_encoding'):
-        names[name] = _lucifer.builtin_function(module, name, names[name])
-
-
-_make_builtins()
