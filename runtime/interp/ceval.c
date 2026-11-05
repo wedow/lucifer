@@ -2701,14 +2701,16 @@ op_LOAD_ATTR_SLOT: {
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
     PyObject *v = NULL;
     if (version != 0 && Py_TYPE(owner)->tp_version_tag == version) {
-        v = *(PyObject **)((char *)owner + lu_cache_load(next_instr + LA_INDEX));
+        /* Another thread may store and free the value: taken only if alive. */
+        v = lu_try_xget_ref((PyObject **)((char *)owner + lu_cache_load(next_instr + LA_INDEX)));
     }
     if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
         || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        Py_XDECREF(v);
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
-    TOP() = Py_NewRef(v);
+    TOP() = v;
     Py_DECREF(owner);
     if (oparg & 1) {
         PUSH(NULL);
@@ -2868,10 +2870,8 @@ op_STORE_ATTR_FAST: {
     sp -= 2;
     int err = 0;
     if (opcode == STORE_ATTR_SLOT) {
-        PyObject **slot = (PyObject **)((char *)owner + offset);
-        PyObject *old = *slot;
-        *slot = v;
-        Py_XDECREF(old);
+        Py_XDECREF(lu_member_exchange(owner, (PyObject **)((char *)owner + offset), v));
+        Py_DECREF(v);
     }
     else {
         SAVE_FRAME();

@@ -1170,6 +1170,10 @@ void lu_type_modified(PyTypeObject *tp);
 int lu_type_assign_version(PyTypeObject *tp);
 /* "__name__" of a type, new: ht_name, or tp_name after its last dot. */
 PyObject *lu_type_name(PyTypeObject *tp);
+/* Stores v (or NULL) into the object member at addr under the object's lock,
+   as PyMember_SetOne and STORE_ATTR_SLOT do; returns the old value. */
+PyObject *lu_member_exchange(PyObject *obj, PyObject **addr, PyObject *v);
+
 /* Adds descriptors for tp_members and tp_getset to the type's dict. */
 int lu_type_add_descriptors(PyTypeObject *tp);
 /* Adds wrapper descriptors (__add__, __len__, ...) for the C slots tp has
