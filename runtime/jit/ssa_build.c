@@ -781,6 +781,23 @@ unbox_int(struct ctx *c, lu_v v)
     return u;
 }
 
+/* An int operand of a comparison as a machine word: a constant past one
+   digit that fits 64 bits compares exactly as itself, where unboxing it
+   would always leave (the kernel's range checks against _SSIZE_MAX). */
+static lu_v
+compare_int_operand(struct ctx *c, lu_v v)
+{
+    PyObject *o = known(c, v);
+    if (o != NULL && PyLong_CheckExact(o) && !_PyLong_IsCompact((PyLongObject *)o)) {
+        int overflow;
+        long long x = PyLong_AsLongLongAndOverflow(o, &overflow);
+        if (!overflow) {
+            return const_i(c, x);
+        }
+    }
+    return unbox_int(c, v);
+}
+
 static lu_v
 unbox_float(struct ctx *c, lu_v v)
 {
@@ -1013,7 +1030,7 @@ compare_op(struct ctx *c)
     if (known_type(c, b) == &PyLong_Type) rk = LU_KIND_INT;
     if (known_type(c, b) == &PyFloat_Type) rk = LU_KIND_FLOAT;
     if (lk == LU_KIND_INT && rk == LU_KIND_INT) {
-        bit = emit(c, OP_CMP_I, REP_BIT, unbox_int(c, a), unbox_int(c, b), LU_NOV, op);
+        bit = emit(c, OP_CMP_I, REP_BIT, compare_int_operand(c, a), compare_int_operand(c, b), LU_NOV, op);
     }
     else if ((lk == LU_KIND_FLOAT || lk == LU_KIND_INT) && (rk == LU_KIND_FLOAT || rk == LU_KIND_INT)) {
         /* compare's dispatch for two exact floats is float's own method. */
