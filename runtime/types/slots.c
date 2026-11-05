@@ -47,8 +47,11 @@ call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *cons
         return PyErr_NoMemory();
     }
     PyObject *func, *bound_self, *result;
-    int unbound = PyFunction_Check(descr) || lu_kernel_target(descr, &self, 1, &func, &bound_self) > 0;
-    PyErr_Clear();
+    int target = PyFunction_Check(descr) ? 1 : lu_kernel_target(descr, &self, 1, &func, &bound_self);
+    if (target < 0) {
+        PyErr_Clear();  /* self fails the descriptor's check: __get__ decides */
+    }
+    int unbound = target > 0;
     if (unbound) {
         stack[0] = self;
         memcpy(stack + 1, args, total * sizeof(PyObject *));
