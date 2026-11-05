@@ -102,7 +102,7 @@ def gates(out):
         done = run(["make", target] + flags, "TEST_PREFIX")
         (out / f"{target}.log").write_text(done.stdout)
         detail = [l for l in done.stdout.splitlines() if re.search(r"\d+/\d+ checks pass|failing|^FAIL|^PASS difftest", l)]
-        rows[target] = (done.returncode == 0, "; ".join(detail[:6] or done.stdout.splitlines()[-1:]))
+        rows[target] = (done.returncode == 0, "; ".join(l[:200] for l in detail[:6]))
     return rows
 
 
