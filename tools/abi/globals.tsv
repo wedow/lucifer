@@ -194,3 +194,4 @@ istart	-	thread-local: the register allocation running on this thread; its TLS s
 iend	-	thread-local: the register allocation running on this thread; its TLS symbol has no line
 eq_seen	-	thread-local: the last type compiled code asked whether == is identity for; its TLS symbol has no line
 stack_floor	-	thread-local: the lowest C stack address a call from compiled code may recurse to; its TLS symbol has no line
+managed_buffer_type	runtime/prim/memoryview.c	a static type, its slots filled once at startup (lu_memoryview_init)

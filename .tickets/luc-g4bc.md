@@ -1,6 +1,6 @@
 ---
 id: luc-g4bc
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T05:57:02Z
