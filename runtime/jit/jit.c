@@ -592,9 +592,8 @@ lu_jit_note_exit(struct lu_deopt *d)
 }
 
 /* Polymorphic caches. Writers (compiled code's generic loads, on any
-   thread) take this lock; the translator reads published entries without
-   it; a collection forgets entries with the world stopped. */
-static PyMutex pic_lock;
+   thread) take _PyRuntime.pic_lock; the translator reads published
+   entries without it; a collection forgets entries with the world stopped. */
 
 struct lu_pic *
 lu_jit_pic(PyCodeObject *code, int pc, int create)
@@ -608,7 +607,7 @@ lu_jit_pic(PyCodeObject *code, int pc, int create)
         if (!create) {
             return NULL;
         }
-        PyMutex_Lock(&pic_lock);
+        PyMutex_Lock(&_PyRuntime.pic_lock);
         if (jc->pics == NULL) {
             __atomic_store_n(&jc->pics, calloc((size_t)jc->ncode, sizeof(struct lu_pic *)), __ATOMIC_RELEASE);
         }
@@ -618,7 +617,7 @@ lu_jit_pic(PyCodeObject *code, int pc, int create)
             pic->method = lu_code_start(code)[pc].op.arg & 1;
             __atomic_store_n(&jc->pics[pc], pic, __ATOMIC_RELEASE);
         }
-        PyMutex_Unlock(&pic_lock);
+        PyMutex_Unlock(&_PyRuntime.pic_lock);
         pics = jc->pics;
     }
     return pics[pc];
@@ -652,7 +651,7 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
     struct lu_pic_entry e = { lu_cache_load32(site + 1 + LA_VERSION), (uint16_t)op,
                               lu_cache_load(site + 1 + LA_INDEX), lu_cache_load_ptr(site + 1 + LA_DESCR) };
     int added = 0;
-    PyMutex_Lock(&pic_lock);
+    PyMutex_Lock(&_PyRuntime.pic_lock);
     n = pic->n;
     int known = 0;
     for (int i = 0; i < n; i++) {
@@ -663,7 +662,7 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
         __atomic_store_n(&pic->n, n + 1, __ATOMIC_RELEASE);
         added = 1;
     }
-    PyMutex_Unlock(&pic_lock);
+    PyMutex_Unlock(&_PyRuntime.pic_lock);
     if (added) {
         /* The code's units recompile at their next entry, testing for it. */
         struct lu_jit_code *jc = state_of(pic->code);
