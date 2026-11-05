@@ -32,6 +32,7 @@
 #include "interp/code.h"
 #include "interp/instrument.h"
 #include "object/dict.h"
+#include "jit/jit.h"
 
 /* _PyOpcode_Caches: CACHE entries after each instruction, specialized or not. */
 const uint8_t lu_opcode_caches[256] = {
@@ -422,4 +423,5 @@ lu_specialize_forget(PyCodeObject *code, int (*dead)(PyObject *))
         }
         i += 1 + lu_opcode_caches[base];
     }
+    lu_jit_pic_forget(code, dead);
 }

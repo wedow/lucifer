@@ -148,6 +148,37 @@ int lu_jit_call_entry(PyCodeObject *code);
    an exception), or 0 with nothing done when there is no unit to enter. */
 int lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
 
+/* A polymorphic inline cache (runtime/jit/jit.c): the shapes an attribute
+   site the interpreter's one-shape cache gave up on has met in compiled
+   code, each as the interpreter would have specialized it for that type
+   (specialize.h). Compiled code tests the owner's type version against
+   each (a version names one type in one state) and takes the generic path
+   for anything else. Entries name descriptors under the inline-cache rule:
+   immortal or deferred, forgotten by lu_specialize_forget before a
+   collection frees them. */
+#define LU_PIC_WAYS 4
+struct lu_pic_entry {
+    uint32_t version;
+    uint16_t op;                /* LOAD_ATTR_INSTANCE_VALUE, _METHOD_* or _NONDESCRIPTOR_* */
+    uint16_t index;
+    PyObject *descr;
+};
+struct lu_pic {
+    PyCodeObject *code;         /* the site's, which frees the cache */
+    int method;                 /* LOAD_ATTR's method form */
+    int n;                      /* entries published, release-stored after the entry */
+    int tries;                  /* shapes looked at: a site whose owners have none stops looking */
+    struct lu_pic_entry e[LU_PIC_WAYS];
+};
+
+/* The site's cache, made when `create`; NULL without one. */
+struct lu_pic *lu_jit_pic(PyCodeObject *code, int pc, int create);
+/* A generic load at the site met owner: its shape joins the cache, and the
+   code recompiles to test for it, while there is room. */
+void lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name);
+/* lu_specialize_forget for the code's polymorphic caches. */
+void lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *));
+
 /* Releases a code object's compiled units (code_dealloc). */
 void lu_jit_code_free(PyCodeObject *code);
 

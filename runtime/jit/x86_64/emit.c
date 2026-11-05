@@ -1420,7 +1420,12 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     }
     case OP_LOAD:
         r = gpr_of(a, in->a, RAX);
-        load(a, RAX, r, (int32_t)in->imm);
+        if (in->imm2 == 4) {
+            load32(a, RAX, r, (int32_t)in->imm);
+        }
+        else {
+            load(a, RAX, r, (int32_t)in->imm);
+        }
         def_gpr(a, v, RAX);
         return 0;
     case OP_LIST_ITEM: {

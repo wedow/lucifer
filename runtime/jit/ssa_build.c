@@ -1364,6 +1364,97 @@ cached_site(struct ctx *c, int generic, uint32_t *version, uint16_t *index, PyOb
 }
 
 static int load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr);
+static lu_v type_of(struct ctx *c, lu_v v);
+
+/* A site its polymorphic cache answers (runtime/jit/jit.h): the owner's
+   type picks an entry, whose version is guarded and whose answer is
+   taken as its one-shape site would; any other type takes the generic
+   path, which goes on recording. */
+static int
+load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
+{
+    struct lu_func *f = c->f;
+    lu_v owner = peek(c, 1);
+    int own = peek_owned(c, 1);
+    int method = c->oparg & 1;
+    PyObject *name = name_at(c, c->oparg >> 1);
+    before(c);
+    lu_v t = emit(c, OP_LOAD, REP_I64, type_of(c, owner), LU_NOV, LU_NOV, offsetof(PyTypeObject, tp_version_tag));
+    I(c, t)->imm2 = 4;          /* 32 bits */
+    int join = lu_ir_block(f);
+    lu_v r1[LU_PIC_WAYS + 1], r2[LU_PIC_WAYS + 1];
+    int paths = 0;
+    pop(c, NULL);
+    for (int i = 0; i < n; i++) {
+        struct lu_pic_entry e = pic->e[i];
+        lu_v bit = emit(c, OP_CMP_I, REP_BIT, t, const_i(c, e.version), LU_NOV, Py_EQ);
+        int arm = lu_ir_block(f), next = lu_ir_block(f);
+        lu_ir_edge(f, c->cur, arm);
+        lu_ir_edge(f, c->cur, next);
+        emit(c, OP_BRANCH, REP_NONE, bit, LU_NOV, LU_NOV, 0);
+        c->cur = arm;
+        lu_v a1, a2 = LU_NOV;
+        if (e.op == LOAD_ATTR_INSTANCE_VALUE) {
+            a1 = emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, e.index);
+            I(c, a1)->fs = before(c);
+            release(c, owner, own);
+        }
+        else {
+            if (e.op == LOAD_ATTR_METHOD_WITH_VALUES || e.op == LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES) {
+                lu_v args[2] = { owner, konst(c, name) };
+                guard(c, OP_GUARD_BIT, helper(c, H_dict_lacks, 2, args), 1);
+            }
+            a1 = take(c, konst(c, e.descr), 0);
+            if (e.op == LOAD_ATTR_METHOD_NO_DICT || e.op == LOAD_ATTR_METHOD_WITH_VALUES) {
+                a2 = method ? take(c, owner, own) : LU_NOV;
+                if (!method) {
+                    release(c, owner, own);
+                }
+            }
+            else {
+                release(c, owner, own);
+            }
+        }
+        r1[paths] = a1;
+        r2[paths++] = a2;
+        emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+        lu_ir_edge(f, arm, join);
+        c->cur = next;
+    }
+    if (root_only(c)) {
+        lu_v args[3] = { owner, konst(c, name), const_i(c, (int64_t)(intptr_t)pic) };
+        lu_v v = helper_raising(c, method ? H_load_method : H_load_attr, 3, args, 1);
+        release(c, owner, own);
+        r1[paths] = v;
+        r2[paths++] = LU_NOV;
+        emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+        lu_ir_edge(f, c->cur, join);
+    }
+    else {
+        unsupported(c);         /* leaves at the state before the load */
+    }
+    c->cur = join;
+    lu_v out[2];
+    for (int k = 0; k < 1 + method; k++) {
+        lu_v *r = k == 0 ? r1 : r2;
+        if (paths == 1) {
+            out[k] = r[0];
+            continue;
+        }
+        lu_v phi = lu_ir_emit(f, join, OP_PHI, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, c->nlocals + c->st.sp + k);
+        I(c, phi)->nargs = paths;
+        I(c, phi)->args = malloc(sizeof(lu_v) * (size_t)paths);
+        for (int i = 0; i < paths; i++) {
+            I(c, phi)->args[i] = phi_input(c, r[i]);
+        }
+        out[k] = phi;
+    }
+    push(c, out[0], 1);
+    if (method) {
+        push(c, out[1], out[1] != LU_NOV);
+    }
+    return 0;
+}
 
 static int
 load_attr(struct ctx *c)
@@ -1372,7 +1463,9 @@ load_attr(struct ctx *c)
     uint16_t index;
     PyObject *descr;
     int op = cached_site(c, LOAD_ATTR, &version, &index, &descr);
-    int r = load_attr_cached(c, op, version, index, descr);
+    struct lu_pic *pic = op == LOAD_ATTR ? lu_jit_pic(c->code, c->pc, 0) : NULL;
+    int n = pic != NULL ? __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE) : 0;
+    int r = n > 0 ? load_attr_poly(c, pic, n) : load_attr_cached(c, op, version, index, descr);
     Py_XDECREF(descr);
     return r;
 }
@@ -1460,8 +1553,9 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         unsupported(c);
         return -1;
     }
-    lu_v args[3] = { owner, konst(c, name), const_i(c, method) };
-    lu_v v = helper_raising(c, method ? H_load_method : H_load_attr, method ? 3 : 2, args, 1);
+    /* The generic load records the shapes it meets for a polymorphic cache. */
+    lu_v args[3] = { owner, konst(c, name), const_i(c, (int64_t)(intptr_t)lu_jit_pic(c->code, c->pc, 1)) };
+    lu_v v = helper_raising(c, method ? H_load_method : H_load_attr, 3, args, 1);
     pop(c, NULL);
     release(c, owner, own);
     if (method) {

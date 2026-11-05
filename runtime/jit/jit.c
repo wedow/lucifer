@@ -24,6 +24,7 @@
    the interpreter runs that entry a few times first, once per entry. */
 #include "jit/jit.h"
 #include "jit/target.h"
+#include "interp/specialize.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -58,6 +59,7 @@ struct lu_jit_code {
     uint8_t *warmed;            /* per code unit: an entry whose compile was put off for feedback once */
     int noinline;               /* a side exit in an inlined copy keeps leaving: call it instead */
     int call_pc;                /* where a call enters (call_entry), or -1 */
+    struct lu_pic **pics;       /* per code unit: an attribute site's polymorphic cache */
 };
 
 static struct {
@@ -589,6 +591,110 @@ lu_jit_note_exit(struct lu_deopt *d)
     }
 }
 
+/* Polymorphic caches. Writers (compiled code's generic loads, on any
+   thread) take this lock; the translator reads published entries without
+   it; a collection forgets entries with the world stopped. */
+static PyMutex pic_lock;
+
+struct lu_pic *
+lu_jit_pic(PyCodeObject *code, int pc, int create)
+{
+    struct lu_jit_code *jc = state_of(code);
+    if (jc == NULL || pc < 0 || pc >= jc->ncode) {
+        return NULL;
+    }
+    struct lu_pic **pics = __atomic_load_n(&jc->pics, __ATOMIC_ACQUIRE);
+    if (pics == NULL || pics[pc] == NULL) {
+        if (!create) {
+            return NULL;
+        }
+        PyMutex_Lock(&pic_lock);
+        if (jc->pics == NULL) {
+            __atomic_store_n(&jc->pics, calloc((size_t)jc->ncode, sizeof(struct lu_pic *)), __ATOMIC_RELEASE);
+        }
+        if (jc->pics[pc] == NULL) {
+            struct lu_pic *pic = calloc(1, sizeof(struct lu_pic));
+            pic->code = code;
+            pic->method = lu_code_start(code)[pc].op.arg & 1;
+            __atomic_store_n(&jc->pics[pc], pic, __ATOMIC_RELEASE);
+        }
+        PyMutex_Unlock(&pic_lock);
+        pics = jc->pics;
+    }
+    return pics[pc];
+}
+
+void
+lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
+{
+    PyTypeObject *tp = Py_TYPE(owner);
+    int n = __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE);
+    for (int i = 0; i < n; i++) {
+        if (pic->e[i].version == tp->tp_version_tag) {
+            return;
+        }
+    }
+    if (n == LU_PIC_WAYS || __atomic_load_n(&pic->tries, __ATOMIC_RELAXED) >= 4 * LU_PIC_WAYS) {
+        return;                 /* megamorphic, or shapes no entry can hold: the generic path it is */
+    }
+    __atomic_fetch_add(&pic->tries, 1, __ATOMIC_RELAXED);
+    /* What the interpreter's specializer makes of this owner, on a site
+       of its own. */
+    lu_codeunit site[1 + 9 + 1] = { 0 };
+    site[0].op.code = LOAD_ATTR;
+    site[0].op.arg = (uint8_t)pic->method;
+    lu_specialize_load_attr(owner, site, name);
+    int op = site[0].op.code;
+    if (op != LOAD_ATTR_INSTANCE_VALUE && op != LOAD_ATTR_METHOD_NO_DICT && op != LOAD_ATTR_METHOD_WITH_VALUES
+        && op != LOAD_ATTR_NONDESCRIPTOR_NO_DICT && op != LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES) {
+        return;
+    }
+    struct lu_pic_entry e = { lu_cache_load32(site + 1 + LA_VERSION), (uint16_t)op,
+                              lu_cache_load(site + 1 + LA_INDEX), lu_cache_load_ptr(site + 1 + LA_DESCR) };
+    int added = 0;
+    PyMutex_Lock(&pic_lock);
+    n = pic->n;
+    int known = 0;
+    for (int i = 0; i < n; i++) {
+        known |= pic->e[i].version == e.version;
+    }
+    if (n < LU_PIC_WAYS && e.version != 0 && !known) {
+        pic->e[n] = e;
+        __atomic_store_n(&pic->n, n + 1, __ATOMIC_RELEASE);
+        added = 1;
+    }
+    PyMutex_Unlock(&pic_lock);
+    if (added) {
+        /* The code's units recompile at their next entry, testing for it. */
+        struct lu_jit_code *jc = state_of(pic->code);
+        for (struct lu_unit *u = __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
+            if (!__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
+                count(&stats.units_dead, 1);
+            }
+        }
+        jc->nfailed = 0;
+    }
+}
+
+void
+lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
+{
+    struct lu_jit_code *jc = state_of(code);
+    for (int pc = 0; jc != NULL && jc->pics != NULL && pc < jc->ncode; pc++) {
+        struct lu_pic *pic = jc->pics[pc];
+        if (pic == NULL) {
+            continue;
+        }
+        int k = 0;
+        for (int i = 0; i < pic->n; i++) {
+            if (pic->e[i].descr == NULL || !dead(pic->e[i].descr)) {
+                pic->e[k++] = pic->e[i];
+            }
+        }
+        pic->n = k;
+    }
+}
+
 void
 lu_jit_code_free(PyCodeObject *code)
 {
@@ -604,6 +710,10 @@ lu_jit_code_free(PyCodeObject *code)
         next = u->next;
         free_unit(u);
     }
+    for (int i = 0; jc->pics != NULL && i < jc->ncode; i++) {
+        free(jc->pics[i]);
+    }
+    free(jc->pics);
     free(jc->nospec);
     free(jc->fails);
     free(jc->wait);

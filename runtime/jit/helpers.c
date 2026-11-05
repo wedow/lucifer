@@ -228,10 +228,20 @@ h_load_attr(PyObject *owner, PyObject *name)
     return v;
 }
 
+/* A generic site with a polymorphic cache records what it meets. */
 static PyObject *
-h_load_method(PyObject *owner, PyObject *name, int64_t unused)
+h_load_attr_pic(PyObject *owner, PyObject *name, int64_t pic)
 {
+    if (pic != 0) {
+        lu_jit_pic_note((struct lu_pic *)(intptr_t)pic, owner, name);
+    }
     return h_load_attr(owner, name);
+}
+
+static PyObject *
+h_load_method(PyObject *owner, PyObject *name, int64_t site)
+{
+    return h_load_attr_pic(owner, name, site);
 }
 
 static int
@@ -552,7 +562,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_binary_op] = { (void *)h_binary_op, "binary_op", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_compare_op] = { (void *)h_compare_op, "compare_op", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_setitem] = { (void *)h_setitem, "setitem", REP_BIT, IF_RAISE | IF_PY, 3 },
-    [H_load_attr] = { (void *)h_load_attr, "load_attr", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_load_attr] = { (void *)h_load_attr_pic, "load_attr", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_load_method] = { (void *)h_load_method, "load_method", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 3 },
     [H_call] = { (void *)h_call, "call", REP_OBJ, IF_RAISE | IF_PY, 0 },
