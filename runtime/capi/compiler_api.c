@@ -112,6 +112,39 @@ PyUnicode_Find(PyObject *str, PyObject *substr, Py_ssize_t start, Py_ssize_t end
     return n;
 }
 
+/* The filesystem path converters (Objects/unicodeobject.c): PyOS_FSPath to a
+   str (FSDecoder) or to bytes in the filesystem encoding (FSConverter). */
+int
+PyUnicode_FSConverter(PyObject* arg, void* addr)
+{
+    if (arg == NULL) {
+        Py_CLEAR(*(PyObject **)addr);
+        return 1;
+    }
+    PyObject *path = PyOS_FSPath(arg);
+    if (path == NULL) {
+        return 0;
+    }
+    PyObject *output;
+    if (PyBytes_Check(path)) {
+        output = path;
+    }
+    else {  // PyOS_FSPath() guarantees its returned value is bytes or str.
+        output = PyUnicode_EncodeFSDefault(path);
+        Py_DECREF(path);
+        if (output == NULL) {
+            return 0;
+        }
+    }
+    if ((size_t)PyBytes_GET_SIZE(output) != strlen(PyBytes_AS_STRING(output))) {
+        PyErr_SetString(PyExc_ValueError, "embedded null byte");
+        Py_DECREF(output);
+        return 0;
+    }
+    *(PyObject **)addr = output;
+    return Py_CLEANUP_SUPPORTED;
+}
+
 int
 PyUnicode_FSDecoder(PyObject *arg, void *addr)
 {

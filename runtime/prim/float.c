@@ -6,6 +6,7 @@
    PyOS_double_to_string over dtoa.c; parsing is _Py_dg_strtod. */
 
 #include "prim/prim.h"
+#include "prim/bytes.h"
 #include "opcode.h"
 
 #include <errno.h>
@@ -34,6 +35,10 @@ bool_of(int v)
 double
 PyFloat_AsDouble(PyObject *op)
 {
+    if (op == NULL) {
+        PyErr_BadArgument();
+        return -1;
+    }
     if (PyFloat_Check(op)) {
         return PyFloat_AS_DOUBLE(op);
     }
@@ -536,9 +541,11 @@ prim_float_format(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 #define ISSPACE(c) ((c) == ' ' || ((c) >= '\t' && (c) <= '\r'))
 
-/* The bytes of a str or bytes, NUL terminated, with the Unicode whitespace
-   and decimal digits of a non-ASCII str as ASCII
-   (_PyUnicode_TransformDecimalAndSpaceToASCII). */
+/* The bytes of a str or bytes-like object, NUL terminated, with the Unicode
+   whitespace and decimal digits of a non-ASCII str as ASCII
+   (_PyUnicode_TransformDecimalAndSpaceToASCII). A bytes-like object is read
+   through PyObject_GetBuffer(PyBUF_SIMPLE), as PyFloat_FromString reads it,
+   so a non-contiguous buffer is a BufferError. */
 char *
 lu_number_text(PyObject *s, Py_ssize_t *len)
 {
@@ -579,8 +586,19 @@ lu_number_text(PyObject *s, Py_ssize_t *len)
         memcpy(buf, PyBytes_AS_STRING(s), *len);
     }
     else {
-        lu_err_format(PyExc_TypeError, "a str or bytes is needed");
-        return NULL;
+        lu_bv v;
+        if (lu_bv_get(s, &v) < 0) {
+            return NULL;
+        }
+        buf = PyMem_Malloc(v.n + 1);
+        if (buf == NULL) {
+            PyErr_NoMemory();
+            lu_bv_put(&v);
+            return NULL;
+        }
+        *len = v.n;
+        memcpy(buf, v.p, v.n);
+        lu_bv_put(&v);
     }
     buf[*len] = 0;
     return buf;
@@ -1073,14 +1091,342 @@ PyMethodDef lu_prim_float_methods[] = {
     { NULL, NULL, 0, NULL },
 };
 
-/* float(v) for a str, bytes or other bytes-like object only. */
+/* float(v) for a str, bytes or other bytes-like object only. The parse and
+   the errors live in the kernel's float(); the type gate is here so a
+   non-buffer answers before the delegation. */
 PyObject *
 PyFloat_FromString(PyObject *v)
 {
     if (!PyUnicode_Check(v) && !PyBytes_Check(v) && !PyByteArray_Check(v) && !PyObject_CheckBuffer(v)) {
-        PyErr_Format(PyExc_TypeError, "float() argument must be a string or a bytes-like object, not '%.200s'",
+        PyErr_Format(PyExc_TypeError, "float() argument must be a string or a real number, not '%.200s'",
                      Py_TYPE(v)->tp_name);
         return NULL;
     }
     return PyObject_CallOneArg((PyObject *)&PyFloat_Type, v);
+}
+
+/* The float info, max and min (floatobject.c). The kernel builds
+   sys.float_info with the values of the same <float.h> macros. */
+PyObject *
+PyFloat_GetInfo(void)
+{
+    PyObject *info = PyDict_GetItemString(PyInterpreterState_Get()->sysdict, "float_info");
+    if (info == NULL) {
+        lu_err_format(PyExc_SystemError, "can't find float_info in sys");
+        return NULL;
+    }
+    return Py_NewRef(info);
+}
+
+double
+PyFloat_GetMax(void)
+{
+    return DBL_MAX;
+}
+
+double
+PyFloat_GetMin(void)
+{
+    return DBL_MIN;
+}
+
+/* PyFloat_{Pack,Unpack}{2,4,8} (floatobject.c): the IEEE 754 serializations.
+   The host float and double are IEEE 754 little-endian, as
+   float.__getformat__ reports, so 4 and 8 copy the native bytes (swapped for
+   big-endian output); the half float has no native type and is converted in
+   software, with round-half-to-even as numpy's NPY_HALF_ROUND_TIES_TO_EVEN.
+   A signaling NaN stays signaling: the conversions to a narrower width quiet
+   it, and the quiet bit is put back when a payload survives. */
+
+int
+PyFloat_Pack2(double x, char *data, int le)
+{
+    unsigned char *p = (unsigned char *)data;
+    unsigned char sign;
+    int e;
+    double f;
+    unsigned short bits;
+    int incr = 1;
+
+    if (x == 0.0) {
+        sign = (copysign(1.0, x) == -1.0);
+        e = 0;
+        bits = 0;
+    }
+    else if (isinf(x)) {
+        sign = (x < 0.0);
+        e = 0x1f;
+        bits = 0;
+    }
+    else if (isnan(x)) {
+        sign = (copysign(1.0, x) == -1.0);
+        e = 0x1f;
+
+        uint64_t v;
+        memcpy(&v, &x, sizeof(v));
+        v &= 0xffc0000000000ULL;
+        bits = (unsigned short)(v >> 42); /* NaN's type & payload */
+        /* set qNaN if no payload */
+        if (!bits) {
+            bits |= (1<<9);
+        }
+    }
+    else {
+        sign = (x < 0.0);
+        if (sign) {
+            x = -x;
+        }
+
+        f = frexp(x, &e);
+        if (f < 0.5 || f >= 1.0) {
+            PyErr_SetString(PyExc_SystemError,
+                            "frexp() result out of range");
+            return -1;
+        }
+
+        /* Normalize f to be in the range [1.0, 2.0) */
+        f *= 2.0;
+        e--;
+
+        if (e >= 16) {
+            goto Overflow;
+        }
+        else if (e < -25) {
+            /* |x| < 2**-25. Underflow to zero. */
+            f = 0.0;
+            e = 0;
+        }
+        else if (e < -14) {
+            /* |x| < 2**-14. Gradual underflow */
+            f = ldexp(f, 14 + e);
+            e = 0;
+        }
+        else /* if (!(e == 0 && f == 0.0)) */ {
+            e += 15;
+            f -= 1.0; /* Get rid of leading 1 */
+        }
+
+        f *= 1024.0; /* 2**10 */
+        /* Round to even */
+        bits = (unsigned short)f; /* Note the truncation */
+        assert(bits < 1024);
+        assert(e < 31);
+        if ((f - bits > 0.5) || ((f - bits == 0.5) && (bits % 2 == 1))) {
+            ++bits;
+            if (bits == 1024) {
+                /* The carry propagated out of a string of 10 1 bits. */
+                bits = 0;
+                ++e;
+                if (e == 31)
+                    goto Overflow;
+            }
+        }
+    }
+
+    bits |= (e << 10) | (sign << 15);
+
+    /* Write out result. */
+    if (le) {
+        p += 1;
+        incr = -1;
+    }
+
+    /* First byte */
+    *p = (unsigned char)((bits >> 8) & 0xFF);
+    p += incr;
+
+    /* Second byte */
+    *p = (unsigned char)(bits & 0xFF);
+
+    return 0;
+
+  Overflow:
+    PyErr_SetString(PyExc_OverflowError,
+                    "float too large to pack with e format");
+    return -1;
+}
+
+int
+PyFloat_Pack4(double x, char *data, int le)
+{
+    unsigned char *p = (unsigned char *)data;
+    float y = (float)x;
+    int i, incr = 1;
+
+    if (isinf(y) && !isinf(x)) {
+        goto Overflow;
+    }
+
+    /* correct y if x was a sNaN, transformed to qNaN by conversion */
+    if (isnan(x)) {
+        uint64_t v;
+
+        memcpy(&v, &x, 8);
+        if ((v & (1ULL << 51)) == 0) {
+            uint32_t u32;
+            memcpy(&u32, &y, 4);
+            /* if have payload, make sNaN */
+            if (u32 & 0x3fffff) {
+                u32 &= ~(1u << 22);
+            }
+            memcpy(&y, &u32, 4);
+        }
+    }
+
+    unsigned char s[sizeof(float)];
+    memcpy(s, &y, sizeof(float));
+
+    if (!le) {
+        p += 3;
+        incr = -1;
+    }
+
+    for (i = 0; i < 4; i++) {
+        *p = s[i];
+        p += incr;
+    }
+    return 0;
+
+  Overflow:
+    PyErr_SetString(PyExc_OverflowError,
+                    "float too large to pack with f format");
+    return -1;
+}
+
+int
+PyFloat_Pack8(double x, char *data, int le)
+{
+    unsigned char *p = (unsigned char *)data;
+    int i, incr = 1;
+
+    unsigned char s[sizeof(double)];
+    memcpy(s, &x, sizeof(double));
+
+    if (!le) {
+        p += 7;
+        incr = -1;
+    }
+
+    for (i = 0; i < 8; i++) {
+        *p = s[i];
+        p += incr;
+    }
+    return 0;
+}
+
+double
+PyFloat_Unpack2(const char *data, int le)
+{
+    unsigned char *p = (unsigned char *)data;
+    unsigned char sign;
+    int e;
+    unsigned int f;
+    double x;
+    int incr = 1;
+
+    if (le) {
+        p += 1;
+        incr = -1;
+    }
+
+    /* First byte */
+    sign = (*p >> 7) & 1;
+    e = (*p & 0x7C) >> 2;
+    f = (*p & 0x03) << 8;
+    p += incr;
+
+    /* Second byte */
+    f |= *p;
+
+    if (e == 0x1f) {
+        if (f == 0) {
+            /* Infinity */
+            return sign ? -Py_INFINITY : Py_INFINITY;
+        }
+        else {
+            /* NaN */
+            uint64_t v = sign ? 0xfff0000000000000ULL : 0x7ff0000000000000ULL;
+
+            v += (uint64_t)f << 42; /* add NaN's type & payload */
+            memcpy(&x, &v, sizeof(v));
+            return x;
+        }
+    }
+
+    x = (double)f / 1024.0;
+
+    if (e == 0) {
+        e = -14;
+    }
+    else {
+        x += 1.0;
+        e -= 15;
+    }
+    x = ldexp(x, e);
+
+    if (sign)
+        x = -x;
+
+    return x;
+}
+
+double
+PyFloat_Unpack4(const char *data, int le)
+{
+    unsigned char *p = (unsigned char *)data;
+    float x;
+
+    if (!le) {
+        char buf[4];
+        char *d = &buf[3];
+        int i;
+
+        for (i = 0; i < 4; i++) {
+            *d-- = *p++;
+        }
+        memcpy(&x, buf, 4);
+    }
+    else {
+        memcpy(&x, p, 4);
+    }
+
+    /* return sNaN double if x was sNaN float */
+    if (isnan(x)) {
+        uint32_t v;
+        memcpy(&v, &x, 4);
+
+        if ((v & (1u << 22)) == 0) {
+            double y = x; /* will make qNaN double */
+            uint64_t u64;
+            memcpy(&u64, &y, 8);
+            u64 &= ~(1ULL << 51); /* make sNaN */
+            memcpy(&y, &u64, 8);
+            return y;
+        }
+    }
+
+    return x;
+}
+
+double
+PyFloat_Unpack8(const char *data, int le)
+{
+    unsigned char *p = (unsigned char *)data;
+    double x;
+
+    if (!le) {
+        char buf[8];
+        char *d = &buf[7];
+        int i;
+
+        for (i = 0; i < 8; i++) {
+            *d-- = *p++;
+        }
+        memcpy(&x, buf, 8);
+    }
+    else {
+        memcpy(&x, p, 8);
+    }
+
+    return x;
 }

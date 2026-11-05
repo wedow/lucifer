@@ -229,23 +229,6 @@ PyFloat_FromDouble(double value)
     return (PyObject *)op;
 }
 
-double
-PyFloat_Unpack8(const char *data, int le)
-{
-    unsigned char bytes[8];
-    memcpy(bytes, data, 8);
-    if (!le) {
-        for (int i = 0; i < 4; i++) {
-            unsigned char t = bytes[i];
-            bytes[i] = bytes[7 - i];
-            bytes[7 - i] = t;
-        }
-    }
-    double x;
-    memcpy(&x, bytes, 8);       /* x86-64 and aarch64 are little-endian IEEE */
-    return x;
-}
-
 PyObject *
 PyComplex_FromCComplex(Py_complex value)
 {

@@ -7,6 +7,7 @@
 
 #include "lucifer.h"
 #include "interp/exceptions.h"
+#include "interp/frame.h"
 
 #include <stdarg.h>
 #include <string.h>
@@ -67,6 +68,57 @@ PyErr_Occurred(void)
         ? (PyObject *)Py_TYPE(ts->current_exception) : NULL;
 }
 
+/* An instance of `type` made from `value`, as _PyErr_CreateException: the
+   tuple is the arguments, None none, anything else the one argument. */
+static PyObject *
+create_exception(PyObject *type, PyObject *value)
+{
+    /* The class call runs Python at whatever depth the raise itself came
+       from. At the recursion limit there is no room for it (and the limit's
+       own RecursionError must not recurse back through here), so the
+       instance is built directly, as before the kernel exists. */
+    PyThreadState *ts = PyThreadState_Get();
+    if (ts->py_recursion_remaining <= 0) {
+        PyObject *args = value == NULL || value == Py_None ? PyTuple_New(0)
+            : PyTuple_Check(value) ? Py_NewRef(value) : PyTuple_Pack(1, value);
+        return args != NULL ? exc_new(type, args) : NULL;
+    }
+    PyObject *exc = value == NULL || value == Py_None
+        ? PyObject_CallNoArgs(type)
+        : PyTuple_Check(value) ? PyObject_Call(type, value, NULL) : PyObject_CallOneArg(type, value);
+    return exc;
+}
+
+/* The exception raised while creating one becomes the raised exception, with
+   a note of the creation that failed (Python/errors.c
+   get_normalization_failure_note). */
+static void
+normalization_failure(PyObject *type, PyObject *value)
+{
+    PyObject *exc = PyErr_GetRaisedException();
+    if (exc == NULL || !PyExceptionInstance_Check(exc)) {
+        Py_XDECREF(exc);
+        return;
+    }
+    PyObject *args = PyObject_Repr(value);
+    if (args == NULL) {
+        PyErr_Clear();
+        args = PyUnicode_FromString("<unknown>");
+    }
+    PyObject *note = args != NULL
+        ? PyUnicode_FromFormat("Normalization failed: type=%s args=%S",
+                               ((PyTypeObject *)type)->tp_name, args)
+        : NULL;
+    Py_XDECREF(args);
+    if (note != NULL) {
+        PyObject *r = PyObject_CallMethod(exc, "add_note", "O", note);
+        Py_XDECREF(r);
+        PyErr_Clear();          /* a note that failed is not raised either */
+        Py_DECREF(note);
+    }
+    PyErr_SetRaisedException(exc);
+}
+
 void
 PyErr_SetObject(PyObject *type, PyObject *value)
 {
@@ -74,11 +126,9 @@ PyErr_SetObject(PyObject *type, PyObject *value)
         lu_err_format(PyExc_SystemError, "PyErr_SetObject: exception is not a BaseException subclass");
         return;
     }
-    if (value != NULL && PyExceptionInstance_Check(value)
-        && PyErr_GivenExceptionMatches((PyObject *)Py_TYPE(value), type)) {
-        Py_INCREF(value);
-    }
-    else {
+    if (!PyInterpreterState_Get()->kernel_booted) {
+        /* the kernel's classes cannot be called yet: build the instance */
+        PyErr_Clear();
         PyObject *args;
         if (value == NULL || value == Py_None) {
             args = PyTuple_New(0);
@@ -92,10 +142,37 @@ PyErr_SetObject(PyObject *type, PyObject *value)
                 PyTuple_SET_ITEM(args, 0, Py_NewRef(value));
             }
         }
-        value = exc_new(type, args);
-        if (value == NULL) {
+        if (args == NULL) {
             return;
         }
+        PyObject *exc = exc_new(type, args);
+        if (exc != NULL) {
+            lu_exc_chain_context(exc);
+            PyErr_SetRaisedException(exc);
+        }
+        return;
+    }
+    int is_subclass = 0;
+    if (value != NULL && PyExceptionInstance_Check(value)) {
+        is_subclass = PyObject_IsSubclass((PyObject *)Py_TYPE(value), type);
+        if (is_subclass < 0) {
+            return;
+        }
+    }
+    if (is_subclass) {
+        Py_INCREF(value);
+    }
+    else {
+        /* Normalize the value now; the pending exception is cleared first,
+           and one that fails to normalize becomes the raised exception
+           (Python/errors.c _PyErr_SetObject). */
+        PyErr_Clear();
+        PyObject *fixed = create_exception(type, value);
+        if (fixed == NULL) {
+            normalization_failure(type, value);
+            return;
+        }
+        value = fixed;
     }
     lu_exc_chain_context(value);
     PyErr_SetRaisedException(value);
@@ -261,17 +338,6 @@ PyErr_Fetch(PyObject **type, PyObject **value, PyObject **traceback)
     *traceback = exc != NULL ? PyException_GetTraceback(exc) : NULL;
 }
 
-/* An instance of `type` made from `value`, as _PyErr_CreateException: the
-   tuple is the arguments, None none, anything else the one argument. */
-static PyObject *
-create_exception(PyObject *type, PyObject *value)
-{
-    if (value == NULL || value == Py_None) {
-        return PyObject_CallNoArgs(type);
-    }
-    return PyTuple_Check(value) ? PyObject_Call(type, value, NULL) : PyObject_CallOneArg(type, value);
-}
-
 /* The exception that (type, value) stand for, new; value stays as it was. */
 static PyObject *
 normalized(PyObject *type, PyObject *value)
@@ -334,26 +400,83 @@ PyErr_Restore(PyObject *type, PyObject *value, PyObject *traceback)
         return;
     }
     if (traceback != NULL) {
-        PyException_SetTraceback(exc, traceback);
+        int err = PyException_SetTraceback(exc, traceback);
         Py_DECREF(traceback);
+        if (err < 0) {
+            Py_DECREF(exc);
+            return;             /* the TypeError of a bad traceback stays */
+        }
     }
     PyErr_SetRaisedException(exc);
+}
+
+/* The errno error as an instance of `exc`, with the filenames when there are
+   any (Python/errors.c PyErr_SetFromErrnoWithFilenameObjects). Calling `exc`
+   lets OSError map errno to its subclasses. */
+PyObject *
+PyErr_SetFromErrnoWithFilenameObjects(PyObject *exc, PyObject *filenameObject, PyObject *filenameObject2)
+{
+    int err = errno;
+    PyObject *message = PyUnicode_FromString(err ? strerror(err) : "Error");
+    PyObject *args = NULL;
+    if (message != NULL) {
+        args = filenameObject == NULL
+            ? Py_BuildValue("(iO)", err, message)
+            : filenameObject2 != NULL
+                ? Py_BuildValue("(iOOiO)", err, message, filenameObject, 0, filenameObject2)
+                : Py_BuildValue("(iOO)", err, message, filenameObject);
+    }
+    Py_XDECREF(message);
+    PyObject *v = args != NULL ? PyObject_Call(exc, args, NULL) : NULL;
+    Py_XDECREF(args);
+    if (v != NULL) {
+        PyErr_SetObject((PyObject *)Py_TYPE(v), v);
+        Py_DECREF(v);
+    }
+    return NULL;
 }
 
 PyObject *
 PyErr_SetFromErrno(PyObject *exc)
 {
-    int err = errno;
-    PyObject *message = PyUnicode_FromString(err ? strerror(err) : "Error");
-    PyObject *args = message != NULL ? Py_BuildValue("(iO)", err, message) : NULL;
-    PyObject *v = args != NULL ? PyObject_Call(exc, args, NULL) : NULL;
-    if (v != NULL) {
-        PyErr_SetObject((PyObject *)Py_TYPE(v), v);
-        Py_DECREF(v);
+    return PyErr_SetFromErrnoWithFilenameObjects(exc, NULL, NULL);
+}
+
+PyObject *
+PyErr_SetFromErrnoWithFilenameObject(PyObject *exc, PyObject *filenameObject)
+{
+    return PyErr_SetFromErrnoWithFilenameObjects(exc, filenameObject, NULL);
+}
+
+PyObject *
+PyErr_SetFromErrnoWithFilename(PyObject *exc, const char *filename)
+{
+    PyObject *name = filename != NULL ? PyUnicode_DecodeFSDefault(filename) : NULL;
+    PyObject *r = PyErr_SetFromErrnoWithFilenameObjects(exc, name, NULL);
+    Py_XDECREF(name);
+    return r;
+}
+
+/* A warning the warnings module cannot decide, as during finalization:
+   printed as _warnings.c's show_warning does, from the frame stack_level
+   levels up (Python/_warnings.c setup_context). */
+static void
+warn_native(PyObject *category, const char *text, Py_ssize_t stack_level)
+{
+    struct lu_frame *f = lu_frame_user((struct lu_frame *)PyThreadState_Get()->current_frame,
+                                       stack_level > 1 ? stack_level - 1 : 0);
+    const char *file = "<sys>";
+    int line = 0;
+    if (f != NULL && f->code != NULL) {
+        file = PyUnicode_AsUTF8(f->code->co_filename);
+        line = PyCode_Addr2Line(f->code, (int)(lu_frame_lasti(f) * sizeof(lu_codeunit)));
     }
-    Py_XDECREF(message);
-    Py_XDECREF(args);
-    return NULL;
+    char buf[512];
+    int n = snprintf(buf, sizeof buf, "%s:%d: %s: %s\n", file, line > 0 ? line : 0,
+                     category != NULL ? ((PyTypeObject *)category)->tp_name : "RuntimeWarning", text);
+    if (n > 0) {
+        lu_stderr_write(buf, (size_t)n);
+    }
 }
 
 /* warnings.warn(message, category, stacklevel). */
@@ -361,16 +484,25 @@ int
 PyErr_WarnEx(PyObject *category, const char *text, Py_ssize_t stack_level)
 {
     PyObject *message = PyUnicode_FromString(text);
-    PyObject *warnings = message != NULL ? PyImport_ImportModule("warnings") : NULL;
-    PyObject *r = NULL;
-    if (warnings != NULL) {
-        r = PyObject_CallMethod(warnings, "warn", "OOn", message, category != NULL ? category : PyExc_RuntimeWarning,
-                                stack_level);
+    if (message == NULL) {
+        return -1;
     }
-    Py_XDECREF(message);
-    Py_XDECREF(warnings);
-    Py_XDECREF(r);
-    return r == NULL ? -1 : 0;
+    PyObject *warnings = PyImport_ImportModule("warnings");
+    int r = 0;
+    if (warnings != NULL) {
+        PyObject *result = PyObject_CallMethod(warnings, "warn", "OOn", message,
+                                               category != NULL ? category : PyExc_RuntimeWarning,
+                                               stack_level);
+        Py_DECREF(warnings);
+        r = result == NULL ? -1 : 0;
+        Py_XDECREF(result);
+    }
+    else {
+        PyErr_Clear();          /* the module cannot be imported: print natively */
+        warn_native(category, text, stack_level);
+    }
+    Py_DECREF(message);
+    return r;
 }
 
 int
@@ -389,63 +521,107 @@ PyErr_WarnFormat(PyObject *category, Py_ssize_t stack_level, const char *format,
     return r;
 }
 
+/* The current exception handed to sys.unraisablehook (Python/errors.c
+   format_unraisable_v): the object it gets carries exc_type, exc_value,
+   exc_traceback, err_msg and object, with a traceback of the calling frame
+   synthesized when the exception has none. Without a hook it is printed as
+   write_unraisable_exc does. The exception is fetched before the message is
+   formatted, so a formatting failure clears nothing of it. */
+static void
+format_unraisable_v(const char *format, va_list va, PyObject *obj)
+{
+    PyObject *exc = PyErr_GetRaisedException();
+    if (exc == NULL) {
+        return;
+    }
+    if (((PyBaseExceptionObject *)exc)->traceback == NULL) {
+        struct lu_frame *f = lu_frame_user((struct lu_frame *)PyThreadState_Get()->current_frame, 0);
+        if (f != NULL) {
+            PyErr_SetRaisedException(exc);
+            lu_traceback_here(f, lu_frame_lasti(f));
+            exc = PyErr_GetRaisedException();
+        }
+    }
+    PyObject *err_msg = NULL;
+    if (format != NULL) {
+        err_msg = PyUnicode_FromFormatV(format, va);
+        if (err_msg == NULL) {
+            PyErr_Clear();     /* e.g. an undecodable format string: no message */
+        }
+    }
+    PyObject *hook = PyDict_GetItemString(PyInterpreterState_Get()->sysdict, "unraisablehook");
+    if (hook != NULL && hook != Py_None) {
+        PyObject *types_mod = PyImport_ImportModule("types");
+        PyObject *factory = types_mod != NULL
+            ? PyObject_GetAttrString(types_mod, "SimpleNamespace") : NULL;
+        Py_XDECREF(types_mod);
+        PyObject *kwargs = factory != NULL ? PyDict_New() : NULL;
+        PyObject *noargs = kwargs != NULL ? PyTuple_New(0) : NULL;
+        PyObject *tb = PyException_GetTraceback(exc);
+        if (noargs != NULL
+            && PyDict_SetItemString(kwargs, "exc_type", (PyObject *)Py_TYPE(exc)) == 0
+            && PyDict_SetItemString(kwargs, "exc_value", exc) == 0
+            && PyDict_SetItemString(kwargs, "exc_traceback", tb != NULL ? tb : Py_None) == 0
+            && PyDict_SetItemString(kwargs, "err_msg", err_msg != NULL ? err_msg : Py_None) == 0
+            && PyDict_SetItemString(kwargs, "object", obj != NULL ? obj : Py_None) == 0) {
+            PyObject *unraisable_exc = PyObject_Call(factory, noargs, kwargs);
+            if (unraisable_exc != NULL) {
+                PyObject *r = PyObject_CallOneArg(hook, unraisable_exc);
+                Py_DECREF(unraisable_exc);
+                Py_XDECREF(r);
+            }
+        }
+        Py_XDECREF(noargs);
+        PyErr_Clear();     /* an error the hook made is not raisable here either */
+        Py_XDECREF(tb);
+        Py_XDECREF(kwargs);
+        Py_XDECREF(factory);
+    }
+    else {
+        /* write_unraisable_exc: a header naming the object or message, then
+           the exception with its traceback. */
+        PyObject *repr = obj != NULL ? PyObject_Repr(obj) : NULL;
+        const char *text = repr != NULL ? PyUnicode_AsUTF8(repr) : NULL;
+        char head[512];
+        int n;
+        if (obj != NULL && err_msg != NULL) {
+            n = snprintf(head, sizeof head, "%s: %s\n", PyUnicode_AsUTF8(err_msg),
+                         text != NULL ? text : "<object repr() failed>");
+        }
+        else if (obj != NULL) {
+            n = snprintf(head, sizeof head, "Exception ignored in: %s\n",
+                         text != NULL ? text : "<object repr() failed>");
+        }
+        else if (err_msg != NULL) {
+            n = snprintf(head, sizeof head, "%s:\n", PyUnicode_AsUTF8(err_msg));
+        }
+        else {
+            n = 0;
+        }
+        PyErr_Clear();
+        if (n > 0) {
+            lu_stderr_write(head, (size_t)n);
+        }
+        lu_err_display(exc);
+        Py_XDECREF(repr);
+    }
+    Py_XDECREF(err_msg);
+    Py_DECREF(exc);
+}
+
 void
 PyErr_WriteUnraisable(PyObject *obj)
 {
-    lu_err_unraisable_text(NULL, obj);
+    format_unraisable_v(NULL, (va_list){0}, obj);
 }
 
-/* PyErr_FormatUnraisable: the current exception, handed to
-   sys.unraisablehook as an object with err_msg, exc_type, exc_value and
-   object, as CPython's does; the native display is the fallback
-   (Python/errors.c PyErr_FormatUnraisable). */
 void
 PyErr_FormatUnraisable(const char *format, ...)
 {
     va_list ap;
     va_start(ap, format);
-    char message[512];
-    vsnprintf(message, sizeof message, format, ap);
+    format_unraisable_v(format, ap, NULL);
     va_end(ap);
-    PyObject *exc = PyErr_GetRaisedException();
-    PyObject *hook = PyDict_GetItemString(PyInterpreterState_Get()->sysdict, "unraisablehook");
-    PyObject *types_mod = hook != NULL ? PyImport_ImportModule("types") : NULL;
-    PyObject *factory = types_mod != NULL ? PyObject_GetAttrString(types_mod, "SimpleNamespace") : NULL;
-    Py_XDECREF(types_mod);
-    PyObject *args = factory != NULL ? PyTuple_New(0) : NULL;
-    PyObject *kwargs = factory != NULL ? PyDict_New() : NULL;
-    int built = 0;
-    if (kwargs != NULL) {
-        PyObject *msg = PyUnicode_FromString(message);
-        built = msg != NULL
-            && PyDict_SetItemString(kwargs, "err_msg", msg) == 0
-            && PyDict_SetItemString(kwargs, "exc_type",
-                                    exc != NULL ? (PyObject *)Py_TYPE(exc) : Py_None) == 0
-            && PyDict_SetItemString(kwargs, "exc_value", exc != NULL ? exc : Py_None) == 0
-            && PyDict_SetItemString(kwargs, "object", Py_None) == 0;
-        Py_XDECREF(msg);
-    }
-    if (built) {
-        PyObject *unraisable = PyObject_Call(factory, args, kwargs);
-        if (unraisable != NULL) {
-            PyObject *r = PyObject_CallOneArg(hook, unraisable);
-            Py_DECREF(unraisable);
-            Py_XDECREF(r);
-            PyErr_Clear();     /* an error the hook made is not raisable here either */
-            Py_XDECREF(args);
-            Py_XDECREF(kwargs);
-            Py_XDECREF(factory);
-            Py_XDECREF(exc);
-            return;
-        }
-    }
-    Py_XDECREF(args);
-    Py_XDECREF(kwargs);
-    Py_XDECREF(factory);
-    if (exc != NULL) {
-        PyErr_SetRaisedException(exc);
-    }
-    lu_err_unraisable_text(message, NULL);
 }
 
 /* PyErr_Print: SystemExit leaves the process; anything else goes to
