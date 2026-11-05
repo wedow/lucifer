@@ -287,9 +287,10 @@ int lu_attr_lookup(PyObject *obj, PyObject *name, PyObject **v);
 /* Stores v, or deletes the name when v is NULL, on an object lu_dict_ptr
    answers for: 1 done, 0 when the name to delete is absent, -1 on error. */
 int lu_attr_store(PyObject *obj, PyObject *name, PyObject *v);
-/* STORE_ATTR_INSTANCE_VALUE: v into word i of an instance of a class whose
-   name i is the attribute's; 0 when only lu_attr_store can store it. */
-int lu_inline_store(PyObject *obj, Py_ssize_t i, PyObject *v);
+/* STORE_ATTR_INSTANCE_VALUE: v into the inline word at byte offset of an
+   instance of a class whose name there is the attribute's; 0 when only
+   lu_attr_store can store it. */
+int lu_inline_store(PyObject *obj, Py_ssize_t offset, PyObject *v);
 int lu_inline_traverse(PyObject *obj, visitproc visit, void *arg);
 void lu_inline_clear(PyObject *obj);
 

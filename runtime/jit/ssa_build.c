@@ -1406,9 +1406,16 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
     case LOAD_ATTR_SLOT:
     case LOAD_ATTR_INSTANCE_VALUE: {
         guard(c, OP_GUARD_VERSION, owner, version);
-        lu_v args[2] = { owner, const_i(c, index) };
-        lu_v v = helper(c, op == LOAD_ATTR_SLOT ? H_slot_load : H_inline_load, 2, args);
-        guard_after(c, OP_GUARD_NOT_NULL, v, 0);
+        lu_v v;
+        if (op == LOAD_ATTR_INSTANCE_VALUE) {
+            v = emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, index);
+            I(c, v)->fs = before(c);
+        }
+        else {
+            lu_v args[2] = { owner, const_i(c, index) };
+            v = helper(c, H_slot_load, 2, args);
+            guard_after(c, OP_GUARD_NOT_NULL, v, 0);
+        }
         pop(c, NULL);
         release(c, owner, own);
         push(c, v, 1);
@@ -1467,8 +1474,8 @@ store_attr(struct ctx *c)
     }
     else if (op == STORE_ATTR_INSTANCE_VALUE) {
         guard(c, OP_GUARD_VERSION, owner, version);
-        lu_v args[3] = { owner, const_i(c, index), v };
-        guard_after(c, OP_GUARD_BIT, helper(c, H_inline_store, 3, args), 1);
+        lu_v st = emit(c, OP_INLINE_STORE, REP_NONE, owner, v, LU_NOV, index);
+        I(c, st)->fs = before(c);
     }
     else if (op == STORE_ATTR_SLOT) {
         guard(c, OP_GUARD_VERSION, owner, version);

@@ -2860,9 +2860,9 @@ op_LOAD_ATTR: {
     DISPATCH();
 }
 
-/* v, owner -- : a __slots__ member written at its cached offset, an
-   inline value at its cached index, or a name the type lacks inserted into
-   the instance's dict. */
+/* v, owner -- : a __slots__ member or an inline value written at its
+   cached offset, or a name the type lacks inserted into the instance's
+   dict. */
 op_STORE_ATTR_FAST: {
     PyObject *owner = sp[-1];
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);

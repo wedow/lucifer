@@ -307,8 +307,9 @@ store_locked(PyObject *obj, Py_ssize_t i, PyObject *v, PyObject **old)
 }
 
 int
-lu_inline_store(PyObject *obj, Py_ssize_t i, PyObject *v)
+lu_inline_store(PyObject *obj, Py_ssize_t offset, PyObject *v)
 {
+    Py_ssize_t i = (offset - Py_TYPE(obj)->tp_basicsize) / (Py_ssize_t)sizeof(PyObject *);
     PyObject *old = NULL;
     int done;
     uint8_t unlocked = _Py_UNLOCKED;

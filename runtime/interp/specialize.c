@@ -386,9 +386,9 @@ lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
         }
     }
     else if (kind != DESCR_OTHER && lu_inline_live(owner) && (index = lu_inline_index(tp, name)) >= 0
-             && index <= UINT16_MAX) {
+             && (index = tp->tp_basicsize + index * (Py_ssize_t)sizeof(PyObject *)) <= UINT16_MAX) {
         if (begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
-            lu_cache_store(c + LA_INDEX, (uint16_t)index);
+            lu_cache_store(c + LA_INDEX, (uint16_t)index);      /* the byte offset */
             lu_cache_store32(c + LA_VERSION, version);
             end(site, STORE_ATTR_INSTANCE_VALUE);
         }
