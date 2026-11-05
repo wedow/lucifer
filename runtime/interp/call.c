@@ -275,6 +275,10 @@ lu_suggest_keyword(PyObject *const *candidates, Py_ssize_t count, PyObject *name
     }
     size_t buffer[MAX_STRING_SIZE];
     const char *name_str = utf8(name);
+    if (name_str == NULL) {             /* lone surrogates do not UTF-8 encode */
+        PyErr_Clear();
+        return NULL;
+    }
     size_t name_size = strlen(name_str);
     PyObject *suggestion = NULL;
     size_t suggestion_distance = SIZE_MAX;
@@ -283,6 +287,10 @@ lu_suggest_keyword(PyObject *const *candidates, Py_ssize_t count, PyObject *name
             continue;
         }
         const char *item = utf8(candidates[i]);
+        if (item == NULL) {
+            PyErr_Clear();
+            continue;
+        }
         size_t item_size = strlen(item);
         size_t max_distance = (name_size + item_size + 3) * MOVE_COST / 6;
         if (suggestion_distance != SIZE_MAX && max_distance > suggestion_distance - 1) {
