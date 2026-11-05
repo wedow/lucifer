@@ -52,29 +52,57 @@ prim_set_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return lu_set_new((PyTypeObject *)args[0]);
 }
 
-/* set_probe(s, key, hash, skip) -> entry index of an equal key, -1 when
-   absent, or -3 - the index of a candidate to compare. skip is the
-   number of candidates already judged unequal. */
+/* The answer of a probe, add or discard to the kernel: whether the key was
+   found (an add: is there; a discard: was removed), or the 1-tuple of a
+   candidate that only __eq__ can judge. */
+static PyObject *
+verdict_result(int verdict, PyObject *candidate)
+{
+    if (verdict < 0) {
+        return NULL;
+    }
+    if (verdict != LU_SET_CANDIDATE) {
+        return bool_of(verdict == LU_SET_FOUND);
+    }
+    PyObject *one = PyTuple_Pack(1, candidate);
+    Py_DECREF(candidate);
+    return one;
+}
+
+/* set_probe(s, key, hash, judged) -> whether s holds an equal key, or the
+   1-tuple of a candidate to compare. judged is the tuple of candidates the
+   caller found unequal. */
 static PyObject *
 prim_set_probe(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(4); SET(0); SSIZE(2, hash); SSIZE(3, after);
-    PySetObject *so = (PySetObject *)args[0];
-    int verdict;
-    Py_ssize_t i = lu_set_probe(so, args[1], hash, after > 0 ? after : 0, &verdict);
-    return int_of(verdict == LU_SET_FOUND ? i : verdict == LU_SET_ABSENT ? -1 : -3 - i);
+    ARGS(4); SET(0); SSIZE(2, hash);
+    PyObject *candidate = NULL;
+    int verdict = lu_set_probe((PySetObject *)args[0], args[1], hash, args[3], &candidate);
+    return verdict_result(verdict, candidate);
 }
 
-/* set_insert(s, key, hash): adds a key that is not in s. */
+/* set_add_entry(s, key, hash, judged): adds key unless s holds an equal one; True
+   when it does, or the 1-tuple of a candidate to compare first. */
 static PyObject *
-prim_set_insert(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+prim_set_add_entry(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(3); SET(0); SSIZE(2, hash);
-    int err;
-    Py_BEGIN_CRITICAL_SECTION(args[0]);
-    err = lu_set_insert((PySetObject *)args[0], args[1], hash);
-    Py_END_CRITICAL_SECTION();
-    return err < 0 ? NULL : Py_NewRef(Py_None);
+    ARGS(4); SET(0); SSIZE(2, hash);
+    PyObject *candidate = NULL;
+    int verdict = lu_set_add_native((PySetObject *)args[0], args[1], hash, args[3], &candidate);
+    return verdict_result(verdict, candidate);
+}
+
+/* set_discard_entry(s, key, hash, judged, exact): removes an equal key; whether it
+   did, or the 1-tuple of a candidate to compare first. exact removes only
+   key itself. */
+static PyObject *
+prim_set_discard_entry(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(5); SET(0); SSIZE(2, hash);
+    PyObject *candidate = NULL;
+    int verdict = lu_set_discard_native((PySetObject *)args[0], args[1], hash, args[3], args[4] == Py_True,
+                                        &candidate);
+    return verdict_result(verdict, candidate);
 }
 
 /* set_key(s, i), set_hash(s, i): an active entry's key or hash, else MISSING.
@@ -124,26 +152,6 @@ prim_set_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     Py_END_CRITICAL_SECTION();
     return int_of(found);
-}
-
-/* set_discard_at(s, i): turns the active entry i into a dummy; False if it
-   is not active. */
-static PyObject *
-prim_set_discard_at(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
-{
-    ARGS(2); SET(0); SSIZE(1, i);
-    PySetObject *so = (PySetObject *)args[0];
-    PyObject *old = NULL;
-    Py_BEGIN_CRITICAL_SECTION(so);
-    if (active(so, i)) {
-        old = so->table[i].key;
-        so->table[i].key = LU_SET_DUMMY;
-        so->table[i].hash = -1;
-        so->used--;
-    }
-    Py_END_CRITICAL_SECTION();
-    Py_XDECREF(old);
-    return bool_of(old != NULL);
 }
 
 /* set_resize(s, minused). */
@@ -204,18 +212,25 @@ prim_set_swap(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 /* set_merge_clean(so, other): the first two cases of set_merge_lock_held,
    for a so with no entries (fill 0) and an other with some: copy the table
-   when the sizes agree and there are no dummies, else insert each key. */
+   when the sizes agree and there are no dummies, else insert each key. False,
+   with nothing done, when another thread has added to so since the caller
+   looked. */
 static PyObject *
 prim_set_merge_clean(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); SET(0); SET(1);
     PySetObject *so = (PySetObject *)args[0], *other = (PySetObject *)args[1];
-    if (so->fill != 0 || so == other) {
-        lu_err_format(PyExc_SystemError, "set_merge_clean() needs an empty set");
+    if (so == other) {
+        lu_err_format(PyExc_SystemError, "set_merge_clean() needs two sets");
         return NULL;
     }
+    int merged = 0;
     Py_BEGIN_CRITICAL_SECTION2(so, other);
-    if (so->mask == other->mask && other->fill == other->used) {
+    if (so->fill != 0) {
+        /* not clean */
+    }
+    else if (so->mask == other->mask && other->fill == other->used) {
+        merged = 1;
         for (Py_ssize_t i = 0; i <= other->mask; i++) {
             if (other->table[i].key != NULL) {
                 so->table[i].key = Py_NewRef(other->table[i].key);
@@ -226,6 +241,7 @@ prim_set_merge_clean(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         so->used = other->used;
     }
     else {
+        merged = 1;
         so->fill = so->used = other->used;
         for (Py_ssize_t i = 0; i <= other->mask; i++) {
             PyObject *key = other->table[i].key;
@@ -235,11 +251,10 @@ prim_set_merge_clean(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
     }
     Py_END_CRITICAL_SECTION2();
-    return Py_NewRef(Py_None);
+    return bool_of(merged);
 }
 
-/* set_info(s, which): 0 fill, 1 used, 2 mask, 3 finger, 4 the cached hash, 5 a
-   table id that changes when the table is replaced. */
+/* set_info(s, which): 0 fill, 1 used, 2 mask, 3 finger, 4 the cached hash. */
 static PyObject *
 prim_set_info(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -250,8 +265,7 @@ prim_set_info(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     case 1: return int_of(so->used);
     case 2: return int_of(so->mask);
     case 3: return int_of(so->finger);
-    case 4: return int_of(so->hash);
-    default: return PyLong_FromLongLong((long long)(intptr_t)(so->table));
+    default: return int_of(so->hash);
     }
 }
 
@@ -405,8 +419,8 @@ lu_set_iter_init(void)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_set_methods[] = {
-    FAST(set_new), FAST(set_probe), FAST(set_insert), FAST(set_key), FAST(set_hash),
-    FAST(set_next), FAST(set_discard_at), FAST(set_resize), FAST(set_clear), FAST(set_pop),
+    FAST(set_new), FAST(set_probe), FAST(set_add_entry), FAST(set_discard_entry), FAST(set_key), FAST(set_hash),
+    FAST(set_next), FAST(set_resize), FAST(set_clear), FAST(set_pop),
     FAST(set_swap), FAST(set_merge_clean), FAST(set_info), FAST(set_hash_impl),
     FAST(set_reset_hash), FAST(set_sizeof), FAST(setiter_new), FAST(setiter_next),
     FAST(setiter_len), FAST(setiter_copy),
