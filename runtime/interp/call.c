@@ -323,6 +323,51 @@ unexpected_keyword(PyFunctionObject *func, PyCodeObject *co, PyObject *keyword)
     }
 }
 
+/* The index of the parameter `keyword` names, total_args when none does, or
+   -1 with the error set. initialize_locals matches by identity, then by
+   keyword == name, so only a str subclass's __eq__ can differ from the
+   text; a kernel function stands for a C builtin, whose find_keyword
+   compares the text. */
+static Py_ssize_t
+find_parameter(PyCodeObject *co, PyObject **varnames, Py_ssize_t total_args, PyObject *keyword)
+{
+    Py_ssize_t j;
+    if (PyUnicode_CheckExact(keyword) || (co->co_flags & LU_CO_KERNEL)) {
+        for (j = co->co_posonlyargcount; j < total_args; j++) {
+            if (varnames[j] == keyword || lu_str_eq(varnames[j], keyword)) {
+                break;
+            }
+        }
+        return j;
+    }
+    for (j = co->co_posonlyargcount; j < total_args; j++) {
+        int eq = PyObject_RichCompareBool(keyword, varnames[j], Py_EQ);
+        if (eq != 0) {
+            return eq < 0 ? -1 : j;
+        }
+    }
+    return j;
+}
+
+/* Stores keyword=value in the **kwargs dict: a Python function keeps the
+   caller's key, as initialize_locals does; a kernel function's dict is a
+   namespace of exact strs, so a str subclass's key is stored as its text. */
+static int
+collect_keyword(PyCodeObject *co, PyObject *kwdict, PyObject *keyword, PyObject *value)
+{
+    if (PyUnicode_CheckExact(keyword)) {
+        return lu_ns_insert(kwdict, keyword, value);
+    }
+    if (!(co->co_flags & LU_CO_KERNEL)) {
+        return PyDict_SetItem(kwdict, keyword, value);
+    }
+    PyObject *text = PyUnicode_FromKindAndData(PyUnicode_KIND(keyword), PyUnicode_DATA(keyword),
+                                               PyUnicode_GET_LENGTH(keyword));
+    int err = text == NULL ? -1 : lu_ns_insert(kwdict, text, value);
+    Py_XDECREF(text);
+    return err;
+}
+
 /* initialize_locals */
 
 static int
@@ -381,10 +426,9 @@ bind(struct lu_frame *f, PyObject **args, Py_ssize_t argcount, PyObject *kwnames
                           utf8(func->func_qualname));
             goto kw_fail;
         }
-        for (j = co->co_posonlyargcount; j < total_args; j++) {
-            if (varnames[j] == keyword || lu_str_eq(varnames[j], keyword)) {
-                break;
-            }
+        j = find_parameter(co, varnames, total_args, keyword);
+        if (j < 0) {
+            goto kw_fail;
         }
         if (j < total_args) {
             if (locals[j] != NULL) {
@@ -406,7 +450,7 @@ bind(struct lu_frame *f, PyObject **args, Py_ssize_t argcount, PyObject *kwnames
             unexpected_keyword(func, co, keyword);
             goto kw_fail;
         }
-        if (lu_ns_insert(kwdict, keyword, value) < 0) {
+        if (collect_keyword(co, kwdict, keyword, value) < 0) {
             goto kw_fail;
         }
         Py_DECREF(value);

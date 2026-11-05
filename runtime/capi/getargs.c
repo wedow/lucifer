@@ -146,11 +146,16 @@ find_keyword(PyObject *kwnames, PyObject *const *kwstack, PyObject *key)
     return NULL;
 }
 
-/* The value of keyword `key` in kwargs or kwnames, borrowed, or NULL. */
+/* The value of keyword `key` in kwargs or kwnames, borrowed, or NULL with or
+   without an error set. A kwargs key that is not an exact str is found by
+   the dict's hash and __eq__, as PyDict_GetItemRef finds it. */
 static PyObject *
 keyword_value(PyObject *kwargs, PyObject *kwnames, PyObject *const *kwstack, PyObject *key)
 {
-    return kwargs != NULL ? lu_ns_lookup(kwargs, key) : find_keyword(kwnames, kwstack, key);
+    if (kwargs == NULL) {
+        return find_keyword(kwnames, kwstack, key);
+    }
+    return lu_dict_str_keys(kwargs) ? lu_ns_lookup(kwargs, key) : PyDict_GetItemWithError(kwargs, key);
 }
 
 /* Reports the first keyword of kwargs/kwnames no kwtuple entry matches,
@@ -276,6 +281,9 @@ _PyArg_UnpackKeywords(PyObject *const *args, Py_ssize_t nargs, PyObject *kwargs,
         if (current != NULL) {
             --nkwargs;
         }
+        else if (PyErr_Occurred()) {
+            return NULL;
+        }
         else if (i < minpos || (maxpos <= i && i < reqlimit)) {
             PyErr_Format(PyExc_TypeError, "%.200s%s missing required argument '%U' (pos %d)", fname,
                          parens, PyTuple_GET_ITEM(kwtuple, i - posonly), i + 1);
@@ -285,9 +293,12 @@ _PyArg_UnpackKeywords(PyObject *const *args, Py_ssize_t nargs, PyObject *kwargs,
     if (nkwargs > 0) {
         for (int i = posonly; i < nargs; i++) {
             PyObject *keyword = PyTuple_GET_ITEM(kwtuple, i - posonly);
-            if (keyword_value(kwargs, kwnames, kwstack, keyword) != NULL) {
-                PyErr_Format(PyExc_TypeError, "argument for %.200s%s given by name ('%U') and "
-                             "position (%d)", fname, parens, keyword, i + 1);
+            PyObject *given = keyword_value(kwargs, kwnames, kwstack, keyword);
+            if (given != NULL || PyErr_Occurred()) {
+                if (given != NULL) {
+                    PyErr_Format(PyExc_TypeError, "argument for %.200s%s given by name ('%U') and "
+                                 "position (%d)", fname, parens, keyword, i + 1);
+                }
                 return NULL;
             }
         }

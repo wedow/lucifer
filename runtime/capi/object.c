@@ -43,7 +43,7 @@ _PyObject_MakeTpCall(PyThreadState *ts, PyObject *callable, PyObject *const *arg
     if (nkw) {
         kwargs = PyDict_New();
         for (Py_ssize_t i = 0; kwargs != NULL && i < nkw; i++) {
-            if (lu_ns_insert(kwargs, PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) < 0) {
+            if (PyDict_SetItem(kwargs, PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) < 0) {
                 Py_CLEAR(kwargs);
             }
         }
