@@ -1,6 +1,6 @@
 ---
 id: luc-cvgs
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-05T17:49:59Z
