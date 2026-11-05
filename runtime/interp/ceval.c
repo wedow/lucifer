@@ -2720,7 +2720,8 @@ op_LOAD_ATTR_SLOT: {
     if (version != 0 && Py_TYPE(owner)->tp_version_tag == version
         && (opcode == LOAD_ATTR_SLOT || lu_inline_live(owner))) {
         /* Another thread may store and free the value: taken only if alive. */
-        v = lu_try_xget_ref((PyObject **)((char *)owner + lu_cache_load(next_instr + LA_INDEX)));
+        PyObject **word = (PyObject **)((char *)owner + lu_cache_load(next_instr + LA_INDEX));
+        v = opcode == LOAD_ATTR_SLOT ? lu_try_xget_ref(word) : lu_inline_get(owner, word);
     }
     if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
         || lu_cache_load32(next_instr + LA_VERSION) != version) {

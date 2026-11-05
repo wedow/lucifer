@@ -304,7 +304,7 @@ specialize_instance(PyObject *owner, lu_codeunit *site, PyObject *name, int meth
     else if (inline_index >= 0 && kind != DESCR_OTHER) {
         /* An inline value, which shadows a non-data attribute of the class:
            no instance of it has a dict that lacks the name for sure. */
-        size_t offset = (size_t)tp->tp_basicsize + (size_t)inline_index * sizeof(PyObject *);
+        size_t offset = (size_t)tp->tp_basicsize + (size_t)inline_index * LU_INLINE_STRIDE * sizeof(PyObject *);
         if (offset > UINT16_MAX || !lu_inline_live(owner)) {
             fail(site);
         }
@@ -386,7 +386,7 @@ lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
         }
     }
     else if (kind != DESCR_OTHER && lu_inline_live(owner) && (index = lu_inline_index(tp, name)) >= 0
-             && (index = tp->tp_basicsize + index * (Py_ssize_t)sizeof(PyObject *)) <= UINT16_MAX) {
+             && (index = tp->tp_basicsize + index * LU_INLINE_STRIDE * (Py_ssize_t)sizeof(PyObject *)) <= UINT16_MAX) {
         if (begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
             lu_cache_store(c + LA_INDEX, (uint16_t)index);      /* the byte offset */
             lu_cache_store32(c + LA_VERSION, version);

@@ -24,7 +24,15 @@
    reference with a try-incref and fall back to the lock (as for __slots__
    members). A word read as NULL is only absence while the flag is still
    clear: the move publishes the dict and sets the flag before it clears the
-   words. */
+   words.
+
+   Unboxed floats (DESIGN 4.5): each name has a second word, a binary64.
+   Compiled code stores a float it holds raw as that word plus LU_UNBOXED
+   in the value word, making no object, and reads it back without one. The
+   first reader that needs the object makes it under the lock and installs
+   it in the value word, so every later reader gets the same object; the
+   binary64 stays, so compiled readers keep reading it raw. A float object
+   stored is the value itself, as for any other value. */
 
 #include "lucifer.h"
 
@@ -44,7 +52,7 @@ size_t
 lu_inline_values_size(PyTypeObject *tp)
 {
     return (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)
-        ? (size_t)shared_names(tp)->capacity * sizeof(PyObject *) : 0;
+        ? (size_t)shared_names(tp)->capacity * LU_INLINE_STRIDE * sizeof(PyObject *) : 0;
 }
 
 /* Adds the names of a class's __static_attributes__ to `seen`. */
@@ -164,11 +172,46 @@ in_order(PyObject *obj, Py_ssize_t i)
     PyObject **values = lu_inline_values(obj);
     Py_ssize_t n = __atomic_load_n(&shared_names(Py_TYPE(obj))->count, __ATOMIC_ACQUIRE);
     for (Py_ssize_t j = i + 1; j < n; j++) {
-        if (values[j] != NULL) {
+        if (LU_INLINE_WORD(values, j) != NULL) {
             return 0;
         }
     }
     return 1;
+}
+
+/* The object a value word stands for, in the object's critical section:
+   an unboxed float gets its box, installed for every later reader.
+   Borrowed; NULL when absent, or with MemoryError. */
+static PyObject *
+boxed_locked(PyObject **word)
+{
+    PyObject *v = *word;
+    if (v == LU_UNBOXED) {
+        v = PyFloat_FromDouble(*lu_inline_raw(word));
+        if (v != NULL) {
+            __atomic_store_n(word, v, __ATOMIC_RELEASE);
+        }
+    }
+    return v;
+}
+
+PyObject *
+lu_inline_get(PyObject *obj, PyObject **word)
+{
+    if (__atomic_load_n(word, __ATOMIC_ACQUIRE) != LU_UNBOXED) {
+        return lu_try_xget_ref(word);
+    }
+    PyObject *v = NULL;
+    Py_BEGIN_CRITICAL_SECTION(obj);
+    if (lu_inline_live(obj)) {
+        v = boxed_locked(word);
+        v = v != NULL ? lu_new_ref_with_lock(v) : NULL;
+    }
+    Py_END_CRITICAL_SECTION();
+    if (v == NULL && PyErr_Occurred()) {
+        PyErr_Clear();          /* the reader's slow path asks again */
+    }
+    return v;
 }
 
 /* Moves the inline values into a new dict, in the object's critical section. */
@@ -183,7 +226,8 @@ move_to_dict(PyObject *obj)
     }
     Py_ssize_t n = __atomic_load_n(&names->count, __ATOMIC_ACQUIRE);
     for (Py_ssize_t i = 0; i < n; i++) {
-        if (values[i] != NULL && lu_ns_insert(dict, names->names[i], values[i]) < 0) {
+        PyObject **word = &LU_INLINE_WORD(values, i);
+        if (*word != NULL && (boxed_locked(word) == NULL || lu_ns_insert(dict, names->names[i], *word) < 0)) {
             Py_DECREF(dict);
             return -1;
         }
@@ -191,7 +235,8 @@ move_to_dict(PyObject *obj)
     __atomic_store_n(&LU_MANAGED_DICT(obj), dict, __ATOMIC_RELEASE);
     __atomic_fetch_or(&obj->ob_flags, LU_ATTRS_IN_DICT, __ATOMIC_RELEASE);
     for (Py_ssize_t i = 0; i < n; i++) {
-        Py_XDECREF(__atomic_exchange_n(&values[i], NULL, __ATOMIC_RELEASE));    /* the dict holds them */
+        /* the dict holds them */
+        Py_XDECREF(__atomic_exchange_n(&LU_INLINE_WORD(values, i), NULL, __ATOMIC_RELEASE));
     }
     return 0;
 }
@@ -264,17 +309,23 @@ lu_attr_lookup(PyObject *obj, PyObject *name, PyObject **v)
     *v = NULL;
     if (lu_inline_live(obj) && PyUnicode_CheckExact(name)) {
         Py_ssize_t i = lu_inline_index(Py_TYPE(obj), name);
-        PyObject **slot = i >= 0 ? &lu_inline_values(obj)[i] : NULL;
-        if (slot != NULL && (*v = lu_try_xget_ref(slot)) != NULL) {
+        PyObject **slot = i >= 0 ? &LU_INLINE_WORD(lu_inline_values(obj), i) : NULL;
+        if (slot != NULL && __atomic_load_n(slot, __ATOMIC_ACQUIRE) != LU_UNBOXED
+            && (*v = lu_try_xget_ref(slot)) != NULL) {
             return 1;
         }
         int live;
         Py_BEGIN_CRITICAL_SECTION(obj);
         live = lu_inline_live(obj);
-        if (live && slot != NULL && *slot != NULL) {
-            *v = lu_new_ref_with_lock(*slot);
+        PyObject *boxed = live && slot != NULL ? boxed_locked(slot) : NULL;
+        if (boxed != NULL) {
+            *v = lu_new_ref_with_lock(boxed);
         }
         Py_END_CRITICAL_SECTION();
+        if (*v == NULL && PyErr_Occurred()) {
+            PyErr_Clear();      /* no memory for the box: the kernel asks again and raises */
+            return -1;
+        }
         if (live) {
             return *v != NULL;
         }
@@ -293,36 +344,61 @@ lu_attr_lookup(PyObject *obj, PyObject *name, PyObject **v)
 
 /* Stores v in word i, holding the object's lock: the old value in *old,
    or 0 when the values moved to the dict or v would break insertion order. */
+/* Stores v (or LU_UNBOXED with the binary64 d) in word i, holding the
+   object's lock: the old value in *old (NULL for none or an unboxed
+   float), or 0 when the values moved to the dict or v would break
+   insertion order. */
 static int
-store_locked(PyObject *obj, Py_ssize_t i, PyObject *v, PyObject **old)
+store_locked(PyObject *obj, Py_ssize_t i, PyObject *v, double d, PyObject **old)
 {
-    PyObject **slot = &lu_inline_values(obj)[i];
+    PyObject **slot = &LU_INLINE_WORD(lu_inline_values(obj), i);
     if (!lu_inline_live(obj) || (*slot == NULL && !in_order(obj, i))) {
         return 0;
     }
-    *old = __atomic_exchange_n(slot, Py_NewRef(v), __ATOMIC_RELEASE);
+    if (v == LU_UNBOXED) {
+        __atomic_store_n((uint64_t *)lu_inline_raw(slot), *(uint64_t *)&d, __ATOMIC_RELAXED);
+    }
+    else {
+        Py_INCREF(v);
+    }
+    *old = __atomic_exchange_n(slot, v, __ATOMIC_RELEASE);
+    if (*old == LU_UNBOXED) {
+        *old = NULL;
+    }
     return 1;
 }
 
-int
-lu_inline_store(PyObject *obj, Py_ssize_t offset, PyObject *v)
+static int
+store_at(PyObject *obj, Py_ssize_t offset, PyObject *v, double d)
 {
-    Py_ssize_t i = (offset - Py_TYPE(obj)->tp_basicsize) / (Py_ssize_t)sizeof(PyObject *);
+    Py_ssize_t i = (offset - Py_TYPE(obj)->tp_basicsize) / (Py_ssize_t)(LU_INLINE_STRIDE * sizeof(PyObject *));
     PyObject *old = NULL;
     int done;
     uint8_t unlocked = _Py_UNLOCKED;
     if (__atomic_compare_exchange_n(&obj->ob_mutex._bits, &unlocked, _Py_LOCKED, 0,
                                     __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
-        done = store_locked(obj, i, v, &old);   /* the lock alone, as CPython's LOCK_OBJECT */
+        done = store_locked(obj, i, v, d, &old);        /* the lock alone, as CPython's LOCK_OBJECT */
         PyMutex_Unlock(&obj->ob_mutex);
     }
     else {
         Py_BEGIN_CRITICAL_SECTION(obj);
-        done = store_locked(obj, i, v, &old);
+        done = store_locked(obj, i, v, d, &old);
         Py_END_CRITICAL_SECTION();
     }
     Py_XDECREF(old);
     return done;
+}
+
+int
+lu_inline_store(PyObject *obj, Py_ssize_t offset, PyObject *v)
+{
+    return store_at(obj, offset, v, 0.0);
+}
+
+int
+lu_inline_store_f(PyObject *obj, Py_ssize_t offset, double v)
+{
+    return store_at(obj, offset, LU_UNBOXED, v);
 }
 
 int
@@ -338,10 +414,14 @@ lu_attr_store(PyObject *obj, PyObject *name, PyObject *v)
         int done = 0, err = 0;
         Py_BEGIN_CRITICAL_SECTION(obj);
         if (v == NULL && lu_inline_live(obj)) {
-            old = i >= 0 ? __atomic_exchange_n(&lu_inline_values(obj)[i], NULL, __ATOMIC_RELEASE) : NULL;
+            old = i >= 0 ? __atomic_exchange_n(&LU_INLINE_WORD(lu_inline_values(obj), i), NULL, __ATOMIC_RELEASE)
+                         : NULL;
             done = old != NULL ? 1 : -1;
+            if (old == LU_UNBOXED) {
+                old = NULL;
+            }
         }
-        else if (v != NULL && i >= 0 && store_locked(obj, i, v, &old)) {
+        else if (v != NULL && i >= 0 && store_locked(obj, i, v, 0.0, &old)) {
             done = 1;
         }
         else if (lu_inline_live(obj)) {
@@ -372,7 +452,9 @@ lu_inline_traverse(PyObject *obj, visitproc visit, void *arg)
     if (lu_inline_live(obj)) {
         PyObject **values = lu_inline_values(obj);
         for (Py_ssize_t i = 0, n = shared_names(Py_TYPE(obj))->count; i < n; i++) {
-            Py_VISIT(values[i]);
+            if (LU_INLINE_WORD(values, i) != LU_UNBOXED) {
+                Py_VISIT(LU_INLINE_WORD(values, i));
+            }
         }
     }
     return 0;
@@ -384,7 +466,10 @@ lu_inline_clear(PyObject *obj)
     if (lu_inline_live(obj)) {
         PyObject **values = lu_inline_values(obj);
         for (Py_ssize_t i = 0, n = shared_names(Py_TYPE(obj))->count; i < n; i++) {
-            Py_CLEAR(values[i]);
+            if (LU_INLINE_WORD(values, i) == LU_UNBOXED) {
+                LU_INLINE_WORD(values, i) = NULL;
+            }
+            Py_CLEAR(LU_INLINE_WORD(values, i));
         }
     }
 }

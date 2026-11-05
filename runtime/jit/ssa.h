@@ -96,6 +96,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(ATTR_STORE, REP_NONE, IF_RAISE | IF_EFFECT | IF_CALL)     /* a.(name c) = b, borrowing b */ \
     X(INLINE_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL)   /* a's inline word at byte imm = b, borrowing b */ \
     X(INLINE_LOAD, REP_OBJ, IF_GUARD)   /* a's inline value at byte imm, while it keeps them; scratch registers only */ \
+    X(INLINE_LOAD_F, REP_F64, IF_GUARD) /* the same as binary64: an unboxed float's, or an exact float's */ \
+    X(INLINE_STORE_F, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL) /* a's inline word at byte imm = the float b, unboxed */ \
     X(GLOBAL_LOAD, REP_OBJ, IF_GUARD | IF_CALL) /* imm: the dict, imm2: keys version << 32 | entry */ \
     X(INCREF, REP_NONE, IF_EFFECT) \
     X(DECREF, REP_NONE, IF_EFFECT | IF_CALL) \

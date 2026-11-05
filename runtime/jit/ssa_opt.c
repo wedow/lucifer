@@ -376,6 +376,120 @@ count_uses(struct lu_func *f, struct uses *u)
     }
 }
 
+/* 3b. Unboxed float fields (DESIGN 4.5). A float loaded from an inline
+   value only to be unboxed is read as binary64; a float computed here and
+   stored into one is stored as binary64, with no object. Either is allowed
+   only while the box's identity cannot be observed: besides the unbox or
+   the store, its uses are reference operations and frame states that hold
+   it on an operand stack, where a deopt's box is a temporary the next
+   instruction consumes. A box in a local, stored twice, or made from an
+   object (a.x = b.x keeps one object) stays a box. */
+static char *
+stack_only(struct lu_func *f)
+{
+    char *bad = calloc((size_t)f->nins, 1);
+    for (int v = 0; v < f->nins; v++) {
+        struct lu_ins *in = &f->ins[v];
+        if (in->flags & INS_DEAD) {
+            continue;
+        }
+        for (struct lu_fs *fs = in->fs; fs != NULL; fs = fs->caller) {
+            for (int i = 0; i < fs->nlocals; i++) {
+                if (fs->vals[i] != LU_NOV) {
+                    bad[fs->vals[i]] = 1;
+                }
+            }
+        }
+    }
+    return bad;
+}
+
+/* Instruction uses of v other than those `allowed` accepts, and the count
+   of uses by op `want` as operand a (or b for a store). */
+static int
+other_uses(struct lu_func *f, lu_v v, int want, int *wanted)
+{
+    int others = 0;
+    *wanted = 0;
+    for (int u = 0; u < f->nins; u++) {
+        struct lu_ins *in = &f->ins[u];
+        if (in->flags & INS_DEAD) {
+            continue;
+        }
+        lu_v ops[3] = { in->a, in->b, in->c };
+        for (int i = 0; i < 3; i++) {
+            if (ops[i] != v) {
+                continue;
+            }
+            if (in->op == want && i == (want == OP_INLINE_STORE ? 1 : 0)) {
+                (*wanted)++;
+            }
+            else if (!(i == 0 && (in->op == OP_DECREF || in->op == OP_INCREF || in->op == OP_UNBOX_FLOAT))) {
+                others++;
+            }
+        }
+        for (int i = 0; i < in->nargs; i++) {
+            others += in->args[i] == v;
+        }
+    }
+    return others;
+}
+
+static int
+raw_fields(struct lu_func *f)
+{
+    int changed = 0;
+    char *bad = stack_only(f);
+    int n = f->nins;
+    for (int v = 0; v < n; v++) {
+        struct lu_ins *in = &f->ins[v];
+        int k;
+        if (in->flags & INS_DEAD) {
+            continue;
+        }
+        if (in->op == OP_INLINE_LOAD && !bad[v] && other_uses(f, v, OP_UNBOX_FLOAT, &k) == 0 && k > 0) {
+            /* The load becomes a raw read before it, and it a box of that,
+               which the unboxes then fold through. */
+            lu_v r = lu_ir_emit(f, in->block, OP_INLINE_LOAD_F, REP_F64, LU_NOV, LU_NOV, LU_NOV, 0);
+            in = &f->ins[v];
+            struct lu_ins *raw = &f->ins[r];
+            raw->a = in->a;
+            raw->imm = in->imm;
+            raw->fs = in->fs;
+            in->op = OP_BOX_FLOAT;
+            in->a = r;
+            in->b = LU_NOV;
+            in->fs = NULL;
+            struct lu_block *bl = &f->blocks[in->block];
+            int at = 0;
+            while (bl->ins[at] != v) {
+                at++;
+            }
+            memmove(&bl->ins[at + 1], &bl->ins[at], sizeof(int) * (size_t)(bl->nins - 1 - at));
+            bl->ins[at] = r;
+            changed = 1;
+        }
+        else if (in->op == OP_INLINE_STORE) {
+            lu_v b = in->b;
+            struct lu_ins *box = &f->ins[b];
+            if (box->op == OP_BOX_FLOAT && box->b == LU_NOV && !bad[b]
+                && other_uses(f, b, OP_INLINE_STORE, &k) == 0 && k == 1) {
+                in->op = OP_INLINE_STORE_F;
+                in->b = box->a;
+                changed = 1;
+            }
+        }
+    }
+    free(bad);
+    if (changed) {
+        fwd = realloc(fwd, sizeof(lu_v) * (size_t)f->capins);
+        for (int v = n; v < f->nins; v++) {
+            fwd[v] = v;
+        }
+    }
+    return changed;
+}
+
 /* 4 and 5. */
 static void
 escape(struct lu_func *f)
@@ -606,6 +720,10 @@ lu_ssa_optimize(struct lu_func *f)
         if (!changed) {
             break;
         }
+    }
+    if (raw_fields(f)) {
+        simplify(f);
+        rewrite(f);
     }
     escape(f);
     dce(f);
