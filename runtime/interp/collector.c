@@ -34,10 +34,11 @@
       Garbage is merged and held by the collector's worklist reference, so
       finalizers running on any carrier use the shared path on it.
    7. Inline caches name deferred objects without owning them, and only a
-      collection frees those: before the world restarts, every code object's
-      caches forget the garbage (lu_specialize_forget), so a cache never
-      names freed memory. A shutdown collection ends deferral for all, so
-      the caches forget everything they name. */
+      collection frees those: when the garbage holds a deferred object, every
+      code object's caches forget the garbage before the world restarts
+      (lu_specialize_forget), so a cache never names freed memory. A
+      shutdown collection ends deferral for all, so the caches forget
+      everything they name. */
 
 #include "interp/exceptions.h"
 #include "interp/specialize.h"
@@ -65,6 +66,7 @@ struct collection_state {
     Py_ssize_t collected;
     Py_ssize_t uncollectable;
     Py_ssize_t long_lived_total;
+    int forget;                         /* caches may name the garbage (invariant 7) */
     struct worklist unreachable;        /* garbage, each holding a reference */
     struct worklist legacy_finalizers;  /* garbage with tp_del: uncollectable */
     struct worklist wrcb_to_call;       /* weakrefs whose callbacks run */
@@ -388,15 +390,8 @@ has_legacy_finalizer(PyObject *op)
     return Py_TYPE(op)->tp_del != NULL;
 }
 
-static int
-not_immortal(PyObject *op)
-{
-    return !_Py_IsImmortal(op);
-}
-
 /* Collects the remaining unreachable objects, merged and held by a
-   reference of the worklist; restores ob_tid of the rest. Code objects'
-   caches forget the garbage first (invariant 7). */
+   reference of the worklist; restores ob_tid of the rest. */
 static bool
 scan_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area, void *block, size_t block_size,
                   void *args)
@@ -408,18 +403,12 @@ scan_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area, void *block
     PyObject *op = (PyObject *)((char *)block + state->base.offset);
     /* The cost of a collection is the number of blocks, tracked or not. */
     state->long_lived_total++;
-    if (!lu_gc_is_tracked(op)) {
-        return true;
-    }
-    if (PyCode_Check(op)) {
-        lu_specialize_forget((PyCodeObject *)op,
-                             state->reason == LU_GC_REASON_SHUTDOWN ? not_immortal : gc_is_unreachable);
-    }
-    if (gc_is_frozen(op)) {
+    if (!lu_gc_is_tracked(op) || gc_is_frozen(op)) {
         return true;
     }
     if (gc_is_unreachable(op)) {
         /* Collected as soon as it is finalized. */
+        state->forget |= lu_has_deferred_refcount(op);
         disable_deferred_refcounting(op);
         merge_refcount(op, 1);
         if (has_legacy_finalizer(op)) {
@@ -464,6 +453,25 @@ move_legacy_finalizer_reachable(struct collection_state *state)
     worklist_filter(&state->unreachable, still_unreachable, to_legacy_finalizers, state);
 }
 
+static int
+not_immortal(PyObject *op)
+{
+    return !_Py_IsImmortal(op);
+}
+
+/* Invariant 7: code objects' caches forget the garbage, frozen code too. */
+static bool
+forget_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area, void *block, size_t block_size,
+                    void *args)
+{
+    PyObject *op = op_from_block(block, args, 1);
+    if (op != NULL && PyCode_Check(op)) {
+        int shutdown = ((struct collection_state *)args)->reason == LU_GC_REASON_SHUTDOWN;
+        lu_specialize_forget((PyCodeObject *)op, shutdown ? not_immortal : gc_is_unreachable);
+    }
+    return true;
+}
+
 static void
 deduce_unreachable_heap(struct collection_state *state)
 {
@@ -473,6 +481,9 @@ deduce_unreachable_heap(struct collection_state *state)
     visit_heaps(interp, scan_heap_visitor, &state->base);
     if (state->legacy_finalizers.head) {
         move_legacy_finalizer_reachable(state);
+    }
+    if (state->forget || state->reason == LU_GC_REASON_SHUTDOWN) {
+        visit_heaps(interp, forget_heap_visitor, &state->base);
     }
 }
 
