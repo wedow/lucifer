@@ -141,6 +141,17 @@ escaping_boxes(struct lu_func *f, int box)
     return esc;
 }
 
+/* A constant placed first in the entry block. */
+static lu_v
+entry_const(struct lu_func *f, int op, int rep, int64_t imm)
+{
+    lu_v k = lu_ir_emit(f, 0, op, rep, LU_NOV, LU_NOV, LU_NOV, imm);
+    struct lu_block *bl = &f->blocks[0];
+    memmove(&bl->ins[1], &bl->ins[0], sizeof(int) * (size_t)(bl->nins - 1));
+    bl->ins[0] = k;
+    return k;
+}
+
 /* 2. */
 static void
 unbox_phis(struct lu_func *f, int rep)
@@ -153,6 +164,9 @@ unbox_phis(struct lu_func *f, int rep)
         struct lu_ins *in = &f->ins[v];
         cand[v] = in->op == OP_PHI && in->rep == REP_OBJ && !(in->flags & INS_DEAD);
     }
+    /* A NULL input (a local unbound on that path) makes the phi's box one
+       that stands for NULL when a bit phi beside the raw one says so. */
+    char *maybe_null = calloc((size_t)n, 1);
     for (int changed = 1; changed;) {
         changed = 0;
         for (int v = 0; v < n; v++) {
@@ -162,17 +176,53 @@ unbox_phis(struct lu_func *f, int rep)
             struct lu_ins *in = &f->ins[v];
             for (int i = 0; i < in->nargs; i++) {
                 lu_v a = resolve(in->args[i]);
+                if (a == v) {
+                    continue;
+                }
                 /* A box made from an object holds the object's reference unless a
                    root slot does: only such phis may forget it. */
-                if (a != v && f->ins[a].op == box && f->ins[a].b != LU_NOV && !in->imm2) {
+                if (f->ins[a].op == box && f->ins[a].b != LU_NOV && !in->imm2) {
                     cand[v] = 0;
                     changed = 1;
                     break;
                 }
-                if (a != v && (!(f->ins[a].op == box) || esc[a]) && !(a < n && cand[a])) {
+                if (f->ins[a].op == OP_CONST && f->ins[a].imm == 0 && in->imm2) {
+                    changed |= !maybe_null[v];
+                    maybe_null[v] = 1;
+                    continue;
+                }
+                if (a < n && cand[a] && maybe_null[a] && !maybe_null[v]) {
+                    maybe_null[v] = 1;
+                    changed = 1;
+                }
+                if ((!(f->ins[a].op == box) || esc[a]) && !(a < n && cand[a])) {
                     cand[v] = 0;
                     changed = 1;
                     break;
+                }
+            }
+        }
+        /* Such a box is only ever built at an exit or released: a phi that
+           may be NULL keeps its object form for any other use. */
+        for (int u = 0; u < n; u++) {
+            struct lu_ins *in = &f->ins[u];
+            if (in->flags & INS_DEAD) {
+                continue;
+            }
+            int benign = in->op == OP_DECREF || in->op == OP_INCREF || in->op == OP_STORE_LOCAL;
+            lu_v ops[3] = { in->a, in->b, in->c };
+            for (int i = 0; i < 3; i++) {
+                lu_v a = resolve(ops[i]);
+                if (a != LU_NOV && a < n && cand[a] && maybe_null[a] && !(benign && i == 0)) {
+                    cand[a] = 0;
+                    changed = 1;
+                }
+            }
+            for (int i = 0; i < in->nargs; i++) {
+                lu_v a = resolve(in->args[i]);
+                if (a != LU_NOV && a < n && cand[a] && maybe_null[a] && !(in->op == OP_PHI && cand[u])) {
+                    cand[a] = 0;
+                    changed = 1;
                 }
             }
         }
@@ -189,12 +239,25 @@ unbox_phis(struct lu_func *f, int rep)
         }
     }
     lu_v *raw = malloc(sizeof(lu_v) * (size_t)n);
+    lu_v *bit = malloc(sizeof(lu_v) * (size_t)n);
+    lu_v zero = LU_NOV, unbound = LU_NOV, bound = LU_NOV;
     for (int v = 0; v < n; v++) {
         if (cand[v]) {
             struct lu_ins *in = &f->ins[v];
             raw[v] = lu_ir_emit(f, in->block, OP_PHI, rep, LU_NOV, LU_NOV, LU_NOV, in->imm);
             f->ins[raw[v]].nargs = f->ins[v].nargs;
             f->ins[raw[v]].args = malloc(sizeof(lu_v) * (size_t)f->ins[v].nargs);
+            bit[v] = LU_NOV;
+            if (maybe_null[v]) {
+                bit[v] = lu_ir_emit(f, in->block, OP_PHI, REP_BIT, LU_NOV, LU_NOV, LU_NOV, in->imm);
+                f->ins[bit[v]].nargs = f->ins[v].nargs;
+                f->ins[bit[v]].args = malloc(sizeof(lu_v) * (size_t)f->ins[v].nargs);
+                if (zero == LU_NOV) {
+                    zero = entry_const(f, rep == REP_F64 ? OP_CONST_F : OP_CONST_I, rep, 0);
+                    unbound = entry_const(f, OP_CONST_I, REP_I64, 0);
+                    bound = entry_const(f, OP_CONST_I, REP_I64, 1);
+                }
+            }
         }
     }
     fwd = realloc(fwd, sizeof(lu_v) * (size_t)f->capins);
@@ -208,12 +271,17 @@ unbox_phis(struct lu_func *f, int rep)
         struct lu_ins *in = &f->ins[v];
         for (int i = 0; i < in->nargs; i++) {
             lu_v a = inputs[v][i];
-            f->ins[raw[v]].args[i] = a == v ? raw[v] : cand[a] ? raw[a] : resolve(f->ins[a].a);
+            int null = a != v && !cand[a] && f->ins[a].op == OP_CONST;
+            f->ins[raw[v]].args[i] = a == v ? raw[v] : cand[a] ? raw[a] : null ? zero : resolve(f->ins[a].a);
+            if (bit[v] != LU_NOV) {
+                f->ins[bit[v]].args[i] = a == v ? bit[v] : cand[a] ? (bit[a] != LU_NOV ? bit[a] : bound)
+                    : null ? unbound : bound;
+            }
         }
         free(inputs[v]);
         /* The box goes first after the phis. */
         int block = in->block;
-        lu_v b = lu_ir_emit(f, block, box, REP_OBJ, raw[v], LU_NOV, LU_NOV, 0);
+        lu_v b = lu_ir_emit(f, block, box, REP_OBJ, raw[v], LU_NOV, bit[v], 0);
         f->ins[b].imm2 = f->ins[v].imm2 ? f->ins[v].imm + 1 : 0;     /* a root slot's value: its slot */
         struct lu_block *bl = &f->blocks[block];
         int at = 0;
@@ -227,6 +295,8 @@ unbox_phis(struct lu_func *f, int rep)
         kill(f, v, b);
     }
     free(raw);
+    free(bit);
+    free(maybe_null);
     free(inputs);
     free(cand);
     free(esc);

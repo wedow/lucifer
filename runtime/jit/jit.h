@@ -134,6 +134,11 @@ lu_jit_observe_iter(lu_codeunit *word, PyTypeObject *t)
    current frame. */
 enum lu_jit_result lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
 
+/* Where a call enters compiled code: the instruction after the RESUME
+   that starts the code, past a prologue of MAKE_CELL and COPY_FREE_VARS,
+   or -1 when the code starts otherwise. */
+int lu_jit_call_entry(PyCodeObject *code);
+
 /* Runs `frame`, pushed and bound for a call from C (lu_eval) with a frame
    running below, through the compiled unit at its entry after RESUME, with
    no activation of the eval loop until a unit leaves. A C-entry marker

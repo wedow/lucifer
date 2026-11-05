@@ -55,29 +55,32 @@ used(struct lu_func *f, lu_v v)
 /* Calls fn(f, v, arg) for every value instruction `in` reads, phi inputs
    excepted. */
 static void
+use_of(struct lu_func *f, lu_v v, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
+{
+    lu_v u = used(f, v);
+    if (u != LU_NOV) {
+        fn(f, u, arg);
+    }
+    if (v != LU_NOV && (f->ins[v].flags & INS_VIRTUAL) && (u = used(f, f->ins[v].c)) != LU_NOV) {
+        fn(f, u, arg);          /* a box that may stand for NULL reads its bit too */
+    }
+}
+
+static void
 each_use(struct lu_func *f, struct lu_ins *in, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
     lu_v ops[3] = { in->a, in->b, in->c };
     for (int i = 0; i < 3; i++) {
-        lu_v u = used(f, ops[i]);
-        if (u != LU_NOV) {
-            fn(f, u, arg);
-        }
+        use_of(f, ops[i], fn, arg);
     }
     if (in->op != OP_PHI) {
         for (int i = 0; i < in->nargs; i++) {
-            lu_v u = used(f, in->args[i]);
-            if (u != LU_NOV) {
-                fn(f, u, arg);
-            }
+            use_of(f, in->args[i], fn, arg);
         }
     }
     for (struct lu_fs *fs = in->fs; fs != NULL; fs = fs->caller) {
         for (int i = 0; i < fs->nlocals + fs->nstack; i++) {
-            lu_v u = used(f, fs->vals[i]);
-            if (u != LU_NOV) {
-                fn(f, u, arg);
-            }
+            use_of(f, fs->vals[i], fn, arg);
         }
     }
 }

@@ -702,6 +702,12 @@ describe(struct asm_ *a, lu_v v, int owned)
         else {
             dv.loc = raw->loc;
         }
+        if (in->c != LU_NOV) {
+            struct lu_ins *bit = I(a, in->c);
+            dv.maybe_null = 1;
+            dv.bitloc = bit->op == OP_CONST_I ? LU_LOC_NONE : bit->loc;
+            dv.bitimm = (uint8_t)(bit->op == OP_CONST_I && bit->imm);
+        }
         return dv;
     }
     dv.kind = DV_OBJ;
@@ -863,6 +869,22 @@ extern int lu_jit_list_store(PyObject *list, int64_t i, PyObject *v);
 extern PyObject *lu_jit_attr_load(PyObject *owner, int64_t version, int64_t index, PyObject *name);
 extern int lu_jit_truth(PyObject *v);
 
+/* A box of in->a's raw value, in RAX. */
+static void
+emit_box(struct asm_ *a, struct lu_ins *in)
+{
+    save_volatile(a);
+    if (in->op == OP_BOX_INT) {
+        to_gpr(a, RDI, in->a);
+        call_abs(a, (void *)lu_jit_box_int);
+    }
+    else {
+        to_fpr(a, 0, in->a);
+        call_abs(a, (void *)lu_jit_box_float);
+    }
+    restore_volatile(a);
+}
+
 static int
 cond_of(int op, int swap)
 {
@@ -947,17 +969,21 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             def_gpr(a, v, RAX);
             return 0;
         }
-        save_volatile(a);
-        if (in->op == OP_BOX_INT) {
-            to_gpr(a, RDI, in->a);
-            call_abs(a, (void *)lu_jit_box_int);
+        if (in->c != LU_NOV) {
+            /* NULL when the bit says the local was unbound. */
+            int boxed = new_label(a), done = new_label(a);
+            to_gpr(a, RAX, in->c);
+            test_rr(a, RAX, RAX);
+            jcc(a, CC_NE, boxed);
+            def_gpr(a, v, RAX);
+            jmp(a, done);
+            bind(a, boxed);
+            emit_box(a, in);
+            def_gpr(a, v, RAX);
+            bind(a, done);
+            return 0;
         }
-        else {
-            to_fpr(a, 0, in->a);
-            call_abs(a, (void *)lu_jit_box_float);
-        }
-        restore_volatile(a);
-        /* An allocation failure leaves through the instruction's state. */
+        emit_box(a, in);
         def_gpr(a, v, RAX);
         return 0;
     case OP_ADD_I: case OP_SUB_I: case OP_MUL_I: case OP_AND_I: case OP_OR_I: case OP_XOR_I: {

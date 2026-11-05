@@ -100,11 +100,8 @@ state_of(PyCodeObject *code)
 
 int lu_jit_next_pc(PyCodeObject *code, int pc);
 
-/* Where a call enters compiled code: the instruction after the RESUME
-   that starts the code, past a prologue of MAKE_CELL and COPY_FREE_VARS,
-   or -1 when the code starts otherwise. */
-static int
-call_entry(PyCodeObject *code)
+int
+lu_jit_call_entry(PyCodeObject *code)
 {
     for (int pc = 0; pc < (int)Py_SIZE(code); pc++) {
         int op = lu_base_opcode(code, pc);
@@ -131,7 +128,7 @@ state_for(PyCodeObject *code)
     jc->fails = calloc((size_t)jc->ncode + 1, sizeof(uint16_t));
     jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint16_t));
     jc->warmed = calloc((size_t)jc->ncode + 1, 1);
-    jc->call_pc = call_entry(code);
+    jc->call_pc = lu_jit_call_entry(code);
     uintptr_t seen = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
     while (seen == 0 || (seen & 1)) {
         if (__atomic_compare_exchange_n((uintptr_t *)&code->co_executors, &seen, (uintptr_t)jc, 0,

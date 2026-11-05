@@ -39,7 +39,10 @@ enum lu_dv_kind {
 struct lu_dv {
     uint8_t kind;
     uint8_t owned;              /* DV_OBJ: compiled code holds a reference for this entry */
+    uint8_t maybe_null;         /* DV_BOX_*: NULL when the bit at bitloc (or bitimm) is 0 */
+    uint8_t bitimm;
     int32_t loc;
+    int32_t bitloc;
     int32_t vid;                /* the SSA value: one virtual box is built once per exit */
     int64_t imm;
 };

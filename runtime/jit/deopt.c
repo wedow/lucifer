@@ -34,15 +34,18 @@ struct regs {
 };
 
 static uint64_t
+at(struct regs *r, int32_t loc)
+{
+    if (LU_LOC_IS_SPILL(loc)) {
+        return *(const uint64_t *)((const char *)r->spills - 8 * LU_LOC_SPILL_INDEX(loc));
+    }
+    return loc >= LU_LOC_FPR ? r->fpr[loc - LU_LOC_FPR] : r->gpr[loc];
+}
+
+static uint64_t
 raw(struct regs *r, const struct lu_dv *dv)
 {
-    if (dv->loc == LU_LOC_NONE) {
-        return (uint64_t)dv->imm;
-    }
-    if (LU_LOC_IS_SPILL(dv->loc)) {
-        return *(const uint64_t *)((const char *)r->spills - 8 * LU_LOC_SPILL_INDEX(dv->loc));
-    }
-    return dv->loc >= LU_LOC_FPR ? r->fpr[dv->loc - LU_LOC_FPR] : r->gpr[dv->loc];
+    return dv->loc == LU_LOC_NONE ? (uint64_t)dv->imm : at(r, dv->loc);
 }
 
 /* A new reference to what dv names (or the reference compiled code owns
@@ -61,6 +64,9 @@ take(struct regs *r, const struct lu_dv *dv)
     }
     default:
         break;
+    }
+    if (dv->maybe_null && !(dv->bitloc == LU_LOC_NONE ? dv->bitimm : (at(r, dv->bitloc) & 1))) {
+        return NULL;            /* a local still unbound on this path */
     }
     for (int i = 0; i < r->nbuilt; i++) {
         if (r->built[i].vid == dv->vid) {

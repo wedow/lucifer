@@ -2345,8 +2345,16 @@ lu_ssa_build(struct lu_func *f, struct lu_frame *frame)
     c->cur = lu_ir_block(f);
     state_init(c, &c->st);
     c->pc = entry;
+    /* At a call's entry every local but the parameters (and cells, which
+       the prologue made) is unbound. */
+    int params = co->co_argcount + co->co_kwonlyargcount + ((co->co_flags & CO_VARARGS) != 0)
+        + ((co->co_flags & CO_VARKEYWORDS) != 0);
+    int call = entry == lu_jit_call_entry(co);
     for (int i = 0; i < c->nlocals; i++) {
-        c->st.v[i] = emit(c, OP_ENTRY_LOCAL, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, i);
+        int plain = co->co_localspluskinds == NULL
+            || !(((unsigned char *)PyBytes_AS_STRING(co->co_localspluskinds))[i] & (CO_FAST_CELL | CO_FAST_FREE));
+        c->st.v[i] = call && i >= params && plain && frame->localsplus[i] == NULL ? LU_NOV
+            : emit(c, OP_ENTRY_LOCAL, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, i);
     }
     int depth = (int)(frame->stackpointer - (frame->localsplus + c->nlocals));
     for (int j = 0; j < depth; j++) {
