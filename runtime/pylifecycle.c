@@ -26,8 +26,6 @@
 #include <unistd.h>
 #include <wchar.h>
 
-#define LU_MAGIC (3627 | ((long)'\r' << 16) | ((long)'\n' << 24))
-
 /* file_is_closed */
 static int
 stream_closed(PyObject *stream)
@@ -346,7 +344,7 @@ is_pyc(const char *path, PyObject *data)
     size_t n = strlen(path);
     const unsigned char *h = (const unsigned char *)PyBytes_AS_STRING(data);
     return (n >= 4 && strcmp(path + n - 4, ".pyc") == 0)
-        || (PyBytes_GET_SIZE(data) >= 2 && (h[0] | h[1] << 8) == (LU_MAGIC & 0xffff));
+        || (PyBytes_GET_SIZE(data) >= 2 && (h[0] | h[1] << 8) == (LU_PYC_MAGIC & 0xffff));
 }
 
 /* run_pyc_file's reading: the 16-byte header, then the code object. */
@@ -355,7 +353,7 @@ code_of_pyc(PyObject *data)
 {
     const unsigned char *h = (const unsigned char *)PyBytes_AS_STRING(data);
     Py_ssize_t size = PyBytes_GET_SIZE(data);
-    if (size < 16 || (h[0] | h[1] << 8 | (long)h[2] << 16 | (long)h[3] << 24) != LU_MAGIC) {
+    if (size < 16 || (h[0] | h[1] << 8 | (long)h[2] << 16 | (long)h[3] << 24) != LU_PYC_MAGIC) {
         PyErr_SetString(PyExc_RuntimeError, "Bad magic number in .pyc file");
         return NULL;
     }
