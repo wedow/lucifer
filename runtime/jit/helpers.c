@@ -264,26 +264,29 @@ h_store_attr(PyObject *owner, PyObject *name, PyObject *v)
 
 /* --- operators --- */
 
-/* The last answer per thread, valid while the type keeps its version. */
+/* Answers per thread, by type version: a version names one type in one
+   state, so an entry holds while its type keeps it. */
+#define EQ_SEEN 64
 static __thread struct {
-    PyTypeObject *type;
     unsigned int version;
     int answer;
-} eq_seen;
+} eq_seen[EQ_SEEN];
 
 static int
 uses_object_eq(PyObject *o)
 {
     PyTypeObject *t = Py_TYPE(o);
     unsigned int version = t->tp_version_tag;
-    if (version != 0 && eq_seen.type == t && eq_seen.version == version) {
-        return eq_seen.answer;
+    unsigned int at = version % EQ_SEEN;
+    if (version != 0 && eq_seen[at].version == version) {
+        return eq_seen[at].answer;
     }
     int answer = _PyType_Lookup(t, LU_ID(__eq__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__eq__))
         && _PyType_Lookup(t, LU_ID(__ne__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__ne__));
-    eq_seen.type = t;
-    eq_seen.version = version;
-    eq_seen.answer = answer;
+    if (version != 0 && version == __atomic_load_n(&t->tp_version_tag, __ATOMIC_ACQUIRE)) {
+        eq_seen[at].version = version;
+        eq_seen[at].answer = answer;
+    }
     return answer;
 }
 
