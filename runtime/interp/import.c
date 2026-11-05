@@ -31,6 +31,14 @@ find_module(const struct lu_frozen *table, PyObject *name)
     return PyUnicode_Check(name) ? find_cname(table, PyUnicode_AsUTF8(name)) : NULL;
 }
 
+/* lu_frozen_find: the frozen entry a name maps to, or NULL (a non-str or
+   missing name, which importers and the C API report as not frozen). */
+const struct lu_frozen *
+lu_frozen_find(PyObject *name)
+{
+    return name != NULL && name != Py_None ? find_module(lu_frozen_modules, name) : NULL;
+}
+
 static PyObject *
 load_code(const struct lu_frozen *m)
 {
@@ -137,7 +145,7 @@ prim_port_exec(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyObject *
 prim_frozen_find(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const struct lu_frozen *f = nargs == 1 ? find_module(lu_frozen_modules, args[0]) : NULL;
+    const struct lu_frozen *f = nargs == 1 ? lu_frozen_find(args[0]) : NULL;
     return f == NULL ? Py_NewRef(Py_None) : PyUnicode_FromString(f->orig != NULL ? f->orig : f->name);
 }
 
@@ -145,7 +153,7 @@ prim_frozen_find(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyObject *
 prim_frozen_is_package(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const struct lu_frozen *f = nargs == 1 ? find_module(lu_frozen_modules, args[0]) : NULL;
+    const struct lu_frozen *f = nargs == 1 ? lu_frozen_find(args[0]) : NULL;
     return Py_NewRef(f != NULL && f->package ? Py_True : Py_False);
 }
 
@@ -153,7 +161,7 @@ prim_frozen_is_package(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyObject *
 prim_frozen_code(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const struct lu_frozen *f = nargs == 1 ? find_module(lu_frozen_modules, args[0]) : NULL;
+    const struct lu_frozen *f = nargs == 1 ? lu_frozen_find(args[0]) : NULL;
     PyObject *code = f == NULL ? Py_NewRef(Py_None) : load_code(f);
     if (code != NULL && f != NULL && f->hidden) {
         lu_hide_frames(code);
