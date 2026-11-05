@@ -1292,8 +1292,25 @@ load_global(struct ctx *c)
     return 0;
 }
 
+static int load_attr_cached(struct ctx *c, PyObject *descr);
+
+/* The cache's descriptor is borrowed from the type, and the type may have
+   dropped it since: the translation holds a reference to it, or goes without. */
 static int
 load_attr(struct ctx *c)
+{
+    PyObject *descr = lu_cache_load_ptr(c->cache + LA_DESCR);
+    if (descr != NULL && !lu_try_incref(descr)) {
+        unsupported(c);
+        return -1;
+    }
+    int r = load_attr_cached(c, descr);
+    Py_XDECREF(descr);
+    return r;
+}
+
+static int
+load_attr_cached(struct ctx *c, PyObject *descr)
 {
     lu_v owner = peek(c, 1);
     int own = peek_owned(c, 1);
@@ -1302,7 +1319,6 @@ load_attr(struct ctx *c)
     int op = __atomic_load_n(&lu_code_start(c->code)[c->cache - lu_code_start(c->code) - 1].op.code,
                              __ATOMIC_RELAXED);
     uint32_t version = lu_cache_load32(c->cache + LA_VERSION);
-    PyObject *descr = lu_cache_load_ptr(c->cache + LA_DESCR);
     if (version == 0 || lu_jit_nospec(c->code, c->pc)) {
         op = LOAD_ATTR;
     }

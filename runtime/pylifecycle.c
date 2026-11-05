@@ -134,8 +134,9 @@ report_uncaught(void)
         else {
             PyObject *s = PyUnicode_Check(code) ? Py_NewRef(code) : NULL;
             if (s == NULL) {
-                PyObject *str = _PyType_Lookup(Py_TYPE(code), LU_ID(__str__));
+                PyObject *str = _PyType_LookupRef(Py_TYPE(code), LU_ID(__str__));
                 s = str != NULL ? lu_call(str, &code, 1, NULL) : NULL;
+                Py_XDECREF(str);
                 PyErr_Clear();
             }
             const char *text = s != NULL && PyUnicode_Check(s) ? PyUnicode_AsUTF8(s) : "";

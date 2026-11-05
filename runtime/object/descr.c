@@ -550,10 +550,12 @@ static PyMemberDef instancemethod_members[] = {
 static PyObject *
 instancemethod_getattro(PyObject *self, PyObject *name)
 {
-    PyObject *descr = _PyType_Lookup(Py_TYPE(self), name);
+    PyObject *descr = _PyType_LookupRef(Py_TYPE(self), name);
     if (descr != NULL) {
         descrgetfunc get = Py_TYPE(descr)->tp_descr_get;
-        return get != NULL ? get(descr, self, (PyObject *)Py_TYPE(self)) : Py_NewRef(descr);
+        PyObject *r = get != NULL ? get(descr, self, (PyObject *)Py_TYPE(self)) : Py_NewRef(descr);
+        Py_DECREF(descr);
+        return r;
     }
     return PyObject_GetAttr(((instancemethodobject *)self)->func, name);
 }
@@ -1148,10 +1150,13 @@ lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value)
         || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))) {
         return 0;
     }
-    PyObject *descr = _PyType_Lookup(tp, name);
+    PyObject *descr = _PyType_LookupRef(tp, name);
     if (descr != NULL && Py_TYPE(descr)->tp_descr_set != NULL) {
-        return lu_descr_set_native(descr, obj, value);
+        int done = lu_descr_set_native(descr, obj, value);
+        Py_DECREF(descr);
+        return done;
     }
+    Py_XDECREF(descr);
     if (value == NULL || !(tp->tp_flags & Py_TPFLAGS_MANAGED_DICT)) {
         return 0;
     }

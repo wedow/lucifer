@@ -21,7 +21,7 @@ static PyObject *
 builtin(const char *name)
 {
     PyObject *key = PyUnicode_InternFromString(name);
-    PyObject *f = key != NULL ? lu_ns_lookup(PyThreadState_Get()->interp->builtins, key) : NULL;
+    PyObject *f = key != NULL ? lu_ns_get(PyThreadState_Get()->interp->builtins, key) : NULL;
     Py_XDECREF(key);
     if (f == NULL && !PyErr_Occurred()) {
         PyErr_Format(PyExc_SystemError, "builtins.%s is missing", name);
@@ -33,7 +33,9 @@ static PyObject *
 call_builtin(const char *name, PyObject *const *args, Py_ssize_t n)
 {
     PyObject *f = builtin(name);
-    return f != NULL ? lu_call(f, args, n, NULL) : NULL;
+    PyObject *r = f != NULL ? lu_call(f, args, n, NULL) : NULL;
+    Py_XDECREF(f);
+    return r;
 }
 
 /* obj.name(*args) through the type's special method. */
@@ -881,9 +883,10 @@ static PyObject *
 dict_own_list(PyObject *o, const char *method)
 {
     PyObject *name = PyUnicode_InternFromString(method);
-    PyObject *func = name != NULL ? _PyType_Lookup(&PyDict_Type, name) : NULL;
+    PyObject *func = name != NULL ? _PyType_LookupRef(&PyDict_Type, name) : NULL;
     Py_XDECREF(name);
     PyObject *view = func != NULL ? lu_call(func, &o, 1, NULL) : NULL;
+    Py_XDECREF(func);
     if (view == NULL) {
         return NULL;
     }

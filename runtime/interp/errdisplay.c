@@ -235,8 +235,9 @@ call_str(PyObject *value)
     if (PyUnicode_CheckExact(value)) {
         return Py_NewRef(value);
     }
-    PyObject *fn = _PyType_Lookup(Py_TYPE(value), LU_ID(__str__));
+    PyObject *fn = _PyType_LookupRef(Py_TYPE(value), LU_ID(__str__));
     PyObject *s = fn != NULL ? lu_call(fn, &value, 1, NULL) : NULL;
+    Py_XDECREF(fn);
     if (s != NULL && !PyUnicode_Check(s)) {
         Py_CLEAR(s);
     }
@@ -474,8 +475,9 @@ format_exception_only(struct ctx *c, PyObject *exc)
     }
     else {
         struct out line = { 0 };
-        PyObject *repr_fn = _PyType_Lookup(Py_TYPE(notes), LU_ID(__repr__));
+        PyObject *repr_fn = _PyType_LookupRef(Py_TYPE(notes), LU_ID(__repr__));
         PyObject *r = repr_fn != NULL ? lu_call(repr_fn, &notes, 1, NULL) : NULL;
+        Py_XDECREF(repr_fn);
         PyErr_Clear();
         const char *text = utf8(r, &(Py_ssize_t){ 0 });
         puts_(&line, text != NULL ? text : "<__notes__ repr() failed>");
