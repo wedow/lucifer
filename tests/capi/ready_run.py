@@ -164,6 +164,10 @@ for value in (('add', 'f8'), 'single', ('only',)):
     except TypeError as e:
         print(type(e).__name__, e.args, e.ufunc, e.dtypes)
 
+# PyErr_Format over a pending error formats with no error set, then replaces it
+for o in (b'\xff', 'π', [1, 2]):
+    show(ready.format_over, o)
+
 # and so does a builtin class: its __init__ and __new__ set errno, value and the OSError subclass
 for exc, value in ((StopIteration, 5), (StopIteration, None), (OSError, (2, 'gone')), (FileNotFoundError, (2, 'gone')),
                    (OSError, (2, 'gone', 'f.txt')), (KeyError, ('k',)), (SystemExit, 3)):

@@ -1038,6 +1038,15 @@ raise_object(PyObject *self, PyObject *args)
     return NULL;
 }
 
+/* ready.format_over(obj): PyErr_Format while another error is set, as NumPy's
+   converters replace a decode error; the new error wins. */
+static PyObject *
+format_over(PyObject *self, PyObject *obj)
+{
+    PyErr_SetString(PyExc_KeyError, "pending");
+    return PyErr_Format(PyExc_ValueError, "got %R and %S", obj, obj);
+}
+
 /* Dict updates and slices. */
 
 static PyObject *
@@ -1221,6 +1230,7 @@ static PyMethodDef module_methods[] = {
     { "errors", errors, METH_NOARGS, NULL },
     { "raise_object", raise_object, METH_VARARGS, NULL },
     { "make_half_pairs", make_half_pairs, METH_NOARGS, NULL },
+    { "format_over", format_over, METH_O, NULL },
     { "call_direct", call_direct, METH_VARARGS, NULL },
     { "raise_from_frame", raise_from_frame, METH_VARARGS, NULL },
     { "is_sequence", is_sequence, METH_O, NULL },
