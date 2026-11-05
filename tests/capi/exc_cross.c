@@ -150,6 +150,25 @@ exc_nest(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
     return r;
 }
 
+/* pending_lookup(d, key): PyDict_GetItem keeps an exception that was
+   already pending, as an error path that looks up a dict does; returns the
+   value or None. */
+static PyObject *
+exc_pending_lookup(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (check_nargs("pending_lookup", nargs, 2) < 0) {
+        return NULL;
+    }
+    PyErr_SetString(PyExc_ValueError, "pending");
+    PyObject *v = PyDict_GetItem(args[0], args[1]);
+    if (!PyErr_ExceptionMatches(PyExc_ValueError)) {
+        PyErr_SetString(PyExc_SystemError, "PyDict_GetItem lost the pending exception");
+        return NULL;
+    }
+    PyErr_Clear();
+    return Py_NewRef(v != NULL ? v : Py_None);
+}
+
 static PyMethodDef methods[] = {
     { "call", (PyCFunction)(void (*)(void))exc_call, METH_FASTCALL, NULL },
     { "catch", (PyCFunction)(void (*)(void))exc_catch, METH_FASTCALL, NULL },
@@ -160,6 +179,7 @@ static PyMethodDef methods[] = {
     { "occurred", exc_occurred, METH_NOARGS, NULL },
     { "swallow", exc_swallow, METH_O, NULL },
     { "nest", (PyCFunction)(void (*)(void))exc_nest, METH_FASTCALL, NULL },
+    { "pending_lookup", (PyCFunction)(void (*)(void))exc_pending_lookup, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },
 };
 

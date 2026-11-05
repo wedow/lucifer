@@ -517,7 +517,9 @@ class _ThreadHandle:
             raise RuntimeError('thread not started')
         if self._ident == get_ident() and not self.is_done():
             raise RuntimeError('Cannot join current thread')
-        if not self._exited and _is_finalizing():
+        if self._exited:
+            return              # an exception landing between acquire and release below leaves the lock held
+        if _is_finalizing():
             raise PythonFinalizationError('cannot join thread at interpreter shutdown')
         if timeout is None:
             wait = -1

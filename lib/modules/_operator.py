@@ -1,10 +1,20 @@
 """_operator (Modules/_operator.c): the operator functions. operator.py defines
 them in Python and takes this module's names over when it exists; here they
-are operator's own, for C extensions that import _operator by name."""
+are operator.py's own definitions, run in a namespace of their own rather than
+imported, so that operator takes this module's builtins whichever of the two
+is imported first."""
 
-import operator as _operator_py
-from operator import *
-from _lucifer import operators as _kernel_operators
+from _lucifer import frozen_code as _frozen_code, operators as _kernel_operators
+
+
+def _definitions():
+    names = {'__name__': 'operator', '__builtins__': __builtins__}
+    exec(_frozen_code('operator'), names)
+    return {name: names[name] for name in names['__all__']}
+
+
+globals().update(_definitions())
+del _definitions
 
 index = _kernel_operators.index     # PyNumber_Index: a TypeError for what has no __index__
 

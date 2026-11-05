@@ -830,6 +830,10 @@ struct lu_identifiers {
 
 #define LU_NSIG 65                      /* the _signal module's NSIG */
 
+/* The pyc magic token (PYC_MAGIC_NUMBER_TOKEN, Include/pycore_magic_number.h);
+   _imp.pyc_magic_number_token and tools/freeze agree with it. */
+#define LU_PYC_MAGIC (3627L | ((long)'\r' << 16) | ((long)'\n' << 24))
+
 /* The runtime record (FOUNDATIONS 2.1). Its size is the oracle's. */
 #define LU_RUNTIME_SIZE 365624
 
@@ -893,6 +897,7 @@ extern LU_EXPORT union lu_runtime {
             int unhandled_keyboard_interrupt;   /* a KeyboardInterrupt ended the program: exit by SIGINT */
             struct {
                 int tripped;
+                int redirected;         /* signals sent on to the main task's thread, not yet arrived */
                 PyObject *func;         /* the Python handler, strong; NULL for none */
             } handlers[LU_NSIG];
         } signals;

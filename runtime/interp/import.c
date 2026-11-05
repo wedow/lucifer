@@ -31,6 +31,14 @@ find_module(const struct lu_frozen *table, PyObject *name)
     return PyUnicode_Check(name) ? find_cname(table, PyUnicode_AsUTF8(name)) : NULL;
 }
 
+/* lu_frozen_find: the frozen entry a name maps to, or NULL (a non-str or
+   missing name, which importers and the C API report as not frozen). */
+const struct lu_frozen *
+lu_frozen_find(PyObject *name)
+{
+    return name != NULL && name != Py_None ? find_module(lu_frozen_modules, name) : NULL;
+}
+
 static PyObject *
 load_code(const struct lu_frozen *m)
 {
@@ -114,6 +122,28 @@ prim_port_create(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return lu_module_new(PyUnicode_AsUTF8(args[0]));
 }
 
+/* A C module's functions are builtins of it, which stored in a class do not
+   become methods: so is every function a port leaves in its namespace. */
+static int
+functions_to_builtins(PyObject *module)
+{
+    PyObject *ns = PyModule_GetDict(module);
+    Py_ssize_t pos = 0;
+    PyObject *name, *value;
+    while (lu_ns_next(ns, &pos, &name, &value)) {
+        if (!PyFunction_Check(value) || !PyUnicode_CheckExact(name)) {
+            continue;
+        }
+        PyObject *builtin = lu_kernel_builtin(module, name, value);
+        int err = builtin == NULL || lu_ns_insert(ns, name, builtin) < 0;
+        Py_XDECREF(builtin);
+        if (err) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 /* port_exec(module): runs the port that implements the module. */
 static PyObject *
 prim_port_exec(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -128,16 +158,16 @@ prim_port_exec(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return NULL;
     }
     lu_hide_frames(code);
-    int err = exec_in_module(args[0], code);
+    int err = exec_in_module(args[0], code) < 0 || functions_to_builtins(args[0]) < 0;
     Py_DECREF(code);
-    return err < 0 ? NULL : Py_NewRef(Py_None);
+    return err ? NULL : Py_NewRef(Py_None);
 }
 
 /* frozen_find(name): the module a frozen name was frozen from, or None. */
 static PyObject *
 prim_frozen_find(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const struct lu_frozen *f = nargs == 1 ? find_module(lu_frozen_modules, args[0]) : NULL;
+    const struct lu_frozen *f = nargs == 1 ? lu_frozen_find(args[0]) : NULL;
     return f == NULL ? Py_NewRef(Py_None) : PyUnicode_FromString(f->orig != NULL ? f->orig : f->name);
 }
 
@@ -145,7 +175,7 @@ prim_frozen_find(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyObject *
 prim_frozen_is_package(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const struct lu_frozen *f = nargs == 1 ? find_module(lu_frozen_modules, args[0]) : NULL;
+    const struct lu_frozen *f = nargs == 1 ? lu_frozen_find(args[0]) : NULL;
     return Py_NewRef(f != NULL && f->package ? Py_True : Py_False);
 }
 
@@ -153,7 +183,7 @@ prim_frozen_is_package(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyObject *
 prim_frozen_code(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    const struct lu_frozen *f = nargs == 1 ? find_module(lu_frozen_modules, args[0]) : NULL;
+    const struct lu_frozen *f = nargs == 1 ? lu_frozen_find(args[0]) : NULL;
     PyObject *code = f == NULL ? Py_NewRef(Py_None) : load_code(f);
     if (code != NULL && f != NULL && f->hidden) {
         lu_hide_frames(code);
@@ -397,7 +427,8 @@ start_module(struct _is *interp, const struct lu_frozen *m, int frozen)
     int err = (frozen && (origname == NULL
                || lu_ns_insert(PyModule_GetDict(module), PyUnicode_InternFromString("__origname__"), origname) < 0))
         || lu_ns_insert(interp->modules, ((PyModuleObject *)module)->md_name, module) < 0
-        || exec_in_module(module, code) < 0;
+        || exec_in_module(module, code) < 0
+        || (!frozen && functions_to_builtins(module) < 0);
     Py_XDECREF(origname);
     Py_DECREF(code);
     if (err) {

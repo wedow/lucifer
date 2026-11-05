@@ -1,6 +1,6 @@
 ---
 id: luc-aae9
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-05T02:14:19Z

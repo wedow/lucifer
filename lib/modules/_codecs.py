@@ -9,7 +9,6 @@ each error. The other codecs are Python loops. utf-7 is not provided.
 """
 
 import _lucifer
-import sys
 
 _str_encode = _lucifer.str_encode
 _str_decode = _lucifer.str_decode
@@ -1000,16 +999,3 @@ def charmap_decode(data, errors=None, mapping=None, /):
 def readbuffer_encode(data, errors=None, /):
     data = data.encode('utf-8') if isinstance(data, str) else _bytes(data)
     return data, len(data)
-
-
-# The functions of a C module are builtin functions: stored in a class they
-# do not become methods (encodings.utf_8 keeps utf_8_decode so).
-def _make_builtins():
-    module = sys.modules[__name__]
-    names = globals()
-    for name, function in [*names.items()]:
-        if type(function) is type(_make_builtins) and not name.startswith('_'):
-            names[name] = _lucifer.builtin_function(module, name, function)
-
-
-_make_builtins()

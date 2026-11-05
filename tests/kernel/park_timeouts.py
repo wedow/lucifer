@@ -1,6 +1,7 @@
 # Every timeout is a deadline of the park: it returns False/Empty/timeout no earlier than asked,
 # and a wake before the deadline ends the wait at once. time.sleep sleeps at least its time, and
 # a signal's handler runs during it without shortening it (PEP 475).
+import _thread
 import queue
 import signal
 import threading
@@ -70,25 +71,57 @@ r, e = timed(woken.wait, 30)
 print("early wake", r, e < 5)
 t.join()
 
-# A signal during sleep: the handler runs, the sleep goes on for the time left.
+# A signal during sleep: the handler runs, the sleep goes on for the time left. The signalling thread
+# waits for `ready` (set just before the sleep) and is joined after it, so the handler has run by the
+# print wherever the signal landed.
+def signal_main_after(ready):
+    t = threading.Thread(target=lambda: (ready.wait(), signal.pthread_kill(threading.main_thread().ident, signal.SIGUSR1)))
+    t.start()
+    return t
+
+
 hits = []
 signal.signal(signal.SIGUSR1, lambda *a: hits.append(1))
-threading.Timer(0.05, signal.pthread_kill, [threading.main_thread().ident, signal.SIGUSR1]).start()
+ready = threading.Event()
+t = signal_main_after(ready)
+ready.set()
 r, e = timed(time.sleep, 0.2)
+t.join()
 print("signal in sleep", hits, at_least(e, 0.2))
 
-# A signal during a lock wait: the handler runs; one that raises ends the wait.
+# A signal during a lock wait: the handler runs; one that raises ends the wait. A signal that lands
+# just before the wait begins is only noticed at the next safepoint, which a wait that has begun does
+# not reach (PEP 475), so the signalling thread repeats the signal until main has been interrupted.
+# The handler raises once; `ready` is released inside the try, so the exception is raised in it. It is a
+# bare lock: an exception landing inside Event.set could leave its condition locked.
 lock = threading.Lock()
 lock.acquire()
+raised = []
 
 
 def boom(*a):
-    raise KeyboardInterrupt
+    if not raised:
+        raised.append(1)
+        raise KeyboardInterrupt
+
+
+def signal_until(ready, done):
+    ready.acquire()
+    while not done.is_set():
+        signal.pthread_kill(threading.main_thread().ident, signal.SIGUSR1)
+        done.wait(0.01)
 
 
 signal.signal(signal.SIGUSR1, boom)
-threading.Timer(0.05, signal.pthread_kill, [threading.main_thread().ident, signal.SIGUSR1]).start()
+ready = _thread.allocate_lock()
+ready.acquire()
+done = threading.Event()
+t = threading.Thread(target=signal_until, args=(ready, done))
+t.start()
 try:
+    ready.release()
     lock.acquire()
 except KeyboardInterrupt:
     print("interrupted lock wait")
+done.set()
+t.join()
