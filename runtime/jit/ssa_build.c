@@ -1956,10 +1956,12 @@ translate(struct ctx *c)
     case JUMP_BACKWARD: {
         lu_v p = emit(c, OP_POLL, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
         I(c, p)->fs = before(c);
+        c->f->loops++;
         jump_to(c, jump_target(c->base, oparg, c->next));
         return 0;
     }
     case JUMP_BACKWARD_NO_INTERRUPT:
+        c->f->loops++;
         jump_to(c, jump_target(c->base, oparg, c->next));
         return 0;
     case GET_ITER: {

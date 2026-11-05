@@ -9,7 +9,13 @@
    they run, so a change another thread makes (a type, a global, a
    function's code) sends running code out at its next guard; units only
    go dead when one guard keeps failing, which also marks its instruction
-   not to be speculated on again (the donor's exit-driven recompile). */
+   not to be speculated on again (the donor's exit-driven recompile).
+
+   An exit no recompile can remove (an instruction the tier does not
+   compile, an exception) costs an exit and, at the next call or back-edge,
+   an entry. A unit without loops does a bounded amount of work per entry;
+   when such a unit leaves that way on most of its entries, it costs more
+   than it saves, and its entry stays in the interpreter. */
 #include "jit/jit.h"
 #include "jit/target.h"
 
@@ -20,6 +26,9 @@
 
 /* A guard that fails this often makes its instruction generic. */
 #define GUARD_FAILS 50
+/* Exits a unit without loops takes, on at least half its entries, before
+   its entry stays in the interpreter. */
+#define LEAVES 50
 /* Recompiles of one code object before the tier leaves it alone. */
 #define MAX_COMPILES 12
 #define MAX_ENTRIES 16
@@ -34,6 +43,7 @@ struct lu_jit_code {
     int ncode;
     uint8_t *nospec;            /* per code unit: do not speculate */
     uint16_t *fails;            /* per code unit: guard failures */
+    uint8_t *interpret;         /* per code unit: an entry whose unit kept leaving */
     int noinline;               /* a side exit in an inlined copy keeps leaving: call it instead */
 };
 
@@ -50,10 +60,22 @@ static struct {
     PyMutex perf_map;           /* one writer of /tmp/perf-PID.map at a time */
 } stats;
 
+/* A count for -X lucifer_jit_stats: free when the counts are off. */
 static void
 count(unsigned long *c, unsigned long n)
 {
-    __atomic_fetch_add(c, n, __ATOMIC_RELAXED);
+    if (_PyRuntime.jit.stats) {
+        __atomic_fetch_add(c, n, __ATOMIC_RELAXED);
+    }
+}
+
+/* A per-unit count: a lost update under a race only delays a decision. */
+static unsigned long
+bump(unsigned long *c)
+{
+    unsigned long n = __atomic_load_n(c, __ATOMIC_RELAXED) + 1;
+    __atomic_store_n(c, n, __ATOMIC_RELAXED);
+    return n;
 }
 
 static struct lu_jit_code *
@@ -74,6 +96,7 @@ state_for(PyCodeObject *code)
     jc->ncode = (int)Py_SIZE(code);
     jc->nospec = calloc((size_t)jc->ncode + 1, 1);
     jc->fails = calloc((size_t)jc->ncode + 1, sizeof(uint16_t));
+    jc->interpret = calloc((size_t)jc->ncode + 1, 1);
     uintptr_t seen = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
     while (seen == 0 || (seen & 1)) {
         if (__atomic_compare_exchange_n((uintptr_t *)&code->co_executors, &seen, (uintptr_t)jc, 0,
@@ -83,6 +106,7 @@ state_for(PyCodeObject *code)
     }
     free(jc->nospec);
     free(jc->fails);
+    free(jc->interpret);
     free(jc);
     return (struct lu_jit_code *)seen;
 }
@@ -205,7 +229,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
         ok = 0;
     }
     double dt = now() - t0;
-    __atomic_fetch_add(&stats.compiles, 1, __ATOMIC_RELAXED);
+    count(&stats.compiles, 1);
     stats.compile_seconds += dt;
     for (int i = 0; i < 256; i++) {
         if (f.bailouts[i]) {
@@ -220,6 +244,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
         return NULL;
     }
     u->entry_pc = pc;
+    u->loops = f.loops > 0;
     u->consts = f.consts;
     u->nconsts = f.nconsts;
     f.consts = NULL;
@@ -290,6 +315,9 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         return LU_JIT_NONE;
     }
     int pc = (int)(frame->instr - lu_code_start(code));
+    if (__atomic_load_n(&jc->interpret[pc], __ATOMIC_RELAXED)) {
+        return LU_JIT_NONE;
+    }
     struct lu_unit *u = find(jc, pc);
     if (u == NULL) {
         int idle = 0;
@@ -318,7 +346,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         }
     }
     count(&stats.entries, 1);
-    __atomic_fetch_add(&u->entries, 1, __ATOMIC_RELAXED);
+    bump(&u->entries);
     int debug = _PyRuntime.jit.debug;
     if (debug) {
         fprintf(stderr, "jit: enter %s@%d\n", PyUnicode_AsUTF8(code->co_qualname), pc);
@@ -341,14 +369,26 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     return (enum lu_jit_result)r;
 }
 
-/* An exit was taken: its counts, and for a guard that keeps failing, no
-   more speculation there and a recompile of the code it left. */
+/* An exit was taken: its counts; for a guard that keeps failing, no
+   more speculation there and a recompile of the code it left; for a unit
+   without loops that keeps leaving, the interpreter at its entry. */
 void
 lu_jit_note_exit(struct lu_deopt *d)
 {
-    __atomic_fetch_add(&d->count, 1, __ATOMIC_RELAXED);
     count(&stats.exits[d->reason], 1);
     count(&stats.taken[d->opcode & 0xff], 1);
+    struct lu_unit *u = d->unit;
+    if (d->reason == EXIT_ERROR || (d->reason == EXIT_SIDE && d->nframes == 1)) {
+        unsigned long n = bump(&u->leaves);
+        if (!u->loops && n >= LEAVES && 2 * n >= __atomic_load_n(&u->entries, __ATOMIC_RELAXED)) {
+            struct lu_jit_code *jc = state_for(d->frames[0].code);
+            __atomic_store_n(&jc->interpret[u->entry_pc], 1, __ATOMIC_RELAXED);
+            if (!__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
+                count(&stats.units_dead, 1);
+            }
+        }
+        return;
+    }
     if (d->reason != EXIT_GUARD && !(d->reason == EXIT_SIDE && d->nframes > 1)) {
         return;
     }
@@ -357,8 +397,10 @@ lu_jit_note_exit(struct lu_deopt *d)
     if (inner->pc < 0 || inner->pc >= jc->ncode) {
         return;
     }
+    /* Past the threshold too: another root that inlined the same copy before
+       the flag was set leaves here as well, and is recompiled when it does. */
     uint16_t n = __atomic_add_fetch(&jc->fails[inner->pc], 1, __ATOMIC_RELAXED);
-    if (n == GUARD_FAILS) {
+    if (n >= GUARD_FAILS) {
         if (d->reason == EXIT_SIDE) {
             /* The inlined copy keeps leaving here: it is called instead from
                now on (and if that call leaves its caller's copy, the caller next). */
@@ -391,6 +433,7 @@ lu_jit_code_free(PyCodeObject *code)
     }
     free(jc->nospec);
     free(jc->fails);
+    free(jc->interpret);
     free(jc);
     code->co_executors = NULL;
 }

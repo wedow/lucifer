@@ -7,6 +7,11 @@ and always with every 7th guard failing (-X lucifer_stress=deopt:7). Output
 must match the oracle's line for line once the timings are masked, and in the
 compiling modes the tier must have compiled and entered code (its
 -X lucifer_jit_stats report), so that a lane cannot pass by not compiling.
+Then the exits lane: tests/kernel/jit_exits.py, whose hot code holds
+instructions the tier does not compile, runs under -X lucifer_jit=always at
+two sizes. The side exits compiled code takes must not grow with the
+iterations: code that keeps leaving at the same place stays in the
+interpreter instead of paying an entry and an exit each time.
 Exit status 1 on any difference.
 """
 import argparse
@@ -27,6 +32,8 @@ MODES = {
     'deopt:7': ['-X', 'lucifer_jit=always', '-X', 'lucifer_stress=deopt:7'],
 }
 TIMING = re.compile(r'\d+us')
+EXITS = ROOT / 'tests' / 'kernel' / 'jit_exits.py'
+EXITS_N = 20000
 
 
 def run(argv, timeout):
@@ -35,20 +42,44 @@ def run(argv, timeout):
     return p.returncode, TIMING.sub('Nus', p.stdout), p.stderr
 
 
+def side_exits(lucifer, n, timeout):
+    code, out, err = run([lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', str(EXITS), str(n)],
+                         timeout)
+    m = re.search(r'jit: entries .* side (\d+)', err)
+    return code, out, int(m[1]) if m else None
+
+
+def check_exits(args):
+    """Side exits at 2N less those at N: what the extra N iterations cost."""
+    small, large = (side_exits(args.lucifer, n, args.timeout) for n in (EXITS_N, 2 * EXITS_N))
+    want = [run([args.oracle, str(EXITS), str(n)], args.timeout)[:2] for n in (EXITS_N, 2 * EXITS_N)]
+    problems = []
+    if [small[:2], large[:2]] != want:
+        problems.append('output differs')
+    if small[2] is None or large[2] is None:
+        problems.append('no stats')
+    elif large[2] - small[2] > EXITS_N // 20:
+        problems.append(f'side exits {small[2]} at {EXITS_N} iterations, {large[2]} at {2 * EXITS_N}')
+    print(f"{'FAIL' if problems else 'PASS'} exits" + (': ' + '; '.join(problems) if problems else
+                                                     f' ({small[2]}, {large[2]})'))
+    return 1 if problems else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--lucifer', required=True)
     ap.add_argument('--oracle', required=True)
     ap.add_argument('--benchmarks', default=','.join(RUNS))
-    ap.add_argument('--modes', default=','.join(MODES))
+    ap.add_argument('--modes', default=','.join([*MODES, 'exits']))
     ap.add_argument('--timeout', type=float, default=600)
     args = ap.parse_args()
     failed = 0
-    for name in args.benchmarks.split(','):
+    modes = [m for m in args.modes.split(',') if m in MODES]
+    for name in args.benchmarks.split(',') if modes else []:
         iters, inner = RUNS[name]
         tail = [str(AWFY / 'harness.py'), name, str(iters), str(inner)]
         want = run([args.oracle, '-X', 'lucifer_jit=always'] + tail, args.timeout)
-        for mode in args.modes.split(','):
+        for mode in modes:
             flags = MODES[mode] + (['-X', 'lucifer_jit_stats'] if mode != 'off' else [])
             got = run([args.lucifer] + flags + tail, args.timeout)
             problems = []
@@ -64,6 +95,8 @@ def main():
             if problems:
                 failed += 1
                 sys.stdout.write(got[1][-2000:] + got[2][-3000:])
+    if 'exits' in args.modes.split(','):
+        failed += check_exits(args)
     print(f'{failed} failing')
     return 1 if failed else 0
 
