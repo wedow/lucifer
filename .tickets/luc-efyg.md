@@ -1,6 +1,6 @@
 ---
 id: luc-efyg
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-04T20:36:46Z
@@ -17,3 +17,13 @@ Under the jit lane (every function compiled at its first call) four tests/kernel
 
 make check-kernel LANE=jit and LANE=jit-deopt pass all programs.
 
+
+## Notes
+
+**2026-11-04T22:57:31Z**
+
+Seen once 11-04 (luc-0e07 branch, JIT default): make check-compiler's lucifer driver (bin/lucifer -I -S -c DRIVER over a chunk of the corpus, gc disabled) spun at 100% CPU, 48 MB RSS for 36 min and never finished; the same chunks completed in under 150 s on three reruns. Not reproduced since; unknown whether the JIT is involved.
+
+**2026-11-05T00:01:49Z**
+
+jit and jit-deopt lanes pass all programs (541/541 each) and now run in make check; difftest under always and deopt:7 runs in make check-jit. Causes: no poll after a call from compiled code, an inlined call's RESUME skipped, and kernel globals a kernel function rebinds folded. The check-compiler hang was not reproduced: luc-6aq7.

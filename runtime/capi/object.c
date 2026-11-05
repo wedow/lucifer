@@ -521,6 +521,13 @@ PyObject_AsFileDescriptor(PyObject *o)
     PyObject *meth = NULL, *fno = NULL;
     int fd;
     if (PyLong_Check(o)) {
+        if (PyBool_Check(o)) {
+            if (PyErr_WarnEx(PyExc_RuntimeWarning,
+                    "bool is used as a file descriptor", 1))
+            {
+                return -1;
+            }
+        }
         fd = PyLong_AsInt(o);
     }
     else {

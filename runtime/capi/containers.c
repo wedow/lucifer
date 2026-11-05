@@ -389,6 +389,9 @@ PyWeakref_NewProxy(PyObject *ob, PyObject *callback)
     return r;
 }
 
+/* A borrowed reference, as the contract says (Objects/weakrefobject.c): the
+   strong one taken here is dropped at once, which only a referent kept alive
+   by another thread's references survives. */
 PyObject *
 PyWeakref_GetObject(PyObject *ref)
 {
@@ -396,7 +399,12 @@ PyWeakref_GetObject(PyObject *ref)
         PyErr_BadInternalCall();
         return NULL;
     }
-    return ((PyWeakReference *)ref)->wr_object;
+    PyObject *ob = lu_weakref_get(ref);
+    if (ob == NULL) {
+        return Py_None;
+    }
+    Py_DECREF(ob);
+    return ob;
 }
 
 int
@@ -407,13 +415,8 @@ PyWeakref_GetRef(PyObject *ref, PyObject **pobj)
         PyErr_SetString(PyExc_TypeError, "expected a weakref");
         return -1;
     }
-    PyObject *ob = ((PyWeakReference *)ref)->wr_object;
-    if (ob == Py_None || ob == NULL || Py_REFCNT(ob) <= 0) {
-        *pobj = NULL;
-        return 0;
-    }
-    *pobj = Py_NewRef(ob);
-    return 1;
+    *pobj = lu_weakref_get(ref);
+    return *pobj != NULL;
 }
 
 int
@@ -423,8 +426,9 @@ PyWeakref_IsDead(PyObject *ref)
         PyErr_Format(PyExc_TypeError, "expected a weakref, got %s", ref != NULL ? Py_TYPE(ref)->tp_name : "NULL");
         return -1;
     }
-    PyObject *ob = ((PyWeakReference *)ref)->wr_object;
-    return ob == Py_None || ob == NULL || Py_REFCNT(ob) <= 0;
+    PyObject *ob = lu_weakref_get(ref);
+    Py_XDECREF(ob);
+    return ob == NULL;
 }
 
 /* str codecs: decoding is bytes(...).decode(encoding, errors). */
@@ -454,37 +458,6 @@ PyObject *
 PyUnicode_DecodeLatin1(const char *s, Py_ssize_t size, const char *errors)
 {
     return decode(s, size, "latin-1", errors);
-}
-
-PyObject *
-PyUnicode_DecodeUTF8Stateful(const char *s, Py_ssize_t size, const char *errors, Py_ssize_t *consumed)
-{
-    if (consumed != NULL) {
-        *consumed = size;
-    }
-    return decode(s, size, "utf-8", errors);
-}
-
-static PyObject *
-decode_wide(const char *s, Py_ssize_t size, const char *errors, int *byteorder, const char *base)
-{
-    const char *name = base[4] == '1' ? (byteorder == NULL || *byteorder == 0 ? "utf-16"
-                                         : *byteorder < 0 ? "utf-16-le" : "utf-16-be")
-                                      : (byteorder == NULL || *byteorder == 0 ? "utf-32"
-                                         : *byteorder < 0 ? "utf-32-le" : "utf-32-be");
-    return decode(s, size, name, errors);
-}
-
-PyObject *
-PyUnicode_DecodeUTF16(const char *s, Py_ssize_t size, const char *errors, int *byteorder)
-{
-    return decode_wide(s, size, errors, byteorder, "utf-16");
-}
-
-PyObject *
-PyUnicode_DecodeUTF32(const char *s, Py_ssize_t size, const char *errors, int *byteorder)
-{
-    return decode_wide(s, size, errors, byteorder, "utf-32");
 }
 
 PyObject *

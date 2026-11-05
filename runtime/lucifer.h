@@ -113,6 +113,14 @@ struct lu_lot_bucket {
    inside the bracket (tools/blockcheck). */
 PyThreadState *lu_syscall_begin(void);
 void lu_syscall_end(PyThreadState *ts);
+Py_ssize_t lu_write_fd(int fd, const void *buf, size_t count);
+int lu_set_cloexec(int fd);
+/* Evaluates the blocking call `call` between the two, which keeps errno. */
+#define LU_SYSCALL(call) ({ \
+        PyThreadState *lu_ts_ = lu_syscall_begin(); \
+        __typeof__(call) lu_r_ = (call); \
+        lu_syscall_end(lu_ts_); \
+        lu_r_; })
 
 /* lu_park's sleep (runtime/prim/os.c): waits while *word == expected, until
    a wake or the absolute CLOCK_MONOTONIC deadline (-1 for none). Returns 0,
@@ -334,6 +342,7 @@ struct _is {
     uintptr_t monitoring_tool_versions[LU_MON_TOOL_IDS];
     struct lu_static_type_state static_types[LU_MAX_STATIC_TYPES];
     PyObject *kernel[LU_K_COUNT];       /* strong; NULL until registered */
+    PyObject *kernel_rebound;           /* strong: name -> None for each global a kernel function rebinds */
     unsigned int next_version_tag;      /* heap types' tp_version_tag; 0 once spent */
     uint32_t next_keys_version;         /* dk_version of the next keys table versioned; 0 once spent */
     uint32_t next_func_version;         /* co_version of the next code object; 0 once spent */
@@ -832,6 +841,7 @@ extern LU_EXPORT union lu_runtime {
         } qsbr;
         struct {
             int tripped;                /* some handler's flag is set */
+            int unhandled_keyboard_interrupt;   /* a KeyboardInterrupt ended the program: exit by SIGINT */
             struct {
                 int tripped;
                 PyObject *func;         /* the Python handler, strong; NULL for none */
@@ -891,6 +901,13 @@ lu_try_incref_shared(PyObject *op)
     }
 }
 
+/* A reference to op, if it is alive (_Py_TryIncref). */
+static inline int
+lu_try_incref(PyObject *op)
+{
+    return lu_try_incref_fast(op) || lu_try_incref_shared(op);
+}
+
 /* A reference to op, if it is alive and *src still points to it. */
 static inline int
 lu_try_incref_compare(PyObject **src, PyObject *op)
@@ -914,6 +931,21 @@ lu_try_xget_ref(PyObject **ptr)
 {
     PyObject *value = _Py_atomic_load_ptr(ptr);
     return value != NULL && lu_try_incref_compare(ptr, value) ? value : NULL;
+}
+
+/* _PyObject_SetMaybeWeakref: op is about to be reachable through a weak
+   reference, so its shared count is nonzero and a try-incref from another
+   thread can succeed while the owner holds it. */
+static inline void
+lu_set_maybe_weakref(PyObject *op)
+{
+    if (_Py_IsImmortal(op)) {
+        return;
+    }
+    Py_ssize_t shared = _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared);
+    while ((shared & _Py_REF_SHARED_FLAG_MASK) == 0
+           && !_Py_atomic_compare_exchange_ssize(&op->ob_ref_shared, &shared, shared | _Py_REF_MAYBE_WEAKREF)) {
+    }
 }
 
 /* Py_NewRef under the container's lock: marks an object another thread owns
@@ -984,6 +1016,7 @@ PyObject *lu_weakref_get(PyObject *ref);
 PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
 void lu_capsule_init(void);
+int lu_fileobject_init(void);
 void lu_storage_init(void);
 void lu_module_init(void);
 void lu_exc_init(void);

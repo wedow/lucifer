@@ -64,7 +64,7 @@ STRICT_PROGRAMS = """
     exception_groups exceptions float_ops fstrings gc_at_poll gc_dead_weakref gc_thread_queues generators
     generic_alias handoff_finalize handoff_pinned handoff_state handoff_witness hash_seed hello import_io
     int_arith int_errors int_random int_reflect invalidate itertools_basic list_ops mapping_views
-    marshal_dumps match_stmt math_functions memoryview object_reduce posix_basic print_args range_slice
+    marshal_dumps match_stmt math_functions memoryview memoryview_buffer object_reduce posix_basic print_args range_slice
     resurrect scoping set_colliding_keys set_ops set_random signals signals_poll str_format
     str_methods str_sizeof struct_basic sysconfig_vars thread_lock threads_lowlevel threads_subclasses tstrings
     tuple_ops types_module typing_primitives unpack with_stmt
@@ -156,6 +156,8 @@ SOURCE_ROWS = [
     ("script uncaught", ["-S", "s.py"],
      {"s.py": "def f(x):\n    return [1, 2][x] + (None + 1)\ntry:\n    f(0)\nexcept TypeError as e:\n"
               "    raise ValueError('wrapped') from e\n"}, b"", True),
+    ("script keyboard interrupt", ["-S", "s.py"],
+     {"s.py": "import atexit\natexit.register(print, 'atexit')\nraise KeyboardInterrupt\n"}, b"", True),
     ("script excepthook", ["-S", "s.py"],
      {"s.py": "import sys\nsys.excepthook = lambda t, v, tb: print('hooked', t.__name__, v, tb.tb_lineno)\n"
               "raise KeyError('k')\n"}, b"", True),

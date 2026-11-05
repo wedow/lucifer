@@ -33,7 +33,7 @@ static PyObject *
 call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *const *args,
                 Py_ssize_t nargs, PyObject *kwnames)
 {
-    PyObject *descr = _PyType_Lookup(tp, name);
+    PyObject *descr = _PyType_LookupRef(tp, name);
     if (descr == NULL) {
         lu_err_format(PyExc_AttributeError, "'%.100s' object has no attribute '%s'",
                       Py_TYPE(self)->tp_name, PyUnicode_AsUTF8(name));
@@ -43,6 +43,7 @@ call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *cons
     PyObject *small[8];
     PyObject **stack = total + 1 <= 8 ? small : PyMem_Malloc((total + 1) * sizeof(PyObject *));
     if (stack == NULL) {
+        Py_DECREF(descr);
         return PyErr_NoMemory();
     }
     PyObject *func, *bound_self, *result;
@@ -55,7 +56,7 @@ call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *cons
     }
     else {
         /* A descriptor: bind it through __get__ (kernel Python), then call. */
-        PyObject *get = _PyType_Lookup(Py_TYPE(descr), LU_ID(__get__));
+        PyObject *get = _PyType_LookupRef(Py_TYPE(descr), LU_ID(__get__));
         PyObject *bound;
         if (get == NULL) {
             bound = Py_NewRef(descr);
@@ -63,6 +64,7 @@ call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *cons
         else {
             PyObject *get_args[3] = { descr, self, (PyObject *)Py_TYPE(self) };
             bound = lu_call(get, get_args, 3, NULL);
+            Py_DECREF(get);
         }
         result = bound != NULL ? lu_call(bound, args, nargs, kwnames) : NULL;
         Py_XDECREF(bound);
@@ -70,6 +72,7 @@ call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *cons
     if (stack != small) {
         PyMem_Free(stack);
     }
+    Py_DECREF(descr);
     return result;
 }
 

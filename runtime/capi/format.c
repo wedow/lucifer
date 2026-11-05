@@ -124,6 +124,14 @@ type_name(PyObject *obj, int qualified, int colon)
 PyObject *
 PyUnicode_FromFormatV(const char *format, va_list vargs)
 {
+    for (const char *f = format; *f; f++) {
+        if ((unsigned char)*f > 127) {
+            PyErr_Format(PyExc_ValueError,
+                         "PyUnicode_FromFormatV() expects an ASCII-encoded format "
+                         "string, got a non-ASCII byte: 0x%02x", (unsigned char)*f);
+            return NULL;
+        }
+    }
     struct ubuf b = { 0 };
     va_list ap;
     va_copy(ap, vargs);

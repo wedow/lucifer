@@ -10,6 +10,7 @@
 #include "lucifer.h"
 
 #include <errno.h>
+#include <langinfo.h>
 #include <limits.h>
 #include <locale.h>
 #include <stdio.h>
@@ -836,6 +837,95 @@ compute_sys_path_0(PyConfig *config)
     return PyConfig_SetBytesString(config, &config->sys_path_0, resolved);
 }
 
+/* The codeset of the user's LC_CTYPE locale (nl_langinfo_l of a locale made
+   from the environment, whatever the process's own locale is), or UTF-8. */
+static void
+locale_codeset(char out[64])
+{
+    locale_t locale = newlocale(LC_CTYPE_MASK, "", (locale_t)0);
+    const char *codeset = locale != (locale_t)0 ? nl_langinfo_l(CODESET, locale) : "";
+    snprintf(out, 64, "%s", codeset[0] != '\0' ? codeset : "UTF-8");
+    if (locale != (locale_t)0) {
+        freelocale(locale);
+    }
+}
+
+/* config_init_stdio_encoding: PYTHONIOENCODING's encoding:errors, then the
+   UTF-8 mode or the locale's encoding, with surrogateescape in the UTF-8 and
+   ASCII locales. Settled here, the kernel's init_streams takes the config's
+   word for both. */
+static PyStatus
+read_stdio(PyConfig *config)
+{
+    if (config->stdio_encoding != NULL && config->stdio_errors != NULL) {
+        return PyStatus_Ok();
+    }
+    char codeset[64];
+    locale_codeset(codeset);
+    if (config->use_environment && env_set("PYTHONIOENCODING")) {
+        char *copy = strdup(getenv("PYTHONIOENCODING"));
+        char *errors = copy != NULL ? strchr(copy, ':') : NULL;
+        if (errors != NULL) {
+            *errors++ = '\0';               /* the encoding ends at the colon */
+            if (*errors == '\0') {
+                errors = NULL;
+            }
+        }
+        PyStatus status = copy != NULL ? PyStatus_Ok() : PyStatus_NoMemory();
+        if (!PyStatus_Exception(status) && copy[0] != '\0') {
+            if (config->stdio_encoding == NULL) {
+                status = PyConfig_SetBytesString(config, &config->stdio_encoding, copy);
+            }
+            if (errors == NULL) {
+                errors = "strict";      /* latin1 behaves as latin1:strict */
+            }
+        }
+        if (!PyStatus_Exception(status) && config->stdio_errors == NULL && errors != NULL) {
+            status = PyConfig_SetBytesString(config, &config->stdio_errors, errors);
+        }
+        free(copy);
+        if (PyStatus_Exception(status)) {
+            return status;
+        }
+    }
+    int utf8 = lu_utf8_mode(config);
+    PyStatus status = PyStatus_Ok();
+    if (config->stdio_encoding == NULL) {
+        status = utf8 ? PyConfig_SetString(config, &config->stdio_encoding, L"utf-8")
+                      : PyConfig_SetBytesString(config, &config->stdio_encoding, codeset);
+    }
+    if (!PyStatus_Exception(status) && config->stdio_errors == NULL) {
+        status = PyConfig_SetString(config, &config->stdio_errors,
+                                    utf8 || strcmp(codeset, "ANSI_X3.4-1968") == 0
+                                        ? L"surrogateescape" : L"strict");
+    }
+    return status;
+}
+
+/* The string members PyConfig_Get reads as settled values: getpath's program
+   name and the hash-based pyc default, the filesystem always UTF-8 here
+   (Py_EncodeLocale), and the stdio encoding and errors. */
+static PyStatus
+read_strings(PyConfig *config)
+{
+    PyStatus status = read_stdio(config);
+    if (!PyStatus_Exception(status) && config->program_name == NULL) {
+        status = PyConfig_SetString(config, &config->program_name,
+                                    config->orig_argv.length > 0 ? config->orig_argv.items[0]
+                                                                 : L"lucifer");
+    }
+    if (!PyStatus_Exception(status) && config->check_hash_pycs_mode == NULL) {
+        status = PyConfig_SetString(config, &config->check_hash_pycs_mode, L"default");
+    }
+    if (!PyStatus_Exception(status) && config->filesystem_encoding == NULL) {
+        status = PyConfig_SetString(config, &config->filesystem_encoding, L"utf-8");
+    }
+    if (!PyStatus_Exception(status) && config->filesystem_errors == NULL) {
+        status = PyConfig_SetString(config, &config->filesystem_errors, L"surrogateescape");
+    }
+    return status;
+}
+
 PyStatus
 PyConfig_Read(PyConfig *config)
 {
@@ -874,6 +964,9 @@ PyConfig_Read(PyConfig *config)
     }
     if (!PyStatus_Exception(status)) {
         status = finish_warnoptions(config);
+    }
+    if (!PyStatus_Exception(status)) {
+        status = read_strings(config);
     }
     if (config->thread_inherit_context < 0) {
         config->thread_inherit_context = 1;            /* the free-threaded default */

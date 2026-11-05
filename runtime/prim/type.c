@@ -298,7 +298,7 @@ PyType_Unwatch(int id, PyObject *obj)
     return 0;
 }
 
-/* The walk of the MRO: the first dict that has the name. */
+/* The walk of the MRO: the first dict that has the name, as a new reference. */
 static PyObject *
 lookup_in_mro(PyTypeObject *tp, PyObject *name)
 {
@@ -306,7 +306,7 @@ lookup_in_mro(PyTypeObject *tp, PyObject *name)
     if (mro == NULL) {
         /* During creation, before the MRO exists: the type, then its bases. */
         for (; tp != NULL; tp = tp->tp_base) {
-            PyObject *v = lu_ns_lookup(lu_type_dict(tp), name);
+            PyObject *v = lu_ns_get(lu_type_dict(tp), name);
             if (v != NULL) {
                 return v;
             }
@@ -316,7 +316,7 @@ lookup_in_mro(PyTypeObject *tp, PyObject *name)
     for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); i++) {
         PyTypeObject *base = (PyTypeObject *)PyTuple_GET_ITEM(mro, i);
         PyObject *dict = lu_type_dict(base);
-        PyObject *v = dict != NULL ? lu_ns_lookup(dict, name) : NULL;
+        PyObject *v = dict != NULL ? lu_ns_get(dict, name) : NULL;
         if (v != NULL) {
             return v;
         }
@@ -324,8 +324,25 @@ lookup_in_mro(PyTypeObject *tp, PyObject *name)
     return NULL;
 }
 
-PyObject *
-_PyType_Lookup(PyTypeObject *tp, PyObject *name)
+/* The walk of the MRO, its reference dropped at once when the caller only
+   borrows. */
+static PyObject *
+walk(PyTypeObject *tp, PyObject *name, int take)
+{
+    PyObject *value = lookup_in_mro(tp, name);
+    if (!take) {
+        Py_XDECREF(value);
+    }
+    return value;
+}
+
+/* The lookup behind _PyType_LookupRef (typeobject.c): with `take` the value is a new reference, which the
+   caller may keep while another thread replaces the attribute. A cache entry
+   holds the value without owning it, as the dict holds it, so the reader
+   takes its reference only if the value is still alive and the entry has not
+   changed under it; otherwise it walks the MRO. */
+static PyObject *
+type_lookup(PyTypeObject *tp, PyObject *name, int take)
 {
     /* The method cache's assignment: a lookup is what gives a type its tag. */
     if (tp->tp_version_tag == 0 && tp->tp_versions_used < MAX_VERSIONS_PER_CLASS
@@ -339,7 +356,7 @@ _PyType_Lookup(PyTypeObject *tp, PyObject *name)
        kernel has booted, static types change without a tag change. */
     if (version == 0 || !interp->specializing || tp->tp_mro == NULL
         || !PyUnicode_CheckExact(name) || !PyUnicode_CHECK_INTERNED(name)) {
-        return lookup_in_mro(tp, name);
+        return walk(tp, name, take);
     }
     struct lu_mcache_entry *e = &interp->mcache[(version ^ (uint32_t)((uintptr_t)name >> 3)) & (LU_MCACHE_SIZE - 1)];
     uint32_t seq = __atomic_load_n(&e->seq, __ATOMIC_ACQUIRE);
@@ -349,10 +366,12 @@ _PyType_Lookup(PyTypeObject *tp, PyObject *name)
         PyObject *value = __atomic_load_n(&e->value, __ATOMIC_RELAXED);
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         if (v == version && n == name && __atomic_load_n(&e->seq, __ATOMIC_RELAXED) == seq) {
-            return value;
+            if (value == NULL || !take || lu_try_incref_compare(&e->value, value)) {
+                return value;
+            }
         }
     }
-    PyObject *value = lookup_in_mro(tp, name);
+    PyObject *value = walk(tp, name, take);
     if (!(seq & 1) && __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) == version
         && __atomic_compare_exchange_n(&e->seq, &seq, seq + 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
         __atomic_thread_fence(__ATOMIC_RELEASE);        /* the odd sequence before the fields (_PySeqLock_LockWrite) */
@@ -367,7 +386,16 @@ _PyType_Lookup(PyTypeObject *tp, PyObject *name)
 PyObject *
 _PyType_LookupRef(PyTypeObject *tp, PyObject *name)
 {
-    return Py_XNewRef(_PyType_Lookup(tp, name));
+    return type_lookup(tp, name, 1);
+}
+
+/* _PyType_Lookup: the value borrowed. Safe to compare with another pointer or
+   with NULL; a caller that uses the value takes _PyType_LookupRef, because
+   another thread may replace the attribute and free the value. */
+PyObject *
+_PyType_Lookup(PyTypeObject *tp, PyObject *name)
+{
+    return type_lookup(tp, name, 0);
 }
 
 int
@@ -1630,7 +1658,8 @@ static PyObject *
 prim_type_lookup(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); TYPE_ARG(0); STR_ARG(1);
-    return or_missing(_PyType_Lookup((PyTypeObject *)args[0], args[1]));
+    PyObject *v = _PyType_LookupRef((PyTypeObject *)args[0], args[1]);
+    return v != NULL ? v : Py_NewRef(LU_MISSING);
 }
 
 /* type_dict(t): the type's own dict (interpreter state for static types). */
@@ -1982,6 +2011,12 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
     int inherited = !is_runtime_type(staticbase) && staticbase->tp_new == owner->tp_new;
     if (staticbase != owner && !inherited
         && !(PyExceptionClass_Check(staticbase) && PyExceptionClass_Check(owner))) {
+        if (staticbase->tp_new == NULL) {
+            /* A static type with no tp_new cannot be instantiated
+               (type_ready_set_new). */
+            lu_err_format(PyExc_TypeError, "cannot create '%s' instances", tp->tp_name);
+            return -1;
+        }
         lu_err_format(PyExc_TypeError, "%s.__new__(%s) is not safe, use %s.__new__()",
                       owner->tp_name, tp->tp_name, staticbase->tp_name);
         return -1;

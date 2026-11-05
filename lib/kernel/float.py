@@ -9,7 +9,7 @@ from _lucifer import (
     float_floordiv, float_mod, float_divmod, float_pow, float_neg, float_abs, float_exact,
     float_subtype, float_hash, float_cmp, float_repr, float_format, float_from_text,
     float_integral, float_is_integer, float_round, float_as_ratio, float_hex, float_fromhex,
-    int_format, str_len, str_item, str_slice,
+    int_format, str_len, str_item, str_slice, b_check,
 )
 from _lucifer import _boot, operators, _format
 
@@ -40,11 +40,17 @@ def _decimal(n):
 
 
 def _from_string(x):
-    """PyFloat_FromString."""
-    if not (kind(x, 'str') or kind(x, 'bytes')):
+    """PyFloat_FromString: a str, or any bytes-like object (bytearray,
+    memoryview, ...) read through PyBUF_SIMPLE; a non-contiguous buffer is a
+    buffer error CPython's float() replaces with this TypeError."""
+    if not (kind(x, 'str') or kind(x, 'bytes') or b_check(x)):
         error(TypeError, _cat(
             "float() argument must be a string or a real number, not '", _name(x), "'"))
-    r = float_from_text(x)
+    try:
+        r = float_from_text(x)
+    except BufferError:
+        error(TypeError, _cat(
+            "float() argument must be a string or a real number, not '", _name(x), "'"))
     if r is MISSING:
         error(ValueError, _cat('could not convert string to float: ', _format.to_repr(x)))
     return r

@@ -6,22 +6,37 @@
 
 #include "interp/frozen.h"
 #include "interp/code.h"
+#include "interp/frame.h"
 
 #include "marshal.h"
 
 /* Marks a kernel code object and those nested in it, so that their frames
-   are kernel-hidden and __build_class__ knows kernel class bodies. */
-static void
-mark_kernel(PyObject *code)
+   are kernel-hidden and __build_class__ knows kernel class bodies. The
+   globals a kernel function rebinds go into `rebound`: the JIT folds every
+   other kernel global to its value. */
+static int
+mark_kernel(PyObject *code, PyObject *rebound)
 {
     PyCodeObject *co = (PyCodeObject *)code;
     co->co_flags |= LU_CO_KERNEL;
+    lu_codeunit *start = lu_code_start(co);
+    int op = 0, arg = 0;
+    for (Py_ssize_t i = 0; (co->co_flags & CO_OPTIMIZED) && i < Py_SIZE(co); i += 1 + lu_opcode_caches[op]) {
+        op = start[i].op.code;
+        arg = arg << 8 | start[i].op.arg;
+        if ((op == STORE_GLOBAL || op == DELETE_GLOBAL)
+            && lu_ns_insert(rebound, PyTuple_GET_ITEM(co->co_names, arg), Py_None) < 0) {
+            return -1;
+        }
+        arg = op == EXTENDED_ARG ? arg : 0;
+    }
     for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(co->co_consts); i++) {
         PyObject *c = PyTuple_GET_ITEM(co->co_consts, i);
-        if (PyCode_Check(c)) {
-            mark_kernel(c);
+        if (PyCode_Check(c) && mark_kernel(c, rebound) < 0) {
+            return -1;
         }
     }
+    return 0;
 }
 
 /* Marks the functions of a builtin module port, and those nested in them, so
@@ -78,12 +93,19 @@ lu_kernel_boot(PyInterpreterState *interp)
 {
     PyObject *builtins_module = lu_ns_lookup(interp->modules, LU_ID(builtins));
     PyObject *lucifer = lu_ns_lookup(interp->modules, LU_ID(_lucifer));
+    interp->kernel_rebound = PyDict_New();
+    if (interp->kernel_rebound == NULL) {
+        return -1;
+    }
     for (const struct lu_frozen *m = lu_frozen_kernel; m->name != NULL; m++) {
         PyObject *code = PyMarshal_ReadObjectFromString((const char *)m->data, m->size);
         if (code == NULL) {
             return -1;
         }
-        mark_kernel(code);
+        if (mark_kernel(code, interp->kernel_rebound) < 0) {
+            Py_DECREF(code);
+            return -1;
+        }
         PyObject *module = lu_module_new(m->name);
         if (module == NULL) {
             Py_DECREF(code);

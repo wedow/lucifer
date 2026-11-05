@@ -54,9 +54,16 @@ def _descr_check(descr, obj):
 
 @kernel_type(static_type('function'))
 class function:
-    def __new__(cls, code, globals, name=None, argdefs=None, closure=None, kwdefaults=None):
+    def __new__(cls, /, *args, **kwargs):
         """Create a function object."""
-        return function_new(code, globals, name, argdefs, closure, kwdefaults)
+        from _lucifer import _args  # loaded after this module
+        code, globals, name, argdefs, closure, kwdefaults = _args.unpack(
+            'function', args, kwargs,
+            ('code', 'globals', 'name', 'argdefs', 'closure', 'kwdefaults'), 0, 2)
+        return function_new(code, globals, None if name is MISSING else name,
+                            None if argdefs is MISSING else argdefs,
+                            None if closure is MISSING else closure,
+                            None if kwdefaults is MISSING else kwdefaults)
 
     def __call__(self, /, *args, **kwargs):
         return self(*args, **kwargs)

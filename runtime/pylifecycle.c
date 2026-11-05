@@ -134,8 +134,9 @@ report_uncaught(void)
         else {
             PyObject *s = PyUnicode_Check(code) ? Py_NewRef(code) : NULL;
             if (s == NULL) {
-                PyObject *str = _PyType_Lookup(Py_TYPE(code), LU_ID(__str__));
+                PyObject *str = _PyType_LookupRef(Py_TYPE(code), LU_ID(__str__));
                 s = str != NULL ? lu_call(str, &code, 1, NULL) : NULL;
+                Py_XDECREF(str);
                 PyErr_Clear();
             }
             const char *text = s != NULL && PyUnicode_Check(s) ? PyUnicode_AsUTF8(s) : "";
@@ -145,6 +146,9 @@ report_uncaught(void)
         }
     }
     else {
+        if (PyType_IsSubtype(Py_TYPE(exc), (PyTypeObject *)PyExc_KeyboardInterrupt)) {
+            _PyRuntime.signals.unhandled_keyboard_interrupt = 1;
+        }
         /* sys.excepthook(type, value, traceback); without one, the default display */
         PyObject *hook = lu_ns_lookup(_PyRuntime.main_interp.sysdict, PyUnicode_InternFromString("excepthook"));
         PyObject *tb = ((PyBaseExceptionObject *)exc)->traceback;
@@ -246,7 +250,8 @@ boot_native(struct _is *interp)
     }
     interp->builtins = Py_NewRef(PyModule_GetDict(builtins));
     interp->sysdict = Py_NewRef(PyModule_GetDict(sys));
-    if (lu_types_init(interp) < 0 || add_builtins(interp->builtins) < 0 || lu_cc_init() < 0) {
+    if (lu_types_init(interp) < 0 || lu_fileobject_init() < 0
+        || add_builtins(interp->builtins) < 0 || lu_cc_init() < 0) {
         Py_DECREF(builtins);
         Py_DECREF(sys);
         return -1;
@@ -582,15 +587,26 @@ flush_std_files(void)
     return status;
 }
 
-/* finalize_modules: __main__'s namespace is emptied so that what only it
-   held dies, __del__ methods running. The other modules stay: their code
-   (weakref callbacks, stream finalizers) still runs during teardown. */
+/* finalize_modules: the __del__ of what only __main__ held runs while the
+   namespace is still intact, as the shutdown collection's finalizer pass
+   does in CPython, and then the namespace is emptied. The other modules
+   stay: their code (weakref callbacks, stream finalizers) still runs during
+   teardown. */
 static void
 finalize_modules(struct _is *interp)
 {
     PyObject *main = lu_ns_lookup(interp->modules, LU_ID(__main__));
     if (main != NULL && PyModule_Check(main)) {
-        PyDict_Clear(PyModule_GetDict(main));
+        PyObject *dict = PyModule_GetDict(main);
+        PyObject *values = dict != NULL ? PyDict_Values(dict) : NULL;
+        if (values != NULL) {
+            for (Py_ssize_t i = 0; i < PyList_GET_SIZE(values); i++) {
+                PyObject_CallFinalizer(PyList_GET_ITEM(values, i));
+            }
+            PyDict_Clear(dict);
+            Py_DECREF(values);
+        }
+        PyErr_Clear();
     }
 }
 
@@ -619,6 +635,7 @@ release_interpreter(struct _is *interp)
     interp->kernel_booted = 0;
     memset(interp->static_types, 0, sizeof interp->static_types);
     memset(interp->kernel, 0, sizeof interp->kernel);
+    interp->kernel_rebound = NULL;
     PyConfig_Clear(&interp->config);
 }
 
@@ -670,10 +687,21 @@ Py_FinalizeEx(void)
     return status;
 }
 
+/* Modules/main.c exit_sigint: leave by SIGINT's default action so that the caller learns of
+   the interrupt; the status is the fallback if the signal does not end the process. */
+static int
+exit_sigint(void)
+{
+    signal(SIGINT, SIG_DFL);
+    kill(getpid(), SIGINT);
+    return SIGINT + 128;
+}
+
 static int
 finalize_status(int status)
 {
-    return Py_FinalizeEx() < 0 && status == 0 ? 120 : status;
+    status = Py_FinalizeEx() < 0 && status == 0 ? 120 : status;
+    return __atomic_load_n(&_PyRuntime.signals.unhandled_keyboard_interrupt, __ATOMIC_RELAXED) ? exit_sigint() : status;
 }
 
 /* Modules/main.c: run the file the config names, then finalize. */

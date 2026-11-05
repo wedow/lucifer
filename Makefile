@@ -86,7 +86,7 @@ STEP_TMO = 3600
 RUN = timeout -k 10 $(TMO)
 STEP = timeout -k 10 $(STEP_TMO)
 
-.PHONY: all oracle-exts abi-audit check check-jit check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler check-timing
+.PHONY: all oracle-exts abi-audit check check-jit check-kernel-jit check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler check-timing
 all: bin/lucifer build/lib/stamp
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -128,7 +128,7 @@ build/lib/stamp: tools/freeze lib/sysconfigdata.py $(shell find third_party/cpyt
 abi-audit: bin/lucifer
 	python3 tools/abi/audit.py $(EXPORTS) bin/lucifer
 
-check: check-blocking check-globals check-capi check-kernel check-embed
+check: check-blocking check-globals check-capi check-kernel check-kernel-jit check-embed
 
 # Blocking calls only in runtime/prim/os.c, inside the syscall bracket.
 check-blocking: $(MAIN) $(LIB_OBJS)
@@ -237,9 +237,24 @@ check-kernel: bin/lucifer build/lib/stamp
 	$(STEP) $(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer \
 	  --programs "$(PROGRAMS)" $(if $(LANE),--lane $(LANE))
 
-# The optimizing tier on AWFY: every JIT mode against the oracle.
+# tests/kernel with every function compiled at its first call, then with every
+# 7th guard failing as well: the lanes every landing runs.
+check-kernel-jit: bin/lucifer build/lib/stamp
+	for lane in jit jit-deopt; do \
+	  $(STEP) $(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer --lane $$lane || exit 1; \
+	done
+
+# The optimizing tier on AWFY in every JIT mode, then the difftest corpus with
+# every function compiled at its first call, without and with failing guards.
+DIFFTEST_JIT = always:'-X lucifer_jit=always' deopt:'-X lucifer_jit=always -X lucifer_stress=deopt:7'
 check-jit: bin/lucifer build/lib/stamp
 	$(STEP) python3 tools/jitcheck --lucifer bin/lucifer --oracle $(ORACLE_T)
+	@for m in $(DIFFTEST_JIT); do \
+	  name=$${m%%:*}; flags=$${m#*:}; \
+	  $(STEP) python3 tools/difftest run --oracle $(ORACLE_T) --python "bin/lucifer $$flags" --runtime lucifer \
+	    --results build/difftest/$$name --work build/difftest/$$name/work || { echo "FAIL difftest $$name"; exit 1; }; \
+	  echo "PASS difftest $$name"; \
+	done
 
 # Wall-clock bounds: an uncaught exception, a 100,000-line function.
 check-timing: bin/lucifer build/lib/stamp

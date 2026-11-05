@@ -205,6 +205,11 @@ handling of normal slices."""
 
 @kernel_type(static_type('ellipsis'))
 class ellipsis:
+    def __new__(cls, /, *args, **kwargs):
+        if args or kwargs:
+            error(TypeError, 'EllipsisType takes no arguments')
+        return Ellipsis
+
     def __repr__(self):
         return 'Ellipsis'
 

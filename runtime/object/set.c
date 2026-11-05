@@ -182,12 +182,26 @@ lu_set_new(PyTypeObject *type)
     return (PyObject *)so;
 }
 
+static int
+judged_has(PyObject *judged, PyObject *key)
+{
+    for (Py_ssize_t i = 0; judged != NULL && i < PyTuple_GET_SIZE(judged); i++) {
+        if (PyTuple_GET_ITEM(judged, i) == key) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* The probe of set_lookkey. Without the lock an entry's key may be being
    freed by a discard, so a key is read only after a try-incref; one that is
    gone answers LU_SET_CHANGED (the locked probe below redoes it). The table
-   and its mask come from one load. */
-static Py_ssize_t
-probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, int *verdict, int locked)
+   and its mask come from one load. A candidate whose key is in the tuple
+   `judged` (or any key but `key` itself, when `exact`) is passed over; the
+   candidate that stops the probe is returned as a new reference. */
+static int
+probe(PySetObject *so, PyObject *key, Py_hash_t hash, PyObject *judged, int exact, PyObject **candidate,
+      setentry **at, int locked)
 {
     setentry *table = _Py_atomic_load_ptr_acquire(&so->table);
     size_t perturb = hash;
@@ -198,32 +212,33 @@ probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, int *verd
         int probes = (i + LINEAR_PROBES <= mask) ? LINEAR_PROBES : 0;
         do {
             if (entry->hash == 0 && entry->key == NULL) {
-                *verdict = LU_SET_ABSENT;
-                return entry - table;
+                return LU_SET_ABSENT;
             }
             if (entry->hash == hash) {
                 PyObject *startkey = _Py_atomic_load_ptr(&entry->key);
                 if (startkey == key) {
-                    *verdict = LU_SET_FOUND;
-                    return entry - table;
+                    *at = entry;
+                    return LU_SET_FOUND;
                 }
-                if (startkey != NULL && startkey != LU_SET_DUMMY) {
+                if (startkey != NULL && startkey != LU_SET_DUMMY && !exact && !judged_has(judged, startkey)) {
                     int held = !locked && !_Py_IsImmortal(startkey);
                     if (held && !lu_try_incref_compare(&entry->key, startkey)) {
-                        *verdict = LU_SET_CHANGED;
-                        return entry - table;
+                        return LU_SET_CHANGED;
                     }
                     int eq = lu_native_eq(startkey, key);
+                    if (eq > 0) {
+                        if (held) {
+                            Py_DECREF(startkey);
+                        }
+                        *at = entry;
+                        return LU_SET_FOUND;
+                    }
+                    if (eq < 0) {
+                        *candidate = held ? startkey : Py_NewRef(startkey);
+                        return LU_SET_CANDIDATE;
+                    }
                     if (held) {
                         Py_DECREF(startkey);
-                    }
-                    if (eq > 0) {
-                        *verdict = LU_SET_FOUND;
-                        return entry - table;
-                    }
-                    if (eq < 0 && skip-- <= 0) {
-                        *verdict = LU_SET_CANDIDATE;
-                        return entry - table;
                     }
                 }
             }
@@ -234,16 +249,17 @@ probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, int *verd
     }
 }
 
-Py_ssize_t
-lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, int *verdict)
+int
+lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, PyObject *judged, PyObject **candidate)
 {
-    Py_ssize_t i = probe(so, key, hash, skip, verdict, 0);
-    if (*verdict == LU_SET_CHANGED) {
+    setentry *at;
+    int verdict = probe(so, key, hash, judged, 0, candidate, &at, 0);
+    if (verdict == LU_SET_CHANGED) {
         Py_BEGIN_CRITICAL_SECTION(so);
-        i = probe(so, key, hash, skip, verdict, 1);
+        verdict = probe(so, key, hash, judged, 0, candidate, &at, 1);
         Py_END_CRITICAL_SECTION();
     }
-    return i;
+    return verdict;
 }
 
 void
@@ -345,30 +361,90 @@ lu_set_insert(PySetObject *so, PyObject *key, Py_hash_t hash)
     }
 }
 
+/* set_add_entry under the critical section: the key is inserted when the
+   probe meets nothing equal. A candidate that only __eq__ can judge is
+   returned (a new reference) with the set unchanged; the caller judges it
+   and comes back with it in `judged`, so that what it commits is decided
+   against the table as it is then. FOUND: the set holds an equal key now. */
+int
+lu_set_add_native(PySetObject *so, PyObject *key, Py_hash_t hash, PyObject *judged, PyObject **candidate)
+{
+    setentry *at;
+    int verdict;
+    Py_BEGIN_CRITICAL_SECTION(so);
+    verdict = probe(so, key, hash, judged, 0, candidate, &at, 1);
+    if (verdict == LU_SET_ABSENT) {
+        verdict = lu_set_insert(so, key, hash) < 0 ? -1 : LU_SET_FOUND;
+    }
+    Py_END_CRITICAL_SECTION();
+    return verdict;
+}
+
+/* set_discard_entry under the critical section, with the answers of the add:
+   FOUND is a key removed. `exact` removes only the entry holding `key` itself
+   (the candidate a caller has judged equal). */
+int
+lu_set_discard_native(PySetObject *so, PyObject *key, Py_hash_t hash, PyObject *judged, int exact,
+                      PyObject **candidate)
+{
+    setentry *at;
+    PyObject *old = NULL;
+    int verdict;
+    Py_BEGIN_CRITICAL_SECTION(so);
+    verdict = probe(so, key, hash, judged, exact, candidate, &at, 1);
+    if (verdict == LU_SET_FOUND) {
+        old = at->key;
+        at->key = LU_SET_DUMMY;
+        at->hash = -1;
+        so->used--;
+    }
+    Py_END_CRITICAL_SECTION();
+    Py_XDECREF(old);
+    return verdict;
+}
+
+/* The tuple `judged` with `key` appended; NULL with an error set. */
+static PyObject *
+judged_push(PyObject *judged, PyObject *key)
+{
+    Py_ssize_t n = judged == NULL ? 0 : PyTuple_GET_SIZE(judged);
+    PyObject *more = PyTuple_New(n + 1);
+    if (more == NULL) {
+        return NULL;
+    }
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyTuple_SET_ITEM(more, i, Py_NewRef(PyTuple_GET_ITEM(judged, i)));
+    }
+    PyTuple_SET_ITEM(more, n, Py_NewRef(key));
+    return more;
+}
+
 /* The marshal reader's add: keys compare with lu_eq. */
 int
 lu_set_add(PyObject *set, PyObject *key)
 {
-    PySetObject *so = (PySetObject *)set;
     Py_hash_t hash = lu_hash(key);
     if (hash == -1) {
         return -1;
     }
-    Py_ssize_t judged = 0;
+    PyObject *judged = NULL;
     for (;;) {
-        int verdict;
-        Py_ssize_t at = lu_set_probe(so, key, hash, judged, &verdict);
-        if (verdict == LU_SET_FOUND) {
-            return 0;
+        PyObject *candidate;
+        int verdict = lu_set_add_native((PySetObject *)set, key, hash, judged, &candidate);
+        if (verdict != LU_SET_CANDIDATE) {
+            Py_XDECREF(judged);
+            return verdict < 0 ? -1 : 0;
         }
-        if (verdict == LU_SET_ABSENT) {
-            return lu_set_insert(so, key, hash);
-        }
-        int cmp = lu_eq(so->table[at].key, key);
+        int cmp = lu_eq(candidate, key);
+        PyObject *more = cmp == 0 ? judged_push(judged, candidate) : NULL;
+        Py_DECREF(candidate);
+        Py_XDECREF(judged);
         if (cmp != 0) {
             return cmp < 0 ? -1 : 0;
         }
-        judged++;
+        if ((judged = more) == NULL) {
+            return -1;
+        }
     }
 }
 

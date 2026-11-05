@@ -94,15 +94,20 @@ function_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
     return result;
 }
 
-/* _PyEval_BuiltinsFromGlobals. */
+/* _PyEval_BuiltinsFromGlobals, as a new reference. */
 static PyObject *
 builtins_of(PyObject *globals)
 {
-    PyObject *b = lu_ns_lookup(globals, LU_ID(__builtins__));
+    PyObject *b = lu_ns_get(globals, LU_ID(__builtins__));
     if (b == NULL) {
-        return PyInterpreterState_Get()->builtins;
+        return Py_NewRef(PyInterpreterState_Get()->builtins);
     }
-    return PyModule_CheckExact(b) ? ((PyModuleObject *)b)->md_dict : b;
+    if (PyModule_CheckExact(b)) {
+        PyObject *dict = Py_NewRef(((PyModuleObject *)b)->md_dict);
+        Py_DECREF(b);
+        return dict;
+    }
+    return b;
 }
 
 PyObject *
@@ -115,14 +120,14 @@ lu_function_new(PyObject *code, PyObject *globals)
         return NULL;
     }
     op->func_globals = Py_NewRef(globals);
-    op->func_builtins = Py_NewRef(builtins_of(globals));
+    op->func_builtins = builtins_of(globals);
     op->func_name = Py_NewRef(co->co_name);
     op->func_qualname = Py_NewRef(co->co_qualname);
     op->func_code = Py_NewRef(code);
     PyObject *doc = (co->co_flags & CO_HAS_DOCSTRING) ? PyTuple_GET_ITEM(co->co_consts, 0)
                                                       : Py_None;
     op->func_doc = Py_NewRef(doc);
-    op->func_module = Py_XNewRef(lu_ns_lookup(globals, LU_ID(__name__)));
+    op->func_module = lu_ns_get(globals, LU_ID(__name__));
     op->vectorcall = function_vectorcall;
     lu_func_notify(PyFunction_EVENT_CREATE, op, NULL);
     return (PyObject *)op;

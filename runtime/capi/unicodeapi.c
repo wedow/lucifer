@@ -8,7 +8,7 @@
 
 #define CHECK_STR(op) do { \
     if (!PyUnicode_Check(op)) { \
-        PyErr_Format(PyExc_TypeError, "bad argument type for built-in operation"); \
+        PyErr_BadArgument(); \
         return -1; \
     } } while (0)
 

@@ -1,6 +1,7 @@
 /* Format-string argument parsing (Python/getargs.c): PyArg_Parse,
-   PyArg_ParseTuple, PyArg_ParseTupleAndKeywords and PyArg_UnpackTuple. The
-   format units supported are those extension modules use: the integer,
+   PyArg_ParseTuple, PyArg_ParseTupleAndKeywords, PyArg_UnpackTuple and
+   _PyArg_ParseStack, the form argument-clinic wrappers call. The format
+   units supported are those extension modules use: the integer,
    float, string, bytes, object and predicate codes, nested tuples, and the
    optional, keyword-only and name/message markers. */
 
@@ -266,6 +267,14 @@ convert_unit(struct parse *p, PyObject *arg, const char **fmt, va_list *va)
         }
         return 0;
     }
+    case 'D': {
+        Py_complex cval = PyComplex_AsCComplex(arg);
+        if (PyErr_Occurred()) {
+            return -1;
+        }
+        *va_arg(*va, Py_complex *) = cval;
+        return 0;
+    }
     case 'p': {
         int t = PyObject_IsTrue(arg);
         if (t < 0) {
@@ -361,6 +370,7 @@ skip_unit(const char **fmt, va_list *va)
     case 'n': va_arg(*va, Py_ssize_t *); break;
     case 'f': va_arg(*va, float *); break;
     case 'd': va_arg(*va, double *); break;
+    case 'D': va_arg(*va, Py_complex *); break;
     case 'c': va_arg(*va, char *); break;
     case 'C': va_arg(*va, int *); break;
     case 's': case 'z': case 'y': {
@@ -461,7 +471,8 @@ scan_format(const char *format, struct parse *p, int *min, int *max, int *kwonly
 }
 
 static int
-parse_args(PyObject *args, PyObject *kwargs, const char *format, char *const *kwlist, va_list *va)
+parse_stack(PyObject *const *args, Py_ssize_t nargs, PyObject *kwargs, const char *format,
+            char *const *kwlist, va_list *va)
 {
     struct parse p = { NULL, NULL, 0 };
     int min, max, kwonly;
@@ -471,7 +482,6 @@ parse_args(PyObject *args, PyObject *kwargs, const char *format, char *const *kw
     if (kwonly >= 0 && kwonly < max) {
         /* keyword-only units follow the positional ones */
     }
-    Py_ssize_t nargs = PyTuple_GET_SIZE(args);
     Py_ssize_t nkw = kwargs != NULL ? PyDict_Size(kwargs) : 0;
     int npos_max = kwonly >= 0 ? kwonly : max;
     const char *fname = p.fname != NULL ? p.fname : "function";
@@ -493,7 +503,7 @@ parse_args(PyObject *args, PyObject *kwargs, const char *format, char *const *kw
             f++;
         }
         p.unit = i + 1;
-        PyObject *arg = i < nargs ? PyTuple_GET_ITEM(args, i) : NULL;
+        PyObject *arg = i < nargs ? args[i] : NULL;
         if (arg == NULL && kwargs != NULL && kwlist != NULL && kwlist[i] != NULL && *kwlist[i]) {
             arg = PyDict_GetItemString(kwargs, kwlist[i]);
             if (arg != NULL) {
@@ -552,7 +562,10 @@ PyArg_VaParse(PyObject *args, const char *format, va_list va)
 {
     va_list copy;
     va_copy(copy, va);
-    int r = PyTuple_Check(args) ? parse_args(args, NULL, format, NULL, &copy) : 0;
+    int r = PyTuple_Check(args)
+        ? parse_stack(((PyTupleObject *)args)->ob_item, PyTuple_GET_SIZE(args), NULL, format, NULL,
+                      &copy)
+        : 0;
     if (!PyTuple_Check(args)) {
         PyErr_SetString(PyExc_SystemError, "new style getargs format but argument is not a tuple");
     }
@@ -570,6 +583,18 @@ PyArg_ParseTuple(PyObject *args, const char *format, ...)
     return r;
 }
 
+/* A stack of arguments instead of a tuple (Python/getargs.c
+   _PyArg_ParseStack, as argument-clinic wrappers call). */
+LU_EXPORT int
+_PyArg_ParseStack(PyObject *const *args, Py_ssize_t nargs, const char *format, ...)
+{
+    va_list va;
+    va_start(va, format);
+    int r = parse_stack(args, nargs, NULL, format, NULL, &va);
+    va_end(va);
+    return r;
+}
+
 int
 PyArg_VaParseTupleAndKeywords(PyObject *args, PyObject *kwargs, const char *format, char *const *kwlist,
                               va_list va)
@@ -580,7 +605,8 @@ PyArg_VaParseTupleAndKeywords(PyObject *args, PyObject *kwargs, const char *form
     }
     va_list copy;
     va_copy(copy, va);
-    int r = parse_args(args, kwargs, format, kwlist, &copy);
+    int r = parse_stack(((PyTupleObject *)args)->ob_item, PyTuple_GET_SIZE(args), kwargs, format,
+                        kwlist, &copy);
     va_end(copy);
     return r;
 }
