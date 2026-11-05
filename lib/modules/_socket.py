@@ -8,6 +8,7 @@ asyncio and everything that imports them works."""
 import errno as _errno
 import _lucifer
 import posix as _posix
+import select as _select
 
 error = OSError
 
@@ -138,10 +139,8 @@ Only sockets over an existing descriptor (fileno=) exist yet."""
 
     def _wait(self, events):
         """Waits up to the timeout for the descriptor; a timeout of 0 or None does not wait."""
-        if self._timeout:
-            ready = _lucifer.os_poll([(self._fd, events)], int(self._timeout * 1000) or 1)
-            if ready is not None and not ready:      # None: interrupted by a signal
-                raise timeout('timed out')
+        if self._timeout and not _select._wait([(self._fd, events)], self._timeout):
+            raise timeout('timed out')
 
     def __del__(self):
         if self._fd >= 0:

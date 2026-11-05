@@ -442,10 +442,10 @@ bind(struct lu_frame *f, PyObject **args, Py_ssize_t argcount, PyObject *kwnames
                 continue;
             }
             PyObject *def = func->func_kwdefaults != NULL
-                ? lu_ns_lookup(func->func_kwdefaults, PyTuple_GET_ITEM(co->co_localsplusnames, i))
+                ? lu_ns_get(func->func_kwdefaults, PyTuple_GET_ITEM(co->co_localsplusnames, i))
                 : NULL;
             if (def != NULL) {
-                locals[i] = Py_NewRef(def);
+                locals[i] = def;
             }
             else {
                 missing++;

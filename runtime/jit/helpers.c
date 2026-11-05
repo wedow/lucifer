@@ -420,6 +420,12 @@ h_call(PyObject **argv, intptr_t n)
     t->pin++;
     PyObject *r = lu_call(callable, args, nargs, NULL);
     t->pin--;
+    /* The interpreter polls after a call: a signal the callee tripped is
+       handled here, and its exception is the call's. */
+    if (r != NULL && (__atomic_load_n(&t->carrier->poll, __ATOMIC_RELAXED) & LU_POLL_EVENTS_MASK)
+        && lu_poll_slow(&t->ts) < 0) {
+        Py_CLEAR(r);
+    }
     return r;
 }
 

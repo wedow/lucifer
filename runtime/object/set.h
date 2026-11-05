@@ -16,15 +16,22 @@ enum {
     LU_SET_CHANGED,         /* only inside the probe: a key was being freed */
 };
 
-/* The probe of set_lookkey for `key`, answering the entry's index in the table
-   it probed. It holds no lock (a discard may free a key under it: the probe
-   takes a reference first, and redoes itself under the critical section when
-   it cannot). `skip` is the number of candidates the
-   caller has found unequal since the table last changed: the probe resumes
-   past them, counted in the order it meets them (the windows of the probe
-   sequence overlap, so an entry can be met twice). */
-Py_ssize_t lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, Py_ssize_t skip, int *verdict);
-/* set_add_entry's last step, for a key known to be absent. */
+/* The probe of set_lookkey for `key`: FOUND, ABSENT, or CANDIDATE with the
+   key to compare in *candidate (a new reference). It holds no lock (a discard
+   may free a key under it: the probe takes a reference first, and redoes
+   itself under the critical section when it cannot). `judged` is a tuple of
+   keys the caller has found unequal, or NULL: the probe passes over them.
+   Naming them by identity keeps them right when the table changes. */
+int lu_set_probe(PySetObject *so, PyObject *key, Py_hash_t hash, PyObject *judged, PyObject **candidate);
+/* set_add_entry and set_discard_entry, each in one critical section from the
+   probe to the commit, so that two threads cannot both add a key, nor a
+   resize land between the probe and the commit. Answers as the probe;
+   FOUND after an add means the set holds an equal key, after a discard that
+   a key was removed. -1 on error. */
+int lu_set_add_native(PySetObject *so, PyObject *key, Py_hash_t hash, PyObject *judged, PyObject **candidate);
+int lu_set_discard_native(PySetObject *so, PyObject *key, Py_hash_t hash, PyObject *judged, int exact,
+                          PyObject **candidate);
+/* set_add_entry's last step, for a key known to be absent; under the critical section. */
 int lu_set_insert(PySetObject *so, PyObject *key, Py_hash_t hash);
 void lu_set_insert_clean(setentry *table, size_t mask, PyObject *key, Py_hash_t hash);
 int lu_set_resize(PySetObject *so, Py_ssize_t minused);

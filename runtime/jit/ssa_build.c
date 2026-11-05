@@ -1234,7 +1234,7 @@ name_at(struct ctx *c, int i)
 static PyObject *
 global_const(struct ctx *c, PyObject *name)
 {
-    if (c->kernel) {
+    if (c->kernel && lu_ns_lookup(PyThreadState_Get()->interp->kernel_rebound, name) == NULL) {
         return kernel_global(c, name);
     }
     if (!PyDict_CheckExact(c->globals) || !PyDict_CheckExact(c->builtins)) {
@@ -1292,8 +1292,25 @@ load_global(struct ctx *c)
     return 0;
 }
 
+static int load_attr_cached(struct ctx *c, PyObject *descr);
+
+/* The cache's descriptor is borrowed from the type, and the type may have
+   dropped it since: the translation holds a reference to it, or goes without. */
 static int
 load_attr(struct ctx *c)
+{
+    PyObject *descr = lu_cache_load_ptr(c->cache + LA_DESCR);
+    if (descr != NULL && !lu_try_incref(descr)) {
+        unsupported(c);
+        return -1;
+    }
+    int r = load_attr_cached(c, descr);
+    Py_XDECREF(descr);
+    return r;
+}
+
+static int
+load_attr_cached(struct ctx *c, PyObject *descr)
 {
     lu_v owner = peek(c, 1);
     int own = peek_owned(c, 1);
@@ -1302,7 +1319,6 @@ load_attr(struct ctx *c)
     int op = __atomic_load_n(&lu_code_start(c->code)[c->cache - lu_code_start(c->code) - 1].op.code,
                              __ATOMIC_RELAXED);
     uint32_t version = lu_cache_load32(c->cache + LA_VERSION);
-    PyObject *descr = lu_cache_load_ptr(c->cache + LA_DESCR);
     if (version == 0 || lu_jit_nospec(c->code, c->pc)) {
         op = LOAD_ATTR;
     }
@@ -1764,7 +1780,15 @@ translate(struct ctx *c)
     int own;
     lu_v v, w;
     switch (c->base) {
-    case NOP: case NOT_TAKEN: case RESUME:
+    case NOP: case NOT_TAKEN:
+        return 0;
+    case RESUME:
+        if (c->parent != NULL && !c->kernel) {
+            /* An inlined call polls where the interpreter's would: a tool
+               turned on since the compile (sys.settrace) sees the call. */
+            lu_v p = emit(c, OP_POLL, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+            I(c, p)->fs = before(c);
+        }
         return 0;
     case LOAD_FAST: case LOAD_FAST_BORROW:
         push(c, c->st.v[oparg], 0);

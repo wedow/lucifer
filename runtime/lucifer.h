@@ -338,6 +338,7 @@ struct _is {
     uintptr_t monitoring_tool_versions[LU_MON_TOOL_IDS];
     struct lu_static_type_state static_types[LU_MAX_STATIC_TYPES];
     PyObject *kernel[LU_K_COUNT];       /* strong; NULL until registered */
+    PyObject *kernel_rebound;           /* strong: name -> None for each global a kernel function rebinds */
     unsigned int next_version_tag;      /* heap types' tp_version_tag; 0 once spent */
     uint32_t next_keys_version;         /* dk_version of the next keys table versioned; 0 once spent */
     uint32_t next_func_version;         /* co_version of the next code object; 0 once spent */
