@@ -20,6 +20,7 @@ init_mimalloc_entry	runtime/object/alloc.c	.preinit_array entry that starts mima
 recurse	-	mimalloc per-thread recursion guard (options.c); its TLS symbol has no line
 PYCONFIG_SPEC	runtime/capi/config.c	the PyConfig option table (initconfig.c's specs), written once at boot and never
 PYPRECONFIG_SPEC	runtime/capi/config.c	the five read-only preconfig options, built into a table once and never written
+PyHash_Func	runtime/object/hash.c	the siphash13 PyHash_FuncDef PyHash_GetFuncDef answers, written once at boot and never
 stdprinter_getsetlist	runtime/capi/fileobject.c	the stdprinter type's getset table, built once at boot and never written
 stdprinter_methods	runtime/capi/fileobject.c	the stdprinter type's method table, built once at boot and never written
 hidden.*	runtime/capi/config.c	sys.flags' three hidden dict fields, a static list built once and never written

@@ -36,32 +36,75 @@ put_pad(struct ubuf *b, Py_ssize_t count, Py_UCS4 c)
     }
 }
 
-/* The code points of UTF-8 bytes, a malformed byte as U+FFFD. */
+/* The code points of UTF-8 bytes. A malformed sequence is replaced by one
+   U+FFFD per maximal invalid subpart, as CPython's UTF-8 decoder does: the
+   leading byte plus the continuation bytes that a valid sequence of that
+   length could start with, where the leading byte also bounds the second
+   byte (no overlongs, no surrogates, no more than U+10FFFF). */
 static Py_ssize_t
 decode_utf8(const unsigned char *s, Py_ssize_t n, Py_UCS4 *out)
 {
     Py_ssize_t count = 0;
     for (Py_ssize_t i = 0; i < n; count++) {
         unsigned char c = s[i];
-        int len = c < 0x80 ? 1 : c >= 0xc2 && c <= 0xdf ? 2 : c >= 0xe0 && c <= 0xef ? 3
-                  : c >= 0xf0 && c <= 0xf4 ? 4 : 0;
-        Py_UCS4 ch = len == 1 ? c : len == 2 ? c & 0x1f : len == 3 ? c & 0x0f : c & 0x07;
-        for (int k = 1; len > 1 && k < len; k++) {
-            if (i + k >= n || (s[i + k] & 0xc0) != 0x80) {
-                len = 0;
-                break;
-            }
-            ch = (ch << 6) | (s[i + k] & 0x3f);
+        int len, lo, hi;                 /* sequence length, second-byte range */
+        if (c < 0x80) {
+            len = lo = 1, hi = 0;
         }
-        if (len == 0 || (len == 3 && (ch < 0x800 || (ch >= 0xd800 && ch <= 0xdfff)))
-            || (len == 4 && (ch < 0x10000 || ch > 0x10ffff))) {
-            ch = 0xfffd;
-            len = 1;
+        else if (c >= 0xc2 && c <= 0xdf) {
+            len = 2, lo = 0x80, hi = 0xbf;
+        }
+        else if (c == 0xe0) {
+            len = 3, lo = 0xa0, hi = 0xbf;
+        }
+        else if (c >= 0xe1 && c <= 0xec) {
+            len = 3, lo = 0x80, hi = 0xbf;
+        }
+        else if (c == 0xed) {
+            len = 3, lo = 0x80, hi = 0x9f;
+        }
+        else if (c >= 0xee && c <= 0xef) {
+            len = 3, lo = 0x80, hi = 0xbf;
+        }
+        else if (c == 0xf0) {
+            len = 4, lo = 0x90, hi = 0xbf;
+        }
+        else if (c >= 0xf1 && c <= 0xf3) {
+            len = 4, lo = 0x80, hi = 0xbf;
+        }
+        else if (c == 0xf4) {
+            len = 4, lo = 0x80, hi = 0x8f;
+        }
+        else {
+            len = 0;                     /* not a leading byte */
+        }
+        Py_UCS4 ch = 0xfffd;
+        int sub = 1;                     /* bytes of the subpart consumed */
+        if (len == 1) {
+            ch = c;
+        }
+        else if (len > 1) {
+            sub = 0;
+            if (i + 1 < n && s[i + 1] >= lo && s[i + 1] <= hi) {
+                sub = 2;
+                for (int k = 2; k < len && i + k < n && (s[i + k] & 0xc0) == 0x80; k++) {
+                    sub = k + 1;
+                }
+            }
+            if (sub == len) {
+                ch = (c & (len == 2 ? 0x1f : len == 3 ? 0x0f : 0x07));
+                for (int k = 1; k < len; k++) {
+                    ch = (ch << 6) | (s[i + k] & 0x3f);
+                }
+            }
+            else {
+                sub = sub ? sub : 1;     /* the leading byte alone */
+            }
         }
         if (out != NULL) {
             out[count] = ch;
         }
-        i += len;
+        i += sub;
     }
     return count;
 }

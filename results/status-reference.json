@@ -1,0 +1,19 @@
+{
+ "version": "3.14.10 free-threading build (tags/v3.14.10:b703b2c, Nov  2 2026, 05:02:58) [GCC 16.2.1 20260810]",
+ "best_us": {
+  "Bounce": 1729093,
+  "CD": 2573920,
+  "DeltaBlue": 636596,
+  "Havlak": 3519754,
+  "Json": 874376,
+  "List": 1055924,
+  "Mandelbrot": 1367974,
+  "NBody": 1960491,
+  "Permute": 2072989,
+  "Queens": 1003296,
+  "Richards": 4348416,
+  "Sieve": 2153125,
+  "Storage": 1738510,
+  "Towers": 1399041
+ }
+}

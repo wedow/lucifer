@@ -1067,6 +1067,10 @@ lu_xxhash_end(Py_uhash_t acc, Py_ssize_t n, int mangle_length)
 Py_hash_t lu_str_hash(PyObject *s);
 uint64_t lu_keyed_hash(uint64_t key, const void *src, Py_ssize_t size);
 int lu_str_eq(PyObject *a, PyObject *b);
+/* Reports the first keyword argument no name of kwtuple matches, with a
+   suggestion when one is close (runtime/capi/getargs.c). */
+void lu_error_unexpected_keyword_arg(PyObject *kwargs, PyObject *kwnames,
+                                     PyObject *kwtuple, const char *fname);
 void lu_intern(PyInterpreterState *interp, PyObject **p);
 PyObject *lu_str_from_utf8(const char *s, Py_ssize_t n, int surrogatepass);
 Py_hash_t lu_hash(PyObject *v);
