@@ -109,6 +109,38 @@ trivial_phis(struct lu_func *f)
     return changed;
 }
 
+/* The boxes some use makes real (an operand of anything but an unbox, a
+   phi, a reference operation or a slot write): such a box is an object
+   that may be observed later, so a phi of it must stay that object. */
+static char *
+escaping_boxes(struct lu_func *f, int box)
+{
+    char *esc = calloc((size_t)f->nins, 1);
+    for (int v = 0; v < f->nins; v++) {
+        struct lu_ins *in = &f->ins[v];
+        if (in->flags & INS_DEAD) {
+            continue;
+        }
+        int benign = in->op == OP_STORE_LOCAL || in->op == OP_DECREF || in->op == OP_INCREF
+            || in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT || in->op == OP_GUARD_NOT_NULL
+            || in->op == OP_PHI;
+        lu_v ops[3] = { in->a, in->b, in->c };
+        for (int i = 0; i < 3; i++) {
+            lu_v a = resolve(ops[i]);
+            if (a != LU_NOV && f->ins[a].op == box && !(benign && i == 0) && !(in->op == box && i == 1)) {
+                esc[a] = 1;
+            }
+        }
+        for (int i = 0; in->op != OP_PHI && i < in->nargs; i++) {
+            lu_v a = resolve(in->args[i]);
+            if (a != LU_NOV && f->ins[a].op == box) {
+                esc[a] = 1;
+            }
+        }
+    }
+    return esc;
+}
+
 /* 2. */
 static void
 unbox_phis(struct lu_func *f, int rep)
@@ -116,6 +148,7 @@ unbox_phis(struct lu_func *f, int rep)
     int box = rep == REP_I64 ? OP_BOX_INT : OP_BOX_FLOAT;
     int n = f->nins;
     char *cand = calloc((size_t)n, 1);
+    char *esc = escaping_boxes(f, box);
     for (int v = 0; v < n; v++) {
         struct lu_ins *in = &f->ins[v];
         cand[v] = in->op == OP_PHI && in->rep == REP_OBJ && !(in->flags & INS_DEAD);
@@ -136,7 +169,7 @@ unbox_phis(struct lu_func *f, int rep)
                     changed = 1;
                     break;
                 }
-                if (a != v && !(f->ins[a].op == box) && !(a < n && cand[a])) {
+                if (a != v && (!(f->ins[a].op == box) || esc[a]) && !(a < n && cand[a])) {
                     cand[v] = 0;
                     changed = 1;
                     break;
@@ -196,6 +229,7 @@ unbox_phis(struct lu_func *f, int rep)
     free(raw);
     free(inputs);
     free(cand);
+    free(esc);
 }
 
 /* Whether v is an object of exact type t whatever path reached it: a
