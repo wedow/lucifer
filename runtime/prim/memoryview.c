@@ -1,7 +1,8 @@
 /* memoryview primitives (DESIGN 4.1): PyMemoryViewObject as cp314t lays it
    out, over a managed buffer shared by every view of one export. The
-   managed buffer is not an object: it counts its views and releases the
-   exporter's buffer when the last one goes. Views are one- or
+   managed buffer is a collectable object (mbuf_traverse, as Objects/
+   memoryobject.c): it holds the only reference to the exporter, counts its
+   views and releases the exporter's buffer when the last one goes. Views are one- or
    multi-dimensional with native single-character formats; indexing,
    slicing and assignment are one-dimensional, as in CPython. */
 
@@ -13,13 +14,8 @@
         lu_err_format(PyExc_TypeError, "%s() takes %d arguments (%zd given)", __func__ + 5, (n), nargs); \
         return NULL; } } while (0)
 
-typedef struct {
-    Py_ssize_t views;               /* memoryviews sharing master; atomic */
-    Py_buffer master;
-} managed;
-
 #define MV(o) ((PyMemoryViewObject *)(o))
-#define MB(mv) ((managed *)(mv)->mbuf)
+#define MB(mv) ((mv)->mbuf)
 #define MAX_NDIM 64
 
 static PyObject *
@@ -73,14 +69,14 @@ released(PyObject *o)
 static const struct { char c; Py_ssize_t size; } native[] = {
     { '?', 1 }, { 'c', 1 }, { 'b', 1 }, { 'B', 1 }, { 'h', 2 }, { 'H', 2 }, { 'i', 4 },
     { 'I', 4 }, { 'l', 8 }, { 'L', 8 }, { 'q', 8 }, { 'Q', 8 }, { 'n', 8 }, { 'N', 8 },
-    { 'f', 4 }, { 'd', 8 }, { 'P', 8 }, { 0, 0 },
+    { 'e', 2 }, { 'f', 4 }, { 'd', 8 }, { 'P', 8 }, { 0, 0 },
 };
 
 /* The static format string of a native character, or NULL. */
 static const char *
 native_fmt(char c)
 {
-    static const char all[] = "?\0c\0b\0B\0h\0H\0i\0I\0l\0L\0q\0Q\0n\0N\0f\0d\0P";
+    static const char all[] = "?\0c\0b\0B\0h\0H\0i\0I\0l\0L\0q\0Q\0n\0N\0e\0f\0d\0P";
     for (const char *p = all; p < all + sizeof all; p += 2) {
         if (*p == c) {
             return p;
@@ -138,6 +134,7 @@ unpack_item(const char *p, char c)
     case 'L': case 'Q': case 'N': case 'P': {
         unsigned long v; memcpy(&v, p, sizeof v); return from_u64(v);
     }
+    case 'e': return PyFloat_FromDouble(PyFloat_Unpack2(p, 1));
     case 'f': { float v; memcpy(&v, p, sizeof v); return PyFloat_FromDouble(v); }
     case 'd': { double v; memcpy(&v, p, sizeof v); return PyFloat_FromDouble(v); }
     }
@@ -169,9 +166,75 @@ pack_fail(const char *fmt, int type_error)
     return -1;
 }
 
+/* A failed conversion becomes the format's error, as fix_error_int does. */
 static int
-pack_item(char *p, char c, PyObject *v, const char *fmt)
+pack_convert_fail(const char *fmt)
 {
+    if (PyErr_ExceptionMatches(PyExc_TypeError)) {
+        PyErr_Clear();
+        return pack_fail(fmt, 1);
+    }
+    if (PyErr_ExceptionMatches(PyExc_OverflowError) || PyErr_ExceptionMatches(PyExc_ValueError)) {
+        PyErr_Clear();
+        return pack_fail(fmt, 0);
+    }
+    return -1;
+}
+
+/* The item packed from an int or an __index__ object (pylong_as_ld and its
+   kin): range errors are ValueErrors of the format. */
+static int
+pack_int(char *p, char c, PyObject *v, const char *fmt)
+{
+    if (c == 'P' && !PyLong_Check(v)) {     /* PyLong_AsVoidPtr takes ints only */
+        return pack_fail(fmt, 1);
+    }
+    PyObject *n = PyNumber_Index(v);
+    if (n == NULL) {
+        return pack_convert_fail(fmt);
+    }
+    int r = -1;
+    Py_ssize_t size = fmt_size(c);
+    long long x;
+    int negative = (((PyLongObject *)n)->long_value.lv_tag & 3) == 2;
+    if (c == 'P' && negative) {             /* a pointer also takes the signed range */
+        c = 'q';
+    }
+    if (c == 'B' || c == 'H' || c == 'I' || c == 'L' || c == 'Q' || c == 'N' || c == 'P') {
+        unsigned long long u;
+        if (negative || as_u64(n, &u) < 0
+            || (size < 8 && u >= (1ULL << (size * 8)))) {
+            r = pack_fail(fmt, 0);
+            goto done;
+        }
+        x = (long long)u;
+    }
+    else {
+        long l;
+        if (lu_long_as_long(n, &l) < 0) {
+            PyErr_Clear();
+            r = pack_fail(fmt, 0);
+            goto done;
+        }
+        x = l;
+        if (size < 8 && (x < -(1LL << (size * 8 - 1)) || x > (1LL << (size * 8 - 1)) - 1)) {
+            r = pack_fail(fmt, 0);
+            goto done;
+        }
+    }
+    memcpy(p, &x, size);                /* little-endian hosts */
+    r = 0;
+done:
+    Py_DECREF(n);
+    return r;
+}
+
+/* Packs v as the item of format c at p. The conversion may run Python code
+   that releases mv, which is then an error. */
+static int
+pack_item(PyMemoryViewObject *mv, char *p, char c, PyObject *v, const char *fmt)
+{
+    int r;
     switch (c) {
     case '?': {
         int t = lu_truth_exact(v);
@@ -187,61 +250,28 @@ pack_item(char *p, char c, PyObject *v, const char *fmt)
         }
         *p = PyBytes_AS_STRING(v)[0];
         return 0;
-    case 'f': case 'd': {
-        double d;
-        if (PyFloat_Check(v)) {
-            d = PyFloat_AS_DOUBLE(v);
+    case 'e': case 'f': case 'd': {
+        double d = PyFloat_AsDouble(v);
+        if (d == -1.0 && PyErr_Occurred()) {
+            return pack_convert_fail(fmt);
         }
-        else if (PyLong_Check(v)) {
-            long x;
-            if (lu_long_as_long(v, &x) < 0) {
-                PyErr_Clear();
-                return pack_fail(fmt, 0);
-            }
-            d = (double)x;
+        if (released((PyObject *)mv)) {
+            return -1;
         }
-        else {
-            return pack_fail(fmt, 1);
+        if (c == 'e') {
+            return PyFloat_Pack2(d, p, 1) < 0 ? pack_convert_fail(fmt) : 0;
         }
         if (c == 'f') { float f = (float)d; memcpy(p, &f, sizeof f); }
         else memcpy(p, &d, sizeof d);
         return 0;
     }
     }
-    if (!PyLong_Check(v)) {
-        return pack_fail(fmt, 1);
+    char buf[8];
+    r = pack_int(buf, c, v, fmt);
+    if (r < 0 || released((PyObject *)mv)) {
+        return -1;
     }
-    long long x;
-    int unsigned_fmt = c == 'B' || c == 'H' || c == 'I' || c == 'L' || c == 'Q' || c == 'N' || c == 'P';
-    long long lo = 0, hi = 0;
-    Py_ssize_t size = fmt_size(c);
-    if (unsigned_fmt) {
-        if ((((PyLongObject *)v)->long_value.lv_tag & 3) == 2) {
-            return pack_fail(fmt, 0);
-        }
-        unsigned long long u;
-        if (as_u64(v, &u) < 0) {
-            return pack_fail(fmt, 0);
-        }
-        if (size < 8 && u >= (1ULL << (size * 8))) {
-            return pack_fail(fmt, 0);
-        }
-        x = (long long)u;
-    }
-    else {
-        long l;
-        if (lu_long_as_long(v, &l) < 0) {
-            PyErr_Clear();
-            return pack_fail(fmt, 0);
-        }
-        x = l;
-        lo = -(1LL << (size * 8 - 1));
-        hi = (1LL << (size * 8 - 1)) - 1;
-        if (size < 8 && (x < lo || x > hi)) {
-            return pack_fail(fmt, 0);
-        }
-    }
-    memcpy(p, &x, size);                /* little-endian hosts */
+    memcpy(p, buf, fmt_size(c));
     return 0;
 }
 
@@ -297,9 +327,56 @@ init_len(Py_buffer *view)
     view->len = n * view->itemsize;
 }
 
+/* The managed buffer: mbuf_release, mbuf_dealloc, mbuf_traverse and mbuf_clear
+   of Objects/memoryobject.c. */
+
+static PyTypeObject managed_buffer_type = {
+    PyVarObject_HEAD_INIT(&PyType_Type, 0)
+    .tp_name = "managedbuffer",
+    .tp_basicsize = sizeof(_PyManagedBufferObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
+};
+
+static void
+mbuf_release(_PyManagedBufferObject *mb)
+{
+    if (!(mb->flags & _Py_MANAGED_BUFFER_RELEASED)) {
+        mb->flags |= _Py_MANAGED_BUFFER_RELEASED;
+        PyBuffer_Release(&mb->master);
+    }
+}
+
+static void
+mbuf_dealloc(PyObject *op)
+{
+    mbuf_release((_PyManagedBufferObject *)op);
+    lu_object_free(op);
+}
+
+static int
+mbuf_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    Py_VISIT(((_PyManagedBufferObject *)op)->master.obj);
+    return 0;
+}
+
+static int
+mbuf_clear(PyObject *op)
+{
+    mbuf_release((_PyManagedBufferObject *)op);
+    return 0;
+}
+
+/* A managed buffer with no exporter yet. */
+static _PyManagedBufferObject *
+mbuf_new(void)
+{
+    return (_PyManagedBufferObject *)lu_object_new(&managed_buffer_type, sizeof(_PyManagedBufferObject));
+}
+
 /* A view on mb with the layout of src (the master when NULL). */
 static PyMemoryViewObject *
-add_view(managed *mb, const Py_buffer *src, int ndim)
+add_view(_PyManagedBufferObject *mb, const Py_buffer *src, int ndim)
 {
     if (src == NULL) {
         src = &mb->master;
@@ -308,8 +385,8 @@ add_view(managed *mb, const Py_buffer *src, int ndim)
     if (mv == NULL) {
         return NULL;
     }
-    mv->mbuf = (_PyManagedBufferObject *)mb;
-    __atomic_add_fetch(&mb->views, 1, __ATOMIC_ACQ_REL);
+    mv->mbuf = (_PyManagedBufferObject *)Py_NewRef(mb);
+    __atomic_add_fetch(&mb->exports, 1, __ATOMIC_ACQ_REL);
     Py_buffer *d = &mv->view;
     d->obj = src->obj;
     d->buf = src->buf;
@@ -347,14 +424,11 @@ add_view(managed *mb, const Py_buffer *src, int ndim)
 static void
 drop_view(PyMemoryViewObject *mv)
 {
-    managed *mb = MB(mv);
     mv->flags |= _Py_MEMORYVIEW_RELEASED;
     mv->view.obj = NULL;
-    if (mb != NULL && __atomic_sub_fetch(&mb->views, 1, __ATOMIC_ACQ_REL) == 0) {
-        PyBuffer_Release(&mb->master);
-        PyMem_RawFree(mb);
+    if (__atomic_sub_fetch(&MB(mv)->exports, 1, __ATOMIC_ACQ_REL) == 0) {
+        mbuf_release(MB(mv));
     }
-    mv->mbuf = NULL;
 }
 
 static void
@@ -364,7 +438,28 @@ memory_dealloc(PyObject *op)
     if (!(mv->flags & _Py_MEMORYVIEW_RELEASED)) {
         drop_view(mv);
     }
+    Py_CLEAR(mv->mbuf);
     lu_object_free(op);
+}
+
+static int
+memory_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    Py_VISIT(MV(op)->mbuf);
+    return 0;
+}
+
+static int
+memory_clear(PyObject *op)
+{
+    PyMemoryViewObject *mv = MV(op);
+    if (mv->exports == 0) {
+        if (!(mv->flags & _Py_MEMORYVIEW_RELEASED)) {
+            drop_view(mv);
+        }
+        Py_CLEAR(mv->mbuf);
+    }
+    return 0;
 }
 
 /* memoryview(obj) for any exporter, and a view sharing a memoryview's. */
@@ -382,19 +477,15 @@ PyMemoryView_FromObject(PyObject *v)
                       Py_TYPE(v)->tp_name);
         return NULL;
     }
-    managed *mb = PyMem_RawCalloc(1, sizeof *mb);
+    _PyManagedBufferObject *mb = mbuf_new();
     if (mb == NULL) {
-        return PyErr_NoMemory();
-    }
-    if (PyObject_GetBuffer(v, &mb->master, PyBUF_FULL_RO) < 0) {
-        PyMem_RawFree(mb);
         return NULL;
     }
-    PyMemoryViewObject *mv = add_view(mb, NULL, mb->master.ndim);
-    if (mv == NULL) {
-        PyBuffer_Release(&mb->master);
-        PyMem_RawFree(mb);
+    PyMemoryViewObject *mv = NULL;
+    if (PyObject_GetBuffer(v, &mb->master, PyBUF_FULL_RO) == 0) {
+        mv = add_view(mb, NULL, mb->master.ndim);
     }
+    Py_DECREF(mb);
     return (PyObject *)mv;
 }
 
@@ -405,20 +496,19 @@ PyMemoryView_FromBuffer(const Py_buffer *info)
         PyErr_SetString(PyExc_ValueError, "PyMemoryView_FromBuffer(): info->buf must not be NULL");
         return NULL;
     }
-    managed *mb = PyMem_RawCalloc(1, sizeof *mb);
+    _PyManagedBufferObject *mb = mbuf_new();
     if (mb == NULL) {
-        return PyErr_NoMemory();
+        return NULL;
     }
     mb->master = *info;
     mb->master.obj = NULL;
     /* The shape and strides point into the caller's buffer: copy them where
        the views will find them, as add_view does for each view. */
     PyMemoryViewObject *mv = add_view(mb, info, info->ndim);
-    if (mv == NULL) {
-        PyMem_RawFree(mb);
-        return NULL;
+    if (mv != NULL) {
+        mv->view.obj = NULL;
     }
-    mv->view.obj = NULL;
+    Py_DECREF(mb);
     return (PyObject *)mv;
 }
 
@@ -642,7 +732,7 @@ prim_mv_set_item(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (v->suboffsets && v->suboffsets[0] >= 0) {
         p = *(char **)p + v->suboffsets[0];
     }
-    if (pack_item(p, c, args[2], v->format) < 0) {
+    if (pack_item(mv, p, c, args[2], v->format) < 0) {
         return NULL;
     }
     Py_RETURN_NONE;
@@ -999,8 +1089,13 @@ lu_memoryview_init(void)
 {
     PyMemoryView_Type.tp_basicsize = offsetof(PyMemoryViewObject, ob_array);
     PyMemoryView_Type.tp_itemsize = sizeof(Py_ssize_t);
-    PyMemoryView_Type.tp_flags |= Py_TPFLAGS_DEFAULT;
+    PyMemoryView_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyMemoryView_Type.tp_dealloc = memory_dealloc;
+    PyMemoryView_Type.tp_traverse = memory_traverse;
+    PyMemoryView_Type.tp_clear = memory_clear;
+    managed_buffer_type.tp_dealloc = mbuf_dealloc;
+    managed_buffer_type.tp_traverse = mbuf_traverse;
+    managed_buffer_type.tp_clear = mbuf_clear;
     PyMemoryView_Type.tp_as_buffer = &memory_as_buffer;
 }
 
