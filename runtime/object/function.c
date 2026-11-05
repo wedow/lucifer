@@ -592,6 +592,29 @@ PyFunction_SetKwDefaults(PyObject *op, PyObject *defaults)
     return func_set_kwdefaults(op, defaults, NULL);
 }
 
+/* CPython fires no watcher event for a closure change, only the version
+   clear. */
+int
+PyFunction_SetClosure(PyObject *op, PyObject *closure)
+{
+    if (!PyFunction_Check(op)) {
+        lu_err_format(PyExc_SystemError, "bad argument to internal function");
+        return -1;
+    }
+    if (closure == Py_None) {
+        closure = NULL;
+    }
+    else if (closure == NULL || !PyTuple_Check(closure)) {
+        lu_err_format(PyExc_SystemError, "expected tuple for closure, got '%.100s'",
+                      closure != NULL ? Py_TYPE(closure)->tp_name : "NULL");
+        return -1;
+    }
+    PyFunctionObject *func = (PyFunctionObject *)op;
+    clear_version(func);
+    Py_XSETREF(func->func_closure, Py_XNewRef(closure));
+    return 0;
+}
+
 #define FUNCTION_FIELD(name, field) \
     PyObject * \
     PyFunction_Get##name(PyObject *op) \
@@ -607,6 +630,7 @@ FUNCTION_FIELD(Globals, func_globals)
 FUNCTION_FIELD(Module, func_module)
 FUNCTION_FIELD(Defaults, func_defaults)
 FUNCTION_FIELD(KwDefaults, func_kwdefaults)
+FUNCTION_FIELD(Closure, func_closure)
 
 /* The watcher API (funcobject.c). */
 
