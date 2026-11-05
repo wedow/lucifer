@@ -96,13 +96,15 @@ prim_dict_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return lu_dict_alloc((PyTypeObject *)args[0]);
 }
 
-/* dict_probe(d, key, hash, after) -> entry number, -1, or -3 - the entry
-   number of a candidate to compare. after is -1 or the candidate to pass. */
+/* dict_probe(d, key, hash, steps) -> entry number, -1, or the pair (entry
+   number, steps) of a candidate to compare. steps is 0, or a candidate's
+   steps to resume past it. */
 static PyObject *
 prim_dict_probe(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(4); DICT(0); SSIZE(2, hash); SSIZE(3, after);
-    return int_of(lu_dict_probe((PyDictObject *)args[0], args[1], hash, after));
+    ARGS(4); DICT(0); SSIZE(2, hash); SSIZE(3, steps);
+    Py_ssize_t ix = lu_dict_probe((PyDictObject *)args[0], args[1], hash, &steps);
+    return ix > -3 ? int_of(ix) : Py_BuildValue("(nn)", -3 - ix, steps);
 }
 
 /* dict_find(d, key) -> the value, MISSING when absent, NotImplemented when

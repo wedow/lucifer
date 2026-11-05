@@ -383,21 +383,20 @@ lu_native_eq(PyObject *a, PyObject *b)
    deletion may have cleared an entry (its key is NULL: passed over like any
    unequal key) or be freeing its key, which a probe reads only after a
    try-incref; a key that is already gone answers LU_PROBE_CHANGED and the
-   caller probes again under the lock, as CPython's DKIX_KEY_CHANGED. */
+   caller probes again under the lock, as CPython's DKIX_KEY_CHANGED.
+   The first *steps slots of the probe sequence were judged already and are
+   passed by position, since the sequence can visit a slot twice; a
+   candidate answer sets *steps to its own position. */
 static Py_ssize_t
-probe_keys(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash, Py_ssize_t after, int locked)
+probe_keys(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash, Py_ssize_t *steps, int locked)
 {
     size_t mask = DK_MASK(dk);
     size_t perturb = hash;
     size_t i = (size_t)hash & mask;
-    int skipping = after >= 0;
-    for (;;) {
+    for (Py_ssize_t step = 1;; step++) {
         Py_ssize_t ix = lu_dk_get_index(dk, i);
         if (ix >= 0) {
-            if (skipping) {
-                skipping = ix != after;
-            }
-            else {
+            if (step > *steps) {
                 PyObject **slot = lu_dk_key_slot(dk, ix);
                 PyObject *k = _Py_atomic_load_ptr(slot);
                 if (k == key) {
@@ -419,6 +418,7 @@ probe_keys(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash, Py_ssize_t after
                         return ix;
                     }
                     if (eq < 0) {
+                        *steps = step;
                         return LU_PROBE_CANDIDATE(ix);
                     }
                 }
@@ -433,12 +433,12 @@ probe_keys(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash, Py_ssize_t after
 }
 
 Py_ssize_t
-lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t after)
+lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t *steps)
 {
-    Py_ssize_t ix = probe_keys(__atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE), key, hash, after, 0);
+    Py_ssize_t ix = probe_keys(__atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE), key, hash, steps, 0);
     if (ix == LU_PROBE_CHANGED) {
         Py_BEGIN_CRITICAL_SECTION(mp);
-        ix = probe_keys(mp->ma_keys, key, hash, after, 1);
+        ix = probe_keys(mp->ma_keys, key, hash, steps, 1);
         Py_END_CRITICAL_SECTION();
     }
     return ix;
@@ -493,7 +493,8 @@ probe_native(PyDictKeysObject *dk, PyObject *key, Py_hash_t *hash, int locked)
     if (!native_hash(key, hash)) {
         return -2;
     }
-    Py_ssize_t ix = probe_keys(dk, key, *hash, -1, locked);
+    Py_ssize_t steps = 0;
+    Py_ssize_t ix = probe_keys(dk, key, *hash, &steps, locked);
     return ix == LU_PROBE_CHANGED ? -3 : ix <= -3 ? -2 : ix;
 }
 
@@ -883,10 +884,10 @@ static Py_ssize_t
 ns_find(PyObject *dict, PyObject *key)
 {
     Py_hash_t hash = lu_str_hash(key);
-    Py_ssize_t ix = lu_dict_probe((PyDictObject *)dict, key, hash, -1);
-    while (ix <= -3) {
-        ix = lu_dict_probe((PyDictObject *)dict, key, hash, -3 - ix);
-    }
+    Py_ssize_t steps = 0, ix;
+    do {
+        ix = lu_dict_probe((PyDictObject *)dict, key, hash, &steps);
+    } while (ix <= -3);
     return ix;
 }
 
