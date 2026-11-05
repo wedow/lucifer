@@ -3810,8 +3810,23 @@ exception_unwind: {
 PyObject *
 lu_eval(PyThreadState *ts, struct lu_frame *frame)
 {
+    /* C may call Python with an exception pending (an error path that looks
+       up a dict or drops an object), and the loop reads a set indicator as a
+       failure: the exception waits outside the call and is set again when
+       the call succeeds. */
+    PyObject *pending = ts->current_exception;
+    ts->current_exception = NULL;
     PyObject *result = eval_frame(ts, frame, EVAL_RUN);
-    return result == LU_EVAL_PARKED ? lu_sched_home(ts) : result;
+    if (result == LU_EVAL_PARKED) {
+        result = lu_sched_home(ts);
+    }
+    if (pending != NULL && result != NULL) {
+        PyErr_SetRaisedException(pending);
+    }
+    else {
+        Py_XDECREF(pending);
+    }
+    return result;
 }
 
 PyObject *

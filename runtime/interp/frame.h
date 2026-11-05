@@ -172,7 +172,8 @@ const char *lu_function_str(PyObject *func, char *buf, size_t size);
 
 /* Runs `f`, already pushed and bound, in a new activation of the eval loop
    until it returns. C callers only: the interpreter runs Python calls in its
-   own activation. Returns a new reference, or NULL with an exception set. */
+   own activation. Returns a new reference, or NULL with an exception set.
+   An exception pending at entry is set again on success. */
 PyObject *lu_eval(PyThreadState *ts, struct lu_frame *f);
 
 /* Re-enters the loop for a task whose outermost activation parked, at its

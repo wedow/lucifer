@@ -92,6 +92,10 @@ except ValueError as e:
     print(tb(e))
     print(''.join(traceback.format_exception(e)).replace(__file__, 'FILE'))
 
+# a dict lookup on an error path keeps the pending exception
+d = {'a': 1, 2: 'two'}
+print(x.pending_lookup(d, 'a'), x.pending_lookup(d, 'b'), x.pending_lookup(d, 2))
+
 # an exception raised in C is not seen again afterwards
 try:
     x.raise_(ValueError, 'once')
