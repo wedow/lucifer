@@ -1,6 +1,6 @@
 ---
 id: luc-0e07
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-03T15:56:37Z

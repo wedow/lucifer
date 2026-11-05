@@ -19,6 +19,9 @@ extern const struct lu_frozen lu_frozen_kernel[];
 extern const struct lu_frozen lu_frozen_builtin[];
 extern const struct lu_frozen lu_frozen_modules[];
 
+/* The frozen entry a name maps to, or NULL (runtime/interp/import.c). */
+const struct lu_frozen *lu_frozen_find(PyObject *name);
+
 void lu_hide_frames(PyObject *code);
 
 /* Runs every frozen kernel module. Returns -1 with an exception set. */
