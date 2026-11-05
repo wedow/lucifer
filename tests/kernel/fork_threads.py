@@ -21,6 +21,16 @@ def worker():
             junk.clear()
 
 
+# A single-threaded process forks without the warning (before any thread has existed: an exited thread
+# can linger in the process's OS thread count), and the child's exit is the parent's to see.
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    pid = os.fork()
+    if pid == 0:
+        os._exit(7)
+single = (os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]), [str(w.message) for w in caught])
+
+
 workers = [threading.Thread(target=worker) for _ in range(4)]
 for t in workers:
     t.start()
@@ -48,14 +58,7 @@ stop.set()
 for t in workers:
     t.join()
 print(statuses == [0] * 20, warned == 20, count[0] > 0)
-
-# A single-threaded process forks without the warning, and the child's exit is the parent's to see.
-with warnings.catch_warnings(record=True) as caught:
-    warnings.simplefilter("always")
-    pid = os.fork()
-    if pid == 0:
-        os._exit(7)
-print(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]), [str(w.message) for w in caught])
+print(*single)
 
 # fork from a thread: the child's only thread is that one, and it becomes the main thread.
 r, w = os.pipe()

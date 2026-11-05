@@ -2,7 +2,9 @@
 # large list. The handler and the KeyboardInterrupt run in the main thread; the sort is unharmed.
 # The sorting thread's key function sends the signals; the main thread waits in join, so the
 # handler runs when the wait is interrupted or right after it. The results are printed after join.
-# The interrupt waits until the main thread is inside its try.
+# Each signal that raises waits for the main thread to release the in_try lock inside its try, so the
+# exception always lands in the try. The gate is a bare lock, not an Event: an exception landing inside
+# Event.set could leave its condition locked. The try body keeps running safepoints until it lands.
 import _thread
 import os
 import signal
@@ -14,7 +16,11 @@ data = [(i * 7919) % N for i in range(N)]
 handled = []
 calls = [0]
 result = []
-in_try = threading.Event()
+in_try = _thread.allocate_lock()
+in_try.acquire()
+
+
+limit = time.monotonic() + 60    # a bound that fails the output, not a synchronisation
 
 
 def handler(signum, frame):
@@ -29,7 +35,7 @@ def key(x):
     if calls[0] == N // 3:
         os.kill(os.getpid(), signal.SIGUSR1)
     elif calls[0] == N // 2:
-        in_try.wait()
+        in_try.acquire()
         _thread.interrupt_main()
     return x
 
@@ -41,20 +47,18 @@ def sorter():
 t = threading.Thread(target=sorter)
 t.start()
 interrupted = 0
-while t.is_alive():
-    try:
-        in_try.set()
-        t.join()
-    except KeyboardInterrupt:
-        interrupted += 1
-# The interrupt may arrive after the join returned: it is delivered at the main thread's next
-# safepoint, so wait for both without relying on when.
-deadline = time.monotonic() + 30
-while time.monotonic() < deadline and (not handled or not interrupted):
-    try:
-        time.sleep(0.001)
-    except KeyboardInterrupt:
-        interrupted += 1
+try:
+    in_try.release()
+    t.join()
+    # An interrupt raised while main waits in join, or any time after it, is delivered at a safepoint of
+    # this loop: the try is left only by the KeyboardInterrupt (or the deadline, which fails the output).
+    while time.monotonic() < limit:
+        pass
+except KeyboardInterrupt:
+    interrupted += 1
+t.join()
+while not handled and time.monotonic() < limit:
+    pass
 print(result[0] == sorted(data), calls[0], handled, interrupted)
 
 # A signal sent while the main thread sorts, handled by it, with another thread alive.
@@ -85,6 +89,7 @@ result.clear()
 def key_kill(x):
     calls[0] += 1
     if calls[0] == N // 2:
+        in_try.acquire()
         os.kill(os.getpid(), signal.SIGUSR1)
     return x
 
@@ -92,12 +97,12 @@ def key_kill(x):
 t = threading.Thread(target=lambda: result.append(sorted(data, key=key_kill)))
 t.start()
 caught = 0
-deadline = time.monotonic() + 30
-while not caught and time.monotonic() < deadline:
-    try:
-        t.join()
-        time.sleep(0.001)
-    except ZeroDivisionError:
-        caught += 1
+try:
+    in_try.release()
+    t.join()
+    while time.monotonic() < limit:
+        pass
+except ZeroDivisionError:
+    caught += 1
 t.join()
 print(caught, result[0] == sorted(data))
