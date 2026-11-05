@@ -1,6 +1,6 @@
 ---
 id: luc-jeec
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-04T21:32:01Z
@@ -66,3 +66,46 @@ What is still between us and the bar (perf, branch binary):
 - Worst rows: Storage 9.4x (list allocation and GC, sequence repetition dispatch), Json 5.3x and DeltaBlue 3.3x (polymorphic sites through generic helpers; the JIT barely beats the interpreter), CD 3.9x.
 
 Gates on the branch with master 389dec7 merged: check-compiler, check-jit, abi-audit, check-harness pass; make check passes (plain, jit 569/569; its jit-deopt lane passed 569/569 on a solo rerun with check-embed after one timeout of kwargs_str_subclass, which hangs intermittently on master too: 7 of 40 runs under -X lucifer_jit=always -X lucifer_stress=deopt:7 time out on master 389dec7, 1 of 20 here).
+
+**2026-11-05T20:39:57Z**
+
+Round 2 on branch luc-jeec2 (master 7f7139e merged), AWFY at canonical inner counts under the exclusive benchmark lock, best of 3 (CPython best of 5; off rows of CD, Mandelbrot, NBody one iteration), ms:
+
+| Benchmark | CPython 3.14t | master on | master off | branch on | branch off | branch on / CPython | branch on / off |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 1705 | 1449 | 4347 | 900 | 4424 | 0.53 | 0.20 |
+| CD | 2534 | 9867 | 66706 | 8225 | 64264 | 3.25 | 0.13 |
+| DeltaBlue | 639 | 2179 | 2174 | 1605 | 1999 | 2.51 | 0.80 |
+| Havlak | 3498 | 9690 | 11207 | 8045 | 11477 | 2.30 | 0.70 |
+| Json | 878 | 4691 | 4689 | 3357 | 4731 | 3.82 | 0.71 |
+| List | 1053 | 3749 | 6009 | 1081 | 2045 | 1.03 | 0.53 |
+| Mandelbrot | 1330 | 468 | 146645 | 457 | 137208 | 0.34 | 0.00 |
+| NBody | 1939 | 1089 | 170158 | 613 | 166516 | 0.32 | 0.00 |
+| Permute | 2078 | 1770 | 6296 | 1374 | 6458 | 0.66 | 0.21 |
+| Queens | 991 | 722 | 2596 | 645 | 2672 | 0.65 | 0.24 |
+| Richards | 4283 | 4954 | 11746 | 2788 | 10097 | 0.65 | 0.28 |
+| Sieve | 2136 | 1785 | 4728 | 888 | 4814 | 0.42 | 0.18 |
+| Storage | 1717 | 15894 | 21174 | 8863 | 20646 | 5.16 | 0.43 |
+| Towers | 1396 | 1210 | 2778 | 957 | 3074 | 0.69 | 0.31 |
+geomean branch on / CPython 1.04 (master 1.57); branch on / off 0.17
+
+Bar met: CPython time over ours Bounce 1.89x (bar 1.5), Richards 1.54x (bar 1.5), NBody 3.16x (bar 3). JIT on beats off on every row (closest DeltaBlue 0.80; on master DeltaBlue and Json on were slower than or equal to off).
+
+Mechanisms, instructions:u at reduced inner counts against the stage before:
+- calls enter the callee's unit without the eval loop (7a4b8ec): lu_eval runs a pushed frame's unit at its call entry behind a C-entry marker, running a MAKE_CELL/COPY_FREE_VARS prologue itself; h_call binds Python functions and bound methods directly. Richards -12%, Permute -12%, Towers -12%, List -10%, DeltaBlue -6%, Json -6%. A machine-level call (frame pushed by compiled code) was not built: what is left of a call is frame push/pop and binding (see below).
+- fix (9b2efd8): a phi of boxes that something made real stays an object phi (p.a = t; p.a is t was False after a loop).
+- unboxed float fields (30f469c), DESIGN 4.5 amended: NBody -12%, 1.78x -> 2.60x.
+- loop-carried locals unbound at a call's entry stay raw with a bit phi (7ceda63): NBody about -15% time, Sieve about -50% instructions.
+- unboxed int fields (8fe7be7): Bounce 1.17x -> 1.87x (with the stages before: Bounce -25%, Permute -13%, Towers -10%).
+- unshared list/tuple iterators step without their lock (1cac5fa): Bounce -4%, Storage -3%.
+- a staticmethod reached through an instance answered in C (dc648d8): Richards -28%, DeltaBlue -4%.
+- call_special of a run-time descriptor as a helper, no *args call (82bb94e): List -62%, Json -18%, CD -3%.
+- UNPACK_SEQUENCE of an exact tuple compiled (ce29b51; with the one before): Storage -41%, Json -21%, Havlak -11%, Mandelbrot -11%, DeltaBlue -10%, CD -9%.
+- polymorphic inline caches for LOAD_ATTR, keyed by type version, recorded by the generic load (e8b2731): DeltaBlue -5%, Havlak -2%, the rest flat. Stopped there.
+
+What remains (perf, branch binary):
+- Richards: calls ~27% (lu_jit_run, h_call, frame push/pop/release). run_task cannot be inlined because a call inside an inlined frame is a side exit; materializing inlined frames at such a call is the next mechanism.
+- Storage 5.2x: list allocation and GC.
+- Json 3.8x, CD 3.3x, DeltaBlue 2.5x: interpreted code from units retired or codes disabled (type.__call__, __init__ with super() -- LOAD_SUPER_ATTR is not compiled -- Vector.append after 12 compiles), and class attributes of an enum class (a metaclass the specializer does not handle) staying generic.
+
+Gates (master 7f7139e merged): make check pass (577/577 plain, jit, jit-deopt; embed), abi-audit pass, check-compiler pass, check-jit pass (AWFY lanes, difftest always and deopt), check-harness pass.
