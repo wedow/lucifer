@@ -75,7 +75,8 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 	re._casefix:re._casefix:third_party/cpython/Lib/re/_casefix.py \
 	re._compiler:re._compiler:third_party/cpython/Lib/re/_compiler.py \
 	re._constants:re._constants:third_party/cpython/Lib/re/_constants.py \
-	re._parser:re._parser:third_party/cpython/Lib/re/_parser.py
+	re._parser:re._parser:third_party/cpython/Lib/re/_parser.py \
+	zipimport:zipimport:third_party/cpython/Lib/zipimport.py
 EXPORTS = results/abi/cp314t-exports.tsv
 
 # Every gate step runs under timeout: on expiry the whole process group is

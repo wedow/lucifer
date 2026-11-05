@@ -86,6 +86,10 @@ PyUnicode_FromEncodedObject(PyObject *obj, const char *encoding, const char *err
     return r;
 }
 
+/* The filesystem codec, which interp/config.c settles as UTF-8 with
+   surrogateescape. */
+
+
 PyObject *
 PyUnicode_FromObject(PyObject *obj)
 {

@@ -2,6 +2,8 @@
    the kernel's, which runs importlib; sys.modules is the interpreter's. */
 
 #include "lucifer.h"
+#include <marshal.h>
+#include "interp/frozen.h"
 
 PyObject *
 PyImport_GetModuleDict(void)
@@ -48,7 +50,11 @@ PyObject *
 PyImport_ImportModuleLevelObject(PyObject *name, PyObject *globals, PyObject *locals,
                                  PyObject *fromlist, int level)
 {
-    if (name == NULL || !PyUnicode_Check(name)) {
+    if (name == NULL) {
+        PyErr_SetString(PyExc_ValueError, "Empty module name");
+        return NULL;
+    }
+    if (!PyUnicode_Check(name)) {
         PyErr_SetString(PyExc_TypeError, "module name must be a string");
         return NULL;
     }
@@ -75,6 +81,11 @@ PyImport_ImportModuleLevelObject(PyObject *name, PyObject *globals, PyObject *lo
 PyObject *
 PyImport_Import(PyObject *name)
 {
+    if (name == NULL) {
+        /* CPython's CallFunction hits the NULL-object check of Py_BuildValue */
+        PyErr_SetString(PyExc_SystemError, "NULL object passed to Py_BuildValue");
+        return NULL;
+    }
     PyObject *globals = PyDict_New(), *fromlist = PyList_New(0), *item = PyUnicode_FromString("__doc__");
     PyObject *result = NULL;
     if (globals != NULL && fromlist != NULL && item != NULL && PyList_Append(fromlist, item) == 0) {
@@ -130,6 +141,11 @@ PyImport_ImportModuleLevel(const char *name, PyObject *globals, PyObject *locals
 PyObject *
 PyImport_ImportModuleNoBlock(const char *name)
 {
+    if (PyErr_WarnEx(PyExc_DeprecationWarning,
+                     "PyImport_ImportModuleNoBlock() is deprecated and scheduled for "
+                     "removal in Python 3.15. Use PyImport_ImportModule() instead.", 1) < 0) {
+        return NULL;
+    }
     return PyImport_ImportModule(name);
 }
 
@@ -154,6 +170,212 @@ PyImport_AddModule(const char *name)
     PyObject *m = pname != NULL ? PyImport_AddModuleObject(pname) : NULL;
     Py_XDECREF(pname);
     return m;
+}
+
+/* A helper of importlib._bootstrap_external, the frozen module that owns
+   __file__/__path__/__spec__ handling for code the C API executes. */
+static PyObject *
+call_importlib_external(const char *name, PyObject *const *args, size_t nargs)
+{
+    PyObject *external = PyObject_GetAttrString(PyInterpreterState_Get()->importlib,
+                                                "_bootstrap_external");
+    PyObject *func = external != NULL ? PyObject_GetAttrString(external, name) : NULL;
+    PyObject *result = func != NULL ? lu_call(func, args, nargs, NULL) : NULL;
+    Py_XDECREF(func);
+    Py_XDECREF(external);
+    return result;
+}
+
+/* module_dict_for_exec: the module's dict, a new reference — the module is
+   added if need be (a reload reuses the one in sys.modules), with
+   __builtins__ in place. */
+static PyObject *
+module_dict_for_exec(PyObject *name)
+{
+    PyObject *m = PyImport_AddModuleObject(name);     /* borrowed: sys.modules holds it */
+    if (m == NULL) {
+        return NULL;
+    }
+    PyObject *d = PyModule_GetDict(m);
+    if (lu_ns_lookup(d, LU_ID(__builtins__)) == NULL
+        && lu_ns_insert(d, LU_ID(__builtins__), PyEval_GetBuiltins()) < 0) {
+        return NULL;
+    }
+    return Py_NewRef(d);
+}
+
+/* exec_code_in_module: run the code in the dict; a failure removes the module
+   from sys.modules, as CPython drops damaged modules, and the module found
+   there afterwards is the result. */
+static PyObject *
+exec_code_in_module(PyObject *name, PyObject *d, PyObject *code)
+{
+    PyObject *v = PyEval_EvalCode(code, d, d);
+    if (v == NULL) {
+        lu_ns_delete(PyImport_GetModuleDict(), name);
+        return NULL;
+    }
+    Py_DECREF(v);
+    PyObject *m = PyImport_GetModule(name);
+    if (m == NULL && !PyErr_Occurred()) {
+        PyErr_Format(PyExc_ImportError, "Loaded module %R not found in sys.modules", name);
+    }
+    return m;
+}
+
+PyObject *
+PyImport_ExecCodeModuleObject(PyObject *name, PyObject *co, PyObject *pathname,
+                              PyObject *cpathname)
+{
+    PyObject *d = module_dict_for_exec(name);
+    if (d == NULL) {
+        return NULL;
+    }
+    if (pathname == NULL) {
+        pathname = ((PyCodeObject *)co)->co_filename;
+    }
+    /* _fix_up_module gives the dict its __spec__, __loader__, __file__ and
+       __cached__ (a NULL cpathname is omitted, as CallMethodObjArgs omits it) */
+    PyObject *args[4] = { d, name, pathname, cpathname };
+    PyObject *res = call_importlib_external("_fix_up_module", args, cpathname != NULL ? 4 : 3);
+    if (res != NULL) {
+        Py_DECREF(res);
+        res = exec_code_in_module(name, d, co);
+    }
+    Py_DECREF(d);
+    return res;
+}
+
+PyObject *
+PyImport_ExecCodeModuleWithPathnames(const char *name, PyObject *co,
+                                     const char *pathname, const char *cpathname)
+{
+    PyObject *nameobject = PyUnicode_FromString(name);
+    PyObject *cpathobj = cpathname != NULL ? PyUnicode_DecodeFSDefault(cpathname) : NULL;
+    PyObject *pathobj = pathname != NULL ? PyUnicode_DecodeFSDefault(pathname) : NULL;
+    PyObject *m = NULL;
+    if (nameobject != NULL && (pathname == NULL || pathobj != NULL)
+        && (cpathname == NULL || cpathobj != NULL)) {
+        if (pathname == NULL && cpathobj != NULL) {
+            /* the source file the compiled file came from, as best importlib
+               can tell it (this shim's callers pass only the compiled path) */
+            PyObject *args[1] = { cpathobj };
+            pathobj = call_importlib_external("_get_sourcefile", args, 1);
+            if (pathobj == NULL) {
+                PyErr_Clear();
+            }
+        }
+        m = PyImport_ExecCodeModuleObject(nameobject, co, pathobj, cpathobj);
+    }
+    Py_XDECREF(nameobject);
+    Py_XDECREF(pathobj);
+    Py_XDECREF(cpathobj);
+    return m;
+}
+
+PyObject *
+PyImport_ExecCodeModule(const char *name, PyObject *co)
+{
+    return PyImport_ExecCodeModuleWithPathnames(name, co, NULL, NULL);
+}
+
+PyObject *
+PyImport_ExecCodeModuleEx(const char *name, PyObject *co, const char *pathname)
+{
+    return PyImport_ExecCodeModuleWithPathnames(name, co, pathname, NULL);
+}
+
+int
+PyImport_ImportFrozenModuleObject(PyObject *name)
+{
+    const struct lu_frozen *f = lu_frozen_find(name);
+    if (f == NULL) {
+        return 0;
+    }
+    PyObject *code = PyMarshal_ReadObjectFromString((const char *)f->data, f->size);
+    if (code == NULL) {
+        return -1;
+    }
+    PyObject *d = NULL;
+    int r = -1;
+    if (f->package) {
+        /* the empty __path__ marks the module a package before its code runs */
+        PyObject *m = PyImport_AddModuleObject(name);
+        PyObject *path = m != NULL ? PyList_New(0) : NULL;
+        if (path != NULL
+            && lu_ns_insert(PyModule_GetDict(m), PyUnicode_InternFromString("__path__"), path) == 0) {
+            d = module_dict_for_exec(name);
+        }
+        Py_XDECREF(path);
+    }
+    else {
+        d = module_dict_for_exec(name);
+    }
+    if (d != NULL) {
+        PyObject *m = exec_code_in_module(name, d, code);
+        if (m != NULL) {
+            /* __origname__, which importlib's FrozenImporter would consume */
+            PyObject *origname = f->orig != NULL ? PyUnicode_FromString(f->orig) : Py_NewRef(Py_None);
+            if (origname != NULL
+                && lu_ns_insert(d, PyUnicode_InternFromString("__origname__"), origname) == 0) {
+                r = 1;
+            }
+            Py_XDECREF(origname);
+            Py_DECREF(m);
+        }
+        Py_DECREF(d);
+    }
+    Py_DECREF(code);
+    return r;
+}
+
+int
+PyImport_ImportFrozenModule(const char *name)
+{
+    PyObject *nameobject = PyUnicode_FromString(name);
+    if (nameobject == NULL) {
+        return -1;
+    }
+    int r = PyImport_ImportFrozenModuleObject(nameobject);
+    Py_DECREF(nameobject);
+    return r;
+}
+
+PyObject *
+PyImport_ImportModuleAttr(PyObject *modname, PyObject *attrname)
+{
+    PyObject *mod = PyImport_Import(modname);
+    if (mod == NULL) {
+        return NULL;
+    }
+    PyObject *attr = PyObject_GetAttr(mod, attrname);
+    Py_DECREF(mod);
+    return attr;
+}
+
+long
+PyImport_GetMagicNumber(void)
+{
+    return LU_PYC_MAGIC;
+}
+
+const char *
+PyImport_GetMagicTag(void)
+{
+    PyObject *impl = PySys_GetObject("implementation");
+    PyObject *tag = impl != NULL ? PyObject_GetAttrString(impl, "cache_tag") : NULL;
+    if (tag == NULL || !PyUnicode_Check(tag)) {
+        PyErr_Clear();
+        return "";
+    }
+    /* sys.implementation holds the str for the interpreter's lifetime */
+    const char *utf8 = PyUnicode_AsUTF8(tag);
+    Py_DECREF(tag);
+    if (utf8 == NULL) {
+        PyErr_Clear();
+        return "";
+    }
+    return utf8;
 }
 
 PyObject *

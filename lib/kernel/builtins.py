@@ -705,6 +705,9 @@ def _resolve_name(name, globals_, level):
         if not isinstance(package, str):
             error(TypeError, '__spec__.parent must be a string')
     else:
+        import _warnings
+        _warnings.warn("can't resolve package from __spec__ or __package__, "
+                       "falling back on __name__ and __path__", ImportWarning, stacklevel=3)
         if '__name__' not in globals_:
             error(KeyError, "'__name__' not in globals")
         package = globals_['__name__']
