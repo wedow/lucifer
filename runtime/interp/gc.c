@@ -366,6 +366,11 @@ prim_gc_get_referents(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     for (Py_ssize_t i = 0; result != NULL && PyTuple_CheckExact(objs) && i < PyTuple_GET_SIZE(objs); i++) {
         PyObject *obj = PyTuple_GET_ITEM(objs, i);
         traverseproc traverse = lu_is_gc(obj) ? Py_TYPE(obj)->tp_traverse : NULL;
+        /* Looking at an instance's values is a read of them (DESIGN 4.5). */
+        if (traverse != NULL && lu_inline_box_all(obj) < 0) {
+            Py_CLEAR(result);
+            break;
+        }
         if (traverse != NULL && traverse(obj, referents_visit, result)) {
             Py_CLEAR(result);
         }

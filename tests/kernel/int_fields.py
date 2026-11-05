@@ -88,6 +88,8 @@ def fresh_fields(n):
 bodies = [Body(i * 1000, 7) for i in range(5)]
 advance(bodies, N, 3)
 b = bodies[0]
+# The collector's view first, before anything reads the fields.
+print(sorted(type(r).__name__ for r in gc.get_referents(bodies[1])))
 print([o.x for o in bodies])
 print(b.x is b.x, id(b.x) == id(b.x), b.vx is b.vx)
 x1 = b.x

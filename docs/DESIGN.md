@@ -305,10 +305,11 @@ a raw word. Compiled code stores a float (an int) it computed as a binary64 (an
 int64) in the raw word plus a marker in the value word, making no object, and
 reads the raw word back without one. An object that is stored is kept as the
 value itself, so `a.x = v; a.x is v` holds. The first generic observation (the interpreter, the
-C-API, `__dict__`/`vars`, pickling, the collector's traversal) makes the box once,
+C-API, `__dict__`/`vars`, pickling, `gc.get_referents`) makes the box once,
 under the object's lock, and installs it in the value word, so every later reader,
-on any thread, gets that object and `a.x is a.x` and `id()` stay stable. The
-binary64 stays valid, so compiled readers keep reading it raw. A raw store or load
+on any thread, gets that object and `a.x is a.x` and `id()` stay stable. An
+unboxed value holds no reference, so the collector's own traversal skips it and
+never allocates. The raw word stays valid, so compiled readers keep reading it raw. A raw store or load
 is used only while the value's identity cannot be observed: a box that is in a
 local, stored twice, or loaded from another field (`b.x = a.x`) stays an object.
 Subclasses of float and int are always stored as objects.

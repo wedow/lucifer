@@ -319,6 +319,10 @@ int lu_inline_store_i(PyObject *obj, Py_ssize_t offset, int64_t v);
    float gets its box. */
 PyObject *lu_inline_get(PyObject *obj, PyObject **word);
 int lu_inline_traverse(PyObject *obj, visitproc visit, void *arg);
+/* Every unboxed value of the instance gets its box, as a reader would make
+   it: before gc.get_referents shows what the instance references. 0, or -1
+   with MemoryError. */
+int lu_inline_box_all(PyObject *obj);
 void lu_inline_clear(PyObject *obj);
 
 /* Watcher ids per kind, as CPython's TYPE_/DICT_/FUNC_/CODE_MAX_WATCHERS. */

@@ -473,6 +473,27 @@ lu_attr_store(PyObject *obj, PyObject *name, PyObject *v)
 }
 
 int
+lu_inline_box_all(PyObject *obj)
+{
+    int err = 0;
+    if (!lu_inline_live(obj)) {
+        return 0;
+    }
+    Py_BEGIN_CRITICAL_SECTION(obj);
+    if (lu_inline_live(obj)) {
+        PyObject **values = lu_inline_values(obj);
+        for (Py_ssize_t i = 0, n = shared_names(Py_TYPE(obj))->count; i < n && !err; i++) {
+            if (lu_unboxed(LU_INLINE_WORD(values, i)) && boxed_locked(&LU_INLINE_WORD(values, i)) == NULL) {
+                err = -1;
+            }
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    return err;
+}
+
+/* An unboxed value holds no reference: the collector skips it. */
+int
 lu_inline_traverse(PyObject *obj, visitproc visit, void *arg)
 {
     if (lu_inline_live(obj)) {
