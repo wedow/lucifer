@@ -84,6 +84,17 @@ int lu_jit_nospec(PyCodeObject *code, int pc);
 int lu_jit_noinline(PyCodeObject *code);
 
 static int build_block(struct ctx *c, int bi);
+
+/* A site's operand kinds (runtime/jit/jit.h), counted: none means the
+   interpreter has never run it. Attribute sites count in cached_site. */
+static int
+feedback(struct ctx *c, lu_codeunit *word)
+{
+    int kinds = __atomic_load_n(&word->cache, __ATOMIC_RELAXED);
+    c->f->sites++;
+    c->f->cold += kinds == 0;
+    return kinds;
+}
 static PyTypeObject *known_type(struct ctx *c, lu_v v);
 static void set_known(struct ctx *c, lu_v v, PyTypeObject *t);
 
@@ -543,6 +554,7 @@ supported(int op)
     case JUMP_BACKWARD_NO_INTERRUPT: case GET_ITER: case FOR_ITER: case CALL:
     case RETURN_VALUE: case STORE_SUBSCR: case COPY_FREE_VARS: case LOAD_DEREF:
     case BUILD_LIST: case BUILD_TUPLE: case CONTAINS_OP:
+    case MAKE_FUNCTION: case SET_FUNCTION_ATTRIBUTE: case STORE_DEREF:
         return 1;
     default:
         return 0;
@@ -907,7 +919,7 @@ binary_op(struct ctx *c)
     lu_v b = peek(c, 1), a = peek(c, 2);
     owna = peek_owned(c, 2);
     ownb = peek_owned(c, 1);
-    int kinds = lu_cache_load(c->cache + 1);
+    int kinds = feedback(c, c->cache + 1);
     int lk = kinds & 0xff, rk = kinds >> 8;
     int op = c->oparg;
     int base = op >= NB_INPLACE_ADD && op != NB_SUBSCR ? op - NB_INPLACE_ADD : op;
@@ -976,7 +988,7 @@ compare_op(struct ctx *c)
 {
     lu_v b = peek(c, 1), a = peek(c, 2);
     int owna = peek_owned(c, 2), ownb = peek_owned(c, 1);
-    int kinds = lu_cache_load(c->cache);
+    int kinds = feedback(c, c->cache);
     int lk = kinds & 0xff, rk = kinds >> 8;
     int op = c->oparg >> 5;
     lu_v bit = LU_NOV, r = LU_NOV;
@@ -1314,6 +1326,9 @@ cached_site(struct ctx *c, int generic, uint32_t *version, uint16_t *index, PyOb
     *version = lu_cache_load32(c->cache + LA_VERSION);
     *index = lu_cache_load(c->cache + LA_INDEX);
     *descr = generic == LOAD_ATTR ? lu_cache_load_ptr(c->cache + LA_DESCR) : NULL;
+    /* A generic site whose counter was never spent: the interpreter has not run it. */
+    c->f->sites++;
+    c->f->cold += op == generic && lu_cache_load(c->cache + LA_COUNTER) == 0;
     if (*version == 0 || lu_jit_nospec(c->code, c->pc) || !lu_site_unchanged(site, op)
         || lu_cache_load32(c->cache + LA_VERSION) != *version) {
         *descr = NULL;
@@ -1593,7 +1608,7 @@ speculate_args(struct ctx *c, int n)
     if (lu_jit_nospec(c->code, c->pc)) {
         return;
     }
-    int kinds = lu_cache_load(c->cache);
+    int kinds = n >= 1 ? feedback(c, c->cache) : 0;     /* a call without arguments records none */
     for (int i = 0; i < 2 && i < n; i++) {
         int k = (kinds >> (8 * i)) & 0xff;
         int at = c->nlocals + c->st.sp - n + i;
@@ -1721,6 +1736,18 @@ call(struct ctx *c)
     if (c->failed) {
         return -1;
     }
+    if (prim != NULL && self == LU_NOV && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_NOPY)) {
+        /* It runs no Python, so no frame needs to be real, inlined or not. */
+        lu_v hargs[33];
+        hargs[0] = callable;
+        for (int i = 0; i < n; i++) {
+            hargs[1 + i] = peek(c, n - i);
+        }
+        r = helper_raising(c, H_prim, n + 1, hargs, n + 2);
+        pop_call(c, n);
+        push(c, r, 1);
+        return 0;
+    }
     if (!root_only(c)) {
         unsupported(c);
         return -1;
@@ -1746,7 +1773,7 @@ for_iter(struct ctx *c)
 {
     lu_v it = peek(c, 1);
     int exit_pc = jump_target(FOR_ITER, c->oparg, c->next);
-    int kind = lu_cache_load(c->cache);
+    int kind = feedback(c, c->cache);
     if (lu_jit_nospec(c->code, c->pc)) {
         kind = LU_ITER_OTHER;
     }
@@ -1956,10 +1983,12 @@ translate(struct ctx *c)
     case JUMP_BACKWARD: {
         lu_v p = emit(c, OP_POLL, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
         I(c, p)->fs = before(c);
+        c->f->loops++;
         jump_to(c, jump_target(c->base, oparg, c->next));
         return 0;
     }
     case JUMP_BACKWARD_NO_INTERRUPT:
+        c->f->loops++;
         jump_to(c, jump_target(c->base, oparg, c->next));
         return 0;
     case GET_ITER: {
@@ -2007,7 +2036,7 @@ translate(struct ctx *c)
     case STORE_SUBSCR: {
         lu_v sub = peek(c, 1), cont = peek(c, 2), val = peek(c, 3);
         int ownsub = peek_owned(c, 1), owncont = peek_owned(c, 2), ownval = peek_owned(c, 3);
-        int kinds = lu_cache_load(c->cache);
+        int kinds = feedback(c, c->cache);
         if (!lu_jit_nospec(c->code, c->pc) && (kinds & 0xff) == LU_KIND_LIST && (kinds >> 8) == LU_KIND_INT) {
             guard_type(c, cont, &PyList_Type);
             lu_v i = unbox_int(c, sub);
@@ -2066,7 +2095,7 @@ translate(struct ctx *c)
             unsupported(c);
             return -1;
         }
-        lu_v args[32];
+        lu_v args[32] = { 0 };     /* none for an empty list */
         uint8_t owns[32];
         for (int i = oparg - 1; i >= 0; i--) {
             args[i] = pop(c, &own);
@@ -2079,6 +2108,46 @@ translate(struct ctx *c)
             release(c, args[i], owns[i]);
         }
         push(c, v, 1);
+        return 0;
+    }
+    case MAKE_FUNCTION: {
+        lu_v code = peek(c, 1);
+        own = peek_owned(c, 1);
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[2] = { code, konst(c, c->globals) };
+        v = helper_raising(c, H_make_function, 2, args, 1);
+        pop(c, NULL);
+        release(c, code, own);
+        push(c, v, 1);
+        return 0;
+    }
+    case SET_FUNCTION_ATTRIBUTE: {
+        lu_v func = peek(c, 1), attr = peek(c, 2);
+        int ownfunc = peek_owned(c, 1);
+        own = peek_owned(c, 2);
+        lu_v args[3] = { func, attr, const_i(c, oparg) };
+        helper(c, H_set_function_attribute, 3, args);
+        pop(c, NULL);
+        pop(c, NULL);
+        release(c, attr, own);
+        push(c, func, ownfunc);
+        return 0;
+    }
+    case STORE_DEREF: {
+        lu_v cell = c->st.v[oparg];
+        if (cell == LU_NOV) {
+            unsupported(c);
+            return -1;
+        }
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        lu_v args[2] = { cell, v };
+        helper(c, H_cell_store, 2, args);
+        pop(c, NULL);
+        release(c, v, own);
         return 0;
     }
     case CONTAINS_OP: {

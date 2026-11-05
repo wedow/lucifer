@@ -352,6 +352,7 @@ PyUnicode_FromFormat(const char *format, ...)
 PyObject *
 PyErr_FormatV(PyObject *exception, const char *format, va_list vargs)
 {
+    PyErr_Clear();      /* %R and %S run Python, which an error already set would cut short */
     PyObject *message = PyUnicode_FromFormatV(format, vargs);
     if (message != NULL) {
         PyErr_SetObject(exception, message);

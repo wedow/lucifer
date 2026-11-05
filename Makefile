@@ -123,6 +123,7 @@ STDLIB = build/lib/python3.14t
 SYSCONFIGDATA = _sysconfigdata_t_linux_x86_64-linux-gnu.py
 build/lib/stamp: tools/freeze lib/sysconfigdata.py $(shell find third_party/cpython/Lib -type f -not -name '*.pyc')
 	$(HOST_PYTHON) tools/freeze --pyc $(STDLIB) third_party/cpython/Lib $(SYSCONFIGDATA)=lib/sysconfigdata.py
+	mkdir -p build/include && ln -sfn ../../include build/include/python3.14t   # sysconfig's INCLUDEPY
 	touch $@
 
 abi-audit: bin/lucifer

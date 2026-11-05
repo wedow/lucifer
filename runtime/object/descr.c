@@ -79,7 +79,7 @@ lu_kernel_def_new(PyObject *name, PyObject *func, int flags, int bind)
     }
     k->def.ml_name = PyUnicode_AsUTF8(name);
     k->def.ml_meth = lu_kernel_meth;
-    k->def.ml_flags = METH_FASTCALL | METH_KEYWORDS | flags;
+    k->def.ml_flags = METH_FASTCALL | METH_KEYWORDS | LU_METH_KERNEL | flags;
     PyObject *doc = ((PyFunctionObject *)func)->func_doc;
     k->def.ml_doc = doc != NULL && PyUnicode_Check(doc) ? PyUnicode_AsUTF8(doc) : NULL;
     k->func = Py_NewRef(func);
@@ -691,11 +691,68 @@ descr_get_qualname(PyObject *self, void *closure)
     return result;
 }
 
+/* A C function's ml_doc may start with "name(signature)\n--\n\n": the signature
+   is __text_signature__ and the rest is __doc__ (typeobject.c's
+   _PyType_GetDocFromInternalDoc and _PyType_GetTextSignatureFromInternalDoc). */
+static PyObject *
+internal_doc(const char *name, const char *doc)
+{
+    doc = doc != NULL ? lu_doc_without_signature(name, doc) : NULL;
+    return doc != NULL && *doc ? PyUnicode_FromString(doc) : Py_NewRef(Py_None);
+}
+
+/* The signature of a function that documents none, from its calling convention. */
+static const char *
+signature_from_flags(int flags)
+{
+    switch (flags & ~METH_COEXIST) {
+    case METH_NOARGS: return "($self, /)";
+    case METH_NOARGS | METH_CLASS: return "($type, /)";
+    case METH_NOARGS | METH_STATIC: return "()";
+    case METH_O: return "($self, object, /)";
+    case METH_O | METH_CLASS: return "($type, object, /)";
+    case METH_O | METH_STATIC: return "(object, /)";
+    default: return NULL;
+    }
+}
+
+static PyObject *
+text_signature(const char *name, const char *doc, int flags)
+{
+    const char *rest = doc != NULL ? lu_doc_without_signature(name, doc) : NULL;
+    if (rest != doc) {          /* the signature: from its "(" through the ")" of the marker */
+        const char *dot = strrchr(name, '.');
+        const char *start = doc + strlen(dot != NULL ? dot + 1 : name);
+        return PyUnicode_FromStringAndSize(start, rest - start - (sizeof ")\n--\n\n" - 2));
+    }
+    const char *by_flags = signature_from_flags(flags);
+    return by_flags != NULL ? PyUnicode_FromString(by_flags) : Py_NewRef(Py_None);
+}
+
+static PyObject *
+internal_text_signature(const PyMethodDef *ml)
+{
+    return text_signature(ml->ml_name, ml->ml_doc, ml->ml_flags);
+}
+
+/* type.__text_signature__ of a static type: the signature its tp_doc starts with. */
+PyObject *
+lu_type_text_signature(PyTypeObject *tp)
+{
+    return text_signature(tp->tp_name, tp->tp_doc, 0);
+}
+
 static PyObject *
 method_descr_get_doc(PyObject *self, void *closure)
 {
-    const char *doc = ((PyMethodDescrObject *)self)->d_method->ml_doc;
-    return doc != NULL ? PyUnicode_FromString(doc) : Py_NewRef(Py_None);
+    PyMethodDef *ml = ((PyMethodDescrObject *)self)->d_method;
+    return internal_doc(ml->ml_name, ml->ml_doc);
+}
+
+static PyObject *
+method_descr_get_text_signature(PyObject *self, void *closure)
+{
+    return internal_text_signature(((PyMethodDescrObject *)self)->d_method);
 }
 
 static PyObject *
@@ -717,6 +774,7 @@ none_doc(PyObject *self, void *closure)
 static PyMemberDef descr_members[] = { DESCR_MEMBERS, { NULL } };
 static PyGetSetDef method_descr_getset[] = {
     { "__doc__", method_descr_get_doc, NULL, NULL, NULL },
+    { "__text_signature__", method_descr_get_text_signature, NULL, NULL, NULL },
     { "__qualname__", descr_get_qualname, NULL, NULL, NULL },
     { NULL },
 };
@@ -821,8 +879,14 @@ cfunction_get_self(PyObject *self, void *closure)
 static PyObject *
 cfunction_get_doc(PyObject *self, void *closure)
 {
-    const char *doc = ((PyCFunctionObject *)self)->m_ml->ml_doc;
-    return doc != NULL ? PyUnicode_FromString(doc) : Py_NewRef(Py_None);
+    PyMethodDef *ml = ((PyCFunctionObject *)self)->m_ml;
+    return internal_doc(ml->ml_name, ml->ml_doc);
+}
+
+static PyObject *
+cfunction_get_text_signature(PyObject *self, void *closure)
+{
+    return internal_text_signature(((PyCFunctionObject *)self)->m_ml);
 }
 
 static PyMemberDef cfunction_members[] = {
@@ -834,6 +898,7 @@ static PyGetSetDef cfunction_getset[] = {
     { "__qualname__", cfunction_get_qualname, NULL, NULL, NULL },
     { "__self__", cfunction_get_self, NULL, NULL, NULL },
     { "__doc__", cfunction_get_doc, NULL, NULL, NULL },
+    { "__text_signature__", cfunction_get_text_signature, NULL, NULL, NULL },
     { NULL },
 };
 

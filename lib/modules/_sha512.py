@@ -7,6 +7,13 @@ SHA_BLOCKSIZE = 128
 SHA_DIGESTSIZE = 64
 
 
+def _bytes(data):
+    """The bytes of a bytes-like object (PyObject_GetBuffer), never a str."""
+    if isinstance(data, str):
+        raise TypeError('Strings must be encoded before hashing')
+    return data if type(data) is bytes else bytes(memoryview(data))
+
+
 def new_shaobject():
     return {
         'digest': [0]*8,
@@ -250,11 +257,11 @@ class sha512(object, metaclass=Immutable):
     def __init__(self, s=None, usedforsecurity=True):
         self.name = 'sha512'
         self._sha = sha_init()
-        if s:
-            sha_update(self._sha, s)
+        if s is not None:
+            sha_update(self._sha, _bytes(s))
 
     def update(self, s):
-        sha_update(self._sha, s)
+        sha_update(self._sha, _bytes(s))
 
     def digest(self):
         return sha_final(self._sha.copy())[:self._sha['digestsize']]
@@ -273,8 +280,8 @@ class sha384(sha512):
     def __init__(self, s=None, usedforsecurity=True):
         self.name = 'sha384'
         self._sha = sha384_init()
-        if s:
-            sha_update(self._sha, s)
+        if s is not None:
+            sha_update(self._sha, _bytes(s))
 
     def copy(self):
         new = sha384.__new__(sha384)

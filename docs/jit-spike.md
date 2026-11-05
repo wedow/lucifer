@@ -66,7 +66,18 @@ other machines).
     hands the interpreter the error.
 - **Recompilation.** A guard that fails 50 times marks its instruction "do not
   speculate" and kills the units of the root code. A side exit inside an
-  inlined copy that keeps firing stops that function from being inlined.
+  inlined copy that keeps firing stops that function from being inlined,
+  and every root that still holds the copy recompiles when it leaves there.
+  - A unit without loops that leaves by a side exit or an exception on half
+    its entries (50 at least) is retired, and its entry stays in the
+    interpreter.
+  - A compile that finds most of its feedback sites never ran (the first
+    call under `always`) is put off: the interpreter runs that entry 50
+    times first, once per entry.
+- **Shared C answers.** Generic sites call what the interpreter answers in C
+  (`lu_subscr_native`, `lu_compare_native`, `lu_native_call`,
+  `lu_getattr_native`, `lu_setattr_native`) before the kernel, and
+  primitives marked `LU_METH_NOPY` are called from inlined frames too.
 - **Flags.**
   - `-X lucifer_jit=off|on|always` selects the mode.
   - `-X lucifer_jit_stats` prints compiles, exits by reason, and side exits by

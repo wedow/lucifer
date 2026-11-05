@@ -413,3 +413,6 @@ class list_reverseiterator:
             elif i > size(seq) - 1:
                 i = size(seq) - 1
             iter_set(self, seq, i)
+
+
+_boot.builtin_sequence(list)

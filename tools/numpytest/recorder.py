@@ -29,6 +29,8 @@ def pytest_collection_modifyitems(config, items):
     selected = []
     deselected = []
     shards = json.loads(os.environ.get("NUMPYTEST_SHARDS", '[""]'))
+    skip = Path(os.environ["NUMPYTEST_SKIP"]) if "NUMPYTEST_SKIP" in os.environ else None
+    done = set(skip.read_text().splitlines()) if skip and skip.exists() else set()
     for item in items:
         ident = nodeid(item)
         if not any((ident == shard or ident.startswith(shard + "::") or ident.startswith(shard + "["))
@@ -38,11 +40,13 @@ def pytest_collection_modifyitems(config, items):
             continue
         item.user_properties.append(("nodeid64", base64.b64encode(ident.encode()).decode()))
         selected.append(item)
-    items[:] = selected
-    config.hook.pytest_deselected(items=deselected)
+    # The collection record is the whole selection; a restart runs only the rest.
     Path(os.environ["NUMPYTEST_COLLECTION"]).write_text(
-        json.dumps(sorted(nodeid(item) for item in items)) + "\n"
+        json.dumps(sorted(nodeid(item) for item in selected)) + "\n"
     )
+    deselected += [item for item in selected if nodeid(item) in done]
+    items[:] = [item for item in selected if nodeid(item) not in done]
+    config.hook.pytest_deselected(items=deselected)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -53,16 +57,19 @@ def pytest_runtest_makereport(item, call):
         item.user_properties.append(("outcome", "XPASS"))
     journal = os.environ.get("NUMPYTEST_REPORTS")
     if journal:
+        crash = getattr(report.longrepr, "reprcrash", None)
         with open(journal, "a") as stream:
             stream.write(json.dumps({"id": nodeid(item), "when": report.when,
                                      "outcome": report.outcome, "seconds": report.duration,
-                                     "wasxfail": hasattr(report, "wasxfail")}) + "\n")
+                                     "wasxfail": hasattr(report, "wasxfail"),
+                                     "reason": crash.message.splitlines()[0] if crash and crash.message else ""}) + "\n")
 
 
 def relocate_typing_inputs(module, work):
     """Keep installed dependency modules out of mypy's source search root."""
     original = Path(module.DATA_DIR)
     copied = work / 'typing-inputs'
+    shutil.rmtree(copied, ignore_errors=True)       # a restarted shard copies again
     shutil.copytree(original, copied, ignore=shutil.ignore_patterns('__pycache__', '.mypy_cache'))
     digest = hashlib.sha256()
     files = 0

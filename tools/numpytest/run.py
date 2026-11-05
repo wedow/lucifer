@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
@@ -28,6 +29,11 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 STATUSES = "PASS FAIL ERROR SKIP XFAIL XPASS TIMEOUT CRASH NOTRUN".split()
 PIN = json.loads((HERE / "PIN").read_text())
+
+
+def scrub(text):
+    """Absolute paths out of text bound for public JSON, including one glued to a flag (-I/dir)."""
+    return re.sub(r"(?<!\w)/[^\s'\"<>]+|/(?:home|tmp|var|usr|opt)/[^\s'\"<>]+", "<path>", text)
 
 
 def digest(path):
@@ -68,11 +74,11 @@ def read_manifest(path):
     return rows
 
 
-def execute(command, cwd, env, log, timeout):
+def execute(command, cwd, env, log, timeout, append=False):
     """Bound the whole process group, including compilers and pytest children.
 
     A shell wrapper reports a fatal signal as exit 128+N; return it as -N."""
-    with log.open("wb") as output:
+    with log.open("ab" if append else "wb") as output:
         try:
             child = subprocess.Popen(command, cwd=cwd, env=env, stdout=output,
                                      stderr=subprocess.STDOUT, start_new_session=True)
@@ -96,7 +102,7 @@ def probe(command, site, work, env):
         "'gil_enabled':sys._is_gil_enabled() if hasattr(sys,'_is_gil_enabled') else None}))"
     )
     log = work / "probe.log"
-    code = execute(command + ["-c", source], work, env, log, 30)
+    code = execute(command + ["-c", source], work, env, log, 600)  # a cold bytecode cache compiles numpy on first import
     if code != 0:
         return None
     try:
@@ -156,7 +162,7 @@ def junit_rows(path):
                 status = "TIMEOUT"
             reason = child.get("message", "").splitlines()[0] if child.get("message") else kind
             # Raw XML/logs remain external. Public diagnostics contain no host paths.
-            reasons[ident] = re.sub(r"(?<!\w)/[^\s'\"<>]+", "<path>", reason)[:300]
+            reasons[ident] = scrub(reason)[:300]
         value = (status, float(case.get("time", "0")))
         if ident in rows:
             # JUnit may emit separate call and teardown failures for one item.
@@ -191,6 +197,20 @@ def journal_rows(path):
                 continue
             rows[ident] = (status, durations[ident])
     return rows
+
+
+def journal_reasons(path):
+    """The reason line of each failed report in the journal, for tests whose JUnit died with a crash."""
+    reasons = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            try:
+                report = json.loads(line)
+            except ValueError:
+                continue
+            if report.get("outcome") == "failed" and report.get("reason"):
+                reasons.setdefault(report["id"], report["reason"])
+    return reasons
 
 
 def prepare_docs(cache, site):
@@ -276,11 +296,14 @@ def run(args):
     env.update({"PYTHONPATH": str(HERE),
                 "NPY_RUN_MYPY_IN_TESTSUITE": "1",
                 "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONHASHSEED": "0",
+                # Bytecode (pytest's rewritten asserts included) stays out of the site tree.
+                "PYTHONPYCACHEPREFIX": str(args.pycache.resolve() / args.runtime),
                 "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1",
                 "NUMPYTEST_SITE": str(site) if site else "",
                 "NUMPYTEST_COLLECTION": str(work / "collection.json"),
                 "NUMPYTEST_STATE": str(work / "state.json"),
                 "NUMPYTEST_ACTIVE": str(work / "active.txt"),
+                "NUMPYTEST_SKIP": str(work / "skip.txt"),
                 "NUMPYTEST_REPORTS": str(work / "reports.jsonl"),
                 "NUMPYTEST_SHARDS": json.dumps(shards)})
     if site:
@@ -325,7 +348,7 @@ def run(args):
         if executable:
             metadata["interpreter_sha256"] = digest(executable)
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
-        metadata["unavailable"] = re.sub(r"(?<!\w)/[^\s'\"<>]+", "<path>", str(exc))
+        metadata["unavailable"] = scrub(str(exc))
         if args.collect:
             raise ValueError("cannot establish collection: " + metadata["unavailable"]) from exc
         if not expected:
@@ -338,15 +361,28 @@ def run(args):
         return 0
     pytest_args = ["-m", "pytest", "-p", "recorder", "-p", "pytest_timeout", "-q", "-ra",
                    "-W", "error::pytest.PytestUnhandledThreadExceptionWarning",
-                   "--rootdir", str(site), "--junitxml", str(work / "junit.xml"),
-                   "-o", "junit_family=xunit2", "--timeout=600"]
+                   "--rootdir", str(site), "-o", "junit_family=xunit2", "--timeout=600"]
     if args.parallel:
         pytest_args += ["-p", "pytest_run_parallel.plugin", "--parallel-threads=4"]
     if args.collect:
         pytest_args += ["--collect-only"]
     # Target one installed module when sharding, avoiding repeated full collection.
     targets = [str(site / shard) for shard in shards] if args.shard else ["--pyargs", "numpy"]
-    code = execute(command + pytest_args + targets, work, env, work / "pytest.log", args.timeout)
+    # A fatal signal costs only the active test: it scores CRASH and the shard
+    # restarts without it and without the tests already reported.
+    deadline = time.monotonic() + args.timeout
+    junits, crashed = [], {}
+    while True:
+        junit = work / f"junit{len(junits) or ''}.xml"
+        junits.append(junit)
+        code = execute(command + pytest_args + ["--junitxml", str(junit)] + targets, work, env,
+                       work / "pytest.log", max(1, deadline - time.monotonic()), append=len(junits) > 1)
+        active = (work / "active.txt").read_text() if (work / "active.txt").exists() else ""
+        if args.collect or not (isinstance(code, int) and code < 0) or active not in selected or active in crashed:
+            break
+        crashed[active] = code
+        done = set(journal_rows(work / "reports.jsonl")) | set(crashed)
+        (work / "skip.txt").write_text("".join(i + "\n" for i in sorted(done)))
     metadata["exitstatus"] = code
     collection_file = work / "collection.json"
     try:
@@ -374,21 +410,28 @@ def run(args):
     # Extra collected IDs are retained and reported, never silently discarded.
     metadata["unexpected"] = sorted(collected - set(expected))
     metadata["not_collected"] = sorted(selected - collected)
-    if (work / "junit.xml").exists():
-        try:
-            outcomes, reasons = junit_rows(work / "junit.xml")
-        except (ET.ParseError, ValueError, binascii.Error, UnicodeError):
-            metadata["invalid_junit"] = True
-            outcomes, reasons = {}, {}
-    else:
-        outcomes, reasons = {}, {}
+    outcomes, reasons = {}, {}
+    for junit in junits:
+        if junit.exists():
+            try:
+                found, why = junit_rows(junit)
+            except (ET.ParseError, ValueError, binascii.Error, UnicodeError):
+                metadata["invalid_junit"] = True
+                continue
+            outcomes.update(found)
+            reasons.update(why)
     completed = journal_rows(work / "reports.jsonl")
+    for ident, why in journal_reasons(work / "reports.jsonl").items():
+        reasons.setdefault(ident, scrub(why)[:300])
     completed.update(outcomes)
     rows.update(completed)
     if code == "TIMEOUT" or isinstance(code, int) and code < 0:
-        active = (work / "active.txt").read_text() if (work / "active.txt").exists() else ""
-        if active in selected and active not in outcomes:
-            rows[active] = ("TIMEOUT" if code == "TIMEOUT" else "CRASH", 0.0)
+        crashed[active] = code
+    for ident, how in crashed.items():
+        if ident in selected and ident not in outcomes:
+            rows[ident] = ("TIMEOUT" if how == "TIMEOUT" else "CRASH", 0.0)
+    # Every process that died stays on record, even one whose tests had all reported.
+    metadata["crashed"] = crashed
     if (work / "state.json").exists():
         metadata["finish"] = json.loads((work / "state.json").read_text())
     if args.parallel and args.runtime != args.oracle_runtime:
@@ -420,7 +463,7 @@ def run(args):
     if args.abi == "cp314t" and finish.get("gil_enabled") is not False:
         return 1
     failed = any(rows[i][0] in {"FAIL", "ERROR", "XPASS", "TIMEOUT", "CRASH"} for i in selected)
-    return int(code != 0 or failed or bool(metadata["unexpected"]) or bool(metadata["not_collected"])
+    return int(code != 0 or failed or bool(crashed) or bool(metadata["unexpected"]) or bool(metadata["not_collected"])
                or metadata.get("artifact_changed", False) or metadata.get("invalid_junit", False))
 
 
@@ -440,6 +483,7 @@ def main():
     p.add_argument("--abi", choices=PIN["wheels"], default="cp314t")
     p.add_argument("--work", type=Path, required=True, help="external raw XML/log directory")
     p.add_argument("--results", type=Path, default=ROOT / "results")
+    p.add_argument("--pycache", type=Path, default=ROOT / "build/numpytest-pycache", help="bytecode cache root, one directory per runtime")
     p.add_argument("--collect", action="store_true", help="union oracle nodeids into expected.tsv")
     p.add_argument("--parallel", action="store_true")
     p.add_argument("--oracle-runtime", default="cpython-3.14.10t", help="recorded oracle run the parallel lane is compared with")

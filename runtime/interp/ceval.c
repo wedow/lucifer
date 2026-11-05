@@ -32,11 +32,6 @@
 #include "prim/bytes.h"
 
 /* Include/internal/pycore_opcode_utils.h */
-#define MAKE_FUNCTION_DEFAULTS    0x01
-#define MAKE_FUNCTION_KWDEFAULTS  0x02
-#define MAKE_FUNCTION_ANNOTATIONS 0x04
-#define MAKE_FUNCTION_CLOSURE     0x08
-#define MAKE_FUNCTION_ANNOTATE    0x10
 #define RESUME_AFTER_YIELD_FROM 2
 #define RESUME_OPARG_LOCATION_MASK 0x3
 
@@ -409,6 +404,28 @@ slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObject 
     return lu_seq_slice(container, start, step, count, tp == &PyTuple_Type);
 }
 
+PyObject *
+lu_subscr_native(PyObject *container, PyObject *sub)
+{
+    PyObject *item = subscr_item(container, sub);
+    if (item != NULL) {
+        return item;
+    }
+    if (PyBytes_CheckExact(container) && PyLong_CheckExact(sub) && _PyLong_IsCompact((PyLongObject *)sub)
+        && _PyLong_CompactValue((PyLongObject *)sub) >= 0
+        && _PyLong_CompactValue((PyLongObject *)sub) < PyBytes_GET_SIZE(container)) {
+        return lu_small_int((unsigned char)PyBytes_AS_STRING(container)[_PyLong_CompactValue((PyLongObject *)sub)]);
+    }
+    if (PyDict_CheckExact(container) && lu_dict_find_native(container, sub, &item) > 0) {
+        return item;
+    }
+    if (Py_IS_TYPE(sub, &PySlice_Type)) {
+        PySliceObject *slc = (PySliceObject *)sub;
+        return slice_native(container, slc->start, slc->stop, slc->step);
+    }
+    return NULL;
+}
+
 /* STORE_SUBSCR into an exact list at a compact int index in range: the
    replaced item (a new reference to release), or NULL. */
 static PyObject *
@@ -515,13 +532,8 @@ attr_shortcut(PyObject *owner, PyObject *name)
     return v;
 }
 
-/* obj.name for an exact str name, answered when no Python code decides: a
-   data member or getset of the type, then the instance's dict, then a plain
-   value or function of the type (bound as a method). NULL, with no error, for
-   everything else, which is the kernel's: a missing attribute, __getattr__,
-   __getattribute__, properties and other descriptors. A new reference. */
-static PyObject *
-getattr_native(PyObject *owner, PyObject *name)
+PyObject *
+lu_getattr_native(PyObject *owner, PyObject *name)
 {
     PyTypeObject *tp = Py_TYPE(owner);
     PyObject *v;
@@ -601,6 +613,21 @@ eq_native(PyObject *a, PyObject *b, int depth)
             }
         }
         return Py_SIZE(a) == Py_SIZE(b);
+    }
+    return -1;
+}
+
+int
+lu_compare_native(PyObject *a, PyObject *b, int oparg)
+{
+    int op = oparg >> 5, eq;
+    if ((PyLong_CheckExact(a) || PyBool_Check(a)) && (PyLong_CheckExact(b) || PyBool_Check(b))) {
+        int c = lu_long_compare(a, b);
+        return op == Py_LT ? c < 0 : op == Py_LE ? c <= 0 : op == Py_EQ ? c == 0
+            : op == Py_NE ? c != 0 : op == Py_GT ? c > 0 : c >= 0;
+    }
+    if ((op == Py_EQ || op == Py_NE) && (eq = eq_native(a, b, 0)) >= 0) {
+        return eq == (op == Py_EQ);
     }
     return -1;
 }
@@ -721,11 +748,8 @@ seq_copy_native(int as_tuple, PyObject *seq)
     return NULL;
 }
 
-/* The kernel functions that C answers for plain arguments, so that the common
-   call of dict.get, len and isinstance runs no frame: the result, or NULL
-   when the kernel must run. */
-static PyObject *
-native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize_t npos)
+PyObject *
+lu_native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize_t npos)
 {
     PyObject *const *kernel = ts->interp->kernel;
     if (target == kernel[LU_K_dict_get]) {
@@ -739,11 +763,11 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
     }
     else if (target == kernel[LU_K_builtin_getattr]) {
         if (npos == 2 || npos == 3) {
-            return getattr_native(args[0], args[1]);
+            return lu_getattr_native(args[0], args[1]);
         }
     }
     else if (target == kernel[LU_K_builtin_hasattr]) {
-        PyObject *v = npos == 2 ? getattr_native(args[0], args[1]) : NULL;
+        PyObject *v = npos == 2 ? lu_getattr_native(args[0], args[1]) : NULL;
         if (v != NULL) {
             Py_DECREF(v);
             return Py_NewRef(Py_True);
@@ -800,20 +824,6 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
         }
     }
     return NULL;
-}
-
-static void
-set_function_attribute(PyFunctionObject *func, int which, PyObject *attr)
-{
-    PyObject **field;
-    switch (which) {
-    case MAKE_FUNCTION_DEFAULTS: field = &func->func_defaults; break;
-    case MAKE_FUNCTION_KWDEFAULTS: field = &func->func_kwdefaults; break;
-    case MAKE_FUNCTION_ANNOTATIONS: field = &func->func_annotations; break;
-    case MAKE_FUNCTION_CLOSURE: field = &func->func_closure; break;
-    default: field = &func->func_annotate; break;
-    }
-    Py_XSETREF(*field, attr);
 }
 
 /* SAVE_FRAME as an expression, for a condition that may raise. */
@@ -1646,7 +1656,7 @@ call_tail: {
     }
     if (target != NULL && self == NULL && kwnames == NULL
         && (((PyCodeObject *)((PyFunctionObject *)target)->func_code)->co_flags & LU_CO_KERNEL)
-        && ((result = native_call(ts, target, args, npos)) != NULL || PyErr_Occurred())) {
+        && ((result = lu_native_call(ts, target, args, npos)) != NULL || PyErr_Occurred())) {
         Py_XDECREF(held);
         goto call_done;
     }
@@ -1994,7 +2004,7 @@ op_MAKE_FUNCTION: {
 op_SET_FUNCTION_ATTRIBUTE: {
     PyObject *func = POP();
     PyObject *attr = POP();
-    set_function_attribute((PyFunctionObject *)func, oparg, attr);
+    lu_function_set_attribute((PyFunctionObject *)func, oparg, attr);
     PUSH(func);
     DISPATCH();
 }
@@ -2818,7 +2828,7 @@ op_LOAD_ATTR: {
             Py_XDECREF(getter);
         }
         Py_XDECREF(descr);
-        if ((v = getattr_native(owner, name)) != NULL) {
+        if ((v = lu_getattr_native(owner, name)) != NULL) {
             TOP() = v;
             Py_DECREF(owner);
             if (oparg & 1) {
@@ -3155,16 +3165,8 @@ op_COMPARE_OP: {
     PyObject *left = sp[-2];
     lu_jit_observe(next_instr, left, right);
     SKIP_CACHES();
-    int op = oparg >> 5, r, eq;
-    if ((PyLong_CheckExact(left) || PyBool_Check(left)) && (PyLong_CheckExact(right) || PyBool_Check(right))) {
-        int c = lu_long_compare(left, right);
-        r = op == Py_LT ? c < 0 : op == Py_LE ? c <= 0 : op == Py_EQ ? c == 0
-          : op == Py_NE ? c != 0 : op == Py_GT ? c > 0 : c >= 0;
-    }
-    else if ((op == Py_EQ || op == Py_NE) && (eq = eq_native(left, right, 0)) >= 0) {
-        r = eq == (op == Py_EQ);
-    }
-    else {
+    int r = lu_compare_native(left, right, oparg);
+    if (r < 0) {
         sp -= 2;
         kargs[0] = left;
         kargs[1] = right;
@@ -3316,44 +3318,15 @@ op_BINARY_OP: {
     PyObject *left = sp[-2];
     lu_jit_observe(next_instr + 1, left, right);
     SKIP_CACHES();
-    if (oparg == 26) {   /* NB_SUBSCR */ 
-        PyObject *item = subscr_item(left, right);
+    if (oparg == 26) {   /* NB_SUBSCR */
+        PyObject *item = lu_subscr_native(left, right);
         sp -= 2;
-        if (item != NULL) {
+        if (item != NULL || PyErr_Occurred()) {
+            Py_DECREF(left);
+            Py_DECREF(right);
+            ERROR_IF(item == NULL);
             PUSH(item);
-            Py_DECREF(left);
-            Py_DECREF(right);
             DISPATCH();
-        }
-        if (PyBytes_CheckExact(left) && PyLong_CheckExact(right) && _PyLong_IsCompact((PyLongObject *)right)
-            && _PyLong_CompactValue((PyLongObject *)right) >= 0
-            && _PyLong_CompactValue((PyLongObject *)right) < PyBytes_GET_SIZE(left)) {
-            PUSH(lu_small_int((unsigned char)PyBytes_AS_STRING(left)[_PyLong_CompactValue((PyLongObject *)right)]));
-            Py_DECREF(left);
-            Py_DECREF(right);
-            DISPATCH();
-        }
-        PyObject *value;
-        if (PyDict_CheckExact(left) && lu_dict_find_native(left, right, &value) > 0) {
-            PUSH(value);
-            Py_DECREF(left);
-            Py_DECREF(right);
-            DISPATCH();
-        }
-        if (Py_IS_TYPE(right, &PySlice_Type)) {
-            PySliceObject *slc = (PySliceObject *)right;
-            item = slice_native(left, slc->start, slc->stop, slc->step);
-            if (item != NULL) {
-                PUSH(item);
-                Py_DECREF(left);
-                Py_DECREF(right);
-                DISPATCH();
-            }
-            if (PyErr_Occurred()) {
-                Py_DECREF(left);
-                Py_DECREF(right);
-                goto error;
-            }
         }
         kargs[0] = left;
         kargs[1] = right;

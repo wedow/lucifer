@@ -588,6 +588,14 @@ def _m_ge(self, other):
     return _compare(self, other, 5)
 
 
+def _bytes_compare(op):
+    """bytes_richcompare: only a bytes compares with a bytes (a bytearray does
+    with any buffer: bytearray_richcompare)."""
+    def compare(self, other):
+        return _compare(self, other, op) if kind(other, 'bytes') else NotImplemented
+    return compare
+
+
 def _m_mod(self, args):
     fmt = _str._decode(b_bytes(self), 'latin-1', 'strict')
     r = _format.pct_format(fmt, args, True)
@@ -778,12 +786,12 @@ Construct an immutable array of bytes from:
     def __getnewargs__(self):
         return (b_bytes(self),)
 
-    __lt__ = _m_lt
-    __le__ = _m_le
-    __eq__ = _m_eq
-    __ne__ = _m_ne
-    __gt__ = _m_gt
-    __ge__ = _m_ge
+    __lt__ = _bytes_compare(0)
+    __le__ = _bytes_compare(1)
+    __eq__ = _bytes_compare(2)
+    __ne__ = _bytes_compare(3)
+    __gt__ = _bytes_compare(4)
+    __ge__ = _bytes_compare(5)
     __len__ = _m_len
     __iter__ = _m_iter
     __getitem__ = _m_getitem
@@ -1121,3 +1129,7 @@ class bytearray_iterator:
 
     def __setstate__(self, state):
         _iter.seqiter_setstate(self, state)
+
+
+_boot.builtin_sequence(bytes)
+_boot.builtin_sequence(bytearray)

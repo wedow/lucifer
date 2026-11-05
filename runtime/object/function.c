@@ -52,6 +52,26 @@ lu_function_set_version(PyFunctionObject *func)
     func->func_version = ((PyCodeObject *)func->func_code)->co_version;
 }
 
+/* Include/internal/pycore_opcode_utils.h */
+#define MAKE_FUNCTION_DEFAULTS    0x01
+#define MAKE_FUNCTION_KWDEFAULTS  0x02
+#define MAKE_FUNCTION_ANNOTATIONS 0x04
+#define MAKE_FUNCTION_CLOSURE     0x08
+
+void
+lu_function_set_attribute(PyFunctionObject *func, int which, PyObject *attr)
+{
+    PyObject **field;
+    switch (which) {
+    case MAKE_FUNCTION_DEFAULTS: field = &func->func_defaults; break;
+    case MAKE_FUNCTION_KWDEFAULTS: field = &func->func_kwdefaults; break;
+    case MAKE_FUNCTION_ANNOTATIONS: field = &func->func_annotations; break;
+    case MAKE_FUNCTION_CLOSURE: field = &func->func_closure; break;
+    default: field = &func->func_annotate; break;
+    }
+    Py_XSETREF(*field, attr);
+}
+
 /* func_clear_version: a function whose code, defaults or keyword defaults
    changed is never specialized on again (FUNC_VERSION_CLEARED). */
 static void

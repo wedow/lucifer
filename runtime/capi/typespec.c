@@ -344,7 +344,10 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
     tp->tp_name = et->_ht_tpname;
 
     PyMemberDef *own_members = NULL;
+    int gave_hash = 0, gave_richcompare = 0;
     for (PyType_Slot *s = spec->slots; s->slot; s++) {
+        gave_hash |= s->slot == Py_tp_hash;
+        gave_richcompare |= s->slot == Py_tp_richcompare;
         switch (s->slot) {
         case Py_tp_base:
         case Py_tp_bases:
@@ -406,6 +409,14 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
         || (tp->tp_new != NULL && tp->tp_new != base->tp_new && !lu_tp_new_is_thunk(tp->tp_new)
             && lu_type_add_new_wrapper(tp, dict) < 0)) {
         goto fail;
+    }
+    /* tp_hash and tp_richcompare are inherited as a pair: a spec that gives only
+       the compare makes the type unhashable (inherit_slots, type_ready_set_hash). */
+    if (gave_richcompare && !gave_hash && PyDict_GetItemString(dict, "__hash__") == NULL) {
+        tp->tp_hash = PyObject_HashNotImplemented;
+        if (PyDict_SetItemString(dict, "__hash__", Py_None) < 0) {
+            goto fail;
+        }
     }
     if (doc != NULL) {
         const char *text = lu_doc_without_signature(spec->name, doc);

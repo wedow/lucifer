@@ -744,20 +744,50 @@ slotptr(PyTypeObject *type, int ioffset)
     return (void **)ptr;
 }
 
+/* The old tp_getattr and tp_setattr take a C string. A type with only those
+   answers through the new slots, which are what attribute access runs. A class
+   made from it reaches these through its slot thunk and their wrappers; it
+   gets object's generic access, as the slot CPython gives such a class does. */
+static PyObject *
+getattro_from_getattr(PyObject *self, PyObject *name)
+{
+    if (Py_TYPE(self)->tp_getattro != getattro_from_getattr) {
+        return PyObject_GenericGetAttr(self, name);
+    }
+    const char *text = PyUnicode_AsUTF8(name);
+    return text != NULL ? Py_TYPE(self)->tp_getattr(self, (char *)text) : NULL;
+}
+
+static int
+setattro_from_setattr(PyObject *self, PyObject *name, PyObject *value)
+{
+    if (Py_TYPE(self)->tp_setattro != setattro_from_setattr) {
+        return PyObject_GenericSetAttr(self, name, value);
+    }
+    const char *text = PyUnicode_AsUTF8(name);
+    return text != NULL ? Py_TYPE(self)->tp_setattr(self, (char *)text, value) : -1;
+}
+
 /* Adds a wrapper descriptor to tp's dict for each slot tp has of its own
-   (one its base does not have too) whose dunder the dict lacks, as
-   add_operators does. */
+   (one its base does not have too, and not a thunk) whose dunder the dict
+   lacks, as add_operators does. */
 int
 lu_type_add_operators(PyTypeObject *tp)
 {
     PyObject *dict = lu_type_dict(tp);
+    if (tp->tp_getattr != NULL && tp->tp_getattro == NULL) {
+        tp->tp_getattro = getattro_from_getattr;
+    }
+    if (tp->tp_setattr != NULL && tp->tp_setattro == NULL) {
+        tp->tp_setattro = setattro_from_setattr;
+    }
     for (struct wrapperbase *p = slotdefs; p->name != NULL; p++) {
         if (p->wrapper == NULL) {
             continue;
         }
         void **ptr = slotptr(tp, p->offset);
-        if (ptr == NULL || *ptr == NULL) {
-            continue;
+        if (ptr == NULL || *ptr == NULL || lu_is_slot_thunk(*ptr)) {
+            continue;       /* a thunk would wrap the lookup that finds this very wrapper */
         }
         void **base = tp->tp_base != NULL ? slotptr(tp->tp_base, p->offset) : NULL;
         if (base != NULL && *base == *ptr) {
