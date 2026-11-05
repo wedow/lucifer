@@ -89,9 +89,10 @@ prim_eval_code(PyThreadState *ts, PyObject *const *args, Py_ssize_t nargs)
                       co->co_nfreevars);
         return NULL;
     }
+    /* exec and eval: globals with no __builtins__ gets the caller's, as
+       CPython's _PyEval_EnsureBuiltins does (the dict, not the module). */
     if (lu_ns_lookup(args[1], LU_ID(__builtins__)) == NULL
-        && lu_ns_insert(args[1], LU_ID(__builtins__),
-                        lu_ns_lookup(ts->interp->modules, LU_ID(builtins))) < 0) {
+        && lu_ns_insert(args[1], LU_ID(__builtins__), PyEval_GetBuiltins()) < 0) {
         return NULL;
     }
     PyObject *func = lu_function_new(args[0], args[1]);
