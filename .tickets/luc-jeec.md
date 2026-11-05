@@ -109,3 +109,34 @@ What remains (perf, branch binary):
 - Json 3.8x, CD 3.3x, DeltaBlue 2.5x: interpreted code from units retired or codes disabled (type.__call__, __init__ with super() -- LOAD_SUPER_ATTR is not compiled -- Vector.append after 12 compiles), and class attributes of an enum class (a metaclass the specializer does not handle) staying generic.
 
 Gates (master 7f7139e merged): make check pass (577/577 plain, jit, jit-deopt; embed), abi-audit pass, check-compiler pass, check-jit pass (AWFY lanes, difftest always and deopt), check-harness pass.
+
+**2026-11-05T22:14:23Z**
+
+Review fixes (master 7f7139e merged):
+- 72c29f0: lock-free readers of an inline value word load it once (a compiled raw store could install the unboxed marker between the marker test and the try-incref). threads_unboxed_race: 3 of 16 runs crashed under -X lucifer_jit=always before, 0 of 24 after. The other readers (compiled INLINE_LOAD/_F/_I, the interpreter's LOAD_ATTR_INSTANCE_VALUE via lu_inline_get) already load once or go through these.
+- 82c2403: gc.get_referents boxes an instance's unboxed values before traversing it (float_fields/int_fields call it before any read); the collector's traversal skips unboxed values and never allocates. DESIGN 4.5 says so.
+- 67fa1c1: the unlocked iterator step is dropped (it raced with another thread's first reference and with exhaustion freeing the sequence); threads_iter_exhaust added.
+
+Re-timed (same method), ms:
+
+| Benchmark | CPython 3.14t | master on | master off | branch on | branch off | branch on / CPython | branch on / off |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Bounce | 1685 | 1448 | 4229 | 979 | 4533 | 0.58 | 0.22 |
+| CD | 2525 | 9818 | 66497 | 8243 | 66590 | 3.26 | 0.12 |
+| DeltaBlue | 626 | 2214 | 2166 | 1626 | 2036 | 2.60 | 0.80 |
+| Havlak | 3477 | 9543 | 11337 | 8217 | 11634 | 2.36 | 0.71 |
+| Json | 873 | 4567 | 4618 | 3332 | 4725 | 3.82 | 0.71 |
+| List | 1053 | 3672 | 6059 | 1100 | 2046 | 1.04 | 0.54 |
+| Mandelbrot | 1342 | 465 | 144664 | 468 | 144580 | 0.35 | 0.00 |
+| NBody | 1941 | 1091 | 171646 | 635 | 171411 | 0.33 | 0.00 |
+| Permute | 2084 | 1768 | 6270 | 1299 | 6701 | 0.62 | 0.19 |
+| Queens | 991 | 733 | 2600 | 656 | 2643 | 0.66 | 0.25 |
+| Richards | 4253 | 4794 | 11791 | 2823 | 10244 | 0.66 | 0.28 |
+| Sieve | 2145 | 1780 | 4754 | 891 | 4780 | 0.42 | 0.19 |
+| Storage | 1750 | 15867 | 21264 | 9611 | 21240 | 5.49 | 0.45 |
+| Towers | 1397 | 1191 | 2820 | 951 | 3066 | 0.68 | 0.31 |
+geomean branch on / CPython 1.06 (master 1.56); branch on / off 0.17
+
+Five more processes each (best of 3 iterations, CPython the same), CPython time over ours: Bounce 1.72 1.75 1.71 1.73 1.73; Richards 1.52 1.56 1.53 1.37 1.52; NBody 3.10 3.15 3.07 3.10 3.21. Dropping the unlocked iterator step cost Bounce about 9% (1.89x -> 1.72x) and Storage about 8%. Richards sits at the bar (median 1.52, one run 1.37); the margin it needs is the call work noted above.
+
+Gates: make check 579/579 plain, jit, jit-deopt (and embed), abi-audit, check-compiler, check-jit, check-harness pass.
