@@ -383,3 +383,25 @@ ns['y'] = ns['x'] + 1
 del ns['x']
 print(ns, 'x' in ns, ns['y'])
 print({}.get.__name__, {}.get.__self__ == {}, dict.get.__name__, dict.fromkeys.__self__ is dict)
+
+# A probe can visit the same slot twice before an empty one: in an 8-slot
+# table, hash 224 probes slot 0, slot 0 again, then slot 1. Each visit
+# compares the key there, as CPython's lookup does, and the probe ends.
+class Revisit:
+    def __init__(self, n, calls):
+        self.n = n
+        self.calls = calls
+
+    def __hash__(self):
+        return 224
+
+    def __eq__(self, other):
+        self.calls.append(self.n)
+        return False
+
+
+calls = []
+d = {Revisit(1, calls): 'one'}
+print(Revisit(2, calls) in d, calls)
+d[Revisit(3, calls)] = 'three'
+print(len(d), d.get(Revisit(4, calls)), calls)

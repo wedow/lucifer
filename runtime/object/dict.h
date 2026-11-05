@@ -139,9 +139,10 @@ lu_dk_hash_of(PyDictKeysObject *dk, Py_ssize_t ix, PyObject *k)
 
 /* The entry number of `key` in mp, DKIX_EMPTY when it is absent, or
    LU_PROBE_CANDIDATE(ix) when entry ix has an equal hash and a key that only
-   __eq__ can judge. `after` >= 0 resumes the probe past the candidate it
-   named, which the caller found unequal. */
-Py_ssize_t lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t after);
+   __eq__ can judge. *steps is 0 for a new probe; a candidate answer sets it
+   to the candidate's position in the probe sequence, and a probe given that
+   resumes past it once the caller found it unequal. */
+Py_ssize_t lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t *steps);
 /* A caller that finds an entry without the lock commits under the critical
    section with a stamp read before it looked: the serial of the table says
    that the entry numbers it found are still that table's (entries never move
