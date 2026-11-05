@@ -70,7 +70,7 @@ struct lu_deopt {
     int drop;                   /* then pop this many stack entries of the innermost frame */
     int reason;                 /* enum lu_exit_reason */
     int opcode;                 /* the base opcode at the exit, for the counts */
-    unsigned long count;
+    struct lu_unit *unit;       /* the unit it leaves */
 };
 
 /* A compiled entry into a code object at one bytecode boundary. */
@@ -88,6 +88,8 @@ struct lu_unit {
     int nconsts;
     long *stress_counter;       /* -X lucifer_stress=deopt:N: guards fail when it reaches 0 */
     unsigned long entries;
+    unsigned long leaves;       /* exits no recompile can remove: side exits of the root frame, errors */
+    int loops;                  /* the code has a back edge: an entry may do unbounded work */
     int dead;
 };
 
@@ -128,6 +130,10 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(load_method) \
     X(store_attr) \
     X(call) \
+    X(prim) \
+    X(make_function) \
+    X(set_function_attribute) \
+    X(cell_store) \
     X(get_iter) \
     X(for_iter) \
     X(seqiter_next) \

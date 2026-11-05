@@ -125,6 +125,20 @@ PyMember_GetOne(const char *obj_addr, PyMemberDef *l)
         return -1;                                              \
     } while (0)
 
+/* An object member's store: v (or NULL) replaces the value under the
+   object's lock, released so that lock-free readers (lu_try_xget_ref) see it
+   whole. Returns the old value, which the caller releases. */
+PyObject *
+lu_member_exchange(PyObject *obj, PyObject **addr, PyObject *v)
+{
+    PyObject *old;
+    Py_BEGIN_CRITICAL_SECTION(obj);
+    old = *addr;
+    __atomic_store_n(addr, Py_XNewRef(v), __ATOMIC_RELEASE);
+    Py_END_CRITICAL_SECTION();
+    return old;
+}
+
 int
 PyMember_SetOne(char *addr, PyMemberDef *l, PyObject *v)
 {
@@ -294,10 +308,7 @@ PyMember_SetOne(char *addr, PyMemberDef *l, PyObject *v)
     }
     case _Py_T_OBJECT:
     case Py_T_OBJECT_EX:
-        Py_BEGIN_CRITICAL_SECTION(obj);
-        oldv = *(PyObject **)addr;
-        *(PyObject **)addr = Py_XNewRef(v);
-        Py_END_CRITICAL_SECTION();
+        oldv = lu_member_exchange(obj, (PyObject **)addr, v);
         if (v == NULL && oldv == NULL && l->type == Py_T_OBJECT_EX) {
             // Raise an exception when attempting to delete an already deleted
             // attribute.

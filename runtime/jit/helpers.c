@@ -107,6 +107,41 @@ h_build_tuple(PyObject **argv, intptr_t n)
     return t;
 }
 
+/* A primitive that never runs Python (LU_METH_NOPY): argv[0] is the
+   primitive, then its arguments. */
+static PyObject *
+h_prim(PyObject **argv, intptr_t n)
+{
+    PyCFunctionObject *f = (PyCFunctionObject *)argv[0];
+    return ((PyCFunctionFast)(void (*)(void))f->m_ml->ml_meth)(f->m_self, argv + 1, n - 1);
+}
+
+/* MAKE_FUNCTION; function watchers may run Python. */
+static PyObject *
+h_make_function(PyObject *code, PyObject *globals)
+{
+    PyObject *func = lu_function_new(code, globals);
+    if (func != NULL) {
+        lu_function_set_version((PyFunctionObject *)func);
+    }
+    return func;
+}
+
+static void
+h_set_function_attribute(PyObject *func, PyObject *attr, int64_t which)
+{
+    lu_function_set_attribute((PyFunctionObject *)func, (int)which, Py_NewRef(attr));
+}
+
+/* STORE_DEREF */
+static void
+h_cell_store(PyObject *cell, PyObject *v)
+{
+    PyObject *old = ((PyCellObject *)cell)->ob_ref;
+    ((PyCellObject *)cell)->ob_ref = Py_NewRef(v);
+    Py_XDECREF(old);
+}
+
 /* --- attributes --- */
 
 /* LOAD_ATTR_WITH_HINT: the instance dict's entry `index`, while the type
@@ -151,19 +186,18 @@ h_attr_store(PyObject *owner, PyObject *v, PyObject *name, int64_t version)
     return 1;
 }
 
+/* LOAD_ATTR_SLOT and STORE_ATTR_SLOT, as the interpreter runs them: NULL
+   when the slot is empty or its value is being replaced. */
 static PyObject *
 h_slot_load(PyObject *owner, int64_t offset)
 {
-    return Py_XNewRef(*(PyObject **)((char *)owner + offset));
+    return lu_try_xget_ref((PyObject **)((char *)owner + offset));
 }
 
 static void
 h_slot_store(PyObject *owner, int64_t offset, PyObject *v)
 {
-    PyObject **slot = (PyObject **)((char *)owner + offset);
-    PyObject *old = *slot;
-    *slot = Py_NewRef(v);
-    Py_XDECREF(old);
+    Py_XDECREF(lu_member_exchange(owner, (PyObject **)((char *)owner + offset), v));
 }
 
 /* LOAD_ATTR_METHOD_WITH_VALUES: the instance's dict does not shadow name. */
@@ -183,6 +217,10 @@ h_cell_load(PyObject *cell)
 static PyObject *
 h_load_attr(PyObject *owner, PyObject *name)
 {
+    PyObject *native = lu_getattr_native(owner, name);
+    if (native != NULL || PyErr_Occurred()) {
+        return native;
+    }
     struct lu_task *t = (struct lu_task *)PyThreadState_Get();
     t->pin++;
     PyObject *v = PyObject_GetAttr(owner, name);
@@ -199,6 +237,10 @@ h_load_method(PyObject *owner, PyObject *name, int64_t unused)
 static int
 h_store_attr(PyObject *owner, PyObject *name, PyObject *v)
 {
+    int done = lu_setattr_native(owner, name, v);
+    if (done != 0) {
+        return done < 0 ? -1 : 0;
+    }
     struct lu_task *t = (struct lu_task *)PyThreadState_Get();
     t->pin++;
     int r = PyObject_SetAttr(owner, name, v);
@@ -243,14 +285,11 @@ static PyObject *
 h_binary_op(PyObject *a, PyObject *b, int64_t op)
 {
     if (op == NB_SUBSCR) {
-        PyObject *args[2] = { a, b };
-        if (PyList_CheckExact(a) && PyLong_CheckExact(b) && _PyLong_IsCompact((PyLongObject *)b)
-            && _PyLong_CompactValue((PyLongObject *)b) >= 0) {
-            PyObject *item = lu_list_item_ref((PyListObject *)a, (Py_ssize_t)_PyLong_CompactValue((PyLongObject *)b));
-            if (item != NULL) {
-                return item;
-            }
+        PyObject *item = lu_subscr_native(a, b);
+        if (item != NULL || PyErr_Occurred()) {
+            return item;
         }
+        PyObject *args[2] = { a, b };
         return lu_call_kernel(LU_K_getitem, args, 2);
     }
     int bitwise = op == NB_AND || op == NB_OR || op == NB_XOR || op == NB_INPLACE_AND
@@ -273,16 +312,8 @@ h_binary_op(PyObject *a, PyObject *b, int64_t op)
 static PyObject *
 h_compare_op(PyObject *a, PyObject *b, int64_t oparg)
 {
-    int op = (int)oparg >> 5, r;
-    if (PyUnicode_CheckExact(a) && PyUnicode_CheckExact(b) && (op == Py_EQ || op == Py_NE)) {
-        r = lu_str_eq(a, b) == (op == Py_EQ);
-    }
-    else if (PyLong_CheckExact(a) && PyLong_CheckExact(b)) {
-        int c = lu_long_compare(a, b);
-        r = op == Py_LT ? c < 0 : op == Py_LE ? c <= 0 : op == Py_EQ ? c == 0
-          : op == Py_NE ? c != 0 : op == Py_GT ? c > 0 : c >= 0;
-    }
-    else {
+    int r = lu_compare_native(a, b, (int)oparg);
+    if (r < 0) {
         PyObject *args[3] = { a, b, lu_small_int((int)oparg) };
         return lu_call_kernel(LU_K_compare, args, 3);
     }
@@ -417,9 +448,20 @@ h_call(PyObject **argv, intptr_t n)
     PyObject *callable = argv[0];
     PyObject *const *args = argv[1] != NULL ? argv + 1 : argv + 2;
     size_t nargs = (size_t)(argv[1] != NULL ? n - 1 : n - 2);
-    t->pin++;
-    PyObject *r = lu_call(callable, args, nargs, NULL);
-    t->pin--;
+    /* A kernel function C answers runs no frame, as from the interpreter. */
+    PyObject *target, *self, *r = NULL;
+    int kernel = lu_kernel_target(callable, args, (Py_ssize_t)nargs, &target, &self);
+    if (kernel < 0) {
+        return NULL;
+    }
+    if (kernel && self == NULL) {
+        r = lu_native_call(&t->ts, target, args, (Py_ssize_t)nargs);
+    }
+    if (r == NULL && !PyErr_Occurred()) {
+        t->pin++;
+        r = lu_call(callable, args, nargs, NULL);
+        t->pin--;
+    }
     /* The interpreter polls after a call: a signal the callee tripped is
        handled here, and its exception is the call's. */
     if (r != NULL && (__atomic_load_n(&t->carrier->poll, __ATOMIC_RELAXED) & LU_POLL_EVENTS_MASK)
@@ -451,6 +493,10 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_load_method] = { (void *)h_load_method, "load_method", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 3 },
     [H_call] = { (void *)h_call, "call", REP_OBJ, IF_RAISE | IF_PY, 0 },
+    [H_prim] = { (void *)h_prim, "prim", REP_OBJ, IF_RAISE, 0 },
+    [H_make_function] = { (void *)h_make_function, "make_function", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, 0, 3 },
+    [H_cell_store] = { (void *)h_cell_store, "cell_store", REP_NONE, 0, 2 },
     [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, 0, 1 },

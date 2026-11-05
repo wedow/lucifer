@@ -111,6 +111,13 @@ def update_slots(cls, own_only):
             set_slot(cls, slot, _THUNK, None)
 
 
+def builtin_sequence(cls):
+    """A builtin sequence repeats through sq_repeat and has no nb_multiply, so
+    C code that asks (NumPy's scalars) sees what CPython shows."""
+    set_slot(cls, 'sq_repeat', 4, None)
+    set_slot(cls, 'nb_multiply', 0, None)
+
+
 def check_new(cls, owner):
     """tp_new_wrapper's checks of owner.__new__(cls)."""
     if not kind(cls, 'type'):

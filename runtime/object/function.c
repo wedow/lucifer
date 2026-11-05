@@ -52,6 +52,26 @@ lu_function_set_version(PyFunctionObject *func)
     func->func_version = ((PyCodeObject *)func->func_code)->co_version;
 }
 
+/* Include/internal/pycore_opcode_utils.h */
+#define MAKE_FUNCTION_DEFAULTS    0x01
+#define MAKE_FUNCTION_KWDEFAULTS  0x02
+#define MAKE_FUNCTION_ANNOTATIONS 0x04
+#define MAKE_FUNCTION_CLOSURE     0x08
+
+void
+lu_function_set_attribute(PyFunctionObject *func, int which, PyObject *attr)
+{
+    PyObject **field;
+    switch (which) {
+    case MAKE_FUNCTION_DEFAULTS: field = &func->func_defaults; break;
+    case MAKE_FUNCTION_KWDEFAULTS: field = &func->func_kwdefaults; break;
+    case MAKE_FUNCTION_ANNOTATIONS: field = &func->func_annotations; break;
+    case MAKE_FUNCTION_CLOSURE: field = &func->func_closure; break;
+    default: field = &func->func_annotate; break;
+    }
+    Py_XSETREF(*field, attr);
+}
+
 /* func_clear_version: a function whose code, defaults or keyword defaults
    changed is never specialized on again (FUNC_VERSION_CLEARED). */
 static void
@@ -129,6 +149,11 @@ lu_function_new(PyObject *code, PyObject *globals)
     op->func_doc = Py_NewRef(doc);
     op->func_module = lu_ns_get(globals, LU_ID(__name__));
     op->vectorcall = function_vectorcall;
+    if (!(co->co_flags & CO_NESTED) || (co->co_flags & CO_METHOD)) {
+        /* cp314t: top-level functions and methods are freed by a collection
+           only, which lets inline caches name them (specialize.c). */
+        lu_set_deferred((PyObject *)op);
+    }
     lu_func_notify(PyFunction_EVENT_CREATE, op, NULL);
     return (PyObject *)op;
 }
@@ -342,7 +367,7 @@ vectorcall_varargs(PyObject *callable, PyObject *const *args, size_t nargsf, PyO
     if (nkw) {
         kwargs = PyDict_New();
         for (Py_ssize_t i = 0; kwargs != NULL && i < nkw; i++) {
-            if (lu_ns_insert(kwargs, PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) < 0) {
+            if (PyDict_SetItem(kwargs, PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) < 0) {
                 Py_CLEAR(kwargs);
             }
         }
@@ -597,6 +622,29 @@ PyFunction_SetKwDefaults(PyObject *op, PyObject *defaults)
     return func_set_kwdefaults(op, defaults, NULL);
 }
 
+/* CPython fires no watcher event for a closure change, only the version
+   clear. */
+int
+PyFunction_SetClosure(PyObject *op, PyObject *closure)
+{
+    if (!PyFunction_Check(op)) {
+        lu_err_format(PyExc_SystemError, "bad argument to internal function");
+        return -1;
+    }
+    if (closure == Py_None) {
+        closure = NULL;
+    }
+    else if (closure == NULL || !PyTuple_Check(closure)) {
+        lu_err_format(PyExc_SystemError, "expected tuple for closure, got '%.100s'",
+                      closure != NULL ? Py_TYPE(closure)->tp_name : "NULL");
+        return -1;
+    }
+    PyFunctionObject *func = (PyFunctionObject *)op;
+    clear_version(func);
+    Py_XSETREF(func->func_closure, Py_XNewRef(closure));
+    return 0;
+}
+
 #define FUNCTION_FIELD(name, field) \
     PyObject * \
     PyFunction_Get##name(PyObject *op) \
@@ -612,6 +660,7 @@ FUNCTION_FIELD(Globals, func_globals)
 FUNCTION_FIELD(Module, func_module)
 FUNCTION_FIELD(Defaults, func_defaults)
 FUNCTION_FIELD(KwDefaults, func_kwdefaults)
+FUNCTION_FIELD(Closure, func_closure)
 
 /* The watcher API (funcobject.c). */
 

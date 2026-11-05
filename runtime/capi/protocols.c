@@ -446,7 +446,8 @@ PyNumber_Check(PyObject *o)
 int
 PySequence_Check(PyObject *s)
 {
-    return s != NULL && !PyDict_Check(s) && _PyType_Lookup(Py_TYPE(s), LU_ID(__getitem__)) != NULL;
+    return s != NULL && !PyDict_Check(s) && Py_TYPE(s)->tp_as_sequence != NULL
+        && Py_TYPE(s)->tp_as_sequence->sq_item != NULL;
 }
 
 Py_ssize_t

@@ -2,13 +2,10 @@
   "numpy": "2.5.4",
   "abi": "cp314t",
   "shards": [
-    "numpy/_core/tests/test__exceptions.py",
-    "numpy/_core/tests/test_abc.py",
-    "numpy/_core/tests/test_argparse.py",
-    "numpy/_core/tests/test_array_api_info.py"
+    ""
   ],
   "parallel_threads": 1,
-  "timeout": 540,
+  "timeout": 1300,
   "requirements_sha256": "13a20f27474bc0e98445882b51cdbd8d88bc3c6d9b53a3f6c13ff9de2ec752b7",
   "optional_requirements_sha256": "cf8cd005aaf1955846e0927c0084c3117a0613035211af019ddfb55d0e39d73e",
   "artifact": {
@@ -108,5 +105,21 @@
     "url": "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz"
   },
   "site_injected": true,
-  "unavailable": "interpreter failed startup or NumPy import"
+  "startup": {
+    "version": "3.14.10",
+    "numpy": "2.5.4",
+    "free_threaded_build": true,
+    "gil_enabled": false
+  },
+  "interpreter_sha256": "a4437a969d7e7c971a80dc59efb5af8d6e2ca0878bacf118d09c14f5aba61568",
+  "exitstatus": 0,
+  "collected": 52273,
+  "collection_sha256": "84f478d01922a7dbb56f1d2150727d2e26dde24ecac1f5565c7dc7bf94998dd4",
+  "finish": {
+    "version": "3.14.10",
+    "abiflags": "t",
+    "free_threaded_build": true,
+    "gil_enabled": false,
+    "exitstatus": 0
+  }
 }

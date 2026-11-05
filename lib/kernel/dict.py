@@ -313,15 +313,18 @@ def build_map(items):
 
 def merge_kwargs(d, update, fname):
     """DICT_MERGE: the keywords of f(**update) into the kwargs dict d, which
-    holds exact strs and refuses a key twice."""
+    holds strs and refuses a key twice."""
     if not kind(update, 'dict') and not has_keys(update):
         error(TypeError, _cat(fname, ' argument after ** must be a mapping, not ', _name(update)))
     for key in mapping_keys(update):
-        if type(key) is not str:
+        if not kind(key, 'str'):
             error(TypeError, 'keywords must be strings')
+        value = operators.getitem(update, key)
+        if type(key) is not str:
+            key = str_join('', (key,))      # a str subclass's keyword is its exact text
         if contains(d, key):
             error(TypeError, _cat(fname, " got multiple values for keyword argument '", key, "'"))
-        setitem(d, key, operators.getitem(update, key))
+        setitem(d, key, value)
 
 
 def update_op(d, update):

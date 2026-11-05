@@ -146,14 +146,18 @@ lu_frame_user(struct lu_frame *from, Py_ssize_t depth)
 
 /* PyFrameObject */
 
+/* The first fields lie where CPython's PyFrameObject has them: Cython writes
+   f_lineno of the frame it makes with PyFrame_New, at that offset. */
 struct lu_frameobj {
     PyObject_HEAD
-    struct lu_frame *f_frame;   /* the record it reads through: live, or `own` */
     PyObject *f_back;           /* when it owns its frame: the frame object that called it */
+    struct lu_frame *f_frame;   /* the record it reads through: live, or `own` */
     PyObject *f_trace;
-    PyObject *f_extra_locals;   /* dict: names the proxy was given that are not fast locals */
-    PyObject *f_overwritten;    /* list: fast-local values the proxy replaced, kept alive */
+    int f_lineno;               /* when not 0, the line number to report */
     char f_trace_lines, f_trace_opcodes;
+    PyObject *f_extra_locals;   /* dict: names the proxy was given that are not fast locals */
+    PyObject *f_locals_cache;   /* dict PyEval_GetLocals keeps for a fast-locals frame */
+    PyObject *f_overwritten;    /* list: fast-local values the proxy replaced, kept alive */
     struct lu_frame own;        /* last: its localsplus follow */
 };
 
@@ -266,6 +270,7 @@ frame_traverse(PyObject *op, visitproc visit, void *arg)
     Py_VISIT(fo->f_back);
     Py_VISIT(fo->f_trace);
     Py_VISIT(fo->f_extra_locals);
+    Py_VISIT(fo->f_locals_cache);
     Py_VISIT(fo->f_overwritten);
     /* A frame object that does not own its frame holds nothing of it. */
     if (fo->f_frame == &fo->own) {
@@ -286,6 +291,7 @@ frame_clear(PyObject *op)
     Py_CLEAR(fo->f_back);
     Py_CLEAR(fo->f_trace);
     Py_CLEAR(fo->f_extra_locals);
+    Py_CLEAR(fo->f_locals_cache);
     Py_CLEAR(fo->f_overwritten);
     if (fo->f_frame == &fo->own) {
         release_refs(&fo->own);
@@ -306,6 +312,7 @@ frame_dealloc(PyObject *op)
         }
         Py_XDECREF(fo->f_trace);
         Py_XDECREF(fo->f_extra_locals);
+        Py_XDECREF(fo->f_locals_cache);
         Py_XDECREF(fo->f_overwritten);
         lu_object_free(op);
         op = back != NULL && lu_release_last(back) ? back : NULL;
@@ -326,6 +333,7 @@ lu_frame_clear(PyFrameObject *frame)
     }
     Py_CLEAR(fo->f_trace);
     Py_CLEAR(fo->f_extra_locals);
+    Py_CLEAR(fo->f_locals_cache);
     Py_CLEAR(fo->f_overwritten);
     PyObject *func = f->func;
     f->func = NULL;
@@ -363,8 +371,7 @@ frame_get_lasti(PyObject *op, void *closure)
 static PyObject *
 frame_get_lineno(PyObject *op, void *closure)
 {
-    struct lu_frame *f = FO(op)->f_frame;
-    int line = PyCode_Addr2Line(f->code, (int)(lu_frame_lasti(f) * sizeof(lu_codeunit)));
+    int line = PyFrame_GetLineNumber((PyFrameObject *)op);
     return line < 0 ? Py_NewRef(Py_None) : PyLong_FromLong(line);
 }
 
@@ -710,13 +717,20 @@ PyFrame_GetLasti(PyFrameObject *f)
 int
 PyFrame_GetLineNumber(PyFrameObject *f)
 {
-    struct lu_frame *lf = FO(f)->f_frame;
-    return PyCode_Addr2Line(lf->code, PyFrame_GetLasti(f));
+    if (FO(f)->f_lineno > 0) {
+        return FO(f)->f_lineno;
+    }
+    return PyCode_Addr2Line(FO(f)->f_frame->code, PyFrame_GetLasti(f));
 }
 
 PyObject *
 PyFrame_GetVar(PyFrameObject *f, PyObject *name)
 {
+    if (!PyUnicode_Check(name)) {
+        lu_err_format(PyExc_TypeError, "name must be str, not %s",
+                      Py_TYPE(name)->tp_name);
+        return NULL;
+    }
     struct lu_frame *lf = FO(f)->f_frame;
     for (int i = 0; i < lf->code->co_nlocalsplus; i++) {
         PyObject *v = fast_name_is(lf->code, i, name) ? fast_value(lf, i) : NULL;
@@ -725,7 +739,7 @@ PyFrame_GetVar(PyFrameObject *f, PyObject *name)
         }
     }
     lu_err_format(PyExc_NameError, "variable '%s' does not exist",
-                  PyUnicode_Check(name) ? PyUnicode_AsUTF8(name) : "?");
+                  PyUnicode_AsUTF8(name));
     return NULL;
 }
 
@@ -752,6 +766,41 @@ PyEval_GetFrame(void)
     PyFrameObject *f = PyThreadState_GetFrame(PyThreadState_Get());
     Py_XDECREF(f);
     return f;
+}
+
+/* PyEval_GetLocals (Python/ceval.c): the caller's locals, borrowed. A
+   fast-locals frame's proxy is merged into a dict the frame object keeps,
+   as CPython's PyFrameObject.f_locals_cache does. */
+PyObject *
+PyEval_GetLocals(void)
+{
+    PyFrameObject *frame = PyEval_GetFrame();
+    if (frame == NULL) {
+        lu_err_format(PyExc_SystemError, "frame does not exist");
+        return NULL;
+    }
+    PyObject *locals = PyFrame_GetLocals(frame);
+    if (locals == NULL) {
+        return NULL;
+    }
+    if (PyFrameLocalsProxy_Check(locals)) {
+        PyObject *ret = FO(frame)->f_locals_cache;
+        if (ret == NULL) {
+            ret = PyDict_New();
+            if (ret == NULL) {
+                Py_DECREF(locals);
+                return NULL;
+            }
+            FO(frame)->f_locals_cache = ret;
+        }
+        if (PyDict_Update(ret, locals) < 0) {
+            ret = NULL;             /* a cache that broke stays broken, as in CPython */
+        }
+        Py_DECREF(locals);
+        return ret;
+    }
+    Py_DECREF(locals);              /* the frame keeps it: safe to borrow */
+    return locals;
 }
 
 /* The recursion limit (Python/ceval.c Py_SetRecursionLimit, sys's

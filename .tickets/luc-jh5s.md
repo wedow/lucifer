@@ -1,6 +1,6 @@
 ---
 id: luc-jh5s
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-05T03:27:42Z
@@ -21,3 +21,13 @@ entries 262M, side exits 20.3M (opcode 79 alone 15.6M, opcode 23 1.9M, 56 0.13M)
 Cause: not compile time, not deopt churn. Compiled code side-exits to the interpreter millions of times
 at a few opcodes, and each re-entry pays lu_jit_enter; default mode is already slower than jit=off.
 Fix belongs to the tier (side-exit opcodes, entry cost), not the gate.
+
+## Notes
+
+**2026-11-05T05:08:15Z**
+
+Still flaking the gate after the 8x-oracle timeout: havlak TIMEOUT at 97.5 s in difftest deopt:7 on the dawf checkpoint-4 merge under load. Fixing the side exits is what makes this lane reliable; raise priority.
+
+**2026-11-05T07:50:39Z**
+
+Fixed on branch luc-jh5s: units that keep leaving stay interpreted, cold compiles put off for feedback, NOPY primitives callable from inlined frames, MAKE_FUNCTION/SET_FUNCTION_ATTRIBUTE/STORE_DEREF compiled, generic helpers share the interpreter's C answers. Havlak side exits 11.4M -> 11k (on), 20.2M -> 16k (always); on 11.6 s vs off 13.0 s (pinned core); deopt:7 havlak 21.6 s.

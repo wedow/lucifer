@@ -74,12 +74,12 @@ prim_caller_code_flags(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* eval_code(code, globals, locals): a frame primitive that runs a code
-   object, which takes no closure, as exec and eval do; globals gets
+   object (locals any mapping), which takes no closure, as exec and eval do; globals gets
    __builtins__ when it has none. */
 static struct lu_frame *
 prim_eval_code(PyThreadState *ts, PyObject *const *args, Py_ssize_t nargs)
 {
-    if (nargs != 3 || !PyCode_Check(args[0]) || !PyDict_Check(args[1]) || !PyDict_Check(args[2])) {
+    if (nargs != 3 || !PyCode_Check(args[0]) || !PyDict_Check(args[1])) {
         lu_err_format(PyExc_TypeError, "eval_code(code, globals, locals)");
         return NULL;
     }
@@ -89,9 +89,10 @@ prim_eval_code(PyThreadState *ts, PyObject *const *args, Py_ssize_t nargs)
                       co->co_nfreevars);
         return NULL;
     }
+    /* exec and eval: globals with no __builtins__ gets the caller's, as
+       CPython's _PyEval_EnsureBuiltins does (the dict, not the module). */
     if (lu_ns_lookup(args[1], LU_ID(__builtins__)) == NULL
-        && lu_ns_insert(args[1], LU_ID(__builtins__),
-                        lu_ns_lookup(ts->interp->modules, LU_ID(builtins))) < 0) {
+        && lu_ns_insert(args[1], LU_ID(__builtins__), PyEval_GetBuiltins()) < 0) {
         return NULL;
     }
     PyObject *func = lu_function_new(args[0], args[1]);

@@ -4,10 +4,10 @@ and the type getsets over the layout primitives)."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_dict, type_mro, type_bases,
-    type_base, type_name, type_qualname, type_set_name, type_tp_name, type_flag, type_set_flag,
+    type_base, type_name, type_qualname, type_set_name, type_tp_name, type_text_signature, type_flag, type_set_flag,
     type_can_new, type_new_layout, type_set_mro, type_set_bases, type_subclasses,
     type_modified, type_static_module, is_subtype, ns_get, ns_set, ns_del, ns_items, cell_set, proxy_new,
-    field_get, kernel_get, is_callable, type_layout,
+    field_get, kernel_get, is_callable, type_layout, enable_deferred,
 )
 from _lucifer import _boot, object as _object
 
@@ -153,7 +153,7 @@ def _get_weakrefoffset(cls):
 
 
 def _get_text_signature(cls):
-    return None
+    return type_text_signature(cls)
 
 
 def _get_type_params(cls):
@@ -516,6 +516,8 @@ def _type_set(cls, name, value):
     if not type_flag(cls, _HEAPTYPE):
         error(TypeError, str_join('', (
             "cannot set '", name, "' attribute of immutable type '", type_tp_name(cls), "'")))
+    if type(value) is _function:
+        enable_deferred(value)          # cp314t (gh-139103): a class's methods are freed by collections
     type_modified(cls)
     generic_setattr(cls, name, value)
     type_modified(cls)

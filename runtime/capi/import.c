@@ -115,12 +115,6 @@ PySys_GetObject(const char *name)
 }
 
 PyObject *
-PyEval_GetBuiltins(void)
-{
-    return PyInterpreterState_Get()->builtins;
-}
-
-PyObject *
 PyImport_ImportModuleLevel(const char *name, PyObject *globals, PyObject *locals, PyObject *fromlist,
                            int level)
 {

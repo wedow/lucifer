@@ -26,6 +26,7 @@ build_time_vars = {
     'INCLUDEDIR': _prefix + '/include',
     'INCLUDEPY': _prefix + '/include/python' + _version + _abi,
     'LDLIBRARY': 'liblucifer.a',
+    'LIBPYTHON': '',
     'LDSHARED': 'cc -shared',
     'LDVERSION': _version + _abi,
     'LIBDEST': _prefix + '/lib/python' + _version + _abi,

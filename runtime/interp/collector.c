@@ -32,9 +32,16 @@
    6. Objects other carriers own are handled alike: their counts are merged
       first (the biased queues), so each object's count is its true count.
       Garbage is merged and held by the collector's worklist reference, so
-      finalizers running on any carrier use the shared path on it. */
+      finalizers running on any carrier use the shared path on it.
+   7. Inline caches name deferred objects without owning them, and only a
+      collection frees those: when the garbage holds a deferred object, every
+      code object's caches forget the garbage before the world restarts
+      (lu_specialize_forget), so a cache never names freed memory. A
+      shutdown collection ends deferral for all, so the caches forget
+      everything they name. */
 
 #include "interp/exceptions.h"
+#include "interp/specialize.h"
 #include "prim/prim.h"
 #include "lucifer.h"
 
@@ -59,6 +66,7 @@ struct collection_state {
     Py_ssize_t collected;
     Py_ssize_t uncollectable;
     Py_ssize_t long_lived_total;
+    int forget;                         /* caches may name the garbage (invariant 7) */
     struct worklist unreachable;        /* garbage, each holding a reference */
     struct worklist legacy_finalizers;  /* garbage with tp_del: uncollectable */
     struct worklist wrcb_to_call;       /* weakrefs whose callbacks run */
@@ -400,6 +408,7 @@ scan_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area, void *block
     }
     if (gc_is_unreachable(op)) {
         /* Collected as soon as it is finalized. */
+        state->forget |= lu_has_deferred_refcount(op);
         disable_deferred_refcounting(op);
         merge_refcount(op, 1);
         if (has_legacy_finalizer(op)) {
@@ -444,6 +453,25 @@ move_legacy_finalizer_reachable(struct collection_state *state)
     worklist_filter(&state->unreachable, still_unreachable, to_legacy_finalizers, state);
 }
 
+static int
+not_immortal(PyObject *op)
+{
+    return !_Py_IsImmortal(op);
+}
+
+/* Invariant 7: code objects' caches forget the garbage, frozen code too. */
+static bool
+forget_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area, void *block, size_t block_size,
+                    void *args)
+{
+    PyObject *op = op_from_block(block, args, 1);
+    if (op != NULL && PyCode_Check(op)) {
+        int shutdown = ((struct collection_state *)args)->reason == LU_GC_REASON_SHUTDOWN;
+        lu_specialize_forget((PyCodeObject *)op, shutdown ? not_immortal : gc_is_unreachable);
+    }
+    return true;
+}
+
 static void
 deduce_unreachable_heap(struct collection_state *state)
 {
@@ -453,6 +481,9 @@ deduce_unreachable_heap(struct collection_state *state)
     visit_heaps(interp, scan_heap_visitor, &state->base);
     if (state->legacy_finalizers.head) {
         move_legacy_finalizer_reachable(state);
+    }
+    if (state->forget || state->reason == LU_GC_REASON_SHUTDOWN) {
+        visit_heaps(interp, forget_heap_visitor, &state->base);
     }
 }
 

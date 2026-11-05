@@ -15,16 +15,20 @@
      and the key at that entry is compared on every execution.
    - Nothing is cached while the kernel boots: it fills static types' dicts
      without telling anyone.
-   - A cached descriptor is a borrowed pointer, kept alive only by the type
-     dict that holds it. That is safe while one task runs at a time, as under
-     -X lucifer_handoff, where each hand-over is an acquire and release of the
-     run-queue lock: no carrier is between a guard and its use while another
-     changes the type. Tasks running at once need what cp314t's specializer
-     requires, a cached object whose refcount is deferred (freed only by a
-     stopped-world collection), or reclamation through QSBR. */
+   - A cached descriptor is a pointer the cache does not own, so it is only
+     an object that refcounts cannot free: immortal, or with a deferred
+     refcount, as cp314t's specializer requires. A collection is the only
+     thing that frees a deferred object, and before it does, with the world
+     stopped, it makes every cache forget it (lu_specialize_forget). A cached
+     pointer therefore never dangles: a reader that loaded it may take a
+     reference with a plain incref before its next poll, and the JIT
+     translator may too.
+   - The version and the answer are read as one: the version first, then the
+     lookup, then the version again, so that a change in between is caught. */
 
 #include "interp/specialize.h"
 #include "interp/code.h"
+#include "interp/instrument.h"
 #include "object/dict.h"
 
 /* _PyOpcode_Caches: CACHE entries after each instruction, specialized or not. */
@@ -162,10 +166,16 @@ enum descr_kind {
     DESCR_OTHER,            /* anything that runs code or whose type could change */
 };
 
+/* `name` in tp's MRO as of tp's version *version, which is 0 when tp has no
+   version or changed during the lookup. *descr is a new reference, or NULL. */
 static enum descr_kind
-analyze(PyTypeObject *tp, PyObject *name, PyObject **descr)
+analyze(PyTypeObject *tp, PyObject *name, PyObject **descr, uint32_t *version)
 {
-    *descr = _PyType_Lookup(tp, name);
+    *version = lu_type_assign_version(tp) ? __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) : 0;
+    *descr = _PyType_LookupRef(tp, name);
+    if (__atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) != *version) {
+        *version = 0;
+    }
     if (*descr == NULL) {
         return DESCR_ABSENT;
     }
@@ -188,10 +198,20 @@ default_getattribute(PyTypeObject *tp, PyTypeObject *base)
     return _PyType_Lookup(tp, LU_ID(__getattribute__)) == _PyType_Lookup(base, LU_ID(__getattribute__));
 }
 
+/* Whether a cache may name descr without owning it (see the rules above). */
+static int
+cacheable(PyObject *descr)
+{
+    return descr == NULL || _Py_IsImmortal(descr) || lu_has_deferred_refcount(descr);
+}
+
 static void
 set_attr_cache(lu_codeunit *site, int opcode, uint32_t version, uint32_t second, PyObject *descr)
 {
     lu_codeunit *c = site + 1;
+    if (!cacheable(descr)) {
+        return fail(site);
+    }
     if (!begin(site, LOAD_ATTR, c + LA_VERSION, 2)) {
         return;
     }
@@ -223,22 +243,25 @@ static void
 specialize_class(PyObject *owner, lu_codeunit *site, PyObject *name)
 {
     PyTypeObject *cls = (PyTypeObject *)owner, *meta = Py_TYPE(cls);
-    PyObject *descr;
-    if (!default_getattribute(meta, &PyType_Type) || _PyType_Lookup(meta, name) != NULL) {
+    PyObject *descr, *meta_descr;
+    uint32_t version, meta_version;
+    if (!default_getattribute(meta, &PyType_Type)) {
         return fail(site);
     }
-    enum descr_kind kind = analyze(cls, name, &descr);
-    if ((kind != DESCR_METHOD && kind != DESCR_NON_DESCRIPTOR) || !lu_type_assign_version(cls)
-        || !lu_type_assign_version(meta)) {
-        return fail(site);
+    analyze(meta, name, &meta_descr, &meta_version);
+    enum descr_kind kind = analyze(cls, name, &descr, &version);
+    if (meta_descr != NULL || (kind != DESCR_METHOD && kind != DESCR_NON_DESCRIPTOR)
+        || version == 0 || meta_version == 0) {
+        fail(site);
     }
-    if (meta == &PyType_Type) {
-        set_attr_cache(site, LOAD_ATTR_CLASS, cls->tp_version_tag, 0, descr);
+    else if (meta == &PyType_Type) {
+        set_attr_cache(site, LOAD_ATTR_CLASS, version, 0, descr);
     }
     else {
-        set_attr_cache(site, LOAD_ATTR_CLASS_WITH_METACLASS_CHECK, cls->tp_version_tag,
-                       meta->tp_version_tag, descr);
+        set_attr_cache(site, LOAD_ATTR_CLASS_WITH_METACLASS_CHECK, version, meta_version, descr);
     }
+    Py_XDECREF(meta_descr);
+    Py_XDECREF(descr);
 }
 
 /* A __slots__ member that is an object reference: its byte offset in the
@@ -259,19 +282,17 @@ specialize_instance(PyObject *owner, lu_codeunit *site, PyObject *name, int meth
 {
     PyTypeObject *tp = Py_TYPE(owner);
     PyObject *descr;
+    uint32_t version;
     if (!default_getattribute(tp, &PyBaseObject_Type)) {
         return fail(site);
     }
-    enum descr_kind kind = analyze(tp, name, &descr);
-    if (!lu_type_assign_version(tp)) {
-        return fail(site);
-    }
+    enum descr_kind kind = analyze(tp, name, &descr, &version);
     int managed = (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) != 0;
-    if (!managed && tp->tp_dictoffset != 0) {
-        return fail(site);
+    if (version == 0 || (!managed && tp->tp_dictoffset != 0)) {
+        fail(site);
     }
-    if (is_slot_member(descr)) {
-        set_attr_cache(site, LOAD_ATTR_SLOT, tp->tp_version_tag,
+    else if (is_slot_member(descr)) {
+        set_attr_cache(site, LOAD_ATTR_SLOT, version,
                        (uint32_t)((PyMemberDescrObject *)descr)->d_member->offset, NULL);
     }
     else if (kind == DESCR_ABSENT) {
@@ -280,22 +301,25 @@ specialize_instance(PyObject *owner, lu_codeunit *site, PyObject *name, int meth
         Py_ssize_t index = dict != NULL && unicode_dict(dict) ? lu_ns_index(dict, name) : -1;
         if (index < 0 || index > UINT16_MAX
             || lu_dk_key(((PyDictObject *)dict)->ma_keys, index) != name) {
-            return fail(site);
+            fail(site);
         }
-        set_attr_cache(site, LOAD_ATTR_WITH_HINT, tp->tp_version_tag, (uint32_t)index, NULL);
+        else {
+            set_attr_cache(site, LOAD_ATTR_WITH_HINT, version, (uint32_t)index, NULL);
+        }
     }
     else if (kind == DESCR_METHOD && method) {
         set_attr_cache(site, managed ? LOAD_ATTR_METHOD_WITH_VALUES : LOAD_ATTR_METHOD_NO_DICT,
-                       tp->tp_version_tag, 0, descr);
+                       version, 0, descr);
     }
     else if (kind == DESCR_NON_DESCRIPTOR) {
         set_attr_cache(site, managed ? LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES
                                      : LOAD_ATTR_NONDESCRIPTOR_NO_DICT,
-                       tp->tp_version_tag, 0, descr);
+                       version, 0, descr);
     }
     else {
         fail(site);
     }
+    Py_XDECREF(descr);
 }
 
 void
@@ -326,28 +350,50 @@ void
 lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
 {
     PyTypeObject *tp = Py_TYPE(owner);
-    if (!enabled() || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))
-        || !lu_type_assign_version(tp)) {
+    if (!enabled() || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))) {
         return;
     }
-    PyObject *descr = _PyType_Lookup(tp, name);
+    PyObject *descr;
+    uint32_t version;
+    analyze(tp, name, &descr, &version);
     lu_codeunit *c = site + 1;
-    if (is_slot_member(descr) && !(((PyMemberDescrObject *)descr)->d_member->flags & Py_READONLY)) {
-        if (!begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
-            return;
+    if (version == 0) {
+        fail(site);
+    }
+    else if (is_slot_member(descr) && !(((PyMemberDescrObject *)descr)->d_member->flags & Py_READONLY)) {
+        if (begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
+            lu_cache_store(c + LA_INDEX, (uint16_t)((PyMemberDescrObject *)descr)->d_member->offset);
+            lu_cache_store32(c + LA_VERSION, version);
+            end(site, STORE_ATTR_SLOT);
         }
-        lu_cache_store(c + LA_INDEX, (uint16_t)((PyMemberDescrObject *)descr)->d_member->offset);
-        lu_cache_store32(c + LA_VERSION, tp->tp_version_tag);
-        end(site, STORE_ATTR_SLOT);
     }
     else if (descr == NULL && (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT)) {
-        if (!begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
-            return;
+        if (begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
+            lu_cache_store32(c + LA_VERSION, version);
+            end(site, STORE_ATTR_WITH_HINT);
         }
-        lu_cache_store32(c + LA_VERSION, tp->tp_version_tag);
-        end(site, STORE_ATTR_WITH_HINT);
     }
     else {
         fail(site);
+    }
+    Py_XDECREF(descr);
+}
+
+/* A collection is about to free what `dead` answers true for, with the world
+   stopped: the code's caches stop naming it, and their sites fail their
+   guard until they specialize again. */
+void
+lu_specialize_forget(PyCodeObject *code, int (*dead)(PyObject *))
+{
+    lu_codeunit *start = lu_code_start(code);
+    for (Py_ssize_t i = 0, n = Py_SIZE(code); i < n; ) {
+        int base = lu_base_opcode(code, i);
+        lu_codeunit *c = start + i + 1;
+        PyObject *descr = base == LOAD_ATTR ? lu_cache_load_ptr(c + LA_DESCR) : NULL;
+        if (descr != NULL && dead(descr)) {
+            lu_cache_store32(c + LA_VERSION, 0);
+            lu_cache_store_ptr(c + LA_DESCR, NULL);
+        }
+        i += 1 + lu_opcode_caches[base];
     }
 }

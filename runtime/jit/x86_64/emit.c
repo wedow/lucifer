@@ -1614,6 +1614,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     unit->deopts = malloc(sizeof(struct lu_deopt *) * (size_t)(a->nexits + 1));
     for (int i = 0; i < a->nexits; i++) {
         unit->deopts[i] = a->exits[i].d;
+        unit->deopts[i]->unit = unit;
     }
     struct lu_deopt ***table = malloc(sizeof(*table));
     *table = unit->deopts;

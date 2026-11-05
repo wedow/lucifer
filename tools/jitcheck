@@ -7,6 +7,14 @@ and always with every 7th guard failing (-X lucifer_stress=deopt:7). Output
 must match the oracle's line for line once the timings are masked, and in the
 compiling modes the tier must have compiled and entered code (its
 -X lucifer_jit_stats report), so that a lane cannot pass by not compiling.
+Then two lanes run a program under -X lucifer_jit=always at two sizes and
+require that a count of the tier's does not grow with the iterations:
+  exits  tests/kernel/jit_exits.py, whose hot code holds instructions the
+         tier does not compile: side exits. Code that keeps leaving at the
+         same place stays in the interpreter instead of paying an entry and
+         an exit each time.
+  calls  tests/kernel/jit_calls.py, whose hot calls the tier can inline once
+         it has feedback: entries into compiled code.
 Exit status 1 on any difference.
 """
 import argparse
@@ -27,6 +35,12 @@ MODES = {
     'deopt:7': ['-X', 'lucifer_jit=always', '-X', 'lucifer_stress=deopt:7'],
 }
 TIMING = re.compile(r'\d+us')
+# lane: (program, the count in the -X lucifer_jit_stats report)
+GROWTH = {
+    'exits': ('jit_exits.py', r'jit: entries .* side (\d+)'),
+    'calls': ('jit_calls.py', r'jit: entries (\d+)'),
+}
+GROWTH_N = 20000
 
 
 def run(argv, timeout):
@@ -35,20 +49,47 @@ def run(argv, timeout):
     return p.returncode, TIMING.sub('Nus', p.stdout), p.stderr
 
 
+def counted(lucifer, program, pattern, n, timeout):
+    code, out, err = run([lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', str(program), str(n)],
+                         timeout)
+    m = re.search(pattern, err)
+    return code, out, int(m[1]) if m else None
+
+
+def check_growth(args, lane):
+    """The count at 2N less the count at N: what the extra N iterations cost."""
+    name, pattern = GROWTH[lane]
+    program = ROOT / 'tests' / 'kernel' / name
+    sizes = (GROWTH_N, 2 * GROWTH_N)
+    small, large = (counted(args.lucifer, program, pattern, n, args.timeout) for n in sizes)
+    want = [run([args.oracle, str(program), str(n)], args.timeout)[:2] for n in sizes]
+    problems = []
+    if [small[:2], large[:2]] != want:
+        problems.append('output differs')
+    if small[2] is None or large[2] is None:
+        problems.append('no stats')
+    elif large[2] - small[2] > GROWTH_N // 20:
+        problems.append(f'{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
+    print(f"{'FAIL' if problems else 'PASS'} {lane}" + (': ' + '; '.join(problems) if problems else
+                                                      f' ({small[2]}, {large[2]})'))
+    return 1 if problems else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--lucifer', required=True)
     ap.add_argument('--oracle', required=True)
     ap.add_argument('--benchmarks', default=','.join(RUNS))
-    ap.add_argument('--modes', default=','.join(MODES))
+    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH]))
     ap.add_argument('--timeout', type=float, default=600)
     args = ap.parse_args()
     failed = 0
-    for name in args.benchmarks.split(','):
+    modes = [m for m in args.modes.split(',') if m in MODES]
+    for name in args.benchmarks.split(',') if modes else []:
         iters, inner = RUNS[name]
         tail = [str(AWFY / 'harness.py'), name, str(iters), str(inner)]
         want = run([args.oracle, '-X', 'lucifer_jit=always'] + tail, args.timeout)
-        for mode in args.modes.split(','):
+        for mode in modes:
             flags = MODES[mode] + (['-X', 'lucifer_jit_stats'] if mode != 'off' else [])
             got = run([args.lucifer] + flags + tail, args.timeout)
             problems = []
@@ -64,6 +105,9 @@ def main():
             if problems:
                 failed += 1
                 sys.stdout.write(got[1][-2000:] + got[2][-3000:])
+    for lane in GROWTH:
+        if lane in args.modes.split(','):
+            failed += check_growth(args, lane)
     print(f'{failed} failing')
     return 1 if failed else 0
 

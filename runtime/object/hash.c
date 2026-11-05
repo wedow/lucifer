@@ -112,6 +112,22 @@ lu_keyed_hash(uint64_t key, const void *src, Py_ssize_t size)
     return siphash13(key, 0, src, size);
 }
 
+/* Python/pyhash.c's pysiphash funcdef. */
+static Py_hash_t
+pysiphash(const void *src, Py_ssize_t src_sz)
+{
+    return (Py_hash_t)siphash13(_Py_HashSecret.siphash.k0,
+                                _Py_HashSecret.siphash.k1, src, src_sz);
+}
+
+static PyHash_FuncDef PyHash_Func = {pysiphash, "siphash13", 64, 128};
+
+PyHash_FuncDef *
+PyHash_GetFuncDef(void)
+{
+    return &PyHash_Func;
+}
+
 Py_hash_t
 Py_HashBuffer(const void *ptr, Py_ssize_t len)
 {

@@ -17,6 +17,14 @@
    struct lu_frame *(*)(PyThreadState *, PyObject *const *, Py_ssize_t),
    which returns a frame for the interpreter to push (DESIGN 5.2). */
 #define LU_METH_FRAME 0x4000
+/* A PyMethodDef flag of the runtime's own: the primitive never runs Python
+   code (it may allocate and raise), so compiled code calls it directly, also
+   from an inlined frame. */
+#define LU_METH_NOPY 0x8000
+/* Set on the def of a kernel function: its ml_meth is a stub, so a C caller that
+   dispatches on ml_flags (Cython does) sees a calling convention it does not know
+   and takes the generic call. */
+#define LU_METH_KERNEL 0x2000
 
 /* Report an unported C-API function by name and abort. */
 _Noreturn void lu_unimplemented(const char *name);
@@ -755,7 +763,7 @@ struct lu_static_objects {
    _Py_ID strings). LU_ID(__name__) is the str "__name__". */
 #define LU_IDENTIFIERS(X) \
     X(__all__) X(__build_class__) X(__builtins__) X(__call__) X(__class__) X(__delete__) \
-    X(__del__) X(__doc__) X(__get__) X(__getitem__) X(__init__) X(__iter__) \
+    X(__class_getitem__) X(__del__) X(__doc__) X(__get__) X(__getitem__) X(__init__) X(__iter__) \
     X(__len__) X(__loader__) X(__main__) X(__name__) X(__new__) X(__next__) \
     X(__package__) X(__repr__) X(__set__) X(__spec__) X(__str__) X(__hash__) \
     X(__eq__) X(__ne__) X(__lt__) X(__le__) X(__gt__) X(__ge__) X(__contains__) \
@@ -1063,6 +1071,10 @@ lu_xxhash_end(Py_uhash_t acc, Py_ssize_t n, int mangle_length)
 Py_hash_t lu_str_hash(PyObject *s);
 uint64_t lu_keyed_hash(uint64_t key, const void *src, Py_ssize_t size);
 int lu_str_eq(PyObject *a, PyObject *b);
+/* Reports the first keyword argument no name of kwtuple matches, with a
+   suggestion when one is close (runtime/capi/getargs.c). */
+void lu_error_unexpected_keyword_arg(PyObject *kwargs, PyObject *kwnames,
+                                     PyObject *kwtuple, const char *fname);
 void lu_intern(PyInterpreterState *interp, PyObject **p);
 PyObject *lu_str_from_utf8(const char *s, Py_ssize_t n, int surrogatepass);
 Py_hash_t lu_hash(PyObject *v);
@@ -1150,7 +1162,9 @@ int lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value);
 int lu_ns_store(PyObject *dict, PyObject *key, PyObject *value);
 /* Removes `key`: 1 when it was there, 0 when not. */
 int lu_ns_delete(PyObject *dict, PyObject *key);
-/* PyDict_Next over the namespace: *pos starts at 0; key and value are borrowed. */
+/* PyDict_Next over the namespace: *pos starts at 0; key and value are
+   borrowed. A dict other threads may write is iterated in its critical
+   section, as cp314t's dict_merge and PyDict_Copy do. */
 int lu_ns_next(PyObject *dict, Py_ssize_t *pos, PyObject **key, PyObject **value);
 
 /* Types (runtime/prim/type.c). Static builtin types are made ready natively
@@ -1179,6 +1193,10 @@ void lu_type_modified(PyTypeObject *tp);
 int lu_type_assign_version(PyTypeObject *tp);
 /* "__name__" of a type, new: ht_name, or tp_name after its last dot. */
 PyObject *lu_type_name(PyTypeObject *tp);
+/* Stores v (or NULL) into the object member at addr under the object's lock,
+   as PyMember_SetOne and STORE_ATTR_SLOT do; returns the old value. */
+PyObject *lu_member_exchange(PyObject *obj, PyObject **addr, PyObject *v);
+
 /* Adds descriptors for tp_members and tp_getset to the type's dict. */
 int lu_type_add_descriptors(PyTypeObject *tp);
 /* Adds wrapper descriptors (__add__, __len__, ...) for the C slots tp has
@@ -1230,6 +1248,13 @@ int lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value);
    __setattr__, then a native data descriptor or, for a name the type lacks,
    the instance's dict. Same results as lu_descr_set_native. */
 int lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value);
+/* obj.name for an exact str name, answered when no Python code decides: a
+   data member or getset of the type, then the instance's dict, then a plain
+   value or function of the type (bound as a method). NULL, with no error, for
+   everything else, which is the kernel's: a missing attribute, __getattr__,
+   __getattribute__, properties and other descriptors. A new reference
+   (runtime/interp/ceval.c, which LOAD_ATTR and the optimizing tier share). */
+PyObject *lu_getattr_native(PyObject *owner, PyObject *name);
 PyObject *lu_method_wrapper_new(PyObject *descr, PyObject *self);
 /* The Python function the interpreter runs for a kernel callable, and the
    self it prepends (borrowed, or NULL). NULL when callable is none. Checks
@@ -1244,6 +1269,17 @@ PyObject *lu_kernel_function_of(PyObject *callable, PyObject **self);
 PyObject *lu_call(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames);
 /* Calls interp->kernel[id] from C, in a nested eval loop. */
 PyObject *lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t nargs);
+/* What the interpreter answers in C without running the kernel, which the
+   optimizing tier's helpers answer the same way (runtime/interp/ceval.c):
+   container[sub] for exact lists, tuples, bytes, dicts and slices, a new
+   reference or NULL (with an error only for a bad slice) when the kernel
+   must; COMPARE_OP's oparg for ints and equality no Python code decides,
+   1, 0 or -1 for the kernel; and the kernel function `target` called with
+   plain arguments (dict.get, len, isinstance, ...), its result, or NULL
+   (without an error) when the kernel must run. */
+PyObject *lu_subscr_native(PyObject *container, PyObject *sub);
+int lu_compare_native(PyObject *a, PyObject *b, int oparg);
+PyObject *lu_native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize_t npos);
 /* PyObject_IsTrue: 1, 0 or -1 with an error set. */
 int lu_is_true(PyObject *v);
 /* The truth of a value whose type's truth is its layout: 1, 0, or -1 when __bool__
@@ -1256,8 +1292,13 @@ PyObject *lu_slot_tp_getattro(PyObject *self, PyObject *name);
 int lu_slot_tp_setattro(PyObject *self, PyObject *name, PyObject *value);
 PyObject *lu_slot_tp_call(PyObject *self, PyObject *args, PyObject *kwargs);
 /* Sets slot `name` of tp: how 0 clears it, 1 installs the thunk, 2 copies
-   it from `from`, 3 installs PyObject_HashNotImplemented (tp_hash only). */
+   it from `from`, 3 installs PyObject_HashNotImplemented (tp_hash only), 4 installs
+   the repeat of a builtin sequence over its __mul__ (sq_repeat only). */
 int lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from);
+/* type.__text_signature__: the signature tp_doc starts with, or None. */
+PyObject *lu_type_text_signature(PyTypeObject *tp);
+/* Whether f is one of the slot thunks, which look the dunder up by name. */
+int lu_is_slot_thunk(void *f);
 /* Calls special method `name` of self's type, as vectorcall_method does. */
 PyObject *lu_call_special(PyObject *self, PyObject *name, PyObject *const *args, Py_ssize_t nargs);
 
@@ -1274,6 +1315,9 @@ uint32_t lu_dict_keys_version(PyDictObject *mp);
    the code's co_version; changing __code__, __defaults__ or __kwdefaults__
    clears it. lu_func_notify tells function watchers. */
 void lu_function_set_version(PyFunctionObject *func);
+/* SET_FUNCTION_ATTRIBUTE: stores attr (a reference it takes) in the field
+   `which` (a MAKE_FUNCTION_* flag) names. */
+void lu_function_set_attribute(PyFunctionObject *func, int which, PyObject *attr);
 void lu_func_notify(PyFunction_WatchEvent event, PyFunctionObject *func, PyObject *new_value);
 /* Tells code watchers that co was created or is being destroyed. */
 void lu_code_notify(PyCodeEvent event, PyCodeObject *co);

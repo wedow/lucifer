@@ -306,6 +306,19 @@ PyEval_GetFrameGlobals(void)
     return Py_XNewRef(lu_caller_globals(PyThreadState_Get()));
 }
 
+/* Python/ceval.c: the caller's frame's builtins, else the interpreter's. Borrowed. */
+PyObject *
+PyEval_GetBuiltins(void)
+{
+    PyFrameObject *frame = PyEval_GetFrame();
+    PyObject *b = frame != NULL ? PyFrame_GetBuiltins(frame) : NULL;
+    if (b == NULL || b == Py_None) {
+        return PyInterpreterState_Get()->builtins;
+    }
+    Py_DECREF(b);                   /* borrowed, as the C-API returns it */
+    return b;
+}
+
 PyObject *
 PyEval_GetFrameBuiltins(void)
 {
@@ -317,6 +330,31 @@ PyEval_GetFrameLocals(void)
 {
     PyFrameObject *frame = PyEval_GetFrame();
     return frame != NULL ? PyFrame_GetLocals(frame) : NULL;
+}
+
+/* Python/ceval.c PyEval_GetFuncName: what a traceback says called it. */
+const char *
+PyEval_GetFuncName(PyObject *func)
+{
+    if (PyMethod_Check(func)) {
+        return PyEval_GetFuncName(PyMethod_GET_FUNCTION(func));
+    }
+    if (PyFunction_Check(func)) {
+        return PyUnicode_AsUTF8(((PyFunctionObject *)func)->func_name);
+    }
+    if (PyCFunction_Check(func)) {
+        return ((PyCFunctionObject *)func)->m_ml->ml_name;
+    }
+    return Py_TYPE(func)->tp_name;
+}
+
+const char *
+PyEval_GetFuncDesc(PyObject *func)
+{
+    if (PyMethod_Check(func) || PyFunction_Check(func) || PyCFunction_Check(func)) {
+        return "()";
+    }
+    return " object";
 }
 
 PyObject *

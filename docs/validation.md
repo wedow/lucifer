@@ -481,25 +481,67 @@ collects exactly the oracle's **52,273** IDs, with the same collection hash. The
 wheel needs no change: the runtime supplies the C-API and the standard-library
 modules the pytest, hypothesis and numpy test closure imports.
 
-Run it as the oracles' commands above, with `--python bin/lucifer --runtime
-lucifer` and `--timeout 1300`. The first collection takes 20 to 30 minutes:
-pytest's assertion rewriter parses and compiles every test file from source
-with the compiler that runs on Lucifer itself, and caches the result in the
-site's `__pycache__`; a collection with that cache takes a few minutes.
+Run the whole suite as bounded shards (the 540-second deadline is per shard; Lucifer
+needs the larger `--timeout 1100` for the big ones):
+
+```sh
+python3 tools/numpytest/runall.py --launcher "$LAUNCHER" -- --python bin/lucifer --runtime lucifer \
+  --site "$SITE_T" --cache "$WHEEL_CACHE" --work "$RAW" --timeout 1100
+```
+
+`runall.py` reads `expected.tsv`, keeps each test file of at most 900 tests whole,
+packs small files together and splits a larger file by top-level class or
+function, then runs `run.py run --shard ...` once per group, one after another,
+each under the optional `--launcher` prefix (a memory limit or host lock bounds
+one shard, not the suite). Results merge by node ID into `lucifer.tsv`, and each
+group leaves its JSON beside it. `PATH` carries the venv's `bin`, so f2py and the
+Cython tests find `meson`; they build extensions with the host compiler against
+`build/include/python3.14t`.
+
+Two things in `run.py` exist for Lucifer's speed:
+
+- `PYTHONPYCACHEPREFIX` points at `build/numpytest-pycache/<runtime>`. Pytest's
+  assertion rewriter compiles each test file with the compiler that runs on
+  Lucifer, so the first collection takes 20 to 30 minutes; the cache is
+  reproducible and the oracle venv is left untouched. The startup probe waits
+  up to ten minutes for the same reason. Clear the cache when the compiler changes.
+- A fatal signal costs one test. `run.py` scores the active test CRASH, then
+  restarts pytest on the same shard without it and without the tests the journal
+  already holds (`NUMPYTEST_SKIP`), until the shard's deadline. The journal also
+  keeps each failure's reason line, for runs whose JUnit died with the process.
+  Every process death is listed under `crashed` in the shard's JSON and fails
+  the shard, even when all its tests had already reported.
 
 System libraries the build links beyond libc and libm: zlib (`-lz`, for the
 `zlib` module) and libffi (`-lffi`, for `_ctypes`); both were already installed
 (zlib 1.3.2, libffi 3.8.0), so this work installed no package.
 
-Recorded 2026-11-04, first shards (`results/numpytest/lucifer.tsv`): collection
-passes; six shard groups, run with the default 540-second deadline, give
+Recorded 2026-11-05 (`results/numpytest/lucifer.tsv`, with the 53 shard JSON
+files beside it): one `runall.py` pass, every shard on the same binary (master
+merged, the JIT on by default), with an empty bytecode cache and no reruns.
+Before this work (2026-11-04, six groups, one deadline each) the run gave 2,184
+PASS, 4.18%. Now:
 
-| Suite | Runtime | Expected | PASS | FAIL | TIMEOUT | XFAIL | SKIP | NOTRUN | PASS / expected |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| numpytest | lucifer | 52,273 | 2,184 | 16 | 1 | 2 | 1 | 50,069 | 4.18% |
+| Suite | Runtime | Expected | PASS | FAIL | ERROR | CRASH | TIMEOUT | XPASS | XFAIL | SKIP | NOTRUN | PASS / expected |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| numpytest | lucifer | 52,273 | 50,299 | 67 | 85 | 1 | 2 | 2 | 30 | 1,103 | 684 | 96.22% |
 
-The run that reaches the deadline records the test running then as TIMEOUT and
-leaves later tests NOTRUN. The 16 FAIL rows are the next work.
+What is left, by cause (each has a ticket): 576 NOTRUN rows and one TIMEOUT in
+the shard that holds `test_randomstate.py`, `test_typing.py`,
+`test_overrides.py`, `test_pocketfft.py` and `testing/test_utils.py`, which
+reaches its 1,100-second deadline (`test_integer_repeat[multinomial]` alone
+takes about 430 seconds, under a second on CPython); 108 NOTRUN rows and one
+TIMEOUT behind the slowest `test_mem_overlap.py` fuzz test; 58 `test_typing.py`
+ERRORs and 9 `operator.matmul` FAILs, because the functions of the
+Python-written builtin modules bind as methods (`add() takes 2 positional
+arguments but 3 were given`); 27 `test_cython.py` ERRORs, where `meson compile`
+fails; 12 `ndarray.resize` refusals, because CPython 3.14 lends a local to the
+call (`Py_REFCNT(a)` in `a.resize(...)` is 1) and the interpreter's stack owns a
+reference; one CRASH, converting a list into a structured dtype with an object
+field when its int field fails; and about two dozen rows in single files (ctypes
+argument kinds and buffer formats, the `cmath` module, `__buffer__` on NumPy
+types, `__release_buffer__`). `test_arrayprint.py::test_multithreaded_array_printing`
+passed in this run but fails about half the time, with the JIT on or off.
 
 ## Benchmarks
 

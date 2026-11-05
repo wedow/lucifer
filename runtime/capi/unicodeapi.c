@@ -306,7 +306,7 @@ PyUnicode_Concat(PyObject *left, PyObject *right)
                      Py_TYPE(right)->tp_name);
         return NULL;
     }
-    return PyNumber_Add(left, right);
+    return PyUnicode_FromFormat("%U%U", left, right);     /* native: runs no Python, so works with an error set */
 }
 
 int

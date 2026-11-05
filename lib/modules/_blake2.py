@@ -75,7 +75,7 @@ class _Blake2:
         self._digest_size = digest_size
         if key:
             self._buffer = key.ljust(cls._block, b'\0')
-        if data:
+        if data is not None:
             self.update(data)
 
     @property

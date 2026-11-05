@@ -153,15 +153,17 @@ keyword_value(PyObject *kwargs, PyObject *kwnames, PyObject *const *kwstack, PyO
     return kwargs != NULL ? lu_ns_lookup(kwargs, key) : find_keyword(kwnames, kwstack, key);
 }
 
-static void
-error_unexpected_keyword_arg(PyObject *kwargs, PyObject *kwnames, PyObject *kwtuple, const char *fname)
+/* Reports the first keyword of kwargs/kwnames no kwtuple entry matches,
+   with a suggestion when one is close (shared with argformat.c). */
+void
+lu_error_unexpected_keyword_arg(PyObject *kwargs, PyObject *kwnames, PyObject *kwtuple, const char *fname)
 {
     const char *name = fname == NULL ? "this function" : fname, *parens = fname == NULL ? "" : "()";
     Py_ssize_t j = 0;
     for (;;) {
-        PyObject *keyword;
+        PyObject *keyword, *value;
         if (kwargs != NULL) {
-            if (!lu_ns_next(kwargs, &j, &keyword, NULL)) {
+            if (!lu_ns_next(kwargs, &j, &keyword, &value)) {
                 break;
             }
         }
@@ -289,7 +291,7 @@ _PyArg_UnpackKeywords(PyObject *const *args, Py_ssize_t nargs, PyObject *kwargs,
                 return NULL;
             }
         }
-        error_unexpected_keyword_arg(kwargs, kwnames, kwtuple, parser->fname);
+        lu_error_unexpected_keyword_arg(kwargs, kwnames, kwtuple, parser->fname);
         return NULL;
     }
     return buf;

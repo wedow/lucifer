@@ -871,10 +871,25 @@ best_base(PyObject *bases)
 static void
 inherit_slots(PyTypeObject *tp, PyTypeObject *base)
 {
-    LU_COPY(tp_getattro); LU_COPY(tp_setattro); LU_COPY(tp_repr); LU_COPY(tp_str);
-    LU_COPY(tp_hash); LU_COPY(tp_call); LU_COPY(tp_richcompare); LU_COPY(tp_iter);
+    /* The old C-string attribute slots come with the new ones, as a pair. */
+    if (tp->tp_getattr == NULL && tp->tp_getattro == NULL) {
+        tp->tp_getattr = base->tp_getattr;
+        tp->tp_getattro = base->tp_getattro;
+    }
+    if (tp->tp_setattr == NULL && tp->tp_setattro == NULL) {
+        tp->tp_setattr = base->tp_setattr;
+        tp->tp_setattro = base->tp_setattro;
+    }
+    LU_COPY(tp_repr); LU_COPY(tp_str);
+    LU_COPY(tp_call); LU_COPY(tp_iter);
     LU_COPY(tp_iternext); LU_COPY(tp_descr_get); LU_COPY(tp_descr_set); LU_COPY(tp_init);
     LU_COPY(tp_finalize);
+    /* tp_hash and tp_richcompare are inherited together or not at all: a type
+       that compares and does not hash is unhashable. */
+    if (tp->tp_richcompare == NULL && tp->tp_hash == NULL) {
+        tp->tp_richcompare = base->tp_richcompare;
+        tp->tp_hash = base->tp_hash;
+    }
     if (!(base == &PyBaseObject_Type && !(tp->tp_flags & Py_TPFLAGS_HEAPTYPE))) {
         LU_COPY(tp_new);
     }
@@ -1088,13 +1103,12 @@ ready_type(PyTypeObject *tp, PyTypeObject *base, struct lu_static_type_state *st
         return -1;
     }
 
-    /* The slots the type leaves NULL, from every base, bases first; a type
+    /* The slots the type leaves NULL, from each type of its MRO in turn (only the type changes); a type
        whose dict defines __eq__ or __hash__ inherits neither of the pair
        (inherit_slots, overrides_hash). */
     int hash_pair = tp->tp_hash == NULL && tp->tp_richcompare == NULL;
-    for (Py_ssize_t j = PyTuple_GET_SIZE(mro) - 1; j > 0; j--) {
-        inherit_slots((PyTypeObject *)PyTuple_GET_ITEM(mro, j - 1),
-                      (PyTypeObject *)PyTuple_GET_ITEM(mro, j));
+    for (Py_ssize_t j = 1; j < PyTuple_GET_SIZE(mro); j++) {
+        inherit_slots(tp, (PyTypeObject *)PyTuple_GET_ITEM(mro, j));
     }
     if (hash_pair
         && (PyDict_GetItemString(dict, "__eq__") != NULL || PyDict_GetItemString(dict, "__hash__") != NULL)) {
@@ -1393,11 +1407,13 @@ type_new_layout(PyTypeObject *meta, PyObject *name, PyObject *bases, PyObject *n
     dict = PyDict_New();
     Py_ssize_t pos = 0;
     PyObject *key, *value;
+    Py_BEGIN_CRITICAL_SECTION(ns);
     while (dict != NULL && lu_ns_next(ns, &pos, &key, &value)) {
         if (lu_ns_insert(dict, key, value) < 0) {
             Py_CLEAR(dict);
         }
     }
+    Py_END_CRITICAL_SECTION();
     if (dict == NULL) {
         Py_DECREF(bases);
         return NULL;
@@ -2044,6 +2060,14 @@ prim_type_tp_name(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyUnicode_FromString(((PyTypeObject *)args[0])->tp_name);
 }
 
+/* type_text_signature(t): the signature a static type's tp_doc starts with, or None. */
+static PyObject *
+prim_type_text_signature(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); TYPE_ARG(0);
+    return lu_type_text_signature((PyTypeObject *)args[0]);
+}
+
 /* type_static_module(t): a static type's __module__, the part of tp_name
    before its last dot, else "builtins". */
 static PyObject *
@@ -2229,6 +2253,7 @@ prim_ns_items(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *list = PyList_New(0);
     Py_ssize_t pos = 0;
     PyObject *key, *value;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
     while (list != NULL && lu_ns_next(args[0], &pos, &key, &value)) {
         PyObject *pair = PyTuple_New(2);
         if (pair == NULL) {
@@ -2243,6 +2268,7 @@ prim_ns_items(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
             Py_CLEAR(list);
         }
     }
+    Py_END_CRITICAL_SECTION();
     return list;
 }
 
@@ -2320,6 +2346,14 @@ prim_object_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLongLong(Py_HashPointer(args[0]));
 }
 
+/* enable_deferred(x): PyUnstable_Object_EnableDeferredRefcount. */
+static PyObject *
+prim_enable_deferred(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    return bool_of(PyUnstable_Object_EnableDeferredRefcount(args[0]));
+}
+
 /* object_is_immortal(x): sys._is_immortal. */
 static PyObject *
 prim_object_is_immortal(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -2366,18 +2400,19 @@ prim_static_type(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
+#define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_type_methods[] = {
-    FAST(static_type),
-    FAST(type_lookup), FAST(type_dict), FAST(type_mro), FAST(type_bases), FAST(type_base),
+    PURE(static_type),
+    PURE(type_lookup), PURE(type_dict), PURE(type_mro), PURE(type_bases), PURE(type_base),
     FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag), FAST(type_set_flag), FAST(type_layout), FAST(object_size),
     FAST(type_can_new), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
-    FAST(type_subclasses), FAST(type_modified), FAST(is_subtype), FAST(alloc), FAST(new_check),
-    FAST(type_tp_name), FAST(type_static_module), FAST(size),
-    FAST(truth_exact), FAST(instance_dict), FAST(set_class), FAST(caller_globals), FAST(super_args),
+    FAST(type_subclasses), FAST(type_modified), PURE(is_subtype), FAST(alloc), FAST(new_check),
+    PURE(type_tp_name), FAST(type_text_signature), FAST(type_static_module), PURE(size),
+    PURE(truth_exact), PURE(instance_dict), FAST(set_class), FAST(caller_globals), FAST(super_args),
     FAST(error), FAST(ns_get), FAST(ns_set), FAST(ns_del), FAST(ns_items),
-    { "kind", (PyCFunction)(void (*)(void))prim_kind, METH_FASTCALL, NULL },
+    PURE(kind),
     FAST(cell_get), FAST(cell_set), FAST(address), FAST(object_hash),
-    FAST(object_is_immortal),
+    FAST(object_is_immortal), FAST(enable_deferred),
     { "call_with_locals", (PyCFunction)(void (*)(void))prim_call_with_locals,
       METH_FASTCALL | LU_METH_FRAME, NULL },
     { NULL, NULL, 0, NULL },
