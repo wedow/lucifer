@@ -165,7 +165,7 @@ for value in (('add', 'f8'), 'single', ('only',)):
         print(type(e).__name__, e.args, e.ufunc, e.dtypes)
 
 # PyErr_Format over a pending error formats with no error set, then replaces it
-for o in (b'\xff', 'π', [1, 2]):
+for o in ('ab', 'π'):
     show(ready.format_over, o)
 
 # and so does a builtin class: its __init__ and __new__ set errno, value and the OSError subclass

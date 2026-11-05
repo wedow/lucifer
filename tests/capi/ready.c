@@ -1038,13 +1038,19 @@ raise_object(PyObject *self, PyObject *args)
     return NULL;
 }
 
-/* ready.format_over(obj): PyErr_Format while another error is set, as NumPy's
-   converters replace a decode error; the new error wins. */
+/* ready.format_over(str): PyUnicode_Concat and PyErr_Format while another error
+   is set, as NumPy's converters and indexing replace an error; the new one wins. */
 static PyObject *
 format_over(PyObject *self, PyObject *obj)
 {
     PyErr_SetString(PyExc_KeyError, "pending");
-    return PyErr_Format(PyExc_ValueError, "got %R and %S", obj, obj);
+    PyObject *joined = PyUnicode_Concat(obj, obj);  /* NumPy builds its message so, before it raises */
+    if (joined == NULL) {
+        return NULL;
+    }
+    PyErr_Format(PyExc_ValueError, "got %R and %S", obj, joined);
+    Py_DECREF(joined);
+    return NULL;
 }
 
 /* Dict updates and slices. */
