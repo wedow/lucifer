@@ -446,9 +446,9 @@ count_uses(struct lu_func *f, struct uses *u)
     }
 }
 
-/* 3b. Unboxed float fields (DESIGN 4.5). A float loaded from an inline
-   value only to be unboxed is read as binary64; a float computed here and
-   stored into one is stored as binary64, with no object. Either is allowed
+/* 3b. Unboxed fields (DESIGN 4.5). A float (an int) loaded from an
+   inline value only to be unboxed is read raw; one computed here and
+   stored into one is stored raw, with no object. Either is allowed
    only while the box's identity cannot be observed: besides the unbox or
    the store, its uses are reference operations and frame states that hold
    it on an operand stack, where a deopt's box is a temporary the next
@@ -474,8 +474,8 @@ stack_only(struct lu_func *f)
     return bad;
 }
 
-/* Instruction uses of v other than those `allowed` accepts, and the count
-   of uses by op `want` as operand a (or b for a store). */
+/* Instruction uses of v other than reference operations and unboxes, and
+   the count of uses by op `want` as operand a (or b for a store). */
 static int
 other_uses(struct lu_func *f, lu_v v, int want, int *wanted)
 {
@@ -494,7 +494,8 @@ other_uses(struct lu_func *f, lu_v v, int want, int *wanted)
             if (in->op == want && i == (want == OP_INLINE_STORE ? 1 : 0)) {
                 (*wanted)++;
             }
-            else if (!(i == 0 && (in->op == OP_DECREF || in->op == OP_INCREF || in->op == OP_UNBOX_FLOAT))) {
+            else if (!(i == 0 && (in->op == OP_DECREF || in->op == OP_INCREF || in->op == OP_UNBOX_FLOAT
+                                  || in->op == OP_UNBOX_INT))) {
                 others++;
             }
         }
@@ -517,16 +518,21 @@ raw_fields(struct lu_func *f)
         if (in->flags & INS_DEAD) {
             continue;
         }
-        if (in->op == OP_INLINE_LOAD && !bad[v] && other_uses(f, v, OP_UNBOX_FLOAT, &k) == 0 && k > 0) {
+        int kf = 0, ki = 0;
+        if (in->op == OP_INLINE_LOAD && !bad[v] && other_uses(f, v, OP_UNBOX_FLOAT, &kf) == 0
+            && (other_uses(f, v, OP_UNBOX_INT, &ki), (kf > 0) != (ki > 0))) {
             /* The load becomes a raw read before it, and it a box of that,
                which the unboxes then fold through. */
-            lu_v r = lu_ir_emit(f, in->block, OP_INLINE_LOAD_F, REP_F64, LU_NOV, LU_NOV, LU_NOV, 0);
+            int fl = kf > 0;
+            lu_v r = lu_ir_emit(f, in->block, fl ? OP_INLINE_LOAD_F : OP_INLINE_LOAD_I, fl ? REP_F64 : REP_I64,
+                                LU_NOV, LU_NOV, LU_NOV, 0);
             in = &f->ins[v];
             struct lu_ins *raw = &f->ins[r];
             raw->a = in->a;
             raw->imm = in->imm;
             raw->fs = in->fs;
-            in->op = OP_BOX_FLOAT;
+            in->op = fl ? OP_BOX_FLOAT : OP_BOX_INT;
+            in->rep = REP_OBJ;
             in->a = r;
             in->b = LU_NOV;
             in->fs = NULL;
@@ -542,9 +548,9 @@ raw_fields(struct lu_func *f)
         else if (in->op == OP_INLINE_STORE) {
             lu_v b = in->b;
             struct lu_ins *box = &f->ins[b];
-            if (box->op == OP_BOX_FLOAT && box->b == LU_NOV && !bad[b]
-                && other_uses(f, b, OP_INLINE_STORE, &k) == 0 && k == 1) {
-                in->op = OP_INLINE_STORE_F;
+            if ((box->op == OP_BOX_FLOAT || box->op == OP_BOX_INT) && box->b == LU_NOV && box->c == LU_NOV
+                && !bad[b] && other_uses(f, b, OP_INLINE_STORE, &k) == 0 && k == 1) {
+                in->op = box->op == OP_BOX_FLOAT ? OP_INLINE_STORE_F : OP_INLINE_STORE_I;
                 in->b = box->a;
                 changed = 1;
             }

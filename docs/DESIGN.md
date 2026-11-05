@@ -299,21 +299,23 @@ unknown call, deopt or observation point, the value is materialized at a stable
 address with the exact layout. Materialization happens once, so later identity
 checks see the same object.
 
-Float attributes of plain instances may be unboxed in the heap (amended
-2026-11-05). Each inline value (§4.1) has two words: the value word and a
-binary64. Compiled code stores a float it computed as the binary64 plus a
-marker in the value word, making no object, and reads the binary64 back without
-one. A float object that is stored is kept as the value itself, so
-`a.x = v; a.x is v` holds. The first generic observation (the interpreter, the
+Float and int attributes of plain instances may be unboxed in the heap
+(amended 2026-11-05). Each inline value (§4.1) has two words: the value word and
+a raw word. Compiled code stores a float (an int) it computed as a binary64 (an
+int64) in the raw word plus a marker in the value word, making no object, and
+reads the raw word back without one. An object that is stored is kept as the
+value itself, so `a.x = v; a.x is v` holds. The first generic observation (the interpreter, the
 C-API, `__dict__`/`vars`, pickling, the collector's traversal) makes the box once,
 under the object's lock, and installs it in the value word, so every later reader,
 on any thread, gets that object and `a.x is a.x` and `id()` stay stable. The
 binary64 stays valid, so compiled readers keep reading it raw. A raw store or load
 is used only while the value's identity cannot be observed: a box that is in a
 local, stored twice, or loaded from another field (`b.x = a.x`) stays an object.
-Float subclasses are always stored as objects. `tests/kernel/float_fields.py`
-checks each identity case against the oracle. AWFY NBody, CPython 3.14t time over
-ours: 1.78x with every attribute store boxing, 2.60x with raw float fields.
+Subclasses of float and int are always stored as objects.
+`tests/kernel/float_fields.py` and `int_fields.py` check each identity case
+against the oracle. AWFY NBody, CPython 3.14t time over ours: 1.78x with every
+attribute store boxing, 2.60x with raw float fields; Bounce 1.17x boxing, 1.87x
+with raw int fields.
 
 ## 5. Execution model: tasks on carriers
 
@@ -842,7 +844,7 @@ FAIL or PASS opportunistically; none may be NOTRUN after M0.0.
 | C-API thunks vs native duplicates (`PyList_Append`, `PyDict_GetItem`) | thunks | numpytest per-shard wall time against the oracle plus perf profiles. Add a native path only where a thunk dominates a shard, and keep it the same code the JIT inlines. |
 | Optimizer written in C vs Python | C | Not close for now. A Python optimizer would compile itself and couple compile latency to warm-up. Revisit only if C SSA maintenance measurably lags. |
 | Specialization in shared `co_code` vs per-thread side tables | shared, atomic rewrite (cp314t does this) | `ft-cpython` parallel lane and a specialization-thrash microbench |
-| Heap-type field unboxing | floats of plain instances (§4.5) | other kinds (ints) by the same identity tests and AWFY rows |
+| Heap-type field unboxing | floats and ints of plain instances (§4.5) | other kinds by the same identity tests and AWFY rows |
 | io_uring waits vs the syscall bracket (§5.5) | bracket | after M1.8: socket and file rows of `many_tasks` and an HTTP lane; move an operation to the ring where it beats the bracket |
 | Native asyncio loop over `lu_park` | Python loop | after M1.8: asyncio pyperformance rows; adopt if it beats the selector loop by a measured margin |
 

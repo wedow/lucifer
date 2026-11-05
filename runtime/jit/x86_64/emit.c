@@ -893,6 +893,159 @@ cond_of(int op, int swap)
     return swap ? sw[op] : cc[op];
 }
 
+/* INLINE_LOAD_F and _I: an inline value as binary64 (int64): an unboxed
+   value's raw word, or an exact float's (a compact int's) value, read only
+   when the owning thread holds the object (as INLINE_LOAD takes a
+   reference only then). */
+static void
+inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
+{
+    int is_int = in->op == OP_INLINE_LOAD_I;
+    int fail = guard_exit(a, in);
+    int boxed = new_label(a), done = new_label(a);
+    int r = gpr_of(a, in->a, RDX);
+    rex(a, 0, 0, 0, r);
+    b1(a, 0xF6);
+    modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
+    b1(a, LU_ATTRS_IN_DICT >> 8);
+    jcc(a, CC_NE, fail);
+    load(a, RAX, r, (int32_t)in->imm);
+    alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)(is_int ? LU_UNBOXED_INT : LU_UNBOXED));
+    jcc(a, CC_NE, boxed);
+    if (is_int) {
+        load(a, RAX, r, (int32_t)in->imm + 8);
+    }
+    else {
+        sse_rm(a, 0xF2, 0x10, 0, r, (int32_t)in->imm + 8);     /* movsd xmm0, the binary64 */
+    }
+    jmp(a, done);
+    bind(a, boxed);
+    alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+    jcc(a, CC_BE, fail);                        /* absent, or the other kind unboxed */
+    mov_ri(a, RCX, (int64_t)(intptr_t)(is_int ? &PyLong_Type : &PyFloat_Type));
+    cmp_rm(a, RCX, RAX, offsetof(PyObject, ob_type));
+    jcc(a, CC_NE, fail);
+    int held = new_label(a);
+    load32(a, RCX, RAX, offsetof(PyObject, ob_ref_local));
+    cmp32_ri8(a, RCX, -1);
+    jcc(a, CC_E, held);                         /* immortal (a small int) */
+    b1(a, 0x64);
+    b1(a, 0x4C);
+    b1(a, 0x8B);
+    b1(a, 0x1C);
+    b1(a, 0x25);
+    b4(a, 0);                                   /* mov r11, fs:[0] */
+    cmp_rm(a, R11, RAX, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, fail);
+    bind(a, held);
+    if (is_int) {
+        /* A compact int, as UNBOX_INT reads it. */
+        load(a, RCX, RAX, offsetof(PyLongObject, long_value.lv_tag));
+        alu_ri(a, ALU_CMP, RCX, 2 << _PyLong_NON_SIZE_BITS);
+        jcc(a, CC_AE, fail);
+        load32(a, RAX, RAX, offsetof(PyLongObject, long_value.ob_digit));
+        int pos = new_label(a);
+        rex(a, 0, 0, 0, RCX);
+        b1(a, 0xF6);
+        modrm_rr(a, 0, RCX);
+        b1(a, 2);                               /* test cl, 2: negative */
+        jcc(a, CC_E, pos);
+        unary(a, 3, RAX);
+        bind(a, pos);
+    }
+    else {
+        sse_rm(a, 0xF2, 0x10, 0, RAX, offsetof(PyFloatObject, ob_fval));
+    }
+    bind(a, done);
+    if (is_int) {
+        def_gpr(a, v, RAX);
+    }
+    else {
+        def_fpr(a, v, 0);
+    }
+}
+
+/* INLINE_STORE_F and _I: lu_inline_store_f (_i) in line. Under the
+   owner's lock byte, taken with one cmpxchg, a word that already holds a
+   value takes the raw value and its marker; the old value, an object, is
+   released after the unlock. Anything else is C's, and leaves when it
+   declines. */
+static void
+inline_store_raw(struct asm_ *a, struct lu_ins *in)
+{
+    int is_int = in->op == OP_INLINE_STORE_I;
+    struct move m[2] = { { RDI, in->a, 0, 0 }, is_int ? (struct move){ RSI, in->b, 0, 0 }
+                                                      : (struct move){ XMM(0), in->b, 0, 1 } };
+    int fail = guard_exit(a, in);
+    int slow = new_label(a), unlock_slow = new_label(a), unlocked = new_label(a), done = new_label(a);
+    int32_t flags = offsetof(PyObject, ob_flags) + 1, mutex = offsetof(PyObject, ob_mutex);
+    int32_t off = (int32_t)in->imm;
+    parallel_moves(a, m, 2);
+    mov_rr(a, R12, RDI);                        /* kept across calls: nothing is live here (IF_CALL) */
+    if (is_int) {
+        mov_rr(a, R13, RSI);
+    }
+    else {
+        movq_rx(a, R13, 0);
+    }
+    b1(a, 0xF6);
+    modrm_mem(a, 0, RDI, flags);
+    b1(a, LU_ATTRS_IN_DICT >> 8);               /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
+    jcc(a, CC_NE, slow);
+    alu_rr(a, ALU_XOR, RAX, RAX);
+    b1(a, 0xB1);
+    b1(a, 1);                                   /* mov cl, 1 */
+    b1(a, 0xF0);
+    b1(a, 0x0F);
+    b1(a, 0xB0);
+    modrm_mem(a, RCX, RDI, mutex);              /* lock cmpxchg [rdi+mutex], cl */
+    jcc(a, CC_NE, slow);
+    b1(a, 0xF6);
+    modrm_mem(a, 0, RDI, flags);
+    b1(a, LU_ATTRS_IN_DICT >> 8);
+    jcc(a, CC_NE, unlock_slow);                 /* moved to the dict before the lock */
+    load(a, RBX, RDI, off);                     /* the old value, kept across calls */
+    test_rr(a, RBX, RBX);
+    jcc(a, CC_E, unlock_slow);                  /* a new name: insertion order is C's */
+    store(a, RDI, off + 8, R13);                /* the raw value */
+    mov_ri(a, RAX, (int64_t)(intptr_t)(is_int ? LU_UNBOXED_INT : LU_UNBOXED));
+    store(a, RDI, off, RAX);                    /* after the raw word: x86 stores stay in order */
+    b1(a, 0xB0);
+    b1(a, 1);                                   /* mov al, 1 */
+    alu_rr(a, ALU_XOR, RCX, RCX);
+    b1(a, 0xF0);
+    b1(a, 0x0F);
+    b1(a, 0xB0);
+    modrm_mem(a, RCX, RDI, mutex);              /* lock cmpxchg [rdi+mutex], cl */
+    jcc(a, CC_E, unlocked);
+    alu_ri(a, ALU_ADD, RDI, mutex);             /* a waiter parked: wake it */
+    call_abs(a, (void *)PyMutex_Unlock);
+    bind(a, unlocked);
+    alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+    jcc(a, CC_BE, done);                        /* no object to release */
+    mov_rr(a, RDI, RBX);
+    call_abs(a, (void *)lu_jit_decref);         /* the old value */
+    jmp(a, done);
+    bind(a, unlock_slow);
+    alu_ri(a, ALU_ADD, RDI, mutex);
+    call_abs(a, (void *)PyMutex_Unlock);
+    bind(a, slow);
+    mov_rr(a, RDI, R12);
+    mov_ri(a, RSI, in->imm);
+    if (is_int) {
+        mov_rr(a, RDX, R13);
+        call_abs(a, (void *)lu_inline_store_i);
+    }
+    else {
+        movq_xr(a, 0, R13);
+        call_abs(a, (void *)lu_inline_store_f);
+    }
+    b1(a, 0x85);
+    b1(a, 0xC0);                                /* test eax, eax */
+    jcc(a, CC_E, fail);
+    bind(a, done);
+}
+
 static int
 emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
 {
@@ -1322,10 +1475,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         b1(a, LU_ATTRS_IN_DICT >> 8);
         jcc(a, CC_NE, unlock_slow);             /* moved to the dict before the lock */
         load(a, RBX, RDI, off);                 /* the old value, kept across calls */
-        test_rr(a, RBX, RBX);
-        jcc(a, CC_E, unlock_slow);              /* a new name: insertion order is C's */
-        alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED);
-        jcc(a, CC_E, unlock_slow);              /* an unboxed float: no object to release */
+        alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+        jcc(a, CC_BE, unlock_slow);             /* a new name (insertion order is C's), or an unboxed value */
         load32(a, RCX, RSI, offsetof(PyObject, ob_ref_local));
         rex(a, 0, 0, 0, RCX);
         b1(a, 0x83);
@@ -1385,117 +1536,37 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
         b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
         jcc(a, CC_NE, fail);
+        int unboxed = new_label(a), done = new_label(a);
         load(a, RAX, r, (int32_t)in->imm);
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
-        alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED);
-        jcc(a, CC_E, fail);                     /* an unboxed float: its box is made in C */
+        alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+        jcc(a, CC_BE, unboxed);
         incref_owned_or_exit(a, RAX, fail);
+        jmp(a, done);
+        bind(a, unboxed);
+        /* An unboxed value: its box, made once in C and kept by the owner. */
+        save_volatile(a);
+        if (r != RDI) {
+            mov_rr(a, RDI, r);
+        }
+        rex(a, 1, RSI, 0, RDI);
+        b1(a, 0x8D);
+        modrm_mem(a, RSI, RDI, (int32_t)in->imm);      /* lea rsi, [rdi+imm]: the word */
+        call_abs(a, (void *)lu_inline_get);
+        restore_volatile(a);
+        test_rr(a, RAX, RAX);
+        jcc(a, CC_E, fail);
+        bind(a, done);
         def_gpr(a, v, RAX);
         return 0;
     }
-    case OP_INLINE_LOAD_F: {
-        /* An inline value as binary64: an unboxed float's own word, or an
-           exact float's value, read only when the owning thread holds the
-           object (as INLINE_LOAD takes a reference only then). */
-        int fail = guard_exit(a, in);
-        int boxed = new_label(a), done = new_label(a);
-        r = gpr_of(a, in->a, RDX);
-        rex(a, 0, 0, 0, r);
-        b1(a, 0xF6);
-        modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
-        b1(a, LU_ATTRS_IN_DICT >> 8);
-        jcc(a, CC_NE, fail);
-        load(a, RAX, r, (int32_t)in->imm);
-        alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED);
-        jcc(a, CC_NE, boxed);
-        sse_rm(a, 0xF2, 0x10, 0, r, (int32_t)in->imm + 8);         /* movsd xmm0, the binary64 */
-        jmp(a, done);
-        bind(a, boxed);
-        test_rr(a, RAX, RAX);
-        jcc(a, CC_E, fail);
-        mov_ri(a, RCX, (int64_t)(intptr_t)&PyFloat_Type);
-        cmp_rm(a, RCX, RAX, offsetof(PyObject, ob_type));
-        jcc(a, CC_NE, fail);
-        b1(a, 0x64);
-        b1(a, 0x4C);
-        b1(a, 0x8B);
-        b1(a, 0x1C);
-        b1(a, 0x25);
-        b4(a, 0);                               /* mov r11, fs:[0] */
-        cmp_rm(a, R11, RAX, offsetof(PyObject, ob_tid));
-        jcc(a, CC_NE, fail);
-        sse_rm(a, 0xF2, 0x10, 0, RAX, offsetof(PyFloatObject, ob_fval));
-        bind(a, done);
-        def_fpr(a, v, 0);
+    case OP_INLINE_LOAD_F: case OP_INLINE_LOAD_I:
+        inline_load_raw(a, in, v);
         return 0;
-    }
-    case OP_INLINE_STORE_F: {
-        /* lu_inline_store_f in line: under the owner's lock byte, taken
-           with one cmpxchg, a word that already holds a value takes the
-           binary64 and LU_UNBOXED; the old value, an object, is released
-           after the unlock. Anything else is lu_inline_store_f's, and
-           leaves when it declines. */
-        struct move m[2] = { { RDI, in->a, 0, 0 }, { XMM(0), in->b, 0, 1 } };
-        int fail = guard_exit(a, in);
-        int slow = new_label(a), unlock_slow = new_label(a), unlocked = new_label(a), done = new_label(a);
-        int32_t flags = offsetof(PyObject, ob_flags) + 1, mutex = offsetof(PyObject, ob_mutex);
-        int32_t off = (int32_t)in->imm;
-        parallel_moves(a, m, 2);
-        mov_rr(a, R12, RDI);                    /* kept across calls: nothing is live here (IF_CALL) */
-        movq_rx(a, R13, 0);
-        b1(a, 0xF6);
-        modrm_mem(a, 0, RDI, flags);
-        b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
-        jcc(a, CC_NE, slow);
-        alu_rr(a, ALU_XOR, RAX, RAX);
-        b1(a, 0xB1);
-        b1(a, 1);                               /* mov cl, 1 */
-        b1(a, 0xF0);
-        b1(a, 0x0F);
-        b1(a, 0xB0);
-        modrm_mem(a, RCX, RDI, mutex);          /* lock cmpxchg [rdi+mutex], cl */
-        jcc(a, CC_NE, slow);
-        b1(a, 0xF6);
-        modrm_mem(a, 0, RDI, flags);
-        b1(a, LU_ATTRS_IN_DICT >> 8);
-        jcc(a, CC_NE, unlock_slow);             /* moved to the dict before the lock */
-        load(a, RBX, RDI, off);                 /* the old value, kept across calls */
-        test_rr(a, RBX, RBX);
-        jcc(a, CC_E, unlock_slow);              /* a new name: insertion order is C's */
-        sse_rm(a, 0xF2, 0x11, 0, RDI, off + 8); /* movsd [rdi+off+8], xmm0 */
-        mov_ri(a, RAX, (int64_t)(intptr_t)LU_UNBOXED);
-        store(a, RDI, off, RAX);                /* after the binary64: x86 stores stay in order */
-        b1(a, 0xB0);
-        b1(a, 1);                               /* mov al, 1 */
-        alu_rr(a, ALU_XOR, RCX, RCX);
-        b1(a, 0xF0);
-        b1(a, 0x0F);
-        b1(a, 0xB0);
-        modrm_mem(a, RCX, RDI, mutex);          /* lock cmpxchg [rdi+mutex], cl */
-        jcc(a, CC_E, unlocked);
-        alu_ri(a, ALU_ADD, RDI, mutex);         /* a waiter parked: wake it */
-        call_abs(a, (void *)PyMutex_Unlock);
-        bind(a, unlocked);
-        alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED);
-        jcc(a, CC_E, done);
-        mov_rr(a, RDI, RBX);
-        call_abs(a, (void *)lu_jit_decref);     /* the old value */
-        jmp(a, done);
-        bind(a, unlock_slow);
-        alu_ri(a, ALU_ADD, RDI, mutex);
-        call_abs(a, (void *)PyMutex_Unlock);
-        bind(a, slow);
-        mov_rr(a, RDI, R12);
-        movq_xr(a, 0, R13);
-        mov_ri(a, RSI, in->imm);
-        call_abs(a, (void *)lu_inline_store_f);
-        b1(a, 0x85);
-        b1(a, 0xC0);                            /* test eax, eax */
-        jcc(a, CC_E, fail);
-        bind(a, done);
+    case OP_INLINE_STORE_F: case OP_INLINE_STORE_I:
+        inline_store_raw(a, in);
         return 0;
-    }
     case OP_ATTR_LOAD: {
         /* LOAD_ATTR_WITH_HINT in line: the type's version, the instance's
            exact dict, a unicode keys table with entry imm2 holding the name,

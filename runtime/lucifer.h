@@ -267,17 +267,24 @@ lu_inline_values(PyObject *obj)
 {
     return (PyObject **)((char *)obj + Py_TYPE(obj)->tp_basicsize);
 }
-/* Each name has two words: the value's, and after it a float's binary64.
-   The value word holds the object, NULL when absent, or LU_UNBOXED: a float
-   stored without an object, its value in the second word, whose box the
-   first generic reader makes and installs (DESIGN 4.5). */
+/* Each name has two words: the value's, and after it a raw value. The
+   value word holds the object, NULL when absent, or a marker for a float
+   (LU_UNBOXED, binary64) or an int (LU_UNBOXED_INT, int64) stored without
+   an object, its value in the second word, whose box the first generic
+   reader makes and installs (DESIGN 4.5). */
 #define LU_INLINE_STRIDE 2
 #define LU_INLINE_WORD(values, i) ((values)[LU_INLINE_STRIDE * (i)])
 #define LU_UNBOXED ((PyObject *)1)
-static inline double *
+#define LU_UNBOXED_INT ((PyObject *)3)
+static inline int
+lu_unboxed(PyObject *word)
+{
+    return word == LU_UNBOXED || word == LU_UNBOXED_INT;
+}
+static inline uint64_t *
 lu_inline_raw(PyObject **word)
 {
-    return (double *)(word + 1);
+    return (uint64_t *)(word + 1);
 }
 /* Class setup and teardown, and the bytes each instance carries. */
 int lu_inline_values_init(PyTypeObject *tp);
@@ -303,8 +310,10 @@ int lu_attr_store(PyObject *obj, PyObject *name, PyObject *v);
    instance of a class whose name there is the attribute's; 0 when only
    lu_attr_store can store it. */
 int lu_inline_store(PyObject *obj, Py_ssize_t offset, PyObject *v);
-/* The same for a float compiled code holds as binary64: no object is made. */
+/* The same for a float compiled code holds as binary64, or an int as
+   int64: no object is made. */
 int lu_inline_store_f(PyObject *obj, Py_ssize_t offset, double v);
+int lu_inline_store_i(PyObject *obj, Py_ssize_t offset, int64_t v);
 /* A new reference to the value word at `word` (an instance's, read
    without its lock): NULL when absent or when a try fails; an unboxed
    float gets its box. */
