@@ -717,6 +717,11 @@ PyFrame_GetLineNumber(PyFrameObject *f)
 PyObject *
 PyFrame_GetVar(PyFrameObject *f, PyObject *name)
 {
+    if (!PyUnicode_Check(name)) {
+        lu_err_format(PyExc_TypeError, "name must be str, not %s",
+                      Py_TYPE(name)->tp_name);
+        return NULL;
+    }
     struct lu_frame *lf = FO(f)->f_frame;
     for (int i = 0; i < lf->code->co_nlocalsplus; i++) {
         PyObject *v = fast_name_is(lf->code, i, name) ? fast_value(lf, i) : NULL;
@@ -725,7 +730,7 @@ PyFrame_GetVar(PyFrameObject *f, PyObject *name)
         }
     }
     lu_err_format(PyExc_NameError, "variable '%s' does not exist",
-                  PyUnicode_Check(name) ? PyUnicode_AsUTF8(name) : "?");
+                  PyUnicode_AsUTF8(name));
     return NULL;
 }
 
