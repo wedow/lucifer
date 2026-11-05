@@ -157,13 +157,14 @@ try:
 except RuntimeError as e:
     print(e)
 late = []
-d = threading.Thread(target=lambda: (time.sleep(0.05), late.append(1)), daemon=False)
+fired = threading.Event()
+d = threading.Thread(target=lambda: (fired.wait(), late.append(1)), daemon=False)
 d.start()
-t0 = threading.Timer(0.01, lambda: late.append(2))
+t0 = threading.Timer(0.01, lambda: (late.append(2), fired.set()))
 t0.start()
 t0.join()
-print(late)
 d.join()
+print(late)
 
 # Barrier: every party gets a distinct index, the action runs once, an abort breaks the others.
 actions = []
