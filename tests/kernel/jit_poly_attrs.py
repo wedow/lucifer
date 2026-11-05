@@ -86,3 +86,28 @@ for r in range(5):
     del tmp
     gc.collect()
 print(walk(objs, N))
+
+# Threads fill one site's cache at once.
+import threading
+
+
+def walker(cls_list, out):
+    objs = [k(i) for i, k in enumerate(cls_list)]
+    out.append(walk(objs, N))
+
+
+class G(A):
+    pass
+
+
+class H(C):
+    pass
+
+
+results = []
+ts = [threading.Thread(target=walker, args=([A, B, C, D, G, H][k:k + 3], results)) for k in range(4)]
+for t in ts:
+    t.start()
+for t in ts:
+    t.join()
+print(sorted(results))
