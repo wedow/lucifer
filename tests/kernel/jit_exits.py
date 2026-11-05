@@ -1,5 +1,6 @@
-# Hot code holding instructions the optimizing tier leaves to the
-# interpreter for: closures made in a loop, *args forwarding, rich
+# Hot code holding instructions the optimizing tier compiles as calls into
+# the runtime or leaves to the interpreter for: closures made in a loop,
+# cells a loop rebinds and a closure reads, *args forwarding, rich
 # comparison and instance creation through the kernel's generic paths,
 # and a nonlocal rebound by a callee. Each result must be the
 # interpreter's; tools/jitcheck also runs this at two sizes and requires
@@ -14,6 +15,20 @@ def closures(n):
     for i in range(n):
         f = lambda: i
         s += f()
+    return s
+
+
+def nested(n):
+    s = 0
+    for i in range(n):
+        for j in range(2):
+            s += j
+
+        def g():
+            nonlocal s
+            s += i
+
+        g()
     return s
 
 
@@ -68,4 +83,4 @@ def cells(n):
     return t
 
 
-print(closures(N), forwarding(N), richcmp(N), instances(N), cells(N))
+print(closures(N), nested(N), forwarding(N), richcmp(N), instances(N), cells(N))

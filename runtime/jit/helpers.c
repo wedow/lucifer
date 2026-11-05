@@ -116,6 +116,32 @@ h_prim(PyObject **argv, intptr_t n)
     return ((PyCFunctionFast)(void (*)(void))f->m_ml->ml_meth)(f->m_self, argv + 1, n - 1);
 }
 
+/* MAKE_FUNCTION; function watchers may run Python. */
+static PyObject *
+h_make_function(PyObject *code, PyObject *globals)
+{
+    PyObject *func = lu_function_new(code, globals);
+    if (func != NULL) {
+        lu_function_set_version((PyFunctionObject *)func);
+    }
+    return func;
+}
+
+static void
+h_set_function_attribute(PyObject *func, PyObject *attr, int64_t which)
+{
+    lu_function_set_attribute((PyFunctionObject *)func, (int)which, Py_NewRef(attr));
+}
+
+/* STORE_DEREF */
+static void
+h_cell_store(PyObject *cell, PyObject *v)
+{
+    PyObject *old = ((PyCellObject *)cell)->ob_ref;
+    ((PyCellObject *)cell)->ob_ref = Py_NewRef(v);
+    Py_XDECREF(old);
+}
+
 /* --- attributes --- */
 
 /* LOAD_ATTR_WITH_HINT: the instance dict's entry `index`, while the type
@@ -460,6 +486,9 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 3 },
     [H_call] = { (void *)h_call, "call", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_prim] = { (void *)h_prim, "prim", REP_OBJ, IF_RAISE, 0 },
+    [H_make_function] = { (void *)h_make_function, "make_function", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, 0, 3 },
+    [H_cell_store] = { (void *)h_cell_store, "cell_store", REP_NONE, 0, 2 },
     [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, 0, 1 },

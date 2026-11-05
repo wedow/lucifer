@@ -1284,6 +1284,9 @@ uint32_t lu_dict_keys_version(PyDictObject *mp);
    the code's co_version; changing __code__, __defaults__ or __kwdefaults__
    clears it. lu_func_notify tells function watchers. */
 void lu_function_set_version(PyFunctionObject *func);
+/* SET_FUNCTION_ATTRIBUTE: stores attr (a reference it takes) in the field
+   `which` (a MAKE_FUNCTION_* flag) names. */
+void lu_function_set_attribute(PyFunctionObject *func, int which, PyObject *attr);
 void lu_func_notify(PyFunction_WatchEvent event, PyFunctionObject *func, PyObject *new_value);
 /* Tells code watchers that co was created or is being destroyed. */
 void lu_code_notify(PyCodeEvent event, PyCodeObject *co);

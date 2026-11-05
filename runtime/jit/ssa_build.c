@@ -554,6 +554,7 @@ supported(int op)
     case JUMP_BACKWARD_NO_INTERRUPT: case GET_ITER: case FOR_ITER: case CALL:
     case RETURN_VALUE: case STORE_SUBSCR: case COPY_FREE_VARS: case LOAD_DEREF:
     case BUILD_LIST: case BUILD_TUPLE: case CONTAINS_OP:
+    case MAKE_FUNCTION: case SET_FUNCTION_ATTRIBUTE: case STORE_DEREF:
         return 1;
     default:
         return 0;
@@ -2094,7 +2095,7 @@ translate(struct ctx *c)
             unsupported(c);
             return -1;
         }
-        lu_v args[32];
+        lu_v args[32] = { 0 };     /* none for an empty list */
         uint8_t owns[32];
         for (int i = oparg - 1; i >= 0; i--) {
             args[i] = pop(c, &own);
@@ -2107,6 +2108,46 @@ translate(struct ctx *c)
             release(c, args[i], owns[i]);
         }
         push(c, v, 1);
+        return 0;
+    }
+    case MAKE_FUNCTION: {
+        lu_v code = peek(c, 1);
+        own = peek_owned(c, 1);
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[2] = { code, konst(c, c->globals) };
+        v = helper_raising(c, H_make_function, 2, args, 1);
+        pop(c, NULL);
+        release(c, code, own);
+        push(c, v, 1);
+        return 0;
+    }
+    case SET_FUNCTION_ATTRIBUTE: {
+        lu_v func = peek(c, 1), attr = peek(c, 2);
+        int ownfunc = peek_owned(c, 1);
+        own = peek_owned(c, 2);
+        lu_v args[3] = { func, attr, const_i(c, oparg) };
+        helper(c, H_set_function_attribute, 3, args);
+        pop(c, NULL);
+        pop(c, NULL);
+        release(c, attr, own);
+        push(c, func, ownfunc);
+        return 0;
+    }
+    case STORE_DEREF: {
+        lu_v cell = c->st.v[oparg];
+        if (cell == LU_NOV) {
+            unsupported(c);
+            return -1;
+        }
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        lu_v args[2] = { cell, v };
+        helper(c, H_cell_store, 2, args);
+        pop(c, NULL);
+        release(c, v, own);
         return 0;
     }
     case CONTAINS_OP: {

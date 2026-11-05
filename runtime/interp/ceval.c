@@ -32,11 +32,6 @@
 #include "prim/bytes.h"
 
 /* Include/internal/pycore_opcode_utils.h */
-#define MAKE_FUNCTION_DEFAULTS    0x01
-#define MAKE_FUNCTION_KWDEFAULTS  0x02
-#define MAKE_FUNCTION_ANNOTATIONS 0x04
-#define MAKE_FUNCTION_CLOSURE     0x08
-#define MAKE_FUNCTION_ANNOTATE    0x10
 #define RESUME_AFTER_YIELD_FROM 2
 #define RESUME_OPARG_LOCATION_MASK 0x3
 
@@ -800,20 +795,6 @@ native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize
         }
     }
     return NULL;
-}
-
-static void
-set_function_attribute(PyFunctionObject *func, int which, PyObject *attr)
-{
-    PyObject **field;
-    switch (which) {
-    case MAKE_FUNCTION_DEFAULTS: field = &func->func_defaults; break;
-    case MAKE_FUNCTION_KWDEFAULTS: field = &func->func_kwdefaults; break;
-    case MAKE_FUNCTION_ANNOTATIONS: field = &func->func_annotations; break;
-    case MAKE_FUNCTION_CLOSURE: field = &func->func_closure; break;
-    default: field = &func->func_annotate; break;
-    }
-    Py_XSETREF(*field, attr);
 }
 
 /* SAVE_FRAME as an expression, for a condition that may raise. */
@@ -1994,7 +1975,7 @@ op_MAKE_FUNCTION: {
 op_SET_FUNCTION_ATTRIBUTE: {
     PyObject *func = POP();
     PyObject *attr = POP();
-    set_function_attribute((PyFunctionObject *)func, oparg, attr);
+    lu_function_set_attribute((PyFunctionObject *)func, oparg, attr);
     PUSH(func);
     DISPATCH();
 }
