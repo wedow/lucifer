@@ -207,6 +207,7 @@ struct lu_func {
     int capknown;
     int ninlined;
     int loops;                  /* back edges built: one entry may run unbounded work */
+    int sites, cold;            /* sites with feedback, and those the interpreter never ran */
 };
 
 /* Building and editing. */

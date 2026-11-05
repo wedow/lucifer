@@ -84,6 +84,17 @@ int lu_jit_nospec(PyCodeObject *code, int pc);
 int lu_jit_noinline(PyCodeObject *code);
 
 static int build_block(struct ctx *c, int bi);
+
+/* A site's operand kinds (runtime/jit/jit.h), counted: none means the
+   interpreter has never run it. Attribute sites count in cached_site. */
+static int
+feedback(struct ctx *c, lu_codeunit *word)
+{
+    int kinds = __atomic_load_n(&word->cache, __ATOMIC_RELAXED);
+    c->f->sites++;
+    c->f->cold += kinds == 0;
+    return kinds;
+}
 static PyTypeObject *known_type(struct ctx *c, lu_v v);
 static void set_known(struct ctx *c, lu_v v, PyTypeObject *t);
 
@@ -907,7 +918,7 @@ binary_op(struct ctx *c)
     lu_v b = peek(c, 1), a = peek(c, 2);
     owna = peek_owned(c, 2);
     ownb = peek_owned(c, 1);
-    int kinds = lu_cache_load(c->cache + 1);
+    int kinds = feedback(c, c->cache + 1);
     int lk = kinds & 0xff, rk = kinds >> 8;
     int op = c->oparg;
     int base = op >= NB_INPLACE_ADD && op != NB_SUBSCR ? op - NB_INPLACE_ADD : op;
@@ -976,7 +987,7 @@ compare_op(struct ctx *c)
 {
     lu_v b = peek(c, 1), a = peek(c, 2);
     int owna = peek_owned(c, 2), ownb = peek_owned(c, 1);
-    int kinds = lu_cache_load(c->cache);
+    int kinds = feedback(c, c->cache);
     int lk = kinds & 0xff, rk = kinds >> 8;
     int op = c->oparg >> 5;
     lu_v bit = LU_NOV, r = LU_NOV;
@@ -1314,6 +1325,9 @@ cached_site(struct ctx *c, int generic, uint32_t *version, uint16_t *index, PyOb
     *version = lu_cache_load32(c->cache + LA_VERSION);
     *index = lu_cache_load(c->cache + LA_INDEX);
     *descr = generic == LOAD_ATTR ? lu_cache_load_ptr(c->cache + LA_DESCR) : NULL;
+    /* A generic site whose counter was never spent: the interpreter has not run it. */
+    c->f->sites++;
+    c->f->cold += op == generic && lu_cache_load(c->cache + LA_COUNTER) == 0;
     if (*version == 0 || lu_jit_nospec(c->code, c->pc) || !lu_site_unchanged(site, op)
         || lu_cache_load32(c->cache + LA_VERSION) != *version) {
         *descr = NULL;
@@ -1593,7 +1607,7 @@ speculate_args(struct ctx *c, int n)
     if (lu_jit_nospec(c->code, c->pc)) {
         return;
     }
-    int kinds = lu_cache_load(c->cache);
+    int kinds = n >= 1 ? feedback(c, c->cache) : 0;     /* a call without arguments records none */
     for (int i = 0; i < 2 && i < n; i++) {
         int k = (kinds >> (8 * i)) & 0xff;
         int at = c->nlocals + c->st.sp - n + i;
@@ -1746,7 +1760,7 @@ for_iter(struct ctx *c)
 {
     lu_v it = peek(c, 1);
     int exit_pc = jump_target(FOR_ITER, c->oparg, c->next);
-    int kind = lu_cache_load(c->cache);
+    int kind = feedback(c, c->cache);
     if (lu_jit_nospec(c->code, c->pc)) {
         kind = LU_ITER_OTHER;
     }
@@ -2009,7 +2023,7 @@ translate(struct ctx *c)
     case STORE_SUBSCR: {
         lu_v sub = peek(c, 1), cont = peek(c, 2), val = peek(c, 3);
         int ownsub = peek_owned(c, 1), owncont = peek_owned(c, 2), ownval = peek_owned(c, 3);
-        int kinds = lu_cache_load(c->cache);
+        int kinds = feedback(c, c->cache);
         if (!lu_jit_nospec(c->code, c->pc) && (kinds & 0xff) == LU_KIND_LIST && (kinds >> 8) == LU_KIND_INT) {
             guard_type(c, cont, &PyList_Type);
             lu_v i = unbox_int(c, sub);
