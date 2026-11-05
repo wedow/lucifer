@@ -1,6 +1,7 @@
 # Calls the optimizing tier should inline once it has run: a method reached
 # through a function that was compiled before the interpreter ever ran it
-# (-X lucifer_jit=always compiles at the first call).
+# (-X lucifer_jit=always compiles at the first call), and builtins whose
+# kernel code calls primitives that run no Python (len of a dict or a str).
 # Each result must be the interpreter's; tools/jitcheck also runs this at two
 # sizes and requires that entries into compiled code do not grow with the
 # iterations.
@@ -29,4 +30,13 @@ def methods(n):
     return s
 
 
-print(methods(N))
+def lengths(n):
+    d = {'a': 1, 'b': 2}
+    t = 'xyz'
+    s = 0
+    for i in range(n):
+        s += len(d) + len(t)
+    return s
+
+
+print(methods(N), lengths(N))

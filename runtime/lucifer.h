@@ -17,6 +17,10 @@
    struct lu_frame *(*)(PyThreadState *, PyObject *const *, Py_ssize_t),
    which returns a frame for the interpreter to push (DESIGN 5.2). */
 #define LU_METH_FRAME 0x4000
+/* A PyMethodDef flag of the runtime's own: the primitive never runs Python
+   code (it may allocate and raise), so compiled code calls it directly, also
+   from an inlined frame. */
+#define LU_METH_NOPY 0x8000
 
 /* Report an unported C-API function by name and abort. */
 _Noreturn void lu_unimplemented(const char *name);

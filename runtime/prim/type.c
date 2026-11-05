@@ -2378,16 +2378,17 @@ prim_static_type(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
+#define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_type_methods[] = {
-    FAST(static_type),
-    FAST(type_lookup), FAST(type_dict), FAST(type_mro), FAST(type_bases), FAST(type_base),
+    PURE(static_type),
+    PURE(type_lookup), PURE(type_dict), PURE(type_mro), PURE(type_bases), PURE(type_base),
     FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag), FAST(type_set_flag), FAST(type_layout), FAST(object_size),
     FAST(type_can_new), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
-    FAST(type_subclasses), FAST(type_modified), FAST(is_subtype), FAST(alloc), FAST(new_check),
-    FAST(type_tp_name), FAST(type_static_module), FAST(size),
-    FAST(truth_exact), FAST(instance_dict), FAST(set_class), FAST(caller_globals), FAST(super_args),
+    FAST(type_subclasses), FAST(type_modified), PURE(is_subtype), FAST(alloc), FAST(new_check),
+    PURE(type_tp_name), FAST(type_static_module), PURE(size),
+    PURE(truth_exact), PURE(instance_dict), FAST(set_class), FAST(caller_globals), FAST(super_args),
     FAST(error), FAST(ns_get), FAST(ns_set), FAST(ns_del), FAST(ns_items),
-    { "kind", (PyCFunction)(void (*)(void))prim_kind, METH_FASTCALL, NULL },
+    PURE(kind),
     FAST(cell_get), FAST(cell_set), FAST(address), FAST(object_hash),
     FAST(object_is_immortal), FAST(enable_deferred),
     { "call_with_locals", (PyCFunction)(void (*)(void))prim_call_with_locals,

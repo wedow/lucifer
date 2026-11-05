@@ -107,6 +107,15 @@ h_build_tuple(PyObject **argv, intptr_t n)
     return t;
 }
 
+/* A primitive that never runs Python (LU_METH_NOPY): argv[0] is the
+   primitive, then its arguments. */
+static PyObject *
+h_prim(PyObject **argv, intptr_t n)
+{
+    PyCFunctionObject *f = (PyCFunctionObject *)argv[0];
+    return ((PyCFunctionFast)(void (*)(void))f->m_ml->ml_meth)(f->m_self, argv + 1, n - 1);
+}
+
 /* --- attributes --- */
 
 /* LOAD_ATTR_WITH_HINT: the instance dict's entry `index`, while the type
@@ -450,6 +459,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_load_method] = { (void *)h_load_method, "load_method", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 3 },
     [H_call] = { (void *)h_call, "call", REP_OBJ, IF_RAISE | IF_PY, 0 },
+    [H_prim] = { (void *)h_prim, "prim", REP_OBJ, IF_RAISE, 0 },
     [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, 0, 1 },

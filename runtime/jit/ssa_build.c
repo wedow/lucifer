@@ -1735,6 +1735,18 @@ call(struct ctx *c)
     if (c->failed) {
         return -1;
     }
+    if (prim != NULL && self == LU_NOV && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_NOPY)) {
+        /* It runs no Python, so no frame needs to be real, inlined or not. */
+        lu_v hargs[33];
+        hargs[0] = callable;
+        for (int i = 0; i < n; i++) {
+            hargs[1 + i] = peek(c, n - i);
+        }
+        r = helper_raising(c, H_prim, n + 1, hargs, n + 2);
+        pop_call(c, n);
+        push(c, r, 1);
+        return 0;
+    }
     if (!root_only(c)) {
         unsupported(c);
         return -1;

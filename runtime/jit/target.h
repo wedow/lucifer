@@ -130,6 +130,7 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(load_method) \
     X(store_attr) \
     X(call) \
+    X(prim) \
     X(get_iter) \
     X(for_iter) \
     X(seqiter_next) \
