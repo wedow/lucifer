@@ -353,11 +353,12 @@ PyObject_ClearWeakRefs(PyObject *ob)
     lu_clear_weakrefs(ob);
 }
 
-/* The dict of a Py_TPFLAGS_MANAGED_DICT instance. */
+/* The dict and inline values of a Py_TPFLAGS_MANAGED_DICT instance. */
 
 void
 PyObject_ClearManagedDict(PyObject *obj)
 {
+    lu_inline_clear(obj);
     if (Py_TYPE(obj)->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
         Py_CLEAR(LU_MANAGED_DICT(obj));
     }
@@ -369,7 +370,7 @@ PyObject_VisitManagedDict(PyObject *obj, visitproc visit, void *arg)
     if (Py_TYPE(obj)->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
         Py_VISIT(LU_MANAGED_DICT(obj));
     }
-    return 0;
+    return lu_inline_traverse(obj, visit, arg);
 }
 
 PyObject *

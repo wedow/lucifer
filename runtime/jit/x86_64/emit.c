@@ -337,6 +337,31 @@ call_abs(struct asm_ *a, const void *fn)
     b1(a, 0xD0);
 }
 
+/* A reference to the object in RAX (r) for the owning thread, taken in
+   place: an immortal needs none; another thread's object leaves (biased
+   counting lets only the owner skip the atomic try). Clobbers RCX, R11. */
+static void
+incref_owned_or_exit(struct asm_ *a, int r, int fail)
+{
+    int done = new_label(a);
+    load32(a, RCX, r, offsetof(PyObject, ob_ref_local));
+    rex(a, 0, 0, 0, RCX);
+    b1(a, 0x83);
+    modrm_rr(a, ALU_ADD, RCX);
+    b1(a, 1);                                   /* add ecx, 1 */
+    jcc(a, CC_E, done);                         /* immortal */
+    b1(a, 0x64);
+    b1(a, 0x4C);
+    b1(a, 0x8B);
+    b1(a, 0x1C);
+    b1(a, 0x25);
+    b4(a, 0);                                   /* mov r11, fs:[0] */
+    cmp_rm(a, R11, r, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, fail);
+    op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
+    bind(a, done);
+}
+
 /* A call on a slow path that keeps every allocatable register: the
    caller-saved ones go to the stack around it (rsi, rdi, r8-r10 and
    xmm2-14; 160 bytes keep the stack aligned). Its arguments are set by
@@ -1239,6 +1264,106 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jcc(a, CC_E, fail);
         return 0;
     }
+    case OP_INLINE_STORE: {
+        /* STORE_ATTR_INSTANCE_VALUE in line, after its version guard, as
+           CPython locks the object: the owner's lock byte taken with one
+           cmpxchg, a word that already holds a value replaced, a value the
+           owning thread holds (or an immortal) referenced in place. Anything
+           else is lu_inline_store's, and leaves when it declines. */
+        struct move m[2] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 } };
+        int fail = guard_exit(a, in);
+        int slow = new_label(a), unlock_slow = new_label(a), immortal = new_label(a);
+        int unlocked = new_label(a), done = new_label(a);
+        int32_t flags = offsetof(PyObject, ob_flags) + 1, mutex = offsetof(PyObject, ob_mutex);
+        int32_t off = (int32_t)in->imm;
+        parallel_moves(a, m, 2);
+        mov_rr(a, R12, RDI);                    /* kept across calls: nothing is live here (IF_CALL) */
+        mov_rr(a, R13, RSI);
+        b1(a, 0xF6);
+        modrm_mem(a, 0, RDI, flags);
+        b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
+        jcc(a, CC_NE, slow);
+        alu_rr(a, ALU_XOR, RAX, RAX);
+        b1(a, 0xB1);
+        b1(a, 1);                               /* mov cl, 1 */
+        b1(a, 0xF0);
+        b1(a, 0x0F);
+        b1(a, 0xB0);
+        modrm_mem(a, RCX, RDI, mutex);          /* lock cmpxchg [rdi+mutex], cl */
+        jcc(a, CC_NE, slow);
+        b1(a, 0xF6);
+        modrm_mem(a, 0, RDI, flags);
+        b1(a, LU_ATTRS_IN_DICT >> 8);
+        jcc(a, CC_NE, unlock_slow);             /* moved to the dict before the lock */
+        load(a, RBX, RDI, off);                 /* the old value, kept across calls */
+        test_rr(a, RBX, RBX);
+        jcc(a, CC_E, unlock_slow);              /* a new name: insertion order is C's */
+        load32(a, RCX, RSI, offsetof(PyObject, ob_ref_local));
+        rex(a, 0, 0, 0, RCX);
+        b1(a, 0x83);
+        modrm_rr(a, ALU_ADD, RCX);
+        b1(a, 1);                               /* add ecx, 1 */
+        jcc(a, CC_E, immortal);
+        b1(a, 0x64);
+        b1(a, 0x4C);
+        b1(a, 0x8B);
+        b1(a, 0x1C);
+        b1(a, 0x25);
+        b4(a, 0);                               /* mov r11, fs:[0] */
+        cmp_rm(a, R11, RSI, offsetof(PyObject, ob_tid));
+        jcc(a, CC_NE, unlock_slow);
+        op_rm(a, 0, 0x89, RCX, RSI, offsetof(PyObject, ob_ref_local));
+        bind(a, immortal);
+        store(a, RDI, off, RSI);
+        b1(a, 0xB0);
+        b1(a, 1);                               /* mov al, 1 */
+        alu_rr(a, ALU_XOR, RCX, RCX);
+        b1(a, 0xF0);
+        b1(a, 0x0F);
+        b1(a, 0xB0);
+        modrm_mem(a, RCX, RDI, mutex);          /* lock cmpxchg [rdi+mutex], cl */
+        jcc(a, CC_E, unlocked);
+        alu_ri(a, ALU_ADD, RDI, mutex);         /* a waiter parked: wake it */
+        call_abs(a, (void *)PyMutex_Unlock);
+        bind(a, unlocked);
+        mov_rr(a, RDI, RBX);
+        call_abs(a, (void *)lu_jit_decref);     /* the old value */
+        jmp(a, done);
+        bind(a, unlock_slow);
+        alu_ri(a, ALU_ADD, RDI, mutex);
+        call_abs(a, (void *)PyMutex_Unlock);
+        mov_rr(a, RDI, R12);
+        mov_rr(a, RSI, R13);
+        bind(a, slow);
+        mov_ri(a, RDX, in->imm);
+        b1(a, 0x48);
+        b1(a, 0x87);
+        b1(a, 0xD6);                            /* xchg rsi, rdx: (owner, offset, value) */
+        call_abs(a, (void *)lu_inline_store);
+        b1(a, 0x85);
+        b1(a, 0xC0);                            /* test eax, eax */
+        jcc(a, CC_E, fail);
+        bind(a, done);
+        return 0;
+    }
+    case OP_INLINE_LOAD: {
+        /* LOAD_ATTR_INSTANCE_VALUE in line, after its version guard: the
+           owner still keeps its inline values, the word at imm holds a value,
+           and the owning thread takes the reference in place. */
+        int fail = guard_exit(a, in);
+        r = gpr_of(a, in->a, RDX);
+        rex(a, 0, 0, 0, r);
+        b1(a, 0xF6);
+        modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
+        b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
+        jcc(a, CC_NE, fail);
+        load(a, RAX, r, (int32_t)in->imm);
+        test_rr(a, RAX, RAX);
+        jcc(a, CC_E, fail);
+        incref_owned_or_exit(a, RAX, fail);
+        def_gpr(a, v, RAX);
+        return 0;
+    }
     case OP_ATTR_LOAD: {
         /* LOAD_ATTR_WITH_HINT in line: the type's version, the instance's
            exact dict, a unicode keys table with entry imm2 holding the name,
@@ -1280,23 +1405,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         load(a, RAX, RAX, (int32_t)(offsetof(PyDictKeysObject, dk_indices) + entry + 8));
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
-        int done = new_label(a);
-        load32(a, RCX, RAX, offsetof(PyObject, ob_ref_local));
-        rex(a, 0, 0, 0, RCX);
-        b1(a, 0x83);
-        modrm_rr(a, ALU_ADD, RCX);
-        b1(a, 1);                               /* add ecx, 1 */
-        jcc(a, CC_E, done);                     /* immortal */
-        b1(a, 0x64);
-        b1(a, 0x4C);
-        b1(a, 0x8B);
-        b1(a, 0x1C);
-        b1(a, 0x25);
-        b4(a, 0);                               /* mov r11, fs:[0] */
-        cmp_rm(a, R11, RAX, offsetof(PyObject, ob_tid));
-        jcc(a, CC_NE, fail);
-        op_rm(a, 0, 0x89, RCX, RAX, offsetof(PyObject, ob_ref_local));
-        bind(a, done);
+        incref_owned_or_exit(a, RAX, fail);
         def_gpr(a, v, RAX);
         return 0;
     }

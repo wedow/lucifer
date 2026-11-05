@@ -47,6 +47,7 @@ struct bblk {
     int id;                     /* the IR block */
     int pc;
     int npreds;                 /* static predecessors among reachable code */
+    int succ[2], nsucc;         /* the blocks it can jump or fall to */
     int phis;                   /* the entry state is phis */
     int has;                    /* the entry state is set */
     int done;
@@ -670,6 +671,7 @@ count_fallthrough(struct ctx *c)
 {
     for (int k = 0; k < c->nbb; k++) {
         c->bb[k].npreds = 0;
+        c->bb[k].nsucc = 0;
     }
     for (int k = 0; k < c->nbb; k++) {
         int pc = c->bb[k].pc;
@@ -680,6 +682,9 @@ count_fallthrough(struct ctx *c)
                 int t = jump_target(base, oparg, next);
                 if (t >= 0 && t < c->ncode && c->blkat[t] >= 0) {
                     c->bb[c->blkat[t]].npreds++;
+                    if (c->bb[k].nsucc < 2) {
+                        c->bb[k].succ[c->bb[k].nsucc++] = c->blkat[t];
+                    }
                 }
             }
             if (base == RETURN_VALUE || !supported(base) || is_jump(base)) {
@@ -690,6 +695,9 @@ count_fallthrough(struct ctx *c)
             }
             if (c->blkat[next] >= 0) {
                 c->bb[c->blkat[next]].npreds++;
+                if (c->bb[k].nsucc < 2) {
+                    c->bb[k].succ[c->bb[k].nsucc++] = c->blkat[next];
+                }
                 break;
             }
             pc = next;
@@ -771,6 +779,23 @@ unbox_int(struct ctx *c, lu_v v)
     lu_v u = emit(c, OP_UNBOX_INT, REP_I64, v, LU_NOV, LU_NOV, 0);
     I(c, u)->fs = before(c);
     return u;
+}
+
+/* An int operand of a comparison as a machine word: a constant past one
+   digit that fits 64 bits compares exactly as itself, where unboxing it
+   would always leave (the kernel's range checks against _SSIZE_MAX). */
+static lu_v
+compare_int_operand(struct ctx *c, lu_v v)
+{
+    PyObject *o = known(c, v);
+    if (o != NULL && PyLong_CheckExact(o) && !_PyLong_IsCompact((PyLongObject *)o)) {
+        int overflow;
+        long long x = PyLong_AsLongLongAndOverflow(o, &overflow);
+        if (!overflow) {
+            return const_i(c, x);
+        }
+    }
+    return unbox_int(c, v);
 }
 
 static lu_v
@@ -1005,7 +1030,7 @@ compare_op(struct ctx *c)
     if (known_type(c, b) == &PyLong_Type) rk = LU_KIND_INT;
     if (known_type(c, b) == &PyFloat_Type) rk = LU_KIND_FLOAT;
     if (lk == LU_KIND_INT && rk == LU_KIND_INT) {
-        bit = emit(c, OP_CMP_I, REP_BIT, unbox_int(c, a), unbox_int(c, b), LU_NOV, op);
+        bit = emit(c, OP_CMP_I, REP_BIT, compare_int_operand(c, a), compare_int_operand(c, b), LU_NOV, op);
     }
     else if ((lk == LU_KIND_FLOAT || lk == LU_KIND_INT) && (rk == LU_KIND_FLOAT || rk == LU_KIND_INT)) {
         /* compare's dispatch for two exact floats is float's own method. */
@@ -1395,11 +1420,19 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         }
         return 0;
     }
-    case LOAD_ATTR_SLOT: {
+    case LOAD_ATTR_SLOT:
+    case LOAD_ATTR_INSTANCE_VALUE: {
         guard(c, OP_GUARD_VERSION, owner, version);
-        lu_v args[2] = { owner, const_i(c, index) };
-        lu_v v = helper(c, H_slot_load, 2, args);
-        guard_after(c, OP_GUARD_NOT_NULL, v, 0);
+        lu_v v;
+        if (op == LOAD_ATTR_INSTANCE_VALUE) {
+            v = emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, index);
+            I(c, v)->fs = before(c);
+        }
+        else {
+            lu_v args[2] = { owner, const_i(c, index) };
+            v = helper(c, H_slot_load, 2, args);
+            guard_after(c, OP_GUARD_NOT_NULL, v, 0);
+        }
         pop(c, NULL);
         release(c, owner, own);
         push(c, v, 1);
@@ -1455,6 +1488,11 @@ store_attr(struct ctx *c)
     if (op == STORE_ATTR_WITH_HINT) {
         lu_v args[4] = { owner, v, konst(c, name), const_i(c, version) };
         guard_after(c, OP_GUARD_BIT, helper(c, H_attr_store, 4, args), 1);
+    }
+    else if (op == STORE_ATTR_INSTANCE_VALUE) {
+        guard(c, OP_GUARD_VERSION, owner, version);
+        lu_v st = emit(c, OP_INLINE_STORE, REP_NONE, owner, v, LU_NOV, index);
+        I(c, st)->fs = before(c);
     }
     else if (op == STORE_ATTR_SLOT) {
         guard(c, OP_GUARD_VERSION, owner, version);
@@ -2174,6 +2212,41 @@ translate(struct ctx *c)
     }
 }
 
+/* Whether block k sends no more edges: it is built, or nothing reached
+   it and nothing that could still reach it is left. memo: 0 unknown, 1
+   settled, 2 not (or being decided, which a cycle leaves unsettled). */
+static int
+settled(struct ctx *c, int k, char *memo)
+{
+    if (memo[k] == 0) {
+        memo[k] = 2;
+        int ok = c->bb[k].done || !c->bb[k].has;
+        for (int j = 0; ok && !c->bb[k].done && j < c->nbb; j++) {
+            for (int i = 0; ok && i < c->bb[j].nsucc; i++) {
+                ok = c->bb[j].succ[i] != k || settled(c, j, memo);
+            }
+        }
+        memo[k] = ok ? 1 : 2;
+    }
+    return memo[k] == 1;
+}
+
+/* Whether block bi, about to be built, has every edge it will get. */
+static int
+preds_built(struct ctx *c, int bi)
+{
+    char *memo = calloc((size_t)c->nbb, 1);
+    memo[bi] = 2;               /* its own edges are still to come */
+    int ok = 1;
+    for (int k = 0; ok && k < c->nbb; k++) {
+        for (int i = 0; ok && i < c->bb[k].nsucc; i++) {
+            ok = c->bb[k].succ[i] != bi || settled(c, k, memo);
+        }
+    }
+    free(memo);
+    return ok;
+}
+
 static int
 build_block(struct ctx *c, int bi)
 {
@@ -2182,6 +2255,20 @@ build_block(struct ctx *c, int bi)
     b->done = 1;
     c->cur = b->id;
     state_copy(c, &c->st, &b->in);
+    if (b->phis && preds_built(c, bi)) {
+        /* A join with every edge it will get: if they agree, it has that
+           value, and a constant stays one for what folds on it. */
+        for (int k = 0; k < c->nlocals + c->st.sp; k++) {
+            struct lu_ins *phi = I(c, c->st.v[k]);
+            int same = phi->op == OP_PHI && phi->nargs > 0;
+            for (int i = 1; same && i < phi->nargs; i++) {
+                same = phi->args[i] == phi->args[0];
+            }
+            if (same) {
+                c->st.v[k] = phi->args[0];
+            }
+        }
+    }
     int pc = b->pc;
     while (c->cur >= 0 && !c->failed) {
         if (pc >= c->ncode) {

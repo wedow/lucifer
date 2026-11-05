@@ -253,6 +253,47 @@ enum lu_kernel_id {
 #define LU_MANAGED_DICT_OFFSET (-(Py_ssize_t)sizeof(PyObject *))
 #define LU_MANAGED_DICT(obj) (*(PyObject **)((char *)(obj) + LU_MANAGED_DICT_OFFSET))
 
+/* Instance attributes (runtime/object/attrs.c): inline values after
+   tp_basicsize while LU_ATTRS_IN_DICT is clear, else the instance dict. */
+#define LU_ATTRS_IN_DICT (1 << 8)       /* ob_flags: set once the values moved to the dict */
+static inline int
+lu_inline_live(PyObject *obj)
+{
+    return (Py_TYPE(obj)->tp_flags & Py_TPFLAGS_INLINE_VALUES)
+        && !(__atomic_load_n(&obj->ob_flags, __ATOMIC_ACQUIRE) & LU_ATTRS_IN_DICT);
+}
+static inline PyObject **
+lu_inline_values(PyObject *obj)
+{
+    return (PyObject **)((char *)obj + Py_TYPE(obj)->tp_basicsize);
+}
+/* Class setup and teardown, and the bytes each instance carries. */
+int lu_inline_values_init(PyTypeObject *tp);
+void lu_inline_values_fini(PyTypeObject *tp);
+size_t lu_inline_values_size(PyTypeObject *tp);
+/* The index of name in the class's shared names, or -1. */
+Py_ssize_t lu_inline_index(PyTypeObject *tp, PyObject *name);
+/* The address of the instance's dict pointer, or NULL when it has none. */
+PyObject **lu_dict_ptr(PyObject *obj);
+/* The instance dict (borrowed), made on demand when `create`; the inline
+   values move into it. NULL when there is none, or on error. */
+PyObject *lu_instance_dict(PyObject *obj, int create);
+/* __dict__ assignment (dict NULL deletes): -1 with an error, else 0. */
+int lu_instance_set_dict(PyObject *obj, PyObject *dict);
+/* An instance attribute: 1 with a new reference in *v, 0 when absent, -1
+   when only the kernel can answer (a dict that is not exact, a name that is
+   not an exact str); never raises. */
+int lu_attr_lookup(PyObject *obj, PyObject *name, PyObject **v);
+/* Stores v, or deletes the name when v is NULL, on an object lu_dict_ptr
+   answers for: 1 done, 0 when the name to delete is absent, -1 on error. */
+int lu_attr_store(PyObject *obj, PyObject *name, PyObject *v);
+/* STORE_ATTR_INSTANCE_VALUE: v into the inline word at byte offset of an
+   instance of a class whose name there is the attribute's; 0 when only
+   lu_attr_store can store it. */
+int lu_inline_store(PyObject *obj, Py_ssize_t offset, PyObject *v);
+int lu_inline_traverse(PyObject *obj, visitproc visit, void *arg);
+void lu_inline_clear(PyObject *obj);
+
 /* Watcher ids per kind, as CPython's TYPE_/DICT_/FUNC_/CODE_MAX_WATCHERS. */
 #define LU_MAX_WATCHERS 8
 typedef void (*lu_watcher)(void);
@@ -487,6 +528,9 @@ struct lu_entry {
     int nbound;                 /* tasks bound here; the owner record is registered while > 0 */
     struct lu_mimalloc_state mimalloc;
     struct lu_brc_owner brc;
+    /* Freed floats and one-digit ints kept for reuse (CPython's per-thread
+       freelists); runtime/object/layouts.c. */
+    struct lu_freelist { PyObject *head; int n; } free_floats, free_ints;
 };
 
 /* The carrier record is per pthread, reached through the one thread-local
@@ -704,6 +748,7 @@ lu_current_task(void)
 /* Called when a carrier binds and retires. */
 void lu_mimalloc_bind(struct lu_entry *entry);
 void lu_mimalloc_abandon(struct lu_entry *entry);
+void lu_freelists_clear(struct lu_entry *entry);       /* runtime/object/layouts.c */
 void lu_brc_register(struct lu_entry *entry);
 void lu_brc_retire(struct lu_entry *entry);
 /* A scheduler carrier stops or starts running a task (runtime/thread/task.c). */
@@ -775,7 +820,7 @@ struct lu_static_objects {
     X(__rtruediv__) X(__matmul__) X(__rmatmul__) X(__iadd__) X(__isub__) X(__imul__) \
     X(__imod__) X(__ipow__) X(__ilshift__) X(__irshift__) X(__iand__) X(__ixor__) \
     X(__ior__) X(__import__) X(__ifloordiv__) X(__itruediv__) X(__imatmul__) X(__neg__) X(__pos__) \
-    X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__) X(mro) X(__getattribute__) X(__getattr__) X(__setattr__)
+    X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__) X(mro) X(__getattribute__) X(__static_attributes__) X(__getattr__) X(__setattr__)
 struct lu_identifiers {
 #define LU_ID_FIELD(name) PyObject *name;
     LU_IDENTIFIERS(LU_ID_FIELD)
@@ -829,6 +874,7 @@ extern LU_EXPORT union lu_runtime {
         Py_ssize_t next_module_index;   /* the last PyModuleDef_Base.m_index given */
         PyMutex getargs_lock;           /* builds an argument parser's keyword tuple once */
         PyMutex specialize_lock;        /* one rewrite of an instruction's inline cache at a time */
+        PyMutex shared_names_lock;      /* a class's shared names grow one at a time (object/attrs.c) */
         pthread_t main_thread;          /* the thread that started the runtime */
         struct lu_task *main_task;      /* signals and the main thread's pending calls are aimed at it */
         struct {

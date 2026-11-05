@@ -80,6 +80,55 @@ immortal_header(PyObject *op, PyTypeObject *tp)
 
 #define LONG_HEADER offsetof(PyLongObject, long_value.ob_digit)
 
+/* Floats and one-digit ints come and go in arithmetic: up to FREE_MAX
+   freed ones of each per carrier wait for reuse, linked through the word
+   after the header. A lock-free reader of a stale pointer finds the same
+   type's header there, as it would in a reused mimalloc block. */
+#define FREE_MAX 100
+#define FREE_NEXT(op) (*(PyObject **)((char *)(op) + sizeof(PyObject)))
+
+static PyObject *
+freelist_pop(struct lu_freelist *fl)
+{
+    PyObject *op = fl->head;
+    if (op != NULL) {
+        fl->head = FREE_NEXT(op);
+        fl->n--;
+        _Py_NewReference(op);
+    }
+    return op;
+}
+
+static int
+freelist_push(struct lu_freelist *fl, PyObject *op)
+{
+    if (fl->n >= FREE_MAX) {
+        return 0;
+    }
+    FREE_NEXT(op) = fl->head;
+    fl->head = op;
+    fl->n++;
+    return 1;
+}
+
+static void
+freelist_clear(struct lu_freelist *fl)
+{
+    while (fl->head != NULL) {
+        PyObject *op = fl->head;
+        fl->head = FREE_NEXT(op);
+        lu_object_free(op);
+    }
+    fl->n = 0;
+}
+
+void
+lu_freelists_clear(struct lu_entry *e)
+{
+    freelist_clear(&e->free_floats);
+    freelist_clear(&e->free_ints);
+}
+
 static void
 set_tag(PyLongObject *v, int sign, Py_ssize_t ndigits)
 {
@@ -92,8 +141,13 @@ set_tag(PyLongObject *v, int sign, Py_ssize_t ndigits)
 PyLongObject *
 lu_long_alloc(Py_ssize_t ndigits)
 {
-    PyLongObject *v = (PyLongObject *)lu_object_new(&PyLong_Type,
-        LONG_HEADER + (ndigits > 0 ? ndigits : 1) * sizeof(digit));
+    PyLongObject *v = ndigits <= 1 ? (PyLongObject *)freelist_pop(&lu_current_entry()->free_ints) : NULL;
+    if (v != NULL) {
+        v->long_value.ob_digit[0] = 0;
+    }
+    else {
+        v = (PyLongObject *)lu_object_new(&PyLong_Type, LONG_HEADER + (ndigits > 0 ? ndigits : 1) * sizeof(digit));
+    }
     if (v != NULL) {
         set_tag(v, ndigits != 0, ndigits);
     }
@@ -232,11 +286,29 @@ plain_dealloc(PyObject *op)
 PyObject *
 PyFloat_FromDouble(double value)
 {
-    PyFloatObject *op = (PyFloatObject *)lu_object_new(&PyFloat_Type, sizeof(PyFloatObject));
-    if (op != NULL) {
-        op->ob_fval = value;
+    PyObject *op = freelist_pop(&lu_current_entry()->free_floats);
+    if (op == NULL && (op = lu_object_new(&PyFloat_Type, sizeof(PyFloatObject))) == NULL) {
+        return NULL;
     }
-    return (PyObject *)op;
+    ((PyFloatObject *)op)->ob_fval = value;
+    return op;
+}
+
+static void
+float_dealloc(PyObject *op)
+{
+    if (!PyFloat_CheckExact(op) || !freelist_push(&lu_current_entry()->free_floats, op)) {
+        lu_object_free(op);
+    }
+}
+
+static void
+long_dealloc(PyObject *op)
+{
+    if (!PyLong_CheckExact(op) || !_PyLong_IsCompact((PyLongObject *)op)
+        || !freelist_push(&lu_current_entry()->free_ints, op)) {
+        lu_object_free(op);
+    }
 }
 
 PyObject *
@@ -702,9 +774,9 @@ lu_eq(PyObject *a, PyObject *b)
 void
 lu_layouts_init(void)
 {
-    set_layout(&PyLong_Type, LONG_HEADER, sizeof(digit), 0, plain_dealloc);
+    set_layout(&PyLong_Type, LONG_HEADER, sizeof(digit), 0, long_dealloc);
     set_layout(&PyBool_Type, LONG_HEADER, sizeof(digit), 0, NULL);
-    set_layout(&PyFloat_Type, sizeof(PyFloatObject), 0, 0, plain_dealloc);
+    set_layout(&PyFloat_Type, sizeof(PyFloatObject), 0, 0, float_dealloc);
     set_layout(&PyComplex_Type, sizeof(PyComplexObject), 0, 0, plain_dealloc);
     set_layout(&PyBytes_Type, BYTES_HEADER + 1, 1, 0, bytes_dealloc);
     set_layout(&PyTuple_Type, offsetof(PyTupleObject, ob_item), sizeof(PyObject *),

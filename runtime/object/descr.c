@@ -1316,6 +1316,9 @@ lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value)
     if (value == NULL || !(tp->tp_flags & Py_TPFLAGS_MANAGED_DICT)) {
         return 0;
     }
+    if (lu_inline_live(obj)) {
+        return lu_attr_store(obj, name, value);
+    }
     PyObject *dict = PyObject_GenericGetDict(obj, NULL);       /* made on demand */
     if (dict == NULL) {
         return -1;

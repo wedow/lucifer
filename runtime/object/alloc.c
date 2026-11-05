@@ -251,6 +251,7 @@ lu_mimalloc_bind(struct lu_entry *entry)
 void
 lu_mimalloc_abandon(struct lu_entry *entry)
 {
+    lu_freelists_clear(entry);
     for (int i = 0; i < LU_HEAP_COUNT; i++) {
         _mi_heap_collect_abandon(&entry->mimalloc.heaps[i]);
     }
