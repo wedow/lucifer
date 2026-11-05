@@ -874,22 +874,6 @@ lu_seqiter_next(PyObject *iter)
        parks, which suspends the sections the task holds, and another thread
        could advance or exhaust the iterator meanwhile. */
     PyObject *v = NULL, *seq = NULL, *dead = NULL;
-    if (_Py_IsOwnedByCurrentThread(iter) && _Py_atomic_load_ssize_relaxed(&iter->ob_ref_shared) == 0
-        && it->it_seq != NULL && it->it_index >= 0) {
-        /* No other thread has ever held the iterator: its lock guards
-           nothing, and an item still comes without the list's lock. */
-        PyObject *s = it->it_seq;
-        if (Py_TYPE(iter) == &PyTupleIter_Type) {
-            v = it->it_index < Py_SIZE(s) ? Py_NewRef(PyTuple_GET_ITEM(s, it->it_index)) : NULL;
-        }
-        else {
-            v = lu_list_try_item_ref((PyListObject *)s, it->it_index);
-        }
-        if (v != NULL) {
-            seqiter_step(it, v, &dead);
-            return v;
-        }
-    }
     Py_BEGIN_CRITICAL_SECTION(iter);
     PyObject *s = it->it_seq;
     Py_ssize_t i = it->it_index;
