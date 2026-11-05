@@ -2494,9 +2494,11 @@ op_DICT_UPDATE: {
     else {
         Py_ssize_t pos = 0;
         PyObject *key, *value;
+        Py_BEGIN_CRITICAL_SECTION(update);
         while (err == 0 && lu_ns_next(update, &pos, &key, &value)) {
             err = lu_ns_insert(dict, key, value);
         }
+        Py_END_CRITICAL_SECTION();
     }
     Py_DECREF(update);
     ERROR_IF(err < 0);
@@ -2651,12 +2653,11 @@ op_LOAD_ATTR_CLASS: {
     if (version == 0 || !PyType_Check(owner) || ((PyTypeObject *)owner)->tp_version_tag != version
         || (meta_checked && (meta_version == 0 || Py_TYPE(owner)->tp_version_tag != meta_version))
         || !lu_site_unchanged(next_instr - 1, opcode)
-        || lu_cache_load32(next_instr + LA_VERSION) != version
-        || !lu_try_incref(descr)) {         /* the cache does not own it: it may be freed */
+        || lu_cache_load32(next_instr + LA_VERSION) != version) {
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
-    TOP() = descr;
+    TOP() = Py_NewRef(descr);       /* deferred: no collection since the load (specialize.c) */
     Py_DECREF(owner);
     if (oparg & 1) {
         PUSH(NULL);
@@ -2701,14 +2702,16 @@ op_LOAD_ATTR_SLOT: {
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
     PyObject *v = NULL;
     if (version != 0 && Py_TYPE(owner)->tp_version_tag == version) {
-        v = *(PyObject **)((char *)owner + lu_cache_load(next_instr + LA_INDEX));
+        /* Another thread may store and free the value: taken only if alive. */
+        v = lu_try_xget_ref((PyObject **)((char *)owner + lu_cache_load(next_instr + LA_INDEX)));
     }
     if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
         || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        Py_XDECREF(v);
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
-    TOP() = Py_NewRef(v);
+    TOP() = v;
     Py_DECREF(owner);
     if (oparg & 1) {
         PUSH(NULL);
@@ -2732,12 +2735,11 @@ op_LOAD_ATTR_METHOD: {
             goto op_LOAD_ATTR;
         }
     }
-    if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version
-        || !lu_try_incref(descr)) {         /* the cache does not own it: it may be freed */
+    if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
-    TOP() = descr;
+    TOP() = Py_NewRef(descr);       /* deferred: no collection since the load (specialize.c) */
     if (opcode == LOAD_ATTR_METHOD_NO_DICT || opcode == LOAD_ATTR_METHOD_WITH_VALUES) {
         PUSH(owner);
     }
@@ -2868,10 +2870,8 @@ op_STORE_ATTR_FAST: {
     sp -= 2;
     int err = 0;
     if (opcode == STORE_ATTR_SLOT) {
-        PyObject **slot = (PyObject **)((char *)owner + offset);
-        PyObject *old = *slot;
-        *slot = v;
-        Py_XDECREF(old);
+        Py_XDECREF(lu_member_exchange(owner, (PyObject **)((char *)owner + offset), v));
+        Py_DECREF(v);
     }
     else {
         SAVE_FRAME();

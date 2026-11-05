@@ -1393,11 +1393,13 @@ type_new_layout(PyTypeObject *meta, PyObject *name, PyObject *bases, PyObject *n
     dict = PyDict_New();
     Py_ssize_t pos = 0;
     PyObject *key, *value;
+    Py_BEGIN_CRITICAL_SECTION(ns);
     while (dict != NULL && lu_ns_next(ns, &pos, &key, &value)) {
         if (lu_ns_insert(dict, key, value) < 0) {
             Py_CLEAR(dict);
         }
     }
+    Py_END_CRITICAL_SECTION();
     if (dict == NULL) {
         Py_DECREF(bases);
         return NULL;
@@ -2229,6 +2231,7 @@ prim_ns_items(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *list = PyList_New(0);
     Py_ssize_t pos = 0;
     PyObject *key, *value;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
     while (list != NULL && lu_ns_next(args[0], &pos, &key, &value)) {
         PyObject *pair = PyTuple_New(2);
         if (pair == NULL) {
@@ -2243,6 +2246,7 @@ prim_ns_items(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
             Py_CLEAR(list);
         }
     }
+    Py_END_CRITICAL_SECTION();
     return list;
 }
 
@@ -2320,6 +2324,14 @@ prim_object_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLongLong(Py_HashPointer(args[0]));
 }
 
+/* enable_deferred(x): PyUnstable_Object_EnableDeferredRefcount. */
+static PyObject *
+prim_enable_deferred(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    return bool_of(PyUnstable_Object_EnableDeferredRefcount(args[0]));
+}
+
 /* object_is_immortal(x): sys._is_immortal. */
 static PyObject *
 prim_object_is_immortal(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -2377,7 +2389,7 @@ PyMethodDef lu_prim_type_methods[] = {
     FAST(error), FAST(ns_get), FAST(ns_set), FAST(ns_del), FAST(ns_items),
     { "kind", (PyCFunction)(void (*)(void))prim_kind, METH_FASTCALL, NULL },
     FAST(cell_get), FAST(cell_set), FAST(address), FAST(object_hash),
-    FAST(object_is_immortal),
+    FAST(object_is_immortal), FAST(enable_deferred),
     { "call_with_locals", (PyCFunction)(void (*)(void))prim_call_with_locals,
       METH_FASTCALL | LU_METH_FRAME, NULL },
     { NULL, NULL, 0, NULL },

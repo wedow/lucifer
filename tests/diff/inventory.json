@@ -1019,7 +1019,7 @@
     "tools/difftest/generate.py": "cae5f6e992b857d12192a66e67954db1c449b630b28452aa6615982a18b00957",
     "tools/difftest/normalize.py": "7a3c5b0c15e2111e5539b7b2125784cdfad385e287f59071114384b41871b317",
     "tools/difftest/requirements.lock": "3cc220bb9aa81c3e15984b95a8ce73c831685e7cb51a453579195667f577ec2e",
-    "tools/difftest/run.py": "7b56a3efe6f6c13c9dda6aa87358fe21ca8dda55095ac8f3343c34055dabaf3b",
+    "tools/difftest/run.py": "53ef85e0e963679a1742c21bda0e31f592bd02d4cdca83f925256fed681ab1a3",
     "tools/difftest/setup.py": "c74fe6772ac0a2f1582c8a97b8bcfbf0168ad9c070fc53f86d68b6bda80eb097",
     "tools/difftest/support.py": "a2d2b09fd5dc4d7748f72007fd4ed191c23c8eed77122dfcce51199bf1856803"
   },

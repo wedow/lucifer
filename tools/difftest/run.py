@@ -30,6 +30,9 @@ FIXED_ENV = {"PYTHONHASHSEED": "0", "PYTHONIOENCODING": "utf-8:backslashreplace"
              "LC_ALL": "C.UTF-8", "TZ": "UTC", "OMP_NUM_THREADS": "1",
              "OPENBLAS_NUM_THREADS": "1"}
 
+# The target may take this many times the oracle's time (more than --timeout allows).
+TARGET_FACTOR = 8
+
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -190,7 +193,9 @@ def compare_case(name, spec, oracle, target, work, loops, timeout):
         capabilities.unlink(missing_ok=True)
         invocation = executable + [str(HERE / "bridge.py"), str(source), str(loops),
                                    str(state) if spec["state"] else "-"]
-        record = execute(invocation, scratch, timeout)
+        # The oracle's own time measures the host's load, so the allowance scales with it.
+        limit = max(timeout, TARGET_FACTOR * records["oracle"]["seconds"]) if arm == "target" else timeout
+        record = execute(invocation, scratch, limit)
         record["argv"] = invocation
         records[arm] = record
         if record["kind"] != "EXIT":

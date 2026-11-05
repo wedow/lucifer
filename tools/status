@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""Daily status pass on a built tree: gates, AWFY timing, conformance, optional numpy.
+
+Writes results/status-DATE/{summary.csv,summary.md,*.log}. Run from the repository root.
+
+Environment:
+  LUCIFER        the executable under test (default bin/lucifer)
+  ORACLE_T       the CPython 3.14t reference interpreter
+  HOST_PYTHON    passed to make for host-side tools
+  TIMING_PREFIX  command words put in front of each timed step (an exclusive lock, say)
+  TEST_PREFIX    command words put in front of each gate and numpy shard
+  NUMPY_SITE, NUMPY_CACHE, NUMPY_WORK  site-packages, wheel cache and raw-log directory (--numpy)
+
+CPython timings come from results/status-reference.json; --refresh-reference rewrites it.
+"""
+import argparse
+import csv
+import datetime
+import importlib.machinery
+import importlib.util
+import json
+import math
+import os
+from pathlib import Path
+import re
+import shlex
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+REFERENCE = ROOT / "results/status-reference.json"
+AWFY = ROOT / "third_party/awfy/Python"
+LUCIFER = str(Path(os.environ.get("LUCIFER", "bin/lucifer")).resolve())
+
+
+def awfy_inner():
+    """The canonical inner counts, from the AWFY driver."""
+    sys.path.insert(0, str(ROOT / "tools/bench"))
+    path = str(ROOT / "tools/bench/awfy")
+    spec = importlib.util.spec_from_loader("awfy_driver", importlib.machinery.SourceFileLoader("awfy_driver", path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.INNER
+
+
+def words(prefix):
+    return shlex.split(os.environ.get(prefix, ""))
+
+
+def run(argv, prefix="", cwd=ROOT):
+    return subprocess.run(words(prefix) + argv, cwd=cwd, text=True, errors="replace",
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+
+# --- timing -----------------------------------------------------------------
+
+def time_one(name, iters, commands):
+    """Worker: best-of-iters microseconds per labelled command, as JSON on stdout."""
+    inner = awfy_inner()[name]
+    best = {}
+    for label, command in commands.items():
+        done = subprocess.run(shlex.split(command) + ["harness.py", name, str(iters), str(inner)], cwd=AWFY,
+                              text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        samples = [int(m[1]) for m in re.finditer(rf"^{name}: iterations=1 runtime: (\d+)us$", done.stdout, re.M)]
+        best[label] = min(samples) if done.returncode == 0 and len(samples) == iters else None
+    print(json.dumps(best))
+
+
+def timings(names, iters, commands, out):
+    """Each benchmark is one prefixed step, so a lock is held for one benchmark at a time."""
+    result = {}
+    for name in names:
+        done = run([sys.executable, __file__, "time", name, "--iters", str(iters)]
+                   + [f"--run={label}={command}" for label, command in commands.items()], "TIMING_PREFIX")
+        try:
+            result[name] = json.loads(done.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            result[name] = {label: None for label in commands}
+        (out / "awfy.log").open("a").write(f"{name}: {result[name]}\n")
+    return result
+
+
+def oracle_version(oracle):
+    return run([oracle, "-c", "import sys; print(sys.version)"]).stdout.strip()
+
+
+def refresh_reference(names, iters, oracle):
+    result = {}
+    for name in names:
+        done = run([sys.executable, __file__, "time", name, "--iters", str(iters), f"--run=cpython={oracle}"], "TIMING_PREFIX")
+        result[name] = json.loads(done.stdout.strip().splitlines()[-1])["cpython"]
+    REFERENCE.write_text(json.dumps({"version": oracle_version(oracle), "best_us": result}, indent=1) + "\n")
+
+
+# --- gates and conformance --------------------------------------------------
+
+def make_targets():
+    check = re.search(r"^check:(.*)$", (ROOT / "Makefile").read_text(), re.M)[1].split()
+    return check + ["check-jit"]
+
+
+def gates(out):
+    flags = [f"{v}={os.environ[v]}" for v in ("ORACLE_T", "HOST_PYTHON") if v in os.environ]
+    rows = {}
+    for target in make_targets():
+        done = run(["make", target] + flags, "TEST_PREFIX")
+        (out / f"{target}.log").write_text(done.stdout)
+        detail = [l for l in done.stdout.splitlines() if re.search(r"\d+/\d+ checks pass|failing|^FAIL|^PASS difftest", l)]
+        rows[target] = (done.returncode == 0, "; ".join(detail[:6] or done.stdout.splitlines()[-1:]))
+    return rows
+
+
+def kernel_counts(out):
+    counts = {}
+    for target in ("check-kernel", "check-kernel-jit"):
+        log = out / f"{target}.log"
+        for m in re.finditer(r"(\d+)/(\d+) checks pass \((\S+)\)", log.read_text() if log.exists() else ""):
+            counts[f"conformance.kernel.{m[3]}.pass"], counts[f"conformance.kernel.{m[3]}.total"] = int(m[1]), int(m[2])
+    return counts
+
+
+def conformance(out):
+    metrics = kernel_counts(out)
+    board = run([sys.executable, "tools/scoreboard"]).stdout
+    (out / "scoreboard.tsv").write_text(board)
+    for row in csv.DictReader(board.splitlines(), delimiter="\t"):
+        if row["suite"] in ("difftest", "libtest", "numpytest") and row["runtime"] in ("lucifer", "cpython-3.14.10t"):
+            tag = "lucifer" if row["runtime"] == "lucifer" else "oracle"
+            metrics[f"conformance.{row['suite']}.{tag}.pass"] = int(row["PASS"])
+            metrics[f"conformance.{row['suite']}.total"] = int(row["total"])
+    audit = run(["make", "abi-audit"]).stdout
+    (out / "abi-audit.log").write_text(audit)
+    m = re.search(r"functions:\s+(\d+) implemented, (\d+) stubs, of (\d+)", audit)
+    if m:
+        metrics["capi.implemented"], metrics["capi.stubs"], metrics["capi.total"] = map(int, m.groups())
+    return metrics
+
+
+def numpy(out):
+    from_env = [os.environ.get(v) for v in ("NUMPY_SITE", "NUMPY_CACHE", "NUMPY_WORK")]
+    if not all(from_env):
+        return {}, ["numpy: NUMPY_SITE, NUMPY_CACHE and NUMPY_WORK must be set"]
+    site, cache, work = from_env
+    ids = [r["id"] for r in csv.DictReader((ROOT / "results/numpytest/expected.tsv").open(), delimiter="\t")]
+    shards = sorted({i.split("::")[0] if i.startswith("numpy/_core/") else "/".join(i.split("/")[:2]) for i in ids})
+    for shard in shards:
+        done = run([sys.executable, "tools/numpytest/run.py", "run", "--python", LUCIFER, "--runtime", "lucifer",
+                    "--site", site, "--cache", cache, "--work", work, "--shard", shard], "TEST_PREFIX")
+        (out / "numpytest.log").open("a").write(f"== {shard} exit {done.returncode}\n{done.stdout[-2000:]}\n")
+    counts = {}
+    for row in csv.DictReader((ROOT / "results/numpytest/lucifer.tsv").open(), delimiter="\t"):
+        counts[row["status"]] = counts.get(row["status"], 0) + 1
+    return {f"numpy.{s.lower()}": n for s, n in counts.items()}, []
+
+
+# --- records ----------------------------------------------------------------
+
+def previous_summary(date):
+    earlier = sorted(p for p in (ROOT / "results").glob("status-*/summary.csv") if p.parent.name < f"status-{date}")
+    if not earlier:
+        return {}
+    return {r["metric"]: r["value"] for r in csv.DictReader(earlier[-1].open())}
+
+
+def geomean(values):
+    return math.exp(sum(map(math.log, values)) / len(values)) if values else None
+
+
+def fmt(x, digits=3):
+    return "-" if x is None else f"{x:.{digits}f}"
+
+
+def delta(now, before):
+    return "-" if now is None or before in (None, "") else f"{100 * (now / float(before) - 1):+.1f}%"
+
+
+def write_summary(out, date, metrics, gate_rows, problems, names, ran_numpy):
+    before = previous_summary(date)
+    with (out / "summary.csv").open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["metric", "value", "previous"])
+        for k, v in metrics.items():
+            w.writerow([k, "" if v is None else v, before.get(k, "")])
+    val = metrics.get
+    md = [f"# Lucifer status {date}", "", "## AWFY (best iteration, ms; ratio is JIT on / CPython)", "",
+          "| benchmark | CPython | JIT on | JIT off | on/CPython | on vs yesterday |", "|---|---|---|---|---|---|"]
+    for n in names:
+        c, on, off = (val(f"awfy.{n}.{k}_us") for k in ("cpython", "on", "off"))
+        md.append(f"| {n} | {fmt(c and c / 1000, 1)} | {fmt(on and on / 1000, 1)} | {fmt(off and off / 1000, 1)} "
+                  f"| {fmt(val(f'awfy.{n}.on_over_cpython'))} | {delta(on, before.get(f'awfy.{n}.on_us'))} |")
+    md += ["", f"Geomean JIT on / CPython: {fmt(val('awfy.geomean_on_over_cpython'))} "
+           f"(yesterday {fmt(float(before['awfy.geomean_on_over_cpython']) if before.get('awfy.geomean_on_over_cpython') else None)})",
+           f"Geomean JIT on / JIT off: {fmt(val('awfy.geomean_on_over_off'))}"]
+    slower = [n for n in names if val(f"awfy.{n}.on_us") and val(f"awfy.{n}.off_us") and val(f"awfy.{n}.on_us") > val(f"awfy.{n}.off_us")]
+    md += [f"JIT on slower than off: {', '.join(slower) or 'none'}", "", "## Gates", "", "| target | result | detail |", "|---|---|---|"]
+    md += [f"| {t} | {'pass' if ok else 'FAIL'} | {d} |" for t, (ok, d) in gate_rows.items()]
+    md += ["", "## Conformance", "", "| metric | value | previous |", "|---|---|---|"]
+    md += [f"| {k.removeprefix('conformance.')} | {v} | {before.get(k, '-')} |" for k, v in metrics.items()
+           if k.startswith(("conformance.", "capi.", "numpy."))]
+    if not ran_numpy:
+        md.append("| numpy | not run | |")
+    md += ["", "## Problems", ""] + ([f"- {p}" for p in problems] or ["none"])
+    (out / "summary.md").write_text("\n".join(md) + "\n")
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--out", type=Path)
+    p.add_argument("--iters", type=int, default=3, help="iterations per timed run; the best counts")
+    p.add_argument("--numpy", action="store_true", help="also run the full numpy suite")
+    p.add_argument("--refresh-reference", action="store_true", help="re-time CPython into results/status-reference.json and exit")
+    sub = p.add_subparsers(dest="worker")
+    t = sub.add_parser("time", help=argparse.SUPPRESS)
+    t.add_argument("name")
+    t.add_argument("--iters", type=int, dest="witers")
+    t.add_argument("--run", action="append", dest="runs")
+    args = p.parse_args()
+    oracle = os.environ.get("ORACLE_T", "python3.14t")
+    if args.worker:
+        return time_one(args.name, args.witers, dict(r.split("=", 1) for r in args.runs))
+    names = sorted(awfy_inner())
+    if args.refresh_reference:
+        return refresh_reference(names, args.iters, oracle)
+    date = datetime.datetime.now(datetime.timezone.utc).strftime("%F")
+    out = args.out or ROOT / "results" / f"status-{date}"
+    out.mkdir(parents=True, exist_ok=True)
+    problems = []
+    gate_rows = gates(out)
+    problems += [f"gate {t} failed" for t, (ok, _) in gate_rows.items() if not ok]
+    commands = {"on": f"{LUCIFER} -X lucifer_jit=on", "off": f"{LUCIFER} -X lucifer_jit=off"}
+    times = timings(names, args.iters, commands, out)
+    ref = json.loads(REFERENCE.read_text()) if REFERENCE.exists() else {"version": None, "best_us": {}}
+    if not REFERENCE.exists():
+        problems.append("no CPython reference; run --refresh-reference")
+    elif ref["version"] != oracle_version(oracle):
+        problems.append("CPython reference is for a different version; run --refresh-reference")
+    metrics = {}
+    for n in names:
+        c = ref["best_us"].get(n)
+        on, off = times[n]["on"], times[n]["off"]
+        metrics.update({f"awfy.{n}.cpython_us": c, f"awfy.{n}.on_us": on, f"awfy.{n}.off_us": off,
+                        f"awfy.{n}.on_over_cpython": on / c if on and c else None})
+        problems += [f"AWFY {n}: JIT {k} produced no timing" for k, v in (("on", on), ("off", off)) if v is None]
+    metrics["awfy.geomean_on_over_cpython"] = geomean([metrics[f"awfy.{n}.on_over_cpython"] for n in names if metrics[f"awfy.{n}.on_over_cpython"]])
+    metrics["awfy.geomean_on_over_off"] = geomean([times[n]["on"] / times[n]["off"] for n in names if times[n]["on"] and times[n]["off"]])
+    numpy_metrics = {}
+    if args.numpy:
+        numpy_metrics, numpy_problems = numpy(out)
+        problems += numpy_problems
+    metrics.update(conformance(out))
+    metrics.update(numpy_metrics)
+    metrics.update({f"gate.{t}": int(ok) for t, (ok, _) in gate_rows.items()})
+    write_summary(out, date, metrics, gate_rows, problems, names, args.numpy)
+    print(f"status: {out.relative_to(ROOT) if out.is_relative_to(ROOT) else out}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

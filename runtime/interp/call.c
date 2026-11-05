@@ -487,13 +487,8 @@ lu_frame_call(PyThreadState *ts, PyFunctionObject *func, PyObject **args, Py_ssi
 
 /* CALL_FUNCTION_EX */
 
-/* The operands of f(*callargs, **kwargs) as a vectorcall array of owned
-   references: positional items, then one value per keyword. *kwnames is a
-   new tuple of the keys, or NULL. The array is PyMem memory with a spare
-   word before it, where a call can prepend self; the caller frees it with
-   PyMem_Free(array - 1) after handing the references on. */
-PyObject **
-lu_unpack_call(PyObject *callargs, PyObject *kwargs, Py_ssize_t *nargs, PyObject **kwnames)
+static PyObject **
+unpack_call(PyObject *callargs, PyObject *kwargs, Py_ssize_t *nargs, PyObject **kwnames)
 {
     Py_ssize_t npos = PyTuple_GET_SIZE(callargs);
     Py_ssize_t nkw = kwargs != NULL ? ((PyDictObject *)kwargs)->ma_used : 0;
@@ -517,6 +512,25 @@ lu_unpack_call(PyObject *callargs, PyObject *kwargs, Py_ssize_t *nargs, PyObject
         array[npos + i++] = Py_NewRef(value);
     }
     *nargs = npos;
+    return array;
+}
+
+/* The operands of f(*callargs, **kwargs) as a vectorcall array of owned
+   references: positional items, then one value per keyword. *kwnames is a
+   new tuple of the keys, or NULL. The array is PyMem memory with a spare
+   word before it, where a call can prepend self; the caller frees it with
+   PyMem_Free(array - 1) after handing the references on. kwargs may be the
+   caller's own dict, which other threads may change meanwhile. */
+PyObject **
+lu_unpack_call(PyObject *callargs, PyObject *kwargs, Py_ssize_t *nargs, PyObject **kwnames)
+{
+    if (kwargs == NULL) {
+        return unpack_call(callargs, NULL, nargs, kwnames);
+    }
+    PyObject **array;
+    Py_BEGIN_CRITICAL_SECTION(kwargs);
+    array = unpack_call(callargs, kwargs, nargs, kwnames);
+    Py_END_CRITICAL_SECTION();
     return array;
 }
 
@@ -555,15 +569,18 @@ lu_dict_merge(PyObject *func, PyObject *dict, PyObject *update)
     char buf[256];
     Py_ssize_t pos = 0;
     PyObject *key, *value;
-    while (lu_ns_next(update, &pos, &key, &value)) {
+    int err = 0;
+    Py_BEGIN_CRITICAL_SECTION(update);
+    while (err == 0 && lu_ns_next(update, &pos, &key, &value)) {
         if (lu_ns_lookup(dict, key) != NULL) {
             lu_err_format(PyExc_TypeError, "%s got multiple values for keyword argument '%s'",
                           lu_function_str(func, buf, sizeof buf), utf8(key));
-            return -1;
+            err = -1;
         }
-        if (lu_ns_insert(dict, key, value) < 0) {
-            return -1;
+        else {
+            err = lu_ns_insert(dict, key, value);
         }
     }
-    return 0;
+    Py_END_CRITICAL_SECTION();
+    return err;
 }

@@ -687,12 +687,13 @@ count_fallthrough(struct ctx *c)
 
 /* --- kernel lookups the builder folds --- */
 
+/* A kernel global's value, a new reference, or NULL. */
 static PyObject *
 kernel_global(struct ctx *c, PyObject *name)
 {
-    PyObject *v = lu_ns_lookup(c->globals, name);
+    PyObject *v = lu_ns_get(c->globals, name);
     if (v == NULL) {
-        v = lu_ns_lookup(c->builtins, name);
+        v = lu_ns_get(c->builtins, name);
     }
     return v;
 }
@@ -1229,8 +1230,10 @@ name_at(struct ctx *c, int i)
 }
 
 /* The global `name` as a constant, guarded on the dicts' keys versions
-   and the entry's value: the value the code was compiled with. NULL when
-   the name cannot be found that way. */
+   and the entry's value: the value the code was compiled with, a new
+   reference taken as LOAD_GLOBAL_MODULE takes it, since another thread may
+   replace and free it meanwhile. NULL when the name cannot be found that
+   way. */
 static PyObject *
 global_const(struct ctx *c, PyObject *name)
 {
@@ -1260,7 +1263,10 @@ global_const(struct ctx *c, PyObject *name)
         d = b;
         dk = bk;
     }
-    PyObject *v = lu_dk_value(dk, ix);
+    PyObject *v = ix < dk->dk_nentries ? lu_try_xget_ref(lu_dk_value_slot(dk, ix)) : NULL;
+    if (v != NULL && dk != __atomic_load_n(&d->ma_keys, __ATOMIC_ACQUIRE)) {
+        Py_CLEAR(v);
+    }
     if (v == NULL) {
         return NULL;
     }
@@ -1286,42 +1292,58 @@ load_global(struct ctx *c)
         return -1;
     }
     push(c, konst(c, v), 0);
+    Py_DECREF(v);               /* the unit holds its constants */
     if (c->oparg & 1) {
         push(c, LU_NOV, 0);
     }
     return 0;
 }
 
-static int load_attr_cached(struct ctx *c, PyObject *descr);
+/* The current attribute instruction's specialization, read as the
+   interpreter reads it (specialize.h): its opcode, version, index word and,
+   for LOAD_ATTR, descriptor, all of one specialization; or `generic` when
+   there is none, the tier may not speculate here, or the site changed
+   meanwhile. *descr is a new reference: a cache names only objects no
+   collection has freed (specialize.c), and nothing here polls before the
+   incref. */
+static int
+cached_site(struct ctx *c, int generic, uint32_t *version, uint16_t *index, PyObject **descr)
+{
+    lu_codeunit *site = c->cache - 1;
+    int op = __atomic_load_n(&site->op.code, __ATOMIC_RELAXED);
+    *version = lu_cache_load32(c->cache + LA_VERSION);
+    *index = lu_cache_load(c->cache + LA_INDEX);
+    *descr = generic == LOAD_ATTR ? lu_cache_load_ptr(c->cache + LA_DESCR) : NULL;
+    if (*version == 0 || lu_jit_nospec(c->code, c->pc) || !lu_site_unchanged(site, op)
+        || lu_cache_load32(c->cache + LA_VERSION) != *version) {
+        *descr = NULL;
+        return generic;
+    }
+    Py_XINCREF(*descr);
+    return op;
+}
 
-/* The cache's descriptor is borrowed from the type, and the type may have
-   dropped it since: the translation holds a reference to it, or goes without. */
+static int load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr);
+
 static int
 load_attr(struct ctx *c)
 {
-    PyObject *descr = lu_cache_load_ptr(c->cache + LA_DESCR);
-    if (descr != NULL && !lu_try_incref(descr)) {
-        unsupported(c);
-        return -1;
-    }
-    int r = load_attr_cached(c, descr);
+    uint32_t version;
+    uint16_t index;
+    PyObject *descr;
+    int op = cached_site(c, LOAD_ATTR, &version, &index, &descr);
+    int r = load_attr_cached(c, op, version, index, descr);
     Py_XDECREF(descr);
     return r;
 }
 
 static int
-load_attr_cached(struct ctx *c, PyObject *descr)
+load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr)
 {
     lu_v owner = peek(c, 1);
     int own = peek_owned(c, 1);
     int method = c->oparg & 1;
     PyObject *name = name_at(c, c->oparg >> 1);
-    int op = __atomic_load_n(&lu_code_start(c->code)[c->cache - lu_code_start(c->code) - 1].op.code,
-                             __ATOMIC_RELAXED);
-    uint32_t version = lu_cache_load32(c->cache + LA_VERSION);
-    if (version == 0 || lu_jit_nospec(c->code, c->pc)) {
-        op = LOAD_ATTR;
-    }
     switch (op) {
     case LOAD_ATTR_METHOD_NO_DICT:
     case LOAD_ATTR_METHOD_WITH_VALUES:
@@ -1346,10 +1368,9 @@ load_attr_cached(struct ctx *c, PyObject *descr)
         return 0;
     }
     case LOAD_ATTR_WITH_HINT: {
-        lu_v args[4] = { owner, const_i(c, version), const_i(c, lu_cache_load(c->cache + LA_INDEX)),
-                         konst(c, name) };
+        lu_v args[4] = { owner, const_i(c, version), const_i(c, index), konst(c, name) };
         lu_v v = emit(c, OP_ATTR_LOAD, REP_OBJ, owner, LU_NOV, args[3], version);
-        I(c, v)->imm2 = lu_cache_load(c->cache + LA_INDEX);
+        I(c, v)->imm2 = index;
         I(c, v)->fs = before(c);
         pop(c, NULL);
         release(c, owner, own);
@@ -1361,7 +1382,7 @@ load_attr_cached(struct ctx *c, PyObject *descr)
     }
     case LOAD_ATTR_SLOT: {
         guard(c, OP_GUARD_VERSION, owner, version);
-        lu_v args[2] = { owner, const_i(c, lu_cache_load(c->cache + LA_INDEX)) };
+        lu_v args[2] = { owner, const_i(c, index) };
         lu_v v = helper(c, H_slot_load, 2, args);
         guard_after(c, OP_GUARD_NOT_NULL, v, 0);
         pop(c, NULL);
@@ -1412,19 +1433,17 @@ store_attr(struct ctx *c)
     lu_v owner = peek(c, 1), v = peek(c, 2);
     int ownowner = peek_owned(c, 1), ownv = peek_owned(c, 2);
     PyObject *name = name_at(c, c->oparg);
-    int op = __atomic_load_n(&lu_code_start(c->code)[c->cache - lu_code_start(c->code) - 1].op.code,
-                             __ATOMIC_RELAXED);
-    uint32_t version = lu_cache_load32(c->cache + LA_VERSION);
-    if (version == 0 || lu_jit_nospec(c->code, c->pc)) {
-        op = STORE_ATTR;
-    }
+    uint32_t version;
+    uint16_t index;
+    PyObject *unused;
+    int op = cached_site(c, STORE_ATTR, &version, &index, &unused);
     if (op == STORE_ATTR_WITH_HINT) {
         lu_v args[4] = { owner, v, konst(c, name), const_i(c, version) };
         guard_after(c, OP_GUARD_BIT, helper(c, H_attr_store, 4, args), 1);
     }
     else if (op == STORE_ATTR_SLOT) {
         guard(c, OP_GUARD_VERSION, owner, version);
-        lu_v args[3] = { owner, const_i(c, lu_cache_load(c->cache + LA_INDEX)), v };
+        lu_v args[3] = { owner, const_i(c, index), v };
         helper(c, H_slot_store, 3, args);
     }
     else if (root_only(c)) {

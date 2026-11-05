@@ -1154,7 +1154,9 @@ int lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value);
 int lu_ns_store(PyObject *dict, PyObject *key, PyObject *value);
 /* Removes `key`: 1 when it was there, 0 when not. */
 int lu_ns_delete(PyObject *dict, PyObject *key);
-/* PyDict_Next over the namespace: *pos starts at 0; key and value are borrowed. */
+/* PyDict_Next over the namespace: *pos starts at 0; key and value are
+   borrowed. A dict other threads may write is iterated in its critical
+   section, as cp314t's dict_merge and PyDict_Copy do. */
 int lu_ns_next(PyObject *dict, Py_ssize_t *pos, PyObject **key, PyObject **value);
 
 /* Types (runtime/prim/type.c). Static builtin types are made ready natively
@@ -1183,6 +1185,10 @@ void lu_type_modified(PyTypeObject *tp);
 int lu_type_assign_version(PyTypeObject *tp);
 /* "__name__" of a type, new: ht_name, or tp_name after its last dot. */
 PyObject *lu_type_name(PyTypeObject *tp);
+/* Stores v (or NULL) into the object member at addr under the object's lock,
+   as PyMember_SetOne and STORE_ATTR_SLOT do; returns the old value. */
+PyObject *lu_member_exchange(PyObject *obj, PyObject **addr, PyObject *v);
+
 /* Adds descriptors for tp_members and tp_getset to the type's dict. */
 int lu_type_add_descriptors(PyTypeObject *tp);
 /* Adds wrapper descriptors (__add__, __len__, ...) for the C slots tp has
