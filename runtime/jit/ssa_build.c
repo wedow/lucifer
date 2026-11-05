@@ -1234,7 +1234,7 @@ name_at(struct ctx *c, int i)
 static PyObject *
 global_const(struct ctx *c, PyObject *name)
 {
-    if (c->kernel) {
+    if (c->kernel && lu_ns_lookup(PyThreadState_Get()->interp->kernel_rebound, name) == NULL) {
         return kernel_global(c, name);
     }
     if (!PyDict_CheckExact(c->globals) || !PyDict_CheckExact(c->builtins)) {
@@ -1780,7 +1780,15 @@ translate(struct ctx *c)
     int own;
     lu_v v, w;
     switch (c->base) {
-    case NOP: case NOT_TAKEN: case RESUME:
+    case NOP: case NOT_TAKEN:
+        return 0;
+    case RESUME:
+        if (c->parent != NULL && !c->kernel) {
+            /* An inlined call polls where the interpreter's would: a tool
+               turned on since the compile (sys.settrace) sees the call. */
+            lu_v p = emit(c, OP_POLL, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+            I(c, p)->fs = before(c);
+        }
         return 0;
     case LOAD_FAST: case LOAD_FAST_BORROW:
         push(c, c->st.v[oparg], 0);
