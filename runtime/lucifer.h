@@ -848,6 +848,7 @@ extern LU_EXPORT union lu_runtime {
             int unhandled_keyboard_interrupt;   /* a KeyboardInterrupt ended the program: exit by SIGINT */
             struct {
                 int tripped;
+                int redirected;         /* signals sent on to the main task's thread, not yet arrived */
                 PyObject *func;         /* the Python handler, strong; NULL for none */
             } handlers[LU_NSIG];
         } signals;

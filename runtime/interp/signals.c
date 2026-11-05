@@ -39,8 +39,6 @@ signal_received(void)
     }
 }
 
-static int redirected[LU_NSIG];     /* signals sent on to the task's thread and not yet arrived */
-
 /* Under -X lucifer_handoff the main task runs on a carrier that need not be the thread the kernel
    picked (it prefers the main thread) to receive a signal sent to the process. A blocking call in the
    task's thread is interrupted only if the thread itself receives the signal, so the signal goes there
@@ -54,7 +52,7 @@ redirect_to_main_task(int signum)
     struct lu_task *main = __atomic_load_n(&_PyRuntime.main_task, __ATOMIC_ACQUIRE);
     struct lu_carrier *c = main != NULL ? __atomic_load_n(&main->carrier, __ATOMIC_ACQUIRE) : NULL;
     if (c != NULL && !pthread_equal(c->thread, pthread_self())) {
-        __atomic_add_fetch(&redirected[signum], 1, __ATOMIC_SEQ_CST);
+        __atomic_add_fetch(&_PyRuntime.signals.handlers[signum].redirected, 1, __ATOMIC_SEQ_CST);
         pthread_kill(c->thread, signum);
     }
 }
@@ -74,8 +72,8 @@ static void
 trip_signal(int signum)
 {
     int save_errno = errno;
-    if (__atomic_load_n(&redirected[signum], __ATOMIC_SEQ_CST) > 0) {
-        __atomic_sub_fetch(&redirected[signum], 1, __ATOMIC_SEQ_CST);
+    if (__atomic_load_n(&_PyRuntime.signals.handlers[signum].redirected, __ATOMIC_SEQ_CST) > 0) {
+        __atomic_sub_fetch(&_PyRuntime.signals.handlers[signum].redirected, 1, __ATOMIC_SEQ_CST);
     }
     else {
         trip(signum);
