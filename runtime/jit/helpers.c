@@ -200,6 +200,20 @@ h_slot_store(PyObject *owner, int64_t offset, PyObject *v)
     Py_XDECREF(lu_member_exchange(owner, (PyObject **)((char *)owner + offset), v));
 }
 
+/* LOAD_ATTR_INSTANCE_VALUE and STORE_ATTR_INSTANCE_VALUE, as the
+   interpreter runs them: NULL or 0 when the interpreter must. */
+static PyObject *
+h_inline_load(PyObject *owner, int64_t offset)
+{
+    return lu_inline_live(owner) ? lu_try_xget_ref((PyObject **)((char *)owner + offset)) : NULL;
+}
+
+static int
+h_inline_store(PyObject *owner, int64_t index, PyObject *v)
+{
+    return lu_inline_store(owner, index, v);
+}
+
 /* LOAD_ATTR_METHOD_WITH_VALUES: the instance's dict does not shadow name. */
 static int
 h_dict_lacks(PyObject *owner, PyObject *name)
@@ -483,6 +497,8 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_attr_store] = { (void *)h_attr_store, "attr_store", REP_BIT, 0, 4 },
     [H_slot_load] = { (void *)h_slot_load, "slot_load", REP_OBJ, 0, 2 },
     [H_slot_store] = { (void *)h_slot_store, "slot_store", REP_NONE, 0, 3 },
+    [H_inline_load] = { (void *)h_inline_load, "inline_load", REP_OBJ, 0, 2 },
+    [H_inline_store] = { (void *)h_inline_store, "inline_store", REP_BIT, 0, 3 },
     [H_dict_lacks] = { (void *)h_dict_lacks, "dict_lacks", REP_BIT, 0, 2 },
     [H_cell_load] = { (void *)h_cell_load, "cell_load", REP_OBJ, 0, 1 },
     [H_compare_ideq] = { (void *)h_compare_ideq, "compare_ideq", REP_BIT, 0, 3 },

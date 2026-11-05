@@ -5,8 +5,9 @@
 
    A heap type's instances carry the two-word preheader of
    Py_TPFLAGS_MANAGED_DICT | Py_TPFLAGS_MANAGED_WEAKREF: the dict pointer
-   at -1 word and the weakref list at -2. Attribute values stay in that dict;
-   inline values behind shared keys are not built yet.
+   at -1 word and the weakref list at -2. A plain class's instances keep
+   their attributes inline after tp_basicsize until they need the dict
+   (runtime/object/attrs.c).
 
    Version tags follow 3.14: 0 means none. A static builtin type gets its tag
    at startup from the runtime-wide range below _Py_TYPE_BASE_VERSION_TAG; any
@@ -428,54 +429,25 @@ lu_type_name(PyTypeObject *tp)
     return PyUnicode_FromString(dot != NULL ? dot + 1 : tp->tp_name);
 }
 
-/* Instance dicts. */
+/* Instance dicts (runtime/object/attrs.c). */
 
-/* A static builtin type's dict is reached through lu_type_dict: its own
-   tp_dict field stays NULL (FOUNDATIONS 2.1). */
-static PyObject **
-dict_ptr(PyObject *obj)
-{
-    PyTypeObject *tp = Py_TYPE(obj);
-    if (PyType_Check(obj) && is_static_builtin((PyTypeObject *)obj)) {
-        return NULL;
-    }
-    if (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
-        return (PyObject **)((char *)obj + LU_MANAGED_DICT_OFFSET);
-    }
-    return tp->tp_dictoffset > 0 ? (PyObject **)((char *)obj + tp->tp_dictoffset) : NULL;
-}
-
+/* A C caller may read or write the pointer itself, so the inline values
+   move into the dict first. */
 PyObject **
 _PyObject_GetDictPtr(PyObject *obj)
 {
-    return dict_ptr(obj);
-}
-
-/* The instance dict, created on demand when `create`; NULL when the object
-   has none (borrowed). */
-static PyObject *
-instance_dict(PyObject *obj, int create)
-{
-    PyObject **p = dict_ptr(obj);
-    if (p == NULL) {
+    PyObject **p = lu_dict_ptr(obj);
+    if (p != NULL && lu_instance_dict(obj, 0) == NULL && PyErr_Occurred()) {
+        PyErr_Clear();
         return NULL;
     }
-    PyObject *d = __atomic_load_n(p, __ATOMIC_ACQUIRE);
-    if (d == NULL && create && (d = PyDict_New()) != NULL) {
-        /* Threads that make it at once keep the first one. */
-        PyObject *first = NULL;
-        if (!__atomic_compare_exchange_n(p, &first, d, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-            Py_DECREF(d);
-            d = first;
-        }
-    }
-    return d;
+    return p;
 }
 
 PyObject *
 PyObject_GenericGetDict(PyObject *obj, void *closure)
 {
-    PyObject *d = instance_dict(obj, 1);
+    PyObject *d = lu_instance_dict(obj, 1);
     if (d == NULL && !PyErr_Occurred()) {
         lu_err_format(PyExc_TypeError, "This object has no __dict__");
     }
@@ -486,18 +458,12 @@ PyObject_GenericGetDict(PyObject *obj, void *closure)
 static int
 set_dict(PyObject *obj, PyObject *value)
 {
-    PyObject **p = dict_ptr(obj);
-    if (p == NULL) {
-        lu_err_format(PyExc_AttributeError, "This object has no __dict__");
-        return -1;
-    }
     if (value != NULL && !PyDict_Check(value)) {
         lu_err_format(PyExc_TypeError, "__dict__ must be set to a dictionary, not a '%.200s'",
                       Py_TYPE(value)->tp_name);
         return -1;
     }
-    Py_XSETREF(*p, Py_XNewRef(value));
-    return 0;
+    return lu_instance_set_dict(obj, value);
 }
 
 int
@@ -537,7 +503,8 @@ static PyGetSetDef subtype_getsets_full[] = {
 PyObject *
 PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
 {
-    size_t size = (size_t)tp->tp_basicsize + (size_t)(nitems + 1) * (size_t)tp->tp_itemsize;
+    size_t size = (size_t)tp->tp_basicsize + (size_t)(nitems + 1) * (size_t)tp->tp_itemsize
+        + lu_inline_values_size(tp);
     size_t presize = preheader_size(tp);
     int gc = (tp->tp_flags & Py_TPFLAGS_HAVE_GC) != 0;
     char *mem = gc ? lu_gc_alloc(tp, size, presize) : NULL;
@@ -576,6 +543,7 @@ subtype_dealloc(PyObject *self)
             Py_CLEAR(*(PyObject **)((char *)self + mp->offset));
         }
     }
+    lu_inline_clear(self);
     if (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
         Py_CLEAR(*(PyObject **)((char *)self + LU_MANAGED_DICT_OFFSET));
     }
@@ -606,6 +574,10 @@ subtype_traverse(PyObject *self, visitproc visit, void *arg)
     if (type->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
         Py_VISIT(LU_MANAGED_DICT(self));
     }
+    int err = lu_inline_traverse(self, visit, arg);
+    if (err) {
+        return err;
+    }
     /* An instance counts as a reference to its heap type, unless the base's
        traverse visits the type. */
     if ((type->tp_flags & Py_TPFLAGS_HEAPTYPE)
@@ -627,7 +599,8 @@ subtype_clear(PyObject *self)
         }
         base = base->tp_base;
     }
-    /* The instance dict goes too: it breaks cycles through __dict__ alone. */
+    /* The attributes go too: they break cycles through __dict__ alone. */
+    lu_inline_clear(self);
     if (type->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
         Py_CLEAR(LU_MANAGED_DICT(self));
     }
@@ -686,6 +659,7 @@ type_dealloc(PyObject *self)
     Py_CLEAR(et->ht_qualname);
     Py_CLEAR(et->ht_slots);
     Py_CLEAR(et->ht_module);
+    lu_inline_values_fini(tp);
     PyMem_Free((void *)tp->tp_doc);
     PyMem_Free(et->_ht_tpname);
     lu_object_free(self);       /* a heap metatype's subtype_dealloc releases it */
@@ -1544,6 +1518,9 @@ type_new_layout(PyTypeObject *meta, PyObject *name, PyObject *bases, PyObject *n
         }
     }
     inherit_slots(tp, base);
+    if (lu_inline_values_init(tp) < 0) {
+        goto fail_type;
+    }
     for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(tp->tp_bases); i++) {
         if (add_subclass((PyTypeObject *)PyTuple_GET_ITEM(tp->tp_bases, i), tp) < 0) {
             goto fail_type;
@@ -1607,7 +1584,8 @@ compatible_for_assignment(PyTypeObject *oldto, PyTypeObject *newto, const char *
     }
     if ((newbase == oldbase
          || (newbase->tp_base == oldbase->tp_base && same_slots_added(newbase, oldbase)))
-        && (oldto->tp_flags & Py_TPFLAGS_PREHEADER) == (newto->tp_flags & Py_TPFLAGS_PREHEADER)) {
+        && (oldto->tp_flags & Py_TPFLAGS_PREHEADER) == (newto->tp_flags & Py_TPFLAGS_PREHEADER)
+        && (oldto->tp_flags & Py_TPFLAGS_INLINE_VALUES) == (newto->tp_flags & Py_TPFLAGS_INLINE_VALUES)) {
         return 1;
     }
     lu_err_format(PyExc_TypeError, "%s assignment: '%s' object layout differs from '%s'",
@@ -2119,11 +2097,39 @@ static PyObject *
 prim_instance_dict(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2);
-    PyObject *d = instance_dict(args[0], args[1] == Py_True);
+    PyObject *d = lu_instance_dict(args[0], args[1] == Py_True);
     if (d == NULL && PyErr_Occurred()) {
         return NULL;
     }
     return Py_NewRef(d != NULL ? d : Py_None);
+}
+
+/* instance_load(obj, name): the instance's own attribute, or MISSING. */
+static PyObject *
+prim_instance_load(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2); STR_ARG(1);
+    PyObject *v;
+    if (lu_attr_lookup(args[0], args[1], &v) >= 0) {
+        return v != NULL ? v : Py_NewRef(LU_MISSING);
+    }
+    PyObject *d = lu_instance_dict(args[0], 0);
+    v = d != NULL ? lu_ns_get(d, args[1]) : NULL;
+    return v != NULL ? v : PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
+}
+
+/* instance_store(obj, name, value): stores the instance's own attribute,
+   or deletes it when value is MISSING. None when the object has no
+   instance dict, else whether the name was there to delete. */
+static PyObject *
+prim_instance_store(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(3); STR_ARG(1);
+    if (lu_dict_ptr(args[0]) == NULL) {
+        return Py_NewRef(Py_None);
+    }
+    int r = lu_attr_store(args[0], args[1], args[2] != LU_MISSING ? args[2] : NULL);
+    return r < 0 ? NULL : bool_of(r);
 }
 
 /* set_class(obj, cls): __class__ assignment after the kernel's checks. */
@@ -2140,6 +2146,10 @@ prim_set_class(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return NULL;
     }
     if (!compatible_for_assignment(oldto, newto, "__class__")) {
+        return NULL;
+    }
+    /* The new class names the inline values differently: they move to the dict. */
+    if (lu_inline_live(self) && lu_instance_dict(self, 0) == NULL && PyErr_Occurred()) {
         return NULL;
     }
     if (newto->tp_flags & Py_TPFLAGS_HEAPTYPE) {
@@ -2408,7 +2418,7 @@ PyMethodDef lu_prim_type_methods[] = {
     FAST(type_can_new), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
     FAST(type_subclasses), FAST(type_modified), PURE(is_subtype), FAST(alloc), FAST(new_check),
     PURE(type_tp_name), FAST(type_text_signature), FAST(type_static_module), PURE(size),
-    PURE(truth_exact), PURE(instance_dict), FAST(set_class), FAST(caller_globals), FAST(super_args),
+    PURE(truth_exact), PURE(instance_dict), FAST(instance_load), FAST(instance_store), FAST(set_class), FAST(caller_globals), FAST(super_args),
     FAST(error), FAST(ns_get), FAST(ns_set), FAST(ns_del), FAST(ns_items),
     PURE(kind),
     FAST(cell_get), FAST(cell_set), FAST(address), FAST(object_hash),

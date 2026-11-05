@@ -120,6 +120,8 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(attr_store) \
     X(slot_load) \
     X(slot_store) \
+    X(inline_load) \
+    X(inline_store) \
     X(dict_lacks) \
     X(cell_load) \
     X(compare_ideq) \

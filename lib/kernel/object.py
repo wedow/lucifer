@@ -8,7 +8,7 @@ dict, then non-data descriptors and plain class attributes.
 
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_dict, type_bases, type_tp_name, type_qualname,
-    instance_dict, ns_get, ns_set, ns_del, alloc, set_class, kernel_set, address,
+    instance_dict, instance_load, instance_store, ns_get, alloc, set_class, kernel_set, address,
     object_hash, type_flag, object_size,
 )
 from _lucifer import _boot
@@ -59,11 +59,9 @@ def generic_getattr(obj, name, suppress=False):
         get = type_lookup(type(descr), '__get__')
         if get is not MISSING and is_data(descr):
             return get(descr, obj, tp)
-    d = instance_dict(obj, False)
-    if d is not None:
-        v = ns_get(d, name, MISSING)
-        if v is not MISSING:
-            return v
+    v = instance_load(obj, name)
+    if v is not MISSING:
+        return v
     if get is not MISSING:
         return get(descr, obj, tp)
     if descr is not MISSING:
@@ -94,8 +92,8 @@ def generic_setattr(obj, name, value):
                 return None
             if deleter is not MISSING:
                 error(AttributeError, '__set__')
-    d = instance_dict(obj, True)
-    if d is None:
+    found = instance_store(obj, name, value)
+    if found is None:
         if descr is not MISSING:
             error(AttributeError, str_join('', (
                 "'", type_tp_name(tp), "' object attribute '", name, "' is read-only")))
@@ -104,11 +102,8 @@ def generic_setattr(obj, name, value):
                 "'", type_tp_name(tp), "' object has no attribute '", name,
                 "' and no __dict__ for setting new attributes")))
         _no_attribute(obj, name)
-    if value is MISSING:
-        if not ns_del(d, name):
-            _no_attribute(obj, name)
-    else:
-        ns_set(d, name, value)
+    if not found:
+        _no_attribute(obj, name)
     return None
 
 

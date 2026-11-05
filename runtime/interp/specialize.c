@@ -12,7 +12,9 @@
      keys version, which every added or removed key clears; its value is read
      at execution.
    - An instance attribute is found by entry number in the instance's dict,
-     and the key at that entry is compared on every execution.
+     and the key at that entry is compared on every execution; or, while
+     the instance keeps its inline values, at the fixed offset of its
+     name's index in the class's shared names (runtime/object/attrs.c).
    - Nothing is cached while the kernel boots: it fills static types' dicts
      without telling anyone.
    - A cached descriptor is a pointer the cache does not own, so it is only
@@ -43,6 +45,7 @@ const uint8_t lu_opcode_caches[256] = {
     [LOAD_ATTR_WITH_HINT] = 9, [LOAD_ATTR_METHOD_NO_DICT] = 9, [LOAD_ATTR_METHOD_WITH_VALUES] = 9,
     [LOAD_ATTR_NONDESCRIPTOR_NO_DICT] = 9, [LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES] = 9,
     [LOAD_ATTR_SLOT] = 9, [STORE_ATTR_SLOT] = 4, [STORE_ATTR_WITH_HINT] = 4,
+    [LOAD_ATTR_INSTANCE_VALUE] = 9, [STORE_ATTR_INSTANCE_VALUE] = 4,
     [INSTRUMENTED_LOAD_SUPER_ATTR] = 1, [INSTRUMENTED_JUMP_BACKWARD] = 1,
     [INSTRUMENTED_POP_JUMP_IF_TRUE] = 1, [INSTRUMENTED_POP_JUMP_IF_FALSE] = 1,
     [INSTRUMENTED_POP_JUMP_IF_NONE] = 1, [INSTRUMENTED_POP_JUMP_IF_NOT_NONE] = 1,
@@ -288,12 +291,26 @@ specialize_instance(PyObject *owner, lu_codeunit *site, PyObject *name, int meth
     }
     enum descr_kind kind = analyze(tp, name, &descr, &version);
     int managed = (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) != 0;
+    /* After the version: a name that shadows the class's joins the shared
+       names before the version changes. */
+    Py_ssize_t inline_index = (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) ? lu_inline_index(tp, name) : -1;
     if (version == 0 || (!managed && tp->tp_dictoffset != 0)) {
         fail(site);
     }
     else if (is_slot_member(descr)) {
         set_attr_cache(site, LOAD_ATTR_SLOT, version,
                        (uint32_t)((PyMemberDescrObject *)descr)->d_member->offset, NULL);
+    }
+    else if (inline_index >= 0 && kind != DESCR_OTHER) {
+        /* An inline value, which shadows a non-data attribute of the class:
+           no instance of it has a dict that lacks the name for sure. */
+        size_t offset = (size_t)tp->tp_basicsize + (size_t)inline_index * sizeof(PyObject *);
+        if (offset > UINT16_MAX || !lu_inline_live(owner)) {
+            fail(site);
+        }
+        else {
+            set_attr_cache(site, LOAD_ATTR_INSTANCE_VALUE, version, (uint32_t)offset, NULL);
+        }
     }
     else if (kind == DESCR_ABSENT) {
         /* In the instance's dict, at an entry whose key is this very str. */
@@ -355,7 +372,8 @@ lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
     }
     PyObject *descr;
     uint32_t version;
-    analyze(tp, name, &descr, &version);
+    enum descr_kind kind = analyze(tp, name, &descr, &version);
+    Py_ssize_t index;
     lu_codeunit *c = site + 1;
     if (version == 0) {
         fail(site);
@@ -365,6 +383,14 @@ lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
             lu_cache_store(c + LA_INDEX, (uint16_t)((PyMemberDescrObject *)descr)->d_member->offset);
             lu_cache_store32(c + LA_VERSION, version);
             end(site, STORE_ATTR_SLOT);
+        }
+    }
+    else if (kind != DESCR_OTHER && lu_inline_live(owner) && (index = lu_inline_index(tp, name)) >= 0
+             && index <= UINT16_MAX) {
+        if (begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
+            lu_cache_store(c + LA_INDEX, (uint16_t)index);
+            lu_cache_store32(c + LA_VERSION, version);
+            end(site, STORE_ATTR_INSTANCE_VALUE);
         }
     }
     else if (descr == NULL && (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT)) {

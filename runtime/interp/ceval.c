@@ -556,10 +556,10 @@ lu_getattr_native(PyObject *owner, PyObject *name)
         return v;
     }
     if (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
-        PyObject *dict = LU_MANAGED_DICT(owner);
-        if (dict != NULL && PyDict_CheckExact(dict) && (v = lu_ns_get(dict, name)) != NULL) {
+        int found = lu_attr_lookup(owner, name, &v);
+        if (found != 0) {
             Py_XDECREF(descr);
-            return v;
+            return v;           /* NULL when only the kernel can answer */
         }
     }
     else if (tp->tp_dictoffset != 0) {
@@ -941,6 +941,8 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
         [STORE_ATTR] = &&op_STORE_ATTR,
         [STORE_ATTR_SLOT] = &&op_STORE_ATTR_FAST,
         [STORE_ATTR_WITH_HINT] = &&op_STORE_ATTR_FAST,
+        [STORE_ATTR_INSTANCE_VALUE] = &&op_STORE_ATTR_FAST,
+        [LOAD_ATTR_INSTANCE_VALUE] = &&op_LOAD_ATTR_SLOT,
         [DELETE_ATTR] = &&op_DELETE_ATTR,
         [LOAD_SUPER_ATTR] = &&op_LOAD_SUPER_ATTR,
         [LOAD_BUILD_CLASS] = &&op_LOAD_BUILD_CLASS,
@@ -2706,12 +2708,14 @@ op_LOAD_ATTR_WITH_HINT: {
     DISPATCH();
 }
 
-/* A __slots__ member of the owner's type, read at its cached offset. */
+/* A __slots__ member of the owner's type, or an inline value while the
+   owner keeps them, read at its cached offset. */
 op_LOAD_ATTR_SLOT: {
     PyObject *owner = TOP();
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
     PyObject *v = NULL;
-    if (version != 0 && Py_TYPE(owner)->tp_version_tag == version) {
+    if (version != 0 && Py_TYPE(owner)->tp_version_tag == version
+        && (opcode == LOAD_ATTR_SLOT || lu_inline_live(owner))) {
         /* Another thread may store and free the value: taken only if alive. */
         v = lu_try_xget_ref((PyObject **)((char *)owner + lu_cache_load(next_instr + LA_INDEX)));
     }
@@ -2856,8 +2860,9 @@ op_LOAD_ATTR: {
     DISPATCH();
 }
 
-/* v, owner -- : a __slots__ member written at its cached offset, or a name
-   the type lacks inserted into the instance's dict. */
+/* v, owner -- : a __slots__ member written at its cached offset, an
+   inline value at its cached index, or a name the type lacks inserted into
+   the instance's dict. */
 op_STORE_ATTR_FAST: {
     PyObject *owner = sp[-1];
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
@@ -2881,6 +2886,13 @@ op_STORE_ATTR_FAST: {
     int err = 0;
     if (opcode == STORE_ATTR_SLOT) {
         Py_XDECREF(lu_member_exchange(owner, (PyObject **)((char *)owner + offset), v));
+        Py_DECREF(v);
+    }
+    else if (opcode == STORE_ATTR_INSTANCE_VALUE) {
+        if (!lu_inline_store(owner, offset, v)) {
+            SAVE_FRAME();
+            err = lu_attr_store(owner, NAME(oparg), v) < 0 ? -1 : 0;
+        }
         Py_DECREF(v);
     }
     else {
