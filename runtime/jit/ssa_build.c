@@ -47,6 +47,7 @@ struct bblk {
     int id;                     /* the IR block */
     int pc;
     int npreds;                 /* static predecessors among reachable code */
+    int succ[2], nsucc;         /* the blocks it can jump or fall to */
     int phis;                   /* the entry state is phis */
     int has;                    /* the entry state is set */
     int done;
@@ -670,6 +671,7 @@ count_fallthrough(struct ctx *c)
 {
     for (int k = 0; k < c->nbb; k++) {
         c->bb[k].npreds = 0;
+        c->bb[k].nsucc = 0;
     }
     for (int k = 0; k < c->nbb; k++) {
         int pc = c->bb[k].pc;
@@ -680,6 +682,9 @@ count_fallthrough(struct ctx *c)
                 int t = jump_target(base, oparg, next);
                 if (t >= 0 && t < c->ncode && c->blkat[t] >= 0) {
                     c->bb[c->blkat[t]].npreds++;
+                    if (c->bb[k].nsucc < 2) {
+                        c->bb[k].succ[c->bb[k].nsucc++] = c->blkat[t];
+                    }
                 }
             }
             if (base == RETURN_VALUE || !supported(base) || is_jump(base)) {
@@ -690,6 +695,9 @@ count_fallthrough(struct ctx *c)
             }
             if (c->blkat[next] >= 0) {
                 c->bb[c->blkat[next]].npreds++;
+                if (c->bb[k].nsucc < 2) {
+                    c->bb[k].succ[c->bb[k].nsucc++] = c->blkat[next];
+                }
                 break;
             }
             pc = next;
@@ -2188,6 +2196,41 @@ translate(struct ctx *c)
     }
 }
 
+/* Whether block k sends no more edges: it is built, or nothing reached
+   it and nothing that could still reach it is left. memo: 0 unknown, 1
+   settled, 2 not (or being decided, which a cycle leaves unsettled). */
+static int
+settled(struct ctx *c, int k, char *memo)
+{
+    if (memo[k] == 0) {
+        memo[k] = 2;
+        int ok = c->bb[k].done || !c->bb[k].has;
+        for (int j = 0; ok && !c->bb[k].done && j < c->nbb; j++) {
+            for (int i = 0; ok && i < c->bb[j].nsucc; i++) {
+                ok = c->bb[j].succ[i] != k || settled(c, j, memo);
+            }
+        }
+        memo[k] = ok ? 1 : 2;
+    }
+    return memo[k] == 1;
+}
+
+/* Whether block bi, about to be built, has every edge it will get. */
+static int
+preds_built(struct ctx *c, int bi)
+{
+    char *memo = calloc((size_t)c->nbb, 1);
+    memo[bi] = 2;               /* its own edges are still to come */
+    int ok = 1;
+    for (int k = 0; ok && k < c->nbb; k++) {
+        for (int i = 0; ok && i < c->bb[k].nsucc; i++) {
+            ok = c->bb[k].succ[i] != bi || settled(c, k, memo);
+        }
+    }
+    free(memo);
+    return ok;
+}
+
 static int
 build_block(struct ctx *c, int bi)
 {
@@ -2196,6 +2239,20 @@ build_block(struct ctx *c, int bi)
     b->done = 1;
     c->cur = b->id;
     state_copy(c, &c->st, &b->in);
+    if (b->phis && preds_built(c, bi)) {
+        /* A join with every edge it will get: if they agree, it has that
+           value, and a constant stays one for what folds on it. */
+        for (int k = 0; k < c->nlocals + c->st.sp; k++) {
+            struct lu_ins *phi = I(c, c->st.v[k]);
+            int same = phi->op == OP_PHI && phi->nargs > 0;
+            for (int i = 1; same && i < phi->nargs; i++) {
+                same = phi->args[i] == phi->args[0];
+            }
+            if (same) {
+                c->st.v[k] = phi->args[0];
+            }
+        }
+    }
     int pc = b->pc;
     while (c->cur >= 0 && !c->failed) {
         if (pc >= c->ncode) {
