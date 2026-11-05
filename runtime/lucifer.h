@@ -528,10 +528,9 @@ struct lu_entry {
     int nbound;                 /* tasks bound here; the owner record is registered while > 0 */
     struct lu_mimalloc_state mimalloc;
     struct lu_brc_owner brc;
-    /* Freed floats kept for reuse (CPython's per-thread freelist), linked
-       through ob_fval; runtime/object/layouts.c. */
-    PyObject *free_floats;
-    int nfree_floats;
+    /* Freed floats and one-digit ints kept for reuse (CPython's per-thread
+       freelists); runtime/object/layouts.c. */
+    struct lu_freelist { PyObject *head; int n; } free_floats, free_ints;
 };
 
 /* The carrier record is per pthread, reached through the one thread-local
@@ -749,7 +748,7 @@ lu_current_task(void)
 /* Called when a carrier binds and retires. */
 void lu_mimalloc_bind(struct lu_entry *entry);
 void lu_mimalloc_abandon(struct lu_entry *entry);
-void lu_free_floats_clear(struct lu_entry *entry);     /* runtime/object/layouts.c */
+void lu_freelists_clear(struct lu_entry *entry);       /* runtime/object/layouts.c */
 void lu_brc_register(struct lu_entry *entry);
 void lu_brc_retire(struct lu_entry *entry);
 /* A scheduler carrier stops or starts running a task (runtime/thread/task.c). */
