@@ -32,8 +32,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Inlining policy: code units an inlined callee compiles (the branch
-   directions it never took are not compiled), and inlined frames deep. */
+/* Inlining policy: code units an inlined callee compiles (one larger than
+   that compiles only the branch directions it took), and inlined frames
+   deep. */
 #define INLINE_MAX_UNITS 400
 #define INLINE_MAX_DEPTH 4
 #define INLINE_MAX_TOTAL 3000
@@ -2217,9 +2218,11 @@ translate(struct ctx *c)
             }
         }
         int target = jump_target(c->base, oparg, c->next);
-        int seen = lu_jit_nospec(c->code, c->pc) ? 0 : __atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED);
+        int seen = c->parent == NULL || Py_SIZE(c->code) <= INLINE_MAX_UNITS || lu_jit_nospec(c->code, c->pc) ? 0
+            : __atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED);
         if (I(c, w)->op != OP_CONST_I && (seen == LU_BRANCH_FELL || seen == LU_BRANCH_JUMPED)) {
-            /* A direction the interpreter never took leaves instead. */
+            /* In a callee too large to inline whole, a direction the
+               interpreter never took leaves instead. */
             guard(c, OP_GUARD_BIT, w, seen == LU_BRANCH_JUMPED);
             w = const_i(c, seen == LU_BRANCH_JUMPED);
         }
