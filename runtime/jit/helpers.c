@@ -101,6 +101,14 @@ h_list_append(PyObject *list, PyObject *v)
     return err;
 }
 
+/* LIST_APPEND: a comprehension's or display's own list, which no other
+   thread sees yet, appended to as the interpreter appends. */
+static int
+h_list_push(PyObject *list, PyObject *v)
+{
+    return lu_list_append(list, v);
+}
+
 static PyObject *
 h_build_list(PyObject **argv, intptr_t n)
 {
@@ -174,9 +182,12 @@ h_set_add(PyObject *set, PyObject *v)
 static PyObject *
 h_list_to_tuple(PyObject *list, int64_t n)
 {
+    if (n < 0) {
+        return lu_args_as_tuple(Py_None, list);     /* a display's own list: no other thread sees it */
+    }
     PyObject *t;
     Py_BEGIN_CRITICAL_SECTION(list);
-    t = n < 0 || Py_SIZE(list) == n ? lu_args_as_tuple(Py_None, list) : LU_JIT_DECLINED;
+    t = Py_SIZE(list) == n ? lu_args_as_tuple(Py_None, list) : LU_JIT_DECLINED;
     Py_END_CRITICAL_SECTION();
     return t;
 }
@@ -817,6 +828,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, IF_RAISE, 0 },
     [H_new_dict] = { (void *)h_new_dict, "new_dict", REP_OBJ, IF_RAISE, 0 },
     [H_contains] = { (void *)h_contains, "contains", REP_OBJ, IF_RAISE | IF_PY, 3 },
+    [H_list_push] = { (void *)h_list_push, "list_push", REP_BIT, IF_RAISE, 2 },
     [H_build_set] = { (void *)h_build_set, "build_set", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_build_map] = { (void *)h_build_map, "build_map", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_set_add] = { (void *)h_set_add, "set_add", REP_BIT, IF_RAISE | IF_PY, 2 },

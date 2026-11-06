@@ -2600,7 +2600,7 @@ translate(struct ctx *c)
             return -1;
         }
         lu_v args[2] = { peek(c, oparg + 1), v };
-        helper_raising(c, c->base == LIST_APPEND ? H_list_append : H_set_add, 2, args, 1);
+        helper_raising(c, c->base == LIST_APPEND ? H_list_push : H_set_add, 2, args, 1);
         pop(c, NULL);
         release(c, v, own);
         return 0;

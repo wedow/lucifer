@@ -175,6 +175,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(build_tuple) \
     X(new_dict) \
     X(contains) \
+    X(list_push) \
     X(build_set) \
     X(build_map) \
     X(set_add) \
