@@ -1480,8 +1480,11 @@ op_CALL_KW:
 op_INSTRUMENTED_CALL:
     monitored = next_instr - 1;
 op_CALL:
-    if (oparg >= 1) {
-        lu_jit_observe(next_instr, sp[-oparg], oparg >= 2 ? sp[-oparg + 1] : sp[-oparg]);
+    {
+        /* The arguments' kinds; for a call without any, the callable's, so
+           that the site shows it ran. */
+        PyObject *first = oparg >= 1 ? sp[-oparg] : sp[-2];
+        lu_jit_observe(next_instr, first, oparg >= 2 ? sp[-oparg + 1] : first);
     }
     SKIP_CACHES();
     kwnames = NULL;

@@ -787,12 +787,13 @@ call_helper(struct asm_ *a, lu_v v)
     struct lu_ins *in = I(a, v);
     const struct lu_helper *h = &lu_helpers[in->imm];
     if ((h->flags & IF_PY) && in->fs != NULL) {
-        /* The frame shows the call's instruction as the one that ran. */
+        /* The frame shows the call's instruction as the one that ran: the
+           root's state is before it, or after the call into inlined frames. */
         struct lu_fs *root = in->fs;
         while (root->caller != NULL) {
             root = root->caller;
         }
-        int next = lu_jit_next_pc(root->code, root->pc);
+        int next = root == in->fs ? lu_jit_next_pc(root->code, root->pc) : root->pc;
         mov_ri(a, RAX, (int64_t)(intptr_t)(lu_code_start(root->code) + next));
         store(a, R15, offsetof(struct lu_frame, instr), RAX);
         store(a, R15, offsetof(struct lu_frame, last), RAX);
@@ -823,6 +824,92 @@ call_helper(struct asm_ *a, lu_v v)
         parallel_moves(a, moves, nm);
     }
     call_abs(a, h->fn);
+}
+
+/* A Python-running helper called from an inlined frame: the inlined
+   frames its state names are pushed as real frames first, and popped
+   after it (runtime/jit/deopt.c). lu_jit_frames_push reads registers as
+   an exit saves them; only the ones the frames' locals or the helper's
+   arguments are in are saved (values live across the call are spilled). */
+static void
+mark_loc(uint32_t *saved, int32_t loc)
+{
+    if (loc >= 0 && loc != LU_LOC_NONE && loc < 32) {
+        *saved |= 1u << loc;
+    }
+}
+
+static void
+push_frames(struct asm_ *a, lu_v v, struct lu_deopt *d)
+{
+    struct lu_ins *in = I(a, v);
+    uint32_t saved = 0;
+    for (int k = 1; k < d->nframes; k++) {
+        for (int i = 0; i < d->frames[k].nlocals; i++) {
+            struct lu_dv *dv = &d->frames[k].vals[i];
+            if (dv->kind != DV_NULL && dv->kind != DV_CONST) {
+                mark_loc(&saved, dv->loc);
+            }
+            if (dv->maybe_null) {
+                mark_loc(&saved, dv->bitloc);
+            }
+        }
+    }
+    for (int i = 0; i < in->nargs; i++) {
+        struct lu_ins *arg = I(a, in->args[i]);
+        if (!(arg->flags & INS_VIRTUAL)) {
+            mark_loc(&saved, arg->loc);
+        }
+        else {
+            mark_loc(&saved, I(a, arg->b != LU_NOV ? arg->b : arg->a)->loc);
+        }
+    }
+    alu_ri(a, ALU_SUB, RSP, 256);
+    for (int r = 0; r < 32; r++) {
+        if (saved & (1u << r)) {
+            if (r < LU_LOC_FPR) {
+                store(a, RSP, 8 * r, r);
+            }
+            else {
+                sse_rm(a, 0xF2, 0x11, r - LU_LOC_FPR, RSP, 128 + 8 * (r - LU_LOC_FPR));
+            }
+        }
+    }
+    mov_rr(a, RDI, R14);
+    mov_rr(a, RSI, R15);
+    mov_ri(a, RDX, (int64_t)(intptr_t)d);
+    mov_rr(a, RCX, RSP);
+    rex(a, 1, R8, 0, RSP);
+    b1(a, 0x8D);
+    modrm_mem(a, R8, RSP, 128);                 /* lea r8, [rsp+128] */
+    rex(a, 1, R9, 0, RBP);
+    b1(a, 0x8D);
+    modrm_mem(a, R9, RBP, SPILL_BASE);          /* lea r9, [rbp+SPILL_BASE] */
+    call_abs(a, (void *)lu_jit_frames_push);
+    for (int r = 0; r < 32; r++) {
+        if (saved & (1u << r)) {
+            if (r < LU_LOC_FPR) {
+                load(a, r, RSP, 8 * r);
+            }
+            else {
+                sse_rm(a, 0xF2, 0x10, r - LU_LOC_FPR, RSP, 128 + 8 * (r - LU_LOC_FPR));
+            }
+        }
+    }
+    alu_ri(a, ALU_ADD, RSP, 256);
+}
+
+/* The helper's result in RAX survives. */
+static void
+pop_frames(struct asm_ *a)
+{
+    b1(a, 0x50);                                /* push rax */
+    alu_ri(a, ALU_SUB, RSP, 8);
+    mov_rr(a, RDI, R14);
+    mov_rr(a, RSI, R15);
+    call_abs(a, (void *)lu_jit_frames_pop);
+    alu_ri(a, ALU_ADD, RSP, 8);
+    b1(a, 0x58);                                /* pop rax */
 }
 
 /* --- the instructions --- */
@@ -1405,6 +1492,21 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jcc(a, CC_NE, fail);
         return 0;
     }
+    case OP_GUARD_DEPTH: {
+        /* Not a speculation: near the limit the interpreter runs the entry. */
+        int fail = exit_to(a, in->fs, EXIT_POLL, 0, 0);
+        cmp_mi(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining), (int32_t)in->imm);
+        jcc(a, CC_L, fail);
+        return 0;
+    }
+    case OP_GUARD_FRAMES: {
+        /* Not a speculation: stress fails it in lu_jit_frames_pop. */
+        int fail = exit_to(a, in->fs, EXIT_SIDE, 0, 0);
+        load(a, RAX, R14, offsetof(PyThreadState, current_frame));
+        alu_rr(a, ALU_CMP, RAX, R15);
+        jcc(a, CC_NE, fail);
+        return 0;
+    }
     case OP_GUARD_NOT_NULL: {
         int fail = guard_exit(a, in);
         r = gpr_of(a, in->a, RAX);
@@ -1682,20 +1784,33 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         return 0;
     case OP_HELPER: {
         const struct lu_helper *h = &lu_helpers[in->imm];
+        int err = -1;
+        if ((h->flags & IF_RAISE) && in->fs != NULL && (h->rep == REP_BIT || h->rep == REP_OBJ)) {
+            err = exit_to(a, in->fs, EXIT_ERROR, 1, in->drop);
+        }
+        int inlined = (h->flags & IF_PY) && in->fs != NULL && in->fs->caller != NULL;
+        if (inlined && err < 0) {
+            a->f->fail = "a Python call from an inlined frame without an exit";
+            return -1;
+        }
+        struct lu_deopt *d = err >= 0 ? a->exits[a->nexits - 1].d : NULL;   /* the error exit's state */
+        if (inlined) {
+            d->call_pc = lu_jit_next_pc(in->fs->code, in->fs->pc);
+            push_frames(a, v, d);
+        }
         call_helper(a, v);
-        if ((h->flags & IF_RAISE) && in->fs != NULL) {
-            if (h->rep == REP_BIT) {
-                int err = exit_to(a, in->fs, EXIT_ERROR, 1, in->drop);
-                b1(a, 0x83);
-                b1(a, 0xF8);
-                b1(a, 0xFF);                    /* cmp eax, -1 */
-                jcc(a, CC_E, err);
-            }
-            else if (h->rep == REP_OBJ) {
-                int err = exit_to(a, in->fs, EXIT_ERROR, 1, in->drop);
-                test_rr(a, RAX, RAX);
-                jcc(a, CC_E, err);
-            }
+        if (inlined) {
+            pop_frames(a);
+        }
+        if (err >= 0 && h->rep == REP_BIT) {
+            b1(a, 0x83);
+            b1(a, 0xF8);
+            b1(a, 0xFF);                        /* cmp eax, -1 */
+            jcc(a, CC_E, err);
+        }
+        else if (err >= 0 && h->rep == REP_OBJ) {
+            test_rr(a, RAX, RAX);
+            jcc(a, CC_E, err);
         }
         if (h->rep == REP_BIT) {
             b1(a, 0x48);

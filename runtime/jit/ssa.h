@@ -88,6 +88,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(GUARD_IS, REP_NONE, IF_GUARD)     /* a == imm, or a field of a (GI_*) */ \
     X(GUARD_BIT, REP_NONE, IF_GUARD)    /* a == imm */ \
     X(GUARD_NOT_NULL, REP_NONE, IF_GUARD)       /* a != NULL */ \
+    X(GUARD_DEPTH, REP_NONE, IF_GUARD | IF_EFFECT)  /* the task's py_recursion_remaining >= imm (at entry) */ \
+    X(GUARD_FRAMES, REP_NONE, IF_GUARD | IF_EFFECT) /* a call left no inlined frame pushed (runtime/jit/deopt.c) */ \
     X(LOAD, REP_NONE, 0)                /* *(a + imm), rep set by the builder; a borrowed object; imm2 4: 32 bits */ \
     X(STORE, REP_NONE, IF_EFFECT)       /* *(a + imm) = b, raw */ \
     X(LIST_ITEM, REP_OBJ, IF_GUARD | IF_CALL)   /* a: an exact list, b: i64 index; deopts out of range */ \
@@ -212,6 +214,7 @@ struct lu_func {
     int *known_block;           /* and the block of that guard */
     int capknown;
     int ninlined;
+    int room;                   /* the recursion budget the deepest inlined frame needs */
     int loops;                  /* back edges built: one entry may run unbounded work */
     int sites, cold;            /* sites with feedback, and those the interpreter never ran */
 };
