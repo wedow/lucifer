@@ -53,10 +53,10 @@ lu_futex_wake(uint32_t *word)
     LU_PARKED(syscall(SYS_futex, word, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0));
 }
 
-void
+int
 lu_join_thread(pthread_t thread)
 {
-    LU_SYSCALL(pthread_join(thread, NULL));
+    return LU_SYSCALL(pthread_join(thread, NULL));
 }
 
 /* The fault handler's calls (runtime/prim/faulthandler.c). Its output is
@@ -66,6 +66,14 @@ lu_join_thread(pthread_t thread)
    request brackets the whole dump itself. The watchdog thread is no task, so
    its bracket is empty. */
 #define LU_SIGNAL(call) (call)
+
+/* _Py_IsValidFD (Python/fileutils.c): whether fd is open, by F_GETFD, which
+   only looks at the process's table. */
+LU_EXPORT int
+_Py_IsValidFD(int fd)
+{
+    return fd >= 0 && LU_SYSCALL(fcntl(fd, F_GETFD)) >= 0;
+}
 
 /* write(2) and fcntl(F_SETFD) for the file C-API (Objects/fileobject.c's
    stdprinter and Py_fopen): the blocking symbols live only here. */

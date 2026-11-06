@@ -141,27 +141,16 @@ put_str(struct ubuf *b, PyObject *s, Py_ssize_t width, Py_ssize_t prec, int left
     PyMem_Free(text);
 }
 
-/* %T and %N: a type's name, qualified by its module unless that is builtins or __main__. */
+/* %T (obj's type) and %N (obj, a type): the fully qualified name, with ':'
+   before the qualname under the # flag. */
 static PyObject *
-type_name(PyObject *obj, int qualified, int colon)
+type_name(PyObject *obj, int of_type, int colon)
 {
-    PyObject *type = (PyObject *)Py_TYPE(obj);
-    PyObject *qualname = PyObject_GetAttrString(type, "__qualname__");
-    if (!qualified || qualname == NULL) {
-        return qualname;
+    if (!of_type && !PyType_Check(obj)) {
+        PyErr_SetString(PyExc_TypeError, "%N argument must be a type");
+        return NULL;
     }
-    PyObject *module = PyObject_GetAttrString(type, "__module__");
-    if (module == NULL || !PyUnicode_Check(module)
-        || strcmp(PyUnicode_AsUTF8(module), "builtins") == 0
-        || strcmp(PyUnicode_AsUTF8(module), "__main__") == 0) {
-        PyErr_Clear();
-        Py_XDECREF(module);
-        return qualname;
-    }
-    PyObject *full = PyUnicode_FromFormat(colon ? "%U:%U" : "%U.%U", module, qualname);
-    Py_DECREF(module);
-    Py_DECREF(qualname);
-    return full;
+    return lu_type_fullyqualname(of_type ? Py_TYPE(obj) : (PyTypeObject *)obj, colon ? ':' : '.');
 }
 
 PyObject *
@@ -201,15 +190,50 @@ PyUnicode_FromFormatV(const char *format, va_list vargs)
             zero |= *f == '0';
             alt |= *f == '#';
         }
-        Py_ssize_t width = 0, prec = -1;
-        while (*f >= '0' && *f <= '9') {
-            width = width * 10 + (*f++ - '0');
-        }
-        if (*f == '.') {
-            prec = 0;
-            for (f++; *f >= '0' && *f <= '9'; f++) {
-                prec = prec * 10 + (*f - '0');
+        /* width.precision, each digits or '*' taken from the arguments: a
+           negative '*' width left-justifies, a negative '*' precision is
+           none (-2, which %c and %p still refuse). */
+        Py_ssize_t width = -1, prec = -1;
+        if (*f == '*') {
+            width = va_arg(ap, int);
+            if (width < 0) {
+                left = 1;
+                width = -width;
             }
+            f++;
+        }
+        else {
+            for (; *f >= '0' && *f <= '9'; f++) {
+                if (width > (PY_SSIZE_T_MAX - (*f - '0')) / 10) {
+                    PyErr_SetString(PyExc_ValueError, "width too big");
+                    b.failed = 2;
+                    break;
+                }
+                width = width < 0 ? *f - '0' : width * 10 + (*f - '0');
+            }
+        }
+        if (!b.failed && *f == '.') {
+            f++;
+            if (*f == '*') {
+                prec = va_arg(ap, int);
+                if (prec < 0) {
+                    prec = -2;
+                }
+                f++;
+            }
+            else if (*f >= '0' && *f <= '9') {
+                for (prec = 0; *f >= '0' && *f <= '9'; f++) {
+                    if (prec > (PY_SSIZE_T_MAX - (*f - '0')) / 10) {
+                        PyErr_SetString(PyExc_ValueError, "precision too big");
+                        b.failed = 2;
+                        break;
+                    }
+                    prec = prec * 10 + (*f - '0');
+                }
+            }
+        }
+        if (b.failed) {
+            break;
         }
         int size = 0;           /* 0 int, 1 long, 2 long long, 3 size_t, 4 intmax_t, 5 ptrdiff_t */
         for (;; f++) {
@@ -220,6 +244,21 @@ PyUnicode_FromFormatV(const char *format, va_list vargs)
             else break;
         }
         char conv = *f++;
+        /* The conversions with their options validated (unicode_fromformat_parse):
+           %% only bare, %c and %p without a size, width or precision, and a
+           size modifier only where it is read. */
+        int known = conv == 'd' || conv == 'i' || conv == 'o' || conv == 'u'
+            || conv == 'x' || conv == 'X' || conv == 'c' || conv == 'p'
+            || conv == 's' || conv == 'V' || conv == 'U' || conv == 'S'
+            || conv == 'R' || conv == 'A' || conv == 'T' || conv == 'N' || conv == '%';
+        if ((conv == '%' && f - spec > 2)
+            || ((conv == 'c' || conv == 'p') && (size || width != -1 || prec != -1))
+            || ((conv == 's' || conv == 'V') && size > 1)
+            || (!known && size)) {
+            PyErr_Format(PyExc_SystemError, "invalid format string: %s", spec);
+            b.failed = 2;
+            break;
+        }
         switch (conv) {
         case '%':
             put(&b, '%');
@@ -236,7 +275,7 @@ PyUnicode_FromFormatV(const char *format, va_list vargs)
             break;
         }
         case 'd': case 'i': case 'u': case 'x': case 'X': case 'o': {
-            char digits[80], text[100];
+            char digits[80];
             int base = conv == 'x' || conv == 'X' ? 16 : conv == 'o' ? 8 : 10;
             int negative = 0;
             unsigned long long v;
@@ -259,21 +298,29 @@ PyUnicode_FromFormatV(const char *format, va_list vargs)
                 digits[nd++] = (char)(d < 10 ? '0' + d : (conv == 'X' ? 'A' : 'a') + d - 10);
                 v /= base;
             } while (v);
-            int n = 0;
-            if (negative) text[n++] = '-';
-            for (Py_ssize_t pad = prec - nd; pad > 0; pad--) text[n++] = '0';
-            while (nd) text[n++] = digits[--nd];
-            Py_UCS4 u[100];
-            for (int k = 0; k < n; k++) u[k] = (unsigned char)text[k];
-            Py_ssize_t fill = width - n;
-            if (zero && !left && prec < 0 && fill > 0) {
-                int sign = negative;
-                for (int k = 0; k < sign; k++) put(&b, u[k]);
-                put_pad(&b, fill, '0');
-                put_field(&b, u + sign, n - sign, 0, 0);
+            /* The pads of Objects/unicodeobject.c's integer writer: the
+               precision zero-fills the digits, the width space-fills, and a
+               zero flag with no left-justify turns the space fill into
+               zeroes (precision takes the width's place). */
+            prec = Py_MAX(prec, nd);
+            width = Py_MAX(width, prec + negative);
+            if (zero && !left) {
+                prec = width - negative;
             }
-            else {
-                put_field(&b, u, n, width, left);
+            Py_ssize_t spacepad = Py_MAX(width - prec - negative, 0);
+            Py_ssize_t zeropad = Py_MAX(prec - nd, 0);
+            if (spacepad && !left) {
+                put_pad(&b, spacepad, ' ');
+            }
+            if (negative) {
+                put(&b, '-');
+            }
+            put_pad(&b, zeropad, '0');
+            while (nd) {
+                put(&b, (unsigned char)digits[--nd]);
+            }
+            if (spacepad && left) {
+                put_pad(&b, spacepad, ' ');
             }
             break;
         }
@@ -290,21 +337,44 @@ PyUnicode_FromFormatV(const char *format, va_list vargs)
             if (conv == 'V') {
                 obj = va_arg(ap, PyObject *);
             }
+            if (size == 1) {
+                /* %ls and %lV: wide characters
+                   (unicode_fromformat_write_wcstr) */
+                const wchar_t *s = va_arg(ap, const wchar_t *);
+                if (obj != NULL) {
+                    put_str(&b, obj, width, prec, left);
+                    break;
+                }
+                Py_ssize_t n = prec >= 0 ? (Py_ssize_t)wcsnlen(s, prec) : (Py_ssize_t)wcslen(s);
+                Py_UCS4 *text = PyMem_Malloc((n > 0 ? n : 1) * sizeof(Py_UCS4));
+                if (text == NULL) {
+                    b.failed = 1;
+                    break;
+                }
+                for (Py_ssize_t k = 0; k < n; k++) {
+                    text[k] = (Py_UCS4)s[k];
+                }
+                put_field(&b, text, n, width, left);
+                PyMem_Free(text);
+                break;
+            }
             const char *s = va_arg(ap, const char *);
             if (obj != NULL) {
                 put_str(&b, obj, width, prec, left);
                 break;
             }
+            /* The precision counts bytes; a cut through the last
+               character drops it, and other bad bytes are replaced
+               (unicode_fromformat_write_utf8). */
             Py_ssize_t n = prec >= 0 ? (Py_ssize_t)strnlen(s, prec) : (Py_ssize_t)strlen(s);
-            Py_ssize_t count = decode_utf8((const unsigned char *)s, n, NULL);
-            Py_UCS4 *text = PyMem_Malloc((count + 1) * sizeof(Py_UCS4));
+            Py_ssize_t consumed = n;
+            PyObject *text = PyUnicode_DecodeUTF8Stateful(s, n, "replace", prec >= 0 && n == prec ? &consumed : NULL);
             if (text == NULL) {
-                b.failed = 1;
+                b.failed = 2;
                 break;
             }
-            decode_utf8((const unsigned char *)s, n, text);
-            put_field(&b, text, count, width, left);
-            PyMem_Free(text);
+            put_str(&b, text, width, -1, left);
+            Py_DECREF(text);
             break;
         }
         case 'U': case 'S': case 'R': case 'A': case 'T': case 'N': {

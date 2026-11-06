@@ -131,8 +131,9 @@ int lu_set_cloexec(int fd);
    or ETIMEDOUT, EINTR or EAGAIN. */
 int lu_futex_wait(uint32_t *word, uint32_t expected, PyTime_t deadline);
 void lu_futex_wake(uint32_t *word);
-/* Waits for a thread to exit, detached (runtime/prim/os.c). */
-void lu_join_thread(pthread_t thread);
+/* Waits for a thread to exit, detached (runtime/prim/os.c); pthread_join's
+   result. */
+int lu_join_thread(pthread_t thread);
 /* The fault handler's write(2), safe in a signal handler, and its watchdog's wait (runtime/prim/os.c). */
 void lu_write_signal_safe(int fd, const char *s, size_t n);
 int lu_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *deadline);
@@ -377,6 +378,8 @@ struct lu_pending {
     PyMutex mutex;
     struct lu_pending_call *head, **tail;
     struct lu_task *handling;   /* the task running the queue: it is not re-entered */
+    int main_count;             /* queued main-only calls (CPython caps them at 32) */
+    int other_count;            /* queued other calls (CPython caps them at 300) */
 };
 
 /* sys.monitoring (runtime/interp/instrument.c): the tool ids, event counts
@@ -405,7 +408,15 @@ struct _is {
     PyObject *modules_by_index; /* single-phase modules, for PyState_FindModule */
     PyObject *builtins;         /* builtins.__dict__ */
     PyObject *sysdict;          /* sys.__dict__ */
+    PyObject *dict;             /* PyInterpreterState_GetDict, made on first use */
+    PyObject *last_resort_memory_error; /* raised when no MemoryError can be made */
+    Py_ssize_t interactive_src_count;   /* names each interactive statement's code */
+    struct lu_atexit *atexit;   /* PyUnstable_AtExit callbacks, newest first */
+    PyMutex atexit_lock;
     PyObject *interned;         /* interned str -> itself */
+    int co_extra_user_count;    /* PyUnstable_Eval_RequestCodeExtraIndex hands out the next */
+    freefunc co_extra_freefuncs[MAX_CO_EXTRA_USERS];
+    PyMutex co_extra_lock;      /* hands out the indexes */
     _PyFrameEvalFunction eval_frame;    /* PEP 523; NULL runs frames inline */
     uintptr_t monitoring_version;       /* a multiple of LU_POLL_VERSION_UNIT */
     PyMutex tracing_setup_lock;         /* the first sys.settrace or setprofile registers callbacks */
@@ -428,6 +439,7 @@ struct _is {
     lu_watcher dict_watchers[LU_MAX_WATCHERS];      /* PyDict_WatchCallback */
     lu_watcher func_watchers[LU_MAX_WATCHERS];      /* PyFunction_WatchCallback */
     lu_watcher code_watchers[LU_MAX_WATCHERS];      /* PyCode_WatchCallback */
+    lu_watcher context_watchers[LU_MAX_WATCHERS];   /* PyContext_WatchCallback */
     int specializing;                   /* set once the kernel has booted: instructions may specialize */
     /* The type attribute cache (CPython's method cache): what _PyType_Lookup
        found for an interned name in a type of that version. Read without a
@@ -510,6 +522,14 @@ enum {
    fields of the tstate hold the task's frames. */
 struct lu_task {
     PyThreadState ts;
+    /* CPython's _PyThreadStateImpl continues here: a reference count, then
+       the C stack bounds PyUnstable_ThreadState_SetStackProtection records
+       (an extension reads them at these offsets, pycore_tstate.h). lucifer's
+       recursion limit is a counter, so the bounds are bookkeeping only; the
+       init pair backs ResetStackProtection. */
+    Py_ssize_t tstate_refcount;
+    uintptr_t c_stack_top, c_stack_soft_limit, c_stack_hard_limit;
+    uintptr_t c_stack_init_base, c_stack_init_top;
     uintptr_t pin;              /* transient pins: foreign C and nested evals (DESIGN 5.4) */
     int pinned_for_life;        /* main, foreign-thread and thread-scoped tasks */
     struct lu_carrier *carrier; /* the carrier whose thread it is bound to, or NULL */
@@ -935,6 +955,11 @@ extern LU_EXPORT union lu_runtime {
             } handlers[LU_NSIG];
         } signals;
         PyMutex weakref_locks[64];      /* guard the weakref lists, by referent address */
+        struct {
+            PyMutex mutex;
+            Py_ssize_t next_index, size;
+            PyObject **array;           /* each _Py_Identifier's interned str, by its index */
+        } identifiers;                  /* _PyUnicode_FromId (runtime/capi/unicodeapi.c) */
         struct lu_lock heaps_lock;      /* a carrier's heaps are in the registry or abandoned,
                                            never between: held by its retirement and by the
                                            collector's walk, and by entry creation */
@@ -1104,6 +1129,8 @@ PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
 void lu_capsule_init(void);
 int lu_fileobject_init(void);
+/* The last-resort MemoryError of PyErr_NoMemory (runtime/capi/errors.c). */
+void lu_errors_init(PyInterpreterState *interp);
 void lu_storage_init(void);
 void lu_module_init(void);
 void lu_exc_init(void);
@@ -1272,6 +1299,8 @@ int lu_types_init(PyInterpreterState *interp);
 int lu_static_types_inherit(void);
 /* The type's dict: in interpreter state for static builtin types. Borrowed. */
 PyObject *lu_type_dict(PyTypeObject *tp);
+/* The fully qualified name, module<sep>qualname (runtime/capi/typespec.c). */
+PyObject *lu_type_fullyqualname(PyTypeObject *type, char sep);
 /* The doc after its introspection signature, and tp_methods / the bound
    __new__ of a type with a tp_new into its dict (typespec.c). */
 const char *lu_doc_without_signature(const char *name, const char *doc);
@@ -1536,5 +1565,6 @@ PyObject *lu_range_iter(PyObject *r);
    kernel's exception classes. */
 void lu_err_format(PyObject *type, const char *format, ...)
     __attribute__((format(printf, 2, 3)));
+void lu_err_format_from_cause(PyObject *type, const char *format, const char *name);
 
 #endif

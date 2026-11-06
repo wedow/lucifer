@@ -901,6 +901,11 @@ lu_ns_index(PyObject *dict, PyObject *key)
 PyObject *
 lu_ns_lookup(PyObject *dict, PyObject *key)
 {
+    /* A name that could not be made (out of memory, the error set) is in
+       no namespace: callers look up a fresh PyUnicode_InternFromString. */
+    if (key == NULL) {
+        return NULL;
+    }
     Py_ssize_t ix = ns_find(dict, key);
     return ix >= 0 ? lu_dk_value(((PyDictObject *)dict)->ma_keys, ix) : NULL;
 }

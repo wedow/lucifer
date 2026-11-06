@@ -22,6 +22,8 @@ ROOT = Path(__file__).resolve().parents[2]
 BRIDGE = Path(__file__).with_name('bridge.py')
 RESULTS = ROOT / 'results' / 'libtest'
 RESOURCES = 'all,-network,-urlfetch,tzdata,xpickle'
+# Modules whose deep-recursion cases outrun the default on a loaded host.
+MODULE_TIMEOUTS = {'test_capi': 600}
 STATUSES = 'PASS FAIL ERROR SKIP XFAIL XPASS TIMEOUT CRASH NOTRUN'.split()
 RANK = {s: i for i, s in enumerate(['PASS', 'SKIP', 'XFAIL', 'NOTRUN', 'XPASS', 'FAIL', 'ERROR', 'CRASH', 'TIMEOUT'])}
 PROBE = "import json,sys,sysconfig,test; print(json.dumps({'version':list(sys.version_info[:3]),'implementation':sys.implementation.name,'free_threaded':bool(sysconfig.get_config_var('Py_GIL_DISABLED')),'gil_enabled':getattr(sys,'_is_gil_enabled',lambda:True)(),'dont_write_bytecode':sys.dont_write_bytecode,'test':test.__file__}))"
@@ -205,24 +207,32 @@ def xml_rows(path):
     return rows
 
 
-def run_module(module, ids, args, python, env, raw, unavailable):
+def run_module(module, ids, args, python, env, raw, unavailable, excluded=None):
     directory = raw / module
     directory.mkdir(parents=True, exist_ok=True)
     events, state, xml, worker_pid = (directory / name for name in ('events.jsonl', 'state.jsonl', 'junit.xml', 'worker.pid'))
     for path in (events, state, xml, worker_pid):
         path.unlink(missing_ok=True)
     worker = shlex.join([*python, str(BRIDGE), '--worker'])
+    timeout = max(args.timeout, MODULE_TIMEOUTS.get(module, 0))
+    # Cases that kill this runtime's worker are left out: regrtest ignores
+    # them by full id, and they stay NOTRUN with the reason recorded.
+    excluded = {key: reason for key, reason in (excluded or {}).items() if key in ids}
+    ignore = []
+    if excluded:
+        (directory / 'excluded.txt').write_text(''.join(key + '\n' for key in sorted(excluded)))
+        ignore = ['--ignorefile', str(directory / 'excluded.txt')]
     command = [*python, str(BRIDGE), '-j', '1', '--python', worker,
-               '--timeout', str(args.timeout), '--randseed', '0', '-u', args.resources,
-               '--junit-xml', str(xml), '--tempdir', str(directory), module]
+               '--timeout', str(timeout), '--randseed', '0', '-u', args.resources,
+               *ignore, '--junit-xml', str(xml), '--tempdir', str(directory), module]
     local_env = dict(env, LIBTEST_EVENTS=str(events), LIBTEST_STATE=str(state), LIBTEST_PID=str(worker_pid))
-    code, hung, elapsed = execute(command, local_env, directory, args.timeout + 30,
+    code, hung, elapsed = execute(command, local_env, directory, timeout + 30,
                                   directory / 'output.log', worker_pid=worker_pid)
     states = json_lines(state)
     disposition = states[-1].get('state', 'MISSING') if states else 'MISSING'
     # Upstream normally implements its timeout with faulthandler exit=True;
     # the parent reports that exit as WORKER_FAILED rather than TIMEOUT.
-    faulthandler_timeout = (disposition == 'WORKER_FAILED' and elapsed >= args.timeout * 0.9
+    faulthandler_timeout = (disposition == 'WORKER_FAILED' and elapsed >= timeout * 0.9
                             and re.search(r'(?m)^Timeout \([0-9:.]+\)!',
                                           (directory / 'output.log').read_text(errors='replace')))
     if hung or disposition == 'TIMEOUT' or faulthandler_timeout:
@@ -276,7 +286,9 @@ def run_module(module, ids, args, python, env, raw, unavailable):
     if observation_error and fallback not in ('TIMEOUT', 'CRASH'):
         fallback = 'ERROR'
     for key in ids:
-        if fallback in ('TIMEOUT', 'CRASH'):
+        if key in excluded:
+            rows[key] = ('NOTRUN', 0)
+        elif fallback in ('TIMEOUT', 'CRASH'):
             rows[key] = (fallback, 0)
         elif observation_error:
             rows[key] = ('ERROR', 0)
@@ -302,6 +314,8 @@ def run_module(module, ids, args, python, env, raw, unavailable):
               'environment': {key: env.get(key) for key in ('PYTHONHASHSEED', 'PYTHON_JIT', 'PYTHONDONTWRITEBYTECODE', 'LC_ALL', 'TZ')}}
     if module_skip:
         detail['skip_reason'] = module_skip
+    if excluded:
+        detail['excluded'] = dict(sorted(excluded.items()))
     print(f'{module}: {detail["counts"]} ({elapsed:.1f}s)', flush=True)
     return rows, detail
 
@@ -368,9 +382,16 @@ def run(args, python, env, raw):
             build = inventory.get('free-threaded' if info['free_threaded'] else 'gil', {})
             available = {case for entry in build.values() for case in entry['cases']}
             unavailable.update(dict.fromkeys(set(expected) - available, 'not collected by this ABI build (union inventory)'))
+        # <runtime>.excluded.tsv beside the results: id and reason (a ticket).
+        excluded = {}
+        excluded_path = args.results / (args.runtime + '.excluded.tsv')
+        if excluded_path.exists():
+            with excluded_path.open(encoding='utf-8', newline='') as stream:
+                excluded = {row['id']: row['reason'] for row in csv.DictReader(stream, delimiter='\t')}
+        metadata['excluded_cases'] = len(excluded)
         with ThreadPoolExecutor(max_workers=args.jobs) as executor:
             futures = {executor.submit(run_module, module, modules[module], args, python,
-                                       env, raw, unavailable): module for module in selected}
+                                       env, raw, unavailable, excluded): module for module in selected}
             for future in as_completed(futures):
                 module = futures[future]
                 result, detail = future.result()

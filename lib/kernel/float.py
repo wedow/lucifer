@@ -68,6 +68,11 @@ def to_double(x):
     r = call_special(f, x)
     if not kind(r, 'float'):
         error(TypeError, _cat(_name(x), '.__float__ returned non-float (type ', _name(r), ')'))
+    if type(r) is not float:
+        __import__('warnings').warn(_cat(
+            _name(x), '.__float__ returned non-float (type ', _name(r), ').  The ability to return '
+            'an instance of a strict subclass of float is deprecated, and may be removed in a '
+            'future version of Python.'), DeprecationWarning, 1)
     return r
 
 

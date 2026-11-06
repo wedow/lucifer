@@ -363,9 +363,22 @@ invoked using the three argument form."""
     base, exp, mod = _args.unpack('pow', args, kwargs, ('base', 'exp', 'mod'), 0, 2)
     if mod is MISSING or mod is None:
         return operators.binary_op(base, exp, 8)
-    f = type_lookup(type(base), '__pow__')
+    # ternary_op and slot_nb_power: the reflected method, with the modulus,
+    # as binary_op orders them.
+    tb, te = type(base), type(exp)
+    f = type_lookup(tb, '__pow__')
+    fr = type_lookup(te, '__rpow__') if te is not tb else MISSING
+    if fr is not MISSING and is_subtype(te, tb) and fr is not type_lookup(tb, '__rpow__'):
+        r = call_special(fr, exp, base, mod)
+        if r is not NotImplemented:
+            return r
+        fr = MISSING
     if f is not MISSING:
         r = call_special(f, base, exp, mod)
+        if r is not NotImplemented:
+            return r
+    if fr is not MISSING:
+        r = call_special(fr, exp, base, mod)
         if r is not NotImplemented:
             return r
     error(TypeError, str_join('', (

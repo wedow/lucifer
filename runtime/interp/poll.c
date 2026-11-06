@@ -136,7 +136,21 @@ _PyEval_AddPendingCall(PyInterpreterState *interp, int (*func)(void *), void *ar
     call->arg = arg;
     call->main_only = (flags & PENDING_MAINTHREADONLY) != 0;
     call->rawfree = (flags & PENDING_RAWFREE) != 0;
+    /* CPython keeps a 32-slot queue for the main thread's calls and a
+       300-slot one for the rest (MAXPENDINGCALLS_MAIN, PENDINGCALLSARRAYSIZE);
+       a full queue refuses the call. */
     PyMutex_Lock(&p->mutex);
+    if (call->main_only ? p->main_count >= 32 : p->other_count >= 300) {
+        PyMutex_Unlock(&p->mutex);
+        free(call);
+        return -1;
+    }
+    if (call->main_only) {
+        p->main_count++;
+    }
+    else {
+        p->other_count++;
+    }
     if (p->tail == NULL) {
         p->tail = &p->head;
     }
@@ -192,6 +206,12 @@ pop_call(struct lu_pending *p, int main_thread)
             *link = found->next;
             if (p->tail == &found->next) {
                 p->tail = link;
+            }
+            if (found->main_only) {
+                p->main_count--;
+            }
+            else {
+                p->other_count--;
             }
             break;
         }

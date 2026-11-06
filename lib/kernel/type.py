@@ -27,6 +27,7 @@ merge_class_dict = _object.merge_class_dict
 __all__ = ('type',)
 
 _HEAPTYPE = 1 << 9
+_IMMUTABLETYPE = 1 << 8      # setattr refuses (check_set_special_type_attr, type_setattro)
 _staticmethod = staticmethod
 _classmethod = classmethod
 
@@ -42,7 +43,7 @@ def _repr_str(s):
 
 def _check_heap_set(cls, attr, value, what, noun):
     """check_set_special_type_attr and the setters' type checks."""
-    if not type_flag(cls, _HEAPTYPE):
+    if type_flag(cls, _IMMUTABLETYPE):
         error(TypeError, str_join('', (
             "cannot set '", attr, "' attribute of immutable type '", type_tp_name(cls), "'")))
     if value is MISSING:
@@ -82,7 +83,7 @@ def _get_module(cls):
 
 
 def _set_module(cls, value):
-    if not type_flag(cls, _HEAPTYPE):
+    if type_flag(cls, _IMMUTABLETYPE):
         error(TypeError, str_join('', (
             "cannot set '__module__' attribute of immutable type '", type_tp_name(cls), "'")))
     ns_set(type_dict(cls), '__module__', value)
@@ -99,7 +100,7 @@ def _get_doc(cls):
 
 
 def _set_doc(cls, value):
-    if not type_flag(cls, _HEAPTYPE):
+    if type_flag(cls, _IMMUTABLETYPE):
         error(TypeError, str_join('', (
             "cannot set '__doc__' attribute of immutable type '", type_tp_name(cls), "'")))
     ns_set(type_dict(cls), '__doc__', None if value is MISSING else value)
@@ -161,7 +162,7 @@ def _get_type_params(cls):
 
 
 def _set_type_params(cls, value):
-    if not type_flag(cls, _HEAPTYPE):
+    if type_flag(cls, _IMMUTABLETYPE):
         error(TypeError, str_join('', (
             "cannot set '__type_params__' attribute of immutable type '", type_tp_name(cls), "'")))
     if not kind(value, 'tuple'):
@@ -204,7 +205,7 @@ def _get_annotate(cls):
 def _set_annotate(cls, value):
     if value is MISSING:
         error(TypeError, 'cannot delete __annotate__ attribute')
-    if not type_flag(cls, _HEAPTYPE):
+    if type_flag(cls, _IMMUTABLETYPE):
         error(TypeError, str_join('', (
             "cannot set '__annotate__' attribute of immutable type '", type_tp_name(cls), "'")))
     if value is not None and not is_callable(value):
@@ -242,7 +243,7 @@ def _get_annotations(cls):
 
 
 def _set_annotations(cls, value):
-    if not type_flag(cls, _HEAPTYPE):
+    if type_flag(cls, _IMMUTABLETYPE):
         error(TypeError, str_join('', (
             "cannot set '__annotations__' attribute of immutable type '", type_tp_name(cls), "'")))
     d = type_dict(cls)
@@ -513,7 +514,7 @@ def _type_set(cls, name, value):
     The cached lookups go before the dict changes, as the replaced value's
     finalizer may look the name up, and again after, for a lookup another
     thread made in between."""
-    if not type_flag(cls, _HEAPTYPE):
+    if type_flag(cls, _IMMUTABLETYPE):
         error(TypeError, str_join('', (
             "cannot set '", name, "' attribute of immutable type '", type_tp_name(cls), "'")))
     if type(value) is _function:

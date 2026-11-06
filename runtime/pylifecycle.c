@@ -255,6 +255,7 @@ boot_native(struct _is *interp)
         Py_DECREF(sys);
         return -1;
     }
+    lu_errors_init(interp);     /* the last-resort MemoryError, before anything can run out */
     PyObject *modules_name = PyUnicode_InternFromString("modules");
     if (modules_name == NULL || lu_ns_insert(interp->sysdict, modules_name, interp->modules) < 0) {
         Py_XDECREF(modules_name);
@@ -616,9 +617,11 @@ finalize_modules(struct _is *interp)
 /* The interpreter ends: its task is deleted and its state forgotten, so that
    Py_Initialize starts a new one. The objects it made are not freed: modules
    and types reach each other in cycles, and the collector does not run yet. */
+static void lu_atexit_call(PyInterpreterState *);
 static void
 release_interpreter(struct _is *interp)
 {
+    lu_atexit_call(interp);         /* PyUnstable_AtExit callbacks, while C calls still work */
     PyThreadState *main_task = PyThreadState_Get();
     PyThreadState_Clear(main_task);
     PyEval_SaveThread();
@@ -631,6 +634,11 @@ release_interpreter(struct _is *interp)
     interp->tasks_closed = 0;
     interp->stw.mutex = (PyMutex){ 0 };     /* held for good since the other tasks were shut down */
     interp->modules = interp->builtins = interp->sysdict = interp->interned = NULL;
+    interp->dict = interp->last_resort_memory_error = NULL;
+    interp->interactive_src_count = 0;
+    interp->co_extra_user_count = 0;
+    memset(interp->co_extra_freefuncs, 0, sizeof interp->co_extra_freefuncs);
+    interp->co_extra_lock = (PyMutex){ 0 };
     interp->importlib = interp->import_func = NULL;
     interp->eval_frame = NULL;
     interp->specializing = 0;
@@ -809,4 +817,63 @@ int
 PyRun_SimpleString(const char *command)
 {
     return PyRun_SimpleStringFlags(command, NULL);
+}
+
+/* Py_NewInterpreter: lucifer has no subinterpreters yet, so creating one
+   fails the way CPython reports it: NULL, with no exception set, since
+   there may be no thread state to hold one (Python/pylifecycle.c). */
+PyThreadState *
+Py_NewInterpreter(void)
+{
+    return NULL;
+}
+
+/* No thread state of another interpreter exists to be ended. */
+void
+Py_EndInterpreter(PyThreadState *tstate)
+{
+    Py_FatalError("Py_EndInterpreter: subinterpreters are not supported");
+}
+
+/* PyUnstable_AtExit (Modules/atexitmodule.c): a C callback an interpreter
+   runs when it ends, the last registered first, on its own list. */
+struct lu_atexit {
+    atexit_datacallbackfunc func;
+    void *data;
+    struct lu_atexit *next;
+};
+
+int
+PyUnstable_AtExit(PyInterpreterState *interp, atexit_datacallbackfunc func, void *data)
+{
+    struct lu_atexit *callback = PyMem_Malloc(sizeof *callback);
+    if (callback == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    callback->func = func;
+    callback->data = data;
+    PyMutex_Lock(&interp->atexit_lock);
+    callback->next = interp->atexit;
+    interp->atexit = callback;
+    PyMutex_Unlock(&interp->atexit_lock);
+    return 0;
+}
+
+/* _PyAtExit_Fini's half for C callbacks: each runs once and is freed. */
+static void
+lu_atexit_call(PyInterpreterState *interp)
+{
+    PyMutex_Lock(&interp->atexit_lock);
+    struct lu_atexit *next = interp->atexit;
+    interp->atexit = NULL;
+    PyMutex_Unlock(&interp->atexit_lock);
+    while (next != NULL) {
+        struct lu_atexit *callback = next;
+        next = callback->next;
+        atexit_datacallbackfunc func = callback->func;
+        void *data = callback->data;
+        PyMem_Free(callback);
+        func(data);
+    }
 }

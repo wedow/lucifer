@@ -214,7 +214,13 @@ def index(x):
     r = call_special(f, x)
     if not kind(r, 'int'):
         error(TypeError, str_join('', ('__index__ returned non-int (type ', _name(r), ')')))
-    return r if type(r) is int else int_add(r, 0)
+    if type(r) is int:
+        return r
+    __import__('warnings').warn(str_join('', (
+        '__index__ returned non-int (type ', _name(r), ').  The ability to return an instance of '
+        'a strict subclass of int is deprecated, and may be removed in a future version of '
+        'Python.')), DeprecationWarning, 1)
+    return int_add(r, 0)
 
 
 kernel_set('index', index)

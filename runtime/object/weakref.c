@@ -107,6 +107,15 @@ lu_weakref_init(void)
     _PyWeakref_RefType.tp_dealloc = weakref_dealloc;
     _PyWeakref_RefType.tp_traverse = weakref_traverse;
     _PyWeakref_RefType.tp_clear = weakref_clear;
+    /* The proxies are weak references too, of their own types. */
+    PyTypeObject *const proxies[] = { &_PyWeakref_ProxyType, &_PyWeakref_CallableProxyType };
+    for (int i = 0; i < 2; i++) {
+        proxies[i]->tp_basicsize = sizeof(PyWeakReference);
+        proxies[i]->tp_flags |= Py_TPFLAGS_HAVE_GC;
+        proxies[i]->tp_dealloc = weakref_dealloc;
+        proxies[i]->tp_traverse = weakref_traverse;
+        proxies[i]->tp_clear = weakref_clear;
+    }
 }
 
 /* PyObject_ClearWeakRefs: the referent is dying. Every reference becomes
@@ -147,8 +156,71 @@ lu_clear_weakrefs(PyObject *ob)
     PyErr_SetRaisedException(pending);
 }
 
-/* A reference of `type` (a subtype of ReferenceType) to ob. Without a
-   callback, ReferenceType itself reuses the reference ob already has. A new
+/* PyUnstable_Object_ClearWeakRefsNoCallbacks: every reference to ob goes
+   dead and no callback runs (Objects/weakrefobject.c). */
+void
+PyUnstable_Object_ClearWeakRefsNoCallbacks(PyObject *ob)
+{
+    PyWeakReference **head = list_of(ob);
+    if (head == NULL) {
+        return;
+    }
+    PyMutex *m = stripe(ob);
+    PyMutex_Lock(m);
+    while (*head != NULL) {
+        PyWeakReference *ref = *head;
+        unlink_ref(ref);
+        __atomic_store_n(&ref->wr_object, Py_None, __ATOMIC_RELEASE);
+    }
+    PyMutex_Unlock(m);
+}
+
+static int
+is_proxy_type(PyTypeObject *type)
+{
+    return type == &_PyWeakref_ProxyType || type == &_PyWeakref_CallableProxyType;
+}
+
+/* get_basic_refs: the list's callback-less reference of exactly
+   ReferenceType, its head when there is one, and its callback-less proxy,
+   which follows it (or heads the list). The caller holds the stripe. */
+static void
+basic_refs(PyWeakReference *head, PyWeakReference **ref, PyWeakReference **proxy)
+{
+    *ref = *proxy = NULL;
+    if (head != NULL && head->wr_callback == NULL && Py_TYPE(head) == &_PyWeakref_RefType) {
+        *ref = head;
+        head = head->wr_next;
+    }
+    if (head != NULL && head->wr_callback == NULL && is_proxy_type(Py_TYPE(head))) {
+        *proxy = head;
+    }
+}
+
+/* Links ref after prev, or at the head when prev is NULL. */
+static void
+link_after(PyWeakReference **head, PyWeakReference *prev, PyWeakReference *ref)
+{
+    if (prev == NULL) {
+        ref->wr_next = *head;
+        if (*head != NULL) {
+            (*head)->wr_prev = ref;
+        }
+        *head = ref;
+        return;
+    }
+    ref->wr_prev = prev;
+    ref->wr_next = prev->wr_next;
+    if (prev->wr_next != NULL) {
+        prev->wr_next->wr_prev = ref;
+    }
+    prev->wr_next = ref;
+}
+
+/* A reference of `type` (ReferenceType, a subtype of it, or a proxy type)
+   to ob, as Objects/weakrefobject.c makes them: without a callback,
+   ReferenceType and the proxies reuse the one ob already has; the list keeps
+   the basic reference first, then the basic proxy, then the rest. A new
    reference, or NULL with an exception set. */
 PyObject *
 lu_weakref_new(PyTypeObject *type, PyObject *ob, PyObject *callback)
@@ -159,46 +231,35 @@ lu_weakref_new(PyTypeObject *type, PyObject *ob, PyObject *callback)
         return NULL;
     }
     PyMutex *lock = stripe(ob);
-    if (callback == NULL && type == &_PyWeakref_RefType) {
+    PyWeakReference *ref, *proxy;
+    int basic = callback == NULL && (type == &_PyWeakref_RefType || is_proxy_type(type));
+    if (basic) {
         PyMutex_Lock(lock);
-        PyWeakReference *basic = *head;
-        if (basic != NULL && basic->wr_callback == NULL && Py_TYPE(basic) == &_PyWeakref_RefType
-            && lu_try_incref((PyObject *)basic)) {
+        basic_refs(*head, &ref, &proxy);
+        PyWeakReference *reuse = type == &_PyWeakref_RefType ? ref : proxy;
+        if (reuse != NULL && lu_try_incref((PyObject *)reuse)) {
             PyMutex_Unlock(lock);
-            return (PyObject *)basic;
+            return (PyObject *)reuse;
         }
         PyMutex_Unlock(lock);
     }
-    PyWeakReference *ref = (PyWeakReference *)(type->tp_alloc != NULL ? type->tp_alloc : PyType_GenericAlloc)(type, 0);
-    if (ref == NULL) {
+    PyWeakReference *new = (PyWeakReference *)(type->tp_alloc != NULL ? type->tp_alloc : PyType_GenericAlloc)(type, 0);
+    if (new == NULL) {
         return NULL;
     }
-    ref->wr_object = ob;
-    ref->wr_callback = Py_XNewRef(callback);
-    ref->hash = -1;
+    new->wr_object = ob;
+    new->wr_callback = Py_XNewRef(callback);
+    new->hash = -1;
     lu_set_maybe_weakref(ob);
-    lu_set_maybe_weakref((PyObject *)ref);
+    lu_set_maybe_weakref((PyObject *)new);
     PyMutex_Lock(lock);
-    PyWeakReference *first = *head;
-    int basic = callback == NULL && type == &_PyWeakref_RefType;
-    if (first != NULL && !basic && first->wr_callback == NULL && Py_TYPE(first) == &_PyWeakref_RefType) {
-        /* after the basic reference, which stays the head */
-        ref->wr_prev = first;
-        ref->wr_next = first->wr_next;
-        if (first->wr_next != NULL) {
-            first->wr_next->wr_prev = ref;
-        }
-        first->wr_next = ref;
-    }
-    else {
-        ref->wr_next = first;
-        if (first != NULL) {
-            first->wr_prev = ref;
-        }
-        *head = ref;
-    }
+    basic_refs(*head, &ref, &proxy);
+    PyWeakReference *prev = type == &_PyWeakref_RefType && basic ? NULL
+                          : basic ? ref
+                          : proxy != NULL ? proxy : ref;
+    link_after(head, prev, new);
     PyMutex_Unlock(lock);
-    return (PyObject *)ref;
+    return (PyObject *)new;
 }
 
 /* weakref_new(type, ob, callback) */
@@ -212,7 +273,7 @@ prim_weakref_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return lu_weakref_new((PyTypeObject *)args[0], args[1], args[2] == Py_None ? NULL : args[2]);
 }
 
-#define REF(i) (nargs == 1 && PyObject_TypeCheck(args[0], &_PyWeakref_RefType) \
+#define REF(i) (nargs == 1 && PyWeakref_Check(args[0]) \
     ? (PyWeakReference *)args[0] : (lu_err_format(PyExc_TypeError, "a weak reference is needed"), NULL))
 
 /* A new reference to the referent of the weak reference `ref`, NULL once it is dead

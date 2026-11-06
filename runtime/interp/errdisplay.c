@@ -619,11 +619,27 @@ lu_err_unraisable(const char *what, PyObject *obj)
 }
 
 /* PyErr_FormatUnraisable: "message repr(obj):" then the exception being
-   handled, which is cleared. */
+   handled, which is cleared. A sys.unraisablehook other than the default
+   gets it instead, as CPython's callers' reports reach the hook; the default
+   is written here, which works through interpreter shutdown. */
 void
 lu_err_unraisable_text(const char *message, PyObject *obj)
 {
     PyObject *exc = PyErr_GetRaisedException();
+    PyObject *sysdict = _PyRuntime.main_interp.sysdict;
+    PyObject *hook = sysdict != NULL ? lu_ns_lookup(sysdict, PyUnicode_InternFromString("unraisablehook")) : NULL;
+    PyObject *dflt = sysdict != NULL ? lu_ns_lookup(sysdict, PyUnicode_InternFromString("__unraisablehook__")) : NULL;
+    PyErr_Clear();      /* a name that could not be made */
+    if (hook != NULL && hook != Py_None && hook != dflt) {
+        PyErr_SetRaisedException(exc);
+        if (obj != NULL) {
+            PyErr_FormatUnraisable("%s %R", message, obj);
+        }
+        else {
+            PyErr_FormatUnraisable("%s", message);
+        }
+        return;
+    }
     PyObject *r = obj != NULL ? lu_call_kernel(LU_K_repr, &obj, 1) : NULL;
     const char *text = r != NULL && PyUnicode_Check(r) ? PyUnicode_AsUTF8(r) : NULL;
     PyErr_Clear();

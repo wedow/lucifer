@@ -384,6 +384,28 @@ type_lookup(PyTypeObject *tp, PyObject *name, int take)
     return value;
 }
 
+/* PyType_ClearCache: every entry of the attribute cache emptied, each under
+   its sequence as a writer takes it; the last version tag handed out. */
+unsigned int
+PyType_ClearCache(void)
+{
+    struct _is *interp = PyInterpreterState_Get();
+    for (size_t i = 0; i < LU_MCACHE_SIZE; i++) {
+        struct lu_mcache_entry *e = &interp->mcache[i];
+        uint32_t seq = __atomic_load_n(&e->seq, __ATOMIC_ACQUIRE);
+        while ((seq & 1) || !__atomic_compare_exchange_n(&e->seq, &seq, seq + 1, 0,
+                                                         __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+            seq = __atomic_load_n(&e->seq, __ATOMIC_ACQUIRE) & ~1u;
+        }
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        __atomic_store_n(&e->version, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->name, NULL, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->value, NULL, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->seq, seq + 2, __ATOMIC_RELEASE);
+    }
+    return __atomic_load_n(&interp->next_version_tag, __ATOMIC_RELAXED) - 1;
+}
+
 PyObject *
 _PyType_LookupRef(PyTypeObject *tp, PyObject *name)
 {
@@ -753,7 +775,10 @@ lu_types_init(PyInterpreterState *interp)
     PyType_Type.tp_basicsize = sizeof(PyHeapTypeObject);
     PyType_Type.tp_itemsize = sizeof(PyMemberDef);
     PyType_Type.tp_alloc = PyType_GenericAlloc;
-    PyType_Type.tp_flags |= Py_TPFLAGS_HAVE_GC;
+    PyType_Type.tp_flags |= Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_HAVE_VECTORCALL;
+    /* A class is called through the vectorcall its own tp_vectorcall names
+       (type_vectorcall in CPython); classes without one keep tp_call. */
+    PyType_Type.tp_vectorcall_offset = offsetof(PyTypeObject, tp_vectorcall);
     PyType_Type.tp_dealloc = type_dealloc;
     PyType_Type.tp_traverse = type_traverse;
     PyType_Type.tp_clear = type_clear;
@@ -2422,3 +2447,11 @@ PyMethodDef lu_prim_type_methods[] = {
       METH_FASTCALL | LU_METH_FRAME, NULL },
     { NULL, NULL, 0, NULL },
 };
+
+/* PyType_GetDict (Objects/typeobject.c): a new reference to the type's
+   dict, the static builtins' interpreter state included. */
+PyObject *
+PyType_GetDict(PyTypeObject *tp)
+{
+    return Py_XNewRef(lu_type_dict(tp));
+}

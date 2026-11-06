@@ -105,7 +105,7 @@ function_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
         return NULL;
     }
     PyObject *result;
-    if (lu_enter_frame(ts, f, &result)) {
+    if (lu_enter_frame(ts, f, 0, &result)) {
         struct lu_task *t = (struct lu_task *)ts;
         t->pin++;
         result = lu_eval(ts, f);
@@ -320,6 +320,29 @@ no_keywords(PyObject *callable, PyObject *kwnames)
     return 0;
 }
 
+/* _Py_CheckFunctionResult: a C function must not return NULL without an
+   exception, nor a result with one set (Objects/call.c). */
+static PyObject *
+check_function_result(PyObject *callable, PyObject *result)
+{
+    char buf[300];
+    if (result != NULL) {
+        if (!PyErr_Occurred()) {
+            return result;
+        }
+        lu_function_str(callable, buf, sizeof buf);
+        lu_err_format_from_cause(PyExc_SystemError,
+                                 "%s returned a result with an exception set", buf);
+        Py_DECREF(result);
+        return NULL;
+    }
+    if (!PyErr_Occurred()) {
+        lu_function_str(callable, buf, sizeof buf);
+        lu_err_format(PyExc_SystemError, "%s returned NULL without setting an exception", buf);
+    }
+    return NULL;
+}
+
 static PyObject *
 vectorcall_noargs(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
@@ -333,7 +356,8 @@ vectorcall_noargs(PyObject *callable, PyObject *const *args, size_t nargsf, PyOb
                       lu_function_str(callable, buf, sizeof buf), nargs);
         return NULL;
     }
-    return CFUNC(callable)->m_ml->ml_meth(CFUNC(callable)->m_self, NULL);
+    return check_function_result(callable,
+                                  CFUNC(callable)->m_ml->ml_meth(CFUNC(callable)->m_self, NULL));
 }
 
 static PyObject *
@@ -349,7 +373,8 @@ vectorcall_o(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject 
                       lu_function_str(callable, buf, sizeof buf), nargs);
         return NULL;
     }
-    return CFUNC(callable)->m_ml->ml_meth(CFUNC(callable)->m_self, args[0]);
+    return check_function_result(callable,
+                                  CFUNC(callable)->m_ml->ml_meth(CFUNC(callable)->m_self, args[0]));
 }
 
 static PyObject *
@@ -359,7 +384,8 @@ vectorcall_fastcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
         return NULL;
     }
     _PyCFunctionFast meth = (_PyCFunctionFast)(void (*)(void))CFUNC(callable)->m_ml->ml_meth;
-    return meth(CFUNC(callable)->m_self, args, PyVectorcall_NARGS(nargsf));
+    return check_function_result(callable,
+                                  meth(CFUNC(callable)->m_self, args, PyVectorcall_NARGS(nargsf)));
 }
 
 static PyObject *
@@ -368,7 +394,22 @@ vectorcall_fastcall_keywords(PyObject *callable, PyObject *const *args, size_t n
 {
     _PyCFunctionFastWithKeywords meth =
         (_PyCFunctionFastWithKeywords)(void (*)(void))CFUNC(callable)->m_ml->ml_meth;
-    return meth(CFUNC(callable)->m_self, args, PyVectorcall_NARGS(nargsf), kwnames);
+    return check_function_result(
+        callable, meth(CFUNC(callable)->m_self, args, PyVectorcall_NARGS(nargsf), kwnames));
+}
+
+/* A METH_METHOD function takes the defining class between self and the
+   arguments (cfunction_vectorcall_FASTCALL_KEYWORDS_METHOD). */
+static PyObject *
+vectorcall_method_fastcall_keywords(PyObject *callable, PyObject *const *args, size_t nargsf,
+                                    PyObject *kwnames)
+{
+    PyCMethodObject *m = (PyCMethodObject *)callable;
+    PyObject *(*meth)(PyObject *, PyTypeObject *, PyObject *const *, Py_ssize_t, PyObject *) =
+        (PyObject *(*)(PyObject *, PyTypeObject *, PyObject *const *, Py_ssize_t, PyObject *))
+        (void (*)(void))m->func.m_ml->ml_meth;
+    return check_function_result(
+        callable, meth(m->func.m_self, m->mm_class, args, PyVectorcall_NARGS(nargsf), kwnames));
 }
 
 static PyObject *
@@ -405,7 +446,7 @@ vectorcall_varargs(PyObject *callable, PyObject *const *args, size_t nargsf, PyO
         : ml->ml_meth(CFUNC(callable)->m_self, tuple);
     Py_XDECREF(kwargs);
     Py_DECREF(tuple);
-    return result;
+    return check_function_result(callable, result);
 }
 
 /* A frame primitive called from C runs its frame in a nested eval loop. */
@@ -424,7 +465,7 @@ vectorcall_frame(PyObject *callable, PyObject *const *args, size_t nargsf, PyObj
         return NULL;
     }
     PyObject *result;
-    if (lu_enter_frame(ts, f, &result)) {
+    if (lu_enter_frame(ts, f, 0, &result)) {
         struct lu_task *t = (struct lu_task *)ts;
         t->pin++;
         result = lu_eval(ts, f);
@@ -443,6 +484,9 @@ PyCMethod_New(PyMethodDef *ml, PyObject *self, PyObject *module, PyTypeObject *c
     case METH_VARARGS | METH_KEYWORDS: vectorcall = vectorcall_varargs; break;
     case METH_FASTCALL: vectorcall = vectorcall_fastcall; break;
     case METH_FASTCALL | METH_KEYWORDS: vectorcall = vectorcall_fastcall_keywords; break;
+    case METH_METHOD | METH_FASTCALL | METH_KEYWORDS:
+        vectorcall = vectorcall_method_fastcall_keywords;
+        break;
     case METH_NOARGS: vectorcall = vectorcall_noargs; break;
     case METH_O: vectorcall = vectorcall_o; break;
     case LU_METH_FRAME | METH_FASTCALL: vectorcall = vectorcall_frame; break;
@@ -450,12 +494,18 @@ PyCMethod_New(PyMethodDef *ml, PyObject *self, PyObject *module, PyTypeObject *c
         lu_err_format(PyExc_SystemError, "%s() method: bad call flags", ml->ml_name);
         return NULL;
     }
-    if (cls != NULL) {
-        lu_err_format(PyExc_SystemError, "PyCMethod_New: METH_METHOD arrives with K1c");
+    if (!(ml->ml_flags & METH_METHOD) != (cls == NULL)) {
+        lu_err_format(PyExc_SystemError, "%s() method: METH_METHOD and its class arrive together "
+                                         "or not at all", ml->ml_name);
         return NULL;
     }
-    PyCFunctionObject *op = (PyCFunctionObject *)lu_object_new(&PyCFunction_Type,
-                                                               sizeof(PyCFunctionObject));
+    PyTypeObject *own = (PyTypeObject *)&PyCFunction_Type;
+    Py_ssize_t size = sizeof(PyCFunctionObject);
+    if (ml->ml_flags & METH_METHOD) {
+        own = &PyCMethod_Type;
+        size = sizeof(PyCMethodObject);
+    }
+    PyCFunctionObject *op = (PyCFunctionObject *)lu_object_new(own, size);
     if (op == NULL) {
         return NULL;
     }
@@ -463,6 +513,9 @@ PyCMethod_New(PyMethodDef *ml, PyObject *self, PyObject *module, PyTypeObject *c
     op->m_self = Py_XNewRef(self);
     op->m_module = Py_XNewRef(module);
     op->vectorcall = vectorcall;
+    if (ml->ml_flags & METH_METHOD) {
+        ((PyCMethodObject *)op)->mm_class = (PyTypeObject *)Py_NewRef(cls);
+    }
     return (PyObject *)op;
 }
 
@@ -485,12 +538,18 @@ cfunction_traverse(PyObject *op, visitproc visit, void *arg)
 {
     Py_VISIT(CFUNC(op)->m_self);
     Py_VISIT(CFUNC(op)->m_module);
+    if (Py_IS_TYPE(op, &PyCMethod_Type)) {
+        Py_VISIT(((PyCMethodObject *)op)->mm_class);
+    }
     return 0;
 }
 
 static void
 cfunction_dealloc(PyObject *op)
 {
+    if (Py_IS_TYPE(op, &PyCMethod_Type)) {
+        Py_XDECREF(((PyCMethodObject *)op)->mm_class);
+    }
     Py_XDECREF(CFUNC(op)->m_self);
     Py_XDECREF(CFUNC(op)->m_module);
     lu_object_free(op);
@@ -926,6 +985,12 @@ lu_function_init(void)
     PyCFunction_Type.tp_vectorcall_offset = offsetof(PyCFunctionObject, vectorcall);
     PyCFunction_Type.tp_dealloc = cfunction_dealloc;
     PyCFunction_Type.tp_traverse = cfunction_traverse;
+    /* A METH_METHOD function's object: the same, with its defining class. */
+    PyCMethod_Type.tp_basicsize = sizeof(PyCMethodObject);
+    PyCMethod_Type.tp_flags |= flags;
+    PyCMethod_Type.tp_vectorcall_offset = offsetof(PyCFunctionObject, vectorcall);
+    PyCMethod_Type.tp_dealloc = cfunction_dealloc;
+    PyCMethod_Type.tp_traverse = cfunction_traverse;
     PyCell_Type.tp_basicsize = sizeof(PyCellObject);
     PyCell_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyCell_Type.tp_dealloc = cell_dealloc;

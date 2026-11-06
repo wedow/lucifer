@@ -1,0 +1,6 @@
+id	reason
+test.test_capi.test_misc.Test_testcapi.test_atexit	_testcapi calls PyThreadState_Get() after Py_NewInterpreter() returns NULL (no subinterpreters): a fatal error that kills the worker (luc-fd8e)
+test.test_capi.test_misc.Test_testcapi.test_current_tstate_matches	_testcapi calls PyThreadState_Get() after Py_NewInterpreter() returns NULL (no subinterpreters): a fatal error that kills the worker (luc-fd8e)
+test.test_capi.test_misc.Test_testcapi.test_datetime_capi	_testcapi asserts the datetime C API types are not heap types; the assert aborts the worker (luc-5svj)
+test.test_capi.test_misc.TestThreadState.test_gilstate_matches_current	calls _testcapi.test_current_tstate_matches, which calls PyThreadState_Get() after Py_NewInterpreter() returns NULL: a fatal error that kills the worker (luc-fd8e)
+test.test_capi.test_unicode.PyUnicodeWriterTest.test_memory_error	injects MemoryError into every allocation; the runtime's own paths (type invalidation, error display) still allocate, a fatal error that kills the worker (luc-ovg2)

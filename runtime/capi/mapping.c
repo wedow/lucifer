@@ -147,6 +147,64 @@ PySlice_Unpack(PyObject *_r, Py_ssize_t *start, Py_ssize_t *stop, Py_ssize_t *st
     return 0;
 }
 
+/* The old interface (Objects/sliceobject.c): exact ints only, indexes not
+   clamped, -1 without an exception for anything out of range. */
+int
+PySlice_GetIndices(PyObject *_r, Py_ssize_t length, Py_ssize_t *start, Py_ssize_t *stop,
+                   Py_ssize_t *step)
+{
+    PySliceObject *r = (PySliceObject *)_r;
+    if (r->step == Py_None) {
+        *step = 1;
+    }
+    else {
+        if (!PyLong_Check(r->step)) {
+            return -1;
+        }
+        *step = PyLong_AsSsize_t(r->step);
+    }
+    if (r->start == Py_None) {
+        *start = *step < 0 ? length - 1 : 0;
+    }
+    else {
+        if (!PyLong_Check(r->start)) {
+            return -1;
+        }
+        *start = PyLong_AsSsize_t(r->start);
+        if (*start < 0) {
+            *start += length;
+        }
+    }
+    if (r->stop == Py_None) {
+        *stop = *step < 0 ? -1 : length;
+    }
+    else {
+        if (!PyLong_Check(r->stop)) {
+            return -1;
+        }
+        *stop = PyLong_AsSsize_t(r->stop);
+        if (*stop < 0) {
+            *stop += length;
+        }
+    }
+    if (*stop > length || *start >= length || *step == 0) {
+        return -1;
+    }
+    return 0;
+}
+
+#undef PySlice_GetIndicesEx
+int
+PySlice_GetIndicesEx(PyObject *_r, Py_ssize_t length, Py_ssize_t *start, Py_ssize_t *stop,
+                     Py_ssize_t *step, Py_ssize_t *slicelength)
+{
+    if (PySlice_Unpack(_r, start, stop, step) < 0) {
+        return -1;
+    }
+    *slicelength = PySlice_AdjustIndices(length, start, stop, *step);
+    return 0;
+}
+
 Py_ssize_t
 PySlice_AdjustIndices(Py_ssize_t length, Py_ssize_t *start, Py_ssize_t *stop, Py_ssize_t step)
 {

@@ -1547,6 +1547,7 @@ call_tail: {
     PyObject *target = NULL, *self = NULL;
     PyObject *init = NULL, *held = NULL;      /* references that keep target alive */
     int plan = free_self && !mon && Py_IS_TYPE(callable, &PyType_Type) && callable != (PyObject *)&PyType_Type
+        && ((PyTypeObject *)callable)->tp_vectorcall == NULL
         ? instance_plan((PyTypeObject *)callable, total, &init) : 0;
     if (plan == 3 && kwnames != NULL) {
         Py_CLEAR(init);         /* the kernel runs __new__ with keywords */
@@ -1640,7 +1641,8 @@ call_tail: {
             result = NULL;
             goto call_done;
         }
-        if (!found && Py_TYPE(callable)->tp_call == lu_slot_tp_call) {
+        if (!found && Py_TYPE(callable)->tp_call == lu_slot_tp_call
+            && PyVectorcall_Function(callable) == NULL) {
             /* An instance whose type's __call__ is a function or kernel descriptor. */
             PyObject *descr = _PyType_LookupRef(Py_TYPE(callable), LU_ID(__call__));
             PyObject *unused;
@@ -1732,7 +1734,7 @@ kernel_call: {
 
 push_callee:
     /* Enters callee, pushed and bound; frame->stackpointer is saved. */
-    if (!lu_enter_frame(ts, callee, &result)) {
+    if (!lu_enter_frame(ts, callee, 0, &result)) {
         ERROR_IF(result == NULL);
         PUSH_RETURNED(kret, result);
         POLL();
@@ -1746,7 +1748,27 @@ push_callee:
 
 resume_linked:
     /* A generator's frame, linked above this one by its resumption; a throw
-       enters it by raising. */
+       enters it by raising. A PEP 523 hook evaluates resumes as frame
+       entries too (_PyEval_EvalFrame), and its result continues as the
+       yield or the return would. */
+    if (ts->interp->eval_frame != NULL && callee->owner != LU_FRAME_KERNEL_HIDDEN) {
+        PyObject *hook_result;
+        if (!lu_enter_frame(ts, callee, ts->current_exception != NULL, &hook_result)) {
+            ERROR_IF(hook_result == NULL);
+            uint8_t r = callee->ret;
+            if (lu_gen_of(callee)->frame_state >= LU_GEN_COMPLETED) {
+                if (r == LU_RETURN_FOR_ITER) {
+                    Py_DECREF(hook_result);
+                    hook_result = LU_MISSING;
+                }
+                else if (r == LU_RETURN_SEND) {
+                    next_instr += instr_oparg(code, SEND_START());
+                }
+            }
+            PUSH_RETURNED(r, hook_result);
+            DISPATCH();
+        }
+    }
     ts->current_frame = (struct _PyInterpreterFrame *)callee;
     frame = callee;
     LOAD_FRAME();
@@ -3868,6 +3890,9 @@ PyObject *
 PyEval_EvalCode(PyObject *co, PyObject *globals, PyObject *locals)
 {
     PyThreadState *ts = PyThreadState_Get();
+    if (locals == NULL) {
+        locals = globals;
+    }
     if (lu_ns_lookup(globals, LU_ID(__builtins__)) == NULL
         && lu_ns_insert(globals, LU_ID(__builtins__), ts->interp->builtins) < 0) {
         return NULL;
@@ -3886,9 +3911,65 @@ PyEval_EvalCode(PyObject *co, PyObject *globals, PyObject *locals)
     int nested = ts->current_frame != NULL;
     PyObject *result;
     t->pin += nested;
-    if (lu_enter_frame(ts, f, &result)) {
+    if (lu_enter_frame(ts, f, 0, &result)) {
         result = lu_eval(ts, f);
     }
     t->pin -= nested;
+    return result;
+}
+
+/* The legacy entry (Python/ceval.c): a function made from the parts, called
+   with `locals`. Keywords come as name/value pairs. */
+PyObject *
+PyEval_EvalCodeEx(PyObject *co, PyObject *globals, PyObject *locals,
+                  PyObject *const *args, int argcount, PyObject *const *kws, int kwcount,
+                  PyObject *const *defs, int defcount, PyObject *kwdefs, PyObject *closure)
+{
+    if (!PyDict_Check(globals)) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+    PyFunctionObject *func = (PyFunctionObject *)lu_function_new(co, globals);
+    if (func == NULL) {
+        return NULL;
+    }
+    Py_SETREF(func->func_qualname, Py_NewRef(((PyCodeObject *)co)->co_name));
+    func->func_defaults = PyTuple_New(defcount);
+    PyObject *kwnames = kwcount ? PyTuple_New(kwcount) : NULL;
+    PyObject **owned = PyMem_Malloc((argcount + kwcount + 1) * sizeof(PyObject *));
+    if (func->func_defaults == NULL || (kwcount && kwnames == NULL) || owned == NULL) {
+        Py_DECREF(func);
+        Py_XDECREF(kwnames);
+        PyMem_Free(owned);
+        return PyErr_NoMemory();
+    }
+    for (int i = 0; i < defcount; i++) {
+        PyTuple_SET_ITEM(func->func_defaults, i, Py_NewRef(defs[i]));
+    }
+    func->func_kwdefaults = Py_XNewRef(kwdefs);
+    func->func_closure = Py_XNewRef(closure);
+    for (int i = 0; i < argcount; i++) {
+        owned[i] = Py_NewRef(args[i]);
+    }
+    for (int i = 0; i < kwcount; i++) {
+        PyTuple_SET_ITEM(kwnames, i, Py_NewRef(kws[2 * i]));
+        owned[argcount + i] = Py_NewRef(kws[2 * i + 1]);
+    }
+    PyThreadState *ts = PyThreadState_Get();
+    struct lu_frame *f = lu_frame_call(ts, func, owned, argcount, kwnames);
+    PyMem_Free(owned);
+    Py_XDECREF(kwnames);
+    Py_DECREF(func);
+    if (f == NULL) {
+        return NULL;
+    }
+    f->locals = Py_NewRef(locals != NULL ? locals : globals);
+    struct lu_task *t = (struct lu_task *)ts;
+    PyObject *result;
+    if (lu_enter_frame(ts, f, 0, &result)) {
+        t->pin++;
+        result = lu_eval(ts, f);
+        t->pin--;
+    }
     return result;
 }
