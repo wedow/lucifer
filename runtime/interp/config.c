@@ -1159,6 +1159,14 @@ lu_runtime_options(const PyConfig *config)
         }
         PyMem_Free(text);
     }
+    /* Without a backend (FOUNDATIONS 2.11) everything runs interpreted:
+       said once when compiling everything was asked for. */
+    if (!PyStatus_Exception(status) && jit.mode != LU_JIT_OFF && lu_jit_backend() == NULL) {
+        if (jit.mode == LU_JIT_ALWAYS) {
+            fprintf(stderr, "lucifer: -X lucifer_jit=always: no backend; running interpreted\n");
+        }
+        jit.mode = LU_JIT_OFF;
+    }
     if (!PyStatus_Exception(status)) {
         _PyRuntime.stress = stress;
         _PyRuntime.handoff = handoff;

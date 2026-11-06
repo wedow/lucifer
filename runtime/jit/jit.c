@@ -359,7 +359,7 @@ static struct lu_unit *
 compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
 {
     PyCodeObject *code = frame->code;
-    if (lu_target.name == NULL || !ts->interp->kernel_booted || !(code->co_flags & CO_OPTIMIZED)
+    if (!ts->interp->kernel_booted || !(code->co_flags & CO_OPTIMIZED)
         || (code->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE))) {
         return NULL;
     }
@@ -395,6 +395,12 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
     }
     __atomic_store_n(&jc->compiling, 0, __ATOMIC_RELEASE);
     return u;
+}
+
+const char *
+lu_jit_backend(void)
+{
+    return lu_target.name;
 }
 
 enum lu_jit_result
