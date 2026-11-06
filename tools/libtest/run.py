@@ -205,7 +205,7 @@ def xml_rows(path):
     return rows
 
 
-def run_module(module, ids, args, python, env, raw, unavailable, excluded):
+def run_module(module, ids, args, python, env, raw, unavailable, excluded=None):
     directory = raw / module
     directory.mkdir(parents=True, exist_ok=True)
     events, state, xml, worker_pid = (directory / name for name in ('events.jsonl', 'state.jsonl', 'junit.xml', 'worker.pid'))
@@ -214,7 +214,7 @@ def run_module(module, ids, args, python, env, raw, unavailable, excluded):
     worker = shlex.join([*python, str(BRIDGE), '--worker'])
     # Cases that kill this runtime's worker are left out: regrtest ignores
     # them by full id, and they stay NOTRUN with the reason recorded.
-    excluded = {key: reason for key, reason in excluded.items() if key in ids}
+    excluded = {key: reason for key, reason in (excluded or {}).items() if key in ids}
     ignore = []
     if excluded:
         (directory / 'excluded.txt').write_text(''.join(key + '\n' for key in sorted(excluded)))
