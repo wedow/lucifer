@@ -1,6 +1,6 @@
 ---
 id: luc-c69o
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-06T10:07:51Z
@@ -16,3 +16,9 @@ Reproduction (tools/bench/web/toggle_crash.py on branch luc-web; SITE = a 3.14t 
   PYTHONPATH=SITE taskset -c 0-3,6-9 bin/lucifer -X lucifer_jit=on tools/bench/web/toggle_crash.py 400 8
 Rates (400 requests per thread): 8 threads: -X lucifer_jit=on 3/3 crash, =always 3/3 crash; =always -X lucifer_stress=deopt:7 0/3, deopt:3 0/3; =off 0/3. 1 thread, jit=on: 0/3. Also crashes 3/3 at ebc38da (master before the luc-6e6n merge, same fault site), so luc-6e6n (inlined frames making calls) is not the cause, though the kept/borrowed-frame paths are still a suspect. Needs threads, so look at per-thread state the JIT shares: compiled code or caches mutated while another thread runs them, frame/datastack bookkeeping across a call that runs Python, or a deopt from one thread rewriting state another thread's frame uses.
 
+
+## Notes
+
+**2026-11-06T12:30:10Z**
+
+Root cause: not a thread race. ssa_build.c build_block missed that a join's NULL stack entry agrees (each edge makes its own NULL const), so CALL read the phi as self and inlined redirect with args shifted; location became NULL. Threads only made the view hot (400 req/thread < 1000 call threshold with 1 thread). Fixed on branch luc-c69o (db43b32, merged master at 89c9add); test tests/kernel/jit_join_null.py.
