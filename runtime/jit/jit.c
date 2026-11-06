@@ -388,7 +388,7 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
         }
     }
     if (jc->compiles >= MAX_COMPILES && u == NULL) {
-        if (_PyRuntime.jit.debug) {
+        if ((_PyRuntime.jit.debug || _PyRuntime.jit.stats) && !__atomic_load_n(&jc->disabled, __ATOMIC_RELAXED)) {
             fprintf(stderr, "jit: disabled %s\n", PyUnicode_AsUTF8(code->co_qualname));
         }
         __atomic_store_n(&jc->disabled, 1, __ATOMIC_RELAXED);

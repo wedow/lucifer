@@ -14,7 +14,9 @@ require that a count of the tier's does not grow with the iterations:
          same place stays in the interpreter instead of paying an entry and
          an exit each time.
   calls  tests/kernel/jit_calls.py, whose hot calls the tier can inline once
-         it has feedback: entries into compiled code.
+         it has feedback: entries into compiled code and direct calls.
+         None of its functions may be disabled (recompiled until the tier
+         gives up on it).
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct calls into compiled code, one per
@@ -26,6 +28,7 @@ It reports SKIP where perf cannot record.
 Exit status 1 on any difference.
 """
 import argparse
+import ast
 import os
 from pathlib import Path
 import re
@@ -44,10 +47,10 @@ MODES = {
     'deopt:7': ['-X', 'lucifer_jit=always', '-X', 'lucifer_stress=deopt:7'],
 }
 TIMING = re.compile(r'\d+us')
-# lane: (program, the count in the -X lucifer_jit_stats report, counts allowed per iteration)
+# lane: (program, the counts in the -X lucifer_jit_stats report, summed, counts allowed per iteration)
 GROWTH = {
     'exits': ('jit_exits.py', r'jit: entries .* side (\d+)', 0),
-    'calls': ('jit_calls.py', r'jit: entries (\d+)', 0),
+    'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+)', 1),
 }
 GROWTH_N = 20000
@@ -64,7 +67,18 @@ def counted(lucifer, program, pattern, n, timeout):
     code, out, err = run([lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', str(program), str(n)],
                          timeout)
     m = re.search(pattern, err)
-    return code, out, int(m[1]) if m else None
+    return code, out, sum(map(int, m.groups())) if m else None, re.findall(r'^jit: disabled (\S+)', err, re.M)
+
+
+def qualnames(program):
+    """The qualified names of a program's functions and methods."""
+    names = set()
+    for node in ast.parse(program.read_text()).body:
+        if isinstance(node, ast.FunctionDef):
+            names.add(node.name)
+        elif isinstance(node, ast.ClassDef):
+            names.update(f'{node.name}.{f.name}' for f in node.body if isinstance(f, ast.FunctionDef))
+    return names
 
 
 def check_growth(args, lane):
@@ -81,6 +95,9 @@ def check_growth(args, lane):
         problems.append('no stats')
     elif large[2] - small[2] > per * GROWTH_N + GROWTH_N // 20:
         problems.append(f'{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
+    own = qualnames(program)
+    if lane == 'calls' and own & set(small[3]):
+        problems.append(f"disabled: {' '.join(sorted(own & set(small[3])))}")
     print(f"{'FAIL' if problems else 'PASS'} {lane}" + (': ' + '; '.join(problems) if problems else
                                                       f' ({small[2]}, {large[2]})'))
     return 1 if problems else 0
