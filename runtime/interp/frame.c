@@ -35,48 +35,93 @@ push_chunk(PyThreadState *ts, size_t words)
     return &c->data[0];
 }
 
-/* Kernel code stands in for C, which CPython's limit does not count: it runs
-   a little past the limit, so an exception raised at the limit can be built. */
-#define LU_KERNEL_HEADROOM 50
-
-struct lu_frame *
-lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals)
+/* A frame for func on the datastack, its fields borrowed and its locals
+   not set; the recursion count is the caller's. NULL when out of memory. */
+static struct lu_frame *
+alloc_frame(PyThreadState *ts, PyFunctionObject *func)
 {
     PyCodeObject *code = (PyCodeObject *)func->func_code;
     size_t words = (size_t)code->co_framesize;
-    int floor = (code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) ? -LU_KERNEL_HEADROOM : 0;
-    if (ts->py_recursion_remaining-- <= floor) {
-        ts->py_recursion_remaining++;
-        lu_err_format(PyExc_RecursionError, "maximum recursion depth exceeded");
-        return NULL;
-    }
     PyObject **base = ts->datastack_top;
     if (base == NULL || (size_t)(ts->datastack_limit - base) < words) {
         base = push_chunk(ts, words);
         if (base == NULL) {
-            ts->py_recursion_remaining++;
-            PyErr_NoMemory();
             return NULL;
         }
     }
     ts->datastack_top = base + words;
     struct lu_frame *f = (struct lu_frame *)base;
-    f->code = (PyCodeObject *)Py_NewRef(code);
+    f->code = code;
     f->previous = NULL;
-    f->func = Py_NewRef(func);
+    f->func = (PyObject *)func;
     f->globals = func->func_globals;
     f->builtins = func->func_builtins;
-    f->locals = Py_XNewRef(locals);
+    f->locals = NULL;
     f->frame_obj = NULL;
     f->instr = f->last = lu_code_start(code);
     f->owner = (code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) ? LU_FRAME_KERNEL_HIDDEN
                                                                 : LU_FRAME_INTERPRETER;
     f->ret = LU_RETURN_PUSH;
+    f->stackpointer = f->localsplus + code->co_nlocalsplus;
+    return f;
+}
+
+/* Gives the topmost frame's datastack space back. */
+static void
+free_frame(PyThreadState *ts, struct lu_frame *f)
+{
+    _PyStackChunk *c = ts->datastack_chunk;
+    if ((PyObject **)f != &c->data[0]) {
+        ts->datastack_top = (PyObject **)f;
+        return;
+    }
+    _PyStackChunk *prev = c->previous;
+    PyMem_RawFree(ts->datastack_cached_chunk);
+    ts->datastack_cached_chunk = c;
+    ts->datastack_chunk = prev;
+    ts->datastack_top = prev != NULL ? &prev->data[prev->top] : NULL;
+    ts->datastack_limit = prev != NULL ? (PyObject **)((char *)prev + prev->size) : NULL;
+}
+
+struct lu_frame *
+lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals)
+{
+    PyCodeObject *code = (PyCodeObject *)func->func_code;
+    if (ts->py_recursion_remaining-- <= lu_frame_floor(code)) {
+        ts->py_recursion_remaining++;
+        lu_err_format(PyExc_RecursionError, "maximum recursion depth exceeded");
+        return NULL;
+    }
+    struct lu_frame *f = alloc_frame(ts, func);
+    if (f == NULL) {
+        ts->py_recursion_remaining++;
+        PyErr_NoMemory();
+        return NULL;
+    }
+    Py_INCREF(code);
+    Py_INCREF(func);
+    f->locals = Py_XNewRef(locals);
     for (int i = 0; i < code->co_nlocalsplus; i++) {
         f->localsplus[i] = NULL;
     }
-    f->stackpointer = f->localsplus + code->co_nlocalsplus;
     return f;
+}
+
+struct lu_frame *
+lu_frame_push_lent(PyThreadState *ts, PyFunctionObject *func)
+{
+    struct lu_frame *f = alloc_frame(ts, func);
+    if (f != NULL) {
+        ts->py_recursion_remaining--;
+    }
+    return f;
+}
+
+void
+lu_frame_pop_lent(PyThreadState *ts, struct lu_frame *f)
+{
+    ts->py_recursion_remaining++;
+    free_frame(ts, f);
 }
 
 /* The references a frame holds, except its code. */
@@ -101,17 +146,7 @@ lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
     }
     Py_DECREF(f->code);
     ts->py_recursion_remaining++;
-    _PyStackChunk *c = ts->datastack_chunk;
-    if ((PyObject **)f != &c->data[0]) {
-        ts->datastack_top = (PyObject **)f;
-        return;
-    }
-    _PyStackChunk *prev = c->previous;
-    PyMem_RawFree(ts->datastack_cached_chunk);
-    ts->datastack_cached_chunk = c;
-    ts->datastack_chunk = prev;
-    ts->datastack_top = prev != NULL ? &prev->data[prev->top] : NULL;
-    ts->datastack_limit = prev != NULL ? (PyObject **)((char *)prev + prev->size) : NULL;
+    free_frame(ts, f);
 }
 
 /* The walker (FOUNDATIONS 2.2). Links are single-store pushes and pops, so a
@@ -544,7 +579,7 @@ fast_value(struct lu_frame *f, int i)
     PyObject *v = f->localsplus[i];
     unsigned char kind = (unsigned char)PyBytes_AS_STRING(f->code->co_localspluskinds)[i];
     if (v != NULL && (kind & (CO_FAST_CELL | CO_FAST_FREE)) && PyCell_Check(v)) {
-        v = ((PyCellObject *)v)->ob_ref;
+        return lu_cell_get(v);
     }
     return Py_XNewRef(v);
 }
@@ -594,9 +629,7 @@ prim_frame_fast_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
         PyObject **slot = &f->localsplus[i];
         if (*slot != NULL && PyCell_Check(*slot) && (kind & (CO_FAST_CELL | CO_FAST_FREE))) {
-            PyObject *old = ((PyCellObject *)*slot)->ob_ref;
-            ((PyCellObject *)*slot)->ob_ref = Py_NewRef(value);
-            Py_XDECREF(old);
+            Py_XDECREF(lu_cell_exchange(*slot, Py_NewRef(value)));
         }
         else if (*slot != value) {
             /* The running code may hold the old value without a reference of its own. */

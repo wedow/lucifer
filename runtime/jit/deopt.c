@@ -12,7 +12,15 @@
 
    A virtual box (an int or float compiled code never boxed) is built once
    per exit, so every slot that names the same value gets the same object.
-   Old slot values are released last: a finalizer then sees whole frames. */
+   Old slot values are released last: a finalizer then sees whole frames.
+
+   A call from an inlined frame runs with the inlined frames pushed, lent
+   their code, function and locals by compiled code (lu_jit_frames_push).
+   A callee that made a frame object of one keeps them all pushed
+   (lu_jit_frames_pop), and the exit taken next makes them ordinary frames
+   and fills their stacks instead of pushing new ones: the frame object
+   stays the frame's, and the frames keep the locals they have, which the
+   callee may have written through f_locals. */
 #include "jit/target.h"
 #include "jit/jit.h"
 
@@ -106,12 +114,103 @@ holds(struct regs *r, const struct lu_dv *dv, PyObject *cur)
     }
 }
 
+/* An inlined frame, pushed above top at pc with its locals and an empty
+   stack; the references compiled code owns move into it. */
+static struct lu_frame *
+push_inlined(PyThreadState *ts, struct regs *r, struct lu_deopt_frame *fr, struct lu_frame *top)
+{
+    /* GUARD_DEPTH at entry left room for it. */
+    struct lu_frame *f = lu_frame_push(ts, (PyFunctionObject *)fr->func, NULL);
+    if (f == NULL) {
+        Py_FatalError("lucifer jit: no room to rebuild an inlined frame");
+    }
+    for (int i = 0; i < fr->nlocals; i++) {
+        f->localsplus[i] = take(r, &fr->vals[i]);
+    }
+    f->instr = f->last = lu_code_start(fr->code) + fr->pc;
+    f->previous = top;
+    return f;
+}
+
+void
+lu_jit_frames_push(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
+                   const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills)
+{
+    struct regs r = { gpr, fpr, spills, NULL, 0, 0 };
+    struct lu_frame *top = root;
+    for (int k = 1; k < d->nframes; k++) {
+        struct lu_deopt_frame *fr = &d->frames[k];
+        struct lu_frame *f = lu_frame_push_lent(ts, (PyFunctionObject *)fr->func);
+        if (f == NULL) {
+            Py_FatalError("lucifer jit: no room for an inlined frame");
+        }
+        /* Locals are objects here (the optimizer boxes them): lent, as
+           the code and function are. */
+        for (int i = 0; i < fr->nlocals; i++) {
+            const struct lu_dv *dv = &fr->vals[i];
+            if (dv->kind == DV_BOX_I64 || dv->kind == DV_BOX_F64) {
+                Py_FatalError("lucifer jit: a virtual local in a lent frame");
+            }
+            f->localsplus[i] = dv->kind == DV_NULL ? NULL : (PyObject *)(uintptr_t)raw(&r, dv);
+        }
+        /* Each caller is past its call; the innermost shows the helper's instruction as the one running. */
+        f->instr = f->last = lu_code_start(fr->code) + (k < d->nframes - 1 ? fr->pc : d->call_pc);
+        f->previous = top;
+        top = f;
+    }
+    ts->current_frame = (struct _PyInterpreterFrame *)top;
+}
+
+/* deopt:N keeps the frames of every Nth call too; their exit then counts
+   as a stress exit, from which nothing is learned. */
+static _Thread_local unsigned long stress_calls;
+static _Thread_local int kept_by_stress;
+
+void
+lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root)
+{
+    struct lu_frame *top = (struct lu_frame *)ts->current_frame;
+    int keep = 0;
+    for (struct lu_frame *f = top; f != root; f = f->previous) {
+        keep |= f->frame_obj != NULL;
+    }
+    unsigned long n = _PyRuntime.stress.deopt;
+    kept_by_stress = !keep && n != 0 && ++stress_calls % n == 0;
+    if (keep || kept_by_stress) {
+        return;
+    }
+    while (top != root) {
+        struct lu_frame *f = top;
+        top = f->previous;
+        lu_frame_pop_lent(ts, f);
+    }
+    ts->current_frame = (struct _PyInterpreterFrame *)root;
+}
+
 int
 lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
              const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills)
 {
     struct regs r = { gpr, fpr, spills, NULL, 0, 0 };
-    lu_jit_note_exit(d);
+    /* Frames a call kept pushed above the root, innermost first. */
+    struct lu_frame *kept = (struct lu_frame *)ts->current_frame != root
+        ? (struct lu_frame *)ts->current_frame : NULL;
+    if (kept != NULL && kept_by_stress) {
+        struct lu_deopt stressed = *d;
+        stressed.reason = EXIT_STRESS;
+        stressed.stress = NULL;
+        lu_jit_note_exit(&stressed);
+    }
+    else {
+        lu_jit_note_exit(d);
+    }
+    int depth = 0;
+    for (struct lu_frame *f = kept; f != NULL && f != root; f = f->previous) {
+        depth++;
+    }
+    if (kept != NULL && depth != d->nframes - 1) {
+        Py_FatalError("lucifer jit: kept frames do not match the exit");
+    }
     struct lu_deopt_frame *fr = &d->frames[0];
     PyObject **old = malloc(sizeof(PyObject *) * (size_t)(fr->nlocals + 1));
     int nold = 0;
@@ -134,21 +233,30 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     struct lu_frame *top = root;
     for (int k = 1; k < d->nframes; k++) {
         fr = &d->frames[k];
-        struct lu_frame *f = lu_frame_push(ts, (PyFunctionObject *)fr->func, NULL);
-        if (f == NULL) {
-            Py_FatalError("lucifer jit: no room to rebuild an inlined frame");
+        struct lu_frame *f;
+        if (kept != NULL) {
+            f = kept;
+            for (int j = d->nframes - 1; j > k; j--) {
+                f = f->previous;
+            }
+            /* The frame takes what it was lent. Each local's reference goes
+               to whoever holds the lent value now: the slot, or the frame
+               object's list of values f_locals replaced. */
+            Py_INCREF(f->code);
+            Py_INCREF(f->func);
+            for (int i = 0; i < fr->nlocals; i++) {
+                (void)take(&r, &fr->vals[i]);
+            }
+            f->instr = f->last = lu_code_start(fr->code) + fr->pc;
         }
-        for (int i = 0; i < fr->nlocals; i++) {
-            f->localsplus[i] = take(&r, &fr->vals[i]);
+        else {
+            f = push_inlined(ts, &r, fr, top);
         }
         sp = f->localsplus + fr->nlocals;
         for (int j = 0; j < fr->nstack; j++) {
             *sp++ = take(&r, &fr->vals[fr->nlocals + j]);
         }
         f->stackpointer = sp;
-        f->instr = f->last = lu_code_start(fr->code) + fr->pc;
-        f->previous = top;
-        f->ret = LU_RETURN_PUSH;
         top = f;
     }
     ts->current_frame = (struct _PyInterpreterFrame *)top;

@@ -1,6 +1,6 @@
 ---
 id: luc-k5qz
-status: open
+status: closed
 deps: [luc-d5u1]
 links: []
 created: 2026-11-03T01:39:45Z

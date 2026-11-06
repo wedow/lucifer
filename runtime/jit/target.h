@@ -85,6 +85,7 @@ struct lu_deopt {
     int reason;                 /* enum lu_exit_reason */
     int opcode;                 /* the base opcode at the exit, for the counts */
     struct lu_unit *unit;       /* the unit it leaves */
+    int call_pc;                /* lu_jit_frames_push: the innermost frame's instruction during the call */
 };
 
 /* A compiled entry into a code object at one bytecode boundary. */
@@ -118,6 +119,16 @@ void lu_target_free(struct lu_unit *unit);
    and returns the enum lu_jit_result the unit returns. */
 int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
                  const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills);
+
+/* Around a Python-running helper called from an inlined frame
+   (runtime/jit/deopt.c): pushes the inlined frames d names as the
+   interpreter would have them during the call, with their locals, read as
+   lu_jit_deopt reads them; then pops them again, unless the callee made a
+   frame object of one. Kept frames are the ones the next exit (the call's
+   error exit or the frames guard after it) hands the interpreter. */
+void lu_jit_frames_push(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
+                        const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills);
+void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
 
 /* The helpers compiled code calls, by id; runtime/jit/helpers.c gives each
    its result, flags (IF_RAISE: NULL, or -1 for a bit, raised; IF_PY: may

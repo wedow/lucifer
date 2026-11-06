@@ -1647,12 +1647,6 @@ lu_caller_globals(PyThreadState *ts)
         return NULL; } } while (0)
 
 static PyObject *
-or_missing(PyObject *v)
-{
-    return Py_NewRef(v != NULL ? v : LU_MISSING);
-}
-
-static PyObject *
 bool_of(int v)
 {
     return Py_NewRef(v ? Py_True : Py_False);
@@ -2349,7 +2343,8 @@ prim_cell_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "cell_get() needs a cell");
         return NULL;
     }
-    return or_missing(((PyCellObject *)args[0])->ob_ref);
+    PyObject *v = lu_cell_get(args[0]);
+    return v != NULL ? v : Py_NewRef(LU_MISSING);
 }
 
 static PyObject *
@@ -2360,7 +2355,7 @@ prim_cell_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "cell_set() needs a cell");
         return NULL;
     }
-    Py_XSETREF(((PyCellObject *)args[0])->ob_ref, args[1] == LU_MISSING ? NULL : Py_NewRef(args[1]));
+    Py_XDECREF(lu_cell_exchange(args[0], args[1] == LU_MISSING ? NULL : Py_NewRef(args[1])));
     return Py_NewRef(Py_None);
 }
 

@@ -259,6 +259,30 @@ PyCell_New(PyObject *obj)
     return (PyObject *)op;
 }
 
+PyObject *
+lu_cell_get(PyObject *cell)
+{
+    PyCellObject *c = (PyCellObject *)cell;
+    PyObject *v = lu_try_xget_ref(&c->ob_ref);
+    if (v == NULL) {
+        Py_BEGIN_CRITICAL_SECTION(cell);
+        v = c->ob_ref != NULL ? lu_new_ref_with_lock(c->ob_ref) : NULL;
+        Py_END_CRITICAL_SECTION();
+    }
+    return v;
+}
+
+PyObject *
+lu_cell_exchange(PyObject *cell, PyObject *v)
+{
+    PyObject *old;
+    Py_BEGIN_CRITICAL_SECTION(cell);
+    old = ((PyCellObject *)cell)->ob_ref;
+    __atomic_store_n(&((PyCellObject *)cell)->ob_ref, v, __ATOMIC_RELEASE);
+    Py_END_CRITICAL_SECTION();
+    return old;
+}
+
 static int
 cell_traverse(PyObject *op, visitproc visit, void *arg)
 {

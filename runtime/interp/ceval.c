@@ -1349,7 +1349,7 @@ op_STORE_NAME: {
     else {
         if (PyDict_CheckExact(frame->locals)) {
             PyObject *old = ns_get(frame->locals, name);
-            err = old == NULL && PyErr_Occurred() ? -1 : lu_ns_insert(frame->locals, name, v);
+            err = old == NULL && PyErr_Occurred() ? -1 : lu_ns_store(frame->locals, name, v);
             Py_XDECREF(old);
         }
         else {
@@ -1480,8 +1480,11 @@ op_CALL_KW:
 op_INSTRUMENTED_CALL:
     monitored = next_instr - 1;
 op_CALL:
-    if (oparg >= 1) {
-        lu_jit_observe(next_instr, sp[-oparg], oparg >= 2 ? sp[-oparg + 1] : sp[-oparg]);
+    {
+        /* The arguments' kinds; for a call without any, the callable's, so
+           that the site shows it ran. */
+        PyObject *first = oparg >= 1 ? sp[-oparg] : sp[-2];
+        lu_jit_observe(next_instr, first, oparg >= 2 ? sp[-oparg + 1] : first);
     }
     SKIP_CACHES();
     kwnames = NULL;
@@ -2325,33 +2328,30 @@ op_COPY_FREE_VARS: {
 }
 
 op_LOAD_DEREF: {
-    PyObject *v = ((PyCellObject *)GETLOCAL(oparg))->ob_ref;
+    SAVE_FRAME();
+    PyObject *v = lu_cell_get(GETLOCAL(oparg));
     if (v == NULL) {
-        SAVE_FRAME();
         format_unbound(code, oparg);
         goto error;
     }
-    PUSH(Py_NewRef(v));
+    PUSH(v);
     DISPATCH();
 }
 
 op_STORE_DEREF: {
-    PyCellObject *cell = (PyCellObject *)GETLOCAL(oparg);
-    PyObject *old = cell->ob_ref;
-    cell->ob_ref = POP();
-    Py_XDECREF(old);
+    PyObject *v = POP();
+    SAVE_FRAME();
+    Py_XDECREF(lu_cell_exchange(GETLOCAL(oparg), v));
     DISPATCH();
 }
 
 op_DELETE_DEREF: {
-    PyCellObject *cell = (PyCellObject *)GETLOCAL(oparg);
-    PyObject *old = cell->ob_ref;
+    SAVE_FRAME();
+    PyObject *old = lu_cell_exchange(GETLOCAL(oparg), NULL);
     if (old == NULL) {
-        SAVE_FRAME();
         format_unbound(code, oparg);
         goto error;
     }
-    cell->ob_ref = NULL;
     Py_DECREF(old);
     DISPATCH();
 }
@@ -2363,12 +2363,9 @@ op_LOAD_FROM_DICT_OR_DEREF: {
     PyObject *v = locals_get(mod_or_class_dict, name);
     int failed = v == NULL && PyErr_Occurred();
     if (v == NULL && !failed) {
-        v = ((PyCellObject *)GETLOCAL(oparg))->ob_ref;
+        v = lu_cell_get(GETLOCAL(oparg));
         if (v == NULL) {
             format_unbound(code, oparg);
-        }
-        else {
-            Py_INCREF(v);
         }
     }
     Py_DECREF(mod_or_class_dict);
@@ -2394,7 +2391,7 @@ op_LOAD_FAST_AND_CLEAR:
 op_STORE_GLOBAL: {
     PyObject *v = POP();
     SAVE_FRAME();
-    int err = lu_ns_insert(frame->globals, NAME(oparg), v);
+    int err = lu_ns_store(frame->globals, NAME(oparg), v);
     Py_DECREF(v);
     ERROR_IF(err < 0);
     DISPATCH();

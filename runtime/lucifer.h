@@ -1258,6 +1258,12 @@ void lu_fh_fatal(const char *func, const char *msg) __attribute__((noreturn));
 PyObject *lu_function_new(PyObject *code, PyObject *globals);
 /* function.__new__ over (code, globals, name, defaults, closure, kwdefaults). */
 PyObject *lu_function_from_args(PyObject *const *args);
+/* A cell's value as a new reference, or NULL when empty (_PyCell_GetStackRef):
+   taken as a dict's value is, since another thread may replace and free it. */
+PyObject *lu_cell_get(PyObject *cell);
+/* Stores v (stolen; NULL empties the cell) under the cell's lock and returns
+   the old value, which the caller releases (PyCell_SetTakeRef). */
+PyObject *lu_cell_exchange(PyObject *cell, PyObject *v);
 
 /* The namespace dict (runtime/object/dict.c): lookups and stores with exact
    str keys, which LOAD_NAME/LOAD_GLOBAL, module attributes and the kernel's
@@ -1269,8 +1275,11 @@ PyObject *lu_ns_lookup(PyObject *dict, PyObject *key);
    startup and for dicts that nothing else writes). */
 PyObject *lu_ns_get(PyObject *dict, PyObject *key);
 int lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value);
-/* lu_ns_insert in the dict's critical section, for a dict that other
-   threads may write: an instance's, or one the kernel stores into. */
+/* lu_ns_insert in the dict's critical section, for a dict another thread
+   may see: globals, a module's, an instance's. A reader whose lock-free try
+   fails reads under that lock (lu_dict_find_native), so an unlocked store
+   could free the value it is taking. lu_ns_insert alone is for a dict no
+   other thread can reach yet. */
 int lu_ns_store(PyObject *dict, PyObject *key, PyObject *value);
 /* Removes `key`: 1 when it was there, 0 when not. */
 int lu_ns_delete(PyObject *dict, PyObject *key);

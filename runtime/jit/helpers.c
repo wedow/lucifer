@@ -137,9 +137,7 @@ h_set_function_attribute(PyObject *func, PyObject *attr, int64_t which)
 static void
 h_cell_store(PyObject *cell, PyObject *v)
 {
-    PyObject *old = ((PyCellObject *)cell)->ob_ref;
-    ((PyCellObject *)cell)->ob_ref = Py_NewRef(v);
-    Py_XDECREF(old);
+    Py_XDECREF(lu_cell_exchange(cell, Py_NewRef(v)));
 }
 
 /* --- attributes --- */
@@ -211,7 +209,7 @@ h_dict_lacks(PyObject *owner, PyObject *name)
 static PyObject *
 h_cell_load(PyObject *cell)
 {
-    return PyCell_Check(cell) ? Py_XNewRef(PyCell_GET(cell)) : NULL;
+    return PyCell_Check(cell) ? lu_cell_get(cell) : NULL;
 }
 
 static PyObject *

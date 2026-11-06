@@ -7,6 +7,7 @@
 
 #include "lucifer.h"
 #include "opcode_ids.h"
+#include "interp/code.h"
 
 typedef union {
     uint16_t cache;
@@ -140,13 +141,30 @@ int lu_frame_retire(struct lu_frame *f);
    that is executing or suspended. */
 int lu_frame_clear(PyFrameObject *frame);
 
+/* Kernel code stands in for C, which CPython's limit does not count: it runs
+   a little past the limit, so an exception raised at the limit can be built.
+   A frame of `code` is pushed while ts->py_recursion_remaining is above this. */
+static inline int
+lu_frame_floor(PyCodeObject *code)
+{
+    return (code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) ? -50 : 0;
+}
+
 /* Pushes a frame for `func` on the current task's datastack, with every
-   local unbound. Returns NULL with MemoryError set. */
+   local unbound. Returns NULL with RecursionError or MemoryError set. */
 struct lu_frame *lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals);
 
 /* Releases the frame's references and its datastack space. The frame must
    be the task's topmost. */
 void lu_frame_pop(PyThreadState *ts, struct lu_frame *f);
+
+/* A frame whose code, function and locals compiled code lends it while a
+   call from an inlined frame runs (runtime/jit/deopt.c): pushed holding no
+   references, its locals unset, past the recursion limit if need be (the
+   code checked for room); NULL when out of memory. Popped as it was
+   pushed, or made an ordinary frame by taking the references. */
+struct lu_frame *lu_frame_push_lent(PyThreadState *ts, PyFunctionObject *func);
+void lu_frame_pop_lent(PyThreadState *ts, struct lu_frame *f);
 
 /* Pushes a frame for `func` and binds the call arguments to it
    (initialize_locals): args[0..nargs) are positional, then one value per
