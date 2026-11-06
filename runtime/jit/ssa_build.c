@@ -1172,7 +1172,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
     int save_cur = c->cur;
     int save_nins = f->nins, save_nblocks = f->nblocks, save_consts = f->nconsts;
     int save_cur_nins = f->blocks[c->cur].nins, save_nsucc = f->blocks[c->cur].nsucc;
-    int save_inlined = f->ninlined;
+    int save_inlined = f->ninlined, save_sites = f->sites, save_cold = f->cold;
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
     struct ctx *k = calloc(1, sizeof(struct ctx));
     k->f = f;
@@ -1194,6 +1194,17 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         }
         lu_v g = guard(c, OP_GUARD_VERSION, konst(c, (PyObject *)fn), fn->func_version);
         I(c, g)->imm2 = GV_FUNC;
+    }
+    /* The types proved so far: guards the callee emits may prove more for
+       the caller's values, in blocks an undo drops. */
+    PyTypeObject **save_known = NULL;
+    int *save_known_block = NULL;
+    int save_nknown = save_nins < f->capknown ? save_nins : f->capknown;
+    if (save_nknown > 0) {
+        save_known = malloc(sizeof(PyTypeObject *) * (size_t)save_nknown);
+        save_known_block = malloc(sizeof(int) * (size_t)save_nknown);
+        memcpy(save_known, f->known, sizeof(PyTypeObject *) * (size_t)save_nknown);
+        memcpy(save_known_block, f->known_block, sizeof(int) * (size_t)save_nknown);
     }
     /* The caller resumes after the call with its operands gone. */
     k->caller = snapshot(c, c->next);
@@ -1289,18 +1300,23 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         for (int i = save_consts; i < f->nconsts; i++) {
             Py_XDECREF(f->consts[i]);
         }
-        for (int i = save_nins; i < f->nins && i < f->capknown; i++) {
-            f->known[i] = NULL;         /* the ids are reused */
+        for (int i = 0; i < f->capknown; i++) {
+            f->known[i] = i < save_nknown ? save_known[i] : NULL;      /* the ids are reused */
+            f->known_block[i] = i < save_nknown ? save_known_block[i] : 0;
         }
         f->nconsts = save_consts;
         f->nins = save_nins;
         f->nblocks = save_nblocks;
         f->ninlined = save_inlined;
+        f->sites = save_sites;
+        f->cold = save_cold;
         c->cur = save_cur;
         f->blocks[save_cur].nins = save_cur_nins;
         f->blocks[save_cur].nsucc = save_nsucc;
         f->fail = NULL;
     }
+    free(save_known);
+    free(save_known_block);
     free(k);
     return ok;
 }
