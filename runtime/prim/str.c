@@ -1293,10 +1293,11 @@ prim_str_subtype(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
+#define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_str_methods[] = {
-    FAST(str_find), FAST(str_count), FAST(str_replace), FAST(str_slice), FAST(str_slice_step),
-    FAST(str_item), FAST(str_decimal), FAST(slice_parts), FAST(box_get), FAST(box_set), FAST(str_ord), FAST(str_chr), FAST(str_len), FAST(bytes_ord), FAST(str_sizeof), FAST(str_hash), FAST(str_cmp),
-    FAST(str_concat), FAST(str_repeat), FAST(str_split), FAST(str_splitlines), FAST(str_strip),
+    PURE(str_find), PURE(str_count), FAST(str_replace), PURE(str_slice), PURE(str_slice_step),
+    PURE(str_item), PURE(str_decimal), FAST(slice_parts), FAST(box_get), FAST(box_set), PURE(str_ord), PURE(str_chr), PURE(str_len), FAST(bytes_ord), FAST(str_sizeof), FAST(str_hash), FAST(str_cmp),
+    PURE(str_concat), FAST(str_repeat), FAST(str_split), FAST(str_splitlines), FAST(str_strip),
     FAST(str_case), FAST(str_is), FAST(str_expandtabs), FAST(str_ascii), FAST(str_encode),
     FAST(str_decode), FAST(str_iter), FAST(str_iter_next), FAST(str_subtype),
     { NULL, NULL, 0, NULL },

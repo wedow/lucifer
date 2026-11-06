@@ -524,6 +524,20 @@ h_call(PyObject **argv, intptr_t n)
     if (kernel && self == NULL) {
         r = lu_native_call(&t->ts, target, args, (Py_ssize_t)nargs);
     }
+    if (kernel && r == NULL && !PyErr_Occurred() && t->ts.interp->eval_frame == NULL
+        && PyFunction_Check(target) && (self == NULL || argv[1] == NULL)) {
+        /* The kernel function C does not answer runs as the interpreter
+           calls it: its frame pushed directly, self in the free word. */
+        if (self == NULL) {
+            r = call_function(t, (PyFunctionObject *)target, args, (Py_ssize_t)nargs);
+        }
+        else {
+            argv[1] = self;
+            r = call_function(t, (PyFunctionObject *)target, argv + 1, (Py_ssize_t)nargs + 1);
+            argv[1] = NULL;
+        }
+        goto called;
+    }
     if (r == NULL && !PyErr_Occurred()) {
         t->pin++;
         r = lu_call(callable, args, nargs, NULL);
@@ -537,6 +551,45 @@ called:
         Py_CLEAR(r);
     }
     return r;
+}
+
+/* DELETE_SUBSCR */
+static int
+h_delitem(PyObject *container, PyObject *sub)
+{
+    if (PyDict_CheckExact(container) && lu_dict_del_native(container, sub) == 1) {
+        return 0;
+    }
+    PyObject *args[2] = { container, sub };
+    PyObject *r = lu_call_kernel(LU_K_delitem, args, 2);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
+/* LIST_EXTEND; an exact tuple or list source runs no Python (list_extend_seq). */
+static int
+h_list_extend(PyObject *list, PyObject *iterable)
+{
+    if (PyTuple_CheckExact(iterable) || PyList_CheckExact(iterable)) {
+        /* A list source is read as subscripts are: another thread may resize it. */
+        for (Py_ssize_t i = 0; i < Py_SIZE(iterable); i++) {
+            PyObject *v = PyTuple_CheckExact(iterable) ? Py_NewRef(PyTuple_GET_ITEM(iterable, i))
+                                                       : lu_list_item_ref((PyListObject *)iterable, i);
+            if (v == NULL) {
+                break;
+            }
+            int err = lu_list_append(list, v);
+            Py_DECREF(v);
+            if (err < 0) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+    PyObject *args[2] = { list, iterable };
+    PyObject *r = lu_call_kernel(LU_K_list_extend, args, 2);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
 }
 
 /* call_special(descr, obj, *args) for a function, wrapper or method
@@ -567,9 +620,13 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_dict_lacks] = { (void *)h_dict_lacks, "dict_lacks", REP_BIT, 0, 2 },
     [H_cell_load] = { (void *)h_cell_load, "cell_load", REP_OBJ, 0, 1 },
     [H_compare_ideq] = { (void *)h_compare_ideq, "compare_ideq", REP_BIT, 0, 3 },
+    [H_str_concat] = { (void *)lu_str_concat, "str_concat", REP_OBJ, IF_RAISE, 2 },
     [H_binary_op] = { (void *)h_binary_op, "binary_op", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_compare_op] = { (void *)h_compare_op, "compare_op", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_setitem] = { (void *)h_setitem, "setitem", REP_BIT, IF_RAISE | IF_PY, 3 },
+    [H_delitem] = { (void *)h_delitem, "delitem", REP_BIT, IF_RAISE | IF_PY, 2 },
+    [H_list_extend] = { (void *)h_list_extend, "list_extend", REP_BIT, IF_RAISE | IF_PY, 2 },
+    [H_list_extend_seq] = { (void *)h_list_extend, "list_extend_seq", REP_BIT, IF_RAISE, 2 },
     [H_load_attr] = { (void *)h_load_attr_pic, "load_attr", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_load_method] = { (void *)h_load_method, "load_method", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 3 },

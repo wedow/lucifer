@@ -553,6 +553,21 @@ lu_dict_put_native(PyObject *d, PyObject *key, PyObject *value)
     return result;
 }
 
+int
+lu_dict_del_native(PyObject *d, PyObject *key)
+{
+    PyObject *old = NULL;
+    Py_hash_t hash;
+    Py_BEGIN_CRITICAL_SECTION(d);
+    Py_ssize_t ix = probe_native(((PyDictObject *)d)->ma_keys, key, &hash, 1);
+    if (ix >= 0) {
+        old = lu_dict_remove((PyDictObject *)d, ix);
+    }
+    Py_END_CRITICAL_SECTION();
+    Py_XDECREF(old);
+    return old != NULL ? 1 : -1;
+}
+
 static size_t
 find_empty_slot(PyDictKeysObject *dk, Py_hash_t hash)
 {
