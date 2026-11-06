@@ -73,7 +73,7 @@ PyThread_start_joinable_thread(void (*func)(void *), void *arg,
 LU_EXPORT int
 PyThread_join_thread(PyThread_handle_t th)
 {
-    return pthread_join((pthread_t)th, NULL);
+    return lu_join_thread((pthread_t)th);
 }
 
 LU_EXPORT int

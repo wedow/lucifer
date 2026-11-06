@@ -53,10 +53,10 @@ lu_futex_wake(uint32_t *word)
     LU_PARKED(syscall(SYS_futex, word, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0));
 }
 
-void
+int
 lu_join_thread(pthread_t thread)
 {
-    LU_SYSCALL(pthread_join(thread, NULL));
+    return LU_SYSCALL(pthread_join(thread, NULL));
 }
 
 /* The fault handler's calls (runtime/prim/faulthandler.c). Its output is
