@@ -75,6 +75,9 @@ static struct {
     const char *failure_names[8];
 } stats;
 
+/* Exit reasons by name, for the counts and LUCIFER_JIT_DEBUG. */
+static const char reasons[EXIT_REASONS][8] = { "guard", "stress", "poll", "side", "error" };
+
 /* A count for -X lucifer_jit_stats: free when the counts are off. */
 static void
 count(unsigned long *c, unsigned long n)
@@ -264,6 +267,10 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
     count(&stats.inlined, (unsigned long)f.ninlined);
     if (!ok) {
         note_failure(f.fail != NULL ? f.fail : "compile failed");
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: failed %s@%d: %s\n", PyUnicode_AsUTF8(frame->code->co_qualname), pc,
+                    f.fail != NULL ? f.fail : "compile failed");
+        }
         lu_ir_free(&f);
         free_unit(u);
         return NULL;
@@ -284,7 +291,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
 static void
 retire(struct lu_jit_code *jc, struct lu_unit *u)
 {
-    if (_PyRuntime.jit.debug) {
+    if (_PyRuntime.jit.debug || _PyRuntime.jit.stats) {
         fprintf(stderr, "jit: retire %s@%d after %lu entries, %lu leaves\n",
                 PyUnicode_AsUTF8(u->deopts != NULL && u->ndeopts > 0 ? u->deopts[0]->frames[0].code->co_qualname
                                                                      : Py_None), u->entry_pc, u->entries, u->leaves);
@@ -538,6 +545,11 @@ lu_jit_note_exit(struct lu_deopt *d)
 {
     count(&stats.exits[d->reason], 1);
     count(&stats.taken[d->opcode & 0xff], 1);
+    if (_PyRuntime.jit.debug) {
+        struct lu_deopt_frame *in = &d->frames[d->nframes - 1];
+        fprintf(stderr, "jit: exit %s %s@%d op %d depth %d\n", reasons[d->reason],
+                PyUnicode_AsUTF8(in->code->co_qualname), in->pc, d->opcode, d->nframes);
+    }
     struct lu_unit *u = d->unit;
     if (d->reason == EXIT_ERROR || (d->reason == EXIT_SIDE && d->nframes == 1)) {
         unsigned long n = bump(&u->leaves);
@@ -713,7 +725,6 @@ lu_jit_report(void)
     if (!_PyRuntime.jit.stats) {
         return;
     }
-    static const char reasons[EXIT_REASONS][8] = { "guard", "stress", "poll", "side", "error" };
     fprintf(stderr, "jit: backend %s, mode %s\n", lu_target.name != NULL ? lu_target.name : "none",
             _PyRuntime.jit.mode == LU_JIT_ALWAYS ? "always" : _PyRuntime.jit.mode == LU_JIT_ON ? "on" : "off");
     fprintf(stderr, "jit: compiles %lu, failed %lu, units recompiled %lu, inlined calls %lu, "

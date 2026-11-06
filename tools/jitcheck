@@ -16,7 +16,7 @@ require that a count of the tier's does not grow with the iterations:
   calls  tests/kernel/jit_calls.py, whose hot calls the tier can inline once
          it has feedback: entries into compiled code and direct calls.
          None of its functions may be disabled (recompiled until the tier
-         gives up on it).
+         gives up on it) or retired (an entry left to the interpreter).
   large  tests/kernel/jit_large_callees.py, whose hot call is of a function
          too large to inline whole but small along the path the program
          runs: entries into compiled code and direct calls.
@@ -71,7 +71,8 @@ def counted(lucifer, program, pattern, n, timeout):
     code, out, err = run([lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', str(program), str(n)],
                          timeout)
     m = re.search(pattern, err)
-    return code, out, sum(map(int, m.groups())) if m else None, re.findall(r'^jit: disabled (\S+)', err, re.M)
+    return (code, out, sum(map(int, m.groups())) if m else None,
+            re.findall(r'^jit: (?:disabled (\S+)|retire (\S+)@)', err, re.M))
 
 
 def qualnames(program):
@@ -100,8 +101,9 @@ def check_growth(args, lane):
     elif large[2] - small[2] > per * GROWTH_N + GROWTH_N // 20:
         problems.append(f'{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
     own = qualnames(program)
-    if lane == 'calls' and own & set(small[3]):
-        problems.append(f"disabled: {' '.join(sorted(own & set(small[3])))}")
+    given_up = own & {name for pair in small[3] for name in pair if name}
+    if lane == 'calls' and given_up:
+        problems.append(f"disabled or retired: {' '.join(sorted(given_up))}")
     print(f"{'FAIL' if problems else 'PASS'} {lane}" + (': ' + '; '.join(problems) if problems else
                                                       f' ({small[2]}, {large[2]})'))
     return 1 if problems else 0
