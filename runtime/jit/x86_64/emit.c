@@ -1248,6 +1248,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         def_gpr(a, v, RAX);
         return 0;
     case OP_ADD_I: case OP_SUB_I: case OP_MUL_I: case OP_AND_I: case OP_OR_I: case OP_XOR_I: {
+        /* The exit first: under stress it emits a dec, which would clobber OF. */
+        int fail = in->op == OP_ADD_I || in->op == OP_SUB_I || in->op == OP_MUL_I ? guard_exit(a, in) : -1;
         to_gpr(a, RAX, in->a);
         r = gpr_of(a, in->b, RCX);
         if (in->op == OP_MUL_I) {
@@ -1259,7 +1261,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             alu_rr(a, alu, RAX, r);
         }
         if (in->op == OP_ADD_I || in->op == OP_SUB_I || in->op == OP_MUL_I) {
-            jcc(a, CC_O, guard_exit(a, in));
+            jcc(a, CC_O, fail);
         }
         def_gpr(a, v, RAX);
         return 0;
