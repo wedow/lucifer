@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""Web benchmark: the Flask Todo app (app.py) under wrk, per runtime and server CPU count.
+
+Each runtime serves app.py from one process with a thread per keep-alive
+connection (http.server's ThreadingHTTPServer), pinned with taskset to the first N server CPUs:
+one hardware thread per physical core first, then their siblings. wrk runs
+pinned to the client CPUs, the last two physical cores with their siblings,
+over keep-alive connections, with the request mix in mix.lua. Each point is a
+warm-up interval, then a measured one.
+
+  bench check --run NAME=COMMAND ...   the same responses on every runtime, and
+                                       consistent state under concurrent clients
+  bench time --run NAME=COMMAND ...    one JSON line per point, then a markdown table
+
+COMMAND runs app.py (environment assignments first, as `env PYTHONPATH=SITE python`).
+Host stdlib only.
+"""
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+import http.client
+import json
+import os
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+import urllib.parse
+
+HERE = Path(__file__).resolve().parent
+
+
+def cores():
+    """Physical cores in order, each the list of its CPUs, from sysfs."""
+    found = {}
+    for cpu in sorted(os.sched_getaffinity(0)):
+        siblings = Path(f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list").read_text().strip()
+        found.setdefault(siblings, []).append(cpu)
+    return sorted(found.values())
+
+
+def layout():
+    """(server CPUs in the order they are given out, client CPUs)."""
+    all_cores = cores()
+    client = all_cores[-2:] if len(all_cores) > 2 else all_cores[-1:]
+    server = [core for core in all_cores if core not in client] or all_cores
+    order = [core[0] for core in server] + [cpu for core in server for cpu in core[1:]]
+    return order, sorted(cpu for core in client for cpu in core)
+
+
+def cpu_list(cpus):
+    return ",".join(map(str, cpus))
+
+
+class Server:
+    """app.py under COMMAND, pinned to cpus, on a free port."""
+
+    def __init__(self, command, cpus):
+        argv = ["taskset", "-c", cpu_list(cpus)] + shlex.split(command) + [str(HERE / "app.py"), "0"]
+        self.process = subprocess.Popen(argv, stdout=subprocess.PIPE, text=True)
+        line = self.process.stdout.readline()
+        if not line.startswith("listening "):
+            self.process.kill()
+            raise RuntimeError(f"{command}: server did not start")
+        self.port = int(line.split()[1])
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.process.kill()
+        self.process.wait()
+
+
+def request(conn, method, path, form=None, referer=None):
+    headers = {"Content-Type": "application/x-www-form-urlencoded"} if form is not None else {}
+    if referer:
+        headers["Referer"] = referer
+    conn.request(method, path, body=None if form is None else urllib.parse.urlencode(form), headers=headers)
+    response = conn.getresponse()
+    return response.status, response.getheader("Content-Type"), response.getheader("Location"), response.read().decode()
+
+
+TRANSCRIPT = [
+    ("GET", "/"), ("GET", "/todos/1"), ("GET", "/new"), ("GET", "/api/todos"),
+    ("POST", "/todos", {"title": "<b>new & \u00e9t\u00e9</b>"}), ("GET", "/todos/101"),
+    ("POST", "/todos/1/toggle", None, "/todos/1"), ("POST", "/todos/1/toggle"), ("POST", "/todos/2/toggle", None, "/"),
+    ("GET", "/todos/999"), ("POST", "/todos", {"title": "  "}), ("POST", "/todos/999/toggle"),
+    ("GET", "/missing"), ("GET", "/"), ("GET", "/api/todos"),
+]
+
+
+def transcript(port):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+    return [request(conn, *step) for step in TRANSCRIPT]
+
+
+def hammer(port, clients=16, each=40):
+    """Concurrent clients create and toggle their own todos; the final state must add up."""
+    def client(n):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+        ids = []
+        for i in range(each):
+            location = request(conn, "POST", "/todos", {"title": f"c{n}-{i}"})[2]
+            ids.append(int(location.rsplit("/", 1)[1]))
+            request(conn, "GET", "/")
+        for todo in ids[::2]:
+            request(conn, "POST", f"/todos/{todo}/toggle", None, "/")
+        return ids, [request(conn, "GET", f"/todos/{todo}")[3] for todo in ids]
+
+    with ThreadPoolExecutor(clients) as pool:
+        seen = list(pool.map(client, range(clients)))
+    problems = []
+    if sorted(i for ids, _ in seen for i in ids) != list(range(101, 101 + clients * each)):
+        problems.append("created ids are not unique and dense")
+    for n, (ids, pages) in enumerate(seen):
+        for i, (todo, page) in enumerate(zip(ids, pages)):
+            if f"<h1>c{n}-{i}</h1>" not in page or f"#{todo} is {'done' if i % 2 == 0 else 'open'}." not in page:
+                problems.append(f"client {n}: todo {todo} page differs")
+                break
+    page = request(http.client.HTTPConnection("127.0.0.1", port, timeout=60), "GET", "/")[3]
+    if f"({clients * each // 2}/{100 + clients * each} done)" not in page:
+        problems.append("list page totals differ")
+    return problems
+
+
+def check(runs, cpus):
+    """Exit status 1 unless every runtime gives the first one's transcript and passes the hammer."""
+    failed = False
+    expected = None
+    for name, command in runs.items():
+        with Server(command, cpus) as server:
+            got = transcript(server.port)
+        with Server(command, cpus) as server:
+            problems = hammer(server.port)
+        if expected is None:
+            expected = got
+        problems += [f"step {i} {TRANSCRIPT[i][:2]}: {g!r} != {e!r}"
+                     for i, (g, e) in enumerate(zip(got, expected)) if g != e]
+        failed |= bool(problems)
+        print(f"{'FAIL' if problems else 'PASS'} web {name}" + "".join(f"\n  {p}" for p in problems))
+    return 1 if failed else 0
+
+
+def wrk(args, port, seconds, client):
+    done = subprocess.run(["taskset", "-c", cpu_list(client), args.wrk, f"-t{len(client)}", f"-c{args.connections}",
+                           f"-d{seconds}s", "--timeout", "10s", "-s", str(HERE / "mix.lua"), f"http://127.0.0.1:{port}/"],
+                          text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    lines = [l for l in done.stdout.splitlines() if l.startswith("{")]
+    if done.returncode != 0 or not lines:
+        raise RuntimeError(f"wrk failed: {done.stdout[-500:]}")
+    return json.loads(lines[-1])
+
+
+def point(args, name, command, n, order, client):
+    """One runtime at n server CPUs: warm up, then measure."""
+    with Server(command, order[:n]) as server:
+        wrk(args, server.port, args.warmup, client)
+        r = wrk(args, server.port, args.duration, client)
+        crashed = server.process.poll()
+    return {"runtime": name, "cpus": n, "rps": round(r["requests"] * 1e6 / r["duration_us"], 1),
+            "p50_ms": r["p50_us"] / 1000, "p99_ms": r["p99_us"] / 1000, "errors": r["errors"],
+            "server_exit": crashed,
+            "server_cpus": cpu_list(order[:n]), "client_cpus": cpu_list(client), "connections": args.connections}
+
+
+def table(points):
+    """Markdown: req/s, p50 and p99 per runtime and CPU count; efficiency is req/s over N times 1 CPU's."""
+    one = {p["runtime"]: p["rps"] for p in points if p["cpus"] == 1}
+    md = ["| runtime | CPUs | req/s | p50 ms | p99 ms | scaling efficiency | errors |", "|---|---|---|---|---|---|---|"]
+    for p in points:
+        eff = p["rps"] / (p["cpus"] * one[p["runtime"]]) if one.get(p["runtime"]) else None
+        died = "" if p["server_exit"] is None else f" (server died: exit {p['server_exit']})"
+        md.append(f"| {p['runtime']} | {p['cpus']} | {p['rps']:.0f} | {p['p50_ms']:.2f} | {p['p99_ms']:.2f} "
+                  f"| {'-' if eff is None else f'{eff:.2f}'} | {p['errors']}{died} |")
+    return "\n".join(md)
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("mode", choices=("check", "time"))
+    p.add_argument("--run", action="append", required=True, metavar="NAME=COMMAND")
+    p.add_argument("--cpus", default="1,2,4,8", help="server CPU counts (time)")
+    p.add_argument("--warmup", type=int, default=10, help="seconds")
+    p.add_argument("--duration", type=int, default=10, help="seconds")
+    p.add_argument("--connections", type=int, default=64)
+    p.add_argument("--wrk", default=os.environ.get("WRK", "wrk"))
+    args = p.parse_args()
+    runs = dict(r.split("=", 1) for r in args.run)
+    order, client = layout()
+    if args.mode == "check":
+        return check(runs, order)
+    counts = [n for n in map(int, args.cpus.split(",")) if n <= len(order)]
+    points = []
+    for name, command in runs.items():
+        for n in counts:
+            points.append(point(args, name, command, n, order, client))
+            print(json.dumps(points[-1]), flush=True)
+    print(table(points))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
