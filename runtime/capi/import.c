@@ -198,7 +198,7 @@ module_dict_for_exec(PyObject *name)
     }
     PyObject *d = PyModule_GetDict(m);
     if (lu_ns_lookup(d, LU_ID(__builtins__)) == NULL
-        && lu_ns_insert(d, LU_ID(__builtins__), PyEval_GetBuiltins()) < 0) {
+        && lu_ns_store(d, LU_ID(__builtins__), PyEval_GetBuiltins()) < 0) {
         return NULL;
     }
     return Py_NewRef(d);
@@ -303,7 +303,7 @@ PyImport_ImportFrozenModuleObject(PyObject *name)
         PyObject *m = PyImport_AddModuleObject(name);
         PyObject *path = m != NULL ? PyList_New(0) : NULL;
         if (path != NULL
-            && lu_ns_insert(PyModule_GetDict(m), PyUnicode_InternFromString("__path__"), path) == 0) {
+            && lu_ns_store(PyModule_GetDict(m), PyUnicode_InternFromString("__path__"), path) == 0) {
             d = module_dict_for_exec(name);
         }
         Py_XDECREF(path);
@@ -317,7 +317,7 @@ PyImport_ImportFrozenModuleObject(PyObject *name)
             /* __origname__, which importlib's FrozenImporter would consume */
             PyObject *origname = f->orig != NULL ? PyUnicode_FromString(f->orig) : Py_NewRef(Py_None);
             if (origname != NULL
-                && lu_ns_insert(d, PyUnicode_InternFromString("__origname__"), origname) == 0) {
+                && lu_ns_store(d, PyUnicode_InternFromString("__origname__"), origname) == 0) {
                 r = 1;
             }
             Py_XDECREF(origname);

@@ -52,7 +52,7 @@ exec_in_module(PyObject *module, PyObject *code)
     PyObject *ns = PyModule_GetDict(module);
     PyObject *builtins = lu_ns_lookup(PyInterpreterState_Get()->modules, LU_ID(builtins));
     if (lu_ns_lookup(ns, LU_ID(__builtins__)) == NULL
-        && lu_ns_insert(ns, LU_ID(__builtins__), builtins) < 0) {
+        && lu_ns_store(ns, LU_ID(__builtins__), builtins) < 0) {
         return -1;
     }
     PyObject *result = PyEval_EvalCode(code, ns, ns);
@@ -135,7 +135,7 @@ functions_to_builtins(PyObject *module)
             continue;
         }
         PyObject *builtin = lu_kernel_builtin(module, name, value);
-        int err = builtin == NULL || lu_ns_insert(ns, name, builtin) < 0;
+        int err = builtin == NULL || lu_ns_store(ns, name, builtin) < 0;
         Py_XDECREF(builtin);
         if (err) {
             return -1;
@@ -426,7 +426,7 @@ start_module(struct _is *interp, const struct lu_frozen *m, int frozen)
     PyObject *origname = frozen ? PyUnicode_FromString(m->orig != NULL ? m->orig : m->name) : NULL;
     int err = (frozen && (origname == NULL
                || lu_ns_insert(PyModule_GetDict(module), PyUnicode_InternFromString("__origname__"), origname) < 0))
-        || lu_ns_insert(interp->modules, ((PyModuleObject *)module)->md_name, module) < 0
+        || lu_ns_store(interp->modules, ((PyModuleObject *)module)->md_name, module) < 0
         || exec_in_module(module, code) < 0
         || (!frozen && functions_to_builtins(module) < 0);
     Py_XDECREF(origname);

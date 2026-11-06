@@ -1349,7 +1349,7 @@ op_STORE_NAME: {
     else {
         if (PyDict_CheckExact(frame->locals)) {
             PyObject *old = ns_get(frame->locals, name);
-            err = old == NULL && PyErr_Occurred() ? -1 : lu_ns_insert(frame->locals, name, v);
+            err = old == NULL && PyErr_Occurred() ? -1 : lu_ns_store(frame->locals, name, v);
             Py_XDECREF(old);
         }
         else {
@@ -2372,7 +2372,7 @@ op_LOAD_FAST_AND_CLEAR:
 op_STORE_GLOBAL: {
     PyObject *v = POP();
     SAVE_FRAME();
-    int err = lu_ns_insert(frame->globals, NAME(oparg), v);
+    int err = lu_ns_store(frame->globals, NAME(oparg), v);
     Py_DECREF(v);
     ERROR_IF(err < 0);
     DISPATCH();

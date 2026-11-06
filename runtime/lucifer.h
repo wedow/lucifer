@@ -1242,8 +1242,11 @@ PyObject *lu_ns_lookup(PyObject *dict, PyObject *key);
    startup and for dicts that nothing else writes). */
 PyObject *lu_ns_get(PyObject *dict, PyObject *key);
 int lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value);
-/* lu_ns_insert in the dict's critical section, for a dict that other
-   threads may write: an instance's, or one the kernel stores into. */
+/* lu_ns_insert in the dict's critical section, for a dict another thread
+   may see: globals, a module's, an instance's. A reader whose lock-free try
+   fails reads under that lock (lu_dict_find_native), so an unlocked store
+   could free the value it is taking. lu_ns_insert alone is for a dict no
+   other thread can reach yet. */
 int lu_ns_store(PyObject *dict, PyObject *key, PyObject *value);
 /* Removes `key`: 1 when it was there, 0 when not. */
 int lu_ns_delete(PyObject *dict, PyObject *key);

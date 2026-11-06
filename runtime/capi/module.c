@@ -177,7 +177,7 @@ PyModule_AddObjectRef(PyObject *m, const char *name, PyObject *value)
     }
     PyObject *dict = PyModule_GetDict(m);
     PyObject *key = PyUnicode_InternFromString(name);
-    int err = key == NULL || lu_ns_insert(dict, key, value) < 0;
+    int err = key == NULL || lu_ns_store(dict, key, value) < 0;
     Py_XDECREF(key);
     return err ? -1 : 0;
 }
