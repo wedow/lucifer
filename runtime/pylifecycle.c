@@ -818,41 +818,20 @@ PyRun_SimpleString(const char *command)
     return PyRun_SimpleStringFlags(command, NULL);
 }
 
-/* Py_NewInterpreter: lucifer has one interpreter per process. Extensions
-   written against CPython, where this function never fails in-band,
-   dereference what it returns (its ->interp, say), so NULL is not an
-   option: an inert static thread state comes back instead. It is never
-   attached and runs no code; the thread state the caller swapped out is put
-   back first, so the failure paths of _testcapi.run_in_subinterp and
-   friends keep working. */
-
-static struct _is stub_interp;          /* zeroed: nothing ever runs on it */
-static struct lu_task stub_task;        /* its thread state; a full task, so
-                                           a stray task cast stays in bounds */
-
+/* Py_NewInterpreter: lucifer has no subinterpreters yet, so creating one
+   fails the way CPython reports it: NULL, with no exception set, since
+   there may be no thread state to hold one (Python/pylifecycle.c). */
 PyThreadState *
 Py_NewInterpreter(void)
 {
-    struct lu_task *t = lu_current_task();
-    if (t != NULL && t->ts.state == _Py_THREAD_DETACHED) {
-        lu_task_attach(&t->ts);
-    }
-    stub_task.ts.interp = &stub_interp;
-    return &stub_task.ts;
+    return NULL;
 }
 
-/* Py_EndInterpreter: ending the inert interpreter runs the atexit callbacks
-   registered on it, which is its whole lifecycle. Ending anything else
-   would mean a real subinterpreter, which lucifer does not have. */
+/* No thread state of another interpreter exists to be ended. */
 void
 Py_EndInterpreter(PyThreadState *tstate)
 {
-    if (tstate == &stub_task.ts) {
-        lu_atexit_call(&stub_interp);
-    }
-    else if (tstate != NULL) {
-        Py_FatalError("Py_EndInterpreter: subinterpreters are not supported");
-    }
+    Py_FatalError("Py_EndInterpreter: subinterpreters are not supported");
 }
 
 /* PyUnstable_AtExit (Modules/atexitmodule.c): a C callback an interpreter

@@ -40,8 +40,6 @@ py_datetime	runtime/capi/datetime.c	the Python class a datetime C API base stand
 py_time	runtime/capi/datetime.c	the Python class a datetime C API base stands for in constructors; set when datetime_CAPI is made
 py_delta	runtime/capi/datetime.c	the Python class a datetime C API base stands for in constructors; set when datetime_CAPI is made
 py_tzinfo	runtime/capi/datetime.c	the Python class a datetime C API base stands for in constructors; set when datetime_CAPI is made
-stub_interp	runtime/pylifecycle.c	the inert interpreter Py_NewInterpreter returns until subinterpreters exist; zeroed, only its atexit list is written
-stub_task	runtime/pylifecycle.c	the inert interpreter's thread state; written once by Py_NewInterpreter, never attached
 raising.*	-	thread-local guard: PyErr_NoMemory runs out of memory making a MemoryError and takes the last resort; its TLS symbol has no line
 lu_static_types	runtime/types/static.c	const table of the static builtin types; relocated by ld.so, then read-only (RELRO)
 *_members	runtime/object/descr.c	PyMemberDef table of a native layout, never written; tp_members takes it non-const
