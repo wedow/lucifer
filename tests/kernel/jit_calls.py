@@ -6,7 +6,7 @@
 # comparisons, attributes of several classes).
 # Each result must be the interpreter's; tools/jitcheck also runs this at two
 # sizes and requires that entries into compiled code do not grow with the
-# iterations.
+# iterations, and that the tier gives up on no function.
 import sys
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
@@ -80,4 +80,43 @@ def attributes(n):
     return s
 
 
-print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N))
+def pops(n):
+    """Kernel code with int constants past one digit (list.pop's index check
+    against -sys.maxsize - 1): compiled arithmetic on them never leaves."""
+    items = [0]
+    s = 0
+    for i in range(n):
+        items.append(i)
+        s += items.pop(0)
+    return s
+
+
+def nonzero(a, b, x):
+    return a if x else b
+
+
+def truths(n):
+    """The truth of ints of no known type in an inlined frame (a third
+    argument: calls record the kinds of their first two)."""
+    items = [0, 1, -5, 1 << 40]
+    s = 0
+    for i in range(n):
+        s += nonzero(1, 0, items[i & 3])
+    return s
+
+
+def clamp(x, hi):
+    return x if x < hi else hi
+
+
+def wide(n):
+    """Ints past one digit that fit 64 bits, of no known value, through an
+    inlined comparison and arithmetic."""
+    bounds = [sys.maxsize, 1 << 40]
+    s = 0
+    for i in range(n):
+        s += clamp(i, bounds[i & 1]) - (bounds[i & 1] >> 20)
+    return s
+
+
+print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N), pops(N), truths(N), wide(N))

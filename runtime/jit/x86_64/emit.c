@@ -961,6 +961,7 @@ incref(struct asm_ *a, int r)
 extern void lu_jit_decref(PyObject *o);
 extern void lu_jit_store_local(struct lu_frame *f, intptr_t i, PyObject *v);
 extern PyObject *lu_jit_box_int(int64_t v);
+extern int64_t lu_jit_unbox_wide(PyObject *o);
 extern PyObject *lu_jit_box_float(double v);
 extern PyObject *lu_jit_list_item(PyObject *list, int64_t i);
 extern int lu_jit_list_store(PyObject *list, int64_t i, PyObject *v);
@@ -1170,17 +1171,26 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         cmp_rm(a, RAX, r, offsetof(PyObject, ob_type));
         jcc(a, CC_NE, fail);
         load(a, RCX, r, offsetof(PyLongObject, long_value.lv_tag));
+        int wide = new_label(a), done = new_label(a);
         alu_ri(a, ALU_CMP, RCX, 2 << _PyLong_NON_SIZE_BITS);
-        jcc(a, CC_AE, fail);
+        jcc(a, CC_AE, wide);
         load32(a, RAX, r, offsetof(PyLongObject, long_value.ob_digit));
-        int pos = new_label(a);
         rex(a, 0, 0, 0, RCX);
         b1(a, 0xF6);
         modrm_rr(a, 0, RCX);
         b1(a, 2);                               /* test cl, 2: negative */
-        jcc(a, CC_E, pos);
+        jcc(a, CC_E, done);
         unary(a, 3, RAX);
-        bind(a, pos);
+        jmp(a, done);
+        bind(a, wide);                          /* more digits: in C, leaving past 64 bits */
+        save_volatile(a);
+        mov_rr(a, RDI, r);
+        call_abs(a, (void *)lu_jit_unbox_wide);
+        restore_volatile(a);
+        mov_ri(a, RCX, INT64_MIN);
+        alu_rr(a, ALU_CMP, RAX, RCX);
+        jcc(a, CC_E, fail);
+        bind(a, done);
         def_gpr(a, v, RAX);
         return 0;
     }
@@ -1238,6 +1248,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         def_gpr(a, v, RAX);
         return 0;
     case OP_ADD_I: case OP_SUB_I: case OP_MUL_I: case OP_AND_I: case OP_OR_I: case OP_XOR_I: {
+        /* The exit first: under stress it emits a dec, which would clobber OF. */
+        int fail = in->op == OP_ADD_I || in->op == OP_SUB_I || in->op == OP_MUL_I ? guard_exit(a, in) : -1;
         to_gpr(a, RAX, in->a);
         r = gpr_of(a, in->b, RCX);
         if (in->op == OP_MUL_I) {
@@ -1249,7 +1261,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             alu_rr(a, alu, RAX, r);
         }
         if (in->op == OP_ADD_I || in->op == OP_SUB_I || in->op == OP_MUL_I) {
-            jcc(a, CC_O, guard_exit(a, in));
+            jcc(a, CC_O, fail);
         }
         def_gpr(a, v, RAX);
         return 0;
@@ -1422,6 +1434,16 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         mov_ri(a, RAX, (int64_t)(intptr_t)Py_None);
         alu_rr(a, ALU_CMP, r, RAX);
         jcc(a, CC_E, fz);
+        int other = new_label(a);
+        mov_ri(a, RAX, (int64_t)(intptr_t)&PyLong_Type);
+        cmp_rm(a, RAX, r, offsetof(PyObject, ob_type));
+        jcc(a, CC_NE, other);
+        load(a, RCX, r, offsetof(PyLongObject, long_value.lv_tag));
+        alu_ri(a, ALU_AND, RCX, _PyLong_SIGN_MASK);
+        alu_ri(a, ALU_CMP, RCX, 1);             /* the sign bits of zero */
+        jcc(a, CC_E, fz);
+        jmp(a, t);
+        bind(a, other);
         if (in->imm == 1) {
             jmp(a, exit_to(a, in->fs, EXIT_GUARD, 0, 0));
         }

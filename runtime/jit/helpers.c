@@ -17,6 +17,16 @@ lu_jit_box_int(int64_t v)
     return PyLong_FromLongLong(v);
 }
 
+/* An exact int past one digit as a machine word, or INT64_MIN (which
+   leaves) when it does not fit. */
+int64_t
+lu_jit_unbox_wide(PyObject *o)
+{
+    int overflow;
+    long long x = PyLong_AsLongLongAndOverflow(o, &overflow);
+    return overflow ? INT64_MIN : x;
+}
+
 PyObject *
 lu_jit_box_float(double v)
 {

@@ -83,7 +83,7 @@ lu_jit_call_hot(PyCodeObject *code)
    argument's) in the high byte. The tier speculates on a site
    only when it has met nothing else. */
 enum {
-    LU_KIND_INT = 1,            /* an exact int of one digit (compact) */
+    LU_KIND_INT = 1,            /* an exact int that fits 64 bits (but INT64_MIN) */
     LU_KIND_FLOAT = 2,
     LU_KIND_NONE = 4,
     LU_KIND_LIST = 8,
@@ -92,11 +92,14 @@ enum {
     LU_KIND_OTHER = 128,
 };
 
+int64_t lu_jit_unbox_wide(PyObject *o);
+
 static inline unsigned
 lu_jit_kind(PyObject *o)
 {
     PyTypeObject *t = Py_TYPE(o);
-    return t == &PyLong_Type ? (_PyLong_IsCompact((PyLongObject *)o) ? LU_KIND_INT : LU_KIND_OTHER)
+    return t == &PyLong_Type ? (_PyLong_IsCompact((PyLongObject *)o) || lu_jit_unbox_wide(o) != INT64_MIN
+                                ? LU_KIND_INT : LU_KIND_OTHER)
         : t == &PyFloat_Type ? LU_KIND_FLOAT : o == Py_None ? LU_KIND_NONE
         : t == &PyList_Type ? LU_KIND_LIST : t == &PyTuple_Type ? LU_KIND_TUPLE
         : t == &PyUnicode_Type ? LU_KIND_STR : LU_KIND_OTHER;

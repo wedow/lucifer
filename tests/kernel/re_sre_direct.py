@@ -42,6 +42,21 @@ except TypeError:
     print('not iterable')
 print(re.compile('(?P<x>a)(?P<y>b)?').match('a').lastgroup, re.compile('(a)').match('a').lastgroup)
 
+# Code words are read by value, as C's unsigned code array: an int subclass's
+# comparisons never run (re._compiler emits int subclasses).
+class Liar(int):
+    def __eq__(self, other): return True
+    def __ne__(self, other): return False
+    def __lt__(self, other): return True
+    def __le__(self, other): return True
+    def __gt__(self, other): return True
+    def __ge__(self, other): return True
+    __hash__ = int.__hash__
+words = [Liar(w) for w in (C.INFO, 4, 0, 1, 1, C.IN, 5, C.RANGE, 98, 99, C.FAILURE, C.LITERAL, 97, C.SUCCESS)]
+liar = _sre.compile('[bc]a', 0, words, 0, {}, ())
+print(liar.match('ba'), liar.match('xa'), liar.search('zzca'), liar.fullmatch('cb'))
+
+
 class S(str):
     pass
 
@@ -52,3 +67,4 @@ mv = re.compile(b'b').search(memoryview(b'abc'))
 print(mv, re.compile(b'b').search(bytearray(b'abc')).group().__class__.__name__)
 sc = re.compile('a').scanner('aaa')
 print([sc.search().span() for _ in range(4) if True][:3])
+

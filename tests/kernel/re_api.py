@@ -219,3 +219,15 @@ show(re.purge)
 p = re.compile('a(b)')
 m = p.match('ab')
 print(p.__copy__() is p, p.__deepcopy__({}) is p, m.__copy__() is m, m.__deepcopy__({}) is m)
+
+# Searches that skip positions by the first characters of a branch or of a
+# repeat (no literal prefix or charset in the INFO block): every API, with
+# a search area, empty matches around them, wide text and bytes.
+for pat in (r'([\\"]|[^\ -~])', r'\w+', r'(a|[0-9])c', r'(?:x|[0-9])+y', r'[a-z]{2,}', r'(?P<n>a)|b|(c)d',
+            r'[^a]+?b', r'a*|b', r'(?:ab|cd)|e'):
+    p = re.compile(pat)
+    for text in ('', 'a', 'ab "x\\y" \x7fĀ cd e 9c x9y', 'zzzz€' * 3 + 'abc', 'q' * 40 + 'b'):
+        print(pat, repr(text), [m.span() for m in p.finditer(text)], p.sub('<\\g<0>>', text), p.split(text),
+              p.findall(text, 1, 30), p.search(text, 2), p.subn('', text, 1))
+    pb = re.compile(pat.encode('latin-1'))
+    print(pb.findall(b'ab "x\\y" \x7f cd e 9c x9y \xff'), pb.sub(b'.', b'aa ""\x80'))
