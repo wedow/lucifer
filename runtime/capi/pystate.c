@@ -22,9 +22,10 @@ PyThreadState_Get(void)
     PyThreadState *ts = PyThreadState_GetUnchecked();
     if (ts == NULL) {
         fprintf(stderr, "Fatal Python error: PyThreadState_Get: the function must be "
-                "called with the GIL held, after Python initialization and before "
-                "Python finalization, but the GIL is released (the current Python "
-                "thread state is NULL)\n");
+                "called with an active thread state, after Python initialization and "
+                "before Python finalization, but it was called without an active "
+                "thread state. Are you trying to call the C API inside of a "
+                "Py_BEGIN_ALLOW_THREADS block?\n");
         abort();
     }
     return ts;
@@ -61,6 +62,57 @@ PyInterpreterState_Get(void)
     return PyThreadState_Get()->interp;
 }
 
+/* PyInterpreterState_GetDict: the interpreter's dict, made on first use
+   (Python/pystate.c _PyInterpreterState_GetDictOrCreate). */
+
+PyObject *
+PyInterpreterState_GetDict(PyInterpreterState *interp)
+{
+    if (interp->dict == NULL) {
+        interp->dict = PyDict_New();
+        if (interp->dict == NULL) {
+            PyErr_Clear();
+        }
+    }
+    return interp->dict;        /* borrowed */
+}
+
+/* PyThreadState_EnterTracing / LeaveTracing (Python/ceval.c): a nesting
+   count the tracing machinery reads. */
+
+void
+PyThreadState_EnterTracing(PyThreadState *tstate)
+{
+    tstate->tracing++;
+}
+
+void
+PyThreadState_LeaveTracing(PyThreadState *tstate)
+{
+    tstate->tracing--;
+}
+
+/* The thread's dict, made on first use (Python/pystate.c). */
+
+LU_EXPORT PyObject *
+_PyThreadState_GetDict(PyThreadState *tstate)
+{
+    if (tstate->dict == NULL) {
+        tstate->dict = PyDict_New();
+        if (tstate->dict == NULL) {
+            PyErr_Clear();
+        }
+    }
+    return tstate->dict;        /* borrowed */
+}
+
+PyObject *
+PyThreadState_GetDict(void)
+{
+    PyThreadState *ts = PyThreadState_GetUnchecked();
+    return ts != NULL ? _PyThreadState_GetDict(ts) : NULL;
+}
+
 PyInterpreterState *
 PyInterpreterState_Main(void)
 {
@@ -71,6 +123,12 @@ PyInterpreterState *
 PyThreadState_GetInterpreter(PyThreadState *ts)
 {
     return ts->interp;
+}
+
+uint64_t
+PyThreadState_GetID(PyThreadState *tstate)
+{
+    return tstate->id;
 }
 
 PyThreadState *
@@ -292,4 +350,48 @@ PyState_RemoveModule(PyModuleDef *def)
         PyList_SetItem(list, index, Py_NewRef(Py_None));
     }
     return 0;
+}
+
+/* PyUnstable_ThreadState_SetStackProtection (Python/ceval.c): the C stack
+   bounds a thread's recursion checks watch. The margins are CPython's
+   (_PyOS_MIN_STACK_SIZE, _PyOS_STACK_MARGIN_BYTES of a release build);
+   lucifer's recursion limit is a counter, so the bounds are recorded for
+   whoever reads them and no page is protected. */
+
+#define LU_STACK_MARGIN_BYTES ((size_t)1 << 14)
+#define LU_MIN_STACK_SIZE (LU_STACK_MARGIN_BYTES * 3)
+
+static void
+tstate_set_stack(PyThreadState *tstate, uintptr_t base, uintptr_t top)
+{
+    struct lu_task *t = (struct lu_task *)tstate;
+    t->c_stack_top = top;
+    t->c_stack_hard_limit = base + LU_STACK_MARGIN_BYTES;
+    t->c_stack_soft_limit = base + LU_STACK_MARGIN_BYTES * 2;
+}
+
+int
+PyUnstable_ThreadState_SetStackProtection(PyThreadState *tstate, void *stack_start_addr,
+                                           size_t stack_size)
+{
+    if (stack_size < LU_MIN_STACK_SIZE) {
+        PyErr_Format(PyExc_ValueError, "stack_size must be at least %zu bytes",
+                     LU_MIN_STACK_SIZE);
+        return -1;
+    }
+    tstate_set_stack(tstate, (uintptr_t)stack_start_addr,
+                     (uintptr_t)stack_start_addr + stack_size);
+    return 0;
+}
+
+void
+PyUnstable_ThreadState_ResetStackProtection(PyThreadState *tstate)
+{
+    struct lu_task *t = (struct lu_task *)tstate;
+    if (t->c_stack_init_top != 0) {
+        tstate_set_stack(tstate, t->c_stack_init_base, t->c_stack_init_top);
+    }
+    else {
+        t->c_stack_top = t->c_stack_soft_limit = t->c_stack_hard_limit = 0;
+    }
 }

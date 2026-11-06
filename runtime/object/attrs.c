@@ -284,7 +284,17 @@ lu_dict_ptr(PyObject *obj)
     if (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
         return &LU_MANAGED_DICT(obj);
     }
-    return tp->tp_dictoffset > 0 ? (PyObject **)((char *)obj + tp->tp_dictoffset) : NULL;
+    Py_ssize_t offset = tp->tp_dictoffset;
+    if (offset < 0) {
+        /* A negative offset counts back from the end of the object
+           (_PyObject_ComputedDictPointer). */
+        Py_ssize_t tsize = Py_SIZE(obj);
+        if (tsize < 0) {
+            tsize = -tsize;
+        }
+        offset += tp->tp_basicsize + tsize * tp->tp_itemsize;
+    }
+    return offset != 0 ? (PyObject **)((char *)obj + offset) : NULL;
 }
 
 PyObject *

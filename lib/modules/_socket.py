@@ -24,7 +24,6 @@ class gaierror(OSError):
 timeout = TimeoutError
 has_ipv6 = True
 SocketType = None
-CAPI = None
 
 _CONSTANTS = {
     'AF_ALG': 38, 'AF_APPLETALK': 5, 'AF_ASH': 18, 'AF_ATMPVC': 8, 'AF_ATMSVC': 20,
@@ -347,6 +346,7 @@ def _unpack(sockaddr):
 
 
 SocketType = socket
+CAPI = _lucifer.socket_capi(socket, error, timeout)
 socket.__module__ = '_socket'
 
 

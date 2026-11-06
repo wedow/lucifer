@@ -5,6 +5,9 @@
 
 #include "lucifer.h"
 
+#include <stdarg.h>
+#include <wchar.h>
+
 #include <pthread.h>
 #include <string.h>
 
@@ -73,7 +76,10 @@ PyUnicode_Append(PyObject **p_left, PyObject *right)
     if (left == NULL) {
         return;
     }
-    if (right == NULL) {
+    if (right == NULL || !PyUnicode_Check(left) || !PyUnicode_Check(right)) {
+        if (!PyErr_Occurred()) {
+            PyErr_BadInternalCall();
+        }
         Py_CLEAR(*p_left);
         return;
     }
@@ -81,13 +87,11 @@ PyUnicode_Append(PyObject **p_left, PyObject *right)
     Py_DECREF(left);
 }
 
-Py_ssize_t
-PyUnicode_Find(PyObject *str, PyObject *substr, Py_ssize_t start, Py_ssize_t end, int direction)
+void
+PyUnicode_AppendAndDel(PyObject **pleft, PyObject *right)
 {
-    PyObject *r = PyObject_CallMethod(str, direction > 0 ? "find" : "rfind", "Onn", substr, start, end);
-    Py_ssize_t n = r == NULL ? -2 : PyLong_AsSsize_t(r);
-    Py_XDECREF(r);
-    return n;
+    PyUnicode_Append(pleft, right);
+    Py_XDECREF(right);
 }
 
 /* The filesystem path converters (Objects/unicodeobject.c): PyOS_FSPath to a
@@ -274,10 +278,10 @@ PyUnicodeWriter_WriteRepr(PyUnicodeWriter *w, PyObject *obj)
     return r;
 }
 
-int
-PyUnicodeWriter_WriteUTF8(PyUnicodeWriter *w, const char *str, Py_ssize_t size)
+/* A decoded or formatted str, appended; NULL (its failure) writes nothing. */
+static int
+write_owned(PyUnicodeWriter *w, PyObject *s)
 {
-    PyObject *s = PyUnicode_DecodeUTF8(str, size < 0 ? (Py_ssize_t)strlen(str) : size, "replace");
     if (s == NULL) {
         return -1;
     }
@@ -286,10 +290,107 @@ PyUnicodeWriter_WriteUTF8(PyUnicodeWriter *w, const char *str, Py_ssize_t size)
     return r;
 }
 
+/* Strict UTF-8 (unicode_decode_utf8_writer with _Py_ERROR_STRICT). */
+int
+PyUnicodeWriter_WriteUTF8(PyUnicodeWriter *w, const char *str, Py_ssize_t size)
+{
+    if (size < 0) {
+        size = (Py_ssize_t)strlen(str);
+    }
+    return size == 0 ? 0 : write_owned(w, PyUnicode_DecodeUTF8(str, size, NULL));
+}
+
+int
+PyUnicodeWriter_DecodeUTF8Stateful(PyUnicodeWriter *w, const char *str, Py_ssize_t size,
+                                   const char *errors, Py_ssize_t *consumed)
+{
+    if (size < 0) {
+        size = (Py_ssize_t)strlen(str);
+    }
+    if (size == 0) {
+        if (consumed != NULL) {
+            *consumed = 0;
+        }
+        return 0;
+    }
+    int r = write_owned(w, PyUnicode_DecodeUTF8Stateful(str, size, errors, consumed));
+    if (r < 0 && consumed != NULL) {
+        *consumed = 0;
+    }
+    return r;
+}
+
+static int write_latin1(PyUnicodeWriter *w, const char *str, Py_ssize_t size);
+
+/* The caller vouches the bytes are ASCII: they are taken as they are. */
 int
 PyUnicodeWriter_WriteASCII(PyUnicodeWriter *w, const char *str, Py_ssize_t size)
 {
-    return PyUnicodeWriter_WriteUTF8(w, str, size);
+    if (size < 0) {
+        size = (Py_ssize_t)strlen(str);
+    }
+    return write_latin1(w, str, size);
+}
+
+/* CPython's PyUnicodeWriter is its _PyUnicodeWriter, and _testcapi passes
+   one to the private call: here only a writer PyUnicodeWriter_Create made. */
+int
+_PyUnicodeWriter_WriteLatin1String(_PyUnicodeWriter *writer, const char *str, Py_ssize_t size)
+{
+    return write_latin1((PyUnicodeWriter *)writer, str, size);
+}
+
+static int
+write_latin1(PyUnicodeWriter *w, const char *str, Py_ssize_t size)
+{
+    if (size == 0) {
+        return 0;
+    }
+    if (reserve(w, size) < 0) {
+        return -1;
+    }
+    for (Py_ssize_t i = 0; i < size; i++) {
+        w->buf[w->len++] = (unsigned char)str[i];
+    }
+    return 0;
+}
+
+/* The code points as given: a release build checks none (gh-158445). */
+int
+PyUnicodeWriter_WriteUCS4(PyUnicodeWriter *w, Py_UCS4 *str, Py_ssize_t size)
+{
+    if (size < 0) {
+        PyErr_SetString(PyExc_ValueError, "size must be positive");
+        return -1;
+    }
+    if (size == 0) {
+        return 0;
+    }
+    if (reserve(w, size) < 0) {
+        return -1;
+    }
+    memcpy(w->buf + w->len, str, size * sizeof(Py_UCS4));
+    w->len += size;
+    return 0;
+}
+
+int
+PyUnicodeWriter_WriteWideChar(PyUnicodeWriter *w, const wchar_t *str, Py_ssize_t size)
+{
+    if (size < 0) {
+        size = (Py_ssize_t)wcslen(str);
+    }
+    return size == 0 ? 0 : write_owned(w, PyUnicode_FromWideChar(str, size));
+}
+
+int
+PyUnicodeWriter_Format(PyUnicodeWriter *w, const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    PyObject *s = PyUnicode_FromFormatV(format, ap);
+    va_end(ap);
+    return write_owned(w, s);
 }
 
 /* Py_ReprEnter and Py_ReprLeave (Objects/object.c): the objects being repr'd

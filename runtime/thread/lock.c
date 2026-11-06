@@ -221,3 +221,173 @@ PyEvent_WaitTimed(PyEvent *evt, PyTime_t timeout_ns, int detach)
         return _Py_atomic_load_uint8(&evt->v) == _Py_LOCKED;
     }
 }
+
+/* _PyOnceFlag (Python/lock.c): one thread runs fn, the rest park until the
+   state byte says done. */
+
+static int
+unlock_once(_PyOnceFlag *o, int res)
+{
+    uint8_t new_value = res == 0 ? _Py_ONCE_INITIALIZED : _Py_UNLOCKED;
+    uint8_t old_value = _Py_atomic_exchange_uint8(&o->v, new_value);
+    if ((old_value & _Py_HAS_PARKED) != 0) {
+        _PyParkingLot_UnparkAll(&o->v);
+    }
+    return res;
+}
+
+LU_EXPORT int
+_PyOnceFlag_CallOnceSlow(_PyOnceFlag *flag, _Py_once_fn_t *fn, void *arg)
+{
+    uint8_t v = _Py_atomic_load_uint8(&flag->v);
+    for (;;) {
+        if (v == _Py_UNLOCKED) {
+            if (!_Py_atomic_compare_exchange_uint8(&flag->v, &v, _Py_LOCKED)) {
+                continue;
+            }
+            return unlock_once(flag, fn(arg));
+        }
+        if (v == _Py_ONCE_INITIALIZED) {
+            return 0;
+        }
+        /* The once flag is initializing (locked). */
+        if (!(v & _Py_HAS_PARKED)) {
+            uint8_t new_value = v | _Py_HAS_PARKED;
+            if (!_Py_atomic_compare_exchange_uint8(&flag->v, &v, new_value)) {
+                continue;
+            }
+            v = new_value;
+        }
+        _PyParkingLot_Park(&flag->v, &v, sizeof v, -1, NULL, 1);
+        v = _Py_atomic_load_uint8(&flag->v);
+    }
+}
+
+/* _PyRecursiveMutex (Python/lock.c): a PyMutex plus the owner's thread id
+   and a recursion level. */
+
+static int
+recursive_mutex_is_owned_by(_PyRecursiveMutex *m, unsigned long long tid)
+{
+    return _Py_atomic_load_ullong_relaxed(&m->thread) == tid;
+}
+
+LU_EXPORT int
+_PyRecursiveMutex_IsLockedByCurrentThread(_PyRecursiveMutex *m)
+{
+    return recursive_mutex_is_owned_by(m, PyThread_get_thread_ident_ex());
+}
+
+LU_EXPORT void
+_PyRecursiveMutex_Lock(_PyRecursiveMutex *m)
+{
+    unsigned long long thread = PyThread_get_thread_ident_ex();
+    if (recursive_mutex_is_owned_by(m, thread)) {
+        m->level++;
+        return;
+    }
+    PyMutex_Lock(&m->mutex);
+    _Py_atomic_store_ullong_relaxed(&m->thread, thread);
+}
+
+LU_EXPORT void
+_PyRecursiveMutex_Unlock(_PyRecursiveMutex *m)
+{
+    if (_PyRecursiveMutex_TryUnlock(m) < 0) {
+        Py_FatalError("unlocking a recursive mutex that is not "
+                      "owned by the current thread");
+    }
+}
+
+LU_EXPORT int
+_PyRecursiveMutex_TryUnlock(_PyRecursiveMutex *m)
+{
+    unsigned long long thread = PyThread_get_thread_ident_ex();
+    if (!recursive_mutex_is_owned_by(m, thread)) {
+        return -1;
+    }
+    if (m->level > 0) {
+        m->level--;
+        return 0;
+    }
+    _Py_atomic_store_ullong_relaxed(&m->thread, 0);
+    PyMutex_Unlock(&m->mutex);
+    return 0;
+}
+
+/* _PyRWMutex (Python/lock.c): many readers or one writer, write-preferring.
+   The low bits are "write-locked" and "has parked"; the rest count readers. */
+
+#define _Py_WRITE_LOCKED 1
+#define _PyRWMutex_READER_SHIFT 2
+
+static uintptr_t
+rwmutex_set_parked_and_wait(_PyRWMutex *rwmutex, uintptr_t bits)
+{
+    if ((bits & _Py_HAS_PARKED) == 0) {
+        uintptr_t newval = bits | _Py_HAS_PARKED;
+        if (!_Py_atomic_compare_exchange_uintptr(&rwmutex->bits, &bits, newval)) {
+            return bits;
+        }
+        bits = newval;
+    }
+    _PyParkingLot_Park(&rwmutex->bits, &bits, sizeof bits, -1, NULL, 1);
+    return _Py_atomic_load_uintptr_relaxed(&rwmutex->bits);
+}
+
+static uintptr_t
+rwmutex_reader_count(uintptr_t bits)
+{
+    return bits >> _PyRWMutex_READER_SHIFT;
+}
+
+LU_EXPORT void
+_PyRWMutex_RLock(_PyRWMutex *rwmutex)
+{
+    uintptr_t bits = _Py_atomic_load_uintptr_relaxed(&rwmutex->bits);
+    for (;;) {
+        if ((bits & (_Py_WRITE_LOCKED | _Py_HAS_PARKED)) == 0) {
+            uintptr_t newval = bits + (1 << _PyRWMutex_READER_SHIFT);
+            if (_Py_atomic_compare_exchange_uintptr(&rwmutex->bits, &bits, newval)) {
+                return;
+            }
+            continue;
+        }
+        bits = rwmutex_set_parked_and_wait(rwmutex, bits);
+    }
+}
+
+LU_EXPORT void
+_PyRWMutex_RUnlock(_PyRWMutex *rwmutex)
+{
+    uintptr_t bits = _Py_atomic_add_uintptr(&rwmutex->bits, -(1 << _PyRWMutex_READER_SHIFT));
+    bits -= (1 << _PyRWMutex_READER_SHIFT);
+    if (rwmutex_reader_count(bits) == 0 && (bits & _Py_HAS_PARKED)) {
+        _PyParkingLot_UnparkAll(&rwmutex->bits);
+    }
+}
+
+LU_EXPORT void
+_PyRWMutex_Lock(_PyRWMutex *rwmutex)
+{
+    uintptr_t bits = _Py_atomic_load_uintptr_relaxed(&rwmutex->bits);
+    for (;;) {
+        if ((bits & ~_Py_HAS_PARKED) == 0) {
+            if (_Py_atomic_compare_exchange_uintptr(&rwmutex->bits, &bits,
+                                                    bits | _Py_WRITE_LOCKED)) {
+                return;
+            }
+            continue;
+        }
+        bits = rwmutex_set_parked_and_wait(rwmutex, bits);
+    }
+}
+
+LU_EXPORT void
+_PyRWMutex_Unlock(_PyRWMutex *rwmutex)
+{
+    uintptr_t old_bits = _Py_atomic_exchange_uintptr(&rwmutex->bits, 0);
+    if ((old_bits & _Py_HAS_PARKED) != 0) {
+        _PyParkingLot_UnparkAll(&rwmutex->bits);
+    }
+}

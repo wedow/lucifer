@@ -880,7 +880,7 @@ visit_each(const mi_heap_t *heap, const mi_heap_area_t *area, void *block, size_
            void *args)
 {
     struct visit_args *a = args;
-    PyObject *op = op_from_block(block, args, 0);
+    PyObject *op = op_from_block(block, args, 1);  /* frozen objects are visitors' too */
     if (op != NULL && a->more) {
         a->more = a->callback(op, a->arg);
     }

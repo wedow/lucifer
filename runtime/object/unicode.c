@@ -70,11 +70,12 @@ PyUnicode_New(Py_ssize_t size, Py_UCS4 maxchar)
         lu_err_format(PyExc_SystemError, "invalid maximum character passed to PyUnicode_New");
         return NULL;
     }
-    if (size < 0 || size > (PY_SSIZE_T_MAX - (Py_ssize_t)sizeof(PyCompactUnicodeObject)) / kind - 1) {
-        lu_err_format(size < 0 ? PyExc_SystemError : PyExc_OverflowError,
-                      size < 0 ? "Negative size passed to PyUnicode_New"
-                               : "string is too large");
+    if (size < 0) {
+        lu_err_format(PyExc_SystemError, "Negative size passed to PyUnicode_New");
         return NULL;
+    }
+    if (size > (PY_SSIZE_T_MAX - (Py_ssize_t)sizeof(PyCompactUnicodeObject)) / kind - 1) {
+        return PyErr_NoMemory();
     }
     size_t header = ascii ? sizeof(PyASCIIObject) : sizeof(PyCompactUnicodeObject);
     PyObject *op = lu_object_new(&PyUnicode_Type, header + (size + 1) * kind);
@@ -90,6 +91,10 @@ PyUnicode_FromKindAndData(int kind, const void *buffer, Py_ssize_t size)
 {
     if (size < 0) {
         lu_err_format(PyExc_ValueError, "size must be positive");
+        return NULL;
+    }
+    if (kind != PyUnicode_1BYTE_KIND && kind != PyUnicode_2BYTE_KIND && kind != PyUnicode_4BYTE_KIND) {
+        PyErr_SetString(PyExc_SystemError, "invalid kind");
         return NULL;
     }
     Py_UCS4 maxchar = 0;
@@ -153,6 +158,11 @@ utf8_char(const unsigned char *s, Py_ssize_t n, int surrogatepass, Py_UCS4 *out)
 PyObject *
 lu_str_from_utf8(const char *str, Py_ssize_t size, int surrogatepass)
 {
+    /* No string of that many characters can be made: CPython's decoder
+       makes its result first (PyUnicode_New), before reading the bytes. */
+    if (size > (PY_SSIZE_T_MAX - (Py_ssize_t)sizeof(PyCompactUnicodeObject)) - 1) {
+        return PyErr_NoMemory();
+    }
     const unsigned char *s = (const unsigned char *)str;
     Py_ssize_t length = 0;
     Py_UCS4 maxchar = 0;
@@ -229,6 +239,11 @@ PyUnicode_FromStringAndSize(const char *s, Py_ssize_t size)
                       "Negative size passed to PyUnicode_FromStringAndSize");
         return NULL;
     }
+    if (s == NULL && size > 0) {
+        PyErr_SetString(PyExc_SystemError,
+                        "NULL string with positive size with NULL passed to PyUnicode_FromStringAndSize");
+        return NULL;
+    }
     return lu_str_from_utf8(s, size, 0);
 }
 
@@ -245,7 +260,10 @@ const char *
 PyUnicode_AsUTF8AndSize(PyObject *op, Py_ssize_t *size)
 {
     if (!PyUnicode_Check(op)) {
-        lu_err_format(PyExc_TypeError, "bad argument type for built-in operation");
+        PyErr_BadArgument();
+        if (size != NULL) {
+            *size = -1;     /* the failure's size (Objects/unicodeobject.c) */
+        }
         return NULL;
     }
     if (PyUnicode_IS_ASCII(op)) {
@@ -255,13 +273,17 @@ PyUnicode_AsUTF8AndSize(PyObject *op, Py_ssize_t *size)
         return (const char *)PyUnicode_DATA(op);
     }
     PyCompactUnicodeObject *c = (PyCompactUnicodeObject *)op;
-    if (c->utf8 == NULL) {
+    char *utf8 = __atomic_load_n(&c->utf8, __ATOMIC_ACQUIRE);
+    if (utf8 == NULL) {
         int kind = PyUnicode_KIND(op);
         const void *data = PyUnicode_DATA(op);
         Py_ssize_t n = PyUnicode_GET_LENGTH(op);
         char *buf = PyObject_Malloc(n * 4 + 1), *p = buf;
         if (buf == NULL) {
             PyErr_NoMemory();
+            if (size != NULL) {
+                *size = -1;
+            }
             return NULL;
         }
         for (Py_ssize_t i = 0; i < n; i++) {
@@ -275,9 +297,20 @@ PyUnicode_AsUTF8AndSize(PyObject *op, Py_ssize_t *size)
             }
             else if (ch >= 0xd800 && ch <= 0xdfff) {
                 PyObject_Free(buf);
-                lu_err_format(PyExc_UnicodeEncodeError,
-                              "'utf-8' codec can't encode character '\\u%04x' in position "
-                              "%zd: surrogates not allowed", (unsigned)ch, i);
+                /* The strict handler's error over the run of surrogates. */
+                Py_ssize_t end = i + 1;
+                while (end < n && Py_UNICODE_IS_SURROGATE(PyUnicode_READ(kind, data, end))) {
+                    end++;
+                }
+                PyObject *exc = PyObject_CallFunction(PyExc_UnicodeEncodeError, "sOnns", "utf-8", op,
+                                                      i, end, "surrogates not allowed");
+                if (exc != NULL) {
+                    PyErr_SetObject(PyExc_UnicodeEncodeError, exc);
+                    Py_DECREF(exc);
+                }
+                if (size != NULL) {
+                    *size = -1;
+                }
                 return NULL;
             }
             else if (ch < 0x10000) {
@@ -293,13 +326,21 @@ PyUnicode_AsUTF8AndSize(PyObject *op, Py_ssize_t *size)
             }
         }
         *p = 0;
-        c->utf8_length = p - buf;
-        c->utf8 = buf;
+        /* Threads may race to fill the cache: the first published copy wins,
+           its length stored before it is (unicode_fill_utf8 locks). */
+        __atomic_store_n(&c->utf8_length, p - buf, __ATOMIC_RELAXED);
+        utf8 = NULL;
+        if (!__atomic_compare_exchange_n(&c->utf8, &utf8, buf, 0, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)) {
+            PyObject_Free(buf);
+        }
+        else {
+            utf8 = buf;
+        }
     }
     if (size != NULL) {
         *size = c->utf8_length;
     }
-    return c->utf8;
+    return utf8;
 }
 
 const char *

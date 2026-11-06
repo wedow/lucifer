@@ -16,21 +16,8 @@ PyModuleDef_Init(PyModuleDef *def)
     return (PyObject *)def;
 }
 
-/* PyErr_Format with the exception that was set as its __cause__ and __context__. */
-static void
-err_format_from_cause(PyObject *type, const char *format, const char *name)
-{
-    PyObject *cause = PyErr_GetRaisedException();
-    lu_err_format(type, format, name);
-    PyObject *exc = PyErr_GetRaisedException();
-    if (exc != NULL && cause != NULL) {
-        PyException_SetCause(exc, Py_NewRef(cause));
-        PyException_SetContext(exc, cause);
-        cause = NULL;
-    }
-    Py_XDECREF(cause);
-    PyErr_SetRaisedException(exc);
-}
+/* PyErr_Format with the exception that was set as its __cause__ and __context__:
+   the shared helper lu_err_format_from_cause (runtime/capi/errors.c). */
 
 int
 PyModule_AddFunctions(PyObject *m, PyMethodDef *functions)
@@ -276,7 +263,7 @@ PyModule_FromDefAndSpec2(PyModuleDef *def, PyObject *spec, int module_api_versio
             goto error;
         }
         if (PyErr_Occurred()) {
-            err_format_from_cause(PyExc_SystemError, "creation of module %s raised unreported exception",
+            lu_err_format_from_cause(PyExc_SystemError, "creation of module %s raised unreported exception",
                                   name);
             goto error;
         }
@@ -346,7 +333,7 @@ PyModule_ExecDef(PyObject *m, PyModuleDef *def)
                 return -1;
             }
             if (PyErr_Occurred()) {
-                err_format_from_cause(PyExc_SystemError, "execution of module %s raised unreported "
+                lu_err_format_from_cause(PyExc_SystemError, "execution of module %s raised unreported "
                                       "exception", name);
                 return -1;
             }

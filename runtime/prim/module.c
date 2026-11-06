@@ -203,6 +203,7 @@ lucifer_exec(PyObject *m)
         || add_functions(m, lu_prim_math_methods) < 0
         || add_functions(m, lu_prim_calendar_methods) < 0
         || add_functions(m, lu_prim_datetime_methods) < 0
+        || add_functions(m, lu_prim_context_methods) < 0
         || add_functions(m, lu_prim_zlib_methods) < 0
         || add_functions(m, lu_prim_ctypes_methods) < 0
         || add_functions(m, lu_prim_passwd_methods) < 0
@@ -257,9 +258,31 @@ prim_module_init(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return module_init_dict((PyModuleObject *)args[0], args[1], args[2]) < 0 ? NULL : Py_NewRef(Py_None);
 }
 
+/* socket_capi(type, error, timeout): _socket.CAPI, the capsule of
+   PySocketModule_APIObject (Modules/socketmodule.h) other extensions import.
+   The record lives as long as the process, as the module's does. */
+static PyObject *
+prim_socket_capi(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 3 || !PyType_Check(args[0])) {
+        lu_err_format(PyExc_TypeError, "socket_capi(type, error, timeout)");
+        return NULL;
+    }
+    struct { PyTypeObject *Sock_Type; PyObject *error, *timeout_error; } *api = PyMem_Malloc(sizeof *api);
+    if (api == NULL) {
+        return PyErr_NoMemory();
+    }
+    api->Sock_Type = (PyTypeObject *)Py_NewRef(args[0]);
+    api->error = Py_NewRef(args[1]);
+    api->timeout_error = Py_NewRef(args[2]);
+    return PyCapsule_New(api, "_socket.CAPI", NULL);
+}
+
 static PyMethodDef lucifer_methods[] = {
     { "module_init", (PyCFunction)(void (*)(void))prim_module_init, METH_FASTCALL,
       "module_init(module, name, doc): the namespace of a new module." },
+    { "socket_capi", (PyCFunction)(void (*)(void))prim_socket_capi, METH_FASTCALL,
+      "socket_capi(type, error, timeout): the _socket.CAPI capsule." },
     { "write", (PyCFunction)(void (*)(void))lu_prim_write, METH_FASTCALL,
       "write(fd, str): write str to fd as UTF-8, all of it." },
     { "str_join", (PyCFunction)(void (*)(void))lu_prim_str_join, METH_FASTCALL,

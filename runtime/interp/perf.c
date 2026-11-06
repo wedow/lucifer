@@ -51,7 +51,8 @@ static struct {
     char *arena;                /* the current arena's next free chunk */
     size_t arena_left;
     uint64_t arena_epoch;
-} perf = { .lock = { PTHREAD_MUTEX_INITIALIZER } };
+    Py_ssize_t extra_index;     /* the code-extra slot that holds each code's copy */
+} perf = { .lock = { PTHREAD_MUTEX_INITIALIZER }, .extra_index = -1 };
 
 /* A forked child keeps its parent's copies only when they persist. */
 static uint64_t
@@ -364,13 +365,16 @@ new_chunk(void)
 static trampoline
 trampoline_of(PyCodeObject *co)
 {
-    char *t = __atomic_load_n((char **)&co->co_extra, __ATOMIC_ACQUIRE);
+    void *found;
+    PyUnstable_Code_GetExtra((PyObject *)co, perf.extra_index, &found);
+    char *t = found;
     if (t != NULL && *(uint64_t *)(t + CHUNK - 8) == __atomic_load_n(&perf.current, __ATOMIC_RELAXED)) {
         return (trampoline)(void *)t;
     }
     char *name = code_name(co, -1);
     lock();
-    t = __atomic_load_n((char **)&co->co_extra, __ATOMIC_ACQUIRE);
+    PyUnstable_Code_GetExtra((PyObject *)co, perf.extra_index, &found);
+    t = found;
     if (t == NULL || *(uint64_t *)(t + CHUNK - 8) != perf.current) {
         t = new_chunk();
         if (t != NULL) {
@@ -378,7 +382,9 @@ trampoline_of(PyCodeObject *co)
                 write_entry(perf.backend, t, (size_t)lu_target.ntrampoline, name,
                             lu_target.fp_cfi, (size_t)lu_target.nfp_cfi);
             }
-            __atomic_store_n((char **)&co->co_extra, t, __ATOMIC_RELEASE);
+            if (PyUnstable_Code_SetExtra((PyObject *)co, perf.extra_index, t) < 0) {
+                PyErr_Clear();      /* not kept: the next call makes another */
+            }
         }
     }
     unlock();
@@ -415,6 +421,15 @@ activate(PyInterpreterState *interp, int backend)
         return -1;
     }
     lock();
+    if (perf.extra_index < 0) {
+        /* Each code's copy lives in a code-extra slot (perf_trampoline.c). */
+        perf.extra_index = PyUnstable_Eval_RequestCodeExtraIndex(NULL);
+        if (perf.extra_index < 0) {
+            unlock();
+            PyErr_SetString(PyExc_RuntimeError, "no code-extra slot left for the perf trampolines");
+            return -1;
+        }
+    }
     if (perf.backend != backend) {
         perf.activations++;
         __atomic_store_n(&perf.current, epoch(), __ATOMIC_RELAXED);

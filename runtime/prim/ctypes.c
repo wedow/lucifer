@@ -187,6 +187,10 @@ prim_ct_call(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (ts != NULL) {
         lu_syscall_end(ts);
     }
+    /* A C API function that raised fails the call (_ctypes_callproc). */
+    if ((flags & CT_FUNCFLAG_PYTHONAPI) && PyErr_Occurred()) {
+        return NULL;
+    }
     widen(rcode, &result);
     return from_value(rcode, &result);
 }

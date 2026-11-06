@@ -55,6 +55,10 @@ def to_int(x):
             return r
         if not kind(r, 'int'):
             error(TypeError, str_join('', ('__int__ returned non-int (type ', _name(r), ')')))
+        __import__('warnings').warn(str_join('', (
+            '__int__ returned non-int (type ', _name(r), ').  The ability to return an instance of '
+            'a strict subclass of int is deprecated, and may be removed in a future version of '
+            'Python.')), DeprecationWarning, 1)
         return _exact(r)
     if type_lookup(type(x), '__index__') is not MISSING:
         return index(x)

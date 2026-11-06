@@ -500,7 +500,10 @@ PyUnstable_Object_GC_NewWithExtraData(PyTypeObject *tp, size_t extra)
 {
     PyObject *op = gc_new(tp, tp->tp_basicsize, extra);
     if (op != NULL) {
-        memset((char *)op + tp->tp_basicsize, 0, extra);
+        /* The body after the header is zeroed (Python/gc_free_threading.c):
+           a subclass's slots and the extra data start NULL, so a set or a
+           clear of them decrefs nothing. */
+        memset((char *)op + sizeof(PyObject), 0, tp->tp_basicsize + extra - sizeof(PyObject));
     }
     return op;
 }

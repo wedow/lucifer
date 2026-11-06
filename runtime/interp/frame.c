@@ -747,6 +747,30 @@ PyFrame_GetLasti(PyFrameObject *f)
     return (int)(lu_frame_lasti(FO(f)->f_frame) * (Py_ssize_t)sizeof(lu_codeunit));
 }
 
+/* The frame-record queries of PEP 523's custom evaluators
+   (Python/frame.c): a frame object's record is the same struct. */
+
+PyObject *
+PyUnstable_InterpreterFrame_GetCode(struct _PyInterpreterFrame *frame)
+{
+    return Py_NewRef((PyObject *)((struct lu_frame *)frame)->code);
+}
+
+int
+PyUnstable_InterpreterFrame_GetLasti(struct _PyInterpreterFrame *frame)
+{
+    struct lu_frame *f = (struct lu_frame *)frame;
+    return (int)(lu_frame_lasti(f) * (Py_ssize_t)sizeof(lu_codeunit));
+}
+
+int
+PyUnstable_InterpreterFrame_GetLine(struct _PyInterpreterFrame *frame)
+{
+    struct lu_frame *f = (struct lu_frame *)frame;
+    return PyCode_Addr2Line(f->code,
+                            lu_frame_lasti(f) * (Py_ssize_t)sizeof(lu_codeunit));
+}
+
 int
 PyFrame_GetLineNumber(PyFrameObject *f)
 {

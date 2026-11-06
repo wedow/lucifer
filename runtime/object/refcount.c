@@ -4,6 +4,7 @@
    which may go negative until the owner merges the two. */
 
 #include "lucifer.h"
+#include "interp/frame.h"
 
 void
 Py_IncRef(PyObject *o)
@@ -27,6 +28,77 @@ void
 _Py_DecRef(PyObject *o)
 {
     Py_DECREF(o);
+}
+
+/* The function halves of the reference-count and identity macros
+   (Include/object.h): extensions may #undef the macro and call these. */
+
+#undef Py_NewRef
+#undef Py_XNewRef
+
+PyObject *
+Py_NewRef(PyObject *o)
+{
+    Py_INCREF(o);
+    return o;
+}
+
+PyObject *
+Py_XNewRef(PyObject *o)
+{
+    Py_XINCREF(o);
+    return o;
+}
+
+#undef Py_Is
+#undef Py_IsNone
+#undef Py_IsTrue
+#undef Py_IsFalse
+
+int
+Py_Is(PyObject *x, PyObject *y)
+{
+    return x == y;
+}
+
+int
+Py_IsNone(PyObject *x)
+{
+    return x == Py_None;
+}
+
+int
+Py_IsTrue(PyObject *x)
+{
+    return x == Py_True;
+}
+
+int
+Py_IsFalse(PyObject *x)
+{
+    return x == Py_False;
+}
+
+/* The try-incref API (Objects/object.c): a reference if the object is alive,
+   and the flag that keeps a weakly-reachable object's shared count honest. */
+
+int
+PyUnstable_TryIncRef(PyObject *op)
+{
+    return lu_try_incref(op);
+}
+
+void
+PyUnstable_EnableTryIncRef(PyObject *op)
+{
+    lu_set_maybe_weakref(op);
+}
+
+void
+PyUnstable_DisableTryIncRef(PyObject *op)
+{
+    /* lucifer has no merging flag to clear: nothing to do. */
+    (void)op;
 }
 
 /* The only birth path (Objects/object.c new_reference). */
@@ -284,11 +356,24 @@ PyUnstable_Object_IsUniquelyReferenced(PyObject *op)
         && _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared) == 0;
 }
 
-/* The runtime keeps no temporaries on a value stack C can see: the API's
-   "no". */
+/* Uniquely referenced, and that reference on the value stack of the
+   Python frame that called C (Objects/object.c). */
 int
 PyUnstable_Object_IsUniqueReferencedTemporary(PyObject *op)
 {
+    if (!PyUnstable_Object_IsUniquelyReferenced(op)) {
+        return 0;
+    }
+    struct lu_frame *f = (struct lu_frame *)PyThreadState_Get()->current_frame;
+    if (f == NULL || f->owner == LU_FRAME_C_ENTRY) {
+        return 0;
+    }
+    PyObject **base = f->localsplus + f->code->co_nlocalsplus;
+    for (PyObject **p = f->stackpointer; p > base;) {
+        if (*--p == op) {
+            return 1;
+        }
+    }
     return 0;
 }
 

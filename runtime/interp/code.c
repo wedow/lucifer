@@ -67,6 +67,12 @@ PyCode_ClearWatcher(int id)
     return 0;
 }
 
+/* The holder of the "extra" slots; the API over it is below code_traverse. */
+typedef struct {
+    Py_ssize_t ce_size;
+    void *ce_extras[1];
+} _PyCodeObjectExtra;
+
 static void
 code_dealloc(PyObject *op)
 {
@@ -86,6 +92,16 @@ code_dealloc(PyObject *op)
     Py_XDECREF(co->co_name);
     Py_XDECREF(co->co_qualname);
     Py_XDECREF(co->co_linetable);
+    if (co->co_extra != NULL) {
+        PyInterpreterState *interp = PyInterpreterState_Get();
+        _PyCodeObjectExtra *extra = co->co_extra;
+        for (Py_ssize_t i = 0; i < extra->ce_size; i++) {
+            if (extra->ce_extras[i] != NULL && interp->co_extra_freefuncs[i] != NULL) {
+                interp->co_extra_freefuncs[i](extra->ce_extras[i]);
+            }
+        }
+        PyMem_Free(extra);
+    }
     lu_monitoring_free(co);
     lu_jit_code_free(co);
     lu_object_free(op);
@@ -97,6 +113,84 @@ code_traverse(PyObject *op, visitproc visit, void *arg)
 {
     Py_VISIT(((PyCodeObject *)op)->co_consts);
     return 0;
+}
+
+/* The "extra" slots of PEP 523 (Objects/codeobject.c): an index each user
+   takes once, a per-code array of their void*, and a free function each.
+   Readers take no lock: a store publishes with release, and an array that
+   grows is swapped for a copy, the old one freed once no reader holds it. */
+
+#define CODE_EXTRA_SIZE(n) (offsetof(_PyCodeObjectExtra, ce_extras) + (n) * sizeof(void *))
+
+Py_ssize_t
+PyUnstable_Eval_RequestCodeExtraIndex(freefunc free)
+{
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    PyMutex_Lock(&interp->co_extra_lock);
+    Py_ssize_t index = -1;
+    if (interp->co_extra_user_count < MAX_CO_EXTRA_USERS - 1) {
+        index = interp->co_extra_user_count;
+        interp->co_extra_freefuncs[index] = free;
+        __atomic_store_n(&interp->co_extra_user_count, index + 1, __ATOMIC_RELEASE);
+    }
+    PyMutex_Unlock(&interp->co_extra_lock);
+    return index;
+}
+
+int
+PyUnstable_Code_GetExtra(PyObject *code, Py_ssize_t index, void **extra)
+{
+    if (!PyCode_Check(code)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    _PyCodeObjectExtra *ce = __atomic_load_n((_PyCodeObjectExtra **)&((PyCodeObject *)code)->co_extra,
+                                             __ATOMIC_ACQUIRE);
+    *extra = index >= 0 && ce != NULL && index < ce->ce_size
+        ? __atomic_load_n(&ce->ce_extras[index], __ATOMIC_ACQUIRE) : NULL;
+    return 0;
+}
+
+int
+PyUnstable_Code_SetExtra(PyObject *code, Py_ssize_t index, void *extra)
+{
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    Py_ssize_t users = __atomic_load_n(&interp->co_extra_user_count, __ATOMIC_ACQUIRE);
+    if (!PyCode_Check(code) || index < 0 || index >= users) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    PyCodeObject *co = (PyCodeObject *)code;
+    void *old = NULL;
+    int result = 0;
+    Py_BEGIN_CRITICAL_SECTION(co);
+    _PyCodeObjectExtra *ce = co->co_extra;
+    Py_ssize_t size = ce != NULL ? ce->ce_size : 0;
+    if (index < size) {
+        old = ce->ce_extras[index];
+        __atomic_store_n(&ce->ce_extras[index], extra, __ATOMIC_RELEASE);
+    }
+    else {
+        _PyCodeObjectExtra *grown = PyMem_Malloc(CODE_EXTRA_SIZE(users));
+        if (grown == NULL) {
+            PyErr_NoMemory();
+            result = -1;
+        }
+        else {
+            for (Py_ssize_t i = 0; i < users; i++) {
+                grown->ce_extras[i] = i < size ? ce->ce_extras[i] : NULL;
+            }
+            grown->ce_size = users;
+            grown->ce_extras[index] = extra;
+            __atomic_store_n((_PyCodeObjectExtra **)&co->co_extra, grown, __ATOMIC_RELEASE);
+            lu_qsbr_retire(ce);
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    if (old != NULL && interp->co_extra_freefuncs[index] != NULL) {
+        interp->co_extra_freefuncs[index](old);
+    }
+    return result;
 }
 
 static int code_same(PyCodeObject *a, PyCodeObject *b);
@@ -123,6 +217,32 @@ static PyObject *
 code_get_varnames(PyObject *co, void *closure)
 {
     return code_names_of_kind((PyCodeObject *)co, CO_FAST_LOCAL);
+}
+
+/* PyCode_GetCode / PyCode_GetVarnames: new references to the code object's
+   own views (Objects/codeobject.c). */
+PyObject *
+PyCode_GetCode(PyCodeObject *co)
+{
+    return lu_code_bytes(co);
+}
+
+PyObject *
+PyCode_GetVarnames(PyCodeObject *co)
+{
+    return code_names_of_kind(co, CO_FAST_LOCAL);
+}
+
+PyObject *
+PyCode_GetCellvars(PyCodeObject *co)
+{
+    return code_names_of_kind(co, CO_FAST_CELL);
+}
+
+PyObject *
+PyCode_GetFreevars(PyCodeObject *co)
+{
+    return code_names_of_kind(co, CO_FAST_FREE);
 }
 
 static PyObject *
