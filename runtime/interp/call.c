@@ -493,6 +493,10 @@ bind(struct lu_frame *f, PyObject **args, Py_ssize_t argcount, PyObject *kwnames
             if (locals[i] != NULL) {
                 continue;
             }
+            if (func->func_kwdefaults != NULL && !PyDict_Check(func->func_kwdefaults)) {
+                PyErr_BadInternalCall();    /* PyEval_EvalCodeEx's caller gave a non-dict */
+                return -1;
+            }
             PyObject *def = func->func_kwdefaults != NULL
                 ? lu_ns_get(func->func_kwdefaults, PyTuple_GET_ITEM(co->co_localsplusnames, i))
                 : NULL;

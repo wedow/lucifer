@@ -3895,3 +3895,59 @@ PyEval_EvalCode(PyObject *co, PyObject *globals, PyObject *locals)
     t->pin -= nested;
     return result;
 }
+
+/* The legacy entry (Python/ceval.c): a function made from the parts, called
+   with `locals`. Keywords come as name/value pairs. */
+PyObject *
+PyEval_EvalCodeEx(PyObject *co, PyObject *globals, PyObject *locals,
+                  PyObject *const *args, int argcount, PyObject *const *kws, int kwcount,
+                  PyObject *const *defs, int defcount, PyObject *kwdefs, PyObject *closure)
+{
+    if (!PyDict_Check(globals)) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+    PyFunctionObject *func = (PyFunctionObject *)lu_function_new(co, globals);
+    if (func == NULL) {
+        return NULL;
+    }
+    Py_SETREF(func->func_qualname, Py_NewRef(((PyCodeObject *)co)->co_name));
+    func->func_defaults = PyTuple_New(defcount);
+    PyObject *kwnames = kwcount ? PyTuple_New(kwcount) : NULL;
+    PyObject **owned = PyMem_Malloc((argcount + kwcount + 1) * sizeof(PyObject *));
+    if (func->func_defaults == NULL || (kwcount && kwnames == NULL) || owned == NULL) {
+        Py_DECREF(func);
+        Py_XDECREF(kwnames);
+        PyMem_Free(owned);
+        return PyErr_NoMemory();
+    }
+    for (int i = 0; i < defcount; i++) {
+        PyTuple_SET_ITEM(func->func_defaults, i, Py_NewRef(defs[i]));
+    }
+    func->func_kwdefaults = Py_XNewRef(kwdefs);
+    func->func_closure = Py_XNewRef(closure);
+    for (int i = 0; i < argcount; i++) {
+        owned[i] = Py_NewRef(args[i]);
+    }
+    for (int i = 0; i < kwcount; i++) {
+        PyTuple_SET_ITEM(kwnames, i, Py_NewRef(kws[2 * i]));
+        owned[argcount + i] = Py_NewRef(kws[2 * i + 1]);
+    }
+    PyThreadState *ts = PyThreadState_Get();
+    struct lu_frame *f = lu_frame_call(ts, func, owned, argcount, kwnames);
+    PyMem_Free(owned);
+    Py_XDECREF(kwnames);
+    Py_DECREF(func);
+    if (f == NULL) {
+        return NULL;
+    }
+    f->locals = Py_NewRef(locals != NULL ? locals : globals);
+    struct lu_task *t = (struct lu_task *)ts;
+    PyObject *result;
+    if (lu_enter_frame(ts, f, &result)) {
+        t->pin++;
+        result = lu_eval(ts, f);
+        t->pin--;
+    }
+    return result;
+}
