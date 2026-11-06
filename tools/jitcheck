@@ -22,6 +22,8 @@ require that a count of the tier's does not grow with the iterations:
          runs: entries into compiled code and direct calls.
   quiet  tests/kernel/jit_quiet_misses.py, whose hot lookups miss and whose
          hot generators end where CPython makes no exception: error exits.
+  caught tests/kernel/jit_caught.py, whose hot code raises exceptions that
+         handlers in the same compiled code take: error exits.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct calls into compiled code, one per
@@ -58,6 +60,7 @@ GROWTH = {
     'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
     'large': ('jit_large_callees.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
     'quiet': ('jit_quiet_misses.py', r'jit: entries .* error (\d+)', 0),
+    'caught': ('jit_caught.py', r'jit: entries .* error (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+)', 1),
 }
 GROWTH_N = 20000

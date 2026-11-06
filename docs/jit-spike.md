@@ -74,13 +74,21 @@ other machines).
     inlined call, kernel frames included.
   - An exception exit drops the operands the raising instruction consumed and
     hands the interpreter the error.
+  - An exception a handler of the same unit takes, in the root frame or in
+    kernel frames inlined into it (which make no traceback entries), does not
+    leave: the raising call branches to a landing that adds the root's
+    traceback entry and takes the exception, and the handler's
+    `PUSH_EXC_INFO`, `CHECK_EXC_MATCH` and `POP_EXCEPT` compile. `RERAISE`, a
+    bare `raise`, and a landing while a tool watches exceptions leave.
+    `raise` with an exception compiles as a call of the kernel's `do_raise`.
 - **Recompilation.** A guard that fails 50 times marks its instruction "do not
   speculate" and kills the units of the root code. A side exit inside an
   inlined copy that keeps firing stops that function from being inlined,
   and every root that still holds the copy recompiles when it leaves there.
   - A unit without loops that leaves by a side exit or an exception on half
     its entries (50 at least) is retired, and its entry stays in the
-    interpreter.
+    interpreter. An exception that leaves the root frame ends the call, so
+    it does not count.
   - A compile that finds most of its feedback sites never ran (the first
     call under `always`) is put off: the interpreter runs that entry 50
     times first, once per entry.

@@ -73,6 +73,12 @@ check_except_type(PyObject *right)
     return 0;
 }
 
+int
+lu_exc_match(PyObject *exc, PyObject *type)
+{
+    return check_except_type(type) < 0 ? -1 : PyErr_GivenExceptionMatches(exc, type);
+}
+
 #define UNBOUNDFREE_ERROR_MSG \
     "cannot access free variable '%s' where it is not associated with a value" \
     " in enclosing scope"
@@ -3700,10 +3706,9 @@ op_POP_EXCEPT: {
 op_CHECK_EXC_MATCH: {
     /* left, right -- left, left matches right */
     PyObject *right = POP();
-    int ok = check_except_type(right);
-    int match = ok == 0 && PyErr_GivenExceptionMatches(TOP(), right);
+    int match = lu_exc_match(TOP(), right);
     Py_DECREF(right);
-    if (ok < 0) {
+    if (match < 0) {
         SAVE_FRAME();
         goto error;
     }

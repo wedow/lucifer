@@ -154,6 +154,7 @@ enum {
     INS_DEAD = 1,               /* removed */
     INS_VIRTUAL = 2,            /* a box nothing observes: built only at an exit */
     INS_NOSTRESS = 4,           /* a guard after its instruction's effect: deopt:N never fails it */
+    INS_CAUGHT = 8,             /* a raising helper whose NULL result the code branches on: a handler takes it */
 };
 
 struct lu_ins {

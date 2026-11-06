@@ -5,7 +5,8 @@
    compiled unit starts at one bytecode boundary, the loop header the
    back-edge jumps to or the instruction after RESUME, with the frame
    exactly as the interpreter left it there, and runs until the function
-   returns, an exception is raised, or a guard fails. The interpreter is
+   returns, an exception no handler of the unit takes is raised, or a
+   guard fails. The interpreter is
    the deopt landing: a unit hands back a frame (and any frames of inlined
    calls above it) at a bytecode boundary that has not executed. */
 #ifndef LU_JIT_H

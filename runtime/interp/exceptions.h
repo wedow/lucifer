@@ -21,6 +21,11 @@ int lu_traceback_here(struct lu_frame *f, Py_ssize_t lasti_unit);
    instruction's offset is pushed (lasti). */
 int lu_exception_handler(PyCodeObject *code, int index, int *level, int *handler, int *lasti);
 
+/* CHECK_EXC_MATCH (runtime/interp/ceval.c): whether exc matches an except
+   clause's type, a class or a tuple of classes; -1 with a TypeError when
+   it is neither. */
+int lu_exc_match(PyObject *exc, PyObject *type);
+
 /* The static exception classes whose construction is BaseException's own
    are called as CPython's BaseException_vectorcall makes them
    (runtime/capi/errors.c); once the kernel has filled their dicts. */
