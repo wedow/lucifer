@@ -722,6 +722,8 @@ union sys_arg {
     X(sys_getpgrp, "", getpgrp()) \
     X(sys_setsid, "", setsid()) \
     X(sys_kill, "ii", kill((pid_t)a[0].i, (int)a[1].i)) \
+    X(sys_socket, "iii", socket((int)a[0].i, (int)a[1].i | SOCK_CLOEXEC, (int)a[2].i)) \
+    X(sys_listen, "ii", listen((int)a[0].i, (int)a[1].i)) \
     X(sys_shutdown, "ii", LU_SYSCALL(shutdown((int)a[0].i, (int)a[1].i))) \
     X(sys_fcntl, "iii", LU_SYSCALL(fcntl((int)a[0].i, (int)a[1].i, a[2].i))) \
     X(sys_alarm, "i", alarm((unsigned)a[0].i)) \
@@ -886,6 +888,191 @@ prim_os_socketpair(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     Py_XDECREF(a);
     Py_XDECREF(b);
     return t;
+}
+
+/* The socket calls that take or give an address, as the raw sockaddr bytes _socket packs and
+   unpacks: sockaddr(op, fd[, address]). "bind" and "connect" take the address and answer None,
+   "getsockname" and "getpeername" answer it, "accept" answers (fd, address), close-on-exec. A
+   blocking connect a signal interrupts goes on in the background (connect(2)), so after the
+   handlers it waits for the outcome. */
+static PyObject *
+prim_os_sockaddr(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    const char *op = nargs >= 2 && PyUnicode_Check(args[0]) ? PyUnicode_AsUTF8(args[0]) : NULL;
+    long fd;
+    if (op == NULL || int_arg(args[1], &fd) < 0) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "sockaddr(op, fd[, address])"), NULL);
+    }
+    struct sockaddr_storage sa;
+    socklen_t len = sizeof sa;
+    int takes = strcmp(op, "bind") == 0 || strcmp(op, "connect") == 0;
+    if (nargs != 2 + takes || (takes && (!PyBytes_Check(args[2]) || PyBytes_GET_SIZE(args[2]) > (Py_ssize_t)sizeof sa))) {
+        return lu_err_format(PyExc_TypeError, "sockaddr(op, fd[, address])"), NULL;
+    }
+    if (takes) {
+        len = (socklen_t)PyBytes_GET_SIZE(args[2]);
+        memcpy(&sa, PyBytes_AS_STRING(args[2]), len);
+    }
+    int r;
+    if (strcmp(op, "bind") == 0) {
+        r = bind((int)fd, (struct sockaddr *)&sa, len);
+    }
+    else if (strcmp(op, "connect") == 0) {
+        r = LU_SYSCALL(connect((int)fd, (struct sockaddr *)&sa, len));
+        if (r < 0 && interrupted()) {
+            struct pollfd p = { .fd = (int)fd, .events = POLLOUT };
+            do {
+                r = LU_SYSCALL(poll(&p, 1, -1));
+            } while (r < 0 && interrupted());
+            int err = 0;
+            socklen_t errlen = sizeof err;
+            if (r >= 0 && getsockopt((int)fd, SOL_SOCKET, SO_ERROR, &err, &errlen) == 0) {
+                errno = err;
+                r = err != 0 ? -1 : 0;
+            }
+        }
+    }
+    else if (strcmp(op, "getsockname") == 0) {
+        r = getsockname((int)fd, (struct sockaddr *)&sa, &len);
+    }
+    else if (strcmp(op, "getpeername") == 0) {
+        r = getpeername((int)fd, (struct sockaddr *)&sa, &len);
+    }
+    else if (strcmp(op, "accept") == 0) {
+        do {
+            r = LU_SYSCALL(accept4((int)fd, (struct sockaddr *)&sa, &len, SOCK_CLOEXEC));
+        } while (r < 0 && interrupted());
+    }
+    else {
+        return lu_err_format(PyExc_ValueError, "no such socket call: %s", op), NULL;
+    }
+    if (r < 0) {
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
+        return NULL;
+    }
+    if (takes) {
+        return Py_NewRef(Py_None);
+    }
+    PyObject *address = PyBytes_FromStringAndSize((const char *)&sa, len < sizeof sa ? len : sizeof sa);
+    return address == NULL || strcmp(op, "accept") != 0 ? address : Py_BuildValue("(iN)", r, address);
+}
+
+/* setsockopt(fd, level, name, value): value an int or a bytes-like option buffer. */
+static PyObject *
+prim_os_setsockopt(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd, level, name, value;
+    if (nargs != 4 || int_arg(args[0], &fd) < 0 || int_arg(args[1], &level) < 0 || int_arg(args[2], &name) < 0
+        || (!PyBytes_Check(args[3]) && int_arg(args[3], &value) < 0)) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "setsockopt(fd, level, name, value)"), NULL);
+    }
+    int flag = (int)value;
+    const void *buf = PyBytes_Check(args[3]) ? (const void *)PyBytes_AS_STRING(args[3]) : &flag;
+    socklen_t len = PyBytes_Check(args[3]) ? (socklen_t)PyBytes_GET_SIZE(args[3]) : sizeof flag;
+    if (setsockopt((int)fd, (int)level, (int)name, buf, len) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return Py_NewRef(Py_None);
+}
+
+/* getsockopt(fd, level, name, buflen): the int value when buflen is 0, else up to buflen bytes. */
+static PyObject *
+prim_os_getsockopt(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd, level, name, buflen;
+    if (nargs != 4 || int_arg(args[0], &fd) < 0 || int_arg(args[1], &level) < 0 || int_arg(args[2], &name) < 0
+        || int_arg(args[3], &buflen) < 0) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "getsockopt(fd, level, name, buflen)"), NULL);
+    }
+    if (buflen < 0 || buflen > 1024) {
+        return lu_err_format(PyExc_OSError, "getsockopt buflen out of range"), NULL;
+    }
+    char buf[1024];
+    int flag = 0;
+    socklen_t len = buflen == 0 ? sizeof flag : (socklen_t)buflen;
+    if (getsockopt((int)fd, (int)level, (int)name, buflen == 0 ? (void *)&flag : buf, &len) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return buflen == 0 ? PyLong_FromLong(flag) : PyBytes_FromStringAndSize(buf, len);
+}
+
+/* gethostbyaddr(family, packed): (name, [alias], [packed address]), or (h_errno, message) when the
+   resolver fails. It may wait for a name server, so it runs in the bracket. */
+static PyObject *
+prim_os_gethostbyaddr(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long family;
+    if (nargs != 2 || int_arg(args[0], &family) < 0 || !PyBytes_Check(args[1])) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "gethostbyaddr(family, packed)"), NULL);
+    }
+    struct hostent entry, *h = NULL;
+    char buf[16384] __attribute__((aligned(8)));
+    int err = 0;
+    LU_SYSCALL(gethostbyaddr_r(PyBytes_AS_STRING(args[1]), (socklen_t)PyBytes_GET_SIZE(args[1]), (int)family,
+                               &entry, buf, sizeof buf, &h, &err));
+    if (h == NULL) {
+        return Py_BuildValue("(is)", err, hstrerror(err));
+    }
+    PyObject *aliases = PyList_New(0), *addresses = PyList_New(0);
+    for (char **a = h->h_aliases; aliases != NULL && *a != NULL; a++) {
+        PyObject *alias = PyUnicode_FromString(*a);
+        if (alias == NULL || lu_list_append(aliases, alias) < 0) {
+            Py_CLEAR(aliases);
+        }
+        Py_XDECREF(alias);
+    }
+    for (char **a = h->h_addr_list; addresses != NULL && *a != NULL; a++) {
+        PyObject *address = PyBytes_FromStringAndSize(*a, h->h_length);
+        if (address == NULL || lu_list_append(addresses, address) < 0) {
+            Py_CLEAR(addresses);
+        }
+        Py_XDECREF(address);
+    }
+    if (aliases == NULL || addresses == NULL) {
+        Py_XDECREF(aliases);
+        Py_XDECREF(addresses);
+        return NULL;
+    }
+    return Py_BuildValue("(sNN)", h->h_name, aliases, addresses);
+}
+
+/* inet_pton(family, text): the packed address, or None when text is not one. */
+static PyObject *
+prim_os_inet_pton(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long family;
+    const char *text = nargs == 2 && PyUnicode_Check(args[1]) ? PyUnicode_AsUTF8(args[1]) : NULL;
+    if (text == NULL || int_arg(args[0], &family) < 0) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "inet_pton(family, text)"), NULL);
+    }
+    unsigned char packed[sizeof(struct in6_addr)];
+    int r = inet_pton((int)family, text, packed);
+    if (r < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return r == 0 ? Py_NewRef(Py_None)
+                  : PyBytes_FromStringAndSize((const char *)packed, family == AF_INET6 ? 16 : 4);
+}
+
+/* inet_ntop(family, packed): the text form. */
+static PyObject *
+prim_os_inet_ntop(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long family;
+    if (nargs != 2 || int_arg(args[0], &family) < 0 || !PyBytes_Check(args[1])) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "inet_ntop(family, packed)"), NULL);
+    }
+    char text[INET6_ADDRSTRLEN];
+    if (inet_ntop((int)family, PyBytes_AS_STRING(args[1]), text, sizeof text) == NULL) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return PyUnicode_FromString(text);
 }
 
 /* uname(): (sysname, nodename, release, version, machine) */
@@ -1809,6 +1996,12 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_urandom", (PyCFunction)(void (*)(void))prim_os_urandom, METH_FASTCALL, NULL },
     { "os_pipe", (PyCFunction)(void (*)(void))prim_os_pipe, METH_FASTCALL, NULL },
     { "os_socketpair", (PyCFunction)(void (*)(void))prim_os_socketpair, METH_FASTCALL, NULL },
+    { "os_sockaddr", (PyCFunction)(void (*)(void))prim_os_sockaddr, METH_FASTCALL, NULL },
+    { "os_setsockopt", (PyCFunction)(void (*)(void))prim_os_setsockopt, METH_FASTCALL, NULL },
+    { "os_getsockopt", (PyCFunction)(void (*)(void))prim_os_getsockopt, METH_FASTCALL, NULL },
+    { "os_gethostbyaddr", (PyCFunction)(void (*)(void))prim_os_gethostbyaddr, METH_FASTCALL, NULL },
+    { "os_inet_pton", (PyCFunction)(void (*)(void))prim_os_inet_pton, METH_FASTCALL, NULL },
+    { "os_inet_ntop", (PyCFunction)(void (*)(void))prim_os_inet_ntop, METH_FASTCALL, NULL },
     { "os_uname", (PyCFunction)(void (*)(void))prim_os_uname, METH_FASTCALL, NULL },
     { "os_putenv", (PyCFunction)(void (*)(void))prim_os_putenv, METH_FASTCALL, NULL },
     { "os_scandir", (PyCFunction)(void (*)(void))prim_os_scandir, METH_FASTCALL, NULL },
