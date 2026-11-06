@@ -179,16 +179,14 @@ def write_summary(out, date, metrics, gate_rows, problems, names, ran_numpy):
             w.writerow([k, "" if v is None else v, before.get(k, "")])
     val = metrics.get
     md = [f"# Lucifer status {date}", "", "## AWFY (best iteration, ms; ratio is JIT on / CPython)", "",
-          "| benchmark | CPython | JIT on | JIT off | on/CPython | on vs yesterday |", "|---|---|---|---|---|---|"]
+          "| benchmark | CPython | JIT on | on/CPython | on vs yesterday |", "|---|---|---|---|---|"]
     for n in names:
-        c, on, off = (val(f"awfy.{n}.{k}_us") for k in ("cpython", "on", "off"))
-        md.append(f"| {n} | {fmt(c and c / 1000, 1)} | {fmt(on and on / 1000, 1)} | {fmt(off and off / 1000, 1)} "
+        c, on = (val(f"awfy.{n}.{k}_us") for k in ("cpython", "on"))
+        md.append(f"| {n} | {fmt(c and c / 1000, 1)} | {fmt(on and on / 1000, 1)} "
                   f"| {fmt(val(f'awfy.{n}.on_over_cpython'))} | {delta(on, before.get(f'awfy.{n}.on_us'))} |")
     md += ["", f"Geomean JIT on / CPython: {fmt(val('awfy.geomean_on_over_cpython'))} "
-           f"(yesterday {fmt(float(before['awfy.geomean_on_over_cpython']) if before.get('awfy.geomean_on_over_cpython') else None)})",
-           f"Geomean JIT on / JIT off: {fmt(val('awfy.geomean_on_over_off'))}"]
-    slower = [n for n in names if val(f"awfy.{n}.on_us") and val(f"awfy.{n}.off_us") and val(f"awfy.{n}.on_us") > val(f"awfy.{n}.off_us")]
-    md += [f"JIT on slower than off: {', '.join(slower) or 'none'}", "", "## Gates", "", "| target | result | detail |", "|---|---|---|"]
+           f"(yesterday {fmt(float(before['awfy.geomean_on_over_cpython']) if before.get('awfy.geomean_on_over_cpython') else None)})"]
+    md += ["", "## Gates", "", "| target | result | detail |", "|---|---|---|"]
     md += [f"| {t} | {'pass' if ok else 'FAIL'} | {d} |" for t, (ok, d) in gate_rows.items()]
     md += ["", "## Conformance", "", "| metric | value | previous |", "|---|---|---|"]
     md += [f"| {k.removeprefix('conformance.')} | {v} | {before.get(k, '-')} |" for k, v in metrics.items()
@@ -223,7 +221,7 @@ def main():
     problems = []
     gate_rows = gates(out)
     problems += [f"gate {t} failed" for t, (ok, _) in gate_rows.items() if not ok]
-    commands = {"on": f"{LUCIFER} -X lucifer_jit=on", "off": f"{LUCIFER} -X lucifer_jit=off"}
+    commands = {"on": f"{LUCIFER} -X lucifer_jit=on"}
     times = timings(names, args.iters, commands)
     ref = json.loads(REFERENCE.read_text()) if REFERENCE.exists() else {"version": None, "best_us": {}}
     if not REFERENCE.exists():
@@ -233,12 +231,12 @@ def main():
     metrics = {}
     for n in names:
         c = ref["best_us"].get(n)
-        on, off = times[n]["on"], times[n]["off"]
-        metrics.update({f"awfy.{n}.cpython_us": c, f"awfy.{n}.on_us": on, f"awfy.{n}.off_us": off,
+        on = times[n]["on"]
+        metrics.update({f"awfy.{n}.cpython_us": c, f"awfy.{n}.on_us": on,
                         f"awfy.{n}.on_over_cpython": on / c if on and c else None})
-        problems += [f"AWFY {n}: JIT {k} produced no timing" for k, v in (("on", on), ("off", off)) if v is None]
+        if on is None:
+            problems.append(f"AWFY {n}: JIT on produced no timing")
     metrics["awfy.geomean_on_over_cpython"] = geomean([metrics[f"awfy.{n}.on_over_cpython"] for n in names if metrics[f"awfy.{n}.on_over_cpython"]])
-    metrics["awfy.geomean_on_over_off"] = geomean([times[n]["on"] / times[n]["off"] for n in names if times[n]["on"] and times[n]["off"]])
     numpy_metrics = {}
     if args.numpy:
         numpy_metrics, numpy_problems = numpy(out)
