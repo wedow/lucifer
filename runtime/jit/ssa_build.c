@@ -1118,8 +1118,8 @@ truth(struct ctx *c, lu_v v)
     I(c, bit)->fs = before(c);
     I(c, bit)->drop = 1;
     if (c->parent != NULL) {
-        /* An inlined frame's truth must not run Python: only bools, None
-           and ints are answered without it. */
+        /* An inlined frame's truth must not run Python: only a layout's
+           own (lu_truth_exact) is answered without it. */
         I(c, bit)->imm = 1;
     }
     return bit;

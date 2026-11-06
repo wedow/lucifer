@@ -1477,19 +1477,17 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jcc(a, CC_E, fz);
         jmp(a, t);
         bind(a, other);
-        if (in->imm == 1) {
-            jmp(a, exit_to(a, in->fs, EXIT_GUARD, 0, 0));
-        }
-        else {
-            mov_rr(a, RDI, r);
-            call_abs(a, (void *)lu_jit_truth);
-            int err = exit_to(a, in->fs, EXIT_ERROR, 1, in->drop);
-            b1(a, 0x83);
-            b1(a, 0xF8);
-            b1(a, 0xFF);                        /* cmp eax, -1 */
-            jcc(a, CC_E, err);
-            jmp(a, done);
-        }
+        /* imm 1: only a layout's own truth, which runs no Python; any
+           other leaves. */
+        mov_rr(a, RDI, r);
+        call_abs(a, in->imm == 1 ? (void *)lu_truth_exact : (void *)lu_jit_truth);
+        int err = in->imm == 1 ? exit_to(a, in->fs, EXIT_GUARD, 0, 0)
+                               : exit_to(a, in->fs, EXIT_ERROR, 1, in->drop);
+        b1(a, 0x83);
+        b1(a, 0xF8);
+        b1(a, 0xFF);                            /* cmp eax, -1 */
+        jcc(a, CC_E, err);
+        jmp(a, done);
         bind(a, t);
         mov_ri(a, RAX, 1);
         jmp(a, done);

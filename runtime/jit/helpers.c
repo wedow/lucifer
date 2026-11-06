@@ -524,6 +524,20 @@ h_call(PyObject **argv, intptr_t n)
     if (kernel && self == NULL) {
         r = lu_native_call(&t->ts, target, args, (Py_ssize_t)nargs);
     }
+    if (kernel && r == NULL && !PyErr_Occurred() && t->ts.interp->eval_frame == NULL
+        && PyFunction_Check(target) && (self == NULL || argv[1] == NULL)) {
+        /* The kernel function C does not answer runs as the interpreter
+           calls it: its frame pushed directly, self in the free word. */
+        if (self == NULL) {
+            r = call_function(t, (PyFunctionObject *)target, args, (Py_ssize_t)nargs);
+        }
+        else {
+            argv[1] = self;
+            r = call_function(t, (PyFunctionObject *)target, argv + 1, (Py_ssize_t)nargs + 1);
+            argv[1] = NULL;
+        }
+        goto called;
+    }
     if (r == NULL && !PyErr_Occurred()) {
         t->pin++;
         r = lu_call(callable, args, nargs, NULL);

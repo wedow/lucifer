@@ -110,6 +110,16 @@ def truths(n):
     return s
 
 
+def emptiness(n):
+    """The truth of containers and strs of no known type in an inlined
+    frame, which runs no Python either."""
+    items = [{}, {'k': 1}, [], [0], '', 'ab', (), (0,)]
+    s = 0
+    for i in range(n):
+        s += nonzero(1, 0, items[i & 7])
+    return s
+
+
 def clamp(x, hi):
     return x if x < hi else hi
 
@@ -149,4 +159,4 @@ def octets(n):
     return s
 
 
-print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N), pops(N), truths(N), wide(N), strings(N), octets(N))
+print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N), pops(N), truths(N), emptiness(N), wide(N), strings(N), octets(N))
