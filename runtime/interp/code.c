@@ -67,8 +67,7 @@ PyCode_ClearWatcher(int id)
     return 0;
 }
 
-/* The holder of the "extra" slots, and the API over it, live below
-   code_traverse; dealloc only frees what they filled. */
+/* The holder of the "extra" slots; the API over it is below code_traverse. */
 typedef struct {
     Py_ssize_t ce_size;
     void *ce_extras[1];
@@ -117,7 +116,11 @@ code_traverse(PyObject *op, visitproc visit, void *arg)
 }
 
 /* The "extra" slots of PEP 523 (Objects/codeobject.c): an index each user
-   takes once, a per-code array of their void*, and a free function each. */
+   takes once, a per-code array of their void*, and a free function each.
+   Readers take no lock: a store publishes with release, and an array that
+   grows is swapped for a copy, the old one freed once no reader holds it. */
+
+#define CODE_EXTRA_SIZE(n) (offsetof(_PyCodeObjectExtra, ce_extras) + (n) * sizeof(void *))
 
 Py_ssize_t
 PyUnstable_Eval_RequestCodeExtraIndex(freefunc free)
@@ -128,7 +131,7 @@ PyUnstable_Eval_RequestCodeExtraIndex(freefunc free)
     if (interp->co_extra_user_count < MAX_CO_EXTRA_USERS - 1) {
         index = interp->co_extra_user_count;
         interp->co_extra_freefuncs[index] = free;
-        interp->co_extra_user_count = index + 1;
+        __atomic_store_n(&interp->co_extra_user_count, index + 1, __ATOMIC_RELEASE);
     }
     PyMutex_Unlock(&interp->co_extra_lock);
     return index;
@@ -141,9 +144,10 @@ PyUnstable_Code_GetExtra(PyObject *code, Py_ssize_t index, void **extra)
         PyErr_BadInternalCall();
         return -1;
     }
-    PyCodeObject *co = (PyCodeObject *)code;
-    _PyCodeObjectExtra *ce = co->co_extra;
-    *extra = index >= 0 && ce != NULL && index < ce->ce_size ? ce->ce_extras[index] : NULL;
+    _PyCodeObjectExtra *ce = __atomic_load_n((_PyCodeObjectExtra **)&((PyCodeObject *)code)->co_extra,
+                                             __ATOMIC_ACQUIRE);
+    *extra = index >= 0 && ce != NULL && index < ce->ce_size
+        ? __atomic_load_n(&ce->ce_extras[index], __ATOMIC_ACQUIRE) : NULL;
     return 0;
 }
 
@@ -151,33 +155,42 @@ int
 PyUnstable_Code_SetExtra(PyObject *code, Py_ssize_t index, void *extra)
 {
     PyInterpreterState *interp = PyInterpreterState_Get();
-    if (!PyCode_Check(code) || index < 0 || index >= interp->co_extra_user_count) {
+    Py_ssize_t users = __atomic_load_n(&interp->co_extra_user_count, __ATOMIC_ACQUIRE);
+    if (!PyCode_Check(code) || index < 0 || index >= users) {
         PyErr_BadInternalCall();
         return -1;
     }
     PyCodeObject *co = (PyCodeObject *)code;
-    PyMutex_Lock(&interp->co_extra_lock);
+    void *old = NULL;
+    int result = 0;
+    Py_BEGIN_CRITICAL_SECTION(co);
     _PyCodeObjectExtra *ce = co->co_extra;
-    if (ce == NULL || index >= ce->ce_size) {
-        Py_ssize_t size = index + 1;
-        ce = PyMem_Realloc(ce, sizeof(*ce) + (size - 1) * sizeof(void *));
-        if (ce == NULL) {
-            PyMutex_Unlock(&interp->co_extra_lock);
+    Py_ssize_t size = ce != NULL ? ce->ce_size : 0;
+    if (index < size) {
+        old = ce->ce_extras[index];
+        __atomic_store_n(&ce->ce_extras[index], extra, __ATOMIC_RELEASE);
+    }
+    else {
+        _PyCodeObjectExtra *grown = PyMem_Malloc(CODE_EXTRA_SIZE(users));
+        if (grown == NULL) {
             PyErr_NoMemory();
-            return -1;
+            result = -1;
         }
-        for (Py_ssize_t i = ce->ce_size; i < size; i++) {
-            ce->ce_extras[i] = NULL;
+        else {
+            for (Py_ssize_t i = 0; i < users; i++) {
+                grown->ce_extras[i] = i < size ? ce->ce_extras[i] : NULL;
+            }
+            grown->ce_size = users;
+            grown->ce_extras[index] = extra;
+            __atomic_store_n((_PyCodeObjectExtra **)&co->co_extra, grown, __ATOMIC_RELEASE);
+            lu_qsbr_retire(ce);
         }
-        ce->ce_size = size;
-        co->co_extra = ce;
     }
-    if (ce->ce_extras[index] != NULL && interp->co_extra_freefuncs[index] != NULL) {
-        interp->co_extra_freefuncs[index](ce->ce_extras[index]);
+    Py_END_CRITICAL_SECTION();
+    if (old != NULL && interp->co_extra_freefuncs[index] != NULL) {
+        interp->co_extra_freefuncs[index](old);
     }
-    ce->ce_extras[index] = extra;
-    PyMutex_Unlock(&interp->co_extra_lock);
-    return 0;
+    return result;
 }
 
 static int code_same(PyCodeObject *a, PyCodeObject *b);

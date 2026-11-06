@@ -415,7 +415,7 @@ struct _is {
     PyObject *interned;         /* interned str -> itself */
     int co_extra_user_count;    /* PyUnstable_Eval_RequestCodeExtraIndex hands out the next */
     freefunc co_extra_freefuncs[MAX_CO_EXTRA_USERS];
-    PyMutex co_extra_lock;      /* the count, the free functions and each code's array */
+    PyMutex co_extra_lock;      /* hands out the indexes */
     _PyFrameEvalFunction eval_frame;    /* PEP 523; NULL runs frames inline */
     uintptr_t monitoring_version;       /* a multiple of LU_POLL_VERSION_UNIT */
     PyMutex tracing_setup_lock;         /* the first sys.settrace or setprofile registers callbacks */
