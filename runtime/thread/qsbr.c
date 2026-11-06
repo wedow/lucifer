@@ -122,13 +122,27 @@ push(struct lu_qsbr_queue *q, void *ptr, uint64_t goal)
     q->items[q->n++] = (struct lu_qsbr_item){ ptr, goal };
 }
 
+/* An item is memory to free or, tagged with the low bit, an object to
+   release (_PyObject_XDecRefDelayed). */
+static void
+free_item(void *p)
+{
+    if ((uintptr_t)p & 1) {
+        Py_DECREF((PyObject *)((uintptr_t)p - 1));
+    }
+    else {
+        PyMem_Free(p);
+    }
+}
+
 /* Frees the front of `q` whose goals are reached. Goals are in order, so the
-   first one that is not ends it. */
+   first one that is not ends it. A release can run a finalizer that queues
+   or processes more, so each item leaves the queue before it is freed. */
 static void
 process_queue(struct lu_qsbr_queue *q)
 {
     while (q->first < q->n && goal_reached(q->items[q->first].goal)) {
-        PyMem_Free(q->items[q->first++].ptr);
+        free_item(q->items[q->first++].ptr);
     }
     if (q->first == q->n) {
         q->first = q->n = 0;
@@ -199,7 +213,7 @@ lu_qsbr_retire(void *p)
     }
     struct lu_entry *e = lu_current_entry();
     if (lu_world_stopped(e->interp) || e->interp->tasks_closed) {
-        PyMem_Free(p);
+        free_item(p);
         return;
     }
     struct lu_carrier *c = e->carrier;
@@ -216,5 +230,14 @@ lu_qsbr_retire(void *p)
     push(&c->qsbr.queue, p, goal);
     if (c->qsbr.queue.n - c->qsbr.queue.first >= QUEUE_LIMIT) {
         lu_qsbr_process(c);                         /* so that none piles up unseen */
+    }
+}
+
+/* Releases `op` once no lock-free reader can still hold it (Objects/obmalloc.c). */
+LU_EXPORT void
+_PyObject_XDecRefDelayed(PyObject *op)
+{
+    if (op != NULL && !_Py_IsImmortal(op)) {
+        lu_qsbr_retire((void *)((uintptr_t)op | 1));
     }
 }

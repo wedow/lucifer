@@ -4,6 +4,7 @@
    which may go negative until the owner merges the two. */
 
 #include "lucifer.h"
+#include "interp/frame.h"
 
 void
 Py_IncRef(PyObject *o)
@@ -355,11 +356,24 @@ PyUnstable_Object_IsUniquelyReferenced(PyObject *op)
         && _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared) == 0;
 }
 
-/* The runtime keeps no temporaries on a value stack C can see: the API's
-   "no". */
+/* Uniquely referenced, and that reference on the value stack of the
+   Python frame that called C (Objects/object.c). */
 int
 PyUnstable_Object_IsUniqueReferencedTemporary(PyObject *op)
 {
+    if (!PyUnstable_Object_IsUniquelyReferenced(op)) {
+        return 0;
+    }
+    struct lu_frame *f = (struct lu_frame *)PyThreadState_Get()->current_frame;
+    if (f == NULL || f->owner == LU_FRAME_C_ENTRY) {
+        return 0;
+    }
+    PyObject **base = f->localsplus + f->code->co_nlocalsplus;
+    for (PyObject **p = f->stackpointer; p > base;) {
+        if (*--p == op) {
+            return 1;
+        }
+    }
     return 0;
 }
 

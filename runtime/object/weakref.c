@@ -147,6 +147,25 @@ lu_clear_weakrefs(PyObject *ob)
     PyErr_SetRaisedException(pending);
 }
 
+/* PyUnstable_Object_ClearWeakRefsNoCallbacks: every reference to ob goes
+   dead and no callback runs (Objects/weakrefobject.c). */
+void
+PyUnstable_Object_ClearWeakRefsNoCallbacks(PyObject *ob)
+{
+    PyWeakReference **head = list_of(ob);
+    if (head == NULL) {
+        return;
+    }
+    PyMutex *m = stripe(ob);
+    PyMutex_Lock(m);
+    while (*head != NULL) {
+        PyWeakReference *ref = *head;
+        unlink_ref(ref);
+        __atomic_store_n(&ref->wr_object, Py_None, __ATOMIC_RELEASE);
+    }
+    PyMutex_Unlock(m);
+}
+
 /* A reference of `type` (a subtype of ReferenceType) to ob. Without a
    callback, ReferenceType itself reuses the reference ob already has. A new
    reference, or NULL with an exception set. */

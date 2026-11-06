@@ -567,16 +567,38 @@ PyObject_AsFileDescriptor(PyObject *o)
 int
 PyObject_Print(PyObject *op, FILE *fp, int flags)
 {
-    PyObject *s = op == NULL ? PyUnicode_FromString("<nil>")
-        : (flags & Py_PRINT_RAW) ? PyObject_Str(op) : PyObject_Repr(op);
-    const char *text = s != NULL ? PyUnicode_AsUTF8(s) : NULL;
-    if (text == NULL) {
-        Py_XDECREF(s);
+    /* Objects/object.c: a dead object prints its count and address, not
+       its repr. */
+    if (PyErr_CheckSignals() || Py_EnterRecursiveCall(" printing an object")) {
         return -1;
     }
-    fputs(text, fp);
-    Py_DECREF(s);
-    return ferror(fp) ? -1 : 0;
+    int ret = 0, write_error = 0;
+    clearerr(fp);
+    if (op == NULL) {
+        fprintf(fp, "<nil>");
+    }
+    else if (Py_REFCNT(op) <= 0) {
+        fprintf(fp, "<refcnt %zd at %p>", Py_REFCNT(op), (void *)op);
+    }
+    else {
+        PyObject *s = (flags & Py_PRINT_RAW) ? PyObject_Str(op) : PyObject_Repr(op);
+        Py_ssize_t len;
+        const char *t = s != NULL ? PyUnicode_AsUTF8AndSize(s, &len) : NULL;
+        if (t == NULL) {
+            ret = -1;
+        }
+        else if (fwrite(t, 1, len, fp) != (size_t)len) {
+            write_error = 1;
+        }
+        Py_XDECREF(s);
+    }
+    if (ret == 0 && (write_error || ferror(fp))) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        clearerr(fp);
+        ret = -1;
+    }
+    Py_LeaveRecursiveCall();
+    return ret;
 }
 
 PyObject *
