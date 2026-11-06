@@ -568,8 +568,23 @@ PyUnicode_AsRawUnicodeEscapeString(PyObject *unicode)
 PyObject *
 PyUnicode_FromWideChar(const wchar_t *w, Py_ssize_t size)
 {
-    if (size < 0) {
+    if (w == NULL && size != 0) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+    if (size == -1) {
         size = (Py_ssize_t)wcslen(w);
+    }
+    if (size < 0) {
+        PyErr_SetString(PyExc_SystemError, "Negative size passed to PyUnicode_New");
+        return NULL;
+    }
+    for (Py_ssize_t i = 0; i < size; i++) {
+        if ((Py_UCS4)w[i] > 0x10ffff) {
+            PyErr_Format(PyExc_ValueError, "character U+%x is not in range [U+0000; U+10ffff]",
+                         (unsigned int)w[i]);
+            return NULL;
+        }
     }
     return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, w, size);
 }
@@ -577,8 +592,12 @@ PyUnicode_FromWideChar(const wchar_t *w, Py_ssize_t size)
 Py_ssize_t
 PyUnicode_AsWideChar(PyObject *unicode, wchar_t *w, Py_ssize_t size)
 {
-    if (!PyUnicode_Check(unicode)) {
+    if (unicode == NULL) {
         PyErr_BadInternalCall();
+        return -1;
+    }
+    if (!PyUnicode_Check(unicode)) {
+        PyErr_BadArgument();
         return -1;
     }
     Py_ssize_t len = PyUnicode_GET_LENGTH(unicode);
@@ -597,8 +616,12 @@ PyUnicode_AsWideChar(PyObject *unicode, wchar_t *w, Py_ssize_t size)
 wchar_t *
 PyUnicode_AsWideCharString(PyObject *unicode, Py_ssize_t *size)
 {
-    if (!PyUnicode_Check(unicode)) {
+    if (unicode == NULL) {
         PyErr_BadInternalCall();
+        return NULL;
+    }
+    if (!PyUnicode_Check(unicode)) {
+        PyErr_BadArgument();
         return NULL;
     }
     Py_ssize_t len = PyUnicode_GET_LENGTH(unicode);

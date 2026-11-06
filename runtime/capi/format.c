@@ -190,16 +190,50 @@ PyUnicode_FromFormatV(const char *format, va_list vargs)
             zero |= *f == '0';
             alt |= *f == '#';
         }
+        /* width.precision, each digits or '*' taken from the arguments: a
+           negative '*' width left-justifies, a negative '*' precision is
+           none (-2, which %c and %p still refuse). */
         Py_ssize_t width = -1, prec = -1;
-        while (*f >= '0' && *f <= '9') {
-            width = width < 0 ? *f - '0' : width * 10 + (*f - '0');
+        if (*f == '*') {
+            width = va_arg(ap, int);
+            if (width < 0) {
+                left = 1;
+                width = -width;
+            }
             f++;
         }
-        if (*f == '.') {
-            prec = 0;
-            for (f++; *f >= '0' && *f <= '9'; f++) {
-                prec = prec * 10 + (*f - '0');
+        else {
+            for (; *f >= '0' && *f <= '9'; f++) {
+                if (width > (PY_SSIZE_T_MAX - (*f - '0')) / 10) {
+                    PyErr_SetString(PyExc_ValueError, "width too big");
+                    b.failed = 2;
+                    break;
+                }
+                width = width < 0 ? *f - '0' : width * 10 + (*f - '0');
             }
+        }
+        if (!b.failed && *f == '.') {
+            f++;
+            if (*f == '*') {
+                prec = va_arg(ap, int);
+                if (prec < 0) {
+                    prec = -2;
+                }
+                f++;
+            }
+            else if (*f >= '0' && *f <= '9') {
+                for (prec = 0; *f >= '0' && *f <= '9'; f++) {
+                    if (prec > (PY_SSIZE_T_MAX - (*f - '0')) / 10) {
+                        PyErr_SetString(PyExc_ValueError, "precision too big");
+                        b.failed = 2;
+                        break;
+                    }
+                    prec = prec * 10 + (*f - '0');
+                }
+            }
+        }
+        if (b.failed) {
+            break;
         }
         int size = 0;           /* 0 int, 1 long, 2 long long, 3 size_t, 4 intmax_t, 5 ptrdiff_t */
         for (;; f++) {
@@ -218,7 +252,7 @@ PyUnicode_FromFormatV(const char *format, va_list vargs)
             || conv == 's' || conv == 'V' || conv == 'U' || conv == 'S'
             || conv == 'R' || conv == 'A' || conv == 'T' || conv == 'N' || conv == '%';
         if ((conv == '%' && f - spec > 2)
-            || ((conv == 'c' || conv == 'p') && (size || width >= 0 || prec >= 0))
+            || ((conv == 'c' || conv == 'p') && (size || width != -1 || prec != -1))
             || ((conv == 's' || conv == 'V') && size > 1)
             || (!known && size)) {
             PyErr_Format(PyExc_SystemError, "invalid format string: %s", spec);
@@ -329,16 +363,18 @@ PyUnicode_FromFormatV(const char *format, va_list vargs)
                 put_str(&b, obj, width, prec, left);
                 break;
             }
+            /* The precision counts bytes; a cut through the last
+               character drops it, and other bad bytes are replaced
+               (unicode_fromformat_write_utf8). */
             Py_ssize_t n = prec >= 0 ? (Py_ssize_t)strnlen(s, prec) : (Py_ssize_t)strlen(s);
-            Py_ssize_t count = decode_utf8((const unsigned char *)s, n, NULL);
-            Py_UCS4 *text = PyMem_Malloc((count + 1) * sizeof(Py_UCS4));
+            Py_ssize_t consumed = n;
+            PyObject *text = PyUnicode_DecodeUTF8Stateful(s, n, "replace", prec >= 0 && n == prec ? &consumed : NULL);
             if (text == NULL) {
-                b.failed = 1;
+                b.failed = 2;
                 break;
             }
-            decode_utf8((const unsigned char *)s, n, text);
-            put_field(&b, text, count, width, left);
-            PyMem_Free(text);
+            put_str(&b, text, width, -1, left);
+            Py_DECREF(text);
             break;
         }
         case 'U': case 'S': case 'R': case 'A': case 'T': case 'N': {

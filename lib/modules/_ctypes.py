@@ -321,7 +321,7 @@ def _pointer_value(value, keep=None):
     if isinstance(value, bool):
         raise TypeError('cannot be converted to pointer')
     if isinstance(value, int):
-        return value
+        return value & 0xffffffffffffffff     # a negative int wraps (PyLong_AsVoidPtr)
     if isinstance(value, CArgObject):
         return value._obj._b_addr + value.offset
     if isinstance(value, (bytes, bytearray)):
