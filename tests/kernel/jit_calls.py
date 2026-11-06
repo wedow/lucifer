@@ -4,10 +4,15 @@
 # kernel code calls primitives that run no Python (len of a dict or a str),
 # and operations the interpreter answers in C without the kernel (subscripts,
 # comparisons, attributes of several classes).
+# A character loop over a str (json's escapers, which this runtime writes in
+# Python: a code point read at a time, then a slice and a concatenation)
+# inlines into its caller's loop too, for strs of every width, and so does
+# one over the items of a bytes object.
 # Each result must be the interpreter's; tools/jitcheck also runs this at two
 # sizes and requires that entries into compiled code do not grow with the
 # iterations, and that the tier gives up on no function.
 import sys
+from json.encoder import encode_basestring, encode_basestring_ascii
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
 
@@ -119,4 +124,29 @@ def wide(n):
     return s
 
 
-print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N), pops(N), truths(N), wide(N))
+def strings(n):
+    words = ('a plain key', 'caf\xe9', '\u20ac and \u00a3', 'a clef \U0001d120')
+    s = 0
+    for i in range(n):
+        s += len(encode_basestring_ascii(words[0])) + len(encode_basestring(words[i & 3]))
+    return s
+
+
+def checksum(data):
+    s = 0
+    i = 0
+    while i < len(data):
+        s = (s * 31 + data[i]) & 0xffff
+        i += 1
+    return s
+
+
+def octets(n):
+    blobs = (b'GET / HTTP/1.1', bytes(range(250, 256)))
+    s = 0
+    for i in range(n):
+        s += checksum(blobs[i & 1])
+    return s
+
+
+print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N), pops(N), truths(N), wide(N), strings(N), octets(N))

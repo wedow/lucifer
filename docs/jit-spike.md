@@ -34,8 +34,10 @@ other machines).
   - Kernel module globals fold to constants, except those a kernel function
     rebinds (`global`), which are guarded as user globals are.
   - Primitives become IR: `float_add` becomes `ADD_F`, `m_sqrt` becomes
-    `SQRT_F`, `size` becomes a load of `ob_size`, and `type_lookup` on an
-    immutable type becomes a constant.
+    `SQRT_F`, `size` becomes a load of `ob_size`, `str_ord` becomes
+    `STR_ORD` (a read of the str's data by its kind), and `type_lookup` on an
+    immutable type becomes a constant. A bytes item is `BYTES_ITEM`, and two
+    exact strs concatenate through a helper, so neither needs a real frame.
   - `call_special(descr, obj, ...)` with a constant descriptor becomes a direct
     call of `descr`.
   - `math.sqrt` inlines through three hidden frames (`function`, `_math_1`,

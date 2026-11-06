@@ -89,6 +89,7 @@ enum {
     LU_KIND_LIST = 8,
     LU_KIND_TUPLE = 16,
     LU_KIND_STR = 32,
+    LU_KIND_BYTES = 64,
     LU_KIND_OTHER = 128,
 };
 
@@ -102,7 +103,7 @@ lu_jit_kind(PyObject *o)
                                 ? LU_KIND_INT : LU_KIND_OTHER)
         : t == &PyFloat_Type ? LU_KIND_FLOAT : o == Py_None ? LU_KIND_NONE
         : t == &PyList_Type ? LU_KIND_LIST : t == &PyTuple_Type ? LU_KIND_TUPLE
-        : t == &PyUnicode_Type ? LU_KIND_STR : LU_KIND_OTHER;
+        : t == &PyUnicode_Type ? LU_KIND_STR : t == &PyBytes_Type ? LU_KIND_BYTES : LU_KIND_OTHER;
 }
 
 static inline void

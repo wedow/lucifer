@@ -149,6 +149,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(cell_load) \
     X(compare_ideq) \
     X(binary_op) \
+    X(str_concat) \
     X(compare_op) \
     X(setitem) \
     X(load_attr) \

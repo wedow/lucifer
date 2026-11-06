@@ -340,6 +340,39 @@ movzx8(struct asm_ *a, int dst, int src)
     modrm_rr(a, dst, src);
 }
 
+/* mov (width 4) or movzx (1, 2) dst32, [base + index * width + disp] */
+static void
+load_indexed(struct asm_ *a, int dst, int base, int index, int width, int32_t disp)
+{
+    rex(a, 0, dst, index, base);
+    if (width == 4) {
+        b1(a, 0x8B);
+    }
+    else {
+        b1(a, 0x0F);
+        b1(a, width == 1 ? 0xB6 : 0xB7);
+    }
+    b1(a, 0x84 | ((dst & 7) << 3));             /* [base + index * scale + disp32] */
+    b1(a, ((width == 4 ? 2 : width == 2 ? 1 : 0) << 6) | ((index & 7) << 3) | (base & 7));
+    b4(a, disp);
+}
+
+/* A compact str's state word with the given kind and ascii bits, and no
+   others: the bit-field layout is the C compiler's. */
+static int32_t
+str_state(int kind, int ascii)
+{
+    PyASCIIObject o;
+    memset(&o, 0, sizeof o);
+    o.state.kind = kind;
+    o.state.compact = 1;
+    o.state.ascii = ascii;
+    int32_t w;
+    _Static_assert(sizeof o.state == sizeof w, "a str's state is one 32-bit word");
+    memcpy(&w, &o.state, sizeof w);
+    return w;
+}
+
 static void
 call_abs(struct asm_ *a, const void *fn)
 {
@@ -1570,6 +1603,40 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         call_abs(a, (void *)lu_jit_list_item);
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
+        def_gpr(a, v, RAX);
+        return 0;
+    }
+    case OP_STR_ORD: {
+        /* PyUnicode_READ of a compact str (any other leaves): the data
+           follows a PyASCIIObject when ascii, else a PyCompactUnicodeObject. */
+        static const struct { int kind, ascii; int32_t disp; } kinds[] = {
+            { 1, 1, sizeof(PyASCIIObject) }, { 1, 0, sizeof(PyCompactUnicodeObject) },
+            { 2, 0, sizeof(PyCompactUnicodeObject) }, { 4, 0, sizeof(PyCompactUnicodeObject) },
+        };
+        int fail = guard_exit(a, in), done = new_label(a);
+        int s = gpr_of(a, in->a, RDX), i = gpr_of(a, in->b, RCX);
+        cmp_rm(a, i, s, offsetof(PyASCIIObject, length));
+        jcc(a, CC_AE, fail);                    /* unsigned: a negative index too */
+        load32(a, RAX, s, offsetof(PyASCIIObject, state));
+        alu_ri(a, ALU_AND, RAX, str_state(7, 1));
+        for (int k = 0; k < 4; k++) {
+            int next = new_label(a);
+            alu_ri(a, ALU_CMP, RAX, str_state(kinds[k].kind, kinds[k].ascii));
+            jcc(a, CC_NE, k < 3 ? next : fail);
+            load_indexed(a, RAX, s, i, kinds[k].kind, kinds[k].disp);
+            jmp(a, done);
+            bind(a, next);
+        }
+        bind(a, done);
+        def_gpr(a, v, RAX);
+        return 0;
+    }
+    case OP_BYTES_ITEM: {
+        int fail = guard_exit(a, in);
+        int b = gpr_of(a, in->a, RDX), i = gpr_of(a, in->b, RCX);
+        cmp_rm(a, i, b, offsetof(PyVarObject, ob_size));
+        jcc(a, CC_AE, fail);                    /* unsigned: a negative index too */
+        load_indexed(a, RAX, b, i, 1, offsetof(PyBytesObject, ob_sval));
         def_gpr(a, v, RAX);
         return 0;
     }

@@ -775,7 +775,8 @@ guess_kind(struct ctx *c, lu_v v)
         }
     }
     return t == &PyLong_Type ? LU_KIND_INT : t == &PyFloat_Type ? LU_KIND_FLOAT
-        : t == &PyList_Type ? LU_KIND_LIST : t == &PyTuple_Type ? LU_KIND_TUPLE : 0;
+        : t == &PyList_Type ? LU_KIND_LIST : t == &PyTuple_Type ? LU_KIND_TUPLE
+        : t == &PyUnicode_Type ? LU_KIND_STR : t == &PyBytes_Type ? LU_KIND_BYTES : 0;
 }
 
 /* --- arithmetic --- */
@@ -972,6 +973,12 @@ binary_op(struct ctx *c)
             r = emit(c, OP_LIST_ITEM, REP_OBJ, a, i, LU_NOV, 0);
             I(c, r)->fs = before(c);
         }
+        else if (lk == LU_KIND_BYTES && rk == LU_KIND_INT) {
+            guard_type(c, a, &PyBytes_Type);
+            lu_v byte = emit(c, OP_BYTES_ITEM, REP_I64, a, unbox_int(c, b), LU_NOV, 0);
+            I(c, byte)->fs = before(c);
+            r = box_int(c, byte);
+        }
     }
     else if (lk == LU_KIND_INT && rk == LU_KIND_INT && base == NB_TRUE_DIVIDE) {
         lu_v x = emit(c, OP_I2F, REP_F64, unbox_int(c, a), LU_NOV, LU_NOV, 0);
@@ -992,6 +999,13 @@ binary_op(struct ctx *c)
         if (!float_binary(c, base, a, b, lk, rk, &r, &rown)) {
             r = LU_NOV;
         }
+    }
+    else if (lk == LU_KIND_STR && rk == LU_KIND_STR && base == NB_ADD) {
+        /* Two exact strs concatenate without running Python. */
+        guard_type(c, a, &PyUnicode_Type);
+        guard_type(c, b, &PyUnicode_Type);
+        lu_v args[2] = { a, b };
+        r = helper_raising(c, H_str_concat, 2, args, 2);
     }
     if (c->failed) {
         return -1;
@@ -1696,10 +1710,22 @@ intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
             return box_float(c, emit(c, OP_I2F, REP_F64, unbox_int(c, args[0]), LU_NOV, LU_NOV, 0));
         }
     }
-    if (nargs == 1 && (known_type(c, args[0]) == &PyList_Type || known_type(c, args[0]) == &PyTuple_Type)
+    if (nargs == 1 && (known_type(c, args[0]) == &PyList_Type || known_type(c, args[0]) == &PyTuple_Type
+                       || known_type(c, args[0]) == &PyBytes_Type)
         && strcmp(name, "size") == 0) {
         lu_v n = emit(c, OP_LOAD, REP_I64, args[0], LU_NOV, LU_NOV, offsetof(PyVarObject, ob_size));
         return box_int(c, n);
+    }
+    if (nargs == 1 && known_type(c, args[0]) == &PyUnicode_Type && strcmp(name, "size") == 0) {
+        lu_v n = emit(c, OP_LOAD, REP_I64, args[0], LU_NOV, LU_NOV, offsetof(PyASCIIObject, length));
+        return box_int(c, n);
+    }
+    if (nargs == 2 && strcmp(name, "str_ord") == 0 && !lu_jit_nospec(c->code, c->pc)) {
+        /* The code point read in line from an exact str's data, by its kind. */
+        guard_type(c, args[0], &PyUnicode_Type);
+        lu_v r = emit(c, OP_STR_ORD, REP_I64, args[0], unbox_int(c, args[1]), LU_NOV, 0);
+        I(c, r)->fs = before(c);
+        return box_int(c, r);
     }
     if (nargs == 2 && strcmp(name, "type_lookup") == 0 && known(c, args[0]) != NULL
         && PyType_Check(known(c, args[0])) && known(c, args[1]) != NULL && PyUnicode_CheckExact(known(c, args[1]))
@@ -1763,6 +1789,12 @@ speculate_args(struct ctx *c, int n)
         }
         else if (k == LU_KIND_TUPLE) {
             guard_type(c, a, &PyTuple_Type);
+        }
+        else if (k == LU_KIND_STR) {
+            guard_type(c, a, &PyUnicode_Type);
+        }
+        else if (k == LU_KIND_BYTES) {
+            guard_type(c, a, &PyBytes_Type);
         }
     }
 }
