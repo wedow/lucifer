@@ -1,6 +1,6 @@
 ---
 id: luc-pywv
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-11-06T07:34:17Z
