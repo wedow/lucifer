@@ -2432,15 +2432,21 @@ build_block(struct ctx *c, int bi)
     state_copy(c, &c->st, &b->in);
     if (b->phis && preds_built(c, bi)) {
         /* A join with every edge it will get: if they agree, it has that
-           value, and a constant stays one for what folds on it. */
+           value, and a constant stays one for what folds on it. Each edge
+           makes its own constant, so constants agree by object; a NULL
+           entry (a call's beside its callable, an unbound local) stays
+           one, which a call reads as "no self". */
         for (int k = 0; k < c->nlocals + c->st.sp; k++) {
             struct lu_ins *phi = I(c, c->st.v[k]);
             int same = phi->op == OP_PHI && phi->nargs > 0;
+            lu_v first = same ? phi->args[0] : LU_NOV;
+            int is_const = same && I(c, first)->op == OP_CONST;
             for (int i = 1; same && i < phi->nargs; i++) {
-                same = phi->args[i] == phi->args[0];
+                lu_v in = phi->args[i];
+                same = in == first || (is_const && I(c, in)->op == OP_CONST && I(c, in)->imm == I(c, first)->imm);
             }
             if (same) {
-                c->st.v[k] = phi->args[0];
+                c->st.v[k] = is_const && I(c, first)->imm == 0 ? LU_NOV : first;
             }
         }
     }
