@@ -1,6 +1,6 @@
 ---
 id: luc-dawf
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-04T18:03:10Z

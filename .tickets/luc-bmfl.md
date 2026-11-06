@@ -23,3 +23,7 @@ tools/libtest run --python bin/lucifer --modules test_capi: at least 538 PASS (5
 **2026-11-04T02:48:32Z**
 
 From luc-2vif: also reach test_monitoring at 90% of the oracle (80/89). It needs _testcapi/_testinternalcapi to load (single-phase init); without the TestCApiEventGeneration class, 77/84 pass today.
+
+**2026-11-06T11:39:06Z**
+
+test_capi completes: 1021/1075 PASS (>=538 met) at 42a5c27. Remaining foundations: test_watchers 56/58 (luc-j8kd, luc-exj1), SetAsyncExc rows, eval_hook.c, test_monitoring 90%.
