@@ -17,6 +17,9 @@ require that a count of the tier's does not grow with the iterations:
          it has feedback: entries into compiled code and direct calls.
          None of its functions may be disabled (recompiled until the tier
          gives up on it).
+  large  tests/kernel/jit_large_callees.py, whose hot call is of a function
+         too large to inline whole but small along the path the program
+         runs: entries into compiled code and direct calls.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct calls into compiled code, one per
@@ -51,6 +54,7 @@ TIMING = re.compile(r'\d+us')
 GROWTH = {
     'exits': ('jit_exits.py', r'jit: entries .* side (\d+)', 0),
     'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
+    'large': ('jit_large_callees.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+)', 1),
 }
 GROWTH_N = 20000

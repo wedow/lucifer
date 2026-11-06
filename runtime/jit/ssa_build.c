@@ -32,7 +32,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Inlining policy: code units of a callee, and inlined frames deep. */
+/* Inlining policy: code units an inlined callee compiles (the branch
+   directions it never took are not compiled), and inlined frames deep. */
 #define INLINE_MAX_UNITS 400
 #define INLINE_MAX_DEPTH 4
 #define INLINE_MAX_TOTAL 3000
@@ -78,7 +79,9 @@ struct ctx {
     int opcode, base, oparg;
     lu_codeunit *cache;
     int failed;                 /* an inlined frame met what it cannot compile */
+    const char *why;            /* why, for LUCIFER_JIT_DEBUG */
     int ncalls;                 /* calls it cannot inline (opaque_call) */
+    int units;                  /* code units compiled */
 };
 
 /* Per-code JIT state the builder consults: pcs not to speculate at. */
@@ -1133,8 +1136,7 @@ static int
 inlinable(struct ctx *c, PyFunctionObject *fn, int nargs)
 {
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
-    if (!PyCode_Check(co) || c->depth >= INLINE_MAX_DEPTH || Py_SIZE(co) > INLINE_MAX_UNITS
-        || c->f->ninlined > INLINE_MAX_TOTAL
+    if (!PyCode_Check(co) || c->depth >= INLINE_MAX_DEPTH || c->f->ninlined > INLINE_MAX_TOTAL
         || (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE
                             | CO_VARARGS | CO_VARKEYWORDS))
         || !(co->co_flags & CO_OPTIMIZED) || co->co_kwonlyargcount != 0 || co->_co_monitoring != NULL
@@ -1250,6 +1252,10 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         *result_owned = 0;
     }
     free(k->rets);
+    if (!ok && _PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: not inlined %s: %s\n", PyUnicode_AsUTF8(fn->func_qualname),
+                k->why != NULL ? k->why : "not compiled");
+    }
     if (!ok) {
         /* Undo: the callee's blocks and instructions go, the call stays. */
         for (int i = save_nblocks; i < f->nblocks; i++) {
@@ -1825,6 +1831,7 @@ opaque_call(struct ctx *c)
     }
     if (c->depth > 1 || c->ncalls++ > 0 || loop) {
         c->failed = 1;
+        c->why = "a call it cannot inline";
         return 0;
     }
     return 1;
@@ -2191,13 +2198,20 @@ translate(struct ctx *c)
                 w = not_of(c, w);
             }
         }
+        int target = jump_target(c->base, oparg, c->next);
+        int seen = lu_jit_nospec(c->code, c->pc) ? 0 : __atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED);
+        if (I(c, w)->op != OP_CONST_I && (seen == LU_BRANCH_FELL || seen == LU_BRANCH_JUMPED)) {
+            /* A direction the interpreter never took leaves instead. */
+            guard(c, OP_GUARD_BIT, w, seen == LU_BRANCH_JUMPED);
+            w = const_i(c, seen == LU_BRANCH_JUMPED);
+        }
         release(c, v, own);
         if (I(c, w)->op == OP_CONST_I) {
             /* A branch decided at compile time: the other side is not compiled. */
-            jump_to(c, I(c, w)->imm ? jump_target(c->base, oparg, c->next) : c->next);
+            jump_to(c, I(c, w)->imm ? target : c->next);
             return 0;
         }
-        branch_to(c, w, jump_target(c->base, oparg, c->next), c->next);
+        branch_to(c, w, target, c->next);
         return 0;
     }
     case JUMP_FORWARD:
@@ -2538,6 +2552,11 @@ build_block(struct ctx *c, int bi)
             break;
         }
         translate(c);
+        c->units += c->next - pc;
+        if (c->parent != NULL && c->units > INLINE_MAX_UNITS) {
+            c->failed = 1;      /* too large to inline: it is called instead */
+            c->why = "too large";
+        }
         pc = c->next;
     }
     return c->failed ? -1 : 0;
