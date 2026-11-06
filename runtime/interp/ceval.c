@@ -3893,6 +3893,9 @@ PyObject *
 PyEval_EvalCode(PyObject *co, PyObject *globals, PyObject *locals)
 {
     PyThreadState *ts = PyThreadState_Get();
+    if (locals == NULL) {
+        locals = globals;
+    }
     if (lu_ns_lookup(globals, LU_ID(__builtins__)) == NULL
         && lu_ns_insert(globals, LU_ID(__builtins__), ts->interp->builtins) < 0) {
         return NULL;

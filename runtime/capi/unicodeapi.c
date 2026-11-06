@@ -406,21 +406,23 @@ PyUnicode_FindChar(PyObject *str, Py_UCS4 ch, Py_ssize_t start, Py_ssize_t end, 
 }
 
 /* PyUnicode_EqualToUTF8 (Objects/unicodeobject.c): an exact comparison
-   against a UTF-8 C string, true only for a str it equals. */
+   against a UTF-8 C string, true only for a str it equals; it never
+   raises (a str with lone surrogates equals no UTF-8 text). */
 
 int
 PyUnicode_EqualToUTF8AndSize(PyObject *str, const char *other, Py_ssize_t size)
 {
     if (!PyUnicode_Check(str)) {
-        PyErr_BadArgument();
-        return -1;
+        return 0;
     }
+    PyObject *pending = PyErr_GetRaisedException();
     Py_ssize_t len;
     const char *utf8 = PyUnicode_AsUTF8AndSize(str, &len);
     if (utf8 == NULL) {
-        return -1;
+        PyErr_Clear();
     }
-    return len == size && memcmp(utf8, other, size) == 0;
+    PyErr_SetRaisedException(pending);
+    return utf8 != NULL && len == size && memcmp(utf8, other, size) == 0;
 }
 
 int
@@ -622,4 +624,15 @@ _PyObject_CallMethodId(PyObject *o, _Py_Identifier *id, const char *format, ...)
     }
     Py_DECREF(method);
     return result;
+}
+
+/* PyUnicode_Splitlines: str.splitlines(keepends) (Objects/unicodeobject.c). */
+PyObject *
+PyUnicode_Splitlines(PyObject *string, int keepends)
+{
+    if (!PyUnicode_Check(string)) {
+        PyErr_BadArgument();
+        return NULL;
+    }
+    return PyObject_CallMethod(string, "splitlines", "i", keepends);
 }

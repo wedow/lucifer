@@ -231,68 +231,7 @@ PyThread_tss_get(Py_tss_t *key)
     return pthread_getspecific(key->_key);
 }
 
-/* Running code. */
-
-PyObject *
-Py_CompileStringObject(const char *str, PyObject *filename, int start, PyCompilerFlags *flags, int optimize)
-{
-    /* compile() with the C caller's flags and nothing inherited. The source
-       is bytes, so a coding cookie decides its decoding, unless the flags
-       say it is already UTF-8 text (Python/pythonrun.c). */
-    const char *mode = start == Py_eval_input ? "eval" : start == Py_single_input ? "single" : "exec";
-    int cf = flags != NULL ? flags->cf_flags : 0;
-    PyObject *args[6] = {
-        (cf & PyCF_IGNORE_COOKIE) ? PyUnicode_FromString(str) : PyBytes_FromString(str),
-        filename, PyUnicode_FromString(mode),
-        PyLong_FromLong(cf & ~(PyCF_IGNORE_COOKIE | PyCF_SOURCE_IS_UTF8)), Py_True,
-        PyLong_FromLong(optimize),
-    };
-    PyObject *code = NULL;
-    if (args[0] != NULL && args[2] != NULL && args[3] != NULL && args[5] != NULL) {
-        code = lu_call(PyDict_GetItemString(PyInterpreterState_Get()->builtins, "compile"), args, 6, NULL);
-    }
-    Py_XDECREF(args[0]);
-    Py_XDECREF(args[2]);
-    Py_XDECREF(args[3]);
-    Py_XDECREF(args[5]);
-    return code;
-}
-
-PyObject *
-Py_CompileStringExFlags(const char *str, const char *filename, int start, PyCompilerFlags *flags, int optimize)
-{
-    PyObject *name = PyUnicode_DecodeFSDefault(filename);
-    PyObject *code = name != NULL ? Py_CompileStringObject(str, name, start, flags, optimize) : NULL;
-    Py_XDECREF(name);
-    return code;
-}
-
-PyObject *
-Py_CompileStringFlags(const char *str, const char *filename, int start, PyCompilerFlags *flags)
-{
-    return Py_CompileStringExFlags(str, filename, start, flags, -1);
-}
-
-PyObject *
-Py_CompileString(const char *str, const char *filename, int start)
-{
-    return Py_CompileStringExFlags(str, filename, start, NULL, -1);
-}
-
-PyObject *
-PyRun_StringFlags(const char *str, int start, PyObject *globals, PyObject *locals, PyCompilerFlags *flags)
-{
-    PyObject *code = Py_CompileStringExFlags(str, "<string>", start, flags, -1);
-    PyObject *r = code != NULL ? PyEval_EvalCode(code, globals, locals) : NULL;
-    Py_XDECREF(code);
-    return r;
-}
-
-PyObject *
-PyRun_String(const char *str, int start, PyObject *globals, PyObject *locals)
-{
-    return PyRun_StringFlags(str, start, globals, locals, NULL);
-}
+/* Running code: PyRun_* and Py_CompileString* are in runtime/compiler/pythonrun.c. */
 
 PyObject *
 PyEval_GetGlobals(void)

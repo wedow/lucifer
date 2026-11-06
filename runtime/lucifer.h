@@ -410,6 +410,7 @@ struct _is {
     PyObject *sysdict;          /* sys.__dict__ */
     PyObject *dict;             /* PyInterpreterState_GetDict, made on first use */
     PyObject *last_resort_memory_error; /* raised when no MemoryError can be made */
+    Py_ssize_t interactive_src_count;   /* names each interactive statement's code */
     struct lu_atexit *atexit;   /* PyUnstable_AtExit callbacks, newest first */
     PyMutex atexit_lock;
     PyObject *interned;         /* interned str -> itself */

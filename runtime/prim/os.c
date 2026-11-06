@@ -67,6 +67,14 @@ lu_join_thread(pthread_t thread)
    its bracket is empty. */
 #define LU_SIGNAL(call) (call)
 
+/* _Py_IsValidFD (Python/fileutils.c): whether fd is open, by F_GETFD, which
+   only looks at the process's table. */
+LU_EXPORT int
+_Py_IsValidFD(int fd)
+{
+    return fd >= 0 && LU_SYSCALL(fcntl(fd, F_GETFD)) >= 0;
+}
+
 /* write(2) and fcntl(F_SETFD) for the file C-API (Objects/fileobject.c's
    stdprinter and Py_fopen): the blocking symbols live only here. */
 Py_ssize_t
