@@ -32,7 +32,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Inlining policy: code units of a callee, and inlined frames deep. */
+/* Inlining policy: code units an inlined callee compiles (one larger than
+   that compiles only the branch directions it took), and inlined frames
+   deep. */
 #define INLINE_MAX_UNITS 400
 #define INLINE_MAX_DEPTH 4
 #define INLINE_MAX_TOTAL 3000
@@ -78,7 +80,9 @@ struct ctx {
     int opcode, base, oparg;
     lu_codeunit *cache;
     int failed;                 /* an inlined frame met what it cannot compile */
+    const char *why;            /* why, for LUCIFER_JIT_DEBUG */
     int ncalls;                 /* calls it cannot inline (opaque_call) */
+    int units;                  /* code units compiled */
 };
 
 /* Per-code JIT state the builder consults: pcs not to speculate at. */
@@ -1133,12 +1137,10 @@ static int
 inlinable(struct ctx *c, PyFunctionObject *fn, int nargs)
 {
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
-    if (!PyCode_Check(co) || c->depth >= INLINE_MAX_DEPTH || Py_SIZE(co) > INLINE_MAX_UNITS
-        || c->f->ninlined > INLINE_MAX_TOTAL
-        || (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE
-                            | CO_VARARGS | CO_VARKEYWORDS))
+    if (!PyCode_Check(co) || c->depth >= INLINE_MAX_DEPTH || c->f->ninlined > INLINE_MAX_TOTAL
+        || (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE))
         || !(co->co_flags & CO_OPTIMIZED) || co->co_kwonlyargcount != 0 || co->_co_monitoring != NULL
-        || co->co_argcount < nargs || lu_jit_noinline(co)) {
+        || (co->co_argcount < nargs && !(co->co_flags & CO_VARARGS)) || nargs > 30 || lu_jit_noinline(co)) {
         return 0;
     }
     int defaults = fn->func_defaults != NULL ? (int)PyTuple_GET_SIZE(fn->func_defaults) : 0;
@@ -1170,7 +1172,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
     int save_cur = c->cur;
     int save_nins = f->nins, save_nblocks = f->nblocks, save_consts = f->nconsts;
     int save_cur_nins = f->blocks[c->cur].nins, save_nsucc = f->blocks[c->cur].nsucc;
-    int save_inlined = f->ninlined;
+    int save_inlined = f->ninlined, save_sites = f->sites, save_cold = f->cold;
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
     struct ctx *k = calloc(1, sizeof(struct ctx));
     k->f = f;
@@ -1193,6 +1195,17 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         lu_v g = guard(c, OP_GUARD_VERSION, konst(c, (PyObject *)fn), fn->func_version);
         I(c, g)->imm2 = GV_FUNC;
     }
+    /* The types proved so far: guards the callee emits may prove more for
+       the caller's values, in blocks an undo drops. */
+    PyTypeObject **save_known = NULL;
+    int *save_known_block = NULL;
+    int save_nknown = save_nins < f->capknown ? save_nins : f->capknown;
+    if (save_nknown > 0) {
+        save_known = malloc(sizeof(PyTypeObject *) * (size_t)save_nknown);
+        save_known_block = malloc(sizeof(int) * (size_t)save_nknown);
+        memcpy(save_known, f->known, sizeof(PyTypeObject *) * (size_t)save_nknown);
+        memcpy(save_known_block, f->known_block, sizeof(int) * (size_t)save_nknown);
+    }
     /* The caller resumes after the call with its operands gone. */
     k->caller = snapshot(c, c->next);
     int ok = scan(k, 0) == 0;
@@ -1211,6 +1224,25 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
                 k->st.v[i] = konst(c, d);
                 k->st.own[i] = 0;
             }
+        }
+        /* *args and **kwargs as the call binds them: a tuple of the extra
+           positional arguments (the empty one), and a new dict. */
+        int at = co->co_argcount;
+        if (co->co_flags & CO_VARARGS) {
+            int extra = nargs > at ? nargs - at : 0;
+            k->st.v[at] = extra ? helper_raising(c, H_build_tuple, extra, args + at, 0)
+                                : konst(c, (PyObject *)&_PyRuntime.singletons.empty_tuple);
+            k->st.own[at] = extra != 0;
+            set_known(c, k->st.v[at], &PyTuple_Type);
+            for (int i = at; i < nargs; i++) {
+                release(c, args[i], owned[i]);
+            }
+            at++;
+        }
+        if (co->co_flags & CO_VARKEYWORDS) {
+            k->st.v[at] = helper_raising(c, H_new_dict, 0, NULL, 0);
+            k->st.own[at] = 1;
+            set_known(c, k->st.v[at], &PyDict_Type);
         }
         k->cont = lu_ir_block(f);
         /* Into the callee's first block. */
@@ -1250,6 +1282,10 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         *result_owned = 0;
     }
     free(k->rets);
+    if (!ok && _PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: not inlined %s: %s\n", PyUnicode_AsUTF8(fn->func_qualname),
+                k->why != NULL ? k->why : "not compiled");
+    }
     if (!ok) {
         /* Undo: the callee's blocks and instructions go, the call stays. */
         for (int i = save_nblocks; i < f->nblocks; i++) {
@@ -1264,18 +1300,23 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         for (int i = save_consts; i < f->nconsts; i++) {
             Py_XDECREF(f->consts[i]);
         }
-        for (int i = save_nins; i < f->nins && i < f->capknown; i++) {
-            f->known[i] = NULL;         /* the ids are reused */
+        for (int i = 0; i < f->capknown; i++) {
+            f->known[i] = i < save_nknown ? save_known[i] : NULL;      /* the ids are reused */
+            f->known_block[i] = i < save_nknown ? save_known_block[i] : 0;
         }
         f->nconsts = save_consts;
         f->nins = save_nins;
         f->nblocks = save_nblocks;
         f->ninlined = save_inlined;
+        f->sites = save_sites;
+        f->cold = save_cold;
         c->cur = save_cur;
         f->blocks[save_cur].nins = save_cur_nins;
         f->blocks[save_cur].nsucc = save_nsucc;
         f->fail = NULL;
     }
+    free(save_known);
+    free(save_known_block);
     free(k);
     return ok;
 }
@@ -1825,6 +1866,7 @@ opaque_call(struct ctx *c)
     }
     if (c->depth > 1 || c->ncalls++ > 0 || loop) {
         c->failed = 1;
+        c->why = "a call it cannot inline";
         return 0;
     }
     return 1;
@@ -2191,13 +2233,22 @@ translate(struct ctx *c)
                 w = not_of(c, w);
             }
         }
+        int target = jump_target(c->base, oparg, c->next);
+        int seen = c->parent == NULL || Py_SIZE(c->code) <= INLINE_MAX_UNITS || lu_jit_nospec(c->code, c->pc) ? 0
+            : __atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED);
+        if (I(c, w)->op != OP_CONST_I && (seen == LU_BRANCH_FELL || seen == LU_BRANCH_JUMPED)) {
+            /* In a callee too large to inline whole, a direction the
+               interpreter never took leaves instead. */
+            guard(c, OP_GUARD_BIT, w, seen == LU_BRANCH_JUMPED);
+            w = const_i(c, seen == LU_BRANCH_JUMPED);
+        }
         release(c, v, own);
         if (I(c, w)->op == OP_CONST_I) {
             /* A branch decided at compile time: the other side is not compiled. */
-            jump_to(c, I(c, w)->imm ? jump_target(c->base, oparg, c->next) : c->next);
+            jump_to(c, I(c, w)->imm ? target : c->next);
             return 0;
         }
-        branch_to(c, w, jump_target(c->base, oparg, c->next), c->next);
+        branch_to(c, w, target, c->next);
         return 0;
     }
     case JUMP_FORWARD:
@@ -2538,6 +2589,11 @@ build_block(struct ctx *c, int bi)
             break;
         }
         translate(c);
+        c->units += c->next - pc;
+        if (c->parent != NULL && c->units > INLINE_MAX_UNITS) {
+            c->failed = 1;      /* too large to inline: it is called instead */
+            c->why = "too large";
+        }
         pc = c->next;
     }
     return c->failed ? -1 : 0;

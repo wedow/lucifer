@@ -136,6 +136,20 @@ lu_jit_observe_iter(lu_codeunit *word, PyTypeObject *t)
     }
 }
 
+/* POP_JUMP_IF_*'s cache word: the directions the interpreter has taken.
+   In a callee too large to inline whole, a direction it never took while
+   it took the other is not compiled. */
+enum { LU_BRANCH_FELL = 1, LU_BRANCH_JUMPED = 2 };
+
+static inline void
+lu_jit_observe_branch(lu_codeunit *word, int jumped)
+{
+    uint16_t bit = jumped ? LU_BRANCH_JUMPED : LU_BRANCH_FELL;
+    if (!(__atomic_load_n(&word->cache, __ATOMIC_RELAXED) & bit)) {
+        __atomic_fetch_or(&word->cache, bit, __ATOMIC_RELAXED);
+    }
+}
+
 /* Runs compiled code for `frame` from frame->instr, compiling it first if
    it is due. The frame is saved (instr, stackpointer) and is the task's
    current frame. */

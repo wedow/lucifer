@@ -83,7 +83,10 @@ take(struct regs *r, const struct lu_dv *dv)
     }
     uint64_t bits = raw(r, dv);
     PyObject *o;
-    if (dv->kind == DV_BOX_I64) {
+    if (dv->kind == DV_NEW_DICT) {
+        o = PyDict_New();
+    }
+    else if (dv->kind == DV_BOX_I64) {
         o = PyLong_FromLongLong((long long)bits);
     }
     else {
@@ -148,7 +151,7 @@ lu_jit_frames_push(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
            the code and function are. */
         for (int i = 0; i < fr->nlocals; i++) {
             const struct lu_dv *dv = &fr->vals[i];
-            if (dv->kind == DV_BOX_I64 || dv->kind == DV_BOX_F64) {
+            if (dv->kind >= DV_BOX_I64) {
                 Py_FatalError("lucifer jit: a virtual local in a lent frame");
             }
             f->localsplus[i] = dv->kind == DV_NULL ? NULL : (PyObject *)(uintptr_t)raw(&r, dv);

@@ -117,6 +117,13 @@ h_build_tuple(PyObject **argv, intptr_t n)
     return t;
 }
 
+/* A **kwargs parameter's dict, for a call without keywords. */
+static PyObject *
+h_new_dict(PyObject **argv, intptr_t n)
+{
+    return PyDict_New();
+}
+
 /* A primitive that never runs Python (LU_METH_NOPY): argv[0] is the
    primitive, then its arguments. */
 static PyObject *
@@ -644,5 +651,6 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_list_append] = { (void *)h_list_append, "list_append", REP_BIT, IF_RAISE, 2 },
     [H_build_list] = { (void *)h_build_list, "build_list", REP_OBJ, IF_RAISE, 0 },
     [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, IF_RAISE, 0 },
+    [H_new_dict] = { (void *)h_new_dict, "new_dict", REP_OBJ, IF_RAISE, 0 },
     [H_contains] = { (void *)h_contains, "contains", REP_OBJ, IF_RAISE | IF_PY, 3 },
 };

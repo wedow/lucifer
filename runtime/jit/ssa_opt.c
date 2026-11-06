@@ -10,7 +10,9 @@
       whose every use is an unbox, a frame state, a release or a slot write
       is virtual. It is never built in compiled code; an exit that needs it
       builds it, once (runtime/jit/deopt.c). A box a Python-running call
-      could observe through its frame is materialized.
+      could observe through its frame is materialized. So is a new dict
+      (an inlined callee's **kwargs) whose uses are those or truth tests,
+      which are false.
    5. References: the releases and slot writes of virtual boxes go, and so
       do the reference operations on immortal objects.
    6. Dead code: unused instructions without effects.
@@ -574,7 +576,8 @@ escape(struct lu_func *f)
     char *ok = calloc((size_t)n, 1);
     for (int v = 0; v < n; v++) {
         struct lu_ins *in = &f->ins[v];
-        ok[v] = !(in->flags & INS_DEAD) && (in->op == OP_BOX_INT || in->op == OP_BOX_FLOAT);
+        ok[v] = !(in->flags & INS_DEAD)
+            && (in->op == OP_BOX_INT || in->op == OP_BOX_FLOAT || (in->op == OP_HELPER && in->imm == H_new_dict));
     }
     for (int v = 0; v < n; v++) {
         struct lu_ins *in = &f->ins[v];
@@ -582,7 +585,8 @@ escape(struct lu_func *f)
             continue;
         }
         int allowed = in->op == OP_STORE_LOCAL || in->op == OP_DECREF || in->op == OP_INCREF
-            || in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT || in->op == OP_GUARD_NOT_NULL;
+            || in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT || in->op == OP_GUARD_NOT_NULL
+            || (in->op == OP_TRUTH && f->ins[in->a].op == OP_HELPER);
         lu_v ops[3] = { in->a, in->b, in->c };
         for (int i = 0; i < 3; i++) {
             if (ops[i] != LU_NOV && !(allowed && i == 0)) {
@@ -629,6 +633,13 @@ escape(struct lu_func *f)
         struct lu_ins *in = &f->ins[v];
         if (in->flags & INS_DEAD) {
             continue;
+        }
+        if (in->op == OP_TRUTH && ok[in->a]) {
+            /* A dict nothing filled is empty. */
+            in->op = OP_CONST_I;
+            in->imm = 0;
+            in->a = LU_NOV;
+            in->fs = NULL;
         }
         if ((in->op == OP_STORE_LOCAL || in->op == OP_DECREF || in->op == OP_INCREF) && in->a != LU_NOV
             && ok[in->a]) {

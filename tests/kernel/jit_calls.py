@@ -7,7 +7,8 @@
 # A character loop over a str (json's escapers, which this runtime writes in
 # Python: a code point read at a time, then a slice and a concatenation)
 # inlines into its caller's loop too, for strs of every width, and so does
-# one over the items of a bytes object.
+# one over the items of a bytes object. So do functions taking *args and
+# **kwargs called with positional arguments.
 # Each result must be the interpreter's; tools/jitcheck also runs this at two
 # sizes and requires that entries into compiled code do not grow with the
 # iterations, and that the tier gives up on no function.
@@ -177,4 +178,29 @@ def unpacking(n):
     return s + len(d)
 
 
-print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N), pops(N), truths(N), emptiness(N), wide(N), strings(N), octets(N), unpacking(N))
+def gather(a, *args, **kwargs):
+    if kwargs:
+        return -1
+    return a + len(args)
+
+
+def keep_rest(*args, **kwargs):
+    return args, kwargs
+
+
+def varargs(n):
+    """Functions taking *args and **kwargs, called with positional
+    arguments only: str's predicates and upper (the kernel's methods take
+    *args and **kwargs), and the program's own, including one whose packed
+    arguments are its result."""
+    words = ('abc', 'a1', '  x ', '42')
+    s = 0
+    for i in range(n):
+        w = words[i & 3]
+        s += w.isalpha() + w.isdigit() + len(w.upper()) + gather(i) + gather(i, 2, 3)
+        args, kwargs = keep_rest(i, w)
+        s += len(args) + len(kwargs)
+    return s
+
+
+print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N), pops(N), truths(N), emptiness(N), wide(N), strings(N), octets(N), unpacking(N), varargs(N))

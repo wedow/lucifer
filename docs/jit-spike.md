@@ -22,7 +22,8 @@ other machines).
 - **Type feedback.** The interpreter specializes only `LOAD_GLOBAL` and
   `LOAD_ATTR`/`STORE_ATTR`. Operand kinds are now also recorded in cache words
   the interpreter did not use: `BINARY_OP`, `COMPARE_OP`, `STORE_SUBSCR`,
-  `CALL` (first two arguments) and `FOR_ITER` (iterator type).
+  `CALL` (first two arguments) and `FOR_ITER` (iterator type). A
+  `POP_JUMP_IF_*` records the directions it has taken.
 - **Block SSA from bytecode** (`ssa_build.c`):
   - an abstract stack that tracks, per entry, whether compiled code holds a
     reference;
@@ -31,6 +32,13 @@ other machines).
     `func_version` and cell contents.
 - **Inlining** of kernel and user functions with known identity, with the
   callee's frame state chained to its caller's.
+  - A callee inlines while the code it compiles stays under 400 code
+    units. One larger than that compiles only the branch directions the
+    interpreter took (one never taken is a guard, and a guard that keeps
+    failing compiles both), so a large function whose taken branches are
+    small inlines.
+  - `*args` is the tuple of the extra arguments and `**kwargs` a new dict,
+    which is never built when nothing reads more than its truth.
   - Kernel module globals fold to constants, except those a kernel function
     rebinds (`global`), which are guarded as user globals are.
   - Primitives become IR: `float_add` becomes `ADD_F`, `m_sqrt` becomes

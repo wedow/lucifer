@@ -2242,29 +2242,39 @@ op_JUMP_FORWARD:
     next_instr += oparg;
     DISPATCH();
 
-op_POP_JUMP_IF_FALSE:
+op_POP_JUMP_IF_FALSE: {
+    int jump = POP() == Py_False;
+    lu_jit_observe_branch(next_instr, jump);
     SKIP_CACHES();
-    next_instr += oparg * (POP() == Py_False);
+    next_instr += oparg * jump;
     DISPATCH();
+}
 
-op_POP_JUMP_IF_TRUE:
+op_POP_JUMP_IF_TRUE: {
+    int jump = POP() == Py_True;
+    lu_jit_observe_branch(next_instr, jump);
     SKIP_CACHES();
-    next_instr += oparg * (POP() == Py_True);
+    next_instr += oparg * jump;
     DISPATCH();
+}
 
 op_POP_JUMP_IF_NONE: {
-    SKIP_CACHES();
     PyObject *v = POP();
-    next_instr += oparg * (v == Py_None);
+    int jump = v == Py_None;
     Py_DECREF(v);
+    lu_jit_observe_branch(next_instr, jump);
+    SKIP_CACHES();
+    next_instr += oparg * jump;
     DISPATCH();
 }
 
 op_POP_JUMP_IF_NOT_NONE: {
-    SKIP_CACHES();
     PyObject *v = POP();
-    next_instr += oparg * (v != Py_None);
+    int jump = v != Py_None;
     Py_DECREF(v);
+    lu_jit_observe_branch(next_instr, jump);
+    SKIP_CACHES();
+    next_instr += oparg * jump;
     DISPATCH();
 }
 

@@ -1298,7 +1298,7 @@ PyMethodDef lu_prim_str_methods[] = {
     PURE(str_find), PURE(str_count), FAST(str_replace), PURE(str_slice), PURE(str_slice_step),
     PURE(str_item), PURE(str_decimal), FAST(slice_parts), FAST(box_get), FAST(box_set), PURE(str_ord), PURE(str_chr), PURE(str_len), FAST(bytes_ord), FAST(str_sizeof), FAST(str_hash), FAST(str_cmp),
     PURE(str_concat), FAST(str_repeat), FAST(str_split), FAST(str_splitlines), FAST(str_strip),
-    FAST(str_case), FAST(str_is), FAST(str_expandtabs), FAST(str_ascii), FAST(str_encode),
+    PURE(str_case), PURE(str_is), FAST(str_expandtabs), FAST(str_ascii), FAST(str_encode),
     FAST(str_decode), FAST(str_iter), FAST(str_iter_next), FAST(str_subtype),
     { NULL, NULL, 0, NULL },
 };
