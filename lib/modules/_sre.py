@@ -365,6 +365,7 @@ def _ssize(value):
         except AttributeError:
             raise TypeError("'%s' object cannot be interpreted as an integer" % type(value).__name__) from None
         value = method(value)
+    value = int.__index__(value)    # the value, as C reads it: no subclass's methods run
     if value > _SSIZE_MAX or value < -_SSIZE_MAX - 1:
         raise OverflowError("Python int too large to convert to C ssize_t")
     return value
