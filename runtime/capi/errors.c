@@ -210,14 +210,12 @@ lu_err_format(PyObject *type, const char *format, ...)
    no fresh instance can be made, the one made at boot is raised, as
    CPython's last_resort_memory_error is. Making the fresh one can itself
    run out and call back here, which takes the last resort at once. */
-static PyObject *memerror_last_resort;
-
 void
-lu_errors_init(void)
+lu_errors_init(PyInterpreterState *interp)
 {
     PyObject *args = PyTuple_New(0);
-    memerror_last_resort = args != NULL ? exc_new(PyExc_MemoryError, args) : NULL;
-    if (memerror_last_resort == NULL) {
+    interp->last_resort_memory_error = args != NULL ? exc_new(PyExc_MemoryError, args) : NULL;
+    if (interp->last_resort_memory_error == NULL) {
         PyErr_Clear();
     }
 }
@@ -227,7 +225,7 @@ PyErr_NoMemory(void)
 {
     static _Thread_local int raising;
     if (raising) {
-        PyErr_SetRaisedException(Py_XNewRef(memerror_last_resort));
+        PyErr_SetRaisedException(Py_XNewRef(_PyRuntime.main_interp.last_resort_memory_error));
         return NULL;
     }
     raising = 1;
@@ -236,7 +234,7 @@ PyErr_NoMemory(void)
     raising = 0;
     if (exc == NULL) {
         PyErr_Clear();
-        exc = Py_XNewRef(memerror_last_resort);
+        exc = Py_XNewRef(_PyRuntime.main_interp.last_resort_memory_error);
     }
     PyErr_SetRaisedException(exc);
     return NULL;

@@ -409,6 +409,7 @@ struct _is {
     PyObject *builtins;         /* builtins.__dict__ */
     PyObject *sysdict;          /* sys.__dict__ */
     PyObject *dict;             /* PyInterpreterState_GetDict, made on first use */
+    PyObject *last_resort_memory_error; /* raised when no MemoryError can be made */
     struct lu_atexit *atexit;   /* PyUnstable_AtExit callbacks, newest first */
     PyMutex atexit_lock;
     PyObject *interned;         /* interned str -> itself */
@@ -952,6 +953,11 @@ extern LU_EXPORT union lu_runtime {
             } handlers[LU_NSIG];
         } signals;
         PyMutex weakref_locks[64];      /* guard the weakref lists, by referent address */
+        struct {
+            PyMutex mutex;
+            Py_ssize_t next_index, size;
+            PyObject **array;           /* each _Py_Identifier's interned str, by its index */
+        } identifiers;                  /* _PyUnicode_FromId (runtime/capi/unicodeapi.c) */
         struct lu_lock heaps_lock;      /* a carrier's heaps are in the registry or abandoned,
                                            never between: held by its retirement and by the
                                            collector's walk, and by entry creation */
@@ -1126,7 +1132,7 @@ int lu_fileobject_init(void);
 extern PyTypeObject lu_date_base_type, lu_datetime_base_type, lu_time_base_type,
     lu_timedelta_base_type, lu_tzinfo_base_type;
 /* The last-resort MemoryError of PyErr_NoMemory (runtime/capi/errors.c). */
-void lu_errors_init(void);
+void lu_errors_init(PyInterpreterState *interp);
 void lu_storage_init(void);
 void lu_module_init(void);
 void lu_exc_init(void);

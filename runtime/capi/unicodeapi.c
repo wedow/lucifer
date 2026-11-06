@@ -537,53 +537,38 @@ _Py_UTF8_Edit_Cost(PyObject *a, PyObject *b, Py_ssize_t max_cost)
 }
 
 /* _PyUnicode_FromId (Objects/unicodeobject.c): each identifier holds an
-   index handed out once, and stores its interned str in that slot. The
-   array is process-wide here: the runtime has the one interpreter. */
-
-static struct {
-    PyMutex mutex;
-    Py_ssize_t next_index;
-    PyObject **array;
-    Py_ssize_t size;
-} lu_identifier_ids;
-
+   index handed out once, and its interned str sits at that index. */
 PyObject *
 _PyUnicode_FromId(_Py_Identifier *id)
 {
-    PyMutex_Lock(&lu_identifier_ids.mutex);
-    Py_ssize_t index = id->index;
-    if (index < 0) {
-        index = lu_identifier_ids.next_index++;
-        id->index = index;
+    __typeof__(_PyRuntime.identifiers) *ids = &_PyRuntime.identifiers;
+    PyMutex_Lock(&ids->mutex);
+    if (id->index < 0) {
+        id->index = ids->next_index++;
     }
+    Py_ssize_t index = id->index;
     PyObject *obj = NULL;
-    if (index >= lu_identifier_ids.size) {
+    if (index >= ids->size) {
         Py_ssize_t size = Py_MAX(index * 2, 16);
-        PyObject **array = PyMem_Realloc(lu_identifier_ids.array, size * sizeof *array);
+        PyObject **array = PyMem_Realloc(ids->array, size * sizeof *array);
         if (array == NULL) {
             PyErr_NoMemory();
             goto done;
         }
-        for (Py_ssize_t i = lu_identifier_ids.size; i < size; i++) {
-            array[i] = NULL;
-        }
-        lu_identifier_ids.array = array;
-        lu_identifier_ids.size = size;
+        memset(array + ids->size, 0, (size - ids->size) * sizeof *array);
+        ids->array = array;
+        ids->size = size;
     }
-    else {
-        obj = lu_identifier_ids.array[index];
-    }
+    obj = ids->array[index];
     if (obj == NULL) {
         obj = PyUnicode_DecodeUTF8(id->string, strlen(id->string), NULL);
-        if (obj == NULL) {
-            goto done;
+        if (obj != NULL) {
+            lu_intern(PyInterpreterState_Get(), &obj);
+            ids->array[index] = obj;        /* the table owns it */
         }
-        PyInterpreterState *interp = PyInterpreterState_Get();
-        lu_intern(interp, &obj);
-        lu_identifier_ids.array[index] = obj;   /* strong: the table owns it */
     }
 done:
-    PyMutex_Unlock(&lu_identifier_ids.mutex);
+    PyMutex_Unlock(&ids->mutex);
     return obj;      /* borrowed */
 }
 

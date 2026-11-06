@@ -254,7 +254,7 @@ boot_native(struct _is *interp)
         Py_DECREF(sys);
         return -1;
     }
-    lu_errors_init();       /* the last-resort MemoryError, before anything can run out */
+    lu_errors_init(interp);     /* the last-resort MemoryError, before anything can run out */
     PyObject *modules_name = PyUnicode_InternFromString("modules");
     if (modules_name == NULL || lu_ns_insert(interp->sysdict, modules_name, interp->modules) < 0) {
         Py_XDECREF(modules_name);
@@ -629,7 +629,7 @@ release_interpreter(struct _is *interp)
     interp->tasks_closed = 0;
     interp->stw.mutex = (PyMutex){ 0 };     /* held for good since the other tasks were shut down */
     interp->modules = interp->builtins = interp->sysdict = interp->interned = NULL;
-    interp->dict = NULL;
+    interp->dict = interp->last_resort_memory_error = NULL;
     interp->co_extra_user_count = 0;
     memset(interp->co_extra_freefuncs, 0, sizeof interp->co_extra_freefuncs);
     interp->co_extra_lock = (PyMutex){ 0 };
