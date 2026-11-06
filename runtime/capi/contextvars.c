@@ -87,3 +87,13 @@ PyMethodDef lu_prim_context_methods[] = {
     { "context_switched", (PyCFunction)(void (*)(void))prim_context_switched, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },
 };
+
+/* _PyContext_NewHamtForTests (Python/context.c): a bare HAMT for the
+   _testinternalcapi.hamt() tests. lucifer's contexts are dicts and it has no
+   HAMT (Python/hamt.c), so the hook fails cleanly instead of aborting. */
+LU_EXPORT PyObject *
+_PyContext_NewHamtForTests(void)
+{
+    PyErr_SetString(PyExc_NotImplementedError, "lucifer has no HAMT: contexts hold their variables in dicts");
+    return NULL;
+}
