@@ -507,6 +507,10 @@ enum {
     LU_POLL_EVENTS_BITS = 12,
 };
 #define LU_POLL_EVENTS_MASK (((uintptr_t)1 << LU_POLL_EVENTS_BITS) - 1)
+/* The reasons whose effects Python sees, which wait while a builtin's
+   frame runs (lu_poll_slow). */
+#define LU_POLL_VISIBLE (LU_POLL_SIGNALS_PENDING | LU_POLL_CALLS_TO_DO | LU_POLL_ASYNC_EXCEPTION \
+    | LU_POLL_GC_SCHEDULED | LU_POLL_STRESS_TICK)
 #define LU_POLL_VERSION_UNIT ((uintptr_t)1 << LU_POLL_EVENTS_BITS)
 
 /* PyThreadState.state (Include/internal/pycore_pystate.h). */

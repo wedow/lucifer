@@ -1935,6 +1935,11 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         load(a, RAX, R14, offsetof(struct lu_task, carrier));
         load(a, RCX, RAX, offsetof(struct lu_carrier, poll));
         int poll = exit_to(a, in->fs, EXIT_POLL, 0, 0);
+        if (in->fs->code->co_flags & LU_CO_KERNEL) {
+            /* A builtin's frame leaves the visible reasons for the poll after
+               it returns: leaving for one would only come back. */
+            alu_ri(a, ALU_AND, RCX, (int32_t)~LU_POLL_VISIBLE);
+        }
         mov_ri(a, R11, (int64_t)a->f->code->_co_instrumentation_version);
         alu_rr(a, ALU_CMP, RCX, R11);
         jcc(a, CC_NE, poll);
