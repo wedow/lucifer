@@ -41,6 +41,7 @@ build_time_vars = {
     'PY_CFLAGS_NODIST': '',
     'PY_CORE_CFLAGS': '-O2',
     'PY_ENABLE_SHARED': 0,
+    'PY_HAVE_PERF_TRAMPOLINE': 1,
     'PY_LDFLAGS_NODIST': '',
     'Py_DEBUG': 0,
     'Py_ENABLE_SHARED': 0,

@@ -125,6 +125,8 @@ branch_handler_def	runtime/interp/instrument.c	the PyMethodDef of the legacy BRA
 handler_defs	runtime/interp/legacy_tracing.c	the PyMethodDefs of the sys.settrace and sys.setprofile handlers, never written; the API takes them non-const
 whatstrings	runtime/interp/legacy_tracing.c	const table of the trace event names; relocated by ld.so, then read-only (RELRO)
 lu_sys_tracing_methods	runtime/interp/legacy_tracing.c	sys's tracing functions, a PyMethodDef table never written; the API takes it non-const
+lu_sys_perf_methods	runtime/interp/perf.c	sys's stack trampoline functions, a PyMethodDef table never written; the API takes it non-const
+perf	runtime/interp/perf.c	the perf map, the jitdump and the trampolines' arenas: one set of files per process, as perf reads them, under its registered lock
 monitoring_methods	runtime/interp/monitoring.c	sys.monitoring's functions, a PyMethodDef table never written; the API takes it non-const
 altstack	runtime/prim/faulthandler.c	the alternate signal stack of the thread that enabled the fault handler; set once
 fatal	runtime/prim/faulthandler.c	the fatal-signal handler's configuration and the previous dispositions; process-wide because signal dispositions are

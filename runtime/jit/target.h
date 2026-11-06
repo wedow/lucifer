@@ -23,6 +23,17 @@ struct lu_target {
     int ngpr, nfpr;
     const int8_t *gpr;          /* allocatable, in preference order */
     const int8_t *fpr;
+    /* For perf (runtime/interp/perf.c): the stack trampoline, which calls
+       its fourth argument with its first three inside a frame of its own
+       (NULL: none); the ELF machine; and the DWARF call frame information
+       of a CIE (from its id on) and of a function that starts by pushing
+       and setting the frame pointer, as compiled units and the trampoline
+       do. */
+    const uint8_t *trampoline;
+    int ntrampoline;
+    int elf_machine;
+    const uint8_t *cie, *fp_cfi;
+    int ncie, nfp_cfi;
 };
 extern const struct lu_target lu_target;
 

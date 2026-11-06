@@ -375,11 +375,6 @@ def is_remote_debug_enabled():
     return False
 
 
-def is_stack_trampoline_active():
-    """Return *True* if a stack profiler trampoline is active."""
-    return False
-
-
 stdlib_module_names = frozenset((
     '__future__ _abc _aix_support _android_support _apple_support _ast _ast_unparse _asyncio '
     '_bisect _blake2 _bz2 _codecs _codecs_cn _codecs_hk _codecs_iso2022 _codecs_jp _codecs_kr '
@@ -422,8 +417,7 @@ _install(exit, getdefaultencoding, getfilesystemencoding, getfilesystemencodeerr
          setswitchinterval, getdlopenflags, setdlopenflags, getallocatedblocks,
          getunicodeinternedsize, _is_interned, _is_immortal, _clear_type_cache,
          _clear_internal_caches, _clear_type_descriptors, _debugmallocstats, _getframemodulename,
-         _current_frames, _current_exceptions, _get_cpu_count_config, is_remote_debug_enabled,
-         is_stack_trampoline_active)
+         _current_frames, _current_exceptions, _get_cpu_count_config, is_remote_debug_enabled)
 for _name in ('excepthook', 'displayhook', 'breakpointhook', 'unraisablehook'):
     ns_set(_dict, '__' + _name + '__', ns_get(_dict, _name, None))
 ns_set(_dict, 'stdlib_module_names', stdlib_module_names)

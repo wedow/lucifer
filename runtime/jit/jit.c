@@ -25,6 +25,7 @@
 #include "jit/jit.h"
 #include "jit/target.h"
 #include "interp/specialize.h"
+#include "interp/perf.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -72,7 +73,6 @@ static struct {
     double compile_seconds;
     unsigned long failure_reasons[8];
     const char *failure_names[8];
-    PyMutex perf_map;           /* one writer of /tmp/perf-PID.map at a time */
 } stats;
 
 /* A count for -X lucifer_jit_stats: free when the counts are off. */
@@ -216,26 +216,6 @@ free_unit(struct lu_unit *u)
     free(u);
 }
 
-/* -X perf: each unit as a py:: symbol in /tmp/perf-PID.map (FOUNDATIONS 2.12). */
-static void
-perf_map(PyCodeObject *code, struct lu_unit *u)
-{
-    PyThreadState *ts = PyThreadState_Get();
-    if (ts->interp->config.perf_profiling <= 0) {
-        return;
-    }
-    PyMutex_Lock(&stats.perf_map);
-    char path[64];
-    snprintf(path, sizeof path, "/tmp/perf-%d.map", (int)getpid());
-    FILE *out = fopen(path, "a");
-    if (out != NULL) {
-        fprintf(out, "%lx %zx py::%s:%s@%d\n", (unsigned long)(uintptr_t)u->mem, u->code_bytes,
-                PyUnicode_AsUTF8(code->co_qualname), PyUnicode_AsUTF8(code->co_filename), u->entry_pc);
-        fclose(out);
-    }
-    PyMutex_Unlock(&stats.perf_map);
-}
-
 static struct lu_unit *
 compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
 {
@@ -296,7 +276,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
     f.nconsts = 0;
     count(&stats.code_bytes, u->code_bytes);
     lu_ir_free(&f);
-    perf_map(frame->code, u);
+    lu_perf_unit(u->mem, u->code_bytes, frame->code, pc);
     return u;
 }
 
@@ -424,7 +404,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     struct lu_task *task = (struct lu_task *)ts;
     /* What can change while the code has units: the frame, tools, a hook. */
     if (frame->locals != NULL || frame->owner == LU_FRAME_GENERATOR || code->_co_monitoring != NULL
-        || ts->tracing || ts->interp->eval_frame != NULL
+        || ts->tracing || (ts->interp->eval_frame != NULL && !lu_perf_is_trampoline(ts->interp->eval_frame))
         || code->_co_instrumentation_version
            != (__atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK)) {
         return LU_JIT_NONE;
