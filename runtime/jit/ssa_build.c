@@ -1440,12 +1440,12 @@ load_global(struct ctx *c)
 static int
 load_common_constant(struct ctx *c)
 {
-    static const char *const names[] = { NULL, NULL, "tuple", "all", "any" };
     if (c->oparg < 2) {
         push(c, konst(c, c->oparg == 0 ? PyExc_AssertionError : PyExc_NotImplementedError), 0);
         return 0;
     }
-    PyObject *name = c->oparg < 5 ? PyUnicode_InternFromString(names[c->oparg]) : NULL;
+    const char *s = c->oparg == 2 ? "tuple" : c->oparg == 3 ? "all" : c->oparg == 4 ? "any" : NULL;
+    PyObject *name = s != NULL ? PyUnicode_InternFromString(s) : NULL;
     PyObject *v = name != NULL ? dict_const(c, PyThreadState_Get()->interp->builtins, NULL, name) : NULL;
     Py_XDECREF(name);
     if (v == NULL) {
