@@ -78,6 +78,7 @@ struct ctx {
     int opcode, base, oparg;
     lu_codeunit *cache;
     int failed;                 /* an inlined frame met what it cannot compile */
+    int ncalls;                 /* calls it cannot inline (opaque_call) */
 };
 
 /* Per-code JIT state the builder consults: pcs not to speculate at. */
@@ -417,12 +418,25 @@ unsupported(struct ctx *c)
     side_exit(c, EXIT_SIDE);
 }
 
-/* Python-running helpers need a real frame for everything below them, so
-   inlined frames leave instead. */
+/* Python-running helpers other than calls need a real frame for
+   everything below them, so inlined frames leave instead. */
 static int
 root_only(struct ctx *c)
 {
     return c->parent == NULL;
+}
+
+/* A call from an inlined frame runs with the inlined frames pushed as
+   real ones (the backend's), which go again when it returns unless the
+   callee kept a frame object of one: then the frames stay, and compiled
+   code leaves here, after the call, for the interpreter to run them. */
+static void
+frames_guard(struct ctx *c)
+{
+    if (c->parent != NULL) {
+        lu_v g = emit(c, OP_GUARD_FRAMES, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+        I(c, g)->fs = snapshot(c, c->next);
+    }
 }
 
 /* --- edges and blocks --- */
@@ -1208,6 +1222,9 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         f->ninlined++;
         ok = build_ctx(k, k->blkat[0]) == 0 && !k->failed;
     }
+    if (ok && lu_frame_floor(co) + k->depth > f->room) {
+        f->room = lu_frame_floor(co) + k->depth;
+    }
     if (ok && k->nrets > 0) {
         c->cur = k->cont;
         if (k->nrets == 1) {
@@ -1760,6 +1777,36 @@ speculate_args(struct ctx *c, int n)
     }
 }
 
+/* Whether the call at c->pc, which this frame cannot inline, compiles
+   here. In an inlined frame it pushes the frame as a real one, which costs
+   about what calling the frame did: so a callee one deep with one such
+   call outside its loops inlines, and any other is called instead (the
+   inline is undone). A call the interpreter never made there leaves: a
+   cold path's call would make the root's locals real boxes on hot ones. */
+static int
+opaque_call(struct ctx *c)
+{
+    if (c->parent == NULL) {
+        return 1;
+    }
+    if (__atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED) == 0) {
+        unsupported(c);
+        return 0;
+    }
+    int loop = 0;
+    for (int pc = c->next; pc < c->ncode && !loop;) {
+        int base, oparg, op;
+        int next = decode(c, pc, &base, &oparg, &op);
+        loop = base == JUMP_BACKWARD && jump_target(base, oparg, next) <= c->pc;
+        pc = next;
+    }
+    if (c->depth > 1 || c->ncalls++ > 0 || loop) {
+        c->failed = 1;
+        return 0;
+    }
+    return 1;
+}
+
 static int
 call(struct ctx *c)
 {
@@ -1849,10 +1896,13 @@ call(struct ctx *c)
     else if (fn != NULL && bound == NULL && fn->func_code != NULL
              && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
              && PyUnicode_CompareWithASCIIString(fn->func_qualname, "call_special") == 0
-             && self == LU_NOV && n >= 2 && n <= 32 && root_only(c) && !lu_jit_nospec(c->code, c->pc)) {
+             && self == LU_NOV && n >= 2 && n <= 32 && !lu_jit_nospec(c->code, c->pc)) {
         /* A descriptor known only at run time: called unbound when it is a
            function or a kernel descriptor, which is what call_special's
            first test does, without its *args call the tier leaves at. */
+        if (!opaque_call(c)) {
+            return -1;
+        }
         lu_v hargs[32];
         for (int i = 0; i < n; i++) {
             hargs[i] = peek(c, n - i);
@@ -1861,6 +1911,7 @@ call(struct ctx *c)
         guard_after(c, OP_GUARD_NOT_NULL, r, 1);
         pop_call(c, n);
         push(c, r, 1);
+        frames_guard(c);
         return 0;
     }
     if (fn != NULL && bound == NULL) {
@@ -1897,8 +1948,7 @@ call(struct ctx *c)
         push(c, r, 1);
         return 0;
     }
-    if (!root_only(c)) {
-        unsupported(c);
+    if (!opaque_call(c)) {
         return -1;
     }
     lu_v hargs[34];
@@ -1912,6 +1962,7 @@ call(struct ctx *c)
     guard_after(c, OP_GUARD_NOT_NULL, r, 1);
     pop_call(c, n);
     push(c, r, 1);
+    frames_guard(c);
     return 0;
 }
 
@@ -2497,6 +2548,13 @@ lu_ssa_build(struct lu_func *f, struct lu_frame *frame)
     /* Locals the live frame holds as ints or floats enter unboxed, so that
        loop-carried values stay raw (a guard at entry). */
     c->snap = snapshot(c, entry);
+    /* The interpreter would push each inlined frame at its call, and raise
+       there past the recursion limit. The budget is the same wherever the
+       unit runs (its calls return before it goes on), so one check at entry
+       that there is room for the deepest leaves the unit to the interpreter
+       when there is not, and a deopt or a call never lacks it. */
+    f->room = INT32_MIN;
+    lu_v room = guard(c, OP_GUARD_DEPTH, LU_NOV, 0);
     if (!lu_jit_nospec(co, entry)) {
         /* Locals that hold one object enter as one value, so `x is y` stays true. */
         for (int i = 0; i < c->nlocals; i++) {
@@ -2542,6 +2600,10 @@ lu_ssa_build(struct lu_func *f, struct lu_frame *frame)
     edge_to(c, entry);
     emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
     int r = build_ctx(c, c->blkat[entry]);
+    if (f->room == INT32_MIN) {
+        f->ins[room].flags |= INS_DEAD;
+    }
+    f->ins[room].imm = f->room;
     free(c->rets);
     if (r < 0 && f->fail == NULL) {
         f->fail = "build failed";

@@ -595,14 +595,13 @@ escape(struct lu_func *f)
             }
         }
         if (in->op == OP_HELPER && (lu_helpers[in->imm].flags & IF_PY) && in->fs != NULL) {
-            /* A call that runs Python can read the root frame's locals. */
-            struct lu_fs *root = in->fs;
-            while (root->caller != NULL) {
-                root = root->caller;
-            }
-            for (int i = 0; i < root->nlocals; i++) {
-                if (root->vals[i] != LU_NOV) {
-                    ok[root->vals[i]] = 0;
+            /* A call that runs Python can read every frame's locals: the
+               root's slots, and the frames pushed for it from inlined ones. */
+            for (struct lu_fs *fs = in->fs; fs != NULL; fs = fs->caller) {
+                for (int i = 0; i < fs->nlocals; i++) {
+                    if (fs->vals[i] != LU_NOV) {
+                        ok[fs->vals[i]] = 0;
+                    }
                 }
             }
         }

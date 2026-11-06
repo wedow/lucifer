@@ -198,3 +198,5 @@ iend	-	thread-local: the register allocation running on this thread; its TLS sym
 eq_seen	-	thread-local: the last type compiled code asked whether == is identity for; its TLS symbol has no line
 stack_floor	-	thread-local: the lowest C stack address a call from compiled code may recurse to; its TLS symbol has no line
 managed_buffer_type	runtime/prim/memoryview.c	a static type, its slots filled once at startup (lu_memoryview_init)
+stress_calls	-	per thread (its TLS symbol has no line): calls from inlined frames counted for -X lucifer_stress=deopt:N (runtime/jit/deopt.c)
+kept_by_stress	-	per thread (its TLS symbol has no line): the last call from an inlined frame kept its frames only for deopt:N, so its exit counts as a stress exit (runtime/jit/deopt.c)
