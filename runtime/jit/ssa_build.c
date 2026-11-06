@@ -2222,12 +2222,13 @@ translate(struct ctx *c)
     case LOAD_DEREF: {
         lu_v cell = c->st.v[oparg];
         PyObject *kcell = known(c, cell);
-        if (kcell != NULL && PyCell_Check(kcell) && PyCell_GET(kcell) != NULL) {
+        PyObject *val = kcell != NULL && PyCell_Check(kcell) ? lu_cell_get(kcell) : NULL;
+        if (val != NULL) {
             /* A closure's cell of an inlined function: its value, guarded. */
-            PyObject *val = PyCell_GET(kcell);
             lu_v g = guard(c, OP_GUARD_IS, cell, (int64_t)(intptr_t)val);
             I(c, g)->imm2 = GI_FIELD | offsetof(PyCellObject, ob_ref);
             push(c, konst(c, val), 0);
+            Py_DECREF(val);         /* the unit holds its constants */
             return 0;
         }
         if (cell == LU_NOV) {

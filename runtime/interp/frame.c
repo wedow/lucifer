@@ -544,7 +544,7 @@ fast_value(struct lu_frame *f, int i)
     PyObject *v = f->localsplus[i];
     unsigned char kind = (unsigned char)PyBytes_AS_STRING(f->code->co_localspluskinds)[i];
     if (v != NULL && (kind & (CO_FAST_CELL | CO_FAST_FREE)) && PyCell_Check(v)) {
-        v = ((PyCellObject *)v)->ob_ref;
+        return lu_cell_get(v);
     }
     return Py_XNewRef(v);
 }
@@ -594,9 +594,7 @@ prim_frame_fast_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
         PyObject **slot = &f->localsplus[i];
         if (*slot != NULL && PyCell_Check(*slot) && (kind & (CO_FAST_CELL | CO_FAST_FREE))) {
-            PyObject *old = ((PyCellObject *)*slot)->ob_ref;
-            ((PyCellObject *)*slot)->ob_ref = Py_NewRef(value);
-            Py_XDECREF(old);
+            Py_XDECREF(lu_cell_exchange(*slot, Py_NewRef(value)));
         }
         else if (*slot != value) {
             /* The running code may hold the old value without a reference of its own. */
