@@ -9,7 +9,7 @@ jump and resumes it by label, as sre_lib.h resumes by goto."""
 
 import sys
 from _types import GenericAlias, MappingProxyType
-from _lucifer import str_ord, str_slice
+from _lucifer import str_encode, str_ord, str_slice
 
 MAGIC = 20230612
 CODESIZE = 4
@@ -336,9 +336,8 @@ def _text_of(string):
         last = _last_text
         if last[0] is string:
             return last[1]
-    try:
-        text = str.encode(string, 'latin-1')
-    except UnicodeEncodeError:
+    text = str_encode(string, 'latin-1', 'strict')     # bytes, or where it fails
+    if type(text) is not bytes:
         text = _Wide(string)
     if long:
         _last_text = (string, text)
