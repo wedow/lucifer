@@ -1,6 +1,6 @@
 ---
 id: luc-pcs5
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-06T07:48:39Z
