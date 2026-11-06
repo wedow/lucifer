@@ -117,6 +117,32 @@ def accumulate(n):
 
 print(accumulate(300), held[0].f_code.co_name, held[0].f_locals['v'], held[0].f_back.f_code.co_name)
 
+# Identity across a kept frame: a float computed in the inlined method is a
+# local and a stack entry at once when the callee keeps the frame, and the
+# interpreter, running on, must see one object (DESIGN 4.5).
+class Scale:
+    def __init__(self, fn):
+        self.fn = fn
+
+    def run(self, x):
+        y = x * 1.5
+        z = y
+        t = (y, self.fn(z), z)
+        return t[0] is t[2] and t[0] is y and type(y) is float
+
+
+def scaled(n):
+    s = Scale(make(0.0))
+    ok = True
+    for i in range(n):
+        if i == n - 1:
+            s.fn = keep
+        ok = s.run(float(i)) and ok
+    return ok
+
+
+print('identity', scaled(300))
+
 # Recursion through an inlined frame up to the limit: the interpreter's frames
 # and the same RecursionError.
 for i in range(300):
