@@ -1,9 +1,9 @@
 """_socket (Modules/socketmodule.c): the constants, the error classes, the
-address conversion functions, and sockets made from descriptors: socketpair()
-and socket(fileno=...), which read, write and shut down as nonblocking or
-blocking descriptors do. Creating a network socket raises OSError: networking
-arrives with the scheduler's I/O layer, and until then importing socket,
-asyncio and everything that imports them works."""
+address conversion functions, and stream sockets over AF_INET, AF_INET6 and
+AF_UNIX: create, bind, listen, accept, connect, options, and blocking, timed
+and nonblocking I/O. Addresses cross into the runtime as raw sockaddr bytes,
+packed and unpacked here. Datagram calls (sendto, recvfrom) and recv/send flags
+are not supported yet."""
 
 import errno as _errno
 import _lucifer
@@ -102,25 +102,41 @@ def _unsupported(*args, **kwargs):
 
 
 class socket:
-    """socket(family=AF_INET, type=SOCK_STREAM, proto=0) -> socket object
-
-Only sockets over an existing descriptor (fileno=) exist yet."""
+    """socket(family=AF_INET, type=SOCK_STREAM, proto=0) -> socket object"""
     __slots__ = ('_fd', '_timeout', '_family', '_type', '_proto')
 
     def __init__(self, family=-1, type=-1, proto=-1, fileno=None):
         if fileno is None:
-            _unsupported()
-        if not isinstance(fileno, int):
-            raise TypeError('an integer is required')
-        if fileno < 0:
-            raise ValueError('negative file descriptor')
-        _posix.fstat(fileno)
+            family = AF_INET if family == -1 else family
+            type = SOCK_STREAM if type == -1 else type
+            proto = 0 if proto == -1 else proto
+            fileno = _posix._call('socket', family, type, proto)
+        else:
+            if not isinstance(fileno, int):
+                raise TypeError('an integer is required')
+            if fileno < 0:
+                raise ValueError('negative file descriptor')
+            _posix.fstat(fileno)
+            try:
+                if family == -1:
+                    family = _lucifer.os_getsockopt(fileno, SOL_SOCKET, SO_DOMAIN, 0)
+                if type == -1:
+                    type = _lucifer.os_getsockopt(fileno, SOL_SOCKET, SO_TYPE, 0)
+                if proto == -1:
+                    proto = _lucifer.os_getsockopt(fileno, SOL_SOCKET, SO_PROTOCOL, 0)
+            except OSError as e:
+                if e.errno != _errno.ENOTSOCK:
+                    raise
+                family, type, proto = (AF_UNIX if family == -1 else family,
+                                       SOCK_STREAM if type == -1 else type, 0 if proto == -1 else proto)
         self._fd = fileno
-        self._family = AF_UNIX if family == -1 else family
-        self._type = (SOCK_STREAM if type == -1 else type) & ~(SOCK_NONBLOCK | SOCK_CLOEXEC)
-        self._proto = 0 if proto == -1 else proto
+        self._family = family
+        self._type = type & ~(SOCK_NONBLOCK | SOCK_CLOEXEC)
+        self._proto = proto
         self._timeout = _default_timeout if _posix.get_blocking(fileno) else 0.0
-        if self._timeout is not None and self._timeout > 0:
+        if type & SOCK_NONBLOCK:
+            self._timeout = 0.0
+        elif self._timeout is not None and self._timeout > 0:
             _posix.set_blocking(fileno, False)
 
     def __repr__(self):
@@ -175,17 +191,80 @@ Only sockets over an existing descriptor (fileno=) exist yet."""
         self._check()
         return self._timeout is None
 
+    timeout = property(gettimeout)
+
     def recv(self, bufsize, flags=0, /):
         if bufsize < 0:
             raise ValueError('negative buffersize in recv')
         fd = self._check()
+        _no_flags(flags)
         self._wait(_POLLIN)
         return _posix.read(fd, bufsize)
 
+    def recv_into(self, buffer, nbytes=0, flags=0):
+        view = memoryview(buffer).cast('B')
+        if nbytes < 0:
+            raise ValueError('negative buffersize in recv_into')
+        if nbytes > len(view):
+            raise ValueError('buffer too small for requested bytes')
+        data = self.recv(nbytes or len(view), flags)
+        view[:len(data)] = data
+        return len(data)
+
     def send(self, data, flags=0, /):
         fd = self._check()
+        _no_flags(flags)
         self._wait(_POLLOUT)
         return _posix.write(fd, data)
+
+    def bind(self, address, /):
+        _lucifer.os_sockaddr('bind', self._check(), _pack(self._family, address))
+
+    def listen(self, backlog=128, /):
+        _posix._call('listen', self._check(), max(0, backlog))
+
+    def _accept(self):
+        fd = self._check()
+        self._wait(_POLLIN)
+        new, address = _lucifer.os_sockaddr('accept', fd)
+        return new, _unpack(address)
+
+    def connect(self, address, /):
+        fd = self._check()
+        try:
+            _lucifer.os_sockaddr('connect', fd, _pack(self._family, address))
+        except BlockingIOError as e:
+            if not self._timeout or e.errno != _errno.EINPROGRESS:
+                raise
+            self._wait(_POLLOUT)
+            error = _lucifer.os_getsockopt(fd, SOL_SOCKET, SO_ERROR, 0)
+            if error:
+                raise OSError(error, _posix.strerror(error)) from None
+
+    def connect_ex(self, address, /):
+        try:
+            self.connect(address)
+        except OSError as e:
+            if e.errno is None:
+                raise
+            return e.errno
+        return 0
+
+    def getsockname(self):
+        return _unpack(_lucifer.os_sockaddr('getsockname', self._check()))
+
+    def getpeername(self):
+        return _unpack(_lucifer.os_sockaddr('getpeername', self._check()))
+
+    def setsockopt(self, level, optname, value, optlen=None, /):
+        if value is None:
+            value = bytes(optlen)
+        elif not isinstance(value, int):
+            value = bytes(value)
+        _lucifer.os_setsockopt(self._check(), level, optname, value)
+
+    def getsockopt(self, level, optname, buflen=0, /):
+        return _lucifer.os_getsockopt(self._check(), level, optname, buflen)
 
     def sendall(self, data, flags=0, /):
         view = memoryview(data).cast('B')
@@ -198,11 +277,72 @@ Only sockets over an existing descriptor (fileno=) exist yet."""
     def dup(self):
         return socket(self._family, self._type, self._proto, _posix.dup(self._check()))
 
-    connect = connect_ex = bind = listen = accept = recvfrom = sendto = _unsupported
-    setsockopt = getsockopt = getsockname = getpeername = _unsupported
+    recvfrom = sendto = _unsupported
 
 
 _POLLIN, _POLLOUT = 1, 4
+
+
+def _no_flags(flags):
+    if flags:
+        raise OSError(_errno.ENOSYS, 'socket flags are not supported yet')
+
+
+def _host(family, host):
+    """The packed address of a host name or numeric address, as Modules/socketmodule.c setipaddr."""
+    if not isinstance(host, str):
+        host = bytes(host).decode('idna')
+    if host == '':
+        return bytes(4 if family == AF_INET else 16)
+    if host == '<broadcast>' and family == AF_INET:
+        return b'\xff' * 4
+    packed = _lucifer.os_inet_pton(family, host)
+    if packed is None:
+        packed = _lucifer.os_inet_pton(family, getaddrinfo(host, None, family)[0][4][0])
+    return packed
+
+
+def _port(address):
+    port = address[1]
+    if not isinstance(port, int):
+        raise TypeError("'%s' object cannot be interpreted as an integer" % type(port).__name__)
+    if not 0 <= port <= 0xffff:
+        raise OverflowError('bind(): port must be 0-65535.')
+    return port.to_bytes(2, 'big')
+
+
+def _pack(family, address):
+    """The sockaddr bytes of a Python address (struct sockaddr_in, sockaddr_in6, sockaddr_un)."""
+    head = family.to_bytes(2, 'little')
+    if family == AF_INET:
+        if not isinstance(address, tuple) or len(address) != 2:
+            raise TypeError('AF_INET address must be tuple, not %s' % type(address).__name__)
+        return head + _port(address) + _host(family, address[0]) + bytes(8)
+    if family == AF_INET6:
+        if not isinstance(address, tuple) or not 2 <= len(address) <= 4:
+            raise TypeError('AF_INET6 address must be a tuple (host, port[, flowinfo[, scopeid]])')
+        flowinfo, scope = (tuple(address[2:]) + (0, 0))[:2]
+        return (head + _port(address) + flowinfo.to_bytes(4, 'big') + _host(family, address[0])
+                + scope.to_bytes(4, 'little'))
+    if family == AF_UNIX:
+        path = address.encode('utf-8', 'surrogateescape') if isinstance(address, str) else bytes(address)
+        return head + path + (b'' if path[:1] == b'\0' else b'\0')
+    raise OSError(_errno.EAFNOSUPPORT, 'Address family not supported by protocol')
+
+
+def _unpack(sockaddr):
+    family = int.from_bytes(sockaddr[:2], 'little')
+    if family == AF_INET:
+        return _lucifer.os_inet_ntop(family, sockaddr[4:8]), int.from_bytes(sockaddr[2:4], 'big')
+    if family == AF_INET6:
+        return (_lucifer.os_inet_ntop(family, sockaddr[8:24]), int.from_bytes(sockaddr[2:4], 'big'),
+                int.from_bytes(sockaddr[4:8], 'big'), int.from_bytes(sockaddr[24:28], 'little'))
+    if family == AF_UNIX:
+        path = sockaddr[2:]
+        if path[:1] == b'\0':
+            return path
+        return path.split(b'\0', 1)[0].decode('utf-8', 'surrogateescape')
+    return family, sockaddr[2:]
 
 
 SocketType = socket
@@ -269,19 +409,22 @@ def inet_ntoa(packed_ip, /):
 
 def inet_pton(address_family, ip_string, /):
     """Convert an IP address from string format to a packed string suitable for use with low-level network functions."""
-    if address_family == AF_INET:
-        try:
-            return inet_aton(ip_string)
-        except OSError:
-            raise OSError('illegal IP address string passed to inet_pton') from None
-    raise OSError(_errno.EAFNOSUPPORT, 'Address family not supported by protocol')
+    if address_family not in (AF_INET, AF_INET6):
+        raise OSError(_errno.EAFNOSUPPORT, 'Address family not supported by protocol')
+    packed = _lucifer.os_inet_pton(address_family, ip_string)
+    if packed is None:
+        raise OSError('illegal IP address string passed to inet_pton')
+    return packed
 
 
 def inet_ntop(address_family, packed_ip, /):
     """Convert a packed IP address of the given family to string format."""
-    if address_family == AF_INET:
-        return inet_ntoa(packed_ip)
-    raise ValueError('unknown address family %d' % address_family)
+    packed_ip = bytes(packed_ip)
+    if address_family not in (AF_INET, AF_INET6):
+        raise ValueError('unknown address family %d' % address_family)
+    if len(packed_ip) != (4 if address_family == AF_INET else 16):
+        raise ValueError('invalid length of packed IP address string')
+    return _lucifer.os_inet_ntop(address_family, packed_ip)
 
 
 def _bytes_or_none(value, what):
@@ -310,6 +453,24 @@ def gethostbyname(hostname, /):
     for family, _, _, _, address in getaddrinfo(hostname, None, AF_INET, SOCK_STREAM):
         return address[0]
     raise gaierror(-2, 'Name or service not known')
+
+
+def gethostbyaddr(ip_address, /):
+    """Return the true host name, a list of aliases, and a list of IP addresses, for a host."""
+    if not isinstance(ip_address, str):
+        ip_address = bytes(ip_address).decode('idna')
+    for family in (AF_INET, AF_INET6):
+        packed = _lucifer.os_inet_pton(family, ip_address)
+        if packed is not None:
+            break
+    else:
+        family, _, _, _, address = getaddrinfo(ip_address, None)[0]
+        packed = _lucifer.os_inet_pton(family, address[0])
+    found = _lucifer.os_gethostbyaddr(family, packed)
+    if isinstance(found[0], int):
+        raise herror(*found)
+    name, aliases, addresses = found
+    return name, aliases, [_lucifer.os_inet_ntop(family, a) for a in addresses]
 
 
 def getservbyname(servicename, protocolname=None, /):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily status pass on a built tree: gates, AWFY timing, conformance, optional numpy.
+"""Daily status pass on a built tree: gates, AWFY timing, the web benchmark, conformance, optional numpy.
 
 Writes results/status-DATE/{summary.csv,summary.md,*.log}. Run from the repository root.
 
@@ -10,6 +10,8 @@ Environment:
   TIMING_PREFIX  command words put in front of each timed step (an exclusive lock, say)
   TEST_PREFIX    command words put in front of each gate and numpy shard
   NUMPY_SITE, NUMPY_CACHE, NUMPY_WORK  site-packages, wheel cache and raw-log directory (--numpy)
+  WEB_SITE       site-packages with Flask for the 3.14t ABI (the web benchmark; skipped when unset)
+  WEB_GIL_PYTHON a CPython 3.14 GIL interpreter that imports Flask (--refresh-reference only)
 
 CPython timings come from results/status-reference.json; --refresh-reference rewrites it.
 """
@@ -30,6 +32,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCE = ROOT / "results/status-reference.json"
 AWFY = ROOT / "third_party/awfy/Python"
+WEB = ROOT / "tools/bench/web/bench"
+WEB_CPUS = "1,2,4,8"
 LUCIFER = str(Path(os.environ.get("LUCIFER", "bin/lucifer")).resolve())
 
 
@@ -82,10 +86,31 @@ def oracle_version(oracle):
     return run([oracle, "-c", "import sys; print(sys.version)"]).stdout.strip()
 
 
+def web_timings(runs):
+    """The web benchmark per runtime and server CPU count: {runtime: {cpus: point}}."""
+    done = run([sys.executable, str(WEB), "time", "--cpus", WEB_CPUS] + [f"--run={n}={c}" for n, c in runs.items()],
+               "TIMING_PREFIX")
+    points = {}
+    for line in done.stdout.splitlines():
+        if line.startswith("{"):
+            p = json.loads(line)
+            points.setdefault(p["runtime"], {})[str(p["cpus"])] = {k: p[k] for k in ("rps", "p50_ms", "p99_ms", "errors", "server_exit")}
+    return points, done.stdout
+
+
+def web_check(oracle, site):
+    done = run([sys.executable, str(WEB), "check", f"--run=cpython-3.14t=env PYTHONPATH={site} {oracle}",
+                f"--run=lucifer=env PYTHONPATH={site} {LUCIFER} -X lucifer_jit=on"], "TEST_PREFIX")
+    return done.returncode == 0, done.stdout
+
+
 def refresh_reference(names, iters, oracle):
     times = timings(names, iters, {"cpython": oracle})
+    site, gil = os.environ.get("WEB_SITE"), os.environ.get("WEB_GIL_PYTHON")
+    web = web_timings({"cpython-3.14": gil, "cpython-3.14t": f"env PYTHONPATH={site} {oracle}"})[0] if site and gil else {}
     REFERENCE.write_text(json.dumps({"version": oracle_version(oracle),
-                                     "best_us": {n: times[n]["cpython"] for n in names}}, indent=1) + "\n")
+                                     "best_us": {n: times[n]["cpython"] for n in names},
+                                     "web": web}, indent=1) + "\n")
 
 
 # --- gates and conformance --------------------------------------------------
@@ -170,6 +195,27 @@ def delta(now, before):
     return "-" if now is None or before in (None, "") else f"{100 * (now / float(before) - 1):+.1f}%"
 
 
+def web_section(metrics, before):
+    """req/s per runtime and server CPU count; efficiency is req/s over N times 1 CPU's."""
+    runtimes = ("cpython-3.14", "cpython-3.14t", "lucifer")
+    counts = sorted({int(k.rsplit(".", 2)[1]) for k in metrics if k.startswith("web.") and k.endswith(".rps")})
+    if not counts:
+        return []
+    def rps(r, n):
+        return metrics.get(f"web.{r}.{n}.rps")
+    def eff(r, n):
+        return rps(r, n) / (n * rps(r, 1)) if rps(r, n) and rps(r, 1) else None
+    md = ["", "## Web (Flask Todo app, thread per connection, req/s; efficiency = req/s / (CPUs x 1-CPU req/s))", "",
+          "| CPUs | 3.14 | 3.14t | Lucifer | Lucifer p50 ms | Lucifer p99 ms | Lucifer/3.14t | eff 3.14 | eff 3.14t | eff Lucifer | Lucifer vs yesterday |",
+          "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for n in counts:
+        a, t, l = (rps(r, n) for r in runtimes)
+        md.append(f"| {n} | {fmt(a, 0)} | {fmt(t, 0)} | {fmt(l, 0)} | {fmt(metrics.get(f'web.lucifer.{n}.p50_ms'), 2)} "
+                  f"| {fmt(metrics.get(f'web.lucifer.{n}.p99_ms'), 2)} | {fmt(l / t if l and t else None)} "
+                  f"| {' | '.join(fmt(eff(r, n), 2) for r in runtimes)} | {delta(l, before.get(f'web.lucifer.{n}.rps'))} |")
+    return md
+
+
 def write_summary(out, date, metrics, gate_rows, problems, names, ran_numpy):
     before = previous_summary(date)
     with (out / "summary.csv").open("w", newline="") as f:
@@ -179,16 +225,15 @@ def write_summary(out, date, metrics, gate_rows, problems, names, ran_numpy):
             w.writerow([k, "" if v is None else v, before.get(k, "")])
     val = metrics.get
     md = [f"# Lucifer status {date}", "", "## AWFY (best iteration, ms; ratio is JIT on / CPython)", "",
-          "| benchmark | CPython | JIT on | JIT off | on/CPython | on vs yesterday |", "|---|---|---|---|---|---|"]
+          "| benchmark | CPython | JIT on | on/CPython | on vs yesterday |", "|---|---|---|---|---|"]
     for n in names:
-        c, on, off = (val(f"awfy.{n}.{k}_us") for k in ("cpython", "on", "off"))
-        md.append(f"| {n} | {fmt(c and c / 1000, 1)} | {fmt(on and on / 1000, 1)} | {fmt(off and off / 1000, 1)} "
+        c, on = (val(f"awfy.{n}.{k}_us") for k in ("cpython", "on"))
+        md.append(f"| {n} | {fmt(c and c / 1000, 1)} | {fmt(on and on / 1000, 1)} "
                   f"| {fmt(val(f'awfy.{n}.on_over_cpython'))} | {delta(on, before.get(f'awfy.{n}.on_us'))} |")
     md += ["", f"Geomean JIT on / CPython: {fmt(val('awfy.geomean_on_over_cpython'))} "
-           f"(yesterday {fmt(float(before['awfy.geomean_on_over_cpython']) if before.get('awfy.geomean_on_over_cpython') else None)})",
-           f"Geomean JIT on / JIT off: {fmt(val('awfy.geomean_on_over_off'))}"]
-    slower = [n for n in names if val(f"awfy.{n}.on_us") and val(f"awfy.{n}.off_us") and val(f"awfy.{n}.on_us") > val(f"awfy.{n}.off_us")]
-    md += [f"JIT on slower than off: {', '.join(slower) or 'none'}", "", "## Gates", "", "| target | result | detail |", "|---|---|---|"]
+           f"(yesterday {fmt(float(before['awfy.geomean_on_over_cpython']) if before.get('awfy.geomean_on_over_cpython') else None)})"]
+    md += web_section(metrics, before)
+    md += ["", "## Gates", "", "| target | result | detail |", "|---|---|---|"]
     md += [f"| {t} | {'pass' if ok else 'FAIL'} | {d} |" for t, (ok, d) in gate_rows.items()]
     md += ["", "## Conformance", "", "| metric | value | previous |", "|---|---|---|"]
     md += [f"| {k.removeprefix('conformance.')} | {v} | {before.get(k, '-')} |" for k, v in metrics.items()
@@ -223,7 +268,7 @@ def main():
     problems = []
     gate_rows = gates(out)
     problems += [f"gate {t} failed" for t, (ok, _) in gate_rows.items() if not ok]
-    commands = {"on": f"{LUCIFER} -X lucifer_jit=on", "off": f"{LUCIFER} -X lucifer_jit=off"}
+    commands = {"on": f"{LUCIFER} -X lucifer_jit=on"}
     times = timings(names, args.iters, commands)
     ref = json.loads(REFERENCE.read_text()) if REFERENCE.exists() else {"version": None, "best_us": {}}
     if not REFERENCE.exists():
@@ -233,12 +278,30 @@ def main():
     metrics = {}
     for n in names:
         c = ref["best_us"].get(n)
-        on, off = times[n]["on"], times[n]["off"]
-        metrics.update({f"awfy.{n}.cpython_us": c, f"awfy.{n}.on_us": on, f"awfy.{n}.off_us": off,
+        on = times[n]["on"]
+        metrics.update({f"awfy.{n}.cpython_us": c, f"awfy.{n}.on_us": on,
                         f"awfy.{n}.on_over_cpython": on / c if on and c else None})
-        problems += [f"AWFY {n}: JIT {k} produced no timing" for k, v in (("on", on), ("off", off)) if v is None]
+        if on is None:
+            problems.append(f"AWFY {n}: JIT on produced no timing")
     metrics["awfy.geomean_on_over_cpython"] = geomean([metrics[f"awfy.{n}.on_over_cpython"] for n in names if metrics[f"awfy.{n}.on_over_cpython"]])
-    metrics["awfy.geomean_on_over_off"] = geomean([times[n]["on"] / times[n]["off"] for n in names if times[n]["on"] and times[n]["off"]])
+    site = os.environ.get("WEB_SITE")
+    if site:
+        ok, log = web_check(oracle, site)
+        points, timing_log = web_timings({"lucifer": f"env PYTHONPATH={site} {LUCIFER} -X lucifer_jit=on"})
+        (out / "web.log").write_text(log + timing_log)
+        if not ok:
+            problems.append("web check failed (web.log)")
+        if not points:
+            problems.append("web benchmark produced no timing (web.log)")
+        for runtime, by_cpus in {**ref.get("web", {}), **points}.items():
+            for n, p in by_cpus.items():
+                metrics.update({f"web.{runtime}.{n}.{k}": v for k, v in p.items() if k != "server_exit"})
+                if p["errors"]:
+                    problems.append(f"web {runtime} at {n} CPUs: {p['errors']} errors")
+                if p.get("server_exit") is not None:
+                    problems.append(f"web {runtime} at {n} CPUs: server died (exit {p['server_exit']})")
+    else:
+        problems.append("web benchmark skipped: WEB_SITE is not set")
     numpy_metrics = {}
     if args.numpy:
         numpy_metrics, numpy_problems = numpy(out)
