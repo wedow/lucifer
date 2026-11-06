@@ -1231,6 +1231,12 @@ void lu_fh_fatal(const char *func, const char *msg) __attribute__((noreturn));
 PyObject *lu_function_new(PyObject *code, PyObject *globals);
 /* function.__new__ over (code, globals, name, defaults, closure, kwdefaults). */
 PyObject *lu_function_from_args(PyObject *const *args);
+/* A cell's value as a new reference, or NULL when empty (_PyCell_GetStackRef):
+   taken as a dict's value is, since another thread may replace and free it. */
+PyObject *lu_cell_get(PyObject *cell);
+/* Stores v (stolen; NULL empties the cell) under the cell's lock and returns
+   the old value, which the caller releases (PyCell_SetTakeRef). */
+PyObject *lu_cell_exchange(PyObject *cell, PyObject *v);
 
 /* The namespace dict (runtime/object/dict.c): lookups and stores with exact
    str keys, which LOAD_NAME/LOAD_GLOBAL, module attributes and the kernel's

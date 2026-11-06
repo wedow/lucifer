@@ -2303,33 +2303,30 @@ op_COPY_FREE_VARS: {
 }
 
 op_LOAD_DEREF: {
-    PyObject *v = ((PyCellObject *)GETLOCAL(oparg))->ob_ref;
+    SAVE_FRAME();
+    PyObject *v = lu_cell_get(GETLOCAL(oparg));
     if (v == NULL) {
-        SAVE_FRAME();
         format_unbound(code, oparg);
         goto error;
     }
-    PUSH(Py_NewRef(v));
+    PUSH(v);
     DISPATCH();
 }
 
 op_STORE_DEREF: {
-    PyCellObject *cell = (PyCellObject *)GETLOCAL(oparg);
-    PyObject *old = cell->ob_ref;
-    cell->ob_ref = POP();
-    Py_XDECREF(old);
+    PyObject *v = POP();
+    SAVE_FRAME();
+    Py_XDECREF(lu_cell_exchange(GETLOCAL(oparg), v));
     DISPATCH();
 }
 
 op_DELETE_DEREF: {
-    PyCellObject *cell = (PyCellObject *)GETLOCAL(oparg);
-    PyObject *old = cell->ob_ref;
+    SAVE_FRAME();
+    PyObject *old = lu_cell_exchange(GETLOCAL(oparg), NULL);
     if (old == NULL) {
-        SAVE_FRAME();
         format_unbound(code, oparg);
         goto error;
     }
-    cell->ob_ref = NULL;
     Py_DECREF(old);
     DISPATCH();
 }
@@ -2341,12 +2338,9 @@ op_LOAD_FROM_DICT_OR_DEREF: {
     PyObject *v = locals_get(mod_or_class_dict, name);
     int failed = v == NULL && PyErr_Occurred();
     if (v == NULL && !failed) {
-        v = ((PyCellObject *)GETLOCAL(oparg))->ob_ref;
+        v = lu_cell_get(GETLOCAL(oparg));
         if (v == NULL) {
             format_unbound(code, oparg);
-        }
-        else {
-            Py_INCREF(v);
         }
     }
     Py_DECREF(mod_or_class_dict);

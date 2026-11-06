@@ -53,12 +53,11 @@ prim_caller_locals(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         if ((kind & CO_FAST_HIDDEN) || v == NULL) {
             continue;
         }
-        if ((kind & (CO_FAST_CELL | CO_FAST_FREE)) && PyCell_Check(v)) {
-            v = ((PyCellObject *)v)->ob_ref;
-        }
+        v = (kind & (CO_FAST_CELL | CO_FAST_FREE)) && PyCell_Check(v) ? lu_cell_get(v) : Py_NewRef(v);
         if (v != NULL && lu_ns_insert(d, PyTuple_GET_ITEM(co->co_localsplusnames, i), v) < 0) {
             Py_CLEAR(d);
         }
+        Py_XDECREF(v);
     }
     return d;
 }
