@@ -429,8 +429,7 @@ lu_type_name(PyTypeObject *tp)
     return PyUnicode_FromString(dot != NULL ? dot + 1 : tp->tp_name);
 }
 
-/* Instance dicts.  A static builtin type's dict is reached through
-   lu_type_dict: its own tp_dict field stays NULL (FOUNDATIONS 2.1). */
+/* Instance dicts (runtime/object/attrs.c). */
 
 /* A C caller may read or write the pointer itself, so the inline values
    move into the dict first. */
@@ -1960,7 +1959,24 @@ prim_is_subtype(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* tp_new_wrapper's checks for owner.__new__(cls): cls is a subtype of owner
-   and owner is its static base, or a type that inherited owner's tp_new. */
+   and owner is its static base, or an extension type inherited owner's tp_new. */
+/* One of the runtime's own static types, not an extension's. datetime's C
+   API bases stand in for the extension types CPython's are: the Python
+   classes on them build with object.__new__. */
+static int
+is_runtime_type(PyTypeObject *tp)
+{
+    if (tp == &lu_date_base_type || tp == &lu_datetime_base_type || tp == &lu_time_base_type
+        || tp == &lu_timedelta_base_type || tp == &lu_tzinfo_base_type) {
+        return 0;
+    }
+    for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
+        if (*t == tp) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 /* Set by C calling a builtin's tp_new directly (slot_tp_new_builtin): there is
    no tp_new_wrapper in that call to check, and the first check made on behalf
@@ -1990,10 +2006,8 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
         staticbase = staticbase->tp_base;
     }
     /* Exception types share one allocation rule: a static exception class
-       builds its instances with its base exception's __new__. A static base
-       that builds with owner's own tp_new (an extension's inheriting it, or
-       one of the runtime's object-like bases) inherits nothing newer. */
-    int inherited = staticbase->tp_new == owner->tp_new;
+       builds its instances with its base exception's __new__. */
+    int inherited = !is_runtime_type(staticbase) && staticbase->tp_new == owner->tp_new;
     if (staticbase != owner && !inherited
         && !(PyExceptionClass_Check(staticbase) && PyExceptionClass_Check(owner))) {
         if (staticbase->tp_new == NULL) {
