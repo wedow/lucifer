@@ -1,6 +1,6 @@
 ---
 id: luc-tish
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-06T16:45:21Z
