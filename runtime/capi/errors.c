@@ -578,7 +578,8 @@ format_unraisable_v(const char *format, va_list va, PyObject *obj)
     /* The lookup itself may run out of memory; that failure is dropped, not
        reported as another unraisable error. */
     PyObject *hook = NULL;
-    if (PyDict_GetItemStringRef(PyInterpreterState_Get()->sysdict, "unraisablehook", &hook) < 0) {
+    PyObject *sysdict = PyInterpreterState_Get()->sysdict;     /* NULL once the interpreter is gone */
+    if (sysdict != NULL && PyDict_GetItemStringRef(sysdict, "unraisablehook", &hook) < 0) {
         PyErr_Clear();
     }
     if (hook != NULL && hook != Py_None) {
