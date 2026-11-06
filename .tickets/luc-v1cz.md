@@ -1,6 +1,6 @@
 ---
 id: luc-v1cz
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-06T14:10:23Z
