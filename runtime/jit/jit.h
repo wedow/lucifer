@@ -29,6 +29,9 @@ enum lu_jit_result {
 #define LU_JIT_BACKEDGE_THRESHOLD 1000
 #define LU_JIT_CALL_THRESHOLD 1000
 
+/* The backend's name (runtime/jit/target.h), or NULL where there is none. */
+const char *lu_jit_backend(void);
+
 static inline int
 lu_jit_on(void)
 {

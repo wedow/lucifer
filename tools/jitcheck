@@ -15,6 +15,10 @@ require that a count of the tier's does not grow with the iterations:
          an exit each time.
   calls  tests/kernel/jit_calls.py, whose hot calls the tier can inline once
          it has feedback: entries into compiled code.
+The perf lane records Richards under -X perf with `perf record -g` and
+requires that at least 95% of the samples in compiled code (code perf finds
+in no file: it looks it up in /tmp/perf-PID.map) resolve to py:: symbols.
+It reports SKIP where perf cannot record.
 Exit status 1 on any difference.
 """
 import argparse
@@ -23,6 +27,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 AWFY = ROOT / 'third_party' / 'awfy' / 'Python'
@@ -41,6 +46,7 @@ GROWTH = {
     'calls': ('jit_calls.py', r'jit: entries (\d+)'),
 }
 GROWTH_N = 20000
+PERF_RESOLVED = 0.95
 
 
 def run(argv, timeout):
@@ -75,12 +81,34 @@ def check_growth(args, lane):
     return 1 if problems else 0
 
 
+def check_perf(args):
+    """The share of compiled-code samples that perf names py::."""
+    with tempfile.TemporaryDirectory() as d:
+        data = os.path.join(d, 'perf.data')
+        argv = [args.lucifer, '-X', 'perf', str(AWFY / 'harness.py'), 'Richards', '20', '1']
+        try:
+            rec = subprocess.run(['perf', 'record', '-q', '-g', '-o', data, '--'] + argv,
+                                 capture_output=True, text=True, timeout=args.timeout)
+        except FileNotFoundError:
+            rec = None
+        if rec is None or rec.returncode != 0 or not os.path.exists(data):
+            print('SKIP perf: perf cannot record here')
+            return 0
+        script = subprocess.run(['perf', 'script', '-i', data, '-F', 'ip,sym,dso', '-G'],
+                                capture_output=True, text=True, timeout=args.timeout).stdout
+    jit = [line.split()[1] for line in script.splitlines() if re.search(r'\(/tmp/perf-\d+\.map\)$', line)]
+    named = sum(sym.startswith('py::') for sym in jit)
+    ok = jit and named >= PERF_RESOLVED * len(jit)
+    print(f"{'PASS' if ok else 'FAIL'} perf: {named} of {len(jit)} compiled-code samples named py::")
+    return 0 if ok else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--lucifer', required=True)
     ap.add_argument('--oracle', required=True)
     ap.add_argument('--benchmarks', default=','.join(RUNS))
-    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH]))
+    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, 'perf']))
     ap.add_argument('--timeout', type=float, default=600)
     args = ap.parse_args()
     failed = 0
@@ -108,6 +136,8 @@ def main():
     for lane in GROWTH:
         if lane in args.modes.split(','):
             failed += check_growth(args, lane)
+    if 'perf' in args.modes.split(','):
+        failed += check_perf(args)
     print(f'{failed} failing')
     return 1 if failed else 0
 
