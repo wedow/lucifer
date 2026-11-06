@@ -196,6 +196,25 @@ with open(os.environ['LIBTEST_STATE'], 'w') as stream:
     stream.write(json.dumps({'state':'PASSED'}) + '\\n')
 """), ['NOTRUN', 'NOTRUN', 'SKIP'])
 
+    def test_excluded_cases_are_ignored_and_not_run(self):
+        # A runtime's <runtime>.excluded.tsv names cases its worker must not
+        # run; regrtest ignores them and they stay NOTRUN, with the reason.
+        (self.root / 'fake.excluded.tsv').write_text(
+            'id\treason\n' + self.ids[1] + '\tkills the worker (luc-0000)\n')
+        body = self.fake_probe() + """
+ignored = open(sys.argv[sys.argv.index('--ignorefile') + 1]).read().split()
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'PASSED'}) + '\\n')
+with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
+    for name in ('first', 'second', 'third'):
+        key = 'test_fixture.Example.test_' + name
+        if key not in ignored:
+            stream.write(json.dumps({'id':key,'status':'PASS','seconds':0}) + '\\n')
+"""
+        self.assertEqual(self.run_fake(body, timeout=2), ['PASS', 'NOTRUN', 'PASS'])
+        detail = json.loads((self.root / 'fake.json').read_text())['modules']['test_fixture']
+        self.assertEqual(detail['excluded'], {self.ids[1]: 'kills the worker (luc-0000)'})
+
     def test_bytecode_writing_is_not_disabled(self):
         body = self.fake_probe() + """
 assert 'PYTHONDONTWRITEBYTECODE' not in os.environ
