@@ -1,6 +1,6 @@
 ---
 id: luc-d5u1
-status: open
+status: closed
 deps: [luc-74bf, luc-2vif]
 links: []
 created: 2026-11-03T01:39:45Z
