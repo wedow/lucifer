@@ -1001,6 +1001,7 @@ extern PyObject *lu_jit_box_int(int64_t v);
 extern int64_t lu_jit_unbox_wide(PyObject *o);
 extern PyObject *lu_jit_box_float(double v);
 extern PyObject *lu_jit_list_item(PyObject *list, int64_t i);
+extern PyObject *lu_jit_tuple_item(PyObject *t, int64_t i);
 extern int lu_jit_list_store(PyObject *list, int64_t i, PyObject *v);
 extern PyObject *lu_jit_attr_load(PyObject *owner, int64_t version, int64_t index, PyObject *name);
 extern int lu_jit_truth(PyObject *v);
@@ -1602,7 +1603,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         struct move m[2] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 } };
         int fail = guard_exit(a, in);
         parallel_moves(a, m, 2);
-        call_abs(a, (void *)lu_jit_list_item);
+        call_abs(a, in->imm ? (void *)lu_jit_tuple_item : (void *)lu_jit_list_item);
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
         def_gpr(a, v, RAX);
@@ -1934,6 +1935,11 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         load(a, RAX, R14, offsetof(struct lu_task, carrier));
         load(a, RCX, RAX, offsetof(struct lu_carrier, poll));
         int poll = exit_to(a, in->fs, EXIT_POLL, 0, 0);
+        if (in->fs->code->co_flags & LU_CO_KERNEL) {
+            /* A builtin's frame leaves the visible reasons for the poll after
+               it returns: leaving for one would only come back. */
+            alu_ri(a, ALU_AND, RCX, (int32_t)~LU_POLL_VISIBLE);
+        }
         mov_ri(a, R11, (int64_t)a->f->code->_co_instrumentation_version);
         alu_rr(a, ALU_CMP, RCX, R11);
         jcc(a, CC_NE, poll);

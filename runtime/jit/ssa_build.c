@@ -39,6 +39,8 @@
 #define INLINE_MAX_DEPTH 4
 #define INLINE_MAX_TOTAL 3000
 
+#define INTRINSIC_LIST_TO_TUPLE 6   /* pycore_intrinsics.h */
+
 struct bstate {
     lu_v *v;
     uint8_t *own;
@@ -244,6 +246,15 @@ set_known(struct ctx *c, lu_v v, PyTypeObject *t)
     f->known_block[v] = c->cur;
 }
 
+/* v is an object of exact type t wherever it is used: one an instruction
+   made, not one a guard proved. */
+static void
+set_made(struct ctx *c, lu_v v, PyTypeObject *t)
+{
+    set_known(c, v, t);
+    c->f->known_block[v] = -1;
+}
+
 /* Whether block `from` dominates the current block: it is reached by
    following single predecessors back from it. */
 static int
@@ -269,7 +280,8 @@ known_type(struct ctx *c, lu_v v)
     if (v == LU_NOV) {
         return NULL;
     }
-    if (v < c->f->capknown && c->f->known[v] != NULL && dominates(c, c->f->known_block[v])) {
+    if (v < c->f->capknown && c->f->known[v] != NULL
+        && (c->f->known_block[v] < 0 || dominates(c, c->f->known_block[v]))) {
         return c->f->known[v];
     }
     switch (I(c, v)->op) {
@@ -368,11 +380,12 @@ store_local(struct ctx *c, int i, lu_v v, int owned)
 {
     own_borrowers(c, i);
     v = take(c, v, owned);
-    if (c->parent == NULL) {
-        emit(c, OP_STORE_LOCAL, REP_NONE, v, LU_NOV, LU_NOV, i);
-    }
-    else {
+    if (c->parent != NULL) {
         release(c, c->st.v[i], c->st.own[i]);
+    }
+    else if (v != LU_NOV || c->st.v[i] != LU_NOV) {
+        /* LU_NOV clears the slot (LOAD_FAST_AND_CLEAR), unless it is clear. */
+        emit(c, OP_STORE_LOCAL, REP_NONE, v != LU_NOV ? v : konst(c, NULL), LU_NOV, LU_NOV, i);
     }
     c->st.v[i] = v;
     c->st.own[i] = 1;
@@ -557,6 +570,16 @@ decode(struct ctx *c, int pc, int *base, int *oparg, int *opcode)
     return pc + 1 + lu_opcode_caches[*base];
 }
 
+/* The first cache word of the instruction at pc, past its EXTENDED_ARGs. */
+static lu_codeunit *
+cache_of(struct ctx *c, int pc)
+{
+    while (lu_base_opcode(c->code, pc) == EXTENDED_ARG) {
+        pc++;
+    }
+    return lu_code_start(c->code) + pc + 1;
+}
+
 /* The opcodes the builder compiles at all; anything else is a side exit. */
 static int
 supported(int op)
@@ -574,7 +597,9 @@ supported(int op)
     case RETURN_VALUE: case STORE_SUBSCR: case COPY_FREE_VARS: case LOAD_DEREF:
     case BUILD_LIST: case BUILD_TUPLE: case CONTAINS_OP: case UNPACK_SEQUENCE:
     case MAKE_FUNCTION: case SET_FUNCTION_ATTRIBUTE: case STORE_DEREF: case LIST_EXTEND:
-    case DELETE_SUBSCR:
+    case DELETE_SUBSCR: case LOAD_FAST_AND_CLEAR: case LIST_APPEND: case SET_ADD: case MAP_ADD:
+    case BUILD_SET: case BUILD_MAP: case CALL_INTRINSIC_1: case BINARY_SLICE: case STORE_SLICE:
+    case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
         return 1;
     default:
         return 0;
@@ -964,6 +989,8 @@ binary_op(struct ctx *c)
     if (rk == 0) rk = guess_kind(c, b);
     if (lk == 0 && (rk == LU_KIND_INT || rk == LU_KIND_FLOAT)) lk = rk;
     if (rk == 0 && (lk == LU_KIND_INT || lk == LU_KIND_FLOAT) && op != NB_SUBSCR) rk = lk;
+    if (known_type(c, a) == &PyTuple_Type) lk = LU_KIND_TUPLE;
+    if (known_type(c, a) == &PyList_Type) lk = LU_KIND_LIST;
     if (lu_jit_nospec(c->code, c->pc)) {
         lk = rk = LU_KIND_OTHER;
     }
@@ -972,10 +999,10 @@ binary_op(struct ctx *c)
     if (known_type(c, b) == &PyLong_Type) rk = LU_KIND_INT;
     if (known_type(c, b) == &PyFloat_Type) rk = LU_KIND_FLOAT;
     if (op == NB_SUBSCR) {
-        if (lk == LU_KIND_LIST && rk == LU_KIND_INT) {
-            guard_type(c, a, &PyList_Type);
+        if ((lk == LU_KIND_LIST || lk == LU_KIND_TUPLE) && rk == LU_KIND_INT) {
+            guard_type(c, a, lk == LU_KIND_LIST ? &PyList_Type : &PyTuple_Type);
             lu_v i = unbox_int(c, b);
-            r = emit(c, OP_LIST_ITEM, REP_OBJ, a, i, LU_NOV, 0);
+            r = emit(c, OP_LIST_ITEM, REP_OBJ, a, i, LU_NOV, lk == LU_KIND_TUPLE);
             I(c, r)->fs = before(c);
         }
         else if (lk == LU_KIND_BYTES && rk == LU_KIND_INT) {
@@ -1233,7 +1260,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
             k->st.v[at] = extra ? helper_raising(c, H_build_tuple, extra, args + at, 0)
                                 : konst(c, (PyObject *)&_PyRuntime.singletons.empty_tuple);
             k->st.own[at] = extra != 0;
-            set_known(c, k->st.v[at], &PyTuple_Type);
+            set_made(c, k->st.v[at], &PyTuple_Type);
             for (int i = at; i < nargs; i++) {
                 release(c, args[i], owned[i]);
             }
@@ -1242,7 +1269,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         if (co->co_flags & CO_VARKEYWORDS) {
             k->st.v[at] = helper_raising(c, H_new_dict, 0, NULL, 0);
             k->st.own[at] = 1;
-            set_known(c, k->st.v[at], &PyDict_Type);
+            set_made(c, k->st.v[at], &PyDict_Type);
         }
         k->cont = lu_ir_block(f);
         /* Into the callee's first block. */
@@ -1329,57 +1356,66 @@ name_at(struct ctx *c, int i)
     return PyTuple_GET_ITEM(c->code->co_names, i);
 }
 
-/* The global `name` as a constant, guarded on the dicts' keys versions
-   and the entry's value: the value the code was compiled with, a new
-   reference taken as LOAD_GLOBAL_MODULE takes it, since another thread may
-   replace and free it meanwhile. NULL when the name cannot be found that
+/* `name` in dict d, else in dict b (when not NULL), as a constant guarded
+   on the dicts' keys versions and the entry's value: the value the code was
+   compiled with, a new reference taken as LOAD_GLOBAL_MODULE takes it,
+   since another thread may replace and free it meanwhile. A dict whose keys
+   changed since they were last versioned is versioned again, as the
+   interpreter's specializer does. NULL when the name cannot be found that
    way. */
+static PyObject *
+dict_const(struct ctx *c, PyObject *d, PyObject *b, PyObject *name)
+{
+    if (!PyDict_CheckExact(d) || (b != NULL && !PyDict_CheckExact(b))) {
+        return NULL;
+    }
+    /* Versioned first: a table still of that version after the lookup has
+       not changed meanwhile, so the entry found is its own. */
+    uint32_t dv = lu_dict_keys_version((PyDictObject *)d), bv = 0;
+    PyObject *at = d;
+    Py_ssize_t ix = lu_ns_index(d, name);
+    if (ix < 0 && b != NULL) {
+        at = b;
+        bv = lu_dict_keys_version((PyDictObject *)b);
+        ix = lu_ns_index(b, name);
+    }
+    PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)at)->ma_keys, __ATOMIC_ACQUIRE);
+    if (ix < 0 || dv == 0 || (at == b && bv == 0) || !lu_dk_is_unicode(dk) || ix >= dk->dk_nentries
+        || __atomic_load_n(&dk->dk_version, __ATOMIC_ACQUIRE) != (at == b ? bv : dv)) {
+        return NULL;
+    }
+    PyObject *v = lu_try_xget_ref(lu_dk_value_slot(dk, ix));
+    if (v != NULL && dk != __atomic_load_n(&((PyDictObject *)at)->ma_keys, __ATOMIC_ACQUIRE)) {
+        Py_CLEAR(v);
+    }
+    if (v == NULL) {
+        return NULL;
+    }
+    lu_v g1 = guard(c, OP_GUARD_VERSION, konst(c, d), dv);
+    I(c, g1)->imm2 = GV_DICT_KEYS;
+    if (at == b) {
+        lu_v g2 = guard(c, OP_GUARD_VERSION, konst(c, b), bv);
+        I(c, g2)->imm2 = GV_DICT_KEYS;
+    }
+    lu_v g3 = guard(c, OP_GUARD_IS, konst(c, at), (int64_t)(intptr_t)v);
+    I(c, g3)->imm2 = GI_KEYS_FIELD | ((char *)lu_dk_value_slot(dk, ix) - (char *)dk);
+    return v;
+}
+
+/* The global `name` as a constant (dict_const), or a kernel global. */
 static PyObject *
 global_const(struct ctx *c, PyObject *name)
 {
     if (c->kernel && lu_ns_lookup(PyThreadState_Get()->interp->kernel_rebound, name) == NULL) {
         return kernel_global(c, name);
     }
-    if (!PyDict_CheckExact(c->globals) || !PyDict_CheckExact(c->builtins)) {
-        return NULL;
-    }
-    lu_codeunit *site = lu_code_start(c->code) + (c->cache - lu_code_start(c->code)) - 1;
+    lu_codeunit *site = c->cache - 1;
     if (lu_opcode_deopt(__atomic_load_n(&site->op.code, __ATOMIC_RELAXED)) == LOAD_GLOBAL
-        && site->op.code == LOAD_GLOBAL && PyThreadState_Get()->interp->specializing) {
+        && site->op.code == LOAD_GLOBAL && PyThreadState_Get()->interp->specializing
+        && PyDict_CheckExact(c->globals) && PyDict_CheckExact(c->builtins)) {
         lu_specialize_load_global(c->globals, c->builtins, site, name);
     }
-    PyDictObject *g = (PyDictObject *)c->globals, *b = (PyDictObject *)c->builtins;
-    PyDictKeysObject *gk = g->ma_keys, *bk = b->ma_keys;
-    if (gk->dk_version == 0 || !lu_dk_is_unicode(gk)) {
-        return NULL;
-    }
-    Py_ssize_t ix = lu_ns_index(c->globals, name);
-    PyDictObject *d = g;
-    PyDictKeysObject *dk = gk;
-    if (ix < 0) {
-        if (bk->dk_version == 0 || !lu_dk_is_unicode(bk) || (ix = lu_ns_index(c->builtins, name)) < 0) {
-            return NULL;
-        }
-        d = b;
-        dk = bk;
-    }
-    PyObject *v = ix < dk->dk_nentries ? lu_try_xget_ref(lu_dk_value_slot(dk, ix)) : NULL;
-    if (v != NULL && dk != __atomic_load_n(&d->ma_keys, __ATOMIC_ACQUIRE)) {
-        Py_CLEAR(v);
-    }
-    if (v == NULL) {
-        return NULL;
-    }
-    lu_v gd = konst(c, c->globals);
-    lu_v g1 = guard(c, OP_GUARD_VERSION, gd, gk->dk_version);
-    I(c, g1)->imm2 = GV_DICT_KEYS;
-    if (d == b) {
-        lu_v g2 = guard(c, OP_GUARD_VERSION, konst(c, c->builtins), bk->dk_version);
-        I(c, g2)->imm2 = GV_DICT_KEYS;
-    }
-    lu_v g3 = guard(c, OP_GUARD_IS, konst(c, (PyObject *)d), (int64_t)(intptr_t)v);
-    I(c, g3)->imm2 = GI_KEYS_FIELD | ((char *)lu_dk_value_slot(dk, ix) - (char *)dk);
-    return v;
+    return dict_const(c, c->globals, c->builtins, name);
 }
 
 static int
@@ -1396,6 +1432,29 @@ load_global(struct ctx *c)
     if (c->oparg & 1) {
         push(c, LU_NOV, 0);
     }
+    return 0;
+}
+
+/* LOAD_COMMON_CONSTANT: an exception type, or a builtin the interpreter
+   looks up by name (tuple, all, any). */
+static int
+load_common_constant(struct ctx *c)
+{
+    if (c->oparg < 2) {
+        push(c, konst(c, c->oparg == 0 ? PyExc_AssertionError : PyExc_NotImplementedError), 0);
+        return 0;
+    }
+    const char *s = c->oparg == 2 ? "tuple" : c->oparg == 3 ? "all" : c->oparg == 4 ? "any" : NULL;
+    PyObject *name = s != NULL ? PyUnicode_InternFromString(s) : NULL;
+    PyObject *v = name != NULL ? dict_const(c, PyThreadState_Get()->interp->builtins, NULL, name) : NULL;
+    Py_XDECREF(name);
+    if (v == NULL) {
+        PyErr_Clear();
+        unsupported(c);
+        return -1;
+    }
+    push(c, konst(c, v), 0);
+    Py_DECREF(v);               /* the unit holds its constants */
     return 0;
 }
 
@@ -2042,13 +2101,15 @@ for_iter(struct ctx *c)
     if (lu_jit_nospec(c->code, c->pc)) {
         kind = LU_ITER_OTHER;
     }
-    int guessed = 0;
-    if (I(c, it)->op == OP_PHI && I(c, it)->nargs > 0) {
-        PyTypeObject *t = known_type(c, I(c, it)->args[0]);
-        guessed = t == &PyRangeIter_Type ? LU_ITER_RANGE : t == &PyListIter_Type ? LU_ITER_LIST : 0;
+    /* The iterator's type, or the one its loop entered with. */
+    PyTypeObject *t = known_type(c, it);
+    if (t == NULL && I(c, it)->op == OP_PHI && I(c, it)->nargs > 0) {
+        t = known_type(c, I(c, it)->args[0]);
     }
+    int guessed = t == &PyRangeIter_Type ? LU_ITER_RANGE : t == &PyListIter_Type ? LU_ITER_LIST
+        : t == &PyTupleIter_Type ? LU_ITER_TUPLE : 0;
     if (kind == 0) {
-        kind = known_type(c, it) == &PyRangeIter_Type ? LU_ITER_RANGE : guessed;
+        kind = guessed;
     }
     int range = known_type(c, it) == &PyRangeIter_Type || kind == LU_ITER_RANGE;
     lu_v done, v;
@@ -2056,8 +2117,8 @@ for_iter(struct ctx *c)
         guard_type(c, it, &PyRangeIter_Type);
         done = emit(c, OP_RITER_DONE, REP_BIT, it, LU_NOV, LU_NOV, 0);
     }
-    else if (kind == LU_ITER_LIST) {
-        guard_type(c, it, &PyListIter_Type);
+    else if (kind == LU_ITER_LIST || kind == LU_ITER_TUPLE) {
+        guard_type(c, it, kind == LU_ITER_LIST ? &PyListIter_Type : &PyTupleIter_Type);
         v = helper(c, H_seqiter_next, 1, &it);
         done = emit(c, OP_IS, REP_BIT, v, konst(c, NULL), LU_NOV, 0);
     }
@@ -2268,11 +2329,29 @@ translate(struct ctx *c)
     case GET_ITER: {
         v = peek(c, 1);
         own = peek_owned(c, 1);
-        if (!root_only(c)) {
+        PyTypeObject *t = known_type(c, v);
+        int nbase, noparg, nop;
+        if (t == NULL && c->next < c->ncode && !lu_jit_nospec(c->code, c->pc)
+            && (decode(c, c->next, &nbase, &noparg, &nop), nbase == FOR_ITER)) {
+            /* The sequence the loop's iterators came from, when it met one kind. */
+            int seen = __atomic_load_n(&cache_of(c, c->next)->cache, __ATOMIC_RELAXED);
+            t = seen == LU_ITER_TUPLE ? &PyTuple_Type : seen == LU_ITER_LIST ? &PyList_Type : NULL;
+            if (t != NULL) {
+                guard_type(c, v, t);
+            }
+        }
+        if (t == &PyTuple_Type || t == &PyList_Type) {
+            /* A sequence iterator runs no Python, so an inlined frame makes one too. */
+            w = helper_raising(c, H_get_iter_seq, 1, &v, 1);
+            set_made(c, w, t == &PyTuple_Type ? &PyTupleIter_Type : &PyListIter_Type);
+        }
+        else if (root_only(c)) {
+            w = helper_raising(c, H_get_iter, 1, &v, 1);
+        }
+        else {
             unsupported(c);
             return -1;
         }
-        w = helper_raising(c, H_get_iter, 1, &v, 1);
         pop(c, NULL);
         release(c, v, own);
         push(c, w, 1);
@@ -2351,6 +2430,12 @@ translate(struct ctx *c)
         lu_v it = peek(c, 1), list = peek(c, oparg + 1);
         int ownit = peek_owned(c, 1);
         PyTypeObject *t = known_type(c, it);
+        int kind = t == NULL && !lu_jit_nospec(c->code, c->pc) ? guess_kind(c, it) : 0;
+        if (kind == LU_KIND_TUPLE || kind == LU_KIND_LIST) {
+            /* What the loop entered with, as every input so far is. */
+            t = kind == LU_KIND_TUPLE ? &PyTuple_Type : &PyList_Type;
+            guard_type(c, it, t);
+        }
         int seq = t == &PyTuple_Type || t == &PyList_Type;
         if (!seq && !root_only(c)) {
             unsupported(c);
@@ -2396,8 +2481,11 @@ translate(struct ctx *c)
         push(c, v, 1);
         return 0;
     }
-    case BUILD_LIST: case BUILD_TUPLE: {
-        if (oparg > 30) {
+    case BUILD_LIST: case BUILD_TUPLE: case BUILD_SET: case BUILD_MAP: {
+        /* A set's or a dict's items may run Python (hashing): the root only. */
+        int set = c->base == BUILD_SET || c->base == BUILD_MAP;
+        oparg = c->base == BUILD_MAP ? 2 * oparg : oparg;
+        if (oparg > 30 || (set && !root_only(c))) {
             unsupported(c);
             return -1;
         }
@@ -2408,7 +2496,12 @@ translate(struct ctx *c)
             owns[i] = (uint8_t)own;
         }
         c->st.sp += oparg;
-        v = helper_raising(c, c->base == BUILD_LIST ? H_build_list : H_build_tuple, oparg, args, oparg);
+        static const int helpers[] = { [BUILD_LIST] = H_build_list, [BUILD_TUPLE] = H_build_tuple,
+                                       [BUILD_SET] = H_build_set, [BUILD_MAP] = H_build_map };
+        v = helper_raising(c, helpers[c->base], oparg, args, oparg);
+        if (!set) {
+            set_made(c, v, c->base == BUILD_LIST ? &PyList_Type : &PyTuple_Type);
+        }
         c->st.sp -= oparg;
         for (int i = 0; i < oparg; i++) {
             release(c, args[i], owns[i]);
@@ -2417,24 +2510,38 @@ translate(struct ctx *c)
         return 0;
     }
     case UNPACK_SEQUENCE: {
-        /* An exact tuple of oparg items, its items pushed last first; any
-           other sequence leaves, and after enough of that it always does. */
+        /* An exact tuple or list (the kind the interpreter met, else a
+           tuple) of oparg items, its items pushed last first; any other
+           sequence leaves, and after enough of that it always does. A
+           list's items are read under its lock, as a tuple. */
         v = peek(c, 1);
         own = peek_owned(c, 1);
         if (oparg > 30 || lu_jit_nospec(c->code, c->pc)) {
             unsupported(c);
             return -1;
         }
-        guard_type(c, v, &PyTuple_Type);
-        lu_v size = emit(c, OP_LOAD, REP_I64, v, LU_NOV, LU_NOV, offsetof(PyVarObject, ob_size));
-        guard(c, OP_GUARD_BIT, emit(c, OP_CMP_I, REP_BIT, size, const_i(c, oparg), LU_NOV, Py_EQ), 1);
+        PyTypeObject *t = known_type(c, v);
+        int list = t == &PyList_Type || (t != &PyTuple_Type && (feedback(c, c->cache) & 0xff) == LU_KIND_LIST);
+        lu_v items = v;
+        if (list) {
+            guard_type(c, v, &PyList_Type);
+            lu_v args[2] = { v, const_i(c, oparg) };
+            items = helper_raising(c, H_list_to_tuple, 2, args, 0);
+            guard_after(c, OP_GUARD_NOT_NULL, items, 1);
+        }
+        else {
+            guard_type(c, v, &PyTuple_Type);
+            lu_v size = emit(c, OP_LOAD, REP_I64, v, LU_NOV, LU_NOV, offsetof(PyVarObject, ob_size));
+            guard(c, OP_GUARD_BIT, emit(c, OP_CMP_I, REP_BIT, size, const_i(c, oparg), LU_NOV, Py_EQ), 1);
+        }
         pop(c, NULL);
         for (int i = oparg - 1; i >= 0; i--) {
-            lu_v item = emit(c, OP_LOAD, REP_OBJ, v, LU_NOV, LU_NOV,
+            lu_v item = emit(c, OP_LOAD, REP_OBJ, items, LU_NOV, LU_NOV,
                              (int64_t)(offsetof(PyTupleObject, ob_item) + sizeof(PyObject *) * (size_t)i));
             incref(c, item);
             push(c, item, 1);
         }
+        release(c, items, list);
         release(c, v, own);
         return 0;
     }
@@ -2474,6 +2581,132 @@ translate(struct ctx *c)
         own = peek_owned(c, 1);
         lu_v args[2] = { cell, v };
         helper(c, H_cell_store, 2, args);
+        pop(c, NULL);
+        release(c, v, own);
+        return 0;
+    }
+    case LOAD_FAST_AND_CLEAR:
+        /* A comprehension's variable, kept on the stack while it runs. */
+        push(c, c->st.v[oparg], 0);
+        store_local(c, oparg, LU_NOV, 0);
+        return 0;
+    case LIST_APPEND: case SET_ADD: {
+        /* The comprehension's own list, which no Python sees until it is
+           done; a set's items are hashed, which may run Python. */
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        if (c->base == SET_ADD && !root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[2] = { peek(c, oparg + 1), v };
+        helper_raising(c, c->base == LIST_APPEND ? H_list_push : H_set_add, 2, args, 1);
+        pop(c, NULL);
+        release(c, v, own);
+        return 0;
+    }
+    case MAP_ADD: {
+        lu_v val = peek(c, 1), key = peek(c, 2);
+        int ownval = peek_owned(c, 1), ownkey = peek_owned(c, 2);
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[3] = { peek(c, oparg + 2), key, val };
+        helper_raising(c, H_setitem, 3, args, 2);
+        pop(c, NULL);
+        pop(c, NULL);
+        release(c, key, ownkey);
+        release(c, val, ownval);
+        return 0;
+    }
+    case CALL_INTRINSIC_1: {
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        if (oparg != INTRINSIC_LIST_TO_TUPLE) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[2] = { v, const_i(c, -1) };
+        w = helper_raising(c, H_list_to_tuple, 2, args, 0);
+        pop(c, NULL);
+        release(c, v, own);
+        push(c, w, 1);
+        set_made(c, w, &PyTuple_Type);
+        return 0;
+    }
+    case BINARY_SLICE: {
+        /* A str, bytes, list or tuple sliced by ints runs no Python, so an
+           inlined frame slices one; anything else leaves it. */
+        lu_v stop = peek(c, 1), start = peek(c, 2), cont = peek(c, 3);
+        int ownstop = peek_owned(c, 1), ownstart = peek_owned(c, 2), owncont = peek_owned(c, 3);
+        lu_v args[4] = { cont, start, stop, const_i(c, root_only(c)) };
+        w = helper_raising(c, root_only(c) ? H_binary_slice : H_slice_native, 4, args, 3);
+        if (!root_only(c)) {
+            guard_after(c, OP_GUARD_NOT_NULL, w, 1);
+        }
+        pop(c, NULL); pop(c, NULL); pop(c, NULL);
+        release(c, stop, ownstop);
+        release(c, start, ownstart);
+        release(c, cont, owncont);
+        push(c, w, 1);
+        return 0;
+    }
+    case STORE_SLICE: {
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[4] = { peek(c, 4), peek(c, 3), peek(c, 2), peek(c, 1) };
+        helper_raising(c, H_store_slice, 4, args, 4);
+        for (int i = 0; i < 4; i++) {
+            v = pop(c, &own);
+            release(c, v, own);
+        }
+        return 0;
+    }
+    case LOAD_COMMON_CONSTANT:
+        return load_common_constant(c);
+    case CALL_KW: case CALL_FUNCTION_EX: {
+        /* A call with keywords or star arguments, made as C makes one
+           (CALL_FUNCTION_EX records no feedback: the root's only). */
+        int nops = c->base == CALL_KW ? oparg + 3 : 4;
+        if (nops > 32 || (c->base == CALL_FUNCTION_EX && !root_only(c))) {
+            unsupported(c);
+            return -1;
+        }
+        if (!opaque_call(c)) {
+            return -1;
+        }
+        lu_v hargs[32];
+        for (int i = 0; i < nops; i++) {
+            hargs[i] = peek(c, nops - i) != LU_NOV ? peek(c, nops - i) : konst(c, NULL);
+        }
+        if (c->base == CALL_KW) {
+            w = helper_raising(c, H_call_kw, nops, hargs, nops);
+        }
+        else {
+            lu_v args[3] = { hargs[0], hargs[2], hargs[3] };     /* the callable, *args, **kwargs */
+            w = helper_raising(c, H_call_ex, 3, args, nops);
+        }
+        guard_after(c, OP_GUARD_NOT_NULL, w, 1);
+        for (int i = 0; i < nops; i++) {
+            v = pop(c, &own);
+            release(c, v, own);
+        }
+        push(c, w, 1);
+        frames_guard(c);
+        return 0;
+    }
+    case DICT_MERGE: {
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[3] = { peek(c, oparg + 4), peek(c, oparg + 1), v };
+        helper_raising(c, H_dict_merge, 3, args, 1);
         pop(c, NULL);
         release(c, v, own);
         return 0;
@@ -2541,7 +2774,6 @@ static int
 build_block(struct ctx *c, int bi)
 {
     struct bblk *b = &c->bb[bi];
-    lu_codeunit *start = lu_code_start(c->code);
     b->done = 1;
     c->cur = b->id;
     state_copy(c, &c->st, &b->in);
@@ -2575,13 +2807,9 @@ build_block(struct ctx *c, int bi)
             jump_to(c, pc);
             break;
         }
-        int mpc = pc;
-        while (lu_base_opcode(c->code, mpc) == EXTENDED_ARG) {
-            mpc++;
-        }
         c->pc = pc;
         c->next = decode(c, pc, &c->base, &c->oparg, &c->opcode);
-        c->cache = start + mpc + 1;
+        c->cache = cache_of(c, pc);
         c->snap = NULL;
         before(c);
         if (!supported(c->base)) {

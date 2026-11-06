@@ -371,8 +371,8 @@ slice_unpack(PyObject *start_o, PyObject *stop_o, PyObject *step_o, Py_ssize_t l
 /* container[start:stop:step] for an exact list, tuple, str or bytes and bounds
    that slice_unpack takes, where the step of a str or bytes is 1: a new
    reference. NULL without an error when the kernel must slice. */
-static PyObject *
-slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObject *step_o)
+PyObject *
+lu_slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObject *step_o)
 {
     PyTypeObject *tp = Py_TYPE(container);
     Py_ssize_t length, start, step, count;
@@ -421,7 +421,7 @@ lu_subscr_native(PyObject *container, PyObject *sub)
     }
     if (Py_IS_TYPE(sub, &PySlice_Type)) {
         PySliceObject *slc = (PySliceObject *)sub;
-        return slice_native(container, slc->start, slc->stop, slc->step);
+        return lu_slice_native(container, slc->start, slc->stop, slc->step);
     }
     return NULL;
 }
@@ -1473,6 +1473,8 @@ op_POP_TOP:
 op_INSTRUMENTED_CALL_KW:
     monitored = next_instr - 1;
 op_CALL_KW:
+    /* As CALL's, below the keyword names: a keyword call has an argument. */
+    lu_jit_observe(next_instr, sp[-1 - oparg], oparg >= 2 ? sp[-oparg] : sp[-1 - oparg]);
     SKIP_CACHES();
     kwnames = POP();
     goto call_stack_args;
@@ -3461,6 +3463,7 @@ op_CONTAINS_OP: {
 }
 
 op_UNPACK_SEQUENCE: {
+    lu_jit_observe(next_instr, TOP(), TOP());
     SKIP_CACHES();
     PyObject *seq = POP();
     if (unpack_exact(seq, oparg, sp)) {
@@ -3554,7 +3557,7 @@ op_BUILD_SLICE: {
 op_BINARY_SLICE: {
     /* container, start, stop -- container[start:stop] */
     SAVE_FRAME();
-    PyObject *sliced = slice_native(sp[-3], sp[-2], sp[-1], NULL);
+    PyObject *sliced = lu_slice_native(sp[-3], sp[-2], sp[-1], NULL);
     if (sliced != NULL) {
         Py_DECREF(sp[-3]);
         Py_DECREF(sp[-2]);
