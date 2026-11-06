@@ -45,6 +45,7 @@ kernel_wrapperbase	runtime/object/descr.c	the wrapperbase every kernel slot wrap
 kernel_names	runtime/object/descr.c	const table of the kernel function names; relocated by ld.so, then read-only (RELRO)
 types.*	runtime/object/descr.c	const table of the kernel-writable layouts; relocated by ld.so, then read-only (RELRO)
 lu_prim_type_methods	runtime/prim/type.c	_lucifer's type primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_context_methods	runtime/capi/contextvars.c	_lucifer's context primitive, a PyMethodDef table never written; the API takes it non-const
 lu_prim_descr_methods	runtime/object/descr.c	_lucifer's descriptor primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_slot_methods	runtime/types/slots.c	_lucifer's slot primitive, a PyMethodDef table never written; the API takes it non-const
 lu_prim_str_methods	runtime/prim/str.c	_lucifer's str primitives, a PyMethodDef table never written; the API takes it non-const
