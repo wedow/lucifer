@@ -840,7 +840,6 @@ LU_STUB int PyUnstable_Code_GetExtra(PyObject *code, Py_ssize_t index, void **ex
 LU_STUB PyCodeObject * PyUnstable_Code_New(int, int, int, int, int, PyObject *, PyObject *, PyObject *, PyObject *, PyObject *, PyObject *, PyObject *, PyObject *, PyObject *, int, PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyUnstable_Code_New"); }
 LU_STUB PyCodeObject * PyUnstable_Code_NewWithPosOnlyArgs(int, int, int, int, int, int, PyObject *, PyObject *, PyObject *, PyObject *, PyObject *, PyObject *, PyObject *, PyObject *, PyObject *, int, PyObject *, PyObject *) { LU_UNIMPLEMENTED("PyUnstable_Code_NewWithPosOnlyArgs"); }
 LU_STUB int PyUnstable_Code_SetExtra(PyObject *code, Py_ssize_t index, void *extra) { LU_UNIMPLEMENTED("PyUnstable_Code_SetExtra"); }
-LU_STUB int PyUnstable_CopyPerfMapFile(const char* parent_filename) { LU_UNIMPLEMENTED("PyUnstable_CopyPerfMapFile"); }
 LU_STUB void PyUnstable_EnableTryIncRef(PyObject *) { LU_UNIMPLEMENTED("PyUnstable_EnableTryIncRef"); }
 LU_STUB Py_ssize_t PyUnstable_Eval_RequestCodeExtraIndex(freefunc) { LU_UNIMPLEMENTED("PyUnstable_Eval_RequestCodeExtraIndex"); }
 LU_STUB void PyUnstable_GC_VisitObjects(gcvisitobjects_t callback, void* arg) { LU_UNIMPLEMENTED("PyUnstable_GC_VisitObjects"); }
@@ -858,15 +857,10 @@ LU_STUB int PyUnstable_Object_EnableDeferredRefcount(PyObject *) { LU_UNIMPLEMEN
 LU_STUB PyObject * PyUnstable_Object_GC_NewWithExtraData(PyTypeObject *, size_t) { LU_UNIMPLEMENTED("PyUnstable_Object_GC_NewWithExtraData"); }
 LU_STUB int PyUnstable_Object_IsUniqueReferencedTemporary(PyObject *) { LU_UNIMPLEMENTED("PyUnstable_Object_IsUniqueReferencedTemporary"); }
 LU_STUB int PyUnstable_Object_IsUniquelyReferenced(PyObject *) { LU_UNIMPLEMENTED("PyUnstable_Object_IsUniquelyReferenced"); }
-LU_STUB void PyUnstable_PerfMapState_Fini(void) { LU_UNIMPLEMENTED("PyUnstable_PerfMapState_Fini"); }
-LU_STUB int PyUnstable_PerfMapState_Init(void) { LU_UNIMPLEMENTED("PyUnstable_PerfMapState_Init"); }
-LU_STUB int PyUnstable_PerfTrampoline_CompileCode(PyCodeObject *) { LU_UNIMPLEMENTED("PyUnstable_PerfTrampoline_CompileCode"); }
-LU_STUB int PyUnstable_PerfTrampoline_SetPersistAfterFork(int enable) { LU_UNIMPLEMENTED("PyUnstable_PerfTrampoline_SetPersistAfterFork"); }
 LU_STUB void PyUnstable_ThreadState_ResetStackProtection(PyThreadState *tstate) { LU_UNIMPLEMENTED("PyUnstable_ThreadState_ResetStackProtection"); }
 LU_STUB int PyUnstable_ThreadState_SetStackProtection(PyThreadState *tstate, void *stack_start_addr, size_t stack_size) { LU_UNIMPLEMENTED("PyUnstable_ThreadState_SetStackProtection"); }
 LU_STUB int PyUnstable_TryIncRef(PyObject *) { LU_UNIMPLEMENTED("PyUnstable_TryIncRef"); }
 LU_STUB int PyUnstable_Type_AssignVersionTag(PyTypeObject *type) { LU_UNIMPLEMENTED("PyUnstable_Type_AssignVersionTag"); }
-LU_STUB int PyUnstable_WritePerfMapEntry(const void *code_addr, unsigned int code_size, const char *entry_name) { LU_UNIMPLEMENTED("PyUnstable_WritePerfMapEntry"); }
 LU_STUB PyObject * PyVectorcall_Call(PyObject *callable, PyObject *tuple, PyObject *dict) { LU_UNIMPLEMENTED("PyVectorcall_Call"); }
 LU_STUB vectorcallfunc PyVectorcall_Function(PyObject *callable) { LU_UNIMPLEMENTED("PyVectorcall_Function"); }
 #undef PyVectorcall_NARGS

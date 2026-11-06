@@ -738,6 +738,32 @@ read_stdlib(PyConfig *config)
     return PyStatus_Ok();
 }
 
+/* config_init_perf_profiling: PYTHONPERFSUPPORT and -X perf ask for the
+   perf map trampolines (1), PYTHON_PERF_JIT_SUPPORT and -X perf_jit for
+   the jitdump ones (2), each later one winning; else none. */
+static void
+read_perf_profiling(PyConfig *config)
+{
+    if (config->perf_profiling >= 0) {
+        return;
+    }
+    config->perf_profiling = 0;
+    const char *env = config->use_environment ? getenv("PYTHONPERFSUPPORT") : NULL;
+    if (env != NULL && atoi(env) != 0) {
+        config->perf_profiling = 1;
+    }
+    if (xoption(config, L"perf") != NULL) {
+        config->perf_profiling = 1;
+    }
+    env = config->use_environment ? getenv("PYTHON_PERF_JIT_SUPPORT") : NULL;
+    if (env != NULL && atoi(env) != 0) {
+        config->perf_profiling = 2;
+    }
+    if (xoption(config, L"perf_jit") != NULL) {
+        config->perf_profiling = 2;
+    }
+}
+
 /* config_init_warnoptions: the dev mode filter first, then PYTHONWARNINGS
    and -W (already there, in that order), then the BytesWarning filter. */
 static PyStatus
@@ -957,6 +983,7 @@ PyConfig_Read(PyConfig *config)
         status = read_int_max_str_digits(config);
     }
     if (!PyStatus_Exception(status)) {
+        read_perf_profiling(config);
         status = read_executable(config);
     }
     if (!PyStatus_Exception(status)) {
@@ -1131,6 +1158,14 @@ lu_runtime_options(const PyConfig *config)
             }
         }
         PyMem_Free(text);
+    }
+    /* Without a backend (FOUNDATIONS 2.11) everything runs interpreted:
+       said once when compiling everything was asked for. */
+    if (!PyStatus_Exception(status) && jit.mode != LU_JIT_OFF && lu_jit_backend() == NULL) {
+        if (jit.mode == LU_JIT_ALWAYS) {
+            fprintf(stderr, "lucifer: -X lucifer_jit=always: no backend; running interpreted\n");
+        }
+        jit.mode = LU_JIT_OFF;
     }
     if (!PyStatus_Exception(status)) {
         _PyRuntime.stress = stress;

@@ -25,8 +25,19 @@ enum { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, 
 static const int8_t gprs[] = { RBX, R12, R13, RSI, RDI, R8, R9, R10 };
 static const int8_t fprs[] = { XMM(2), XMM(3), XMM(4), XMM(5), XMM(6), XMM(7), XMM(8), XMM(9),
                                XMM(10), XMM(11), XMM(12), XMM(13), XMM(14) };
+/* push rbp; mov rbp, rsp; call *rcx; pop rbp; ret */
+static const uint8_t trampoline[] = { 0x55, 0x48, 0x89, 0xe5, 0xff, 0xd1, 0x5d, 0xc3 };
+/* CIE: id 0, version 1, "zR", code alignment 1, data alignment -8, return
+   address in DWARF register 16, PC-relative FDE pointers; at entry the
+   CFA is rsp + 8 and the return address is at CFA - 8. */
+static const uint8_t cie[] = { 0, 0, 0, 0, 1, 'z', 'R', 0, 1, 0x78, 16, 1, 0x1b, 0x0c, 7, 8, 0x90, 1 };
+/* After push rbp the CFA is rsp + 16 and rbp is at CFA - 16; after
+   mov rbp, rsp the CFA is rbp + 16. */
+static const uint8_t fp_cfi[] = { 0x41, 0x0e, 16, 0x86, 2, 0x43, 0x0d, 6 };
 const struct lu_target lu_target = {
     .name = "x86_64", .ngpr = sizeof gprs, .nfpr = sizeof fprs, .gpr = gprs, .fpr = fprs,
+    .trampoline = trampoline, .ntrampoline = sizeof trampoline, .elf_machine = 62,
+    .cie = cie, .ncie = sizeof cie, .fp_cfi = fp_cfi, .nfp_cfi = sizeof fp_cfi,
 };
 
 #define SAVES 40                /* rbx, r12-r15 below rbp */
