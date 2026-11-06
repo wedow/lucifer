@@ -36,6 +36,8 @@ other machines).
   callee's frame state chained to its caller's.
   - A callee inlines while the code it compiles stays under 400 code
     units, so a large function whose taken branches are small inlines.
+  - `*args` is the tuple of the extra arguments and `**kwargs` a new dict,
+    which is never built when nothing reads more than its truth.
   - Kernel module globals fold to constants, except those a kernel function
     rebinds (`global`), which are guarded as user globals are.
   - Primitives become IR: `float_add` becomes `ADD_F`, `m_sqrt` becomes

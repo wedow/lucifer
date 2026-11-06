@@ -65,6 +65,30 @@ def warm_then(fn, x, n):
     return r
 
 
+class VarTask:
+    """A method taking *args and **kwargs: the frame it shows a callee holds
+    the packed arguments, built only once something looks."""
+    def __init__(self, fn):
+        self.fn = fn
+
+    def run(self, x, *args, **kwargs):
+        if kwargs:
+            return None
+        r = self.fn(x)
+        return (r, len(args))
+
+
+def warm_varargs(fn, x, n):
+    task = VarTask(make(0))
+    r = None
+    for i in range(n):
+        if i == n - 1:
+            task.fn = fn
+            i = x
+        r = task.run(i, i, 'b')
+    return r
+
+
 def recurse_a(n):
     return recurse_b(n)
 
@@ -85,6 +109,9 @@ except ValueError:
 # The frame keep returned is Task.run's, which ran on to its end.
 frame, y = warm_then(keep, 4, 300)
 print(frame.f_code.co_name, frame.f_locals['y'], frame.f_locals['r'] is frame, y)
+print(warm_varargs(peek, 5, 300))
+frame, n = warm_varargs(keep, 6, 300)
+print(frame.f_code.co_name, frame.f_locals['args'], frame.f_locals['kwargs'], n)
 
 
 held = []

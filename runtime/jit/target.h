@@ -45,6 +45,7 @@ enum lu_dv_kind {
     DV_OBJ,                     /* an object at loc */
     DV_BOX_I64,                 /* a virtual int: its raw value at loc, or imm when loc is none */
     DV_BOX_F64,                 /* a virtual float: the same */
+    DV_NEW_DICT,                /* a virtual empty dict (a **kwargs nothing filled) */
 };
 
 struct lu_dv {
@@ -172,6 +173,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(list_append) \
     X(build_list) \
     X(build_tuple) \
+    X(new_dict) \
     X(contains)
 
 enum lu_helper_id {

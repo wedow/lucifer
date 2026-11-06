@@ -1137,10 +1137,9 @@ inlinable(struct ctx *c, PyFunctionObject *fn, int nargs)
 {
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
     if (!PyCode_Check(co) || c->depth >= INLINE_MAX_DEPTH || c->f->ninlined > INLINE_MAX_TOTAL
-        || (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE
-                            | CO_VARARGS | CO_VARKEYWORDS))
+        || (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE))
         || !(co->co_flags & CO_OPTIMIZED) || co->co_kwonlyargcount != 0 || co->_co_monitoring != NULL
-        || co->co_argcount < nargs || lu_jit_noinline(co)) {
+        || (co->co_argcount < nargs && !(co->co_flags & CO_VARARGS)) || nargs > 30 || lu_jit_noinline(co)) {
         return 0;
     }
     int defaults = fn->func_defaults != NULL ? (int)PyTuple_GET_SIZE(fn->func_defaults) : 0;
@@ -1213,6 +1212,25 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
                 k->st.v[i] = konst(c, d);
                 k->st.own[i] = 0;
             }
+        }
+        /* *args and **kwargs as the call binds them: a tuple of the extra
+           positional arguments (the empty one), and a new dict. */
+        int at = co->co_argcount;
+        if (co->co_flags & CO_VARARGS) {
+            int extra = nargs > at ? nargs - at : 0;
+            k->st.v[at] = extra ? helper_raising(c, H_build_tuple, extra, args + at, 0)
+                                : konst(c, (PyObject *)&_PyRuntime.singletons.empty_tuple);
+            k->st.own[at] = extra != 0;
+            set_known(c, k->st.v[at], &PyTuple_Type);
+            for (int i = at; i < nargs; i++) {
+                release(c, args[i], owned[i]);
+            }
+            at++;
+        }
+        if (co->co_flags & CO_VARKEYWORDS) {
+            k->st.v[at] = helper_raising(c, H_new_dict, 0, NULL, 0);
+            k->st.own[at] = 1;
+            set_known(c, k->st.v[at], &PyDict_Type);
         }
         k->cont = lu_ir_block(f);
         /* Into the callee's first block. */

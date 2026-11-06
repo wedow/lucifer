@@ -45,7 +45,7 @@ used(struct lu_func *f, lu_v v)
     if (f->ins[v].flags & INS_VIRTUAL) {
         v = f->ins[v].b != LU_NOV ? f->ins[v].b : f->ins[v].a;
     }
-    return allocatable(f, v) ? v : LU_NOV;
+    return v != LU_NOV && allocatable(f, v) ? v : LU_NOV;
 }
 
 #define BIT_SET(set, v) ((set)[(v) >> 6] |= (word)1 << ((v) & 63))

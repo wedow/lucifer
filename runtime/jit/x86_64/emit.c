@@ -737,6 +737,10 @@ describe(struct asm_ *a, lu_v v, int owned)
     if ((in->flags & INS_VIRTUAL) && in->b != LU_NOV) {
         return describe(a, in->b, owned);      /* the object it was unboxed from */
     }
+    if ((in->flags & INS_VIRTUAL) && in->op == OP_HELPER) {
+        dv.kind = DV_NEW_DICT;
+        return dv;
+    }
     if (in->flags & INS_VIRTUAL) {
         struct lu_ins *raw = I(a, in->a);
         dv.kind = in->op == OP_BOX_INT ? DV_BOX_I64 : DV_BOX_F64;
@@ -1881,6 +1885,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         def_gpr(a, v, RAX);
         return 0;
     case OP_HELPER: {
+        if (in->flags & INS_VIRTUAL) {
+            return 0;
+        }
         const struct lu_helper *h = &lu_helpers[in->imm];
         int err = -1;
         if ((h->flags & IF_RAISE) && in->fs != NULL && (h->rep == REP_BIT || h->rep == REP_OBJ)) {
