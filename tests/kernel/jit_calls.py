@@ -159,4 +159,22 @@ def octets(n):
     return s
 
 
-print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N), pops(N), truths(N), emptiness(N), wide(N), strings(N), octets(N))
+def spread(t):
+    values = [*t]
+    return len(values)
+
+
+def unpacking(n):
+    """A list built from a tuple (the kernel's argument parsing), inlined;
+    and a key deleted from a dict in the loop itself."""
+    t = (1, 2, 3)
+    d = {}
+    s = 0
+    for i in range(n):
+        s += spread(t)
+        d[i & 7] = i
+        del d[i & 7]
+    return s + len(d)
+
+
+print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N), pops(N), truths(N), emptiness(N), wide(N), strings(N), octets(N), unpacking(N))

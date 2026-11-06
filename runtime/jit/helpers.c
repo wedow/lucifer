@@ -553,6 +553,45 @@ called:
     return r;
 }
 
+/* DELETE_SUBSCR */
+static int
+h_delitem(PyObject *container, PyObject *sub)
+{
+    if (PyDict_CheckExact(container) && lu_dict_del_native(container, sub) == 1) {
+        return 0;
+    }
+    PyObject *args[2] = { container, sub };
+    PyObject *r = lu_call_kernel(LU_K_delitem, args, 2);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
+/* LIST_EXTEND; an exact tuple or list source runs no Python (list_extend_seq). */
+static int
+h_list_extend(PyObject *list, PyObject *iterable)
+{
+    if (PyTuple_CheckExact(iterable) || PyList_CheckExact(iterable)) {
+        /* A list source is read as subscripts are: another thread may resize it. */
+        for (Py_ssize_t i = 0; i < Py_SIZE(iterable); i++) {
+            PyObject *v = PyTuple_CheckExact(iterable) ? Py_NewRef(PyTuple_GET_ITEM(iterable, i))
+                                                       : lu_list_item_ref((PyListObject *)iterable, i);
+            if (v == NULL) {
+                break;
+            }
+            int err = lu_list_append(list, v);
+            Py_DECREF(v);
+            if (err < 0) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+    PyObject *args[2] = { list, iterable };
+    PyObject *r = lu_call_kernel(LU_K_list_extend, args, 2);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
 /* call_special(descr, obj, *args) for a function, wrapper or method
    descriptor, which it calls unbound: descr(obj, *args). Anything else is
    bound through its __get__ first, which the interpreter does. */
@@ -585,6 +624,9 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_binary_op] = { (void *)h_binary_op, "binary_op", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_compare_op] = { (void *)h_compare_op, "compare_op", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_setitem] = { (void *)h_setitem, "setitem", REP_BIT, IF_RAISE | IF_PY, 3 },
+    [H_delitem] = { (void *)h_delitem, "delitem", REP_BIT, IF_RAISE | IF_PY, 2 },
+    [H_list_extend] = { (void *)h_list_extend, "list_extend", REP_BIT, IF_RAISE | IF_PY, 2 },
+    [H_list_extend_seq] = { (void *)h_list_extend, "list_extend_seq", REP_BIT, IF_RAISE, 2 },
     [H_load_attr] = { (void *)h_load_attr_pic, "load_attr", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_load_method] = { (void *)h_load_method, "load_method", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 3 },

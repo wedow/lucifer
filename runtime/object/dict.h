@@ -178,11 +178,13 @@ Py_ssize_t lu_ns_index(PyObject *dict, PyObject *key);
 /* Lookup and store of an exact str or int key in any dict, decided without
    Python: find answers 1 with *value a new reference, 0 absent, or -1 when
    the key is another type or an equal-hash entry needs __eq__; put answers
-   1 stored, -1 undecided, -2 with an exception set. Find holds no lock: it
+   1 stored, -1 undecided, -2 with an exception set; del answers 1 deleted,
+   -1 undecided (an absent key too: the kernel raises). Find holds no lock: it
    takes the reference only if the value is alive (lu_try_xget_ref) and else
    reads under the dict's critical section. */
 int lu_dict_find_native(PyObject *d, PyObject *key, PyObject **value);
 int lu_dict_put_native(PyObject *d, PyObject *key, PyObject *value);
+int lu_dict_del_native(PyObject *d, PyObject *key);
 /* A new dict of type tp with no entries. */
 PyObject *lu_dict_alloc(PyTypeObject *tp);
 Py_ssize_t lu_dict_sizeof(PyDictObject *mp);

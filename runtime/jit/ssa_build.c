@@ -569,7 +569,8 @@ supported(int op)
     case JUMP_BACKWARD_NO_INTERRUPT: case GET_ITER: case FOR_ITER: case CALL:
     case RETURN_VALUE: case STORE_SUBSCR: case COPY_FREE_VARS: case LOAD_DEREF:
     case BUILD_LIST: case BUILD_TUPLE: case CONTAINS_OP: case UNPACK_SEQUENCE:
-    case MAKE_FUNCTION: case SET_FUNCTION_ATTRIBUTE: case STORE_DEREF:
+    case MAKE_FUNCTION: case SET_FUNCTION_ATTRIBUTE: case STORE_DEREF: case LIST_EXTEND:
+    case DELETE_SUBSCR:
         return 1;
     default:
         return 0;
@@ -2277,6 +2278,37 @@ translate(struct ctx *c)
         release(c, sub, ownsub);
         release(c, cont, owncont);
         release(c, val, ownval);
+        return 0;
+    }
+    case DELETE_SUBSCR: {
+        lu_v sub = peek(c, 1), cont = peek(c, 2);
+        int ownsub = peek_owned(c, 1), owncont = peek_owned(c, 2);
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[2] = { cont, sub };
+        helper_raising(c, H_delitem, 2, args, 2);
+        pop(c, NULL); pop(c, NULL);
+        release(c, sub, ownsub);
+        release(c, cont, owncont);
+        return 0;
+    }
+    case LIST_EXTEND: {
+        /* An exact tuple or list source runs no Python, so an inlined frame
+           extends from one too. */
+        lu_v it = peek(c, 1), list = peek(c, oparg + 1);
+        int ownit = peek_owned(c, 1);
+        PyTypeObject *t = known_type(c, it);
+        int seq = t == &PyTuple_Type || t == &PyList_Type;
+        if (!seq && !root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[2] = { list, it };
+        helper_raising(c, seq ? H_list_extend_seq : H_list_extend, 2, args, 1);
+        pop(c, NULL);
+        release(c, it, ownit);
         return 0;
     }
     case COPY_FREE_VARS: {
