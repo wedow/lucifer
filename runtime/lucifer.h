@@ -439,6 +439,7 @@ struct _is {
     lu_watcher dict_watchers[LU_MAX_WATCHERS];      /* PyDict_WatchCallback */
     lu_watcher func_watchers[LU_MAX_WATCHERS];      /* PyFunction_WatchCallback */
     lu_watcher code_watchers[LU_MAX_WATCHERS];      /* PyCode_WatchCallback */
+    lu_watcher context_watchers[LU_MAX_WATCHERS];   /* PyContext_WatchCallback */
     int specializing;                   /* set once the kernel has booted: instructions may specialize */
     /* The type attribute cache (CPython's method cache): what _PyType_Lookup
        found for an interned name in a type of that version. Read without a

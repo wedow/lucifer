@@ -3,6 +3,7 @@ Context and Token. A context holds its variables in a dict that is replaced,
 never changed, when a variable is set, so a copy shares it until either side
 sets."""
 
+import _lucifer
 import _thread
 
 _current = {}
@@ -51,10 +52,12 @@ class Context:
         self._prev = _current.get(ident)
         self._entered = True
         _current[ident] = self
+        _lucifer.context_switched(self)
         try:
             return callable(*args, **kwargs)
         finally:
             _current[ident] = self._prev
+            _lucifer.context_switched(self._prev)
             self._prev = None
             self._entered = False
 

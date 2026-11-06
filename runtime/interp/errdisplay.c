@@ -618,42 +618,17 @@ lu_err_unraisable(const char *what, PyObject *obj)
     lu_err_unraisable_text(message, obj);
 }
 
-/* PyErr_FormatUnraisable: "message repr(obj):" then the exception being
-   handled, which is cleared. */
+/* "message repr(obj)" (or the message alone) for the exception being
+   handled, through PyErr_FormatUnraisable: sys.unraisablehook sees it, as
+   CPython's callers' do. */
 void
 lu_err_unraisable_text(const char *message, PyObject *obj)
 {
-    PyObject *exc = PyErr_GetRaisedException();
-    PyObject *r = obj != NULL ? lu_call_kernel(LU_K_repr, &obj, 1) : NULL;
-    const char *text = r != NULL && PyUnicode_Check(r) ? PyUnicode_AsUTF8(r) : NULL;
-    PyErr_Clear();
-    const char *repr = text != NULL ? text : "<object repr() failed>";
-    int n = obj == NULL ? snprintf(NULL, 0, "%s:\n", message)
-                        : snprintf(NULL, 0, "%s %s:\n", message, repr);
-    char *head = malloc((size_t)n + 1);
-    if (head != NULL) {
-        if (obj == NULL) {
-            snprintf(head, (size_t)n + 1, "%s:\n", message);
-        }
-        else {
-            snprintf(head, (size_t)n + 1, "%s %s:\n", message, repr);
-        }
-        lu_stderr_write(head, (size_t)n);
-        free(head);
+    if (obj != NULL) {
+        PyErr_FormatUnraisable("%s %R", message, obj);
     }
-    Py_XDECREF(r);
-    if (exc != NULL && ((PyBaseExceptionObject *)exc)->traceback == NULL) {
-        /* format_unraisable_v: a traceback of the frame running now */
-        struct lu_frame *f = lu_frame_user((struct lu_frame *)PyThreadState_Get()->current_frame, 0);
-        if (f != NULL) {
-            PyErr_SetRaisedException(exc);
-            lu_traceback_here(f, lu_frame_lasti(f));
-            exc = PyErr_GetRaisedException();
-        }
-    }
-    if (exc != NULL) {
-        lu_err_display(exc);
-        Py_DECREF(exc);
+    else {
+        PyErr_FormatUnraisable("%s", message);
     }
 }
 
