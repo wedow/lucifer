@@ -388,10 +388,24 @@ PyNumber_Power(PyObject *a, PyObject *b, PyObject *c)
     return c == Py_None ? binary(a, b, NB_POWER) : call_builtin("pow", args, 3);
 }
 
+/* ternary_iop: __ipow__ first, which takes no modulus, then pow(). */
 PyObject *
 PyNumber_InPlacePower(PyObject *a, PyObject *b, PyObject *c)
 {
-    return c == Py_None ? binary(a, b, NB_INPLACE_POWER) : PyNumber_Power(a, b, c);
+    if (c == Py_None) {
+        return binary(a, b, NB_INPLACE_POWER);
+    }
+    PyObject *ipow = _PyType_LookupRef(Py_TYPE(a), LU_ID(__ipow__));
+    if (ipow != NULL) {
+        PyObject *args[2] = { a, b };
+        PyObject *r = lu_call(ipow, args, 2, NULL);   /* an unbound __ipow__(a, b) */
+        Py_DECREF(ipow);
+        if (r != Py_NotImplemented) {
+            return r;
+        }
+        Py_DECREF(r);
+    }
+    return PyNumber_Power(a, b, c);
 }
 
 PyObject *
