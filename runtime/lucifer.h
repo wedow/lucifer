@@ -1127,10 +1127,6 @@ PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
 void lu_capsule_init(void);
 int lu_fileobject_init(void);
-/* The datetime C API's static bases (runtime/types/static.c): the Python
-   implementation's classes are rebased onto them. */
-extern PyTypeObject lu_date_base_type, lu_datetime_base_type, lu_time_base_type,
-    lu_timedelta_base_type, lu_tzinfo_base_type;
 /* The last-resort MemoryError of PyErr_NoMemory (runtime/capi/errors.c). */
 void lu_errors_init(PyInterpreterState *interp);
 void lu_storage_init(void);

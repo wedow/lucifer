@@ -750,16 +750,6 @@ lu_types_init(PyInterpreterState *interp)
 {
     PyBaseObject_Type.tp_basicsize = sizeof(PyObject);
     PyBaseObject_Type.tp_dealloc = object_dealloc;
-    /* The datetime C API's bases take object's dealloc, so the walk in
-       compatible_for_assignment sees their layout as object's and a heap
-       class may be rebased onto them. */
-    PyTypeObject *const dt_bases[] = {
-        &lu_date_base_type, &lu_datetime_base_type, &lu_time_base_type,
-        &lu_timedelta_base_type, &lu_tzinfo_base_type,
-    };
-    for (size_t i = 0; i < sizeof dt_bases / sizeof dt_bases[0]; i++) {
-        dt_bases[i]->tp_dealloc = object_dealloc;
-    }
     PyType_Type.tp_basicsize = sizeof(PyHeapTypeObject);
     PyType_Type.tp_itemsize = sizeof(PyMemberDef);
     PyType_Type.tp_alloc = PyType_GenericAlloc;
@@ -1960,16 +1950,10 @@ prim_is_subtype(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 /* tp_new_wrapper's checks for owner.__new__(cls): cls is a subtype of owner
    and owner is its static base, or an extension type inherited owner's tp_new. */
-/* One of the runtime's own static types, not an extension's. datetime's C
-   API bases stand in for the extension types CPython's are: the Python
-   classes on them build with object.__new__. */
+/* One of the runtime's own static types, not an extension's. */
 static int
 is_runtime_type(PyTypeObject *tp)
 {
-    if (tp == &lu_date_base_type || tp == &lu_datetime_base_type || tp == &lu_time_base_type
-        || tp == &lu_timedelta_base_type || tp == &lu_tzinfo_base_type) {
-        return 0;
-    }
     for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
         if (*t == tp) {
             return 1;
