@@ -1289,6 +1289,8 @@ int lu_types_init(PyInterpreterState *interp);
 int lu_static_types_inherit(void);
 /* The type's dict: in interpreter state for static builtin types. Borrowed. */
 PyObject *lu_type_dict(PyTypeObject *tp);
+/* The fully qualified name, module<sep>qualname (runtime/capi/typespec.c). */
+PyObject *lu_type_fullyqualname(PyTypeObject *type, char sep);
 /* The doc after its introspection signature, and tp_methods / the bound
    __new__ of a type with a tp_new into its dict (typespec.c). */
 const char *lu_doc_without_signature(const char *name, const char *doc);

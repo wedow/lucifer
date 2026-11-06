@@ -31,11 +31,11 @@
 #define LU_STATIC_TYPES(X) \
     X(PyAsyncGen_Type, "async_generator", 0, &PyBaseObject_Type) \
     X(PyBaseObject_Type, "object", Py_TPFLAGS_BASETYPE, NULL) \
-    X(PyBool_Type, "bool", Py_TPFLAGS_LONG_SUBCLASS, &PyLong_Type) \
+    X(PyBool_Type, "bool", Py_TPFLAGS_LONG_SUBCLASS | _Py_TPFLAGS_MATCH_SELF, &PyLong_Type) \
     X(PyByteArrayIter_Type, "bytearray_iterator", 0, &PyBaseObject_Type) \
-    X(PyByteArray_Type, "bytearray", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyByteArray_Type, "bytearray", Py_TPFLAGS_BASETYPE | _Py_TPFLAGS_MATCH_SELF, &PyBaseObject_Type) \
     X(PyBytesIter_Type, "bytes_iterator", 0, &PyBaseObject_Type) \
-    X(PyBytes_Type, "bytes", Py_TPFLAGS_BYTES_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyBytes_Type, "bytes", Py_TPFLAGS_BYTES_SUBCLASS | Py_TPFLAGS_BASETYPE | _Py_TPFLAGS_MATCH_SELF, &PyBaseObject_Type) \
     X(PyCFunction_Type, "builtin_function_or_method", 0, &PyBaseObject_Type) \
     X(PyCMethod_Type, "builtin_method", 0, &PyCFunction_Type) \
     X(PyCallIter_Type, "callable_iterator", 0, &PyBaseObject_Type) \
@@ -54,31 +54,31 @@
     X(PyDictIterKey_Type, "dict_keyiterator", 0, &PyBaseObject_Type) \
     X(PyDictIterValue_Type, "dict_valueiterator", 0, &PyBaseObject_Type) \
     X(PyDictKeys_Type, "dict_keys", 0, &PyBaseObject_Type) \
-    X(PyDictProxy_Type, "mappingproxy", 0, &PyBaseObject_Type) \
+    X(PyDictProxy_Type, "mappingproxy", Py_TPFLAGS_MAPPING, &PyBaseObject_Type) \
     X(PyDictRevIterItem_Type, "dict_reverseitemiterator", 0, &PyBaseObject_Type) \
     X(PyDictRevIterKey_Type, "dict_reversekeyiterator", 0, &PyBaseObject_Type) \
     X(PyDictRevIterValue_Type, "dict_reversevalueiterator", 0, &PyBaseObject_Type) \
     X(PyDictValues_Type, "dict_values", 0, &PyBaseObject_Type) \
-    X(PyDict_Type, "dict", Py_TPFLAGS_DICT_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyDict_Type, "dict", Py_TPFLAGS_DICT_SUBCLASS | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_MAPPING | _Py_TPFLAGS_MATCH_SELF, &PyBaseObject_Type) \
     X(PyEllipsis_Type, "ellipsis", 0, &PyBaseObject_Type) \
     X(PyEnum_Type, "enumerate", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
     X(PyFilter_Type, "filter", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
-    X(PyFloat_Type, "float", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyFloat_Type, "float", Py_TPFLAGS_BASETYPE | _Py_TPFLAGS_MATCH_SELF, &PyBaseObject_Type) \
     X(PyFrameLocalsProxy_Type, "FrameLocalsProxy", 0, &PyBaseObject_Type) \
     X(PyFrame_Type, "frame", 0, &PyBaseObject_Type) \
-    X(PyFrozenSet_Type, "frozenset", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyFrozenSet_Type, "frozenset", Py_TPFLAGS_BASETYPE | _Py_TPFLAGS_MATCH_SELF, &PyBaseObject_Type) \
     X(PyFunction_Type, "function", 0, &PyBaseObject_Type) \
     X(PyGen_Type, "generator", 0, &PyBaseObject_Type) \
     X(PyGetSetDescr_Type, "getset_descriptor", 0, &PyBaseObject_Type) \
     X(PyInstanceMethod_Type, "instancemethod", 0, &PyBaseObject_Type) \
     X(PyListIter_Type, "list_iterator", 0, &PyBaseObject_Type) \
     X(PyListRevIter_Type, "list_reverseiterator", 0, &PyBaseObject_Type) \
-    X(PyList_Type, "list", Py_TPFLAGS_LIST_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyList_Type, "list", Py_TPFLAGS_LIST_SUBCLASS | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_SEQUENCE | _Py_TPFLAGS_MATCH_SELF, &PyBaseObject_Type) \
     X(PyLongRangeIter_Type, "longrange_iterator", 0, &PyBaseObject_Type) \
-    X(PyLong_Type, "int", Py_TPFLAGS_LONG_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyLong_Type, "int", Py_TPFLAGS_LONG_SUBCLASS | Py_TPFLAGS_BASETYPE | _Py_TPFLAGS_MATCH_SELF, &PyBaseObject_Type) \
     X(PyMap_Type, "map", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
     X(PyMemberDescr_Type, "member_descriptor", 0, &PyBaseObject_Type) \
-    X(PyMemoryView_Type, "memoryview", 0, &PyBaseObject_Type) \
+    X(PyMemoryView_Type, "memoryview", Py_TPFLAGS_SEQUENCE, &PyBaseObject_Type) \
     X(PyMethodDescr_Type, "method_descriptor", 0, &PyBaseObject_Type) \
     X(PyMethod_Type, "method", 0, &PyBaseObject_Type) \
     X(PyModuleDef_Type, "moduledef", 0, &PyBaseObject_Type) \
@@ -91,21 +91,21 @@
     X(PyPickleBuffer_Type, "pickle.PickleBuffer", 0, &PyBaseObject_Type) \
     X(PyProperty_Type, "property", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
     X(PyRangeIter_Type, "range_iterator", 0, &PyBaseObject_Type) \
-    X(PyRange_Type, "range", 0, &PyBaseObject_Type) \
+    X(PyRange_Type, "range", Py_TPFLAGS_SEQUENCE, &PyBaseObject_Type) \
     X(PyReversed_Type, "reversed", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
     X(PySeqIter_Type, "iterator", 0, &PyBaseObject_Type) \
     X(PySetIter_Type, "set_iterator", 0, &PyBaseObject_Type) \
-    X(PySet_Type, "set", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PySet_Type, "set", Py_TPFLAGS_BASETYPE | _Py_TPFLAGS_MATCH_SELF, &PyBaseObject_Type) \
     X(PySlice_Type, "slice", 0, &PyBaseObject_Type) \
     X(PyStaticMethod_Type, "staticmethod", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
     X(PyStdPrinter_Type, "stderrprinter", 0, &PyBaseObject_Type) \
     X(PySuper_Type, "super", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
     X(PyTraceBack_Type, "traceback", 0, &PyBaseObject_Type) \
     X(PyTupleIter_Type, "tuple_iterator", 0, &PyBaseObject_Type) \
-    X(PyTuple_Type, "tuple", Py_TPFLAGS_TUPLE_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
-    X(PyType_Type, "type", Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyTuple_Type, "tuple", Py_TPFLAGS_TUPLE_SUBCLASS | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_SEQUENCE | _Py_TPFLAGS_MATCH_SELF, &PyBaseObject_Type) \
+    X(PyType_Type, "type", Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_ITEMS_AT_END, &PyBaseObject_Type) \
     X(PyUnicodeIter_Type, "str_iterator", 0, &PyBaseObject_Type) \
-    X(PyUnicode_Type, "str", Py_TPFLAGS_UNICODE_SUBCLASS | Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(PyUnicode_Type, "str", Py_TPFLAGS_UNICODE_SUBCLASS | Py_TPFLAGS_BASETYPE | _Py_TPFLAGS_MATCH_SELF, &PyBaseObject_Type) \
     X(PyWrapperDescr_Type, "wrapper_descriptor", 0, &PyBaseObject_Type) \
     X(PyZip_Type, "zip", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
     X(Py_GenericAliasType, "types.GenericAlias", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \

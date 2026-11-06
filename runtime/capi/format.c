@@ -141,27 +141,16 @@ put_str(struct ubuf *b, PyObject *s, Py_ssize_t width, Py_ssize_t prec, int left
     PyMem_Free(text);
 }
 
-/* %T and %N: a type's name, qualified by its module unless that is builtins or __main__. */
+/* %T (obj's type) and %N (obj, a type): the fully qualified name, with ':'
+   before the qualname under the # flag. */
 static PyObject *
-type_name(PyObject *obj, int qualified, int colon)
+type_name(PyObject *obj, int of_type, int colon)
 {
-    PyObject *type = (PyObject *)Py_TYPE(obj);
-    PyObject *qualname = PyObject_GetAttrString(type, "__qualname__");
-    if (!qualified || qualname == NULL) {
-        return qualname;
+    if (!of_type && !PyType_Check(obj)) {
+        PyErr_SetString(PyExc_TypeError, "%N argument must be a type");
+        return NULL;
     }
-    PyObject *module = PyObject_GetAttrString(type, "__module__");
-    if (module == NULL || !PyUnicode_Check(module)
-        || strcmp(PyUnicode_AsUTF8(module), "builtins") == 0
-        || strcmp(PyUnicode_AsUTF8(module), "__main__") == 0) {
-        PyErr_Clear();
-        Py_XDECREF(module);
-        return qualname;
-    }
-    PyObject *full = PyUnicode_FromFormat(colon ? "%U:%U" : "%U.%U", module, qualname);
-    Py_DECREF(module);
-    Py_DECREF(qualname);
-    return full;
+    return lu_type_fullyqualname(of_type ? Py_TYPE(obj) : (PyTypeObject *)obj, colon ? ':' : '.');
 }
 
 PyObject *

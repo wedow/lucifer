@@ -384,6 +384,28 @@ type_lookup(PyTypeObject *tp, PyObject *name, int take)
     return value;
 }
 
+/* PyType_ClearCache: every entry of the attribute cache emptied, each under
+   its sequence as a writer takes it; the last version tag handed out. */
+unsigned int
+PyType_ClearCache(void)
+{
+    struct _is *interp = PyInterpreterState_Get();
+    for (size_t i = 0; i < LU_MCACHE_SIZE; i++) {
+        struct lu_mcache_entry *e = &interp->mcache[i];
+        uint32_t seq = __atomic_load_n(&e->seq, __ATOMIC_ACQUIRE);
+        while ((seq & 1) || !__atomic_compare_exchange_n(&e->seq, &seq, seq + 1, 0,
+                                                         __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+            seq = __atomic_load_n(&e->seq, __ATOMIC_ACQUIRE) & ~1u;
+        }
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        __atomic_store_n(&e->version, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->name, NULL, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->value, NULL, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->seq, seq + 2, __ATOMIC_RELEASE);
+    }
+    return __atomic_load_n(&interp->next_version_tag, __ATOMIC_RELAXED) - 1;
+}
+
 PyObject *
 _PyType_LookupRef(PyTypeObject *tp, PyObject *name)
 {
