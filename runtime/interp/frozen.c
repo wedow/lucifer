@@ -5,6 +5,7 @@
    after it. */
 
 #include "interp/frozen.h"
+#include "interp/exceptions.h"
 #include "interp/code.h"
 #include "interp/frame.h"
 
@@ -130,5 +131,6 @@ lu_kernel_boot(PyInterpreterState *interp)
        on a change to one is a PyType_Modified. */
     interp->specializing = 1;
     interp->kernel_booted = 1;          /* every kernel function is registered */
+    lu_exc_vectorcalls();
     return 0;
 }

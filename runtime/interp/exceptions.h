@@ -21,6 +21,16 @@ int lu_traceback_here(struct lu_frame *f, Py_ssize_t lasti_unit);
    instruction's offset is pushed (lasti). */
 int lu_exception_handler(PyCodeObject *code, int index, int *level, int *handler, int *lasti);
 
+/* The static exception classes whose construction is BaseException's own
+   are called as CPython's BaseException_vectorcall makes them
+   (runtime/capi/errors.c); once the kernel has filled their dicts. */
+void lu_exc_vectorcalls(void);
+
+/* RAISE_VARARGS as the kernel's do_raise: 1 with the exception set when
+   exc and its cause (or MISSING) are exceptions or classes of them (called)
+   or a None cause; 0 when the kernel must refuse them. */
+int lu_raise_native(PyObject *exc, PyObject *cause);
+
 /* Makes the handled exception `value`'s __context__ (PyErr_SetObject). */
 void lu_exc_chain_context(PyObject *value);
 

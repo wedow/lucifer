@@ -416,8 +416,18 @@ lu_subscr_native(PyObject *container, PyObject *sub)
         && _PyLong_CompactValue((PyLongObject *)sub) < PyBytes_GET_SIZE(container)) {
         return lu_small_int((unsigned char)PyBytes_AS_STRING(container)[_PyLong_CompactValue((PyLongObject *)sub)]);
     }
-    if (PyDict_CheckExact(container) && lu_dict_find_native(container, sub, &item) > 0) {
+    int found = PyDict_CheckExact(container) ? lu_dict_find_native(container, sub, &item) : -1;
+    if (found > 0) {
         return item;
+    }
+    if (found == 0) {
+        /* An exact dict has no __missing__: its __getitem__ raises KeyError(sub). */
+        PyObject *args = PyTuple_Pack(1, sub);
+        if (args != NULL) {
+            PyErr_SetObject(PyExc_KeyError, args);
+            Py_DECREF(args);
+        }
+        return NULL;
     }
     if (Py_IS_TYPE(sub, &PySlice_Type)) {
         PySliceObject *slc = (PySliceObject *)sub;
@@ -3631,6 +3641,12 @@ op_RAISE_VARARGS: {
             lu_monitor_reraise(ts, frame, INSTR_START());
         }
         goto exception_unwind;
+    }
+    if (lu_raise_native(sp[-oparg], oparg == 2 ? sp[-1] : LU_MISSING)) {
+        while (oparg-- > 0) {
+            Py_DECREF(POP());
+        }
+        goto error;
     }
     sp -= oparg;
     kargs[0] = sp[0];

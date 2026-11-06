@@ -1401,8 +1401,8 @@ PyObject *lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t
 /* What the interpreter answers in C without running the kernel, which the
    optimizing tier's helpers answer the same way (runtime/interp/ceval.c):
    container[sub] for exact lists, tuples, bytes, dicts and slices, a new
-   reference or NULL (with an error only for a bad slice) when the kernel
-   must; COMPARE_OP's oparg for ints and equality no Python code decides,
+   reference or NULL (with an error for a bad slice or a key an exact dict
+   lacks) when the kernel must; COMPARE_OP's oparg for ints and equality no Python code decides,
    1, 0 or -1 for the kernel; and the kernel function `target` called with
    plain arguments (dict.get, len, isinstance, ...), its result, or NULL
    (without an error) when the kernel must run. */
