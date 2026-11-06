@@ -380,7 +380,7 @@ class _Rep:
 class _State:
     """SRE_STATE."""
 
-    __slots__ = ('code', 'text', 'string', 'data', 'isbytes', 'start', 'end', 'ptr', 'pos', 'endpos',
+    __slots__ = ('code', 'first', 'text', 'string', 'data', 'isbytes', 'start', 'end', 'ptr', 'pos', 'endpos',
                  'lastmark', 'lastindex', 'mark', 'match_all', 'must_advance')
 
 
@@ -395,6 +395,7 @@ def _state_init(pattern, string, start, end):
     end = 0 if end < 0 else length if end > length else end
     st = _State()
     st.code = pattern.code
+    st.first = pattern._first
     st.text = data if isbytes else _text_of(data)
     st.string = string
     st.data = data
@@ -1269,6 +1270,58 @@ def _search_prefix(text, prefix, ptr, end):
         ptr = i + 1
 
 
+def _first_test(code, i):
+    """(op, where) for the one-character test at code[i] (past any MARK) that
+    every match from there begins with, or None."""
+    while code[i] == MARK:
+        i += 2
+    op = code[i]
+    if op == LITERAL or op == NOT_LITERAL:
+        return op, i + 1
+    if op == IN:
+        return op, i + 2
+    if (op == REPEAT_ONE or op == MIN_REPEAT_ONE or op == POSSESSIVE_REPEAT_ONE) and code[i + 2] >= 1:
+        return _first_test(code, i + 4)
+    return None
+
+
+def _first_tests(code):
+    """The one-character tests the first character of every match passes one
+    of, where the INFO block names no literal prefix or charset: a branch of
+    alternatives that each begin with one, or a repeat of one at least once.
+    Lib/re/_compiler.py derives a charset only from a branch of literals, so
+    without these _search would try a match at every position. None when
+    there are none."""
+    if code[0] != INFO or code[2] & (INFO_PREFIX | INFO_CHARSET):
+        return None
+    i = 1 + code[1]
+    while code[i] == MARK:
+        i += 2
+    if code[i] != BRANCH:
+        test = _first_test(code, i)
+        return None if test is None else (test,)
+    tests = []
+    i += 1
+    while code[i]:
+        test = _first_test(code, i + 1)
+        if test is None:
+            return None
+        tests.append(test)
+        i += code[i]
+    return tuple(tests)
+
+
+def _starts(code, tests, ch):
+    """Does ch pass one of the first-character tests?"""
+    for op, at in tests:
+        if op == IN:
+            if _charset(code, at, ch):
+                return True
+        elif (ch == code[at]) == (op == LITERAL):
+            return True
+    return False
+
+
 def _search(st):
     """SRE(search): the leftmost match from st.start; 1 with the span in
     st.start and st.ptr, or 0."""
@@ -1300,6 +1353,7 @@ def _search(st):
         elif flags & INFO_CHARSET:
             charset = 5
         pattern = 1 + code[1]
+    first = st.first
 
     if prefix is not None:
         # the pattern starts with a literal prefix
@@ -1320,13 +1374,18 @@ def _search(st):
         return 0
 
     status = 0
-    if charset >= 0:
-        # the pattern starts with a character from a known set
+    if charset >= 0 or first is not None:
+        # the pattern starts with a character from a known set, or one that
+        # passes one of the first-character tests
         end = st.end
         st.must_advance = False
         while True:
-            while ptr < end and not _charset(code, charset, text[ptr]):
-                ptr += 1
+            if charset >= 0:
+                while ptr < end and not _charset(code, charset, text[ptr]):
+                    ptr += 1
+            else:
+                while ptr < end and not _starts(code, first, text[ptr]):
+                    ptr += 1
             if ptr >= end:
                 return 0
             st.start = ptr
@@ -1600,7 +1659,7 @@ class Pattern:
     """Compiled regular expression object."""
 
     __module__ = 're'
-    __slots__ = ('pattern', 'flags', 'groups', 'code', 'isbytes', '_groupindex', '_indexgroup', '__weakref__')
+    __slots__ = ('pattern', 'flags', 'groups', 'code', '_first', 'isbytes', '_groupindex', '_indexgroup', '__weakref__')
 
     def __new__(cls, *args, **kwargs):
         _no_instances(cls)
@@ -2128,6 +2187,7 @@ def compile(pattern, flags, code, groups, groupindex, indexgroup):
         raise RuntimeError("invalid SRE code") from None
     self = object.__new__(Pattern)
     self.code = words
+    self._first = _first_tests(words)
     if pattern is None:
         self.isbytes = -1
     else:
