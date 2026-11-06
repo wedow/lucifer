@@ -9,27 +9,58 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#undef Py_CompileString
-#undef Py_CompileStringFlags
-#undef PyRun_String
-
 /* sys */
 
+/* text written to sys.<name>, or to the C stream when that fails; no
+   exception escapes (Python/sysmodule.c sys_pyfile_write_unicode). */
+static void
+write_text(const char *name, FILE *fallback, PyObject *text)
+{
+    PyObject *file = PySys_GetObject(name);
+    PyObject *r = file != NULL ? PyObject_CallMethod(file, "write", "(O)", text) : NULL;
+    if (r == NULL) {
+        PyErr_Clear();
+        const char *utf8 = PyUnicode_AsUTF8(text);
+        if (utf8 != NULL) {
+            fputs(utf8, fallback);
+        }
+        PyErr_Clear();
+    }
+    Py_XDECREF(r);
+}
+
+/* sys_write: printf formatting, at most 1000 bytes, then "... truncated". */
 static void
 write_sys(const char *name, FILE *fallback, const char *format, va_list va)
 {
     char buffer[1001];
     PyObject *exc = PyErr_GetRaisedException();
-    int n = vsnprintf(buffer, sizeof buffer, format, va);
-    PyObject *file = PySys_GetObject(name);
-    PyObject *text = n >= 0 ? PyUnicode_DecodeUTF8(buffer, n < (int)sizeof buffer ? n : (int)sizeof buffer - 1, NULL) : NULL;
-    PyObject *r = file != NULL && text != NULL ? PyObject_CallMethod(file, "write", "(O)", text) : NULL;
-    if (r == NULL) {
-        PyErr_Clear();
-        fputs(buffer, fallback);
+    int written = PyOS_vsnprintf(buffer, sizeof buffer, format, va);
+    const char *parts[2] = { buffer, written < 0 || (size_t)written >= sizeof buffer ? "... truncated" : NULL };
+    for (int i = 0; i < 2 && parts[i] != NULL; i++) {
+        PyObject *text = PyUnicode_FromString(parts[i]);
+        if (text != NULL) {
+            write_text(name, fallback, text);
+            Py_DECREF(text);
+        }
+        else {
+            PyErr_Clear();
+            fputs(parts[i], fallback);
+        }
     }
-    Py_XDECREF(r);
-    Py_XDECREF(text);
+    PyErr_SetRaisedException(exc);
+}
+
+/* sys_format: PyUnicode_FromFormat, unlimited. */
+static void
+format_sys(const char *name, FILE *fallback, const char *format, va_list va)
+{
+    PyObject *exc = PyErr_GetRaisedException();
+    PyObject *message = PyUnicode_FromFormatV(format, va);
+    if (message != NULL) {
+        write_text(name, fallback, message);
+        Py_DECREF(message);
+    }
     PyErr_SetRaisedException(exc);
 }
 
@@ -49,6 +80,41 @@ PySys_WriteStderr(const char *format, ...)
     va_start(ap, format);
     write_sys("stderr", stderr, format, ap);
     va_end(ap);
+}
+
+void
+PySys_FormatStdout(const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    format_sys("stdout", stdout, format, ap);
+    va_end(ap);
+}
+
+void
+PySys_FormatStderr(const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    format_sys("stderr", stderr, format, ap);
+    va_end(ap);
+}
+
+/* sys._xoptions, replaced by a new dict when it is missing or not a dict
+   (get_xoptions); borrowed. */
+PyObject *
+PySys_GetXOptions(void)
+{
+    PyObject *xoptions = PySys_GetObject("_xoptions");
+    if (xoptions == NULL || !PyDict_Check(xoptions)) {
+        xoptions = PyDict_New();
+        if (xoptions == NULL || PySys_SetObject("_xoptions", xoptions) < 0) {
+            Py_XDECREF(xoptions);
+            return NULL;
+        }
+        Py_DECREF(xoptions);    /* sys holds it */
+    }
+    return xoptions;
 }
 
 int
