@@ -396,21 +396,15 @@ _PyBytes_Find(const char *haystack, Py_ssize_t len_haystack,
 PyObject *
 PyWeakref_NewRef(PyObject *ob, PyObject *callback)
 {
-    PyObject *m = PyImport_ImportModule("weakref");
-    PyObject *r = m != NULL ? call_method(m, "ref", callback != NULL && callback != Py_None ? "(OO)" : "(O)", ob, callback)
-                            : NULL;
-    Py_XDECREF(m);
-    return r;
+    return lu_weakref_new(&_PyWeakref_RefType, ob, callback == Py_None ? NULL : callback);
 }
 
+/* A CallableProxyType for a callable referent (Objects/weakrefobject.c). */
 PyObject *
 PyWeakref_NewProxy(PyObject *ob, PyObject *callback)
 {
-    PyObject *m = PyImport_ImportModule("weakref");
-    PyObject *r = m != NULL ? call_method(m, "proxy", callback != NULL && callback != Py_None ? "(OO)" : "(O)", ob, callback)
-                            : NULL;
-    Py_XDECREF(m);
-    return r;
+    PyTypeObject *type = PyCallable_Check(ob) ? &_PyWeakref_CallableProxyType : &_PyWeakref_ProxyType;
+    return lu_weakref_new(type, ob, callback == Py_None ? NULL : callback);
 }
 
 /* A borrowed reference, as the contract says (Objects/weakrefobject.c): the
