@@ -15,6 +15,10 @@ require that a count of the tier's does not grow with the iterations:
          an exit each time.
   calls  tests/kernel/jit_calls.py, whose hot calls the tier can inline once
          it has feedback: entries into compiled code.
+A third lane allows one count per iteration:
+  inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
+         the tier cannot inline: direct calls into compiled code, one per
+         iteration for that callee, none for the method, which inlines.
 Exit status 1 on any difference.
 """
 import argparse
@@ -35,10 +39,11 @@ MODES = {
     'deopt:7': ['-X', 'lucifer_jit=always', '-X', 'lucifer_stress=deopt:7'],
 }
 TIMING = re.compile(r'\d+us')
-# lane: (program, the count in the -X lucifer_jit_stats report)
+# lane: (program, the count in the -X lucifer_jit_stats report, counts allowed per iteration)
 GROWTH = {
-    'exits': ('jit_exits.py', r'jit: entries .* side (\d+)'),
-    'calls': ('jit_calls.py', r'jit: entries (\d+)'),
+    'exits': ('jit_exits.py', r'jit: entries .* side (\d+)', 0),
+    'calls': ('jit_calls.py', r'jit: entries (\d+)', 0),
+    'inlined': ('jit_inlined_frames.py', r'direct calls (\d+)', 1),
 }
 GROWTH_N = 20000
 
@@ -58,7 +63,7 @@ def counted(lucifer, program, pattern, n, timeout):
 
 def check_growth(args, lane):
     """The count at 2N less the count at N: what the extra N iterations cost."""
-    name, pattern = GROWTH[lane]
+    name, pattern, per = GROWTH[lane]
     program = ROOT / 'tests' / 'kernel' / name
     sizes = (GROWTH_N, 2 * GROWTH_N)
     small, large = (counted(args.lucifer, program, pattern, n, args.timeout) for n in sizes)
@@ -68,7 +73,7 @@ def check_growth(args, lane):
         problems.append('output differs')
     if small[2] is None or large[2] is None:
         problems.append('no stats')
-    elif large[2] - small[2] > GROWTH_N // 20:
+    elif large[2] - small[2] > per * GROWTH_N + GROWTH_N // 20:
         problems.append(f'{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
     print(f"{'FAIL' if problems else 'PASS'} {lane}" + (': ' + '; '.join(problems) if problems else
                                                       f' ({small[2]}, {large[2]})'))
