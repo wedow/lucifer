@@ -404,3 +404,237 @@ PyUnicode_FindChar(PyObject *str, Py_UCS4 ch, Py_ssize_t start, Py_ssize_t end, 
     }
     return -1;
 }
+
+/* PyUnicode_EqualToUTF8 (Objects/unicodeobject.c): an exact comparison
+   against a UTF-8 C string, true only for a str it equals. */
+
+int
+PyUnicode_EqualToUTF8AndSize(PyObject *str, const char *other, Py_ssize_t size)
+{
+    if (!PyUnicode_Check(str)) {
+        PyErr_BadArgument();
+        return -1;
+    }
+    Py_ssize_t len;
+    const char *utf8 = PyUnicode_AsUTF8AndSize(str, &len);
+    if (utf8 == NULL) {
+        return -1;
+    }
+    return len == size && memcmp(utf8, other, size) == 0;
+}
+
+int
+PyUnicode_EqualToUTF8(PyObject *str, const char *other)
+{
+    return PyUnicode_EqualToUTF8AndSize(str, other, (Py_ssize_t)strlen(other));
+}
+
+/* _Py_UTF8_Edit_Cost (Python/suggestions.c): the Levenshtein distance over
+   the UTF-8 bytes, case flips at half the cost of any other change, bounded
+   by max_cost (-1 for "as large as needed"). */
+
+#define MOVE_COST 2
+#define CASE_COST 1
+#define MAX_STRING_SIZE 40
+#define LEAST_FIVE_BITS(n) ((n) & 31)
+
+static int
+substitution_cost(char a, char b)
+{
+    if (LEAST_FIVE_BITS(a) != LEAST_FIVE_BITS(b)) {
+        return MOVE_COST;
+    }
+    if (a == b) {
+        return 0;
+    }
+    if ('A' <= a && a <= 'Z') {
+        a += 'a' - 'A';
+    }
+    if ('A' <= b && b <= 'Z') {
+        b += 'a' - 'A';
+    }
+    return a == b ? CASE_COST : MOVE_COST;
+}
+
+static Py_ssize_t
+levenshtein_distance(const char *a, size_t a_size, const char *b, size_t b_size,
+                     size_t max_cost, size_t *buffer)
+{
+    if (a == b) {
+        return 0;
+    }
+    while (a_size && b_size && a[0] == b[0]) {
+        a++; a_size--;
+        b++; b_size--;
+    }
+    while (a_size && b_size && a[a_size-1] == b[b_size-1]) {
+        a_size--;
+        b_size--;
+    }
+    if (a_size == 0 || b_size == 0) {
+        return (a_size + b_size) * MOVE_COST;
+    }
+    if (a_size > MAX_STRING_SIZE || b_size > MAX_STRING_SIZE) {
+        return max_cost + 1;
+    }
+    if (b_size < a_size) {
+        const char *t = a; a = b; b = t;
+        size_t t_size = a_size; a_size = b_size; b_size = t_size;
+    }
+    if ((b_size - a_size) * MOVE_COST > max_cost) {
+        return max_cost + 1;
+    }
+    size_t tmp = MOVE_COST;
+    for (size_t i = 0; i < a_size; i++) {
+        buffer[i] = tmp;
+        tmp += MOVE_COST;
+    }
+    size_t result = 0;
+    for (size_t b_index = 0; b_index < b_size; b_index++) {
+        char code = b[b_index];
+        size_t distance = result = b_index * MOVE_COST;
+        size_t minimum = SIZE_MAX;
+        for (size_t index = 0; index < a_size; index++) {
+            size_t substitute = distance + substitution_cost(code, a[index]);
+            distance = buffer[index];
+            size_t insert_delete = Py_MIN(result, distance) + MOVE_COST;
+            result = Py_MIN(insert_delete, substitute);
+            buffer[index] = result;
+            if (result < minimum) {
+                minimum = result;
+            }
+        }
+        if (minimum > max_cost) {
+            return max_cost + 1;
+        }
+    }
+    return result;
+}
+
+LU_EXPORT Py_ssize_t
+_Py_UTF8_Edit_Cost(PyObject *a, PyObject *b, Py_ssize_t max_cost)
+{
+    Py_ssize_t size_a, size_b;
+    const char *utf8_a = PyUnicode_AsUTF8AndSize(a, &size_a);
+    if (utf8_a == NULL) {
+        return -1;
+    }
+    const char *utf8_b = PyUnicode_AsUTF8AndSize(b, &size_b);
+    if (utf8_b == NULL) {
+        return -1;
+    }
+    if (max_cost == -1) {
+        max_cost = MOVE_COST * Py_MAX(size_a, size_b);
+    }
+    size_t *buffer = PyMem_New(size_t, MAX_STRING_SIZE);
+    if (buffer == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    Py_ssize_t res = levenshtein_distance(utf8_a, size_a, utf8_b, size_b, max_cost, buffer);
+    PyMem_Free(buffer);
+    return res;
+}
+
+/* _PyUnicode_FromId (Objects/unicodeobject.c): each identifier holds an
+   index handed out once, and stores its interned str in that slot. The
+   array is process-wide here: the runtime has the one interpreter. */
+
+static struct {
+    PyMutex mutex;
+    Py_ssize_t next_index;
+    PyObject **array;
+    Py_ssize_t size;
+} lu_identifier_ids;
+
+PyObject *
+_PyUnicode_FromId(_Py_Identifier *id)
+{
+    PyMutex_Lock(&lu_identifier_ids.mutex);
+    Py_ssize_t index = id->index;
+    if (index < 0) {
+        index = lu_identifier_ids.next_index++;
+        id->index = index;
+    }
+    PyObject *obj = NULL;
+    if (index >= lu_identifier_ids.size) {
+        Py_ssize_t size = Py_MAX(index * 2, 16);
+        PyObject **array = PyMem_Realloc(lu_identifier_ids.array, size * sizeof *array);
+        if (array == NULL) {
+            PyErr_NoMemory();
+            goto done;
+        }
+        for (Py_ssize_t i = lu_identifier_ids.size; i < size; i++) {
+            array[i] = NULL;
+        }
+        lu_identifier_ids.array = array;
+        lu_identifier_ids.size = size;
+    }
+    else {
+        obj = lu_identifier_ids.array[index];
+    }
+    if (obj == NULL) {
+        obj = PyUnicode_DecodeUTF8(id->string, strlen(id->string), NULL);
+        if (obj == NULL) {
+            goto done;
+        }
+        PyInterpreterState *interp = PyInterpreterState_Get();
+        lu_intern(interp, &obj);
+        lu_identifier_ids.array[index] = obj;   /* strong: the table owns it */
+    }
+done:
+    PyMutex_Unlock(&lu_identifier_ids.mutex);
+    return obj;      /* borrowed */
+}
+
+/* _PyObject_GetAttrId / _PyObject_CallMethodId: the Attr calls of the
+   identifier API (Objects/object.c). */
+
+PyObject *
+_PyObject_GetAttrId(PyObject *o, _Py_Identifier *id)
+{
+    PyObject *n = _PyUnicode_FromId(id);
+    if (n == NULL) {
+        return NULL;
+    }
+    return PyObject_GetAttr(o, n);
+}
+
+int
+_PyObject_HasAttrId(PyObject *o, _Py_Identifier *id)
+{
+    PyObject *n = _PyUnicode_FromId(id);
+    if (n == NULL) {
+        return -1;
+    }
+    return PyObject_HasAttr(o, n);
+}
+
+PyObject *
+_PyObject_CallMethodId(PyObject *o, _Py_Identifier *id, const char *format, ...)
+{
+    PyObject *n = _PyUnicode_FromId(id);
+    if (n == NULL) {
+        return NULL;
+    }
+    PyObject *method = PyObject_GetAttr(o, n);
+    if (method == NULL) {
+        return NULL;
+    }
+    va_list ap;
+    va_start(ap, format);
+    PyObject *args = format != NULL && *format ? Py_VaBuildValue(format, ap) : PyTuple_New(0);
+    va_end(ap);
+    PyObject *result = NULL;
+    if (args != NULL && PyTuple_Check(args)) {
+        result = PyObject_Call(method, args, NULL);
+        Py_DECREF(args);
+    }
+    else if (args != NULL) {
+        PyObject *stack[1] = { args };
+        result = lu_call(method, stack, 1, NULL);
+        Py_DECREF(args);
+    }
+    Py_DECREF(method);
+    return result;
+}

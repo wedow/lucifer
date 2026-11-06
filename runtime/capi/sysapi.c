@@ -169,6 +169,12 @@ PyThread_get_thread_native_id(void)
     return (unsigned long)gettid();
 }
 
+LU_EXPORT unsigned long long
+PyThread_get_thread_ident_ex(void)
+{
+    return (unsigned long long)pthread_self();
+}
+
 Py_tss_t *
 PyThread_tss_alloc(void)
 {
@@ -225,36 +231,30 @@ PyThread_tss_get(Py_tss_t *key)
     return pthread_getspecific(key->_key);
 }
 
-PyObject *
-PyThreadState_GetDict(void)
-{
-    PyThreadState *ts = PyThreadState_GetUnchecked();
-    if (ts == NULL) {
-        return NULL;
-    }
-    if (ts->dict == NULL) {
-        ts->dict = PyDict_New();
-        if (ts->dict == NULL) {
-            PyErr_Clear();
-        }
-    }
-    return ts->dict;
-}
-
 /* Running code. */
 
 PyObject *
 Py_CompileStringObject(const char *str, PyObject *filename, int start, PyCompilerFlags *flags, int optimize)
 {
+    /* compile() with the C caller's flags and nothing inherited. The source
+       is bytes, so a coding cookie decides its decoding, unless the flags
+       say it is already UTF-8 text (Python/pythonrun.c). */
     const char *mode = start == Py_eval_input ? "eval" : start == Py_single_input ? "single" : "exec";
-    PyObject *source = PyUnicode_FromString(str);
+    int cf = flags != NULL ? flags->cf_flags : 0;
+    PyObject *args[6] = {
+        (cf & PyCF_IGNORE_COOKIE) ? PyUnicode_FromString(str) : PyBytes_FromString(str),
+        filename, PyUnicode_FromString(mode),
+        PyLong_FromLong(cf & ~(PyCF_IGNORE_COOKIE | PyCF_SOURCE_IS_UTF8)), Py_True,
+        PyLong_FromLong(optimize),
+    };
     PyObject *code = NULL;
-    if (source != NULL) {
-        PyObject *args[3] = { source, filename, PyUnicode_FromString(mode) };
-        code = args[2] != NULL ? lu_call(PyDict_GetItemString(PyInterpreterState_Get()->builtins, "compile"), args, 3, NULL) : NULL;
-        Py_XDECREF(args[2]);
-        Py_DECREF(source);
+    if (args[0] != NULL && args[2] != NULL && args[3] != NULL && args[5] != NULL) {
+        code = lu_call(PyDict_GetItemString(PyInterpreterState_Get()->builtins, "compile"), args, 6, NULL);
     }
+    Py_XDECREF(args[0]);
+    Py_XDECREF(args[2]);
+    Py_XDECREF(args[3]);
+    Py_XDECREF(args[5]);
     return code;
 }
 
@@ -372,4 +372,72 @@ PyContextVar_Reset(PyObject *var, PyObject *token)
     PyObject *r = PyObject_CallMethod(var, "reset", "(O)", token);
     Py_XDECREF(r);
     return r == NULL ? -1 : 0;
+}
+
+/* The clock queries (Python/pytime.c): nanoseconds since the epoch of each
+   clock. Raw and checked forms read the same clock here. */
+
+#include <time.h>
+
+static PyTime_t
+clock_ns(clockid_t id)
+{
+    struct timespec ts;
+    clock_gettime(id, &ts);
+    return (PyTime_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+int
+PyTime_Monotonic(PyTime_t *result)
+{
+    *result = clock_ns(CLOCK_MONOTONIC);
+    return 0;
+}
+
+int
+PyTime_MonotonicRaw(PyTime_t *result)
+{
+    return PyTime_Monotonic(result);
+}
+
+int
+PyTime_PerfCounter(PyTime_t *result)
+{
+    *result = clock_ns(CLOCK_MONOTONIC);
+    return 0;
+}
+
+int
+PyTime_PerfCounterRaw(PyTime_t *result)
+{
+    return PyTime_PerfCounter(result);
+}
+
+int
+PyTime_Time(PyTime_t *result)
+{
+    *result = clock_ns(CLOCK_REALTIME);
+    return 0;
+}
+
+int
+PyTime_TimeRaw(PyTime_t *result)
+{
+    return PyTime_Time(result);
+}
+
+double
+PyTime_AsSecondsDouble(PyTime_t t)
+{
+    /* Whole seconds convert exactly; volatile keeps the rounding of the
+       division what CPython's is. */
+    volatile double d;
+    if (t % 1000000000 == 0) {
+        d = (double)(t / 1000000000);
+    }
+    else {
+        d = (double)t;
+        d /= 1e9;
+    }
+    return d;
 }

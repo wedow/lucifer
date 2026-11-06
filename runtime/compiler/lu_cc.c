@@ -274,19 +274,17 @@ lu_cc_enter_recursive(const char *where)
     return 0;
 }
 
-/* The once flag: one process-wide mutex serializes every first call. */
+/* The once flag (pycore_lock.h): done, or the slow path that runs fn once
+   (runtime/thread/lock.c). */
+int _PyOnceFlag_CallOnceSlow(_PyOnceFlag *flag, _Py_once_fn_t *fn, void *arg);
+
 int
 _PyOnceFlag_CallOnce(_PyOnceFlag *flag, _Py_once_fn_t *fn, void *arg)
 {
-    static PyMutex mutex;
-    int result = 0;
-    PyMutex_Lock(&mutex);
-    if (!flag->v) {
-        result = fn(arg);
-        flag->v = result == 0;
+    if (_Py_atomic_load_uint8(&flag->v) == 4) {     /* _Py_ONCE_INITIALIZED */
+        return 0;
     }
-    PyMutex_Unlock(&mutex);
-    return result;
+    return _PyOnceFlag_CallOnceSlow(flag, fn, arg);
 }
 
 /* Objects/unicodeobject.c */

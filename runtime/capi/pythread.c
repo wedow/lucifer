@@ -1,7 +1,92 @@
 /* The PyThread lock API (Python/thread_pthread.h): a lock any thread may
-   release, on a PyMutex. */
+   release, on a PyMutex, and the thread-start calls. */
 
 #include "thread/lock.h"
+
+#include <pthread.h>
+#include <stdlib.h>
+
+/* bpo-33015: the wrapper casts "void func(void *)" to pthread's required
+   "void *func(void *)", and frees its argument record. */
+typedef struct {
+    void (*func)(void *);
+    void *arg;
+} pythread_callback;
+
+static void *
+pythread_wrapper(void *arg)
+{
+    pythread_callback callback = *(pythread_callback *)arg;
+    free(arg);
+    callback.func(callback.arg);
+    return NULL;
+}
+
+static int
+start_thread(void (*func)(void *), void *arg, pthread_t *out)
+{
+    pythread_callback *callback = malloc(sizeof *callback);
+    if (callback == NULL) {
+        return -1;
+    }
+    callback->func = func;
+    callback->arg = arg;
+    if (pthread_create(out, NULL, pythread_wrapper, callback) != 0) {
+        free(callback);
+        return -1;
+    }
+    return 0;
+}
+
+/* Cast through an integer of the same size: POSIX allows pthread_t to be a
+   non-arithmetic type (musl makes it a pointer). */
+static unsigned long
+pthread_ident(pthread_t value)
+{
+    return (unsigned long)(uintptr_t)value;
+}
+
+unsigned long
+PyThread_start_new_thread(void (*func)(void *), void *arg)
+{
+    pthread_t th;
+    if (start_thread(func, arg, &th) != 0) {
+        return PYTHREAD_INVALID_THREAD_ID;
+    }
+    pthread_detach(th);
+    return pthread_ident(th);
+}
+
+LU_EXPORT int
+PyThread_start_joinable_thread(void (*func)(void *), void *arg,
+                               PyThread_ident_t *ident, PyThread_handle_t *handle)
+{
+    pthread_t th;
+    if (start_thread(func, arg, &th) != 0) {
+        return -1;
+    }
+    *ident = pthread_ident(th);
+    *handle = (PyThread_handle_t)th;
+    return 0;
+}
+
+LU_EXPORT int
+PyThread_join_thread(PyThread_handle_t th)
+{
+    return pthread_join((pthread_t)th, NULL);
+}
+
+LU_EXPORT int
+PyThread_detach_thread(PyThread_handle_t th)
+{
+    return pthread_detach((pthread_t)th);
+}
+
+void
+PyThread_exit_thread(void)
+{
+    pthread_exit(NULL);
+}
 
 PyThread_type_lock
 PyThread_allocate_lock(void)

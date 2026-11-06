@@ -169,7 +169,7 @@ $(EXT_DIR)/slots_%$(EXT_SUFFIX): $(EXT_DIR)/slots$(EXT_SUFFIX)
 
 # The oracle's own C test modules, beside the installed standard library, for
 # the libtest modules and the capi gate programs that import them.
-LIBTEST_EXTS = _testcapi _testlimitedcapi _testinternalcapi
+LIBTEST_EXTS = _testcapi _testlimitedcapi _testinternalcapi _testmultiphase
 oracle-exts: build/lib/stamp
 	dir=$$($(ORACLE_T) -c 'import _testcapi, os; print(os.path.dirname(_testcapi.__file__))') && \
 	for m in $(LIBTEST_EXTS); do ln -sf $$dir/$$m$(EXT_SUFFIX) $(STDLIB)/; done

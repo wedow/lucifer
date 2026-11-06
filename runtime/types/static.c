@@ -48,6 +48,12 @@
     X(PyContextToken_Type, "_contextvars.Token", 0, &PyBaseObject_Type) \
     X(PyContextVar_Type, "_contextvars.ContextVar", 0, &PyBaseObject_Type) \
     X(PyContext_Type, "_contextvars.Context", 0, &PyBaseObject_Type) \
+    /* datetime's C API bases: static, as C API types must be; the Python classes are rebased onto them */ \
+    X(lu_date_base_type, "datetime._date_base", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(lu_datetime_base_type, "datetime._datetime_base", Py_TPFLAGS_BASETYPE, &lu_date_base_type) \
+    X(lu_time_base_type, "datetime._time_base", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(lu_timedelta_base_type, "datetime._timedelta_base", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
+    X(lu_tzinfo_base_type, "datetime._tzinfo_base", Py_TPFLAGS_BASETYPE, &PyBaseObject_Type) \
     X(PyCoro_Type, "coroutine", 0, &PyBaseObject_Type) \
     X(PyDictItems_Type, "dict_items", 0, &PyBaseObject_Type) \
     X(PyDictIterItem_Type, "dict_itemiterator", 0, &PyBaseObject_Type) \

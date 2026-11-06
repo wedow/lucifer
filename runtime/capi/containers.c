@@ -62,6 +62,11 @@ PySet_Contains(PyObject *anyset, PyObject *key)
         PyErr_BadInternalCall();
         return -1;
     }
+    /* The key is hashed, never compared by equality: an unhashable key is a
+       TypeError (set_contains_key), not a scan. */
+    if (PyObject_Hash(key) == -1) {
+        return -1;
+    }
     return PySequence_Contains(anyset, key);
 }
 
@@ -257,12 +262,18 @@ PyObject_IS_GC(PyObject *obj)
 PyObject *
 PyNumber_ToBase(PyObject *n, int base)
 {
-    const char *name = base == 2 ? "bin" : base == 8 ? "oct" : base == 16 ? "hex" : NULL;
-    if (name == NULL) {
+    if (!(base == 2 || base == 8 || base == 10 || base == 16)) {
         PyErr_SetString(PyExc_SystemError, "PyNumber_ToBase: base must be 2, 8, 10 or 16");
         return NULL;
     }
-    return PyObject_CallOneArg(builtin(name), n);
+    PyObject *index = PyNumber_Index(n);
+    if (index == NULL) {
+        return NULL;
+    }
+    const char *name = base == 2 ? "bin" : base == 8 ? "oct" : base == 16 ? "hex" : NULL;
+    PyObject *res = name != NULL ? PyObject_CallOneArg(builtin(name), index) : PyObject_Str(index);
+    Py_DECREF(index);
+    return res;
 }
 
 PyObject *
@@ -367,6 +378,19 @@ PyBytes_FromFormat(const char *format, ...)
     return r;
 }
 
+/* _PyBytes_Find (Objects/bytesobject.c): the first index of needle in
+   haystack, plus offset, or -1. */
+LU_EXPORT Py_ssize_t
+_PyBytes_Find(const char *haystack, Py_ssize_t len_haystack,
+              const char *needle, Py_ssize_t len_needle, Py_ssize_t offset)
+{
+    if (len_needle == 0) {
+        return offset;
+    }
+    const char *found = memmem(haystack, len_haystack, needle, len_needle);
+    return found != NULL ? found - haystack + offset : -1;
+}
+
 /* Weak references. */
 
 PyObject *
@@ -410,7 +434,12 @@ PyWeakref_GetObject(PyObject *ref)
 int
 PyWeakref_GetRef(PyObject *ref, PyObject **pobj)
 {
-    if (ref == NULL || !PyWeakref_Check(ref)) {
+    if (ref == NULL) {
+        *pobj = NULL;
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    if (!PyWeakref_Check(ref)) {
         *pobj = NULL;
         PyErr_SetString(PyExc_TypeError, "expected a weakref");
         return -1;
@@ -422,8 +451,12 @@ PyWeakref_GetRef(PyObject *ref, PyObject **pobj)
 int
 PyWeakref_IsDead(PyObject *ref)
 {
-    if (ref == NULL || !PyWeakref_Check(ref)) {
-        PyErr_Format(PyExc_TypeError, "expected a weakref, got %s", ref != NULL ? Py_TYPE(ref)->tp_name : "NULL");
+    if (ref == NULL) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    if (!PyWeakref_Check(ref)) {
+        PyErr_Format(PyExc_TypeError, "expected a weakref, got %s", Py_TYPE(ref)->tp_name);
         return -1;
     }
     PyObject *ob = lu_weakref_get(ref);

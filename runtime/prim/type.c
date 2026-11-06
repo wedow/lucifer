@@ -429,7 +429,8 @@ lu_type_name(PyTypeObject *tp)
     return PyUnicode_FromString(dot != NULL ? dot + 1 : tp->tp_name);
 }
 
-/* Instance dicts (runtime/object/attrs.c). */
+/* Instance dicts.  A static builtin type's dict is reached through
+   lu_type_dict: its own tp_dict field stays NULL (FOUNDATIONS 2.1). */
 
 /* A C caller may read or write the pointer itself, so the inline values
    move into the dict first. */
@@ -750,10 +751,23 @@ lu_types_init(PyInterpreterState *interp)
 {
     PyBaseObject_Type.tp_basicsize = sizeof(PyObject);
     PyBaseObject_Type.tp_dealloc = object_dealloc;
+    /* The datetime C API's bases take object's dealloc, so the walk in
+       compatible_for_assignment sees their layout as object's and a heap
+       class may be rebased onto them. */
+    PyTypeObject *const dt_bases[] = {
+        &lu_date_base_type, &lu_datetime_base_type, &lu_time_base_type,
+        &lu_timedelta_base_type, &lu_tzinfo_base_type,
+    };
+    for (size_t i = 0; i < sizeof dt_bases / sizeof dt_bases[0]; i++) {
+        dt_bases[i]->tp_dealloc = object_dealloc;
+    }
     PyType_Type.tp_basicsize = sizeof(PyHeapTypeObject);
     PyType_Type.tp_itemsize = sizeof(PyMemberDef);
     PyType_Type.tp_alloc = PyType_GenericAlloc;
-    PyType_Type.tp_flags |= Py_TPFLAGS_HAVE_GC;
+    PyType_Type.tp_flags |= Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_HAVE_VECTORCALL;
+    /* A class is called through the vectorcall its own tp_vectorcall names
+       (type_vectorcall in CPython); classes without one keep tp_call. */
+    PyType_Type.tp_vectorcall_offset = offsetof(PyTypeObject, tp_vectorcall);
     PyType_Type.tp_dealloc = type_dealloc;
     PyType_Type.tp_traverse = type_traverse;
     PyType_Type.tp_clear = type_clear;
@@ -1946,18 +1960,7 @@ prim_is_subtype(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* tp_new_wrapper's checks for owner.__new__(cls): cls is a subtype of owner
-   and owner is its static base, or an extension type inherited owner's tp_new. */
-/* One of the runtime's own static types, not an extension's. */
-static int
-is_runtime_type(PyTypeObject *tp)
-{
-    for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
-        if (*t == tp) {
-            return 1;
-        }
-    }
-    return 0;
-}
+   and owner is its static base, or a type that inherited owner's tp_new. */
 
 /* Set by C calling a builtin's tp_new directly (slot_tp_new_builtin): there is
    no tp_new_wrapper in that call to check, and the first check made on behalf
@@ -1987,8 +1990,10 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
         staticbase = staticbase->tp_base;
     }
     /* Exception types share one allocation rule: a static exception class
-       builds its instances with its base exception's __new__. */
-    int inherited = !is_runtime_type(staticbase) && staticbase->tp_new == owner->tp_new;
+       builds its instances with its base exception's __new__. A static base
+       that builds with owner's own tp_new (an extension's inheriting it, or
+       one of the runtime's object-like bases) inherits nothing newer. */
+    int inherited = staticbase->tp_new == owner->tp_new;
     if (staticbase != owner && !inherited
         && !(PyExceptionClass_Check(staticbase) && PyExceptionClass_Check(owner))) {
         if (staticbase->tp_new == NULL) {
@@ -2427,3 +2432,11 @@ PyMethodDef lu_prim_type_methods[] = {
       METH_FASTCALL | LU_METH_FRAME, NULL },
     { NULL, NULL, 0, NULL },
 };
+
+/* PyType_GetDict (Objects/typeobject.c): a new reference to the type's
+   dict, the static builtins' interpreter state included. */
+PyObject *
+PyType_GetDict(PyTypeObject *tp)
+{
+    return Py_XNewRef(lu_type_dict(tp));
+}

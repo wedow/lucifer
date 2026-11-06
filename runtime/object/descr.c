@@ -358,7 +358,10 @@ native_method_vectorcall(PyObject *callable, PyObject *const *args, size_t nargs
     if (check_self((PyDescrObject *)d, args, nargs, 0) < 0) {
         return NULL;
     }
-    PyObject *bound = PyCFunction_NewEx(d->d_method, args[0], NULL);
+    /* A METH_METHOD function takes the class the descriptor was made for. */
+    PyObject *bound = (d->d_method->ml_flags & METH_METHOD)
+        ? PyCMethod_New(d->d_method, args[0], NULL, PyDescr_TYPE(d))
+        : PyCFunction_NewEx(d->d_method, args[0], NULL);
     if (bound == NULL) {
         return NULL;
     }
@@ -609,25 +612,6 @@ instancemethod_repr(PyObject *self)
              funcname != NULL ? PyUnicode_AsUTF8(funcname) : "?", (void *)self);
     Py_XDECREF(funcname);
     return PyUnicode_FromString(buf);
-}
-
-static PyObject *
-instancemethod_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
-{
-    if (kwds != NULL && ((PyDictObject *)kwds)->ma_used) {
-        lu_err_format(PyExc_TypeError, "instancemethod() takes no keyword arguments");
-        return NULL;
-    }
-    if (PyTuple_GET_SIZE(args) != 1) {
-        lu_err_format(PyExc_TypeError, "instancemethod() takes exactly one argument (%zd given)",
-                      PyTuple_GET_SIZE(args));
-        return NULL;
-    }
-    if (!PyCallable_Check(PyTuple_GET_ITEM(args, 0))) {
-        lu_err_format(PyExc_TypeError, "first argument must be callable");
-        return NULL;
-    }
-    return PyInstanceMethod_New(PyTuple_GET_ITEM(args, 0));
 }
 
 PyObject *
@@ -1159,10 +1143,12 @@ lu_descr_init(void)
     PyInstanceMethod_Type.tp_setattro = PyObject_GenericSetAttr;
     PyInstanceMethod_Type.tp_richcompare = instancemethod_richcompare;
     PyInstanceMethod_Type.tp_descr_get = instancemethod_descr_get;
-    PyInstanceMethod_Type.tp_new = instancemethod_new;
     PyCFunction_Type.tp_members = cfunction_members;
     PyCFunction_Type.tp_getset = cfunction_getset;
     PyCFunction_Type.tp_call = PyVectorcall_Call;
+    PyCMethod_Type.tp_members = cfunction_members;
+    PyCMethod_Type.tp_getset = cfunction_getset;
+    PyCMethod_Type.tp_call = PyVectorcall_Call;
     layout(&PyClassMethod_Type, sizeof(classmethod), 0, classmethod,
            classmethod_members, classmethod_getset);
     PyClassMethod_Type.tp_dictoffset = offsetof(classmethod, cm_dict);
@@ -1470,7 +1456,11 @@ prim_bind(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(2);
     PyObject *d = args[0], *obj = args[1];
     if (Py_IS_TYPE(d, &PyMethodDescr_Type) || Py_IS_TYPE(d, &PyClassMethodDescr_Type)) {
-        return cfunction_bound(((PyMethodDescrObject *)d)->d_method, obj, NULL);
+        PyMethodDef *ml = ((PyMethodDescrObject *)d)->d_method;
+        /* A METH_METHOD function takes the class the descriptor was made for. */
+        return ml->ml_flags & METH_METHOD
+            ? PyCMethod_New(ml, obj, NULL, PyDescr_TYPE(d))
+            : cfunction_bound(ml, obj, NULL);
     }
     if (Py_IS_TYPE(d, &PyWrapperDescr_Type)) {
         return lu_method_wrapper_new(d, obj);
@@ -1485,6 +1475,14 @@ prim_method_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2);
     return PyMethod_New(args[0], args[1]);
+}
+
+/* instancemethod_new(func): PyInstanceMethod_New, for the kernel's __new__. */
+static PyObject *
+prim_instancemethod_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    return PyInstanceMethod_New(args[0]);
 }
 
 /* field_get(obj, i), field_set(obj, i, value): the object fields after the
@@ -1613,6 +1611,6 @@ PyMethodDef lu_prim_descr_methods[] = {
     FAST(kernel_get), FAST(setattr_native),
     FAST(make_function), FAST(make_getset), FAST(getset_kernel), FAST(getset_get),
     FAST(getset_set), FAST(member_get), FAST(member_set), FAST(descr_type), FAST(bind),
-    FAST(method_new), FAST(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set),
+    FAST(method_new), FAST(instancemethod_new), FAST(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set),
     { NULL, NULL, 0, NULL },
 };

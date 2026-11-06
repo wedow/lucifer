@@ -206,11 +206,39 @@ lu_err_format(PyObject *type, const char *format, ...)
     PyErr_SetString(type, buf);
 }
 
+/* raising MemoryError must not need memory (Objects/exceptions.c): when
+   no fresh instance can be made, the one made at boot is raised, as
+   CPython's last_resort_memory_error is. Making the fresh one can itself
+   run out and call back here, which takes the last resort at once. */
+static PyObject *memerror_last_resort;
+
+void
+lu_errors_init(void)
+{
+    PyObject *args = PyTuple_New(0);
+    memerror_last_resort = args != NULL ? exc_new(PyExc_MemoryError, args) : NULL;
+    if (memerror_last_resort == NULL) {
+        PyErr_Clear();
+    }
+}
+
 PyObject *
 PyErr_NoMemory(void)
 {
-    /* MemoryError carries no message, so raising it allocates only the instance. */
-    PyErr_SetRaisedException(exc_new(PyExc_MemoryError, PyTuple_New(0)));
+    static _Thread_local int raising;
+    if (raising) {
+        PyErr_SetRaisedException(Py_XNewRef(memerror_last_resort));
+        return NULL;
+    }
+    raising = 1;
+    PyObject *args = PyTuple_New(0);
+    PyObject *exc = args != NULL ? exc_new(PyExc_MemoryError, args) : NULL;
+    raising = 0;
+    if (exc == NULL) {
+        PyErr_Clear();
+        exc = Py_XNewRef(memerror_last_resort);
+    }
+    PyErr_SetRaisedException(exc);
     return NULL;
 }
 
@@ -667,4 +695,21 @@ PyArg_ValidateKeywordArguments(PyObject *kwargs)
         }
     }
     return 1;
+}
+
+/* lu_err_format with the exception that was set as the new one's __cause__
+   and __context__ (_PyErr_FormatFromCause). */
+void
+lu_err_format_from_cause(PyObject *type, const char *format, const char *name)
+{
+    PyObject *cause = PyErr_GetRaisedException();
+    lu_err_format(type, format, name);
+    PyObject *exc = PyErr_GetRaisedException();
+    if (exc != NULL && cause != NULL) {
+        PyException_SetCause(exc, Py_NewRef(cause));
+        PyException_SetContext(exc, cause);
+        cause = NULL;
+    }
+    Py_XDECREF(cause);
+    PyErr_SetRaisedException(exc);
 }

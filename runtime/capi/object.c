@@ -336,8 +336,10 @@ PyObject_InitVar(PyVarObject *op, PyTypeObject *tp, Py_ssize_t size)
         PyErr_NoMemory();
         return NULL;
     }
-    Py_SET_SIZE(op, size);
+    /* The type first: Py_SET_SIZE's check reads it, and the memory a fresh
+       block carries there is garbage (_PyObject_InitVar's order). */
     PyObject_Init((PyObject *)op, tp);
+    Py_SET_SIZE(op, size);
     return op;
 }
 

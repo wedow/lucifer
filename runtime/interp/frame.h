@@ -189,17 +189,21 @@ PyObject *lu_resume(PyThreadState *ts);
 
 /* Every Python frame entry (FOUNDATIONS 2.18). Returns 1 when the caller's
    loop should run `f` inline; otherwise a PEP 523 hook ran it, under a pin,
-   and *result holds what it returned. */
+   and *result holds what it returned. Kernel frames are the runtime's own
+   machinery (CPython runs it in C, where no hook sees it), and a hook's C
+   API calls - PyImport_GetModule over sys.modules, say - enter them, so
+   routing them through the hook would re-enter the hook itself. `exc` is
+   the throwflag a resumed generator enters with. */
 static inline int
-lu_enter_frame(PyThreadState *ts, struct lu_frame *f, PyObject **result)
+lu_enter_frame(PyThreadState *ts, struct lu_frame *f, int exc, PyObject **result)
 {
     _PyFrameEvalFunction hook = ts->interp->eval_frame;
-    if (hook == NULL) {
+    if (hook == NULL || f->owner == LU_FRAME_KERNEL_HIDDEN) {
         return 1;
     }
     struct lu_task *t = (struct lu_task *)ts;
     t->pin++;
-    *result = hook(ts, (struct _PyInterpreterFrame *)f, 0);
+    *result = hook(ts, (struct _PyInterpreterFrame *)f, exc);
     t->pin--;
     return 0;
 }

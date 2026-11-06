@@ -67,6 +67,13 @@ PyCode_ClearWatcher(int id)
     return 0;
 }
 
+/* The holder of the "extra" slots, and the API over it, live below
+   code_traverse; dealloc only frees what they filled. */
+typedef struct {
+    Py_ssize_t ce_size;
+    void *ce_extras[1];
+} _PyCodeObjectExtra;
+
 static void
 code_dealloc(PyObject *op)
 {
@@ -86,6 +93,16 @@ code_dealloc(PyObject *op)
     Py_XDECREF(co->co_name);
     Py_XDECREF(co->co_qualname);
     Py_XDECREF(co->co_linetable);
+    if (co->co_extra != NULL) {
+        PyInterpreterState *interp = PyInterpreterState_Get();
+        _PyCodeObjectExtra *extra = co->co_extra;
+        for (Py_ssize_t i = 0; i < extra->ce_size; i++) {
+            if (extra->ce_extras[i] != NULL && interp->co_extra_freefuncs[i] != NULL) {
+                interp->co_extra_freefuncs[i](extra->ce_extras[i]);
+            }
+        }
+        PyMem_Free(extra);
+    }
     lu_monitoring_free(co);
     lu_jit_code_free(co);
     lu_object_free(op);
@@ -96,6 +113,70 @@ static int
 code_traverse(PyObject *op, visitproc visit, void *arg)
 {
     Py_VISIT(((PyCodeObject *)op)->co_consts);
+    return 0;
+}
+
+/* The "extra" slots of PEP 523 (Objects/codeobject.c): an index each user
+   takes once, a per-code array of their void*, and a free function each. */
+
+Py_ssize_t
+PyUnstable_Eval_RequestCodeExtraIndex(freefunc free)
+{
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    PyMutex_Lock(&interp->co_extra_lock);
+    Py_ssize_t index = -1;
+    if (interp->co_extra_user_count < MAX_CO_EXTRA_USERS - 1) {
+        index = interp->co_extra_user_count;
+        interp->co_extra_freefuncs[index] = free;
+        interp->co_extra_user_count = index + 1;
+    }
+    PyMutex_Unlock(&interp->co_extra_lock);
+    return index;
+}
+
+int
+PyUnstable_Code_GetExtra(PyObject *code, Py_ssize_t index, void **extra)
+{
+    if (!PyCode_Check(code)) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    PyCodeObject *co = (PyCodeObject *)code;
+    _PyCodeObjectExtra *ce = co->co_extra;
+    *extra = index >= 0 && ce != NULL && index < ce->ce_size ? ce->ce_extras[index] : NULL;
+    return 0;
+}
+
+int
+PyUnstable_Code_SetExtra(PyObject *code, Py_ssize_t index, void *extra)
+{
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    if (!PyCode_Check(code) || index < 0 || index >= interp->co_extra_user_count) {
+        PyErr_BadInternalCall();
+        return -1;
+    }
+    PyCodeObject *co = (PyCodeObject *)code;
+    PyMutex_Lock(&interp->co_extra_lock);
+    _PyCodeObjectExtra *ce = co->co_extra;
+    if (ce == NULL || index >= ce->ce_size) {
+        Py_ssize_t size = index + 1;
+        ce = PyMem_Realloc(ce, sizeof(*ce) + (size - 1) * sizeof(void *));
+        if (ce == NULL) {
+            PyMutex_Unlock(&interp->co_extra_lock);
+            PyErr_NoMemory();
+            return -1;
+        }
+        for (Py_ssize_t i = ce->ce_size; i < size; i++) {
+            ce->ce_extras[i] = NULL;
+        }
+        ce->ce_size = size;
+        co->co_extra = ce;
+    }
+    if (ce->ce_extras[index] != NULL && interp->co_extra_freefuncs[index] != NULL) {
+        interp->co_extra_freefuncs[index](ce->ce_extras[index]);
+    }
+    ce->ce_extras[index] = extra;
+    PyMutex_Unlock(&interp->co_extra_lock);
     return 0;
 }
 
@@ -123,6 +204,32 @@ static PyObject *
 code_get_varnames(PyObject *co, void *closure)
 {
     return code_names_of_kind((PyCodeObject *)co, CO_FAST_LOCAL);
+}
+
+/* PyCode_GetCode / PyCode_GetVarnames: new references to the code object's
+   own views (Objects/codeobject.c). */
+PyObject *
+PyCode_GetCode(PyCodeObject *co)
+{
+    return lu_code_bytes(co);
+}
+
+PyObject *
+PyCode_GetVarnames(PyCodeObject *co)
+{
+    return code_names_of_kind(co, CO_FAST_LOCAL);
+}
+
+PyObject *
+PyCode_GetCellvars(PyCodeObject *co)
+{
+    return code_names_of_kind(co, CO_FAST_CELL);
+}
+
+PyObject *
+PyCode_GetFreevars(PyCodeObject *co)
+{
+    return code_names_of_kind(co, CO_FAST_FREE);
 }
 
 static PyObject *

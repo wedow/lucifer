@@ -7,7 +7,7 @@ staticmethod and super. Their layouts are native
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_dict, type_mro, type_tp_name,
     type_qualname, is_subtype, ns_get, alloc, static_type, descr_type, bind,
-    method_new, member_get, member_set, getset_kernel, getset_get, getset_set,
+    method_new, instancemethod_new, member_get, member_set, getset_kernel, getset_get, getset_set,
     field_get, field_set, ns_set, super_args, is_callable, kernel_set, kernel_get, address, function_new,
     object_hash,
 )
@@ -155,6 +155,28 @@ def kind_method(x):
 
 _method_func = ns_get(type_dict(method), '__func__', MISSING)
 _method_self = ns_get(type_dict(method), '__self__', MISSING)
+
+
+# The instance method (Objects/classobject.c), whose layout and __new__ are
+# native: a callable that binds to an instance where a class stores it.
+@kernel_type(static_type('instancemethod'))
+class instancemethod:
+    def __new__(cls, function, /):
+        if not is_callable(function):
+            error(TypeError, 'first argument must be callable')
+        return instancemethod_new(function)
+
+    def __get__(self, instance, owner=None):
+        func = member_get(_im_func, self)
+        if _class_access(instance, owner):
+            return func
+        return method_new(func, instance)
+
+    def __call__(self, /, *args, **kwargs):
+        return member_get(_im_func, self)(*args, **kwargs)
+
+
+_im_func = ns_get(type_dict(instancemethod), '__func__', MISSING)
 
 
 @kernel_type(static_type('method_descriptor'))

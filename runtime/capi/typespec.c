@@ -121,19 +121,28 @@ align_up(Py_ssize_t n)
 }
 
 /* The offset a member named __dictoffset__ and the like gives, relative to
-   the type's data when the member says so. */
+   the type's data when the member says so (special_offset_from_member). */
 static int
 special_offset(const PyMemberDef *m, Py_ssize_t data_offset, Py_ssize_t *out)
 {
     if (m == NULL) {
         return 0;
     }
-    if (m->type != Py_T_PYSSIZET || !(m->flags & Py_READONLY)) {
-        PyErr_Format(PyExc_SystemError, "%s must be a read-only Py_ssize_t member", m->name);
+    if (m->type != Py_T_PYSSIZET) {
+        PyErr_Format(PyExc_SystemError, "type of %s must be Py_T_PYSSIZET", m->name);
         return -1;
     }
-    *out = m->offset + ((m->flags & Py_RELATIVE_OFFSET) ? data_offset : 0);
-    return 0;
+    if (m->flags == Py_READONLY) {
+        *out = m->offset;
+        return 0;
+    }
+    if (m->flags == (Py_READONLY | Py_RELATIVE_OFFSET)) {
+        *out = m->offset + data_offset;
+        return 0;
+    }
+    PyErr_Format(PyExc_SystemError,
+                 "flags for %s must be Py_READONLY or (Py_READONLY | Py_RELATIVE_OFFSET)", m->name);
+    return -1;
 }
 
 static PyObject *
@@ -272,6 +281,10 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
             }
         }
         else if (s->slot == Py_tp_doc) {
+            if (doc != NULL) {
+                PyErr_SetString(PyExc_SystemError, "Multiple Py_tp_doc slots are not supported.");
+                return NULL;
+            }
             doc = s->pfunc;
         }
     }
@@ -290,10 +303,45 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
         || (modname != NULL && PyDict_SetItemString(ns, "__module__", modname) < 0)) {
         goto done;
     }
+    /* An immutable type cannot be built on mutable bases (check_immutable_bases). */
+    if (spec->flags & Py_TPFLAGS_IMMUTABLETYPE) {
+        for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); i++) {
+            PyTypeObject *b = (PyTypeObject *)PyTuple_GET_ITEM(bases, i);
+            if (!(b->tp_flags & Py_TPFLAGS_IMMUTABLETYPE)) {
+                PyErr_Format(PyExc_TypeError, "Creating immutable type %s from mutable base %N",
+                             spec->name, b);
+                goto done;
+            }
+        }
+    }
+    /* The metaclass is the most derived of the one asked for and the bases'
+       (_PyType_CalculateMetaclass); one with a tp_new of its own cannot be
+       used, as the class creation here goes through type.__new__. */
+    PyTypeObject *meta = metaclass != NULL ? metaclass : (PyTypeObject *)&PyType_Type;
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); i++) {
+        PyTypeObject *b = Py_TYPE(PyTuple_GET_ITEM(bases, i));
+        if (b == meta || PyType_IsSubtype(meta, b)) {
+            continue;
+        }
+        if (PyType_IsSubtype(b, meta)) {
+            meta = b;
+            continue;
+        }
+        PyErr_SetString(PyExc_TypeError,
+                        "metaclass conflict: the metaclass of a derived class "
+                        "must be a (non-strict) subclass of the metaclasses of "
+                        "all its bases");
+        goto done;
+    }
+    if (meta->tp_new != NULL && meta->tp_new != PyType_Type.tp_new
+        && !lu_tp_new_is_thunk(meta->tp_new)) {
+        PyErr_SetString(PyExc_TypeError, "Metaclasses with custom tp_new are not supported.");
+        goto done;
+    }
     /* type.__new__ itself: the metaclass may forbid instantiation (Cython's does),
        which only stops code calling it. */
     PyObject *type_new = PyObject_GetAttr((PyObject *)&PyType_Type, LU_ID(__new__));
-    PyObject *args[4] = { metaclass != NULL ? (PyObject *)metaclass : (PyObject *)&PyType_Type, name, bases, ns };
+    PyObject *args[4] = { (PyObject *)meta, name, bases, ns };
     cls = type_new != NULL ? lu_call(type_new, args, 4, NULL) : NULL;
     Py_XDECREF(type_new);
     if (cls == NULL) {
@@ -514,6 +562,27 @@ PyType_GetModuleState(PyTypeObject *type)
     return m != NULL ? PyModule_GetState(m) : NULL;
 }
 
+/* The module of the first heap type in type's MRO whose module was made
+   from def (Objects/typeobject.c); static types are skipped. */
+PyObject *
+PyType_GetModuleByDef(PyTypeObject *type, PyModuleDef *def)
+{
+    if (type->tp_flags & Py_TPFLAGS_HEAPTYPE) {
+        PyObject *mro = type->tp_mro;
+        for (Py_ssize_t i = 0; mro != NULL && i < PyTuple_GET_SIZE(mro); i++) {
+            PyTypeObject *super = (PyTypeObject *)PyTuple_GET_ITEM(mro, i);
+            PyObject *module = (super->tp_flags & Py_TPFLAGS_HEAPTYPE)
+                ? ((PyHeapTypeObject *)super)->ht_module : NULL;
+            if (module != NULL && ((PyModuleObject *)module)->md_def == def) {
+                return module;      /* borrowed */
+            }
+        }
+    }
+    PyErr_Format(PyExc_TypeError, "PyType_GetModuleByDef: No superclass of '%s' has the given module",
+                 type->tp_name);
+    return NULL;
+}
+
 void *
 PyObject_GetTypeData(PyObject *obj, PyTypeObject *cls)
 {
@@ -546,3 +615,17 @@ PyModule_AddType(PyObject *module, PyTypeObject *type)
     name = name != NULL ? name + 1 : type->tp_name;
     return PyModule_AddObjectRef(module, name, (PyObject *)type);
 }
+
+/* PyObject_GetItemData (Objects/typeobject.c): the items of a variable-size
+   type whose data ends the object, at its basicsize. */
+void *
+PyObject_GetItemData(PyObject *obj)
+{
+    if (!PyType_HasFeature(Py_TYPE(obj), Py_TPFLAGS_ITEMS_AT_END)) {
+        PyErr_Format(PyExc_TypeError, "type '%s' does not have Py_TPFLAGS_ITEMS_AT_END",
+                     Py_TYPE(obj)->tp_name);
+        return NULL;
+    }
+    return (char *)obj + Py_TYPE(obj)->tp_basicsize;
+}
+

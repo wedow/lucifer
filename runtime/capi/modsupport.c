@@ -490,6 +490,24 @@ Py_BuildValue(const char *format, ...)
     return retval;
 }
 
+/* The exported halves of the version helper macros (Python/modsupport.c). */
+
+#undef Py_PACK_FULL_VERSION
+#undef Py_PACK_VERSION
+
+uint32_t
+Py_PACK_FULL_VERSION(int x, int y, int z, int level, int serial)
+{
+    return (((x) & 0xff) << 24) | (((y) & 0xff) << 16) | (((z) & 0xff) << 8)
+         | (((level) & 0xf) << 4) | (((serial) & 0xf) << 0);
+}
+
+uint32_t
+Py_PACK_VERSION(int x, int y)
+{
+    return Py_PACK_FULL_VERSION(x, y, 0, 0, 0);
+}
+
 PyAPI_FUNC(PyObject *) /* abi only */
 _Py_BuildValue_SizeT(const char *format, ...)
 {

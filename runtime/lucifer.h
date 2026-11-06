@@ -377,6 +377,8 @@ struct lu_pending {
     PyMutex mutex;
     struct lu_pending_call *head, **tail;
     struct lu_task *handling;   /* the task running the queue: it is not re-entered */
+    int main_count;             /* queued main-only calls (CPython caps them at 32) */
+    int other_count;            /* queued other calls (CPython caps them at 300) */
 };
 
 /* sys.monitoring (runtime/interp/instrument.c): the tool ids, event counts
@@ -405,7 +407,13 @@ struct _is {
     PyObject *modules_by_index; /* single-phase modules, for PyState_FindModule */
     PyObject *builtins;         /* builtins.__dict__ */
     PyObject *sysdict;          /* sys.__dict__ */
+    PyObject *dict;             /* PyInterpreterState_GetDict, made on first use */
+    struct lu_atexit *atexit;   /* PyUnstable_AtExit callbacks, newest first */
+    PyMutex atexit_lock;
     PyObject *interned;         /* interned str -> itself */
+    int co_extra_user_count;    /* PyUnstable_Eval_RequestCodeExtraIndex hands out the next */
+    freefunc co_extra_freefuncs[MAX_CO_EXTRA_USERS];
+    PyMutex co_extra_lock;      /* the count, the free functions and each code's array */
     _PyFrameEvalFunction eval_frame;    /* PEP 523; NULL runs frames inline */
     uintptr_t monitoring_version;       /* a multiple of LU_POLL_VERSION_UNIT */
     PyMutex tracing_setup_lock;         /* the first sys.settrace or setprofile registers callbacks */
@@ -510,6 +518,14 @@ enum {
    fields of the tstate hold the task's frames. */
 struct lu_task {
     PyThreadState ts;
+    /* CPython's _PyThreadStateImpl continues here: a reference count, then
+       the C stack bounds PyUnstable_ThreadState_SetStackProtection records
+       (an extension reads them at these offsets, pycore_tstate.h). lucifer's
+       recursion limit is a counter, so the bounds are bookkeeping only; the
+       init pair backs ResetStackProtection. */
+    Py_ssize_t tstate_refcount;
+    uintptr_t c_stack_top, c_stack_soft_limit, c_stack_hard_limit;
+    uintptr_t c_stack_init_base, c_stack_init_top;
     uintptr_t pin;              /* transient pins: foreign C and nested evals (DESIGN 5.4) */
     int pinned_for_life;        /* main, foreign-thread and thread-scoped tasks */
     struct lu_carrier *carrier; /* the carrier whose thread it is bound to, or NULL */
@@ -1104,6 +1120,12 @@ PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
 void lu_capsule_init(void);
 int lu_fileobject_init(void);
+/* The datetime C API's static bases (runtime/types/static.c): the Python
+   implementation's classes are rebased onto them. */
+extern PyTypeObject lu_date_base_type, lu_datetime_base_type, lu_time_base_type,
+    lu_timedelta_base_type, lu_tzinfo_base_type;
+/* The last-resort MemoryError of PyErr_NoMemory (runtime/capi/errors.c). */
+void lu_errors_init(void);
 void lu_storage_init(void);
 void lu_module_init(void);
 void lu_exc_init(void);
@@ -1527,5 +1549,6 @@ PyObject *lu_range_iter(PyObject *r);
    kernel's exception classes. */
 void lu_err_format(PyObject *type, const char *format, ...)
     __attribute__((format(printf, 2, 3)));
+void lu_err_format_from_cause(PyObject *type, const char *format, const char *name);
 
 #endif

@@ -328,6 +328,13 @@ gen_get_code(PyObject *self, void *closure)
     return Py_NewRef((PyObject *)((struct lu_gen *)self)->frame.code);
 }
 
+/* PyGen_GetCode: a new reference to the generator's code (genobject.c). */
+PyCodeObject *
+PyGen_GetCode(PyGenObject *gen)
+{
+    return (PyCodeObject *)Py_NewRef((PyObject *)((struct lu_gen *)gen)->frame.code);
+}
+
 #define NAME_GETSETS \
     { "__name__", gen_get_name, gen_set_name, NULL, NULL }, \
     { "__qualname__", gen_get_name, gen_set_name, NULL, "q" }

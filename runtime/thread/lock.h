@@ -7,6 +7,40 @@
 #include "lucifer.h"
 
 #define _Py_HAS_PARKED 2
+#define _Py_ONCE_INITIALIZED 4
+
+/* The raw-thread calls of pycore_pythread.h: an identity that stays put for
+   the thread's life, and startable, joinable threads. */
+typedef unsigned long long PyThread_ident_t;
+typedef uintptr_t PyThread_handle_t;
+PyThread_ident_t PyThread_get_thread_ident_ex(void);
+int PyThread_start_joinable_thread(void (*func)(void *), void *arg,
+                                   PyThread_ident_t *ident, PyThread_handle_t *handle);
+int PyThread_join_thread(PyThread_handle_t th);
+int PyThread_detach_thread(PyThread_handle_t th);
+
+/* A recursive mutex and a readers-writer lock (pycore_lock.h). */
+typedef struct {
+    PyMutex mutex;
+    unsigned long long thread;  /* PyThread_get_thread_ident_ex() of the owner */
+    size_t level;
+} _PyRecursiveMutex;
+
+typedef struct {
+    uintptr_t bits;
+} _PyRWMutex;
+
+int _PyRecursiveMutex_IsLockedByCurrentThread(_PyRecursiveMutex *m);
+void _PyRecursiveMutex_Lock(_PyRecursiveMutex *m);
+void _PyRecursiveMutex_Unlock(_PyRecursiveMutex *m);
+int _PyRecursiveMutex_TryUnlock(_PyRecursiveMutex *m);
+void _PyRWMutex_RLock(_PyRWMutex *rwmutex);
+void _PyRWMutex_RUnlock(_PyRWMutex *rwmutex);
+void _PyRWMutex_Lock(_PyRWMutex *rwmutex);
+void _PyRWMutex_Unlock(_PyRWMutex *rwmutex);
+
+typedef int _Py_once_fn_t(void *arg);
+int _PyOnceFlag_CallOnceSlow(_PyOnceFlag *flag, _Py_once_fn_t *fn, void *arg);
 
 typedef enum _PyLockFlags {
     _Py_LOCK_DONT_DETACH = 0,           /* stay attached while waiting */

@@ -29,6 +29,77 @@ _Py_DecRef(PyObject *o)
     Py_DECREF(o);
 }
 
+/* The function halves of the reference-count and identity macros
+   (Include/object.h): extensions may #undef the macro and call these. */
+
+#undef Py_NewRef
+#undef Py_XNewRef
+
+PyObject *
+Py_NewRef(PyObject *o)
+{
+    Py_INCREF(o);
+    return o;
+}
+
+PyObject *
+Py_XNewRef(PyObject *o)
+{
+    Py_XINCREF(o);
+    return o;
+}
+
+#undef Py_Is
+#undef Py_IsNone
+#undef Py_IsTrue
+#undef Py_IsFalse
+
+int
+Py_Is(PyObject *x, PyObject *y)
+{
+    return x == y;
+}
+
+int
+Py_IsNone(PyObject *x)
+{
+    return x == Py_None;
+}
+
+int
+Py_IsTrue(PyObject *x)
+{
+    return x == Py_True;
+}
+
+int
+Py_IsFalse(PyObject *x)
+{
+    return x == Py_False;
+}
+
+/* The try-incref API (Objects/object.c): a reference if the object is alive,
+   and the flag that keeps a weakly-reachable object's shared count honest. */
+
+int
+PyUnstable_TryIncRef(PyObject *op)
+{
+    return lu_try_incref(op);
+}
+
+void
+PyUnstable_EnableTryIncRef(PyObject *op)
+{
+    lu_set_maybe_weakref(op);
+}
+
+void
+PyUnstable_DisableTryIncRef(PyObject *op)
+{
+    /* lucifer has no merging flag to clear: nothing to do. */
+    (void)op;
+}
+
 /* The only birth path (Objects/object.c new_reference). */
 void
 _Py_NewReference(PyObject *op)

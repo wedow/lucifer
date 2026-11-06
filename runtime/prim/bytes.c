@@ -2041,6 +2041,16 @@ _PyBytes_Resize(PyObject **pv, Py_ssize_t size)
         return 0;
     }
     PyObject *r = PyBytes_FromStringAndSize(NULL, size);
+    if (r == NULL) {
+        /* The failed in-place resize this stands in for leaves the object
+           itself alone: the DESTROY its move would have fired is created
+           back, and the DECREF below fires it again for real
+           (bytesobject.c bytes_resize_inplace). */
+        PyRefTracer tracer = _PyRuntime.ref_tracer.func;
+        if (tracer != NULL) {
+            tracer(v, PyRefTracer_CREATE, _PyRuntime.ref_tracer.data);
+        }
+    }
     if (r != NULL && oldsize > 0) {
         memcpy(PyBytes_AS_STRING(r), PyBytes_AS_STRING(v),
                oldsize < size ? oldsize : size);
