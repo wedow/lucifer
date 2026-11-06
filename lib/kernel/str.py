@@ -339,6 +339,22 @@ def _slice_int(x):
     return index(x)
 
 
+def _translation(getitem, table, c):
+    """charmaptranslate_lookup: what table maps code point c to, checked;
+    MISSING for a LookupError, which leaves the character as it is."""
+    try:
+        v = call_special(getitem, table, c)
+    except LookupError:
+        return MISSING
+    if v is None or kind(v, 'str'):
+        return v
+    if kind(v, 'int'):
+        if v < 0 or v > 0x10ffff:
+            error(ValueError, 'character mapping must be in range(0x110000)')
+        return v
+    error(TypeError, 'character mapping must return integer, None or str')
+
+
 @kernel_type(static_type('str'))
 class str:
     """str(object='') -> str
@@ -659,22 +675,42 @@ errors defaults to 'strict'."""
         if getitem is MISSING:
             error(TypeError, _cat("'", _name(table), "' object is not subscriptable"))
         pieces = []
-        for ch in self:
-            try:
-                v = call_special(getitem, table, str_ord(ch, 0))
-            except LookupError:
-                list_append(pieces, ch)
-                continue
-            if v is None:
-                continue
-            if kind(v, 'int'):
-                if v < 0 or v > 0x10ffff:
-                    error(ValueError, 'character mapping must be in range(0x110000)')
+        n = str_len(self)
+        i = 0
+        if str_is(self, 11):
+            # unicode_fast_translate: an ASCII string looks each character up
+            # once while every answer is one ASCII character or a deletion;
+            # from the first other answer on, each character is looked up.
+            seen = {}
+            while i < n:
+                c = str_ord(self, i)
+                r = seen.get(c, MISSING)
+                if r is MISSING:
+                    v = _translation(getitem, table, c)
+                    if v is MISSING:
+                        r = str_item(self, i)
+                    elif v is None:
+                        r = ''
+                    elif kind(v, 'int'):
+                        if v > 127:
+                            break
+                        r = str_chr(v)
+                    elif str_len(v) == 1 and str_ord(v, 0) < 128:
+                        r = str_chr(str_ord(v, 0))
+                    else:
+                        break
+                    seen[c] = r
+                list_append(pieces, r)
+                i += 1
+        while i < n:
+            v = _translation(getitem, table, str_ord(self, i))
+            if v is MISSING:
+                list_append(pieces, str_item(self, i))
+            elif kind(v, 'int'):
                 list_append(pieces, str_chr(v))
-            elif kind(v, 'str'):
+            elif v is not None:
                 list_append(pieces, v)
-            else:
-                error(TypeError, 'character mapping must return integer, None or str')
+            i += 1
         return str_join('', (*pieces,))
 
     @classmethod_
