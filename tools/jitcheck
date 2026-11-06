@@ -7,7 +7,7 @@ and always with every 7th guard failing (-X lucifer_stress=deopt:7). Output
 must match the oracle's line for line once the timings are masked, and in the
 compiling modes the tier must have compiled and entered code (its
 -X lucifer_jit_stats report), so that a lane cannot pass by not compiling.
-Then two lanes run a program under -X lucifer_jit=always at two sizes and
+Then lanes run a program each under -X lucifer_jit=always at two sizes and
 require that a count of the tier's does not grow with the iterations:
   exits  tests/kernel/jit_exits.py, whose hot code holds instructions the
          tier does not compile: side exits. Code that keeps leaving at the
@@ -20,6 +20,8 @@ require that a count of the tier's does not grow with the iterations:
   large  tests/kernel/jit_large_callees.py, whose hot call is of a function
          too large to inline whole but small along the path the program
          runs: entries into compiled code and direct calls.
+  quiet  tests/kernel/jit_quiet_misses.py, whose hot lookups miss and whose
+         hot generators end where CPython makes no exception: error exits.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct calls into compiled code, one per
@@ -55,6 +57,7 @@ GROWTH = {
     'exits': ('jit_exits.py', r'jit: entries .* side (\d+)', 0),
     'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
     'large': ('jit_large_callees.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
+    'quiet': ('jit_quiet_misses.py', r'jit: entries .* error (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+)', 1),
 }
 GROWTH_N = 20000

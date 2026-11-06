@@ -128,6 +128,30 @@ def getattr_hook(obj, name):
     return call_special(getattr_, obj, name)
 
 
+# The __getattribute__ of types and of modules, and their lookups with
+# suppress, which type.py and module.py bind.
+type_getattribute = type_getattr = module_getattribute = module_getattr = None
+
+
+def lookup_attr(obj, name):
+    """PyObject_GetOptionalAttr: the attribute, or MISSING where getattr
+    raises AttributeError. Generic, type and module attributes are looked up
+    with suppress, as CPython does, so that no AttributeError is made."""
+    tp = type(obj)
+    try:
+        if type_lookup(tp, '__getattr__') is MISSING:
+            getattribute = type_lookup(tp, '__getattribute__')
+            if getattribute is _object_getattribute:
+                return generic_getattr(obj, name, True)
+            if getattribute is type_getattribute:
+                return type_getattr(obj, name, True)
+            if getattribute is module_getattribute:
+                return module_getattr(obj, name, True)
+        return getattr_hook(obj, name)
+    except AttributeError:
+        return MISSING
+
+
 def setattr_hook(obj, name, value):
     call_special(type_lookup(type(obj), '__setattr__'), obj, name, value)
 

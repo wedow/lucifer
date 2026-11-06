@@ -1133,3 +1133,7 @@ class bytearray_iterator:
 
 _boot.builtin_sequence(bytes)
 _boot.builtin_sequence(bytearray)
+
+
+_iter.NEXT_MISSING[bytes_iterator] = b_next
+_iter.NEXT_MISSING[bytearray_iterator] = b_next

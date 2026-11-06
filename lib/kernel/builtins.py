@@ -10,7 +10,7 @@ from _lucifer import (
     object_id, caller_locals, caller_globals, caller_code_flags, eval_code, kernel_get, kernel_set,
     import_state, field_get, setattr_native, compile as _lucifer_compile,
 )
-from _lucifer import _boot, _format, operators, _args, iter as _iter
+from _lucifer import _boot, _format, operators, _args, iter as _iter, object as _object
 import sys
 
 call_special = _boot.call_special
@@ -22,6 +22,7 @@ decimal = operators.decimal
 get_iter = _iter.get_iter
 next_item = _iter.next_item
 getattr_hook = kernel_get('getattr')
+lookup_attr = _object.lookup_attr
 setattr_hook = kernel_get('setattr')
 delattr_hook = kernel_get('delattr')
 
@@ -242,10 +243,8 @@ exist; without it, an exception is raised in that case."""
     _attribute_name(name)
     if default is MISSING:
         return getattr_hook(obj, name)
-    try:
-        return getattr_hook(obj, name)
-    except AttributeError:
-        return default
+    v = lookup_attr(obj, name)
+    return default if v is MISSING else v
 
 
 def hasattr(obj, name, /):
@@ -253,11 +252,7 @@ def hasattr(obj, name, /):
 
 This is done by calling getattr(obj, name) and catching AttributeError."""
     _attribute_name(name)
-    try:
-        getattr_hook(obj, name)
-    except AttributeError:
-        return False
-    return True
+    return lookup_attr(obj, name) is not MISSING
 
 
 def setattr(obj, name, value, /):
@@ -773,16 +768,11 @@ def _remove_importlib_frames(exc):
 
 def _initializing(module):
     """Is the module's spec still being loaded (_PyModuleSpec_IsInitializing)?"""
-    try:
-        spec = getattr_hook(module, '__spec__')
-    except AttributeError:
+    spec = lookup_attr(module, '__spec__')
+    if spec is MISSING or spec is None:
         return False
-    if spec is None:
-        return False
-    try:
-        return truth(getattr_hook(spec, '_initializing'))
-    except AttributeError:
-        return False
+    initializing = lookup_attr(spec, '_initializing')
+    return initializing is not MISSING and truth(initializing)
 
 
 def _import(name, globals_, fromlist, level):
@@ -817,9 +807,7 @@ def _import(name, globals_, fromlist, level):
                 error(KeyError, str_join('', (repr(to_return), ' not in sys.modules as expected')))
             return sys.modules[to_return]
         return mod
-    try:
-        getattr_hook(mod, '__path__')
-    except AttributeError:
+    if lookup_attr(mod, '__path__') is MISSING:
         return mod
     return importlib._handle_fromlist(mod, fromlist, import_func)
 
@@ -849,14 +837,10 @@ is the number of parent directories to search relative to the current module."""
 def import_from(module, name):
     """Python/ceval.c import_from: module.name, else the submodule of that
     name in sys.modules, else an ImportError that says where the module is."""
-    try:
-        return getattr_hook(module, name)
-    except AttributeError:
-        pass
-    try:
-        package = getattr_hook(module, '__name__')
-    except AttributeError:
-        package = None
+    v = lookup_attr(module, name)
+    if v is not MISSING:
+        return v
+    package = lookup_attr(module, '__name__')
     if isinstance(package, str):
         found = sys.modules.get(package + '.' + name)
         if found is not None:

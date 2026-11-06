@@ -4,6 +4,7 @@
    (here called through a nested eval, as C callers do). None takes a
    reference it is given; each result is a new reference. */
 #include "jit/target.h"
+#include "interp/gen.h"
 #include "prim/prim.h"
 
 #include <pthread.h>
@@ -463,7 +464,9 @@ h_get_iter(PyObject *v)
     return it != NULL || PyErr_Occurred() ? it : lu_call_kernel(LU_K_get_iter, &v, 1);
 }
 
-/* The next item, LU_MISSING when exhausted, or NULL with an exception. */
+/* The next item, LU_MISSING when exhausted, or NULL with an exception. A
+   generator runs as the interpreter's FOR_ITER resumes it: its return is
+   the loop's end, with no StopIteration. */
 static PyObject *
 h_for_iter(PyObject *it)
 {
@@ -471,6 +474,18 @@ h_for_iter(PyObject *it)
     if (t == &PyListIter_Type || t == &PyTupleIter_Type || t == &PyRangeIter_Type) {
         PyObject *v = t == &PyRangeIter_Type ? lu_rangeiter_next(it) : lu_seqiter_next(it);
         return v != NULL ? v : PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
+    }
+    struct lu_task *task = lu_current_task();
+    if (t == &PyGen_Type && task->ts.interp->eval_frame == NULL) {
+        struct lu_frame *f = lu_gen_resume(&task->ts, it, NULL);
+        if (f == NULL) {
+            return PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
+        }
+        f->ret = LU_RETURN_FOR_ITER;
+        task->pin++;
+        PyObject *v = lu_eval(&task->ts, f);
+        task->pin--;
+        return v;
     }
     return lu_call_kernel(LU_K_next_item, &it, 1);
 }

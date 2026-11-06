@@ -872,3 +872,6 @@ kernel_set('format', format_value)
 
 
 _boot.builtin_sequence(str)
+
+
+_iter.NEXT_MISSING[str_iterator] = str_iter_next

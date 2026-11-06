@@ -80,16 +80,38 @@ raise a ValueError."""
         return self
 
     def __next__(self):
-        iters = field_get(self, 0)
-        values = []
-        for i in range(size(iters)):
-            v = next_item(iters[i])
-            if v is MISSING:
-                if field_get(self, 2):
-                    _check_strict('map', iters, i)
-                raise StopIteration
-            values = [*values, v]
-        return field_get(self, 1)(*values)
+        v = _map_next(self)
+        if v is MISSING:
+            raise StopIteration
+        return v
+
+
+def _map_next(self):
+    iters = field_get(self, 0)
+    values = []
+    for i in range(size(iters)):
+        v = next_item(iters[i])
+        if v is MISSING:
+            if field_get(self, 2):
+                _check_strict('map', iters, i)
+            return MISSING
+        values = [*values, v]
+    return field_get(self, 1)(*values)
+
+
+def _filter_next(self):
+    func = field_get(self, 0)
+    it = field_get(self, 1)
+    while True:
+        item = next_item(it)
+        if item is MISSING:
+            return MISSING
+        if func is None or func is bool:
+            ok = truth(item)
+        else:
+            ok = truth(func(item))
+        if ok:
+            return item
 
 
 @kernel_type(static_type('filter'))
@@ -114,18 +136,10 @@ is true. If function is None, return the items that are true."""
         return self
 
     def __next__(self):
-        func = field_get(self, 0)
-        it = field_get(self, 1)
-        while True:
-            item = next_item(it)
-            if item is MISSING:
-                raise StopIteration
-            if func is None or func is bool:
-                ok = truth(item)
-            else:
-                ok = truth(func(item))
-            if ok:
-                return item
+        v = _filter_next(self)
+        if v is MISSING:
+            raise StopIteration
+        return v
 
 
 def _zip_next(self):
@@ -279,5 +293,7 @@ class reversed:
         return 0 if position > n else position
 
 
+_iter.NEXT_MISSING[map] = _map_next
+_iter.NEXT_MISSING[filter] = _filter_next
 _iter.NEXT_MISSING[zip] = _zip_next
 _iter.NEXT_MISSING[enumerate] = _enumerate_next

@@ -248,3 +248,8 @@ class longrange_iterator:
 
     def __length_hint__(self):
         return rangeiter_len(self)
+
+
+# The iteration step without StopIteration (iter.py).
+_iter.NEXT_MISSING[range_iterator] = rangeiter_next
+_iter.NEXT_MISSING[longrange_iterator] = rangeiter_next
