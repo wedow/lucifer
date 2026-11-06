@@ -8,7 +8,11 @@
 # Python: a code point read at a time, then a slice and a concatenation)
 # inlines into its caller's loop too, for strs of every width, and so does
 # one over the items of a bytes object. So do functions taking *args and
-# **kwargs called with positional arguments.
+# **kwargs called with positional arguments. So do the kernel's argument
+# parsers that loop over or index *args (str.strip's chars, str.startswith's
+# prefix and its tuple of prefixes).
+# A function compiled before the module binds a new global keeps compiling
+# its global loads after (the module's keys are versioned again).
 # Each result must be the interpreter's; tools/jitcheck also runs this at two
 # sizes and requires that entries into compiled code do not grow with the
 # iterations, and that the tier gives up on no function.
@@ -203,4 +207,31 @@ def varargs(n):
     return s
 
 
-print(methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N), pops(N), truths(N), emptiness(N), wide(N), strings(N), octets(N), unpacking(N), varargs(N))
+def stripping(n):
+    """str methods whose kernel code iterates over and indexes *args."""
+    words = ('  a ', 'b', '\tc', 'd  ')
+    s = 0
+    for i in range(n):
+        w = words[i & 3]
+        s += len(w.strip()) + len(w.strip(' ')) + w.startswith(' ') + w.startswith(('\t', 'd'))
+    return s
+
+
+def lengths_of(ws):
+    s = 0
+    for w in ws:
+        s += len(w)
+    return s
+
+
+WORDS = ('ab', 'c') * 64
+total = 0
+for f in [lengths_of]:
+    for _ in range(100):
+        total += f(WORDS)
+    late = total
+    for _ in range(100):
+        total += f(WORDS)
+
+
+print(late, total, methods(N), lengths(N), generic(N, (1, 2), (1, 2)), attributes(N), pops(N), truths(N), emptiness(N), wide(N), strings(N), octets(N), unpacking(N), varargs(N), stripping(N))

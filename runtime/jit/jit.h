@@ -120,7 +120,7 @@ lu_jit_observe(lu_codeunit *word, PyObject *left, PyObject *right)
 }
 
 /* FOR_ITER's cache word: the iterators it has met. */
-enum { LU_ITER_RANGE = 1, LU_ITER_LIST = 2, LU_ITER_OTHER = 4 };
+enum { LU_ITER_RANGE = 1, LU_ITER_LIST = 2, LU_ITER_OTHER = 4, LU_ITER_TUPLE = 8 };
 
 static inline void
 lu_jit_observe_iter(lu_codeunit *word, PyTypeObject *t)
@@ -130,7 +130,7 @@ lu_jit_observe_iter(lu_codeunit *word, PyTypeObject *t)
     }
     uint16_t seen = __atomic_load_n(&word->cache, __ATOMIC_RELAXED);
     uint16_t now = seen | (t == &PyRangeIter_Type ? LU_ITER_RANGE : t == &PyListIter_Type ? LU_ITER_LIST
-                           : LU_ITER_OTHER);
+                           : t == &PyTupleIter_Type ? LU_ITER_TUPLE : LU_ITER_OTHER);
     if (now != seen) {
         __atomic_store_n(&word->cache, now, __ATOMIC_RELAXED);
     }

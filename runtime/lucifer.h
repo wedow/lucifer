@@ -1403,6 +1403,8 @@ PyObject *lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t
    plain arguments (dict.get, len, isinstance, ...), its result, or NULL
    (without an error) when the kernel must run. */
 PyObject *lu_subscr_native(PyObject *container, PyObject *sub);
+/* container[start:stop:step] as lu_subscr_native answers it for a slice. */
+PyObject *lu_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *step);
 int lu_compare_native(PyObject *a, PyObject *b, int oparg);
 PyObject *lu_native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize_t npos);
 /* PyObject_IsTrue: 1, 0 or -1 with an error set. */

@@ -174,7 +174,18 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(build_list) \
     X(build_tuple) \
     X(new_dict) \
-    X(contains)
+    X(contains) \
+    X(build_set) \
+    X(build_map) \
+    X(set_add) \
+    X(list_to_tuple) \
+    X(get_iter_seq) \
+    X(binary_slice) \
+    X(slice_native) \
+    X(store_slice) \
+    X(call_kw) \
+    X(call_ex) \
+    X(dict_merge)
 
 enum lu_helper_id {
 #define LU_HELPER_ENUM(name) H_##name,

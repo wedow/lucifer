@@ -62,6 +62,14 @@ lu_jit_list_item(PyObject *list, int64_t i)
     return i >= 0 ? lu_list_item_ref((PyListObject *)list, (Py_ssize_t)i) : NULL;
 }
 
+/* t[i] for -len <= i < len, else NULL (which leaves). */
+PyObject *
+lu_jit_tuple_item(PyObject *t, int64_t i)
+{
+    i += i < 0 ? Py_SIZE(t) : 0;
+    return i >= 0 && i < Py_SIZE(t) ? Py_NewRef(PyTuple_GET_ITEM(t, i)) : NULL;
+}
+
 /* list[i] = v for 0 <= i < len: 1, else 0 and nothing stored. */
 int
 lu_jit_list_store(PyObject *list, int64_t i, PyObject *v)
@@ -114,6 +122,62 @@ h_build_tuple(PyObject **argv, intptr_t n)
             PyTuple_SET_ITEM(t, i, Py_NewRef(argv[i]));
         }
     }
+    return t;
+}
+
+/* The oparg items of BUILD_SET or BUILD_MAP as one tuple, for the kernel's builder. */
+static PyObject *
+build_kernel(enum lu_kernel_id kid, PyObject **argv, intptr_t n)
+{
+    PyObject *items = h_build_tuple(argv, n);
+    PyObject *r = items != NULL ? lu_call_kernel(kid, &items, 1) : NULL;
+    Py_XDECREF(items);
+    return r;
+}
+
+static PyObject *
+h_build_set(PyObject **argv, intptr_t n)
+{
+    return build_kernel(LU_K_build_set, argv, n);
+}
+
+/* BUILD_MAP of n / 2 key, value pairs: str keys go straight in. */
+static PyObject *
+h_build_map(PyObject **argv, intptr_t n)
+{
+    for (intptr_t i = 0; i < n; i += 2) {
+        if (!PyUnicode_CheckExact(argv[i])) {
+            return build_kernel(LU_K_build_map, argv, n);
+        }
+    }
+    PyObject *map = PyDict_New();
+    for (intptr_t i = 0; map != NULL && i < n; i += 2) {
+        if (lu_ns_insert(map, argv[i], argv[i + 1]) < 0) {
+            Py_CLEAR(map);
+        }
+    }
+    return map;
+}
+
+static int
+h_set_add(PyObject *set, PyObject *v)
+{
+    PyObject *args[2] = { set, v };
+    PyObject *r = lu_call_kernel(LU_K_set_add, args, 2);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
+/* An exact list's items as a tuple, read under its lock: a tuple display's
+   list (INTRINSIC_LIST_TO_TUPLE, n < 0), or a list UNPACK_SEQUENCE unpacks
+   into n items, declined when it has another number. */
+static PyObject *
+h_list_to_tuple(PyObject *list, int64_t n)
+{
+    PyObject *t;
+    Py_BEGIN_CRITICAL_SECTION(list);
+    t = n < 0 || Py_SIZE(list) == n ? lu_args_as_tuple(Py_None, list) : LU_JIT_DECLINED;
+    Py_END_CRITICAL_SECTION();
     return t;
 }
 
@@ -492,15 +556,44 @@ call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, 
     return r;
 }
 
+/* Whether the interpreter makes a call of callable: the C stack is too
+   deep to recurse, or it is a primitive that hands the interpreter a frame
+   to run (a generator's resumption). */
+static int
+declines(PyObject *callable)
+{
+    return stack_low() || (Py_IS_TYPE(callable, &PyCFunction_Type)
+                           && (((PyCFunctionObject *)callable)->m_ml->ml_flags & LU_METH_FRAME));
+}
+
+/* The interpreter polls after a call: a signal the callee tripped is
+   handled here, and its exception is the call's. */
+static PyObject *
+polled(struct lu_task *t, PyObject *r)
+{
+    if (r != NULL && (__atomic_load_n(&t->carrier->poll, __ATOMIC_RELAXED) & LU_POLL_EVENTS_MASK)
+        && lu_poll_slow(&t->ts) < 0) {
+        Py_CLEAR(r);
+    }
+    return r;
+}
+
+/* A call through lu_call, which C callers make. */
+static PyObject *
+call_generic(PyObject *callable, PyObject *const *args, size_t nargs, PyObject *kwnames)
+{
+    struct lu_task *t = lu_current_task();
+    t->pin++;
+    PyObject *r = lu_call(callable, args, nargs, kwnames);
+    t->pin--;
+    return polled(t, r);
+}
+
 /* argv: the callable, self or NULL, then the arguments. */
 static PyObject *
 h_call(PyObject **argv, intptr_t n)
 {
-    if (stack_low()
-        || (Py_IS_TYPE(argv[0], &PyCFunction_Type)
-            && (((PyCFunctionObject *)argv[0])->m_ml->ml_flags & LU_METH_FRAME))) {
-        /* Too deep to recurse, or a primitive that hands the interpreter a
-           frame to run (a generator's resumption): the interpreter calls it. */
+    if (declines(argv[0])) {
         return LU_JIT_DECLINED;
     }
     struct lu_task *t = lu_current_task();
@@ -546,18 +639,89 @@ h_call(PyObject **argv, intptr_t n)
         goto called;
     }
     if (r == NULL && !PyErr_Occurred()) {
-        t->pin++;
-        r = lu_call(callable, args, nargs, NULL);
-        t->pin--;
+        return call_generic(callable, args, nargs, NULL);
     }
-    /* The interpreter polls after a call: a signal the callee tripped is
-       handled here, and its exception is the call's. */
 called:
-    if (r != NULL && (__atomic_load_n(&t->carrier->poll, __ATOMIC_RELAXED) & LU_POLL_EVENTS_MASK)
-        && lu_poll_slow(&t->ts) < 0) {
-        Py_CLEAR(r);
+    return polled(t, r);
+}
+
+/* CALL_KW: argv as h_call's, then the keyword names. */
+static PyObject *
+h_call_kw(PyObject **argv, intptr_t n)
+{
+    if (declines(argv[0])) {
+        return LU_JIT_DECLINED;
+    }
+    PyObject *kwnames = argv[n - 1];
+    PyObject *const *args = argv[1] != NULL ? argv + 1 : argv + 2;
+    size_t total = (size_t)(argv[1] != NULL ? n - 2 : n - 3);
+    return call_generic(argv[0], args, total - (size_t)PyTuple_GET_SIZE(kwnames), kwnames);
+}
+
+/* CALL_FUNCTION_EX: callable(*callargs, **kwargs), kwargs NULL without. */
+static PyObject *
+h_call_ex(PyObject *callable, PyObject *callargs, PyObject *kwargs)
+{
+    if (declines(callable)) {
+        return LU_JIT_DECLINED;
+    }
+    PyObject *t = lu_args_as_tuple(callable, callargs), *kwnames, *r = NULL;
+    Py_ssize_t npos;
+    PyObject **args = t != NULL ? lu_unpack_call(t, kwargs, &npos, &kwnames) : NULL;
+    Py_XDECREF(t);
+    if (args != NULL) {
+        r = call_generic(callable, args, (size_t)npos, kwnames);
+        Py_ssize_t total = npos + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
+        for (Py_ssize_t i = 0; i < total; i++) {
+            Py_DECREF(args[i]);
+        }
+        Py_XDECREF(kwnames);
+        PyMem_Free(args - 1);
     }
     return r;
+}
+
+/* DICT_MERGE: a call's **update into its keyword dict. */
+static int
+h_dict_merge(PyObject *func, PyObject *dict, PyObject *update)
+{
+    if (PyDict_CheckExact(update) && lu_dict_str_keys(update) && lu_dict_str_keys(dict)) {
+        return lu_dict_merge(func, dict, update);
+    }
+    char buf[256];
+    PyObject *args[3] = { dict, update, PyUnicode_FromString(lu_function_str(func, buf, sizeof buf)) };
+    PyObject *r = args[2] != NULL ? lu_call_kernel(LU_K_dict_merge, args, 3) : NULL;
+    Py_XDECREF(args[2]);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
+/* BINARY_SLICE: container[start:stop]. Unless `generic`, it declines what
+   needs the kernel, which runs Python. */
+static PyObject *
+h_binary_slice(PyObject *container, PyObject *start, PyObject *stop, int64_t generic)
+{
+    PyObject *r = lu_slice_native(container, start, stop, NULL);
+    if (r != NULL || PyErr_Occurred()) {
+        return r;
+    }
+    if (!generic) {
+        return LU_JIT_DECLINED;
+    }
+    PyObject *args[2] = { container, PySlice_New(start, stop, NULL) };
+    r = args[1] != NULL ? lu_call_kernel(LU_K_getitem, args, 2) : NULL;
+    Py_XDECREF(args[1]);
+    return r;
+}
+
+/* STORE_SLICE: container[start:stop] = v. */
+static int
+h_store_slice(PyObject *v, PyObject *container, PyObject *start, PyObject *stop)
+{
+    PyObject *slice = PySlice_New(start, stop, NULL);
+    int err = slice != NULL ? h_setitem(container, slice, v) : -1;
+    Py_XDECREF(slice);
+    return err;
 }
 
 /* DELETE_SUBSCR */
@@ -653,4 +817,15 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, IF_RAISE, 0 },
     [H_new_dict] = { (void *)h_new_dict, "new_dict", REP_OBJ, IF_RAISE, 0 },
     [H_contains] = { (void *)h_contains, "contains", REP_OBJ, IF_RAISE | IF_PY, 3 },
+    [H_build_set] = { (void *)h_build_set, "build_set", REP_OBJ, IF_RAISE | IF_PY, 0 },
+    [H_build_map] = { (void *)h_build_map, "build_map", REP_OBJ, IF_RAISE | IF_PY, 0 },
+    [H_set_add] = { (void *)h_set_add, "set_add", REP_BIT, IF_RAISE | IF_PY, 2 },
+    [H_list_to_tuple] = { (void *)h_list_to_tuple, "list_to_tuple", REP_OBJ, IF_RAISE, 2 },
+    [H_get_iter_seq] = { (void *)lu_get_iter_exact, "get_iter_seq", REP_OBJ, IF_RAISE, 1 },
+    [H_binary_slice] = { (void *)h_binary_slice, "binary_slice", REP_OBJ, IF_RAISE | IF_PY, 4 },
+    [H_slice_native] = { (void *)h_binary_slice, "slice_native", REP_OBJ, IF_RAISE, 4 },
+    [H_store_slice] = { (void *)h_store_slice, "store_slice", REP_BIT, IF_RAISE | IF_PY, 4 },
+    [H_call_kw] = { (void *)h_call_kw, "call_kw", REP_OBJ, IF_RAISE | IF_PY, 0 },
+    [H_call_ex] = { (void *)h_call_ex, "call_ex", REP_OBJ, IF_RAISE | IF_PY, 3 },
+    [H_dict_merge] = { (void *)h_dict_merge, "dict_merge", REP_BIT, IF_RAISE | IF_PY, 3 },
 };

@@ -92,7 +92,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(GUARD_FRAMES, REP_NONE, IF_GUARD | IF_EFFECT) /* a call left no inlined frame pushed (runtime/jit/deopt.c) */ \
     X(LOAD, REP_NONE, 0)                /* *(a + imm), rep set by the builder; a borrowed object; imm2 4: 32 bits */ \
     X(STORE, REP_NONE, IF_EFFECT)       /* *(a + imm) = b, raw */ \
-    X(LIST_ITEM, REP_OBJ, IF_GUARD | IF_CALL)   /* a: an exact list, b: i64 index; deopts out of range */ \
+    X(LIST_ITEM, REP_OBJ, IF_GUARD | IF_CALL)   /* a: an exact list (imm 1: tuple), b: i64 index; deopts out of range */ \
     X(LIST_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL)     /* a[b] = c, borrowing c */ \
     X(STR_ORD, REP_I64, IF_GUARD)       /* a: an exact str, b: i64 index; the code point; deopts out of range */ \
     X(BYTES_ITEM, REP_I64, IF_GUARD)    /* a: an exact bytes, b: i64 index; the byte; deopts out of range */ \

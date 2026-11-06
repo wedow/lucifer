@@ -88,13 +88,21 @@ other machines).
   (`lu_subscr_native`, `lu_compare_native`, `lu_native_call`,
   `lu_getattr_native`, `lu_setattr_native`) before the kernel, and
   primitives marked `LU_METH_NOPY` are called from inlined frames too.
+  Comprehensions, slices, tuple displays from a starred list, and calls with
+  keywords or star arguments compile at the root; inlined frames build,
+  iterate, index and slice exact lists and tuples, so the kernel's
+  argument parsers over `*args` inline.
+- **Globals.** A global load is a constant guarded on the dicts' keys
+  versions. A module that binds a new name has its keys versioned again at
+  the next compile, as the interpreter's specializer does.
 - **Flags.**
   - `-X lucifer_jit=off|on|always` selects the mode.
-  - `-X lucifer_jit_stats` prints compiles, exits by reason, and side exits by
-    opcode.
+  - `-X lucifer_jit_stats` prints compiles, exits by reason, side exits by
+    opcode, and the functions disabled or retired.
   - `-X lucifer_stress=deopt:N` fails every Nth guard.
   - `-X perf` writes `/tmp/perf-PID.map`.
-  - `LUCIFER_JIT_{DEBUG,DUMP,ONLY}` are debugging aids.
+  - `LUCIFER_JIT_{DEBUG,DUMP,ONLY}` are debugging aids; `DEBUG` names each
+    exit (reason, innermost code and pc, opcode) and each failed compile.
 
 ## Correctness
 
