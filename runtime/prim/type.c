@@ -2206,10 +2206,10 @@ prim_super_args(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_RuntimeError, "super(): no arguments");
         return NULL;
     }
-    PyObject *first = f->localsplus[0];
+    PyObject *first = lu_frame_slot(f, 0);
     const char *kinds = PyBytes_AS_STRING(co->co_localspluskinds);
     if (first != NULL && (kinds[0] & CO_FAST_CELL) && PyCell_Check(first)) {
-        first = ((PyCellObject *)first)->ob_ref;
+        Py_SETREF(first, Py_XNewRef(((PyCellObject *)first)->ob_ref));
     }
     if (first == NULL) {
         lu_err_format(PyExc_RuntimeError, "super(): arg[0] deleted");
@@ -2220,24 +2220,25 @@ prim_super_args(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         if (!lu_str_eq(name, LU_ID(__class__))) {
             continue;
         }
-        PyObject *cell = f->localsplus[i];
+        PyObject *cell = lu_frame_slot(f, i);
         PyObject *cls = cell != NULL ? ((PyCellObject *)cell)->ob_ref : NULL;
+        PyObject *pair = NULL;
         if (cls == NULL) {
             lu_err_format(PyExc_RuntimeError, "super(): empty __class__ cell");
-            return NULL;
         }
-        if (!PyType_Check(cls)) {
+        else if (!PyType_Check(cls)) {
             lu_err_format(PyExc_RuntimeError, "super(): __class__ is not a type (%s)",
                           Py_TYPE(cls)->tp_name);
-            return NULL;
         }
-        PyObject *pair = PyTuple_New(2);
-        if (pair != NULL) {
+        else if ((pair = PyTuple_New(2)) != NULL) {
             PyTuple_SET_ITEM(pair, 0, Py_NewRef(cls));
             PyTuple_SET_ITEM(pair, 1, Py_NewRef(first));
         }
+        Py_XDECREF(cell);
+        Py_DECREF(first);
         return pair;
     }
+    Py_DECREF(first);
     lu_err_format(PyExc_RuntimeError, "super(): __class__ cell not found");
     return NULL;
 }

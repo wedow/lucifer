@@ -119,8 +119,7 @@ out_text(int fd, PyObject *s)
 static int
 is_user_frame(struct lu_frame *f)
 {
-    if (f->owner == LU_FRAME_C_ENTRY || f->owner == LU_FRAME_KERNEL_HIDDEN || f->code == NULL
-        || (f->code->co_flags & LU_CO_KERNEL)) {
+    if (f->owner == LU_FRAME_C_ENTRY || f->code == NULL || (f->code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN))) {
         return 0;
     }
     PyObject *file = f->code->co_filename;

@@ -10,7 +10,9 @@
 
    Calls clobber every register (the donor's rule: all registers are dead
    across a call, FOUNDATIONS 2.11), so a value live across one gets a
-   spill word for its whole interval. The rest go through linear scan over
+   spill word for its whole interval. A call that publishes the root
+   frame's state (lu_publishes) reads the root locals it names during the
+   call, so they count as live across it. The rest go through linear scan over
    the target's general and float registers; when none is free, the
    interval that ends last is spilled. Constants take no location: the
    backend makes them at each use. Phis get locations like any value, and
@@ -236,6 +238,16 @@ lu_regalloc(struct lu_func *f)
             if (ins->op != OP_PHI) {
                 struct use_at at = { ins->pos };
                 each_use(f, ins, extend_use, &at);
+            }
+            if (lu_publishes(ins)) {
+                struct lu_fs *root = ins->fs;
+                while (root->caller != NULL) {
+                    root = root->caller;
+                }
+                struct use_at after = { ins->pos + 1 };
+                for (int i = 0; i < root->nlocals; i++) {
+                    use_of(f, root->vals[i], extend_use, &after);
+                }
             }
             if ((lu_op_flags[ins->op] & IF_CALL) && ins->op != OP_PHI) {
                 calls[ncalls++] = ins->pos;

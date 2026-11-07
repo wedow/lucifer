@@ -174,12 +174,27 @@ to it:
   nothing and reads through the record. After the frame exits it takes a copy
   (CPython's `take_ownership`).
 - `FrameLocalsProxy` writes go to the fast-locals array. If the frame is `jit`,
-  the write first deopts that frame, so a register copy never goes stale.
+  the write first gives it real slots, and compiled code leaves the frame when
+  the call it is in returns, so a register copy never goes stale.
 - One `lu_frame_walk(task, visit)` serves `sys._getframe`, traceback creation,
   `PyThreadState_GetFrame`, the GC's deferred-root scan, deopt reconstruction,
   tracemalloc and faulthandler.
   - JIT frames expose their values through per-safepoint descriptors, and
-    virtual objects' referents count as roots.
+    virtual objects' referents count as roots. Compiled code owns a `jit`
+    frame's locals and stack (counted references, so the collector needs
+    nothing from it) and its slots hold nothing. Before each call that may
+    run Python it publishes the call's exit description and its spill words,
+    where the allocator keeps every local the description names for the
+    call's duration; after the call it withdraws them. A reader of the
+    frame's locals (`lu_frame_slot`) decodes them from there, building a box
+    for a raw int or float. The frame's own task can only read it from inside
+    such a call. Any other task stops the world first, and every stopped
+    task is then either inside such a call or out of compiled code: a
+    compiled poll leaves through its exit, which gives the frame back to the
+    interpreter. The stop's handshake orders the publication before the read,
+    and the owner cannot change the spill words while it is stopped. A frame
+    stopped elsewhere in compiled code (a finalizer run by a release) has
+    published nothing, and reads as having no bound locals.
   - Links are single-store pushes and pops, so a signal-time reader
     (faulthandler) sees a valid chain with a possibly lagging `instr`. That is
     CPython's guarantee.
