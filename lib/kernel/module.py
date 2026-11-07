@@ -3,9 +3,9 @@ attribute lookup that falls back to the module's __getattr__ (PEP 562)."""
 
 from _lucifer import (
     error, str_join, kind, static_type, alloc, instance_dict, ns_get, module_init, import_state,
-    kernel_get, MISSING,
+    kernel_get, MISSING, type_dict,
 )
-from _lucifer import _boot
+from _lucifer import _boot, object as _object
 
 kernel_type = _boot.kernel_type
 generic_getattr = kernel_get('generic_getattr')
@@ -21,6 +21,35 @@ def _initializing(spec):
         return bool(spec._initializing)
     except AttributeError:
         return False
+
+
+def _module_getattr(self, name, suppress=False):
+    """module_getattro: generic lookup, then the module's __getattr__; MISSING
+    instead of AttributeError when suppress."""
+    try:
+        v = generic_getattr(self, name, True)
+    except AttributeError:
+        v = MISSING
+    if v is not MISSING:
+        return v
+    d = instance_dict(self, True)
+    hook = ns_get(d, '__getattr__', MISSING)
+    if hook is not MISSING:
+        return hook(name)
+    if suppress:
+        return MISSING
+    module_name = ns_get(d, '__name__', MISSING)
+    if kind(module_name, 'str'):
+        spec = ns_get(d, '__spec__', None)
+        if _initializing(spec):
+            text = str_join('', ("partially initialized module '", module_name,
+                                 "' has no attribute '", name,
+                                 "' (most likely due to a circular import)"))
+        else:
+            text = str_join('', ("module '", module_name, "' has no attribute '", name, "'"))
+    else:
+        text = str_join('', ("module has no attribute '", name, "'"))
+    raise AttributeError(text, name=name, obj=self)
 
 
 @kernel_type(static_type('module'))
@@ -46,26 +75,7 @@ The name must be a string; the optional doc argument can have any type."""
         return importlib._module_repr(self)
 
     def __getattribute__(self, name):
-        try:
-            return generic_getattr(self, name)
-        except AttributeError:
-            pass
-        d = instance_dict(self, True)
-        hook = ns_get(d, '__getattr__', MISSING)
-        if hook is not MISSING:
-            return hook(name)
-        module_name = ns_get(d, '__name__', MISSING)
-        if kind(module_name, 'str'):
-            spec = ns_get(d, '__spec__', None)
-            if _initializing(spec):
-                text = str_join('', ("partially initialized module '", module_name,
-                                     "' has no attribute '", name,
-                                     "' (most likely due to a circular import)"))
-            else:
-                text = str_join('', ("module '", module_name, "' has no attribute '", name, "'"))
-        else:
-            text = str_join('', ("module has no attribute '", name, "'"))
-        raise AttributeError(text, name=name, obj=self)
+        return _module_getattr(self, name)
 
     def __dir__(self):
         d = instance_dict(self, True)
@@ -73,3 +83,7 @@ The name must be a string; the optional doc argument can have any type."""
         if hook is not MISSING:
             return hook()
         return list(d)
+
+
+_object.module_getattribute = ns_get(type_dict(module), '__getattribute__', MISSING)
+_object.module_getattr = _module_getattr

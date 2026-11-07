@@ -245,13 +245,15 @@ unbox_phis(struct lu_func *f, int rep)
     lu_v zero = LU_NOV, unbound = LU_NOV, bound = LU_NOV;
     for (int v = 0; v < n; v++) {
         if (cand[v]) {
-            struct lu_ins *in = &f->ins[v];
-            raw[v] = lu_ir_emit(f, in->block, OP_PHI, rep, LU_NOV, LU_NOV, LU_NOV, in->imm);
+            /* lu_ir_emit may move the instructions: no pointer into them is kept. */
+            int block = f->ins[v].block;
+            int64_t imm = f->ins[v].imm;
+            raw[v] = lu_ir_emit(f, block, OP_PHI, rep, LU_NOV, LU_NOV, LU_NOV, imm);
             f->ins[raw[v]].nargs = f->ins[v].nargs;
             f->ins[raw[v]].args = malloc(sizeof(lu_v) * (size_t)f->ins[v].nargs);
             bit[v] = LU_NOV;
             if (maybe_null[v]) {
-                bit[v] = lu_ir_emit(f, in->block, OP_PHI, REP_BIT, LU_NOV, LU_NOV, LU_NOV, in->imm);
+                bit[v] = lu_ir_emit(f, block, OP_PHI, REP_BIT, LU_NOV, LU_NOV, LU_NOV, imm);
                 f->ins[bit[v]].nargs = f->ins[v].nargs;
                 f->ins[bit[v]].args = malloc(sizeof(lu_v) * (size_t)f->ins[v].nargs);
                 if (zero == LU_NOV) {

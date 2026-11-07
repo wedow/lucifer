@@ -75,6 +75,13 @@ _dict0, _dict1, _dict2 = _DICT_ITERATORS
 NEXT_MISSING = {}
 
 
+def ends_quietly(t):
+    """Whether next_item steps an iterator of exact type t without its end
+    raising StopIteration, which then has no value: as tp_iternext."""
+    return (t is _seq0 or t is _seq1 or t is _dict0 or t is _dict1 or t is _dict2
+            or NEXT_MISSING.get(t) is not None)
+
+
 def next_item(it):
     """The step of FOR_ITER and next(): the next item, or MISSING when the
     iterator is exhausted."""

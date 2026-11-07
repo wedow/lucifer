@@ -73,6 +73,12 @@ check_except_type(PyObject *right)
     return 0;
 }
 
+int
+lu_exc_match(PyObject *exc, PyObject *type)
+{
+    return check_except_type(type) < 0 ? -1 : PyErr_GivenExceptionMatches(exc, type);
+}
+
 #define UNBOUNDFREE_ERROR_MSG \
     "cannot access free variable '%s' where it is not associated with a value" \
     " in enclosing scope"
@@ -416,8 +422,18 @@ lu_subscr_native(PyObject *container, PyObject *sub)
         && _PyLong_CompactValue((PyLongObject *)sub) < PyBytes_GET_SIZE(container)) {
         return lu_small_int((unsigned char)PyBytes_AS_STRING(container)[_PyLong_CompactValue((PyLongObject *)sub)]);
     }
-    if (PyDict_CheckExact(container) && lu_dict_find_native(container, sub, &item) > 0) {
+    int found = PyDict_CheckExact(container) ? lu_dict_find_native(container, sub, &item) : -1;
+    if (found > 0) {
         return item;
+    }
+    if (found == 0) {
+        /* An exact dict has no __missing__: its __getitem__ raises KeyError(sub). */
+        PyObject *args = PyTuple_Pack(1, sub);
+        if (args != NULL) {
+            PyErr_SetObject(PyExc_KeyError, args);
+            Py_DECREF(args);
+        }
+        return NULL;
     }
     if (Py_IS_TYPE(sub, &PySlice_Type)) {
         PySliceObject *slc = (PySliceObject *)sub;
@@ -3632,6 +3648,12 @@ op_RAISE_VARARGS: {
         }
         goto exception_unwind;
     }
+    if (lu_raise_native(sp[-oparg], oparg == 2 ? sp[-1] : LU_MISSING)) {
+        while (oparg-- > 0) {
+            Py_DECREF(POP());
+        }
+        goto error;
+    }
     sp -= oparg;
     kargs[0] = sp[0];
     kargs[1] = oparg == 2 ? sp[1] : Py_NewRef(LU_MISSING);
@@ -3684,10 +3706,9 @@ op_POP_EXCEPT: {
 op_CHECK_EXC_MATCH: {
     /* left, right -- left, left matches right */
     PyObject *right = POP();
-    int ok = check_except_type(right);
-    int match = ok == 0 && PyErr_GivenExceptionMatches(TOP(), right);
+    int match = lu_exc_match(TOP(), right);
     Py_DECREF(right);
-    if (ok < 0) {
+    if (match < 0) {
         SAVE_FRAME();
         goto error;
     }

@@ -1894,6 +1894,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         if ((h->flags & IF_RAISE) && in->fs != NULL && (h->rep == REP_BIT || h->rep == REP_OBJ)) {
             err = exit_to(a, in->fs, EXIT_ERROR, 1, in->drop);
         }
+        int caught = (in->flags & INS_CAUGHT) != 0;     /* the code branches on NULL itself */
         int inlined = (h->flags & IF_PY) && in->fs != NULL && in->fs->caller != NULL;
         if (inlined && err < 0) {
             a->f->fail = "a Python call from an inlined frame without an exit";
@@ -1914,7 +1915,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             b1(a, 0xFF);                        /* cmp eax, -1 */
             jcc(a, CC_E, err);
         }
-        else if (err >= 0 && h->rep == REP_OBJ) {
+        else if (err >= 0 && h->rep == REP_OBJ && !caught) {
             test_rr(a, RAX, RAX);
             jcc(a, CC_E, err);
         }

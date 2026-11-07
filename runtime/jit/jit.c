@@ -12,10 +12,12 @@
    not to be speculated on again (the donor's exit-driven recompile).
 
    An exit no recompile can remove (an instruction the tier does not
-   compile, an exception) costs an exit and, at the next call or back-edge,
-   an entry. A unit without loops does a bounded amount of work per entry;
-   when such a unit leaves that way on most of its entries, it costs more
-   than it saves, and its entry stays in the interpreter.
+   compile, an exception the unit does not handle) costs an exit and, at
+   the next call or back-edge, an entry. A unit without loops does a
+   bounded amount of work per entry; when such a unit leaves that way on
+   most of its entries, it costs more than it saves, and its entry stays in
+   the interpreter. An exception that leaves the root frame is no such
+   exit: the call ends there.
 
    Code the interpreter has not run (on the first call under
    -X lucifer_jit=always, or a path that turned hot later) has no feedback
@@ -26,6 +28,7 @@
 #include "jit/target.h"
 #include "interp/specialize.h"
 #include "interp/perf.h"
+#include "interp/exceptions.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -537,9 +540,38 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     return 1;
 }
 
+/* Whether frame k of an error exit has a handler where it stands: the
+   innermost at the raising instruction, each caller at its call. */
+int
+lu_jit_handles(struct lu_deopt *d, int k)
+{
+    struct lu_deopt_frame *fr = &d->frames[k];
+    lu_codeunit *start = lu_code_start(fr->code);
+    int at = k == d->nframes - 1 ? fr->pc : (int)(lu_instr_before(fr->code, start + fr->pc) - start);
+    int level, handler, lasti;
+    return lu_exception_handler(fr->code, at, &level, &handler, &lasti);
+}
+
+/* The frame of an error exit whose handler takes its exception, as the
+   interpreter unwinds it, or -1 when the exception leaves the root frame. */
+static int
+handling_frame(struct lu_deopt *d)
+{
+    int k = d->nframes - 1;
+    while (k >= 0 && !lu_jit_handles(d, k)) {
+        k--;
+    }
+    return k;
+}
+
 /* An exit was taken: its counts; for a guard that keeps failing, no
    more speculation there and a recompile of the code it left; for a unit
-   without loops that keeps leaving, the interpreter at its entry. */
+   without loops that keeps leaving, the interpreter at its entry. An
+   exception that leaves the root frame ends the call there: the
+   interpreter only unwinds it, so it is not a leave. One that an inlined
+   frame's handler keeps taking (compiled code takes only the root's and
+   kernel frames', which make no traceback entry) is treated as a side
+   exit there: the function is called instead, and its own unit takes it. */
 void
 lu_jit_note_exit(struct lu_deopt *d)
 {
@@ -551,17 +583,23 @@ lu_jit_note_exit(struct lu_deopt *d)
                 PyUnicode_AsUTF8(in->code->co_qualname), in->pc, d->opcode, d->nframes);
     }
     struct lu_unit *u = d->unit;
+    int handled = d->reason == EXIT_ERROR ? handling_frame(d) : d->nframes - 1;
+    if (handled < 0) {
+        return;
+    }
     if (d->reason == EXIT_ERROR || (d->reason == EXIT_SIDE && d->nframes == 1)) {
         unsigned long n = bump(&u->leaves);
         if (!u->loops && n >= LEAVES && 2 * n >= __atomic_load_n(&u->entries, __ATOMIC_RELAXED)) {
             retire(state_for(d->frames[0].code), u);
         }
+        if (d->reason != EXIT_ERROR || handled == 0) {
+            return;
+        }
+    }
+    if (d->reason != EXIT_GUARD && d->reason != EXIT_ERROR && !(d->reason == EXIT_SIDE && d->nframes > 1)) {
         return;
     }
-    if (d->reason != EXIT_GUARD && !(d->reason == EXIT_SIDE && d->nframes > 1)) {
-        return;
-    }
-    struct lu_deopt_frame *inner = &d->frames[d->nframes - 1];
+    struct lu_deopt_frame *inner = &d->frames[handled];
     struct lu_jit_code *jc = state_for(inner->code);
     if (inner->pc < 0 || inner->pc >= jc->ncode) {
         return;
@@ -570,7 +608,7 @@ lu_jit_note_exit(struct lu_deopt *d)
        the flag was set leaves here as well, and is recompiled when it does. */
     uint16_t n = __atomic_add_fetch(&jc->fails[inner->pc], 1, __ATOMIC_RELAXED);
     if (n >= GUARD_FAILS) {
-        if (d->reason == EXIT_SIDE) {
+        if (d->reason != EXIT_GUARD) {
             /* The inlined copy keeps leaving here: it is called instead from
                now on (and if that call leaves its caller's copy, the caller next). */
             __atomic_store_n(&jc->noinline, 1, __ATOMIC_RELAXED);

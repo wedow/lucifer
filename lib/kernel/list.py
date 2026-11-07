@@ -416,3 +416,6 @@ class list_reverseiterator:
 
 
 _boot.builtin_sequence(list)
+
+
+_iter.NEXT_MISSING[list_reverseiterator] = seqiter_next

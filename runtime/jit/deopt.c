@@ -28,6 +28,7 @@
 #include <string.h>
 
 void lu_jit_note_exit(struct lu_deopt *d);
+int lu_jit_handles(struct lu_deopt *d, int k);
 int lu_jit_next_pc(PyCodeObject *code, int pc);
 
 struct built {
@@ -190,6 +191,20 @@ lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root)
     ts->current_frame = (struct _PyInterpreterFrame *)root;
 }
 
+/* Whether an exception leaves every inlined frame of the exit as the
+   interpreter would unwind them unseen: each is kernel code, which makes
+   no traceback entry and no event, with no handler where it stands. */
+static int
+unwinds_unseen(struct lu_deopt *d)
+{
+    for (int k = 1; k < d->nframes; k++) {
+        if (!(d->frames[k].code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) || lu_jit_handles(d, k)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 int
 lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
              const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills)
@@ -215,7 +230,11 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
         Py_FatalError("lucifer jit: kept frames do not match the exit");
     }
     struct lu_deopt_frame *fr = &d->frames[0];
-    PyObject **old = malloc(sizeof(PyObject *) * (size_t)(fr->nlocals + 1));
+    int nvals = 1;
+    for (int k = 0; k < d->nframes; k++) {
+        nvals += d->frames[k].nlocals + d->frames[k].nstack;
+    }
+    PyObject **old = malloc(sizeof(PyObject *) * (size_t)nvals);
     int nold = 0;
     for (int i = 0; i < fr->nlocals; i++) {
         PyObject *cur = root->localsplus[i];
@@ -234,7 +253,18 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     root->stackpointer = sp;
     root->instr = root->last = lu_code_start(fr->code) + fr->pc;
     struct lu_frame *top = root;
-    for (int k = 1; k < d->nframes; k++) {
+    /* An exception the inlined frames would pass on unseen is the root's
+       at its call: they are not made, and what they held is released. */
+    int unseen = d->error && kept == NULL && d->nframes > 1 && unwinds_unseen(d);
+    for (int k = 1; unseen && k < d->nframes; k++) {
+        fr = &d->frames[k];
+        for (int i = 0; i < fr->nlocals + fr->nstack; i++) {
+            if (fr->vals[i].kind == DV_OBJ && fr->vals[i].owned) {
+                old[nold++] = (PyObject *)(uintptr_t)raw(&r, &fr->vals[i]);
+            }
+        }
+    }
+    for (int k = 1; !unseen && k < d->nframes; k++) {
         fr = &d->frames[k];
         struct lu_frame *f;
         if (kept != NULL) {
@@ -263,7 +293,7 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
         top = f;
     }
     ts->current_frame = (struct _PyInterpreterFrame *)top;
-    if (d->error) {
+    if (d->error && !unseen) {
         /* The raising instruction consumed its operands; the interpreter
            unwinds from the instruction after it. */
         for (int i = 0; i < d->drop; i++) {

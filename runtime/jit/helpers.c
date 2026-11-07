@@ -4,6 +4,8 @@
    (here called through a nested eval, as C callers do). None takes a
    reference it is given; each result is a new reference. */
 #include "jit/target.h"
+#include "interp/exceptions.h"
+#include "interp/gen.h"
 #include "prim/prim.h"
 
 #include <pthread.h>
@@ -463,7 +465,9 @@ h_get_iter(PyObject *v)
     return it != NULL || PyErr_Occurred() ? it : lu_call_kernel(LU_K_get_iter, &v, 1);
 }
 
-/* The next item, LU_MISSING when exhausted, or NULL with an exception. */
+/* The next item, LU_MISSING when exhausted, or NULL with an exception. A
+   generator runs as the interpreter's FOR_ITER resumes it: its return is
+   the loop's end, with no StopIteration. */
 static PyObject *
 h_for_iter(PyObject *it)
 {
@@ -471,6 +475,18 @@ h_for_iter(PyObject *it)
     if (t == &PyListIter_Type || t == &PyTupleIter_Type || t == &PyRangeIter_Type) {
         PyObject *v = t == &PyRangeIter_Type ? lu_rangeiter_next(it) : lu_seqiter_next(it);
         return v != NULL ? v : PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
+    }
+    struct lu_task *task = lu_current_task();
+    if (t == &PyGen_Type && task->ts.interp->eval_frame == NULL) {
+        struct lu_frame *f = lu_gen_resume(&task->ts, it, NULL);
+        if (f == NULL) {
+            return PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
+        }
+        f->ret = LU_RETURN_FOR_ITER;
+        task->pin++;
+        PyObject *v = lu_eval(&task->ts, f);
+        task->pin--;
+        return v;
     }
     return lu_call_kernel(LU_K_next_item, &it, 1);
 }
@@ -787,6 +803,72 @@ h_call_special(PyObject **argv, intptr_t n)
     return h_call(argv, n);     /* obj as the self word: args are argv + 1 */
 }
 
+/* --- exceptions --- */
+
+/* The landing of an exception a handler of the unit takes (ssa_build.c
+   catch_here): the exception, taken, after the root frame's traceback
+   entry at code unit lasti (none when -1). NULL with the exception still
+   set where the interpreter unwinds instead: a tool watches exceptions
+   raised or handled, or a call kept inlined frames pushed, so that the
+   root is not the task's current frame. */
+static PyObject *
+h_catch(PyObject *code, int64_t lasti)
+{
+    PyThreadState *ts = PyThreadState_Get();
+    struct lu_frame *f = (struct lu_frame *)ts->current_frame;
+    if (f->code != (PyCodeObject *)code || !lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RAISE)
+        || !lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_EXCEPTION_HANDLED)) {
+        return NULL;
+    }
+    if (lasti >= 0) {
+        lu_traceback_here(f, lasti);
+    }
+    return PyErr_GetRaisedException();
+}
+
+/* PUSH_EXC_INFO: exc becomes the handled exception; the one before it (or None). */
+static PyObject *
+h_push_exc_info(PyObject *exc)
+{
+    _PyErr_StackItem *info = PyThreadState_Get()->exc_info;
+    PyObject *prev = info->exc_value;
+    info->exc_value = Py_NewRef(exc);
+    return prev != NULL ? prev : Py_NewRef(Py_None);
+}
+
+/* POP_EXCEPT: prev (None for none) is the handled exception again. */
+static void
+h_pop_except(PyObject *prev)
+{
+    _PyErr_StackItem *info = PyThreadState_Get()->exc_info;
+    PyObject *old = info->exc_value;
+    info->exc_value = prev == Py_None ? NULL : Py_NewRef(prev);
+    Py_XDECREF(old);
+}
+
+static PyObject *
+h_exc_match(PyObject *exc, PyObject *type)
+{
+    int match = lu_exc_match(exc, type);
+    return match < 0 ? NULL : match ? Py_True : Py_False;
+}
+
+/* RAISE_VARARGS with an exception, and its cause or MISSING: always NULL. */
+static PyObject *
+h_raise(PyObject *exc, PyObject *cause)
+{
+    if (lu_raise_native(exc, cause)) {
+        return NULL;
+    }
+    PyObject *args[2] = { exc, cause };
+    PyObject *r = lu_call_kernel(LU_K_do_raise, args, 2);
+    if (r != NULL) {
+        Py_DECREF(r);
+        lu_err_format(PyExc_SystemError, "do_raise returned");
+    }
+    return NULL;
+}
+
 const struct lu_helper lu_helpers[H_COUNT] = {
     [H_box_int] = { (void *)lu_jit_box_int, "box_int", REP_OBJ, 0, 1 },
     [H_box_float] = { (void *)lu_jit_box_float, "box_float", REP_OBJ, 0, 1 },
@@ -840,4 +922,9 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_call_kw] = { (void *)h_call_kw, "call_kw", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_call_ex] = { (void *)h_call_ex, "call_ex", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_dict_merge] = { (void *)h_dict_merge, "dict_merge", REP_BIT, IF_RAISE | IF_PY, 3 },
+    [H_catch] = { (void *)h_catch, "catch", REP_OBJ, IF_RAISE, 2 },
+    [H_push_exc_info] = { (void *)h_push_exc_info, "push_exc_info", REP_OBJ, 0, 1 },
+    [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, 0, 1 },
+    [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, IF_RAISE, 2 },
+    [H_raise] = { (void *)h_raise, "raise", REP_OBJ, IF_RAISE | IF_PY, 2 },
 };

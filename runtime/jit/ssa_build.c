@@ -26,8 +26,11 @@
    Primitives the kernel calls become IR (float_add is ADD_F). Anything
    the builder does not compile leaves the root frame to the interpreter
    (DEOPT, a side exit), and an inlined call that meets one is not
-   inlined. */
+   inlined. An exception leaves through its instruction's frame state,
+   unless a handler of the unit takes it: then the instruction branches
+   to the handler, whose blocks are reachable for that (catch_here). */
 #include "jit/target.h"
+#include "interp/exceptions.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -53,9 +56,20 @@ struct bblk {
     int npreds;                 /* static predecessors among reachable code */
     int succ[2], nsucc;         /* the blocks it can jump or fall to */
     int phis;                   /* the entry state is phis */
+    int exc;                    /* an exception handler: edges come from raising instructions */
     int has;                    /* the entry state is set */
+    int folded;                 /* built taking the edges it had as all it gets */
     int done;
     struct bstate in;
+};
+
+/* An exception landing whose handler is a caller's (catch_here): its
+   block, ended once the inline that made it holds (wire_pending), with the
+   handler's frame state at the handler. */
+struct pending {
+    struct ctx *k;
+    int block, handler;
+    struct bstate st;
 };
 
 struct ctx {
@@ -84,6 +98,8 @@ struct ctx {
     int failed;                 /* an inlined frame met what it cannot compile */
     const char *why;            /* why, for LUCIFER_JIT_DEBUG */
     int ncalls;                 /* calls it cannot inline (opaque_call) */
+    struct pending *pend;       /* landings for a caller's handlers, wired once the inline holds */
+    int npend, cappend;
     int units;                  /* code units compiled */
 };
 
@@ -403,14 +419,42 @@ helper(struct ctx *c, int id, int nargs, const lu_v *args)
     return v;
 }
 
+static int catcher(struct ctx *c, struct lu_fs *fs, struct ctx **k, int *handler, int *level, int *lasti,
+                   int *at);
+static void catch_here(struct ctx *c, struct lu_fs *fs, int drop, struct ctx *k, int handler, int level,
+                       int lasti, int at);
+
 /* A helper that may raise: it leaves at the state before the instruction,
-   minus the `drop` stack entries the instruction consumed. */
+   minus the `drop` stack entries the instruction consumed. With
+   helper_raising, an object result raised where a handler of this unit
+   takes the exception (catcher) branches there instead (catch_here). */
 static lu_v
-helper_raising(struct ctx *c, int id, int nargs, const lu_v *args, int drop)
+helper_leaving(struct ctx *c, int id, int nargs, const lu_v *args, int drop)
 {
     lu_v v = helper(c, id, nargs, args);
     I(c, v)->fs = before(c);
     I(c, v)->drop = (uint8_t)drop;
+    return v;
+}
+
+static lu_v
+helper_raising(struct ctx *c, int id, int nargs, const lu_v *args, int drop)
+{
+    lu_v v = helper_leaving(c, id, nargs, args, drop);
+    struct lu_fs *fs = I(c, v)->fs;
+    struct ctx *k;
+    int handler, level, lasti, at;
+    if (lu_helpers[id].rep == REP_OBJ && catcher(c, fs, &k, &handler, &level, &lasti, &at)) {
+        I(c, v)->flags |= INS_CAUGHT;
+        lu_v raised = emit(c, OP_IS, REP_BIT, v, konst(c, NULL), LU_NOV, 0);
+        int landing = lu_ir_block(c->f), cont = lu_ir_block(c->f);
+        lu_ir_edge(c->f, c->cur, landing);
+        lu_ir_edge(c->f, c->cur, cont);
+        emit(c, OP_BRANCH, REP_NONE, raised, LU_NOV, LU_NOV, 0);
+        c->cur = landing;
+        catch_here(c, fs, drop, k, handler, level, lasti, at);
+        c->cur = cont;
+    }
     return v;
 }
 
@@ -545,6 +589,158 @@ branch_to(struct ctx *c, lu_v bit, int pc_true, int pc_false)
     c->cur = -1;
 }
 
+/* --- exceptions --- */
+
+static int
+hidden(PyCodeObject *co)
+{
+    return (co->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) != 0;
+}
+
+/* Whether a block the handler bi leads to was built taking the edges it
+   had as all it gets (build_block): a first edge into the handler now
+   would come too late for it. */
+static int
+folded_after(struct ctx *c, int bi)
+{
+    char *seen = calloc((size_t)c->nbb, 1);
+    int *work = malloc(sizeof(int) * (size_t)c->nbb), nw = 0, found = 0;
+    seen[bi] = 1;
+    work[nw++] = bi;
+    while (nw > 0 && !found) {
+        struct bblk *b = &c->bb[work[--nw]];
+        for (int i = 0; i < b->nsucc; i++) {
+            int s = b->succ[i];
+            found |= c->bb[s].folded;
+            if (!seen[s]) {
+                seen[s] = 1;
+                work[nw++] = s;
+            }
+        }
+    }
+    free(seen);
+    free(work);
+    return found;
+}
+
+/* Where an exception raised by the current instruction is handled in this
+   unit, as the interpreter would unwind it: the frame k whose exception
+   table covers the instruction (the call, in a caller), the handler with
+   its stack level and lasti flag, and the instruction there (at). Only
+   through frames that make no traceback entry (kernel code) and the root,
+   whose frame is real; and only to a handler not built yet. fs is c's
+   state before the instruction. */
+static int
+catcher(struct ctx *c, struct lu_fs *fs, struct ctx **k, int *handler, int *level, int *lasti, int *at)
+{
+    for (struct ctx *x = c; x != NULL; x = x->parent, fs = fs->caller) {
+        if (x->parent != NULL && !hidden(x->code)) {
+            return 0;
+        }
+        lu_codeunit *start = lu_code_start(x->code);
+        int pc = (int)(lu_instr_before(x->code, start + x->next) - start);
+        if (lu_exception_handler(x->code, pc, level, handler, lasti)) {
+            int bi = *handler < x->ncode ? x->blkat[*handler] : -1;
+            if (bi < 0 || !x->bb[bi].exc || x->bb[bi].done || *level > fs->nstack
+                || (!x->bb[bi].has && folded_after(x, bi))) {
+                return 0;
+            }
+            *k = x;
+            *at = pc;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The landing of an exception raised by the instruction whose state is
+   fs, which frame k's handler takes: the exception, with the root's
+   traceback entry when the root is the frame it is caught in (kernel
+   frames make none), then the frames it leaves released, then k's state at
+   the handler, its stack cut to the handler's level with lasti and the
+   exception pushed. Where the interpreter must unwind (a tool is watching
+   exceptions, or a call kept inlined frames pushed), the landing leaves as
+   the instruction's error exit. */
+static void
+catch_here(struct ctx *c, struct lu_fs *fs, int drop, struct ctx *k, int handler, int level,
+           int lasti, int at)
+{
+    struct ctx *root = c;
+    while (root->parent != NULL) {
+        root = root->parent;
+    }
+    lu_v args[2] = { konst(c, (PyObject *)root->code), const_i(c, k == root && !hidden(root->code) ? at : -1) };
+    lu_v exc = helper(c, H_catch, 2, args);
+    I(c, exc)->fs = fs;
+    I(c, exc)->drop = (uint8_t)drop;
+    struct lu_fs *kfs = fs;
+    for (struct ctx *x = c; x != k; x = x->parent) {
+        kfs = kfs->caller;
+    }
+    struct bstate saved = k->st;
+    int saved_cur = k->cur;
+    state_init(k, &k->st);
+    memcpy(k->st.v, kfs->vals, sizeof(lu_v) * (size_t)(kfs->nlocals + level));
+    memcpy(k->st.own, kfs->owned, (size_t)(kfs->nlocals + level));
+    k->st.sp = level;
+    k->cur = c->cur;
+    if (lasti) {
+        PyObject *n = PyLong_FromLong(at);
+        push(k, konst(k, n), 0);
+        Py_DECREF(n);
+    }
+    push(k, exc, 1);
+    normalize(k);
+    /* What the frames the exception leaves held, after the handler's state took its references. */
+    struct lu_fs *x = fs;
+    for (; x != kfs; x = x->caller) {
+        for (int i = 0; i < x->nlocals + x->nstack; i++) {
+            release(c, x->vals[i], x->owned[i]);
+        }
+    }
+    for (int i = x->nlocals + level; i < x->nlocals + x->nstack; i++) {
+        release(c, x->vals[i], x->owned[i]);
+    }
+    if (k == c) {
+        jump_to(k, handler);
+    }
+    else {
+        /* A caller's handler: its blocks change only once the inline holds,
+           so that an inline undone leaves them as they were. */
+        if (c->npend == c->cappend) {
+            c->cappend = c->cappend ? 2 * c->cappend : 4;
+            c->pend = realloc(c->pend, sizeof(struct pending) * (size_t)c->cappend);
+        }
+        c->pend[c->npend++] = (struct pending){ k, c->cur, handler, k->st };
+    }
+    k->st = saved;
+    k->cur = saved_cur;
+}
+
+/* The landings an inline that holds made for the handlers of c and its callers. */
+static void
+wire_pending(struct ctx *c, struct ctx *callee)
+{
+    for (int i = 0; i < callee->npend; i++) {
+        struct pending *p = &callee->pend[i];
+        if (p->k != c) {
+            if (c->npend == c->cappend) {
+                c->cappend = c->cappend ? 2 * c->cappend : 4;
+                c->pend = realloc(c->pend, sizeof(struct pending) * (size_t)c->cappend);
+            }
+            c->pend[c->npend++] = *p;
+            continue;
+        }
+        struct bstate saved = c->st;
+        int saved_cur = c->cur;
+        c->st = p->st;
+        c->cur = p->block;
+        jump_to(c, p->handler);
+        c->st = saved;
+        c->cur = saved_cur;
+    }
+}
+
 /* --- bytecode --- */
 
 static int
@@ -600,6 +796,7 @@ supported(int op)
     case DELETE_SUBSCR: case LOAD_FAST_AND_CLEAR: case LIST_APPEND: case SET_ADD: case MAP_ADD:
     case BUILD_SET: case BUILD_MAP: case CALL_INTRINSIC_1: case BINARY_SLICE: case STORE_SLICE:
     case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
+    case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case DELETE_FAST:
         return 1;
     default:
         return 0;
@@ -619,6 +816,13 @@ is_branch(int op)
         || op == POP_JUMP_IF_NOT_NONE || op == FOR_ITER;
 }
 
+/* Instructions after which control never falls through. */
+static int
+terminal(int op)
+{
+    return op == RETURN_VALUE || op == RAISE_VARARGS || op == RERAISE;
+}
+
 static int
 jump_target(int op, int oparg, int next)
 {
@@ -635,50 +839,69 @@ scan(struct ctx *c, int entry)
 {
     int n = c->ncode;
     char *reach = calloc((size_t)n + 1, 1), *start = calloc((size_t)n + 1, 1);
+    char *ins = calloc((size_t)n + 1, 1), *exc = calloc((size_t)n + 1, 1);
     int *preds = calloc((size_t)n + 1, sizeof(int));
-    int *work = malloc(sizeof(int) * ((size_t)n + 1) * 2), nw = 0;
+    int *work = malloc(sizeof(int) * ((size_t)n + 1) * 3), nw = 0;
     c->blkat = lu_ir_alloc(c->f, sizeof(int) * ((size_t)n + 1));
     start[entry] = 1;
     preds[entry] = 1;
     work[nw++] = entry;
-    while (nw > 0) {
-        int pc = work[--nw];
-        while (pc < n && !reach[pc]) {
-            int base, oparg, opcode;
-            reach[pc] = 1;
-            int next = decode(c, pc, &base, &oparg, &opcode);
-            int ends = base == RETURN_VALUE || !supported(base) || is_jump(base);
-            if (is_jump(base) || is_branch(base)) {
-                int t = jump_target(base, oparg, next);
-                if (t < 0 || t >= n) {
-                    free(reach); free(start); free(preds); free(work);
-                    return -1;
+    for (;;) {
+        while (nw > 0) {
+            int pc = work[--nw];
+            while (pc < n && !reach[pc]) {
+                int base, oparg, opcode;
+                reach[pc] = 1;
+                ins[pc] = 1;
+                int next = decode(c, pc, &base, &oparg, &opcode);
+                int ends = terminal(base) || !supported(base) || is_jump(base);
+                if (is_jump(base) || is_branch(base)) {
+                    int t = jump_target(base, oparg, next);
+                    if (t < 0 || t >= n) {
+                        free(reach); free(start); free(ins); free(exc); free(preds); free(work);
+                        return -1;
+                    }
+                    start[t] = 1;
+                    preds[t]++;
+                    work[nw++] = t;
                 }
-                start[t] = 1;
-                preds[t]++;
-                work[nw++] = t;
+                if (is_branch(base)) {
+                    start[next] = 1;
+                    preds[next]++;
+                    work[nw++] = next;
+                    break;
+                }
+                if (ends) {
+                    break;
+                }
+                for (int k = pc + 1; k < next; k++) {
+                    reach[k] = 1;   /* EXTENDED_ARG's instruction and caches */
+                }
+                if (next < n && start[next]) {
+                    preds[next]++;
+                    work[nw++] = next;
+                    break;
+                }
+                pc = next;
             }
-            if (is_branch(base)) {
-                start[next] = 1;
-                preds[next]++;
-                work[nw++] = next;
-                break;
+            if (pc < n && reach[pc] && start[pc] && nw >= 0) {
+                /* reached an already scanned block start by fall-through: counted above */
             }
-            if (ends) {
-                break;
-            }
-            for (int k = pc + 1; k < next; k++) {
-                reach[k] = 1;   /* EXTENDED_ARG's instruction and caches */
-            }
-            if (next < n && start[next]) {
-                preds[next]++;
-                work[nw++] = next;
-                break;
-            }
-            pc = next;
         }
-        if (pc < n && reach[pc] && start[pc] && nw >= 0) {
-            /* reached an already scanned block start by fall-through: counted above */
+        /* The handlers of what is reachable are reachable: raising
+           instructions may branch to them (catch_here). */
+        int found = 0;
+        for (int pc = 0; pc < n; pc++) {
+            int level, handler, lasti;
+            if (ins[pc] && lu_exception_handler(c->code, pc, &level, &handler, &lasti)
+                && handler >= 0 && handler < n && !exc[handler]) {
+                exc[handler] = start[handler] = 1;
+                work[nw++] = handler;
+                found = 1;
+            }
+        }
+        if (!found) {
+            break;
         }
     }
     /* A fall-through into a block start found later is a predecessor too. */
@@ -697,12 +920,15 @@ scan(struct ctx *c, int entry)
         if (start[pc] && reach[pc]) {
             c->bb[k].pc = pc;
             c->bb[k].npreds = preds[pc];
+            c->bb[k].exc = exc[pc];
             c->bb[k].id = -1;
             c->blkat[pc] = k++;
         }
     }
     free(reach);
     free(start);
+    free(ins);
+    free(exc);
     free(preds);
     free(work);
     return 0;
@@ -731,7 +957,7 @@ count_fallthrough(struct ctx *c)
                     }
                 }
             }
-            if (base == RETURN_VALUE || !supported(base) || is_jump(base)) {
+            if (terminal(base) || !supported(base) || is_jump(base)) {
                 break;
             }
             if (next >= c->ncode) {
@@ -745,6 +971,11 @@ count_fallthrough(struct ctx *c)
                 break;
             }
             pc = next;
+        }
+    }
+    for (int k = 0; k < c->nbb; k++) {
+        if (c->bb[k].exc) {
+            c->bb[k].npreds += 2;       /* any number of raising instructions: a join */
         }
     }
 }
@@ -1257,7 +1488,8 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         int at = co->co_argcount;
         if (co->co_flags & CO_VARARGS) {
             int extra = nargs > at ? nargs - at : 0;
-            k->st.v[at] = extra ? helper_raising(c, H_build_tuple, extra, args + at, 0)
+            /* Leaving, not caught: an inline undone must leave the caller's handlers as they were. */
+            k->st.v[at] = extra ? helper_leaving(c, H_build_tuple, extra, args + at, 0)
                                 : konst(c, (PyObject *)&_PyRuntime.singletons.empty_tuple);
             k->st.own[at] = extra != 0;
             set_made(c, k->st.v[at], &PyTuple_Type);
@@ -1267,7 +1499,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
             at++;
         }
         if (co->co_flags & CO_VARKEYWORDS) {
-            k->st.v[at] = helper_raising(c, H_new_dict, 0, NULL, 0);
+            k->st.v[at] = helper_leaving(c, H_new_dict, 0, NULL, 0);
             k->st.own[at] = 1;
             set_made(c, k->st.v[at], &PyDict_Type);
         }
@@ -1308,6 +1540,10 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         *result = LU_NOV;
         *result_owned = 0;
     }
+    if (ok) {
+        wire_pending(c, k);
+    }
+    free(k->pend);
     free(k->rets);
     if (!ok && _PyRuntime.jit.debug) {
         fprintf(stderr, "jit: not inlined %s: %s\n", PyUnicode_AsUTF8(fn->func_qualname),
@@ -2729,6 +2965,54 @@ translate(struct ctx *c)
         push(c, v, 1);
         return 0;
     }
+    case PUSH_EXC_INFO:
+        /* exc -- prev_exc, exc */
+        v = pop(c, &own);
+        push(c, helper(c, H_push_exc_info, 1, &v), 1);
+        push(c, v, own);
+        return 0;
+    case POP_EXCEPT:
+        v = pop(c, &own);
+        helper(c, H_pop_except, 1, &v);
+        release(c, v, own);
+        return 0;
+    case CHECK_EXC_MATCH: {
+        /* exc, type -- exc, bool */
+        lu_v args[2] = { peek(c, 2), peek(c, 1) };
+        own = peek_owned(c, 1);
+        v = helper_raising(c, H_exc_match, 2, args, 1);
+        pop(c, NULL);
+        release(c, args[1], own);
+        push(c, v, 0);
+        return 0;
+    }
+    case RAISE_VARARGS: {
+        /* raise exc [from cause]; a bare raise re-raises without a traceback
+           entry here. An inlined frame raises only to a handler of the unit:
+           else the side exit costs the same, and its boxes stay virtual. */
+        struct ctx *k;
+        int handler, level, lasti, at;
+        if (oparg == 0 || (c->parent != NULL && !catcher(c, before(c), &k, &handler, &level, &lasti, &at))) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[2] = { peek(c, oparg), oparg == 2 ? peek(c, 1) : konst(c, LU_MISSING) };
+        helper_raising(c, H_raise, 2, args, oparg);
+        side_exit(c, EXIT_SIDE);        /* not reached: the helper always raises */
+        return 0;
+    }
+    case DELETE_FAST:
+        /* A local known bound: an unbound one raises, in the interpreter. */
+        v = c->st.v[oparg];
+        if (v == LU_NOV) {
+            unsupported(c);
+            return -1;
+        }
+        if (I(c, v)->op == OP_ENTRY_LOCAL || I(c, v)->op == OP_PHI) {
+            guard(c, OP_GUARD_NOT_NULL, v, 0);
+        }
+        store_local(c, oparg, LU_NOV, 0);
+        return 0;
     default:
         unsupported(c);
         return -1;
@@ -2743,7 +3027,7 @@ settled(struct ctx *c, int k, char *memo)
 {
     if (memo[k] == 0) {
         memo[k] = 2;
-        int ok = c->bb[k].done || !c->bb[k].has;
+        int ok = c->bb[k].done || (!c->bb[k].has && !c->bb[k].exc);      /* a handler may still be reached */
         for (int j = 0; ok && !c->bb[k].done && j < c->nbb; j++) {
             for (int i = 0; ok && i < c->bb[j].nsucc; i++) {
                 ok = c->bb[j].succ[i] != k || settled(c, j, memo);
@@ -2777,7 +3061,8 @@ build_block(struct ctx *c, int bi)
     b->done = 1;
     c->cur = b->id;
     state_copy(c, &c->st, &b->in);
-    if (b->phis && preds_built(c, bi)) {
+    if (b->phis && !b->exc && preds_built(c, bi)) {
+        b->folded = 1;
         /* A join with every edge it will get: if they agree, it has that
            value, and a constant stays one for what folds on it. Each edge
            makes its own constant, so constants agree by object; a NULL
@@ -2949,6 +3234,7 @@ lu_ssa_build(struct lu_func *f, struct lu_frame *frame)
     }
     f->ins[room].imm = f->room;
     free(c->rets);
+    free(c->pend);
     if (r < 0 && f->fail == NULL) {
         f->fail = "build failed";
     }

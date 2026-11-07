@@ -68,6 +68,56 @@ PyErr_Occurred(void)
         ? (PyObject *)Py_TYPE(ts->current_exception) : NULL;
 }
 
+/* Whether calling `tp` runs only BaseException's own __new__ and __init__,
+   which CPython has in C: they store the arguments as args, and nothing
+   else can observe the call. */
+static int
+plain_exception(PyTypeObject *tp)
+{
+    PyTypeObject *base = (PyTypeObject *)PyExc_BaseException;
+    return Py_IS_TYPE(tp, &PyType_Type)
+        && _PyType_Lookup(tp, LU_ID(__new__)) == _PyType_Lookup(base, LU_ID(__new__))
+        && _PyType_Lookup(tp, LU_ID(__init__)) == _PyType_Lookup(base, LU_ID(__init__));
+}
+
+/* BaseException_vectorcall: a call with positional arguments of a class
+   whose construction is BaseException's own makes the instance here, as
+   CPython's C does; keywords (which __init__ refuses) go to the class's
+   call. */
+PyObject *_PyObject_MakeTpCall(PyThreadState *ts, PyObject *callable, PyObject *const *args,
+                               Py_ssize_t nargs, PyObject *kwnames);
+
+static PyObject *
+plain_exception_call(PyObject *type, PyObject *const *args, size_t nargsf, PyObject *kwnames)
+{
+    if (kwnames != NULL && PyTuple_GET_SIZE(kwnames) > 0) {
+        return _PyObject_MakeTpCall(PyThreadState_Get(), type, args, PyVectorcall_NARGS(nargsf), kwnames);
+    }
+    Py_ssize_t n = PyVectorcall_NARGS(nargsf);
+    PyObject *t = PyTuple_New(n);
+    for (Py_ssize_t i = 0; t != NULL && i < n; i++) {
+        PyTuple_SET_ITEM(t, i, Py_NewRef(args[i]));
+    }
+    PyObject *exc = t != NULL ? lu_alloc_instance((PyTypeObject *)type, (PyTypeObject *)PyExc_BaseException) : NULL;
+    if (exc == NULL) {
+        Py_XDECREF(t);
+        return NULL;
+    }
+    ((PyBaseExceptionObject *)exc)->args = t;
+    return exc;
+}
+
+void
+lu_exc_vectorcalls(void)
+{
+    extern PyTypeObject *const lu_static_types[];
+    for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
+        if (PyType_IsSubtype(*t, (PyTypeObject *)PyExc_BaseException) && plain_exception(*t)) {
+            (*t)->tp_vectorcall = plain_exception_call;
+        }
+    }
+}
+
 /* An instance of `type` made from `value`, as _PyErr_CreateException: the
    tuple is the arguments, None none, anything else the one argument. */
 static PyObject *
@@ -82,6 +132,19 @@ create_exception(PyObject *type, PyObject *value)
         PyObject *args = value == NULL || value == Py_None ? PyTuple_New(0)
             : PyTuple_Check(value) ? Py_NewRef(value) : PyTuple_Pack(1, value);
         return args != NULL ? exc_new(type, args) : NULL;
+    }
+    if (plain_exception((PyTypeObject *)type)) {
+        PyObject *args = value == NULL || value == Py_None ? PyTuple_New(0)
+            : PyTuple_CheckExact(value) ? Py_NewRef(value)
+            : PyTuple_Check(value) ? PySequence_Tuple(value) : PyTuple_Pack(1, value);
+        PyObject *exc = args != NULL
+            ? lu_alloc_instance((PyTypeObject *)type, (PyTypeObject *)PyExc_BaseException) : NULL;
+        if (exc == NULL) {
+            Py_XDECREF(args);
+            return NULL;
+        }
+        ((PyBaseExceptionObject *)exc)->args = args;
+        return exc;
     }
     PyObject *exc = value == NULL || value == Py_None
         ? PyObject_CallNoArgs(type)
@@ -362,6 +425,49 @@ PyErr_Fetch(PyObject **type, PyObject **value, PyObject **traceback)
     *value = exc;
     *type = exc != NULL ? Py_NewRef((PyObject *)Py_TYPE(exc)) : NULL;
     *traceback = exc != NULL ? PyException_GetTraceback(exc) : NULL;
+}
+
+/* An exception, or a class of them called: a new reference, or NULL with
+   an error (the class's own, or one for a call that made no exception). */
+static PyObject *
+raised_value(PyObject *exc)
+{
+    if (PyExceptionInstance_Check(exc)) {
+        return Py_NewRef(exc);
+    }
+    PyObject *value = PyObject_CallNoArgs(exc);
+    if (value != NULL && !PyExceptionInstance_Check(value)) {
+        PyErr_Format(PyExc_TypeError, "calling %R should have returned an instance of BaseException, "
+                     "not %R", exc, (PyObject *)Py_TYPE(value));
+        Py_CLEAR(value);
+    }
+    return value;
+}
+
+int
+lu_raise_native(PyObject *exc, PyObject *cause)
+{
+    int known = PyExceptionInstance_Check(exc) || PyExceptionClass_Check(exc);
+    int known_cause = cause == LU_MISSING || cause == Py_None || PyExceptionInstance_Check(cause)
+        || PyExceptionClass_Check(cause);
+    if (!known || !known_cause) {
+        return 0;
+    }
+    PyObject *value = raised_value(exc);
+    if (value == NULL) {
+        return 1;
+    }
+    if (cause != LU_MISSING) {
+        PyObject *fixed = cause == Py_None ? NULL : raised_value(cause);
+        if (fixed == NULL && cause != Py_None) {
+            Py_DECREF(value);
+            return 1;
+        }
+        PyException_SetCause(value, fixed);
+    }
+    PyErr_SetObject((PyObject *)Py_TYPE(value), value);
+    Py_DECREF(value);
+    return 1;
 }
 
 /* The exception that (type, value) stand for, new; value stays as it was. */

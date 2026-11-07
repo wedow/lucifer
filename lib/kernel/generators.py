@@ -17,11 +17,11 @@ from _lucifer import (
     gen_set_running, gen_clear, gen_flag, gen_set_finalizer, asyncgen_hooks, size,
 )
 from _lucifer import set_asyncgen_hooks as _set_hooks
-from _lucifer import _boot
+from _lucifer import _boot, iter as _iter, object as _object
 
 kernel_type = _boot.kernel_type
 call_special = _boot.call_special
-getattr_ = kernel_get('getattr')
+lookup_attr = _object.lookup_attr
 
 __all__ = ()
 
@@ -78,6 +78,18 @@ def _send(gen, value):
     return _result(gen, gen_send(gen, value))
 
 
+def _next(gen):
+    """The iteration step of a generator, as gen_iternext takes it: the next
+    item, or MISSING once it returns, without a StopIteration."""
+    if _finished(gen):
+        return MISSING
+    value = gen_send(gen, MISSING)
+    return MISSING if _finished(gen) else value
+
+
+_iter.NEXT_MISSING[_generator] = _next
+
+
 def _matches(exc, cls):
     """PyErr_GivenExceptionMatches for a class or an instance."""
     t = exc if is_exception_class(exc) else type(exc)
@@ -112,16 +124,9 @@ def _normalized(typ, val, tb):
     return exc
 
 
-def _optional_attr(obj, name):
-    try:
-        return getattr_(obj, name)
-    except AttributeError:
-        return MISSING
-
-
 def _close_iter(yf):
     """gen_close_iter for what is not a generator: its close(), if any."""
-    close = _optional_attr(yf, 'close')
+    close = lookup_attr(yf, 'close')
     if close is not MISSING:
         close()
 
@@ -153,7 +158,7 @@ def _throw(gen, typ, val, tb, close_on_genexit):
             g = yf
             depth += 1
             continue
-        throw = _optional_attr(yf, 'throw')
+        throw = lookup_attr(yf, 'throw')
         if throw is MISSING:
             break
         gen_set_running(gen, depth, True)
@@ -381,6 +386,9 @@ def get_anext(aiter):
 def send(receiver, value):
     """SEND to a receiver that is not a generator: (what it yielded, False),
     or (its return value, True)."""
+    if value is None and _iter.ends_quietly(type(receiver)):
+        item = _iter.next_item(receiver)
+        return (None, True) if item is MISSING else (item, False)
     try:
         if value is None and type_lookup(type(receiver), '__next__') is not MISSING:
             return (call_special(type_lookup(type(receiver), '__next__'), receiver), False)

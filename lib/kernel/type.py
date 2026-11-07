@@ -324,6 +324,34 @@ def _set_names(cls):
             call_special(set_name, value, cls, key)
 
 
+def _type_getattr(cls, name, suppress=False):
+    """type_getattro; MISSING instead of AttributeError when suppress."""
+    if not kind(name, 'str'):
+        error(TypeError, str_join('', (
+            "attribute name must be string, not '", type_tp_name(type(name)), "'")))
+    meta = type(cls)
+    meta_attr = type_lookup(meta, name)
+    meta_get = MISSING
+    if meta_attr is not MISSING:
+        meta_get = type_lookup(type(meta_attr), '__get__')
+        if meta_get is not MISSING and is_data(meta_attr):
+            return meta_get(meta_attr, cls, meta)
+    attr = type_lookup(cls, name)
+    if attr is not MISSING:
+        local_get = type_lookup(type(attr), '__get__')
+        if local_get is MISSING:
+            return attr
+        return local_get(attr, None, cls)
+    if meta_get is not MISSING:
+        return meta_get(meta_attr, cls, meta)
+    if meta_attr is not MISSING:
+        return meta_attr
+    if suppress:
+        return MISSING
+    raise AttributeError(str_join('', (
+        "type object '", type_tp_name(cls), "' has no attribute '", name, "'")), name=name, obj=cls)
+
+
 @kernel_type(type)
 class type:
     """type(object) -> the object's type
@@ -422,28 +450,7 @@ type(name, bases, dict, **kwds) -> a new type"""
             error(TypeError, 'type.__init__() takes 1 or 3 arguments')
 
     def __getattribute__(cls, name):
-        if not kind(name, 'str'):
-            error(TypeError, str_join('', (
-                "attribute name must be string, not '", type_tp_name(type(name)), "'")))
-        meta = type(cls)
-        meta_attr = type_lookup(meta, name)
-        meta_get = MISSING
-        if meta_attr is not MISSING:
-            meta_get = type_lookup(type(meta_attr), '__get__')
-            if meta_get is not MISSING and is_data(meta_attr):
-                return meta_get(meta_attr, cls, meta)
-        attr = type_lookup(cls, name)
-        if attr is not MISSING:
-            local_get = type_lookup(type(attr), '__get__')
-            if local_get is MISSING:
-                return attr
-            return local_get(attr, None, cls)
-        if meta_get is not MISSING:
-            return meta_get(meta_attr, cls, meta)
-        if meta_attr is not MISSING:
-            return meta_attr
-        raise AttributeError(str_join('', (
-            "type object '", type_tp_name(cls), "' has no attribute '", name, "'")), name=name, obj=cls)
+        return _type_getattr(cls, name)
 
     def __setattr__(cls, name, value):
         _type_set(cls, name, value)
@@ -533,5 +540,7 @@ def _remro_slots(cls):
 
 
 _type_dict = type_dict(type)
+_object.type_getattribute = ns_get(_type_dict, '__getattribute__', MISSING)
+_object.type_getattr = _type_getattr
 _type_new = ns_get(_type_dict, '__new__', MISSING)
 _type_mro = ns_get(_type_dict, 'mro', MISSING)
