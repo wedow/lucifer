@@ -34,6 +34,7 @@ REFERENCE = ROOT / "results/status-reference.json"
 AWFY = ROOT / "third_party/awfy/Python"
 WEB = ROOT / "tools/bench/web/bench"
 WEB_CPUS = "1,2,4,8"
+WEB_SCORE_CPUS = "8"  # the composite speed score takes the web point that uses every core: no GIL is the point
 LUCIFER = str(Path(os.environ.get("LUCIFER", "bin/lucifer")).resolve())
 
 
@@ -100,7 +101,7 @@ def web_timings(runs):
 
 def web_check(oracle, site):
     done = run([sys.executable, str(WEB), "check", f"--run=cpython-3.14t=env PYTHONPATH={site} {oracle}",
-                f"--run=lucifer=env PYTHONPATH={site} {LUCIFER} -X lucifer_jit=on"], "TEST_PREFIX")
+                f"--run=lucifer=env PYTHONPATH={site} {LUCIFER}"], "TEST_PREFIX")
     return done.returncode == 0, done.stdout
 
 
@@ -300,7 +301,7 @@ def main():
     problems = []
     gate_rows = gates(out)
     problems += [f"gate {t} failed" for t, (ok, _) in gate_rows.items() if not ok]
-    commands = {"on": f"{LUCIFER} -X lucifer_jit=on"}
+    commands = {"on": LUCIFER}
     times = timings(names, args.iters, commands)
     ref = json.loads(REFERENCE.read_text()) if REFERENCE.exists() else {"version": None, "best_us": {}}
     if not REFERENCE.exists():
@@ -319,7 +320,7 @@ def main():
     site = os.environ.get("WEB_SITE")
     if site:
         ok, log = web_check(oracle, site)
-        points, timing_log = web_timings({"lucifer": f"env PYTHONPATH={site} {LUCIFER} -X lucifer_jit=on"})
+        points, timing_log = web_timings({"lucifer": f"env PYTHONPATH={site} {LUCIFER}"})
         (out / "web.log").write_text(log + timing_log)
         if not ok:
             problems.append("web check failed (web.log)")
@@ -332,6 +333,8 @@ def main():
                     problems.append(f"web {runtime} at {n} CPUs: {p['errors']} errors")
                 if p.get("server_exit") is not None:
                     problems.append(f"web {runtime} at {n} CPUs: server died (exit {p['server_exit']})")
+        t, l = (metrics.get(f"web.{r}.{WEB_SCORE_CPUS}.rps") for r in ("cpython-3.14t", "lucifer"))
+        metrics["web.flask.on_over_cpython"] = t / l if t and l else None
     else:
         problems.append("web benchmark skipped: WEB_SITE is not set")
     numpy_metrics = {}
