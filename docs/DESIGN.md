@@ -654,9 +654,15 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    > poll or a call unless the object is proven thread-local; tracing and
    > monitoring state is checked at every poll and entry.
 
-   Mechanism (`runtime/jit/deps.c`). A unit lists its dependencies: the facts
-   it relies on past the guard that checked them (a guard moved out of a loop,
-   or one a guard of the same fact dominates). Writers call
+   Mechanism (`runtime/jit/deps.c`, the facts pass of `ssa_opt.c`). A unit
+   lists its dependencies: the facts it relies on past the guard that checked
+   them (a guard moved out of a loop, or one a guard of the same fact
+   dominates). A value's type version is such a fact too, so repeated
+   `self.x` guards go and guards on a loop's invariant objects leave the loop.
+   Facts nothing takes back (an exact immutable type, not NULL) need no
+   dependency. A load of an object's word (its type, size, an attribute) is
+   reused only within a block, between instructions that may run code and
+   polls. Writers call
    `lu_jit_invalidate` after their change (`lu_type_modified`, `__class__`
    assignment, the dict changes of a dict watcher id 0 marks, a function's
    version clearing): the dependent units are marked dead, and every task's

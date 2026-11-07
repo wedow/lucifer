@@ -1,6 +1,7 @@
-# A hot loop whose guards check only what a writer can change: a global
-# function and its code, a global constant, a class and its attribute.
-# They leave the loop, so its iterations run no guards (tools/jitcheck).
+# A hot loop whose guards check what a writer can change (a global
+# function and its code, a global constant, a class and its attribute)
+# or what never does (the range iterator's type). They leave the loop, so
+# its iterations run no guards (tools/jitcheck).
 import sys
 
 

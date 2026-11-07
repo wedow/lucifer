@@ -1,8 +1,8 @@
 /* The optimizer's passes over block SSA (DESIGN 6.2 step 3), in order:
 
    1. Trivial phis go (a phi of one value, or of itself and one value).
-      Then facts: guards of what only a writer changes leave loops, and
-      repeated ones go (1b).
+      Then facts: guards leave loops, repeated guards go, and so do loads
+      of what a load in the block already read (1b).
    2. Representation: a phi whose inputs are all int boxes (or float
       boxes), counting phis of the same kind, becomes a raw phi under one
       box, so loop-carried ints and floats stay in registers.
@@ -414,63 +414,99 @@ simplify(struct lu_func *f)
     return changed;
 }
 
-/* 1b. Facts (DESIGN 6.2 step 7). A guard on a constant type's version, a
-   constant dict's keys or the value of one of its keys, or a constant
-   function's version checks a fact only a writer's change takes back, and
-   the writer kills the units that rely on it (runtime/jit/deps.c). Such a
-   guard inside a loop moves before the loop, to a preheader, where it
-   leaves at the loop's entry state and blames its old site; one that a
-   guard of the same fact dominates is redundant. A redundant guard goes,
-   or stays as a check that the unit lives (CHECK_LIVE) when something that
-   may run code or change state came since the last check or the entry:
-   that may have been the running thread's own change, or a call whose
-   polls took the bit another thread's change raised. A poll is no such
-   check, since a call before it may have taken the bit. Each fact relied on is a dependency of the unit. A site whose
-   fact was taken back before (lu_jit_nohoist) keeps its guards. */
+/* 1b. Facts and value numbering (DESIGN 6.2 step 7). A guard checks a
+   fact. Some facts only a writer's change takes back, and the writer kills
+   the units that rely on them (runtime/jit/deps.c): a type's version (of a
+   constant type, or of a value's type), a constant dict's keys or the value
+   of one of its keys, a constant function's version. Others never change:
+   a value's exact immutable type, that it is not NULL, a bit's value. A
+   guard inside a loop on a value the loop does not define moves before the
+   loop, to a preheader, where it leaves at the loop's entry state and
+   blames its old site; one that a guard of the same fact dominates is
+   redundant and goes. Where a fact a writer may take back is relied on
+   again after something that may run code or change state, since the last
+   check or the entry, a check that the unit lives (CHECK_LIVE) stays in
+   its place: that may have been the running thread's own change, or a call
+   whose polls took the bit another thread's change raised. A poll is no
+   such check, since a call before it may have taken the bit. Each fact
+   relied on is a dependency of the unit. A site whose fact was taken back
+   before (lu_jit_nohoist) keeps its guards.
 
-/* What a guard checks, when it is a fact that holds now, with the watch
-   that makes its writers report it. */
+   Then loads of a word of an object (its type, size, an inline attribute)
+   that a load of the same word earlier in the block made, with nothing
+   between that may run code, change state or poll, are that load: heap
+   values are kept only between polls. */
+
+enum { NO_FACT, WRITER_FACT, FIXED_FACT };
+
+/* What a guard checks: NO_FACT, or the kind of fact with the dependency a
+   WRITER_FACT is, watched so that its writers report it. A constant's fact
+   must hold now. */
 static int
 fact_of(struct lu_func *f, struct lu_ins *in, struct lu_fdep *dep)
 {
-    if (in->fs == NULL || in->a == LU_NOV || f->ins[in->a].op != OP_CONST
-        || lu_jit_nohoist(in->fs->code, in->fs->pc)) {
-        return 0;
+    if (in->fs == NULL || in->a == LU_NOV || lu_jit_nohoist(in->fs->code, in->fs->pc)) {
+        return NO_FACT;
+    }
+    if (in->op == OP_GUARD_NOT_NULL || in->op == OP_GUARD_BIT) {
+        return FIXED_FACT;
+    }
+    if (in->op == OP_GUARD_TYPE) {
+        return ((PyTypeObject *)(intptr_t)in->imm)->tp_flags & Py_TPFLAGS_IMMUTABLETYPE ? FIXED_FACT : NO_FACT;
+    }
+    *dep = (struct lu_fdep){ .code = in->fs->code, .pc = in->fs->pc };
+    if (in->op == OP_GUARD_VERSION && in->imm2 == GV_TYPE_OF) {
+        dep->kind = LU_DEP_TYPE;
+        dep->obj = (uint32_t)in->imm;
+        return WRITER_FACT;
+    }
+    if (f->ins[in->a].op != OP_CONST) {
+        return NO_FACT;
     }
     PyObject *o = (PyObject *)(intptr_t)f->ins[in->a].imm;
-    *dep = (struct lu_fdep){ .code = in->fs->code, .pc = in->fs->pc, .obj = (uintptr_t)o };
+    dep->obj = (uintptr_t)o;
     if (in->op == OP_GUARD_VERSION && in->imm2 == GV_TYPE_ITSELF) {
         dep->kind = LU_DEP_TYPE;
         dep->obj = (uint32_t)in->imm;
-        return __atomic_load_n(&((PyTypeObject *)o)->tp_version_tag, __ATOMIC_ACQUIRE) == (uint32_t)in->imm;
+        return __atomic_load_n(&((PyTypeObject *)o)->tp_version_tag, __ATOMIC_ACQUIRE) == (uint32_t)in->imm
+            ? WRITER_FACT : NO_FACT;
     }
     if (in->op == OP_GUARD_VERSION && in->imm2 == GV_FUNC) {
         dep->kind = LU_DEP_FUNC;
-        return __atomic_load_n(&((PyFunctionObject *)o)->func_version, __ATOMIC_ACQUIRE) == (uint32_t)in->imm;
+        return __atomic_load_n(&((PyFunctionObject *)o)->func_version, __ATOMIC_ACQUIRE) == (uint32_t)in->imm
+            ? WRITER_FACT : NO_FACT;
     }
     int keys = in->op == OP_GUARD_VERSION && in->imm2 == GV_DICT_KEYS;
     int value = in->op == OP_GUARD_IS && GI_MODE(in->imm2) == 2;
     if (!keys && !value) {
-        return 0;
+        return NO_FACT;
     }
     /* Watched before it is read, so a change after the read is reported. */
     __atomic_fetch_or(&((PyDictObject *)o)->_ma_watcher_tag, 1, __ATOMIC_SEQ_CST);
     PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)o)->ma_keys, __ATOMIC_ACQUIRE);
     if (keys) {
         dep->kind = LU_DEP_KEYS;
-        return __atomic_load_n(&dk->dk_version, __ATOMIC_ACQUIRE) == (uint32_t)in->imm;
+        return __atomic_load_n(&dk->dk_version, __ATOMIC_ACQUIRE) == (uint32_t)in->imm ? WRITER_FACT : NO_FACT;
     }
     dep->kind = LU_DEP_VALUE;
     dep->sub = (uint32_t)GI_OFFSET(in->imm2);
     return __atomic_load_n((PyObject **)((char *)dk + GI_OFFSET(in->imm2)), __ATOMIC_ACQUIRE)
-        == (PyObject *)(intptr_t)in->imm;
+        == (PyObject *)(intptr_t)in->imm ? WRITER_FACT : NO_FACT;
+}
+
+/* The value a guard checks: a constant's object, or the SSA value. */
+static int64_t
+subject(struct lu_func *f, struct lu_ins *in)
+{
+    lu_v a = resolve(in->a);
+    return f->ins[a].op == OP_CONST ? f->ins[a].imm : -2 - (int64_t)a;
 }
 
 static int
 same_fact(struct lu_func *f, struct lu_ins *x, struct lu_ins *y)
 {
     return x->op == y->op && x->imm == y->imm && x->imm2 == y->imm2 && x->a != LU_NOV && y->a != LU_NOV
-        && f->ins[x->a].op == OP_CONST && f->ins[y->a].op == OP_CONST && f->ins[x->a].imm == f->ins[y->a].imm;
+        && subject(f, x) == subject(f, y);
 }
 
 /* Whether releasing v cannot run a finalizer: v is an int, a float, a bool
@@ -745,6 +781,59 @@ note_dep(struct lu_func *f, struct lu_fdep *dep)
     f->deps[f->ndeps++] = *dep;
 }
 
+/* The guards of one fact seen on the way down the dominator tree, a
+   chained hash on what they check; leaving a block drops what it added. */
+struct seen {
+    lu_v *guard, *next;         /* per instruction */
+    lu_v head[256];
+    lu_v *undo;
+    int nundo;
+};
+
+static int
+seen_hash(struct lu_func *f, struct lu_ins *in)
+{
+    uint64_t h = (uint64_t)subject(f, in) * 0x9E3779B97F4A7C15ull ^ (uint64_t)in->imm * 31 ^ in->op;
+    return (int)(h >> 56);
+}
+
+static lu_v
+seen_find(struct lu_func *f, struct seen *t, lu_v v)
+{
+    for (lu_v w = t->head[seen_hash(f, &f->ins[v])]; w != LU_NOV; w = t->next[w]) {
+        if (same_fact(f, &f->ins[w], &f->ins[v])) {
+            return w;
+        }
+    }
+    return LU_NOV;
+}
+
+static void
+seen_add(struct lu_func *f, struct seen *t, lu_v v)
+{
+    int h = seen_hash(f, &f->ins[v]);
+    t->next[v] = t->head[h];
+    t->head[h] = v;
+    t->undo[t->nundo++] = v;
+}
+
+static void
+seen_drop(struct lu_func *f, struct seen *t, int to)
+{
+    while (t->nundo > to) {
+        lu_v v = t->undo[--t->nundo];
+        t->head[seen_hash(f, &f->ins[v])] = t->next[v];
+    }
+}
+
+/* Whether a loop (its blocks) does not define the value a guard checks. */
+static int
+invariant(struct lu_func *f, struct lu_ins *in, char *body)
+{
+    lu_v a = resolve(in->a);
+    return f->ins[a].op == OP_CONST || !body[f->ins[a].block];
+}
+
 static void
 facts(struct lu_func *f)
 {
@@ -764,21 +853,24 @@ facts(struct lu_func *f)
     cfg_build(f, &g);
     body = loops_find(f, &g);
     int nb = f->nblocks;
-    /* Facts inside loops move to the outermost loop's preheader. */
+    /* Facts inside loops move to the outermost preheader of a loop that
+       does not define what they check. */
     int nins0 = f->nins;
-    char *redundant = calloc((size_t)nins0, 1);
-    struct lu_fs **live_at = calloc((size_t)nb, sizeof(struct lu_fs *));      /* preheaders given guards */
+    struct lu_fs **live_at = calloc((size_t)nb, sizeof(struct lu_fs *));      /* preheaders given writers' facts */
+    struct lu_fs **state_at = calloc((size_t)nb, sizeof(struct lu_fs *));
     struct lu_fdep dep;
     for (int i = 0; i < g.n; i++) {
         int b = g.rpo[i];
         for (int k = 0; k < f->blocks[b].nins; k++) {
             lu_v v = f->blocks[b].ins[k];
-            if (v >= nins0 || (f->ins[v].flags & INS_DEAD) || !fact_of(f, &f->ins[v], &dep)) {
+            int kind;
+            if (v >= nins0 || (f->ins[v].flags & INS_DEAD) || (kind = fact_of(f, &f->ins[v], &dep)) == NO_FACT) {
                 continue;
             }
             int best = -1;
             for (int h = 0; h < nb0; h++) {
-                if (pre[h] >= 0 && body[h] != NULL && body[h][b] && (best < 0 || body[h][best])) {
+                if (pre[h] >= 0 && body[h] != NULL && body[h][b] && invariant(f, &f->ins[v], body[h])
+                    && (best < 0 || body[h][best])) {
                     best = h;
                 }
             }
@@ -792,12 +884,15 @@ facts(struct lu_func *f)
                 have = w >= nins0 && same_fact(f, &f->ins[w], &f->ins[v]);
             }
             if (!have) {
-                if (live_at[p] == NULL) {
-                    live_at[p] = preheader_state(f, best, p);
+                if (state_at[p] == NULL) {
+                    state_at[p] = preheader_state(f, best, p);
                 }
-                hoist_copy(f, v, p, live_at[p]);
+                hoist_copy(f, v, p, state_at[p]);
             }
-            note_dep(f, &dep);
+            if (kind == WRITER_FACT) {
+                live_at[p] = state_at[p];
+                note_dep(f, &dep);
+            }
         }
     }
     /* A loop starts knowing the unit lives: a check before it, which goes
@@ -816,37 +911,63 @@ facts(struct lu_func *f)
     for (int v = nstart; v < f->nins; v++) {
         fwd[v] = v;
     }
-    redundant = realloc(redundant, (size_t)f->nins);
-    memset(redundant + nins0, 0, (size_t)(f->nins - nins0));
-    memset(redundant + nhoisted, 1, (size_t)(f->nins - nhoisted));
-    /* Redundant guards: a guard of the same fact dominates them. */
-    for (int i = 0; i < g.n; i++) {
-        int b = g.rpo[i];
+    /* Redundant guards: a guard of the same fact dominates them. The
+       dominator tree is walked in preorder (children by a stack). */
+    char *redundant = calloc((size_t)f->nins, 1);
+    memset(redundant + nhoisted, WRITER_FACT, (size_t)(f->nins - nhoisted));
+    struct seen t = { .guard = NULL };
+    t.next = malloc(sizeof(lu_v) * (size_t)f->nins);
+    t.undo = malloc(sizeof(lu_v) * (size_t)f->nins);
+    for (int h = 0; h < 256; h++) {
+        t.head[h] = LU_NOV;
+    }
+    int *child = malloc(sizeof(int) * (size_t)nb), *sib = malloc(sizeof(int) * (size_t)nb);
+    for (int b = 0; b < nb; b++) {
+        child[b] = sib[b] = -1;
+    }
+    for (int i = g.n - 1; i > 0; i--) {
+        int b = g.rpo[i], d = g.idom[b];
+        sib[b] = child[d];
+        child[d] = b;
+    }
+    int *stack = malloc(sizeof(int) * (size_t)(2 * nb + 2)), sp = 0;
+    stack[sp++] = 0;
+    stack[sp++] = 0;
+    while (sp > 0) {
+        int mark = stack[--sp], b = stack[--sp];
+        if (b < 0) {
+            seen_drop(f, &t, mark);
+            continue;
+        }
+        int at = t.nundo;
         for (int k = 0; k < f->blocks[b].nins; k++) {
             lu_v v = f->blocks[b].ins[k];
-            if ((f->ins[v].flags & INS_DEAD) || !fact_of(f, &f->ins[v], &dep)) {
+            int kind;
+            if ((f->ins[v].flags & INS_DEAD) || (kind = fact_of(f, &f->ins[v], &dep)) == NO_FACT) {
                 continue;
             }
-            for (int d = b, found = 0; !found; d = g.idom[d]) {
-                struct lu_block *bl = &f->blocks[d];
-                for (int j = 0; j < bl->nins && !found; j++) {
-                    lu_v w = bl->ins[j];
-                    if (d == b && w == v) {
-                        break;
-                    }
-                    found = !(f->ins[w].flags & INS_DEAD) && !redundant[w] && w != v
-                        && f->ins[w].op == f->ins[v].op && same_fact(f, &f->ins[w], &f->ins[v]);
-                }
-                if (found) {
-                    redundant[v] = 1;
+            if (seen_find(f, &t, v) != LU_NOV) {
+                redundant[v] = (char)kind;
+                if (kind == WRITER_FACT) {
                     note_dep(f, &dep);
                 }
-                if (d == 0) {
-                    break;
-                }
+            }
+            else {
+                seen_add(f, &t, v);
             }
         }
+        stack[sp++] = -1;
+        stack[sp++] = at;
+        for (int c = child[b]; c >= 0; c = sib[c]) {
+            stack[sp++] = c;
+            stack[sp++] = 0;
+        }
     }
+    free(stack);
+    free(child);
+    free(sib);
+    free(t.next);
+    free(t.undo);
     /* Whether the unit is known to live at each block's start: none of
        its predecessors' ends may have changed anything since a check. */
     char *live_in = malloc((size_t)nb), *live_out = malloc((size_t)nb);
@@ -867,7 +988,7 @@ facts(struct lu_func *f)
                 if (in->flags & INS_DEAD) {
                     continue;
                 }
-                if (redundant[f->blocks[b].ins[k]]) {
+                if (redundant[f->blocks[b].ins[k]] == WRITER_FACT) {
                     live = 1;
                 }
                 else if (may_change(f, in)) {
@@ -889,14 +1010,13 @@ facts(struct lu_func *f)
             if (in->flags & INS_DEAD) {
                 continue;
             }
-            if (redundant[v]) {
-                if (live) {
-                    in->flags |= INS_DEAD;
-                }
-                else {
-                    in->op = OP_CHECK_LIVE;
-                    in->a = in->b = in->c = LU_NOV;
-                }
+            if (redundant[v] == FIXED_FACT || (redundant[v] == WRITER_FACT && live)) {
+                in->flags |= INS_DEAD;
+                live |= redundant[v] == WRITER_FACT;
+            }
+            else if (redundant[v] == WRITER_FACT) {
+                in->op = OP_CHECK_LIVE;
+                in->a = in->b = in->c = LU_NOV;
                 live = 1;
             }
             else if (may_change(f, in)) {
@@ -910,10 +1030,58 @@ facts(struct lu_func *f)
     free(body);
     free(pre);
     free(live_at);
+    free(state_at);
     free(redundant);
     free(live_in);
     free(live_out);
     cfg_free(&g);
+}
+
+/* Loads of a word an earlier load in the block made, with nothing between
+   that may run code, change state or poll: an object's type or size, an
+   inline attribute (whose reference the load took: the copy takes one
+   too). */
+static void
+same_loads(struct lu_func *f)
+{
+    for (int b = 0; b < f->nblocks; b++) {
+        struct lu_block *bl = &f->blocks[b];
+        int from = 0;
+        for (int k = 0; k < bl->nins; k++) {
+            lu_v v = bl->ins[k];
+            struct lu_ins *in = &f->ins[v];
+            if (in->flags & INS_DEAD) {
+                continue;
+            }
+            if (in->op == OP_POLL || in->op == OP_STORE || in->op == OP_RITER_NEXT || may_change(f, in)) {
+                from = k + 1;
+                continue;
+            }
+            if (in->op != OP_LOAD && in->op != OP_INLINE_LOAD) {
+                continue;
+            }
+            for (int j = from; j < k; j++) {
+                lu_v w = bl->ins[j];
+                struct lu_ins *x = &f->ins[w];
+                if ((x->flags & INS_DEAD) || x->op != in->op || resolve(x->a) != resolve(in->a) || x->imm != in->imm
+                    || x->imm2 != in->imm2 || x->rep != in->rep) {
+                    continue;
+                }
+                /* v's uses are w's; an attribute's load becomes the reference it took. */
+                fwd[v] = w;
+                if (in->op == OP_INLINE_LOAD) {
+                    in->op = OP_INCREF;
+                    in->a = w;
+                    in->rep = REP_NONE;
+                    in->fs = NULL;
+                }
+                else {
+                    in->flags |= INS_DEAD;
+                }
+                break;
+            }
+        }
+    }
 }
 
 /* Use counts, with frame-state uses apart. */
@@ -1300,6 +1468,8 @@ lu_ssa_optimize(struct lu_func *f)
     }
     rewrite(f);
     facts(f);
+    same_loads(f);
+    rewrite(f);
     unbox_phis(f, REP_I64);
     rewrite(f);
     unbox_phis(f, REP_F64);
