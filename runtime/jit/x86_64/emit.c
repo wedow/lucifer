@@ -1549,6 +1549,44 @@ pop_block(struct asm_ *a, int heap, size_t size, int dst, int page, int none)
     modrm_mem(a, 0, page, offsetof(mi_page_t, used));  /* inc word [page+used] */
 }
 
+/* -X lucifer_jit_stats: one more allocation of in's kind at its site.
+   Clobbers R11. */
+static void
+alloc_count(struct asm_ *a, struct lu_ins *in)
+{
+    int k = a->unit->counts != NULL && in->src != NULL ? lu_alloc_kind(in) : -1;
+    if (k >= 0) {
+        mov_ri(a, R11, (int64_t)(intptr_t)lu_jit_alloc_site(in->src, in->src_pc, k));
+        rex(a, 1, 0, 0, R11);
+        b1(a, 0xFF);
+        modrm_mem(a, 0, R11, 0);                /* inc qword [r11] */
+    }
+}
+
+/* The same before an instruction that allocates; a call counts only when
+   it calls a class, and an int box counts in emit_box (not a small int). */
+static void
+alloc_count_before(struct asm_ *a, lu_v v)
+{
+    struct lu_ins *in = I(a, v);
+    int k = a->unit->counts != NULL && in->src != NULL ? lu_alloc_kind(in) : -1;
+    if (k < 0 || k == ALLOC_int || k == ALLOC_float) {
+        return;
+    }
+    int skip = new_label(a);
+    if (k == ALLOC_class_call) {
+        to_gpr(a, R11, in->args[0]);
+        load(a, R11, R11, offsetof(PyObject, ob_type));
+        rex(a, 0, 0, 0, R11);
+        b1(a, 0xF6);
+        modrm_mem(a, 0, R11, offsetof(PyTypeObject, tp_flags) + 3);
+        b1(a, (uint8_t)(Py_TPFLAGS_TYPE_SUBCLASS >> 24));      /* test byte: a type */
+        jcc(a, CC_E, skip);
+    }
+    alloc_count(a, in);
+    bind(a, skip);
+}
+
 /* A box of in->a's raw value, in RAX, as PyLong_FromLongLong and
    PyFloat_FromDouble make it: a small int from the cache, a one-digit int
    or a float from the carrier's freelist, else from its mimalloc object
@@ -1574,12 +1612,14 @@ emit_box(struct asm_ *a, struct lu_ins *in)
         alu_rr(a, ALU_ADD, RAX, RCX);
         jmp(a, done);
         bind(a, fresh);
+        alloc_count(a, in);
         lea(a, RCX, r, PyLong_MASK);
         alu_ri(a, ALU_CMP, RCX, 2 * PyLong_MASK);
         jcc(a, CC_A, slow);                     /* more than one digit */
     }
     else {
         x = fpr_of(a, in->a, 0);
+        alloc_count(a, in);
     }
     mov_ri(a, R11, (int64_t)(intptr_t)&_PyRuntime.allocators.observed);
     cmp_mi(a, 0, R11, 0, 0);
@@ -1727,6 +1767,58 @@ emit_build(struct asm_ *a, lu_v v)
     return 1;
 }
 
+/* An instance of a class whose instances object.__new__ makes, in line as
+   PyType_GenericAlloc makes it: the block (and its preheader) popped from
+   the carrier's GC heap, zeroed, counted for the collector, tracked, with
+   a reference to its type. The helper takes the rest, as for builds. 0
+   when the allocation is the helper's alone (a block too large to pop). */
+static int
+emit_new_object(struct asm_ *a, lu_v v)
+{
+    struct lu_ins *in = I(a, v);
+    PyTypeObject *tp = (PyTypeObject *)(intptr_t)I(a, in->args[0])->imm;
+    size_t pre = (tp->tp_flags & Py_TPFLAGS_PREHEADER) ? 2 * sizeof(PyObject *) : 0;
+    size_t size = pre + (size_t)tp->tp_basicsize + lu_inline_values_size(tp);
+    if (_PyRuntime.stress.gc != 0 || (size + 7) / 8 > MI_SMALL_WSIZE_MAX) {
+        return 0;
+    }
+    int slow = new_label(a), done = new_label(a);
+    mov_ri(a, R11, (int64_t)(intptr_t)&_PyRuntime.allocators.observed);
+    cmp_mi(a, 0, R11, 0, 0);
+    jcc(a, CC_NE, slow);
+    load(a, RAX, R14, offsetof(struct lu_task, carrier));
+    load(a, RAX, RAX, offsetof(struct lu_carrier, current));
+    cmp_mi(a, 0, RAX, offsetof(struct lu_entry, gc_alloc_count), LU_GC_ALLOC_FLUSH - 1);
+    jcc(a, CC_GE, slow);                        /* lu_gc_record_allocation would flush the count */
+    pop_block(a, pre ? LU_HEAP_GC_PRE : LU_HEAP_GC, size, RDX, RCX, slow);
+    b1(a, 0x83);
+    modrm_mem(a, ALU_ADD, RAX, offsetof(struct lu_entry, gc_alloc_count));
+    b1(a, 1);                                   /* add dword [rax+count], 1 */
+    for (size_t off = 0; off < size; off += 8) {
+        if (off < pre || off >= pre + sizeof(PyObject)) {
+            store_mi(a, RDX, (int32_t)off, 0);  /* the preheader, slots and inline values */
+        }
+    }
+    if (pre) {
+        lea(a, RDX, RDX, (int32_t)pre);
+    }
+    thread_id(a, R11);
+    store(a, RDX, offsetof(PyObject, ob_tid), R11);
+    store32_mi(a, RDX, offsetof(PyObject, ob_flags), (int32_t)((uint32_t)LU_GC_TRACKED << 24));    /* ob_gc_bits */
+    store32_mi(a, RDX, offsetof(PyObject, ob_ref_local), 1);
+    store_mi(a, RDX, offsetof(PyObject, ob_ref_shared), 0);
+    mov_ri(a, RBX, (int64_t)(intptr_t)tp);
+    store(a, RDX, offsetof(PyObject, ob_type), RBX);
+    incref(a, RBX);                             /* clobbers RAX, RCX */
+    mov_rr(a, RAX, RDX);
+    jmp(a, done);
+    bind(a, slow);
+    mov_ri(a, RDI, (int64_t)(intptr_t)tp);
+    call_abs(a, lu_helpers[in->imm].fn);
+    bind(a, done);
+    return 1;
+}
+
 static int
 cond_of(int op, int swap)
 {
@@ -1846,6 +1938,23 @@ unlock_object(struct asm_ *a, int r)
     bind(a, unlocked);
 }
 
+/* An inline store's word at off of the object in r holds nothing: the
+   store takes it in line only if every later word of the class's room
+   (imm2 - 1 of them; imm2 0: unknown) is empty too, so that the words keep
+   the instance's insertion order (attrs.c's in_order); else `slow`. */
+static void
+fresh_word(struct asm_ *a, struct lu_ins *in, int r, int slow)
+{
+    if (in->imm2 == 0) {
+        jmp(a, slow);
+        return;
+    }
+    for (int k = 1; k < in->imm2; k++) {
+        cmp_mi(a, 1, r, (int32_t)in->imm + (int32_t)(LU_INLINE_STRIDE * sizeof(PyObject *)) * k, 0);
+        jcc(a, CC_NE, slow);
+    }
+}
+
 /* INLINE_STORE_F and _I: lu_inline_store_f (_i) in line. Under the
    owner's lock byte, taken with one cmpxchg, a word that already holds a
    value takes the raw value and its marker; the old value, an object, is
@@ -1881,8 +1990,11 @@ inline_store_raw(struct asm_ *a, lu_v v)
     b1(a, LU_ATTRS_IN_DICT >> 8);
     jcc(a, CC_NE, unlock_slow);                 /* moved to the dict before the lock */
     load(a, RBX, RDI, off);                     /* the old value, kept across calls */
+    int have = new_label(a);
     test_rr(a, RBX, RBX);
-    jcc(a, CC_E, unlock_slow);                  /* a new name: insertion order is C's */
+    jcc(a, CC_NE, have);
+    fresh_word(a, in, RDI, unlock_slow);        /* a name new to the instance */
+    bind(a, have);
     store(a, RDI, off + 8, R13);                /* the raw value */
     mov_ri(a, RAX, (int64_t)(intptr_t)(is_int ? LU_UNBOXED_INT : LU_UNBOXED));
     store(a, RDI, off, RAX);                    /* after the raw word: x86 stores stay in order */
@@ -2516,8 +2628,15 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         b1(a, LU_ATTRS_IN_DICT >> 8);
         jcc(a, CC_NE, unlock_slow);             /* moved to the dict before the lock */
         load(a, RBX, RDI, off);                 /* the old value, kept across calls */
+        int have = new_label(a), take = new_label(a);
+        test_rr(a, RBX, RBX);
+        jcc(a, CC_NE, have);
+        fresh_word(a, in, RDI, unlock_slow);    /* a name new to the instance */
+        jmp(a, take);
+        bind(a, have);
         alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED_INT);
-        jcc(a, CC_BE, unlock_slow);             /* a new name (insertion order is C's), or an unboxed value */
+        jcc(a, CC_BE, unlock_slow);             /* an unboxed value */
+        bind(a, take);
         load32(a, RCX, RSI, offsetof(PyObject, ob_ref_local));
         rex(a, 0, 0, 0, RCX);
         b1(a, 0x83);
@@ -2536,6 +2655,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         bind(a, immortal);
         store(a, RDI, off, RSI);
         unlock_object(a, RDI);
+        test_rr(a, RBX, RBX);
+        jcc(a, CC_E, done);                     /* a new name: nothing to release */
         decref(a, RBX, in, d, settled_exit(a, v));     /* the old value */
         jmp(a, done);
         bind(a, unlock_slow);
@@ -2694,7 +2815,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         if (lu_publishes(in)) {
             pub = d != NULL ? d : published(a, in);
         }
-        if ((in->imm != H_build_tuple && in->imm != H_build_list) || !emit_build(a, v)) {
+        int inline_ok = in->imm == H_build_tuple || in->imm == H_build_list ? emit_build(a, v)
+            : in->imm == H_new_object ? emit_new_object(a, v) : 0;
+        if (!inline_ok) {
             call_helper(a, v, pub);
         }
         if (inlined) {
@@ -3168,6 +3291,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
                 b1(a, 0xFF);
                 modrm_mem(a, 0, R11, 0);        /* inc qword [r11] */
             }
+            alloc_count_before(a, bl->ins[i]);
             if (emit_ins(a, bl->ins[i], next, labels) < 0) {
                 free(labels);
                 free_settle(a);

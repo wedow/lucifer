@@ -95,6 +95,19 @@ static struct {
     unsigned long freed[CNT_COUNT];
 } census;
 
+/* -X lucifer_jit_stats: allocation sites (lu_jit_alloc_site), never freed. */
+struct alloc_site {
+    struct alloc_site *next;
+    PyCodeObject *code;         /* the key only: the code may be gone by the report */
+    int pc, kind;
+    char *where;
+    unsigned long n;
+};
+static struct {
+    PyMutex lock;
+    struct alloc_site *sites;
+} allocs;
+
 /* Exit reasons by name, for the counts and LUCIFER_JIT_DEBUG. */
 static const char reasons[EXIT_REASONS][8] = { "guard", "stress", "poll", "side", "error", "frame" };
 
@@ -122,6 +135,74 @@ bump_entries(struct lu_unit *u)
     if (__atomic_load_n(&u->entries, __ATOMIC_RELAXED) < ENTRIES_SEEN) {
         bump(&u->entries);
     }
+}
+
+unsigned long *
+lu_jit_alloc_site(PyCodeObject *code, int pc, int kind)
+{
+    PyMutex_Lock(&allocs.lock);
+    struct alloc_site *s = allocs.sites;
+    while (s != NULL && (s->code != code || s->pc != pc || s->kind != kind)) {
+        s = s->next;
+    }
+    if (s == NULL) {
+        char where[512];
+        PyObject *file = code->co_filename;
+        snprintf(where, sizeof where, "%s (%s:%d)", PyUnicode_AsUTF8(code->co_qualname),
+                 file != NULL && PyUnicode_Check(file) ? PyUnicode_AsUTF8(file) : "?",
+                 PyCode_Addr2Line(code, pc * (int)sizeof(lu_codeunit)));
+        s = calloc(1, sizeof *s);
+        *s = (struct alloc_site){ allocs.sites, code, pc, kind, strdup(where), 0 };
+        allocs.sites = s;
+    }
+    PyMutex_Unlock(&allocs.lock);
+    return &s->n;
+}
+
+/* The busiest allocation sites, merged by place and kind. */
+static void
+report_allocs(void)
+{
+    static const char names[ALLOC_KINDS][12] = {
+#define LU_ALLOC_NAME(name) #name,
+        LU_ALLOC_KINDS(LU_ALLOC_NAME)
+#undef LU_ALLOC_NAME
+    };
+    unsigned long total[ALLOC_KINDS] = { 0 };
+    int n = 0;
+    for (struct alloc_site *s = allocs.sites; s != NULL; s = s->next) {
+        total[s->kind] += s->n;
+        n++;
+    }
+    fprintf(stderr, "jit: allocations by kind:");
+    for (int k = 0; k < ALLOC_KINDS; k++) {
+        fprintf(stderr, "%s %s %lu", k ? "," : "", names[k], total[k]);
+    }
+    fprintf(stderr, "\n");
+    struct alloc_site **v = malloc(sizeof(struct alloc_site *) * (size_t)(n ? n : 1));
+    n = 0;
+    for (struct alloc_site *s = allocs.sites; s != NULL; s = s->next) {
+        int k = 0;
+        while (k < n && (v[k]->kind != s->kind || strcmp(v[k]->where, s->where) != 0)) {
+            k++;
+        }
+        if (k < n) {
+            v[k]->n += s->n;    /* the same place in another unit (or a code made again) */
+            s->n = 0;
+        }
+        else if (s->n > 0) {
+            v[n++] = s;
+        }
+    }
+    for (int shown = 0; shown < 40 && n > 0; shown++) {
+        int best = 0;
+        for (int k = 1; k < n; k++) {
+            best = v[k]->n > v[best]->n ? k : best;
+        }
+        fprintf(stderr, "jit: allocated %lu %s at %s\n", v[best]->n, names[v[best]->kind], v[best]->where);
+        v[best] = v[--n];
+    }
+    free(v);
 }
 
 void
@@ -969,4 +1050,5 @@ lu_jit_report(void)
         fprintf(stderr, " %s %lu", lu_count_names[k], total[k]);
     }
     fprintf(stderr, "\n");
+    report_allocs();
 }

@@ -26,6 +26,9 @@ const char *const lu_count_names[CNT_COUNT] = {
 int
 lu_count_kind(const struct lu_ins *in)
 {
+    if (in->flags & INS_VIRTUAL) {
+        return -1;              /* nothing runs */
+    }
     switch (in->op) {
     case OP_GUARD_TYPE: return CNT_guard_type;
     case OP_GUARD_VERSION:
@@ -50,7 +53,36 @@ lu_count_kind(const struct lu_ins *in)
     case OP_HELPER: return CNT_helper;
     case OP_INCREF: return CNT_incref;
     case OP_DECREF: return CNT_decref;
-    case OP_BOX_INT: case OP_BOX_FLOAT: return (in->flags & INS_VIRTUAL) ? -1 : CNT_box;
+    case OP_BOX_INT: case OP_BOX_FLOAT: return CNT_box;
+    default: return -1;
+    }
+}
+
+int
+lu_alloc_kind(const struct lu_ins *in)
+{
+    if (in->flags & (INS_VIRTUAL | INS_DEAD)) {
+        return -1;
+    }
+    switch (in->op) {
+    case OP_BOX_INT: return ALLOC_int;
+    case OP_BOX_FLOAT: return ALLOC_float;
+    case OP_HELPER:
+        break;
+    default:
+        return -1;
+    }
+    switch (in->imm) {
+    case H_box_int: return ALLOC_int;
+    case H_box_float: return ALLOC_float;
+    case H_build_tuple: case H_list_to_tuple: return ALLOC_tuple;
+    case H_build_list: case H_list_repeat: return ALLOC_list;
+    case H_new_dict: case H_build_map: return ALLOC_dict;
+    case H_build_set: return ALLOC_set;
+    case H_new_object: return ALLOC_instance;
+    case H_get_iter: case H_get_iter_seq: case H_range_iter: return ALLOC_iterator;
+    case H_make_function: return ALLOC_function;
+    case H_call: return ALLOC_class_call;
     default: return -1;
     }
 }

@@ -250,6 +250,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(list_repeat) \
     X(build_list) \
     X(build_tuple) \
+    X(new_object) \
     X(new_dict) \
     X(contains) \
     X(list_push) \
@@ -301,7 +302,8 @@ lu_publishes(const struct lu_ins *in)
 
 /* -X lucifer_jit_stats: how often compiled code takes the C path of an
    operation it otherwise runs in line (runtime/jit/jit.c reports them). */
-#define LU_C_PATHS(X) X(list_item) X(tuple_item) X(list_store) X(box_int) X(box_float) X(build_list) X(build_tuple)
+#define LU_C_PATHS(X) X(list_item) X(tuple_item) X(list_store) X(box_int) X(box_float) X(build_list) X(build_tuple) \
+    X(new_object)
 enum lu_c_path {
 #define LU_C_PATH_ENUM(name) C_PATH_##name,
     LU_C_PATHS(LU_C_PATH_ENUM)
@@ -309,6 +311,22 @@ enum lu_c_path {
     C_PATHS
 };
 void lu_jit_c_path_count(enum lu_c_path k);
+
+/* -X lucifer_jit_stats: the objects compiled code allocates, counted per
+   site (the bytecode instruction) and kind; a class call counts what the
+   class makes. jit.c reports the busiest. */
+#define LU_ALLOC_KINDS(X) X(int) X(float) X(tuple) X(list) X(dict) X(set) X(instance) X(iterator) \
+    X(function) X(class_call)
+enum lu_alloc_kind {
+#define LU_ALLOC_ENUM(name) ALLOC_##name,
+    LU_ALLOC_KINDS(LU_ALLOC_ENUM)
+#undef LU_ALLOC_ENUM
+    ALLOC_KINDS
+};
+/* The kind an instruction allocates, or -1. */
+int lu_alloc_kind(const struct lu_ins *in);
+/* The count of a site and kind, kept for the life of the process. */
+unsigned long *lu_jit_alloc_site(PyCodeObject *code, int pc, int kind);
 #define LU_JIT_C_PATH(name) do { \
         if (_PyRuntime.jit.stats) { \
             lu_jit_c_path_count(C_PATH_##name); \

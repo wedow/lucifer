@@ -103,7 +103,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(BYTES_ITEM, REP_I64, IF_GUARD)    /* a: an exact bytes, b: i64 index; the byte; deopts out of range */ \
     X(ATTR_LOAD, REP_OBJ, IF_GUARD | IF_CALL)   /* a.name from its managed dict: imm version, imm2 entry; c: the name */ \
     X(ATTR_STORE, REP_NONE, IF_RAISE | IF_EFFECT | IF_CALL)     /* a.(name c) = b, borrowing b */ \
-    X(INLINE_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN) /* a's inline word at byte imm = b, borrowing b */ \
+    X(INLINE_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN) /* a's inline word at byte imm = b, borrowing b;   \
+                                                       imm2: 1 + the words after it in the class's room (0: unknown) */ \
     X(INLINE_LOAD, REP_OBJ, IF_GUARD)   /* a's inline value at byte imm, while it keeps them; scratch registers only */ \
     X(INLINE_LOAD_F, REP_F64, IF_GUARD) /* the same as binary64: an unboxed float's, or an exact float's */ \
     X(INLINE_LOAD_I, REP_I64, IF_GUARD) /* the same as int64: an unboxed int's, or a compact int's */ \
@@ -162,6 +163,7 @@ enum {
     INS_CAUGHT = 8,             /* a raising helper whose NULL result the code branches on: a handler takes it */
 };
 
+
 struct lu_ins {
     uint8_t op;
     uint8_t rep;
@@ -172,6 +174,8 @@ struct lu_ins {
     int64_t imm, imm2;
     struct lu_fs *fs;           /* where a guard or a raise leaves */
     struct lu_fs *origin;       /* a guard moved out of a loop: where it was, which its failure blames */
+    PyCodeObject *src;          /* the bytecode it was built for (NULL: the optimizer's), for the counts */
+    int src_pc;
     int nargs;
     lu_v *args;                 /* PHI: per predecessor; HELPER: the arguments */
     /* The backend's: the position in the linear order, and the location. */

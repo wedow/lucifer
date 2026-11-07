@@ -629,7 +629,13 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
 1. **Trigger and build.** Back-edge and call counters trigger compilation. A
    background compiler thread builds SSA from bytecode plus inline-cache feedback.
    It inlines kernel functions, so `list.append` and `dict.get` written in Python
-   compile into the caller. That is the payoff of Python builtins.
+   compile into the caller. That is the payoff of Python builtins. A call of a
+   class whose `__new__` is object's and whose `__init__` is a Python function
+   is `type.__call__`'s work in line: the class's version guarded, the
+   instance allocated, and `__init__` inlined under a frame of `type.__call__`
+   that compiled code never runs, at its boundary after its call of
+   `__init__`. An exit inside the initializer resumes there, so the
+   interpreter checks the result and returns the instance.
 2. **Guards.** Type version, keys version, function version, global watcher tag,
    value range. Effects are explicit per Python operation: descriptors,
    `__eq__`/`__hash__` callbacks, C calls and allocation can all reenter.
@@ -644,8 +650,8 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    place for an immortal item or one the thread owns; the try-incref
    protocol stays in C), list stores under the list's `ob_mutex`, boxes from
    the small-int cache, the carrier's freelists or its mimalloc pages, and
-   small tuple and list displays popped from the pages and counted in the
-   carrier's GC allocation batch. A hook that sees allocations (an allocator
+   small tuple and list displays and instances popped from the pages and
+   counted in the carrier's GC allocation batch. A hook that sees allocations (an allocator
    or a reference tracer) sends every allocation to C. `-X
    lucifer_jit_stats` counts the C paths taken.
 5. **Entry.** OSR at `JUMP_BACKWARD`.

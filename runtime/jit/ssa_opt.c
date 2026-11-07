@@ -569,7 +569,8 @@ may_change(struct lu_func *f, struct lu_ins *in)
     case OP_HELPER:
         return !(in->imm == H_box_int || in->imm == H_box_float || in->imm == H_list_item
                  || in->imm == H_attr_load || in->imm == H_slot_load || in->imm == H_dict_lacks
-                 || in->imm == H_cell_load || in->imm == H_compare_ideq || in->imm == H_range_iter);
+                 || in->imm == H_cell_load || in->imm == H_compare_ideq || in->imm == H_range_iter
+                 || in->imm == H_new_object);
     default:
         return (lu_op_flags[in->op] & IF_CALL) || in->op == OP_TRUTH;
     }
