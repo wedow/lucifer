@@ -105,12 +105,17 @@ lu_instr_before(PyCodeObject *code, lu_codeunit *after)
     return at;
 }
 
+/* A frame compiled code runs: the instr of the state it published at its
+   call (runtime/jit/deopt.c). */
+lu_codeunit *lu_jit_instr(struct lu_frame *f);
+
 /* The code unit of the instruction the frame last started: the one before
    instr, caches skipped. */
 static inline Py_ssize_t
 lu_frame_lasti(struct lu_frame *f)
 {
-    return lu_instr_before(f->code, f->instr) - lu_code_start(f->code);
+    lu_codeunit *instr = __atomic_load_n(&f->owner, __ATOMIC_ACQUIRE) == LU_FRAME_JIT ? lu_jit_instr(f) : f->instr;
+    return lu_instr_before(f->code, instr) - lu_code_start(f->code);
 }
 
 /* The owner of an executing frame of `code` that the interpreter runs. */

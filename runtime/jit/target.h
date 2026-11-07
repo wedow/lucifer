@@ -93,6 +93,7 @@ struct lu_deopt {
     int call_pc;                /* lu_jit_frames_push: the innermost frame's instruction during the call */
     int nrelease;               /* references compiled code still holds that no frame takes: released last */
     struct lu_dv *release;
+    lu_codeunit *instr;         /* published: the instruction the root frame shows as running (lu_jit_instr) */
 };
 
 /* A code object's entry for calls from compiled code, the first field of

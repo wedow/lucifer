@@ -16,10 +16,11 @@
    run Python, release a value whose finalizer does, or park the task), it
    publishes the description of that call's state and its spill words
    (jit_desc, jit_spills), where the allocator keeps every local it names
-   during the call (lu_publishes). A walker then reads its locals from there (lu_jit_slot), and a
-   write to them (f_locals, PEP 667) first gives the frame real slots
-   (lu_jit_sync); compiled code sees that when the call returns and leaves,
-   and the exit keeps the slots the walker wrote.
+   during the call (lu_publishes). A walker then reads its locals from
+   there (lu_jit_slot) and its instruction (lu_jit_instr), and a write to
+   them (f_locals, PEP 667) first gives the frame real slots (lu_jit_sync);
+   compiled code sees that after the call and leaves, and the exit keeps
+   the slots the walker wrote.
 
    A virtual box (an int or float compiled code never boxed) is built once
    per exit, so every slot that names the same value gets the same object.
@@ -161,8 +162,16 @@ lu_jit_slot(struct lu_frame *f, int i)
     return v;
 }
 
-/* The frame gets real slots, each with a reference of its own, and the
-   interpreter's owner: compiled code leaves it when its call returns. */
+lu_codeunit *
+lu_jit_instr(struct lu_frame *f)
+{
+    struct lu_deopt *d = __atomic_load_n(&f->jit_desc, __ATOMIC_ACQUIRE);
+    return d != NULL ? d->instr : f->instr;
+}
+
+/* The frame gets real slots, each with a reference of its own, its
+   instruction, and the interpreter's owner: compiled code leaves it when
+   its call returns. */
 int
 lu_jit_sync(struct lu_frame *f)
 {
@@ -185,6 +194,7 @@ lu_jit_sync(struct lu_frame *f)
     }
     free(r.built);
     f->stackpointer = f->localsplus + fr->nlocals;
+    f->instr = f->last = d->instr;
     __atomic_store_n(&f->owner, lu_frame_owner_for(f->code), __ATOMIC_RELEASE);
     return 0;
 }

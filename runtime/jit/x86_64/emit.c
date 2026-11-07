@@ -903,23 +903,21 @@ published(struct asm_ *a, struct lu_ins *in)
 }
 
 /* Before a call during which a walker may see the root frame: the state
-   `d` of in->fs, where walkers read its locals (runtime/jit/deopt.c), and
-   the instruction the frame shows as the one that ran: the root's state
-   is before it, or after the call into inlined frames, or, for a
-   release's, after it. Clobbers RAX. */
+   `d` of in->fs, where walkers read its locals and the instruction the
+   frame shows as the one that ran (runtime/jit/deopt.c). The root's state
+   is before that instruction, or after the call into inlined frames, or,
+   for a release's, after it. Clobbers RAX. */
 static void
 publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
 {
-    mov_ri(a, RAX, (int64_t)(intptr_t)d);
-    store(a, R15, offsetof(struct lu_frame, jit_desc), RAX);
     struct lu_fs *root = in->fs;
     while (root->caller != NULL) {
         root = root->caller;
     }
     int next = root == in->fs && in->op != OP_DECREF ? lu_jit_next_pc(root->code, root->pc) : root->pc;
-    mov_ri(a, RAX, (int64_t)(intptr_t)(lu_code_start(root->code) + next));
-    store(a, R15, offsetof(struct lu_frame, instr), RAX);
-    store(a, R15, offsetof(struct lu_frame, last), RAX);
+    d->instr = lu_code_start(root->code) + next;
+    mov_ri(a, RAX, (int64_t)(intptr_t)d);
+    store(a, R15, offsetof(struct lu_frame, jit_desc), RAX);
 }
 
 static void
