@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Rewrite the stats table between README.md's stats markers from the latest daily status record.
 
-Speed is the geomean over every *.on_over_cpython ratio in the latest record, so new
-benchmarks join it by recording that key. Kernel and differential rows take the worst of
+Speed is the geomean over every *.on_over_cpython ratio in the latest record, one per
+program across every benchmark suite, so new benchmarks join it by recording that key. Kernel and differential rows take the worst of
 the record's lanes; numpy and Lib/test rows carry the date of the run behind their counts.
 """
 import argparse
@@ -41,7 +41,7 @@ def table(results):
     rows = [
         "| Metric | Score | Counts |",
         "|---|---|---|",
-        f"| Speed vs CPython 3.14t | {speed:.2f}x CPython's speed | geomean of {len(ratios)} programs, {date} |",
+        f"| Speed vs CPython 3.14t, composite across benchmark suites | {speed:.2f}x CPython's speed | geomean of {len(ratios)} programs, {date} |",
         share("C-API functions implemented", m, "capi.implemented", "capi.total"),
         share("numpy test suite passing", m, "conformance.numpytest.lucifer.pass", "conformance.numpytest.total",
               note=f" collected, run {m['conformance.numpytest.date']}"),

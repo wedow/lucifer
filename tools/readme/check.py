@@ -12,6 +12,9 @@ RECORD = """metric,value,previous
 awfy.A.on_over_cpython,0.5,0.6
 awfy.B.on_over_cpython,2.0,2.1
 awfy.geomean_on_over_cpython,1.0,1.1
+web.cpython-3.14t.8.rps,8000.0,
+web.lucifer.8.rps,1000.0,
+web.flask.on_over_cpython,8.0,
 conformance.kernel.plain.pass,593,580
 conformance.kernel.plain.total,593,583
 conformance.kernel.jit.pass,590,580
@@ -37,7 +40,7 @@ README = "# Title\n\nIntro.\n\n<!-- stats:begin -->\nold\n<!-- stats:end -->\n\n
 TABLE = """<!-- stats:begin -->
 | Metric | Score | Counts |
 |---|---|---|
-| Speed vs CPython 3.14t | 1.00x CPython's speed | geomean of 2 programs, 2026-01-02 |
+| Speed vs CPython 3.14t, composite across benchmark suites | 0.50x CPython's speed | geomean of 3 programs, 2026-01-02 |
 | C-API functions implemented | 66.5% | 1,083 of 1,628 |
 | numpy test suite passing | 96.2% | 50,299 of 52,273 collected, run 2025-12-28 |
 | Core-type `Lib/test` passing, relative to CPython | 92.4% | 1,993 of CPython's 2,157, run 2025-12-01 |
@@ -74,7 +77,7 @@ class StatsCheck(unittest.TestCase):
     def test_geomean_takes_every_perf_ratio(self):
         with (self.day / "summary.csv").open("a") as f:
             f.write("pyperformance.C.on_over_cpython,0.125,\n")
-        self.assertIn("| 2.00x CPython's speed | geomean of 3 programs, 2026-01-02 |", self.stats())
+        self.assertIn("| 1.00x CPython's speed | geomean of 4 programs, 2026-01-02 |", self.stats())
 
 
 if __name__ == "__main__":

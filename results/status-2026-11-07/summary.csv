@@ -90,6 +90,7 @@ web.lucifer.8.rps,1510.6,
 web.lucifer.8.p50_ms,47.815,
 web.lucifer.8.p99_ms,110.787,
 web.lucifer.8.errors,0,
+web.flask.on_over_cpython,6.688203362902159,
 conformance.kernel.plain.pass,593,583
 conformance.kernel.plain.total,593,583
 conformance.kernel.jit.pass,593,583
