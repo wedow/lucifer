@@ -17,6 +17,44 @@ const uint8_t lu_op_flags[OP_COUNT] = {
 #undef LU_OP_FLAGS
 };
 
+const char *const lu_count_names[CNT_COUNT] = {
+#define LU_COUNT_NAME(name) #name,
+    LU_COUNT_KINDS(LU_COUNT_NAME)
+#undef LU_COUNT_NAME
+};
+
+int
+lu_count_kind(const struct lu_ins *in)
+{
+    switch (in->op) {
+    case OP_GUARD_TYPE: return CNT_guard_type;
+    case OP_GUARD_VERSION:
+        return in->imm2 == GV_TYPE_OF ? CNT_guard_type_of : in->imm2 == GV_TYPE_ITSELF ? CNT_guard_type_itself
+            : in->imm2 == GV_DICT_KEYS ? CNT_guard_keys : CNT_guard_func;
+    case OP_GUARD_IS:
+        return GI_MODE(in->imm2) == 0 ? CNT_guard_is : GI_MODE(in->imm2) == 1 ? CNT_guard_cell : CNT_guard_global;
+    case OP_GUARD_BIT: return CNT_guard_bit;
+    case OP_GUARD_NOT_NULL: return CNT_guard_not_null;
+    case OP_GUARD_DEPTH: case OP_GUARD_FRAMES: return CNT_guard_other;
+    case OP_UNBOX_INT: case OP_UNBOX_FLOAT: return CNT_unbox;
+    case OP_POLL: return CNT_poll;
+    case OP_CHECK_LIVE: return CNT_live;
+    case OP_LOAD:
+        return in->imm == offsetof(PyObject, ob_type) ? CNT_load_type
+            : in->imm == offsetof(PyTypeObject, tp_version_tag) && in->imm2 == 4 ? CNT_load_version
+            : in->imm == offsetof(PyVarObject, ob_size) ? CNT_load_size : CNT_load_other;
+    case OP_INLINE_LOAD: case OP_INLINE_LOAD_F: case OP_INLINE_LOAD_I: case OP_ATTR_LOAD: return CNT_attr_load;
+    case OP_INLINE_STORE: case OP_INLINE_STORE_F: case OP_INLINE_STORE_I: case OP_ATTR_STORE: return CNT_attr_store;
+    case OP_GLOBAL_LOAD: return CNT_global_load;
+    case OP_LIST_ITEM: case OP_LIST_STORE: case OP_STR_ORD: case OP_BYTES_ITEM: return CNT_item;
+    case OP_HELPER: return CNT_helper;
+    case OP_INCREF: return CNT_incref;
+    case OP_DECREF: return CNT_decref;
+    case OP_BOX_INT: case OP_BOX_FLOAT: return (in->flags & INS_VIRTUAL) ? -1 : CNT_box;
+    default: return -1;
+    }
+}
+
 static const uint8_t op_reps[OP_COUNT] = {
 #define LU_OP_REP(name, rep, flags) rep,
     LU_IR_OPS(LU_OP_REP)
@@ -149,6 +187,7 @@ lu_ir_free(struct lu_func *f)
     free(f->ins);
     free(f->known);
     free(f->known_block);
+    free(f->deps);
     free(f->order);
     for (int i = 0; i < f->nconsts; i++) {
         Py_XDECREF(f->consts[i]);

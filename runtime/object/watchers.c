@@ -5,7 +5,9 @@
 
 #include "lucifer.h"
 
-/* Dict watcher id 0 is CPython's own, taken at startup; it has no work here. */
+/* Dict watcher id 0 is CPython's own, taken at startup: here it marks the
+   dicts compiled code relies on (runtime/jit/deps.c), and dict.c reports
+   their changes after making them, so the callback has no work. */
 static int
 reserved_dict_callback(PyDict_WatchEvent event, PyObject *dict, PyObject *key, PyObject *value)
 {

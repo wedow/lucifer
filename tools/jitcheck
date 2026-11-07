@@ -31,6 +31,11 @@ require that a count of the tier's does not grow with the iterations:
          from C). Compiled code makes them itself.
   super  tests/kernel/jit_super.py, whose hot constructors and methods go
          through super(): side exits. None of its functions may be retired.
+  guards tests/kernel/jit_guards.py, whose hot loop's guards check what a
+         writer can change (a global, a function's code, a class
+         attribute) or what never changes (the range iterator's type):
+         the guards its units execute (-X lucifer_jit_stats' per-unit
+         census). They move out of the loop.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -70,6 +75,7 @@ GROWTH = {
     'caught': ('jit_caught.py', r'jit: entries .* error (\d+) frame (\d+)', 0),
     'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
     'super': ('jit_super.py', r'jit: entries .* side (\d+)', 0),
+    'guards': ('jit_guards.py', r'jit: unit hot@\d+ entries \d+ guards (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
 }
 GROWTH_N = 20000
@@ -85,8 +91,8 @@ def run(argv, timeout):
 def counted(lucifer, program, pattern, n, timeout):
     code, out, err = run([lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', str(program), str(n)],
                          timeout)
-    m = re.search(pattern, err)
-    return (code, out, sum(map(int, m.groups())) if m else None,
+    found = [int(n) for m in re.finditer(pattern, err) for n in m.groups()]
+    return (code, out, sum(found) if found else None,
             re.findall(r'^jit: (?:disabled (\S+)|retire (\S+)@)', err, re.M))
 
 

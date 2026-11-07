@@ -79,6 +79,7 @@ clear_version(PyFunctionObject *func)
 {
     if (func->func_version >= 2) {
         __atomic_store_n(&func->func_version, 1, __ATOMIC_RELEASE);
+        lu_jit_invalidate(LU_DEP_FUNC, (uintptr_t)func, 0);
     }
 }
 

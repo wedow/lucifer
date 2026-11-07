@@ -128,6 +128,23 @@ send_event(int watcher_bits, PyDict_WatchEvent event, PyDictObject *mp, PyObject
     }
 }
 
+/* After a change to a dict compiled code relies on (dict watcher id 0):
+   its keys (ix < 0), or the value of entry ix, named by its word's offset
+   in the keys table, which only a change of keys moves. */
+static void
+changed(PyDictObject *mp, Py_ssize_t ix)
+{
+    if (__atomic_load_n(&mp->_ma_watcher_tag, __ATOMIC_ACQUIRE) & 1) {
+        PyDictKeysObject *dk = mp->ma_keys;
+        if (ix >= 0) {
+            lu_jit_invalidate(LU_DEP_VALUE, (uintptr_t)mp, (uint32_t)((char *)lu_dk_value_slot(dk, ix) - (char *)dk));
+        }
+        else {
+            lu_jit_invalidate(LU_DEP_KEYS, (uintptr_t)mp, 0);
+        }
+    }
+}
+
 void
 lu_dict_notify(PyDictObject *mp, PyDict_WatchEvent event, PyObject *key, PyObject *value)
 {
@@ -670,6 +687,7 @@ lu_dict_insert(PyDictObject *mp, PyObject *key, Py_hash_t hash, PyObject *value)
     dk->dk_usable--;
     dk->dk_nentries = n + 1;
     __atomic_store_n(&mp->ma_used, mp->ma_used + 1, __ATOMIC_RELAXED);
+    changed(mp, -1);
     return 0;
 }
 
@@ -706,6 +724,7 @@ lu_dict_replace(PyDictObject *mp, Py_ssize_t ix, PyObject *value)
     if (old != value) {
         lu_dict_notify(mp, PyDict_EVENT_MODIFIED, lu_dk_key(dk, ix), value);
         __atomic_store_n(slot, Py_NewRef(value), __ATOMIC_RELEASE);
+        changed(mp, ix);
         Py_XDECREF(old);
     }
 }
@@ -726,6 +745,7 @@ lu_dict_remove(PyDictObject *mp, Py_ssize_t ix)
     }
     dk->dk_version = 0;
     __atomic_store_n(&mp->ma_used, mp->ma_used - 1, __ATOMIC_RELAXED);
+    changed(mp, -1);
     Py_DECREF(key);
     return value;
 }
@@ -758,6 +778,7 @@ lu_dict_clear(PyDictObject *mp)
     lu_dict_notify(mp, PyDict_EVENT_CLEARED, NULL, NULL);
     __atomic_store_n(&mp->ma_keys, LU_EMPTY_KEYS, __ATOMIC_RELEASE);
     __atomic_store_n(&mp->ma_used, 0, __ATOMIC_RELAXED);
+    changed(mp, -1);
     for (Py_ssize_t i = 0; i < old->dk_nentries; i++) {
         Py_XDECREF(lu_dk_key(old, i));
         Py_XDECREF(lu_dk_value(old, i));
@@ -841,6 +862,7 @@ clone_into(PyDictObject *mp, PyDictObject *other)
     lu_dict_notify(mp, PyDict_EVENT_CLONED, (PyObject *)other, NULL);
     __atomic_store_n(&mp->ma_keys, dk, __ATOMIC_RELEASE);
     __atomic_store_n(&mp->ma_used, other->ma_used, __ATOMIC_RELAXED);
+    changed(mp, -1);
     return 0;
 }
 
