@@ -44,6 +44,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
 #define IF_PURE     0x10        /* a value of its operands alone */
 #define IF_TERM     0x20        /* ends its block */
 #define IF_PY       0x40        /* may run Python: the frame must be observable */
+#define IF_SEEN     0x80        /* may release a value whose finalizer runs Python, or park the task:
+                                   a walker may see the frame, which publishes its state (lu_publishes) */
 
 /* X(name, result rep, flags) */
 #define LU_IR_OPS(X) \
@@ -81,7 +83,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(CMP_F, REP_BIT, IF_PURE)          /* imm: Py_LT .. Py_GE, false on NaN except != */ \
     X(IS, REP_BIT, IF_PURE)             /* a is b */ \
     X(NOT, REP_BIT, IF_PURE) \
-    X(BOOL, REP_OBJ, IF_PURE)           /* a: bit; Py_True or Py_False, immortal */ \
+    X(BOOL, REP_OBJ, IF_PURE)           /* a: bit; Py_True or Py_False, immortal; imm 1 (virtual): of NOT a */ \
     X(TRUTH, REP_BIT, IF_RAISE | IF_CALL | IF_EFFECT)       /* a: any object, as TO_BOOL decides */ \
     X(GUARD_TYPE, REP_NONE, IF_GUARD)   /* Py_TYPE(a) == imm */ \
     X(GUARD_VERSION, REP_NONE, IF_GUARD)        /* a version == imm; imm2 says which (GV_*) */ \
@@ -91,24 +93,25 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(GUARD_DEPTH, REP_NONE, IF_GUARD | IF_EFFECT)  /* the task's py_recursion_remaining >= imm (at entry) */ \
     X(GUARD_FRAMES, REP_NONE, IF_GUARD | IF_EFFECT) /* a call left no inlined frame pushed and the root     \
                                                        compiled code's (runtime/jit/deopt.c); imm 1: and    \
-                                                       without a frame object another holds */ \
+                                                       without a frame object another holds; imm2: the      \
+                                                       instruction's first IR instruction */ \
     X(LOAD, REP_NONE, 0)                /* *(a + imm), rep set by the builder; a borrowed object; imm2 4: 32 bits */ \
     X(STORE, REP_NONE, IF_EFFECT)       /* *(a + imm) = b, raw */ \
-    X(LIST_ITEM, REP_OBJ, IF_GUARD | IF_CALL)   /* a: an exact list (imm 1: tuple), b: i64 index; deopts out of range */ \
-    X(LIST_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL)     /* a[b] = c, borrowing c */ \
+    X(LIST_ITEM, REP_OBJ, IF_GUARD | IF_CALL | IF_SEEN)   /* a: an exact list (imm 1: tuple), b: i64 index; deopts out of range */ \
+    X(LIST_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* a[b] = c, borrowing c */ \
     X(STR_ORD, REP_I64, IF_GUARD)       /* a: an exact str, b: i64 index; the code point; deopts out of range */ \
     X(BYTES_ITEM, REP_I64, IF_GUARD)    /* a: an exact bytes, b: i64 index; the byte; deopts out of range */ \
     X(ATTR_LOAD, REP_OBJ, IF_GUARD | IF_CALL)   /* a.name from its managed dict: imm version, imm2 entry; c: the name */ \
     X(ATTR_STORE, REP_NONE, IF_RAISE | IF_EFFECT | IF_CALL)     /* a.(name c) = b, borrowing b */ \
-    X(INLINE_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL)   /* a's inline word at byte imm = b, borrowing b */ \
+    X(INLINE_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN) /* a's inline word at byte imm = b, borrowing b */ \
     X(INLINE_LOAD, REP_OBJ, IF_GUARD)   /* a's inline value at byte imm, while it keeps them; scratch registers only */ \
     X(INLINE_LOAD_F, REP_F64, IF_GUARD) /* the same as binary64: an unboxed float's, or an exact float's */ \
     X(INLINE_LOAD_I, REP_I64, IF_GUARD) /* the same as int64: an unboxed int's, or a compact int's */ \
-    X(INLINE_STORE_F, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL) /* a's inline word at byte imm = the float b, unboxed */ \
-    X(INLINE_STORE_I, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL) /* the same for the int b */ \
+    X(INLINE_STORE_F, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* a's inline word at byte imm = the float b, unboxed */ \
+    X(INLINE_STORE_I, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* the same for the int b */ \
     X(GLOBAL_LOAD, REP_OBJ, IF_GUARD | IF_CALL) /* imm: the dict, imm2: keys version << 32 | entry */ \
     X(INCREF, REP_NONE, IF_EFFECT) \
-    X(DECREF, REP_NONE, IF_EFFECT | IF_CALL) \
+    X(DECREF, REP_NONE, IF_EFFECT | IF_CALL | IF_SEEN)  /* imm 1: may run a finalizer, published at fs when it has one */ \
     X(RITER_NEXT, REP_I64, 0)           /* a: an exact range_iterator; the next value, stepping it */ \
     X(RITER_DONE, REP_BIT, 0)           /* a: an exact range_iterator: exhausted */ \
     X(HELPER, REP_NONE, IF_EFFECT | IF_CALL)    /* imm: the helper, args; rep and flags from it */ \

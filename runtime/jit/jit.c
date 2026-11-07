@@ -265,6 +265,7 @@ free_unit(struct lu_unit *u)
             free(d->frames[k].vals);
         }
         free(d->frames);
+        free(d->release);
         free(d);
     }
     free(u->deopts);

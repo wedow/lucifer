@@ -12,10 +12,11 @@
    the task's current frame. References: an entry compiled code owns moves
    into the frame; any other entry takes a new reference.
 
-   While the root calls something that may run Python, it publishes the
-   description of that call's state and its spill words (jit_desc,
-   jit_spills), where the allocator keeps every local it names during the
-   call. A walker then reads its locals from there (lu_jit_slot), and a
+   While the root calls something during which a walker may see it (it may
+   run Python, release a value whose finalizer does, or park the task), it
+   publishes the description of that call's state and its spill words
+   (jit_desc, jit_spills), where the allocator keeps every local it names
+   during the call (lu_publishes). A walker then reads its locals from there (lu_jit_slot), and a
    write to them (f_locals, PEP 667) first gives the frame real slots
    (lu_jit_sync); compiled code sees that when the call returns and leaves,
    and the exit keeps the slots the walker wrote.
@@ -84,6 +85,8 @@ take(struct regs *r, const struct lu_dv *dv)
         PyObject *o = (PyObject *)(uintptr_t)raw(r, dv);
         return dv->owned ? o : Py_XNewRef(o);
     }
+    case DV_BOOL:
+        return Py_NewRef((raw(r, dv) ^ dv->bitimm) & 1 ? Py_True : Py_False);
     default:
         break;
     }
@@ -138,8 +141,8 @@ push_inlined(PyThreadState *ts, struct regs *r, struct lu_deopt_frame *fr, struc
 }
 
 /* Local i of a root frame compiled code runs, as a new reference: from
-   the state it published at its call, or NULL (unbound) when it is in no
-   such call (a finalizer run by a release in compiled code). */
+   the state it published at its call, or NULL (unbound) in a call that
+   published none (lu_publishes). */
 PyObject *
 lu_jit_slot(struct lu_frame *f, int i)
 {
@@ -280,7 +283,7 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
         Py_FatalError("lucifer jit: kept frames do not match the exit");
     }
     struct lu_deopt_frame *fr = &d->frames[0];
-    int nvals = 1;
+    int nvals = 1 + d->nrelease;
     for (int k = 0; k < d->nframes; k++) {
         nvals += d->frames[k].nlocals + d->frames[k].nstack;
     }
@@ -360,6 +363,9 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
         }
         top->instr = top->last = lu_code_start(top->code)
             + lu_jit_next_pc(top->code, (int)(top->instr - lu_code_start(top->code)));
+    }
+    for (int i = 0; i < d->nrelease; i++) {
+        old[nold++] = (PyObject *)(uintptr_t)raw(&r, &d->release[i]);
     }
     if (d->reason == EXIT_STRESS && d->stress != NULL) {
         __atomic_store_n(d->stress, (long)_PyRuntime.stress.deopt, __ATOMIC_RELAXED);

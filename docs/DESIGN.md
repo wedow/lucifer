@@ -640,7 +640,10 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    aliases preserved. Completed side effects are never replayed.
 7. **Calls and frames.** Compiled code owns the locals and stack of the
    frame it runs in (`LU_FRAME_JIT`); walkers read them through the state
-   each Python-running call publishes (FOUNDATIONS 2.2). A call of a
+   published by each call during which one may see the frame: a call that
+   may run Python, release a value whose finalizer does, or park the task
+   (FOUNDATIONS 2.2). A guard after such an instruction leaves when a
+   walker wrote the locals. A call of a
    Python function whose code has a unit at its call entry pushes the
    callee's frame itself and enters that unit's direct entry: no C helper,
    no eval loop, and the callee pops its frame when it returns. A function

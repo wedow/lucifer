@@ -70,7 +70,16 @@ struct asm_ {
     struct lu_func *f;
     struct lu_unit *unit;
     int frame_bytes;
+    /* Per instruction (settle_guards): the frames guard whose state a call
+       of it leaves at when a walker wrote the locals, or LU_NOV; that exit's
+       label, or -1; a guard's GM_* mode; the block position. */
+    lu_v *settle;
+    int *left;
+    uint8_t *gmode;
+    int *at;
 };
+
+enum { GM_FULL, GM_ROOT, GM_NONE };
 
 /* --- the buffer --- */
 
@@ -772,6 +781,18 @@ describe(struct asm_ *a, lu_v v, int owned)
         dv.kind = DV_NEW_DICT;
         return dv;
     }
+    if ((in->flags & INS_VIRTUAL) && in->op == OP_BOOL) {
+        struct lu_ins *bit = I(a, in->a);
+        dv.kind = DV_BOOL;
+        dv.bitimm = (uint8_t)in->imm;
+        if (bit->op == OP_CONST_I) {
+            dv.imm = bit->imm;
+        }
+        else {
+            dv.loc = bit->loc;
+        }
+        return dv;
+    }
     if (in->flags & INS_VIRTUAL) {
         struct lu_ins *raw = I(a, in->a);
         dv.kind = in->op == OP_BOX_INT ? DV_BOX_I64 : DV_BOX_F64;
@@ -872,13 +893,33 @@ guard_exit(struct asm_ *a, struct lu_ins *in)
 
 extern int lu_jit_next_pc(PyCodeObject *code, int pc);
 
-/* Around a call that may run Python: the root frame's state during the
-   call, where walkers read its locals (runtime/jit/deopt.c). */
+/* The description an instruction that publishes (lu_publishes) shows
+   walkers: an exit's that is never taken. */
+static struct lu_deopt *
+published(struct asm_ *a, struct lu_ins *in)
+{
+    exit_to(a, in->fs, EXIT_SIDE, 0, 0);
+    return a->exits[a->nexits - 1].d;
+}
+
+/* Before a call during which a walker may see the root frame: the state
+   `d` of in->fs, where walkers read its locals (runtime/jit/deopt.c), and
+   the instruction the frame shows as the one that ran: the root's state
+   is before it, or after the call into inlined frames, or, for a
+   release's, after it. Clobbers RAX. */
 static void
-publish(struct asm_ *a, struct lu_deopt *d)
+publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
 {
     mov_ri(a, RAX, (int64_t)(intptr_t)d);
     store(a, R15, offsetof(struct lu_frame, jit_desc), RAX);
+    struct lu_fs *root = in->fs;
+    while (root->caller != NULL) {
+        root = root->caller;
+    }
+    int next = root == in->fs && in->op != OP_DECREF ? lu_jit_next_pc(root->code, root->pc) : root->pc;
+    mov_ri(a, RAX, (int64_t)(intptr_t)(lu_code_start(root->code) + next));
+    store(a, R15, offsetof(struct lu_frame, instr), RAX);
+    store(a, R15, offsetof(struct lu_frame, last), RAX);
 }
 
 static void
@@ -980,24 +1021,14 @@ call_direct(struct asm_ *a, lu_v v, int done)
     bind(a, slow);
 }
 
-/* `d`, when the helper may run Python: the state it publishes. */
+/* `d`, when the helper publishes: the state it publishes. */
 static void
 call_helper(struct asm_ *a, lu_v v, struct lu_deopt *d)
 {
     struct lu_ins *in = I(a, v);
     const struct lu_helper *h = &lu_helpers[in->imm];
     if (d != NULL) {
-        publish(a, d);
-        /* The frame shows the call's instruction as the one that ran: the
-           root's state is before it, or after the call into inlined frames. */
-        struct lu_fs *root = in->fs;
-        while (root->caller != NULL) {
-            root = root->caller;
-        }
-        int next = root == in->fs ? lu_jit_next_pc(root->code, root->pc) : root->pc;
-        mov_ri(a, RAX, (int64_t)(intptr_t)(lu_code_start(root->code) + next));
-        store(a, R15, offsetof(struct lu_frame, instr), RAX);
-        store(a, R15, offsetof(struct lu_frame, last), RAX);
+        publish(a, in, d);
     }
     static const int argregs[] = { RDI, RSI, RDX, RCX, R8, R9 };
     struct move moves[8];
@@ -1111,6 +1142,124 @@ push_frames(struct asm_ *a, lu_v v, struct lu_deopt *d)
     alu_ri(a, ALU_ADD, RSP, 256);
 }
 
+/* --- frames guards that check on the slow paths --- */
+
+/* What may come between an instruction's last call and its frames guard
+   for the guard to check after each call instead (settle_guards): a
+   release or a store, which make no value. */
+static int
+tail_ins(struct lu_func *f, lu_v v)
+{
+    struct lu_ins *in = &f->ins[v];
+    if (in->flags & (INS_DEAD | INS_VIRTUAL)) {
+        return 1;
+    }
+    switch (in->op) {
+    case OP_DECREF:
+        return in->a == LU_NOV || !(f->ins[in->a].flags & INS_VIRTUAL);
+    case OP_INLINE_STORE: case OP_INLINE_STORE_F: case OP_INLINE_STORE_I: case OP_LIST_STORE:
+        return 1;
+    case OP_HELPER:
+        return in->rep == REP_NONE && !(lu_helpers[in->imm].flags & IF_PY);
+    default:
+        return 0;
+    }
+}
+
+/* A frames guard needs no check on the path that made no call a walker may
+   see the frame during, when every such call of its instruction is a
+   release or a store in the tail just before it: each of those checks
+   after its call and leaves at the guard's state, releasing what the
+   instruction had yet to release. The tail defines no value, so that
+   state's values exist before each of those calls, and are in memory after
+   it (IF_CALL). A guard checks the inlined frames only when its
+   instruction made a Python call from one (lu_jit_frames_push). */
+static void
+settle_guards(struct asm_ *a)
+{
+    struct lu_func *f = a->f;
+    for (int v = 0; v < f->nins; v++) {
+        a->settle[v] = LU_NOV;
+        a->left[v] = -1;
+        a->gmode[v] = GM_FULL;
+        a->at[v] = -1;
+    }
+    for (int b = 0; b < f->nblocks; b++) {
+        for (int p = 0; p < f->blocks[b].nins; p++) {
+            a->at[f->blocks[b].ins[p]] = p;
+        }
+    }
+    for (int b = 0; b < f->nblocks; b++) {
+        struct lu_block *bl = &f->blocks[b];
+        for (int p = 0; p < bl->nins; p++) {
+            lu_v g = bl->ins[p];
+            struct lu_ins *gi = &f->ins[g];
+            if (gi->op != OP_GUARD_FRAMES || (gi->flags & INS_DEAD) || (gi->imm & 1)) {
+                continue;
+            }
+            int t = p, settles = 1, pushes = 0;
+            while (t > 0 && tail_ins(f, bl->ins[t - 1])) {
+                t--;
+            }
+            for (lu_v v = (lu_v)gi->imm2; v < g; v++) {
+                struct lu_ins *in = &f->ins[v];
+                if ((in->flags & INS_DEAD) || !lu_publishes(in)) {
+                    continue;
+                }
+                pushes |= in->op == OP_HELPER && (lu_helpers[in->imm].flags & IF_PY) && in->fs->caller != NULL;
+                settles &= in->block == b && a->at[v] >= t && a->at[v] < p && bl->ins[a->at[v]] == v;
+            }
+            a->gmode[g] = settles ? GM_NONE : pushes ? GM_FULL : GM_ROOT;
+            for (lu_v v = (lu_v)gi->imm2; settles && v < g; v++) {
+                if (!(f->ins[v].flags & INS_DEAD) && lu_publishes(&f->ins[v])) {
+                    a->settle[v] = g;
+                }
+            }
+        }
+    }
+}
+
+/* After a call of v: a walker that wrote the root's locals during it
+   (lu_jit_sync) leaves compiled code at its frames guard's state, with the
+   references the tail had yet to release. */
+static int
+settled_exit(struct asm_ *a, lu_v v)
+{
+    lu_v g = a->settle[v];
+    if (g == LU_NOV || a->left[v] >= 0) {
+        return g == LU_NOV ? -1 : a->left[v];
+    }
+    a->left[v] = exit_to(a, I(a, g)->fs, EXIT_FRAME, 0, 0);
+    struct lu_deopt *d = a->exits[a->nexits - 1].d;
+    struct lu_block *bl = &a->f->blocks[I(a, g)->block];
+    for (int p = a->at[v] + 1; p < a->at[g]; p++) {
+        struct lu_ins *in = I(a, bl->ins[p]);
+        if (in->op == OP_DECREF && !(in->flags & INS_DEAD) && in->a != LU_NOV) {
+            d->release = realloc(d->release, sizeof(struct lu_dv) * (size_t)(d->nrelease + 1));
+            d->release[d->nrelease++] = describe(a, in->a, 1);
+        }
+    }
+    return a->left[v];
+}
+
+static void
+free_settle(struct asm_ *a)
+{
+    free(a->settle);
+    free(a->left);
+    free(a->gmode);
+    free(a->at);
+}
+
+static void
+settle(struct asm_ *a, int left)
+{
+    if (left >= 0) {
+        cmp8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
+        jcc(a, CC_NE, left);
+    }
+}
+
 /* The helper's result in RAX survives. */
 static void
 pop_frames(struct asm_ *a)
@@ -1177,11 +1326,14 @@ extern void lu_jit_decref(PyObject *o);
 
 /* Py_DECREF of r: the owning thread's count above one drops in place;
    anything else (immortal, last reference, another thread's object) goes
-   to C, which keeps the registers when `keep`. DECREF is a call to the
-   allocator (no value is in a register across it), so it keeps none.
-   Clobbers RAX, RCX. */
+   to C. DECREF is a call to the allocator (no value is in a register
+   across it). When the release may run a finalizer, C runs with `d`, the
+   state of `in`, published, and a walker's write then leaves at `left`
+   if it is a label (settle_guards). Clobbers RAX, RCX. */
+static void settle(struct asm_ *a, int left);
+
 static void
-decref(struct asm_ *a, int r, int keep)
+decref(struct asm_ *a, int r, struct lu_ins *in, struct lu_deopt *d, int left)
 {
     int done = new_label(a), slow = new_label(a);
     test_rr(a, r, r);
@@ -1206,13 +1358,14 @@ decref(struct asm_ *a, int r, int keep)
     op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
     jmp(a, done);
     bind(a, slow);
-    if (keep) {
-        save_volatile(a);
-    }
     mov_rr(a, RDI, r);
+    if (d != NULL) {
+        publish(a, in, d);
+    }
     call_abs(a, (void *)lu_jit_decref);
-    if (keep) {
-        restore_volatile(a);
+    if (d != NULL) {
+        unpublish(a);
+        settle(a, left);
     }
     bind(a, done);
 }
@@ -1326,8 +1479,9 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
    released after the unlock. Anything else is C's, and leaves when it
    declines. */
 static void
-inline_store_raw(struct asm_ *a, struct lu_ins *in)
+inline_store_raw(struct asm_ *a, lu_v v)
 {
+    struct lu_ins *in = I(a, v);
     int is_int = in->op == OP_INLINE_STORE_I;
     struct move m[2] = { { RDI, in->a, 0, 0 }, is_int ? (struct move){ RSI, in->b, 0, 0 }
                                                       : (struct move){ XMM(0), in->b, 0, 1 } };
@@ -1335,6 +1489,7 @@ inline_store_raw(struct asm_ *a, struct lu_ins *in)
     int slow = new_label(a), unlock_slow = new_label(a), unlocked = new_label(a), done = new_label(a);
     int32_t flags = offsetof(PyObject, ob_flags) + 1, mutex = offsetof(PyObject, ob_mutex);
     int32_t off = (int32_t)in->imm;
+    struct lu_deopt *d = published(a, in);
     parallel_moves(a, m, 2);
     mov_rr(a, R12, RDI);                        /* kept across calls: nothing is live here (IF_CALL) */
     if (is_int) {
@@ -1378,8 +1533,7 @@ inline_store_raw(struct asm_ *a, struct lu_ins *in)
     bind(a, unlocked);
     alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED_INT);
     jcc(a, CC_BE, done);                        /* no object to release */
-    mov_rr(a, RDI, RBX);
-    call_abs(a, (void *)lu_jit_decref);         /* the old value */
+    decref(a, RBX, in, d, settled_exit(a, v));     /* the old value */
     jmp(a, done);
     bind(a, unlock_slow);
     alu_ri(a, ALU_ADD, RDI, mutex);
@@ -1387,6 +1541,7 @@ inline_store_raw(struct asm_ *a, struct lu_ins *in)
     bind(a, slow);
     mov_rr(a, RDI, R12);
     mov_ri(a, RSI, in->imm);
+    publish(a, in, d);
     if (is_int) {
         mov_rr(a, RDX, R13);
         call_abs(a, (void *)lu_inline_store_i);
@@ -1395,9 +1550,11 @@ inline_store_raw(struct asm_ *a, struct lu_ins *in)
         movq_xr(a, 0, R13);
         call_abs(a, (void *)lu_inline_store_f);
     }
+    unpublish(a);
     b1(a, 0x85);
     b1(a, 0xC0);                                /* test eax, eax */
     jcc(a, CC_E, fail);
+    settle(a, settled_exit(a, v));
     bind(a, done);
 }
 
@@ -1671,6 +1828,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         def_gpr(a, v, RAX);
         return 0;
     case OP_BOOL:
+        if (in->flags & INS_VIRTUAL) {
+            return 0;
+        }
         r = gpr_of(a, in->a, RCX);
         mov_ri(a, RAX, (int64_t)(intptr_t)Py_False);
         mov_ri(a, RDX, (int64_t)(intptr_t)Py_True);
@@ -1705,7 +1865,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int err = in->imm == 1 ? exit_to(a, in->fs, EXIT_GUARD, 0, 0)
                                : exit_to(a, in->fs, EXIT_ERROR, 1, in->drop);
         if (in->imm != 1) {
-            publish(a, a->exits[a->nexits - 1].d);
+            publish(a, in, a->exits[a->nexits - 1].d);
         }
         mov_rr(a, RDI, r);
         call_abs(a, in->imm == 1 ? (void *)lu_truth_exact : (void *)lu_jit_truth);
@@ -1794,7 +1954,10 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     }
     case OP_GUARD_FRAMES: {
         /* Not a speculation: stress fails it in lu_jit_frames_pop. */
-        if (in->fs->caller != NULL) {
+        if (a->gmode[v] == GM_NONE) {
+            return 0;
+        }
+        if (in->fs->caller != NULL && a->gmode[v] == GM_FULL) {
             int kept = exit_to(a, in->fs, EXIT_SIDE, 0, 0);
             load(a, RAX, R14, offsetof(PyThreadState, current_frame));
             alu_rr(a, ALU_CMP, RAX, R15);
@@ -1852,8 +2015,15 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     case OP_LIST_ITEM: {
         struct move m[2] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 } };
         int fail = guard_exit(a, in);
+        struct lu_deopt *d = lu_publishes(in) ? published(a, in) : NULL;
+        if (d != NULL) {
+            publish(a, in, d);
+        }
         parallel_moves(a, m, 2);
         call_abs(a, in->imm ? (void *)lu_jit_tuple_item : (void *)lu_jit_list_item);
+        if (d != NULL) {
+            unpublish(a);
+        }
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
         def_gpr(a, v, RAX);
@@ -1896,11 +2066,15 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     case OP_LIST_STORE: {
         struct move m[3] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 }, { RDX, in->c, 0, 0 } };
         int fail = guard_exit(a, in);
+        struct lu_deopt *d = published(a, in);
+        publish(a, in, d);
         parallel_moves(a, m, 3);
         call_abs(a, (void *)lu_jit_list_store);
+        unpublish(a);
         b1(a, 0x85);
         b1(a, 0xC0);                            /* test eax, eax */
         jcc(a, CC_E, fail);
+        settle(a, settled_exit(a, v));
         return 0;
     }
     case OP_INLINE_STORE: {
@@ -1915,6 +2089,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int unlocked = new_label(a), done = new_label(a);
         int32_t flags = offsetof(PyObject, ob_flags) + 1, mutex = offsetof(PyObject, ob_mutex);
         int32_t off = (int32_t)in->imm;
+        struct lu_deopt *d = published(a, in);
         parallel_moves(a, m, 2);
         mov_rr(a, R12, RDI);                    /* kept across calls: nothing is live here (IF_CALL) */
         mov_rr(a, R13, RSI);
@@ -1965,8 +2140,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         alu_ri(a, ALU_ADD, RDI, mutex);         /* a waiter parked: wake it */
         call_abs(a, (void *)PyMutex_Unlock);
         bind(a, unlocked);
-        mov_rr(a, RDI, RBX);
-        call_abs(a, (void *)lu_jit_decref);     /* the old value */
+        decref(a, RBX, in, d, settled_exit(a, v));     /* the old value */
         jmp(a, done);
         bind(a, unlock_slow);
         alu_ri(a, ALU_ADD, RDI, mutex);
@@ -1978,10 +2152,13 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         b1(a, 0x48);
         b1(a, 0x87);
         b1(a, 0xD6);                            /* xchg rsi, rdx: (owner, offset, value) */
+        publish(a, in, d);
         call_abs(a, (void *)lu_inline_store);
+        unpublish(a);
         b1(a, 0x85);
         b1(a, 0xC0);                            /* test eax, eax */
         jcc(a, CC_E, fail);
+        settle(a, settled_exit(a, v));
         bind(a, done);
         return 0;
     }
@@ -2025,7 +2202,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         inline_load_raw(a, in, v);
         return 0;
     case OP_INLINE_STORE_F: case OP_INLINE_STORE_I:
-        inline_store_raw(a, in);
+        inline_store_raw(a, v);
         return 0;
     case OP_ATTR_LOAD: {
         /* LOAD_ATTR_WITH_HINT in line: the type's version, the instance's
@@ -2077,7 +2254,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         incref(a, r);
         return 0;
     case OP_DECREF:
-        decref(a, gpr_of(a, in->a, RDX), 0);
+        decref(a, gpr_of(a, in->a, RDX), in, lu_publishes(in) ? published(a, in) : NULL, settled_exit(a, v));
         return 0;
     case OP_RITER_DONE:
         r = gpr_of(a, in->a, RDX);
@@ -2118,12 +2295,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             push_frames(a, v, d);
         }
         struct lu_deopt *pub = NULL;
-        if ((h->flags & IF_PY) && in->fs != NULL) {
-            if (d == NULL) {
-                exit_to(a, in->fs, EXIT_SIDE, 0, 0);    /* only its description is used */
-                d = a->exits[a->nexits - 1].d;
-            }
-            pub = d;
+        if (lu_publishes(in)) {
+            pub = d != NULL ? d : published(a, in);
         }
         call_helper(a, v, pub);
         if (inlined) {
@@ -2147,6 +2320,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         if (h->rep != REP_NONE) {
             def_gpr(a, v, RAX);
         }
+        settle(a, settled_exit(a, v));
         return 0;
     }
     case OP_POLL: {
@@ -2484,7 +2658,7 @@ direct_return(struct asm_ *a)
     rex(a, 0, 0, 0, R14);
     b1(a, 0xFF);
     modrm_mem(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));     /* inc dword */
-    decref(a, R12, 0);
+    decref(a, R12, NULL, NULL, -1);
     mov_ri(a, RAX, 1);                          /* LU_JIT_RETURN */
     jmp(a, a->epilogue);
 }
@@ -2549,6 +2723,11 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
        8 off, so the frame is 8 more than a multiple of 16. */
     int bytes = 8 + 8 * f->nspill + 8 * maxargs;
     a->frame_bytes = ((bytes + 15) & ~15) + 8;
+    a->settle = malloc(sizeof(lu_v) * (size_t)f->nins);
+    a->left = malloc(sizeof(int) * (size_t)f->nins);
+    a->gmode = malloc((size_t)f->nins);
+    a->at = malloc(sizeof(int) * (size_t)f->nins);
+    settle_guards(a);
     prologue(a);
     int *labels = malloc(sizeof(int) * (size_t)f->nblocks);
     for (int b = 0; b < f->nblocks; b++) {
@@ -2561,7 +2740,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
         int next = k + 1 < f->norder ? f->order[k + 1] : -1;
         for (int i = 0; i < bl->nins; i++) {
             int k = unit->counts != NULL ? lu_count_kind(I(a, bl->ins[i])) : -1;
-            if (k >= 0) {
+            if (k >= 0 && a->gmode[bl->ins[i]] != GM_NONE) {
                 mov_ri(a, R11, (int64_t)(intptr_t)&unit->counts[k]);
                 rex(a, 1, 0, 0, R11);
                 b1(a, 0xFF);
@@ -2569,6 +2748,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
             }
             if (emit_ins(a, bl->ins[i], next, labels) < 0) {
                 free(labels);
+                free_settle(a);
                 return -1;
             }
         }
@@ -2599,6 +2779,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
         }
     }
     free(labels);
+    free_settle(a);
     epilogue(a);
     int direct = -1;
     if (f->direct) {

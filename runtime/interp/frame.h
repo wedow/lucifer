@@ -61,8 +61,9 @@ struct lu_frame {
     uint8_t owner;              /* enum lu_frame_owner */
     uint8_t ret;                /* enum lu_frame_return */
     uint8_t jit_lent;           /* pushed by a direct call (runtime/jit): func is the caller's, borrowed */
-    /* LU_FRAME_JIT: where its values are while it calls something that may
-       run Python (runtime/jit/deopt.c), NULL otherwise; the spill words. */
+    /* LU_FRAME_JIT: where its values are while it calls something during
+       which a walker may see it (runtime/jit/deopt.c), NULL otherwise; the
+       spill words. */
     struct lu_deopt *jit_desc;
     const uint64_t *jit_spills;
     PyObject *localsplus[];     /* fast locals, cells and free variables, then the stack */
