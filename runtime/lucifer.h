@@ -751,6 +751,10 @@ void lu_stw_task_new(struct _is *interp, struct lu_task *t);
 void lu_stw_task_delete(struct _is *interp, struct lu_task *t);
 
 /* The collector's trigger (runtime/interp/gc.c). */
+/* A carrier's GC allocations reach the interpreter's count in batches of
+   this many (LOCAL_ALLOC_COUNT_THRESHOLD); compiled code's in-line
+   allocations count in the same word. */
+#define LU_GC_ALLOC_FLUSH 512
 void lu_gc_record_allocation(struct lu_entry *entry);
 /* Sets _PyRuntime.allocators.observed after the allocators or the reference
    tracer change: a mem or object allocator other than the runtime's, or a

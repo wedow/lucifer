@@ -111,6 +111,7 @@ h_list_push(PyObject *list, PyObject *v)
 static PyObject *
 h_build_list(PyObject **argv, intptr_t n)
 {
+    LU_JIT_C_PATH(build_list);
     PyObject *l = PyList_New(n);
     if (l != NULL) {
         for (intptr_t i = 0; i < n; i++) {
@@ -121,7 +122,7 @@ h_build_list(PyObject **argv, intptr_t n)
 }
 
 static PyObject *
-h_build_tuple(PyObject **argv, intptr_t n)
+tuple_of(PyObject **argv, intptr_t n)
 {
     PyObject *t = PyTuple_New(n);
     if (t != NULL) {
@@ -132,11 +133,18 @@ h_build_tuple(PyObject **argv, intptr_t n)
     return t;
 }
 
+static PyObject *
+h_build_tuple(PyObject **argv, intptr_t n)
+{
+    LU_JIT_C_PATH(build_tuple);
+    return tuple_of(argv, n);
+}
+
 /* The oparg items of BUILD_SET or BUILD_MAP as one tuple, for the kernel's builder. */
 static PyObject *
 build_kernel(enum lu_kernel_id kid, PyObject **argv, intptr_t n)
 {
-    PyObject *items = h_build_tuple(argv, n);
+    PyObject *items = tuple_of(argv, n);
     PyObject *r = items != NULL ? lu_call_kernel(kid, &items, 1) : NULL;
     Py_XDECREF(items);
     return r;

@@ -1395,6 +1395,93 @@ emit_box(struct asm_ *a, struct lu_ins *in)
     bind(a, done);
 }
 
+/* BUILD_TUPLE and BUILD_LIST of a few items in line, as PyTuple_New and
+   PyList_New make them: the object (and a list's array) popped from the
+   carrier's mimalloc pages, counted for the collector, tracked, and filled
+   with new references. The helper takes the rest: a page with no block at
+   hand, a collection due, a hook that sees allocations, and
+   -X lucifer_stress=gc:N. 0 when the build is the helper's alone. */
+#define BUILD_INLINE 8
+
+static int
+emit_build(struct asm_ *a, lu_v v)
+{
+    struct lu_ins *in = I(a, v);
+    int n = in->nargs, is_list = in->imm == H_build_list;
+    if (_PyRuntime.stress.gc != 0 || n > BUILD_INLINE || (!is_list && n == 0)) {
+        return 0;
+    }
+    int slow = new_label(a), undo = new_label(a), done = new_label(a);
+    size_t size = is_list ? sizeof(PyListObject) : offsetof(PyTupleObject, ob_item) + (size_t)n * sizeof(PyObject *);
+    for (int i = 0; i < n; i++) {
+        to_gpr(a, RAX, in->args[i]);
+        store(a, RSP, 8 * i, RAX);              /* the helper's argument array, as call_helper makes it */
+    }
+    /* IF_CALL: nothing live past the build is in a register. Until the
+       fast path can no longer fall back to the call it writes only
+       caller-saved registers, which the call clobbers anyway. */
+    mov_ri(a, R11, (int64_t)(intptr_t)&_PyRuntime.allocators.observed);
+    cmp_mi(a, 0, R11, 0, 0);
+    jcc(a, CC_NE, slow);
+    load(a, RAX, R14, offsetof(struct lu_task, carrier));
+    load(a, RAX, RAX, offsetof(struct lu_carrier, current));
+    cmp_mi(a, 0, RAX, offsetof(struct lu_entry, gc_alloc_count), LU_GC_ALLOC_FLUSH - 1);
+    jcc(a, CC_GE, slow);                        /* lu_gc_record_allocation would flush the count */
+    pop_block(a, LU_HEAP_GC, size, RDX, RCX, slow);
+    if (is_list && n > 0) {
+        pop_block(a, LU_HEAP_MEM, sizeof(struct lu_list_array) + (size_t)n * sizeof(PyObject *), RSI, RDI, undo);
+    }
+    b1(a, 0x83);
+    modrm_mem(a, ALU_ADD, RAX, offsetof(struct lu_entry, gc_alloc_count));
+    b1(a, 1);                                   /* add dword [rax+count], 1 */
+    thread_id(a, R11);
+    store(a, RDX, offsetof(PyObject, ob_tid), R11);
+    store32_mi(a, RDX, offsetof(PyObject, ob_flags), (int32_t)((uint32_t)LU_GC_TRACKED << 24));    /* ob_gc_bits */
+    store32_mi(a, RDX, offsetof(PyObject, ob_ref_local), 1);
+    store_mi(a, RDX, offsetof(PyObject, ob_ref_shared), 0);
+    mov_ri(a, R11, (int64_t)(intptr_t)(is_list ? &PyList_Type : &PyTuple_Type));
+    store(a, RDX, offsetof(PyObject, ob_type), R11);
+    store_mi(a, RDX, offsetof(PyVarObject, ob_size), n);
+    int items = RDX;
+    int32_t first = offsetof(PyTupleObject, ob_item);
+    if (!is_list) {
+        store_mi(a, RDX, offsetof(PyTupleObject, ob_hash), -1);
+    }
+    else {
+        store_mi(a, RDX, offsetof(PyListObject, allocated), n);
+        if (n > 0) {
+            store_mi(a, RSI, offsetof(struct lu_list_array, allocated), n);
+            lea(a, R11, RSI, offsetof(struct lu_list_array, ob_item));
+            store(a, RDX, offsetof(PyListObject, ob_item), R11);
+            items = RSI;
+            first = offsetof(struct lu_list_array, ob_item);
+        }
+        else {
+            store_mi(a, RDX, offsetof(PyListObject, ob_item), 0);
+        }
+    }
+    for (int i = 0; i < n; i++) {
+        load(a, RBX, RSP, 8 * i);
+        incref(a, RBX);                         /* clobbers RAX, RCX */
+        store(a, items, first + 8 * i, RBX);
+    }
+    mov_rr(a, RAX, RDX);
+    jmp(a, done);
+    bind(a, undo);                              /* the object's block goes back */
+    load(a, R11, RCX, offsetof(mi_page_t, free));
+    store(a, RDX, 0, R11);
+    store(a, RCX, offsetof(mi_page_t, free), RDX);
+    b1(a, 0x66);
+    b1(a, 0xFF);
+    modrm_mem(a, 1, RCX, offsetof(mi_page_t, used));   /* dec word [rcx+used] */
+    bind(a, slow);
+    mov_rr(a, RDI, RSP);
+    mov_ri(a, RSI, n);
+    call_abs(a, lu_helpers[in->imm].fn);
+    bind(a, done);
+    return 1;
+}
+
 static int
 cond_of(int op, int swap)
 {
@@ -2343,7 +2430,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             }
             pub = d;
         }
-        call_helper(a, v, pub);
+        if ((in->imm != H_build_tuple && in->imm != H_build_list) || !emit_build(a, v)) {
+            call_helper(a, v, pub);
+        }
         if (inlined) {
             pop_frames(a);
         }

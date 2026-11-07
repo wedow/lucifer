@@ -20,8 +20,6 @@
 #include <string.h>
 #include <time.h>
 
-#define LOCAL_ALLOC_COUNT_THRESHOLD 512
-
 /* get_process_mem_usage: resident plus swapped memory in KB, or -1. */
 Py_ssize_t
 lu_gc_mem_usage(void)
@@ -92,7 +90,7 @@ void
 lu_gc_record_allocation(struct lu_entry *e)
 {
     struct lu_gc *gc = &e->interp->gc;
-    if (++e->gc_alloc_count >= LOCAL_ALLOC_COUNT_THRESHOLD) {
+    if (++e->gc_alloc_count >= LU_GC_ALLOC_FLUSH) {
         __atomic_fetch_add(&gc->young_count, e->gc_alloc_count, __ATOMIC_RELAXED);
         e->gc_alloc_count = 0;
         if (should_collect(gc) && !__atomic_load_n(&gc->collecting, __ATOMIC_RELAXED)) {
@@ -105,7 +103,7 @@ void
 lu_gc_record_deallocation(struct lu_entry *e)
 {
     struct lu_gc *gc = &e->interp->gc;
-    if (--e->gc_alloc_count <= -LOCAL_ALLOC_COUNT_THRESHOLD) {
+    if (--e->gc_alloc_count <= -LU_GC_ALLOC_FLUSH) {
         int count = __atomic_load_n(&gc->young_count, __ATOMIC_RELAXED);
         int new_count;
         do {
