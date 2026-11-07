@@ -324,23 +324,22 @@ class _Wide:
         return -1
 
 
-_last_text = (None, None)
+_last_text = [(None, None)]    # a list item, not a global: a store to a global costs compiled code its facts
 
 
 def _text_of(string):
     """The integer sequence of a str; the last long one is remembered, so that
     a scanner that calls match(string, pos) in a loop converts it once."""
-    global _last_text
     long = len(string) > 1024
     if long:
-        last = _last_text
+        last = _last_text[0]
         if last[0] is string:
             return last[1]
     text = str_encode(string, 'latin-1', 'strict')     # bytes, or where it fails
     if type(text) is not bytes:
         text = _Wide(string)
     if long:
-        _last_text = (string, text)
+        _last_text[0] = (string, text)
     return text
 
 
