@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Rewrite the stats table between README.md's stats markers from the daily status records.
+"""Rewrite the stats table between README.md's stats markers from the latest daily status record.
 
 Speed is the geomean over every *.on_over_cpython ratio in the latest record, so new
-benchmarks join it by recording that key. numpy runs weekly: its row comes from the
-latest record holding numpy.* keys (a --numpy run), else the latest record.
+benchmarks join it by recording that key. Kernel and differential rows take the worst of
+the record's lanes; numpy and Lib/test rows carry the date of the run behind their counts.
 """
 import argparse
 import csv
@@ -16,10 +16,10 @@ ROOT = Path(__file__).resolve().parents[2]
 BEGIN, END = "<!-- stats:begin -->", "<!-- stats:end -->"
 
 
-def records(results):
-    """(date, metrics) per status record, oldest first."""
-    return [(p.parent.name.removeprefix("status-"), {r["metric"]: r["value"] for r in csv.DictReader(p.open())})
-            for p in sorted(results.glob("status-*/summary.csv"))]
+def latest(results):
+    """(date, metrics) of the newest status record."""
+    path = sorted(results.glob("status-*/summary.csv"))[-1]
+    return path.parent.name.removeprefix("status-"), {r["metric"]: r["value"] for r in csv.DictReader(path.open())}
 
 
 def share(name, m, part, whole, of="of", note=""):
@@ -27,10 +27,15 @@ def share(name, m, part, whole, of="of", note=""):
     return f"| {name} | {100 * a / b:.1f}% | {a:,} {of} {b:,}{note} |"
 
 
+def worst_lane(name, m, suite):
+    """The lane passing fewest of conformance.SUITE.LANE.{pass,total}, with the lane count."""
+    lanes = [k.split(".")[2] for k in m if k.startswith(f"conformance.{suite}.") and k.count(".") == 3 and k.endswith(".total")]
+    lane = min(lanes, key=lambda lane: int(m[f"conformance.{suite}.{lane}.pass"]))
+    return share(name, m, f"conformance.{suite}.{lane}.pass", f"conformance.{suite}.{lane}.total", note=f", {len(lanes)} modes")
+
+
 def table(results):
-    found = records(results)
-    date, m = found[-1]
-    numpy_date, numpy = next((r for r in reversed(found) if any(k.startswith("numpy.") for k in r[1])), found[-1])
+    date, m = latest(results)
     ratios = [float(v) for k, v in m.items() if k.endswith(".on_over_cpython") and v]
     speed = math.exp(-sum(map(math.log, ratios)) / len(ratios))
     rows = [
@@ -38,12 +43,12 @@ def table(results):
         "|---|---|---|",
         f"| Speed vs CPython 3.14t | {speed:.2f}x CPython's speed | geomean of {len(ratios)} programs, {date} |",
         share("C-API functions implemented", m, "capi.implemented", "capi.total"),
-        share("numpy test suite passing", numpy, "conformance.numpytest.lucifer.pass", "conformance.numpytest.total",
-              note=f" collected, {numpy_date}"),
+        share("numpy test suite passing", m, "conformance.numpytest.lucifer.pass", "conformance.numpytest.total",
+              note=f" collected, run {m['conformance.numpytest.date']}"),
         share("Core-type `Lib/test` passing, relative to CPython", m, "conformance.libtest-core.lucifer.pass",
-              "conformance.libtest-core.oracle.pass", of="of CPython's"),
-        share("Kernel programs passing", m, "conformance.kernel.plain.pass", "conformance.kernel.plain.total"),
-        share("Differential programs matching CPython", m, "conformance.difftest.lucifer.pass", "conformance.difftest.total"),
+              "conformance.libtest-core.oracle.pass", of="of CPython's", note=f", run {m['conformance.libtest-core.date']}"),
+        worst_lane("Kernel programs passing in every mode", m, "kernel"),
+        worst_lane("Differential programs matching CPython in every JIT mode", m, "difftest"),
     ]
     return "\n".join([BEGIN, *rows, END])
 

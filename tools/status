@@ -140,6 +140,22 @@ def kernel_counts(out):
     return counts
 
 
+def difftest_counts():
+    """Difftest passes per lane of the check-jit gate just run (build/difftest/LANE/lucifer.tsv)."""
+    counts = {}
+    for path in sorted((ROOT / "build/difftest").glob("*/lucifer.tsv")):
+        statuses = [r["status"] for r in csv.DictReader(path.open(), delimiter="\t")]
+        lane = path.parent.name
+        counts[f"conformance.difftest.{lane}.pass"], counts[f"conformance.difftest.{lane}.total"] = statuses.count("PASS"), len(statuses)
+    return counts
+
+
+def numpy_date():
+    """When the numpy shards behind results/numpytest/lucifer.tsv last ran."""
+    stamps = [json.loads(p.read_text()).get("recorded_at", "") for p in (ROOT / "results/numpytest").glob("lucifer-*.json")]
+    return max(stamps)[:10] if any(stamps) else None
+
+
 def libtest_core():
     """Lib/test passes in the core-type modules Lucifer runs, for Lucifer and the oracle."""
     results = ROOT / "results/libtest"
@@ -147,19 +163,23 @@ def libtest_core():
     status = {rt: {r["id"]: r["status"] for r in csv.DictReader((results / f"{rt}.tsv").open(), delimiter="\t")}
               for rt in ("lucifer", "cpython-3.14.10t")}
     core = [i for i in status["cpython-3.14.10t"] if i.startswith(tuple(f"test.{m}." for m in modules))]
-    return {f"conformance.libtest-core.{tag}.pass": sum(status[rt].get(i) == "PASS" for i in core)
-            for tag, rt in (("lucifer", "lucifer"), ("oracle", "cpython-3.14.10t"))}
+    counts = {f"conformance.libtest-core.{tag}.pass": sum(status[rt].get(i) == "PASS" for i in core)
+              for tag, rt in (("lucifer", "lucifer"), ("oracle", "cpython-3.14.10t"))}
+    # The daily never runs Lib/test: its counts date from the last committed run.
+    counts["conformance.libtest-core.date"] = run(["git", "log", "-1", "--format=%cs", "--", str(results / "lucifer.tsv")]).stdout.strip()
+    return counts
 
 
 def conformance(out):
-    metrics = kernel_counts(out)
+    metrics = {**kernel_counts(out), **difftest_counts()}
     board = run([sys.executable, "tools/scoreboard"]).stdout
     (out / "scoreboard.tsv").write_text(board)
     for row in csv.DictReader(board.splitlines(), delimiter="\t"):
-        if row["suite"] in ("difftest", "libtest", "numpytest") and row["runtime"] in ("lucifer", "cpython-3.14.10t"):
+        if row["suite"] in ("libtest", "numpytest") and row["runtime"] in ("lucifer", "cpython-3.14.10t"):
             tag = "lucifer" if row["runtime"] == "lucifer" else "oracle"
             metrics[f"conformance.{row['suite']}.{tag}.pass"] = int(row["PASS"])
             metrics[f"conformance.{row['suite']}.total"] = int(row["total"])
+    metrics["conformance.numpytest.date"] = numpy_date()
     metrics.update(libtest_core())
     audit = run(["make", "abi-audit"]).stdout
     (out / "abi-audit.log").write_text(audit)
