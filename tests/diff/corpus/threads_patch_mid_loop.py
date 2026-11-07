@@ -1,5 +1,7 @@
 """Another thread monkeypatches a method, rebinds a global and changes a class's base while a hot
-loop reads them; the loop's next iteration after it sees the patcher's flag sees every change."""
+loop reads them; the loop's next iteration after it sees the patcher's flag sees every change.
+Collection is off, so that no stop-the-world sends the loop out of compiled code meanwhile."""
+import gc
 import threading
 import time
 
@@ -33,7 +35,7 @@ def g2():
 
 class State:
     def __init__(self):
-        self.warm = False
+        self.count = 0
         self.done = False
 
 
@@ -50,18 +52,18 @@ def spin(state, helper, leaf, out):
             out.append((a, b, c, d, e))
             return
         i += 1
-        if i == 20000:
-            state.warm = True
+        state.count = i
         after = state.done
 
 
 def run():
     global g
+    gc.disable()
     state = State()
     out = []
     t = threading.Thread(target=spin, args=(state, Helper(), Leaf(), out))
     t.start()
-    while not state.warm:
+    while state.count < 20000:
         time.sleep(0.001)
     g = g2
     Helper.compute = lambda self: 20

@@ -1,7 +1,8 @@
 # Compiled code relies on globals, class attributes, a class's bases and
-# a function's code between polls; a change the running thread makes, in
-# the loop itself, in a call or in a finalizer, is seen by the very next
-# read, in the same iteration.
+# a function's code between polls. A change the running thread makes in
+# compiled code, through a call it cannot inline, its own stores or a
+# finalizer its own store runs, is seen by the very next read, in the
+# same iteration.
 
 
 class Base1:
@@ -33,10 +34,14 @@ def f():
     return 'f'
 
 
+def compute2(self):
+    return 20
+
+
 def patch_all():
     global g
     g = g2
-    Helper.compute = lambda self: 20
+    Helper.compute = compute2
     Leaf.__bases__ = (Base2,)
     f.__code__ = (lambda: 'f2').__code__
 
@@ -56,30 +61,41 @@ def read(helper, leaf):
 g_first = g
 compute_first = Helper.compute
 code_first = f.__code__
+G = globals()
 
 
-# A call in the loop makes every change.
+def maybe_patch(i, n):
+    if i == n - 2:
+        patch_all()
+
+
+# A call the loop cannot inline (its callee comes from a list) makes them.
 def by_call(n, helper, leaf):
+    act = hooks[0]
     seen = []
     for i in range(n):
         before = read(helper, leaf)
-        if i == n - 2:
-            patch_all()
+        act(i, n)
         seen.append((before, read(helper, leaf)))
     return seen[-3:]
 
 
-# The loop makes them itself.
-def in_loop(n, helper, leaf):
-    global g
+hooks = [maybe_patch]
+
+
+# The loop's own stores make them, every iteration; the values change two
+# iterations before the end.
+def by_store(n, helper, leaf):
+    gs = [g_first] * (n - 2) + [g2] * 2
+    cs = [compute_first] * (n - 2) + [compute2] * 2
+    bs = [(Base1,)] * (n - 2) + [(Base2,)] * 2
     seen = []
     for i in range(n):
-        before = (g(), Helper.compute(helper), Leaf.x)
-        if i == n - 2:
-            g = g2
-            Helper.compute = lambda self: 20
-            Leaf.__bases__ = (Base2,)
-        seen.append((before, (g(), Helper.compute(helper), Leaf.x)))
+        before = (g(), Helper.compute(helper), Leaf.x, leaf.x)
+        G['g'] = gs[i]
+        Helper.compute = cs[i]
+        Leaf.__bases__ = bs[i]
+        seen.append((before, (g(), Helper.compute(helper), Leaf.x, leaf.x)))
     return seen[-3:]
 
 
@@ -90,18 +106,19 @@ class Patcher:
 
 
 def by_finalizer(n, helper, leaf):
+    ps = [None] * n
+    ps[n - 2] = Patcher()
     seen = []
-    p = None
     for i in range(n):
-        if i == n - 2:
-            p = Patcher()
+        p = ps[i]
+        ps[i] = None
         before = read(helper, leaf)
         p = None
         seen.append((before, read(helper, leaf)))
     return seen[-3:]
 
 
-for test in (by_call, in_loop, by_finalizer):
+for test in (by_call, by_store, by_finalizer):
     for n in (5, 300, 3000):
         print(test.__name__, n, test(n, Helper(), Leaf()))
         reset()
