@@ -85,14 +85,13 @@ immortal_header(PyObject *op, PyTypeObject *tp)
    after the header. A lock-free reader of a stale pointer finds the same
    type's header there, as it would in a reused mimalloc block. */
 #define FREE_MAX 100
-#define FREE_NEXT(op) (*(PyObject **)((char *)(op) + sizeof(PyObject)))
 
 static PyObject *
 freelist_pop(struct lu_freelist *fl)
 {
     PyObject *op = fl->head;
     if (op != NULL) {
-        fl->head = FREE_NEXT(op);
+        fl->head = LU_FREE_NEXT(op);
         fl->n--;
         _Py_NewReference(op);
     }
@@ -105,7 +104,7 @@ freelist_push(struct lu_freelist *fl, PyObject *op)
     if (fl->n >= FREE_MAX) {
         return 0;
     }
-    FREE_NEXT(op) = fl->head;
+    LU_FREE_NEXT(op) = fl->head;
     fl->head = op;
     fl->n++;
     return 1;
@@ -116,7 +115,7 @@ freelist_clear(struct lu_freelist *fl)
 {
     while (fl->head != NULL) {
         PyObject *op = fl->head;
-        fl->head = FREE_NEXT(op);
+        fl->head = LU_FREE_NEXT(op);
         lu_object_free(op);
     }
     fl->n = 0;

@@ -584,9 +584,12 @@ struct lu_entry {
     struct lu_mimalloc_state mimalloc;
     struct lu_brc_owner brc;
     /* Freed floats and one-digit ints kept for reuse (CPython's per-thread
-       freelists); runtime/object/layouts.c. */
+       freelists), linked through the word after the header (LU_FREE_NEXT);
+       runtime/object/layouts.c, and compiled code's boxes. */
     struct lu_freelist { PyObject *head; int n; } free_floats, free_ints;
 };
+
+#define LU_FREE_NEXT(op) (*(PyObject **)((char *)(op) + sizeof(PyObject)))
 
 /* The carrier record is per pthread, reached through the one thread-local
    word (DESIGN 5.3). It is created by the thread's first allocation or its
@@ -749,6 +752,10 @@ void lu_stw_task_delete(struct _is *interp, struct lu_task *t);
 
 /* The collector's trigger (runtime/interp/gc.c). */
 void lu_gc_record_allocation(struct lu_entry *entry);
+/* Sets _PyRuntime.allocators.observed after the allocators or the reference
+   tracer change: a mem or object allocator other than the runtime's, or a
+   tracer (runtime/object/alloc.c). */
+void lu_alloc_observe(void);
 void lu_gc_record_deallocation(struct lu_entry *entry);
 /* Why a collection runs (runtime/interp/collector.c). */
 enum { LU_GC_REASON_HEAP, LU_GC_REASON_MANUAL, LU_GC_REASON_SHUTDOWN, LU_GC_REASON_STRESS };
@@ -907,6 +914,8 @@ extern LU_EXPORT union lu_runtime {
         struct {
             PyMemAllocatorEx raw, mem, obj;
             struct lu_lock lock;        /* PyMem_SetAllocator/GetAllocator */
+            int observed;               /* a hook sees allocations (lu_alloc_observe):
+                                           compiled code allocates through C */
         } allocators;
         struct {
             PyRefTracer func;

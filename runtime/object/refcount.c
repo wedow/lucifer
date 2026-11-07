@@ -183,6 +183,7 @@ PyRefTracer_SetTracer(PyRefTracer tracer, void *data)
 {
     _PyRuntime.ref_tracer.data = data;
     _PyRuntime.ref_tracer.func = tracer;
+    lu_alloc_observe();
     return 0;
 }
 
