@@ -674,6 +674,26 @@ called:
     return polled(t, r);
 }
 
+/* LOAD_SUPER_ATTR: super's attribute as the interpreter takes it: the
+   kernel's when super is the builtin and the class a type, else super
+   called (with the class and self when `two`) and its attribute taken. */
+static PyObject *
+h_super_attr(PyObject *gsuper, PyObject *cls, PyObject *self, PyObject *name, intptr_t two)
+{
+    if (gsuper == (PyObject *)&PySuper_Type && PyType_Check(cls)) {
+        PyObject *args[3] = { cls, self, name };
+        return lu_call_kernel(LU_K_super_getattr, args, 3);
+    }
+    struct lu_task *t = lu_current_task();
+    PyObject *argv[2] = { cls, self };
+    t->pin++;
+    PyObject *sup = lu_call(gsuper, argv, (size_t)two, NULL);
+    PyObject *v = sup != NULL ? PyObject_GetAttr(sup, name) : NULL;
+    t->pin--;
+    Py_XDECREF(sup);
+    return polled(t, v);
+}
+
 /* CALL_KW: argv as h_call's, then the keyword names. */
 static PyObject *
 h_call_kw(PyObject **argv, intptr_t n)
@@ -897,6 +917,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 3 },
     [H_call] = { (void *)h_call, "call", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_call_special] = { (void *)h_call_special, "call_special", REP_OBJ, IF_RAISE | IF_PY, 0 },
+    [H_super_attr] = { (void *)h_super_attr, "super_attr", REP_OBJ, IF_RAISE | IF_PY, 5 },
     [H_prim] = { (void *)h_prim, "prim", REP_OBJ, IF_RAISE, 0 },
     [H_make_function] = { (void *)h_make_function, "make_function", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, 0, 3 },

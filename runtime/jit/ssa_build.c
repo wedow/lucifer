@@ -829,6 +829,7 @@ supported(int op)
     case BUILD_SET: case BUILD_MAP: case CALL_INTRINSIC_1: case BINARY_SLICE: case STORE_SLICE:
     case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
     case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case DELETE_FAST:
+    case LOAD_SUPER_ATTR:
         return 1;
     default:
         return 0;
@@ -2631,6 +2632,25 @@ translate(struct ctx *c)
         return for_iter(c);
     case CALL:
         return call(c);
+    case LOAD_SUPER_ATTR: {
+        /* global_super, class, self -- attr, NULL in the method form (a bound method) */
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[5] = { peek(c, 3), peek(c, 2), peek(c, 1),
+                         konst(c, PyTuple_GET_ITEM(c->code->co_names, oparg >> 2)), const_i(c, oparg & 2) };
+        v = helper_raising(c, H_super_attr, 5, args, 3);
+        for (int i = 0; i < 3; i++) {
+            w = pop(c, &own);
+            release(c, w, own);
+        }
+        push(c, v, 1);
+        if (oparg & 1) {
+            push(c, LU_NOV, 0);
+        }
+        return 0;
+    }
     case RETURN_VALUE: {
         if (c->parent == NULL) {
             /* A frame object takes the locals when the frame stops: the

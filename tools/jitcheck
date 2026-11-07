@@ -28,6 +28,8 @@ require that a count of the tier's does not grow with the iterations:
   compiled  tests/kernel/jit_compiled_calls.py, whose hot calls are of
          functions it cannot inline: direct calls (compiled code entered
          from C). Compiled code makes them itself.
+  super  tests/kernel/jit_super.py, whose hot constructors and methods go
+         through super(): side exits. None of its functions may be retired.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -66,6 +68,7 @@ GROWTH = {
     'quiet': ('jit_quiet_misses.py', r'jit: entries .* error (\d+)', 0),
     'caught': ('jit_caught.py', r'jit: entries .* error (\d+)', 0),
     'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
+    'super': ('jit_super.py', r'jit: entries .* side (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
 }
 GROWTH_N = 20000
@@ -113,7 +116,7 @@ def check_growth(args, lane):
         problems.append(f'{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
     own = qualnames(program)
     given_up = own & {name for pair in small[3] for name in pair if name}
-    if lane == 'calls' and given_up:
+    if lane in ('calls', 'super') and given_up:
         problems.append(f"disabled or retired: {' '.join(sorted(given_up))}")
     print(f"{'FAIL' if problems else 'PASS'} {lane}" + (': ' + '; '.join(problems) if problems else
                                                       f' ({small[2]}, {large[2]})'))

@@ -188,6 +188,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(store_attr) \
     X(call) \
     X(call_special) \
+    X(super_attr) \
     X(prim) \
     X(make_function) \
     X(set_function_attribute) \
