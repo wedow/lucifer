@@ -79,6 +79,7 @@ struct asm_ {
     int *at;
     int save_all, restore_all;  /* the shared stubs of parked_call, emitted when used */
     int parks;
+    lu_v now;                   /* the instruction being emitted: the fields its exits' virtual objects have */
 };
 
 enum { GM_FULL, GM_ROOT, GM_NONE };
@@ -797,6 +798,25 @@ describe(struct asm_ *a, lu_v v, int owned)
     if (in->op == OP_CONST) {
         dv.kind = in->imm == 0 ? DV_NULL : DV_CONST;
         dv.imm = in->imm;
+        return dv;
+    }
+    if ((in->flags & INS_VIRTUAL) && in->op == OP_HELPER && (in->imm == H_build_tuple || in->imm == H_new_object)) {
+        /* A virtual object: made by the exit with the fields it has here,
+           whose references it holds (ssa_opt.c step 3c). */
+        int tuple = in->imm == H_build_tuple, max = tuple ? in->nargs : in->nfields;
+        lu_v *vals = malloc(sizeof(lu_v) * (size_t)(max ? max : 1));
+        int32_t *offs = malloc(sizeof(int32_t) * (size_t)(max ? max : 1));
+        int n = lu_object_fields(a->f, v, a->now, vals, offs);
+        dv.kind = tuple ? DV_TUPLE : DV_INSTANCE;
+        dv.imm = tuple ? 0 : I(a, in->args[0])->imm;
+        dv.nfields = n;
+        dv.fields = calloc((size_t)(n ? n : 1), sizeof(struct lu_dv));
+        for (int i = 0; i < n; i++) {
+            dv.fields[i] = describe(a, vals[i], 1);
+            dv.fields[i].off = offs[i];
+        }
+        free(vals);
+        free(offs);
         return dv;
     }
     if ((in->flags & INS_VIRTUAL) && in->b != LU_NOV) {
@@ -1971,7 +1991,7 @@ inline_store_raw(struct asm_ *a, lu_v v)
     int slow = new_label(a), unlock_slow = new_label(a), done = new_label(a);
     int32_t flags = offsetof(PyObject, ob_flags) + 1;
     int32_t off = (int32_t)in->imm;
-    struct lu_deopt *d = published(a, in);
+    struct lu_deopt *d = lu_publishes(in) ? published(a, in) : NULL;
     parallel_moves(a, m, 2);
     mov_rr(a, R12, RDI);                        /* kept across calls: nothing is live here (IF_CALL) */
     if (is_int) {
@@ -1984,11 +2004,14 @@ inline_store_raw(struct asm_ *a, lu_v v)
     modrm_mem(a, 0, RDI, flags);
     b1(a, LU_ATTRS_IN_DICT >> 8);               /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
     jcc(a, CC_NE, slow);
-    lock_object(a, RDI, slow);
-    b1(a, 0xF6);
-    modrm_mem(a, 0, RDI, flags);
-    b1(a, LU_ATTRS_IN_DICT >> 8);
-    jcc(a, CC_NE, unlock_slow);                 /* moved to the dict before the lock */
+    int fresh = (in->flags & INS_FRESH) != 0;
+    if (!fresh) {
+        lock_object(a, RDI, slow);
+        b1(a, 0xF6);
+        modrm_mem(a, 0, RDI, flags);
+        b1(a, LU_ATTRS_IN_DICT >> 8);
+        jcc(a, CC_NE, unlock_slow);             /* moved to the dict before the lock */
+    }
     load(a, RBX, RDI, off);                     /* the old value, kept across calls */
     int have = new_label(a);
     test_rr(a, RBX, RBX);
@@ -1998,17 +2021,23 @@ inline_store_raw(struct asm_ *a, lu_v v)
     store(a, RDI, off + 8, R13);                /* the raw value */
     mov_ri(a, RAX, (int64_t)(intptr_t)(is_int ? LU_UNBOXED_INT : LU_UNBOXED));
     store(a, RDI, off, RAX);                    /* after the raw word: x86 stores stay in order */
-    unlock_object(a, RDI);
+    if (!fresh) {
+        unlock_object(a, RDI);
+    }
     alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED_INT);
     jcc(a, CC_BE, done);                        /* no object to release */
     decref(a, RBX, in, d, settled_exit(a, v));     /* the old value */
     jmp(a, done);
     bind(a, unlock_slow);
-    unlock_object(a, RDI);
+    if (!fresh) {
+        unlock_object(a, RDI);
+    }
     bind(a, slow);
     mov_rr(a, RDI, R12);
     mov_ri(a, RSI, in->imm);
-    publish(a, in, d);
+    if (d != NULL) {
+        publish(a, in, d);
+    }
     if (is_int) {
         mov_rr(a, RDX, R13);
         call_abs(a, (void *)lu_inline_store_i);
@@ -2017,7 +2046,9 @@ inline_store_raw(struct asm_ *a, lu_v v)
         movq_xr(a, 0, R13);
         call_abs(a, (void *)lu_inline_store_f);
     }
-    unpublish(a);
+    if (d != NULL) {
+        unpublish(a);
+    }
     b1(a, 0x85);
     b1(a, 0xC0);                                /* test eax, eax */
     jcc(a, CC_E, fail);
@@ -2603,6 +2634,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         return 0;
     }
     case OP_INLINE_STORE: {
+        if (in->flags & INS_VIRTUAL) {
+            return 0;           /* a virtual object's field (ssa_opt.c step 3c) */
+        }
         /* STORE_ATTR_INSTANCE_VALUE in line, after its version guard, as
            CPython locks the object: the owner's lock byte taken with one
            cmpxchg, a word that already holds a value replaced, a value the
@@ -2614,7 +2648,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int done = new_label(a);
         int32_t flags = offsetof(PyObject, ob_flags) + 1;
         int32_t off = (int32_t)in->imm;
-        struct lu_deopt *d = published(a, in);
+        struct lu_deopt *d = lu_publishes(in) ? published(a, in) : NULL;
         parallel_moves(a, m, 2);
         mov_rr(a, R12, RDI);                    /* kept across calls: nothing is live here (IF_CALL) */
         mov_rr(a, R13, RSI);
@@ -2622,11 +2656,14 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         modrm_mem(a, 0, RDI, flags);
         b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
         jcc(a, CC_NE, slow);
-        lock_object(a, RDI, slow);
-        b1(a, 0xF6);
-        modrm_mem(a, 0, RDI, flags);
-        b1(a, LU_ATTRS_IN_DICT >> 8);
-        jcc(a, CC_NE, unlock_slow);             /* moved to the dict before the lock */
+        int fresh = (in->flags & INS_FRESH) != 0;
+        if (!fresh) {
+            lock_object(a, RDI, slow);
+            b1(a, 0xF6);
+            modrm_mem(a, 0, RDI, flags);
+            b1(a, LU_ATTRS_IN_DICT >> 8);
+            jcc(a, CC_NE, unlock_slow);         /* moved to the dict before the lock */
+        }
         load(a, RBX, RDI, off);                 /* the old value, kept across calls */
         int have = new_label(a), take = new_label(a);
         test_rr(a, RBX, RBX);
@@ -2654,13 +2691,17 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         op_rm(a, 0, 0x89, RCX, RSI, offsetof(PyObject, ob_ref_local));
         bind(a, immortal);
         store(a, RDI, off, RSI);
-        unlock_object(a, RDI);
+        if (!fresh) {
+            unlock_object(a, RDI);
+        }
         test_rr(a, RBX, RBX);
         jcc(a, CC_E, done);                     /* a new name: nothing to release */
         decref(a, RBX, in, d, settled_exit(a, v));     /* the old value */
         jmp(a, done);
         bind(a, unlock_slow);
-        unlock_object(a, RDI);
+        if (!fresh) {
+            unlock_object(a, RDI);
+        }
         mov_rr(a, RDI, R12);
         mov_rr(a, RSI, R13);
         bind(a, slow);
@@ -2668,9 +2709,13 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         b1(a, 0x48);
         b1(a, 0x87);
         b1(a, 0xD6);                            /* xchg rsi, rdx: (owner, offset, value) */
-        publish(a, in, d);
+        if (d != NULL) {
+            publish(a, in, d);
+        }
         call_abs(a, (void *)lu_inline_store);
-        unpublish(a);
+        if (d != NULL) {
+            unpublish(a);
+        }
         b1(a, 0x85);
         b1(a, 0xC0);                            /* test eax, eax */
         jcc(a, CC_E, fail);
@@ -3291,6 +3336,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
                 b1(a, 0xFF);
                 modrm_mem(a, 0, R11, 0);        /* inc qword [r11] */
             }
+            a->now = bl->ins[i];
             alloc_count_before(a, bl->ins[i]);
             if (emit_ins(a, bl->ins[i], next, labels) < 0) {
                 free(labels);

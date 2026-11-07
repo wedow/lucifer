@@ -41,6 +41,10 @@ require that a count of the tier's does not grow with the iterations:
   classes  tests/kernel/jit_class_calls.py, whose hot loop calls classes
          with Python initializers: entries into compiled code, direct and
          compiled calls (the instance is made in line, __init__ inlines).
+  objects  tests/kernel/jit_virtual_objects.py, whose hot loop makes
+         instances and tuples nothing outside compiled code sees: the
+         tuples and instances compiled code allocates (-X lucifer_jit_stats'
+         allocation census). They stay virtual.
   guards tests/kernel/jit_guards.py, whose hot loop's guards check what a
          writer can change (a global, a function's code, a class
          attribute) or what never changes (the range iterator's type):
@@ -89,6 +93,7 @@ GROWTH = {
                r'box_int (\d+), box_float (\d+), build_list (\d+), build_tuple (\d+)', 0),
     'repeat': ('jit_inline_paths.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'classes': ('jit_class_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
+    'objects': ('jit_virtual_objects.py', r'jit: allocations by kind: .*tuple (\d+), .*instance (\d+)', 0),
     'guards': ('jit_guards.py', r'jit: unit hot@\d+ entries \d+ guards (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
 }

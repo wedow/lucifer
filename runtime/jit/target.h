@@ -47,6 +47,8 @@ enum lu_dv_kind {
     DV_BOX_F64,                 /* a virtual float: the same */
     DV_NEW_DICT,                /* a virtual empty dict (a **kwargs nothing filled) */
     DV_BOOL,                    /* a virtual bool: True when the bit at loc (or imm), xor bitimm, is 1 */
+    DV_TUPLE,                   /* a virtual tuple: its items are fields[i] */
+    DV_INSTANCE,                /* a virtual instance of the type imm: fields[i] in the inline word at byte fields[i].off */
 };
 
 struct lu_dv {
@@ -58,7 +60,12 @@ struct lu_dv {
     int32_t bitloc;
     int32_t vid;                /* the SSA value: one virtual box is built once per exit */
     int64_t imm;
+    int32_t off;                /* a field's place */
+    int32_t nfields;            /* DV_TUPLE, DV_INSTANCE: the fields, each a reference the */
+    struct lu_dv *fields;       /* object holds (DV_OBJ: owned), which moves into the object made */
 };
+/* Frees the fields n values describe. */
+void lu_jit_dv_free(struct lu_dv *vals, int n);
 
 struct lu_deopt_frame {
     PyCodeObject *code;
@@ -287,7 +294,7 @@ extern const struct lu_helper lu_helpers[H_COUNT];
 static inline int
 lu_publishes(const struct lu_ins *in)
 {
-    if (in->fs == NULL || (in->flags & INS_VIRTUAL)) {
+    if (in->fs == NULL || (in->flags & (INS_VIRTUAL | INS_FRESH))) {
         return 0;
     }
     switch (in->op) {

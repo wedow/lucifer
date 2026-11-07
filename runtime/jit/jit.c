@@ -350,6 +350,7 @@ free_unit(struct lu_unit *u)
     for (int i = 0; i < u->ndeopts; i++) {
         struct lu_deopt *d = u->deopts[i];
         for (int k = 0; k < d->nframes; k++) {
+            lu_jit_dv_free(d->frames[k].vals, d->frames[k].nlocals + d->frames[k].nstack);
             free(d->frames[k].vals);
         }
         free(d->frames);

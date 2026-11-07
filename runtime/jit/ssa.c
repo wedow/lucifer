@@ -58,6 +58,54 @@ lu_count_kind(const struct lu_ins *in)
     }
 }
 
+/* The position of instruction v in its block. */
+static int
+index_in_block(struct lu_func *f, lu_v v)
+{
+    struct lu_block *bl = &f->blocks[f->ins[v].block];
+    for (int i = 0; i < bl->nins; i++) {
+        if (bl->ins[i] == v) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int
+lu_ssa_before(struct lu_func *f, lu_v s, lu_v x)
+{
+    int bs = f->ins[s].block, b = f->ins[x].block;
+    if (bs == b) {
+        return s != x && index_in_block(f, s) < index_in_block(f, x);
+    }
+    while (b != bs && b > 0) {
+        b = f->idom[b];
+    }
+    return b == bs;
+}
+
+int
+lu_object_fields(struct lu_func *f, lu_v v, lu_v at, lu_v *vals, int32_t *offs)
+{
+    struct lu_ins *in = &f->ins[v];
+    int n = 0;
+    if (in->imm == H_build_tuple) {
+        for (int i = 0; i < in->nargs; i++) {
+            vals[n] = in->args[i];
+            offs[n++] = i;
+        }
+        return n;
+    }
+    for (int i = 0; i < in->nfields; i++) {
+        struct lu_ins *st = &f->ins[in->fields[i]];
+        if (lu_ssa_before(f, in->fields[i], at)) {
+            vals[n] = st->b;
+            offs[n++] = (int32_t)st->imm;
+        }
+    }
+    return n;
+}
+
 int
 lu_alloc_kind(const struct lu_ins *in)
 {
@@ -221,6 +269,7 @@ lu_ir_free(struct lu_func *f)
     free(f->known_block);
     free(f->deps);
     free(f->order);
+    free(f->idom);
     for (int i = 0; i < f->nconsts; i++) {
         Py_XDECREF(f->consts[i]);
     }

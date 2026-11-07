@@ -161,8 +161,16 @@ enum {
     INS_VIRTUAL = 2,            /* a box nothing observes: built only at an exit */
     INS_NOSTRESS = 4,           /* a guard after its instruction's effect: deopt:N never fails it */
     INS_CAUGHT = 8,             /* a raising helper whose NULL result the code branches on: a handler takes it */
+    INS_FRESH = 16,             /* an inline store into an instance this code made that no other thread
+                                   can have seen yet, of a name it lacks: it takes no lock, releases
+                                   nothing and publishes nothing (ssa_opt.c 3c) */
 };
-
+/* A virtual object (ssa_opt.c step 3c) is a tuple build or an instance
+   allocation flagged INS_VIRTUAL: never made in compiled code, but by an
+   exit that names it, once per exit, with the fields it has there
+   (lu_object_fields). An instance's fields are the stores into it, which
+   stay in place, virtual, so that where they are says which fields an
+   exit sees. */
 
 struct lu_ins {
     uint8_t op;
@@ -176,6 +184,8 @@ struct lu_ins {
     struct lu_fs *origin;       /* a guard moved out of a loop: where it was, which its failure blames */
     PyCodeObject *src;          /* the bytecode it was built for (NULL: the optimizer's), for the counts */
     int src_pc;
+    int nfields;                /* a virtual instance: its stores */
+    lu_v *fields;
     int nargs;
     lu_v *args;                 /* PHI: per predecessor; HELPER: the arguments */
     /* The backend's: the position in the linear order, and the location. */
@@ -235,6 +245,7 @@ struct lu_func {
     int sites, cold;            /* sites with feedback, and those the interpreter never ran */
     struct lu_fdep *deps;       /* the facts the code relies on between polls */
     int ndeps, capdeps;
+    int *idom;                  /* per block, once optimized: its immediate dominator (-1: unreached) */
 };
 
 /* Building and editing. */
@@ -257,6 +268,13 @@ lu_ins(struct lu_func *f, lu_v v)
 int lu_ssa_build(struct lu_func *f, struct lu_frame *frame);
 int lu_ssa_optimize(struct lu_func *f);
 int lu_regalloc(struct lu_func *f);
+
+/* Whether instruction s runs before x on every path to x. */
+int lu_ssa_before(struct lu_func *f, lu_v s, lu_v x);
+/* The fields virtual object v has where instruction `at` runs: their
+   values into vals (room for every field) and their places into offs (an
+   instance's byte offsets, a tuple's indexes); the count. */
+int lu_object_fields(struct lu_func *f, lu_v v, lu_v at, lu_v *vals, int32_t *offs);
 
 /* JIT build statistics, for -X lucifer_jit_stats. */
 extern unsigned long lu_jit_bailout_counts[256];

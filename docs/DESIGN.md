@@ -640,7 +640,16 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    value range. Effects are explicit per Python operation: descriptors,
    `__eq__`/`__hash__` callbacks, C calls and allocation can all reenter.
 3. **Representation.** Unboxing, escape analysis and scalar replacement (§4.5);
-   ownership-based refcount elision (Cinder precedent, research 01 §5).
+   ownership-based refcount elision (Cinder precedent, research 01 §5). A
+   tuple or an instance (of a class without a finalizer, made by a lowered
+   class call) that only exits can see is never made: its fields are the
+   values stored into it, a load reads the store, and its references are
+   its fields'. Each name is stored once, in the order the class's inline
+   words keep, and at every use a store has run on every path or on none,
+   so each exit sees one set of fields; the exit makes the object once
+   with those fields, and every slot that names it gets that one object.
+   An instance that stays real takes the first store of each name without
+   its lock while no other thread can have seen it.
 4. **Backend.** Per-block linear-scan register allocation over GPR/XMM with spill
    homes and edge reconciliation (port of `optimizer_ssa_allocate.inc`); x86-64
    encoder in C; root maps per safepoint; perf map and jitdump (port of
