@@ -117,6 +117,7 @@ int lu_jit_nospec(PyCodeObject *code, int pc);
 int lu_jit_noinline(PyCodeObject *code);
 
 static int build_block(struct ctx *c, int bi);
+static int step(struct ctx *c, int pc, struct lu_block *entry);
 
 /* A site's operand kinds (runtime/jit/jit.h), counted: none means the
    interpreter has never run it. Attribute sites count in cached_site. */
@@ -2191,6 +2192,19 @@ speculate_args(struct ctx *c, int n)
     }
 }
 
+/* Whether v joins answers of a polymorphic attribute site: a phi with a
+   constant input. */
+static int
+poly_join(struct ctx *c, lu_v v)
+{
+    for (int i = 0; I(c, v)->op == OP_PHI && i < I(c, v)->nargs; i++) {
+        if (I(c, I(c, v)->args[i])->op == OP_CONST && I(c, I(c, v)->args[i])->imm != 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Whether the call at c->pc, which this frame cannot inline, compiles
    here. In an inlined frame it pushes the frame as a real one, which costs
    about what calling the frame did: so a callee one deep with one such
@@ -2323,6 +2337,7 @@ call(struct ctx *c)
             hargs[i] = peek(c, n - i);
         }
         r = helper_raising(c, H_call_special, n, hargs, n + 2);
+        I(c, r)->imm2 = CNT_call_unknown + 1;
         guard_after(c, OP_GUARD_NOT_NULL, r, 1);
         pop_call(c, n);
         push(c, r, 1);
@@ -2358,6 +2373,7 @@ call(struct ctx *c)
             hargs[1 + i] = peek(c, n - i);
         }
         r = helper_raising(c, H_prim, n + 1, hargs, n + 2);
+        I(c, r)->imm2 = CNT_call_c + 1;
         pop_call(c, n);
         push(c, r, 1);
         return 0;
@@ -2372,6 +2388,12 @@ call(struct ctx *c)
         hargs[2 + i] = peek(c, n - i);
     }
     r = helper_raising(c, H_call, n + 2, hargs, n + 2);
+    I(c, r)->imm2 = 1 + (fn != NULL ? CNT_call_refused : kc != NULL ? CNT_call_c
+                         : poly_join(c, callable) ? CNT_call_poly : CNT_call_unknown);
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: call %s at %s@%d\n", lu_count_names[I(c, r)->imm2 - 1],
+                PyUnicode_AsUTF8(c->code->co_qualname), c->pc);
+    }
     /* The helper declines when the C stack is too deep to recurse: the interpreter makes the call. */
     guard_after(c, OP_GUARD_NOT_NULL, r, 1);
     pop_call(c, n);
@@ -3008,6 +3030,7 @@ translate(struct ctx *c)
             lu_v args[3] = { hargs[0], hargs[2], hargs[3] };     /* the callable, *args, **kwargs */
             w = helper_raising(c, H_call_ex, 3, args, nops);
         }
+        I(c, w)->imm2 = CNT_call_kw + 1;
         guard_after(c, OP_GUARD_NOT_NULL, w, 1);
         for (int i = 0; i < nops; i++) {
             v = pop(c, &own);
@@ -3101,6 +3124,38 @@ translate(struct ctx *c)
     }
 }
 
+/* Builds the instruction at pc from the current state; the next one's pc.
+   A join's first instruction records its state for guards moved before
+   it (entry). */
+static int
+step(struct ctx *c, int pc, struct lu_block *entry)
+{
+    c->pc = pc;
+    c->next = decode(c, pc, &c->base, &c->oparg, &c->opcode);
+    c->cache = cache_of(c, pc);
+    c->snap = NULL;
+    before(c);
+    if (entry != NULL) {
+        entry->entry_fs = c->snap;
+    }
+    if (!supported(c->base)) {
+        unsupported(c);
+        return c->next;
+    }
+    c->observed = 0;
+    translate(c);
+    if (c->observed && c->cur >= 0 && !c->failed) {
+        frames_guard(c);
+    }
+    c->observed = 0;
+    c->units += c->next - pc;
+    if (c->parent != NULL && c->units > INLINE_MAX_UNITS) {
+        c->failed = 1;      /* too large to inline: it is called instead */
+        c->why = "too large";
+    }
+    return c->next;
+}
+
 /* Whether block k sends no more edges: it is built, or nothing reached
    it and nothing that could still reach it is left. memo: 0 unknown, 1
    settled, 2 not (or being decided, which a cycle leaves unsettled). */
@@ -3174,29 +3229,7 @@ build_block(struct ctx *c, int bi)
             jump_to(c, pc);
             break;
         }
-        c->pc = pc;
-        c->next = decode(c, pc, &c->base, &c->oparg, &c->opcode);
-        c->cache = cache_of(c, pc);
-        c->snap = NULL;
-        before(c);
-        if (pc == b->pc && b->phis && !b->exc) {
-            c->f->blocks[b->id].entry_fs = c->snap;
-        }
-        if (!supported(c->base)) {
-            unsupported(c);
-            break;
-        }
-        c->observed = 0;
-        translate(c);
-        if (c->observed && c->cur >= 0 && !c->failed) {
-            frames_guard(c);
-        }
-        c->units += c->next - pc;
-        if (c->parent != NULL && c->units > INLINE_MAX_UNITS) {
-            c->failed = 1;      /* too large to inline: it is called instead */
-            c->why = "too large";
-        }
-        pc = c->next;
+        pc = step(c, pc, pc == b->pc && b->phis && !b->exc ? &c->f->blocks[b->id] : NULL);
     }
     return c->failed ? -1 : 0;
 }

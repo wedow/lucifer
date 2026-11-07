@@ -153,7 +153,8 @@ struct lu_unit {
     X(guard_type) X(guard_type_of) X(guard_type_itself) X(guard_keys) X(guard_func) \
     X(guard_is) X(guard_cell) X(guard_global) X(guard_bit) X(guard_not_null) X(guard_other) \
     X(unbox) X(live) X(poll) X(load_type) X(load_version) X(load_size) X(load_other) \
-    X(attr_load) X(attr_store) X(global_load) X(item) X(helper) X(incref) X(decref) X(box)
+    X(attr_load) X(attr_store) X(global_load) X(item) X(helper) X(incref) X(decref) X(box) \
+    X(call_unknown) X(call_poly) X(call_refused) X(call_c) X(call_kw)
 enum lu_count {
 #define LU_COUNT_ENUM(name) CNT_##name,
     LU_COUNT_KINDS(LU_COUNT_ENUM)
@@ -163,6 +164,12 @@ enum lu_count {
 extern const char *const lu_count_names[CNT_COUNT];
 /* The kind an instruction counts as, or -1. */
 int lu_count_kind(const struct lu_ins *in);
+/* A call compiled code makes instead of inlining it, by why: a callee
+   the builder could not name, one of several a site met, a Python function
+   it would not or could not inline, a callable that is not Python code, or
+   a call with keywords or unpacked arguments. A call helper's imm2 holds
+   the kind plus one. */
+#define LU_COUNT_IS_CALL(k) ((k) >= CNT_call_unknown)
 /* Kinds that are guards: every guard_* kind and unbox (not polls and checks that the unit lives). */
 #define LU_COUNT_IS_GUARD(k) ((k) <= CNT_unbox)
 
