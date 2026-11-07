@@ -1,6 +1,6 @@
 ---
 id: luc-23yk
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-07T05:56:29Z
