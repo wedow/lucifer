@@ -46,6 +46,7 @@ enum lu_dv_kind {
     DV_BOX_I64,                 /* a virtual int: its raw value at loc, or imm when loc is none */
     DV_BOX_F64,                 /* a virtual float: the same */
     DV_NEW_DICT,                /* a virtual empty dict (a **kwargs nothing filled) */
+    DV_BOOL,                    /* a virtual bool: True when the bit at loc (or imm), xor bitimm, is 1 */
 };
 
 struct lu_dv {
@@ -90,6 +91,10 @@ struct lu_deopt {
     PyCodeObject *blame_code;   /* a guard moved out of a loop: the site it came from */
     int blame_pc;
     int call_pc;                /* lu_jit_frames_push: the innermost frame's instruction during the call */
+    int nrelease;               /* references compiled code still holds that no frame takes: released last */
+    struct lu_dv *release;
+    lu_codeunit *instr;         /* published: the instruction the root frame shows as running (lu_jit_instr) */
+    uint8_t regs;               /* published by a slow path that saved every register at the frame's jit_regs */
 };
 
 /* A code object's entry for calls from compiled code, the first field of
@@ -203,7 +208,8 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
 
 /* The helpers compiled code calls, by id; runtime/jit/helpers.c gives each
    its result, flags (IF_RAISE: NULL, or -1 for a bit, raised; IF_PY: may
-   run Python) and argument count (0: an array and its length). */
+   run Python; IF_SEEN: may release a value whose finalizer does, or park)
+   and argument count (0: an array and its length). */
 #define LU_HELPERS(X) \
     X(box_int) \
     X(box_float) \
@@ -272,14 +278,25 @@ enum lu_helper_id {
 };
 extern const struct lu_helper lu_helpers[H_COUNT];
 
-/* Whether the instruction calls C that may run Python, and so publishes
-   the root frame's state for walkers while it does (runtime/jit/deopt.c):
-   every root local that state names is in memory during the call. */
+/* Whether a walker may see the root frame during the instruction's call
+   to C: the call may run Python (IF_PY), or release a value whose
+   finalizer does, or park the task (IF_SEEN). It publishes the root
+   frame's state for walkers while it does (runtime/jit/deopt.c): every
+   root local that state names is in memory during the call. */
 static inline int
 lu_publishes(const struct lu_ins *in)
 {
-    return in->fs != NULL && !(in->flags & INS_VIRTUAL)
-        && ((in->op == OP_HELPER && (lu_helpers[in->imm].flags & IF_PY)) || (in->op == OP_TRUTH && in->imm != 1));
+    if (in->fs == NULL || (in->flags & INS_VIRTUAL)) {
+        return 0;
+    }
+    switch (in->op) {
+    case OP_HELPER:
+        return (lu_helpers[in->imm].flags & (IF_PY | IF_SEEN)) != 0;
+    case OP_TRUTH:
+        return in->imm != 1;    /* imm 1: a layout's own truth, which runs no Python */
+    default:
+        return (lu_op_flags[in->op] & IF_SEEN) != 0;
+    }
 }
 
 /* -X lucifer_jit_stats: how often compiled code takes the C path of an
