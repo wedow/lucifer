@@ -1,5 +1,5 @@
-"""Another thread monkeypatches a method, rebinds a global and changes a class's base while a hot
-loop reads them; the loop's next iteration after it sees the patcher's flag sees every change.
+"""Another thread rebinds a global, monkeypatches a method and changes a class's base while a hot
+loop reads them, one at a time; the iteration after the loop sees the patcher's flag sees the change.
 Collection is off, so that no stop-the-world sends the loop out of compiled code meanwhile."""
 import gc
 import threading
@@ -36,24 +36,35 @@ def g2():
 class State:
     def __init__(self):
         self.count = 0
-        self.done = False
+        self.phase = 0
+        self.seen = 0
 
 
 def spin(state, helper, leaf, out):
     i = 0
-    after = False
+    phase = seen = 0
     while True:
         a = g()
         b = helper.compute()
         c = Helper.compute(helper)
         d = Leaf.x
         e = leaf.x
-        if after:
-            out.append((a, b, c, d, e))
-            return
+        if phase != seen:
+            out.append((phase, (a, b, c, d, e)))
+            seen = state.seen = phase
+            if phase == 3:
+                return
         i += 1
         state.count = i
-        after = state.done
+        phase = state.phase
+
+
+def wait(state, phase):
+    while state.seen != phase:
+        time.sleep(0.001)
+    start = state.count
+    while state.count < start + 20000:
+        time.sleep(0.001)
 
 
 def run():
@@ -63,21 +74,24 @@ def run():
     out = []
     t = threading.Thread(target=spin, args=(state, Helper(), Leaf(), out))
     t.start()
-    while state.count < 20000:
-        time.sleep(0.001)
+    wait(state, 0)
     g = g2
+    state.phase = 1
+    wait(state, 1)
     Helper.compute = lambda self: 20
+    state.phase = 2
+    wait(state, 2)
     Leaf.__bases__ = (Base2,)
-    state.done = True
+    state.phase = 3
     t.join()
     g = g_first
     Helper.compute = compute_first
     Leaf.__bases__ = (Base1,)
-    return out[0]
+    return out
 
 
 g_first = g
 compute_first = Helper.compute
+# Every run must see every change; the first runs on facts kept between polls.
 for _ in range(min(loops(), 4)):
-    RESULT = run()
-print(repr(RESULT))
+    print(run())
