@@ -1548,6 +1548,10 @@ lu_list_try_item_ref(PyListObject *l, Py_ssize_t i)
 /* l[i] as a new reference, NULL when i is out of range (runtime/prim/storage.c). */
 PyObject *lu_list_item_ref_locked(PyListObject *l, Py_ssize_t i);
 
+/* n >= 0 copies of the items of a tuple or list, as a new tuple (as_tuple)
+   or list; NULL with MemoryError when that is too large (runtime/prim/storage.c). */
+PyObject *lu_seq_repeat(PyObject *seq, Py_ssize_t n, int as_tuple);
+
 static inline PyObject *
 lu_list_item_ref(PyListObject *l, Py_ssize_t i)
 {

@@ -199,6 +199,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(range_iter) \
     X(unary) \
     X(list_append) \
+    X(list_repeat) \
     X(build_list) \
     X(build_tuple) \
     X(new_dict) \

@@ -100,6 +100,14 @@ h_list_append(PyObject *list, PyObject *v)
     return err;
 }
 
+/* [x] * n of an exact list and an int, without dispatch: a count below
+   zero repeats nothing, as list.__mul__ counts. */
+static PyObject *
+h_list_repeat(PyObject *list, int64_t n)
+{
+    return lu_seq_repeat(list, n > 0 ? (Py_ssize_t)n : 0, 0);
+}
+
 /* LIST_APPEND: a comprehension's or display's own list, which no other
    thread sees yet, appended to as the interpreter appends. */
 static int
@@ -941,6 +949,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_range_iter] = { (void *)h_range_iter, "range_iter", REP_OBJ, 0, 3 },
     [H_unary] = { (void *)h_unary, "unary", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_list_append] = { (void *)h_list_append, "list_append", REP_BIT, IF_RAISE, 2 },
+    [H_list_repeat] = { (void *)h_list_repeat, "list_repeat", REP_OBJ, IF_RAISE, 2 },
     [H_build_list] = { (void *)h_build_list, "build_list", REP_OBJ, IF_RAISE, 0 },
     [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, IF_RAISE, 0 },
     [H_new_dict] = { (void *)h_new_dict, "new_dict", REP_OBJ, IF_RAISE, 0 },

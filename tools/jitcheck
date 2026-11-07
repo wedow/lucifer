@@ -35,6 +35,9 @@ require that a count of the tier's does not grow with the iterations:
          list and tuple items the running thread owns, box ints and floats,
          and build small lists and tuples: the C paths of those operations
          (compiled code runs them in line).
+  repeat the same program, whose hot loop repeats a list ([x] * n):
+         entries into compiled code, direct and compiled calls (the copies
+         are made without list.__mul__).
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -76,6 +79,7 @@ GROWTH = {
     'super': ('jit_super.py', r'jit: entries .* side (\d+)', 0),
     'inline': ('jit_inline_paths.py', r'jit: C paths list_item (\d+), tuple_item (\d+), list_store (\d+), '
                r'box_int (\d+), box_float (\d+), build_list (\d+), build_tuple (\d+)', 0),
+    'repeat': ('jit_inline_paths.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
 }
 GROWTH_N = 20000
