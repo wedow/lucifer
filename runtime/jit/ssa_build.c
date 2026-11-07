@@ -1304,6 +1304,15 @@ binary_op(struct ctx *c)
         }
         c->island = NULL;
     }
+    else if (op == NB_MULTIPLY && ((lk == LU_KIND_LIST && rk == LU_KIND_INT) || (lk == LU_KIND_INT && rk == LU_KIND_LIST))) {
+        /* list.__mul__ and __rmul__ of an exact list and an int: the copies
+           without the dispatch. */
+        lu_v list = lk == LU_KIND_LIST ? a : b, n = lk == LU_KIND_LIST ? b : a;
+        guard_type(c, list, &PyList_Type);
+        lu_v args[2] = { list, unbox_int(c, n) };
+        r = helper_raising(c, H_list_repeat, 2, args, 2);
+        set_made(c, r, &PyList_Type);
+    }
     else if (lk == LU_KIND_STR && rk == LU_KIND_STR && base == NB_ADD) {
         /* Two exact strs concatenate without running Python. */
         guard_type(c, a, &PyUnicode_Type);

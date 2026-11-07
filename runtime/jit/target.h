@@ -239,6 +239,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(range_iter) \
     X(unary) \
     X(list_append) \
+    X(list_repeat) \
     X(build_list) \
     X(build_tuple) \
     X(new_dict) \
@@ -278,6 +279,22 @@ lu_publishes(const struct lu_ins *in)
     return in->fs != NULL && !(in->flags & INS_VIRTUAL)
         && ((in->op == OP_HELPER && (lu_helpers[in->imm].flags & IF_PY)) || (in->op == OP_TRUTH && in->imm != 1));
 }
+
+/* -X lucifer_jit_stats: how often compiled code takes the C path of an
+   operation it otherwise runs in line (runtime/jit/jit.c reports them). */
+#define LU_C_PATHS(X) X(list_item) X(tuple_item) X(list_store) X(box_int) X(box_float) X(build_list) X(build_tuple)
+enum lu_c_path {
+#define LU_C_PATH_ENUM(name) C_PATH_##name,
+    LU_C_PATHS(LU_C_PATH_ENUM)
+#undef LU_C_PATH_ENUM
+    C_PATHS
+};
+void lu_jit_c_path_count(enum lu_c_path k);
+#define LU_JIT_C_PATH(name) do { \
+        if (_PyRuntime.jit.stats) { \
+            lu_jit_c_path_count(C_PATH_##name); \
+        } \
+    } while (0)
 
 /* A helper's result that is not an answer: the call needs the interpreter
    (a C stack too deep to recurse on), so compiled code deopts. */

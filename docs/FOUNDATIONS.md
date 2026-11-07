@@ -515,7 +515,7 @@ Oracle PASS rows: `test_fork1` 3, `test_os` 320; 26 Lib/test files call
 - `runtime/jit/{ssa*,regalloc}.c` include only `jit/target.h`, which provides:
   - register classes and the calling convention;
   - `emit_*` for the lowered ops;
-  - the two-instruction poll (DESIGN §5.6);
+  - the three-instruction poll (DESIGN §5.6);
   - call, deopt stub, frame descriptor and code publication.
 - `runtime/jit/x86_64/` implements it. Assembly lives under
   `runtime/asm/<arch>/`.

@@ -264,13 +264,11 @@ prim_seq_concat(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return seq_take(all, na + nb, args[2] == Py_True);
 }
 
-/* seq_repeat(seq, n, as_tuple): n >= 0 copies. */
-static PyObject *
-prim_seq_repeat(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+PyObject *
+lu_seq_repeat(PyObject *seq, Py_ssize_t n, int as_tuple)
 {
-    ARGS(3); SEQ(0); SSIZE(1, n);
     Py_ssize_t size;
-    PyObject **src = snapshot(args[0], &size);
+    PyObject **src = snapshot(seq, &size);
     if (src == NULL) {
         return NULL;
     }
@@ -280,12 +278,20 @@ prim_seq_repeat(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     Py_ssize_t total = size * n;
     PyObject **slots;
-    PyObject *r = seq_alloc(total, args[2] == Py_True, &slots);   /* filled in place: one allocation */
+    PyObject *r = seq_alloc(total, as_tuple, &slots);   /* filled in place: one allocation */
     for (Py_ssize_t k = 0; r != NULL && k < total; k++) {
         slots[k] = Py_NewRef(src[k % size]);
     }
     release(src, size);
     return r;
+}
+
+/* seq_repeat(seq, n, as_tuple): n >= 0 copies. */
+static PyObject *
+prim_seq_repeat(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(3); SEQ(0); SSIZE(1, n);
+    return lu_seq_repeat(args[0], n, args[2] == Py_True);
 }
 
 /* tuple_from(seq, cls): the items of a tuple or list as an instance of the

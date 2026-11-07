@@ -85,6 +85,7 @@ static struct {
     double compile_seconds;
     unsigned long failure_reasons[8];
     const char *failure_names[8];
+    unsigned long c_paths[C_PATHS];
 } stats;
 
 /* -X lucifer_jit_stats: every unit with counts, and the counts of units freed. */
@@ -121,6 +122,12 @@ bump_entries(struct lu_unit *u)
     if (__atomic_load_n(&u->entries, __ATOMIC_RELAXED) < ENTRIES_SEEN) {
         bump(&u->entries);
     }
+}
+
+void
+lu_jit_c_path_count(enum lu_c_path k)
+{
+    count(&stats.c_paths[k], 1);
 }
 
 unsigned long *
@@ -922,6 +929,15 @@ lu_jit_report(void)
         if (stats.taken[i]) {
             fprintf(stderr, " %d:%lu", i, stats.taken[i]);
         }
+    }
+    static const char c_path_names[C_PATHS][16] = {
+#define LU_C_PATH_NAME(name) #name,
+        LU_C_PATHS(LU_C_PATH_NAME)
+#undef LU_C_PATH_NAME
+    };
+    fprintf(stderr, "\njit: C paths");
+    for (int k = 0; k < C_PATHS; k++) {
+        fprintf(stderr, "%s %s %lu", k ? "," : "", c_path_names[k], stats.c_paths[k]);
     }
     fprintf(stderr, "\n");
     /* The census: what compiled code executed, in all and per unit. */
