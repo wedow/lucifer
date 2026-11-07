@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily status pass on a built tree: gates, AWFY timing, the web benchmark, conformance, optional numpy.
+"""Daily status pass on a built tree: gates, AWFY timing, the web benchmark, the corpus, conformance, optional numpy.
 
 Writes results/status-DATE/{summary.csv,summary.md,*.log}. Run from the repository root.
 
@@ -14,6 +14,7 @@ Environment:
   WEB_GIL_PYTHON a CPython 3.14 GIL interpreter that imports Flask (--refresh-reference only)
 
 CPython timings come from results/status-reference.json; --refresh-reference rewrites it.
+The corpus (tools/bench/corpus) installs into build/corpus/site; its CPython run sets each program's loops.
 """
 import argparse
 import csv
@@ -28,12 +29,15 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCE = ROOT / "results/status-reference.json"
 AWFY = ROOT / "third_party/awfy/Python"
 WEB = ROOT / "tools/bench/web/bench"
 WEB_CPUS = "1,2,4,8"
+CORPUS = ROOT / "tools/bench/corpus"
+CORPUS_SITE = ROOT / "build/corpus/site"
 WEB_SCORE_CPUS = "8"  # the composite speed score takes the web point that uses every core: no GIL is the point
 LUCIFER = str(Path(os.environ.get("LUCIFER", "bin/lucifer")).resolve())
 
@@ -105,13 +109,29 @@ def web_check(oracle, site):
     return done.returncode == 0, done.stdout
 
 
+def corpus_timings(command, reference=None):
+    """{program: result} from tools/bench/corpus in one prefixed step, against REFERENCE when given."""
+    prepared = run([sys.executable, str(CORPUS), "prepare", str(CORPUS_SITE)])
+    if prepared.returncode:
+        return {}, prepared.stdout
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as ref:
+        json.dump(reference, ref)
+        ref.flush()
+        done = run([sys.executable, str(CORPUS), "time", str(CORPUS_SITE), "--run", command]
+                   + (["--reference", ref.name] if reference is not None else []), "TIMING_PREFIX")
+    try:
+        return json.loads(done.stdout.strip().splitlines()[-1]), done.stdout
+    except (ValueError, IndexError):
+        return {}, done.stdout
+
+
 def refresh_reference(names, iters, oracle):
     times = timings(names, iters, {"cpython": oracle})
     site, gil = os.environ.get("WEB_SITE"), os.environ.get("WEB_GIL_PYTHON")
     web = web_timings({"cpython-3.14": gil, "cpython-3.14t": f"env PYTHONPATH={site} {oracle}"})[0] if site and gil else {}
     REFERENCE.write_text(json.dumps({"version": oracle_version(oracle),
                                      "best_us": {n: times[n]["cpython"] for n in names},
-                                     "web": web}, indent=1) + "\n")
+                                     "web": web, "corpus": corpus_timings(oracle)[0]}, indent=1) + "\n")
 
 
 # --- gates and conformance --------------------------------------------------
@@ -249,6 +269,45 @@ def web_section(metrics, before):
     return md
 
 
+def suite_ratios(record):
+    """{suite: [ratio, or None for a failing program]} over a record's *.on_over_cpython keys."""
+    found = {}
+    for k, v in record.items():
+        if k.endswith(".on_over_cpython"):
+            found.setdefault(k.split(".")[0], []).append(float(v) if v not in (None, "") else None)
+    return found
+
+
+def suites_section(metrics, before):
+    """Per suite: programs, failing and the geomean of the rest, as the README composite counts them."""
+    now, then = suite_ratios(metrics), suite_ratios(before)
+    now, then["all"] = {**dict(sorted(now.items())), "all": sum(now.values(), [])}, sum(then.values(), [])
+    md = ["", "## Suites (time over CPython 3.14t, lower is faster; the README speed is 1 / the all row)", "",
+          "| suite | programs | failing | geomean | yesterday |", "|---|---|---|---|---|"]
+    for suite, values in now.items():
+        md.append(f"| {suite} | {len(values)} | {values.count(None)} | {fmt(geomean([v for v in values if v]))} "
+                  f"| {fmt(geomean([v for v in then.get(suite, []) if v]))} |")
+    return md
+
+
+def corpus_metrics(results, reference):
+    """Per program: CPython and Lucifer seconds and their ratio, empty when Lucifer fails; problems."""
+    metrics, failing, unreferenced = {}, {}, []
+    for program, r in results.items():
+        if r["status"] == "noreference":
+            unreferenced.append(program)
+            continue
+        c = reference[program]["seconds"]
+        on = r["seconds"] if r["status"] == "ok" else None
+        metrics.update({f"{program}.cpython_s": c, f"{program}.on_s": on, f"{program}.on_over_cpython": on / c if on else None})
+        if on is None:
+            failing.setdefault(r["status"], []).append(program)
+    problems = [f"corpus {status}: {', '.join(p)}" for status, p in sorted(failing.items())]
+    if unreferenced:
+        problems.append(f"corpus programs failing on CPython too, not scored: {', '.join(unreferenced)}")
+    return metrics, problems
+
+
 def write_summary(out, date, metrics, gate_rows, problems, names, ran_numpy):
     before = previous_summary(date)
     with (out / "summary.csv").open("w", newline="") as f:
@@ -266,6 +325,7 @@ def write_summary(out, date, metrics, gate_rows, problems, names, ran_numpy):
     md += ["", f"Geomean JIT on / CPython: {fmt(val('awfy.geomean_on_over_cpython'))} "
            f"(yesterday {fmt(float(before['awfy.geomean_on_over_cpython']) if before.get('awfy.geomean_on_over_cpython') else None)})"]
     md += web_section(metrics, before)
+    md += suites_section(metrics, before)
     md += ["", "## Gates", "", "| target | result | detail |", "|---|---|---|"]
     md += [f"| {t} | {'pass' if ok else 'FAIL'} | {d} |" for t, (ok, d) in gate_rows.items()]
     md += ["", "## Conformance", "", "| metric | value | previous |", "|---|---|---|"]
@@ -337,6 +397,14 @@ def main():
         metrics["web.flask.on_over_cpython"] = t / l if t and l else None
     else:
         problems.append("web benchmark skipped: WEB_SITE is not set")
+    if ref.get("corpus"):
+        results, corpus_log = corpus_timings(LUCIFER, ref["corpus"])
+        (out / "corpus.log").write_text(corpus_log)
+        corpus, corpus_problems = corpus_metrics(results, ref["corpus"])
+        metrics.update(corpus)
+        problems += corpus_problems or ([] if results else ["corpus produced no results (corpus.log)"])
+    else:
+        problems.append("corpus skipped: no CPython corpus reference; run --refresh-reference")
     numpy_metrics = {}
     if args.numpy:
         numpy_metrics, numpy_problems = numpy(out)
