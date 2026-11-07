@@ -61,10 +61,12 @@ struct lu_frame {
     uint8_t owner;              /* enum lu_frame_owner */
     uint8_t ret;                /* enum lu_frame_return */
     uint8_t jit_lent;           /* pushed by a direct call (runtime/jit): func is the caller's, borrowed */
-    /* LU_FRAME_JIT: where its values are while it calls something that may
-       run Python (runtime/jit/deopt.c), NULL otherwise; the spill words. */
+    /* LU_FRAME_JIT: where its values are while it calls something during
+       which a walker may see it (runtime/jit/deopt.c), NULL otherwise; the
+       spill words. */
     struct lu_deopt *jit_desc;
     const uint64_t *jit_spills;
+    const uint64_t *jit_regs;   /* the registers a slow path saved, when jit_desc says so */
     PyObject *localsplus[];     /* fast locals, cells and free variables, then the stack */
 };
 
@@ -104,12 +106,17 @@ lu_instr_before(PyCodeObject *code, lu_codeunit *after)
     return at;
 }
 
+/* A frame compiled code runs: the instr of the state it published at its
+   call (runtime/jit/deopt.c). */
+lu_codeunit *lu_jit_instr(struct lu_frame *f);
+
 /* The code unit of the instruction the frame last started: the one before
    instr, caches skipped. */
 static inline Py_ssize_t
 lu_frame_lasti(struct lu_frame *f)
 {
-    return lu_instr_before(f->code, f->instr) - lu_code_start(f->code);
+    lu_codeunit *instr = __atomic_load_n(&f->owner, __ATOMIC_ACQUIRE) == LU_FRAME_JIT ? lu_jit_instr(f) : f->instr;
+    return lu_instr_before(f->code, instr) - lu_code_start(f->code);
 }
 
 /* The owner of an executing frame of `code` that the interpreter runs. */
