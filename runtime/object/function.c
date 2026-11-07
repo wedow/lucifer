@@ -6,6 +6,7 @@
 #include "interp/code.h"
 #include "interp/exceptions.h"
 #include "interp/frame.h"
+#include "jit/jit.h"
 
 #include <string.h>
 
@@ -90,6 +91,12 @@ function_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
     Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
     Py_ssize_t total = nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
     PyThreadState *ts = PyThreadState_Get();
+    PyObject *result;
+    /* A compiled callee is entered directly, as compiled code calls it. */
+    if (kwnames == NULL && ts->current_exception == NULL && ts->current_frame != NULL
+        && lu_jit_call(ts, func, args, nargs, &result)) {
+        return result;
+    }
     PyObject *small[16];
     PyObject **owned = total <= 16 ? small : PyMem_Malloc(total * sizeof(PyObject *));
     if (owned == NULL) {
@@ -105,7 +112,6 @@ function_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
     if (f == NULL) {
         return NULL;
     }
-    PyObject *result;
     if (lu_enter_frame(ts, f, 0, &result)) {
         struct lu_task *t = (struct lu_task *)ts;
         t->pin++;

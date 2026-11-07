@@ -86,6 +86,7 @@ static struct {
     unsigned long failure_reasons[8];
     const char *failure_names[8];
     unsigned long c_paths[C_PATHS];
+    unsigned long why_not[WHY_NOTS];
 } stats;
 
 /* -X lucifer_jit_stats: every unit with counts, and the counts of units freed. */
@@ -209,6 +210,46 @@ void
 lu_jit_c_path_count(enum lu_c_path k)
 {
     count(&stats.c_paths[k], 1);
+}
+
+void
+lu_jit_why_not_count(enum lu_why_not k)
+{
+    count(&stats.why_not[k], 1);
+}
+
+static struct lu_jit_code *state_of(PyCodeObject *code);
+
+void
+lu_jit_why_not(PyObject *callable, Py_ssize_t nargs)
+{
+    if (Py_IS_TYPE(callable, &PyMethod_Type)) {
+        callable = PyMethod_GET_FUNCTION(callable);
+        nargs++;
+    }
+    enum lu_why_not k;
+    if (!PyFunction_Check(callable)) {
+        k = PyType_Check(callable) ? WHY_NOT_type
+            : PyCFunction_Check(callable) || Py_IS_TYPE(callable, &PyMethodDescr_Type) ? WHY_NOT_builtin
+            : WHY_NOT_object;
+    }
+    else {
+        PyCodeObject *code = (PyCodeObject *)((PyFunctionObject *)callable)->func_code;
+        struct lu_jit_code *jc = state_of(code);
+        int pc = jc != NULL ? jc->call_pc : -1;
+        k = code->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR) ? WHY_NOT_generator
+            : code->co_kwonlyargcount ? WHY_NOT_kwonly
+            : code->co_flags & (CO_VARARGS | CO_VARKEYWORDS) ? WHY_NOT_varargs
+            : jc == NULL ? WHY_NOT_cold
+            : pc <= 0 ? WHY_NOT_prologue
+            : jc->direct.nargs < 0 ? WHY_NOT_cells
+            : nargs > jc->direct.nargs ? WHY_NOT_toomany
+            : __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) ? WHY_NOT_disabled
+            : __atomic_load_n(&jc->wait[pc], __ATOMIC_RELAXED) == FOREVER ? WHY_NOT_retired
+            : __atomic_load_n(&jc->direct.entry, __ATOMIC_RELAXED) == NULL ? WHY_NOT_nounit
+            : WHY_NOT_entry;
+    }
+    count(&stats.why_not[k], 1);
 }
 
 unsigned long *
@@ -632,7 +673,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     struct lu_task *task = (struct lu_task *)ts;
     /* What can change while the code has units: the frame, tools, a hook. */
     if (frame->locals != NULL || frame->owner == LU_FRAME_GENERATOR || code->_co_monitoring != NULL
-        || ts->tracing || (ts->interp->eval_frame != NULL && !lu_perf_is_trampoline(ts->interp->eval_frame))
+        || ts->tracing || (ts->interp->eval_frame != NULL && ts->interp->eval_frame != lu_perf_eval)
         || code->_co_instrumentation_version
            != (__atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK)) {
         return LU_JIT_NONE;
@@ -1019,6 +1060,15 @@ lu_jit_report(void)
         LU_C_PATHS(LU_C_PATH_NAME)
 #undef LU_C_PATH_NAME
     };
+    static const char why_not_names[WHY_NOTS][16] = {
+#define LU_WHY_NOT_NAME(name) #name,
+        LU_WHY_NOT(LU_WHY_NOT_NAME)
+#undef LU_WHY_NOT_NAME
+    };
+    fprintf(stderr, "\njit: whynot");
+    for (int k = 0; k < WHY_NOTS; k++) {
+        fprintf(stderr, "%s %s %lu", k ? "," : "", why_not_names[k], stats.why_not[k]);
+    }
     fprintf(stderr, "\njit: C paths");
     for (int k = 0; k < C_PATHS; k++) {
         fprintf(stderr, "%s %s %lu", k ? "," : "", c_path_names[k], stats.c_paths[k]);

@@ -392,18 +392,12 @@ trampoline_of(PyCodeObject *co)
     return (trampoline)(void *)t;
 }
 
-static PyObject *
-trampoline_eval(PyThreadState *ts, struct _PyInterpreterFrame *f, int throwflag)
+PyObject *
+lu_perf_eval(PyThreadState *ts, struct _PyInterpreterFrame *f, int throwflag)
 {
     trampoline t = trampoline_of(((struct lu_frame *)f)->code);
     return t != NULL ? t(ts, f, throwflag, _PyEval_EvalFrameDefault)
                      : _PyEval_EvalFrameDefault(ts, f, throwflag);
-}
-
-int
-lu_perf_is_trampoline(_PyFrameEvalFunction eval)
-{
-    return eval == trampoline_eval;
 }
 
 /* Activation */
@@ -415,7 +409,7 @@ activate(PyInterpreterState *interp, int backend)
         PyErr_SetString(PyExc_ValueError, "perf trampoline not available");
         return -1;
     }
-    if (interp->eval_frame != NULL && interp->eval_frame != trampoline_eval) {
+    if (interp->eval_frame != NULL && interp->eval_frame != lu_perf_eval) {
         PyErr_SetString(PyExc_RuntimeError,
                         "Trampoline cannot be initialized as a custom eval frame is already present");
         return -1;
@@ -436,7 +430,7 @@ activate(PyInterpreterState *interp, int backend)
         __atomic_store_n(&perf.backend, backend, __ATOMIC_RELEASE);
     }
     unlock();
-    _PyInterpreterState_SetEvalFrameFunc(interp, trampoline_eval);
+    _PyInterpreterState_SetEvalFrameFunc(interp, lu_perf_eval);
     return 0;
 }
 
@@ -473,7 +467,7 @@ static PyObject *
 sys_deactivate_stack_trampoline(PyObject *m, PyObject *unused)
 {
     PyInterpreterState *interp = PyInterpreterState_Get();
-    if (interp->eval_frame == trampoline_eval) {
+    if (interp->eval_frame == lu_perf_eval) {
         _PyInterpreterState_SetEvalFrameFunc(interp, NULL);
         __atomic_store_n(&perf.backend, LU_PERF_NONE, __ATOMIC_RELEASE);
     }
@@ -483,7 +477,7 @@ sys_deactivate_stack_trampoline(PyObject *m, PyObject *unused)
 static PyObject *
 sys_is_stack_trampoline_active(PyObject *m, PyObject *unused)
 {
-    return PyBool_FromLong(PyInterpreterState_Get()->eval_frame == trampoline_eval);
+    return PyBool_FromLong(PyInterpreterState_Get()->eval_frame == lu_perf_eval);
 }
 
 PyMethodDef lu_sys_perf_methods[] = {

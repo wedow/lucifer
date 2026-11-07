@@ -170,6 +170,13 @@ int lu_jit_call_entry(PyCodeObject *code);
    an exception), or 0 with nothing done when there is no unit to enter. */
 int lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
 
+/* A call of func with nargs positional arguments (borrowed) from C,
+   through its code's direct entry (target.h) when it has a live one and
+   the entry's checks pass: 1 with *result its value (NULL with an
+   exception), or 0 with nothing done. No exception may be pending. */
+int lu_jit_call(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs,
+                PyObject **result);
+
 /* A polymorphic inline cache (runtime/jit/jit.c): the shapes an attribute
    site the interpreter's one-shape cache gave up on has met in compiled
    code, each as the interpreter would have specialized it for that type

@@ -29,6 +29,16 @@ require that a count of the tier's does not grow with the iterations:
   compiled  tests/kernel/jit_compiled_calls.py, whose hot calls are of
          functions it cannot inline: direct calls (compiled code entered
          from C). Compiled code makes them itself.
+  ccalls tests/kernel/jit_c_calls.py, whose hot code makes C call compiled
+         functions (a dict lookup calls its keys' __hash__ and __eq__):
+         direct calls (compiled code entered through the eval loop's C
+         entry). C enters the callee's unit itself; one per iteration is
+         the kernel's call_special, which the comparison reaches and whose
+         *args the direct entry does not bind.
+  perfcalls  the compiled lane's program under -X perf, whose trampoline
+         gives interpreted frames perf symbols: compiled code still calls
+         compiled callees itself (they have symbols of their own): entries
+         into compiled code and direct calls.
   super  tests/kernel/jit_super.py, whose hot constructors and methods go
          through super(): side exits. None of its functions may be retired.
   inline tests/kernel/jit_inline_paths.py, whose hot loops read and store
@@ -80,7 +90,7 @@ MODES = {
     'deopt:7': ['-X', 'lucifer_jit=always', '-X', 'lucifer_stress=deopt:7'],
 }
 TIMING = re.compile(r'\d+us')
-# lane: (program, the counts in the -X lucifer_jit_stats report, summed, counts allowed per iteration)
+# lane: (program, the counts in the -X lucifer_jit_stats report, summed, counts allowed per iteration[, flags])
 GROWTH = {
     'exits': ('jit_exits.py', r'jit: entries .* side (\d+)', 0),
     'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
@@ -88,6 +98,8 @@ GROWTH = {
     'quiet': ('jit_quiet_misses.py', r'jit: entries .* error (\d+)', 0),
     'caught': ('jit_caught.py', r'jit: entries .* error (\d+) frame (\d+)', 0),
     'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
+    'ccalls': ('jit_c_calls.py', r'direct calls (\d+)', 1),
+    'perfcalls': ('jit_compiled_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0, ['-X', 'perf']),
     'super': ('jit_super.py', r'jit: entries .* side (\d+)', 0),
     'inline': ('jit_inline_paths.py', r'jit: C paths list_item (\d+), tuple_item (\d+), list_store (\d+), '
                r'box_int (\d+), box_float (\d+), build_list (\d+), build_tuple (\d+)', 0),
@@ -107,9 +119,9 @@ def run(argv, timeout):
     return p.returncode, TIMING.sub('Nus', p.stdout), p.stderr
 
 
-def counted(lucifer, program, pattern, n, timeout):
-    code, out, err = run([lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', str(program), str(n)],
-                         timeout)
+def counted(lucifer, program, pattern, n, timeout, flags=()):
+    code, out, err = run([lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', *flags, str(program),
+                          str(n)], timeout)
     found = [int(n) for m in re.finditer(pattern, err) for n in m.groups()]
     return (code, out, sum(found) if found else None,
             re.findall(r'^jit: (?:disabled (\S+)|retire (\S+)@)', err, re.M))
@@ -128,10 +140,10 @@ def qualnames(program):
 
 def check_growth(args, lane):
     """The count at 2N less the count at N: what the extra N iterations cost."""
-    name, pattern, per = GROWTH[lane]
+    name, pattern, per, *flags = GROWTH[lane]
     program = ROOT / 'tests' / 'kernel' / name
     sizes = (GROWTH_N, 2 * GROWTH_N)
-    small, large = (counted(args.lucifer, program, pattern, n, args.timeout) for n in sizes)
+    small, large = (counted(args.lucifer, program, pattern, n, args.timeout, *flags) for n in sizes)
     want = [run([args.oracle, str(program), str(n)], args.timeout)[:2] for n in sizes]
     problems = []
     if [small[:2], large[:2]] != want:

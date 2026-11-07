@@ -1416,7 +1416,11 @@ int lu_kernel_target(PyObject *callable, PyObject *const *args, Py_ssize_t nargs
    but without checking an argument (the optimizing tier knows it), and the
    self a builtin binds (borrowed, or NULL). NULL when callable is none. */
 PyObject *lu_kernel_function_of(PyObject *callable, PyObject **self);
-/* Calls a callable from C (PyObject_Vectorcall): vectorcall, else tp_call. */
+/* An unbound slot wrapper's call (wrapper_descriptor.__call__) on the
+   arguments as a vector, self first; kwargs a dict or NULL. */
+PyObject *lu_wrapper_descr_call(PyObject *descr, PyObject *const *args, Py_ssize_t nargs, PyObject *kwargs);
+/* Calls a callable from C (PyObject_Vectorcall): vectorcall, else tp_call
+   (a slot wrapper's without a tuple of the arguments). */
 PyObject *lu_call(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames);
 /* Calls interp->kernel[id] from C, in a nested eval loop. */
 PyObject *lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t nargs);

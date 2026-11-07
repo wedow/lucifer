@@ -245,6 +245,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(call_special) \
     X(super_attr) \
     X(prim) \
+    X(prim_call) \
     X(make_function) \
     X(set_function_attribute) \
     X(cell_store) \
@@ -339,6 +340,26 @@ unsigned long *lu_jit_alloc_site(PyCodeObject *code, int pc, int kind);
             lu_jit_c_path_count(C_PATH_##name); \
         } \
     } while (0)
+
+/* -X lucifer_jit_stats: why a call compiled code did not inline missed
+   the callee's direct entry (runtime/jit/jit.c classifies a call reaching
+   a C helper): a keyword or star call; a callable that is a
+   type, a C function or something else; a generator's code; parameters
+   the direct entry does not bind (keyword-only, star parameters, cells);
+   more arguments than parameters; a code that never got hot, is disabled,
+   retired, or has no live unit at its call entry; or a live entry, which
+   the helper enters itself. */
+#define LU_WHY_NOT(X) X(kw) X(star) X(type) X(builtin) X(object) X(generator) X(kwonly) \
+    X(varargs) X(cells) X(prologue) X(toomany) X(cold) X(disabled) X(retired) X(nounit) X(entry)
+enum lu_why_not {
+#define LU_WHY_NOT_ENUM(name) WHY_NOT_##name,
+    LU_WHY_NOT(LU_WHY_NOT_ENUM)
+#undef LU_WHY_NOT_ENUM
+    WHY_NOTS
+};
+void lu_jit_why_not_count(enum lu_why_not k);
+/* A call of callable with nargs positional arguments: its reason. */
+void lu_jit_why_not(PyObject *callable, Py_ssize_t nargs);
 
 /* A helper's result that is not an answer: the call needs the interpreter
    (a C stack too deep to recurse on), so compiled code deopts. */

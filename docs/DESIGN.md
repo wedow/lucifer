@@ -676,7 +676,8 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    walker wrote the locals. A call of a
    Python function whose code has a unit at its call entry pushes the
    callee's frame itself and enters that unit's direct entry: no C helper,
-   no eval loop, and the callee pops its frame when it returns. A function
+   no eval loop, and the callee pops its frame when it returns. C that
+   calls a Python function (its vectorcall) enters the same way. A function
    borrows the parameters it never rebinds from its caller.
 8. **Publication and invalidation.** Code is published by a ticket-checked
    atomic store into the code object's private tail. Patching running code

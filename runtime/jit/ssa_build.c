@@ -2728,14 +2728,26 @@ call(struct ctx *c)
     if (c->failed) {
         return -1;
     }
-    if (prim != NULL && self == LU_NOV && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_NOPY)) {
-        /* It runs no Python, so no frame needs to be real, inlined or not. */
+    int flags = prim != NULL ? ((PyCFunctionObject *)kc)->m_ml->ml_flags : 0;
+    if (prim != NULL && self == LU_NOV
+        && (flags & (METH_VARARGS | METH_FASTCALL | METH_NOARGS | METH_O | METH_KEYWORDS | METH_METHOD))
+           == METH_FASTCALL) {
+        /* A primitive that runs no Python needs no frame to be real, inlined
+           or not; one that may is called as h_call would, without its
+           dispatch. */
+        int py = !(flags & LU_METH_NOPY);
+        if (py && !opaque_call(c)) {
+            return -1;
+        }
         lu_v hargs[33];
         hargs[0] = callable;
         for (int i = 0; i < n; i++) {
             hargs[1 + i] = peek(c, n - i);
         }
-        r = helper_raising(c, H_prim, n + 1, hargs, n + 2);
+        r = helper_raising(c, py ? H_prim_call : H_prim, n + 1, hargs, n + 2);
+        if (py) {
+            guard_after(c, OP_GUARD_NOT_NULL, r, 1);    /* declined: the C stack is too deep */
+        }
         pop_call(c, n);
         push(c, r, 1);
         return 0;
