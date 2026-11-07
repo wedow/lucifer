@@ -20,7 +20,7 @@ typedef union {
 enum lu_frame_owner {
     LU_FRAME_INTERPRETER,       /* a task's datastack frame */
     LU_FRAME_GENERATOR,         /* embedded in a generator or coroutine */
-    LU_FRAME_JIT,               /* values published through safepoint descriptors */
+    LU_FRAME_JIT,               /* compiled code owns its locals and stack: lu_frame_slot reads them */
     LU_FRAME_KERNEL_HIDDEN,     /* a kernel builtin: skipped by every user-visible walker */
     LU_FRAME_C_ENTRY,           /* where C entered the eval loop; the task is pinned below it */
     LU_FRAME_FRAME_OBJECT,      /* the copy a frame object took when its frame stopped executing */
@@ -45,6 +45,8 @@ enum lu_frame_return {
                                    call's arguments: type.__call__ finishes the instance */
 };
 
+struct lu_deopt;
+
 struct lu_frame {
     PyCodeObject *code;         /* strong */
     struct lu_frame *previous;  /* single-store link, so a signal-time walker sees a chain */
@@ -58,6 +60,10 @@ struct lu_frame {
     PyObject **stackpointer;    /* the value stack's top, valid with instr */
     uint8_t owner;              /* enum lu_frame_owner */
     uint8_t ret;                /* enum lu_frame_return */
+    /* LU_FRAME_JIT: where its values are while it calls something that may
+       run Python (runtime/jit/deopt.c), NULL otherwise; the spill words. */
+    struct lu_deopt *jit_desc;
+    const uint64_t *jit_spills;
     PyObject *localsplus[];     /* fast locals, cells and free variables, then the stack */
 };
 
@@ -104,6 +110,24 @@ lu_frame_lasti(struct lu_frame *f)
 {
     return lu_instr_before(f->code, f->instr) - lu_code_start(f->code);
 }
+
+/* The owner of an executing frame of `code` that the interpreter runs. */
+static inline uint8_t
+lu_frame_owner_for(PyCodeObject *code)
+{
+    return (code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) ? LU_FRAME_KERNEL_HIDDEN : LU_FRAME_INTERPRETER;
+}
+
+/* What local i's slot holds (a cell for a cell variable) as a new reference,
+   or NULL when unbound. A frame compiled code runs (LU_FRAME_JIT) is read
+   through the state it published at its call; another task's, with the
+   world stopped. */
+PyObject *lu_frame_slot(struct lu_frame *f, int i);
+
+/* Before a write to f's locals: a frame compiled code runs gets real
+   slots, and compiled code leaves it when the call it is in returns.
+   0, or -1 with an exception set. */
+int lu_frame_sync(struct lu_frame *f);
 
 /* The walker (FOUNDATIONS 2.2): calls visit(f, arg) on `from` and then each
    frame outward until it returns nonzero, and returns that frame, or NULL.

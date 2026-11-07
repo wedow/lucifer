@@ -65,6 +65,8 @@ struct asm_ {
     int nexits, capexits;
     int deopts_patch;           /* the imm64 that holds the exits' table */
     int epilogue;
+    int entered;                /* where both entries meet, the frame pushed */
+    int direct_return;          /* a return to a direct caller: the frame popped here */
     struct lu_func *f;
     struct lu_unit *unit;
     int frame_bytes;
@@ -268,6 +270,35 @@ cmp_mi(struct asm_ *a, int w, int base, int32_t disp, int32_t imm)
     rex(a, w, 0, 0, base);
     b1(a, 0x81);
     modrm_mem(a, ALU_CMP, base, disp);
+    b4(a, imm);
+}
+
+/* cmp byte [base+disp], imm8 and mov byte [base+disp], imm8 */
+static void
+cmp8_mi(struct asm_ *a, int base, int32_t disp, int imm)
+{
+    rex(a, 0, 0, 0, base);
+    b1(a, 0x80);
+    modrm_mem(a, ALU_CMP, base, disp);
+    b1(a, imm);
+}
+
+static void
+store8_mi(struct asm_ *a, int base, int32_t disp, int imm)
+{
+    rex(a, 0, 0, 0, base);
+    b1(a, 0xC6);
+    modrm_mem(a, 0, base, disp);
+    b1(a, imm);
+}
+
+/* mov qword [base+disp], imm32 (sign-extended) */
+static void
+store_mi(struct asm_ *a, int base, int32_t disp, int32_t imm)
+{
+    rex(a, 1, 0, 0, base);
+    b1(a, 0xC7);
+    modrm_mem(a, 0, base, disp);
     b4(a, imm);
 }
 
@@ -829,12 +860,122 @@ guard_exit(struct asm_ *a, struct lu_ins *in)
 
 extern int lu_jit_next_pc(PyCodeObject *code, int pc);
 
+/* Around a call that may run Python: the root frame's state during the
+   call, where walkers read its locals (runtime/jit/deopt.c). */
 static void
-call_helper(struct asm_ *a, lu_v v)
+publish(struct asm_ *a, struct lu_deopt *d)
+{
+    mov_ri(a, RAX, (int64_t)(intptr_t)d);
+    store(a, R15, offsetof(struct lu_frame, jit_desc), RAX);
+}
+
+static void
+unpublish(struct asm_ *a)
+{
+    store_mi(a, R15, offsetof(struct lu_frame, jit_desc), 0);
+}
+
+/* The direct call of a function in RAX (struct lu_jit_direct) with
+   `nargs` arguments at rsp + `off`: then `done` with the value (or NULL)
+   in RAX, or `slow` with nothing done. */
+static void
+direct_call(struct asm_ *a, int nargs, int off, int slow, int done)
+{
+    int left = new_label(a);
+    load(a, RCX, RAX, offsetof(PyFunctionObject, func_code));
+    load(a, RDX, RCX, offsetof(PyCodeObject, co_executors));
+    test_rr(a, RDX, RDX);
+    jcc(a, CC_E, slow);
+    b1(a, 0xF6);
+    modrm_rr(a, 0, RDX);
+    b1(a, 1);                                   /* test dl, 1: a call count, not JIT state */
+    jcc(a, CC_NE, slow);
+    cmp_mi(a, 0, RDX, offsetof(struct lu_jit_direct, nargs), nargs);
+    jcc(a, CC_L, slow);                         /* more arguments than parameters, or never direct */
+    load(a, R11, RDX, offsetof(struct lu_jit_direct, entry));
+    test_rr(a, R11, R11);
+    jcc(a, CC_E, slow);
+    mov_rr(a, RDI, R14);
+    mov_rr(a, RSI, RAX);
+    rex(a, 1, RDX, 0, RSP);
+    b1(a, 0x8D);
+    modrm_mem(a, RDX, RSP, off);                /* lea rdx, the arguments */
+    mov_rr(a, RCX, RSP);                        /* the value goes over the callable's copy */
+    mov_ri(a, R8, nargs);
+    rex(a, 0, 0, 0, R11);
+    b1(a, 0xFF);
+    modrm_rr(a, 2, R11);                        /* call r11 */
+    b1(a, 0x83);
+    b1(a, 0xF8);
+    b1(a, 0x01);                                /* cmp eax, 1: returned */
+    jcc(a, CC_NE, left);
+    load(a, RAX, RSP, 0);
+    jmp(a, done);
+    bind(a, left);
+    test_rr(a, RAX, RAX);
+    jcc(a, CC_E, slow);                         /* declined: nothing was done */
+    mov_rr(a, RDX, RAX);
+    mov_rr(a, RDI, R14);
+    load(a, RSI, RSP, 0);                       /* the callee's frame */
+    call_abs(a, (void *)lu_jit_call_finish);
+    jmp(a, done);
+}
+
+/* A call with the argument array at rsp as h_call takes it (the callable,
+   self or NULL, the arguments), from the root or from inlined frames
+   pushed for it: a Python function, or a bound method of one, that
+   compiled code can enter is called directly. Anything else falls
+   through to h_call. */
+static void
+call_direct(struct asm_ *a, lu_v v, int done)
+{
+    struct lu_ins *in = I(a, v);
+    struct lu_ins *self = I(a, in->args[1]);
+    int bound = !(self->op == OP_CONST && self->imm == 0);
+    int n = in->nargs - 2;
+    int slow = new_label(a), function = new_label(a);
+    load(a, RAX, RSP, 0);
+    mov_ri(a, R11, (int64_t)(intptr_t)&PyFunction_Type);
+    cmp_rm(a, R11, RAX, offsetof(PyObject, ob_type));
+    if (!bound) {
+        /* A bound method: its self goes in the free word before the
+           arguments, as h_call puts it, and the word is empty again if
+           the call does not go directly. */
+        int unbind = new_label(a);
+        jcc(a, CC_E, function);
+        mov_ri(a, R11, (int64_t)(intptr_t)&PyMethod_Type);
+        cmp_rm(a, R11, RAX, offsetof(PyObject, ob_type));
+        jcc(a, CC_NE, slow);
+        load(a, RCX, RAX, offsetof(PyMethodObject, im_self));
+        load(a, RAX, RAX, offsetof(PyMethodObject, im_func));
+        mov_ri(a, R11, (int64_t)(intptr_t)&PyFunction_Type);
+        cmp_rm(a, R11, RAX, offsetof(PyObject, ob_type));
+        jcc(a, CC_NE, slow);
+        store(a, RSP, 8, RCX);
+        direct_call(a, n + 1, 8, unbind, done);
+        bind(a, unbind);
+        store_mi(a, RSP, 8, 0);
+        jmp(a, slow);
+        bind(a, function);
+        direct_call(a, n, 16, slow, done);
+    }
+    else {
+        jcc(a, CC_NE, slow);
+        cmp_mi(a, 1, RSP, 8, 0);                /* the method form without a method: no self */
+        jcc(a, CC_E, slow);
+        direct_call(a, n + 1, 8, slow, done);
+    }
+    bind(a, slow);
+}
+
+/* `d`, when the helper may run Python: the state it publishes. */
+static void
+call_helper(struct asm_ *a, lu_v v, struct lu_deopt *d)
 {
     struct lu_ins *in = I(a, v);
     const struct lu_helper *h = &lu_helpers[in->imm];
-    if ((h->flags & IF_PY) && in->fs != NULL) {
+    if (d != NULL) {
+        publish(a, d);
         /* The frame shows the call's instruction as the one that ran: the
            root's state is before it, or after the call into inlined frames. */
         struct lu_fs *root = in->fs;
@@ -849,11 +990,16 @@ call_helper(struct asm_ *a, lu_v v)
     static const int argregs[] = { RDI, RSI, RDX, RCX, R8, R9 };
     struct move moves[8];
     int nm = 0;
+    int done = -1;
     if (h->nargs == 0) {
         /* Variadic: the values in the argument array at rsp. */
         for (int i = 0; i < in->nargs; i++) {
             to_gpr(a, RAX, in->args[i]);
             store(a, RSP, 8 * i, RAX);
+        }
+        if (in->imm == H_call) {
+            done = new_label(a);
+            call_direct(a, v, done);
         }
         mov_rr(a, RDI, RSP);
         mov_ri(a, RSI, in->nargs);
@@ -872,6 +1018,12 @@ call_helper(struct asm_ *a, lu_v v)
         parallel_moves(a, moves, nm);
     }
     call_abs(a, h->fn);
+    if (done >= 0) {
+        bind(a, done);
+    }
+    if (d != NULL) {
+        unpublish(a);
+    }
 }
 
 /* A Python-running helper called from an inlined frame: the inlined
@@ -962,6 +1114,20 @@ pop_frames(struct asm_ *a)
 
 /* --- the instructions --- */
 
+/* The carrier (in RAX) passes a quiescent state, as the interpreter's poll
+   does. Clobbers RCX. */
+static void
+quiescent(struct asm_ *a)
+{
+    int same = new_label(a);
+    mov_ri(a, RCX, (int64_t)(intptr_t)&_PyRuntime.qsbr.wr_seq);
+    load(a, RCX, RCX, 0);
+    cmp_rm(a, RCX, RAX, offsetof(struct lu_carrier, qsbr.seq));
+    jcc(a, CC_E, same);
+    store(a, RAX, offsetof(struct lu_carrier, qsbr.seq), RCX);
+    bind(a, same);
+}
+
 static void
 incref(struct asm_ *a, int r)
 {
@@ -996,7 +1162,46 @@ incref(struct asm_ *a, int r)
 }
 
 extern void lu_jit_decref(PyObject *o);
-extern void lu_jit_store_local(struct lu_frame *f, intptr_t i, PyObject *v);
+
+/* Py_DECREF of r: the owning thread's count above one drops in place;
+   anything else (immortal, last reference, another thread's object) goes
+   to C, which keeps the registers when `keep`. Clobbers RAX, RCX. */
+static void
+decref(struct asm_ *a, int r, int keep)
+{
+    int done = new_label(a), slow = new_label(a);
+    test_rr(a, r, r);
+    jcc(a, CC_E, done);
+    load32(a, RCX, r, offsetof(PyObject, ob_ref_local));
+    cmp32_ri8(a, RCX, -1);
+    jcc(a, CC_E, done);                         /* immortal */
+    cmp32_ri8(a, RCX, 1);
+    jcc(a, CC_BE, slow);                        /* the last local reference, or none */
+    b1(a, 0x64);
+    b1(a, 0x48);
+    b1(a, 0x8B);
+    b1(a, 0x04);
+    b1(a, 0x25);
+    b4(a, 0);                                   /* mov rax, fs:[0] */
+    cmp_rm(a, RAX, r, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, slow);
+    rex(a, 0, 0, 0, RCX);
+    b1(a, 0x83);
+    modrm_rr(a, ALU_SUB, RCX);
+    b1(a, 1);                                   /* sub ecx, 1 */
+    op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
+    jmp(a, done);
+    bind(a, slow);
+    if (keep) {
+        save_volatile(a);
+    }
+    mov_rr(a, RDI, r);
+    call_abs(a, (void *)lu_jit_decref);
+    if (keep) {
+        restore_volatile(a);
+    }
+    bind(a, done);
+}
 extern PyObject *lu_jit_box_int(int64_t v);
 extern int64_t lu_jit_unbox_wide(PyObject *o);
 extern PyObject *lu_jit_box_float(double v);
@@ -1484,10 +1689,16 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         bind(a, other);
         /* imm 1: only a layout's own truth, which runs no Python; any
            other leaves. */
-        mov_rr(a, RDI, r);
-        call_abs(a, in->imm == 1 ? (void *)lu_truth_exact : (void *)lu_jit_truth);
         int err = in->imm == 1 ? exit_to(a, in->fs, EXIT_GUARD, 0, 0)
                                : exit_to(a, in->fs, EXIT_ERROR, 1, in->drop);
+        if (in->imm != 1) {
+            publish(a, a->exits[a->nexits - 1].d);
+        }
+        mov_rr(a, RDI, r);
+        call_abs(a, in->imm == 1 ? (void *)lu_truth_exact : (void *)lu_jit_truth);
+        if (in->imm != 1) {
+            unpublish(a);
+        }
         b1(a, 0x83);
         b1(a, 0xF8);
         b1(a, 0xFF);                            /* cmp eax, -1 */
@@ -1570,10 +1781,19 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     }
     case OP_GUARD_FRAMES: {
         /* Not a speculation: stress fails it in lu_jit_frames_pop. */
-        int fail = exit_to(a, in->fs, EXIT_SIDE, 0, 0);
-        load(a, RAX, R14, offsetof(PyThreadState, current_frame));
-        alu_rr(a, ALU_CMP, RAX, R15);
-        jcc(a, CC_NE, fail);
+        if (in->fs->caller != NULL) {
+            int kept = exit_to(a, in->fs, EXIT_SIDE, 0, 0);
+            load(a, RAX, R14, offsetof(PyThreadState, current_frame));
+            alu_rr(a, ALU_CMP, RAX, R15);
+            jcc(a, CC_NE, kept);
+        }
+        int seen = exit_to(a, in->fs, EXIT_FRAME, 0, 0);
+        cmp8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
+        jcc(a, CC_NE, seen);
+        if (in->imm & 1) {
+            cmp_mi(a, 1, R15, offsetof(struct lu_frame, frame_obj), 0);
+            jcc(a, CC_NE, seen);
+        }
         return 0;
     }
     case OP_GUARD_NOT_NULL: {
@@ -1826,46 +2046,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         r = gpr_of(a, in->a, RDX);
         incref(a, r);
         return 0;
-    case OP_DECREF: {
-        /* Py_DECREF: the owning thread's count above one drops in place;
-           anything else (immortal, last reference, another thread's object)
-           goes to C, which keeps the registers. */
-        int done = new_label(a), slow = new_label(a);
-        r = gpr_of(a, in->a, RDX);
-        test_rr(a, r, r);
-        jcc(a, CC_E, done);
-        load32(a, RCX, r, offsetof(PyObject, ob_ref_local));
-        cmp32_ri8(a, RCX, -1);
-        jcc(a, CC_E, done);                     /* immortal */
-        cmp32_ri8(a, RCX, 1);
-        jcc(a, CC_BE, slow);                    /* the last local reference, or none */
-        b1(a, 0x64);
-        b1(a, 0x48);
-        b1(a, 0x8B);
-        b1(a, 0x04);
-        b1(a, 0x25);
-        b4(a, 0);                               /* mov rax, fs:[0] */
-        cmp_rm(a, RAX, r, offsetof(PyObject, ob_tid));
-        jcc(a, CC_NE, slow);
-        rex(a, 0, 0, 0, RCX);
-        b1(a, 0x83);
-        modrm_rr(a, ALU_SUB, RCX);
-        b1(a, 1);                               /* sub ecx, 1 */
-        op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
-        jmp(a, done);
-        bind(a, slow);
-        save_volatile(a);
-        mov_rr(a, RDI, r);
-        call_abs(a, (void *)lu_jit_decref);
-        restore_volatile(a);
-        bind(a, done);
-        return 0;
-    }
-    case OP_STORE_LOCAL:
-        to_gpr(a, RDX, in->a);
-        mov_rr(a, RDI, R15);
-        mov_ri(a, RSI, in->imm);
-        call_abs(a, (void *)lu_jit_store_local);
+    case OP_DECREF:
+        decref(a, gpr_of(a, in->a, RDX), 1);
         return 0;
     case OP_RITER_DONE:
         r = gpr_of(a, in->a, RDX);
@@ -1905,7 +2087,15 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             d->call_pc = lu_jit_next_pc(in->fs->code, in->fs->pc);
             push_frames(a, v, d);
         }
-        call_helper(a, v);
+        struct lu_deopt *pub = NULL;
+        if ((h->flags & IF_PY) && in->fs != NULL) {
+            if (d == NULL) {
+                exit_to(a, in->fs, EXIT_SIDE, 0, 0);    /* only its description is used */
+                d = a->exits[a->nexits - 1].d;
+            }
+            pub = d;
+        }
+        call_helper(a, v, pub);
         if (inlined) {
             pop_frames(a);
         }
@@ -1944,14 +2134,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         mov_ri(a, R11, (int64_t)a->f->code->_co_instrumentation_version);
         alu_rr(a, ALU_CMP, RCX, R11);
         jcc(a, CC_NE, poll);
-        /* The carrier passes a quiescent state, as the interpreter's poll does. */
-        int same = new_label(a);
-        mov_ri(a, RCX, (int64_t)(intptr_t)&_PyRuntime.qsbr.wr_seq);
-        load(a, RCX, RCX, 0);
-        cmp_rm(a, RCX, RAX, offsetof(struct lu_carrier, qsbr.seq));
-        jcc(a, CC_E, same);
-        store(a, RAX, offsetof(struct lu_carrier, qsbr.seq), RCX);
-        bind(a, same);
+        quiescent(a);
         mov_ri(a, RCX, (int64_t)(intptr_t)&_PyRuntime.sched.active);
         cmp_mi(a, 0, RCX, 0, 0);
         jcc(a, CC_NE, poll);
@@ -1963,6 +2146,11 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     case OP_RETURN:
         to_gpr(a, RCX, in->a);
         load(a, RAX, RBP, RESULT_SLOT);
+        if (f->direct) {
+            b1(a, 0xA8);
+            b1(a, 1);                           /* test al, 1: a direct caller's */
+            jcc(a, CC_NE, a->direct_return);
+        }
         store(a, RAX, 0, RCX);
         mov_ri(a, RAX, 1);                      /* LU_JIT_RETURN */
         jmp(a, a->epilogue);
@@ -2007,7 +2195,7 @@ edge_moves(struct asm_ *a, int b, int succ)
 }
 
 static void
-prologue(struct asm_ *a)
+saves(struct asm_ *a)
 {
     b1(a, 0x55);                                /* push rbp */
     mov_rr(a, RBP, RSP);
@@ -2017,9 +2205,28 @@ prologue(struct asm_ *a)
     b1(a, 0x41); b1(a, 0x56);                   /* push r14 */
     b1(a, 0x41); b1(a, 0x57);                   /* push r15 */
     alu_ri(a, ALU_SUB, RSP, a->frame_bytes);
+}
+
+static void
+prologue(struct asm_ *a)
+{
+    saves(a);
     mov_rr(a, R14, RDI);
     mov_rr(a, R15, RSI);
     store(a, RBP, RESULT_SLOT, RDX);
+    /* Compiled code owns the frame's locals and stack from here, but for
+       the parameters it borrows, which the slots below stackpointer keep:
+       its loads of them come before anything that could change a slot. */
+    rex(a, 1, RAX, 0, R15);
+    b1(a, 0x8D);
+    modrm_mem(a, RAX, R15, offsetof(struct lu_frame, localsplus) + 8 * a->f->nborrowed);
+    store(a, R15, offsetof(struct lu_frame, stackpointer), RAX);
+    bind(a, a->entered);
+    store8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
+    rex(a, 1, RAX, 0, RBP);
+    b1(a, 0x8D);
+    modrm_mem(a, RAX, RBP, SPILL_BASE);
+    store(a, R15, offsetof(struct lu_frame, jit_spills), RAX);
 }
 
 static void
@@ -2036,6 +2243,199 @@ epilogue(struct asm_ *a)
     b1(a, 0x5B);
     b1(a, 0x5D);
     b1(a, 0xC3);
+}
+
+/* The direct entry (struct lu_jit_direct): RDI the thread, RSI the
+   function, RDX its arguments, RCX the result's word, R8 how many
+   arguments there are. It makes the checks
+   the interpreter makes at a call and at RESUME, pushes and binds the
+   frame as lu_frame_push and lu_jit_run would (free variables copied as
+   COPY_FREE_VARS copies them), and meets the other entry.
+   Its returns pop the frame (direct_return), marked by the low bit of the
+   result's word. */
+static void
+direct_entry(struct asm_ *a)
+{
+    struct lu_func *f = a->f;
+    PyCodeObject *code = f->code;
+    int words = code->co_framesize;
+    int decline = new_label(a);
+    saves(a);
+    mov_rr(a, R14, RDI);
+    mov_rr(a, RDI, R8);                         /* the arguments given */
+    alu_ri(a, ALU_OR, RCX, 1);
+    store(a, RBP, RESULT_SLOT, RCX);
+    load(a, RAX, R14, offsetof(struct lu_task, carrier));
+    cmp_rm(a, RSP, RAX, offsetof(struct lu_carrier, jit_stack_floor));
+    jcc(a, CC_B, decline);
+    /* No event pending, and the tools as the code was compiled under. */
+    load(a, RCX, RAX, offsetof(struct lu_carrier, poll));
+    mov_ri(a, R11, (int64_t)code->_co_instrumentation_version);
+    alu_rr(a, ALU_CMP, RCX, R11);
+    jcc(a, CC_NE, decline);
+    mov_ri(a, R11, (int64_t)(intptr_t)&code->_co_monitoring);
+    cmp_mi(a, 1, R11, 0, 0);
+    jcc(a, CC_NE, decline);
+    cmp_mi(a, 0, R14, offsetof(PyThreadState, tracing), 0);
+    jcc(a, CC_NE, decline);
+    load(a, R11, R14, offsetof(PyThreadState, interp));
+    cmp_mi(a, 1, R11, offsetof(struct _is, eval_frame), 0);
+    jcc(a, CC_NE, decline);
+    cmp_mi(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining), lu_frame_floor(code));
+    jcc(a, CC_LE, decline);
+    /* Missing arguments come from the defaults, past the borrowed ones:
+       R10 points 8 * argcount below the end of the defaults' items. */
+    int all = new_label(a);
+    cmp32_ri8(a, RDI, code->co_argcount);
+    jcc(a, CC_E, all);
+    cmp32_ri8(a, RDI, f->nborrowed);
+    jcc(a, CC_L, decline);
+    load(a, R9, RSI, offsetof(PyFunctionObject, func_defaults));
+    test_rr(a, R9, R9);
+    jcc(a, CC_E, decline);
+    load(a, R10, R9, offsetof(PyVarObject, ob_size));
+    rex(a, 1, R11, 0, R10);
+    b1(a, 0x8D);
+    modrm_mem(a, R11, R10, -code->co_argcount);     /* lea r11, [r10 - argcount]: the first defaulted index, negated */
+    alu_rr(a, ALU_ADD, R11, RDI);
+    jcc(a, CC_S, decline);                      /* fewer than argcount - ndefaults */
+    rex(a, 1, R10, R10, R9);
+    b1(a, 0x8D);
+    b1(a, 0x04 | ((R10 & 7) << 3));
+    b1(a, 0xC0 | ((R10 & 7) << 3) | (R9 & 7));  /* lea r10, [r9 + r10*8] */
+    bind(a, all);
+    load(a, R8, R14, offsetof(PyThreadState, datastack_top));
+    test_rr(a, R8, R8);
+    jcc(a, CC_E, decline);
+    load(a, R11, R14, offsetof(PyThreadState, datastack_limit));
+    alu_rr(a, ALU_SUB, R11, R8);
+    alu_ri(a, ALU_CMP, R11, 8 * words);
+    jcc(a, CC_B, decline);
+    /* The frame. */
+    rex(a, 1, R11, 0, R8);
+    b1(a, 0x8D);
+    modrm_mem(a, R11, R8, 8 * words);           /* lea r11, [r8+words] */
+    store(a, R14, offsetof(PyThreadState, datastack_top), R11);
+    rex(a, 0, 0, 0, R14);
+    b1(a, 0xFF);
+    modrm_mem(a, 1, R14, offsetof(PyThreadState, py_recursion_remaining));     /* dec dword */
+    mov_rr(a, R15, R8);
+    /* The frame, for the caller if it exits: a return overwrites it. */
+    load(a, RAX, RBP, RESULT_SLOT);
+    alu_ri(a, ALU_AND, RAX, -2);
+    store(a, RAX, 0, R15);
+    mov_ri(a, R11, (int64_t)(intptr_t)code);
+    store(a, R15, offsetof(struct lu_frame, code), R11);
+    incref(a, R11);
+    store(a, R15, offsetof(struct lu_frame, func), RSI);
+    incref(a, RSI);
+    load(a, R11, RSI, offsetof(PyFunctionObject, func_globals));
+    store(a, R15, offsetof(struct lu_frame, globals), R11);
+    load(a, R11, RSI, offsetof(PyFunctionObject, func_builtins));
+    store(a, R15, offsetof(struct lu_frame, builtins), R11);
+    store_mi(a, R15, offsetof(struct lu_frame, locals), 0);
+    store_mi(a, R15, offsetof(struct lu_frame, frame_obj), 0);
+    store_mi(a, R15, offsetof(struct lu_frame, jit_desc), 0);
+    load(a, R11, R14, offsetof(PyThreadState, current_frame));
+    store(a, R15, offsetof(struct lu_frame, previous), R11);
+    lu_codeunit *instr = lu_code_start(code) + f->entry_pc;
+    mov_ri(a, R11, (int64_t)(intptr_t)instr);
+    store(a, R15, offsetof(struct lu_frame, instr), R11);
+    mov_ri(a, R11, (int64_t)(intptr_t)(instr - 1 - lu_opcode_caches[RESUME]));
+    store(a, R15, offsetof(struct lu_frame, last), R11);
+    store8_mi(a, R15, offsetof(struct lu_frame, ret), LU_RETURN_PUSH);
+    /* The arguments: the ones the unit borrows (ssa_build.c) the caller
+       holds for the call, so the slots keep none of them (stackpointer at
+       localsplus). The parameters past the caller's R8 take the
+       function's defaults, which are never borrowed. */
+    int argc = code->co_argcount;
+    for (int i = 0; i < argc; i++) {
+        int given = new_label(a), next = new_label(a);
+        if (i >= f->nborrowed) {
+            cmp32_ri8(a, RDI, i);
+            jcc(a, CC_G, given);
+            load(a, R11, R10, offsetof(PyTupleObject, ob_item) + 8 * (i - argc));
+            jmp(a, next);
+        }
+        bind(a, given);
+        load(a, R11, RDX, 8 * i);
+        bind(a, next);
+        if (i >= f->nborrowed) {
+            incref(a, R11);
+        }
+        store(a, R15, offsetof(struct lu_frame, localsplus) + 8 * i, R11);
+    }
+    /* The other locals the unit reads at entry are unbound (a loop's
+       header at the call's entry reads them all). */
+    for (int v = 0; v < f->nins; v++) {
+        struct lu_ins *in = &f->ins[v];
+        int i = (int)in->imm;
+        if (in->op == OP_ENTRY_LOCAL && !(in->flags & INS_DEAD) && i >= code->co_argcount
+            && i < code->co_nlocalsplus - code->co_nfreevars) {
+            store_mi(a, R15, offsetof(struct lu_frame, localsplus) + 8 * i, 0);
+        }
+    }
+    rex(a, 1, R11, 0, R15);
+    b1(a, 0x8D);
+    modrm_mem(a, R11, R15, offsetof(struct lu_frame, localsplus));
+    store(a, R15, offsetof(struct lu_frame, stackpointer), R11);
+    if (code->co_nfreevars > 0) {
+        /* COPY_FREE_VARS, the prologue's only instruction. */
+        load(a, R11, RSI, offsetof(PyFunctionObject, func_closure));
+        for (int i = 0; i < code->co_nfreevars; i++) {
+            load(a, R9, R11, offsetof(PyTupleObject, ob_item) + 8 * i);
+            incref(a, R9);
+            store(a, R15, offsetof(struct lu_frame, localsplus) + 8 * (code->co_nlocalsplus - code->co_nfreevars + i),
+                  R9);
+        }
+    }
+    store(a, R14, offsetof(PyThreadState, current_frame), R15);
+    /* Entries, while the unit counts them (runtime/jit/jit.c). */
+    int counted = new_label(a);
+    mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->entries);
+    cmp_mi(a, 1, R11, 0, 1 << 16);
+    jcc(a, CC_AE, counted);
+    rex(a, 1, 0, 0, R11);
+    b1(a, 0xFF);
+    modrm_mem(a, 0, R11, 0);                    /* inc qword [r11] */
+    bind(a, counted);
+    unsigned long *stat = lu_jit_direct_count();
+    if (stat != NULL) {
+        mov_ri(a, R11, (int64_t)(intptr_t)stat);
+        b1(a, 0xF0);
+        rex(a, 1, 0, 0, R11);
+        b1(a, 0xFF);
+        modrm_mem(a, 0, R11, 0);                /* lock inc qword [r11] */
+    }
+    load(a, RAX, R14, offsetof(struct lu_task, carrier));
+    quiescent(a);
+    jmp(a, a->entered);
+    bind(a, decline);
+    mov_ri(a, RAX, 0);
+    jmp(a, a->epilogue);
+}
+
+/* A return into a direct caller: RCX the value, RAX its word (marked).
+   The frame goes as lu_frame_pop takes it (no frame object, no slots),
+   its function and code last, with the caller's frame current. */
+static void
+direct_return(struct asm_ *a)
+{
+    bind(a, a->direct_return);
+    alu_ri(a, ALU_AND, RAX, -2);
+    store(a, RAX, 0, RCX);
+    load(a, RBX, R15, offsetof(struct lu_frame, func));
+    load(a, R12, R15, offsetof(struct lu_frame, code));
+    load(a, RAX, R15, offsetof(struct lu_frame, previous));
+    store(a, R14, offsetof(PyThreadState, current_frame), RAX);
+    store(a, R14, offsetof(PyThreadState, datastack_top), R15);
+    rex(a, 0, 0, 0, R14);
+    b1(a, 0xFF);
+    modrm_mem(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));     /* inc dword */
+    decref(a, RBX, 0);
+    decref(a, R12, 0);
+    mov_ri(a, RAX, 1);                          /* LU_JIT_RETURN */
+    jmp(a, a->epilogue);
 }
 
 /* The exits: each pushes its index; the common path saves everything and
@@ -2086,6 +2486,8 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     a->f = f;
     a->unit = unit;
     a->epilogue = new_label(a);
+    a->entered = new_label(a);
+    a->direct_return = new_label(a);
     int maxargs = 0;
     for (int v = 0; v < f->nins; v++) {
         if (f->ins[v].op == OP_HELPER && f->ins[v].nargs > maxargs) {
@@ -2111,13 +2513,6 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
                 free(labels);
                 return -1;
             }
-        }
-        if (b == 0) {
-            /* Compiled code owns the entry stack's references now. */
-            rex(a, 1, RAX, 0, R15);
-            b1(a, 0x8D);
-            modrm_mem(a, RAX, R15, offsetof(struct lu_frame, localsplus) + 8 * f->code->co_nlocalsplus);
-            store(a, R15, offsetof(struct lu_frame, stackpointer), RAX);
         }
         lu_v last = bl->nins ? bl->ins[bl->nins - 1] : LU_NOV;
         struct lu_ins *term = last != LU_NOV ? &f->ins[last] : NULL;
@@ -2147,6 +2542,12 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     }
     free(labels);
     epilogue(a);
+    int direct = -1;
+    if (f->direct) {
+        direct_return(a);
+        direct = a->n;
+        direct_entry(a);
+    }
     exits(a);
     /* Labels. */
     for (int i = 0; i < a->npatches; i++) {
@@ -2180,6 +2581,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     unit->size = size;
     unit->code_bytes = (size_t)a->n;
     unit->fn = (int (*)(PyThreadState *, struct lu_frame *, PyObject **))mem;
+    unit->direct = direct >= 0 ? (char *)mem + direct : NULL;
     free(a->buf);
     free(a->labels);
     free(a->patches);

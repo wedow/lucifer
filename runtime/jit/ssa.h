@@ -89,7 +89,9 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(GUARD_BIT, REP_NONE, IF_GUARD)    /* a == imm */ \
     X(GUARD_NOT_NULL, REP_NONE, IF_GUARD)       /* a != NULL */ \
     X(GUARD_DEPTH, REP_NONE, IF_GUARD | IF_EFFECT)  /* the task's py_recursion_remaining >= imm (at entry) */ \
-    X(GUARD_FRAMES, REP_NONE, IF_GUARD | IF_EFFECT) /* a call left no inlined frame pushed (runtime/jit/deopt.c) */ \
+    X(GUARD_FRAMES, REP_NONE, IF_GUARD | IF_EFFECT) /* a call left no inlined frame pushed and the root     \
+                                                       compiled code's (runtime/jit/deopt.c); imm 1: and    \
+                                                       without a frame object */ \
     X(LOAD, REP_NONE, 0)                /* *(a + imm), rep set by the builder; a borrowed object; imm2 4: 32 bits */ \
     X(STORE, REP_NONE, IF_EFFECT)       /* *(a + imm) = b, raw */ \
     X(LIST_ITEM, REP_OBJ, IF_GUARD | IF_CALL)   /* a: an exact list (imm 1: tuple), b: i64 index; deopts out of range */ \
@@ -107,7 +109,6 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(GLOBAL_LOAD, REP_OBJ, IF_GUARD | IF_CALL) /* imm: the dict, imm2: keys version << 32 | entry */ \
     X(INCREF, REP_NONE, IF_EFFECT) \
     X(DECREF, REP_NONE, IF_EFFECT | IF_CALL) \
-    X(STORE_LOCAL, REP_NONE, IF_EFFECT | IF_CALL)       /* root slot imm takes a's reference */ \
     X(RITER_NEXT, REP_I64, 0)           /* a: an exact range_iterator; the next value, stepping it */ \
     X(RITER_DONE, REP_BIT, 0)           /* a: an exact range_iterator: exhausted */ \
     X(HELPER, REP_NONE, IF_EFFECT | IF_CALL)    /* imm: the helper, args; rep and flags from it */ \
@@ -203,6 +204,8 @@ struct lu_func {
     int norder;
     PyCodeObject *code;
     int entry_pc;
+    int direct;                 /* the call entry of a code compiled code may call directly */
+    int nborrowed;              /* leading parameters the root borrows (ssa_build.c) */
     int stress;                 /* deopt:N is on: guards count */
     PyObject **consts;          /* strong references the unit keeps */
     int nconsts, capconsts;

@@ -41,14 +41,6 @@ lu_jit_decref(PyObject *o)
     Py_XDECREF(o);
 }
 
-void
-lu_jit_store_local(struct lu_frame *f, intptr_t i, PyObject *v)
-{
-    PyObject *old = f->localsplus[i];
-    f->localsplus[i] = v;
-    Py_XDECREF(old);
-}
-
 int
 lu_jit_truth(PyObject *v)
 {
@@ -527,29 +519,11 @@ h_range_iter(int64_t start, int64_t stop, int64_t step)
 
 /* --- calls --- */
 
-/* How much C stack a call from compiled code leaves for the callee's
-   activation: below it the interpreter makes the call, without
-   recursing (DESIGN 5.2). */
-#define STACK_RESERVE (192 * 1024)
-
-static __thread char *stack_floor;
-
 static int
 stack_low(void)
 {
     char here;
-    if (stack_floor == NULL) {
-        pthread_attr_t attr;
-        void *addr;
-        size_t size;
-        if (pthread_getattr_np(pthread_self(), &attr) != 0) {
-            return 1;
-        }
-        pthread_attr_getstack(&attr, &addr, &size);
-        pthread_attr_destroy(&attr);
-        stack_floor = (char *)addr + STACK_RESERVE;
-    }
-    return &here < stack_floor;
+    return &here < lu_current_task()->carrier->jit_stack_floor;
 }
 
 /* A Python function's call, as CALL makes it: the frame is pushed and
@@ -603,6 +577,20 @@ polled(struct lu_task *t, PyObject *r)
         Py_CLEAR(r);
     }
     return r;
+}
+
+PyObject *
+lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r)
+{
+    struct lu_task *t = (struct lu_task *)ts;
+    /* The callee's frame returns into a C-entry marker, as under lu_eval. */
+    struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
+    entry.previous = callee->previous;
+    callee->previous = &entry;
+    t->pin++;
+    PyObject *v = lu_eval_continue(ts, r == LU_JIT_ERROR);
+    t->pin--;
+    return polled(t, v);
 }
 
 /* A call through lu_call, which C callers make. */
@@ -873,7 +861,6 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_box_int] = { (void *)lu_jit_box_int, "box_int", REP_OBJ, 0, 1 },
     [H_box_float] = { (void *)lu_jit_box_float, "box_float", REP_OBJ, 0, 1 },
     [H_decref] = { (void *)lu_jit_decref, "decref", REP_NONE, 0, 1 },
-    [H_store_local] = { (void *)lu_jit_store_local, "store_local", REP_NONE, 0, 3 },
     [H_truth] = { (void *)lu_jit_truth, "truth", REP_BIT, IF_RAISE | IF_PY, 1 },
     [H_list_item] = { (void *)lu_jit_list_item, "list_item", REP_OBJ, 0, 2 },
     [H_list_store] = { (void *)lu_jit_list_store, "list_store", REP_BIT, 0, 3 },

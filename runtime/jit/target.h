@@ -74,6 +74,7 @@ enum lu_exit_reason {
     EXIT_POLL,                  /* the poll word asked */
     EXIT_SIDE,                  /* an instruction the tier does not compile */
     EXIT_ERROR,                 /* an exception */
+    EXIT_FRAME,                 /* a walker wrote the frame's locals, or keeps its frame object */
     EXIT_REASONS
 };
 
@@ -89,11 +90,38 @@ struct lu_deopt {
     int call_pc;                /* lu_jit_frames_push: the innermost frame's instruction during the call */
 };
 
+/* A code object's entry for calls from compiled code, the first field of
+   its JIT state (co_executors, runtime/jit/jit.c). `entry` is the live
+   call-entry unit's direct entry, or NULL:
+     int entry(PyThreadState *ts, PyFunctionObject *func, PyObject **args, PyObject **result,
+               int given)
+   takes `given` positional arguments (borrowed; up to nargs, the rest
+   from the function's defaults), pushes and binds the frame
+   above the task's current one and runs it. 1: it returned *result and
+   was popped; 0: nothing was done (the interpreter's checks at a call
+   failed: a poll is pending, a tool or hook is on, no room); else the
+   enum lu_jit_result of an exit, with the frame, in *result, left to the
+   interpreter (lu_jit_call_finish). */
+struct lu_jit_direct {
+    void *entry;
+    int nargs;                  /* the positional parameters, or -1: never called directly */
+};
+
+/* The rest of a direct call whose callee left compiled code with `r`
+   (runtime/jit/helpers.c): the interpreter runs the callee's frame and
+   any above it, and its value or NULL with an exception comes back. */
+PyObject *lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r);
+
+/* -X lucifer_jit_stats' count of calls compiled code makes into compiled
+   code (direct entries), or NULL when the counts are off. */
+unsigned long *lu_jit_direct_count(void);
+
 /* A compiled entry into a code object at one bytecode boundary. */
 struct lu_unit {
     struct lu_unit *next;
     int entry_pc;
     int (*fn)(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
+    void *direct;               /* the call entry's direct entry (struct lu_jit_direct), or NULL */
     void *mem;
     size_t size;
     size_t code_bytes;
@@ -103,7 +131,7 @@ struct lu_unit {
     PyObject **consts;
     int nconsts;
     long *stress_counter;       /* -X lucifer_stress=deopt:N: guards fail when it reaches 0 */
-    unsigned long entries;
+    unsigned long entries;      /* up to a bound (jit.c) */
     unsigned long leaves;       /* exits no recompile can remove: side exits of the root frame, errors */
     int loops;                  /* the code has a back edge: an entry may do unbounded work */
     int dead;
@@ -138,7 +166,6 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(box_int) \
     X(box_float) \
     X(decref) \
-    X(store_local) \
     X(truth) \
     X(list_item) \
     X(list_store) \
@@ -200,6 +227,16 @@ enum lu_helper_id {
     H_COUNT
 };
 extern const struct lu_helper lu_helpers[H_COUNT];
+
+/* Whether the instruction calls C that may run Python, and so publishes
+   the root frame's state for walkers while it does (runtime/jit/deopt.c):
+   every root local that state names is in memory during the call. */
+static inline int
+lu_publishes(const struct lu_ins *in)
+{
+    return in->fs != NULL && !(in->flags & INS_VIRTUAL)
+        && ((in->op == OP_HELPER && (lu_helpers[in->imm].flags & IF_PY)) || (in->op == OP_TRUTH && in->imm != 1));
+}
 
 /* A helper's result that is not an answer: the call needs the interpreter
    (a C stack too deep to recurse on), so compiled code deopts. */

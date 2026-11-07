@@ -14,19 +14,23 @@ require that a count of the tier's does not grow with the iterations:
          same place stays in the interpreter instead of paying an entry and
          an exit each time.
   calls  tests/kernel/jit_calls.py, whose hot calls the tier can inline once
-         it has feedback: entries into compiled code and direct calls.
+         it has feedback: entries into compiled code, direct calls and
+         compiled calls.
          None of its functions may be disabled (recompiled until the tier
          gives up on it) or retired (an entry left to the interpreter).
   large  tests/kernel/jit_large_callees.py, whose hot call is of a function
          too large to inline whole but small along the path the program
-         runs: entries into compiled code and direct calls.
+         runs: entries into compiled code, direct and compiled calls.
   quiet  tests/kernel/jit_quiet_misses.py, whose hot lookups miss and whose
          hot generators end where CPython makes no exception: error exits.
   caught tests/kernel/jit_caught.py, whose hot code raises exceptions that
          handlers in the same compiled code take: error exits.
+  compiled  tests/kernel/jit_compiled_calls.py, whose hot calls are of
+         functions it cannot inline: direct calls (compiled code entered
+         from C). Compiled code makes them itself.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
-         the tier cannot inline: direct calls into compiled code, one per
+         the tier cannot inline: direct and compiled calls, one per
          iteration for that callee, none for the method, which inlines.
 The perf lane records Richards under -X perf with `perf record -g` and
 requires that at least 95% of the samples in compiled code (code perf finds
@@ -57,11 +61,12 @@ TIMING = re.compile(r'\d+us')
 # lane: (program, the counts in the -X lucifer_jit_stats report, summed, counts allowed per iteration)
 GROWTH = {
     'exits': ('jit_exits.py', r'jit: entries .* side (\d+)', 0),
-    'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
-    'large': ('jit_large_callees.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
+    'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
+    'large': ('jit_large_callees.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'quiet': ('jit_quiet_misses.py', r'jit: entries .* error (\d+)', 0),
     'caught': ('jit_caught.py', r'jit: entries .* error (\d+)', 0),
-    'inlined': ('jit_inlined_frames.py', r'direct calls (\d+)', 1),
+    'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
+    'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
 }
 GROWTH_N = 20000
 PERF_RESOLVED = 0.95

@@ -2,17 +2,27 @@
    are made real at their unexecuted boundary, and the interpreter runs on
    from there.
 
-   The root frame is the one compiled code ran in: each local whose slot
-   does not already hold its value gets it (the slot may hold an older
-   object while compiled code kept an int raw), and its stack gets every
-   entry. Each inlined call becomes a frame pushed above it, as the
-   interpreter would have pushed it at the call, and the innermost is the
-   task's current frame. References: an entry compiled code owns moves
+   The root frame is the one compiled code runs in. From the unit's entry
+   it is LU_FRAME_JIT: compiled code owns its locals and its stack, and
+   the slots hold nothing, but for the leading parameters it borrows that
+   the slots below stackpointer keep. An exit fills every other local and
+   every stack entry from its description and gives the frame back to the
+   interpreter. Each inlined call becomes a frame pushed above it, as
+   the interpreter would have pushed it at the call, and the innermost is
+   the task's current frame. References: an entry compiled code owns moves
    into the frame; any other entry takes a new reference.
+
+   While the root calls something that may run Python, it publishes the
+   description of that call's state and its spill words (jit_desc,
+   jit_spills), where the allocator keeps every local it names during the
+   call. A walker then reads its locals from there (lu_jit_slot), and a
+   write to them (f_locals, PEP 667) first gives the frame real slots
+   (lu_jit_sync); compiled code sees that when the call returns and leaves,
+   and the exit keeps the slots the walker wrote.
 
    A virtual box (an int or float compiled code never boxed) is built once
    per exit, so every slot that names the same value gets the same object.
-   Old slot values are released last: a finalizer then sees whole frames.
+   Released values go last: a finalizer then sees whole frames.
 
    A call from an inlined frame runs with the inlined frames pushed, lent
    their code, function and locals by compiled code (lu_jit_frames_push).
@@ -47,6 +57,9 @@ at(struct regs *r, int32_t loc)
 {
     if (LU_LOC_IS_SPILL(loc)) {
         return *(const uint64_t *)((const char *)r->spills - 8 * LU_LOC_SPILL_INDEX(loc));
+    }
+    if (r->gpr == NULL) {
+        Py_FatalError("lucifer jit: a published value in a register");
     }
     return loc >= LU_LOC_FPR ? r->fpr[loc - LU_LOC_FPR] : r->gpr[loc];
 }
@@ -106,18 +119,6 @@ take(struct regs *r, const struct lu_dv *dv)
     return Py_NewRef(o);
 }
 
-/* Whether the root slot already holds what dv names. */
-static int
-holds(struct regs *r, const struct lu_dv *dv, PyObject *cur)
-{
-    switch (dv->kind) {
-    case DV_NULL: return cur == NULL;
-    case DV_CONST: return cur == (PyObject *)(intptr_t)dv->imm;
-    case DV_OBJ: return cur == (PyObject *)(uintptr_t)raw(r, dv);
-    default: return 0;
-    }
-}
-
 /* An inlined frame, pushed above top at pc with its locals and an empty
    stack; the references compiled code owns move into it. */
 static struct lu_frame *
@@ -134,6 +135,55 @@ push_inlined(PyThreadState *ts, struct regs *r, struct lu_deopt_frame *fr, struc
     f->instr = f->last = lu_code_start(fr->code) + fr->pc;
     f->previous = top;
     return f;
+}
+
+/* Local i of a root frame compiled code runs, as a new reference: from
+   the state it published at its call, or NULL (unbound) when it is in no
+   such call (a finalizer run by a release in compiled code). */
+PyObject *
+lu_jit_slot(struct lu_frame *f, int i)
+{
+    struct lu_deopt *d = __atomic_load_n(&f->jit_desc, __ATOMIC_ACQUIRE);
+    if (d == NULL) {
+        return NULL;
+    }
+    struct regs r = { NULL, NULL, f->jit_spills, NULL, 0, 0 };
+    struct lu_dv dv = d->frames[0].vals[i];
+    dv.owned = 0;
+    PyObject *v = take(&r, &dv);
+    for (int k = 0; k < r.nbuilt; k++) {
+        Py_DECREF(r.built[k].obj);
+    }
+    free(r.built);
+    return v;
+}
+
+/* The frame gets real slots, each with a reference of its own, and the
+   interpreter's owner: compiled code leaves it when its call returns. */
+int
+lu_jit_sync(struct lu_frame *f)
+{
+    struct lu_deopt *d = __atomic_load_n(&f->jit_desc, __ATOMIC_ACQUIRE);
+    if (d == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "cannot write the locals of a frame compiled code is running");
+        return -1;
+    }
+    struct regs r = { NULL, NULL, f->jit_spills, NULL, 0, 0 };
+    struct lu_deopt_frame *fr = &d->frames[0];
+    for (int i = 0; i < fr->nlocals; i++) {
+        struct lu_dv dv = fr->vals[i];
+        dv.owned = 0;
+        if (f->localsplus + i >= f->stackpointer) {
+            f->localsplus[i] = take(&r, &dv);
+        }
+    }
+    for (int k = 0; k < r.nbuilt; k++) {
+        Py_DECREF(r.built[k].obj);
+    }
+    free(r.built);
+    f->stackpointer = f->localsplus + fr->nlocals;
+    __atomic_store_n(&f->owner, lu_frame_owner_for(f->code), __ATOMIC_RELEASE);
+    return 0;
 }
 
 void
@@ -236,15 +286,17 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     }
     PyObject **old = malloc(sizeof(PyObject *) * (size_t)nvals);
     int nold = 0;
+    /* A walker that wrote the locals (lu_jit_sync) made the slots the
+       frame's: compiled code's own references go. */
+    int synced = root->owner != LU_FRAME_JIT;
     for (int i = 0; i < fr->nlocals; i++) {
-        PyObject *cur = root->localsplus[i];
-        if (holds(&r, &fr->vals[i], cur)) {
-            continue;
+        const struct lu_dv *dv = &fr->vals[i];
+        if (!synced && root->localsplus + i >= root->stackpointer) {
+            root->localsplus[i] = take(&r, dv);
         }
-        struct lu_dv dv = fr->vals[i];
-        dv.owned = 0;           /* the slot takes its own reference */
-        root->localsplus[i] = take(&r, &dv);
-        old[nold++] = cur;
+        else if (dv->kind == DV_OBJ && dv->owned) {
+            old[nold++] = (PyObject *)(uintptr_t)raw(&r, dv);
+        }
     }
     PyObject **sp = root->localsplus + fr->nlocals;
     for (int j = 0; j < fr->nstack; j++) {
@@ -252,6 +304,8 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     }
     root->stackpointer = sp;
     root->instr = root->last = lu_code_start(fr->code) + fr->pc;
+    root->jit_desc = NULL;
+    root->owner = lu_frame_owner_for(root->code);
     struct lu_frame *top = root;
     /* An exception the inlined frames would pass on unseen is the root's
        at its call: they are not made, and what they held is released. */

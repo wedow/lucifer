@@ -102,6 +102,17 @@ lu_carrier_bind(void)
     lu_carrier = c;
     c->native_id = (unsigned long)gettid();
     c->thread = pthread_self();
+    pthread_attr_t attr;
+    void *addr;
+    size_t size;
+    if (pthread_getattr_np(c->thread, &attr) == 0) {
+        pthread_attr_getstack(&attr, &addr, &size);
+        pthread_attr_destroy(&attr);
+        c->jit_stack_floor = (char *)addr + LU_JIT_STACK_RESERVE;
+    }
+    else {
+        c->jit_stack_floor = (char *)UINTPTR_MAX;       /* compiled code makes no calls */
+    }
     c->current = entry_new(c, &_PyRuntime.main_interp);
     lu_qsbr_register(c);
     pthread_setspecific(_PyRuntime.carrier_key, c);

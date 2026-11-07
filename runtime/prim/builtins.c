@@ -49,11 +49,16 @@ prim_caller_locals(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *d = PyDict_New();
     for (int i = 0; d != NULL && i < co->co_nlocalsplus; i++) {
         unsigned char kind = (unsigned char)PyBytes_AS_STRING(co->co_localspluskinds)[i];
-        PyObject *v = f->localsplus[i];
-        if ((kind & CO_FAST_HIDDEN) || v == NULL) {
+        if (kind & CO_FAST_HIDDEN) {
             continue;
         }
-        v = (kind & (CO_FAST_CELL | CO_FAST_FREE)) && PyCell_Check(v) ? lu_cell_get(v) : Py_NewRef(v);
+        PyObject *v = lu_frame_slot(f, i);
+        if (v == NULL) {
+            continue;
+        }
+        if ((kind & (CO_FAST_CELL | CO_FAST_FREE)) && PyCell_Check(v)) {
+            Py_SETREF(v, lu_cell_get(v));
+        }
         if (v != NULL && lu_ns_insert(d, PyTuple_GET_ITEM(co->co_localsplusnames, i), v) < 0) {
             Py_CLEAR(d);
         }
