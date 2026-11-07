@@ -34,3 +34,9 @@ Left: DeltaBlue's residual (instructions -0.9%, time +2-4%); liveness checks aft
 The guard removal brought check-jit's deopt lane to a latent exit bug (luc-8h3o, reproduced on master at deopt:11 and :21): folded float arithmetic of an operator's method resumed after the operator with its operands on the stack. Fixed on the branch, with tests/kernel/jit_float_island.py.
 
 Gates on 5248d7a (master 4528888 merged, nothing newer): make check 0 (593/593 in plain, jit and jit-deopt), abi-audit 0, check-jit 0, check-harness 0, check-compiler 0.
+
+**2026-11-07, after merging item 1 (master 730d384)**
+
+Item 1 removed STORE_LOCAL, so the hot loop of tests/kernel/jit_guards.py runs no liveness checks at all now. A writer's kill clears the code's direct entry (master's own kill does; the entry's dead-unit refusal still covers a caller that read the entry first). Dict facts are watched and read inside the dict's critical section, which closes the compile race under the C11 model (argument in deps.c). The writers' global mutex is luc-fwnf.
+
+AWFY best of 3, branch / master: geomean 0.973 (master 0.816 of CPython, branch 0.794). CD 0.907, Bounce 0.918, NBody 0.926, Richards 0.938, Havlak 0.965; DeltaBlue 1.038 (1.071 over six alternating rounds), Mandelbrot 1.036 (1.058), Storage 1.024 (0.990). Mandelbrot runs the same instructions as master (4,587.5M vs 4,587.9M per iteration) with 19% more cycles: its hot unit's IR is master's but for the DIV_F exit state, so it is code placement. DeltaBlue runs 0.4% more instructions than master, and 1.8% more than the branch with the facts pass off (14,894.8M vs 14,625.8M): with item 1 the pass now costs DeltaBlue instructions (hoisting 0.4%, repeat removal 0.8%, block loads 0.7%), likely from guards hoisted into short loops' preheaders and longer live ranges. Left for a follow-up.
