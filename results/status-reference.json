@@ -69,5 +69,934 @@
     "errors": 0
    }
   }
+ },
+ "corpus": {
+  "pyperformance.2to3": {
+   "status": "ok",
+   "seconds": 0.3186602797359228,
+   "loops": 1,
+   "check": [
+    "2to3",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.argparse": {
+   "status": "ok",
+   "seconds": 0.0012127703055739402,
+   "loops": 65,
+   "check": [
+    "many_optionals",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.argparse_subparsers": {
+   "status": "ok",
+   "seconds": 0.012269933358766139,
+   "loops": 8,
+   "check": [
+    "subparsers",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_generators": {
+   "status": "ok",
+   "seconds": 0.3815674101933837,
+   "loops": 1,
+   "check": [
+    "async_generators",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree": {
+   "status": "ok",
+   "seconds": 0.27532451692968607,
+   "loops": 1,
+   "check": [
+    "async_tree_none",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_cpu_io_mixed": {
+   "status": "ok",
+   "seconds": 0.5463972128927708,
+   "loops": 1,
+   "check": [
+    "async_tree_cpu_io_mixed",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_io": {
+   "status": "ok",
+   "seconds": 0.6277139121666551,
+   "loops": 1,
+   "check": [
+    "async_tree_io",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_memoization": {
+   "status": "ok",
+   "seconds": 0.32723989011719823,
+   "loops": 1,
+   "check": [
+    "async_tree_memoization",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_eager": {
+   "status": "ok",
+   "seconds": 0.1311122397892177,
+   "loops": 1,
+   "check": [
+    "async_tree_eager",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_eager_cpu_io_mixed": {
+   "status": "ok",
+   "seconds": 0.4779194490984082,
+   "loops": 1,
+   "check": [
+    "async_tree_eager_cpu_io_mixed",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_eager_io": {
+   "status": "ok",
+   "seconds": 0.6016610539518297,
+   "loops": 1,
+   "check": [
+    "async_tree_eager_io",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_eager_memoization": {
+   "status": "ok",
+   "seconds": 0.2402984513901174,
+   "loops": 1,
+   "check": [
+    "async_tree_eager_memoization",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_tg": {
+   "status": "ok",
+   "seconds": 0.2589430012740195,
+   "loops": 1,
+   "check": [
+    "async_tree_none_tg",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_cpu_io_mixed_tg": {
+   "status": "ok",
+   "seconds": 0.5541893127374351,
+   "loops": 1,
+   "check": [
+    "async_tree_cpu_io_mixed_tg",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_io_tg": {
+   "status": "ok",
+   "seconds": 0.6014384441077709,
+   "loops": 1,
+   "check": [
+    "async_tree_io_tg",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_memoization_tg": {
+   "status": "ok",
+   "seconds": 0.3143911021761596,
+   "loops": 1,
+   "check": [
+    "async_tree_memoization_tg",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_eager_tg": {
+   "status": "ok",
+   "seconds": 0.21371827740222216,
+   "loops": 1,
+   "check": [
+    "async_tree_eager_tg",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_eager_cpu_io_mixed_tg": {
+   "status": "ok",
+   "seconds": 0.516171338967979,
+   "loops": 1,
+   "check": [
+    "async_tree_eager_cpu_io_mixed_tg",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_eager_io_tg": {
+   "status": "ok",
+   "seconds": 0.5747322994284332,
+   "loops": 1,
+   "check": [
+    "async_tree_eager_io_tg",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.async_tree_eager_memoization_tg": {
+   "status": "ok",
+   "seconds": 0.3042874098755419,
+   "loops": 1,
+   "check": [
+    "async_tree_eager_memoization_tg",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.asyncio_tcp": {
+   "status": "ok",
+   "seconds": 0.40264747478067875,
+   "loops": 1,
+   "check": [
+    "asyncio_tcp",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.asyncio_tcp_ssl": {
+   "status": "ok",
+   "seconds": 1.616398229263723,
+   "loops": 1,
+   "check": [
+    "asyncio_tcp_ssl",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.asyncio_websockets": {
+   "status": "ok",
+   "seconds": 0.48892686795443296,
+   "loops": 1,
+   "check": [
+    "asyncio_websockets",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.base64": {
+   "status": "ok",
+   "seconds": 2.2908531427383423,
+   "loops": 1,
+   "check": [
+    "ascii85_large",
+    "ascii85_small",
+    "base16_large",
+    "base16_small",
+    "base32_large",
+    "base32_small",
+    "base64_large",
+    "base64_small",
+    "base85_large",
+    "base85_small",
+    "urlsafe_base64_small",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.bpe_tokeniser": {
+   "status": "ok",
+   "seconds": 4.9341131378896534,
+   "loops": 1,
+   "check": [
+    "bpe_tokeniser",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.concurrent_imap": {
+   "status": "ok",
+   "seconds": 0.008430024143308401,
+   "loops": 1,
+   "check": [
+    "bench_mp_pool",
+    "bench_thread_pool",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.coroutines": {
+   "status": "ok",
+   "seconds": 0.026194676524028182,
+   "loops": 4,
+   "check": [
+    "coroutines",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.coverage": {
+   "status": "ok",
+   "seconds": 0.7130937897600234,
+   "loops": 1,
+   "check": [
+    "coverage",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.gc_traversal": {
+   "status": "ok",
+   "seconds": 0.0020505414106585878,
+   "loops": 47,
+   "check": [
+    "gc_traversal",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.gc_collect": {
+   "status": "ok",
+   "seconds": 0.0013361654605772069,
+   "loops": 67,
+   "check": [
+    "create_gc_cycles",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.generators": {
+   "status": "ok",
+   "seconds": 0.03009352196628849,
+   "loops": 3,
+   "check": [
+    "generators",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.chameleon": {
+   "status": "ok",
+   "seconds": 0.01869211345911026,
+   "loops": 5,
+   "check": [
+    "chameleon",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.chaos": {
+   "status": "ok",
+   "seconds": 0.07119196513667703,
+   "loops": 1,
+   "check": [
+    "chaos",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.comprehensions": {
+   "status": "ok",
+   "seconds": 2.156798290761639e-05,
+   "loops": 1481,
+   "check": [
+    "comprehensions",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.crypto_pyaes": {
+   "status": "ok",
+   "seconds": 0.0996064618229866,
+   "loops": 1,
+   "check": [
+    "crypto_pyaes",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.deepcopy": {
+   "status": "ok",
+   "seconds": 0.00038638137522395015,
+   "loops": 216,
+   "check": [
+    "deepcopy",
+    "deepcopy_memo",
+    "deepcopy_reduce",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.deltablue": {
+   "status": "ok",
+   "seconds": 0.003740346524864435,
+   "loops": 26,
+   "check": [
+    "deltablue",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.django_template": {
+   "status": "ok",
+   "seconds": 0.04693573550321162,
+   "loops": 2,
+   "check": [
+    "django_template",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.dulwich_log": {
+   "status": "ok",
+   "seconds": 0.07937896065413952,
+   "loops": 1,
+   "check": [
+    "dulwich_log",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.docutils": {
+   "status": "ok",
+   "seconds": 2.844013463240117,
+   "loops": 1,
+   "check": [
+    "docutils",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.fannkuch": {
+   "status": "ok",
+   "seconds": 0.4979365961626172,
+   "loops": 1,
+   "check": [
+    "fannkuch",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.fastapi": {
+   "status": "ok",
+   "seconds": 0.2372905188240111,
+   "loops": 1,
+   "check": [
+    "fastapi_http",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.float": {
+   "status": "ok",
+   "seconds": 0.07696646498516202,
+   "loops": 1,
+   "check": [
+    "float",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.genshi": {
+   "status": "ok",
+   "seconds": 0.09399686194956303,
+   "loops": 1,
+   "check": [
+    "genshi_text",
+    "genshi_xml",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.go": {
+   "status": "ok",
+   "seconds": 0.12549440190196037,
+   "loops": 1,
+   "check": [
+    "go",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.hexiom": {
+   "status": "ok",
+   "seconds": 0.00725400065337973,
+   "loops": 14,
+   "check": [
+    "hexiom",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.html5lib": {
+   "status": "ok",
+   "seconds": 0.07015432836487889,
+   "loops": 1,
+   "check": [
+    "html5lib",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.json_dumps": {
+   "status": "ok",
+   "seconds": 0.013944122142025403,
+   "loops": 7,
+   "check": [
+    "json_dumps",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.json_loads": {
+   "status": "ok",
+   "seconds": 3.626833837479353e-05,
+   "loops": 125,
+   "check": [
+    "json_loads",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.logging": {
+   "status": "ok",
+   "seconds": 1.7720299153141278e-05,
+   "loops": 281,
+   "check": [
+    "logging_format",
+    "logging_silent",
+    "logging_simple",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.mako": {
+   "status": "ok",
+   "seconds": 0.01626622979529202,
+   "loops": 6,
+   "check": [
+    "mako",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.mdp": {
+   "status": "ok",
+   "seconds": 1.53147626016289,
+   "loops": 1,
+   "check": [
+    "mdp",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.meteor_contest": {
+   "status": "ok",
+   "seconds": 0.11799859581515193,
+   "loops": 1,
+   "check": [
+    "meteor_contest",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.networkx": {
+   "status": "ok",
+   "seconds": 0.5034487759694457,
+   "loops": 1,
+   "check": [
+    "shortest_path",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.networkx_connected_components": {
+   "status": "ok",
+   "seconds": 0.45492625515908003,
+   "loops": 1,
+   "check": [
+    "connected_components",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.networkx_k_core": {
+   "status": "ok",
+   "seconds": 2.2618912998586893,
+   "loops": 1,
+   "check": [
+    "k_core",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.nbody": {
+   "status": "ok",
+   "seconds": 0.15042939875274897,
+   "loops": 1,
+   "check": [
+    "nbody",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.nqueens": {
+   "status": "ok",
+   "seconds": 0.1019431077875197,
+   "loops": 1,
+   "check": [
+    "nqueens",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.pathlib": {
+   "status": "ok",
+   "seconds": 0.019199752993881703,
+   "loops": 5,
+   "check": [
+    "pathlib",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.pickle": {
+   "status": "ok",
+   "seconds": 1.2958576974869778e-05,
+   "loops": 297,
+   "check": [
+    "pickle",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.pickle_dict": {
+   "status": "ok",
+   "seconds": 3.2489867864799665e-05,
+   "loops": 577,
+   "check": [
+    "pickle_dict",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.pickle_list": {
+   "status": "ok",
+   "seconds": 5.482922752316181e-06,
+   "loops": 1625,
+   "check": [
+    "pickle_list",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.pickle_pure_python": {
+   "status": "ok",
+   "seconds": 0.00037607343759960856,
+   "loops": 13,
+   "check": [
+    "pickle_pure_python",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.pidigits": {
+   "status": "ok",
+   "seconds": 0.17580080684274435,
+   "loops": 1,
+   "check": [
+    "pidigits",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.pprint": {
+   "status": "ok",
+   "seconds": 2.886704323813319,
+   "loops": 1,
+   "check": [
+    "pprint_pformat",
+    "pprint_safe_repr",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.pyflate": {
+   "status": "ok",
+   "seconds": 0.48505661729723215,
+   "loops": 1,
+   "check": [
+    "pyflate",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.python_startup": {
+   "status": "ok",
+   "seconds": 0.013144749416304486,
+   "loops": 7,
+   "check": [
+    "python_startup",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.python_startup_no_site": {
+   "status": "ok",
+   "seconds": 0.009465396869927645,
+   "loops": 10,
+   "check": [
+    "python_startup_no_site",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.raytrace": {
+   "status": "ok",
+   "seconds": 0.3417542870156467,
+   "loops": 1,
+   "check": [
+    "raytrace",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.regex_compile": {
+   "status": "ok",
+   "seconds": 0.15676528541371226,
+   "loops": 1,
+   "check": [
+    "regex_compile",
+    "c64f9ca8f52ce7bdd14a568c000b88c5aef2eea34467357aea31d7b7dc68f3eb"
+   ]
+  },
+  "pyperformance.regex_dna": {
+   "status": "ok",
+   "seconds": 0.16603296203538775,
+   "loops": 1,
+   "check": [
+    "regex_dna",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.regex_effbot": {
+   "status": "ok",
+   "seconds": 0.0025395257747732104,
+   "loops": 4,
+   "check": [
+    "regex_effbot",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.regex_v8": {
+   "status": "ok",
+   "seconds": 0.019489040016196668,
+   "loops": 4,
+   "check": [
+    "regex_v8",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.richards": {
+   "status": "ok",
+   "seconds": 0.05631968914531171,
+   "loops": 2,
+   "check": [
+    "richards",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.richards_super": {
+   "status": "ok",
+   "seconds": 0.06452931184321642,
+   "loops": 1,
+   "check": [
+    "richards_super",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.scimark": {
+   "status": "ok",
+   "seconds": 0.7891131713986397,
+   "loops": 1,
+   "check": [
+    "scimark_fft",
+    "scimark_lu",
+    "scimark_monte_carlo",
+    "scimark_sor",
+    "scimark_sparse_mat_mult",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.spectral_norm": {
+   "status": "ok",
+   "seconds": 0.12497004633769393,
+   "loops": 1,
+   "check": [
+    "spectral_norm",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.sphinx": {
+   "status": "ok",
+   "seconds": 1.1345751397311687,
+   "loops": 1,
+   "check": [
+    "sphinx",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.sqlalchemy_declarative": {
+   "status": "ok",
+   "seconds": 0.15166360698640347,
+   "loops": 1,
+   "check": [
+    "sqlalchemy_declarative",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.sqlalchemy_imperative": {
+   "status": "ok",
+   "seconds": 0.02560357019926111,
+   "loops": 3,
+   "check": [
+    "sqlalchemy_imperative",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.sqlglot_v2": {
+   "status": "ok",
+   "seconds": 0.1344061391428113,
+   "loops": 1,
+   "check": [
+    "sqlglot_v2_normalize",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.sqlglot_v2_parse": {
+   "status": "ok",
+   "seconds": 0.0015301597063782915,
+   "loops": 58,
+   "check": [
+    "sqlglot_v2_parse",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.sqlglot_v2_transpile": {
+   "status": "ok",
+   "seconds": 0.0018618757319119241,
+   "loops": 45,
+   "check": [
+    "sqlglot_v2_transpile",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.sqlglot_v2_optimize": {
+   "status": "ok",
+   "seconds": 0.06463848520070314,
+   "loops": 1,
+   "check": [
+    "sqlglot_v2_optimize",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.sqlite_synth": {
+   "status": "ok",
+   "seconds": 2.4743013106930403e-06,
+   "loops": 324,
+   "check": [
+    "sqlite_synth",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.sympy": {
+   "status": "ok",
+   "seconds": 0.9207944609224796,
+   "loops": 1,
+   "check": [
+    "sympy_expand",
+    "sympy_integrate",
+    "sympy_str",
+    "sympy_sum",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.telco": {
+   "status": "ok",
+   "seconds": 0.010569713233659664,
+   "loops": 9,
+   "check": [
+    "telco",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.tomli_loads": {
+   "status": "ok",
+   "seconds": 2.208292722236365,
+   "loops": 1,
+   "check": [
+    "tomli_loads",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.tornado_http": {
+   "status": "ok",
+   "seconds": 0.1406057639978826,
+   "loops": 1,
+   "check": [
+    "tornado_http",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.typing_runtime_protocols": {
+   "status": "ok",
+   "seconds": 0.0002193843578458379,
+   "loops": 218,
+   "check": [
+    "typing_runtime_protocols",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.unpack_sequence": {
+   "status": "ok",
+   "seconds": 5.4488883566102914e-08,
+   "loops": 2215,
+   "check": [
+    "unpack_sequence",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.unpickle": {
+   "status": "ok",
+   "seconds": 1.9916245246236503e-05,
+   "loops": 241,
+   "check": [
+    "unpickle",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.unpickle_list": {
+   "status": "ok",
+   "seconds": 5.164460012578424e-06,
+   "loops": 1765,
+   "check": [
+    "unpickle_list",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.unpickle_pure_python": {
+   "status": "ok",
+   "seconds": 0.0002681868150830269,
+   "loops": 17,
+   "check": [
+    "unpickle_pure_python",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.xdsl": {
+   "status": "ok",
+   "seconds": 0.05568522238172591,
+   "loops": 2,
+   "check": [
+    "xdsl_constant_fold",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "pyperformance.xml_etree": {
+   "status": "ok",
+   "seconds": 0.4250900140032172,
+   "loops": 1,
+   "check": [
+    "xml_etree_generate",
+    "xml_etree_iterparse",
+    "xml_etree_parse",
+    "xml_etree_process",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "cli.black": {
+   "status": "ok",
+   "seconds": 0.3861055891029537,
+   "loops": null,
+   "check": "33cec38ba78ee25f0208eb4ae6deac2cdb96ebfb2656bee0f0b53af86f9e0a5f"
+  },
+  "cli.isort": {
+   "status": "ok",
+   "seconds": 0.10587051790207624,
+   "loops": null,
+   "check": "c06198941fc8912f99937a2c3f3ef9a2e086bbf9bbcb1ef634ca351e8fd4b432"
+  },
+  "cli.pyflakes": {
+   "status": "ok",
+   "seconds": 0.5977331292815506,
+   "loops": null,
+   "check": "62704a520611b5645c959dfabe6dff0cd75866d4ccc7ca6bc883561e8d79d302"
+  },
+  "cli.pycodestyle": {
+   "status": "ok",
+   "seconds": 0.7280368441715837,
+   "loops": null,
+   "check": "6e9913f73a026051f37d1e11e14b29ad35cf61b11d94eb50260711b4a4509cdd"
+  },
+  "cli.pygments": {
+   "status": "ok",
+   "seconds": 0.23367958795279264,
+   "loops": null,
+   "check": "90b41c122e5961ddc9ef516fc055a875abad5508bccaed23ac8c085c34dbc0f9"
+  },
+  "cli.markdown": {
+   "status": "ok",
+   "seconds": 0.18194918567314744,
+   "loops": null,
+   "check": "792ab609aa72d95d411b39f71cd93080062c59506e8bb476db461bf63181d7bc"
+  }
  }
 }

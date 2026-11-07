@@ -2,6 +2,7 @@
 """Binary-level regression checks for benchmark drivers, using no real timings."""
 import csv
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -132,6 +133,92 @@ class BenchCheck(unittest.TestCase):
             self.assertEqual(summary['bad']['measured'], '0')
             self.assertEqual(summary['bad']['runtime_over_cpython'], '')
             self.assertEqual({r['status'] for r in self.manifest(root, 'bad')}, {'ERROR'})
+
+
+FAKE = r"""import json, os, sys
+args, mode = sys.argv[1:], os.environ.get('FAKE_MODE', '')
+if args[0] == '-m':
+    print('report of', args[1], open('/proc/self/stat').read().split()[0] if mode == 'unstable' else '')
+    sys.exit(1)
+if mode == 'crash':
+    os.kill(os.getpid(), 9)
+if mode == 'fail':
+    sys.exit(2)
+loops = int(args[args.index('-l') + 1])
+names = ['alpha'] + (['alpha_b', 'alpha_c'] if 'two' in args else [])
+if mode == 'renamed':
+    names[0] = 'beta'
+if mode == 'noisy':
+    print('Extension error: No module named _csv', file=sys.stderr)
+print('Warning in', os.environ['PYTHONPATH'], os.getcwd(), file=sys.stderr)  # paths vary by checkout
+values = [0.001 * loops, 0.003 * loops, 0.002 * loops][:int(args[args.index('-n') + 1])]
+benchmarks = [dict(metadata=dict(name=n), runs=[dict(values=values)]) for n in names]
+metadata = dict(inner_loops=10) if 'inner' in args else {}
+open(args[args.index('-o') + 1], 'w').write(json.dumps(dict(version='1.0', benchmarks=benchmarks, metadata=metadata)))
+"""
+
+
+class CorpusCheck(unittest.TestCase):
+    """tools/bench/corpus on a fake pyperformance tree and a fake interpreter: no real timings."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.site = self.root / 'site'
+        bench = self.site / 'pyperformance/data-files/benchmarks'
+        (bench / 'bm_alpha').mkdir(parents=True)
+        (bench / 'MANIFEST').write_text('[benchmarks]\n\nname\tmetafile\nalpha\t<local>\nalpha_two\t<local:alpha>\nalpha_inner\t<local:alpha>\n'
+                                        '#gone\t<local>\ndask\t<local>\n\n[group default]\n')
+        (bench / 'bm_alpha/pyproject.toml').write_text('[project]\nname = "alpha"\n')
+        (bench / 'bm_alpha/bm_alpha_two.toml').write_text('[tool.pyperformance]\nextra_opts = ["two"]\n')
+        (bench / 'bm_alpha/bm_alpha_inner.toml').write_text('[tool.pyperformance]\nextra_opts = ["inner"]\n')
+        self.python = self.root / 'python'
+        self.python.write_text('#!' + sys.executable + '\n' + FAKE)
+        self.python.chmod(0o755)
+
+    def time(self, programs, reference=None, mode=''):
+        args = [sys.executable, ROOT / 'tools/bench/corpus', 'time', self.site, '--run', self.python,
+                '--programs', ','.join(programs)]
+        if reference is not None:
+            (self.root / 'reference.json').write_text(json.dumps(reference))
+            args += ['--reference', self.root / 'reference.json']
+        done = subprocess.run(args, capture_output=True, text=True, timeout=60, env={**os.environ, 'FAKE_MODE': mode})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout.splitlines()[-1])
+
+    def test_calibrates_loops_and_sums_each_benchmarks_best(self):
+        found = self.time(['pyperformance.alpha', 'pyperformance.alpha_two', 'pyperformance.gone', 'pyperformance.dask'])
+        self.assertEqual(sorted(found), ['pyperformance.alpha', 'pyperformance.alpha_two'])
+        # One loop takes 0.001 s per benchmark, so 0.1 s per value needs 100 loops (33 for three benchmarks).
+        alpha = found['pyperformance.alpha']
+        self.assertEqual((alpha['status'], alpha['seconds'], alpha['loops'], alpha['check'][0]), ('ok', 0.1, 100, 'alpha'))
+        two = found['pyperformance.alpha_two']
+        self.assertEqual((two['loops'], two['check'][:3]), (33, ['alpha', 'alpha_b', 'alpha_c']))
+        self.assertAlmostEqual(two['seconds'], 3 * 0.033)
+        # pyperf values are per inner loop: ten inner loops of 0.001 s make a 0.01 s loop.
+        self.assertEqual(self.time(['pyperformance.alpha_inner'])['pyperformance.alpha_inner']['loops'], 10)
+
+    def test_reference_fixes_loops_and_checks_output(self):
+        reference = self.time(['pyperformance.alpha', 'cli.black'])
+        reference['pyperformance.alpha']['loops'] = 7
+        moved = self.root / 'elsewhere'
+        self.site.rename(moved)
+        self.site = moved
+        again = self.time(['pyperformance.alpha', 'cli.black'], reference)
+        self.assertAlmostEqual(again['pyperformance.alpha']['seconds'], 0.007)
+        self.assertEqual(again['cli.black']['status'], 'ok')  # exit 1 with the reference's output
+        # A benchmark that swallows an error still says so on stderr.
+        for mode, status in [('renamed', 'wrong'), ('noisy', 'wrong'), ('crash', 'crash'), ('fail', 'fail')]:
+            result = self.time(['pyperformance.alpha'], reference, mode)['pyperformance.alpha']
+            self.assertEqual((result['status'], result['seconds']), (status, None))
+        reference['cli.black']['check'] = 'other'
+        self.assertEqual(self.time(['cli.black'], reference)['cli.black']['status'], 'wrong')
+        self.assertEqual(self.time(['cli.isort'], reference)['cli.isort']['status'], 'noreference')
+
+    def test_output_that_changes_between_runs_is_wrong(self):
+        self.assertEqual(self.time(['cli.black'], mode='unstable')['cli.black'],
+                         dict(status='wrong', seconds=None, loops=None, check=None))
 
 
 if __name__ == '__main__':
