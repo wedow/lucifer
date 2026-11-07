@@ -28,3 +28,7 @@ Census, non-inlined calls per AWFY iteration (inner: DeltaBlue 1000, Havlak 150,
 AWFY time best of 3, branch/master: geomean 0.994 (CPython ratio 0.623 -> 0.620); DeltaBlue 0.900, Towers 0.974, Permute 0.982, Json 0.988; CD 1.081 (luc-8fns). luc-sl4y fixed (0.07 s both orders). Flask in process: 1-2% faster per route.
 
 Tried and reverted: generic attribute loads/stores in inlined frames with frames pushed (Richards +30% instructions); feedback-made JIT state skipping warm-up (fixed: the state keeps the counts as waits).
+
+**2026-11-07T23:45:11Z**
+
+After luc-8fns's fix (a3ab2b7) and merging master 936c76f: gates 0/0/0/0/0; AWFY best of 3, branch/master geomean 0.833 (CPython ratio 0.623 -> 0.519): CD 0.316, Havlak 0.653, Json 0.740, DeltaBlue 0.742, Bounce 0.798, others 0.94-1.006. Flask in process: show/new/api/toggle 1-2% faster, index 6% slower in this run (one best-of-5 sample, not yet attributed).
