@@ -790,22 +790,6 @@ hoist_copy(struct lu_func *f, lu_v g, int p, struct lu_fs *fs)
     return c;
 }
 
-static void
-note_dep(struct lu_func *f, struct lu_fdep *dep)
-{
-    for (int i = 0; i < f->ndeps; i++) {
-        struct lu_fdep *d = &f->deps[i];
-        if (d->kind == dep->kind && d->obj == dep->obj && d->sub == dep->sub) {
-            return;
-        }
-    }
-    if (f->ndeps == f->capdeps) {
-        f->capdeps = f->capdeps ? 2 * f->capdeps : 8;
-        f->deps = realloc(f->deps, sizeof(struct lu_fdep) * (size_t)f->capdeps);
-    }
-    f->deps[f->ndeps++] = *dep;
-}
-
 /* The guards of one fact seen on the way down the dominator tree, a
    chained hash on what they check; leaving a block drops what it added. */
 struct seen {
@@ -916,7 +900,7 @@ facts(struct lu_func *f)
             }
             if (kind == WRITER_FACT) {
                 live_at[p] = state_at[p];
-                note_dep(f, &dep);
+                lu_ir_dep(f, &dep);
             }
         }
     }
@@ -974,7 +958,7 @@ facts(struct lu_func *f)
             if (seen_find(f, &t, v) != LU_NOV) {
                 redundant[v] = (char)kind;
                 if (kind == WRITER_FACT) {
-                    note_dep(f, &dep);
+                    lu_ir_dep(f, &dep);
                 }
             }
             else {

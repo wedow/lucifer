@@ -237,6 +237,8 @@ lu_v lu_ir_emit(struct lu_func *f, int block, int op, int rep, lu_v a, lu_v b, l
 void lu_ir_edge(struct lu_func *f, int from, int to);
 lu_v lu_ir_const(struct lu_func *f, int block, PyObject *o);
 void lu_ir_free(struct lu_func *f);
+/* The unit relies on dep between polls (runtime/jit/deps.c). */
+void lu_ir_dep(struct lu_func *f, struct lu_fdep *dep);
 void lu_ir_dump(struct lu_func *f, FILE *out);
 /* The value v forwards to after simplification. */
 static inline struct lu_ins *

@@ -1282,6 +1282,9 @@ void lu_fh_thread_enter(PyThreadState *ts);
 void lu_fh_thread_exit(PyThreadState *ts);
 void lu_fh_fatal(const char *func, const char *msg) __attribute__((noreturn));
 PyObject *lu_function_new(PyObject *code, PyObject *globals);
+/* A function of code in globals that no watcher hears of: what compiled
+   code names the frames of an inlined closure by (runtime/jit/ssa_build.c). */
+PyObject *lu_function_template(PyObject *code, PyObject *globals);
 /* function.__new__ over (code, globals, name, defaults, closure, kwdefaults). */
 PyObject *lu_function_from_args(PyObject *const *args);
 /* A cell's value as a new reference, or NULL when empty (_PyCell_GetStackRef):
@@ -1486,11 +1489,12 @@ void lu_watchers_init(struct _is *interp);
    type's version (obj: the version), a dict's keys (obj: the dict, which
    dict watcher id 0 marks), the value of one key (obj: the dict, sub: its
    value word's offset in the keys table), a function's code and defaults
-   (obj: the function). A
+   (obj: the function), and the callees a call site has met (obj: its
+   table, runtime/jit/jit.c), which only grows. A
    writer calls lu_jit_invalidate after its change: the units that rely on
    it are dead, and every task leaves compiled code at its next poll, the
    running one's code at its next check. */
-enum lu_dep_kind { LU_DEP_TYPE, LU_DEP_KEYS, LU_DEP_VALUE, LU_DEP_FUNC };
+enum lu_dep_kind { LU_DEP_TYPE, LU_DEP_KEYS, LU_DEP_VALUE, LU_DEP_FUNC, LU_DEP_CALLEES };
 void lu_jit_invalidate(int kind, uintptr_t obj, uint32_t sub);
 int lu_watcher_add(lu_watcher *table, int first, lu_watcher callback, const char *kind);
 int lu_watcher_check(lu_watcher *table, int id, const char *invalid, const char *unset);

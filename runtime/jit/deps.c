@@ -175,7 +175,9 @@ lu_jit_invalidate(int kind, uintptr_t obj, uint32_t sub)
             fprintf(stderr, "jit: invalidate kind %d of %s@%d\n", kind, PyUnicode_AsUTF8(d->want.code->co_qualname),
                     d->want.pc);
         }
-        lu_jit_nohoist_set(d->want.code, d->want.pc);
+        if (kind != LU_DEP_CALLEES) {
+            lu_jit_nohoist_set(d->want.code, d->want.pc);       /* a new callee is no failed guard */
+        }
         for (int i = 0; i < u->ndeps; i++) {
             unlink_dep(&u->deps[i]);
         }

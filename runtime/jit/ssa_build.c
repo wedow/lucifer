@@ -111,6 +111,9 @@ struct ctx {
     int units;                  /* code units compiled */
     struct lu_fs *island;       /* inlined for an operator: where its folded arithmetic restarts */
     int generic_call;           /* the end of a call on a polymorphic site's generic answer: no feedback */
+    int cells;                  /* an inlined closure's caller set its cells (inline_call) */
+    PyFunctionObject *code_fn;  /* a callee test proved code_value a function of this one's code and globals */
+    lu_v code_value;
 };
 
 /* Per-code JIT state the builder consults: pcs not to speculate at. */
@@ -119,6 +122,8 @@ int lu_jit_noinline(PyCodeObject *code);
 
 static int build_block(struct ctx *c, int bi);
 static int step(struct ctx *c, int pc, struct lu_block *entry);
+static int call_dispatch(struct ctx *c, int n);
+static int call(struct ctx *c);
 
 /* A site's operand kinds (runtime/jit/jit.h), counted: none means the
    interpreter has never run it. Attribute sites count in cached_site. */
@@ -1204,8 +1209,8 @@ static const char *const compare_names[] = {
     "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__",
 };
 
-static int inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int nargs,
-                       lu_v *result, int *result_owned);
+static int inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *args, uint8_t *owned,
+                       int nargs, lu_v *result, int *result_owned);
 
 /* A kernel method of a static type, inlined as the interpreter would run
    it for operands of that exact type. */
@@ -1222,7 +1227,7 @@ kernel_method(struct ctx *c, PyTypeObject *tp, const char *name, lu_v *args, int
     if (fn == NULL || self != NULL) {
         return 0;
     }
-    return inline_call(c, fn, args, own, nargs, result, owned);
+    return inline_call(c, fn, LU_NOV, 0, args, own, nargs, result, owned);
 }
 
 /* BINARY_OP on floats, or a float and an int: the operator's method of
@@ -1442,27 +1447,34 @@ truth(struct ctx *c, lu_v v)
 
 /* --- calls --- */
 
-/* Whether fn's code can inline here. */
-static int
-inlinable(struct ctx *c, PyFunctionObject *fn, int nargs)
+/* Why fn's code cannot inline here, or NULL. */
+static const char *
+not_inlinable(struct ctx *c, PyFunctionObject *fn, int nargs)
 {
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
-    if (!PyCode_Check(co) || c->depth >= INLINE_MAX_DEPTH || c->f->ninlined > INLINE_MAX_TOTAL
-        || (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE))
-        || !(co->co_flags & CO_OPTIMIZED) || co->co_kwonlyargcount != 0 || co->_co_monitoring != NULL
-        || (co->co_argcount < nargs && !(co->co_flags & CO_VARARGS)) || nargs > 30 || lu_jit_noinline(co)) {
-        return 0;
-    }
     int defaults = fn->func_defaults != NULL ? (int)PyTuple_GET_SIZE(fn->func_defaults) : 0;
-    if (nargs + defaults < co->co_argcount) {
-        return 0;
+    if (!PyCode_Check(co) || !(co->co_flags & CO_OPTIMIZED) || co->_co_monitoring != NULL) {
+        return "not plain code";
+    }
+    if (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE)) {
+        return "a generator";
+    }
+    if (co->co_kwonlyargcount != 0 || (co->co_argcount < nargs && !(co->co_flags & CO_VARARGS)) || nargs > 30
+        || nargs + defaults < co->co_argcount) {
+        return "arguments it does not bind";
+    }
+    if (c->depth >= INLINE_MAX_DEPTH || c->f->ninlined > INLINE_MAX_TOTAL) {
+        return "the inline budget";
+    }
+    if (lu_jit_noinline(co)) {
+        return "its inlined copies kept leaving";
     }
     for (struct ctx *p = c; p != NULL; p = p->parent) {
         if (p->code == co) {
-            return 0;           /* recursion */
+            return "recursion";
         }
     }
-    return 1;
+    return NULL;
 }
 
 static int
@@ -1470,12 +1482,19 @@ build_ctx(struct ctx *c, int entry_block);
 
 /* Inlines fn(args...): the caller's state has the call's operands popped.
    Takes the args' references (owned[i]); on success *result is the value
-   the call returns. Returns 1, or 0 with nothing emitted. */
+   the call returns. With fnv, the call is of that function value, of fn's
+   code and globals (a closure, lu_function_template): the frame's cells
+   are fnv's, and fnv's reference (fnv_owned) is taken. Returns 1, or 0
+   with nothing emitted. */
 static int
-inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int nargs,
+inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *args, uint8_t *owned, int nargs,
             lu_v *result, int *result_owned)
 {
-    if (!inlinable(c, fn, nargs) || c->cur < 0) {
+    const char *no = c->cur < 0 ? "unreachable" : not_inlinable(c, fn, nargs);
+    if (no != NULL) {
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: not inlined %s: %s\n", PyUnicode_AsUTF8(fn->func_qualname), no);
+        }
         return 0;
     }
     struct lu_func *f = c->f;
@@ -1498,7 +1517,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
     k->depth = c->depth + 1;
     k->island = c->island;
     k->fixed = fixed_params(k);
-    if (!k->kernel) {
+    if (!k->kernel && fnv == LU_NOV) {
         /* The function's code is part of what was compiled: f.__code__ = ... changes its version. */
         if (fn->func_version < 2) {     /* 1: changed code or defaults, never specialized on again */
             free(k);
@@ -1556,6 +1575,21 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
             k->st.v[at] = helper_leaving(c, H_new_dict, 0, NULL, 0);
             k->st.own[at] = 1;
             set_made(c, k->st.v[at], &PyDict_Type);
+        }
+        if (fnv != LU_NOV) {
+            /* COPY_FREE_VARS from the function called: its cells, each a reference of the frame's. */
+            int nfree = co->co_nfreevars;
+            lu_v closure = nfree > 0 ? emit(c, OP_LOAD, REP_OBJ, fnv, LU_NOV, LU_NOV,
+                                            offsetof(PyFunctionObject, func_closure)) : LU_NOV;
+            for (int i = 0; i < nfree; i++) {
+                lu_v cell = emit(c, OP_LOAD, REP_OBJ, closure, LU_NOV, LU_NOV,
+                                 offsetof(PyTupleObject, ob_item) + (int64_t)sizeof(PyObject *) * i);
+                incref(c, cell);
+                k->st.v[k->nlocals - nfree + i] = cell;
+                k->st.own[k->nlocals - nfree + i] = 1;
+            }
+            k->cells = 1;
+            release(c, fnv, fnv_owned);
         }
         k->cont = lu_ir_block(f);
         /* Into the callee's first block. */
@@ -1890,6 +1924,8 @@ arg_effect(int op, int oparg)
 static struct path
 through(struct ctx *c, const struct ctx *at, int end, const struct bstate *base)
 {
+    int ncalls = c->ncalls;
+    c->ncalls = at->ncalls;     /* the copies are alternatives: one call's worth */
     for (int pc = at->next; pc != end && c->cur >= 0 && !c->failed;) {
         pc = step(c, pc, NULL);
     }
@@ -1897,6 +1933,7 @@ through(struct ctx *c, const struct ctx *at, int end, const struct bstate *base)
     if (c->failed) {
         p.block = -1;
     }
+    c->ncalls = c->ncalls > ncalls ? c->ncalls : ncalls;
     c->pc = at->pc;
     c->next = at->next;
     c->base = at->base;
@@ -2466,6 +2503,184 @@ opaque_call(struct ctx *c)
     return 1;
 }
 
+/* A function this unit made (MAKE_FUNCTION), reached however it was
+   passed (a closure handed to a callee that inlined): its code and globals
+   are known, as a template the unit keeps (lu_function_template), and only
+   its code can change since (f.__code__ = ...), which a guard checks. */
+static PyFunctionObject *
+made_function(struct ctx *c, lu_v v)
+{
+    struct lu_ins *in = I(c, v);
+    if (in->op != OP_HELPER || in->imm != H_make_function || lu_jit_nospec(c->code, c->pc)) {
+        return NULL;
+    }
+    PyObject *code = known(c, in->args[0]), *globals = known(c, in->args[1]);
+    PyObject *tmpl = code != NULL && globals != NULL ? lu_function_template(code, globals) : NULL;
+    if (tmpl == NULL) {
+        PyErr_Clear();
+        return NULL;
+    }
+    konst(c, tmpl);
+    Py_DECREF(tmpl);
+    lu_v g = guard(c, OP_GUARD_IS, v, (int64_t)(intptr_t)code);
+    I(c, g)->imm2 = GI_FIELD | offsetof(PyFunctionObject, func_code);
+    return (PyFunctionObject *)tmpl;
+}
+
+/* Leaves for block fail, or with fail < 0 deopts, unless bit is set. */
+static void
+test_bit(struct ctx *c, lu_v bit, int fail)
+{
+    if (fail < 0) {
+        guard(c, OP_GUARD_BIT, bit, 1);
+        return;
+    }
+    int ok = lu_ir_block(c->f);
+    lu_ir_edge(c->f, c->cur, ok);
+    lu_ir_edge(c->f, c->cur, fail);
+    emit(c, OP_BRANCH, REP_NONE, bit, LU_NOV, LU_NOV, 0);
+    c->cur = ok;
+}
+
+/* The same unless the word at offset off of v (off < 0: v itself) is o. */
+static void
+test_word(struct ctx *c, lu_v v, int off, PyObject *o, int fail)
+{
+    lu_v k = konst(c, o);       /* the unit keeps what it compares with */
+    if (fail < 0) {
+        lu_v g = guard(c, OP_GUARD_IS, v, (int64_t)(intptr_t)o);
+        I(c, g)->imm2 = off < 0 ? 0 : GI_FIELD | off;
+        return;
+    }
+    lu_v w = off < 0 ? v : emit(c, OP_LOAD, REP_OBJ, v, LU_NOV, LU_NOV, off);
+    test_bit(c, emit(c, OP_IS, REP_BIT, w, k, LU_NOV, 0), fail);
+}
+
+/* Goes on in a new block when callable is e's callee (obj its function or
+   code), else leaves for fail (fail < 0: deopts, as a guard): the function
+   it calls. */
+static lu_v
+callee_test(struct ctx *c, lu_v callable, const struct lu_callee *e, int fail)
+{
+    lu_v fv = callable;
+    if (e->kind & LU_CALLEE_BOUND) {
+        test_word(c, callable, offsetof(PyObject, ob_type), (PyObject *)&PyMethod_Type, fail);
+        fv = emit(c, OP_LOAD, REP_OBJ, callable, LU_NOV, LU_NOV, offsetof(PyMethodObject, im_func));
+    }
+    if (e->kind & LU_CALLEE_CODE) {
+        test_word(c, fv, offsetof(PyObject, ob_type), (PyObject *)&PyFunction_Type, fail);
+        test_word(c, fv, offsetof(PyFunctionObject, func_code), e->obj, fail);
+        test_word(c, fv, offsetof(PyFunctionObject, func_globals), e->globals, fail);
+    }
+    else {
+        test_word(c, fv, -1, e->obj, fail);
+    }
+    return fv;
+}
+
+/* A call of a callable the code does not name, by the callees the
+   interpreter met at the site (jit.h): each is tested in turn, the last as
+   a guard, and the call is built once per callee with that callee known,
+   so that each inlines; the paths join after the call. A callee added to
+   the site's table later recompiles the unit. 1 when built, 0 when the site
+   has no table to use, -1 when the frame cannot be compiled. */
+static int
+call_dispatch(struct ctx *c, int n)
+{
+    int site = (int)(c->cache - 1 - lu_code_start(c->code));
+    struct lu_callees *t = lu_jit_callees(c->code, site);
+    if (t == NULL || __atomic_load_n(&t->mega, __ATOMIC_ACQUIRE) || lu_jit_nospec(c->code, c->pc)
+        || c->generic_call == c->next) {
+        return 0;
+    }
+    /* Entries name only what a collection frees, and this thread does not
+       poll before the unit holds them; a closure's globals are compared
+       only, and used only when a frame being compiled holds them. */
+    struct lu_callee e[LU_CALLEE_WAYS];
+    int m = 0;
+    for (int i = 0, k = __atomic_load_n(&t->n, __ATOMIC_ACQUIRE); i < k; i++) {
+        struct lu_callee x = t->e[i];
+        int live = !(x.kind & LU_CALLEE_CODE);
+        for (struct ctx *p = c; p != NULL && !live; p = p->parent) {
+            live = p->globals == x.globals;
+        }
+        PyObject *fo = x.kind & LU_CALLEE_CODE ? x.obj : x.obj != NULL && PyFunction_Check(x.obj)
+            ? ((PyFunctionObject *)x.obj)->func_code : NULL;
+        if (fo != NULL && lu_jit_noinline((PyCodeObject *)fo)) {
+            return 0;           /* a callee called anyway: the call as it is costs least */
+        }
+        if (live && x.obj != NULL) {
+            e[m++] = x;
+        }
+    }
+    if (m == 0) {
+        return 0;
+    }
+    struct lu_fdep dep = { .kind = LU_DEP_CALLEES, .obj = (uintptr_t)t, .code = c->code, .pc = c->pc };
+    lu_ir_dep(c->f, &dep);
+    int callable_at = c->nlocals + c->st.sp - (n + 2);
+    lu_v callable = c->st.v[callable_at];
+    int own = c->st.own[callable_at];
+    struct ctx at = *c;
+    struct bstate base;
+    state_copy(c, &base, &c->st);
+    struct path ends[LU_CALLEE_WAYS];
+    int ncalls = c->ncalls, most = ncalls;     /* the arms are alternatives: one call's worth */
+    for (int i = 0; i < m; i++) {
+        c->ncalls = ncalls;
+        int fail = i < m - 1 ? lu_ir_block(c->f) : -1;
+        lu_v fv = callee_test(c, callable, &e[i], fail);
+        if (e[i].kind & LU_CALLEE_BOUND) {
+            /* The bound method's self and function become the call's, and it goes. */
+            lu_v self = emit(c, OP_LOAD, REP_OBJ, callable, LU_NOV, LU_NOV, offsetof(PyMethodObject, im_self));
+            incref(c, self);
+            c->st.v[callable_at + 1] = self;
+            c->st.own[callable_at + 1] = 1;
+            if (e[i].kind & LU_CALLEE_CODE) {
+                incref(c, fv);
+            }
+            release(c, callable, own);
+        }
+        if (e[i].kind & LU_CALLEE_CODE) {
+            PyObject *tmpl = lu_function_template(e[i].obj, e[i].globals);
+            if (tmpl == NULL) {
+                Py_FatalError("lucifer jit: out of memory");
+            }
+            konst(c, tmpl);     /* the unit names the inlined frames by it */
+            Py_DECREF(tmpl);
+            c->st.v[callable_at] = fv;
+            c->st.own[callable_at] = (e[i].kind & LU_CALLEE_BOUND) || own;
+            c->code_fn = (PyFunctionObject *)tmpl;
+            c->code_value = fv;
+        }
+        else {
+            if (!(e[i].kind & LU_CALLEE_BOUND)) {
+                release(c, callable, own);      /* the constant is the same object */
+            }
+            c->st.v[callable_at] = konst(c, e[i].obj);
+            c->st.own[callable_at] = 0;
+        }
+        /* Guards of the call leave with the stack as it is now: the
+           interpreter calls the function with the bound method's self. */
+        c->snap = NULL;
+        before(c);
+        int built = call(c);
+        c->code_fn = NULL;
+        if (built < 0 && c->failed) {
+            return -1;
+        }
+        ends[i] = path_here(c);
+        most = c->ncalls > most ? c->ncalls : most;
+        c->next = at.next;
+        c->snap = at.snap;
+        state_copy(c, &c->st, &base);
+        c->cur = fail;
+    }
+    c->ncalls = most;
+    join_paths(c, ends, m);
+    return 1;
+}
+
 static int
 call(struct ctx *c)
 {
@@ -2478,6 +2693,20 @@ call(struct ctx *c)
     PyObject *kc = known(c, callable);
     PyObject *bound;
     PyFunctionObject *fn = call_target(c, callable, &bound);
+    lu_v fnv = LU_NOV;
+    if (fn == NULL && c->code_fn != NULL && callable == c->code_value) {
+        fn = c->code_fn;        /* a callee test proved its code */
+        fnv = callable;
+    }
+    else if (kc == NULL && (fn = made_function(c, callable)) != NULL) {
+        fnv = callable;
+    }
+    else if (kc == NULL && self == LU_NOV) {
+        int built = call_dispatch(c, n);
+        if (built != 0) {
+            return built < 0 ? -1 : 0;
+        }
+    }
     const char *prim = primitive_name(kc);
     if (kc != NULL && PyCFunction_Check(kc) && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_FRAME)) {
         unsupported(c);         /* it hands the interpreter a frame to run */
@@ -2581,9 +2810,11 @@ call(struct ctx *c)
         struct bstate saved;
         state_copy(c, &saved, &c->st);
         c->st.sp -= n + 2;
-        if (inline_call(c, fn, args, own, nargs, &r, &rown)) {
+        if (inline_call(c, fn, fnv, owncallable, args, own, nargs, &r, &rown)) {
             if (c->cur >= 0) {          /* else every path of the callee left */
-                release(c, callable, owncallable);
+                if (fnv == LU_NOV) {
+                    release(c, callable, owncallable);
+                }
                 release(c, descr, owndescr);
                 push(c, r, rown);
             }
@@ -3020,6 +3251,9 @@ translate(struct ctx *c)
     }
     case COPY_FREE_VARS: {
         PyObject *closure = c->func->func_closure;
+        if (c->cells) {
+            return 0;           /* the caller copied the function's */
+        }
         if (c->parent == NULL || closure == NULL) {
             unsupported(c);
             return -1;

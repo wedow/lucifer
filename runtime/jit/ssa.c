@@ -80,6 +80,22 @@ grow(void *p, int *cap, int need, size_t size)
     return p;
 }
 
+void
+lu_ir_dep(struct lu_func *f, struct lu_fdep *dep)
+{
+    for (int i = 0; i < f->ndeps; i++) {
+        struct lu_fdep *d = &f->deps[i];
+        if (d->kind == dep->kind && d->obj == dep->obj && d->sub == dep->sub) {
+            return;
+        }
+    }
+    if (f->ndeps == f->capdeps) {
+        f->capdeps = f->capdeps ? 2 * f->capdeps : 8;
+        f->deps = realloc(f->deps, sizeof(struct lu_fdep) * (size_t)f->capdeps);
+    }
+    f->deps[f->ndeps++] = *dep;
+}
+
 void *
 lu_ir_alloc(struct lu_func *f, size_t size)
 {

@@ -73,6 +73,7 @@ struct lu_jit_code {
     int noinline;               /* a side exit in an inlined copy keeps leaving: call it instead */
     int call_pc;                /* where a call enters (call_entry), or -1 */
     struct lu_pic **pics;       /* per code unit: an attribute site's polymorphic cache */
+    struct lu_callees **callees;        /* per code unit: a call site's callees */
 };
 
 static struct {
@@ -378,6 +379,10 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
     f.consts = NULL;
     f.nconsts = 0;
     count(&stats.code_bytes, u->code_bytes);
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: compiled %s@%d: %zu bytes, %d calls inlined\n", PyUnicode_AsUTF8(frame->code->co_qualname),
+                pc, u->code_bytes, f.ninlined);
+    }
     if (u->counts != NULL) {
         char name[256];
         snprintf(name, sizeof name, "%s@%d", PyUnicode_AsUTF8(frame->code->co_qualname), pc);
@@ -851,6 +856,91 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
     }
 }
 
+/* Callee tables (jit.h). Writers (the interpreter's calls, on any thread)
+   take _PyRuntime.pic_lock; the translator reads published entries without
+   it, and depends on the table (LU_DEP_CALLEES), so a callee added later
+   recompiles the units that test for the others. */
+
+struct lu_callees *
+lu_jit_callees(PyCodeObject *code, int pc)
+{
+    struct lu_jit_code *jc = state_of(code);
+    struct lu_callees **t = jc != NULL ? __atomic_load_n(&jc->callees, __ATOMIC_ACQUIRE) : NULL;
+    return t != NULL && pc >= 0 && pc < jc->ncode ? __atomic_load_n(&t[pc], __ATOMIC_ACQUIRE) : NULL;
+}
+
+void
+lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, PyObject *self, uint32_t tag)
+{
+    int pc = (int)(cache - 1 - lu_code_start(code));
+    PyObject *fn = Py_IS_TYPE(callable, &PyMethod_Type) && self == NULL ? ((PyMethodObject *)callable)->im_func
+        : callable;
+    PyFunctionObject *f = (PyFunctionObject *)fn;
+    /* What only a collection frees can be named; any other function by
+       what every function of its code shares; any other callable not. */
+    int named = _Py_IsImmortal(fn) || lu_has_deferred_refcount(fn);
+    if (!named && !PyFunction_Check(fn)) {
+        lu_cache_store32(cache + 1, tag);
+        return;
+    }
+    struct lu_callee want = { named ? fn : f->func_code, named ? NULL : f->func_globals,
+                              (fn != callable || self != NULL ? LU_CALLEE_BOUND : 0) | (named ? 0 : LU_CALLEE_CODE) };
+    struct lu_jit_code *jc = state_of(code);
+    if (jc == NULL) {
+        /* The code's state, made before the code is hot: its counts go on
+           as entries the interpreter keeps (wait), so that it still warms
+           up before it compiles. */
+        uintptr_t v = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
+        int mode = _PyRuntime.jit.mode == LU_JIT_ALWAYS;
+        unsigned calls = v & 1 ? (unsigned)(v >> 1) : 0;
+        jc = state_for(code);
+        for (int i = 0; i < jc->ncode && !mode; i++) {
+            __atomic_store_n(&jc->wait[i], (uint16_t)LU_JIT_BACKEDGE_THRESHOLD, __ATOMIC_RELAXED);
+        }
+        if (jc->call_pc >= 0 && !mode) {
+            unsigned left = calls < LU_JIT_CALL_THRESHOLD ? LU_JIT_CALL_THRESHOLD - calls : 0;
+            __atomic_store_n(&jc->wait[jc->call_pc], (uint16_t)left, __ATOMIC_RELAXED);
+        }
+    }
+    struct lu_callees *t = lu_jit_callees(code, pc);
+    int n = t != NULL ? __atomic_load_n(&t->n, __ATOMIC_ACQUIRE) : 0;
+    for (int i = 0; i < n; i++) {
+        if (t->e[i].obj == want.obj && t->e[i].kind == want.kind && t->e[i].globals == want.globals) {
+            lu_cache_store32(cache + 1, tag);
+            return;
+        }
+    }
+    int added = 0;
+    PyMutex_Lock(&_PyRuntime.pic_lock);
+    if (jc->callees == NULL) {
+        __atomic_store_n(&jc->callees, calloc((size_t)jc->ncode, sizeof(struct lu_callees *)), __ATOMIC_RELEASE);
+    }
+    t = jc->callees[pc];
+    if (t == NULL) {
+        t = calloc(1, sizeof(struct lu_callees));
+        __atomic_store_n(&jc->callees[pc], t, __ATOMIC_RELEASE);
+    }
+    int known = 0;
+    for (int i = 0; i < t->n; i++) {
+        known |= t->e[i].obj == want.obj && t->e[i].kind == want.kind && t->e[i].globals == want.globals;
+    }
+    if (!known && !t->mega) {
+        if (t->n < LU_CALLEE_WAYS) {
+            t->e[t->n] = want;
+            __atomic_store_n(&t->n, t->n + 1, __ATOMIC_RELEASE);
+        }
+        else {
+            __atomic_store_n(&t->mega, 1, __ATOMIC_RELEASE);
+        }
+        added = 1;
+    }
+    lu_cache_store32(cache + 1, t->mega ? LU_CALLEE_MEGA : tag);
+    PyMutex_Unlock(&_PyRuntime.pic_lock);
+    if (added) {
+        lu_jit_invalidate(LU_DEP_CALLEES, (uintptr_t)t, 0);
+    }
+}
+
 void
 lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
 {
@@ -867,6 +957,19 @@ lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
             }
         }
         pic->n = k;
+    }
+    for (int pc = 0; jc != NULL && jc->callees != NULL && pc < jc->ncode; pc++) {
+        struct lu_callees *t = jc->callees[pc];
+        int k = 0;
+        for (int i = 0; t != NULL && i < t->n; i++) {
+            if (!dead(t->e[i].obj)) {
+                t->e[k++] = t->e[i];
+            }
+        }
+        if (t != NULL && k < t->n) {
+            t->n = k;
+            lu_cache_store32(lu_code_start(code) + pc + 2, 0);     /* the next call relearns its callee */
+        }
     }
 }
 
@@ -889,6 +992,10 @@ lu_jit_code_free(PyCodeObject *code)
         free(jc->pics[i]);
     }
     free(jc->pics);
+    for (int i = 0; jc->callees != NULL && i < jc->ncode; i++) {
+        free(jc->callees[i]);
+    }
+    free(jc->callees);
     free(jc->nospec);
     free(jc->fails);
     free(jc->wait);
