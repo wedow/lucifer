@@ -55,6 +55,12 @@ lu_poll_slow(PyThreadState *ts)
             return -1;
         }
     }
+    /* The write sequence moved (lu_qsbr_advance): the carrier reports it
+       before its own queue is processed below. */
+    if (breaker & LU_POLL_QSBR) {
+        lu_poll_clear(c, LU_POLL_QSBR);
+        lu_qsbr_quiescent(c);
+    }
     /* Objects with refcounts to merge, and storage retired to QSBR. */
     if (breaker & LU_POLL_EXPLICIT_MERGE) {
         lu_poll_clear(c, LU_POLL_EXPLICIT_MERGE);

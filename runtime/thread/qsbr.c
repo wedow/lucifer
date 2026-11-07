@@ -3,15 +3,17 @@
 
    Storage that lock-free readers may still hold (a replaced list array, a
    dict's old keys table) is retired with a goal: the write sequence readers
-   must reach. Every attached carrier reports the sequence it has seen at each
-   poll, and a detached carrier is offline and holds nothing. The least
+   must reach. Every attached carrier reports the sequence it has seen at the
+   interpreter's polls, and at compiled code's first poll after the sequence
+   moves (an advance raises LU_POLL_QSBR on every attached carrier); a
+   detached carrier is offline and holds nothing. The least
    sequence over the attached carriers is the read sequence; an item is freed
    once the read sequence has reached its goal. Each carrier keeps its own
    queue, in goal order, and processes it from the poll handler; an exiting
    carrier leaves what it could not free to the next carrier that processes.
 
    Unlike CPython's array of per-thread states, the carriers form a list under
-   the registry lock, which only a scan takes. */
+   the registry lock, which scans and advances take. */
 
 #include "lucifer.h"
 
@@ -49,10 +51,21 @@ lu_qsbr_detach(struct lu_carrier *c)
     __atomic_store_n(&c->qsbr.seq, QSBR_OFFLINE, __ATOMIC_RELEASE);
 }
 
+/* Moves the write sequence on and asks every attached carrier to report
+   it (LU_POLL_QSBR): compiled code reports only when its poll word asks. A
+   carrier that attaches later starts from the new sequence. */
 uint64_t
 lu_qsbr_advance(void)
 {
-    return __atomic_add_fetch(&_PyRuntime.qsbr.wr_seq, QSBR_INCR, __ATOMIC_SEQ_CST);
+    uint64_t seq = __atomic_add_fetch(&_PyRuntime.qsbr.wr_seq, QSBR_INCR, __ATOMIC_SEQ_CST);
+    pthread_mutex_lock(&_PyRuntime.qsbr.lock.mutex);
+    for (struct lu_carrier *c = _PyRuntime.qsbr.head; c != NULL; c = c->qsbr.next) {
+        if (__atomic_load_n(&c->qsbr.seq, __ATOMIC_ACQUIRE) != QSBR_OFFLINE) {
+            lu_poll_set(c, LU_POLL_QSBR);
+        }
+    }
+    pthread_mutex_unlock(&_PyRuntime.qsbr.lock.mutex);
+    return seq;
 }
 
 uint64_t

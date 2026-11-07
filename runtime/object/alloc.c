@@ -310,7 +310,16 @@ PyMem_SetAllocator(PyMemAllocatorDomain domain, PyMemAllocatorEx *allocator)
     case PYMEM_DOMAIN_OBJ: _PyRuntime.allocators.obj = *allocator; break;
     default: break;
     }
+    lu_alloc_observe();
     pthread_mutex_unlock(&_PyRuntime.allocators.lock.mutex);
+}
+
+void
+lu_alloc_observe(void)
+{
+    __atomic_store_n(&_PyRuntime.allocators.observed,
+                     _PyRuntime.allocators.mem.malloc != lu_mem_malloc || _PyRuntime.allocators.obj.malloc != lu_obj_malloc
+                     || _PyRuntime.ref_tracer.func != NULL, __ATOMIC_RELEASE);
 }
 
 #define LU_DOMAIN_ENTRY_POINTS(domain, malloc_name, calloc_name, realloc_name, free_name) \

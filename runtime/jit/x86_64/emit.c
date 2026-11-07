@@ -388,6 +388,29 @@ load_indexed(struct asm_ *a, int dst, int base, int index, int width, int32_t di
     b4(a, disp);
 }
 
+/* op reg, [base + index * 8 + disp], 64-bit */
+static void
+op_indexed8(struct asm_ *a, int opcode, int reg, int base, int index, int32_t disp)
+{
+    rex(a, 1, reg, index, base);
+    b1(a, opcode);
+    b1(a, 0x84 | ((reg & 7) << 3));
+    b1(a, (3 << 6) | ((index & 7) << 3) | (base & 7));
+    b4(a, disp);
+}
+
+static void
+load_indexed8(struct asm_ *a, int dst, int base, int index, int32_t disp)
+{
+    op_indexed8(a, 0x8B, dst, base, index, disp);
+}
+
+static void
+store_indexed8(struct asm_ *a, int base, int index, int32_t disp, int src)
+{
+    op_indexed8(a, 0x89, src, base, index, disp);
+}
+
 /* A compact str's state word with the given kind and ascii bits, and no
    others: the bit-field layout is the C compiler's. */
 static int32_t
@@ -1127,7 +1150,8 @@ pop_frames(struct asm_ *a)
 /* --- the instructions --- */
 
 /* The carrier (in RAX) passes a quiescent state, as the interpreter's poll
-   does. Clobbers RCX. */
+   does: compiled code's poll when the poll word asks (LU_POLL_QSBR). Clobbers
+   RCX. */
 static void
 quiescent(struct asm_ *a)
 {
@@ -1225,12 +1249,154 @@ extern int lu_jit_list_store(PyObject *list, int64_t i, PyObject *v);
 extern PyObject *lu_jit_attr_load(PyObject *owner, int64_t version, int64_t index, PyObject *name);
 extern int lu_jit_truth(PyObject *v);
 
-/* A box of in->a's raw value, in RAX. */
-/* A box: a call to the allocator, so no value is in a register across it. */
+static void
+lea(struct asm_ *a, int dst, int base, int32_t disp)
+{
+    op_rm(a, 1, 0x8D, dst, base, disp);
+}
+
+/* mov dword [base+disp], imm32 */
+static void
+store32_mi(struct asm_ *a, int base, int32_t disp, int32_t imm)
+{
+    rex(a, 0, 0, 0, base);
+    b1(a, 0xC7);
+    modrm_mem(a, 0, base, disp);
+    b4(a, imm);
+}
+
+/* mov r, fs:[0]: the running thread's id (_Py_ThreadId, ob_tid's owner). */
+static void
+thread_id(struct asm_ *a, int r)
+{
+    b1(a, 0x64);
+    rex(a, 1, r, 0, 0);
+    b1(a, 0x8B);
+    b1(a, 0x04 | ((r & 7) << 3));
+    b1(a, 0x25);
+    b4(a, 0);
+}
+
+/* Pops a block of `size` bytes from the carrier's mimalloc heap `heap`
+   (the entry in RAX), as mi_heap_malloc_small does: the block in `dst`, its
+   page in `page`. An empty free list takes the blocks the thread freed on
+   that page since (_mi_page_free_collect's usual case); `none` when there
+   are none either (C takes another page). Clobbers R11. */
+static void
+pop_block(struct asm_ *a, int heap, size_t size, int dst, int page, int none)
+{
+    int32_t direct = (int32_t)(offsetof(struct lu_entry, mimalloc.heaps) + heap * sizeof(mi_heap_t)
+                               + offsetof(mi_heap_t, pages_free_direct) + sizeof(mi_page_t *) * ((size + 7) / 8));
+    int have = new_label(a);
+    load(a, page, RAX, direct);
+    load(a, dst, page, offsetof(mi_page_t, free));
+    test_rr(a, dst, dst);
+    jcc(a, CC_NE, have);
+    load(a, dst, page, offsetof(mi_page_t, local_free));
+    test_rr(a, dst, dst);
+    jcc(a, CC_E, none);
+    store_mi(a, page, offsetof(mi_page_t, local_free), 0);
+    /* free_is_zero = false: a bit field, found by setting it. */
+    mi_page_t probe;
+    memset(&probe, 0, sizeof probe);
+    probe.free_is_zero = 1;
+    int byte = 0;
+    while (((uint8_t *)&probe)[byte] == 0) {
+        byte++;
+    }
+    rex(a, 0, 0, 0, page);
+    b1(a, 0x80);
+    modrm_mem(a, ALU_AND, page, byte);
+    b1(a, (uint8_t)~((uint8_t *)&probe)[byte]);    /* and byte [page+byte], ~bit */
+    bind(a, have);
+    load(a, R11, dst, 0);                       /* the next free block */
+    store(a, page, offsetof(mi_page_t, free), R11);
+    b1(a, 0x66);
+    rex(a, 0, 0, 0, page);
+    b1(a, 0xFF);
+    modrm_mem(a, 0, page, offsetof(mi_page_t, used));  /* inc word [page+used] */
+}
+
+/* A box of in->a's raw value, in RAX, as PyLong_FromLongLong and
+   PyFloat_FromDouble make it: a small int from the cache, a one-digit int
+   or a float from the carrier's freelist, else from its mimalloc object
+   heap, with the header _Py_NewReference gives it. Anything else is C's,
+   which keeps the registers: a wider int, a page with no block at hand, or
+   a hook that sees allocations. */
 static void
 emit_box(struct asm_ *a, struct lu_ins *in)
 {
-    if (in->op == OP_BOX_INT) {
+    int is_int = in->op == OP_BOX_INT, slow = new_label(a), done = new_label(a);
+    int32_t list = is_int ? (int32_t)offsetof(struct lu_entry, free_ints) : (int32_t)offsetof(struct lu_entry, free_floats);
+    int x = 0;
+    if (is_int) {
+        int fresh = new_label(a), r = gpr_of(a, in->a, RDX);
+        lea(a, RCX, r, LU_NSMALLNEGINTS);
+        alu_ri(a, ALU_CMP, RCX, LU_NSMALLNEGINTS + LU_NSMALLPOSINTS);
+        jcc(a, CC_AE, fresh);                   /* unsigned: below the cache too */
+        rex(a, 1, RCX, 0, RCX);
+        b1(a, 0x69);
+        modrm_rr(a, RCX, RCX);
+        b4(a, (int32_t)sizeof(PyLongObject));  /* imul rcx, rcx, size */
+        mov_ri(a, RAX, (int64_t)(intptr_t)&_PyRuntime.singletons.small_ints[0]);
+        alu_rr(a, ALU_ADD, RAX, RCX);
+        jmp(a, done);
+        bind(a, fresh);
+        lea(a, RCX, r, PyLong_MASK);
+        alu_ri(a, ALU_CMP, RCX, 2 * PyLong_MASK);
+        jcc(a, CC_A, slow);                     /* more than one digit */
+    }
+    else {
+        x = fpr_of(a, in->a, 0);
+    }
+    mov_ri(a, R11, (int64_t)(intptr_t)&_PyRuntime.allocators.observed);
+    cmp_mi(a, 0, R11, 0, 0);
+    jcc(a, CC_NE, slow);
+    int page = new_label(a), header = new_label(a);
+    load(a, RAX, R14, offsetof(struct lu_task, carrier));
+    load(a, RAX, RAX, offsetof(struct lu_carrier, current));
+    load(a, RCX, RAX, list + (int32_t)offsetof(struct lu_freelist, head));
+    test_rr(a, RCX, RCX);
+    jcc(a, CC_E, page);
+    load(a, R11, RCX, sizeof(PyObject));       /* LU_FREE_NEXT */
+    store(a, RAX, list + (int32_t)offsetof(struct lu_freelist, head), R11);
+    b1(a, 0x83);
+    modrm_mem(a, ALU_SUB, RAX, list + (int32_t)offsetof(struct lu_freelist, n));
+    b1(a, 1);                                   /* sub dword [rax+n], 1 */
+    jmp(a, header);
+    bind(a, page);                              /* a block of lu_object_new's size; its type too */
+    pop_block(a, LU_HEAP_OBJECT, is_int ? offsetof(PyLongObject, long_value.ob_digit) + sizeof(digit)
+                                        : sizeof(PyFloatObject), RCX, RDX, slow);
+    mov_ri(a, R11, (int64_t)(intptr_t)(is_int ? &PyLong_Type : &PyFloat_Type));
+    store(a, RCX, offsetof(PyObject, ob_type), R11);
+    bind(a, header);
+    thread_id(a, R11);
+    store(a, RCX, offsetof(PyObject, ob_tid), R11);
+    _Static_assert(offsetof(PyObject, ob_flags) == 8 && offsetof(PyObject, ob_gc_bits) == 11
+                   && offsetof(PyObject, ob_ref_local) == 12, "flags, mutex and GC bits are one word");
+    store32_mi(a, RCX, offsetof(PyObject, ob_flags), 0);
+    store32_mi(a, RCX, offsetof(PyObject, ob_ref_local), 1);
+    store_mi(a, RCX, offsetof(PyObject, ob_ref_shared), 0);
+    if (is_int) {
+        int positive = new_label(a);
+        to_gpr(a, RAX, in->a);                  /* again: RDX held the page */
+        mov_ri(a, R11, ((uintptr_t)1 << _PyLong_NON_SIZE_BITS) | 0);
+        test_rr(a, RAX, RAX);
+        jcc(a, CC_NS, positive);
+        unary(a, 3, RAX);                       /* neg rax */
+        mov_ri(a, R11, ((uintptr_t)1 << _PyLong_NON_SIZE_BITS) | 2);
+        bind(a, positive);
+        store(a, RCX, offsetof(PyLongObject, long_value.lv_tag), R11);
+        op_rm(a, 0, 0x89, RAX, RCX, offsetof(PyLongObject, long_value.ob_digit));
+    }
+    else {
+        sse_rm(a, 0xF2, 0x11, x, RCX, offsetof(PyFloatObject, ob_fval));
+    }
+    mov_rr(a, RAX, RCX);
+    jmp(a, done);
+    bind(a, slow);
+    save_volatile(a);
+    if (is_int) {
         to_gpr(a, RDI, in->a);
         call_abs(a, (void *)lu_jit_box_int);
     }
@@ -1238,6 +1404,95 @@ emit_box(struct asm_ *a, struct lu_ins *in)
         to_fpr(a, 0, in->a);
         call_abs(a, (void *)lu_jit_box_float);
     }
+    restore_volatile(a);
+    bind(a, done);
+}
+
+/* BUILD_TUPLE and BUILD_LIST of a few items in line, as PyTuple_New and
+   PyList_New make them: the object (and a list's array) popped from the
+   carrier's mimalloc pages, counted for the collector, tracked, and filled
+   with new references. The helper takes the rest: a page with no block at
+   hand, a collection due, a hook that sees allocations, and
+   -X lucifer_stress=gc:N. 0 when the build is the helper's alone. */
+#define BUILD_INLINE 8
+
+static int
+emit_build(struct asm_ *a, lu_v v)
+{
+    struct lu_ins *in = I(a, v);
+    int n = in->nargs, is_list = in->imm == H_build_list;
+    if (_PyRuntime.stress.gc != 0 || n > BUILD_INLINE || (!is_list && n == 0)) {
+        return 0;
+    }
+    int slow = new_label(a), undo = new_label(a), done = new_label(a);
+    size_t size = is_list ? sizeof(PyListObject) : offsetof(PyTupleObject, ob_item) + (size_t)n * sizeof(PyObject *);
+    for (int i = 0; i < n; i++) {
+        to_gpr(a, RAX, in->args[i]);
+        store(a, RSP, 8 * i, RAX);              /* the helper's argument array, as call_helper makes it */
+    }
+    /* IF_CALL: nothing live past the build is in a register. Until the
+       fast path can no longer fall back to the call it writes only
+       caller-saved registers, which the call clobbers anyway. */
+    mov_ri(a, R11, (int64_t)(intptr_t)&_PyRuntime.allocators.observed);
+    cmp_mi(a, 0, R11, 0, 0);
+    jcc(a, CC_NE, slow);
+    load(a, RAX, R14, offsetof(struct lu_task, carrier));
+    load(a, RAX, RAX, offsetof(struct lu_carrier, current));
+    cmp_mi(a, 0, RAX, offsetof(struct lu_entry, gc_alloc_count), LU_GC_ALLOC_FLUSH - 1);
+    jcc(a, CC_GE, slow);                        /* lu_gc_record_allocation would flush the count */
+    pop_block(a, LU_HEAP_GC, size, RDX, RCX, slow);
+    if (is_list && n > 0) {
+        pop_block(a, LU_HEAP_MEM, sizeof(struct lu_list_array) + (size_t)n * sizeof(PyObject *), RSI, RDI, undo);
+    }
+    b1(a, 0x83);
+    modrm_mem(a, ALU_ADD, RAX, offsetof(struct lu_entry, gc_alloc_count));
+    b1(a, 1);                                   /* add dword [rax+count], 1 */
+    thread_id(a, R11);
+    store(a, RDX, offsetof(PyObject, ob_tid), R11);
+    store32_mi(a, RDX, offsetof(PyObject, ob_flags), (int32_t)((uint32_t)LU_GC_TRACKED << 24));    /* ob_gc_bits */
+    store32_mi(a, RDX, offsetof(PyObject, ob_ref_local), 1);
+    store_mi(a, RDX, offsetof(PyObject, ob_ref_shared), 0);
+    mov_ri(a, R11, (int64_t)(intptr_t)(is_list ? &PyList_Type : &PyTuple_Type));
+    store(a, RDX, offsetof(PyObject, ob_type), R11);
+    store_mi(a, RDX, offsetof(PyVarObject, ob_size), n);
+    int items = RDX;
+    int32_t first = offsetof(PyTupleObject, ob_item);
+    if (!is_list) {
+        store_mi(a, RDX, offsetof(PyTupleObject, ob_hash), -1);
+    }
+    else {
+        store_mi(a, RDX, offsetof(PyListObject, allocated), n);
+        if (n > 0) {
+            store_mi(a, RSI, offsetof(struct lu_list_array, allocated), n);
+            lea(a, R11, RSI, offsetof(struct lu_list_array, ob_item));
+            store(a, RDX, offsetof(PyListObject, ob_item), R11);
+            items = RSI;
+            first = offsetof(struct lu_list_array, ob_item);
+        }
+        else {
+            store_mi(a, RDX, offsetof(PyListObject, ob_item), 0);
+        }
+    }
+    for (int i = 0; i < n; i++) {
+        load(a, RBX, RSP, 8 * i);
+        incref(a, RBX);                         /* clobbers RAX, RCX */
+        store(a, items, first + 8 * i, RBX);
+    }
+    mov_rr(a, RAX, RDX);
+    jmp(a, done);
+    bind(a, undo);                              /* the object's block goes back */
+    load(a, R11, RCX, offsetof(mi_page_t, free));
+    store(a, RDX, 0, R11);
+    store(a, RCX, offsetof(mi_page_t, free), RDX);
+    b1(a, 0x66);
+    b1(a, 0xFF);
+    modrm_mem(a, 1, RCX, offsetof(mi_page_t, used));   /* dec word [rcx+used] */
+    bind(a, slow);
+    mov_rr(a, RDI, RSP);
+    mov_ri(a, RSI, n);
+    call_abs(a, lu_helpers[in->imm].fn);
+    bind(a, done);
+    return 1;
 }
 
 static int
@@ -1320,6 +1575,45 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
     }
 }
 
+/* PyMutex_LockFast on the lock byte of the object in r (ob_mutex), as
+   CPython's LOCK_OBJECT: `busy` when another thread holds it. Clobbers
+   RAX, RCX. */
+static void
+lock_object(struct asm_ *a, int r, int busy)
+{
+    alu_rr(a, ALU_XOR, RAX, RAX);
+    b1(a, 0xB1);
+    b1(a, 1);                                   /* mov cl, 1 */
+    b1(a, 0xF0);
+    rex(a, 0, RCX, 0, r);
+    b1(a, 0x0F);
+    b1(a, 0xB0);
+    modrm_mem(a, RCX, r, offsetof(PyObject, ob_mutex));     /* lock cmpxchg [r+mutex], cl */
+    jcc(a, CC_NE, busy);
+}
+
+/* Its release: a waiter parked on it is woken in C, a call that clobbers
+   the caller-saved registers (RDI among them). */
+static void
+unlock_object(struct asm_ *a, int r)
+{
+    int unlocked = new_label(a);
+    b1(a, 0xB0);
+    b1(a, 1);                                   /* mov al, 1 */
+    alu_rr(a, ALU_XOR, RCX, RCX);
+    b1(a, 0xF0);
+    rex(a, 0, RCX, 0, r);
+    b1(a, 0x0F);
+    b1(a, 0xB0);
+    modrm_mem(a, RCX, r, offsetof(PyObject, ob_mutex));     /* lock cmpxchg [r+mutex], cl */
+    jcc(a, CC_E, unlocked);
+    rex(a, 1, RDI, 0, r);
+    b1(a, 0x8D);
+    modrm_mem(a, RDI, r, offsetof(PyObject, ob_mutex));     /* lea rdi, [r+mutex] */
+    call_abs(a, (void *)PyMutex_Unlock);
+    bind(a, unlocked);
+}
+
 /* INLINE_STORE_F and _I: lu_inline_store_f (_i) in line. Under the
    owner's lock byte, taken with one cmpxchg, a word that already holds a
    value takes the raw value and its marker; the old value, an object, is
@@ -1332,8 +1626,8 @@ inline_store_raw(struct asm_ *a, struct lu_ins *in)
     struct move m[2] = { { RDI, in->a, 0, 0 }, is_int ? (struct move){ RSI, in->b, 0, 0 }
                                                       : (struct move){ XMM(0), in->b, 0, 1 } };
     int fail = guard_exit(a, in);
-    int slow = new_label(a), unlock_slow = new_label(a), unlocked = new_label(a), done = new_label(a);
-    int32_t flags = offsetof(PyObject, ob_flags) + 1, mutex = offsetof(PyObject, ob_mutex);
+    int slow = new_label(a), unlock_slow = new_label(a), done = new_label(a);
+    int32_t flags = offsetof(PyObject, ob_flags) + 1;
     int32_t off = (int32_t)in->imm;
     parallel_moves(a, m, 2);
     mov_rr(a, R12, RDI);                        /* kept across calls: nothing is live here (IF_CALL) */
@@ -1347,14 +1641,7 @@ inline_store_raw(struct asm_ *a, struct lu_ins *in)
     modrm_mem(a, 0, RDI, flags);
     b1(a, LU_ATTRS_IN_DICT >> 8);               /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
     jcc(a, CC_NE, slow);
-    alu_rr(a, ALU_XOR, RAX, RAX);
-    b1(a, 0xB1);
-    b1(a, 1);                                   /* mov cl, 1 */
-    b1(a, 0xF0);
-    b1(a, 0x0F);
-    b1(a, 0xB0);
-    modrm_mem(a, RCX, RDI, mutex);              /* lock cmpxchg [rdi+mutex], cl */
-    jcc(a, CC_NE, slow);
+    lock_object(a, RDI, slow);
     b1(a, 0xF6);
     modrm_mem(a, 0, RDI, flags);
     b1(a, LU_ATTRS_IN_DICT >> 8);
@@ -1365,25 +1652,14 @@ inline_store_raw(struct asm_ *a, struct lu_ins *in)
     store(a, RDI, off + 8, R13);                /* the raw value */
     mov_ri(a, RAX, (int64_t)(intptr_t)(is_int ? LU_UNBOXED_INT : LU_UNBOXED));
     store(a, RDI, off, RAX);                    /* after the raw word: x86 stores stay in order */
-    b1(a, 0xB0);
-    b1(a, 1);                                   /* mov al, 1 */
-    alu_rr(a, ALU_XOR, RCX, RCX);
-    b1(a, 0xF0);
-    b1(a, 0x0F);
-    b1(a, 0xB0);
-    modrm_mem(a, RCX, RDI, mutex);              /* lock cmpxchg [rdi+mutex], cl */
-    jcc(a, CC_E, unlocked);
-    alu_ri(a, ALU_ADD, RDI, mutex);             /* a waiter parked: wake it */
-    call_abs(a, (void *)PyMutex_Unlock);
-    bind(a, unlocked);
+    unlock_object(a, RDI);
     alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED_INT);
     jcc(a, CC_BE, done);                        /* no object to release */
     mov_rr(a, RDI, RBX);
     call_abs(a, (void *)lu_jit_decref);         /* the old value */
     jmp(a, done);
     bind(a, unlock_slow);
-    alu_ri(a, ALU_ADD, RDI, mutex);
-    call_abs(a, (void *)PyMutex_Unlock);
+    unlock_object(a, RDI);
     bind(a, slow);
     mov_rr(a, RDI, R12);
     mov_ri(a, RSI, in->imm);
@@ -1850,12 +2126,52 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         def_gpr(a, v, RAX);
         return 0;
     case OP_LIST_ITEM: {
+        /* BINARY_OP_SUBSCR_LIST_INT and _TUPLE_INT in line: an index below
+           the size, the item read without a lock (a list's below its
+           array's own capacity too, as lu_list_try_item_ref reads it), and
+           the reference taken in place for an immortal item or one the
+           running thread owns; a tuple's other items count in the shared
+           count. Anything else (a negative index, a list resized under the
+           read, another thread's list item) is C's, which keeps the
+           registers: a list's may wait for its lock. */
         struct move m[2] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 } };
-        int fail = guard_exit(a, in);
+        int fail = guard_exit(a, in), slow = new_label(a), done = new_label(a);
+        int s = gpr_of(a, in->a, RDX), i = gpr_of(a, in->b, RCX);
+        cmp_rm(a, i, s, offsetof(PyVarObject, ob_size));
+        jcc(a, CC_AE, slow);                    /* unsigned: a negative index too */
+        if (in->imm) {
+            int shared = new_label(a);
+            load_indexed8(a, RAX, s, i, offsetof(PyTupleObject, ob_item));
+            incref_owned_or_exit(a, RAX, shared);
+            jmp(a, done);
+            bind(a, shared);
+            b1(a, 0xF0);
+            rex(a, 1, 0, 0, RAX);
+            b1(a, 0x83);
+            modrm_mem(a, ALU_ADD, RAX, offsetof(PyObject, ob_ref_shared));
+            b1(a, 1 << _Py_REF_SHARED_SHIFT);   /* lock add qword [rax+shared], 1 */
+            jmp(a, done);
+        }
+        else {
+            load(a, RAX, s, offsetof(PyListObject, ob_item));
+            test_rr(a, RAX, RAX);
+            jcc(a, CC_E, slow);
+            cmp_rm(a, i, RAX, (int32_t)offsetof(struct lu_list_array, allocated) - (int32_t)offsetof(struct lu_list_array, ob_item));
+            jcc(a, CC_AE, slow);
+            load_indexed8(a, RAX, RAX, i, 0);
+            test_rr(a, RAX, RAX);
+            jcc(a, CC_E, slow);
+            incref_owned_or_exit(a, RAX, slow);
+            jmp(a, done);
+        }
+        bind(a, slow);
+        save_volatile(a);
         parallel_moves(a, m, 2);
         call_abs(a, in->imm ? (void *)lu_jit_tuple_item : (void *)lu_jit_list_item);
+        restore_volatile(a);
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
+        bind(a, done);
         def_gpr(a, v, RAX);
         return 0;
     }
@@ -1894,13 +2210,33 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         return 0;
     }
     case OP_LIST_STORE: {
+        /* STORE_SUBSCR_LIST_INT in line, as CPython locks the list: its
+           lock byte taken with one cmpxchg, an index below the size, the
+           value's reference taken, and the old value released after the
+           unlock. A negative or too large index leaves; a contended lock
+           is lu_jit_list_store's. */
         struct move m[3] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 }, { RDX, in->c, 0, 0 } };
-        int fail = guard_exit(a, in);
+        int fail = guard_exit(a, in), slow = new_label(a), out = new_label(a), done = new_label(a);
         parallel_moves(a, m, 3);
+        lock_object(a, RDI, slow);
+        cmp_rm(a, RSI, RDI, offsetof(PyVarObject, ob_size));
+        jcc(a, CC_AE, out);                     /* unsigned: a negative index too */
+        load(a, R11, RDI, offsetof(PyListObject, ob_item));
+        load_indexed8(a, RBX, R11, RSI, 0);     /* the old value, kept across calls (IF_CALL) */
+        incref(a, RDX);
+        store_indexed8(a, R11, RSI, 0, RDX);    /* a release on x86: readers take it without the lock */
+        unlock_object(a, RDI);
+        decref(a, RBX, 0);
+        jmp(a, done);
+        bind(a, out);
+        unlock_object(a, RDI);
+        jmp(a, fail);
+        bind(a, slow);
         call_abs(a, (void *)lu_jit_list_store);
         b1(a, 0x85);
         b1(a, 0xC0);                            /* test eax, eax */
         jcc(a, CC_E, fail);
+        bind(a, done);
         return 0;
     }
     case OP_INLINE_STORE: {
@@ -1912,8 +2248,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         struct move m[2] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 } };
         int fail = guard_exit(a, in);
         int slow = new_label(a), unlock_slow = new_label(a), immortal = new_label(a);
-        int unlocked = new_label(a), done = new_label(a);
-        int32_t flags = offsetof(PyObject, ob_flags) + 1, mutex = offsetof(PyObject, ob_mutex);
+        int done = new_label(a);
+        int32_t flags = offsetof(PyObject, ob_flags) + 1;
         int32_t off = (int32_t)in->imm;
         parallel_moves(a, m, 2);
         mov_rr(a, R12, RDI);                    /* kept across calls: nothing is live here (IF_CALL) */
@@ -1922,14 +2258,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         modrm_mem(a, 0, RDI, flags);
         b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
         jcc(a, CC_NE, slow);
-        alu_rr(a, ALU_XOR, RAX, RAX);
-        b1(a, 0xB1);
-        b1(a, 1);                               /* mov cl, 1 */
-        b1(a, 0xF0);
-        b1(a, 0x0F);
-        b1(a, 0xB0);
-        modrm_mem(a, RCX, RDI, mutex);          /* lock cmpxchg [rdi+mutex], cl */
-        jcc(a, CC_NE, slow);
+        lock_object(a, RDI, slow);
         b1(a, 0xF6);
         modrm_mem(a, 0, RDI, flags);
         b1(a, LU_ATTRS_IN_DICT >> 8);
@@ -1954,23 +2283,12 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         op_rm(a, 0, 0x89, RCX, RSI, offsetof(PyObject, ob_ref_local));
         bind(a, immortal);
         store(a, RDI, off, RSI);
-        b1(a, 0xB0);
-        b1(a, 1);                               /* mov al, 1 */
-        alu_rr(a, ALU_XOR, RCX, RCX);
-        b1(a, 0xF0);
-        b1(a, 0x0F);
-        b1(a, 0xB0);
-        modrm_mem(a, RCX, RDI, mutex);          /* lock cmpxchg [rdi+mutex], cl */
-        jcc(a, CC_E, unlocked);
-        alu_ri(a, ALU_ADD, RDI, mutex);         /* a waiter parked: wake it */
-        call_abs(a, (void *)PyMutex_Unlock);
-        bind(a, unlocked);
+        unlock_object(a, RDI);
         mov_rr(a, RDI, RBX);
         call_abs(a, (void *)lu_jit_decref);     /* the old value */
         jmp(a, done);
         bind(a, unlock_slow);
-        alu_ri(a, ALU_ADD, RDI, mutex);
-        call_abs(a, (void *)PyMutex_Unlock);
+        unlock_object(a, RDI);
         mov_rr(a, RDI, R12);
         mov_rr(a, RSI, R13);
         bind(a, slow);
@@ -2125,7 +2443,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             }
             pub = d;
         }
-        call_helper(a, v, pub);
+        if ((in->imm != H_build_tuple && in->imm != H_build_list) || !emit_build(a, v)) {
+            call_helper(a, v, pub);
+        }
         if (inlined) {
             pop_frames(a);
         }
@@ -2151,23 +2471,47 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     }
     case OP_POLL: {
         guard_exit(a, in);                          /* the stress count */
-        /* The poll word: an event, or a monitoring version other than the
-           one the code was compiled under (tools turned on), leaves. */
+        /* The poll word is the monitoring version the code was compiled
+           under and no event: three instructions. Else the stub below
+           reports a moved write sequence (LU_POLL_QSBR) in place, and every
+           other event, or tools turned on, leaves. A builtin's frame leaves
+           the visible reasons for the poll after it returns too: leaving for
+           one would only come back. */
+        int poll = exit_to(a, in->fs, EXIT_POLL, 0, 0), done = new_label(a);
+        int64_t version = (int64_t)a->f->code->_co_instrumentation_version;
+        uintptr_t stays = LU_POLL_QSBR | (in->fs->code->co_flags & LU_CO_KERNEL ? LU_POLL_VISIBLE : 0);
         load(a, RAX, R14, offsetof(struct lu_task, carrier));
-        load(a, RCX, RAX, offsetof(struct lu_carrier, poll));
-        int poll = exit_to(a, in->fs, EXIT_POLL, 0, 0);
-        if (in->fs->code->co_flags & LU_CO_KERNEL) {
-            /* A builtin's frame leaves the visible reasons for the poll after
-               it returns: leaving for one would only come back. */
-            alu_ri(a, ALU_AND, RCX, (int32_t)~LU_POLL_VISIBLE);
+        if (version <= INT32_MAX) {
+            cmp_mi(a, 1, RAX, offsetof(struct lu_carrier, poll), (int32_t)version);
         }
-        mov_ri(a, R11, (int64_t)a->f->code->_co_instrumentation_version);
+        else {
+            mov_ri(a, R11, version);
+            cmp_rm(a, R11, RAX, offsetof(struct lu_carrier, poll));
+        }
+        jcc(a, CC_E, done);
+        load(a, RCX, RAX, offsetof(struct lu_carrier, poll));
+        alu_ri(a, ALU_AND, RCX, (int32_t)~stays);
+        mov_ri(a, R11, version);
         alu_rr(a, ALU_CMP, RCX, R11);
         jcc(a, CC_NE, poll);
+        rex(a, 1, 0, 0, RAX);
+        b1(a, 0xF7);
+        modrm_mem(a, 0, RAX, offsetof(struct lu_carrier, poll));
+        b4(a, LU_POLL_QSBR);                    /* test qword [rax+poll], LU_POLL_QSBR */
+        jcc(a, CC_E, done);                     /* only a builtin's visible reasons */
+        b1(a, 0xF0);
+        rex(a, 1, 0, 0, RAX);
+        b1(a, 0x81);
+        modrm_mem(a, ALU_AND, RAX, offsetof(struct lu_carrier, poll));
+        b4(a, (int32_t)~LU_POLL_QSBR);          /* lock and: the bit goes before the report */
         quiescent(a);
-        mov_ri(a, RCX, (int64_t)(intptr_t)&_PyRuntime.sched.active);
-        cmp_mi(a, 0, RCX, 0, 0);
-        jcc(a, CC_NE, poll);
+        bind(a, done);
+        if (_PyRuntime.handoff.on) {
+            /* The handoff scheduler migrates tasks at the interpreter's polls. */
+            mov_ri(a, RCX, (int64_t)(intptr_t)&_PyRuntime.sched.active);
+            cmp_mi(a, 0, RCX, 0, 0);
+            jcc(a, CC_NE, poll);
+        }
         return 0;
     }
     case OP_CHECK_LIVE: {
@@ -2452,8 +2796,6 @@ direct_entry(struct asm_ *a)
         b1(a, 0xFF);
         modrm_mem(a, 0, R11, 0);                /* lock inc qword [r11] */
     }
-    load(a, RAX, R14, offsetof(struct lu_task, carrier));
-    quiescent(a);
     jmp(a, a->entered);
     bind(a, decline);
     mov_ri(a, RAX, 0);
