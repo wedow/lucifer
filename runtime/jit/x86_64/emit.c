@@ -1165,7 +1165,9 @@ extern void lu_jit_decref(PyObject *o);
 
 /* Py_DECREF of r: the owning thread's count above one drops in place;
    anything else (immortal, last reference, another thread's object) goes
-   to C, which keeps the registers when `keep`. Clobbers RAX, RCX. */
+   to C, which keeps the registers when `keep`. DECREF is a call to the
+   allocator (no value is in a register across it), so it keeps none.
+   Clobbers RAX, RCX. */
 static void
 decref(struct asm_ *a, int r, int keep)
 {
@@ -1212,10 +1214,10 @@ extern PyObject *lu_jit_attr_load(PyObject *owner, int64_t version, int64_t inde
 extern int lu_jit_truth(PyObject *v);
 
 /* A box of in->a's raw value, in RAX. */
+/* A box: a call to the allocator, so no value is in a register across it. */
 static void
 emit_box(struct asm_ *a, struct lu_ins *in)
 {
-    save_volatile(a);
     if (in->op == OP_BOX_INT) {
         to_gpr(a, RDI, in->a);
         call_abs(a, (void *)lu_jit_box_int);
@@ -1224,7 +1226,6 @@ emit_box(struct asm_ *a, struct lu_ins *in)
         to_fpr(a, 0, in->a);
         call_abs(a, (void *)lu_jit_box_float);
     }
-    restore_volatile(a);
 }
 
 static int
@@ -2047,7 +2048,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         incref(a, r);
         return 0;
     case OP_DECREF:
-        decref(a, gpr_of(a, in->a, RDX), 1);
+        decref(a, gpr_of(a, in->a, RDX), 0);
         return 0;
     case OP_RITER_DONE:
         r = gpr_of(a, in->a, RDX);
