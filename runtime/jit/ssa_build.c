@@ -109,6 +109,7 @@ struct ctx {
     struct pending *pend;       /* landings for a caller's handlers, wired once the inline holds */
     int npend, cappend;
     int units;                  /* code units compiled */
+    struct lu_fs *island;       /* inlined for an operator: where its folded arithmetic restarts */
 };
 
 /* Per-code JIT state the builder consults: pcs not to speculate at. */
@@ -1282,9 +1283,11 @@ binary_op(struct ctx *c)
         I(c, x)->fs = I(c, y)->fs = before(c);
         I(c, x)->imm = I(c, y)->imm = 1;      /* exact only below 2**53: guarded */
         lu_v args[2] = { box_float(c, x), box_float(c, y) };
+        c->island = before(c);
         if (!kernel_method(c, &PyFloat_Type, "__truediv__", args, 2, &r, &rown)) {
             r = LU_NOV;
         }
+        c->island = NULL;
     }
     else if (lk == LU_KIND_INT && rk == LU_KIND_INT) {
         lu_v x = unbox_int(c, a), y = unbox_int(c, b);
@@ -1292,9 +1295,14 @@ binary_op(struct ctx *c)
         r = z != LU_NOV ? box_int(c, z) : LU_NOV;
     }
     else if ((lk == LU_KIND_FLOAT || lk == LU_KIND_INT) && (rk == LU_KIND_FLOAT || rk == LU_KIND_INT)) {
+        /* The float method's arithmetic leaves at the operator, whose
+           operands are still on the stack: a state inside the method
+           would resume after the operator with them there. */
+        c->island = before(c);
         if (!float_binary(c, base, a, b, lk, rk, &r, &rown)) {
             r = LU_NOV;
         }
+        c->island = NULL;
     }
     else if (op == NB_MULTIPLY && ((lk == LU_KIND_LIST && rk == LU_KIND_INT) || (lk == LU_KIND_INT && rk == LU_KIND_LIST))) {
         /* list.__mul__ and __rmul__ of an exact list and an int: the copies
@@ -1486,6 +1494,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
     k->nlocals = co->co_nlocalsplus;
     k->nvars = k->nlocals + co->co_stacksize + 1;
     k->depth = c->depth + 1;
+    k->island = c->island;
     k->fixed = fixed_params(k);
     if (!k->kernel) {
         /* The function's code is part of what was compiled: f.__code__ = ... changes its version. */
@@ -2048,7 +2057,7 @@ intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
             if (strcmp(name, fops[i].name) == 0) {
                 lu_v r = emit(c, fops[i].op, REP_F64, unbox_float(c, args[0]), unbox_float(c, args[1]), LU_NOV, 0);
                 if (lu_op_flags[fops[i].op] & IF_GUARD) {
-                    I(c, r)->fs = before(c);
+                    I(c, r)->fs = c->island != NULL ? c->island : before(c);
                 }
                 return box_float(c, r);
             }
@@ -3170,6 +3179,9 @@ build_block(struct ctx *c, int bi)
         c->cache = cache_of(c, pc);
         c->snap = NULL;
         before(c);
+        if (pc == b->pc && b->phis && !b->exc) {
+            c->f->blocks[b->id].entry_fs = c->snap;
+        }
         if (!supported(c->base)) {
             unsupported(c);
             break;

@@ -1481,6 +1481,17 @@ void lu_code_notify(PyCodeEvent event, PyCodeObject *co);
    frees an id; Check raises ValueError, formatted with the id from `invalid`
    or `unset`, unless the id has a callback. -1 on error. */
 void lu_watchers_init(struct _is *interp);
+
+/* Facts compiled code relies on between polls (runtime/jit/deps.c): a
+   type's version (obj: the version), a dict's keys (obj: the dict, which
+   dict watcher id 0 marks), the value of one key (obj: the dict, sub: its
+   value word's offset in the keys table), a function's code and defaults
+   (obj: the function). A
+   writer calls lu_jit_invalidate after its change: the units that rely on
+   it are dead, and every task leaves compiled code at its next poll, the
+   running one's code at its next check. */
+enum lu_dep_kind { LU_DEP_TYPE, LU_DEP_KEYS, LU_DEP_VALUE, LU_DEP_FUNC };
+void lu_jit_invalidate(int kind, uintptr_t obj, uint32_t sub);
 int lu_watcher_add(lu_watcher *table, int first, lu_watcher callback, const char *kind);
 int lu_watcher_check(lu_watcher *table, int id, const char *invalid, const char *unset);
 

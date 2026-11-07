@@ -188,11 +188,14 @@ __compound_literal.*	-	CPython's static initializers of the compiler (a PyUnicod
 _keywords.*	.c.h	Argument Clinic's keyword-name table of a method, never written
 _parser.*	.c.h	Argument Clinic's argument parser of a method; _PyArg_UnpackKeywords fills its keyword tuple once under a mutex
 stats	runtime/jit/jit.c	the optimizing tier's process-wide counts (-X lucifer_jit_stats); compiled units are process-wide too
+census	runtime/jit/jit.c	the units whose execution -X lucifer_jit_stats counts, and the counts of freed ones; process-wide like the units, under its lock
+deps	runtime/jit/deps.c	compiled units' dependencies by object and the log of recent changes; process-wide like the units, under its lock
 binary_names	runtime/jit/ssa_build.c	const table of BINARY_OP method names; relocated by ld.so, then read-only (RELRO)
 compare_names	runtime/jit/ssa_build.c	const table of COMPARE_OP method names; relocated by ld.so, then read-only (RELRO)
 fops.*	runtime/jit/ssa_build.c	const table of float primitives and their IR; relocated by ld.so, then read-only (RELRO)
 lu_helpers	runtime/jit/helpers.c	const table of the helpers compiled code calls; relocated by ld.so, then read-only (RELRO)
 lu_op_names	runtime/jit/ssa.c	const table of IR operation names; relocated by ld.so, then read-only (RELRO)
+lu_count_names	runtime/jit/ssa.c	const table of census count names; relocated by ld.so, then read-only (RELRO)
 lu_target	runtime/jit/x86_64/emit.c	const description of the backend; relocated by ld.so, then read-only (RELRO)
 fwd	-	thread-local: the optimizer pass running on this thread; its TLS symbol has no line
 istart	-	thread-local: the register allocation running on this thread; its TLS symbol has no line

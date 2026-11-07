@@ -661,10 +661,55 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    no eval loop, and the callee pops its frame when it returns. A function
    borrows the parameters it never rebinds from its caller.
 8. **Publication and invalidation.** Code is published by an epoch-checked
-   atomic store into the code object's private tail. Invalidation sets a flag that
-   compiled code checks at guards and polls. Dependency lists (donor
-   `optimizer_dependencies.inc`) mark code dead when a type, keys or global
-   version changes. Patching running code waits for a measured need.
+   atomic store into the code object's private tail. Patching running code
+   waits for a measured need. Compiled code keeps facts between polls, under
+   this rule (invariant, 2026-11-07):
+
+   > A change another thread makes to a type (its dict, `__bases__`, or
+   > `__class__` assignment on an instance of it), to a dict's keys or the
+   > value of one of its keys, or to a function's code or defaults reaches
+   > compiled code at that code's next poll: a loop's back-edge, an inlined
+   > call's entry, or the first check after a call returns. A change the
+   > running thread makes itself, in the unit or in anything it calls or
+   > releases, kills the facts it touches before compiled code next relies on
+   > them. Heap values (attributes, items, cells) are never kept across a
+   > poll or a call unless the object is proven thread-local; tracing and
+   > monitoring state is checked at every poll and entry.
+
+   Mechanism (`runtime/jit/deps.c`, the facts pass of `ssa_opt.c`). A unit
+   lists its dependencies: the facts it relies on past the guard that checked
+   them (a guard moved out of a loop, or one a guard of the same fact
+   dominates). A value's type version is such a fact too, so repeated
+   `self.x` guards go and guards on a loop's invariant objects leave the loop.
+   Facts nothing takes back (an exact immutable type, not NULL) need no
+   dependency. A load of an object's word (its type, size, an attribute) is
+   reused only within a block, between instructions that may run code and
+   polls. Writers call
+   `lu_jit_invalidate` after their change (`lu_type_modified`, `__class__`
+   assignment, the dict changes of a dict watcher id 0 marks, a function's
+   version clearing): the dependent units are marked dead, and every task's
+   poll bit is raised. A poll exits through the ordinary exit path. After any
+   instruction that may run code or change state, the next place that relies
+   on a fact checks that its unit lives (`CHECK_LIVE`). A site whose fact was
+   taken back keeps its guard in place from then on.
+
+   Why no program can tell. Under the GIL a thread switched only at eval-breaker
+   checks (back-edges, calls, RESUME), so another thread's change appeared only
+   there, the same points. 3.14t orders nothing between threads without
+   synchronization, and every primitive that synchronizes (a lock, an event, a
+   queue, a join, I/O) is a call, after which the unit checks it lives. A
+   writer raises the poll bits with a full barrier before its later stores, so
+   a loop that reads one of those stores (a flag) sees the bit at its next
+   poll. Spin loops stay correct because heap values are read every iteration.
+   The running thread's own change happens inside an instruction that may run
+   code; the writer has marked the unit dead before it returns, and the check
+   after that instruction leaves. A compile that read a fact just before a
+   writer changed it is not published: writers log their changes with an
+   epoch under the lock publication takes, and publication fails when a
+   change since the compile's start matches a dependency. A dict is watched
+   and its fact read inside its critical section, where every change to it
+   is made and reported, so a change the compile did not read is logged
+   after its start (the C11 argument is in `deps.c`).
 
 ### 6.3 What comes from the donor
 

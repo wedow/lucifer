@@ -87,6 +87,8 @@ struct lu_deopt {
     int reason;                 /* enum lu_exit_reason */
     int opcode;                 /* the base opcode at the exit, for the counts */
     struct lu_unit *unit;       /* the unit it leaves */
+    PyCodeObject *blame_code;   /* a guard moved out of a loop: the site it came from */
+    int blame_pc;
     int call_pc;                /* lu_jit_frames_push: the innermost frame's instruction during the call */
 };
 
@@ -119,6 +121,7 @@ unsigned long *lu_jit_direct_count(void);
 /* A compiled entry into a code object at one bytecode boundary. */
 struct lu_unit {
     struct lu_unit *next;
+    PyCodeObject *code;         /* whose unit it is (borrowed: the code frees its units) */
     int entry_pc;
     int (*fn)(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
     void *direct;               /* the call entry's direct entry (struct lu_jit_direct), or NULL */
@@ -135,7 +138,44 @@ struct lu_unit {
     unsigned long leaves;       /* exits no recompile can remove: side exits of the root frame, errors */
     int loops;                  /* the code has a back edge: an entry may do unbounded work */
     int dead;
+    struct lu_dep *deps;        /* what it relies on between polls (runtime/jit/deps.c) */
+    int ndeps;
+    /* -X lucifer_jit_stats: what the code executed, by kind (lu_count_kind),
+       and the next unit on the report's list. */
+    unsigned long *counts;
+    char *stats_name;
+    struct lu_unit *stats_next;
 };
+
+/* What -X lucifer_jit_stats counts as compiled code runs it: the census of
+   guards, loads and calls per unit. */
+#define LU_COUNT_KINDS(X) \
+    X(guard_type) X(guard_type_of) X(guard_type_itself) X(guard_keys) X(guard_func) \
+    X(guard_is) X(guard_cell) X(guard_global) X(guard_bit) X(guard_not_null) X(guard_other) \
+    X(unbox) X(live) X(poll) X(load_type) X(load_version) X(load_size) X(load_other) \
+    X(attr_load) X(attr_store) X(global_load) X(item) X(helper) X(incref) X(decref) X(box)
+enum lu_count {
+#define LU_COUNT_ENUM(name) CNT_##name,
+    LU_COUNT_KINDS(LU_COUNT_ENUM)
+#undef LU_COUNT_ENUM
+    CNT_COUNT
+};
+extern const char *const lu_count_names[CNT_COUNT];
+/* The kind an instruction counts as, or -1. */
+int lu_count_kind(const struct lu_ins *in);
+/* Kinds that are guards: every guard_* kind and unbox (not polls and checks that the unit lives). */
+#define LU_COUNT_IS_GUARD(k) ((k) <= CNT_unbox)
+
+/* Dependencies (runtime/jit/deps.c): the epoch a compile starts at, and
+   publishing a unit's (-1: a change since the epoch may have been missed,
+   and the unit is not to be entered); then the policy's side (jit.c): a
+   dependency's unit dies, and its site keeps its guard in place. */
+uint64_t lu_jit_deps_epoch(void);
+int lu_jit_deps_publish(struct lu_unit *u, const struct lu_fdep *want, int n, uint64_t epoch0);
+void lu_jit_deps_free(struct lu_unit *u);
+void lu_jit_unit_kill(struct lu_unit *u);
+void lu_jit_nohoist_set(PyCodeObject *code, int pc);
+int lu_jit_nohoist(PyCodeObject *code, int pc);
 
 /* Lowers an allocated function into unit: code, exits, constants. 0, or
    -1 with f->fail set. */

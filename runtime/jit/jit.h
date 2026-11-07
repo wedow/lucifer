@@ -201,6 +201,15 @@ void lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name);
 /* lu_specialize_forget for the code's polymorphic caches. */
 void lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *));
 
+/* A fact compiled code relies on between polls (lu_jit_invalidate). */
+struct lu_fdep {
+    int kind;
+    uint32_t sub;
+    uintptr_t obj;
+    PyCodeObject *code;         /* the site whose guard it stands for */
+    int pc;
+};
+
 /* Releases a code object's compiled units (code_dealloc). */
 void lu_jit_code_free(PyCodeObject *code);
 
