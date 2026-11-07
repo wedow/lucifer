@@ -808,10 +808,10 @@ exit_to(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
     return label;
 }
 
-/* A guard's failure jumps here; under -X lucifer_stress=deopt:N, every
-   Nth guard execution also leaves (FOUNDATIONS 2.7). */
-static int
-guard_exit(struct asm_ *a, struct lu_ins *in)
+/* Under -X lucifer_stress=deopt:N, every Nth guard execution leaves
+   (FOUNDATIONS 2.7). */
+static void
+stress_exit(struct asm_ *a, struct lu_ins *in)
 {
     if (a->f->stress && !(in->flags & INS_NOSTRESS)) {
         int stress = exit_to(a, in->fs, EXIT_STRESS, 0, 0);
@@ -822,7 +822,19 @@ guard_exit(struct asm_ *a, struct lu_ins *in)
         modrm_mem(a, 1, R11, 0);                /* dec qword [r11] */
         jcc(a, CC_E, stress);
     }
-    return exit_to(a, in->fs, EXIT_GUARD, 0, 0);
+}
+
+/* A guard's failure jumps here, blaming the site it was moved from. */
+static int
+guard_exit(struct asm_ *a, struct lu_ins *in)
+{
+    stress_exit(a, in);
+    int label = exit_to(a, in->fs, EXIT_GUARD, 0, 0);
+    if (in->origin != NULL) {
+        a->exits[a->nexits - 1].d->blame_code = in->origin->code;
+        a->exits[a->nexits - 1].d->blame_pc = in->origin->pc;
+    }
+    return label;
 }
 
 /* --- calls --- */
@@ -1955,6 +1967,16 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         mov_ri(a, RCX, (int64_t)(intptr_t)&_PyRuntime.sched.active);
         cmp_mi(a, 0, RCX, 0, 0);
         jcc(a, CC_NE, poll);
+        return 0;
+    }
+    case OP_CHECK_LIVE: {
+        /* A fact relied on since the last check may have been taken back
+           (runtime/jit/deps.c): a dead unit leaves, as at a poll. */
+        stress_exit(a, in);
+        int dead = exit_to(a, in->fs, EXIT_POLL, 0, 0);
+        mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
+        cmp_mi(a, 0, R11, 0, 0);
+        jcc(a, CC_NE, dead);
         return 0;
     }
     case OP_DEOPT:

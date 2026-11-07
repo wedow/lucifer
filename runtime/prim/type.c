@@ -229,7 +229,9 @@ lu_type_modified(PyTypeObject *tp)
     }
     Py_DECREF(subs);
     notify_type_watchers(tp);
+    unsigned int version = tp->tp_version_tag;
     set_version(tp, 0);
+    lu_jit_invalidate(LU_DEP_TYPE, version, 0);
 }
 
 void
@@ -2175,6 +2177,10 @@ prim_set_class(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         Py_INCREF(newto);
     }
     Py_SET_TYPE(self, newto);
+    /* Compiled code may rely on what an object of the old type is. */
+    if (oldto->tp_version_tag != 0) {
+        lu_jit_invalidate(LU_DEP_TYPE, oldto->tp_version_tag, 0);
+    }
     if (oldto->tp_flags & Py_TPFLAGS_HEAPTYPE) {
         Py_DECREF(oldto);
     }

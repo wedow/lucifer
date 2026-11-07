@@ -1,6 +1,8 @@
 /* The optimizer's passes over block SSA (DESIGN 6.2 step 3), in order:
 
    1. Trivial phis go (a phi of one value, or of itself and one value).
+      Then facts: guards of what only a writer changes leave loops, and
+      repeated ones go (1b).
    2. Representation: a phi whose inputs are all int boxes (or float
       boxes), counting phis of the same kind, becomes a raw phi under one
       box, so loop-carried ints and floats stay in registers.
@@ -412,6 +414,508 @@ simplify(struct lu_func *f)
     return changed;
 }
 
+/* 1b. Facts (DESIGN 6.2 step 7). A guard on a constant type's version, a
+   constant dict's keys or the value of one of its keys, or a constant
+   function's version checks a fact only a writer's change takes back, and
+   the writer kills the units that rely on it (runtime/jit/deps.c). Such a
+   guard inside a loop moves before the loop, to a preheader, where it
+   leaves at the loop's entry state and blames its old site; one that a
+   guard of the same fact dominates is redundant. A redundant guard goes,
+   or stays as a check that the unit lives (CHECK_LIVE) when something that
+   may run code or change state came since the last check or the entry:
+   that may have been the running thread's own change, or a call whose
+   polls took the bit another thread's change raised. A poll is no such
+   check, since a call before it may have taken the bit. Each fact relied on is a dependency of the unit. A site whose
+   fact was taken back before (lu_jit_nohoist) keeps its guards. */
+
+/* What a guard checks, when it is a fact that holds now, with the watch
+   that makes its writers report it. */
+static int
+fact_of(struct lu_func *f, struct lu_ins *in, struct lu_fdep *dep)
+{
+    if (in->fs == NULL || in->a == LU_NOV || f->ins[in->a].op != OP_CONST
+        || lu_jit_nohoist(in->fs->code, in->fs->pc)) {
+        return 0;
+    }
+    PyObject *o = (PyObject *)(intptr_t)f->ins[in->a].imm;
+    *dep = (struct lu_fdep){ .code = in->fs->code, .pc = in->fs->pc, .obj = (uintptr_t)o };
+    if (in->op == OP_GUARD_VERSION && in->imm2 == GV_TYPE_ITSELF) {
+        dep->kind = LU_DEP_TYPE;
+        dep->obj = (uint32_t)in->imm;
+        return __atomic_load_n(&((PyTypeObject *)o)->tp_version_tag, __ATOMIC_ACQUIRE) == (uint32_t)in->imm;
+    }
+    if (in->op == OP_GUARD_VERSION && in->imm2 == GV_FUNC) {
+        dep->kind = LU_DEP_FUNC;
+        return __atomic_load_n(&((PyFunctionObject *)o)->func_version, __ATOMIC_ACQUIRE) == (uint32_t)in->imm;
+    }
+    int keys = in->op == OP_GUARD_VERSION && in->imm2 == GV_DICT_KEYS;
+    int value = in->op == OP_GUARD_IS && GI_MODE(in->imm2) == 2;
+    if (!keys && !value) {
+        return 0;
+    }
+    /* Watched before it is read, so a change after the read is reported. */
+    __atomic_fetch_or(&((PyDictObject *)o)->_ma_watcher_tag, 1, __ATOMIC_SEQ_CST);
+    PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)o)->ma_keys, __ATOMIC_ACQUIRE);
+    if (keys) {
+        dep->kind = LU_DEP_KEYS;
+        return __atomic_load_n(&dk->dk_version, __ATOMIC_ACQUIRE) == (uint32_t)in->imm;
+    }
+    dep->kind = LU_DEP_VALUE;
+    dep->sub = (uint32_t)GI_OFFSET(in->imm2);
+    return __atomic_load_n((PyObject **)((char *)dk + GI_OFFSET(in->imm2)), __ATOMIC_ACQUIRE)
+        == (PyObject *)(intptr_t)in->imm;
+}
+
+static int
+same_fact(struct lu_func *f, struct lu_ins *x, struct lu_ins *y)
+{
+    return x->op == y->op && x->imm == y->imm && x->imm2 == y->imm2 && x->a != LU_NOV && y->a != LU_NOV
+        && f->ins[x->a].op == OP_CONST && f->ins[y->a].op == OP_CONST && f->ins[x->a].imm == f->ins[y->a].imm;
+}
+
+/* Whether releasing v cannot run a finalizer: v is an int, a float, a bool
+   or an immortal object on every path. */
+static int
+plain(struct lu_func *f, lu_v v, int depth)
+{
+    struct lu_ins *in = &f->ins[resolve(v)];
+    switch (in->op) {
+    case OP_BOX_INT: case OP_BOX_FLOAT: case OP_BOOL:
+        return 1;
+    case OP_CONST:
+        return in->imm == 0 || _Py_IsImmortal((PyObject *)(intptr_t)in->imm);
+    case OP_PHI:
+        for (int i = 0; depth < 4 && i < in->nargs; i++) {
+            if (resolve(in->args[i]) != resolve(v) && !plain(f, in->args[i], depth + 1)) {
+                return 0;
+            }
+        }
+        return depth < 4;
+    default:
+        return 0;
+    }
+}
+
+/* Whether an instruction may run code or change what a fact names. */
+static int
+may_change(struct lu_func *f, struct lu_ins *in)
+{
+    switch (in->op) {
+    case OP_BOX_INT: case OP_BOX_FLOAT: case OP_LIST_ITEM: case OP_ATTR_LOAD: case OP_GLOBAL_LOAD:
+        return 0;
+    case OP_DECREF:
+        return !plain(f, in->a, 0);
+    case OP_HELPER:
+        return !(in->imm == H_box_int || in->imm == H_box_float || in->imm == H_list_item
+                 || in->imm == H_attr_load || in->imm == H_slot_load || in->imm == H_dict_lacks
+                 || in->imm == H_cell_load || in->imm == H_compare_ideq || in->imm == H_range_iter);
+    default:
+        return (lu_op_flags[in->op] & IF_CALL) || in->op == OP_TRUTH;
+    }
+}
+
+/* Blocks in reverse postorder from the entry, and immediate dominators
+   (Cooper, Harvey and Kennedy); -1 for blocks not reached. */
+struct cfg {
+    int *rpo, n;
+    int *at;                    /* block -> position in rpo, or -1 */
+    int *idom;
+};
+
+static void
+cfg_build(struct lu_func *f, struct cfg *g)
+{
+    int nb = f->nblocks;
+    g->rpo = malloc(sizeof(int) * (size_t)nb);
+    g->at = malloc(sizeof(int) * (size_t)nb);
+    g->idom = malloc(sizeof(int) * (size_t)nb);
+    int *post = malloc(sizeof(int) * (size_t)nb), np = 0;
+    int *stack = malloc(sizeof(int) * (size_t)nb), *next = calloc((size_t)nb, sizeof(int)), sp = 0;
+    for (int b = 0; b < nb; b++) {
+        g->at[b] = -1;
+        g->idom[b] = -1;
+    }
+    g->at[0] = 0;
+    stack[sp++] = 0;
+    while (sp > 0) {
+        int b = stack[sp - 1];
+        if (next[b] < f->blocks[b].nsucc) {
+            int s = f->blocks[b].succ[next[b]++];
+            if (g->at[s] < 0) {
+                g->at[s] = 0;
+                stack[sp++] = s;
+            }
+        }
+        else {
+            post[np++] = b;
+            sp--;
+        }
+    }
+    g->n = np;
+    for (int i = 0; i < np; i++) {
+        g->rpo[i] = post[np - 1 - i];
+        g->at[g->rpo[i]] = i;
+    }
+    g->idom[0] = 0;
+    for (int changed = 1; changed;) {
+        changed = 0;
+        for (int i = 1; i < np; i++) {
+            int b = g->rpo[i], d = -1;
+            for (int k = 0; k < f->blocks[b].npreds; k++) {
+                int p = f->blocks[b].preds[k];
+                if (g->at[p] < 0 || g->idom[p] < 0) {
+                    continue;
+                }
+                if (d < 0) {
+                    d = p;
+                    continue;
+                }
+                int x = p, y = d;
+                while (x != y) {
+                    while (g->at[x] > g->at[y]) {
+                        x = g->idom[x];
+                    }
+                    while (g->at[y] > g->at[x]) {
+                        y = g->idom[y];
+                    }
+                }
+                d = x;
+            }
+            if (d != g->idom[b]) {
+                g->idom[b] = d;
+                changed = 1;
+            }
+        }
+    }
+    free(post);
+    free(stack);
+    free(next);
+}
+
+static void
+cfg_free(struct cfg *g)
+{
+    free(g->rpo);
+    free(g->at);
+    free(g->idom);
+}
+
+static int
+dominates_block(struct cfg *g, int a, int b)
+{
+    while (b != a && b != 0) {
+        b = g->idom[b];
+    }
+    return b == a;
+}
+
+/* The loop headers, and per header the blocks of its loop (a back edge's
+   source reaches its header, which dominates it, through them). */
+static char **
+loops_find(struct lu_func *f, struct cfg *g)
+{
+    int nb = f->nblocks;
+    char **body = calloc((size_t)nb, sizeof(char *));
+    int *work = malloc(sizeof(int) * (size_t)nb);
+    for (int i = 0; i < g->n; i++) {
+        int b = g->rpo[i];
+        for (int s = 0; s < f->blocks[b].nsucc; s++) {
+            int h = f->blocks[b].succ[s];
+            if (!dominates_block(g, h, b)) {
+                continue;
+            }
+            if (body[h] == NULL) {
+                body[h] = calloc((size_t)nb, 1);
+                body[h][h] = 1;
+            }
+            int nw = 0;
+            if (!body[h][b]) {
+                body[h][b] = 1;
+                work[nw++] = b;
+            }
+            while (nw > 0) {
+                int x = work[--nw];
+                for (int k = 0; k < f->blocks[x].npreds; k++) {
+                    int p = f->blocks[x].preds[k];
+                    if (g->at[p] >= 0 && !body[h][p]) {
+                        body[h][p] = 1;
+                        work[nw++] = p;
+                    }
+                }
+            }
+        }
+    }
+    free(work);
+    return body;
+}
+
+/* The one predecessor of header h from outside its loop, made to have h as
+   its only successor (an edge split), or -1. */
+static int
+preheader(struct lu_func *f, int h, char *body)
+{
+    int p = -1, at = -1;
+    for (int k = 0; k < f->blocks[h].npreds; k++) {
+        int q = f->blocks[h].preds[k];
+        if (!body[q]) {
+            if (p >= 0) {
+                return -1;
+            }
+            p = q;
+            at = k;
+        }
+    }
+    if (p < 0 || f->blocks[p].nsucc == 1) {
+        return p;
+    }
+    int mid = lu_ir_block(f);
+    lu_ir_emit(f, mid, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+    f->blocks[mid].succ[0] = h;
+    f->blocks[mid].nsucc = 1;
+    f->blocks[mid].preds = malloc(sizeof(int));
+    f->blocks[mid].preds[0] = p;
+    f->blocks[mid].npreds = f->blocks[mid].cappreds = 1;
+    for (int s = 0; s < f->blocks[p].nsucc; s++) {
+        if (f->blocks[p].succ[s] == h) {
+            f->blocks[p].succ[s] = mid;
+        }
+    }
+    f->blocks[h].preds[at] = mid;
+    return mid;
+}
+
+/* Header h's entry state as it stands at the end of its preheader p: h's
+   phis are their inputs from p. */
+static struct lu_fs *
+preheader_state(struct lu_func *f, int h, int p)
+{
+    struct lu_fs *in = f->blocks[h].entry_fs;
+    int at = 0;
+    while (f->blocks[h].preds[at] != p) {
+        at++;
+    }
+    struct lu_fs *fs = lu_ir_alloc(f, sizeof(struct lu_fs));
+    *fs = *in;
+    int n = in->nlocals + in->nstack;
+    fs->vals = lu_ir_alloc(f, sizeof(lu_v) * (size_t)(n ? n : 1));
+    fs->owned = lu_ir_alloc(f, (size_t)(n ? n : 1));
+    memcpy(fs->owned, in->owned, (size_t)n);
+    for (int i = 0; i < n; i++) {
+        lu_v v = resolve(in->vals[i]);
+        if (v != LU_NOV && f->ins[v].op == OP_PHI && f->ins[v].block == h) {
+            v = resolve(f->ins[v].args[at]);
+            if (f->ins[v].op == OP_CONST && f->ins[v].imm == 0) {
+                v = LU_NOV;     /* an unbound local */
+            }
+        }
+        fs->vals[i] = v;
+    }
+    return fs;
+}
+
+/* Puts guard g's copy last before block p's terminator, leaving at fs. */
+static lu_v
+hoist_copy(struct lu_func *f, lu_v g, int p, struct lu_fs *fs)
+{
+    lu_v c = lu_ir_emit(f, p, f->ins[g].op, REP_NONE, f->ins[g].a, f->ins[g].b, f->ins[g].c, f->ins[g].imm);
+    struct lu_ins *in = &f->ins[c], *from = &f->ins[g];
+    in->imm2 = from->imm2;
+    in->flags = from->flags;
+    in->fs = fs;
+    in->origin = from->fs;
+    struct lu_block *bl = &f->blocks[p];
+    bl->ins[bl->nins - 1] = bl->ins[bl->nins - 2];
+    bl->ins[bl->nins - 2] = c;
+    return c;
+}
+
+static void
+note_dep(struct lu_func *f, struct lu_fdep *dep)
+{
+    for (int i = 0; i < f->ndeps; i++) {
+        struct lu_fdep *d = &f->deps[i];
+        if (d->kind == dep->kind && d->obj == dep->obj && d->sub == dep->sub) {
+            return;
+        }
+    }
+    if (f->ndeps == f->capdeps) {
+        f->capdeps = f->capdeps ? 2 * f->capdeps : 8;
+        f->deps = realloc(f->deps, sizeof(struct lu_fdep) * (size_t)f->capdeps);
+    }
+    f->deps[f->ndeps++] = *dep;
+}
+
+static void
+facts(struct lu_func *f)
+{
+    /* Preheaders first: they change the graph the rest is computed on. */
+    int nstart = f->nins;
+    struct cfg g;
+    cfg_build(f, &g);
+    char **body = loops_find(f, &g);
+    int nb0 = f->nblocks;
+    int *pre = malloc(sizeof(int) * (size_t)nb0);
+    for (int h = 0; h < nb0; h++) {
+        pre[h] = body[h] != NULL && f->blocks[h].entry_fs != NULL ? preheader(f, h, body[h]) : -1;
+        free(body[h]);
+    }
+    free(body);
+    cfg_free(&g);
+    cfg_build(f, &g);
+    body = loops_find(f, &g);
+    int nb = f->nblocks;
+    /* Facts inside loops move to the outermost loop's preheader. */
+    int nins0 = f->nins;
+    char *redundant = calloc((size_t)nins0, 1);
+    struct lu_fs **live_at = calloc((size_t)nb, sizeof(struct lu_fs *));      /* preheaders given guards */
+    struct lu_fdep dep;
+    for (int i = 0; i < g.n; i++) {
+        int b = g.rpo[i];
+        for (int k = 0; k < f->blocks[b].nins; k++) {
+            lu_v v = f->blocks[b].ins[k];
+            if (v >= nins0 || (f->ins[v].flags & INS_DEAD) || !fact_of(f, &f->ins[v], &dep)) {
+                continue;
+            }
+            int best = -1;
+            for (int h = 0; h < nb0; h++) {
+                if (pre[h] >= 0 && body[h] != NULL && body[h][b] && (best < 0 || body[h][best])) {
+                    best = h;
+                }
+            }
+            if (best < 0) {
+                continue;
+            }
+            int p = pre[best];
+            int have = 0;
+            for (int j = 0; j < f->blocks[p].nins && !have; j++) {
+                lu_v w = f->blocks[p].ins[j];
+                have = w >= nins0 && same_fact(f, &f->ins[w], &f->ins[v]);
+            }
+            if (!have) {
+                if (live_at[p] == NULL) {
+                    live_at[p] = preheader_state(f, best, p);
+                }
+                hoist_copy(f, v, p, live_at[p]);
+            }
+            note_dep(f, &dep);
+        }
+    }
+    /* A loop starts knowing the unit lives: a check before it, which goes
+       again unless something before may have changed a fact. */
+    int nhoisted = f->nins;
+    for (int p = 0; p < nb; p++) {
+        if (live_at[p] != NULL) {
+            lu_v live = lu_ir_emit(f, p, OP_CHECK_LIVE, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+            f->ins[live].fs = live_at[p];
+            struct lu_block *bl = &f->blocks[p];
+            bl->ins[bl->nins - 1] = bl->ins[bl->nins - 2];
+            bl->ins[bl->nins - 2] = live;
+        }
+    }
+    fwd = realloc(fwd, sizeof(lu_v) * (size_t)f->capins);
+    for (int v = nstart; v < f->nins; v++) {
+        fwd[v] = v;
+    }
+    redundant = realloc(redundant, (size_t)f->nins);
+    memset(redundant + nins0, 0, (size_t)(f->nins - nins0));
+    memset(redundant + nhoisted, 1, (size_t)(f->nins - nhoisted));
+    /* Redundant guards: a guard of the same fact dominates them. */
+    for (int i = 0; i < g.n; i++) {
+        int b = g.rpo[i];
+        for (int k = 0; k < f->blocks[b].nins; k++) {
+            lu_v v = f->blocks[b].ins[k];
+            if ((f->ins[v].flags & INS_DEAD) || !fact_of(f, &f->ins[v], &dep)) {
+                continue;
+            }
+            for (int d = b, found = 0; !found; d = g.idom[d]) {
+                struct lu_block *bl = &f->blocks[d];
+                for (int j = 0; j < bl->nins && !found; j++) {
+                    lu_v w = bl->ins[j];
+                    if (d == b && w == v) {
+                        break;
+                    }
+                    found = !(f->ins[w].flags & INS_DEAD) && !redundant[w] && w != v
+                        && f->ins[w].op == f->ins[v].op && same_fact(f, &f->ins[w], &f->ins[v]);
+                }
+                if (found) {
+                    redundant[v] = 1;
+                    note_dep(f, &dep);
+                }
+                if (d == 0) {
+                    break;
+                }
+            }
+        }
+    }
+    /* Whether the unit is known to live at each block's start: none of
+       its predecessors' ends may have changed anything since a check. */
+    char *live_in = malloc((size_t)nb), *live_out = malloc((size_t)nb);
+    memset(live_in, 1, (size_t)nb);
+    memset(live_out, 1, (size_t)nb);
+    for (int changed = 1; changed;) {
+        changed = 0;
+        for (int i = 0; i < g.n; i++) {
+            int b = g.rpo[i];
+            int live = 1;
+            for (int k = 0; b != 0 && k < f->blocks[b].npreds; k++) {
+                int p = f->blocks[b].preds[k];
+                live &= g.at[p] < 0 || live_out[p];
+            }
+            live_in[b] = (char)live;
+            for (int k = 0; k < f->blocks[b].nins; k++) {
+                struct lu_ins *in = &f->ins[f->blocks[b].ins[k]];
+                if (in->flags & INS_DEAD) {
+                    continue;
+                }
+                if (redundant[f->blocks[b].ins[k]]) {
+                    live = 1;
+                }
+                else if (may_change(f, in)) {
+                    live = 0;
+                }
+            }
+            if (live != live_out[b]) {
+                live_out[b] = (char)live;
+                changed = 1;
+            }
+        }
+    }
+    for (int i = 0; i < g.n; i++) {
+        int b = g.rpo[i];
+        int live = live_in[b];
+        for (int k = 0; k < f->blocks[b].nins; k++) {
+            lu_v v = f->blocks[b].ins[k];
+            struct lu_ins *in = &f->ins[v];
+            if (in->flags & INS_DEAD) {
+                continue;
+            }
+            if (redundant[v]) {
+                if (live) {
+                    in->flags |= INS_DEAD;
+                }
+                else {
+                    in->op = OP_CHECK_LIVE;
+                    in->a = in->b = in->c = LU_NOV;
+                }
+                live = 1;
+            }
+            else if (may_change(f, in)) {
+                live = 0;
+            }
+        }
+    }
+    for (int h = 0; h < nb; h++) {
+        free(body[h]);
+    }
+    free(body);
+    free(pre);
+    free(live_at);
+    free(redundant);
+    free(live_in);
+    free(live_out);
+    cfg_free(&g);
+}
+
 /* Use counts, with frame-state uses apart. */
 struct uses {
     int *n;                     /* every use */
@@ -795,6 +1299,7 @@ lu_ssa_optimize(struct lu_func *f)
     while (trivial_phis(f)) {
     }
     rewrite(f);
+    facts(f);
     unbox_phis(f, REP_I64);
     rewrite(f);
     unbox_phis(f, REP_F64);

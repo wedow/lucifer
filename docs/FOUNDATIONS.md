@@ -255,6 +255,9 @@ Oracle PASS rows: `test_capi.test_watchers` 58. difftest has
   `lu_func_notify`, and code create/destroy.
 - **The JIT's dependencies use the same paths.** They are internal watcher ids,
   as CPython reserves for itself. Inline caches guard on the same fields.
+  Dict watcher id 0 marks the dicts compiled code relies on; each notify path
+  calls `lu_jit_invalidate` after its change, and a dependent unit dies, which
+  running code sees at its next poll (DESIGN §6.2 step 7).
 
 **Checks.**
 - **K1** `tests/kernel/invalidate.py` warms a loop, then mutates:

@@ -115,7 +115,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(BRANCH, REP_NONE, IF_TERM)        /* a: bit; to succ[0] when 1 */ \
     X(RETURN, REP_NONE, IF_TERM)        /* a: the frame's result, owned */ \
     X(DEOPT, REP_NONE, IF_TERM)         /* leaves unconditionally at fs; imm: the reason */ \
-    X(POLL, REP_NONE, IF_GUARD)         /* a back-edge: leaves at fs if the poll word is set */
+    X(POLL, REP_NONE, IF_GUARD)         /* a back-edge: leaves at fs if the poll word is set */ \
+    X(CHECK_LIVE, REP_NONE, IF_GUARD | IF_EFFECT)   /* leaves at fs, as a poll does, once the unit is dead */
 
 /* GUARD_VERSION's imm2: whose version. */
 enum { GV_TYPE_OF, GV_TYPE_ITSELF, GV_DICT_KEYS, GV_FUNC };
@@ -166,6 +167,7 @@ struct lu_ins {
     lu_v a, b, c;
     int64_t imm, imm2;
     struct lu_fs *fs;           /* where a guard or a raise leaves */
+    struct lu_fs *origin;       /* a guard moved out of a loop: where it was, which its failure blames */
     int nargs;
     lu_v *args;                 /* PHI: per predecessor; HELPER: the arguments */
     /* The backend's: the position in the linear order, and the location. */
@@ -183,6 +185,7 @@ struct lu_block {
     int order;                  /* position in the emission order */
     int start, end;             /* linear positions of its first and last instruction */
     int loop_end;               /* for a loop header: the last position of its loop, else -1 */
+    struct lu_fs *entry_fs;     /* a join's state at its start, its phis as values: a loop's guards move before it */
 };
 
 /* Helpers compiled code calls (runtime/jit/helpers.c). */
@@ -220,6 +223,8 @@ struct lu_func {
     int room;                   /* the recursion budget the deepest inlined frame needs */
     int loops;                  /* back edges built: one entry may run unbounded work */
     int sites, cold;            /* sites with feedback, and those the interpreter never ran */
+    struct lu_fdep *deps;       /* the facts the code relies on between polls */
+    int ndeps, capdeps;
 };
 
 /* Building and editing. */

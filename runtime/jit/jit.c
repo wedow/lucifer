@@ -5,11 +5,13 @@
    Compiles run synchronously in the thread that found the code hot, one
    per code object at a time; another thread meanwhile interprets. A unit
    is published by a release store after it is complete, and never freed
-   while its code lives. Guards are checked by the code itself each time
-   they run, so a change another thread makes (a type, a global, a
-   function's code) sends running code out at its next guard; units only
-   go dead when one guard keeps failing, which also marks its instruction
-   not to be speculated on again (the donor's exit-driven recompile).
+   while its code lives. A unit may rely on what only a writer changes (a
+   type's version, a dict's keys or one key's value, a function's code)
+   between polls: a change another thread makes reaches it at its next
+   poll, and the running thread's own at once (DESIGN 6.2 step 7,
+   runtime/jit/deps.c). A unit also goes dead when one guard keeps failing,
+   which marks its instruction not to be speculated on again (the donor's
+   exit-driven recompile).
 
    An exit no recompile can remove (an instruction the tier does not
    compile, an exception the unit does not handle) costs an exit and, at
@@ -35,6 +37,9 @@
 #include <time.h>
 #include <unistd.h>
 
+/* nospec bits. */
+#define NOSPEC 1
+#define NOHOIST 2
 /* A guard that fails this often makes its instruction generic. */
 #define GUARD_FAILS 50
 /* Exits a unit without loops takes, on at least half its entries, before
@@ -57,7 +62,7 @@ struct lu_jit_code {
     int nfailed;
     int failed[MAX_ENTRIES];    /* entry pcs that did not compile */
     int ncode;
-    uint8_t *nospec;            /* per code unit: do not speculate */
+    uint8_t *nospec;            /* per code unit: NOSPEC, do not speculate; NOHOIST, keep its guards in place */
     uint16_t *fails;            /* per code unit: guard failures */
     uint16_t *wait;             /* per code unit: entries to leave to the interpreter, or FOREVER */
     uint8_t *warmed;            /* per code unit: an entry whose compile was put off for feedback once */
@@ -67,7 +72,7 @@ struct lu_jit_code {
 };
 
 static struct {
-    unsigned long compiles, failures, entries, returns, units_dead, direct;
+    unsigned long compiles, failures, entries, returns, units_dead, direct, invalidated;
     unsigned long exits[EXIT_REASONS];
     unsigned long inlined;
     unsigned long bailouts[256];        /* side exits planted, per base opcode */
@@ -163,7 +168,32 @@ int
 lu_jit_nospec(PyCodeObject *code, int pc)
 {
     struct lu_jit_code *jc = state_of(code);
-    return jc != NULL && pc >= 0 && pc < jc->ncode && __atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED);
+    return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & NOSPEC);
+}
+
+int
+lu_jit_nohoist(PyCodeObject *code, int pc)
+{
+    struct lu_jit_code *jc = state_of(code);
+    return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & NOHOIST);
+}
+
+void
+lu_jit_nohoist_set(PyCodeObject *code, int pc)
+{
+    struct lu_jit_code *jc = state_for(code);
+    if (pc >= 0 && pc < jc->ncode) {
+        __atomic_fetch_or(&jc->nospec[pc], NOHOIST, __ATOMIC_RELAXED);
+    }
+}
+
+void
+lu_jit_unit_kill(struct lu_unit *u)
+{
+    if (!__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
+        count(&stats.units_dead, 1);
+        count(&stats.invalidated, 1);
+    }
 }
 
 int
@@ -226,6 +256,7 @@ free_unit(struct lu_unit *u)
     }
     free(u->consts);
     free(u->stress_counter);
+    lu_jit_deps_free(u);
     if (u->counts != NULL) {
         /* Its counts stay in the report's totals. */
         PyMutex_Lock(&census.lock);
@@ -258,6 +289,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
         *u->stress_counter = (long)(_PyRuntime.stress.seed % _PyRuntime.stress.deopt) + 1;
     }
     double t0 = now();
+    uint64_t epoch = lu_jit_deps_epoch();      /* before anything the build reads */
     int dump = _PyRuntime.jit.dump;
     if (dump) {
         fprintf(stderr, "jit: compiling %s@%d\n", PyUnicode_AsUTF8(frame->code->co_qualname), pc);
@@ -300,6 +332,14 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
             fprintf(stderr, "jit: failed %s@%d: %s\n", PyUnicode_AsUTF8(frame->code->co_qualname), pc,
                     f.fail != NULL ? f.fail : "compile failed");
         }
+        lu_ir_free(&f);
+        free_unit(u);
+        return NULL;
+    }
+    if (lu_jit_deps_publish(u, f.deps, f.ndeps, epoch) < 0) {
+        /* A fact it relies on changed while it compiled: the next entry compiles again. */
+        note_failure("a dependency changed during the compile");
+        __atomic_store_n(&jc->wait[pc], 1, __ATOMIC_RELAXED);
         lu_ir_free(&f);
         free_unit(u);
         return NULL;
@@ -618,6 +658,17 @@ lu_jit_note_exit(struct lu_deopt *d)
                 PyUnicode_AsUTF8(in->code->co_qualname), in->pc, d->opcode, d->nframes);
     }
     struct lu_unit *u = d->unit;
+    if (d->reason == EXIT_GUARD && d->blame_code != NULL) {
+        /* A guard moved out of a loop failed: its site keeps it in place,
+           and the code recompiles. */
+        lu_jit_nohoist_set(d->blame_code, d->blame_pc);
+        struct lu_jit_code *root = state_for(d->frames[0].code);
+        for (struct lu_unit *r = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); r != NULL; r = r->next) {
+            lu_jit_unit_kill(r);
+        }
+        root->nfailed = 0;
+        return;
+    }
     int handled = d->reason == EXIT_ERROR ? handling_frame(d) : d->nframes - 1;
     if (handled < 0) {
         return;
@@ -649,7 +700,7 @@ lu_jit_note_exit(struct lu_deopt *d)
             __atomic_store_n(&jc->noinline, 1, __ATOMIC_RELAXED);
         }
         else {
-            __atomic_store_n(&jc->nospec[inner->pc], 1, __ATOMIC_RELAXED);
+            __atomic_fetch_or(&jc->nospec[inner->pc], NOSPEC, __ATOMIC_RELAXED);
         }
         /* Every unit of the root code is recompiled at its next entry. */
         struct lu_jit_code *root = state_for(d->frames[0].code);
@@ -803,6 +854,7 @@ lu_jit_report(void)
     fprintf(stderr, "jit: compiles %lu, failed %lu, units recompiled %lu, inlined calls %lu, "
             "compile time %.1f ms, code %lu bytes\n", stats.compiles, stats.failures, stats.units_dead,
             stats.inlined, stats.compile_seconds * 1e3, stats.code_bytes);
+    fprintf(stderr, "jit: units invalidated %lu\n", stats.invalidated);
     for (int i = 0; i < 8 && stats.failure_names[i] != NULL; i++) {
         fprintf(stderr, "jit:   failed: %s: %lu\n", stats.failure_names[i], stats.failure_reasons[i]);
     }

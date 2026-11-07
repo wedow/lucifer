@@ -3097,6 +3097,9 @@ build_block(struct ctx *c, int bi)
         c->cache = cache_of(c, pc);
         c->snap = NULL;
         before(c);
+        if (pc == b->pc && b->phis && !b->exc) {
+            c->f->blocks[b->id].entry_fs = c->snap;
+        }
         if (!supported(c->base)) {
             unsupported(c);
             break;

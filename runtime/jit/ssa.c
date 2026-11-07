@@ -38,6 +38,7 @@ lu_count_kind(const struct lu_ins *in)
     case OP_GUARD_DEPTH: case OP_GUARD_FRAMES: return CNT_guard_other;
     case OP_UNBOX_INT: case OP_UNBOX_FLOAT: return CNT_unbox;
     case OP_POLL: return CNT_poll;
+    case OP_CHECK_LIVE: return CNT_live;
     case OP_LOAD:
         return in->imm == offsetof(PyObject, ob_type) ? CNT_load_type
             : in->imm == offsetof(PyTypeObject, tp_version_tag) && in->imm2 == 4 ? CNT_load_version
@@ -187,6 +188,7 @@ lu_ir_free(struct lu_func *f)
     free(f->ins);
     free(f->known);
     free(f->known_block);
+    free(f->deps);
     free(f->order);
     for (int i = 0; i < f->nconsts; i++) {
         Py_XDECREF(f->consts[i]);

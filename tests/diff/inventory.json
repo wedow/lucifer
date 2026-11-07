@@ -720,6 +720,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/threads_patch_mid_loop.py": {
+      "exit": 0,
+      "sha256": "e6f2ca0dbc0b0d4d913e9334c59e0e76c6bb33eae9fe3caad71e6baee5d22b12",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/unicode_case_expansion.py": {
       "exit": 0,
       "sha256": "cd2896d94688cf81cdcf3f642be2b37cc90959459e52ccbf6cc1c0003d48534e",
