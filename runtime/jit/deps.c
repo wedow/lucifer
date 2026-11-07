@@ -20,6 +20,7 @@
    entry read the new state. */
 #include "jit/target.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 
 #define NBUCKETS 1024
@@ -157,6 +158,10 @@ lu_jit_invalidate(int kind, uintptr_t obj, uint32_t sub)
         /* The unit is dead, and so are its other dependencies; its site
            keeps its guard in place from now on. */
         struct lu_unit *u = d->unit;
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: invalidate kind %d of %s@%d\n", kind, PyUnicode_AsUTF8(d->want.code->co_qualname),
+                    d->want.pc);
+        }
         lu_jit_nohoist_set(d->want.code, d->want.pc);
         for (int i = 0; i < u->ndeps; i++) {
             unlink_dep(&u->deps[i]);

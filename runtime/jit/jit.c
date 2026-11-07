@@ -661,6 +661,10 @@ lu_jit_note_exit(struct lu_deopt *d)
     if (d->reason == EXIT_GUARD && d->blame_code != NULL) {
         /* A guard moved out of a loop failed: its site keeps it in place,
            and the code recompiles. */
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: hoisted guard failed, from %s@%d\n", PyUnicode_AsUTF8(d->blame_code->co_qualname),
+                    d->blame_pc);
+        }
         lu_jit_nohoist_set(d->blame_code, d->blame_pc);
         struct lu_jit_code *root = state_for(d->frames[0].code);
         for (struct lu_unit *r = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); r != NULL; r = r->next) {
