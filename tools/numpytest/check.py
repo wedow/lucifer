@@ -302,6 +302,16 @@ class HarnessChecks(unittest.TestCase):
         self.assertIn("50.00%", result.stdout)
         self.assertIn("\t1\t50.00%", result.stdout)
 
+    def test_scoreboard_ignores_exclusion_lists(self):
+        self.invoke()
+        (self.expected.parent / "fake.tsv").write_text(
+            "id\tstatus\tseconds\n" + self.ids[0] + "\tPASS\t0.1\n")
+        (self.expected.parent / "fake.excluded.tsv").write_text("id\treason\n" + self.ids[1] + "\tluc-0000\n")
+        result = subprocess.run([sys.executable, str(HERE.parent / "scoreboard"),
+                                 "--results", str(self.root / "results")], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("50.00%", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
