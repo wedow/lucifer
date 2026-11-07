@@ -1,6 +1,6 @@
 ---
 id: luc-ajdn
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-06T21:49:51Z
