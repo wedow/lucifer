@@ -2262,9 +2262,14 @@ direct_entry(struct asm_ *a)
     int decline = new_label(a);
     saves(a);
     mov_rr(a, R14, RDI);
-    mov_rr(a, RDI, R8);                         /* the arguments given */
+    op_rr(a, 0, 0x89, R8, RDI);                 /* mov edi, r8d: the arguments given, an int */
     alu_ri(a, ALU_OR, RCX, 1);
     store(a, RBP, RESULT_SLOT, RCX);
+    /* A unit that died (a recompile is due, or what it assumed changed) is
+       not entered: a caller may have read its entry before. */
+    mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
+    cmp_mi(a, 0, R11, 0, 0);
+    jcc(a, CC_NE, decline);
     load(a, RAX, R14, offsetof(struct lu_task, carrier));
     cmp_rm(a, RSP, RAX, offsetof(struct lu_carrier, jit_stack_floor));
     jcc(a, CC_B, decline);
