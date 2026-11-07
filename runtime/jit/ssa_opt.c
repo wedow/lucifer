@@ -503,8 +503,8 @@ fact_of(struct lu_func *f, struct lu_ins *in, struct lu_fdep *dep)
     }
     /* Watched and read in the dict's critical section, where every change
        to it is made and reported (dict.c): a change the compile does not
-       read is one made after, which sees the watch and is logged after the
-       compile's epoch (runtime/jit/deps.c). */
+       read is one made after, which sees the watch and the compile's
+       ticket (runtime/jit/deps.c). */
     int holds;
     dep->kind = keys ? LU_DEP_KEYS : LU_DEP_VALUE;
     dep->sub = keys ? 0 : (uint32_t)GI_OFFSET(in->imm2);

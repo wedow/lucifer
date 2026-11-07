@@ -302,7 +302,7 @@ free_unit(struct lu_unit *u)
 }
 
 static struct lu_unit *
-compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
+compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
 {
     struct lu_func f = { 0 };
     struct lu_unit *u = calloc(1, sizeof(struct lu_unit));
@@ -316,7 +316,6 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
         *u->stress_counter = (long)(_PyRuntime.stress.seed % _PyRuntime.stress.deopt) + 1;
     }
     double t0 = now();
-    uint64_t epoch = lu_jit_deps_epoch();      /* before anything the build reads */
     int dump = _PyRuntime.jit.dump;
     if (dump) {
         fprintf(stderr, "jit: compiling %s@%d\n", PyUnicode_AsUTF8(frame->code->co_qualname), pc);
@@ -363,7 +362,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
         free_unit(u);
         return NULL;
     }
-    if (lu_jit_deps_publish(u, f.deps, f.ndeps, epoch) < 0) {
+    if (lu_jit_deps_publish(u, f.deps, f.ndeps, ticket) < 0) {
         /* A fact it relies on changed while it compiled: the next entry compiles again. */
         note_failure("a dependency changed during the compile");
         __atomic_store_n(&jc->wait[pc], 1, __ATOMIC_RELAXED);
@@ -513,7 +512,9 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
     struct lu_unit *u = find(jc, pc);
     if (u == NULL && jc->compiles < MAX_COMPILES) {
         jc->compiles++;
-        u = compile(jc, frame, pc);
+        uint64_t ticket = lu_jit_deps_begin();     /* before anything the build reads */
+        u = compile(jc, frame, pc, ticket);
+        lu_jit_deps_end();
         if (u != NULL) {
             u->next = jc->units;
             __atomic_store_n(&jc->units, u, __ATOMIC_RELEASE);
