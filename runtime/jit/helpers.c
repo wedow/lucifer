@@ -666,6 +666,37 @@ h_call(PyObject **argv, intptr_t n)
             goto called;
         }
     }
+    /* A class whose instances the interpreter makes itself: allocated
+       here and its __init__ called, as the interpreter's CALL does, not
+       through type.__call__ and object.__new__ (several times the work). */
+    if (t->ts.interp->eval_frame == NULL && argv[1] == NULL && Py_IS_TYPE(callable, &PyType_Type)
+        && callable != (PyObject *)&PyType_Type && ((PyTypeObject *)callable)->tp_vectorcall == NULL) {
+        PyObject *init;
+        int plan = lu_instance_plan((PyTypeObject *)callable, (Py_ssize_t)nargs, &init);
+        if (plan == 1 || plan == 2) {
+            PyObject *obj = lu_alloc_instance((PyTypeObject *)callable, &PyBaseObject_Type);
+            if (obj != NULL && plan == 1) {
+                argv[1] = obj;          /* the free word before the arguments */
+                r = call_function(t, (PyFunctionObject *)init, argv + 1, (Py_ssize_t)nargs + 1);
+                argv[1] = NULL;
+                if (r != Py_None) {
+                    if (r != NULL) {
+                        lu_err_format(PyExc_TypeError, "__init__() should return None, not '%.200s'",
+                                      Py_TYPE(r)->tp_name);
+                        Py_DECREF(r);
+                    }
+                    Py_CLEAR(obj);
+                }
+                else {
+                    Py_DECREF(r);
+                }
+            }
+            Py_XDECREF(init);
+            r = obj;
+            goto called;
+        }
+        Py_XDECREF(init);
+    }
     /* A kernel function C answers runs no frame, as from the interpreter. */
     int kernel = lu_kernel_target(callable, args, (Py_ssize_t)nargs, &target, &self);
     if (kernel < 0) {
