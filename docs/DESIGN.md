@@ -638,7 +638,16 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
 4. **Backend.** Per-block linear-scan register allocation over GPR/XMM with spill
    homes and edge reconciliation (port of `optimizer_ssa_allocate.inc`); x86-64
    encoder in C; root maps per safepoint; perf map and jitdump (port of
-   `perf_map.inc`).
+   `perf_map.inc`). The common cases of hot operations on objects run in
+   line, as CPython's specialized instructions run them, with the C path
+   behind: list and tuple reads (bounds, load, and the reference taken in
+   place for an immortal item or one the thread owns; the try-incref
+   protocol stays in C), list stores under the list's `ob_mutex`, boxes from
+   the small-int cache, the carrier's freelists or its mimalloc pages, and
+   small tuple and list displays popped from the pages and counted in the
+   carrier's GC allocation batch. A hook that sees allocations (an allocator
+   or a reference tracer) sends every allocation to C. `-X
+   lucifer_jit_stats` counts the C paths taken.
 5. **Entry.** OSR at `JUMP_BACKWARD`.
 6. **Deopt.** At an unexecuted bytecode boundary (the donor's BEFORE-state rule,
    `optimizer_ssa_emit.inc` `opt_ssa_deopt`). Reconstruct interpreter frames,
