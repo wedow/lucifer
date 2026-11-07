@@ -5,7 +5,7 @@ deps: []
 links: []
 created: 2026-11-07T05:56:29Z
 type: task
-priority: 2
+priority: 1
 ---
 # JIT: frame state where compiled code runs Python outside a publishing call
 
