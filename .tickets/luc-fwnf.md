@@ -5,7 +5,7 @@ deps: []
 links: []
 created: 2026-11-07T10:15:38Z
 type: bug
-priority: 2
+priority: 1
 tags: [jit, perf, scaling]
 ---
 # jit: dependency writers serialize on one global mutex (watched-dict stores, type changes)
