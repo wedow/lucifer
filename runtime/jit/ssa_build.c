@@ -110,6 +110,7 @@ struct ctx {
     int npend, cappend;
     int units;                  /* code units compiled */
     struct lu_fs *island;       /* inlined for an operator: where its folded arithmetic restarts */
+    int generic_call;           /* the end of a call on a polymorphic site's generic answer: no feedback */
 };
 
 /* Per-code JIT state the builder consults: pcs not to speculate at. */
@@ -1780,6 +1781,156 @@ cached_site(struct ctx *c, int generic, uint32_t *version, uint16_t *index, PyOb
 static int load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr);
 static lu_v type_of(struct ctx *c, lu_v v);
 
+/* --- paths that join after a call --- */
+
+/* One way through an instruction range: where it ends and with what. */
+struct path {
+    int block;                  /* -1: it never gets to the end */
+    struct bstate st;
+};
+
+/* The current block and state as a path, for join_paths. */
+static struct path
+path_here(struct ctx *c)
+{
+    struct path p = { c->cur, { 0 } };
+    if (c->cur >= 0) {
+        state_copy(c, &p.st, &c->st);
+    }
+    return p;
+}
+
+/* Joins paths that end at the same instruction boundary: each owns its
+   entries (normalize), and an entry the paths disagree on becomes a phi. */
+static void
+join_paths(struct ctx *c, struct path *p, int n)
+{
+    struct lu_func *f = c->f;
+    int live = 0, first = -1;
+    for (int i = 0; i < n; i++) {
+        if (p[i].block >= 0) {
+            live++;
+            first = first < 0 ? i : first;
+        }
+    }
+    if (live <= 1) {
+        c->cur = live ? p[first].block : -1;
+        if (live) {
+            c->st = p[first].st;
+        }
+        return;
+    }
+    int join = lu_ir_block(f);
+    for (int i = 0; i < n; i++) {
+        if (p[i].block >= 0) {
+            c->cur = p[i].block;
+            c->st = p[i].st;
+            normalize(c);
+            emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+            lu_ir_edge(f, p[i].block, join);
+        }
+    }
+    c->cur = join;
+    state_copy(c, &c->st, &p[first].st);
+    for (int k = 0; k < c->nlocals + c->st.sp; k++) {
+        int same = 1;
+        for (int i = first + 1; i < n; i++) {
+            same &= p[i].block < 0 || p[i].st.v[k] == p[first].st.v[k];
+        }
+        if (same) {
+            continue;
+        }
+        lu_v phi = lu_ir_emit(f, join, OP_PHI, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, k);
+        I(c, phi)->nargs = live;
+        I(c, phi)->args = malloc(sizeof(lu_v) * (size_t)live);
+        I(c, phi)->imm2 = c->parent == NULL && k < c->nlocals;     /* a root slot's value */
+        for (int i = 0, j = 0; i < n; i++) {
+            if (p[i].block >= 0) {
+                I(c, phi)->args[j++] = phi_input(c, p[i].st.v[k]);
+            }
+        }
+        c->st.v[k] = phi;
+        c->st.own[k] = 1;
+    }
+}
+
+/* The stack depth change of an instruction an argument list may hold, or
+   INT32_MIN for any other. */
+static int
+arg_effect(int op, int oparg)
+{
+    switch (op) {
+    case NOP: case NOT_TAKEN: case TO_BOOL: case UNARY_NOT: case UNARY_NEGATIVE: case UNARY_INVERT:
+        return 0;
+    case LOAD_FAST: case LOAD_FAST_BORROW: case LOAD_FAST_CHECK: case LOAD_CONST: case LOAD_SMALL_INT:
+    case LOAD_DEREF: case PUSH_NULL: case COPY: case LOAD_COMMON_CONSTANT:
+        return 1;
+    case LOAD_FAST_LOAD_FAST: case LOAD_FAST_BORROW_LOAD_FAST_BORROW:
+        return 2;
+    case LOAD_GLOBAL:
+        return 1 + (oparg & 1);
+    case LOAD_ATTR:
+        return oparg & 1;
+    case BINARY_OP: case COMPARE_OP: case CONTAINS_OP: case IS_OP:
+        return -1;
+    case BUILD_TUPLE: case BUILD_LIST:
+        return 1 - oparg;
+    case CALL:
+        return -1 - oparg;
+    case CALL_KW:
+        return -2 - oparg;
+    default:
+        return INT32_MIN;
+    }
+}
+
+/* Builds the instructions from the load at `at` to end on the current
+   state, as one path, then puts the builder back at the load with the
+   state before it (base). */
+static struct path
+through(struct ctx *c, const struct ctx *at, int end, const struct bstate *base)
+{
+    for (int pc = at->next; pc != end && c->cur >= 0 && !c->failed;) {
+        pc = step(c, pc, NULL);
+    }
+    struct path p = path_here(c);
+    if (c->failed) {
+        p.block = -1;
+    }
+    c->pc = at->pc;
+    c->next = at->next;
+    c->base = at->base;
+    c->oparg = at->oparg;
+    c->opcode = at->opcode;
+    c->cache = at->cache;
+    c->snap = at->snap;
+    state_copy(c, &c->st, base);
+    return p;
+}
+
+/* The end of the call that takes the method and self a method-form load
+   at c->pc pushes, when only argument code that does not branch comes
+   between: the boundary after the call, or -1. */
+static int
+call_end(struct ctx *c)
+{
+    int above = 0;              /* entries above the method and self */
+    for (int pc = c->next; pc < c->ncode && c->blkat[pc] < 0;) {
+        int base, oparg, op;
+        int next = decode(c, pc, &base, &oparg, &op);
+        if ((base == CALL && above == oparg) || (base == CALL_KW && above == oparg + 1)) {
+            return next;
+        }
+        int d = arg_effect(base, oparg);
+        if (d == INT32_MIN) {
+            return -1;
+        }
+        above += d;
+        pc = next;
+    }
+    return -1;
+}
+
 /* A site its polymorphic cache answers (runtime/jit/jit.h): the owner's
    type picks an entry, whose version is guarded and whose answer is
    taken as its one-shape site would; any other type takes the generic
@@ -1795,10 +1946,25 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
     before(c);
     lu_v t = emit(c, OP_LOAD, REP_I64, type_of(c, owner), LU_NOV, LU_NOV, offsetof(PyTypeObject, tp_version_tag));
     I(c, t)->imm2 = 4;          /* 32 bits */
-    int join = lu_ir_block(f);
+    pop(c, NULL);
+    /* A method's call that follows is built once per entry (tail
+       duplication), so that each builds its own method's call and inlines
+       it. The copies count against the frame's inline budget: a split
+       that would make an inlined callee too large leaves the arms joined. */
+    int end = method ? call_end(c) : -1;
+    int range = end - c->next;
+    if (end >= 0 && c->parent != NULL && c->units + (c->next - c->pc) + (n + 1) * range > INLINE_MAX_UNITS) {
+        end = -1;
+    }
+    struct ctx at = *c;         /* the load's position, which each copy starts from */
+    struct bstate base;
+    if (end >= 0) {
+        state_copy(c, &base, &c->st);
+    }
+    struct path ends[LU_PIC_WAYS + 1];
+    int join = end < 0 ? lu_ir_block(f) : -1;
     lu_v r1[LU_PIC_WAYS + 1], r2[LU_PIC_WAYS + 1];
     int paths = 0;
-    pop(c, NULL);
     for (int i = 0; i < n; i++) {
         struct lu_pic_entry e = pic->e[i];
         lu_v bit = emit(c, OP_CMP_I, REP_BIT, t, const_i(c, e.version), LU_NOV, Py_EQ);
@@ -1808,6 +1974,7 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
         emit(c, OP_BRANCH, REP_NONE, bit, LU_NOV, LU_NOV, 0);
         c->cur = arm;
         lu_v a1, a2 = LU_NOV;
+        int own1 = 1, own2 = 0;
         if (e.op == LOAD_ATTR_INSTANCE_VALUE) {
             a1 = emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, e.index);
             I(c, a1)->fs = before(c);
@@ -1818,34 +1985,67 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                 lu_v args[2] = { owner, konst(c, name) };
                 guard(c, OP_GUARD_BIT, helper(c, H_dict_lacks, 2, args), 1);
             }
-            a1 = take(c, konst(c, e.descr), 0);
-            if (e.op == LOAD_ATTR_METHOD_NO_DICT || e.op == LOAD_ATTR_METHOD_WITH_VALUES) {
-                a2 = method ? take(c, owner, own) : LU_NOV;
-                if (!method) {
-                    release(c, owner, own);
-                }
+            /* A copy keeps the method a constant, which its call inlines; a join owns its inputs. */
+            a1 = konst(c, e.descr);
+            own1 = end < 0;
+            if (own1) {
+                incref(c, a1);
+            }
+            if (method && (e.op == LOAD_ATTR_METHOD_NO_DICT || e.op == LOAD_ATTR_METHOD_WITH_VALUES)) {
+                a2 = end < 0 ? take(c, owner, own) : owner;
+                own2 = end < 0 || own;
             }
             else {
                 release(c, owner, own);
             }
         }
-        r1[paths] = a1;
-        r2[paths++] = a2;
-        emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
-        lu_ir_edge(f, arm, join);
+        if (end >= 0) {
+            push(c, a1, own1);
+            if (method) {
+                push(c, a2, own2);
+            }
+            ends[paths++] = through(c, &at, end, &base);
+        }
+        else {
+            r1[paths] = a1;
+            r2[paths++] = a2;
+            emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+            lu_ir_edge(f, arm, join);
+        }
         c->cur = next;
     }
-    if (root_only(c)) {
+    if (!root_only(c)) {
+        unsupported(c);         /* leaves at the state before the load */
+    }
+    else {
         lu_v args[3] = { owner, konst(c, name), const_i(c, (int64_t)(intptr_t)pic) };
         lu_v v = helper_raising(c, method ? H_load_method : H_load_attr, 3, args, 1);
         release(c, owner, own);
-        r1[paths] = v;
-        r2[paths++] = LU_NOV;
-        emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
-        lu_ir_edge(f, c->cur, join);
+        if (end >= 0) {
+            /* Shapes the cache does not hold: the call as it was, on what the load answered. */
+            if (c->observed) {
+                frames_guard(c);
+                c->observed = 0;
+            }
+            push(c, v, 1);
+            push(c, LU_NOV, 0);
+            c->generic_call = end;
+            ends[paths++] = through(c, &at, end, &base);
+            c->generic_call = 0;
+        }
+        else {
+            r1[paths] = v;
+            r2[paths++] = LU_NOV;
+            emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+            lu_ir_edge(f, c->cur, join);
+        }
     }
-    else {
-        unsupported(c);         /* leaves at the state before the load */
+    if (end >= 0) {
+        /* The rest of this instruction is the call's: the frame goes on after it. */
+        join_paths(c, ends, paths);
+        c->units -= range;      /* the step that called this counts the range too */
+        c->next = end;
+        return 0;
     }
     c->cur = join;
     lu_v out[2];
@@ -1948,10 +2148,20 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         }
         return 0;
     }
-    case LOAD_ATTR_CLASS: {
-        /* A class's own attribute, by the class's version. */
+    case LOAD_ATTR_CLASS:
+    case LOAD_ATTR_CLASS_WITH_METACLASS_CHECK: {
+        /* A class's own attribute, by the class's version, and by its
+           metaclass's when that is not type (an Enum's members). */
         lu_v g = guard(c, OP_GUARD_VERSION, owner, version);
         I(c, g)->imm2 = GV_TYPE_ITSELF;
+        if (op == LOAD_ATTR_CLASS_WITH_METACLASS_CHECK) {
+            uint32_t meta = lu_cache_load32(c->cache + LA_KEYS_VERSION);
+            if (meta == 0) {
+                unsupported(c);
+                return -1;
+            }
+            guard(c, OP_GUARD_VERSION, owner, meta);
+        }
         pop(c, NULL);
         release(c, owner, own);
         push(c, konst(c, descr), 0);
@@ -1962,6 +2172,26 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
     }
     default:
         break;
+    }
+    PyObject *cls = known(c, owner);
+    uint32_t cv[3];
+    PyObject *value = cls != NULL && PyType_Check(cls) && !lu_jit_nospec(c->code, c->pc)
+        ? lu_specialize_class_value((PyTypeObject *)cls, name, cv) : NULL;
+    if (value != NULL) {
+        /* A constant class's attribute that is a plain value, by the versions that keep it one. */
+        lu_v g = guard(c, OP_GUARD_VERSION, owner, cv[0]);
+        I(c, g)->imm2 = GV_TYPE_ITSELF;
+        guard(c, OP_GUARD_VERSION, owner, cv[1]);
+        lu_v k = konst(c, value);
+        Py_DECREF(value);       /* the unit holds its constants */
+        guard(c, OP_GUARD_VERSION, k, cv[2]);
+        pop(c, NULL);
+        release(c, owner, own);
+        push(c, k, 0);
+        if (method) {
+            push(c, LU_NOV, 0);
+        }
+        return 0;
     }
     if (!root_only(c)) {
         unsupported(c);
