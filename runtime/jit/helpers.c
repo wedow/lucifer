@@ -526,13 +526,27 @@ stack_low(void)
     return &here < lu_current_task()->carrier->jit_stack_floor;
 }
 
-/* A Python function's call, as CALL makes it: the frame is pushed and
-   bound (by plain stores when the arguments are exactly its positional
-   parameters), then run by lu_eval, which enters a compiled unit directly. */
+/* A Python function's call, as CALL makes it: into its code's direct entry
+   when it has one (target.h), else the frame is pushed and bound (by plain
+   stores when the arguments are exactly its positional parameters), then
+   run by lu_eval, which enters a compiled unit directly. */
 static PyObject *
 call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs)
 {
     PyCodeObject *co = (PyCodeObject *)func->func_code;
+    uintptr_t jc = (uintptr_t)__atomic_load_n(&co->co_executors, __ATOMIC_ACQUIRE);
+    if (jc != 0 && !(jc & 1) && nargs <= ((struct lu_jit_direct *)jc)->nargs) {
+        int (*entry)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, int)
+            = __atomic_load_n(&((struct lu_jit_direct *)jc)->entry, __ATOMIC_ACQUIRE);
+        PyObject *v;
+        int r = entry != NULL ? entry(&t->ts, func, args, &v, (int)nargs) : 0;
+        if (r == LU_JIT_RETURN) {
+            return v;
+        }
+        if (r != 0) {
+            return lu_jit_call_finish(&t->ts, (struct lu_frame *)v, r);
+        }
+    }
     struct lu_frame *f;
     if (co->co_argcount == nargs && co->co_kwonlyargcount == 0
         && !(co->co_flags & (CO_VARARGS | CO_VARKEYWORDS))) {
