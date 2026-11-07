@@ -15,9 +15,22 @@
    A compile reads facts while writers run. The epoch counts changes, and
    the last LOG of them are kept: a unit whose dependencies match a change
    made since its compile started (or that started more than LOG changes
-   ago) is not published, since it may have read the state from before. A
-   writer logs after its change, so a compile that started after the log
-   entry read the new state. */
+   ago) is not published, since it may have read the state from before.
+   Why that misses nothing, in C11 terms. A writer makes its change, then
+   appends to the log and stores the epoch (release) under the lock, then
+   kills what is registered; the compile loads the epoch (acquire) before
+   it reads anything, and checks the log and registers its dependencies
+   under the same lock. If the compile's load sees the writer's epoch, the
+   change happens before every read the compile makes. If not, the lock
+   orders the writer's append and the compile's publish: an append first
+   is in the log the publish checks, a publish first is registered when
+   the writer kills. Types and functions report every change. A dict
+   reports only once watched, so the compile watches it and reads its fact
+   inside the dict's critical section, where dict.c makes every change to
+   a shared dict and reports it: the writer's section comes either wholly
+   before the compile's, whose read then sees the change, or wholly after,
+   when the writer sees the watch and appends after the compile's epoch.
+   Nothing rests on how soon a store becomes visible. */
 #include "jit/target.h"
 
 #include <stdio.h>

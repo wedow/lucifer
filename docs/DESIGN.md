@@ -690,8 +690,11 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    code; the writer has marked the unit dead before it returns, and the check
    after that instruction leaves. A compile that read a fact just before a
    writer changed it is not published: writers log their changes with an
-   epoch, and publication fails when a change since the compile's start
-   matches a dependency.
+   epoch under the lock publication takes, and publication fails when a
+   change since the compile's start matches a dependency. A dict is watched
+   and its fact read inside its critical section, where every change to it
+   is made and reported, so a change the compile did not read is logged
+   after its start (the C11 argument is in `deps.c`).
 
 ### 6.3 What comes from the donor
 

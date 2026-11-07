@@ -501,17 +501,22 @@ fact_of(struct lu_func *f, struct lu_ins *in, struct lu_fdep *dep)
     if (!keys && !value) {
         return NO_FACT;
     }
-    /* Watched before it is read, so a change after the read is reported. */
-    __atomic_fetch_or(&((PyDictObject *)o)->_ma_watcher_tag, 1, __ATOMIC_SEQ_CST);
-    PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)o)->ma_keys, __ATOMIC_ACQUIRE);
-    if (keys) {
-        dep->kind = LU_DEP_KEYS;
-        return __atomic_load_n(&dk->dk_version, __ATOMIC_ACQUIRE) == (uint32_t)in->imm ? WRITER_FACT : NO_FACT;
-    }
-    dep->kind = LU_DEP_VALUE;
-    dep->sub = (uint32_t)GI_OFFSET(in->imm2);
-    return __atomic_load_n((PyObject **)((char *)dk + GI_OFFSET(in->imm2)), __ATOMIC_ACQUIRE)
-        == (PyObject *)(intptr_t)in->imm ? WRITER_FACT : NO_FACT;
+    /* Watched and read in the dict's critical section, where every change
+       to it is made and reported (dict.c): a change the compile does not
+       read is one made after, which sees the watch and is logged after the
+       compile's epoch (runtime/jit/deps.c). */
+    int holds;
+    dep->kind = keys ? LU_DEP_KEYS : LU_DEP_VALUE;
+    dep->sub = keys ? 0 : (uint32_t)GI_OFFSET(in->imm2);
+    Py_BEGIN_CRITICAL_SECTION(o);
+    __atomic_fetch_or(&((PyDictObject *)o)->_ma_watcher_tag, 1, __ATOMIC_RELAXED);
+    PyDictKeysObject *dk = ((PyDictObject *)o)->ma_keys;
+    char *word = (char *)dk + GI_OFFSET(in->imm2);
+    holds = keys ? dk->dk_version == (uint32_t)in->imm
+                 : lu_dk_is_unicode(dk) && dk->dk_nentries > 0 && word <= (char *)lu_dk_value_slot(dk, dk->dk_nentries - 1)
+                   && *(PyObject **)word == (PyObject *)(intptr_t)in->imm;
+    Py_END_CRITICAL_SECTION();
+    return holds ? WRITER_FACT : NO_FACT;
 }
 
 /* The value a guard checks: a constant's object, or the SSA value. */
