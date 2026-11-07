@@ -119,6 +119,7 @@ struct ctx {
 /* Per-code JIT state the builder consults: pcs not to speculate at. */
 int lu_jit_nospec(PyCodeObject *code, int pc);
 int lu_jit_noinline(PyCodeObject *code);
+int lu_jit_next_pc(PyCodeObject *code, int pc);
 
 static int build_block(struct ctx *c, int bi);
 static int step(struct ctx *c, int pc, struct lu_block *entry);
@@ -2503,6 +2504,20 @@ opaque_call(struct ctx *c)
     return 1;
 }
 
+/* Whether code has a loop. An inlined loop keeps its ints boxed where the
+   callee's own unit keeps them raw (Sieve 2.8x the instructions), so a
+   callee found only by feedback that loops is called. */
+static int
+loops(PyCodeObject *co)
+{
+    for (int pc = 0; pc < (int)Py_SIZE(co); pc = lu_jit_next_pc(co, pc)) {
+        if (lu_base_opcode(co, pc) == JUMP_BACKWARD) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* A function this unit made (MAKE_FUNCTION), reached however it was
    passed (a closure handed to a callee that inlined): its code and globals
    are known, as a template the unit keeps (lu_function_template), and only
@@ -2606,8 +2621,8 @@ call_dispatch(struct ctx *c, int n)
         }
         PyObject *fo = x.kind & LU_CALLEE_CODE ? x.obj : x.obj != NULL && PyFunction_Check(x.obj)
             ? ((PyFunctionObject *)x.obj)->func_code : NULL;
-        if (fo != NULL && lu_jit_noinline((PyCodeObject *)fo)) {
-            return 0;           /* a callee called anyway: the call as it is costs least */
+        if (fo != NULL && (lu_jit_noinline((PyCodeObject *)fo) || loops((PyCodeObject *)fo))) {
+            return 0;           /* a callee called anyway, or one that loops: the call as it is costs least */
         }
         if (live && x.obj != NULL) {
             e[m++] = x;
