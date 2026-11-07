@@ -16,6 +16,7 @@
 PyObject *
 lu_jit_box_int(int64_t v)
 {
+    LU_JIT_C_PATH(box_int);
     return PyLong_FromLongLong(v);
 }
 
@@ -32,6 +33,7 @@ lu_jit_unbox_wide(PyObject *o)
 PyObject *
 lu_jit_box_float(double v)
 {
+    LU_JIT_C_PATH(box_float);
     return PyFloat_FromDouble(v);
 }
 
@@ -53,6 +55,7 @@ lu_jit_truth(PyObject *v)
 PyObject *
 lu_jit_list_item(PyObject *list, int64_t i)
 {
+    LU_JIT_C_PATH(list_item);
     return i >= 0 ? lu_list_item_ref((PyListObject *)list, (Py_ssize_t)i) : NULL;
 }
 
@@ -60,6 +63,7 @@ lu_jit_list_item(PyObject *list, int64_t i)
 PyObject *
 lu_jit_tuple_item(PyObject *t, int64_t i)
 {
+    LU_JIT_C_PATH(tuple_item);
     i += i < 0 ? Py_SIZE(t) : 0;
     return i >= 0 && i < Py_SIZE(t) ? Py_NewRef(PyTuple_GET_ITEM(t, i)) : NULL;
 }
@@ -69,6 +73,7 @@ int
 lu_jit_list_store(PyObject *list, int64_t i, PyObject *v)
 {
     PyObject *old = NULL;
+    LU_JIT_C_PATH(list_store);
     if (i < 0) {
         return 0;
     }
