@@ -638,7 +638,14 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    `optimizer_ssa_emit.inc` `opt_ssa_deopt`). Reconstruct interpreter frames,
    including inlined kernel frames, then materialize virtual objects once with
    aliases preserved. Completed side effects are never replayed.
-7. **Publication and invalidation.** Code is published by an epoch-checked
+7. **Calls and frames.** Compiled code owns the locals and stack of the
+   frame it runs in (`LU_FRAME_JIT`); walkers read them through the state
+   each Python-running call publishes (FOUNDATIONS 2.2). A call of a
+   Python function whose code has a unit at its call entry pushes the
+   callee's frame itself and enters that unit's direct entry: no C helper,
+   no eval loop, and the callee pops its frame when it returns. A function
+   borrows the parameters it never rebinds from its caller.
+8. **Publication and invalidation.** Code is published by an epoch-checked
    atomic store into the code object's private tail. Patching running code
    waits for a measured need. Compiled code keeps facts between polls, under
    this rule (invariant, 2026-11-07):

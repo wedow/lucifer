@@ -6,12 +6,17 @@
    a block with more than one predecessor gets a phi per local and stack
    entry, and phis that turn out trivial are removed by the optimizer.
 
-   References follow the interpreter's: the root frame's slots own their
-   values (a STORE_LOCAL writes the slot), a stack entry or an inlined
-   frame's local is owned when compiled code holds a reference for it. An
-   instruction that consumes an operand it borrows releases it afterwards;
-   one that keeps it takes a reference first. The optimizer deletes the
-   pairs that a virtual box makes moot.
+   References follow the interpreter's, with compiled code as every
+   frame's owner: a local or a stack entry is owned when compiled code
+   holds a reference for it, and the root frame's slots hold nothing while
+   it runs (runtime/jit/deopt.c). An instruction that consumes an operand
+   it borrows releases it afterwards; one that keeps it takes a reference
+   first. The optimizer deletes the pairs that a virtual box makes moot.
+
+   A walker may write a frame's locals from inside a call that runs
+   Python: every instruction that makes such a call is followed by a guard
+   (GUARD_FRAMES) that leaves after it when one did, and so is the root's
+   return when a frame object would take its locals.
 
    Speculation comes from the interpreter's caches: LOAD_GLOBAL and
    LOAD_ATTR shapes, and the operand kinds BINARY_OP, COMPARE_OP and
@@ -98,6 +103,9 @@ struct ctx {
     int failed;                 /* an inlined frame met what it cannot compile */
     const char *why;            /* why, for LUCIFER_JIT_DEBUG */
     int ncalls;                 /* calls it cannot inline (opaque_call) */
+    int observed;               /* the instruction calls a helper that may run Python */
+    uint8_t *fixed;             /* per local: a parameter the code never rebinds, whose reference
+                                   stays as the frame was entered with it */
     struct pending *pend;       /* landings for a caller's handlers, wired once the inline holds */
     int npend, cappend;
     int units;                  /* code units compiled */
@@ -122,6 +130,38 @@ feedback(struct ctx *c, lu_codeunit *word)
 }
 static PyTypeObject *known_type(struct ctx *c, lu_v v);
 static void set_known(struct ctx *c, lu_v v, PyTypeObject *t);
+
+static int decode(struct ctx *c, int pc, int *base, int *oparg, int *opcode);
+
+/* The parameters the code never rebinds: per local, 1. */
+static uint8_t *
+fixed_params(struct ctx *c)
+{
+    PyCodeObject *co = c->code;
+    uint8_t *fixed = lu_ir_alloc(c->f, (size_t)c->nlocals + 1);
+    for (int i = 0; i < c->nlocals; i++) {
+        fixed[i] = i < co->co_argcount;
+    }
+    for (int pc = 0; pc < c->ncode;) {
+        int base, oparg, op;
+        int next = decode(c, pc, &base, &oparg, &op);
+        if (base == STORE_FAST || base == DELETE_FAST || base == LOAD_FAST_AND_CLEAR) {
+            fixed[oparg] = 0;
+        }
+        else if (base == STORE_FAST_LOAD_FAST) {
+            fixed[oparg >> 4] = 0;
+        }
+        else if (base == STORE_FAST_STORE_FAST) {
+            fixed[oparg >> 4] = 0;
+            fixed[oparg & 15] = 0;
+        }
+        else if (base == MAKE_CELL) {
+            fixed[oparg] = 0;
+        }
+        pc = next;
+    }
+    return fixed;
+}
 
 /* --- states --- */
 
@@ -162,9 +202,6 @@ snapshot(struct ctx *c, int pc)
     memcpy(fs->vals + c->nlocals, c->st.v + c->nlocals, sizeof(lu_v) * (size_t)c->st.sp);
     memcpy(fs->owned, c->st.own, (size_t)c->nlocals);
     memcpy(fs->owned + c->nlocals, c->st.own + c->nlocals, (size_t)c->st.sp);
-    if (c->parent == NULL) {
-        memset(fs->owned, 0, (size_t)c->nlocals);       /* the root frame's slots own its locals */
-    }
     return fs;
 }
 
@@ -397,13 +434,7 @@ store_local(struct ctx *c, int i, lu_v v, int owned)
 {
     own_borrowers(c, i);
     v = take(c, v, owned);
-    if (c->parent != NULL) {
-        release(c, c->st.v[i], c->st.own[i]);
-    }
-    else if (v != LU_NOV || c->st.v[i] != LU_NOV) {
-        /* LU_NOV clears the slot (LOAD_FAST_AND_CLEAR), unless it is clear. */
-        emit(c, OP_STORE_LOCAL, REP_NONE, v != LU_NOV ? v : konst(c, NULL), LU_NOV, LU_NOV, i);
-    }
+    release(c, c->st.v[i], c->st.own[i]);
     c->st.v[i] = v;
     c->st.own[i] = 1;
 }
@@ -412,6 +443,7 @@ static lu_v
 helper(struct ctx *c, int id, int nargs, const lu_v *args)
 {
     const struct lu_helper *h = &lu_helpers[id];
+    c->observed |= (h->flags & IF_PY) != 0;
     lu_v v = emit(c, OP_HELPER, h->rep, LU_NOV, LU_NOV, LU_NOV, id);
     struct lu_ins *in = I(c, v);
     in->nargs = nargs;
@@ -488,29 +520,29 @@ root_only(struct ctx *c)
     return c->parent == NULL;
 }
 
-/* A call from an inlined frame runs with the inlined frames pushed as
-   real ones (the backend's), which go again when it returns unless the
-   callee kept a frame object of one: then the frames stay, and compiled
-   code leaves here, after the call, for the interpreter to run them. */
+/* After an instruction that called a helper that may run Python: the
+   frames are as compiled code left them. A call from an inlined frame runs
+   with the inlined frames pushed as real ones (the backend's), which go
+   again when it returns unless the callee kept a frame object of one; a
+   walker that wrote the root's locals made its slots real. Either way
+   compiled code leaves here, after the instruction, for the interpreter. */
 static void
 frames_guard(struct ctx *c)
 {
-    if (c->parent != NULL) {
-        lu_v g = emit(c, OP_GUARD_FRAMES, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
-        I(c, g)->fs = snapshot(c, c->next);
-    }
+    lu_v g = emit(c, OP_GUARD_FRAMES, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+    I(c, g)->fs = snapshot(c, c->next);
 }
 
 /* --- edges and blocks --- */
 
-/* Every stack entry and inlined local is owned at a block's end, so that a
-   join's inputs agree. */
+/* Every stack entry and local is owned at a block's end, so that a join's
+   inputs agree, but for a parameter the code never rebinds, which is the
+   same on every path. */
 static void
 normalize(struct ctx *c)
 {
-    int from = c->parent == NULL ? c->nlocals : 0;
-    for (int k = from; k < c->nlocals + c->st.sp; k++) {
-        if (!c->st.own[k] && c->st.v[k] != LU_NOV) {
+    for (int k = 0; k < c->nlocals + c->st.sp; k++) {
+        if (!c->st.own[k] && c->st.v[k] != LU_NOV && !(k < c->nlocals && c->fixed[k])) {
             if (k < c->nlocals || !immortal(c, c->st.v[k])) {
                 incref(c, c->st.v[k]);
             }
@@ -543,7 +575,7 @@ edge_to(struct ctx *c, int pc)
                 lu_v phi = lu_ir_emit(c->f, b->id, OP_PHI, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, k);
                 I(c, phi)->args = NULL;
                 b->in.v[k] = phi;
-                b->in.own[k] = 1;       /* every input was owned (normalize) */
+                b->in.own[k] = k < c->nlocals && c->fixed[k] ? c->st.own[k] : 1;  /* as normalize left them */
                 I(c, phi)->imm2 = c->parent == NULL && k < c->nlocals;     /* a root slot's value */
             }
         }
@@ -798,6 +830,7 @@ supported(int op)
     case BUILD_SET: case BUILD_MAP: case CALL_INTRINSIC_1: case BINARY_SLICE: case STORE_SLICE:
     case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
     case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case DELETE_FAST:
+    case LOAD_SUPER_ATTR:
         return 1;
     default:
         return 0;
@@ -1453,6 +1486,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
     k->nvars = k->nlocals + co->co_stacksize + 1;
     k->depth = c->depth + 1;
     k->island = c->island;
+    k->fixed = fixed_params(k);
     if (!k->kernel) {
         /* The function's code is part of what was compiled: f.__code__ = ... changes its version. */
         if (fn->func_version < 2) {     /* 1: changed code or defaults, never specialized on again */
@@ -1516,6 +1550,9 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
         /* Into the callee's first block. */
         k->cur = c->cur;
         for (int i = 0; i < k->nlocals; i++) {
+            if (k->fixed[i]) {
+                continue;               /* a borrowed argument stays borrowed: the call holds it */
+            }
             if (!k->st.own[i] && k->st.v[i] != LU_NOV && !immortal(c, k->st.v[i])) {
                 emit(k, OP_INCREF, REP_NONE, k->st.v[i], LU_NOV, LU_NOV, 0);
             }
@@ -2280,7 +2317,6 @@ call(struct ctx *c)
         guard_after(c, OP_GUARD_NOT_NULL, r, 1);
         pop_call(c, n);
         push(c, r, 1);
-        frames_guard(c);
         return 0;
     }
     if (fn != NULL && bound == NULL) {
@@ -2331,7 +2367,6 @@ call(struct ctx *c)
     guard_after(c, OP_GUARD_NOT_NULL, r, 1);
     pop_call(c, n);
     push(c, r, 1);
-    frames_guard(c);
     return 0;
 }
 
@@ -2606,20 +2641,50 @@ translate(struct ctx *c)
         return for_iter(c);
     case CALL:
         return call(c);
+    case LOAD_SUPER_ATTR: {
+        /* global_super, class, self -- attr, NULL in the method form (a bound method) */
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[5] = { peek(c, 3), peek(c, 2), peek(c, 1),
+                         konst(c, PyTuple_GET_ITEM(c->code->co_names, oparg >> 2)), const_i(c, oparg & 2) };
+        v = helper_raising(c, H_super_attr, 5, args, 3);
+        for (int i = 0; i < 3; i++) {
+            w = pop(c, &own);
+            release(c, w, own);
+        }
+        push(c, v, 1);
+        if (oparg & 1) {
+            push(c, LU_NOV, 0);
+        }
+        return 0;
+    }
     case RETURN_VALUE: {
+        if (c->parent == NULL) {
+            /* A frame object another holds takes the locals when the
+               frame stops: the interpreter returns from such a frame. */
+            guard(c, OP_GUARD_FRAMES, LU_NOV, 1);
+        }
         v = pop(c, &own);
+        for (int i = 0; !own && i < c->nlocals; i++) {
+            if (c->st.v[i] == v && c->st.own[i]) {
+                c->st.own[i] = 0;       /* a local's value: its reference moves */
+                own = 1;
+            }
+        }
         v = take(c, v, own);
         while (c->st.sp > 0) {
             w = pop(c, &own);
             release(c, w, own);
         }
+        for (int i = 0; i < c->nlocals; i++) {
+            release(c, c->st.v[i], c->st.own[i]);
+        }
         if (c->parent == NULL) {
             emit(c, OP_RETURN, REP_NONE, v, LU_NOV, LU_NOV, 0);
         }
         else {
-            for (int i = 0; i < c->nlocals; i++) {
-                release(c, c->st.v[i], c->st.own[i]);
-            }
             if (c->nrets == c->caprets) {
                 c->caprets = c->caprets ? c->caprets * 2 : 4;
                 c->rets = realloc(c->rets, sizeof(lu_v) * (size_t)c->caprets);
@@ -2940,7 +3005,6 @@ translate(struct ctx *c)
             release(c, v, own);
         }
         push(c, w, 1);
-        frames_guard(c);
         return 0;
     }
     case DICT_MERGE: {
@@ -3113,7 +3177,11 @@ build_block(struct ctx *c, int bi)
             unsupported(c);
             break;
         }
+        c->observed = 0;
         translate(c);
+        if (c->observed && c->cur >= 0 && !c->failed) {
+            frames_guard(c);
+        }
         c->units += c->next - pc;
         if (c->parent != NULL && c->units > INLINE_MAX_UNITS) {
             c->failed = 1;      /* too large to inline: it is called instead */
@@ -3161,26 +3229,41 @@ lu_ssa_build(struct lu_func *f, struct lu_frame *frame)
     c->ncode = (int)Py_SIZE(co);
     c->nlocals = co->co_nlocalsplus;
     c->nvars = c->nlocals + co->co_stacksize + 1;
+    /* The leading parameters the code never rebinds are borrowed: from
+       the slots, which keep them for the frame (its stackpointer covers
+       them), or from a direct caller (runtime/jit/x86_64/emit.c), which
+       gives them all: a default is not borrowed. */
+    c->fixed = fixed_params(c);
+    PyObject *defaults = c->func->func_defaults;
+    int required = co->co_argcount - (defaults != NULL ? (int)PyTuple_GET_SIZE(defaults) : 0);
+    while (f->nborrowed < required && c->fixed[f->nborrowed]) {
+        f->nborrowed++;
+    }
+    for (int i = f->nborrowed; i < c->nlocals; i++) {
+        c->fixed[i] = 0;
+    }
     int entry = f->entry_pc;
     if (scan(c, entry) < 0) {
         f->fail = "unfollowable jumps";
         return -1;
     }
     count_fallthrough(c);
+    /* At a call's entry every local but the parameters (and cells, which
+       the prologue made) is unbound, unless a jump comes there too: then
+       the unit is a loop's entry as well, and reads them all. */
+    int params = co->co_argcount + co->co_kwonlyargcount + ((co->co_flags & CO_VARARGS) != 0)
+        + ((co->co_flags & CO_VARKEYWORDS) != 0);
+    int call = entry == lu_jit_call_entry(co) && c->bb[c->blkat[entry]].npreds == 0;
     c->bb[c->blkat[entry]].npreds++;
     c->cur = lu_ir_block(f);
     state_init(c, &c->st);
     c->pc = entry;
-    /* At a call's entry every local but the parameters (and cells, which
-       the prologue made) is unbound. */
-    int params = co->co_argcount + co->co_kwonlyargcount + ((co->co_flags & CO_VARARGS) != 0)
-        + ((co->co_flags & CO_VARKEYWORDS) != 0);
-    int call = entry == lu_jit_call_entry(co);
     for (int i = 0; i < c->nlocals; i++) {
         int plain = co->co_localspluskinds == NULL
             || !(((unsigned char *)PyBytes_AS_STRING(co->co_localspluskinds))[i] & (CO_FAST_CELL | CO_FAST_FREE));
-        c->st.v[i] = call && i >= params && plain && frame->localsplus[i] == NULL ? LU_NOV
+        c->st.v[i] = call && i >= params && plain ? LU_NOV
             : emit(c, OP_ENTRY_LOCAL, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, i);
+        c->st.own[i] = i >= f->nborrowed;       /* the slot's reference is compiled code's from entry */
     }
     int depth = (int)(frame->stackpointer - (frame->localsplus + c->nlocals));
     for (int j = 0; j < depth; j++) {

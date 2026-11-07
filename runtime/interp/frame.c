@@ -59,9 +59,10 @@ alloc_frame(PyThreadState *ts, PyFunctionObject *func)
     f->locals = NULL;
     f->frame_obj = NULL;
     f->instr = f->last = lu_code_start(code);
-    f->owner = (code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) ? LU_FRAME_KERNEL_HIDDEN
-                                                                : LU_FRAME_INTERPRETER;
+    f->owner = lu_frame_owner_for(code);
     f->ret = LU_RETURN_PUSH;
+    f->jit_lent = 0;
+    f->jit_desc = NULL;
     f->stackpointer = f->localsplus + code->co_nlocalsplus;
     return f;
 }
@@ -149,6 +150,58 @@ lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
     free_frame(ts, f);
 }
 
+/* Frames compiled code runs (LU_FRAME_JIT). Their own task reads them only
+   from inside a call they made, where they published where their values
+   are (runtime/jit/deopt.c). Another task stops the world first: the owner
+   is then inside such a call too, or has left compiled code at a poll,
+   which made its frames the interpreter's. */
+
+PyObject *lu_jit_slot(struct lu_frame *f, int i);
+int lu_jit_sync(struct lu_frame *f);
+
+static int
+on_own_chain(struct lu_frame *f)
+{
+    for (struct lu_frame *p = (struct lu_frame *)PyThreadState_Get()->current_frame; p != NULL; p = p->previous) {
+        if (p == f) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+PyObject *
+lu_frame_slot(struct lu_frame *f, int i)
+{
+    if (__atomic_load_n(&f->owner, __ATOMIC_ACQUIRE) != LU_FRAME_JIT) {
+        return Py_XNewRef(f->localsplus[i]);
+    }
+    if (on_own_chain(f)) {
+        return lu_jit_slot(f, i);
+    }
+    struct _is *interp = PyThreadState_Get()->interp;
+    lu_stw_stop(interp);
+    PyObject *v = f->owner == LU_FRAME_JIT ? lu_jit_slot(f, i) : Py_XNewRef(f->localsplus[i]);
+    lu_stw_start(interp);
+    return v;
+}
+
+int
+lu_frame_sync(struct lu_frame *f)
+{
+    if (__atomic_load_n(&f->owner, __ATOMIC_ACQUIRE) != LU_FRAME_JIT) {
+        return 0;
+    }
+    if (on_own_chain(f)) {
+        return lu_jit_sync(f);
+    }
+    struct _is *interp = PyThreadState_Get()->interp;
+    lu_stw_stop(interp);
+    int r = f->owner == LU_FRAME_JIT ? lu_jit_sync(f) : 0;
+    lu_stw_start(interp);
+    return r;
+}
+
 /* The walker (FOUNDATIONS 2.2). Links are single-store pushes and pops, so a
    reader that interrupts the owner sees a valid chain. */
 
@@ -166,8 +219,7 @@ lu_frame_walk(struct lu_frame *from, int (*visit)(struct lu_frame *, void *), vo
 static int
 is_nth_user_frame(struct lu_frame *f, void *depth)
 {
-    if (f->owner == LU_FRAME_C_ENTRY || f->owner == LU_FRAME_KERNEL_HIDDEN
-        || (f->code->co_flags & LU_CO_KERNEL)) {
+    if (f->owner == LU_FRAME_C_ENTRY || (f->code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN))) {
         return 0;
     }
     return (*(Py_ssize_t *)depth)-- == 0;
@@ -576,12 +628,12 @@ prim_frame_clear(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyObject *
 fast_value(struct lu_frame *f, int i)
 {
-    PyObject *v = f->localsplus[i];
+    PyObject *v = lu_frame_slot(f, i);
     unsigned char kind = (unsigned char)PyBytes_AS_STRING(f->code->co_localspluskinds)[i];
     if (v != NULL && (kind & (CO_FAST_CELL | CO_FAST_FREE)) && PyCell_Check(v)) {
-        return lu_cell_get(v);
+        Py_SETREF(v, lu_cell_get(v));
     }
-    return Py_XNewRef(v);
+    return v;
 }
 
 static int
@@ -618,6 +670,9 @@ prim_frame_fast_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     struct lu_frameobj *fo = FO(args[0]);
     struct lu_frame *f = fo->f_frame;
     PyObject *value = args[2];
+    if (lu_frame_sync(f) < 0) {
+        return NULL;
+    }
     for (int i = 0; i < f->code->co_nlocalsplus; i++) {
         unsigned char kind = (unsigned char)PyBytes_AS_STRING(f->code->co_localspluskinds)[i];
         if (!fast_name_is(f->code, i, args[1]) || (kind & CO_FAST_HIDDEN)) {

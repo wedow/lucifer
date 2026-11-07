@@ -5,17 +5,19 @@
       of what a load in the block already read (1b).
    2. Representation: a phi whose inputs are all int boxes (or float
       boxes), counting phis of the same kind, becomes a raw phi under one
-      box, so loop-carried ints and floats stay in registers.
+      box, so loop-carried ints and floats stay in registers. A root
+      local's phi may forget an object an input box was made from, which
+      its edge then releases.
    3. Simplification: an unbox of a box is its raw value; guards on values
       whose type a box proves fold away.
    4. Escape analysis (the donor's scalar replacement, for boxes): a box
-      whose every use is an unbox, a frame state, a release or a slot write
-      is virtual. It is never built in compiled code; an exit that needs it
-      builds it, once (runtime/jit/deopt.c). A box a Python-running call
-      could observe through its frame is materialized. So is a new dict
+      whose every use is an unbox, a frame state or a release is virtual.
+      It is never built in compiled code; an exit or a walker that needs
+      it builds it (runtime/jit/deopt.c). A box a Python-running call could
+      observe in an inlined frame pushed for it is materialized. So is a new dict
       (an inlined callee's **kwargs) whose uses are those or truth tests,
       which are false.
-   5. References: the releases and slot writes of virtual boxes go, and so
+   5. References: the releases of virtual boxes go, and so
       do the reference operations on immortal objects.
    6. Dead code: unused instructions without effects.
    7. Critical edges are split and blocks get their emission order. */
@@ -114,7 +116,7 @@ trivial_phis(struct lu_func *f)
 }
 
 /* The boxes some use makes real (an operand of anything but an unbox, a
-   phi, a reference operation or a slot write): such a box is an object
+   phi or a reference operation): such a box is an object
    that may be observed later, so a phi of it must stay that object. */
 static char *
 escaping_boxes(struct lu_func *f, int box)
@@ -125,8 +127,7 @@ escaping_boxes(struct lu_func *f, int box)
         if (in->flags & INS_DEAD) {
             continue;
         }
-        int benign = in->op == OP_STORE_LOCAL || in->op == OP_DECREF || in->op == OP_INCREF
-            || in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT || in->op == OP_GUARD_NOT_NULL
+        int benign = in->op == OP_DECREF || in->op == OP_INCREF || in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT || in->op == OP_GUARD_NOT_NULL
             || in->op == OP_PHI;
         lu_v ops[3] = { in->a, in->b, in->c };
         for (int i = 0; i < 3; i++) {
@@ -156,6 +157,20 @@ entry_const(struct lu_func *f, int op, int rep, int64_t imm)
     return k;
 }
 
+/* A release of o at the end of block b, before its jump. */
+static void
+release_on_edge(struct lu_func *f, int b, lu_v o)
+{
+    lu_v d = lu_ir_emit(f, b, OP_DECREF, REP_NONE, o, LU_NOV, LU_NOV, 0);
+    struct lu_block *bl = &f->blocks[b];
+    bl->ins[bl->nins - 1] = bl->ins[bl->nins - 2];
+    bl->ins[bl->nins - 2] = d;
+    fwd = realloc(fwd, sizeof(lu_v) * (size_t)f->capins);
+    for (int v = d; v < f->nins; v++) {
+        fwd[v] = v;
+    }
+}
+
 /* 2. */
 static void
 unbox_phis(struct lu_func *f, int rep)
@@ -183,9 +198,11 @@ unbox_phis(struct lu_func *f, int rep)
                 if (a == v) {
                     continue;
                 }
-                /* A box made from an object holds the object's reference unless a
-                   root slot does: only such phis may forget it. */
-                if (f->ins[a].op == box && f->ins[a].b != LU_NOV && !in->imm2) {
+                /* A box made from an object holds the object's reference: a
+                   root local's phi forgets it by releasing it on its edge,
+                   which must be its predecessor's only one. */
+                if (f->ins[a].op == box && f->ins[a].b != LU_NOV
+                    && (!in->imm2 || f->blocks[f->blocks[in->block].preds[i]].nsucc != 1)) {
                     cand[v] = 0;
                     changed = 1;
                     break;
@@ -213,7 +230,7 @@ unbox_phis(struct lu_func *f, int rep)
             if (in->flags & INS_DEAD) {
                 continue;
             }
-            int benign = in->op == OP_DECREF || in->op == OP_INCREF || in->op == OP_STORE_LOCAL;
+            int benign = in->op == OP_DECREF || in->op == OP_INCREF;
             lu_v ops[3] = { in->a, in->b, in->c };
             for (int i = 0; i < 3; i++) {
                 lu_v a = resolve(ops[i]);
@@ -277,6 +294,10 @@ unbox_phis(struct lu_func *f, int rep)
         struct lu_ins *in = &f->ins[v];
         for (int i = 0; i < in->nargs; i++) {
             lu_v a = inputs[v][i];
+            if (a != v && !cand[a] && f->ins[a].op == box && f->ins[a].b != LU_NOV) {
+                release_on_edge(f, f->blocks[in->block].preds[i], resolve(f->ins[a].b));
+                in = &f->ins[v];
+            }
             int null = a != v && !cand[a] && f->ins[a].op == OP_CONST;
             f->ins[raw[v]].args[i] = a == v ? raw[v] : cand[a] ? raw[a] : null ? zero : resolve(f->ins[a].a);
             if (bit[v] != LU_NOV) {
@@ -288,7 +309,6 @@ unbox_phis(struct lu_func *f, int rep)
         /* The box goes first after the phis. */
         int block = in->block;
         lu_v b = lu_ir_emit(f, block, box, REP_OBJ, raw[v], LU_NOV, bit[v], 0);
-        f->ins[b].imm2 = f->ins[v].imm2 ? f->ins[v].imm + 1 : 0;     /* a root slot's value: its slot */
         struct lu_block *bl = &f->blocks[block];
         int at = 0;
         while (at < bl->nins - 1 && f->ins[bl->ins[at]].op == OP_PHI) {
@@ -414,7 +434,7 @@ simplify(struct lu_func *f)
     return changed;
 }
 
-/* 1b. Facts and value numbering (DESIGN 6.2 step 7). A guard checks a
+/* 1b. Facts and value numbering (DESIGN 6.2 step 8). A guard checks a
    fact. Some facts only a writer's change takes back, and the writer kills
    the units that rely on them (runtime/jit/deps.c): a type's version (of a
    constant type, or of a value's type), a constant dict's keys or the value
@@ -1258,8 +1278,8 @@ escape(struct lu_func *f)
         if (in->flags & INS_DEAD) {
             continue;
         }
-        int allowed = in->op == OP_STORE_LOCAL || in->op == OP_DECREF || in->op == OP_INCREF
-            || in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT || in->op == OP_GUARD_NOT_NULL
+        int allowed = in->op == OP_DECREF || in->op == OP_INCREF || in->op == OP_UNBOX_INT
+            || in->op == OP_UNBOX_FLOAT || in->op == OP_GUARD_NOT_NULL
             || (in->op == OP_TRUTH && f->ins[in->a].op == OP_HELPER);
         lu_v ops[3] = { in->a, in->b, in->c };
         for (int i = 0; i < 3; i++) {
@@ -1273,9 +1293,10 @@ escape(struct lu_func *f)
             }
         }
         if (in->op == OP_HELPER && (lu_helpers[in->imm].flags & IF_PY) && in->fs != NULL) {
-            /* A call that runs Python can read every frame's locals: the
-               root's slots, and the frames pushed for it from inlined ones. */
-            for (struct lu_fs *fs = in->fs; fs != NULL; fs = fs->caller) {
+            /* A call that runs Python can read the locals of the frames
+               pushed for it from inlined ones. The root's are read through
+               the state it publishes, where a box can still be built. */
+            for (struct lu_fs *fs = in->fs; fs != NULL && fs->caller != NULL; fs = fs->caller) {
                 for (int i = 0; i < fs->nlocals; i++) {
                     if (fs->vals[i] != LU_NOV) {
                         ok[fs->vals[i]] = 0;
@@ -1287,20 +1308,6 @@ escape(struct lu_func *f)
     for (int v = 0; v < n; v++) {
         if (ok[v]) {
             f->ins[v].flags |= INS_VIRTUAL;
-        }
-        else if ((f->ins[v].op == OP_BOX_INT || f->ins[v].op == OP_BOX_FLOAT) && f->ins[v].imm2
-                 && !(f->ins[v].flags & INS_DEAD)) {
-            /* A root slot's value built from a raw phi: the slot holds the
-               reference, as STORE_FAST would have made it. */
-            int block = f->ins[v].block;
-            lu_v st = lu_ir_emit(f, block, OP_STORE_LOCAL, REP_NONE, v, LU_NOV, LU_NOV, f->ins[v].imm2 - 1);
-            struct lu_block *bl = &f->blocks[block];
-            int at = 0;
-            while (bl->ins[at] != v) {
-                at++;
-            }
-            memmove(&bl->ins[at + 2], &bl->ins[at + 1], sizeof(int) * (size_t)(bl->nins - 2 - at));
-            bl->ins[at + 1] = st;
         }
     }
     for (int v = 0; v < n; v++) {
@@ -1315,8 +1322,7 @@ escape(struct lu_func *f)
             in->a = LU_NOV;
             in->fs = NULL;
         }
-        if ((in->op == OP_STORE_LOCAL || in->op == OP_DECREF || in->op == OP_INCREF) && in->a != LU_NOV
-            && ok[in->a]) {
+        if ((in->op == OP_DECREF || in->op == OP_INCREF) && in->a != LU_NOV && ok[in->a]) {
             /* A box made from an object is that object: its references are the object's. */
             if (f->ins[in->a].b != LU_NOV) {
                 in->a = f->ins[in->a].b;

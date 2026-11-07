@@ -608,9 +608,17 @@ struct lu_carrier {
        record stays registered until the carrier exits. */
     struct lu_task *runq_head, *runq_tail;
     int scheduled;
+    /* Below this the thread's C stack keeps room for an activation of the
+       interpreter: compiled code calls a callee only above it. */
+    char *jit_stack_floor;
 };
 
 extern _Thread_local struct lu_carrier *lu_carrier;
+
+/* How much C stack a call from compiled code leaves for the callee's
+   activation: below it the interpreter makes the call, without
+   recursing (DESIGN 5.2). */
+#define LU_JIT_STACK_RESERVE (192 * 1024)
 
 /* Raising and clearing reasons from any thread. A reason aimed at a task
    (lu_task_signal) is kept in the task, so that binding it raises the

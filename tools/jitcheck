@@ -14,16 +14,23 @@ require that a count of the tier's does not grow with the iterations:
          same place stays in the interpreter instead of paying an entry and
          an exit each time.
   calls  tests/kernel/jit_calls.py, whose hot calls the tier can inline once
-         it has feedback: entries into compiled code and direct calls.
+         it has feedback: entries into compiled code, direct calls and
+         compiled calls.
          None of its functions may be disabled (recompiled until the tier
          gives up on it) or retired (an entry left to the interpreter).
   large  tests/kernel/jit_large_callees.py, whose hot call is of a function
          too large to inline whole but small along the path the program
-         runs: entries into compiled code and direct calls.
+         runs: entries into compiled code, direct and compiled calls.
   quiet  tests/kernel/jit_quiet_misses.py, whose hot lookups miss and whose
          hot generators end where CPython makes no exception: error exits.
   caught tests/kernel/jit_caught.py, whose hot code raises exceptions that
-         handlers in the same compiled code take: error exits.
+         handlers in the same compiled code take: error exits, and exits
+         at a return for the frame object the traceback made.
+  compiled  tests/kernel/jit_compiled_calls.py, whose hot calls are of
+         functions it cannot inline: direct calls (compiled code entered
+         from C). Compiled code makes them itself.
+  super  tests/kernel/jit_super.py, whose hot constructors and methods go
+         through super(): side exits. None of its functions may be retired.
   guards tests/kernel/jit_guards.py, whose hot loop's guards check what a
          writer can change (a global, a function's code, a class
          attribute) or what never changes (the range iterator's type):
@@ -31,7 +38,7 @@ require that a count of the tier's does not grow with the iterations:
          census). They move out of the loop.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
-         the tier cannot inline: direct calls into compiled code, one per
+         the tier cannot inline: direct and compiled calls, one per
          iteration for that callee, none for the method, which inlines.
 The perf lane records Richards under -X perf with `perf record -g` and
 requires that at least 95% of the samples in compiled code (code perf finds
@@ -62,12 +69,14 @@ TIMING = re.compile(r'\d+us')
 # lane: (program, the counts in the -X lucifer_jit_stats report, summed, counts allowed per iteration)
 GROWTH = {
     'exits': ('jit_exits.py', r'jit: entries .* side (\d+)', 0),
-    'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
-    'large': ('jit_large_callees.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
+    'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
+    'large': ('jit_large_callees.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'quiet': ('jit_quiet_misses.py', r'jit: entries .* error (\d+)', 0),
-    'caught': ('jit_caught.py', r'jit: entries .* error (\d+)', 0),
+    'caught': ('jit_caught.py', r'jit: entries .* error (\d+) frame (\d+)', 0),
+    'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
+    'super': ('jit_super.py', r'jit: entries .* side (\d+)', 0),
     'guards': ('jit_guards.py', r'jit: unit hot@\d+ entries \d+ guards (\d+)', 0),
-    'inlined': ('jit_inlined_frames.py', r'direct calls (\d+)', 1),
+    'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
 }
 GROWTH_N = 20000
 PERF_RESOLVED = 0.95
@@ -114,7 +123,7 @@ def check_growth(args, lane):
         problems.append(f'{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
     own = qualnames(program)
     given_up = own & {name for pair in small[3] for name in pair if name}
-    if lane == 'calls' and given_up:
+    if lane in ('calls', 'super') and given_up:
         problems.append(f"disabled or retired: {' '.join(sorted(given_up))}")
     print(f"{'FAIL' if problems else 'PASS'} {lane}" + (': ' + '; '.join(problems) if problems else
                                                       f' ({small[2]}, {large[2]})'))

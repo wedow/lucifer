@@ -52,7 +52,7 @@ def main():
         for inventory in inventories:
             expected = read_manifest(inventory, expected=True)
             for path in sorted(inventory.parent.glob("*.tsv")):
-                if path == inventory:
+                if path == inventory or path.name.endswith(".excluded.tsv"):
                     continue
                 actual = read_manifest(path)
                 extra = actual.keys() - expected.keys()

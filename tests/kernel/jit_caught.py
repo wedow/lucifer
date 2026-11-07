@@ -10,7 +10,9 @@
 # strings and a bad index, a __next__ ending a for loop, str.translate over
 # a mapping) run a fixed number of times. Each result must be the
 # interpreter's; tools/jitcheck also runs this at two sizes and requires
-# that the error exits compiled code takes do not grow with the iterations.
+# that the error exits compiled code takes do not grow with the iterations,
+# nor the exits at a return for the frame object a caught exception's
+# traceback made (returns_after_catch is called once per iteration).
 import sys
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
@@ -188,7 +190,23 @@ def leaving():
     return t, last
 
 
+def returns_after_catch(i):
+    try:
+        raise ValueError(i)
+    except ValueError as e:
+        seen = e.args[0]
+    return seen
+
+
+def calls_catching(n):
+    t = 0
+    for i in range(n):
+        t += returns_after_catch(i)
+    return t
+
+
 print(same_frame(N))
+print(calls_catching(N))
 print(from_operations(N))
 print(nested_and_finally(N))
 print(handler_flow(N))

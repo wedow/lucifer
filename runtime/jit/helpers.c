@@ -41,14 +41,6 @@ lu_jit_decref(PyObject *o)
     Py_XDECREF(o);
 }
 
-void
-lu_jit_store_local(struct lu_frame *f, intptr_t i, PyObject *v)
-{
-    PyObject *old = f->localsplus[i];
-    f->localsplus[i] = v;
-    Py_XDECREF(old);
-}
-
 int
 lu_jit_truth(PyObject *v)
 {
@@ -527,38 +519,34 @@ h_range_iter(int64_t start, int64_t stop, int64_t step)
 
 /* --- calls --- */
 
-/* How much C stack a call from compiled code leaves for the callee's
-   activation: below it the interpreter makes the call, without
-   recursing (DESIGN 5.2). */
-#define STACK_RESERVE (192 * 1024)
-
-static __thread char *stack_floor;
-
 static int
 stack_low(void)
 {
     char here;
-    if (stack_floor == NULL) {
-        pthread_attr_t attr;
-        void *addr;
-        size_t size;
-        if (pthread_getattr_np(pthread_self(), &attr) != 0) {
-            return 1;
-        }
-        pthread_attr_getstack(&attr, &addr, &size);
-        pthread_attr_destroy(&attr);
-        stack_floor = (char *)addr + STACK_RESERVE;
-    }
-    return &here < stack_floor;
+    return &here < lu_current_task()->carrier->jit_stack_floor;
 }
 
-/* A Python function's call, as CALL makes it: the frame is pushed and
-   bound (by plain stores when the arguments are exactly its positional
-   parameters), then run by lu_eval, which enters a compiled unit directly. */
+/* A Python function's call, as CALL makes it: into its code's direct entry
+   when it has one (target.h), else the frame is pushed and bound (by plain
+   stores when the arguments are exactly its positional parameters), then
+   run by lu_eval, which enters a compiled unit directly. */
 static PyObject *
 call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs)
 {
     PyCodeObject *co = (PyCodeObject *)func->func_code;
+    uintptr_t jc = (uintptr_t)__atomic_load_n(&co->co_executors, __ATOMIC_ACQUIRE);
+    if (jc != 0 && !(jc & 1) && nargs <= ((struct lu_jit_direct *)jc)->nargs) {
+        int (*entry)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, int)
+            = __atomic_load_n(&((struct lu_jit_direct *)jc)->entry, __ATOMIC_ACQUIRE);
+        PyObject *v;
+        int r = entry != NULL ? entry(&t->ts, func, args, &v, (int)nargs) : 0;
+        if (r == LU_JIT_RETURN) {
+            return v;
+        }
+        if (r != 0) {
+            return lu_jit_call_finish(&t->ts, (struct lu_frame *)v, r);
+        }
+    }
     struct lu_frame *f;
     if (co->co_argcount == nargs && co->co_kwonlyargcount == 0
         && !(co->co_flags & (CO_VARARGS | CO_VARKEYWORDS))) {
@@ -603,6 +591,20 @@ polled(struct lu_task *t, PyObject *r)
         Py_CLEAR(r);
     }
     return r;
+}
+
+PyObject *
+lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r)
+{
+    struct lu_task *t = (struct lu_task *)ts;
+    /* The callee's frame returns into a C-entry marker, as under lu_eval. */
+    struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
+    entry.previous = callee->previous;
+    callee->previous = &entry;
+    t->pin++;
+    PyObject *v = lu_eval_continue(ts, r == LU_JIT_ERROR);
+    t->pin--;
+    return polled(t, v);
 }
 
 /* A call through lu_call, which C callers make. */
@@ -670,6 +672,26 @@ h_call(PyObject **argv, intptr_t n)
     }
 called:
     return polled(t, r);
+}
+
+/* LOAD_SUPER_ATTR: super's attribute as the interpreter takes it: the
+   kernel's when super is the builtin and the class a type, else super
+   called (with the class and self when `two`) and its attribute taken. */
+static PyObject *
+h_super_attr(PyObject *gsuper, PyObject *cls, PyObject *self, PyObject *name, intptr_t two)
+{
+    if (gsuper == (PyObject *)&PySuper_Type && PyType_Check(cls)) {
+        PyObject *args[3] = { cls, self, name };
+        return lu_call_kernel(LU_K_super_getattr, args, 3);
+    }
+    struct lu_task *t = lu_current_task();
+    PyObject *argv[2] = { cls, self };
+    t->pin++;
+    PyObject *sup = lu_call(gsuper, argv, (size_t)two, NULL);
+    PyObject *v = sup != NULL ? PyObject_GetAttr(sup, name) : NULL;
+    t->pin--;
+    Py_XDECREF(sup);
+    return polled(t, v);
 }
 
 /* CALL_KW: argv as h_call's, then the keyword names. */
@@ -873,7 +895,6 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_box_int] = { (void *)lu_jit_box_int, "box_int", REP_OBJ, 0, 1 },
     [H_box_float] = { (void *)lu_jit_box_float, "box_float", REP_OBJ, 0, 1 },
     [H_decref] = { (void *)lu_jit_decref, "decref", REP_NONE, 0, 1 },
-    [H_store_local] = { (void *)lu_jit_store_local, "store_local", REP_NONE, 0, 3 },
     [H_truth] = { (void *)lu_jit_truth, "truth", REP_BIT, IF_RAISE | IF_PY, 1 },
     [H_list_item] = { (void *)lu_jit_list_item, "list_item", REP_OBJ, 0, 2 },
     [H_list_store] = { (void *)lu_jit_list_store, "list_store", REP_BIT, 0, 3 },
@@ -896,6 +917,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 3 },
     [H_call] = { (void *)h_call, "call", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_call_special] = { (void *)h_call_special, "call_special", REP_OBJ, IF_RAISE | IF_PY, 0 },
+    [H_super_attr] = { (void *)h_super_attr, "super_attr", REP_OBJ, IF_RAISE | IF_PY, 5 },
     [H_prim] = { (void *)h_prim, "prim", REP_OBJ, IF_RAISE, 0 },
     [H_make_function] = { (void *)h_make_function, "make_function", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, 0, 3 },

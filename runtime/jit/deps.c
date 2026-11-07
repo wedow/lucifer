@@ -1,5 +1,5 @@
 /* What compiled code relies on between polls, and taking it back
-   (DESIGN 6.2 step 7, FOUNDATIONS 2.4).
+   (DESIGN 6.2 step 8, FOUNDATIONS 2.4).
 
    A unit may rely on a fact past the guard that checked it: that a type
    keeps a version, a dict its keys or the value of one key, a function its

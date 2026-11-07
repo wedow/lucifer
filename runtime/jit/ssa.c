@@ -50,7 +50,6 @@ lu_count_kind(const struct lu_ins *in)
     case OP_HELPER: return CNT_helper;
     case OP_INCREF: return CNT_incref;
     case OP_DECREF: return CNT_decref;
-    case OP_STORE_LOCAL: return CNT_store_local;
     case OP_BOX_INT: case OP_BOX_FLOAT: return (in->flags & INS_VIRTUAL) ? -1 : CNT_box;
     default: return -1;
     }
