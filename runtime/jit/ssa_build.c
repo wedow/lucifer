@@ -2653,8 +2653,8 @@ translate(struct ctx *c)
     }
     case RETURN_VALUE: {
         if (c->parent == NULL) {
-            /* A frame object takes the locals when the frame stops: the
-               interpreter returns from a frame that has one. */
+            /* A frame object another holds takes the locals when the
+               frame stops: the interpreter returns from such a frame. */
             guard(c, OP_GUARD_FRAMES, LU_NOV, 1);
         }
         v = pop(c, &own);

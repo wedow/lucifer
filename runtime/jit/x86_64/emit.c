@@ -1792,8 +1792,25 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         cmp8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
         jcc(a, CC_NE, seen);
         if (in->imm & 1) {
-            cmp_mi(a, 1, R15, offsetof(struct lu_frame, frame_obj), 0);
+            /* A frame object takes the locals only if another holds it too
+               (lu_frame_retire): one the record alone holds is dropped. */
+            int ok = new_label(a);
+            load(a, RAX, R15, offsetof(struct lu_frame, frame_obj));
+            test_rr(a, RAX, RAX);
+            jcc(a, CC_E, ok);
+            cmp_mi(a, 0, RAX, offsetof(PyObject, ob_ref_local), 1);
             jcc(a, CC_NE, seen);
+            cmp_mi(a, 1, RAX, offsetof(PyObject, ob_ref_shared), 0);
+            jcc(a, CC_NE, seen);
+            b1(a, 0x64);
+            b1(a, 0x48);
+            b1(a, 0x8B);
+            b1(a, 0x0C);
+            b1(a, 0x25);
+            b4(a, 0);                           /* mov rcx, fs:[0] */
+            cmp_rm(a, RCX, RAX, offsetof(PyObject, ob_tid));
+            jcc(a, CC_NE, seen);
+            bind(a, ok);
         }
         return 0;
     }
@@ -2422,15 +2439,22 @@ direct_entry(struct asm_ *a)
 }
 
 /* A return into a direct caller: RCX the value, RAX its word (marked).
-   The frame goes as lu_frame_pop takes it (no frame object, no slots,
-   the function borrowed), its code last, with the caller's frame
-   current. */
+   The frame goes as lu_frame_pop takes it (no frame object another
+   holds, no slots, the function borrowed), its code last, with the
+   caller's frame current. */
 static void
 direct_return(struct asm_ *a)
 {
     bind(a, a->direct_return);
     alu_ri(a, ALU_AND, RAX, -2);
     store(a, RAX, 0, RCX);
+    /* A frame object only the record holds goes with the frame. */
+    int alone = new_label(a);
+    cmp_mi(a, 1, R15, offsetof(struct lu_frame, frame_obj), 0);
+    jcc(a, CC_E, alone);
+    mov_rr(a, RDI, R15);
+    call_abs(a, (void *)lu_frame_retire);
+    bind(a, alone);
     load(a, R12, R15, offsetof(struct lu_frame, code));
     load(a, RAX, R15, offsetof(struct lu_frame, previous));
     store(a, R14, offsetof(PyThreadState, current_frame), RAX);

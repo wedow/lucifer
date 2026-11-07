@@ -91,7 +91,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(GUARD_DEPTH, REP_NONE, IF_GUARD | IF_EFFECT)  /* the task's py_recursion_remaining >= imm (at entry) */ \
     X(GUARD_FRAMES, REP_NONE, IF_GUARD | IF_EFFECT) /* a call left no inlined frame pushed and the root     \
                                                        compiled code's (runtime/jit/deopt.c); imm 1: and    \
-                                                       without a frame object */ \
+                                                       without a frame object another holds */ \
     X(LOAD, REP_NONE, 0)                /* *(a + imm), rep set by the builder; a borrowed object; imm2 4: 32 bits */ \
     X(STORE, REP_NONE, IF_EFFECT)       /* *(a + imm) = b, raw */ \
     X(LIST_ITEM, REP_OBJ, IF_GUARD | IF_CALL)   /* a: an exact list (imm 1: tuple), b: i64 index; deopts out of range */ \
