@@ -1330,6 +1330,58 @@ escape(struct lu_func *f)
     free(ok);
 }
 
+/* 5b. A bool only frame states hold (one a test pushed for the branch
+   after it) is made by the exits that need it, from its bit, its NOTs
+   folded into imm (1: negated). Lent frames' locals stay real
+   (lu_jit_frames_push reads them). */
+static void
+virtual_bools(struct lu_func *f)
+{
+    int n = f->nins;
+    char *ok = calloc((size_t)n, 1);
+    for (int v = 0; v < n; v++) {
+        ok[v] = f->ins[v].op == OP_BOOL && !(f->ins[v].flags & INS_DEAD);
+    }
+    for (int v = 0; v < n; v++) {
+        struct lu_ins *in = &f->ins[v];
+        if (in->flags & INS_DEAD) {
+            continue;
+        }
+        lu_v ops[3] = { in->a, in->b, in->c };
+        for (int i = 0; i < 3; i++) {
+            if (ops[i] != LU_NOV && in->op != OP_DECREF && in->op != OP_INCREF) {
+                ok[ops[i]] = 0;
+            }
+        }
+        for (int i = 0; i < in->nargs; i++) {
+            if (in->args[i] != LU_NOV) {
+                ok[in->args[i]] = 0;
+            }
+        }
+        if (in->op == OP_HELPER && (lu_helpers[in->imm].flags & IF_PY) && in->fs != NULL) {
+            for (struct lu_fs *fs = in->fs; fs->caller != NULL; fs = fs->caller) {
+                for (int i = 0; i < fs->nlocals; i++) {
+                    if (fs->vals[i] != LU_NOV) {
+                        ok[fs->vals[i]] = 0;
+                    }
+                }
+            }
+        }
+    }
+    for (int v = 0; v < n; v++) {
+        struct lu_ins *in = &f->ins[v];
+        if (!ok[v]) {
+            continue;
+        }
+        in->flags |= INS_VIRTUAL;
+        while (f->ins[in->a].op == OP_NOT) {
+            in->a = f->ins[in->a].a;
+            in->imm ^= 1;
+        }
+    }
+    free(ok);
+}
+
 /* 6. */
 static void
 dce(struct lu_func *f)
@@ -1484,6 +1536,7 @@ lu_ssa_optimize(struct lu_func *f)
         rewrite(f);
     }
     escape(f);
+    virtual_bools(f);
     dce(f);
     split_edges(f);
     order_blocks(f);

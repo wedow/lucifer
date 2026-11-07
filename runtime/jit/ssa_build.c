@@ -14,9 +14,11 @@
    first. The optimizer deletes the pairs that a virtual box makes moot.
 
    A walker may write a frame's locals from inside a call that runs
-   Python: every instruction that makes such a call is followed by a guard
-   (GUARD_FRAMES) that leaves after it when one did, and so is the root's
-   return when a frame object would take its locals.
+   Python, or while the task is parked in one: every instruction that makes
+   such a call (a release that may run a finalizer, a truth test included)
+   is followed by a guard (GUARD_FRAMES) that leaves after it when one did,
+   and so is the root's return when a frame object would take its
+   locals.
 
    Speculation comes from the interpreter's caches: LOAD_GLOBAL and
    LOAD_ATTR shapes, and the operand kinds BINARY_OP, COMPARE_OP and
@@ -103,7 +105,7 @@ struct ctx {
     int failed;                 /* an inlined frame met what it cannot compile */
     const char *why;            /* why, for LUCIFER_JIT_DEBUG */
     int ncalls;                 /* calls it cannot inline (opaque_call) */
-    int observed;               /* the instruction calls a helper that may run Python */
+    int observed;               /* the instruction makes a call during which a walker may see the frame */
     uint8_t *fixed;             /* per local: a parameter the code never rebinds, whose reference
                                    stays as the frame was entered with it */
     struct pending *pend;       /* landings for a caller's handlers, wired once the inline holds */
@@ -235,6 +237,7 @@ emit(struct ctx *c, int op, int rep, lu_v a, lu_v b, lu_v cc, int64_t imm)
     if (lu_op_flags[op] & IF_GUARD) {
         c->f->ins[v].fs = c->snap;      /* it leaves before the instruction it belongs to */
     }
+    c->observed |= op != OP_DECREF && lu_publishes(&c->f->ins[v]);
     return v;
 }
 
@@ -373,11 +376,25 @@ incref(struct ctx *c, lu_v v)
     }
 }
 
+/* Whether releasing v cannot run a finalizer: its type makes no
+   reference cycle, has no __del__ and no weak references. */
+static int
+plain_release(struct ctx *c, lu_v v)
+{
+    PyTypeObject *t = known_type(c, v);
+    return t == &PyLong_Type || t == &PyFloat_Type || t == &PyBool_Type || t == &PyUnicode_Type
+        || t == &PyBytes_Type || t == &PyRangeIter_Type;
+}
+
+/* A release that may run a finalizer is marked (imm 1); frames_guard
+   gives it the state after its instruction. */
 static void
 release(struct ctx *c, lu_v v, int owned)
 {
     if (owned && !immortal(c, v)) {
-        emit(c, OP_DECREF, REP_NONE, v, LU_NOV, LU_NOV, 0);
+        int seen = !plain_release(c, v);
+        emit(c, OP_DECREF, REP_NONE, v, LU_NOV, LU_NOV, seen);
+        c->observed |= seen;
     }
 }
 
@@ -451,9 +468,12 @@ static lu_v
 helper(struct ctx *c, int id, int nargs, const lu_v *args)
 {
     const struct lu_helper *h = &lu_helpers[id];
-    c->observed |= (h->flags & IF_PY) != 0;
+    c->observed |= (h->flags & (IF_PY | IF_SEEN)) != 0;
     lu_v v = emit(c, OP_HELPER, h->rep, LU_NOV, LU_NOV, LU_NOV, id);
     struct lu_ins *in = I(c, v);
+    if (h->flags & IF_SEEN) {
+        in->fs = before(c);     /* the state it publishes */
+    }
     in->nargs = nargs;
     in->args = lu_ir_alloc(c->f, sizeof(lu_v) * (size_t)(nargs ? nargs : 1));
     memcpy(in->args, args, sizeof(lu_v) * (size_t)nargs);
@@ -528,17 +548,48 @@ root_only(struct ctx *c)
     return c->parent == NULL;
 }
 
-/* After an instruction that called a helper that may run Python: the
-   frames are as compiled code left them. A call from an inlined frame runs
-   with the inlined frames pushed as real ones (the backend's), which go
-   again when it returns unless the callee kept a frame object of one; a
-   walker that wrote the root's locals made its slots real. Either way
-   compiled code leaves here, after the instruction, for the interpreter. */
+/* After an instruction that made a call during which a walker may see the
+   frames: they are as compiled code left them. A call from an inlined
+   frame runs with the inlined frames pushed as real ones (the backend's),
+   which go again when it returns unless the callee kept a frame object of
+   one; a walker that wrote the root's locals made its slots real. Either
+   way compiled code leaves here, after the instruction, for the
+   interpreter.
+
+   The instruction's releases since `first` that may run a finalizer
+   publish the locals of this state: a local stored over already names its
+   new value, as the interpreter's does when it releases the old one. The
+   stack's entries may not exist yet, and a release that follows a value it
+   would name publishes nothing (one in a block that is not the last).
+   imm2: `first`, the instruction's first IR instruction, for the backend. */
 static void
-frames_guard(struct ctx *c)
+frames_guard(struct ctx *c, lu_v first)
 {
     lu_v g = emit(c, OP_GUARD_FRAMES, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
-    I(c, g)->fs = snapshot(c, c->next);
+    struct lu_fs *after = snapshot(c, c->next), *locals = NULL;
+    I(c, g)->fs = after;
+    I(c, g)->imm2 = first;
+    for (lu_v v = first; v < g; v++) {
+        struct lu_ins *in = I(c, v);
+        if (in->op != OP_DECREF || !in->imm || in->fs != NULL || in->block != c->cur) {
+            continue;
+        }
+        int defined = 1;
+        for (int i = 0; i < after->nlocals; i++) {
+            lu_v l = after->vals[i];
+            defined &= l == LU_NOV || l < v || I(c, l)->op == OP_CONST;
+        }
+        if (!defined) {
+            continue;
+        }
+        if (locals == NULL) {
+            int sp = c->st.sp;
+            c->st.sp = 0;
+            locals = snapshot(c, c->next);
+            c->st.sp = sp;
+        }
+        in->fs = locals;
+    }
 }
 
 /* --- edges and blocks --- */
@@ -1443,6 +1494,7 @@ truth(struct ctx *c, lu_v v)
            own (lu_truth_exact) is answered without it. */
         I(c, bit)->imm = 1;
     }
+    c->observed |= c->parent == NULL;
     return bit;
 }
 
@@ -1982,6 +2034,7 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
     int method = c->oparg & 1;
     PyObject *name = name_at(c, c->oparg >> 1);
     before(c);
+    lu_v first = f->nins;
     lu_v t = emit(c, OP_LOAD, REP_I64, type_of(c, owner), LU_NOV, LU_NOV, offsetof(PyTypeObject, tp_version_tag));
     I(c, t)->imm2 = 4;          /* 32 bits */
     pop(c, NULL);
@@ -2062,7 +2115,7 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
         if (end >= 0) {
             /* Shapes the cache does not hold: the call as it was, on what the load answered. */
             if (c->observed) {
-                frames_guard(c);
+                frames_guard(c, first);
                 c->observed = 0;
             }
             push(c, v, 1);
@@ -3622,9 +3675,10 @@ step(struct ctx *c, int pc, struct lu_block *entry)
         return c->next;
     }
     c->observed = 0;
+    lu_v first = c->f->nins;
     translate(c);
     if (c->observed && c->cur >= 0 && !c->failed) {
-        frames_guard(c);
+        frames_guard(c, first);
     }
     c->observed = 0;
     c->units += c->next - pc;
