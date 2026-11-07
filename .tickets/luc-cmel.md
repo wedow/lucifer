@@ -1,6 +1,6 @@
 ---
 id: luc-cmel
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-06T19:47:24Z
