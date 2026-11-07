@@ -25,7 +25,10 @@
 
    A virtual box (an int or float compiled code never boxed) is built once
    per exit, so every slot that names the same value gets the same object.
-   Released values go last: a finalizer then sees whole frames.
+   So is a virtual object (a tuple or an instance compiled code never
+   made), with the fields it has at the exit, whose references move into
+   it (ssa_opt.c step 3c); exits are its only observers. Released values
+   go last: a finalizer then sees whole frames.
 
    A call from an inlined frame runs with the inlined frames pushed, lent
    their code, function and locals by compiled code (lu_jit_frames_push).
@@ -102,7 +105,20 @@ take(struct regs *r, const struct lu_dv *dv)
     }
     uint64_t bits = raw(r, dv);
     PyObject *o;
-    if (dv->kind == DV_NEW_DICT) {
+    if (dv->kind == DV_TUPLE) {
+        o = PyTuple_New(dv->nfields);
+        for (int i = 0; o != NULL && i < dv->nfields; i++) {
+            PyTuple_SET_ITEM(o, dv->fields[i].off, take(r, &dv->fields[i]));
+        }
+    }
+    else if (dv->kind == DV_INSTANCE) {
+        /* The words in the class's order, as the stores filled them. */
+        o = PyType_GenericAlloc((PyTypeObject *)(intptr_t)dv->imm, 0);
+        for (int i = 0; o != NULL && i < dv->nfields; i++) {
+            *(PyObject **)((char *)o + dv->fields[i].off) = take(r, &dv->fields[i]);
+        }
+    }
+    else if (dv->kind == DV_NEW_DICT) {
         o = PyDict_New();
     }
     else if (dv->kind == DV_BOX_I64) {
@@ -122,6 +138,15 @@ take(struct regs *r, const struct lu_dv *dv)
     }
     r->built[r->nbuilt++] = (struct built){ dv->vid, o };
     return Py_NewRef(o);
+}
+
+void
+lu_jit_dv_free(struct lu_dv *vals, int n)
+{
+    for (int i = 0; i < n; i++) {
+        lu_jit_dv_free(vals[i].fields, vals[i].nfields);
+        free(vals[i].fields);
+    }
 }
 
 /* An inlined frame, pushed above top at pc with its locals and an empty
@@ -335,6 +360,9 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
         for (int i = 0; i < fr->nlocals + fr->nstack; i++) {
             if (fr->vals[i].kind == DV_OBJ && fr->vals[i].owned) {
                 old[nold++] = (PyObject *)(uintptr_t)raw(&r, &fr->vals[i]);
+            }
+            else if (fr->vals[i].kind == DV_TUPLE || fr->vals[i].kind == DV_INSTANCE) {
+                old[nold++] = take(&r, &fr->vals[i]);  /* made to release the fields it holds */
             }
         }
     }

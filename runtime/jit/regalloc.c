@@ -3,10 +3,10 @@
    Positions number instructions in emission order, two apart. Liveness is
    the usual backward dataflow over blocks, with frame states counted as
    uses: an exit reads every value its state names (a virtual box's raw
-   input stands for it). Each value then gets one interval, from its
-   definition to its last use, stretched over every block it is live
-   through, so a value live around a loop holds its location through the
-   whole loop. Values in one interval keep one location: no splitting.
+   input stands for it, a virtual object's fields there for it). Each
+   value then gets one interval, from its definition to its last use,
+   stretched over every block it is live through, so a value live around a
+   loop holds its location through the whole loop. Values in one interval keep one location: no splitting.
 
    Calls clobber every register (the donor's rule: all registers are dead
    across a call, FOUNDATIONS 2.11), so a value live across one gets a
@@ -55,10 +55,23 @@ used(struct lu_func *f, lu_v v)
 #define BIT_GET(set, v) (((set)[(v) >> 6] >> ((v) & 63)) & 1)
 
 /* Calls fn(f, v, arg) for every value instruction `in` reads, phi inputs
-   excepted. */
+   excepted: a virtual object reads its fields there (at). */
 static void
-use_of(struct lu_func *f, lu_v v, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
+use_of(struct lu_func *f, lu_v v, lu_v at, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
+    if (v != LU_NOV && (f->ins[v].flags & INS_VIRTUAL) && f->ins[v].op == OP_HELPER
+        && (f->ins[v].imm == H_build_tuple || f->ins[v].imm == H_new_object)) {
+        int max = f->ins[v].imm == H_build_tuple ? f->ins[v].nargs : f->ins[v].nfields;
+        lu_v *vals = malloc(sizeof(lu_v) * (size_t)(max ? max : 1));
+        int32_t *offs = malloc(sizeof(int32_t) * (size_t)(max ? max : 1));
+        int n = lu_object_fields(f, v, at, vals, offs);
+        for (int i = 0; i < n; i++) {
+            use_of(f, vals[i], at, fn, arg);
+        }
+        free(vals);
+        free(offs);
+        return;
+    }
     lu_v u = used(f, v);
     if (u != LU_NOV) {
         fn(f, u, arg);
@@ -71,18 +84,19 @@ use_of(struct lu_func *f, lu_v v, void (*fn)(struct lu_func *, lu_v, void *), vo
 static void
 each_use(struct lu_func *f, struct lu_ins *in, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
+    lu_v at = (lu_v)(in - f->ins);
     lu_v ops[3] = { in->a, in->b, in->c };
     for (int i = 0; i < 3; i++) {
-        use_of(f, ops[i], fn, arg);
+        use_of(f, ops[i], at, fn, arg);
     }
     if (in->op != OP_PHI) {
         for (int i = 0; i < in->nargs; i++) {
-            use_of(f, in->args[i], fn, arg);
+            use_of(f, in->args[i], at, fn, arg);
         }
     }
     for (struct lu_fs *fs = in->fs; fs != NULL; fs = fs->caller) {
         for (int i = 0; i < fs->nlocals + fs->nstack; i++) {
-            use_of(f, fs->vals[i], fn, arg);
+            use_of(f, fs->vals[i], at, fn, arg);
         }
     }
 }
@@ -246,7 +260,7 @@ lu_regalloc(struct lu_func *f)
                 }
                 struct use_at after = { ins->pos + 1 };
                 for (int i = 0; i < root->nlocals; i++) {
-                    use_of(f, root->vals[i], extend_use, &after);
+                    use_of(f, root->vals[i], v, extend_use, &after);
                 }
             }
             if ((lu_op_flags[ins->op] & IF_CALL) && ins->op != OP_PHI) {

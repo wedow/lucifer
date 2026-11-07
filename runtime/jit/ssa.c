@@ -26,6 +26,9 @@ const char *const lu_count_names[CNT_COUNT] = {
 int
 lu_count_kind(const struct lu_ins *in)
 {
+    if (in->flags & INS_VIRTUAL) {
+        return -1;              /* nothing runs */
+    }
     switch (in->op) {
     case OP_GUARD_TYPE: return CNT_guard_type;
     case OP_GUARD_VERSION:
@@ -50,7 +53,84 @@ lu_count_kind(const struct lu_ins *in)
     case OP_HELPER: return in->imm2 > 0 ? (int)in->imm2 - 1 : CNT_helper;
     case OP_INCREF: return CNT_incref;
     case OP_DECREF: return CNT_decref;
-    case OP_BOX_INT: case OP_BOX_FLOAT: return (in->flags & INS_VIRTUAL) ? -1 : CNT_box;
+    case OP_BOX_INT: case OP_BOX_FLOAT: return CNT_box;
+    default: return -1;
+    }
+}
+
+/* The position of instruction v in its block. */
+static int
+index_in_block(struct lu_func *f, lu_v v)
+{
+    struct lu_block *bl = &f->blocks[f->ins[v].block];
+    for (int i = 0; i < bl->nins; i++) {
+        if (bl->ins[i] == v) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int
+lu_ssa_before(struct lu_func *f, lu_v s, lu_v x)
+{
+    int bs = f->ins[s].block, b = f->ins[x].block;
+    if (bs == b) {
+        return s != x && index_in_block(f, s) < index_in_block(f, x);
+    }
+    while (b != bs && b > 0) {
+        b = f->idom[b];
+    }
+    return b == bs;
+}
+
+int
+lu_object_fields(struct lu_func *f, lu_v v, lu_v at, lu_v *vals, int32_t *offs)
+{
+    struct lu_ins *in = &f->ins[v];
+    int n = 0;
+    if (in->imm == H_build_tuple) {
+        for (int i = 0; i < in->nargs; i++) {
+            vals[n] = in->args[i];
+            offs[n++] = i;
+        }
+        return n;
+    }
+    for (int i = 0; i < in->nfields; i++) {
+        struct lu_ins *st = &f->ins[in->fields[i]];
+        if (lu_ssa_before(f, in->fields[i], at)) {
+            vals[n] = st->b;
+            offs[n++] = (int32_t)st->imm;
+        }
+    }
+    return n;
+}
+
+int
+lu_alloc_kind(const struct lu_ins *in)
+{
+    if (in->flags & (INS_VIRTUAL | INS_DEAD)) {
+        return -1;
+    }
+    switch (in->op) {
+    case OP_BOX_INT: return ALLOC_int;
+    case OP_BOX_FLOAT: return ALLOC_float;
+    case OP_HELPER:
+        break;
+    default:
+        return -1;
+    }
+    switch (in->imm) {
+    case H_box_int: return ALLOC_int;
+    case H_box_float: return ALLOC_float;
+    case H_build_tuple: case H_list_to_tuple: return ALLOC_tuple;
+    case H_build_list: case H_list_repeat: return ALLOC_list;
+    case H_new_dict: case H_build_map: return ALLOC_dict;
+    case H_build_set: return ALLOC_set;
+    case H_new_object: return ALLOC_instance;
+    case H_get_iter: case H_get_iter_seq: case H_range_iter: return ALLOC_iterator;
+    case H_make_function: return ALLOC_function;
+    case H_call: return ALLOC_class_call;
     default: return -1;
     }
 }
@@ -205,6 +285,7 @@ lu_ir_free(struct lu_func *f)
     free(f->known_block);
     free(f->deps);
     free(f->order);
+    free(f->idom);
     for (int i = 0; i < f->nconsts; i++) {
         Py_XDECREF(f->consts[i]);
     }

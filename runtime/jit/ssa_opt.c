@@ -9,7 +9,8 @@
       local's phi may forget an object an input box was made from, which
       its edge then releases.
    3. Simplification: an unbox of a box is its raw value; guards on values
-      whose type a box proves fold away.
+      whose type a box proves fold away. Then virtual objects (3c): tuples
+      and instances nothing outside compiled code sees are not made.
    4. Escape analysis (the donor's scalar replacement, for boxes): a box
       whose every use is an unbox, a frame state or a release is virtual.
       It is never built in compiled code; an exit or a walker that needs
@@ -569,7 +570,8 @@ may_change(struct lu_func *f, struct lu_ins *in)
     case OP_HELPER:
         return !(in->imm == H_box_int || in->imm == H_box_float || in->imm == H_list_item
                  || in->imm == H_attr_load || in->imm == H_slot_load || in->imm == H_dict_lacks
-                 || in->imm == H_cell_load || in->imm == H_compare_ideq || in->imm == H_range_iter);
+                 || in->imm == H_cell_load || in->imm == H_compare_ideq || in->imm == H_range_iter
+                 || in->imm == H_new_object);
     default:
         return (lu_op_flags[in->op] & IF_CALL) || in->op == OP_TRUTH;
     }
@@ -1131,6 +1133,705 @@ count_uses(struct lu_func *f, struct uses *u)
     }
 }
 
+/* 3c. Virtual objects (DESIGN 4.5, the donor's scalar replacement for
+   objects). A tuple this code builds, or an instance it makes (a class
+   call whose __init__ inlined) of a class without a finalizer, whose
+   every use is one of these is never made:
+     - a reference operation;
+     - a frame state (only exits see it, and every exit taken while it
+       lives names it), but for the locals of a state an instruction
+       publishes, which a walker reads;
+     - a read of its type, a guard of its type or its type's version, an
+       identity test (nothing else can be it: it never leaves);
+     - a tuple's size or a constant index into it;
+     - an instance's inline store (as the owner) or load, or the test of
+       its dict for a method, which it has none of.
+   An instance's fields are the stores into it: each name is stored once,
+   in the order of the class's names (the insertion order the words keep),
+   and wherever it is used a store either ran on every path there or on
+   none, so that each exit sees one set of fields. A load reads its
+   store's value. The object's references become its fields': the build
+   (a store) takes a reference to each, and the release that ends it (its
+   count is the same on every path, found by counting) releases them; the
+   rest go. An exit makes it once, its fields moving in
+   (runtime/jit/deopt.c). */
+
+enum { OBJ_NONE, OBJ_TUPLE, OBJ_INSTANCE };
+
+static PyTypeObject *
+object_type(struct lu_func *f, struct lu_ins *in)
+{
+    return in->imm == H_build_tuple ? &PyTuple_Type : (PyTypeObject *)(intptr_t)f->ins[in->args[0]].imm;
+}
+
+static int
+object_kind(struct lu_func *f, lu_v v)
+{
+    struct lu_ins *in = &f->ins[v];
+    if (in->op != OP_HELPER || (in->flags & (INS_DEAD | INS_VIRTUAL))) {
+        return OBJ_NONE;
+    }
+    if (in->imm == H_build_tuple && in->nargs > 0) {
+        return OBJ_TUPLE;
+    }
+    if (in->imm == H_new_object) {
+        PyTypeObject *tp = object_type(f, in);
+        return tp->tp_finalize == NULL && tp->tp_del == NULL && (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)
+            ? OBJ_INSTANCE : OBJ_NONE;
+    }
+    return OBJ_NONE;
+}
+
+/* Whether u's operand at pos (0..2: a, b, c; 3: an argument) may be
+   object v of kind k. */
+static int
+object_use(struct lu_func *f, struct lu_ins *u, int pos, lu_v v, int k)
+{
+    struct lu_ins *o = &f->ins[v];
+    int64_t first = offsetof(PyTupleObject, ob_item);
+    switch (u->op) {
+    case OP_INCREF: case OP_DECREF:
+        return pos == 0;
+    case OP_IS:
+        return pos < 2;
+    case OP_GUARD_TYPE:
+        return pos == 0 && u->imm == (int64_t)(intptr_t)object_type(f, o);
+    case OP_GUARD_VERSION:
+        return pos == 0 && u->imm2 == GV_TYPE_OF;
+    case OP_LOAD:
+        return pos == 0 && (u->imm == offsetof(PyObject, ob_type)
+                            || (k == OBJ_TUPLE && u->imm == offsetof(PyVarObject, ob_size) && u->rep == REP_I64)
+                            || (k == OBJ_TUPLE && u->rep == REP_OBJ && u->imm >= first
+                                && u->imm < first + 8 * o->nargs && (u->imm - first) % 8 == 0));
+    case OP_LIST_ITEM:
+        return k == OBJ_TUPLE && pos == 0 && u->imm == 1 && f->ins[u->b].op == OP_CONST_I
+            && f->ins[u->b].imm >= -o->nargs && f->ins[u->b].imm < o->nargs;
+    case OP_INLINE_STORE: case OP_INLINE_LOAD:
+        return k == OBJ_INSTANCE && pos == 0;
+    case OP_HELPER:
+        return k == OBJ_INSTANCE && pos == 3 && u->imm == H_dict_lacks && u->args[0] == v;
+    default:
+        return 0;
+    }
+}
+
+/* LUCIFER_JIT_DEBUG: why object v stays real (u: the instruction that
+   decided it, or NULL); OBJ_NONE. */
+static int
+not_virtual(struct lu_func *f, lu_v v, struct lu_ins *u, const char *why)
+{
+    if (_PyRuntime.jit.debug) {
+        struct lu_ins *o = &f->ins[v];
+        fprintf(stderr, "jit: not virtual: %s at %s@%d: %s", o->imm == H_build_tuple ? "tuple" : "instance",
+                o->src != NULL ? PyUnicode_AsUTF8(o->src->co_qualname) : "?", o->src_pc, why);
+        if (u != NULL) {
+            fprintf(stderr, " (%s at %s@%d)", lu_op_names[u->op], u->src != NULL ? PyUnicode_AsUTF8(u->src->co_qualname) : "?",
+                    u->src_pc);
+            if (u->op == OP_HELPER) {
+                fprintf(stderr, " %s", lu_helpers[u->imm].name);
+            }
+        }
+        fprintf(stderr, "\n");
+    }
+    return OBJ_NONE;
+}
+
+/* Whether u may leave compiled code at its frame state. */
+static int
+exits(struct lu_ins *u)
+{
+    return u->fs != NULL && ((lu_op_flags[u->op] & (IF_GUARD | IF_RAISE)) || u->op == OP_DEOPT
+                             || (u->op == OP_HELPER && (lu_helpers[u->imm].flags & IF_RAISE)));
+}
+
+struct objs {
+    struct lu_func *f;
+    int nold;                   /* instructions before the pass added any */
+    char *mark;                 /* per instruction: how it uses the object looked at (1 operand, 2 state) */
+    struct cfg g;
+    int *blk, *idx;             /* per instruction: its block and position */
+    char *seen;                 /* per block: scratch */
+    int *work;
+};
+
+/* Whether v is in a block control reaches. */
+static int
+reached(struct objs *x, lu_v v)
+{
+    return x->blk[v] >= 0 && x->g.at[x->blk[v]] >= 0;
+}
+
+static int
+before_ins(struct objs *x, lu_v s, lu_v p)
+{
+    if (!reached(x, s) || !reached(x, p)) {
+        return 0;
+    }
+    if (x->blk[s] == x->blk[p]) {
+        return x->idx[s] < x->idx[p];
+    }
+    return x->g.at[x->blk[p]] >= 0 && dominates_block(&x->g, x->blk[s], x->blk[p]);
+}
+
+/* Whether p can run after s without object v's allocation between. */
+static int
+reaches(struct objs *x, lu_v v, lu_v s, lu_v p)
+{
+    struct lu_func *f = x->f;
+    if (!reached(x, s) || !reached(x, p)) {
+        return 0;
+    }
+    if (x->blk[s] == x->blk[p] && x->idx[s] < x->idx[p]) {
+        return 1;
+    }
+    memset(x->seen, 0, (size_t)f->nblocks);
+    int nw = 0;
+    x->work[nw++] = x->blk[s];
+    while (nw > 0) {
+        int b = x->work[--nw];
+        for (int k = 0; k < f->blocks[b].nsucc; k++) {
+            int t = f->blocks[b].succ[k];
+            if (x->seen[t]) {
+                continue;
+            }
+            x->seen[t] = 1;
+            if (t == x->blk[p] && (t != x->blk[v] || x->idx[p] < x->idx[v])) {
+                return 1;
+            }
+            if (t != x->blk[v]) {
+                x->work[nw++] = t;
+            }
+        }
+    }
+    return 0;
+}
+
+/* The release that ends v, per instruction (1), found by counting its
+   references along every path; 0 when the counts disagree or an exit
+   taken while it lives would not name it. */
+static int
+object_counts(struct objs *x, lu_v v, char *ends)
+{
+    struct lu_func *f = x->f;
+    int *rc = malloc(sizeof(int) * (size_t)f->nblocks);
+    for (int b = 0; b < f->nblocks; b++) {
+        rc[b] = -1;
+    }
+    rc[0] = 0;
+    const char *why = NULL;
+    lu_v at = LU_NOV;
+    for (int i = 0; i < x->g.n && why == NULL; i++) {
+        int b = x->g.rpo[i], n = rc[b];
+        if (n < 0) {
+            continue;
+        }
+        struct lu_block *bl = &f->blocks[b];
+        for (int k = 0; k < bl->nins && why == NULL; k++) {
+            lu_v u = bl->ins[k];
+            struct lu_ins *in = &f->ins[u];
+            at = u;
+            if (in->flags & INS_DEAD) {
+                continue;
+            }
+            if (u == v) {
+                why = n != 0 ? "made again while it lives" : NULL;
+                n = 1;
+                continue;
+            }
+            if (in->op == OP_INCREF && in->a == v) {
+                n++;
+            }
+            else if (in->op == OP_DECREF && in->a == v) {
+                why = n <= 0 ? "released more than taken" : NULL;
+                ends[u] = --n == 0;
+                if (ends[u] && (x->mark[u] & 2)) {
+                    why = "its last release's state names it";  /* its fields' releases publish that state */
+                }
+                continue;
+            }
+            int own = (in->op == OP_INLINE_STORE || in->op == OP_INLINE_LOAD || in->op == OP_GUARD_TYPE)
+                && in->a == v;
+            if (!own && (x->mark[u] & 2)) {
+                why = n <= 0 ? "a state names it where it is gone" : NULL;
+            }
+            else if (!own && n > 0 && exits(in)) {
+                why = "an exit while it lives does not name it";
+            }
+            else if (in->op == OP_RETURN && n != 0) {
+                why = "it lives at a return";
+            }
+        }
+        for (int k = 0; k < bl->nsucc && why == NULL; k++) {
+            int t = bl->succ[k];
+            if (rc[t] < 0) {
+                rc[t] = n;
+            }
+            why = rc[t] != n ? "its count differs by path" : NULL;
+            at = bl->ins[bl->nins - 1];
+        }
+    }
+    free(rc);
+    if (why != NULL) {
+        not_virtual(f, v, &f->ins[at], why);
+    }
+    return why == NULL;
+}
+
+/* Whether instance v's stores make one set of fields at every use. */
+static int
+object_fields(struct objs *x, lu_v v, lu_v *uses, int nuses, lu_v *stores, int nstores)
+{
+    struct lu_func *f = x->f;
+    for (int i = 0; i < nstores; i++) {
+        for (int j = 0; j < nstores; j++) {
+            struct lu_ins *a = &f->ins[stores[i]], *b = &f->ins[stores[j]];
+            if (i != j && (a->imm == b->imm || (before_ins(x, stores[i], stores[j]) && a->imm > b->imm))) {
+                return 0;       /* a name stored twice, or out of the names' order */
+            }
+        }
+        for (int k = 0; k < nuses; k++) {
+            if (uses[k] != stores[i] && !before_ins(x, stores[i], uses[k]) && reaches(x, v, stores[i], uses[k])) {
+                return 0;
+            }
+        }
+    }
+    for (int k = 0; k < nuses; k++) {
+        struct lu_ins *u = &f->ins[uses[k]];
+        if (u->op != OP_INLINE_LOAD) {
+            continue;
+        }
+        int found = 0;
+        for (int i = 0; i < nstores; i++) {
+            found |= f->ins[stores[i]].imm == u->imm && before_ins(x, stores[i], uses[k]);
+        }
+        if (!found) {
+            return 0;           /* a load of a name not stored: it leaves */
+        }
+    }
+    return 1;
+}
+
+static int
+immortal_value(struct lu_func *f, lu_v v)
+{
+    struct lu_ins *in = &f->ins[v];
+    return in->op == OP_BOOL || in->op == OP_CONST;      /* a constant: the unit keeps it */
+}
+
+static lu_v
+insert_before(struct lu_func *f, lu_v at, int op, lu_v a, int64_t imm)
+{
+    int b = f->ins[at].block;
+    lu_v v = lu_ir_emit(f, b, op, REP_NONE, a, LU_NOV, LU_NOV, imm);
+    struct lu_block *bl = &f->blocks[b];
+    int k = 0;
+    while (bl->ins[k] != at) {
+        k++;
+    }
+    memmove(&bl->ins[k + 1], &bl->ins[k], sizeof(int) * (size_t)(bl->nins - 1 - k));
+    bl->ins[k] = v;
+    return v;
+}
+
+/* The value a load of v at u reads. */
+static lu_v
+field_at(struct lu_func *f, lu_v v, lu_v u, int64_t off)
+{
+    struct lu_ins *o = &f->ins[v];
+    if (o->imm == H_build_tuple) {
+        return o->args[off];
+    }
+    for (int i = 0; i < o->nfields; i++) {
+        if (f->ins[o->fields[i]].imm == off && lu_ssa_before(f, o->fields[i], u)) {
+            return f->ins[o->fields[i]].b;
+        }
+    }
+    return LU_NOV;
+}
+
+static void
+object_rewrite(struct lu_func *f, lu_v v, int k, lu_v *uses, int nuses, char *ends)
+{
+    if (k == OBJ_TUPLE) {
+        for (int i = 0, nargs = f->ins[v].nargs; i < nargs; i++) {
+            if (!immortal_value(f, f->ins[v].args[i])) {
+                insert_before(f, v, OP_INCREF, f->ins[v].args[i], 0);
+            }
+        }
+    }
+    else {
+        int n = 0;
+        for (int i = 0; i < nuses; i++) {
+            n += f->ins[uses[i]].op == OP_INLINE_STORE && f->ins[uses[i]].a == v;
+        }
+        lu_v *fields = lu_ir_alloc(f, sizeof(lu_v) * (size_t)(n ? n : 1));
+        n = 0;
+        for (int i = 0; i < nuses; i++) {
+            struct lu_ins *u = &f->ins[uses[i]];
+            if (u->op == OP_INLINE_STORE && u->a == v) {
+                fields[n++] = uses[i];
+                if (!immortal_value(f, u->b)) {
+                    insert_before(f, uses[i], OP_INCREF, f->ins[uses[i]].b, 0);
+                }
+                f->ins[uses[i]].flags |= INS_VIRTUAL;
+                f->ins[uses[i]].fs = NULL;     /* it never leaves */
+            }
+        }
+        f->ins[v].fields = fields;
+        f->ins[v].nfields = n;
+    }
+    f->ins[v].flags |= INS_VIRTUAL;
+    PyTypeObject *tp = object_type(f, &f->ins[v]);
+    lu_v type = k == OBJ_TUPLE ? entry_const(f, OP_CONST, REP_OBJ, (int64_t)(intptr_t)tp) : f->ins[v].args[0];
+    for (int i = 0; i < nuses; i++) {
+        lu_v u = uses[i];
+        struct lu_ins *in = &f->ins[u];
+        int operand = in->a == v || in->b == v || in->c == v || (in->op == OP_HELPER && in->nargs > 0 && in->args[0] == v);
+        if (!operand) {
+            continue;           /* a frame state names it */
+        }
+        switch (in->op) {
+        case OP_INCREF:
+            in->flags |= INS_DEAD;
+            break;
+        case OP_DECREF: {
+            if (ends[u]) {
+                lu_v vals[64];
+                int32_t offs[64];
+                int nv = f->ins[v].imm == H_build_tuple ? f->ins[v].nargs : f->ins[v].nfields;
+                lu_v *pv = nv <= 64 ? vals : malloc(sizeof(lu_v) * (size_t)nv);
+                int32_t *po = nv <= 64 ? offs : malloc(sizeof(int32_t) * (size_t)nv);
+                nv = lu_object_fields(f, v, u, pv, po);
+                for (int j = 0; j < nv; j++) {
+                    if (!immortal_value(f, pv[j])) {
+                        int seen = !plain(f, pv[j], 0);
+                        lu_v d = insert_before(f, u, OP_DECREF, pv[j], seen);
+                        f->ins[d].fs = seen ? f->ins[u].fs : NULL;
+                    }
+                }
+                if (pv != vals) {
+                    free(pv);
+                    free(po);
+                }
+            }
+            f->ins[u].flags |= INS_DEAD;
+            break;
+        }
+        case OP_IS:
+            in->op = OP_CONST_I;
+            in->imm = in->a == in->b;
+            in->a = in->b = LU_NOV;
+            break;
+        case OP_GUARD_TYPE:
+            in->flags |= INS_DEAD;
+            break;
+        case OP_GUARD_VERSION:
+            in->a = type;
+            in->imm2 = GV_TYPE_ITSELF;
+            break;
+        case OP_LOAD:
+            if (in->imm == offsetof(PyObject, ob_type)) {
+                kill(f, u, type);
+            }
+            else if (in->imm == offsetof(PyVarObject, ob_size)) {
+                kill(f, u, entry_const(f, OP_CONST_I, REP_I64, f->ins[v].nargs));
+            }
+            else {
+                kill(f, u, f->ins[v].args[(in->imm - (int64_t)offsetof(PyTupleObject, ob_item)) / 8]);
+            }
+            break;
+        case OP_LIST_ITEM: case OP_INLINE_LOAD: {
+            /* A new reference to the field's value. */
+            int64_t i = in->op == OP_LIST_ITEM ? f->ins[in->b].imm : 0;
+            lu_v w = in->op == OP_LIST_ITEM ? f->ins[v].args[i < 0 ? i + f->ins[v].nargs : i] : field_at(f, v, u, in->imm);
+            in = &f->ins[u];
+            in->op = OP_INCREF;
+            in->rep = REP_NONE;
+            in->a = w;
+            in->b = in->c = LU_NOV;
+            in->fs = NULL;
+            fwd[u] = w;
+            break;
+        }
+        case OP_HELPER:         /* dict_lacks: it has no dict */
+            in->op = OP_CONST_I;
+            in->rep = REP_BIT;
+            in->imm = 1;
+            in->nargs = 0;
+            in->fs = NULL;
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+/* Stores into an instance this code made that no other thread can have
+   seen yet, of a name it does not have yet (INS_FRESH): they take no lock
+   and release nothing, so they never park or run a finalizer, and
+   publish nothing. The instance may have reached another thread once any
+   use of it but its own stores, loads, guards and reference operations
+   has run (it was passed, stored, returned or joined), or a state a
+   walker can read names it in a local: a store any of those reaches is
+   not fresh, nor is one another store of its name reaches; and a store
+   that is not fresh publishes, so it is such a use for the stores after. */
+static void
+fresh_stores(struct objs *x, lu_v v)
+{
+    struct lu_func *f = x->f;
+    int n = x->nold, nst = 0, nesc = 0;
+    lu_v *st = malloc(sizeof(lu_v) * (size_t)(n + 1)), *esc = malloc(sizeof(lu_v) * (size_t)(n + 1));
+    for (int u = 0; u < n; u++) {
+        struct lu_ins *in = &f->ins[u];
+        if (in->flags & INS_DEAD) {
+            continue;
+        }
+        if (in->op == OP_INLINE_STORE && in->a == v && in->b != v) {
+            st[nst++] = u;
+            continue;
+        }
+        int escapes = 0;
+        lu_v ops[3] = { in->a, in->b, in->c };
+        for (int i = 0; i < 3; i++) {
+            escapes |= ops[i] == v && !object_use(f, in, i, v, OBJ_INSTANCE);
+        }
+        for (int i = 0; i < in->nargs; i++) {
+            escapes |= in->args[i] == v && (in->op == OP_PHI || !object_use(f, in, 3, v, OBJ_INSTANCE));
+        }
+        for (struct lu_fs *fs = in->fs; fs != NULL && !escapes && lu_publishes(in); fs = fs->caller) {
+            for (int i = 0; i < fs->nlocals; i++) {
+                escapes |= fs->vals[i] == v;
+            }
+        }
+        if (escapes) {
+            esc[nesc++] = u;
+        }
+    }
+    char *stale = calloc((size_t)(nst ? nst : 1), 1);
+    for (int changed = 1; changed;) {
+        changed = 0;
+        for (int i = 0; i < nst; i++) {
+            int fresh = !stale[i];
+            for (int k = 0; k < nesc && fresh; k++) {
+                fresh = !reaches(x, v, esc[k], st[i]);
+            }
+            for (int k = 0; k < nst && fresh; k++) {
+                fresh = k == i || f->ins[st[k]].imm != f->ins[st[i]].imm || !reaches(x, v, st[k], st[i]);
+            }
+            if (!fresh && !stale[i]) {
+                stale[i] = 1;
+                esc[nesc++] = st[i];
+                changed = 1;
+            }
+        }
+    }
+    for (int i = 0; i < nst; i++) {
+        if (!stale[i]) {
+            f->ins[st[i]].flags |= INS_FRESH;
+        }
+    }
+    free(stale);
+    free(st);
+    free(esc);
+}
+
+static int
+objects(struct lu_func *f)
+{
+    int n = f->nins, changed = 0;
+    int *kind = calloc((size_t)n, sizeof(int)), ncand = 0;
+    for (int v = 0; v < n; v++) {
+        kind[v] = object_kind(f, v);
+        ncand += kind[v] != OBJ_NONE || (f->ins[v].op == OP_HELPER && f->ins[v].imm == H_new_object);
+    }
+    if (ncand == 0) {
+        free(kind);
+        return 0;
+    }
+    struct objs x = { .f = f, .nold = n };
+    x.mark = calloc((size_t)n, 1);
+    cfg_build(f, &x.g);
+    x.blk = malloc(sizeof(int) * (size_t)n);
+    x.idx = malloc(sizeof(int) * (size_t)n);
+    for (int v = 0; v < n; v++) {
+        x.blk[v] = -1;          /* in no block */
+    }
+    x.seen = malloc((size_t)f->nblocks);
+    x.work = malloc(sizeof(int) * (size_t)f->nblocks);
+    for (int b = 0; b < f->nblocks; b++) {
+        for (int i = 0; i < f->blocks[b].nins; i++) {
+            x.blk[f->blocks[b].ins[i]] = b;
+            x.idx[f->blocks[b].ins[i]] = i;
+        }
+    }
+    /* A release of a box, a bool, an immortal, or a value an unbox before it
+       proved an exact int or float runs no finalizer, so it publishes nothing. */
+    lu_v *unboxed = malloc(sizeof(lu_v) * (size_t)n);
+    for (int u = 0; u < n; u++) {
+        unboxed[u] = LU_NOV;
+    }
+    for (int u = n - 1; u >= 0; u--) {
+        struct lu_ins *in = &f->ins[u];
+        if ((in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT) && !(in->flags & INS_DEAD) && in->a != LU_NOV) {
+            unboxed[in->a] = u;
+        }
+    }
+    for (int d = 0; d < n; d++) {
+        struct lu_ins *r = &f->ins[d];
+        if (r->op != OP_DECREF || r->imm != 1 || r->a == LU_NOV || (r->flags & INS_DEAD)) {
+            continue;
+        }
+        lu_v u = unboxed[r->a];
+        if (plain(f, r->a, 0) || (u != LU_NOV && reached(&x, d) && reached(&x, u) && before_ins(&x, u, d))) {
+            r->imm = 0;
+            r->fs = NULL;
+        }
+    }
+    free(unboxed);
+    /* Fresh stores first: they publish nothing, so they keep no object real. */
+    for (int v = 0; v < n; v++) {
+        if (f->ins[v].op == OP_HELPER && f->ins[v].imm == H_new_object && !(f->ins[v].flags & INS_DEAD)
+            && reached(&x, v)) {
+            fresh_stores(&x, v);
+        }
+    }
+    /* Disqualifying uses; the rest listed per object. */
+    int *nuses = calloc((size_t)n, sizeof(int));
+    for (int u = 0; u < n; u++) {
+        struct lu_ins *in = &f->ins[u];
+        if (in->flags & INS_DEAD) {
+            continue;
+        }
+        lu_v ops[3] = { in->a, in->b, in->c };
+        for (int i = 0; i < 3; i++) {
+            if (ops[i] != LU_NOV && kind[ops[i]]) {
+                if (object_use(f, in, i, ops[i], kind[ops[i]])) {
+                    nuses[ops[i]]++;
+                }
+                else {
+                    kind[ops[i]] = not_virtual(f, ops[i], in, "a use");
+                }
+            }
+        }
+        for (int i = 0; i < in->nargs; i++) {
+            lu_v a = in->args[i];
+            if (a != LU_NOV && kind[a]) {
+                if (in->op != OP_PHI && object_use(f, in, 3, a, kind[a])) {
+                    nuses[a]++;
+                }
+                else {
+                    kind[a] = not_virtual(f, a, in, "an argument");
+                }
+            }
+        }
+        /* A walker reads the locals of a state an instruction publishes,
+           the stack only an exit; the object's own stores and reference
+           operations go with it (its last release's state cannot name it). */
+        int published = in->fs != NULL && lu_publishes(in);
+        for (struct lu_fs *fs = in->fs; fs != NULL; fs = fs->caller) {
+            for (int i = 0; i < fs->nlocals + fs->nstack; i++) {
+                lu_v a = fs->vals[i];
+                if (a != LU_NOV && kind[a]) {
+                    nuses[a]++;
+                    int own = in->a == a && (in->op == OP_INLINE_STORE || in->op == OP_DECREF || in->op == OP_INCREF);
+                    if (published && i < fs->nlocals && !own) {
+                        kind[a] = not_virtual(f, a, in, "a local where a walker reads it");
+                    }
+                }
+            }
+        }
+    }
+    /* Each object's uses, in order of instruction: 1 an operand, 2 its state names it. */
+    lu_v **ul = calloc((size_t)n, sizeof(lu_v *));
+    char **uf = calloc((size_t)n, sizeof(char *));
+    int *nul = calloc((size_t)n, sizeof(int));
+    for (int v = 0; v < n; v++) {
+        if (kind[v]) {
+            ul[v] = malloc(sizeof(lu_v) * (size_t)(nuses[v] + 1));
+            uf[v] = malloc((size_t)(nuses[v] + 1));
+        }
+    }
+    for (int u = 0; u < n; u++) {
+        struct lu_ins *in = &f->ins[u];
+        if (in->flags & INS_DEAD) {
+            continue;
+        }
+        lu_v ops[3] = { in->a, in->b, in->c };
+        for (int i = 0; i < 3 + in->nargs; i++) {
+            lu_v a = i < 3 ? ops[i] : in->args[i - 3];
+            if (a != LU_NOV && kind[a]) {
+                if (nul[a] == 0 || ul[a][nul[a] - 1] != u) {
+                    ul[a][nul[a]] = u;
+                    uf[a][nul[a]++] = 0;
+                }
+                uf[a][nul[a] - 1] |= 1;
+            }
+        }
+        for (struct lu_fs *fs = in->fs; fs != NULL; fs = fs->caller) {
+            for (int i = 0; i < fs->nlocals + fs->nstack; i++) {
+                lu_v a = fs->vals[i];
+                if (a != LU_NOV && kind[a]) {
+                    if (nul[a] == 0 || ul[a][nul[a] - 1] != u) {
+                        ul[a][nul[a]] = u;
+                        uf[a][nul[a]++] = 0;
+                    }
+                    uf[a][nul[a] - 1] |= 2;
+                }
+            }
+        }
+    }
+    char *ends = calloc((size_t)n, 1);
+    f->idom = x.g.idom;         /* lu_ssa_before's, while it rewrites */
+    for (int v = 0; v < n; v++) {
+        if (!kind[v] || !reached(&x, v)) {
+            continue;
+        }
+        lu_v *uses = ul[v];
+        int nu = nul[v], ns = 0;
+        lu_v *stores = malloc(sizeof(lu_v) * (size_t)(nu + 1));
+        for (int i = 0; i < nu; i++) {
+            x.mark[uses[i]] = uf[v][i];
+            if (f->ins[uses[i]].op == OP_INLINE_STORE && f->ins[uses[i]].a == v) {
+                stores[ns++] = uses[i];
+            }
+        }
+        int ok = object_counts(&x, v, ends) && (kind[v] == OBJ_TUPLE || object_fields(&x, v, uses, nu, stores, ns)
+                                               || not_virtual(f, v, NULL, "its fields differ by path"));
+        for (int i = 0; i < nu; i++) {
+            x.mark[uses[i]] = 0;
+        }
+        if (ok) {
+            object_rewrite(f, v, kind[v], uses, nu, ends);
+            changed = 1;
+        }
+        free(stores);
+    }
+    for (int v = 0; v < n; v++) {
+        free(ul[v]);
+        free(uf[v]);
+    }
+    free(ul);
+    free(uf);
+    free(nul);
+    free(ends);
+    free(x.mark);
+    f->idom = NULL;
+    free(x.blk);
+    free(x.idx);
+    free(x.seen);
+    free(x.work);
+    cfg_free(&x.g);
+    free(kind);
+    free(nuses);
+    if (changed) {
+        fwd = realloc(fwd, sizeof(lu_v) * (size_t)f->capins);
+        for (int v = n; v < f->nins; v++) {
+            fwd[v] = v;
+        }
+    }
+    return changed;
+}
+
 /* 3b. Unboxed fields (DESIGN 4.5). A float (an int) loaded from an
    inline value only to be unboxed is read raw; one computed here and
    stored into one is stored raw, with no object. Either is allowed
@@ -1230,7 +1931,7 @@ raw_fields(struct lu_func *f)
             bl->ins[at] = r;
             changed = 1;
         }
-        else if (in->op == OP_INLINE_STORE) {
+        else if (in->op == OP_INLINE_STORE && !(in->flags & INS_VIRTUAL)) {
             lu_v b = in->b;
             struct lu_ins *box = &f->ins[b];
             if ((box->op == OP_BOX_FLOAT || box->op == OP_BOX_INT) && box->b == LU_NOV && box->c == LU_NOV
@@ -1264,8 +1965,8 @@ escape(struct lu_func *f)
     }
     for (int v = 0; v < n; v++) {
         struct lu_ins *in = &f->ins[v];
-        if (in->flags & INS_DEAD) {
-            continue;
+        if (in->flags & (INS_DEAD | INS_VIRTUAL)) {
+            continue;           /* a virtual object's fields are like a frame state's values */
         }
         int allowed = in->op == OP_DECREF || in->op == OP_INCREF || in->op == OP_UNBOX_INT
             || in->op == OP_UNBOX_FLOAT || in->op == OP_GUARD_NOT_NULL
@@ -1531,6 +2232,14 @@ lu_ssa_optimize(struct lu_func *f)
             break;
         }
     }
+    /* Twice: an object's release that kept another real may go with it. */
+    for (int pass = 0; pass < 2 && objects(f); pass++) {
+        rewrite(f);
+        for (int round = 0; round < 4 && simplify(f); round++) {
+            rewrite(f);
+        }
+        rewrite(f);
+    }
     if (raw_fields(f)) {
         simplify(f);
         rewrite(f);
@@ -1541,6 +2250,11 @@ lu_ssa_optimize(struct lu_func *f)
     split_edges(f);
     order_blocks(f);
     compact(f);
+    struct cfg g;
+    cfg_build(f, &g);
+    f->idom = g.idom;           /* for lu_ssa_before */
+    free(g.rpo);
+    free(g.at);
     free(fwd);
     fwd = NULL;
     return 0;

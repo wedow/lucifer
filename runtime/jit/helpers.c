@@ -148,6 +148,15 @@ h_build_tuple(PyObject **argv, intptr_t n)
     return tuple_of(argv, n);
 }
 
+/* An instance of a class whose instances object.__new__ makes, as
+   PyType_GenericAlloc makes it (ssa_build.c's class calls). */
+static PyObject *
+h_new_object(PyTypeObject *tp)
+{
+    LU_JIT_C_PATH(new_object);
+    return PyType_GenericAlloc(tp, 0);
+}
+
 /* The oparg items of BUILD_SET or BUILD_MAP as one tuple, for the kernel's builder. */
 static PyObject *
 build_kernel(enum lu_kernel_id kid, PyObject **argv, intptr_t n)
@@ -273,7 +282,10 @@ lu_jit_attr_load(PyObject *owner, int64_t version, int64_t index, PyObject *name
 }
 
 /* STORE_ATTR_WITH_HINT: 1 stored, 0 when the type or dict is not what was
-   compiled (the interpreter then stores). */
+   compiled (the interpreter then stores). An instance without its dict
+   (one whose values are inline, as a site specialized before its class
+   had room for the name finds them) is stored as the interpreter stores:
+   the version says the name is no descriptor of the class. */
 static int
 h_attr_store(PyObject *owner, PyObject *v, PyObject *name, int64_t version)
 {
@@ -281,6 +293,11 @@ h_attr_store(PyObject *owner, PyObject *v, PyObject *name, int64_t version)
         return 0;
     }
     PyObject *dict = LU_MANAGED_DICT(owner);
+    if (dict == NULL && lu_inline_live(owner)) {
+        int r = lu_attr_store(owner, name, v);
+        PyErr_Clear();
+        return r > 0;
+    }
     if (dict == NULL || !PyDict_CheckExact(dict)) {
         return 0;
     }
@@ -983,6 +1000,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_list_repeat] = { (void *)h_list_repeat, "list_repeat", REP_OBJ, IF_RAISE | IF_SEEN, 2 },
     [H_build_list] = { (void *)h_build_list, "build_list", REP_OBJ, IF_RAISE, 0 },
     [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, IF_RAISE, 0 },
+    [H_new_object] = { (void *)h_new_object, "new_object", REP_OBJ, IF_RAISE, 1 },
     [H_new_dict] = { (void *)h_new_dict, "new_dict", REP_OBJ, IF_RAISE, 0 },
     [H_contains] = { (void *)h_contains, "contains", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_list_push] = { (void *)h_list_push, "list_push", REP_BIT, IF_RAISE, 2 },

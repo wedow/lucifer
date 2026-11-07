@@ -124,6 +124,14 @@ void lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name
    does not cache such a value, whose type may gain a __get__; compiled
    code guards that type's version. */
 PyObject *lu_specialize_class_value(PyTypeObject *cls, PyObject *name, uint32_t v[3]);
+/* The shapes LOAD_ATTR and STORE_ATTR of name would take on an instance of
+   tp that keeps its values inline and has no dict (one compiled code
+   made), for a site whose own cache holds another type's: the opcode (the
+   generic one for none), the version, the index word, and a load's answer
+   (a new reference). */
+int lu_specialize_load_fresh(PyTypeObject *tp, PyObject *name, int method, uint32_t *version, uint16_t *index,
+                             PyObject **descr);
+int lu_specialize_store_fresh(PyTypeObject *tp, PyObject *name, uint32_t *version, uint16_t *index);
 /* Makes the code's caches forget every object `dead` says a collection
    will free; the world is stopped. */
 void lu_specialize_forget(PyCodeObject *code, int (*dead)(PyObject *));
