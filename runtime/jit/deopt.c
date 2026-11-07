@@ -306,6 +306,10 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     root->instr = root->last = lu_code_start(fr->code) + fr->pc;
     root->jit_desc = NULL;
     root->owner = lu_frame_owner_for(root->code);
+    if (root->jit_lent) {
+        Py_INCREF(root->func);  /* the interpreter's frame holds its function */
+        root->jit_lent = 0;
+    }
     struct lu_frame *top = root;
     /* An exception the inlined frames would pass on unseen is the root's
        at its call: they are not made, and what they held is released. */

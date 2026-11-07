@@ -61,6 +61,7 @@ alloc_frame(PyThreadState *ts, PyFunctionObject *func)
     f->instr = f->last = lu_code_start(code);
     f->owner = lu_frame_owner_for(code);
     f->ret = LU_RETURN_PUSH;
+    f->jit_lent = 0;
     f->jit_desc = NULL;
     f->stackpointer = f->localsplus + code->co_nlocalsplus;
     return f;

@@ -2328,7 +2328,7 @@ direct_entry(struct asm_ *a)
     store(a, R15, offsetof(struct lu_frame, code), R11);
     incref(a, R11);
     store(a, R15, offsetof(struct lu_frame, func), RSI);
-    incref(a, RSI);
+    store8_mi(a, R15, offsetof(struct lu_frame, jit_lent), 1);     /* the caller holds the function */
     load(a, R11, RSI, offsetof(PyFunctionObject, func_globals));
     store(a, R15, offsetof(struct lu_frame, globals), R11);
     load(a, R11, RSI, offsetof(PyFunctionObject, func_builtins));
@@ -2416,15 +2416,15 @@ direct_entry(struct asm_ *a)
 }
 
 /* A return into a direct caller: RCX the value, RAX its word (marked).
-   The frame goes as lu_frame_pop takes it (no frame object, no slots),
-   its function and code last, with the caller's frame current. */
+   The frame goes as lu_frame_pop takes it (no frame object, no slots,
+   the function borrowed), its code last, with the caller's frame
+   current. */
 static void
 direct_return(struct asm_ *a)
 {
     bind(a, a->direct_return);
     alu_ri(a, ALU_AND, RAX, -2);
     store(a, RAX, 0, RCX);
-    load(a, RBX, R15, offsetof(struct lu_frame, func));
     load(a, R12, R15, offsetof(struct lu_frame, code));
     load(a, RAX, R15, offsetof(struct lu_frame, previous));
     store(a, R14, offsetof(PyThreadState, current_frame), RAX);
@@ -2432,7 +2432,6 @@ direct_return(struct asm_ *a)
     rex(a, 0, 0, 0, R14);
     b1(a, 0xFF);
     modrm_mem(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));     /* inc dword */
-    decref(a, RBX, 0);
     decref(a, R12, 0);
     mov_ri(a, RAX, 1);                          /* LU_JIT_RETURN */
     jmp(a, a->epilogue);
