@@ -504,7 +504,8 @@ enum {
     LU_POLL_DEOPT_SELF = 1 << 9,
     LU_POLL_STRESS_TICK = 1 << 10,
     LU_POLL_REMOTE_EXEC = 1 << 11,
-    LU_POLL_EVENTS_BITS = 12,
+    LU_POLL_QSBR = 1 << 12,             /* the write sequence moved: report a quiescent state */
+    LU_POLL_EVENTS_BITS = 13,
 };
 #define LU_POLL_EVENTS_MASK (((uintptr_t)1 << LU_POLL_EVENTS_BITS) - 1)
 /* The reasons whose effects Python sees, which wait while a builtin's
@@ -584,9 +585,12 @@ struct lu_entry {
     struct lu_mimalloc_state mimalloc;
     struct lu_brc_owner brc;
     /* Freed floats and one-digit ints kept for reuse (CPython's per-thread
-       freelists); runtime/object/layouts.c. */
+       freelists), linked through the word after the header (LU_FREE_NEXT);
+       runtime/object/layouts.c, and compiled code's boxes. */
     struct lu_freelist { PyObject *head; int n; } free_floats, free_ints;
 };
+
+#define LU_FREE_NEXT(op) (*(PyObject **)((char *)(op) + sizeof(PyObject)))
 
 /* The carrier record is per pthread, reached through the one thread-local
    word (DESIGN 5.3). It is created by the thread's first allocation or its
@@ -748,7 +752,15 @@ void lu_stw_task_new(struct _is *interp, struct lu_task *t);
 void lu_stw_task_delete(struct _is *interp, struct lu_task *t);
 
 /* The collector's trigger (runtime/interp/gc.c). */
+/* A carrier's GC allocations reach the interpreter's count in batches of
+   this many (LOCAL_ALLOC_COUNT_THRESHOLD); compiled code's in-line
+   allocations count in the same word. */
+#define LU_GC_ALLOC_FLUSH 512
 void lu_gc_record_allocation(struct lu_entry *entry);
+/* Sets _PyRuntime.allocators.observed after the allocators or the reference
+   tracer change: a mem or object allocator other than the runtime's, or a
+   tracer (runtime/object/alloc.c). */
+void lu_alloc_observe(void);
 void lu_gc_record_deallocation(struct lu_entry *entry);
 /* Why a collection runs (runtime/interp/collector.c). */
 enum { LU_GC_REASON_HEAP, LU_GC_REASON_MANUAL, LU_GC_REASON_SHUTDOWN, LU_GC_REASON_STRESS };
@@ -907,6 +919,8 @@ extern LU_EXPORT union lu_runtime {
         struct {
             PyMemAllocatorEx raw, mem, obj;
             struct lu_lock lock;        /* PyMem_SetAllocator/GetAllocator */
+            int observed;               /* a hook sees allocations (lu_alloc_observe):
+                                           compiled code allocates through C */
         } allocators;
         struct {
             PyRefTracer func;
@@ -1545,6 +1559,10 @@ lu_list_try_item_ref(PyListObject *l, Py_ssize_t i)
 
 /* l[i] as a new reference, NULL when i is out of range (runtime/prim/storage.c). */
 PyObject *lu_list_item_ref_locked(PyListObject *l, Py_ssize_t i);
+
+/* n >= 0 copies of the items of a tuple or list, as a new tuple (as_tuple)
+   or list; NULL with MemoryError when that is too large (runtime/prim/storage.c). */
+PyObject *lu_seq_repeat(PyObject *seq, Py_ssize_t n, int as_tuple);
 
 static inline PyObject *
 lu_list_item_ref(PyListObject *l, Py_ssize_t i)

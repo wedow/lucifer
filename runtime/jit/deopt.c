@@ -16,7 +16,8 @@
    run Python, release a value whose finalizer does, or park the task), it
    publishes the description of that call's state and its spill words
    (jit_desc, jit_spills), where the allocator keeps every local it names
-   during the call (lu_publishes). A walker then reads its locals from
+   during the call (lu_publishes); a slow path that is not a call saves
+   every register (jit_regs) instead. A walker then reads its locals from
    there (lu_jit_slot) and its instruction (lu_jit_instr), and a write to
    them (f_locals, PEP 667) first gives the frame real slots (lu_jit_sync);
    compiled code sees that after the call and leaves, and the exit keeps
@@ -151,7 +152,8 @@ lu_jit_slot(struct lu_frame *f, int i)
     if (d == NULL) {
         return NULL;
     }
-    struct regs r = { NULL, NULL, f->jit_spills, NULL, 0, 0 };
+    const uint64_t *saved = d->regs ? f->jit_regs : NULL;
+    struct regs r = { saved, saved != NULL ? saved + 16 : NULL, f->jit_spills, NULL, 0, 0 };
     struct lu_dv dv = d->frames[0].vals[i];
     dv.owned = 0;
     PyObject *v = take(&r, &dv);
@@ -180,7 +182,8 @@ lu_jit_sync(struct lu_frame *f)
         PyErr_SetString(PyExc_RuntimeError, "cannot write the locals of a frame compiled code is running");
         return -1;
     }
-    struct regs r = { NULL, NULL, f->jit_spills, NULL, 0, 0 };
+    const uint64_t *saved = d->regs ? f->jit_regs : NULL;
+    struct regs r = { saved, saved != NULL ? saved + 16 : NULL, f->jit_spills, NULL, 0, 0 };
     struct lu_deopt_frame *fr = &d->frames[0];
     for (int i = 0; i < fr->nlocals; i++) {
         struct lu_dv dv = fr->vals[i];

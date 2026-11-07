@@ -94,6 +94,7 @@ struct lu_deopt {
     int nrelease;               /* references compiled code still holds that no frame takes: released last */
     struct lu_dv *release;
     lu_codeunit *instr;         /* published: the instruction the root frame shows as running (lu_jit_instr) */
+    uint8_t regs;               /* published by a slow path that saved every register at the frame's jit_regs */
 };
 
 /* A code object's entry for calls from compiled code, the first field of
@@ -170,12 +171,14 @@ int lu_count_kind(const struct lu_ins *in);
 /* Kinds that are guards: every guard_* kind and unbox (not polls and checks that the unit lives). */
 #define LU_COUNT_IS_GUARD(k) ((k) <= CNT_unbox)
 
-/* Dependencies (runtime/jit/deps.c): the epoch a compile starts at, and
-   publishing a unit's (-1: a change since the epoch may have been missed,
-   and the unit is not to be entered); then the policy's side (jit.c): a
-   dependency's unit dies, and its site keeps its guard in place. */
-uint64_t lu_jit_deps_epoch(void);
-int lu_jit_deps_publish(struct lu_unit *u, const struct lu_fdep *want, int n, uint64_t epoch0);
+/* Dependencies (runtime/jit/deps.c): a compile's ticket, taken before it
+   reads anything, and its end; publishing a unit's (-1: a change since the
+   ticket may have been missed, and the unit is not to be entered); then the
+   policy's side (jit.c): a dependency's unit dies, and its site keeps its
+   guard in place. */
+uint64_t lu_jit_deps_begin(void);
+void lu_jit_deps_end(void);
+int lu_jit_deps_publish(struct lu_unit *u, const struct lu_fdep *want, int n, uint64_t ticket);
 void lu_jit_deps_free(struct lu_unit *u);
 void lu_jit_unit_kill(struct lu_unit *u);
 void lu_jit_nohoist_set(PyCodeObject *code, int pc);
@@ -244,6 +247,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(range_iter) \
     X(unary) \
     X(list_append) \
+    X(list_repeat) \
     X(build_list) \
     X(build_tuple) \
     X(new_dict) \
@@ -290,12 +294,26 @@ lu_publishes(const struct lu_ins *in)
         return (lu_helpers[in->imm].flags & (IF_PY | IF_SEEN)) != 0;
     case OP_TRUTH:
         return in->imm != 1;    /* imm 1: a layout's own truth, which runs no Python */
-    case OP_LIST_ITEM:
-        return in->imm == 0;    /* a tuple's item takes no lock */
     default:
         return (lu_op_flags[in->op] & IF_SEEN) != 0;
     }
 }
+
+/* -X lucifer_jit_stats: how often compiled code takes the C path of an
+   operation it otherwise runs in line (runtime/jit/jit.c reports them). */
+#define LU_C_PATHS(X) X(list_item) X(tuple_item) X(list_store) X(box_int) X(box_float) X(build_list) X(build_tuple)
+enum lu_c_path {
+#define LU_C_PATH_ENUM(name) C_PATH_##name,
+    LU_C_PATHS(LU_C_PATH_ENUM)
+#undef LU_C_PATH_ENUM
+    C_PATHS
+};
+void lu_jit_c_path_count(enum lu_c_path k);
+#define LU_JIT_C_PATH(name) do { \
+        if (_PyRuntime.jit.stats) { \
+            lu_jit_c_path_count(C_PATH_##name); \
+        } \
+    } while (0)
 
 /* A helper's result that is not an answer: the call needs the interpreter
    (a C stack too deep to recurse on), so compiled code deopts. */

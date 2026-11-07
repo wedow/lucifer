@@ -57,8 +57,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(PHI, REP_NONE, 0)                 /* args: one input per predecessor; rep set by the builder */ \
     X(UNBOX_INT, REP_I64, IF_GUARD | IF_EFFECT)     /* a: an exact int that fits one digit; kept, since */ \
     X(UNBOX_FLOAT, REP_F64, IF_GUARD | IF_EFFECT)   /* a's known type lets later code fold */ \
-    X(BOX_INT, REP_OBJ, IF_CALL)        /* a: i64; a new reference; b: the object it was unboxed from; c: a bit, NULL when 0 */ \
-    X(BOX_FLOAT, REP_OBJ, IF_CALL)      /* a: f64; a new reference; b: the same */ \
+    X(BOX_INT, REP_OBJ, 0)              /* a: i64; a new reference; b: the object it was unboxed from; c: a bit, NULL when 0 */ \
+    X(BOX_FLOAT, REP_OBJ, 0)            /* a: f64; a new reference; b: the same */ \
     X(I2F, REP_F64, IF_PURE)            /* a: i64, rounded as int.__float__ */ \
     X(ADD_I, REP_I64, IF_GUARD)         /* overflow deopts */ \
     X(SUB_I, REP_I64, IF_GUARD) \
@@ -97,7 +97,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
                                                        instruction's first IR instruction */ \
     X(LOAD, REP_NONE, 0)                /* *(a + imm), rep set by the builder; a borrowed object; imm2 4: 32 bits */ \
     X(STORE, REP_NONE, IF_EFFECT)       /* *(a + imm) = b, raw */ \
-    X(LIST_ITEM, REP_OBJ, IF_GUARD | IF_CALL | IF_SEEN)   /* a: an exact list (imm 1: tuple), b: i64 index; deopts out of range */ \
+    X(LIST_ITEM, REP_OBJ, IF_GUARD)    /* a: an exact list (imm 1: tuple), b: i64 index; deopts out of range; publishes on its slow path (parked_call) */ \
     X(LIST_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* a[b] = c, borrowing c */ \
     X(STR_ORD, REP_I64, IF_GUARD)       /* a: an exact str, b: i64 index; the code point; deopts out of range */ \
     X(BYTES_ITEM, REP_I64, IF_GUARD)    /* a: an exact bytes, b: i64 index; the byte; deopts out of range */ \

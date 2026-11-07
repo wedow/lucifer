@@ -66,6 +66,7 @@ struct lu_frame {
        spill words. */
     struct lu_deopt *jit_desc;
     const uint64_t *jit_spills;
+    const uint64_t *jit_regs;   /* the registers a slow path saved, when jit_desc says so */
     PyObject *localsplus[];     /* fast locals, cells and free variables, then the stack */
 };
 
