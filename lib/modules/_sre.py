@@ -379,7 +379,7 @@ class _Rep:
 class _State:
     """SRE_STATE."""
 
-    __slots__ = ('code', 'first', 'text', 'string', 'data', 'isbytes', 'start', 'end', 'ptr', 'pos', 'endpos',
+    __slots__ = ('code', 'first', 'spec', 'text', 'string', 'data', 'isbytes', 'start', 'end', 'ptr', 'pos', 'endpos',
                  'lastmark', 'lastindex', 'mark', 'match_all', 'must_advance')
 
 
@@ -395,6 +395,7 @@ def _state_init(pattern, string, start, end):
     st = _State()
     st.code = pattern.code
     st.first = pattern._first
+    st.spec = pattern._spec
     st.text = data if isbytes else _text_of(data)
     st.string = string
     st.data = data
@@ -1321,7 +1322,7 @@ def _starts(code, tests, ch):
     return False
 
 
-def _search(st):
+def _search_generic(st):
     """SRE(search): the leftmost match from st.start; 1 with the span in
     st.start and st.ptr, or 0."""
     code = st.code
@@ -1407,6 +1408,1212 @@ def _search(st):
             _state_reset(st)
             st.start = st.ptr = ptr
             status = _match(st, pattern, False)
+    return status
+
+
+# ---------------------------------------------------------------------------
+# Specialization. A pattern that has done enough work in the interpreter above
+# gets its code compiled to Python source: one matcher function with the
+# opcodes unrolled, literals and sets as constants, alternatives as control
+# flow and repeats as loops, which the tier then compiles like any function.
+# A failure jumps to the innermost choice point: `continue` of the loop that
+# tries its next alternative, or the fail statement its caller gave. A success
+# returns from the matcher, so the rest of the pattern (the continuation) is
+# emitted inside every choice point's loop. The marks, lastmark and lastindex
+# follow the interpreter's saves and restores exactly, so the generic engine
+# stays the reference: a code word the generator does not handle leaves the
+# pattern on it, and -X lucifer_stress=sre runs both and compares.
+
+class _Unsupported(Exception):
+    """The code has a construct the generator leaves to the interpreter."""
+
+
+class _Branchy(Exception):
+    """A segment that must not backtrack has a choice point."""
+
+
+_CHAR_OPS = frozenset((LITERAL, NOT_LITERAL, IN, ANY, ANY_ALL, CATEGORY, LITERAL_IGNORE, NOT_LITERAL_IGNORE,
+                       LITERAL_UNI_IGNORE, NOT_LITERAL_UNI_IGNORE, LITERAL_LOC_IGNORE, NOT_LITERAL_LOC_IGNORE,
+                       IN_IGNORE, IN_UNI_IGNORE, IN_LOC_IGNORE))
+_IN_OPS = frozenset((IN, IN_IGNORE, IN_UNI_IGNORE, IN_LOC_IGNORE))
+_ONE_REPEATS = frozenset((REPEAT_ONE, MIN_REPEAT_ONE, POSSESSIVE_REPEAT_ONE))
+_UNI_SPACE = bytes([1 if chr(c).isspace() else 0 for c in range(128)])
+# Category pairs no character is in both of: each category and its complement,
+# then digits, words and line breaks against spaces and each other.
+_DISJOINT = set()
+for _a, _b in [(2 * k, 2 * k + 1) for k in range(9)] + [(0, 2), (4, 2), (8, 2), (0, 5), (0, 9), (6, 0), (6, 4), (6, 8),
+                                                       (6, 3), (10, 12), (14, 12), (10, 15), (16, 10), (16, 14),
+                                                       (16, 13)]:
+    _DISJOINT.add((_a, _b))
+    _DISJOINT.add((_b, _a))
+del _a, _b
+
+# The source's free names, beside the constants each pattern adds.
+_NAMESPACE = {'_ASCII_LOWER': _ASCII_LOWER, '_ASCII_WORD': _ASCII_WORD, '_ASCII_SPACE': _ASCII_SPACE,
+              '_UNI_SPACE': _UNI_SPACE, '_LINEBREAKS': _LINEBREAKS, '_lower_unicode': _lower_unicode,
+              '_upper_unicode': _upper_unicode, '_lower_ascii': _lower_ascii, '_lower_locale': _lower_locale,
+              '_char_loc_ignore': _char_loc_ignore, '_charset': _charset, '_charset_loc_ignore': _charset_loc_ignore,
+              '_search_prefix': _search_prefix}
+
+
+def _char_end(code, pc):
+    """The code word after the one-character test at pc."""
+    op = code[pc]
+    if op == ANY or op == ANY_ALL:
+        return pc + 1
+    if op in _IN_OPS:
+        return pc + 1 + code[pc + 1]
+    return pc + 2
+
+
+def _test(code, pc, ch):
+    """Does ch pass the one-character test at pc? As the matcher decides it."""
+    op = code[pc]
+    if op == ANY:
+        return ch != 10
+    if op == ANY_ALL:
+        return True
+    if op == CATEGORY:
+        return _category(code[pc + 1], ch)
+    if op == IN:
+        return _charset(code, pc + 2, ch)
+    if op == IN_IGNORE:
+        return _charset(code, pc + 2, _lower_ascii(ch))
+    if op == IN_UNI_IGNORE:
+        return _charset(code, pc + 2, _lower_unicode(ch))
+    if op == IN_LOC_IGNORE:
+        return _charset_loc_ignore(code, pc + 2, ch)
+    v = code[pc + 1]
+    if op == LITERAL:
+        return ch == v
+    if op == NOT_LITERAL:
+        return ch != v
+    if op == LITERAL_IGNORE or op == NOT_LITERAL_IGNORE:
+        return (_lower_ascii(ch) == v) == (op == LITERAL_IGNORE)
+    if op == LITERAL_UNI_IGNORE or op == NOT_LITERAL_UNI_IGNORE:
+        return (_lower_unicode(ch) == v) == (op == LITERAL_UNI_IGNORE)
+    return _char_loc_ignore(v, ch) == (op == LITERAL_LOC_IGNORE)
+
+
+def _members(code, pc):
+    """Every character the test at pc passes, when that is a short list; else None."""
+    op = code[pc]
+    if op == LITERAL:
+        return (code[pc + 1],)
+    if op == LITERAL_IGNORE:
+        v = code[pc + 1]
+        return tuple([c for c in (v, v - 32, v + 32) if c >= 0 and _test(code, pc, c)])
+    if op != IN:
+        return None
+    out = []
+    s = pc + 2
+    while code[s] != FAILURE:
+        op = code[s]
+        if op == LITERAL:
+            out.append(code[s + 1])
+            s += 2
+        elif op == RANGE and code[s + 2] - code[s + 1] < 256:
+            out.extend(range(code[s + 1], code[s + 2] + 1))
+            s += 3
+        elif op == CHARSET:
+            out.extend([c for c in range(256) if (code[s + 1 + (c >> 5)] >> (c & 31)) & 1])
+            s += 9
+        else:
+            return None
+    return out if len(out) <= 512 else None
+
+
+def _categories(code, pc):
+    """The categories of a set made of nothing else, or None."""
+    if code[pc] != IN:
+        return None
+    cats = []
+    s = pc + 2
+    while code[s] == CATEGORY:
+        cats.append(code[s + 1])
+        s += 2
+    return cats if cats and code[s] == FAILURE else None
+
+
+def _disjoint(code, a, b):
+    """Can no character pass both one-character tests?"""
+    for x, y in ((a, b), (b, a)):
+        chars = _members(code, x)
+        if chars is not None:
+            for c in chars:
+                if _test(code, y, c):
+                    return False
+            return True
+    ca = _categories(code, a)
+    cb = _categories(code, b)
+    if ca is None or cb is None:
+        return False
+    for x in ca:
+        for y in cb:
+            if (x, y) not in _DISJOINT:
+                return False
+    return True
+
+
+class _Gen:
+    """Python source for one entry of one pattern's code."""
+
+    def __init__(self, code):
+        self.code = code
+        self.out = []           # (indent, text), or None for a dropped placeholder
+        self.subs = []          # finished sub-matcher functions, as lines
+        self.sub_names = {}
+        self.consts = {}
+        self.memo = {}          # (test pc, test pc) -> disjoint
+        self.loops = {}         # a REPEAT's UNTIL pc -> (body, tail)
+        self.untils = {}        # the UNTIL of a REPEAT emitted as an optional body -> (tail, its inrep)
+        self.n = 0
+        self.limit = 4000 + 400 * len(code)
+
+    def new(self):
+        self.n += 1
+        return self.n
+
+    def w(self, ind, text):
+        self.out.append((ind, text))
+        if len(self.out) > self.limit:
+            raise _Unsupported
+
+    def const(self, value):
+        name = '_k%d' % len(self.consts)
+        self.consts[name] = value
+        return name
+
+    def try_straight(self, emit, *args):
+        """emit(*args) when it emits no choice point; False, with nothing emitted, when it would."""
+        mark = len(self.out)
+        try:
+            emit(*args)
+        except _Branchy:
+            del self.out[mark:]
+            return False
+        return True
+
+    # --- one-character tests --------------------------------------------
+
+    def cond(self, pc):
+        """(statements, expression): the test at pc of the character in ch."""
+        code = self.code
+        op = code[pc]
+        if op == ANY:
+            return (), 'ch != 10'
+        if op == ANY_ALL:
+            return (), 'True'
+        if op == CATEGORY:
+            return (), self.category(code[pc + 1], 'ch')
+        if op == IN:
+            return (), self.charset(pc + 2, 'ch')
+        if op == IN_IGNORE:
+            return ('la = _ASCII_LOWER[ch] if ch < 128 else ch',), self.charset(pc + 2, 'la')
+        if op == IN_UNI_IGNORE:
+            return ('lu = _ASCII_LOWER[ch] if ch < 128 else _lower_unicode(ch)',), self.charset(pc + 2, 'lu')
+        if op == IN_LOC_IGNORE:
+            return (), '_charset_loc_ignore(_code, %d, ch)' % (pc + 2)
+        v = code[pc + 1]
+        if op == LITERAL:
+            return (), 'ch == %d' % v
+        if op == NOT_LITERAL:
+            return (), 'ch != %d' % v
+        if op == LITERAL_IGNORE or op == NOT_LITERAL_IGNORE:
+            return (('la = _ASCII_LOWER[ch] if ch < 128 else ch',),
+                    'la %s %d' % ('==' if op == LITERAL_IGNORE else '!=', v))
+        if op == LITERAL_UNI_IGNORE or op == NOT_LITERAL_UNI_IGNORE:
+            return (('lu = _ASCII_LOWER[ch] if ch < 128 else _lower_unicode(ch)',),
+                    'lu %s %d' % ('==' if op == LITERAL_UNI_IGNORE else '!=', v))
+        return (), '%s_char_loc_ignore(%d, ch)' % ('' if op == LITERAL_LOC_IGNORE else 'not ', v)
+
+    def category(self, cat, c):
+        if cat > 17:
+            raise _Unsupported
+        neg = 'not ' if cat & 1 else ''
+        cat &= ~1
+        if cat == 0:
+            e = '48 <= %s <= 57' % c
+        elif cat == 2:
+            e = '%s < 128 and _ASCII_SPACE[%s] != 0' % (c, c)
+        elif cat == 4 or cat == 8:
+            e = '%s < 128 and _ASCII_WORD[%s] != 0' % (c, c)
+        elif cat == 6:
+            e = '%s == 10' % c
+        elif cat == 10:
+            e = '48 <= %s <= 57 if %s < 128 else chr(%s).isdecimal()' % (c, c, c)
+        elif cat == 12:
+            e = '_UNI_SPACE[%s] != 0 if %s < 128 else chr(%s).isspace()' % (c, c, c)
+        elif cat == 14:
+            e = '_ASCII_WORD[%s] != 0 if %s < 128 else chr(%s).isalnum()' % (c, c, c)
+        else:
+            e = '%s in _LINEBREAKS' % c
+        return '%s(%s)' % (neg, e)
+
+    def charset(self, s, c):
+        """The membership of c in the set whose items start at s, as one expression."""
+        code = self.code
+        parts = []
+        neg = False
+        if code[s] == NEGATE:
+            neg = True
+            s += 1
+        while True:
+            op = code[s]
+            if op == FAILURE:
+                break
+            if op == LITERAL:
+                parts.append('%s == %d' % (c, code[s + 1]))
+                s += 2
+            elif op == RANGE:
+                parts.append('%d <= %s <= %d' % (code[s + 1], c, code[s + 2]))
+                s += 3
+            elif op == RANGE_UNI_IGNORE:
+                lo, hi = code[s + 1], code[s + 2]
+                parts.append('%d <= %s <= %d or %d <= _upper_unicode(%s) <= %d' % (lo, c, hi, lo, c, hi))
+                s += 3
+            elif op == CATEGORY:
+                parts.append(self.category(code[s + 1], c))
+                s += 2
+            elif op == CHARSET:
+                table = bytes([(code[s + 1 + (i >> 5)] >> (i & 31)) & 1 for i in range(256)])
+                parts.append('%s < 256 and %s[%s] != 0' % (c, self.const(table), c))
+                s += 9
+            elif op == BIGCHARSET:
+                parts.append('_charset(_code, %d, %s)' % (s, c))   # it and the items after it
+                break
+            else:
+                raise _Unsupported
+        e = ' or '.join(['(%s)' % p for p in parts]) or 'False'
+        return 'not (%s)' % e if neg else e
+
+    def test_char(self, pc, ind, at, fail):
+        """Fail unless the character at index `at` (already below end) passes the test at pc."""
+        prep, e = self.cond(pc)
+        self.w(ind, 'ch = text[%s]' % at)
+        for line in prep:
+            self.w(ind, line)
+        self.w(ind, 'if not (%s): %s' % (e, fail))
+
+    def char(self, pc, ind, fail):
+        """The one-character test at pc, consuming the character."""
+        code = self.code
+        op = code[pc]
+        if op == LITERAL:
+            self.w(ind, 'if ptr >= end or text[ptr] != %d: %s' % (code[pc + 1], fail))
+        elif op == NOT_LITERAL:
+            self.w(ind, 'if ptr >= end or text[ptr] == %d: %s' % (code[pc + 1], fail))
+        elif op == ANY:
+            self.w(ind, 'if ptr >= end or text[ptr] == 10: %s' % fail)
+        elif op == ANY_ALL:
+            self.w(ind, 'if ptr >= end: %s' % fail)
+        else:
+            self.w(ind, 'if ptr >= end: %s' % fail)
+            self.test_char(pc, ind, 'ptr', fail)
+        self.w(ind, 'ptr += 1')
+
+    def count(self, item, maximum, ind):
+        """SRE(count): advance ptr over at most `maximum` characters that pass the test at item."""
+        code = self.code
+        op = code[item]
+        if maximum == MAXREPEAT:
+            lim = 'end'
+        else:
+            lim = 'cl'
+            self.w(ind, 'cl = ptr + %d if %d < end - ptr else end' % (maximum, maximum))
+        if op == ANY_ALL:
+            self.w(ind, 'if %s > ptr: ptr = %s' % (lim, lim))
+        elif op == ANY or (op == NOT_LITERAL and code[item + 1] < 256):
+            self.w(ind, 'q = text.find(%d, ptr, %s) if ptr < %s else -1' % (10 if op == ANY else code[item + 1], lim, lim))
+            self.w(ind, 'ptr = %s if q < 0 else q' % lim)
+        elif op == LITERAL:
+            self.w(ind, 'while ptr < %s and text[ptr] == %d: ptr += 1' % (lim, code[item + 1]))
+        else:
+            self.w(ind, 'while ptr < %s:' % lim)
+            self.test_char(item, ind + 1, 'ptr', 'break')
+            self.w(ind + 1, 'ptr += 1')
+
+    # --- the walk -------------------------------------------------------
+
+    def first_set(self, pc, follow, depth=0, guarded=False):
+        """The one-character tests (their pcs) a match from pc starts with one of, or None when
+        unknown. follow: pc is a continuation, so reaching the (sub)match's SUCCESS adds 'end' and
+        reaching the end of a REPEAT's body adds what an iteration or the repeat's tail starts with.
+        Without follow, a match that may be empty is unknown. The sets serve positions before the
+        end: there, $ passes only before a newline ('nl'), and \\Z never. Other zero-width
+        assertions are passed over (guarded), except on the way to 'end', whose success they would
+        make depend on the position."""
+        code = self.code
+        out = []
+        while depth < 40:
+            op = code[pc]
+            if op == MARK:
+                pc += 2
+            elif op == AT and (code[pc + 1] == AT_END or code[pc + 1] == AT_END_LINE):
+                out.append('nl')
+                return out
+            elif op == AT and code[pc + 1] == AT_END_STRING:
+                return out
+            elif op == AT:
+                pc += 2
+                guarded = True
+            elif op == ASSERT or op == ASSERT_NOT:
+                pc += 1 + code[pc + 1]
+                guarded = True
+            elif op == JUMP:
+                pc += 1 + code[pc + 1]
+            elif op in _CHAR_OPS:
+                out.append(pc)
+                return out
+            elif op == SUCCESS and follow and not guarded:
+                out.append('end')
+                return out
+            elif op in _ONE_REPEATS:
+                out.append(pc + 4)
+                if code[pc + 2]:
+                    return out
+                pc += 1 + code[pc + 1]
+            elif op == REPEAT or op == POSSESSIVE_REPEAT or op == ATOMIC_GROUP:
+                body = self.first_set(pc + (2 if op == ATOMIC_GROUP else 4), False, depth + 1)
+                if body is None:
+                    return None
+                out.extend(body)
+                if op == ATOMIC_GROUP or code[pc + 2]:
+                    return out
+                pc += 2 + code[pc + 1]
+            elif op == BRANCH:
+                pc += 1
+                while code[pc]:
+                    alt = self.first_set(pc + 1, follow, depth + 1, guarded)
+                    if alt is None:
+                        return None
+                    out.extend(alt)
+                    pc += code[pc]
+                return out
+            elif (op == MAX_UNTIL or op == MIN_UNTIL) and follow and pc in self.loops:
+                body, tail = self.loops[pc]
+                more = self.first_set(body, False, depth + 1)
+                after = self.first_set(tail, True, depth + 1, guarded)
+                if more is None or after is None:
+                    return None
+                return out + more + after
+            else:
+                return None
+            depth += 1
+        return None
+
+    def excludes(self, items, tests, end_ok):
+        """Does no character pass both one of the tests at items and one of tests? 'end' among
+        tests is allowed when end_ok."""
+        if not items or tests is None or 'end' in items or 'nl' in items:
+            return False
+        for t in tests:
+            if t == 'end':
+                if not end_ok:
+                    return False
+                continue
+            if t == 'nl':
+                if any([_test(self.code, i, 10) for i in items]):
+                    return False
+                continue
+            for i in items:
+                key = (i, t)
+                d = self.memo.get(key)
+                if d is None:
+                    d = self.memo[key] = _disjoint(self.code, i, t)
+                if not d:
+                    return False
+        return True
+
+    def seq(self, pc, stop, ind, fail, inrep, succ):
+        """Emit the code from pc. With stop, up to stop, emitting no choice point (else _Branchy);
+        without, to the end of the (sub)match: the emitted code then returns or fails.
+        inrep: inside a REPEAT, where choice points save the marks; succ: 'match', 'search' or 'sub'."""
+        code = self.code
+        while pc != stop:
+            op = code[pc]
+            if op == LITERAL and code[pc + 2] == LITERAL and pc + 2 != stop:
+                pc = self.literals(pc, stop, ind, fail)
+            elif op in _CHAR_OPS:
+                self.char(pc, ind, fail)
+                pc = _char_end(code, pc)
+            elif op == MARK:
+                self.mark(code[pc + 1], ind)
+                pc += 2
+            elif op == AT:
+                self.at(code[pc + 1], ind, fail)
+                pc += 2
+            elif op == SUCCESS:
+                if stop is not None:
+                    raise _Unsupported
+                self.success(ind, fail, succ)
+                return
+            elif op == FAILURE:
+                self.w(ind, fail)
+                return
+            elif op == JUMP:
+                if stop is not None:
+                    raise _Unsupported
+                pc += 1 + code[pc + 1]
+            elif op == GROUPREF or op == GROUPREF_IGNORE or op == GROUPREF_UNI_IGNORE or op == GROUPREF_LOC_IGNORE:
+                self.groupref(op, code[pc + 1], ind, fail)
+                pc += 2
+            elif op == GROUPREF_EXISTS:
+                pc = self.groupref_exists(pc, stop, ind, fail, inrep, succ)
+            elif op == BRANCH:
+                pc = self.branch(pc, stop, ind, fail, inrep, succ)
+            elif op in _ONE_REPEATS:
+                pc = self.repeat_one(pc, stop, ind, fail, inrep, succ)
+            elif op == REPEAT:
+                pc = self.repeat(pc, stop, ind, fail, inrep, succ)
+            elif op == POSSESSIVE_REPEAT:
+                pc = self.possessive(pc, ind, fail, succ)
+            elif op == ATOMIC_GROUP:
+                pc = self.atomic(pc, ind, fail, inrep, succ)
+            elif op == ASSERT:
+                pc = self.assert_(pc, ind, fail, inrep, succ)
+            elif op == ASSERT_NOT:
+                pc = self.assert_not(pc, ind, fail, inrep)
+            elif (op == MAX_UNTIL or op == MIN_UNTIL) and pc in self.untils:
+                pc, inrep = self.untils[pc]
+            else:
+                raise _Unsupported
+            if pc is None:
+                return
+
+    def literals(self, pc, stop, ind, fail):
+        code = self.code
+        values = []
+        while code[pc] == LITERAL and pc != stop:
+            values.append(code[pc + 1])
+            pc += 2
+        tests = ' or '.join(['text[ptr + %d] != %d' % (i, v) if i else 'text[ptr] != %d' % v
+                             for i, v in enumerate(values)])
+        self.w(ind, 'if end - ptr < %d or %s: %s' % (len(values), tests, fail))
+        self.w(ind, 'ptr += %d' % len(values))
+        return pc
+
+    def mark(self, i, ind):
+        if i & 1:
+            self.w(ind, 'lastindex = %d' % (i // 2 + 1))
+        self.w(ind, 'if lastmark < %d:' % i)
+        if i > 0:
+            self.w(ind + 1, 'j = lastmark + 1')
+            self.w(ind + 1, 'while j < %d:' % i)
+            self.w(ind + 2, 'mark[j] = None')
+            self.w(ind + 2, 'j += 1')
+        self.w(ind + 1, 'lastmark = %d' % i)
+        self.w(ind, 'mark[%d] = ptr' % i)
+
+    def at(self, at, ind, fail):
+        if at == AT_BEGINNING or at == AT_BEGINNING_STRING:
+            self.w(ind, 'if ptr != 0: %s' % fail)
+        elif at == AT_BEGINNING_LINE:
+            self.w(ind, 'if ptr != 0 and text[ptr - 1] != 10: %s' % fail)
+        elif at == AT_END:
+            self.w(ind, 'if ptr != end and (end - ptr != 1 or text[ptr] != 10): %s' % fail)
+        elif at == AT_END_LINE:
+            self.w(ind, 'if ptr != end and (ptr >= len(text) or text[ptr] != 10): %s' % fail)
+        elif at == AT_END_STRING:
+            self.w(ind, 'if ptr != end: %s' % fail)
+        elif AT_BOUNDARY <= at <= AT_UNI_NON_BOUNDARY:
+            word = self.category(14 if at >= AT_UNI_BOUNDARY else 4, 'ch')
+            self.w(ind, 'w0 = False')
+            self.w(ind, 'if ptr > 0:')
+            self.w(ind + 1, 'ch = text[ptr - 1]')
+            self.w(ind + 1, 'w0 = %s' % word)
+            self.w(ind, 'w1 = False')
+            self.w(ind, 'if ptr < end:')
+            self.w(ind + 1, 'ch = text[ptr]')
+            self.w(ind + 1, 'w1 = %s' % word)
+            boundary = at == AT_BOUNDARY or at == AT_LOC_BOUNDARY or at == AT_UNI_BOUNDARY
+            self.w(ind, 'if w0 %s w1: %s' % ('==' if boundary else '!=', fail))
+        else:
+            raise _Unsupported
+
+    def groupref(self, op, group, ind, fail):
+        g = 2 * group
+        self.w(ind, 'if %d >= lastmark: %s' % (g, fail))
+        self.w(ind, 'gp = mark[%d]' % g)
+        self.w(ind, 'ge = mark[%d]' % (g + 1))
+        self.w(ind, 'if gp is None or ge is None or ge < gp: %s' % fail)
+        if op == GROUPREF:
+            differ = 'text[ptr] != text[gp]'
+        else:
+            low = {GROUPREF_IGNORE: '_lower_ascii', GROUPREF_UNI_IGNORE: '_lower_unicode'}.get(op, '_lower_locale')
+            differ = '%s(text[ptr]) != %s(text[gp])' % (low, low)
+        self.w(ind, 'while gp < ge:')
+        self.w(ind + 1, 'if ptr >= end or %s: break' % differ)
+        self.w(ind + 1, 'gp += 1')
+        self.w(ind + 1, 'ptr += 1')
+        self.w(ind, 'if gp < ge: %s' % fail)
+
+    def success(self, ind, fail, succ):
+        if succ == 'sub':
+            self.w(ind, 'st.lastmark = lastmark')
+            self.w(ind, 'st.lastindex = lastindex')
+            self.w(ind, 'return ptr')
+            return
+        if succ == 'match':
+            self.w(ind, 'if (match_all and ptr != end) or (adv and ptr == start): %s' % fail)
+        else:
+            self.w(ind, 'if adv and ptr == start: %s' % fail)
+            self.w(ind, 'st.start = pos')
+        self.w(ind, 'st.ptr = ptr')
+        self.w(ind, 'st.lastmark = lastmark')
+        self.w(ind, 'st.lastindex = lastindex')
+        self.w(ind, 'return 1')
+
+    # --- saving and restoring at a choice point ---------------------------
+
+    def save(self, n, ind, snap):
+        self.w(ind, 'm%d = lastmark' % n)
+        self.w(ind, 'x%d = lastindex' % n)
+        if snap:
+            self.w(ind, 's%d = mark[:m%d + 1] if m%d >= 0 else None' % (n, n, n))
+
+    def restore(self, n, ind, snap):
+        self.w(ind, 'lastmark = m%d' % n)
+        self.w(ind, 'lastindex = x%d' % n)
+        if snap:
+            self.w(ind, 'if m%d >= 0: mark[:m%d + 1] = s%d' % (n, n, n))
+
+    def nonempty(self, start, ind):
+        if len(self.out) == start:
+            self.w(ind, 'pass')
+
+    # --- constructs -----------------------------------------------------
+
+    def branch(self, pc, stop, ind, fail, inrep, succ):
+        code = self.code
+        alts = []
+        pos = pc + 1
+        while code[pos]:
+            jump = pos + code[pos] - 2
+            if code[jump] != JUMP:
+                raise _Unsupported
+            alts.append((pos + 1, jump))
+            pos += code[pos]
+        after = pos + 1
+        for body, jump in alts:
+            if jump + 1 + code[jump + 1] != after:
+                raise _Unsupported
+        if not alts:
+            self.w(ind, fail)
+            return None
+        # Alternatives whose first characters exclude each other: at most one can start, so the
+        # branch never backtracks into another and is plain control flow.
+        firsts = [self.first_set(body, True) for body, jump in alts]
+        if all([f and 'end' not in f and 'nl' not in f for f in firsts]) and all(
+                [self.excludes(firsts[i], firsts[j], False) for i in range(len(firsts)) for j in range(i)]):
+            if self.try_straight(self.dispatch, alts, firsts, ind, fail, inrep, succ):
+                return after
+        if stop is not None:
+            raise _Branchy
+        n = self.new()
+        self.w(ind, 'p%d = ptr' % n)
+        self.save(n, ind, inrep)
+        self.w(ind, 'a%d = 0' % n)
+        self.w(ind, 'while True:')
+        self.w(ind + 1, 'a%d += 1' % n)
+        self.w(ind + 1, 'if a%d > 1:' % n)
+        self.restore(n, ind + 2, inrep)
+        self.w(ind + 2, 'ptr = p%d' % n)
+        # Alternatives without choice points of their own share one continuation after them.
+        mark = len(self.out)
+        shared = True
+        for k, (body, jump) in enumerate(alts):
+            self.w(ind + 1, '%s a%d == %d:' % ('if' if k == 0 else 'elif', n, k + 1))
+            start = len(self.out)
+            if not self.try_straight(self.seq, body, jump, ind + 2, 'continue', inrep, succ):
+                shared = False
+                break
+            self.nonempty(start, ind + 2)
+        if not shared:
+            del self.out[mark:]
+            for k, (body, jump) in enumerate(alts):
+                self.w(ind + 1, '%s a%d == %d:' % ('if' if k == 0 else 'elif', n, k + 1))
+                self.seq(body, None, ind + 2, 'continue', inrep, succ)
+        self.w(ind + 1, 'else:')
+        self.w(ind + 2, 'break')
+        if shared:
+            self.seq(after, None, ind + 1, 'continue', inrep, succ)
+        self.w(ind, fail)
+        return None
+
+    def dispatch(self, alts, firsts, ind, fail, inrep, succ):
+        self.w(ind, 'if ptr >= end: %s' % fail)
+        self.w(ind, 'ch = text[ptr]')
+        preps = []
+        conds = []
+        for tests in firsts:
+            es = []
+            for f in tests:
+                prep, e = self.cond(f)
+                preps.extend([p for p in prep if p not in preps])
+                es.append('(%s)' % e)
+            conds.append(' or '.join(es))
+        for p in preps:
+            self.w(ind, p)
+        for k, (body, jump) in enumerate(alts):
+            self.w(ind, '%s %s:' % ('if' if k == 0 else 'elif', conds[k]))
+            start = len(self.out)
+            self.seq(body, jump, ind + 1, fail, inrep, succ)
+            self.nonempty(start, ind + 1)
+        self.w(ind, 'else:')
+        self.w(ind + 1, fail)
+
+    def groupref_exists(self, pc, stop, ind, fail, inrep, succ):
+        code = self.code
+        g = 2 * code[pc + 1]
+        yes = pc + 3
+        no = pc + 1 + code[pc + 2]
+        if code[no - 2] == JUMP and self.reaches(yes, no - 2):
+            yes_stop = no - 2
+            join = no - 1 + code[no - 1]
+        else:
+            yes_stop = join = no
+        cond = ('%d < lastmark and mark[%d] is not None and mark[%d] is not None and mark[%d] >= mark[%d]'
+                % (g, g, g + 1, g + 1, g))
+        mark = len(self.out)
+        try:
+            self.w(ind, 'if %s:' % cond)
+            start = len(self.out)
+            self.seq(yes, yes_stop, ind + 1, fail, inrep, succ)
+            self.nonempty(start, ind + 1)
+            self.w(ind, 'else:')
+            start = len(self.out)
+            self.seq(no, join, ind + 1, fail, inrep, succ)
+            self.nonempty(start, ind + 1)
+            return join
+        except _Branchy:
+            del self.out[mark:]
+            if stop is not None:
+                raise
+        self.w(ind, 'if %s:' % cond)
+        self.seq(yes, None, ind + 1, fail, inrep, succ)
+        self.w(ind, 'else:')
+        self.seq(no, None, ind + 1, fail, inrep, succ)
+        return None
+
+    def reaches(self, pc, target):
+        """Does stepping op by op from pc land on target?"""
+        code = self.code
+        while pc < target:
+            op = code[pc]
+            if op in _CHAR_OPS:
+                pc = _char_end(code, pc)
+            elif op in (MARK, AT, GROUPREF, GROUPREF_IGNORE, GROUPREF_UNI_IGNORE, GROUPREF_LOC_IGNORE):
+                pc += 2
+            elif op == BRANCH:
+                pc += 1
+                while code[pc]:
+                    pc += code[pc]
+                pc += 1
+            elif op == REPEAT:
+                pc += 2 + code[pc + 1]
+            elif op in _ONE_REPEATS or op == ATOMIC_GROUP or op == ASSERT or op == ASSERT_NOT:
+                pc += 1 + code[pc + 1]
+            elif op == POSSESSIVE_REPEAT:
+                pc += 2 + code[pc + 1]
+            elif op == GROUPREF_EXISTS:
+                pc += 1 + code[pc + 2]
+                if code[pc - 2] == JUMP:
+                    pc += code[pc - 1] - 1
+            else:
+                return False
+        return pc == target
+
+    def repeat_one(self, pc, stop, ind, fail, inrep, succ):
+        code = self.code
+        op = code[pc]
+        minimum = code[pc + 2]
+        maximum = code[pc + 3]
+        item = pc + 4
+        tail = pc + 1 + code[pc + 1]
+        if code[item] not in _CHAR_OPS or _char_end(code, item) != tail - 1 or code[tail - 1] != SUCCESS:
+            raise _Unsupported
+        n = self.new()
+        if op == POSSESSIVE_REPEAT_ONE or minimum == maximum or self.excludes(
+                [item], self.first_set(tail, True), op == REPEAT_ONE):
+            # Giving back an item never lets the tail match: take as many as there are.
+            self.w(ind, 'if %d > end - ptr: %s' % (minimum, fail))
+            self.w(ind, 'p%d = ptr' % n)
+            self.count(item, maximum, ind)
+            if minimum:
+                self.w(ind, 'if ptr - p%d < %d: %s' % (n, minimum, fail))
+            return tail
+        if stop is not None:
+            raise _Branchy
+        self.w(ind, 'if %d > end - ptr: %s' % (minimum, fail))
+        if op == REPEAT_ONE:
+            self.w(ind, 'p%d = ptr' % n)
+            self.count(item, maximum, ind)
+            self.w(ind, 'c%d = ptr - p%d + 1' % (n, n))
+            if minimum:
+                self.w(ind, 'if c%d <= %d: %s' % (n, minimum, fail))
+            self.save(n, ind, inrep)
+            self.w(ind, 'while True:')
+            self.w(ind + 1, 'c%d -= 1' % n)
+            self.w(ind + 1, 'ptr = p%d + c%d' % (n, n))     # the tail moved it
+            self.restore(n, ind + 1, inrep)
+            if code[tail] == LITERAL:
+                self.w(ind + 1, 'while c%d >= %d and (ptr >= end or text[ptr] != %d):' % (n, minimum, code[tail + 1]))
+                self.w(ind + 2, 'ptr -= 1')
+                self.w(ind + 2, 'c%d -= 1' % n)
+            self.w(ind + 1, 'if c%d < %d: break' % (n, minimum))
+        else:
+            self.w(ind, 'p%d = ptr' % n)
+            if minimum:
+                self.count(item, minimum, ind)
+                self.w(ind, 'if ptr - p%d < %d: %s' % (n, minimum, fail))
+            self.w(ind, 'c%d = %d' % (n, minimum))
+            self.save(n, ind, inrep)
+            self.w(ind, 'b%d = 0' % n)
+            self.w(ind, 'while True:')
+            self.w(ind + 1, 'if b%d:' % n)
+            self.restore(n, ind + 2, inrep)
+            self.w(ind + 2, 'ptr = p%d + c%d' % (n, n))
+            self.w(ind + 2, 'if ptr >= end: break')
+            self.test_char(item, ind + 2, 'ptr', 'break')
+            self.w(ind + 2, 'ptr += 1')
+            self.w(ind + 2, 'c%d += 1' % n)
+            self.w(ind + 1, 'b%d = 1' % n)
+            if maximum != MAXREPEAT:
+                self.w(ind + 1, 'if c%d > %d: break' % (n, maximum))
+        self.seq(tail, None, ind + 1, 'continue', inrep, succ)
+        self.w(ind, fail)
+        return None
+
+    def loop(self, n, body, minimum, maximum, ind, fail, snap, keep):
+        """The iterations of a greedy repeat that never backtracks into an iteration: body(ind, fail)
+        emits one. The last attempt that fails is undone; keep: push each iteration's start and saved
+        marks on k<n>, for the tail to back off to."""
+        counted = maximum != MAXREPEAT
+        if minimum or counted:
+            self.w(ind, 'c%d = 0' % n)
+        if minimum == 1:
+            body(ind, fail)
+            if counted:
+                self.w(ind, 'c%d = 1' % n)
+        elif minimum:
+            self.w(ind, 'while c%d < %d:' % (n, minimum))
+            body(ind + 1, 'break')
+            self.w(ind + 1, 'c%d += 1' % n)
+            self.w(ind, 'if c%d < %d: %s' % (n, minimum, fail))
+        if maximum == minimum:
+            return
+        if keep:
+            self.w(ind, 'k%d = []' % n)
+        self.w(ind, 'v%d = -1' % n)
+        self.w(ind, 'p%d = -1' % n)
+        self.w(ind, 'while ptr != v%d%s:' % (n, ' and c%d < %d' % (n, maximum) if counted else ''))
+        if snap:
+            self.save(n, ind + 1, True)
+        self.w(ind + 1, 'p%d = v%d = ptr' % (n, n))
+        body(ind + 1, 'break')
+        if keep:
+            self.w(ind + 1, 'k%d.append((p%d, m%d, x%d, s%d))' % (n, n, n, n, n) if snap else 'k%d.append(p%d)' % (n, n))
+        if counted:
+            self.w(ind + 1, 'c%d += 1' % n)
+        self.w(ind + 1, 'p%d = -1' % n)
+        self.w(ind, 'if p%d >= 0:' % n)
+        if snap:
+            self.restore(n, ind + 1, True)
+        self.w(ind + 1, 'ptr = p%d' % n)
+
+    def writes_marks(self, emit, *args):
+        """Does emit(*args) emit a MARK? It emits nothing either way."""
+        mark = len(self.out)
+        try:
+            emit(*args)
+        finally:
+            text = [line[1] for line in self.out[mark:]]
+            del self.out[mark:]
+        return any(['lastmark =' in t for t in text])
+
+    def repeat(self, pc, stop, ind, fail, inrep, succ):
+        code = self.code
+        minimum = code[pc + 2]
+        maximum = code[pc + 3]
+        body = pc + 4
+        until = pc + 1 + code[pc + 1]
+        tail = until + 1
+        lazy = code[until] == MIN_UNTIL
+        if not lazy and code[until] != MAX_UNTIL:
+            raise _Unsupported
+
+        self.loops[until] = (body, tail)
+
+        def iteration(i, f):
+            self.seq(body, until, i, f, True, succ)
+        try:
+            snap = self.writes_marks(iteration, ind, 'break')
+            plain = True        # no choice point inside an iteration
+        except _Branchy:
+            plain = False
+        straight = plain and (minimum == maximum or not lazy and self.excludes(
+            self.first_set(body, False), self.first_set(tail, True), True))
+        if not straight and stop is not None:
+            raise _Branchy
+        n = self.new()
+        if not lazy and minimum == 0 and maximum == 1 and not straight:
+            # At most one iteration: the iteration and the tail after it, or else the tail.
+            self.untils[until] = (tail, inrep)
+            self.w(ind, 'p%d = ptr' % n)
+            self.save(n, ind, True)
+            self.w(ind, 'a%d = 0' % n)
+            self.w(ind, 'while True:')
+            self.w(ind + 1, 'a%d += 1' % n)
+            self.w(ind + 1, 'if a%d == 1:' % n)
+            self.seq(body, None, ind + 2, 'continue', True, succ)
+            self.w(ind + 1, 'elif a%d == 2:' % n)
+            self.restore(n, ind + 2, True)
+            self.w(ind + 2, 'ptr = p%d' % n)
+            self.seq(tail, None, ind + 2, 'continue', inrep, succ)
+            self.w(ind + 1, 'else:')
+            self.w(ind + 2, 'break')
+            self.w(ind, fail)
+            return None
+        if not plain:
+            raise _Unsupported      # backtracking into one of many iterations: the interpreter's
+        if not lazy:
+            self.loop(n, iteration, minimum, maximum, ind, fail, snap, not straight)
+            if straight:
+                return tail
+            self.w(ind, 'b%d = 0' % n)
+            self.w(ind, 'while True:')
+            self.w(ind + 1, 'if b%d:' % n)
+            self.w(ind + 2, 'if not k%d: break' % n)
+            if snap:
+                self.w(ind + 2, 'p%d, m%d, x%d, s%d = k%d.pop()' % (n, n, n, n, n))
+                self.restore(n, ind + 2, True)
+            else:
+                self.w(ind + 2, 'p%d = k%d.pop()' % (n, n))
+            self.w(ind + 2, 'ptr = p%d' % n)
+            self.w(ind + 1, 'b%d = 1' % n)
+            self.seq(tail, None, ind + 1, 'continue', inrep, succ)
+            self.w(ind, fail)
+            return None
+        self.loop(n, iteration, minimum, minimum, ind, fail, snap, False)
+        if minimum == maximum:
+            return tail
+        counted = maximum != MAXREPEAT
+        self.w(ind, 'v%d = -1' % n)
+        self.w(ind, 'b%d = 0' % n)
+        self.w(ind, 'while True:')
+        self.w(ind + 1, 'if b%d:' % n)
+        self.restore(n, ind + 2, inrep)
+        self.w(ind + 2, 'ptr = t%d' % n)    # where the tail failed
+        self.w(ind + 2, 'if ptr == v%d%s: break' % (n, ' or c%d >= %d' % (n, maximum) if counted else ''))
+        self.w(ind + 2, 'v%d = ptr' % n)
+        iteration(ind + 2, 'break')
+        if counted:
+            self.w(ind + 2, 'c%d += 1' % n)
+        self.w(ind + 1, 'b%d = 1' % n)
+        self.w(ind + 1, 't%d = ptr' % n)
+        self.save(n, ind + 1, inrep)
+        self.seq(tail, None, ind + 1, 'continue', inrep, succ)
+        self.w(ind, fail)
+        return None
+
+    def sub(self, body, inrep):
+        """A function for the submatch at body: the new end or -1, its lastmark and lastindex in st."""
+        key = (body, inrep)
+        name = self.sub_names.get(key)
+        if name is None:
+            name = self.sub_names[key] = '_sub%d' % self.new()
+            saved = self.out
+            self.out = [(0, 'def %s(st, text, end, mark, ptr, lastmark, lastindex):' % name)]
+            self.seq(body, None, 1, 'return -1', inrep, 'sub')
+            self.subs.append(self.out)
+            self.out = saved
+        return name
+
+    def atomic_body(self, body, stop, ind, fail, inrep, succ):
+        """Emit a body that never backtracks once matched: in line when it has no choice point, else
+        as a call of a submatch function."""
+        if self.try_straight(self.seq, body, stop, ind, fail, inrep, succ):
+            return
+        self.w(ind, 'q = %s(st, text, end, mark, ptr, lastmark, lastindex)' % self.sub(body, inrep))
+        self.w(ind, 'if q < 0: %s' % fail)
+        self.w(ind, 'ptr = q')
+        self.w(ind, 'lastmark = st.lastmark')
+        self.w(ind, 'lastindex = st.lastindex')
+
+    def atomic(self, pc, ind, fail, inrep, succ):
+        tail = pc + 1 + self.code[pc + 1]
+        if self.code[tail - 1] != SUCCESS:
+            raise _Unsupported
+        self.atomic_body(pc + 2, tail - 1, ind, fail, inrep, succ)
+        return tail
+
+    def possessive(self, pc, ind, fail, succ):
+        code = self.code
+        end = pc + 1 + code[pc + 1]
+        if code[end] != SUCCESS:
+            raise _Unsupported
+
+        def iteration(i, f):
+            self.atomic_body(pc + 4, end, i, f, True, succ)
+        snap = self.writes_marks(iteration, ind, 'break')
+        self.loop(self.new(), iteration, code[pc + 2], code[pc + 3], ind, fail, snap, False)
+        return end + 1
+
+    def assert_(self, pc, ind, fail, inrep, succ):
+        code = self.code
+        back = code[pc + 2]
+        after = pc + 1 + code[pc + 1]
+        if code[after - 1] != SUCCESS:
+            raise _Unsupported
+        if back:
+            self.w(ind, 'if ptr < %d: %s' % (back, fail))
+        n = self.new()
+        self.w(ind, 'p%d = ptr' % n)
+        if back:
+            self.w(ind, 'ptr -= %d' % back)
+        self.atomic_body(pc + 3, after - 1, ind, fail, inrep, succ)
+        self.w(ind, 'ptr = p%d' % n)
+        return after
+
+    def assert_not(self, pc, ind, fail, inrep):
+        code = self.code
+        back = code[pc + 2]
+        body = pc + 3
+        after = pc + 1 + code[pc + 1]
+        if code[after - 1] != SUCCESS:
+            raise _Unsupported
+        self.w(ind, 'if ptr >= %d:' % back)
+        if code[body] in _CHAR_OPS and _char_end(code, body) == after - 1:
+            self.w(ind + 1, 'q = ptr - %d' % back)
+            self.w(ind + 1, 'if q < end:')
+            prep, e = self.cond(body)
+            self.w(ind + 2, 'ch = text[q]')
+            for line in prep:
+                self.w(ind + 2, line)
+            self.w(ind + 2, 'if %s: %s' % (e, fail))
+            return after
+        n = self.new()
+        if inrep:
+            self.w(ind + 1, 's%d = mark[:lastmark + 1] if lastmark >= 0 else None' % n)
+        self.w(ind + 1, 'if %s(st, text, end, mark, ptr - %d, lastmark, lastindex) >= 0: %s'
+               % (self.sub(body, inrep), back, fail))
+        if inrep:
+            self.w(ind + 1, 'if lastmark >= 0: mark[:lastmark + 1] = s%d' % n)
+        return after
+
+    # --- entries --------------------------------------------------------
+
+    def match_entry(self):
+        """_match(st, 0, True)."""
+        code = self.code
+        w = self.w
+        w(0, 'def _entry(st):')
+        w(1, 'text = st.text')
+        w(1, 'end = st.end')
+        w(1, 'mark = st.mark')
+        w(1, 'ptr = start = st.ptr')
+        w(1, 'match_all = st.match_all')
+        w(1, 'adv = st.must_advance')
+        w(1, 'lastmark = st.lastmark')
+        w(1, 'lastindex = st.lastindex')
+        pc = 0
+        if code[0] == INFO:
+            if code[3]:
+                w(1, 'if 0 <= end - ptr < %d: return 0' % code[3])
+            pc = 1 + code[1]
+        self.seq(pc, None, 1, 'return 0', False, 'match')
+
+    def search_entry(self, first):
+        """_search_generic(st)."""
+        code = self.code
+        w = self.w
+        w(0, 'def _entry(st):')
+        w(1, 'text = st.text')
+        w(1, 'end = st.end')
+        w(1, 'mark = st.mark')
+        w(1, 'start = st.start')
+        w(1, 'if start > end: return 0')
+        pc = 0
+        flags = need = 0
+        if code[0] == INFO:
+            flags = code[2]
+            need = code[3]
+            if need:
+                w(1, 'if end - start < %d: return 0' % need)
+            pc = 1 + code[1]
+        w(1, 'adv = st.must_advance')
+        w(1, 'st.must_advance = False')
+        if flags & INFO_PREFIX:
+            w(1, 'adv = False')
+            skip = code[6]
+            w(1, 'nxt = start')
+            w(1, 'while nxt < end:')
+            w(2, 'pos = _search_prefix(text, %s, nxt, end)' % self.const(tuple(code[7:7 + code[5]])))
+            w(2, 'if pos < 0: return 0')
+            w(2, 'nxt = pos + 1')
+            if flags & INFO_LITERAL:
+                w(2, 'st.start = pos')
+                w(2, 'st.ptr = pos + %d' % skip)
+                w(2, 'return 1')
+            else:
+                w(2, 'ptr = pos + %d' % skip)
+                w(2, 'lastmark = lastindex = -1')
+                self.seq(pc + 2 * skip, None, 2, 'continue', False, 'search')
+            w(1, 'return 0')
+            return
+        tests = None
+        if flags & INFO_CHARSET:
+            tests = self.charset(5, 'ch')
+        elif first is not None:
+            tests = ' or '.join(['(%s)' % (self.charset(at, 'ch') if op == IN else 'ch %s %d' % (
+                '==' if op == LITERAL else '!=', code[at])) for op, at in first])
+        if tests is not None:
+            w(1, 'adv = False')
+            w(1, 'pos = start - 1')
+            w(1, 'while True:')
+            w(2, 'pos += 1')
+            w(2, 'while pos < end:')
+            w(3, 'ch = text[pos]')
+            w(3, 'if %s: break' % tests)
+            w(3, 'pos += 1')
+            w(2, 'if pos >= end: return 0')
+            w(2, 'ptr = pos')
+            w(2, 'lastmark = lastindex = -1')
+            self.seq(pc, None, 2, 'continue', False, 'search')
+            return
+        w(1, 'last = end')
+        if need > 1:
+            w(1, 'last = end - %d' % (need - 1))
+            w(1, 'if last <= start: last = start')
+        if code[pc] == AT and (code[pc + 1] == AT_BEGINNING or code[pc + 1] == AT_BEGINNING_STRING):
+            # one attempt: a match can only start at the beginning
+            w(1, 'pos = ptr = start')
+            w(1, 'lastmark = lastindex = -1')
+            w(1, 'while True:')
+            self.seq(pc, None, 2, 'break', False, 'search')
+            w(1, 'st.start = st.ptr = last')
+            w(1, 'return 0')
+            return
+        w(1, 'pos = start - 1')
+        w(1, 'while pos < last:')
+        w(2, 'pos += 1')
+        w(2, 'ptr = pos')
+        w(2, 'lastmark = lastindex = -1')
+        self.seq(pc, None, 2, 'continue', False, 'search')
+        w(1, 'return 0')
+
+    def source(self):
+        lines = []
+        for block in self.subs + [self.out]:
+            for item in block:
+                if item is not None:
+                    lines.append('    ' * item[0] + item[1])
+        return '\n'.join(lines) + '\n'
+
+
+_compile_source = compile     # the builtin: this module's compile() comes below
+
+
+def _generate(code, first, kind):
+    """The specialized entry for kind 'match' or 'search', or None."""
+    g = _Gen(code)
+    try:
+        if kind == 'match':
+            g.match_entry()
+        else:
+            g.search_entry(first)
+        source = g.source()
+        namespace = dict(_NAMESPACE)
+        namespace.update(g.consts)
+        namespace['_code'] = code
+        exec(_compile_source(source, '<sre>', 'exec'), namespace)
+    except (_Unsupported, SyntaxError, RecursionError, MemoryError):
+        return None
+    return namespace['_entry']
+
+
+class _Spec:
+    """A pattern's entries: the specialized function, the generic one, or None while the pattern is
+    cold. budget: the work the interpreter may still do before the pattern is specialized."""
+
+    __slots__ = ('code', 'first', 'budget', 'match', 'search')
+
+    def __init__(self, code, first):
+        self.code = code
+        self.first = first
+        self.budget = 0 if _EAGER else _BUDGET_PER_WORD * len(code)
+        self.match = None
+        self.search = None
+
+
+# The interpreter's work is charged as _CALL_COST per call plus one per character the match or
+# search covered; a pattern is specialized once it has used _BUDGET_PER_WORD of that per code word,
+# so the cost of generating and compiling its source (linear in the code) stays a fraction of it.
+_CALL_COST = 32
+_BUDGET_PER_WORD = 64
+_CHECK = 'sre' in str(sys._xoptions.get('lucifer_stress', '')).split(',')
+_EAGER = _CHECK or sys._xoptions.get('lucifer_jit') == 'always'
+
+
+def _match_top(st):
+    return _match(st, 0, True)
+
+
+def _specialize(sp, kind):
+    generic = _match_top if kind == 'match' else _search_generic
+    f = _generate(sp.code, sp.first, kind)
+    if f is None:
+        f = generic
+    elif _CHECK:
+        f = _checked(f, generic)
+    if kind == 'match':
+        sp.match = f
+    else:
+        sp.search = f
+    return f
+
+
+def _checked(fast, generic):
+    """fast, compared on every call with the interpreter on a copy of the state."""
+    def run(st):
+        twin = _State()
+        for name in _State.__slots__:
+            setattr(twin, name, getattr(st, name))
+        twin.mark = list(st.mark)
+        want = generic(twin)
+        got = fast(st)
+        if want != got or (want and (twin.start, twin.ptr, twin.lastmark, twin.lastindex, twin.mark[:twin.lastmark + 1])
+                           != (st.start, st.ptr, st.lastmark, st.lastindex, st.mark[:st.lastmark + 1])):
+            raise RuntimeError('sre specialization diverges on %r at %d: %r, generic %r' % (
+                st.string, twin.pos, (got, st.start, st.ptr, st.lastmark, st.lastindex, st.mark),
+                (want, twin.start, twin.ptr, twin.lastmark, twin.lastindex, twin.mark)))
+        return got
+    return run
+
+
+def _match_entry(st):
+    f = st.spec.match
+    if f is not None:
+        return f(st)
+    sp = st.spec
+    if sp.budget <= 0:
+        return _specialize(sp, 'match')(st)
+    status = _match(st, 0, True)
+    sp.budget -= _CALL_COST + (st.ptr - st.start if status else 0)
+    return status
+
+
+def _search(st):
+    f = st.spec.search
+    if f is not None:
+        return f(st)
+    sp = st.spec
+    if sp.budget <= 0:
+        return _specialize(sp, 'search')(st)
+    start = st.start
+    status = _search_generic(st)
+    sp.budget -= _CALL_COST + ((st.ptr if status else st.end) - start)
     return status
 
 
@@ -1658,7 +2865,8 @@ class Pattern:
     """Compiled regular expression object."""
 
     __module__ = 're'
-    __slots__ = ('pattern', 'flags', 'groups', 'code', '_first', 'isbytes', '_groupindex', '_indexgroup', '__weakref__')
+    __slots__ = ('pattern', 'flags', 'groups', 'code', '_first', '_spec', 'isbytes', '_groupindex', '_indexgroup',
+                 '__weakref__')
 
     def __new__(cls, *args, **kwargs):
         _no_instances(cls)
@@ -1673,13 +2881,13 @@ class Pattern:
     def match(self, /, string, pos=0, endpos=_SSIZE_MAX):
         """Matches zero or more characters at the beginning of the string."""
         st = _state_init(self, string, _ssize(pos), _ssize(endpos))
-        return _new_match(self, st, _match(st, 0, True))
+        return _new_match(self, st, _match_entry(st))
 
     def fullmatch(self, /, string, pos=0, endpos=_SSIZE_MAX):
         """Matches against all of the string."""
         st = _state_init(self, string, _ssize(pos), _ssize(endpos))
         st.match_all = True
-        return _new_match(self, st, _match(st, 0, True))
+        return _new_match(self, st, _match_entry(st))
 
     def search(self, /, string, pos=0, endpos=_SSIZE_MAX):
         """Scan through string looking for a match, and return a corresponding match object instance.
@@ -1958,7 +3166,7 @@ class SRE_Scanner:
             self._executing = False
 
     def match(self):
-        return self._step(lambda st: _match(st, 0, True))
+        return self._step(_match_entry)
 
     def search(self):
         return self._step(_search)
@@ -2187,6 +3395,7 @@ def compile(pattern, flags, code, groups, groupindex, indexgroup):
     self = object.__new__(Pattern)
     self.code = words
     self._first = _first_tests(words)
+    self._spec = _Spec(words, self._first)
     if pattern is None:
         self.isbytes = -1
     else:
