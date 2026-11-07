@@ -209,7 +209,7 @@ The decision comes from data: see §10 for the startup experiment.
 | Refcount | Exact `Include/refcount.h` cp314t semantics. `ob_tid` is the allocating carrier's TCB (`%fs:0`); local non-atomic increments by that carrier, shared atomic otherwise, including from a migrated task. `_Py_DecRefShared` and `_Py_MergeZeroLocalRefcount` are exported. Biased-refcount merge queues are per carrier. | `Python/brc.c` (208 lines) port |
 | Immortals | `ob_ref_local == UINT32_MAX` for statics, interned strings and small ints; `_Py_SetImmortal` exported. | `refcount.h` |
 | Deferred refcount | Functions, code, modules, heap types and top-level globals use cp314t deferred counting. Stack references from interpreter and JIT frames are not counted, so the GC scans every task's frames, running or parked. This is where precise stack maps (donor INV-EXE-1, INV-GC-1) become mandatory. | `_PyObject_SetDeferredRefcount` |
-| Storage reclamation | Replaced `ob_item` arrays and dict keys tables are freed after a QSBR grace period. Lock-free readers (`list[i]`, dict lookup) never see freed storage. | `Python/qsbr.c` (282) port; donor `vm_retire`/`vm_grace_step` |
+| Storage reclamation | Replaced `ob_item` arrays and dict keys tables are freed after a QSBR grace period. Lock-free readers (`list[i]`, dict lookup, compiled code's in-line list reads) never see freed storage. Carriers report at polls; compiled code only when an advance asks (§5.6). | `Python/qsbr.c` (282) port; donor `vm_retire`/`vm_grace_step` |
 | Uniqueness | `_PyObject_IsUniquelyReferenced` follows cp314t (owner + local 1 + shared 0). `PyUnstable_Object_IsUniqueReferencedTemporary` consults interpreter and JIT frames. NumPy's in-place temporary elision depends on it. Another carrier's objects answer false (§5.3). | research 01 §6.2 |
 
 ### 4.3 Cycle collector
@@ -486,8 +486,14 @@ Every blocking operation goes through one of two entry points from K1:
 ### 5.6 Safepoints and stop-the-world
 
 - **Polls.** Each carrier has one poll word. The interpreter checks it at calls
-  and back-edges (the eval breaker). JIT code checks it with a two-instruction
-  poll (the donor's `sc_next` pattern).
+  and back-edges (the eval breaker). JIT code checks it with a three-instruction
+  poll (the donor's `sc_next` pattern): load the carrier, compare its word with
+  the code's monitoring version, branch. Everything else a poll used to check
+  is folded into the word. An advance of the QSBR write sequence raises
+  `LU_POLL_QSBR` on every attached carrier, and compiled code reports its
+  quiescent state in place when that is the only reason; the interpreter still
+  reports at every poll. The handoff scheduler's migration check is compiled
+  in only under `-X lucifer_handoff`.
 - **Stop-the-world**, used by GC, `settrace`/`setprofile` across all threads and
   code invalidation:
   - A request bumps a global stop sequence.

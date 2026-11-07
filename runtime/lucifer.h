@@ -504,7 +504,8 @@ enum {
     LU_POLL_DEOPT_SELF = 1 << 9,
     LU_POLL_STRESS_TICK = 1 << 10,
     LU_POLL_REMOTE_EXEC = 1 << 11,
-    LU_POLL_EVENTS_BITS = 12,
+    LU_POLL_QSBR = 1 << 12,             /* the write sequence moved: report a quiescent state */
+    LU_POLL_EVENTS_BITS = 13,
 };
 #define LU_POLL_EVENTS_MASK (((uintptr_t)1 << LU_POLL_EVENTS_BITS) - 1)
 /* The reasons whose effects Python sees, which wait while a builtin's

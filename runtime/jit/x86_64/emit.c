@@ -1138,7 +1138,8 @@ pop_frames(struct asm_ *a)
 /* --- the instructions --- */
 
 /* The carrier (in RAX) passes a quiescent state, as the interpreter's poll
-   does. Clobbers RCX. */
+   does: compiled code's poll when the poll word asks (LU_POLL_QSBR). Clobbers
+   RCX. */
 static void
 quiescent(struct asm_ *a)
 {
@@ -2458,23 +2459,47 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     }
     case OP_POLL: {
         guard_exit(a, in);                          /* the stress count */
-        /* The poll word: an event, or a monitoring version other than the
-           one the code was compiled under (tools turned on), leaves. */
+        /* The poll word is the monitoring version the code was compiled
+           under and no event: three instructions. Else the stub below
+           reports a moved write sequence (LU_POLL_QSBR) in place, and every
+           other event, or tools turned on, leaves. A builtin's frame leaves
+           the visible reasons for the poll after it returns too: leaving for
+           one would only come back. */
+        int poll = exit_to(a, in->fs, EXIT_POLL, 0, 0), done = new_label(a);
+        int64_t version = (int64_t)a->f->code->_co_instrumentation_version;
+        uintptr_t stays = LU_POLL_QSBR | (in->fs->code->co_flags & LU_CO_KERNEL ? LU_POLL_VISIBLE : 0);
         load(a, RAX, R14, offsetof(struct lu_task, carrier));
-        load(a, RCX, RAX, offsetof(struct lu_carrier, poll));
-        int poll = exit_to(a, in->fs, EXIT_POLL, 0, 0);
-        if (in->fs->code->co_flags & LU_CO_KERNEL) {
-            /* A builtin's frame leaves the visible reasons for the poll after
-               it returns: leaving for one would only come back. */
-            alu_ri(a, ALU_AND, RCX, (int32_t)~LU_POLL_VISIBLE);
+        if (version <= INT32_MAX) {
+            cmp_mi(a, 1, RAX, offsetof(struct lu_carrier, poll), (int32_t)version);
         }
-        mov_ri(a, R11, (int64_t)a->f->code->_co_instrumentation_version);
+        else {
+            mov_ri(a, R11, version);
+            cmp_rm(a, R11, RAX, offsetof(struct lu_carrier, poll));
+        }
+        jcc(a, CC_E, done);
+        load(a, RCX, RAX, offsetof(struct lu_carrier, poll));
+        alu_ri(a, ALU_AND, RCX, (int32_t)~stays);
+        mov_ri(a, R11, version);
         alu_rr(a, ALU_CMP, RCX, R11);
         jcc(a, CC_NE, poll);
+        rex(a, 1, 0, 0, RAX);
+        b1(a, 0xF7);
+        modrm_mem(a, 0, RAX, offsetof(struct lu_carrier, poll));
+        b4(a, LU_POLL_QSBR);                    /* test qword [rax+poll], LU_POLL_QSBR */
+        jcc(a, CC_E, done);                     /* only a builtin's visible reasons */
+        b1(a, 0xF0);
+        rex(a, 1, 0, 0, RAX);
+        b1(a, 0x81);
+        modrm_mem(a, ALU_AND, RAX, offsetof(struct lu_carrier, poll));
+        b4(a, (int32_t)~LU_POLL_QSBR);          /* lock and: the bit goes before the report */
         quiescent(a);
-        mov_ri(a, RCX, (int64_t)(intptr_t)&_PyRuntime.sched.active);
-        cmp_mi(a, 0, RCX, 0, 0);
-        jcc(a, CC_NE, poll);
+        bind(a, done);
+        if (_PyRuntime.handoff.on) {
+            /* The handoff scheduler migrates tasks at the interpreter's polls. */
+            mov_ri(a, RCX, (int64_t)(intptr_t)&_PyRuntime.sched.active);
+            cmp_mi(a, 0, RCX, 0, 0);
+            jcc(a, CC_NE, poll);
+        }
         return 0;
     }
     case OP_DEOPT:
@@ -2749,8 +2774,6 @@ direct_entry(struct asm_ *a)
         b1(a, 0xFF);
         modrm_mem(a, 0, R11, 0);                /* lock inc qword [r11] */
     }
-    load(a, RAX, R14, offsetof(struct lu_task, carrier));
-    quiescent(a);
     jmp(a, a->entered);
     bind(a, decline);
     mov_ri(a, RAX, 0);
