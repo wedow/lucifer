@@ -229,6 +229,7 @@ check-harness:
 	python3 tools/difftest/check.py
 	python3 tools/ftcorpus/check.py
 	python3 tools/pypi/check.py
+	python3 tools/readme/check.py
 
 # tests/kernel programs, host-compiled to .pyc, against the free-threaded
 # oracle under a 512 KiB stack. PROGRAMS="a b" selects; LANE= picks a policy.

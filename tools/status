@@ -140,6 +140,17 @@ def kernel_counts(out):
     return counts
 
 
+def libtest_core():
+    """Lib/test passes in the core-type modules Lucifer runs, for Lucifer and the oracle."""
+    results = ROOT / "results/libtest"
+    modules = json.loads((results / "lucifer.json").read_text())["modules"]
+    status = {rt: {r["id"]: r["status"] for r in csv.DictReader((results / f"{rt}.tsv").open(), delimiter="\t")}
+              for rt in ("lucifer", "cpython-3.14.10t")}
+    core = [i for i in status["cpython-3.14.10t"] if i.startswith(tuple(f"test.{m}." for m in modules))]
+    return {f"conformance.libtest-core.{tag}.pass": sum(status[rt].get(i) == "PASS" for i in core)
+            for tag, rt in (("lucifer", "lucifer"), ("oracle", "cpython-3.14.10t"))}
+
+
 def conformance(out):
     metrics = kernel_counts(out)
     board = run([sys.executable, "tools/scoreboard"]).stdout
@@ -149,6 +160,7 @@ def conformance(out):
             tag = "lucifer" if row["runtime"] == "lucifer" else "oracle"
             metrics[f"conformance.{row['suite']}.{tag}.pass"] = int(row["PASS"])
             metrics[f"conformance.{row['suite']}.total"] = int(row["total"])
+    metrics.update(libtest_core())
     audit = run(["make", "abi-audit"]).stdout
     (out / "abi-audit.log").write_text(audit)
     m = re.search(r"functions:\s+(\d+) implemented, (\d+) stubs, of (\d+)", audit)

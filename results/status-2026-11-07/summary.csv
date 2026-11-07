@@ -105,6 +105,8 @@ conformance.libtest.lucifer.pass,1993,1993
 conformance.numpytest.oracle.pass,51140,51140
 conformance.numpytest.total,52273,52273
 conformance.numpytest.lucifer.pass,50299,50299
+conformance.libtest-core.lucifer.pass,1993,
+conformance.libtest-core.oracle.pass,2157,
 capi.implemented,1083,968
 capi.stubs,545,660
 capi.total,1628,1628
