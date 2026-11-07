@@ -107,7 +107,31 @@ struct lu_unit {
     unsigned long leaves;       /* exits no recompile can remove: side exits of the root frame, errors */
     int loops;                  /* the code has a back edge: an entry may do unbounded work */
     int dead;
+    /* -X lucifer_jit_stats: what the code executed, by kind (lu_count_kind),
+       and the next unit on the report's list. */
+    unsigned long *counts;
+    char *stats_name;
+    struct lu_unit *stats_next;
 };
+
+/* What -X lucifer_jit_stats counts as compiled code runs it: the census of
+   guards, loads and calls per unit. */
+#define LU_COUNT_KINDS(X) \
+    X(guard_type) X(guard_type_of) X(guard_type_itself) X(guard_keys) X(guard_func) \
+    X(guard_is) X(guard_cell) X(guard_global) X(guard_bit) X(guard_not_null) X(guard_other) \
+    X(unbox) X(poll) X(load_type) X(load_version) X(load_size) X(load_other) \
+    X(attr_load) X(attr_store) X(global_load) X(item) X(helper) X(incref) X(decref) X(store_local) X(box)
+enum lu_count {
+#define LU_COUNT_ENUM(name) CNT_##name,
+    LU_COUNT_KINDS(LU_COUNT_ENUM)
+#undef LU_COUNT_ENUM
+    CNT_COUNT
+};
+extern const char *const lu_count_names[CNT_COUNT];
+/* The kind an instruction counts as, or -1. */
+int lu_count_kind(const struct lu_ins *in);
+/* Kinds that are guards: every guard_* kind and unbox (not polls). */
+#define LU_COUNT_IS_GUARD(k) ((k) <= CNT_unbox)
 
 /* Lowers an allocated function into unit: code, exits, constants. 0, or
    -1 with f->fail set. */

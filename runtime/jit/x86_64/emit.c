@@ -2107,6 +2107,13 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
         bind(a, labels[b]);
         int next = k + 1 < f->norder ? f->order[k + 1] : -1;
         for (int i = 0; i < bl->nins; i++) {
+            int k = unit->counts != NULL ? lu_count_kind(I(a, bl->ins[i])) : -1;
+            if (k >= 0) {
+                mov_ri(a, R11, (int64_t)(intptr_t)&unit->counts[k]);
+                rex(a, 1, 0, 0, R11);
+                b1(a, 0xFF);
+                modrm_mem(a, 0, R11, 0);        /* inc qword [r11] */
+            }
             if (emit_ins(a, bl->ins[i], next, labels) < 0) {
                 free(labels);
                 return -1;

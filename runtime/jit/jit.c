@@ -78,6 +78,13 @@ static struct {
     const char *failure_names[8];
 } stats;
 
+/* -X lucifer_jit_stats: every unit with counts, and the counts of units freed. */
+static struct {
+    PyMutex lock;
+    struct lu_unit *units;
+    unsigned long freed[CNT_COUNT];
+} census;
+
 /* Exit reasons by name, for the counts and LUCIFER_JIT_DEBUG. */
 static const char reasons[EXIT_REASONS][8] = { "guard", "stress", "poll", "side", "error" };
 
@@ -219,6 +226,22 @@ free_unit(struct lu_unit *u)
     }
     free(u->consts);
     free(u->stress_counter);
+    if (u->counts != NULL) {
+        /* Its counts stay in the report's totals. */
+        PyMutex_Lock(&census.lock);
+        for (struct lu_unit **link = &census.units; *link != NULL; link = &(*link)->stats_next) {
+            if (*link == u) {
+                *link = u->stats_next;
+                break;
+            }
+        }
+        for (int k = 0; k < CNT_COUNT; k++) {
+            census.freed[k] += u->counts[k];
+        }
+        PyMutex_Unlock(&census.lock);
+        free(u->counts);
+        free(u->stats_name);
+    }
     free(u);
 }
 
@@ -250,6 +273,9 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
         return NULL;
     }
     ok = ok && lu_ssa_optimize(&f) == 0;
+    if (_PyRuntime.jit.stats) {
+        u->counts = calloc(CNT_COUNT, sizeof(unsigned long));
+    }
     if (ok && lu_regalloc(&f) == 0) {
         if (dump) {
             lu_ir_dump(&f, stderr);
@@ -285,6 +311,15 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc)
     f.consts = NULL;
     f.nconsts = 0;
     count(&stats.code_bytes, u->code_bytes);
+    if (u->counts != NULL) {
+        char name[256];
+        snprintf(name, sizeof name, "%s@%d", PyUnicode_AsUTF8(frame->code->co_qualname), pc);
+        u->stats_name = strdup(name);
+        PyMutex_Lock(&census.lock);
+        u->stats_next = census.units;
+        census.units = u;
+        PyMutex_Unlock(&census.lock);
+    }
     lu_ir_free(&f);
     lu_perf_unit(u->mem, u->code_bytes, frame->code, pc);
     return u;
@@ -788,6 +823,33 @@ lu_jit_report(void)
         if (stats.taken[i]) {
             fprintf(stderr, " %d:%lu", i, stats.taken[i]);
         }
+    }
+    fprintf(stderr, "\n");
+    /* The census: what compiled code executed, in all and per unit. */
+    unsigned long total[CNT_COUNT];
+    PyMutex_Lock(&census.lock);
+    memcpy(total, census.freed, sizeof total);
+    for (struct lu_unit *u = census.units; u != NULL; u = u->stats_next) {
+        unsigned long guards = 0, all = 0;
+        for (int k = 0; k < CNT_COUNT; k++) {
+            total[k] += u->counts[k];
+            guards += LU_COUNT_IS_GUARD(k) ? u->counts[k] : 0;
+            all += u->counts[k];
+        }
+        if (all >= 1000) {
+            fprintf(stderr, "jit: unit %s entries %lu guards %lu:", u->stats_name, u->entries, guards);
+            for (int k = 0; k < CNT_COUNT; k++) {
+                if (u->counts[k]) {
+                    fprintf(stderr, " %s %lu", lu_count_names[k], u->counts[k]);
+                }
+            }
+            fprintf(stderr, "\n");
+        }
+    }
+    PyMutex_Unlock(&census.lock);
+    fprintf(stderr, "jit: executed:");
+    for (int k = 0; k < CNT_COUNT; k++) {
+        fprintf(stderr, " %s %lu", lu_count_names[k], total[k]);
     }
     fprintf(stderr, "\n");
 }
