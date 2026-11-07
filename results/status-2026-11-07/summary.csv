@@ -90,6 +90,7 @@ web.lucifer.8.rps,1510.6,
 web.lucifer.8.p50_ms,47.815,
 web.lucifer.8.p99_ms,110.787,
 web.lucifer.8.errors,0,
+web.flask.on_over_cpython,6.688203362902159,
 conformance.kernel.plain.pass,593,583
 conformance.kernel.plain.total,593,583
 conformance.kernel.jit.pass,593,583
@@ -105,6 +106,14 @@ conformance.libtest.lucifer.pass,1993,1993
 conformance.numpytest.oracle.pass,51140,51140
 conformance.numpytest.total,52273,52273
 conformance.numpytest.lucifer.pass,50299,50299
+conformance.libtest-core.lucifer.pass,1993,
+conformance.libtest-core.oracle.pass,2157,
+conformance.libtest-core.date,2026-11-04,
+conformance.numpytest.date,2026-11-05,
+conformance.difftest.always.pass,164,
+conformance.difftest.always.total,164,
+conformance.difftest.deopt.pass,164,
+conformance.difftest.deopt.total,164,
 capi.implemented,1083,968
 capi.stubs,545,660
 capi.total,1628,1628

@@ -189,7 +189,8 @@ _keywords.*	.c.h	Argument Clinic's keyword-name table of a method, never written
 _parser.*	.c.h	Argument Clinic's argument parser of a method; _PyArg_UnpackKeywords fills its keyword tuple once under a mutex
 stats	runtime/jit/jit.c	the optimizing tier's process-wide counts (-X lucifer_jit_stats); compiled units are process-wide too
 census	runtime/jit/jit.c	the units whose execution -X lucifer_jit_stats counts, and the counts of freed ones; process-wide like the units, under its lock
-deps	runtime/jit/deps.c	compiled units' dependencies by object and the log of recent changes; process-wide like the units, under its lock
+buckets	runtime/jit/deps.c	compiled units' dependencies by the change that takes them back; process-wide like the units, each bucket under its own lock
+compiles	runtime/jit/deps.c	the tickets compiles take and how many run, so writers know when to stamp; atomic counters
 binary_names	runtime/jit/ssa_build.c	const table of BINARY_OP method names; relocated by ld.so, then read-only (RELRO)
 compare_names	runtime/jit/ssa_build.c	const table of COMPARE_OP method names; relocated by ld.so, then read-only (RELRO)
 fops.*	runtime/jit/ssa_build.c	const table of float primitives and their IR; relocated by ld.so, then read-only (RELRO)

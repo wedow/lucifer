@@ -660,7 +660,7 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    callee's frame itself and enters that unit's direct entry: no C helper,
    no eval loop, and the callee pops its frame when it returns. A function
    borrows the parameters it never rebinds from its caller.
-8. **Publication and invalidation.** Code is published by an epoch-checked
+8. **Publication and invalidation.** Code is published by a ticket-checked
    atomic store into the code object's private tail. Patching running code
    waits for a measured need. Compiled code keeps facts between polls, under
    this rule (invariant, 2026-11-07):
@@ -703,13 +703,16 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    poll. Spin loops stay correct because heap values are read every iteration.
    The running thread's own change happens inside an instruction that may run
    code; the writer has marked the unit dead before it returns, and the check
-   after that instruction leaves. A compile that read a fact just before a
-   writer changed it is not published: writers log their changes with an
-   epoch under the lock publication takes, and publication fails when a
-   change since the compile's start matches a dependency. A dict is watched
-   and its fact read inside its critical section, where every change to it
-   is made and reported, so a change the compile did not read is logged
-   after its start (the C11 argument is in `deps.c`).
+   after that instruction leaves. Dependencies hang in buckets by the change
+   that takes them back, each with its own lock; a writer whose bucket is
+   empty while no compile runs takes no lock, so writers never serialize on
+   one another unless they change the same fact. A compile that read a fact
+   just before a writer changed it is not published: a compile takes a
+   ticket before it reads, a writer that sees a compile running stamps its
+   bucket with the tickets taken, and publication fails at a bucket stamped
+   with its ticket. A dict is watched and its fact read inside its critical
+   section, where every change to it is made and reported, so a change the
+   compile did not read sees its ticket (the C11 argument is in `deps.c`).
 
 ### 6.3 What comes from the donor
 

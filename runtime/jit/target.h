@@ -173,12 +173,14 @@ int lu_count_kind(const struct lu_ins *in);
 /* Kinds that are guards: every guard_* kind and unbox (not polls and checks that the unit lives). */
 #define LU_COUNT_IS_GUARD(k) ((k) <= CNT_unbox)
 
-/* Dependencies (runtime/jit/deps.c): the epoch a compile starts at, and
-   publishing a unit's (-1: a change since the epoch may have been missed,
-   and the unit is not to be entered); then the policy's side (jit.c): a
-   dependency's unit dies, and its site keeps its guard in place. */
-uint64_t lu_jit_deps_epoch(void);
-int lu_jit_deps_publish(struct lu_unit *u, const struct lu_fdep *want, int n, uint64_t epoch0);
+/* Dependencies (runtime/jit/deps.c): a compile's ticket, taken before it
+   reads anything, and its end; publishing a unit's (-1: a change since the
+   ticket may have been missed, and the unit is not to be entered); then the
+   policy's side (jit.c): a dependency's unit dies, and its site keeps its
+   guard in place. */
+uint64_t lu_jit_deps_begin(void);
+void lu_jit_deps_end(void);
+int lu_jit_deps_publish(struct lu_unit *u, const struct lu_fdep *want, int n, uint64_t ticket);
 void lu_jit_deps_free(struct lu_unit *u);
 void lu_jit_unit_kill(struct lu_unit *u);
 void lu_jit_nohoist_set(PyCodeObject *code, int pc);

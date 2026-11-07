@@ -34,6 +34,7 @@ REFERENCE = ROOT / "results/status-reference.json"
 AWFY = ROOT / "third_party/awfy/Python"
 WEB = ROOT / "tools/bench/web/bench"
 WEB_CPUS = "1,2,4,8"
+WEB_SCORE_CPUS = "8"  # the composite speed score takes the web point that uses every core: no GIL is the point
 LUCIFER = str(Path(os.environ.get("LUCIFER", "bin/lucifer")).resolve())
 
 
@@ -100,7 +101,7 @@ def web_timings(runs):
 
 def web_check(oracle, site):
     done = run([sys.executable, str(WEB), "check", f"--run=cpython-3.14t=env PYTHONPATH={site} {oracle}",
-                f"--run=lucifer=env PYTHONPATH={site} {LUCIFER} -X lucifer_jit=on"], "TEST_PREFIX")
+                f"--run=lucifer=env PYTHONPATH={site} {LUCIFER}"], "TEST_PREFIX")
     return done.returncode == 0, done.stdout
 
 
@@ -140,15 +141,47 @@ def kernel_counts(out):
     return counts
 
 
+def difftest_counts():
+    """Difftest passes per lane of the check-jit gate just run (build/difftest/LANE/lucifer.tsv)."""
+    counts = {}
+    for path in sorted((ROOT / "build/difftest").glob("*/lucifer.tsv")):
+        statuses = [r["status"] for r in csv.DictReader(path.open(), delimiter="\t")]
+        lane = path.parent.name
+        counts[f"conformance.difftest.{lane}.pass"], counts[f"conformance.difftest.{lane}.total"] = statuses.count("PASS"), len(statuses)
+    return counts
+
+
+def numpy_date():
+    """When the numpy shards behind results/numpytest/lucifer.tsv last ran."""
+    stamps = [json.loads(p.read_text()).get("recorded_at", "") for p in (ROOT / "results/numpytest").glob("lucifer-*.json")]
+    return max(stamps)[:10] if any(stamps) else None
+
+
+def libtest_core():
+    """Lib/test passes in the core-type modules Lucifer runs, for Lucifer and the oracle."""
+    results = ROOT / "results/libtest"
+    modules = json.loads((results / "lucifer.json").read_text())["modules"]
+    status = {rt: {r["id"]: r["status"] for r in csv.DictReader((results / f"{rt}.tsv").open(), delimiter="\t")}
+              for rt in ("lucifer", "cpython-3.14.10t")}
+    core = [i for i in status["cpython-3.14.10t"] if i.startswith(tuple(f"test.{m}." for m in modules))]
+    counts = {f"conformance.libtest-core.{tag}.pass": sum(status[rt].get(i) == "PASS" for i in core)
+              for tag, rt in (("lucifer", "lucifer"), ("oracle", "cpython-3.14.10t"))}
+    # The daily never runs Lib/test: its counts date from the last committed run.
+    counts["conformance.libtest-core.date"] = run(["git", "log", "-1", "--format=%cs", "--", str(results / "lucifer.tsv")]).stdout.strip()
+    return counts
+
+
 def conformance(out):
-    metrics = kernel_counts(out)
+    metrics = {**kernel_counts(out), **difftest_counts()}
     board = run([sys.executable, "tools/scoreboard"]).stdout
     (out / "scoreboard.tsv").write_text(board)
     for row in csv.DictReader(board.splitlines(), delimiter="\t"):
-        if row["suite"] in ("difftest", "libtest", "numpytest") and row["runtime"] in ("lucifer", "cpython-3.14.10t"):
+        if row["suite"] in ("libtest", "numpytest") and row["runtime"] in ("lucifer", "cpython-3.14.10t"):
             tag = "lucifer" if row["runtime"] == "lucifer" else "oracle"
             metrics[f"conformance.{row['suite']}.{tag}.pass"] = int(row["PASS"])
             metrics[f"conformance.{row['suite']}.total"] = int(row["total"])
+    metrics["conformance.numpytest.date"] = numpy_date()
+    metrics.update(libtest_core())
     audit = run(["make", "abi-audit"]).stdout
     (out / "abi-audit.log").write_text(audit)
     m = re.search(r"functions:\s+(\d+) implemented, (\d+) stubs, of (\d+)", audit)
@@ -268,7 +301,7 @@ def main():
     problems = []
     gate_rows = gates(out)
     problems += [f"gate {t} failed" for t, (ok, _) in gate_rows.items() if not ok]
-    commands = {"on": f"{LUCIFER} -X lucifer_jit=on"}
+    commands = {"on": LUCIFER}
     times = timings(names, args.iters, commands)
     ref = json.loads(REFERENCE.read_text()) if REFERENCE.exists() else {"version": None, "best_us": {}}
     if not REFERENCE.exists():
@@ -287,7 +320,7 @@ def main():
     site = os.environ.get("WEB_SITE")
     if site:
         ok, log = web_check(oracle, site)
-        points, timing_log = web_timings({"lucifer": f"env PYTHONPATH={site} {LUCIFER} -X lucifer_jit=on"})
+        points, timing_log = web_timings({"lucifer": f"env PYTHONPATH={site} {LUCIFER}"})
         (out / "web.log").write_text(log + timing_log)
         if not ok:
             problems.append("web check failed (web.log)")
@@ -300,6 +333,8 @@ def main():
                     problems.append(f"web {runtime} at {n} CPUs: {p['errors']} errors")
                 if p.get("server_exit") is not None:
                     problems.append(f"web {runtime} at {n} CPUs: server died (exit {p['server_exit']})")
+        t, l = (metrics.get(f"web.{r}.{WEB_SCORE_CPUS}.rps") for r in ("cpython-3.14t", "lucifer"))
+        metrics["web.flask.on_over_cpython"] = t / l if t and l else None
     else:
         problems.append("web benchmark skipped: WEB_SITE is not set")
     numpy_metrics = {}
