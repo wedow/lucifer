@@ -137,10 +137,14 @@ print(sys.is_stack_trampoline_active())
     print(backend, p.returncode, out, p.stderr.strip().splitlines()[-1:])
 
 # A name with no UTF-8 form: its frame still runs, and the exception the encoding raised is not seen.
+# A function after it has a name, so that the map exists whatever else got a symbol.
 _, p = run('''
 import os, sys
 sys.activate_stack_trampoline("perf")
 eval(compile("x = 1", "bad\\ud800file", "exec"))
+def named():
+    pass
+named()
 print(os.getpid())
 ''')
 os.unlink(f"/tmp/perf-{int(p.stdout)}.map")
