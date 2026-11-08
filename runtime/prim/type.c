@@ -1874,6 +1874,16 @@ prim_type_can_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return bool_of(((PyTypeObject *)args[0])->tp_new != NULL);
 }
 
+/* type_has_sq_item(t): t has the sequence protocol's sq_item (PySequence_Check),
+   which a mapping-only extension type lacks though it has __getitem__. */
+static PyObject *
+prim_type_has_sq_item(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); TYPE_ARG(0);
+    PySequenceMethods *sq = ((PyTypeObject *)args[0])->tp_as_sequence;
+    return bool_of(sq != NULL && sq->sq_item != NULL);
+}
+
 /* type_new_layout(meta, name, bases, ns) */
 static PyObject *
 prim_type_new_layout(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -2063,7 +2073,9 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
                       owner->tp_name, tp->tp_name, tp->tp_name, owner->tp_name);
         return -1;
     }
-    while (staticbase != NULL && (staticbase->tp_flags & Py_TPFLAGS_HEAPTYPE)) {
+    /* Classes are skipped, not an extension's heap type that refuses
+       instances (Py_TPFLAGS_DISALLOW_INSTANTIATION leaves its tp_new NULL). */
+    while (staticbase != NULL && (staticbase->tp_flags & Py_TPFLAGS_HEAPTYPE) && staticbase->tp_new != NULL) {
         staticbase = staticbase->tp_base;
     }
     /* Exception types share one allocation rule: a static exception class
@@ -2501,7 +2513,7 @@ PyMethodDef lu_prim_type_methods[] = {
     PURE(static_type),
     PURE(type_lookup), PURE(type_dict), PURE(type_mro), PURE(type_bases), PURE(type_base),
     FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag), FAST(type_set_flag), FAST(type_layout), FAST(object_size),
-    FAST(type_can_new), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
+    FAST(type_can_new), FAST(type_has_sq_item), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
     FAST(type_subclasses), FAST(type_modified), PURE(is_subtype), FAST(alloc), FAST(new_check),
     PURE(type_tp_name), FAST(type_text_signature), FAST(type_static_module), PURE(size),
     PURE(truth_exact), PURE(instance_dict), FAST(instance_load), FAST(instance_store), FAST(set_class), FAST(caller_globals), FAST(super_args),
