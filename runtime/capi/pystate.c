@@ -62,6 +62,19 @@ Py_LeaveRecursiveCall(void)
     PyThreadState_Get()->py_recursion_remaining++;
 }
 
+/* The internal headers' _Py_EnterRecursiveCall calls this once the C stack
+   is past the soft limit of the bounds a thread recorded (Python/ceval.c). */
+LU_EXPORT int
+_Py_CheckRecursiveCall(PyThreadState *tstate, const char *where)
+{
+    char here;
+    if ((uintptr_t)&here >= ((struct lu_task *)tstate)->c_stack_soft_limit) {
+        return 0;
+    }
+    PyErr_Format(PyExc_RecursionError, "maximum recursion depth exceeded%s", where);
+    return -1;
+}
+
 PyInterpreterState *
 PyInterpreterState_Get(void)
 {

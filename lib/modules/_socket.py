@@ -101,9 +101,9 @@ def _unsupported(*args, **kwargs):
     raise OSError(_errno.ENOSYS, 'sockets are not supported yet')
 
 
-class socket:
+class socket(_lucifer.socket_base()):
     """socket(family=AF_INET, type=SOCK_STREAM, proto=0) -> socket object"""
-    __slots__ = ('_fd', '_timeout', '_family', '_type', '_proto')
+    __slots__ = ()
 
     def __init__(self, family=-1, type=-1, proto=-1, fileno=None):
         if fileno is None:

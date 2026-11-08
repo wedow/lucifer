@@ -126,6 +126,38 @@ build/lib/stamp: tools/freeze lib/sysconfigdata.py $(shell find third_party/cpyt
 	mkdir -p build/include && ln -sfn ../../include build/include/python3.14t   # sysconfig's INCLUDEPY
 	touch $@
 
+# Standard-library extension modules: the tag's own C (third_party/cpython/Modules),
+# built as any extension is, against include/ and the tag's internal headers, and
+# linked to the system's libraries, into lib-dynload as CPython installs them.
+DYNLOAD = $(STDLIB)/lib-dynload
+EXT_SUFFIX = .cpython-314t-x86_64-linux-gnu.so
+CPY_MODULES = third_party/cpython/Modules
+CJK_CODECS = _codecs_cn _codecs_hk _codecs_iso2022 _codecs_jp _codecs_kr _codecs_tw
+STDLIB_EXTS = _ssl _sqlite3 _bz2 pyexpat _elementtree cmath _multiprocessing _posixshmem _multibytecodec $(CJK_CODECS)
+STDLIB_EXT_FILES = $(STDLIB_EXTS:%=$(DYNLOAD)/%$(EXT_SUFFIX))
+all: $(STDLIB_EXT_FILES)
+$(DYNLOAD)/_ssl$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_ssl.c
+$(DYNLOAD)/_ssl$(EXT_SUFFIX): EXT_LIBS = -lssl -lcrypto
+$(DYNLOAD)/_sqlite3$(EXT_SUFFIX): EXT_SRC = $(wildcard $(CPY_MODULES)/_sqlite/*.c)
+$(DYNLOAD)/_sqlite3$(EXT_SUFFIX): EXT_LIBS = -lsqlite3
+$(DYNLOAD)/_bz2$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_bz2module.c
+$(DYNLOAD)/_bz2$(EXT_SUFFIX): EXT_LIBS = -lbz2
+$(DYNLOAD)/pyexpat$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/pyexpat.c
+$(DYNLOAD)/pyexpat$(EXT_SUFFIX): EXT_LIBS = -lexpat
+$(DYNLOAD)/_elementtree$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_elementtree.c
+$(DYNLOAD)/cmath$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/cmathmodule.c
+$(DYNLOAD)/cmath$(EXT_SUFFIX): EXT_LIBS = -lm
+$(DYNLOAD)/_multiprocessing$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_multiprocessing/multiprocessing.c \
+	$(CPY_MODULES)/_multiprocessing/semaphore.c
+$(DYNLOAD)/_posixshmem$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_multiprocessing/posixshmem.c
+$(DYNLOAD)/_multibytecodec$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/cjkcodecs/multibytecodec.c
+$(CJK_CODECS:%=$(DYNLOAD)/%$(EXT_SUFFIX)): EXT_SRC = $(CPY_MODULES)/cjkcodecs/$*.c
+
+$(DYNLOAD)/%$(EXT_SUFFIX): $(shell find $(CPY_MODULES) third_party/cpython/Include -type f) $(wildcard include/*.h include/cpython/*.h)
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -std=c11 -fno-strict-overflow -DNDEBUG -fvisibility=hidden -fPIC -shared -pthread \
+	  -Iinclude -Ithird_party/cpython/Include/internal -I$(CPY_MODULES)/expat -o $@ $(EXT_SRC) $(EXT_LIBS)
+
 abi-audit: bin/lucifer
 	python3 tools/abi/audit.py $(EXPORTS) bin/lucifer
 
@@ -153,7 +185,6 @@ build/tests/capi/%.so: tests/capi/%.c
 # Each EXT_PROGRAMS program prints the same stdout, stderr and exit status
 # under the oracle and bin/lucifer.
 EXT_DIR = build/tests/capi/ext
-EXT_SUFFIX = .cpython-314t-x86_64-linux-gnu.so
 EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c tests/capi/capi_monitoring.c tests/capi/capi_conv.c tests/capi/ready.c
 EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run capi_conv_run testcapi_import container_refs ready_run list_capi_run
 SLOTS_MODULES = plain noshare shared_gil create two_exec unknown negative two_create two_interp \

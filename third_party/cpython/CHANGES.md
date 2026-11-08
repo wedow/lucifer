@@ -24,6 +24,21 @@ Every future modification to this copy of CPython must be listed here, with a
 brief summary as required by clause 3 of the PSF License. No files from Lib/
 have been excluded.
 
+## Modules/ and Include/internal/
+
+`Include/internal/` is copied verbatim from the same tag. The standard
+library's extension modules below are the tag's own `Modules/` sources, copied
+verbatim with their `clinic/` headers, and built against `include/` and
+`Include/internal/` into `lib-dynload` (Makefile `STDLIB_EXTS`), linked to the
+system's OpenSSL, SQLite, bzip2 and Expat:
+
+- `_ssl.c`, `_ssl.h`, `_ssl/`, `_ssl_data_*.h`, `socketmodule.h` (`_ssl`)
+- `_sqlite/` (`_sqlite3`), `_bz2module.c` (`_bz2`), `cmathmodule.c` and `_math.h` (`cmath`)
+- `pyexpat.c` and `expat/expat_config.h` (`pyexpat`), `_elementtree.c` (`_elementtree`)
+- `_multiprocessing/` (`_multiprocessing`, `_posixshmem`)
+- `cjkcodecs/` (`_multibytecodec`, `_codecs_cn`, `_codecs_hk`, `_codecs_iso2022`,
+  `_codecs_jp`, `_codecs_kr`, `_codecs_tw`)
+
 ## include/
 
 `include/` (top level of this repository) is `Include/` from the same tag,

@@ -386,3 +386,10 @@ PyImport_ReloadModule(PyObject *m)
     Py_XDECREF(importlib);
     return r;
 }
+
+/* sys.modules[name] = module. */
+LU_EXPORT int
+_PyImport_SetModule(PyObject *name, PyObject *module)
+{
+    return PyObject_SetItem(PyImport_GetModuleDict(), name, module);
+}

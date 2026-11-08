@@ -470,25 +470,28 @@ prim_list_append(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return err < 0 ? NULL : Py_NewRef(Py_None);
 }
 
-/* list_set(list, i, item): a negative i counts from the end, as the lock sees the length. */
+/* list_set(list, i, item): a negative i counts from the end, as the lock sees the length.
+   The item replaced may be NULL: PyList_New's lists start with none. */
 static PyObject *
 prim_list_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(3); LIST(0); SSIZE(1, i);
     PyListObject *l = (PyListObject *)args[0];
     PyObject *old = NULL;
+    int stored = 0;
     Py_BEGIN_CRITICAL_SECTION(l);
     i += i < 0 ? Py_SIZE(l) : 0;
     if (0 <= i && i < Py_SIZE(l)) {
         old = l->ob_item[i];
         _Py_atomic_store_ptr_release(&l->ob_item[i], Py_NewRef(args[2]));
+        stored = 1;
     }
     Py_END_CRITICAL_SECTION();
-    if (old == NULL) {
+    if (!stored) {
         lu_err_format(PyExc_IndexError, "list assignment index out of range");
         return NULL;
     }
-    Py_DECREF(old);
+    Py_XDECREF(old);
     return Py_NewRef(Py_None);
 }
 

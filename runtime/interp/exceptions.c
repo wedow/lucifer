@@ -11,6 +11,7 @@
 #include "interp/code.h"
 #include "interp/exceptions.h"
 #include "opcode_ids.h"
+#include "frameobject.h"
 #include "prim/prim.h"
 
 #include <stddef.h>
@@ -480,6 +481,26 @@ PyTraceBack_Here(PyFrameObject *frame)
     Py_XDECREF(exc->traceback);
     exc->traceback = (PyObject *)tb;
     return 0;
+}
+
+/* A traceback entry for C code, FUNCNAME at FILENAME:LINENO, on the current
+   exception (Python/traceback.c). */
+LU_EXPORT void
+_PyTraceback_Add(const char *funcname, const char *filename, int lineno)
+{
+    PyObject *exc = PyErr_GetRaisedException();
+    PyObject *globals = PyDict_New();
+    PyCodeObject *code = globals == NULL ? NULL : PyCode_NewEmpty(filename, funcname, lineno);
+    PyFrameObject *frame = code == NULL ? NULL : PyFrame_New(PyThreadState_Get(), code, globals, NULL);
+    Py_XDECREF(globals);
+    Py_XDECREF(code);
+    if (frame == NULL) {
+        _PyErr_ChainExceptions1(exc);
+        return;
+    }
+    PyErr_SetRaisedException(exc);
+    PyTraceBack_Here(frame);
+    Py_DECREF(frame);
 }
 
 /* Exception links (Objects/exceptions.c PyException_*). */
