@@ -51,10 +51,6 @@ require that a count of the tier's does not grow with the iterations:
          subclass of str), with and without keywords: the class calls
          that reach the generic call of a class (-X lucifer_jit_stats'
          whynot type). Each calls __new__ itself.
-  closures tests/kernel/jit_inlined_closures.py, whose hot loop inlines
-         methods that make closures (functions, and cells for what they
-         capture): entries into compiled code, direct and compiled
-         calls. The closures are made in the inlined frames and inline.
   perfcalls  the compiled lane's program under -X perf, whose trampoline
          gives interpreted frames perf symbols: compiled code still calls
          compiled callees itself (they have symbols of their own): entries
@@ -149,7 +145,6 @@ GROWTH = {
     'kwcalls': ('jit_kw_calls.py', r'jit: executed:.* call_kw (\d+)', 0),
     'cmethods': ('jit_class_methods.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'newcalls': ('jit_new_calls.py', r'jit: whynot kw \d+, star \d+, type (\d+)', 0),
-    'closures': ('jit_inlined_closures.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'perfcalls': ('jit_compiled_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0, ('-X', 'perf')),
     'super': ('jit_super.py', r'jit: entries .* side (\d+)', 0),
     'inline': ('jit_inline_paths.py', r'jit: C paths list_item (\d+), tuple_item (\d+), list_store (\d+), '

@@ -954,7 +954,7 @@ supported(int op)
     case JUMP_BACKWARD_NO_INTERRUPT: case GET_ITER: case FOR_ITER: case CALL:
     case RETURN_VALUE: case STORE_SUBSCR: case COPY_FREE_VARS: case LOAD_DEREF:
     case BUILD_LIST: case BUILD_TUPLE: case CONTAINS_OP: case UNPACK_SEQUENCE:
-    case MAKE_FUNCTION: case SET_FUNCTION_ATTRIBUTE: case STORE_DEREF: case LIST_EXTEND: case MAKE_CELL:
+    case MAKE_FUNCTION: case SET_FUNCTION_ATTRIBUTE: case STORE_DEREF: case LIST_EXTEND:
     case DELETE_SUBSCR: case LOAD_FAST_AND_CLEAR: case LIST_APPEND: case SET_ADD: case MAP_ADD:
     case BUILD_SET: case BUILD_MAP: case CALL_INTRINSIC_1: case BINARY_SLICE: case STORE_SLICE:
     case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
@@ -4569,16 +4569,6 @@ translate(struct ctx *c)
         release(c, it, ownit);
         return 0;
     }
-    case MAKE_CELL: {
-        /* An inlined frame's prologue (a unit's root starts after its own):
-           the local's value, or nothing, in a new cell. */
-        lu_v arg = c->st.v[oparg] != LU_NOV ? c->st.v[oparg] : konst(c, NULL);
-        v = helper_raising(c, H_cell_new, 1, &arg, 0);
-        release(c, c->st.v[oparg], c->st.own[oparg]);
-        c->st.v[oparg] = v;
-        c->st.own[oparg] = 1;
-        return 0;
-    }
     case COPY_FREE_VARS: {
         PyObject *closure = c->func->func_closure;
         if (c->cells) {
@@ -4686,9 +4676,12 @@ translate(struct ctx *c)
     case MAKE_FUNCTION: {
         lu_v code = peek(c, 1);
         own = peek_owned(c, 1);
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
         lu_v args[2] = { code, konst(c, c->globals) };
         v = helper_raising(c, H_make_function, 2, args, 1);
-        guard_after(c, OP_GUARD_NOT_NULL, v, 1);    /* declined: a function watcher is on */
         pop(c, NULL);
         release(c, code, own);
         push(c, v, 1);

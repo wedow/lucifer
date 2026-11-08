@@ -650,9 +650,7 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    constants under the function's version, and inlines as a positional
    call. A classmethod or staticmethod loaded through a constant class, or
    through an instance of a known type, is its callable, guarded, with the
-   class as a classmethod's self. An inlined callee makes its cells and
-   closures itself (MAKE_CELL, MAKE_FUNCTION); with a function watcher
-   on, making a function is the interpreter's.
+   class as a classmethod's self.
 2. **Guards.** Type version, keys version, function version, global watcher tag,
    value range. Effects are explicit per Python operation: descriptors,
    `__eq__`/`__hash__` callbacks, C calls and allocation can all reenter.

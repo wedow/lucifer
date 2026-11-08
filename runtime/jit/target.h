@@ -274,7 +274,6 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(prim_call) \
     X(make_function) \
     X(set_function_attribute) \
-    X(cell_new) \
     X(cell_store) \
     X(get_iter) \
     X(for_iter) \

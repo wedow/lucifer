@@ -233,30 +233,15 @@ h_prim(PyObject **argv, intptr_t n)
     return ((PyCFunctionFast)(void (*)(void))f->m_ml->ml_meth)(f->m_self, argv + 1, n - 1);
 }
 
-/* MAKE_FUNCTION. A function watcher would run Python, which compiled code
-   lets no allocation run: then it declines, and the interpreter makes the
-   function. */
+/* MAKE_FUNCTION; function watchers may run Python. */
 static PyObject *
 h_make_function(PyObject *code, PyObject *globals)
 {
-    lu_watcher *watchers = PyInterpreterState_Get()->func_watchers;
-    for (int i = 0; i < LU_MAX_WATCHERS; i++) {
-        if (watchers[i] != NULL) {
-            return LU_JIT_DECLINED;
-        }
-    }
     PyObject *func = lu_function_new(code, globals);
     if (func != NULL) {
         lu_function_set_version((PyFunctionObject *)func);
     }
     return func;
-}
-
-/* MAKE_CELL in an inlined frame: a cell holding v (NULL: empty). */
-static PyObject *
-h_cell_new(PyObject *v)
-{
-    return PyCell_New(v);
 }
 
 static void
@@ -1211,8 +1196,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_super_attr] = { (void *)h_super_attr, "super_attr", REP_OBJ, IF_RAISE | IF_PY, 5 },
     [H_prim] = { (void *)h_prim, "prim", REP_OBJ, IF_RAISE | IF_SEEN, 0 },
     [H_prim_call] = { (void *)h_prim_call, "prim_call", REP_OBJ, IF_RAISE | IF_PY, 0 },
-    [H_make_function] = { (void *)h_make_function, "make_function", REP_OBJ, IF_RAISE, 2 },
-    [H_cell_new] = { (void *)h_cell_new, "cell_new", REP_OBJ, IF_RAISE, 1 },
+    [H_make_function] = { (void *)h_make_function, "make_function", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, IF_SEEN, 3 },
     [H_cell_store] = { (void *)h_cell_store, "cell_store", REP_NONE, IF_SEEN, 2 },
     [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
