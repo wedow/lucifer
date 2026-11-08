@@ -400,6 +400,15 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
     strcpy(et->_ht_tpname, spec->name);
     tp->tp_name = et->_ht_tpname;
 
+    /* A class that keeps object's attribute hooks gets object's functions
+       (lu_set_slot); a spec type has its base's unless the spec gives them,
+       so that it gets wrappers only for the slots its spec gives. */
+    if (tp->tp_getattro == PyObject_GenericGetAttr) {
+        tp->tp_getattro = base->tp_getattro;
+    }
+    if (tp->tp_setattro == PyObject_GenericSetAttr) {
+        tp->tp_setattro = base->tp_setattro;
+    }
     PyMemberDef *own_members = NULL;
     int gave_hash = 0, gave_richcompare = 0;
     for (PyType_Slot *s = spec->slots; s->slot; s++) {
