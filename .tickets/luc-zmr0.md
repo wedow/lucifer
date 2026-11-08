@@ -1,6 +1,6 @@
 ---
 id: luc-zmr0
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-11-08T18:17:46Z

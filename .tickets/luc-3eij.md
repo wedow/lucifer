@@ -1,6 +1,6 @@
 ---
 id: luc-3eij
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-11-08T18:17:46Z
