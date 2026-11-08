@@ -13,6 +13,7 @@
    lu_jit_deopt with them and the spill words, which rebuilds the frames
    from the exit's description, so no per-exit code moves values. */
 #include "jit/target.h"
+#include "jit/jit.h"
 #include "interp/perf.h"
 
 #include <stdlib.h>
@@ -878,6 +879,7 @@ make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
         fr->code = p->code;
         fr->func = p->func;
         fr->pc = p->pc;
+        fr->gen = p->gen;
         fr->nlocals = p->nlocals;
         fr->nstack = p->nstack;
         int m = p->nlocals + p->nstack;
@@ -2057,6 +2059,133 @@ inline_store_raw(struct asm_ *a, lu_v v)
     bind(a, done);
 }
 
+/* What a frame state's value is at a yield: the object it was unboxed
+   from, when it is one; a virtual box or bool; or LU_NOV for a virtual
+   value the yield does not make (a tuple, an instance, a box that may be
+   unbound), which the exit makes instead. */
+static lu_v
+yielded_value(struct asm_ *a, lu_v v)
+{
+    while (v != LU_NOV && (I(a, v)->flags & INS_VIRTUAL) && I(a, v)->b != LU_NOV) {
+        v = I(a, v)->b;
+    }
+    struct lu_ins *in = v != LU_NOV ? I(a, v) : NULL;
+    if (in == NULL || !(in->flags & INS_VIRTUAL) || in->op == OP_BOOL
+        || ((in->op == OP_BOX_INT || in->op == OP_BOX_FLOAT) && in->c == LU_NOV)) {
+        return v;
+    }
+    return LU_NOV;
+}
+
+/* A yield whose frame state holds objects, virtual boxes and bools: the
+   frame gets its locals and stack, at the YIELD_VALUE's resume point,
+   and the unit returns the value (LU_JIT_YIELD) for its caller to suspend
+   the generator with. A virtual box's raw word goes to its slot first,
+   then the boxes are made (calls, which may clobber registers), one per
+   value. Else 0, and the yield is an exit at the YIELD_VALUE, which the
+   caller runs. */
+static int
+yield_in_line(struct asm_ *a, struct lu_ins *in)
+{
+    struct lu_fs *fs = in->fs;
+    int n = fs->nlocals + fs->nstack, first = a->f->nborrowed;
+    if (fs->caller != NULL || fs->nstack < 1) {
+        return 0;
+    }
+    lu_v *vals = malloc(sizeof(lu_v) * (size_t)n);
+    int ok = 1;
+    for (int i = 0; i < n; i++) {
+        vals[i] = fs->vals[i] == LU_NOV ? LU_NOV : yielded_value(a, fs->vals[i]);
+        ok &= fs->vals[i] == LU_NOV || vals[i] != LU_NOV;
+    }
+    if (!ok) {
+        free(vals);
+        return 0;
+    }
+    /* The value yielded goes to the stack's top slot like the others,
+       and from there to the result. */
+    int slots = offsetof(struct lu_frame, localsplus);
+    for (int i = first; i < n; i++) {
+        lu_v v = vals[i];
+        struct lu_ins *vi = v != LU_NOV ? I(a, v) : NULL;
+        if (vi == NULL) {
+            store_mi(a, R15, slots + 8 * i, 0);
+        }
+        else if (!(vi->flags & INS_VIRTUAL)) {
+            to_gpr(a, RDX, v);
+            if (!fs->owned[i]) {
+                incref(a, RDX);
+            }
+            store(a, R15, slots + 8 * i, RDX);
+        }
+        else if (vi->op == OP_BOOL) {
+            struct lu_ins *bit = I(a, vi->a);
+            int done = new_label(a), yes = new_label(a);
+            if (bit->op == OP_CONST_I) {
+                mov_ri(a, RDX, (int64_t)(intptr_t)(((bit->imm ^ vi->imm) & 1) ? Py_True : Py_False));
+            }
+            else {
+                to_gpr(a, RAX, vi->a);
+                alu_ri(a, ALU_XOR, RAX, (int32_t)vi->imm);
+                b1(a, 0xA8);
+                b1(a, 1);                       /* test al, 1 */
+                jcc(a, CC_NE, yes);
+                mov_ri(a, RDX, (int64_t)(intptr_t)Py_False);
+                jmp(a, done);
+                bind(a, yes);
+                mov_ri(a, RDX, (int64_t)(intptr_t)Py_True);
+                bind(a, done);
+            }
+            store(a, R15, slots + 8 * i, RDX);  /* immortal */
+        }
+        else {
+            to_gpr(a, RDX, vi->a);              /* the raw word, boxed below */
+            store(a, R15, slots + 8 * i, RDX);
+        }
+    }
+    for (int i = first; i < n; i++) {
+        lu_v v = vals[i];
+        if (v == LU_NOV || !(I(a, v)->flags & INS_VIRTUAL) || I(a, v)->op == OP_BOOL) {
+            continue;
+        }
+        int same = first;
+        while (same < i && vals[same] != v) {
+            same++;
+        }
+        if (same < i) {                         /* one box per value */
+            load(a, RDX, R15, slots + 8 * same);
+            incref(a, RDX);
+        }
+        else if (I(a, v)->op == OP_BOX_INT) {
+            load(a, RDI, R15, slots + 8 * i);
+            call_abs(a, (void *)lu_jit_box_int);
+            mov_rr(a, RDX, RAX);
+        }
+        else {
+            sse_rm(a, 0xF2, 0x10, 0, R15, slots + 8 * i);       /* movsd xmm0, [slot] */
+            call_abs(a, (void *)lu_jit_box_float);
+            mov_rr(a, RDX, RAX);
+        }
+        store(a, R15, slots + 8 * i, RDX);
+    }
+    free(vals);
+    load(a, RDX, R15, slots + 8 * (n - 1));
+    load(a, RAX, RBP, RESULT_SLOT);
+    store(a, RAX, 0, RDX);
+    lea(a, RAX, R15, slots + 8 * (n - 1));
+    store(a, R15, offsetof(struct lu_frame, stackpointer), RAX);
+    lu_codeunit *y = lu_code_start(fs->code) + fs->pc;
+    mov_ri(a, RAX, (int64_t)(intptr_t)y);
+    store(a, R15, offsetof(struct lu_frame, last), RAX);
+    mov_ri(a, RAX, (int64_t)(intptr_t)(y + 1 + lu_opcode_caches[YIELD_VALUE]));
+    store(a, R15, offsetof(struct lu_frame, instr), RAX);
+    store_mi(a, R15, offsetof(struct lu_frame, jit_desc), 0);
+    store8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_GENERATOR);
+    mov_ri(a, RAX, LU_JIT_YIELD);
+    jmp(a, a->epilogue);
+    return 1;
+}
+
 static int
 emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
 {
@@ -2072,6 +2201,13 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         return 0;
     case OP_ENTRY_STACK:
         load(a, RAX, R15, offsetof(struct lu_frame, localsplus) + 8 * (f->code->co_nlocalsplus + (int)in->imm));
+        def_gpr(a, v, RAX);
+        return 0;
+    case OP_ENTRY_PC:
+        load(a, RAX, R15, offsetof(struct lu_frame, instr));
+        mov_ri(a, R11, (int64_t)(intptr_t)lu_code_start(f->code));
+        alu_rr(a, ALU_SUB, RAX, R11);
+        b1(a, 0x48); b1(a, 0xD1); b1(a, 0xF8);  /* sar rax, 1: code units */
         def_gpr(a, v, RAX);
         return 0;
     case OP_UNBOX_INT: {
@@ -2501,6 +2637,11 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         }
         return 0;
     }
+    case OP_STORE:
+        r = gpr_of(a, in->a, RAX);
+        y = gpr_of(a, in->b, RCX);
+        store(a, r, (int32_t)in->imm, y);
+        return 0;
     case OP_LOAD:
         r = gpr_of(a, in->a, RAX);
         if (in->imm2 == 4) {
@@ -2946,6 +3087,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         return 0;
     }
     case OP_DEOPT:
+        if (in->imm == EXIT_YIELD && yield_in_line(a, in)) {
+            return 0;
+        }
         jmp(a, exit_to(a, in->fs, (int)in->imm, 0, 0));
         return 0;
     case OP_RETURN:
@@ -2957,6 +3101,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             jcc(a, CC_NE, a->direct_return);
         }
         store(a, RAX, 0, RCX);
+        if (f->code->co_flags & LU_CO_GENERATORS) {
+            store8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_GENERATOR);  /* lu_gen_finish's */
+        }
         mov_ri(a, RAX, 1);                      /* LU_JIT_RETURN */
         jmp(a, a->epilogue);
         return 0;

@@ -51,6 +51,22 @@ struct lu_frame *lu_gen_resume(PyThreadState *ts, PyObject *gen, PyObject *arg);
 void lu_gen_suspend(PyThreadState *ts, struct lu_frame *f, int oparg);
 void lu_gen_finish(PyThreadState *ts, struct lu_frame *f);
 
+/* A generator resumed in line by compiled code (runtime/jit/ssa_build.c
+   inline_resume), whose frame compiled code holds the values of while it
+   runs: enter returns the code unit its run starts at (after the RESUME),
+   -1 when it is finished (the iteration ends) or -2 when compiled code
+   declines (not a plain generator of `code`, running, or a frame object
+   observes it), and marks it running; yielded saves where it goes on
+   (depth: the frame's values compiled code stored; resume: the RESUME's
+   code unit); finish clears the frame of a generator that returned.
+   relink makes the frame the interpreter's again when compiled code
+   leaves inside it: running above `previous`, which resumed it for
+   FOR_ITER or next_item (ret). */
+int64_t lu_gen_enter_in_line(PyObject *gen, PyObject *code);
+void lu_gen_yielded_in_line(PyObject *gen, int64_t depth, int64_t resume);
+void lu_gen_finish_in_line(PyObject *gen);
+void lu_gen_relink(PyThreadState *ts, struct lu_frame *f, struct lu_frame *previous, int ret);
+
 /* frame.clear() on a generator's frame: refused while it runs or is suspended;
    a generator not yet started is closed. */
 int lu_gen_frame_clear(struct lu_frame *f);

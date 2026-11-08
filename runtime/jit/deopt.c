@@ -39,6 +39,7 @@
    callee may have written through f_locals. */
 #include "jit/target.h"
 #include "jit/jit.h"
+#include "interp/gen.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -154,9 +155,21 @@ lu_jit_dv_free(struct lu_dv *vals, int n)
 static struct lu_frame *
 push_inlined(PyThreadState *ts, struct regs *r, struct lu_deopt_frame *fr, struct lu_frame *top)
 {
+    struct lu_frame *f;
+    if (fr->gen) {
+        /* A generator resumed in line: its own frame, whose slots compiled
+           code took, runs above its caller's FOR_ITER. */
+        PyObject *gen = top->stackpointer[-1];
+        if (fr->gen == LU_RETURN_NEXT) {
+            /* Not the caller's: its local holds it (inline_resume). */
+            top->stackpointer--;
+            Py_DECREF(gen);
+        }
+        f = &((struct lu_gen *)gen)->frame;
+        lu_gen_relink(ts, f, top, fr->gen);
+    }
     /* GUARD_DEPTH at entry left room for it. */
-    struct lu_frame *f = lu_frame_push(ts, (PyFunctionObject *)fr->func, NULL);
-    if (f == NULL) {
+    else if ((f = lu_frame_push(ts, (PyFunctionObject *)fr->func, NULL)) == NULL) {
         Py_FatalError("lucifer jit: no room to rebuild an inlined frame");
     }
     for (int i = 0; i < fr->nlocals; i++) {
@@ -223,7 +236,7 @@ lu_jit_sync(struct lu_frame *f)
     free(r.built);
     f->stackpointer = f->localsplus + fr->nlocals;
     f->instr = f->last = d->instr;
-    __atomic_store_n(&f->owner, lu_frame_owner_for(f->code), __ATOMIC_RELEASE);
+    __atomic_store_n(&f->owner, lu_frame_home(f->code), __ATOMIC_RELEASE);
     return 0;
 }
 
@@ -235,6 +248,9 @@ lu_jit_frames_push(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     struct lu_frame *top = root;
     for (int k = 1; k < d->nframes; k++) {
         struct lu_deopt_frame *fr = &d->frames[k];
+        if (fr->gen) {
+            Py_FatalError("lucifer jit: a call from a generator resumed in line");
+        }
         struct lu_frame *f = lu_frame_push_lent(ts, (PyFunctionObject *)fr->func);
         if (f == NULL) {
             Py_FatalError("lucifer jit: no room for an inlined frame");
@@ -325,7 +341,8 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     for (int k = 0; k < d->nframes; k++) {
         nvals += d->frames[k].nlocals + d->frames[k].nstack;
     }
-    PyObject **old = malloc(sizeof(PyObject *) * (size_t)nvals);
+    PyObject *few[64];          /* most exits (every yield) release a few */
+    PyObject **old = nvals <= 64 ? few : malloc(sizeof(PyObject *) * (size_t)nvals);
     int nold = 0;
     /* A walker that wrote the locals (lu_jit_sync) made the slots the
        frame's: compiled code's own references go. */
@@ -346,7 +363,7 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     root->stackpointer = sp;
     root->instr = root->last = lu_code_start(fr->code) + fr->pc;
     root->jit_desc = NULL;
-    root->owner = lu_frame_owner_for(root->code);
+    root->owner = lu_frame_home(root->code);
     if (root->jit_lent) {
         Py_INCREF(root->func);  /* the interpreter's frame holds its function */
         root->jit_lent = 0;
@@ -418,6 +435,8 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     for (int i = 0; i < nold; i++) {
         Py_XDECREF(old[i]);
     }
-    free(old);
+    if (old != few) {
+        free(old);
+    }
     return d->error ? LU_JIT_ERROR : LU_JIT_DEOPT;
 }

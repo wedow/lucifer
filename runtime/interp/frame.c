@@ -411,7 +411,7 @@ lu_frame_clear(PyFrameObject *frame)
 {
     struct lu_frameobj *fo = FO(frame);
     struct lu_frame *f = fo->f_frame;
-    if (f->owner == LU_FRAME_GENERATOR) {
+    if (lu_frame_in_gen(f)) {
         return lu_gen_frame_clear(f);
     }
     if (f->owner != LU_FRAME_FRAME_OBJECT) {
@@ -553,7 +553,7 @@ static PyObject *
 frame_get_generator(PyObject *op, void *closure)
 {
     struct lu_frame *f = FO(op)->f_frame;
-    return Py_NewRef(f->owner == LU_FRAME_GENERATOR ? (PyObject *)lu_gen_of(f) : Py_None);
+    return Py_NewRef(lu_frame_in_gen(f) ? (PyObject *)lu_gen_of(f) : Py_None);
 }
 
 static PyMemberDef frame_members[] = {

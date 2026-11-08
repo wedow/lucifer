@@ -663,7 +663,28 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    counted in the carrier's GC allocation batch. A hook that sees allocations (an allocator
    or a reference tracer) sends every allocation to C. `-X
    lucifer_jit_stats` counts the C paths taken.
-5. **Entry.** OSR at `JUMP_BACKWARD`.
+5. **Entry.** OSR at `JUMP_BACKWARD`. A generator, coroutine or async
+   generator compiles as one unit with an entry per resume point (after
+   each `RESUME`), picked by the frame's instruction; each entry reads the
+   frame's locals and its stack at that point. Its locals are in registers
+   between yields and in the generator's frame across one: a yield stores
+   them there and returns the value for the caller to suspend the
+   generator with, and the frame is the generator's again (owner
+   `LU_FRAME_GENERATOR`). The interpreter's `RESUME` enters the unit, and
+   compiled code resuming a generator (`FOR_ITER`, `SEND`, `gen_send` for
+   `next()` and `send()`) enters it directly. A generator going on inside
+   `yield from` or `await` stays in the eval loop, which runs the
+   delegation chain by switching frames; a unit per level would pay an
+   entry and a yield for each (pyperformance generators, a tree walked by
+   recursive `yield from`: 1.43x master's time when it did). A call of a generator function
+   from compiled code makes the generator without the interpreter. A
+   generator whose code the builder knows (a call of a known generator
+   function, or of a function the code made, as a generator expression is)
+   and whose body runs no Python is resumed in line at the `FOR_ITER` or
+   `next_item` that steps it: its body becomes blocks of the consumer, its
+   locals load from the frame at entry and store back at a yield, and an
+   exit inside it makes the generator's own frame the running one above
+   the consumer.
 6. **Deopt.** At an unexecuted bytecode boundary (the donor's BEFORE-state rule,
    `optimizer_ssa_emit.inc` `opt_ssa_deopt`). Reconstruct interpreter frames,
    including inlined kernel frames, then materialize virtual objects once with

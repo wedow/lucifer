@@ -477,8 +477,8 @@ items_contain(PyObject *const *items, Py_ssize_t n, PyObject *item)
    lu_dict_find_native decides it: 1, 0, or -1 for the kernel. A list is
    scanned in its critical section, which its mutators hold: a resize
    replaces the array and the size apart. */
-static int
-contains_native(PyObject *container, PyObject *item)
+int
+lu_contains_native(PyObject *container, PyObject *item)
 {
     PyObject *value;
     int found = -1;
@@ -1267,7 +1267,13 @@ op_RESUME: {
     if ((oparg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM) {
         POLL();
     }
-    if (oparg == 0 && lu_jit_on() && lu_jit_call_hot(code)) {
+    /* A call, or a generator going on after a yield. One going on inside
+       `yield from` or `await` stays here: this loop runs the delegation
+       chain by switching frames, which a unit per level would pay a
+       nested entry and a yield for. */
+    if ((oparg == 0 || ((code->co_flags & LU_CO_GENERATORS)
+                        && (oparg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM))
+        && lu_jit_on() && lu_jit_call_hot(code)) {
         goto jit_enter;
     }
     DISPATCH();
@@ -1776,7 +1782,7 @@ resume_linked:
             ERROR_IF(hook_result == NULL);
             uint8_t r = callee->ret;
             if (lu_gen_of(callee)->frame_state >= LU_GEN_COMPLETED) {
-                if (r == LU_RETURN_FOR_ITER) {
+                if (r == LU_RETURN_FOR_ITER || r == LU_RETURN_NEXT) {
                     Py_DECREF(hook_result);
                     hook_result = LU_MISSING;
                 }
@@ -1846,7 +1852,7 @@ return_frame: {
     int from_builtin = (code->co_flags & LU_CO_KERNEL) != 0;
     if (frame->owner == LU_FRAME_GENERATOR) {
         lu_gen_finish(ts, frame);
-        if (ret == LU_RETURN_FOR_ITER) {
+        if (ret == LU_RETURN_FOR_ITER || ret == LU_RETURN_NEXT) {
             Py_DECREF(retval);
             retval = LU_MISSING;
         }
@@ -1888,9 +1894,11 @@ op_INSTRUMENTED_YIELD_VALUE: {
         DISPATCH();
     }
 }
-op_YIELD_VALUE: {
+op_YIELD_VALUE:
     retval = POP();
     SAVE_FRAME();
+yield_frame: {
+    /* The frame is saved at its resume point; YIELD_VALUE's oparg. */
     struct lu_frame *caller = frame->previous;
     uint8_t ret = frame->ret;
     lu_gen_suspend(ts, frame, oparg);
@@ -2673,6 +2681,10 @@ jit_enter:
         frame = (struct lu_frame *)ts->current_frame;
         LOAD_FRAME();
         goto error;
+    case LU_JIT_YIELD:
+        retval = result;
+        oparg = frame->last->op.arg;
+        goto yield_frame;
     }
     Py_UNREACHABLE();
 
@@ -3460,7 +3472,7 @@ op_UNARY_INVERT: {
 op_CONTAINS_OP: {
     /* item, container -- bool; oparg 1 is `not in` */
     SKIP_CACHES();
-    int found = contains_native(sp[-1], sp[-2]);
+    int found = lu_contains_native(sp[-1], sp[-2]);
     if (found >= 0) {
         PyObject *item = sp[-2], *container = sp[-1];
         sp -= 2;

@@ -38,6 +38,7 @@
    to the handler, whose blocks are reachable for that (catch_here). */
 #include "jit/target.h"
 #include "interp/exceptions.h"
+#include "interp/gen.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -49,7 +50,8 @@
 #define INLINE_MAX_DEPTH 4
 #define INLINE_MAX_TOTAL 3000
 
-#define INTRINSIC_LIST_TO_TUPLE 6   /* pycore_intrinsics.h */
+#define INTRINSIC_ASYNC_GEN_WRAP 4  /* pycore_intrinsics.h */
+#define INTRINSIC_LIST_TO_TUPLE 6
 
 struct bstate {
     lu_v *v;
@@ -118,6 +120,11 @@ struct ctx {
     lu_v code_value;
     int made;                   /* a frame compiled code never ran, made to be an inlined call's
                                    caller (class_call): nothing leaves at its own boundaries */
+    int *entries;               /* a resume unit's: each resume point, and its stack depth */
+    int *entry_depth;
+    int nentries;
+    int gen;                    /* a generator's frame resumed in line (inline_resume): how it returns */
+    lu_v genv;                  /* that generator */
 };
 
 /* Per-code JIT state the builder consults: pcs not to speculate at. */
@@ -203,6 +210,7 @@ snapshot(struct ctx *c, int pc)
     struct lu_fs *fs = lu_ir_alloc(c->f, sizeof(struct lu_fs));
     int n = c->nlocals + c->st.sp;
     fs->caller = c->caller;
+    fs->gen = (uint8_t)c->gen;
     fs->code = c->code;
     fs->func = (PyObject *)c->func;
     fs->pc = pc;
@@ -914,7 +922,8 @@ supported(int op)
     case BUILD_SET: case BUILD_MAP: case CALL_INTRINSIC_1: case BINARY_SLICE: case STORE_SLICE:
     case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
     case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case DELETE_FAST:
-    case LOAD_SUPER_ATTR:
+    case LOAD_SUPER_ATTR: case YIELD_VALUE: case SEND: case END_SEND: case GET_AWAITABLE:
+    case GET_YIELD_FROM_ITER: case GET_AITER: case GET_ANEXT:
         return 1;
     default:
         return 0;
@@ -931,14 +940,15 @@ static int
 is_branch(int op)
 {
     return op == POP_JUMP_IF_FALSE || op == POP_JUMP_IF_TRUE || op == POP_JUMP_IF_NONE
-        || op == POP_JUMP_IF_NOT_NONE || op == FOR_ITER;
+        || op == POP_JUMP_IF_NOT_NONE || op == FOR_ITER || op == SEND;
 }
 
-/* Instructions after which control never falls through. */
+/* Instructions after which control never falls through (in compiled
+   code: a yield leaves it, and the frame goes on at a resume point). */
 static int
 terminal(int op)
 {
-    return op == RETURN_VALUE || op == RAISE_VARARGS || op == RERAISE;
+    return op == RETURN_VALUE || op == RAISE_VARARGS || op == RERAISE || op == YIELD_VALUE;
 }
 
 static int
@@ -959,11 +969,15 @@ scan(struct ctx *c, int entry)
     char *reach = calloc((size_t)n + 1, 1), *start = calloc((size_t)n + 1, 1);
     char *ins = calloc((size_t)n + 1, 1), *exc = calloc((size_t)n + 1, 1);
     int *preds = calloc((size_t)n + 1, sizeof(int));
-    int *work = malloc(sizeof(int) * ((size_t)n + 1) * 3), nw = 0;
+    int *work = malloc(sizeof(int) * (((size_t)n + 1) * 3 + (size_t)c->nentries)), nw = 0;
     c->blkat = lu_ir_alloc(c->f, sizeof(int) * ((size_t)n + 1));
     start[entry] = 1;
     preds[entry] = 1;
     work[nw++] = entry;
+    for (int i = 0; i < c->nentries; i++) {
+        start[c->entries[i]] = 1;
+        work[nw++] = c->entries[i];
+    }
     for (;;) {
         while (nw > 0) {
             int pc = work[--nw];
@@ -1557,12 +1571,13 @@ not_inlinable(struct ctx *c, PyFunctionObject *fn, int nargs)
 
 static int
 build_ctx(struct ctx *c, int entry_block);
+static int resume_points(struct ctx *c);
 
 /* What an attempt that may be undone has emitted from: an undo drops the
    blocks, instructions and constants made since, and the types proved
    since (the ids are reused). */
 struct mark {
-    int cur, nins, nblocks, nconsts, cur_nins, nsucc, inlined, sites, cold;
+    int cur, nins, nblocks, nconsts, cur_nins, nsucc, inlined, sites, cold, ngens;
     PyTypeObject **known;
     int *known_block, nknown;
 };
@@ -1572,7 +1587,7 @@ mark_take(struct ctx *c, struct mark *m)
 {
     struct lu_func *f = c->f;
     *m = (struct mark){ c->cur, f->nins, f->nblocks, f->nconsts, f->blocks[c->cur].nins,
-                        f->blocks[c->cur].nsucc, f->ninlined, f->sites, f->cold, NULL, NULL, 0 };
+                        f->blocks[c->cur].nsucc, f->ninlined, f->sites, f->cold, f->ngens, NULL, NULL, 0 };
     m->nknown = f->nins < f->capknown ? f->nins : f->capknown;
     if (m->nknown > 0) {
         m->known = malloc(sizeof(PyTypeObject *) * (size_t)m->nknown);
@@ -1615,6 +1630,7 @@ mark_undo(struct ctx *c, struct mark *m)
     f->ninlined = m->inlined;
     f->sites = m->sites;
     f->cold = m->cold;
+    f->ngens = m->ngens;
     c->cur = m->cur;
     f->blocks[m->cur].nins = m->cur_nins;
     f->blocks[m->cur].nsucc = m->nsucc;
@@ -1778,6 +1794,243 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *
     mark_free(&m);
     free(k);
     return ok;
+}
+
+/* --- generators resumed in line --- */
+
+/* The code a value that is a generator runs, when the builder knows it
+   (made by a call of a known generator function), and its function or NULL. */
+static PyCodeObject *
+gen_made(struct ctx *c, lu_v v, PyFunctionObject **fn)
+{
+    for (int i = 0; v != LU_NOV && i < c->f->ngens; i++) {
+        if (c->f->gens[i].v == v) {
+            *fn = c->f->gens[i].func;
+            return c->f->gens[i].code;
+        }
+    }
+    return NULL;
+}
+
+static void
+note_gen_made(struct ctx *c, lu_v v, PyCodeObject *code, PyFunctionObject *fn)
+{
+    struct lu_func *f = c->f;
+    if (f->ngens == f->capgens) {
+        f->capgens = f->capgens ? 2 * f->capgens : 8;
+        struct lu_gen_made *g = lu_ir_alloc(f, sizeof(struct lu_gen_made) * (size_t)f->capgens);
+        memcpy(g, f->gens, sizeof(struct lu_gen_made) * (size_t)f->ngens);
+        f->gens = g;
+    }
+    f->gens[f->ngens++] = (struct lu_gen_made){ v, code, fn };
+    set_known(c, v, &PyGen_Type);
+}
+
+/* Whether a local of c holds v. */
+static int
+local_holds(struct ctx *c, lu_v v)
+{
+    for (int i = 0; i < c->nlocals; i++) {
+        if (c->st.v[i] == v) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The first instruction from `first` on that may run Python or let a
+   walker see frames, or LU_NOV: a generator resumed in line is not a real
+   frame until an exit makes it one, so its body makes no such call. A
+   release that may run a finalizer is allowed, as it is in any inlined
+   frame (no frame is pushed for it). */
+static lu_v
+calls_out(struct lu_func *f, lu_v first)
+{
+    for (lu_v v = first; v < f->nins; v++) {
+        struct lu_ins *in = &f->ins[v];
+        int flags = in->op == OP_HELPER ? lu_helpers[in->imm].flags : 0;
+        if ((in->flags & INS_DEAD) || (in->op == OP_HELPER && in->imm == H_gen_finish)) {
+            continue;
+        }
+        if ((flags & (IF_PY | IF_SEEN)) || (in->op == OP_TRUTH && in->imm != 1)) {
+            return v;
+        }
+    }
+    return LU_NOV;
+}
+
+/* The next value of the generator `it`, which runs `co`, as FOR_ITER and
+   next_item take it: the generator's body built in line from each of its
+   resume points, its frame's values loaded from the generator's frame at
+   entry and stored back at a yield, so that between yields they are in
+   registers (DESIGN 6.2 step 7). A yield's value, or MISSING once it
+   returns or had finished; the generator's own checks (it may be another
+   object, running, or observed by a frame object) leave before the
+   instruction. Generators whose bodies run Python are not resumed in line
+   (calls_out). LU_NOV with nothing emitted when it does not compile. */
+static lu_v
+inline_resume(struct ctx *c, lu_v it, PyCodeObject *co, PyFunctionObject *fn, int ret)
+{
+    struct lu_func *f = c->f;
+    if (c->cur < 0 || c->depth + 1 >= INLINE_MAX_DEPTH || f->ninlined > INLINE_MAX_TOTAL
+        || (co->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE))
+        || !(co->co_flags & CO_GENERATOR) || co->_co_monitoring != NULL || lu_jit_noinline(co)
+        || lu_jit_nospec(c->code, c->pc)) {
+        return LU_NOV;
+    }
+    for (struct ctx *p = c; p != NULL; p = p->parent) {
+        if (p->code == co) {
+            return LU_NOV;
+        }
+    }
+    struct mark m;
+    mark_take(c, &m);
+    lu_v first = f->nins;
+    struct ctx *k = calloc(1, sizeof(struct ctx));
+    k->f = f;
+    k->parent = c;
+    k->code = co;
+    k->func = fn;
+    k->globals = fn != NULL ? fn->func_globals : c->globals;
+    k->builtins = fn != NULL ? fn->func_builtins : c->builtins;
+    k->ncode = (int)Py_SIZE(co);
+    k->nlocals = co->co_nlocalsplus;
+    k->nvars = k->nlocals + co->co_stacksize + 1;
+    k->depth = c->depth + 1;
+    k->island = c->island;
+    k->gen = ret;
+    k->genv = it;
+    k->fixed = lu_ir_alloc(f, (size_t)k->nlocals + 1);
+    memset(k->fixed, 0, (size_t)k->nlocals + 1);
+    /* The caller is at FOR_ITER's end, the generator still on its stack;
+       or past next_item's call, its operands gone, the generator (which a
+       local holds) on the stack for an exit to find (deopt.c). */
+    if (ret == LU_RETURN_NEXT) {
+        struct bstate saved;
+        state_copy(c, &saved, &c->st);
+        c->st.sp -= 3;
+        push(c, it, 0);
+        k->caller = snapshot(c, c->next);
+        c->st = saved;
+    }
+    else {
+        k->caller = snapshot(c, c->next);
+    }
+    lu_v r = LU_NOV;
+    int ok = resume_points(k) == 0 && scan(k, k->entries[0]) == 0;
+    if (ok) {
+        count_fallthrough(k);
+        k->cont = lu_ir_block(f);
+        for (int j = 0; j < k->nentries; j++) {
+            k->bb[k->blkat[k->entries[j]]].npreds++;
+        }
+        lu_v args[2] = { it, konst(c, (PyObject *)co) };
+        lu_v at = helper(c, H_gen_enter, 2, args);
+        guard(c, OP_GUARD_BIT, emit(c, OP_CMP_I, REP_BIT, at, const_i(c, -2), LU_NOV, Py_NE), 1);
+        /* Finished: the iteration ends. */
+        lu_v fin = emit(c, OP_CMP_I, REP_BIT, at, const_i(c, 0), LU_NOV, Py_LT);
+        lu_v missing = konst(c, LU_MISSING);
+        int run = lu_ir_block(f);
+        lu_ir_edge(f, c->cur, k->cont);
+        lu_ir_edge(f, c->cur, run);
+        emit(c, OP_BRANCH, REP_NONE, fin, LU_NOV, LU_NOV, 0);
+        k->rets = malloc(sizeof(lu_v) * 4);
+        k->caprets = 4;
+        k->rets[k->nrets++] = missing;
+        c->cur = run;
+        int slots = (int)(offsetof(struct lu_gen, frame) + offsetof(struct lu_frame, localsplus));
+        for (int j = 0; j < k->nentries; j++) {
+            int other = -1, e = k->entries[j];
+            if (j < k->nentries - 1) {
+                lu_v bit = emit(c, OP_CMP_I, REP_BIT, at, const_i(c, e), LU_NOV, Py_EQ);
+                int here = lu_ir_block(f);
+                other = lu_ir_block(f);
+                lu_ir_edge(f, c->cur, here);
+                lu_ir_edge(f, c->cur, other);
+                emit(c, OP_BRANCH, REP_NONE, bit, LU_NOV, LU_NOV, 0);
+                c->cur = here;
+            }
+            /* The frame's values move from its slots to compiled code; a
+               resume after a yield pushes the None it is sent. */
+            k->cur = c->cur;
+            k->pc = e;
+            state_init(k, &k->st);
+            for (int i = 0; i < k->nlocals; i++) {
+                k->st.v[i] = emit(k, OP_LOAD, REP_OBJ, it, LU_NOV, LU_NOV, slots + 8 * i);
+                k->st.own[i] = 1;
+            }
+            for (int d = 0; d < k->entry_depth[j] - (e != k->entries[0]); d++) {
+                push(k, emit(k, OP_LOAD, REP_OBJ, it, LU_NOV, LU_NOV, slots + 8 * (k->nlocals + d)), 1);
+            }
+            if (e != k->entries[0]) {
+                push(k, konst(c, Py_None), 0);
+            }
+            edge_to(k, e);
+            emit(k, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+            c->cur = other;
+        }
+        f->ninlined++;
+        ok = build_ctx(k, k->blkat[k->entries[0]]) == 0 && !k->failed;
+        lu_v out = ok ? calls_out(f, first) : LU_NOV;
+        if (out != LU_NOV) {
+            struct lu_ins *in = I(c, out);
+            k->why = in->op == OP_HELPER ? lu_helpers[in->imm].name : lu_op_names[in->op];
+            ok = 0;
+        }
+    }
+    if (ok && lu_frame_floor(co) + k->depth > f->room) {
+        f->room = lu_frame_floor(co) + k->depth;
+    }
+    if (ok) {
+        c->cur = k->cont;
+        r = lu_ir_emit(f, k->cont, OP_PHI, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, -1);
+        I(c, r)->nargs = k->nrets;
+        I(c, r)->args = malloc(sizeof(lu_v) * (size_t)k->nrets);
+        memcpy(I(c, r)->args, k->rets, sizeof(lu_v) * (size_t)k->nrets);
+        wire_pending(c, k);
+    }
+    else {
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: not resumed in line %s: %s\n", PyUnicode_AsUTF8(co->co_qualname),
+                    k->why != NULL ? k->why : f->fail != NULL ? f->fail : "it calls out");
+        }
+        mark_undo(c, &m);
+    }
+    mark_free(&m);
+    free(k->pend);
+    free(k->rets);
+    free(k);
+    return r;
+}
+
+/* A yield of a generator resumed in line: its frame's values go back to
+   its slots (each slot takes a reference), it saves where it goes on, and
+   the value is the resumption's. */
+static int
+gen_yield(struct ctx *c)
+{
+    int own;
+    lu_v v = pop(c, &own);
+    v = take(c, v, own);
+    int slots = (int)(offsetof(struct lu_gen, frame) + offsetof(struct lu_frame, localsplus));
+    for (int i = 0; i < c->nlocals + c->st.sp; i++) {
+        lu_v w = c->st.v[i];
+        if (w != LU_NOV && !c->st.own[i]) {
+            incref(c, w);
+        }
+        emit(c, OP_STORE, REP_NONE, c->genv, w != LU_NOV ? w : konst(c, NULL), LU_NOV, slots + 8 * i);
+    }
+    lu_v args[3] = { c->genv, const_i(c, c->nlocals + c->st.sp), const_i(c, c->next) };
+    helper(c, H_gen_yielded, 3, args);
+    if (c->nrets == c->caprets) {
+        c->caprets *= 2;
+        c->rets = realloc(c->rets, sizeof(lu_v) * (size_t)c->caprets);
+    }
+    c->rets[c->nrets++] = v;
+    lu_ir_edge(c->f, c->cur, c->cont);
+    emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+    c->cur = -1;
+    return 0;
 }
 
 /* --- attributes and globals --- */
@@ -3092,8 +3345,21 @@ call(struct ctx *c)
     }
     const char *prim = primitive_name(kc);
     if (kc != NULL && PyCFunction_Check(kc) && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_FRAME)) {
-        unsupported(c);         /* it hands the interpreter a frame to run */
-        return -1;
+        /* It hands the interpreter a frame to run: a generator's resumption
+           runs here; anything else leaves. */
+        if (self != LU_NOV || n != 2 || strcmp(((PyCFunctionObject *)kc)->m_ml->ml_name, "gen_send") != 0) {
+            unsupported(c);
+            return -1;
+        }
+        if (!opaque_call(c)) {
+            return -1;
+        }
+        lu_v hargs[3] = { callable, peek(c, 2), peek(c, 1) };
+        lu_v r = helper_raising(c, H_gen_send, 3, hargs, n + 2);
+        guard_after(c, OP_GUARD_NOT_NULL, r, 1);    /* declined: the interpreter resumes it */
+        pop_call(c, n);
+        push(c, r, 1);
+        return 0;
     }
     lu_v r = LU_NOV;
     int rown = 1;
@@ -3156,6 +3422,31 @@ call(struct ctx *c)
         return 0;
     }
     if (klass && class_call(c, (PyTypeObject *)kc, init, version, args, own, nargs)) {
+        return 0;
+    }
+    PyFunctionObject *gfn;
+    PyCodeObject *gco;
+    if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
+        && PyUnicode_CompareWithASCIIString(fn->func_qualname, "next_item") == 0
+        && (gco = gen_made(c, args[0], &gfn)) != NULL && local_holds(c, args[0])) {
+        /* The iteration step of a generator whose code is known: resumed in line. */
+        lu_v next = inline_resume(c, args[0], gco, gfn, LU_RETURN_NEXT);
+        if (next != LU_NOV) {
+            pop_call(c, n);
+            push(c, next, 1);
+            return 0;
+        }
+    }
+    if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
+        && PyUnicode_CompareWithASCIIString(fn->func_qualname, "next_item") == 0) {
+        /* next_item is FOR_ITER's step, which C takes for the iterators it
+           knows (a generator resumed in its own unit), else the kernel's. */
+        if (!opaque_call(c)) {
+            return -1;
+        }
+        r = helper_raising(c, H_for_iter, 1, args, n + 2);
+        pop_call(c, n);
+        push(c, r, 1);
         return 0;
     }
     if (fn != NULL && bound == NULL && fn->func_code != NULL
@@ -3248,6 +3539,22 @@ call(struct ctx *c)
     if (!opaque_call(c)) {
         return -1;
     }
+    /* A call of a generator function whose code is known (a function the
+       code was compiled for, or one this code made) makes a generator of
+       that code. */
+    struct lu_ins *made = I(c, callable);
+    gfn = NULL;
+    gco = self != LU_NOV ? NULL
+        : fn != NULL && bound == NULL && PyCode_Check(fn->func_code) && fn->func_version >= 2
+          ? (gfn = fn, (PyCodeObject *)fn->func_code)
+        : made->op == OP_HELPER && made->imm == H_make_function && I(c, made->args[0])->op == OP_CONST
+          ? (PyCodeObject *)(intptr_t)I(c, made->args[0])->imm : NULL;
+    if (gco != NULL && (gco->co_flags & (LU_CO_GENERATORS | CO_ITERABLE_COROUTINE | LU_CO_KERNEL)) != CO_GENERATOR) {
+        gco = NULL;
+    }
+    if (gco != NULL && gfn != NULL) {
+        guard_func(c, gfn);     /* its code is what the call runs */
+    }
     lu_v hargs[34];
     hargs[0] = callable;
     hargs[1] = self != LU_NOV ? self : konst(c, NULL);
@@ -3265,6 +3572,9 @@ call(struct ctx *c)
     guard_after(c, OP_GUARD_NOT_NULL, r, 1);
     pop_call(c, n);
     push(c, r, 1);
+    if (gco != NULL) {
+        note_gen_made(c, r, gco, gfn);
+    }
     return 0;
 }
 
@@ -3275,6 +3585,20 @@ for_iter(struct ctx *c)
 {
     lu_v it = peek(c, 1);
     int exit_pc = jump_target(FOR_ITER, c->oparg, c->next);
+    PyFunctionObject *gfn;
+    PyCodeObject *gco = gen_made(c, I(c, it)->op == OP_PHI && I(c, it)->nargs > 0 ? I(c, it)->args[0] : it, &gfn);
+    lu_v v = gco != NULL ? inline_resume(c, it, gco, gfn, LU_RETURN_FOR_ITER) : LU_NOV;
+    if (v != LU_NOV) {
+        lu_v done = emit(c, OP_IS, REP_BIT, v, konst(c, LU_MISSING), LU_NOV, 0);
+        normalize(c);
+        edge_to(c, exit_pc);
+        int body = lu_ir_block(c->f);
+        lu_ir_edge(c->f, c->cur, body);
+        emit(c, OP_BRANCH, REP_NONE, done, LU_NOV, LU_NOV, 0);
+        c->cur = body;
+        push(c, v, 1);
+        return 0;
+    }
     int kind = feedback(c, c->cache);
     if (lu_jit_nospec(c->code, c->pc)) {
         kind = LU_ITER_OTHER;
@@ -3290,7 +3614,7 @@ for_iter(struct ctx *c)
         kind = guessed;
     }
     int range = known_type(c, it) == &PyRangeIter_Type || kind == LU_ITER_RANGE;
-    lu_v done, v;
+    lu_v done;
     if (range) {
         guard_type(c, it, &PyRangeIter_Type);
         done = emit(c, OP_RITER_DONE, REP_BIT, it, LU_NOV, LU_NOV, 0);
@@ -3508,6 +3832,9 @@ translate(struct ctx *c)
         v = peek(c, 1);
         own = peek_owned(c, 1);
         PyTypeObject *t = known_type(c, v);
+        if (t == &PyGen_Type) {
+            return 0;           /* a generator is its own iterator */
+        }
         int nbase, noparg, nop;
         if (t == NULL && c->next < c->ncode && !lu_jit_nospec(c->code, c->pc)
             && (decode(c, c->next, &nbase, &noparg, &nop), nbase == FOR_ITER)) {
@@ -3558,6 +3885,110 @@ translate(struct ctx *c)
         }
         return 0;
     }
+    case SEND: {
+        /* A generator or coroutine receiver is resumed (any other declines,
+           and the interpreter sends to it): what it yields stays on the
+           stack for the YIELD_VALUE after; what it returns leaves the
+           yield-from loop. Generator code is never inlined. */
+        if (!root_only(c) || lu_jit_nospec(c->code, c->pc)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v first = c->f->nins;
+        lu_v recv = peek(c, 2);
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        lu_v args[2] = { recv, v };
+        w = helper_raising(c, H_send, 2, args, 1);
+        guard_after(c, OP_GUARD_NOT_NULL, w, 1);
+        lu_v done = helper(c, H_gen_done, 1, &recv);
+        pop(c, NULL);
+        release(c, v, own);
+        push(c, w, 1);
+        /* Each way on has the frames guard after the call, at its own place. */
+        int returned = lu_ir_block(c->f), yielded = lu_ir_block(c->f), next = c->next;
+        lu_ir_edge(c->f, c->cur, returned);
+        lu_ir_edge(c->f, c->cur, yielded);
+        emit(c, OP_BRANCH, REP_NONE, done, LU_NOV, LU_NOV, 0);
+        struct bstate saved;
+        state_copy(c, &saved, &c->st);
+        c->cur = returned;
+        c->next = jump_target(SEND, oparg, next);
+        frames_guard(c, first);
+        jump_to(c, c->next);
+        c->next = next;
+        c->st = saved;
+        c->cur = yielded;
+        frames_guard(c, first);
+        c->observed = 0;
+        return 0;
+    }
+    case END_SEND: {
+        int ownr;
+        v = pop(c, &own);
+        w = pop(c, &ownr);
+        release(c, w, ownr);
+        push(c, v, own);
+        return 0;
+    }
+    case GET_AWAITABLE: case GET_YIELD_FROM_ITER: {
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        lu_v args[2] = { v, const_i(c, c->base == GET_AWAITABLE ? oparg
+                                       : (c->code->co_flags & (CO_COROUTINE | CO_ITERABLE_COROUTINE)) != 0) };
+        w = helper_raising(c, c->base == GET_AWAITABLE ? H_get_awaitable : H_get_yield_from_iter, 2, args, 1);
+        pop(c, NULL);
+        release(c, v, own);
+        push(c, w, 1);
+        return 0;
+    }
+    case GET_AITER: case GET_ANEXT: {
+        /* The kernel's: GET_AITER replaces the iterable, GET_ANEXT pushes
+           the awaitable above the iterator. */
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        int anext = c->base == GET_ANEXT;
+        w = helper_raising(c, anext ? H_get_anext : H_get_aiter, 1, &v, anext ? 0 : 1);
+        if (!anext) {
+            pop(c, NULL);
+            release(c, v, own);
+        }
+        push(c, w, 1);
+        return 0;
+    }
+    case YIELD_VALUE: {
+        /* The generator yields: compiled code leaves its frame at the
+           YIELD_VALUE, which the caller runs (the interpreter's loop, or
+           lu_jit_resume). A resume unit goes on from the next resume
+           point, whose entry reads the stack as it is here, the sent value
+           for the yielded one. */
+        if (c->gen) {
+            return gen_yield(c);
+        }
+        if (c->parent != NULL) {
+            unsupported(c);
+            return -1;
+        }
+        int base, arg, op;
+        int at = decode(c, c->next, &base, &arg, &op);
+        for (int k = 0; k < c->nentries; k++) {
+            if (c->entries[k] == at && c->entry_depth[k] != c->st.sp) {
+                c->f->fail = "stack depths differ at a resume point";
+                c->failed = 1;
+                return -1;
+            }
+        }
+        side_exit(c, EXIT_YIELD);
+        return 0;
+    }
     case RETURN_VALUE: {
         if (c->parent == NULL) {
             /* A frame object another holds takes the locals when the
@@ -3583,6 +4014,14 @@ translate(struct ctx *c)
             emit(c, OP_RETURN, REP_NONE, v, LU_NOV, LU_NOV, 0);
         }
         else {
+            if (c->gen) {
+                /* A generator resumed in line returned: the iteration ends. */
+                release(c, v, 1);
+                int observed = c->observed;
+                helper(c, H_gen_finish, 1, &c->genv);
+                c->observed = observed;     /* control leaves the frame: no frames guard after */
+                v = konst(c, LU_MISSING);
+            }
             if (c->nrets == c->caprets) {
                 c->caprets = c->caprets ? c->caprets * 2 : 4;
                 c->rets = realloc(c->rets, sizeof(lu_v) * (size_t)c->caprets);
@@ -3834,6 +4273,13 @@ translate(struct ctx *c)
     case CALL_INTRINSIC_1: {
         v = peek(c, 1);
         own = peek_owned(c, 1);
+        if (oparg == INTRINSIC_ASYNC_GEN_WRAP) {
+            w = helper_raising(c, H_async_gen_wrap, 1, &v, 0);
+            pop(c, NULL);
+            release(c, v, own);
+            push(c, w, 1);
+            return 0;
+        }
         if (oparg != INTRINSIC_LIST_TO_TUPLE) {
             unsupported(c);
             return -1;
@@ -4126,6 +4572,132 @@ build_ctx(struct ctx *c, int entry_block)
     }
 }
 
+/* A generator's resume points, the code units after each RESUME, with the
+   stack depth there (the depth at the yield before it, whose value the
+   sent one replaces), as CPython's compiler computes depths: a walk from
+   the code's start over fall-throughs, jumps and handlers. Into
+   c->entries and c->entry_depth; -1 when the walk cannot follow the code
+   or misses one. */
+static int
+resume_points(struct ctx *c)
+{
+    int n = c->ncode, ok = 1, nw = 0;
+    int *depth = malloc(sizeof(int) * ((size_t)n + 1)), *work = malloc(sizeof(int) * ((size_t)n + 1));
+    for (int pc = 0; pc <= n; pc++) {
+        depth[pc] = -1;
+    }
+#define REACH(t, d) do { \
+        int t_ = (t), d_ = (d); \
+        if (t_ < 0 || t_ >= n || d_ < 0 || d_ > c->code->co_stacksize) { ok = 0; } \
+        else if (depth[t_] < 0) { depth[t_] = d_; work[nw++] = t_; } \
+        else if (depth[t_] != d_) { ok = 0; } \
+    } while (0)
+    REACH(0, 0);
+    while (nw > 0 && ok) {
+        int pc = work[--nw], d = depth[pc];
+        int base, oparg, op;
+        int next = decode(c, pc, &base, &oparg, &op);
+        int level, handler, lasti;
+        if (lu_exception_handler(c->code, pc, &level, &handler, &lasti) && handler >= 0) {
+            REACH(handler, level + lasti + 1);
+        }
+        if (base == FOR_ITER) {
+            REACH(jump_target(base, oparg, next), d);   /* past END_FOR, nothing pushed */
+            REACH(next, d + 1);
+            continue;
+        }
+        int fall = PyCompile_OpcodeStackEffectWithJump(base, oparg, 0);
+        int jump = PyCompile_OpcodeStackEffectWithJump(base, oparg, 1);
+        if (fall == PY_INVALID_STACK_EFFECT || jump == PY_INVALID_STACK_EFFECT) {
+            ok = 0;
+            break;
+        }
+        if (is_jump(base) || is_branch(base)) {
+            REACH(jump_target(base, oparg, next), d + jump);
+        }
+        if (!is_jump(base) && base != RETURN_VALUE && base != RAISE_VARARGS && base != RERAISE) {
+            REACH(next, d + fall);
+        }
+    }
+#undef REACH
+    int count = 0;
+    for (int pc = 0; ok && pc < n; pc = lu_jit_next_pc(c->code, pc)) {
+        if (lu_base_opcode(c->code, pc) == RESUME) {
+            int at = lu_jit_next_pc(c->code, pc);
+            ok = at < n && depth[at] >= 0;
+            count++;
+        }
+    }
+    if (ok) {
+        c->entries = lu_ir_alloc(c->f, sizeof(int) * (size_t)(count ? count : 1));
+        c->entry_depth = lu_ir_alloc(c->f, sizeof(int) * (size_t)(count ? count : 1));
+        for (int pc = 0; pc < n; pc = lu_jit_next_pc(c->code, pc)) {
+            if (lu_base_opcode(c->code, pc) == RESUME) {
+                int at = lu_jit_next_pc(c->code, pc);
+                c->entries[c->nentries] = at;
+                c->entry_depth[c->nentries++] = depth[at];
+            }
+        }
+    }
+    free(depth);
+    free(work);
+    return ok && count > 0 ? 0 : -1;
+}
+
+/* A resume unit's entry: the frame's instruction picks the resume point,
+   whose state is every local and the stack its depth there, each read
+   from the frame as an entry reads it. */
+static int
+build_resume(struct ctx *c)
+{
+    struct lu_func *f = c->f;
+    for (int k = 0; k < c->nentries; k++) {
+        c->bb[c->blkat[c->entries[k]]].npreds++;
+    }
+    c->cur = lu_ir_block(f);
+    c->pc = f->entry_pc;
+    lu_v at = emit(c, OP_ENTRY_PC, REP_I64, LU_NOV, LU_NOV, LU_NOV, 0);
+    lu_v *room = lu_ir_alloc(f, sizeof(lu_v) * (size_t)c->nentries);
+    f->room = INT32_MIN;
+    for (int k = 0; k < c->nentries; k++) {
+        int other = -1;
+        if (k < c->nentries - 1) {
+            lu_v bit = emit(c, OP_CMP_I, REP_BIT, at, const_i(c, c->entries[k]), LU_NOV, Py_EQ);
+            int here = lu_ir_block(f);
+            other = lu_ir_block(f);
+            lu_ir_edge(f, c->cur, here);
+            lu_ir_edge(f, c->cur, other);
+            emit(c, OP_BRANCH, REP_NONE, bit, LU_NOV, LU_NOV, 0);
+            c->cur = here;
+        }
+        c->pc = c->entries[k];
+        state_init(c, &c->st);
+        for (int i = 0; i < c->nlocals; i++) {
+            c->st.v[i] = emit(c, OP_ENTRY_LOCAL, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, i);
+            c->st.own[i] = i >= f->nborrowed;
+        }
+        for (int j = 0; j < c->entry_depth[k]; j++) {
+            push(c, emit(c, OP_ENTRY_STACK, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, j), 1);
+        }
+        c->snap = snapshot(c, c->pc);
+        room[k] = guard(c, OP_GUARD_DEPTH, LU_NOV, 0);
+        edge_to(c, c->pc);
+        emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+        c->cur = other;
+    }
+    int r = build_ctx(c, c->blkat[c->entries[0]]);
+    for (int k = 0; k < c->nentries; k++) {
+        f->ins[room[k]].flags |= f->room == INT32_MIN ? INS_DEAD : 0;
+        f->ins[room[k]].imm = f->room;
+    }
+    free(c->rets);
+    free(c->pend);
+    if (r < 0 && f->fail == NULL) {
+        f->fail = "build failed";
+    }
+    return r;
+}
+
 int
 lu_ssa_build(struct lu_func *f, struct lu_frame *frame)
 {
@@ -4156,11 +4728,18 @@ lu_ssa_build(struct lu_func *f, struct lu_frame *frame)
         c->fixed[i] = 0;
     }
     int entry = f->entry_pc;
+    if (f->resume && resume_points(c) < 0) {
+        f->fail = "unfollowable generator";
+        return -1;
+    }
     if (scan(c, entry) < 0) {
         f->fail = "unfollowable jumps";
         return -1;
     }
     count_fallthrough(c);
+    if (f->resume) {
+        return build_resume(c);
+    }
     /* At a call's entry every local but the parameters (and cells, which
        the prologue made) is unbound, unless a jump comes there too: then
        the unit is a loop's entry as well, and reads them all. */

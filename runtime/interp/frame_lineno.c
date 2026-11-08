@@ -350,7 +350,7 @@ first_line_not_before(int *lines, int len, int line)
 static int
 frame_is_suspended(struct lu_frame *f)
 {
-    if (f->owner == LU_FRAME_GENERATOR) {
+    if (lu_frame_in_gen(f)) {
         int state = lu_gen_of(f)->frame_state;
         return state == LU_GEN_SUSPENDED || state == LU_GEN_SUSPENDED_YIELD_FROM;
     }
