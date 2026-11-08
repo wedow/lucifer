@@ -937,6 +937,44 @@ h_call_ex(PyObject *callable, PyObject *callargs, PyObject *kwargs)
     return r;
 }
 
+/* f(a, ..., *args, **kwargs) in hidden code (ssa_build.c forward_call):
+   argv is the callable, its NULL, the leading arguments, the star tuple
+   and the keyword dict or NULL, which the call takes as
+   they are: no list, tuple or dict is made for it. Declines anything
+   CALL_FUNCTION_EX would make more of: a star argument that is not an
+   exact tuple, or keywords that are not an exact dict of str keys. */
+static PyObject *
+h_call_forward(PyObject **argv, intptr_t n)
+{
+    PyObject *star = argv[n - 2], *kw = argv[n - 1];
+    intptr_t lead = n - 4;
+    if (!PyTuple_CheckExact(star) || (kw != NULL && (!PyDict_CheckExact(kw) || !lu_dict_str_keys(kw)))) {
+        return LU_JIT_DECLINED;
+    }
+    if (kw != NULL && PyDict_GET_SIZE(kw) > 0) {
+        PyObject *t = PyTuple_New(lead + PyTuple_GET_SIZE(star));
+        for (intptr_t i = 0; t != NULL && i < PyTuple_GET_SIZE(t); i++) {
+            PyTuple_SET_ITEM(t, i, Py_NewRef(i < lead ? argv[2 + i] : PyTuple_GET_ITEM(star, i - lead)));
+        }
+        PyObject *r = t != NULL ? h_call_ex(argv[0], t, kw) : NULL;
+        Py_XDECREF(t);
+        return r;
+    }
+    /* The tuple holds its items while the call runs: they are borrowed. */
+    intptr_t m = 2 + lead + PyTuple_GET_SIZE(star);
+    PyObject *few[16], **all = m <= 16 ? few : PyMem_Malloc(sizeof(PyObject *) * (size_t)m);
+    if (all == NULL) {
+        return PyErr_NoMemory();
+    }
+    memcpy(all, argv, sizeof(PyObject *) * (size_t)(2 + lead));
+    memcpy(all + 2 + lead, ((PyTupleObject *)star)->ob_item, sizeof(PyObject *) * (size_t)PyTuple_GET_SIZE(star));
+    PyObject *r = h_call(all, m);
+    if (all != few) {
+        PyMem_Free(all);
+    }
+    return r;
+}
+
 /* DICT_MERGE: a call's **update into its keyword dict. */
 static int
 h_dict_merge(PyObject *func, PyObject *dict, PyObject *update)
@@ -1170,6 +1208,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_store_slice] = { (void *)h_store_slice, "store_slice", REP_BIT, IF_RAISE | IF_PY, 4 },
     [H_call_kw] = { (void *)h_call_kw, "call_kw", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_call_ex] = { (void *)h_call_ex, "call_ex", REP_OBJ, IF_RAISE | IF_PY, 3 },
+    [H_call_forward] = { (void *)h_call_forward, "call_forward", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_dict_merge] = { (void *)h_dict_merge, "dict_merge", REP_BIT, IF_RAISE | IF_PY, 3 },
     [H_catch] = { (void *)h_catch, "catch", REP_OBJ, IF_RAISE, 2 },
     [H_push_exc_info] = { (void *)h_push_exc_info, "push_exc_info", REP_OBJ, 0, 1 },

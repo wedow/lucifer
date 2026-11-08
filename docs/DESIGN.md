@@ -711,7 +711,13 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    callee's frame itself and enters that unit's direct entry: no C helper,
    no eval loop, and the callee pops its frame when it returns. C that
    calls a Python function (its vectorcall) enters the same way. A function
-   borrows the parameters it never rebinds from its caller.
+   borrows the parameters it never rebinds from its caller. In hidden
+   code (type.__call__, call_special), `f(a, *args, **kwargs)` compiles
+   as one call that passes the star tuple's items and the keyword dict on
+   as they are, without the list, tuple and dict CALL_FUNCTION_EX makes;
+   hidden frames show no traceback entry, so it may leave from its first
+   instruction, and it declines what would need more (a star argument
+   that is not an exact tuple, keys that are not strs).
 8. **Publication and invalidation.** Code is published by a ticket-checked
    atomic store into the code object's private tail. Patching running code
    waits for a measured need. Compiled code keeps facts between polls, under

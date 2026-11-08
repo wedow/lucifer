@@ -3750,6 +3750,82 @@ for_iter(struct ctx *c)
     return 0;
 }
 
+/* The local a LOAD_FAST at pc reads, or -1; the next instruction in *next. */
+static int
+loads_local(struct ctx *c, int pc, int *next)
+{
+    int base, oparg, op;
+    *next = decode(c, pc, &base, &oparg, &op);
+    return base == LOAD_FAST || base == LOAD_FAST_BORROW ? oparg : -1;
+}
+
+/* f(a, ..., *args, **kwargs) in hidden code, from BUILD_LIST or BUILD_MAP
+   to CALL_FUNCTION_EX: the compiler's list of the leading arguments
+   extended by a local, made a tuple, and the keywords merged from a local
+   into an empty dict (or none), compiled as one call that passes the star
+   tuple's items and the dict as they are (h_call_forward). Hidden code
+   shows no traceback entry, so the call may leave from the first
+   instruction. 1 when it did. */
+static int
+forward_call(struct ctx *c)
+{
+    int base, oparg, op, pc = c->pc, next, star = -1, kw = -1, lead = 0;
+    if (!hidden(c->code) || c->parent != NULL || lu_jit_nospec(c->code, c->pc)) {
+        return 0;
+    }
+    if (c->base == BUILD_LIST) {
+        lead = c->oparg;
+        if (lead > 8 || lead > c->st.sp - 2 || (star = loads_local(c, c->next, &next)) < 0
+            || (decode(c, next, &base, &oparg, &op), base != LIST_EXTEND || oparg != 1)
+            || (next = decode(c, decode(c, next, &base, &oparg, &op), &base, &oparg, &op),
+                base != CALL_INTRINSIC_1 || oparg != INTRINSIC_LIST_TO_TUPLE)) {
+            return 0;
+        }
+        pc = next;
+    }
+    else {
+        pc = c->pc;                     /* the star tuple is on the stack already */
+    }
+    int after = decode(c, pc, &base, &oparg, &op);
+    if (base == BUILD_MAP && oparg == 0) {
+        if ((kw = loads_local(c, after, &next)) < 0 || (after = decode(c, next, &base, &oparg, &op),
+                                                         base != DICT_MERGE || oparg != 1)) {
+            return 0;
+        }
+    }
+    else if (base != PUSH_NULL) {
+        return 0;
+    }
+    int end = decode(c, after, &base, &oparg, &op);
+    if (base != CALL_FUNCTION_EX || (star >= 0 ? c->st.v[star] : peek(c, 1)) == LU_NOV
+        || (kw >= 0 && c->st.v[kw] == LU_NOV) || !opaque_call(c)) {
+        return 0;
+    }
+    /* The callable, its NULL (CALL_FUNCTION_EX ignores what is there), the
+       leading arguments (or the star tuple), from the stack. */
+    int nst = star >= 0 ? lead + 2 : 3;
+    lu_v args[12];
+    for (int i = 0; i < nst; i++) {
+        args[i] = peek(c, nst - i) != LU_NOV && i != 1 ? peek(c, nst - i) : konst(c, NULL);
+    }
+    int n = nst;
+    if (star >= 0) {
+        args[n++] = c->st.v[star];
+    }
+    args[n++] = kw >= 0 ? c->st.v[kw] : konst(c, NULL);
+    lu_v w = helper_raising(c, H_call_forward, n, args, nst);
+    I(c, w)->imm2 = CNT_call_kw + 1;
+    guard_after(c, OP_GUARD_NOT_NULL, w, 1);
+    for (int i = 0; i < nst; i++) {
+        int own;
+        lu_v v = pop(c, &own);
+        release(c, v, own);
+    }
+    push(c, w, 1);
+    c->next = end;
+    return 1;
+}
+
 /* --- the instruction --- */
 
 static int
@@ -4241,6 +4317,9 @@ translate(struct ctx *c)
         return 0;
     }
     case BUILD_LIST: case BUILD_TUPLE: case BUILD_SET: case BUILD_MAP: {
+        if ((c->base == BUILD_LIST || (c->base == BUILD_MAP && oparg == 0)) && forward_call(c)) {
+            return c->failed ? -1 : 0;
+        }
         /* A set's or a dict's items may run Python (hashing): the root only. */
         int set = c->base == BUILD_SET || c->base == BUILD_MAP;
         oparg = c->base == BUILD_MAP ? 2 * oparg : oparg;
