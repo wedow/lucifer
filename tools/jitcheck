@@ -51,6 +51,11 @@ require that a count of the tier's does not grow with the iterations:
          subclass of str), with and without keywords: the class calls
          that reach the generic call of a class (-X lucifer_jit_stats'
          whynot type). Each calls __new__ itself.
+  attrorder tests/kernel/jit_attr_order.py, whose hot loop reads and
+         writes attributes of instances of one class that got their names
+         in different orders: guard and side exits, and entries left to
+         the interpreter while a unit's entry waits. Each instance keeps
+         its values in line, where the class's sites read them.
   stritems tests/kernel/jit_str_items.py, whose hot method reads one
          character of a str at a time through an attribute: the calls
          that reach a callee compiled code refuses (-X lucifer_jit_stats'
@@ -165,6 +170,8 @@ GROWTH = {
     'kwcalls': ('jit_kw_calls.py', r'jit: executed:.* call_kw (\d+)', 0),
     'cmethods': ('jit_class_methods.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'newcalls': ('jit_new_calls.py', r'jit: whynot kw \d+, star \d+, type (\d+)', 0),
+    'attrorder': ('jit_attr_order.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
+                  r'|jit: entries waited (\d+)', 0),
     'stritems': ('jit_str_items.py', r'jit: whynot kw \d+, star \d+, type \d+, builtin \d+, object (\d+)', 0),
     'perfcalls': ('jit_compiled_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0, ('-X', 'perf')),
     'super': ('jit_super.py', r'jit: entries .* side (\d+)', 0),

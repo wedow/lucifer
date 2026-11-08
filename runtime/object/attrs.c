@@ -13,10 +13,18 @@
 
    While an instance's LU_ATTRS_IN_DICT flag is clear, its attributes are
    those words and its dict pointer is NULL. Anything that needs a real dict
-   (__dict__, vars, a name with no room left or stored out of insertion
-   order, __class__ assignment, a C caller of _PyObject_GetDictPtr) moves the
-   values into a new dict under the object's lock and sets the flag for good;
-   the words stay NULL from then on. A name that shadows a class attribute
+   (__dict__, vars, a name with no room left, __class__ assignment, a C
+   caller of _PyObject_GetDictPtr) moves the values into a new dict under
+   the object's lock and sets the flag for good; the words stay NULL from
+   then on, and the dict keeps the instance's insertion order.
+
+   That order is the words' index order until a name is stored while a
+   later word is in use (instances that get their names in different
+   orders). The instance then keeps an order record after its words: the
+   number of names present, then their indices as they were inserted
+   (LU_ATTRS_UNORDERED, set for good). Such an instance keeps its values in
+   line; only a store of a name new to it goes through C, which appends to
+   the record, and a deletion takes the index out of it. A name that shadows a class attribute
    changes the class's version when it joins the table, so a method cached
    for the class needs no check of the instance beyond the flag.
 
@@ -51,11 +59,28 @@ shared_names(PyTypeObject *tp)
     return (struct lu_shared_names *)((PyHeapTypeObject *)tp)->ht_cached_keys;
 }
 
+/* The order record (see above): a count byte and an index byte per name,
+   in whole words; a class with room for more names than a byte numbers
+   has none, and its instances move to a dict instead. */
+#define ORDER_MAX 255
+
+static size_t
+order_size(Py_ssize_t capacity)
+{
+    return capacity < ORDER_MAX ? ((size_t)capacity + 1 + sizeof(PyObject *) - 1) & ~(sizeof(PyObject *) - 1) : 0;
+}
+
+Py_ssize_t
+lu_inline_capacity(PyTypeObject *tp)
+{
+    return (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) ? shared_names(tp)->capacity : 0;
+}
+
 size_t
 lu_inline_values_size(PyTypeObject *tp)
 {
-    return (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)
-        ? (size_t)shared_names(tp)->capacity * LU_INLINE_STRIDE * sizeof(PyObject *) : 0;
+    Py_ssize_t capacity = lu_inline_capacity(tp);
+    return capacity > 0 ? (size_t)capacity * LU_INLINE_STRIDE * sizeof(PyObject *) + order_size(capacity) : 0;
 }
 
 /* Adds the names of a class's __static_attributes__ to `seen`. */
@@ -182,6 +207,62 @@ in_order(PyObject *obj, Py_ssize_t i)
     return 1;
 }
 
+static uint8_t *
+order_record(PyObject *obj)
+{
+    return (uint8_t *)&LU_INLINE_WORD(lu_inline_values(obj), shared_names(Py_TYPE(obj))->capacity);
+}
+
+static int
+unordered(PyObject *obj)
+{
+    return (__atomic_load_n(&obj->ob_flags, __ATOMIC_ACQUIRE) & LU_ATTRS_UNORDERED) != 0;
+}
+
+/* Before word i, empty, takes a name new to the instance, in the object's
+   critical section: the order record notes it, started from the words'
+   index order when this is the first name out of it. 0 when the class
+   keeps no record. */
+static int
+note_insert(PyObject *obj, Py_ssize_t i)
+{
+    uint8_t *order = order_record(obj);
+    if (!unordered(obj)) {
+        if (in_order(obj, i)) {
+            return 1;
+        }
+        if (order_size(shared_names(Py_TYPE(obj))->capacity) == 0) {
+            return 0;
+        }
+        PyObject **values = lu_inline_values(obj);
+        Py_ssize_t n = __atomic_load_n(&shared_names(Py_TYPE(obj))->count, __ATOMIC_ACQUIRE);
+        order[0] = 0;
+        for (Py_ssize_t j = 0; j < n; j++) {
+            if (LU_INLINE_WORD(values, j) != NULL) {
+                order[1 + order[0]++] = (uint8_t)j;
+            }
+        }
+        __atomic_fetch_or(&obj->ob_flags, LU_ATTRS_UNORDERED, __ATOMIC_RELEASE);
+    }
+    order[1 + order[0]++] = (uint8_t)i;
+    return 1;
+}
+
+/* After word i lost its name, in the object's critical section. */
+static void
+note_delete(PyObject *obj, Py_ssize_t i)
+{
+    if (unordered(obj)) {
+        uint8_t *order = order_record(obj);
+        int k = 1;
+        while (k <= order[0] && order[k] != i) {
+            k++;
+        }
+        memmove(order + k, order + k + 1, (size_t)(order[0] - k));
+        order[0]--;
+    }
+}
+
 /* The object a value word stands for, in the object's critical section:
    an unboxed float gets its box, installed for every later reader.
    Borrowed; NULL when absent, or with MemoryError. */
@@ -264,7 +345,9 @@ move_to_dict(PyObject *obj)
         return -1;
     }
     Py_ssize_t n = __atomic_load_n(&names->count, __ATOMIC_ACQUIRE);
-    for (Py_ssize_t i = 0; i < n; i++) {
+    uint8_t *order = unordered(obj) ? order_record(obj) : NULL;
+    for (Py_ssize_t k = 0, m = order != NULL ? order[0] : n; k < m; k++) {
+        Py_ssize_t i = order != NULL ? order[1 + k] : k;      /* in insertion order */
         PyObject **word = &LU_INLINE_WORD(values, i);
         if (*word != NULL && (boxed_locked(word) == NULL || lu_ns_insert(dict, names->names[i], *word) < 0)) {
             Py_DECREF(dict);
@@ -391,17 +474,15 @@ lu_attr_lookup(PyObject *obj, PyObject *name, PyObject **v)
     return *v != NULL;
 }
 
-/* Stores v in word i, holding the object's lock: the old value in *old,
-   or 0 when the values moved to the dict or v would break insertion order. */
 /* Stores v (or a marker with the raw bits) in word i, holding the
    object's lock: the old value in *old (NULL for none or an unboxed
-   value), or 0 when the values moved to the dict or v would break
-   insertion order. */
+   value), or 0 when the values moved to the dict or the instance's
+   insertion order has no record to go in. */
 static int
 store_locked(PyObject *obj, Py_ssize_t i, PyObject *v, uint64_t bits, PyObject **old)
 {
     PyObject **slot = &LU_INLINE_WORD(lu_inline_values(obj), i);
-    if (!lu_inline_live(obj) || (*slot == NULL && !in_order(obj, i))) {
+    if (!lu_inline_live(obj) || (*slot == NULL && !note_insert(obj, i))) {
         return 0;
     }
     if (lu_unboxed(v)) {
@@ -474,6 +555,9 @@ lu_attr_store(PyObject *obj, PyObject *name, PyObject *v)
             old = i >= 0 ? __atomic_exchange_n(&LU_INLINE_WORD(lu_inline_values(obj), i), NULL, __ATOMIC_RELEASE)
                          : NULL;
             done = old != NULL ? 1 : -1;
+            if (old != NULL) {
+                note_delete(obj, i);
+            }
             if (lu_unboxed(old)) {
                 old = NULL;
             }

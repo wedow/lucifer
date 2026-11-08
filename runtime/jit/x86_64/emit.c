@@ -1989,7 +1989,8 @@ unlock_object(struct asm_ *a, int r)
 /* An inline store's word at off of the object in r holds nothing: the
    store takes it in line only if every later word of the class's room
    (imm2 - 1 of them; imm2 0: unknown) is empty too, so that the words keep
-   the instance's insertion order (attrs.c's in_order); else `slow`. */
+   the instance's insertion order (attrs.c's in_order), and the instance
+   keeps no order record, which C appends to; else `slow`. */
 static void
 fresh_word(struct asm_ *a, struct lu_ins *in, int r, int slow)
 {
@@ -1997,6 +1998,11 @@ fresh_word(struct asm_ *a, struct lu_ins *in, int r, int slow)
         jmp(a, slow);
         return;
     }
+    rex(a, 0, 0, 0, r);
+    b1(a, 0xF6);
+    modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
+    b1(a, LU_ATTRS_UNORDERED >> 8);             /* test byte [r+flags+1], LU_ATTRS_UNORDERED */
+    jcc(a, CC_NE, slow);
     for (int k = 1; k < in->imm2; k++) {
         cmp_mi(a, 1, r, (int32_t)in->imm + (int32_t)(LU_INLINE_STRIDE * sizeof(PyObject *)) * k, 0);
         jcc(a, CC_NE, slow);

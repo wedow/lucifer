@@ -2870,7 +2870,7 @@ store_attr(struct ctx *c)
         t = known_type(c, owner);
         if (t != NULL && (t->tp_flags & Py_TPFLAGS_INLINE_VALUES)) {
             size_t word = LU_INLINE_STRIDE * sizeof(PyObject *);
-            I(c, st)->imm2 = (int64_t)((lu_inline_values_size(t) - (index - (size_t)t->tp_basicsize)) / word);
+            I(c, st)->imm2 = (int64_t)lu_inline_capacity(t) - (int64_t)((index - (size_t)t->tp_basicsize) / word);
         }
     }
     else if (op == STORE_ATTR_SLOT) {

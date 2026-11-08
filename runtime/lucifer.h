@@ -257,6 +257,7 @@ enum lu_kernel_id {
 /* Instance attributes (runtime/object/attrs.c): inline values after
    tp_basicsize while LU_ATTRS_IN_DICT is clear, else the instance dict. */
 #define LU_ATTRS_IN_DICT (1 << 8)       /* ob_flags: set once the values moved to the dict */
+#define LU_ATTRS_UNORDERED (1 << 9)     /* ob_flags: the words' insertion order is in the order record */
 static inline int
 lu_inline_live(PyObject *obj)
 {
@@ -291,6 +292,8 @@ lu_inline_raw(PyObject **word)
 int lu_inline_values_init(PyTypeObject *tp);
 void lu_inline_values_fini(PyTypeObject *tp);
 size_t lu_inline_values_size(PyTypeObject *tp);
+/* The number of names the class's instances have room for. */
+Py_ssize_t lu_inline_capacity(PyTypeObject *tp);
 /* The index of name in the class's shared names, or -1. */
 Py_ssize_t lu_inline_index(PyTypeObject *tp, PyObject *name);
 /* The address of the instance's dict pointer, or NULL when it has none. */
