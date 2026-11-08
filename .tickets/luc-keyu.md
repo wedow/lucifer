@@ -1,6 +1,6 @@
 ---
 id: luc-keyu
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-11-07T14:15:47Z
