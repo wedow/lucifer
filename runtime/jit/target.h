@@ -115,11 +115,12 @@ struct lu_deopt {
    call-entry unit's direct entry, or NULL:
      int entry(PyThreadState *ts, PyFunctionObject *func, PyObject **args, PyObject **result,
                int given, PyObject *kwnames)
-   takes `given` positional arguments (up to nargs) and then one value
-   per name in kwnames (NULL: none), all borrowed, pushes and binds the
-   frame above the task's current one as the interpreter would (defaults,
-   keyword-only parameters, star parameters, the prologue's cells and free
-   variables) and runs it. 1: it returned *result and was popped; 0:
+   takes `given` positional arguments (up to nargs), borrowed, pushes and
+   binds the frame above the task's current one as the interpreter would
+   (defaults, keyword-only parameters, star parameters, the prologue's
+   cells and free variables) and runs it. The keyword entry, the
+   LU_DIRECT_KW bytes before entry, takes as well one value per name in
+   kwnames (a sixth argument; positional callers pay nothing for it). 1: it returned *result and was popped; 0:
    nothing was done (the interpreter's checks at a call failed: a poll is
    pending, a tool or hook is on, no room; or the binding would raise,
    which the slow way then does); else the enum lu_jit_result of an exit,
@@ -131,6 +132,7 @@ struct lu_jit_direct {
     int call_pc;                /* where the call entry's unit starts */
 };
 #define LU_DIRECT_ANY 0x7fffffff
+#define LU_DIRECT_KW 8
 
 /* What the direct entry does not bind in line (runtime/jit/helpers.c): a
    frame for func bound to the call's arguments, not yet current, holding

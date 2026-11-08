@@ -1026,7 +1026,6 @@ direct_call(struct asm_ *a, int nargs, int off, int slow, int done)
     modrm_mem(a, RDX, RSP, off);                /* lea rdx, the arguments */
     mov_rr(a, RCX, RSP);                        /* the value goes over the callable's copy */
     mov_ri(a, R8, nargs);
-    mov_ri(a, R9, 0);                           /* no keywords */
     rex(a, 0, 0, 0, R11);
     b1(a, 0xFF);
     modrm_rr(a, 2, R11);                        /* call r11 */
@@ -3341,26 +3340,13 @@ push_in_line(struct asm_ *a, int decline)
     }
 }
 
-/* The direct entry (struct lu_jit_direct): RDI the thread, RSI the
-   function, RDX its arguments, RCX the result's word, R8 how many
-   positional arguments there are, R9 the keywords' names or NULL. It
-   makes the checks the interpreter makes at a call and at RESUME, pushes
-   and binds the frame as lu_frame_push and lu_jit_run would (free
-   variables copied as COPY_FREE_VARS copies them), and meets the other
-   entry. Positional arguments and defaults bind in line; keywords, and
-   parameters that need objects made (keyword-only, star, cells), bind in
-   lu_jit_bind. Its returns pop the frame (direct_return), marked by the
-   low bit of the result's word. */
+/* The checks the interpreter makes at a call and at RESUME, as the direct
+   entry makes them (its registers as direct_entry says): `decline` when
+   one fails, with nothing done. */
 static void
-direct_entry(struct asm_ *a)
+entry_checks(struct asm_ *a, int decline)
 {
-    struct lu_func *f = a->f;
-    PyCodeObject *code = f->code;
-    int decline = new_label(a), bound = new_label(a), framed = new_label(a);
-    int made = code->co_kwonlyargcount != 0 || (code->co_flags & (CO_VARARGS | CO_VARKEYWORDS));
-    for (int i = 0; i < code->co_nlocalsplus && !made; i++) {
-        made = (((unsigned char *)PyBytes_AS_STRING(code->co_localspluskinds))[i] & CO_FAST_CELL) != 0;
-    }
+    PyCodeObject *code = a->f->code;
     saves(a);
     mov_rr(a, R14, RDI);
     op_rr(a, 0, 0x89, R8, RDI);                 /* mov edi, r8d: the arguments given, an int */
@@ -3396,12 +3382,40 @@ direct_entry(struct asm_ *a)
     bind(a, hooked);
     cmp_mi(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining), lu_frame_floor(code));
     jcc(a, CC_LE, decline);
+}
+
+/* The direct entry (struct lu_jit_direct): RDI the thread, RSI the
+   function, RDX its arguments, RCX the result's word, R8 how many
+   positional arguments there are. It makes the checks the interpreter
+   makes at a call and at RESUME, pushes and binds the frame as
+   lu_frame_push and lu_jit_run would (free variables copied as
+   COPY_FREE_VARS copies them), and meets the other entry. Positional
+   arguments and defaults bind in line; parameters that need objects made
+   (keyword-only, star, cells) bind in lu_jit_bind. The keyword entry
+   (LU_DIRECT_KW bytes before it, a jump) takes the keywords' names in R9
+   as well and binds in lu_jit_bind. Its returns pop the frame
+   (direct_return), marked by the low bit of the result's word. */
+static void
+direct_entry(struct asm_ *a, int keywords)
+{
+    struct lu_func *f = a->f;
+    PyCodeObject *code = f->code;
+    int decline = new_label(a), bound = new_label(a), framed = new_label(a);
+    int made = code->co_kwonlyargcount != 0 || (code->co_flags & (CO_VARARGS | CO_VARKEYWORDS));
+    for (int i = 0; i < code->co_nlocalsplus && !made; i++) {
+        made = (((unsigned char *)PyBytes_AS_STRING(code->co_localspluskinds))[i] & CO_FAST_CELL) != 0;
+    }
+    entry_checks(a, decline);
     if (!made) {
-        test_rr(a, R9, R9);
-        jcc(a, CC_NE, bound);
         push_in_line(a, decline);
         jmp(a, framed);
     }
+    else {
+        mov_ri(a, R9, 0);                       /* no keywords */
+        jmp(a, bound);
+    }
+    bind(a, keywords);
+    entry_checks(a, decline);
     bind(a, bound);
     op_rr(a, 0, 0x89, RDI, RCX);                /* mov ecx, edi: the positional arguments */
     mov_rr(a, R8, R9);
@@ -3596,8 +3610,15 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     int direct = -1;
     if (f->direct) {
         direct_return(a);
+        /* The keyword entry: nops and a jump, the LU_DIRECT_KW bytes
+           before the other. */
+        int keywords = new_label(a);
+        for (int i = 0; i < LU_DIRECT_KW - 5; i++) {
+            b1(a, 0x90);
+        }
+        jmp(a, keywords);
         direct = a->n;
-        direct_entry(a);
+        direct_entry(a, keywords);
     }
     if (a->parks) {
         parked_stubs(a);

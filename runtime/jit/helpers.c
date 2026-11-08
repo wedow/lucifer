@@ -633,10 +633,17 @@ lu_jit_call(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, Py
     if (jc == 0 || (jc & 1) || nargs > ((struct lu_jit_direct *)jc)->nargs) {
         return 0;
     }
-    int (*entry)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, int, PyObject *)
-        = __atomic_load_n(&((struct lu_jit_direct *)jc)->entry, __ATOMIC_ACQUIRE);
+    char *entry = __atomic_load_n(&((struct lu_jit_direct *)jc)->entry, __ATOMIC_ACQUIRE);
     PyObject *v;
-    int r = entry != NULL ? entry(ts, func, args, &v, (int)nargs, kwnames) : 0;
+    int r = 0;
+    if (entry != NULL && kwnames == NULL) {
+        r = ((int (*)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, int))(void *)entry)(
+            ts, func, args, &v, (int)nargs);
+    }
+    else if (entry != NULL) {
+        r = ((int (*)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, int, PyObject *))(void *)
+             (entry - LU_DIRECT_KW))(ts, func, args, &v, (int)nargs, kwnames);
+    }
     if (r == 0) {
         return 0;
     }
