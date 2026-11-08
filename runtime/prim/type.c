@@ -597,8 +597,9 @@ static PyGetSetDef subtype_getsets_full[] = {
 PyObject *
 PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
 {
+    Py_ssize_t room = lu_inline_take_room(tp);
     size_t size = (size_t)tp->tp_basicsize + (size_t)(nitems + 1) * (size_t)tp->tp_itemsize
-        + lu_inline_values_size(tp);
+        + lu_inline_room_size(room);
     size_t presize = preheader_size(tp);
     int gc = (tp->tp_flags & Py_TPFLAGS_HAVE_GC) != 0;
     char *mem = gc ? lu_gc_alloc(tp, size, presize) : NULL;
@@ -612,6 +613,9 @@ PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
     memset(mem - presize, 0, presize + size);
     PyObject *op = (PyObject *)mem;
     PyObject_Init(op, tp);
+    if (room > 0) {
+        op->ob_flags |= lu_inline_room_flags(tp, room);
+    }
     if (tp->tp_itemsize != 0) {
         Py_SET_SIZE(op, nitems);
     }

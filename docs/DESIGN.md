@@ -189,7 +189,19 @@ The decision comes from data: see §10 for the startup experiment.
   two-word preheader, so `_PyObject_GetDictPtr` and `tp_dictoffset == -1` behave
   as in CPython. Attribute values sit inline behind shared keys. Extensions reach
   them only through functions, so the JIT may use shape-guarded fixed offsets there
-  (the donor's flat-layout idea where the ABI allows it).
+  (the donor's flat-layout idea where the ABI allows it). A class's table takes 30
+  names or its static attributes, and an instance's room follows CPython's split
+  values (`_PyDict_NewKeysForClass`): names present plus a usable count each new
+  instance takes one from, so a name added later still fits the instances made
+  before it. An instance that gets its names out of the class's order keeps an
+  order record after its words instead of moving to a dict
+  (`runtime/object/attrs.c`).
+- **Attribute hooks.** A class that keeps object's `__getattribute__` (and has
+  no `__getattr__`), or object's `__setattr__` and `__delattr__`, gets
+  `PyObject_GenericGetAttr` (`PyObject_GenericSetAttr`) in its slot, as CPython's
+  `update_one_slot` installs the specific function; those answer in C where no
+  Python runs and call the kernel otherwise. C tests the slot instead of looking
+  the hooks up on each access.
 - **Static data.** All 215 exported data objects (`PyFloat_Type`,
   `_Py_NoneStruct`, `PyExc_*`, small-int cache −5..256, …) are statically
   initialized immortal C objects in `runtime/types/static.c`. They have the oracle's

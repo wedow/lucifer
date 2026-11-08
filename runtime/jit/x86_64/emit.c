@@ -1826,7 +1826,9 @@ emit_new_object(struct asm_ *a, lu_v v)
     struct lu_ins *in = I(a, v);
     PyTypeObject *tp = (PyTypeObject *)(intptr_t)I(a, in->args[0])->imm;
     size_t pre = (tp->tp_flags & Py_TPFLAGS_PREHEADER) ? 2 * sizeof(PyObject *) : 0;
-    size_t size = pre + (size_t)tp->tp_basicsize + lu_inline_values_size(tp);
+    Py_ssize_t room = lu_inline_settle_room(tp);         /* every later instance's room */
+    size_t size = pre + (size_t)tp->tp_basicsize + lu_inline_room_size(room);
+    uint32_t flags = room > 0 ? lu_inline_room_flags(tp, room) : 0;
     if (_PyRuntime.stress.gc != 0 || (size + 7) / 8 > MI_SMALL_WSIZE_MAX) {
         return 0;
     }
@@ -1852,7 +1854,7 @@ emit_new_object(struct asm_ *a, lu_v v)
     }
     thread_id(a, R11);
     store(a, RDX, offsetof(PyObject, ob_tid), R11);
-    store32_mi(a, RDX, offsetof(PyObject, ob_flags), (int32_t)((uint32_t)LU_GC_TRACKED << 24));    /* ob_gc_bits */
+    store32_mi(a, RDX, offsetof(PyObject, ob_flags), (int32_t)((uint32_t)LU_GC_TRACKED << 24 | flags));    /* ob_gc_bits, the room */
     store32_mi(a, RDX, offsetof(PyObject, ob_ref_local), 1);
     store_mi(a, RDX, offsetof(PyObject, ob_ref_shared), 0);
     mov_ri(a, RBX, (int64_t)(intptr_t)tp);

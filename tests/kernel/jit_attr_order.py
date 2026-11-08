@@ -1,6 +1,7 @@
 # A hot loop reads and writes the attributes of instances of one class
 # that got their names in different orders (pyperformance go's Square):
-# some in __init__'s order, some later and out of it. tools/jitcheck runs
+# some in __init__'s order, some later and out of it, and one name that
+# only code outside the class assigns, after the instances were made. tools/jitcheck runs
 # this at two sizes (lane `attrorder`) and requires that guard and side
 # exits, and entries left to the interpreter, do not grow with the
 # iterations: every instance keeps its values in line at the offsets the
@@ -27,6 +28,7 @@ class Square:
 def step(s, k):
     s.color = s.color + k
     s.ledges = s.ledges + s.pos
+    s.mark = s.mark + 1
     return s.reference is s
 
 
@@ -34,10 +36,12 @@ def hot(n):
     squares = [Square(i) for i in range(8)]
     for i, s in enumerate(squares):
         (s.link if i % 2 else s.relink)()
+    for s in squares:
+        s.mark = 0
     total = 0
     for k in range(n):
         total += step(squares[k & 7], k & 3)
-    return total, sum(s.color + s.ledges for s in squares)
+    return total, sum(s.color + s.ledges + s.mark for s in squares)
 
 
 print(hot(N))

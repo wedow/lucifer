@@ -2866,11 +2866,11 @@ store_attr(struct ctx *c)
         lu_v st = emit(c, OP_INLINE_STORE, REP_NONE, owner, v, LU_NOV, index);
         I(c, st)->fs = before(c);
         /* An instance of a known class (one this code made) may take a new
-           name in line: its room is fixed when the class is made. */
+           name in line: every instance has at least the room settled now. */
         t = known_type(c, owner);
         if (t != NULL && (t->tp_flags & Py_TPFLAGS_INLINE_VALUES)) {
             size_t word = LU_INLINE_STRIDE * sizeof(PyObject *);
-            I(c, st)->imm2 = (int64_t)lu_inline_capacity(t) - (int64_t)((index - (size_t)t->tp_basicsize) / word);
+            I(c, st)->imm2 = (int64_t)lu_inline_settle_room(t) - (int64_t)((index - (size_t)t->tp_basicsize) / word);
         }
     }
     else if (op == STORE_ATTR_SLOT) {
