@@ -154,6 +154,7 @@ bump(unsigned long *c)
 static void
 bump_entries(struct lu_unit *u)
 {
+    count(&u->entered, 1);
     if (__atomic_load_n(&u->entries, __ATOMIC_RELAXED) < ENTRIES_SEEN) {
         bump(&u->entries);
     }
@@ -1616,7 +1617,7 @@ lu_jit_report(void)
             all += u->counts[k];
         }
         if (all >= 1000) {
-            fprintf(stderr, "jit: unit %s entries %lu guards %lu:", u->stats_name, u->entries, guards);
+            fprintf(stderr, "jit: unit %s entries %lu guards %lu:", u->stats_name, u->entered, guards);
             for (int k = 0; k < CNT_COUNT; k++) {
                 if (u->counts[k]) {
                     fprintf(stderr, " %s %lu", lu_count_names[k], u->counts[k]);
