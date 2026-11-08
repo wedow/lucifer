@@ -388,9 +388,7 @@ known_type(struct ctx *c, lu_v v)
     case OP_BOX_FLOAT: return &PyFloat_Type;
     case OP_BOOL: return &PyBool_Type;
     case OP_CONST: return known(c, v) != NULL ? Py_TYPE(known(c, v)) : NULL;
-    case OP_HELPER:
-        return I(c, v)->imm == H_range_iter ? &PyRangeIter_Type
-            : lu_iter_type(I(c, v));
+    case OP_HELPER: return I(c, v)->imm == H_range_iter ? &PyRangeIter_Type : lu_iter_type(I(c, v));
     default: return NULL;
     }
 }
@@ -580,7 +578,6 @@ steps_fresh(struct ctx *c, int pc)
     }
     return 1;
 }
-
 
 /* --- leaving --- */
 
@@ -3452,8 +3449,8 @@ call(struct ctx *c)
         if (n == 3) {
             guard(c, OP_GUARD_BIT, emit(c, OP_CMP_I, REP_BIT, step, const_i(c, 0), LU_NOV, Py_NE), 1);
         }
-        int gbase0, goparg0, gop0;
-        if (n <= 2 && steps_fresh(c, decode(c, c->next, &gbase0, &goparg0, &gop0)) && !lu_jit_nospec(c->code, c->pc)) {
+        int ibase, ioparg, iop;
+        if (n <= 2 && steps_fresh(c, decode(c, c->next, &ibase, &ioparg, &iop)) && !lu_jit_nospec(c->code, c->pc)) {
             /* Its length fits, and so does every value with step 1. */
             lu_v len = emit(c, OP_SUB_I, REP_I64, stop, start, LU_NOV, 0);
             I(c, len)->fs = before(c);

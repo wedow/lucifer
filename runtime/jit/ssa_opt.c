@@ -6,9 +6,8 @@
    2. Representation: a phi whose inputs are all int boxes (or float
       boxes, or such constants), counting phis of the same kind, becomes a
       raw phi under one box, so loop-carried ints and floats stay in
-      registers. A root
-      local's phi may forget an object an input box was made from, which
-      its edge then releases.
+      registers. A root local's phi may forget an object an input box was
+      made from, which its edge then releases.
    3. Simplification: an unbox of a box is its raw value; guards on values
       whose type a box proves fold away. Then virtual objects (3c): tuples,
       instances, loop iterators and phis of them that nothing outside
@@ -340,7 +339,8 @@ unbox_phis(struct lu_func *f, int rep)
             int null = a != v && !cand[a] && !konst && f->ins[a].op == OP_CONST;
             lu_v k = konst ? entry_const(f, rep == REP_F64 ? OP_CONST_F : OP_CONST_I, rep, bits) : LU_NOV;
             in = &f->ins[v];
-            f->ins[raw[v]].args[i] = a == v ? raw[v] : cand[a] ? raw[a] : null ? zero : konst ? k : resolve(f->ins[a].a);
+            f->ins[raw[v]].args[i] = a == v ? raw[v] : cand[a] ? raw[a] : null ? zero : konst ? k
+                : resolve(f->ins[a].a);
             if (bit[v] != LU_NOV) {
                 f->ins[bit[v]].args[i] = a == v ? bit[v] : cand[a] ? (bit[a] != LU_NOV ? bit[a] : bound)
                     : null ? unbound : bound;
@@ -701,8 +701,8 @@ may_change(struct lu_func *f, struct lu_ins *in)
     case OP_HELPER:
         return !(in->imm == H_box_int || in->imm == H_box_float || in->imm == H_list_item
                  || in->imm == H_attr_load || in->imm == H_slot_load || in->imm == H_dict_lacks
-                 || in->imm == H_cell_load || in->imm == H_compare_ideq || in->imm == H_range_iter || lu_iter_type(in) != NULL
-                 || in->imm == H_new_object);
+                 || in->imm == H_cell_load || in->imm == H_compare_ideq || in->imm == H_range_iter
+                 || in->imm == H_new_object || lu_iter_type(in) != NULL);
     default:
         return (lu_op_flags[in->op] & IF_CALL) || in->op == OP_TRUTH;
     }
@@ -1503,7 +1503,8 @@ phi_shapes(struct lu_func *f, int *kind)
         changed = 0;
         for (int v = 0; v < n; v++) {
             struct lu_ins *in = &f->ins[v];
-            if (in->op != OP_PHI || in->rep != REP_OBJ || (in->flags & (INS_DEAD | INS_VIRTUAL)) || shape[v] != LU_NOV) {
+            if (in->op != OP_PHI || in->rep != REP_OBJ || (in->flags & (INS_DEAD | INS_VIRTUAL))
+                || shape[v] != LU_NOV) {
                 continue;
             }
             for (int i = 0; i < in->nargs && shape[v] == LU_NOV; i++) {
