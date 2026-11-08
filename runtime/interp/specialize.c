@@ -356,6 +356,30 @@ specialize_instance(PyObject *owner, lu_codeunit *site, PyObject *name, int meth
     Py_XDECREF(descr);
 }
 
+PyObject *
+lu_specialize_class_value(PyTypeObject *cls, PyObject *name, uint32_t v[3])
+{
+    PyTypeObject *meta = Py_TYPE(cls);
+    if (!enabled() || !default_getattribute(meta, &PyType_Type)) {
+        return NULL;
+    }
+    PyObject *descr, *meta_descr;
+    analyze(meta, name, &meta_descr, &v[1]);
+    analyze(cls, name, &descr, &v[0]);
+    Py_XDECREF(meta_descr);
+    if (descr == NULL || meta_descr != NULL || v[0] == 0 || v[1] == 0) {
+        Py_XDECREF(descr);
+        return NULL;
+    }
+    PyTypeObject *dt = Py_TYPE(descr);
+    v[2] = lu_type_assign_version(dt) ? __atomic_load_n(&dt->tp_version_tag, __ATOMIC_ACQUIRE) : 0;
+    if (v[2] == 0 || dt->tp_descr_get != NULL || __atomic_load_n(&dt->tp_version_tag, __ATOMIC_ACQUIRE) != v[2]) {
+        Py_DECREF(descr);
+        return NULL;
+    }
+    return descr;
+}
+
 int
 lu_specialize_load_fresh(PyTypeObject *tp, PyObject *name, int method, uint32_t *version, uint16_t *index,
                          PyObject **descr)

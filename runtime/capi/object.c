@@ -65,6 +65,9 @@ lu_call(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwna
     if (vector != NULL) {
         return vector(callable, args, nargsf, kwnames);
     }
+    if (Py_IS_TYPE(callable, &PyWrapperDescr_Type) && kwnames == NULL) {
+        return lu_wrapper_descr_call(callable, args, PyVectorcall_NARGS(nargsf), NULL);
+    }
     return _PyObject_MakeTpCall(PyThreadState_Get(), callable, args, PyVectorcall_NARGS(nargsf),
                                 kwnames);
 }

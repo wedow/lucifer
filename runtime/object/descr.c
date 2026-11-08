@@ -117,26 +117,24 @@ call_prepended(PyObject *func, PyObject *self, PyObject *const *args, size_t nar
 static int
 check_self(PyDescrObject *descr, PyObject *const *args, Py_ssize_t nargs, int wrapper)
 {
+    if (nargs >= 1 && PyObject_TypeCheck(args[0], descr->d_type)) {
+        return 0;
+    }
     const char *name = PyUnicode_AsUTF8(descr->d_name);
     if (nargs < 1) {
         lu_err_format(PyExc_TypeError, "descriptor '%s' of '%.100s' object needs an argument",
                       name, descr->d_type->tp_name);
         return -1;
     }
-    if (!PyObject_TypeCheck(args[0], descr->d_type)) {
-        if (wrapper) {
-            lu_err_format(PyExc_TypeError,
-                          "descriptor '%s' requires a '%.100s' object but received a '%.100s'",
-                          name, descr->d_type->tp_name, Py_TYPE(args[0])->tp_name);
-        }
-        else {
-            lu_err_format(PyExc_TypeError,
-                          "descriptor '%s' for '%.100s' objects doesn't apply to a '%.100s' object",
-                          name, descr->d_type->tp_name, Py_TYPE(args[0])->tp_name);
-        }
-        return -1;
+    if (wrapper) {
+        lu_err_format(PyExc_TypeError, "descriptor '%s' requires a '%.100s' object but received a '%.100s'",
+                      name, descr->d_type->tp_name, Py_TYPE(args[0])->tp_name);
     }
-    return 0;
+    else {
+        lu_err_format(PyExc_TypeError, "descriptor '%s' for '%.100s' objects doesn't apply to a '%.100s' object",
+                      name, descr->d_type->tp_name, Py_TYPE(args[0])->tp_name);
+    }
+    return -1;
 }
 
 int
@@ -281,24 +279,29 @@ call_wrapper(PyWrapperDescrObject *d, PyObject *self, PyObject *args, void *wrap
     return d->d_base->wrapper(self, args, wrapped);
 }
 
-static PyObject *
-wrapperdescr_call(PyObject *callable, PyObject *args, PyObject *kwargs)
+PyObject *
+lu_wrapper_descr_call(PyObject *descr, PyObject *const *args, Py_ssize_t nargs, PyObject *kwargs)
 {
-    PyWrapperDescrObject *d = (PyWrapperDescrObject *)callable;
-    Py_ssize_t n = PyTuple_GET_SIZE(args);
-    if (check_self((PyDescrObject *)d, &PyTuple_GET_ITEM(args, 0), n, 1) < 0) {
+    PyWrapperDescrObject *d = (PyWrapperDescrObject *)descr;
+    if (check_self((PyDescrObject *)d, args, nargs, 1) < 0) {
         return NULL;
     }
-    PyObject *rest = PyTuple_New(n - 1);
-    for (Py_ssize_t i = 1; rest != NULL && i < n; i++) {
-        PyTuple_SET_ITEM(rest, i - 1, Py_NewRef(PyTuple_GET_ITEM(args, i)));
+    PyObject *rest = PyTuple_New(nargs - 1);
+    for (Py_ssize_t i = 1; rest != NULL && i < nargs; i++) {
+        PyTuple_SET_ITEM(rest, i - 1, Py_NewRef(args[i]));
     }
     if (rest == NULL) {
         return NULL;
     }
-    PyObject *result = call_wrapper(d, PyTuple_GET_ITEM(args, 0), rest, d->d_wrapped, kwargs);
+    PyObject *result = call_wrapper(d, args[0], rest, d->d_wrapped, kwargs);
     Py_DECREF(rest);
     return result;
+}
+
+static PyObject *
+wrapperdescr_call(PyObject *callable, PyObject *args, PyObject *kwargs)
+{
+    return lu_wrapper_descr_call(callable, &PyTuple_GET_ITEM(args, 0), PyTuple_GET_SIZE(args), kwargs);
 }
 
 static PyObject *

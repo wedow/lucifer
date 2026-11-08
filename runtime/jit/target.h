@@ -165,7 +165,8 @@ struct lu_unit {
     X(guard_type) X(guard_type_of) X(guard_type_itself) X(guard_keys) X(guard_func) \
     X(guard_is) X(guard_cell) X(guard_global) X(guard_bit) X(guard_not_null) X(guard_other) \
     X(unbox) X(live) X(poll) X(load_type) X(load_version) X(load_size) X(load_other) \
-    X(attr_load) X(attr_store) X(global_load) X(item) X(helper) X(incref) X(decref) X(box)
+    X(attr_load) X(attr_store) X(global_load) X(item) X(helper) X(incref) X(decref) X(box) \
+    X(call_unknown) X(call_poly) X(call_refused) X(call_c) X(call_kw)
 enum lu_count {
 #define LU_COUNT_ENUM(name) CNT_##name,
     LU_COUNT_KINDS(LU_COUNT_ENUM)
@@ -175,6 +176,12 @@ enum lu_count {
 extern const char *const lu_count_names[CNT_COUNT];
 /* The kind an instruction counts as, or -1. */
 int lu_count_kind(const struct lu_ins *in);
+/* A call compiled code makes instead of inlining it, by why: a callee
+   the builder could not name, one of several a site met, a Python function
+   it would not or could not inline, a callable that is not Python code, or
+   a call with keywords or unpacked arguments. A call helper's imm2 holds
+   the kind plus one. */
+#define LU_COUNT_IS_CALL(k) ((k) >= CNT_call_unknown)
 /* Kinds that are guards: every guard_* kind and unbox (not polls and checks that the unit lives). */
 #define LU_COUNT_IS_GUARD(k) ((k) <= CNT_unbox)
 
@@ -245,6 +252,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(call_special) \
     X(super_attr) \
     X(prim) \
+    X(prim_call) \
     X(make_function) \
     X(set_function_attribute) \
     X(cell_store) \
@@ -339,6 +347,26 @@ unsigned long *lu_jit_alloc_site(PyCodeObject *code, int pc, int kind);
             lu_jit_c_path_count(C_PATH_##name); \
         } \
     } while (0)
+
+/* -X lucifer_jit_stats: why a call compiled code did not inline missed
+   the callee's direct entry (runtime/jit/jit.c classifies a call reaching
+   a C helper): a keyword or star call; a callable that is a
+   type, a C function or something else; a generator's code; parameters
+   the direct entry does not bind (keyword-only, star parameters, cells);
+   more arguments than parameters; a code that never got hot, is disabled,
+   retired, or has no live unit at its call entry; or a live entry, which
+   the helper enters itself. */
+#define LU_WHY_NOT(X) X(kw) X(star) X(type) X(builtin) X(object) X(generator) X(kwonly) \
+    X(varargs) X(cells) X(prologue) X(toomany) X(cold) X(disabled) X(retired) X(nounit) X(entry)
+enum lu_why_not {
+#define LU_WHY_NOT_ENUM(name) WHY_NOT_##name,
+    LU_WHY_NOT(LU_WHY_NOT_ENUM)
+#undef LU_WHY_NOT_ENUM
+    WHY_NOTS
+};
+void lu_jit_why_not_count(enum lu_why_not k);
+/* A call of callable with nargs positional arguments: its reason. */
+void lu_jit_why_not(PyObject *callable, Py_ssize_t nargs);
 
 /* A helper's result that is not an answer: the call needs the interpreter
    (a C stack too deep to recurse on), so compiled code deopts. */

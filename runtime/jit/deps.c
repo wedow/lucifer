@@ -179,7 +179,7 @@ void
 lu_jit_invalidate(int kind, uintptr_t obj, uint32_t sub)
 {
     struct bucket *b = bucket(kind, obj, kind == LU_DEP_VALUE ? sub : 0);
-    if (kind == LU_DEP_TYPE || kind == LU_DEP_FUNC) {
+    if (kind != LU_DEP_KEYS && kind != LU_DEP_VALUE) {
         __atomic_thread_fence(__ATOMIC_SEQ_CST);       /* a dict's critical section orders its changes */
     }
     if (__atomic_load_n(&compiles.running, __ATOMIC_ACQUIRE) == 0
@@ -205,7 +205,9 @@ lu_jit_invalidate(int kind, uintptr_t obj, uint32_t sub)
             fprintf(stderr, "jit: invalidate kind %d of %s@%d\n", kind, PyUnicode_AsUTF8(d->want.code->co_qualname),
                     d->want.pc);
         }
-        lu_jit_nohoist_set(d->want.code, d->want.pc);
+        if (kind != LU_DEP_CALLEES) {
+            lu_jit_nohoist_set(d->want.code, d->want.pc);       /* a new callee is no failed guard */
+        }
         lu_jit_unit_kill(u);
         killed = 1;
     }

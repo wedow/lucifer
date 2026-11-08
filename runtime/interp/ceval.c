@@ -1503,6 +1503,7 @@ op_CALL:
            that the site shows it ran. */
         PyObject *first = oparg >= 1 ? sp[-oparg] : sp[-2];
         lu_jit_observe(next_instr, first, oparg >= 2 ? sp[-oparg + 1] : first);
+        lu_jit_observe_callee(code, next_instr, sp[-oparg - 2], sp[-oparg - 1]);
     }
     SKIP_CACHES();
     kwnames = NULL;
