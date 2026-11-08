@@ -112,6 +112,10 @@ struct ctx {
     int npend, cappend;
     int units;                  /* code units compiled */
     struct lu_fs *island;       /* inlined for an operator: where its folded arithmetic restarts */
+    int generic_call;           /* the end of a call on a polymorphic site's generic answer: no feedback */
+    int cells;                  /* an inlined closure's caller set its cells (inline_call) */
+    PyFunctionObject *code_fn;  /* a callee test proved code_value a function of this one's code and globals */
+    lu_v code_value;
     int made;                   /* a frame compiled code never ran, made to be an inlined call's
                                    caller (class_call): nothing leaves at its own boundaries */
 };
@@ -119,8 +123,12 @@ struct ctx {
 /* Per-code JIT state the builder consults: pcs not to speculate at. */
 int lu_jit_nospec(PyCodeObject *code, int pc);
 int lu_jit_noinline(PyCodeObject *code);
+int lu_jit_next_pc(PyCodeObject *code, int pc);
 
 static int build_block(struct ctx *c, int bi);
+static int step(struct ctx *c, int pc, struct lu_block *entry);
+static int call_dispatch(struct ctx *c, int n);
+static int call(struct ctx *c);
 
 /* A site's operand kinds (runtime/jit/jit.h), counted: none means the
    interpreter has never run it. Attribute sites count in cached_site. */
@@ -1278,8 +1286,8 @@ static const char *const compare_names[] = {
     "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__",
 };
 
-static int inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int nargs,
-                       lu_v *result, int *result_owned);
+static int inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *args, uint8_t *owned,
+                       int nargs, lu_v *result, int *result_owned);
 
 /* A kernel method of a static type, inlined as the interpreter would run
    it for operands of that exact type. */
@@ -1296,7 +1304,7 @@ kernel_method(struct ctx *c, PyTypeObject *tp, const char *name, lu_v *args, int
     if (fn == NULL || self != NULL) {
         return 0;
     }
-    return inline_call(c, fn, args, own, nargs, result, owned);
+    return inline_call(c, fn, LU_NOV, 0, args, own, nargs, result, owned);
 }
 
 /* BINARY_OP on floats, or a float and an int: the operator's method of
@@ -1517,27 +1525,34 @@ truth(struct ctx *c, lu_v v)
 
 /* --- calls --- */
 
-/* Whether fn's code can inline here. */
-static int
-inlinable(struct ctx *c, PyFunctionObject *fn, int nargs)
+/* Why fn's code cannot inline here, or NULL. */
+static const char *
+not_inlinable(struct ctx *c, PyFunctionObject *fn, int nargs)
 {
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
-    if (!PyCode_Check(co) || c->depth >= INLINE_MAX_DEPTH || c->f->ninlined > INLINE_MAX_TOTAL
-        || (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE))
-        || !(co->co_flags & CO_OPTIMIZED) || co->co_kwonlyargcount != 0 || co->_co_monitoring != NULL
-        || (co->co_argcount < nargs && !(co->co_flags & CO_VARARGS)) || nargs > 30 || lu_jit_noinline(co)) {
-        return 0;
-    }
     int defaults = fn->func_defaults != NULL ? (int)PyTuple_GET_SIZE(fn->func_defaults) : 0;
-    if (nargs + defaults < co->co_argcount) {
-        return 0;
+    if (!PyCode_Check(co) || !(co->co_flags & CO_OPTIMIZED) || co->_co_monitoring != NULL) {
+        return "not plain code";
+    }
+    if (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE)) {
+        return "a generator";
+    }
+    if (co->co_kwonlyargcount != 0 || (co->co_argcount < nargs && !(co->co_flags & CO_VARARGS)) || nargs > 30
+        || nargs + defaults < co->co_argcount) {
+        return "arguments it does not bind";
+    }
+    if (c->depth >= INLINE_MAX_DEPTH || c->f->ninlined > INLINE_MAX_TOTAL) {
+        return "the inline budget";
+    }
+    if (lu_jit_noinline(co)) {
+        return "its inlined copies kept leaving";
     }
     for (struct ctx *p = c; p != NULL; p = p->parent) {
         if (p->code == co) {
-            return 0;           /* recursion */
+            return "recursion";
         }
     }
-    return 1;
+    return NULL;
 }
 
 static int
@@ -1608,12 +1623,19 @@ mark_undo(struct ctx *c, struct mark *m)
 
 /* Inlines fn(args...): the caller's state has the call's operands popped.
    Takes the args' references (owned[i]); on success *result is the value
-   the call returns. Returns 1, or 0 with nothing emitted. */
+   the call returns. With fnv, the call is of that function value, of fn's
+   code and globals (a closure, lu_function_template): the frame's cells
+   are fnv's, and fnv's reference (fnv_owned) is taken. Returns 1, or 0
+   with nothing emitted. */
 static int
-inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int nargs,
+inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *args, uint8_t *owned, int nargs,
             lu_v *result, int *result_owned)
 {
-    if (!inlinable(c, fn, nargs) || c->cur < 0) {
+    const char *no = c->cur < 0 ? "unreachable" : not_inlinable(c, fn, nargs);
+    if (no != NULL) {
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: not inlined %s: %s\n", PyUnicode_AsUTF8(fn->func_qualname), no);
+        }
         return 0;
     }
     struct lu_func *f = c->f;
@@ -1636,7 +1658,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
     k->depth = c->depth + 1;
     k->island = c->island;
     k->fixed = fixed_params(k);
-    if (!k->kernel) {
+    if (!k->kernel && fnv == LU_NOV) {
         /* The function's code is part of what was compiled: f.__code__ = ... changes its version. */
         if (fn->func_version < 2) {     /* 1: changed code or defaults, never specialized on again */
             free(k);
@@ -1685,6 +1707,21 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, uint8_t *owned, int
             k->st.v[at] = helper_leaving(c, H_new_dict, 0, NULL, 0);
             k->st.own[at] = 1;
             set_made(c, k->st.v[at], &PyDict_Type);
+        }
+        if (fnv != LU_NOV) {
+            /* COPY_FREE_VARS from the function called: its cells, each a reference of the frame's. */
+            int nfree = co->co_nfreevars;
+            lu_v closure = nfree > 0 ? emit(c, OP_LOAD, REP_OBJ, fnv, LU_NOV, LU_NOV,
+                                            offsetof(PyFunctionObject, func_closure)) : LU_NOV;
+            for (int i = 0; i < nfree; i++) {
+                lu_v cell = emit(c, OP_LOAD, REP_OBJ, closure, LU_NOV, LU_NOV,
+                                 offsetof(PyTupleObject, ob_item) + (int64_t)sizeof(PyObject *) * i);
+                incref(c, cell);
+                k->st.v[k->nlocals - nfree + i] = cell;
+                k->st.own[k->nlocals - nfree + i] = 1;
+            }
+            k->cells = 1;
+            release(c, fnv, fnv_owned);
         }
         k->cont = lu_ir_block(f);
         /* Into the callee's first block. */
@@ -1896,6 +1933,159 @@ cached_site(struct ctx *c, int generic, uint32_t *version, uint16_t *index, PyOb
 static int load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr);
 static lu_v type_of(struct ctx *c, lu_v v);
 
+/* --- paths that join after a call --- */
+
+/* One way through an instruction range: where it ends and with what. */
+struct path {
+    int block;                  /* -1: it never gets to the end */
+    struct bstate st;
+};
+
+/* The current block and state as a path, for join_paths. */
+static struct path
+path_here(struct ctx *c)
+{
+    struct path p = { c->cur, { 0 } };
+    if (c->cur >= 0) {
+        state_copy(c, &p.st, &c->st);
+    }
+    return p;
+}
+
+/* Joins paths that end at the same instruction boundary: each owns its
+   entries (normalize), and an entry the paths disagree on becomes a phi. */
+static void
+join_paths(struct ctx *c, struct path *p, int n)
+{
+    struct lu_func *f = c->f;
+    int live = 0, first = -1;
+    for (int i = 0; i < n; i++) {
+        if (p[i].block >= 0) {
+            live++;
+            first = first < 0 ? i : first;
+        }
+    }
+    if (live <= 1) {
+        c->cur = live ? p[first].block : -1;
+        if (live) {
+            c->st = p[first].st;
+        }
+        return;
+    }
+    int join = lu_ir_block(f);
+    for (int i = 0; i < n; i++) {
+        if (p[i].block >= 0) {
+            c->cur = p[i].block;
+            c->st = p[i].st;
+            normalize(c);
+            emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+            lu_ir_edge(f, p[i].block, join);
+        }
+    }
+    c->cur = join;
+    state_copy(c, &c->st, &p[first].st);
+    for (int k = 0; k < c->nlocals + c->st.sp; k++) {
+        int same = 1;
+        for (int i = first + 1; i < n; i++) {
+            same &= p[i].block < 0 || p[i].st.v[k] == p[first].st.v[k];
+        }
+        if (same) {
+            continue;
+        }
+        lu_v phi = lu_ir_emit(f, join, OP_PHI, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, k);
+        I(c, phi)->nargs = live;
+        I(c, phi)->args = malloc(sizeof(lu_v) * (size_t)live);
+        I(c, phi)->imm2 = c->parent == NULL && k < c->nlocals;     /* a root slot's value */
+        for (int i = 0, j = 0; i < n; i++) {
+            if (p[i].block >= 0) {
+                I(c, phi)->args[j++] = phi_input(c, p[i].st.v[k]);
+            }
+        }
+        c->st.v[k] = phi;
+        c->st.own[k] = 1;
+    }
+}
+
+/* The stack depth change of an instruction an argument list may hold, or
+   INT32_MIN for any other. */
+static int
+arg_effect(int op, int oparg)
+{
+    switch (op) {
+    case NOP: case NOT_TAKEN: case TO_BOOL: case UNARY_NOT: case UNARY_NEGATIVE: case UNARY_INVERT:
+        return 0;
+    case LOAD_FAST: case LOAD_FAST_BORROW: case LOAD_FAST_CHECK: case LOAD_CONST: case LOAD_SMALL_INT:
+    case LOAD_DEREF: case PUSH_NULL: case COPY: case LOAD_COMMON_CONSTANT:
+        return 1;
+    case LOAD_FAST_LOAD_FAST: case LOAD_FAST_BORROW_LOAD_FAST_BORROW:
+        return 2;
+    case LOAD_GLOBAL:
+        return 1 + (oparg & 1);
+    case LOAD_ATTR:
+        return oparg & 1;
+    case BINARY_OP: case COMPARE_OP: case CONTAINS_OP: case IS_OP:
+        return -1;
+    case BUILD_TUPLE: case BUILD_LIST:
+        return 1 - oparg;
+    case CALL:
+        return -1 - oparg;
+    case CALL_KW:
+        return -2 - oparg;
+    default:
+        return INT32_MIN;
+    }
+}
+
+/* Builds the instructions from the load at `at` to end on the current
+   state, as one path, then puts the builder back at the load with the
+   state before it (base). */
+static struct path
+through(struct ctx *c, const struct ctx *at, int end, const struct bstate *base)
+{
+    int ncalls = c->ncalls;
+    c->ncalls = at->ncalls;     /* the copies are alternatives: one call's worth */
+    for (int pc = at->next; pc != end && c->cur >= 0 && !c->failed;) {
+        pc = step(c, pc, NULL);
+    }
+    struct path p = path_here(c);
+    if (c->failed) {
+        p.block = -1;
+    }
+    c->ncalls = c->ncalls > ncalls ? c->ncalls : ncalls;
+    c->pc = at->pc;
+    c->next = at->next;
+    c->base = at->base;
+    c->oparg = at->oparg;
+    c->opcode = at->opcode;
+    c->cache = at->cache;
+    c->snap = at->snap;
+    state_copy(c, &c->st, base);
+    return p;
+}
+
+/* The end of the call that takes the method and self a method-form load
+   at c->pc pushes, when only argument code that does not branch comes
+   between: the boundary after the call, or -1. */
+static int
+call_end(struct ctx *c)
+{
+    int above = 0;              /* entries above the method and self */
+    for (int pc = c->next; pc < c->ncode && c->blkat[pc] < 0;) {
+        int base, oparg, op;
+        int next = decode(c, pc, &base, &oparg, &op);
+        if ((base == CALL && above == oparg) || (base == CALL_KW && above == oparg + 1)) {
+            return next;
+        }
+        int d = arg_effect(base, oparg);
+        if (d == INT32_MIN) {
+            return -1;
+        }
+        above += d;
+        pc = next;
+    }
+    return -1;
+}
+
 /* A site its polymorphic cache answers (runtime/jit/jit.h): the owner's
    type picks an entry, whose version is guarded and whose answer is
    taken as its one-shape site would; any other type takes the generic
@@ -1909,12 +2099,28 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
     int method = c->oparg & 1;
     PyObject *name = name_at(c, c->oparg >> 1);
     before(c);
+    lu_v first = f->nins;
     lu_v t = emit(c, OP_LOAD, REP_I64, type_of(c, owner), LU_NOV, LU_NOV, offsetof(PyTypeObject, tp_version_tag));
     I(c, t)->imm2 = 4;          /* 32 bits */
-    int join = lu_ir_block(f);
+    pop(c, NULL);
+    /* A method's call that follows is built once per entry (tail
+       duplication), so that each builds its own method's call and inlines
+       it. The copies count against the frame's inline budget: a split
+       that would make an inlined callee too large leaves the arms joined. */
+    int end = method ? call_end(c) : -1;
+    int range = end - c->next;
+    if (end >= 0 && c->parent != NULL && c->units + (c->next - c->pc) + (n + 1) * range > INLINE_MAX_UNITS) {
+        end = -1;
+    }
+    struct ctx at = *c;         /* the load's position, which each copy starts from */
+    struct bstate base;
+    if (end >= 0) {
+        state_copy(c, &base, &c->st);
+    }
+    struct path ends[LU_PIC_WAYS + 1];
+    int join = end < 0 ? lu_ir_block(f) : -1;
     lu_v r1[LU_PIC_WAYS + 1], r2[LU_PIC_WAYS + 1];
     int paths = 0;
-    pop(c, NULL);
     for (int i = 0; i < n; i++) {
         struct lu_pic_entry e = pic->e[i];
         lu_v bit = emit(c, OP_CMP_I, REP_BIT, t, const_i(c, e.version), LU_NOV, Py_EQ);
@@ -1924,6 +2130,7 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
         emit(c, OP_BRANCH, REP_NONE, bit, LU_NOV, LU_NOV, 0);
         c->cur = arm;
         lu_v a1, a2 = LU_NOV;
+        int own1 = 1, own2 = 0;
         if (e.op == LOAD_ATTR_INSTANCE_VALUE) {
             a1 = emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, e.index);
             I(c, a1)->fs = before(c);
@@ -1934,34 +2141,67 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                 lu_v args[2] = { owner, konst(c, name) };
                 guard(c, OP_GUARD_BIT, helper(c, H_dict_lacks, 2, args), 1);
             }
-            a1 = take(c, konst(c, e.descr), 0);
-            if (e.op == LOAD_ATTR_METHOD_NO_DICT || e.op == LOAD_ATTR_METHOD_WITH_VALUES) {
-                a2 = method ? take(c, owner, own) : LU_NOV;
-                if (!method) {
-                    release(c, owner, own);
-                }
+            /* A copy keeps the method a constant, which its call inlines; a join owns its inputs. */
+            a1 = konst(c, e.descr);
+            own1 = end < 0;
+            if (own1) {
+                incref(c, a1);
+            }
+            if (method && (e.op == LOAD_ATTR_METHOD_NO_DICT || e.op == LOAD_ATTR_METHOD_WITH_VALUES)) {
+                a2 = end < 0 ? take(c, owner, own) : owner;
+                own2 = end < 0 || own;
             }
             else {
                 release(c, owner, own);
             }
         }
-        r1[paths] = a1;
-        r2[paths++] = a2;
-        emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
-        lu_ir_edge(f, arm, join);
+        if (end >= 0) {
+            push(c, a1, own1);
+            if (method) {
+                push(c, a2, own2);
+            }
+            ends[paths++] = through(c, &at, end, &base);
+        }
+        else {
+            r1[paths] = a1;
+            r2[paths++] = a2;
+            emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+            lu_ir_edge(f, arm, join);
+        }
         c->cur = next;
     }
-    if (root_only(c)) {
+    if (!root_only(c)) {
+        unsupported(c);         /* leaves at the state before the load */
+    }
+    else {
         lu_v args[3] = { owner, konst(c, name), const_i(c, (int64_t)(intptr_t)pic) };
         lu_v v = helper_raising(c, method ? H_load_method : H_load_attr, 3, args, 1);
         release(c, owner, own);
-        r1[paths] = v;
-        r2[paths++] = LU_NOV;
-        emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
-        lu_ir_edge(f, c->cur, join);
+        if (end >= 0) {
+            /* Shapes the cache does not hold: the call as it was, on what the load answered. */
+            if (c->observed) {
+                frames_guard(c, first);
+                c->observed = 0;
+            }
+            push(c, v, 1);
+            push(c, LU_NOV, 0);
+            c->generic_call = end;
+            ends[paths++] = through(c, &at, end, &base);
+            c->generic_call = 0;
+        }
+        else {
+            r1[paths] = v;
+            r2[paths++] = LU_NOV;
+            emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+            lu_ir_edge(f, c->cur, join);
+        }
     }
-    else {
-        unsupported(c);         /* leaves at the state before the load */
+    if (end >= 0) {
+        /* The rest of this instruction is the call's: the frame goes on after it. */
+        join_paths(c, ends, paths);
+        c->units -= range;      /* the step that called this counts the range too */
+        c->next = end;
+        return 0;
     }
     c->cur = join;
     lu_v out[2];
@@ -2076,10 +2316,20 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         }
         return 0;
     }
-    case LOAD_ATTR_CLASS: {
-        /* A class's own attribute, by the class's version. */
+    case LOAD_ATTR_CLASS:
+    case LOAD_ATTR_CLASS_WITH_METACLASS_CHECK: {
+        /* A class's own attribute, by the class's version, and by its
+           metaclass's when that is not type (an Enum's members). */
         lu_v g = guard(c, OP_GUARD_VERSION, owner, version);
         I(c, g)->imm2 = GV_TYPE_ITSELF;
+        if (op == LOAD_ATTR_CLASS_WITH_METACLASS_CHECK) {
+            uint32_t meta = lu_cache_load32(c->cache + LA_KEYS_VERSION);
+            if (meta == 0) {
+                unsupported(c);
+                return -1;
+            }
+            guard(c, OP_GUARD_VERSION, owner, meta);
+        }
         pop(c, NULL);
         release(c, owner, own);
         push(c, konst(c, descr), 0);
@@ -2090,6 +2340,26 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
     }
     default:
         break;
+    }
+    PyObject *cls = known(c, owner);
+    uint32_t cv[3];
+    PyObject *value = cls != NULL && PyType_Check(cls) && !lu_jit_nospec(c->code, c->pc)
+        ? lu_specialize_class_value((PyTypeObject *)cls, name, cv) : NULL;
+    if (value != NULL) {
+        /* A constant class's attribute that is a plain value, by the versions that keep it one. */
+        lu_v g = guard(c, OP_GUARD_VERSION, owner, cv[0]);
+        I(c, g)->imm2 = GV_TYPE_ITSELF;
+        guard(c, OP_GUARD_VERSION, owner, cv[1]);
+        lu_v k = konst(c, value);
+        Py_DECREF(value);       /* the unit holds its constants */
+        guard(c, OP_GUARD_VERSION, k, cv[2]);
+        pop(c, NULL);
+        release(c, owner, own);
+        push(c, k, 0);
+        if (method) {
+            push(c, LU_NOV, 0);
+        }
+        return 0;
     }
     if (!root_only(c)) {
         unsupported(c);
@@ -2335,6 +2605,19 @@ speculate_args(struct ctx *c, int n)
     }
 }
 
+/* Whether v joins answers of a polymorphic attribute site: a phi with a
+   constant input. */
+static int
+poly_join(struct ctx *c, lu_v v)
+{
+    for (int i = 0; I(c, v)->op == OP_PHI && i < I(c, v)->nargs; i++) {
+        if (I(c, I(c, v)->args[i])->op == OP_CONST && I(c, I(c, v)->args[i])->imm != 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* --- class calls --- */
 
 static int opaque_call(struct ctx *c);
@@ -2525,7 +2808,7 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *init, uint32_t ver
         iown[0] = 0;
         memcpy(iargs + 1, args, sizeof(lu_v) * (size_t)nargs);
         memcpy(iown + 1, own, (size_t)nargs);
-        int resown, ok = inline_call(t, init, iargs, iown, nargs + 1, &res, &resown);
+        int resown, ok = inline_call(t, init, LU_NOV, 0, iargs, iown, nargs + 1, &res, &resown);
         if (!ok && !c->failed && (ok = init_call(c, t, init, iargs, iown, nargs + 1))) {
             res = pop(t, &resown);
         }
@@ -2589,6 +2872,198 @@ opaque_call(struct ctx *c)
     return 1;
 }
 
+/* Whether code has a loop. An inlined loop keeps its ints boxed where the
+   callee's own unit keeps them raw (Sieve 2.8x the instructions), so a
+   callee found only by feedback that loops is called. */
+static int
+loops(PyCodeObject *co)
+{
+    for (int pc = 0; pc < (int)Py_SIZE(co); pc = lu_jit_next_pc(co, pc)) {
+        if (lu_base_opcode(co, pc) == JUMP_BACKWARD) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* A function this unit made (MAKE_FUNCTION), reached however it was
+   passed (a closure handed to a callee that inlined): its code and globals
+   are known, as a template the unit keeps (lu_function_template), and only
+   its code can change since (f.__code__ = ...), which a guard checks. */
+static PyFunctionObject *
+made_function(struct ctx *c, lu_v v)
+{
+    struct lu_ins *in = I(c, v);
+    if (in->op != OP_HELPER || in->imm != H_make_function || lu_jit_nospec(c->code, c->pc)) {
+        return NULL;
+    }
+    PyObject *code = known(c, in->args[0]), *globals = known(c, in->args[1]);
+    PyObject *tmpl = code != NULL && globals != NULL ? lu_function_template(code, globals) : NULL;
+    if (tmpl == NULL) {
+        PyErr_Clear();
+        return NULL;
+    }
+    konst(c, tmpl);
+    Py_DECREF(tmpl);
+    lu_v g = guard(c, OP_GUARD_IS, v, (int64_t)(intptr_t)code);
+    I(c, g)->imm2 = GI_FIELD | offsetof(PyFunctionObject, func_code);
+    return (PyFunctionObject *)tmpl;
+}
+
+/* Leaves for block fail, or with fail < 0 deopts, unless bit is set. */
+static void
+test_bit(struct ctx *c, lu_v bit, int fail)
+{
+    if (fail < 0) {
+        guard(c, OP_GUARD_BIT, bit, 1);
+        return;
+    }
+    int ok = lu_ir_block(c->f);
+    lu_ir_edge(c->f, c->cur, ok);
+    lu_ir_edge(c->f, c->cur, fail);
+    emit(c, OP_BRANCH, REP_NONE, bit, LU_NOV, LU_NOV, 0);
+    c->cur = ok;
+}
+
+/* The same unless the word at offset off of v (off < 0: v itself) is o. */
+static void
+test_word(struct ctx *c, lu_v v, int off, PyObject *o, int fail)
+{
+    lu_v k = konst(c, o);       /* the unit keeps what it compares with */
+    if (fail < 0) {
+        lu_v g = guard(c, OP_GUARD_IS, v, (int64_t)(intptr_t)o);
+        I(c, g)->imm2 = off < 0 ? 0 : GI_FIELD | off;
+        return;
+    }
+    lu_v w = off < 0 ? v : emit(c, OP_LOAD, REP_OBJ, v, LU_NOV, LU_NOV, off);
+    test_bit(c, emit(c, OP_IS, REP_BIT, w, k, LU_NOV, 0), fail);
+}
+
+/* Goes on in a new block when callable is e's callee (obj its function or
+   code), else leaves for fail (fail < 0: deopts, as a guard): the function
+   it calls. */
+static lu_v
+callee_test(struct ctx *c, lu_v callable, const struct lu_callee *e, int fail)
+{
+    lu_v fv = callable;
+    if (e->kind & LU_CALLEE_BOUND) {
+        test_word(c, callable, offsetof(PyObject, ob_type), (PyObject *)&PyMethod_Type, fail);
+        fv = emit(c, OP_LOAD, REP_OBJ, callable, LU_NOV, LU_NOV, offsetof(PyMethodObject, im_func));
+    }
+    if (e->kind & LU_CALLEE_CODE) {
+        test_word(c, fv, offsetof(PyObject, ob_type), (PyObject *)&PyFunction_Type, fail);
+        test_word(c, fv, offsetof(PyFunctionObject, func_code), e->obj, fail);
+        test_word(c, fv, offsetof(PyFunctionObject, func_globals), e->globals, fail);
+    }
+    else {
+        test_word(c, fv, -1, e->obj, fail);
+    }
+    return fv;
+}
+
+/* A call of a callable the code does not name, by the callees the
+   interpreter met at the site (jit.h): each is tested in turn, the last as
+   a guard, and the call is built once per callee with that callee known,
+   so that each inlines; the paths join after the call. A callee added to
+   the site's table later recompiles the unit. 1 when built, 0 when the site
+   has no table to use, -1 when the frame cannot be compiled. */
+static int
+call_dispatch(struct ctx *c, int n)
+{
+    int site = (int)(c->cache - 1 - lu_code_start(c->code));
+    struct lu_callees *t = lu_jit_callees(c->code, site);
+    if (t == NULL || __atomic_load_n(&t->mega, __ATOMIC_ACQUIRE) || lu_jit_nospec(c->code, c->pc)
+        || c->generic_call == c->next) {
+        return 0;
+    }
+    /* Entries name only what a collection frees, and this thread does not
+       poll before the unit holds them; a closure's globals are compared
+       only, and used only when a frame being compiled holds them. */
+    struct lu_callee e[LU_CALLEE_WAYS];
+    int m = 0;
+    for (int i = 0, k = __atomic_load_n(&t->n, __ATOMIC_ACQUIRE); i < k; i++) {
+        struct lu_callee x = t->e[i];
+        int live = !(x.kind & LU_CALLEE_CODE);
+        for (struct ctx *p = c; p != NULL && !live; p = p->parent) {
+            live = p->globals == x.globals;
+        }
+        PyObject *fo = x.kind & LU_CALLEE_CODE ? x.obj : x.obj != NULL && PyFunction_Check(x.obj)
+            ? ((PyFunctionObject *)x.obj)->func_code : NULL;
+        if (fo != NULL && (lu_jit_noinline((PyCodeObject *)fo) || loops((PyCodeObject *)fo))) {
+            return 0;           /* a callee called anyway, or one that loops: the call as it is costs least */
+        }
+        if (live && x.obj != NULL) {
+            e[m++] = x;
+        }
+    }
+    if (m == 0) {
+        return 0;
+    }
+    struct lu_fdep dep = { .kind = LU_DEP_CALLEES, .obj = (uintptr_t)t, .code = c->code, .pc = c->pc };
+    lu_ir_dep(c->f, &dep);
+    int callable_at = c->nlocals + c->st.sp - (n + 2);
+    lu_v callable = c->st.v[callable_at];
+    int own = c->st.own[callable_at];
+    struct ctx at = *c;
+    struct bstate base;
+    state_copy(c, &base, &c->st);
+    struct path ends[LU_CALLEE_WAYS];
+    int ncalls = c->ncalls, most = ncalls;     /* the arms are alternatives: one call's worth */
+    for (int i = 0; i < m; i++) {
+        c->ncalls = ncalls;
+        int fail = i < m - 1 ? lu_ir_block(c->f) : -1;
+        lu_v fv = callee_test(c, callable, &e[i], fail);
+        if (e[i].kind & LU_CALLEE_BOUND) {
+            /* The bound method's self and function become the call's, and it goes. */
+            lu_v self = emit(c, OP_LOAD, REP_OBJ, callable, LU_NOV, LU_NOV, offsetof(PyMethodObject, im_self));
+            incref(c, self);
+            c->st.v[callable_at + 1] = self;
+            c->st.own[callable_at + 1] = 1;
+            if (e[i].kind & LU_CALLEE_CODE) {
+                incref(c, fv);
+            }
+            release(c, callable, own);
+        }
+        if (e[i].kind & LU_CALLEE_CODE) {
+            PyObject *tmpl = lu_function_template(e[i].obj, e[i].globals);
+            if (tmpl == NULL) {
+                Py_FatalError("lucifer jit: out of memory");
+            }
+            konst(c, tmpl);     /* the unit names the inlined frames by it */
+            Py_DECREF(tmpl);
+            c->st.v[callable_at] = fv;
+            c->st.own[callable_at] = (e[i].kind & LU_CALLEE_BOUND) || own;
+            c->code_fn = (PyFunctionObject *)tmpl;
+            c->code_value = fv;
+        }
+        else {
+            if (!(e[i].kind & LU_CALLEE_BOUND)) {
+                release(c, callable, own);      /* the constant is the same object */
+            }
+            c->st.v[callable_at] = konst(c, e[i].obj);
+            c->st.own[callable_at] = 0;
+        }
+        /* Guards of the call leave with the stack as it is now: the
+           interpreter calls the function with the bound method's self. */
+        c->snap = NULL;
+        before(c);
+        int built = call(c);
+        c->code_fn = NULL;
+        if (built < 0 && c->failed) {
+            return -1;
+        }
+        ends[i] = path_here(c);
+        most = c->ncalls > most ? c->ncalls : most;
+        c->next = at.next;
+        c->snap = at.snap;
+        state_copy(c, &c->st, &base);
+        c->cur = fail;
+    }
+    c->ncalls = most;
+    join_paths(c, ends, m);
+    return 1;
+}
+
 static int
 call(struct ctx *c)
 {
@@ -2601,6 +3076,20 @@ call(struct ctx *c)
     PyObject *kc = known(c, callable);
     PyObject *bound;
     PyFunctionObject *fn = call_target(c, callable, &bound);
+    lu_v fnv = LU_NOV;
+    if (fn == NULL && c->code_fn != NULL && callable == c->code_value) {
+        fn = c->code_fn;        /* a callee test proved its code */
+        fnv = callable;
+    }
+    else if (kc == NULL && (fn = made_function(c, callable)) != NULL) {
+        fnv = callable;
+    }
+    else if (kc == NULL && self == LU_NOV) {
+        int built = call_dispatch(c, n);
+        if (built != 0) {
+            return built < 0 ? -1 : 0;
+        }
+    }
     const char *prim = primitive_name(kc);
     if (kc != NULL && PyCFunction_Check(kc) && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_FRAME)) {
         unsupported(c);         /* it hands the interpreter a frame to run */
@@ -2701,6 +3190,7 @@ call(struct ctx *c)
             hargs[i] = peek(c, n - i);
         }
         r = helper_raising(c, H_call_special, n, hargs, n + 2);
+        I(c, r)->imm2 = CNT_call_unknown + 1;
         guard_after(c, OP_GUARD_NOT_NULL, r, 1);
         pop_call(c, n);
         push(c, r, 1);
@@ -2714,9 +3204,11 @@ call(struct ctx *c)
         struct bstate saved;
         state_copy(c, &saved, &c->st);
         c->st.sp -= n + 2;
-        if (inline_call(c, fn, args, own, nargs, &r, &rown)) {
+        if (inline_call(c, fn, fnv, owncallable, args, own, nargs, &r, &rown)) {
             if (c->cur >= 0) {          /* else every path of the callee left */
-                release(c, callable, owncallable);
+                if (fnv == LU_NOV) {
+                    release(c, callable, owncallable);
+                }
                 release(c, descr, owndescr);
                 push(c, r, rown);
             }
@@ -2745,6 +3237,7 @@ call(struct ctx *c)
             hargs[1 + i] = peek(c, n - i);
         }
         r = helper_raising(c, py ? H_prim_call : H_prim, n + 1, hargs, n + 2);
+        I(c, r)->imm2 = CNT_call_c + 1;
         if (py) {
             guard_after(c, OP_GUARD_NOT_NULL, r, 1);    /* declined: the C stack is too deep */
         }
@@ -2762,6 +3255,12 @@ call(struct ctx *c)
         hargs[2 + i] = peek(c, n - i);
     }
     r = helper_raising(c, H_call, n + 2, hargs, n + 2);
+    I(c, r)->imm2 = 1 + (fn != NULL ? CNT_call_refused : kc != NULL ? CNT_call_c
+                         : poly_join(c, callable) ? CNT_call_poly : CNT_call_unknown);
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: call %s at %s@%d\n", lu_count_names[I(c, r)->imm2 - 1],
+                PyUnicode_AsUTF8(c->code->co_qualname), c->pc);
+    }
     /* The helper declines when the C stack is too deep to recurse: the interpreter makes the call. */
     guard_after(c, OP_GUARD_NOT_NULL, r, 1);
     pop_call(c, n);
@@ -3158,6 +3657,9 @@ translate(struct ctx *c)
     }
     case COPY_FREE_VARS: {
         PyObject *closure = c->func->func_closure;
+        if (c->cells) {
+            return 0;           /* the caller copied the function's */
+        }
         if (c->parent == NULL || closure == NULL) {
             unsupported(c);
             return -1;
@@ -3398,6 +3900,7 @@ translate(struct ctx *c)
             lu_v args[3] = { hargs[0], hargs[2], hargs[3] };     /* the callable, *args, **kwargs */
             w = helper_raising(c, H_call_ex, 3, args, nops);
         }
+        I(c, w)->imm2 = CNT_call_kw + 1;
         guard_after(c, OP_GUARD_NOT_NULL, w, 1);
         for (int i = 0; i < nops; i++) {
             v = pop(c, &own);
@@ -3491,6 +3994,39 @@ translate(struct ctx *c)
     }
 }
 
+/* Builds the instruction at pc from the current state; the next one's pc.
+   A join's first instruction records its state for guards moved before
+   it (entry). */
+static int
+step(struct ctx *c, int pc, struct lu_block *entry)
+{
+    c->pc = pc;
+    c->next = decode(c, pc, &c->base, &c->oparg, &c->opcode);
+    c->cache = cache_of(c, pc);
+    c->snap = NULL;
+    before(c);
+    if (entry != NULL) {
+        entry->entry_fs = c->snap;
+    }
+    if (!supported(c->base)) {
+        unsupported(c);
+        return c->next;
+    }
+    c->observed = 0;
+    lu_v first = c->f->nins;
+    translate(c);
+    if (c->observed && c->cur >= 0 && !c->failed) {
+        frames_guard(c, first);
+    }
+    c->observed = 0;
+    c->units += c->next - pc;
+    if (c->parent != NULL && c->units > INLINE_MAX_UNITS) {
+        c->failed = 1;      /* too large to inline: it is called instead */
+        c->why = "too large";
+    }
+    return c->next;
+}
+
 /* Whether block k sends no more edges: it is built, or nothing reached
    it and nothing that could still reach it is left. memo: 0 unknown, 1
    settled, 2 not (or being decided, which a cycle leaves unsettled). */
@@ -3564,30 +4100,7 @@ build_block(struct ctx *c, int bi)
             jump_to(c, pc);
             break;
         }
-        c->pc = pc;
-        c->next = decode(c, pc, &c->base, &c->oparg, &c->opcode);
-        c->cache = cache_of(c, pc);
-        c->snap = NULL;
-        before(c);
-        if (pc == b->pc && b->phis && !b->exc) {
-            c->f->blocks[b->id].entry_fs = c->snap;
-        }
-        if (!supported(c->base)) {
-            unsupported(c);
-            break;
-        }
-        c->observed = 0;
-        lu_v first = c->f->nins;
-        translate(c);
-        if (c->observed && c->cur >= 0 && !c->failed) {
-            frames_guard(c, first);
-        }
-        c->units += c->next - pc;
-        if (c->parent != NULL && c->units > INLINE_MAX_UNITS) {
-            c->failed = 1;      /* too large to inline: it is called instead */
-            c->why = "too large";
-        }
-        pc = c->next;
+        pc = step(c, pc, pc == b->pc && b->phis && !b->exc ? &c->f->blocks[b->id] : NULL);
     }
     return c->failed ? -1 : 0;
 }

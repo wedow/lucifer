@@ -60,6 +60,17 @@ require that a count of the tier's does not grow with the iterations:
          attribute) or what never changes (the range iterator's type):
          the guards its units execute (-X lucifer_jit_stats' per-unit
          census). They move out of the loop.
+  callees tests/kernel/jit_callee_calls.py, whose hot calls are of
+         methods at a site that meets four classes, and of functions,
+         bound methods and closures the code reaches through locals and
+         attributes: calls compiled code makes of a callee it could not
+         name or of a polymorphic site's join (-X lucifer_jit_stats'
+         call_unknown and call_poly). The tier inlines them all.
+  order  tests/kernel/jit_call_order.py in both orders (luc-sl4y): a loop
+         calling a function through a local after, or before, another loop
+         called it through a class attribute with other operand types:
+         entries into compiled code, direct and compiled calls, and calls
+         of callees it could not name. Each site inlines the callee.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -90,7 +101,8 @@ MODES = {
     'deopt:7': ['-X', 'lucifer_jit=always', '-X', 'lucifer_stress=deopt:7'],
 }
 TIMING = re.compile(r'\d+us')
-# lane: (program, the counts in the -X lucifer_jit_stats report, summed, counts allowed per iteration[, flags])
+# lane: (program, the counts in the -X lucifer_jit_stats report, summed, counts allowed per iteration[,
+#        interpreter flags[, the argument lists after each run's size, all of which must pass]])
 GROWTH = {
     'exits': ('jit_exits.py', r'jit: entries .* side (\d+)', 0),
     'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
@@ -99,7 +111,7 @@ GROWTH = {
     'caught': ('jit_caught.py', r'jit: entries .* error (\d+) frame (\d+)', 0),
     'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
     'ccalls': ('jit_c_calls.py', r'direct calls (\d+)', 1),
-    'perfcalls': ('jit_compiled_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0, ['-X', 'perf']),
+    'perfcalls': ('jit_compiled_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0, ('-X', 'perf')),
     'super': ('jit_super.py', r'jit: entries .* side (\d+)', 0),
     'inline': ('jit_inline_paths.py', r'jit: C paths list_item (\d+), tuple_item (\d+), list_store (\d+), '
                r'box_int (\d+), box_float (\d+), build_list (\d+), build_tuple (\d+)', 0),
@@ -108,6 +120,9 @@ GROWTH = {
     'objects': ('jit_virtual_objects.py', r'jit: allocations by kind: .*tuple (\d+), .*instance (\d+)', 0),
     'guards': ('jit_guards.py', r'jit: unit hot@\d+ entries \d+ guards (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
+    'callees': ('jit_callee_calls.py', r'call_unknown (\d+) call_poly (\d+)', 0),
+    'order': ('jit_call_order.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
+              r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),
 }
 GROWTH_N = 20000
 PERF_RESOLVED = 0.95
@@ -119,10 +134,10 @@ def run(argv, timeout):
     return p.returncode, TIMING.sub('Nus', p.stdout), p.stderr
 
 
-def counted(lucifer, program, pattern, n, timeout, flags=()):
-    code, out, err = run([lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', *flags, str(program),
-                          str(n)], timeout)
-    found = [int(n) for m in re.finditer(pattern, err) for n in m.groups()]
+def counted(lucifer, program, pattern, n, timeout, flags=(), extra=()):
+    code, out, err = run([lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', *flags, str(program), str(n),
+                          *extra], timeout)
+    found = [int(n) for m in re.finditer(pattern, err) for n in m.groups() if n is not None]
     return (code, out, sum(found) if found else None,
             re.findall(r'^jit: (?:disabled (\S+)|retire (\S+)@)', err, re.M))
 
@@ -140,24 +155,28 @@ def qualnames(program):
 
 def check_growth(args, lane):
     """The count at 2N less the count at N: what the extra N iterations cost."""
-    name, pattern, per, *flags = GROWTH[lane]
+    name, pattern, per, *rest = GROWTH[lane]
+    flags, variants = (rest + [(), [()]][len(rest):])[:2]
     program = ROOT / 'tests' / 'kernel' / name
     sizes = (GROWTH_N, 2 * GROWTH_N)
-    small, large = (counted(args.lucifer, program, pattern, n, args.timeout, *flags) for n in sizes)
-    want = [run([args.oracle, str(program), str(n)], args.timeout)[:2] for n in sizes]
-    problems = []
-    if [small[:2], large[:2]] != want:
-        problems.append('output differs')
-    if small[2] is None or large[2] is None:
-        problems.append('no stats')
-    elif large[2] - small[2] > per * GROWTH_N + GROWTH_N // 20:
-        problems.append(f'{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
-    own = qualnames(program)
-    given_up = own & {name for pair in small[3] for name in pair if name}
-    if lane in ('calls', 'super') and given_up:
-        problems.append(f"disabled or retired: {' '.join(sorted(given_up))}")
+    problems, seen = [], []
+    for extra in variants:
+        small, large = (counted(args.lucifer, program, pattern, n, args.timeout, flags, extra) for n in sizes)
+        want = [run([args.oracle, str(program), str(n), *extra], args.timeout)[:2] for n in sizes]
+        tag = f"{' '.join(extra)}: " if extra else ''
+        if [small[:2], large[:2]] != want:
+            problems.append(tag + 'output differs')
+        if small[2] is None or large[2] is None:
+            problems.append(tag + 'no stats')
+        elif large[2] - small[2] > per * GROWTH_N + GROWTH_N // 20:
+            problems.append(f'{tag}{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
+        own = qualnames(program)
+        given_up = own & {name for pair in small[3] for name in pair if name}
+        if lane in ('calls', 'super') and given_up:
+            problems.append(f"{tag}disabled or retired: {' '.join(sorted(given_up))}")
+        seen.append(f'{small[2]}, {large[2]}')
     print(f"{'FAIL' if problems else 'PASS'} {lane}" + (': ' + '; '.join(problems) if problems else
-                                                      f' ({small[2]}, {large[2]})'))
+                                                      f" ({'; '.join(seen)})"))
     return 1 if problems else 0
 
 
