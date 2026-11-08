@@ -1276,6 +1276,29 @@ h_load_special(PyObject *owner, int64_t which)
     return lu_call_kernel(LU_K_load_special, args, 2);
 }
 
+/* UNPACK_SEQUENCE of what is not an exact tuple or list: a tuple of its n
+   items, or NULL with the interpreter's error. A tuple subclass that
+   iterates as a tuple (a named tuple) is that tuple. */
+static PyObject *
+h_unpack(PyObject *seq, int64_t n)
+{
+    static PyObject *iter_name;
+    if (iter_name == NULL) {
+        iter_name = PyUnicode_InternFromString("__iter__");       /* immortal, as interned */
+    }
+    if (PyTuple_Check(seq) && Py_SIZE(seq) == n
+        && _PyType_Lookup(Py_TYPE(seq), iter_name) == _PyType_Lookup(&PyTuple_Type, iter_name)) {
+        return Py_NewRef(seq);
+    }
+    PyObject *args[2] = { seq, PyLong_FromLongLong(n) };
+    if (args[1] == NULL) {
+        return NULL;
+    }
+    PyObject *r = lu_call_kernel(LU_K_unpack, args, 2);
+    Py_DECREF(args[1]);
+    return r;
+}
+
 const struct lu_helper lu_helpers[H_COUNT] = {
     [H_box_int] = { (void *)lu_jit_box_int, "box_int", REP_OBJ, 0, 1 },
     [H_box_float] = { (void *)lu_jit_box_float, "box_float", REP_OBJ, 0, 1 },
@@ -1363,4 +1386,5 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_raise] = { (void *)h_raise, "raise", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_reraise] = { (void *)h_reraise, "reraise", REP_OBJ, IF_RAISE, 1 },
     [H_load_special] = { (void *)h_load_special, "load_special", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_unpack] = { (void *)h_unpack, "unpack", REP_OBJ, IF_RAISE | IF_PY, 2 },
 };

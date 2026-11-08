@@ -121,6 +121,10 @@ require that a count of the tier's does not grow with the iterations:
          on every call for a while and then stops (luc-j4mj): calls
          compiled code makes of it, and entries left to the interpreter,
          while its entry waits. It is compiled and entered again.
+  unpack tests/kernel/jit_unpack_generic.py, whose hot loop unpacks named
+         tuples, a tuple subclass with its own __iter__ and a generator:
+         side exits and entries left to the interpreter. The kernel's unpack
+         is called from compiled code.
   contexts tests/kernel/jit_contexts.py, whose hot loop runs with
          statements: entries left to the interpreter and retired units.
          LOAD_SPECIAL compiles.
@@ -194,6 +198,7 @@ GROWTH = {
     'phases': ('jit_phases.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
                r'|jit: entries waited (\d+)', 0),
     'retry': ('jit_retry.py', r'jit: whynot .* waiting (\d+)|jit: entries waited (\d+)', 0),
+    'unpack': ('jit_unpack_generic.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
     'contexts': ('jit_contexts.py', r'jit: entries waited (\d+), units retired (\d+)', 0),
     'marked': ('jit_marked.py', r'jit: compiles (\d+)|jit: entries waited (\d+)', 0),
     'shadowed': ('jit_shadowed.py', r'jit: compiles (\d+)|exits guard (\d+)', 0),

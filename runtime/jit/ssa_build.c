@@ -4698,18 +4698,25 @@ translate(struct ctx *c)
     case UNPACK_SEQUENCE: {
         /* An exact tuple or list (the kind the interpreter met, else a
            tuple) of oparg items, its items pushed last first; any other
-           sequence leaves, and after enough of that it always does. A
-           list's items are read under its lock, as a tuple. */
+           sequence leaves, and after enough of that the kernel unpacks
+           it into a tuple (at the root: it runs Python). A list's items
+           are read under its lock, as a tuple. */
         v = peek(c, 1);
         own = peek_owned(c, 1);
-        if (oparg > 30 || lu_jit_nospec(c->code, c->pc)) {
+        int generic = oparg > 30 || lu_jit_nospec(c->code, c->pc);
+        if (generic && !root_only(c)) {
             unsupported(c);
             return -1;
         }
         PyTypeObject *t = known_type(c, v);
-        int list = t == &PyList_Type || (t != &PyTuple_Type && (feedback(c, c->cache) & 0xff) == LU_KIND_LIST);
+        int list = !generic
+            && (t == &PyList_Type || (t != &PyTuple_Type && (feedback(c, c->cache) & 0xff) == LU_KIND_LIST));
         lu_v items = v;
-        if (list) {
+        if (generic) {
+            lu_v args[2] = { v, const_i(c, oparg) };
+            items = helper_raising(c, H_unpack, 2, args, 1);
+        }
+        else if (list) {
             guard_type(c, v, &PyList_Type);
             lu_v args[2] = { v, const_i(c, oparg) };
             items = helper_raising(c, H_list_to_tuple, 2, args, 0);
@@ -4727,7 +4734,7 @@ translate(struct ctx *c)
             incref(c, item);
             push(c, item, 1);
         }
-        release(c, items, list);
+        release(c, items, list || generic);
         release(c, v, own);
         return 0;
     }
