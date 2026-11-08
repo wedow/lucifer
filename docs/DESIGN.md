@@ -672,7 +672,11 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    generator with, and the frame is the generator's again (owner
    `LU_FRAME_GENERATOR`). The interpreter's `RESUME` enters the unit, and
    compiled code resuming a generator (`FOR_ITER`, `SEND`, `gen_send` for
-   `next()` and `send()`) enters it directly. A call of a generator function
+   `next()` and `send()`) enters it directly. A generator going on inside
+   `yield from` or `await` stays in the eval loop, which runs the
+   delegation chain by switching frames; a unit per level would pay an
+   entry and a yield for each (pyperformance generators, a tree walked by
+   recursive `yield from`: 1.43x master's time when it did). A call of a generator function
    from compiled code makes the generator without the interpreter. A
    generator whose code the builder knows (a call of a known generator
    function, or of a function the code made, as a generator expression is)

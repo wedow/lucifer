@@ -1267,8 +1267,13 @@ op_RESUME: {
     if ((oparg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM) {
         POLL();
     }
-    /* A call, or a generator going on after a yield. */
-    if ((oparg == 0 || (code->co_flags & LU_CO_GENERATORS)) && lu_jit_on() && lu_jit_call_hot(code)) {
+    /* A call, or a generator going on after a yield. One going on inside
+       `yield from` or `await` stays here: this loop runs the delegation
+       chain by switching frames, which a unit per level would pay a
+       nested entry and a yield for. */
+    if ((oparg == 0 || ((code->co_flags & LU_CO_GENERATORS)
+                        && (oparg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM))
+        && lu_jit_on() && lu_jit_call_hot(code)) {
         goto jit_enter;
     }
     DISPATCH();

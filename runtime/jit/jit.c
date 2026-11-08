@@ -836,7 +836,10 @@ lu_jit_resume(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     int fresh = frame->instr == jc->fresh;
     int pc = fresh ? jc->resume_key - 1 - lu_opcode_caches[RESUME] : (int)(frame->instr - start);
     int at = pc + 1 + lu_opcode_caches[RESUME];
-    struct lu_unit *u = at < jc->ncode && jc->resume[at] ? find(jc, jc->resume_key) : NULL;
+    /* Inside `yield from` or `await` the delegation runs in the eval loop
+       (ceval.c RESUME). */
+    struct lu_unit *u = at < jc->ncode && jc->resume[at] && (start[pc].op.arg & 3) < 2
+        ? find(jc, jc->resume_key) : NULL;
     if (u == NULL) {
         return 0;
     }

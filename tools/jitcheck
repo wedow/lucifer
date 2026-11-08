@@ -52,8 +52,9 @@ require that a count of the tier's does not grow with the iterations:
          census). They move out of the loop.
   gens   tests/kernel/jit_gen_resumes.py, whose hot generators and
          coroutines are resumed by a for loop, next() and send(), a builtin
-         consuming a generator expression, `yield from` and await: the
-         resumes the interpreter runs (each resume enters compiled code).
+         consuming a generator expression, the first run of `yield from`
+         and await: the resumes the interpreter runs (each resume enters
+         compiled code).
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
