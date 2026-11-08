@@ -2293,6 +2293,14 @@ raw_fields(struct lu_func *f)
     return changed;
 }
 
+/* Whether in returns a box of a raw value (one that cannot stand for NULL). */
+static int
+returns_raw(struct lu_func *f, struct lu_ins *in)
+{
+    struct lu_ins *b = in->op == OP_RETURN && in->a != LU_NOV ? &f->ins[in->a] : NULL;
+    return b != NULL && (b->op == OP_BOX_INT || b->op == OP_BOX_FLOAT) && b->b == LU_NOV && b->c == LU_NOV;
+}
+
 /* 4 and 5. */
 static void
 escape(struct lu_func *f)
@@ -2311,7 +2319,7 @@ escape(struct lu_func *f)
         }
         int allowed = in->op == OP_DECREF || in->op == OP_INCREF || in->op == OP_UNBOX_INT
             || in->op == OP_UNBOX_FLOAT || in->op == OP_GUARD_NOT_NULL
-            || (in->op == OP_TRUTH && f->ins[in->a].op == OP_HELPER);
+            || (in->op == OP_TRUTH && f->ins[in->a].op == OP_HELPER) || returns_raw(f, in);
         lu_v ops[3] = { in->a, in->b, in->c };
         for (int i = 0; i < 3; i++) {
             if (ops[i] != LU_NOV && !(allowed && i == 0)) {
@@ -2340,6 +2348,21 @@ escape(struct lu_func *f)
         if (ok[v]) {
             f->ins[v].flags |= INS_VIRTUAL;
         }
+    }
+    for (int v = 0; v < n; v++) {
+        /* A return makes the box it returns: one the loop carried raw
+           (s = 0, s += x, return s) is made once, where it leaves. */
+        struct lu_ins *in = &f->ins[v];
+        if (!(in->flags & INS_DEAD) && returns_raw(f, in) && ok[in->a]) {
+            lu_v raw = f->ins[in->a].a;
+            int op = f->ins[in->a].op;
+            lu_v box = insert_before(f, v, op, raw, 0);
+            f->ins[v].a = box;
+        }
+    }
+    fwd = realloc(fwd, sizeof(lu_v) * (size_t)f->capins);
+    for (int v = n; v < f->nins; v++) {
+        fwd[v] = v;
     }
     for (int v = 0; v < n; v++) {
         struct lu_ins *in = &f->ins[v];

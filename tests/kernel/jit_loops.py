@@ -225,12 +225,48 @@ def big_compare(n):
     return c
 
 
+SMALL = [int(str(k)) for k in range(8)]   # the cached small ints, not constants
+
+
+def const_starts(n):
+    # Loop-carried values that start as constants stay raw, and the value
+    # returned or left at an exit is the interpreter's: a small int is the
+    # cached object, a float joins an infinite constant.
+    lo, hi, s, f = 0, 0, 0.0, float("-inf")
+    for i in range(n):
+        s += i * 0.5
+        f = f if i % 3 else i / 7
+        if i == n - 2:
+            lo = len([s])
+        hi += 1
+    return lo is SMALL[1], hi, s, f
+
+
+def returned_box(n):
+    t = 0
+    for i in range(n):
+        t += 1 if i < 5 else 0
+    return t
+
+
+def exits_with_raw(n):
+    acc, big = 0, 1
+    for i in range(n):
+        acc += i
+        if i == n // 2:
+            big = 2 ** 80     # the loop leaves here with acc raw
+        acc += big % 3
+    return acc
+
+
 for f, arg in [(int_sum, N), (int_overflow, 200), (int_ops, N), (float_mix, N), (sieve, 5000),
                (attrs, N), (floats_attrs, N), (builtins_loop, N), (type_change, N),
                (list_change, N), (raises_inside, N), (global_rebind, N), (method_replace, N),
                (none_checks, 600), (fib, 20), (negative_range, N), (early_exit, N),
-               (same_object, N), (frame_view, N), (big_compare, N)]:
+               (same_object, N), (frame_view, N), (big_compare, N), (const_starts, N),
+               (exits_with_raw, N)]:
     print(f.__name__, f(arg))
+print("returned_box", returned_box(N) is SMALL[5], [returned_box(k) for k in (0, 3, 9)])
 try:
     raises_out(N)
 except ZeroDivisionError as e:
