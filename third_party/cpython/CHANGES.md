@@ -39,6 +39,10 @@ system's OpenSSL, SQLite, bzip2 and Expat:
 - `cjkcodecs/` (`_multibytecodec`, `_codecs_cn`, `_codecs_hk`, `_codecs_iso2022`,
   `_codecs_jp`, `_codecs_kr`, `_codecs_tw`)
 
+Local change (marked `LU:`): `pyexpat.c` sets the error's `code` attribute by
+name, not through `&_Py_ID(code)`, a string object inside CPython's
+`_PyRuntime`, which this runtime does not lay out.
+
 ## include/
 
 `include/` (top level of this repository) is `Include/` from the same tag,

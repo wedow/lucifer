@@ -619,6 +619,9 @@ struct lu_carrier {
     /* Below this the thread's C stack keeps room for an activation of the
        interpreter: compiled code calls a callee only above it. */
     char *jit_stack_floor;
+    /* The thread's C stack, [stack_base, stack_top), or zeros when unknown:
+       a task bound here takes it as the bounds C recursion checks watch. */
+    uintptr_t stack_base, stack_top;
 };
 
 extern _Thread_local struct lu_carrier *lu_carrier;
@@ -675,6 +678,7 @@ struct lu_entry *lu_entry_of(struct lu_carrier *c, struct _is *interp);
    unbinds and frees the tasks still bound to it (lu_task_carrier_exit). */
 struct lu_task *lu_task_new(struct _is *interp, int whence);
 void lu_task_bind(struct lu_task *t);
+void lu_task_set_c_stack(struct lu_task *t, uintptr_t base, uintptr_t top);
 void lu_task_attach(PyThreadState *ts);
 /* The task stops using objects: its critical sections release their locks,
    its carrier goes offline for QSBR, and its state becomes `state`, detached
