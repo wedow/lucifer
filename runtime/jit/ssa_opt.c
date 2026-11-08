@@ -2283,8 +2283,9 @@ raw_fields(struct lu_func *f)
             x.idx[f->blocks[bi].ins[i]] = i;
         }
     }
-    x.seen = malloc((size_t)f->nblocks);
-    x.work = malloc(sizeof(int) * (size_t)f->nblocks);
+    size_t nb = (size_t)(f->nblocks > 0 ? f->nblocks : 1);
+    x.seen = malloc(nb);
+    x.work = malloc(sizeof(int) * nb);
     for (int v = 0; v < n; v++) {
         struct lu_ins *in = &f->ins[v];
         int k;
