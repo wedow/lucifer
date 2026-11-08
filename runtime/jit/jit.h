@@ -192,12 +192,13 @@ PyObject *lu_jit_new_gen(PyThreadState *ts, struct lu_frame *frame);
 /* -X lucifer_jit_stats: a generator was resumed. */
 void lu_jit_note_resume(void);
 
-/* A call of func with nargs positional arguments (borrowed) from C,
-   through its code's direct entry (target.h) when it has a live one and
-   the entry's checks pass: 1 with *result its value (NULL with an
-   exception), or 0 with nothing done. No exception may be pending. */
+/* A call of func with nargs positional arguments, then one value per name
+   in kwnames (NULL: none), all borrowed, from C, through its code's direct
+   entry (target.h) when it has a live one and the entry's checks pass: 1
+   with *result its value (NULL with an exception), or 0 with nothing
+   done. No exception may be pending. */
 int lu_jit_call(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs,
-                PyObject **result);
+                PyObject *kwnames, PyObject **result);
 
 /* A polymorphic inline cache (runtime/jit/jit.c): the shapes an attribute
    site the interpreter's one-shape cache gave up on has met in compiled

@@ -635,11 +635,18 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    It inlines kernel functions, so `list.append` and `dict.get` written in Python
    compile into the caller. That is the payoff of Python builtins. A call of a
    class whose `__new__` is object's and whose `__init__` is a Python function
-   is `type.__call__`'s work in line: the class's version guarded, the
+   is `type.__call__`'s work in line: the class's version guarded (and its
+   metaclass's, one whose `__call__` is type's, as ABCMeta's is), the
    instance allocated, and `__init__` inlined under a frame of `type.__call__`
    that compiled code never runs, at its boundary after its call of
    `__init__`. An exit inside the initializer resumes there, so the
-   interpreter checks the result and returns the instance.
+   interpreter checks the result and returns the instance. A call with
+   keywords of a function or class the code knows binds the keywords to
+   the parameters at compile time, defaults and keyword-only defaults as
+   constants under the function's version, and inlines as a positional
+   call. A classmethod or staticmethod loaded through a constant class, or
+   through an instance of a known type, is its callable, guarded, with the
+   class as a classmethod's self.
 2. **Guards.** Type version, keys version, function version, global watcher tag,
    value range. Effects are explicit per Python operation: descriptors,
    `__eq__`/`__hash__` callbacks, C calls and allocation can all reenter.
@@ -715,14 +722,19 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    Python function whose code has a unit at its call entry pushes the
    callee's frame itself and enters that unit's direct entry: no C helper,
    no eval loop, and the callee pops its frame when it returns. C that
-   calls a Python function (its vectorcall) enters the same way. A function
-   borrows the parameters it never rebinds from its caller. In hidden
-   code (type.__call__, call_special), `f(a, *args, **kwargs)` compiles
-   as one call that passes the star tuple's items and the keyword dict on
-   as they are, without the list, tuple and dict CALL_FUNCTION_EX makes;
-   hidden frames show no traceback entry, so it may leave from its first
-   instruction, and it declines what would need more (a star argument
-   that is not an exact tuple, keys that are not strs).
+   calls a Python function (its vectorcall) enters the same way, keywords
+   and all. The entry binds positional arguments and defaults in line;
+   keywords, keyword-only parameters, star parameters and the prologue's
+   cells bind in C as the interpreter binds them (`lu_jit_bind`), and a
+   binding that would raise declines, so that the slow way raises it. A
+   function borrows the parameters it never rebinds from its caller.
+   `f(a, *args, **kwargs)` compiles as one call that passes the star
+   tuple's items and the keyword dict on as they are, without the list,
+   tuple and dict CALL_FUNCTION_EX makes: an exception from the call is
+   CALL_FUNCTION_EX's, and a declined call leaves from the sequence's
+   first instruction, where nothing is made yet. It declines what would
+   need more (a star argument that is not an exact tuple, keys that are
+   not strs).
 8. **Publication and invalidation.** Code is published by a ticket-checked
    atomic store into the code object's private tail. Patching running code
    waits for a measured need. Compiled code keeps facts between polls, under

@@ -1497,6 +1497,7 @@ op_INSTRUMENTED_CALL_KW:
 op_CALL_KW:
     /* As CALL's, below the keyword names: a keyword call has an argument. */
     lu_jit_observe(next_instr, sp[-1 - oparg], oparg >= 2 ? sp[-oparg] : sp[-1 - oparg]);
+    lu_jit_observe_callee(code, next_instr, sp[-oparg - 3], sp[-oparg - 2]);
     SKIP_CACHES();
     kwnames = POP();
     goto call_stack_args;

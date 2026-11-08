@@ -222,10 +222,99 @@ lu_jit_c_path_count(enum lu_c_path k)
     count(&stats.c_paths[k], 1);
 }
 
+/* -X lucifer_jit_stats: the callees behind the why-not counts, by kind and
+   identity (a code, a type, a method definition, a descriptor), named when
+   first seen: the report lists the most called. */
+#define WHY_NOT_CALLEES 8192
+static struct {
+    PyMutex lock;
+    struct { int kind; void *key; char *name; unsigned long n; } e[WHY_NOT_CALLEES];
+} why_not_callees;
+
+static void
+why_not_callee(enum lu_why_not k, PyObject *callable)
+{
+    void *key = Py_TYPE(callable);
+    char buf[200];
+    const char *name = NULL;
+    if (Py_IS_TYPE(callable, &PyMethod_Type)) {
+        callable = PyMethod_GET_FUNCTION(callable);
+        key = Py_TYPE(callable);
+    }
+    if (PyFunction_Check(callable)) {
+        key = ((PyFunctionObject *)callable)->func_code;
+    }
+    else if (PyType_Check(callable) || PyCFunction_Check(callable)) {
+        key = PyCFunction_Check(callable) ? (void *)((PyCFunctionObject *)callable)->m_ml : callable;
+    }
+    else if (Py_IS_TYPE(callable, &PyMethodDescr_Type) || Py_IS_TYPE(callable, &PyWrapperDescr_Type)) {
+        key = callable;
+    }
+    uintptr_t h = ((uintptr_t)key >> 4) * 31 + (uintptr_t)k;
+    PyMutex_Lock(&why_not_callees.lock);
+    for (int i = 0; i < WHY_NOT_CALLEES; i++) {
+        int at = (int)((h + (uintptr_t)i) % WHY_NOT_CALLEES);
+        if (why_not_callees.e[at].key == key && why_not_callees.e[at].kind == (int)k) {
+            why_not_callees.e[at].n++;
+            break;
+        }
+        if (why_not_callees.e[at].key == NULL) {
+            if (PyType_Check(callable)) {
+                snprintf(buf, sizeof buf, "class %s", ((PyTypeObject *)callable)->tp_name);
+            }
+            else if (Py_IS_TYPE(callable, &PyMethodDescr_Type) || Py_IS_TYPE(callable, &PyWrapperDescr_Type)) {
+                PyDescrObject *d = (PyDescrObject *)callable;
+                snprintf(buf, sizeof buf, "%s %s.%s", Py_TYPE(callable)->tp_name, d->d_type->tp_name,
+                         d->d_name != NULL ? PyUnicode_AsUTF8(d->d_name) : "?");
+            }
+            else if (PyFunction_Check(callable) || PyCFunction_Check(callable)) {
+                name = lu_function_str(callable, buf, sizeof buf);
+                if (name != buf) {
+                    snprintf(buf, sizeof buf, "%s", name);
+                }
+            }
+            else {
+                snprintf(buf, sizeof buf, "<%s>", Py_TYPE(callable)->tp_name);
+            }
+            why_not_callees.e[at].key = key;
+            why_not_callees.e[at].kind = (int)k;
+            why_not_callees.e[at].name = strdup(buf);
+            why_not_callees.e[at].n = 1;
+            break;
+        }
+    }
+    PyMutex_Unlock(&why_not_callees.lock);
+}
+
+static void
+report_why_not_callees(void)
+{
+    static const char names[WHY_NOTS][16] = {
+#define LU_WHY_NOT_NAME(name) #name,
+        LU_WHY_NOT(LU_WHY_NOT_NAME)
+#undef LU_WHY_NOT_NAME
+    };
+    for (int shown = 0; shown < 40; shown++) {
+        int best = -1;
+        for (int i = 0; i < WHY_NOT_CALLEES; i++) {
+            if (why_not_callees.e[i].n > 0 && (best < 0 || why_not_callees.e[i].n > why_not_callees.e[best].n)) {
+                best = i;
+            }
+        }
+        if (best < 0) {
+            break;
+        }
+        fprintf(stderr, "jit: whynot %s %lu %s\n", names[why_not_callees.e[best].kind], why_not_callees.e[best].n,
+                why_not_callees.e[best].name);
+        why_not_callees.e[best].n = 0;
+    }
+}
+
 void
-lu_jit_why_not_count(enum lu_why_not k)
+lu_jit_why_not_count(enum lu_why_not k, PyObject *callable)
 {
     count(&stats.why_not[k], 1);
+    why_not_callee(k, callable);
 }
 
 static struct lu_jit_code *state_of(PyCodeObject *code);
@@ -248,11 +337,8 @@ lu_jit_why_not(PyObject *callable, Py_ssize_t nargs)
         struct lu_jit_code *jc = state_of(code);
         int pc = jc != NULL ? jc->call_pc : -1;
         k = code->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR) ? WHY_NOT_generator
-            : code->co_kwonlyargcount ? WHY_NOT_kwonly
-            : code->co_flags & (CO_VARARGS | CO_VARKEYWORDS) ? WHY_NOT_varargs
             : jc == NULL ? WHY_NOT_cold
-            : pc <= 0 ? WHY_NOT_prologue
-            : jc->direct.nargs < 0 ? WHY_NOT_cells
+            : pc <= 0 || jc->direct.nargs < 0 ? WHY_NOT_prologue
             : nargs > jc->direct.nargs ? WHY_NOT_toomany
             : __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) ? WHY_NOT_disabled
             : __atomic_load_n(&jc->wait[pc], __ATOMIC_RELAXED) == FOREVER ? WHY_NOT_retired
@@ -260,6 +346,7 @@ lu_jit_why_not(PyObject *callable, Py_ssize_t nargs)
             : WHY_NOT_entry;
     }
     count(&stats.why_not[k], 1);
+    why_not_callee(k, callable);
 }
 
 unsigned long *
@@ -320,15 +407,10 @@ state_for(PyCodeObject *code)
             }
         }
     }
-    /* Compiled code calls the call entry's unit directly when the arguments
-       bind by position alone and the prologue makes no cells (the direct
-       entry copies free variables itself). */
-    int cells = 0;
-    for (int pc = 0; jc->call_pc > 0 && lu_base_opcode(code, pc) != RESUME; pc = lu_jit_next_pc(code, pc)) {
-        cells |= lu_base_opcode(code, pc) == MAKE_CELL;
-    }
-    jc->direct.nargs = jc->call_pc > 0 && !cells && code->co_kwonlyargcount == 0 && code->co_argcount < 100
-        && !(code->co_flags & (CO_VARARGS | CO_VARKEYWORDS)) ? code->co_argcount : -1;
+    /* Compiled code and C call the call entry's unit directly. */
+    jc->direct.nargs = jc->call_pc <= 0 || code->co_argcount >= 100 ? -1
+        : code->co_flags & CO_VARARGS ? LU_DIRECT_ANY : code->co_argcount;
+    jc->direct.call_pc = jc->call_pc;
     uintptr_t seen = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
     while (seen == 0 || (seen & 1)) {
         if (__atomic_compare_exchange_n((uintptr_t *)&code->co_executors, &seen, (uintptr_t)jc, 0,
@@ -787,6 +869,129 @@ prologue(struct lu_frame *frame)
         }
     }
     return 0;
+}
+
+/* The parameter keyword names: its index among those that take keywords
+   (from the positional-only ones on), or -1. Exact strs only, compared
+   by identity first, as the names are interned; no Python runs. */
+static int
+keyword_index(PyCodeObject *code, PyObject *name)
+{
+    int total = code->co_argcount + code->co_kwonlyargcount;
+    PyObject **names = &PyTuple_GET_ITEM(code->co_localsplusnames, 0);
+    for (int j = code->co_posonlyargcount; j < total; j++) {
+        if (names[j] == name) {
+            return j;
+        }
+    }
+    for (int j = code->co_posonlyargcount; j < total; j++) {
+        if (lu_str_eq(names[j], name)) {
+            return j;
+        }
+    }
+    return -1;
+}
+
+struct lu_frame *
+lu_jit_bind(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, int given, PyObject *kwnames,
+            int nborrowed)
+{
+    PyCodeObject *code = (PyCodeObject *)func->func_code;
+    PyObject **base = ts->datastack_top;
+    if (base == NULL || ts->datastack_limit - base < code->co_framesize) {
+        return NULL;            /* the entry's caller pops it to here: a new chunk would not be */
+    }
+    ts->datastack_top = base + code->co_framesize;
+    struct lu_frame *f = (struct lu_frame *)base;
+    *f = (struct lu_frame){ .code = code, .func = (PyObject *)func, .globals = func->func_globals,
+                            .builtins = func->func_builtins, .ret = LU_RETURN_PUSH, .jit_lent = 1,
+                            .previous = (struct lu_frame *)ts->current_frame };
+    f->instr = lu_code_start(code) + ((struct lu_jit_direct *)code->co_executors)->call_pc;
+    f->last = f->instr - 1 - lu_opcode_caches[RESUME];
+    f->stackpointer = f->localsplus;    /* compiled code's from here */
+    PyObject **locals = f->localsplus;
+    for (int i = 0; i < code->co_nlocalsplus; i++) {
+        locals[i] = NULL;
+    }
+    int argc = code->co_argcount, total = argc + code->co_kwonlyargcount;
+    int star = (code->co_flags & CO_VARARGS) != 0, nkw = kwnames != NULL ? (int)PyTuple_GET_SIZE(kwnames) : 0;
+    PyObject *kwdict = NULL;
+    int n = given < argc ? given : argc;
+    for (int i = 0; i < n; i++) {
+        locals[i] = i < nborrowed ? args[i] : Py_NewRef(args[i]);
+    }
+    if (given > argc && !star) {
+        goto decline;
+    }
+    for (int k = 0; k < nkw; k++) {
+        PyObject *name = PyTuple_GET_ITEM(kwnames, k), *value = args[given + k];
+        int j = PyUnicode_CheckExact(name) ? keyword_index(code, name) : -2;
+        if (j >= 0 && locals[j] == NULL) {
+            locals[j] = j < nborrowed ? value : Py_NewRef(value);
+            continue;
+        }
+        if (j != -1 || !(code->co_flags & CO_VARKEYWORDS)) {
+            goto decline;       /* not a str, given twice, or a name it does not take */
+        }
+        if ((kwdict == NULL && (kwdict = PyDict_New()) == NULL) || lu_ns_insert(kwdict, name, value) < 0) {
+            goto decline;
+        }
+    }
+    /* What the call leaves out: defaults, never borrowed. */
+    PyObject *defaults = func->func_defaults, *kwdefaults = func->func_kwdefaults;
+    int first = argc - (defaults != NULL ? (int)PyTuple_GET_SIZE(defaults) : 0);
+    for (int i = 0; i < argc; i++) {
+        if (locals[i] == NULL) {
+            if (i < first || i < nborrowed) {
+                goto decline;
+            }
+            locals[i] = Py_NewRef(PyTuple_GET_ITEM(defaults, i - first));
+        }
+    }
+    for (int j = argc; j < total; j++) {
+        if (locals[j] == NULL) {
+            PyObject *d = kwdefaults != NULL && PyDict_CheckExact(kwdefaults)
+                ? lu_ns_get(kwdefaults, PyTuple_GET_ITEM(code->co_localsplusnames, j)) : NULL;
+            if (d == NULL) {
+                goto decline;
+            }
+            locals[j] = d;
+        }
+    }
+    if (star) {
+        PyObject *rest = given > argc ? PyTuple_New(given - argc)
+            : Py_NewRef((PyObject *)&_PyRuntime.singletons.empty_tuple);
+        if (rest == NULL) {
+            goto decline;
+        }
+        for (int i = argc; i < given; i++) {
+            PyTuple_SET_ITEM(rest, i - argc, Py_NewRef(args[i]));
+        }
+        locals[total] = rest;
+    }
+    if (code->co_flags & CO_VARKEYWORDS) {
+        if (kwdict == NULL && (kwdict = PyDict_New()) == NULL) {
+            goto decline;
+        }
+        locals[total + star] = kwdict;
+        kwdict = NULL;
+    }
+    if (prologue(f) < 0) {
+        goto decline;
+    }
+    Py_INCREF(code);
+    return f;
+decline:
+    /* The binding would raise, or memory ran out: the slow way does it again. */
+    PyErr_Clear();
+    Py_XDECREF(kwdict);
+    for (int i = 0; i < code->co_nlocalsplus; i++) {
+        if (i >= nborrowed) {
+            Py_XDECREF(locals[i]);
+        }
+    }
+    ts->datastack_top = base;
+    return NULL;
 }
 
 PyObject *
@@ -1326,7 +1531,9 @@ lu_jit_report(void)
     for (int k = 0; k < WHY_NOTS; k++) {
         fprintf(stderr, "%s %s %lu", k ? "," : "", why_not_names[k], stats.why_not[k]);
     }
-    fprintf(stderr, "\njit: C paths");
+    fprintf(stderr, "\n");
+    report_why_not_callees();
+    fprintf(stderr, "jit: C paths");
     for (int k = 0; k < C_PATHS; k++) {
         fprintf(stderr, "%s %s %lu", k ? "," : "", c_path_names[k], stats.c_paths[k]);
     }

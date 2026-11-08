@@ -32,9 +32,20 @@ require that a count of the tier's does not grow with the iterations:
   ccalls tests/kernel/jit_c_calls.py, whose hot code makes C call compiled
          functions (a dict lookup calls its keys' __hash__ and __eq__):
          direct calls (compiled code entered through the eval loop's C
-         entry). C enters the callee's unit itself; one per iteration is
-         the kernel's call_special, which the comparison reaches and whose
-         *args the direct entry does not bind.
+         entry). C enters the callee's unit itself, the kernel's
+         call_special (which the comparison reaches, with *args) too.
+  shapes tests/kernel/jit_call_shapes.py, whose hot calls are of functions
+         it cannot inline with star, keyword and keyword-only parameters
+         and cells, some made with keywords: entries into compiled code and
+         direct calls. Each takes its callee's direct entry.
+  kwcalls tests/kernel/jit_kw_calls.py, whose hot calls of functions,
+         methods and classes it knows pass keywords: the calls made as C
+         makes a keyword call (-X lucifer_jit_stats' call_kw). Each binds
+         its keywords at compile time and inlines.
+  cmethods tests/kernel/jit_class_methods.py, whose hot methods call
+         classmethods and staticmethods through their class: entries into
+         compiled code, direct and compiled calls. The loads bind at
+         compile time and every call inlines.
   perfcalls  the compiled lane's program under -X perf, whose trampoline
          gives interpreted frames perf symbols: compiled code still calls
          compiled callees itself (they have symbols of their own): entries
@@ -124,7 +135,10 @@ GROWTH = {
     'quiet': ('jit_quiet_misses.py', r'jit: entries .* error (\d+)', 0),
     'caught': ('jit_caught.py', r'jit: entries .* error (\d+) frame (\d+)', 0),
     'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
-    'ccalls': ('jit_c_calls.py', r'direct calls (\d+)', 1),
+    'ccalls': ('jit_c_calls.py', r'direct calls (\d+)', 0),
+    'shapes': ('jit_call_shapes.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
+    'kwcalls': ('jit_kw_calls.py', r'jit: executed:.* call_kw (\d+)', 0),
+    'cmethods': ('jit_class_methods.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'perfcalls': ('jit_compiled_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0, ('-X', 'perf')),
     'super': ('jit_super.py', r'jit: entries .* side (\d+)', 0),
     'inline': ('jit_inline_paths.py', r'jit: C paths list_item (\d+), tuple_item (\d+), list_store (\d+), '

@@ -1,9 +1,10 @@
 # Calls the kernel forwards with f(a, *args, **kwargs): a class called
 # through type.__call__ (its own __new__, or the class not a constant at
 # the call), and operators whose method the dispatch finds at run time
-# (call_special). Compiled code passes the arguments on as they are; an
-# exception from the callee, keywords, and every way of calling must be
-# the interpreter's. tools/jitcheck also runs this at two sizes and
+# (call_special); and a user decorator's wrapper, which forwards the same
+# way. Compiled code passes the arguments on as they are; an exception
+# from the callee (its traceback's positions too), keywords, and every way
+# of calling must be the interpreter's. tools/jitcheck also runs this at two sizes and
 # requires that the tuples, lists and dicts compiled code allocates do
 # not grow with the iterations.
 import sys
@@ -51,10 +52,33 @@ def make(i):
     return cls(i)
 
 
+def wrapped(f):
+    def wrapper(*args, **kwargs):
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def lead(f):
+    def wrapper(*args):
+        return f(1, *args)
+    return wrapper
+
+
+@wrapped
+def add3(a, b, c=1):
+    return a + b + c
+
+
+@lead
+def sub(a, b):
+    return b - a
+
+
 def step(i):
     o = make(i)
     s = o + i            # the dispatch meets four classes here
     s += 1 + KINDS[3](i)
+    s += add3(i, 1) + sub(i)
     return s
 
 
@@ -114,6 +138,28 @@ def raises():
 
 
 print('raises', raises())
+
+
+@wrapped
+def fails(x):
+    if x % 7 == 6:
+        raise ValueError(x)
+    return x
+
+
+def wrapped_raises():
+    out = []
+    for i in range(K):
+        try:
+            out.append(fails(i) + add3(i, 2, c=i))
+        except ValueError as e:
+            tb = e.__traceback__.tb_next
+            out.append((tb.tb_frame.f_code.co_name, tb.tb_lineno, tb.tb_lasti,
+                        [(f.name, f.lineno, f.colno, f.end_colno) for f in traceback.extract_tb(tb)]))
+    return out[:8], len(out)
+
+
+print('wrapped raises', wrapped_raises())
 
 
 def counts():
