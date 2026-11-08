@@ -515,6 +515,9 @@ lu_contains_native(PyObject *container, PyObject *item)
 static int
 object_attr_hook(PyTypeObject *tp, PyObject *id)
 {
+    if (id == LU_ID(__getattribute__) && tp->tp_getattro == PyObject_GenericGetAttr) {
+        return 1;               /* the slot says so (lu_set_slot) */
+    }
     return _PyType_Lookup(tp, id) == _PyType_Lookup(&PyBaseObject_Type, id);
 }
 
