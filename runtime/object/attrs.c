@@ -201,6 +201,27 @@ boxed_locked(PyObject **word)
     return v;
 }
 
+void
+lu_inline_install(PyObject *obj, PyObject **word, PyObject *box)
+{
+    Py_BEGIN_CRITICAL_SECTION(obj);
+    PyObject *w = *word;
+    if (lu_inline_live(obj) && lu_unboxed(w) && PyFloat_CheckExact(box) == (w == LU_UNBOXED)) {
+        uint64_t mine;
+        if (w == LU_UNBOXED) {
+            double d = PyFloat_AS_DOUBLE(box);
+            memcpy(&mine, &d, sizeof d);
+        }
+        else {
+            mine = (uint64_t)PyLong_AsLongLong(box);     /* made from an int64 */
+        }
+        if (mine == *lu_inline_raw(word)) {
+            __atomic_store_n(word, Py_NewRef(box), __ATOMIC_RELEASE);
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+}
+
 /* A new reference to the object a value word holds, read without the lock:
    NULL when it holds none (*seen tells absent from unboxed), or when a try
    fails. The word is loaded once: a compiled store may make it a marker at

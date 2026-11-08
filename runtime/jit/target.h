@@ -43,7 +43,8 @@ enum lu_dv_kind {
     DV_NULL,                    /* an unbound local, or a NULL stack entry */
     DV_CONST,                   /* imm: an object the unit keeps */
     DV_OBJ,                     /* an object at loc */
-    DV_BOX_I64,                 /* a virtual int: its raw value at loc, or imm when loc is none */
+    DV_BOX_I64,                 /* a virtual int: its raw value at loc, or imm when loc is none; fields: the
+                                   objects (at their offsets) whose attribute it was stored into raw */
     DV_BOX_F64,                 /* a virtual float: the same */
     DV_NEW_DICT,                /* a virtual empty dict (a **kwargs nothing filled) */
     DV_BOOL,                    /* a virtual bool: True when the bit at loc (or imm), xor bitimm, is 1 */

@@ -143,6 +143,13 @@ take(struct regs *r, const struct lu_dv *dv)
         memcpy(&d, &bits, 8);
         o = PyFloat_FromDouble(d);
     }
+    if (dv->kind == DV_BOX_I64 || dv->kind == DV_BOX_F64) {
+        /* The attributes compiled code stored it into raw take this box. */
+        for (int i = 0; o != NULL && i < dv->nfields; i++) {
+            PyObject *obj = (PyObject *)(uintptr_t)raw(r, &dv->fields[i]);
+            lu_inline_install(obj, (PyObject **)((char *)obj + dv->fields[i].off), o);
+        }
+    }
     if (o == NULL) {
         Py_FatalError("lucifer jit: out of memory rebuilding a frame");
     }

@@ -2179,8 +2179,10 @@ objects(struct lu_func *f)
    only while the box's identity cannot be observed: besides the unbox or
    the store, its uses are reference operations and frame states that hold
    it on an operand stack, where a deopt's box is a temporary the next
-   instruction consumes. A box in a local, stored twice, or made from an
-   object (a.x = b.x keeps one object) stays a box. */
+   instruction consumes, or in a local where an exit that names it after
+   the store installs the box it makes (exits_install). A box stored
+   twice, or made from an object (a.x = b.x keeps one object), stays a
+   box. */
 static char *
 stack_only(struct lu_func *f)
 {
@@ -2233,12 +2235,56 @@ other_uses(struct lu_func *f, lu_v v, int want, int *wanted)
     return others;
 }
 
+/* Whether store st of a box b that frame states name in a local may
+   store it raw: wherever a state names b after st ran, st ran on every
+   path there and the state names the object too, so that an exit makes
+   the box once and installs it in the attribute (lu_inline_install);
+   and no state a walker reads names b after st, where nothing would. */
+static int
+exits_install(struct objs *x, lu_v st)
+{
+    struct lu_func *f = x->f;
+    lu_v b = f->ins[st].b, o = f->ins[st].a;
+    for (int u = 0; u < x->nold; u++) {
+        struct lu_ins *in = &f->ins[u];
+        if ((in->flags & INS_DEAD) || in->fs == NULL || !reaches(x, b, st, u)) {
+            continue;
+        }
+        int names = 0, obj = 0;
+        for (struct lu_fs *fs = in->fs; fs != NULL; fs = fs->caller) {
+            for (int i = 0; i < fs->nlocals + fs->nstack; i++) {
+                names |= i < fs->nlocals && fs->vals[i] == b;
+                obj |= fs->vals[i] == o;
+            }
+        }
+        if (names && (!before_ins(x, st, u) || !obj || lu_publishes(in))) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int
 raw_fields(struct lu_func *f)
 {
     int changed = 0;
     char *bad = stack_only(f);
     int n = f->nins;
+    struct objs x = { .f = f, .nold = n };
+    cfg_build(f, &x.g);
+    x.blk = malloc(sizeof(int) * (size_t)n);
+    x.idx = malloc(sizeof(int) * (size_t)n);
+    for (int v = 0; v < n; v++) {
+        x.blk[v] = -1;
+    }
+    for (int bi = 0; bi < f->nblocks; bi++) {
+        for (int i = 0; i < f->blocks[bi].nins; i++) {
+            x.blk[f->blocks[bi].ins[i]] = bi;
+            x.idx[f->blocks[bi].ins[i]] = i;
+        }
+    }
+    x.seen = malloc((size_t)f->nblocks);
+    x.work = malloc(sizeof(int) * (size_t)f->nblocks);
     for (int v = 0; v < n; v++) {
         struct lu_ins *in = &f->ins[v];
         int k;
@@ -2276,7 +2322,11 @@ raw_fields(struct lu_func *f)
             lu_v b = in->b;
             struct lu_ins *box = &f->ins[b];
             if ((box->op == OP_BOX_FLOAT || box->op == OP_BOX_INT) && box->b == LU_NOV && box->c == LU_NOV
-                && !bad[b] && other_uses(f, b, OP_INLINE_STORE, &k) == 0 && k == 1) {
+                && other_uses(f, b, OP_INLINE_STORE, &k) == 0 && k == 1 && (!bad[b] || exits_install(&x, v))) {
+                box->fields = lu_ir_alloc(f, sizeof(lu_v));    /* the exits that name it install it */
+                box->fields[0] = v;
+                box->nfields = 1;
+                in = &f->ins[v];
                 in->op = box->op == OP_BOX_FLOAT ? OP_INLINE_STORE_F : OP_INLINE_STORE_I;
                 in->b = box->a;
                 changed = 1;
@@ -2284,6 +2334,11 @@ raw_fields(struct lu_func *f)
         }
     }
     free(bad);
+    free(x.blk);
+    free(x.idx);
+    free(x.seen);
+    free(x.work);
+    cfg_free(&x.g);
     if (changed) {
         fwd = realloc(fwd, sizeof(lu_v) * (size_t)f->capins);
         for (int v = n; v < f->nins; v++) {

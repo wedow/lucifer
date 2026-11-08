@@ -310,8 +310,12 @@ under the object's lock, and installs it in the value word, so every later reade
 on any thread, gets that object and `a.x is a.x` and `id()` stay stable. An
 unboxed value holds no reference, so the collector's own traversal skips it and
 never allocates. The raw word stays valid, so compiled readers keep reading it raw. A raw store or load
-is used only while the value's identity cannot be observed: a box that is in a
-local, stored twice, or loaded from another field (`b.x = a.x`) stays an object.
+is used only while the value's identity cannot be observed: a box stored twice,
+loaded from another field (`b.x = a.x`), or in a local a walker can read after
+the store stays an object. A box only exits see in a local (an inlined
+initializer's parameter) is stored raw when every exit that names it after the
+store also names the object: the exit makes the box once and installs it in the
+attribute while the word still holds that value, so `self.x is x` holds there.
 Subclasses of float and int are always stored as objects.
 `tests/kernel/float_fields.py` and `int_fields.py` check each identity case
 against the oracle. AWFY NBody, CPython 3.14t time over ours: 1.78x with every

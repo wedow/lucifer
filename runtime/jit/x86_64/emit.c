@@ -871,6 +871,15 @@ describe(struct asm_ *a, lu_v v, int owned)
             dv.bitloc = bit->op == OP_CONST_I ? LU_LOC_NONE : bit->loc;
             dv.bitimm = (uint8_t)(bit->op == OP_CONST_I && bit->imm);
         }
+        /* The attributes it was stored into raw by here get the box made (ssa_opt.c 3b). */
+        for (int i = 0; i < in->nfields; i++) {
+            struct lu_ins *st = I(a, in->fields[i]);
+            if (!(st->flags & INS_DEAD) && lu_ssa_before(a->f, in->fields[i], a->now)) {
+                dv.fields = realloc(dv.fields, sizeof(struct lu_dv) * (size_t)(dv.nfields + 1));
+                dv.fields[dv.nfields] = describe(a, st->a, 0);
+                dv.fields[dv.nfields++].off = (int32_t)st->imm;
+            }
+        }
         return dv;
     }
     dv.kind = DV_OBJ;
