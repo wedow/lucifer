@@ -2689,6 +2689,8 @@ jit_enter:
         retval = result;
         oparg = frame->last->op.arg;
         goto yield_frame;
+    case LU_JIT_RAISED:         /* only a direct call's frame */
+        break;
     }
     Py_UNREACHABLE();
 

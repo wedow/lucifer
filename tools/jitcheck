@@ -23,6 +23,13 @@ require that a count of the tier's does not grow with the iterations:
          runs: entries into compiled code, direct and compiled calls.
   quiet  tests/kernel/jit_quiet_misses.py, whose hot lookups miss and whose
          hot generators end where CPython makes no exception: error exits.
+  raised tests/kernel/jit_raised.py, whose hot code catches exceptions
+         kernel builtins raise without a handler of their own (send() on a
+         finished generator or coroutine, a dict miss, list.pop(), next(),
+         an async generator's asend passing each value on through a
+         cleanup handler): side exits and error exits the interpreter
+         unwinds. The exception leaves compiled kernel code as its call's
+         result, and kernel code raises one again without leaving.
   caught tests/kernel/jit_caught.py, whose hot code raises exceptions that
          handlers in the same compiled code take: error exits, and exits
          at a return for the frame object the traceback made.
@@ -133,6 +140,17 @@ require that a count of the tier's does not grow with the iterations:
          on every call for a while and then stops (luc-j4mj): calls
          compiled code makes of it, and entries left to the interpreter,
          while its entry waits. It is compiled and entered again.
+  unpack tests/kernel/jit_unpack_generic.py, whose hot loop unpacks named
+         tuples, a tuple subclass with its own __iter__ and a generator:
+         side exits and entries left to the interpreter. The kernel's unpack
+         is called from compiled code.
+  contexts tests/kernel/jit_contexts.py, whose hot loop runs with
+         statements: entries left to the interpreter and retired units.
+         LOAD_SPECIAL compiles.
+  marked tests/kernel/jit_marked.py, whose polymorphic attribute site went
+         generic and still meets, now and then, an instance whose class's
+         entry it cannot read in line: compiles and entries left to the
+         interpreter. The exit costs an exit, not a recompile.
   shadowed tests/kernel/jit_shadowed.py, whose polymorphic method site
          meets an instance that shadows the method in its own dict:
          compiles and guard exits. The site stops leaving and recompiling.
@@ -173,6 +191,7 @@ GROWTH = {
     'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'large': ('jit_large_callees.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'quiet': ('jit_quiet_misses.py', r'jit: entries .* error (\d+)', 0),
+    'raised': ('jit_raised.py', r'jit: entries .* side (\d+) error (\d+) frame', 0),
     'caught': ('jit_caught.py', r'jit: entries .* error (\d+) frame (\d+)', 0),
     'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
     'ccalls': ('jit_c_calls.py', r'direct calls (\d+)', 0),
@@ -204,6 +223,9 @@ GROWTH = {
     'phases': ('jit_phases.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
                r'|jit: entries waited (\d+)', 0),
     'retry': ('jit_retry.py', r'jit: whynot .* waiting (\d+)|jit: entries waited (\d+)', 0),
+    'unpack': ('jit_unpack_generic.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
+    'contexts': ('jit_contexts.py', r'jit: entries waited (\d+), units retired (\d+)', 0),
+    'marked': ('jit_marked.py', r'jit: compiles (\d+)|jit: entries waited (\d+)', 0),
     'shadowed': ('jit_shadowed.py', r'jit: compiles (\d+)|exits guard (\d+)', 0),
     'order': ('jit_call_order.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),
