@@ -692,17 +692,25 @@ stack_low(void)
 }
 
 int
-lu_jit_call(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, PyObject **result)
+lu_jit_call(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames,
+            PyObject **result)
 {
     PyCodeObject *co = (PyCodeObject *)func->func_code;
     uintptr_t jc = (uintptr_t)__atomic_load_n(&co->co_executors, __ATOMIC_ACQUIRE);
     if (jc == 0 || (jc & 1) || nargs > ((struct lu_jit_direct *)jc)->nargs) {
         return 0;
     }
-    int (*entry)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, int)
-        = __atomic_load_n(&((struct lu_jit_direct *)jc)->entry, __ATOMIC_ACQUIRE);
+    char *entry = __atomic_load_n(&((struct lu_jit_direct *)jc)->entry, __ATOMIC_ACQUIRE);
     PyObject *v;
-    int r = entry != NULL ? entry(ts, func, args, &v, (int)nargs) : 0;
+    int r = 0;
+    if (entry != NULL && kwnames == NULL) {
+        r = ((int (*)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, int))(void *)entry)(
+            ts, func, args, &v, (int)nargs);
+    }
+    else if (entry != NULL) {
+        r = ((int (*)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, int, PyObject *))(void *)
+             (entry - LU_DIRECT_KW))(ts, func, args, &v, (int)nargs, kwnames);
+    }
     if (r == 0) {
         return 0;
     }
@@ -710,20 +718,20 @@ lu_jit_call(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, Py
     return 1;
 }
 
-/* A Python function's call, as CALL makes it: into its code's direct entry
-   when it has one, else the frame is pushed and bound (by plain stores
-   when the arguments are exactly its positional parameters), then run by
-   lu_eval, which enters a compiled unit directly. */
+/* A Python function's call, as CALL and CALL_KW make it: into its code's
+   direct entry when it has one, else the frame is pushed and bound (by
+   plain stores when the arguments are exactly its positional parameters),
+   then run by lu_eval, which enters a compiled unit directly. */
 static PyObject *
-call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs)
+call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *v;
-    if (lu_jit_call(&t->ts, func, args, nargs, &v)) {
+    if (lu_jit_call(&t->ts, func, args, nargs, kwnames, &v)) {
         return v;
     }
     PyCodeObject *co = (PyCodeObject *)func->func_code;
     struct lu_frame *f;
-    if (co->co_argcount == nargs && co->co_kwonlyargcount == 0
+    if (co->co_argcount == nargs && co->co_kwonlyargcount == 0 && kwnames == NULL
         && !(co->co_flags & (CO_VARARGS | CO_VARKEYWORDS))) {
         if ((f = lu_frame_push(&t->ts, func, NULL)) == NULL) {
             return NULL;
@@ -733,10 +741,10 @@ call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, 
         }
     }
     else {
-        for (Py_ssize_t i = 0; i < nargs; i++) {
+        for (Py_ssize_t i = 0; i < nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0); i++) {
             Py_INCREF(args[i]);
         }
-        if ((f = lu_frame_call(&t->ts, func, (PyObject **)args, nargs, NULL)) == NULL) {
+        if ((f = lu_frame_call(&t->ts, func, (PyObject **)args, nargs, kwnames)) == NULL) {
             return NULL;
         }
     }
@@ -899,7 +907,7 @@ h_call(PyObject **argv, intptr_t n)
     }
     if (t->ts.interp->eval_frame == NULL) {
         if (PyFunction_Check(callable)) {
-            r = call_function(t, (PyFunctionObject *)callable, args, (Py_ssize_t)nargs);
+            r = call_function(t, (PyFunctionObject *)callable, args, (Py_ssize_t)nargs, NULL);
             goto called;
         }
         if (Py_IS_TYPE(callable, &PyMethod_Type) && argv[1] == NULL
@@ -907,7 +915,7 @@ h_call(PyObject **argv, intptr_t n)
             /* A bound method: its self goes in the free word before the arguments. */
             argv[1] = PyMethod_GET_SELF(callable);
             r = call_function(t, (PyFunctionObject *)PyMethod_GET_FUNCTION(callable), argv + 1,
-                              (Py_ssize_t)nargs + 1);
+                              (Py_ssize_t)nargs + 1, NULL);
             argv[1] = NULL;
             goto called;
         }
@@ -925,11 +933,11 @@ h_call(PyObject **argv, intptr_t n)
         /* The kernel function C does not answer runs as the interpreter
            calls it: its frame pushed directly, self in the free word. */
         if (self == NULL) {
-            r = call_function(t, (PyFunctionObject *)target, args, (Py_ssize_t)nargs);
+            r = call_function(t, (PyFunctionObject *)target, args, (Py_ssize_t)nargs, NULL);
         }
         else {
             argv[1] = self;
-            r = call_function(t, (PyFunctionObject *)target, argv + 1, (Py_ssize_t)nargs + 1);
+            r = call_function(t, (PyFunctionObject *)target, argv + 1, (Py_ssize_t)nargs + 1, NULL);
             argv[1] = NULL;
         }
         goto called;
@@ -977,20 +985,43 @@ h_super_attr(PyObject *gsuper, PyObject *cls, PyObject *self, PyObject *name, in
     return polled(t, v);
 }
 
-/* CALL_KW: argv as h_call's, then the keyword names. */
+/* CALL_KW: argv as h_call's, then the keyword names. A Python function,
+   or a bound method of one, is called as h_call calls it. */
 static PyObject *
 h_call_kw(PyObject **argv, intptr_t n)
 {
-    if (_PyRuntime.jit.stats) {
-        lu_jit_why_not_count(WHY_NOT_kw);
-    }
     if (declines(argv[0])) {
         return LU_JIT_DECLINED;
     }
-    PyObject *kwnames = argv[n - 1];
+    struct lu_task *t = lu_current_task();
+    PyObject *callable = argv[0], *kwnames = argv[n - 1];
     PyObject *const *args = argv[1] != NULL ? argv + 1 : argv + 2;
-    size_t total = (size_t)(argv[1] != NULL ? n - 2 : n - 3);
-    return call_generic(argv[0], args, total - (size_t)PyTuple_GET_SIZE(kwnames), kwnames);
+    size_t nargs = (size_t)(argv[1] != NULL ? n - 2 : n - 3) - (size_t)PyTuple_GET_SIZE(kwnames);
+    PyFunctionObject *func = PyFunction_Check(callable) ? (PyFunctionObject *)callable
+        : Py_IS_TYPE(callable, &PyMethod_Type) && argv[1] == NULL && PyFunction_Check(PyMethod_GET_FUNCTION(callable))
+        ? (PyFunctionObject *)PyMethod_GET_FUNCTION(callable) : NULL;
+    if (_PyRuntime.jit.stats) {
+        if (func != NULL) {
+            lu_jit_why_not(callable, (Py_ssize_t)nargs);
+        }
+        else {
+            lu_jit_why_not_count(WHY_NOT_kw, callable);
+        }
+    }
+    if (func == NULL || t->ts.interp->eval_frame != NULL) {
+        return call_generic(callable, args, nargs, kwnames);
+    }
+    PyObject *r;
+    if ((PyObject *)func == callable) {
+        r = call_function(t, func, args, (Py_ssize_t)nargs, kwnames);
+    }
+    else {
+        /* A bound method: its self goes in the free word before the arguments. */
+        argv[1] = PyMethod_GET_SELF(callable);
+        r = call_function(t, func, argv + 1, (Py_ssize_t)nargs + 1, kwnames);
+        argv[1] = NULL;
+    }
+    return polled(t, r);
 }
 
 /* CALL_FUNCTION_EX: callable(*callargs, **kwargs), kwargs NULL without. */
@@ -998,7 +1029,7 @@ static PyObject *
 h_call_ex(PyObject *callable, PyObject *callargs, PyObject *kwargs)
 {
     if (_PyRuntime.jit.stats) {
-        lu_jit_why_not_count(WHY_NOT_star);
+        lu_jit_why_not_count(WHY_NOT_star, callable);
     }
     if (declines(callable)) {
         return LU_JIT_DECLINED;

@@ -114,18 +114,31 @@ struct lu_deopt {
    its JIT state (co_executors, runtime/jit/jit.c). `entry` is the live
    call-entry unit's direct entry, or NULL:
      int entry(PyThreadState *ts, PyFunctionObject *func, PyObject **args, PyObject **result,
-               int given)
-   takes `given` positional arguments (borrowed; up to nargs, the rest
-   from the function's defaults), pushes and binds the frame
-   above the task's current one and runs it. 1: it returned *result and
-   was popped; 0: nothing was done (the interpreter's checks at a call
-   failed: a poll is pending, a tool or hook is on, no room); else the
-   enum lu_jit_result of an exit, with the frame, in *result, left to the
-   interpreter (lu_jit_call_finish). */
+               int given, PyObject *kwnames)
+   takes `given` positional arguments (up to nargs), borrowed, pushes and
+   binds the frame above the task's current one as the interpreter would
+   (defaults, keyword-only parameters, star parameters, the prologue's
+   cells and free variables) and runs it. The keyword entry, the
+   LU_DIRECT_KW bytes before entry, takes as well one value per name in
+   kwnames (a sixth argument; positional callers pay nothing for it). 1: it returned *result and was popped; 0:
+   nothing was done (the interpreter's checks at a call failed: a poll is
+   pending, a tool or hook is on, no room; or the binding would raise,
+   which the slow way then does); else the enum lu_jit_result of an exit,
+   with the frame, in *result, left to the interpreter
+   (lu_jit_call_finish). */
 struct lu_jit_direct {
     void *entry;
-    int nargs;                  /* the positional parameters, or -1: never called directly */
+    int nargs;                  /* the most positional arguments it takes (LU_DIRECT_ANY), or -1: never called directly */
+    int call_pc;                /* where the call entry's unit starts */
 };
+#define LU_DIRECT_ANY 0x7fffffff
+#define LU_DIRECT_KW 8
+
+/* What the direct entry does not bind in line (runtime/jit/helpers.c): a
+   frame for func bound to the call's arguments, not yet current, holding
+   its first nborrowed parameters borrowed, or NULL with nothing changed. */
+struct lu_frame *lu_jit_bind(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, int given,
+                             PyObject *kwnames, int nborrowed);
 
 /* The rest of a direct call whose callee left compiled code with `r`
    (runtime/jit/helpers.c): the interpreter runs the callee's frame and
@@ -378,22 +391,22 @@ unsigned long *lu_jit_alloc_site(PyCodeObject *code, int pc, int kind);
 
 /* -X lucifer_jit_stats: why a call compiled code did not inline missed
    the callee's direct entry (runtime/jit/jit.c classifies a call reaching
-   a C helper): a keyword or star call; a callable that is a
-   type, a C function or something else; a generator's code; parameters
-   the direct entry does not bind (keyword-only, star parameters, cells);
+   a C helper): a keyword call of what is not a Python function, or a
+   star call; a callable that is a type, a C function or something else;
+   a generator's code; a prologue that is not cells and free variables;
    more arguments than parameters; a code that never got hot, that
    LUCIFER_JIT_ONLY leaves out, whose call entry waits in the interpreter
    (its unit died), or has no live unit there; or a live entry, which the
    helper enters itself. */
-#define LU_WHY_NOT(X) X(kw) X(star) X(type) X(builtin) X(object) X(generator) X(kwonly) \
-    X(varargs) X(cells) X(prologue) X(toomany) X(cold) X(excluded) X(waiting) X(nounit) X(entry)
+#define LU_WHY_NOT(X) X(kw) X(star) X(type) X(builtin) X(object) X(generator) \
+    X(prologue) X(toomany) X(cold) X(excluded) X(waiting) X(nounit) X(entry)
 enum lu_why_not {
 #define LU_WHY_NOT_ENUM(name) WHY_NOT_##name,
     LU_WHY_NOT(LU_WHY_NOT_ENUM)
 #undef LU_WHY_NOT_ENUM
     WHY_NOTS
 };
-void lu_jit_why_not_count(enum lu_why_not k);
+void lu_jit_why_not_count(enum lu_why_not k, PyObject *callable);
 /* A call of callable with nargs positional arguments: its reason. */
 void lu_jit_why_not(PyObject *callable, Py_ssize_t nargs);
 

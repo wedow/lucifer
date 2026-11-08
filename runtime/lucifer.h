@@ -1404,6 +1404,8 @@ PyObject *lu_descr_new_getset(PyTypeObject *type, PyGetSetDef *getset);
 int lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out);
 /* An exact staticmethod's callable, as its __get__ returns it (a new reference), or NULL. */
 PyObject *lu_staticmethod_get(PyObject *descr);
+/* Where a classmethod's and a staticmethod's callable is (compiled code reads it). */
+extern const Py_ssize_t lu_classmethod_callable_offset;
 /* The Python or kernel function a class's __new__ entry runs, called with the class first: 1 with *func, else 0. */
 int lu_new_function(PyObject *new_, PyObject **func);
 int lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value);
