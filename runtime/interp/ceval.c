@@ -477,8 +477,8 @@ items_contain(PyObject *const *items, Py_ssize_t n, PyObject *item)
    lu_dict_find_native decides it: 1, 0, or -1 for the kernel. A list is
    scanned in its critical section, which its mutators hold: a resize
    replaces the array and the size apart. */
-static int
-contains_native(PyObject *container, PyObject *item)
+int
+lu_contains_native(PyObject *container, PyObject *item)
 {
     PyObject *value;
     int found = -1;
@@ -3466,7 +3466,7 @@ op_UNARY_INVERT: {
 op_CONTAINS_OP: {
     /* item, container -- bool; oparg 1 is `not in` */
     SKIP_CACHES();
-    int found = contains_native(sp[-1], sp[-2]);
+    int found = lu_contains_native(sp[-1], sp[-2]);
     if (found >= 0) {
         PyObject *item = sp[-2], *container = sp[-1];
         sp -= 2;

@@ -483,6 +483,10 @@ h_setitem(PyObject *container, PyObject *sub, PyObject *v)
 static PyObject *
 h_contains(PyObject *item, PyObject *container, int64_t negate)
 {
+    int found = lu_contains_native(container, item);
+    if (found >= 0) {
+        return Py_NewRef((found ^ (int)negate) ? Py_True : Py_False);
+    }
     PyObject *args[3] = { container, item, lu_small_int((int)negate) };
     return lu_call_kernel(LU_K_contains, args, 3);
 }

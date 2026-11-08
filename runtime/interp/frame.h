@@ -247,6 +247,10 @@ const char *lu_function_str(PyObject *func, char *buf, size_t size);
    An exception pending at entry is set again on success. */
 PyObject *lu_eval(PyThreadState *ts, struct lu_frame *f);
 
+/* CONTAINS_OP's native answer for an exact set, frozenset, dict, tuple or
+   list: 1, 0, or -1 when the kernel decides (runtime/interp/ceval.c). */
+int lu_contains_native(PyObject *container, PyObject *item);
+
 /* Runs the task's current frame, from its saved instruction (or unwinding
    the exception set, if `error`), in a new activation until a frame returns
    into the C-entry marker the caller linked below it. Returns what lu_eval
