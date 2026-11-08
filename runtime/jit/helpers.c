@@ -1282,12 +1282,8 @@ h_load_special(PyObject *owner, int64_t which)
 static PyObject *
 h_unpack(PyObject *seq, int64_t n)
 {
-    static PyObject *iter_name;
-    if (iter_name == NULL) {
-        iter_name = PyUnicode_InternFromString("__iter__");       /* immortal, as interned */
-    }
     if (PyTuple_Check(seq) && Py_SIZE(seq) == n
-        && _PyType_Lookup(Py_TYPE(seq), iter_name) == _PyType_Lookup(&PyTuple_Type, iter_name)) {
+        && _PyType_Lookup(Py_TYPE(seq), LU_ID(__iter__)) == _PyType_Lookup(&PyTuple_Type, LU_ID(__iter__))) {
         return Py_NewRef(seq);
     }
     PyObject *args[2] = { seq, PyLong_FromLongLong(n) };
