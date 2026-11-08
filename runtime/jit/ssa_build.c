@@ -1400,6 +1400,8 @@ float_binary(struct ctx *c, int base, lu_v a, lu_v b, int lk, int rk, lu_v *resu
     return kernel_method(c, &PyFloat_Type, binary_names[base], args, 2, result, owned);
 }
 
+static int str_item(struct ctx *c, lu_v a, lu_v b, int owna, int ownb);
+
 static int
 binary_op(struct ctx *c)
 {
@@ -1438,6 +1440,9 @@ binary_op(struct ctx *c)
             lu_v byte = emit(c, OP_BYTES_ITEM, REP_I64, a, unbox_int(c, b), LU_NOV, 0);
             I(c, byte)->fs = before(c);
             r = box_int(c, byte);
+        }
+        else if (lk == LU_KIND_STR && rk == LU_KIND_INT && str_item(c, a, b, owna, ownb)) {
+            return 0;
         }
     }
     else if (lk == LU_KIND_INT && rk == LU_KIND_INT && base == NB_TRUE_DIVIDE) {
@@ -1701,6 +1706,42 @@ mark_undo(struct ctx *c, struct mark *m)
     f->blocks[m->cur].nins = m->cur_nins;
     f->blocks[m->cur].nsucc = m->nsucc;
     f->fail = NULL;
+}
+
+/* BINARY_OP's subscript of an exact str by an int: str's own __getitem__,
+   inlined as a call of it with the operands popped, so that an exit
+   inside it returns its result to the operator's place. 1 with the result
+   pushed, or 0 with nothing emitted. */
+static int
+str_item(struct ctx *c, lu_v a, lu_v b, int owna, int ownb)
+{
+    PyObject *self, *descr = _PyType_Lookup(&PyUnicode_Type, LU_ID(__getitem__));
+    PyFunctionObject *fn = kernel_function(descr, &self);
+    if (fn == NULL || self != NULL) {
+        return 0;
+    }
+    struct mark m;
+    struct bstate saved;
+    mark_take(c, &m);
+    state_copy(c, &saved, &c->st);
+    guard_type(c, a, &PyUnicode_Type);
+    guard_type(c, b, &PyLong_Type);
+    pop(c, NULL);
+    pop(c, NULL);
+    lu_v args[2] = { a, b }, r;
+    uint8_t own[2] = { (uint8_t)owna, (uint8_t)ownb };
+    int rown;
+    if (!inline_call(c, fn, LU_NOV, 0, args, own, 2, 0, &r, &rown)) {
+        c->st = saved;
+        mark_undo(c, &m);
+        mark_free(&m);
+        return 0;
+    }
+    mark_free(&m);
+    if (c->cur >= 0) {
+        push(c, r, rown);
+    }
+    return 1;
 }
 
 /* Inlines fn(args...): the caller's state has the call's operands popped.
