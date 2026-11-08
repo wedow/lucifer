@@ -2,6 +2,7 @@
 under random.Random, with CPython's seeding, state layout and output."""
 
 import _lucifer
+import _operator
 
 _N, _M = 624, 397
 _MATRIX_A, _UPPER_MASK, _LOWER_MASK = 0x9908b0df, 0x80000000, 0x7fffffff
@@ -78,22 +79,14 @@ of the current time and the process identifier."""
 
     def getrandbits(self, k, /):
         """getrandbits(k) -> x.  Generates an int with k random bits."""
+        k = _operator.index(k)
         if k < 0:
             raise ValueError('Cannot convert negative int')
-        if k == 0:
-            return 0
-        state = self._state
+        if k > 0xffffffffffffffff:
+            raise OverflowError('Python int too large for C uint64_t')
         if k <= 32:
-            return _lucifer.mt_next32(state) >> (32 - k)
-        words = (k - 1) // 32 + 1
-        result = 0
-        for i in range(words):
-            r = _lucifer.mt_next32(state)
-            if k < 32:
-                r >>= 32 - k
-            result |= r << (32 * i)
-            k -= 32
-        return result
+            return _lucifer.mt_next32(self._state) >> (32 - k) if k else 0
+        return _lucifer.mt_getrandbits(self._state, k)
 
     def getstate(self):
         """getstate() -> tuple containing the current state."""

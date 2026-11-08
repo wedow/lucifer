@@ -4,7 +4,7 @@ runtime/prim/storage.c; the rest is the protocol around them."""
 
 from _lucifer import (
     MISSING, NULL_ITEM, error, str_join, kind, size, type_lookup, type_tp_name, static_type, kernel_set,
- seq_get, seq_slice, seq_concat, seq_repeat, tuple_from, xxh_hash, repr_enter,
+ seq_get, seq_slice, seq_concat, seq_repeat, tuple_from, tuple_hash, repr_enter,
     repr_leave, iter_new, iter_state, iter_set, seqiter_next, list_append,
 )
 from _lucifer import _boot, _format, operators, slice as _slice, iter as _iter
@@ -14,7 +14,6 @@ classmethod_ = _boot.classmethod_
 index = operators.index
 as_ssize = operators.as_ssize
 decimal = operators.decimal
-hash_of = operators.hash_of
 object_repr = _format.to_repr
 slice_bounds = _slice.slice_bounds
 slice_index_not_none = _slice.slice_index_not_none
@@ -230,12 +229,7 @@ If the argument is a tuple, the return value is the same object."""
         return compare(self, other, 5, 'tuple')
 
     def __hash__(self):
-        hashes = []
-        i = 0
-        while i < size(self):
-            list_append(hashes, hash_of(seq_get(self, i)))
-            i += 1
-        return xxh_hash(hashes, True)
+        return tuple_hash(self)
 
     def __repr__(self):
         if size(self) == 1:

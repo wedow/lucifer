@@ -78,8 +78,39 @@ prim_mt_random(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyFloat_FromDouble((a * 67108864.0 + b) * (1.0 / 9007199254740992.0));
 }
 
+/* mt_getrandbits(state, k): k > 32 random bits as an int, from 32-bit words
+   least significant first, the last one's low bits dropped (CPython's
+   _random_Random_getrandbits_impl). A k too large to allocate is a
+   MemoryError. */
+static PyObject *
+prim_mt_getrandbits(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    uint32_t *mt;
+    long k;
+    if (nargs != 2 || (mt = state_of(args[0])) == NULL) {
+        return NULL;
+    }
+    if (!PyLong_CheckExact(args[1]) || lu_long_as_long(args[1], &k) < 0 || k <= 32
+        || k > PY_SSIZE_T_MAX / 2) {
+        PyErr_Clear();
+        return PyErr_NoMemory();
+    }
+    Py_ssize_t words = (k - 1) / 32 + 1;
+    uint32_t *buf = PyMem_Malloc(words * sizeof(uint32_t));
+    if (buf == NULL) {
+        return PyErr_NoMemory();
+    }
+    for (Py_ssize_t i = 0; i < words; i++, k -= 32) {
+        uint32_t r = next32(mt);
+        buf[i] = k < 32 ? r >> (32 - k) : r;
+    }
+    PyObject *result = lu_long_from_bytes((const unsigned char *)buf, words * 4, 1, 0);
+    PyMem_Free(buf);
+    return result;
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_mt_methods[] = {
-    FAST(mt_next32), FAST(mt_random),
+    FAST(mt_next32), FAST(mt_random), FAST(mt_getrandbits),
     { NULL, NULL, 0, NULL },
 };

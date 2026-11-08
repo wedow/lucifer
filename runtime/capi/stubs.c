@@ -3,6 +3,7 @@
 #include "frameobject.h"
 #include "marshal.h"
 #include "structmember.h"
+#define LU_STUBS     /* the exported names, not lucifer.h's inline redirects */
 #include "lucifer.h"
 
 LU_STUB int PyAIter_Check(PyObject *) { LU_UNIMPLEMENTED("PyAIter_Check"); }
