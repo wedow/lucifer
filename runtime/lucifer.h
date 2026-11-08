@@ -319,6 +319,10 @@ int lu_inline_store_i(PyObject *obj, Py_ssize_t offset, int64_t v);
    without its lock): NULL when absent or when a try fails; an unboxed
    float gets its box. */
 PyObject *lu_inline_get(PyObject *obj, PyObject **word);
+/* An exit's box of the value compiled code stored raw in word: installed
+   while the word still holds that value unboxed, so that the box the
+   exit's frame names and the attribute are one object. */
+void lu_inline_install(PyObject *obj, PyObject **word, PyObject *box);
 int lu_inline_traverse(PyObject *obj, visitproc visit, void *arg);
 /* Every unboxed value of the instance gets its box, as a reader would make
    it: before gc.get_referents shows what the instance references. 0, or -1

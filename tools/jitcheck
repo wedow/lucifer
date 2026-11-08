@@ -55,6 +55,15 @@ require that a count of the tier's does not grow with the iterations:
          instances and tuples nothing outside compiled code sees: the
          tuples and instances compiled code allocates (-X lucifer_jit_stats'
          allocation census). They stay virtual.
+  iterators  tests/kernel/jit_virtual_iterators.py, whose hot loop runs
+         loops over ranges, lists and tuples, some in inlined callees, and
+         carries a tuple around a loop: the iterators and tuples compiled
+         code allocates. Iterators only the stack holds and objects only
+         phis carry stay virtual.
+  forward  tests/kernel/jit_forward_calls.py, whose hot code calls classes
+         through type.__call__ and operators through call_special, which
+         forward their arguments with f(a, *args, **kwargs): the tuples,
+         lists and dicts compiled code allocates. The call passes them on.
   guards tests/kernel/jit_guards.py, whose hot loop's guards check what a
          writer can change (a global, a function's code, a class
          attribute) or what never changes (the range iterator's type):
@@ -123,6 +132,8 @@ GROWTH = {
     'repeat': ('jit_inline_paths.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'classes': ('jit_class_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'objects': ('jit_virtual_objects.py', r'jit: allocations by kind: .*tuple (\d+), .*instance (\d+)', 0),
+    'iterators': ('jit_virtual_iterators.py', r'jit: allocations by kind: .*tuple (\d+), .*iterator (\d+)', 0),
+    'forward': ('jit_forward_calls.py', r'jit: allocations by kind: .*tuple (\d+), list (\d+), dict (\d+)', 0),
     'guards': ('jit_guards.py', r'jit: unit hot@\d+ entries \d+ guards (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
     'gens': ('jit_gen_resumes.py', r'jit: generator resumes interpreted (\d+)', 0),

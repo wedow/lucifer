@@ -483,13 +483,14 @@ def _min_max(name, args, kwargs, greater):
     if not args:
         error(TypeError, str_join('', (name, ' expected at least 1 argument, got 0')))
     key = default = MISSING
-    for k, v in kwargs.items():
-        if k == 'key':
-            key = v
-        elif k == 'default':
-            default = v
-        else:
-            error(TypeError, str_join('', (name, "() got an unexpected keyword argument '", k, "'")))
+    if kwargs:
+        for k, v in kwargs.items():
+            if k == 'key':
+                key = v
+            elif k == 'default':
+                default = v
+            else:
+                error(TypeError, str_join('', (name, "() got an unexpected keyword argument '", k, "'")))
     positional = size(args) > 1
     if positional and default is not MISSING:
         error(TypeError, str_join('', (

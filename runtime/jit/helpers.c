@@ -571,6 +571,35 @@ h_range_iter(int64_t start, int64_t stop, int64_t step)
     return (PyObject *)it;
 }
 
+/* A loop's iterator after a step (ssa_build.c for_iter): a new one with
+   the fields given. Compiled code makes one only when the stack entry it
+   stands for is not virtual (ssa_opt.c 3c); an exit makes it otherwise. */
+static PyObject *
+h_seqiter_new(PyObject *seq, int64_t index)
+{
+    seqiterobject *it = (seqiterobject *)lu_object_new(
+        Py_IS_TYPE(seq, &PyTuple_Type) ? &PyTupleIter_Type : &PyListIter_Type, sizeof(seqiterobject));
+    if (it == NULL) {
+        Py_FatalError("lucifer jit: out of memory stepping a loop");
+    }
+    it->it_seq = Py_NewRef(seq);
+    it->it_index = index;
+    return (PyObject *)it;
+}
+
+static PyObject *
+h_rangeiter_new(int64_t start, int64_t step, int64_t len)
+{
+    rangeiterobject *it = (rangeiterobject *)lu_object_new(&PyRangeIter_Type, sizeof(rangeiterobject));
+    if (it == NULL) {
+        Py_FatalError("lucifer jit: out of memory stepping a loop");
+    }
+    it->start = start;
+    it->step = step;
+    it->len = len;
+    return (PyObject *)it;
+}
+
 /* --- calls --- */
 
 static int
@@ -908,6 +937,44 @@ h_call_ex(PyObject *callable, PyObject *callargs, PyObject *kwargs)
     return r;
 }
 
+/* f(a, ..., *args, **kwargs) in hidden code (ssa_build.c forward_call):
+   argv is the callable, its NULL, the leading arguments, the star tuple
+   and the keyword dict or NULL, which the call takes as
+   they are: no list, tuple or dict is made for it. Declines anything
+   CALL_FUNCTION_EX would make more of: a star argument that is not an
+   exact tuple, or keywords that are not an exact dict of str keys. */
+static PyObject *
+h_call_forward(PyObject **argv, intptr_t n)
+{
+    PyObject *star = argv[n - 2], *kw = argv[n - 1];
+    intptr_t lead = n - 4;
+    if (!PyTuple_CheckExact(star) || (kw != NULL && (!PyDict_CheckExact(kw) || !lu_dict_str_keys(kw)))) {
+        return LU_JIT_DECLINED;
+    }
+    if (kw != NULL && PyDict_GET_SIZE(kw) > 0) {
+        PyObject *t = PyTuple_New(lead + PyTuple_GET_SIZE(star));
+        for (intptr_t i = 0; t != NULL && i < PyTuple_GET_SIZE(t); i++) {
+            PyTuple_SET_ITEM(t, i, Py_NewRef(i < lead ? argv[2 + i] : PyTuple_GET_ITEM(star, i - lead)));
+        }
+        PyObject *r = t != NULL ? h_call_ex(argv[0], t, kw) : NULL;
+        Py_XDECREF(t);
+        return r;
+    }
+    /* The tuple holds its items while the call runs: they are borrowed. */
+    intptr_t m = 2 + lead + PyTuple_GET_SIZE(star);
+    PyObject *few[16], **all = m <= 16 ? few : PyMem_Malloc(sizeof(PyObject *) * (size_t)m);
+    if (all == NULL) {
+        return PyErr_NoMemory();
+    }
+    memcpy(all, argv, sizeof(PyObject *) * (size_t)(2 + lead));
+    memcpy(all + 2 + lead, ((PyTupleObject *)star)->ob_item, sizeof(PyObject *) * (size_t)PyTuple_GET_SIZE(star));
+    PyObject *r = h_call(all, m);
+    if (all != few) {
+        PyMem_Free(all);
+    }
+    return r;
+}
+
 /* DICT_MERGE: a call's **update into its keyword dict. */
 static int
 h_dict_merge(PyObject *func, PyObject *dict, PyObject *update)
@@ -1105,9 +1172,15 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, IF_SEEN, 1 },
     [H_range_iter] = { (void *)h_range_iter, "range_iter", REP_OBJ, 0, 3 },
+    [H_listiter_new] = { (void *)h_seqiter_new, "listiter_new", REP_OBJ, 0, 2 },
+    [H_tupleiter_new] = { (void *)h_seqiter_new, "tupleiter_new", REP_OBJ, 0, 2 },
+    [H_rangeiter_new] = { (void *)h_rangeiter_new, "rangeiter_new", REP_OBJ, 0, 3 },
     [H_unary] = { (void *)h_unary, "unary", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_list_append] = { (void *)h_list_append, "list_append", REP_BIT, IF_RAISE | IF_SEEN, 2 },
     [H_list_repeat] = { (void *)h_list_repeat, "list_repeat", REP_OBJ, IF_RAISE | IF_SEEN, 2 },
+    /* Of a display no other thread can have seen (ssa_build.c): the items it
+       releases are the display's still, so none is the last reference. */
+    [H_list_repeat_fresh] = { (void *)h_list_repeat, "list_repeat_fresh", REP_OBJ, IF_RAISE, 2 },
     [H_build_list] = { (void *)h_build_list, "build_list", REP_OBJ, IF_RAISE, 0 },
     [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, IF_RAISE, 0 },
     [H_new_object] = { (void *)h_new_object, "new_object", REP_OBJ, IF_RAISE, 1 },
@@ -1135,6 +1208,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_store_slice] = { (void *)h_store_slice, "store_slice", REP_BIT, IF_RAISE | IF_PY, 4 },
     [H_call_kw] = { (void *)h_call_kw, "call_kw", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_call_ex] = { (void *)h_call_ex, "call_ex", REP_OBJ, IF_RAISE | IF_PY, 3 },
+    [H_call_forward] = { (void *)h_call_forward, "call_forward", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_dict_merge] = { (void *)h_dict_merge, "dict_merge", REP_BIT, IF_RAISE | IF_PY, 3 },
     [H_catch] = { (void *)h_catch, "catch", REP_OBJ, IF_RAISE, 2 },
     [H_push_exc_info] = { (void *)h_push_exc_info, "push_exc_info", REP_OBJ, 0, 1 },

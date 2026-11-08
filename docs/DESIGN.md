@@ -310,8 +310,12 @@ under the object's lock, and installs it in the value word, so every later reade
 on any thread, gets that object and `a.x is a.x` and `id()` stay stable. An
 unboxed value holds no reference, so the collector's own traversal skips it and
 never allocates. The raw word stays valid, so compiled readers keep reading it raw. A raw store or load
-is used only while the value's identity cannot be observed: a box that is in a
-local, stored twice, or loaded from another field (`b.x = a.x`) stays an object.
+is used only while the value's identity cannot be observed: a box stored twice,
+loaded from another field (`b.x = a.x`), or in a local a walker can read after
+the store stays an object. A box only exits see in a local (an inlined
+initializer's parameter) is stored raw when every exit that names it after the
+store also names the object: the exit makes the box once and installs it in the
+attribute while the word still holds that value, so `self.x is x` holds there.
 Subclasses of float and int are always stored as objects.
 `tests/kernel/float_fields.py` and `int_fields.py` check each identity case
 against the oracle. AWFY NBody, CPython 3.14t time over ours: 1.78x with every
@@ -649,7 +653,20 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    so each exit sees one set of fields; the exit makes the object once
    with those fields, and every slot that names it gets that one object.
    An instance that stays real takes the first store of each name without
-   its lock while no other thread can have seen it.
+   its lock while no other thread can have seen it. A loop over a range,
+   list or tuple made in the loop's code (in a generator, a loop with no
+   yield in it: the stack goes back to the frame at a yield) keeps its
+   iterator only on the stack,
+   where only an exit sees it, so each step makes a new iterator from the
+   last one's fields (an index, a range's start and length) instead of
+   changing it; a list's length is read at each step. A phi whose inputs
+   are all such objects of one shape (iterators, or tuples of one size)
+   is one too, its fields phis of its inputs' fields, which take the
+   references the inputs held: the iterator is never made, the index is a
+   loop phi, and an exit makes the iterator where the loop stands. A phi
+   is virtual only with all its inputs, and an input only with every phi
+   that takes it. A phi of boxes may take a constant int or float as a box
+   of its raw value.
 4. **Backend.** Per-block linear-scan register allocation over GPR/XMM with spill
    homes and edge reconciliation (port of `optimizer_ssa_allocate.inc`); x86-64
    encoder in C; root maps per safepoint; perf map and jitdump (port of
@@ -699,7 +716,13 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    callee's frame itself and enters that unit's direct entry: no C helper,
    no eval loop, and the callee pops its frame when it returns. C that
    calls a Python function (its vectorcall) enters the same way. A function
-   borrows the parameters it never rebinds from its caller.
+   borrows the parameters it never rebinds from its caller. In hidden
+   code (type.__call__, call_special), `f(a, *args, **kwargs)` compiles
+   as one call that passes the star tuple's items and the keyword dict on
+   as they are, without the list, tuple and dict CALL_FUNCTION_EX makes;
+   hidden frames show no traceback entry, so it may leave from its first
+   instruction, and it declines what would need more (a star argument
+   that is not an exact tuple, keys that are not strs).
 8. **Publication and invalidation.** Code is published by a ticket-checked
    atomic store into the code object's private tail. Patching running code
    waits for a measured need. Compiled code keeps facts between polls, under

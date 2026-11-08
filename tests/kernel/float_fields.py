@@ -94,6 +94,23 @@ def fresh_fields(n):
     return out
 
 
+class Probe:
+    def __init__(self, x, rare):
+        self.x = x                  # stored raw: only exits see the parameter
+        if rare:
+            import gc               # compiled code leaves here, naming x and self
+            self.same = self.x is x
+
+
+def init_exit(n):
+    seen = []
+    for i in range(n):
+        p = Probe(i * 0.5 + 0.25, i % 1000 == 999)
+        if i % 1000 == 999:
+            seen.append((p.same, p.x is p.x, p.x))
+    return seen
+
+
 bodies = [Body(float(i), 0.5) for i in range(5)]
 advance(bodies, N, 0.01)
 b = bodies[0]
@@ -117,6 +134,7 @@ print(store_shared_int(Pair(), N))
 print(store_copied(Body(0.0, 0.0), Body(0.0, 0.0), N))
 print(store_subclass(Body(0.0, 0.0), N))
 print(store_then_delete(Body(0.0, 0.0), N))
+print(init_exit(N))
 fs = fresh_fields(N)
 print(fs[-1].x, fs[-1].x is fs[-1].x, sum(f.x for f in fs))
 

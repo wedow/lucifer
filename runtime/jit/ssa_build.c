@@ -151,6 +151,7 @@ static PyTypeObject *known_type(struct ctx *c, lu_v v);
 static void set_known(struct ctx *c, lu_v v, PyTypeObject *t);
 
 static int decode(struct ctx *c, int pc, int *base, int *oparg, int *opcode);
+static int jump_target(int op, int oparg, int next);
 
 /* The parameters the code never rebinds: per local, 1. */
 static uint8_t *
@@ -387,7 +388,7 @@ known_type(struct ctx *c, lu_v v)
     case OP_BOX_FLOAT: return &PyFloat_Type;
     case OP_BOOL: return &PyBool_Type;
     case OP_CONST: return known(c, v) != NULL ? Py_TYPE(known(c, v)) : NULL;
-    case OP_HELPER: return I(c, v)->imm == H_range_iter ? &PyRangeIter_Type : NULL;
+    case OP_HELPER: return I(c, v)->imm == H_range_iter ? &PyRangeIter_Type : lu_iter_type(I(c, v));
     default: return NULL;
     }
 }
@@ -552,6 +553,32 @@ helper_raising(struct ctx *c, int id, int nargs, const lu_v *args, int drop)
     return v;
 }
 
+/* Whether the loop whose FOR_ITER is at pc may step a new iterator each
+   time (for_iter): only the stack holds the iterator, so only an exit sees
+   it, and the optimizer keeps every one of them virtual. A generator's
+   stack goes back to its frame at a yield, which would make each one: a
+   loop of a generator's that yields keeps its iterator. The step
+   speculates nothing, so the site's failures do not matter. */
+static int
+steps_fresh(struct ctx *c, int pc)
+{
+    int base, oparg, opcode;
+    if (pc >= c->ncode || (decode(c, pc, &base, &oparg, &opcode), base != FOR_ITER)) {
+        return 0;
+    }
+    if (!(c->code->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE))) {
+        return 1;
+    }
+    int end = jump_target(FOR_ITER, oparg, decode(c, pc, &base, &oparg, &opcode));
+    for (int at = pc; at < end && at < c->ncode;) {
+        at = decode(c, at, &base, &oparg, &opcode);
+        if (base == YIELD_VALUE || base == SEND) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* --- leaving --- */
 
 /* The block ends here: the rest of the instruction stream is not reached. */
@@ -668,7 +695,8 @@ edge_to(struct ctx *c, int pc)
                 I(c, phi)->args = NULL;
                 b->in.v[k] = phi;
                 b->in.own[k] = k < c->nlocals && c->fixed[k] ? c->st.own[k] : 1;  /* as normalize left them */
-                I(c, phi)->imm2 = c->parent == NULL && k < c->nlocals;     /* a root slot's value */
+                /* A root (1) or an inlined frame's (2) local's value. */
+                I(c, phi)->imm2 = k < c->nlocals ? (c->parent == NULL ? 1 : 2) : 0;
             }
         }
     }
@@ -1271,6 +1299,32 @@ not_of(struct ctx *c, lu_v bit)
     return emit(c, OP_NOT, REP_BIT, bit, LU_NOV, LU_NOV, 0);
 }
 
+/* Whether v is a list display built in this block that nothing since
+   could have shown another thread: no instruction after it published a
+   state or ran Python, and no local holds it. */
+static int
+unseen_display(struct ctx *c, lu_v v)
+{
+    struct lu_ins *in = I(c, v);
+    if (in->op != OP_HELPER || in->imm != H_build_list || in->block != c->cur) {
+        return 0;
+    }
+    for (int i = 0; i < c->nlocals; i++) {
+        if (c->st.v[i] == v) {
+            return 0;
+        }
+    }
+    struct lu_block *bl = &c->f->blocks[c->cur];
+    int k = bl->nins - 1;
+    for (; k >= 0 && bl->ins[k] != v; k--) {
+        struct lu_ins *u = I(c, bl->ins[k]);
+        if (lu_publishes(u) || (u->op == OP_HELPER && (lu_helpers[u->imm].flags & IF_PY))) {
+            return 0;
+        }
+    }
+    return k >= 0;
+}
+
 static lu_v
 int_op(struct ctx *c, int op, lu_v a, lu_v b)
 {
@@ -1408,7 +1462,7 @@ binary_op(struct ctx *c)
         lu_v list = lk == LU_KIND_LIST ? a : b, n = lk == LU_KIND_LIST ? b : a;
         guard_type(c, list, &PyList_Type);
         lu_v args[2] = { list, unbox_int(c, n) };
-        r = helper_raising(c, H_list_repeat, 2, args, 2);
+        r = helper_raising(c, unseen_display(c, list) ? H_list_repeat_fresh : H_list_repeat, 2, args, 2);
         set_made(c, r, &PyList_Type);
     }
     else if (lk == LU_KIND_STR && rk == LU_KIND_STR && base == NB_ADD) {
@@ -2248,7 +2302,7 @@ join_paths(struct ctx *c, struct path *p, int n)
         lu_v phi = lu_ir_emit(f, join, OP_PHI, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, k);
         I(c, phi)->nargs = live;
         I(c, phi)->args = malloc(sizeof(lu_v) * (size_t)live);
-        I(c, phi)->imm2 = c->parent == NULL && k < c->nlocals;     /* a root slot's value */
+        I(c, phi)->imm2 = k < c->nlocals ? (c->parent == NULL ? 1 : 2) : 0;   /* as edge_to sets it */
         for (int i = 0, j = 0; i < n; i++) {
             if (p[i].block >= 0) {
                 I(c, phi)->args[j++] = phi_input(c, p[i].st.v[k]);
@@ -3395,9 +3449,19 @@ call(struct ctx *c)
         if (n == 3) {
             guard(c, OP_GUARD_BIT, emit(c, OP_CMP_I, REP_BIT, step, const_i(c, 0), LU_NOV, Py_NE), 1);
         }
-        lu_v hargs[3] = { start, stop, step };
-        r = helper(c, H_range_iter, 3, hargs);
-        guard_after(c, OP_GUARD_NOT_NULL, r, 0);
+        int ibase, ioparg, iop;
+        if (n <= 2 && steps_fresh(c, decode(c, c->next, &ibase, &ioparg, &iop)) && !lu_jit_nospec(c->code, c->pc)) {
+            /* Its length fits, and so does every value with step 1. */
+            lu_v len = emit(c, OP_SUB_I, REP_I64, stop, start, LU_NOV, 0);
+            I(c, len)->fs = before(c);
+            lu_v fields[3] = { start, step, len };
+            r = helper(c, H_rangeiter_new, 3, fields);  /* a loop iterator (for_step) */
+        }
+        else {
+            lu_v hargs[3] = { start, stop, step };
+            r = helper(c, H_range_iter, 3, hargs);
+            guard_after(c, OP_GUARD_NOT_NULL, r, 0);
+        }
         pop_call(c, n);
         push(c, r, 1);
         /* Skip GET_ITER: the next instruction gets the iterator. */
@@ -3580,6 +3644,55 @@ call(struct ctx *c)
 
 /* --- iteration --- */
 
+/* FOR_ITER of an iterator steps_fresh allowed: the next item from its
+   fields, and a new iterator with the fields after the step in its stack
+   entry, the old one released. A list's length is read each time, so
+   that its changes during the loop show. */
+static int
+for_step(struct ctx *c, lu_v it, PyTypeObject *t, int exit_pc)
+{
+    int range = t == &PyRangeIter_Type;
+    lu_v seq = LU_NOV, idx, step = LU_NOV, len = LU_NOV, done;
+    if (range) {
+        idx = emit(c, OP_LOAD, REP_I64, it, LU_NOV, LU_NOV, offsetof(rangeiterobject, start));
+        step = emit(c, OP_LOAD, REP_I64, it, LU_NOV, LU_NOV, offsetof(rangeiterobject, step));
+        len = emit(c, OP_LOAD, REP_I64, it, LU_NOV, LU_NOV, offsetof(rangeiterobject, len));
+        done = emit(c, OP_CMP_I, REP_BIT, len, const_i(c, 0), LU_NOV, Py_LE);
+    }
+    else {
+        seq = emit(c, OP_LOAD, REP_OBJ, it, LU_NOV, LU_NOV, offsetof(seqiterobject, it_seq));
+        idx = emit(c, OP_LOAD, REP_I64, it, LU_NOV, LU_NOV, offsetof(seqiterobject, it_index));
+        lu_v n = emit(c, OP_LOAD, REP_I64, seq, LU_NOV, LU_NOV, offsetof(PyVarObject, ob_size));
+        done = emit(c, OP_CMP_I, REP_BIT, idx, n, LU_NOV, Py_GE);
+    }
+    normalize(c);
+    edge_to(c, exit_pc);
+    int body = lu_ir_block(c->f);
+    lu_ir_edge(c->f, c->cur, body);
+    emit(c, OP_BRANCH, REP_NONE, done, LU_NOV, LU_NOV, 0);
+    c->cur = body;
+    lu_v v, next;
+    if (range) {
+        v = box_int(c, idx);
+        lu_v fields[3] = { emit(c, OP_ADD_I, REP_I64, idx, step, LU_NOV, 0), step,
+                           emit(c, OP_SUB_I, REP_I64, len, const_i(c, 1), LU_NOV, 0) };
+        I(c, fields[0])->fs = I(c, fields[2])->fs = before(c);     /* neither overflows */
+        next = helper(c, H_rangeiter_new, 3, fields);
+    }
+    else {
+        lu_v fields[2] = { seq, emit(c, OP_ADD_I, REP_I64, idx, const_i(c, 1), LU_NOV, 0) };
+        I(c, fields[1])->fs = before(c);
+        v = emit(c, OP_LIST_ITEM, REP_OBJ, seq, idx, LU_NOV, t == &PyTupleIter_Type);
+        I(c, v)->fs = before(c);
+        next = helper(c, t == &PyTupleIter_Type ? H_tupleiter_new : H_listiter_new, 2, fields);
+    }
+    c->st.v[c->nlocals + c->st.sp - 1] = next;
+    c->st.own[c->nlocals + c->st.sp - 1] = 1;
+    release(c, it, 1);
+    push(c, v, 1);
+    return 0;
+}
+
 static int
 for_iter(struct ctx *c)
 {
@@ -3598,6 +3711,10 @@ for_iter(struct ctx *c)
         c->cur = body;
         push(c, v, 1);
         return 0;
+    }
+    lu_v made = I(c, it)->op == OP_PHI && I(c, it)->nargs > 0 ? I(c, it)->args[0] : it;
+    if (lu_iter_type(I(c, made)) != NULL) {
+        return for_step(c, it, lu_iter_type(I(c, made)), exit_pc);
     }
     int kind = feedback(c, c->cache);
     if (lu_jit_nospec(c->code, c->pc)) {
@@ -3643,6 +3760,82 @@ for_iter(struct ctx *c)
     }
     push(c, v, 1);
     return 0;
+}
+
+/* The local a LOAD_FAST at pc reads, or -1; the next instruction in *next. */
+static int
+loads_local(struct ctx *c, int pc, int *next)
+{
+    int base, oparg, op;
+    *next = decode(c, pc, &base, &oparg, &op);
+    return base == LOAD_FAST || base == LOAD_FAST_BORROW ? oparg : -1;
+}
+
+/* f(a, ..., *args, **kwargs) in hidden code, from BUILD_LIST or BUILD_MAP
+   to CALL_FUNCTION_EX: the compiler's list of the leading arguments
+   extended by a local, made a tuple, and the keywords merged from a local
+   into an empty dict (or none), compiled as one call that passes the star
+   tuple's items and the dict as they are (h_call_forward). Hidden code
+   shows no traceback entry, so the call may leave from the first
+   instruction. 1 when it did. */
+static int
+forward_call(struct ctx *c)
+{
+    int base, oparg, op, pc = c->pc, next, star = -1, kw = -1, lead = 0;
+    if (!hidden(c->code) || c->parent != NULL || lu_jit_nospec(c->code, c->pc)) {
+        return 0;
+    }
+    if (c->base == BUILD_LIST) {
+        lead = c->oparg;
+        if (lead > 8 || lead > c->st.sp - 2 || (star = loads_local(c, c->next, &next)) < 0
+            || (decode(c, next, &base, &oparg, &op), base != LIST_EXTEND || oparg != 1)
+            || (next = decode(c, decode(c, next, &base, &oparg, &op), &base, &oparg, &op),
+                base != CALL_INTRINSIC_1 || oparg != INTRINSIC_LIST_TO_TUPLE)) {
+            return 0;
+        }
+        pc = next;
+    }
+    else {
+        pc = c->pc;                     /* the star tuple is on the stack already */
+    }
+    int after = decode(c, pc, &base, &oparg, &op);
+    if (base == BUILD_MAP && oparg == 0) {
+        if ((kw = loads_local(c, after, &next)) < 0 || (after = decode(c, next, &base, &oparg, &op),
+                                                         base != DICT_MERGE || oparg != 1)) {
+            return 0;
+        }
+    }
+    else if (base != PUSH_NULL) {
+        return 0;
+    }
+    int end = decode(c, after, &base, &oparg, &op);
+    if (base != CALL_FUNCTION_EX || (star >= 0 ? c->st.v[star] : peek(c, 1)) == LU_NOV
+        || (kw >= 0 && c->st.v[kw] == LU_NOV) || !opaque_call(c)) {
+        return 0;
+    }
+    /* The callable, its NULL (CALL_FUNCTION_EX ignores what is there), the
+       leading arguments (or the star tuple), from the stack. */
+    int nst = star >= 0 ? lead + 2 : 3;
+    lu_v args[12];
+    for (int i = 0; i < nst; i++) {
+        args[i] = peek(c, nst - i) != LU_NOV && i != 1 ? peek(c, nst - i) : konst(c, NULL);
+    }
+    int n = nst;
+    if (star >= 0) {
+        args[n++] = c->st.v[star];
+    }
+    args[n++] = kw >= 0 ? c->st.v[kw] : konst(c, NULL);
+    lu_v w = helper_raising(c, H_call_forward, n, args, nst);
+    I(c, w)->imm2 = CNT_call_kw + 1;
+    guard_after(c, OP_GUARD_NOT_NULL, w, 1);
+    for (int i = 0; i < nst; i++) {
+        int own;
+        lu_v v = pop(c, &own);
+        release(c, v, own);
+    }
+    push(c, w, 1);
+    c->next = end;
+    return 1;
 }
 
 /* --- the instruction --- */
@@ -3845,7 +4038,11 @@ translate(struct ctx *c)
                 guard_type(c, v, t);
             }
         }
-        if (t == &PyTuple_Type || t == &PyList_Type) {
+        if ((t == &PyTuple_Type || t == &PyList_Type) && steps_fresh(c, c->next)) {
+            lu_v fields[2] = { v, const_i(c, 0) };
+            w = helper(c, t == &PyTuple_Type ? H_tupleiter_new : H_listiter_new, 2, fields);   /* (for_step) */
+        }
+        else if (t == &PyTuple_Type || t == &PyList_Type) {
             /* A sequence iterator runs no Python, so an inlined frame makes one too. */
             w = helper_raising(c, H_get_iter_seq, 1, &v, 1);
             set_made(c, w, t == &PyTuple_Type ? &PyTupleIter_Type : &PyListIter_Type);
@@ -4132,6 +4329,9 @@ translate(struct ctx *c)
         return 0;
     }
     case BUILD_LIST: case BUILD_TUPLE: case BUILD_SET: case BUILD_MAP: {
+        if ((c->base == BUILD_LIST || (c->base == BUILD_MAP && oparg == 0)) && forward_call(c)) {
+            return c->failed ? -1 : 0;
+        }
         /* A set's or a dict's items may run Python (hashing): the root only. */
         int set = c->base == BUILD_SET || c->base == BUILD_MAP;
         oparg = c->base == BUILD_MAP ? 2 * oparg : oparg;

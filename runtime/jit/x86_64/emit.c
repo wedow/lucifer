@@ -802,19 +802,35 @@ describe(struct asm_ *a, lu_v v, int owned)
         dv.imm = in->imm;
         return dv;
     }
-    if ((in->flags & INS_VIRTUAL) && in->op == OP_HELPER && (in->imm == H_build_tuple || in->imm == H_new_object)) {
+    lu_v shape = lu_object_shape(a->f, v);
+    if (shape != LU_NOV) {
         /* A virtual object: made by the exit with the fields it has here,
            whose references it holds (ssa_opt.c step 3c). */
-        int tuple = in->imm == H_build_tuple, max = tuple ? in->nargs : in->nfields;
+        struct lu_ins *sh = I(a, shape);
+        int max = in->nargs > in->nfields ? in->nargs : in->nfields;
         lu_v *vals = malloc(sizeof(lu_v) * (size_t)(max ? max : 1));
         int32_t *offs = malloc(sizeof(int32_t) * (size_t)(max ? max : 1));
         int n = lu_object_fields(a->f, v, a->now, vals, offs);
-        dv.kind = tuple ? DV_TUPLE : DV_INSTANCE;
-        dv.imm = tuple ? 0 : I(a, in->args[0])->imm;
+        PyTypeObject *iter = lu_iter_type(sh);
+        dv.kind = sh->imm == H_build_tuple ? DV_TUPLE : iter != NULL ? DV_ITER : DV_INSTANCE;
+        dv.imm = sh->imm == H_build_tuple ? 0 : iter != NULL ? (int64_t)(intptr_t)iter : I(a, sh->args[0])->imm;
         dv.nfields = n;
         dv.fields = calloc((size_t)(n ? n : 1), sizeof(struct lu_dv));
         for (int i = 0; i < n; i++) {
-            dv.fields[i] = describe(a, vals[i], 1);
+            struct lu_ins *fi = I(a, vals[i]);
+            if (fi->rep == REP_I64) {
+                /* A raw word of the object (an iterator's index). */
+                dv.fields[i] = (struct lu_dv){ .kind = DV_RAW, .loc = LU_LOC_NONE, .vid = vals[i] };
+                if (fi->op == OP_CONST_I) {
+                    dv.fields[i].imm = fi->imm;
+                }
+                else {
+                    dv.fields[i].loc = fi->loc;
+                }
+            }
+            else {
+                dv.fields[i] = describe(a, vals[i], 1);
+            }
             dv.fields[i].off = offs[i];
         }
         free(vals);
@@ -854,6 +870,15 @@ describe(struct asm_ *a, lu_v v, int owned)
             dv.maybe_null = 1;
             dv.bitloc = bit->op == OP_CONST_I ? LU_LOC_NONE : bit->loc;
             dv.bitimm = (uint8_t)(bit->op == OP_CONST_I && bit->imm);
+        }
+        /* The attributes it was stored into raw by here get the box made (ssa_opt.c 3b). */
+        for (int i = 0; i < in->nfields; i++) {
+            struct lu_ins *st = I(a, in->fields[i]);
+            if (!(st->flags & INS_DEAD) && lu_ssa_before(a->f, in->fields[i], a->now)) {
+                dv.fields = realloc(dv.fields, sizeof(struct lu_dv) * (size_t)(dv.nfields + 1));
+                dv.fields[dv.nfields] = describe(a, st->a, 0);
+                dv.fields[dv.nfields++].off = (int32_t)st->imm;
+            }
         }
         return dv;
     }

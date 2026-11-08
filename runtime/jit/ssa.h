@@ -169,12 +169,15 @@ enum {
                                    can have seen yet, of a name it lacks: it takes no lock, releases
                                    nothing and publishes nothing (ssa_opt.c 3c) */
 };
-/* A virtual object (ssa_opt.c step 3c) is a tuple build or an instance
-   allocation flagged INS_VIRTUAL: never made in compiled code, but by an
-   exit that names it, once per exit, with the fields it has there
-   (lu_object_fields). An instance's fields are the stores into it, which
-   stay in place, virtual, so that where they are says which fields an
-   exit sees. */
+/* A virtual object (ssa_opt.c step 3c) is a tuple build, an instance
+   allocation, a loop iterator (lu_iter_type) or a phi of such objects,
+   flagged INS_VIRTUAL: never made in compiled code, but by an exit that
+   names it, once per exit, with the fields it has there
+   (lu_object_fields). A tuple's or an iterator's fields are its
+   arguments, a phi's the phis of its inputs' fields (its `fields`; its c
+   names an input whose shape it has). An instance's fields are the stores
+   into it, which stay in place, virtual, so that where they are says
+   which fields an exit sees. */
 
 struct lu_ins {
     uint8_t op;
@@ -290,8 +293,18 @@ int lu_regalloc(struct lu_func *f);
 int lu_ssa_before(struct lu_func *f, lu_v s, lu_v x);
 /* The fields virtual object v has where instruction `at` runs: their
    values into vals (room for every field) and their places into offs (an
-   instance's byte offsets, a tuple's indexes); the count. */
+   instance's or an iterator's byte offsets, a tuple's indexes); the count. */
 int lu_object_fields(struct lu_func *f, lu_v v, lu_v at, lu_v *vals, int32_t *offs);
+/* The instruction whose shape virtual object v has (the build, or a phi's
+   input), or LU_NOV when v is not a virtual object. */
+lu_v lu_object_shape(struct lu_func *f, lu_v v);
+/* The place of field k of an object of shape's kind whose fields are its
+   arguments: a tuple's index, an iterator's byte offset. */
+int32_t lu_object_place(const struct lu_ins *shape, int k);
+
+/* The type of the loop iterator a listiter_new, tupleiter_new or
+   rangeiter_new helper makes (ssa_build.c for_step), else NULL. */
+PyTypeObject *lu_iter_type(const struct lu_ins *in);
 
 /* JIT build statistics, for -X lucifer_jit_stats. */
 extern unsigned long lu_jit_bailout_counts[256];
