@@ -61,6 +61,7 @@ struct lu_jit_code {
     int compiling;              /* a thread is compiling: others interpret */
     int disabled;
     int compiles;
+    int regrown;                /* recompiles a polymorphic cache asked for: bounded, so not held against MAX_COMPILES */
     struct lu_unit *units;
     struct lu_unit *retired;    /* units off the list, freed with the code */
     int nfailed;
@@ -593,7 +594,8 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
     }
     sweep(jc);
     struct lu_unit *u = find(jc, pc);
-    if (u == NULL && jc->compiles < MAX_COMPILES) {
+    int allowed = MAX_COMPILES + __atomic_load_n(&jc->regrown, __ATOMIC_RELAXED);
+    if (u == NULL && jc->compiles < allowed) {
         jc->compiles++;
         uint64_t ticket = lu_jit_deps_begin();     /* before anything the build reads */
         u = compile(jc, frame, pc, ticket);
@@ -605,11 +607,14 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
                 __atomic_store_n(&jc->direct.entry, u->direct, __ATOMIC_RELEASE);
             }
         }
-        else if (jc->nfailed < MAX_ENTRIES && jc->wait[pc] == 0) {     /* not put off for warm-up */
+        else if (jc->wait[pc] != 0) {
+            jc->compiles--;     /* put off for warm-up: a code with many loops puts off one per entry */
+        }
+        else if (jc->nfailed < MAX_ENTRIES) {
             jc->failed[jc->nfailed++] = pc;
         }
     }
-    if (jc->compiles >= MAX_COMPILES && u == NULL) {
+    if (jc->compiles >= allowed && u == NULL) {
         if ((_PyRuntime.jit.debug || _PyRuntime.jit.stats) && !__atomic_load_n(&jc->disabled, __ATOMIC_RELAXED)) {
             fprintf(stderr, "jit: disabled %s\n", PyUnicode_AsUTF8(code->co_qualname));
         }
@@ -927,8 +932,14 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
     PyMutex_Unlock(&_PyRuntime.pic_lock);
     if (added) {
         /* The code's units recompile at their next entry, testing for it. */
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: pic grows %s for %s\n", PyUnicode_AsUTF8(pic->code->co_qualname), tp->tp_name);
+        }
         struct lu_jit_code *jc = state_of(pic->code);
         for (struct lu_unit *u = __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
+            if (!__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
+                __atomic_fetch_add(&jc->regrown, 1, __ATOMIC_RELAXED);
+            }
             kill(jc, u);
         }
         jc->nfailed = 0;

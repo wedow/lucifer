@@ -402,6 +402,8 @@ within 1,000 bytes of 1 MB in a snapshot diff. The wheel imports
     allocations under `gc:1`, `gc:10` and `gc:100`.
 - **`deopt:N` (P0).** Guards are compiled to fail at a seeded phase on every
   Nth execution. Code compiled without the flag has no stress instructions.
+- **`sre`.** `_sre` specializes every pattern at its first use and runs its
+  interpreter beside each specialized match, raising on any difference.
 - **`switch` and `sched`.** These are `-X lucifer_handoff` (DESIGN §5.8) with an
   optional `=SEED` choosing park-or-continue per safepoint. There is no second
   mechanism.
