@@ -3825,7 +3825,10 @@ call(struct ctx *c)
     }
     PyFunctionObject *knew;
     int kinit;
+    /* Only where the call has run: an error path's exception class would
+       add exits whose states keep the hot path's values boxed. */
     if (!klass && kc != NULL && PyType_Check(kc) && self == LU_NOV
+        && __atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED) != 0
         && kernel_class(c, (PyTypeObject *)kc, &knew, &init, &kinit, &version, &meta)
         && class_call(c, (PyTypeObject *)kc, knew, init, kinit, version, meta, args, own, nargs, 0, n + 2)) {
         return 0;
