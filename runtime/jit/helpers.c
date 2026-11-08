@@ -1268,6 +1268,14 @@ h_reraise(PyObject *exc)
     return NULL;
 }
 
+/* LOAD_SPECIAL: the special method `which` of owner's type, bound to owner. */
+static PyObject *
+h_load_special(PyObject *owner, int64_t which)
+{
+    PyObject *args[2] = { owner, lu_small_int((int)which) };
+    return lu_call_kernel(LU_K_load_special, args, 2);
+}
+
 const struct lu_helper lu_helpers[H_COUNT] = {
     [H_box_int] = { (void *)lu_jit_box_int, "box_int", REP_OBJ, 0, 1 },
     [H_box_float] = { (void *)lu_jit_box_float, "box_float", REP_OBJ, 0, 1 },
@@ -1354,4 +1362,5 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, IF_RAISE, 2 },
     [H_raise] = { (void *)h_raise, "raise", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_reraise] = { (void *)h_reraise, "reraise", REP_OBJ, IF_RAISE, 1 },
+    [H_load_special] = { (void *)h_load_special, "load_special", REP_OBJ, IF_RAISE | IF_PY, 2 },
 };

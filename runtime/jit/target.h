@@ -327,7 +327,8 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(pop_except) \
     X(exc_match) \
     X(raise) \
-    X(reraise)
+    X(reraise) \
+    X(load_special)
 
 enum lu_helper_id {
 #define LU_HELPER_ENUM(name) H_##name,

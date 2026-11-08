@@ -960,7 +960,7 @@ supported(int op)
     case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
     case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case RERAISE: case DELETE_FAST:
     case LOAD_SUPER_ATTR: case STORE_GLOBAL: case BUILD_SLICE: case CONVERT_VALUE: case FORMAT_SIMPLE:
-    case FORMAT_WITH_SPEC: case BUILD_STRING:
+    case FORMAT_WITH_SPEC: case BUILD_STRING: case LOAD_SPECIAL:
     case YIELD_VALUE: case SEND: case END_SEND: case GET_AWAITABLE:
     case GET_YIELD_FROM_ITER: case GET_AITER: case GET_ANEXT:
         return 1;
@@ -5025,6 +5025,20 @@ translate(struct ctx *c)
             helper_raising(c, H_raise, 2, args, oparg);
         }
         side_exit(c, EXIT_SIDE);        /* not reached: the helper always raises */
+        return 0;
+    }
+    case LOAD_SPECIAL: {
+        /* owner -- attr, NULL: the special method looked up on owner's
+           type, bound by the kernel (which raises the interpreter's error
+           for a type without it). */
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        lu_v args[2] = { v, const_i(c, oparg) };
+        lu_v r = helper_raising(c, H_load_special, 2, args, 1);
+        pop(c, NULL);
+        release(c, v, own);
+        push(c, r, 1);
+        push(c, LU_NOV, 0);
         return 0;
     }
     case DELETE_FAST:
