@@ -670,7 +670,11 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    through an instance of a known type, is its callable, guarded, with the
    class as a classmethod's self.
 2. **Guards.** Type version, keys version, function version, global watcher tag,
-   value range. Effects are explicit per Python operation: descriptors,
+   value range. An attribute load or store site that meets several classes
+   keeps a polymorphic cache of up to four shapes, fed by the generic path of
+   a root unit and by the interpreter's generic loads and stores, so that a
+   frame inlined where the generic path cannot run tests those shapes and
+   leaves only on others. Effects are explicit per Python operation: descriptors,
    `__eq__`/`__hash__` callbacks, C calls and allocation can all reenter.
 3. **Representation.** Unboxing, escape analysis and scalar replacement (§4.5);
    ownership-based refcount elision (Cinder precedent, research 01 §5). A

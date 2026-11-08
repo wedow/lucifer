@@ -369,8 +369,11 @@ h_load_method(PyObject *owner, PyObject *name, int64_t site)
 }
 
 static int
-h_store_attr(PyObject *owner, PyObject *name, PyObject *v)
+h_store_attr(PyObject *owner, PyObject *name, PyObject *v, int64_t pic)
 {
+    if (pic != 0) {
+        lu_jit_pic_note((struct lu_pic *)(intptr_t)pic, owner, name);
+    }
     int done = lu_setattr_native(owner, name, v);
     if (done != 0) {
         return done < 0 ? -1 : 0;
@@ -1272,7 +1275,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_list_extend_seq] = { (void *)h_list_extend, "list_extend_seq", REP_BIT, IF_RAISE, 2 },
     [H_load_attr] = { (void *)h_load_attr_pic, "load_attr", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_load_method] = { (void *)h_load_method, "load_method", REP_OBJ, IF_RAISE | IF_PY, 3 },
-    [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 3 },
+    [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 4 },
     [H_load_global] = { (void *)h_load_global, "load_global", REP_OBJ, IF_RAISE, 4 },
     [H_store_global] = { (void *)h_store_global, "store_global", REP_BIT, IF_RAISE | IF_SEEN, 3 },
     [H_build_slice] = { (void *)h_build_slice, "build_slice", REP_OBJ, IF_RAISE, 3 },

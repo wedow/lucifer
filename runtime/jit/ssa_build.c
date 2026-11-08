@@ -2839,6 +2839,52 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
     return 0;
 }
 
+/* A generic STORE_ATTR site its polymorphic cache answers: the owner's
+   type version picks an entry, whose inline value is stored as its
+   one-shape site would store it; any other type takes the generic path
+   (in a root frame, which goes on recording) or leaves. 0 when the site
+   has no cache. */
+static int
+store_attr_poly(struct ctx *c, lu_v owner, lu_v v)
+{
+    struct lu_pic *pic = lu_jit_pic(c->code, c->pc, 0);
+    int n = pic != NULL && pic->store ? __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE) : 0;
+    if (n == 0) {
+        return 0;
+    }
+    struct lu_func *f = c->f;
+    lu_v t = emit(c, OP_LOAD, REP_I64, type_of(c, owner), LU_NOV, LU_NOV, offsetof(PyTypeObject, tp_version_tag));
+    I(c, t)->imm2 = 4;          /* 32 bits */
+    int join = lu_ir_block(f);
+    for (int i = 0; i < n; i++) {
+        struct lu_pic_entry e = pic->e[i];
+        lu_v bit = emit(c, OP_CMP_I, REP_BIT, t, const_i(c, e.version), LU_NOV, Py_EQ);
+        int arm = lu_ir_block(f), next = lu_ir_block(f);
+        lu_ir_edge(f, c->cur, arm);
+        lu_ir_edge(f, c->cur, next);
+        emit(c, OP_BRANCH, REP_NONE, bit, LU_NOV, LU_NOV, 0);
+        c->cur = arm;
+        lu_v st = emit(c, OP_INLINE_STORE, REP_NONE, owner, v, LU_NOV, e.index);
+        I(c, st)->fs = before(c);
+        emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+        lu_ir_edge(f, c->cur, join);
+        c->cur = next;
+    }
+    if (root_only(c)) {
+        lu_v args[4] = { owner, konst(c, name_at(c, c->oparg)), v, const_i(c, (int64_t)(intptr_t)pic) };
+        helper_raising(c, H_store_attr, 4, args, 2);
+    }
+    else {
+        unsupported(c);         /* leaves at the state before the store */
+    }
+    if (c->cur >= 0) {
+        emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+        lu_ir_edge(f, c->cur, join);
+    }
+    c->cur = join;
+    return 1;
+}
+
 static int
 store_attr(struct ctx *c)
 {
@@ -2878,9 +2924,12 @@ store_attr(struct ctx *c)
         lu_v args[3] = { owner, const_i(c, index), v };
         helper(c, H_slot_store, 3, args);
     }
+    else if (store_attr_poly(c, owner, v)) {
+        /* done */
+    }
     else if (root_only(c)) {
-        lu_v args[3] = { owner, konst(c, name), v };
-        helper_raising(c, H_store_attr, 3, args, 2);
+        lu_v args[4] = { owner, konst(c, name), v, const_i(c, (int64_t)(intptr_t)lu_jit_pic(c->code, c->pc, 1)) };
+        helper_raising(c, H_store_attr, 4, args, 2);
     }
     else {
         unsupported(c);

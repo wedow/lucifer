@@ -225,13 +225,14 @@ int lu_jit_call(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args
 #define LU_PIC_WAYS 4
 struct lu_pic_entry {
     uint32_t version;
-    uint16_t op;                /* LOAD_ATTR_INSTANCE_VALUE, _METHOD_* or _NONDESCRIPTOR_* */
+    uint16_t op;                /* LOAD_ATTR_INSTANCE_VALUE, _METHOD_* or _NONDESCRIPTOR_*; STORE_ATTR_INSTANCE_VALUE */
     uint16_t index;
     PyObject *descr;
 };
 struct lu_pic {
     PyCodeObject *code;         /* the site's, which frees the cache */
     int method;                 /* LOAD_ATTR's method form */
+    int store;                  /* a STORE_ATTR site's */
     int n;                      /* entries published, release-stored after the entry */
     int tries;                  /* shapes looked at: a site whose owners have none stops looking */
     struct lu_pic_entry e[LU_PIC_WAYS];
@@ -242,6 +243,11 @@ struct lu_pic *lu_jit_pic(PyCodeObject *code, int pc, int create);
 /* A generic load at the site met owner: its shape joins the cache, and the
    code recompiles to test for it, while there is room. */
 void lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name);
+/* The interpreter's generic load or store at pc of code that has compiled units met
+   owner: the site's cache (made now) notes its shape, so that a unit that
+   inlines the code, whose generic load or store leaves, tests for it
+   (luc-9ags, luc-n6yj). */
+void lu_jit_pic_note_interpreted(PyCodeObject *code, int pc, PyObject *owner, PyObject *name);
 /* lu_specialize_forget for the code's polymorphic caches. */
 void lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *));
 
