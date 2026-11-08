@@ -1,9 +1,12 @@
-"""_collections (Modules/_collectionsmodule.c): deque over a list,
+"""_collections (Modules/_collectionsmodule.c): deque over a ring buffer,
 defaultdict, _count_elements and _tuplegetter. OrderedDict stays the
 pure-Python fallback of collections."""
 
 import sys
-from _lucifer import repr_enter, repr_leave, kind, size, seq_get, kernel_set
+from _lucifer import (
+    MISSING, repr_enter, repr_leave, kind, size, seq_get, kernel_set, ring_new, ring_push, ring_extend, ring_pop,
+    ring_get, ring_set, ring_del, ring_insert, ring_rotate, ring_reverse, ring_clear, ring_items, ring_len, ring_state,
+)
 from _types import GenericAlias
 
 __all__ = ('deque', 'defaultdict', '_deque_iterator', '_deque_reverse_iterator',
@@ -30,14 +33,13 @@ def _slice_index(x):
 class deque:
     """A list-like sequence optimized for data accesses near its endpoints."""
 
-    __slots__ = ('_items', '_maxlen', '_state', '__weakref__')
+    __slots__ = ('_ring', '_maxlen', '__weakref__')
     __hash__ = None
 
     def __new__(cls, *args, **kwargs):
         self = object.__new__(cls)
-        self._items = []
+        self._ring = ring_new()
         self._maxlen = None
-        self._state = 0
         return self
 
     def __init__(self, iterable=(), maxlen=None):
@@ -49,8 +51,8 @@ class deque:
             if maxlen < 0:
                 raise ValueError('maxlen must be non-negative')
         self._maxlen = maxlen
-        self.clear()
-        self.extend(iterable)
+        ring_clear(self._ring)
+        deque.extend(self, iterable)
 
     @property
     def maxlen(self):
@@ -59,63 +61,53 @@ class deque:
 
     def append(self, item, /):
         """Add an element to the right side of the deque."""
-        items = self._items
-        items.append(item)
-        if self._maxlen is not None and len(items) > self._maxlen:
-            del items[0]
-        self._state += 1
+        ring_push(self._ring, item, False, self._maxlen)
 
     def appendleft(self, item, /):
         """Add an element to the left side of the deque."""
-        items = self._items
-        items.insert(0, item)
-        if self._maxlen is not None and len(items) > self._maxlen:
-            del items[-1]
-        self._state += 1
+        ring_push(self._ring, item, True, self._maxlen)
 
     def pop(self):
         """Remove and return the rightmost element."""
-        if not self._items:
+        item = ring_pop(self._ring, False)
+        if item is MISSING:
             raise IndexError('pop from an empty deque')
-        self._state += 1
-        return self._items.pop()
+        return item
 
     def popleft(self):
         """Remove and return the leftmost element."""
-        if not self._items:
+        item = ring_pop(self._ring, True)
+        if item is MISSING:
             raise IndexError('pop from an empty deque')
-        self._state += 1
-        return self._items.pop(0)
+        return item
+
+    def _extend(self, iterable, left):
+        """deque_extend: a list, a tuple or the deque itself is copied first,
+        and its items go in at once."""
+        if self._maxlen == 0:
+            for _ in iterable:
+                pass
+            return
+        ring = self._ring
+        if iterable is self:
+            iterable = ring_items(ring)
+        if type(iterable) is list or type(iterable) is tuple:
+            ring_extend(ring, iterable, left, self._maxlen)
+            return
+        for item in iterable:
+            ring_push(ring, item, left, self._maxlen)
 
     def extend(self, iterable, /):
         """Extend the right side of the deque with elements from the iterable."""
-        if iterable is self:
-            iterable = list(self._items)
-        it = iter(iterable)
-        if self._maxlen == 0:
-            for _ in it:
-                pass
-            return
-        for item in it:
-            deque.append(self, item)
+        deque._extend(self, iterable, False)
 
     def extendleft(self, iterable, /):
         """Extend the left side of the deque with elements from the iterable."""
-        if iterable is self:
-            iterable = list(self._items)
-        it = iter(iterable)
-        if self._maxlen == 0:
-            for _ in it:
-                pass
-            return
-        for item in it:
-            deque.appendleft(self, item)
+        deque._extend(self, iterable, True)
 
     def clear(self):
         """Remove all elements from the deque."""
-        if self._items:
-            self._state += 1
-            self._items.clear()
+        ring_clear(self._ring)
 
     def copy(self):
         """Return a shallow copy of a deque."""
@@ -127,16 +119,38 @@ class deque:
         """Return a shallow copy of a deque."""
         return self.copy()
 
+    def _scan(self, value, start, stop, removing):
+        """The first index in [start, stop) holding value, else -1. A change
+        under the comparisons is a RuntimeError once nothing is found, and
+        for remove() an IndexError even when something is."""
+        ring = self._ring
+        state = ring_state(ring)
+        exc = IndexError if removing else RuntimeError
+        for i in range(start, stop):
+            item = ring_get(ring, i, state)
+            if item is MISSING:
+                raise exc('deque mutated during iteration')
+            found = item is value or item == value
+            if found and not removing:
+                return i
+            if ring_state(ring) != state:
+                raise exc('deque mutated during iteration')
+            if found:
+                return i
+        return -1
+
     def count(self, value, /):
         """Return number of occurrences of value."""
-        items = self._items
-        state = self._state
+        ring = self._ring
+        state = ring_state(ring)
         count = 0
-        for i in range(len(items)):
-            item = items[i]
+        for i in range(ring_len(ring)):
+            item = ring_get(ring, i, state)
+            if item is MISSING:
+                raise RuntimeError('deque mutated during iteration')
             if item is value or item == value:
                 count += 1
-            if state != self._state:
+            if ring_state(ring) != state:
                 raise RuntimeError('deque mutated during iteration')
         return count
 
@@ -144,9 +158,7 @@ class deque:
         """Return first index of value.
 
 Raises ValueError if the value is not present."""
-        items = self._items
-        state = self._state
-        size = len(items)
+        size = ring_len(self._ring)
         start = _slice_index(start)
         stop = _slice_index(stop)
         if start < 0:
@@ -155,85 +167,52 @@ Raises ValueError if the value is not present."""
             stop = max(stop + size, 0)
         stop = min(stop, size)
         start = min(start, stop)
-        for i in range(start, stop):
-            item = items[i]
-            if item is value or item == value:
-                return i
-            if state != self._state:
-                raise RuntimeError('deque mutated during iteration')
-        raise ValueError('deque.index(x): x not in deque')
+        i = deque._scan(self, value, start, stop, False)
+        if i < 0:
+            raise ValueError('deque.index(x): x not in deque')
+        return i
 
     def insert(self, index, value, /):
         """Insert value before index."""
-        index = _index(index)
-        if self._maxlen == len(self._items):
+        if not ring_insert(self._ring, _index(index), value, self._maxlen):
             raise IndexError('deque already at its maximum size')
-        self._items.insert(index, value)
-        self._state += 1
 
     def remove(self, value, /):
         """Remove first occurrence of value."""
-        items = self._items
-        state = self._state
-        for i in range(len(items)):
-            item = items[i]
-            found = item is value or item == value
-            if state != self._state:
-                raise IndexError('deque mutated during iteration')
-            if found:
-                del items[i]
-                self._state += 1
-                return
-        raise ValueError('deque.remove(x): x not in deque')
+        i = deque._scan(self, value, 0, ring_len(self._ring), True)
+        if i < 0:
+            raise ValueError('deque.remove(x): x not in deque')
+        ring_del(self._ring, i)
 
     def reverse(self):
         """Reverse *IN PLACE*."""
-        self._items.reverse()
+        ring_reverse(self._ring)
 
     def rotate(self, n=1, /):
         """Rotate the deque n steps to the right.  If n is negative, rotates left."""
-        n = _index(n)
-        items = self._items
-        if len(items) > 1:
-            self._state += 1
-            n %= len(items)
-            if n:
-                items[:] = items[-n:] + items[:-n]
+        ring_rotate(self._ring, _index(n))
 
     def __len__(self):
-        return len(self._items)
+        return ring_len(self._ring)
 
     def __getitem__(self, i):
         if not isinstance(i, int) and not hasattr(type(i), '__index__'):
             raise TypeError("sequence index must be integer, not '%s'" % type(i).__name__)
-        i = _index(i)
-        if not -len(self._items) <= i < len(self._items):
+        item = ring_get(self._ring, _index(i), -1)
+        if item is MISSING:
             raise IndexError('deque index out of range')
-        return self._items[i]
+        return item
 
     def __setitem__(self, i, value):
-        i = _index(i)
-        if not -len(self._items) <= i < len(self._items):
+        if not ring_set(self._ring, _index(i), value):
             raise IndexError('deque index out of range')
-        self._items[i] = value
 
     def __delitem__(self, i):
-        i = _index(i)
-        if not -len(self._items) <= i < len(self._items):
+        if not ring_del(self._ring, _index(i)):
             raise IndexError('deque index out of range')
-        del self._items[i]
-        self._state += 1
 
     def __contains__(self, value):
-        items = self._items
-        state = self._state
-        for i in range(len(items)):
-            item = items[i]
-            if item is value or item == value:
-                return True
-            if state != self._state:
-                raise RuntimeError('deque mutated during iteration')
-        return False
+        return deque._scan(self, value, 0, ring_len(self._ring), False) >= 0
 
     def __iter__(self):
         return _deque_iterator(self)
@@ -263,59 +242,53 @@ Raises ValueError if the value is not present."""
         if not isinstance(n, int) and not hasattr(type(n), '__index__'):
             raise TypeError("can't multiply sequence by non-int of type '%s'" % type(n).__name__)
         n = _index(n)
-        items = self._items
-        if not items or n == 1:
+        ring = self._ring
+        size = ring_len(ring)
+        if not size or n == 1:
             return self
         if n <= 0:
-            self.clear()
-        elif len(items) == 1:
-            if self._maxlen is not None:
-                n = min(n, self._maxlen)
-            self._state += 1
-            items.extend(items * (n - 1))
-        else:
-            seq = list(items)
-            if self._maxlen is not None and n * len(items) > self._maxlen:
-                n = (self._maxlen + len(items) - 1) // len(items)
-            for _ in range(n - 1):
-                self.extend(seq)
+            ring_clear(ring)
+            return self
+        if self._maxlen is not None and n * size > self._maxlen:
+            n = (self._maxlen + size - 1) // size
+        ring_extend(ring, ring_items(ring) * (n - 1), False, self._maxlen)
         return self
 
     def __eq__(self, other):
         if not isinstance(other, deque):
             return NotImplemented
-        return self._items == other._items
+        return ring_items(self._ring) == ring_items(other._ring)
 
     def __ne__(self, other):
         if not isinstance(other, deque):
             return NotImplemented
-        return self._items != other._items
+        return ring_items(self._ring) != ring_items(other._ring)
 
     def __lt__(self, other):
         if not isinstance(other, deque):
             return NotImplemented
-        return self._items < other._items
+        return ring_items(self._ring) < ring_items(other._ring)
 
     def __le__(self, other):
         if not isinstance(other, deque):
             return NotImplemented
-        return self._items <= other._items
+        return ring_items(self._ring) <= ring_items(other._ring)
 
     def __gt__(self, other):
         if not isinstance(other, deque):
             return NotImplemented
-        return self._items > other._items
+        return ring_items(self._ring) > ring_items(other._ring)
 
     def __ge__(self, other):
         if not isinstance(other, deque):
             return NotImplemented
-        return self._items >= other._items
+        return ring_items(self._ring) >= ring_items(other._ring)
 
     def __repr__(self):
         if repr_enter(self):
             return '[...]'
         try:
-            body = repr(list(self._items))
+            body = repr(ring_items(self._ring))
         finally:
             repr_leave(self)
         if self._maxlen is None:
@@ -331,7 +304,7 @@ Raises ValueError if the value is not present."""
 
     def __sizeof__(self):
         """Return the size of the deque in memory, in bytes."""
-        return 64 + 8 * len(self._items)
+        return 64 + 8 * ring_len(self._ring)
 
     def __class_getitem__(cls, item):
         return GenericAlias(cls, item)
@@ -351,8 +324,8 @@ class _DequeIterator:
             raise TypeError('%s() argument 1 must be collections.deque, not %s'
                             % (type(self).__name__, type(deque_).__name__))
         self._deque = deque_
-        self._state = deque_._state
-        self._size = self._counter = len(deque_._items)
+        self._state = ring_state(deque_._ring)
+        self._size = self._counter = ring_len(deque_._ring)
         for _ in range(index):
             if not self._counter:
                 break
@@ -367,7 +340,7 @@ class _DequeIterator:
 
     def __reduce__(self):
         """Return state information for pickling."""
-        return type(self), (self._deque, len(self._deque._items) - self._counter)
+        return type(self), (self._deque, ring_len(self._deque._ring) - self._counter)
 
     def _stale(self):
         self._counter = 0
@@ -378,11 +351,13 @@ class _deque_iterator(_DequeIterator):
     __slots__ = ()
 
     def __next__(self):
-        if self._deque._state != self._state:
-            self._stale()
         if not self._counter:
+            if ring_state(self._deque._ring) != self._state:
+                self._stale()
             raise StopIteration
-        item = self._deque._items[self._size - self._counter]
+        item = ring_get(self._deque._ring, self._size - self._counter, self._state)
+        if item is MISSING:
+            self._stale()
         self._counter -= 1
         return item
 
@@ -393,10 +368,11 @@ class _deque_reverse_iterator(_DequeIterator):
     def __next__(self):
         if not self._counter:
             raise StopIteration
-        if self._deque._state != self._state:
+        item = ring_get(self._deque._ring, self._counter - 1, self._state)
+        if item is MISSING:
             self._stale()
         self._counter -= 1
-        return self._deque._items[self._counter]
+        return item
 
 
 _deque_iterator.__module__ = _deque_reverse_iterator.__module__ = 'collections'
