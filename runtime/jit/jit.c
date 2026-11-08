@@ -1240,14 +1240,6 @@ handling_frame(struct lu_deopt *d)
     return k;
 }
 
-/* An exit was taken: its counts; for a guard that keeps failing, no
-   more speculation there and a recompile of the code it left; for a unit
-   without loops that keeps leaving, retirement. An
-   exception that leaves the root frame ends the call there: the
-   interpreter only unwinds it, so it is not a leave. One that an inlined
-   frame's handler keeps taking (compiled code takes only the root's and
-   kernel frames', which make no traceback entry) is treated as a side
-   exit there: the function is called instead, and its own unit takes it. */
 /* An error exit that leaves as its direct call's result (deopt.c). */
 void
 lu_jit_note_raised(struct lu_deopt *d)
@@ -1260,6 +1252,14 @@ lu_jit_note_raised(struct lu_deopt *d)
     }
 }
 
+/* An exit was taken: its counts; for a guard that keeps failing, no
+   more speculation there and a recompile of the code it left; for a unit
+   without loops that keeps leaving, retirement. An
+   exception that leaves the root frame ends the call there: the
+   interpreter only unwinds it, so it is not a leave. One that an inlined
+   frame's handler keeps taking (compiled code takes only the root's and
+   kernel frames', which make no traceback entry) is treated as a side
+   exit there: the function is called instead, and its own unit takes it. */
 void
 lu_jit_note_exit(struct lu_deopt *d)
 {
