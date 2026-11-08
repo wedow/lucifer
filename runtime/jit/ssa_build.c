@@ -958,9 +958,9 @@ supported(int op)
     case DELETE_SUBSCR: case LOAD_FAST_AND_CLEAR: case LIST_APPEND: case SET_ADD: case MAP_ADD:
     case BUILD_SET: case BUILD_MAP: case CALL_INTRINSIC_1: case BINARY_SLICE: case STORE_SLICE:
     case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
-    case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case DELETE_FAST:
+    case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case RERAISE: case DELETE_FAST:
     case LOAD_SUPER_ATTR: case STORE_GLOBAL: case BUILD_SLICE: case CONVERT_VALUE: case FORMAT_SIMPLE:
-    case FORMAT_WITH_SPEC: case BUILD_STRING:
+    case FORMAT_WITH_SPEC: case BUILD_STRING: case LOAD_SPECIAL:
     case YIELD_VALUE: case SEND: case END_SEND: case GET_AWAITABLE:
     case GET_YIELD_FROM_ITER: case GET_AITER: case GET_ANEXT:
         return 1;
@@ -2490,6 +2490,16 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
         lu_v a1, a2 = LU_NOV;
         int own1 = 1, own2 = 0;
         if (e.op == LOAD_ATTR_INSTANCE_VALUE) {
+            /* An instance of the class that lacks the attribute (its class
+               attribute answers until it sets its own) takes the generic
+               path. */
+            lu_v word = emit(c, OP_LOAD, REP_I64, owner, LU_NOV, LU_NOV, e.index);
+            lu_v set = emit(c, OP_CMP_I, REP_BIT, word, const_i(c, 0), LU_NOV, Py_NE);
+            int hit = lu_ir_block(f);
+            lu_ir_edge(f, c->cur, hit);
+            lu_ir_edge(f, c->cur, next);
+            emit(c, OP_BRANCH, REP_NONE, set, LU_NOV, LU_NOV, 0);
+            c->cur = hit;
             a1 = emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, e.index);
             I(c, a1)->fs = before(c);
             release(c, owner, own);
@@ -4315,11 +4325,12 @@ translate(struct ctx *c)
             }
         }
         int target = jump_target(c->base, oparg, c->next);
-        int seen = c->parent == NULL || Py_SIZE(c->code) <= INLINE_MAX_UNITS || lu_jit_nospec(c->code, c->pc) ? 0
+        int seen = Py_SIZE(c->code) <= INLINE_MAX_UNITS || lu_jit_nospec(c->code, c->pc) ? 0
             : __atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED);
         if (I(c, w)->op != OP_CONST_I && (seen == LU_BRANCH_FELL || seen == LU_BRANCH_JUMPED)) {
-            /* In a callee too large to inline whole, a direction the
-               interpreter never took leaves instead. */
+            /* In code too large to inline whole (a callee or the root: its
+               compile costs its size), a direction the interpreter never
+               took leaves instead. */
             guard(c, OP_GUARD_BIT, w, seen == LU_BRANCH_JUMPED);
             w = const_i(c, seen == LU_BRANCH_JUMPED);
         }
@@ -4687,18 +4698,25 @@ translate(struct ctx *c)
     case UNPACK_SEQUENCE: {
         /* An exact tuple or list (the kind the interpreter met, else a
            tuple) of oparg items, its items pushed last first; any other
-           sequence leaves, and after enough of that it always does. A
-           list's items are read under its lock, as a tuple. */
+           sequence leaves, and after enough of that the kernel unpacks
+           it into a tuple (at the root: it runs Python). A list's items
+           are read under its lock, as a tuple. */
         v = peek(c, 1);
         own = peek_owned(c, 1);
-        if (oparg > 30 || lu_jit_nospec(c->code, c->pc)) {
+        int generic = oparg > 30 || lu_jit_nospec(c->code, c->pc);
+        if (generic && !root_only(c)) {
             unsupported(c);
             return -1;
         }
         PyTypeObject *t = known_type(c, v);
-        int list = t == &PyList_Type || (t != &PyTuple_Type && (feedback(c, c->cache) & 0xff) == LU_KIND_LIST);
+        int list = !generic
+            && (t == &PyList_Type || (t != &PyTuple_Type && (feedback(c, c->cache) & 0xff) == LU_KIND_LIST));
         lu_v items = v;
-        if (list) {
+        if (generic) {
+            lu_v args[2] = { v, const_i(c, oparg) };
+            items = helper_raising(c, H_unpack, 2, args, 1);
+        }
+        else if (list) {
             guard_type(c, v, &PyList_Type);
             lu_v args[2] = { v, const_i(c, oparg) };
             items = helper_raising(c, H_list_to_tuple, 2, args, 0);
@@ -4716,7 +4734,7 @@ translate(struct ctx *c)
             incref(c, item);
             push(c, item, 1);
         }
-        release(c, items, list);
+        release(c, items, list || generic);
         release(c, v, own);
         return 0;
     }
@@ -4989,19 +5007,45 @@ translate(struct ctx *c)
         push(c, v, 0);
         return 0;
     }
-    case RAISE_VARARGS: {
-        /* raise exc [from cause]; a bare raise re-raises without a traceback
-           entry here. An inlined frame raises only to a handler of the unit:
-           else the side exit costs the same, and its boxes stay virtual. */
+    case RAISE_VARARGS:
+    case RERAISE: {
+        /* raise exc [from cause]. A bare raise and RERAISE raise again
+           without a traceback entry here, as kernel code makes none: only
+           there (the lasti RERAISE restores is seen only by a traceback or
+           a frame object). An inlined frame raises only to a handler of the
+           unit: else the side exit costs the same, and its boxes stay
+           virtual. */
         struct ctx *k;
         int handler, level, lasti, at;
-        if (oparg == 0 || (c->parent != NULL && !catcher(c, before(c), &k, &handler, &level, &lasti, &at))) {
+        int again = c->base == RERAISE || oparg == 0;
+        if ((again && !hidden(c->code))
+            || (c->parent != NULL && !catcher(c, before(c), &k, &handler, &level, &lasti, &at))) {
             unsupported(c);
             return -1;
         }
-        lu_v args[2] = { peek(c, oparg), oparg == 2 ? peek(c, 1) : konst(c, LU_MISSING) };
-        helper_raising(c, H_raise, 2, args, oparg);
+        if (again) {
+            lu_v exc = c->base == RERAISE ? peek(c, 1) : const_i(c, 0);
+            helper_raising(c, H_reraise, 1, &exc, c->base == RERAISE);
+        }
+        else {
+            lu_v args[2] = { peek(c, oparg), oparg == 2 ? peek(c, 1) : konst(c, LU_MISSING) };
+            helper_raising(c, H_raise, 2, args, oparg);
+        }
         side_exit(c, EXIT_SIDE);        /* not reached: the helper always raises */
+        return 0;
+    }
+    case LOAD_SPECIAL: {
+        /* owner -- attr, NULL: the special method looked up on owner's
+           type, bound by the kernel (which raises the interpreter's error
+           for a type without it). */
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        lu_v args[2] = { v, const_i(c, oparg) };
+        lu_v r = helper_raising(c, H_load_special, 2, args, 1);
+        pop(c, NULL);
+        release(c, v, own);
+        push(c, r, 1);
+        push(c, LU_NOV, 0);
         return 0;
     }
     case DELETE_FAST:
