@@ -59,9 +59,8 @@ used(struct lu_func *f, lu_v v)
 static void
 use_of(struct lu_func *f, lu_v v, lu_v at, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
-    if (v != LU_NOV && (f->ins[v].flags & INS_VIRTUAL) && f->ins[v].op == OP_HELPER
-        && (f->ins[v].imm == H_build_tuple || f->ins[v].imm == H_new_object)) {
-        int max = f->ins[v].imm == H_build_tuple ? f->ins[v].nargs : f->ins[v].nfields;
+    if (v != LU_NOV && lu_object_shape(f, v) != LU_NOV) {
+        int max = f->ins[v].nargs > f->ins[v].nfields ? f->ins[v].nargs : f->ins[v].nfields;
         lu_v *vals = malloc(sizeof(lu_v) * (size_t)(max ? max : 1));
         int32_t *offs = malloc(sizeof(int32_t) * (size_t)(max ? max : 1));
         int n = lu_object_fields(f, v, at, vals, offs);

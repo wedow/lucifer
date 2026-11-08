@@ -119,6 +119,19 @@ take(struct regs *r, const struct lu_dv *dv)
             *(PyObject **)((char *)o + dv->fields[i].off) = take(r, &dv->fields[i]);
         }
     }
+    else if (dv->kind == DV_ITER) {
+        PyTypeObject *t = (PyTypeObject *)(intptr_t)dv->imm;
+        o = lu_object_new(t, t == &PyRangeIter_Type ? sizeof(rangeiterobject) : sizeof(seqiterobject));
+        for (int i = 0; o != NULL && i < dv->nfields; i++) {
+            const struct lu_dv *fd = &dv->fields[i];
+            if (fd->kind == DV_RAW) {
+                *(uint64_t *)((char *)o + fd->off) = raw(r, fd);
+            }
+            else {
+                *(PyObject **)((char *)o + fd->off) = take(r, fd);
+            }
+        }
+    }
     else if (dv->kind == DV_NEW_DICT) {
         o = PyDict_New();
     }
@@ -378,7 +391,7 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
             if (fr->vals[i].kind == DV_OBJ && fr->vals[i].owned) {
                 old[nold++] = (PyObject *)(uintptr_t)raw(&r, &fr->vals[i]);
             }
-            else if (fr->vals[i].kind == DV_TUPLE || fr->vals[i].kind == DV_INSTANCE) {
+            else if (fr->vals[i].kind == DV_TUPLE || fr->vals[i].kind == DV_INSTANCE || fr->vals[i].kind == DV_ITER) {
                 old[nold++] = take(&r, &fr->vals[i]);  /* made to release the fields it holds */
             }
         }

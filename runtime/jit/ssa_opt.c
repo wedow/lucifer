@@ -4,13 +4,15 @@
       Then facts: guards leave loops, repeated guards go, and so do loads
       of what a load in the block already read (1b).
    2. Representation: a phi whose inputs are all int boxes (or float
-      boxes), counting phis of the same kind, becomes a raw phi under one
-      box, so loop-carried ints and floats stay in registers. A root
+      boxes, or such constants), counting phis of the same kind, becomes a
+      raw phi under one box, so loop-carried ints and floats stay in
+      registers. A root
       local's phi may forget an object an input box was made from, which
       its edge then releases.
    3. Simplification: an unbox of a box is its raw value; guards on values
-      whose type a box proves fold away. Then virtual objects (3c): tuples
-      and instances nothing outside compiled code sees are not made.
+      whose type a box proves fold away. Then virtual objects (3c): tuples,
+      instances, loop iterators and phis of them that nothing outside
+      compiled code sees are not made.
    4. Escape analysis (the donor's scalar replacement, for boxes): a box
       whose every use is an unbox, a frame state or a release is virtual.
       It is never built in compiled code; an exit or a walker that needs
@@ -71,6 +73,9 @@ rewrite(struct lu_func *f)
         in->c = resolve(in->c);
         for (int i = 0; i < in->nargs; i++) {
             in->args[i] = resolve(in->args[i]);
+        }
+        for (int i = 0; in->op == OP_PHI && i < in->nfields; i++) {
+            in->fields[i] = resolve(in->fields[i]);     /* a virtual phi's */
         }
         if (in->fs != NULL) {
             rewrite_fs(in->fs, NULL, f);
@@ -172,6 +177,36 @@ release_on_edge(struct lu_func *f, int b, lu_v o)
     }
 }
 
+/* Whether a is a constant exact int (float) that unboxes to a raw value
+   of rep, which goes into bits: a phi takes it as a box of that value. A
+   box made at the phi stands for it after, a small int being the same
+   object. */
+static int
+raw_const(struct lu_func *f, lu_v a, int rep, int64_t *bits)
+{
+    struct lu_ins *in = &f->ins[a];
+    PyObject *o = in->op == OP_CONST ? (PyObject *)(intptr_t)in->imm : NULL;
+    if (o == NULL) {
+        return 0;
+    }
+    if (rep == REP_F64 && PyFloat_CheckExact(o)) {
+        double d = PyFloat_AS_DOUBLE(o);
+        if (bits != NULL) {
+            memcpy(bits, &d, 8);
+        }
+        return 1;
+    }
+    if (rep == REP_I64 && PyLong_CheckExact(o)) {
+        int overflow;
+        long long x = PyLong_AsLongLongAndOverflow(o, &overflow);
+        if (bits != NULL) {
+            *bits = x;
+        }
+        return !overflow;
+    }
+    return 0;
+}
+
 /* 2. */
 static void
 unbox_phis(struct lu_func *f, int rep)
@@ -217,7 +252,7 @@ unbox_phis(struct lu_func *f, int rep)
                     maybe_null[v] = 1;
                     changed = 1;
                 }
-                if ((!(f->ins[a].op == box) || esc[a]) && !(a < n && cand[a])) {
+                if ((!(f->ins[a].op == box) || esc[a]) && !(a < n && cand[a]) && !raw_const(f, a, rep, NULL)) {
                     cand[v] = 0;
                     changed = 1;
                     break;
@@ -288,6 +323,7 @@ unbox_phis(struct lu_func *f, int rep)
     for (int v = n; v < f->nins; v++) {
         fwd[v] = v;
     }
+    lu_v mapped = f->nins;      /* instructions fwd has */
     for (int v = 0; v < n; v++) {
         if (!cand[v]) {
             continue;
@@ -299,8 +335,12 @@ unbox_phis(struct lu_func *f, int rep)
                 release_on_edge(f, f->blocks[in->block].preds[i], resolve(f->ins[a].b));
                 in = &f->ins[v];
             }
-            int null = a != v && !cand[a] && f->ins[a].op == OP_CONST;
-            f->ins[raw[v]].args[i] = a == v ? raw[v] : cand[a] ? raw[a] : null ? zero : resolve(f->ins[a].a);
+            int64_t bits;
+            int konst = a != v && !cand[a] && raw_const(f, a, rep, &bits);
+            int null = a != v && !cand[a] && !konst && f->ins[a].op == OP_CONST;
+            lu_v k = konst ? entry_const(f, rep == REP_F64 ? OP_CONST_F : OP_CONST_I, rep, bits) : LU_NOV;
+            in = &f->ins[v];
+            f->ins[raw[v]].args[i] = a == v ? raw[v] : cand[a] ? raw[a] : null ? zero : konst ? k : resolve(f->ins[a].a);
             if (bit[v] != LU_NOV) {
                 f->ins[bit[v]].args[i] = a == v ? bit[v] : cand[a] ? (bit[a] != LU_NOV ? bit[a] : bound)
                     : null ? unbound : bound;
@@ -318,7 +358,9 @@ unbox_phis(struct lu_func *f, int rep)
         memmove(&bl->ins[at + 1], &bl->ins[at], sizeof(int) * (size_t)(bl->nins - 1 - at));
         bl->ins[at] = b;
         fwd = realloc(fwd, sizeof(lu_v) * (size_t)f->capins);
-        fwd[b] = b;
+        for (; mapped < f->nins; mapped++) {
+            fwd[mapped] = mapped;
+        }
         kill(f, v, b);
     }
     free(raw);
@@ -339,7 +381,7 @@ proves_type(struct lu_func *f, lu_v v, PyTypeObject *t, int depth)
     case OP_BOX_INT: return t == &PyLong_Type;
     case OP_BOX_FLOAT: return t == &PyFloat_Type;
     case OP_CONST: return in->imm != 0 && Py_TYPE((PyObject *)(intptr_t)in->imm) == t;
-    case OP_HELPER: return in->imm == H_range_iter && t == &PyRangeIter_Type;
+    case OP_HELPER: return (in->imm == H_range_iter && t == &PyRangeIter_Type) || (lu_iter_type(in) == t && t != NULL);
     case OP_PHI:
         if (depth > 4) {
             return 0;
@@ -535,27 +577,116 @@ same_fact(struct lu_func *f, struct lu_ins *x, struct lu_ins *y)
         && subject(f, x) == subject(f, y);
 }
 
+static int plain(struct lu_func *f, lu_v v, int depth);
+static int plain_item(struct lu_func *f, lu_v t, int64_t k, int depth);
+
+/* Whether releasing list display v cannot run a finalizer: its items are
+   plain and nothing but a copy (list_repeat_fresh) and reference
+   operations uses it, and no state a walker reads names it in a local,
+   so nothing can have put another item in it. */
+static int
+quiet_display(struct lu_func *f, lu_v v)
+{
+    struct lu_ins *in = &f->ins[v];
+    if (in->op != OP_HELPER || in->imm != H_build_list) {
+        return 0;
+    }
+    for (int i = 0; i < in->nargs; i++) {
+        if (!plain(f, in->args[i], 1)) {
+            return 0;
+        }
+    }
+    for (int u = 0; u < f->nins; u++) {
+        struct lu_ins *x = &f->ins[u];
+        if (x->flags & INS_DEAD) {
+            continue;
+        }
+        int ok = x->op == OP_INCREF || x->op == OP_DECREF || (x->op == OP_HELPER && x->imm == H_list_repeat_fresh);
+        lu_v ops[3] = { x->a, x->b, x->c };
+        for (int i = 0; i < 3; i++) {
+            if (ops[i] == v && !(ok && i == 0)) {
+                return 0;
+            }
+        }
+        for (int i = 0; i < x->nargs; i++) {
+            if (x->args[i] == v && !(ok && i == 0 && x->op == OP_HELPER)) {
+                return 0;
+            }
+        }
+        for (struct lu_fs *fs = x->fs; fs != NULL && lu_publishes(x); fs = fs->caller) {
+            for (int i = 0; i < fs->nlocals; i++) {
+                if (fs->vals[i] == v) {
+                    return 0;
+                }
+            }
+        }
+    }
+    return 1;
+}
+
 /* Whether releasing v cannot run a finalizer: v is an int, a float, a bool
-   or an immortal object on every path. */
+   or an immortal object on every path, or a tuple this code built of such
+   values (an item read from one is one), or a range's loop iterator. */
 static int
 plain(struct lu_func *f, lu_v v, int depth)
 {
     struct lu_ins *in = &f->ins[resolve(v)];
+    int64_t first = offsetof(PyTupleObject, ob_item);
+    if (depth >= 8) {
+        return 0;
+    }
     switch (in->op) {
     case OP_BOX_INT: case OP_BOX_FLOAT: case OP_BOOL:
         return 1;
     case OP_CONST:
         return in->imm == 0 || _Py_IsImmortal((PyObject *)(intptr_t)in->imm);
     case OP_PHI:
-        for (int i = 0; depth < 4 && i < in->nargs; i++) {
+        for (int i = 0; i < in->nargs; i++) {
             if (resolve(in->args[i]) != resolve(v) && !plain(f, in->args[i], depth + 1)) {
                 return 0;
             }
         }
-        return depth < 4;
+        return 1;
+    case OP_HELPER:
+        for (int i = 0; in->imm == H_build_tuple && i < in->nargs; i++) {
+            if (!plain(f, in->args[i], depth + 1)) {
+                return 0;
+            }
+        }
+        return in->imm == H_build_tuple || in->imm == H_rangeiter_new;
+    case OP_LOAD:
+        return in->rep == REP_OBJ && in->imm >= first && (in->imm - first) % 8 == 0
+            && plain_item(f, in->a, (in->imm - first) / 8, depth + 1);
+    case OP_LIST_ITEM:
+        return in->imm == 1 && f->ins[resolve(in->b)].op == OP_CONST_I
+            && plain_item(f, in->a, f->ins[resolve(in->b)].imm, depth + 1);
     default:
         return 0;
     }
+}
+
+/* Whether item k of tuple t is plain: t is a tuple this code built, or a
+   phi of such tuples. */
+static int
+plain_item(struct lu_func *f, lu_v t, int64_t k, int depth)
+{
+    struct lu_ins *in = &f->ins[resolve(t)];
+    if (depth >= 8) {
+        return 0;
+    }
+    if (in->op == OP_HELPER && in->imm == H_build_tuple) {
+        k = k < 0 ? k + in->nargs : k;
+        return k >= 0 && k < in->nargs && plain(f, in->args[k], depth + 1);
+    }
+    if (in->op != OP_PHI || in->rep != REP_OBJ || (in->flags & INS_VIRTUAL)) {
+        return 0;
+    }
+    for (int i = 0; i < in->nargs; i++) {
+        if (resolve(in->args[i]) != resolve(t) && !plain_item(f, in->args[i], k, depth + 1)) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 /* Whether an instruction may run code or change what a fact names. */
@@ -570,7 +701,7 @@ may_change(struct lu_func *f, struct lu_ins *in)
     case OP_HELPER:
         return !(in->imm == H_box_int || in->imm == H_box_float || in->imm == H_list_item
                  || in->imm == H_attr_load || in->imm == H_slot_load || in->imm == H_dict_lacks
-                 || in->imm == H_cell_load || in->imm == H_compare_ideq || in->imm == H_range_iter
+                 || in->imm == H_cell_load || in->imm == H_compare_ideq || in->imm == H_range_iter || lu_iter_type(in) != NULL
                  || in->imm == H_new_object);
     default:
         return (lu_op_flags[in->op] & IF_CALL) || in->op == OP_TRUTH;
@@ -1122,6 +1253,9 @@ count_uses(struct lu_func *f, struct uses *u)
                 u->n[in->args[i]]++;
             }
         }
+        for (int i = 0; in->op == OP_PHI && i < in->nfields; i++) {
+            u->n[in->fields[i]]++;      /* a virtual phi's: exits read them */
+        }
         for (struct lu_fs *fs = in->fs; fs != NULL; fs = fs->caller) {
             for (int i = 0; i < fs->nlocals + fs->nstack; i++) {
                 if (fs->vals[i] != LU_NOV) {
@@ -1146,6 +1280,12 @@ count_uses(struct lu_func *f, struct uses *u)
      - a tuple's size or a constant index into it;
      - an instance's inline store (as the owner) or load, or the test of
        its dict for a method, which it has none of.
+   A loop iterator (ssa_build.c for_step) is one too: its fields are its
+   arguments, as a tuple's are, read by loads. A phi whose every input is
+   such an object of one shape (phi_shapes) is virtual with them
+   (phis_agree): its fields are phis of their fields (phi_fields), which
+   take the references the inputs held, so the edge into it is the
+   input's last use.
    An instance's fields are the stores into it: each name is stored once,
    in the order of the class's names (the insertion order the words keep),
    and wherever it is used a store either ran on every path there or on
@@ -1156,12 +1296,13 @@ count_uses(struct lu_func *f, struct uses *u)
    rest go. An exit makes it once, its fields moving in
    (runtime/jit/deopt.c). */
 
-enum { OBJ_NONE, OBJ_TUPLE, OBJ_INSTANCE };
+enum { OBJ_NONE, OBJ_TUPLE, OBJ_INSTANCE, OBJ_ITER, OBJ_PHI };
 
 static PyTypeObject *
 object_type(struct lu_func *f, struct lu_ins *in)
 {
-    return in->imm == H_build_tuple ? &PyTuple_Type : (PyTypeObject *)(intptr_t)f->ins[in->args[0]].imm;
+    return in->imm == H_build_tuple ? &PyTuple_Type : lu_iter_type(in) != NULL ? lu_iter_type(in)
+        : (PyTypeObject *)(intptr_t)f->ins[in->args[0]].imm;
 }
 
 static int
@@ -1174,6 +1315,9 @@ object_kind(struct lu_func *f, lu_v v)
     if (in->imm == H_build_tuple && in->nargs > 0) {
         return OBJ_TUPLE;
     }
+    if (lu_iter_type(in) != NULL) {
+        return OBJ_ITER;
+    }
     if (in->imm == H_new_object) {
         PyTypeObject *tp = object_type(f, in);
         return tp->tp_finalize == NULL && tp->tp_del == NULL && (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)
@@ -1182,8 +1326,20 @@ object_kind(struct lu_func *f, lu_v v)
     return OBJ_NONE;
 }
 
+/* The field of iterator o that load u reads, or -1. */
+static int
+iter_field(struct lu_func *f, struct lu_ins *o, struct lu_ins *u)
+{
+    for (int k = 0; k < o->nargs; k++) {
+        if (u->imm == lu_object_place(o, k) && u->rep == f->ins[o->args[k]].rep && u->imm2 == 0) {
+            return k;
+        }
+    }
+    return -1;
+}
+
 /* Whether u's operand at pos (0..2: a, b, c; 3: an argument) may be
-   object v of kind k. */
+   object v of kind k (of a phi: v and k are its shape's). */
 static int
 object_use(struct lu_func *f, struct lu_ins *u, int pos, lu_v v, int k)
 {
@@ -1202,7 +1358,8 @@ object_use(struct lu_func *f, struct lu_ins *u, int pos, lu_v v, int k)
         return pos == 0 && (u->imm == offsetof(PyObject, ob_type)
                             || (k == OBJ_TUPLE && u->imm == offsetof(PyVarObject, ob_size) && u->rep == REP_I64)
                             || (k == OBJ_TUPLE && u->rep == REP_OBJ && u->imm >= first
-                                && u->imm < first + 8 * o->nargs && (u->imm - first) % 8 == 0));
+                                && u->imm < first + 8 * o->nargs && (u->imm - first) % 8 == 0)
+                            || (k == OBJ_ITER && iter_field(f, o, u) >= 0));
     case OP_LIST_ITEM:
         return k == OBJ_TUPLE && pos == 0 && u->imm == 1 && f->ins[u->b].op == OP_CONST_I
             && f->ins[u->b].imm >= -o->nargs && f->ins[u->b].imm < o->nargs;
@@ -1222,7 +1379,8 @@ not_virtual(struct lu_func *f, lu_v v, struct lu_ins *u, const char *why)
 {
     if (_PyRuntime.jit.debug) {
         struct lu_ins *o = &f->ins[v];
-        fprintf(stderr, "jit: not virtual: %s at %s@%d: %s", o->imm == H_build_tuple ? "tuple" : "instance",
+        fprintf(stderr, "jit: not virtual: %s at %s@%d: %s", o->op == OP_PHI ? "phi" : o->imm == H_build_tuple ? "tuple"
+                : lu_iter_type(o) != NULL ? "iterator" : "instance",
                 o->src != NULL ? PyUnicode_AsUTF8(o->src->co_qualname) : "?", o->src_pc, why);
         if (u != NULL) {
             fprintf(stderr, " (%s at %s@%d)", lu_op_names[u->op], u->src != NULL ? PyUnicode_AsUTF8(u->src->co_qualname) : "?",
@@ -1306,6 +1464,150 @@ reaches(struct objs *x, lu_v v, lu_v s, lu_v p)
     return 0;
 }
 
+/* The phis of block t that take v on the edge from block b. */
+static int
+phi_takes(struct lu_func *f, int b, int t, lu_v v)
+{
+    struct lu_block *bl = &f->blocks[t];
+    int p = 0, took = 0;
+    while (p < bl->npreds && bl->preds[p] != b) {
+        p++;
+    }
+    for (int i = 0; i < bl->nins && f->ins[bl->ins[i]].op == OP_PHI; i++) {
+        struct lu_ins *phi = &f->ins[bl->ins[i]];
+        took += !(phi->flags & INS_DEAD) && p < phi->nargs && phi->args[p] == v;
+    }
+    return took;
+}
+
+/* Whether objects a and b (tuples or iterators) have one shape. */
+static int
+same_shape(struct lu_func *f, lu_v a, lu_v b)
+{
+    return f->ins[a].imm == f->ins[b].imm && f->ins[a].nargs == f->ins[b].nargs;
+}
+
+/* Per value: the object whose shape it has (a tuple or an iterator
+   itself, or a phi whose every input has one shape, OBJ_PHI in kind), or
+   LU_NOV. A phi's inputs are found optimistically, then a phi any input
+   of which has no such shape, or another, drops out. */
+static lu_v *
+phi_shapes(struct lu_func *f, int *kind)
+{
+    int n = f->nins;
+    lu_v *shape = malloc(sizeof(lu_v) * (size_t)n);
+    for (int v = 0; v < n; v++) {
+        shape[v] = kind[v] == OBJ_TUPLE || kind[v] == OBJ_ITER ? v : LU_NOV;
+    }
+    for (int changed = 1; changed;) {
+        changed = 0;
+        for (int v = 0; v < n; v++) {
+            struct lu_ins *in = &f->ins[v];
+            if (in->op != OP_PHI || in->rep != REP_OBJ || (in->flags & (INS_DEAD | INS_VIRTUAL)) || shape[v] != LU_NOV) {
+                continue;
+            }
+            for (int i = 0; i < in->nargs && shape[v] == LU_NOV; i++) {
+                shape[v] = in->args[i] != LU_NOV ? shape[in->args[i]] : LU_NOV;
+            }
+            changed |= shape[v] != LU_NOV;
+        }
+    }
+    for (int changed = 1; changed;) {
+        changed = 0;
+        for (int v = 0; v < n; v++) {
+            struct lu_ins *in = &f->ins[v];
+            if (in->op != OP_PHI || shape[v] == LU_NOV) {
+                continue;
+            }
+            for (int i = 0; i < in->nargs; i++) {
+                lu_v a = in->args[i];
+                if (a != v && (a == LU_NOV || shape[a] == LU_NOV || !same_shape(f, shape[a], shape[v]))) {
+                    shape[v] = LU_NOV;
+                    changed = 1;
+                    break;
+                }
+            }
+        }
+    }
+    for (int v = 0; v < n; v++) {
+        if (f->ins[v].op == OP_PHI && shape[v] != LU_NOV) {
+            kind[v] = OBJ_PHI;
+        }
+    }
+    return shape;
+}
+
+/* A phi is virtual only with every input, and an input only with every
+   phi that takes it: a real one keeps the rest real. */
+static void
+phis_agree(struct lu_func *f, int *kind, int n)
+{
+    for (int changed = 1; changed;) {
+        changed = 0;
+        for (int u = 0; u < n; u++) {
+            struct lu_ins *in = &f->ins[u];
+            if (in->op != OP_PHI || (in->flags & INS_DEAD)) {
+                continue;
+            }
+            for (int i = 0; i < in->nargs; i++) {
+                lu_v a = in->args[i];
+                if (a == u || a == LU_NOV || a >= n) {
+                    continue;
+                }
+                if (kind[u] == OBJ_PHI && !kind[a]) {
+                    kind[u] = not_virtual(f, u, &f->ins[a], "an input stays real");
+                    changed = 1;
+                }
+                else if (kind[u] != OBJ_PHI && kind[a]) {
+                    kind[a] = not_virtual(f, a, in, "an argument");
+                    changed = 1;
+                }
+            }
+        }
+    }
+}
+
+/* Each virtual phi's fields: a phi per field of its shape, of its inputs'
+   fields, which take the references the inputs held for them. */
+static void
+phi_fields(struct lu_func *f, int *kind, lu_v *shape, int n)
+{
+    for (int v = 0; v < n; v++) {
+        if (kind[v] != OBJ_PHI) {
+            continue;
+        }
+        int nf = f->ins[shape[v]].nargs, block = f->ins[v].block;
+        lu_v *fields = lu_ir_alloc(f, sizeof(lu_v) * (size_t)nf);
+        for (int k = 0; k < nf; k++) {
+            int rep = f->ins[f->ins[shape[v]].args[k]].rep;
+            fields[k] = lu_ir_emit(f, block, OP_PHI, rep, LU_NOV, LU_NOV, LU_NOV, -1);
+        }
+        f->ins[v].fields = fields;
+        f->ins[v].nfields = nf;
+        f->ins[v].c = shape[v];
+    }
+    for (int v = 0; v < n; v++) {
+        if (kind[v] != OBJ_PHI) {
+            continue;
+        }
+        struct lu_ins *in = &f->ins[v];
+        for (int k = 0; k < in->nfields; k++) {
+            struct lu_ins *fk = &f->ins[in->fields[k]];
+            fk->nargs = in->nargs;
+            fk->args = malloc(sizeof(lu_v) * (size_t)in->nargs);    /* a phi's, freed with it */
+            for (int i = 0; i < in->nargs; i++) {
+                struct lu_ins *a = &f->ins[in->args[i]];
+                fk->args[i] = a->op == OP_PHI ? a->fields[k] : a->args[k];
+            }
+        }
+        in->nargs = 0;          /* its fields' phis move the values */
+    }
+    fwd = realloc(fwd, sizeof(lu_v) * (size_t)f->capins);
+    for (int v = n; v < f->nins; v++) {
+        fwd[v] = v;
+    }
+}
+
 /* The release that ends v, per instruction (1), found by counting its
    references along every path; 0 when the counts disagree or an exit
    taken while it lives would not name it. */
@@ -1363,10 +1665,14 @@ object_counts(struct objs *x, lu_v v, char *ends)
         }
         for (int k = 0; k < bl->nsucc && why == NULL; k++) {
             int t = bl->succ[k];
+            /* A phi of the successor that takes it takes its reference. */
+            int took = phi_takes(f, b, t, v);
+            int m = n - took;
+            why = took > 1 || (took && m != 0) ? "a phi takes it while it lives on" : NULL;
             if (rc[t] < 0) {
-                rc[t] = n;
+                rc[t] = m;
             }
-            why = rc[t] != n ? "its count differs by path" : NULL;
+            why = why != NULL ? why : rc[t] != m ? "its count differs by path" : NULL;
             at = bl->ins[bl->nins - 1];
         }
     }
@@ -1411,11 +1717,15 @@ object_fields(struct objs *x, lu_v v, lu_v *uses, int nuses, lu_v *stores, int n
     return 1;
 }
 
+/* Whether a field's value holds no reference: a raw word, a bool, an
+   immortal constant. Another constant's is counted, since a phi of fields
+   may join it with values that are not constants. */
 static int
 immortal_value(struct lu_func *f, lu_v v)
 {
     struct lu_ins *in = &f->ins[v];
-    return in->op == OP_BOOL || in->op == OP_CONST;      /* a constant: the unit keeps it */
+    return in->rep != REP_OBJ || in->op == OP_BOOL
+        || (in->op == OP_CONST && (in->imm == 0 || _Py_IsImmortal((PyObject *)(intptr_t)in->imm)));
 }
 
 static lu_v
@@ -1438,8 +1748,8 @@ static lu_v
 field_at(struct lu_func *f, lu_v v, lu_v u, int64_t off)
 {
     struct lu_ins *o = &f->ins[v];
-    if (o->imm == H_build_tuple) {
-        return o->args[off];
+    if (o->op == OP_PHI || o->imm == H_build_tuple || lu_iter_type(o) != NULL) {
+        return o->op == OP_PHI ? o->fields[off] : o->args[off];
     }
     for (int i = 0; i < o->nfields; i++) {
         if (f->ins[o->fields[i]].imm == off && lu_ssa_before(f, o->fields[i], u)) {
@@ -1449,15 +1759,25 @@ field_at(struct lu_func *f, lu_v v, lu_v u, int64_t off)
     return LU_NOV;
 }
 
+/* v's shape: its build, or a virtual phi's input that is one. */
+static struct lu_ins *
+shape_of(struct lu_func *f, lu_v v)
+{
+    return &f->ins[f->ins[v].op == OP_PHI ? f->ins[v].c : v];
+}
+
 static void
 object_rewrite(struct lu_func *f, lu_v v, int k, lu_v *uses, int nuses, char *ends)
 {
-    if (k == OBJ_TUPLE) {
+    if (k == OBJ_TUPLE || k == OBJ_ITER) {
         for (int i = 0, nargs = f->ins[v].nargs; i < nargs; i++) {
             if (!immortal_value(f, f->ins[v].args[i])) {
                 insert_before(f, v, OP_INCREF, f->ins[v].args[i], 0);
             }
         }
+    }
+    else if (k == OBJ_PHI) {
+        /* Its fields' phis hold the references its inputs' fields moved in (phi_fields). */
     }
     else {
         int n = 0;
@@ -1481,8 +1801,10 @@ object_rewrite(struct lu_func *f, lu_v v, int k, lu_v *uses, int nuses, char *en
         f->ins[v].nfields = n;
     }
     f->ins[v].flags |= INS_VIRTUAL;
-    PyTypeObject *tp = object_type(f, &f->ins[v]);
-    lu_v type = k == OBJ_TUPLE ? entry_const(f, OP_CONST, REP_OBJ, (int64_t)(intptr_t)tp) : f->ins[v].args[0];
+    struct lu_ins *sh = shape_of(f, v);
+    PyTypeObject *tp = object_type(f, sh);
+    lu_v type = sh->imm == H_new_object ? sh->args[0] : entry_const(f, OP_CONST, REP_OBJ, (int64_t)(intptr_t)tp);
+    sh = NULL;              /* entry_const may move the instructions */
     for (int i = 0; i < nuses; i++) {
         lu_v u = uses[i];
         struct lu_ins *in = &f->ins[u];
@@ -1498,7 +1820,7 @@ object_rewrite(struct lu_func *f, lu_v v, int k, lu_v *uses, int nuses, char *en
             if (ends[u]) {
                 lu_v vals[64];
                 int32_t offs[64];
-                int nv = f->ins[v].imm == H_build_tuple ? f->ins[v].nargs : f->ins[v].nfields;
+                int nv = f->ins[v].nargs > f->ins[v].nfields ? f->ins[v].nargs : f->ins[v].nfields;
                 lu_v *pv = nv <= 64 ? vals : malloc(sizeof(lu_v) * (size_t)nv);
                 int32_t *po = nv <= 64 ? offs : malloc(sizeof(int32_t) * (size_t)nv);
                 nv = lu_object_fields(f, v, u, pv, po);
@@ -1533,17 +1855,21 @@ object_rewrite(struct lu_func *f, lu_v v, int k, lu_v *uses, int nuses, char *en
             if (in->imm == offsetof(PyObject, ob_type)) {
                 kill(f, u, type);
             }
+            else if (shape_of(f, v)->imm != H_build_tuple) {
+                kill(f, u, field_at(f, v, u, iter_field(f, shape_of(f, v), in)));
+            }
             else if (in->imm == offsetof(PyVarObject, ob_size)) {
-                kill(f, u, entry_const(f, OP_CONST_I, REP_I64, f->ins[v].nargs));
+                kill(f, u, entry_const(f, OP_CONST_I, REP_I64, shape_of(f, v)->nargs));
             }
             else {
-                kill(f, u, f->ins[v].args[(in->imm - (int64_t)offsetof(PyTupleObject, ob_item)) / 8]);
+                kill(f, u, field_at(f, v, u, (in->imm - (int64_t)offsetof(PyTupleObject, ob_item)) / 8));
             }
             break;
         case OP_LIST_ITEM: case OP_INLINE_LOAD: {
             /* A new reference to the field's value. */
             int64_t i = in->op == OP_LIST_ITEM ? f->ins[in->b].imm : 0;
-            lu_v w = in->op == OP_LIST_ITEM ? f->ins[v].args[i < 0 ? i + f->ins[v].nargs : i] : field_at(f, v, u, in->imm);
+            int nt = shape_of(f, v)->nargs;
+            lu_v w = field_at(f, v, u, in->op == OP_LIST_ITEM ? (i < 0 ? i + nt : i) : in->imm);
             in = &f->ins[u];
             in->op = OP_INCREF;
             in->rep = REP_NONE;
@@ -1648,6 +1974,7 @@ objects(struct lu_func *f)
         free(kind);
         return 0;
     }
+    lu_v *shape = phi_shapes(f, kind);
     struct objs x = { .f = f, .nold = n };
     x.mark = calloc((size_t)n, 1);
     cfg_build(f, &x.g);
@@ -1682,7 +2009,8 @@ objects(struct lu_func *f)
             continue;
         }
         lu_v u = unboxed[r->a];
-        if (plain(f, r->a, 0) || (u != LU_NOV && reached(&x, d) && reached(&x, u) && before_ins(&x, u, d))) {
+        if (plain(f, r->a, 0) || quiet_display(f, r->a)
+            || (u != LU_NOV && reached(&x, d) && reached(&x, u) && before_ins(&x, u, d))) {
             r->imm = 0;
             r->fs = NULL;
         }
@@ -1705,7 +2033,8 @@ objects(struct lu_func *f)
         lu_v ops[3] = { in->a, in->b, in->c };
         for (int i = 0; i < 3; i++) {
             if (ops[i] != LU_NOV && kind[ops[i]]) {
-                if (object_use(f, in, i, ops[i], kind[ops[i]])) {
+                lu_v sh = kind[ops[i]] == OBJ_PHI ? shape[ops[i]] : ops[i];
+                if (object_use(f, in, i, sh, object_kind(f, sh))) {
                     nuses[ops[i]]++;
                 }
                 else {
@@ -1716,7 +2045,8 @@ objects(struct lu_func *f)
         for (int i = 0; i < in->nargs; i++) {
             lu_v a = in->args[i];
             if (a != LU_NOV && kind[a]) {
-                if (in->op != OP_PHI && object_use(f, in, 3, a, kind[a])) {
+                lu_v sh = kind[a] == OBJ_PHI ? shape[a] : a;
+                if (in->op == OP_PHI ? kind[u] == OBJ_PHI : object_use(f, in, 3, sh, object_kind(f, sh))) {
                     nuses[a]++;
                 }
                 else {
@@ -1741,6 +2071,7 @@ objects(struct lu_func *f)
             }
         }
     }
+    phis_agree(f, kind, n);
     /* Each object's uses, in order of instruction: 1 an operand, 2 its state names it. */
     lu_v **ul = calloc((size_t)n, sizeof(lu_v *));
     char **uf = calloc((size_t)n, sizeof(char *));
@@ -1784,6 +2115,7 @@ objects(struct lu_func *f)
     f->idom = x.g.idom;         /* lu_ssa_before's, while it rewrites */
     for (int v = 0; v < n; v++) {
         if (!kind[v] || !reached(&x, v)) {
+            kind[v] = OBJ_NONE;
             continue;
         }
         lu_v *uses = ul[v];
@@ -1795,16 +2127,24 @@ objects(struct lu_func *f)
                 stores[ns++] = uses[i];
             }
         }
-        int ok = object_counts(&x, v, ends) && (kind[v] == OBJ_TUPLE || object_fields(&x, v, uses, nu, stores, ns)
+        int ok = object_counts(&x, v, ends) && (kind[v] != OBJ_INSTANCE || object_fields(&x, v, uses, nu, stores, ns)
                                                || not_virtual(f, v, NULL, "its fields differ by path"));
         for (int i = 0; i < nu; i++) {
             x.mark[uses[i]] = 0;
         }
-        if (ok) {
-            object_rewrite(f, v, kind[v], uses, nu, ends);
-            changed = 1;
+        if (!ok) {
+            kind[v] = OBJ_NONE;
         }
         free(stores);
+    }
+    /* A phi and its inputs are virtual together. */
+    phis_agree(f, kind, n);
+    phi_fields(f, kind, shape, n);
+    for (int v = 0; v < n; v++) {
+        if (kind[v]) {
+            object_rewrite(f, v, kind[v], ul[v], nul[v], ends);
+            changed = 1;
+        }
     }
     for (int v = 0; v < n; v++) {
         free(ul[v]);
@@ -1822,6 +2162,7 @@ objects(struct lu_func *f)
     free(x.work);
     cfg_free(&x.g);
     free(kind);
+    free(shape);
     free(nuses);
     if (changed) {
         fwd = realloc(fwd, sizeof(lu_v) * (size_t)f->capins);
@@ -2234,6 +2575,9 @@ lu_ssa_optimize(struct lu_func *f)
     }
     /* Twice: an object's release that kept another real may go with it. */
     for (int pass = 0; pass < 2 && objects(f); pass++) {
+        rewrite(f);
+        while (trivial_phis(f)) {
+        }
         rewrite(f);
         for (int round = 0; round < 4 && simplify(f); round++) {
             rewrite(f);

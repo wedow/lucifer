@@ -49,6 +49,8 @@ enum lu_dv_kind {
     DV_BOOL,                    /* a virtual bool: True when the bit at loc (or imm), xor bitimm, is 1 */
     DV_TUPLE,                   /* a virtual tuple: its items are fields[i] */
     DV_INSTANCE,                /* a virtual instance of the type imm: fields[i] in the inline word at byte fields[i].off */
+    DV_ITER,                    /* a virtual loop iterator of the type imm: fields[i] in the word at byte fields[i].off */
+    DV_RAW,                     /* a field's raw word: at loc, or imm when loc is none */
 };
 
 struct lu_dv {
@@ -61,7 +63,7 @@ struct lu_dv {
     int32_t vid;                /* the SSA value: one virtual box is built once per exit */
     int64_t imm;
     int32_t off;                /* a field's place */
-    int32_t nfields;            /* DV_TUPLE, DV_INSTANCE: the fields, each a reference the */
+    int32_t nfields;            /* DV_TUPLE, DV_INSTANCE, DV_ITER: the fields, each a raw word or a reference the */
     struct lu_dv *fields;       /* object holds (DV_OBJ: owned), which moves into the object made */
 };
 /* Frees the fields n values describe. */
@@ -263,9 +265,13 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(for_iter) \
     X(seqiter_next) \
     X(range_iter) \
+    X(listiter_new) \
+    X(tupleiter_new) \
+    X(rangeiter_new) \
     X(unary) \
     X(list_append) \
     X(list_repeat) \
+    X(list_repeat_fresh) \
     X(build_list) \
     X(build_tuple) \
     X(new_object) \

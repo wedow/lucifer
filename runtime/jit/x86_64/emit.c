@@ -802,19 +802,35 @@ describe(struct asm_ *a, lu_v v, int owned)
         dv.imm = in->imm;
         return dv;
     }
-    if ((in->flags & INS_VIRTUAL) && in->op == OP_HELPER && (in->imm == H_build_tuple || in->imm == H_new_object)) {
+    lu_v shape = lu_object_shape(a->f, v);
+    if (shape != LU_NOV) {
         /* A virtual object: made by the exit with the fields it has here,
            whose references it holds (ssa_opt.c step 3c). */
-        int tuple = in->imm == H_build_tuple, max = tuple ? in->nargs : in->nfields;
+        struct lu_ins *sh = I(a, shape);
+        int max = in->nargs > in->nfields ? in->nargs : in->nfields;
         lu_v *vals = malloc(sizeof(lu_v) * (size_t)(max ? max : 1));
         int32_t *offs = malloc(sizeof(int32_t) * (size_t)(max ? max : 1));
         int n = lu_object_fields(a->f, v, a->now, vals, offs);
-        dv.kind = tuple ? DV_TUPLE : DV_INSTANCE;
-        dv.imm = tuple ? 0 : I(a, in->args[0])->imm;
+        PyTypeObject *iter = lu_iter_type(sh);
+        dv.kind = sh->imm == H_build_tuple ? DV_TUPLE : iter != NULL ? DV_ITER : DV_INSTANCE;
+        dv.imm = sh->imm == H_build_tuple ? 0 : iter != NULL ? (int64_t)(intptr_t)iter : I(a, sh->args[0])->imm;
         dv.nfields = n;
         dv.fields = calloc((size_t)(n ? n : 1), sizeof(struct lu_dv));
         for (int i = 0; i < n; i++) {
-            dv.fields[i] = describe(a, vals[i], 1);
+            struct lu_ins *fi = I(a, vals[i]);
+            if (fi->rep == REP_I64) {
+                /* A raw word of the object (an iterator's index). */
+                dv.fields[i] = (struct lu_dv){ .kind = DV_RAW, .loc = LU_LOC_NONE, .vid = vals[i] };
+                if (fi->op == OP_CONST_I) {
+                    dv.fields[i].imm = fi->imm;
+                }
+                else {
+                    dv.fields[i].loc = fi->loc;
+                }
+            }
+            else {
+                dv.fields[i] = describe(a, vals[i], 1);
+            }
             dv.fields[i].off = offs[i];
         }
         free(vals);

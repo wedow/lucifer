@@ -649,7 +649,19 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    so each exit sees one set of fields; the exit makes the object once
    with those fields, and every slot that names it gets that one object.
    An instance that stays real takes the first store of each name without
-   its lock while no other thread can have seen it.
+   its lock while no other thread can have seen it. A loop over a range,
+   list or tuple made in the loop's code (not a generator's, whose stack
+   goes back to its frame at a yield) keeps its iterator only on the stack,
+   where only an exit sees it, so each step makes a new iterator from the
+   last one's fields (an index, a range's start and length) instead of
+   changing it; a list's length is read at each step. A phi whose inputs
+   are all such objects of one shape (iterators, or tuples of one size)
+   is one too, its fields phis of its inputs' fields, which take the
+   references the inputs held: the iterator is never made, the index is a
+   loop phi, and an exit makes the iterator where the loop stands. A phi
+   is virtual only with all its inputs, and an input only with every phi
+   that takes it. A phi of boxes may take a constant int or float as a box
+   of its raw value.
 4. **Backend.** Per-block linear-scan register allocation over GPR/XMM with spill
    homes and edge reconciliation (port of `optimizer_ssa_allocate.inc`); x86-64
    encoder in C; root maps per safepoint; perf map and jitdump (port of

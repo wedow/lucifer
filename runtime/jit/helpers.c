@@ -571,6 +571,35 @@ h_range_iter(int64_t start, int64_t stop, int64_t step)
     return (PyObject *)it;
 }
 
+/* A loop's iterator after a step (ssa_build.c for_iter): a new one with
+   the fields given. Compiled code makes one only when the stack entry it
+   stands for is not virtual (ssa_opt.c 3c); an exit makes it otherwise. */
+static PyObject *
+h_seqiter_new(PyObject *seq, int64_t index)
+{
+    seqiterobject *it = (seqiterobject *)lu_object_new(
+        Py_IS_TYPE(seq, &PyTuple_Type) ? &PyTupleIter_Type : &PyListIter_Type, sizeof(seqiterobject));
+    if (it == NULL) {
+        Py_FatalError("lucifer jit: out of memory stepping a loop");
+    }
+    it->it_seq = Py_NewRef(seq);
+    it->it_index = index;
+    return (PyObject *)it;
+}
+
+static PyObject *
+h_rangeiter_new(int64_t start, int64_t step, int64_t len)
+{
+    rangeiterobject *it = (rangeiterobject *)lu_object_new(&PyRangeIter_Type, sizeof(rangeiterobject));
+    if (it == NULL) {
+        Py_FatalError("lucifer jit: out of memory stepping a loop");
+    }
+    it->start = start;
+    it->step = step;
+    it->len = len;
+    return (PyObject *)it;
+}
+
 /* --- calls --- */
 
 static int
@@ -1105,9 +1134,15 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, IF_SEEN, 1 },
     [H_range_iter] = { (void *)h_range_iter, "range_iter", REP_OBJ, 0, 3 },
+    [H_listiter_new] = { (void *)h_seqiter_new, "listiter_new", REP_OBJ, 0, 2 },
+    [H_tupleiter_new] = { (void *)h_seqiter_new, "tupleiter_new", REP_OBJ, 0, 2 },
+    [H_rangeiter_new] = { (void *)h_rangeiter_new, "rangeiter_new", REP_OBJ, 0, 3 },
     [H_unary] = { (void *)h_unary, "unary", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_list_append] = { (void *)h_list_append, "list_append", REP_BIT, IF_RAISE | IF_SEEN, 2 },
     [H_list_repeat] = { (void *)h_list_repeat, "list_repeat", REP_OBJ, IF_RAISE | IF_SEEN, 2 },
+    /* Of a display no other thread can have seen (ssa_build.c): the items it
+       releases are the display's still, so none is the last reference. */
+    [H_list_repeat_fresh] = { (void *)h_list_repeat, "list_repeat_fresh", REP_OBJ, IF_RAISE, 2 },
     [H_build_list] = { (void *)h_build_list, "build_list", REP_OBJ, IF_RAISE, 0 },
     [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, IF_RAISE, 0 },
     [H_new_object] = { (void *)h_new_object, "new_object", REP_OBJ, IF_RAISE, 1 },

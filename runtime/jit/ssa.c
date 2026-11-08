@@ -84,15 +84,46 @@ lu_ssa_before(struct lu_func *f, lu_v s, lu_v x)
     return b == bs;
 }
 
+lu_v
+lu_object_shape(struct lu_func *f, lu_v v)
+{
+    struct lu_ins *in = &f->ins[v];
+    if (!(in->flags & INS_VIRTUAL) || in->flags & INS_DEAD) {
+        return LU_NOV;
+    }
+    if (in->op == OP_PHI) {
+        return in->c;
+    }
+    return in->op == OP_HELPER && (in->imm == H_build_tuple || in->imm == H_new_object || lu_iter_type(in) != NULL)
+        ? v : LU_NOV;
+}
+
+int32_t
+lu_object_place(const struct lu_ins *shape, int k)
+{
+    if (shape->imm == H_rangeiter_new) {
+        static const int32_t range[3] = { offsetof(rangeiterobject, start), offsetof(rangeiterobject, step),
+                                          offsetof(rangeiterobject, len) };
+        return range[k];
+    }
+    if (shape->imm != H_build_tuple) {
+        return k == 0 ? (int32_t)offsetof(seqiterobject, it_seq) : (int32_t)offsetof(seqiterobject, it_index);
+    }
+    return k;
+}
+
 int
 lu_object_fields(struct lu_func *f, lu_v v, lu_v at, lu_v *vals, int32_t *offs)
 {
     struct lu_ins *in = &f->ins[v];
+    struct lu_ins *shape = &f->ins[in->op == OP_PHI ? in->c : v];
     int n = 0;
-    if (in->imm == H_build_tuple) {
-        for (int i = 0; i < in->nargs; i++) {
-            vals[n] = in->args[i];
-            offs[n++] = i;
+    if (in->op == OP_PHI || shape->imm != H_new_object) {
+        /* Its fields are its arguments, or a phi's are the phis of theirs. */
+        int nf = in->op == OP_PHI ? in->nfields : in->nargs;
+        for (int i = 0; i < nf; i++) {
+            vals[n] = in->op == OP_PHI ? in->fields[i] : in->args[i];
+            offs[n++] = lu_object_place(shape, i);
         }
         return n;
     }
@@ -104,6 +135,16 @@ lu_object_fields(struct lu_func *f, lu_v v, lu_v at, lu_v *vals, int32_t *offs)
         }
     }
     return n;
+}
+
+PyTypeObject *
+lu_iter_type(const struct lu_ins *in)
+{
+    if (in->op != OP_HELPER) {
+        return NULL;
+    }
+    return in->imm == H_listiter_new ? &PyListIter_Type : in->imm == H_tupleiter_new ? &PyTupleIter_Type
+        : in->imm == H_rangeiter_new ? &PyRangeIter_Type : NULL;
 }
 
 int
@@ -124,11 +165,13 @@ lu_alloc_kind(const struct lu_ins *in)
     case H_box_int: return ALLOC_int;
     case H_box_float: return ALLOC_float;
     case H_build_tuple: case H_list_to_tuple: return ALLOC_tuple;
-    case H_build_list: case H_list_repeat: return ALLOC_list;
+    case H_build_list: case H_list_repeat: case H_list_repeat_fresh: return ALLOC_list;
     case H_new_dict: case H_build_map: return ALLOC_dict;
     case H_build_set: return ALLOC_set;
     case H_new_object: return ALLOC_instance;
-    case H_get_iter: case H_get_iter_seq: case H_range_iter: return ALLOC_iterator;
+    case H_get_iter: case H_get_iter_seq: case H_range_iter: case H_listiter_new: case H_tupleiter_new:
+    case H_rangeiter_new:
+        return ALLOC_iterator;
     case H_make_function: return ALLOC_function;
     case H_call: return ALLOC_class_call;
     default: return -1;
