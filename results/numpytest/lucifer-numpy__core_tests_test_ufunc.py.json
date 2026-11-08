@@ -5,7 +5,7 @@
     "numpy/_core/tests/test_ufunc.py"
   ],
   "parallel_threads": 1,
-  "timeout": 1100,
+  "timeout": 540,
   "requirements_sha256": "13a20f27474bc0e98445882b51cdbd8d88bc3c6d9b53a3f6c13ff9de2ec752b7",
   "optional_requirements_sha256": "cf8cd005aaf1955846e0927c0084c3117a0613035211af019ddfb55d0e39d73e",
   "artifact": {
@@ -111,7 +111,7 @@
     "free_threaded_build": true,
     "gil_enabled": false
   },
-  "interpreter_sha256": "40e7eeb496f3c46669ec839bad356e173e27ca0b21ddb1db9b3f4b15ab12916a",
+  "interpreter_sha256": "5ff1fcc8fbdc777322a6c3c39161832af6deb23e7bd22b2b36d9c7f930344963",
   "exitstatus": 1,
   "unexpected": [],
   "not_collected": [],
@@ -124,7 +124,7 @@
     "exitstatus": 1
   },
   "reasons": {
-    "numpy/_core/tests/test_ufunc.py::test_ufunc_method_signatures[__call__]": "Failed: no signature found for builtin <wrapper_descriptor object at 0x5e66c7a05f0>",
+    "numpy/_core/tests/test_ufunc.py::test_ufunc_method_signatures[__call__]": "Failed: no signature found for builtin <wrapper_descriptor object at 0x240147b3170>",
     "numpy/_core/tests/test_ufunc.py::test_addition_reduce_negative_zero[False-e]": "-0. propagation in sum currently requires initial",
     "numpy/_core/tests/test_ufunc.py::test_addition_reduce_negative_zero[False-f]": "-0. propagation in sum currently requires initial",
     "numpy/_core/tests/test_ufunc.py::test_addition_reduce_negative_zero[False-d]": "-0. propagation in sum currently requires initial",
@@ -230,11 +230,14 @@
     "url": "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz"
   },
   "counts": {
-    "NOTRUN": 11668,
-    "PASS": 39566,
-    "FAIL": 37,
-    "XFAIL": 15,
-    "SKIP": 987
+    "PASS": 50495,
+    "XFAIL": 30,
+    "SKIP": 1103,
+    "ERROR": 85,
+    "FAIL": 63,
+    "NOTRUN": 494,
+    "XPASS": 2,
+    "TIMEOUT": 1
   },
-  "recorded_at": "2026-11-05T08:39:39.287680+00:00"
+  "recorded_at": "2026-11-08T07:31:44.812848+00:00"
 }
