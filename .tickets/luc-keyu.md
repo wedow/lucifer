@@ -32,3 +32,7 @@ Tried and reverted: generic attribute loads/stores in inlined frames with frames
 **2026-11-07T23:45:11Z**
 
 After luc-8fns's fix (a3ab2b7) and merging master 936c76f: gates 0/0/0/0/0; AWFY best of 3, branch/master geomean 0.833 (CPython ratio 0.623 -> 0.519): CD 0.316, Havlak 0.653, Json 0.740, DeltaBlue 0.742, Bounce 0.798, others 0.94-1.006. Flask in process: show/new/api/toggle 1-2% faster, index 6% slower in this run (one best-of-5 sample, not yet attributed).
+
+**2026-11-08T02:14:55Z**
+
+After merging luc-zcur (928d261): h_call's instance path removed (zcur covers it: CD inner 250 10.39G vs 10.40G instructions per iteration without it; master 18.2G). Gates 0/0/0/0/0. AWFY best of 3 branch/master geomean 0.950 (CPython ratio 0.521 -> 0.495): CD 0.612, DeltaBlue 0.912, Towers 0.955, NBody 0.972; Json 1.003, Queens 1.008. Flask index alone, best of 5 twice, master/branch: 3091/3063, 3046/3070 us (the earlier +6% does not hold). In the five-route run of the same session the branch was 1-5% slower on show/new/api/toggle; the instruction census of three routes says +1.5%, not attributed further.
