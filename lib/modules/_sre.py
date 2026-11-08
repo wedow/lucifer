@@ -9,7 +9,7 @@ jump and resumes it by label, as sre_lib.h resumes by goto."""
 
 import sys
 from _types import GenericAlias, MappingProxyType
-from _lucifer import str_encode, str_ord, str_slice
+from _lucifer import str_encode, str_ord, str_slice, b_find, str_find
 
 MAGIC = 20230612
 CODESIZE = 4
@@ -315,14 +315,6 @@ class _Wide:
     def __getitem__(self, i):
         return str_ord(self.s, i)
 
-    def find(self, ch, start, end):
-        s = self.s
-        while start < end:
-            if str_ord(s, start) == ch:
-                return start
-            start += 1
-        return -1
-
 
 _last_text = [(None, None)]    # a list item, not a global: a store to a global costs compiled code its facts
 
@@ -487,7 +479,7 @@ def _count(st, code, text, pattern, ptr, end, maxcount):
         while ptr < end and _charset(code, s, text[ptr]):
             ptr += 1
     elif op == ANY:
-        stop = text.find(10, ptr, end) if ptr < end else -1
+        stop = _find_char(text, 10, ptr, end) if ptr < end else -1
         ptr = end if stop < 0 else stop
     elif op == ANY_ALL:
         ptr = end if end > ptr else ptr
@@ -1251,22 +1243,27 @@ def _match(st, pattern, toplevel):
             label, pattern, ptr, toplevel, count, u, clm, clx = stack.pop()
 
 
-def _search_prefix(text, prefix, ptr, end):
-    """The first position in [ptr, end) where the code points of prefix start."""
-    first = prefix[0]
-    n = len(prefix)
-    if first > 255 and type(text) is bytes:
-        return -1               # the literal does not fit the character width
-    while True:
-        i = text.find(first, ptr, end - n + 1)
-        if i < 0:
-            return -1
-        j = 1
-        while j < n and text[i + j] == prefix[j]:
-            j += 1
-        if j == n:
-            return i
-        ptr = i + 1
+def _needles(prefix):
+    """A literal prefix's code points as the needles of the native searches:
+    (bytes, or None when one does not fit a byte; str)."""
+    return (bytes(prefix) if max(prefix) < 256 else None), ''.join([chr(c) for c in prefix])
+
+
+def _search_prefix(text, needles, ptr, end):
+    """The first position in [ptr, end) where the whole prefix fits and starts."""
+    if type(text) is bytes:
+        return -1 if needles[0] is None else b_find(text, needles[0], ptr, end, False)
+    return str_find(text.s, needles[1], ptr, end, False)
+
+
+_BYTE = tuple([bytes((i,)) for i in range(256)])
+
+
+def _find_char(text, ch, ptr, end):
+    """text.find(ch, ptr, end) for a code point ch < 256, searched natively."""
+    if type(text) is bytes:
+        return b_find(text, _BYTE[ch], ptr, end, False)
+    return str_find(text.s, chr(ch), ptr, end, False)
 
 
 def _first_test(code, i):
@@ -1348,7 +1345,7 @@ def _search_generic(st):
         if flags & INFO_PREFIX:
             prefix_len = code[5]
             prefix_skip = code[6]
-            prefix = code[7:7 + prefix_len]
+            prefix = _needles(code[7:7 + prefix_len])
         elif flags & INFO_CHARSET:
             charset = 5
         pattern = 1 + code[1]
@@ -1452,7 +1449,7 @@ _NAMESPACE = {'_ASCII_LOWER': _ASCII_LOWER, '_ASCII_WORD': _ASCII_WORD, '_ASCII_
               '_UNI_SPACE': _UNI_SPACE, '_LINEBREAKS': _LINEBREAKS, '_lower_unicode': _lower_unicode,
               '_upper_unicode': _upper_unicode, '_lower_ascii': _lower_ascii, '_lower_locale': _lower_locale,
               '_char_loc_ignore': _char_loc_ignore, '_charset': _charset, '_charset_loc_ignore': _charset_loc_ignore,
-              '_search_prefix': _search_prefix}
+              '_search_prefix': _search_prefix, '_find_char': _find_char}
 
 
 def _char_end(code, pc):
@@ -1723,7 +1720,7 @@ class _Gen:
         if op == ANY_ALL:
             self.w(ind, 'if %s > ptr: ptr = %s' % (lim, lim))
         elif op == ANY or (op == NOT_LITERAL and code[item + 1] < 256):
-            self.w(ind, 'q = text.find(%d, ptr, %s) if ptr < %s else -1' % (10 if op == ANY else code[item + 1], lim, lim))
+            self.w(ind, 'q = _find_char(text, %d, ptr, %s) if ptr < %s else -1' % (10 if op == ANY else code[item + 1], lim, lim))
             self.w(ind, 'ptr = %s if q < 0 else q' % lim)
         elif op == LITERAL:
             self.w(ind, 'while ptr < %s and text[ptr] == %d: ptr += 1' % (lim, code[item + 1]))
@@ -2448,7 +2445,7 @@ class _Gen:
             skip = code[6]
             w(1, 'nxt = start')
             w(1, 'while nxt < end:')
-            w(2, 'pos = _search_prefix(text, %s, nxt, end)' % self.const(tuple(code[7:7 + code[5]])))
+            w(2, 'pos = _search_prefix(text, %s, nxt, end)' % self.const(_needles(code[7:7 + code[5]])))
             w(2, 'if pos < 0: return 0')
             w(2, 'nxt = pos + 1')
             if flags & INFO_LITERAL:

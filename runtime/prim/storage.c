@@ -346,6 +346,19 @@ prim_xxh_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLong(lu_xxhash_end(acc, n, args[1] == Py_True));
 }
 
+/* tuple_hash(t): the hash of a tuple or tuple subclass instance (tuple.__hash__). */
+static PyObject *
+prim_tuple_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    if (!PyTuple_Check(args[0])) {
+        lu_err_format(PyExc_TypeError, "tuple_hash() needs a tuple");
+        return NULL;
+    }
+    Py_hash_t h = lu_tuple_hash(args[0]);
+    return h == -1 ? NULL : PyLong_FromSsize_t(h);
+}
+
 /* repr_enter(obj): whether obj is already being repr'd by this task, else
    marks it; repr_leave(obj) unmarks (Py_ReprEnter, Py_ReprLeave). */
 static PyObject *
@@ -1230,7 +1243,7 @@ lu_storage_init(void)
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_storage_methods[] = {
     FAST(seq_get), FAST(seq_slice), FAST(seq_concat), FAST(seq_repeat), FAST(tuple_from),
-    FAST(xxh_hash), FAST(repr_enter), FAST(repr_leave), FAST(list_alloc), FAST(list_append),
+    FAST(xxh_hash), FAST(tuple_hash), FAST(repr_enter), FAST(repr_leave), FAST(list_alloc), FAST(list_append),
     FAST(list_set), FAST(list_splice), FAST(list_insert), FAST(list_insert), FAST(list_set_stride), FAST(list_del_stride),
     FAST(list_reverse), FAST(list_pop), FAST(list_sort_begin), FAST(list_sort_end), FAST(iter_new),
     FAST(seqiter_next), FAST(iter_state), FAST(iter_set), FAST(range_new), FAST(range_get),

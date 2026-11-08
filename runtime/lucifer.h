@@ -1220,6 +1220,7 @@ void lu_error_unexpected_keyword_arg(PyObject *kwargs, PyObject *kwnames,
 void lu_intern(PyInterpreterState *interp, PyObject **p);
 PyObject *lu_str_from_utf8(const char *s, Py_ssize_t n, int surrogatepass);
 Py_hash_t lu_hash(PyObject *v);
+Py_hash_t lu_tuple_hash(PyObject *tuple);
 int lu_eq(PyObject *a, PyObject *b);
 /* Whether two keys of an equal hash are equal when that needs no Python: 1, 0,
    or -1 when __eq__ must decide (runtime/object/dict.c). */
@@ -1628,5 +1629,83 @@ PyObject *lu_range_iter(PyObject *r);
 void lu_err_format(PyObject *type, const char *format, ...)
     __attribute__((format(printf, 2, 3)));
 void lu_err_format_from_cause(PyObject *type, const char *format, const char *name);
+
+/* Inline bodies of exported C-API functions on the runtime's hot paths. The
+   runtime's own calls of those names compile to these; the exported
+   functions (the ABI extensions bind to) wrap the same bodies, in the files
+   that define them after an #undef. */
+static inline PyThreadState *
+lu_tstate(void)
+{
+    struct lu_task *t = lu_current_task();
+    return t != NULL && t->ts.state == _Py_THREAD_ATTACHED ? &t->ts : NULL;
+}
+_Noreturn void lu_tstate_missing(void);        /* PyThreadState_Get's fatal error */
+static inline PyThreadState *
+lu_tstate_get(void)
+{
+    PyThreadState *ts = lu_tstate();
+    if (ts == NULL) {
+        lu_tstate_missing();
+    }
+    return ts;
+}
+static inline PyInterpreterState *
+lu_interp(void)
+{
+    return lu_tstate_get()->interp;
+}
+static inline PyObject *
+lu_err_occurred(void)
+{
+    PyThreadState *ts = lu_tstate();
+    return ts != NULL && ts->current_exception != NULL ? (PyObject *)Py_TYPE(ts->current_exception) : NULL;
+}
+static inline int
+lu_type_is_subtype(PyTypeObject *a, PyTypeObject *b)
+{
+    PyObject *mro = a->tp_mro;
+    if (mro == NULL) {
+        /* a type not yet ready: its base chain */
+        for (; a != NULL; a = a->tp_base) {
+            if (a == b) {
+                return 1;
+            }
+        }
+        return b == &PyBaseObject_Type;
+    }
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); i++) {
+        if (PyTuple_GET_ITEM(mro, i) == (PyObject *)b) {
+            return 1;
+        }
+    }
+    return 0;
+}
+static inline int
+lu_type_check(PyObject *ob, PyTypeObject *type)
+{
+    return Py_IS_TYPE(ob, type) || lu_type_is_subtype(Py_TYPE(ob), type);
+}
+static inline vectorcallfunc
+lu_vectorcall_function(PyObject *callable)
+{
+    PyTypeObject *tp = Py_TYPE(callable);
+    if (!PyType_HasFeature(tp, Py_TPFLAGS_HAVE_VECTORCALL)) {
+        return NULL;
+    }
+    vectorcallfunc f;
+    memcpy(&f, (char *)callable + tp->tp_vectorcall_offset, sizeof f);
+    return f;
+}
+#ifndef LU_STUBS
+#define PyThreadState_GetUnchecked lu_tstate
+#define PyThreadState_Get lu_tstate_get
+#define PyInterpreterState_Get lu_interp
+#define PyErr_Occurred lu_err_occurred
+#define PyType_IsSubtype lu_type_is_subtype
+#define PyVectorcall_Function lu_vectorcall_function
+#undef PyObject_TypeCheck
+#define PyObject_TypeCheck(ob, type) lu_type_check(_PyObject_CAST(ob), (type))
+#endif
 
 #endif

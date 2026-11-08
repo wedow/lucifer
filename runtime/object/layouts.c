@@ -593,6 +593,35 @@ slice_traverse(PyObject *op, visitproc visit, void *arg)
 
 /* Layout hash and equality. */
 
+/* tuple_hash (Objects/tupleobject.c): the xxHash fold of the items' hashes,
+   cached in ob_hash as 3.14 does. Items of the common exact types hash here;
+   any other goes through PyObject_Hash, the kernel's hash(). */
+Py_hash_t
+lu_tuple_hash(PyObject *op)
+{
+    PyTupleObject *t = (PyTupleObject *)op;
+    Py_hash_t cached = __atomic_load_n(&t->ob_hash, __ATOMIC_RELAXED);
+    if (cached != -1) {
+        return cached;
+    }
+    Py_uhash_t acc = LU_XXHASH_START;
+    for (Py_ssize_t i = 0; i < Py_SIZE(t); i++) {
+        PyObject *item = t->ob_item[i];
+        PyTypeObject *tp = Py_TYPE(item);
+        Py_hash_t lane = tp == &PyTuple_Type ? lu_tuple_hash(item)
+            : tp == &PyUnicode_Type || tp == &PyLong_Type || tp == &PyBool_Type || tp == &PyFloat_Type
+              || tp == &PyBytes_Type || item == Py_None ? lu_hash(item)
+            : PyObject_Hash(item);
+        if (lane == -1) {
+            return -1;
+        }
+        acc = lu_xxhash_step(acc, lane);
+    }
+    Py_hash_t h = lu_xxhash_end(acc, Py_SIZE(t), 1);
+    __atomic_store_n(&t->ob_hash, h, __ATOMIC_RELAXED);
+    return h;
+}
+
 Py_hash_t
 lu_hash(PyObject *v)
 {
@@ -617,11 +646,7 @@ lu_hash(PyObject *v)
         return h == (Py_uhash_t)-1 ? -2 : (Py_hash_t)h;
     }
     if (tp == &PyTuple_Type) {
-        PyTupleObject *t = (PyTupleObject *)v;
-        if (t->ob_hash == -1) {
-            t->ob_hash = lu_xxhash_items(t->ob_item, Py_SIZE(t), 1);
-        }
-        return t->ob_hash;
+        return lu_tuple_hash(v);
     }
     if (tp == &PySlice_Type) {
         PySliceObject *s = (PySliceObject *)v;

@@ -493,24 +493,11 @@ _PyType_Lookup(PyTypeObject *tp, PyObject *name)
     return type_lookup(tp, name, 0);
 }
 
+#undef PyType_IsSubtype
 int
 PyType_IsSubtype(PyTypeObject *a, PyTypeObject *b)
 {
-    PyObject *mro = a->tp_mro;
-    if (mro == NULL) {
-        for (; a != NULL; a = a->tp_base) {
-            if (a == b) {
-                return 1;
-            }
-        }
-        return b == &PyBaseObject_Type;
-    }
-    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); i++) {
-        if (PyTuple_GET_ITEM(mro, i) == (PyObject *)b) {
-            return 1;
-        }
-    }
-    return 0;
+    return lu_type_is_subtype(a, b);
 }
 
 PyObject *
