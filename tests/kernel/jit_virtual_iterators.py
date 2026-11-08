@@ -52,6 +52,15 @@ def pairs(n):
     return t[0] + t[1]
 
 
+def gen_total(row):
+    # A generator's loop with no yield in it makes no iterator either.
+    t = 0
+    for x in row:
+        t += x
+    yield t
+    yield -t
+
+
 def note(x):
     return x
 
@@ -65,6 +74,7 @@ def step(v, lst, tup, i):
     s = v.has_some(big)
     s += total(lst) + total(tup) + first_over(tup, 2)
     s += pairs(i % 7)
+    s += next(gen_total(tup))
     for j in range(i % 3):
         s += j
     return s

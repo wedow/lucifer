@@ -151,6 +151,7 @@ static PyTypeObject *known_type(struct ctx *c, lu_v v);
 static void set_known(struct ctx *c, lu_v v, PyTypeObject *t);
 
 static int decode(struct ctx *c, int pc, int *base, int *oparg, int *opcode);
+static int jump_target(int op, int oparg, int next);
 
 /* The parameters the code never rebinds: per local, 1. */
 static uint8_t *
@@ -557,14 +558,27 @@ helper_raising(struct ctx *c, int id, int nargs, const lu_v *args, int drop)
 /* Whether the loop whose FOR_ITER is at pc may step a new iterator each
    time (for_iter): only the stack holds the iterator, so only an exit sees
    it, and the optimizer keeps every one of them virtual. A generator's
-   stack goes back to its frame at a yield, which would make each one. The
-   step speculates nothing, so the site's failures do not matter. */
+   stack goes back to its frame at a yield, which would make each one: a
+   loop of a generator's that yields keeps its iterator. The step
+   speculates nothing, so the site's failures do not matter. */
 static int
 steps_fresh(struct ctx *c, int pc)
 {
     int base, oparg, opcode;
-    return pc < c->ncode && (decode(c, pc, &base, &oparg, &opcode), base == FOR_ITER)
-        && !(c->code->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE));
+    if (pc >= c->ncode || (decode(c, pc, &base, &oparg, &opcode), base != FOR_ITER)) {
+        return 0;
+    }
+    if (!(c->code->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE))) {
+        return 1;
+    }
+    int end = jump_target(FOR_ITER, oparg, decode(c, pc, &base, &oparg, &opcode));
+    for (int at = pc; at < end && at < c->ncode;) {
+        at = decode(c, at, &base, &oparg, &opcode);
+        if (base == YIELD_VALUE || base == SEND) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 
