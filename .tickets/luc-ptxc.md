@@ -1,6 +1,6 @@
 ---
 id: luc-ptxc
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-11-07T20:06:32Z
