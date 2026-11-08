@@ -645,7 +645,35 @@ lu_long_compare(PyObject *a, PyObject *b)
     return x.neg ? -c : c;
 }
 
-/* Shifts. */
+/* Shifts and bitwise operations write the result's digits in place: no
+   scratch copy of an operand. Operands of at most two digits (|v| < 2**60)
+   take machine words. */
+
+/* A value of at most two digits. */
+static int64_t
+word(big a)
+{
+    int64_t v = a.n == 0 ? 0 : a.n == 1 ? (int64_t)a.d[0] : (int64_t)a.d[0] | (int64_t)a.d[1] << SHIFT;
+    return a.neg ? -v : v;
+}
+
+/* An int allocated with n digits and filled: its normalized length and sign
+   set, or the cached small int that equals it. */
+static PyObject *
+settle(PyLongObject *v, int neg, Py_ssize_t n)
+{
+    n = normalize(v->long_value.ob_digit, n);
+    if (n <= 1) {
+        long w = n ? (long)v->long_value.ob_digit[0] : 0;
+        w = neg ? -w : w;
+        if (w >= -LU_NSMALLNEGINTS && w < LU_NSMALLPOSINTS) {
+            Py_DECREF(v);
+            return lu_small_int((int)w);
+        }
+    }
+    v->long_value.lv_tag = ((uintptr_t)n << _PyLong_NON_SIZE_BITS) | (uintptr_t)(n == 0 ? 1 : neg ? 2 : 0);
+    return (PyObject *)v;
+}
 
 /* a << n for n >= 0. */
 static PyObject *
@@ -660,20 +688,30 @@ long_lshift(PyObject *a, PyObject *count)
         PyErr_Clear();
         return too_many_digits();
     }
+    if (x.n <= 2 && n < 64) {
+        int64_t w = word(x);
+        uint64_t m = w < 0 ? 0 - (uint64_t)w : (uint64_t)w;
+        if (64 - __builtin_clzll(m) + n <= 62) {
+            return PyLong_FromLongLong((long long)(m << n) * (w < 0 ? -1 : 1));
+        }
+    }
     if (n > (long)MAX_LONG_DIGITS * SHIFT) {
         return too_many_digits();
     }
     Py_ssize_t wordshift = n / SHIFT;
-    int remshift = (int)(n % SHIFT);
-    digit *z = dcalloc(x.n + wordshift + 1);
-    if (z == NULL) {
+    PyLongObject *r = lu_long_alloc(x.n + wordshift + 1);
+    if (r == NULL) {
         return NULL;
     }
-    z[x.n + wordshift] = v_lshift(z + wordshift, x.d, x.n, remshift);
-    return finish(x.neg, z, x.n + wordshift + 1);
+    digit *z = r->long_value.ob_digit;
+    memset(z, 0, wordshift * sizeof(digit));
+    z[x.n + wordshift] = v_lshift(z + wordshift, x.d, x.n, (int)(n % SHIFT));
+    return settle(r, x.neg, x.n + wordshift + 1);
 }
 
-/* a >> n for n >= 0, rounding toward negative infinity. */
+/* a >> n for n >= 0, rounding toward negative infinity: for a negative a,
+   -ceil(|a| / 2**n), one more than the shifted magnitude when a bit set in
+   |a| is shifted out. */
 static PyObject *
 long_rshift(PyObject *a, PyObject *count)
 {
@@ -681,87 +719,83 @@ long_rshift(PyObject *a, PyObject *count)
     long n = 0;
     int huge = lu_long_as_long(count, &n) < 0;
     PyErr_Clear();
+    if (x.n <= 2) {
+        return PyLong_FromLongLong(word(x) >> (huge || n > 63 ? 63 : n));
+    }
     Py_ssize_t wordshift = huge ? x.n : n / SHIFT;
     int remshift = huge ? 0 : (int)(n % SHIFT);
     if (wordshift >= x.n) {
         return PyLong_FromLong(x.neg ? -1 : 0);
     }
-    /* For a negative a, floor(a / 2**n) == -(((|a| - 1) >> n) + 1). */
-    digit *m = dalloc(x.n);
-    if (m == NULL) {
+    Py_ssize_t keep = x.n - wordshift;
+    PyLongObject *r = lu_long_alloc(keep + 1);
+    if (r == NULL) {
         return NULL;
     }
-    Py_ssize_t nm = x.n;
+    digit *z = r->long_value.ob_digit;
+    digit lost = v_rshift(z, x.d + wordshift, keep, remshift);
+    z[keep] = 0;
     if (x.neg) {
-        nm = mag_sub(x.d, x.n, (const digit[]){1}, 1, m);
-    }
-    else {
-        memcpy(m, x.d, x.n * sizeof(digit));
-    }
-    Py_ssize_t keep = nm - wordshift;
-    if (keep <= 0) {
-        PyMem_Free(m);
-        return PyLong_FromLong(x.neg ? -1 : 0);
-    }
-    digit *z = dalloc(keep + 1);
-    if (z == NULL) {
-        PyMem_Free(m);
-        return NULL;
-    }
-    v_rshift(z, m + wordshift, keep, remshift);
-    PyMem_Free(m);
-    Py_ssize_t nz = normalize(z, keep);
-    if (x.neg) {
-        digit one = 1;
-        nz = mag_add(z, nz, &one, 1, z);
-    }
-    return finish(x.neg, z, nz);
-}
-
-/* Bitwise operations, on two's complement digits sign-extended to size. */
-
-static void
-to_twos(big a, Py_ssize_t size, digit *out)
-{
-    memset(out, 0, size * sizeof(digit));
-    memcpy(out, a.d, a.n * sizeof(digit));
-    if (a.neg) {
-        /* -m == ~(m - 1) */
-        digit one = 1;
-        v_isub(out, size, &one, 1);
-        for (Py_ssize_t i = 0; i < size; i++) {
-            out[i] = ~out[i] & MASK;
+        for (Py_ssize_t i = 0; i < wordshift && !lost; i++) {
+            lost = x.d[i];
+        }
+        if (lost) {
+            v_iadd(z, keep + 1, (const digit[]){1}, 1);
         }
     }
+    return settle(r, x.neg, keep + 1);
+}
+
+/* Digit i of a's two's complement, sign-extended without end: for a
+   negative a, ~(|a| - 1), whose borrow *borrow carries (1 at digit 0). */
+static inline digit
+twos_digit(big a, Py_ssize_t i, digit *borrow)
+{
+    digit d = i < a.n ? a.d[i] : 0;
+    if (!a.neg) {
+        return d;
+    }
+    d -= *borrow;
+    *borrow = d >> (8 * sizeof(digit) - 1);
+    return ~d & MASK;
 }
 
 static PyObject *
 long_bitwise(int op, PyObject *a, PyObject *b)
 {
     big x = view(a), y = view(b);
-    Py_ssize_t size = (x.n > y.n ? x.n : y.n) + 1;
-    digit *p = dalloc(3 * size);
-    if (p == NULL) {
+    if (x.n <= 2 && y.n <= 2) {
+        int64_t u = word(x), v = word(y);
+        return PyLong_FromLongLong(op == NB_AND ? u & v : op == NB_OR ? u | v : u ^ v);
+    }
+    int neg = op == NB_AND ? x.neg & y.neg : op == NB_OR ? x.neg | y.neg : x.neg ^ y.neg;
+    /* A non-negative operand of &, or both of |, bound the result's length. */
+    Py_ssize_t size = x.n > y.n ? x.n : y.n;
+    if (op == NB_AND && !x.neg && (y.neg || x.n < y.n)) {
+        size = x.n;
+    }
+    else if (op == NB_AND && !y.neg) {
+        size = y.n;
+    }
+    PyLongObject *r = lu_long_alloc(size + 1);
+    if (r == NULL) {
         return NULL;
     }
-    digit *u = p, *v = p + size, *z = p + 2 * size;
-    to_twos(x, size, u);
-    to_twos(y, size, v);
+    digit *z = r->long_value.ob_digit;
+    digit bx = 1, by = 1, carry = 1;
     for (Py_ssize_t i = 0; i < size; i++) {
-        z[i] = op == NB_AND ? u[i] & v[i] : op == NB_OR ? u[i] | v[i] : u[i] ^ v[i];
-    }
-    int neg = (z[size - 1] >> (SHIFT - 1)) & 1;
-    if (neg) {
-        /* magnitude = ~z + 1 */
-        for (Py_ssize_t i = 0; i < size; i++) {
-            z[i] = ~z[i] & MASK;
+        digit u = twos_digit(x, i, &bx), v = twos_digit(y, i, &by);
+        digit w = op == NB_AND ? u & v : op == NB_OR ? u | v : u ^ v;
+        if (neg) {
+            /* the magnitude of a negative result: ~w + 1 */
+            w = (~w & MASK) + carry;
+            carry = w >> SHIFT;
+            w &= MASK;
         }
-        digit one = 1;
-        v_iadd(z, size, &one, 1);
+        z[i] = w;
     }
-    PyObject *r = lu_long_from_digits(neg, normalize(z, size), z);
-    PyMem_Free(p);
-    return r;
+    z[size] = neg ? carry : 0;
+    return settle(r, neg, size + 1);
 }
 
 /* pow */

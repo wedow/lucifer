@@ -71,6 +71,7 @@ code_members	runtime/interp/code.c	PyMemberDef table of the code layout, never w
 code_getset	runtime/interp/code.c	PyGetSetDef table of the code layout, never written; tp_getset takes it non-const
 names.*	runtime/interp/ceval.c	the builtins LOAD_COMMON_CONSTANT names, a table never written
 lu_prim_storage_methods	runtime/prim/storage.c	_lucifer's storage primitives, a PyMethodDef table never written; the API takes it non-const
+lu_prim_deque_methods	runtime/prim/deque.c	_lucifer's deque ring primitives, a PyMethodDef table never written; the API takes it non-const
 gen_getset	runtime/interp/gen.c	PyGetSetDef table of generators, never written; tp_getset takes it non-const
 coro_getset	runtime/interp/gen.c	PyGetSetDef table of coroutines, never written; tp_getset takes it non-const
 coro_members	runtime/interp/gen.c	PyMemberDef table of coroutines, never written; tp_members takes it non-const
@@ -207,6 +208,7 @@ iend	-	thread-local: the register allocation running on this thread; its TLS sym
 eq_seen	-	thread-local: the last type compiled code asked whether == is identity for; its TLS symbol has no line
 stack_floor	-	thread-local: the lowest C stack address a call from compiled code may recurse to; its TLS symbol has no line
 managed_buffer_type	runtime/prim/memoryview.c	a static type, its slots filled once at startup (lu_memoryview_init)
+ring_type	runtime/prim/deque.c	the deque's ring buffer, a private static type complete at compile time
 readline_lock	runtime/capi/myreadline.c	_PyOS_ReadlineLock: one readline at a time across threads
 stress_calls	-	per thread (its TLS symbol has no line): calls from inlined frames counted for -X lucifer_stress=deopt:N (runtime/jit/deopt.c)
 kept_by_stress	-	per thread (its TLS symbol has no line): the last call from an inlined frame kept its frames only for deopt:N, so its exit counts as a stress exit (runtime/jit/deopt.c)

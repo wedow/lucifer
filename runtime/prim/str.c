@@ -154,14 +154,18 @@ find_in(PyObject *s, PyObject *sub, Py_ssize_t start, Py_ssize_t end, int last)
         const char *at = memmem((const char *)DATA(s) + start, end - start, DATA(sub), n);
         return at == NULL ? -1 : at - (const char *)DATA(s);
     }
+    if (n == 0) {
+        return last ? end : start;
+    }
+    Py_UCS4 first = CH(sub, 0);
     if (last) {
         for (Py_ssize_t i = end - n; i >= start; i--) {
-            if (match_at(s, sub, i)) return i;
+            if (CH(s, i) == first && match_at(s, sub, i)) return i;
         }
         return -1;
     }
     for (Py_ssize_t i = start; i <= end - n; i++) {
-        if (match_at(s, sub, i)) return i;
+        if (CH(s, i) == first && match_at(s, sub, i)) return i;
     }
     return -1;
 }

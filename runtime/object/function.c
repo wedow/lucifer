@@ -1020,14 +1020,9 @@ lu_function_init(void)
 }
 
 /* Objects/call.c. */
+#undef PyVectorcall_Function
 vectorcallfunc
 PyVectorcall_Function(PyObject *callable)
 {
-    PyTypeObject *tp = Py_TYPE(callable);
-    if (!PyType_HasFeature(tp, Py_TPFLAGS_HAVE_VECTORCALL)) {
-        return NULL;
-    }
-    vectorcallfunc f;
-    memcpy(&f, (char *)callable + tp->tp_vectorcall_offset, sizeof f);
-    return f;
+    return lu_vectorcall_function(callable);
 }

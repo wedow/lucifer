@@ -9,26 +9,32 @@
 
 #define TASK(ts) ((struct lu_task *)(ts))
 
+/* The exported forms of lucifer.h's inline lu_tstate, lu_tstate_get and lu_interp. */
+#undef PyThreadState_GetUnchecked
+#undef PyThreadState_Get
+#undef PyInterpreterState_Get
+
 PyThreadState *
 PyThreadState_GetUnchecked(void)
 {
-    struct lu_task *t = lu_current_task();
-    return t != NULL && t->ts.state == _Py_THREAD_ATTACHED ? &t->ts : NULL;
+    return lu_tstate();
 }
 
 PyThreadState *
 PyThreadState_Get(void)
 {
-    PyThreadState *ts = PyThreadState_GetUnchecked();
-    if (ts == NULL) {
-        fprintf(stderr, "Fatal Python error: PyThreadState_Get: the function must be "
-                "called with an active thread state, after Python initialization and "
-                "before Python finalization, but it was called without an active "
-                "thread state. Are you trying to call the C API inside of a "
-                "Py_BEGIN_ALLOW_THREADS block?\n");
-        abort();
-    }
-    return ts;
+    return lu_tstate_get();
+}
+
+void
+lu_tstate_missing(void)
+{
+    fprintf(stderr, "Fatal Python error: PyThreadState_Get: the function must be "
+            "called with an active thread state, after Python initialization and "
+            "before Python finalization, but it was called without an active "
+            "thread state. Are you trying to call the C API inside of a "
+            "Py_BEGIN_ALLOW_THREADS block?\n");
+    abort();
 }
 
 LU_EXPORT PyThreadState *
@@ -59,7 +65,7 @@ Py_LeaveRecursiveCall(void)
 PyInterpreterState *
 PyInterpreterState_Get(void)
 {
-    return PyThreadState_Get()->interp;
+    return lu_interp();
 }
 
 /* PyInterpreterState_GetDict: the interpreter's dict, made on first use

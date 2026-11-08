@@ -60,12 +60,11 @@ PyErr_Clear(void)
     PyErr_SetRaisedException(NULL);
 }
 
+#undef PyErr_Occurred
 PyObject *
 PyErr_Occurred(void)
 {
-    PyThreadState *ts = PyThreadState_GetUnchecked();
-    return ts != NULL && ts->current_exception != NULL
-        ? (PyObject *)Py_TYPE(ts->current_exception) : NULL;
+    return lu_err_occurred();
 }
 
 /* Whether calling `tp` runs only BaseException's own __new__ and __init__,
