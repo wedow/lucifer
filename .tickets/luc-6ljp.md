@@ -2,7 +2,7 @@
 id: luc-6ljp
 status: open
 deps: []
-links: [luc-9ags]
+links: [luc-9ags, luc-j2vs, luc-uexr, luc-4yfw, luc-n6yj, luc-r1pk, luc-mltz, luc-m3wi, luc-xtmp, luc-po0x, luc-o8i6]
 created: 2026-11-08T20:03:49Z
 type: bug
 priority: 2

@@ -2,7 +2,7 @@
 id: luc-po0x
 status: closed
 deps: []
-links: []
+links: [luc-j2vs, luc-uexr, luc-4yfw, luc-n6yj, luc-6ljp, luc-r1pk, luc-mltz, luc-m3wi, luc-xtmp, luc-9ags, luc-o8i6]
 created: 2026-11-08T19:44:46Z
 type: task
 priority: 2

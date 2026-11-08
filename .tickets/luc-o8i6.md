@@ -2,7 +2,7 @@
 id: luc-o8i6
 status: open
 deps: []
-links: [luc-uexr, luc-m3wi, luc-p2yt, luc-9ags]
+links: [luc-uexr, luc-m3wi, luc-p2yt, luc-9ags, luc-j2vs, luc-4yfw, luc-n6yj, luc-6ljp, luc-r1pk, luc-mltz, luc-xtmp, luc-po0x]
 created: 2026-11-07T23:49:21Z
 type: task
 priority: 2

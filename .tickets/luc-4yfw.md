@@ -2,7 +2,7 @@
 id: luc-4yfw
 status: closed
 deps: []
-links: []
+links: [luc-j2vs, luc-uexr, luc-n6yj, luc-6ljp, luc-r1pk, luc-mltz, luc-m3wi, luc-xtmp, luc-9ags, luc-po0x, luc-o8i6]
 created: 2026-11-07T13:14:15Z
 type: bug
 priority: 2

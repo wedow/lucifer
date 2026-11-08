@@ -1,8 +1,8 @@
 ---
 id: luc-r1pk
-status: in_progress
-deps: [luc-9ags, luc-n6yj, luc-4yfw, luc-xtmp, luc-m3wi, luc-uexr, luc-o8i6, luc-j2vs]
-links: []
+status: closed
+deps: []
+links: [luc-j2vs, luc-uexr, luc-4yfw, luc-n6yj, luc-6ljp, luc-mltz, luc-m3wi, luc-xtmp, luc-9ags, luc-po0x, luc-o8i6]
 created: 2026-11-08T18:09:49Z
 type: epic
 priority: 2
@@ -22,3 +22,7 @@ Census (perf + -X lucifer_jit_stats, master then branch) on Flask in process, AW
 **2026-11-08T22:36:22Z**
 
 Also fixed on the way: the check after a generator's in-line entry (gen_enter) was an ordinary guard, so -X lucifer_stress=deopt:N left after the entry had made the generator running and the interpreter raised 'generator already executing' (master fails tests/kernel/jit_gen_enter_stress.py, an ast.walk-shaped loop, at every stress period; master's ast_module passed only by its guard pattern). And object keeps its attribute thunk so that extension types that set PyObject_GenericGetAttr themselves (ast nodes) keep their __getattribute__ wrapper, as in CPython.
+
+**2026-11-08T23:49:44Z**
+
+Re-timed after merging master (luc-hotc, luc-cold) against that master, same host and method: corpus subset geomean 0.946x (go 0.70x, richards 0.65x, richards_super 0.73x, deltablue 0.86x, sqlglot_v2 0.89x, parse 0.87x, transpile 0.86x; async_tree family 0.89-1.10, its noise band); AWFY geomean 0.976x (Json 0.783x, 1.16x CPython 3.14t; Havlak 0.95x, List 0.91x); Flask in process 1.00x; class writes 6.42/22.43/30.07 M/s at 1/8/32 threads (master 2.04/1.82/1.39, CPython 7.51/3.95/2.88); uncached lookups 43.1/154.1/402.1 M/s (master 33.8/120.8/165.7, CPython 25.4/87.4/159.6). Also folded in luc-po0x. Gates on the merged head: check, abi-audit, check-jit, check-harness, check-compiler all 0.
