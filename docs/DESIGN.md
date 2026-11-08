@@ -656,6 +656,12 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    `__new__` is a kernel function of its own and whose `__init__` is
    object's (str, int, bytes, tuple, range) returns what `__new__`
    returns, so its call is a call of `__new__` with the class first. A
+   class whose `__new__` is its builtin base's kernel function (list, set,
+   bytearray, exceptions and their subclasses) and whose `__init__` is a
+   Python function or the base's own is made by a call of that `__new__`,
+   which raises at the call, and its `__init__` inlines under the made
+   frame of `type.__call__` as above (after `call_special` for a kernel
+   one). A
    call with
    keywords of a function or class the code knows binds the keywords to
    the parameters at compile time, defaults and keyword-only defaults as
