@@ -1220,6 +1220,7 @@ void lu_error_unexpected_keyword_arg(PyObject *kwargs, PyObject *kwnames,
 void lu_intern(PyInterpreterState *interp, PyObject **p);
 PyObject *lu_str_from_utf8(const char *s, Py_ssize_t n, int surrogatepass);
 Py_hash_t lu_hash(PyObject *v);
+Py_hash_t lu_tuple_hash(PyObject *tuple);
 int lu_eq(PyObject *a, PyObject *b);
 /* Whether two keys of an equal hash are equal when that needs no Python: 1, 0,
    or -1 when __eq__ must decide (runtime/object/dict.c). */
