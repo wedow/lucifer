@@ -1356,11 +1356,6 @@ int lu_type_add_descriptors(PyTypeObject *tp);
 int lu_type_add_operators(PyTypeObject *tp);
 /* object.__new__(tp): a new instance of tp, refusing a tp whose static base is not owner. */
 PyObject *lu_alloc_instance(PyTypeObject *tp, PyTypeObject *owner);
-/* How cls(...) with `total` positional arguments runs when type.__call__
-   has nothing to decide (runtime/interp/ceval.c): 2 it only allocates, 1 it
-   also calls the Python function *func (its __init__, a new reference), 3
-   *func is its __new__, 0 type.__call__ decides. */
-int lu_instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **func);
 
 /* The next tp_new_wrapper check (owner.__new__(cls) is safe) passes: C called owner's tp_new itself. */
 void lu_new_check_skip(int on);

@@ -677,8 +677,8 @@ plan_for(PyTypeObject *cls, Py_ssize_t total, PyObject *new_, PyObject *init, Py
 
 /* plan_for over the class's __new__ and __init__, which another thread may
    replace: *func, when the plan is 1 or 3, is a new reference. */
-int
-lu_instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **func)
+static int
+instance_plan(PyTypeObject *cls, Py_ssize_t total, PyObject **func)
 {
     PyObject *new_ = _PyType_LookupRef(cls, LU_ID(__new__)), *init = _PyType_LookupRef(cls, LU_ID(__init__));
     PyObject *f = NULL;
@@ -1567,7 +1567,7 @@ call_tail: {
     PyObject *init = NULL, *held = NULL;      /* references that keep target alive */
     int plan = free_self && !mon && Py_IS_TYPE(callable, &PyType_Type) && callable != (PyObject *)&PyType_Type
         && ((PyTypeObject *)callable)->tp_vectorcall == NULL
-        ? lu_instance_plan((PyTypeObject *)callable, total, &init) : 0;
+        ? instance_plan((PyTypeObject *)callable, total, &init) : 0;
     if (plan == 3 && kwnames != NULL) {
         Py_CLEAR(init);         /* the kernel runs __new__ with keywords */
     }
