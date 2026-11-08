@@ -1,6 +1,6 @@
 ---
 id: luc-xboo
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-08T03:06:11Z
