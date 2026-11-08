@@ -8,13 +8,17 @@
    stretched over every block it is live through, so a value live around a
    loop holds its location through the whole loop. Values in one interval keep one location: no splitting.
 
-   Calls clobber every register (the donor's rule: all registers are dead
-   across a call, FOUNDATIONS 2.11), so a value live across one gets a
-   spill word for its whole interval. A call that publishes the root
-   frame's state (lu_publishes) reads the root locals it names during the
-   call, so they count as live across it. The rest go through linear scan over
-   the target's general and float registers; when none is free, the
-   interval that ends last is spilled. Constants take no location: the
+   A release that publishes nothing (it runs no Python a walker could see
+   the frame from) is not a call here: its slow path keeps the registers
+   (lu_alloc_call). Calls clobber every register but the ones the target says every call
+   preserves (the C ABI's callee-saved ones), so a value live across one
+   gets one of those for its whole interval, or a spill word when none is
+   free, when it is a float, or when an instruction it lives across uses
+   them itself (clobbers_saved). A call that publishes the root frame's
+   state (lu_publishes) reads the root locals it names during the call
+   from memory, so they count as live across it and are spilled. The rest
+   go through linear scan over the target's other registers first; when
+   none is free, the interval that ends last is spilled. Constants take no location: the
    backend makes them at each use. Phis get locations like any value, and
    the backend moves their inputs on the edges. */
 #include "jit/target.h"
@@ -198,7 +202,8 @@ struct interval {
     lu_v v;
     int start, end;
     int fpr;
-    int crosses;
+    int crosses;                /* a call */
+    int memory;                 /* a call that clobbers the preserved registers, or one that publishes it */
 };
 
 static __thread int *istart, *iend;     /* the allocation in progress on this thread */
@@ -218,6 +223,40 @@ static void
 extend_use(struct lu_func *f, lu_v v, void *arg)
 {
     extend(f, v, ((struct use_at *)arg)->pos);
+}
+
+static void
+mark_memory(struct lu_func *f, lu_v v, void *set)
+{
+    ((char *)set)[v] = 1;
+}
+
+/* Whether a call at one of the n sorted positions falls inside (start, end). */
+static int
+crosses(const int *calls, int n, int start, int end)
+{
+    int lo = 0, hi = n;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (calls[mid] > start) {
+            hi = mid;
+        }
+        else {
+            lo = mid + 1;
+        }
+    }
+    return lo < n && calls[lo] < end;
+}
+
+static int
+saved_reg(int reg)
+{
+    for (int i = 0; i < lu_target.nsaved; i++) {
+        if (lu_target.saved[i] == reg) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int
@@ -259,6 +298,8 @@ lu_regalloc(struct lu_func *f)
         iend[v] = -1;
     }
     int *calls = malloc(sizeof(int) * (size_t)(f->nins + 1)), ncalls = 0;
+    int *hard = malloc(sizeof(int) * (size_t)(f->nins + 1)), nhard = 0;
+    char *memory = calloc((size_t)f->nins + 1, 1);
     for (int k = 0; k < f->norder; k++) {
         int b = f->order[k];
         struct lu_block *bl = &f->blocks[b];
@@ -289,10 +330,14 @@ lu_regalloc(struct lu_func *f)
                 struct use_at after = { ins->pos + 1 };
                 for (int i = 0; i < root->nlocals; i++) {
                     use_of(f, root->vals[i], v, extend_use, &after);
+                    use_of(f, root->vals[i], v, mark_memory, memory);
                 }
             }
-            if ((lu_op_flags[ins->op] & IF_CALL) && ins->op != OP_PHI) {
+            if (lu_alloc_call(ins)) {
                 calls[ncalls++] = ins->pos;
+                if (lu_target.clobbers_saved(ins)) {
+                    hard[nhard++] = ins->pos;
+                }
             }
         }
         /* Phi inputs are read at the end of their predecessor. */
@@ -328,18 +373,8 @@ lu_regalloc(struct lu_func *f)
         it->start = istart[v];
         it->end = iend[v];
         it->fpr = f->ins[v].rep == REP_F64;
-        /* The first call after its start (calls are in position order). */
-        int lo = 0, hi = ncalls;
-        while (lo < hi) {
-            int mid = (lo + hi) / 2;
-            if (calls[mid] > it->start) {
-                hi = mid;
-            }
-            else {
-                lo = mid + 1;
-            }
-        }
-        it->crosses = lo < ncalls && calls[lo] < it->end;
+        it->crosses = crosses(calls, ncalls, it->start, it->end);
+        it->memory = it->crosses && (it->fpr || memory[v] || crosses(hard, nhard, it->start, it->end));
     }
     qsort(iv, (size_t)n, sizeof(struct interval), by_start);
     int nspill = 0;
@@ -359,16 +394,32 @@ lu_regalloc(struct lu_func *f)
             }
         }
         if (it->crosses) {
-            f->ins[it->v].loc = LU_LOC_SPILL(nspill++);
+            int reg = -1;
+            for (int r = 0; r < lu_target.nsaved && !it->memory; r++) {
+                if (!busy[lu_target.saved[r]]) {
+                    reg = lu_target.saved[r];
+                    break;
+                }
+            }
+            if (reg < 0) {
+                f->ins[it->v].loc = LU_LOC_SPILL(nspill++);
+                continue;
+            }
+            f->ins[it->v].loc = reg;
+            busy[reg] = 1;
+            active[nactive++] = it;
             continue;
         }
         const int8_t *regs = it->fpr ? lu_target.fpr : lu_target.gpr;
         int nregs = it->fpr ? lu_target.nfpr : lu_target.ngpr;
         int reg = -1;
-        for (int r = 0; r < nregs; r++) {
-            if (!busy[regs[r]]) {
-                reg = regs[r];
-                break;
+        /* The registers calls preserve last: values that cross calls want them. */
+        for (int pass = 0; pass < 2 && reg < 0; pass++) {
+            for (int r = 0; r < nregs; r++) {
+                if (!busy[regs[r]] && saved_reg(regs[r]) == pass) {
+                    reg = regs[r];
+                    break;
+                }
             }
         }
         if (reg < 0) {
@@ -396,6 +447,8 @@ lu_regalloc(struct lu_func *f)
     f->nspill = nspill;
     free(iv);
     free(calls);
+    free(hard);
+    free(memory);
     free(istart);
     free(iend);
     return 0;

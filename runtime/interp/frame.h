@@ -216,6 +216,9 @@ void lu_frame_pop(PyThreadState *ts, struct lu_frame *f);
    references, its locals unset, past the recursion limit if need be (the
    code checked for room); NULL when out of memory. Popped as it was
    pushed, or made an ordinary frame by taking the references. */
+/* Room for `words` more datastack words in the current chunk, which a new
+   one gives when it has none: -1 when out of memory. */
+int lu_frame_reserve(PyThreadState *ts, size_t words);
 struct lu_frame *lu_frame_push_lent(PyThreadState *ts, PyFunctionObject *func);
 void lu_frame_pop_lent(PyThreadState *ts, struct lu_frame *f);
 

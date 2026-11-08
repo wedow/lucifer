@@ -268,6 +268,14 @@ lu_jit_frames_push(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
 {
     struct regs r = { gpr, fpr, spills, NULL, 0, 0 };
     struct lu_frame *top = root;
+    /* One block, as compiled code pushes them in line and pops them. */
+    size_t words = 0;
+    for (int k = 1; k < d->nframes; k++) {
+        words += (size_t)d->frames[k].code->co_framesize;
+    }
+    if (lu_frame_reserve(ts, words) < 0) {
+        Py_FatalError("lucifer jit: no room for an inlined frame");
+    }
     for (int k = 1; k < d->nframes; k++) {
         struct lu_deopt_frame *fr = &d->frames[k];
         if (fr->gen) {
@@ -412,7 +420,8 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     root->jit_desc = NULL;
     root->owner = lu_frame_home(root->code);
     if (root->jit_lent) {
-        Py_INCREF(root->func);  /* the interpreter's frame holds its function */
+        Py_INCREF(root->code);  /* the interpreter's frame holds its code and function */
+        Py_INCREF(root->func);
         root->jit_lent = 0;
     }
     struct lu_frame *top = root;
