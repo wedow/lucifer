@@ -1091,7 +1091,14 @@ typedef struct { PyObject_HEAD PyObject *f[LU_ALIAS_FIELDS]; } aliasfields;
 FIELDS(alias, aliasfields, f[0], f[LU_ALIAS_FIELDS - 1])
 
 FIELDS(wrapper, wrapperobject, descr, self)
-FIELDS(method, PyMethodObject, im_func, im_self)
+/* A bound method is weakly referenceable (im_weakreflist). */
+LU_GC_FIELDS(method, PyMethodObject, im_func, im_self)
+static void
+method_dealloc(PyObject *op)
+{
+    lu_clear_weakrefs(op);
+    fields_dealloc(op, offsetof(PyMethodObject, im_func), offsetof(PyMethodObject, im_self) + sizeof(PyObject *));
+}
 FIELDS(instancemethod, instancemethodobject, func, func)
 FIELDS(classmethod, classmethod, cm_callable, cm_dict)
 FIELDS(property, propertyobject, prop_get, prop_name)
@@ -1138,6 +1145,7 @@ lu_descr_init(void)
            method_members, NULL);
     PyMethod_Type.tp_vectorcall_offset = offsetof(PyMethodObject, vectorcall);
     PyMethod_Type.tp_call = PyVectorcall_Call;
+    PyMethod_Type.tp_weaklistoffset = offsetof(PyMethodObject, im_weakreflist);
     layout(&PyInstanceMethod_Type, sizeof(instancemethodobject), 0, instancemethod,
            instancemethod_members, instancemethod_getset);
     PyInstanceMethod_Type.tp_repr = instancemethod_repr;

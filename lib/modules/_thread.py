@@ -237,8 +237,9 @@ class _localimpl:
             tdict.pop(self.key, None)
 
 
-# A weakref callback runs only while its weakref lives.
-_local_refs = set()
+# A weakref callback runs only while its weakref lives. Keyed by id: the local
+# itself may be unhashable (a dataclass subclass), and so then is its weakref.
+_local_refs = {}
 
 
 def _thread_exit():
@@ -265,11 +266,11 @@ class _local:
         object.__setattr__(self, '_local__impl', impl)
 
         def die(ref):
-            _local_refs.discard(ref)
+            _local_refs.pop(id(ref), None)
             impl.clear()
         import _weakref
         ref = _weakref.ref(self, die)
-        _local_refs.add(ref)
+        _local_refs[id(ref)] = ref
         # The creating thread's dict exists before __init__ runs, so nothing calls __init__ twice.
         object.__setattr__(self, '__dict__', impl.create_dict())
         return self

@@ -48,7 +48,6 @@ FROZEN = _frozen_importlib:importlib._bootstrap:third_party/cpython/Lib/importli
 	encodings.unicode_escape:encodings.unicode_escape:third_party/cpython/Lib/encodings/unicode_escape.py \
 	encodings.raw_unicode_escape:encodings.raw_unicode_escape:third_party/cpython/Lib/encodings/raw_unicode_escape.py \
 	abc:abc:third_party/cpython/Lib/abc.py \
-	_py_abc:_py_abc:third_party/cpython/Lib/_py_abc.py \
 	_weakrefset:_weakrefset:third_party/cpython/Lib/_weakrefset.py \
 	_collections_abc:_collections_abc:third_party/cpython/Lib/_collections_abc.py \
 	io:io:third_party/cpython/Lib/io.py \

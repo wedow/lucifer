@@ -27,8 +27,9 @@ lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* vectorcall_method/lookup_maybe_method: the special method of self's
-   type, bound unless it is a plain function or a kernel descriptor, then
-   called with self first. */
+   type, called with self first when it is a plain function or a kernel
+   method descriptor, else bound through its __get__ if it has one (a
+   builtin function has none: it gets no self). */
 static PyObject *
 call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *const *args,
                 Py_ssize_t nargs, PyObject *kwnames)
@@ -47,7 +48,9 @@ call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *cons
         return PyErr_NoMemory();
     }
     PyObject *func, *bound_self, *result;
-    int target = PyFunction_Check(descr) ? 1 : lu_kernel_target(descr, &self, 1, &func, &bound_self);
+    int target = PyFunction_Check(descr) ? 1
+        : (Py_TYPE(descr)->tp_flags & Py_TPFLAGS_METHOD_DESCRIPTOR) ? lu_kernel_target(descr, &self, 1, &func, &bound_self)
+        : 0;
     if (target < 0) {
         PyErr_Clear();  /* self fails the descriptor's check: __get__ decides */
     }

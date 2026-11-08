@@ -1673,7 +1673,8 @@ call_tail: {
             PyObject *descr = _PyType_LookupRef(Py_TYPE(callable), LU_ID(__call__));
             PyObject *unused;
             if (descr != NULL && (PyFunction_Check(descr)
-                                  || (lu_kernel_target(descr, &callable, 1, &target, &unused) > 0
+                                  || ((Py_TYPE(descr)->tp_flags & Py_TPFLAGS_METHOD_DESCRIPTOR)
+                                      && lu_kernel_target(descr, &callable, 1, &target, &unused) > 0
                                       && unused == NULL))) {
                 target = PyFunction_Check(descr) ? descr : target;
                 self = callable;
