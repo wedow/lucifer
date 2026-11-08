@@ -23,6 +23,13 @@ require that a count of the tier's does not grow with the iterations:
          runs: entries into compiled code, direct and compiled calls.
   quiet  tests/kernel/jit_quiet_misses.py, whose hot lookups miss and whose
          hot generators end where CPython makes no exception: error exits.
+  raised tests/kernel/jit_raised.py, whose hot code catches exceptions
+         kernel builtins raise without a handler of their own (send() on a
+         finished generator or coroutine, a dict miss, list.pop(), next(),
+         an async generator's asend passing each value on through a
+         cleanup handler): side exits and error exits the interpreter
+         unwinds. The exception leaves compiled kernel code as its call's
+         result, and kernel code raises one again without leaving.
   caught tests/kernel/jit_caught.py, whose hot code raises exceptions that
          handlers in the same compiled code take: error exits, and exits
          at a return for the frame object the traceback made.
@@ -154,6 +161,7 @@ GROWTH = {
     'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'large': ('jit_large_callees.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'quiet': ('jit_quiet_misses.py', r'jit: entries .* error (\d+)', 0),
+    'raised': ('jit_raised.py', r'jit: entries .* side (\d+) error (\d+) frame', 0),
     'caught': ('jit_caught.py', r'jit: entries .* error (\d+) frame (\d+)', 0),
     'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
     'ccalls': ('jit_c_calls.py', r'direct calls (\d+)', 0),

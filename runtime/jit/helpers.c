@@ -782,6 +782,9 @@ polled(struct lu_task *t, PyObject *r)
 PyObject *
 lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r)
 {
+    if (r == LU_JIT_RAISED) {
+        return NULL;            /* the callee is gone; its exception is the call's */
+    }
     struct lu_task *t = (struct lu_task *)ts;
     /* The callee's frame returns into a C-entry marker, as under lu_eval. */
     struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
@@ -1249,6 +1252,22 @@ h_raise(PyObject *exc, PyObject *cause)
     return NULL;
 }
 
+/* A bare raise (exc NULL) or RERAISE in kernel code, which makes no
+   traceback entry: the exception raised again as it is. Always NULL. */
+static PyObject *
+h_reraise(PyObject *exc)
+{
+    if (exc == NULL) {
+        exc = lu_topmost_exc_info(PyThreadState_Get())->exc_value;
+        if (exc == NULL || exc == Py_None) {
+            lu_err_format(PyExc_RuntimeError, "No active exception to reraise");
+            return NULL;
+        }
+    }
+    PyErr_SetRaisedException(Py_NewRef(exc));
+    return NULL;
+}
+
 const struct lu_helper lu_helpers[H_COUNT] = {
     [H_box_int] = { (void *)lu_jit_box_int, "box_int", REP_OBJ, 0, 1 },
     [H_box_float] = { (void *)lu_jit_box_float, "box_float", REP_OBJ, 0, 1 },
@@ -1334,4 +1353,5 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, IF_SEEN, 1 },
     [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, IF_RAISE, 2 },
     [H_raise] = { (void *)h_raise, "raise", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_reraise] = { (void *)h_reraise, "reraise", REP_OBJ, IF_RAISE, 1 },
 };

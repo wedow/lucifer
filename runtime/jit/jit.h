@@ -28,6 +28,8 @@ enum lu_jit_result {
     LU_JIT_ERROR,       /* ts->current_frame raised: unwind from its instr */
     LU_JIT_YIELD,       /* the frame's generator yielded *result (a new reference): the frame is
                            saved at its resume point, still current; the caller suspends it */
+    LU_JIT_RAISED,      /* a direct call's frame raised and is popped: the call's result is
+                           the exception */
 };
 
 /* Back-edges (at one site) or calls before a code is compiled

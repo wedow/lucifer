@@ -96,7 +96,7 @@ struct lu_jit_code {
 
 static struct {
     unsigned long compiles, failures, entries, returns, units_dead, direct, compiled, invalidated, waited, retired;
-    unsigned long resumes, resumes_compiled;
+    unsigned long resumes, resumes_compiled, raised;
     unsigned long exits[EXIT_REASONS];
     unsigned long inlined;
     unsigned long bailouts[256];        /* side exits planted, per base opcode */
@@ -720,10 +720,14 @@ escalate(struct lu_jit_code *jc)
 }
 
 /* A unit that keeps leaving dies; its entry waits, ever longer if the
-   next one leaves too. */
+   next one leaves too. Activations still running a unit that died (a
+   recursion's callers) leave as well: the unit is retired once. */
 static void
 retire(struct lu_jit_code *jc, struct lu_unit *u)
 {
+    if (__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
+        return;
+    }
     if (_PyRuntime.jit.debug || _PyRuntime.jit.stats) {
         fprintf(stderr, "jit: retire %s@%d after %lu entries, %lu leaves, level %d\n",
                 PyUnicode_AsUTF8(u->code->co_qualname), u->entry_pc, u->entries, u->leaves, jc->level);
@@ -1226,6 +1230,18 @@ handling_frame(struct lu_deopt *d)
    frame's handler keeps taking (compiled code takes only the root's and
    kernel frames', which make no traceback entry) is treated as a side
    exit there: the function is called instead, and its own unit takes it. */
+/* An error exit that leaves as its direct call's result (deopt.c). */
+void
+lu_jit_note_raised(struct lu_deopt *d)
+{
+    count(&stats.raised, 1);
+    if (_PyRuntime.jit.debug) {
+        struct lu_deopt_frame *in = &d->frames[d->nframes - 1];
+        fprintf(stderr, "jit: raised %s@%d op %d depth %d\n", PyUnicode_AsUTF8(in->code->co_qualname), in->pc,
+                d->opcode, d->nframes);
+    }
+}
+
 void
 lu_jit_note_exit(struct lu_deopt *d)
 {
@@ -1569,7 +1585,7 @@ lu_jit_report(void)
     for (int i = 0; i < EXIT_REASONS; i++) {
         fprintf(stderr, " %s %lu", reasons[i], stats.exits[i]);
     }
-    fprintf(stderr, "\n");
+    fprintf(stderr, ", raised %lu\n", stats.raised);
     fprintf(stderr, "jit: entries waited %lu, units retired %lu\n", stats.waited, stats.retired);
     fprintf(stderr, "jit: side exits compiled (bailouts) by opcode:");
     for (int i = 0; i < 256; i++) {

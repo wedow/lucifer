@@ -958,7 +958,7 @@ supported(int op)
     case DELETE_SUBSCR: case LOAD_FAST_AND_CLEAR: case LIST_APPEND: case SET_ADD: case MAP_ADD:
     case BUILD_SET: case BUILD_MAP: case CALL_INTRINSIC_1: case BINARY_SLICE: case STORE_SLICE:
     case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
-    case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case DELETE_FAST:
+    case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case RERAISE: case DELETE_FAST:
     case LOAD_SUPER_ATTR: case STORE_GLOBAL: case BUILD_SLICE: case CONVERT_VALUE: case FORMAT_SIMPLE:
     case FORMAT_WITH_SPEC: case BUILD_STRING:
     case YIELD_VALUE: case SEND: case END_SEND: case GET_AWAITABLE:
@@ -4989,18 +4989,30 @@ translate(struct ctx *c)
         push(c, v, 0);
         return 0;
     }
-    case RAISE_VARARGS: {
-        /* raise exc [from cause]; a bare raise re-raises without a traceback
-           entry here. An inlined frame raises only to a handler of the unit:
-           else the side exit costs the same, and its boxes stay virtual. */
+    case RAISE_VARARGS:
+    case RERAISE: {
+        /* raise exc [from cause]. A bare raise and RERAISE raise again
+           without a traceback entry here, as kernel code makes none: only
+           there (the lasti RERAISE restores is seen only by a traceback or
+           a frame object). An inlined frame raises only to a handler of the
+           unit: else the side exit costs the same, and its boxes stay
+           virtual. */
         struct ctx *k;
         int handler, level, lasti, at;
-        if (oparg == 0 || (c->parent != NULL && !catcher(c, before(c), &k, &handler, &level, &lasti, &at))) {
+        int again = c->base == RERAISE || oparg == 0;
+        if ((again && !hidden(c->code))
+            || (c->parent != NULL && !catcher(c, before(c), &k, &handler, &level, &lasti, &at))) {
             unsupported(c);
             return -1;
         }
-        lu_v args[2] = { peek(c, oparg), oparg == 2 ? peek(c, 1) : konst(c, LU_MISSING) };
-        helper_raising(c, H_raise, 2, args, oparg);
+        if (again) {
+            lu_v exc = c->base == RERAISE ? peek(c, 1) : const_i(c, 0);
+            helper_raising(c, H_reraise, 1, &exc, c->base == RERAISE);
+        }
+        else {
+            lu_v args[2] = { peek(c, oparg), oparg == 2 ? peek(c, 1) : konst(c, LU_MISSING) };
+            helper_raising(c, H_raise, 2, args, oparg);
+        }
         side_exit(c, EXIT_SIDE);        /* not reached: the helper always raises */
         return 0;
     }
