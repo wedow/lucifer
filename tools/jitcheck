@@ -101,6 +101,22 @@ require that a count of the tier's does not grow with the iterations:
          called it through a class attribute with other operand types:
          entries into compiled code, direct and compiled calls, and calls
          of callees it could not name. Each site inlines the callee.
+  rebind tests/kernel/jit_rebind.py, whose hot functions read a global
+         and rebind it on every call (luc-ffdo): guard and side exits, and
+         entries left to the interpreter while a dead unit's entry waits.
+         None of its functions may be disabled or retired.
+  phases tests/kernel/jit_phases.py, whose hot function meets floats at
+         one more site per phase, in more phases than a fixed recompile
+         budget allows (luc-idah): guard and side exits, and entries left
+         to the interpreter while a dead unit's entry waits. None of its
+         functions may be disabled or retired.
+  retry  tests/kernel/jit_retry.py, whose hot function leaves compiled code
+         on every call for a while and then stops (luc-j4mj): calls
+         compiled code makes of it, and entries left to the interpreter,
+         while its entry waits. It is compiled and entered again.
+  shadowed tests/kernel/jit_shadowed.py, whose polymorphic method site
+         meets an instance that shadows the method in its own dict:
+         compiles and guard exits. The site stops leaving and recompiling.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -158,6 +174,12 @@ GROWTH = {
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
     'gens': ('jit_gen_resumes.py', r'jit: generator resumes interpreted (\d+)', 0),
     'callees': ('jit_callee_calls.py', r'call_unknown (\d+) call_poly (\d+)', 0),
+    'rebind': ('jit_rebind.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
+               r'|jit: entries waited (\d+)', 0),
+    'phases': ('jit_phases.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
+               r'|jit: entries waited (\d+)', 0),
+    'retry': ('jit_retry.py', r'jit: whynot .* waiting (\d+)|jit: entries waited (\d+)', 0),
+    'shadowed': ('jit_shadowed.py', r'jit: compiles (\d+)|exits guard (\d+)', 0),
     'order': ('jit_call_order.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),
 }
@@ -209,7 +231,7 @@ def check_growth(args, lane):
             problems.append(f'{tag}{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
         own = qualnames(program)
         given_up = own & {name for pair in small[3] for name in pair if name}
-        if lane in ('calls', 'super') and given_up:
+        if lane in ('calls', 'super', 'rebind', 'phases') and given_up:
             problems.append(f"{tag}disabled or retired: {' '.join(sorted(given_up))}")
         seen.append(f'{small[2]}, {large[2]}')
     print(f"{'FAIL' if problems else 'PASS'} {lane}" + (': ' + '; '.join(problems) if problems else

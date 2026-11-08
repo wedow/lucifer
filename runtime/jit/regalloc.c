@@ -52,7 +52,6 @@ used(struct lu_func *f, lu_v v)
 
 #define BIT_SET(set, v) ((set)[(v) >> 6] |= (word)1 << ((v) & 63))
 #define BIT_CLR(set, v) ((set)[(v) >> 6] &= ~((word)1 << ((v) & 63)))
-#define BIT_GET(set, v) (((set)[(v) >> 6] >> ((v) & 63)) & 1)
 
 /* Calls fn(f, v, arg) for every value instruction `in` reads, phi inputs
    excepted: a virtual object reads its fields there (at). */
@@ -106,63 +105,93 @@ mark_live(struct lu_func *f, lu_v v, void *set)
     BIT_SET((word *)set, v);
 }
 
+/* The backward dataflow, with each block's transfer made once: what its
+   instructions read before they define it (gen), what they define
+   (kill), and what its successors' phis read from it. A block's live-in
+   is gen | (live-out & ~kill), live-out its successors' live-ins and the
+   phi inputs. */
 static void
 liveness(struct lu_func *f, struct live *L)
 {
     int nb = f->nblocks;
-    L->nwords = (f->nins + 63) / 64;
-    L->in = calloc((size_t)nb * (size_t)L->nwords, sizeof(word));
-    L->out = calloc((size_t)nb * (size_t)L->nwords, sizeof(word));
-    word *tmp = malloc(sizeof(word) * (size_t)L->nwords);
-    for (int changed = 1; changed;) {
-        changed = 0;
-        for (int k = f->norder - 1; k >= 0; k--) {
-            int b = f->order[k];
-            struct lu_block *bl = &f->blocks[b];
-            word *out = L->out + (size_t)b * L->nwords, *in = L->in + (size_t)b * L->nwords;
-            memset(tmp, 0, sizeof(word) * (size_t)L->nwords);
-            for (int s = 0; s < bl->nsucc; s++) {
-                int sb = bl->succ[s];
-                word *sin = L->in + (size_t)sb * L->nwords;
-                for (int w = 0; w < L->nwords; w++) {
-                    tmp[w] |= sin[w];
+    size_t nw = (size_t)(f->nins + 63) / 64;
+    L->nwords = (int)nw;
+    L->in = calloc((size_t)nb * nw, sizeof(word));
+    L->out = calloc((size_t)nb * nw, sizeof(word));
+    word *gen = calloc((size_t)nb * nw, sizeof(word)), *kill = calloc((size_t)nb * nw, sizeof(word));
+    word *phis = calloc((size_t)nb * nw, sizeof(word));
+    for (int k = 0; k < f->norder; k++) {
+        int b = f->order[k];
+        struct lu_block *bl = &f->blocks[b];
+        word *g = gen + (size_t)b * nw, *d = kill + (size_t)b * nw, *ph = phis + (size_t)b * nw;
+        for (int s = 0; s < bl->nsucc; s++) {
+            struct lu_block *sbl = &f->blocks[bl->succ[s]];
+            int p = 0;
+            while (p < sbl->npreds && sbl->preds[p] != b) {
+                p++;
+            }
+            for (int i = 0; i < sbl->nins; i++) {
+                struct lu_ins *phi = &f->ins[sbl->ins[i]];
+                if (phi->op != OP_PHI) {
+                    break;
                 }
-                /* This block's phi inputs into the successor. */
-                struct lu_block *sbl = &f->blocks[sb];
-                int p = 0;
-                while (p < sbl->npreds && sbl->preds[p] != b) {
-                    p++;
-                }
-                for (int i = 0; i < sbl->nins; i++) {
-                    struct lu_ins *phi = &f->ins[sbl->ins[i]];
-                    if (phi->op != OP_PHI) {
-                        break;
-                    }
-                    lu_v u = p < phi->nargs ? used(f, phi->args[p]) : LU_NOV;
-                    if (u != LU_NOV) {
-                        BIT_SET(tmp, u);
-                    }
+                lu_v u = p < phi->nargs ? used(f, phi->args[p]) : LU_NOV;
+                if (u != LU_NOV) {
+                    BIT_SET(ph, u);
                 }
             }
-            if (memcmp(tmp, out, sizeof(word) * (size_t)L->nwords) != 0) {
-                memcpy(out, tmp, sizeof(word) * (size_t)L->nwords);
-                changed = 1;
-            }
-            for (int i = bl->nins - 1; i >= 0; i--) {
-                lu_v v = bl->ins[i];
-                struct lu_ins *ins = &f->ins[v];
-                BIT_CLR(tmp, v);
-                if (ins->op != OP_PHI) {
-                    each_use(f, ins, mark_live, tmp);
-                }
-            }
-            if (memcmp(tmp, in, sizeof(word) * (size_t)L->nwords) != 0) {
-                memcpy(in, tmp, sizeof(word) * (size_t)L->nwords);
-                changed = 1;
+        }
+        for (int i = bl->nins - 1; i >= 0; i--) {
+            lu_v v = bl->ins[i];
+            struct lu_ins *ins = &f->ins[v];
+            BIT_CLR(g, v);
+            BIT_SET(d, v);
+            if (ins->op != OP_PHI) {
+                each_use(f, ins, mark_live, g);
             }
         }
     }
-    free(tmp);
+    /* A worklist, first in reverse order: a block is visited again only
+       when the live-in of a successor grew. */
+    int *queue = malloc(sizeof(int) * (size_t)(nb + 1));
+    char *queued = calloc((size_t)nb, 1);
+    int head = 0, count = 0;
+    for (int k = f->norder - 1; k >= 0; k--) {
+        queue[count++] = f->order[k];
+        queued[f->order[k]] = 1;
+    }
+    while (count > 0) {
+        int b = queue[head];
+        head = (head + 1) % (nb + 1);
+        count--;
+        queued[b] = 0;
+        struct lu_block *bl = &f->blocks[b];
+        word *out = L->out + (size_t)b * nw, *in = L->in + (size_t)b * nw;
+        word *g = gen + (size_t)b * nw, *d = kill + (size_t)b * nw, *ph = phis + (size_t)b * nw;
+        int grew = 0;
+        for (size_t w = 0; w < nw; w++) {
+            word o = ph[w];
+            for (int s = 0; s < bl->nsucc; s++) {
+                o |= L->in[(size_t)bl->succ[s] * nw + w];
+            }
+            word i = g[w] | (o & ~d[w]);
+            grew |= i != in[w];
+            out[w] = o;
+            in[w] = i;
+        }
+        for (int p = 0; grew && p < bl->npreds; p++) {
+            int pb = bl->preds[p];
+            if (!queued[pb]) {
+                queued[pb] = 1;
+                queue[(head + count++) % (nb + 1)] = pb;
+            }
+        }
+    }
+    free(queue);
+    free(queued);
+    free(gen);
+    free(kill);
+    free(phis);
 }
 
 struct interval {
@@ -234,12 +263,12 @@ lu_regalloc(struct lu_func *f)
         int b = f->order[k];
         struct lu_block *bl = &f->blocks[b];
         word *in = L.in + (size_t)b * L.nwords, *out = L.out + (size_t)b * L.nwords;
-        for (int v = 0; v < f->nins; v++) {
-            if (BIT_GET(in, v)) {
-                extend(f, v, bl->start);
+        for (int w = 0; w < L.nwords; w++) {
+            for (word m = in[w]; m != 0; m &= m - 1) {
+                extend(f, (lu_v)(w * 64 + __builtin_ctzll(m)), bl->start);
             }
-            if (BIT_GET(out, v)) {
-                extend(f, v, bl->end);
+            for (word m = out[w]; m != 0; m &= m - 1) {
+                extend(f, (lu_v)(w * 64 + __builtin_ctzll(m)), bl->end);
             }
         }
         for (int i = 0; i < bl->nins; i++) {
@@ -299,13 +328,18 @@ lu_regalloc(struct lu_func *f)
         it->start = istart[v];
         it->end = iend[v];
         it->fpr = f->ins[v].rep == REP_F64;
-        it->crosses = 0;
-        for (int c = 0; c < ncalls; c++) {
-            if (calls[c] > it->start && calls[c] < it->end) {
-                it->crosses = 1;
-                break;
+        /* The first call after its start (calls are in position order). */
+        int lo = 0, hi = ncalls;
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (calls[mid] > it->start) {
+                hi = mid;
+            }
+            else {
+                lo = mid + 1;
             }
         }
+        it->crosses = lo < ncalls && calls[lo] < it->end;
     }
     qsort(iv, (size_t)n, sizeof(struct interval), by_start);
     int nspill = 0;

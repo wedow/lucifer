@@ -267,6 +267,12 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(load_attr) \
     X(load_method) \
     X(store_attr) \
+    X(load_global) \
+    X(store_global) \
+    X(build_slice) \
+    X(convert_value) \
+    X(format) \
+    X(build_string) \
     X(call) \
     X(call_special) \
     X(super_attr) \
@@ -388,11 +394,12 @@ unsigned long *lu_jit_alloc_site(PyCodeObject *code, int pc, int kind);
    a C helper): a keyword call of what is not a Python function, or a
    star call; a callable that is a type, a C function or something else;
    a generator's code; a prologue that is not cells and free variables;
-   more arguments than parameters; a code that never got hot, is
-   disabled, retired, or has no live unit at its call entry; or a live
-   entry, which the helper enters itself. */
+   more arguments than parameters; a code that never got hot, that
+   LUCIFER_JIT_ONLY leaves out, whose call entry waits in the interpreter
+   (its unit died), or has no live unit there; or a live entry, which the
+   helper enters itself. */
 #define LU_WHY_NOT(X) X(kw) X(star) X(type) X(builtin) X(object) X(generator) \
-    X(prologue) X(toomany) X(cold) X(disabled) X(retired) X(nounit) X(entry)
+    X(prologue) X(toomany) X(cold) X(excluded) X(waiting) X(nounit) X(entry)
 enum lu_why_not {
 #define LU_WHY_NOT_ENUM(name) WHY_NOT_##name,
     LU_WHY_NOT(LU_WHY_NOT_ENUM)

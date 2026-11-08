@@ -11,15 +11,28 @@
    poll, and the running thread's own at once (DESIGN 6.2 step 8,
    runtime/jit/deps.c). A unit also goes dead when one guard keeps failing,
    which marks its instruction not to be speculated on again (the donor's
-   exit-driven recompile).
+   exit-driven recompile): each such death moves one site toward generic,
+   once.
 
    An exit no recompile can remove (an instruction the tier does not
    compile, an exception the unit does not handle) costs an exit and, at
    the next call or back-edge, an entry. A unit without loops does a
    bounded amount of work per entry; when such a unit leaves that way on
-   most of its entries, it costs more than it saves, and its entry stays in
-   the interpreter. An exception that leaves the root frame is no such
-   exit: the call ends there.
+   most of its entries, it costs more than it saves, and it dies (is
+   retired). An exception that leaves the root frame is no such exit: the
+   call ends there.
+
+   Nothing is given up for good. Whenever a unit dies, or a compile fails,
+   its entry waits in the interpreter before it compiles again: WARMUP
+   entries plus one per code unit (a compile costs about the size of what
+   it compiles). A death that moves the code toward generic (a site
+   marked, a cache grown, a fact taken back) can happen only so often per
+   site; a death that does not (a unit retired for leaving, a failed
+   compile) doubles the code's waits from then on (its level), and a unit
+   that served longer than its wait decays the level back. A unit that
+   keeps leaving is compiled ever more rarely, so its exits and compiles
+   cost a shrinking share of the code's interpreted work; a phase change
+   gets a fresh compile; a code that settled recompiles soon.
 
    Code the interpreter has not run (on the first call under
    -X lucifer_jit=always, or a path that turned hot later) has no feedback
@@ -44,15 +57,15 @@
 /* A guard that fails this often makes its instruction generic. */
 #define GUARD_FAILS 50
 /* Exits a unit without loops takes, on at least half its entries, before
-   its entry stays in the interpreter. */
+   it is retired. */
 #define LEAVES 50
-/* Interpreted entries before a compile put off for feedback. */
+/* Interpreted entries before a compile put off for feedback, and the wait
+   after a death at level 0. */
 #define WARMUP 50
-/* An entry's wait that never runs out. */
-#define FOREVER UINT16_MAX
-/* Recompiles of one code object before the tier leaves it alone. */
-#define MAX_COMPILES 12
-#define MAX_ENTRIES 16
+/* Doublings of the wait an entry's 32 bits hold: past it, the wait stays. */
+#define MAX_LEVEL 25
+/* seen bits. */
+#define WARMED 1                /* the entry's compile was put off for feedback once */
 /* Entries a unit counts: one past this many is not retired, and the count
    is only read, so calls from many threads share its line. */
 #define ENTRIES_SEEN (1u << 16)
@@ -60,18 +73,15 @@
 struct lu_jit_code {
     struct lu_jit_direct direct;        /* first: compiled callers read it (target.h) */
     int compiling;              /* a thread is compiling: others interpret */
-    int disabled;
-    int compiles;
-    int regrown;                /* recompiles a polymorphic cache asked for: bounded, so not held against MAX_COMPILES */
+    int disabled;               /* LUCIFER_JIT_ONLY does not list it */
+    int level;                  /* the wait's doublings: retirements and failed compiles, less decay */
     struct lu_unit *units;
     struct lu_unit *retired;    /* units off the list, freed with the code */
-    int nfailed;
-    int failed[MAX_ENTRIES];    /* entry pcs that did not compile */
     int ncode;
     uint8_t *nospec;            /* per code unit: NOSPEC, do not speculate; NOHOIST, keep its guards in place */
     uint16_t *fails;            /* per code unit: guard failures */
-    uint16_t *wait;             /* per code unit: entries to leave to the interpreter, or FOREVER */
-    uint8_t *warmed;            /* per code unit: an entry whose compile was put off for feedback once */
+    uint32_t *wait;             /* per code unit: entries to leave to the interpreter */
+    uint8_t *seen;              /* per code unit: WARMED */
     int noinline;               /* a side exit in an inlined copy keeps leaving: call it instead */
     int call_pc;                /* where a call enters (call_entry), or -1 */
     struct lu_pic **pics;       /* per code unit: an attribute site's polymorphic cache */
@@ -85,7 +95,7 @@ struct lu_jit_code {
 };
 
 static struct {
-    unsigned long compiles, failures, entries, returns, units_dead, direct, compiled, invalidated;
+    unsigned long compiles, failures, entries, returns, units_dead, direct, compiled, invalidated, waited, retired;
     unsigned long resumes, resumes_compiled;
     unsigned long exits[EXIT_REASONS];
     unsigned long inlined;
@@ -93,6 +103,7 @@ static struct {
     unsigned long taken[256];           /* exits taken, per base opcode at the exit */
     unsigned long code_bytes;
     double compile_seconds;
+    double phase_seconds[5];            /* build, optimize, regalloc, emit; builds put off for feedback */
     unsigned long failure_reasons[8];
     const char *failure_names[8];
     unsigned long c_paths[C_PATHS];
@@ -340,8 +351,8 @@ lu_jit_why_not(PyObject *callable, Py_ssize_t nargs)
             : jc == NULL ? WHY_NOT_cold
             : pc <= 0 || jc->direct.nargs < 0 ? WHY_NOT_prologue
             : nargs > jc->direct.nargs ? WHY_NOT_toomany
-            : __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) ? WHY_NOT_disabled
-            : __atomic_load_n(&jc->wait[pc], __ATOMIC_RELAXED) == FOREVER ? WHY_NOT_retired
+            : __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) ? WHY_NOT_excluded
+            : __atomic_load_n(&jc->wait[pc], __ATOMIC_RELAXED) != 0 ? WHY_NOT_waiting
             : __atomic_load_n(&jc->direct.entry, __ATOMIC_RELAXED) == NULL ? WHY_NOT_nounit
             : WHY_NOT_entry;
     }
@@ -390,8 +401,8 @@ state_for(PyCodeObject *code)
     jc->ncode = (int)Py_SIZE(code);
     jc->nospec = calloc((size_t)jc->ncode + 1, 1);
     jc->fails = calloc((size_t)jc->ncode + 1, sizeof(uint16_t));
-    jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint16_t));
-    jc->warmed = calloc((size_t)jc->ncode + 1, 1);
+    jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint32_t));
+    jc->seen = calloc((size_t)jc->ncode + 1, 1);
     jc->call_pc = lu_jit_call_entry(code);
     jc->resume_key = -1;
     if (code->co_flags & LU_CO_GENERATORS) {
@@ -421,7 +432,7 @@ state_for(PyCodeObject *code)
     free(jc->nospec);
     free(jc->fails);
     free(jc->wait);
-    free(jc->warmed);
+    free(jc->seen);
     free(jc->resume);
     free(jc);
     return (struct lu_jit_code *)seen;
@@ -556,20 +567,24 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
                 f.resume ? " (resume)" : "");
     }
     int ok = lu_ssa_build(&f, frame) == 0;
-    if (ok && f.cold > 0 && 2 * f.cold >= f.sites && !jc->warmed[pc]) {
+    double t1 = now();
+    if (ok && f.cold > 0 && 2 * f.cold >= f.sites && !(jc->seen[pc] & WARMED)) {
+        stats.phase_seconds[4] += t1 - t0;
         /* Most of it never ran: the interpreter runs the entry a few times
            to gather feedback, and the compile after that stands. */
-        jc->warmed[pc] = 1;
+        jc->seen[pc] |= WARMED;
         __atomic_store_n(&jc->wait[pc], WARMUP, __ATOMIC_RELAXED);
         lu_ir_free(&f);
         free_unit(u);
         return NULL;
     }
     ok = ok && lu_ssa_optimize(&f) == 0;
+    double t2 = now(), t3 = t2;
     if (_PyRuntime.jit.stats) {
         u->counts = calloc(CNT_COUNT, sizeof(unsigned long));
     }
     if (ok && lu_regalloc(&f) == 0) {
+        t3 = now();
         if (dump) {
             lu_ir_dump(&f, stderr);
         }
@@ -578,7 +593,11 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     else {
         ok = 0;
     }
-    double dt = now() - t0;
+    double t4 = now(), dt = t4 - t0;
+    stats.phase_seconds[0] += t1 - t0;
+    stats.phase_seconds[1] += t2 - t1;
+    stats.phase_seconds[2] += t3 - t2;
+    stats.phase_seconds[3] += t4 - t3;
     count(&stats.compiles, 1);
     stats.compile_seconds += dt;
     for (int i = 0; i < 256; i++) {
@@ -630,17 +649,51 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     return u;
 }
 
-/* The unit is not entered again: the next entry compiles anew. */
+/* LUCIFER_JIT_DEBUG: why a code's units die. */
+static void
+say_recompile(PyCodeObject *root, const char *why, PyCodeObject *at, int pc)
+{
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: recompile %s: %s at %s@%d\n", PyUnicode_AsUTF8(root->co_qualname), why,
+                PyUnicode_AsUTF8(at->co_qualname), pc);
+    }
+}
+
+/* The entry waits (WARMUP + the code's size) << level interpreted
+   entries before it compiles again: a compile costs about the size of
+   what it compiles. Races between threads only shift when. */
+static void
+wait_at(struct lu_jit_code *jc, int pc)
+{
+    int level = __atomic_load_n(&jc->level, __ATOMIC_RELAXED);
+    __atomic_store_n(&jc->wait[pc], (uint32_t)(WARMUP + jc->ncode) << level, __ATOMIC_RELAXED);
+}
+
+/* The unit is not entered again, and its entry waits before the next
+   compile. A unit that served at least that wait's entries, leaving on
+   fewer than half, decays the code's level first: the wait never exceeds
+   what the last good unit served, and one that served past what its count
+   holds starts the code over. */
 static void
 kill(struct lu_jit_code *jc, struct lu_unit *u)
 {
-    if (!__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
-        count(&stats.units_dead, 1);
-    }
     void *entry = u->direct;
     if (entry != NULL) {
         __atomic_compare_exchange_n(&jc->direct.entry, &entry, NULL, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
     }
+    if (__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
+        return;
+    }
+    count(&stats.units_dead, 1);
+    unsigned long served = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
+    if (2 * __atomic_load_n(&u->leaves, __ATOMIC_RELAXED) < served) {
+        int level = served >= ENTRIES_SEEN ? 0 : __atomic_load_n(&jc->level, __ATOMIC_RELAXED);
+        while (level > 0 && served >= (unsigned long)(WARMUP + jc->ncode) << level) {
+            level--;
+        }
+        __atomic_store_n(&jc->level, level, __ATOMIC_RELAXED);
+    }
+    wait_at(jc, u->entry_pc);
 }
 
 /* A writer took back what the unit relies on (runtime/jit/deps.c), or a
@@ -655,16 +708,28 @@ lu_jit_unit_kill(struct lu_unit *u)
     kill(state_of(u->code), u);
 }
 
-/* The unit is not entered again, and its entry stays in the interpreter. */
+/* A death no recompile was asked to fix (a unit that keeps leaving, a
+   compile that failed): the code's waits double from now on. */
+static void
+escalate(struct lu_jit_code *jc)
+{
+    int level = __atomic_load_n(&jc->level, __ATOMIC_RELAXED);
+    if (level < MAX_LEVEL) {
+        __atomic_store_n(&jc->level, level + 1, __ATOMIC_RELAXED);
+    }
+}
+
+/* A unit that keeps leaving dies; its entry waits, ever longer if the
+   next one leaves too. */
 static void
 retire(struct lu_jit_code *jc, struct lu_unit *u)
 {
     if (_PyRuntime.jit.debug || _PyRuntime.jit.stats) {
-        fprintf(stderr, "jit: retire %s@%d after %lu entries, %lu leaves\n",
-                PyUnicode_AsUTF8(u->deopts != NULL && u->ndeopts > 0 ? u->deopts[0]->frames[0].code->co_qualname
-                                                                     : Py_None), u->entry_pc, u->entries, u->leaves);
+        fprintf(stderr, "jit: retire %s@%d after %lu entries, %lu leaves, level %d\n",
+                PyUnicode_AsUTF8(u->code->co_qualname), u->entry_pc, u->entries, u->leaves, jc->level);
     }
-    __atomic_store_n(&jc->wait[u->entry_pc], FOREVER, __ATOMIC_RELAXED);
+    count(&stats.retired, 1);
+    escalate(jc);
     kill(jc, u);
 }
 
@@ -677,17 +742,6 @@ find(struct lu_jit_code *jc, int pc)
         }
     }
     return NULL;
-}
-
-static int
-failed_at(struct lu_jit_code *jc, int pc)
-{
-    for (int i = 0; i < jc->nfailed; i++) {
-        if (jc->failed[i] == pc) {
-            return 1;
-        }
-    }
-    return 0;
 }
 
 /* LUCIFER_JIT_ONLY: a comma-separated list of qualnames. */
@@ -742,15 +796,13 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
         return NULL;
     }
     int idle = 0;
-    if (__atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) || jc->wait[pc] != 0 || failed_at(jc, pc)
+    if (__atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) || jc->wait[pc] != 0
         || !__atomic_compare_exchange_n(&jc->compiling, &idle, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
         return NULL;
     }
     sweep(jc);
     struct lu_unit *u = find(jc, pc);
-    int allowed = MAX_COMPILES + __atomic_load_n(&jc->regrown, __ATOMIC_RELAXED);
-    if (u == NULL && jc->compiles < allowed) {
-        jc->compiles++;
+    if (u == NULL) {
         uint64_t ticket = lu_jit_deps_begin();     /* before anything the build reads */
         u = compile(jc, frame, pc, ticket);
         lu_jit_deps_end();
@@ -761,18 +813,12 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
                 __atomic_store_n(&jc->direct.entry, u->direct, __ATOMIC_RELEASE);
             }
         }
-        else if (jc->wait[pc] != 0) {
-            jc->compiles--;     /* put off for warm-up: a code with many loops puts off one per entry */
+        else if (jc->wait[pc] == 0) {
+            /* It failed: tried again later, like a unit that died. (A compile
+               put off for feedback, or one a writer overtook, has its wait.) */
+            escalate(jc);
+            wait_at(jc, pc);
         }
-        else if (jc->nfailed < MAX_ENTRIES) {
-            jc->failed[jc->nfailed++] = pc;
-        }
-    }
-    if (jc->compiles >= allowed && u == NULL) {
-        if ((_PyRuntime.jit.debug || _PyRuntime.jit.stats) && !__atomic_load_n(&jc->disabled, __ATOMIC_RELAXED)) {
-            fprintf(stderr, "jit: disabled %s\n", PyUnicode_AsUTF8(code->co_qualname));
-        }
-        __atomic_store_n(&jc->disabled, 1, __ATOMIC_RELAXED);
     }
     __atomic_store_n(&jc->compiling, 0, __ATOMIC_RELEASE);
     return u;
@@ -807,10 +853,11 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         pc = jc->resume_key;    /* every resume point enters the one unit */
     }
     if (jc != NULL) {
-        uint16_t wait = __atomic_load_n(&jc->wait[pc], __ATOMIC_RELAXED);
+        uint32_t wait = __atomic_load_n(&jc->wait[pc], __ATOMIC_RELAXED);
         if (wait != 0 || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED)) {
-            if (wait != 0 && wait != FOREVER) {
+            if (wait != 0) {
                 __atomic_store_n(&jc->wait[pc], wait - 1, __ATOMIC_RELAXED);
+                count(&stats.waited, 1);
             }
             return LU_JIT_NONE;
         }
@@ -1031,8 +1078,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         || ts->tracing || code->_co_instrumentation_version != (poll & ~LU_POLL_EVENTS_MASK)) {
         return 0;
     }
-    /* A unit is live only while its entry is not left to the interpreter
-       (retire marks it dead). */
+    /* A unit is live only while its entry does not wait (kill marks it dead). */
     struct lu_unit *u = find(jc, jc->call_pc);
     if (u == NULL) {
         return 0;
@@ -1082,7 +1128,14 @@ lu_jit_resume(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     if (jc == NULL || jc->resume_key < 0 || frame->locals != NULL || (poll & LU_POLL_EVENTS_MASK)
         || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) || code->_co_monitoring != NULL
         || ts->tracing || code->_co_instrumentation_version != (poll & ~LU_POLL_EVENTS_MASK)
-        || ts->interp->eval_frame != NULL || jc->wait[jc->resume_key] != 0) {
+        || ts->interp->eval_frame != NULL) {
+        return 0;
+    }
+    uint32_t wait = __atomic_load_n(&jc->wait[jc->resume_key], __ATOMIC_RELAXED);
+    if (wait != 0) {
+        /* A dead resume unit's entry counts its wait down here too. */
+        __atomic_store_n(&jc->wait[jc->resume_key], wait - 1, __ATOMIC_RELAXED);
+        count(&stats.waited, 1);
         return 0;
     }
     /* What the interpreter runs before the unit's entry: a frame that
@@ -1167,7 +1220,7 @@ handling_frame(struct lu_deopt *d)
 
 /* An exit was taken: its counts; for a guard that keeps failing, no
    more speculation there and a recompile of the code it left; for a unit
-   without loops that keeps leaving, the interpreter at its entry. An
+   without loops that keeps leaving, retirement. An
    exception that leaves the root frame ends the call there: the
    interpreter only unwinds it, so it is not a leave. One that an inlined
    frame's handler keeps taking (compiled code takes only the root's and
@@ -1195,11 +1248,11 @@ lu_jit_note_exit(struct lu_deopt *d)
                     d->blame_pc);
         }
         lu_jit_nohoist_set(d->blame_code, d->blame_pc);
+        say_recompile(d->frames[0].code, "hoisted guard", d->blame_code, d->blame_pc);
         struct lu_jit_code *root = state_for(d->frames[0].code);
         for (struct lu_unit *r = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); r != NULL; r = r->next) {
             lu_jit_unit_kill(r);
         }
-        root->nfailed = 0;
         return;
     }
     int handled = d->reason == EXIT_ERROR ? handling_frame(d) : d->nframes - 1;
@@ -1228,20 +1281,33 @@ lu_jit_note_exit(struct lu_deopt *d)
        the flag was set leaves here as well, and is recompiled when it does. */
     uint16_t n = __atomic_add_fetch(&jc->fails[inner->pc], 1, __ATOMIC_RELAXED);
     if (n >= GUARD_FAILS) {
+        int again;
         if (d->reason != EXIT_GUARD) {
             /* The inlined copy keeps leaving here: it is called instead from
                now on (and if that call leaves its caller's copy, the caller next). */
-            __atomic_store_n(&jc->noinline, 1, __ATOMIC_RELAXED);
+            again = __atomic_exchange_n(&jc->noinline, 1, __ATOMIC_RELAXED);
         }
         else {
-            __atomic_fetch_or(&jc->nospec[inner->pc], NOSPEC, __ATOMIC_RELAXED);
+            again = __atomic_fetch_or(&jc->nospec[inner->pc], NOSPEC, __ATOMIC_RELAXED) & NOSPEC;
         }
-        /* Every unit of the root code is recompiled at its next entry. */
+        /* Every unit of the root code dies and recompiles after its wait.
+           A dead unit still running (a recursion's older activations) that
+           fails at a site already marked teaches nothing: the units compiled
+           since know the mark. A live one that does made no progress (a guard
+           the build keeps, or a root that inlined the copy before the mark),
+           so the root's waits double. */
+        if (again && __atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
+            return;
+        }
+        say_recompile(d->frames[0].code, d->reason != EXIT_GUARD ? "inlined copy leaves" : "guard fails", inner->code,
+                      inner->pc);
         struct lu_jit_code *root = state_for(d->frames[0].code);
+        if (again) {
+            escalate(root);
+        }
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
             kill(root, u);
         }
-        root->nfailed = 0;
     }
 }
 
@@ -1324,12 +1390,8 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
         }
         struct lu_jit_code *jc = state_of(pic->code);
         for (struct lu_unit *u = __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
-            if (!__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
-                __atomic_fetch_add(&jc->regrown, 1, __ATOMIC_RELAXED);
-            }
             kill(jc, u);
         }
-        jc->nfailed = 0;
     }
 }
 
@@ -1369,14 +1431,14 @@ lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, P
            up before it compiles. */
         uintptr_t v = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
         int mode = _PyRuntime.jit.mode == LU_JIT_ALWAYS;
-        unsigned calls = v & 1 ? (unsigned)(v >> 1) : 0;
+        unsigned calls = v & 1 ? (unsigned)(v >> 1) : 0, threshold = lu_jit_threshold(code);
         jc = state_for(code);
         for (int i = 0; i < jc->ncode && !mode; i++) {
-            __atomic_store_n(&jc->wait[i], (uint16_t)LU_JIT_BACKEDGE_THRESHOLD, __ATOMIC_RELAXED);
+            __atomic_store_n(&jc->wait[i], threshold, __ATOMIC_RELAXED);
         }
         if (jc->call_pc >= 0 && !mode) {
-            unsigned left = calls < LU_JIT_CALL_THRESHOLD ? LU_JIT_CALL_THRESHOLD - calls : 0;
-            __atomic_store_n(&jc->wait[jc->call_pc], (uint16_t)left, __ATOMIC_RELAXED);
+            unsigned left = calls < threshold ? threshold - calls : 0;
+            __atomic_store_n(&jc->wait[jc->call_pc], left, __ATOMIC_RELAXED);
         }
     }
     struct lu_callees *t = lu_jit_callees(code, pc);
@@ -1476,7 +1538,7 @@ lu_jit_code_free(PyCodeObject *code)
     free(jc->nospec);
     free(jc->fails);
     free(jc->wait);
-    free(jc->warmed);
+    free(jc->seen);
     free(jc->resume);
     free(jc);
     code->co_executors = NULL;
@@ -1493,6 +1555,9 @@ lu_jit_report(void)
     fprintf(stderr, "jit: compiles %lu, failed %lu, units recompiled %lu, inlined calls %lu, "
             "compile time %.1f ms, code %lu bytes\n", stats.compiles, stats.failures, stats.units_dead,
             stats.inlined, stats.compile_seconds * 1e3, stats.code_bytes);
+    fprintf(stderr, "jit: compile phases: build %.1f ms, optimize %.1f ms, regalloc %.1f ms, emit %.1f ms, "
+            "builds put off %.1f ms\n", stats.phase_seconds[0] * 1e3, stats.phase_seconds[1] * 1e3,
+            stats.phase_seconds[2] * 1e3, stats.phase_seconds[3] * 1e3, stats.phase_seconds[4] * 1e3);
     fprintf(stderr, "jit: units invalidated %lu\n", stats.invalidated);
     fprintf(stderr, "jit: generator resumes interpreted %lu, compiled %lu\n",
             stats.resumes > stats.resumes_compiled ? stats.resumes - stats.resumes_compiled : 0, stats.resumes_compiled);
@@ -1505,6 +1570,7 @@ lu_jit_report(void)
         fprintf(stderr, " %s %lu", reasons[i], stats.exits[i]);
     }
     fprintf(stderr, "\n");
+    fprintf(stderr, "jit: entries waited %lu, units retired %lu\n", stats.waited, stats.retired);
     fprintf(stderr, "jit: side exits compiled (bailouts) by opcode:");
     for (int i = 0; i < 256; i++) {
         if (stats.bailouts[i]) {

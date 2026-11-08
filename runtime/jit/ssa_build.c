@@ -959,7 +959,9 @@ supported(int op)
     case BUILD_SET: case BUILD_MAP: case CALL_INTRINSIC_1: case BINARY_SLICE: case STORE_SLICE:
     case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
     case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case DELETE_FAST:
-    case LOAD_SUPER_ATTR: case YIELD_VALUE: case SEND: case END_SEND: case GET_AWAITABLE:
+    case LOAD_SUPER_ATTR: case STORE_GLOBAL: case BUILD_SLICE: case CONVERT_VALUE: case FORMAT_SIMPLE:
+    case FORMAT_WITH_SPEC: case BUILD_STRING:
+    case YIELD_VALUE: case SEND: case END_SEND: case GET_AWAITABLE:
     case GET_YIELD_FROM_ITER: case GET_AITER: case GET_ANEXT:
         return 1;
     default:
@@ -2186,10 +2188,42 @@ global_const(struct ctx *c, PyObject *name)
     return dict_const(c, c->globals, c->builtins, name);
 }
 
+/* Whether the global `name` now names a function, class, module or C
+   function: a binding programs make once (a module still defining its
+   names fails the guards of one, and it stays a constant, which calls
+   inline), where a value rebound as data goes through the lookup. */
+static int
+binds_code(struct ctx *c, PyObject *name)
+{
+    PyObject *v = lu_ns_get(c->globals, name);
+    if (v == NULL && !PyErr_Occurred()) {
+        v = lu_ns_get(c->builtins, name);
+    }
+    PyErr_Clear();
+    int r = v != NULL && (PyFunction_Check(v) || PyType_Check(v) || PyModule_Check(v) || PyCFunction_Check(v));
+    Py_XDECREF(v);
+    return r;
+}
+
 static int
 load_global(struct ctx *c)
 {
     PyObject *name = name_at(c, c->oparg >> 1);
+    if (lu_jit_nospec(c->code, c->pc) && !c->kernel && PyDict_CheckExact(c->globals)
+        && PyDict_CheckExact(c->builtins) && !binds_code(c, name)) {
+        /* Its guards kept failing (a value rebound on every call): loaded
+           through the site's own cache each time, and a miss leaves for
+           the NameError. */
+        lu_v args[4] = { konst(c, c->globals), konst(c, c->builtins), konst(c, name),
+                         const_i(c, (int64_t)(intptr_t)(c->cache - 1)) };
+        lu_v w = helper_raising(c, H_load_global, 4, args, 0);
+        guard_after(c, OP_GUARD_NOT_NULL, w, 1);
+        push(c, w, 1);
+        if (c->oparg & 1) {
+            push(c, LU_NOV, 0);
+        }
+        return 0;
+    }
     PyObject *v = global_const(c, name);
     if (v == NULL) {
         unsupported(c);
@@ -2444,6 +2478,7 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
     int join = end < 0 ? lu_ir_block(f) : -1;
     lu_v r1[LU_PIC_WAYS + 1], r2[LU_PIC_WAYS + 1];
     int paths = 0;
+    int nospec = lu_jit_nospec(c->code, c->pc);
     for (int i = 0; i < n; i++) {
         struct lu_pic_entry e = pic->e[i];
         lu_v bit = emit(c, OP_CMP_I, REP_BIT, t, const_i(c, e.version), LU_NOV, Py_EQ);
@@ -2462,7 +2497,19 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
         else {
             if (e.op == LOAD_ATTR_METHOD_WITH_VALUES || e.op == LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES) {
                 lu_v args[2] = { owner, konst(c, name) };
-                guard(c, OP_GUARD_BIT, helper(c, H_dict_lacks, 2, args), 1);
+                lu_v lacks = helper(c, H_dict_lacks, 2, args);
+                if (nospec) {
+                    /* Its check kept failing (instance dicts shadow the
+                       name): those instances take the generic path. */
+                    int hit = lu_ir_block(f);
+                    lu_ir_edge(f, c->cur, hit);
+                    lu_ir_edge(f, c->cur, next);
+                    emit(c, OP_BRANCH, REP_NONE, lacks, LU_NOV, LU_NOV, 0);
+                    c->cur = hit;
+                }
+                else {
+                    guard(c, OP_GUARD_BIT, lacks, 1);
+                }
             }
             /* A copy keeps the method a constant, which its call inlines; a join owns its inputs. */
             a1 = konst(c, e.descr);
@@ -2489,7 +2536,7 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
             r1[paths] = a1;
             r2[paths++] = a2;
             emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
-            lu_ir_edge(f, arm, join);
+            lu_ir_edge(f, c->cur, join);
         }
         c->cur = next;
     }
@@ -4768,6 +4815,66 @@ translate(struct ctx *c)
         release(c, v, own);
         push(c, w, 1);
         set_made(c, w, &PyTuple_Type);
+        return 0;
+    }
+    case STORE_GLOBAL: {
+        if (!PyDict_CheckExact(c->globals)) {
+            unsupported(c);
+            return -1;
+        }
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        lu_v args[3] = { konst(c, c->globals), konst(c, name_at(c, oparg)), v };
+        helper_raising(c, H_store_global, 3, args, 1);
+        pop(c, NULL);
+        release(c, v, own);
+        return 0;
+    }
+    case BUILD_SLICE: {
+        int n = oparg == 3 ? 3 : 2;
+        lu_v args[3] = { peek(c, n), peek(c, n - 1), n == 3 ? peek(c, 1) : const_i(c, 0) };
+        w = helper_raising(c, H_build_slice, 3, args, n);
+        for (int i = 0; i < n; i++) {
+            v = pop(c, &own);
+            release(c, v, own);
+        }
+        push(c, w, 1);
+        set_made(c, w, &PySlice_Type);
+        return 0;
+    }
+    case CONVERT_VALUE: case FORMAT_SIMPLE: case FORMAT_WITH_SPEC: {
+        /* They run the kernel's str, repr, ascii or format: the root only. */
+        int n = c->base == FORMAT_WITH_SPEC ? 2 : 1;
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[2] = { peek(c, n), c->base == CONVERT_VALUE ? const_i(c, oparg)
+                         : n == 2 ? peek(c, 1) : konst(c, (PyObject *)&_PyRuntime.singletons.empty_str) };
+        w = helper_raising(c, c->base == CONVERT_VALUE ? H_convert_value : H_format, 2, args, n);
+        for (int i = 0; i < n; i++) {
+            v = pop(c, &own);
+            release(c, v, own);
+        }
+        push(c, w, 1);
+        return 0;
+    }
+    case BUILD_STRING: {
+        if (oparg > 30) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[32] = { 0 };
+        for (int i = 0; i < oparg; i++) {
+            args[i] = peek(c, oparg - i);
+        }
+        w = helper_raising(c, H_build_string, oparg, args, oparg);
+        for (int i = 0; i < oparg; i++) {
+            v = pop(c, &own);
+            release(c, v, own);
+        }
+        push(c, w, 1);
+        set_made(c, w, &PyUnicode_Type);
         return 0;
     }
     case BINARY_SLICE: {
