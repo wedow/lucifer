@@ -2490,6 +2490,16 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
         lu_v a1, a2 = LU_NOV;
         int own1 = 1, own2 = 0;
         if (e.op == LOAD_ATTR_INSTANCE_VALUE) {
+            /* An instance of the class that lacks the attribute (its class
+               attribute answers until it sets its own) takes the generic
+               path. */
+            lu_v word = emit(c, OP_LOAD, REP_I64, owner, LU_NOV, LU_NOV, e.index);
+            lu_v set = emit(c, OP_CMP_I, REP_BIT, word, const_i(c, 0), LU_NOV, Py_NE);
+            int hit = lu_ir_block(f);
+            lu_ir_edge(f, c->cur, hit);
+            lu_ir_edge(f, c->cur, next);
+            emit(c, OP_BRANCH, REP_NONE, set, LU_NOV, LU_NOV, 0);
+            c->cur = hit;
             a1 = emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, e.index);
             I(c, a1)->fs = before(c);
             release(c, owner, own);

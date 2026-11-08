@@ -121,6 +121,10 @@ require that a count of the tier's does not grow with the iterations:
          on every call for a while and then stops (luc-j4mj): calls
          compiled code makes of it, and entries left to the interpreter,
          while its entry waits. It is compiled and entered again.
+  marked tests/kernel/jit_marked.py, whose polymorphic attribute site went
+         generic and still meets, now and then, an instance whose class's
+         entry it cannot read in line: compiles and entries left to the
+         interpreter. The exit costs an exit, not a recompile.
   shadowed tests/kernel/jit_shadowed.py, whose polymorphic method site
          meets an instance that shadows the method in its own dict:
          compiles and guard exits. The site stops leaving and recompiling.
@@ -187,6 +191,7 @@ GROWTH = {
     'phases': ('jit_phases.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
                r'|jit: entries waited (\d+)', 0),
     'retry': ('jit_retry.py', r'jit: whynot .* waiting (\d+)|jit: entries waited (\d+)', 0),
+    'marked': ('jit_marked.py', r'jit: compiles (\d+)|jit: entries waited (\d+)', 0),
     'shadowed': ('jit_shadowed.py', r'jit: compiles (\d+)|exits guard (\d+)', 0),
     'order': ('jit_call_order.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),

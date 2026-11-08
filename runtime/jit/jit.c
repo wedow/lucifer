@@ -83,6 +83,7 @@ struct lu_jit_code {
     uint32_t *wait;             /* per code unit: entries to leave to the interpreter */
     uint8_t *seen;              /* per code unit: WARMED */
     int noinline;               /* a side exit in an inlined copy keeps leaving: call it instead */
+    unsigned long marked;       /* marks when a site of it (or noinline) was last marked */
     int call_pc;                /* where a call enters (call_entry), or -1 */
     struct lu_pic **pics;       /* per code unit: an attribute site's polymorphic cache */
     /* A generator's code: per code unit, 1 where a resumed frame goes on
@@ -109,6 +110,10 @@ static struct {
     unsigned long c_paths[C_PATHS];
     unsigned long why_not[WHY_NOTS];
 } stats;
+
+/* Sites marked generic (nospec, noinline) so far: a unit built after a
+   mark knows it. */
+static unsigned long marks;
 
 /* -X lucifer_jit_stats: every unit with counts, and the counts of units freed. */
 static struct {
@@ -549,6 +554,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     struct lu_func f = { 0 };
     struct lu_unit *u = calloc(1, sizeof(struct lu_unit));
     u->code = frame->code;
+    u->built = __atomic_load_n(&marks, __ATOMIC_ACQUIRE);
     f.code = frame->code;
     /* A generator's resume unit (keyed at its first resume point) is
        compiled where this frame stands, one of its entries. */
@@ -735,6 +741,18 @@ retire(struct lu_jit_code *jc, struct lu_unit *u)
     count(&stats.retired, 1);
     escalate(jc);
     kill(jc, u);
+}
+
+/* An exit no recompile can remove: a unit without loops that leaves on
+   most of its entries is retired. */
+static void
+leave(struct lu_deopt *d, struct lu_unit *u)
+{
+    unsigned long n = bump(&u->leaves);
+    unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
+    if (!u->loops && n >= LEAVES && 2 * n >= entries && entries < ENTRIES_SEEN) {
+        retire(state_for(d->frames[0].code), u);
+    }
 }
 
 static struct lu_unit *
@@ -1276,11 +1294,7 @@ lu_jit_note_exit(struct lu_deopt *d)
         return;
     }
     if (d->reason == EXIT_ERROR || (d->reason == EXIT_SIDE && d->nframes == 1)) {
-        unsigned long n = bump(&u->leaves);
-        unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
-        if (!u->loops && n >= LEAVES && 2 * n >= entries && entries < ENTRIES_SEEN) {
-            retire(state_for(d->frames[0].code), u);
-        }
+        leave(d, u);
         if (d->reason != EXIT_ERROR || handled == 0) {
             return;
         }
@@ -1309,18 +1323,24 @@ lu_jit_note_exit(struct lu_deopt *d)
         /* Every unit of the root code dies and recompiles after its wait.
            A dead unit still running (a recursion's older activations) that
            fails at a site already marked teaches nothing: the units compiled
-           since know the mark. A live one that does made no progress (a guard
-           the build keeps, or a root that inlined the copy before the mark),
-           so the root's waits double. */
-        if (again && __atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
+           since know the mark. Nor does a live one built after the mark: its
+           build kept that check (an entry of a polymorphic cache reads in
+           line what an instance may lack), so no recompile removes the exit,
+           which counts as a leave. One built before it (a root that inlined
+           the copy earlier) recompiles. */
+        if (!again) {
+            __atomic_store_n(&jc->marked, __atomic_add_fetch(&marks, 1, __ATOMIC_RELEASE), __ATOMIC_RELAXED);
+        }
+        else if (__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
+            return;
+        }
+        else if (u->built >= __atomic_load_n(&jc->marked, __ATOMIC_RELAXED)) {
+            leave(d, u);
             return;
         }
         say_recompile(d->frames[0].code, d->reason != EXIT_GUARD ? "inlined copy leaves" : "guard fails", inner->code,
                       inner->pc);
         struct lu_jit_code *root = state_for(d->frames[0].code);
-        if (again) {
-            escalate(root);
-        }
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
             kill(root, u);
         }
