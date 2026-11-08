@@ -159,6 +159,8 @@ class socket(_lucifer.socket_base()):
 
     def __del__(self):
         if self._fd >= 0:
+            import _warnings
+            _warnings.warn('unclosed %r' % (self,), ResourceWarning, 1, source=self)
             self.close()
 
     def close(self):
@@ -243,7 +245,7 @@ class socket(_lucifer.socket_base()):
 
     def connect_ex(self, address, /):
         try:
-            self.connect(address)
+            socket.connect(self, address)     # not a subclass's connect (ssl.SSLSocket's calls this)
         except OSError as e:
             if e.errno is None:
                 raise
@@ -277,7 +279,7 @@ class socket(_lucifer.socket_base()):
     def dup(self):
         return socket(self._family, self._type, self._proto, _posix.dup(self._check()))
 
-    recvfrom = sendto = _unsupported
+    recvfrom = recvfrom_into = sendto = _unsupported
 
 
 _POLLIN, _POLLOUT = 1, 4
