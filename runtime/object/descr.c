@@ -1271,6 +1271,8 @@ lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out)
     return 1;
 }
 
+const Py_ssize_t lu_classmethod_callable_offset = offsetof(classmethod, cm_callable);
+
 PyObject *
 lu_staticmethod_get(PyObject *descr)
 {

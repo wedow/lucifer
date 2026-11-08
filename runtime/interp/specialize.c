@@ -380,6 +380,45 @@ lu_specialize_class_value(PyTypeObject *cls, PyObject *name, uint32_t v[3])
     return descr;
 }
 
+PyObject *
+lu_specialize_class_method(PyTypeObject *cls, PyObject *name, uint32_t v[2])
+{
+    PyTypeObject *meta = Py_TYPE(cls);
+    if (!enabled() || !default_getattribute(meta, &PyType_Type)) {
+        return NULL;
+    }
+    PyObject *descr, *meta_descr;
+    analyze(meta, name, &meta_descr, &v[1]);
+    analyze(cls, name, &descr, &v[0]);
+    Py_XDECREF(meta_descr);
+    if (descr == NULL || meta_descr != NULL || v[0] == 0 || v[1] == 0
+        || !(Py_IS_TYPE(descr, &PyClassMethod_Type) || Py_IS_TYPE(descr, &PyStaticMethod_Type))) {
+        Py_XDECREF(descr);
+        return NULL;
+    }
+    return descr;
+}
+
+PyObject *
+lu_specialize_instance_method(PyTypeObject *tp, PyObject *name, uint32_t *version, int *managed)
+{
+    getattrofunc get = tp->tp_getattro;
+    if (!enabled() || (get != lu_slot_tp_getattro && get != PyObject_GenericGetAttr)
+        || !default_getattribute(tp, &PyBaseObject_Type)) {
+        return NULL;
+    }
+    PyObject *descr;
+    analyze(tp, name, &descr, version);
+    *managed = (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) != 0;
+    int shadowed = (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) && lu_inline_index(tp, name) >= 0;
+    if (descr == NULL || *version == 0 || shadowed || (!*managed && tp->tp_dictoffset != 0)
+        || !(Py_IS_TYPE(descr, &PyClassMethod_Type) || Py_IS_TYPE(descr, &PyStaticMethod_Type))) {
+        Py_XDECREF(descr);
+        return NULL;
+    }
+    return descr;
+}
+
 int
 lu_specialize_load_fresh(PyTypeObject *tp, PyObject *name, int method, uint32_t *version, uint16_t *index,
                          PyObject **descr)

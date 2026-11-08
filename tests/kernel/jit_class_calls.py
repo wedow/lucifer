@@ -6,12 +6,14 @@
 # initializer that raises, returns a value, leaves compiled code half done
 # (a guard fails after it stored an attribute) or looks at its callers, and
 # a class changed under a running loop (a new __init__, a custom __new__,
-# __abstractmethods__), and an initializer the tier calls instead of
-# inlining (it takes keyword-only parameters, or is a generator). Classes
+# __abstractmethods__), a class of ABCMeta called with and without
+# keywords, and an initializer the tier calls instead of inlining (it takes
+# keyword-only parameters, or is a generator). Classes
 # the lowering leaves alone (a custom __new__, a metaclass __call__, builtin
 # bases) behave as before. tools/jitcheck also runs this at two sizes and
 # requires that entries into compiled code and calls it makes do not grow
 # with the iterations.
+import abc
 import sys
 import weakref
 from dataclasses import dataclass
@@ -59,9 +61,16 @@ class Slotted:
         self.q = p * 2
 
 
+class Shape(abc.ABC):
+    """A class of a metaclass (ABCMeta) whose __call__ is type's."""
+
+    def __init__(self, sides, scale=1):
+        self.sides = sides * scale
+
+
 # Each initializer runs once first, as it has by the time a hot loop
 # compiles: one compiled before then leaves where it never ran.
-Point(0, 0), Defaults(0), Child(0, 0), Many(0), Rec(0, 0.0), Slotted(0), Bare()
+Point(0, 0), Defaults(0), Child(0, 0), Many(0), Rec(0, 0.0), Slotted(0), Bare(), Shape(0)
 
 
 def hot(n):
@@ -74,7 +83,8 @@ def hot(n):
         r = Rec(i, 0.5)
         t = Slotted(i)
         Bare()
-        s += p.x + p.y + d.a + d.b + c.y + m.n + r.k + t.q
+        g = Shape(i, scale=2)
+        s += p.x + p.y + d.a + d.b + c.y + m.n + r.k + t.q + g.sides + Shape(1).sides
     return s
 
 

@@ -3222,56 +3222,16 @@ epilogue(struct asm_ *a)
     b1(a, 0xC3);
 }
 
-/* The direct entry (struct lu_jit_direct): RDI the thread, RSI the
-   function, RDX its arguments, RCX the result's word, R8 how many
-   arguments there are. It makes the checks
-   the interpreter makes at a call and at RESUME, pushes and binds the
-   frame as lu_frame_push and lu_jit_run would (free variables copied as
-   COPY_FREE_VARS copies them), and meets the other entry.
-   Its returns pop the frame (direct_return), marked by the low bit of the
-   result's word. */
+/* The direct entry's frame for positional arguments and defaults (R8
+   given in EDI, the arguments at RDX, the function in RSI): pushed and
+   bound in line, in R15; `decline` with nothing done when the defaults
+   do not cover what is missing or the datastack chunk has no room. */
 static void
-direct_entry(struct asm_ *a)
+push_in_line(struct asm_ *a, int decline)
 {
     struct lu_func *f = a->f;
     PyCodeObject *code = f->code;
     int words = code->co_framesize;
-    int decline = new_label(a);
-    saves(a);
-    mov_rr(a, R14, RDI);
-    op_rr(a, 0, 0x89, R8, RDI);                 /* mov edi, r8d: the arguments given, an int */
-    alu_ri(a, ALU_OR, RCX, 1);
-    store(a, RBP, RESULT_SLOT, RCX);
-    /* A unit that died (a recompile is due, or what it assumed changed) is
-       not entered: a caller may have read its entry before. */
-    mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
-    cmp_mi(a, 0, R11, 0, 0);
-    jcc(a, CC_NE, decline);
-    load(a, RAX, R14, offsetof(struct lu_task, carrier));
-    cmp_rm(a, RSP, RAX, offsetof(struct lu_carrier, jit_stack_floor));
-    jcc(a, CC_B, decline);
-    /* No event pending, and the tools as the code was compiled under. */
-    load(a, RCX, RAX, offsetof(struct lu_carrier, poll));
-    mov_ri(a, R11, (int64_t)code->_co_instrumentation_version);
-    alu_rr(a, ALU_CMP, RCX, R11);
-    jcc(a, CC_NE, decline);
-    mov_ri(a, R11, (int64_t)(intptr_t)&code->_co_monitoring);
-    cmp_mi(a, 1, R11, 0, 0);
-    jcc(a, CC_NE, decline);
-    cmp_mi(a, 0, R14, offsetof(PyThreadState, tracing), 0);
-    jcc(a, CC_NE, decline);
-    /* No PEP 523 hook but perf's, which compiled code needs no frames from. */
-    int hooked = new_label(a);
-    load(a, R11, R14, offsetof(PyThreadState, interp));
-    load(a, R11, R11, offsetof(struct _is, eval_frame));
-    test_rr(a, R11, R11);
-    jcc(a, CC_E, hooked);
-    mov_ri(a, RAX, (int64_t)(intptr_t)lu_perf_eval);
-    alu_rr(a, ALU_CMP, R11, RAX);
-    jcc(a, CC_NE, decline);
-    bind(a, hooked);
-    cmp_mi(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining), lu_frame_floor(code));
-    jcc(a, CC_LE, decline);
     /* Missing arguments come from the defaults, past the borrowed ones:
        R10 points 8 * argcount below the end of the defaults' items. */
     int all = new_label(a);
@@ -3378,6 +3338,100 @@ direct_entry(struct asm_ *a)
                   R9);
         }
     }
+}
+
+/* The checks the interpreter makes at a call and at RESUME, as the direct
+   entry makes them (its registers as direct_entry says): `decline` when
+   one fails, with nothing done. */
+static void
+entry_checks(struct asm_ *a, int decline)
+{
+    PyCodeObject *code = a->f->code;
+    saves(a);
+    mov_rr(a, R14, RDI);
+    op_rr(a, 0, 0x89, R8, RDI);                 /* mov edi, r8d: the arguments given, an int */
+    alu_ri(a, ALU_OR, RCX, 1);
+    store(a, RBP, RESULT_SLOT, RCX);
+    /* A unit that died (a recompile is due, or what it assumed changed) is
+       not entered: a caller may have read its entry before. */
+    mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
+    cmp_mi(a, 0, R11, 0, 0);
+    jcc(a, CC_NE, decline);
+    load(a, RAX, R14, offsetof(struct lu_task, carrier));
+    cmp_rm(a, RSP, RAX, offsetof(struct lu_carrier, jit_stack_floor));
+    jcc(a, CC_B, decline);
+    /* No event pending, and the tools as the code was compiled under. */
+    load(a, RCX, RAX, offsetof(struct lu_carrier, poll));
+    mov_ri(a, R11, (int64_t)code->_co_instrumentation_version);
+    alu_rr(a, ALU_CMP, RCX, R11);
+    jcc(a, CC_NE, decline);
+    mov_ri(a, R11, (int64_t)(intptr_t)&code->_co_monitoring);
+    cmp_mi(a, 1, R11, 0, 0);
+    jcc(a, CC_NE, decline);
+    cmp_mi(a, 0, R14, offsetof(PyThreadState, tracing), 0);
+    jcc(a, CC_NE, decline);
+    /* No PEP 523 hook but perf's, which compiled code needs no frames from. */
+    int hooked = new_label(a);
+    load(a, R11, R14, offsetof(PyThreadState, interp));
+    load(a, R11, R11, offsetof(struct _is, eval_frame));
+    test_rr(a, R11, R11);
+    jcc(a, CC_E, hooked);
+    mov_ri(a, RAX, (int64_t)(intptr_t)lu_perf_eval);
+    alu_rr(a, ALU_CMP, R11, RAX);
+    jcc(a, CC_NE, decline);
+    bind(a, hooked);
+    cmp_mi(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining), lu_frame_floor(code));
+    jcc(a, CC_LE, decline);
+}
+
+/* The direct entry (struct lu_jit_direct): RDI the thread, RSI the
+   function, RDX its arguments, RCX the result's word, R8 how many
+   positional arguments there are. It makes the checks the interpreter
+   makes at a call and at RESUME, pushes and binds the frame as
+   lu_frame_push and lu_jit_run would (free variables copied as
+   COPY_FREE_VARS copies them), and meets the other entry. Positional
+   arguments and defaults bind in line; parameters that need objects made
+   (keyword-only, star, cells) bind in lu_jit_bind. The keyword entry
+   (LU_DIRECT_KW bytes before it, a jump) takes the keywords' names in R9
+   as well and binds in lu_jit_bind. Its returns pop the frame
+   (direct_return), marked by the low bit of the result's word. */
+static void
+direct_entry(struct asm_ *a, int keywords)
+{
+    struct lu_func *f = a->f;
+    PyCodeObject *code = f->code;
+    int decline = new_label(a), bound = new_label(a), framed = new_label(a);
+    int made = code->co_kwonlyargcount != 0 || (code->co_flags & (CO_VARARGS | CO_VARKEYWORDS));
+    for (int i = 0; i < code->co_nlocalsplus && !made; i++) {
+        made = (((unsigned char *)PyBytes_AS_STRING(code->co_localspluskinds))[i] & CO_FAST_CELL) != 0;
+    }
+    entry_checks(a, decline);
+    if (!made) {
+        push_in_line(a, decline);
+        jmp(a, framed);
+    }
+    else {
+        mov_ri(a, R9, 0);                       /* no keywords */
+        jmp(a, bound);
+    }
+    bind(a, keywords);
+    entry_checks(a, decline);
+    bind(a, bound);
+    op_rr(a, 0, 0x89, RDI, RCX);                /* mov ecx, edi: the positional arguments */
+    mov_rr(a, R8, R9);
+    mov_ri(a, R9, f->nborrowed);
+    mov_rr(a, RDI, R14);
+    call_abs(a, (void *)lu_jit_bind);
+    test_rr(a, RAX, RAX);
+    jcc(a, CC_E, decline);
+    mov_rr(a, R15, RAX);
+    rex(a, 0, 0, 0, R14);
+    b1(a, 0xFF);
+    modrm_mem(a, 1, R14, offsetof(PyThreadState, py_recursion_remaining));     /* dec dword */
+    load(a, RAX, RBP, RESULT_SLOT);
+    alu_ri(a, ALU_AND, RAX, -2);
+    store(a, RAX, 0, R15);
+    bind(a, framed);
     store(a, R14, offsetof(PyThreadState, current_frame), R15);
     /* Entries, while the unit counts them (runtime/jit/jit.c). */
     int counted = new_label(a);
@@ -3556,8 +3610,15 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     int direct = -1;
     if (f->direct) {
         direct_return(a);
+        /* The keyword entry: nops and a jump, the LU_DIRECT_KW bytes
+           before the other. */
+        int keywords = new_label(a);
+        for (int i = 0; i < LU_DIRECT_KW - 5; i++) {
+            b1(a, 0x90);
+        }
+        jmp(a, keywords);
         direct = a->n;
-        direct_entry(a);
+        direct_entry(a, keywords);
     }
     if (a->parks) {
         parked_stubs(a);

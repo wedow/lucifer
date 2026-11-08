@@ -190,6 +190,7 @@ _parser.*	.c.h	Argument Clinic's argument parser of a method; _PyArg_UnpackKeywo
 stats	runtime/jit/jit.c	the optimizing tier's process-wide counts (-X lucifer_jit_stats); compiled units are process-wide too
 census	runtime/jit/jit.c	the units whose execution -X lucifer_jit_stats counts, and the counts of freed ones; process-wide like the units, under its lock
 allocs	runtime/jit/jit.c	the allocation sites -X lucifer_jit_stats counts, kept for the process; under its lock
+why_not_callees	runtime/jit/jit.c	the callees behind -X lucifer_jit_stats' why-not counts, kept for the process; under its lock
 buckets	runtime/jit/deps.c	compiled units' dependencies by the change that takes them back; process-wide like the units, each bucket under its own lock
 compiles	runtime/jit/deps.c	the tickets compiles take and how many run, so writers know when to stamp; atomic counters
 binary_names	runtime/jit/ssa_build.c	const table of BINARY_OP method names; relocated by ld.so, then read-only (RELRO)

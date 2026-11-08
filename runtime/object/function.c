@@ -93,8 +93,8 @@ function_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
     PyThreadState *ts = PyThreadState_Get();
     PyObject *result;
     /* A compiled callee is entered directly, as compiled code calls it. */
-    if (kwnames == NULL && ts->current_exception == NULL && ts->current_frame != NULL
-        && lu_jit_call(ts, func, args, nargs, &result)) {
+    if (ts->current_exception == NULL && ts->current_frame != NULL
+        && lu_jit_call(ts, func, args, nargs, kwnames, &result)) {
         return result;
     }
     PyObject *small[16];

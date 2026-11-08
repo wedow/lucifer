@@ -532,11 +532,14 @@ helper_leaving(struct ctx *c, int id, int nargs, const lu_v *args, int drop)
     return v;
 }
 
+/* A helper that may raise, as the instruction at fs's pc raises: an
+   exception leaves (or is caught) there, `drop` stack entries consumed. */
 static lu_v
-helper_raising(struct ctx *c, int id, int nargs, const lu_v *args, int drop)
+helper_raising_at(struct ctx *c, int id, int nargs, const lu_v *args, int drop, struct lu_fs *fs)
 {
-    lu_v v = helper_leaving(c, id, nargs, args, drop);
-    struct lu_fs *fs = I(c, v)->fs;
+    lu_v v = helper(c, id, nargs, args);
+    I(c, v)->fs = fs;
+    I(c, v)->drop = (uint8_t)drop;
     struct ctx *k;
     int handler, level, lasti, at;
     if (lu_helpers[id].rep == REP_OBJ && catcher(c, fs, &k, &handler, &level, &lasti, &at)) {
@@ -551,6 +554,12 @@ helper_raising(struct ctx *c, int id, int nargs, const lu_v *args, int drop)
         c->cur = cont;
     }
     return v;
+}
+
+static lu_v
+helper_raising(struct ctx *c, int id, int nargs, const lu_v *args, int drop)
+{
+    return helper_raising_at(c, id, nargs, args, drop, before(c));
 }
 
 /* Whether the loop whose FOR_ITER is at pc may step a new iterator each
@@ -1357,7 +1366,7 @@ static const char *const compare_names[] = {
 };
 
 static int inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *args, uint8_t *owned,
-                       int nargs, lu_v *result, int *result_owned);
+                       int nargs, int nkwonly, lu_v *result, int *result_owned);
 
 /* A kernel method of a static type, inlined as the interpreter would run
    it for operands of that exact type. */
@@ -1374,7 +1383,7 @@ kernel_method(struct ctx *c, PyTypeObject *tp, const char *name, lu_v *args, int
     if (fn == NULL || self != NULL) {
         return 0;
     }
-    return inline_call(c, fn, LU_NOV, 0, args, own, nargs, result, owned);
+    return inline_call(c, fn, LU_NOV, 0, args, own, nargs, 0, result, owned);
 }
 
 /* BINARY_OP on floats, or a float and an int: the operator's method of
@@ -1595,9 +1604,10 @@ truth(struct ctx *c, lu_v v)
 
 /* --- calls --- */
 
-/* Why fn's code cannot inline here, or NULL. */
+/* Why fn's code cannot inline here, or NULL: a call with nargs positional
+   arguments, or with nkwonly as well its keyword-only parameters' values. */
 static const char *
-not_inlinable(struct ctx *c, PyFunctionObject *fn, int nargs)
+not_inlinable(struct ctx *c, PyFunctionObject *fn, int nargs, int nkwonly)
 {
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
     int defaults = fn->func_defaults != NULL ? (int)PyTuple_GET_SIZE(fn->func_defaults) : 0;
@@ -1607,7 +1617,7 @@ not_inlinable(struct ctx *c, PyFunctionObject *fn, int nargs)
     if (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE)) {
         return "a generator";
     }
-    if (co->co_kwonlyargcount != 0 || (co->co_argcount < nargs && !(co->co_flags & CO_VARARGS)) || nargs > 30
+    if (co->co_kwonlyargcount != nkwonly || (co->co_argcount < nargs && !(co->co_flags & CO_VARARGS)) || nargs > 30
         || nargs + defaults < co->co_argcount) {
         return "arguments it does not bind";
     }
@@ -1695,15 +1705,17 @@ mark_undo(struct ctx *c, struct mark *m)
 
 /* Inlines fn(args...): the caller's state has the call's operands popped.
    Takes the args' references (owned[i]); on success *result is the value
-   the call returns. With fnv, the call is of that function value, of fn's
+   the call returns. With nkwonly, args[nargs..nargs + nkwonly) are the
+   keyword-only parameters' values (nargs then at most its positional
+   parameters). With fnv, the call is of that function value, of fn's
    code and globals (a closure, lu_function_template): the frame's cells
    are fnv's, and fnv's reference (fnv_owned) is taken. Returns 1, or 0
    with nothing emitted. */
 static int
 inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *args, uint8_t *owned, int nargs,
-            lu_v *result, int *result_owned)
+            int nkwonly, lu_v *result, int *result_owned)
 {
-    const char *no = c->cur < 0 ? "unreachable" : not_inlinable(c, fn, nargs);
+    const char *no = c->cur < 0 ? "unreachable" : not_inlinable(c, fn, nargs, nkwonly);
     if (no != NULL) {
         if (_PyRuntime.jit.debug) {
             fprintf(stderr, "jit: not inlined %s: %s\n", PyUnicode_AsUTF8(fn->func_qualname), no);
@@ -1760,9 +1772,13 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *
                 k->st.own[i] = 0;
             }
         }
+        for (int i = 0; i < nkwonly; i++) {
+            k->st.v[co->co_argcount + i] = args[nargs + i];
+            k->st.own[co->co_argcount + i] = owned[nargs + i];
+        }
         /* *args and **kwargs as the call binds them: a tuple of the extra
            positional arguments (the empty one), and a new dict. */
-        int at = co->co_argcount;
+        int at = co->co_argcount + nkwonly;
         if (co->co_flags & CO_VARARGS) {
             int extra = nargs > at ? nargs - at : 0;
             /* Leaving, not caught: an inline undone must leave the caller's handlers as they were. */
@@ -2696,7 +2712,54 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         break;
     }
     PyObject *cls = known(c, owner);
+    PyTypeObject *ot = known_type(c, owner);
     uint32_t cv[3];
+    int managed = 0, nospec = lu_jit_nospec(c->code, c->pc);
+    PyObject *cm = nospec ? NULL : cls != NULL && PyType_Check(cls)
+        ? lu_specialize_class_method((PyTypeObject *)cls, name, cv)
+        : ot != NULL ? lu_specialize_instance_method(ot, name, cv, &managed) : NULL;
+    PyObject *fn = cm != NULL ? *(PyObject **)((char *)cm + lu_classmethod_callable_offset) : NULL;
+    int classmethod = cm != NULL && Py_IS_TYPE(cm, &PyClassMethod_Type);
+    if (fn != NULL && (!classmethod || method)) {
+        /* A classmethod or staticmethod of a constant class, or found on an
+           instance of a known type, bound at compile time: its callable,
+           guarded, and for a classmethod the class as the call's self (only
+           a method load: anything else makes the bound method). */
+        if (cls != NULL && PyType_Check(cls)) {
+            lu_v g = guard(c, OP_GUARD_VERSION, owner, cv[0]);
+            I(c, g)->imm2 = GV_TYPE_ITSELF;
+            guard(c, OP_GUARD_VERSION, owner, cv[1]);
+        }
+        else {
+            guard_version(c, owner, cv[0]);
+            if (managed) {
+                lu_v args[2] = { owner, konst(c, name) };
+                guard(c, OP_GUARD_BIT, helper(c, H_dict_lacks, 2, args), 1);
+            }
+        }
+        lu_v k = konst(c, cm);
+        lu_v g = guard(c, OP_GUARD_IS, k, (int64_t)(intptr_t)fn);
+        I(c, g)->imm2 = GI_FIELD | (int)lu_classmethod_callable_offset;
+        lu_v f = konst(c, fn);
+        Py_DECREF(cm);          /* the unit holds its constants */
+        pop(c, NULL);
+        push(c, f, 0);
+        if (classmethod && cls != NULL && PyType_Check(cls)) {
+            push(c, owner, own);
+        }
+        else if (classmethod) {
+            release(c, owner, own);
+            push(c, konst(c, (PyObject *)ot), 0);
+        }
+        else {
+            release(c, owner, own);
+            if (method) {
+                push(c, LU_NOV, 0);
+            }
+        }
+        return 0;
+    }
+    Py_XDECREF(cm);
     PyObject *value = cls != NULL && PyType_Check(cls) && !lu_jit_nospec(c->code, c->pc)
         ? lu_specialize_class_value((PyTypeObject *)cls, name, cv) : NULL;
     if (value != NULL) {
@@ -3072,11 +3135,23 @@ type_call_site(struct type_call *tc)
 /* Whether a call of class tp with nargs arguments is one type.__call__
    makes by object.__new__ and then a Python __init__ (*init), or object's
    own given none (*init NULL), for an instance of an ordinary layout: as
-   of tp's version *version, which the call guards. */
+   of tp's version *version, which the call guards, and its metaclass's
+   (*meta: 0 for type itself), a class of type's whose __call__ is type's
+   (ABCMeta's). */
 static int
-class_init(struct ctx *c, PyTypeObject *tp, int nargs, PyFunctionObject **init, uint32_t *version)
+class_init(struct ctx *c, PyTypeObject *tp, int nargs, PyFunctionObject **init, uint32_t *version, uint32_t *meta)
 {
-    if (!Py_IS_TYPE(tp, &PyType_Type) || !(tp->tp_flags & Py_TPFLAGS_HEAPTYPE) || !(tp->tp_flags & Py_TPFLAGS_HAVE_GC)
+    PyTypeObject *mt = Py_TYPE(tp);
+    *meta = 0;
+    if (mt != &PyType_Type) {
+        *meta = lu_type_assign_version(mt) ? __atomic_load_n(&mt->tp_version_tag, __ATOMIC_ACQUIRE) : 0;
+        if (*meta == 0 || mt->tp_call != PyType_Type.tp_call
+            || _PyType_Lookup(mt, LU_ID(__call__)) != _PyType_Lookup(&PyType_Type, LU_ID(__call__))
+            || __atomic_load_n(&mt->tp_version_tag, __ATOMIC_ACQUIRE) != *meta) {
+            return 0;
+        }
+    }
+    if (!PyType_IsSubtype(mt, &PyType_Type) || !(tp->tp_flags & Py_TPFLAGS_HEAPTYPE) || !(tp->tp_flags & Py_TPFLAGS_HAVE_GC)
         || (tp->tp_flags & Py_TPFLAGS_IS_ABSTRACT) || tp->tp_alloc != PyType_GenericAlloc || tp->tp_itemsize != 0
         || tp->tp_new == NULL || lu_jit_nospec(c->code, c->pc) || !lu_type_assign_version(tp)) {
         return 0;
@@ -3098,26 +3173,57 @@ class_init(struct ctx *c, PyTypeObject *tp, int nargs, PyFunctionObject **init, 
     return *init != NULL || (in == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__init__)) && nargs == 0);
 }
 
+/* A class whose __new__ is a kernel function of its own and whose
+   __init__ is object's (str, bytes, int, range, zip and their
+   subclasses): type.__call__ calls no __init__ after such a __new__ and
+   returns what it returns, so a call of the class is a call of its
+   __new__ with the class first. The function, as of the class's version
+   *version, which the call guards; NULL for anything else. */
+static PyFunctionObject *
+new_call(struct ctx *c, PyTypeObject *tp, uint32_t *version)
+{
+    PyObject *f;
+    if (!Py_IS_TYPE(tp, &PyType_Type) || tp == &PyType_Type || tp->tp_new == NULL || lu_jit_nospec(c->code, c->pc)
+        || !lu_type_assign_version(tp)) {
+        return NULL;
+    }
+    *version = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE);
+    PyObject *new_ = _PyType_Lookup(tp, LU_ID(__new__)), *init = _PyType_Lookup(tp, LU_ID(__init__));
+    if (new_ == NULL || new_ == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__new__))
+        || init != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__init__)) || !lu_new_function(new_, &f)
+        || !(((PyCodeObject *)((PyFunctionObject *)f)->func_code)->co_flags & LU_CO_KERNEL)
+        || __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) != *version) {
+        return NULL;
+    }
+    return (PyFunctionObject *)f;
+}
+
 /* A call of class tp as type.__call__ makes it (class_init): the class's
    version guarded, the instance made in line, then __init__ inlined with a
    made frame of type.__call__ as its caller, at its boundary after the
    call. An exit inside the initializer resumes there, and type.__call__
    checks the result and returns the instance, as it does when one returns
-   a value. 1 with the call done, or 0 with nothing emitted. */
+   a value. With nkwonly, args holds __init__'s parameters but self bound
+   by keyword (bind_keywords): nargs positional ones, then its keyword-only
+   ones; such a call inlines or is not made here. nops: the stack entries
+   the call consumes. 1 with the call done, or 0 with nothing emitted. */
 static int
-class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *init, uint32_t version, lu_v *args,
-           uint8_t *own, int nargs)
+class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *init, uint32_t version, uint32_t meta, lu_v *args,
+           uint8_t *own, int nargs, int nkwonly, int nops)
 {
     struct type_call tc = { 0 };
     if (c->cur < 0 || (init != NULL && (init->func_version < 2 || !type_call_site(&tc)))) {
         return 0;
     }
-    int n = c->oparg;
+    int n = nops - 2, by_keyword = c->base == CALL_KW;
     struct mark m;
     mark_take(c, &m);
     lu_v cls = konst(c, (PyObject *)tp);
     lu_v g = guard(c, OP_GUARD_VERSION, cls, version);
     I(c, g)->imm2 = GV_TYPE_ITSELF;
+    if (meta != 0) {
+        guard(c, OP_GUARD_VERSION, cls, meta);  /* its metaclass's __call__ is still type's */
+    }
     if (init != NULL) {
         guard_func(c, init);
     }
@@ -3160,10 +3266,10 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *init, uint32_t ver
         uint8_t iown[33];
         iargs[0] = obj;
         iown[0] = 0;
-        memcpy(iargs + 1, args, sizeof(lu_v) * (size_t)nargs);
-        memcpy(iown + 1, own, (size_t)nargs);
-        int resown, ok = inline_call(t, init, LU_NOV, 0, iargs, iown, nargs + 1, &res, &resown);
-        if (!ok && !c->failed && (ok = init_call(c, t, init, iargs, iown, nargs + 1))) {
+        memcpy(iargs + 1, args, sizeof(lu_v) * (size_t)(nargs + nkwonly));
+        memcpy(iown + 1, own, (size_t)(nargs + nkwonly));
+        int resown, ok = inline_call(t, init, LU_NOV, 0, iargs, iown, nargs + 1, nkwonly, &res, &resown);
+        if (!ok && !c->failed && !by_keyword && (ok = init_call(c, t, init, iargs, iown, nargs + 1))) {
             res = pop(t, &resown);
         }
         if (ok && t->cur >= 0 && known(t, res) != Py_None) {
@@ -3321,6 +3427,8 @@ callee_test(struct ctx *c, lu_v callable, const struct lu_callee *e, int fail)
    so that each inlines; the paths join after the call. A callee added to
    the site's table later recompiles the unit. 1 when built, 0 when the site
    has no table to use, -1 when the frame cannot be compiled. */
+static int call_kw(struct ctx *c);
+
 static int
 call_dispatch(struct ctx *c, int n)
 {
@@ -3355,7 +3463,7 @@ call_dispatch(struct ctx *c, int n)
     }
     struct lu_fdep dep = { .kind = LU_DEP_CALLEES, .obj = (uintptr_t)t, .code = c->code, .pc = c->pc };
     lu_ir_dep(c->f, &dep);
-    int callable_at = c->nlocals + c->st.sp - (n + 2);
+    int callable_at = c->nlocals + c->st.sp - (n + 2 + (c->base == CALL_KW));
     lu_v callable = c->st.v[callable_at];
     int own = c->st.own[callable_at];
     struct ctx at = *c;
@@ -3401,7 +3509,7 @@ call_dispatch(struct ctx *c, int n)
            interpreter calls the function with the bound method's self. */
         c->snap = NULL;
         before(c);
-        int built = call(c);
+        int built = c->base == CALL_KW ? call_kw(c) : call(c);
         c->code_fn = NULL;
         if (built < 0 && c->failed) {
             return -1;
@@ -3465,9 +3573,9 @@ call(struct ctx *c)
     lu_v r = LU_NOV;
     int rown = 1;
     PyFunctionObject *init = NULL;
-    uint32_t version = 0;
+    uint32_t version = 0, meta = 0;
     int klass = kc != NULL && PyType_Check(kc) && self == LU_NOV
-        && class_init(c, (PyTypeObject *)kc, n, &init, &version);
+        && class_init(c, (PyTypeObject *)kc, n, &init, &version, &meta);
     if (_PyRuntime.jit.debug && kc != NULL && PyType_Check(kc) && !klass
         && (((PyTypeObject *)kc)->tp_flags & Py_TPFLAGS_HEAPTYPE)) {
         fprintf(stderr, "jit: class call not lowered: %s\n", ((PyTypeObject *)kc)->tp_name);
@@ -3532,8 +3640,20 @@ call(struct ctx *c)
         push(c, r, rown);
         return 0;
     }
-    if (klass && class_call(c, (PyTypeObject *)kc, init, version, args, own, nargs)) {
+    if (klass && class_call(c, (PyTypeObject *)kc, init, version, meta, args, own, nargs, 0, n + 2)) {
         return 0;
+    }
+    PyFunctionObject *newfn = !klass && kc != NULL && PyType_Check(kc) && self == LU_NOV && nargs < 31
+        ? new_call(c, (PyTypeObject *)kc, &version) : NULL;
+    if (newfn != NULL) {
+        lu_v g = guard(c, OP_GUARD_VERSION, callable, version);
+        I(c, g)->imm2 = GV_TYPE_ITSELF;
+        memmove(args + 1, args, sizeof(lu_v) * (size_t)nargs);
+        memmove(own + 1, own, (size_t)nargs);
+        args[0] = callable;     /* the class, a constant */
+        own[0] = 0;
+        nargs++;
+        fn = newfn;
     }
     PyFunctionObject *gfn;
     PyCodeObject *gco;
@@ -3606,7 +3726,7 @@ call(struct ctx *c)
         struct bstate saved;
         state_copy(c, &saved, &c->st);
         c->st.sp -= n + 2;
-        if (inline_call(c, fn, fnv, owncallable, args, own, nargs, &r, &rown)) {
+        if (inline_call(c, fn, fnv, owncallable, args, own, nargs, 0, &r, &rown)) {
             if (c->cur >= 0) {          /* else every path of the callee left */
                 if (fnv == LU_NOV) {
                     release(c, callable, owncallable);
@@ -3667,8 +3787,8 @@ call(struct ctx *c)
         guard_func(c, gfn);     /* its code is what the call runs */
     }
     lu_v hargs[34];
-    hargs[0] = callable;
-    hargs[1] = self != LU_NOV ? self : konst(c, NULL);
+    hargs[0] = newfn != NULL ? konst(c, (PyObject *)newfn) : callable;
+    hargs[1] = newfn != NULL ? callable : self != LU_NOV ? self : konst(c, NULL);    /* __new__'s class first */
     for (int i = 0; i < n; i++) {
         hargs[2 + i] = peek(c, n - i);
     }
@@ -3686,6 +3806,162 @@ call(struct ctx *c)
     if (gco != NULL) {
         note_gen_made(c, r, gco, gfn);
     }
+    return 0;
+}
+
+/* CALL_KW's operands bound to fn's parameters by name, at compile time:
+   pv[0..argcount) the positional parameters' values and then the
+   keyword-only ones', each an operand (owned as the stack entry is) or a
+   default as a constant. 0 where the binding would need more: keywords
+   for **kwargs or none of its names, more positional arguments than
+   parameters, a parameter given twice or not at all, or a default of a
+   function whose defaults the unit does not guard (fnv). */
+static int
+bind_keywords(struct ctx *c, PyFunctionObject *fn, lu_v fnv, PyObject *names, int skip, lu_v *pv, uint8_t *pown)
+{
+    PyCodeObject *co = (PyCodeObject *)fn->func_code;
+    int n = c->oparg, nkw = (int)PyTuple_GET_SIZE(names), total = co->co_argcount + co->co_kwonlyargcount;
+    int self = peek(c, n + 2) != LU_NOV, npos = self + n - nkw;
+    if (!PyCode_Check(co) || total > 30 || skip + npos > co->co_argcount || skip > total) {
+        return 0;
+    }
+    for (int i = 0; i < total; i++) {
+        pv[i] = LU_NOV;
+        pown[i] = 0;
+    }
+    for (int i = 0; i < npos; i++) {
+        int depth = n + 1 - i + self;       /* from self (or the first argument) on */
+        pv[skip + i] = peek(c, depth);
+        pown[skip + i] = (uint8_t)peek_owned(c, depth);
+    }
+    for (int k = 0; k < nkw; k++) {
+        PyObject *name = PyTuple_GET_ITEM(names, k);
+        int j = co->co_posonlyargcount;
+        while (j < total && (!PyUnicode_CheckExact(name)
+                             || PyUnicode_Compare(PyTuple_GET_ITEM(co->co_localsplusnames, j), name) != 0)) {
+            j++;
+        }
+        if (j == total || pv[j] != LU_NOV) {
+            return 0;
+        }
+        pv[j] = peek(c, nkw - k + 1);
+        pown[j] = (uint8_t)peek_owned(c, nkw - k + 1);
+    }
+    PyObject *defaults = fn->func_defaults, *kwdefaults = fn->func_kwdefaults;
+    int first = co->co_argcount - (defaults != NULL ? (int)PyTuple_GET_SIZE(defaults) : 0);
+    for (int j = skip; j < total; j++) {
+        if (pv[j] != LU_NOV) {
+            continue;
+        }
+        PyObject *d = j < co->co_argcount ? (j >= first ? PyTuple_GET_ITEM(defaults, j - first) : NULL)
+            : kwdefaults != NULL && PyDict_CheckExact(kwdefaults)
+              ? PyDict_GetItemWithError(kwdefaults, PyTuple_GET_ITEM(co->co_localsplusnames, j)) : NULL;
+        if (d == NULL || fnv != LU_NOV) {
+            PyErr_Clear();
+            return 0;
+        }
+        pv[j] = konst(c, d);
+        pown[j] = 0;
+    }
+    return 1;
+}
+
+/* CALL_KW: callable, self or NULL, the arguments, the keywords' names. A
+   Python function the code knows (as CALL knows one, or by the site's
+   callees) whose parameters take the keywords by name is CALL of it with
+   them in place, inlined, and so is a class whose __init__'s do, as CALL
+   of a class makes it (class_call); anything else is made as C makes it
+   (h_call_kw, which enters a Python callee's direct entry). 0, or -1 when
+   the frame cannot be compiled. */
+static int
+call_kw(struct ctx *c)
+{
+    int n = c->oparg, nops = n + 3;
+    if (nops > 32) {
+        unsupported(c);
+        return -1;
+    }
+    lu_v callable = peek(c, n + 3), self = peek(c, n + 2), w;
+    PyObject *names = known(c, peek(c, 1)), *kc = known(c, callable), *bound = NULL;
+    PyFunctionObject *fn = kc != NULL ? call_target(c, callable, &bound) : NULL;
+    lu_v fnv = LU_NOV;
+    if (fn == NULL && c->code_fn != NULL && callable == c->code_value) {
+        fn = c->code_fn;
+        fnv = callable;
+    }
+    else if (kc == NULL && (fn = made_function(c, callable)) != NULL) {
+        fnv = callable;
+    }
+    else if (kc == NULL && self == LU_NOV) {
+        int built = call_dispatch(c, n);
+        if (built != 0) {
+            return built < 0 ? -1 : 0;
+        }
+    }
+    lu_v pv[32];
+    uint8_t pown[32];
+    int named = names != NULL && PyTuple_CheckExact(names) && !lu_jit_nospec(c->code, c->pc);
+    PyFunctionObject *init = NULL;
+    uint32_t version = 0, meta = 0;
+    if (named && kc != NULL && PyType_Check(kc) && self == LU_NOV
+        && class_init(c, (PyTypeObject *)kc, n, &init, &version, &meta)
+        && init != NULL && bind_keywords(c, init, LU_NOV, names, 1, pv, pown)) {
+        PyCodeObject *ico = (PyCodeObject *)init->func_code;
+        if (class_call(c, (PyTypeObject *)kc, init, version, meta, pv + 1, pown + 1, ico->co_argcount - 1,
+                       ico->co_kwonlyargcount, nops)) {
+            return 0;
+        }
+    }
+    PyFunctionObject *newfn = named && kc != NULL && PyType_Check(kc) && self == LU_NOV && init == NULL
+        ? new_call(c, (PyTypeObject *)kc, &version) : NULL;
+    int bound_new = newfn != NULL && bind_keywords(c, newfn, LU_NOV, names, 1, pv, pown);
+    if (bound_new) {
+        /* A class whose call is its __new__'s (new_call), the class first. */
+        lu_v g = guard(c, OP_GUARD_VERSION, callable, version);
+        I(c, g)->imm2 = GV_TYPE_ITSELF;
+        pv[0] = callable;
+        pown[0] = 0;
+        fn = newfn;
+        fnv = LU_NOV;
+    }
+    if (named && fn != NULL && bound == NULL && (bound_new || bind_keywords(c, fn, fnv, names, 0, pv, pown))) {
+        PyCodeObject *co = (PyCodeObject *)fn->func_code;
+        int owncallable = peek_owned(c, n + 3), rown;
+        lu_v r;
+        struct bstate saved;
+        state_copy(c, &saved, &c->st);
+        c->st.sp -= nops;
+        if (inline_call(c, fn, fnv, owncallable, pv, pown, co->co_argcount, co->co_kwonlyargcount, &r, &rown)) {
+            if (c->cur >= 0) {
+                if (fnv == LU_NOV) {
+                    release(c, callable, owncallable);
+                }
+                push(c, r, rown);
+            }
+            return 0;
+        }
+        c->st = saved;
+    }
+    if (c->failed || !opaque_call(c)) {
+        return -1;
+    }
+    lu_v hargs[32];
+    for (int i = 0; i < nops; i++) {
+        hargs[i] = peek(c, nops - i) != LU_NOV ? peek(c, nops - i) : konst(c, NULL);
+    }
+    if (bound_new) {
+        hargs[0] = konst(c, (PyObject *)newfn);     /* __new__, the class first */
+        hargs[1] = callable;
+    }
+    w = helper_raising(c, H_call_kw, nops, hargs, nops);
+    I(c, w)->imm2 = CNT_call_kw + 1;
+    guard_after(c, OP_GUARD_NOT_NULL, w, 1);
+    for (int i = 0; i < nops; i++) {
+        int own;
+        lu_v v = pop(c, &own);
+        release(c, v, own);
+    }
+    push(c, w, 1);
     return 0;
 }
 
@@ -3818,18 +4094,19 @@ loads_local(struct ctx *c, int pc, int *next)
     return base == LOAD_FAST || base == LOAD_FAST_BORROW ? oparg : -1;
 }
 
-/* f(a, ..., *args, **kwargs) in hidden code, from BUILD_LIST or BUILD_MAP
-   to CALL_FUNCTION_EX: the compiler's list of the leading arguments
-   extended by a local, made a tuple, and the keywords merged from a local
-   into an empty dict (or none), compiled as one call that passes the star
-   tuple's items and the dict as they are (h_call_forward). Hidden code
-   shows no traceback entry, so the call may leave from the first
-   instruction. 1 when it did. */
+/* f(a, ..., *args, **kwargs), from BUILD_LIST or BUILD_MAP to
+   CALL_FUNCTION_EX: the compiler's list of the leading arguments extended
+   by a local, made a tuple, and the keywords merged from a local into an
+   empty dict (or none), compiled as one call that passes the star tuple's
+   items and the dict as they are (h_call_forward). An exception the call
+   raises is CALL_FUNCTION_EX's, with the operands that remain on the
+   stack consumed; a declined call leaves from the first instruction,
+   where nothing has been made. 1 when it did. */
 static int
 forward_call(struct ctx *c)
 {
     int base, oparg, op, pc = c->pc, next, star = -1, kw = -1, lead = 0;
-    if (!hidden(c->code) || c->parent != NULL || lu_jit_nospec(c->code, c->pc)) {
+    if (c->parent != NULL || lu_jit_nospec(c->code, c->pc)) {
         return 0;
     }
     if (c->base == BUILD_LIST) {
@@ -3855,7 +4132,7 @@ forward_call(struct ctx *c)
     else if (base != PUSH_NULL) {
         return 0;
     }
-    int end = decode(c, after, &base, &oparg, &op);
+    int call_pc = after, end = decode(c, after, &base, &oparg, &op);
     if (base != CALL_FUNCTION_EX || (star >= 0 ? c->st.v[star] : peek(c, 1)) == LU_NOV
         || (kw >= 0 && c->st.v[kw] == LU_NOV) || !opaque_call(c)) {
         return 0;
@@ -3872,7 +4149,8 @@ forward_call(struct ctx *c)
         args[n++] = c->st.v[star];
     }
     args[n++] = kw >= 0 ? c->st.v[kw] : konst(c, NULL);
-    lu_v w = helper_raising(c, H_call_forward, n, args, nst);
+    before(c);
+    lu_v w = helper_raising_at(c, H_call_forward, n, args, nst, snapshot(c, call_pc));
     I(c, w)->imm2 = CNT_call_kw + 1;
     guard_after(c, OP_GUARD_NOT_NULL, w, 1);
     for (int i = 0; i < nst; i++) {
@@ -4631,28 +4909,25 @@ translate(struct ctx *c)
     }
     case LOAD_COMMON_CONSTANT:
         return load_common_constant(c);
-    case CALL_KW: case CALL_FUNCTION_EX: {
-        /* A call with keywords or star arguments, made as C makes one
-           (CALL_FUNCTION_EX records no feedback: the root's only). */
-        int nops = c->base == CALL_KW ? oparg + 3 : 4;
-        if (nops > 32 || (c->base == CALL_FUNCTION_EX && !root_only(c))) {
+    case CALL_KW:
+        return call_kw(c);
+    case CALL_FUNCTION_EX: {
+        /* A call with star arguments, made as C makes one (it records no
+           feedback: the root's only). */
+        int nops = 4;
+        if (!root_only(c)) {
             unsupported(c);
             return -1;
         }
         if (!opaque_call(c)) {
             return -1;
         }
-        lu_v hargs[32];
+        lu_v hargs[4];
         for (int i = 0; i < nops; i++) {
             hargs[i] = peek(c, nops - i) != LU_NOV ? peek(c, nops - i) : konst(c, NULL);
         }
-        if (c->base == CALL_KW) {
-            w = helper_raising(c, H_call_kw, nops, hargs, nops);
-        }
-        else {
-            lu_v args[3] = { hargs[0], hargs[2], hargs[3] };     /* the callable, *args, **kwargs */
-            w = helper_raising(c, H_call_ex, 3, args, nops);
-        }
+        lu_v args[3] = { hargs[0], hargs[2], hargs[3] };     /* the callable, *args, **kwargs */
+        w = helper_raising(c, H_call_ex, 3, args, nops);
         I(c, w)->imm2 = CNT_call_kw + 1;
         guard_after(c, OP_GUARD_NOT_NULL, w, 1);
         for (int i = 0; i < nops; i++) {

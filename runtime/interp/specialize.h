@@ -124,6 +124,15 @@ void lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name
    does not cache such a value, whose type may gain a __get__; compiled
    code guards that type's version. */
 PyObject *lu_specialize_class_value(PyTypeObject *cls, PyObject *name, uint32_t v[3]);
+/* An exact classmethod or staticmethod that cls.name finds, with the
+   versions that keep it so: the class's and the metaclass's (v[0..1]). A
+   new reference, or NULL. The interpreter does not cache it (its __get__
+   runs); compiled code binds its callable. */
+PyObject *lu_specialize_class_method(PyTypeObject *cls, PyObject *name, uint32_t v[2]);
+/* The same found on an instance of tp by object's __getattribute__, which
+   an instance's own value of the name would shadow: as of tp's version
+   *version, with *managed when the instance's dict must lack the name. */
+PyObject *lu_specialize_instance_method(PyTypeObject *tp, PyObject *name, uint32_t *version, int *managed);
 /* The shapes LOAD_ATTR and STORE_ATTR of name would take on an instance of
    tp that keeps its values inline and has no dict (one compiled code
    made), for a site whose own cache holds another type's: the opcode (the
