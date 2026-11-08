@@ -4325,11 +4325,12 @@ translate(struct ctx *c)
             }
         }
         int target = jump_target(c->base, oparg, c->next);
-        int seen = c->parent == NULL || Py_SIZE(c->code) <= INLINE_MAX_UNITS || lu_jit_nospec(c->code, c->pc) ? 0
+        int seen = Py_SIZE(c->code) <= INLINE_MAX_UNITS || lu_jit_nospec(c->code, c->pc) ? 0
             : __atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED);
         if (I(c, w)->op != OP_CONST_I && (seen == LU_BRANCH_FELL || seen == LU_BRANCH_JUMPED)) {
-            /* In a callee too large to inline whole, a direction the
-               interpreter never took leaves instead. */
+            /* In code too large to inline whole (a callee or the root: its
+               compile costs its size), a direction the interpreter never
+               took leaves instead. */
             guard(c, OP_GUARD_BIT, w, seen == LU_BRANCH_JUMPED);
             w = const_i(c, seen == LU_BRANCH_JUMPED);
         }
