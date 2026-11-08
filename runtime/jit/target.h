@@ -47,6 +47,8 @@ enum lu_dv_kind {
     DV_BOX_F64,                 /* a virtual float: the same */
     DV_NEW_DICT,                /* a virtual empty dict (a **kwargs nothing filled) */
     DV_BOOL,                    /* a virtual bool: True when the bit at loc (or imm), xor bitimm, is 1 */
+    DV_TUPLE,                   /* a virtual tuple: its items are fields[i] */
+    DV_INSTANCE,                /* a virtual instance of the type imm: fields[i] in the inline word at byte fields[i].off */
 };
 
 struct lu_dv {
@@ -58,7 +60,12 @@ struct lu_dv {
     int32_t bitloc;
     int32_t vid;                /* the SSA value: one virtual box is built once per exit */
     int64_t imm;
+    int32_t off;                /* a field's place */
+    int32_t nfields;            /* DV_TUPLE, DV_INSTANCE: the fields, each a reference the */
+    struct lu_dv *fields;       /* object holds (DV_OBJ: owned), which moves into the object made */
 };
+/* Frees the fields n values describe. */
+void lu_jit_dv_free(struct lu_dv *vals, int n);
 
 struct lu_deopt_frame {
     PyCodeObject *code;
@@ -250,6 +257,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(list_repeat) \
     X(build_list) \
     X(build_tuple) \
+    X(new_object) \
     X(new_dict) \
     X(contains) \
     X(list_push) \
@@ -286,7 +294,7 @@ extern const struct lu_helper lu_helpers[H_COUNT];
 static inline int
 lu_publishes(const struct lu_ins *in)
 {
-    if (in->fs == NULL || (in->flags & INS_VIRTUAL)) {
+    if (in->fs == NULL || (in->flags & (INS_VIRTUAL | INS_FRESH))) {
         return 0;
     }
     switch (in->op) {
@@ -301,7 +309,8 @@ lu_publishes(const struct lu_ins *in)
 
 /* -X lucifer_jit_stats: how often compiled code takes the C path of an
    operation it otherwise runs in line (runtime/jit/jit.c reports them). */
-#define LU_C_PATHS(X) X(list_item) X(tuple_item) X(list_store) X(box_int) X(box_float) X(build_list) X(build_tuple)
+#define LU_C_PATHS(X) X(list_item) X(tuple_item) X(list_store) X(box_int) X(box_float) X(build_list) X(build_tuple) \
+    X(new_object)
 enum lu_c_path {
 #define LU_C_PATH_ENUM(name) C_PATH_##name,
     LU_C_PATHS(LU_C_PATH_ENUM)
@@ -309,6 +318,22 @@ enum lu_c_path {
     C_PATHS
 };
 void lu_jit_c_path_count(enum lu_c_path k);
+
+/* -X lucifer_jit_stats: the objects compiled code allocates, counted per
+   site (the bytecode instruction) and kind; a class call counts what the
+   class makes. jit.c reports the busiest. */
+#define LU_ALLOC_KINDS(X) X(int) X(float) X(tuple) X(list) X(dict) X(set) X(instance) X(iterator) \
+    X(function) X(class_call)
+enum lu_alloc_kind {
+#define LU_ALLOC_ENUM(name) ALLOC_##name,
+    LU_ALLOC_KINDS(LU_ALLOC_ENUM)
+#undef LU_ALLOC_ENUM
+    ALLOC_KINDS
+};
+/* The kind an instruction allocates, or -1. */
+int lu_alloc_kind(const struct lu_ins *in);
+/* The count of a site and kind, kept for the life of the process. */
+unsigned long *lu_jit_alloc_site(PyCodeObject *code, int pc, int kind);
 #define LU_JIT_C_PATH(name) do { \
         if (_PyRuntime.jit.stats) { \
             lu_jit_c_path_count(C_PATH_##name); \

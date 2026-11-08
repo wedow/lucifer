@@ -280,64 +280,95 @@ is_slot_member(PyObject *descr)
     return m->type == Py_T_OBJECT_EX && m->offset >= 0 && m->offset <= UINT16_MAX;
 }
 
-/* An instance's attribute, for a type whose __getattribute__ is object's. */
-static void
-specialize_instance(PyObject *owner, lu_codeunit *site, PyObject *name, int method)
+/* What LOAD_ATTR of name specializes to on an instance of a type whose
+   __getattribute__ is object's: the opcode (LOAD_ATTR for none), the
+   version, the second word and the answer (a new reference). The owner may
+   be NULL: an instance of tp that keeps its values inline and has no dict,
+   as one compiled code just made. */
+static int
+instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, uint32_t *version,
+               uint32_t *second, PyObject **descr)
 {
-    PyTypeObject *tp = Py_TYPE(owner);
-    PyObject *descr;
-    uint32_t version;
+    *second = 0;
+    *descr = NULL;
     if (!default_getattribute(tp, &PyBaseObject_Type)) {
-        return fail(site);
+        return LOAD_ATTR;
     }
-    enum descr_kind kind = analyze(tp, name, &descr, &version);
+    enum descr_kind kind = analyze(tp, name, descr, version);
     int managed = (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) != 0;
     /* After the version: a name that shadows the class's joins the shared
        names before the version changes. */
     Py_ssize_t inline_index = (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) ? lu_inline_index(tp, name) : -1;
-    if (version == 0 || (!managed && tp->tp_dictoffset != 0)) {
-        fail(site);
+    int op = LOAD_ATTR;
+    if (*version == 0 || (!managed && tp->tp_dictoffset != 0)) {
+        op = LOAD_ATTR;
     }
-    else if (is_slot_member(descr)) {
-        set_attr_cache(site, LOAD_ATTR_SLOT, version,
-                       (uint32_t)((PyMemberDescrObject *)descr)->d_member->offset, NULL);
+    else if (is_slot_member(*descr)) {
+        *second = (uint32_t)((PyMemberDescrObject *)*descr)->d_member->offset;
+        Py_CLEAR(*descr);
+        op = LOAD_ATTR_SLOT;
     }
     else if (inline_index >= 0 && kind != DESCR_OTHER) {
         /* An inline value, which shadows a non-data attribute of the class:
            no instance of it has a dict that lacks the name for sure. */
         size_t offset = (size_t)tp->tp_basicsize + (size_t)inline_index * LU_INLINE_STRIDE * sizeof(PyObject *);
-        if (offset > UINT16_MAX || !lu_inline_live(owner)) {
-            fail(site);
+        if (offset <= UINT16_MAX && (owner == NULL || lu_inline_live(owner))) {
+            *second = (uint32_t)offset;
+            op = LOAD_ATTR_INSTANCE_VALUE;
         }
-        else {
-            set_attr_cache(site, LOAD_ATTR_INSTANCE_VALUE, version, (uint32_t)offset, NULL);
-        }
+        Py_CLEAR(*descr);
     }
     else if (kind == DESCR_ABSENT) {
         /* In the instance's dict, at an entry whose key is this very str. */
-        PyObject *dict = managed ? LU_MANAGED_DICT(owner) : NULL;
+        PyObject *dict = managed && owner != NULL ? LU_MANAGED_DICT(owner) : NULL;
         Py_ssize_t index = dict != NULL && unicode_dict(dict) ? lu_ns_index(dict, name) : -1;
-        if (index < 0 || index > UINT16_MAX
-            || lu_dk_key(((PyDictObject *)dict)->ma_keys, index) != name) {
-            fail(site);
-        }
-        else {
-            set_attr_cache(site, LOAD_ATTR_WITH_HINT, version, (uint32_t)index, NULL);
+        if (index >= 0 && index <= UINT16_MAX && lu_dk_key(((PyDictObject *)dict)->ma_keys, index) == name) {
+            *second = (uint32_t)index;
+            op = LOAD_ATTR_WITH_HINT;
         }
     }
     else if (kind == DESCR_METHOD && method) {
-        set_attr_cache(site, managed ? LOAD_ATTR_METHOD_WITH_VALUES : LOAD_ATTR_METHOD_NO_DICT,
-                       version, 0, descr);
+        op = managed ? LOAD_ATTR_METHOD_WITH_VALUES : LOAD_ATTR_METHOD_NO_DICT;
     }
     else if (kind == DESCR_NON_DESCRIPTOR) {
-        set_attr_cache(site, managed ? LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES
-                                     : LOAD_ATTR_NONDESCRIPTOR_NO_DICT,
-                       version, 0, descr);
+        op = managed ? LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES : LOAD_ATTR_NONDESCRIPTOR_NO_DICT;
     }
-    else {
+    if (op == LOAD_ATTR || !cacheable(*descr)) {
+        Py_CLEAR(*descr);
+        return LOAD_ATTR;
+    }
+    return op;
+}
+
+/* An instance's attribute, for a type whose __getattribute__ is object's. */
+static void
+specialize_instance(PyObject *owner, lu_codeunit *site, PyObject *name, int method)
+{
+    uint32_t version, second;
+    PyObject *descr;
+    int op = instance_shape(Py_TYPE(owner), owner, name, method, &version, &second, &descr);
+    if (op == LOAD_ATTR) {
         fail(site);
     }
+    else {
+        set_attr_cache(site, op, version, second, descr);
+    }
     Py_XDECREF(descr);
+}
+
+int
+lu_specialize_load_fresh(PyTypeObject *tp, PyObject *name, int method, uint32_t *version, uint16_t *index,
+                         PyObject **descr)
+{
+    getattrofunc get = tp->tp_getattro;
+    uint32_t second = 0;
+    int op = enabled() && (get == lu_slot_tp_getattro || get == PyObject_GenericGetAttr)
+        ? instance_shape(tp, NULL, name, method, version, &second, descr) : LOAD_ATTR;
+    *index = (uint16_t)second;
+    if (op == LOAD_ATTR) {
+        *descr = NULL;
+    }
+    return op;
 }
 
 void
@@ -364,6 +395,33 @@ lu_specialize_load_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
 /* STORE_ATTR on an instance of a type whose __setattr__ is object's: a
    writable __slots__ member is stored at its offset; a name the type does not
    have goes into the instance's dict. */
+/* STORE_ATTR's inline value for name on an instance of tp that keeps its
+   values inline: its byte offset, or -1. */
+static Py_ssize_t
+store_inline_offset(PyTypeObject *tp, PyObject *name, enum descr_kind kind)
+{
+    Py_ssize_t index = kind != DESCR_OTHER ? lu_inline_index(tp, name) : -1;
+    if (index >= 0) {
+        index = tp->tp_basicsize + index * LU_INLINE_STRIDE * (Py_ssize_t)sizeof(PyObject *);
+    }
+    return index <= UINT16_MAX ? index : -1;
+}
+
+int
+lu_specialize_store_fresh(PyTypeObject *tp, PyObject *name, uint32_t *version, uint16_t *index)
+{
+    if (!enabled() || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))
+        || !(tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)) {
+        return STORE_ATTR;
+    }
+    PyObject *descr;
+    enum descr_kind kind = analyze(tp, name, &descr, version);
+    Py_ssize_t offset = *version != 0 && !is_slot_member(descr) ? store_inline_offset(tp, name, kind) : -1;
+    Py_XDECREF(descr);
+    *index = (uint16_t)(offset >= 0 ? offset : 0);
+    return offset >= 0 ? STORE_ATTR_INSTANCE_VALUE : STORE_ATTR;
+}
+
 void
 lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
 {
@@ -386,8 +444,7 @@ lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
             end(site, STORE_ATTR_SLOT);
         }
     }
-    else if (kind != DESCR_OTHER && lu_inline_live(owner) && (index = lu_inline_index(tp, name)) >= 0
-             && (index = tp->tp_basicsize + index * LU_INLINE_STRIDE * (Py_ssize_t)sizeof(PyObject *)) <= UINT16_MAX) {
+    else if (lu_inline_live(owner) && (index = store_inline_offset(tp, name, kind)) >= 0) {
         if (begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
             lu_cache_store(c + LA_INDEX, (uint16_t)index);      /* the byte offset */
             lu_cache_store32(c + LA_VERSION, version);
