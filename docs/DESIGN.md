@@ -654,8 +654,9 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    with those fields, and every slot that names it gets that one object.
    An instance that stays real takes the first store of each name without
    its lock while no other thread can have seen it. A loop over a range,
-   list or tuple made in the loop's code (not a generator's, whose stack
-   goes back to its frame at a yield) keeps its iterator only on the stack,
+   list or tuple made in the loop's code (in a generator, a loop with no
+   yield in it: the stack goes back to the frame at a yield) keeps its
+   iterator only on the stack,
    where only an exit sees it, so each step makes a new iterator from the
    last one's fields (an index, a range's start and length) instead of
    changing it; a list's length is read at each step. A phi whose inputs
