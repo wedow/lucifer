@@ -20,6 +20,7 @@
 #include "interp/code.h"
 #include "interp/exceptions.h"
 #include "prim/prim.h"
+#include "object/dict.h"
 
 #include <string.h>
 
@@ -358,11 +359,13 @@ PyType_Unwatch(int id, PyObject *obj)
 
 /* The walk of the MRO: the first dict that has the name, as a new reference.
    Another thread may replace the MRO meanwhile (type_set_mro). The replaced
-   tuple is released only after a QSBR grace period, and nothing between the
-   load and the incref reports a quiescent state or detaches, so the tuple is
-   alive at the incref. The walk keeps that reference, since a dict lookup
-   that waits for the dict's lock detaches, and a detached carrier holds
-   nothing as far as QSBR knows. */
+   tuple is released only after a QSBR grace period, and the walk's
+   lock-free lookups report no quiescent state, detach or release anything,
+   so the tuple stays alive without a reference: no atomic on a tuple every
+   thread shares. A lookup that needs the dict's lock (it may wait, and a
+   waiting carrier detaches, which QSBR counts as holding nothing) first
+   takes a reference to the tuple, still alive then, and the walk goes on
+   with it. */
 static PyObject *
 lookup_in_mro(PyTypeObject *tp, PyObject *name)
 {
@@ -377,14 +380,25 @@ lookup_in_mro(PyTypeObject *tp, PyObject *name)
         }
         return NULL;
     }
-    Py_INCREF(mro);
     PyObject *v = NULL;
-    for (Py_ssize_t i = 0; v == NULL && i < PyTuple_GET_SIZE(mro); i++) {
-        PyObject *dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i));
-        v = dict != NULL ? lu_ns_get(dict, name) : NULL;
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); i++) {
+        PyObject *dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i)), *stale;
+        int found = dict != NULL ? lu_dict_find_lockfree(dict, name, &v, &stale) : 0;
+        if (found == 1) {
+            return v;
+        }
+        if (found == -2) {
+            Py_INCREF(mro);
+            Py_XDECREF(stale);
+            for (v = NULL; v == NULL && i < PyTuple_GET_SIZE(mro); i++) {
+                dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i));
+                v = dict != NULL ? lu_ns_get(dict, name) : NULL;
+            }
+            Py_DECREF(mro);
+            return v;
+        }
     }
-    Py_DECREF(mro);
-    return v;
+    return NULL;
 }
 
 /* The walk of the MRO, its reference dropped at once when the caller only
