@@ -1083,6 +1083,9 @@ parse_stress(const char *value, struct lu_stress *out)
         else if (strcmp(item, "deopt") == 0) {
             out->deopt = n;
         }
+        else if (strcmp(item, "sre") == 0 && colon == NULL) {
+            /* lib/modules/_sre.py reads it from sys._xoptions */
+        }
         else {
             status = stress_error("unknown kind", item);
         }
