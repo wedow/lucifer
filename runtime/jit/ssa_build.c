@@ -684,7 +684,8 @@ edge_to(struct ctx *c, int pc)
                 I(c, phi)->args = NULL;
                 b->in.v[k] = phi;
                 b->in.own[k] = k < c->nlocals && c->fixed[k] ? c->st.own[k] : 1;  /* as normalize left them */
-                I(c, phi)->imm2 = c->parent == NULL && k < c->nlocals;     /* a root slot's value */
+                /* A root (1) or an inlined frame's (2) local's value. */
+                I(c, phi)->imm2 = k < c->nlocals ? (c->parent == NULL ? 1 : 2) : 0;
             }
         }
     }
@@ -2290,7 +2291,7 @@ join_paths(struct ctx *c, struct path *p, int n)
         lu_v phi = lu_ir_emit(f, join, OP_PHI, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, k);
         I(c, phi)->nargs = live;
         I(c, phi)->args = malloc(sizeof(lu_v) * (size_t)live);
-        I(c, phi)->imm2 = c->parent == NULL && k < c->nlocals;     /* a root slot's value */
+        I(c, phi)->imm2 = k < c->nlocals ? (c->parent == NULL ? 1 : 2) : 0;   /* as edge_to sets it */
         for (int i = 0, j = 0; i < n; i++) {
             if (p[i].block >= 0) {
                 I(c, phi)->args[j++] = phi_input(c, p[i].st.v[k]);

@@ -238,7 +238,7 @@ unbox_phis(struct lu_func *f, int rep)
                    root local's phi forgets it by releasing it on its edge,
                    which must be its predecessor's only one. */
                 if (f->ins[a].op == box && f->ins[a].b != LU_NOV
-                    && (!in->imm2 || f->blocks[f->blocks[in->block].preds[i]].nsucc != 1)) {
+                    && (in->imm2 != 1 || f->blocks[f->blocks[in->block].preds[i]].nsucc != 1)) {
                     cand[v] = 0;
                     changed = 1;
                     break;
