@@ -3126,6 +3126,31 @@ class_init(struct ctx *c, PyTypeObject *tp, int nargs, PyFunctionObject **init, 
     return *init != NULL || (in == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__init__)) && nargs == 0);
 }
 
+/* A class whose __new__ is a kernel function of its own and whose
+   __init__ is object's (str, bytes, int, range, zip and their
+   subclasses): type.__call__ calls no __init__ after such a __new__ and
+   returns what it returns, so a call of the class is a call of its
+   __new__ with the class first. The function, as of the class's version
+   *version, which the call guards; NULL for anything else. */
+static PyFunctionObject *
+new_call(struct ctx *c, PyTypeObject *tp, uint32_t *version)
+{
+    PyObject *f;
+    if (!Py_IS_TYPE(tp, &PyType_Type) || tp == &PyType_Type || tp->tp_new == NULL || lu_jit_nospec(c->code, c->pc)
+        || !lu_type_assign_version(tp)) {
+        return NULL;
+    }
+    *version = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE);
+    PyObject *new_ = _PyType_Lookup(tp, LU_ID(__new__)), *init = _PyType_Lookup(tp, LU_ID(__init__));
+    if (new_ == NULL || new_ == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__new__))
+        || init != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__init__)) || !lu_new_function(new_, &f)
+        || !(((PyCodeObject *)((PyFunctionObject *)f)->func_code)->co_flags & LU_CO_KERNEL)
+        || __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) != *version) {
+        return NULL;
+    }
+    return (PyFunctionObject *)f;
+}
+
 /* A call of class tp as type.__call__ makes it (class_init): the class's
    version guarded, the instance made in line, then __init__ inlined with a
    made frame of type.__call__ as its caller, at its boundary after the
@@ -3571,6 +3596,18 @@ call(struct ctx *c)
     if (klass && class_call(c, (PyTypeObject *)kc, init, version, meta, args, own, nargs, 0, n + 2)) {
         return 0;
     }
+    PyFunctionObject *newfn = !klass && kc != NULL && PyType_Check(kc) && self == LU_NOV && nargs < 31
+        ? new_call(c, (PyTypeObject *)kc, &version) : NULL;
+    if (newfn != NULL) {
+        lu_v g = guard(c, OP_GUARD_VERSION, callable, version);
+        I(c, g)->imm2 = GV_TYPE_ITSELF;
+        memmove(args + 1, args, sizeof(lu_v) * (size_t)nargs);
+        memmove(own + 1, own, (size_t)nargs);
+        args[0] = callable;     /* the class, a constant */
+        own[0] = 0;
+        nargs++;
+        fn = newfn;
+    }
     PyFunctionObject *gfn;
     PyCodeObject *gco;
     if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
@@ -3703,8 +3740,8 @@ call(struct ctx *c)
         guard_func(c, gfn);     /* its code is what the call runs */
     }
     lu_v hargs[34];
-    hargs[0] = callable;
-    hargs[1] = self != LU_NOV ? self : konst(c, NULL);
+    hargs[0] = newfn != NULL ? konst(c, (PyObject *)newfn) : callable;
+    hargs[1] = newfn != NULL ? callable : self != LU_NOV ? self : konst(c, NULL);    /* __new__'s class first */
     for (int i = 0; i < n; i++) {
         hargs[2 + i] = peek(c, n - i);
     }
@@ -3828,7 +3865,19 @@ call_kw(struct ctx *c)
             return 0;
         }
     }
-    if (named && fn != NULL && bound == NULL && bind_keywords(c, fn, fnv, names, 0, pv, pown)) {
+    PyFunctionObject *newfn = named && kc != NULL && PyType_Check(kc) && self == LU_NOV && init == NULL
+        ? new_call(c, (PyTypeObject *)kc, &version) : NULL;
+    int bound_new = newfn != NULL && bind_keywords(c, newfn, LU_NOV, names, 1, pv, pown);
+    if (bound_new) {
+        /* A class whose call is its __new__'s (new_call), the class first. */
+        lu_v g = guard(c, OP_GUARD_VERSION, callable, version);
+        I(c, g)->imm2 = GV_TYPE_ITSELF;
+        pv[0] = callable;
+        pown[0] = 0;
+        fn = newfn;
+        fnv = LU_NOV;
+    }
+    if (named && fn != NULL && bound == NULL && (bound_new || bind_keywords(c, fn, fnv, names, 0, pv, pown))) {
         PyCodeObject *co = (PyCodeObject *)fn->func_code;
         int owncallable = peek_owned(c, n + 3), rown;
         lu_v r;
@@ -3852,6 +3901,10 @@ call_kw(struct ctx *c)
     lu_v hargs[32];
     for (int i = 0; i < nops; i++) {
         hargs[i] = peek(c, nops - i) != LU_NOV ? peek(c, nops - i) : konst(c, NULL);
+    }
+    if (bound_new) {
+        hargs[0] = konst(c, (PyObject *)newfn);     /* __new__, the class first */
+        hargs[1] = callable;
     }
     w = helper_raising(c, H_call_kw, nops, hargs, nops);
     I(c, w)->imm2 = CNT_call_kw + 1;

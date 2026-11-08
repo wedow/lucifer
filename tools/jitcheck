@@ -46,6 +46,11 @@ require that a count of the tier's does not grow with the iterations:
          classmethods and staticmethods through their class: entries into
          compiled code, direct and compiled calls. The loads bind at
          compile time and every call inlines.
+  newcalls tests/kernel/jit_new_calls.py, whose hot loop calls classes
+         whose call is their __new__'s (str, int, bytes, tuple, range, a
+         subclass of str), with and without keywords: the class calls
+         that reach the generic call of a class (-X lucifer_jit_stats'
+         whynot type). Each calls __new__ itself.
   perfcalls  the compiled lane's program under -X perf, whose trampoline
          gives interpreted frames perf symbols: compiled code still calls
          compiled callees itself (they have symbols of their own): entries
@@ -139,6 +144,7 @@ GROWTH = {
     'shapes': ('jit_call_shapes.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
     'kwcalls': ('jit_kw_calls.py', r'jit: executed:.* call_kw (\d+)', 0),
     'cmethods': ('jit_class_methods.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
+    'newcalls': ('jit_new_calls.py', r'jit: whynot kw \d+, star \d+, type (\d+)', 0),
     'perfcalls': ('jit_compiled_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0, ('-X', 'perf')),
     'super': ('jit_super.py', r'jit: entries .* side (\d+)', 0),
     'inline': ('jit_inline_paths.py', r'jit: C paths list_item (\d+), tuple_item (\d+), list_store (\d+), '

@@ -640,7 +640,11 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    instance allocated, and `__init__` inlined under a frame of `type.__call__`
    that compiled code never runs, at its boundary after its call of
    `__init__`. An exit inside the initializer resumes there, so the
-   interpreter checks the result and returns the instance. A call with
+   interpreter checks the result and returns the instance. A class whose
+   `__new__` is a kernel function of its own and whose `__init__` is
+   object's (str, int, bytes, tuple, range) returns what `__new__`
+   returns, so its call is a call of `__new__` with the class first. A
+   call with
    keywords of a function or class the code knows binds the keywords to
    the parameters at compile time, defaults and keyword-only defaults as
    constants under the function's version, and inlines as a positional
