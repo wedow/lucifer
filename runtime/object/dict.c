@@ -995,6 +995,26 @@ lu_ns_delete(PyObject *dict, PyObject *key)
 }
 
 int
+lu_ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old)
+{
+    int r;
+    Py_BEGIN_CRITICAL_SECTION(dict);
+    Py_ssize_t ix = ns_find(dict, key);
+    *old = ix >= 0 ? Py_NewRef(lu_dk_value(((PyDictObject *)dict)->ma_keys, ix)) : NULL;
+    if (value != NULL) {
+        r = lu_ns_insert(dict, key, value) < 0 ? -1 : 1;
+    }
+    else {
+        r = ix >= 0;
+        if (r) {
+            Py_DECREF(lu_dict_remove((PyDictObject *)dict, ix));
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    return r;
+}
+
+int
 lu_ns_next(PyObject *dict, Py_ssize_t *pos, PyObject **key, PyObject **value)
 {
     PyDictObject *mp = (PyDictObject *)dict;

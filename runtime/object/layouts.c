@@ -83,7 +83,9 @@ immortal_header(PyObject *op, PyTypeObject *tp)
 /* Floats and one-digit ints come and go in arithmetic: up to FREE_MAX
    freed ones of each per carrier wait for reuse, linked through the word
    after the header. A lock-free reader of a stale pointer finds the same
-   type's header there, as it would in a reused mimalloc block. */
+   type's header there, as it would in a reused mimalloc block, with no
+   owner and no count, so its try-incref fails as on any dead object (an
+   owner's would succeed: it increments the local count unchecked). */
 #define FREE_MAX 100
 
 static PyObject *
@@ -105,6 +107,7 @@ freelist_push(struct lu_freelist *fl, PyObject *op)
         return 0;
     }
     LU_FREE_NEXT(op) = fl->head;
+    _Py_atomic_store_uintptr_relaxed(&op->ob_tid, 0);
     fl->head = op;
     fl->n++;
     return 1;

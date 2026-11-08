@@ -497,6 +497,16 @@ lu_attr_store(PyObject *obj, PyObject *name, PyObject *v)
     if (dict == NULL) {
         return PyErr_Occurred() ? -1 : 0;
     }
+    if (PyType_Check(obj)) {
+        /* The type's attribute cache names the value it replaces without
+           owning it: it is released only once every tag it may be cached
+           under is taken back (type_lookup, runtime/prim/type.c). */
+        PyObject *old;
+        int r = lu_ns_exchange(dict, name, v, &old);
+        lu_type_modified((PyTypeObject *)obj);
+        Py_XDECREF(old);
+        return r;
+    }
     if (v == NULL) {
         return lu_ns_delete(dict, name);
     }
