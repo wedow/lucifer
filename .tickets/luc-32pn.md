@@ -1,6 +1,6 @@
 ---
 id: luc-32pn
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-07T22:27:52Z
@@ -13,3 +13,9 @@ tags: [jit, perf]
 
 Corpus census 2026-11-07: 350-800 compiles and 0.4-1.0 s per process, 50% of isort, 21% of import black, 6.7% weighted across the corpus. Options: measure compile-time phases first; then raise thresholds adaptively for one-shot code; cache compiled units across runs only if safe; compile on a background thread (roadmap item 5 deferred it until compile time showed up, and now it has). Proof: compile seconds per process and cli/import timings.
 
+
+## Notes
+
+**2026-11-08T04:41:12Z**
+
+Done on luc-policy (luc-xboo): phases measured (-X lucifer_jit_stats prints them; regalloc was 50-60% on large units), regalloc liveness made linear (same code bytes), thresholds and waits scale with code size, recompile loops removed. Compile seconds summed over the 30 census programs 29.4 s -> 9.0 s; cli.isort 1228 -> 150 ms, cli.black 1997 -> 295 ms. Background compile split to luc-f7cn with the data.

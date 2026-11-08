@@ -30,9 +30,25 @@ enum lu_jit_result {
                            saved at its resume point, still current; the caller suspends it */
 };
 
-/* Back-edges and calls before a function is compiled (-X lucifer_jit=on). */
-#define LU_JIT_BACKEDGE_THRESHOLD 1000
-#define LU_JIT_CALL_THRESHOLD 1000
+/* Back-edges (at one site) or calls before a code is compiled
+   (-X lucifer_jit=on): LU_JIT_THRESHOLD, and LU_JIT_THRESHOLD_PER_UNIT
+   more per code unit past the first LU_JIT_THRESHOLD_FREE, since a compile
+   costs about the size of the code it compiles and has to be paid back by
+   the runs it saves; the base pays for a function of ordinary size. */
+#define LU_JIT_THRESHOLD 1000
+#define LU_JIT_THRESHOLD_PER_UNIT 4
+#define LU_JIT_THRESHOLD_FREE 256
+
+static inline unsigned
+lu_jit_threshold(PyCodeObject *code)
+{
+    if (_PyRuntime.jit.mode == LU_JIT_ALWAYS) {
+        return 1;
+    }
+    size_t size = (size_t)Py_SIZE(code);
+    size_t n = LU_JIT_THRESHOLD + (size > LU_JIT_THRESHOLD_FREE ? LU_JIT_THRESHOLD_PER_UNIT * (size - LU_JIT_THRESHOLD_FREE) : 0);
+    return n < UINT16_MAX ? (unsigned)n : UINT16_MAX;      /* what a cache word counts */
+}
 
 /* The backend's name (runtime/jit/target.h), or NULL where there is none. */
 const char *lu_jit_backend(void);
@@ -53,8 +69,7 @@ lu_jit_backedge_hot(PyCodeObject *code, lu_codeunit *site)
     }
     lu_codeunit *counter = site + 1;
     uint16_t n = __atomic_load_n(&counter->cache, __ATOMIC_RELAXED);
-    unsigned threshold = _PyRuntime.jit.mode == LU_JIT_ALWAYS ? 1 : LU_JIT_BACKEDGE_THRESHOLD;
-    if (n + 1u >= threshold) {
+    if (n + 1u >= lu_jit_threshold(code)) {
         return 1;
     }
     __atomic_store_n(&counter->cache, (uint16_t)(n + 1), __ATOMIC_RELAXED);
@@ -70,9 +85,8 @@ lu_jit_call_hot(PyCodeObject *code)
     if (v != 0 && !(v & 1)) {
         return 1;
     }
-    unsigned threshold = _PyRuntime.jit.mode == LU_JIT_ALWAYS ? 1 : LU_JIT_CALL_THRESHOLD;
     uintptr_t n = v >> 1;
-    if (n + 1 >= threshold) {
+    if (n + 1 >= lu_jit_threshold(code)) {
         return 1;
     }
     /* A lost count under a race only delays the compile. */

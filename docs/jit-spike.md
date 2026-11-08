@@ -86,9 +86,17 @@ other machines).
   inlined copy that keeps firing stops that function from being inlined,
   and every root that still holds the copy recompiles when it leaves there.
   - A unit without loops that leaves by a side exit or an exception on half
-    its entries (50 at least) is retired, and its entry stays in the
-    interpreter. An exception that leaves the root frame ends the call, so
-    it does not count.
+    its entries (50 at least) is retired. An exception that leaves the root
+    frame ends the call, so it does not count.
+  - Nothing is given up for good (luc-xboo). A dead unit's entry, or one
+    whose compile failed, waits (50 + the code's size) << level interpreted
+    entries before it compiles again. A retirement or a failed compile
+    raises the code's level (deaths that move a site toward generic are
+    bounded per site and do not), and a unit that served longer than its
+    wait lowers it.
+  - A code compiles after 1000 calls or back-edges at one site, plus 4 per
+    code unit past its first 256: a compile costs about the size of what it
+    compiles.
   - A compile that finds most of its feedback sites never ran (the first
     call under `always`) is put off: the interpreter runs that entry 50
     times first, once per entry.
@@ -102,11 +110,14 @@ other machines).
   argument parsers over `*args` inline.
 - **Globals.** A global load is a constant guarded on the dicts' keys
   versions. A module that binds a new name has its keys versioned again at
-  the next compile, as the interpreter's specializer does.
+  the next compile, as the interpreter's specializer does. A load whose
+  guard kept failing (a global rebound on every call) is a lookup, and
+  `STORE_GLOBAL` compiles.
 - **Flags.**
   - `-X lucifer_jit=off|on|always` selects the mode.
   - `-X lucifer_jit_stats` prints compiles, exits by reason, side exits by
-    opcode, and the functions disabled or retired.
+    opcode, compile phase times, entries spent waiting, and the units
+    retired.
   - `-X lucifer_stress=deopt:N` fails every Nth guard.
   - `-X perf` writes `/tmp/perf-PID.map`.
   - `LUCIFER_JIT_{DEBUG,DUMP,ONLY}` are debugging aids; `DEBUG` names each

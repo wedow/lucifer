@@ -8,6 +8,7 @@
 #include "interp/exceptions.h"
 #include "interp/gen.h"
 #include "prim/prim.h"
+#include "interp/specialize.h"
 
 #include <pthread.h>
 #include <string.h>
@@ -378,6 +379,87 @@ h_store_attr(PyObject *owner, PyObject *name, PyObject *v)
     t->pin++;
     int r = PyObject_SetAttr(owner, name, v);
     t->pin--;
+    return r;
+}
+
+/* LOAD_GLOBAL without speculation, as the interpreter runs it: through
+   the site's LOAD_GLOBAL_MODULE/BUILTIN cache (keys versions and an index)
+   while it holds, else the name in the globals, then the builtins (both
+   exact dicts), specializing the site for the next time. A new
+   reference; declined where the interpreter raises the NameError. */
+static PyObject *
+h_load_global(PyObject *globals, PyObject *builtins, PyObject *name, int64_t at)
+{
+    lu_codeunit *site = (lu_codeunit *)(intptr_t)at, *cache = site + 1;
+    int op = __atomic_load_n(&site->op.code, __ATOMIC_RELAXED);
+    if (op == LOAD_GLOBAL_MODULE || op == LOAD_GLOBAL_BUILTIN) {
+        uint16_t mv = lu_cache_load(cache + LG_MODULE_KEYS_VERSION), bv = lu_cache_load(cache + LG_BUILTIN_KEYS_VERSION);
+        Py_ssize_t index = lu_cache_load(cache + LG_INDEX);
+        PyObject *in = op == LOAD_GLOBAL_BUILTIN ? builtins : globals;
+        PyDictKeysObject *gk = __atomic_load_n(&((PyDictObject *)globals)->ma_keys, __ATOMIC_ACQUIRE);
+        PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)in)->ma_keys, __ATOMIC_ACQUIRE);
+        if (mv != 0 && gk->dk_version == mv && dk->dk_version == (in == globals ? mv : bv) && (in == globals || bv != 0)
+            && lu_dk_is_unicode(dk) && index < dk->dk_nentries) {
+            PyObject *v = lu_try_xget_ref(lu_dk_value_slot(dk, index));
+            if (v != NULL && dk == __atomic_load_n(&((PyDictObject *)in)->ma_keys, __ATOMIC_ACQUIRE)
+                && lu_site_unchanged(site, op) && lu_cache_load(cache + LG_MODULE_KEYS_VERSION) == mv) {
+                return v;
+            }
+            Py_XDECREF(v);
+        }
+    }
+    else if (op == LOAD_GLOBAL && PyThreadState_Get()->interp->specializing) {
+        lu_specialize_load_global(globals, builtins, site, name);
+    }
+    PyObject *v = lu_ns_get(globals, name);
+    if (v == NULL && !PyErr_Occurred()) {
+        v = lu_ns_get(builtins, name);
+    }
+    return v != NULL || PyErr_Occurred() ? v : LU_JIT_DECLINED;
+}
+
+/* STORE_GLOBAL into an exact dict, borrowing v. */
+static int
+h_store_global(PyObject *globals, PyObject *name, PyObject *v)
+{
+    return lu_ns_store(globals, name, v);
+}
+
+/* BUILD_SLICE; step is NULL for start:stop. */
+static PyObject *
+h_build_slice(PyObject *start, PyObject *stop, PyObject *step)
+{
+    return PySlice_New(start, stop, step);
+}
+
+/* CONVERT_VALUE: str, repr or ascii (oparg 1, 2, 3), as the kernel makes them. */
+static PyObject *
+h_convert_value(PyObject *v, int64_t oparg)
+{
+    return lu_call_kernel(oparg == 1 ? LU_K_str : oparg == 2 ? LU_K_repr : LU_K_ascii, &v, 1);
+}
+
+/* FORMAT_SIMPLE (spec "") and FORMAT_WITH_SPEC; an exact str formats as itself. */
+static PyObject *
+h_format(PyObject *v, PyObject *spec)
+{
+    if (PyUnicode_CheckExact(v) && PyUnicode_GET_LENGTH(spec) == 0) {
+        return Py_NewRef(v);
+    }
+    PyObject *args[2] = { v, spec };
+    return lu_call_kernel(LU_K_format, args, 2);
+}
+
+/* BUILD_STRING: exact strs joined. */
+static PyObject *
+h_build_string(PyObject **argv, intptr_t n)
+{
+    PyObject *pieces = tuple_of(argv, n);
+    if (pieces == NULL) {
+        return NULL;
+    }
+    PyObject *r = lu_str_join_tuple((PyObject *)&_PyRuntime.singletons.empty_str, pieces);
+    Py_DECREF(pieces);
     return r;
 }
 
@@ -1160,6 +1242,12 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_load_attr] = { (void *)h_load_attr_pic, "load_attr", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_load_method] = { (void *)h_load_method, "load_method", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 3 },
+    [H_load_global] = { (void *)h_load_global, "load_global", REP_OBJ, IF_RAISE, 4 },
+    [H_store_global] = { (void *)h_store_global, "store_global", REP_BIT, IF_RAISE | IF_SEEN, 3 },
+    [H_build_slice] = { (void *)h_build_slice, "build_slice", REP_OBJ, IF_RAISE, 3 },
+    [H_convert_value] = { (void *)h_convert_value, "convert_value", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_format] = { (void *)h_format, "format", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_build_string] = { (void *)h_build_string, "build_string", REP_OBJ, IF_RAISE, 0 },
     [H_call] = { (void *)h_call, "call", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_call_special] = { (void *)h_call_special, "call_special", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_super_attr] = { (void *)h_super_attr, "super_attr", REP_OBJ, IF_RAISE | IF_PY, 5 },
