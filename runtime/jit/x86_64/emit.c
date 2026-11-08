@@ -14,6 +14,7 @@
    from the exit's description, so no per-exit code moves values. */
 #include "jit/target.h"
 #include "jit/jit.h"
+#include "interp/perf.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -3234,9 +3235,16 @@ direct_entry(struct asm_ *a)
     jcc(a, CC_NE, decline);
     cmp_mi(a, 0, R14, offsetof(PyThreadState, tracing), 0);
     jcc(a, CC_NE, decline);
+    /* No PEP 523 hook but perf's, which compiled code needs no frames from. */
+    int hooked = new_label(a);
     load(a, R11, R14, offsetof(PyThreadState, interp));
-    cmp_mi(a, 1, R11, offsetof(struct _is, eval_frame), 0);
+    load(a, R11, R11, offsetof(struct _is, eval_frame));
+    test_rr(a, R11, R11);
+    jcc(a, CC_E, hooked);
+    mov_ri(a, RAX, (int64_t)(intptr_t)lu_perf_eval);
+    alu_rr(a, ALU_CMP, R11, RAX);
     jcc(a, CC_NE, decline);
+    bind(a, hooked);
     cmp_mi(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining), lu_frame_floor(code));
     jcc(a, CC_LE, decline);
     /* Missing arguments come from the defaults, past the borrowed ones:

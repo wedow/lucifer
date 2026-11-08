@@ -50,7 +50,7 @@ lu_count_kind(const struct lu_ins *in)
     case OP_INLINE_STORE: case OP_INLINE_STORE_F: case OP_INLINE_STORE_I: case OP_ATTR_STORE: return CNT_attr_store;
     case OP_GLOBAL_LOAD: return CNT_global_load;
     case OP_LIST_ITEM: case OP_LIST_STORE: case OP_STR_ORD: case OP_BYTES_ITEM: return CNT_item;
-    case OP_HELPER: return CNT_helper;
+    case OP_HELPER: return in->imm2 > 0 ? (int)in->imm2 - 1 : CNT_helper;
     case OP_INCREF: return CNT_incref;
     case OP_DECREF: return CNT_decref;
     case OP_BOX_INT: case OP_BOX_FLOAT: return CNT_box;
@@ -158,6 +158,22 @@ grow(void *p, int *cap, int need, size_t size)
     memset((char *)p + (size_t)*cap * size, 0, (size_t)(n - *cap) * size);
     *cap = n;
     return p;
+}
+
+void
+lu_ir_dep(struct lu_func *f, struct lu_fdep *dep)
+{
+    for (int i = 0; i < f->ndeps; i++) {
+        struct lu_fdep *d = &f->deps[i];
+        if (d->kind == dep->kind && d->obj == dep->obj && d->sub == dep->sub) {
+            return;
+        }
+    }
+    if (f->ndeps == f->capdeps) {
+        f->capdeps = f->capdeps ? 2 * f->capdeps : 8;
+        f->deps = realloc(f->deps, sizeof(struct lu_fdep) * (size_t)f->capdeps);
+    }
+    f->deps[f->ndeps++] = *dep;
 }
 
 void *

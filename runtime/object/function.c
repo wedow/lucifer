@@ -6,6 +6,7 @@
 #include "interp/code.h"
 #include "interp/exceptions.h"
 #include "interp/frame.h"
+#include "jit/jit.h"
 
 #include <string.h>
 
@@ -90,6 +91,12 @@ function_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
     Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
     Py_ssize_t total = nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
     PyThreadState *ts = PyThreadState_Get();
+    PyObject *result;
+    /* A compiled callee is entered directly, as compiled code calls it. */
+    if (kwnames == NULL && ts->current_exception == NULL && ts->current_frame != NULL
+        && lu_jit_call(ts, func, args, nargs, &result)) {
+        return result;
+    }
     PyObject *small[16];
     PyObject **owned = total <= 16 ? small : PyMem_Malloc(total * sizeof(PyObject *));
     if (owned == NULL) {
@@ -105,7 +112,6 @@ function_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
     if (f == NULL) {
         return NULL;
     }
-    PyObject *result;
     if (lu_enter_frame(ts, f, 0, &result)) {
         struct lu_task *t = (struct lu_task *)ts;
         t->pin++;
@@ -131,8 +137,8 @@ builtins_of(PyObject *globals)
     return b;
 }
 
-PyObject *
-lu_function_new(PyObject *code, PyObject *globals)
+static PyObject *
+make_function(PyObject *code, PyObject *globals, int notify)
 {
     PyCodeObject *co = (PyCodeObject *)code;
     PyFunctionObject *op = (PyFunctionObject *)lu_object_new(&PyFunction_Type,
@@ -155,8 +161,22 @@ lu_function_new(PyObject *code, PyObject *globals)
            only, which lets inline caches name them (specialize.c). */
         lu_set_deferred((PyObject *)op);
     }
-    lu_func_notify(PyFunction_EVENT_CREATE, op, NULL);
+    if (notify) {
+        lu_func_notify(PyFunction_EVENT_CREATE, op, NULL);
+    }
     return (PyObject *)op;
+}
+
+PyObject *
+lu_function_new(PyObject *code, PyObject *globals)
+{
+    return make_function(code, globals, 1);
+}
+
+PyObject *
+lu_function_template(PyObject *code, PyObject *globals)
+{
+    return make_function(code, globals, 0);
 }
 
 PyObject *

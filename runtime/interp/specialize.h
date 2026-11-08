@@ -116,6 +116,14 @@ lu_site_unchanged(const lu_codeunit *site, int opcode)
 void lu_specialize_load_global(PyObject *globals, PyObject *builtins, lu_codeunit *site, PyObject *name);
 void lu_specialize_load_attr(PyObject *owner, lu_codeunit *site, PyObject *name);
 void lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name);
+/* What cls.name is when it is a value type.__getattribute__ returns as it
+   is: its type has no __get__, and the metaclass finds attributes as type
+   does and has no such name. A new reference, with the versions that keep
+   it so: the class's, the metaclass's and the value's type's (v[0..2]).
+   NULL when it is not such a value or a version is missing. The interpreter
+   does not cache such a value, whose type may gain a __get__; compiled
+   code guards that type's version. */
+PyObject *lu_specialize_class_value(PyTypeObject *cls, PyObject *name, uint32_t v[3]);
 /* The shapes LOAD_ATTR and STORE_ATTR of name would take on an instance of
    tp that keeps its values inline and has no dict (one compiled code
    made), for a site whose own cache holds another type's: the opcode (the
