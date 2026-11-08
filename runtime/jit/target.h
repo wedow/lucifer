@@ -73,6 +73,8 @@ struct lu_deopt_frame {
     int pc;
     int nlocals, nstack;
     struct lu_dv *vals;
+    uint8_t gen;                /* the frame of the generator its caller's top stack entry holds, which
+                                   returns to it as this enum lu_frame_return says (0: not one) */
 };
 
 /* Why compiled code left, for the counts. */
@@ -83,6 +85,7 @@ enum lu_exit_reason {
     EXIT_SIDE,                  /* an instruction the tier does not compile */
     EXIT_ERROR,                 /* an exception */
     EXIT_FRAME,                 /* a walker wrote the frame's locals, or keeps its frame object */
+    EXIT_YIELD,                 /* a generator yields: its frame is left at the YIELD_VALUE */
     EXIT_REASONS
 };
 
@@ -265,6 +268,17 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(build_map) \
     X(set_add) \
     X(list_to_tuple) \
+    X(async_gen_wrap) \
+    X(gen_send) \
+    X(send) \
+    X(gen_done) \
+    X(get_awaitable) \
+    X(get_yield_from_iter) \
+    X(get_aiter) \
+    X(get_anext) \
+    X(gen_enter) \
+    X(gen_yielded) \
+    X(gen_finish) \
     X(get_iter_seq) \
     X(binary_slice) \
     X(slice_native) \

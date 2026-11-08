@@ -4,6 +4,7 @@
    (here called through a nested eval, as C callers do). None takes a
    reference it is given; each result is a new reference. */
 #include "jit/target.h"
+#include "jit/jit.h"
 #include "interp/exceptions.h"
 #include "interp/gen.h"
 #include "prim/prim.h"
@@ -495,6 +496,20 @@ h_get_iter(PyObject *v)
     return it != NULL || PyErr_Occurred() ? it : lu_call_kernel(LU_K_get_iter, &v, 1);
 }
 
+/* Runs a generator's frame, resumed for compiled code: through its resume
+   unit when it has one, else in a nested activation. */
+static PyObject *
+run_resumed(struct lu_task *t, struct lu_frame *f)
+{
+    PyObject *v;
+    t->pin++;
+    if (!lu_jit_resume(&t->ts, f, &v)) {
+        v = lu_eval(&t->ts, f);
+    }
+    t->pin--;
+    return v;
+}
+
 /* The next item, LU_MISSING when exhausted, or NULL with an exception. A
    generator runs as the interpreter's FOR_ITER resumes it: its return is
    the loop's end, with no StopIteration. */
@@ -513,10 +528,7 @@ h_for_iter(PyObject *it)
             return PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
         }
         f->ret = LU_RETURN_FOR_ITER;
-        task->pin++;
-        PyObject *v = lu_eval(&task->ts, f);
-        task->pin--;
-        return v;
+        return run_resumed(task, f);
     }
     return lu_call_kernel(LU_K_next_item, &it, 1);
 }
@@ -603,6 +615,9 @@ call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, 
             return NULL;
         }
     }
+    if ((co->co_flags & LU_CO_GENERATORS) && co->_co_monitoring == NULL && !t->ts.tracing) {
+        return lu_jit_new_gen(&t->ts, f);
+    }
     t->pin++;
     PyObject *r = lu_eval(&t->ts, f);
     t->pin--;
@@ -643,6 +658,92 @@ lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r)
     PyObject *v = lu_eval_continue(ts, r == LU_JIT_ERROR);
     t->pin--;
     return polled(t, v);
+}
+
+/* gen_send(gen, value), the frame primitive next(), send() and the
+   iteration step resume a generator with: what it yields or returns, or
+   NULL with an exception (StopIteration when it had finished). */
+static PyObject *
+h_gen_send(PyObject *callable, PyObject *gen, PyObject *value)
+{
+    struct lu_task *t = lu_current_task();
+    if (stack_low() || t->ts.interp->eval_frame != NULL) {
+        return LU_JIT_DECLINED;
+    }
+    struct lu_frame *(*prim)(PyThreadState *, PyObject *const *, Py_ssize_t) =
+        (struct lu_frame *(*)(PyThreadState *, PyObject *const *, Py_ssize_t))(void (*)(void))
+        ((PyCFunctionObject *)callable)->m_ml->ml_meth;
+    PyObject *args[2] = { gen, value };
+    struct lu_frame *f = prim(&t->ts, args, 2);
+    return f != NULL ? polled(t, run_resumed(t, f)) : NULL;
+}
+
+/* SEND to a generator or coroutine, the receivers the interpreter resumes
+   itself: what it yields, or returns (h_gen_done then says so; a finished
+   generator returns None); NULL with an exception. Anything else is
+   declined: the interpreter sends to it. */
+static PyObject *
+h_send(PyObject *receiver, PyObject *v)
+{
+    struct lu_task *t = lu_current_task();
+    if ((!Py_IS_TYPE(receiver, &PyGen_Type) && !Py_IS_TYPE(receiver, &PyCoro_Type))
+        || t->ts.interp->eval_frame != NULL || stack_low()) {
+        return LU_JIT_DECLINED;
+    }
+    struct lu_frame *f = lu_gen_resume(&t->ts, receiver, Py_NewRef(v));
+    if (f == NULL) {
+        return PyErr_Occurred() ? NULL : Py_NewRef(Py_None);
+    }
+    return run_resumed(t, f);
+}
+
+static int
+h_gen_done(PyObject *gen)
+{
+    return ((struct lu_gen *)gen)->frame_state >= LU_GEN_COMPLETED;
+}
+
+static PyObject *
+h_get_aiter(PyObject *v)
+{
+    return lu_call_kernel(LU_K_get_aiter, &v, 1);
+}
+
+static PyObject *
+h_get_anext(PyObject *v)
+{
+    return lu_call_kernel(LU_K_get_anext, &v, 1);
+}
+
+/* GET_AWAITABLE: a coroutine is its own awaitable, unless something
+   awaits it already; anything else is the kernel's to convert. */
+static PyObject *
+h_get_awaitable(PyObject *v, int64_t oparg)
+{
+    if (Py_IS_TYPE(v, &PyCoro_Type)) {
+        if (((struct lu_gen *)v)->frame_state == LU_GEN_SUSPENDED_YIELD_FROM) {
+            lu_err_format(PyExc_RuntimeError, "coroutine is being awaited already");
+            return NULL;
+        }
+        return Py_NewRef(v);
+    }
+    PyObject *args[2] = { v, lu_small_int((int)oparg) };
+    return lu_call_kernel(LU_K_get_awaitable, args, 2);
+}
+
+/* GET_YIELD_FROM_ITER: a coroutine delegates to itself, in coroutine code
+   only (`coro` says the code is one); anything else is iterated. */
+static PyObject *
+h_get_yield_from_iter(PyObject *v, int64_t coro)
+{
+    if (Py_IS_TYPE(v, &PyCoro_Type)) {
+        if (!coro) {
+            lu_err_format(PyExc_TypeError, "cannot 'yield from' a coroutine object in a non-coroutine generator");
+            return NULL;
+        }
+        return Py_NewRef(v);
+    }
+    return h_get_iter(v);
 }
 
 /* A call through lu_call, which C callers make. */
@@ -977,6 +1078,17 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_build_map] = { (void *)h_build_map, "build_map", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_set_add] = { (void *)h_set_add, "set_add", REP_BIT, IF_RAISE | IF_PY, 2 },
     [H_list_to_tuple] = { (void *)h_list_to_tuple, "list_to_tuple", REP_OBJ, IF_RAISE | IF_SEEN, 2 },
+    [H_gen_send] = { (void *)h_gen_send, "gen_send", REP_OBJ, IF_RAISE | IF_PY, 3 },
+    [H_send] = { (void *)h_send, "send", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_gen_done] = { (void *)h_gen_done, "gen_done", REP_BIT, 0, 1 },
+    [H_get_awaitable] = { (void *)h_get_awaitable, "get_awaitable", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_get_yield_from_iter] = { (void *)h_get_yield_from_iter, "get_yield_from_iter", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_get_aiter] = { (void *)h_get_aiter, "get_aiter", REP_OBJ, IF_RAISE | IF_PY, 1 },
+    [H_get_anext] = { (void *)h_get_anext, "get_anext", REP_OBJ, IF_RAISE | IF_PY, 1 },
+    [H_gen_enter] = { (void *)lu_gen_enter_in_line, "gen_enter", REP_I64, 0, 2 },
+    [H_gen_yielded] = { (void *)lu_gen_yielded_in_line, "gen_yielded", REP_NONE, 0, 3 },
+    [H_gen_finish] = { (void *)lu_gen_finish_in_line, "gen_finish", REP_NONE, IF_SEEN, 1 },
+    [H_async_gen_wrap] = { (void *)lu_async_gen_wrap, "async_gen_wrap", REP_OBJ, IF_RAISE, 1 },
     [H_get_iter_seq] = { (void *)lu_get_iter_exact, "get_iter_seq", REP_OBJ, IF_RAISE, 1 },
     [H_binary_slice] = { (void *)h_binary_slice, "binary_slice", REP_OBJ, IF_RAISE | IF_PY, 4 },
     [H_slice_native] = { (void *)h_binary_slice, "slice_native", REP_OBJ, IF_RAISE, 4 },

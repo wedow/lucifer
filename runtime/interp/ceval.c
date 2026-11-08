@@ -1267,7 +1267,8 @@ op_RESUME: {
     if ((oparg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM) {
         POLL();
     }
-    if (oparg == 0 && lu_jit_on() && lu_jit_call_hot(code)) {
+    /* A call, or a generator going on after a yield. */
+    if ((oparg == 0 || (code->co_flags & LU_CO_GENERATORS)) && lu_jit_on() && lu_jit_call_hot(code)) {
         goto jit_enter;
     }
     DISPATCH();
@@ -1775,7 +1776,7 @@ resume_linked:
             ERROR_IF(hook_result == NULL);
             uint8_t r = callee->ret;
             if (lu_gen_of(callee)->frame_state >= LU_GEN_COMPLETED) {
-                if (r == LU_RETURN_FOR_ITER) {
+                if (r == LU_RETURN_FOR_ITER || r == LU_RETURN_NEXT) {
                     Py_DECREF(hook_result);
                     hook_result = LU_MISSING;
                 }
@@ -1845,7 +1846,7 @@ return_frame: {
     int from_builtin = (code->co_flags & LU_CO_KERNEL) != 0;
     if (frame->owner == LU_FRAME_GENERATOR) {
         lu_gen_finish(ts, frame);
-        if (ret == LU_RETURN_FOR_ITER) {
+        if (ret == LU_RETURN_FOR_ITER || ret == LU_RETURN_NEXT) {
             Py_DECREF(retval);
             retval = LU_MISSING;
         }
@@ -1887,9 +1888,11 @@ op_INSTRUMENTED_YIELD_VALUE: {
         DISPATCH();
     }
 }
-op_YIELD_VALUE: {
+op_YIELD_VALUE:
     retval = POP();
     SAVE_FRAME();
+yield_frame: {
+    /* The frame is saved at its resume point; YIELD_VALUE's oparg. */
     struct lu_frame *caller = frame->previous;
     uint8_t ret = frame->ret;
     lu_gen_suspend(ts, frame, oparg);
@@ -2672,6 +2675,10 @@ jit_enter:
         frame = (struct lu_frame *)ts->current_frame;
         LOAD_FRAME();
         goto error;
+    case LU_JIT_YIELD:
+        retval = result;
+        oparg = frame->last->op.arg;
+        goto yield_frame;
     }
     Py_UNREACHABLE();
 

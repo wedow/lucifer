@@ -36,6 +36,7 @@ enum lu_frame_return {
     LU_RETURN_PAIR,             /* the value is a 2-tuple: push both items */
     LU_RETURN_UNPACK,           /* the value is a tuple: push its items, last first */
     LU_RETURN_FOR_ITER,         /* the next item, or MISSING: the loop's exit */
+    LU_RETURN_NEXT,             /* the next item, or MISSING pushed (next_item's value) */
     LU_RETURN_SEND,             /* a generator resumed by SEND: a yield pushes the value, a
                                    return pushes it and leaves the yield-from loop */
     LU_RETURN_SENT,             /* the kernel's SEND: (value, returned), as SEND's two outcomes */
@@ -124,6 +125,26 @@ static inline uint8_t
 lu_frame_owner_for(PyCodeObject *code)
 {
     return (code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) ? LU_FRAME_KERNEL_HIDDEN : LU_FRAME_INTERPRETER;
+}
+
+/* Code whose frames live in a generator, coroutine or async generator. */
+#define LU_CO_GENERATORS (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR)
+
+/* The owner compiled code gives a frame of `code` back with: a generator's
+   own frame runs only embedded in its object (RETURN_GENERATOR, its
+   first instruction, is the interpreter's). */
+static inline uint8_t
+lu_frame_home(PyCodeObject *code)
+{
+    return (code->co_flags & LU_CO_GENERATORS) ? LU_FRAME_GENERATOR : lu_frame_owner_for(code);
+}
+
+/* Whether f is a generator's frame, whoever runs it. */
+static inline int
+lu_frame_in_gen(struct lu_frame *f)
+{
+    uint8_t owner = __atomic_load_n(&f->owner, __ATOMIC_ACQUIRE);
+    return owner == LU_FRAME_GENERATOR || (owner == LU_FRAME_JIT && (f->code->co_flags & LU_CO_GENERATORS));
 }
 
 /* What local i's slot holds (a cell for a cell variable) as a new reference,

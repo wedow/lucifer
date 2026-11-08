@@ -31,6 +31,7 @@
 #include "interp/specialize.h"
 #include "interp/perf.h"
 #include "interp/exceptions.h"
+#include "interp/gen.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -73,10 +74,17 @@ struct lu_jit_code {
     int noinline;               /* a side exit in an inlined copy keeps leaving: call it instead */
     int call_pc;                /* where a call enters (call_entry), or -1 */
     struct lu_pic **pics;       /* per code unit: an attribute site's polymorphic cache */
+    /* A generator's code: per code unit, 1 where a resumed frame goes on
+       (after each RESUME), all of them entries of one unit, found at the
+       first of them (resume_key; -1 for other code). */
+    uint8_t *resume;
+    int resume_key;
+    lu_codeunit *fresh;         /* where a generator that never ran stands (the POP_TOP before the first RESUME) */
 };
 
 static struct {
     unsigned long compiles, failures, entries, returns, units_dead, direct, compiled, invalidated;
+    unsigned long resumes, resumes_compiled;
     unsigned long exits[EXIT_REASONS];
     unsigned long inlined;
     unsigned long bailouts[256];        /* side exits planted, per base opcode */
@@ -109,7 +117,7 @@ static struct {
 } allocs;
 
 /* Exit reasons by name, for the counts and LUCIFER_JIT_DEBUG. */
-static const char reasons[EXIT_REASONS][8] = { "guard", "stress", "poll", "side", "error", "frame" };
+static const char reasons[EXIT_REASONS][8] = { "guard", "stress", "poll", "side", "error", "frame", "yield" };
 
 /* A count for -X lucifer_jit_stats: free when the counts are off. */
 static void
@@ -255,6 +263,20 @@ state_for(PyCodeObject *code)
     jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint16_t));
     jc->warmed = calloc((size_t)jc->ncode + 1, 1);
     jc->call_pc = lu_jit_call_entry(code);
+    jc->resume_key = -1;
+    if (code->co_flags & LU_CO_GENERATORS) {
+        jc->resume = calloc((size_t)jc->ncode + 1, 1);
+        for (int pc = 0; pc < jc->ncode; pc = lu_jit_next_pc(code, pc)) {
+            if (lu_base_opcode(code, pc) == RETURN_GENERATOR) {
+                jc->fresh = lu_code_start(code) + lu_jit_next_pc(code, pc);
+            }
+            if (lu_base_opcode(code, pc) == RESUME) {
+                int at = lu_jit_next_pc(code, pc);
+                jc->resume[at] = 1;
+                jc->resume_key = jc->resume_key < 0 ? at : jc->resume_key;
+            }
+        }
+    }
     /* Compiled code calls the call entry's unit directly when the arguments
        bind by position alone and the prologue makes no cells (the direct
        entry copies free variables itself). */
@@ -275,6 +297,7 @@ state_for(PyCodeObject *code)
     free(jc->fails);
     free(jc->wait);
     free(jc->warmed);
+    free(jc->resume);
     free(jc);
     return (struct lu_jit_code *)seen;
 }
@@ -391,7 +414,10 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     struct lu_unit *u = calloc(1, sizeof(struct lu_unit));
     u->code = frame->code;
     f.code = frame->code;
-    f.entry_pc = pc;
+    /* A generator's resume unit (keyed at its first resume point) is
+       compiled where this frame stands, one of its entries. */
+    f.entry_pc = (int)(frame->instr - lu_code_start(frame->code));
+    f.resume = pc == jc->resume_key;
     f.direct = pc == jc->call_pc && jc->direct.nargs >= 0;
     f.stress = _PyRuntime.stress.deopt != 0;
     if (f.stress) {
@@ -401,7 +427,8 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     double t0 = now();
     int dump = _PyRuntime.jit.dump;
     if (dump) {
-        fprintf(stderr, "jit: compiling %s@%d\n", PyUnicode_AsUTF8(frame->code->co_qualname), pc);
+        fprintf(stderr, "jit: compiling %s@%d%s\n", PyUnicode_AsUTF8(frame->code->co_qualname), pc,
+                f.resume ? " (resume)" : "");
     }
     int ok = lu_ssa_build(&f, frame) == 0;
     if (ok && f.cold > 0 && 2 * f.cold >= f.sites && !jc->warmed[pc]) {
@@ -576,8 +603,7 @@ static struct lu_unit *
 compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
 {
     PyCodeObject *code = frame->code;
-    if (!ts->interp->kernel_booted || !(code->co_flags & CO_OPTIMIZED)
-        || (code->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE))) {
+    if (!ts->interp->kernel_booted || !(code->co_flags & CO_OPTIMIZED)) {
         return NULL;
     }
     struct lu_jit_code *jc = state_for(code);
@@ -631,7 +657,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     PyCodeObject *code = frame->code;
     struct lu_task *task = (struct lu_task *)ts;
     /* What can change while the code has units: the frame, tools, a hook. */
-    if (frame->locals != NULL || frame->owner == LU_FRAME_GENERATOR || code->_co_monitoring != NULL
+    if (frame->locals != NULL || code->_co_monitoring != NULL
         || ts->tracing || (ts->interp->eval_frame != NULL && !lu_perf_is_trampoline(ts->interp->eval_frame))
         || code->_co_instrumentation_version
            != (__atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK)) {
@@ -640,6 +666,13 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     int pc = (int)(frame->instr - lu_code_start(code));
     struct lu_jit_code *jc = state_of(code);
     struct lu_unit *u = NULL;
+    if ((code->co_flags & LU_CO_GENERATORS) && jc == NULL) {
+        jc = state_for(code);
+    }
+    int resumed = jc != NULL && jc->resume != NULL && jc->resume[pc];
+    if (resumed) {
+        pc = jc->resume_key;    /* every resume point enters the one unit */
+    }
     if (jc != NULL) {
         uint16_t wait = __atomic_load_n(&jc->wait[pc], __ATOMIC_RELAXED);
         if (wait != 0 || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED)) {
@@ -654,6 +687,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         return LU_JIT_NONE;
     }
     count(&stats.entries, 1);
+    count(&stats.resumes_compiled, (unsigned long)resumed);
     bump_entries(u);
     int debug = _PyRuntime.jit.debug;
     if (debug) {
@@ -677,13 +711,14 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     return (enum lu_jit_result)r;
 }
 
-/* MAKE_CELL and COPY_FREE_VARS as the interpreter runs them: 0, or -1
-   with an exception and frame->instr after the instruction that raised. */
+/* MAKE_CELL and COPY_FREE_VARS as the interpreter runs them, up to the
+   RESUME (or a generator's RETURN_GENERATOR): 0, or -1 with an exception
+   and frame->instr after the instruction that raised. */
 static int
 prologue(struct lu_frame *frame)
 {
     PyCodeObject *code = frame->code;
-    for (lu_codeunit *at = lu_code_start(code); at->op.code != RESUME; at++) {
+    for (lu_codeunit *at = lu_code_start(code); at->op.code != RESUME && at->op.code != RETURN_GENERATOR; at++) {
         if (at->op.code == COPY_FREE_VARS) {
             PyObject **closure = &PyTuple_GET_ITEM(((PyFunctionObject *)frame->func)->func_closure, 0);
             PyObject **free = frame->localsplus + code->co_nlocalsplus - at->op.arg;
@@ -701,6 +736,28 @@ prologue(struct lu_frame *frame)
         }
     }
     return 0;
+}
+
+PyObject *
+lu_jit_new_gen(PyThreadState *ts, struct lu_frame *frame)
+{
+    PyCodeObject *code = frame->code;
+    lu_codeunit *at = lu_code_start(code);
+    while (at->op.code == MAKE_CELL || at->op.code == COPY_FREE_VARS) {
+        at++;
+    }
+    PyObject *gen = NULL;
+    if (at->op.code != RETURN_GENERATOR) {
+        PyErr_SetString(PyExc_SystemError, "a generator's code that does not start with RETURN_GENERATOR");
+    }
+    else if (prologue(frame) == 0) {
+        frame->last = at;
+        frame->instr = at + 1 + lu_opcode_caches[RETURN_GENERATOR];
+        frame->stackpointer = frame->localsplus + code->co_nlocalsplus;
+        gen = lu_gen_new(ts, frame);
+    }
+    lu_frame_pop(ts, frame);
+    return gen;
 }
 
 int
@@ -752,6 +809,79 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     return 1;
 }
 
+void
+lu_jit_note_resume(void)
+{
+    count(&stats.resumes, 1);
+}
+
+int
+lu_jit_resume(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
+{
+    PyCodeObject *code = frame->code;
+    struct lu_jit_code *jc = state_of(code);
+    struct lu_task *task = (struct lu_task *)ts;
+    /* lu_jit_run's conditions, and no hook: a PEP 523 hook sees resumes. */
+    uintptr_t poll = __atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED);
+    if (jc == NULL || jc->resume_key < 0 || frame->locals != NULL || (poll & LU_POLL_EVENTS_MASK)
+        || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) || code->_co_monitoring != NULL
+        || ts->tracing || code->_co_instrumentation_version != (poll & ~LU_POLL_EVENTS_MASK)
+        || ts->interp->eval_frame != NULL || jc->wait[jc->resume_key] != 0) {
+        return 0;
+    }
+    /* What the interpreter runs before the unit's entry: a frame that
+       never ran pops the None it was sent, then RESUME (the instruction
+       before each resume point, whose caches it has). */
+    lu_codeunit *start = lu_code_start(code);
+    int fresh = frame->instr == jc->fresh;
+    int pc = fresh ? jc->resume_key - 1 - lu_opcode_caches[RESUME] : (int)(frame->instr - start);
+    int at = pc + 1 + lu_opcode_caches[RESUME];
+    struct lu_unit *u = at < jc->ncode && jc->resume[at] ? find(jc, jc->resume_key) : NULL;
+    if (u == NULL) {
+        return 0;
+    }
+    if (fresh) {
+        Py_DECREF(*--frame->stackpointer);
+    }
+    frame->instr = start + at;
+    frame->last = start + pc;
+    struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
+    entry.previous = (struct lu_frame *)ts->current_frame;
+    frame->previous = &entry;
+    ts->current_frame = (struct _PyInterpreterFrame *)frame;
+    count(&stats.entries, 1);
+    count(&stats.resumes_compiled, 1);
+    bump_entries(u);
+    int r = u->fn(ts, frame, result);
+    if (r == LU_JIT_RETURN) {
+        uint8_t ret = frame->ret;
+        lu_gen_finish(ts, frame);
+        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
+        if (ret == LU_RETURN_FOR_ITER) {
+            Py_DECREF(*result);
+            *result = LU_MISSING;
+        }
+        return 1;
+    }
+    if (r == LU_JIT_YIELD) {
+        lu_gen_suspend(ts, frame, frame->last->op.arg);
+        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
+        return 1;
+    }
+    lu_codeunit *y = frame->instr;
+    if (r == LU_JIT_DEOPT && (struct lu_frame *)ts->current_frame == frame && y->op.code == YIELD_VALUE) {
+        /* Left at a yield (EXIT_YIELD): YIELD_VALUE, as the interpreter runs it. */
+        *result = *--frame->stackpointer;
+        frame->last = y;
+        frame->instr = y + 1 + lu_opcode_caches[YIELD_VALUE];
+        lu_gen_suspend(ts, frame, y->op.arg);
+        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
+        return 1;
+    }
+    *result = lu_eval_continue(ts, r == LU_JIT_ERROR);
+    return 1;
+}
+
 /* Whether frame k of an error exit has a handler where it stands: the
    innermost at the raising instruction, each caller at its call. */
 int
@@ -788,6 +918,9 @@ void
 lu_jit_note_exit(struct lu_deopt *d)
 {
     count(&stats.exits[d->reason], 1);
+    if (d->reason == EXIT_YIELD) {
+        return;                 /* the end of a generator unit's run, no leave */
+    }
     count(&stats.taken[d->opcode & 0xff], 1);
     if (_PyRuntime.jit.debug) {
         struct lu_deopt_frame *in = &d->frames[d->nframes - 1];
@@ -977,6 +1110,7 @@ lu_jit_code_free(PyCodeObject *code)
     free(jc->fails);
     free(jc->wait);
     free(jc->warmed);
+    free(jc->resume);
     free(jc);
     code->co_executors = NULL;
 }
@@ -993,6 +1127,8 @@ lu_jit_report(void)
             "compile time %.1f ms, code %lu bytes\n", stats.compiles, stats.failures, stats.units_dead,
             stats.inlined, stats.compile_seconds * 1e3, stats.code_bytes);
     fprintf(stderr, "jit: units invalidated %lu\n", stats.invalidated);
+    fprintf(stderr, "jit: generator resumes interpreted %lu, compiled %lu\n",
+            stats.resumes > stats.resumes_compiled ? stats.resumes - stats.resumes_compiled : 0, stats.resumes_compiled);
     for (int i = 0; i < 8 && stats.failure_names[i] != NULL; i++) {
         fprintf(stderr, "jit:   failed: %s: %lu\n", stats.failure_names[i], stats.failure_reasons[i]);
     }

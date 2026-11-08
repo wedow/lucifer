@@ -6,7 +6,8 @@
    back-edge jumps to or the instruction after RESUME, with the frame
    exactly as the interpreter left it there, and runs until the function
    returns, an exception no handler of the unit takes is raised, or a
-   guard fails. The interpreter is
+   guard fails. A generator's unit starts after any of its RESUMEs (the
+   frame's instruction picks) and also ends at a yield (LU_JIT_YIELD). The interpreter is
    the deopt landing: a unit hands back a frame (and any frames of inlined
    calls above it) at a bytecode boundary that has not executed. */
 #ifndef LU_JIT_H
@@ -24,6 +25,8 @@ enum lu_jit_result {
     LU_JIT_DEOPT,       /* frames were handed back at an unexecuted boundary: continue
                            with ts->current_frame, which may be an inlined callee's */
     LU_JIT_ERROR,       /* ts->current_frame raised: unwind from its instr */
+    LU_JIT_YIELD,       /* the frame's generator yielded *result (a new reference): the frame is
+                           saved at its resume point, still current; the caller suspends it */
 };
 
 /* Back-edges and calls before a function is compiled (-X lucifer_jit=on). */
@@ -169,6 +172,24 @@ int lu_jit_call_entry(PyCodeObject *code);
    the frame returns into it. 1 with *result the frame's value (NULL with
    an exception), or 0 with nothing done when there is no unit to enter. */
 int lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
+
+/* Runs a generator's frame, just resumed for a C caller by lu_gen_resume
+   (linked above the task's current frame, its sent value pushed), through
+   the code's resume unit, with no activation of the eval loop until the
+   unit leaves. 1 with *result what the generator yielded or returned (a
+   return under LU_RETURN_FOR_ITER gives MISSING), NULL with an exception;
+   0 with nothing done when there is no unit to enter. */
+int lu_jit_resume(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
+
+/* Calls a generator function from compiled code: `frame`, pushed and bound
+   (the task's topmost, not linked), runs RETURN_GENERATOR and the prologue
+   before it as the interpreter does (a tool sees neither: PY_START comes
+   at the first RESUME), and is popped. The new generator, coroutine or
+   async generator, or NULL with an exception. */
+PyObject *lu_jit_new_gen(PyThreadState *ts, struct lu_frame *frame);
+
+/* -X lucifer_jit_stats: a generator was resumed. */
+void lu_jit_note_resume(void);
 
 /* A polymorphic inline cache (runtime/jit/jit.c): the shapes an attribute
    site the interpreter's one-shape cache gave up on has met in compiled

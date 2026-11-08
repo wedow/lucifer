@@ -54,6 +54,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(CONST_F, REP_F64, IF_PURE)        /* imm: the bits */ \
     X(ENTRY_LOCAL, REP_OBJ, 0)          /* imm: frame->localsplus[imm], borrowed from the slot */ \
     X(ENTRY_STACK, REP_OBJ, 0)          /* imm: the stack entry, owned */ \
+    X(ENTRY_PC, REP_I64, 0)             /* the code unit frame->instr names: a resume unit's entry */ \
     X(PHI, REP_NONE, 0)                 /* args: one input per predecessor; rep set by the builder */ \
     X(UNBOX_INT, REP_I64, IF_GUARD | IF_EFFECT)     /* a: an exact int that fits one digit; kept, since */ \
     X(UNBOX_FLOAT, REP_F64, IF_GUARD | IF_EFFECT)   /* a's known type lets later code fold */ \
@@ -153,6 +154,9 @@ struct lu_fs {
     int nlocals, nstack;
     lu_v *vals;                 /* locals, then the stack bottom up; LU_NOV is NULL */
     uint8_t *owned;             /* per entry: compiled code holds a reference for it */
+    uint8_t gen;                /* a generator's frame its caller resumed in line: the generator is
+                                   the caller's top stack entry (ssa_build.c inline_resume), and this
+                                   says how it returns (LU_RETURN_FOR_ITER or _NEXT; 0: not one) */
 };
 
 /* Instruction flags kept per instruction. */
@@ -215,6 +219,14 @@ struct lu_helper {
     uint8_t nargs;
 };
 
+/* A value that is a generator, made by a call of a generator function
+   whose code (and function, when it is a constant) the builder knows. */
+struct lu_gen_made {
+    lu_v v;
+    PyCodeObject *code;
+    PyFunctionObject *func;
+};
+
 struct lu_func {
     struct lu_ins *ins;
     int nins, capins;
@@ -225,6 +237,7 @@ struct lu_func {
     PyCodeObject *code;
     int entry_pc;
     int direct;                 /* the call entry of a code compiled code may call directly */
+    int resume;                 /* a generator's resume unit: an entry per resume point (frame->instr picks) */
     int nborrowed;              /* leading parameters the root borrows (ssa_build.c) */
     int stress;                 /* deopt:N is on: guards count */
     PyObject **consts;          /* strong references the unit keeps */
@@ -246,6 +259,8 @@ struct lu_func {
     struct lu_fdep *deps;       /* the facts the code relies on between polls */
     int ndeps, capdeps;
     int *idom;                  /* per block, once optimized: its immediate dominator (-1: unreached) */
+    struct lu_gen_made *gens;   /* values that are generators of a known code (ssa_build.c) */
+    int ngens, capgens;
 };
 
 /* Building and editing. */
