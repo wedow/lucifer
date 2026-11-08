@@ -1,6 +1,6 @@
 ---
 id: luc-55va
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-08T16:14:44Z
