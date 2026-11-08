@@ -28,6 +28,7 @@
 #define VERSION_TAG_BASE (2u << 16)     /* _Py_TYPE_BASE_VERSION_TAG */
 
 extern PyTypeObject *const lu_static_types[];
+void _PyObject_XDecRefDelayed(PyObject *op);     /* runtime/thread/qsbr.c */
 
 static size_t
 preheader_size(PyTypeObject *tp)
@@ -355,11 +356,17 @@ PyType_Unwatch(int id, PyObject *obj)
     return 0;
 }
 
-/* The walk of the MRO: the first dict that has the name, as a new reference. */
+/* The walk of the MRO: the first dict that has the name, as a new reference.
+   Another thread may replace the MRO meanwhile (type_set_mro). The replaced
+   tuple is released only after a QSBR grace period, and nothing between the
+   load and the incref reports a quiescent state or detaches, so the tuple is
+   alive at the incref. The walk keeps that reference, since a dict lookup
+   that waits for the dict's lock detaches, and a detached carrier holds
+   nothing as far as QSBR knows. */
 static PyObject *
 lookup_in_mro(PyTypeObject *tp, PyObject *name)
 {
-    PyObject *mro = tp->tp_mro;
+    PyObject *mro = __atomic_load_n(&tp->tp_mro, __ATOMIC_ACQUIRE);
     if (mro == NULL) {
         /* During creation, before the MRO exists: the type, then its bases. */
         for (; tp != NULL; tp = tp->tp_base) {
@@ -370,15 +377,14 @@ lookup_in_mro(PyTypeObject *tp, PyObject *name)
         }
         return NULL;
     }
-    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); i++) {
-        PyTypeObject *base = (PyTypeObject *)PyTuple_GET_ITEM(mro, i);
-        PyObject *dict = lu_type_dict(base);
-        PyObject *v = dict != NULL ? lu_ns_get(dict, name) : NULL;
-        if (v != NULL) {
-            return v;
-        }
+    Py_INCREF(mro);
+    PyObject *v = NULL;
+    for (Py_ssize_t i = 0; v == NULL && i < PyTuple_GET_SIZE(mro); i++) {
+        PyObject *dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i));
+        v = dict != NULL ? lu_ns_get(dict, name) : NULL;
     }
-    return NULL;
+    Py_DECREF(mro);
+    return v;
 }
 
 /* The walk of the MRO, its reference dropped at once when the caller only
@@ -1950,7 +1956,10 @@ prim_type_set_mro(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN) {
         lu_set_immortal(mro);
     }
-    Py_XSETREF(tp->tp_mro, Py_NewRef(mro));
+    /* Lock-free readers may still walk the old one (lookup_in_mro). */
+    PyObject *old_mro = tp->tp_mro;
+    __atomic_store_n(&tp->tp_mro, Py_NewRef(mro), __ATOMIC_RELEASE);
+    _PyObject_XDecRefDelayed(old_mro);
     if (!(tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)) {
         mro_modified(tp, mro);
         mro_modified(tp, tp->tp_bases);
@@ -1997,9 +2006,9 @@ prim_type_set_bases(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
             }
         }
     }
-    tp->tp_bases = Py_NewRef(bases);
-    if (old != NULL && !(tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)) {
-        Py_DECREF(old);
+    __atomic_store_n(&tp->tp_bases, Py_NewRef(bases), __ATOMIC_RELEASE);
+    if (!(tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)) {
+        _PyObject_XDecRefDelayed(old);          /* lock-free readers, as the MRO's */
     }
     return Py_NewRef(Py_None);
 }
