@@ -1879,7 +1879,7 @@ static PyObject *
 prim_type_new_layout(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(4); TYPE_ARG(0);
-    if (!PyUnicode_Check(args[1]) || !PyTuple_Check(args[2]) || !PyDict_CheckExact(args[3])) {
+    if (!PyUnicode_Check(args[1]) || !PyTuple_Check(args[2]) || !PyDict_Check(args[3])) {
         lu_err_format(PyExc_SystemError, "type_new_layout(meta, str, tuple, dict)");
         return NULL;
     }
