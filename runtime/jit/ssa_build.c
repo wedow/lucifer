@@ -2039,7 +2039,8 @@ inline_resume(struct ctx *c, lu_v it, PyCodeObject *co, PyFunctionObject *fn, in
         }
         lu_v args[2] = { it, konst(c, (PyObject *)co) };
         lu_v at = helper(c, H_gen_enter, 2, args);
-        guard(c, OP_GUARD_BIT, emit(c, OP_CMP_I, REP_BIT, at, const_i(c, -2), LU_NOV, Py_NE), 1);
+        /* gen_enter made it running when it did not decline: stress must not leave here. */
+        guard_after(c, OP_GUARD_BIT, emit(c, OP_CMP_I, REP_BIT, at, const_i(c, -2), LU_NOV, Py_NE), 1);
         /* Finished: the iteration ends. */
         lu_v fin = emit(c, OP_CMP_I, REP_BIT, at, const_i(c, 0), LU_NOV, Py_LT);
         lu_v missing = konst(c, LU_MISSING);
