@@ -78,16 +78,23 @@ other machines).
     kernel frames inlined into it (which make no traceback entries), does not
     leave: the raising call branches to a landing that adds the root's
     traceback entry and takes the exception, and the handler's
-    `PUSH_EXC_INFO`, `CHECK_EXC_MATCH` and `POP_EXCEPT` compile. `RERAISE`, a
-    bare `raise`, and a landing while a tool watches exceptions leave.
+    `PUSH_EXC_INFO`, `CHECK_EXC_MATCH` and `POP_EXCEPT` compile. `RERAISE` and
+    a bare `raise` compile in kernel code (which makes no traceback entry)
+    and leave elsewhere, as a landing does while a tool watches exceptions.
     `raise` with an exception compiles as a call of the kernel's `do_raise`.
+  - An exception no frame of the exit takes, raised through kernel frames
+    only, at a root a direct call entered, leaves as that call's result:
+    the frames are released and popped in place (`LU_JIT_RAISED`), with no
+    eval loop to unwind them.
 - **Recompilation.** A guard that fails 50 times marks its instruction "do not
-  speculate" and kills the units of the root code. A side exit inside an
+  speculate" and kills the units of the root code. A unit built after that
+  mark which still fails there (its build keeps the check) only leaves. A side exit inside an
   inlined copy that keeps firing stops that function from being inlined,
   and every root that still holds the copy recompiles when it leaves there.
   - A unit without loops that leaves by a side exit or an exception on half
-    its entries (50 at least) is retired. An exception that leaves the root
-    frame ends the call, so it does not count.
+    its entries (50 at least) is retired, once: activations still running
+    it leave too. An exception that leaves the root frame ends the call, so
+    it does not count.
   - Nothing is given up for good (luc-xboo). A dead unit's entry, or one
     whose compile failed, waits (50 + the code's size) << level interpreted
     entries before it compiles again. A retirement or a failed compile
