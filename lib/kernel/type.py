@@ -7,7 +7,7 @@ from _lucifer import (
     type_base, type_name, type_qualname, type_set_name, type_tp_name, type_text_signature, type_flag, type_set_flag,
     type_can_new, type_new_layout, type_set_mro, type_set_bases, type_subclasses,
     type_modified, type_static_module, is_subtype, ns_get, ns_set, ns_del, ns_items, cell_set, proxy_new,
-    field_get, kernel_get, is_callable, type_layout, enable_deferred,
+    field_get, kernel_get, is_callable, type_layout, enable_deferred, instance_store,
 )
 from _lucifer import _boot, object as _object
 
@@ -86,8 +86,7 @@ def _set_module(cls, value):
     if type_flag(cls, _IMMUTABLETYPE):
         error(TypeError, str_join('', (
             "cannot set '__module__' attribute of immutable type '", type_tp_name(cls), "'")))
-    ns_set(type_dict(cls), '__module__', value)
-    type_modified(cls)
+    instance_store(cls, '__module__', value)
 
 
 def _get_doc(cls):
@@ -103,8 +102,7 @@ def _set_doc(cls, value):
     if type_flag(cls, _IMMUTABLETYPE):
         error(TypeError, str_join('', (
             "cannot set '__doc__' attribute of immutable type '", type_tp_name(cls), "'")))
-    ns_set(type_dict(cls), '__doc__', None if value is MISSING else value)
-    type_modified(cls)
+    instance_store(cls, '__doc__', None if value is MISSING else value)
 
 
 _IS_ABSTRACT = 1 << 20
@@ -120,16 +118,13 @@ def _get_abstractmethods(cls):
 
 def _set_abstractmethods(cls, value):
     """type_set_abstractmethods: Py_TPFLAGS_IS_ABSTRACT follows the truth of the value."""
-    d = type_dict(cls)
     if value is MISSING:
-        if ns_get(d, '__abstractmethods__', MISSING) is MISSING:
+        if not instance_store(cls, '__abstractmethods__', MISSING):
             error(AttributeError, '__abstractmethods__')
-        ns_del(d, '__abstractmethods__')
         abstract = False
     else:
         abstract = True if value else False
-        ns_set(d, '__abstractmethods__', value)
-    type_modified(cls)
+        instance_store(cls, '__abstractmethods__', value)
     type_set_flag(cls, _IS_ABSTRACT, abstract)
 
 
@@ -167,8 +162,7 @@ def _set_type_params(cls, value):
             "cannot set '__type_params__' attribute of immutable type '", type_tp_name(cls), "'")))
     if not kind(value, 'tuple'):
         error(TypeError, str_join('', ('__type_params__ must be set to a tuple, not ', type(value).__name__)))
-    ns_set(type_dict(cls), '__type_params__', value)
-    type_modified(cls)
+    instance_store(cls, '__type_params__', value)
 
 
 def _heap_only(cls, name):
@@ -181,9 +175,8 @@ def _own(d, name):
     return ns_get(d, name, MISSING)
 
 
-def _drop(d, name):
-    if ns_get(d, name, MISSING) is not MISSING:
-        ns_del(d, name)
+def _drop(cls, name):
+    instance_store(cls, name, MISSING)
 
 
 def _get_annotate(cls):
@@ -210,11 +203,9 @@ def _set_annotate(cls, value):
             "cannot set '__annotate__' attribute of immutable type '", type_tp_name(cls), "'")))
     if value is not None and not is_callable(value):
         error(TypeError, '__annotate__ must be callable or None')
-    d = type_dict(cls)
-    ns_set(d, '__annotate_func__', value)
+    instance_store(cls, '__annotate_func__', value)
     if value is not None:
-        _drop(d, '__annotations_cache__')
-    type_modified(cls)
+        _drop(cls, '__annotations_cache__')
 
 
 def _get_annotations(cls):
@@ -237,8 +228,7 @@ def _get_annotations(cls):
                 "__annotate__ returned non-dict of type '", type_tp_name(type(annotations)), "'")))
     else:
         annotations = {}
-    ns_set(d, '__annotations_cache__', annotations)
-    type_modified(cls)
+    instance_store(cls, '__annotations_cache__', annotations)
     return annotations
 
 
@@ -249,16 +239,14 @@ def _set_annotations(cls, value):
     d = type_dict(cls)
     key = '__annotations__' if _own(d, '__annotations__') is not MISSING else '__annotations_cache__'
     if value is MISSING:
-        if _own(d, key) is MISSING:
+        if not instance_store(cls, key, MISSING):
             error(AttributeError, '__annotations__')
-        ns_del(d, key)
     else:
-        ns_set(d, key, value)
+        instance_store(cls, key, value)
     if key == '__annotations__':
-        _drop(d, '__annotations_cache__')
-    _drop(d, '__annotate_func__')
-    _drop(d, '__annotate__')
-    type_modified(cls)
+        _drop(cls, '__annotations_cache__')
+    _drop(cls, '__annotate_func__')
+    _drop(cls, '__annotate__')
 
 
 def _get_dict(cls):
@@ -518,9 +506,9 @@ type(name, bases, dict, **kwds) -> a new type"""
 
 def _type_set(cls, name, value):
     """type_setattro: immutable types refuse; a dunder updates the slots.
-    The cached lookups go before the dict changes, as the replaced value's
-    finalizer may look the name up, and again after, for a lookup another
-    thread made in between."""
+    A store into the type's dict takes back the cached lookups before it
+    releases the value it replaced (instance_store); the calls here are for
+    what a descriptor's setter changes."""
     if type_flag(cls, _IMMUTABLETYPE):
         error(TypeError, str_join('', (
             "cannot set '", name, "' attribute of immutable type '", type_tp_name(cls), "'")))

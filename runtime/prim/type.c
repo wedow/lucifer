@@ -160,8 +160,9 @@ next_global_version_tag(void)
     return old + 1;
 }
 
-int
-lu_type_assign_version(PyTypeObject *tp)
+/* lu_type_assign_version with type_lock held. */
+static int
+assign_version(PyTypeObject *tp)
 {
     if (tp->tp_version_tag != 0) {
         return 1;
@@ -171,7 +172,7 @@ lu_type_assign_version(PyTypeObject *tp)
     }
     PyObject *bases = tp->tp_bases;
     for (Py_ssize_t i = 0; bases != NULL && i < PyTuple_GET_SIZE(bases); i++) {
-        if (!lu_type_assign_version((PyTypeObject *)PyTuple_GET_ITEM(bases, i))) {
+        if (!assign_version((PyTypeObject *)PyTuple_GET_ITEM(bases, i))) {
             return 0;
         }
     }
@@ -194,6 +195,20 @@ lu_type_assign_version(PyTypeObject *tp)
     return 1;
 }
 
+/* A type gets its tag, after its bases, under type_lock, which also orders
+   it with the change that takes tags back (lu_type_modified). */
+int
+lu_type_assign_version(PyTypeObject *tp)
+{
+    if (__atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) != 0) {
+        return 1;
+    }
+    PyMutex_Lock(&_PyRuntime.type_lock);
+    int r = assign_version(tp);
+    PyMutex_Unlock(&_PyRuntime.type_lock);
+    return r;
+}
+
 int
 PyUnstable_Type_AssignVersionTag(PyTypeObject *tp)
 {
@@ -214,10 +229,11 @@ notify_type_watchers(PyTypeObject *tp)
     }
 }
 
-void
-lu_type_modified(PyTypeObject *tp)
+/* The watchers of tp and of its subclasses that have tags, subclasses first. */
+static void
+notify_modified(PyTypeObject *tp)
 {
-    if (tp->tp_version_tag == 0) {
+    if (__atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) == 0) {
         return;
     }
     PyObject *subs = subclasses_snapshot(tp);
@@ -225,13 +241,51 @@ lu_type_modified(PyTypeObject *tp)
         Py_FatalError("out of memory invalidating a type's subclasses");
     }
     for (Py_ssize_t i = 0; i < PyList_GET_SIZE(subs); i++) {
-        lu_type_modified((PyTypeObject *)PyList_GET_ITEM(subs, i));
+        notify_modified((PyTypeObject *)PyList_GET_ITEM(subs, i));
     }
     Py_DECREF(subs);
     notify_type_watchers(tp);
+}
+
+/* Takes back the tags of tp and its subclasses, subclasses first (a type
+   has a tag only while its bases do), with type_lock held. */
+static void
+clear_versions(PyTypeObject *tp)
+{
     unsigned int version = tp->tp_version_tag;
+    if (version == 0) {
+        return;
+    }
+    PyObject *list = *subclasses_ref(tp);
+    for (Py_ssize_t i = 0; list != NULL && i < PyList_GET_SIZE(list); i++) {
+        PyTypeObject *sub = subclass_of(PyList_GET_ITEM(list, i));
+        if (sub != NULL) {
+            clear_versions(sub);
+        }
+    }
     set_version(tp, 0);
     lu_jit_invalidate(LU_DEP_TYPE, version, 0);
+}
+
+/* After a change to what lookups through tp find. A tag is assigned and
+   taken back only under type_lock, and that orders the two (CPython's
+   TYPE_LOCK): a tag assigned before this clear is taken back by it, and
+   one assigned after it is assigned after the change, so every lookup
+   under it finds the change. A tag that is current therefore never names
+   what the change replaced, and the replaced value may be released once
+   this returns (lu_attr_store, type_lookup). */
+void
+lu_type_modified(PyTypeObject *tp)
+{
+    for (int i = 0; i < LU_MAX_WATCHERS; i++) {
+        if (PyInterpreterState_Get()->type_watchers[i] != NULL) {
+            notify_modified(tp);
+            break;
+        }
+    }
+    PyMutex_Lock(&_PyRuntime.type_lock);
+    clear_versions(tp);
+    PyMutex_Unlock(&_PyRuntime.type_lock);
 }
 
 void
@@ -341,9 +395,13 @@ walk(PyTypeObject *tp, PyObject *name, int take)
 
 /* The lookup behind _PyType_LookupRef (typeobject.c): with `take` the value is a new reference, which the
    caller may keep while another thread replaces the attribute. A cache entry
-   holds the value without owning it, as the dict holds it, so the reader
-   takes its reference only if the value is still alive and the entry has not
-   changed under it; otherwise it walks the MRO. */
+   holds the value without owning it, as the dict holds it. A change takes
+   back the type's tag before it releases the value it replaced
+   (lu_type_modified), so an entry of a current tag names a live value. The
+   reader takes its reference only if the value is still alive and the entry
+   has not changed under it, and keeps it only if the tag is still current:
+   a value released meanwhile may have left its memory to another object,
+   which a try could take. Otherwise it walks the MRO. */
 static PyObject *
 type_lookup(PyTypeObject *tp, PyObject *name, int take)
 {
@@ -369,8 +427,14 @@ type_lookup(PyTypeObject *tp, PyObject *name, int take)
         PyObject *value = __atomic_load_n(&e->value, __ATOMIC_RELAXED);
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         if (v == version && n == name && __atomic_load_n(&e->seq, __ATOMIC_RELAXED) == seq) {
-            if (value == NULL || !take || lu_try_incref_compare(&e->value, value)) {
+            if (value == NULL || !take) {
                 return value;
+            }
+            if (lu_try_incref_compare(&e->value, value)) {
+                if (__atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) == version) {
+                    return value;
+                }
+                Py_DECREF(value);
             }
         }
     }
@@ -1854,8 +1918,7 @@ mro_modified(PyTypeObject *tp, PyObject *bases)
             || !PyType_IsSubtype(tp, base);
     }
     if (clear) {
-        set_version(tp, 0);
-        tp->tp_versions_used = _Py_ATTR_CACHE_UNUSED;
+        tp->tp_versions_used = _Py_ATTR_CACHE_UNUSED;       /* lu_type_modified takes back its tag */
     }
 }
 

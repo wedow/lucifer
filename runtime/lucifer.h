@@ -1316,6 +1316,11 @@ int lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value);
 int lu_ns_store(PyObject *dict, PyObject *key, PyObject *value);
 /* Removes `key`: 1 when it was there, 0 when not. */
 int lu_ns_delete(PyObject *dict, PyObject *key);
+/* lu_ns_store, or lu_ns_delete when value is NULL, handing the value it
+   replaced or removed to the caller (*old, a reference, or NULL) instead of
+   releasing it: 1 when stored or removed, 0 when there was nothing to
+   remove, -1 on error. */
+int lu_ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old);
 /* PyDict_Next over the namespace: *pos starts at 0; key and value are
    borrowed. A dict other threads may write is iterated in its critical
    section, as cp314t's dict_merge and PyDict_Copy do. */
