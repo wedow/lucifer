@@ -1509,13 +1509,15 @@ field_offset(PyObject *obj, PyObject *index)
     if (!PyLong_CheckExact(index) || lu_long_as_long(index, &i) < 0) {
         return -1;
     }
-    for (size_t t = 0; t < sizeof types / sizeof types[0]; t++) {
-        if (PyObject_TypeCheck(obj, types[t])) {
-            if (i < 0 || i >= counts[t]) {
-                break;
-            }
-            return (Py_ssize_t)(sizeof(PyObject) + i * sizeof(PyObject *));
-        }
+    /* the exact types first: a subclass instance is the rare case */
+    size_t t = 0, n = sizeof types / sizeof types[0];
+    while (t < n && !Py_IS_TYPE(obj, types[t])) {
+        t++;
+    }
+    for (t = t < n ? t : 0; t < n && !PyObject_TypeCheck(obj, types[t]); t++) {
+    }
+    if (t < n && i >= 0 && i < counts[t]) {
+        return (Py_ssize_t)(sizeof(PyObject) + i * sizeof(PyObject *));
     }
     lu_err_format(PyExc_SystemError, "field %ld of a '%s' is not kernel-writable", i,
                   Py_TYPE(obj)->tp_name);
