@@ -348,6 +348,16 @@ lu_dict_init(void)
    left to their methods, and any other pair of those types is unequal. */
 enum { EQ_STR, EQ_INT, EQ_FLOAT, EQ_BYTES, EQ_TUPLE, EQ_IDENT, EQ_OTHER };
 
+/* Whether instances of tp hash and compare as object's do, by identity: it
+   keeps object's __hash__ and __eq__ (a plain class, a function). */
+static int
+identity_keyed(PyTypeObject *tp)
+{
+    PyObject *hash = _PyType_Lookup(tp, LU_ID(__hash__)), *eq = _PyType_Lookup(tp, LU_ID(__eq__));
+    return hash != NULL && eq != NULL && hash == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__hash__))
+        && eq == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__eq__));
+}
+
 static int
 eq_class(PyObject *v)
 {
@@ -357,7 +367,7 @@ eq_class(PyObject *v)
          : tp == &PyFloat_Type ? EQ_FLOAT
          : tp == &PyBytes_Type ? EQ_BYTES
          : tp == &PyTuple_Type ? EQ_TUPLE
-         : v == Py_None || tp == &PyType_Type ? EQ_IDENT : EQ_OTHER;
+         : v == Py_None || tp == &PyType_Type || identity_keyed(tp) ? EQ_IDENT : EQ_OTHER;
 }
 
 static int
@@ -462,8 +472,8 @@ lu_dict_probe(PyDictObject *mp, PyObject *key, Py_hash_t hash, Py_ssize_t *steps
 }
 
 /* The hash of a key that needs no Python: an exact str, int, bool, float or
-   bytes, None, a class (object's hash, equal only to itself), or a tuple of
-   those. 0 when Python must hash it. */
+   bytes, None, a class or an instance that keeps object's hash and
+   equality (equal only to itself), or a tuple of those. 0 when Python must hash it. */
 static int
 hash_native(PyObject *key, Py_hash_t *hash, int depth)
 {
@@ -472,7 +482,7 @@ hash_native(PyObject *key, Py_hash_t *hash, int depth)
         || kt == &PyBytes_Type || key == Py_None) {
         *hash = lu_hash(key);
     }
-    else if (kt == &PyType_Type) {
+    else if (kt == &PyType_Type || identity_keyed(kt)) {
         *hash = Py_HashPointer(key);
     }
     else if (kt == &PyTuple_Type && depth < LU_NATIVE_DEPTH) {
