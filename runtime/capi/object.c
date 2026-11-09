@@ -4,6 +4,7 @@
 #include "interp/frame.h"
 
 #include <stdarg.h>
+#include <string.h>
 
 PyObject *
 PyObject_Init(PyObject *op, PyTypeObject *tp)
@@ -58,6 +59,58 @@ _PyObject_MakeTpCall(PyThreadState *ts, PyObject *callable, PyObject *const *arg
     return result;
 }
 
+/* slot_tp_call's call for a type whose __call__ is a Python function or a
+   kernel function (a class whose metaclass keeps type's): that function
+   with the object first, without the slot's argument tuple, its wrapper
+   descriptor or a nested eval loop. NULL without an error for any other. */
+static PyObject *
+call_dunder_call(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames)
+{
+    PyObject *descr = _PyType_LookupRef(Py_TYPE(callable), LU_ID(__call__)), *fn = NULL, *target, *unused;
+    if (descr != NULL && PyFunction_Check(descr)) {
+        fn = descr;
+    }
+    else if (descr != NULL && (Py_TYPE(descr)->tp_flags & Py_TPFLAGS_METHOD_DESCRIPTOR)) {
+        /* Only a method descriptor takes the object as self; a builtin
+           function stored as __call__ is no descriptor, and the slot calls it. */
+        int found = lu_kernel_target(descr, &callable, 1, &target, &unused);
+        if (found < 0) {
+            Py_DECREF(descr);
+            return NULL;
+        }
+        fn = found && unused == NULL && PyFunction_Check(target) ? target : NULL;
+    }
+    if (fn == NULL) {
+        Py_XDECREF(descr);
+        return NULL;
+    }
+    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    Py_ssize_t total = nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
+    PyObject *result;
+    if (nargsf & PY_VECTORCALL_ARGUMENTS_OFFSET) {
+        PyObject **stack = (PyObject **)args - 1, *saved = stack[0];
+        stack[0] = callable;
+        result = lu_call(fn, stack, (size_t)(nargs + 1), kwnames);
+        stack[0] = saved;
+    }
+    else {
+        PyObject *small[8];
+        PyObject **stack = total + 1 <= 8 ? small : PyMem_Malloc((size_t)(total + 1) * sizeof(PyObject *));
+        if (stack == NULL) {
+            Py_DECREF(descr);
+            return PyErr_NoMemory();
+        }
+        stack[0] = callable;
+        memcpy(stack + 1, args, (size_t)total * sizeof(PyObject *));
+        result = lu_call(fn, stack, (size_t)(nargs + 1), kwnames);
+        if (stack != small) {
+            PyMem_Free(stack);
+        }
+    }
+    Py_DECREF(descr);
+    return result;
+}
+
 PyObject *
 lu_call(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
@@ -67,6 +120,12 @@ lu_call(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject *kwna
     }
     if (Py_IS_TYPE(callable, &PyWrapperDescr_Type) && kwnames == NULL) {
         return lu_wrapper_descr_call(callable, args, PyVectorcall_NARGS(nargsf), NULL);
+    }
+    if (Py_TYPE(callable)->tp_call == lu_slot_tp_call) {
+        PyObject *r = call_dunder_call(callable, args, nargsf, kwnames);
+        if (r != NULL || PyErr_Occurred()) {
+            return r;
+        }
     }
     return _PyObject_MakeTpCall(PyThreadState_Get(), callable, args, PyVectorcall_NARGS(nargsf),
                                 kwnames);

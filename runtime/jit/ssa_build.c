@@ -957,7 +957,7 @@ supported(int op)
     case MAKE_FUNCTION: case SET_FUNCTION_ATTRIBUTE: case STORE_DEREF: case LIST_EXTEND:
     case DELETE_SUBSCR: case LOAD_FAST_AND_CLEAR: case LIST_APPEND: case SET_ADD: case MAP_ADD:
     case BUILD_SET: case BUILD_MAP: case CALL_INTRINSIC_1: case BINARY_SLICE: case STORE_SLICE:
-    case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
+    case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE: case DICT_UPDATE:
     case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case RERAISE: case DELETE_FAST:
     case LOAD_SUPER_ATTR: case STORE_GLOBAL: case BUILD_SLICE: case CONVERT_VALUE: case FORMAT_SIMPLE:
     case FORMAT_WITH_SPEC: case BUILD_STRING: case LOAD_SPECIAL:
@@ -5190,6 +5190,19 @@ translate(struct ctx *c)
         }
         lu_v args[3] = { peek(c, oparg + 4), peek(c, oparg + 1), v };
         helper_raising(c, H_dict_merge, 3, args, 1);
+        pop(c, NULL);
+        release(c, v, own);
+        return 0;
+    }
+    case DICT_UPDATE: {
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[2] = { peek(c, oparg + 1), v };
+        helper_raising(c, H_dict_update, 2, args, 1);
         pop(c, NULL);
         release(c, v, own);
         return 0;

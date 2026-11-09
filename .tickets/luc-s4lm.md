@@ -19,3 +19,7 @@ From luc-0ivh. inline_resume (ssa_build.c) resumes a known generator's body in t
 **2026-11-08T08:03:41Z**
 
 luc-esc2 did not take this on. Related, landed: a generator's loops that contain no yield now use fresh virtual loop iterators (commit 56bfd63); loops that yield keep a real iterator, since gen_yield stores the stack back to the frame.
+
+**2026-11-09T04:45:21Z**
+
+luc-vxsk: Flask's in-process run still takes about 95 interpreted generator resumes per request, Jinja's delegating root generators (luc-hhnm).
