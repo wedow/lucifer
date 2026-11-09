@@ -5,7 +5,7 @@ deps: []
 links: []
 created: 2026-11-09T02:01:52Z
 type: bug
-priority: 2
+priority: 1
 parent: luc-vxsk
 tags: [jit]
 ---
