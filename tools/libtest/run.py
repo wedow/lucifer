@@ -212,9 +212,10 @@ def xml_rows(path):
     return rows
 
 
-def run_module(module, ids, args, python, env, raw, unavailable, timeout, excluded=None):
+def run_module(module, ids, args, python, env, raw, unavailable, excluded=None, oracle_seconds=0):
     directory = raw / module
     directory.mkdir(parents=True, exist_ok=True)
+    timeout = max(args.timeout, MODULE_TIMEOUTS.get(module, 0), SLOWDOWN * oracle_seconds)
     events, state, xml, worker_pid = (directory / name for name in ('events.jsonl', 'state.jsonl', 'junit.xml', 'worker.pid'))
     for path in (events, state, xml, worker_pid):
         path.unlink(missing_ok=True)
@@ -404,11 +405,10 @@ def run(args, python, env, raw):
         metadata['excluded_cases'] = len(excluded)
         oracle_path = args.results / ORACLE
         oracle = json.loads(oracle_path.read_text())['modules'] if oracle_path.exists() else {}
-        timeouts = {m: max(args.timeout, MODULE_TIMEOUTS.get(m, 0), SLOWDOWN * oracle.get(m, {}).get('seconds', 0))
-                    for m in selected}
         with ThreadPoolExecutor(max_workers=args.jobs) as executor:
             futures = {executor.submit(run_module, module, modules[module], args, python,
-                                       env, raw, unavailable, timeouts[module], excluded): module for module in selected}
+                                       env, raw, unavailable, excluded,
+                                       oracle.get(module, {}).get('seconds', 0)): module for module in selected}
             for future in as_completed(futures):
                 module = futures[future]
                 result, detail = future.result()
