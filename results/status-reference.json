@@ -994,9 +994,9 @@
   },
   "cli.markdown": {
    "status": "ok",
-   "seconds": 0.18194918567314744,
+   "seconds": 0.09019482880830765,
    "loops": null,
-   "check": "792ab609aa72d95d411b39f71cd93080062c59506e8bb476db461bf63181d7bc"
+   "check": "2bd6e8d43a9ca3a41323bb1821539eb481961a5fdc72b26de12ecd21421f335f"
   }
  }
 }
