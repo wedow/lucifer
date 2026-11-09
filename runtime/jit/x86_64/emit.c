@@ -1826,7 +1826,9 @@ emit_new_object(struct asm_ *a, lu_v v)
     struct lu_ins *in = I(a, v);
     PyTypeObject *tp = (PyTypeObject *)(intptr_t)I(a, in->args[0])->imm;
     size_t pre = (tp->tp_flags & Py_TPFLAGS_PREHEADER) ? 2 * sizeof(PyObject *) : 0;
-    size_t size = pre + (size_t)tp->tp_basicsize + lu_inline_values_size(tp);
+    Py_ssize_t room = lu_inline_settle_room(tp);         /* every later instance's room */
+    size_t size = pre + (size_t)tp->tp_basicsize + lu_inline_room_size(room);
+    uint32_t flags = room > 0 ? lu_inline_room_flags(tp, room) : 0;
     if (_PyRuntime.stress.gc != 0 || (size + 7) / 8 > MI_SMALL_WSIZE_MAX) {
         return 0;
     }
@@ -1852,7 +1854,7 @@ emit_new_object(struct asm_ *a, lu_v v)
     }
     thread_id(a, R11);
     store(a, RDX, offsetof(PyObject, ob_tid), R11);
-    store32_mi(a, RDX, offsetof(PyObject, ob_flags), (int32_t)((uint32_t)LU_GC_TRACKED << 24));    /* ob_gc_bits */
+    store32_mi(a, RDX, offsetof(PyObject, ob_flags), (int32_t)((uint32_t)LU_GC_TRACKED << 24 | flags));    /* ob_gc_bits, the room */
     store32_mi(a, RDX, offsetof(PyObject, ob_ref_local), 1);
     store_mi(a, RDX, offsetof(PyObject, ob_ref_shared), 0);
     mov_ri(a, RBX, (int64_t)(intptr_t)tp);
@@ -1989,7 +1991,8 @@ unlock_object(struct asm_ *a, int r)
 /* An inline store's word at off of the object in r holds nothing: the
    store takes it in line only if every later word of the class's room
    (imm2 - 1 of them; imm2 0: unknown) is empty too, so that the words keep
-   the instance's insertion order (attrs.c's in_order); else `slow`. */
+   the instance's insertion order (attrs.c's in_order), and the instance
+   keeps no order record, which C appends to; else `slow`. */
 static void
 fresh_word(struct asm_ *a, struct lu_ins *in, int r, int slow)
 {
@@ -1997,6 +2000,11 @@ fresh_word(struct asm_ *a, struct lu_ins *in, int r, int slow)
         jmp(a, slow);
         return;
     }
+    rex(a, 0, 0, 0, r);
+    b1(a, 0xF6);
+    modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
+    b1(a, LU_ATTRS_UNORDERED >> 8);             /* test byte [r+flags+1], LU_ATTRS_UNORDERED */
+    jcc(a, CC_NE, slow);
     for (int k = 1; k < in->imm2; k++) {
         cmp_mi(a, 1, r, (int32_t)in->imm + (int32_t)(LU_INLINE_STRIDE * sizeof(PyObject *)) * k, 0);
         jcc(a, CC_NE, slow);

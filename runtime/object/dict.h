@@ -183,6 +183,10 @@ Py_ssize_t lu_ns_index(PyObject *dict, PyObject *key);
    takes the reference only if the value is alive (lu_try_xget_ref) and else
    reads under the dict's critical section. */
 int lu_dict_find_native(PyObject *d, PyObject *key, PyObject **value);
+/* Find's lock-free part: 1 with *value, 0 absent, -1 undecided (as find), or
+   -2 when only the lock can tell, with *stale a reference the caller drops
+   (NULL for none). Nothing in it waits, detaches or releases a reference. */
+int lu_dict_find_lockfree(PyObject *d, PyObject *key, PyObject **value, PyObject **stale);
 int lu_dict_put_native(PyObject *d, PyObject *key, PyObject *value);
 int lu_dict_del_native(PyObject *d, PyObject *key);
 /* A new dict of type tp with no entries. */

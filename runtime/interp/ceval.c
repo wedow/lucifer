@@ -515,6 +515,9 @@ lu_contains_native(PyObject *container, PyObject *item)
 static int
 object_attr_hook(PyTypeObject *tp, PyObject *id)
 {
+    if (id == LU_ID(__getattribute__) && tp->tp_getattro == PyObject_GenericGetAttr) {
+        return 1;               /* the slot says so (lu_set_slot) */
+    }
     return _PyType_Lookup(tp, id) == _PyType_Lookup(&PyBaseObject_Type, id);
 }
 
@@ -2854,6 +2857,9 @@ op_LOAD_ATTR: {
     }
     getattrofunc get = Py_TYPE(owner)->tp_getattro;
     if (get == lu_slot_tp_getattro || get == PyObject_GenericGetAttr) {
+        if (_PyRuntime.jit.mode != LU_JIT_OFF && !(oparg & 1) && !PyType_Check(owner)) {
+            lu_jit_pic_note_interpreted(code, (int)(INSTR_START() - lu_code_start(code)), owner, name);
+        }
         PyObject *descr = _PyType_LookupRef(Py_TYPE(owner), name), *v;
         if ((v = attr_shortcut(owner, name)) != NULL) {
             Py_XDECREF(descr);
@@ -2985,6 +2991,9 @@ op_DELETE_ATTR: {
     SKIP_CACHES();
     setattrofunc set = Py_TYPE(owner)->tp_setattro;
     if (set == lu_slot_tp_setattro || set == PyObject_GenericSetAttr) {
+        if (store && _PyRuntime.jit.mode != LU_JIT_OFF && !PyType_Check(owner)) {
+            lu_jit_pic_note_interpreted(code, (int)(INSTR_START() - lu_code_start(code)), owner, name);
+        }
         SAVE_FRAME();
         int done = lu_setattr_native(owner, name, v);
         if (done != 0) {

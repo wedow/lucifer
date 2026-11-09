@@ -20,6 +20,7 @@
 #include "interp/code.h"
 #include "interp/exceptions.h"
 #include "prim/prim.h"
+#include "object/dict.h"
 
 #include <string.h>
 
@@ -207,6 +208,7 @@ lu_type_assign_version(PyTypeObject *tp)
     PyMutex_Lock(&_PyRuntime.type_lock);
     int r = assign_version(tp);
     PyMutex_Unlock(&_PyRuntime.type_lock);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);    /* the tag before the caller's walk (lu_type_modified) */
     return r;
 }
 
@@ -278,11 +280,21 @@ clear_versions(PyTypeObject *tp)
 void
 lu_type_modified(PyTypeObject *tp)
 {
+    PyInterpreterState *interp = PyInterpreterState_Get();
     for (int i = 0; i < LU_MAX_WATCHERS; i++) {
-        if (PyInterpreterState_Get()->type_watchers[i] != NULL) {
+        if (interp->type_watchers[i] != NULL) {
             notify_modified(tp);
             break;
         }
+    }
+    /* A type without a tag has subclasses without one: nothing to take
+       back, and no lock. The fence orders the change before the load, as
+       assign_version's orders the tag before the walk that follows it: a
+       tag this load misses is assigned after the change, and its walk sees
+       the change. */
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    if (__atomic_load_n(&tp->tp_version_tag, __ATOMIC_RELAXED) == 0) {
+        return;
     }
     PyMutex_Lock(&_PyRuntime.type_lock);
     clear_versions(tp);
@@ -358,11 +370,13 @@ PyType_Unwatch(int id, PyObject *obj)
 
 /* The walk of the MRO: the first dict that has the name, as a new reference.
    Another thread may replace the MRO meanwhile (type_set_mro). The replaced
-   tuple is released only after a QSBR grace period, and nothing between the
-   load and the incref reports a quiescent state or detaches, so the tuple is
-   alive at the incref. The walk keeps that reference, since a dict lookup
-   that waits for the dict's lock detaches, and a detached carrier holds
-   nothing as far as QSBR knows. */
+   tuple is released only after a QSBR grace period, and the walk's
+   lock-free lookups report no quiescent state, detach or release anything,
+   so the tuple stays alive without a reference: no atomic on a tuple every
+   thread shares. A lookup that needs the dict's lock (it may wait, and a
+   waiting carrier detaches, which QSBR counts as holding nothing) first
+   takes a reference to the tuple, still alive then, and the walk goes on
+   with it. */
 static PyObject *
 lookup_in_mro(PyTypeObject *tp, PyObject *name)
 {
@@ -377,14 +391,25 @@ lookup_in_mro(PyTypeObject *tp, PyObject *name)
         }
         return NULL;
     }
-    Py_INCREF(mro);
     PyObject *v = NULL;
-    for (Py_ssize_t i = 0; v == NULL && i < PyTuple_GET_SIZE(mro); i++) {
-        PyObject *dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i));
-        v = dict != NULL ? lu_ns_get(dict, name) : NULL;
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); i++) {
+        PyObject *dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i)), *stale;
+        int found = dict != NULL ? lu_dict_find_lockfree(dict, name, &v, &stale) : 0;
+        if (found == 1) {
+            return v;
+        }
+        if (found == -2) {
+            Py_INCREF(mro);
+            Py_XDECREF(stale);
+            for (v = NULL; v == NULL && i < PyTuple_GET_SIZE(mro); i++) {
+                dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i));
+                v = dict != NULL ? lu_ns_get(dict, name) : NULL;
+            }
+            Py_DECREF(mro);
+            return v;
+        }
     }
-    Py_DECREF(mro);
-    return v;
+    return NULL;
 }
 
 /* The walk of the MRO, its reference dropped at once when the caller only
@@ -416,12 +441,15 @@ type_lookup(PyTypeObject *tp, PyObject *name, int take)
         && PyUnicode_CheckExact(name) && PyUnicode_GET_LENGTH(name) <= MCACHE_MAX_ATTR_SIZE) {
         lu_type_assign_version(tp);
     }
-    struct _is *interp = PyInterpreterState_Get();
     uint32_t version = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE);
+    if (version == 0) {
+        return walk(tp, name, take);
+    }
+    struct _is *interp = PyInterpreterState_Get();
     /* A type's tag changes whenever it or a base changes, and interned names
        are immortal: an entry for (tag, name) cannot go stale. Before the
        kernel has booted, static types change without a tag change. */
-    if (version == 0 || !interp->specializing || tp->tp_mro == NULL
+    if (!interp->specializing || tp->tp_mro == NULL
         || !PyUnicode_CheckExact(name) || !PyUnicode_CHECK_INTERNED(name)) {
         return walk(tp, name, take);
     }
@@ -584,8 +612,9 @@ static PyGetSetDef subtype_getsets_full[] = {
 PyObject *
 PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
 {
+    Py_ssize_t room = lu_inline_take_room(tp);
     size_t size = (size_t)tp->tp_basicsize + (size_t)(nitems + 1) * (size_t)tp->tp_itemsize
-        + lu_inline_values_size(tp);
+        + lu_inline_room_size(room);
     size_t presize = preheader_size(tp);
     int gc = (tp->tp_flags & Py_TPFLAGS_HAVE_GC) != 0;
     char *mem = gc ? lu_gc_alloc(tp, size, presize) : NULL;
@@ -599,6 +628,9 @@ PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
     memset(mem - presize, 0, presize + size);
     PyObject *op = (PyObject *)mem;
     PyObject_Init(op, tp);
+    if (room > 0) {
+        op->ob_flags |= lu_inline_room_flags(tp, room);
+    }
     if (tp->tp_itemsize != 0) {
         Py_SET_SIZE(op, nitems);
     }

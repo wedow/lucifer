@@ -228,6 +228,10 @@ PyObject_SetAttrString(PyObject *v, const char *name, PyObject *value)
 PyObject *
 PyObject_GenericGetAttr(PyObject *obj, PyObject *name)
 {
+    PyObject *v = lu_getattr_native(obj, name);
+    if (v != NULL || PyErr_Occurred()) {
+        return v;
+    }
     PyObject *args[2] = { obj, name };
     return lu_call_kernel(LU_K_generic_getattr, args, 2);
 }
@@ -235,6 +239,10 @@ PyObject_GenericGetAttr(PyObject *obj, PyObject *name)
 int
 PyObject_GenericSetAttr(PyObject *obj, PyObject *name, PyObject *value)
 {
+    int done = lu_setattr_native(obj, name, value);
+    if (done != 0) {
+        return done < 0 ? -1 : 0;
+    }
     PyObject *args[3] = { obj, name, value != NULL ? value : LU_MISSING };
     PyObject *r = lu_call_kernel(LU_K_generic_setattr, args, 3);
     Py_XDECREF(r);

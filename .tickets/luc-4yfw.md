@@ -1,8 +1,8 @@
 ---
 id: luc-4yfw
-status: open
+status: closed
 deps: []
-links: []
+links: [luc-j2vs, luc-uexr, luc-n6yj, luc-6ljp, luc-r1pk, luc-mltz, luc-m3wi, luc-xtmp, luc-9ags, luc-po0x, luc-o8i6]
 created: 2026-11-07T13:14:15Z
 type: bug
 priority: 2
@@ -16,3 +16,9 @@ Measured with luc-fwnf's writer microbenchmark (N threads each run 'C.x += 1' 20
 
 Class attribute writes on a class without subclasses within 1.5x of CPython 3.14t at 1-8 threads, with no process-wide lock on the path.
 
+
+## Notes
+
+**2026-11-08T22:04:06Z**
+
+Done on luc-r1pk: a plain class attribute write is C's (type_setattr_native in descr.c: no function value, no dunder, metaclass keeps type's __setattr__ and has no data descriptor of the name), taking the tag back once instead of three times from kernel Python; lu_type_modified skips type_lock when the type has no tag (none of its subclasses then has one), with a fence ordering the change before the tag load, as assign_version's orders the tag before the walk. Writer microbenchmark (N threads, C.x += 1 on a class each, million writes/s total, best of 3): master 1.89 / 1.82 / 1.35 at 1 / 8 / 32 threads, branch 5.99 / 28.26 / 29.69, CPython 3.14t 7.51 / 3.95 / 2.88: 1.25x CPython's time at 1 thread, 7x and 10x its throughput at 8 and 32. A type that still has a tag takes type_lock to take it back, as CPython's TYPE_LOCK does; the benchmark's classes spend their 1000 tags early, after which no lock is taken.
