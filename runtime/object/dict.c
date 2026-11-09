@@ -349,13 +349,30 @@ lu_dict_init(void)
 enum { EQ_STR, EQ_INT, EQ_FLOAT, EQ_BYTES, EQ_TUPLE, EQ_IDENT, EQ_OTHER };
 
 /* Whether instances of tp hash and compare as object's do, by identity: it
-   keeps object's __hash__ and __eq__ (a plain class, a function). */
+   keeps object's __hash__ and __eq__ (a plain class, a function). The
+   answers are kept per thread by type version, which names one type in one
+   state, so keys of other classes pay two lookups once, not per probe. */
+#define IDENTITY_SEEN 64
+static __thread struct {
+    unsigned int version;
+    int answer;
+} identity_seen[IDENTITY_SEEN];
+
 static int
 identity_keyed(PyTypeObject *tp)
 {
+    unsigned int version = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE);
+    if (version != 0 && identity_seen[version % IDENTITY_SEEN].version == version) {
+        return identity_seen[version % IDENTITY_SEEN].answer;
+    }
     PyObject *hash = _PyType_Lookup(tp, LU_ID(__hash__)), *eq = _PyType_Lookup(tp, LU_ID(__eq__));
-    return hash != NULL && eq != NULL && hash == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__hash__))
+    int answer = hash != NULL && eq != NULL && hash == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__hash__))
         && eq == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__eq__));
+    if (version != 0 && version == __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE)) {
+        identity_seen[version % IDENTITY_SEEN].version = version;
+        identity_seen[version % IDENTITY_SEEN].answer = answer;
+    }
+    return answer;
 }
 
 static int
@@ -508,6 +525,12 @@ hash_native(PyObject *key, Py_hash_t *hash, int depth)
 
 static int
 native_hash(PyObject *key, Py_hash_t *hash)
+{
+    return hash_native(key, hash, 0);
+}
+
+int
+lu_hash_native(PyObject *key, Py_hash_t *hash)
 {
     return hash_native(key, hash, 0);
 }

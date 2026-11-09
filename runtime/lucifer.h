@@ -1180,7 +1180,8 @@ PyLongObject *lu_long_alloc(Py_ssize_t ndigits);
 PyObject *lu_long_from_digits(int negative, Py_ssize_t ndigits, const digit *digits);
 PyObject *lu_long_from_bytes(const unsigned char *s, Py_ssize_t n, int little, int is_signed);
 int lu_long_as_long(PyObject *v, long *result);
-PyObject *lu_long_decimal(PyObject *v);      /* str() of an exact int, as int.__repr__ */
+PyObject *lu_long_decimal(PyObject *v);
+int lu_hash_native(PyObject *key, Py_hash_t *hash);   /* a key's hash when no Python computes it (dict.c) */      /* str() of an exact int, as int.__repr__ */
 Py_hash_t lu_long_hash(PyLongObject *v);
 /* Operations on ints (runtime/prim/int.c); operands are any PyLong. */
 PyObject *lu_long_add(PyObject *a, PyObject *b);
