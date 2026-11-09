@@ -1099,10 +1099,102 @@ lu_memoryview_init(void)
     PyMemoryView_Type.tp_as_buffer = &memory_as_buffer;
 }
 
+/* Typed items of a bytearray, for array.array (a bytearray subclass) ----- */
+
+/* The item size of a native struct code, and i (negative from the end) as a
+   byte offset into ba, or -1 when out of range. Under ba's lock. */
+static Py_ssize_t
+typed_offset(PyObject *ba, char c, Py_ssize_t i)
+{
+    Py_ssize_t size = fmt_size(c), n = PyByteArray_GET_SIZE(ba) / size;
+    i += i < 0 ? n : 0;
+    return 0 <= i && i < n ? i * size : -1;
+}
+
+/* typed_get(bytearray, code, i): the item at index i of the bytearray read as
+   native items of struct code, or MISSING when i is out of range. */
+static PyObject *
+prim_typed_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long i;
+    if (nargs != 3 || !PyByteArray_Check(args[0]) || !PyUnicode_Check(args[1])
+        || PyUnicode_GET_LENGTH(args[1]) != 1 || fmt_size(PyUnicode_READ_CHAR(args[1], 0)) < 0
+        || !PyLong_CheckExact(args[2])) {
+        lu_err_format(PyExc_TypeError, "typed_get(bytearray, code, int)");
+        return NULL;
+    }
+    if (lu_long_as_long(args[2], &i) < 0) {
+        PyErr_Clear();
+        return Py_NewRef(LU_MISSING);
+    }
+    char c = (char)PyUnicode_READ_CHAR(args[1], 0), item[8];
+    Py_ssize_t off;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
+    off = typed_offset(args[0], c, i);
+    if (off >= 0) {
+        memcpy(item, PyByteArray_AS_STRING(args[0]) + off, fmt_size(c));
+    }
+    Py_END_CRITICAL_SECTION();
+    return off < 0 ? Py_NewRef(LU_MISSING) : unpack_item(item, c);
+}
+
+/* typed_set(bytearray, code, i, value): stores an exact int or float value
+   at index i, read as native items of struct code, and answers True; MISSING
+   (nothing stored) when i is out of range, the value is of another type or
+   out of the code's range: the caller's checks then raise the right error. */
+static PyObject *
+prim_typed_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long i;
+    if (nargs != 4 || !PyByteArray_Check(args[0]) || !PyUnicode_Check(args[1])
+        || PyUnicode_GET_LENGTH(args[1]) != 1 || fmt_size(PyUnicode_READ_CHAR(args[1], 0)) < 0
+        || !PyLong_CheckExact(args[2])) {
+        lu_err_format(PyExc_TypeError, "typed_set(bytearray, code, int, value)");
+        return NULL;
+    }
+    if (lu_long_as_long(args[2], &i) < 0) {
+        PyErr_Clear();
+        return Py_NewRef(LU_MISSING);
+    }
+    char c = (char)PyUnicode_READ_CHAR(args[1], 0), item[8];
+    PyObject *v = args[3];
+    if (c == 'f' || c == 'd') {
+        double d;
+        if (PyFloat_CheckExact(v)) {
+            d = PyFloat_AS_DOUBLE(v);
+        }
+        else if (PyLong_CheckExact(v)) {
+            d = PyLong_AsDouble(v);
+            if (d == -1.0 && PyErr_Occurred()) {
+                PyErr_Clear();
+                return Py_NewRef(LU_MISSING);
+            }
+        }
+        else {
+            return Py_NewRef(LU_MISSING);
+        }
+        if (c == 'f') { float f = (float)d; memcpy(item, &f, sizeof f); }
+        else memcpy(item, &d, sizeof d);
+    }
+    else if (strchr("bBhHiIlLqQ", c) == NULL || !PyLong_CheckExact(v) || pack_int(item, c, v, "") < 0) {
+        PyErr_Clear();
+        return Py_NewRef(LU_MISSING);
+    }
+    Py_ssize_t off;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
+    off = typed_offset(args[0], c, i);
+    if (off >= 0) {
+        memcpy(PyByteArray_AS_STRING(args[0]) + off, item, fmt_size(c));
+    }
+    Py_END_CRITICAL_SECTION();
+    return Py_NewRef(off < 0 ? LU_MISSING : Py_True);
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_mv_methods[] = {
     FAST(mv_new), FAST(mv_release), FAST(mv_released), FAST(mv_attr), FAST(mv_len),
     FAST(mv_tobytes), FAST(mv_tolist), FAST(mv_item), FAST(mv_set_item), FAST(mv_slice),
     FAST(mv_set_slice), FAST(mv_cast), FAST(mv_toreadonly), FAST(mv_eq), FAST(mv_hash),
+    FAST(typed_get), FAST(typed_set),
     { NULL, NULL, 0, NULL },
 };

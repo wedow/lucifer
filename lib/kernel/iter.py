@@ -7,7 +7,7 @@ exact tuple, list and range loops never come here."""
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, kernel_set,
     iter_new, iter_state, iter_set, list_append, list_splice, tuple_from, is_callable,
-    alloc, field_get, field_set, seqiter_next, dictiter_next,
+    alloc, field_get, field_set, seqiter_next, dictiter_next, type_has_sq_item,
 )
 from _lucifer import _boot, operators
 
@@ -46,8 +46,8 @@ def seqiter_setstate(self, state):
 
 
 def _has_sequence_protocol(obj):
-    """PySequence_Check: __getitem__ on a type that is not a mapping."""
-    return type_lookup(type(obj), '__getitem__') is not MISSING and not kind(obj, 'dict')
+    """PySequence_Check: sq_item (a class's __getitem__ fills it) on a type that is not a dict."""
+    return not kind(obj, 'dict') and type_has_sq_item(type(obj))
 
 
 def get_iter(obj):

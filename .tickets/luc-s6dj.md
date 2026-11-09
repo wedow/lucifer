@@ -1,6 +1,6 @@
 ---
 id: luc-s6dj
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-07T18:46:10Z
@@ -12,3 +12,9 @@ tags: [bench, corpus]
 
 weakref.ref(obj.method) raises TypeError: cannot create weak reference to 'method' object; CPython method objects are weakly referenceable. SQLAlchemy's event registry (event/registry.py) does this, failing pyperformance sqlalchemy_declarative and sqlalchemy_imperative. Corpus: tools/bench/corpus.
 
+
+## Notes
+
+**2026-11-09T00:33:44Z**
+
+Fixed on luc-mods: bound methods and builtin functions are weakly referenceable. sqlalchemy_declarative and sqlalchemy_imperative pass. tests/kernel/weakref_methods.py.

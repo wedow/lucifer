@@ -28,6 +28,7 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <sys/statvfs.h>
 #include <sys/wait.h>
 #include <sys/syscall.h>
 #include <time.h>
@@ -1083,6 +1084,43 @@ prim_os_inet_ntop(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyUnicode_FromString(text);
 }
 
+/* statvfs(path or fd): (f_bsize, f_frsize, f_blocks, f_bfree, f_bavail,
+   f_files, f_ffree, f_favail, f_flag, f_namemax, f_fsid) */
+static PyObject *
+prim_os_statvfs(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    struct statvfs st;
+    long fd;
+    int r;
+    if (nargs != 1) {
+        lu_err_format(PyExc_TypeError, "statvfs(path or fd)");
+        return NULL;
+    }
+    if (PyLong_Check(args[0])) {
+        if (int_arg(args[0], &fd) < 0) {
+            return NULL;
+        }
+        r = LU_SYSCALL(fstatvfs((int)fd, &st));
+    }
+    else {
+        PyObject *path = path_bytes(args[0]);
+        if (path == NULL) {
+            return NULL;
+        }
+        r = LU_SYSCALL(statvfs(PyBytes_AS_STRING(path), &st));
+        Py_DECREF(path);
+    }
+    if (r < 0) {
+        set_oserror(errno, PyLong_Check(args[0]) ? NULL : args[0]);
+        return NULL;
+    }
+    return Py_BuildValue("(kkKKKKKKkkK)", st.f_bsize, st.f_frsize, (unsigned long long)st.f_blocks,
+                         (unsigned long long)st.f_bfree, (unsigned long long)st.f_bavail,
+                         (unsigned long long)st.f_files, (unsigned long long)st.f_ffree,
+                         (unsigned long long)st.f_favail, st.f_flag, st.f_namemax,
+                         (unsigned long long)st.f_fsid);
+}
+
 /* uname(): (sysname, nodename, release, version, machine) */
 static PyObject *
 prim_os_uname(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -2011,6 +2049,7 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_inet_pton", (PyCFunction)(void (*)(void))prim_os_inet_pton, METH_FASTCALL, NULL },
     { "os_inet_ntop", (PyCFunction)(void (*)(void))prim_os_inet_ntop, METH_FASTCALL, NULL },
     { "os_uname", (PyCFunction)(void (*)(void))prim_os_uname, METH_FASTCALL, NULL },
+    { "os_statvfs", (PyCFunction)(void (*)(void))prim_os_statvfs, METH_FASTCALL, NULL },
     { "os_putenv", (PyCFunction)(void (*)(void))prim_os_putenv, METH_FASTCALL, NULL },
     { "os_scandir", (PyCFunction)(void (*)(void))prim_os_scandir, METH_FASTCALL, NULL },
     { "os_fork_exec", (PyCFunction)(void (*)(void))prim_os_fork_exec, METH_FASTCALL, NULL },

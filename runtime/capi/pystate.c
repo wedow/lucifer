@@ -62,6 +62,23 @@ Py_LeaveRecursiveCall(void)
     PyThreadState_Get()->py_recursion_remaining++;
 }
 
+/* The internal headers' _Py_EnterRecursiveCall calls this once the C stack
+   is past the soft limit of the bounds a thread recorded (Python/ceval.c). */
+LU_EXPORT int
+_Py_CheckRecursiveCall(PyThreadState *tstate, const char *where)
+{
+    char here;
+    struct lu_task *t = (struct lu_task *)tstate;
+    if ((uintptr_t)&here >= t->c_stack_soft_limit || tstate->recursion_headroom) {
+        return 0;
+    }
+    tstate->recursion_headroom++;
+    PyErr_Format(PyExc_RecursionError, "Stack overflow (used %d kB)%s",
+                 (int)((t->c_stack_top - (uintptr_t)&here) / 1024), where);
+    tstate->recursion_headroom--;
+    return -1;
+}
+
 PyInterpreterState *
 PyInterpreterState_Get(void)
 {
@@ -360,9 +377,10 @@ PyState_RemoveModule(PyModuleDef *def)
 
 /* PyUnstable_ThreadState_SetStackProtection (Python/ceval.c): the C stack
    bounds a thread's recursion checks watch. The margins are CPython's
-   (_PyOS_MIN_STACK_SIZE, _PyOS_STACK_MARGIN_BYTES of a release build);
-   lucifer's recursion limit is a counter, so the bounds are recorded for
-   whoever reads them and no page is protected. */
+   (_PyOS_MIN_STACK_SIZE, _PyOS_STACK_MARGIN_BYTES of a release build). The
+   interpreter's recursion limit is a counter; the bounds serve the C
+   recursion checks extensions inline from the internal headers
+   (_Py_EnterRecursiveCall), and no page is protected. */
 
 #define LU_STACK_MARGIN_BYTES ((size_t)1 << 14)
 #define LU_MIN_STACK_SIZE (LU_STACK_MARGIN_BYTES * 3)
@@ -374,6 +392,21 @@ tstate_set_stack(PyThreadState *tstate, uintptr_t base, uintptr_t top)
     t->c_stack_top = top;
     t->c_stack_hard_limit = base + LU_STACK_MARGIN_BYTES;
     t->c_stack_soft_limit = base + LU_STACK_MARGIN_BYTES * 2;
+}
+
+/* The bounds of the C stack of the carrier a task is bound to, which
+   ResetStackProtection restores; zeros (unknown) check nothing. */
+void
+lu_task_set_c_stack(struct lu_task *t, uintptr_t base, uintptr_t top)
+{
+    t->c_stack_init_base = base;
+    t->c_stack_init_top = top;
+    if (top != 0) {
+        tstate_set_stack(&t->ts, base, top);
+    }
+    else {
+        t->c_stack_top = t->c_stack_soft_limit = t->c_stack_hard_limit = 0;
+    }
 }
 
 int
