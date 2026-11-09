@@ -49,7 +49,7 @@ def _module_getattr(self, name, suppress=False):
             text = str_join('', ("module '", module_name, "' has no attribute '", name, "'"))
     else:
         text = str_join('', ("module has no attribute '", name, "'"))
-    raise AttributeError(text, name=name, obj=self)
+    _object.attribute_error(text, name, self)
 
 
 @kernel_type(static_type('module'))

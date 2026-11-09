@@ -39,7 +39,17 @@ def _no_attribute(obj, name):
         text = str_join('', ("type object '", type_tp_name(obj), "' has no attribute '", name, "'"))
     else:
         text = str_join('', ("'", type_tp_name(type(obj)), "' object has no attribute '", name, "'"))
-    raise AttributeError(text, name=name, obj=obj)
+    attribute_error(text, name, obj)
+
+
+def attribute_error(text, name, obj):
+    """Raises AttributeError(text, name=name, obj=obj). name and obj are
+    stored, not passed by keyword: the kernel raises this for every failed
+    lookup, and a positional class call is made in line."""
+    e = AttributeError(text)
+    e.name = name
+    e.obj = obj
+    raise e
 
 
 def _check_name(name):
