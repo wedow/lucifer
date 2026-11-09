@@ -405,6 +405,11 @@ def getpgrp():
     return _call('getpgrp')
 
 
+def abort():
+    """Abort the interpreter immediately with SIGABRT, with no cleanup."""
+    _call('abort')
+
+
 def kill(pid, signal, /):
     """Kill a process with a signal."""
     _call('kill', pid, signal)
