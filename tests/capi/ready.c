@@ -544,6 +544,16 @@ static PyTypeObject DocSig_Type = {
     .tp_doc = "DocSig(x, /, y=1)\n--\n\nA documented type.",
 };
 
+/* ready.Added: a static type that PyModule_AddType readies, after which the
+   module writes __module__ into its tp_dict, as torch's dtype does. */
+static PyTypeObject Added_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "Added",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = PyType_GenericNew,
+};
+
 /* ready.Mapped: indexing through mp_subscript only, as numpy's scalars do:
    not a sequence for PySequence_Check, which looks at sq_item. */
 static PyObject *
@@ -1353,6 +1363,15 @@ PyInit_ready(void)
         Py_XDECREF(m);
         return NULL;
     }
+    PyObject *where = PyUnicode_FromString("ready.added");
+    if (where == NULL || PyModule_AddType(m, &Added_Type) < 0
+        || PyDict_SetItemString(Added_Type.tp_dict, "__module__", where) < 0) {
+        Py_XDECREF(where);
+        Py_DECREF(m);
+        return NULL;
+    }
+    Py_DECREF(where);
+    PyType_Modified(&Added_Type);
     PyUnstable_Module_SetGIL(m, Py_MOD_GIL_NOT_USED);
     return m;
 }

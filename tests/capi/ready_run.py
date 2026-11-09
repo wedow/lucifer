@@ -312,3 +312,6 @@ for i, o in enumerate(managed):
         setattr(o, 'a%d' % k, i * 100 + k)
 print(all([getattr(o, 'a%d' % k) for k in range(12)] == [i * 100 + k for k in range(12)] for i, o in enumerate(managed)),
       type(managed[0]).__name__, managed[3].a11)
+
+# PyModule_AddType readies a static type, whose tp_dict the module may then fill
+print(ready.Added.__module__, ready.Added.__name__, type(ready.Added()).__qualname__)

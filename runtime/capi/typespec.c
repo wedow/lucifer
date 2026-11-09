@@ -633,6 +633,9 @@ PyType_GetTypeDataSize(PyTypeObject *cls)
 int
 PyModule_AddType(PyObject *module, PyTypeObject *type)
 {
+    if (!(type->tp_flags & Py_TPFLAGS_READY) && PyType_Ready(type) < 0) {
+        return -1;
+    }
     const char *name = strrchr(type->tp_name, '.');
     name = name != NULL ? name + 1 : type->tp_name;
     return PyModule_AddObjectRef(module, name, (PyObject *)type);
