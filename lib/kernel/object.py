@@ -7,8 +7,8 @@ dict, then non-data descriptors and plain class attributes.
 """
 
 from _lucifer import (
-    MISSING, error, str_join, kind, type_lookup, type_dict, type_bases, type_tp_name, type_qualname,
-    instance_dict, instance_load, instance_store, ns_get, alloc, set_class, kernel_set, address,
+    MISSING, error, attribute_error, str_join, kind, type_lookup, type_dict, type_bases, type_tp_name, type_qualname,
+    instance_dict, instance_load, instance_store, ns_get, ns_set, ns_del, alloc, set_class, kernel_set, address,
     object_hash, type_flag, object_size,
 )
 from _lucifer import _boot
@@ -42,25 +42,15 @@ def _no_attribute(obj, name):
     attribute_error(text, name, obj)
 
 
-def attribute_error(text, name, obj):
-    """Raises AttributeError(text, name=name, obj=obj). name and obj are
-    stored, not passed by keyword: the kernel raises this for every failed
-    lookup, and a positional class call is made in line."""
-    e = AttributeError(text)
-    e.name = name
-    e.obj = obj
-    raise e
-
-
 def _check_name(name):
     if not kind(name, 'str'):
         error(TypeError, str_join('', (
             "attribute name must be string, not '", type_tp_name(type(name)), "'")))
 
 
-def generic_getattr(obj, name, suppress=False):
+def generic_getattr(obj, name, suppress=False, dct=MISSING):
     """_PyObject_GenericGetAttrWithDict; MISSING instead of AttributeError
-    when suppress."""
+    when suppress. dct, when given, stands for the instance's dict."""
     _check_name(name)
     tp = type(obj)
     descr = type_lookup(tp, name)
@@ -69,7 +59,7 @@ def generic_getattr(obj, name, suppress=False):
         get = type_lookup(type(descr), '__get__')
         if get is not MISSING and is_data(descr):
             return get(descr, obj, tp)
-    v = instance_load(obj, name)
+    v = instance_load(obj, name) if dct is MISSING else ns_get(dct, name, MISSING)
     if v is not MISSING:
         return v
     if get is not MISSING:
@@ -81,8 +71,9 @@ def generic_getattr(obj, name, suppress=False):
     _no_attribute(obj, name)
 
 
-def generic_setattr(obj, name, value):
-    """_PyObject_GenericSetAttrWithDict; value MISSING deletes."""
+def generic_setattr(obj, name, value, dct=MISSING):
+    """_PyObject_GenericSetAttrWithDict; value MISSING deletes. dct, when
+    given, stands for the instance's dict."""
     _check_name(name)
     tp = type(obj)
     descr = type_lookup(tp, name)
@@ -102,7 +93,13 @@ def generic_setattr(obj, name, value):
                 return None
             if deleter is not MISSING:
                 error(AttributeError, '__set__')
-    found = instance_store(obj, name, value)
+    if dct is MISSING:
+        found = instance_store(obj, name, value)
+    elif value is MISSING:
+        found = ns_del(dct, name)
+    else:
+        ns_set(dct, name, value)
+        found = True
     if found is None:
         if descr is not MISSING:
             error(AttributeError, str_join('', (
