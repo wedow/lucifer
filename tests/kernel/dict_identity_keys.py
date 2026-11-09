@@ -20,12 +20,11 @@ def run():
     e = Equal(1)
     d2 = {e: 'e'}
     out += [d2.get(Equal(2)), d2.get(a)]
-    p = Plain()
-    d3 = {p: 'p'}
     Plain.__eq__ = lambda self, other: True
     Plain.__hash__ = lambda self: 0
-    q = Plain()
-    out += [d3.get(q), d3.get(p)]
+    q, r = Plain(), Plain()
+    d3 = {q: 'q'}
+    out += [d3.get(r), r in d3, len({q, r})]
     del Plain.__eq__, Plain.__hash__
     return out
 

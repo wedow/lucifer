@@ -351,7 +351,9 @@ enum { EQ_STR, EQ_INT, EQ_FLOAT, EQ_BYTES, EQ_TUPLE, EQ_IDENT, EQ_OTHER };
 /* Whether instances of tp hash and compare as object's do, by identity: it
    keeps object's __hash__ and __eq__ (a plain class, a function). The
    answers are kept per thread by type version, which names one type in one
-   state, so keys of other classes pay two lookups once, not per probe. */
+   state, so keys of other classes pay two lookups once, not per probe.
+   Equality does not ask: two such keys are distinct objects, and a hash
+   collision between them is rare enough to leave to __eq__. */
 #define IDENTITY_SEEN 64
 static __thread struct {
     unsigned int version;
@@ -384,7 +386,7 @@ eq_class(PyObject *v)
          : tp == &PyFloat_Type ? EQ_FLOAT
          : tp == &PyBytes_Type ? EQ_BYTES
          : tp == &PyTuple_Type ? EQ_TUPLE
-         : v == Py_None || tp == &PyType_Type || identity_keyed(tp) ? EQ_IDENT : EQ_OTHER;
+         : v == Py_None || tp == &PyType_Type ? EQ_IDENT : EQ_OTHER;
 }
 
 static int
