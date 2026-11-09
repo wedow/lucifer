@@ -80,6 +80,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(NEG_F, REP_F64, IF_PURE) \
     X(ABS_F, REP_F64, IF_PURE) \
     X(SQRT_F, REP_F64, IF_GUARD | IF_EFFECT)        /* a negative operand deopts (math.sqrt raises) */ \
+    X(POW_F, REP_F64, IF_GUARD | IF_EFFECT | IF_CALL)   /* a ** b as float.__pow__; deopts where that raises or is complex */ \
     X(CMP_I, REP_BIT, IF_PURE)          /* imm: Py_LT .. Py_GE */ \
     X(CMP_F, REP_BIT, IF_PURE)          /* imm: Py_LT .. Py_GE, false on NaN except != */ \
     X(IS, REP_BIT, IF_PURE)             /* a is b */ \

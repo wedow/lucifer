@@ -3277,6 +3277,7 @@ op_COMPARE_OP: {
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
     lu_jit_observe(next_instr, left, right);
+    lu_jit_observe_classes(code, next_instr - 1, left, right);
     SKIP_CACHES();
     int r = lu_compare_native(left, right, oparg);
     if (r < 0) {
@@ -3430,6 +3431,7 @@ op_BINARY_OP: {
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
     lu_jit_observe(next_instr + 1, left, right);
+    lu_jit_observe_classes(code, next_instr - 1, left, right);
     SKIP_CACHES();
     if (oparg == 26) {   /* NB_SUBSCR */
         PyObject *item = lu_subscr_native(left, right);
@@ -3489,6 +3491,7 @@ op_BINARY_OP: {
 op_UNARY_NEGATIVE:
 op_UNARY_INVERT: {
     PyObject *v = TOP();
+    lu_jit_observe_unary(code, next_instr - 1, v);
     if (PyLong_CheckExact(v)) {
         PyObject *res = opcode == UNARY_NEGATIVE ? lu_long_negate(v) : lu_long_invert(v);
         if (res == NULL) {

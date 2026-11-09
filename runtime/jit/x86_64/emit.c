@@ -2638,6 +2638,21 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         sse_rr(a, 0x66, in->op == OP_NEG_F ? 0x57 : 0x54, 0, 1, 0);
         def_fpr(a, v, 0);
         return 0;
+    case OP_POW_F: {
+        int fail = guard_exit(a, in);
+        to_fpr(a, 0, in->a);
+        y = fpr_of(a, in->b, 1);
+        if (y != 1) {
+            sse_rr(a, 0xF2, 0x10, 1, y, 0);     /* movsd xmm1, y */
+        }
+        call_abs(a, (void *)lu_jit_float_pow);
+        movq_rx(a, RAX, 0);
+        mov_ri(a, R11, (int64_t)LU_JIT_POW_FAILED);
+        alu_rr(a, ALU_CMP, RAX, R11);
+        jcc(a, CC_E, fail);
+        def_fpr(a, v, 0);
+        return 0;
+    }
     case OP_SQRT_F: {
         int fail = guard_exit(a, in);
         x = fpr_of(a, in->a, 0);

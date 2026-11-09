@@ -58,32 +58,38 @@ def add_sequence(t):
 def _sequence_slot(t, name):
     """The function of t's method name when it is a sequence slot, else MISSING."""
     f = type_lookup(t, name)
+    if f is MISSING or type(f) is _function:
+        return MISSING          # a class's own Python method is a number slot
     for s in _SEQUENCES:
         if f is type_lookup(s, name):
             return f
     return MISSING
 
 
-def _entry(table, i):
-    for e in table:
-        if i == 0:
-            return e
-        i -= 1
+_function = type(_sequence_slot)
 
 
 def _name(x):
     return type_tp_name(type(x))
 
 
-def _unsupported(sym, a, b):
+def _unsupported(op, a, b):
+    if op >= 13:
+        sym = str_join('', (_BINARY[op - 13][3], '='))
+    elif op == 8:
+        sym = '** or pow()'
+    else:
+        sym = _BINARY[op][3]
     error(TypeError, str_join('', (
         'unsupported operand type(s) for ', sym, ": '", _name(a), "' and '", _name(b), "'")))
 
 
 def binary_op(a, b, op):
-    """PyNumber_<op>(a, b) and PyNumber_InPlace<op>(a, b) for BINARY_OP's oparg."""
+    """PyNumber_<op>(a, b) and PyNumber_InPlace<op>(a, b) for BINARY_OP's oparg.
+    Written to fold where the tier knows the operands' types and op (a
+    site's own classes): a table read, type lookups and identity tests."""
     inplace = op >= 13
-    forward, reverse, iname, sym = _entry(_BINARY, op - 13 if inplace else op)
+    forward, reverse, iname, sym = _BINARY[op - 13 if inplace else op]
     ta = type(a)
     if inplace:
         f = type_lookup(ta, iname)
@@ -91,9 +97,6 @@ def binary_op(a, b, op):
             r = call_special(f, a, b)
             if r is not NotImplemented:
                 return r
-        sym = str_join('', (sym, '='))
-    elif op == 8:
-        sym = '** or pow()'
     tb = type(b)
     fb = MISSING
     seq_a = seq_b = MISSING
@@ -127,7 +130,7 @@ def binary_op(a, b, op):
         return call_special(seq_a, a, b)
     if seq_b is not MISSING:
         return call_special(seq_b, b, a)
-    _unsupported(sym, a, b)
+    _unsupported(op, a, b)
 
 
 def truth(v):
@@ -152,7 +155,7 @@ def truth(v):
 
 def compare(a, b, oparg):
     """COMPARE_OP: PyObject_RichCompare; oparg bit 4 asks for a bool."""
-    forward, reverse, sym = _entry(_COMPARE, oparg >> 5)
+    forward, reverse, sym = _COMPARE[oparg >> 5]
     ta = type(a)
     tb = type(b)
     done = False

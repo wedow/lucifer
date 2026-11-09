@@ -93,6 +93,17 @@ struct lu_jit_code {
     int resume_key;
     lu_codeunit *fresh;         /* where a generator that never ran stands (the POP_TOP before the first RESUME) */
     struct lu_callees **callees;        /* per code unit: a call site's callees */
+    struct lu_opclasses **opclasses;    /* per code unit: an operator site's operand classes */
+    struct ctxmark *ctx;                /* a root's marks on kernel code inlined in it, by context */
+    int nctx, capctx;
+    PyMutex ctx_lock;                   /* the marks' */
+};
+
+/* A root's mark on kernel code by context (target.h): its failures and bits. */
+struct ctxmark {
+    uint64_t key;
+    uint16_t fails;
+    uint8_t bits;
 };
 
 static struct {
@@ -465,6 +476,52 @@ lu_jit_nohoist_set(PyCodeObject *code, int pc)
     if (pc >= 0 && pc < jc->ncode) {
         __atomic_fetch_or(&jc->nospec[pc], NOHOIST, __ATOMIC_RELAXED);
     }
+}
+
+/* The root's mark for key, made when `create` (under its ctx_lock), or NULL. */
+static struct ctxmark *
+ctx_entry(struct lu_jit_code *jc, uint64_t key, int create)
+{
+    for (int i = 0; i < jc->nctx; i++) {
+        if (jc->ctx[i].key == key) {
+            return &jc->ctx[i];
+        }
+    }
+    if (!create) {
+        return NULL;
+    }
+    if (jc->nctx == jc->capctx) {
+        jc->capctx = jc->capctx ? jc->capctx * 2 : 8;
+        jc->ctx = realloc(jc->ctx, sizeof(struct ctxmark) * (size_t)jc->capctx);
+    }
+    jc->ctx[jc->nctx] = (struct ctxmark){ .key = key };
+    return &jc->ctx[jc->nctx++];
+}
+
+int
+lu_jit_ctx_marked(PyCodeObject *root, uint64_t key, int bit)
+{
+    struct lu_jit_code *jc = state_of(root);
+    if (jc == NULL) {
+        return 0;
+    }
+    PyMutex_Lock(&jc->ctx_lock);
+    struct ctxmark *m = ctx_entry(jc, key, 0);
+    int set = m != NULL && (m->bits & bit);
+    PyMutex_Unlock(&jc->ctx_lock);
+    return set;
+}
+
+/* The context of the exit's frame k (frames 1..k kernel code inlined in
+   the root), and with `pc` 0 that of the call that inlined it. */
+static uint64_t
+exit_context(struct lu_deopt *d, int k, int pc)
+{
+    uint64_t h = 0;
+    for (int i = 0; i < k; i++) {
+        h = lu_jit_ctx_mix(h, d->frames[i].code, d->frames[i].pc);
+    }
+    return lu_jit_ctx_mix(h, d->frames[k].code, pc ? d->frames[k].pc : -1);
 }
 
 int
@@ -1260,6 +1317,44 @@ lu_jit_note_raised(struct lu_deopt *d)
    frame's handler keeps taking (compiled code takes only the root's and
    kernel frames', which make no traceback entry) is treated as a side
    exit there: the function is called instead, and its own unit takes it. */
+/* lu_jit_note_exit for kernel code inlined in the root (frame k): the
+   failures count, and the mark goes, in the root's marks by context, so
+   that the kernel function compiles differently only where its copy
+   failed. */
+static void
+note_in_context(struct lu_deopt *d, struct lu_unit *u, int k)
+{
+    int bit = d->reason == EXIT_GUARD ? LU_CTX_NOSPEC : LU_CTX_NOINLINE;
+    uint64_t key = exit_context(d, k, bit == LU_CTX_NOSPEC);
+    struct lu_jit_code *root = state_for(d->frames[0].code);
+    PyMutex_Lock(&root->ctx_lock);
+    struct ctxmark *m = ctx_entry(root, key, 1);
+    int n = m->fails < UINT16_MAX ? ++m->fails : m->fails;
+    int again = (m->bits & bit) != 0;
+    if (n >= GUARD_FAILS) {
+        m->bits |= (uint8_t)bit;
+    }
+    PyMutex_Unlock(&root->ctx_lock);
+    if (n < GUARD_FAILS) {
+        return;
+    }
+    if (!again) {
+        __atomic_store_n(&root->marked, __atomic_add_fetch(&marks, 1, __ATOMIC_RELEASE), __ATOMIC_RELAXED);
+    }
+    else if (__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
+        return;
+    }
+    else if (u->built >= __atomic_load_n(&root->marked, __ATOMIC_RELAXED)) {
+        leave(d, u);
+        return;
+    }
+    say_recompile(d->frames[0].code, bit == LU_CTX_NOINLINE ? "inlined copy leaves here" : "guard fails here",
+                  d->frames[k].code, d->frames[k].pc);
+    for (struct lu_unit *r = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); r != NULL; r = r->next) {
+        kill(root, r);
+    }
+}
+
 void
 lu_jit_note_exit(struct lu_deopt *d)
 {
@@ -1303,6 +1398,10 @@ lu_jit_note_exit(struct lu_deopt *d)
         return;
     }
     struct lu_deopt_frame *inner = &d->frames[handled];
+    if (handled > 0 && (inner->code->co_flags & LU_CO_KERNEL)) {
+        note_in_context(d, u, handled);
+        return;
+    }
     struct lu_jit_code *jc = state_for(inner->code);
     if (inner->pc < 0 || inner->pc >= jc->ncode) {
         return;
@@ -1464,6 +1563,30 @@ lu_jit_callees(PyCodeObject *code, int pc)
     return t != NULL && pc >= 0 && pc < jc->ncode ? __atomic_load_n(&t[pc], __ATOMIC_ACQUIRE) : NULL;
 }
 
+/* The code's state, made before the code is hot if it has none: its
+   counts go on as entries the interpreter keeps (wait), so that it still
+   warms up before it compiles. */
+static struct lu_jit_code *
+state_cold(PyCodeObject *code)
+{
+    struct lu_jit_code *jc = state_of(code);
+    if (jc != NULL) {
+        return jc;
+    }
+    uintptr_t v = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
+    int mode = _PyRuntime.jit.mode == LU_JIT_ALWAYS;
+    unsigned calls = v & 1 ? (unsigned)(v >> 1) : 0, threshold = lu_jit_threshold(code);
+    jc = state_for(code);
+    for (int i = 0; i < jc->ncode && !mode; i++) {
+        __atomic_store_n(&jc->wait[i], threshold, __ATOMIC_RELAXED);
+    }
+    if (jc->call_pc >= 0 && !mode) {
+        unsigned left = calls < threshold ? threshold - calls : 0;
+        __atomic_store_n(&jc->wait[jc->call_pc], left, __ATOMIC_RELAXED);
+    }
+    return jc;
+}
+
 void
 lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, PyObject *self, uint32_t tag)
 {
@@ -1480,23 +1603,7 @@ lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, P
     }
     struct lu_callee want = { named ? fn : f->func_code, named ? NULL : f->func_globals,
                               (fn != callable || self != NULL ? LU_CALLEE_BOUND : 0) | (named ? 0 : LU_CALLEE_CODE) };
-    struct lu_jit_code *jc = state_of(code);
-    if (jc == NULL) {
-        /* The code's state, made before the code is hot: its counts go on
-           as entries the interpreter keeps (wait), so that it still warms
-           up before it compiles. */
-        uintptr_t v = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
-        int mode = _PyRuntime.jit.mode == LU_JIT_ALWAYS;
-        unsigned calls = v & 1 ? (unsigned)(v >> 1) : 0, threshold = lu_jit_threshold(code);
-        jc = state_for(code);
-        for (int i = 0; i < jc->ncode && !mode; i++) {
-            __atomic_store_n(&jc->wait[i], threshold, __ATOMIC_RELAXED);
-        }
-        if (jc->call_pc >= 0 && !mode) {
-            unsigned left = calls < threshold ? threshold - calls : 0;
-            __atomic_store_n(&jc->wait[jc->call_pc], left, __ATOMIC_RELAXED);
-        }
-    }
+    struct lu_jit_code *jc = state_cold(code);
     struct lu_callees *t = lu_jit_callees(code, pc);
     int n = t != NULL ? __atomic_load_n(&t->n, __ATOMIC_ACQUIRE) : 0;
     for (int i = 0; i < n; i++) {
@@ -1536,6 +1643,61 @@ lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, P
     }
 }
 
+/* Operator class tables (jit.h), kept as callee tables are. */
+
+struct lu_opclasses *
+lu_jit_opclasses(PyCodeObject *code, int pc)
+{
+    struct lu_jit_code *jc = state_of(code);
+    struct lu_opclasses **t = jc != NULL ? __atomic_load_n(&jc->opclasses, __ATOMIC_ACQUIRE) : NULL;
+    return t != NULL && pc >= 0 && pc < jc->ncode ? __atomic_load_n(&t[pc], __ATOMIC_ACQUIRE) : NULL;
+}
+
+void
+lu_jit_opclass_note(PyCodeObject *code, int pc, PyTypeObject *left, PyTypeObject *right)
+{
+    struct lu_opclasses *t = lu_jit_opclasses(code, pc);
+    int n = t != NULL ? __atomic_load_n(&t->n, __ATOMIC_ACQUIRE) : 0;
+    if (t != NULL && __atomic_load_n(&t->mega, __ATOMIC_RELAXED)) {
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        if (t->e[i].left == left && t->e[i].right == right) {
+            return;
+        }
+    }
+    struct lu_jit_code *jc = state_cold(code);
+    int added = 0;
+    PyMutex_Lock(&_PyRuntime.pic_lock);
+    if (jc->opclasses == NULL) {
+        __atomic_store_n(&jc->opclasses, calloc((size_t)jc->ncode, sizeof(struct lu_opclasses *)), __ATOMIC_RELEASE);
+    }
+    t = jc->opclasses[pc];
+    if (t == NULL) {
+        t = calloc(1, sizeof(struct lu_opclasses));
+        __atomic_store_n(&jc->opclasses[pc], t, __ATOMIC_RELEASE);
+    }
+    int known = 0;
+    for (int i = 0; i < t->n; i++) {
+        known |= t->e[i].left == left && t->e[i].right == right;
+    }
+    if (!known && !t->mega) {
+        if (t->n < LU_OPCLASS_WAYS) {
+            t->e[t->n].left = left;
+            t->e[t->n].right = right;
+            __atomic_store_n(&t->n, t->n + 1, __ATOMIC_RELEASE);
+        }
+        else {
+            __atomic_store_n(&t->mega, 1, __ATOMIC_RELEASE);
+        }
+        added = 1;
+    }
+    PyMutex_Unlock(&_PyRuntime.pic_lock);
+    if (added) {
+        lu_jit_invalidate(LU_DEP_CALLEES, (uintptr_t)t, 0);
+    }
+}
+
 void
 lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
 {
@@ -1566,6 +1728,18 @@ lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
             lu_cache_store32(lu_code_start(code) + pc + 2, 0);     /* the next call relearns its callee */
         }
     }
+    for (int pc = 0; jc != NULL && jc->opclasses != NULL && pc < jc->ncode; pc++) {
+        struct lu_opclasses *t = jc->opclasses[pc];
+        int k = 0;
+        for (int i = 0; t != NULL && i < t->n; i++) {
+            if (!dead((PyObject *)t->e[i].left) && !dead((PyObject *)t->e[i].right)) {
+                t->e[k++] = t->e[i];
+            }
+        }
+        if (t != NULL) {
+            t->n = k;
+        }
+    }
 }
 
 void
@@ -1591,6 +1765,11 @@ lu_jit_code_free(PyCodeObject *code)
         free(jc->callees[i]);
     }
     free(jc->callees);
+    for (int i = 0; jc->opclasses != NULL && i < jc->ncode; i++) {
+        free(jc->opclasses[i]);
+    }
+    free(jc->opclasses);
+    free(jc->ctx);
     free(jc->nospec);
     free(jc->fails);
     free(jc->wait);
