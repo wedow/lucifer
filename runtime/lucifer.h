@@ -1162,6 +1162,7 @@ PyObject *lu_weakref_get(PyObject *ref);
 PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
 void lu_capsule_init(void);
+void lu_picklebuf_init(void);
 int lu_fileobject_init(void);
 /* The last-resort MemoryError of PyErr_NoMemory (runtime/capi/errors.c). */
 void lu_errors_init(PyInterpreterState *interp);

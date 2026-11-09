@@ -775,6 +775,24 @@ lu_type_add_descriptors(PyTypeObject *tp)
     return 0;
 }
 
+/* A runtime type's C instance methods (tp_methods), inserted natively: the
+   kernel's dict functions are not up when the static types are readied. */
+static int
+add_static_methods(PyTypeObject *tp, PyObject *dict)
+{
+    for (PyMethodDef *ml = tp->tp_methods; ml != NULL && ml->ml_name != NULL; ml++) {
+        PyObject *d = lu_descr_new_method(tp, ml);
+        PyObject *name = d != NULL ? PyUnicode_InternFromString(ml->ml_name) : NULL;
+        int err = name == NULL || lu_ns_insert(dict, name, d) < 0;
+        Py_XDECREF(name);
+        Py_XDECREF(d);
+        if (err) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 /* tp_free of a class: what a base's dealloc calls last, which must know the preheader. */
 static void
 heap_free(void *self)
@@ -859,9 +877,13 @@ lu_types_init(PyInterpreterState *interp)
         if (state->tp_dict != NULL) {
             continue;
         }
-        if ((state->tp_dict = PyDict_New()) == NULL
-            || lu_ns_insert(state->tp_dict, LU_ID(__doc__), Py_None) < 0
-            || lu_type_add_descriptors(*t) < 0) {
+        /* Kernel Python fills most; a type written in C has its methods and doc. */
+        PyObject *doc = (*t)->tp_doc != NULL ? PyUnicode_FromString((*t)->tp_doc) : Py_NewRef(Py_None);
+        int err = doc == NULL || (state->tp_dict = PyDict_New()) == NULL
+            || lu_ns_insert(state->tp_dict, LU_ID(__doc__), doc) < 0
+            || lu_type_add_descriptors(*t) < 0 || add_static_methods(*t, state->tp_dict) < 0;
+        Py_XDECREF(doc);
+        if (err) {
             return -1;
         }
     }

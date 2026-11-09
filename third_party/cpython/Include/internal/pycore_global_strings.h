@@ -827,14 +827,21 @@ struct _Py_global_strings {
 #undef STR
 
 
-#define _Py_ID(NAME) \
-     (_Py_SINGLETON(strings.identifiers._py_ ## NAME._ascii.ob_base))
-#define _Py_STR(NAME) \
-     (_Py_SINGLETON(strings.literals._py_ ## NAME._ascii.ob_base))
-#define _Py_LATIN1_CHR(CH) \
-    ((CH) < 128 \
-     ? (PyObject*)&_Py_SINGLETON(strings).ascii[(CH)] \
-     : (PyObject*)&_Py_SINGLETON(strings).latin1[(CH) - 128])
+/* LU: _Py_ID and _Py_LATIN1_CHR are immortal interned strings made once per
+   use site (runtime/capi/internal.c): CPython's are objects inside
+   _PyRuntime, which Lucifer does not lay out. _Py_STR is left undefined, so
+   a use fails to build. */
+PyAPI_FUNC(PyObject *) lu_static_str(const char *s);
+PyAPI_FUNC(PyObject *) lu_latin1_chr(unsigned int ch);
+#define _Py_ID(NAME) (*__extension__ ({ \
+        static PyObject *_lu_id; \
+        if (_lu_id == NULL) { _lu_id = lu_static_str(#NAME); } \
+        _lu_id; }))
+#define _Py_LATIN1_CHR(CH) (__extension__ ({ \
+        static PyObject *_lu_chr[256]; \
+        unsigned int _lu_c = (CH); \
+        if (_lu_chr[_lu_c] == NULL) { _lu_chr[_lu_c] = lu_latin1_chr(_lu_c); } \
+        _lu_chr[_lu_c]; }))
 
 /* _Py_DECLARE_STR() should precede all uses of _Py_STR() in a function.
 

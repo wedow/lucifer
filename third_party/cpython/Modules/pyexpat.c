@@ -146,7 +146,7 @@ static int
 set_xml_error_attr_code(PyObject *err, enum XML_Error code)
 {
     PyObject *v = PyLong_FromLong((long)code);
-    int ok = v != NULL && PyObject_SetAttrString(err, "code", v) != -1;    /* LU: not &_Py_ID(code) */
+    int ok = v != NULL && PyObject_SetAttr(err, &_Py_ID(code), v) != -1;
     Py_XDECREF(v);
     return ok;
 }

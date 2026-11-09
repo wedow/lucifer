@@ -26,7 +26,10 @@ have been excluded.
 
 ## Modules/ and Include/internal/
 
-`Include/internal/` is copied verbatim from the same tag. The standard
+`Include/internal/` is copied from the same tag; one local change, marked `LU:`:
+`pycore_global_strings.h` defines `_Py_ID` and `_Py_LATIN1_CHR` as interned
+strings made on first use (CPython's are objects inside `_PyRuntime`), and no
+`_Py_STR`. The standard
 library's extension modules below are the tag's own `Modules/` sources, copied
 verbatim with their `clinic/` headers, and built against `include/` and
 `Include/internal/` into `lib-dynload` (Makefile `STDLIB_EXTS`), linked to the
@@ -34,14 +37,13 @@ system's OpenSSL, SQLite, bzip2 and Expat:
 
 - `_ssl.c`, `_ssl.h`, `_ssl/`, `_ssl_data_*.h`, `socketmodule.h` (`_ssl`)
 - `_sqlite/` (`_sqlite3`), `_bz2module.c` (`_bz2`), `cmathmodule.c` and `_math.h` (`cmath`)
-- `pyexpat.c` and `expat/expat_config.h` (`pyexpat`), `_elementtree.c` (`_elementtree`)
+- `pyexpat.c` and `expat/expat_config.h` (`pyexpat`), `_elementtree.c` (`_elementtree`), `_pickle.c` (`_pickle`)
 - `_multiprocessing/` (`_multiprocessing`, `_posixshmem`)
 - `cjkcodecs/` (`_multibytecodec`, `_codecs_cn`, `_codecs_hk`, `_codecs_iso2022`,
   `_codecs_jp`, `_codecs_kr`, `_codecs_tw`)
 
-Local change (marked `LU:`): `pyexpat.c` sets the error's `code` attribute by
-name, not through `&_Py_ID(code)`, a string object inside CPython's
-`_PyRuntime`, which this runtime does not lay out.
+`runtime/capi/internal.c` holds `_PyBytesWriter_*` of `Objects/bytesobject.c`,
+adapted (no debug-build checks).
 
 ## include/
 

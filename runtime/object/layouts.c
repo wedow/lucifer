@@ -830,6 +830,7 @@ lu_layouts_init(void)
     lu_frame_init();
     lu_weakref_init();
     lu_capsule_init();
+    lu_picklebuf_init();
 
     struct lu_static_objects *s = &_PyRuntime.singletons;
     for (int i = 0; i < LU_NSMALLNEGINTS + LU_NSMALLPOSINTS; i++) {

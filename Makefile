@@ -132,7 +132,8 @@ DYNLOAD = $(STDLIB)/lib-dynload
 EXT_SUFFIX = .cpython-314t-x86_64-linux-gnu.so
 CPY_MODULES = third_party/cpython/Modules
 CJK_CODECS = _codecs_cn _codecs_hk _codecs_iso2022 _codecs_jp _codecs_kr _codecs_tw
-STDLIB_EXTS = _ssl _sqlite3 _bz2 pyexpat _elementtree cmath _multiprocessing _posixshmem _multibytecodec $(CJK_CODECS)
+STDLIB_EXTS = _ssl _sqlite3 _bz2 pyexpat _elementtree _pickle cmath _multiprocessing _posixshmem _multibytecodec \
+	$(CJK_CODECS)
 STDLIB_EXT_FILES = $(STDLIB_EXTS:%=$(DYNLOAD)/%$(EXT_SUFFIX))
 all: $(STDLIB_EXT_FILES)
 $(DYNLOAD)/_ssl$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_ssl.c
@@ -144,6 +145,7 @@ $(DYNLOAD)/_bz2$(EXT_SUFFIX): EXT_LIBS = -lbz2
 $(DYNLOAD)/pyexpat$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/pyexpat.c
 $(DYNLOAD)/pyexpat$(EXT_SUFFIX): EXT_LIBS = -lexpat
 $(DYNLOAD)/_elementtree$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_elementtree.c
+$(DYNLOAD)/_pickle$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_pickle.c
 $(DYNLOAD)/cmath$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/cmathmodule.c
 $(DYNLOAD)/cmath$(EXT_SUFFIX): EXT_LIBS = -lm
 $(DYNLOAD)/_multiprocessing$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_multiprocessing/multiprocessing.c \
