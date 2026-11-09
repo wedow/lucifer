@@ -201,9 +201,11 @@ LU_STATIC_TYPES(LU_TYPE)
     LU_EXPORT PyObject *PyExc_##sym = (PyObject *)&lu_exc_##sym;
 LU_EXCEPTIONS(LU_EXC)
 
-/* Every exception type, for the native layout setup (runtime/capi/errors.c). */
+/* Every exception type, for the native layout setup (runtime/capi/errors.c);
+   _IncompleteInputError is exported as the type itself. */
 #define LU_EXC_ENTRY(sym, name, base) &lu_exc_##sym,
-PyTypeObject *const lu_exception_types[] = { LU_EXCEPTIONS(LU_EXC_ENTRY) NULL };
+PyTypeObject *const lu_exception_types[] = {
+    LU_EXCEPTIONS(LU_EXC_ENTRY) &_PyExc_IncompleteInputError, NULL };
 
 /* method-wrapper (Objects/descrobject.c wrapperobject): a slot wrapper bound
    to an instance. CPython does not export it. */
