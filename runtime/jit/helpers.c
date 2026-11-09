@@ -218,6 +218,18 @@ h_list_to_tuple(PyObject *list, int64_t n)
     return t;
 }
 
+/* UNPACK_SEQUENCE where the interpreter met both exact tuples and exact
+   lists: a tuple of n items itself, a list's n items as a tuple; declined
+   for anything else. */
+static PyObject *
+h_unpack_exact(PyObject *seq, int64_t n)
+{
+    if (PyTuple_CheckExact(seq)) {
+        return Py_SIZE(seq) == n ? Py_NewRef(seq) : LU_JIT_DECLINED;
+    }
+    return PyList_CheckExact(seq) ? h_list_to_tuple(seq, n) : LU_JIT_DECLINED;
+}
+
 /* A **kwargs parameter's dict, for a call without keywords. */
 static PyObject *
 h_new_dict(PyObject **argv, intptr_t n)
@@ -1380,6 +1392,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_build_map] = { (void *)h_build_map, "build_map", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_set_add] = { (void *)h_set_add, "set_add", REP_BIT, IF_RAISE | IF_PY, 2 },
     [H_list_to_tuple] = { (void *)h_list_to_tuple, "list_to_tuple", REP_OBJ, IF_RAISE | IF_SEEN, 2 },
+    [H_unpack_exact] = { (void *)h_unpack_exact, "unpack_exact", REP_OBJ, IF_RAISE | IF_SEEN, 2 },
     [H_gen_send] = { (void *)h_gen_send, "gen_send", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_send] = { (void *)h_send, "send", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_gen_done] = { (void *)h_gen_done, "gen_done", REP_BIT, 0, 1 },

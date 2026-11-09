@@ -162,6 +162,10 @@ require that a count of the tier's does not grow with the iterations:
          an int with no feedback: guard and side exits, and entries left to
          the interpreter. The unit built after the site is marked keeps no
          guard there.
+  hoisted tests/kernel/jit_unpack_phases.py, whose hot loop unpacks a tuple
+         and then a list, by turns, after the tuple's guard moved out of
+         the loop: entries left to the interpreter and side exits. The
+         code recompiles once, into a unit that takes both.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -238,6 +242,7 @@ GROWTH = {
     'shadowed': ('jit_shadowed.py', r'jit: compiles (\d+)|exits guard (\d+)', 0),
     'kept': ('jit_marked_guards.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
              r'|jit: entries waited (\d+)', 0),
+    'hoisted': ('jit_unpack_phases.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
     'order': ('jit_call_order.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),
 }
