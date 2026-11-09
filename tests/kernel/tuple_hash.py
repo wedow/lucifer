@@ -126,5 +126,6 @@ for depth, make in ((1000, lambda t: (t,)), (100, lambda t: T((t,)))):
         hash(t)
         print('hashed')
     except RecursionError as e:
-        print('RecursionError', 'while hashing a tuple' in str(e))
+        # A subclass's nesting may hit the recursion limit first.
+        print('RecursionError', (type(make(())) is T or 'while hashing a tuple' in str(e)))
     del t
