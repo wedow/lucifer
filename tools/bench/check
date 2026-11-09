@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Binary-level regression checks for benchmark drivers, using no real timings."""
 import csv
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
+import zipfile
 
 from common import ROOT
 from steady import median_interval, steady_start, summarize
@@ -137,6 +141,11 @@ class BenchCheck(unittest.TestCase):
 
 FAKE = r"""import json, os, sys
 args, mode = sys.argv[1:], os.environ.get('FAKE_MODE', '')
+if args[0].endswith('.py') and '--worker' not in args:  # a script: it must exist
+    if not os.path.exists(args[0]):
+        os.kill(os.getpid(), 9)
+    print('ran', os.path.basename(args[0]))
+    sys.exit(0)
 if args[0] == '-m':
     print('report of', args[1], open('/proc/self/stat').read().split()[0] if mode == 'unstable' else '')
     sys.exit(1)
@@ -216,9 +225,53 @@ class CorpusCheck(unittest.TestCase):
         self.assertEqual(self.time(['cli.black'], reference)['cli.black']['status'], 'wrong')
         self.assertEqual(self.time(['cli.isort'], reference)['cli.isort']['status'], 'noreference')
 
+    def test_cadence_scripts_run_from_the_release_tree(self):
+        tree = self.root / 'cadence-net'
+        found = self.time(['cadence.walking_rhythm'])['cadence.walking_rhythm']
+        self.assertEqual(found['status'], 'crash')
+        (tree / 'examples').mkdir(parents=True)
+        (tree / 'examples/walking_rhythm.py').write_text('')
+        found = self.time(['cadence.walking_rhythm'])['cadence.walking_rhythm']
+        self.assertEqual(found['status'], 'ok')
+
     def test_output_that_changes_between_runs_is_wrong(self):
         self.assertEqual(self.time(['cli.black'], mode='unstable')['cli.black'],
                          dict(status='wrong', seconds=None, loops=None, check=None))
+
+
+class CorpusPrepareCheck(unittest.TestCase):
+    """corpus prepare from a lock of local archives: wheels unpack, an sdist gives its package and, if asked, its tree."""
+
+    def test_sdist_tree_lands_beside_the_site(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            tool = root / 'tools/bench'
+            tool.mkdir(parents=True)
+            (tool / 'corpus').write_text((ROOT / 'tools/bench/corpus').read_text())
+            wheel = root / 'pyperformance-1.0-py3-none-any.whl'
+            with zipfile.ZipFile(wheel, 'w') as archive:
+                archive.writestr('pyperformance/', '')  # a directory entry, as numpy's wheel has
+                archive.writestr('pyperformance/data-files/benchmarks/bm_2to3/vendor/src/lib2to3/__init__.py', '')
+            sdist = root / 'demo-1.0.tar.gz'
+            with tarfile.open(sdist, 'w:gz') as archive:
+                for name in ('demo-1.0/src/demo/__init__.py', 'demo-1.0/examples/run.py'):
+                    info = tarfile.TarInfo(name)
+                    archive.addfile(info, io.BytesIO(b''))
+            digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+            lock = [dict(name='pyperformance', url=wheel.as_uri(), sha256=digest(wheel)),
+                    dict(name='demo', url=sdist.as_uri(), sha256=digest(sdist), package='demo-1.0/src/demo', tree='demo-1.0')]
+            (tool / 'corpus.lock.json').write_text(json.dumps(lock))
+            site = root / 'build/site'
+            stale = root / 'build/demo/stale.py'
+            stale.parent.mkdir(parents=True)
+            stale.write_text('')
+            done = subprocess.run([sys.executable, tool / 'corpus', 'prepare', site, '--cache', root / 'cache'],
+                                  capture_output=True, text=True, timeout=60)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertTrue((site / 'demo/__init__.py').is_file())
+            self.assertTrue((site / 'lib2to3/__init__.py').is_file())
+            self.assertTrue((root / 'build/demo/examples/run.py').is_file())
+            self.assertFalse(stale.exists())
 
 
 if __name__ == '__main__':

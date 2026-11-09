@@ -270,7 +270,9 @@ def _encode(code, value, swapped=''):
     """The bytes of a Python value for a simple type code."""
     fmt, size = _CODES[code]
     if code == 'c':
-        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value < 256:
+        if isinstance(value, int):
+            if not 0 <= value < 256:
+                raise TypeError('integer not in range(256)')
             return bytes((value,))
         if isinstance(value, (bytes, bytearray)) and len(value) == 1:
             return bytes(value)
@@ -364,16 +366,14 @@ class PyCSimpleType(_CDataType):
                 _write(param._b_addr, _pointer_value(value, keep).to_bytes(8, 'little'))
                 param._keep('param', (value, keep))
                 return param
-        elif hasattr(value, '_as_parameter_'):
-            return cls.from_param(value._as_parameter_)
         else:
+            # The value itself first (the type's setfunc), then its _as_parameter_.
             try:
                 return cls(value)
-            except TypeError as e:
-                if code == 'O':
+            except TypeError:
+                if not hasattr(value, '_as_parameter_'):
                     raise
-                raise TypeError("'%s' object cannot be interpreted as ctypes.%s" % (type(value).__name__, cls.__name__)) \
-                    if isinstance(value, (str, bytes, type(None), tuple, list, dict)) else e
+            return cls.from_param(value._as_parameter_)
         if hasattr(value, '_as_parameter_'):
             return cls.from_param(value._as_parameter_)
         raise TypeError("'%s' object cannot be interpreted as ctypes.%s" % (type(value).__name__, cls.__name__))

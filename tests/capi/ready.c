@@ -469,6 +469,17 @@ static PyTypeObject CmpOnly_Type = {
     .tp_richcompare = delegate_richcompare,
 };
 
+/* ready.FloatCmp: numpy's DUAL_INHERIT, a static type on an unhashable base and float
+   that takes float's tp_hash, so it hashes as a float (its value is 0.0: the base's
+   tp_new makes it). */
+static PyTypeObject FloatCmp_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.FloatCmp",
+    .tp_basicsize = sizeof(PyFloatObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_base = &CmpOnly_Type,
+};
+
 /* Spec types with one of tp_richcompare and tp_hash: the other is not inherited. */
 static Py_hash_t
 seven_hash(PyObject *self)
@@ -542,6 +553,16 @@ static PyTypeObject DocSig_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_new = PyType_GenericNew,
     .tp_doc = "DocSig(x, /, y=1)\n--\n\nA documented type.",
+};
+
+/* ready.Added: a static type that PyModule_AddType readies, after which the
+   module writes __module__ into its tp_dict, as torch's dtype does. */
+static PyTypeObject Added_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "Added",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = PyType_GenericNew,
 };
 
 /* ready.Mapped: indexing through mp_subscript only, as numpy's scalars do:
@@ -1188,6 +1209,58 @@ numbers(PyObject *self, PyObject *Py_UNUSED(ignored))
 
 /* Objects: length hints, file descriptors, managed state. */
 
+/* A spec type with a managed dict whose instances C allocates with
+   PyObject_GC_New, as Cython's function type is: an instance has room for
+   the attributes stored on it, as CPython's _PyObject_GC_New gives the
+   inline values. */
+static int
+managed_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    Py_VISIT(Py_TYPE(op));
+    return PyObject_VisitManagedDict(op, visit, arg);
+}
+
+static int
+managed_clear(PyObject *op)
+{
+    PyObject_ClearManagedDict(op);
+    return 0;
+}
+
+static void
+managed_dealloc(PyObject *op)
+{
+    PyTypeObject *tp = Py_TYPE(op);
+    PyObject_GC_UnTrack(op);
+    managed_clear(op);
+    PyObject_GC_Del(op);
+    Py_DECREF(tp);
+}
+
+static PyObject *managed_type;
+
+static PyObject *
+managed_new(PyObject *self, PyObject *unused)
+{
+    if (managed_type == NULL) {
+        PyType_Slot slots[] = {
+            { Py_tp_traverse, managed_traverse }, { Py_tp_clear, managed_clear },
+            { Py_tp_dealloc, managed_dealloc }, { 0, NULL },
+        };
+        PyType_Spec spec = { "ready.Managed", sizeof(PyObject), 0,
+                             Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_MANAGED_DICT, slots };
+        managed_type = PyType_FromSpec(&spec);
+        if (managed_type == NULL) {
+            return NULL;
+        }
+    }
+    PyObject *op = PyObject_GC_New(PyObject, (PyTypeObject *)managed_type);
+    if (op != NULL) {
+        PyObject_GC_Track(op);
+    }
+    return op;
+}
+
 static PyObject *
 objects(PyObject *self, PyObject *arg)
 {
@@ -1252,6 +1325,7 @@ static PyMethodDef module_methods[] = {
     { "datetimes", datetimes, METH_NOARGS, NULL },
     { "numbers", numbers, METH_NOARGS, NULL },
     { "objects", objects, METH_O, NULL },
+    { "managed_new", managed_new, METH_NOARGS, NULL },
     { NULL }
 };
 
@@ -1275,6 +1349,11 @@ PyInit_ready(void)
     if (PyType_Ready(&BytesCopy_Type) < 0 || PyType_Ready(&Mul_Type) < 0) {
         return NULL;
     }
+    FloatCmp_Type.tp_bases = Py_BuildValue("(OO)", &CmpOnly_Type, &PyFloat_Type);
+    FloatCmp_Type.tp_hash = PyFloat_Type.tp_hash;
+    if (FloatCmp_Type.tp_bases == NULL || PyType_Ready(&FloatCmp_Type) < 0) {
+        return NULL;
+    }
     BytesMul_Type.tp_bases = Py_BuildValue("(OO)", &PyBytes_Type, &Mul_Type);
     if (BytesMul_Type.tp_bases == NULL || PyType_Ready(&BytesMul_Type) < 0) {
         return NULL;
@@ -1296,10 +1375,20 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "DocSig", (PyObject *)&DocSig_Type) < 0
         || PyModule_AddObjectRef(m, "BytesCopy", (PyObject *)&BytesCopy_Type) < 0
         || PyModule_AddObjectRef(m, "Mul", (PyObject *)&Mul_Type) < 0
-        || PyModule_AddObjectRef(m, "BytesMul", (PyObject *)&BytesMul_Type) < 0) {
+        || PyModule_AddObjectRef(m, "BytesMul", (PyObject *)&BytesMul_Type) < 0
+        || PyModule_AddObjectRef(m, "FloatCmp", (PyObject *)&FloatCmp_Type) < 0) {
         Py_XDECREF(m);
         return NULL;
     }
+    PyObject *where = PyUnicode_FromString("ready.added");
+    if (where == NULL || PyModule_AddType(m, &Added_Type) < 0
+        || PyDict_SetItemString(Added_Type.tp_dict, "__module__", where) < 0) {
+        Py_XDECREF(where);
+        Py_DECREF(m);
+        return NULL;
+    }
+    Py_DECREF(where);
+    PyType_Modified(&Added_Type);
     PyUnstable_Module_SetGIL(m, Py_MOD_GIL_NOT_USED);
     return m;
 }
