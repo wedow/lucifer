@@ -1,79 +1,87 @@
 {
  "version": "3.14.10 free-threading build (tags/v3.14.10:b703b2c, Nov  2 2026, 05:02:58) [GCC 16.2.1 20260810]",
  "best_us": {
-  "Bounce": 1729093,
-  "CD": 2573920,
-  "DeltaBlue": 636596,
-  "Havlak": 3519754,
-  "Json": 874376,
-  "List": 1055924,
-  "Mandelbrot": 1367974,
-  "NBody": 1960491,
-  "Permute": 2072989,
-  "Queens": 1003296,
-  "Richards": 4348416,
-  "Sieve": 2153125,
-  "Storage": 1738510,
-  "Towers": 1399041
+  "Bounce": 1737627,
+  "CD": 2588907,
+  "DeltaBlue": 642349,
+  "Havlak": 3484955,
+  "Json": 906731,
+  "List": 1085295,
+  "Mandelbrot": 1374892,
+  "NBody": 1948348,
+  "Permute": 2108418,
+  "Queens": 1002214,
+  "Richards": 4304247,
+  "Sieve": 2169227,
+  "Storage": 1760828,
+  "Towers": 1413688
  },
  "web": {
   "cpython-3.14": {
    "1": {
-    "rps": 3101.4,
-    "p50_ms": 19.144,
-    "p99_ms": 86.982,
-    "errors": 0
+    "rps": 3098.9,
+    "p50_ms": 19.431,
+    "p99_ms": 75.875,
+    "errors": 0,
+    "server_exit": null
    },
    "2": {
-    "rps": 2867.2,
-    "p50_ms": 20.048,
-    "p99_ms": 728.481,
-    "errors": 0
+    "rps": 2870.5,
+    "p50_ms": 20.099,
+    "p99_ms": 665.445,
+    "errors": 0,
+    "server_exit": null
    },
    "4": {
-    "rps": 2190.9,
-    "p50_ms": 25.411,
-    "p99_ms": 782.922,
-    "errors": 0
+    "rps": 2592.6,
+    "p50_ms": 20.612,
+    "p99_ms": 610.488,
+    "errors": 0,
+    "server_exit": null
    },
    "8": {
-    "rps": 2159.6,
-    "p50_ms": 25.56,
-    "p99_ms": 1009.776,
-    "errors": 0
+    "rps": 2139.0,
+    "p50_ms": 25.726,
+    "p99_ms": 687.002,
+    "errors": 0,
+    "server_exit": null
    }
   },
   "cpython-3.14t": {
    "1": {
-    "rps": 2601.1,
-    "p50_ms": 2.843,
-    "p99_ms": 6517.329,
-    "errors": 0
+    "rps": 2579.0,
+    "p50_ms": 2.992,
+    "p99_ms": 7728.785,
+    "errors": 0,
+    "server_exit": null
    },
    "2": {
-    "rps": 4371.8,
-    "p50_ms": 18.15,
-    "p99_ms": 2082.012,
-    "errors": 0
+    "rps": 4332.6,
+    "p50_ms": 18.177,
+    "p99_ms": 1458.075,
+    "errors": 0,
+    "server_exit": null
    },
    "4": {
-    "rps": 8109.5,
-    "p50_ms": 8.426,
-    "p99_ms": 261.736,
-    "errors": 0
+    "rps": 8336.2,
+    "p50_ms": 8.298,
+    "p99_ms": 863.362,
+    "errors": 0,
+    "server_exit": null
    },
    "8": {
-    "rps": 10103.2,
-    "p50_ms": 6.635,
-    "p99_ms": 30.743,
-    "errors": 0
+    "rps": 10658.1,
+    "p50_ms": 6.334,
+    "p99_ms": 28.142,
+    "errors": 0,
+    "server_exit": null
    }
   }
  },
  "corpus": {
   "pyperformance.2to3": {
    "status": "ok",
-   "seconds": 0.3186602797359228,
+   "seconds": 0.30289338901638985,
    "loops": 1,
    "check": [
     "2to3",
@@ -82,8 +90,8 @@
   },
   "pyperformance.argparse": {
    "status": "ok",
-   "seconds": 0.0012127703055739402,
-   "loops": 65,
+   "seconds": 0.0011498092740241971,
+   "loops": 70,
    "check": [
     "many_optionals",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -91,8 +99,8 @@
   },
   "pyperformance.argparse_subparsers": {
    "status": "ok",
-   "seconds": 0.012269933358766139,
-   "loops": 8,
+   "seconds": 0.01177369063306186,
+   "loops": 9,
    "check": [
     "subparsers",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -100,7 +108,7 @@
   },
   "pyperformance.async_generators": {
    "status": "ok",
-   "seconds": 0.3815674101933837,
+   "seconds": 0.3688871990889311,
    "loops": 1,
    "check": [
     "async_generators",
@@ -109,7 +117,7 @@
   },
   "pyperformance.async_tree": {
    "status": "ok",
-   "seconds": 0.27532451692968607,
+   "seconds": 0.2585003040730953,
    "loops": 1,
    "check": [
     "async_tree_none",
@@ -118,7 +126,7 @@
   },
   "pyperformance.async_tree_cpu_io_mixed": {
    "status": "ok",
-   "seconds": 0.5463972128927708,
+   "seconds": 0.5693084998056293,
    "loops": 1,
    "check": [
     "async_tree_cpu_io_mixed",
@@ -127,7 +135,7 @@
   },
   "pyperformance.async_tree_io": {
    "status": "ok",
-   "seconds": 0.6277139121666551,
+   "seconds": 0.5788171431049705,
    "loops": 1,
    "check": [
     "async_tree_io",
@@ -136,7 +144,7 @@
   },
   "pyperformance.async_tree_memoization": {
    "status": "ok",
-   "seconds": 0.32723989011719823,
+   "seconds": 0.3293893337249756,
    "loops": 1,
    "check": [
     "async_tree_memoization",
@@ -145,7 +153,7 @@
   },
   "pyperformance.async_tree_eager": {
    "status": "ok",
-   "seconds": 0.1311122397892177,
+   "seconds": 0.13695296086370945,
    "loops": 1,
    "check": [
     "async_tree_eager",
@@ -154,7 +162,7 @@
   },
   "pyperformance.async_tree_eager_cpu_io_mixed": {
    "status": "ok",
-   "seconds": 0.4779194490984082,
+   "seconds": 0.48610776476562023,
    "loops": 1,
    "check": [
     "async_tree_eager_cpu_io_mixed",
@@ -163,7 +171,7 @@
   },
   "pyperformance.async_tree_eager_io": {
    "status": "ok",
-   "seconds": 0.6016610539518297,
+   "seconds": 0.5916602611541748,
    "loops": 1,
    "check": [
     "async_tree_eager_io",
@@ -172,7 +180,7 @@
   },
   "pyperformance.async_tree_eager_memoization": {
    "status": "ok",
-   "seconds": 0.2402984513901174,
+   "seconds": 0.24189299205318093,
    "loops": 1,
    "check": [
     "async_tree_eager_memoization",
@@ -181,7 +189,7 @@
   },
   "pyperformance.async_tree_tg": {
    "status": "ok",
-   "seconds": 0.2589430012740195,
+   "seconds": 0.2300624386407435,
    "loops": 1,
    "check": [
     "async_tree_none_tg",
@@ -190,7 +198,7 @@
   },
   "pyperformance.async_tree_cpu_io_mixed_tg": {
    "status": "ok",
-   "seconds": 0.5541893127374351,
+   "seconds": 0.5356727996841073,
    "loops": 1,
    "check": [
     "async_tree_cpu_io_mixed_tg",
@@ -199,7 +207,7 @@
   },
   "pyperformance.async_tree_io_tg": {
    "status": "ok",
-   "seconds": 0.6014384441077709,
+   "seconds": 0.5962380841374397,
    "loops": 1,
    "check": [
     "async_tree_io_tg",
@@ -208,7 +216,7 @@
   },
   "pyperformance.async_tree_memoization_tg": {
    "status": "ok",
-   "seconds": 0.3143911021761596,
+   "seconds": 0.309498003218323,
    "loops": 1,
    "check": [
     "async_tree_memoization_tg",
@@ -217,7 +225,7 @@
   },
   "pyperformance.async_tree_eager_tg": {
    "status": "ok",
-   "seconds": 0.21371827740222216,
+   "seconds": 0.19866876117885113,
    "loops": 1,
    "check": [
     "async_tree_eager_tg",
@@ -226,7 +234,7 @@
   },
   "pyperformance.async_tree_eager_cpu_io_mixed_tg": {
    "status": "ok",
-   "seconds": 0.516171338967979,
+   "seconds": 0.5250695487484336,
    "loops": 1,
    "check": [
     "async_tree_eager_cpu_io_mixed_tg",
@@ -235,7 +243,7 @@
   },
   "pyperformance.async_tree_eager_io_tg": {
    "status": "ok",
-   "seconds": 0.5747322994284332,
+   "seconds": 0.5399582013487816,
    "loops": 1,
    "check": [
     "async_tree_eager_io_tg",
@@ -244,7 +252,7 @@
   },
   "pyperformance.async_tree_eager_memoization_tg": {
    "status": "ok",
-   "seconds": 0.3042874098755419,
+   "seconds": 0.298368486110121,
    "loops": 1,
    "check": [
     "async_tree_eager_memoization_tg",
@@ -253,7 +261,7 @@
   },
   "pyperformance.asyncio_tcp": {
    "status": "ok",
-   "seconds": 0.40264747478067875,
+   "seconds": 0.3909761542454362,
    "loops": 1,
    "check": [
     "asyncio_tcp",
@@ -262,7 +270,7 @@
   },
   "pyperformance.asyncio_tcp_ssl": {
    "status": "ok",
-   "seconds": 1.616398229263723,
+   "seconds": 1.432880389969796,
    "loops": 1,
    "check": [
     "asyncio_tcp_ssl",
@@ -271,7 +279,7 @@
   },
   "pyperformance.asyncio_websockets": {
    "status": "ok",
-   "seconds": 0.48892686795443296,
+   "seconds": 0.47590147890150547,
    "loops": 1,
    "check": [
     "asyncio_websockets",
@@ -280,7 +288,7 @@
   },
   "pyperformance.base64": {
    "status": "ok",
-   "seconds": 2.2908531427383423,
+   "seconds": 2.2444313429296017,
    "loops": 1,
    "check": [
     "ascii85_large",
@@ -299,7 +307,7 @@
   },
   "pyperformance.bpe_tokeniser": {
    "status": "ok",
-   "seconds": 4.9341131378896534,
+   "seconds": 5.031178471632302,
    "loops": 1,
    "check": [
     "bpe_tokeniser",
@@ -308,7 +316,7 @@
   },
   "pyperformance.concurrent_imap": {
    "status": "ok",
-   "seconds": 0.008430024143308401,
+   "seconds": 0.008576351217925549,
    "loops": 1,
    "check": [
     "bench_mp_pool",
@@ -318,7 +326,7 @@
   },
   "pyperformance.coroutines": {
    "status": "ok",
-   "seconds": 0.026194676524028182,
+   "seconds": 0.026208244264125824,
    "loops": 4,
    "check": [
     "coroutines",
@@ -327,7 +335,7 @@
   },
   "pyperformance.coverage": {
    "status": "ok",
-   "seconds": 0.7130937897600234,
+   "seconds": 0.7339507210999727,
    "loops": 1,
    "check": [
     "coverage",
@@ -336,8 +344,8 @@
   },
   "pyperformance.gc_traversal": {
    "status": "ok",
-   "seconds": 0.0020505414106585878,
-   "loops": 47,
+   "seconds": 0.00212176629741277,
+   "loops": 42,
    "check": [
     "gc_traversal",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -345,8 +353,8 @@
   },
   "pyperformance.gc_collect": {
    "status": "ok",
-   "seconds": 0.0013361654605772069,
-   "loops": 67,
+   "seconds": 0.0013789676795048372,
+   "loops": 70,
    "check": [
     "create_gc_cycles",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -354,7 +362,7 @@
   },
   "pyperformance.generators": {
    "status": "ok",
-   "seconds": 0.03009352196628849,
+   "seconds": 0.030159059911966324,
    "loops": 3,
    "check": [
     "generators",
@@ -363,7 +371,7 @@
   },
   "pyperformance.chameleon": {
    "status": "ok",
-   "seconds": 0.01869211345911026,
+   "seconds": 0.018325272388756274,
    "loops": 5,
    "check": [
     "chameleon",
@@ -372,7 +380,7 @@
   },
   "pyperformance.chaos": {
    "status": "ok",
-   "seconds": 0.07119196513667703,
+   "seconds": 0.07135242084041238,
    "loops": 1,
    "check": [
     "chaos",
@@ -381,8 +389,8 @@
   },
   "pyperformance.comprehensions": {
    "status": "ok",
-   "seconds": 2.156798290761639e-05,
-   "loops": 1481,
+   "seconds": 2.1025348940911623e-05,
+   "loops": 2789,
    "check": [
     "comprehensions",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -390,7 +398,7 @@
   },
   "pyperformance.crypto_pyaes": {
    "status": "ok",
-   "seconds": 0.0996064618229866,
+   "seconds": 0.0981076592579484,
    "loops": 1,
    "check": [
     "crypto_pyaes",
@@ -399,8 +407,8 @@
   },
   "pyperformance.deepcopy": {
    "status": "ok",
-   "seconds": 0.00038638137522395015,
-   "loops": 216,
+   "seconds": 0.0004047955786086381,
+   "loops": 219,
    "check": [
     "deepcopy",
     "deepcopy_memo",
@@ -410,8 +418,8 @@
   },
   "pyperformance.deltablue": {
    "status": "ok",
-   "seconds": 0.003740346524864435,
-   "loops": 26,
+   "seconds": 0.0036937852390110494,
+   "loops": 25,
    "check": [
     "deltablue",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -419,7 +427,7 @@
   },
   "pyperformance.django_template": {
    "status": "ok",
-   "seconds": 0.04693573550321162,
+   "seconds": 0.045511977979913354,
    "loops": 2,
    "check": [
     "django_template",
@@ -428,7 +436,7 @@
   },
   "pyperformance.dulwich_log": {
    "status": "ok",
-   "seconds": 0.07937896065413952,
+   "seconds": 0.07791158324107528,
    "loops": 1,
    "check": [
     "dulwich_log",
@@ -437,7 +445,7 @@
   },
   "pyperformance.docutils": {
    "status": "ok",
-   "seconds": 2.844013463240117,
+   "seconds": 2.8782519376836717,
    "loops": 1,
    "check": [
     "docutils",
@@ -446,7 +454,7 @@
   },
   "pyperformance.fannkuch": {
    "status": "ok",
-   "seconds": 0.4979365961626172,
+   "seconds": 0.4971422990784049,
    "loops": 1,
    "check": [
     "fannkuch",
@@ -455,7 +463,7 @@
   },
   "pyperformance.fastapi": {
    "status": "ok",
-   "seconds": 0.2372905188240111,
+   "seconds": 0.23374750325456262,
    "loops": 1,
    "check": [
     "fastapi_http",
@@ -464,7 +472,7 @@
   },
   "pyperformance.float": {
    "status": "ok",
-   "seconds": 0.07696646498516202,
+   "seconds": 0.07356806891039014,
    "loops": 1,
    "check": [
     "float",
@@ -473,7 +481,7 @@
   },
   "pyperformance.genshi": {
    "status": "ok",
-   "seconds": 0.09399686194956303,
+   "seconds": 0.09587075235322118,
    "loops": 1,
    "check": [
     "genshi_text",
@@ -483,7 +491,7 @@
   },
   "pyperformance.go": {
    "status": "ok",
-   "seconds": 0.12549440190196037,
+   "seconds": 0.12374912621453404,
    "loops": 1,
    "check": [
     "go",
@@ -492,7 +500,7 @@
   },
   "pyperformance.hexiom": {
    "status": "ok",
-   "seconds": 0.00725400065337973,
+   "seconds": 0.0073518160664077315,
    "loops": 14,
    "check": [
     "hexiom",
@@ -501,7 +509,7 @@
   },
   "pyperformance.html5lib": {
    "status": "ok",
-   "seconds": 0.07015432836487889,
+   "seconds": 0.0720089441165328,
    "loops": 1,
    "check": [
     "html5lib",
@@ -510,7 +518,7 @@
   },
   "pyperformance.json_dumps": {
    "status": "ok",
-   "seconds": 0.013944122142025403,
+   "seconds": 0.013925185560115747,
    "loops": 7,
    "check": [
     "json_dumps",
@@ -519,8 +527,8 @@
   },
   "pyperformance.json_loads": {
    "status": "ok",
-   "seconds": 3.626833837479353e-05,
-   "loops": 125,
+   "seconds": 3.66676869843878e-05,
+   "loops": 134,
    "check": [
     "json_loads",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -528,8 +536,8 @@
   },
   "pyperformance.logging": {
    "status": "ok",
-   "seconds": 1.7720299153141278e-05,
-   "loops": 281,
+   "seconds": 1.724146422930062e-05,
+   "loops": 240,
    "check": [
     "logging_format",
     "logging_silent",
@@ -539,7 +547,7 @@
   },
   "pyperformance.mako": {
    "status": "ok",
-   "seconds": 0.01626622979529202,
+   "seconds": 0.016409176168963313,
    "loops": 6,
    "check": [
     "mako",
@@ -548,7 +556,7 @@
   },
   "pyperformance.mdp": {
    "status": "ok",
-   "seconds": 1.53147626016289,
+   "seconds": 1.5798903703689575,
    "loops": 1,
    "check": [
     "mdp",
@@ -557,7 +565,7 @@
   },
   "pyperformance.meteor_contest": {
    "status": "ok",
-   "seconds": 0.11799859581515193,
+   "seconds": 0.11645604064688087,
    "loops": 1,
    "check": [
     "meteor_contest",
@@ -566,7 +574,7 @@
   },
   "pyperformance.networkx": {
    "status": "ok",
-   "seconds": 0.5034487759694457,
+   "seconds": 0.42818748438730836,
    "loops": 1,
    "check": [
     "shortest_path",
@@ -575,7 +583,7 @@
   },
   "pyperformance.networkx_connected_components": {
    "status": "ok",
-   "seconds": 0.45492625515908003,
+   "seconds": 0.40967845916748047,
    "loops": 1,
    "check": [
     "connected_components",
@@ -584,7 +592,7 @@
   },
   "pyperformance.networkx_k_core": {
    "status": "ok",
-   "seconds": 2.2618912998586893,
+   "seconds": 1.9490143931470811,
    "loops": 1,
    "check": [
     "k_core",
@@ -593,7 +601,7 @@
   },
   "pyperformance.nbody": {
    "status": "ok",
-   "seconds": 0.15042939875274897,
+   "seconds": 0.14789551915600896,
    "loops": 1,
    "check": [
     "nbody",
@@ -602,7 +610,7 @@
   },
   "pyperformance.nqueens": {
    "status": "ok",
-   "seconds": 0.1019431077875197,
+   "seconds": 0.10392904607579112,
    "loops": 1,
    "check": [
     "nqueens",
@@ -611,7 +619,7 @@
   },
   "pyperformance.pathlib": {
    "status": "ok",
-   "seconds": 0.019199752993881703,
+   "seconds": 0.018602598831057547,
    "loops": 5,
    "check": [
     "pathlib",
@@ -620,8 +628,8 @@
   },
   "pyperformance.pickle": {
    "status": "ok",
-   "seconds": 1.2958576974869778e-05,
-   "loops": 297,
+   "seconds": 1.3101380249923642e-05,
+   "loops": 340,
    "check": [
     "pickle",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -629,8 +637,8 @@
   },
   "pyperformance.pickle_dict": {
    "status": "ok",
-   "seconds": 3.2489867864799665e-05,
-   "loops": 577,
+   "seconds": 3.3452684030984725e-05,
+   "loops": 583,
    "check": [
     "pickle_dict",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -638,8 +646,8 @@
   },
   "pyperformance.pickle_list": {
    "status": "ok",
-   "seconds": 5.482922752316181e-06,
-   "loops": 1625,
+   "seconds": 5.395518152968969e-06,
+   "loops": 1670,
    "check": [
     "pickle_list",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -647,8 +655,8 @@
   },
   "pyperformance.pickle_pure_python": {
    "status": "ok",
-   "seconds": 0.00037607343759960856,
-   "loops": 13,
+   "seconds": 0.00038928667393823467,
+   "loops": 12,
    "check": [
     "pickle_pure_python",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -656,7 +664,7 @@
   },
   "pyperformance.pidigits": {
    "status": "ok",
-   "seconds": 0.17580080684274435,
+   "seconds": 0.1757694073021412,
    "loops": 1,
    "check": [
     "pidigits",
@@ -665,7 +673,7 @@
   },
   "pyperformance.pprint": {
    "status": "ok",
-   "seconds": 2.886704323813319,
+   "seconds": 2.8818011647090316,
    "loops": 1,
    "check": [
     "pprint_pformat",
@@ -675,7 +683,7 @@
   },
   "pyperformance.pyflate": {
    "status": "ok",
-   "seconds": 0.48505661729723215,
+   "seconds": 0.465374912135303,
    "loops": 1,
    "check": [
     "pyflate",
@@ -684,8 +692,8 @@
   },
   "pyperformance.python_startup": {
    "status": "ok",
-   "seconds": 0.013144749416304486,
-   "loops": 7,
+   "seconds": 0.01211261173011735,
+   "loops": 8,
    "check": [
     "python_startup",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -693,8 +701,8 @@
   },
   "pyperformance.python_startup_no_site": {
    "status": "ok",
-   "seconds": 0.009465396869927645,
-   "loops": 10,
+   "seconds": 0.00905249064618891,
+   "loops": 11,
    "check": [
     "python_startup_no_site",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -702,7 +710,7 @@
   },
   "pyperformance.raytrace": {
    "status": "ok",
-   "seconds": 0.3417542870156467,
+   "seconds": 0.34575737500563264,
    "loops": 1,
    "check": [
     "raytrace",
@@ -711,7 +719,7 @@
   },
   "pyperformance.regex_compile": {
    "status": "ok",
-   "seconds": 0.15676528541371226,
+   "seconds": 0.15641550300642848,
    "loops": 1,
    "check": [
     "regex_compile",
@@ -720,7 +728,7 @@
   },
   "pyperformance.regex_dna": {
    "status": "ok",
-   "seconds": 0.16603296203538775,
+   "seconds": 0.16571450419723988,
    "loops": 1,
    "check": [
     "regex_dna",
@@ -729,7 +737,7 @@
   },
   "pyperformance.regex_effbot": {
    "status": "ok",
-   "seconds": 0.0025395257747732104,
+   "seconds": 0.0024716383195482194,
    "loops": 4,
    "check": [
     "regex_effbot",
@@ -738,7 +746,7 @@
   },
   "pyperformance.regex_v8": {
    "status": "ok",
-   "seconds": 0.019489040016196668,
+   "seconds": 0.019388265209272504,
    "loops": 4,
    "check": [
     "regex_v8",
@@ -747,7 +755,7 @@
   },
   "pyperformance.richards": {
    "status": "ok",
-   "seconds": 0.05631968914531171,
+   "seconds": 0.056873820489272475,
    "loops": 2,
    "check": [
     "richards",
@@ -756,7 +764,7 @@
   },
   "pyperformance.richards_super": {
    "status": "ok",
-   "seconds": 0.06452931184321642,
+   "seconds": 0.06631953828036785,
    "loops": 1,
    "check": [
     "richards_super",
@@ -765,7 +773,7 @@
   },
   "pyperformance.scimark": {
    "status": "ok",
-   "seconds": 0.7891131713986397,
+   "seconds": 0.7951612332835793,
    "loops": 1,
    "check": [
     "scimark_fft",
@@ -778,7 +786,7 @@
   },
   "pyperformance.spectral_norm": {
    "status": "ok",
-   "seconds": 0.12497004633769393,
+   "seconds": 0.12410337524488568,
    "loops": 1,
    "check": [
     "spectral_norm",
@@ -787,7 +795,7 @@
   },
   "pyperformance.sphinx": {
    "status": "ok",
-   "seconds": 1.1345751397311687,
+   "seconds": 1.1641273791901767,
    "loops": 1,
    "check": [
     "sphinx",
@@ -796,7 +804,7 @@
   },
   "pyperformance.sqlalchemy_declarative": {
    "status": "ok",
-   "seconds": 0.15166360698640347,
+   "seconds": 0.15478684473782778,
    "loops": 1,
    "check": [
     "sqlalchemy_declarative",
@@ -805,8 +813,8 @@
   },
   "pyperformance.sqlalchemy_imperative": {
    "status": "ok",
-   "seconds": 0.02560357019926111,
-   "loops": 3,
+   "seconds": 0.02414585475344211,
+   "loops": 4,
    "check": [
     "sqlalchemy_imperative",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -814,7 +822,7 @@
   },
   "pyperformance.sqlglot_v2": {
    "status": "ok",
-   "seconds": 0.1344061391428113,
+   "seconds": 0.13053058832883835,
    "loops": 1,
    "check": [
     "sqlglot_v2_normalize",
@@ -823,8 +831,8 @@
   },
   "pyperformance.sqlglot_v2_parse": {
    "status": "ok",
-   "seconds": 0.0015301597063782915,
-   "loops": 58,
+   "seconds": 0.001459696571276124,
+   "loops": 56,
    "check": [
     "sqlglot_v2_parse",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -832,8 +840,8 @@
   },
   "pyperformance.sqlglot_v2_transpile": {
    "status": "ok",
-   "seconds": 0.0018618757319119241,
-   "loops": 45,
+   "seconds": 0.001832201056420169,
+   "loops": 47,
    "check": [
     "sqlglot_v2_transpile",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -841,7 +849,7 @@
   },
   "pyperformance.sqlglot_v2_optimize": {
    "status": "ok",
-   "seconds": 0.06463848520070314,
+   "seconds": 0.06629181606695056,
    "loops": 1,
    "check": [
     "sqlglot_v2_optimize",
@@ -850,8 +858,8 @@
   },
   "pyperformance.sqlite_synth": {
    "status": "ok",
-   "seconds": 2.4743013106930403e-06,
-   "loops": 324,
+   "seconds": 2.898729435820401e-06,
+   "loops": 347,
    "check": [
     "sqlite_synth",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -859,7 +867,7 @@
   },
   "pyperformance.sympy": {
    "status": "ok",
-   "seconds": 0.9207944609224796,
+   "seconds": 0.9254028089344501,
    "loops": 1,
    "check": [
     "sympy_expand",
@@ -871,7 +879,7 @@
   },
   "pyperformance.telco": {
    "status": "ok",
-   "seconds": 0.010569713233659664,
+   "seconds": 0.010554388424174653,
    "loops": 9,
    "check": [
     "telco",
@@ -880,7 +888,7 @@
   },
   "pyperformance.tomli_loads": {
    "status": "ok",
-   "seconds": 2.208292722236365,
+   "seconds": 2.1958808321505785,
    "loops": 1,
    "check": [
     "tomli_loads",
@@ -889,7 +897,7 @@
   },
   "pyperformance.tornado_http": {
    "status": "ok",
-   "seconds": 0.1406057639978826,
+   "seconds": 0.13308463292196393,
    "loops": 1,
    "check": [
     "tornado_http",
@@ -898,8 +906,8 @@
   },
   "pyperformance.typing_runtime_protocols": {
    "status": "ok",
-   "seconds": 0.0002193843578458379,
-   "loops": 218,
+   "seconds": 0.00023589732910634257,
+   "loops": 204,
    "check": [
     "typing_runtime_protocols",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -907,8 +915,8 @@
   },
   "pyperformance.unpack_sequence": {
    "status": "ok",
-   "seconds": 5.4488883566102914e-08,
-   "loops": 2215,
+   "seconds": 5.461515523911862e-08,
+   "loops": 2225,
    "check": [
     "unpack_sequence",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -916,8 +924,8 @@
   },
   "pyperformance.unpickle": {
    "status": "ok",
-   "seconds": 1.9916245246236503e-05,
-   "loops": 241,
+   "seconds": 1.974187745544754e-05,
+   "loops": 244,
    "check": [
     "unpickle",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -925,8 +933,8 @@
   },
   "pyperformance.unpickle_list": {
    "status": "ok",
-   "seconds": 5.164460012578424e-06,
-   "loops": 1765,
+   "seconds": 5.040024456829752e-06,
+   "loops": 1783,
    "check": [
     "unpickle_list",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -934,8 +942,8 @@
   },
   "pyperformance.unpickle_pure_python": {
    "status": "ok",
-   "seconds": 0.0002681868150830269,
-   "loops": 17,
+   "seconds": 0.0002739576648713814,
+   "loops": 18,
    "check": [
     "unpickle_pure_python",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -943,7 +951,7 @@
   },
   "pyperformance.xdsl": {
    "status": "ok",
-   "seconds": 0.05568522238172591,
+   "seconds": 0.054271849570795894,
    "loops": 2,
    "check": [
     "xdsl_constant_fold",
@@ -952,7 +960,7 @@
   },
   "pyperformance.xml_etree": {
    "status": "ok",
-   "seconds": 0.4250900140032172,
+   "seconds": 0.4314491916447878,
    "loops": 1,
    "check": [
     "xml_etree_generate",
@@ -964,37 +972,37 @@
   },
   "cli.black": {
    "status": "ok",
-   "seconds": 0.3861055891029537,
+   "seconds": 0.3600713349878788,
    "loops": null,
    "check": "33cec38ba78ee25f0208eb4ae6deac2cdb96ebfb2656bee0f0b53af86f9e0a5f"
   },
   "cli.isort": {
    "status": "ok",
-   "seconds": 0.10587051790207624,
+   "seconds": 0.10158433904871345,
    "loops": null,
    "check": "c06198941fc8912f99937a2c3f3ef9a2e086bbf9bbcb1ef634ca351e8fd4b432"
   },
   "cli.pyflakes": {
    "status": "ok",
-   "seconds": 0.5977331292815506,
+   "seconds": 0.5978870010003448,
    "loops": null,
    "check": "62704a520611b5645c959dfabe6dff0cd75866d4ccc7ca6bc883561e8d79d302"
   },
   "cli.pycodestyle": {
    "status": "ok",
-   "seconds": 0.7280368441715837,
+   "seconds": 0.7161017642356455,
    "loops": null,
    "check": "6e9913f73a026051f37d1e11e14b29ad35cf61b11d94eb50260711b4a4509cdd"
   },
   "cli.pygments": {
    "status": "ok",
-   "seconds": 0.23367958795279264,
+   "seconds": 0.2289851768873632,
    "loops": null,
    "check": "90b41c122e5961ddc9ef516fc055a875abad5508bccaed23ac8c085c34dbc0f9"
   },
   "cli.markdown": {
    "status": "ok",
-   "seconds": 0.09019482880830765,
+   "seconds": 0.09310937765985727,
    "loops": null,
    "check": "2bd6e8d43a9ca3a41323bb1821539eb481961a5fdc72b26de12ecd21421f335f"
   },

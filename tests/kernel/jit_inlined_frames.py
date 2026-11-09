@@ -178,3 +178,27 @@ try:
     recurse_a(100000)
 except RecursionError:
     print('RecursionError')
+
+
+# Deep recursion through an inlined frame crosses datastack chunks: the
+# inlined frames pushed for each call, walked from the bottom and released
+# on the way back, must be the interpreter's at every boundary.
+def walk_a(n):
+    return walk_b(n)
+
+
+def walk_b(n):
+    if n == 0:
+        f = sys._getframe()
+        names = []
+        while f is not None:
+            names.append(f.f_code.co_name)
+            f = f.f_back
+        return names.count('walk_a'), names.count('walk_b')
+    return walk_a(n - 1)
+
+
+for i in range(300):
+    walk_a(3)
+for depth in (150, 700, 701, 702, 703):
+    print('walk', depth, walk_a(depth))

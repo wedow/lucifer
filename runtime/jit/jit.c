@@ -1049,7 +1049,6 @@ lu_jit_bind(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, in
     if (prologue(f) < 0) {
         goto decline;
     }
-    Py_INCREF(code);
     return f;
 decline:
     /* The binding would raise, or memory ran out: the slow way does it again. */
