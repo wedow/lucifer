@@ -315,3 +315,7 @@ print(all([getattr(o, 'a%d' % k) for k in range(12)] == [i * 100 + k for k in ra
 
 # PyModule_AddType readies a static type, whose tp_dict the module may then fill
 print(ready.Added.__module__, ready.Added.__name__, type(ready.Added()).__qualname__)
+
+# a static type that copies float's tp_hash hashes as a float, though a base of it is unhashable
+x = ready.FloatCmp()
+print(hash(x) == hash(0.0), len({x, x}), {x: 'v'}[x], ready.CmpOnly.__hash__, float(x))

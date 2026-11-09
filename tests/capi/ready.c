@@ -469,6 +469,17 @@ static PyTypeObject CmpOnly_Type = {
     .tp_richcompare = delegate_richcompare,
 };
 
+/* ready.FloatCmp: numpy's DUAL_INHERIT, a static type on an unhashable base and float
+   that takes float's tp_hash, so it hashes as a float (its value is 0.0: the base's
+   tp_new makes it). */
+static PyTypeObject FloatCmp_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.FloatCmp",
+    .tp_basicsize = sizeof(PyFloatObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_base = &CmpOnly_Type,
+};
+
 /* Spec types with one of tp_richcompare and tp_hash: the other is not inherited. */
 static Py_hash_t
 seven_hash(PyObject *self)
@@ -1338,6 +1349,11 @@ PyInit_ready(void)
     if (PyType_Ready(&BytesCopy_Type) < 0 || PyType_Ready(&Mul_Type) < 0) {
         return NULL;
     }
+    FloatCmp_Type.tp_bases = Py_BuildValue("(OO)", &CmpOnly_Type, &PyFloat_Type);
+    FloatCmp_Type.tp_hash = PyFloat_Type.tp_hash;
+    if (FloatCmp_Type.tp_bases == NULL || PyType_Ready(&FloatCmp_Type) < 0) {
+        return NULL;
+    }
     BytesMul_Type.tp_bases = Py_BuildValue("(OO)", &PyBytes_Type, &Mul_Type);
     if (BytesMul_Type.tp_bases == NULL || PyType_Ready(&BytesMul_Type) < 0) {
         return NULL;
@@ -1359,7 +1375,8 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "DocSig", (PyObject *)&DocSig_Type) < 0
         || PyModule_AddObjectRef(m, "BytesCopy", (PyObject *)&BytesCopy_Type) < 0
         || PyModule_AddObjectRef(m, "Mul", (PyObject *)&Mul_Type) < 0
-        || PyModule_AddObjectRef(m, "BytesMul", (PyObject *)&BytesMul_Type) < 0) {
+        || PyModule_AddObjectRef(m, "BytesMul", (PyObject *)&BytesMul_Type) < 0
+        || PyModule_AddObjectRef(m, "FloatCmp", (PyObject *)&FloatCmp_Type) < 0) {
         Py_XDECREF(m);
         return NULL;
     }
