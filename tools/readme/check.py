@@ -25,9 +25,10 @@ conformance.difftest.always.pass,164,
 conformance.difftest.always.total,164,
 conformance.difftest.deopt.pass,164,
 conformance.difftest.deopt.total,164,
-conformance.libtest-core.oracle.pass,2157,
-conformance.libtest-core.lucifer.pass,1993,
-conformance.libtest-core.date,2025-12-01,
+conformance.libtest.total,50816,50816
+conformance.libtest.oracle.pass,40143,
+conformance.libtest.lucifer.pass,30107,
+conformance.libtest.date,2025-12-01,
 conformance.numpytest.total,52273,52273
 conformance.numpytest.lucifer.pass,50299,50299
 conformance.numpytest.date,2025-12-28,
@@ -43,7 +44,7 @@ TABLE = """<!-- stats:begin -->
 | Speed vs CPython 3.14t, composite across benchmark suites | 0.50x CPython's speed | geomean of 3 programs, 0 fail, 2026-01-02 |
 | C-API functions implemented | 66.5% | 1,083 of 1,628 |
 | numpy test suite passing | 96.2% | 50,299 of 52,273 collected, run 2025-12-28 |
-| Core-type `Lib/test` passing, relative to CPython | 92.4% | 1,993 of CPython's 2,157, run 2025-12-01 |
+| `Lib/test` passing, relative to CPython | 75.0% | 30,107 of CPython's 40,143, run 2025-12-01 |
 | Kernel programs passing in every mode | 99.5% | 590 of 593, 2 modes |
 | Differential programs matching CPython in every JIT mode | 100.0% | 164 of 164, 2 modes |
 <!-- stats:end -->"""
