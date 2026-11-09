@@ -17,3 +17,7 @@ codecs.lookup('gbk'), 'shift_jis', 'big5', 'euc_kr' and the rest of the CJK enco
 **2026-11-07T18:46:10Z**
 
 charset_normalizer imports _multibytecodec; without it requests warns (RequestsDependencyWarning) under the corpus sphinx benchmark.
+
+**2026-11-09T00:33:44Z**
+
+Fixed on luc-mods: _multibytecodec and the six _codecs_* built from Modules/cjkcodecs; the private _PyUnicodeWriter is now what PyUnicodeWriter is. test_codecencodings_* and test_multibytecodec pass as on CPython (one subinterpreter skip).
