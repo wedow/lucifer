@@ -415,6 +415,31 @@ def kill(pid, signal, /):
     _call('kill', pid, signal)
 
 
+def killpg(pgid, signal, /):
+    """Kill a process group with a signal."""
+    _call('killpg', pgid, signal)
+
+
+def getpgid(pid):
+    """Call the system call getpgid(), and return the result."""
+    return _call('getpgid', pid)
+
+
+def setpgid(pid, pgrp, /):
+    """Call the system call setpgid(pid, pgrp)."""
+    _call('setpgid', pid, pgrp)
+
+
+def setpgrp():
+    """Make the current process the leader of its process group."""
+    _call('setpgid', 0, 0)
+
+
+def getsid(pid, /):
+    """Call the system call getsid(pid) and return the result."""
+    return _call('getsid', pid)
+
+
 def waitpid(pid, options, /):
     """Wait for completion of a given child process."""
     return _lucifer.os_waitpid(pid, options)
