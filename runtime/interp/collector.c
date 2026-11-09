@@ -16,8 +16,10 @@
       outside the windows, with the world restarted.
    2. A frame's references are counted. A reference in a running or parked
       task's frame is therefore an outside reference, and the stacks need not
-      be scanned. A frame that stops counting (the JIT's) must add its
-      references to gc_refs in update_refs, as gc_visit_thread_stacks does.
+      be scanned. A frame that stops counting must add its references to
+      gc_refs after update_refs, as gc_visit_thread_stacks does: a frame a
+      direct call pushed (jit_lent) borrows its code, which f.__code__ =
+      ... may leave no other holder of (borrowed_code_refs).
    3. A dying object is untracked before any code of its dealloc runs
       (_Py_Dealloc), so a collection from inside a __del__ or a weakref
       callback never sees an object with a zero count and live fields.
@@ -472,11 +474,31 @@ forget_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area, void *blo
     return true;
 }
 
+/* Invariant 2 for the code a direct call's frame borrows: an outside
+   reference, in every task's chain. */
+static void
+borrowed_code_refs(struct _is *interp)
+{
+    pthread_mutex_lock(&interp->tasks_lock.mutex);
+    for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
+        for (struct lu_frame *f = (struct lu_frame *)ts->current_frame; f != NULL; f = f->previous) {
+            PyObject *code = (PyObject *)f->code;
+            if (f->jit_lent && lu_gc_is_tracked(code) && !_Py_IsImmortal(code) && !gc_is_frozen(code)
+                && !gc_is_alive(code)) {
+                gc_maybe_init_refs(code);
+                code->ob_tid += 1;
+            }
+        }
+    }
+    pthread_mutex_unlock(&interp->tasks_lock.mutex);
+}
+
 static void
 deduce_unreachable_heap(struct collection_state *state)
 {
     struct _is *interp = state->interp;
     visit_heaps(interp, update_refs, &state->base);
+    borrowed_code_refs(interp);
     visit_heaps(interp, mark_heap_visitor, &state->base);
     visit_heaps(interp, scan_heap_visitor, &state->base);
     if (state->legacy_finalizers.head) {

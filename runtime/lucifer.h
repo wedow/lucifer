@@ -1466,6 +1466,10 @@ PyObject *lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t
 PyObject *lu_subscr_native(PyObject *container, PyObject *sub);
 /* container[start:stop:step] as lu_subscr_native answers it for a slice. */
 PyObject *lu_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *step);
+/* container[start:stop] for an exact list, tuple, str or bytes by machine-int
+   bounds, either None as `none` says (bit 0 the start, bit 1 the stop): a new
+   reference, or NULL without an error for another type. */
+PyObject *lu_slice_native_raw(PyObject *container, int64_t start, int64_t stop, int none);
 int lu_compare_native(PyObject *a, PyObject *b, int oparg);
 PyObject *lu_native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize_t npos);
 /* PyObject_IsTrue: 1, 0 or -1 with an error set. */

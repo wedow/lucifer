@@ -25,6 +25,8 @@ enum { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, 
 #define XMM(n) (LU_LOC_FPR + (n))
 
 static const int8_t gprs[] = { RBX, R12, R13, RSI, RDI, R8, R9, R10 };
+static const int8_t saved_gprs[] = { RBX, R12, R13 };
+static int clobbers_saved(const struct lu_ins *in);
 static const int8_t fprs[] = { XMM(2), XMM(3), XMM(4), XMM(5), XMM(6), XMM(7), XMM(8), XMM(9),
                                XMM(10), XMM(11), XMM(12), XMM(13), XMM(14) };
 /* push rbp; mov rbp, rsp; call *rcx; pop rbp; ret */
@@ -38,6 +40,7 @@ static const uint8_t cie[] = { 0, 0, 0, 0, 1, 'z', 'R', 0, 1, 0x78, 16, 1, 0x1b,
 static const uint8_t fp_cfi[] = { 0x41, 0x0e, 16, 0x86, 2, 0x43, 0x0d, 6 };
 const struct lu_target lu_target = {
     .name = "x86_64", .ngpr = sizeof gprs, .nfpr = sizeof fprs, .gpr = gprs, .fpr = fprs,
+    .nsaved = sizeof saved_gprs, .saved = saved_gprs, .clobbers_saved = clobbers_saved,
     .trampoline = trampoline, .ntrampoline = sizeof trampoline, .elf_machine = 62,
     .cie = cie, .ncie = sizeof cie, .fp_cfi = fp_cfi, .nfp_cfi = sizeof fp_cfi,
 };
@@ -82,9 +85,25 @@ struct asm_ {
     int save_all, restore_all;  /* the shared stubs of parked_call, emitted when used */
     int parks;
     lu_v now;                   /* the instruction being emitted: the fields its exits' virtual objects have */
+    uint32_t volatiles;         /* the caller-saved registers the unit allocates, by location */
 };
 
 enum { GM_FULL, GM_ROOT, GM_NONE };
+
+/* The instructions whose code keeps its own values in RBX, R12 and R13
+   across the calls it makes. */
+static int
+clobbers_saved(const struct lu_ins *in)
+{
+    switch (in->op) {
+    case OP_LIST_STORE: case OP_INLINE_STORE: case OP_INLINE_STORE_F: case OP_INLINE_STORE_I:
+        return 1;
+    case OP_HELPER:
+        return in->imm == H_build_tuple || in->imm == H_build_list || in->imm == H_new_object;
+    default:
+        return 0;
+    }
+}
 
 /* --- the buffer --- */
 
@@ -475,37 +494,53 @@ incref_owned_or_exit(struct asm_ *a, int r, int fail)
 }
 
 /* A call on a slow path that keeps every allocatable register: the
-   caller-saved ones go to the stack around it (rsi, rdi, r8-r10 and
-   xmm2-14; 160 bytes keep the stack aligned). Its arguments are set by
-   `setup` after the saves. */
+   caller-saved ones the unit allocates at all (a->volatiles, by location)
+   go to the stack around it, in a multiple of 16 bytes that keeps it
+   aligned. Its arguments are set after the saves. */
 static void sse_rm(struct asm_ *a, int prefix, int op, int reg, int base, int32_t disp);
+
+static int
+volatile_bytes(struct asm_ *a)
+{
+    return (8 * __builtin_popcount(a->volatiles) + 15) & ~15;
+}
 
 static void
 save_volatile(struct asm_ *a)
 {
-    static const int regs[] = { RSI, RDI, R8, R9, R10 };
-    for (int i = 0; i < 5; i++) {
-        rex(a, 0, 0, 0, regs[i]);
-        b1(a, 0x50 + (regs[i] & 7));            /* push */
+    if (a->volatiles == 0) {
+        return;
     }
-    alu_ri(a, ALU_SUB, RSP, 120);
-    for (int x = 2; x <= 14; x++) {
-        sse_rm(a, 0xF2, 0x11, x, RSP, 8 * (x - 2));
+    alu_ri(a, ALU_SUB, RSP, volatile_bytes(a));
+    for (int r = 0, k = 0; r < 32; r++) {
+        if (a->volatiles & (1u << r)) {
+            if (r < LU_LOC_FPR) {
+                store(a, RSP, 8 * k++, r);
+            }
+            else {
+                sse_rm(a, 0xF2, 0x11, r - LU_LOC_FPR, RSP, 8 * k++);
+            }
+        }
     }
 }
 
 static void
 restore_volatile(struct asm_ *a)
 {
-    static const int regs[] = { RSI, RDI, R8, R9, R10 };
-    for (int x = 2; x <= 14; x++) {
-        sse_rm(a, 0xF2, 0x10, x, RSP, 8 * (x - 2));
+    if (a->volatiles == 0) {
+        return;
     }
-    alu_ri(a, ALU_ADD, RSP, 120);
-    for (int i = 4; i >= 0; i--) {
-        rex(a, 0, 0, 0, regs[i]);
-        b1(a, 0x58 + (regs[i] & 7));            /* pop */
+    for (int r = 0, k = 0; r < 32; r++) {
+        if (a->volatiles & (1u << r)) {
+            if (r < LU_LOC_FPR) {
+                load(a, r, RSP, 8 * k++);
+            }
+            else {
+                sse_rm(a, 0xF2, 0x10, r - LU_LOC_FPR, RSP, 8 * k++);
+            }
+        }
     }
+    alu_ri(a, ALU_ADD, RSP, volatile_bytes(a));
 }
 
 /* SSE2: prefix, 0F, op, with xmm registers as 0..15. */
@@ -1000,10 +1035,12 @@ unpublish(struct asm_ *a)
 }
 
 /* The direct call of a function in RAX (struct lu_jit_direct) with
-   `nargs` arguments at rsp + `off`: then `done` with the value (or NULL)
-   in RAX, or `slow` with nothing done. */
+   `nargs` positional arguments at rsp + `off`, and after them a value for
+   each name of the constant tuple kwnames (NULL: none), which the keyword
+   entry takes: then `done` with the value (or NULL) in RAX, or `slow`
+   with nothing done. */
 static void
-direct_call(struct asm_ *a, int nargs, int off, int slow, int done)
+direct_call(struct asm_ *a, int nargs, int off, int slow, int done, PyObject *kwnames)
 {
     int left = new_label(a);
     load(a, RCX, RAX, offsetof(PyFunctionObject, func_code));
@@ -1026,6 +1063,10 @@ direct_call(struct asm_ *a, int nargs, int off, int slow, int done)
     modrm_mem(a, RDX, RSP, off);                /* lea rdx, the arguments */
     mov_rr(a, RCX, RSP);                        /* the value goes over the callable's copy */
     mov_ri(a, R8, nargs);
+    if (kwnames != NULL) {
+        mov_ri(a, R9, (int64_t)(intptr_t)kwnames);
+        alu_ri(a, ALU_SUB, R11, LU_DIRECT_KW);  /* the keyword entry */
+    }
     rex(a, 0, 0, 0, R11);
     b1(a, 0xFF);
     modrm_rr(a, 2, R11);                        /* call r11 */
@@ -1046,10 +1087,11 @@ direct_call(struct asm_ *a, int nargs, int off, int slow, int done)
 }
 
 /* A call with the argument array at rsp as h_call takes it (the callable,
-   self or NULL, the arguments), from the root or from inlined frames
-   pushed for it: a Python function, or a bound method of one, that
-   compiled code can enter is called directly. Anything else falls
-   through to h_call. */
+   self or NULL, the arguments), or as h_call_kw takes it (then the names
+   of the last arguments, a constant), from the root or from inlined
+   frames pushed for it: a Python function, or a bound method of one,
+   that compiled code can enter is called directly. Anything else falls
+   through to the helper. */
 static void
 call_direct(struct asm_ *a, lu_v v, int done)
 {
@@ -1057,6 +1099,15 @@ call_direct(struct asm_ *a, lu_v v, int done)
     struct lu_ins *self = I(a, in->args[1]);
     int bound = !(self->op == OP_CONST && self->imm == 0);
     int n = in->nargs - 2;
+    PyObject *kwnames = NULL;
+    if (in->imm == H_call_kw) {
+        struct lu_ins *names = I(a, in->args[in->nargs - 1]);
+        if (names->op != OP_CONST || !PyTuple_CheckExact((PyObject *)(intptr_t)names->imm)) {
+            return;
+        }
+        kwnames = (PyObject *)(intptr_t)names->imm;
+        n -= 1 + (int)PyTuple_GET_SIZE(kwnames);
+    }
     int slow = new_label(a), function = new_label(a);
     load(a, RAX, RSP, 0);
     mov_ri(a, R11, (int64_t)(intptr_t)&PyFunction_Type);
@@ -1076,18 +1127,18 @@ call_direct(struct asm_ *a, lu_v v, int done)
         cmp_rm(a, R11, RAX, offsetof(PyObject, ob_type));
         jcc(a, CC_NE, slow);
         store(a, RSP, 8, RCX);
-        direct_call(a, n + 1, 8, unbind, done);
+        direct_call(a, n + 1, 8, unbind, done, kwnames);
         bind(a, unbind);
         store_mi(a, RSP, 8, 0);
         jmp(a, slow);
         bind(a, function);
-        direct_call(a, n, 16, slow, done);
+        direct_call(a, n, 16, slow, done, kwnames);
     }
     else {
         jcc(a, CC_NE, slow);
         cmp_mi(a, 1, RSP, 8, 0);                /* the method form without a method: no self */
         jcc(a, CC_E, slow);
-        direct_call(a, n + 1, 8, slow, done);
+        direct_call(a, n + 1, 8, slow, done, kwnames);
     }
     bind(a, slow);
 }
@@ -1111,7 +1162,7 @@ call_helper(struct asm_ *a, lu_v v, struct lu_deopt *d)
             to_gpr(a, RAX, in->args[i]);
             store(a, RSP, 8 * i, RAX);
         }
-        if (in->imm == H_call) {
+        if (in->imm == H_call || in->imm == H_call_kw) {
             done = new_label(a);
             call_direct(a, v, done);
         }
@@ -1153,10 +1204,116 @@ mark_loc(uint32_t *saved, int32_t loc)
     }
 }
 
+/* The datastack words of the inlined frames d names, which they take
+   in one block (lu_jit_frames_push), or 0 when they are not pushed in
+   line: a frame of a generator resumed in line, or a virtual local. */
+static int
+lent_words(struct lu_deopt *d)
+{
+    int words = 0;
+    for (int k = 1; k < d->nframes; k++) {
+        struct lu_deopt_frame *fr = &d->frames[k];
+        if (fr->gen) {
+            return 0;
+        }
+        for (int i = 0; i < fr->nlocals; i++) {
+            if (fr->vals[i].kind >= DV_BOX_I64) {
+                return 0;
+            }
+        }
+        words += fr->code->co_framesize;
+    }
+    return words;
+}
+
+static void lea(struct asm_ *a, int dst, int base, int32_t disp);
+
+/* lu_jit_frames_push in line, when the chunk has room for the block:
+   each frame as alloc_frame makes it, lent its code, function and
+   locals, the innermost current. RAX and R11 are free here. */
+static void
+push_frames_in_line(struct asm_ *a, struct lu_deopt *d, int words, int slow)
+{
+    load(a, RAX, R14, offsetof(PyThreadState, datastack_top));
+    load(a, R11, R14, offsetof(PyThreadState, datastack_limit));
+    alu_rr(a, ALU_SUB, R11, RAX);
+    alu_ri(a, ALU_CMP, R11, 8 * words);
+    jcc(a, CC_B, slow);                         /* no room (or no chunk): C pushes a new one */
+    int off = 0, prev = -1;
+    for (int k = 1; k < d->nframes; k++) {
+        struct lu_deopt_frame *fr = &d->frames[k];
+        PyCodeObject *code = fr->code;
+        PyFunctionObject *func = (PyFunctionObject *)fr->func;
+        lu_codeunit *instr = lu_code_start(code) + (k < d->nframes - 1 ? fr->pc : d->call_pc);
+#define AT(field) (off + (int32_t)offsetof(struct lu_frame, field))
+        mov_ri(a, R11, (int64_t)(intptr_t)code);
+        store(a, RAX, AT(code), R11);
+        if (prev < 0) {
+            store(a, RAX, AT(previous), R15);
+        }
+        else {
+            lea(a, R11, RAX, prev);
+            store(a, RAX, AT(previous), R11);
+        }
+        mov_ri(a, R11, (int64_t)(intptr_t)func);
+        store(a, RAX, AT(func), R11);
+        mov_ri(a, R11, (int64_t)(intptr_t)func->func_globals);
+        store(a, RAX, AT(globals), R11);
+        mov_ri(a, R11, (int64_t)(intptr_t)func->func_builtins);
+        store(a, RAX, AT(builtins), R11);
+        store_mi(a, RAX, AT(locals), 0);
+        store_mi(a, RAX, AT(frame_obj), 0);
+        mov_ri(a, R11, (int64_t)(intptr_t)instr);
+        store(a, RAX, AT(instr), R11);
+        store(a, RAX, AT(last), R11);
+        lea(a, R11, RAX, AT(localsplus) + 8 * code->co_nlocalsplus);
+        store(a, RAX, AT(stackpointer), R11);
+        store8_mi(a, RAX, AT(owner), lu_frame_owner_for(code));
+        store8_mi(a, RAX, AT(ret), LU_RETURN_PUSH);
+        store8_mi(a, RAX, AT(jit_lent), 0);
+        store_mi(a, RAX, AT(jit_desc), 0);
+        for (int i = 0; i < fr->nlocals; i++) {
+            const struct lu_dv *dv = &fr->vals[i];
+            int32_t at = AT(localsplus) + 8 * i;
+            if (dv->kind == DV_NULL) {
+                store_mi(a, RAX, at, 0);
+            }
+            else if (dv->loc == LU_LOC_NONE) {
+                mov_ri(a, R11, dv->imm);
+                store(a, RAX, at, R11);
+            }
+            else if (LU_LOC_IS_SPILL(dv->loc)) {
+                load(a, R11, RBP, spill_disp(dv->loc));
+                store(a, RAX, at, R11);
+            }
+            else {
+                store(a, RAX, at, dv->loc);
+            }
+        }
+#undef AT
+        prev = off;
+        off += 8 * code->co_framesize;
+    }
+    lea(a, R11, RAX, prev);
+    store(a, R14, offsetof(PyThreadState, current_frame), R11);
+    lea(a, R11, RAX, off);
+    store(a, R14, offsetof(PyThreadState, datastack_top), R11);
+    rex(a, 0, 0, 0, R14);
+    b1(a, 0x81);
+    modrm_mem(a, 5, R14, offsetof(PyThreadState, py_recursion_remaining));
+    b4(a, d->nframes - 1);                      /* sub dword, the frames */
+}
+
 static void
 push_frames(struct asm_ *a, lu_v v, struct lu_deopt *d)
 {
     struct lu_ins *in = I(a, v);
+    int words = lent_words(d), done = new_label(a), slow = new_label(a);
+    if (words > 0) {
+        push_frames_in_line(a, d, words, slow);
+        jmp(a, done);
+    }
+    bind(a, slow);
     uint32_t saved = 0;
     for (int k = 1; k < d->nframes; k++) {
         for (int i = 0; i < d->frames[k].nlocals; i++) {
@@ -1211,6 +1368,7 @@ push_frames(struct asm_ *a, lu_v v, struct lu_deopt *d)
         }
     }
     alu_ri(a, ALU_ADD, RSP, 256);
+    bind(a, done);
 }
 
 /* --- frames guards that check on the slow paths --- */
@@ -1411,10 +1569,40 @@ parked_stubs(struct asm_ *a)
     b1(a, 0xC3);
 }
 
-/* The helper's result in RAX survives. */
+/* The helper's result in RAX survives. The frames the call ran under
+   are one block (lu_jit_frames_push) below the datastack's top: popped in
+   line unless the callee made a frame object of one (they stay, for the
+   exit next), the block starts a chunk, or stress may keep them. */
 static void
-pop_frames(struct asm_ *a)
+pop_frames(struct asm_ *a, struct lu_deopt *d)
 {
+    int slow = new_label(a), done = new_label(a);
+    if (!a->f->stress && lent_words(d) > 0) {
+        load(a, RCX, R14, offsetof(PyThreadState, current_frame));
+        int off = 0, top = 0;
+        for (int k = 1; k < d->nframes; k++) {
+            top = off;
+            off += 8 * d->frames[k].code->co_framesize;
+        }
+        lea(a, RCX, RCX, -top);                 /* the block */
+        for (int k = 1, at = 0; k < d->nframes; k++) {
+            cmp_mi(a, 1, RCX, at + (int32_t)offsetof(struct lu_frame, frame_obj), 0);
+            jcc(a, CC_NE, slow);
+            at += 8 * d->frames[k].code->co_framesize;
+        }
+        load(a, RDX, R14, offsetof(PyThreadState, datastack_chunk));
+        lea(a, RDX, RDX, offsetof(_PyStackChunk, data));
+        alu_rr(a, ALU_CMP, RDX, RCX);
+        jcc(a, CC_E, slow);
+        store(a, R14, offsetof(PyThreadState, datastack_top), RCX);
+        store(a, R14, offsetof(PyThreadState, current_frame), R15);
+        rex(a, 0, 0, 0, R14);
+        b1(a, 0x81);
+        modrm_mem(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));
+        b4(a, d->nframes - 1);                  /* add dword, the frames */
+        jmp(a, done);
+    }
+    bind(a, slow);
     b1(a, 0x50);                                /* push rax */
     alu_ri(a, ALU_SUB, RSP, 8);
     mov_rr(a, RDI, R14);
@@ -1422,6 +1610,7 @@ pop_frames(struct asm_ *a)
     call_abs(a, (void *)lu_jit_frames_pop);
     alu_ri(a, ALU_ADD, RSP, 8);
     b1(a, 0x58);                                /* pop rax */
+    bind(a, done);
 }
 
 /* --- the instructions --- */
@@ -1509,6 +1698,10 @@ decref(struct asm_ *a, int r, struct lu_ins *in, struct lu_deopt *d, int left)
     op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
     jmp(a, done);
     bind(a, slow);
+    int keep = in != NULL && !lu_alloc_call(in);   /* a release values stay in registers across */
+    if (keep) {
+        save_volatile(a);
+    }
     mov_rr(a, RDI, r);
     if (d != NULL) {
         publish(a, in, d);
@@ -1517,6 +1710,9 @@ decref(struct asm_ *a, int r, struct lu_ins *in, struct lu_deopt *d, int left)
     if (d != NULL) {
         unpublish(a);
         settle(a, left);
+    }
+    if (keep) {
+        restore_volatile(a);
     }
     bind(a, done);
 }
@@ -3041,7 +3237,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             call_helper(a, v, pub);
         }
         if (inlined) {
-            pop_frames(a);
+            pop_frames(a, d);
         }
         if (err >= 0 && h->rep == REP_BIT) {
             b1(a, 0x83);
@@ -3283,9 +3479,8 @@ push_in_line(struct asm_ *a, int decline)
     store(a, RAX, 0, R15);
     mov_ri(a, R11, (int64_t)(intptr_t)code);
     store(a, R15, offsetof(struct lu_frame, code), R11);
-    incref(a, R11);
     store(a, R15, offsetof(struct lu_frame, func), RSI);
-    store8_mi(a, R15, offsetof(struct lu_frame, jit_lent), 1);     /* the caller holds the function */
+    store8_mi(a, R15, offsetof(struct lu_frame, jit_lent), 1);     /* the caller holds the function; code borrowed */
     load(a, R11, RSI, offsetof(PyFunctionObject, func_globals));
     store(a, R15, offsetof(struct lu_frame, globals), R11);
     load(a, R11, RSI, offsetof(PyFunctionObject, func_builtins));
@@ -3481,14 +3676,12 @@ direct_return(struct asm_ *a)
     mov_rr(a, RDI, R15);
     call_abs(a, (void *)lu_frame_retire);
     bind(a, alone);
-    load(a, R12, R15, offsetof(struct lu_frame, code));
     load(a, RAX, R15, offsetof(struct lu_frame, previous));
     store(a, R14, offsetof(PyThreadState, current_frame), RAX);
     store(a, R14, offsetof(PyThreadState, datastack_top), R15);
     rex(a, 0, 0, 0, R14);
     b1(a, 0xFF);
     modrm_mem(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));     /* inc dword */
-    decref(a, R12, NULL, NULL, -1);
     mov_ri(a, RAX, 1);                          /* LU_JIT_RETURN */
     jmp(a, a->epilogue);
 }
@@ -3559,6 +3752,16 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     a->left = malloc(sizeof(int) * (size_t)f->nins);
     a->gmode = malloc((size_t)f->nins);
     a->at = malloc(sizeof(int) * (size_t)f->nins);
+    for (int v = 0; v < f->nins; v++) {
+        int32_t loc = f->ins[v].loc;
+        int saved = 0;
+        for (int i = 0; i < lu_target.nsaved; i++) {
+            saved |= lu_target.saved[i] == loc;
+        }
+        if (!(f->ins[v].flags & INS_DEAD) && loc >= 0 && loc < 32 && !saved && loc != LU_LOC_NONE) {
+            a->volatiles |= 1u << loc;
+        }
+    }
     settle_guards(a);
     prologue(a);
     int *labels = malloc(sizeof(int) * (size_t)f->nblocks);
