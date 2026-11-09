@@ -1109,6 +1109,28 @@ h_dict_merge(PyObject *func, PyObject *dict, PyObject *update)
     return r == NULL ? -1 : 0;
 }
 
+/* DICT_UPDATE: dict.update(update) for {**update}, as the interpreter
+   runs it: str keys in place, anything else through the kernel. */
+static int
+h_dict_update(PyObject *dict, PyObject *update)
+{
+    if (PyDict_CheckExact(update) && lu_dict_str_keys(update)) {
+        int err = 0;
+        Py_ssize_t pos = 0;
+        PyObject *key, *value;
+        Py_BEGIN_CRITICAL_SECTION(update);
+        while (err == 0 && lu_ns_next(update, &pos, &key, &value)) {
+            err = lu_ns_insert(dict, key, value);
+        }
+        Py_END_CRITICAL_SECTION();
+        return err;
+    }
+    PyObject *args[2] = { dict, update };
+    PyObject *r = lu_call_kernel(LU_K_dict_update, args, 2);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
 /* BINARY_SLICE: container[start:stop]. Unless `generic`, it declines what
    needs the kernel, which runs Python. */
 static PyObject *
@@ -1378,6 +1400,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_call_ex] = { (void *)h_call_ex, "call_ex", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_call_forward] = { (void *)h_call_forward, "call_forward", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_dict_merge] = { (void *)h_dict_merge, "dict_merge", REP_BIT, IF_RAISE | IF_PY, 3 },
+    [H_dict_update] = { (void *)h_dict_update, "dict_update", REP_BIT, IF_RAISE | IF_PY, 2 },
     [H_catch] = { (void *)h_catch, "catch", REP_OBJ, IF_RAISE, 2 },
     [H_push_exc_info] = { (void *)h_push_exc_info, "push_exc_info", REP_OBJ, 0, 1 },
     [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, IF_SEEN, 1 },
