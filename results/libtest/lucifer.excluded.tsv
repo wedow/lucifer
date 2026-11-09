@@ -65,3 +65,5 @@ test.test_time.TestOldPyTime.test_object_to_timespec	unimplemented C-API functio
 test.test_time.TestOldPyTime.test_object_to_timeval	unimplemented C-API function aborts the worker (luc-vl7e)
 test.test_call.TestPEP590.test_vectorcall	hangs the worker until the module timeout (luc-lmao)
 test.test_call.TestRecursion.test_super_deep	deep C recursion overflows the C stack and segfaults the worker (luc-mci3)
+test.test_statistics.TestKDE.test_kde_random	grows the worker past 20 GB, which kills the whole run at the test host's memory cap (luc-wy7i)
+test.test_struct.StructTest.test_count_overflow	grows the worker past 8 GB, which kills the whole run at the test host's memory cap (luc-wy7i)
