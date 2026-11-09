@@ -28,6 +28,8 @@ enum lu_jit_result {
     LU_JIT_ERROR,       /* ts->current_frame raised: unwind from its instr */
     LU_JIT_YIELD,       /* the frame's generator yielded *result (a new reference): the frame is
                            saved at its resume point, still current; the caller suspends it */
+    LU_JIT_RAISED,      /* a direct call's frame raised and is popped: the call's result is
+                           the exception */
 };
 
 /* Back-edges (at one site) or calls before a code is compiled
@@ -156,7 +158,7 @@ lu_jit_observe_iter(lu_codeunit *word, PyTypeObject *t)
 }
 
 /* POP_JUMP_IF_*'s cache word: the directions the interpreter has taken.
-   In a callee too large to inline whole, a direction it never took while
+   In code too large to inline whole, a direction it never took while
    it took the other is not compiled. */
 enum { LU_BRANCH_FELL = 1, LU_BRANCH_JUMPED = 2 };
 

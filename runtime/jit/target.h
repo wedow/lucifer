@@ -169,6 +169,7 @@ struct lu_unit {
     unsigned long leaves;       /* exits no recompile can remove: side exits of the root frame, errors */
     int loops;                  /* the code has a back edge: an entry may do unbounded work */
     int dead;
+    unsigned long built;        /* sites marked generic before its build began (jit.c) */
     struct lu_dep *deps;        /* what it relies on between polls (runtime/jit/deps.c) */
     int ndeps;
     /* -X lucifer_jit_stats: what the code executed, by kind (lu_count_kind),
@@ -325,7 +326,10 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(push_exc_info) \
     X(pop_except) \
     X(exc_match) \
-    X(raise)
+    X(raise) \
+    X(reraise) \
+    X(load_special) \
+    X(unpack)
 
 enum lu_helper_id {
 #define LU_HELPER_ENUM(name) H_##name,

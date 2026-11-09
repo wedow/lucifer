@@ -40,11 +40,13 @@
 #include "jit/target.h"
 #include "jit/jit.h"
 #include "interp/gen.h"
+#include "interp/instrument.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 void lu_jit_note_exit(struct lu_deopt *d);
+void lu_jit_note_raised(struct lu_deopt *d);
 int lu_jit_handles(struct lu_deopt *d, int k);
 int lu_jit_next_pc(PyCodeObject *code, int pc);
 
@@ -332,6 +334,27 @@ unwinds_unseen(struct lu_deopt *d)
     return 1;
 }
 
+/* Whether an exception leaves as the result of the direct call that
+   entered the root: no frame of the exit takes it, each is kernel code
+   (the interpreter would pop them all, unseen) and no tool watches raises
+   or unwinds. The frames are then released here, and the caller's call
+   fails, without the interpreter. */
+static int
+raises_through(PyThreadState *ts, struct lu_frame *root, struct lu_frame *kept, struct lu_deopt *d)
+{
+    if (!d->error || kept != NULL || !root->jit_lent || root->frame_obj != NULL
+        || !lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RAISE)
+        || !lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_PY_UNWIND)) {
+        return 0;
+    }
+    for (int k = 0; k < d->nframes; k++) {
+        if (!(d->frames[k].code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) || lu_jit_handles(d, k)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 int
 lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
              const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills)
@@ -340,7 +363,11 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     /* Frames a call kept pushed above the root, innermost first. */
     struct lu_frame *kept = (struct lu_frame *)ts->current_frame != root
         ? (struct lu_frame *)ts->current_frame : NULL;
-    if (kept != NULL && kept_by_stress) {
+    int raised = raises_through(ts, root, kept, d);
+    if (raised) {
+        lu_jit_note_raised(d);
+    }
+    else if (kept != NULL && kept_by_stress) {
         struct lu_deopt stressed = *d;
         stressed.reason = EXIT_STRESS;
         stressed.stress = NULL;
@@ -457,6 +484,12 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     }
     if (old != few) {
         free(old);
+    }
+    if (raised) {
+        struct lu_frame *caller = root->previous;
+        lu_frame_pop(ts, root);
+        ts->current_frame = (struct _PyInterpreterFrame *)caller;
+        return LU_JIT_RAISED;
     }
     return d->error ? LU_JIT_ERROR : LU_JIT_DEOPT;
 }

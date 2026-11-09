@@ -782,6 +782,9 @@ polled(struct lu_task *t, PyObject *r)
 PyObject *
 lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r)
 {
+    if (r == LU_JIT_RAISED) {
+        return NULL;            /* the callee is gone; its exception is the call's */
+    }
     struct lu_task *t = (struct lu_task *)ts;
     /* The callee's frame returns into a C-entry marker, as under lu_eval. */
     struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
@@ -1249,6 +1252,49 @@ h_raise(PyObject *exc, PyObject *cause)
     return NULL;
 }
 
+/* A bare raise (exc NULL) or RERAISE in kernel code, which makes no
+   traceback entry: the exception raised again as it is. Always NULL. */
+static PyObject *
+h_reraise(PyObject *exc)
+{
+    if (exc == NULL) {
+        exc = lu_topmost_exc_info(PyThreadState_Get())->exc_value;
+        if (exc == NULL || exc == Py_None) {
+            lu_err_format(PyExc_RuntimeError, "No active exception to reraise");
+            return NULL;
+        }
+    }
+    PyErr_SetRaisedException(Py_NewRef(exc));
+    return NULL;
+}
+
+/* LOAD_SPECIAL: the special method `which` of owner's type, bound to owner. */
+static PyObject *
+h_load_special(PyObject *owner, int64_t which)
+{
+    PyObject *args[2] = { owner, lu_small_int((int)which) };
+    return lu_call_kernel(LU_K_load_special, args, 2);
+}
+
+/* UNPACK_SEQUENCE of what is not an exact tuple or list: a tuple of its n
+   items, or NULL with the interpreter's error. A tuple subclass that
+   iterates as a tuple (a named tuple) is that tuple. */
+static PyObject *
+h_unpack(PyObject *seq, int64_t n)
+{
+    if (PyTuple_Check(seq) && Py_SIZE(seq) == n
+        && _PyType_Lookup(Py_TYPE(seq), LU_ID(__iter__)) == _PyType_Lookup(&PyTuple_Type, LU_ID(__iter__))) {
+        return Py_NewRef(seq);
+    }
+    PyObject *args[2] = { seq, PyLong_FromLongLong(n) };
+    if (args[1] == NULL) {
+        return NULL;
+    }
+    PyObject *r = lu_call_kernel(LU_K_unpack, args, 2);
+    Py_DECREF(args[1]);
+    return r;
+}
+
 const struct lu_helper lu_helpers[H_COUNT] = {
     [H_box_int] = { (void *)lu_jit_box_int, "box_int", REP_OBJ, 0, 1 },
     [H_box_float] = { (void *)lu_jit_box_float, "box_float", REP_OBJ, 0, 1 },
@@ -1334,4 +1380,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, IF_SEEN, 1 },
     [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, IF_RAISE, 2 },
     [H_raise] = { (void *)h_raise, "raise", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_reraise] = { (void *)h_reraise, "reraise", REP_OBJ, IF_RAISE, 1 },
+    [H_load_special] = { (void *)h_load_special, "load_special", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_unpack] = { (void *)h_unpack, "unpack", REP_OBJ, IF_RAISE | IF_PY, 2 },
 };
