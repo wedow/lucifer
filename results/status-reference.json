@@ -997,6 +997,36 @@
    "seconds": 0.09019482880830765,
    "loops": null,
    "check": "2bd6e8d43a9ca3a41323bb1821539eb481961a5fdc72b26de12ecd21421f335f"
+  },
+  "cadence.continuing_brain": {
+   "status": "ok",
+   "seconds": 0.79126555332914,
+   "loops": null,
+   "check": "36a466341465f832116b02e3709788f7caa8e8f5caa4734ad9879a96a7c2d4a9"
+  },
+  "cadence.walking_rhythm": {
+   "status": "ok",
+   "seconds": 5.910312169697136,
+   "loops": null,
+   "check": "871991227de9ca7a50fa796bc1c73a3102fe0851564da366a2cc6a71a58659e9"
+  },
+  "cadence.walking_for_reward": {
+   "status": "ok",
+   "seconds": 6.201938549987972,
+   "loops": null,
+   "check": "ac64c36bb1c5b7c0938e50396f358ca062a0317c40293115c3d3b10afc4c3991"
+  },
+  "cadence.bandit": {
+   "status": "ok",
+   "seconds": 1.170304210856557,
+   "loops": null,
+   "check": "2d0237a0e42e5af23d52cb330b1119cbade65a9a13fe5451b2dc3e1db39e18fd"
+  },
+  "cadence.night_replay": {
+   "status": "ok",
+   "seconds": 1.8256386909633875,
+   "loops": null,
+   "check": "f50a6b3be3df4d4429453fcaa2b2e011bab00697da1c5bef0b3263bd3d37b792"
   }
  }
 }
