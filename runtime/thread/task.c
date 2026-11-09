@@ -63,6 +63,7 @@ bind_tstate(struct lu_task *t)
         ts->thread_id = (unsigned long)pthread_self();      /* the task's ident, for life */
     }
     ts->native_thread_id = lu_carrier->native_id;
+    lu_task_set_c_stack(t, lu_carrier->stack_base, lu_carrier->stack_top);
     e->gc_alloc_count += t->gc_alloc_count;
     t->gc_alloc_count = 0;
     e->nbound++;

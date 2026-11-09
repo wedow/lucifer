@@ -101,9 +101,9 @@ def _unsupported(*args, **kwargs):
     raise OSError(_errno.ENOSYS, 'sockets are not supported yet')
 
 
-class socket:
+class socket(_lucifer.socket_base()):
     """socket(family=AF_INET, type=SOCK_STREAM, proto=0) -> socket object"""
-    __slots__ = ('_fd', '_timeout', '_family', '_type', '_proto')
+    __slots__ = ()
 
     def __init__(self, family=-1, type=-1, proto=-1, fileno=None):
         if fileno is None:
@@ -159,6 +159,8 @@ class socket:
 
     def __del__(self):
         if self._fd >= 0:
+            import _warnings
+            _warnings.warn('unclosed %r' % (self,), ResourceWarning, 1, source=self)
             self.close()
 
     def close(self):
@@ -243,7 +245,7 @@ class socket:
 
     def connect_ex(self, address, /):
         try:
-            self.connect(address)
+            socket.connect(self, address)     # not a subclass's connect (ssl.SSLSocket's calls this)
         except OSError as e:
             if e.errno is None:
                 raise
@@ -277,7 +279,7 @@ class socket:
     def dup(self):
         return socket(self._family, self._type, self._proto, _posix.dup(self._check()))
 
-    recvfrom = sendto = _unsupported
+    recvfrom = recvfrom_into = sendto = _unsupported
 
 
 _POLLIN, _POLLOUT = 1, 4

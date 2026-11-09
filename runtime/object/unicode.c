@@ -349,6 +349,19 @@ PyUnicode_AsUTF8(PyObject *op)
     return PyUnicode_AsUTF8AndSize(op, NULL);
 }
 
+/* PyUnicode_AsUTF8 for a C string: no embedded NUL. */
+LU_EXPORT const char *
+_PyUnicode_AsUTF8NoNUL(PyObject *op)
+{
+    Py_ssize_t size;
+    const char *s = PyUnicode_AsUTF8AndSize(op, &size);
+    if (s != NULL && strlen(s) != (size_t)size) {
+        PyErr_SetString(PyExc_ValueError, "embedded null character");
+        return NULL;
+    }
+    return s;
+}
+
 /* unicode_hash: SipHash over the canonical data, cached. */
 Py_hash_t
 lu_str_hash(PyObject *s)

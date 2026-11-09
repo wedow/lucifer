@@ -35,6 +35,12 @@ Py_IsFinalizing(void)
     return __atomic_load_n(&_PyRuntime.finalizing, __ATOMIC_RELAXED);
 }
 
+LU_EXPORT int
+_Py_IsInterpreterFinalizing(PyInterpreterState *interp)
+{
+    return Py_IsFinalizing();
+}
+
 static PyObject *
 sys_is_finalizing(PyObject *m, PyObject *unused)
 {

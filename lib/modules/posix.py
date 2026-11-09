@@ -543,6 +543,32 @@ uname_result = _lucifer.structseq.structseq_type(
     ('sysname', 'nodename', 'release', 'version', 'machine'), 5)
 
 
+statvfs_result = _lucifer.structseq.structseq_type(
+    'os.statvfs_result', 'statvfs_result: Result from statvfs or fstatvfs.\n\n'
+    'This object may be accessed either as a tuple of\n'
+    '  (bsize, frsize, blocks, bfree, bavail, files, ffree, favail, flag, namemax),\n'
+    'or via the attributes f_bsize, f_frsize, f_blocks, f_bfree, and so on.\n\n'
+    'See os.statvfs for more information.',
+    ('f_bsize', 'f_frsize', 'f_blocks', 'f_bfree', 'f_bavail', 'f_files', 'f_ffree', 'f_favail',
+     'f_flag', 'f_namemax', 'f_fsid'), 10)
+
+
+def _statvfs_result(fields):
+    return _make_stat(statvfs_result, fields[:10], {'f_fsid': fields[10]})
+
+
+def statvfs(path):
+    """Perform a statvfs system call on the given path."""
+    if not isinstance(path, int):
+        path = _path('statvfs', path, 'string, bytes, os.PathLike or integer')
+    return _statvfs_result(_lucifer.os_statvfs(path))
+
+
+def fstatvfs(fd, /):
+    """Perform an fstatvfs system call on the given fd."""
+    return _statvfs_result(_lucifer.os_statvfs(fd if isinstance(fd, int) else fd.__index__()))
+
+
 def uname():
     """Return an object identifying the current operating system."""
     return _lucifer.structseq.structseq_make(uname_result, _lucifer.os_uname(), {})

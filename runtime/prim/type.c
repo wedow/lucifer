@@ -807,6 +807,24 @@ lu_type_add_descriptors(PyTypeObject *tp)
     return 0;
 }
 
+/* A runtime type's C instance methods (tp_methods), inserted natively: the
+   kernel's dict functions are not up when the static types are readied. */
+static int
+add_static_methods(PyTypeObject *tp, PyObject *dict)
+{
+    for (PyMethodDef *ml = tp->tp_methods; ml != NULL && ml->ml_name != NULL; ml++) {
+        PyObject *d = lu_descr_new_method(tp, ml);
+        PyObject *name = d != NULL ? PyUnicode_InternFromString(ml->ml_name) : NULL;
+        int err = name == NULL || lu_ns_insert(dict, name, d) < 0;
+        Py_XDECREF(name);
+        Py_XDECREF(d);
+        if (err) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 /* tp_free of a class: what a base's dealloc calls last, which must know the preheader. */
 static void
 heap_free(void *self)
@@ -891,9 +909,13 @@ lu_types_init(PyInterpreterState *interp)
         if (state->tp_dict != NULL) {
             continue;
         }
-        if ((state->tp_dict = PyDict_New()) == NULL
-            || lu_ns_insert(state->tp_dict, LU_ID(__doc__), Py_None) < 0
-            || lu_type_add_descriptors(*t) < 0) {
+        /* Kernel Python fills most; a type written in C has its methods and doc. */
+        PyObject *doc = (*t)->tp_doc != NULL ? PyUnicode_FromString((*t)->tp_doc) : Py_NewRef(Py_None);
+        int err = doc == NULL || (state->tp_dict = PyDict_New()) == NULL
+            || lu_ns_insert(state->tp_dict, LU_ID(__doc__), doc) < 0
+            || lu_type_add_descriptors(*t) < 0 || add_static_methods(*t, state->tp_dict) < 0;
+        Py_XDECREF(doc);
+        if (err) {
             return -1;
         }
     }
@@ -1906,12 +1928,22 @@ prim_type_can_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return bool_of(((PyTypeObject *)args[0])->tp_new != NULL);
 }
 
+/* type_has_sq_item(t): t has the sequence protocol's sq_item (PySequence_Check),
+   which a mapping-only extension type lacks though it has __getitem__. */
+static PyObject *
+prim_type_has_sq_item(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); TYPE_ARG(0);
+    PySequenceMethods *sq = ((PyTypeObject *)args[0])->tp_as_sequence;
+    return bool_of(sq != NULL && sq->sq_item != NULL);
+}
+
 /* type_new_layout(meta, name, bases, ns) */
 static PyObject *
 prim_type_new_layout(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(4); TYPE_ARG(0);
-    if (!PyUnicode_Check(args[1]) || !PyTuple_Check(args[2]) || !PyDict_CheckExact(args[3])) {
+    if (!PyUnicode_Check(args[1]) || !PyTuple_Check(args[2]) || !PyDict_Check(args[3])) {
         lu_err_format(PyExc_SystemError, "type_new_layout(meta, str, tuple, dict)");
         return NULL;
     }
@@ -2095,7 +2127,9 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
                       owner->tp_name, tp->tp_name, tp->tp_name, owner->tp_name);
         return -1;
     }
-    while (staticbase != NULL && (staticbase->tp_flags & Py_TPFLAGS_HEAPTYPE)) {
+    /* Classes are skipped, not an extension's heap type that refuses
+       instances (Py_TPFLAGS_DISALLOW_INSTANTIATION leaves its tp_new NULL). */
+    while (staticbase != NULL && (staticbase->tp_flags & Py_TPFLAGS_HEAPTYPE) && staticbase->tp_new != NULL) {
         staticbase = staticbase->tp_base;
     }
     /* Exception types share one allocation rule: a static exception class
@@ -2533,7 +2567,7 @@ PyMethodDef lu_prim_type_methods[] = {
     PURE(static_type),
     PURE(type_lookup), PURE(type_dict), PURE(type_mro), PURE(type_bases), PURE(type_base),
     FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag), FAST(type_set_flag), FAST(type_layout), FAST(object_size),
-    FAST(type_can_new), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
+    FAST(type_can_new), FAST(type_has_sq_item), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
     FAST(type_subclasses), FAST(type_modified), PURE(is_subtype), FAST(alloc), FAST(new_check),
     PURE(type_tp_name), FAST(type_text_signature), FAST(type_static_module), PURE(size),
     PURE(truth_exact), PURE(instance_dict), FAST(instance_load), FAST(instance_store), FAST(set_class), FAST(caller_globals), FAST(super_args),

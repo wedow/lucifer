@@ -478,6 +478,7 @@ def configure(c):
     path.extend(entry for entry in c['pythonpath'].split(':') if entry)
     if c['stdlib_dir'] is not None:
         path.append(c['stdlib_dir'])
+        path.append(c['stdlib_dir'] + '/lib-dynload')
     put('path', path)
     for name in ('prefix', 'exec_prefix', 'base_prefix', 'base_exec_prefix'):
         put(name, c[name] if c[name] is not None else '')

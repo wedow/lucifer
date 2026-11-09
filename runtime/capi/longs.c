@@ -111,6 +111,41 @@ PyLong_AsInt(PyObject *op)
         return 0; \
     } while (0)
 
+/* The Argument Clinic converters of unsigned C types (Objects/longobject.c):
+   1 with *ptr set, or 0 with an exception. */
+#define UNSIGNED_INT_CONVERTER(NAME, TYPE) \
+    LU_EXPORT int \
+    _PyLong_##NAME##_Converter(PyObject *obj, void *ptr) \
+    { \
+        Py_ssize_t bytes = PyLong_AsNativeBytes(obj, ptr, sizeof(TYPE), \
+            Py_ASNATIVEBYTES_NATIVE_ENDIAN | Py_ASNATIVEBYTES_ALLOW_INDEX \
+            | Py_ASNATIVEBYTES_REJECT_NEGATIVE | Py_ASNATIVEBYTES_UNSIGNED_BUFFER); \
+        if (bytes < 0) { \
+            return 0; \
+        } \
+        if ((size_t)bytes > sizeof(TYPE)) { \
+            PyErr_SetString(PyExc_OverflowError, "Python int too large for C " #TYPE); \
+            return 0; \
+        } \
+        return 1; \
+    }
+
+UNSIGNED_INT_CONVERTER(UnsignedShort, unsigned short)
+UNSIGNED_INT_CONVERTER(UnsignedInt, unsigned int)
+UNSIGNED_INT_CONVERTER(UnsignedLong, unsigned long)
+UNSIGNED_INT_CONVERTER(UnsignedLongLong, unsigned long long)
+UNSIGNED_INT_CONVERTER(Size_t, size_t)
+UNSIGNED_INT_CONVERTER(UInt8, uint8_t)
+UNSIGNED_INT_CONVERTER(UInt16, uint16_t)
+UNSIGNED_INT_CONVERTER(UInt32, uint32_t)
+UNSIGNED_INT_CONVERTER(UInt64, uint64_t)
+
+LU_EXPORT PyObject *
+_PyLong_FromTime_t(time_t t)
+{
+    return PyLong_FromLongLong((long long)t);
+}
+
 #define LONG_TO_UINT(type, obj, result) \
     do { \
         type value; \

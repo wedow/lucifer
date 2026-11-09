@@ -528,7 +528,7 @@ _PySet_Update(PyObject *set, PyObject *iterable)
     }
     PyObject *item;
     while ((item = PyIter_Next(it)) != NULL) {
-        int err = lu_set_add(set, item);
+        int err = PySet_Add(set, item);     /* any key: lu_set_add takes marshal's only */
         Py_DECREF(item);
         if (err < 0) {
             Py_DECREF(it);
