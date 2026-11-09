@@ -4496,14 +4496,20 @@ translate(struct ctx *c)
     case UNARY_NEGATIVE: {
         v = peek(c, 1);
         own = peek_owned(c, 1);
+        /* Without feedback an unknown operand is guessed an int; once that
+           guess failed here (a marked site), the kernel's negation. */
         PyTypeObject *t = known_type(c, v);
         if (t == &PyFloat_Type) {
             w = box_float(c, emit(c, OP_NEG_F, REP_F64, unbox_float(c, v), LU_NOV, LU_NOV, 0));
         }
-        else if (t == &PyLong_Type || known(c, v) == NULL) {
+        else if (t == &PyLong_Type || (known(c, v) == NULL && !lu_jit_nospec(c->code, c->pc))) {
             lu_v x = emit(c, OP_NEG_I, REP_I64, unbox_int(c, v), LU_NOV, LU_NOV, 0);
             I(c, x)->fs = before(c);
             w = box_int(c, x);
+        }
+        else if (root_only(c)) {
+            lu_v args[2] = { v, const_i(c, 0) };
+            w = helper_raising(c, H_unary, 2, args, 1);
         }
         else {
             unsupported(c);

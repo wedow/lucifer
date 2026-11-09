@@ -15,12 +15,13 @@
    once.
 
    An exit no recompile can remove (an instruction the tier does not
-   compile, an exception the unit does not handle) costs an exit and, at
-   the next call or back-edge, an entry. A unit without loops does a
-   bounded amount of work per entry; when such a unit leaves that way on
-   most of its entries, it costs more than it saves, and it dies (is
-   retired). An exception that leaves the root frame is no such exit: the
-   call ends there.
+   compile, an exception the unit does not handle, a guard a unit built
+   after its site's mark still keeps) costs an exit and, at the next call
+   or back-edge, an entry. A unit without loops does a bounded amount of
+   work per entry, and so does one whose entries leave at a kept guard;
+   when such a unit leaves that way on most of its entries, it costs more
+   than it saves, and it dies (is retired). An exception that leaves the
+   root frame is no such exit: the call ends there.
 
    Nothing is given up for good. Whenever a unit dies, or a compile fails,
    its entry waits in the interpreter before it compiles again: WARMUP
@@ -745,13 +746,16 @@ retire(struct lu_jit_code *jc, struct lu_unit *u)
 }
 
 /* An exit no recompile can remove: a unit without loops that leaves on
-   most of its entries is retired. */
+   most of its entries is retired. So is one with loops that leaves at a
+   guard it kept on a site already marked: no recompile removes that
+   guard, and a loop that fails it each iteration pays an exit and an
+   entry each iteration. */
 static void
-leave(struct lu_deopt *d, struct lu_unit *u)
+leave(struct lu_deopt *d, struct lu_unit *u, int kept)
 {
     unsigned long n = bump(&u->leaves);
     unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
-    if (!u->loops && n >= LEAVES && 2 * n >= entries && entries < ENTRIES_SEEN) {
+    if ((kept || !u->loops) && n >= LEAVES && 2 * n >= entries && entries < ENTRIES_SEEN) {
         retire(state_for(d->frames[0].code), u);
     }
 }
@@ -1294,7 +1298,7 @@ lu_jit_note_exit(struct lu_deopt *d)
         return;
     }
     if (d->reason == EXIT_ERROR || (d->reason == EXIT_SIDE && d->nframes == 1)) {
-        leave(d, u);
+        leave(d, u, 0);
         if (d->reason != EXIT_ERROR || handled == 0) {
             return;
         }
@@ -1335,7 +1339,7 @@ lu_jit_note_exit(struct lu_deopt *d)
             return;
         }
         else if (u->built >= __atomic_load_n(&jc->marked, __ATOMIC_RELAXED)) {
-            leave(d, u);
+            leave(d, u, 1);
             return;
         }
         say_recompile(d->frames[0].code, d->reason != EXIT_GUARD ? "inlined copy leaves" : "guard fails", inner->code,
