@@ -1,6 +1,6 @@
 ---
 id: luc-s6dj
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-07T18:46:10Z

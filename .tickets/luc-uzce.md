@@ -1,6 +1,6 @@
 ---
 id: luc-uzce
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-06T04:58:05Z
