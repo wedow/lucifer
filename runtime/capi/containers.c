@@ -442,6 +442,19 @@ PyWeakref_GetRef(PyObject *ref, PyObject **pobj)
     return *pobj != NULL;
 }
 
+/* 1 when the referent of the weak reference is gone, 0 while it lives. */
+LU_EXPORT int
+_PyWeakref_IsDead(PyObject *ref)
+{
+    PyObject *obj;
+    int alive = PyWeakref_GetRef(ref, &obj);
+    if (alive < 0) {
+        return -1;
+    }
+    Py_XDECREF(obj);
+    return !alive;
+}
+
 int
 PyWeakref_IsDead(PyObject *ref)
 {

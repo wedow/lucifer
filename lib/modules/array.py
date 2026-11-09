@@ -4,26 +4,36 @@ packed items (as bytes, with format 'B': memoryview(array) is not typed);
 length, indexing, iteration and the methods work in items."""
 
 import struct as _struct
+from _lucifer import MISSING as _NOT_STORED, typed_get as _typed_get, typed_set as _typed_set
 
 typecodes = 'bBuwhHiIlLqQfd'
 _NATIVE = {'b': 'b', 'B': 'B', 'u': 'I', 'w': 'I', 'h': 'h', 'H': 'H', 'i': 'i', 'I': 'I', 'l': 'q', 'L': 'Q',
            'q': 'q', 'Q': 'Q', 'f': 'f', 'd': 'd'}
+# Each integer typecode's conversions in order, as arraymodule.c's setitem
+# functions make them (a PyArg format, then the item's own range): (low,
+# high, message below, message above).
+_LONG = (-2**63, 2**63 - 1, 'Python int too large to convert to C long', 'Python int too large to convert to C long')
+_ULONG = (0, 2**64 - 1, "can't convert negative value to unsigned int",
+          'Python int too large to convert to C unsigned long')
+_SHORT = (-32768, 32767, 'signed short integer is less than minimum', 'signed short integer is greater than maximum')
+_INT = (-2**31, 2**31 - 1, 'signed integer is less than minimum', 'signed integer is greater than maximum')
 _LIMITS = {
-    'b': (-128, 127, 'signed char is less than minimum', 'signed char is greater than maximum'),
-    'B': (0, 255, 'unsigned byte integer is less than minimum', 'unsigned byte integer is greater than maximum'),
-    'h': (-32768, 32767, 'signed short integer is less than minimum', 'signed short integer is greater than maximum'),
-    'H': (0, 65535, 'unsigned short is less than minimum', 'unsigned short is greater than maximum'),
-    'i': (-2**31, 2**31 - 1, 'signed integer is less than minimum', 'signed integer is greater than maximum'),
-    'I': (0, 2**32 - 1, "can't convert negative value to unsigned int", 'unsigned int is greater than maximum'),
-    'l': (-2**63, 2**63 - 1, 'Python int too large to convert to C long', 'Python int too large to convert to C long'),
-    'L': (0, 2**64 - 1, "can't convert negative value to unsigned int",
-          'Python int too large to convert to C unsigned long'),
-    'q': (-2**63, 2**63 - 1, 'int too big to convert', 'int too big to convert'),
-    'Q': (0, 2**64 - 1, "can't convert negative int to unsigned", 'int too big to convert'),
+    'b': (_LONG, _SHORT, (-128, 127, 'signed char is less than minimum', 'signed char is greater than maximum')),
+    'B': (_LONG, (0, 255, 'unsigned byte integer is less than minimum', 'unsigned byte integer is greater than maximum')),
+    'h': (_LONG, _SHORT),
+    'H': (_LONG, _INT, (0, 65535, 'unsigned short is less than minimum', 'unsigned short is greater than maximum')),
+    'i': (_LONG, _INT),
+    'I': (_ULONG, (0, 2**32 - 1, None, 'unsigned int is greater than maximum')),
+    'l': (_LONG,),
+    'L': (_ULONG,),
+    'q': ((-2**63, 2**63 - 1, 'int too big to convert', 'int too big to convert'),),
+    'Q': ((0, 2**64 - 1, "can't convert negative int to unsigned", 'int too big to convert'),),
 }
 _MACHINE = {'b': 1, 'B': 0, 'h': 4, 'H': 2, 'i': 8, 'I': 6, 'l': 12, 'L': 10, 'q': 12, 'Q': 10, 'f': 14, 'd': 16,
             'u': 20, 'w': 20}
 _MISSING = object()
+# The typecodes whose items index directly, as the native struct code.
+_DIRECT = {code: native for code, native in _NATIVE.items() if code not in 'uw'}
 
 
 def _index(value):
@@ -34,6 +44,14 @@ def _index(value):
     except AttributeError:
         raise TypeError("'%s' object cannot be interpreted as an integer" % type(value).__name__) from None
     return method(value)
+
+
+def _item_index(index):
+    """PyNumber_AsSsize_t(index, IndexError)."""
+    index = _index(index)
+    if not -2**63 <= index < 2**63:
+        raise IndexError("cannot fit 'int' into an index-sized integer")
+    return index
 
 
 def _encode(typecode, value):
@@ -52,11 +70,11 @@ def _encode(typecode, value):
             raise TypeError('must be real number, not %s' % type(value).__name__)
         return method(value)
     value = _index(value)
-    low, high, low_message, high_message = _LIMITS[typecode]
-    if value < low:
-        raise OverflowError(low_message)
-    if value > high:
-        raise OverflowError(high_message)
+    for low, high, low_message, high_message in _LIMITS[typecode]:
+        if value < low:
+            raise OverflowError(low_message)
+        if value > high:
+            raise OverflowError(high_message)
     return value
 
 
@@ -138,11 +156,16 @@ a bytes-like object, or iterable over elements of the appropriate type."""
         return iter(self._values())
 
     def __getitem__(self, index):
+        code = _DIRECT.get(self._typecode)
+        if code is not None and type(index) is int:
+            item = _typed_get(self, code, index)
+            if item is not _NOT_STORED:
+                return item
         if isinstance(index, slice):
             result = array(self._typecode)
             bytearray.extend(result, self._pack(self._values()[index]))
             return result
-        index = _index(index)
+        index = _item_index(index)
         n = len(self)
         if index < 0:
             index += n
@@ -152,8 +175,11 @@ a bytes-like object, or iterable over elements of the appropriate type."""
         return chr(item) if self._typecode in 'uw' else item
 
     def __setitem__(self, index, value):
+        code = _DIRECT.get(self._typecode)
+        if code is not None and type(index) is int and _typed_set(self, code, index, value) is True:
+            return
         if not isinstance(index, slice):
-            index = _index(index)
+            index = _item_index(index)
             if index < 0:
                 index += len(self)
             if not 0 <= index < len(self):

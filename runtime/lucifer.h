@@ -257,6 +257,9 @@ enum lu_kernel_id {
 /* Instance attributes (runtime/object/attrs.c): inline values after
    tp_basicsize while LU_ATTRS_IN_DICT is clear, else the instance dict. */
 #define LU_ATTRS_IN_DICT (1 << 8)       /* ob_flags: set once the values moved to the dict */
+#define LU_ATTRS_UNORDERED (1 << 9)     /* ob_flags: the words' insertion order is in the order record */
+#define LU_ATTRS_ROOM_SHIFT 10
+#define LU_ATTRS_ROOM (63 << LU_ATTRS_ROOM_SHIFT)  /* ob_flags: the names the instance has room for (0: the table's) */
 static inline int
 lu_inline_live(PyObject *obj)
 {
@@ -290,7 +293,13 @@ lu_inline_raw(PyObject **word)
 /* Class setup and teardown, and the bytes each instance carries. */
 int lu_inline_values_init(PyTypeObject *tp);
 void lu_inline_values_fini(PyTypeObject *tp);
-size_t lu_inline_values_size(PyTypeObject *tp);
+/* A new instance's room (names), taken for one instance; settled for
+   every later one (a unit that allocates instances in line); the bytes a
+   room takes after tp_basicsize, and the ob_flags bits that record it. */
+Py_ssize_t lu_inline_take_room(PyTypeObject *tp);
+Py_ssize_t lu_inline_settle_room(PyTypeObject *tp);
+size_t lu_inline_room_size(Py_ssize_t room);
+uint16_t lu_inline_room_flags(PyTypeObject *tp, Py_ssize_t room);
 /* The index of name in the class's shared names, or -1. */
 Py_ssize_t lu_inline_index(PyTypeObject *tp, PyObject *name);
 /* The address of the instance's dict pointer, or NULL when it has none. */
@@ -619,6 +628,9 @@ struct lu_carrier {
     /* Below this the thread's C stack keeps room for an activation of the
        interpreter: compiled code calls a callee only above it. */
     char *jit_stack_floor;
+    /* The thread's C stack, [stack_base, stack_top), or zeros when unknown:
+       a task bound here takes it as the bounds C recursion checks watch. */
+    uintptr_t stack_base, stack_top;
 };
 
 extern _Thread_local struct lu_carrier *lu_carrier;
@@ -675,6 +687,7 @@ struct lu_entry *lu_entry_of(struct lu_carrier *c, struct _is *interp);
    unbinds and frees the tasks still bound to it (lu_task_carrier_exit). */
 struct lu_task *lu_task_new(struct _is *interp, int whence);
 void lu_task_bind(struct lu_task *t);
+void lu_task_set_c_stack(struct lu_task *t, uintptr_t base, uintptr_t top);
 void lu_task_attach(PyThreadState *ts);
 /* The task stops using objects: its critical sections release their locks,
    its carrier goes offline for QSBR, and its state becomes `state`, detached
@@ -899,7 +912,7 @@ struct lu_static_objects {
     X(__rtruediv__) X(__matmul__) X(__rmatmul__) X(__iadd__) X(__isub__) X(__imul__) \
     X(__imod__) X(__ipow__) X(__ilshift__) X(__irshift__) X(__iand__) X(__ixor__) \
     X(__ior__) X(__import__) X(__ifloordiv__) X(__itruediv__) X(__imatmul__) X(__neg__) X(__pos__) \
-    X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__) X(mro) X(__getattribute__) X(__static_attributes__) X(__getattr__) X(__setattr__)
+    X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__) X(mro) X(__getattribute__) X(__static_attributes__) X(__getattr__) X(__setattr__) X(__delattr__)
 struct lu_identifiers {
 #define LU_ID_FIELD(name) PyObject *name;
     LU_IDENTIFIERS(LU_ID_FIELD)
@@ -1158,6 +1171,7 @@ PyObject *lu_weakref_get(PyObject *ref);
 PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
 void lu_capsule_init(void);
+void lu_picklebuf_init(void);
 int lu_fileobject_init(void);
 /* The last-resort MemoryError of PyErr_NoMemory (runtime/capi/errors.c). */
 void lu_errors_init(PyInterpreterState *interp);

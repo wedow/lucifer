@@ -9,7 +9,7 @@ dict, then non-data descriptors and plain class attributes.
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_dict, type_bases, type_tp_name, type_qualname,
     instance_dict, instance_load, instance_store, ns_get, alloc, set_class, kernel_set, address,
-    object_hash, type_flag, object_size,
+    object_hash, type_flag, object_size, type_can_new,
 )
 from _lucifer import _boot
 
@@ -23,6 +23,7 @@ __all__ = ('object',)
 
 
 _IS_ABSTRACT = 1 << 20          # Py_TPFLAGS_IS_ABSTRACT
+_MANAGED_DICT = 1 << 4          # Py_TPFLAGS_MANAGED_DICT
 
 
 def _abstract_error(cls):
@@ -304,11 +305,24 @@ overridden to extend subclasses.
 
 
 def _getstate_default(obj, required):
-    """object_getstate_default: the instance dict, or (dict, slots)."""
+    """object_getstate_default: the instance dict, or (dict, slots). When the
+    state is required (no __new__ arguments), an object whose layout holds
+    more than its dict, weakref and slots cannot be pickled."""
+    cls = type(obj)
+    if required and cls.__itemsize__:
+        error(TypeError, str_join('', ('cannot pickle ', type_tp_name(cls), ' objects')))
     d = instance_dict(obj, False)
     state = d if d else None
     import copyreg
-    slotnames = copyreg._slotnames(type(obj))
+    slotnames = copyreg._slotnames(cls)
+    if required:
+        size = object.__basicsize__ + 8 * len(slotnames)
+        if cls.__dictoffset__ and not cls.__flags__ & _MANAGED_DICT:
+            size += 8
+        if cls.__weakrefoffset__ > 0:
+            size += 8
+        if cls.__basicsize__ > size:
+            error(TypeError, str_join('', ("cannot pickle '", type_tp_name(cls), "' object")))
     if slotnames:
         slots = {}
         for name in slotnames:
@@ -357,6 +371,8 @@ def _common_reduce(obj, proto):
     if proto < 2:
         return copyreg._reduce_ex(obj, proto)
     cls = type(obj)
+    if not type_can_new(cls):
+        error(TypeError, str_join('', ("cannot pickle '", type_tp_name(cls), "' object")))
     args, kwargs = _new_arguments(obj)
     if kwargs:
         newobj = copyreg.__newobj_ex__
@@ -366,7 +382,7 @@ def _common_reduce(obj, proto):
         newargs = (cls, *(args or ()))
     getstate = type_lookup(cls, '__getstate__')
     if getstate is _object_getstate:
-        state = _getstate_default(obj, args is None)
+        state = _getstate_default(obj, args is None and not kind(obj, 'list') and not kind(obj, 'dict'))
     else:
         state = call_special(getstate, obj)
     listitems = iter(obj) if kind(obj, 'list') else None

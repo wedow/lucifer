@@ -5,6 +5,7 @@
 
 #include "interp/exceptions.h"
 #include "prim/bytes.h"
+#include <math.h>
 
 /* bpo-39824: m_traverse and m_clear need the state a positive m_size promises. */
 static int
@@ -192,6 +193,87 @@ lu_module_from_def(PyModuleDef *def)
 
 /* _lucifer */
 
+/* socket_base: the instance layout of _socket.socket, PySocketSockObject
+   (Modules/socketmodule.h), which extensions such as _ssl read through
+   _socket.CAPI. _socket.socket, Python, subclasses it and keeps its state in
+   these fields; the timeout is seconds (None for blocking) to Python and
+   nanoseconds (-1) in the field. */
+typedef struct {
+    PyObject_HEAD
+    int sock_fd, sock_family, sock_type, sock_proto;
+    PyObject *(*errorhandler)(void);
+    PyTime_t sock_timeout;
+} lu_socket_base;
+
+static PyObject *
+socket_base_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+{
+    lu_socket_base *s = (lu_socket_base *)type->tp_alloc(type, 0);
+    if (s != NULL) {
+        s->sock_fd = -1;
+        s->sock_timeout = -1;
+    }
+    return (PyObject *)s;
+}
+
+static PyObject *
+socket_base_get_timeout(PyObject *self, void *closure)
+{
+    PyTime_t t = ((lu_socket_base *)self)->sock_timeout;
+    return t < 0 ? Py_NewRef(Py_None) : PyFloat_FromDouble(PyTime_AsSecondsDouble(t));
+}
+
+/* _PyTime_FromSecondsObject with _PyTime_ROUND_TIMEOUT (away from zero). */
+static int
+socket_base_set_timeout(PyObject *self, PyObject *value, void *closure)
+{
+    PyTime_t t = -1;
+    if (value == NULL) {
+        PyErr_SetString(PyExc_AttributeError, "cannot delete the timeout");
+        return -1;
+    }
+    if (value != Py_None) {
+        double d = PyFloat_AsDouble(value);
+        if (d == -1.0 && PyErr_Occurred()) {
+            return -1;
+        }
+        d = d * 1e9;
+        d = d >= 0 ? ceil(d) : floor(d);
+        if (!((double)PyTime_MIN <= d && d < -(double)PyTime_MIN)) {
+            PyErr_SetString(PyExc_OverflowError, "timestamp too large to convert to C PyTime_t");
+            return -1;
+        }
+        t = (PyTime_t)d;
+    }
+    ((lu_socket_base *)self)->sock_timeout = t;
+    return 0;
+}
+
+static PyMemberDef socket_base_members[] = {
+    { "_fd", Py_T_INT, offsetof(lu_socket_base, sock_fd), 0, NULL },
+    { "_family", Py_T_INT, offsetof(lu_socket_base, sock_family), 0, NULL },
+    { "_type", Py_T_INT, offsetof(lu_socket_base, sock_type), 0, NULL },
+    { "_proto", Py_T_INT, offsetof(lu_socket_base, sock_proto), 0, NULL },
+    { NULL },
+};
+
+static PyGetSetDef socket_base_getset[] = {
+    { "_timeout", socket_base_get_timeout, socket_base_set_timeout, NULL, NULL },
+    { NULL },
+};
+
+static PyType_Slot socket_base_slots[] = {
+    { Py_tp_new, socket_base_new },
+    { Py_tp_members, socket_base_members },
+    { Py_tp_getset, socket_base_getset },
+    { 0, NULL },
+};
+
+static PyType_Spec socket_base_spec = {
+    "_lucifer.socket_base", sizeof(lu_socket_base), 0, Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    socket_base_slots,
+};
+
 static int
 lucifer_exec(PyObject *m)
 {
@@ -259,6 +341,13 @@ prim_module_init(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return module_init_dict((PyModuleObject *)args[0], args[1], args[2]) < 0 ? NULL : Py_NewRef(Py_None);
 }
 
+/* socket_base(): a new socket_base type, for the _socket module being made. */
+static PyObject *
+prim_socket_base(PyObject *m, PyObject *unused)
+{
+    return PyType_FromSpec(&socket_base_spec);
+}
+
 /* socket_capi(type, error, timeout): _socket.CAPI, the capsule of
    PySocketModule_APIObject (Modules/socketmodule.h) other extensions import.
    The record lives as long as the process, as the module's does. */
@@ -282,6 +371,7 @@ prim_socket_capi(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static PyMethodDef lucifer_methods[] = {
     { "module_init", (PyCFunction)(void (*)(void))prim_module_init, METH_FASTCALL,
       "module_init(module, name, doc): the namespace of a new module." },
+    { "socket_base", prim_socket_base, METH_NOARGS, "socket_base(): the instance layout of _socket.socket." },
     { "socket_capi", (PyCFunction)(void (*)(void))prim_socket_capi, METH_FASTCALL,
       "socket_capi(type, error, timeout): the _socket.CAPI capsule." },
     { "write", (PyCFunction)(void (*)(void))lu_prim_write, METH_FASTCALL,

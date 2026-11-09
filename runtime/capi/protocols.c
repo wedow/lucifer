@@ -756,10 +756,16 @@ PySequence_Fast(PyObject *s, const char *msg)
     if (PyList_CheckExact(s) || PyTuple_CheckExact(s)) {
         return Py_NewRef(s);
     }
-    PyObject *r = PySequence_List(s);
-    if (r == NULL && PyErr_ExceptionMatches(PyExc_TypeError)) {
-        PyErr_SetString(PyExc_TypeError, msg);
+    /* Only a TypeError of iter() becomes msg, not one the iteration raises. */
+    PyObject *it = PyObject_GetIter(s);
+    if (it == NULL) {
+        if (PyErr_ExceptionMatches(PyExc_TypeError)) {
+            PyErr_SetString(PyExc_TypeError, msg);
+        }
+        return NULL;
     }
+    PyObject *r = PySequence_List(it);
+    Py_DECREF(it);
     return r;
 }
 

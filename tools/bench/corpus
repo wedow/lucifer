@@ -46,14 +46,15 @@ WARMUPS, VALUES, RUNS = 1, 3, 3
 TIMEOUT = 300  # seconds per run
 # Benchmarks the MANIFEST lists that the lock does not install.
 EXCLUDED = {"dask": "a distributed cluster over psutil, msgpack and dozens more"}
-# Inputs come from third_party/cpython as src/..., relative so the output names no checkout.
+# Inputs come from third_party/cpython as src/..., relative so the output names no checkout:
+# upstream Lib/ files, which the vendoring never modifies (CHANGES.md changes with it).
 CLI = {
     "black": ["-m", "black", "-q", "-", "<", "src/Lib/textwrap.py"],
     "isort": ["-m", "isort", "-", "<", "src/Lib/typing.py"],
     "pyflakes": ["-m", "pyflakes", "src/Lib/email", "src/Lib/json", "src/Lib/asyncio"],
     "pycodestyle": ["-m", "pycodestyle", "--max-line-length=100", "src/Lib/email", "src/Lib/json"],
     "pygments": ["-m", "pygments", "-l", "python", "-f", "html", "src/Lib/typing.py"],
-    "markdown": ["-m", "markdown", "src/CHANGES.md"],
+    "markdown": ["-m", "markdown", "src/Lib/idlelib/NEWS2x.txt"],
 }
 
 

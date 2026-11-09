@@ -172,6 +172,7 @@ struct lu_unit {
     int nconsts;
     long *stress_counter;       /* -X lucifer_stress=deopt:N: guards fail when it reaches 0 */
     unsigned long entries;      /* up to a bound (jit.c) */
+    unsigned long entered;      /* every entry, under -X lucifer_jit_stats */
     unsigned long leaves;       /* exits no recompile can remove: side exits of the root frame, errors */
     int loops;                  /* the code has a back edge: an entry may do unbounded work */
     int dead;

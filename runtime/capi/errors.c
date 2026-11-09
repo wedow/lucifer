@@ -807,13 +807,11 @@ PyArg_ValidateKeywordArguments(PyObject *kwargs)
     return 1;
 }
 
-/* lu_err_format with the exception that was set as the new one's __cause__
-   and __context__ (_PyErr_FormatFromCause). */
-void
-lu_err_format_from_cause(PyObject *type, const char *format, const char *name)
+/* The exception just raised gets CAUSE, the one raised before it, as its
+   __cause__ and __context__ (_PyErr_FormatVFromCause). */
+static void
+raise_from_cause(PyObject *cause)
 {
-    PyObject *cause = PyErr_GetRaisedException();
-    lu_err_format(type, format, name);
     PyObject *exc = PyErr_GetRaisedException();
     if (exc != NULL && cause != NULL) {
         PyException_SetCause(exc, Py_NewRef(cause));
@@ -822,4 +820,65 @@ lu_err_format_from_cause(PyObject *type, const char *format, const char *name)
     }
     Py_XDECREF(cause);
     PyErr_SetRaisedException(exc);
+}
+
+/* lu_err_format with the current exception as the new one's cause. */
+void
+lu_err_format_from_cause(PyObject *type, const char *format, const char *name)
+{
+    PyObject *cause = PyErr_GetRaisedException();
+    lu_err_format(type, format, name);
+    raise_from_cause(cause);
+}
+
+/* Python/errors.c: EXC, raised while handling the current exception, becomes
+   that exception's context; with none current, EXC is raised. */
+void
+_PyErr_ChainExceptions1(PyObject *exc)
+{
+    if (exc == NULL) {
+        return;
+    }
+    if (PyErr_Occurred()) {
+        PyObject *current = PyErr_GetRaisedException();
+        PyException_SetContext(current, exc);
+        PyErr_SetRaisedException(current);
+    }
+    else {
+        PyErr_SetRaisedException(exc);
+    }
+}
+
+/* A new exception whose cause and context are the current one. */
+LU_EXPORT PyObject *
+_PyErr_FormatFromCause(PyObject *exception, const char *format, ...)
+{
+    PyObject *cause = PyErr_GetRaisedException();
+    va_list ap;
+    va_start(ap, format);
+    PyErr_FormatV(exception, format, ap);
+    va_end(ap);
+    raise_from_cause(cause);
+    return NULL;
+}
+
+/* warnings.warn(message, ResourceWarning, stack_level, source). */
+int
+PyErr_ResourceWarning(PyObject *source, Py_ssize_t stack_level, const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    PyObject *message = PyUnicode_FromFormatV(format, ap);
+    va_end(ap);
+    if (message == NULL) {
+        return -1;
+    }
+    PyObject *warnings = PyImport_ImportModule("warnings");
+    PyObject *result = warnings == NULL ? NULL
+        : PyObject_CallMethod(warnings, "warn", "OOnO", message, PyExc_ResourceWarning, stack_level,
+                              source != NULL ? source : Py_None);
+    Py_XDECREF(warnings);
+    Py_DECREF(message);
+    Py_XDECREF(result);
+    return result == NULL ? -1 : 0;
 }

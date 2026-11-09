@@ -27,8 +27,9 @@ lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* vectorcall_method/lookup_maybe_method: the special method of self's
-   type, bound unless it is a plain function or a kernel descriptor, then
-   called with self first. */
+   type, called with self first when it is a plain function or a kernel
+   method descriptor, else bound through its __get__ if it has one (a
+   builtin function has none: it gets no self). */
 static PyObject *
 call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *const *args,
                 Py_ssize_t nargs, PyObject *kwnames)
@@ -47,7 +48,9 @@ call_special_in(PyTypeObject *tp, PyObject *self, PyObject *name, PyObject *cons
         return PyErr_NoMemory();
     }
     PyObject *func, *bound_self, *result;
-    int target = PyFunction_Check(descr) ? 1 : lu_kernel_target(descr, &self, 1, &func, &bound_self);
+    int target = PyFunction_Check(descr) ? 1
+        : (Py_TYPE(descr)->tp_flags & Py_TPFLAGS_METHOD_DESCRIPTOR) ? lu_kernel_target(descr, &self, 1, &func, &bound_self)
+        : 0;
     if (target < 0) {
         PyErr_Clear();  /* self fails the descriptor's check: __get__ decides */
     }
@@ -245,6 +248,36 @@ object_tp_richcompare(PyObject *self, PyObject *other, int op)
         return Py_NewRef(Py_NotImplemented);
     }
     return call_special_in(&PyBaseObject_Type, self, names[op], &other, 1, NULL);
+}
+
+/* The attribute hooks a class keeps from object (no __getattr__ and
+   object's __getattribute__; object's __setattr__ and __delattr__): its
+   slot is object's own function, as update_one_slot gives a class the
+   specific function of the wrapper it finds, so C tests the slot instead
+   of looking the hooks up. Object keeps its thunk, which static types
+   inherit: an extension type that sets PyObject_GenericGetAttr itself
+   still differs from its base and gets its own wrapper, as in CPython. */
+static int
+keeps_object_hook(PyTypeObject *tp, PyObject *a, PyObject *b, PyObject *absent)
+{
+    PyObject *own = _PyType_Lookup(&PyBaseObject_Type, a);
+    return own != NULL && _PyType_Lookup(tp, a) == own
+        && (b == NULL || _PyType_Lookup(tp, b) == _PyType_Lookup(&PyBaseObject_Type, b))
+        && (absent == NULL || _PyType_Lookup(tp, absent) == NULL);
+}
+
+static void *
+attribute_thunk(PyTypeObject *tp, void *thunk)
+{
+    if (thunk == (void *)lu_slot_tp_getattro
+        && keeps_object_hook(tp, LU_ID(__getattribute__), NULL, LU_ID(__getattr__))) {
+        return (void *)PyObject_GenericGetAttr;
+    }
+    if (thunk == (void *)lu_slot_tp_setattro
+        && keeps_object_hook(tp, LU_ID(__setattr__), LU_ID(__delattr__), NULL)) {
+        return (void *)PyObject_GenericSetAttr;
+    }
+    return thunk;
 }
 
 static void *
@@ -726,7 +759,7 @@ lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from)
     case 1:
         value = s->thunk == (void *)slot_tp_new && (tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)
             ? (void *)slot_tp_new_builtin
-            : tp == &PyBaseObject_Type ? object_thunk(s->thunk) : s->thunk;
+            : tp == &PyBaseObject_Type ? object_thunk(s->thunk) : attribute_thunk(tp, s->thunk);
         break;
     case 2: {
         char *src = from != NULL ? slot_base(from, s->where, 0) : NULL;

@@ -446,3 +446,67 @@ PyTime_AsSecondsDouble(PyTime_t t)
     }
     return d;
 }
+
+/* PyTime_t arithmetic of Python/pytime.c, clamped on overflow. ROUND is
+   _PyTime_round_t: floor, ceiling, half-even, up (away from zero). */
+static PyTime_t
+pytime_divide_round_up(PyTime_t t, PyTime_t k)
+{
+    if (t >= 0) {
+        return t > PyTime_MAX - (k - 1) ? PyTime_MAX / k : (t + k - 1) / k;
+    }
+    return t < PyTime_MIN + (k - 1) ? PyTime_MIN / k : (t - (k - 1)) / k;
+}
+
+static PyTime_t
+pytime_divide(PyTime_t t, PyTime_t k, int round)
+{
+    switch (round) {
+    case 2: {
+        PyTime_t x = t / k, r = t % k, abs_r = r < 0 ? -r : r;
+        if (abs_r > k / 2 || (abs_r == k / 2 && (x & 1))) {
+            x += t >= 0 ? 1 : -1;
+        }
+        return x;
+    }
+    case 1:
+        return t >= 0 ? pytime_divide_round_up(t, k) : t / k;
+    case 0:
+        return t >= 0 ? t / k : pytime_divide_round_up(t, k);
+    default:
+        return pytime_divide_round_up(t, k);
+    }
+}
+
+LU_EXPORT PyTime_t
+_PyTime_AsMilliseconds(PyTime_t t, int round)
+{
+    return pytime_divide(t, 1000000, round);
+}
+
+LU_EXPORT PyTime_t
+_PyTime_AsMicroseconds(PyTime_t t, int round)
+{
+    return pytime_divide(t, 1000, round);
+}
+
+/* A deadline TIMEOUT from now on the monotonic clock, and the time left
+   until DEADLINE. */
+LU_EXPORT PyTime_t
+_PyDeadline_Init(PyTime_t timeout)
+{
+    PyTime_t now = clock_ns(CLOCK_MONOTONIC);
+    if (timeout > 0 && now > PyTime_MAX - timeout) {
+        return PyTime_MAX;
+    }
+    if (timeout < 0 && now < PyTime_MIN - timeout) {
+        return PyTime_MIN;
+    }
+    return now + timeout;
+}
+
+LU_EXPORT PyTime_t
+_PyDeadline_Get(PyTime_t deadline)
+{
+    return deadline - clock_ns(CLOCK_MONOTONIC);
+}

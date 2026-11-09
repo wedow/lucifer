@@ -1014,6 +1014,16 @@ class BytesIO(_BufferedIOBase):
         return True
 
 
+def _size_arg(size):
+    """_Py_convert_optional_to_ssize_t: None is -1, else an index."""
+    if size is None:
+        return -1
+    try:
+        return size.__index__()
+    except AttributeError:
+        raise TypeError("argument should be integer or None, not '%s'" % type(size).__name__) from None
+
+
 class BufferedReader(_BufferedIOBase):
 
     """BufferedReader(raw[, buffer_size])
@@ -1053,8 +1063,9 @@ class BufferedReader(_BufferedIOBase):
         mode. If size is negative, read until EOF or until read() would
         block.
         """
-        if size is not None and size < -1:
-            raise ValueError("invalid number of bytes to read")
+        size = _size_arg(size)
+        if size < -1:
+            raise ValueError("read length must be non-negative or -1")
         with self._read_lock:
             return self._read_unlocked(size)
 
@@ -2944,17 +2955,9 @@ class StringIO(_TextIOBase):
         self._write(s)
         return len(s)
 
-    def _size_arg(self, size):
-        if size is None:
-            return -1
-        try:
-            return size.__index__()
-        except AttributeError:
-            raise TypeError("argument should be integer or None, not '%s'" % type(size).__name__) from None
-
     def read(self, size=-1):
         self._checkClosed()
-        size = self._size_arg(size)
+        size = _size_arg(size)
         buffer = self._realize()
         if self._pos >= len(buffer):
             return ''
@@ -2981,7 +2984,7 @@ class StringIO(_TextIOBase):
 
     def readline(self, size=None):
         self._checkClosed()
-        size = self._size_arg(size)
+        size = _size_arg(size)
         buffer = self._realize()
         if self._pos >= len(buffer):
             return ''
@@ -3028,7 +3031,7 @@ class StringIO(_TextIOBase):
 
     def truncate(self, pos=None):
         self._checkClosed()
-        pos = self._pos if pos is None else self._size_arg(pos)
+        pos = self._pos if pos is None else _size_arg(pos)
         if pos < 0:
             raise ValueError("Negative size value %d" % pos)
         buffer = self._realize()

@@ -189,7 +189,19 @@ The decision comes from data: see §10 for the startup experiment.
   two-word preheader, so `_PyObject_GetDictPtr` and `tp_dictoffset == -1` behave
   as in CPython. Attribute values sit inline behind shared keys. Extensions reach
   them only through functions, so the JIT may use shape-guarded fixed offsets there
-  (the donor's flat-layout idea where the ABI allows it).
+  (the donor's flat-layout idea where the ABI allows it). A class's table takes 30
+  names or its static attributes, and an instance's room follows CPython's split
+  values (`_PyDict_NewKeysForClass`): names present plus a usable count each new
+  instance takes one from, so a name added later still fits the instances made
+  before it. An instance that gets its names out of the class's order keeps an
+  order record after its words instead of moving to a dict
+  (`runtime/object/attrs.c`).
+- **Attribute hooks.** A class that keeps object's `__getattribute__` (and has
+  no `__getattr__`), or object's `__setattr__` and `__delattr__`, gets
+  `PyObject_GenericGetAttr` (`PyObject_GenericSetAttr`) in its slot, as CPython's
+  `update_one_slot` installs the specific function; those answer in C where no
+  Python runs and call the kernel otherwise. C tests the slot instead of looking
+  the hooks up on each access.
 - **Static data.** All 215 exported data objects (`PyFloat_Type`,
   `_Py_NoneStruct`, `PyExc_*`, small-int cache −5..256, …) are statically
   initialized immortal C objects in `runtime/types/static.c`. They have the oracle's
@@ -644,6 +656,12 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    `__new__` is a kernel function of its own and whose `__init__` is
    object's (str, int, bytes, tuple, range) returns what `__new__`
    returns, so its call is a call of `__new__` with the class first. A
+   class whose `__new__` is its builtin base's kernel function (list, set,
+   bytearray, exceptions and their subclasses) and whose `__init__` is a
+   Python function or the base's own is made by a call of that `__new__`,
+   which raises at the call, and its `__init__` inlines under the made
+   frame of `type.__call__` as above (after `call_special` for a kernel
+   one). A
    call with
    keywords of a function or class the code knows binds the keywords to
    the parameters at compile time, defaults and keyword-only defaults as
@@ -652,7 +670,11 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    through an instance of a known type, is its callable, guarded, with the
    class as a classmethod's self.
 2. **Guards.** Type version, keys version, function version, global watcher tag,
-   value range. Effects are explicit per Python operation: descriptors,
+   value range. An attribute load or store site that meets several classes
+   keeps a polymorphic cache of up to four shapes, fed by the generic path of
+   a root unit and by the interpreter's generic loads and stores, so that a
+   frame inlined where the generic path cannot run tests those shapes and
+   leaves only on others. Effects are explicit per Python operation: descriptors,
    `__eq__`/`__hash__` callbacks, C calls and allocation can all reenter.
 3. **Representation.** Unboxing, escape analysis and scalar replacement (§4.5);
    ownership-based refcount elision (Cinder precedent, research 01 §5). A

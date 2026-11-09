@@ -516,10 +516,11 @@ probe_native(PyDictKeysObject *dk, PyObject *key, Py_hash_t *hash, int locked)
 }
 
 int
-lu_dict_find_native(PyObject *d, PyObject *key, PyObject **value)
+lu_dict_find_lockfree(PyObject *d, PyObject *key, PyObject **value, PyObject **stale)
 {
     PyDictObject *mp = (PyDictObject *)d;
     Py_hash_t hash;
+    *stale = NULL;
     /* One table for the probe and the read, which a resize may replace. */
     PyDictKeysObject *dk = __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE);
     Py_ssize_t ix = probe_native(dk, key, &hash, 0);
@@ -535,8 +536,24 @@ lu_dict_find_native(PyObject *d, PyObject *key, PyObject **value)
             *value = v;
             return 1;
         }
-        Py_XDECREF(v);
+        *stale = v;
     }
+    return -2;
+}
+
+int
+lu_dict_find_native(PyObject *d, PyObject *key, PyObject **value)
+{
+    PyDictObject *mp = (PyDictObject *)d;
+    PyObject *stale;
+    int found = lu_dict_find_lockfree(d, key, value, &stale);
+    Py_XDECREF(stale);
+    if (found != -2) {
+        return found;
+    }
+    Py_hash_t hash;
+    PyDictKeysObject *dk;
+    Py_ssize_t ix;
     int result = -1;
     Py_BEGIN_CRITICAL_SECTION(d);
     dk = mp->ma_keys;

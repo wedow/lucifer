@@ -212,3 +212,9 @@ ring_type	runtime/prim/deque.c	the deque's ring buffer, a private static type co
 readline_lock	runtime/capi/myreadline.c	_PyOS_ReadlineLock: one readline at a time across threads
 stress_calls	-	per thread (its TLS symbol has no line): calls from inlined frames counted for -X lucifer_stress=deopt:N (runtime/jit/deopt.c)
 kept_by_stress	-	per thread (its TLS symbol has no line): the last call from an inlined frame kept its frames only for deopt:N, so its exit counts as a stress exit (runtime/jit/deopt.c)
+picklebuf_methods	runtime/object/picklebuf.c	pickle.PickleBuffer's PyMethodDef table, never written; the API takes it non-const
+picklebuf_as_buffer	runtime/object/picklebuf.c	pickle.PickleBuffer's PyBufferProcs, never written; tp_as_buffer takes it non-const
+socket_base_members	runtime/prim/module.c	_lucifer.socket_base's PyMemberDef table, never written; the API takes it non-const
+socket_base_getset	runtime/prim/module.c	_lucifer.socket_base's PyGetSetDef table, never written; the API takes it non-const
+socket_base_slots	runtime/prim/module.c	_lucifer.socket_base's PyType_Slot table, never written; the API takes it non-const
+socket_base_spec	runtime/prim/module.c	_lucifer.socket_base's PyType_Spec, never written; the API takes it non-const

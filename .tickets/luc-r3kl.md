@@ -1,6 +1,6 @@
 ---
 id: luc-r3kl
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-07T18:46:10Z
@@ -12,3 +12,9 @@ tags: [bench, corpus]
 
 pyperformance typing_runtime_protocols fails with TypeError: Protocols with non-method members don't support issubclass(). Non-method members: 'x' (typing.py __subclasscheck__), where CPython 3.14t completes. Reproduce with build/corpus/site/pyperformance/data-files/benchmarks/bm_typing_runtime_protocols/run_benchmark.py --worker -l 1 -w 0 -n 1 under PYTHONPATH=build/corpus/site. Corpus: tools/bench/corpus.
 
+
+## Notes
+
+**2026-11-09T00:33:44Z**
+
+Fixed on luc-mods: _abc is a builtin port of Modules/_abc.c, whose elided frames make abc the caller typing expects. typing_runtime_protocols passes. tests/kernel/protocol_data_members.py.

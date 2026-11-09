@@ -109,6 +109,8 @@ lu_carrier_bind(void)
         pthread_attr_getstack(&attr, &addr, &size);
         pthread_attr_destroy(&attr);
         c->jit_stack_floor = (char *)addr + LU_JIT_STACK_RESERVE;
+        c->stack_base = (uintptr_t)addr;
+        c->stack_top = (uintptr_t)addr + size;
     }
     else {
         c->jit_stack_floor = (char *)UINTPTR_MAX;       /* compiled code makes no calls */

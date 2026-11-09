@@ -20,6 +20,7 @@
 #include "interp/code.h"
 #include "interp/exceptions.h"
 #include "prim/prim.h"
+#include "object/dict.h"
 
 #include <string.h>
 
@@ -207,6 +208,7 @@ lu_type_assign_version(PyTypeObject *tp)
     PyMutex_Lock(&_PyRuntime.type_lock);
     int r = assign_version(tp);
     PyMutex_Unlock(&_PyRuntime.type_lock);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);    /* the tag before the caller's walk (lu_type_modified) */
     return r;
 }
 
@@ -278,11 +280,21 @@ clear_versions(PyTypeObject *tp)
 void
 lu_type_modified(PyTypeObject *tp)
 {
+    PyInterpreterState *interp = PyInterpreterState_Get();
     for (int i = 0; i < LU_MAX_WATCHERS; i++) {
-        if (PyInterpreterState_Get()->type_watchers[i] != NULL) {
+        if (interp->type_watchers[i] != NULL) {
             notify_modified(tp);
             break;
         }
+    }
+    /* A type without a tag has subclasses without one: nothing to take
+       back, and no lock. The fence orders the change before the load, as
+       assign_version's orders the tag before the walk that follows it: a
+       tag this load misses is assigned after the change, and its walk sees
+       the change. */
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    if (__atomic_load_n(&tp->tp_version_tag, __ATOMIC_RELAXED) == 0) {
+        return;
     }
     PyMutex_Lock(&_PyRuntime.type_lock);
     clear_versions(tp);
@@ -358,11 +370,13 @@ PyType_Unwatch(int id, PyObject *obj)
 
 /* The walk of the MRO: the first dict that has the name, as a new reference.
    Another thread may replace the MRO meanwhile (type_set_mro). The replaced
-   tuple is released only after a QSBR grace period, and nothing between the
-   load and the incref reports a quiescent state or detaches, so the tuple is
-   alive at the incref. The walk keeps that reference, since a dict lookup
-   that waits for the dict's lock detaches, and a detached carrier holds
-   nothing as far as QSBR knows. */
+   tuple is released only after a QSBR grace period, and the walk's
+   lock-free lookups report no quiescent state, detach or release anything,
+   so the tuple stays alive without a reference: no atomic on a tuple every
+   thread shares. A lookup that needs the dict's lock (it may wait, and a
+   waiting carrier detaches, which QSBR counts as holding nothing) first
+   takes a reference to the tuple, still alive then, and the walk goes on
+   with it. */
 static PyObject *
 lookup_in_mro(PyTypeObject *tp, PyObject *name)
 {
@@ -377,14 +391,25 @@ lookup_in_mro(PyTypeObject *tp, PyObject *name)
         }
         return NULL;
     }
-    Py_INCREF(mro);
     PyObject *v = NULL;
-    for (Py_ssize_t i = 0; v == NULL && i < PyTuple_GET_SIZE(mro); i++) {
-        PyObject *dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i));
-        v = dict != NULL ? lu_ns_get(dict, name) : NULL;
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); i++) {
+        PyObject *dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i)), *stale;
+        int found = dict != NULL ? lu_dict_find_lockfree(dict, name, &v, &stale) : 0;
+        if (found == 1) {
+            return v;
+        }
+        if (found == -2) {
+            Py_INCREF(mro);
+            Py_XDECREF(stale);
+            for (v = NULL; v == NULL && i < PyTuple_GET_SIZE(mro); i++) {
+                dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i));
+                v = dict != NULL ? lu_ns_get(dict, name) : NULL;
+            }
+            Py_DECREF(mro);
+            return v;
+        }
     }
-    Py_DECREF(mro);
-    return v;
+    return NULL;
 }
 
 /* The walk of the MRO, its reference dropped at once when the caller only
@@ -416,12 +441,15 @@ type_lookup(PyTypeObject *tp, PyObject *name, int take)
         && PyUnicode_CheckExact(name) && PyUnicode_GET_LENGTH(name) <= MCACHE_MAX_ATTR_SIZE) {
         lu_type_assign_version(tp);
     }
-    struct _is *interp = PyInterpreterState_Get();
     uint32_t version = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE);
+    if (version == 0) {
+        return walk(tp, name, take);
+    }
+    struct _is *interp = PyInterpreterState_Get();
     /* A type's tag changes whenever it or a base changes, and interned names
        are immortal: an entry for (tag, name) cannot go stale. Before the
        kernel has booted, static types change without a tag change. */
-    if (version == 0 || !interp->specializing || tp->tp_mro == NULL
+    if (!interp->specializing || tp->tp_mro == NULL
         || !PyUnicode_CheckExact(name) || !PyUnicode_CHECK_INTERNED(name)) {
         return walk(tp, name, take);
     }
@@ -584,8 +612,9 @@ static PyGetSetDef subtype_getsets_full[] = {
 PyObject *
 PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
 {
+    Py_ssize_t room = lu_inline_take_room(tp);
     size_t size = (size_t)tp->tp_basicsize + (size_t)(nitems + 1) * (size_t)tp->tp_itemsize
-        + lu_inline_values_size(tp);
+        + lu_inline_room_size(room);
     size_t presize = preheader_size(tp);
     int gc = (tp->tp_flags & Py_TPFLAGS_HAVE_GC) != 0;
     char *mem = gc ? lu_gc_alloc(tp, size, presize) : NULL;
@@ -599,6 +628,9 @@ PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
     memset(mem - presize, 0, presize + size);
     PyObject *op = (PyObject *)mem;
     PyObject_Init(op, tp);
+    if (room > 0) {
+        op->ob_flags |= lu_inline_room_flags(tp, room);
+    }
     if (tp->tp_itemsize != 0) {
         Py_SET_SIZE(op, nitems);
     }
@@ -775,6 +807,24 @@ lu_type_add_descriptors(PyTypeObject *tp)
     return 0;
 }
 
+/* A runtime type's C instance methods (tp_methods), inserted natively: the
+   kernel's dict functions are not up when the static types are readied. */
+static int
+add_static_methods(PyTypeObject *tp, PyObject *dict)
+{
+    for (PyMethodDef *ml = tp->tp_methods; ml != NULL && ml->ml_name != NULL; ml++) {
+        PyObject *d = lu_descr_new_method(tp, ml);
+        PyObject *name = d != NULL ? PyUnicode_InternFromString(ml->ml_name) : NULL;
+        int err = name == NULL || lu_ns_insert(dict, name, d) < 0;
+        Py_XDECREF(name);
+        Py_XDECREF(d);
+        if (err) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 /* tp_free of a class: what a base's dealloc calls last, which must know the preheader. */
 static void
 heap_free(void *self)
@@ -859,9 +909,13 @@ lu_types_init(PyInterpreterState *interp)
         if (state->tp_dict != NULL) {
             continue;
         }
-        if ((state->tp_dict = PyDict_New()) == NULL
-            || lu_ns_insert(state->tp_dict, LU_ID(__doc__), Py_None) < 0
-            || lu_type_add_descriptors(*t) < 0) {
+        /* Kernel Python fills most; a type written in C has its methods and doc. */
+        PyObject *doc = (*t)->tp_doc != NULL ? PyUnicode_FromString((*t)->tp_doc) : Py_NewRef(Py_None);
+        int err = doc == NULL || (state->tp_dict = PyDict_New()) == NULL
+            || lu_ns_insert(state->tp_dict, LU_ID(__doc__), doc) < 0
+            || lu_type_add_descriptors(*t) < 0 || add_static_methods(*t, state->tp_dict) < 0;
+        Py_XDECREF(doc);
+        if (err) {
             return -1;
         }
     }
@@ -1874,12 +1928,22 @@ prim_type_can_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return bool_of(((PyTypeObject *)args[0])->tp_new != NULL);
 }
 
+/* type_has_sq_item(t): t has the sequence protocol's sq_item (PySequence_Check),
+   which a mapping-only extension type lacks though it has __getitem__. */
+static PyObject *
+prim_type_has_sq_item(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); TYPE_ARG(0);
+    PySequenceMethods *sq = ((PyTypeObject *)args[0])->tp_as_sequence;
+    return bool_of(sq != NULL && sq->sq_item != NULL);
+}
+
 /* type_new_layout(meta, name, bases, ns) */
 static PyObject *
 prim_type_new_layout(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(4); TYPE_ARG(0);
-    if (!PyUnicode_Check(args[1]) || !PyTuple_Check(args[2]) || !PyDict_CheckExact(args[3])) {
+    if (!PyUnicode_Check(args[1]) || !PyTuple_Check(args[2]) || !PyDict_Check(args[3])) {
         lu_err_format(PyExc_SystemError, "type_new_layout(meta, str, tuple, dict)");
         return NULL;
     }
@@ -2063,7 +2127,9 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
                       owner->tp_name, tp->tp_name, tp->tp_name, owner->tp_name);
         return -1;
     }
-    while (staticbase != NULL && (staticbase->tp_flags & Py_TPFLAGS_HEAPTYPE)) {
+    /* Classes are skipped, not an extension's heap type that refuses
+       instances (Py_TPFLAGS_DISALLOW_INSTANTIATION leaves its tp_new NULL). */
+    while (staticbase != NULL && (staticbase->tp_flags & Py_TPFLAGS_HEAPTYPE) && staticbase->tp_new != NULL) {
         staticbase = staticbase->tp_base;
     }
     /* Exception types share one allocation rule: a static exception class
@@ -2501,7 +2567,7 @@ PyMethodDef lu_prim_type_methods[] = {
     PURE(static_type),
     PURE(type_lookup), PURE(type_dict), PURE(type_mro), PURE(type_bases), PURE(type_base),
     FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag), FAST(type_set_flag), FAST(type_layout), FAST(object_size),
-    FAST(type_can_new), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
+    FAST(type_can_new), FAST(type_has_sq_item), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
     FAST(type_subclasses), FAST(type_modified), PURE(is_subtype), FAST(alloc), FAST(new_check),
     PURE(type_tp_name), FAST(type_text_signature), FAST(type_static_module), PURE(size),
     PURE(truth_exact), PURE(instance_dict), FAST(instance_load), FAST(instance_store), FAST(set_class), FAST(caller_globals), FAST(super_args),

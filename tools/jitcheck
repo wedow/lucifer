@@ -58,6 +58,25 @@ require that a count of the tier's does not grow with the iterations:
          subclass of str), with and without keywords: the class calls
          that reach the generic call of a class (-X lucifer_jit_stats'
          whynot type). Each calls __new__ itself.
+  attrorder tests/kernel/jit_attr_order.py, whose hot loop reads and
+         writes attributes of instances of one class that got their names
+         in different orders: guard and side exits, and entries left to
+         the interpreter while a unit's entry waits. Each instance keeps
+         its values in line, where the class's sites read them.
+  kclasses tests/kernel/jit_kernel_class_calls.py, whose hot loop calls
+         classes whose __new__ is a builtin base's kernel function and
+         whose __init__ is the base's or a Python function (list, set,
+         bytearray, exceptions, list subclasses): the class calls that
+         reach the generic call of a class (whynot type). Each makes the
+         instance by __new__ and inlines __init__.
+  inlinedpoly tests/kernel/jit_inlined_poly_loads.py, whose hot method,
+         inlined, loads attributes of instances of three classes: entries,
+         direct and compiled calls, guard and side exits. The interpreter
+         feeds the site's polymorphic cache, which the inline tests.
+  stritems tests/kernel/jit_str_items.py, whose hot method reads one
+         character of a str at a time through an attribute: the calls
+         that reach a callee compiled code refuses (-X lucifer_jit_stats'
+         whynot object, here str's __getitem__). Each inlines it.
   perfcalls  the compiled lane's program under -X perf, whose trampoline
          gives interpreted frames perf symbols: compiled code still calls
          compiled callees itself (they have symbols of their own): entries
@@ -183,6 +202,12 @@ GROWTH = {
     'kwcalls': ('jit_kw_calls.py', r'jit: executed:.* call_kw (\d+)', 0),
     'cmethods': ('jit_class_methods.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'newcalls': ('jit_new_calls.py', r'jit: whynot kw \d+, star \d+, type (\d+)', 0),
+    'attrorder': ('jit_attr_order.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
+                  r'|jit: entries waited (\d+)', 0),
+    'kclasses': ('jit_kernel_class_calls.py', r'jit: whynot kw \d+, star \d+, type (\d+)', 0),
+    'inlinedpoly': ('jit_inlined_poly_loads.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
+                    r'|exits guard (\d+) stress \d+ poll \d+ side (\d+)', 0),
+    'stritems': ('jit_str_items.py', r'jit: whynot kw \d+, star \d+, type \d+, builtin \d+, object (\d+)', 0),
     'perfcalls': ('jit_compiled_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0, ('-X', 'perf')),
     'super': ('jit_super.py', r'jit: entries .* side (\d+)', 0),
     'inline': ('jit_inline_paths.py', r'jit: C paths list_item (\d+), tuple_item (\d+), list_store (\d+), '

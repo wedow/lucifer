@@ -2,7 +2,7 @@
 id: luc-o8i6
 status: open
 deps: []
-links: [luc-uexr, luc-m3wi, luc-p2yt, luc-9ags]
+links: [luc-uexr, luc-m3wi, luc-p2yt, luc-9ags, luc-j2vs, luc-4yfw, luc-n6yj, luc-6ljp, luc-r1pk, luc-mltz, luc-xtmp, luc-po0x]
 created: 2026-11-07T23:49:21Z
 type: task
 priority: 2
@@ -18,3 +18,7 @@ luc-ibwc census, tomli_loads: 42M calls per run of wrapper descriptors through c
 **2026-11-08T14:34:27Z**
 
 luc-p2yt's per-callee census: the wrapper-descriptor calls are kernel wrappers (kernel_wrapperbase) that call_special reaches with a descriptor only known at run time: h_call, lu_kernel_target, lu_native_call's chain, then the kernel function's direct entry. tomli_loads' 39.5M str.__getitem__ come from _sre's interpreted matcher (the regex lane's), pprint's 46M are wrapper_descriptor.__get__ (14.4M), frozenset.__contains__, type.__getattribute__ and int.__repr__, raytrace's 11M float operators from binary_op. The dispatch costs about 1-2% of those programs; the lever is knowing the operand's type where binary_op and getattr inline (operand speculation), not the call path.
+
+**2026-11-08T22:04:06Z**
+
+luc-r1pk: binary_op's subscript of an exact str by an int now inlines str's own __getitem__ (str_item in ssa_build.c), which removed AWFY Json's 51.6M refused calls of the str.__getitem__ wrapper descriptor (Json 0.74x master's time, 1.17x CPython 3.14t from 1.56x). The general case (call_special of a descriptor known only at run time) is open.

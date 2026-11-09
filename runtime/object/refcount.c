@@ -401,3 +401,20 @@ _Py_SetImmortal(PyObject *op)
 {
     lu_set_immortal(op);
 }
+
+/* The stable ABI's function forms of Py_TYPE and Py_REFCNT (limited API
+   3.14 and newer calls them): last in the file, as they replace the macros. */
+#undef Py_TYPE
+#undef Py_REFCNT
+
+PyTypeObject *
+Py_TYPE(PyObject *ob)
+{
+    return _Py_TYPE(ob);
+}
+
+Py_ssize_t
+Py_REFCNT(PyObject *ob)
+{
+    return _Py_REFCNT(ob);
+}

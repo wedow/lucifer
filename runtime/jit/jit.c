@@ -159,6 +159,7 @@ bump(unsigned long *c)
 static void
 bump_entries(struct lu_unit *u)
 {
+    count(&u->entered, 1);
     if (__atomic_load_n(&u->entries, __ATOMIC_RELAXED) < ENTRIES_SEEN) {
         bump(&u->entries);
     }
@@ -1370,6 +1371,7 @@ lu_jit_pic(PyCodeObject *code, int pc, int create)
             struct lu_pic *pic = calloc(1, sizeof(struct lu_pic));
             pic->code = code;
             pic->method = lu_code_start(code)[pc].op.arg & 1;
+            pic->store = lu_base_opcode(code, pc) == STORE_ATTR;
             __atomic_store_n(&jc->pics[pc], pic, __ATOMIC_RELEASE);
         }
         PyMutex_Unlock(&_PyRuntime.pic_lock);
@@ -1395,16 +1397,22 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
     /* What the interpreter's specializer makes of this owner, on a site
        of its own. */
     lu_codeunit site[1 + 9 + 1] = { 0 };
-    site[0].op.code = LOAD_ATTR;
+    site[0].op.code = pic->store ? STORE_ATTR : LOAD_ATTR;
     site[0].op.arg = (uint8_t)pic->method;
-    lu_specialize_load_attr(owner, site, name);
+    if (pic->store) {
+        lu_specialize_store_attr(owner, site, name);
+    }
+    else {
+        lu_specialize_load_attr(owner, site, name);
+    }
     int op = site[0].op.code;
     if (op != LOAD_ATTR_INSTANCE_VALUE && op != LOAD_ATTR_METHOD_NO_DICT && op != LOAD_ATTR_METHOD_WITH_VALUES
-        && op != LOAD_ATTR_NONDESCRIPTOR_NO_DICT && op != LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES) {
+        && op != LOAD_ATTR_NONDESCRIPTOR_NO_DICT && op != LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES
+        && op != STORE_ATTR_INSTANCE_VALUE) {
         return;
     }
-    struct lu_pic_entry e = { lu_cache_load32(site + 1 + LA_VERSION), (uint16_t)op,
-                              lu_cache_load(site + 1 + LA_INDEX), lu_cache_load_ptr(site + 1 + LA_DESCR) };
+    struct lu_pic_entry e = { lu_cache_load32(site + 1 + LA_VERSION), (uint16_t)op, lu_cache_load(site + 1 + LA_INDEX),
+                              pic->store ? NULL : lu_cache_load_ptr(site + 1 + LA_DESCR) };
     int added = 0;
     PyMutex_Lock(&_PyRuntime.pic_lock);
     n = pic->n;
@@ -1427,6 +1435,19 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
         for (struct lu_unit *u = __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
             kill(jc, u);
         }
+    }
+}
+
+void
+lu_jit_pic_note_interpreted(PyCodeObject *code, int pc, PyObject *owner, PyObject *name)
+{
+    struct lu_jit_code *jc = state_of(code);
+    if (jc == NULL || __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE) == NULL) {
+        return;
+    }
+    struct lu_pic *pic = lu_jit_pic(code, pc, 1);
+    if (pic != NULL) {
+        lu_jit_pic_note(pic, owner, name);
     }
 }
 
@@ -1651,7 +1672,7 @@ lu_jit_report(void)
             all += u->counts[k];
         }
         if (all >= 1000) {
-            fprintf(stderr, "jit: unit %s entries %lu guards %lu:", u->stats_name, u->entries, guards);
+            fprintf(stderr, "jit: unit %s entries %lu guards %lu:", u->stats_name, u->entered, guards);
             for (int k = 0; k < CNT_COUNT; k++) {
                 if (u->counts[k]) {
                     fprintf(stderr, " %s %lu", lu_count_names[k], u->counts[k]);

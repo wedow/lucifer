@@ -568,6 +568,7 @@ cfunction_traverse(PyObject *op, visitproc visit, void *arg)
 static void
 cfunction_dealloc(PyObject *op)
 {
+    lu_clear_weakrefs(op);
     if (Py_IS_TYPE(op, &PyCMethod_Type)) {
         Py_XDECREF(((PyCMethodObject *)op)->mm_class);
     }
@@ -1006,12 +1007,14 @@ lu_function_init(void)
     PyCFunction_Type.tp_vectorcall_offset = offsetof(PyCFunctionObject, vectorcall);
     PyCFunction_Type.tp_dealloc = cfunction_dealloc;
     PyCFunction_Type.tp_traverse = cfunction_traverse;
+    PyCFunction_Type.tp_weaklistoffset = offsetof(PyCFunctionObject, m_weakreflist);
     /* A METH_METHOD function's object: the same, with its defining class. */
     PyCMethod_Type.tp_basicsize = sizeof(PyCMethodObject);
     PyCMethod_Type.tp_flags |= flags;
     PyCMethod_Type.tp_vectorcall_offset = offsetof(PyCFunctionObject, vectorcall);
     PyCMethod_Type.tp_dealloc = cfunction_dealloc;
     PyCMethod_Type.tp_traverse = cfunction_traverse;
+    PyCMethod_Type.tp_weaklistoffset = offsetof(PyCFunctionObject, m_weakreflist);
     PyCell_Type.tp_basicsize = sizeof(PyCellObject);
     PyCell_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyCell_Type.tp_dealloc = cell_dealloc;
