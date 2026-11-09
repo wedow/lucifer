@@ -2,7 +2,7 @@
 attribute lookup that falls back to the module's __getattr__ (PEP 562)."""
 
 from _lucifer import (
-    error, str_join, kind, static_type, alloc, instance_dict, ns_get, module_init, import_state,
+    error, attribute_error, str_join, kind, static_type, alloc, instance_dict, ns_get, module_init, import_state,
     kernel_get, MISSING, type_dict,
 )
 from _lucifer import _boot, object as _object
@@ -49,7 +49,7 @@ def _module_getattr(self, name, suppress=False):
             text = str_join('', ("module '", module_name, "' has no attribute '", name, "'"))
     else:
         text = str_join('', ("module has no attribute '", name, "'"))
-    raise AttributeError(text, name=name, obj=self)
+    attribute_error(text, name, self)
 
 
 @kernel_type(static_type('module'))

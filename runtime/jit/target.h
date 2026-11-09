@@ -332,6 +332,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(call_ex) \
     X(call_forward) \
     X(dict_merge) \
+    X(dict_update) \
     X(catch) \
     X(push_exc_info) \
     X(pop_except) \

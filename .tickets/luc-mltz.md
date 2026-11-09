@@ -12,3 +12,9 @@ tags: [jit, perf]
 
 luc-r1pk lowers positional calls of classes whose __new__ is a builtin base's kernel function (list, set, bytearray, exceptions). A call with keywords of such a class (the kernel's own AttributeError(text, name=..., obj=...) from _no_attribute, about 280K per Flask census run) still reaches h_call and type.__call__: bind_keywords does not bind into a **kwds parameter, which the kernel exception initializers take. Bind keywords into a made dict (or a virtual one) for kernel __init__ functions with **kwds, then reuse class_call's kernel path.
 
+
+## Notes
+
+**2026-11-09T04:45:21Z**
+
+luc-vxsk: the kernel's own AttributeError(text, name=, obj=) no longer makes a keyword class call: a failed lookup raises it from a C primitive (_lucifer.attribute_error) with name and obj set (getattr miss caught: 7.8 us -> 1.6 us; CPython 0.48 us). A positional form made by the lowered class call aborted deopt stress (luc-nnl3). Keyword calls into **kwds parameters in general are still unbound.

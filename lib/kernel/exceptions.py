@@ -46,9 +46,10 @@ def _type_name(obj):
     return type_tp_name(type(obj))
 
 
-def _no_keywords(name, kwds):
+def _no_keywords(cls, kwds):
+    """The refusal of keywords; cls's name is made only for the message."""
     if kwds:
-        error(TypeError, str_join('', (name, '() takes no keyword arguments')))
+        error(TypeError, str_join('', (type_tp_name(cls), '() takes no keyword arguments')))
 
 
 def _store_keywords(self, cls, kwds, names):
@@ -66,7 +67,7 @@ def _store_keywords(self, cls, kwds, names):
 
 def _init(self, args, kwds):
     """BaseException_init."""
-    _no_keywords(_type_name(self), kwds)
+    _no_keywords(type(self), kwds)
     self.args = args
 
 
@@ -254,7 +255,7 @@ class OSError:
             self = alloc(cls, OSError)
             self.args = ()
             return self
-        _no_keywords(type_tp_name(cls), kwds)
+        _no_keywords(cls, kwds)
         errno, strerror, filename, filename2 = _oserror_args(args)
         if cls is OSError and errno is not MISSING and kind_int(errno):
             mapped = _errno_class(errno)
@@ -267,7 +268,7 @@ class OSError:
     def __init__(self, /, *args, **kwds):
         if not _use_init(type(self)):
             return None
-        _no_keywords(_type_name(self), kwds)
+        _no_keywords(type(self), kwds)
         errno, strerror, filename, filename2 = _oserror_args(args)
         _oserror_fill(self, args, errno, strerror, filename, filename2)
 
