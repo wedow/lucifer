@@ -3,6 +3,10 @@
 # typing's protocol checks see abc.ABCMeta as the caller of __subclasscheck__.
 # Py_TPFLAGS_SEQUENCE and _MAPPING are not set here: pattern matching asks the
 # collections.abc classes instead (lib/kernel/match.py).
+# The caches and the registry map a class's id to a weak reference to it: a
+# check is one int-keyed lookup and a dereference, where a set of weak
+# references makes one and hashes it per check. An entry leaves when its class
+# dies, and a stale id never matches: the reference must name the class asked.
 
 from _weakref import ref as _ref
 
@@ -26,27 +30,47 @@ def _get_impl(cls):
     return impl
 
 
+class _WeakIdSet:
+    """Classes held weakly, by identity."""
+    __slots__ = ('refs', '_selfref', '__weakref__')
+
+    def __init__(self):
+        self.refs = {}
+        self._selfref = _ref(self)
+
+    def __contains__(self, obj):
+        ref = self.refs.get(id(obj))
+        return ref is not None and ref() is obj
+
+    def __len__(self):
+        return len(self.refs)
+
+    def add(self, obj):
+        key, selfref = id(obj), self._selfref
+
+        def _destroy(ref):
+            owner = selfref()
+            if owner is not None and owner.refs.get(key) is ref:
+                del owner.refs[key]
+        self.refs[key] = _ref(obj, _destroy)
+
+    def clear(self):
+        self.refs.clear()
+
+    def refs_alive(self):
+        return {ref for ref in self.refs.values() if ref() is not None}
+
+
 def _in_weak_set(weak_set, obj):
-    if not weak_set:
-        return False
-    try:
-        return _ref(obj) in weak_set
-    except TypeError:
-        return False
+    return bool(weak_set) and obj in weak_set
 
 
 def _add_to_weak_set(impl, name, obj):
     weak_set = getattr(impl, name)
     if weak_set is None:
-        weak_set = set()
+        weak_set = _WeakIdSet()
         setattr(impl, name, weak_set)
-    set_ref = _ref(weak_set)
-
-    def _destroy(key):
-        live = set_ref()
-        if live is not None:
-            live.discard(key)
-    weak_set.add(_ref(obj, _destroy))
+    weak_set.add(obj)
 
 
 def _is_abstract(value):
@@ -140,7 +164,7 @@ def _abc_subclasscheck(self, subclass, /):
     if registry:
         if _in_weak_set(registry, subclass):
             return True
-        for rcls in frozenset(registry):
+        for rcls in registry.refs_alive():
             rcls = rcls()
             if rcls is not None and issubclass(subclass, rcls):
                 _add_to_weak_set(impl, '_abc_cache', subclass)
@@ -165,8 +189,8 @@ Return shallow copies of registry, of both caches, and
 negative cache version. Don't call this function directly,
 instead use ABC._dump_registry() for a nice repr."""
     impl = _get_impl(self)
-    return (set(impl._abc_registry or ()), set(impl._abc_cache or ()),
-            set(impl._abc_negative_cache or ()), impl._abc_negative_cache_version)
+    sets = (impl._abc_registry, impl._abc_cache, impl._abc_negative_cache)
+    return (*(s.refs_alive() if s is not None else set() for s in sets), impl._abc_negative_cache_version)
 
 
 def _reset_registry(self, /):

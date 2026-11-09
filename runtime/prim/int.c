@@ -1755,6 +1755,12 @@ prim_int_format(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return format_binary(view(args[0]), (int)base, args[2] == Py_True);
 }
 
+PyObject *
+lu_long_decimal(PyObject *v)
+{
+    return format_decimal(view(v));
+}
+
 /* The Unicode whitespace that int() reads as ASCII space. */
 static int
 is_unicode_space(Py_UCS4 c)

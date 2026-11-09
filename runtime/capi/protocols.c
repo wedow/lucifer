@@ -264,6 +264,12 @@ PyObject_DelAttrString(PyObject *o, const char *name)
 int
 PyObject_IsInstance(PyObject *inst, PyObject *cls)
 {
+    /* object_isinstance's answer for a plain class without asking it:
+       yes when the type says so; no needs __class__, which the kernel asks. */
+    if (Py_IS_TYPE(inst, (PyTypeObject *)cls)
+        || (PyType_CheckExact(cls) && PyType_IsSubtype(Py_TYPE(inst), (PyTypeObject *)cls))) {
+        return 1;
+    }
     PyObject *args[2] = { inst, cls };
     return as_bool(call_builtin("isinstance", args, 2));
 }
@@ -271,6 +277,11 @@ PyObject_IsInstance(PyObject *inst, PyObject *cls)
 int
 PyObject_IsSubclass(PyObject *derived, PyObject *cls)
 {
+    /* recursive_issubclass of two types, for a class whose metaclass is
+       type (no __subclasscheck__ of its own). */
+    if (PyType_CheckExact(cls) && PyType_Check(derived)) {
+        return PyType_IsSubtype((PyTypeObject *)derived, (PyTypeObject *)cls);
+    }
     PyObject *args[2] = { derived, cls };
     return as_bool(call_builtin("issubclass", args, 2));
 }
