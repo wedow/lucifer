@@ -3276,6 +3276,13 @@ op_FORMAT_SIMPLE: {
     if (PyUnicode_CheckExact(TOP())) {
         DISPATCH();
     }
+    if (PyLong_CheckExact(TOP())) {
+        SAVE_FRAME();
+        PyObject *s = lu_long_decimal(TOP());
+        ERROR_IF(s == NULL);
+        Py_SETREF(TOP(), s);
+        DISPATCH();
+    }
     kargs[0] = POP();
     kargs[1] = (PyObject *)&_PyRuntime.singletons.empty_str;
     nk = 2;

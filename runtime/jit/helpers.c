@@ -442,12 +442,16 @@ h_convert_value(PyObject *v, int64_t oparg)
     return lu_call_kernel(oparg == 1 ? LU_K_str : oparg == 2 ? LU_K_repr : LU_K_ascii, &v, 1);
 }
 
-/* FORMAT_SIMPLE (spec "") and FORMAT_WITH_SPEC; an exact str formats as itself. */
+/* FORMAT_SIMPLE (spec "") and FORMAT_WITH_SPEC; an exact str formats as
+   itself, an exact int as its decimal digits. */
 static PyObject *
 h_format(PyObject *v, PyObject *spec)
 {
     if (PyUnicode_CheckExact(v) && PyUnicode_GET_LENGTH(spec) == 0) {
         return Py_NewRef(v);
+    }
+    if (PyLong_CheckExact(v) && PyUnicode_GET_LENGTH(spec) == 0) {
+        return lu_long_decimal(v);
     }
     PyObject *args[2] = { v, spec };
     return lu_call_kernel(LU_K_format, args, 2);
