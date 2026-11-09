@@ -70,7 +70,9 @@ call_dunder_call(PyObject *callable, PyObject *const *args, size_t nargsf, PyObj
     if (descr != NULL && PyFunction_Check(descr)) {
         fn = descr;
     }
-    else if (descr != NULL) {
+    else if (descr != NULL && (Py_TYPE(descr)->tp_flags & Py_TPFLAGS_METHOD_DESCRIPTOR)) {
+        /* Only a method descriptor takes the object as self; a builtin
+           function stored as __call__ is no descriptor, and the slot calls it. */
         int found = lu_kernel_target(descr, &callable, 1, &target, &unused);
         if (found < 0) {
             Py_DECREF(descr);
