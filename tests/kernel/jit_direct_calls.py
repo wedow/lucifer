@@ -4,8 +4,11 @@
 # shows it. Closures (COPY_FREE_VARS before RESUME), arguments that are cells
 # (MAKE_CELL), bound methods, defaults, a callee that leaves its compiled code
 # at a changed type, one that raises, frames walked from inside the callee,
-# the recursion limit, and tracing turned on in the middle of a call.
+# the recursion limit, tracing turned on in the middle of a call, and a
+# callee that replaces its own code while it runs, then collects.
+import gc
 import sys
+import weakref
 
 N = 3000
 
@@ -133,6 +136,46 @@ def traced(n):
     return out, events
 
 
+def plain(n):
+    return -n
+
+
+rebind = [False]
+
+
+def rebinding(n):
+    # Every level but the first is a direct call. The innermost replaces
+    # the function's code and collects while its frame and its callers'
+    # still run the old code, which must stay alive: the traceback reads
+    # it after the collection and after other code took the memory.
+    if n == 0:
+        if rebind[0]:
+            old = weakref.ref(rebinding.__code__)
+            rebinding.__code__ = plain.__code__
+            gc.collect()
+            junk = [compile(f'x{i} = {i}', '<junk>', 'exec') for i in range(200)]
+            raise KeyError(len(junk), old() is not None)
+        return 0
+    return rebinding(n - 1) + 1
+
+
+def rebinds(n):
+    s = 0
+    for i in range(n):
+        s += rebinding(5)
+    rebind[0] = True
+    try:
+        rebinding(5)
+    except KeyError as e:
+        tb = e.__traceback__
+        names = []
+        while tb is not None:
+            names.append((tb.tb_frame.f_code.co_name, tb.tb_lineno))
+            tb = tb.tb_next
+        print('rebound', s, names)
+    print(rebinding(5), rebinding.__code__ is plain.__code__)
+
+
 print(drive(N))
 print(errors(N))
 print(changing(N))
@@ -142,3 +185,4 @@ for i in range(N):
 print(names)
 print(deep())
 print(traced(N))
+rebinds(N)

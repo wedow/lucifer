@@ -7,6 +7,8 @@ Suites:
                  a program's time is the sum over its pyperf benchmarks of the best value
   cli            real command-line programs over files from third_party/cpython;
                  a program's time is the best wall time of 3 runs after a warm-up run
+  cadence        scripts shipped in the cadence-net release (a numpy brain simulation),
+                 timed as cli programs; the lock unpacks the release tree beside SITE
 
 Every program runs as `COMMAND ARGS` with PYTHONPATH=SITE and nothing else changed.
 
@@ -56,6 +58,22 @@ CLI = {
     "pygments": ["-m", "pygments", "-l", "python", "-f", "html", "src/Lib/typing.py"],
     "markdown": ["-m", "markdown", "src/Lib/idlelib/NEWS2x.txt"],
 }
+# Scripts in the cadence-net release tree, which is GPL-3.0: fetched by the lock, never committed.
+# The examples run as shipped; the two benchmark chambers get one small cell of their grid.
+CADENCE = {
+    "continuing_brain": ["examples/continuing_brain.py"],
+    "walking_rhythm": ["examples/walking_rhythm.py"],
+    "walking_for_reward": ["examples/walking_for_reward.py"],
+    "bandit": ["benchmarks/extinction/bandit.py", "--thetas", "0.5", "--fails", "0", "--seeds", "0",
+               "--out", "/dev/stdout"],
+    "night_replay": ["benchmarks/replay/night_replay.py", "--world", "signal", "--settings", "defaults",
+                     "--seeds", "1", "--rounds", "1"],
+}
+
+
+def cadence_tree(site):
+    """Where the lock unpacked the cadence-net release (a vendored copy would live under third_party/)."""
+    return site.parent / "cadence-net"
 
 
 # --- installation -----------------------------------------------------------
@@ -74,10 +92,13 @@ def fetch(entry, cache):
 
 
 def install(entry, archive, site):
-    """A wheel unpacks into SITE; a pure-Python sdist contributes its one package directory."""
+    """A wheel unpacks into SITE; a pure-Python sdist contributes its one package directory,
+    and with "tree" its whole top directory too, as SITE/../NAME."""
     if "package" not in entry:
         with zipfile.ZipFile(archive) as wheel:
             for name in wheel.namelist():
+                if name.endswith("/"):
+                    continue
                 parts = name.split("/")
                 if parts[0].endswith(".data"):
                     if parts[1] not in ("purelib", "platlib"):
@@ -91,6 +112,9 @@ def install(entry, archive, site):
         sdist.extractall(temp, filter="data")
         package = Path(temp, entry["package"])
         shutil.copytree(package, site / package.name, dirs_exist_ok=True)
+        if "tree" in entry:
+            shutil.rmtree(site.parent / entry["name"], ignore_errors=True)
+            shutil.copytree(Path(temp, entry["tree"]), site.parent / entry["name"])
 
 
 def prepare(site, cache):
@@ -130,7 +154,8 @@ def pyperformance(site):
 
 def programs(site):
     return {**{f"pyperformance.{n}": ("pyperf", a) for n, a in pyperformance(site).items()},
-            **{f"cli.{n}": ("cli", a) for n, a in CLI.items()}}
+            **{f"cli.{n}": ("cli", a) for n, a in CLI.items()},
+            **{f"cadence.{n}": ("cli", [str(cadence_tree(site) / a[0]), *a[1:]]) for n, a in CADENCE.items()}}
 
 
 # --- measurement ------------------------------------------------------------

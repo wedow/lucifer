@@ -442,12 +442,16 @@ h_convert_value(PyObject *v, int64_t oparg)
     return lu_call_kernel(oparg == 1 ? LU_K_str : oparg == 2 ? LU_K_repr : LU_K_ascii, &v, 1);
 }
 
-/* FORMAT_SIMPLE (spec "") and FORMAT_WITH_SPEC; an exact str formats as itself. */
+/* FORMAT_SIMPLE (spec "") and FORMAT_WITH_SPEC; an exact str formats as
+   itself, an exact int as its decimal digits. */
 static PyObject *
 h_format(PyObject *v, PyObject *spec)
 {
     if (PyUnicode_CheckExact(v) && PyUnicode_GET_LENGTH(spec) == 0) {
         return Py_NewRef(v);
+    }
+    if (PyLong_CheckExact(v) && PyUnicode_GET_LENGTH(spec) == 0) {
+        return lu_long_decimal(v);
     }
     PyObject *args[2] = { v, spec };
     return lu_call_kernel(LU_K_format, args, 2);
@@ -1109,6 +1113,28 @@ h_dict_merge(PyObject *func, PyObject *dict, PyObject *update)
     return r == NULL ? -1 : 0;
 }
 
+/* DICT_UPDATE: dict.update(update) for {**update}, as the interpreter
+   runs it: str keys in place, anything else through the kernel. */
+static int
+h_dict_update(PyObject *dict, PyObject *update)
+{
+    if (PyDict_CheckExact(update) && lu_dict_str_keys(update)) {
+        int err = 0;
+        Py_ssize_t pos = 0;
+        PyObject *key, *value;
+        Py_BEGIN_CRITICAL_SECTION(update);
+        while (err == 0 && lu_ns_next(update, &pos, &key, &value)) {
+            err = lu_ns_insert(dict, key, value);
+        }
+        Py_END_CRITICAL_SECTION();
+        return err;
+    }
+    PyObject *args[2] = { dict, update };
+    PyObject *r = lu_call_kernel(LU_K_dict_update, args, 2);
+    Py_XDECREF(r);
+    return r == NULL ? -1 : 0;
+}
+
 /* BINARY_SLICE: container[start:stop]. Unless `generic`, it declines what
    needs the kernel, which runs Python. */
 static PyObject *
@@ -1124,6 +1150,27 @@ h_binary_slice(PyObject *container, PyObject *start, PyObject *stop, int64_t gen
     PyObject *args[2] = { container, PySlice_New(start, stop, NULL) };
     r = args[1] != NULL ? lu_call_kernel(LU_K_getitem, args, 2) : NULL;
     Py_XDECREF(args[1]);
+    return r;
+}
+
+/* BINARY_SLICE by machine-int bounds (luc-14n0): mode bit 0 or 1, the
+   start or the stop is None; bit 2, a container the native slice does not
+   take slices as h_binary_slice slices it, its bounds boxed. */
+static PyObject *
+h_binary_slice_raw(PyObject *container, int64_t start, int64_t stop, int64_t mode)
+{
+    PyObject *r = lu_slice_native_raw(container, start, stop, (int)(mode & 3));
+    if (r != NULL || PyErr_Occurred()) {
+        return r;
+    }
+    if (!(mode & 4)) {
+        return LU_JIT_DECLINED;
+    }
+    PyObject *so = mode & 1 ? Py_NewRef(Py_None) : PyLong_FromLongLong(start);
+    PyObject *eo = mode & 2 ? Py_NewRef(Py_None) : PyLong_FromLongLong(stop);
+    r = so != NULL && eo != NULL ? h_binary_slice(container, so, eo, 1) : NULL;
+    Py_XDECREF(so);
+    Py_XDECREF(eo);
     return r;
 }
 
@@ -1373,11 +1420,14 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_get_iter_seq] = { (void *)lu_get_iter_exact, "get_iter_seq", REP_OBJ, IF_RAISE, 1 },
     [H_binary_slice] = { (void *)h_binary_slice, "binary_slice", REP_OBJ, IF_RAISE | IF_PY, 4 },
     [H_slice_native] = { (void *)h_binary_slice, "slice_native", REP_OBJ, IF_RAISE, 4 },
+    [H_binary_slice_raw] = { (void *)h_binary_slice_raw, "binary_slice_raw", REP_OBJ, IF_RAISE | IF_PY, 4 },
+    [H_slice_native_raw] = { (void *)h_binary_slice_raw, "slice_native_raw", REP_OBJ, IF_RAISE, 4 },
     [H_store_slice] = { (void *)h_store_slice, "store_slice", REP_BIT, IF_RAISE | IF_PY, 4 },
     [H_call_kw] = { (void *)h_call_kw, "call_kw", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_call_ex] = { (void *)h_call_ex, "call_ex", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_call_forward] = { (void *)h_call_forward, "call_forward", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_dict_merge] = { (void *)h_dict_merge, "dict_merge", REP_BIT, IF_RAISE | IF_PY, 3 },
+    [H_dict_update] = { (void *)h_dict_update, "dict_update", REP_BIT, IF_RAISE | IF_PY, 2 },
     [H_catch] = { (void *)h_catch, "catch", REP_OBJ, IF_RAISE, 2 },
     [H_push_exc_info] = { (void *)h_push_exc_info, "push_exc_info", REP_OBJ, 0, 1 },
     [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, IF_SEEN, 1 },

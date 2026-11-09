@@ -343,6 +343,14 @@ slice_bound(PyObject *bound, Py_ssize_t *v)
     return 1;
 }
 
+/* A bound over a sequence of `length`, as PySlice_AdjustIndices adjusts it. */
+static Py_ssize_t
+slice_clamp(Py_ssize_t v, Py_ssize_t length, int down)
+{
+    v += v < 0 ? length : 0;
+    return v < 0 ? (down ? -1 : 0) : v >= length ? (down ? length - 1 : length) : v;
+}
+
 /* PySlice_Unpack and PySlice_AdjustIndices for bounds of None or compact
    ints over a sequence of `length`: 1 with the first position, the step and
    the count, or 0 when the kernel must decide (another bound type, a zero step). */
@@ -362,42 +370,32 @@ slice_unpack(PyObject *start_o, PyObject *stop_o, PyObject *step_o, Py_ssize_t l
         return 0;
     }
     if (start_o != NULL && start_o != Py_None) {
-        *start += *start < 0 ? length : 0;
-        *start = *start < 0 ? (down ? -1 : 0) : *start >= length ? (down ? length - 1 : length) : *start;
+        *start = slice_clamp(*start, length, down);
     }
     if (stop_o != NULL && stop_o != Py_None) {
-        stop += stop < 0 ? length : 0;
-        stop = stop < 0 ? (down ? -1 : 0) : stop >= length ? (down ? length - 1 : length) : stop;
+        stop = slice_clamp(stop, length, down);
     }
     *count = down ? (stop < *start ? (*start - stop - 1) / -*step + 1 : 0)
                   : (*start < stop ? (stop - *start - 1) / *step + 1 : 0);
     return 1;
 }
 
-/* container[start:stop:step] for an exact list, tuple, str or bytes and bounds
-   that slice_unpack takes, where the step of a str or bytes is 1: a new
-   reference. NULL without an error when the kernel must slice. */
-PyObject *
-lu_slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObject *step_o)
+/* The length of an exact list, tuple, str or bytes, or -1 for another type. */
+static Py_ssize_t
+native_length(PyObject *container)
 {
     PyTypeObject *tp = Py_TYPE(container);
-    Py_ssize_t length, start, step, count;
-    if (tp == &PyList_Type || tp == &PyTuple_Type) {
-        length = Py_SIZE(container);
-    }
-    else if (tp == &PyUnicode_Type) {
-        length = PyUnicode_GET_LENGTH(container);
-    }
-    else if (tp == &PyBytes_Type) {
-        length = PyBytes_GET_SIZE(container);
-    }
-    else {
-        return NULL;
-    }
-    if (!slice_unpack(start_o, stop_o, step_o, length, &start, &step, &count)
-        || (tp != &PyList_Type && tp != &PyTuple_Type && step != 1)) {
-        return NULL;
-    }
+    return tp == &PyList_Type || tp == &PyTuple_Type ? Py_SIZE(container)
+        : tp == &PyUnicode_Type ? PyUnicode_GET_LENGTH(container)
+        : tp == &PyBytes_Type ? PyBytes_GET_SIZE(container) : -1;
+}
+
+/* The `count` items of such a container from `start` by `step`, 1 for a
+   str or bytes: a new reference. */
+static PyObject *
+slice_take(PyObject *container, Py_ssize_t length, Py_ssize_t start, Py_ssize_t step, Py_ssize_t count)
+{
+    PyTypeObject *tp = Py_TYPE(container);
     if (tp != &PyList_Type && start == 0 && count == length) {
         return Py_NewRef(container);
     }
@@ -408,6 +406,32 @@ lu_slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObje
         return PyBytes_FromStringAndSize(PyBytes_AS_STRING(container) + start, count);
     }
     return lu_seq_slice(container, start, step, count, tp == &PyTuple_Type);
+}
+
+/* container[start:stop:step] for an exact list, tuple, str or bytes and bounds
+   that slice_unpack takes, where the step of a str or bytes is 1: a new
+   reference. NULL without an error when the kernel must slice. */
+PyObject *
+lu_slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObject *step_o)
+{
+    Py_ssize_t length = native_length(container), start, step, count;
+    if (length < 0 || !slice_unpack(start_o, stop_o, step_o, length, &start, &step, &count)
+        || (!PyList_CheckExact(container) && !PyTuple_CheckExact(container) && step != 1)) {
+        return NULL;
+    }
+    return slice_take(container, length, start, step, count);
+}
+
+PyObject *
+lu_slice_native_raw(PyObject *container, int64_t start, int64_t stop, int none)
+{
+    Py_ssize_t length = native_length(container);
+    if (length < 0) {
+        return NULL;
+    }
+    Py_ssize_t from = none & 1 ? 0 : slice_clamp(start, length, 0);
+    Py_ssize_t to = none & 2 ? length : slice_clamp(stop, length, 0);
+    return slice_take(container, length, from, 1, from < to ? to - from : 0);
 }
 
 PyObject *
@@ -483,12 +507,12 @@ lu_contains_native(PyObject *container, PyObject *item)
     PyObject *value;
     int found = -1;
     if (PyAnySet_CheckExact(container)) {
-        PyTypeObject *kt = Py_TYPE(item);
         PyObject *candidate = NULL;
-        if (kt != &PyUnicode_Type && kt != &PyLong_Type) {
+        Py_hash_t hash;
+        if (!lu_hash_native(item, &hash)) {
             return -1;
         }
-        int verdict = lu_set_probe((PySetObject *)container, item, lu_hash(item), NULL, &candidate);
+        int verdict = lu_set_probe((PySetObject *)container, item, hash, NULL, &candidate);
         Py_XDECREF(candidate);
         return verdict == LU_SET_FOUND ? 1 : verdict == LU_SET_ABSENT ? 0 : -1;
     }
@@ -3275,6 +3299,13 @@ op_COMPARE_OP: {
 op_FORMAT_SIMPLE: {
     /* value -- str(value) through PyObject_Format(value, '') */
     if (PyUnicode_CheckExact(TOP())) {
+        DISPATCH();
+    }
+    if (PyLong_CheckExact(TOP())) {
+        SAVE_FRAME();
+        PyObject *s = lu_long_decimal(TOP());
+        ERROR_IF(s == NULL);
+        Py_SETREF(TOP(), s);
         DISPATCH();
     }
     kargs[0] = POP();

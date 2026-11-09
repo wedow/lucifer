@@ -62,29 +62,52 @@ PyContext_ClearWatcher(int watcher_id)
     return 0;
 }
 
-/* context_switched(ctx): the thread's current context is now ctx (None
-   for none); each watcher is told, a failing one reported unraisable. */
+/* The task's current context lives in its thread state (ts->context), as
+   in CPython, so a new thread starts with none whatever ran before it.
+
+   context_get(): the current context, or None.
+   context_set(ctx, switched): makes ctx (None for none) current and answers
+   the one it replaces; when switched, each watcher is told (Context.run's
+   enter and exit), a failing one reported unraisable. */
 static PyObject *
-prim_context_switched(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+prim_context_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    if (nargs != 1) {
-        lu_err_format(PyExc_TypeError, "context_switched(ctx)");
+    if (nargs != 0) {
+        lu_err_format(PyExc_TypeError, "context_get()");
         return NULL;
     }
-    lu_watcher *table = PyInterpreterState_Get()->context_watchers;
+    PyObject *ctx = PyThreadState_Get()->context;
+    return Py_NewRef(ctx != NULL ? ctx : Py_None);
+}
+
+static PyObject *
+prim_context_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 2) {
+        lu_err_format(PyExc_TypeError, "context_set(ctx, switched)");
+        return NULL;
+    }
+    PyThreadState *ts = PyThreadState_Get();
     PyObject *ctx = args[0] == Py_None ? NULL : args[0];
-    for (int i = 0; i < LU_MAX_WATCHERS; i++) {
-        PyContext_WatchCallback cb = (PyContext_WatchCallback)table[i];
-        if (cb != NULL && cb(Py_CONTEXT_SWITCHED, ctx) < 0) {
-            PyErr_FormatUnraisable("Exception ignored in %s watcher callback for %R",
-                                   "Py_CONTEXT_SWITCHED", args[0]);
+    PyObject *prev = ts->context;
+    ts->context = Py_XNewRef(ctx);
+    ts->context_ver++;
+    if (args[1] == Py_True) {
+        lu_watcher *table = ts->interp->context_watchers;
+        for (int i = 0; i < LU_MAX_WATCHERS; i++) {
+            PyContext_WatchCallback cb = (PyContext_WatchCallback)table[i];
+            if (cb != NULL && cb(Py_CONTEXT_SWITCHED, ctx) < 0) {
+                PyErr_FormatUnraisable("Exception ignored in %s watcher callback for %R",
+                                       "Py_CONTEXT_SWITCHED", args[0]);
+            }
         }
     }
-    Py_RETURN_NONE;
+    return prev != NULL ? prev : Py_NewRef(Py_None);
 }
 
 PyMethodDef lu_prim_context_methods[] = {
-    { "context_switched", (PyCFunction)(void (*)(void))prim_context_switched, METH_FASTCALL, NULL },
+    { "context_get", (PyCFunction)(void (*)(void))prim_context_get, METH_FASTCALL, NULL },
+    { "context_set", (PyCFunction)(void (*)(void))prim_context_set, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },
 };
 

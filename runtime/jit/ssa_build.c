@@ -957,7 +957,7 @@ supported(int op)
     case MAKE_FUNCTION: case SET_FUNCTION_ATTRIBUTE: case STORE_DEREF: case LIST_EXTEND:
     case DELETE_SUBSCR: case LOAD_FAST_AND_CLEAR: case LIST_APPEND: case SET_ADD: case MAP_ADD:
     case BUILD_SET: case BUILD_MAP: case CALL_INTRINSIC_1: case BINARY_SLICE: case STORE_SLICE:
-    case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE:
+    case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE: case DICT_UPDATE:
     case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH: case RAISE_VARARGS: case RERAISE: case DELETE_FAST:
     case LOAD_SUPER_ATTR: case STORE_GLOBAL: case BUILD_SLICE: case CONVERT_VALUE: case FORMAT_SIMPLE:
     case FORMAT_WITH_SPEC: case BUILD_STRING: case LOAD_SPECIAL:
@@ -1251,6 +1251,31 @@ unbox_float(struct ctx *c, lu_v v)
     lu_v u = emit(c, OP_UNBOX_FLOAT, REP_F64, v, LU_NOV, LU_NOV, 0);
     I(c, u)->fs = before(c);
     return u;
+}
+
+/* A slice bound as a machine int: a box's raw value or a constant that
+   fits 64 bits, or None (`bit` set in *none). 0 for anything else. */
+static int
+raw_bound(struct ctx *c, lu_v v, lu_v *raw, int *none, int bit)
+{
+    PyObject *o = known(c, v);
+    if (o == Py_None) {
+        *none |= bit;
+        *raw = const_i(c, 0);
+        return 1;
+    }
+    if (I(c, v)->op != OP_BOX_INT && (o == NULL || !PyLong_CheckExact(o))) {
+        return 0;
+    }
+    if (I(c, v)->op != OP_BOX_INT) {
+        int overflow;
+        PyLong_AsLongLongAndOverflow(o, &overflow);
+        if (overflow) {
+            return 0;
+        }
+    }
+    *raw = unbox_int(c, v);
+    return 1;
 }
 
 static lu_v
@@ -5088,11 +5113,21 @@ translate(struct ctx *c)
     }
     case BINARY_SLICE: {
         /* A str, bytes, list or tuple sliced by ints runs no Python, so an
-           inlined frame slices one; anything else leaves it. */
+           inlined frame slices one; anything else leaves it. Bounds the
+           code computed go as machine ints, unboxed (luc-14n0). */
         lu_v stop = peek(c, 1), start = peek(c, 2), cont = peek(c, 3);
         int ownstop = peek_owned(c, 1), ownstart = peek_owned(c, 2), owncont = peek_owned(c, 3);
-        lu_v args[4] = { cont, start, stop, const_i(c, root_only(c)) };
-        w = helper_raising(c, root_only(c) ? H_binary_slice : H_slice_native, 4, args, 3);
+        lu_v rstart, rstop;
+        int none = 0;
+        if ((I(c, start)->op == OP_BOX_INT || I(c, stop)->op == OP_BOX_INT)
+            && raw_bound(c, start, &rstart, &none, 1) && raw_bound(c, stop, &rstop, &none, 2)) {
+            lu_v args[4] = { cont, rstart, rstop, const_i(c, none | (root_only(c) ? 4 : 0)) };
+            w = helper_raising(c, root_only(c) ? H_binary_slice_raw : H_slice_native_raw, 4, args, 3);
+        }
+        else {
+            lu_v args[4] = { cont, start, stop, const_i(c, root_only(c)) };
+            w = helper_raising(c, root_only(c) ? H_binary_slice : H_slice_native, 4, args, 3);
+        }
         if (!root_only(c)) {
             guard_after(c, OP_GUARD_NOT_NULL, w, 1);
         }
@@ -5155,6 +5190,19 @@ translate(struct ctx *c)
         }
         lu_v args[3] = { peek(c, oparg + 4), peek(c, oparg + 1), v };
         helper_raising(c, H_dict_merge, 3, args, 1);
+        pop(c, NULL);
+        release(c, v, own);
+        return 0;
+    }
+    case DICT_UPDATE: {
+        v = peek(c, 1);
+        own = peek_owned(c, 1);
+        if (!root_only(c)) {
+            unsupported(c);
+            return -1;
+        }
+        lu_v args[2] = { peek(c, oparg + 1), v };
+        helper_raising(c, H_dict_update, 2, args, 1);
         pop(c, NULL);
         release(c, v, own);
         return 0;

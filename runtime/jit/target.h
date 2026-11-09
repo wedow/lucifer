@@ -23,6 +23,12 @@ struct lu_target {
     int ngpr, nfpr;
     const int8_t *gpr;          /* allocatable, in preference order */
     const int8_t *fpr;
+    /* The allocatable general registers every call preserves (the C ABI's
+       callee-saved ones, which compiled code saves at its entries too),
+       and whether an instruction's own code uses them across its calls. */
+    int nsaved;
+    const int8_t *saved;
+    int (*clobbers_saved)(const struct lu_ins *in);
     /* For perf (runtime/interp/perf.c): the stack trampoline, which calls
        its fourth argument with its first three inside a frame of its own
        (NULL: none); the ELF machine; and the DWARF call frame information
@@ -318,11 +324,14 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(get_iter_seq) \
     X(binary_slice) \
     X(slice_native) \
+    X(binary_slice_raw) \
+    X(slice_native_raw) \
     X(store_slice) \
     X(call_kw) \
     X(call_ex) \
     X(call_forward) \
     X(dict_merge) \
+    X(dict_update) \
     X(catch) \
     X(push_exc_info) \
     X(pop_except) \
@@ -359,6 +368,16 @@ lu_publishes(const struct lu_ins *in)
     default:
         return (lu_op_flags[in->op] & IF_SEEN) != 0;
     }
+}
+
+/* Whether the register allocator treats the instruction as a call, which
+   clobbers every register but the preserved ones: an IF_CALL instruction,
+   but for a release that publishes nothing, whose slow path keeps every
+   register (luc-15mf). */
+static inline int
+lu_alloc_call(const struct lu_ins *in)
+{
+    return (lu_op_flags[in->op] & IF_CALL) && in->op != OP_PHI && !(in->op == OP_DECREF && !lu_publishes(in));
 }
 
 /* -X lucifer_jit_stats: how often compiled code takes the C path of an

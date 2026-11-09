@@ -2383,6 +2383,24 @@ prim_error(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return NULL;
 }
 
+/* attribute_error(text, name, obj): raises AttributeError(text) with its
+   name and obj set, as PyObject_GenericGetAttr's failure does in C: no
+   class call and no keywords for the kernel's every failed lookup. */
+static PyObject *
+prim_attribute_error(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(3);
+    PyErr_SetObject(PyExc_AttributeError, args[0]);
+    PyObject *e = PyErr_GetRaisedException();
+    if (e != NULL && Py_IS_TYPE(e, (PyTypeObject *)PyExc_AttributeError)) {
+        PyAttributeErrorObject *a = (PyAttributeErrorObject *)e;
+        Py_XSETREF(a->name, Py_NewRef(args[1]));
+        Py_XSETREF(a->obj, Py_NewRef(args[2]));
+    }
+    PyErr_SetRaisedException(e);
+    return NULL;
+}
+
 /* Namespace dicts: ns_get(d, key, default), ns_set(d, key, value),
    ns_del(d, key) -> whether it was there, ns_items(d) -> list of pairs. */
 static PyObject *
@@ -2571,7 +2589,7 @@ PyMethodDef lu_prim_type_methods[] = {
     FAST(type_subclasses), FAST(type_modified), PURE(is_subtype), FAST(alloc), FAST(new_check),
     PURE(type_tp_name), FAST(type_text_signature), FAST(type_static_module), PURE(size),
     PURE(truth_exact), PURE(instance_dict), FAST(instance_load), FAST(instance_store), FAST(set_class), FAST(caller_globals), FAST(super_args),
-    FAST(error), FAST(ns_get), FAST(ns_set), FAST(ns_del), FAST(ns_items),
+    FAST(error), FAST(attribute_error), FAST(ns_get), FAST(ns_set), FAST(ns_del), FAST(ns_items),
     PURE(kind),
     FAST(cell_get), FAST(cell_set), FAST(address), FAST(object_hash),
     FAST(object_is_immortal), FAST(enable_deferred),
