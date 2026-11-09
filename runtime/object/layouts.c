@@ -595,7 +595,10 @@ slice_traverse(PyObject *op, visitproc visit, void *arg)
 
 /* tuple_hash (Objects/tupleobject.c): the xxHash fold of the items' hashes,
    cached in ob_hash as 3.14 does. Items of the common exact types hash here;
-   any other goes through PyObject_Hash, the kernel's hash(). */
+   any other goes through PyObject_Hash, the kernel's hash(). Nesting
+   recurses on the C stack, which is checked as _Py_EnterRecursiveCall does. */
+int _Py_CheckRecursiveCall(PyThreadState *tstate, const char *where);
+
 Py_hash_t
 lu_tuple_hash(PyObject *op)
 {
@@ -603,6 +606,9 @@ lu_tuple_hash(PyObject *op)
     Py_hash_t cached = __atomic_load_n(&t->ob_hash, __ATOMIC_RELAXED);
     if (cached != -1) {
         return cached;
+    }
+    if (_Py_CheckRecursiveCall(lu_tstate_get(), " while hashing a tuple") < 0) {
+        return -1;
     }
     Py_uhash_t acc = LU_XXHASH_START;
     for (Py_ssize_t i = 0; i < Py_SIZE(t); i++) {
