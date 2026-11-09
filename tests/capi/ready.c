@@ -1188,6 +1188,58 @@ numbers(PyObject *self, PyObject *Py_UNUSED(ignored))
 
 /* Objects: length hints, file descriptors, managed state. */
 
+/* A spec type with a managed dict whose instances C allocates with
+   PyObject_GC_New, as Cython's function type is: an instance has room for
+   the attributes stored on it, as CPython's _PyObject_GC_New gives the
+   inline values. */
+static int
+managed_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    Py_VISIT(Py_TYPE(op));
+    return PyObject_VisitManagedDict(op, visit, arg);
+}
+
+static int
+managed_clear(PyObject *op)
+{
+    PyObject_ClearManagedDict(op);
+    return 0;
+}
+
+static void
+managed_dealloc(PyObject *op)
+{
+    PyTypeObject *tp = Py_TYPE(op);
+    PyObject_GC_UnTrack(op);
+    managed_clear(op);
+    PyObject_GC_Del(op);
+    Py_DECREF(tp);
+}
+
+static PyObject *managed_type;
+
+static PyObject *
+managed_new(PyObject *self, PyObject *unused)
+{
+    if (managed_type == NULL) {
+        PyType_Slot slots[] = {
+            { Py_tp_traverse, managed_traverse }, { Py_tp_clear, managed_clear },
+            { Py_tp_dealloc, managed_dealloc }, { 0, NULL },
+        };
+        PyType_Spec spec = { "ready.Managed", sizeof(PyObject), 0,
+                             Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_MANAGED_DICT, slots };
+        managed_type = PyType_FromSpec(&spec);
+        if (managed_type == NULL) {
+            return NULL;
+        }
+    }
+    PyObject *op = PyObject_GC_New(PyObject, (PyTypeObject *)managed_type);
+    if (op != NULL) {
+        PyObject_GC_Track(op);
+    }
+    return op;
+}
+
 static PyObject *
 objects(PyObject *self, PyObject *arg)
 {
@@ -1252,6 +1304,7 @@ static PyMethodDef module_methods[] = {
     { "datetimes", datetimes, METH_NOARGS, NULL },
     { "numbers", numbers, METH_NOARGS, NULL },
     { "objects", objects, METH_O, NULL },
+    { "managed_new", managed_new, METH_NOARGS, NULL },
     { NULL }
 };
 

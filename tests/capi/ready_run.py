@@ -304,3 +304,11 @@ for o, k in ((list, int), (type, int), (dict, (str, int)), (Generic, 5), (Plain,
              ((7, 8), 'x'), (5, 0), (Generic(), 0), ([1, 2, 3], slice(0, 2)), ({'a': 1}, 'a'), (ready.Mapped(), 'k'),
              (ready.Vec(1, 2), 1), ((1, 2), 2**80)):
     show(ready.subscript, o, k)
+
+# instances of a managed-dict spec type that C allocates take attributes side by side
+managed = [ready.managed_new() for _ in range(64)]
+for i, o in enumerate(managed):
+    for k in range(12):
+        setattr(o, 'a%d' % k, i * 100 + k)
+print(all([getattr(o, 'a%d' % k) for k in range(12)] == [i * 100 + k for k in range(12)] for i, o in enumerate(managed)),
+      type(managed[0]).__name__, managed[3].a11)
