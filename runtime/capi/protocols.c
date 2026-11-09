@@ -17,12 +17,49 @@
 
 /* Helpers. */
 
+/* The interned name of each builtin these helpers call, by the address of
+   the literal that names it: made once, not per call. A slot's key is set
+   before its name is published, under the lock. */
+#define BUILTIN_KEYS 16
+static struct { const char *name; PyObject *key; } builtin_keys[BUILTIN_KEYS];
+static PyMutex builtin_keys_lock;
+
+static PyObject *
+builtin_key(const char *name)
+{
+    for (int pass = 0; pass < 2; pass++) {
+        int i = 0;
+        for (; i < BUILTIN_KEYS; i++) {
+            const char *at = __atomic_load_n(&builtin_keys[i].name, __ATOMIC_ACQUIRE);
+            if (at == name) {
+                if (pass) {
+                    PyMutex_Unlock(&builtin_keys_lock);
+                }
+                return builtin_keys[i].key;
+            }
+            if (at == NULL) {
+                break;
+            }
+        }
+        if (pass) {
+            PyObject *key = i < BUILTIN_KEYS ? PyUnicode_InternFromString(name) : NULL;
+            if (key != NULL) {
+                builtin_keys[i].key = key;
+                __atomic_store_n(&builtin_keys[i].name, name, __ATOMIC_RELEASE);
+            }
+            PyMutex_Unlock(&builtin_keys_lock);
+            return key;
+        }
+        PyMutex_Lock(&builtin_keys_lock);
+    }
+    Py_UNREACHABLE();
+}
+
 static PyObject *
 builtin(const char *name)
 {
-    PyObject *key = PyUnicode_InternFromString(name);
+    PyObject *key = builtin_key(name);
     PyObject *f = key != NULL ? lu_ns_get(PyThreadState_Get()->interp->builtins, key) : NULL;
-    Py_XDECREF(key);
     if (f == NULL && !PyErr_Occurred()) {
         PyErr_Format(PyExc_SystemError, "builtins.%s is missing", name);
     }
@@ -264,6 +301,12 @@ PyObject_DelAttrString(PyObject *o, const char *name)
 int
 PyObject_IsInstance(PyObject *inst, PyObject *cls)
 {
+    /* object_isinstance's answer for a plain class without asking it:
+       yes when the type says so; no needs __class__, which the kernel asks. */
+    if (Py_IS_TYPE(inst, (PyTypeObject *)cls)
+        || (PyType_CheckExact(cls) && PyType_IsSubtype(Py_TYPE(inst), (PyTypeObject *)cls))) {
+        return 1;
+    }
     PyObject *args[2] = { inst, cls };
     return as_bool(call_builtin("isinstance", args, 2));
 }
@@ -271,6 +314,11 @@ PyObject_IsInstance(PyObject *inst, PyObject *cls)
 int
 PyObject_IsSubclass(PyObject *derived, PyObject *cls)
 {
+    /* recursive_issubclass of two types, for a class whose metaclass is
+       type (no __subclasscheck__ of its own). */
+    if (PyType_CheckExact(cls) && PyType_Check(derived)) {
+        return PyType_IsSubtype((PyTypeObject *)derived, (PyTypeObject *)cls);
+    }
     PyObject *args[2] = { derived, cls };
     return as_bool(call_builtin("issubclass", args, 2));
 }
