@@ -5,18 +5,26 @@
    but object gets Py_TPFLAGS_INLINE_VALUES. Its shared names (struct
    lu_shared_names in ht_cached_keys) list the attribute names its instances
    have stored, in the order the first of them did; a name keeps its index
-   for the life of the class, and the table never moves. The table's room is
-   fixed when the class is made: the names its methods and its bases' assign
-   to self (__static_attributes__). An instance carries one word per name
-   after tp_basicsize, so a site guarded by the type's version reads and
-   writes a fixed offset.
+   for the life of the class, and the table never moves. The table takes 30
+   names, or more when its methods and its bases' assign more to self
+   (__static_attributes__). An instance carries one word per name of its
+   room (below) after tp_basicsize, so a site guarded by the type's version
+   reads and writes a fixed offset.
 
    While an instance's LU_ATTRS_IN_DICT flag is clear, its attributes are
    those words and its dict pointer is NULL. Anything that needs a real dict
-   (__dict__, vars, a name with no room left or stored out of insertion
-   order, __class__ assignment, a C caller of _PyObject_GetDictPtr) moves the
-   values into a new dict under the object's lock and sets the flag for good;
-   the words stay NULL from then on. A name that shadows a class attribute
+   (__dict__, vars, a name with no room left, __class__ assignment, a C
+   caller of _PyObject_GetDictPtr) moves the values into a new dict under
+   the object's lock and sets the flag for good; the words stay NULL from
+   then on, and the dict keeps the instance's insertion order.
+
+   That order is the words' index order until a name is stored while a
+   later word is in use (instances that get their names in different
+   orders). The instance then keeps an order record after its words: the
+   number of names present, then their indices as they were inserted
+   (LU_ATTRS_UNORDERED, set for good). Such an instance keeps its values in
+   line; only a store of a name new to it goes through C, which appends to
+   the record, and a deletion takes the index out of it. A name that shadows a class attribute
    changes the class's version when it joins the table, so a method cached
    for the class needs no check of the instance beyond the flag.
 
@@ -40,8 +48,10 @@
 #include <string.h>
 
 struct lu_shared_names {
-    Py_ssize_t capacity;
+    Py_ssize_t capacity;            /* the most names the table takes */
     Py_ssize_t count;               /* names[0..count) are set and never change */
+    Py_ssize_t usable;              /* count + usable: a new instance's room, which never grows */
+    int fixed;                      /* every instance's room is capacity */
     PyObject *names[];
 };
 
@@ -51,11 +61,93 @@ shared_names(PyTypeObject *tp)
     return (struct lu_shared_names *)((PyHeapTypeObject *)tp)->ht_cached_keys;
 }
 
-size_t
-lu_inline_values_size(PyTypeObject *tp)
+/* The order record (see above): a count byte and an index byte per name,
+   in whole words; an instance with room for more names than a byte
+   numbers has none, and moves to a dict instead. */
+#define ORDER_MAX 255
+
+static size_t
+order_size(Py_ssize_t room)
 {
-    return (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)
-        ? (size_t)shared_names(tp)->capacity * LU_INLINE_STRIDE * sizeof(PyObject *) : 0;
+    return room < ORDER_MAX ? ((size_t)room + 1 + sizeof(PyObject *) - 1) & ~(sizeof(PyObject *) - 1) : 0;
+}
+
+/* Room, as Objects/dictobject.c sizes split values (_PyDict_NewKeysForClass):
+   a class's table takes ROOM names or its static attributes, whichever is
+   more, and a new instance gets room for the names the class has plus
+   `usable` more. Each instance made takes one from `usable` until one is
+   left, and each name added takes one, so count + usable never grows: an
+   instance's room is at least every later count, and any index below the
+   count is in every live instance. An instance keeps its room in its
+   ob_flags (LU_ATTRS_ROOM); a class whose table is larger than those bits
+   number gives every instance the whole table (fixed). */
+#define ROOM 30
+#define ROOM_MAX (LU_ATTRS_ROOM >> LU_ATTRS_ROOM_SHIFT)
+
+static size_t
+room_size(Py_ssize_t room)
+{
+    return room > 0 ? (size_t)room * LU_INLINE_STRIDE * sizeof(PyObject *) + order_size(room) : 0;
+}
+
+static Py_ssize_t
+room_of(PyObject *obj)
+{
+    Py_ssize_t room = (obj->ob_flags & LU_ATTRS_ROOM) >> LU_ATTRS_ROOM_SHIFT;
+    return room != 0 ? room : shared_names(Py_TYPE(obj))->capacity;
+}
+
+/* What a new instance gets: count + usable, read in that order's reverse
+   (a name added between the reads only makes the room larger). */
+static Py_ssize_t
+current_room(struct lu_shared_names *names)
+{
+    if (names->fixed) {
+        return names->capacity;
+    }
+    Py_ssize_t usable = __atomic_load_n(&names->usable, __ATOMIC_ACQUIRE);
+    return __atomic_load_n(&names->count, __ATOMIC_ACQUIRE) + usable;
+}
+
+Py_ssize_t
+lu_inline_take_room(PyTypeObject *tp)
+{
+    if (!(tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)) {
+        return 0;
+    }
+    struct lu_shared_names *names = shared_names(tp);
+    Py_ssize_t usable = __atomic_load_n(&names->usable, __ATOMIC_RELAXED);
+    while (!names->fixed && usable > 1
+           && !__atomic_compare_exchange_n(&names->usable, &usable, usable - 1, 0, __ATOMIC_ACQ_REL,
+                                           __ATOMIC_RELAXED)) {
+    }
+    return current_room(names);
+}
+
+Py_ssize_t
+lu_inline_settle_room(PyTypeObject *tp)
+{
+    if (!(tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)) {
+        return 0;
+    }
+    struct lu_shared_names *names = shared_names(tp);
+    Py_ssize_t usable = __atomic_load_n(&names->usable, __ATOMIC_RELAXED);
+    while (!names->fixed && usable > 1
+           && !__atomic_compare_exchange_n(&names->usable, &usable, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+    }
+    return current_room(names);
+}
+
+size_t
+lu_inline_room_size(Py_ssize_t room)
+{
+    return room_size(room);
+}
+
+uint16_t
+lu_inline_room_flags(PyTypeObject *tp, Py_ssize_t room)
+{
+    return shared_names(tp)->fixed ? 0 : (uint16_t)(room << LU_ATTRS_ROOM_SHIFT);
 }
 
 /* Adds the names of a class's __static_attributes__ to `seen`. */
@@ -97,7 +189,7 @@ lu_inline_values_init(PyTypeObject *tp)
             }
         }
     }
-    Py_ssize_t capacity = PyDict_GET_SIZE(seen);
+    Py_ssize_t capacity = PyDict_GET_SIZE(seen) > ROOM ? PyDict_GET_SIZE(seen) : ROOM;
     Py_DECREF(seen);
     struct lu_shared_names *names = PyMem_Calloc(1, sizeof *names + (size_t)capacity * sizeof(PyObject *));
     if (names == NULL) {
@@ -105,6 +197,8 @@ lu_inline_values_init(PyTypeObject *tp)
         return -1;
     }
     names->capacity = capacity;
+    names->usable = capacity;
+    names->fixed = capacity > ROOM_MAX;
     ((PyHeapTypeObject *)tp)->ht_cached_keys = (PyDictKeysObject *)names;
     tp->tp_flags |= Py_TPFLAGS_INLINE_VALUES;
     return 0;
@@ -152,12 +246,16 @@ add_name(PyTypeObject *tp, PyObject *name)
     PyMutex_Lock(&_PyRuntime.shared_names_lock);
     Py_ssize_t i = lu_inline_index(tp, name);
     int added = 0;
-    if (i < 0 && names->count < names->capacity) {
+    if (i < 0 && names->count < names->capacity && (names->fixed || names->usable > 0)) {
         PyObject *interned = Py_NewRef(name);
         PyUnicode_InternInPlace(&interned);
         i = names->count;
         names->names[i] = interned;
+        /* The count first: a reader of usable, then count, never sees less room. */
         __atomic_store_n(&names->count, i + 1, __ATOMIC_RELEASE);
+        if (!names->fixed) {
+            __atomic_fetch_sub(&names->usable, 1, __ATOMIC_RELEASE);
+        }
         added = 1;
     }
     PyMutex_Unlock(&_PyRuntime.shared_names_lock);
@@ -180,6 +278,62 @@ in_order(PyObject *obj, Py_ssize_t i)
         }
     }
     return 1;
+}
+
+static uint8_t *
+order_record(PyObject *obj)
+{
+    return (uint8_t *)&LU_INLINE_WORD(lu_inline_values(obj), room_of(obj));
+}
+
+static int
+unordered(PyObject *obj)
+{
+    return (__atomic_load_n(&obj->ob_flags, __ATOMIC_ACQUIRE) & LU_ATTRS_UNORDERED) != 0;
+}
+
+/* Before word i, empty, takes a name new to the instance, in the object's
+   critical section: the order record notes it, started from the words'
+   index order when this is the first name out of it. 0 when the class
+   keeps no record. */
+static int
+note_insert(PyObject *obj, Py_ssize_t i)
+{
+    uint8_t *order = order_record(obj);
+    if (!unordered(obj)) {
+        if (in_order(obj, i)) {
+            return 1;
+        }
+        if (order_size(room_of(obj)) == 0) {
+            return 0;
+        }
+        PyObject **values = lu_inline_values(obj);
+        Py_ssize_t n = __atomic_load_n(&shared_names(Py_TYPE(obj))->count, __ATOMIC_ACQUIRE);
+        order[0] = 0;
+        for (Py_ssize_t j = 0; j < n; j++) {
+            if (LU_INLINE_WORD(values, j) != NULL) {
+                order[1 + order[0]++] = (uint8_t)j;
+            }
+        }
+        __atomic_fetch_or(&obj->ob_flags, LU_ATTRS_UNORDERED, __ATOMIC_RELEASE);
+    }
+    order[1 + order[0]++] = (uint8_t)i;
+    return 1;
+}
+
+/* After word i lost its name, in the object's critical section. */
+static void
+note_delete(PyObject *obj, Py_ssize_t i)
+{
+    if (unordered(obj)) {
+        uint8_t *order = order_record(obj);
+        int k = 1;
+        while (k <= order[0] && order[k] != i) {
+            k++;
+        }
+        memmove(order + k, order + k + 1, (size_t)(order[0] - k));
+        order[0]--;
+    }
 }
 
 /* The object a value word stands for, in the object's critical section:
@@ -264,7 +418,9 @@ move_to_dict(PyObject *obj)
         return -1;
     }
     Py_ssize_t n = __atomic_load_n(&names->count, __ATOMIC_ACQUIRE);
-    for (Py_ssize_t i = 0; i < n; i++) {
+    uint8_t *order = unordered(obj) ? order_record(obj) : NULL;
+    for (Py_ssize_t k = 0, m = order != NULL ? order[0] : n; k < m; k++) {
+        Py_ssize_t i = order != NULL ? order[1 + k] : k;      /* in insertion order */
         PyObject **word = &LU_INLINE_WORD(values, i);
         if (*word != NULL && (boxed_locked(word) == NULL || lu_ns_insert(dict, names->names[i], *word) < 0)) {
             Py_DECREF(dict);
@@ -391,17 +547,15 @@ lu_attr_lookup(PyObject *obj, PyObject *name, PyObject **v)
     return *v != NULL;
 }
 
-/* Stores v in word i, holding the object's lock: the old value in *old,
-   or 0 when the values moved to the dict or v would break insertion order. */
 /* Stores v (or a marker with the raw bits) in word i, holding the
    object's lock: the old value in *old (NULL for none or an unboxed
-   value), or 0 when the values moved to the dict or v would break
-   insertion order. */
+   value), or 0 when the values moved to the dict or the instance's
+   insertion order has no record to go in. */
 static int
 store_locked(PyObject *obj, Py_ssize_t i, PyObject *v, uint64_t bits, PyObject **old)
 {
     PyObject **slot = &LU_INLINE_WORD(lu_inline_values(obj), i);
-    if (!lu_inline_live(obj) || (*slot == NULL && !in_order(obj, i))) {
+    if (!lu_inline_live(obj) || (*slot == NULL && !note_insert(obj, i))) {
         return 0;
     }
     if (lu_unboxed(v)) {
@@ -474,6 +628,9 @@ lu_attr_store(PyObject *obj, PyObject *name, PyObject *v)
             old = i >= 0 ? __atomic_exchange_n(&LU_INLINE_WORD(lu_inline_values(obj), i), NULL, __ATOMIC_RELEASE)
                          : NULL;
             done = old != NULL ? 1 : -1;
+            if (old != NULL) {
+                note_delete(obj, i);
+            }
             if (lu_unboxed(old)) {
                 old = NULL;
             }

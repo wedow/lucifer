@@ -250,6 +250,36 @@ object_tp_richcompare(PyObject *self, PyObject *other, int op)
     return call_special_in(&PyBaseObject_Type, self, names[op], &other, 1, NULL);
 }
 
+/* The attribute hooks a class keeps from object (no __getattr__ and
+   object's __getattribute__; object's __setattr__ and __delattr__): its
+   slot is object's own function, as update_one_slot gives a class the
+   specific function of the wrapper it finds, so C tests the slot instead
+   of looking the hooks up. Object keeps its thunk, which static types
+   inherit: an extension type that sets PyObject_GenericGetAttr itself
+   still differs from its base and gets its own wrapper, as in CPython. */
+static int
+keeps_object_hook(PyTypeObject *tp, PyObject *a, PyObject *b, PyObject *absent)
+{
+    PyObject *own = _PyType_Lookup(&PyBaseObject_Type, a);
+    return own != NULL && _PyType_Lookup(tp, a) == own
+        && (b == NULL || _PyType_Lookup(tp, b) == _PyType_Lookup(&PyBaseObject_Type, b))
+        && (absent == NULL || _PyType_Lookup(tp, absent) == NULL);
+}
+
+static void *
+attribute_thunk(PyTypeObject *tp, void *thunk)
+{
+    if (thunk == (void *)lu_slot_tp_getattro
+        && keeps_object_hook(tp, LU_ID(__getattribute__), NULL, LU_ID(__getattr__))) {
+        return (void *)PyObject_GenericGetAttr;
+    }
+    if (thunk == (void *)lu_slot_tp_setattro
+        && keeps_object_hook(tp, LU_ID(__setattr__), LU_ID(__delattr__), NULL)) {
+        return (void *)PyObject_GenericSetAttr;
+    }
+    return thunk;
+}
+
 static void *
 object_thunk(void *thunk)
 {
@@ -729,7 +759,7 @@ lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from)
     case 1:
         value = s->thunk == (void *)slot_tp_new && (tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)
             ? (void *)slot_tp_new_builtin
-            : tp == &PyBaseObject_Type ? object_thunk(s->thunk) : s->thunk;
+            : tp == &PyBaseObject_Type ? object_thunk(s->thunk) : attribute_thunk(tp, s->thunk);
         break;
     case 2: {
         char *src = from != NULL ? slot_base(from, s->where, 0) : NULL;

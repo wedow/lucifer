@@ -1302,10 +1302,35 @@ lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value)
     return 0;
 }
 
+/* type_setattro (_type_set in lib/kernel/type.py) without Python: a plain
+   value (a function is the kernel's: it makes it deferred) stored under a
+   name no slot reads into a mutable class whose metaclass keeps type's
+   __setattr__ and has no data descriptor of that name. The store takes the
+   class's tag back (lu_attr_store). 1 when done, 0 for the kernel, -1. */
+static int
+type_setattr_native(PyTypeObject *cls, PyObject *name, PyObject *value)
+{
+    PyTypeObject *meta = Py_TYPE(cls);
+    Py_ssize_t n = PyUnicode_CheckExact(name) ? PyUnicode_GET_LENGTH(name) : 0;
+    if (value == NULL || PyFunction_Check(value) || (cls->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) || n == 0
+        || (n >= 4 && PyUnicode_READ_CHAR(name, 0) == '_' && PyUnicode_READ_CHAR(name, 1) == '_'
+            && PyUnicode_READ_CHAR(name, n - 1) == '_' && PyUnicode_READ_CHAR(name, n - 2) == '_')
+        || _PyType_Lookup(meta, LU_ID(__setattr__)) != _PyType_Lookup(&PyType_Type, LU_ID(__setattr__))) {
+        return 0;
+    }
+    PyObject *descr = _PyType_LookupRef(meta, name);
+    int data = descr != NULL && Py_TYPE(descr)->tp_descr_set != NULL;
+    Py_XDECREF(descr);
+    return data ? 0 : lu_attr_store((PyObject *)cls, name, value) < 0 ? -1 : 1;
+}
+
 int
 lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value)
 {
     PyTypeObject *tp = Py_TYPE(obj);
+    if (PyType_Check(obj) && (tp->tp_setattro == lu_slot_tp_setattro || tp->tp_setattro == PyObject_GenericSetAttr)) {
+        return type_setattr_native((PyTypeObject *)obj, name, value);
+    }
     if ((tp->tp_setattro != lu_slot_tp_setattro && tp->tp_setattro != PyObject_GenericSetAttr)
         || !PyUnicode_CheckExact(name)
         || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))) {
