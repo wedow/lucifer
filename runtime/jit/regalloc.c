@@ -322,6 +322,16 @@ lu_regalloc(struct lu_func *f)
                 struct use_at at = { ins->pos };
                 each_use(f, ins, extend_use, &at);
             }
+            if (lu_alloc_call(ins)) {
+                /* Its exits leave after its call: what their states read
+                   lives across it. */
+                struct use_at after = { ins->pos + 1 };
+                for (struct lu_fs *fs = ins->fs; fs != NULL; fs = fs->caller) {
+                    for (int i = 0; i < fs->nlocals + fs->nstack; i++) {
+                        use_of(f, fs->vals[i], v, extend_use, &after);
+                    }
+                }
+            }
             if (lu_publishes(ins)) {
                 struct lu_fs *root = ins->fs;
                 while (root->caller != NULL) {
