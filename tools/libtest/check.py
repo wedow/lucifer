@@ -80,6 +80,16 @@ with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
         self.addCleanup(os.environ.pop, 'PYTHONPATH')
         self.assertEqual(self.run_fake(body, timeout=2), ['PASS'] * 3)
 
+    def test_run_records_its_date(self):
+        # The daily status dates the Lib/test row from the run, not from a commit.
+        import datetime
+        self.run_fake(self.fake_probe() + """
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'PASSED'}) + '\\n')
+""")
+        recorded = json.loads((self.root / 'fake.json').read_text())['recorded_at']
+        self.assertEqual(recorded[:10], datetime.datetime.now(datetime.timezone.utc).strftime('%F'))
+
     def test_startup_hang(self):
         self.assertEqual(self.run_fake('import time; time.sleep(60)\n'), ['NOTRUN'] * 3)
 
@@ -249,6 +259,34 @@ with open(os.environ['LIBTEST_STATE'], 'w') as stream:
     stream.write(json.dumps({'state':'PASSED'}) + '\\n')
 """
         self.assertEqual(self.run_fake(body), ['PASS', 'NOTRUN', 'NOTRUN'])
+
+    def test_error_reasons_name_the_exception_type(self):
+        # Raw events carry the exception type, so failures can be grouped by cause.
+        body = self.fake_probe() + """
+import io,runpy,types,unittest
+module = types.ModuleType('test.libregrtest.testresult')
+class RegressionTestResult(unittest.TextTestResult):
+    pass
+module.RegressionTestResult = RegressionTestResult
+sys.modules[module.__name__] = module
+""" + 'runpy.run_path(' + repr(str(RUNNER.with_name('bridge.py'))) + ")[\"observe_cases\"]()\n" + """
+class Example(unittest.TestCase):
+    def test_first(self): pass
+Example.__module__ = 'test_fixture'
+result = RegressionTestResult(io.StringIO(), False, 0)
+case = Example('test_first')
+result.startTest(case)
+try:
+    raise ModuleNotFoundError("No module named 'absent'")
+except ModuleNotFoundError:
+    result.addError(case, sys.exc_info())
+result.stopTest(case)
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'FAILED'}) + '\\n')
+"""
+        self.assertEqual(self.run_fake(body), ['ERROR', 'ERROR', 'ERROR'])
+        events = (self.root / 'raw/fake/test_fixture/events.jsonl').read_text().splitlines()
+        self.assertEqual(json.loads(events[0])['reason'], "ModuleNotFoundError: No module named 'absent'")
 
     def test_collection_preserves_upstream_ids(self):
         fake = self.root / 'collector.py'

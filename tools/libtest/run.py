@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
 from collections import Counter
 from contextlib import nullcontext
+from datetime import datetime, timezone
 import hashlib
 import json
 import math
@@ -404,6 +405,7 @@ def run(args, python, env, raw):
                 metadata['modules'][module] = detail
                 write_manifest(destination, rows)
     write_manifest(destination, rows)
+    metadata['recorded_at'] = datetime.now(timezone.utc).isoformat()
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + '\n')
     print(args.runtime, dict(Counter(status for status, _ in rows.values())))
 
