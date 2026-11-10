@@ -1,6 +1,6 @@
 ---
 id: luc-nnl3
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-09T02:01:52Z

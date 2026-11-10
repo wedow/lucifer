@@ -1,6 +1,6 @@
 ---
 id: luc-gskg
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-06T01:23:01Z

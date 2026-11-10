@@ -1,6 +1,6 @@
 ---
 id: luc-nvfb
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-09T04:58:34Z
