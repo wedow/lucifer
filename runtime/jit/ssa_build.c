@@ -4916,6 +4916,10 @@ call(struct ctx *c)
     if (gco != NULL && gfn != NULL) {
         guard_func(c, gfn);     /* its code is what the call runs */
     }
+    if (instead == NULL && newfn == NULL && fn != NULL && bound == NULL && self == LU_NOV && kc != NULL
+        && PyCFunction_Check(kc)) {
+        instead = fn;           /* a builtin whose kernel function did not inline: that function called */
+    }
     lu_v hargs[34];
     int nh = n + 2;
     if (instead != NULL) {

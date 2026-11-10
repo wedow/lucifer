@@ -732,6 +732,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/module_builtin_calls.py": {
+      "exit": 0,
+      "sha256": "21ee1a78e6b540cf97a6596dc9a323b40c9cf94f4f54356ca3bbef06cbdc1214",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/pattern_mapping_sequence.py": {
       "exit": 0,
       "sha256": "98a2ce47db272acabbbe9b79e1ca864219a22bccb74550079e82cee377135c44",
