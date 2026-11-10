@@ -4390,6 +4390,7 @@ call(struct ctx *c)
     }
     PyFunctionObject *gfn;
     PyCodeObject *gco;
+    PyFunctionObject *instead = NULL;   /* the function the call became, if not the callable's */
     if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
         && PyUnicode_CompareWithASCIIString(fn->func_qualname, "next_item") == 0
         && (gco = gen_made(c, args[0], &gfn)) != NULL && local_holds(c, args[0])) {
@@ -4427,7 +4428,7 @@ call(struct ctx *c)
             : (Py_IS_TYPE(descr, &PyMethodDescr_Type) || Py_IS_TYPE(descr, &PyWrapperDescr_Type))
               ? kernel_function(descr, &dself) : NULL;
         if (target != NULL) {
-            fn = target;
+            fn = instead = target;
             memmove(args, args + 1, sizeof(lu_v) * (size_t)(nargs - 1));
             memmove(own, own + 1, (size_t)(nargs - 1));
             nargs--;
@@ -4456,7 +4457,7 @@ call(struct ctx *c)
     }
     PyFunctionObject *twin = fn != NULL && bound == NULL && fnv == LU_NOV ? lu_kernel_twin(fn, nargs) : NULL;
     if (twin != NULL) {
-        fn = twin;              /* a kernel function's fixed-arity form: no *args or **kwargs to make */
+        fn = instead = twin;    /* a kernel function's fixed-arity form: no *args or **kwargs to make */
     }
     if (fn != NULL && bound == NULL) {
         /* The callee takes the arguments' references; the rest go here. */
@@ -4547,12 +4548,22 @@ call(struct ctx *c)
         guard_func(c, gfn);     /* its code is what the call runs */
     }
     lu_v hargs[34];
-    hargs[0] = newfn != NULL ? konst(c, (PyObject *)newfn) : callable;
-    hargs[1] = newfn != NULL ? callable : self != LU_NOV ? self : konst(c, NULL);    /* __new__'s class first */
-    for (int i = 0; i < n; i++) {
-        hargs[2 + i] = peek(c, n - i);
+    int nh = n + 2;
+    if (instead != NULL) {
+        /* What the call became (a twin, call_special's function), called. */
+        hargs[0] = konst(c, (PyObject *)instead);
+        hargs[1] = konst(c, NULL);
+        memcpy(hargs + 2, args, sizeof(lu_v) * (size_t)nargs);
+        nh = nargs + 2;
     }
-    r = helper_raising(c, H_call, n + 2, hargs, n + 2);
+    else {
+        hargs[0] = newfn != NULL ? konst(c, (PyObject *)newfn) : callable;
+        hargs[1] = newfn != NULL ? callable : self != LU_NOV ? self : konst(c, NULL);    /* __new__'s class first */
+        for (int i = 0; i < n; i++) {
+            hargs[2 + i] = peek(c, n - i);
+        }
+    }
+    r = helper_raising(c, H_call, nh, hargs, n + 2);
     I(c, r)->imm2 = 1 + (fn != NULL ? CNT_call_refused : kc != NULL ? CNT_call_c
                          : poly_join(c, callable) ? CNT_call_poly : CNT_call_unknown);
     if (_PyRuntime.jit.debug) {
