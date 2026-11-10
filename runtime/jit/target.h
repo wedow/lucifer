@@ -310,6 +310,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed);
     X(build_map) \
     X(set_add) \
     X(list_to_tuple) \
+    X(unpack_exact) \
     X(async_gen_wrap) \
     X(gen_send) \
     X(send) \

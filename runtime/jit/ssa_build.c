@@ -1722,8 +1722,10 @@ unary_op(struct ctx *c)
     if (t == &PyFloat_Type && neg) {
         w = box_float(c, emit(c, OP_NEG_F, REP_F64, unbox_float(c, v), LU_NOV, LU_NOV, 0));
     }
-    else if ((t == &PyLong_Type || (t == NULL && known(c, v) == NULL)) && neg) {
-        /* A site whose classes are not known has met only ints, which the interpreter does not note. */
+    else if ((t == &PyLong_Type || (t == NULL && known(c, v) == NULL && !nospec(c, c->pc))) && neg) {
+        /* A site whose classes are not known has met only ints, which the
+           interpreter does not note; once that guess failed here (a marked
+           site), the kernel's operator. */
         lu_v x = emit(c, OP_NEG_I, REP_I64, unbox_int(c, v), LU_NOV, LU_NOV, 0);
         I(c, x)->fs = before(c);
         w = box_int(c, x);
@@ -1735,8 +1737,8 @@ unary_op(struct ctx *c)
         return -1;
     }
     if (w == LU_NOV) {
-        unsupported(c);
-        return -1;
+        lu_v args[2] = { v, const_i(c, !neg) };
+        w = helper_raising(c, H_unary, 2, args, 1);
     }
     pop(c, NULL);
     release(c, v, own);
@@ -5187,8 +5189,9 @@ translate(struct ctx *c)
         return 0;
     }
     case UNPACK_SEQUENCE: {
-        /* An exact tuple or list (the kind the interpreter met, else a
-           tuple) of oparg items, its items pushed last first; any other
+        /* An exact tuple or list of oparg items (the kinds the interpreter
+           met, one helper taking both; else a tuple), its items pushed
+           last first; any other
            sequence leaves, and after enough of that the kernel unpacks
            it into a tuple (at the root: it runs Python). A list's items
            are read under its lock, as a tuple. */
@@ -5206,17 +5209,20 @@ translate(struct ctx *c)
         }
         int generic = oparg > 30 || nospec(c, c->pc);
         PyTypeObject *t = known_type(c, v);
-        int list = !generic
-            && (t == &PyList_Type || (t != &PyTuple_Type && (feedback(c, c->cache) & 0xff) == LU_KIND_LIST));
+        int kinds = t == &PyList_Type ? LU_KIND_LIST : t == &PyTuple_Type ? LU_KIND_TUPLE
+            : feedback(c, c->cache) & (LU_KIND_LIST | LU_KIND_TUPLE);
+        int fresh = generic || kinds & LU_KIND_LIST;
         lu_v items = v;
         if (generic) {
             lu_v args[2] = { v, const_i(c, oparg) };
             items = helper_raising(c, H_unpack, 2, args, 1);
         }
-        else if (list) {
-            guard_type(c, v, &PyList_Type);
+        else if (kinds & LU_KIND_LIST) {
+            if (kinds == LU_KIND_LIST) {
+                guard_type(c, v, &PyList_Type);
+            }
             lu_v args[2] = { v, const_i(c, oparg) };
-            items = helper_raising(c, H_list_to_tuple, 2, args, 0);
+            items = helper_raising(c, kinds == LU_KIND_LIST ? H_list_to_tuple : H_unpack_exact, 2, args, 0);
             guard_after(c, OP_GUARD_NOT_NULL, items, 1);
         }
         else {
@@ -5231,7 +5237,7 @@ translate(struct ctx *c)
             incref(c, item);
             push(c, item, 1);
         }
-        release(c, items, list || generic);
+        release(c, items, fresh);
         release(c, v, own);
         return 0;
     }
