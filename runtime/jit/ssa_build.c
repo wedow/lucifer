@@ -2013,6 +2013,15 @@ binary_op(struct ctx *c)
         lu_v args[2] = { a, b };
         r = helper_raising(c, H_bytes_concat, 2, args, 2);
     }
+    else if (op == NB_ADD && ((lk == LU_KIND_LIST && rk == LU_KIND_LIST) || (lk == LU_KIND_TUPLE && rk == LU_KIND_TUPLE))) {
+        /* And two exact lists, or tuples, into a new one. */
+        PyTypeObject *t = lk == LU_KIND_LIST ? &PyList_Type : &PyTuple_Type;
+        guard_type(c, a, t);
+        guard_type(c, b, t);
+        lu_v args[2] = { a, b };
+        r = helper_raising(c, H_seq_concat, 2, args, 2);
+        set_made(c, r, t);
+    }
     PyTypeObject *ta = known_type(c, a), *tb = known_type(c, b);
     int bitwise = base == NB_AND || base == NB_OR || base == NB_XOR;
     int ints = ta != NULL && tb != NULL && (ta == &PyLong_Type || (ta == &PyBool_Type && !bitwise))

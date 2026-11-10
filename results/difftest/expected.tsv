@@ -126,6 +126,7 @@ tests/diff/corpus/module_builtin_calls.py	NOTRUN	0.000000
 tests/diff/corpus/pattern_mapping_sequence.py	NOTRUN	0.000000
 tests/diff/corpus/raise_through_inlined.py	NOTRUN	0.000000
 tests/diff/corpus/repr_address_normalization.py	NOTRUN	0.000000
+tests/diff/corpus/seq_concat_paths.py	NOTRUN	0.000000
 tests/diff/corpus/shadowed_class_attrs.py	NOTRUN	0.000000
 tests/diff/corpus/slots_delete_descriptor.py	NOTRUN	0.000000
 tests/diff/corpus/slots_inheritance.py	NOTRUN	0.000000

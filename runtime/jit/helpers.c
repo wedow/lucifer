@@ -595,6 +595,10 @@ h_binary_op(PyObject *a, PyObject *b, int64_t op)
     else if ((op == NB_ADD || op == NB_INPLACE_ADD) && PyBytes_CheckExact(a) && PyBytes_CheckExact(b)) {
         return lu_bytes_concat(a, b);
     }
+    else if (op == NB_ADD && ((PyList_CheckExact(a) && PyList_CheckExact(b))
+                              || (PyTuple_CheckExact(a) && PyTuple_CheckExact(b)))) {
+        return lu_seq_concat(a, b);
+    }
     else {
         PyObject *r = lu_binary_foreign(a, b, (int)op);
         if (r != NULL || PyErr_Occurred()) {
@@ -1601,6 +1605,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, IF_SEEN, 1 },
     [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, IF_RAISE, 2 },
     [H_raise] = { (void *)h_raise, "raise", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_seq_concat] = { (void *)lu_seq_concat, "seq_concat", REP_OBJ, IF_RAISE, 2 },
     [H_float_pow] = { (void *)lu_float_pow, "float_pow", REP_OBJ, IF_RAISE, 2 },
     [H_bind_method] = { (void *)lu_bind_method, "bind_method", REP_OBJ, 0, 2 },
     [H_bytes_concat] = { (void *)lu_bytes_concat, "bytes_concat", REP_OBJ, IF_RAISE, 2 },

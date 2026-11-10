@@ -762,6 +762,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/seq_concat_paths.py": {
+      "exit": 0,
+      "sha256": "bad719ee4a245e35fc70d6733f841d8aff9eaf017017563d6c5064b854e56a37",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/shadowed_class_attrs.py": {
       "exit": 0,
       "sha256": "ec1d4a438ce37e9709622f0d7dfec3605cbb7899377964704b7b772f43734ed2",

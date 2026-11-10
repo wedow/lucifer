@@ -3720,11 +3720,14 @@ op_BINARY_OP: {
         }
         Py_DECREF(res);
     }
-    else if ((oparg == NB_ADD || oparg == NB_INPLACE_ADD)
-             && ((PyUnicode_CheckExact(left) && PyUnicode_CheckExact(right))
-                 || (PyBytes_CheckExact(left) && PyBytes_CheckExact(right)))) {
+    else if (((oparg == NB_ADD || oparg == NB_INPLACE_ADD)
+              && ((PyUnicode_CheckExact(left) && PyUnicode_CheckExact(right))
+                  || (PyBytes_CheckExact(left) && PyBytes_CheckExact(right))))
+             || (oparg == NB_ADD && ((PyList_CheckExact(left) && PyList_CheckExact(right))
+                                     || (PyTuple_CheckExact(left) && PyTuple_CheckExact(right))))) {
         SAVE_FRAME();
-        PyObject *res = PyBytes_CheckExact(left) ? lu_bytes_concat(left, right) : lu_str_concat(left, right);
+        PyObject *res = PyBytes_CheckExact(left) ? lu_bytes_concat(left, right)
+            : PyUnicode_CheckExact(left) ? lu_str_concat(left, right) : lu_seq_concat(left, right);
         ERROR_IF(res == NULL);
         sp--;
         TOP() = res;
