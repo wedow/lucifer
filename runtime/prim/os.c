@@ -15,6 +15,7 @@
 #include <netdb.h>
 #include <poll.h>
 #include <pty.h>
+#include <utmp.h>
 #include <sched.h>
 #include <pthread.h>
 #include <sys/resource.h>
@@ -759,6 +760,7 @@ union sys_arg {
     X(sys_getppid, "", getppid()) \
     X(sys_getpgrp, "", getpgrp()) \
     X(sys_setsid, "", setsid()) \
+    X(sys_login_tty, "i", login_tty((int)a[0].i)) \
     X(sys_kill, "ii", kill((pid_t)a[0].i, (int)a[1].i)) \
     X(sys_abort, "", (abort(), 0)) \
     X(sys_killpg, "ii", killpg((pid_t)a[0].i, (int)a[1].i)) \
@@ -910,6 +912,42 @@ prim_os_pipe(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     Py_XDECREF(r);
     Py_XDECREF(w);
     return t;
+}
+
+/* stdio_tty(in_fd, out_fd): whether they are C's stdin and stdout and both
+   terminals, so that input() may read through PyOS_Readline
+   (Python/bltinmodule.c builtin_input_impl). */
+static PyObject *
+prim_stdio_tty(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long in, out;
+    if (nargs != 2 || lu_long_as_long(args[0], &in) < 0 || lu_long_as_long(args[1], &out) < 0) {
+        return NULL;
+    }
+    return PyBool_FromLong(in == fileno(stdin) && isatty((int)in) && out == fileno(stdout) && isatty((int)out));
+}
+
+/* stdio_readline(prompt): a line of C's stdin through PyOS_Readline (the
+   readline module's editor once it is imported), b'' at EOF; KeyboardInterrupt
+   when it was interrupted. */
+static PyObject *
+prim_stdio_readline(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 1 || !PyBytes_Check(args[0])) {
+        lu_err_format(PyExc_TypeError, "stdio_readline() needs a bytes prompt");
+        return NULL;
+    }
+    char *s = PyOS_Readline(stdin, stdout, PyBytes_AS_STRING(args[0]));
+    if (s == NULL) {
+        PyErr_CheckSignals();
+        if (!PyErr_Occurred()) {
+            PyErr_SetNone(PyExc_KeyboardInterrupt);
+        }
+        return NULL;
+    }
+    PyObject *line = PyBytes_FromString(s);
+    PyMem_Free(s);
+    return line;
 }
 
 /* openpty(): (master, slave) of a new pseudo-terminal, neither inheritable. */
@@ -2096,6 +2134,8 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_urandom", (PyCFunction)(void (*)(void))prim_os_urandom, METH_FASTCALL, NULL },
     { "os_pipe", (PyCFunction)(void (*)(void))prim_os_pipe, METH_FASTCALL, NULL },
     { "os_openpty", (PyCFunction)(void (*)(void))prim_os_openpty, METH_FASTCALL, NULL },
+    { "stdio_tty", (PyCFunction)(void (*)(void))prim_stdio_tty, METH_FASTCALL, NULL },
+    { "stdio_readline", (PyCFunction)(void (*)(void))prim_stdio_readline, METH_FASTCALL, NULL },
     { "os_socketpair", (PyCFunction)(void (*)(void))prim_os_socketpair, METH_FASTCALL, NULL },
     { "os_sockaddr", (PyCFunction)(void (*)(void))prim_os_sockaddr, METH_FASTCALL, NULL },
     { "os_setsockopt", (PyCFunction)(void (*)(void))prim_os_setsockopt, METH_FASTCALL, NULL },

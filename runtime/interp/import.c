@@ -354,6 +354,10 @@ prim_ext_create(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
             && PyObject_SetAttrString(module, "__name__", name) < 0) {
             Py_CLEAR(module);
         }
+        /* found by PyState_FindModule, as fix_up_extension registers it */
+        if (module != NULL && md != NULL && PyState_AddModule(module, md) < 0) {
+            Py_CLEAR(module);
+        }
     }
     else if (!Py_IS_TYPE(def, &PyModuleDef_Type)) {
         lu_err_format(PyExc_ImportError, "initialization of %s did not return a module or a "

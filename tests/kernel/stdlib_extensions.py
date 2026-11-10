@@ -111,6 +111,46 @@ print('pty read', os.read(slave, 100))
 os.close(master)
 os.close(slave)
 
+# input() on a terminal reads through readline, which completes and records the history.
+import subprocess
+import sys
+master, slave = os.openpty()
+child = subprocess.Popen([sys.executable, '-c', "import readline; readline.parse_and_bind('tab: complete'); "
+                          "readline.set_completer(lambda text, state: [text + 'ped'][state] if state < 1 else None); "
+                          "s = input('> '); print('history', readline.get_current_history_length(), repr(s))"],
+                         stdin=slave, stdout=slave, stderr=slave)
+os.close(slave)
+os.write(master, b'ty\t line\n')
+output = b''
+while True:
+    try:
+        chunk = os.read(master, 1024)
+    except OSError:
+        break
+    if not chunk:
+        break
+    output += chunk
+os.close(master)
+print('tty input', child.wait(), output.replace(b'\r', b'').splitlines()[-1])
+
+import pty
+sys.stdout.flush()
+pid, master = pty.fork()
+if pid == 0:
+    print('child', os.isatty(0), os.getsid(0) == os.getpid(), flush=True)
+    os._exit(0)
+output = b''
+while True:
+    try:
+        chunk = os.read(master, 1024)
+    except OSError:
+        break
+    if not chunk:
+        break
+    output += chunk
+os.close(master)
+print('pty.fork', os.waitpid(pid, 0)[1], output.replace(b'\r', b''))
+
 syslog.openlog()
 syslog.closelog()
 print('syslog', syslog.LOG_MASK(syslog.LOG_ERR), syslog.LOG_UPTO(syslog.LOG_WARNING))
