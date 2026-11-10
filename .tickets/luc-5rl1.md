@@ -18,3 +18,7 @@ Corpus on the bench host, master (cd44643) -> luc-custom (1a04f48), ratio to CPy
 **2026-11-10T13:03:29Z**
 
 Fixed on luc-custom2 (74c5c68, 09166cf). Causes, by instructions of importing json, re, argparse and typing: class notes ran on all code with JIT state (callee notes give nearly every code state), every new class pair invalidated its dependents (16 recompiles against 5 before customization), and call arms in units of kernel code (getattr_hook serves every caller) left on 50 guard failures each. Now a site has a class table only after a build asked for it (the first pair recompiles, later ones go through guard exits), operand kinds are computed once per operator, and units compiled for kernel code take no call arms outside FOR_ITER steps. 811M on master -> 746M (733M before customization; the rest is the interpreter running the larger kernel, the same with the JIT off). cli+startup geomean ratio to CPython: 7.45 master, 7.04 branch, 6.91 before customization.
+
+**2026-11-10T16:16:57Z**
+
+Final luc-custom2 timing on the bench host, ratio to CPython 3.14t, master -> branch: cli+startup geomean 7.75 -> 7.14 (isort 8.61 -> 6.99, black 7.40 -> 7.03, python_startup 3.02 -> 2.92, concurrent_imap 54.4 -> 45.2); importing json, re, argparse and typing 818M -> 743M instructions (732M before customization).
