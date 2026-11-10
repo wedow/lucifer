@@ -1,6 +1,6 @@
 ---
 id: luc-udvi
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-10T09:01:35Z
