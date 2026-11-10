@@ -318,14 +318,23 @@ instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, ui
         Py_CLEAR(*descr);
         op = LOAD_ATTR_SLOT;
     }
-    else if (inline_index >= 0 && kind != DESCR_OTHER && (owner == NULL || lu_inline_live(owner))) {
+    else if (inline_index >= 0 && kind != DESCR_OTHER) {
         /* An inline value, which shadows a non-data attribute of the class:
            no instance of it has a dict that lacks the name for sure. An
-           instance whose values moved to a dict reads it by its hint. */
+           instance whose values moved to a dict reads it by its hint, when
+           its dict has the name (the class's value would ignore the inline
+           values of others). */
         size_t offset = (size_t)tp->tp_basicsize + (size_t)inline_index * LU_INLINE_STRIDE * sizeof(PyObject *);
-        if (offset <= UINT16_MAX) {
-            *second = (uint32_t)offset;
-            op = LOAD_ATTR_INSTANCE_VALUE;
+        Py_ssize_t hint;
+        if (owner == NULL || lu_inline_live(owner)) {
+            if (offset <= UINT16_MAX) {
+                *second = (uint32_t)offset;
+                op = LOAD_ATTR_INSTANCE_VALUE;
+            }
+        }
+        else if ((hint = dict_hint(owner, managed, name)) >= 0) {
+            *second = (uint32_t)hint;
+            op = LOAD_ATTR_WITH_HINT;
         }
         Py_CLEAR(*descr);
     }
