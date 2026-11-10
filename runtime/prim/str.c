@@ -416,6 +416,28 @@ prim_str_cmp(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 /* a + b for two strs. */
 static PyObject *join_items(PyObject *sep, PyObject *const *items, Py_ssize_t n);
 
+/* s's characters written at `at` of data (of kind `kind`, wide enough):
+   the position after them. */
+static Py_ssize_t
+copy_into(void *data, int kind, Py_ssize_t at, PyObject *s)
+{
+    Py_ssize_t len = PyUnicode_GET_LENGTH(s);
+    if (len == 0) {
+        return at;
+    }
+    int from = PyUnicode_KIND(s);
+    const void *src = PyUnicode_DATA(s);
+    if (from == kind) {
+        memcpy((char *)data + at * kind, src, (size_t)len * (size_t)kind);
+    }
+    else {
+        for (Py_ssize_t j = 0; j < len; j++) {
+            PyUnicode_WRITE(kind, data, at + j, PyUnicode_READ(from, src, j));
+        }
+    }
+    return at + len;
+}
+
 PyObject *
 lu_str_concat(PyObject *a, PyObject *b)
 {
@@ -671,24 +693,12 @@ join_items(PyObject *sep, PyObject *const *items, Py_ssize_t n)
     }
     int kind = PyUnicode_KIND(result);
     void *data = PyUnicode_DATA(result);
-    Py_ssize_t at = 0;
+    Py_ssize_t at = 0, seplen = PyUnicode_GET_LENGTH(sep);
     for (Py_ssize_t i = 0; i < n; i++) {
-        PyObject *parts[2] = { sep, items[i] };
-        for (int p = i == 0; p < 2; p++) {
-            PyObject *s = parts[p];
-            int from = PyUnicode_KIND(s);
-            const void *src = PyUnicode_DATA(s);
-            Py_ssize_t len = PyUnicode_GET_LENGTH(s);
-            if (from == kind) {
-                memcpy((char *)data + at * kind, src, len * kind);
-            }
-            else {
-                for (Py_ssize_t j = 0; j < len; j++) {
-                    PyUnicode_WRITE(kind, data, at + j, PyUnicode_READ(from, src, j));
-                }
-            }
-            at += len;
+        if (i > 0 && seplen > 0) {
+            at = copy_into(data, kind, at, sep);
         }
+        at = copy_into(data, kind, at, items[i]);
     }
     PyUnicode_WRITE(kind, data, length, 0);
     return result;
