@@ -8,7 +8,7 @@ from _lucifer import (
     str_join, error, kind, type_lookup, type_tp_name, MISSING, static_type, is_callable,
     is_subtype, size, int_format, int_add, int_as_double, str_chr, str_ord, bytes_ord, str_len,
     object_id, caller_locals, caller_globals, caller_code_flags, eval_code, kernel_get, kernel_set,
-    import_state, field_get, setattr_native, compile as _lucifer_compile,
+    import_state, field_get, setattr_native, compile as _lucifer_compile, stdio_tty, stdio_readline,
 )
 from _lucifer import _boot, _format, operators, _args, iter as _iter, object as _object
 import sys
@@ -929,6 +929,36 @@ def _stream(name):
     return stream
 
 
+def _tty_input(stdin, stdout, prompt):
+    """input() through PyOS_Readline when sys.stdin and sys.stdout are C's
+    terminal stdin and stdout (builtin_input_impl), else MISSING."""
+    try:
+        if not stdio_tty(stdin.fileno(), stdout.fileno()):
+            return MISSING
+        in_encoding, in_errors = stdin.encoding, stdin.errors
+        out_encoding, out_errors = stdout.encoding, stdout.errors
+    except BaseException:
+        return MISSING
+    if not (kind(in_encoding, 'str') and kind(in_errors, 'str')
+            and kind(out_encoding, 'str') and kind(out_errors, 'str')):
+        return MISSING
+    try:
+        stdout.flush()
+    except BaseException:
+        pass
+    encoded = b''
+    if prompt is not MISSING:
+        encoded = to_str(prompt).encode(out_encoding, out_errors)
+        if b'\0' in encoded:
+            error(ValueError, 'input: prompt string cannot contain null characters')
+    line = stdio_readline(encoded)
+    if not line:
+        error(EOFError, 'EOF when reading a line')
+    if line[-1:] == b'\n':
+        line = line[:-1]
+    return line.decode(in_encoding, in_errors)
+
+
 def input(prompt=MISSING, /):
     """Read a string from standard input.  The trailing newline is stripped.
 
@@ -944,6 +974,9 @@ On *nix systems, readline is used if available."""
         stderr.flush()
     except BaseException:
         pass
+    line = _tty_input(stdin, stdout, prompt)
+    if line is not MISSING:
+        return line
     if prompt is not MISSING:
         stdout.write(to_str(prompt))
     stdout.flush()

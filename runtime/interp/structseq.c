@@ -24,8 +24,10 @@ kernel_function(const char *name)
     return f;
 }
 
-PyTypeObject *
-PyStructSequence_NewType(PyStructSequence_Desc *desc)
+/* The type of desc; Py_TPFLAGS_DISALLOW_INSTANTIATION is the one flag of
+   tp_flags with an effect: only C can make instances. */
+LU_EXPORT PyTypeObject *
+_PyStructSequence_NewType(PyStructSequence_Desc *desc, unsigned long tp_flags)
 {
     Py_ssize_t n = 0;
     while (desc->fields[n].name != NULL) {
@@ -43,15 +45,22 @@ PyStructSequence_NewType(PyStructSequence_Desc *desc)
         PyTuple_SET_ITEM(fields, i, field);
     }
     PyObject *f = fields != NULL ? kernel_function("structseq_type") : NULL;
-    PyObject *args[4] = { PyUnicode_FromString(desc->name),
+    PyObject *args[5] = { PyUnicode_FromString(desc->name),
                           desc->doc != NULL ? PyUnicode_FromString(desc->doc) : Py_NewRef(Py_None),
-                          fields, PyLong_FromLong(desc->n_in_sequence) };
+                          fields, PyLong_FromLong(desc->n_in_sequence),
+                          PyBool_FromLong(!(tp_flags & Py_TPFLAGS_DISALLOW_INSTANTIATION)) };
     PyObject *type = f != NULL && args[0] != NULL && args[1] != NULL && args[3] != NULL
-        ? lu_call(f, args, 4, NULL) : NULL;
-    for (int i = 0; i < 4; i++) {
+        ? lu_call(f, args, 5, NULL) : NULL;
+    for (int i = 0; i < 5; i++) {
         Py_XDECREF(args[i]);
     }
     return (PyTypeObject *)type;
+}
+
+PyTypeObject *
+PyStructSequence_NewType(PyStructSequence_Desc *desc)
+{
+    return _PyStructSequence_NewType(desc, 0);
 }
 
 PyObject *

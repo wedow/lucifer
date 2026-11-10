@@ -340,15 +340,7 @@ lu_fileobject_init(void)
    filesystem encoding, fopen() with the GIL released and EINTR retried, and
    raise OSError (with the filename) from errno on failure. */
 
-static int
-set_cloexec(int fd)
-{
-    if (lu_set_cloexec(fd) < 0) {
-        PyErr_SetFromErrno(PyExc_OSError);
-        return -1;
-    }
-    return 0;
-}
+extern int _Py_set_inheritable(int fd, int inheritable, int *atomic_flag_works);   /* prim/os.c */
 
 FILE *
 Py_fopen(PyObject *path, const char *mode)
@@ -383,7 +375,7 @@ Py_fopen(PyObject *path, const char *mode)
         return NULL;
     }
 
-    if (set_cloexec(fileno(f)) < 0) {
+    if (_Py_set_inheritable(fileno(f), 0, NULL) < 0) {
         fclose(f);
         return NULL;
     }

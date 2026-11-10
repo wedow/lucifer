@@ -1888,6 +1888,19 @@ prim_int_is_zero(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return view(args[0]).n == 0 ? Py_True : Py_False;
 }
 
+/* The methods C reads from int's tp_methods, as in CPython (_decimal calls
+   bit_length through it); the kernel's definitions replace them in the dict. */
+static PyObject *
+int_bit_length(PyObject *self, PyObject *unused)
+{
+    return prim_int_bit_length(NULL, &self, 1);
+}
+
+PyMethodDef lu_long_methods[] = {
+    { "bit_length", int_bit_length, METH_NOARGS, NULL },
+    { NULL, NULL, 0, NULL },
+};
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_int_methods[] = {
     FAST(int_add), FAST(int_sub), FAST(int_mul), FAST(int_floordiv), FAST(int_mod),

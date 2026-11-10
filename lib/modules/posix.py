@@ -565,6 +565,23 @@ def pipe():
     return _lucifer.os_pipe()
 
 
+def openpty():
+    """Open a pseudo-terminal.
+
+Return a tuple of (master_fd, slave_fd) containing open file descriptors
+for both the master and slave ends."""
+    return _lucifer.os_openpty()
+
+
+def login_tty(fd, /):
+    """Prepare the tty of which fd is a file descriptor for a new login session.
+
+Make the calling process a session leader; make the tty the
+controlling tty, the stdin, the stdout, and the stderr of the
+calling process; close fd."""
+    _call('login_tty', fd)
+
+
 uname_result = _lucifer.structseq.structseq_type(
     'posix.uname_result', 'uname_result: Result from os.uname().\n\n'
     'This object may be accessed either as a tuple of\n'

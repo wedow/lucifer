@@ -881,6 +881,8 @@ lu_types_init(PyInterpreterState *interp)
 {
     PyBaseObject_Type.tp_basicsize = sizeof(PyObject);
     PyBaseObject_Type.tp_dealloc = object_dealloc;
+    PyFloat_Type.tp_methods = lu_float_methods;
+    PyLong_Type.tp_methods = lu_long_methods;
     PyType_Type.tp_basicsize = sizeof(PyHeapTypeObject);
     PyType_Type.tp_itemsize = sizeof(PyMemberDef);
     PyType_Type.tp_alloc = PyType_GenericAlloc;

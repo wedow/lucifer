@@ -33,7 +33,9 @@ strings made on first use (CPython's are objects inside `_PyRuntime`), and no
 library's extension modules below are the tag's own `Modules/` sources, copied
 verbatim with their `clinic/` headers, and built against `include/` and
 `Include/internal/` into `lib-dynload` (Makefile `STDLIB_EXTS`), linked to the
-system's OpenSSL, SQLite, bzip2 and Expat:
+system's OpenSSL, SQLite, bzip2 and Expat, and, where their headers are found,
+Tcl/Tk, liblzma, zstd, ncursesw, gdbm (and its ndbm compatibility library),
+readline, libmpdec and libuuid:
 
 - `_ssl.c`, `_ssl.h`, `_ssl/`, `_ssl_data_*.h`, `socketmodule.h` (`_ssl`)
 - `_sqlite/` (`_sqlite3`), `_bz2module.c` (`_bz2`), `cmathmodule.c` and `_math.h` (`cmath`)
@@ -41,9 +43,20 @@ system's OpenSSL, SQLite, bzip2 and Expat:
 - `_multiprocessing/` (`_multiprocessing`, `_posixshmem`)
 - `cjkcodecs/` (`_multibytecodec`, `_codecs_cn`, `_codecs_hk`, `_codecs_iso2022`,
   `_codecs_jp`, `_codecs_kr`, `_codecs_tw`)
+- `_tkinter.c`, `tkinter.h` and `tkappinit.c` (`_tkinter`), `_lzmamodule.c` (`_lzma`),
+  `_zstd/` (`_zstd`), `_cursesmodule.c` (`_curses`), `_curses_panel.c` (`_curses_panel`)
+- `_dbmmodule.c` (`_dbm`), `_gdbmmodule.c` (`_gdbm`), `readline.c` (`readline`),
+  `termios.c` (`termios`), `syslogmodule.c` (`syslog`), `_uuidmodule.c` (`_uuid`)
+- `_decimal/_decimal.c` and `_decimal/docstrings.h` (`_decimal`, over the system's
+  libmpdec, else over `_decimal/libmpdec/`: the sources and headers of the tag's
+  `LIBMPDEC_OBJS`, built with its x64 flags)
 
 `runtime/capi/internal.c` holds `_PyBytesWriter_*` of `Objects/bytesobject.c`,
 adapted (no debug-build checks).
+`runtime/prim/os.c` holds `_Py_set_inheritable` and `_Py_open_noraise` of
+`Python/fileutils.c` (fcntl only, no ioctl fast path), `runtime/interp/signals.c`
+`PyOS_getsig` and `PyOS_setsig` of `Python/pylifecycle.c`, and
+`runtime/object/capsule.c` `_PyCapsule_SetTraverse` of `Objects/capsule.c`.
 
 ## include/
 

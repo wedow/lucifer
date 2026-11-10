@@ -5,6 +5,7 @@
    public API. */
 
 #include "lucifer.h"
+#include <locale.h>
 #include <string.h>
 
 /* _Py_ID and _Py_LATIN1_CHR as the vendored pycore_global_strings.h defines
@@ -246,22 +247,64 @@ _PyObject_GenericGetAttrWithDict(PyObject *obj, PyObject *name, PyObject *dict, 
     return result;
 }
 
+/* sys.NAME as a new reference: 1 if set, 0 (and NULL) if not, -1 on error. */
+LU_EXPORT int
+_PySys_GetOptionalAttrString(const char *name, PyObject **value)
+{
+    return PyDict_GetItemStringRef(PyInterpreterState_Get()->sysdict, name, value);
+}
+
+LU_EXPORT int
+_PySys_GetOptionalAttr(PyObject *name, PyObject **value)
+{
+    if (!PyUnicode_Check(name)) {
+        PyErr_Format(PyExc_TypeError, "attribute name must be string, not '%.200s'", Py_TYPE(name)->tp_name);
+        *value = NULL;
+        return -1;
+    }
+    return PyDict_GetItemRef(PyInterpreterState_Get()->sysdict, name, value);
+}
+
 /* sys.NAME, or RuntimeError when it is gone. */
 LU_EXPORT PyObject *
 _PySys_GetRequiredAttr(PyObject *name)
 {
-    if (!PyUnicode_Check(name)) {
-        PyErr_Format(PyExc_TypeError, "attribute name must be string, not '%.200s'", Py_TYPE(name)->tp_name);
-        return NULL;
+    PyObject *value;
+    if (_PySys_GetOptionalAttr(name, &value) == 0) {
+        PyErr_Format(PyExc_RuntimeError, "lost sys.%U", name);
     }
-    PyObject *value = PySys_GetObject(PyUnicode_AsUTF8(name));
-    if (value == NULL) {
-        if (!PyErr_Occurred()) {
-            PyErr_Format(PyExc_RuntimeError, "lost sys.%U", name);
-        }
-        return NULL;
+    return value;
+}
+
+/* int.__format__ of base 2, 8, 10 or 16, with the 0b/0o/0x prefix. */
+LU_EXPORT PyObject *
+_PyLong_Format(PyObject *obj, int base)
+{
+    return PyNumber_ToBase(obj, base);
+}
+
+LU_EXPORT PyObject *
+_PyUnicode_AsUTF8String(PyObject *unicode, const char *errors)
+{
+    return PyUnicode_AsEncodedString(unicode, "utf-8", errors);
+}
+
+/* exception(string), the message decoded from the locale encoding. */
+LU_EXPORT void
+_PyErr_SetLocaleString(PyObject *exception, const char *string)
+{
+    PyObject *value = PyUnicode_DecodeLocale(string, "surrogateescape");
+    if (value != NULL) {
+        PyErr_SetObject(exception, value);
+        Py_DECREF(value);
     }
-    return Py_NewRef(value);
+}
+
+/* setlocale(category, "") (Python/pylifecycle.c). */
+LU_EXPORT char *
+_Py_SetLocaleFromEnv(int category)
+{
+    return setlocale(category, "");
 }
 
 /* sys.getsizeof(o), or (size_t)-1 with an exception. */

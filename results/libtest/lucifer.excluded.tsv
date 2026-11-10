@@ -54,3 +54,4 @@ test.test_call.TestPEP590.test_vectorcall	hangs the worker until the module time
 test.test_call.TestRecursion.test_super_deep	deep C recursion overflows the C stack and segfaults the worker (luc-mci3)
 test.test_statistics.TestKDE.test_kde_random	grows the worker past 20 GB, which kills the whole run at the test host's memory cap (luc-wy7i)
 test.test_struct.StructTest.test_count_overflow	grows the worker past 8 GB, which kills the whole run at the test host's memory cap (luc-wy7i)
+test.test_int.PyLongModuleTests.test_pylong_roundtrip_huge	converts a 10-million-digit int to and from str; without _pylong's subquadratic paths it outlives the module timeout (luc-bfil)

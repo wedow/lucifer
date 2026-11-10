@@ -928,3 +928,33 @@ PyLong_FromUnsignedNativeBytes(const void *buffer, size_t n, int flags)
     resolve_endianness(&little_endian);
     return _PyLong_FromByteArray((const unsigned char *)buffer, n, little_endian, 0);
 }
+
+/* gcd(a, b) of two ints, by Euclid's algorithm over the number protocol;
+   always non-negative (Objects/longobject.c computes the same by Lehmer's). */
+PyObject *
+_PyLong_GCD(PyObject *a, PyObject *b)
+{
+    PyObject *x = PyNumber_Absolute(a);
+    PyObject *y = x != NULL ? PyNumber_Absolute(b) : NULL;
+    if (y == NULL) {
+        Py_XDECREF(x);
+        return NULL;
+    }
+    for (;;) {
+        int zero = PyObject_Not(y);
+        if (zero != 0) {
+            Py_DECREF(y);
+            if (zero < 0) {
+                Py_CLEAR(x);
+            }
+            return x;
+        }
+        PyObject *r = PyNumber_Remainder(x, y);
+        Py_SETREF(x, y);
+        if (r == NULL) {
+            Py_DECREF(x);
+            return NULL;
+        }
+        y = r;
+    }
+}

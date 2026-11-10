@@ -11,6 +11,8 @@ typedef struct {
     const char *name;
     void *context;
     PyCapsule_Destructor destructor;
+    traverseproc traverse_func;     /* what the pointer holds, for the collector */
+    inquiry clear_func;
 } capsule;
 
 static void
@@ -23,12 +25,28 @@ capsule_dealloc(PyObject *op)
     lu_object_free(op);
 }
 
+static int
+capsule_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    capsule *c = (capsule *)op;
+    return c->traverse_func != NULL ? c->traverse_func(op, visit, arg) : 0;
+}
+
+static int
+capsule_clear(PyObject *op)
+{
+    capsule *c = (capsule *)op;
+    return c->clear_func != NULL ? c->clear_func(op) : 0;
+}
+
 void
 lu_capsule_init(void)
 {
     PyCapsule_Type.tp_basicsize = sizeof(capsule);
-    PyCapsule_Type.tp_flags |= Py_TPFLAGS_DEFAULT;
+    PyCapsule_Type.tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
     PyCapsule_Type.tp_dealloc = capsule_dealloc;
+    PyCapsule_Type.tp_traverse = capsule_traverse;
+    PyCapsule_Type.tp_clear = capsule_clear;
 }
 
 PyObject *
@@ -188,4 +206,22 @@ done:
     Py_XDECREF(object);
     PyMem_Free(copy);
     return result;
+}
+
+/* Lets the collector see the references the capsule's pointer holds
+   (Objects/capsule.c). */
+LU_EXPORT int
+_PyCapsule_SetTraverse(PyObject *op, traverseproc traverse_func, inquiry clear_func)
+{
+    capsule *c = valid(op, "_PyCapsule_SetTraverse");
+    if (c == NULL) {
+        return -1;
+    }
+    if (traverse_func == NULL || clear_func == NULL) {
+        PyErr_SetString(PyExc_ValueError, "_PyCapsule_SetTraverse() called with NULL callback");
+        return -1;
+    }
+    c->traverse_func = traverse_func;
+    c->clear_func = clear_func;
+    return 0;
 }
