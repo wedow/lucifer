@@ -22,3 +22,7 @@ Levers, general: (1) version a compiled loop on its iterator's exact type at the
 **2026-11-10T19:50:29Z**
 
 Done on luc-custom3 (a3b985e): the generic step votes for the class it meets in the site's class table (majority vote); a winner joins the site's armed classes (up to four, each doubling the votes the next needs), and the unit recompiles with a class test per armed class, the step in line for it, and the generic step for the rest. A call of next_item counts as a step (in_step), so the frames it inlines call what they call. The generic step calls a Python class's __next__ itself (StopIteration its end) instead of the kernel's next_item. mako per loop 765M -> 627M instructions (master 629M). The join over a deque after eleven classes: 217 -> 122 ns per item (CPython 10 ns); what is left is the deque iterator's own Python body (slot loads through helpers, the counter boxed). A user class's __next__ that ends by raising StopIteration still leaves its inlined copy at the raise (its frame needs a traceback entry), so the unit calls it instead: through the cheap generic step, one compiled call per item. Lane: jitcheck megaiter.
+
+**2026-11-10T20:39:40Z**
+
+Wall on luc-custom3 9363b1f+ (master d3596b0 merged), ratio to CPython 3.14t: mako 4.22 master -> 3.92 branch; 15 programs 2.152 -> 1.753; cli 7.126 -> 6.956. AWFY branch/master 1.018 wall, with instructions per iteration equal or lower on Bounce, DeltaBlue, Richards, Queens and Towers. Five gates pass.
