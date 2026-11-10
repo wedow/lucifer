@@ -14,6 +14,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <poll.h>
+#include <pty.h>
 #include <sched.h>
 #include <pthread.h>
 #include <sys/resource.h>
@@ -76,19 +77,47 @@ _Py_IsValidFD(int fd)
     return fd >= 0 && LU_SYSCALL(fcntl(fd, F_GETFD)) >= 0;
 }
 
-/* write(2) and fcntl(F_SETFD) for the file C-API (Objects/fileobject.c's
-   stdprinter and Py_fopen): the blocking symbols live only here. */
+/* write(2) for the file C-API (Objects/fileobject.c's stdprinter): the
+   blocking symbols live only here. */
 Py_ssize_t
 lu_write_fd(int fd, const void *buf, size_t count)
 {
     return LU_SYSCALL(write(fd, buf, count));
 }
 
-int
-lu_set_cloexec(int fd)
+/* _Py_set_inheritable (Python/fileutils.c), by fcntl(F_SETFD): sets or clears
+   FD_CLOEXEC and raises OSError on failure. atomic_flag_works caches whether
+   the descriptor was made non-inheritable atomically at creation. */
+LU_EXPORT int
+_Py_set_inheritable(int fd, int inheritable, int *atomic_flag_works)
 {
     int flags = LU_SYSCALL(fcntl(fd, F_GETFD));
-    return flags < 0 ? -1 : LU_SYSCALL(fcntl(fd, F_SETFD, flags | FD_CLOEXEC));
+    if (flags >= 0 && atomic_flag_works != NULL && !inheritable) {
+        if (*atomic_flag_works == -1) {
+            *atomic_flag_works = (flags & FD_CLOEXEC) != 0;
+        }
+        if (*atomic_flag_works) {
+            return 0;
+        }
+    }
+    int wanted = inheritable ? flags & ~FD_CLOEXEC : flags | FD_CLOEXEC;
+    if (flags < 0 || (wanted != flags && LU_SYSCALL(fcntl(fd, F_SETFD, wanted)) < 0)) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return -1;
+    }
+    return 0;
+}
+
+/* _Py_open_noraise (Python/fileutils.c): open(2), non-inheritable, with EINTR
+   retried; -1 and errno on failure, no exception. */
+LU_EXPORT int
+_Py_open_noraise(const char *pathname, int flags)
+{
+    int fd;
+    do {
+        fd = LU_SYSCALL(open(pathname, flags | O_CLOEXEC));
+    } while (fd < 0 && errno == EINTR);
+    return fd;
 }
 
 void
@@ -880,6 +909,26 @@ prim_os_pipe(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *t = r != NULL && w != NULL ? PyTuple_Pack(2, r, w) : NULL;
     Py_XDECREF(r);
     Py_XDECREF(w);
+    return t;
+}
+
+/* openpty(): (master, slave) of a new pseudo-terminal, neither inheritable. */
+static PyObject *
+prim_os_openpty(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    int master, slave;
+    if (LU_SYSCALL(openpty(&master, &slave, NULL, NULL, NULL)) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    PyObject *t = NULL;
+    if (_Py_set_inheritable(master, 0, NULL) == 0 && _Py_set_inheritable(slave, 0, NULL) == 0) {
+        t = Py_BuildValue("(ii)", master, slave);
+    }
+    if (t == NULL) {
+        LU_SYSCALL(close(master));
+        LU_SYSCALL(close(slave));
+    }
     return t;
 }
 
@@ -2046,6 +2095,7 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_readlink", (PyCFunction)(void (*)(void))prim_os_readlink, METH_FASTCALL, NULL },
     { "os_urandom", (PyCFunction)(void (*)(void))prim_os_urandom, METH_FASTCALL, NULL },
     { "os_pipe", (PyCFunction)(void (*)(void))prim_os_pipe, METH_FASTCALL, NULL },
+    { "os_openpty", (PyCFunction)(void (*)(void))prim_os_openpty, METH_FASTCALL, NULL },
     { "os_socketpair", (PyCFunction)(void (*)(void))prim_os_socketpair, METH_FASTCALL, NULL },
     { "os_sockaddr", (PyCFunction)(void (*)(void))prim_os_sockaddr, METH_FASTCALL, NULL },
     { "os_setsockopt", (PyCFunction)(void (*)(void))prim_os_setsockopt, METH_FASTCALL, NULL },

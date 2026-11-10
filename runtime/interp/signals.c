@@ -270,6 +270,27 @@ prim_signal_ignored(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(sa.sa_handler == SIG_IGN ? Py_True : Py_False);
 }
 
+/* PyOS_getsig and PyOS_setsig (Python/pylifecycle.c): a C handler for an
+   extension, installed with sigaction as signal.signal installs its own. */
+PyOS_sighandler_t
+PyOS_getsig(int sig)
+{
+    struct sigaction context;
+    return sigaction(sig, NULL, &context) < 0 ? SIG_ERR : context.sa_handler;
+}
+
+PyOS_sighandler_t
+PyOS_setsig(int sig, PyOS_sighandler_t handler)
+{
+    struct sigaction context, ocontext;
+    memset(&context, 0, sizeof context);
+    context.sa_handler = handler;
+    sigemptyset(&context.sa_mask);
+    /* SA_ONSTACK so that a handler can run on the fault handler's stack. */
+    context.sa_flags = SA_ONSTACK;
+    return sigaction(sig, &context, &ocontext) < 0 ? SIG_ERR : ocontext.sa_handler;
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_signal_methods[] = {
     FAST(signal_install), FAST(signal_raise), FAST(signal_interrupt), FAST(signal_ignored),

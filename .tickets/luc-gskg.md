@@ -18,3 +18,7 @@ Found while closing luc-d5u1. `bin/lucifer -X lucifer_jit=off -m test test_pdb` 
 **2026-11-09T09:18:51Z**
 
 Still zeroes test_pdb (152 cases) in the full Lib/test run of 2026-11-09.
+
+**2026-11-10T03:53:52Z**
+
+With termios built (luc-clibs), test_pyrepl imports and reaches the same compile() segfault from codeop._maybe_compile (test_interact.test_incomplete_statement): all 265 of its cases are CRASH (CPython 3.14t: 204 PASS, 61 SKIP).

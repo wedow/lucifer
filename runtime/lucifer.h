@@ -118,7 +118,6 @@ struct lu_lot_bucket {
 PyThreadState *lu_syscall_begin(void);
 void lu_syscall_end(PyThreadState *ts);
 Py_ssize_t lu_write_fd(int fd, const void *buf, size_t count);
-int lu_set_cloexec(int fd);
 /* Evaluates the blocking call `call` between the two, which keeps errno. */
 #define LU_SYSCALL(call) ({ \
         PyThreadState *lu_ts_ = lu_syscall_begin(); \
@@ -1360,6 +1359,7 @@ PyObject *lu_type_fullyqualname(PyTypeObject *type, char sep);
    __new__ of a type with a tp_new into its dict (typespec.c). */
 const char *lu_doc_without_signature(const char *name, const char *doc);
 int lu_type_add_methods(PyTypeObject *tp, PyObject *dict);
+extern PyMethodDef lu_float_methods[], lu_long_methods[];   /* prim/float.c, prim/int.c */
 int lu_type_add_new_wrapper(PyTypeObject *tp, PyObject *dict);
 void lu_free_object(void *p);
 /* PyType_Modified: tells tp's watchers, then tp and its subclasses lose

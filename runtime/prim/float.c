@@ -1081,6 +1081,20 @@ prim_float_fromhex(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return NULL;
 }
 
+/* The methods C reads from float's tp_methods, as in CPython (_decimal calls
+   as_integer_ratio through it); the kernel's definitions replace them in the
+   dict. */
+static PyObject *
+float_as_integer_ratio(PyObject *self, PyObject *unused)
+{
+    return prim_float_as_ratio(NULL, &self, 1);
+}
+
+PyMethodDef lu_float_methods[] = {
+    { "as_integer_ratio", float_as_integer_ratio, METH_NOARGS, NULL },
+    { NULL, NULL, 0, NULL },
+};
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_float_methods[] = {
     FAST(float_add), FAST(float_sub), FAST(float_mul), FAST(float_truediv), FAST(float_floordiv),
