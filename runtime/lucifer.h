@@ -1536,6 +1536,8 @@ PyObject *lu_binary_foreign(PyObject *a, PyObject *b, int op);
    load_special binds it: a new reference, or NULL (no error) for the
    kernel to look it up. */
 PyObject *lu_special_function(PyObject *owner, int which);
+/* a + b for two exact bytes. */
+PyObject *lu_bytes_concat(PyObject *a, PyObject *b);
 /* Whether lu_binary_foreign takes the operator for operands of these types. */
 int lu_binary_is_foreign(PyTypeObject *ta, PyTypeObject *tb, int op);
 /* container[start:stop] for an exact list, tuple, str or bytes by machine-int

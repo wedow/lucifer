@@ -3716,10 +3716,11 @@ op_BINARY_OP: {
         }
         Py_DECREF(res);
     }
-    else if ((oparg == NB_ADD || oparg == NB_INPLACE_ADD) && PyUnicode_CheckExact(left)
-             && PyUnicode_CheckExact(right)) {
+    else if ((oparg == NB_ADD || oparg == NB_INPLACE_ADD)
+             && ((PyUnicode_CheckExact(left) && PyUnicode_CheckExact(right))
+                 || (PyBytes_CheckExact(left) && PyBytes_CheckExact(right)))) {
         SAVE_FRAME();
-        PyObject *res = lu_str_concat(left, right);
+        PyObject *res = PyBytes_CheckExact(left) ? lu_bytes_concat(left, right) : lu_str_concat(left, right);
         ERROR_IF(res == NULL);
         sp--;
         TOP() = res;

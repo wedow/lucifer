@@ -592,6 +592,9 @@ h_binary_op(PyObject *a, PyObject *b, int64_t op)
     else if ((op == NB_ADD || op == NB_INPLACE_ADD) && PyUnicode_CheckExact(a) && PyUnicode_CheckExact(b)) {
         return lu_str_concat(a, b);
     }
+    else if ((op == NB_ADD || op == NB_INPLACE_ADD) && PyBytes_CheckExact(a) && PyBytes_CheckExact(b)) {
+        return lu_bytes_concat(a, b);
+    }
     else {
         PyObject *r = lu_binary_foreign(a, b, (int)op);
         if (r != NULL || PyErr_Occurred()) {
@@ -1592,6 +1595,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, IF_SEEN, 1 },
     [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, IF_RAISE, 2 },
     [H_raise] = { (void *)h_raise, "raise", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_bytes_concat] = { (void *)lu_bytes_concat, "bytes_concat", REP_OBJ, IF_RAISE, 2 },
     [H_raise_tb] = { (void *)h_raise_tb, "raise_tb", REP_OBJ, IF_RAISE | IF_PY, 4 },
     [H_reraise] = { (void *)h_reraise, "reraise", REP_OBJ, IF_RAISE, 1 },
     [H_load_special] = { (void *)h_load_special, "load_special", REP_OBJ, IF_RAISE | IF_PY, 2 },

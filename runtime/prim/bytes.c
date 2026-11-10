@@ -1965,6 +1965,24 @@ PyBytes_Join(PyObject *sep, PyObject *iterable)
     return r;
 }
 
+PyObject *
+lu_bytes_concat(PyObject *a, PyObject *b)
+{
+    Py_ssize_t na = PyBytes_GET_SIZE(a), nb = PyBytes_GET_SIZE(b);
+    if (na == 0 || nb == 0) {
+        return Py_NewRef(na == 0 ? b : a);
+    }
+    if (na > PY_SSIZE_T_MAX - nb) {
+        return PyErr_NoMemory();
+    }
+    PyObject *r = PyBytes_FromStringAndSize(NULL, na + nb);
+    if (r != NULL) {
+        memcpy(PyBytes_AS_STRING(r), PyBytes_AS_STRING(a), na);
+        memcpy(PyBytes_AS_STRING(r) + na, PyBytes_AS_STRING(b), nb);
+    }
+    return r;
+}
+
 /* Objects/bytesobject.c PyBytes_Concat over bytes_concat: raw buffers on
    both sides, so a strided view or a non-buffer raises TypeError rather
    than going through the constructor.  CPython appends in place when the

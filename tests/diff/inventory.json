@@ -162,6 +162,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/bytes_concat_paths.py": {
+      "exit": 0,
+      "sha256": "7061c7058bf9d79e7163ffa7bde480108332a90b235eacdfbeac08c7d533c1f5",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/class_attribute_delete.py": {
       "exit": 0,
       "sha256": "d37484bb53983ec1409c59beb86286b9ef8bae66fc727cfac8e05f5935039977",

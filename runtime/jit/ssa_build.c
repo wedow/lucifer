@@ -1998,6 +1998,13 @@ binary_op(struct ctx *c)
         lu_v args[2] = { a, b };
         r = helper_raising(c, H_str_concat, 2, args, 2);
     }
+    else if (lk == LU_KIND_BYTES && rk == LU_KIND_BYTES && base == NB_ADD) {
+        /* So do two exact bytes. */
+        guard_type(c, a, &PyBytes_Type);
+        guard_type(c, b, &PyBytes_Type);
+        lu_v args[2] = { a, b };
+        r = helper_raising(c, H_bytes_concat, 2, args, 2);
+    }
     PyTypeObject *ta = known_type(c, a), *tb = known_type(c, b);
     int bitwise = base == NB_AND || base == NB_OR || base == NB_XOR;
     int ints = ta != NULL && tb != NULL && (ta == &PyLong_Type || (ta == &PyBool_Type && !bitwise))
