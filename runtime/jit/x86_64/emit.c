@@ -3772,11 +3772,19 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     for (int b = 0; b < f->nblocks; b++) {
         labels[b] = new_label(a);
     }
+    /* A block runs all its code each time it runs. One larger than the
+       core's L2 cache streams from farther out every time, slower than
+       the interpreter, whose own code stays near: such code is not
+       compiled (measured on pyperformance's unpack_sequence, 400
+       unpackings in one block of a loop: 1 MB, twice the interpreter's
+       time per unpacking). */
+    long l2 = sysconf(_SC_LEVEL2_CACHE_SIZE);
     for (int k = 0; k < f->norder; k++) {
         int b = f->order[k];
         struct lu_block *bl = &f->blocks[b];
         bind(a, labels[b]);
         int next = k + 1 < f->norder ? f->order[k + 1] : -1;
+        int start = a->n;
         for (int i = 0; i < bl->nins; i++) {
             int k = unit->counts != NULL ? lu_count_kind(I(a, bl->ins[i])) : -1;
             if (k >= 0 && a->gmode[bl->ins[i]] != GM_NONE) {
@@ -3792,6 +3800,12 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
                 free_settle(a);
                 return -1;
             }
+        }
+        if (l2 > 0 && a->n - start > l2) {
+            f->fail = "a block larger than the L2 cache";
+            free(labels);
+            free_settle(a);
+            return -1;
         }
         lu_v last = bl->nins ? bl->ins[bl->nins - 1] : LU_NOV;
         struct lu_ins *term = last != LU_NOV ? &f->ins[last] : NULL;
