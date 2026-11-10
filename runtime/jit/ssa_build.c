@@ -1981,8 +1981,10 @@ binary_op(struct ctx *c)
             r = LU_NOV;
         }
         c->island = NULL;
-        if (r == LU_NOV && !c->failed && base == NB_POWER && (lk == LU_KIND_FLOAT || rk == LU_KIND_FLOAT)) {
-            /* float.__pow__ in C, as the kernel's dispatcher would reach it. */
+        if (r == LU_NOV && !c->failed && base == NB_POWER && lk != rk) {
+            /* A float to an int's power, or an int to a float's: float.__pow__
+               in C, which the kernel's dispatcher reaches only through its
+               slot wrapper. Two floats inline the kernel's float.__pow__. */
             guard_type(c, a, lk == LU_KIND_FLOAT ? &PyFloat_Type : &PyLong_Type);
             guard_type(c, b, rk == LU_KIND_FLOAT ? &PyFloat_Type : &PyLong_Type);
             lu_v args[2] = { a, b };
