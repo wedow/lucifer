@@ -708,22 +708,28 @@ h_for_iter(PyObject *it, struct lu_opclasses *classes)
     if (classes != NULL) {
         lu_jit_class_vote(classes, t);
     }
-    if (lu_next_missing_of((PyObject *)t) == Py_None) {
-        /* No kernel step of its own: its __next__, a Python function, as
-           next_item calls it, without its frame. */
-        PyObject *f = _PyType_LookupRef(t, LU_ID(__next__));
-        if (f != NULL && PyFunction_Check(f)) {
-            PyObject *v = task->ts.interp->eval_frame == NULL
-                ? polled(task, call_function(task, (PyFunctionObject *)f, &it, 1, NULL)) : lu_call(f, &it, 1, NULL);
-            Py_DECREF(f);
-            if (v == NULL && PyErr_ExceptionMatches(PyExc_StopIteration)) {
-                PyErr_Clear();
-                return Py_NewRef(LU_MISSING);
-            }
-            return v;
-        }
-        Py_XDECREF(f);
+    if (t == &PyDictIterKey_Type || t == &PyDictIterValue_Type || t == &PyDictIterItem_Type) {
+        return lu_dictiter_next(it);
     }
+    /* As next_item steps it, without its frame: the class's kernel step
+       (the registry holds it), else its __next__, a Python function. */
+    PyObject *step = lu_next_missing_of((PyObject *)t);
+    if (step != Py_None) {
+        return PyFunction_Check(step) && task->ts.interp->eval_frame == NULL
+            ? polled(task, call_function(task, (PyFunctionObject *)step, &it, 1, NULL)) : lu_call(step, &it, 1, NULL);
+    }
+    PyObject *f = _PyType_LookupRef(t, LU_ID(__next__));
+    if (f != NULL && PyFunction_Check(f)) {
+        PyObject *v = task->ts.interp->eval_frame == NULL
+            ? polled(task, call_function(task, (PyFunctionObject *)f, &it, 1, NULL)) : lu_call(f, &it, 1, NULL);
+        Py_DECREF(f);
+        if (v == NULL && PyErr_ExceptionMatches(PyExc_StopIteration)) {
+            PyErr_Clear();
+            return Py_NewRef(LU_MISSING);
+        }
+        return v;
+    }
+    Py_XDECREF(f);
     return lu_call_kernel(LU_K_next_item, &it, 1);
 }
 
