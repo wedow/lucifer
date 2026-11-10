@@ -1528,6 +1528,8 @@ int lu_nb_slot_kind(PyTypeObject *tp, size_t offset);
    NULL (with an error when a slot raised) when it is the kernel's to
    decide, because a slot is the runtime's or every slot declined. */
 PyObject *lu_binary_foreign(PyObject *a, PyObject *b, int op);
+/* Whether lu_binary_foreign takes the operator for operands of these types. */
+int lu_binary_is_foreign(PyTypeObject *ta, PyTypeObject *tb, int op);
 /* container[start:stop] for an exact list, tuple, str or bytes by machine-int
    bounds, either None as `none` says (bit 0 the start, bit 1 the stop): a new
    reference, or NULL without an error for another type. */

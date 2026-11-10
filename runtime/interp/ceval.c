@@ -501,47 +501,57 @@ lu_store_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyOb
     }
 }
 
+static const size_t nb_binary[] = {
+    offsetof(PyNumberMethods, nb_add), offsetof(PyNumberMethods, nb_and),
+    offsetof(PyNumberMethods, nb_floor_divide), offsetof(PyNumberMethods, nb_lshift),
+    offsetof(PyNumberMethods, nb_matrix_multiply), offsetof(PyNumberMethods, nb_multiply),
+    offsetof(PyNumberMethods, nb_remainder), offsetof(PyNumberMethods, nb_or),
+    offsetof(PyNumberMethods, nb_power), offsetof(PyNumberMethods, nb_rshift),
+    offsetof(PyNumberMethods, nb_subtract), offsetof(PyNumberMethods, nb_true_divide),
+    offsetof(PyNumberMethods, nb_xor),
+};
+static const size_t nb_inplace[] = {
+    offsetof(PyNumberMethods, nb_inplace_add), offsetof(PyNumberMethods, nb_inplace_and),
+    offsetof(PyNumberMethods, nb_inplace_floor_divide), offsetof(PyNumberMethods, nb_inplace_lshift),
+    offsetof(PyNumberMethods, nb_inplace_matrix_multiply), offsetof(PyNumberMethods, nb_inplace_multiply),
+    offsetof(PyNumberMethods, nb_inplace_remainder), offsetof(PyNumberMethods, nb_inplace_or),
+    offsetof(PyNumberMethods, nb_inplace_power), offsetof(PyNumberMethods, nb_inplace_rshift),
+    offsetof(PyNumberMethods, nb_inplace_subtract), offsetof(PyNumberMethods, nb_inplace_true_divide),
+    offsetof(PyNumberMethods, nb_inplace_xor),
+};
+
+int
+lu_binary_is_foreign(PyTypeObject *ta, PyTypeObject *tb, int op)
+{
+    if (op < NB_ADD || op > NB_INPLACE_XOR) {
+        return 0;
+    }
+    int base = op >= NB_INPLACE_ADD ? op - NB_INPLACE_ADD : op;
+    int ka = lu_nb_slot_kind(ta, nb_binary[base]), kb = tb != ta ? lu_nb_slot_kind(tb, nb_binary[base]) : 0;
+    int ki = op >= NB_INPLACE_ADD ? lu_nb_slot_kind(ta, nb_inplace[base]) : 0;
+    return ka >= 0 && kb >= 0 && ki >= 0 && ka + kb + ki > 0;
+}
+
 PyObject *
 lu_binary_foreign(PyObject *a, PyObject *b, int op)
 {
-    static const size_t binary[] = {
-        offsetof(PyNumberMethods, nb_add), offsetof(PyNumberMethods, nb_and),
-        offsetof(PyNumberMethods, nb_floor_divide), offsetof(PyNumberMethods, nb_lshift),
-        offsetof(PyNumberMethods, nb_matrix_multiply), offsetof(PyNumberMethods, nb_multiply),
-        offsetof(PyNumberMethods, nb_remainder), offsetof(PyNumberMethods, nb_or),
-        offsetof(PyNumberMethods, nb_power), offsetof(PyNumberMethods, nb_rshift),
-        offsetof(PyNumberMethods, nb_subtract), offsetof(PyNumberMethods, nb_true_divide),
-        offsetof(PyNumberMethods, nb_xor),
-    };
-    static const size_t inplace[] = {
-        offsetof(PyNumberMethods, nb_inplace_add), offsetof(PyNumberMethods, nb_inplace_and),
-        offsetof(PyNumberMethods, nb_inplace_floor_divide), offsetof(PyNumberMethods, nb_inplace_lshift),
-        offsetof(PyNumberMethods, nb_inplace_matrix_multiply), offsetof(PyNumberMethods, nb_inplace_multiply),
-        offsetof(PyNumberMethods, nb_inplace_remainder), offsetof(PyNumberMethods, nb_inplace_or),
-        offsetof(PyNumberMethods, nb_inplace_power), offsetof(PyNumberMethods, nb_inplace_rshift),
-        offsetof(PyNumberMethods, nb_inplace_subtract), offsetof(PyNumberMethods, nb_inplace_true_divide),
-        offsetof(PyNumberMethods, nb_inplace_xor),
-    };
-    if (op < NB_ADD || op > NB_INPLACE_XOR) {
-        return NULL;
-    }
-    int base = op >= NB_INPLACE_ADD ? op - NB_INPLACE_ADD : op, power = base == NB_POWER;
     PyTypeObject *ta = Py_TYPE(a), *tb = Py_TYPE(b);
-    int ka = lu_nb_slot_kind(ta, binary[base]), kb = tb != ta ? lu_nb_slot_kind(tb, binary[base]) : 0;
-    int ki = op >= NB_INPLACE_ADD ? lu_nb_slot_kind(ta, inplace[base]) : 0;
-    if (ka < 0 || kb < 0 || ki < 0 || ka + kb + ki == 0) {
+    if (!lu_binary_is_foreign(ta, tb, op)) {
         return NULL;            /* the runtime's slot, or none at all */
     }
+    int base = op >= NB_INPLACE_ADD ? op - NB_INPLACE_ADD : op, power = base == NB_POWER;
+    int ka = lu_nb_slot_kind(ta, nb_binary[base]), kb = tb != ta ? lu_nb_slot_kind(tb, nb_binary[base]) : 0;
+    int ki = op >= NB_INPLACE_ADD ? lu_nb_slot_kind(ta, nb_inplace[base]) : 0;
 #define NB_SLOT(t, off) (*(void **)((char *)(t)->tp_as_number + (off)))
 #define NB_CALL(f) (power ? ((ternaryfunc)(f))(a, b, Py_None) : ((binaryfunc)(f))(a, b))
     PyObject *r;
     if (ki > 0) {
-        if ((r = NB_CALL(NB_SLOT(ta, inplace[base]))) != Py_NotImplemented) {
+        if ((r = NB_CALL(NB_SLOT(ta, nb_inplace[base]))) != Py_NotImplemented) {
             return r;
         }
         Py_DECREF(r);
     }
-    void *slotv = ka > 0 ? NB_SLOT(ta, binary[base]) : NULL, *slotw = kb > 0 ? NB_SLOT(tb, binary[base]) : NULL;
+    void *slotv = ka > 0 ? NB_SLOT(ta, nb_binary[base]) : NULL, *slotw = kb > 0 ? NB_SLOT(tb, nb_binary[base]) : NULL;
     slotw = slotw == slotv ? NULL : slotw;
     if (slotv != NULL) {
         if (slotw != NULL && PyType_IsSubtype(tb, ta)) {

@@ -516,6 +516,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/foreign_number_slots.py": {
+      "exit": 0,
+      "sha256": "cbad7e0aaa8c0484d27cc250698f7978049617af8ae65d16cfe0a15fbc22c359",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/function_defaults_kwonly.py": {
       "exit": 0,
       "sha256": "5576ce672e8c3265710550b52ce66c94b1170bcd9400fb7d52cfe4597f9465e7",

@@ -192,6 +192,7 @@ static int build_block(struct ctx *c, int bi);
 static int step(struct ctx *c, int pc, struct lu_block *entry);
 static int call_dispatch(struct ctx *c, int n);
 static int call(struct ctx *c);
+static int opaque_call(struct ctx *c);
 
 /* A site's operand kinds (runtime/jit/jit.h), counted: none means the
    interpreter has never run it. Attribute sites count in cached_site. */
@@ -1991,6 +1992,21 @@ binary_op(struct ctx *c)
         guard_type(c, b, &PyUnicode_Type);
         lu_v args[2] = { a, b };
         r = helper_raising(c, H_str_concat, 2, args, 2);
+    }
+    PyTypeObject *ta = known_type(c, a), *tb = known_type(c, b);
+    int bitwise = base == NB_AND || base == NB_OR || base == NB_XOR;
+    int ints = ta != NULL && tb != NULL && (ta == &PyLong_Type || (ta == &PyBool_Type && !bitwise))
+        && (tb == &PyLong_Type || (tb == &PyBool_Type && !bitwise)) && op != NB_SUBSCR;
+    if (r == LU_NOV && ta != NULL && tb != NULL && (ints || lu_binary_is_foreign(ta, tb, op))) {
+        /* Extension types' number slots: called as binary_op1 calls them,
+           not through the kernel's dispatcher, which finds their wrappers.
+           So are ints and bools, which compute as ints, as the
+           interpreter computes them. */
+        if (!opaque_call(c)) {
+            return -1;
+        }
+        lu_v args[3] = { a, b, const_i(c, op) };
+        r = helper_raising(c, H_binary_op, 3, args, 2);
     }
     if (r == LU_NOV && !c->failed && op != NB_SUBSCR && kernel_operator(c, LU_K_binary_op, 2, op)) {
         return 0;
@@ -4216,10 +4232,10 @@ in_step(struct ctx *c)
 
 /* Whether the call at c->pc, which this frame cannot inline, compiles
    here. In an inlined frame it pushes the inlined frames as real ones, in
-   line (luc-hez4), for the call: so a callee one deep (kernel code two,
+   line (luc-hez4), for the call: so a callee three deep (kernel code four,
    so that a twin or a dispatcher inlines with what it calls; a tail call,
-   after which the frame only returns, one deeper still) with one such
-   call outside its loops inlines, and any other is called instead
+   after which the frame only returns, one deeper still) with up to four
+   such calls outside its loops inlines, and any other is called instead
    (the inline is undone), which keeps the inline budget for the calls
    that inline.
    The frames of a FOR_ITER's step in line (iter_step) call whatever they
@@ -4246,7 +4262,7 @@ opaque_call(struct ctx *c)
         loop = base == JUMP_BACKWARD && jump_target(base, oparg, next) <= c->pc;
         pc = next;
     }
-    if (c->depth > (c->kernel ? 2 : 1) + tail || c->ncalls++ > 0 || loop) {
+    if (c->depth > (c->kernel ? 4 : 3) + tail || c->ncalls++ >= 4 || loop) {
         if (_PyRuntime.jit.debug) {
             fprintf(stderr, "jit: a call it cannot inline at %s@%d: depth %d, calls %d, loop after %d\n",
                     PyUnicode_AsUTF8(c->code->co_qualname), c->pc, c->depth, c->ncalls, loop);
