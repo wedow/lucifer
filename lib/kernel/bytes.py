@@ -644,6 +644,25 @@ def _encoded(x, encoding, errors, what):
         error(TypeError, _cat(what, "() argument 'errors' must be str, not ", _name(errors)))
 
 
+def _bytes_new(cls, args, kwargs):
+    """bytes.__new__."""
+    if not kind(cls, 'type'):
+        error(TypeError, _cat('bytes.__new__(X): X is not a type object (', _name(cls), ')'))
+    if cls is not bytes:
+        new_check(cls, bytes)
+    value = _bytes_of(args, kwargs)
+    if cls is bytes:
+        return value
+    return b_subtype(cls, value)
+
+
+def _bytes_new1(cls, x):
+    """bytes(x) (kernel_twin): a bytes or bytearray's data copied as it is."""
+    if cls is bytes and (type(x) is bytearray or type(x) is bytes):
+        return b_bytes(x)
+    return _bytes_new(cls, (x,), {})
+
+
 def _bytes_of(args, kwargs):
     """bytes_new_impl: the exact bytes bytes(source, encoding, errors) makes."""
     x, encoding, errors = _parse('bytes', args, kwargs, ('source', 'encoding', 'errors'), 0)
@@ -762,14 +781,9 @@ Construct an immutable array of bytes from:
   - an integer"""
 
     def __new__(cls, /, *args, **kwargs):
-        if not kind(cls, 'type'):
-            error(TypeError, _cat('bytes.__new__(X): X is not a type object (', _name(cls), ')'))
-        if cls is not bytes:
-            new_check(cls, bytes)
-        value = _bytes_of(args, kwargs)
-        if cls is bytes:
-            return value
-        return b_subtype(cls, value)
+        return _bytes_new(cls, args, kwargs)
+
+    kernel_twin(__new__, _bytes_new1)
 
     def __repr__(self):
         return _m_repr(self)

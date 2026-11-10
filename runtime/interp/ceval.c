@@ -390,8 +390,32 @@ native_length(PyObject *container)
         : tp == &PyBytes_Type ? PyBytes_GET_SIZE(container) : -1;
 }
 
+/* `count` bytes of src from `start` by `step`, as a bytes or (bytearray) a
+   bytearray: a new reference. */
+static PyObject *
+bytes_take(const char *src, Py_ssize_t start, Py_ssize_t step, Py_ssize_t count, int bytearray)
+{
+    if (!bytearray && step == 1) {
+        return PyBytes_FromStringAndSize(src + start, count);  /* a single byte's is shared */
+    }
+    PyObject *r = bytearray ? PyByteArray_FromStringAndSize(NULL, count) : PyBytes_FromStringAndSize(NULL, count);
+    if (r == NULL) {
+        return NULL;
+    }
+    char *dst = bytearray ? PyByteArray_AS_STRING(r) : PyBytes_AS_STRING(r);
+    if (step == 1) {
+        memcpy(dst, src + start, (size_t)count);
+    }
+    else {
+        for (Py_ssize_t i = 0; i < count; i++) {
+            dst[i] = src[start + i * step];
+        }
+    }
+    return r;
+}
+
 /* The `count` items of such a container from `start` by `step`, 1 for a
-   str or bytes: a new reference. */
+   str: a new reference. */
 static PyObject *
 slice_take(PyObject *container, Py_ssize_t length, Py_ssize_t start, Py_ssize_t step, Py_ssize_t count)
 {
@@ -403,20 +427,48 @@ slice_take(PyObject *container, Py_ssize_t length, Py_ssize_t start, Py_ssize_t 
         return PyUnicode_Substring(container, start, start + count);
     }
     if (tp == &PyBytes_Type) {
-        return PyBytes_FromStringAndSize(PyBytes_AS_STRING(container) + start, count);
+        return bytes_take(PyBytes_AS_STRING(container), start, step, count, 0);
     }
     return lu_seq_slice(container, start, step, count, tp == &PyTuple_Type);
 }
 
-/* container[start:stop:step] for an exact list, tuple, str or bytes and bounds
-   that slice_unpack takes, where the step of a str or bytes is 1: a new
-   reference. NULL without an error when the kernel must slice. */
+/* A bytearray's slice, its bounds taken and its bytes copied under its lock;
+   NULL without an error when the kernel must slice. */
+static PyObject *
+bytearray_slice(PyObject *ba, PyObject *start_o, PyObject *stop_o, PyObject *step_o, int raw, int64_t rstart,
+                int64_t rstop, int none)
+{
+    PyObject *r = NULL;
+    Py_BEGIN_CRITICAL_SECTION(ba);
+    Py_ssize_t length = PyByteArray_GET_SIZE(ba), start, step = 1, count;
+    int ok = 1;
+    if (raw) {
+        start = none & 1 ? 0 : slice_clamp(rstart, length, 0);
+        Py_ssize_t to = none & 2 ? length : slice_clamp(rstop, length, 0);
+        count = start < to ? to - start : 0;
+    }
+    else {
+        ok = slice_unpack(start_o, stop_o, step_o, length, &start, &step, &count);
+    }
+    if (ok) {
+        r = bytes_take(PyByteArray_AS_STRING(ba), start, step, count, 1);
+    }
+    Py_END_CRITICAL_SECTION();
+    return r;
+}
+
+/* container[start:stop:step] for an exact list, tuple, str, bytes or
+   bytearray and bounds that slice_unpack takes, where the step of a str is
+   1: a new reference. NULL without an error when the kernel must slice. */
 PyObject *
 lu_slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObject *step_o)
 {
+    if (PyByteArray_CheckExact(container)) {
+        return bytearray_slice(container, start_o, stop_o, step_o, 0, 0, 0, 0);
+    }
     Py_ssize_t length = native_length(container), start, step, count;
     if (length < 0 || !slice_unpack(start_o, stop_o, step_o, length, &start, &step, &count)
-        || (!PyList_CheckExact(container) && !PyTuple_CheckExact(container) && step != 1)) {
+        || (PyUnicode_CheckExact(container) && step != 1)) {
         return NULL;
     }
     return slice_take(container, length, start, step, count);
@@ -517,6 +569,9 @@ lu_setitem_slice_native(PyObject *container, PyObject *sub, PyObject *v)
 PyObject *
 lu_slice_native_raw(PyObject *container, int64_t start, int64_t stop, int none)
 {
+    if (PyByteArray_CheckExact(container)) {
+        return bytearray_slice(container, NULL, NULL, NULL, 1, start, stop, none);
+    }
     Py_ssize_t length = native_length(container);
     if (length < 0) {
         return NULL;

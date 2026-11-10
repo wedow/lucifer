@@ -3566,7 +3566,7 @@ intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
         }
     }
     if (nargs == 1 && (known_type(c, args[0]) == &PyList_Type || known_type(c, args[0]) == &PyTuple_Type
-                       || known_type(c, args[0]) == &PyBytes_Type)
+                       || known_type(c, args[0]) == &PyBytes_Type || known_type(c, args[0]) == &PyByteArray_Type)
         && strcmp(name, "size") == 0) {
         lu_v n = emit(c, OP_LOAD, REP_I64, args[0], LU_NOV, LU_NOV, offsetof(PyVarObject, ob_size));
         return box_int(c, n);

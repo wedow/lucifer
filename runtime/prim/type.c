@@ -2226,6 +2226,9 @@ prim_size(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (PyBytes_Check(x)) {
         return PyLong_FromLongLong(PyBytes_GET_SIZE(x));
     }
+    if (PyByteArray_Check(x)) {
+        return PyLong_FromLongLong(__atomic_load_n(&((PyVarObject *)x)->ob_size, __ATOMIC_RELAXED));
+    }
     lu_err_format(PyExc_TypeError, "size() of a '%.200s'", Py_TYPE(x)->tp_name);
     return NULL;
 }
