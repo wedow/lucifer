@@ -1659,13 +1659,17 @@ static int unary_op(struct ctx *c);
 static int call(struct ctx *c);
 static int type_arms(struct ctx *c, int n, int d0, int d1, int lk, int rk, int (*build)(struct ctx *));
 
-/* Whether v is a constant int a machine int cannot hold: an int kind's
-   unboxed path would always leave on it. */
+/* Whether v is a constant int a machine int cannot hold (beyond 64 bits):
+   an int kind's unboxed path would always leave on it. */
 static int
 wide_const(struct ctx *c, lu_v v)
 {
     PyObject *k = I(c, v)->op == OP_CONST ? known(c, v) : NULL;
-    return k != NULL && PyLong_CheckExact(k) && lu_jit_kind(k) != LU_KIND_INT;
+    int overflow = 0;
+    if (k != NULL && PyLong_CheckExact(k)) {
+        PyLong_AsLongLongAndOverflow(k, &overflow);
+    }
+    return overflow != 0;
 }
 
 /* The exact type a kind names, or NULL for OTHER. */
