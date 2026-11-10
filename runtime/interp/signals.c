@@ -131,11 +131,12 @@ lu_signals_handle(PyThreadState *ts)
     return 0;
 }
 
+/* Clears the reason too: a wait that ends at a pending signal (time.sleep's)
+   would otherwise end again at once. */
 int
 PyErr_CheckSignals(void)
 {
-    PyThreadState *ts = PyThreadState_Get();
-    return lu_thread_can_handle_signals() ? check_signals(ts) : 0;
+    return lu_signals_handle(PyThreadState_Get());
 }
 
 int

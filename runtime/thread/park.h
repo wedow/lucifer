@@ -37,6 +37,8 @@ struct lu_wait {
     int unpinned;               /* the waiter parks without sleeping: no one sleeps on `carrier`'s futex */
     int parked;                 /* ... and its task has left its carrier (lu_park_commit):
                                    completing the wait queues the task on `carrier` */
+    int signals;                /* a signal with a Python handler ends the wait (LU_PARK_INTR):
+                                   the caller runs the handler; lu_wait_begin clears it */
     struct lu_wait *next;       /* in the wait table while pending */
 };
 
@@ -51,9 +53,11 @@ void lu_wait_ready(struct lu_wait *w, struct lu_carrier *carrier);
 
 /* Waits until `w` is unparked or `deadline` (absolute CLOCK_MONOTONIC ns, -1
    for none) passes, then ends the wait: its id is stale from here on. A
-   result that arrived before the call returns at once. With `detach` the
-   task counts as detached while it sleeps (lu_syscall_begin), as it must
-   unless the caller is CPython code that asked for _Py_LOCK_DONT_DETACH.
+   result that arrived before the call returns at once. A wait with
+   `signals` set also ends at a signal, one raised before the call included.
+   With `detach` the task counts as detached while it sleeps
+   (lu_syscall_begin), as it must unless the caller is CPython code that
+   asked for _Py_LOCK_DONT_DETACH.
 
    lu_park is a C function and sleeps on the carrier's futex, which a pinned
    task must. An unpinned task at a safepoint of the eval loop parks without

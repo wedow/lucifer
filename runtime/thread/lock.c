@@ -85,7 +85,7 @@ _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
         }
 
         int ret = _PyParkingLot_Park(&m->_bits, &newv, sizeof(newv), timeout,
-                                     &entry, (flags & _PY_LOCK_DETACH) != 0);
+                                     &entry, flags);
         if (ret == Py_PARK_OK) {
             if (entry.handed_off) {
                 // We own the lock now.

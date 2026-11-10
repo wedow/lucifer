@@ -74,7 +74,7 @@ atomic_memcmp(const void *addr, const void *expected, size_t addr_size)
 
 LU_EXPORT int
 _PyParkingLot_Park(const void *addr, const void *expected, size_t size,
-                   PyTime_t timeout_ns, void *park_arg, int detach)
+                   PyTime_t timeout_ns, void *park_arg, int flags)
 {
     struct lu_lot_entry wait = {
         .park_arg = park_arg,
@@ -89,13 +89,14 @@ _PyParkingLot_Park(const void *addr, const void *expected, size_t size,
         return Py_PARK_AGAIN;
     }
     lu_wait_begin(&wait.wait);
+    wait.wait.signals = (flags & _PY_LOCK_HANDLE_SIGNALS) != 0;
     enqueue(bucket, &wait);
     pthread_mutex_unlock(&bucket->lock.mutex);
 
     // Detached until the entry has left the bucket: reattaching may wait to
     // resume a critical section, and a wait still queued meanwhile would
     // take a wakeup or a handoff that belongs to the next waiter.
-    PyThreadState *tstate = detach ? lu_syscall_begin() : NULL;
+    PyThreadState *tstate = (flags & _PY_LOCK_DETACH) ? lu_syscall_begin() : NULL;
     PyTime_t deadline = timeout_ns < 0 ? -1 : lu_monotonic_ns() + timeout_ns;
     int res = lu_park(&wait.wait, deadline, 0);
     if (res != Py_PARK_OK) {
