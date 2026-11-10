@@ -164,7 +164,8 @@ struct lu_fs {
 enum {
     INS_DEAD = 1,               /* removed */
     INS_VIRTUAL = 2,            /* a box nothing observes: built only at an exit */
-    INS_NOSTRESS = 4,           /* a guard after its instruction's effect: deopt:N never fails it */
+    INS_NOSTRESS = 4,           /* a guard after its instruction's effect: deopt:N never fails it; a
+                                   Python-running helper whose frames deopt:N never keeps */
     INS_CAUGHT = 8,             /* a raising helper whose NULL result the code branches on: a handler takes it */
     INS_FRESH = 16,             /* an inline store into an instance this code made that no other thread
                                    can have seen yet, of a name it lacks: it takes no lock, releases

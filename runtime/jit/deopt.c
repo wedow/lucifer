@@ -308,7 +308,7 @@ static _Thread_local unsigned long stress_calls;
 static _Thread_local int kept_by_stress;
 
 void
-lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root)
+lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed)
 {
     struct lu_frame *top = (struct lu_frame *)ts->current_frame;
     int keep = 0;
@@ -316,7 +316,7 @@ lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root)
         keep |= f->frame_obj != NULL;
     }
     unsigned long n = _PyRuntime.stress.deopt;
-    kept_by_stress = !keep && n != 0 && ++stress_calls % n == 0;
+    kept_by_stress = !keep && stressed && n != 0 && ++stress_calls % n == 0;
     if (keep || kept_by_stress) {
         return;
     }

@@ -3758,6 +3758,9 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *new, PyFunctionObj
         I(c, obj)->fs = before(c);
         I(c, obj)->drop = (uint8_t)(n + 2);
         I(c, obj)->imm2 = 1 + CNT_call_c;
+        /* The initializer inlines after it, with no frames check between
+           (none could leave here): stress does not keep its frames. */
+        I(c, obj)->flags |= INS_NOSTRESS;
         guard_after(c, OP_GUARD_NOT_NULL, obj, 1);
         set_known(c, obj, tp);
     }

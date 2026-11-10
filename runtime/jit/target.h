@@ -245,7 +245,7 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
    error exit or the frames guard after it) hands the interpreter. */
 void lu_jit_frames_push(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
                         const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills);
-void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
+void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed);
 
 /* The helpers compiled code calls, by id; runtime/jit/helpers.c gives each
    its result, flags (IF_RAISE: NULL, or -1 for a bit, raised; IF_PY: may

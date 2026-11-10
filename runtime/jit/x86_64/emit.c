@@ -1574,7 +1574,7 @@ parked_stubs(struct asm_ *a)
    line unless the callee made a frame object of one (they stay, for the
    exit next), the block starts a chunk, or stress may keep them. */
 static void
-pop_frames(struct asm_ *a, struct lu_deopt *d)
+pop_frames(struct asm_ *a, struct lu_deopt *d, int stressed)
 {
     int slow = new_label(a), done = new_label(a);
     if (!a->f->stress && lent_words(d) > 0) {
@@ -1607,6 +1607,7 @@ pop_frames(struct asm_ *a, struct lu_deopt *d)
     alu_ri(a, ALU_SUB, RSP, 8);
     mov_rr(a, RDI, R14);
     mov_rr(a, RSI, R15);
+    mov_ri(a, RDX, stressed);
     call_abs(a, (void *)lu_jit_frames_pop);
     alu_ri(a, ALU_ADD, RSP, 8);
     b1(a, 0x58);                                /* pop rax */
@@ -3252,7 +3253,18 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             call_helper(a, v, pub);
         }
         if (inlined) {
-            pop_frames(a, d);
+            pop_frames(a, d, !(in->flags & INS_NOSTRESS));
+        }
+        if (inlined && caught) {
+            /* An exception a handler here takes, from frames a walker kept
+               (a traceback's frame objects): the interpreter unwinds them. */
+            int fine = new_label(a);
+            test_rr(a, RAX, RAX);
+            jcc(a, CC_NE, fine);
+            load(a, RCX, R14, offsetof(PyThreadState, current_frame));
+            alu_rr(a, ALU_CMP, RCX, R15);
+            jcc(a, CC_NE, err);
+            bind(a, fine);
         }
         if (err >= 0 && h->rep == REP_BIT) {
             b1(a, 0x83);
