@@ -3349,6 +3349,10 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         }
         jmp(a, exit_to(a, in->fs, (int)in->imm, 0, 0));
         return 0;
+    case OP_UNLINK:
+        load(a, R11, R15, offsetof(struct lu_frame, previous));
+        store(a, R14, offsetof(PyThreadState, current_frame), R11);
+        return 0;
     case OP_RETURN:
         to_gpr(a, RCX, in->a);
         load(a, RAX, RBP, RESULT_SLOT);

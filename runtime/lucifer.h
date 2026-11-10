@@ -118,7 +118,6 @@ struct lu_lot_bucket {
 PyThreadState *lu_syscall_begin(void);
 void lu_syscall_end(PyThreadState *ts);
 Py_ssize_t lu_write_fd(int fd, const void *buf, size_t count);
-int lu_set_cloexec(int fd);
 /* Evaluates the blocking call `call` between the two, which keeps errno. */
 #define LU_SYSCALL(call) ({ \
         PyThreadState *lu_ts_ = lu_syscall_begin(); \
@@ -1350,6 +1349,11 @@ int lu_ns_next(PyObject *dict, Py_ssize_t *pos, PyObject **key, PyObject **value
    the kernel's @kernel_type then fills. */
 #define LU_VERSION_TAG_STATIC_MAX ((1u << 17) - 1)     /* _Py_MAX_GLOBAL_TYPE_VERSION_TAG */
 extern PyTypeObject lu_method_wrapper_type;
+/* The exporter a class's __buffer__ memoryview is wrapped in, so that
+   releasing the buffer runs the class's __release_buffer__ (slots.c). */
+typedef struct { PyObject_HEAD PyObject *mv, *obj; } lu_buffer_wrapper;
+extern PyTypeObject lu_buffer_wrapper_type;
+extern PyBufferProcs lu_buffer_wrapper_procs;
 int lu_types_init(PyInterpreterState *interp);
 /* Fills each static type's unset slots from its bases (inherit_slots); run
    after every kernel module, as kernel classes install slots. */
@@ -1362,6 +1366,7 @@ PyObject *lu_type_fullyqualname(PyTypeObject *type, char sep);
    __new__ of a type with a tp_new into its dict (typespec.c). */
 const char *lu_doc_without_signature(const char *name, const char *doc);
 int lu_type_add_methods(PyTypeObject *tp, PyObject *dict);
+extern PyMethodDef lu_float_methods[], lu_long_methods[];   /* prim/float.c, prim/int.c */
 int lu_type_add_new_wrapper(PyTypeObject *tp, PyObject *dict);
 void lu_free_object(void *p);
 /* PyType_Modified: tells tp's watchers, then tp and its subclasses lose

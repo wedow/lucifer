@@ -1313,6 +1313,38 @@ PyArg_VaParseTupleAndKeywords(PyObject *args,
     return retval;
 }
 
+/* A vectorcall's arguments by a parser's format and keywords (Argument
+   Clinic's fallback for converters it cannot inline): the same parse as
+   PyArg_ParseTupleAndKeywords over a tuple and dict built from the stack,
+   which keeps every borrowed argument alive for the call. */
+LU_EXPORT int
+_PyArg_ParseStackAndKeywords(PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames,
+                             struct _PyArg_Parser *parser, ...)
+{
+    PyObject *tuple = PyTuple_New(nargs);
+    PyObject *kwargs = kwnames != NULL && PyTuple_GET_SIZE(kwnames) > 0 ? PyDict_New() : NULL;
+    int retval = 0;
+    if (tuple == NULL || (kwnames != NULL && PyTuple_GET_SIZE(kwnames) > 0 && kwargs == NULL)) {
+        goto done;
+    }
+    for (Py_ssize_t i = 0; i < nargs; i++) {
+        PyTuple_SET_ITEM(tuple, i, Py_NewRef(args[i]));
+    }
+    for (Py_ssize_t i = 0; kwargs != NULL && i < PyTuple_GET_SIZE(kwnames); i++) {
+        if (PyDict_SetItem(kwargs, PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) < 0) {
+            goto done;
+        }
+    }
+    va_list va;
+    va_start(va, parser);
+    retval = vgetargskeywords(tuple, kwargs, parser->format, parser->keywords, &va, 0);
+    va_end(va);
+done:
+    Py_XDECREF(tuple);
+    Py_XDECREF(kwargs);
+    return retval;
+}
+
 #define IS_END_OF_FORMAT(c) (c == '\0' || c == ';' || c == ':')
 
 static int

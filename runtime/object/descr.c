@@ -1021,6 +1021,7 @@ fields_dealloc(PyObject *op, Py_ssize_t first, Py_ssize_t end)
     { fields_dealloc(op, offsetof(type, first), offsetof(type, last) + sizeof(PyObject *)); }
 
 FIELDS(descr, PyDescrObject, d_type, d_qualname)
+FIELDS(bufwrap, lu_buffer_wrapper, mv, obj)
 
 /* map, filter, zip, enumerate, reversed and callable_iterator hold up to
    three object fields, which their kernel methods reach by index. */
@@ -1141,6 +1142,8 @@ lu_descr_init(void)
     layout(&lu_method_wrapper_type, sizeof(wrapperobject), 0, wrapper,
            wrapper_members, wrapper_getset);
     lu_method_wrapper_type.tp_call = method_wrapper_call;
+    layout(&lu_buffer_wrapper_type, sizeof(lu_buffer_wrapper), 0, bufwrap, NULL, NULL);
+    lu_buffer_wrapper_type.tp_as_buffer = &lu_buffer_wrapper_procs;
     layout(&PyMethod_Type, sizeof(PyMethodObject), Py_TPFLAGS_HAVE_VECTORCALL, method,
            method_members, NULL);
     PyMethod_Type.tp_vectorcall_offset = offsetof(PyMethodObject, vectorcall);

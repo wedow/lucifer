@@ -34,6 +34,8 @@ lucifer_methods	runtime/prim/module.c	_lucifer's PyMethodDef table, never writte
 lucifer_slots	runtime/prim/module.c	_lucifer's PyModuleDef_Slot table, never written; the API takes it non-const
 lu_lucifer_module	runtime/prim/module.c	_lucifer's PyModuleDef, never written; one per process, as every extension's def
 lu_method_wrapper_type	runtime/types/static.c	method-wrapper, a private static type; the kernel fills in its slots once at startup
+lu_buffer_wrapper_type	runtime/types/static.c	_buffer_wrapper, a private static type; its layout is set once at startup
+lu_buffer_wrapper_procs	runtime/types/slots.c	_buffer_wrapper's buffer slots, constant after startup
 raising.*	-	thread-local guard: PyErr_NoMemory runs out of memory making a MemoryError and takes the last resort; its TLS symbol has no line
 lu_static_types	runtime/types/static.c	const table of the static builtin types; relocated by ld.so, then read-only (RELRO)
 *_members	runtime/object/descr.c	PyMemberDef table of a native layout, never written; tp_members takes it non-const
@@ -51,6 +53,8 @@ lu_prim_slot_methods	runtime/types/slots.c	_lucifer's slot primitive, a PyMethod
 lu_prim_str_methods	runtime/prim/str.c	_lucifer's str primitives, a PyMethodDef table never written; the API takes it non-const
 lu_prim_int_methods	runtime/prim/int.c	_lucifer's int primitives, a PyMethodDef table never written; the API takes it non-const
 lu_sys_int_methods	runtime/prim/int.c	sys's int-limit functions, a PyMethodDef table never written; the API takes it non-const
+lu_long_methods	runtime/prim/int.c	int's tp_methods, the C-readable methods of CPython's table; never written, the API takes it non-const
+lu_float_methods	runtime/prim/float.c	float's tp_methods, the C-readable methods of CPython's table; never written, the API takes it non-const
 objects.*	runtime/pylifecycle.c	const table of the static builtins names; relocated by ld.so, then read-only (RELRO)
 slots	runtime/types/slots.c	const table of the type slots and their thunks; relocated by ld.so, then read-only (RELRO)
 base_getset	runtime/interp/exceptions.c	PyGetSetDef table of BaseException, never written; tp_getset takes it non-const

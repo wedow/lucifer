@@ -85,6 +85,8 @@ HANDOFF_XFAIL = {
 # name -> [(flags, env)]: env None is -I -S with the inherited environment.
 RUNS = {
     "hash_seed": [([], {"PYTHONHASHSEED": "12345"}), ([], {"PYTHONHASHSEED": "0"})],
+    "jit_deopt_raise": [(["-X", "lucifer_jit=always", "-X", f"lucifer_stress=deopt:{n}"], None)
+                        for n in range(1, 13)],
     "stdio": [([], None), (["-u"], None), (["-X", "utf8=0"], {"LC_ALL": "C"}),
               ([], {"LC_ALL": "C"}), ([], {"PYTHONIOENCODING": "latin-1:replace", "PYTHONUNBUFFERED": "1"}),
               ([], {"PYTHONIOENCODING": "ascii:backslashreplace", "LANG": "en_US.UTF-8"})],

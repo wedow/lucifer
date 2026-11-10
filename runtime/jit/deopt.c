@@ -388,11 +388,19 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     else {
         lu_jit_note_exit(d);
     }
-    int depth = 0;
+    /* The frames a call kept are the exit's outermost inlined ones; deeper
+       ones it inlined after the call (a lowered class call's __init__) are
+       pushed above them. */
+    int nkept = 0;
     for (struct lu_frame *f = kept; f != NULL && f != root; f = f->previous) {
-        depth++;
+        nkept++;
     }
-    if (kept != NULL && depth != d->nframes - 1) {
+    int matches = nkept <= d->nframes - 1;
+    struct lu_frame *g = kept;
+    for (int k = nkept; matches && k > 0; k--, g = g->previous) {
+        matches = g->code == d->frames[k].code;
+    }
+    if (!matches) {
         Py_FatalError("lucifer jit: kept frames do not match the exit");
     }
     struct lu_deopt_frame *fr = &d->frames[0];
@@ -446,9 +454,9 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     for (int k = 1; !unseen && k < d->nframes; k++) {
         fr = &d->frames[k];
         struct lu_frame *f;
-        if (kept != NULL) {
+        if (k <= nkept) {
             f = kept;
-            for (int j = d->nframes - 1; j > k; j--) {
+            for (int j = nkept; j > k; j--) {
                 f = f->previous;
             }
             /* The frame takes what it was lent. Each local's reference goes

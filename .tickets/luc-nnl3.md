@@ -1,6 +1,6 @@
 ---
 id: luc-nnl3
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-09T02:01:52Z
@@ -18,3 +18,7 @@ Found in luc-vxsk. Making the kernel's failed-lookup AttributeError positionally
 **2026-11-09T07:44:47Z**
 
 Master 4a9dd60 shows it in user code too: def mk(t, n, o): e = AttributeError(t); e.name = n; e.obj = o; raise e, called in a try/except AttributeError 300 times, aborts under -X lucifer_jit=always -X lucifer_stress=deopt:9 (and 10, 11) with the same 'kept frames do not match the exit'.
+
+**2026-11-10T03:44:42Z**
+
+Root cause: a lowered class call inlines type.__call__ and __init__ after an allocation call that may keep its frames (a frame object of them, or deopt stress); the next exit is inside __init__, deeper than the kept frames, and lu_jit_deopt required an exact match. The kept frames are now the exit's outermost ones and the deeper frames are pushed above them. tests/kernel/jit_deopt_raise runs under deopt:1..12.

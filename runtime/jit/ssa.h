@@ -121,6 +121,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(JUMP, REP_NONE, IF_TERM) \
     X(BRANCH, REP_NONE, IF_TERM)        /* a: bit; to succ[0] when 1 */ \
     X(RETURN, REP_NONE, IF_TERM)        /* a: the frame's result, owned */ \
+    X(UNLINK, REP_NONE, IF_EFFECT)      /* the root frame leaves the stack before its locals go */ \
     X(DEOPT, REP_NONE, IF_TERM)         /* leaves unconditionally at fs; imm: the reason */ \
     X(POLL, REP_NONE, IF_GUARD)         /* a back-edge: leaves at fs if the poll word is set */ \
     X(CHECK_LIVE, REP_NONE, IF_GUARD | IF_EFFECT)   /* leaves at fs, as a poll does, once the unit is dead */

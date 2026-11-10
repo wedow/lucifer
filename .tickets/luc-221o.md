@@ -1,6 +1,6 @@
 ---
 id: luc-221o
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-09T09:18:41Z
@@ -12,3 +12,9 @@ tags: [libtest]
 
 Full Lib/test run, 2026-11-09: cases CPython 3.14t passes and Lucifer does not. Lib/test runs C and pure-Python variants of these modules; the C variants skip or never get generated without the accelerator: _asyncio (test_asyncio.test_tasks 797, test_futures 123, test_eager_task_factory 48 via asyncio.tasks._CTask, test_free_threading 12, test_futures2 7), _decimal (test_decimal 341), _zoneinfo (test_zoneinfo 248), _functools (test_functools 120), _heapq (test_heapq 34). Build them from CPython's Modules/ like the other stdlib extensions, or provide them.
 
+
+## Notes
+
+**2026-11-10T05:18:05Z**
+
+_decimal is built from Modules/_decimal over the system libmpdec (luc-clibs): test_decimal 384 -> 724 PASS (3.14t 724 recorded, 726 fresh). Owner decision: the other accelerators stay Python; what their C-variant tests need is luc-tcgn (and luc-7aot for _datetime).

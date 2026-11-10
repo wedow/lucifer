@@ -132,8 +132,15 @@ DYNLOAD = $(STDLIB)/lib-dynload
 EXT_SUFFIX = .cpython-314t-x86_64-linux-gnu.so
 CPY_MODULES = third_party/cpython/Modules
 CJK_CODECS = _codecs_cn _codecs_hk _codecs_iso2022 _codecs_jp _codecs_kr _codecs_tw
-STDLIB_EXTS = _ssl _sqlite3 _bz2 pyexpat _elementtree _pickle cmath _multiprocessing _posixshmem _multibytecodec \
-	$(CJK_CODECS)
+STDLIB_EXTS := _ssl _sqlite3 _bz2 pyexpat _elementtree _pickle cmath _multiprocessing _posixshmem _multibytecodec \
+	$(CJK_CODECS) termios syslog
+# A module over an optional library is built when the library's header is found,
+# as CPython's configure decides; without it the import fails as in CPython.
+have = $(shell printf '\043include <$(1)>\n' | $(CC) -E -x c - >/dev/null 2>&1 && echo $(2))
+STDLIB_EXTS += $(call have,tk.h,_tkinter) $(call have,lzma.h,_lzma) $(call have,zstd.h,_zstd) \
+	$(call have,panel.h,_curses _curses_panel) $(call have,ndbm.h,_dbm) $(call have,gdbm.h,_gdbm) \
+	$(call have,readline/readline.h,readline) _decimal $(call have,uuid/uuid.h,_uuid)
+SYSTEM_MPDEC := $(call have,mpdecimal.h,yes)
 STDLIB_EXT_FILES = $(STDLIB_EXTS:%=$(DYNLOAD)/%$(EXT_SUFFIX))
 all: $(STDLIB_EXT_FILES)
 $(DYNLOAD)/_ssl$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_ssl.c
@@ -153,11 +160,44 @@ $(DYNLOAD)/_multiprocessing$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_multiprocess
 $(DYNLOAD)/_posixshmem$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_multiprocessing/posixshmem.c
 $(DYNLOAD)/_multibytecodec$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/cjkcodecs/multibytecodec.c
 $(CJK_CODECS:%=$(DYNLOAD)/%$(EXT_SUFFIX)): EXT_SRC = $(CPY_MODULES)/cjkcodecs/$*.c
+$(DYNLOAD)/termios$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/termios.c
+$(DYNLOAD)/syslog$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/syslogmodule.c
+$(DYNLOAD)/_tkinter$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_tkinter.c $(CPY_MODULES)/tkappinit.c
+$(DYNLOAD)/_tkinter$(EXT_SUFFIX): EXT_CFLAGS = -Wno-strict-prototypes -DWITH_APPINIT=1
+$(DYNLOAD)/_tkinter$(EXT_SUFFIX): EXT_LIBS = -ltk8.6 -ltcl8.6
+$(DYNLOAD)/_lzma$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_lzmamodule.c
+$(DYNLOAD)/_lzma$(EXT_SUFFIX): EXT_LIBS = -llzma
+$(DYNLOAD)/_zstd$(EXT_SUFFIX): EXT_SRC = $(wildcard $(CPY_MODULES)/_zstd/*.c)
+$(DYNLOAD)/_zstd$(EXT_SUFFIX): EXT_LIBS = -lzstd
+$(DYNLOAD)/_curses$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_cursesmodule.c
+$(DYNLOAD)/_curses$(EXT_SUFFIX): EXT_CFLAGS = -D_DEFAULT_SOURCE
+$(DYNLOAD)/_curses$(EXT_SUFFIX): EXT_LIBS = -lncursesw
+$(DYNLOAD)/_curses_panel$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_curses_panel.c
+$(DYNLOAD)/_curses_panel$(EXT_SUFFIX): EXT_CFLAGS = -D_DEFAULT_SOURCE
+$(DYNLOAD)/_curses_panel$(EXT_SUFFIX): EXT_LIBS = -lpanelw -lncursesw
+$(DYNLOAD)/_dbm$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_dbmmodule.c
+$(DYNLOAD)/_dbm$(EXT_SUFFIX): EXT_CFLAGS = -DUSE_NDBM
+$(DYNLOAD)/_dbm$(EXT_SUFFIX): EXT_LIBS = -lgdbm_compat
+$(DYNLOAD)/_gdbm$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_gdbmmodule.c
+$(DYNLOAD)/_gdbm$(EXT_SUFFIX): EXT_LIBS = -lgdbm
+$(DYNLOAD)/readline$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/readline.c
+$(DYNLOAD)/readline$(EXT_SUFFIX): EXT_CFLAGS = -D_DEFAULT_SOURCE
+$(DYNLOAD)/readline$(EXT_SUFFIX): EXT_LIBS = -lreadline
+# _decimal over the system's libmpdec, else over the tag's copy (configure's
+# USE_BUNDLED_LIBMPDEC, x64 machine).
+$(DYNLOAD)/_decimal$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_decimal/_decimal.c \
+	$(if $(SYSTEM_MPDEC),,$(wildcard $(CPY_MODULES)/_decimal/libmpdec/*.c))
+$(DYNLOAD)/_decimal$(EXT_SUFFIX): EXT_CFLAGS = \
+	$(if $(SYSTEM_MPDEC),,-I$(CPY_MODULES)/_decimal/libmpdec -DCONFIG_64=1 -DASM=1)
+$(DYNLOAD)/_decimal$(EXT_SUFFIX): EXT_LIBS = $(if $(SYSTEM_MPDEC),-lmpdec) -lm
+$(DYNLOAD)/_uuid$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_uuidmodule.c
+$(DYNLOAD)/_uuid$(EXT_SUFFIX): EXT_CFLAGS = $(shell pkg-config --cflags uuid)
+$(DYNLOAD)/_uuid$(EXT_SUFFIX): EXT_LIBS = -luuid
 
 $(DYNLOAD)/%$(EXT_SUFFIX): $(shell find $(CPY_MODULES) third_party/cpython/Include -type f) $(wildcard include/*.h include/cpython/*.h)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -std=c11 -fno-strict-overflow -DNDEBUG -fvisibility=hidden -fPIC -shared -pthread \
-	  -Iinclude -Ithird_party/cpython/Include/internal -I$(CPY_MODULES)/expat -o $@ $(EXT_SRC) $(EXT_LIBS)
+	  -Iinclude -Ithird_party/cpython/Include -Ithird_party/cpython/Include/internal -I$(CPY_MODULES)/expat $(EXT_CFLAGS) -o $@ $(EXT_SRC) $(EXT_LIBS)
 
 abi-audit: bin/lucifer
 	python3 tools/abi/audit.py $(EXPORTS) bin/lucifer
@@ -187,7 +227,7 @@ build/tests/capi/%.so: tests/capi/%.c
 # under the oracle and bin/lucifer.
 EXT_DIR = build/tests/capi/ext
 EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c tests/capi/capi_monitoring.c tests/capi/capi_conv.c tests/capi/ready.c
-EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run capi_conv_run testcapi_import container_refs ready_run list_capi_run
+EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run capi_conv_run testcapi_import container_refs ready_run list_capi_run bad_modules_run given_matches_run
 SLOTS_MODULES = plain noshare shared_gil create two_exec unknown negative two_create two_interp \
 	two_gil not_module not_module_exec create_fails create_raises exec_fails exec_raises
 

@@ -68,6 +68,8 @@ static PyMethodDef symtable_methods[] = {
 static int
 symtable_init_constants(PyObject *m)
 {
+    /* CPython readies the entry type at startup (_PyTypes_InitTypes). */
+    if (PyType_Ready(&PySTEntry_Type) < 0) return -1;
     if (PyModule_AddIntMacro(m, USE) < 0) return -1;
     if (PyModule_AddIntMacro(m, DEF_GLOBAL) < 0) return -1;
     if (PyModule_AddIntMacro(m, DEF_NONLOCAL) < 0) return -1;

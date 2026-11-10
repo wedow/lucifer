@@ -5315,6 +5315,10 @@ translate(struct ctx *c)
             }
         }
         v = take(c, v, own);
+        if (c->parent == NULL && !(c->code->co_flags & LU_CO_GENERATORS)) {
+            /* GH-99729: a finalizer the releases run sees the caller on top. */
+            emit(c, OP_UNLINK, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+        }
         while (c->st.sp > 0) {
             w = pop(c, &own);
             release(c, w, own);

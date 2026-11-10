@@ -13,11 +13,11 @@ Status, refreshed by each daily status run (details: `tools/scoreboard`):
 <!-- stats:begin -->
 | Metric | Score | Counts |
 |---|---|---|
-| Speed vs CPython 3.14t, composite across benchmark suites | 0.24x CPython's speed | geomean of 91 programs, 26 fail, 2026-11-08 |
-| C-API functions implemented | 66.5% | 1,083 of 1,628 |
+| Speed vs CPython 3.14t, composite across benchmark suites | 0.35x CPython's speed | geomean of 121 programs, 1 fail, 2026-11-10 |
+| C-API functions implemented | 69.7% | 1,134 of 1,628 |
 | numpy test suite passing | 97.0% | 50,714 of 52,273 collected, run 2026-11-08 |
 | `Lib/test` passing, relative to CPython | 70.6% | 35,857 of CPython's 50,816, run 2026-11-09 |
-| Kernel programs passing in every mode | 100.0% | 611 of 611, 3 modes |
+| Kernel programs passing in every mode | 100.0% | 666 of 666, 3 modes |
 | Differential programs matching CPython in every JIT mode | 100.0% | 165 of 165, 2 modes |
 <!-- stats:end -->
 

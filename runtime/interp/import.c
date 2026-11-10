@@ -341,9 +341,13 @@ prim_ext_create(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
         goto done;
     }
-    if (PyErr_Occurred()) {
-        PyErr_Clear();
-        lu_err_format(PyExc_SystemError, "initialization of %s raised unreported exception", last);
+    if (Py_TYPE(def) == NULL) {
+        /* a PyModuleDef returned without PyModuleDef_Init: nothing to release */
+        def = NULL;
+        lu_err_format(PyExc_SystemError, "init function of %s returned uninitialized object", last);
+    }
+    else if (PyErr_Occurred()) {
+        lu_err_format_from_cause(PyExc_SystemError, "initialization of %s raised unreported exception", last);
     }
     else if (PyModule_Check(def)) {
         module = def;                   /* single-phase: PyInit_<name> returned the module */
@@ -352,6 +356,10 @@ prim_ext_create(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         PyModuleDef *md = PyModule_GetDef(module);
         if (last != full && md != NULL && md->m_name != NULL && strcmp(md->m_name, last) == 0
             && PyObject_SetAttrString(module, "__name__", name) < 0) {
+            Py_CLEAR(module);
+        }
+        /* found by PyState_FindModule, as fix_up_extension registers it */
+        if (module != NULL && md != NULL && PyState_AddModule(module, md) < 0) {
             Py_CLEAR(module);
         }
     }

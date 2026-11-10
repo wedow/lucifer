@@ -107,3 +107,25 @@ class StrSub(str):
 print(hash((IntSub(1), StrSub('a'))), hash(IntSub(1)), hash(StrSub('a')))
 print(hash(('',)), hash((b'',)), hash(('', b'')) == hash(('', b'')))
 print(hash(('abc', 1)) == hash(('abc', 1)), hash((b'xyz',)) == hash((b'xyz',)))
+
+
+# A deeply nested tuple raises RecursionError instead of overflowing the C
+# stack; a moderately deep one hashes as CPython's does.
+class T(tuple):
+    pass
+
+
+for depth, make in ((1000, lambda t: (t,)), (100, lambda t: T((t,)))):
+    t = ()
+    for _ in range(depth):
+        t = make(t)
+    print(type(hash(t)).__name__)
+    for _ in range(500_000):
+        t = make(t)
+    try:
+        hash(t)
+        print('hashed')
+    except RecursionError as e:
+        # A subclass's nesting may hit the recursion limit first.
+        print('RecursionError', (type(make(())) is T or 'while hashing a tuple' in str(e)))
+    del t
