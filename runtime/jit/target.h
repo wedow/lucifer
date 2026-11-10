@@ -295,6 +295,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed);
     X(seqiter_next) \
     X(seqiter_step) \
     X(field_get) \
+    X(str_char) \
     X(field_set) \
     X(range_iter) \
     X(listiter_new) \

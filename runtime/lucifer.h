@@ -1489,6 +1489,16 @@ PyObject *lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t
 PyObject *lu_subscr_native(PyObject *container, PyObject *sub);
 /* container[start:stop:step] as lu_subscr_native answers it for a slice. */
 PyObject *lu_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *step);
+/* list[lo:hi] = seq for a tuple or list seq (prim/storage.c's list_splice),
+   the bounds clamped under the list's lock: 0, -1 with an error, or 1 when
+   the list's length is no longer expect (>= 0) and nothing was done. */
+int lu_list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, Py_ssize_t expect);
+/* container[start:stop] = v without Python: an exact list, int or None
+   bounds and a tuple or list v. 0, -1 with an error, or 1 when the kernel
+   must do it. */
+int lu_store_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *v);
+/* container[sub] = v for a slice sub without a step, as lu_store_slice_native. */
+int lu_setitem_slice_native(PyObject *container, PyObject *sub, PyObject *v);
 /* container[start:stop] for an exact list, tuple, str or bytes by machine-int
    bounds, either None as `none` says (bit 0 the start, bit 1 the stop): a new
    reference, or NULL without an error for another type. */

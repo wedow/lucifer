@@ -636,6 +636,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/list_slice_store_native.py": {
+      "exit": 0,
+      "sha256": "0a0928c86fc99b4e8d677e6ae2546b8a776b315e42b51ea289eab093bdecbd28",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/memoryview_alias_release.py": {
       "exit": 0,
       "sha256": "cea0cc4719b4a8374425d271a7a6fc1d4e042aad33a3b3a55235916bd0b9f32c",

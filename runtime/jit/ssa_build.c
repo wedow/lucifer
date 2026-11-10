@@ -3551,9 +3551,19 @@ intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
         lu_v n = emit(c, OP_LOAD, REP_I64, args[0], LU_NOV, LU_NOV, offsetof(PyVarObject, ob_size));
         return box_int(c, n);
     }
-    if (nargs == 1 && known_type(c, args[0]) == &PyUnicode_Type && strcmp(name, "size") == 0) {
+    if (nargs == 1 && known_type(c, args[0]) == &PyUnicode_Type
+        && (strcmp(name, "size") == 0 || strcmp(name, "str_len") == 0)) {
         lu_v n = emit(c, OP_LOAD, REP_I64, args[0], LU_NOV, LU_NOV, offsetof(PyASCIIObject, length));
         return box_int(c, n);
+    }
+    if (nargs == 2 && strcmp(name, "str_item") == 0 && !nospec(c, c->pc)) {
+        /* The code point read in line from an exact str, its str made
+           without boxing the index (an int: str.__getitem__ made it one). */
+        guard_type(c, args[0], &PyUnicode_Type);
+        guard_type(c, args[1], &PyLong_Type);
+        lu_v cp = emit(c, OP_STR_ORD, REP_I64, args[0], unbox_int(c, args[1]), LU_NOV, 0);
+        I(c, cp)->fs = before(c);
+        return helper_raising(c, H_str_char, 1, &cp, c->oparg + 2);
     }
     if (nargs == 2 && strcmp(name, "str_ord") == 0 && !nospec(c, c->pc)) {
         /* The code point read in line from an exact str's data, by its kind. */

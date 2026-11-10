@@ -422,6 +422,32 @@ lu_slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObje
     return slice_take(container, length, start, step, count);
 }
 
+int
+lu_store_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *v)
+{
+    if (!PyList_CheckExact(container) || !(PyList_CheckExact(v) || PyTuple_CheckExact(v))) {
+        return 1;
+    }
+    for (;;) {
+        Py_ssize_t length = __atomic_load_n(&((PyVarObject *)container)->ob_size, __ATOMIC_RELAXED), lo, step, count;
+        if (!slice_unpack(start, stop, NULL, length, &lo, &step, &count)) {
+            return 1;
+        }
+        int r = lu_list_splice((PyListObject *)container, lo, lo + count, v, length);
+        if (r != 1) {
+            return r;           /* else the list changed length meanwhile: again */
+        }
+    }
+}
+
+int
+lu_setitem_slice_native(PyObject *container, PyObject *sub, PyObject *v)
+{
+    PySliceObject *s = (PySliceObject *)sub;
+    return Py_IS_TYPE(sub, &PySlice_Type) && s->step == Py_None ? lu_store_slice_native(container, s->start, s->stop, v)
+        : 1;
+}
+
 PyObject *
 lu_slice_native_raw(PyObject *container, int64_t start, int64_t stop, int none)
 {
@@ -3606,6 +3632,19 @@ op_STORE_SUBSCR: {
             DISPATCH();
         }
     }
+    else if (Py_IS_TYPE(sub, &PySlice_Type)) {
+        SAVE_FRAME();
+        int done = lu_setitem_slice_native(container, sub, sp[-3]);
+        ERROR_IF(done < 0);
+        if (done == 0) {
+            PyObject *value = sp[-3];
+            sp -= 3;
+            Py_DECREF(value);
+            Py_DECREF(container);
+            Py_DECREF(sub);
+            DISPATCH();
+        }
+    }
     sp -= 3;
     kargs[0] = container;
     kargs[1] = sub;
@@ -3677,6 +3716,17 @@ op_STORE_SLICE: {
     SAVE_FRAME();
     PyObject *stop = POP();
     PyObject *start = POP();
+    int stored = lu_store_slice_native(sp[-1], start, stop, sp[-2]);
+    if (stored <= 0) {
+        Py_DECREF(start);
+        Py_DECREF(stop);
+        Py_DECREF(POP());
+        Py_DECREF(POP());
+        if (stored < 0) {
+            goto error;
+        }
+        DISPATCH();
+    }
     PyObject *slice = PySlice_New(start, stop, NULL);
     Py_DECREF(start);
     Py_DECREF(stop);

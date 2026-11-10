@@ -625,6 +625,12 @@ h_setitem(PyObject *container, PyObject *sub, PyObject *v)
             return 0;
         }
     }
+    else if (Py_IS_TYPE(sub, &PySlice_Type)) {
+        int done = lu_setitem_slice_native(container, sub, v);
+        if (done <= 0) {
+            return done;
+        }
+    }
     PyObject *args[3] = { container, sub, v };
     PyObject *r = lu_call_kernel(LU_K_setitem, args, 3);
     Py_XDECREF(r);
@@ -692,6 +698,14 @@ static PyObject *
 h_seqiter_next(PyObject *it)
 {
     return lu_seqiter_next(it);
+}
+
+/* The str of one code point: latin-1's are the runtime's singletons. */
+static PyObject *
+h_str_char(int64_t c)
+{
+    Py_UCS4 u = (Py_UCS4)c;
+    return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, &u, 1);
 }
 
 /* The kernel's seqiter_next: MISSING at the end. */
@@ -1248,6 +1262,10 @@ h_binary_slice_raw(PyObject *container, int64_t start, int64_t stop, int64_t mod
 static int
 h_store_slice(PyObject *v, PyObject *container, PyObject *start, PyObject *stop)
 {
+    int r = lu_store_slice_native(container, start, stop, v);
+    if (r <= 0) {
+        return r;
+    }
     PyObject *slice = PySlice_New(start, stop, NULL);
     int err = slice != NULL ? h_setitem(container, slice, v) : -1;
     Py_XDECREF(slice);
@@ -1463,6 +1481,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, IF_SEEN, 1 },
     [H_seqiter_step] = { (void *)h_seqiter_step, "seqiter_step", REP_OBJ, IF_SEEN, 1 },
     [H_field_get] = { (void *)lu_field_get, "field_get", REP_OBJ, IF_SEEN, 2 },
+    [H_str_char] = { (void *)h_str_char, "str_char", REP_OBJ, IF_RAISE, 1 },
     [H_field_set] = { (void *)lu_field_set, "field_set", REP_NONE, IF_SEEN, 3 },
     [H_range_iter] = { (void *)h_range_iter, "range_iter", REP_OBJ, 0, 3 },
     [H_listiter_new] = { (void *)h_seqiter_new, "listiter_new", REP_OBJ, 0, 2 },
