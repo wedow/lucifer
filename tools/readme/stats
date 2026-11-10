@@ -47,8 +47,8 @@ def table(results):
         share("C-API functions implemented", m, "capi.implemented", "capi.total"),
         share("numpy test suite passing", m, "conformance.numpytest.lucifer.pass", "conformance.numpytest.total",
               note=f" collected, run {m['conformance.numpytest.date']}"),
-        share("Core-type `Lib/test` passing, relative to CPython", m, "conformance.libtest-core.lucifer.pass",
-              "conformance.libtest-core.oracle.pass", of="of CPython's", note=f", run {m['conformance.libtest-core.date']}"),
+        share("`Lib/test` passing, relative to CPython", m, "conformance.libtest.lucifer.pass",
+              "conformance.libtest.oracle.pass", of="of CPython's", note=f", run {m['conformance.libtest.date']}"),
         worst_lane("Kernel programs passing in every mode", m, "kernel"),
         worst_lane("Differential programs matching CPython in every JIT mode", m, "difftest"),
     ]

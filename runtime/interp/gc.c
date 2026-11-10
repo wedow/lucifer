@@ -473,10 +473,20 @@ gc_new(PyTypeObject *tp, size_t size, size_t extra)
     return mem != NULL ? PyObject_Init(mem, tp) : PyErr_NoMemory();
 }
 
+/* An instance with inline values gets its room, empty, as from
+   PyType_GenericAlloc (CPython's adds _PyInlineValuesSize): a spec type with
+   a managed dict has them, and its extension allocates here. */
 PyObject *
 _PyObject_GC_New(PyTypeObject *tp)
 {
-    return gc_new(tp, tp->tp_basicsize, 0);
+    Py_ssize_t room = lu_inline_take_room(tp);
+    size_t values = lu_inline_room_size(room);
+    PyObject *op = gc_new(tp, tp->tp_basicsize + values, 0);
+    if (op != NULL && room > 0) {
+        memset((char *)op + tp->tp_basicsize, 0, values);
+        op->ob_flags |= lu_inline_room_flags(tp, room);
+    }
+    return op;
 }
 
 PyVarObject *

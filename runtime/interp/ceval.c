@@ -507,12 +507,12 @@ lu_contains_native(PyObject *container, PyObject *item)
     PyObject *value;
     int found = -1;
     if (PyAnySet_CheckExact(container)) {
-        PyTypeObject *kt = Py_TYPE(item);
         PyObject *candidate = NULL;
-        if (kt != &PyUnicode_Type && kt != &PyLong_Type && kt != &PyType_Type && item != Py_None) {
-            return -1;          /* only keys whose hash runs no Python; a probe that needs __eq__ declines */
+        Py_hash_t hash;
+        if (!lu_hash_native(item, &hash)) {
+            return -1;
         }
-        int verdict = lu_set_probe((PySetObject *)container, item, lu_hash(item), NULL, &candidate);
+        int verdict = lu_set_probe((PySetObject *)container, item, hash, NULL, &candidate);
         Py_XDECREF(candidate);
         return verdict == LU_SET_FOUND ? 1 : verdict == LU_SET_ABSENT ? 0 : -1;
     }
@@ -3300,6 +3300,13 @@ op_COMPARE_OP: {
 op_FORMAT_SIMPLE: {
     /* value -- str(value) through PyObject_Format(value, '') */
     if (PyUnicode_CheckExact(TOP())) {
+        DISPATCH();
+    }
+    if (PyLong_CheckExact(TOP())) {
+        SAVE_FRAME();
+        PyObject *s = lu_long_decimal(TOP());
+        ERROR_IF(s == NULL);
+        Py_SETREF(TOP(), s);
         DISPATCH();
     }
     kargs[0] = POP();

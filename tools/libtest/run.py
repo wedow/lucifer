@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
 from collections import Counter
 from contextlib import nullcontext
+from datetime import datetime, timezone
 import hashlib
 import json
 import math
@@ -24,6 +25,10 @@ RESULTS = ROOT / 'results' / 'libtest'
 RESOURCES = 'all,-network,-urlfetch,tzdata,xpickle'
 # Modules whose deep-recursion cases outrun the default on a loaded host.
 MODULE_TIMEOUTS = {'test_capi': 600}
+# A module may take this many times the oracle's recorded duration before it
+# counts as a hang: a slower runtime is still slower, not stuck.
+ORACLE = 'cpython-3.14.10t.json'
+SLOWDOWN = 10
 STATUSES = 'PASS FAIL ERROR SKIP XFAIL XPASS TIMEOUT CRASH NOTRUN'.split()
 RANK = {s: i for i, s in enumerate(['PASS', 'SKIP', 'XFAIL', 'NOTRUN', 'XPASS', 'FAIL', 'ERROR', 'CRASH', 'TIMEOUT'])}
 PROBE = "import json,sys,sysconfig,test; print(json.dumps({'version':list(sys.version_info[:3]),'implementation':sys.implementation.name,'free_threaded':bool(sysconfig.get_config_var('Py_GIL_DISABLED')),'gil_enabled':getattr(sys,'_is_gil_enabled',lambda:True)(),'dont_write_bytecode':sys.dont_write_bytecode,'test':test.__file__}))"
@@ -207,14 +212,14 @@ def xml_rows(path):
     return rows
 
 
-def run_module(module, ids, args, python, env, raw, unavailable, excluded=None):
+def run_module(module, ids, args, python, env, raw, unavailable, excluded=None, oracle_seconds=0):
     directory = raw / module
     directory.mkdir(parents=True, exist_ok=True)
+    timeout = max(args.timeout, MODULE_TIMEOUTS.get(module, 0), SLOWDOWN * oracle_seconds)
     events, state, xml, worker_pid = (directory / name for name in ('events.jsonl', 'state.jsonl', 'junit.xml', 'worker.pid'))
     for path in (events, state, xml, worker_pid):
         path.unlink(missing_ok=True)
     worker = shlex.join([*python, str(BRIDGE), '--worker'])
-    timeout = max(args.timeout, MODULE_TIMEOUTS.get(module, 0))
     # Cases that kill this runtime's worker are left out: regrtest ignores
     # them by full id, and they stay NOTRUN with the reason recorded.
     excluded = {key: reason for key, reason in (excluded or {}).items() if key in ids}
@@ -320,6 +325,15 @@ def run_module(module, ids, args, python, env, raw, unavailable, excluded=None):
     return rows, detail
 
 
+def save(destination, rows, metadata_path, metadata):
+    """Rows and metadata together, after every module: a killed run stays resumable."""
+    write_manifest(destination, rows)
+    metadata['recorded_at'] = datetime.now(timezone.utc).isoformat()
+    temporary = metadata_path.with_suffix('.json.tmp')
+    temporary.write_text(json.dumps(metadata, indent=2, sort_keys=True) + '\n')
+    temporary.replace(metadata_path)
+
+
 def run(args, python, env, raw):
     expected = read_manifest(args.results / 'expected.tsv')
     inventory = json.loads((args.results / 'inventory.json').read_text())
@@ -389,9 +403,12 @@ def run(args, python, env, raw):
             with excluded_path.open(encoding='utf-8', newline='') as stream:
                 excluded = {row['id']: row['reason'] for row in csv.DictReader(stream, delimiter='\t')}
         metadata['excluded_cases'] = len(excluded)
+        oracle_path = args.results / ORACLE
+        oracle = json.loads(oracle_path.read_text())['modules'] if oracle_path.exists() else {}
         with ThreadPoolExecutor(max_workers=args.jobs) as executor:
             futures = {executor.submit(run_module, module, modules[module], args, python,
-                                       env, raw, unavailable, excluded): module for module in selected}
+                                       env, raw, unavailable, excluded,
+                                       oracle.get(module, {}).get('seconds', 0)): module for module in selected}
             for future in as_completed(futures):
                 module = futures[future]
                 result, detail = future.result()
@@ -402,9 +419,8 @@ def run(args, python, env, raw):
                     outcomes = [repeated.get(name, {}).get(key, ('NOTRUN', 0)) for name in names]
                     rows[key] = max(outcomes, key=lambda outcome: RANK[outcome[0]])
                 metadata['modules'][module] = detail
-                write_manifest(destination, rows)
-    write_manifest(destination, rows)
-    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + '\n')
+                save(destination, rows, metadata_path, metadata)
+    save(destination, rows, metadata_path, metadata)
     print(args.runtime, dict(Counter(status for status, _ in rows.values())))
 
 

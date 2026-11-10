@@ -1,19 +1,17 @@
 """_contextvars (Modules/_contextvarsmodule.c, Python/context.c): ContextVar,
 Context and Token. A context holds its variables in a dict that is replaced,
 never changed, when a variable is set, so a copy shares it until either side
-sets."""
+sets. The current context is the task's (_lucifer.context_get/context_set),
+made empty on first use."""
 
 import _lucifer
-import _thread
-
-_current = {}
 
 
 def _get_current():
-    ident = _thread.get_ident()
-    context = _current.get(ident)
+    context = _lucifer.context_get()
     if context is None:
-        context = _current[ident] = Context()
+        context = Context()
+        _lucifer.context_set(context, False)
     return context
 
 
@@ -23,6 +21,7 @@ class _Missing:
 
 
 _MISSING = _Missing()
+_ABSENT = object()       # no value in the context: Token.MISSING may be one
 
 
 def _generic_alias(cls, item):
@@ -36,7 +35,6 @@ class Context:
     def __init__(self):
         self._data = {}
         self._entered = False
-        self._prev = None
 
     def copy(self):
         """Return a shallow copy of the context object."""
@@ -48,17 +46,12 @@ class Context:
         """Execute callable(*args, **kwargs) code in the context object."""
         if self._entered:
             raise RuntimeError('cannot enter context: %r is already entered' % (self,))
-        ident = _thread.get_ident()
-        self._prev = _current.get(ident)
         self._entered = True
-        _current[ident] = self
-        _lucifer.context_switched(self)
+        prev = _lucifer.context_set(self, True)
         try:
             return callable(*args, **kwargs)
         finally:
-            _current[ident] = self._prev
-            _lucifer.context_switched(self._prev)
-            self._prev = None
+            _lucifer.context_set(prev, True)
             self._entered = False
 
     def get(self, key, default=None, /):
@@ -123,10 +116,9 @@ class ContextVar:
         """Return a value for the context variable for the current context."""
         if len(args) > 1:
             raise TypeError('get expected at most 1 argument, got %d' % len(args))
-        try:
-            return _get_current()._data[self]
-        except KeyError:
-            pass
+        value = _get_current()._data.get(self, _ABSENT)
+        if value is not _ABSENT:
+            return value
         if args:
             return args[0]
         if self._default is not _MISSING:

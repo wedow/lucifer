@@ -768,12 +768,32 @@ setattro_from_setattr(PyObject *self, PyObject *name, PyObject *value)
     return text != NULL ? Py_TYPE(self)->tp_setattr(self, (char *)text, value) : -1;
 }
 
+/* The dunder of the first type after tp in its MRO that has the same thunk
+   in this slot and the dunder in its dict, borrowed; NULL when none does. */
+static PyObject *
+copied_dunder(PyTypeObject *tp, struct wrapperbase *p, void *thunk, PyObject *name)
+{
+    PyObject *mro = tp->tp_mro;
+    for (Py_ssize_t i = 1; mro != NULL && i < PyTuple_GET_SIZE(mro); i++) {
+        PyTypeObject *b = (PyTypeObject *)PyTuple_GET_ITEM(mro, i);
+        void **slot = slotptr(b, p->offset);
+        PyObject *dunder = slot != NULL && *slot == thunk ? lu_ns_lookup(lu_type_dict(b), name) : NULL;
+        if (dunder != NULL && dunder != Py_None) {
+            return dunder;
+        }
+    }
+    return NULL;
+}
+
 /* Adds a wrapper descriptor to tp's dict for each slot tp has of its own
-   (one its base does not have too, and not a thunk) whose dunder the dict
-   lacks, as add_operators does. */
+   (one its base does not have too) whose dunder the dict lacks, as
+   add_operators does. A thunk in an extension's static type was copied from
+   a runtime type's slot (numpy's float64 takes float's tp_hash): the dict
+   gets that type's dunder, which is what the copied function does in CPython. */
 int
 lu_type_add_operators(PyTypeObject *tp)
 {
+    int foreign = !(tp->tp_flags & (Py_TPFLAGS_HEAPTYPE | _Py_TPFLAGS_STATIC_BUILTIN));
     PyObject *dict = lu_type_dict(tp);
     if (tp->tp_getattr != NULL && tp->tp_getattro == NULL) {
         tp->tp_getattro = getattro_from_getattr;
@@ -786,7 +806,8 @@ lu_type_add_operators(PyTypeObject *tp)
             continue;
         }
         void **ptr = slotptr(tp, p->offset);
-        if (ptr == NULL || *ptr == NULL || lu_is_slot_thunk(*ptr)) {
+        int thunk = ptr != NULL && *ptr != NULL && lu_is_slot_thunk(*ptr);
+        if (ptr == NULL || *ptr == NULL || (thunk && !foreign)) {
             continue;       /* a thunk would wrap the lookup that finds this very wrapper */
         }
         void **base = tp->tp_base != NULL ? slotptr(tp->tp_base, p->offset) : NULL;
@@ -798,8 +819,9 @@ lu_type_add_operators(PyTypeObject *tp)
             return -1;
         }
         int err = 0;
-        if (lu_ns_lookup(dict, name) == NULL) {
-            PyObject *descr = *ptr == (void *)PyObject_HashNotImplemented
+        PyObject *copied = thunk ? copied_dunder(tp, p, *ptr, name) : NULL;
+        if (lu_ns_lookup(dict, name) == NULL && (!thunk || copied != NULL)) {
+            PyObject *descr = thunk ? Py_NewRef(copied) : *ptr == (void *)PyObject_HashNotImplemented
                 ? Py_NewRef(Py_None) : PyDescr_NewWrapper(tp, p, *ptr);
             err = descr == NULL || lu_ns_insert(dict, name, descr) < 0;
             Py_XDECREF(descr);

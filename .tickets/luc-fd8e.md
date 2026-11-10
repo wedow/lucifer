@@ -27,3 +27,7 @@ From luc-dawf: Py_NewInterpreter is an inert stand-in until this lands. It re-at
 **2026-11-06T02:44:31Z**
 
 Superseding the earlier luc-dawf note: the inert stand-in is gone. Py_NewInterpreter returns NULL (no exception), Py_EndInterpreter is a fatal error. Two oracle _testcapi entry points do not check the NULL and call PyThreadState_Get() with no thread state, a fatal error that kills the libtest worker: test_atexit (Modules/_testcapimodule.c ~2524-2528: PyThreadState_Swap(NULL); Py_NewInterpreter(); PyThreadState_Get()) and test_current_tstate_matches (~1190-1193). run_in_subinterp and the other callers handle NULL.
+
+**2026-11-09T09:18:51Z**
+
+Full Lib/test run 2026-11-09: 634 cases need subinterpreters: test_concurrent_futures fails to import in most of its modules (test_process_pool 119, test_shutdown 51, test_deadlock 48, test_wait 33, test_as_completed 25, ...) because test_concurrent_futures/util.py reads futures.InterpreterPoolExecutor at import; test_crossinterp 101, test__interpchannels 68, test__interpreters 66, test_interpreter_pool 37, plus 28 'subinterpreters required' skips.

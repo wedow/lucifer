@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily status pass on a built tree: gates, AWFY timing, the web benchmark, the corpus, conformance, optional numpy.
+"""Daily status pass on a built tree: gates, AWFY timing, the web benchmark, the corpus, conformance, optional numpy and Lib/test.
 
 Writes results/status-DATE/{summary.csv,summary.md,*.log}. Run from the repository root.
 
@@ -8,7 +8,8 @@ Environment:
   ORACLE_T       the CPython 3.14t reference interpreter
   HOST_PYTHON    passed to make for host-side tools
   TIMING_PREFIX  command words put in front of each timed step (an exclusive lock, say)
-  TEST_PREFIX    command words put in front of each gate and numpy shard
+  TEST_PREFIX    command words put in front of each gate, numpy shard and the Lib/test run
+  LIBTEST_JOBS   parallel Lib/test modules (--libtest; default 6)
   NUMPY_SITE, NUMPY_CACHE, NUMPY_WORK  site-packages, wheel cache and raw-log directory (--numpy)
   WEB_SITE       site-packages with Flask for the 3.14t ABI (the web benchmark; skipped when unset)
   WEB_GIL_PYTHON a CPython 3.14 GIL interpreter that imports Flask (--refresh-reference only)
@@ -141,11 +142,14 @@ def make_targets():
     return check + ["check-jit"]
 
 
+def make_flags():
+    return [f"{v}={os.environ[v]}" for v in ("ORACLE_T", "HOST_PYTHON") if v in os.environ]
+
+
 def gates(out):
-    flags = [f"{v}={os.environ[v]}" for v in ("ORACLE_T", "HOST_PYTHON") if v in os.environ]
     rows = {}
     for target in make_targets():
-        done = run(["make", target] + flags, "TEST_PREFIX")
+        done = run(["make", target] + make_flags(), "TEST_PREFIX")
         (out / f"{target}.log").write_text(done.stdout)
         detail = [l for l in done.stdout.splitlines() if re.search(r"\d+/\d+ checks pass|failing|^FAIL|^PASS difftest", l)]
         rows[target] = (done.returncode == 0, "; ".join(l[:200] for l in detail[:6]))
@@ -177,18 +181,18 @@ def numpy_date():
     return max(stamps)[:10] if any(stamps) else None
 
 
-def libtest_core():
-    """Lib/test passes in the core-type modules Lucifer runs, for Lucifer and the oracle."""
-    results = ROOT / "results/libtest"
-    modules = json.loads((results / "lucifer.json").read_text())["modules"]
-    status = {rt: {r["id"]: r["status"] for r in csv.DictReader((results / f"{rt}.tsv").open(), delimiter="\t")}
-              for rt in ("lucifer", "cpython-3.14.10t")}
-    core = [i for i in status["cpython-3.14.10t"] if i.startswith(tuple(f"test.{m}." for m in modules))]
-    counts = {f"conformance.libtest-core.{tag}.pass": sum(status[rt].get(i) == "PASS" for i in core)
-              for tag, rt in (("lucifer", "lucifer"), ("oracle", "cpython-3.14.10t"))}
-    # The daily never runs Lib/test: its counts date from the last committed run.
-    counts["conformance.libtest-core.date"] = run(["git", "log", "-1", "--format=%cs", "--", str(results / "lucifer.tsv")]).stdout.strip()
-    return counts
+def libtest_date():
+    """When results/libtest/lucifer.tsv last ran."""
+    return json.loads((ROOT / "results/libtest/lucifer.json").read_text()).get("recorded_at", "")[:10] or None
+
+
+def libtest(out):
+    """Every Lib/test module on Lucifer, in one prefixed step; per-module failures never stop it."""
+    run(["make", "oracle-exts"] + make_flags())  # the oracle's _testcapi and friends, which test_capi imports
+    done = run([sys.executable, "tools/libtest/run.py", "run", "--python", LUCIFER, "--runtime", "lucifer",
+                "--source", "installed", "--jobs", os.environ.get("LIBTEST_JOBS", "6")], "TEST_PREFIX")
+    (out / "libtest.log").write_text(done.stdout)
+    return [] if done.returncode == 0 else [f"libtest run exited {done.returncode} (libtest.log)"]
 
 
 def conformance(out):
@@ -201,7 +205,7 @@ def conformance(out):
             metrics[f"conformance.{row['suite']}.{tag}.pass"] = int(row["PASS"])
             metrics[f"conformance.{row['suite']}.total"] = int(row["total"])
     metrics["conformance.numpytest.date"] = numpy_date()
-    metrics.update(libtest_core())
+    metrics["conformance.libtest.date"] = libtest_date()
     audit = run(["make", "abi-audit"]).stdout
     (out / "abi-audit.log").write_text(audit)
     m = re.search(r"functions:\s+(\d+) implemented, (\d+) stubs, of (\d+)", audit)
@@ -342,6 +346,7 @@ def main():
     p.add_argument("--out", type=Path)
     p.add_argument("--iters", type=int, default=3, help="iterations per timed run; the best counts")
     p.add_argument("--numpy", action="store_true", help="also run the full numpy suite")
+    p.add_argument("--libtest", action="store_true", help="also run every Lib/test module")
     p.add_argument("--refresh-reference", action="store_true", help="re-time CPython into results/status-reference.json and exit")
     sub = p.add_subparsers(dest="worker")
     t = sub.add_parser("time", help=argparse.SUPPRESS)
@@ -405,6 +410,8 @@ def main():
         problems += corpus_problems or ([] if results else ["corpus produced no results (corpus.log)"])
     else:
         problems.append("corpus skipped: no CPython corpus reference; run --refresh-reference")
+    if args.libtest:
+        problems += libtest(out)
     numpy_metrics = {}
     if args.numpy:
         numpy_metrics, numpy_problems = numpy(out)

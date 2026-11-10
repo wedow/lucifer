@@ -80,6 +80,50 @@ with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
         self.addCleanup(os.environ.pop, 'PYTHONPATH')
         self.assertEqual(self.run_fake(body, timeout=2), ['PASS'] * 3)
 
+    def test_run_records_its_date(self):
+        # The daily status dates the Lib/test row from the run, not from a commit.
+        import datetime
+        self.run_fake(self.fake_probe() + """
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'PASSED'}) + '\\n')
+""")
+        recorded = json.loads((self.root / 'fake.json').read_text())['recorded_at']
+        self.assertEqual(recorded[:10], datetime.datetime.now(datetime.timezone.utc).strftime('%F'))
+
+    def test_killed_run_keeps_finished_module_records(self):
+        # A run killed midway (the test host's memory cap, say) keeps each
+        # finished module's metadata beside its rows, so --resume can finish it.
+        (self.root / 'inventory.json').write_text(json.dumps({'free-threaded': {
+            'test_fixture': {'cases': self.ids[:2]}, 'test_fixture_z': {'cases': self.ids[2:]}}}))
+        fake = self.root / 'fake.py'
+        fake.write_text(self.fake_probe() + """
+import signal
+if sys.argv[-1] == 'test_fixture_z':
+    os.kill(os.getppid(), signal.SIGKILL)
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'PASSED'}) + '\\n')
+""")
+        subprocess.run([sys.executable, str(RUNNER), 'run', '--python', shlex.join([sys.executable, str(fake)]),
+                        '--runtime', 'fake', '--results', str(self.root), '--source', 'installed',
+                        '--jobs', '1', '--timeout', '5'], capture_output=True, timeout=40)
+        self.assertEqual(list(json.loads((self.root / 'fake.json').read_text())['modules']), ['test_fixture'])
+
+    def test_module_timeout_scales_with_the_oracle_duration(self):
+        # A module CPython itself needs a long time for gets proportionally
+        # longer than the default before it counts as a hang.
+        (self.root / 'cpython-3.14.10t.json').write_text(json.dumps({'modules': {'test_fixture': {'seconds': 0.1}}}))
+        self.assertEqual(self.run_fake(self.fake_probe() + """
+if float(sys.argv[sys.argv.index('--timeout') + 1]) < 0.5:
+    with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+        stream.write(json.dumps({'state':'TIMEOUT'}) + '\\n')
+    raise SystemExit(1)
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'PASSED'}) + '\\n')
+with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
+    for name in ('first','second','third'):
+        stream.write(json.dumps({'id':'test_fixture.Example.test_' + name,'status':'PASS','seconds':0}) + '\\n')
+""", timeout=0.15), ['PASS'] * 3)
+
     def test_startup_hang(self):
         self.assertEqual(self.run_fake('import time; time.sleep(60)\n'), ['NOTRUN'] * 3)
 
@@ -249,6 +293,34 @@ with open(os.environ['LIBTEST_STATE'], 'w') as stream:
     stream.write(json.dumps({'state':'PASSED'}) + '\\n')
 """
         self.assertEqual(self.run_fake(body), ['PASS', 'NOTRUN', 'NOTRUN'])
+
+    def test_error_reasons_name_the_exception_type(self):
+        # Raw events carry the exception type, so failures can be grouped by cause.
+        body = self.fake_probe() + """
+import io,runpy,types,unittest
+module = types.ModuleType('test.libregrtest.testresult')
+class RegressionTestResult(unittest.TextTestResult):
+    pass
+module.RegressionTestResult = RegressionTestResult
+sys.modules[module.__name__] = module
+""" + 'runpy.run_path(' + repr(str(RUNNER.with_name('bridge.py'))) + ")[\"observe_cases\"]()\n" + """
+class Example(unittest.TestCase):
+    def test_first(self): pass
+Example.__module__ = 'test_fixture'
+result = RegressionTestResult(io.StringIO(), False, 0)
+case = Example('test_first')
+result.startTest(case)
+try:
+    raise ModuleNotFoundError("No module named 'absent'")
+except ModuleNotFoundError:
+    result.addError(case, sys.exc_info())
+result.stopTest(case)
+with open(os.environ['LIBTEST_STATE'], 'w') as stream:
+    stream.write(json.dumps({'state':'FAILED'}) + '\\n')
+"""
+        self.assertEqual(self.run_fake(body), ['ERROR', 'ERROR', 'ERROR'])
+        events = (self.root / 'raw/fake/test_fixture/events.jsonl').read_text().splitlines()
+        self.assertEqual(json.loads(events[0])['reason'], "ModuleNotFoundError: No module named 'absent'")
 
     def test_collection_preserves_upstream_ids(self):
         fake = self.root / 'collector.py'

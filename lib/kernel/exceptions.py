@@ -46,27 +46,37 @@ def _type_name(obj):
     return type_tp_name(type(obj))
 
 
-def _no_keywords(name, kwds):
+def _no_keywords(cls, kwds):
+    """The refusal of keywords; cls's name is made only for the message."""
     if kwds:
-        error(TypeError, str_join('', (name, '() takes no keyword arguments')))
+        error(TypeError, str_join('', (type_tp_name(cls), '() takes no keyword arguments')))
 
 
 def _store_keywords(self, cls, kwds, names):
-    """Stores the keyword arguments of cls's __init__ as attributes."""
+    """Stores the keyword arguments of cls's __init__ in the words names lists in order."""
     for key, value in ns_items(kwds):
-        known = False
+        word = -1
+        i = 0
         for name in names:
             if key == name:
-                known = True
-        if not known:
+                word = i
+            i = i + 1
+        if word < 0:
             error(TypeError, str_join('', (
                 "'", key, "' is an invalid keyword argument for ", cls, '()')))
-        setattr_(self, key, value)
+        _set(self, word, value)
+
+
+# The words of a native exception layout (runtime/interp/exceptions.c), read and
+# written as CPython's C code reads and writes its struct fields: a subclass may
+# shadow one with a property, which neither its __init__ nor its __str__ sees.
+_set = exc_set_word
+_word = exc_word
 
 
 def _init(self, args, kwds):
     """BaseException_init."""
-    _no_keywords(_type_name(self), kwds)
+    _no_keywords(type(self), kwds)
     self.args = args
 
 
@@ -148,9 +158,9 @@ class SystemExit:
         _init(self, args, kwds)
         n = size(args)
         if n == 1:
-            self.code = _first(args)
+            _set(self, 0, _first(args))
         elif n > 1:
-            self.code = args
+            _set(self, 0, args)
 
 
 @kernel_type(StopIteration)
@@ -159,7 +169,7 @@ class StopIteration:
 
     def __init__(self, /, *args, **kwds):
         _init(self, args, kwds)
-        self.value = _first(args) if args else None
+        _set(self, 0, _first(args) if args else None)
 
 
 @kernel_type(KeyError)
@@ -191,7 +201,7 @@ class AttributeError:
 
     def __init__(self, /, *args, **kwds):
         self.args = args
-        _store_keywords(self, 'AttributeError', kwds, ('name', 'obj'))
+        _store_keywords(self, 'AttributeError', kwds, ('obj', 'name'))
 
     def __reduce__(self):
         state = {}
@@ -199,8 +209,8 @@ class AttributeError:
         if d:
             for key, value in ns_items(d):
                 ns_set(state, key, value)
-        if self.name is not None:
-            ns_set(state, 'name', self.name)
+        if _word(self, 1) is not None:
+            ns_set(state, 'name', _word(self, 1))
         ns_set(state, 'args', self.args)
         return (type(self), self.args, state)
 
@@ -215,13 +225,13 @@ class ImportError:
             if key != 'name' and key != 'path' and key != 'name_from':
                 error(TypeError, str_join('', (
                     "ImportError() got an unexpected keyword argument '", key, "'")))
-        self.name = ns_get(kwds, 'name', None)
-        self.path = ns_get(kwds, 'path', None)
-        self.name_from = ns_get(kwds, 'name_from', None)
-        self.msg = _first(args) if size(args) == 1 else None
+        _set(self, 1, ns_get(kwds, 'name', None))
+        _set(self, 2, ns_get(kwds, 'path', None))
+        _set(self, 3, ns_get(kwds, 'name_from', None))
+        _set(self, 0, _first(args) if size(args) == 1 else None)
 
     def __str__(self):
-        msg = self.msg
+        msg = _word(self, 0)
         if kind(msg, 'str') and type(msg) is str:
             return msg
         return _base_str(self)
@@ -232,12 +242,9 @@ class ImportError:
         if d:
             for key, value in ns_items(d):
                 ns_set(state, key, value)
-        if self.name is not None:
-            ns_set(state, 'name', self.name)
-        if self.path is not None:
-            ns_set(state, 'path', self.path)
-        if self.name_from is not None:
-            ns_set(state, 'name_from', self.name_from)
+        for i, key in ((1, 'name'), (2, 'path'), (3, 'name_from')):
+            if _word(self, i) is not None:
+                ns_set(state, key, _word(self, i))
         if state:
             return (type(self), self.args, state)
         return (type(self), self.args)
@@ -254,7 +261,7 @@ class OSError:
             self = alloc(cls, OSError)
             self.args = ()
             return self
-        _no_keywords(type_tp_name(cls), kwds)
+        _no_keywords(cls, kwds)
         errno, strerror, filename, filename2 = _oserror_args(args)
         if cls is OSError and errno is not MISSING and kind_int(errno):
             mapped = _errno_class(errno)
@@ -267,18 +274,18 @@ class OSError:
     def __init__(self, /, *args, **kwds):
         if not _use_init(type(self)):
             return None
-        _no_keywords(_type_name(self), kwds)
+        _no_keywords(type(self), kwds)
         errno, strerror, filename, filename2 = _oserror_args(args)
         _oserror_fill(self, args, errno, strerror, filename, filename2)
 
     def __str__(self):
-        errno = self.errno
-        strerror = self.strerror
-        filename = self.filename
+        errno = _word(self, 0)
+        strerror = _word(self, 1)
+        filename = _word(self, 2)
         if filename is not None:
-            if self.filename2 is not None:
+            if _word(self, 3) is not None:
                 return str_join('', ('[Errno ', _text(errno), '] ', _text(strerror), ': ',
-                                     _repr(filename), ' -> ', _repr(self.filename2)))
+                                     _repr(filename), ' -> ', _repr(_word(self, 3))))
             return str_join('', ('[Errno ', _text(errno), '] ', _text(strerror), ': ',
                                  _repr(filename)))
         if errno is not None and strerror is not None:
@@ -287,12 +294,12 @@ class OSError:
 
     def __reduce__(self):
         args = self.args
-        if size(args) == 2 and self.filename is not None:
+        if size(args) == 2 and _word(self, 2) is not None:
             a, b = args
-            if self.filename2 is not None:
-                args = (a, b, self.filename, None, self.filename2)
+            if _word(self, 3) is not None:
+                args = (a, b, _word(self, 2), None, _word(self, 3))
             else:
-                args = (a, b, self.filename)
+                args = (a, b, _word(self, 2))
         d = instance_dict(self, False)
         if d:
             return (type(self), args, d)
@@ -340,15 +347,15 @@ def _oserror_fill(self, args, errno, strerror, filename, filename2):
         if type(self) is BlockingIOError and isinstance(filename, int):
             self.characters_written = filename
         else:
-            self.filename = filename
+            _set(self, 2, filename)
             if filename2 is not MISSING and filename2 is not None:
-                self.filename2 = filename2
+                _set(self, 3, filename2)
             if errno is not MISSING:
                 a, b = _two(args)
                 args = (a, b)
     if errno is not MISSING:
-        self.errno = errno
-        self.strerror = strerror
+        _set(self, 0, errno)
+        _set(self, 1, strerror)
     self.args = args
 
 
@@ -394,7 +401,7 @@ class SyntaxError:
         _init(self, args, kwds)
         n = size(args)
         if n >= 1:
-            self.msg = _first(args)
+            _set(self, 0, _first(args))
         if n == 2:
             info = _items(_second(args))
             count = size(info)
@@ -405,28 +412,28 @@ class SyntaxError:
                 error(TypeError, str_join('', (
                     'function takes at most 7 arguments (', int_text(count), ' given)')))
             filename, lineno, offset, text, end_lineno, end_offset, metadata = _pad(info, 7)
-            self.filename = filename
-            self.lineno = lineno
-            self.offset = offset
-            self.text = text
+            _set(self, 1, filename)
+            _set(self, 2, lineno)
+            _set(self, 3, offset)
+            _set(self, 4, text)
             if end_lineno is not MISSING:
-                self.end_lineno = end_lineno
+                _set(self, 5, end_lineno)
             if end_offset is not MISSING:
-                self.end_offset = end_offset
+                _set(self, 6, end_offset)
             if metadata is not MISSING:
-                self._metadata = metadata
+                _set(self, 8, metadata)
             if end_lineno is not MISSING and end_offset is MISSING:
                 error(TypeError, 'end_offset must be provided when end_lineno is provided')
 
     def __str__(self):
-        filename = self.filename
-        lineno = self.lineno
+        filename = _word(self, 1)
+        lineno = _word(self, 2)
         if kind(filename, 'str'):
             filename = _basename(filename)
         else:
             filename = None
         have_lineno = lineno is not None and isinstance(lineno, int)
-        msg = self.msg
+        msg = _word(self, 0)
         if filename is None and not have_lineno:
             return _text(msg)
         if filename is not None and have_lineno:
@@ -510,7 +517,10 @@ class UnicodeEncodeError:
     def __init__(self, /, *args, **kwds):
         _init(self, args, kwds)
         _unicode_args(self, args, 'ssnns', 'UnicodeEncodeError')
-        self.encoding, self.object, self.start, self.end, self.reason = args
+        encoding, obj, self.start, self.end, reason = args
+        _set(self, 0, encoding)
+        _set(self, 1, obj)
+        _set(self, 4, reason)
 
     def __str__(self):
         return _unicode_str(self, 'encode', False)
@@ -523,8 +533,10 @@ class UnicodeDecodeError:
     def __init__(self, /, *args, **kwds):
         _init(self, args, kwds)
         _unicode_args(self, args, 'sbnns', 'UnicodeDecodeError')
-        self.encoding, obj, self.start, self.end, self.reason = args
-        self.object = obj if kind(obj, 'bytes') else bytes(obj)
+        encoding, obj, self.start, self.end, reason = args
+        _set(self, 0, encoding)
+        _set(self, 1, obj if kind(obj, 'bytes') else bytes(obj))
+        _set(self, 4, reason)
 
     def __str__(self):
         return _unicode_str(self, 'decode', True)
@@ -537,16 +549,15 @@ class UnicodeTranslateError:
     def __init__(self, /, *args, **kwds):
         _init(self, args, kwds)
         _unicode_args(self, args, 'snns', 'UnicodeTranslateError')
-        self.object, self.start, self.end, self.reason = args
-        self.encoding = None
+        obj, self.start, self.end, reason = args
+        _set(self, 1, obj)
+        _set(self, 4, reason)
+        _set(self, 0, None)
 
     def __str__(self):
-        try:
-            if self.object is None:
-                return ''
-        except AttributeError:
+        if _word(self, 1) is None:
             return ''
-        reason = _text(self.reason)
+        reason = _text(_word(self, 4))
         obj = _error_object(self, False)
         start = self.start
         end = self.end
@@ -584,9 +595,8 @@ def _escape(obj, index):
 def _error_object(self, decoding):
     """The object of a Unicode error, which str() reads after the side effects
     of its other attributes' __str__: it must still be there, and the right type."""
-    try:
-        obj = self.object
-    except AttributeError:
+    obj = _word(self, 1)
+    if obj is None:
         error(TypeError, "UnicodeError 'object' attribute is not set")
     if not kind(obj, 'bytes' if decoding else 'str'):
         error(TypeError, str_join('', ("UnicodeError 'object' attribute must be a ",
@@ -595,13 +605,10 @@ def _error_object(self, decoding):
 
 
 def _unicode_str(self, verb, decoding):
-    try:
-        if self.object is None:
-            return ''
-    except AttributeError:
+    if _word(self, 1) is None:
         return ''
-    reason = _text(self.reason)
-    encoding = _text(self.encoding)
+    reason = _text(_word(self, 4))
+    encoding = _text(_word(self, 0))
     obj = _error_object(self, decoding)
     start = self.start
     end = self.end

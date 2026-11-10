@@ -5,6 +5,7 @@ carrier of its own (DESIGN 5.7); _lucifer.thread_start runs a function in it.
 """
 
 import _lucifer
+from _lucifer import object as _kobject
 from sys import is_finalizing as _is_finalizing
 
 TIMEOUT_MAX = 9223372036.0
@@ -275,55 +276,39 @@ class _local:
         object.__setattr__(self, '__dict__', impl.create_dict())
         return self
 
-    def _enter(self):
-        """Makes self.__dict__ this thread's, and returns the impl with its lock held. The lock
-        covers creating the dict and running __init__, so no other thread's access swaps
-        self.__dict__ in between."""
+    def _dict(self):
+        """This thread's dict of the local, made on first use, when __init__ runs with it.
+        Attribute access looks names up in it directly (generic_getattr's dct), so threads
+        never share or swap self.__dict__ and need no lock."""
         impl = object.__getattribute__(self, '_local__impl')
-        impl.locallock.acquire()
-        try:
-            dct = impl.get_dict()
-            if dct is None:
-                dct = impl.create_dict()
-                args, kw = impl.localargs
-                object.__setattr__(self, '__dict__', dct)
-                try:
-                    self.__init__(*args, **kw)
-                except BaseException:
-                    tdict = _lucifer.thread_dict()      # the next access runs __init__ again
-                    tdict.pop(impl.key, None)
-                    impl.forget(tdict)
-                    raise
-            object.__setattr__(self, '__dict__', dct)
-        except BaseException:
-            impl.locallock.release()
-            raise
-        return impl
+        dct = impl.get_dict()
+        if dct is None:
+            dct = impl.create_dict()
+            args, kw = impl.localargs
+            try:
+                self.__init__(*args, **kw)
+            except BaseException:
+                tdict = _lucifer.thread_dict()      # the next access runs __init__ again
+                tdict.pop(impl.key, None)
+                impl.forget(tdict)
+                raise
+        return dct
 
     def __getattribute__(self, name):
-        impl = _local._enter(self)
-        try:
-            return object.__getattribute__(self, name)
-        finally:
-            impl.locallock.release()
+        dct = _local._dict(self)
+        if name == '__dict__':
+            return dct
+        return _kobject.generic_getattr(self, name, False, dct)
 
     def __setattr__(self, name, value):
         if name == '__dict__':
             raise AttributeError("%r object attribute '__dict__' is read-only" % self.__class__.__name__)
-        impl = _local._enter(self)
-        try:
-            return object.__setattr__(self, name, value)
-        finally:
-            impl.locallock.release()
+        _kobject.generic_setattr(self, name, value, _local._dict(self))
 
     def __delattr__(self, name):
         if name == '__dict__':
             raise AttributeError("%r object attribute '__dict__' is read-only" % self.__class__.__name__)
-        impl = _local._enter(self)
-        try:
-            return object.__delattr__(self, name)
-        finally:
-            impl.locallock.release()
+        _kobject.generic_setattr(self, name, _lucifer.MISSING, _local._dict(self))
 
 
 # Threads. _state guards the count of running threads, the handles of the non-daemon
