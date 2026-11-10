@@ -1441,6 +1441,10 @@ PyObject *lu_descr_new_getset(PyTypeObject *type, PyGetSetDef *getset);
 int lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out);
 /* An exact staticmethod's callable, as its __get__ returns it (a new reference), or NULL. */
 PyObject *lu_staticmethod_get(PyObject *descr);
+/* An extension's method descriptor bound to obj, as its __get__ binds it
+   (a builtin method), or NULL without an error for any other descriptor or
+   an obj not of its class. */
+PyObject *lu_method_descr_bind(PyObject *descr, PyObject *obj);
 /* Where a classmethod's and a staticmethod's callable is (compiled code reads it). */
 extern const Py_ssize_t lu_classmethod_callable_offset;
 /* The Python or kernel function a class's __new__ entry runs, called with the class first: 1 with *func, else 0. */

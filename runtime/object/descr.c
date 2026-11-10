@@ -1290,6 +1290,18 @@ lu_staticmethod_get(PyObject *descr)
     return Py_IS_TYPE(descr, &PyStaticMethod_Type) ? lu_try_xget_ref(&((classmethod *)descr)->cm_callable) : NULL;
 }
 
+PyObject *
+lu_method_descr_bind(PyObject *descr, PyObject *obj)
+{
+    PyMethodDescrObject *d = (PyMethodDescrObject *)descr;
+    if (!Py_IS_TYPE(descr, &PyMethodDescr_Type) || lu_kernel_def_of(d->d_method) != NULL
+        || !PyObject_TypeCheck(obj, PyDescr_TYPE(d))) {
+        return NULL;
+    }
+    return (d->d_method->ml_flags & METH_METHOD) ? PyCMethod_New(d->d_method, obj, NULL, PyDescr_TYPE(d))
+                                                 : PyCFunction_NewEx(d->d_method, obj, NULL);
+}
+
 int
 lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value)
 {
