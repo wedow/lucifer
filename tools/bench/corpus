@@ -203,13 +203,14 @@ def pyperf_run(command, argv, site, loops, values, warmups):
 
 
 def measure_pyperf(command, argv, site, reference):
-    loops = reference["loops"] if reference else None
-    if loops is None:
-        status, best, _ = pyperf_run(command, argv, site, 1, 1, 0)
-        if status != "ok":
-            return {"status": status, "seconds": None, "loops": None, "check": None}
-        # pyperf values are per inner loop; a loop is inner_loops of them.
-        loops = max(1, round(TARGET / max(sum(v * inner for v, inner in best.values()), 1e-9)))
+    # A one-loop run first, with or without a reference: it calibrates, and it compiles the program's
+    # modules, whose compile warnings (SyntaxWarning) would otherwise land in the checked stderr.
+    status, best, _ = pyperf_run(command, argv, site, 1, 1, 0)
+    if status != "ok":
+        return {"status": status, "seconds": None, "loops": None, "check": None}
+    # pyperf values are per inner loop; a loop is inner_loops of them.
+    calibrated = max(1, round(TARGET / max(sum(v * inner for v, inner in best.values()), 1e-9)))
+    loops = reference["loops"] if reference else calibrated
     status, best, err = pyperf_run(command, argv, site, loops, VALUES, WARMUPS)
     # pyperf prints timings on stdout; a benchmark that swallows an error still reports it on stderr.
     check = sorted(best) + [err]
