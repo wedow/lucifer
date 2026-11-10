@@ -22,3 +22,7 @@ Re-measured on luc-custom2 (C _decimal, kernel customization): telco 10.7x CPyth
 **2026-11-10T13:11:11Z**
 
 luc-custom2 2527745: operators whose operands' types have extension C number slots run CPython's binary_op1 on them instead of the kernel's binary_op (which found the slot wrapper and called it through call_special), and PyContextVar_Get reads a value the current context holds in C instead of calling ContextVar.get. telco per loop: 708M -> 555M instructions (CPython 90M). A profile by Python function now puts struct.unpack at 25% of the loop (bytes(memoryview(...)), a tuple over a genexpr, slicing and int.from_bytes per item), BytesIO.read at 15% and the remaining ContextVar.get calls at under 10%; the decimal arithmetic is a small share.
+
+**2026-11-10T19:22:03Z**
+
+luc-custom3: struct.unpack and BytesIO.read stay in Python and compile through general mechanisms: bytes and bytearray slices made natively (step 1 through the bytes constructor, so singletons hold), bytes(bytes|bytearray) and set(genexpr) as kernel twins of their __init__/__new__, property getters specialized (LOAD_ATTR_PROPERTY, inlined by the tier, also in polymorphic arms), method descriptors bound natively, ContextVar.get reading the context's _data natively, PyUnicode_Compare natively, and float/bytes/set truth tests natively. telco per loop 552M -> 322M instructions (CPython 90M); wall 8.6x -> 5.4x CPython. Micro: BytesIO.read 22463 -> 6438, decimal quantize 7352 -> 3915 (x100k instructions).
