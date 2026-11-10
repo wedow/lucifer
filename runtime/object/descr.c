@@ -1303,6 +1303,12 @@ lu_property_fget(PyObject *prop)
 static PyObject *descr_bound(PyObject *d, PyObject *obj);
 
 PyObject *
+lu_bind_method(PyObject *descr, PyObject *obj)
+{
+    return PyFunction_Check(descr) ? PyMethod_New(descr, obj) : lu_method_descr_bind(descr, obj);
+}
+
+PyObject *
 lu_method_descr_bind(PyObject *descr, PyObject *obj)
 {
     if (!(Py_IS_TYPE(descr, &PyMethodDescr_Type) || Py_IS_TYPE(descr, &PyWrapperDescr_Type))

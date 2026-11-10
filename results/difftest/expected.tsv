@@ -24,6 +24,7 @@ tests/diff/corpus/augassign_list_alias.py	NOTRUN	0.000000
 tests/diff/corpus/augassign_notimplemented.py	NOTRUN	0.000000
 tests/diff/corpus/augassign_subscript_order.py	NOTRUN	0.000000
 tests/diff/corpus/augassign_tuple_item_partial.py	NOTRUN	0.000000
+tests/diff/corpus/bound_method_attrs.py	NOTRUN	0.000000
 tests/diff/corpus/builtin_rebinding.py	NOTRUN	0.000000
 tests/diff/corpus/bytearray_slice_stores.py	NOTRUN	0.000000
 tests/diff/corpus/bytes_concat_paths.py	NOTRUN	0.000000
@@ -121,6 +122,7 @@ tests/diff/corpus/metaclass_prepare_order.py	NOTRUN	0.000000
 tests/diff/corpus/pattern_mapping_sequence.py	NOTRUN	0.000000
 tests/diff/corpus/raise_through_inlined.py	NOTRUN	0.000000
 tests/diff/corpus/repr_address_normalization.py	NOTRUN	0.000000
+tests/diff/corpus/shadowed_class_attrs.py	NOTRUN	0.000000
 tests/diff/corpus/slots_delete_descriptor.py	NOTRUN	0.000000
 tests/diff/corpus/slots_inheritance.py	NOTRUN	0.000000
 tests/diff/corpus/slots_missing_dict.py	NOTRUN	0.000000

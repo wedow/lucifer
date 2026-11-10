@@ -150,6 +150,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/bound_method_attrs.py": {
+      "exit": 0,
+      "sha256": "c7cc1d17a967b2fd62249e3ba04bc9f50f4e233ddc8afa35b7264ef0d44036e1",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/builtin_rebinding.py": {
       "exit": 0,
       "sha256": "3372b7fa3f22297951d9003b0adf503d8ff00faf3cb64bb41d04bef2d4edc6d2",
@@ -729,6 +735,12 @@
     "tests/diff/corpus/repr_address_normalization.py": {
       "exit": 0,
       "sha256": "14c861c9fd724635bf7613d9bb1c31e394a956c2868282ca491e961a485cb161",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/shadowed_class_attrs.py": {
+      "exit": 0,
+      "sha256": "ec1d4a438ce37e9709622f0d7dfec3605cbb7899377964704b7b772f43734ed2",
       "state": false,
       "timing": false
     },

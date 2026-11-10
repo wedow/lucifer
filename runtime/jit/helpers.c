@@ -1595,6 +1595,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, IF_SEEN, 1 },
     [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, IF_RAISE, 2 },
     [H_raise] = { (void *)h_raise, "raise", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_bind_method] = { (void *)lu_bind_method, "bind_method", REP_OBJ, 0, 2 },
     [H_bytes_concat] = { (void *)lu_bytes_concat, "bytes_concat", REP_OBJ, IF_RAISE, 2 },
     [H_raise_tb] = { (void *)h_raise_tb, "raise_tb", REP_OBJ, IF_RAISE | IF_PY, 4 },
     [H_reraise] = { (void *)h_reraise, "reraise", REP_OBJ, IF_RAISE, 1 },

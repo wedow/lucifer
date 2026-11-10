@@ -1446,6 +1446,8 @@ PyObject *lu_staticmethod_get(PyObject *descr);
    (a builtin method, a method-wrapper), or NULL without an error for any
    other descriptor or an obj not of its class. */
 PyObject *lu_method_descr_bind(PyObject *descr, PyObject *obj);
+/* A function or a method descriptor bound to obj, as its __get__ binds it. */
+PyObject *lu_bind_method(PyObject *descr, PyObject *obj);
 /* A property's getter, or a kernel getset's (borrowed, read once; NULL or None
    for none, and NULL for another getset). */
 PyObject *lu_property_fget(PyObject *prop);

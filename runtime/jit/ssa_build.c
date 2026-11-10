@@ -3140,11 +3140,20 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                     guard(c, OP_GUARD_BIT, lacks, 1);
                 }
             }
-            /* A copy keeps the method a constant, which its call inlines; a join owns its inputs. */
-            a1 = konst(c, e.descr);
-            own1 = end < 0;
-            if (own1) {
-                incref(c, a1);
+            if (!method && e.op == LOAD_ATTR_METHOD_NO_DICT) {
+                /* The method as an attribute: bound in C. */
+                lu_v args[2] = { konst(c, e.descr), owner };
+                a1 = helper(c, H_bind_method, 2, args);
+                guard_after(c, OP_GUARD_NOT_NULL, a1, 0);
+                own1 = 1;
+            }
+            else {
+                /* A copy keeps the method a constant, which its call inlines; a join owns its inputs. */
+                a1 = konst(c, e.descr);
+                own1 = end < 0;
+                if (own1) {
+                    incref(c, a1);
+                }
             }
             if (method && (e.op == LOAD_ATTR_METHOD_NO_DICT || e.op == LOAD_ATTR_METHOD_WITH_VALUES)) {
                 a2 = end < 0 ? take(c, owner, own) : owner;
@@ -3269,6 +3278,14 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
             guard(c, OP_GUARD_BIT, helper(c, H_dict_lacks, 2, args), 1);
         }
         pop(c, NULL);
+        if (op == LOAD_ATTR_METHOD_NO_DICT && !method) {
+            lu_v args[2] = { konst(c, descr), owner };
+            lu_v bound = helper(c, H_bind_method, 2, args);
+            guard_after(c, OP_GUARD_NOT_NULL, bound, 0);
+            release(c, owner, own);
+            push(c, bound, 1);
+            return 0;
+        }
         push(c, konst(c, descr), 0);
         if (op == LOAD_ATTR_METHOD_NO_DICT || op == LOAD_ATTR_METHOD_WITH_VALUES) {
             push(c, owner, own);

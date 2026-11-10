@@ -280,6 +280,16 @@ is_slot_member(PyObject *descr)
     return m->type == Py_T_OBJECT_EX && m->offset >= 0 && m->offset <= UINT16_MAX;
 }
 
+/* The index of name's entry in owner's managed dict, whose key is this
+   very str, or -1. */
+static Py_ssize_t
+dict_hint(PyObject *owner, int managed, PyObject *name)
+{
+    PyObject *dict = managed && owner != NULL ? LU_MANAGED_DICT(owner) : NULL;
+    Py_ssize_t index = dict != NULL && unicode_dict(dict) ? lu_ns_index(dict, name) : -1;
+    return index >= 0 && index <= UINT16_MAX && lu_dk_key(((PyDictObject *)dict)->ma_keys, index) == name ? index : -1;
+}
+
 /* What LOAD_ATTR of name specializes to on an instance of a type whose
    __getattribute__ is object's: the opcode (LOAD_ATTR for none), the
    version, the second word and the answer (a new reference). The owner may
@@ -318,17 +328,26 @@ instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, ui
         }
         Py_CLEAR(*descr);
     }
-    else if (kind == DESCR_ABSENT) {
-        /* In the instance's dict, at an entry whose key is this very str. */
-        PyObject *dict = managed && owner != NULL ? LU_MANAGED_DICT(owner) : NULL;
-        Py_ssize_t index = dict != NULL && unicode_dict(dict) ? lu_ns_index(dict, name) : -1;
-        if (index >= 0 && index <= UINT16_MAX && lu_dk_key(((PyDictObject *)dict)->ma_keys, index) == name) {
+    else if (kind == DESCR_ABSENT || (kind == DESCR_NON_DESCRIPTOR && !method && dict_hint(owner, managed, name) >= 0)) {
+        /* In the instance's dict, at an entry whose key is this very str;
+           also where that entry shadows a class attribute that is no
+           descriptor (BytesIO's _buffer). */
+        Py_ssize_t index = dict_hint(owner, managed, name);
+        if (index >= 0) {
             *second = (uint32_t)index;
             op = LOAD_ATTR_WITH_HINT;
         }
+        Py_CLEAR(*descr);
     }
     else if (kind == DESCR_METHOD && method) {
         op = managed ? LOAD_ATTR_METHOD_WITH_VALUES : LOAD_ATTR_METHOD_NO_DICT;
+    }
+    else if (kind == DESCR_METHOD && !managed && tp->tp_dictoffset == 0
+             && (PyFunction_Check(*descr) || Py_IS_TYPE(*descr, &PyMethodDescr_Type)
+                 || Py_IS_TYPE(*descr, &PyWrapperDescr_Type))) {
+        /* The method as an attribute (f = x.append) of an instance with no
+           dict to shadow it: bound in C (lu_bind_method). */
+        op = LOAD_ATTR_METHOD_NO_DICT;
     }
     else if (kind == DESCR_NON_DESCRIPTOR) {
         op = managed ? LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES : LOAD_ATTR_NONDESCRIPTOR_NO_DICT;

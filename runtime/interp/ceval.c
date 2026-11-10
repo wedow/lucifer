@@ -3085,6 +3085,18 @@ op_LOAD_ATTR_METHOD: {
     if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
         goto op_LOAD_ATTR;
     }
+    if (opcode == LOAD_ATTR_METHOD_NO_DICT && !(oparg & 1)) {
+        SAVE_FRAME();
+        PyObject *bound = lu_bind_method(descr, owner);
+        if (bound == NULL) {
+            ERROR_IF(PyErr_Occurred());
+            goto op_LOAD_ATTR;
+        }
+        SKIP_CACHES();
+        TOP() = bound;
+        Py_DECREF(owner);
+        DISPATCH();
+    }
     SKIP_CACHES();
     TOP() = Py_NewRef(descr);       /* deferred: no collection since the load (specialize.c) */
     if (opcode == LOAD_ATTR_METHOD_NO_DICT || opcode == LOAD_ATTR_METHOD_WITH_VALUES) {
