@@ -26,3 +26,7 @@ Root cause: _IncompleteInputError had no dealloc (it was left out of the excepti
 **2026-11-10T03:53:52Z**
 
 With termios built (luc-clibs), test_pyrepl imports and reaches the same compile() segfault from codeop._maybe_compile (test_interact.test_incomplete_statement): all 265 of its cases are CRASH (CPython 3.14t: 204 PASS, 61 SKIP).
+
+**2026-11-10T09:48:00Z**
+
+After merging the luc-crash fix, test_pyrepl on luc-clibs (termios and readline built) runs whole: 184 PASS, 61 SKIP, 18 ERROR, 2 FAIL (CPython 3.14t: 204 PASS, 61 SKIP).
