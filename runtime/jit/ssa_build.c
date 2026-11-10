@@ -3610,6 +3610,20 @@ intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
         *owned = 0;
         return konst(c, sub ? Py_True : Py_False);
     }
+    if (nargs == 2 && strcmp(name, "kind") == 0 && known_type(c, args[0]) != NULL && known(c, args[1]) != NULL
+        && PyUnicode_CheckExact(known(c, args[1]))) {
+        /* A known type's kind: by its flags, or by its bases where they
+           cannot change. */
+        PyTypeObject *t = known_type(c, args[0]);
+        const char *k = PyUnicode_AsUTF8(known(c, args[1]));
+        int r = lu_kind_of_type(t, k);
+        int flagged = strcmp(k, "float") != 0 && strcmp(k, "complex") != 0 && strcmp(k, "bytearray") != 0
+            && strcmp(k, "set") != 0 && strcmp(k, "frozenset") != 0;
+        if (r >= 0 && (flagged || (t->tp_flags & Py_TPFLAGS_IMMUTABLETYPE))) {
+            *owned = 0;
+            return konst(c, r ? Py_True : Py_False);
+        }
+    }
     if (nargs == 2 && strcmp(name, "list_append") == 0 && known_type(c, args[0]) == &PyList_Type) {
         helper_raising(c, H_list_append, 2, args, c->oparg + 2);
         *owned = 0;
@@ -4096,6 +4110,10 @@ opaque_call(struct ctx *c)
         c->failed = 1;
         c->why = "a call it cannot inline";
         return 0;
+    }
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: a call it makes at %s@%d: depth %d\n", PyUnicode_AsUTF8(c->code->co_qualname), c->pc,
+                c->depth);
     }
     return 1;
 }

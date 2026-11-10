@@ -582,7 +582,7 @@ errors defaults to 'strict'."""
             if (type_lookup(type(iterable), '__iter__') is MISSING
                     and type_lookup(type(iterable), '__getitem__') is MISSING):
                 error(TypeError, 'can only join an iterable')
-            items = (*[x for x in iterable],)
+            items = [x for x in iterable]
         return str_join(self, items)
 
     # transformations

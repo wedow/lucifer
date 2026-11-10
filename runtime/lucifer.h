@@ -1457,6 +1457,10 @@ PyObject *lu_kernel_function_of(PyObject *callable, PyObject **self);
 /* The twin of kernel function f for calls of nargs positional arguments
    and no keywords (the kernel_twin primitive), borrowed, or NULL. */
 PyFunctionObject *lu_kernel_twin(PyFunctionObject *f, int nargs);
+/* The kernel's kind(x, name) for every x of exact type t (prim/type.c): 1 or
+   0, or -1 for a name it does not know or one ("kernel") that is not the
+   type's. */
+int lu_kind_of_type(PyTypeObject *t, const char *kind);
 /* The step next_item takes for an iterator of exact type t (next_missing_set),
    borrowed, or None. */
 PyObject *lu_next_missing_of(PyObject *t);
