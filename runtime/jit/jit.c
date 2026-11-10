@@ -963,8 +963,9 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     int r = u->fn(ts, frame, result);
     if (debug) {
         struct lu_frame *cf = (struct lu_frame *)ts->current_frame;
+        int py = cf != NULL && cf->code != NULL;       /* else back in a C caller, or its shim frame */
         fprintf(stderr, "jit: %s@%d -> %d at %s@%d%s\n", PyUnicode_AsUTF8(code->co_qualname), pc, r,
-                PyUnicode_AsUTF8(cf->code->co_qualname), (int)(cf->instr - lu_code_start(cf->code)),
+                py ? PyUnicode_AsUTF8(cf->code->co_qualname) : "C", py ? (int)(cf->instr - lu_code_start(cf->code)) : -1,
                 r == LU_JIT_ERROR && !PyErr_Occurred() ? " NO EXCEPTION" : "");
         if (r == LU_JIT_ERROR && PyErr_Occurred()) {
             PyObject *e = PyErr_GetRaisedException();
