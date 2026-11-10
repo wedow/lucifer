@@ -154,14 +154,30 @@ prim_set_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return int_of(found);
 }
 
-/* set_resize(s, minused). */
+/* set_reserve(s, n): room for n more keys, sized from s under its lock. */
 static PyObject *
-prim_set_resize(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+prim_set_reserve(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); SET(0); SSIZE(1, n);
     int err;
     Py_BEGIN_CRITICAL_SECTION(args[0]);
-    err = lu_set_resize((PySetObject *)args[0], n);
+    err = lu_set_reserve((PySetObject *)args[0], n);
+    Py_END_CRITICAL_SECTION();
+    return err < 0 ? NULL : Py_NewRef(Py_None);
+}
+
+/* set_compact(s): set_difference_update_internal's last step, a new table
+   once more than a quarter of the entries are dummies. */
+static PyObject *
+prim_set_compact(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); SET(0);
+    PySetObject *so = (PySetObject *)args[0];
+    int err = 0;
+    Py_BEGIN_CRITICAL_SECTION(so);
+    if (so->fill - so->used > (Py_ssize_t)so->mask / 4) {
+        err = lu_set_rebuild(so);
+    }
     Py_END_CRITICAL_SECTION();
     return err < 0 ? NULL : Py_NewRef(Py_None);
 }
@@ -211,8 +227,10 @@ prim_set_swap(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* set_merge_clean(so, other): the first two cases of set_merge_lock_held,
-   for a so with no entries (fill 0) and an other with some: copy the table
-   when the sizes agree and there are no dummies, else insert each key. False,
+   for a so with no entries (fill 0) and an other with some: room is made for
+   other's keys (a clear since the caller's presize leaves the small table),
+   then the table is copied when the sizes agree and there are no dummies,
+   else each key is inserted. False,
    with nothing done, when another thread has added to so since the caller
    looked. */
 static PyObject *
@@ -228,6 +246,9 @@ prim_set_merge_clean(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     Py_BEGIN_CRITICAL_SECTION2(so, other);
     if (so->fill != 0) {
         /* not clean */
+    }
+    else if (lu_set_reserve(so, other->used) < 0) {
+        merged = -1;
     }
     else if (so->mask == other->mask && other->fill == other->used) {
         merged = 1;
@@ -251,7 +272,7 @@ prim_set_merge_clean(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
     }
     Py_END_CRITICAL_SECTION2();
-    return bool_of(merged);
+    return merged < 0 ? NULL : bool_of(merged);
 }
 
 /* set_info(s, which): 0 fill, 1 used, 2 mask, 3 finger, 4 the cached hash. */
@@ -420,7 +441,7 @@ lu_set_iter_init(void)
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_set_methods[] = {
     FAST(set_new), FAST(set_probe), FAST(set_add_entry), FAST(set_discard_entry), FAST(set_key), FAST(set_hash),
-    FAST(set_next), FAST(set_resize), FAST(set_clear), FAST(set_pop),
+    FAST(set_next), FAST(set_reserve), FAST(set_compact), FAST(set_clear), FAST(set_pop),
     FAST(set_swap), FAST(set_merge_clean), FAST(set_info), FAST(set_hash_impl),
     FAST(set_reset_hash), FAST(set_sizeof), FAST(setiter_new), FAST(setiter_next),
     FAST(setiter_len), FAST(setiter_copy),
