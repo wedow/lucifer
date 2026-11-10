@@ -139,26 +139,38 @@ int lu_jit_nospec(PyCodeObject *code, int pc);
 int lu_jit_noinline(PyCodeObject *code);
 int lu_jit_next_pc(PyCodeObject *code, int pc);
 
+/* The inlining context of frame c and its callers (target.h): each
+   frame's code and the instruction its state shows, from the root down;
+   *root the root's code. */
+static uint64_t
+chain_context(struct ctx *c, PyCodeObject **root)
+{
+    struct ctx *chain[64];
+    int n = 0;
+    for (struct ctx *p = c; p != NULL && n < 64; p = p->parent) {
+        chain[n++] = p;
+    }
+    *root = chain[n - 1]->code;
+    uint64_t h = 0;
+    while (n > 0) {
+        struct ctx *p = chain[--n];
+        h = lu_jit_ctx_mix(h, p->code, p->next);
+    }
+    return h;
+}
+
 /* Whether the instruction at pc of c's code is not speculated on: for
    kernel code inlined in a root, as marked where it is inlined (the
-   context, runtime/jit/target.h), else as marked on the code. */
+   context), else as marked on the code. */
 static int
 nospec(struct ctx *c, int pc)
 {
     if (c->parent == NULL || !c->kernel) {
         return lu_jit_nospec(c->code, pc);
     }
-    struct ctx *chain[64];
-    int n = 0;
-    for (struct ctx *p = c->parent; p != NULL && n < 64; p = p->parent) {
-        chain[n++] = p;
-    }
-    uint64_t h = 0;
-    while (n > 0) {
-        struct ctx *p = chain[--n];
-        h = lu_jit_ctx_mix(h, p->code, p->next);
-    }
-    return lu_jit_ctx_marked(chain[0]->code, lu_jit_ctx_mix(h, c->code, pc), LU_CTX_NOSPEC);
+    PyCodeObject *root;
+    uint64_t h = chain_context(c->parent, &root);
+    return lu_jit_ctx_marked(root, lu_jit_ctx_mix(h, c->code, pc), LU_CTX_NOSPEC);
 }
 
 /* Whether a kernel function's copies inlined at c's current call keep
@@ -169,18 +181,9 @@ noinline(struct ctx *c, PyCodeObject *co)
     if (!(co->co_flags & LU_CO_KERNEL)) {
         return lu_jit_noinline(co);
     }
-    struct ctx *chain[64];
-    int n = 0;
-    for (struct ctx *p = c; p != NULL && n < 64; p = p->parent) {
-        chain[n++] = p;
-    }
-    struct ctx *root = chain[n - 1];
-    uint64_t h = 0;
-    while (n > 0) {
-        struct ctx *p = chain[--n];
-        h = lu_jit_ctx_mix(h, p->code, p->next);
-    }
-    return lu_jit_ctx_marked(root->code, lu_jit_ctx_mix(h, co, -1), LU_CTX_NOINLINE);
+    PyCodeObject *root;
+    uint64_t h = chain_context(c, &root);
+    return lu_jit_ctx_marked(root, lu_jit_ctx_mix(h, co, -1), LU_CTX_NOINLINE);
 }
 
 static int build_block(struct ctx *c, int bi);
@@ -1814,7 +1817,7 @@ static int
 unary_op(struct ctx *c)
 {
     lu_v v = peek(c, 1), w = LU_NOV;
-    int own = peek_owned(c, 1), wown = 1;
+    int own = peek_owned(c, 1);
     PyTypeObject *t = known_type(c, v);
     int neg = c->base == UNARY_NEGATIVE;
     int armed = operator_arms(c, 1, LU_KIND_OTHER, LU_KIND_OTHER, unary_op);
@@ -1844,7 +1847,7 @@ unary_op(struct ctx *c)
     }
     pop(c, NULL);
     release(c, v, own);
-    push(c, w, wown);
+    push(c, w, 1);
     return 0;
 }
 
