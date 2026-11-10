@@ -82,6 +82,7 @@ struct lu_deopt_frame {
     int pc;
     int nlocals, nstack;
     struct lu_dv *vals;
+    uint8_t ret;                /* how the frame returns when rebuilt (lu_fs) */
     uint8_t gen;                /* the frame of the generator its caller's top stack entry holds, which
                                    returns to it as this enum lu_frame_return says (0: not one) */
 };
@@ -245,7 +246,7 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
    error exit or the frames guard after it) hands the interpreter. */
 void lu_jit_frames_push(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
                         const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills);
-void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
+void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed);
 
 /* The helpers compiled code calls, by id; runtime/jit/helpers.c gives each
    its result, flags (IF_RAISE: NULL, or -1 for a bit, raised; IF_PY: may
@@ -292,6 +293,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(get_iter) \
     X(for_iter) \
     X(seqiter_next) \
+    X(seqiter_step) \
     X(range_iter) \
     X(listiter_new) \
     X(tupleiter_new) \
@@ -370,6 +372,30 @@ lu_publishes(const struct lu_ins *in)
         return (lu_op_flags[in->op] & IF_SEEN) != 0;
     }
 }
+
+/* Marks on kernel code by inlining context (runtime/jit/jit.c): a kernel
+   function inlined in a root is customized for the place it is inlined
+   at, so that a guard of its copy that keeps failing there, or a copy
+   that keeps leaving, changes how it compiles there and nowhere else.
+   The context is the root's code and the chain of frames from the root
+   to the frame the mark is about, each a code and the instruction its
+   frame state shows (a caller's: the one after its call), hashed. */
+static inline uint64_t
+lu_jit_ctx_mix(uint64_t h, const void *code, int pc)
+{
+    h ^= (uint64_t)(uintptr_t)code + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+    h ^= (uint64_t)(uint32_t)pc * 0xff51afd7ed558ccdULL;
+    return h * 0xc4ceb9fe1a85ec53ULL;
+}
+/* Whether `root`'s context mark `key` has `bit` (NOSPEC 1 or NOINLINE 4). */
+int lu_jit_ctx_marked(PyCodeObject *root, uint64_t key, int bit);
+#define LU_CTX_NOSPEC 1
+#define LU_CTX_NOINLINE 4
+
+/* POW_F's call (runtime/jit/helpers.c): a NaN with these bits where the
+   power raises or is complex. */
+#define LU_JIT_POW_FAILED 0x7ff4dead0000beefULL
+double lu_jit_float_pow(double v, double w);
 
 /* Whether the register allocator treats the instruction as a call, which
    clobbers every register but the preserved ones: an IF_CALL instruction,

@@ -80,6 +80,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(NEG_F, REP_F64, IF_PURE) \
     X(ABS_F, REP_F64, IF_PURE) \
     X(SQRT_F, REP_F64, IF_GUARD | IF_EFFECT)        /* a negative operand deopts (math.sqrt raises) */ \
+    X(POW_F, REP_F64, IF_GUARD | IF_EFFECT | IF_CALL)   /* a ** b as float.__pow__; deopts where that raises or is complex */ \
     X(CMP_I, REP_BIT, IF_PURE)          /* imm: Py_LT .. Py_GE */ \
     X(CMP_F, REP_BIT, IF_PURE)          /* imm: Py_LT .. Py_GE, false on NaN except != */ \
     X(IS, REP_BIT, IF_PURE)             /* a is b */ \
@@ -155,6 +156,8 @@ struct lu_fs {
     int nlocals, nstack;
     lu_v *vals;                 /* locals, then the stack bottom up; LU_NOV is NULL */
     uint8_t *owned;             /* per entry: compiled code holds a reference for it */
+    uint8_t ret;                /* how an inlined frame returns when rebuilt: LU_RETURN_FOR_ITER for
+                                   the step of a FOR_ITER (ssa_build.c iter_step), else 0 (a push) */
     uint8_t gen;                /* a generator's frame its caller resumed in line: the generator is
                                    the caller's top stack entry (ssa_build.c inline_resume), and this
                                    says how it returns (LU_RETURN_FOR_ITER or _NEXT; 0: not one) */
@@ -164,7 +167,8 @@ struct lu_fs {
 enum {
     INS_DEAD = 1,               /* removed */
     INS_VIRTUAL = 2,            /* a box nothing observes: built only at an exit */
-    INS_NOSTRESS = 4,           /* a guard after its instruction's effect: deopt:N never fails it */
+    INS_NOSTRESS = 4,           /* a guard after its instruction's effect: deopt:N never fails it; a
+                                   Python-running helper whose frames deopt:N never keeps */
     INS_CAUGHT = 8,             /* a raising helper whose NULL result the code branches on: a handler takes it */
     INS_FRESH = 16,             /* an inline store into an instance this code made that no other thread
                                    can have seen yet, of a name it lacks: it takes no lock, releases

@@ -311,6 +311,48 @@ lu_jit_observe_callee(PyCodeObject *code, lu_codeunit *cache, PyObject *callable
     }
 }
 
+/* The operand classes an operator site has met where a kind (above) says
+   only OTHER: BINARY_OP (its subscript too), COMPARE_OP and CONTAINS_OP
+   (the container left). Pairs of exact types, up to LU_OPCLASS_WAYS, then
+   the site is megamorphic. Classes are freed only by a collection (a
+   class is in a cycle through its __mro__), which forgets them first, as
+   callee tables do; static types are immortal. Read without the lock. */
+#define LU_OPCLASS_WAYS 4
+struct lu_opclasses {
+    int n;                      /* entries published, release-stored after the entry */
+    int mega;
+    struct { PyTypeObject *left, *right; } e[LU_OPCLASS_WAYS];
+};
+
+/* The site's table, or NULL. The site is the operator's code unit. */
+struct lu_opclasses *lu_jit_opclasses(PyCodeObject *code, int pc);
+void lu_jit_opclass_note(PyCodeObject *code, int pc, PyTypeObject *left, PyTypeObject *right);
+
+/* The interpreter's generic path of an operator at `instr` met left and
+   right: the site learns their classes when either is of no kind. */
+static inline void
+lu_jit_observe_classes(PyCodeObject *code, lu_codeunit *instr, PyObject *left, PyObject *right)
+{
+    if (_PyRuntime.jit.mode != LU_JIT_OFF
+        && (lu_jit_kind(left) == LU_KIND_OTHER || lu_jit_kind(right) == LU_KIND_OTHER)) {
+        lu_jit_opclass_note(code, (int)(instr - lu_code_start(code)), Py_TYPE(left), Py_TYPE(right));
+    }
+}
+
+/* A unary operator at `instr` met v: the site learns its class, an int's
+   only once another class has made it polymorphic. */
+static inline void
+lu_jit_observe_unary(PyCodeObject *code, lu_codeunit *instr, PyObject *v)
+{
+    if (_PyRuntime.jit.mode == LU_JIT_OFF) {
+        return;
+    }
+    int pc = (int)(instr - lu_code_start(code));
+    if (!PyLong_CheckExact(v) || lu_jit_opclasses(code, pc) != NULL) {
+        lu_jit_opclass_note(code, pc, Py_TYPE(v), Py_TYPE(v));
+    }
+}
+
 /* A fact compiled code relies on between polls (lu_jit_invalidate). */
 struct lu_fdep {
     int kind;

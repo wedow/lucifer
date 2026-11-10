@@ -1634,6 +1634,83 @@ prim_kernel_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
+/* kernel_twin(f, g): g is a twin of the kernel function f for calls with
+   g's fixed arity, which the tier compiles instead of f (lu_kernel_twin):
+   f binds *args and **kwargs, g positional parameters only, with f's
+   meaning for them (the design of kernel customization, section 5). The
+   twins are a list of (f's code, g), made at boot and only read after. */
+static PyObject *
+prim_kernel_twin(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2);
+    if (!PyFunction_Check(args[0]) || !PyFunction_Check(args[1])) {
+        lu_err_format(PyExc_TypeError, "kernel_twin() needs two functions");
+        return NULL;
+    }
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    if (interp->kernel_twins == NULL && (interp->kernel_twins = PyList_New(0)) == NULL) {
+        return NULL;
+    }
+    PyObject *pair = PyTuple_Pack(2, PyFunction_GET_CODE(args[0]), args[1]);
+    int ok = pair != NULL && PyList_Append(interp->kernel_twins, pair) == 0;
+    Py_XDECREF(pair);
+    return ok ? Py_NewRef(Py_None) : NULL;
+}
+
+PyFunctionObject *
+lu_kernel_twin(PyFunctionObject *f, int nargs)
+{
+    PyObject *twins = PyInterpreterState_Get()->kernel_twins;
+    for (Py_ssize_t i = 0; twins != NULL && i < PyList_GET_SIZE(twins); i++) {
+        PyObject *pair = PyList_GET_ITEM(twins, i);
+        PyFunctionObject *g = (PyFunctionObject *)PyTuple_GET_ITEM(pair, 1);
+        PyCodeObject *co = (PyCodeObject *)g->func_code;
+        if (PyTuple_GET_ITEM(pair, 0) == f->func_code && co->co_argcount == nargs && co->co_kwonlyargcount == 0
+            && !(co->co_flags & (CO_VARARGS | CO_VARKEYWORDS))) {
+            return g;
+        }
+    }
+    return NULL;
+}
+
+/* next_missing_set(t, f): f(it) is the step of an iterator of exact type
+   t that gives MISSING at its end instead of raising StopIteration
+   (iter.py's next_item); next_missing_of(t): that f, or None. Made at boot
+   and only read after, so the tier folds the lookup on a known type. */
+static PyObject *
+prim_next_missing_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2);
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    if (interp->kernel_nexts == NULL && (interp->kernel_nexts = PyList_New(0)) == NULL) {
+        return NULL;
+    }
+    PyObject *pair = PyTuple_Pack(2, args[0], args[1]);
+    int ok = pair != NULL && PyList_Append(interp->kernel_nexts, pair) == 0;
+    Py_XDECREF(pair);
+    return ok ? Py_NewRef(Py_None) : NULL;
+}
+
+PyObject *
+lu_next_missing_of(PyObject *t)
+{
+    PyObject *nexts = PyInterpreterState_Get()->kernel_nexts;
+    for (Py_ssize_t i = 0; nexts != NULL && i < PyList_GET_SIZE(nexts); i++) {
+        PyObject *pair = PyList_GET_ITEM(nexts, i);
+        if (PyTuple_GET_ITEM(pair, 0) == t) {
+            return PyTuple_GET_ITEM(pair, 1);
+        }
+    }
+    return Py_None;
+}
+
+static PyObject *
+prim_next_missing_of(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    return Py_NewRef(lu_next_missing_of(args[0]));
+}
+
 /* kernel_get(name): a registered kernel function, for the kernel modules
    after the one that defines it. */
 static PyObject *
@@ -1654,6 +1731,6 @@ PyMethodDef lu_prim_descr_methods[] = {
     FAST(kernel_get), FAST(setattr_native),
     FAST(make_function), FAST(make_getset), FAST(getset_kernel), FAST(getset_get),
     FAST(getset_set), FAST(member_get), FAST(member_set), FAST(descr_type), FAST(bind),
-    FAST(method_new), FAST(instancemethod_new), FAST(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set),
+    FAST(method_new), FAST(instancemethod_new), FAST(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set), FAST(kernel_twin), FAST(next_missing_set), FAST(next_missing_of),
     { NULL, NULL, 0, NULL },
 };

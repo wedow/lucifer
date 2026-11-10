@@ -4,6 +4,9 @@
    (here called through a nested eval, as C callers do). None takes a
    reference it is given; each result is a new reference. */
 #include "jit/target.h"
+
+#include <errno.h>
+#include <math.h>
 #include "jit/jit.h"
 #include "interp/exceptions.h"
 #include "interp/gen.h"
@@ -50,6 +53,53 @@ lu_jit_truth(PyObject *v)
 {
     int t = lu_truth_exact(v);
     return t >= 0 ? t : lu_is_true(v);
+}
+
+/* float.__pow__ of two floats (prim_float_pow, runtime/prim/float.c),
+   or LU_JIT_POW_FAILED's bits where it would raise or make a complex, for
+   the interpreter to do. A NaN operand with those very bits leaves too,
+   which is only slower. */
+double
+lu_jit_float_pow(double iv, double iw)
+{
+    union { uint64_t u; double d; } failed = { .u = LU_JIT_POW_FAILED };
+    int negate = 0;
+    if (iw == 0) {
+        return 1.0;
+    }
+    if (isnan(iv)) {
+        return iv;
+    }
+    if (isnan(iw)) {
+        return iv == 1.0 ? 1.0 : iw;
+    }
+    if (isinf(iw)) {
+        iv = fabs(iv);
+        return iv == 1.0 ? 1.0 : (iw > 0.0) == (iv > 1.0) ? fabs(iw) : 0.0;
+    }
+    int odd = fmod(fabs(iw), 2.0) == 1.0;       /* iw is finite here */
+    if (isinf(iv)) {
+        return iw > 0.0 ? (odd ? iv : fabs(iv)) : (odd ? copysign(0.0, iv) : 0.0);
+    }
+    if (iv == 0.0) {
+        return iw < 0.0 ? failed.d : odd ? iv : 0.0;
+    }
+    if (iv < 0.0) {
+        if (iw != floor(iw)) {
+            return failed.d;
+        }
+        iv = -iv;
+        negate = odd;
+    }
+    if (iv == 1.0) {
+        return negate ? -1.0 : 1.0;
+    }
+    errno = 0;
+    double ix = pow(iv, iw);
+    if (errno != 0 || isinf(ix)) {
+        return failed.d;        /* overflow or underflow: the interpreter words it */
+    }
+    return negate ? -ix : ix;
 }
 
 /* --- containers --- */
@@ -642,6 +692,14 @@ static PyObject *
 h_seqiter_next(PyObject *it)
 {
     return lu_seqiter_next(it);
+}
+
+/* The kernel's seqiter_next: MISSING at the end. */
+static PyObject *
+h_seqiter_step(PyObject *it)
+{
+    PyObject *v = lu_seqiter_next(it);
+    return v != NULL ? v : Py_NewRef(LU_MISSING);
 }
 
 /* iter(range(start, stop, step)) for C longs, as range_iter computes the
@@ -1403,6 +1461,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, IF_SEEN, 1 },
+    [H_seqiter_step] = { (void *)h_seqiter_step, "seqiter_step", REP_OBJ, IF_SEEN, 1 },
     [H_range_iter] = { (void *)h_range_iter, "range_iter", REP_OBJ, 0, 3 },
     [H_listiter_new] = { (void *)h_seqiter_new, "listiter_new", REP_OBJ, 0, 2 },
     [H_tupleiter_new] = { (void *)h_seqiter_new, "tupleiter_new", REP_OBJ, 0, 2 },

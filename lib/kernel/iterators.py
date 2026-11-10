@@ -143,9 +143,23 @@ is true. If function is None, return the items that are true."""
 
 
 def _zip_next(self):
-    """The next tuple of a zip, or MISSING at its end."""
+    """The next tuple of a zip, or MISSING at its end. Two iterators, the
+    common zip, make no list."""
     iters = field_get(self, 0)
-    if not size(iters):
+    n = size(iters)
+    if n == 2:
+        a = next_item(iters[0])
+        if a is MISSING:
+            if field_get(self, 2):
+                _check_strict('zip', iters, 0)
+            return MISSING
+        b = next_item(iters[1])
+        if b is MISSING:
+            if field_get(self, 2):
+                _check_strict('zip', iters, 1)
+            return MISSING
+        return (a, b)
+    if not n:
         return MISSING
     values = []
     for i in range(size(iters)):
@@ -293,7 +307,7 @@ class reversed:
         return 0 if position > n else position
 
 
-_iter.NEXT_MISSING[map] = _map_next
-_iter.NEXT_MISSING[filter] = _filter_next
-_iter.NEXT_MISSING[zip] = _zip_next
-_iter.NEXT_MISSING[enumerate] = _enumerate_next
+_iter.next_missing_set(map, _map_next)
+_iter.next_missing_set(filter, _filter_next)
+_iter.next_missing_set(zip, _zip_next)
+_iter.next_missing_set(enumerate, _enumerate_next)

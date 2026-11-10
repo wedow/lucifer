@@ -251,5 +251,5 @@ class longrange_iterator:
 
 
 # The iteration step without StopIteration (iter.py).
-_iter.NEXT_MISSING[range_iterator] = rangeiter_next
-_iter.NEXT_MISSING[longrange_iterator] = rangeiter_next
+_iter.next_missing_set(range_iterator, rangeiter_next)
+_iter.next_missing_set(longrange_iterator, rangeiter_next)

@@ -940,6 +940,7 @@ make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
         fr->func = p->func;
         fr->pc = p->pc;
         fr->gen = p->gen;
+        fr->ret = p->ret;
         fr->nlocals = p->nlocals;
         fr->nstack = p->nstack;
         int m = p->nlocals + p->nstack;
@@ -1269,7 +1270,7 @@ push_frames_in_line(struct asm_ *a, struct lu_deopt *d, int words, int slow)
         lea(a, R11, RAX, AT(localsplus) + 8 * code->co_nlocalsplus);
         store(a, RAX, AT(stackpointer), R11);
         store8_mi(a, RAX, AT(owner), lu_frame_owner_for(code));
-        store8_mi(a, RAX, AT(ret), LU_RETURN_PUSH);
+        store8_mi(a, RAX, AT(ret), fr->ret);    /* LU_RETURN_PUSH but for a FOR_ITER step (lu_fs ret) */
         store8_mi(a, RAX, AT(jit_lent), 0);
         store_mi(a, RAX, AT(jit_desc), 0);
         for (int i = 0; i < fr->nlocals; i++) {
@@ -1574,7 +1575,7 @@ parked_stubs(struct asm_ *a)
    line unless the callee made a frame object of one (they stay, for the
    exit next), the block starts a chunk, or stress may keep them. */
 static void
-pop_frames(struct asm_ *a, struct lu_deopt *d)
+pop_frames(struct asm_ *a, struct lu_deopt *d, int stressed)
 {
     int slow = new_label(a), done = new_label(a);
     if (!a->f->stress && lent_words(d) > 0) {
@@ -1607,6 +1608,7 @@ pop_frames(struct asm_ *a, struct lu_deopt *d)
     alu_ri(a, ALU_SUB, RSP, 8);
     mov_rr(a, RDI, R14);
     mov_rr(a, RSI, R15);
+    mov_ri(a, RDX, stressed);
     call_abs(a, (void *)lu_jit_frames_pop);
     alu_ri(a, ALU_ADD, RSP, 8);
     b1(a, 0x58);                                /* pop rax */
@@ -2638,6 +2640,21 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         sse_rr(a, 0x66, in->op == OP_NEG_F ? 0x57 : 0x54, 0, 1, 0);
         def_fpr(a, v, 0);
         return 0;
+    case OP_POW_F: {
+        int fail = guard_exit(a, in);
+        to_fpr(a, 0, in->a);
+        y = fpr_of(a, in->b, 1);
+        if (y != 1) {
+            sse_rr(a, 0xF2, 0x10, 1, y, 0);     /* movsd xmm1, y */
+        }
+        call_abs(a, (void *)lu_jit_float_pow);
+        movq_rx(a, RAX, 0);
+        mov_ri(a, R11, (int64_t)LU_JIT_POW_FAILED);
+        alu_rr(a, ALU_CMP, RAX, R11);
+        jcc(a, CC_E, fail);
+        def_fpr(a, v, 0);
+        return 0;
+    }
     case OP_SQRT_F: {
         int fail = guard_exit(a, in);
         x = fpr_of(a, in->a, 0);
@@ -3237,7 +3254,18 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             call_helper(a, v, pub);
         }
         if (inlined) {
-            pop_frames(a, d);
+            pop_frames(a, d, !(in->flags & INS_NOSTRESS));
+        }
+        if (inlined && caught) {
+            /* An exception a handler here takes, from frames a walker kept
+               (a traceback's frame objects): the interpreter unwinds them. */
+            int fine = new_label(a);
+            test_rr(a, RAX, RAX);
+            jcc(a, CC_NE, fine);
+            load(a, RCX, R14, offsetof(PyThreadState, current_frame));
+            alu_rr(a, ALU_CMP, RCX, R15);
+            jcc(a, CC_NE, err);
+            bind(a, fine);
         }
         if (err >= 0 && h->rep == REP_BIT) {
             b1(a, 0x83);

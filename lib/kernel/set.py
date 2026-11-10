@@ -824,4 +824,4 @@ kernel_set('set_add', set_add)
 kernel_set('set_update', update_internal)
 
 
-_iter.NEXT_MISSING[set_iterator] = setiter_next
+_iter.next_missing_set(set_iterator, setiter_next)
