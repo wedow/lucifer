@@ -2224,6 +2224,12 @@ op_BUILD_SET:
 op_SET_ADD: {
     PyObject *v = POP();
     SAVE_FRAME();
+    int added = lu_set_add_simple(sp[-oparg], v);
+    if (added != 0) {
+        Py_DECREF(v);
+        ERROR_IF(added < 0);
+        DISPATCH();
+    }
     kargs[0] = Py_NewRef(sp[-oparg]);
     kargs[1] = v;
     nk = 2;

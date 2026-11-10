@@ -2551,7 +2551,7 @@ static lu_v
 inline_resume(struct ctx *c, lu_v it, PyCodeObject *co, PyFunctionObject *fn, int ret)
 {
     struct lu_func *f = c->f;
-    if (c->cur < 0 || c->depth + 1 >= INLINE_MAX_DEPTH || f->ninlined > INLINE_MAX_TOTAL
+    if (c->cur < 0 || c->depth + 1 > INLINE_MAX_DEPTH || f->ninlined > INLINE_MAX_TOTAL
         || (co->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE))
         || !(co->co_flags & CO_GENERATOR) || co->_co_monitoring != NULL || lu_jit_noinline(co)
         || nospec(c, c->pc)) {
@@ -4074,7 +4074,10 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *new, PyFunctionObj
         iown[0] = 0;
         memcpy(iargs + 1, args, sizeof(lu_v) * (size_t)(nargs + nkwonly));
         memcpy(iown + 1, own, (size_t)(nargs + nkwonly));
-        int resown, ok = inline_call(t, init, LU_NOV, 0, iargs, iown, nargs + 1, nkwonly, &res, &resown);
+        /* A kernel __init__'s fixed-arity twin: no *args to make and unpack. */
+        PyFunctionObject *itwin = kinit && nkwonly == 0 ? lu_kernel_twin(init, nargs + 1) : NULL;
+        int resown, ok = inline_call(t, itwin != NULL ? itwin : init, LU_NOV, 0, iargs, iown, nargs + 1, nkwonly, &res,
+                                     &resown);
         if (!ok && !c->failed && !by_keyword && (ok = init_call(c, t, init, kinit ? init_descr : NULL, iargs, iown, nargs + 1))) {
             res = pop(t, &resown);
         }
@@ -4123,8 +4126,9 @@ in_step(struct ctx *c)
 /* Whether the call at c->pc, which this frame cannot inline, compiles
    here. In an inlined frame it pushes the inlined frames as real ones, in
    line (luc-hez4), for the call: so a callee one deep (kernel code two,
-   so that a twin or a dispatcher inlines with what it calls) with one
-   such call outside its loops inlines, and any other is called instead
+   so that a twin or a dispatcher inlines with what it calls; a tail call,
+   after which the frame only returns, one deeper still) with one such
+   call outside its loops inlines, and any other is called instead
    (the inline is undone), which keeps the inline budget for the calls
    that inline.
    The frames of a FOR_ITER's step in line (iter_step) call whatever they
@@ -4142,14 +4146,16 @@ opaque_call(struct ctx *c)
         unsupported(c);
         return 0;
     }
-    int loop = 0;
-    for (int pc = c->next; pc < c->ncode && !loop;) {
+    /* A loop after it, unless it is a tail call: its frame returns what it returns. */
+    int loop = 0, base0, oparg0, op0;
+    int tail = c->next < c->ncode && (decode(c, c->next, &base0, &oparg0, &op0), base0 == RETURN_VALUE);
+    for (int pc = c->next; pc < c->ncode && !loop && !tail;) {
         int base, oparg, op;
         int next = decode(c, pc, &base, &oparg, &op);
         loop = base == JUMP_BACKWARD && jump_target(base, oparg, next) <= c->pc;
         pc = next;
     }
-    if (c->depth > (c->kernel ? 2 : 1) || c->ncalls++ > 0 || loop) {
+    if (c->depth > (c->kernel ? 2 : 1) + tail || c->ncalls++ > 0 || loop) {
         if (_PyRuntime.jit.debug) {
             fprintf(stderr, "jit: a call it cannot inline at %s@%d: depth %d, calls %d, loop after %d\n",
                     PyUnicode_AsUTF8(c->code->co_qualname), c->pc, c->depth, c->ncalls, loop);
@@ -4517,6 +4523,15 @@ call(struct ctx *c)
     PyFunctionObject *gfn;
     PyCodeObject *gco;
     PyFunctionObject *instead = NULL;   /* the function the call became, if not the callable's */
+    if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
+        && known_type(c, args[0]) == &PyGen_Type && PyUnicode_CompareWithASCIIString(fn->func_qualname, "get_iter") == 0) {
+        /* A generator is its own iterator (GET_ITER's rule), at any depth. */
+        lu_v g = args[0];
+        incref(c, g);
+        pop_call(c, n);
+        push(c, g, 1);
+        return 0;
+    }
     if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
         && PyUnicode_CompareWithASCIIString(fn->func_qualname, "next_item") == 0
         && (gco = gen_made(c, held_once(c, args[0]), &gfn)) != NULL && local_holds(c, args[0])) {

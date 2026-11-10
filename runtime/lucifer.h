@@ -1254,6 +1254,11 @@ int lu_native_eq(PyObject *a, PyObject *b);
 int lu_dict_str_keys(PyObject *dict);
 PyObject *lu_set_new(PyTypeObject *type);
 int lu_set_add(PyObject *set, PyObject *key);
+/* set.add(key) where no Python decides it: a key of a type whose hash and
+   equality are the runtime's (exact int, str, float, bytes, bool, None),
+   compared with keys no __eq__ judges. 1 when done, 0 when the kernel must
+   add it (nothing changed), -1 with an error. */
+int lu_set_add_simple(PyObject *set, PyObject *key);
 Py_hash_t lu_frozenset_hash(PyObject *set);
 int lu_hash_secret_init(int use_seed, unsigned long seed);
 

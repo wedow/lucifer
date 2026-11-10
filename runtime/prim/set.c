@@ -417,12 +417,22 @@ lu_set_iter_init(void)
     PySetIter_Type.tp_clear = setiter_clear;
 }
 
+/* set_add_simple(s, key): lu_set_add_simple, True when it added (or found) the key. */
+static PyObject *
+prim_set_add_simple(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2); SET(0);
+    int r = lu_set_add_simple(args[0], args[1]);
+    return r < 0 ? NULL : Py_NewRef(r ? Py_True : Py_False);
+}
+
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
+#define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_set_methods[] = {
     FAST(set_new), FAST(set_probe), FAST(set_add_entry), FAST(set_discard_entry), FAST(set_key), FAST(set_hash),
     FAST(set_next), FAST(set_resize), FAST(set_clear), FAST(set_pop),
-    FAST(set_swap), FAST(set_merge_clean), FAST(set_info), FAST(set_hash_impl),
-    FAST(set_reset_hash), FAST(set_sizeof), FAST(setiter_new), FAST(setiter_next),
+    FAST(set_swap), FAST(set_merge_clean), PURE(set_info), FAST(set_hash_impl),
+    PURE(set_reset_hash), PURE(set_add_simple), FAST(set_sizeof), FAST(setiter_new), FAST(setiter_next),
     FAST(setiter_len), FAST(setiter_copy),
     { NULL, NULL, 0, NULL },
 };
