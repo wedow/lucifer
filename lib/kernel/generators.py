@@ -87,7 +87,7 @@ def _next(gen):
     return MISSING if _finished(gen) else value
 
 
-_iter.NEXT_MISSING[_generator] = _next
+_iter.next_missing_set(_generator, _next)
 
 
 def _matches(exc, cls):

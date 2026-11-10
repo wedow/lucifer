@@ -6,7 +6,7 @@ each class body binds; a primitive that mutates a bytearray takes its
 critical section, so a method that is one primitive is atomic."""
 
 from _lucifer import (
-    MISSING, error, str_join, kind, size, ns_items, static_type, type_tp_name, type_lookup, kernel_set,
+    MISSING, error, str_join, kind, size, ns_items, static_type, type_tp_name, type_lookup, kernel_set, kernel_twin,
     int_format, text_repr, str_replace, new_check, str_encode, instance_dict,
     b_len, b_check, b_bytes, b_from_ints, b_zeros, b_subtype, b_item, b_slice, b_slice_step,
     b_cmp, b_hash, b_concat, b_repeat, b_find, b_count, b_match, b_replace, b_join, b_split,
@@ -1052,6 +1052,8 @@ Construct a mutable bytearray object from:
         """Append all the items from the iterator or sequence to the end of the bytearray."""
         _extend(self, _o(self, 'extend', args, kwargs))
 
+    kernel_twin(extend, _extend)
+
     def insert(self, *args, **kwargs):
         """Insert a single item into the bytearray before the given index."""
         index, item = _a(self, 'insert', args, kwargs, 2, 2)
@@ -1135,5 +1137,5 @@ _boot.builtin_sequence(bytes)
 _boot.builtin_sequence(bytearray)
 
 
-_iter.NEXT_MISSING[bytes_iterator] = b_next
-_iter.NEXT_MISSING[bytearray_iterator] = b_next
+_iter.next_missing_set(bytes_iterator, b_next)
+_iter.next_missing_set(bytearray_iterator, b_next)

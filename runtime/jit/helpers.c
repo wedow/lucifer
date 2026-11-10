@@ -694,6 +694,14 @@ h_seqiter_next(PyObject *it)
     return lu_seqiter_next(it);
 }
 
+/* The kernel's seqiter_next: MISSING at the end. */
+static PyObject *
+h_seqiter_step(PyObject *it)
+{
+    PyObject *v = lu_seqiter_next(it);
+    return v != NULL ? v : Py_NewRef(LU_MISSING);
+}
+
 /* iter(range(start, stop, step)) for C longs, as range_iter computes the
    length; NULL when the values do not fit (the interpreter makes it). */
 static PyObject *
@@ -1453,6 +1461,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, IF_SEEN, 1 },
+    [H_seqiter_step] = { (void *)h_seqiter_step, "seqiter_step", REP_OBJ, IF_SEEN, 1 },
     [H_range_iter] = { (void *)h_range_iter, "range_iter", REP_OBJ, 0, 3 },
     [H_listiter_new] = { (void *)h_seqiter_new, "listiter_new", REP_OBJ, 0, 2 },
     [H_tupleiter_new] = { (void *)h_seqiter_new, "tupleiter_new", REP_OBJ, 0, 2 },

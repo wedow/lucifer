@@ -7,7 +7,8 @@ exact tuple, list and range loops never come here."""
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, kernel_set,
     iter_new, iter_state, iter_set, list_append, list_splice, tuple_from, is_callable,
-    alloc, field_get, field_set, seqiter_next, dictiter_next, type_has_sq_item,
+    alloc, field_get, field_set, seqiter_next, dictiter_next, type_has_sq_item, next_missing_of,
+    next_missing_set,
 )
 from _lucifer import _boot, operators
 
@@ -71,15 +72,15 @@ _dict0, _dict1, _dict2 = _DICT_ITERATORS
 
 
 # Exact iterator type -> a function giving its next item, or MISSING at the end,
-# without raising StopIteration (iterators.py registers zip and enumerate).
-NEXT_MISSING = {}
+# without raising StopIteration (iterators.py registers zip and enumerate):
+# next_missing_set and next_missing_of.
 
 
 def ends_quietly(t):
     """Whether next_item steps an iterator of exact type t without its end
     raising StopIteration, which then has no value: as tp_iternext."""
     return (t is _seq0 or t is _seq1 or t is _dict0 or t is _dict1 or t is _dict2
-            or NEXT_MISSING.get(t) is not None)
+            or next_missing_of(t) is not None)
 
 
 def next_item(it):
@@ -90,7 +91,7 @@ def next_item(it):
         return seqiter_next(it)
     if t is _dict0 or t is _dict1 or t is _dict2:
         return dictiter_next(it)
-    f = NEXT_MISSING.get(t)
+    f = next_missing_of(t)
     if f is not None:
         return f(it)
     f = type_lookup(type(it), '__next__')

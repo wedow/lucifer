@@ -124,6 +124,13 @@ struct ctx {
     int *entry_depth;
     int nentries;
     int gen;                    /* a generator's frame resumed in line (inline_resume): how it returns */
+    int ret;                    /* an inlined frame's return when rebuilt (lu_fs ret) */
+    int callee_ret;             /* the ret of the frame the next inline_call makes */
+    int done;                   /* a FOR_ITER step's frame (want_done): where its returns of MISSING
+                                   go, the loop's exit, made on the first (an IR block), or -1 */
+    int want_done, maybe_missing;       /* ... and whether another of its returns may be MISSING */
+    int last_done, last_maybe;  /* the done and maybe_missing of the frame inline_call last made */
+    int callee_want_done;       /* the next inline_call's frame returns as a FOR_ITER step's (a tail call) */
     lu_v genv;                  /* that generator */
 };
 
@@ -256,6 +263,7 @@ snapshot(struct ctx *c, int pc)
     int n = c->nlocals + c->st.sp;
     fs->caller = c->caller;
     fs->gen = (uint8_t)c->gen;
+    fs->ret = (uint8_t)c->ret;
     fs->code = c->code;
     fs->func = (PyObject *)c->func;
     fs->pc = pc;
@@ -715,6 +723,15 @@ normalize(struct ctx *c)
     }
 }
 
+/* Whether local k of an inlined frame holds one value on every path of
+   it: a parameter it never rebinds, which then needs no phi at a join,
+   and keeps what is known of it (its type) in loops. */
+static int
+same_everywhere(struct ctx *c, int k)
+{
+    return c->parent != NULL && !c->gen && !c->made && k < c->nlocals && c->fixed[k];
+}
+
 static lu_v
 phi_input(struct ctx *c, lu_v v)
 {
@@ -736,6 +753,9 @@ edge_to(struct ctx *c, int pc)
         if (b->npreds > 1) {
             b->phis = 1;
             for (int k = 0; k < c->nlocals + c->st.sp; k++) {
+                if (same_everywhere(c, k)) {
+                    continue;   /* the value it entered with, known as it was */
+                }
                 lu_v phi = lu_ir_emit(c->f, b->id, OP_PHI, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, k);
                 I(c, phi)->args = NULL;
                 b->in.v[k] = phi;
@@ -751,6 +771,9 @@ edge_to(struct ctx *c, int pc)
     }
     if (b->phis) {
         for (int k = 0; k < c->nlocals + c->st.sp; k++) {
+            if (same_everywhere(c, k)) {
+                continue;
+            }
             struct lu_ins *phi = I(c, b->in.v[k]);
             lu_v in = phi_input(c, c->st.v[k]);
             phi = I(c, b->in.v[k]);
@@ -768,6 +791,31 @@ jump_to(struct ctx *c, int pc)
     edge_to(c, pc);
     emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
     c->cur = -1;
+}
+
+/* After a branch on `type(x) is T` (bit), whose true side goes to the
+   block at pc: x is of exact type T there, when that block has no other
+   way in. Kernel code dispatches on exact types this way. */
+static void
+type_tested(struct ctx *c, lu_v bit, int pc)
+{
+    struct lu_ins *in = I(c, bit);
+    if (in->op != OP_IS) {
+        return;
+    }
+    for (int k = 0; k < 2; k++) {
+        struct lu_ins *load = I(c, k == 0 ? in->a : in->b);
+        PyObject *t = known(c, k == 0 ? in->b : in->a);
+        struct bblk *b = &c->bb[c->blkat[pc]];
+        if (load->op == OP_LOAD && load->imm == offsetof(PyObject, ob_type) && load->rep == REP_OBJ
+            && t != NULL && PyType_Check(t) && b->npreds == 1 && b->id >= 0 && known_type(c, load->a) == NULL) {
+            int cur = c->cur;
+            c->cur = b->id;
+            set_known(c, load->a, (PyTypeObject *)t);
+            c->cur = cur;
+            return;
+        }
+    }
 }
 
 /* Branches on bit: to pc_true when set. */
@@ -1520,6 +1568,35 @@ static const char *const compare_names[] = {
 static int inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *args, uint8_t *owned,
                        int nargs, int nkwonly, lu_v *result, int *result_owned);
 
+/* Whether v is surely not MISSING: of a type MISSING's is not. */
+static int
+not_missing(struct ctx *c, lu_v v)
+{
+    PyTypeObject *t = known_type(c, v);
+    return t != NULL && t != Py_TYPE(LU_MISSING);
+}
+
+/* The frame returns MISSING as a FOR_ITER step's (c->want_done): its stack
+   and locals are released and control goes to its done block. */
+static void
+done_return(struct ctx *c)
+{
+    while (c->st.sp > 0) {
+        int own;
+        lu_v w = pop(c, &own);
+        release(c, w, own);
+    }
+    for (int i = 0; i < c->nlocals; i++) {
+        release(c, c->st.v[i], c->st.own[i]);
+    }
+    if (c->done < 0) {
+        c->done = lu_ir_block(c->f);
+    }
+    lu_ir_edge(c->f, c->cur, c->done);
+    emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+    c->cur = -1;
+}
+
 /* A kernel method of a static type, inlined as the interpreter would run
    it for operands of that exact type. */
 static int
@@ -1557,6 +1634,8 @@ static void test_word(struct ctx *c, lu_v v, int off, PyObject *o, int fail);
 static int binary_op(struct ctx *c);
 static int compare_op(struct ctx *c);
 static int unary_op(struct ctx *c);
+static int call(struct ctx *c);
+static int type_arms(struct ctx *c, int n, int d0, int d1, int lk, int rk, int (*build)(struct ctx *));
 
 /* The exact type a kind names, or NULL for OTHER. */
 static PyTypeObject *
@@ -1621,12 +1700,35 @@ operand_pairs(struct ctx *c, int lk, int rk, PyTypeObject *pairs[][2])
 static int
 operator_arms(struct ctx *c, int n, int lk, int rk, int (*build)(struct ctx *))
 {
-    lu_v ops[2] = { peek(c, n), peek(c, 1) };   /* a unary operator's: its one operand twice */
+    return type_arms(c, n, n, n - 1 > 0 ? n - 1 : 1, lk, rk, build);
+}
+
+/* The same for any instruction whose n (1 or 2) values that decide it are
+   the stack entries at depths d0 and d1 (a call's first arguments). */
+static int
+type_arms(struct ctx *c, int n, int d0, int d1, int lk, int rk, int (*build)(struct ctx *))
+{
+    lu_v ops[2] = { peek(c, d0), peek(c, d1) };     /* a unary operator's: its one operand twice */
     PyTypeObject *pairs[LU_OPCLASS_WAYS][2];
     if (nospec(c, c->pc) || (known_type(c, ops[0]) != NULL && known_type(c, ops[1]) != NULL)) {
         return 0;
     }
     int m = operand_pairs(c, lk, rk, pairs);
+    if (n == 1) {
+        /* One operand: the pairs' first types, once each. */
+        int u = 0;
+        for (int i = 0; i < m; i++) {
+            int seen = 0;
+            for (int j = 0; j < u; j++) {
+                seen |= pairs[j][0] == pairs[i][0];
+            }
+            if (!seen) {
+                pairs[u][0] = pairs[u][1] = pairs[i][0];
+                u++;
+            }
+        }
+        m = u;
+    }
     int single = m == 1 && kind_type(lk) != NULL && kind_type(rk) != NULL;
     if (m == 0 || single) {
         return 0;               /* one pair of kinds: the instruction guards them itself */
@@ -2009,12 +2111,13 @@ not_inlinable(struct ctx *c, PyFunctionObject *fn, int nargs, int nkwonly)
     if (noinline(c, co)) {
         return "its inlined copies kept leaving";
     }
+    /* Kernel code may recur once: customized on other classes, as
+       next_item's step of a zip steps its iterators. */
+    int times = 0;
     for (struct ctx *p = c; p != NULL; p = p->parent) {
-        if (p->code == co) {
-            return "recursion";
-        }
+        times += p->code == co;
     }
-    return NULL;
+    return times > ((co->co_flags & LU_CO_KERNEL) ? 1 : 0) ? "recursion" : NULL;
 }
 
 static int
@@ -2159,6 +2262,13 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *
     k->nvars = k->nlocals + co->co_stacksize + 1;
     k->depth = c->depth + 1;
     k->island = c->island;
+    k->ret = c->callee_ret;
+    k->want_done = c->callee_ret == LU_RETURN_FOR_ITER || c->callee_want_done;
+    k->done = -1;
+    c->last_done = -1;
+    c->last_maybe = 1;
+    c->callee_ret = 0;
+    c->callee_want_done = 0;
     k->fixed = fixed_params(k);
     if (!k->kernel && fnv == LU_NOV) {
         /* The function's code is part of what was compiled: f.__code__ = ... changes its version. */
@@ -2271,6 +2381,8 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *
     }
     if (ok) {
         wire_pending(c, k);
+        c->last_done = k->done;
+        c->last_maybe = k->maybe_missing;
     }
     free(k->pend);
     free(k->rets);
@@ -3412,6 +3524,17 @@ intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
         *owned = 0;
         return konst(c, r != NULL ? r : LU_MISSING);
     }
+    if (nargs == 1 && strcmp(name, "seqiter_next") == 0
+        && (known_type(c, args[0]) == &PyListIter_Type || known_type(c, args[0]) == &PyTupleIter_Type)) {
+        /* A list or tuple iterator's step without a frame: what it releases
+           at its end may run a finalizer, which runs no code of this unit's. */
+        return helper(c, H_seqiter_step, 1, args);
+    }
+    if (nargs == 1 && strcmp(name, "next_missing_of") == 0 && known(c, args[0]) != NULL) {
+        /* The registry is made at boot and only read after. */
+        *owned = 0;
+        return konst(c, lu_next_missing_of(known(c, args[0])));
+    }
     if (nargs == 2 && strcmp(name, "is_subtype") == 0 && known(c, args[0]) != NULL && PyType_Check(known(c, args[0]))
         && known(c, args[1]) != NULL && PyType_Check(known(c, args[1]))) {
         /* Two constant types: the first's bases hold while its version does. */
@@ -3868,16 +3991,26 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *new, PyFunctionObj
 
 /* Whether the call at c->pc, which this frame cannot inline, compiles
    here. In an inlined frame it pushes the inlined frames as real ones, in
-   line (luc-hez4), for the call: so a callee one deep with one such call
-   outside its loops inlines, and any other is called instead (the inline
-   is undone), which keeps the inline budget for the calls that inline. A
-   call the interpreter never made there leaves: a cold path's call would
-   make the root's locals real boxes on hot ones. */
+   line (luc-hez4), for the call: so a callee one deep (kernel code two,
+   so that a twin or a dispatcher inlines with what it calls) with one
+   such call outside its loops inlines, and any other is called instead
+   (the inline is undone), which keeps the inline budget for the calls
+   that inline.
+   The frames of a FOR_ITER's step in line (iter_step) call whatever they
+   call, and run Python-running helpers: the step is the loop's body. A call the interpreter never made
+   there leaves (a cold path's call would make the root's locals real
+   boxes on hot ones), but in a step: the interpreter takes some steps
+   natively (enumerate's), so the kernel's never ran. */
 static int
 opaque_call(struct ctx *c)
 {
     if (c->parent == NULL) {
         return 1;
+    }
+    for (struct ctx *p = c; p->parent != NULL; p = p->parent) {
+        if (p->ret == LU_RETURN_FOR_ITER) {
+            return 1;
+        }
     }
     if (__atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED) == 0) {
         unsupported(c);
@@ -3890,7 +4023,7 @@ opaque_call(struct ctx *c)
         loop = base == JUMP_BACKWARD && jump_target(base, oparg, next) <= c->pc;
         pc = next;
     }
-    if (c->depth > 1 || c->ncalls++ > 0 || loop) {
+    if (c->depth > (c->kernel ? 2 : 1) || c->ncalls++ > 0 || loop) {
         c->failed = 1;
         c->why = "a call it cannot inline";
         return 0;
@@ -4119,6 +4252,20 @@ call(struct ctx *c)
         }
     }
     const char *prim = primitive_name(kc);
+    PyFunctionObject *kfn = kc != NULL && self == LU_NOV && fn != NULL && (PyCFunction_Check(kc)
+        || (PyFunction_Check(kc) && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL))) ? fn : NULL;
+    if (n >= 1 && (kfn != NULL || (kc != NULL && PyType_Check(kc) && kc != (PyObject *)&PyType_Type
+                                   && !(((PyTypeObject *)kc)->tp_flags & Py_TPFLAGS_HEAPTYPE)))
+        && c->base == CALL) {
+        /* A builtin customized by the classes of its first arguments,
+           which its kernel code dispatches on: one arm per pair met.
+           type(x) is a load already. */
+        int kinds = feedback(c, c->cache);
+        int armed = type_arms(c, n >= 2 ? 2 : 1, n, n >= 2 ? n - 1 : n, kinds & 0xff, kinds >> 8, call);
+        if (armed != 0) {
+            return armed < 0 ? -1 : 0;
+        }
+    }
     if (kc != NULL && PyCFunction_Check(kc) && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_FRAME)) {
         /* It hands the interpreter a frame to run: a generator's resumption
            runs here; anything else leaves. */
@@ -4245,9 +4392,12 @@ call(struct ctx *c)
         }
     }
     if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
-        && PyUnicode_CompareWithASCIIString(fn->func_qualname, "next_item") == 0) {
+        && PyUnicode_CompareWithASCIIString(fn->func_qualname, "next_item") == 0
+        && (known_type(c, args[0]) == NULL || known_type(c, args[0]) == &PyGen_Type
+            || not_inlinable(c, fn, 1, 0) != NULL)) {
         /* next_item is FOR_ITER's step, which C takes for the iterators it
-           knows (a generator resumed in its own unit), else the kernel's. */
+           knows (a generator resumed in its own unit), else the kernel's;
+           one of a known class inlines and folds to that class's step. */
         if (!opaque_call(c)) {
             return -1;
         }
@@ -4294,6 +4444,10 @@ call(struct ctx *c)
         push(c, r, 1);
         return 0;
     }
+    PyFunctionObject *twin = fn != NULL && bound == NULL && fnv == LU_NOV ? lu_kernel_twin(fn, nargs) : NULL;
+    if (twin != NULL) {
+        fn = twin;              /* a kernel function's fixed-arity form: no *args or **kwargs to make */
+    }
     if (fn != NULL && bound == NULL) {
         /* The callee takes the arguments' references; the rest go here. */
         int owncallable = peek_owned(c, n + 2);
@@ -4302,7 +4456,26 @@ call(struct ctx *c)
         struct bstate saved;
         state_copy(c, &saved, &c->st);
         c->st.sp -= n + 2;
+        int base, oparg, op;
+        c->callee_want_done = c->want_done && c->next < c->ncode
+            && (decode(c, c->next, &base, &oparg, &op), base == RETURN_VALUE);
         if (inline_call(c, fn, fnv, owncallable, args, own, nargs, 0, &r, &rown)) {
+            if (c->last_done >= 0) {
+                /* The tail call's step ended: so does this frame's. */
+                int cont = c->cur;
+                struct bstate keep;
+                state_copy(c, &keep, &c->st);
+                c->cur = c->last_done;
+                if (fnv == LU_NOV) {
+                    release(c, callable, owncallable);
+                }
+                release(c, descr, owndescr);
+                done_return(c);
+                c->cur = cont;
+                c->st = keep;
+            }
+            c->maybe_missing |= c->callee_want_done && c->last_maybe;
+            c->callee_want_done = 0;
             if (c->cur >= 0) {          /* else every path of the callee left */
                 if (fnv == LU_NOV) {
                     release(c, callable, owncallable);
@@ -4312,6 +4485,7 @@ call(struct ctx *c)
             }
             return 0;
         }
+        c->callee_want_done = 0;
         c->st = saved;
         r = LU_NOV;
     }
@@ -4592,6 +4766,51 @@ for_step(struct ctx *c, lu_v it, PyTypeObject *t, int exit_pc)
     return 0;
 }
 
+/* FOR_ITER's step for an iterator of known class: the kernel's next_item
+   inlined, folded on the class to that class's step (next_missing_of). An
+   exit inside it rebuilds its frame returning as FOR_ITER's step does. */
+static int
+iter_step(struct ctx *c, lu_v it, int exit_pc)
+{
+    PyObject *k = PyThreadState_Get()->interp->kernel[LU_K_next_item];
+    if (k == NULL || !PyFunction_Check(k)) {
+        return 0;
+    }
+    lu_v args[1] = { it }, v;
+    uint8_t own[1] = { 0 };     /* the loop's stack keeps the iterator */
+    int vown;
+    c->callee_ret = LU_RETURN_FOR_ITER;
+    int ok = inline_call(c, (PyFunctionObject *)k, LU_NOV, 0, args, own, 1, 0, &v, &vown);
+    c->callee_ret = 0;
+    if (!ok) {
+        return 0;
+    }
+    int cont = c->cur, maybe = c->last_maybe;
+    if (c->last_done >= 0) {
+        /* The step's ends that are MISSING by construction: the loop's exit. */
+        struct bstate keep;
+        state_copy(c, &keep, &c->st);
+        c->cur = c->last_done;
+        jump_to(c, exit_pc);
+        c->st = keep;
+    }
+    c->cur = cont;
+    if (c->cur < 0) {
+        return 1;
+    }
+    if (maybe) {
+        lu_v done = emit(c, OP_IS, REP_BIT, v, konst(c, LU_MISSING), LU_NOV, 0);
+        normalize(c);
+        edge_to(c, exit_pc);
+        int body = lu_ir_block(c->f);
+        lu_ir_edge(c->f, c->cur, body);
+        emit(c, OP_BRANCH, REP_NONE, done, LU_NOV, LU_NOV, 0);
+        c->cur = body;
+    }
+    push(c, v, vown);
+    return 1;
+}
+
 static int
 for_iter(struct ctx *c)
 {
@@ -4618,6 +4837,17 @@ for_iter(struct ctx *c)
     int kind = feedback(c, c->cache);
     if (nospec(c, c->pc)) {
         kind = LU_ITER_OTHER;
+    }
+    if (kind == LU_ITER_OTHER) {
+        /* Iterators of other classes: one arm per class met, each the
+           kernel's step for that class in line. */
+        int armed = type_arms(c, 1, 1, 1, LU_KIND_OTHER, LU_KIND_OTHER, for_iter);
+        if (armed != 0) {
+            return armed < 0 ? -1 : 0;
+        }
+        if (known_type(c, it) != NULL && known_type(c, it) != &PyGen_Type && iter_step(c, it, exit_pc)) {
+            return 0;
+        }
     }
     /* The iterator's type, or the one its loop entered with. */
     PyTypeObject *t = known_type(c, it);
@@ -4886,7 +5116,11 @@ translate(struct ctx *c)
             jump_to(c, I(c, w)->imm ? target : c->next);
             return 0;
         }
+        lu_v test = I(c, v)->op == OP_BOOL ? I(c, v)->a : LU_NOV;
         branch_to(c, w, target, c->next);
+        if (test != LU_NOV && (c->base == POP_JUMP_IF_TRUE || c->base == POP_JUMP_IF_FALSE)) {
+            type_tested(c, test, c->base == POP_JUMP_IF_TRUE ? target : c->next);
+        }
         return 0;
     }
     case JUMP_FORWARD:
@@ -5096,6 +5330,19 @@ translate(struct ctx *c)
                 helper(c, H_gen_finish, 1, &c->genv);
                 c->observed = observed;     /* control leaves the frame: no frames guard after */
                 v = konst(c, LU_MISSING);
+            }
+            if (c->want_done && known(c, v) == LU_MISSING) {
+                /* A FOR_ITER step ends: straight to the loop's exit. */
+                if (c->done < 0) {
+                    c->done = lu_ir_block(c->f);
+                }
+                lu_ir_edge(c->f, c->cur, c->done);
+                emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+                c->cur = -1;
+                return 0;
+            }
+            if (c->want_done && !not_missing(c, v)) {
+                c->maybe_missing = 1;
             }
             if (c->nrets == c->caprets) {
                 c->caprets = c->caprets ? c->caprets * 2 : 4;
@@ -5718,6 +5965,9 @@ build_block(struct ctx *c, int bi)
            entry (a call's beside its callable, an unbound local) stays
            one, which a call reads as "no self". */
         for (int k = 0; k < c->nlocals + c->st.sp; k++) {
+            if (same_everywhere(c, k)) {
+                continue;       /* no phi of its own: the value it came in with */
+            }
             struct lu_ins *phi = I(c, c->st.v[k]);
             int same = phi->op == OP_PHI && phi->nargs > 0;
             lu_v first = same ? phi->args[0] : LU_NOV;

@@ -1536,8 +1536,16 @@ op_CALL:
         /* The arguments' kinds; for a call without any, the callable's, so
            that the site shows it ran. */
         PyObject *first = oparg >= 1 ? sp[-oparg] : sp[-2];
+        PyObject *callable = sp[-oparg - 2];
         lu_jit_observe(next_instr, first, oparg >= 2 ? sp[-oparg + 1] : first);
-        lu_jit_observe_callee(code, next_instr, sp[-oparg - 2], sp[-oparg - 1]);
+        lu_jit_observe_callee(code, next_instr, callable, sp[-oparg - 1]);
+        if (oparg >= 1 && (Py_IS_TYPE(callable, &PyCFunction_Type)
+                           || (PyType_Check(callable) && !(((PyTypeObject *)callable)->tp_flags & Py_TPFLAGS_HEAPTYPE))
+                           || (PyFunction_Check(callable)
+                               && (((PyCodeObject *)((PyFunctionObject *)callable)->func_code)->co_flags & LU_CO_KERNEL)))) {
+            /* A builtin's or a kernel function's call: the classes its kernel code dispatches on. */
+            lu_jit_observe_classes(code, next_instr - 1, first, oparg >= 2 ? sp[-oparg + 1] : first);
+        }
     }
     SKIP_CACHES();
     kwnames = NULL;
@@ -3221,6 +3229,10 @@ op_FOR_ITER: {
     PyObject *iter = TOP();
     PyTypeObject *itp = Py_TYPE(iter);
     lu_jit_observe_iter(next_instr, itp);
+    if (itp != &PyListIter_Type && itp != &PyTupleIter_Type && itp != &PyRangeIter_Type && itp != &PyGen_Type
+        && _PyRuntime.jit.mode != LU_JIT_OFF) {
+        lu_jit_opclass_note(code, (int)(this_instr - lu_code_start(code)), itp, itp);  /* its step, per class */
+    }
     SKIP_CACHES();
     PyObject *v;
     if (itp == &PyListIter_Type || itp == &PyTupleIter_Type) {

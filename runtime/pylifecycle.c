@@ -647,6 +647,8 @@ release_interpreter(struct _is *interp)
     memset(interp->static_types, 0, sizeof interp->static_types);
     memset(interp->kernel, 0, sizeof interp->kernel);
     interp->kernel_rebound = NULL;
+    interp->kernel_twins = NULL;
+    interp->kernel_nexts = NULL;
     PyConfig_Clear(&interp->config);
 }
 

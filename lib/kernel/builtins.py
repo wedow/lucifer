@@ -8,7 +8,7 @@ from _lucifer import (
     str_join, error, kind, type_lookup, type_tp_name, MISSING, static_type, is_callable,
     is_subtype, size, int_format, int_add, int_as_double, str_chr, str_ord, bytes_ord, str_len,
     object_id, caller_locals, caller_globals, caller_code_flags, eval_code, kernel_get, kernel_set,
-    import_state, field_get, setattr_native, compile as _lucifer_compile,
+    import_state, field_get, setattr_native, compile as _lucifer_compile, kernel_twin, iter_set,
 )
 from _lucifer import _boot, _format, operators, _args, iter as _iter, object as _object
 import sys
@@ -103,11 +103,23 @@ def isinstance(obj, class_or_tuple, /):
     t = type(obj)
     if t is class_or_tuple:
         return True
+    # A negative answer asks obj.__class__ (object_isinstance), unless its
+    # type keeps object's.
+    plain = type_lookup(t, '__class__') is _object_class and type_lookup(t, '__getattribute__') is _object_getattribute
     if type(class_or_tuple) is type:
         if is_subtype(t, class_or_tuple):
             return True
-        # A negative answer asks obj.__class__ (object_isinstance).
-        if type_lookup(t, '__class__') is _object_class and type_lookup(t, '__getattribute__') is _object_getattribute:
+        if plain:
+            return False
+    elif plain and type(class_or_tuple) is tuple:
+        # A tuple of plain classes, checked in order without running Python;
+        # anything else in it checks the whole tuple the general way.
+        for c in class_or_tuple:
+            if type(c) is not type:
+                break
+            if t is c or is_subtype(t, c):
+                return True
+        else:
             return False
     return _check('isinstance', class_or_tuple, obj, '__instancecheck__',
                   'type, a tuple of types, or a union')
@@ -419,6 +431,16 @@ When the iterable is empty, return the start value.
 This function is intended specifically for use with numeric values and
 may reject non-numeric types."""
     iterable, start = _args.unpack('sum', args, kwargs, ('iterable', 'start'), 1, 1)
+    return _sum(iterable, start)
+
+
+def _sum1(iterable):
+    """sum(iterable): its twin for one argument (kernel_twin)."""
+    return _sum(iterable, MISSING)
+
+
+def _sum(iterable, start):
+    """sum's work, and its twin for two arguments: start MISSING is 0."""
     it = get_iter(iterable)
     if start is MISSING:
         result = 0
@@ -430,6 +452,11 @@ may reject non-numeric types."""
         if kind(start, 'bytearray'):
             error(TypeError, "sum() can't sum bytearray [use b''.join(seq) instead]")
         result = start
+    t = type(iterable)
+    if t is list:
+        return _sum_items(iterable, it, result)
+    if t is tuple:
+        return _sum_items(iterable, it, result)
     if type(result) is int:
         while True:
             item = next_item(it)
@@ -454,6 +481,48 @@ may reject non-numeric types."""
             else:
                 result = _total(hi, lo) + item
                 break
+    return _sum_complex(it, result)
+
+
+def _sum_items(seq, it, result):
+    """_sum's int and float phases over an exact list or tuple, whose fresh
+    iterator is it: the items read by index as the iterator reads them,
+    and the iterator left at the next for the phases after."""
+    i = 0
+    if type(result) is int:
+        while True:
+            if i >= size(seq):
+                return result
+            item = seq[i]
+            i += 1
+            if type(item) is int:
+                result = result + item
+            elif type(item) is bool:
+                result = int_add(result, item)
+            else:
+                result = result + item
+                break
+    if type(result) is float:
+        hi = result
+        lo = 0.0
+        while True:
+            if i >= size(seq):
+                return _total(hi, lo)
+            item = seq[i]
+            i += 1
+            if type(item) is float:
+                hi, lo = _compensated(hi, lo, item)
+            elif kind(item, 'int'):
+                hi, lo = _compensated(hi, lo, int_as_double(item))
+            else:
+                result = _total(hi, lo) + item
+                break
+    iter_set(it, seq, i)
+    return _sum_complex(it, result)
+
+
+def _sum_complex(it, result):
+    """_sum's phases after the float one: complex, then any."""
     if type(result) is complex:
         re_hi = result.real
         im_hi = result.imag
@@ -513,6 +582,17 @@ def _min_max(name, args, kwargs, greater):
     return best
 
 
+def _min2(a, b):
+    """min(a, b): min's twin for two arguments (kernel_twin): the second
+    when it is less, as min's loop compares each item with the best."""
+    return b if b < a else a
+
+
+def _max2(a, b):
+    """max(a, b), as _min2."""
+    return b if b > a else a
+
+
 def max(*args, **kwargs):
     """max(iterable, *[, default=obj, key=func]) -> value
 max(arg1, arg2, *args, *[, key=func]) -> value
@@ -533,6 +613,12 @@ default keyword-only argument specifies an object to return if
 the provided iterable is empty.
 With two or more positional arguments, return the smallest argument."""
     return _min_max('min', args, kwargs, False)
+
+
+kernel_twin(sum, _sum1)
+kernel_twin(sum, _sum)
+kernel_twin(min, _min2)
+kernel_twin(max, _max2)
 
 
 _PyCF_SOURCE_IS_UTF8 = 0x100

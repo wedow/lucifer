@@ -155,6 +155,8 @@ struct lu_fs {
     int nlocals, nstack;
     lu_v *vals;                 /* locals, then the stack bottom up; LU_NOV is NULL */
     uint8_t *owned;             /* per entry: compiled code holds a reference for it */
+    uint8_t ret;                /* how an inlined frame returns when rebuilt: LU_RETURN_FOR_ITER for
+                                   the step of a FOR_ITER (ssa_build.c iter_step), else 0 (a push) */
     uint8_t gen;                /* a generator's frame its caller resumed in line: the generator is
                                    the caller's top stack entry (ssa_build.c inline_resume), and this
                                    says how it returns (LU_RETURN_FOR_ITER or _NEXT; 0: not one) */

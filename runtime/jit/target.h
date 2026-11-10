@@ -82,6 +82,7 @@ struct lu_deopt_frame {
     int pc;
     int nlocals, nstack;
     struct lu_dv *vals;
+    uint8_t ret;                /* how the frame returns when rebuilt (lu_fs) */
     uint8_t gen;                /* the frame of the generator its caller's top stack entry holds, which
                                    returns to it as this enum lu_frame_return says (0: not one) */
 };
@@ -292,6 +293,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed);
     X(get_iter) \
     X(for_iter) \
     X(seqiter_next) \
+    X(seqiter_step) \
     X(range_iter) \
     X(listiter_new) \
     X(tupleiter_new) \

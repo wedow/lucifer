@@ -940,6 +940,7 @@ make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
         fr->func = p->func;
         fr->pc = p->pc;
         fr->gen = p->gen;
+        fr->ret = p->ret;
         fr->nlocals = p->nlocals;
         fr->nstack = p->nstack;
         int m = p->nlocals + p->nstack;
@@ -1269,7 +1270,7 @@ push_frames_in_line(struct asm_ *a, struct lu_deopt *d, int words, int slow)
         lea(a, R11, RAX, AT(localsplus) + 8 * code->co_nlocalsplus);
         store(a, RAX, AT(stackpointer), R11);
         store8_mi(a, RAX, AT(owner), lu_frame_owner_for(code));
-        store8_mi(a, RAX, AT(ret), LU_RETURN_PUSH);
+        store8_mi(a, RAX, AT(ret), fr->ret);    /* LU_RETURN_PUSH but for a FOR_ITER step (lu_fs ret) */
         store8_mi(a, RAX, AT(jit_lent), 0);
         store_mi(a, RAX, AT(jit_desc), 0);
         for (int i = 0; i < fr->nlocals; i++) {

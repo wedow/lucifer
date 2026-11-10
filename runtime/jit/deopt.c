@@ -194,6 +194,9 @@ push_inlined(PyThreadState *ts, struct regs *r, struct lu_deopt_frame *fr, struc
     else if ((f = lu_frame_push(ts, (PyFunctionObject *)fr->func, NULL)) == NULL) {
         Py_FatalError("lucifer jit: no room to rebuild an inlined frame");
     }
+    else {
+        f->ret = fr->ret;
+    }
     for (int i = 0; i < fr->nlocals; i++) {
         f->localsplus[i] = take(r, &fr->vals[i]);
     }
@@ -285,6 +288,7 @@ lu_jit_frames_push(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
         if (f == NULL) {
             Py_FatalError("lucifer jit: no room for an inlined frame");
         }
+        f->ret = fr->ret;
         /* Locals are objects here (the optimizer boxes them): lent, as
            the code and function are. */
         for (int i = 0; i < fr->nlocals; i++) {

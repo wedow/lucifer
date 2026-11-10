@@ -8,7 +8,7 @@ from _lucifer import (
     is_subtype, int_format, text_repr, new_check, str_find, str_count, str_replace, str_slice,
     str_slice_step, str_item, str_ord, str_chr, str_len, str_hash, str_cmp, str_concat,
     str_repeat, str_split, str_splitlines, str_strip, str_case, str_is, str_expandtabs, str_ascii,
-    str_encode, str_decode, str_iter, str_iter_next, str_subtype, str_sizeof, list_append, slice_parts, kernel_set, b_check, b_bytes,
+    str_encode, str_decode, str_iter, str_iter_next, str_subtype, str_sizeof, list_append, slice_parts, kernel_set, b_check, b_bytes, kernel_twin,
 )
 from _lucifer import _boot, operators, _format, iter as _iter
 
@@ -296,6 +296,39 @@ def _str_new(args, kwargs):
                    'strict' if errors is MISSING else errors)
 
 
+def _new(cls, args, kwargs):
+    """str.__new__(cls, *args, **kwargs)."""
+    if not kind(cls, 'type'):
+        error(TypeError, _cat('str.__new__(X): X is not a type object (', _name(cls), ')'))
+    if cls is not str:
+        new_check(cls, str)
+    value = _str_new(args, kwargs)
+    if cls is str:
+        return value
+    return str_subtype(cls, value)
+
+
+def _new1(cls, obj):
+    """str(obj): __new__'s twin for one argument (kernel_twin)."""
+    if cls is str:
+        return to_str(obj)
+    return _new(cls, (obj,), {})
+
+
+def _startswith1(self, prefix):
+    """str.startswith's twin for one argument (kernel_twin)."""
+    if kind(prefix, 'str'):
+        return _match(self, prefix, 0, str_len(self), False)
+    return _tailmatch(self, (prefix,), 'startswith', False)
+
+
+def _endswith1(self, suffix):
+    """str.endswith's twin for one argument (kernel_twin)."""
+    if kind(suffix, 'str'):
+        return _match(self, suffix, 0, str_len(self), True)
+    return _tailmatch(self, (suffix,), 'endswith', True)
+
+
 def _unpack_slice(sl, length):
     """PySlice_Unpack and PySlice_AdjustIndices: (start, step, count)."""
     start, stop, step = slice_parts(sl)
@@ -369,14 +402,9 @@ encoding defaults to 'utf-8'.
 errors defaults to 'strict'."""
 
     def __new__(cls, /, *args, **kwargs):
-        if not kind(cls, 'type'):
-            error(TypeError, _cat('str.__new__(X): X is not a type object (', _name(cls), ')'))
-        if cls is not str:
-            new_check(cls, str)
-        value = _str_new(args, kwargs)
-        if cls is str:
-            return value
-        return str_subtype(cls, value)
+        return _new(cls, args, kwargs)
+
+    kernel_twin(__new__, _new1)
 
     def __repr__(self):
         return text_repr(self, -1)
@@ -506,6 +534,9 @@ errors defaults to 'strict'."""
 
     def endswith(self, *args):
         return _tailmatch(self, args, 'endswith', True)
+
+    kernel_twin(startswith, _startswith1)
+    kernel_twin(endswith, _endswith1)
 
     # splitting and joining
 
@@ -910,4 +941,4 @@ kernel_set('format', format_value)
 _boot.builtin_sequence(str)
 
 
-_iter.NEXT_MISSING[str_iterator] = str_iter_next
+_iter.next_missing_set(str_iterator, str_iter_next)

@@ -443,6 +443,8 @@ struct _is {
     struct lu_static_type_state static_types[LU_MAX_STATIC_TYPES];
     PyObject *kernel[LU_K_COUNT];       /* strong; NULL until registered */
     PyObject *kernel_rebound;           /* strong: name -> None for each global a kernel function rebinds */
+    PyObject *kernel_twins;             /* strong: (a kernel function's code, its twin) pairs (kernel_twin) */
+    PyObject *kernel_nexts;             /* strong: (iterator type, its step) pairs (next_missing_set) */
     unsigned int next_version_tag;      /* heap types' tp_version_tag; 0 once spent */
     uint32_t next_keys_version;         /* dk_version of the next keys table versioned; 0 once spent */
     uint32_t next_func_version;         /* co_version of the next code object; 0 once spent */
@@ -1447,6 +1449,12 @@ int lu_kernel_target(PyObject *callable, PyObject *const *args, Py_ssize_t nargs
    but without checking an argument (the optimizing tier knows it), and the
    self a builtin binds (borrowed, or NULL). NULL when callable is none. */
 PyObject *lu_kernel_function_of(PyObject *callable, PyObject **self);
+/* The twin of kernel function f for calls of nargs positional arguments
+   and no keywords (the kernel_twin primitive), borrowed, or NULL. */
+PyFunctionObject *lu_kernel_twin(PyFunctionObject *f, int nargs);
+/* The step next_item takes for an iterator of exact type t (next_missing_set),
+   borrowed, or None. */
+PyObject *lu_next_missing_of(PyObject *t);
 /* An unbound slot wrapper's call (wrapper_descriptor.__call__) on the
    arguments as a vector, self first; kwargs a dict or NULL. */
 PyObject *lu_wrapper_descr_call(PyObject *descr, PyObject *const *args, Py_ssize_t nargs, PyObject *kwargs);
