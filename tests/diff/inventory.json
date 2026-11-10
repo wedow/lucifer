@@ -726,6 +726,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/module_attr_constants.py": {
+      "exit": 0,
+      "sha256": "e4d50f1a40202b965215ac84a8044727ea68c4ba2ac5222a3d12638b010a070d",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/pattern_mapping_sequence.py": {
       "exit": 0,
       "sha256": "98a2ce47db272acabbbe9b79e1ca864219a22bccb74550079e82cee377135c44",

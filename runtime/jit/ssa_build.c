@@ -3237,6 +3237,25 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
 static int
 load_attr(struct ctx *c)
 {
+    /* A known module's attribute (math.sqrt) in a program's code: a
+       constant, guarded as a global is (dict_const); one rebound on every
+       call leaves the site to its cache. Kernel code reaches its modules'
+       functions as its dispatchers choose, which a constant would bypass. */
+    PyObject *mod = known(c, peek(c, 1));
+    if (mod != NULL && PyModule_CheckExact(mod) && !c->kernel && !nospec(c, c->pc)) {
+        PyObject *v = dict_const(c, PyModule_GetDict(mod), NULL, name_at(c, c->oparg >> 1));
+        if (v != NULL) {
+            int own;
+            lu_v owner = pop(c, &own);
+            release(c, owner, own);
+            push(c, konst(c, v), 0);
+            Py_DECREF(v);       /* the unit holds its constants */
+            if (c->oparg & 1) {
+                push(c, LU_NOV, 0);
+            }
+            return 0;
+        }
+    }
     uint32_t version;
     uint16_t index;
     PyObject *descr;

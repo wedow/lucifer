@@ -120,6 +120,7 @@ tests/diff/corpus/metaclass_call.py	NOTRUN	0.000000
 tests/diff/corpus/metaclass_init_subclass.py	NOTRUN	0.000000
 tests/diff/corpus/metaclass_instancecheck.py	NOTRUN	0.000000
 tests/diff/corpus/metaclass_prepare_order.py	NOTRUN	0.000000
+tests/diff/corpus/module_attr_constants.py	NOTRUN	0.000000
 tests/diff/corpus/pattern_mapping_sequence.py	NOTRUN	0.000000
 tests/diff/corpus/raise_through_inlined.py	NOTRUN	0.000000
 tests/diff/corpus/repr_address_normalization.py	NOTRUN	0.000000
