@@ -414,18 +414,15 @@ prim_str_cmp(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* a + b for two strs. */
+static PyObject *join_items(PyObject *sep, PyObject *const *items, Py_ssize_t n);
+
 PyObject *
 lu_str_concat(PyObject *a, PyObject *b)
 {
     if (LEN(a) == 0 && PyUnicode_CheckExact(b)) return Py_NewRef(b);
     if (LEN(b) == 0 && PyUnicode_CheckExact(a)) return Py_NewRef(a);
-    PyObject *parts = PyTuple_Pack(2, a, b);
-    PyObject *r = NULL;
-    if (parts != NULL) {
-        r = lu_str_join_tuple((PyObject *)&_PyRuntime.singletons.empty_str, parts);
-        Py_DECREF(parts);
-    }
-    return r;
+    PyObject *parts[2] = { a, b };
+    return join_items((PyObject *)&_PyRuntime.singletons.empty_str, parts, 2);
 }
 
 static PyObject *
@@ -632,31 +629,33 @@ lu_prim_str_join(PyObject *module, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "str_join(sep, items) takes a str and a tuple or list");
         return NULL;
     }
-    PyObject *items = args[1];
+    PyObject *items = args[1], *r;
     if (PyTuple_CheckExact(items)) {
-        Py_INCREF(items);
+        return lu_str_join_tuple(args[0], items);
     }
-    else {
-        Py_BEGIN_CRITICAL_SECTION(args[1]);
-        items = lu_args_as_tuple(Py_None, args[1]);
-        Py_END_CRITICAL_SECTION();
-    }
-    PyObject *r = items != NULL ? lu_str_join_tuple(args[0], items) : NULL;
-    Py_XDECREF(items);
+    Py_BEGIN_CRITICAL_SECTION(items);     /* the list's items, joined without running Python */
+    r = join_items(args[0], ((PyListObject *)items)->ob_item, PyList_GET_SIZE(items));
+    Py_END_CRITICAL_SECTION();
     return r;
 }
 
 PyObject *
 lu_str_join_tuple(PyObject *sep, PyObject *items)
 {
-    Py_ssize_t n = PyTuple_GET_SIZE(items);
-    if (n == 1 && PyUnicode_CheckExact(PyTuple_GET_ITEM(items, 0))) {
-        return Py_NewRef(PyTuple_GET_ITEM(items, 0));
+    return join_items(sep, &PyTuple_GET_ITEM(items, 0), PyTuple_GET_SIZE(items));
+}
+
+/* sep.join of n items, which no other thread changes meanwhile. */
+static PyObject *
+join_items(PyObject *sep, PyObject *const *items, Py_ssize_t n)
+{
+    if (n == 1 && PyUnicode_CheckExact(items[0])) {
+        return Py_NewRef(items[0]);
     }
     Py_ssize_t length = n > 0 ? (n - 1) * PyUnicode_GET_LENGTH(sep) : 0;
     Py_UCS4 maxchar = n > 1 ? PyUnicode_MAX_CHAR_VALUE(sep) : 0;
     for (Py_ssize_t i = 0; i < n; i++) {
-        PyObject *s = PyTuple_GET_ITEM(items, i);
+        PyObject *s = items[i];
         if (!PyUnicode_Check(s)) {
             lu_err_format(PyExc_TypeError, "sequence item %zd: expected str instance, %s found",
                           i, Py_TYPE(s)->tp_name);
@@ -674,7 +673,7 @@ lu_str_join_tuple(PyObject *sep, PyObject *items)
     void *data = PyUnicode_DATA(result);
     Py_ssize_t at = 0;
     for (Py_ssize_t i = 0; i < n; i++) {
-        PyObject *parts[2] = { sep, PyTuple_GET_ITEM(items, i) };
+        PyObject *parts[2] = { sep, items[i] };
         for (int p = i == 0; p < 2; p++) {
             PyObject *s = parts[p];
             int from = PyUnicode_KIND(s);

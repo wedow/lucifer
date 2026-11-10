@@ -774,6 +774,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/str_join_concat_paths.py": {
+      "exit": 0,
+      "sha256": "33b47ed0407da8425798531d6a518440fff4ba4ad63992f2aabdb0a85f2e882c",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/threads_patch_mid_loop.py": {
       "exit": 0,
       "sha256": "691e08ac05b78f6363ea067186614170c60c6c739d56ba4e3514abc03ca2fddc",
