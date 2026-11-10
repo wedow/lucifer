@@ -1902,14 +1902,15 @@ PyMethodDef lu_long_methods[] = {
 };
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
+#define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_int_methods[] = {
-    FAST(int_add), FAST(int_sub), FAST(int_mul), FAST(int_floordiv), FAST(int_mod),
-    FAST(int_divmod), FAST(int_pow), FAST(int_truediv), FAST(int_neg), FAST(int_abs),
-    FAST(int_invert), FAST(int_shift), FAST(int_bitwise), FAST(int_cmp),
-    FAST(int_bit_length), FAST(int_bit_count), FAST(int_hash), FAST(int_to_bytes),
-    FAST(int_from_bytes), FAST(int_format), FAST(int_from_text), FAST(int_as_double),
-    FAST(int_from_double), FAST(int_subtype), FAST(int_max_str_digits),
-    FAST(set_int_max_str_digits), FAST(int_is_zero),
+    PURE(int_add), PURE(int_sub), PURE(int_mul), PURE(int_floordiv), PURE(int_mod),
+    PURE(int_divmod), PURE(int_pow), PURE(int_truediv), PURE(int_neg), PURE(int_abs),
+    PURE(int_invert), PURE(int_shift), PURE(int_bitwise), PURE(int_cmp),
+    PURE(int_bit_length), PURE(int_bit_count), PURE(int_hash), FAST(int_to_bytes),
+    FAST(int_from_bytes), FAST(int_format), FAST(int_from_text), PURE(int_as_double),
+    PURE(int_from_double), FAST(int_subtype), PURE(int_max_str_digits),
+    FAST(set_int_max_str_digits), PURE(int_is_zero),
     { NULL, NULL, 0, NULL },
 };
 

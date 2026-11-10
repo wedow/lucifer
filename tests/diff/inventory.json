@@ -516,6 +516,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/generator_consumed_in_line.py": {
+      "exit": 0,
+      "sha256": "8552c2cb98d725551d1691e58bd63c3a26c45d7e5e41b45810bba20304ecd351",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/generator_pep479.py": {
       "exit": 0,
       "sha256": "9f3f209c76de34edbc8fc775a5f021ebc80aa40c29b5084c5a2087849f5c6f82",

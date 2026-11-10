@@ -207,32 +207,37 @@ static void set_known(struct ctx *c, lu_v v, PyTypeObject *t);
 static int decode(struct ctx *c, int pc, int *base, int *oparg, int *opcode);
 static int jump_target(int op, int oparg, int next);
 
+/* Whether the instruction binds (or unbinds) local i. */
+static int
+binds(int base, int oparg, int i)
+{
+    return ((base == STORE_FAST || base == DELETE_FAST || base == LOAD_FAST_AND_CLEAR || base == MAKE_CELL)
+            && oparg == i)
+        || ((base == STORE_FAST_LOAD_FAST || base == STORE_FAST_STORE_FAST) && oparg >> 4 == i)
+        || (base == STORE_FAST_STORE_FAST && (oparg & 15) == i);
+}
+
+/* How many places bind local i: its parameter's binding, and each store. */
+static int
+bindings(struct ctx *c, int i)
+{
+    int n = i < c->code->co_argcount;
+    for (int pc = 0; pc < c->ncode;) {
+        int base, oparg, op;
+        int next = decode(c, pc, &base, &oparg, &op);
+        n += binds(base, oparg, i);
+        pc = next;
+    }
+    return n;
+}
+
 /* The parameters the code never rebinds: per local, 1. */
 static uint8_t *
 fixed_params(struct ctx *c)
 {
-    PyCodeObject *co = c->code;
     uint8_t *fixed = lu_ir_alloc(c->f, (size_t)c->nlocals + 1);
     for (int i = 0; i < c->nlocals; i++) {
-        fixed[i] = i < co->co_argcount;
-    }
-    for (int pc = 0; pc < c->ncode;) {
-        int base, oparg, op;
-        int next = decode(c, pc, &base, &oparg, &op);
-        if (base == STORE_FAST || base == DELETE_FAST || base == LOAD_FAST_AND_CLEAR) {
-            fixed[oparg] = 0;
-        }
-        else if (base == STORE_FAST_LOAD_FAST) {
-            fixed[oparg >> 4] = 0;
-        }
-        else if (base == STORE_FAST_STORE_FAST) {
-            fixed[oparg >> 4] = 0;
-            fixed[oparg & 15] = 0;
-        }
-        else if (base == MAKE_CELL) {
-            fixed[oparg] = 0;
-        }
-        pc = next;
+        fixed[i] = i < c->code->co_argcount && bindings(c, i) == 1;
     }
     return fixed;
 }
@@ -2444,6 +2449,40 @@ note_gen_made(struct ctx *c, lu_v v, PyCodeObject *code, PyFunctionObject *fn)
     set_known(c, v, &PyGen_Type);
 }
 
+/* The one value phi v joins, its self-references aside, or LU_NOV. */
+static lu_v
+phi_one(struct ctx *c, lu_v v, int depth)
+{
+    if (I(c, v)->op != OP_PHI) {
+        return v;
+    }
+    lu_v w = LU_NOV;
+    for (int i = 0; i < I(c, v)->nargs && depth < 8; i++) {
+        lu_v a = I(c, v)->args[i];
+        lu_v r = a == v ? w : phi_one(c, a, depth + 1);
+        if (r == LU_NOV || (w != LU_NOV && r != w)) {
+            return LU_NOV;
+        }
+        w = r;
+    }
+    return w;
+}
+
+/* v, or for a phi a local the code binds once holds, the value it was
+   bound to: what the local holds on every path, also through a loop's phi
+   built before its back edges. */
+static lu_v
+held_once(struct ctx *c, lu_v v)
+{
+    for (int i = 0; I(c, v)->op == OP_PHI && i < c->nlocals; i++) {
+        if (c->st.v[i] == v) {
+            lu_v w = bindings(c, i) == 1 ? phi_one(c, v, 0) : LU_NOV;
+            return w != LU_NOV ? w : v;
+        }
+    }
+    return v;
+}
+
 /* Whether a local of c holds v. */
 static int
 local_holds(struct ctx *c, lu_v v)
@@ -2456,11 +2495,13 @@ local_holds(struct ctx *c, lu_v v)
     return 0;
 }
 
-/* The first instruction from `first` on that may run Python or let a
-   walker see frames, or LU_NOV: a generator resumed in line is not a real
-   frame until an exit makes it one, so its body makes no such call. A
-   release that may run a finalizer is allowed, as it is in any inlined
-   frame (no frame is pushed for it). */
+/* The first instruction from `first` on that may run Python, or LU_NOV: a
+   generator resumed in line is not a real frame until an exit makes it
+   one, so its body makes no such call. What only lets a walker see the
+   frames (a release that may run a finalizer, a park: IF_SEEN) is allowed,
+   as in any inlined frame, whose frame is not pushed for it either: the
+   generator is executing, so a collection does not read its frame, whose
+   values are those of its last yield until it yields again. */
 static lu_v
 calls_out(struct lu_func *f, lu_v first)
 {
@@ -2470,7 +2511,7 @@ calls_out(struct lu_func *f, lu_v first)
         if ((in->flags & INS_DEAD) || (in->op == OP_HELPER && in->imm == H_gen_finish)) {
             continue;
         }
-        if ((flags & (IF_PY | IF_SEEN)) || (in->op == OP_TRUTH && in->imm != 1)) {
+        if ((flags & IF_PY) || (in->op == OP_TRUTH && in->imm != 1)) {
             return v;
         }
     }
@@ -4048,6 +4089,10 @@ opaque_call(struct ctx *c)
         pc = next;
     }
     if (c->depth > (c->kernel ? 2 : 1) || c->ncalls++ > 0 || loop) {
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: a call it cannot inline at %s@%d: depth %d, calls %d, loop after %d\n",
+                    PyUnicode_AsUTF8(c->code->co_qualname), c->pc, c->depth, c->ncalls, loop);
+        }
         c->failed = 1;
         c->why = "a call it cannot inline";
         return 0;
@@ -4409,9 +4454,9 @@ call(struct ctx *c)
     PyFunctionObject *instead = NULL;   /* the function the call became, if not the callable's */
     if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
         && PyUnicode_CompareWithASCIIString(fn->func_qualname, "next_item") == 0
-        && (gco = gen_made(c, args[0], &gfn)) != NULL && local_holds(c, args[0])) {
+        && (gco = gen_made(c, held_once(c, args[0]), &gfn)) != NULL && local_holds(c, args[0])) {
         /* The iteration step of a generator whose code is known: resumed in line. */
-        lu_v next = inline_resume(c, args[0], gco, gfn, LU_RETURN_NEXT);
+        lu_v next = inline_resume(c, held_once(c, args[0]), gco, gfn, LU_RETURN_NEXT);
         if (next != LU_NOV) {
             pop_call(c, n);
             push(c, next, 1);
@@ -4549,11 +4594,11 @@ call(struct ctx *c)
     }
     /* A call of a generator function whose code is known (a function the
        code was compiled for, or one this code made) makes a generator of
-       that code. */
+       that code, also with a first argument in the self word (a genexpr's
+       iterator). */
     struct lu_ins *made = I(c, callable);
     gfn = NULL;
-    gco = self != LU_NOV ? NULL
-        : fn != NULL && bound == NULL && PyCode_Check(fn->func_code) && fn->func_version >= 2
+    gco = fn != NULL && bound == NULL && PyCode_Check(fn->func_code) && fn->func_version >= 2
           ? (gfn = fn, (PyCodeObject *)fn->func_code)
         : made->op == OP_HELPER && made->imm == H_make_function && I(c, made->args[0])->op == OP_CONST
           ? (PyCodeObject *)(intptr_t)I(c, made->args[0])->imm : NULL;
