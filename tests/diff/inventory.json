@@ -408,6 +408,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/dict_mode_instances.py": {
+      "exit": 0,
+      "sha256": "e83488e9b9d18eb7c47caf2d32af9947ede56324ac6d9f4d4d3c40874f0ab49b",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/dict_reinsert_order.py": {
       "exit": 0,
       "sha256": "f7ee6e113a11f7d37f6824bec3976998221d131972b1bd72db389dd7be180c99",

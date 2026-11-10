@@ -67,6 +67,7 @@ tests/diff/corpus/dict_hash_exception.py	NOTRUN	0.000000
 tests/diff/corpus/dict_iterator_resize.py	NOTRUN	0.000000
 tests/diff/corpus/dict_iterator_value_change.py	NOTRUN	0.000000
 tests/diff/corpus/dict_missing_subclass.py	NOTRUN	0.000000
+tests/diff/corpus/dict_mode_instances.py	NOTRUN	0.000000
 tests/diff/corpus/dict_reinsert_order.py	NOTRUN	0.000000
 tests/diff/corpus/dict_views_dynamic.py	NOTRUN	0.000000
 tests/diff/corpus/exception_explicit_chain.py	NOTRUN	0.000000
