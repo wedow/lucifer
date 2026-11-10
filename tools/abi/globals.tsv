@@ -57,6 +57,7 @@ lu_long_methods	runtime/prim/int.c	int's tp_methods, the C-readable methods of C
 lu_float_methods	runtime/prim/float.c	float's tp_methods, the C-readable methods of CPython's table; never written, the API takes it non-const
 objects.*	runtime/pylifecycle.c	const table of the static builtins names; relocated by ld.so, then read-only (RELRO)
 slots	runtime/types/slots.c	const table of the type slots and their thunks; relocated by ld.so, then read-only (RELRO)
+nb_thunks	runtime/types/slots.c	const table of the number slots' thunks by field; relocated by ld.so, then read-only (RELRO)
 base_getset	runtime/interp/exceptions.c	PyGetSetDef table of BaseException, never written; tp_getset takes it non-const
 base_members	runtime/interp/exceptions.c	PyMemberDef table of BaseException, never written; tp_members takes it non-const
 *_error_members	runtime/interp/exceptions.c	PyMemberDef tables of the exception layouts, never written; tp_members takes them non-const
