@@ -61,12 +61,21 @@ lu_jit_on(void)
     return _PyRuntime.jit.mode != LU_JIT_OFF;
 }
 
+/* Whether the code has JIT state (it is warm): co_executors holds its
+   call count, tagged with bit 0, until then. */
+static inline int
+lu_jit_warm(PyCodeObject *code)
+{
+    uintptr_t v = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
+    return v != 0 && !(v & 1);
+}
+
 /* Counts the back-edge at `site` (a JUMP_BACKWARD; its cache word is the
    counter): whether to try lu_jit_enter at the jump's target. */
 static inline int
 lu_jit_backedge_hot(PyCodeObject *code, lu_codeunit *site)
 {
-    if (code->co_executors != NULL && !((uintptr_t)code->co_executors & 1)) {
+    if (lu_jit_warm(code)) {
         return 1;               /* compiled, or tried: lu_jit_enter knows */
     }
     lu_codeunit *counter = site + 1;
@@ -127,17 +136,19 @@ lu_jit_kind(PyObject *o)
         : t == &PyUnicode_Type ? LU_KIND_STR : t == &PyBytes_Type ? LU_KIND_BYTES : LU_KIND_OTHER;
 }
 
-static inline void
+/* Returns the operands' kinds as the word holds them (0 with the tier off). */
+static inline unsigned
 lu_jit_observe(lu_codeunit *word, PyObject *left, PyObject *right)
 {
     if (_PyRuntime.jit.mode == LU_JIT_OFF) {
-        return;
+        return 0;
     }
+    unsigned kinds = lu_jit_kind(left) | lu_jit_kind(right) << 8;
     uint16_t seen = __atomic_load_n(&word->cache, __ATOMIC_RELAXED);
-    uint16_t now = seen | lu_jit_kind(left) | lu_jit_kind(right) << 8;
-    if (now != seen) {
-        __atomic_store_n(&word->cache, now, __ATOMIC_RELAXED);
+    if ((seen | kinds) != seen) {
+        __atomic_store_n(&word->cache, (uint16_t)(seen | kinds), __ATOMIC_RELAXED);
     }
+    return kinds;
 }
 
 /* FOR_ITER's cache word: the iterators it has met. */
@@ -327,14 +338,17 @@ struct lu_opclasses {
 /* The site's table, or NULL. The site is the operator's code unit. */
 struct lu_opclasses *lu_jit_opclasses(PyCodeObject *code, int pc);
 void lu_jit_opclass_note(PyCodeObject *code, int pc, PyTypeObject *left, PyTypeObject *right);
+/* The site's table, made empty if it had none: a build asked for its
+   classes, which the interpreter notes from then on. */
+struct lu_opclasses *lu_jit_want_classes(PyCodeObject *code, int pc);
 
 /* The interpreter's generic path of an operator at `instr` met left and
-   right: the site learns their classes when either is of no kind. */
+   right, of `kinds` (lu_jit_observe's): a warm code's site with a table
+   learns their classes when either is of no kind. */
 static inline void
-lu_jit_observe_classes(PyCodeObject *code, lu_codeunit *instr, PyObject *left, PyObject *right)
+lu_jit_observe_classes(PyCodeObject *code, lu_codeunit *instr, unsigned kinds, PyObject *left, PyObject *right)
 {
-    if (_PyRuntime.jit.mode != LU_JIT_OFF
-        && (lu_jit_kind(left) == LU_KIND_OTHER || lu_jit_kind(right) == LU_KIND_OTHER)) {
+    if (((kinds & 0xff) == LU_KIND_OTHER || kinds >> 8 == LU_KIND_OTHER) && lu_jit_warm(code)) {
         lu_jit_opclass_note(code, (int)(instr - lu_code_start(code)), Py_TYPE(left), Py_TYPE(right));
     }
 }
@@ -344,7 +358,7 @@ lu_jit_observe_classes(PyCodeObject *code, lu_codeunit *instr, PyObject *left, P
 static inline void
 lu_jit_observe_unary(PyCodeObject *code, lu_codeunit *instr, PyObject *v)
 {
-    if (_PyRuntime.jit.mode == LU_JIT_OFF) {
+    if (_PyRuntime.jit.mode == LU_JIT_OFF || !lu_jit_warm(code)) {
         return;
     }
     int pc = (int)(instr - lu_code_start(code));

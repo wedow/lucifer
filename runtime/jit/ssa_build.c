@@ -1674,11 +1674,17 @@ operand_pairs(struct ctx *c, int lk, int rk, PyTypeObject *pairs[][2])
     }
     int site = (int)(c->cache - 1 - lu_code_start(c->code));
     struct lu_opclasses *t = lu_jit_opclasses(c->code, site);
-    if (t == NULL || __atomic_load_n(&t->mega, __ATOMIC_ACQUIRE)) {
+    if (t == NULL || __atomic_load_n(&t->n, __ATOMIC_ACQUIRE) == 0) {
+        /* Not noted yet: from now on, and the first pair recompiles. */
+        t = lu_jit_want_classes(c->code, site);
+        struct lu_fdep dep = { .kind = LU_DEP_CALLEES, .obj = (uintptr_t)t, .code = c->code, .pc = c->pc };
+        lu_ir_dep(c->f, &dep);
+        c->f->unfed = 1;
         return 0;
     }
-    struct lu_fdep dep = { .kind = LU_DEP_CALLEES, .obj = (uintptr_t)t, .code = c->code, .pc = c->pc };
-    lu_ir_dep(c->f, &dep);
+    if (__atomic_load_n(&t->mega, __ATOMIC_ACQUIRE)) {
+        return 0;
+    }
     for (int i = 0, k = __atomic_load_n(&t->n, __ATOMIC_ACQUIRE); i < k; i++) {
         PyTypeObject *l = t->e[i].left, *r = t->e[i].right;
         int seen = 0;
@@ -4259,10 +4265,11 @@ call(struct ctx *c)
         || (PyFunction_Check(kc) && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL))) ? fn : NULL;
     if (n >= 1 && (kfn != NULL || (kc != NULL && PyType_Check(kc) && kc != (PyObject *)&PyType_Type
                                    && !(((PyTypeObject *)kc)->tp_flags & Py_TPFLAGS_HEAPTYPE)))
-        && c->base == CALL) {
+        && c->base == CALL && !c->kernel) {
         /* A builtin customized by the classes of its first arguments,
            which its kernel code dispatches on: one arm per pair met.
-           type(x) is a load already. */
+           type(x) is a load already. Not in kernel code, whose one table
+           holds every caller's classes: its arms would leave on most. */
         int kinds = feedback(c, c->cache);
         int armed = type_arms(c, n >= 2 ? 2 : 1, n, n >= 2 ? n - 1 : n, kinds & 0xff, kinds >> 8, call);
         if (armed != 0) {

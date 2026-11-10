@@ -98,9 +98,14 @@ set on `type_lookup`, `is_subtype`, `type_tp_name`, `str_join` and
   `COMPARE_OP`, `CONTAINS_OP`, `UNARY_*`, `STORE_SUBSCR` and the
   `BINARY_OP` subscript. It writes only when an operand's kind bit is
   `OTHER`: int/float/str/list/tuple/bytes sites keep the 8 kind bits they
-  have. The cost is a pointer load and at most 4 compares on a path that
-  already costs a kernel call. An addition takes `pic_lock` and
-  invalidates `LU_DEP_OPCLASSES`, as callee notes do.
+  have. A site has a table only once a build asked for its classes
+  (`lu_jit_want_classes`), so code no build reads pays nothing. The cost is
+  a pointer load and at most 4 compares on a path that already costs a
+  kernel call. An addition takes `pic_lock`. The first pair recompiles the
+  units built without any (they depend on the empty table); later pairs
+  recompile nothing: a unit that meets one leaves at its arm's guard and
+  is retired if it keeps leaving. A compile that asks for a site's classes
+  is put off once, as one whose sites never ran is.
 - **Lifetime.** Heap types are in a reference cycle (`__mro__`), so only a
   collection frees them. The table therefore names types without owning
   them, and `lu_jit_pic_forget` drops the entries a collection frees. This

@@ -39,7 +39,10 @@
    -X lucifer_jit=always, or a path that turned hot later) has no feedback
    to speculate on, and generic paths never fail a guard to ask for a
    recompile. A compile that finds most of its sites never ran is put off:
-   the interpreter runs that entry a few times first, once per entry. */
+   the interpreter runs that entry a few times first, once per entry. So
+   is one that met an operator site without classes, which the
+   interpreter notes only at sites a build asked about: code no build
+   reads pays nothing for them. */
 #include "jit/jit.h"
 #include "jit/target.h"
 #include "interp/specialize.h"
@@ -633,7 +636,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     }
     int ok = lu_ssa_build(&f, frame) == 0;
     double t1 = now();
-    if (ok && f.cold > 0 && 2 * f.cold >= f.sites && !(jc->seen[pc] & WARMED)) {
+    if (ok && ((f.cold > 0 && 2 * f.cold >= f.sites) || f.unfed) && !(jc->seen[pc] & WARMED)) {
         stats.phase_seconds[4] += t1 - t0;
         /* Most of it never ran: the interpreter runs the entry a few times
            to gather feedback, and the compile after that stands. */
@@ -1647,7 +1650,11 @@ lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, P
     }
 }
 
-/* Operator class tables (jit.h), kept as callee tables are. */
+/* Operator class tables (jit.h), kept as callee tables are. A site has
+   one only once a build asked for it; the first pair it learns recompiles
+   the units built without any, later ones nothing: a unit that meets one
+   leaves at its arm's guard, and one that keeps leaving is retired and
+   compiled again with the pair. */
 
 struct lu_opclasses *
 lu_jit_opclasses(PyCodeObject *code, int pc)
@@ -1657,31 +1664,38 @@ lu_jit_opclasses(PyCodeObject *code, int pc)
     return t != NULL && pc >= 0 && pc < jc->ncode ? __atomic_load_n(&t[pc], __ATOMIC_ACQUIRE) : NULL;
 }
 
+struct lu_opclasses *
+lu_jit_want_classes(PyCodeObject *code, int pc)
+{
+    struct lu_jit_code *jc = state_cold(code);
+    PyMutex_Lock(&_PyRuntime.pic_lock);
+    if (jc->opclasses == NULL) {
+        __atomic_store_n(&jc->opclasses, calloc((size_t)jc->ncode, sizeof(struct lu_opclasses *)), __ATOMIC_RELEASE);
+    }
+    struct lu_opclasses *t = jc->opclasses[pc];
+    if (t == NULL) {
+        t = calloc(1, sizeof(struct lu_opclasses));
+        __atomic_store_n(&jc->opclasses[pc], t, __ATOMIC_RELEASE);
+    }
+    PyMutex_Unlock(&_PyRuntime.pic_lock);
+    return t;
+}
+
 void
 lu_jit_opclass_note(PyCodeObject *code, int pc, PyTypeObject *left, PyTypeObject *right)
 {
     struct lu_opclasses *t = lu_jit_opclasses(code, pc);
-    int n = t != NULL ? __atomic_load_n(&t->n, __ATOMIC_ACQUIRE) : 0;
-    if (t != NULL && __atomic_load_n(&t->mega, __ATOMIC_RELAXED)) {
+    if (t == NULL || __atomic_load_n(&t->mega, __ATOMIC_RELAXED)) {
         return;
     }
+    int n = __atomic_load_n(&t->n, __ATOMIC_ACQUIRE);
     for (int i = 0; i < n; i++) {
         if (t->e[i].left == left && t->e[i].right == right) {
             return;
         }
     }
-    struct lu_jit_code *jc = state_cold(code);
-    int added = 0;
     PyMutex_Lock(&_PyRuntime.pic_lock);
-    if (jc->opclasses == NULL) {
-        __atomic_store_n(&jc->opclasses, calloc((size_t)jc->ncode, sizeof(struct lu_opclasses *)), __ATOMIC_RELEASE);
-    }
-    t = jc->opclasses[pc];
-    if (t == NULL) {
-        t = calloc(1, sizeof(struct lu_opclasses));
-        __atomic_store_n(&jc->opclasses[pc], t, __ATOMIC_RELEASE);
-    }
-    int known = 0;
+    int first = t->n == 0, known = 0;
     for (int i = 0; i < t->n; i++) {
         known |= t->e[i].left == left && t->e[i].right == right;
     }
@@ -1694,10 +1708,12 @@ lu_jit_opclass_note(PyCodeObject *code, int pc, PyTypeObject *left, PyTypeObject
         else {
             __atomic_store_n(&t->mega, 1, __ATOMIC_RELEASE);
         }
-        added = 1;
+    }
+    else {
+        first = 0;
     }
     PyMutex_Unlock(&_PyRuntime.pic_lock);
-    if (added) {
+    if (first) {
         lu_jit_invalidate(LU_DEP_CALLEES, (uintptr_t)t, 0);
     }
 }
