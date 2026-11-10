@@ -3610,6 +3610,23 @@ intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
         *owned = 0;
         return konst(c, sub ? Py_True : Py_False);
     }
+    if ((nargs == 2 || nargs == 3) && (strcmp(name, nargs == 2 ? "field_get" : "field_set") == 0)
+        && known_type(c, args[0]) != NULL && I(c, args[1])->op == OP_CONST && known(c, args[1]) != NULL
+        && PyLong_CheckExact(known(c, args[1]))) {
+        /* A field of a known layout: its offset found now, not per call. */
+        long i;
+        Py_ssize_t off = lu_long_as_long(known(c, args[1]), &i) < 0 ? -1 : lu_field_offset(known_type(c, args[0]), i);
+        PyErr_Clear();
+        if (off >= 0) {
+            lu_v hargs[3] = { args[0], const_i(c, off), nargs == 3 ? args[2] : LU_NOV };
+            if (nargs == 2) {
+                return helper(c, H_field_get, 2, hargs);
+            }
+            helper(c, H_field_set, 3, hargs);
+            *owned = 0;
+            return konst(c, Py_None);
+        }
+    }
     if (nargs == 2 && strcmp(name, "kind") == 0 && known_type(c, args[0]) != NULL && known(c, args[1]) != NULL
         && PyUnicode_CheckExact(known(c, args[1]))) {
         /* A known type's kind: by its flags, or by its bases where they

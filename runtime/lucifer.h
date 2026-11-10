@@ -1461,6 +1461,12 @@ PyFunctionObject *lu_kernel_twin(PyFunctionObject *f, int nargs);
    0, or -1 for a name it does not know or one ("kernel") that is not the
    type's. */
 int lu_kind_of_type(PyTypeObject *t, const char *kind);
+/* The kernel's field_get and field_set (object/descr.c): field i's offset
+   in an instance of tp, or -1; and the field read (a new reference, None
+   for none) and written at that offset, under the object's lock. */
+Py_ssize_t lu_field_offset(PyTypeObject *tp, long i);
+PyObject *lu_field_get(PyObject *obj, Py_ssize_t off);
+void lu_field_set(PyObject *obj, Py_ssize_t off, PyObject *value);
 /* The step next_item takes for an iterator of exact type t (next_missing_set),
    borrowed, or None. */
 PyObject *lu_next_missing_of(PyObject *t);
