@@ -3050,6 +3050,8 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
             lu_v r = LU_NOV;
             int rown = 0;
             if (end < 0 && PyFunction_Check(fget)) {
+                struct mark m;
+                mark_take(c, &m);       /* a getter that does not inline leaves nothing behind */
                 konst(c, fget);
                 lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, e.descr), LU_NOV, LU_NOV,
                                  lu_field_offset(&PyProperty_Type, 0));
@@ -3060,8 +3062,10 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                 uint8_t owns[1] = { (uint8_t)own };
                 if (!inline_call(c, (PyFunctionObject *)fget, LU_NOV, 0, args, owns, 1, 0, &r, &rown)) {
                     c->st = saved;
+                    mark_undo(c, &m);
                     r = LU_NOV;
                 }
+                mark_free(&m);
             }
             if (r == LU_NOV) {
                 if (c->failed) {
@@ -3243,6 +3247,8 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         if (method || fget == NULL || !PyFunction_Check(fget)) {
             break;
         }
+        struct mark m;
+        mark_take(c, &m);       /* a getter that does not inline leaves nothing behind */
         guard_version(c, owner, version);
         konst(c, fget);         /* the unit keeps the getter it inlines */
         lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, descr), LU_NOV, LU_NOV, lu_field_offset(&PyProperty_Type, 0));
@@ -3253,8 +3259,16 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         lu_v args[1] = { owner }, r;
         uint8_t owns[1] = { (uint8_t)own };
         int rown;
-        if (!inline_call(c, (PyFunctionObject *)fget, LU_NOV, 0, args, owns, 1, 0, &r, &rown)) {
+        int ok = inline_call(c, (PyFunctionObject *)fget, LU_NOV, 0, args, owns, 1, 0, &r, &rown);
+        if (!ok) {
             c->st = saved;
+            mark_undo(c, &m);
+        }
+        mark_free(&m);
+        if (!ok) {
+            if (c->failed) {
+                return -1;
+            }
             break;
         }
         if (c->cur >= 0) {
