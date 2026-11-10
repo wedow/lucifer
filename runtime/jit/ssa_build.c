@@ -3048,7 +3048,7 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                does not inline takes the generic path. */
             PyObject *fget = lu_property_fget(e.descr);
             lu_v r = LU_NOV;
-            int rown = 0;
+            int rown = 0, inlined = 0;
             if (end < 0 && PyFunction_Check(fget)) {
                 struct mark m;
                 mark_take(c, &m);       /* a getter that does not inline leaves nothing behind */
@@ -3060,14 +3060,14 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                 state_copy(c, &saved, &c->st);
                 lu_v args[1] = { owner };
                 uint8_t owns[1] = { (uint8_t)own };
-                if (!inline_call(c, (PyFunctionObject *)fget, LU_NOV, 0, args, owns, 1, 0, &r, &rown)) {
+                inlined = inline_call(c, (PyFunctionObject *)fget, LU_NOV, 0, args, owns, 1, 0, &r, &rown);
+                if (!inlined) {
                     c->st = saved;
                     mark_undo(c, &m);
-                    r = LU_NOV;
                 }
                 mark_free(&m);
             }
-            if (r == LU_NOV) {
+            if (!inlined) {
                 if (c->failed) {
                     return -1;
                 }
