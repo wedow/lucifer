@@ -5,19 +5,23 @@
    added from any thread, the main-thread-only ones running only on the main
    thread, each call exactly once and a failing call leaving the rest for the
    next poll; and an object queued to its owner's refcount-merge queue being
-   freed at the owner's next poll. The interpreter is started here so that
-   exceptions can be raised. */
+   freed at the owner's next poll; and a signal that arrives before a lock
+   wait begins, as one does while a builtin runs, ending that wait. The
+   interpreter is started here so that exceptions can be raised. */
 
 #include "Python.h"
 
 #include <pthread.h>
 #include <sched.h>
+#include <signal.h>
 #include <stdio.h>
 #include <unistd.h>
 
 extern int _Py_HandlePending(PyThreadState *tstate);
 extern int _PyEval_AddPendingCall(PyInterpreterState *interp, int (*func)(void *),
                                   void *arg, int flags);
+extern PyLockStatus _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout_ns, int flags);
+enum { LOCK_DETACH = 1, LOCK_HANDLE_SIGNALS = 2 };
 
 static int failures;
 
@@ -336,6 +340,24 @@ check_merge_at_poll(void)
     pthread_barrier_destroy(&barrier);
 }
 
+/* A signal handled by the time a lock wait begins would be lost to it: its
+   wake came before the wait, and nothing wakes the wait again. The handler
+   must run at once and its exception end the wait. */
+static void
+check_signal_before_lock_wait(void)
+{
+    CHECK(PyRun_SimpleString("import signal\n"
+                             "def handler(signum, frame): raise ZeroDivisionError\n"
+                             "signal.signal(signal.SIGUSR1, handler)\n") == 0);
+    PyMutex m = {0};
+    PyMutex_Lock(&m);
+    raise(SIGUSR1);
+    CHECK(_PyMutex_LockTimed(&m, 2000000000, LOCK_DETACH | LOCK_HANDLE_SIGNALS) == PY_LOCK_INTR);
+    CHECK(PyErr_ExceptionMatches(PyExc_ZeroDivisionError));
+    PyErr_Clear();
+    PyMutex_Unlock(&m);
+}
+
 __attribute__((constructor)) static void
 check(void)
 {
@@ -352,6 +374,7 @@ check(void)
     check_async_exc_waits_for_builtin();
     check_pending_calls();
     check_merge_at_poll();
+    check_signal_before_lock_wait();
 
     if (failures == 0) {
         puts("capi poll ok");
