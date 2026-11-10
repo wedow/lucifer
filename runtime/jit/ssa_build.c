@@ -902,6 +902,16 @@ catcher(struct ctx *c, struct lu_fs *fs, struct ctx **k, int *handler, int *leve
     return 0;
 }
 
+/* The frame the unit is compiled for. */
+static struct ctx *
+root_of(struct ctx *c)
+{
+    while (c->parent != NULL) {
+        c = c->parent;
+    }
+    return c;
+}
+
 /* The landing of an exception raised by the instruction whose state is
    fs, which frame k's handler takes: the exception, with the root's
    traceback entry when the root is the frame it is caught in (kernel
@@ -914,10 +924,7 @@ static void
 catch_here(struct ctx *c, struct lu_fs *fs, int drop, struct ctx *k, int handler, int level,
            int lasti, int at)
 {
-    struct ctx *root = c;
-    while (root->parent != NULL) {
-        root = root->parent;
-    }
+    struct ctx *root = root_of(c);
     lu_v args[2] = { konst(c, (PyObject *)root->code), const_i(c, k == root && !hidden(root->code) ? at : -1) };
     lu_v exc = helper(c, H_catch, 2, args);
     I(c, exc)->fs = fs;
@@ -3998,6 +4005,19 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *new, PyFunctionObj
     return 1;
 }
 
+/* Whether c is a frame of a FOR_ITER's step in line (iter_step), or
+   inlined in one. */
+static int
+in_step(struct ctx *c)
+{
+    for (struct ctx *p = c; p->parent != NULL; p = p->parent) {
+        if (p->ret == LU_RETURN_FOR_ITER) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Whether the call at c->pc, which this frame cannot inline, compiles
    here. In an inlined frame it pushes the inlined frames as real ones, in
    line (luc-hez4), for the call: so a callee one deep (kernel code two,
@@ -4013,13 +4033,8 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *new, PyFunctionObj
 static int
 opaque_call(struct ctx *c)
 {
-    if (c->parent == NULL) {
+    if (c->parent == NULL || in_step(c)) {
         return 1;
-    }
-    for (struct ctx *p = c; p->parent != NULL; p = p->parent) {
-        if (p->ret == LU_RETURN_FOR_ITER) {
-            return 1;
-        }
     }
     if (__atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED) == 0) {
         unsupported(c);
@@ -4265,11 +4280,12 @@ call(struct ctx *c)
         || (PyFunction_Check(kc) && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL))) ? fn : NULL;
     if (n >= 1 && (kfn != NULL || (kc != NULL && PyType_Check(kc) && kc != (PyObject *)&PyType_Type
                                    && !(((PyTypeObject *)kc)->tp_flags & Py_TPFLAGS_HEAPTYPE)))
-        && c->base == CALL && !c->kernel) {
+        && c->base == CALL && (!root_of(c)->kernel || in_step(c))) {
         /* A builtin customized by the classes of its first arguments,
            which its kernel code dispatches on: one arm per pair met.
-           type(x) is a load already. Not in kernel code, whose one table
-           holds every caller's classes: its arms would leave on most. */
+           type(x) is a load already. Not in a unit of kernel code, which
+           serves every caller (getattr_hook's): its arms would leave on
+           most; but in a FOR_ITER's step, the loop's body. */
         int kinds = feedback(c, c->cache);
         int armed = type_arms(c, n >= 2 ? 2 : 1, n, n >= 2 ? n - 1 : n, kinds & 0xff, kinds >> 8, call);
         if (armed != 0) {
