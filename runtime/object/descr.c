@@ -1291,15 +1291,21 @@ lu_staticmethod_get(PyObject *descr)
 }
 
 PyObject *
+lu_property_fget(PyObject *prop)
+{
+    return __atomic_load_n((PyObject **)((char *)prop + lu_field_offset(&PyProperty_Type, 0)), __ATOMIC_ACQUIRE);
+}
+
+static PyObject *descr_bound(PyObject *d, PyObject *obj);
+
+PyObject *
 lu_method_descr_bind(PyObject *descr, PyObject *obj)
 {
-    PyMethodDescrObject *d = (PyMethodDescrObject *)descr;
-    if (!Py_IS_TYPE(descr, &PyMethodDescr_Type) || lu_kernel_def_of(d->d_method) != NULL
-        || !PyObject_TypeCheck(obj, PyDescr_TYPE(d))) {
+    if (!(Py_IS_TYPE(descr, &PyMethodDescr_Type) || Py_IS_TYPE(descr, &PyWrapperDescr_Type))
+        || !PyObject_TypeCheck(obj, PyDescr_TYPE(descr))) {
         return NULL;
     }
-    return (d->d_method->ml_flags & METH_METHOD) ? PyCMethod_New(d->d_method, obj, NULL, PyDescr_TYPE(d))
-                                                 : PyCFunction_NewEx(d->d_method, obj, NULL);
+    return descr_bound(descr, obj);
 }
 
 int

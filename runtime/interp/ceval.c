@@ -1134,6 +1134,7 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
         [STORE_ATTR_WITH_HINT] = &&op_STORE_ATTR_FAST,
         [STORE_ATTR_INSTANCE_VALUE] = &&op_STORE_ATTR_FAST,
         [LOAD_ATTR_INSTANCE_VALUE] = &&op_LOAD_ATTR_SLOT,
+        [LOAD_ATTR_PROPERTY] = &&op_LOAD_ATTR_PROPERTY,
         [DELETE_ATTR] = &&op_DELETE_ATTR,
         [LOAD_SUPER_ATTR] = &&op_LOAD_SUPER_ATTR,
         [LOAD_BUILD_CLASS] = &&op_LOAD_BUILD_CLASS,
@@ -2988,6 +2989,27 @@ op_LOAD_ATTR_SLOT: {
         PUSH(NULL);
     }
     DISPATCH();
+}
+
+/* A property's getter, a function, called with the owner as a call does. */
+op_LOAD_ATTR_PROPERTY: {
+    PyObject *owner = TOP();
+    uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
+    PyObject *prop = lu_cache_load_ptr(next_instr + LA_DESCR);
+    PyObject *fget = prop != NULL ? lu_property_fget(prop) : NULL;
+    if (version == 0 || Py_TYPE(owner)->tp_version_tag != version || fget == NULL || !PyFunction_Check(fget)
+        || !lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        goto op_LOAD_ATTR;
+    }
+    SKIP_CACHES();
+    SAVE_FRAME();
+    sp--;
+    frame->stackpointer = sp;
+    PyObject *pargs[1] = { owner };
+    callee = lu_frame_call(ts, (PyFunctionObject *)fget, pargs, 1, NULL);
+    ERROR_IF(callee == NULL);
+    kret = LU_RETURN_PUSH;
+    goto push_callee;
 }
 
 /* A method of the type, or a plain value of it, unless the instance's dict

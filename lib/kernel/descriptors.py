@@ -9,7 +9,7 @@ from _lucifer import (
     type_qualname, is_subtype, ns_get, alloc, static_type, descr_type, bind,
     method_new, instancemethod_new, member_get, member_set, getset_kernel, getset_get, getset_set,
     field_get, field_set, ns_set, super_args, is_callable, kernel_set, kernel_get, address, function_new,
-    object_hash,
+    object_hash, enable_deferred,
 )
 from _lucifer import _boot
 
@@ -324,7 +324,9 @@ class property:
     """Property attribute."""
 
     def __new__(cls, /, *args, **kwargs):
-        return alloc(cls, property)
+        p = alloc(cls, property)
+        enable_deferred(p)      # as a class's methods: inline caches may name it (LOAD_ATTR_PROPERTY)
+        return p
 
     def __init__(self, fget=None, fset=None, fdel=None, doc=None):
         if doc is None and fget is not None:

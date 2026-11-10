@@ -3039,6 +3039,41 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
             I(c, a1)->fs = before(c);
             release(c, owner, own);
         }
+        else if (e.op == LOAD_ATTR_PROPERTY) {
+            /* A property's getter inlined, as load_attr_cached does; one that
+               does not inline takes the generic path. */
+            PyObject *fget = lu_property_fget(e.descr);
+            lu_v r = LU_NOV;
+            int rown = 0;
+            if (end < 0 && PyFunction_Check(fget)) {
+                konst(c, fget);
+                lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, e.descr), LU_NOV, LU_NOV,
+                                 lu_field_offset(&PyProperty_Type, 0));
+                guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+                struct bstate saved;
+                state_copy(c, &saved, &c->st);
+                lu_v args[1] = { owner };
+                uint8_t owns[1] = { (uint8_t)own };
+                if (!inline_call(c, (PyFunctionObject *)fget, LU_NOV, 0, args, owns, 1, 0, &r, &rown)) {
+                    c->st = saved;
+                    r = LU_NOV;
+                }
+            }
+            if (r == LU_NOV) {
+                if (c->failed) {
+                    return -1;
+                }
+                emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+                lu_ir_edge(f, c->cur, next);
+                c->cur = next;
+                continue;
+            }
+            if (c->cur < 0) {
+                c->cur = next;  /* every way through the getter raised */
+                continue;
+            }
+            a1 = rown ? r : (incref(c, r), r);
+        }
         else {
             if (e.op == LOAD_ATTR_METHOD_WITH_VALUES || e.op == LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES) {
                 lu_v args[2] = { owner, konst(c, name) };
@@ -3194,6 +3229,32 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
             if (method) {
                 push(c, LU_NOV, 0);
             }
+        }
+        return 0;
+    }
+    case LOAD_ATTR_PROPERTY: {
+        /* The getter the property holds, a function, called with the owner
+           as the instruction's own call: an exit inside resumes after it. */
+        PyObject *fget = lu_property_fget(descr);
+        if (method || fget == NULL || !PyFunction_Check(fget)) {
+            break;
+        }
+        guard_version(c, owner, version);
+        konst(c, fget);         /* the unit keeps the getter it inlines */
+        lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, descr), LU_NOV, LU_NOV, lu_field_offset(&PyProperty_Type, 0));
+        guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+        struct bstate saved;
+        state_copy(c, &saved, &c->st);
+        c->st.sp -= 1;          /* the getter takes the owner's reference */
+        lu_v args[1] = { owner }, r;
+        uint8_t owns[1] = { (uint8_t)own };
+        int rown;
+        if (!inline_call(c, (PyFunctionObject *)fget, LU_NOV, 0, args, owns, 1, 0, &r, &rown)) {
+            c->st = saved;
+            break;
+        }
+        if (c->cur >= 0) {
+            push(c, r, rown);
         }
         return 0;
     }
