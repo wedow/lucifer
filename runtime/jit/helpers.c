@@ -1338,12 +1338,17 @@ h_load_special(PyObject *owner, int64_t which)
     return lu_call_kernel(LU_K_load_special, args, 2);
 }
 
-/* UNPACK_SEQUENCE of what is not an exact tuple or list: a tuple of its n
-   items, or NULL with the interpreter's error. A tuple subclass that
-   iterates as a tuple (a named tuple) is that tuple. */
+/* UNPACK_SEQUENCE at a generic site: a tuple of its n items, or NULL with
+   the interpreter's error. An exact tuple or list is unpacked as the
+   interpreter does, without the kernel; so is a tuple subclass that
+   iterates as a tuple (a named tuple). */
 static PyObject *
 h_unpack(PyObject *seq, int64_t n)
 {
+    PyObject *t = h_unpack_exact(seq, n);
+    if (t != LU_JIT_DECLINED) {
+        return t;
+    }
     if (PyTuple_Check(seq) && Py_SIZE(seq) == n
         && _PyType_Lookup(Py_TYPE(seq), LU_ID(__iter__)) == _PyType_Lookup(&PyTuple_Type, LU_ID(__iter__))) {
         return Py_NewRef(seq);
