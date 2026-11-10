@@ -708,6 +708,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/raise_through_inlined.py": {
+      "exit": 0,
+      "sha256": "8f1182dd93f228461bdd5b8f46b88a719bf49c29727501104a3b31e8f46d1631",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/repr_address_normalization.py": {
       "exit": 0,
       "sha256": "14c861c9fd724635bf7613d9bb1c31e394a956c2868282ca491e961a485cb161",

@@ -171,6 +171,10 @@ require that a count of the tier's does not grow with the iterations:
          items each, after their sites met more classes than their arms
          take: compiled calls, 24 an iteration for the loops' set-up, none
          per item. Each loop takes the classes it meets most in line.
+  useriter tests/kernel/jit_user_iter_end.py, whose hot loops run over
+         iterators of a user class that end by raising StopIteration:
+         side and error exits. The raise leaves the inlined __next__ for
+         the loop's end with its traceback entry made in place.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -248,6 +252,7 @@ GROWTH = {
     'kept': ('jit_marked_guards.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
              r'|jit: entries waited (\d+)', 0),
     'hoisted': ('jit_unpack_phases.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
+    'useriter': ('jit_user_iter_end.py', r'exits guard \d+ stress \d+ poll \d+ side (\d+) error (\d+)', 0),
     'megaiter': ('jit_mega_iter.py', r'compiled calls (\d+)', 24),
     'order': ('jit_call_order.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),

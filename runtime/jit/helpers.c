@@ -1420,6 +1420,31 @@ h_raise(PyObject *exc, PyObject *cause)
     return NULL;
 }
 
+/* raise exc [from cause] in the innermost of `frames` inlined frames
+   (pushed for the call) that the exception leaves to a handler of the
+   unit: each but a kernel frame makes its traceback entry, as the
+   interpreter unwinds them, the innermost at the raise (lasti), and its
+   frame object takes its locals, so that the frames go as they came.
+   Where a tool watches, the exit's unwinding makes the entries. */
+static PyObject *
+h_raise_tb(PyObject *exc, PyObject *cause, int64_t frames, int64_t lasti)
+{
+    h_raise(exc, cause);
+    PyThreadState *ts = PyThreadState_Get();
+    if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RAISE)
+        || !lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_PY_UNWIND)) {
+        return NULL;
+    }
+    struct lu_frame *f = (struct lu_frame *)ts->current_frame;
+    for (int64_t i = 0; i < frames && f != NULL; i++, f = f->previous) {
+        if (f->owner != LU_FRAME_KERNEL_HIDDEN) {
+            lu_traceback_here(f, i == 0 ? lasti : f->instr - lu_code_start(f->code));
+            lu_frame_retire_lent(f);
+        }
+    }
+    return NULL;
+}
+
 /* A bare raise (exc NULL) or RERAISE in kernel code, which makes no
    traceback entry: the exception raised again as it is. Always NULL. */
 static PyObject *
@@ -1561,6 +1586,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, IF_SEEN, 1 },
     [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, IF_RAISE, 2 },
     [H_raise] = { (void *)h_raise, "raise", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_raise_tb] = { (void *)h_raise_tb, "raise_tb", REP_OBJ, IF_RAISE | IF_PY, 4 },
     [H_reraise] = { (void *)h_reraise, "reraise", REP_OBJ, IF_RAISE, 1 },
     [H_load_special] = { (void *)h_load_special, "load_special", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_unpack] = { (void *)h_unpack, "unpack", REP_OBJ, IF_RAISE | IF_PY, 2 },

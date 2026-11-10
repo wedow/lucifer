@@ -584,7 +584,7 @@ helper(struct ctx *c, int id, int nargs, const lu_v *args)
     return v;
 }
 
-static int catcher(struct ctx *c, struct lu_fs *fs, struct ctx **k, int *handler, int *level, int *lasti,
+static int catcher(struct ctx *c, struct lu_fs *fs, int user, struct ctx **k, int *handler, int *level, int *lasti,
                    int *at);
 static void catch_here(struct ctx *c, struct lu_fs *fs, int drop, struct ctx *k, int handler, int level,
                        int lasti, int at);
@@ -612,7 +612,7 @@ helper_raising_at(struct ctx *c, int id, int nargs, const lu_v *args, int drop, 
     I(c, v)->drop = (uint8_t)drop;
     struct ctx *k;
     int handler, level, lasti, at;
-    if (lu_helpers[id].rep == REP_OBJ && catcher(c, fs, &k, &handler, &level, &lasti, &at)) {
+    if (lu_helpers[id].rep == REP_OBJ && catcher(c, fs, id == H_raise_tb, &k, &handler, &level, &lasti, &at)) {
         I(c, v)->flags |= INS_CAUGHT;
         lu_v raised = emit(c, OP_IS, REP_BIT, v, konst(c, NULL), LU_NOV, 0);
         int landing = lu_ir_block(c->f), cont = lu_ir_block(c->f);
@@ -892,17 +892,22 @@ folded_after(struct ctx *c, int bi)
    table covers the instruction (the call, in a caller), the handler with
    its stack level and lasti flag, and the instruction there (at). Only
    through frames that make no traceback entry (kernel code) and the root,
-   whose frame is real; and only to a handler not built yet. fs is c's
-   state before the instruction. */
+   whose frame is real, or for a raise that makes the entries itself
+   (user, H_raise_tb), also through other inlined frames without a handler
+   there; and only to a handler not built yet. fs is c's state before the
+   instruction. */
 static int
-catcher(struct ctx *c, struct lu_fs *fs, struct ctx **k, int *handler, int *level, int *lasti, int *at)
+catcher(struct ctx *c, struct lu_fs *fs, int user, struct ctx **k, int *handler, int *level, int *lasti, int *at)
 {
     for (struct ctx *x = c; x != NULL; x = x->parent, fs = fs->caller) {
-        if (x->parent != NULL && !hidden(x->code)) {
-            return 0;
-        }
         lu_codeunit *start = lu_code_start(x->code);
         int pc = (int)(lu_instr_before(x->code, start + x->next) - start);
+        if (x->parent != NULL && !hidden(x->code)) {
+            if (!user || lu_exception_handler(x->code, pc, level, handler, lasti)) {
+                return 0;
+            }
+            continue;
+        }
         if (lu_exception_handler(x->code, pc, level, handler, lasti)) {
             int bi = *handler < x->ncode ? x->blkat[*handler] : -1;
             if (bi < 0 || !x->bb[bi].exc || x->bb[bi].done || *level > fs->nstack
@@ -6185,13 +6190,25 @@ translate(struct ctx *c)
         int handler, level, lasti, at;
         int again = c->base == RERAISE || oparg == 0;
         if ((again && !hidden(c->code))
-            || (c->parent != NULL && !catcher(c, before(c), &k, &handler, &level, &lasti, &at))) {
+            || (c->parent != NULL && !catcher(c, before(c), !again, &k, &handler, &level, &lasti, &at))) {
             unsupported(c);
             return -1;
+        }
+        int frames = 0;         /* the inlined frames it leaves, which make their own entries */
+        for (struct ctx *x = c; c->parent != NULL && x != k; x = x->parent) {
+            frames++;
         }
         if (again) {
             lu_v exc = c->base == RERAISE ? peek(c, 1) : const_i(c, 0);
             helper_raising(c, H_reraise, 1, &exc, c->base == RERAISE);
+        }
+        else if (frames > 0 && !hidden(c->code)) {
+            /* Through user frames: each makes its traceback entry, as the
+               interpreter's unwinding would, from the frames pushed for
+               the helper. */
+            lu_v args[4] = { peek(c, oparg), oparg == 2 ? peek(c, 1) : konst(c, LU_MISSING), const_i(c, frames),
+                             const_i(c, c->pc) };
+            helper_raising(c, H_raise_tb, 4, args, oparg);
         }
         else {
             lu_v args[2] = { peek(c, oparg), oparg == 2 ? peek(c, 1) : konst(c, LU_MISSING) };
