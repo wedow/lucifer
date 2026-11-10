@@ -1530,6 +1530,12 @@ int lu_nb_slot_kind(PyTypeObject *tp, size_t offset);
    NULL (with an error when a slot raised) when it is the kernel's to
    decide, because a slot is the runtime's or every slot declined. */
 PyObject *lu_binary_foreign(PyObject *a, PyObject *b, int op);
+/* LOAD_SPECIAL's method `which` (0 __enter__, 1 __exit__, 2 __aenter__,
+   3 __aexit__) on owner's type when it is a function or a method
+   descriptor, which a call with owner first runs as the kernel's
+   load_special binds it: a new reference, or NULL (no error) for the
+   kernel to look it up. */
+PyObject *lu_special_function(PyObject *owner, int which);
 /* Whether lu_binary_foreign takes the operator for operands of these types. */
 int lu_binary_is_foreign(PyTypeObject *ta, PyTypeObject *tb, int op);
 /* container[start:stop] for an exact list, tuple, str or bytes by machine-int

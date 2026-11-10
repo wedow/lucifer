@@ -1465,6 +1465,12 @@ h_reraise(PyObject *exc)
 static PyObject *
 h_load_special(PyObject *owner, int64_t which)
 {
+    PyObject *f = lu_special_function(owner, (int)which);
+    if (f != NULL) {
+        PyObject *bound = PyFunction_Check(f) ? PyMethod_New(f, owner) : lu_method_descr_bind(f, owner);
+        Py_DECREF(f);
+        return bound;
+    }
     PyObject *args[2] = { owner, lu_small_int((int)which) };
     return lu_call_kernel(LU_K_load_special, args, 2);
 }

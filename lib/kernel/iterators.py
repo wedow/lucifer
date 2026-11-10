@@ -4,7 +4,7 @@ fields of its native layout; the kernel reaches them by index."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, alloc,
-    field_get, field_set, iter_new, tuple_from, list_append,
+    field_get, field_set, iter_new, tuple_from, list_append, kernel_twin,
 )
 from _lucifer import _boot, operators, _args, iter as _iter
 
@@ -142,6 +142,16 @@ is true. If function is None, return the items that are true."""
         return v
 
 
+def _zip_new2(cls, a, b):
+    """zip(a, b) (kernel_twin): the common zip, without the argument parsing."""
+    if cls is not zip:
+        _boot.check_new(cls, zip)
+    self = alloc(cls, zip)
+    field_set(self, 0, (get_iter(a), get_iter(b)))
+    field_set(self, 2, False)
+    return self
+
+
 def _zip_next(self):
     """The next tuple of a zip, or MISSING at its end. Two iterators, the
     common zip, make no list."""
@@ -203,6 +213,8 @@ raise a ValueError."""
         field_set(self, 0, tuple_from(iters, tuple))
         field_set(self, 2, strict)
         return self
+
+    kernel_twin(__new__, _zip_new2)
 
     def __iter__(self):
         return self

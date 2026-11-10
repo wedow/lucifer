@@ -588,6 +588,29 @@ lu_binary_foreign(PyObject *a, PyObject *b, int op)
 #undef NB_SLOT
 }
 
+PyObject *
+lu_special_function(PyObject *owner, int which)
+{
+    static const char *const names[4] = { "__enter__", "__exit__", "__aenter__", "__aexit__" };
+    static PyObject *interned[4];
+    if (which < 0 || which > 3) {
+        return NULL;
+    }
+    PyObject *name = __atomic_load_n(&interned[which], __ATOMIC_ACQUIRE);
+    if (name == NULL) {
+        if ((name = PyUnicode_InternFromString(names[which])) == NULL) {
+            PyErr_Clear();
+            return NULL;
+        }
+        __atomic_store_n(&interned[which], name, __ATOMIC_RELEASE);     /* interned: immortal */
+    }
+    PyObject *f = _PyType_LookupRef(Py_TYPE(owner), name);
+    if (f != NULL && !PyFunction_Check(f) && !Py_IS_TYPE(f, &PyMethodDescr_Type)) {
+        Py_CLEAR(f);
+    }
+    return f;
+}
+
 int
 lu_setitem_slice_native(PyObject *container, PyObject *sub, PyObject *v)
 {
@@ -4067,6 +4090,13 @@ op_CALL_INTRINSIC_2: {
 
 op_LOAD_SPECIAL: {
     /* owner -- attr, self_or_null; looked up on the type, never the instance */
+    PyObject *special = lu_special_function(TOP(), oparg);
+    if (special != NULL) {
+        PyObject *owner = TOP();
+        TOP() = special;
+        PUSH(owner);
+        DISPATCH();
+    }
     SAVE_FRAME();
     kargs[0] = POP();
     kargs[1] = lu_small_int(oparg);

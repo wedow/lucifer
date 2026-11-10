@@ -858,6 +858,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/with_and_zip_paths.py": {
+      "exit": 0,
+      "sha256": "176479d53cb34885b2dcddbb205290c720d67ccc514d6dddc6713f5897640691",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/generated/seed_31410_0000.py": {
       "exit": 0,
       "sha256": "eadf4872fa710b1e0443aa54c68e2ab7154a2fa963d29ccc40f656caec3d90b3",
