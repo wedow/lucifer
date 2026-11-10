@@ -444,6 +444,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/extension_number_slots.py": {
+      "exit": 0,
+      "sha256": "49e2b8a10a643025b2df0cba720bc9bd3d50e22619229557fda6b5d55497d5d5",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/finalizer_resurrection.py": {
       "exit": 0,
       "sha256": "853e3235d1ec6f734069ce15ed1ab2cebb0d892d96f25cb370cb898730a1ff7d",

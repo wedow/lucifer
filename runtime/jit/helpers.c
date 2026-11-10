@@ -592,6 +592,12 @@ h_binary_op(PyObject *a, PyObject *b, int64_t op)
     else if ((op == NB_ADD || op == NB_INPLACE_ADD) && PyUnicode_CheckExact(a) && PyUnicode_CheckExact(b)) {
         return lu_str_concat(a, b);
     }
+    else {
+        PyObject *r = lu_binary_foreign(a, b, (int)op);
+        if (r != NULL || PyErr_Occurred()) {
+            return r;
+        }
+    }
     PyObject *args[3] = { a, b, lu_small_int((int)op) };
     return lu_call_kernel(LU_K_binary_op, args, 3);
 }

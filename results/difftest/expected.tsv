@@ -73,6 +73,7 @@ tests/diff/corpus/exception_suppress_chain.py	NOTRUN	0.000000
 tests/diff/corpus/exception_target_cleared.py	NOTRUN	0.000000
 tests/diff/corpus/exception_traceback_frames.py	NOTRUN	0.000000
 tests/diff/corpus/exception_uncaught_traceback.py	NOTRUN	0.000000
+tests/diff/corpus/extension_number_slots.py	NOTRUN	0.000000
 tests/diff/corpus/finalizer_resurrection.py	NOTRUN	0.000000
 tests/diff/corpus/finalizer_single_cycle.py	NOTRUN	0.000000
 tests/diff/corpus/float_floor_mod.py	NOTRUN	0.000000

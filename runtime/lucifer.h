@@ -1499,6 +1499,15 @@ int lu_list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq,
 int lu_store_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *v);
 /* container[sub] = v for a slice sub without a step, as lu_store_slice_native. */
 int lu_setitem_slice_native(PyObject *container, PyObject *sub, PyObject *v);
+/* Type tp's number slot at offset in PyNumberMethods (types/slots.c): 1 for
+   an extension's C function, 0 for none, -1 for the runtime's (a kernel
+   type's or a class's, which runs the kernel). */
+int lu_nb_slot_kind(PyTypeObject *tp, size_t offset);
+/* BINARY_OP's oparg (not NB_SUBSCR) on a and b by their extension types'
+   number slots, as CPython's binary_op1 and binary_iop1: the result, or
+   NULL (with an error when a slot raised) when it is the kernel's to
+   decide, because a slot is the runtime's or every slot declined. */
+PyObject *lu_binary_foreign(PyObject *a, PyObject *b, int op);
 /* container[start:stop] for an exact list, tuple, str or bytes by machine-int
    bounds, either None as `none` says (bit 0 the start, bit 1 the stop): a new
    reference, or NULL without an error for another type. */

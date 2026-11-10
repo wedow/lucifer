@@ -804,6 +804,21 @@ slot_base(PyTypeObject *tp, int where, int create)
 }
 
 int
+lu_nb_slot_kind(PyTypeObject *tp, size_t offset)
+{
+    void *fn = tp->tp_as_number != NULL ? *(void **)((char *)tp->tp_as_number + offset) : NULL;
+    if (fn == NULL) {
+        return 0;
+    }
+    for (size_t i = 0; i < sizeof slots / sizeof slots[0]; i++) {
+        if (slots[i].where == IN_NUMBER && slots[i].offset == offset) {
+            return fn == slots[i].thunk ? -1 : 1;
+        }
+    }
+    return -1;
+}
+
+int
 lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from)
 {
     const char *n = PyUnicode_AsUTF8(name);
