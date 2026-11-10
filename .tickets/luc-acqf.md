@@ -15,3 +15,9 @@ The oracle-built _testbuffer reads struct.Struct internals directly (PyPartialSt
 
 _testbuffer in LIBTEST_EXTS; test_capi.test_number 11/11; ndarray constructs.
 
+
+## Notes
+
+**2026-11-09T09:18:51Z**
+
+Full Lib/test run 2026-11-09: 78 cases wait on _testbuffer (test_buffer 76 'ndarray object required', test_capi 2).

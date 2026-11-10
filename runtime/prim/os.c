@@ -731,6 +731,11 @@ union sys_arg {
     X(sys_getpgrp, "", getpgrp()) \
     X(sys_setsid, "", setsid()) \
     X(sys_kill, "ii", kill((pid_t)a[0].i, (int)a[1].i)) \
+    X(sys_abort, "", (abort(), 0)) \
+    X(sys_killpg, "ii", killpg((pid_t)a[0].i, (int)a[1].i)) \
+    X(sys_getpgid, "i", getpgid((pid_t)a[0].i)) \
+    X(sys_setpgid, "ii", setpgid((pid_t)a[0].i, (pid_t)a[1].i)) \
+    X(sys_getsid, "i", getsid((pid_t)a[0].i)) \
     X(sys_socket, "iii", socket((int)a[0].i, (int)a[1].i | SOCK_CLOEXEC, (int)a[2].i)) \
     X(sys_listen, "ii", listen((int)a[0].i, (int)a[1].i)) \
     X(sys_shutdown, "ii", LU_SYSCALL(shutdown((int)a[0].i, (int)a[1].i))) \

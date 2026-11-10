@@ -11,6 +11,7 @@ import _struct
 
 __version__ = '1.1.0'
 RTLD_LOCAL = 0
+CTYPES_MAX_ARGCOUNT = 1024
 RTLD_GLOBAL = 0x100
 FUNCFLAG_CDECL = 1
 FUNCFLAG_PYTHONAPI = 4
@@ -33,10 +34,10 @@ _CODES = {
     'c': ('c', 1), 'b': ('b', 1), 'B': ('B', 1), 'h': ('h', 2), 'H': ('H', 2), 'i': ('i', 4),
     'I': ('I', 4), 'l': ('q', 8), 'L': ('Q', 8), 'q': ('q', 8), 'Q': ('Q', 8), 'f': ('f', 4),
     'd': ('d', 8), 'g': (None, 16), '?': ('?', 1), 'P': ('Q', 8), 'z': ('Q', 8), 'Z': ('Q', 8),
-    'O': ('Q', 8), 'u': ('i', 4),
+    'O': ('Q', 8), 'u': ('i', 4), 'v': ('h', 2),
 }
 _INTEGERS = frozenset('bBhHiIlLqQ')
-_FFI = {'c': 'b', 'u': 'i', '?': 'B', 'z': 'P', 'Z': 'P', 'O': 'P'}      # type code -> libffi code
+_FFI = {'c': 'b', 'u': 'i', '?': 'B', 'z': 'P', 'Z': 'P', 'O': 'P', 'v': 'h'}      # type code -> libffi code
 _MASK = {code: (1 << (8 * size)) - 1 for code, (_, size) in _CODES.items()}
 
 
@@ -270,7 +271,9 @@ def _encode(code, value, swapped=''):
     """The bytes of a Python value for a simple type code."""
     fmt, size = _CODES[code]
     if code == 'c':
-        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value < 256:
+        if isinstance(value, int):
+            if not 0 <= value < 256:
+                raise TypeError('integer not in range(256)')
             return bytes((value,))
         if isinstance(value, (bytes, bytearray)) and len(value) == 1:
             return bytes(value)
@@ -285,6 +288,8 @@ def _encode(code, value, swapped=''):
         return _struct.pack('<I', ord(value))
     if code == '?':
         return b'\x01' if value else b'\x00'
+    if code == 'v':                       # VARIANT_BOOL: true is -1
+        return b'\xff\xff' if value else b'\x00\x00'
     if code in 'fd':
         try:
             return _struct.pack(swapped + fmt, value)
@@ -305,8 +310,8 @@ def _decode(code, data, swapped=''):
         return bytes(data)
     if code == 'u':
         return chr(_struct.unpack('<I', data)[0] & 0x10FFFF) if _struct.unpack('<I', data)[0] < 0x110000 else '�'
-    if code == '?':
-        return data != b'\x00'
+    if code in '?v':
+        return data != bytes(size)
     if code == 'g':
         return _lucifer.ct_longdouble(data)
     if code in 'fd':
@@ -364,16 +369,14 @@ class PyCSimpleType(_CDataType):
                 _write(param._b_addr, _pointer_value(value, keep).to_bytes(8, 'little'))
                 param._keep('param', (value, keep))
                 return param
-        elif hasattr(value, '_as_parameter_'):
-            return cls.from_param(value._as_parameter_)
         else:
+            # The value itself first (the type's setfunc), then its _as_parameter_.
             try:
                 return cls(value)
-            except TypeError as e:
-                if code == 'O':
+            except TypeError:
+                if not hasattr(value, '_as_parameter_'):
                     raise
-                raise TypeError("'%s' object cannot be interpreted as ctypes.%s" % (type(value).__name__, cls.__name__)) \
-                    if isinstance(value, (str, bytes, type(None), tuple, list, dict)) else e
+            return cls.from_param(value._as_parameter_)
         if hasattr(value, '_as_parameter_'):
             return cls.from_param(value._as_parameter_)
         raise TypeError("'%s' object cannot be interpreted as ctypes.%s" % (type(value).__name__, cls.__name__))

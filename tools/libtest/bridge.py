@@ -11,6 +11,12 @@ def append(path, value):
         stream.write(json.dumps(value, ensure_ascii=True) + '\n')
 
 
+def described(exc_info):
+    """'Type: message' for a failure, so raw events group by cause."""
+    kind, value = exc_info[0], exc_info[1]
+    return f'{getattr(kind, "__name__", kind)}: {value}'
+
+
 def observe_cases():
     import unittest
     from test.libregrtest.testresult import RegressionTestResult
@@ -50,7 +56,7 @@ def observe_cases():
             parent = test.test_case if isinstance(test, unittest.case._SubTest) else test
             reason = ''
             if args:
-                reason = str(args[0]) if name == 'addSkip' else str(args[0][1])
+                reason = str(args[0]) if name == 'addSkip' else described(args[0])
             append(os.environ['LIBTEST_EVENTS'], {
                 'id': case_id(parent), 'status': status, 'reason': reason,
                 'seconds': time.perf_counter() - starts.get(id(parent), time.perf_counter()),
@@ -72,7 +78,7 @@ def observe_cases():
             append(os.environ['LIBTEST_EVENTS'], {
                 'id': case_id(test),
                 'status': 'FAIL' if issubclass(err[0], test.failureException) else 'ERROR',
-                'reason': str(err[1]),
+                'reason': described(err),
                 'seconds': time.perf_counter() - starts.get(id(test), time.perf_counter()),
             })
         return result

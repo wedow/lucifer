@@ -304,3 +304,18 @@ for o, k in ((list, int), (type, int), (dict, (str, int)), (Generic, 5), (Plain,
              ((7, 8), 'x'), (5, 0), (Generic(), 0), ([1, 2, 3], slice(0, 2)), ({'a': 1}, 'a'), (ready.Mapped(), 'k'),
              (ready.Vec(1, 2), 1), ((1, 2), 2**80)):
     show(ready.subscript, o, k)
+
+# instances of a managed-dict spec type that C allocates take attributes side by side
+managed = [ready.managed_new() for _ in range(64)]
+for i, o in enumerate(managed):
+    for k in range(12):
+        setattr(o, 'a%d' % k, i * 100 + k)
+print(all([getattr(o, 'a%d' % k) for k in range(12)] == [i * 100 + k for k in range(12)] for i, o in enumerate(managed)),
+      type(managed[0]).__name__, managed[3].a11)
+
+# PyModule_AddType readies a static type, whose tp_dict the module may then fill
+print(ready.Added.__module__, ready.Added.__name__, type(ready.Added()).__qualname__)
+
+# a static type that copies float's tp_hash hashes as a float, though a base of it is unhashable
+x = ready.FloatCmp()
+print(hash(x) == hash(0.0), len({x, x}), {x: 'v'}[x], ready.CmpOnly.__hash__, float(x))
