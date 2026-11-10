@@ -57,7 +57,10 @@ void _PyEvent_Notify(PyEvent *evt);
 void PyEvent_Wait(PyEvent *evt);
 int PyEvent_WaitTimed(PyEvent *evt, PyTime_t timeout_ns, int detach);
 
-/* The parking lot: compare-and-sleep on an address, and wake. */
+/* The parking lot: compare-and-sleep on an address, and wake. Park's last
+   argument is CPython's `detach`, read as _PyLockFlags: 1 detaches, and
+   _PY_LOCK_HANDLE_SIGNALS ends the park with Py_PARK_INTR at a signal whose
+   handler the caller then runs. */
 enum {
     Py_PARK_OK = LU_PARK_OK,            /* unparked by another thread */
     Py_PARK_AGAIN = -1,                 /* *address did not match *expected */
@@ -68,7 +71,7 @@ enum {
 typedef void _Py_unpark_fn_t(void *arg, void *park_arg, int has_more_waiters);
 
 int _PyParkingLot_Park(const void *address, const void *expected, size_t address_size,
-                       PyTime_t timeout_ns, void *park_arg, int detach);
+                       PyTime_t timeout_ns, void *park_arg, int flags);
 void _PyParkingLot_Unpark(const void *address, _Py_unpark_fn_t *fn, void *arg);
 void _PyParkingLot_UnparkAll(const void *address);
 

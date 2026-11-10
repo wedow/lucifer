@@ -605,6 +605,7 @@ lu_prim_os_sleep(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     for (;;) {
         struct lu_wait w;
         lu_wait_begin(&w);
+        w.signals = 1;
         if (lu_park(&w, deadline, 1) != LU_PARK_INTR) {
             return Py_NewRef(Py_None);
         }

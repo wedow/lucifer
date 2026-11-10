@@ -38,7 +38,7 @@ lu_wait_begin(struct lu_wait *w)
     w->status = LU_PARK_PENDING;
     w->result = 0;
     w->deadline = -1;
-    w->unpinned = w->parked = 0;
+    w->unpinned = w->parked = w->signals = 0;
     w->registered = 1;
     struct lu_wait_bucket *b = bucket_of(w->id);
     pthread_mutex_lock(&b->lock.mutex);
@@ -83,24 +83,25 @@ lu_park(struct lu_wait *w, PyTime_t deadline, int detach)
     PyThreadState *ts = detach ? lu_syscall_begin() : NULL;
     int ended = LU_PARK_PENDING;
     for (;;) {
-        /* Read the futex word before the status: an unpark in between
-           changes the word, and the sleep returns at once. */
+        /* Read the futex word before the status and the signals reason: an
+           unpark or a signal in between changes the word, and the sleep
+           returns at once. */
         uint32_t seq = __atomic_load_n(&c->wake, __ATOMIC_SEQ_CST);
         if (__atomic_load_n(&w->status, __ATOMIC_SEQ_CST) != LU_PARK_PENDING) {
             break;
         }
-        int err = carrier_sleep(c, seq, deadline);
-        if (err == ETIMEDOUT) {
-            ended = LU_PARK_TIMEOUT;
+        /* A Python handler to run (the signals reason, which only the main
+           task's carrier ever has, and whose C handler wakes that carrier)
+           ends a wait whose caller runs it. It is looked for before every
+           sleep, the first included: a signal that came before the wait, as
+           one does while a builtin runs, spent its wake already. The caller
+           clears the reason as it runs the handler. Other waits sleep on. */
+        if (w->signals && (__atomic_load_n(&c->poll, __ATOMIC_SEQ_CST) & LU_POLL_SIGNALS_PENDING)) {
+            ended = LU_PARK_INTR;
             break;
         }
-        /* A signal handler ran. The wait ends only if it left a Python handler
-           to run (the signals reason, which only the main task's carrier ever
-           has, and whose handler wakes that carrier): the caller then runs
-           pending calls and parks again. Any other wake changes nothing for
-           the caller, so the wait goes on. */
-        if (__atomic_load_n(&c->poll, __ATOMIC_ACQUIRE) & LU_POLL_SIGNALS_PENDING) {
-            ended = LU_PARK_INTR;
+        if (carrier_sleep(c, seq, deadline) == ETIMEDOUT) {
+            ended = LU_PARK_TIMEOUT;
             break;
         }
     }
