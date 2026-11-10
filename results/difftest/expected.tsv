@@ -25,6 +25,7 @@ tests/diff/corpus/augassign_notimplemented.py	NOTRUN	0.000000
 tests/diff/corpus/augassign_subscript_order.py	NOTRUN	0.000000
 tests/diff/corpus/augassign_tuple_item_partial.py	NOTRUN	0.000000
 tests/diff/corpus/builtin_rebinding.py	NOTRUN	0.000000
+tests/diff/corpus/bytearray_slice_stores.py	NOTRUN	0.000000
 tests/diff/corpus/class_attribute_delete.py	NOTRUN	0.000000
 tests/diff/corpus/class_bases_invalidation.py	NOTRUN	0.000000
 tests/diff/corpus/class_mro_diamond.py	NOTRUN	0.000000

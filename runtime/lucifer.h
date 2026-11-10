@@ -1446,7 +1446,8 @@ PyObject *lu_staticmethod_get(PyObject *descr);
    (a builtin method, a method-wrapper), or NULL without an error for any
    other descriptor or an obj not of its class. */
 PyObject *lu_method_descr_bind(PyObject *descr, PyObject *obj);
-/* A property's getter (borrowed, read once; NULL or None for none). */
+/* A property's getter, or a kernel getset's (borrowed, read once; NULL or None
+   for none, and NULL for another getset). */
 PyObject *lu_property_fget(PyObject *prop);
 /* Where a classmethod's and a staticmethod's callable is (compiled code reads it). */
 extern const Py_ssize_t lu_classmethod_callable_offset;
@@ -1513,8 +1514,9 @@ PyObject *lu_slice_native(PyObject *container, PyObject *start, PyObject *stop, 
    the bounds clamped under the list's lock: 0, -1 with an error, or 1 when
    the list's length is no longer expect (>= 0) and nothing was done. */
 int lu_list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, Py_ssize_t expect);
-/* container[start:stop] = v without Python: an exact list, int or None
-   bounds and a tuple or list v. 0, -1 with an error, or 1 when the kernel
+/* container[start:stop] = v without Python: int or None bounds, and an
+   exact list with a tuple or list v, or an exact bytearray with a bytes,
+   bytearray or memoryview v. 0, -1 with an error, or 1 when the kernel
    must do it. */
 int lu_store_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *v);
 /* container[sub] = v for a slice sub without a step, as lu_store_slice_native. */

@@ -3085,9 +3085,11 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                 struct mark m;
                 mark_take(c, &m);       /* a getter that does not inline leaves nothing behind */
                 konst(c, fget);
-                lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, e.descr), LU_NOV, LU_NOV,
-                                 lu_field_offset(&PyProperty_Type, 0));
-                guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+                if (Py_IS_TYPE(e.descr, &PyProperty_Type)) {      /* a kernel getset's getter is fixed */
+                    lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, e.descr), LU_NOV, LU_NOV,
+                                     lu_field_offset(&PyProperty_Type, 0));
+                    guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+                }
                 struct bstate saved;
                 state_copy(c, &saved, &c->st);
                 lu_v args[1] = { owner };
@@ -3283,8 +3285,10 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         mark_take(c, &m);       /* a getter that does not inline leaves nothing behind */
         guard_version(c, owner, version);
         konst(c, fget);         /* the unit keeps the getter it inlines */
-        lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, descr), LU_NOV, LU_NOV, lu_field_offset(&PyProperty_Type, 0));
-        guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+        if (Py_IS_TYPE(descr, &PyProperty_Type)) {          /* a kernel getset's getter is fixed */
+            lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, descr), LU_NOV, LU_NOV, lu_field_offset(&PyProperty_Type, 0));
+            guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+        }
         struct bstate saved;
         state_copy(c, &saved, &c->st);
         c->st.sp -= 1;          /* the getter takes the owner's reference */

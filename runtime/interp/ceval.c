@@ -25,6 +25,7 @@
 #include "jit/jit.h"
 #include "object/dict.h"
 #include "object/set.h"
+#include "prim/bytes.h"
 
 #include "opcode.h"
 #include "opcode_ids.h"
@@ -486,6 +487,16 @@ lu_slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObje
 int
 lu_store_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *v)
 {
+    if (PyByteArray_CheckExact(container)
+        && (PyBytes_CheckExact(v) || PyByteArray_CheckExact(v) || PyMemoryView_Check(v))) {
+        int r;
+        Py_BEGIN_CRITICAL_SECTION(container);
+        Py_ssize_t lo, step, count;
+        r = !slice_unpack(start, stop, NULL, Py_SIZE(container), &lo, &step, &count) ? 1
+            : lu_bytearray_splice(container, lo, lo + count, v);
+        Py_END_CRITICAL_SECTION();
+        return r;
+    }
     if (!PyList_CheckExact(container) || !(PyList_CheckExact(v) || PyTuple_CheckExact(v))) {
         return 1;
     }

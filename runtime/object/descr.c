@@ -1293,6 +1293,10 @@ lu_staticmethod_get(PyObject *descr)
 PyObject *
 lu_property_fget(PyObject *prop)
 {
+    if (Py_IS_TYPE(prop, &PyGetSetDescr_Type)) {
+        PyGetSetDef *def = ((PyGetSetDescrObject *)prop)->d_getset;
+        return def->get == kernel_getset_get ? ((struct lu_kernel_getset *)def->closure)->fget : NULL;
+    }
     return __atomic_load_n((PyObject **)((char *)prop + lu_field_offset(&PyProperty_Type, 0)), __ATOMIC_ACQUIRE);
 }
 
