@@ -622,8 +622,10 @@ UNARY_THUNK(slot_nb_int, __int__)
 UNARY_THUNK(slot_nb_float, __float__)
 UNARY_THUNK(slot_nb_index, __index__)
 
+static void slot_bf_releasebuffer(PyObject *self, Py_buffer *view);
+
 /* bf_getbuffer of a class that defines __buffer__ (PEP 688): the memoryview it
-   returns exports the buffer, and the caller releases through the view. */
+   returns exports the buffer, wrapped so that its release reaches the class. */
 static int
 slot_bf_getbuffer(PyObject *self, Py_buffer *view, int flags)
 {
@@ -640,9 +642,71 @@ slot_bf_getbuffer(PyObject *self, Py_buffer *view, int flags)
         Py_DECREF(mv);
         return -1;
     }
-    int r = PyObject_GetBuffer(mv, view, flags);
+    if (PyObject_GetBuffer(mv, view, flags) < 0) {
+        Py_DECREF(mv);
+        return -1;
+    }
+    lu_buffer_wrapper *w = (lu_buffer_wrapper *)lu_object_new(&lu_buffer_wrapper_type, sizeof *w);
+    if (w == NULL) {
+        PyBuffer_Release(view);
+        Py_DECREF(mv);
+        return -1;
+    }
+    w->mv = mv;
+    w->obj = Py_NewRef(self);
+    Py_SETREF(view->obj, (PyObject *)w);
+    return 0;
+}
+
+/* The wrapper's release: the memoryview's export goes, then the class's
+   __release_buffer__ runs with that memoryview, an exception in it unraisable
+   and one in flight kept (releasebuffer_call_python). */
+static void
+bufwrap_release(PyObject *op, Py_buffer *view)
+{
+    lu_buffer_wrapper *w = (lu_buffer_wrapper *)op;
+    PyObject *mv = w->mv, *obj = w->obj;
+    if (mv == NULL || obj == NULL) {
+        return;                         /* already released */
+    }
+    w->mv = w->obj = NULL;
+    PyBufferProcs *mb = Py_TYPE(mv)->tp_as_buffer;
+    if (mb != NULL && mb->bf_releasebuffer != NULL) {
+        mb->bf_releasebuffer(mv, view);
+    }
+    PyBufferProcs *pb = Py_TYPE(obj)->tp_as_buffer;
+    if (pb != NULL && pb->bf_releasebuffer == slot_bf_releasebuffer) {
+        PyObject *exc = PyErr_GetRaisedException();
+        PyObject *name = PyUnicode_InternFromString("__release_buffer__");
+        PyObject *r = name != NULL ? lu_call_special(obj, name, &mv, 1) : NULL;
+        Py_XDECREF(name);
+        if (r == NULL) {
+            lu_err_unraisable_text("Exception ignored in __release_buffer__", obj);
+        }
+        Py_XDECREF(r);
+        PyErr_SetRaisedException(exc);
+    }
     Py_DECREF(mv);
-    return r;
+    Py_DECREF(obj);
+}
+
+PyBufferProcs lu_buffer_wrapper_procs = { .bf_releasebuffer = bufwrap_release };
+
+/* bf_releasebuffer of a class that defines __release_buffer__. The wrapper
+   its own __buffer__ exports through calls the method; a buffer a native
+   base exported is released by that base (releasebuffer_maybe_call_super). */
+static void
+slot_bf_releasebuffer(PyObject *self, Py_buffer *view)
+{
+    PyObject *mro = Py_TYPE(self)->tp_mro;
+    for (Py_ssize_t i = 1; mro != NULL && i < PyTuple_GET_SIZE(mro); i++) {
+        PyTypeObject *base = (PyTypeObject *)PyTuple_GET_ITEM(mro, i);
+        PyBufferProcs *pb = base->tp_as_buffer;
+        if (pb != NULL && pb->bf_releasebuffer != NULL && pb->bf_releasebuffer != slot_bf_releasebuffer) {
+            pb->bf_releasebuffer(self, view);
+            return;
+        }
+    }
 }
 
 /* sq_repeat of a builtin sequence: its __mul__. Heap types get none, as in CPython. */
@@ -679,7 +743,7 @@ static const struct slot slots[] = {
     TP(tp_iter, slot_tp_iter), TP(tp_iternext, slot_tp_iternext),
     TP(tp_descr_get, slot_tp_descr_get), TP(tp_descr_set, slot_tp_descr_set),
     TP(tp_init, slot_tp_init), TP(tp_new, slot_tp_new), TP(tp_finalize, slot_tp_finalize),
-    BF(bf_getbuffer, slot_bf_getbuffer), BF(bf_releasebuffer, NULL), AM(am_await), AM(am_aiter), AM(am_anext),
+    BF(bf_getbuffer, slot_bf_getbuffer), BF(bf_releasebuffer, slot_bf_releasebuffer), AM(am_await), AM(am_aiter), AM(am_anext),
     NB(nb_add, slot_nb_add), NB(nb_subtract, slot_nb_subtract),
     NB(nb_multiply, slot_nb_multiply), NB(nb_remainder, slot_nb_remainder),
     NB(nb_divmod, slot_nb_divmod), NB(nb_power, slot_nb_power),

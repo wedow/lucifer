@@ -153,9 +153,14 @@ release_refs(struct lu_frame *f)
     Py_CLEAR(f->func);
 }
 
+/* The frame leaves the stack before its references go (GH-99729): a
+   finalizer they run must not see it, nor make a frame object of it. */
 void
 lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
 {
+    if (ts->current_frame == (struct _PyInterpreterFrame *)f) {
+        ts->current_frame = (struct _PyInterpreterFrame *)f->previous;
+    }
     if (!lu_frame_retire(f)) {
         release_refs(f);
     }

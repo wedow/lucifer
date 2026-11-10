@@ -7,6 +7,7 @@ memoryview over it."""
 import os
 import sys
 import _lucifer
+from _thread import allocate_lock
 
 PROT_NONE, PROT_READ, PROT_WRITE, PROT_EXEC = 0, 1, 2, 4
 MAP_SHARED, MAP_PRIVATE = 1, 2
@@ -64,6 +65,10 @@ Unix: mmap(fileno, length[, flags[, prot[, access[, offset[, trackfd]]]]])"""
         self._pos = 0
         self._fd = -1
         self._closed = True
+        # Exported buffers pin the mapping: close and resize refuse while
+        # any is out. The lock orders them against exports and releases.
+        self._exports = 0
+        self._lock = allocate_lock()
         fileno, length, offset = _index(fileno), _index(length), _index(offset)
         if length < 0:
             raise OverflowError('memory mapped length must be positive')
@@ -120,6 +125,12 @@ Unix: mmap(fileno, length[, flags[, prot[, access[, offset[, trackfd]]]]])"""
 
     def close(self):
         """Close the mmap.  Subsequent calls to other methods of the object will raise an exception."""
+        with self._lock:
+            self._close()
+
+    def _close(self):
+        if self._exports:
+            raise BufferError('cannot close exported pointers exist')
         if not self._closed:
             self._closed = True
             if self._fd >= 0:
@@ -266,7 +277,13 @@ Unix: mmap(fileno, length[, flags[, prot[, access[, offset[, trackfd]]]]])"""
 
     def resize(self, newsize, /):
         """Resize the map (and the underlying file, if any)."""
+        with self._lock:
+            self._resize(newsize)
+
+    def _resize(self, newsize):
         self._check()
+        if self._exports:
+            raise BufferError("mmap can't resize with extant buffers exported.")
         if self._copy or self._readonly:
             raise TypeError('mmap can\'t resize a readonly or copy-on-write memory map.')
         if self._fd < 0 and self._flags & MAP_SHARED:
@@ -334,8 +351,15 @@ Unix: mmap(fileno, length[, flags[, prot[, access[, offset[, trackfd]]]]])"""
         raise TypeError('mmap object doesn\'t support item deletion')
 
     def __buffer__(self, flags, /):
-        self._check()
-        return _lucifer.ct_view(self._addr, self._size, self._readonly)
+        with self._lock:
+            self._check()
+            view = _lucifer.ct_view(self._addr, self._size, self._readonly)
+            self._exports += 1
+            return view
+
+    def __release_buffer__(self, view, /):
+        with self._lock:
+            self._exports -= 1
 
     def __repr__(self):
         if self._closed:

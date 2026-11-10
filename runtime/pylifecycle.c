@@ -175,7 +175,6 @@ add_module(struct _is *interp, PyObject *module)
 }
 
 extern PyTypeObject *const lu_exception_types[];
-extern PyTypeObject _PyExc_IncompleteInputError;
 
 /* _PyBuiltin_Init and _PyBuiltins_AddExceptions: the static objects and
    types builtins names. */
@@ -199,7 +198,6 @@ add_builtins(PyObject *builtins)
         { "str", (PyObject *)&PyUnicode_Type }, { "super", (PyObject *)&PySuper_Type },
         { "tuple", (PyObject *)&PyTuple_Type }, { "type", (PyObject *)&PyType_Type },
         { "zip", (PyObject *)&PyZip_Type }, { "EnvironmentError", NULL }, { "IOError", NULL },
-        { "_IncompleteInputError", (PyObject *)&_PyExc_IncompleteInputError },
     };
     for (size_t i = 0; i < sizeof objects / sizeof objects[0]; i++) {
         PyObject *name = PyUnicode_InternFromString(objects[i].name);
