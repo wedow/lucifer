@@ -415,11 +415,11 @@ class SyntaxError:
             _set(self, 1, filename)
             _set(self, 2, lineno)
             _set(self, 3, offset)
-            _set(self, 4, text)
+            _set(self, 6, text)             # after end_lineno and end_offset, as PySyntaxErrorObject
             if end_lineno is not MISSING:
-                _set(self, 5, end_lineno)
+                _set(self, 4, end_lineno)
             if end_offset is not MISSING:
-                _set(self, 6, end_offset)
+                _set(self, 5, end_offset)
             if metadata is not MISSING:
                 _set(self, 8, metadata)
             if end_lineno is not MISSING and end_offset is MISSING:

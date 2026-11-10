@@ -59,7 +59,11 @@ class module:
 The name must be a string; the optional doc argument can have any type."""
 
     def __new__(cls, /, *args, **kwargs):
-        return alloc(cls, module)
+        # new_module_notrack: the dict exists before __init__, so every
+        # reader of md_dict may assume it.
+        self = alloc(cls, module)
+        instance_dict(self, True)
+        return self
 
     def __init__(self, name, doc=None):
         if not kind(name, 'str'):

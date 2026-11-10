@@ -2280,25 +2280,25 @@ prim_instance_store(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return r < 0 ? NULL : bool_of(r);
 }
 
-/* set_class(obj, cls): __class__ assignment after the kernel's checks. */
-static PyObject *
-prim_set_class(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+/* set_class(obj, cls): __class__ assignment after the kernel's checks.
+   Concurrent assignments to one object take turns, so that each takes the
+   reference of the class it replaced, once. */
+static int
+set_class(PyObject *self, PyTypeObject *newto)
 {
-    ARGS(2); TYPE_ARG(1);
-    PyObject *self = args[0];
-    PyTypeObject *oldto = Py_TYPE(self), *newto = (PyTypeObject *)args[1];
+    PyTypeObject *oldto = Py_TYPE(self);
     if (!(PyType_IsSubtype(newto, &PyModule_Type) && PyType_IsSubtype(oldto, &PyModule_Type))
         && ((newto->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) || (oldto->tp_flags & Py_TPFLAGS_IMMUTABLETYPE))) {
         lu_err_format(PyExc_TypeError,
                       "__class__ assignment only supported for mutable types or ModuleType subclasses");
-        return NULL;
+        return -1;
     }
     if (!compatible_for_assignment(oldto, newto, "__class__")) {
-        return NULL;
+        return -1;
     }
     /* The new class names the inline values differently: they move to the dict. */
     if (lu_inline_live(self) && lu_instance_dict(self, 0) == NULL && PyErr_Occurred()) {
-        return NULL;
+        return -1;
     }
     if (newto->tp_flags & Py_TPFLAGS_HEAPTYPE) {
         Py_INCREF(newto);
@@ -2311,7 +2311,18 @@ prim_set_class(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (oldto->tp_flags & Py_TPFLAGS_HEAPTYPE) {
         Py_DECREF(oldto);
     }
-    return Py_NewRef(Py_None);
+    return 0;
+}
+
+static PyObject *
+prim_set_class(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2); TYPE_ARG(1);
+    int r;
+    Py_BEGIN_CRITICAL_SECTION(args[0]);
+    r = set_class(args[0], (PyTypeObject *)args[1]);
+    Py_END_CRITICAL_SECTION();
+    return r < 0 ? NULL : Py_NewRef(Py_None);
 }
 
 /* caller_globals(): the calling frame's globals, or None. */

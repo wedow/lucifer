@@ -309,6 +309,10 @@ PyErr_BadArgument(void)
     return 0;
 }
 
+int _Py_CheckRecursiveCall(PyThreadState *tstate, const char *where);
+
+/* Nesting recurses on the C stack: past its limit the RecursionError is
+   unraisable, the exception in flight stays, and nothing matches (gh-156204). */
 int
 PyErr_GivenExceptionMatches(PyObject *given, PyObject *exc)
 {
@@ -316,6 +320,15 @@ PyErr_GivenExceptionMatches(PyObject *given, PyObject *exc)
         return 0;
     }
     if (PyTuple_Check(exc)) {
+        PyThreadState *ts = lu_tstate_get();
+        if ((uintptr_t)__builtin_frame_address(0) < ((struct lu_task *)ts)->c_stack_soft_limit) {
+            PyObject *pending = PyErr_GetRaisedException();
+            if (_Py_CheckRecursiveCall(ts, " in PyErr_GivenExceptionMatches") < 0) {
+                PyErr_WriteUnraisable(NULL);
+            }
+            PyErr_SetRaisedException(pending);
+            return 0;
+        }
         for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(exc); i++) {
             if (PyErr_GivenExceptionMatches(given, PyTuple_GET_ITEM(exc, i))) {
                 return 1;
