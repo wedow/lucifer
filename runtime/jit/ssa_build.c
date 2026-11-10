@@ -207,32 +207,44 @@ static void set_known(struct ctx *c, lu_v v, PyTypeObject *t);
 static int decode(struct ctx *c, int pc, int *base, int *oparg, int *opcode);
 static int jump_target(int op, int oparg, int next);
 
-/* The parameters the code never rebinds: per local, 1. */
+/* Per local, how many places bind (or unbind) it, up to 2: its
+   parameter's binding, and each store. */
 static uint8_t *
-fixed_params(struct ctx *c)
+bindings(struct ctx *c)
 {
-    PyCodeObject *co = c->code;
-    uint8_t *fixed = lu_ir_alloc(c->f, (size_t)c->nlocals + 1);
+    uint8_t *n = lu_ir_alloc(c->f, (size_t)c->nlocals + 1);
     for (int i = 0; i < c->nlocals; i++) {
-        fixed[i] = i < co->co_argcount;
+        n[i] = i < c->code->co_argcount;
     }
     for (int pc = 0; pc < c->ncode;) {
         int base, oparg, op;
         int next = decode(c, pc, &base, &oparg, &op);
-        if (base == STORE_FAST || base == DELETE_FAST || base == LOAD_FAST_AND_CLEAR) {
-            fixed[oparg] = 0;
+        int a = -1, b = -1;
+        if (base == STORE_FAST || base == DELETE_FAST || base == LOAD_FAST_AND_CLEAR || base == MAKE_CELL) {
+            a = oparg;
         }
-        else if (base == STORE_FAST_LOAD_FAST) {
-            fixed[oparg >> 4] = 0;
+        else if (base == STORE_FAST_LOAD_FAST || base == STORE_FAST_STORE_FAST) {
+            a = oparg >> 4;
+            b = base == STORE_FAST_STORE_FAST ? oparg & 15 : -1;
         }
-        else if (base == STORE_FAST_STORE_FAST) {
-            fixed[oparg >> 4] = 0;
-            fixed[oparg & 15] = 0;
-        }
-        else if (base == MAKE_CELL) {
-            fixed[oparg] = 0;
+        for (int k = 0; k < 2; k++) {
+            int i = k == 0 ? a : b;
+            if (i >= 0 && i < c->nlocals && n[i] < 2) {
+                n[i]++;
+            }
         }
         pc = next;
+    }
+    return n;
+}
+
+/* The parameters the code never rebinds: per local, 1. */
+static uint8_t *
+fixed_params(struct ctx *c)
+{
+    uint8_t *fixed = bindings(c);
+    for (int i = 0; i < c->nlocals; i++) {
+        fixed[i] = i < c->code->co_argcount && fixed[i] == 1;
     }
     return fixed;
 }
@@ -902,6 +914,16 @@ catcher(struct ctx *c, struct lu_fs *fs, struct ctx **k, int *handler, int *leve
     return 0;
 }
 
+/* The frame the unit is compiled for. */
+static struct ctx *
+root_of(struct ctx *c)
+{
+    while (c->parent != NULL) {
+        c = c->parent;
+    }
+    return c;
+}
+
 /* The landing of an exception raised by the instruction whose state is
    fs, which frame k's handler takes: the exception, with the root's
    traceback entry when the root is the frame it is caught in (kernel
@@ -914,10 +936,7 @@ static void
 catch_here(struct ctx *c, struct lu_fs *fs, int drop, struct ctx *k, int handler, int level,
            int lasti, int at)
 {
-    struct ctx *root = c;
-    while (root->parent != NULL) {
-        root = root->parent;
-    }
+    struct ctx *root = root_of(c);
     lu_v args[2] = { konst(c, (PyObject *)root->code), const_i(c, k == root && !hidden(root->code) ? at : -1) };
     lu_v exc = helper(c, H_catch, 2, args);
     I(c, exc)->fs = fs;
@@ -1640,6 +1659,19 @@ static int unary_op(struct ctx *c);
 static int call(struct ctx *c);
 static int type_arms(struct ctx *c, int n, int d0, int d1, int lk, int rk, int (*build)(struct ctx *));
 
+/* Whether v is a constant int a machine int cannot hold (beyond 64 bits):
+   an int kind's unboxed path would always leave on it. */
+static int
+wide_const(struct ctx *c, lu_v v)
+{
+    PyObject *k = I(c, v)->op == OP_CONST ? known(c, v) : NULL;
+    int overflow = 0;
+    if (k != NULL && PyLong_CheckExact(k)) {
+        PyLong_AsLongLongAndOverflow(k, &overflow);
+    }
+    return overflow != 0;
+}
+
 /* The exact type a kind names, or NULL for OTHER. */
 static PyTypeObject *
 kind_type(int kind)
@@ -1674,11 +1706,17 @@ operand_pairs(struct ctx *c, int lk, int rk, PyTypeObject *pairs[][2])
     }
     int site = (int)(c->cache - 1 - lu_code_start(c->code));
     struct lu_opclasses *t = lu_jit_opclasses(c->code, site);
-    if (t == NULL || __atomic_load_n(&t->mega, __ATOMIC_ACQUIRE)) {
+    if (t == NULL || __atomic_load_n(&t->n, __ATOMIC_ACQUIRE) == 0) {
+        /* Not noted yet: from now on, and the first pair recompiles. */
+        t = lu_jit_want_classes(c->code, site);
+        struct lu_fdep dep = { .kind = LU_DEP_CALLEES, .obj = (uintptr_t)t, .code = c->code, .pc = c->pc };
+        lu_ir_dep(c->f, &dep);
+        c->f->unfed = 1;
         return 0;
     }
-    struct lu_fdep dep = { .kind = LU_DEP_CALLEES, .obj = (uintptr_t)t, .code = c->code, .pc = c->pc };
-    lu_ir_dep(c->f, &dep);
+    if (__atomic_load_n(&t->mega, __ATOMIC_ACQUIRE)) {
+        return 0;
+    }
     for (int i = 0, k = __atomic_load_n(&t->n, __ATOMIC_ACQUIRE); i < k; i++) {
         PyTypeObject *l = t->e[i].left, *r = t->e[i].right;
         int seen = 0;
@@ -1873,9 +1911,9 @@ binary_op(struct ctx *c)
     if (nospec(c, c->pc)) {
         lk = rk = LU_KIND_OTHER;
     }
-    if (known_type(c, a) == &PyLong_Type) lk = LU_KIND_INT;
+    if (known_type(c, a) == &PyLong_Type && !wide_const(c, a)) lk = LU_KIND_INT;
     if (known_type(c, a) == &PyFloat_Type) lk = LU_KIND_FLOAT;
-    if (known_type(c, b) == &PyLong_Type) rk = LU_KIND_INT;
+    if (known_type(c, b) == &PyLong_Type && !wide_const(c, b)) rk = LU_KIND_INT;
     if (known_type(c, b) == &PyFloat_Type) rk = LU_KIND_FLOAT;
     if (op != NB_SUBSCR) {
         int armed = operator_arms(c, 2, lk, rk, binary_op);
@@ -1991,9 +2029,9 @@ compare_op(struct ctx *c)
     if (nospec(c, c->pc)) {
         lk = rk = LU_KIND_OTHER;
     }
-    if (known_type(c, a) == &PyLong_Type) lk = LU_KIND_INT;
+    if (known_type(c, a) == &PyLong_Type && !wide_const(c, a)) lk = LU_KIND_INT;
     if (known_type(c, a) == &PyFloat_Type) lk = LU_KIND_FLOAT;
-    if (known_type(c, b) == &PyLong_Type) rk = LU_KIND_INT;
+    if (known_type(c, b) == &PyLong_Type && !wide_const(c, b)) rk = LU_KIND_INT;
     if (known_type(c, b) == &PyFloat_Type) rk = LU_KIND_FLOAT;
     int armed = operator_arms(c, 2, lk, rk, compare_op);
     if (armed != 0) {
@@ -2431,6 +2469,40 @@ note_gen_made(struct ctx *c, lu_v v, PyCodeObject *code, PyFunctionObject *fn)
     set_known(c, v, &PyGen_Type);
 }
 
+/* The one value phi v joins, its self-references aside, or LU_NOV. */
+static lu_v
+phi_one(struct ctx *c, lu_v v, int depth)
+{
+    if (I(c, v)->op != OP_PHI) {
+        return v;
+    }
+    lu_v w = LU_NOV;
+    for (int i = 0; i < I(c, v)->nargs && depth < 8; i++) {
+        lu_v a = I(c, v)->args[i];
+        lu_v r = a == v ? w : phi_one(c, a, depth + 1);
+        if (r == LU_NOV || (w != LU_NOV && r != w)) {
+            return LU_NOV;
+        }
+        w = r;
+    }
+    return w;
+}
+
+/* v, or for a phi a local the code binds once holds, the value it was
+   bound to: what the local holds on every path, also through a loop's phi
+   built before its back edges. */
+static lu_v
+held_once(struct ctx *c, lu_v v)
+{
+    for (int i = 0; I(c, v)->op == OP_PHI && i < c->nlocals; i++) {
+        if (c->st.v[i] == v) {
+            lu_v w = bindings(c)[i] == 1 ? phi_one(c, v, 0) : LU_NOV;
+            return w != LU_NOV ? w : v;
+        }
+    }
+    return v;
+}
+
 /* Whether a local of c holds v. */
 static int
 local_holds(struct ctx *c, lu_v v)
@@ -2443,11 +2515,13 @@ local_holds(struct ctx *c, lu_v v)
     return 0;
 }
 
-/* The first instruction from `first` on that may run Python or let a
-   walker see frames, or LU_NOV: a generator resumed in line is not a real
-   frame until an exit makes it one, so its body makes no such call. A
-   release that may run a finalizer is allowed, as it is in any inlined
-   frame (no frame is pushed for it). */
+/* The first instruction from `first` on that may run Python, or LU_NOV: a
+   generator resumed in line is not a real frame until an exit makes it
+   one, so its body makes no such call. What only lets a walker see the
+   frames (a release that may run a finalizer, a park: IF_SEEN) is allowed,
+   as in any inlined frame, whose frame is not pushed for it either: the
+   generator is executing, so a collection does not read its frame, whose
+   values are those of its last yield until it yields again. */
 static lu_v
 calls_out(struct lu_func *f, lu_v first)
 {
@@ -2457,7 +2531,7 @@ calls_out(struct lu_func *f, lu_v first)
         if ((in->flags & INS_DEAD) || (in->op == OP_HELPER && in->imm == H_gen_finish)) {
             continue;
         }
-        if ((flags & (IF_PY | IF_SEEN)) || (in->op == OP_TRUTH && in->imm != 1)) {
+        if ((flags & IF_PY) || (in->op == OP_TRUTH && in->imm != 1)) {
             return v;
         }
     }
@@ -3497,9 +3571,19 @@ intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
         lu_v n = emit(c, OP_LOAD, REP_I64, args[0], LU_NOV, LU_NOV, offsetof(PyVarObject, ob_size));
         return box_int(c, n);
     }
-    if (nargs == 1 && known_type(c, args[0]) == &PyUnicode_Type && strcmp(name, "size") == 0) {
+    if (nargs == 1 && known_type(c, args[0]) == &PyUnicode_Type
+        && (strcmp(name, "size") == 0 || strcmp(name, "str_len") == 0)) {
         lu_v n = emit(c, OP_LOAD, REP_I64, args[0], LU_NOV, LU_NOV, offsetof(PyASCIIObject, length));
         return box_int(c, n);
+    }
+    if (nargs == 2 && strcmp(name, "str_item") == 0 && !nospec(c, c->pc)) {
+        /* The code point read in line from an exact str, its str made
+           without boxing the index (an int: str.__getitem__ made it one). */
+        guard_type(c, args[0], &PyUnicode_Type);
+        guard_type(c, args[1], &PyLong_Type);
+        lu_v cp = emit(c, OP_STR_ORD, REP_I64, args[0], unbox_int(c, args[1]), LU_NOV, 0);
+        I(c, cp)->fs = before(c);
+        return helper_raising(c, H_str_char, 1, &cp, c->oparg + 2);
     }
     if (nargs == 2 && strcmp(name, "str_ord") == 0 && !nospec(c, c->pc)) {
         /* The code point read in line from an exact str's data, by its kind. */
@@ -3555,6 +3639,37 @@ intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
         }
         *owned = 0;
         return konst(c, sub ? Py_True : Py_False);
+    }
+    if ((nargs == 2 || nargs == 3) && (strcmp(name, nargs == 2 ? "field_get" : "field_set") == 0)
+        && known_type(c, args[0]) != NULL && I(c, args[1])->op == OP_CONST && known(c, args[1]) != NULL
+        && PyLong_CheckExact(known(c, args[1]))) {
+        /* A field of a known layout: its offset found now, not per call. */
+        long i;
+        Py_ssize_t off = lu_long_as_long(known(c, args[1]), &i) < 0 ? -1 : lu_field_offset(known_type(c, args[0]), i);
+        PyErr_Clear();
+        if (off >= 0) {
+            lu_v hargs[3] = { args[0], const_i(c, off), nargs == 3 ? args[2] : LU_NOV };
+            if (nargs == 2) {
+                return helper(c, H_field_get, 2, hargs);
+            }
+            helper(c, H_field_set, 3, hargs);
+            *owned = 0;
+            return konst(c, Py_None);
+        }
+    }
+    if (nargs == 2 && strcmp(name, "kind") == 0 && known_type(c, args[0]) != NULL && known(c, args[1]) != NULL
+        && PyUnicode_CheckExact(known(c, args[1]))) {
+        /* A known type's kind: by its flags, or by its bases where they
+           cannot change. */
+        PyTypeObject *t = known_type(c, args[0]);
+        const char *k = PyUnicode_AsUTF8(known(c, args[1]));
+        int r = lu_kind_of_type(t, k);
+        int flagged = strcmp(k, "float") != 0 && strcmp(k, "complex") != 0 && strcmp(k, "bytearray") != 0
+            && strcmp(k, "set") != 0 && strcmp(k, "frozenset") != 0;
+        if (r >= 0 && (flagged || (t->tp_flags & Py_TPFLAGS_IMMUTABLETYPE))) {
+            *owned = 0;
+            return konst(c, r ? Py_True : Py_False);
+        }
     }
     if (nargs == 2 && strcmp(name, "list_append") == 0 && known_type(c, args[0]) == &PyList_Type) {
         helper_raising(c, H_list_append, 2, args, c->oparg + 2);
@@ -3992,6 +4107,19 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *new, PyFunctionObj
     return 1;
 }
 
+/* Whether c is a frame of a FOR_ITER's step in line (iter_step), or
+   inlined in one. */
+static int
+in_step(struct ctx *c)
+{
+    for (struct ctx *p = c; p->parent != NULL; p = p->parent) {
+        if (p->ret == LU_RETURN_FOR_ITER) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Whether the call at c->pc, which this frame cannot inline, compiles
    here. In an inlined frame it pushes the inlined frames as real ones, in
    line (luc-hez4), for the call: so a callee one deep (kernel code two,
@@ -4007,13 +4135,8 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *new, PyFunctionObj
 static int
 opaque_call(struct ctx *c)
 {
-    if (c->parent == NULL) {
+    if (c->parent == NULL || in_step(c)) {
         return 1;
-    }
-    for (struct ctx *p = c; p->parent != NULL; p = p->parent) {
-        if (p->ret == LU_RETURN_FOR_ITER) {
-            return 1;
-        }
     }
     if (__atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED) == 0) {
         unsupported(c);
@@ -4027,9 +4150,17 @@ opaque_call(struct ctx *c)
         pc = next;
     }
     if (c->depth > (c->kernel ? 2 : 1) || c->ncalls++ > 0 || loop) {
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: a call it cannot inline at %s@%d: depth %d, calls %d, loop after %d\n",
+                    PyUnicode_AsUTF8(c->code->co_qualname), c->pc, c->depth, c->ncalls, loop);
+        }
         c->failed = 1;
         c->why = "a call it cannot inline";
         return 0;
+    }
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: a call it makes at %s@%d: depth %d\n", PyUnicode_AsUTF8(c->code->co_qualname), c->pc,
+                c->depth);
     }
     return 1;
 }
@@ -4259,10 +4390,12 @@ call(struct ctx *c)
         || (PyFunction_Check(kc) && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL))) ? fn : NULL;
     if (n >= 1 && (kfn != NULL || (kc != NULL && PyType_Check(kc) && kc != (PyObject *)&PyType_Type
                                    && !(((PyTypeObject *)kc)->tp_flags & Py_TPFLAGS_HEAPTYPE)))
-        && c->base == CALL) {
+        && c->base == CALL && (!root_of(c)->kernel || in_step(c))) {
         /* A builtin customized by the classes of its first arguments,
            which its kernel code dispatches on: one arm per pair met.
-           type(x) is a load already. */
+           type(x) is a load already. Not in a unit of kernel code, which
+           serves every caller (getattr_hook's): its arms would leave on
+           most; but in a FOR_ITER's step, the loop's body. */
         int kinds = feedback(c, c->cache);
         int armed = type_arms(c, n >= 2 ? 2 : 1, n, n >= 2 ? n - 1 : n, kinds & 0xff, kinds >> 8, call);
         if (armed != 0) {
@@ -4383,11 +4516,12 @@ call(struct ctx *c)
     }
     PyFunctionObject *gfn;
     PyCodeObject *gco;
+    PyFunctionObject *instead = NULL;   /* the function the call became, if not the callable's */
     if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
         && PyUnicode_CompareWithASCIIString(fn->func_qualname, "next_item") == 0
-        && (gco = gen_made(c, args[0], &gfn)) != NULL && local_holds(c, args[0])) {
+        && (gco = gen_made(c, held_once(c, args[0]), &gfn)) != NULL && local_holds(c, args[0])) {
         /* The iteration step of a generator whose code is known: resumed in line. */
-        lu_v next = inline_resume(c, args[0], gco, gfn, LU_RETURN_NEXT);
+        lu_v next = inline_resume(c, held_once(c, args[0]), gco, gfn, LU_RETURN_NEXT);
         if (next != LU_NOV) {
             pop_call(c, n);
             push(c, next, 1);
@@ -4420,7 +4554,7 @@ call(struct ctx *c)
             : (Py_IS_TYPE(descr, &PyMethodDescr_Type) || Py_IS_TYPE(descr, &PyWrapperDescr_Type))
               ? kernel_function(descr, &dself) : NULL;
         if (target != NULL) {
-            fn = target;
+            fn = instead = target;
             memmove(args, args + 1, sizeof(lu_v) * (size_t)(nargs - 1));
             memmove(own, own + 1, (size_t)(nargs - 1));
             nargs--;
@@ -4449,7 +4583,7 @@ call(struct ctx *c)
     }
     PyFunctionObject *twin = fn != NULL && bound == NULL && fnv == LU_NOV ? lu_kernel_twin(fn, nargs) : NULL;
     if (twin != NULL) {
-        fn = twin;              /* a kernel function's fixed-arity form: no *args or **kwargs to make */
+        fn = instead = twin;    /* a kernel function's fixed-arity form: no *args or **kwargs to make */
     }
     if (fn != NULL && bound == NULL) {
         /* The callee takes the arguments' references; the rest go here. */
@@ -4525,11 +4659,11 @@ call(struct ctx *c)
     }
     /* A call of a generator function whose code is known (a function the
        code was compiled for, or one this code made) makes a generator of
-       that code. */
+       that code, also with a first argument in the self word (a genexpr's
+       iterator). */
     struct lu_ins *made = I(c, callable);
     gfn = NULL;
-    gco = self != LU_NOV ? NULL
-        : fn != NULL && bound == NULL && PyCode_Check(fn->func_code) && fn->func_version >= 2
+    gco = fn != NULL && bound == NULL && PyCode_Check(fn->func_code) && fn->func_version >= 2
           ? (gfn = fn, (PyCodeObject *)fn->func_code)
         : made->op == OP_HELPER && made->imm == H_make_function && I(c, made->args[0])->op == OP_CONST
           ? (PyCodeObject *)(intptr_t)I(c, made->args[0])->imm : NULL;
@@ -4540,12 +4674,22 @@ call(struct ctx *c)
         guard_func(c, gfn);     /* its code is what the call runs */
     }
     lu_v hargs[34];
-    hargs[0] = newfn != NULL ? konst(c, (PyObject *)newfn) : callable;
-    hargs[1] = newfn != NULL ? callable : self != LU_NOV ? self : konst(c, NULL);    /* __new__'s class first */
-    for (int i = 0; i < n; i++) {
-        hargs[2 + i] = peek(c, n - i);
+    int nh = n + 2;
+    if (instead != NULL) {
+        /* What the call became (a twin, call_special's function), called. */
+        hargs[0] = konst(c, (PyObject *)instead);
+        hargs[1] = konst(c, NULL);
+        memcpy(hargs + 2, args, sizeof(lu_v) * (size_t)nargs);
+        nh = nargs + 2;
     }
-    r = helper_raising(c, H_call, n + 2, hargs, n + 2);
+    else {
+        hargs[0] = newfn != NULL ? konst(c, (PyObject *)newfn) : callable;
+        hargs[1] = newfn != NULL ? callable : self != LU_NOV ? self : konst(c, NULL);    /* __new__'s class first */
+        for (int i = 0; i < n; i++) {
+            hargs[2 + i] = peek(c, n - i);
+        }
+    }
+    r = helper_raising(c, H_call, nh, hargs, n + 2);
     I(c, r)->imm2 = 1 + (fn != NULL ? CNT_call_refused : kc != NULL ? CNT_call_c
                          : poly_join(c, callable) ? CNT_call_poly : CNT_call_unknown);
     if (_PyRuntime.jit.debug) {

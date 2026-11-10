@@ -735,6 +735,44 @@ struct slot {
 #define SQ(f, t) { #f, IN_SEQUENCE, offsetof(PySequenceMethods, f), (void *)(t) }
 #define AM(f) { #f, IN_ASYNC, offsetof(PyAsyncMethods, f), NULL }
 #define BF(f, t) { #f, IN_BUFFER, offsetof(PyBufferProcs, f), (void *)(t) }
+#define NB_SLOTS(X) \
+    X(nb_add, slot_nb_add) \
+    X(nb_subtract, slot_nb_subtract) \
+    X(nb_multiply, slot_nb_multiply) \
+    X(nb_remainder, slot_nb_remainder) \
+    X(nb_divmod, slot_nb_divmod) \
+    X(nb_power, slot_nb_power) \
+    X(nb_negative, slot_nb_negative) \
+    X(nb_positive, slot_nb_positive) \
+    X(nb_absolute, slot_nb_absolute) \
+    X(nb_bool, slot_nb_bool) \
+    X(nb_invert, slot_nb_invert) \
+    X(nb_lshift, slot_nb_lshift) \
+    X(nb_rshift, slot_nb_rshift) \
+    X(nb_and, slot_nb_and) \
+    X(nb_xor, slot_nb_xor) \
+    X(nb_or, slot_nb_or) \
+    X(nb_int, slot_nb_int) \
+    X(nb_float, slot_nb_float) \
+    X(nb_inplace_add, slot_nb_inplace_add) \
+    X(nb_inplace_subtract, slot_nb_inplace_subtract) \
+    X(nb_inplace_multiply, slot_nb_inplace_multiply) \
+    X(nb_inplace_remainder, slot_nb_inplace_remainder) \
+    X(nb_inplace_power, slot_nb_inplace_power) \
+    X(nb_inplace_lshift, slot_nb_inplace_lshift) \
+    X(nb_inplace_rshift, slot_nb_inplace_rshift) \
+    X(nb_inplace_and, slot_nb_inplace_and) \
+    X(nb_inplace_xor, slot_nb_inplace_xor) \
+    X(nb_inplace_or, slot_nb_inplace_or) \
+    X(nb_floor_divide, slot_nb_floor_divide) \
+    X(nb_true_divide, slot_nb_true_divide) \
+    X(nb_inplace_floor_divide, slot_nb_inplace_floor_divide) \
+    X(nb_inplace_true_divide, slot_nb_inplace_true_divide) \
+    X(nb_index, slot_nb_index) \
+    X(nb_matrix_multiply, slot_nb_matrix_multiply) \
+    X(nb_inplace_matrix_multiply, slot_nb_inplace_matrix_multiply) \
+
+#define NB_ENTRY(f, t) NB(f, t),
 static const struct slot slots[] = {
     TP(tp_getattr, NULL), TP(tp_setattr, NULL),
     TP(tp_getattro, lu_slot_tp_getattro), TP(tp_setattro, lu_slot_tp_setattro),
@@ -744,25 +782,7 @@ static const struct slot slots[] = {
     TP(tp_descr_get, slot_tp_descr_get), TP(tp_descr_set, slot_tp_descr_set),
     TP(tp_init, slot_tp_init), TP(tp_new, slot_tp_new), TP(tp_finalize, slot_tp_finalize),
     BF(bf_getbuffer, slot_bf_getbuffer), BF(bf_releasebuffer, slot_bf_releasebuffer), AM(am_await), AM(am_aiter), AM(am_anext),
-    NB(nb_add, slot_nb_add), NB(nb_subtract, slot_nb_subtract),
-    NB(nb_multiply, slot_nb_multiply), NB(nb_remainder, slot_nb_remainder),
-    NB(nb_divmod, slot_nb_divmod), NB(nb_power, slot_nb_power),
-    NB(nb_negative, slot_nb_negative), NB(nb_positive, slot_nb_positive),
-    NB(nb_absolute, slot_nb_absolute), NB(nb_bool, slot_nb_bool),
-    NB(nb_invert, slot_nb_invert), NB(nb_lshift, slot_nb_lshift), NB(nb_rshift, slot_nb_rshift),
-    NB(nb_and, slot_nb_and), NB(nb_xor, slot_nb_xor), NB(nb_or, slot_nb_or),
-    NB(nb_int, slot_nb_int), NB(nb_float, slot_nb_float),
-    NB(nb_inplace_add, slot_nb_inplace_add), NB(nb_inplace_subtract, slot_nb_inplace_subtract),
-    NB(nb_inplace_multiply, slot_nb_inplace_multiply),
-    NB(nb_inplace_remainder, slot_nb_inplace_remainder),
-    NB(nb_inplace_power, slot_nb_inplace_power), NB(nb_inplace_lshift, slot_nb_inplace_lshift),
-    NB(nb_inplace_rshift, slot_nb_inplace_rshift), NB(nb_inplace_and, slot_nb_inplace_and),
-    NB(nb_inplace_xor, slot_nb_inplace_xor), NB(nb_inplace_or, slot_nb_inplace_or),
-    NB(nb_floor_divide, slot_nb_floor_divide), NB(nb_true_divide, slot_nb_true_divide),
-    NB(nb_inplace_floor_divide, slot_nb_inplace_floor_divide),
-    NB(nb_inplace_true_divide, slot_nb_inplace_true_divide), NB(nb_index, slot_nb_index),
-    NB(nb_matrix_multiply, slot_nb_matrix_multiply),
-    NB(nb_inplace_matrix_multiply, slot_nb_inplace_matrix_multiply),
+    NB_SLOTS(NB_ENTRY)
     MP(mp_length, slot_length), MP(mp_subscript, slot_mp_subscript),
     MP(mp_ass_subscript, slot_mp_ass_subscript),
     SQ(sq_length, slot_length), SQ(sq_concat, NULL), SQ(sq_repeat, NULL), SQ(sq_item, slot_sq_item),
@@ -801,6 +821,18 @@ slot_base(PyTypeObject *tp, int where, int create)
         *sub = PyMem_RawCalloc(1, size);
     }
     return *sub;
+}
+
+/* The thunk of each PyNumberMethods field, by its index. */
+#define NB_THUNK(f, t) [offsetof(PyNumberMethods, f) / sizeof(void *)] = (void *)(t),
+static void *const nb_thunks[sizeof(PyNumberMethods) / sizeof(void *)] = { NB_SLOTS(NB_THUNK) };
+
+int
+lu_nb_slot_kind(PyTypeObject *tp, size_t offset)
+{
+    void *fn = tp->tp_as_number != NULL ? *(void **)((char *)tp->tp_as_number + offset) : NULL;
+    void *thunk = nb_thunks[offset / sizeof(void *)];
+    return fn == NULL ? 0 : thunk == NULL || fn == thunk ? -1 : 1;
 }
 
 int

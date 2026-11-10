@@ -1457,6 +1457,16 @@ PyObject *lu_kernel_function_of(PyObject *callable, PyObject **self);
 /* The twin of kernel function f for calls of nargs positional arguments
    and no keywords (the kernel_twin primitive), borrowed, or NULL. */
 PyFunctionObject *lu_kernel_twin(PyFunctionObject *f, int nargs);
+/* The kernel's kind(x, name) for every x of exact type t (prim/type.c): 1 or
+   0, or -1 for a name it does not know or one ("kernel") that is not the
+   type's. */
+int lu_kind_of_type(PyTypeObject *t, const char *kind);
+/* The kernel's field_get and field_set (object/descr.c): field i's offset
+   in an instance of tp, or -1; and the field read (a new reference, None
+   for none) and written at that offset, under the object's lock. */
+Py_ssize_t lu_field_offset(PyTypeObject *tp, long i);
+PyObject *lu_field_get(PyObject *obj, Py_ssize_t off);
+void lu_field_set(PyObject *obj, Py_ssize_t off, PyObject *value);
 /* The step next_item takes for an iterator of exact type t (next_missing_set),
    borrowed, or None. */
 PyObject *lu_next_missing_of(PyObject *t);
@@ -1479,6 +1489,25 @@ PyObject *lu_call_kernel(enum lu_kernel_id id, PyObject *const *args, Py_ssize_t
 PyObject *lu_subscr_native(PyObject *container, PyObject *sub);
 /* container[start:stop:step] as lu_subscr_native answers it for a slice. */
 PyObject *lu_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *step);
+/* list[lo:hi] = seq for a tuple or list seq (prim/storage.c's list_splice),
+   the bounds clamped under the list's lock: 0, -1 with an error, or 1 when
+   the list's length is no longer expect (>= 0) and nothing was done. */
+int lu_list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, Py_ssize_t expect);
+/* container[start:stop] = v without Python: an exact list, int or None
+   bounds and a tuple or list v. 0, -1 with an error, or 1 when the kernel
+   must do it. */
+int lu_store_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *v);
+/* container[sub] = v for a slice sub without a step, as lu_store_slice_native. */
+int lu_setitem_slice_native(PyObject *container, PyObject *sub, PyObject *v);
+/* Type tp's number slot at offset in PyNumberMethods (types/slots.c): 1 for
+   an extension's C function, 0 for none, -1 for the runtime's (a kernel
+   type's or a class's, which runs the kernel). */
+int lu_nb_slot_kind(PyTypeObject *tp, size_t offset);
+/* BINARY_OP's oparg (not NB_SUBSCR) on a and b by their extension types'
+   number slots, as CPython's binary_op1 and binary_iop1: the result, or
+   NULL (with an error when a slot raised) when it is the kernel's to
+   decide, because a slot is the runtime's or every slot declined. */
+PyObject *lu_binary_foreign(PyObject *a, PyObject *b, int op);
 /* container[start:stop] for an exact list, tuple, str or bytes by machine-int
    bounds, either None as `none` says (bit 0 the start, bit 1 the stop): a new
    reference, or NULL without an error for another type. */

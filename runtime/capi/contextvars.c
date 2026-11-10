@@ -24,6 +24,20 @@ PyContextVar_New(const char *name, PyObject *def)
 int
 PyContextVar_Get(PyObject *var, PyObject *default_value, PyObject **val)
 {
+    /* A value the current context holds, read as ContextVar.get reads it
+       (its _data dict) without calling it; the rest is the method's. */
+    PyObject *ctx = PyThreadState_Get()->context, *data = NULL;
+    int has = ctx != NULL ? PyObject_GetOptionalAttrString(ctx, "_data", &data) : 0;
+    if (has > 0) {
+        int found = PyDict_CheckExact(data) ? PyDict_GetItemRef(data, var, val) : 0;
+        Py_DECREF(data);
+        if (found != 0) {
+            return found < 0 ? -1 : 0;
+        }
+    }
+    else if (has < 0) {
+        PyErr_Clear();          /* the method answers, or raises, instead */
+    }
     PyObject *r = default_value != NULL ? PyObject_CallMethod(var, "get", "O", default_value)
                                         : PyObject_CallMethod(var, "get", NULL);
     if (r == NULL && PyErr_ExceptionMatches(PyExc_LookupError)) {

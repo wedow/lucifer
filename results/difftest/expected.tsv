@@ -73,6 +73,7 @@ tests/diff/corpus/exception_suppress_chain.py	NOTRUN	0.000000
 tests/diff/corpus/exception_target_cleared.py	NOTRUN	0.000000
 tests/diff/corpus/exception_traceback_frames.py	NOTRUN	0.000000
 tests/diff/corpus/exception_uncaught_traceback.py	NOTRUN	0.000000
+tests/diff/corpus/extension_number_slots.py	NOTRUN	0.000000
 tests/diff/corpus/finalizer_resurrection.py	NOTRUN	0.000000
 tests/diff/corpus/finalizer_single_cycle.py	NOTRUN	0.000000
 tests/diff/corpus/float_floor_mod.py	NOTRUN	0.000000
@@ -85,6 +86,7 @@ tests/diff/corpus/float_round_ties.py	NOTRUN	0.000000
 tests/diff/corpus/float_signed_zero.py	NOTRUN	0.000000
 tests/diff/corpus/function_defaults_kwonly.py	NOTRUN	0.000000
 tests/diff/corpus/generator_close_delegation.py	NOTRUN	0.000000
+tests/diff/corpus/generator_consumed_in_line.py	NOTRUN	0.000000
 tests/diff/corpus/generator_pep479.py	NOTRUN	0.000000
 tests/diff/corpus/generator_reentry.py	NOTRUN	0.000000
 tests/diff/corpus/generator_send_return.py	NOTRUN	0.000000
@@ -104,6 +106,7 @@ tests/diff/corpus/int_shift_edges.py	NOTRUN	0.000000
 tests/diff/corpus/int_type_change_after_warmup.py	NOTRUN	0.000000
 tests/diff/corpus/list_iteration_mutation.py	NOTRUN	0.000000
 tests/diff/corpus/list_slice_alias.py	NOTRUN	0.000000
+tests/diff/corpus/list_slice_store_native.py	NOTRUN	0.000000
 tests/diff/corpus/memoryview_alias_release.py	NOTRUN	0.000000
 tests/diff/corpus/metaclass_call.py	NOTRUN	0.000000
 tests/diff/corpus/metaclass_init_subclass.py	NOTRUN	0.000000

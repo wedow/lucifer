@@ -444,6 +444,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/extension_number_slots.py": {
+      "exit": 0,
+      "sha256": "49e2b8a10a643025b2df0cba720bc9bd3d50e22619229557fda6b5d55497d5d5",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/finalizer_resurrection.py": {
       "exit": 0,
       "sha256": "853e3235d1ec6f734069ce15ed1ab2cebb0d892d96f25cb370cb898730a1ff7d",
@@ -513,6 +519,12 @@
     "tests/diff/corpus/generator_close_delegation.py": {
       "exit": 0,
       "sha256": "1a719cca8c56dcf82cdf4a2f5170bd78cfa2cc42e47a4d24558d4c7d0f2395ae",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/generator_consumed_in_line.py": {
+      "exit": 0,
+      "sha256": "8552c2cb98d725551d1691e58bd63c3a26c45d7e5e41b45810bba20304ecd351",
       "state": false,
       "timing": false
     },
@@ -627,6 +639,12 @@
     "tests/diff/corpus/list_slice_alias.py": {
       "exit": 0,
       "sha256": "198d96d653e7dcf72c88339feeb3e1157d2104dcc22363134428a29681698217",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/list_slice_store_native.py": {
+      "exit": 0,
+      "sha256": "0a0928c86fc99b4e8d677e6ae2546b8a776b315e42b51ea289eab093bdecbd28",
       "state": false,
       "timing": false
     },

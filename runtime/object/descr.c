@@ -1528,8 +1528,8 @@ prim_instancemethod_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 /* field_get(obj, i), field_set(obj, i, value): the object fields after the
    header of the layouts whose behaviour is kernel Python. */
-static Py_ssize_t
-field_offset(PyObject *obj, PyObject *index)
+Py_ssize_t
+lu_field_offset(PyTypeObject *tp, long i)
 {
     extern PyTypeObject lu_coro_wrapper_type, lu_async_gen_athrow_type, lu_async_gen_wrapped_type;
     static PyTypeObject *const types[] = { &PyProperty_Type, &PyClassMethod_Type,
@@ -1541,23 +1541,51 @@ field_offset(PyObject *obj, PyObject *index)
                                            &PyFrameLocalsProxy_Type,
                                            &Py_GenericAliasType, &_PyUnion_Type };
     static const int counts[] = { 5, 2, 2, 3, 1, 1, 3, 3, 1, 3, 3, 3, 3, 3, 3, 1, 4, 4 };
+    /* the exact types first: a subclass instance is the rare case */
+    size_t t = 0, n = sizeof types / sizeof types[0];
+    while (t < n && tp != types[t]) {
+        t++;
+    }
+    for (t = t < n ? t : 0; t < n && !PyType_IsSubtype(tp, types[t]); t++) {
+    }
+    return t < n && i >= 0 && i < counts[t] ? (Py_ssize_t)(sizeof(PyObject) + i * sizeof(PyObject *)) : -1;
+}
+
+static Py_ssize_t
+field_offset(PyObject *obj, PyObject *index)
+{
     long i;
     if (!PyLong_CheckExact(index) || lu_long_as_long(index, &i) < 0) {
         return -1;
     }
-    /* the exact types first: a subclass instance is the rare case */
-    size_t t = 0, n = sizeof types / sizeof types[0];
-    while (t < n && !Py_IS_TYPE(obj, types[t])) {
-        t++;
+    Py_ssize_t off = lu_field_offset(Py_TYPE(obj), i);
+    if (off < 0) {
+        lu_err_format(PyExc_SystemError, "field %ld of a '%s' is not kernel-writable", i,
+                      Py_TYPE(obj)->tp_name);
     }
-    for (t = t < n ? t : 0; t < n && !PyObject_TypeCheck(obj, types[t]); t++) {
-    }
-    if (t < n && i >= 0 && i < counts[t]) {
-        return (Py_ssize_t)(sizeof(PyObject) + i * sizeof(PyObject *));
-    }
-    lu_err_format(PyExc_SystemError, "field %ld of a '%s' is not kernel-writable", i,
-                  Py_TYPE(obj)->tp_name);
-    return -1;
+    return off;
+}
+
+PyObject *
+lu_field_get(PyObject *obj, Py_ssize_t off)
+{
+    PyObject *v;
+    Py_BEGIN_CRITICAL_SECTION(obj);
+    v = *(PyObject **)((char *)obj + off);
+    v = Py_NewRef(v != NULL ? v : Py_None);
+    Py_END_CRITICAL_SECTION();
+    return v;
+}
+
+void
+lu_field_set(PyObject *obj, Py_ssize_t off, PyObject *value)
+{
+    PyObject *old;
+    Py_BEGIN_CRITICAL_SECTION(obj);
+    old = *(PyObject **)((char *)obj + off);
+    *(PyObject **)((char *)obj + off) = Py_NewRef(value);
+    Py_END_CRITICAL_SECTION();
+    Py_XDECREF(old);            /* outside the lock: a finalizer may run */
 }
 
 static PyObject *
@@ -1565,15 +1593,7 @@ prim_field_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2);
     Py_ssize_t off = field_offset(args[0], args[1]);
-    if (off < 0) {
-        return NULL;
-    }
-    PyObject *v;
-    Py_BEGIN_CRITICAL_SECTION(args[0]);
-    v = *(PyObject **)((char *)args[0] + off);
-    v = Py_NewRef(v != NULL ? v : Py_None);
-    Py_END_CRITICAL_SECTION();
-    return v;
+    return off < 0 ? NULL : lu_field_get(args[0], off);
 }
 
 static PyObject *
@@ -1584,12 +1604,7 @@ prim_field_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (off < 0) {
         return NULL;
     }
-    PyObject *old;
-    Py_BEGIN_CRITICAL_SECTION(args[0]);
-    old = *(PyObject **)((char *)args[0] + off);
-    *(PyObject **)((char *)args[0] + off) = Py_NewRef(args[2]);
-    Py_END_CRITICAL_SECTION();
-    Py_XDECREF(old);            /* outside the lock: a finalizer may run */
+    lu_field_set(args[0], off, args[2]);
     return Py_NewRef(Py_None);
 }
 

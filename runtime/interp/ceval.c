@@ -422,6 +422,98 @@ lu_slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObje
     return slice_take(container, length, start, step, count);
 }
 
+int
+lu_store_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *v)
+{
+    if (!PyList_CheckExact(container) || !(PyList_CheckExact(v) || PyTuple_CheckExact(v))) {
+        return 1;
+    }
+    for (;;) {
+        Py_ssize_t length = __atomic_load_n(&((PyVarObject *)container)->ob_size, __ATOMIC_RELAXED), lo, step, count;
+        if (!slice_unpack(start, stop, NULL, length, &lo, &step, &count)) {
+            return 1;
+        }
+        int r = lu_list_splice((PyListObject *)container, lo, lo + count, v, length);
+        if (r != 1) {
+            return r;           /* else the list changed length meanwhile: again */
+        }
+    }
+}
+
+PyObject *
+lu_binary_foreign(PyObject *a, PyObject *b, int op)
+{
+    static const size_t binary[] = {
+        offsetof(PyNumberMethods, nb_add), offsetof(PyNumberMethods, nb_and),
+        offsetof(PyNumberMethods, nb_floor_divide), offsetof(PyNumberMethods, nb_lshift),
+        offsetof(PyNumberMethods, nb_matrix_multiply), offsetof(PyNumberMethods, nb_multiply),
+        offsetof(PyNumberMethods, nb_remainder), offsetof(PyNumberMethods, nb_or),
+        offsetof(PyNumberMethods, nb_power), offsetof(PyNumberMethods, nb_rshift),
+        offsetof(PyNumberMethods, nb_subtract), offsetof(PyNumberMethods, nb_true_divide),
+        offsetof(PyNumberMethods, nb_xor),
+    };
+    static const size_t inplace[] = {
+        offsetof(PyNumberMethods, nb_inplace_add), offsetof(PyNumberMethods, nb_inplace_and),
+        offsetof(PyNumberMethods, nb_inplace_floor_divide), offsetof(PyNumberMethods, nb_inplace_lshift),
+        offsetof(PyNumberMethods, nb_inplace_matrix_multiply), offsetof(PyNumberMethods, nb_inplace_multiply),
+        offsetof(PyNumberMethods, nb_inplace_remainder), offsetof(PyNumberMethods, nb_inplace_or),
+        offsetof(PyNumberMethods, nb_inplace_power), offsetof(PyNumberMethods, nb_inplace_rshift),
+        offsetof(PyNumberMethods, nb_inplace_subtract), offsetof(PyNumberMethods, nb_inplace_true_divide),
+        offsetof(PyNumberMethods, nb_inplace_xor),
+    };
+    if (op < NB_ADD || op > NB_INPLACE_XOR) {
+        return NULL;
+    }
+    int base = op >= NB_INPLACE_ADD ? op - NB_INPLACE_ADD : op, power = base == NB_POWER;
+    PyTypeObject *ta = Py_TYPE(a), *tb = Py_TYPE(b);
+    int ka = lu_nb_slot_kind(ta, binary[base]), kb = tb != ta ? lu_nb_slot_kind(tb, binary[base]) : 0;
+    int ki = op >= NB_INPLACE_ADD ? lu_nb_slot_kind(ta, inplace[base]) : 0;
+    if (ka < 0 || kb < 0 || ki < 0 || ka + kb + ki == 0) {
+        return NULL;            /* the runtime's slot, or none at all */
+    }
+#define NB_SLOT(t, off) (*(void **)((char *)(t)->tp_as_number + (off)))
+#define NB_CALL(f) (power ? ((ternaryfunc)(f))(a, b, Py_None) : ((binaryfunc)(f))(a, b))
+    PyObject *r;
+    if (ki > 0) {
+        if ((r = NB_CALL(NB_SLOT(ta, inplace[base]))) != Py_NotImplemented) {
+            return r;
+        }
+        Py_DECREF(r);
+    }
+    void *slotv = ka > 0 ? NB_SLOT(ta, binary[base]) : NULL, *slotw = kb > 0 ? NB_SLOT(tb, binary[base]) : NULL;
+    slotw = slotw == slotv ? NULL : slotw;
+    if (slotv != NULL) {
+        if (slotw != NULL && PyType_IsSubtype(tb, ta)) {
+            if ((r = NB_CALL(slotw)) != Py_NotImplemented) {
+                return r;
+            }
+            Py_DECREF(r);
+            slotw = NULL;
+        }
+        if ((r = NB_CALL(slotv)) != Py_NotImplemented) {
+            return r;
+        }
+        Py_DECREF(r);
+    }
+    if (slotw != NULL) {
+        if ((r = NB_CALL(slotw)) != Py_NotImplemented) {
+            return r;
+        }
+        Py_DECREF(r);
+    }
+    return NULL;
+#undef NB_CALL
+#undef NB_SLOT
+}
+
+int
+lu_setitem_slice_native(PyObject *container, PyObject *sub, PyObject *v)
+{
+    PySliceObject *s = (PySliceObject *)sub;
+    return Py_IS_TYPE(sub, &PySlice_Type) && s->step == Py_None ? lu_store_slice_native(container, s->start, s->stop, v)
+        : 1;
+}
+
 PyObject *
 lu_slice_native_raw(PyObject *container, int64_t start, int64_t stop, int none)
 {
@@ -1537,14 +1629,14 @@ op_CALL:
            that the site shows it ran. */
         PyObject *first = oparg >= 1 ? sp[-oparg] : sp[-2];
         PyObject *callable = sp[-oparg - 2];
-        lu_jit_observe(next_instr, first, oparg >= 2 ? sp[-oparg + 1] : first);
+        unsigned kinds = lu_jit_observe(next_instr, first, oparg >= 2 ? sp[-oparg + 1] : first);
         lu_jit_observe_callee(code, next_instr, callable, sp[-oparg - 1]);
         if (oparg >= 1 && (Py_IS_TYPE(callable, &PyCFunction_Type)
                            || (PyType_Check(callable) && !(((PyTypeObject *)callable)->tp_flags & Py_TPFLAGS_HEAPTYPE))
                            || (PyFunction_Check(callable)
                                && (((PyCodeObject *)((PyFunctionObject *)callable)->func_code)->co_flags & LU_CO_KERNEL)))) {
             /* A builtin's or a kernel function's call: the classes its kernel code dispatches on. */
-            lu_jit_observe_classes(code, next_instr - 1, first, oparg >= 2 ? sp[-oparg + 1] : first);
+            lu_jit_observe_classes(code, next_instr - 1, kinds, first, oparg >= 2 ? sp[-oparg + 1] : first);
         }
     }
     SKIP_CACHES();
@@ -3230,7 +3322,7 @@ op_FOR_ITER: {
     PyTypeObject *itp = Py_TYPE(iter);
     lu_jit_observe_iter(next_instr, itp);
     if (itp != &PyListIter_Type && itp != &PyTupleIter_Type && itp != &PyRangeIter_Type && itp != &PyGen_Type
-        && _PyRuntime.jit.mode != LU_JIT_OFF) {
+        && _PyRuntime.jit.mode != LU_JIT_OFF && lu_jit_warm(code)) {
         lu_jit_opclass_note(code, (int)(this_instr - lu_code_start(code)), itp, itp);  /* its step, per class */
     }
     SKIP_CACHES();
@@ -3288,8 +3380,8 @@ op_COMPARE_OP: {
     /* Ints (bools too) and equality that needs no Python code here; the rest is the kernel's compare. */
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
-    lu_jit_observe(next_instr, left, right);
-    lu_jit_observe_classes(code, next_instr - 1, left, right);
+    unsigned kinds = lu_jit_observe(next_instr, left, right);
+    lu_jit_observe_classes(code, next_instr - 1, kinds, left, right);
     SKIP_CACHES();
     int r = lu_compare_native(left, right, oparg);
     if (r < 0) {
@@ -3449,8 +3541,8 @@ op_BINARY_OP: {
     /* lhs, rhs -- res; exact ints here, everything else reflects in the kernel. */
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
-    lu_jit_observe(next_instr + 1, left, right);
-    lu_jit_observe_classes(code, next_instr - 1, left, right);
+    unsigned kinds = lu_jit_observe(next_instr + 1, left, right);
+    lu_jit_observe_classes(code, next_instr - 1, kinds, left, right);
     SKIP_CACHES();
     if (oparg == 26) {   /* NB_SUBSCR */
         PyObject *item = lu_subscr_native(left, right);
@@ -3496,6 +3588,18 @@ op_BINARY_OP: {
         Py_DECREF(left);
         Py_DECREF(right);
         DISPATCH();
+    }
+    else {
+        SAVE_FRAME();
+        PyObject *res = lu_binary_foreign(left, right, oparg);
+        ERROR_IF(res == NULL && PyErr_Occurred());
+        if (res != NULL) {
+            sp--;
+            TOP() = res;
+            Py_DECREF(left);
+            Py_DECREF(right);
+            DISPATCH();
+        }
     }
     sp -= 2;
     kargs[0] = left;
@@ -3606,6 +3710,19 @@ op_STORE_SUBSCR: {
             DISPATCH();
         }
     }
+    else if (Py_IS_TYPE(sub, &PySlice_Type)) {
+        SAVE_FRAME();
+        int done = lu_setitem_slice_native(container, sub, sp[-3]);
+        ERROR_IF(done < 0);
+        if (done == 0) {
+            PyObject *value = sp[-3];
+            sp -= 3;
+            Py_DECREF(value);
+            Py_DECREF(container);
+            Py_DECREF(sub);
+            DISPATCH();
+        }
+    }
     sp -= 3;
     kargs[0] = container;
     kargs[1] = sub;
@@ -3677,6 +3794,17 @@ op_STORE_SLICE: {
     SAVE_FRAME();
     PyObject *stop = POP();
     PyObject *start = POP();
+    int stored = lu_store_slice_native(sp[-1], start, stop, sp[-2]);
+    if (stored <= 0) {
+        Py_DECREF(start);
+        Py_DECREF(stop);
+        Py_DECREF(POP());
+        Py_DECREF(POP());
+        if (stored < 0) {
+            goto error;
+        }
+        DISPATCH();
+    }
     PyObject *slice = PySlice_New(start, stop, NULL);
     Py_DECREF(start);
     Py_DECREF(stop);

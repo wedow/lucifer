@@ -264,6 +264,7 @@ struct lu_func {
     int room;                   /* the recursion budget the deepest inlined frame needs */
     int loops;                  /* back edges built: one entry may run unbounded work */
     int sites, cold;            /* sites with feedback, and those the interpreter never ran */
+    int unfed;                  /* an operator site had no classes noted yet (lu_jit_want_classes) */
     struct lu_fdep *deps;       /* the facts the code relies on between polls */
     int ndeps, capdeps;
     int *idom;                  /* per block, once optimized: its immediate dominator (-1: unreached) */

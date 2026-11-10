@@ -2466,35 +2466,45 @@ prim_ns_items(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 /* is_str(x), is_type(x), is_dict(x), is_tuple(x), is_cell(x),
    is_function(x), is_kernel(f): exact layout checks. */
+int
+lu_kind_of_type(PyTypeObject *t, const char *kind)
+{
+    if (!strcmp(kind, "str")) return PyType_FastSubclass(t, Py_TPFLAGS_UNICODE_SUBCLASS);
+    if (!strcmp(kind, "type")) return PyType_FastSubclass(t, Py_TPFLAGS_TYPE_SUBCLASS);
+    if (!strcmp(kind, "dict")) return PyType_FastSubclass(t, Py_TPFLAGS_DICT_SUBCLASS);
+    if (!strcmp(kind, "int")) return PyType_FastSubclass(t, Py_TPFLAGS_LONG_SUBCLASS);
+    if (!strcmp(kind, "float")) return PyType_IsSubtype(t, &PyFloat_Type);
+    if (!strcmp(kind, "complex")) return PyType_IsSubtype(t, &PyComplex_Type);
+    if (!strcmp(kind, "bool")) return t == &PyBool_Type;
+    if (!strcmp(kind, "bytes")) return PyType_FastSubclass(t, Py_TPFLAGS_BYTES_SUBCLASS);
+    if (!strcmp(kind, "bytearray")) return PyType_IsSubtype(t, &PyByteArray_Type);
+    if (!strcmp(kind, "memoryview")) return t == &PyMemoryView_Type;
+    if (!strcmp(kind, "tuple")) return PyType_FastSubclass(t, Py_TPFLAGS_TUPLE_SUBCLASS);
+    if (!strcmp(kind, "list")) return PyType_FastSubclass(t, Py_TPFLAGS_LIST_SUBCLASS);
+    if (!strcmp(kind, "set")) return PyType_IsSubtype(t, &PySet_Type) || PyType_IsSubtype(t, &PyFrozenSet_Type);
+    if (!strcmp(kind, "frozenset")) return PyType_IsSubtype(t, &PyFrozenSet_Type);
+    if (!strcmp(kind, "slice")) return t == &PySlice_Type;
+    if (!strcmp(kind, "cell")) return t == &PyCell_Type;
+    if (!strcmp(kind, "function")) return t == &PyFunction_Type;
+    return -1;
+}
+
 static PyObject *
 prim_kind(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2);
     PyObject *x = args[0];
     const char *kind = PyUnicode_Check(args[1]) ? PyUnicode_AsUTF8(args[1]) : "";
-    if (!strcmp(kind, "str")) return bool_of(PyUnicode_Check(x));
-    if (!strcmp(kind, "type")) return bool_of(PyType_Check(x));
-    if (!strcmp(kind, "dict")) return bool_of(PyDict_Check(x));
-    if (!strcmp(kind, "int")) return bool_of(PyLong_Check(x));
-    if (!strcmp(kind, "float")) return bool_of(PyFloat_Check(x));
-    if (!strcmp(kind, "complex")) return bool_of(PyComplex_Check(x));
-    if (!strcmp(kind, "bool")) return bool_of(PyBool_Check(x));
-    if (!strcmp(kind, "bytes")) return bool_of(PyBytes_Check(x));
-    if (!strcmp(kind, "bytearray")) return bool_of(PyByteArray_Check(x));
-    if (!strcmp(kind, "memoryview")) return bool_of(PyMemoryView_Check(x));
-    if (!strcmp(kind, "tuple")) return bool_of(PyTuple_Check(x));
-    if (!strcmp(kind, "list")) return bool_of(PyList_Check(x));
-    if (!strcmp(kind, "set")) return bool_of(PyAnySet_Check(x));
-    if (!strcmp(kind, "frozenset")) return bool_of(PyFrozenSet_Check(x));
-    if (!strcmp(kind, "slice")) return bool_of(PySlice_Check(x));
-    if (!strcmp(kind, "cell")) return bool_of(PyCell_Check(x));
-    if (!strcmp(kind, "function")) return bool_of(PyFunction_Check(x));
     if (!strcmp(kind, "kernel")) {
         return bool_of(PyFunction_Check(x)
                        && (((PyCodeObject *)((PyFunctionObject *)x)->func_code)->co_flags & LU_CO_KERNEL));
     }
-    lu_err_format(PyExc_SystemError, "kind(x, name): unknown kind '%s'", kind);
-    return NULL;
+    int r = lu_kind_of_type(Py_TYPE(x), kind);
+    if (r < 0) {
+        lu_err_format(PyExc_SystemError, "kind(x, name): unknown kind '%s'", kind);
+        return NULL;
+    }
+    return bool_of(r);
 }
 
 /* cell_get(cell) -> value or MISSING; cell_set(cell, value or MISSING to empty it). */

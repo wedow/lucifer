@@ -501,8 +501,8 @@ prim_list_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
    another length by the time the lock is held, nothing happens and the result
    is 1, for the caller to compute again. A result with no items clears the
    list, which resets its storage. */
-static int
-list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, Py_ssize_t expect)
+int
+lu_list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, Py_ssize_t expect)
 {
     Py_ssize_t d;
     PyObject **fresh = snapshot(seq, &d);
@@ -593,7 +593,7 @@ static PyObject *
 prim_list_splice(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(5); LIST(0); SSIZE(1, lo); SSIZE(2, hi); SEQ(3); SSIZE(4, expect);
-    int r = list_splice((PyListObject *)args[0], lo, hi, args[3], expect);
+    int r = lu_list_splice((PyListObject *)args[0], lo, hi, args[3], expect);
     return r < 0 ? NULL : Py_NewRef(r ? LU_MISSING : Py_None);
 }
 
@@ -611,7 +611,7 @@ PyList_SetSlice(PyObject *a, Py_ssize_t ilow, Py_ssize_t ihigh, PyObject *v)
     if (seq == NULL) {
         return -1;
     }
-    int r = list_splice((PyListObject *)a, ilow, ihigh, seq, -1);
+    int r = lu_list_splice((PyListObject *)a, ilow, ihigh, seq, -1);
     Py_DECREF(seq);
     return r;
 }

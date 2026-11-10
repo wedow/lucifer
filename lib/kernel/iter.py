@@ -53,6 +53,8 @@ def _has_sequence_protocol(obj):
 
 def get_iter(obj):
     """PyObject_GetIter."""
+    if type(obj) is _generator:
+        return obj      # its __iter__; the tier keeps a generator it made known
     f = type_lookup(type(obj), '__iter__')
     if f is not MISSING and f is not None:
         it = call_special(f, obj)
@@ -65,6 +67,7 @@ def get_iter(obj):
 
 
 _SEQ_ITERATORS = (static_type('tuple_iterator'), static_type('list_iterator'))
+_generator = static_type('generator')
 _DICT_ITERATORS = (static_type('dict_keyiterator'), static_type('dict_valueiterator'),
                    static_type('dict_itemiterator'))
 _seq0, _seq1 = _SEQ_ITERATORS

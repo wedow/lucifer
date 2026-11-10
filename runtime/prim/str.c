@@ -5,6 +5,7 @@
    methods, argument parsing and messages are lib/kernel/str.py. */
 
 #include "prim/prim.h"
+#include "interp/frame.h"
 
 #include <string.h>
 
@@ -622,15 +623,27 @@ prim_str_strip(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return substring(s, i, j);
 }
 
-/* str_join(sep, items): items is a tuple of exact strs. */
+/* str_join(sep, items): items is a tuple or list of strs (a list is read
+   once, under its lock). */
 PyObject *
 lu_prim_str_join(PyObject *module, PyObject *const *args, Py_ssize_t nargs)
 {
-    if (nargs != 2 || !PyUnicode_Check(args[0]) || !PyTuple_CheckExact(args[1])) {
-        lu_err_format(PyExc_TypeError, "str_join(sep, items) takes a str and a tuple");
+    if (nargs != 2 || !PyUnicode_Check(args[0]) || !(PyTuple_CheckExact(args[1]) || PyList_CheckExact(args[1]))) {
+        lu_err_format(PyExc_TypeError, "str_join(sep, items) takes a str and a tuple or list");
         return NULL;
     }
-    return lu_str_join_tuple(args[0], args[1]);
+    PyObject *items = args[1];
+    if (PyTuple_CheckExact(items)) {
+        Py_INCREF(items);
+    }
+    else {
+        Py_BEGIN_CRITICAL_SECTION(args[1]);
+        items = lu_args_as_tuple(Py_None, args[1]);
+        Py_END_CRITICAL_SECTION();
+    }
+    PyObject *r = items != NULL ? lu_str_join_tuple(args[0], items) : NULL;
+    Py_XDECREF(items);
+    return r;
 }
 
 PyObject *
