@@ -109,6 +109,7 @@ tests/diff/corpus/int_float_comparison.py	NOTRUN	0.000000
 tests/diff/corpus/int_floor_mod_signs.py	NOTRUN	0.000000
 tests/diff/corpus/int_index_protocol.py	NOTRUN	0.000000
 tests/diff/corpus/int_multiply_overflow.py	NOTRUN	0.000000
+tests/diff/corpus/int_of_float_paths.py	NOTRUN	0.000000
 tests/diff/corpus/int_power_modular.py	NOTRUN	0.000000
 tests/diff/corpus/int_reflected_operator.py	NOTRUN	0.000000
 tests/diff/corpus/int_shift_edges.py	NOTRUN	0.000000

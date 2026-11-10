@@ -660,6 +660,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/int_of_float_paths.py": {
+      "exit": 0,
+      "sha256": "d3fa9764fd950eccc5110be02bbd3339a69dd07d70dba5a8a026d99913496555",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/int_power_modular.py": {
       "exit": 0,
       "sha256": "91a4abef73cc5d0e1f2f1ed6b74f49aa5575b4d97e53ee301eea3181b60a4242",

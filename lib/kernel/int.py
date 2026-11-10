@@ -9,6 +9,7 @@ from _lucifer import (
     int_neg, int_abs, int_invert, int_shift, int_bitwise, int_cmp, int_bit_length,
     int_bit_count, int_hash, int_to_bytes, int_from_bytes, int_format, int_from_text,
     int_as_double, int_subtype, int_is_zero, text_repr, b_check, b_bytes, b_from_ints,
+    int_from_double, kernel_twin,
 )
 from _lucifer import _boot, operators, _format
 
@@ -48,6 +49,8 @@ def to_int(x):
     """PyNumber_Long."""
     if type(x) is int:
         return x
+    if type(x) is float:
+        return int_from_double(x)       # float.__int__'s own answer
     f = type_lookup(type(x), '__int__')
     if f is not MISSING:
         r = call_special(f, x)
@@ -110,6 +113,45 @@ def _byteorder(byteorder, fname):
     error(ValueError, "byteorder must be either 'little' or 'big'")
 
 
+def _int_new(cls, args, kwargs):
+    """long_new: int(), int(x), int(x, base) and the keyword form."""
+    if cls is not int:
+        _boot.check_new(cls, int)
+    n = size(args)
+    x = MISSING
+    base = MISSING
+    if kwargs:
+        for key, value in ns_items(kwargs):
+            if key != 'base':
+                error(TypeError, str_join('', ('int() got an unexpected keyword argument \'', key, "'")))
+            base = value
+        if n > 1:
+            error(TypeError, str_join('', ('int() takes at most 2 arguments (', _decimal(n + 1), ' given)')))
+    elif n > 2:
+        error(TypeError, str_join('', ('int expected at most 2 arguments, got ', _decimal(n))))
+    i = 0
+    for arg in args:
+        if i == 0:
+            x = arg
+        else:
+            base = arg
+        i += 1
+    if base is MISSING:
+        value = 0 if x is MISSING else to_int(x)
+    else:
+        value = _with_base(x, base)
+    if cls is int:
+        return value
+    return int_subtype(cls, value)
+
+
+def _int_new1(cls, x):
+    """int(x) (kernel_twin): without the argument parsing."""
+    if cls is int:
+        return to_int(x)
+    return _int_new(cls, (x,), {})
+
+
 @kernel_type(static_type('int'))
 class int:
     """int([x]) -> integer
@@ -129,34 +171,9 @@ iteral.
 4"""
 
     def __new__(cls, /, *args, **kwargs):
-        if cls is not int:
-            _boot.check_new(cls, int)
-        n = size(args)
-        x = MISSING
-        base = MISSING
-        if kwargs:
-            for key, value in ns_items(kwargs):
-                if key != 'base':
-                    error(TypeError, str_join('', ('int() got an unexpected keyword argument \'', key, "'")))
-                base = value
-            if n > 1:
-                error(TypeError, str_join('', ('int() takes at most 2 arguments (', _decimal(n + 1), ' given)')))
-        elif n > 2:
-            error(TypeError, str_join('', ('int expected at most 2 arguments, got ', _decimal(n))))
-        i = 0
-        for arg in args:
-            if i == 0:
-                x = arg
-            else:
-                base = arg
-            i += 1
-        if base is MISSING:
-            value = 0 if x is MISSING else to_int(x)
-        else:
-            value = _with_base(x, base)
-        if cls is int:
-            return value
-        return int_subtype(cls, value)
+        return _int_new(cls, args, kwargs)
+
+    kernel_twin(__new__, _int_new1)
 
     def __repr__(self):
         return int_format(self, 10, False)
