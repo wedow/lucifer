@@ -25,6 +25,34 @@ in_builtin(PyThreadState *ts)
 #define LU_POLL_NO_PRODUCER (LU_POLL_GIL_DROP_REQUEST | LU_POLL_JIT_INVALIDATE_COLD \
     | LU_POLL_PREEMPT | LU_POLL_DEOPT_SELF | LU_POLL_REMOTE_EXEC)
 
+PyObject *
+lu_poll_merge(void)
+{
+    PyThreadState *ts = PyThreadState_Get();
+    struct lu_carrier *c = TASK(ts)->carrier;
+    lu_poll_clear(c, LU_POLL_EXPLICIT_MERGE);
+    lu_brc_merge(lu_entry_of(c, ts->interp));
+    if (c->qsbr.should_process) {
+        lu_qsbr_process(c);
+    }
+    return Py_None;
+}
+
+PyObject *
+lu_poll_in_place(void)
+{
+    PyThreadState *ts = PyThreadState_Get();
+    uintptr_t breaker = __atomic_load_n(&TASK(ts)->carrier->poll, __ATOMIC_ACQUIRE);
+    if (breaker & LU_POLL_EXPLICIT_MERGE) {
+        lu_poll_merge();
+    }
+    if (breaker & LU_POLL_GC_SCHEDULED) {
+        lu_task_unsignal(TASK(ts), LU_POLL_GC_SCHEDULED);
+        lu_gc_run(ts);
+    }
+    return Py_None;
+}
+
 int
 lu_poll_slow(PyThreadState *ts)
 {
@@ -61,13 +89,8 @@ lu_poll_slow(PyThreadState *ts)
         lu_poll_clear(c, LU_POLL_QSBR);
         lu_qsbr_quiescent(c);
     }
-    /* Objects with refcounts to merge, and storage retired to QSBR. */
     if (breaker & LU_POLL_EXPLICIT_MERGE) {
-        lu_poll_clear(c, LU_POLL_EXPLICIT_MERGE);
-        lu_brc_merge(lu_entry_of(c, ts->interp));
-        if (c->qsbr.should_process) {
-            lu_qsbr_process(c);
-        }
+        lu_poll_merge();
     }
     /* Collection runs only here. */
     if ((breaker & LU_POLL_GC_SCHEDULED) && visible) {

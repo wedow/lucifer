@@ -737,6 +737,14 @@ void lu_sched_enqueue(struct lu_task *t, struct lu_carrier *c);
    interpreter and the JIT when the carrier's poll word has a reason set.
    Returns -1 with an exception set when the reason raises. */
 int lu_poll_slow(PyThreadState *ts);
+/* The poll's LU_POLL_EXPLICIT_MERGE: objects other threads queued have their
+   refcounts merged (their releases may run destructors), and storage retired
+   to QSBR is processed. Returns None (immortal). */
+PyObject *lu_poll_merge(void);
+/* The merge and a scheduled collection, which compiled code outside a
+   builtin makes at its poll instead of leaving for them, its frames
+   published (emit.c's parked_call). Returns None. */
+PyObject *lu_poll_in_place(void);
 
 /* Raises `bits` (targeted reasons) at task `t`: kept in the task, and set in
    its carrier's word when it is bound. The caller holds the interpreter's

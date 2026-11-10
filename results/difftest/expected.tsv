@@ -85,6 +85,7 @@ tests/diff/corpus/float_repr_roundtrip.py	NOTRUN	0.000000
 tests/diff/corpus/float_round_ties.py	NOTRUN	0.000000
 tests/diff/corpus/float_signed_zero.py	NOTRUN	0.000000
 tests/diff/corpus/function_defaults_kwonly.py	NOTRUN	0.000000
+tests/diff/corpus/gc_in_compiled_loop.py	NOTRUN	0.000000
 tests/diff/corpus/generator_close_delegation.py	NOTRUN	0.000000
 tests/diff/corpus/generator_consumed_in_line.py	NOTRUN	0.000000
 tests/diff/corpus/generator_pep479.py	NOTRUN	0.000000

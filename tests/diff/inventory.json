@@ -516,6 +516,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/gc_in_compiled_loop.py": {
+      "exit": 0,
+      "sha256": "dfb24a35e9cdc47da9c0cc0fec9a29b251e415ea91c9380158516160ee8b9b27",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/generator_close_delegation.py": {
       "exit": 0,
       "sha256": "1a719cca8c56dcf82cdf4a2f5170bd78cfa2cc42e47a4d24558d4c7d0f2395ae",
