@@ -159,6 +159,10 @@ if mode == 'renamed':
     names[0] = 'beta'
 if mode == 'noisy':
     print('Extension error: No module named _csv', file=sys.stderr)
+cache = os.path.join(os.environ['PYTHONPATH'], 'cached')
+if mode == 'compiling' and not os.path.exists(cache):  # a compile warning, until bytecode is cached
+    print('SyntaxWarning: invalid escape sequence', file=sys.stderr)
+    open(cache, 'w').close()
 print('Warning in', os.environ['PYTHONPATH'], os.getcwd(), file=sys.stderr)  # paths vary by checkout
 values = [0.001 * loops, 0.003 * loops, 0.002 * loops][:int(args[args.index('-n') + 1])]
 benchmarks = [dict(metadata=dict(name=n), runs=[dict(values=values)]) for n in names]
@@ -224,6 +228,13 @@ class CorpusCheck(unittest.TestCase):
         reference['cli.black']['check'] = 'other'
         self.assertEqual(self.time(['cli.black'], reference)['cli.black']['status'], 'wrong')
         self.assertEqual(self.time(['cli.isort'], reference)['cli.isort']['status'], 'noreference')
+
+    def test_compile_warnings_of_a_fresh_site_are_not_output(self):
+        # The reference ran on a site whose bytecode was already cached; this one compiles on its first run.
+        reference = self.time(['pyperformance.alpha'], mode='compiling')
+        (self.site / 'cached').unlink()
+        result = self.time(['pyperformance.alpha'], reference, 'compiling')['pyperformance.alpha']
+        self.assertEqual(result['status'], 'ok')
 
     def test_cadence_scripts_run_from_the_release_tree(self):
         tree = self.root / 'cadence-net'
