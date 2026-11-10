@@ -18,3 +18,7 @@ Found while closing luc-d5u1. `bin/lucifer -X lucifer_jit=off -m test test_pdb` 
 **2026-11-09T09:18:51Z**
 
 Still zeroes test_pdb (152 cases) in the full Lib/test run of 2026-11-09.
+
+**2026-11-10T03:44:42Z**
+
+Root cause: _IncompleteInputError had no dealloc (it was left out of the exception type setup), so codeop's dropped incomplete-input error crashed on release. Fixed on luc-crash; test_pdb runs whole: 135 of 152 PASS (oracle 152).
