@@ -4421,6 +4421,13 @@ static lu_v
 callee_test(struct ctx *c, lu_v callable, const struct lu_callee *e, int fail)
 {
     lu_v fv = callable;
+    if (e->kind & LU_CALLEE_CMETH) {
+        /* A builtin method of that def: its kernel function, a constant. */
+        test_word(c, callable, offsetof(PyObject, ob_type), (PyObject *)&PyCFunction_Type, fail);
+        lu_v ml = emit(c, OP_LOAD, REP_I64, callable, LU_NOV, LU_NOV, offsetof(PyCFunctionObject, m_ml));
+        test_bit(c, emit(c, OP_CMP_I, REP_BIT, ml, const_i(c, (int64_t)(intptr_t)e->globals), LU_NOV, Py_EQ), fail);
+        return konst(c, e->obj);
+    }
     if (e->kind & LU_CALLEE_BOUND) {
         test_word(c, callable, offsetof(PyObject, ob_type), (PyObject *)&PyMethod_Type, fail);
         fv = emit(c, OP_LOAD, REP_OBJ, callable, LU_NOV, LU_NOV, offsetof(PyMethodObject, im_func));
@@ -4490,9 +4497,10 @@ call_dispatch(struct ctx *c, int n)
         c->ncalls = ncalls;
         int fail = i < m - 1 ? lu_ir_block(c->f) : -1;
         lu_v fv = callee_test(c, callable, &e[i], fail);
-        if (e[i].kind & LU_CALLEE_BOUND) {
+        if (e[i].kind & (LU_CALLEE_BOUND | LU_CALLEE_CMETH)) {
             /* The bound method's self and function become the call's, and it goes. */
-            lu_v self = emit(c, OP_LOAD, REP_OBJ, callable, LU_NOV, LU_NOV, offsetof(PyMethodObject, im_self));
+            lu_v self = emit(c, OP_LOAD, REP_OBJ, callable, LU_NOV, LU_NOV, e[i].kind & LU_CALLEE_CMETH
+                             ? offsetof(PyCFunctionObject, m_self) : offsetof(PyMethodObject, im_self));
             incref(c, self);
             c->st.v[callable_at + 1] = self;
             c->st.own[callable_at + 1] = 1;
@@ -4514,7 +4522,7 @@ call_dispatch(struct ctx *c, int n)
             c->code_value = fv;
         }
         else {
-            if (!(e[i].kind & LU_CALLEE_BOUND)) {
+            if (!(e[i].kind & (LU_CALLEE_BOUND | LU_CALLEE_CMETH))) {
                 release(c, callable, own);      /* the constant is the same object */
             }
             c->st.v[callable_at] = konst(c, e[i].obj);
@@ -4933,9 +4941,11 @@ call(struct ctx *c)
     if (gco != NULL && gfn != NULL) {
         guard_func(c, gfn);     /* its code is what the call runs */
     }
-    if (instead == NULL && newfn == NULL && fn != NULL && bound == NULL && self == LU_NOV && kc != NULL
-        && PyCFunction_Check(kc)) {
-        instead = fn;           /* a builtin whose kernel function did not inline: that function called */
+    if (instead == NULL && newfn == NULL && fn != NULL && bound == NULL && kc != NULL
+        && ((PyCFunction_Check(kc) && self == LU_NOV) || (Py_IS_TYPE(kc, &PyMethodDescr_Type) && self != LU_NOV))) {
+        /* A builtin, or a method descriptor its own instance loaded, whose
+           kernel function did not inline: that function called. */
+        instead = fn;
     }
     lu_v hargs[34];
     int nh = n + 2;

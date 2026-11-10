@@ -1603,13 +1603,20 @@ lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, P
         : callable;
     PyFunctionObject *f = (PyFunctionObject *)fn;
     /* What only a collection frees can be named; any other function by
-       what every function of its code shares; any other callable not. */
+       what every function of its code shares; a builtin method bound to
+       its self by its kernel function; any other callable not. */
     int named = _Py_IsImmortal(fn) || lu_has_deferred_refcount(fn);
-    if (!named && !PyFunction_Check(fn)) {
+    PyObject *bself = NULL;
+    PyObject *kfn = !named && self == NULL && PyCFunction_Check(fn) ? lu_kernel_function_of(fn, &bself) : NULL;
+    int cmeth = kfn != NULL && bself != NULL && !PyModule_Check(bself) && PyFunction_Check(kfn)
+        && (_Py_IsImmortal(kfn) || lu_has_deferred_refcount(kfn));
+    if (!named && !cmeth && !PyFunction_Check(fn)) {
         lu_cache_store32(cache + 1, tag);
         return;
     }
-    struct lu_callee want = { named ? fn : f->func_code, named ? NULL : f->func_globals,
+    struct lu_callee want = cmeth
+        ? (struct lu_callee){ kfn, (PyObject *)((PyCFunctionObject *)fn)->m_ml, LU_CALLEE_CMETH }
+        : (struct lu_callee){ named ? fn : f->func_code, named ? NULL : f->func_globals,
                               (fn != callable || self != NULL ? LU_CALLEE_BOUND : 0) | (named ? 0 : LU_CALLEE_CODE) };
     struct lu_jit_code *jc = state_cold(code);
     struct lu_callees *t = lu_jit_callees(code, pc);

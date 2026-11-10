@@ -150,6 +150,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/bound_builtin_calls.py": {
+      "exit": 0,
+      "sha256": "8161879d00c253cbca1872e2be171d0d7d34e3399423337f845b26300292ecc2",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/bound_method_attrs.py": {
       "exit": 0,
       "sha256": "c7cc1d17a967b2fd62249e3ba04bc9f50f4e233ddc8afa35b7264ef0d44036e1",

@@ -274,10 +274,14 @@ void lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *));
    then the site is megamorphic. Entries are read without the lock; a collection
    forgets those that name what it frees, with the world stopped. */
 #define LU_CALLEE_WAYS 4
-enum { LU_CALLEE_BOUND = 1, LU_CALLEE_CODE = 2 };
+/* LU_CALLEE_CMETH: a builtin method bound to its self (f = lst.append),
+   named by its kernel function, with the method def it binds (`globals`,
+   compared only). */
+enum { LU_CALLEE_BOUND = 1, LU_CALLEE_CODE = 2, LU_CALLEE_CMETH = 4 };
 struct lu_callee {
     PyObject *obj;              /* the function, or with LU_CALLEE_CODE its code */
-    PyObject *globals;          /* LU_CALLEE_CODE: the functions' globals, compared but never read */
+    PyObject *globals;          /* LU_CALLEE_CODE: the functions' globals, LU_CALLEE_CMETH: the method
+                                   def, compared but never read */
     int kind;
 };
 struct lu_callees {
