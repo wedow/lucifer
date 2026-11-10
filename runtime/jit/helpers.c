@@ -677,11 +677,16 @@ run_resumed(struct lu_task *t, struct lu_frame *f)
     return v;
 }
 
+static PyObject *call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs,
+                               PyObject *kwnames);
+static PyObject *polled(struct lu_task *t, PyObject *r);
+
 /* The next item, LU_MISSING when exhausted, or NULL with an exception. A
    generator runs as the interpreter's FOR_ITER resumes it: its return is
-   the loop's end, with no StopIteration. */
+   the loop's end, with no StopIteration. Another class votes in the
+   site's table (classes, or NULL) for the class to take in line. */
 static PyObject *
-h_for_iter(PyObject *it)
+h_for_iter(PyObject *it, struct lu_opclasses *classes)
 {
     PyTypeObject *t = Py_TYPE(it);
     if (t == &PyListIter_Type || t == &PyTupleIter_Type || t == &PyRangeIter_Type) {
@@ -696,6 +701,25 @@ h_for_iter(PyObject *it)
         }
         f->ret = LU_RETURN_FOR_ITER;
         return run_resumed(task, f);
+    }
+    if (classes != NULL) {
+        lu_jit_class_vote(classes, t);
+    }
+    if (lu_next_missing_of((PyObject *)t) == Py_None) {
+        /* No kernel step of its own: its __next__, a Python function, as
+           next_item calls it, without its frame. */
+        PyObject *f = _PyType_LookupRef(t, LU_ID(__next__));
+        if (f != NULL && PyFunction_Check(f)) {
+            PyObject *v = task->ts.interp->eval_frame == NULL
+                ? polled(task, call_function(task, (PyFunctionObject *)f, &it, 1, NULL)) : lu_call(f, &it, 1, NULL);
+            Py_DECREF(f);
+            if (v == NULL && PyErr_ExceptionMatches(PyExc_StopIteration)) {
+                PyErr_Clear();
+                return Py_NewRef(LU_MISSING);
+            }
+            return v;
+        }
+        Py_XDECREF(f);
     }
     return lu_call_kernel(LU_K_next_item, &it, 1);
 }
@@ -1483,7 +1507,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, IF_SEEN, 3 },
     [H_cell_store] = { (void *)h_cell_store, "cell_store", REP_NONE, IF_SEEN, 2 },
     [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
-    [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
+    [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, IF_SEEN, 1 },
     [H_seqiter_step] = { (void *)h_seqiter_step, "seqiter_step", REP_OBJ, IF_SEEN, 1 },
     [H_field_get] = { (void *)lu_field_get, "field_get", REP_OBJ, IF_SEEN, 2 },

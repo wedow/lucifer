@@ -642,6 +642,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/iter_megamorphic.py": {
+      "exit": 0,
+      "sha256": "4a4ca8b089774c245dfd3b2aa822014ad921b366c7523e83d24858d8db85904e",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/list_iteration_mutation.py": {
       "exit": 0,
       "sha256": "ce3ffa78db837e153ea764c3f0e4041d6176d8d086ccd426c5384c6798a0ef44",
