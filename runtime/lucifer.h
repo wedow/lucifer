@@ -1543,6 +1543,8 @@ PyObject *lu_special_function(PyObject *owner, int which);
 PyObject *lu_float_pow(PyObject *a, PyObject *b);
 /* a + b for two exact lists or two exact tuples. */
 PyObject *lu_seq_concat(PyObject *a, PyObject *b);
+/* sub in s for two strs (no Python, no error). */
+int lu_str_contains(PyObject *s, PyObject *sub);
 /* a + b for two exact bytes. */
 PyObject *lu_bytes_concat(PyObject *a, PyObject *b);
 /* Whether lu_binary_foreign takes the operator for operands of these types. */

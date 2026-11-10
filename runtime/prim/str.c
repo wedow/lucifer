@@ -171,6 +171,12 @@ find_in(PyObject *s, PyObject *sub, Py_ssize_t start, Py_ssize_t end, int last)
     return -1;
 }
 
+int
+lu_str_contains(PyObject *s, PyObject *sub)
+{
+    return find_in(s, sub, 0, LEN(s), 0) >= 0;
+}
+
 /* str_find(s, sub, start, end, last) -> index or -1. */
 static PyObject *
 prim_str_find(PyObject *m, PyObject *const *args, Py_ssize_t nargs)

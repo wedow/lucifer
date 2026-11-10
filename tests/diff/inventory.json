@@ -828,6 +828,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/str_contains_paths.py": {
+      "exit": 0,
+      "sha256": "7b0d5485270a5bd0674721301ace1c9e9e92e02e7bf9187b28cb7792b52c5992",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/str_join_concat_paths.py": {
       "exit": 0,
       "sha256": "33b47ed0407da8425798531d6a518440fff4ba4ad63992f2aabdb0a85f2e882c",

@@ -718,6 +718,9 @@ lu_contains_native(PyObject *container, PyObject *item)
     if (PyTuple_CheckExact(container)) {
         return items_contain(((PyTupleObject *)container)->ob_item, Py_SIZE(container), item);
     }
+    if (PyUnicode_CheckExact(container) && PyUnicode_CheckExact(item)) {
+        return lu_str_contains(container, item);
+    }
     if (PyList_CheckExact(container)) {
         Py_BEGIN_CRITICAL_SECTION(container);
         found = items_contain(((PyListObject *)container)->ob_item, Py_SIZE(container), item);
