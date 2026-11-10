@@ -9,7 +9,7 @@ in), and the error texts."""
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, list_append,
     repr_enter, repr_leave, is_subtype, kernel_set, kernel_twin,
-    set_new, set_probe, set_add_entry, set_discard_entry, set_resize,
+    set_new, set_probe, set_add_entry, set_discard_entry, set_reserve, set_compact,
     set_clear, set_pop, set_swap, set_merge_clean, set_info, set_hash_impl, set_reset_hash, set_add_simple,
     set_sizeof, setiter_new, setiter_next, setiter_len, setiter_copy,
 )
@@ -155,8 +155,7 @@ def merge(so, other):
     """set_merge_lock_held: the keys of the set other into so."""
     if other is so or size(other) == 0:
         return
-    if (set_info(so, FILL) + size(other)) * 5 >= set_info(so, MASK) * 3:
-        set_resize(so, (size(so) + size(other)) * 2)
+    set_reserve(so, size(other))
     if set_info(so, FILL) == 0 and set_merge_clean(so, other):
         return
     e = next_set_entry(other, 0)
@@ -166,9 +165,7 @@ def merge(so, other):
 
 
 def update_dict(so, other):
-    n = size(other)
-    if (set_info(so, FILL) + n) * 5 >= set_info(so, MASK) * 3:
-        set_resize(so, (size(so) + n) * 2)
+    set_reserve(so, size(other))
     e = next_dict_entry(other, 0)
     while e is not None:
         add_entry(so, e[1], e[3])
@@ -308,9 +305,7 @@ def difference_update_internal(so, other):
             if key is MISSING:
                 break
             discard_key(so, key)
-    if set_info(so, FILL) - size(so) <= set_info(so, MASK) // 4:
-        return
-    set_resize(so, size(so) * 2 if size(so) > 50000 else size(so) * 4)
+    set_compact(so)
 
 
 def copy_and_difference(so, other):

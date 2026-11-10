@@ -34,7 +34,12 @@ int lu_set_discard_native(PySetObject *so, PyObject *key, Py_hash_t hash, PyObje
 /* set_add_entry's last step, for a key known to be absent; under the critical section. */
 int lu_set_insert(PySetObject *so, PyObject *key, Py_hash_t hash);
 void lu_set_insert_clean(setentry *table, size_t mask, PyObject *key, Py_hash_t hash);
-int lu_set_resize(PySetObject *so, Py_ssize_t minused);
+/* The table sizes, chosen from the set as it is, under its critical
+   section: lu_set_reserve makes room for n more keys (set_merge_lock_held's
+   presize), lu_set_rebuild sizes the table for the keys held (an add's
+   growth, a difference_update's dropping of dummies). */
+int lu_set_reserve(PySetObject *so, Py_ssize_t n);
+int lu_set_rebuild(PySetObject *so);
 /* set_clear_internal: empties the set, releasing its keys. */
 void lu_set_clear(PySetObject *so);
 /* set_swap_bodies, for an `a` that lock-free readers may probe and a `b`
