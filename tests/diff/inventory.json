@@ -108,6 +108,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/attr_and_bytes_native.py": {
+      "exit": 0,
+      "sha256": "9c134ba3092af1db3495b9ae896ed402f76cad4999dbafa64a9963e1b2986a43",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/augassign_attribute_order.py": {
       "exit": 0,
       "sha256": "1632802ac233c1a6e091b46da6b616ad27ae015e3957400efb965322c2bd50d8",

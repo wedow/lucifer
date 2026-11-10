@@ -17,6 +17,7 @@ tests/diff/corpus/async_cancellation_finally.py	NOTRUN	0.000000
 tests/diff/corpus/async_context_manager.py	NOTRUN	0.000000
 tests/diff/corpus/async_contextvars.py	NOTRUN	0.000000
 tests/diff/corpus/async_generator_iteration.py	NOTRUN	0.000000
+tests/diff/corpus/attr_and_bytes_native.py	NOTRUN	0.000000
 tests/diff/corpus/augassign_attribute_order.py	NOTRUN	0.000000
 tests/diff/corpus/augassign_dict_union.py	NOTRUN	0.000000
 tests/diff/corpus/augassign_list_alias.py	NOTRUN	0.000000
