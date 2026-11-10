@@ -323,9 +323,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root);
     X(gen_finish) \
     X(get_iter_seq) \
     X(binary_slice) \
-    X(slice_native) \
     X(binary_slice_raw) \
-    X(slice_native_raw) \
     X(store_slice) \
     X(call_kw) \
     X(call_ex) \

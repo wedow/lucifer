@@ -509,8 +509,8 @@ lu_contains_native(PyObject *container, PyObject *item)
     if (PyAnySet_CheckExact(container)) {
         PyTypeObject *kt = Py_TYPE(item);
         PyObject *candidate = NULL;
-        if (kt != &PyUnicode_Type && kt != &PyLong_Type) {
-            return -1;
+        if (kt != &PyUnicode_Type && kt != &PyLong_Type && kt != &PyType_Type && item != Py_None) {
+            return -1;          /* only keys whose hash runs no Python; a probe that needs __eq__ declines */
         }
         int verdict = lu_set_probe((PySetObject *)container, item, lu_hash(item), NULL, &candidate);
         Py_XDECREF(candidate);

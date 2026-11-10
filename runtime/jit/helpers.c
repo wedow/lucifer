@@ -1159,17 +1159,13 @@ h_dict_merge(PyObject *func, PyObject *dict, PyObject *update)
     return r == NULL ? -1 : 0;
 }
 
-/* BINARY_SLICE: container[start:stop]. Unless `generic`, it declines what
-   needs the kernel, which runs Python. */
+/* BINARY_SLICE: container[start:stop]. */
 static PyObject *
-h_binary_slice(PyObject *container, PyObject *start, PyObject *stop, int64_t generic)
+h_binary_slice(PyObject *container, PyObject *start, PyObject *stop)
 {
     PyObject *r = lu_slice_native(container, start, stop, NULL);
     if (r != NULL || PyErr_Occurred()) {
         return r;
-    }
-    if (!generic) {
-        return LU_JIT_DECLINED;
     }
     PyObject *args[2] = { container, PySlice_New(start, stop, NULL) };
     r = args[1] != NULL ? lu_call_kernel(LU_K_getitem, args, 2) : NULL;
@@ -1178,21 +1174,18 @@ h_binary_slice(PyObject *container, PyObject *start, PyObject *stop, int64_t gen
 }
 
 /* BINARY_SLICE by machine-int bounds (luc-14n0): mode bit 0 or 1, the
-   start or the stop is None; bit 2, a container the native slice does not
-   take slices as h_binary_slice slices it, its bounds boxed. */
+   start or the stop is None. A container the native slice does not take
+   slices as h_binary_slice slices it, its bounds boxed. */
 static PyObject *
 h_binary_slice_raw(PyObject *container, int64_t start, int64_t stop, int64_t mode)
 {
-    PyObject *r = lu_slice_native_raw(container, start, stop, (int)(mode & 3));
+    PyObject *r = lu_slice_native_raw(container, start, stop, (int)mode);
     if (r != NULL || PyErr_Occurred()) {
         return r;
     }
-    if (!(mode & 4)) {
-        return LU_JIT_DECLINED;
-    }
     PyObject *so = mode & 1 ? Py_NewRef(Py_None) : PyLong_FromLongLong(start);
     PyObject *eo = mode & 2 ? Py_NewRef(Py_None) : PyLong_FromLongLong(stop);
-    r = so != NULL && eo != NULL ? h_binary_slice(container, so, eo, 1) : NULL;
+    r = so != NULL && eo != NULL ? h_binary_slice(container, so, eo) : NULL;
     Py_XDECREF(so);
     Py_XDECREF(eo);
     return r;
@@ -1442,10 +1435,8 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_gen_finish] = { (void *)lu_gen_finish_in_line, "gen_finish", REP_NONE, IF_SEEN, 1 },
     [H_async_gen_wrap] = { (void *)lu_async_gen_wrap, "async_gen_wrap", REP_OBJ, IF_RAISE, 1 },
     [H_get_iter_seq] = { (void *)lu_get_iter_exact, "get_iter_seq", REP_OBJ, IF_RAISE, 1 },
-    [H_binary_slice] = { (void *)h_binary_slice, "binary_slice", REP_OBJ, IF_RAISE | IF_PY, 4 },
-    [H_slice_native] = { (void *)h_binary_slice, "slice_native", REP_OBJ, IF_RAISE, 4 },
+    [H_binary_slice] = { (void *)h_binary_slice, "binary_slice", REP_OBJ, IF_RAISE | IF_PY, 3 },
     [H_binary_slice_raw] = { (void *)h_binary_slice_raw, "binary_slice_raw", REP_OBJ, IF_RAISE | IF_PY, 4 },
-    [H_slice_native_raw] = { (void *)h_binary_slice_raw, "slice_native_raw", REP_OBJ, IF_RAISE, 4 },
     [H_store_slice] = { (void *)h_store_slice, "store_slice", REP_BIT, IF_RAISE | IF_PY, 4 },
     [H_call_kw] = { (void *)h_call_kw, "call_kw", REP_OBJ, IF_RAISE | IF_PY, 0 },
     [H_call_ex] = { (void *)h_call_ex, "call_ex", REP_OBJ, IF_RAISE | IF_PY, 3 },

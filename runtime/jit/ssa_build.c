@@ -653,14 +653,6 @@ unsupported(struct ctx *c)
     side_exit(c, EXIT_SIDE);
 }
 
-/* Python-running helpers other than calls need a real frame for
-   everything below them, so inlined frames leave instead. */
-static int
-root_only(struct ctx *c)
-{
-    return c->parent == NULL;
-}
-
 /* After an instruction that made a call during which a walker may see the
    frames: they are as compiled code left them. A call from an inlined
    frame runs with the inlined frames pushed as real ones (the backend's),
@@ -1860,10 +1852,6 @@ binary_op(struct ctx *c)
         return -1;
     }
     if (r == LU_NOV) {
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[3] = { a, b, const_i(c, op) };
         r = helper_raising(c, H_binary_op, 3, args, 2);
     }
@@ -1947,10 +1935,6 @@ compare_op(struct ctx *c)
         rown = 0;
     }
     if (r == LU_NOV) {
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[3] = { a, b, const_i(c, c->oparg) };
         r = helper_raising(c, H_compare_op, 3, args, 2);
     }
@@ -2902,10 +2886,7 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
         }
         c->cur = next;
     }
-    if (!root_only(c)) {
-        unsupported(c);         /* leaves at the state before the load */
-    }
-    else {
+    {
         lu_v args[3] = { owner, konst(c, name), const_i(c, (int64_t)(intptr_t)pic) };
         lu_v v = helper_raising(c, method ? H_load_method : H_load_attr, 3, args, 1);
         release(c, owner, own);
@@ -3140,10 +3121,6 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         }
         return 0;
     }
-    if (!root_only(c)) {
-        unsupported(c);
-        return -1;
-    }
     /* The generic load records the shapes it meets for a polymorphic cache. */
     lu_v args[3] = { owner, konst(c, name), const_i(c, (int64_t)(intptr_t)lu_jit_pic(c->code, c->pc, 1)) };
     lu_v v = helper_raising(c, method ? H_load_method : H_load_attr, 3, args, 1);
@@ -3191,13 +3168,8 @@ store_attr_poly(struct ctx *c, lu_v owner, lu_v v)
         lu_ir_edge(f, c->cur, join);
         c->cur = next;
     }
-    if (root_only(c)) {
-        lu_v args[4] = { owner, konst(c, name_at(c, c->oparg)), v, const_i(c, (int64_t)(intptr_t)pic) };
-        helper_raising(c, H_store_attr, 4, args, 2);
-    }
-    else {
-        unsupported(c);         /* leaves at the state before the store */
-    }
+    lu_v args[4] = { owner, konst(c, name_at(c, c->oparg)), v, const_i(c, (int64_t)(intptr_t)pic) };
+    helper_raising(c, H_store_attr, 4, args, 2);
     if (c->cur >= 0) {
         emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
         lu_ir_edge(f, c->cur, join);
@@ -3248,13 +3220,9 @@ store_attr(struct ctx *c)
     else if (store_attr_poly(c, owner, v)) {
         /* done */
     }
-    else if (root_only(c)) {
+    else {
         lu_v args[4] = { owner, konst(c, name), v, const_i(c, (int64_t)(intptr_t)lu_jit_pic(c->code, c->pc, 1)) };
         helper_raising(c, H_store_attr, 4, args, 2);
-    }
-    else {
-        unsupported(c);
-        return -1;
     }
     pop(c, NULL);
     pop(c, NULL);
@@ -3870,11 +3838,13 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *new, PyFunctionObj
 }
 
 /* Whether the call at c->pc, which this frame cannot inline, compiles
-   here. In an inlined frame it pushes the frame as a real one, which costs
-   about what calling the frame did: so a callee one deep with one such
-   call outside its loops inlines, and any other is called instead (the
-   inline is undone). A call the interpreter never made there leaves: a
-   cold path's call would make the root's locals real boxes on hot ones. */
+   here. In an inlined frame it pushes the inlined frames as real ones, in
+   line (luc-hez4), for the call. A call the interpreter never made there
+   leaves: a cold path's call would make the root's locals real boxes on
+   hot ones. Kernel code inlines whatever it calls: that is its
+   customization. A user function inlines one deep with one such call
+   outside its loops, and any other is called instead (the inline is
+   undone): its own unit keeps its loops' values raw and its calls direct. */
 static int
 opaque_call(struct ctx *c)
 {
@@ -3884,6 +3854,9 @@ opaque_call(struct ctx *c)
     if (__atomic_load_n(&c->cache->cache, __ATOMIC_RELAXED) == 0) {
         unsupported(c);
         return 0;
+    }
+    if (c->kernel) {
+        return 1;
     }
     int loop = 0;
     for (int pc = c->next; pc < c->ncode && !loop;) {
@@ -3898,9 +3871,7 @@ opaque_call(struct ctx *c)
         return 0;
     }
     return 1;
-}
-
-/* Whether code has a loop. An inlined loop keeps its ints boxed where the
+}/* Whether code has a loop. An inlined loop keeps its ints boxed where the
    callee's own unit keeps them raw (Sieve 2.8x the instructions), so a
    callee found only by feedback that loops is called. */
 static int
@@ -4642,13 +4613,9 @@ for_iter(struct ctx *c)
         v = helper(c, H_seqiter_next, 1, &it);
         done = emit(c, OP_IS, REP_BIT, v, konst(c, NULL), LU_NOV, 0);
     }
-    else if (root_only(c)) {
+    else {
         v = helper_raising(c, H_for_iter, 1, &it, 0);
         done = emit(c, OP_IS, REP_BIT, v, konst(c, LU_MISSING), LU_NOV, 0);
-    }
-    else {
-        unsupported(c);
-        return -1;
     }
     normalize(c);
     edge_to(c, exit_pc);
@@ -4932,12 +4899,8 @@ translate(struct ctx *c)
             w = helper_raising(c, H_get_iter_seq, 1, &v, 1);
             set_made(c, w, t == &PyTuple_Type ? &PyTupleIter_Type : &PyListIter_Type);
         }
-        else if (root_only(c)) {
-            w = helper_raising(c, H_get_iter, 1, &v, 1);
-        }
         else {
-            unsupported(c);
-            return -1;
+            w = helper_raising(c, H_get_iter, 1, &v, 1);
         }
         pop(c, NULL);
         release(c, v, own);
@@ -4950,10 +4913,6 @@ translate(struct ctx *c)
         return call(c);
     case LOAD_SUPER_ATTR: {
         /* global_super, class, self -- attr, NULL in the method form (a bound method) */
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[5] = { peek(c, 3), peek(c, 2), peek(c, 1),
                          konst(c, PyTuple_GET_ITEM(c->code->co_names, oparg >> 2)), const_i(c, oparg & 2) };
         v = helper_raising(c, H_super_attr, 5, args, 3);
@@ -4972,7 +4931,7 @@ translate(struct ctx *c)
            and the interpreter sends to it): what it yields stays on the
            stack for the YIELD_VALUE after; what it returns leaves the
            yield-from loop. Generator code is never inlined. */
-        if (!root_only(c) || nospec(c, c->pc)) {
+        if (nospec(c, c->pc)) {
             unsupported(c);
             return -1;
         }
@@ -5014,10 +4973,6 @@ translate(struct ctx *c)
         return 0;
     }
     case GET_AWAITABLE: case GET_YIELD_FROM_ITER: {
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         v = peek(c, 1);
         own = peek_owned(c, 1);
         lu_v args[2] = { v, const_i(c, c->base == GET_AWAITABLE ? oparg
@@ -5031,10 +4986,6 @@ translate(struct ctx *c)
     case GET_AITER: case GET_ANEXT: {
         /* The kernel's: GET_AITER replaces the iterable, GET_ANEXT pushes
            the awaitable above the iterator. */
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         v = peek(c, 1);
         own = peek_owned(c, 1);
         int anext = c->base == GET_ANEXT;
@@ -5125,13 +5076,9 @@ translate(struct ctx *c)
             lu_v ok = emit(c, OP_LIST_STORE, REP_NONE, cont, i, val, 0);
             I(c, ok)->fs = before(c);
         }
-        else if (root_only(c)) {
+        else {
             lu_v args[3] = { cont, sub, val };
             helper_raising(c, H_setitem, 3, args, 3);
-        }
-        else {
-            unsupported(c);
-            return -1;
         }
         pop(c, NULL); pop(c, NULL); pop(c, NULL);
         release(c, sub, ownsub);
@@ -5142,10 +5089,6 @@ translate(struct ctx *c)
     case DELETE_SUBSCR: {
         lu_v sub = peek(c, 1), cont = peek(c, 2);
         int ownsub = peek_owned(c, 1), owncont = peek_owned(c, 2);
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[2] = { cont, sub };
         helper_raising(c, H_delitem, 2, args, 2);
         pop(c, NULL); pop(c, NULL);
@@ -5166,10 +5109,6 @@ translate(struct ctx *c)
             guard_type(c, it, t);
         }
         int seq = t == &PyTuple_Type || t == &PyList_Type;
-        if (!seq && !root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[2] = { list, it };
         helper_raising(c, seq ? H_list_extend_seq : H_list_extend, 2, args, 1);
         pop(c, NULL);
@@ -5220,7 +5159,7 @@ translate(struct ctx *c)
         /* A set's or a dict's items may run Python (hashing): the root only. */
         int set = c->base == BUILD_SET || c->base == BUILD_MAP;
         oparg = c->base == BUILD_MAP ? 2 * oparg : oparg;
-        if (oparg > 30 || (set && !root_only(c))) {
+        if (oparg > 30) {
             unsupported(c);
             return -1;
         }
@@ -5263,10 +5202,6 @@ translate(struct ctx *c)
             return 0;
         }
         int generic = oparg > 30 || nospec(c, c->pc);
-        if (generic && !root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         PyTypeObject *t = known_type(c, v);
         int list = !generic
             && (t == &PyList_Type || (t != &PyTuple_Type && (feedback(c, c->cache) & 0xff) == LU_KIND_LIST));
@@ -5300,10 +5235,6 @@ translate(struct ctx *c)
     case MAKE_FUNCTION: {
         lu_v code = peek(c, 1);
         own = peek_owned(c, 1);
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[2] = { code, konst(c, c->globals) };
         v = helper_raising(c, H_make_function, 2, args, 1);
         pop(c, NULL);
@@ -5347,10 +5278,6 @@ translate(struct ctx *c)
            done; a set's items are hashed, which may run Python. */
         v = peek(c, 1);
         own = peek_owned(c, 1);
-        if (c->base == SET_ADD && !root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[2] = { peek(c, oparg + 1), v };
         helper_raising(c, c->base == LIST_APPEND ? H_list_push : H_set_add, 2, args, 1);
         pop(c, NULL);
@@ -5360,10 +5287,6 @@ translate(struct ctx *c)
     case MAP_ADD: {
         lu_v val = peek(c, 1), key = peek(c, 2);
         int ownval = peek_owned(c, 1), ownkey = peek_owned(c, 2);
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[3] = { peek(c, oparg + 2), key, val };
         helper_raising(c, H_setitem, 3, args, 2);
         pop(c, NULL);
@@ -5422,10 +5345,6 @@ translate(struct ctx *c)
     case CONVERT_VALUE: case FORMAT_SIMPLE: case FORMAT_WITH_SPEC: {
         /* They run the kernel's str, repr, ascii or format: the root only. */
         int n = c->base == FORMAT_WITH_SPEC ? 2 : 1;
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[2] = { peek(c, n), c->base == CONVERT_VALUE ? const_i(c, oparg)
                          : n == 2 ? peek(c, 1) : konst(c, (PyObject *)&_PyRuntime.singletons.empty_str) };
         w = helper_raising(c, c->base == CONVERT_VALUE ? H_convert_value : H_format, 2, args, n);
@@ -5464,15 +5383,12 @@ translate(struct ctx *c)
         int none = 0;
         if ((I(c, start)->op == OP_BOX_INT || I(c, stop)->op == OP_BOX_INT)
             && raw_bound(c, start, &rstart, &none, 1) && raw_bound(c, stop, &rstop, &none, 2)) {
-            lu_v args[4] = { cont, rstart, rstop, const_i(c, none | (root_only(c) ? 4 : 0)) };
-            w = helper_raising(c, root_only(c) ? H_binary_slice_raw : H_slice_native_raw, 4, args, 3);
+            lu_v args[4] = { cont, rstart, rstop, const_i(c, none) };
+            w = helper_raising(c, H_binary_slice_raw, 4, args, 3);
         }
         else {
-            lu_v args[4] = { cont, start, stop, const_i(c, root_only(c)) };
-            w = helper_raising(c, root_only(c) ? H_binary_slice : H_slice_native, 4, args, 3);
-        }
-        if (!root_only(c)) {
-            guard_after(c, OP_GUARD_NOT_NULL, w, 1);
+            lu_v args[3] = { cont, start, stop };
+            w = helper_raising(c, H_binary_slice, 3, args, 3);
         }
         pop(c, NULL); pop(c, NULL); pop(c, NULL);
         release(c, stop, ownstop);
@@ -5482,10 +5398,6 @@ translate(struct ctx *c)
         return 0;
     }
     case STORE_SLICE: {
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[4] = { peek(c, 4), peek(c, 3), peek(c, 2), peek(c, 1) };
         helper_raising(c, H_store_slice, 4, args, 4);
         for (int i = 0; i < 4; i++) {
@@ -5502,10 +5414,6 @@ translate(struct ctx *c)
         /* A call with star arguments, made as C makes one (it records no
            feedback: the root's only). */
         int nops = 4;
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         if (!opaque_call(c)) {
             return -1;
         }
@@ -5527,10 +5435,6 @@ translate(struct ctx *c)
     case DICT_MERGE: {
         v = peek(c, 1);
         own = peek_owned(c, 1);
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[3] = { peek(c, oparg + 4), peek(c, oparg + 1), v };
         helper_raising(c, H_dict_merge, 3, args, 1);
         pop(c, NULL);
@@ -5542,10 +5446,6 @@ translate(struct ctx *c)
         lu_v b = peek(c, 1), a = peek(c, 2);
         owna = peek_owned(c, 2);
         ownb = peek_owned(c, 1);
-        if (!root_only(c)) {
-            unsupported(c);
-            return -1;
-        }
         lu_v args[3] = { a, b, const_i(c, oparg) };
         v = helper_raising(c, H_contains, 3, args, 2);
         pop(c, NULL);
