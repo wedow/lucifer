@@ -436,6 +436,39 @@ judged_push(PyObject *judged, PyObject *key)
     return more;
 }
 
+int
+lu_set_add_simple(PyObject *set, PyObject *key)
+{
+    PyTypeObject *t = Py_TYPE(key);
+    if (!PyAnySet_Check(set) || !(t == &PyLong_Type || t == &PyUnicode_Type || t == &PyFloat_Type
+                                  || t == &PyBytes_Type || t == &PyBool_Type || key == Py_None)) {
+        return 0;
+    }
+    Py_hash_t hash = lu_hash(key);
+    if (hash == -1) {
+        return -1;
+    }
+    PyObject *judged = NULL;
+    for (;;) {
+        PyObject *candidate;
+        int verdict = lu_set_add_native((PySetObject *)set, key, hash, judged, &candidate);
+        if (verdict != LU_SET_CANDIDATE) {
+            Py_XDECREF(judged);
+            return verdict < 0 ? -1 : 1;
+        }
+        int eq = lu_native_eq(candidate, key);
+        PyObject *more = eq == 0 ? judged_push(judged, candidate) : NULL;
+        Py_DECREF(candidate);
+        Py_XDECREF(judged);
+        if (eq != 0) {
+            return eq > 0;      /* an equal key is in it; or __eq__ must judge: the kernel adds */
+        }
+        if ((judged = more) == NULL) {
+            return -1;
+        }
+    }
+}
+
 /* The marshal reader's add: keys compare with lu_eq. */
 int
 lu_set_add(PyObject *set, PyObject *key)

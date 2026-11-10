@@ -3292,13 +3292,19 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         guard_exit(a, in);                          /* the stress count */
         /* The poll word is the monitoring version the code was compiled
            under and no event: three instructions. Else the stub below
-           reports a moved write sequence (LU_POLL_QSBR) in place, and every
-           other event, or tools turned on, leaves. A builtin's frame leaves
-           the visible reasons for the poll after it returns too: leaving for
-           one would only come back. */
-        int poll = exit_to(a, in->fs, EXIT_POLL, 0, 0), done = new_label(a);
+           merges refcounts other threads queued and processes retired
+           storage (LU_POLL_EXPLICIT_MERGE), and runs a scheduled collection
+           outside a builtin, with the frames published, as a release's
+           destructor would see them; it reports a moved write
+           sequence (LU_POLL_QSBR) in place; every other event, or tools
+           turned on, leaves. A builtin's frame leaves the visible reasons
+           for the poll after it returns too: leaving for one would only
+           come back. */
+        int poll = exit_to(a, in->fs, EXIT_POLL, 0, 0), done = new_label(a), top = new_label(a);
+        int merge = new_label(a);
         int64_t version = (int64_t)a->f->code->_co_instrumentation_version;
         uintptr_t stays = LU_POLL_QSBR | (in->fs->code->co_flags & LU_CO_KERNEL ? LU_POLL_VISIBLE : 0);
+        bind(a, top);
         load(a, RAX, R14, offsetof(struct lu_task, carrier));
         if (version <= INT32_MAX) {
             cmp_mi(a, 1, RAX, offsetof(struct lu_carrier, poll), (int32_t)version);
@@ -3312,7 +3318,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         alu_ri(a, ALU_AND, RCX, (int32_t)~stays);
         mov_ri(a, R11, version);
         alu_rr(a, ALU_CMP, RCX, R11);
-        jcc(a, CC_NE, poll);
+        jcc(a, CC_NE, merge);
         rex(a, 1, 0, 0, RAX);
         b1(a, 0xF7);
         modrm_mem(a, 0, RAX, offsetof(struct lu_carrier, poll));
@@ -3324,6 +3330,15 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         modrm_mem(a, ALU_AND, RAX, offsetof(struct lu_carrier, poll));
         b4(a, (int32_t)~LU_POLL_QSBR);          /* lock and: the bit goes before the report */
         quiescent(a);
+        jmp(a, done);
+        /* Another event: a merge and a collection are made here, and the
+           word read again. */
+        bind(a, merge);
+        alu_ri(a, ALU_AND, RCX, (int32_t)~(LU_POLL_EXPLICIT_MERGE | LU_POLL_GC_SCHEDULED));
+        alu_rr(a, ALU_CMP, RCX, R11);
+        jcc(a, CC_NE, poll);
+        parked_call(a, v, (void *)lu_poll_in_place, NULL, 0);
+        jmp(a, top);
         bind(a, done);
         if (_PyRuntime.handoff.on) {
             /* The handoff scheduler migrates tasks at the interpreter's polls. */

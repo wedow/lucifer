@@ -108,6 +108,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/attr_and_bytes_native.py": {
+      "exit": 0,
+      "sha256": "9c134ba3092af1db3495b9ae896ed402f76cad4999dbafa64a9963e1b2986a43",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/augassign_attribute_order.py": {
       "exit": 0,
       "sha256": "1632802ac233c1a6e091b46da6b616ad27ae015e3957400efb965322c2bd50d8",
@@ -516,6 +522,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/gc_in_compiled_loop.py": {
+      "exit": 0,
+      "sha256": "dfb24a35e9cdc47da9c0cc0fec9a29b251e415ea91c9380158516160ee8b9b27",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/generator_close_delegation.py": {
       "exit": 0,
       "sha256": "1a719cca8c56dcf82cdf4a2f5170bd78cfa2cc42e47a4d24558d4c7d0f2395ae",
@@ -630,6 +642,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/iter_megamorphic.py": {
+      "exit": 0,
+      "sha256": "4a4ca8b089774c245dfd3b2aa822014ad921b366c7523e83d24858d8db85904e",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/list_iteration_mutation.py": {
       "exit": 0,
       "sha256": "ce3ffa78db837e153ea764c3f0e4041d6176d8d086ccd426c5384c6798a0ef44",
@@ -741,6 +759,12 @@
     "tests/diff/corpus/threads_patch_mid_loop.py": {
       "exit": 0,
       "sha256": "691e08ac05b78f6363ea067186614170c60c6c739d56ba4e3514abc03ca2fddc",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/truth_native_types.py": {
+      "exit": 0,
+      "sha256": "7eb3a67a6672e36b5a9d94eee3937a6d65252355313c29f31e871846f11594c5",
       "state": false,
       "timing": false
     },

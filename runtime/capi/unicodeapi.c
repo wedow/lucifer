@@ -292,24 +292,33 @@ PyUnicode_Compare(PyObject *left, PyObject *right)
                      Py_TYPE(right)->tp_name);
         return -1;
     }
-    int lt = PyObject_RichCompareBool(left, right, Py_LT);
-    if (lt != 0) {
-        return lt < 0 ? -1 : -1;
+    /* unicode_compare: by code point, as no __lt__ of a subclass decides. */
+    int lk = PyUnicode_KIND(left), rk = PyUnicode_KIND(right);
+    const void *ld = PyUnicode_DATA(left), *rd = PyUnicode_DATA(right);
+    Py_ssize_t ln = PyUnicode_GET_LENGTH(left), rn = PyUnicode_GET_LENGTH(right);
+    for (Py_ssize_t i = 0; i < ln && i < rn; i++) {
+        Py_UCS4 a = PyUnicode_READ(lk, ld, i), b = PyUnicode_READ(rk, rd, i);
+        if (a != b) {
+            return a < b ? -1 : 1;
+        }
     }
-    int eq = PyObject_RichCompareBool(left, right, Py_EQ);
-    return eq < 0 ? -1 : eq ? 0 : 1;
+    return ln < rn ? -1 : ln > rn ? 1 : 0;
 }
 
 int
 PyUnicode_CompareWithASCIIString(PyObject *uni, const char *str)
 {
-    PyObject *other = PyUnicode_FromString(str);
-    if (other == NULL) {
-        return -1;
+    /* The str's code points against the bytes (as Latin-1), as CPython does. */
+    int kind = PyUnicode_KIND(uni);
+    const void *data = PyUnicode_DATA(uni);
+    Py_ssize_t n = PyUnicode_GET_LENGTH(uni), i = 0;
+    for (; i < n && str[i] != '\0'; i++) {
+        Py_UCS4 a = PyUnicode_READ(kind, data, i), b = (unsigned char)str[i];
+        if (a != b) {
+            return a < b ? -1 : 1;
+        }
     }
-    int r = PyUnicode_Compare(uni, other);
-    Py_DECREF(other);
-    return r;
+    return i < n ? 1 : str[i] != '\0' ? -1 : 0;
 }
 
 int

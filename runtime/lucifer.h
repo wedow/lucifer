@@ -737,6 +737,14 @@ void lu_sched_enqueue(struct lu_task *t, struct lu_carrier *c);
    interpreter and the JIT when the carrier's poll word has a reason set.
    Returns -1 with an exception set when the reason raises. */
 int lu_poll_slow(PyThreadState *ts);
+/* The poll's LU_POLL_EXPLICIT_MERGE: objects other threads queued have their
+   refcounts merged (their releases may run destructors), and storage retired
+   to QSBR is processed. Returns None (immortal). */
+PyObject *lu_poll_merge(void);
+/* The merge and a scheduled collection, which compiled code outside a
+   builtin makes at its poll instead of leaving for them, its frames
+   published (emit.c's parked_call). Returns None. */
+PyObject *lu_poll_in_place(void);
 
 /* Raises `bits` (targeted reasons) at task `t`: kept in the task, and set in
    its carrier's word when it is bound. The caller holds the interpreter's
@@ -913,7 +921,8 @@ struct lu_static_objects {
     X(__rtruediv__) X(__matmul__) X(__rmatmul__) X(__iadd__) X(__isub__) X(__imul__) \
     X(__imod__) X(__ipow__) X(__ilshift__) X(__irshift__) X(__iand__) X(__ixor__) \
     X(__ior__) X(__import__) X(__ifloordiv__) X(__itruediv__) X(__imatmul__) X(__neg__) X(__pos__) \
-    X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__) X(mro) X(__getattribute__) X(__static_attributes__) X(__getattr__) X(__setattr__) X(__delattr__)
+    X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__) X(mro) X(__getattribute__) X(__static_attributes__) X(__getattr__) X(__setattr__) X(__delattr__) \
+    X(_data)
 struct lu_identifiers {
 #define LU_ID_FIELD(name) PyObject *name;
     LU_IDENTIFIERS(LU_ID_FIELD)
@@ -1246,6 +1255,11 @@ int lu_native_eq(PyObject *a, PyObject *b);
 int lu_dict_str_keys(PyObject *dict);
 PyObject *lu_set_new(PyTypeObject *type);
 int lu_set_add(PyObject *set, PyObject *key);
+/* set.add(key) where no Python decides it: a key of a type whose hash and
+   equality are the runtime's (exact int, str, float, bytes, bool, None),
+   compared with keys no __eq__ judges. 1 when done, 0 when the kernel must
+   add it (nothing changed), -1 with an error. */
+int lu_set_add_simple(PyObject *set, PyObject *key);
 Py_hash_t lu_frozenset_hash(PyObject *set);
 int lu_hash_secret_init(int use_seed, unsigned long seed);
 
@@ -1428,6 +1442,12 @@ PyObject *lu_descr_new_getset(PyTypeObject *type, PyGetSetDef *getset);
 int lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out);
 /* An exact staticmethod's callable, as its __get__ returns it (a new reference), or NULL. */
 PyObject *lu_staticmethod_get(PyObject *descr);
+/* A method descriptor or slot wrapper bound to obj, as its __get__ binds it
+   (a builtin method, a method-wrapper), or NULL without an error for any
+   other descriptor or an obj not of its class. */
+PyObject *lu_method_descr_bind(PyObject *descr, PyObject *obj);
+/* A property's getter (borrowed, read once; NULL or None for none). */
+PyObject *lu_property_fget(PyObject *prop);
 /* Where a classmethod's and a staticmethod's callable is (compiled code reads it). */
 extern const Py_ssize_t lu_classmethod_callable_offset;
 /* The Python or kernel function a class's __new__ entry runs, called with the class first: 1 with *func, else 0. */

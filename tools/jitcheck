@@ -166,6 +166,11 @@ require that a count of the tier's does not grow with the iterations:
          and then a list, by turns, after the tuple's guard moved out of
          the loop: entries left to the interpreter and side exits. The
          code recompiles once, into a unit that takes both.
+  megaiter tests/kernel/jit_mega_iter.py, whose hot loops run str.join and
+         set() over a deque's iterator (a Python class) and a filter, 200
+         items each, after their sites met more classes than their arms
+         take: compiled calls, 24 an iteration for the loops' set-up, none
+         per item. Each loop takes the classes it meets most in line.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -243,6 +248,7 @@ GROWTH = {
     'kept': ('jit_marked_guards.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
              r'|jit: entries waited (\d+)', 0),
     'hoisted': ('jit_unpack_phases.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
+    'megaiter': ('jit_mega_iter.py', r'compiled calls (\d+)', 24),
     'order': ('jit_call_order.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),
 }

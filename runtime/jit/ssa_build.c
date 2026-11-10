@@ -131,6 +131,8 @@ struct ctx {
     int want_done, maybe_missing;       /* ... and whether another of its returns may be MISSING */
     int last_done, last_maybe;  /* the done and maybe_missing of the frame inline_call last made */
     int callee_want_done;       /* the next inline_call's frame returns as a FOR_ITER step's (a tail call) */
+    int generic_step;           /* building a step's generic path, beside its hot class's arm (hot_arm) */
+    int step;                   /* a call of the kernel's next_item: a step, as FOR_ITER's is (in_step) */
     lu_v genv;                  /* that generator */
 };
 
@@ -2115,6 +2117,10 @@ truth(struct ctx *c, lu_v v)
     if (t == &PyLong_Type) {
         return emit(c, OP_CMP_I, REP_BIT, unbox_int(c, v), const_i(c, 0), LU_NOV, Py_NE);
     }
+    if (t == &PyFloat_Type) {
+        return emit(c, OP_CMP_F, REP_BIT, unbox_float(c, v), emit(c, OP_CONST_F, REP_F64, LU_NOV, LU_NOV, LU_NOV, 0),
+                    LU_NOV, Py_NE);    /* 0.0's bits; -0.0 compares equal, as it is false */
+    }
     lu_v bit = emit(c, OP_TRUTH, REP_BIT, v, LU_NOV, LU_NOV, 0);
     I(c, bit)->fs = before(c);
     I(c, bit)->drop = 1;
@@ -2265,6 +2271,14 @@ str_item(struct ctx *c, lu_v a, lu_v b, int owna, int ownb)
     return 1;
 }
 
+/* Whether fn is the kernel's next_item, FOR_ITER's step. */
+static int
+is_next_item(PyFunctionObject *fn)
+{
+    return (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
+        && PyUnicode_CompareWithASCIIString(fn->func_qualname, "next_item") == 0;
+}
+
 /* Inlines fn(args...): the caller's state has the call's operands popped.
    Takes the args' references (owned[i]); on success *result is the value
    the call returns. With nkwonly, args[nargs..nargs + nkwonly) are the
@@ -2304,6 +2318,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v fnv, int fnv_owned, lu_v *
     k->depth = c->depth + 1;
     k->island = c->island;
     k->ret = c->callee_ret;
+    k->step = is_next_item(fn);
     k->want_done = c->callee_ret == LU_RETURN_FOR_ITER || c->callee_want_done;
     k->done = -1;
     c->last_done = -1;
@@ -2551,7 +2566,7 @@ static lu_v
 inline_resume(struct ctx *c, lu_v it, PyCodeObject *co, PyFunctionObject *fn, int ret)
 {
     struct lu_func *f = c->f;
-    if (c->cur < 0 || c->depth + 1 >= INLINE_MAX_DEPTH || f->ninlined > INLINE_MAX_TOTAL
+    if (c->cur < 0 || c->depth + 1 > INLINE_MAX_DEPTH || f->ninlined > INLINE_MAX_TOTAL
         || (co->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN | CO_COROUTINE | CO_ASYNC_GENERATOR | CO_ITERABLE_COROUTINE))
         || !(co->co_flags & CO_GENERATOR) || co->_co_monitoring != NULL || lu_jit_noinline(co)
         || nospec(c, c->pc)) {
@@ -3039,6 +3054,45 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
             I(c, a1)->fs = before(c);
             release(c, owner, own);
         }
+        else if (e.op == LOAD_ATTR_PROPERTY) {
+            /* A property's getter inlined, as load_attr_cached does; one that
+               does not inline takes the generic path. */
+            PyObject *fget = lu_property_fget(e.descr);
+            lu_v r = LU_NOV;
+            int rown = 0, inlined = 0;
+            if (end < 0 && PyFunction_Check(fget)) {
+                struct mark m;
+                mark_take(c, &m);       /* a getter that does not inline leaves nothing behind */
+                konst(c, fget);
+                lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, e.descr), LU_NOV, LU_NOV,
+                                 lu_field_offset(&PyProperty_Type, 0));
+                guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+                struct bstate saved;
+                state_copy(c, &saved, &c->st);
+                lu_v args[1] = { owner };
+                uint8_t owns[1] = { (uint8_t)own };
+                inlined = inline_call(c, (PyFunctionObject *)fget, LU_NOV, 0, args, owns, 1, 0, &r, &rown);
+                if (!inlined) {
+                    c->st = saved;
+                    mark_undo(c, &m);
+                }
+                mark_free(&m);
+            }
+            if (!inlined) {
+                if (c->failed) {
+                    return -1;
+                }
+                emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+                lu_ir_edge(f, c->cur, next);
+                c->cur = next;
+                continue;
+            }
+            if (c->cur < 0) {
+                c->cur = next;  /* every way through the getter raised */
+                continue;
+            }
+            a1 = rown ? r : (incref(c, r), r);
+        }
         else {
             if (e.op == LOAD_ATTR_METHOD_WITH_VALUES || e.op == LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES) {
                 lu_v args[2] = { owner, konst(c, name) };
@@ -3194,6 +3248,42 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
             if (method) {
                 push(c, LU_NOV, 0);
             }
+        }
+        return 0;
+    }
+    case LOAD_ATTR_PROPERTY: {
+        /* The getter the property holds, a function, called with the owner
+           as the instruction's own call: an exit inside resumes after it. */
+        PyObject *fget = lu_property_fget(descr);
+        if (method || fget == NULL || !PyFunction_Check(fget)) {
+            break;
+        }
+        struct mark m;
+        mark_take(c, &m);       /* a getter that does not inline leaves nothing behind */
+        guard_version(c, owner, version);
+        konst(c, fget);         /* the unit keeps the getter it inlines */
+        lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, descr), LU_NOV, LU_NOV, lu_field_offset(&PyProperty_Type, 0));
+        guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+        struct bstate saved;
+        state_copy(c, &saved, &c->st);
+        c->st.sp -= 1;          /* the getter takes the owner's reference */
+        lu_v args[1] = { owner }, r;
+        uint8_t owns[1] = { (uint8_t)own };
+        int rown;
+        int ok = inline_call(c, (PyFunctionObject *)fget, LU_NOV, 0, args, owns, 1, 0, &r, &rown);
+        if (!ok) {
+            c->st = saved;
+            mark_undo(c, &m);
+        }
+        mark_free(&m);
+        if (!ok) {
+            if (c->failed) {
+                return -1;
+            }
+            break;
+        }
+        if (c->cur >= 0) {
+            push(c, r, rown);
         }
         return 0;
     }
@@ -3566,7 +3656,7 @@ intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
         }
     }
     if (nargs == 1 && (known_type(c, args[0]) == &PyList_Type || known_type(c, args[0]) == &PyTuple_Type
-                       || known_type(c, args[0]) == &PyBytes_Type)
+                       || known_type(c, args[0]) == &PyBytes_Type || known_type(c, args[0]) == &PyByteArray_Type)
         && strcmp(name, "size") == 0) {
         lu_v n = emit(c, OP_LOAD, REP_I64, args[0], LU_NOV, LU_NOV, offsetof(PyVarObject, ob_size));
         return box_int(c, n);
@@ -4074,7 +4164,10 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *new, PyFunctionObj
         iown[0] = 0;
         memcpy(iargs + 1, args, sizeof(lu_v) * (size_t)(nargs + nkwonly));
         memcpy(iown + 1, own, (size_t)(nargs + nkwonly));
-        int resown, ok = inline_call(t, init, LU_NOV, 0, iargs, iown, nargs + 1, nkwonly, &res, &resown);
+        /* A kernel __init__'s fixed-arity twin: no *args to make and unpack. */
+        PyFunctionObject *itwin = kinit && nkwonly == 0 ? lu_kernel_twin(init, nargs + 1) : NULL;
+        int resown, ok = inline_call(t, itwin != NULL ? itwin : init, LU_NOV, 0, iargs, iown, nargs + 1, nkwonly, &res,
+                                     &resown);
         if (!ok && !c->failed && !by_keyword && (ok = init_call(c, t, init, kinit ? init_descr : NULL, iargs, iown, nargs + 1))) {
             res = pop(t, &resown);
         }
@@ -4107,13 +4200,14 @@ class_call(struct ctx *c, PyTypeObject *tp, PyFunctionObject *new, PyFunctionObj
     return 1;
 }
 
-/* Whether c is a frame of a FOR_ITER's step in line (iter_step), or
-   inlined in one. */
+/* Whether c is a frame of a FOR_ITER's step in line (iter_step), or of
+   a call of the kernel's next_item, the step a kernel loop makes itself,
+   or inlined in one. */
 static int
 in_step(struct ctx *c)
 {
     for (struct ctx *p = c; p->parent != NULL; p = p->parent) {
-        if (p->ret == LU_RETURN_FOR_ITER) {
+        if (p->ret == LU_RETURN_FOR_ITER || p->step) {
             return 1;
         }
     }
@@ -4123,8 +4217,9 @@ in_step(struct ctx *c)
 /* Whether the call at c->pc, which this frame cannot inline, compiles
    here. In an inlined frame it pushes the inlined frames as real ones, in
    line (luc-hez4), for the call: so a callee one deep (kernel code two,
-   so that a twin or a dispatcher inlines with what it calls) with one
-   such call outside its loops inlines, and any other is called instead
+   so that a twin or a dispatcher inlines with what it calls; a tail call,
+   after which the frame only returns, one deeper still) with one such
+   call outside its loops inlines, and any other is called instead
    (the inline is undone), which keeps the inline budget for the calls
    that inline.
    The frames of a FOR_ITER's step in line (iter_step) call whatever they
@@ -4142,14 +4237,16 @@ opaque_call(struct ctx *c)
         unsupported(c);
         return 0;
     }
-    int loop = 0;
-    for (int pc = c->next; pc < c->ncode && !loop;) {
+    /* A loop after it, unless it is a tail call: its frame returns what it returns. */
+    int loop = 0, base0, oparg0, op0;
+    int tail = c->next < c->ncode && (decode(c, c->next, &base0, &oparg0, &op0), base0 == RETURN_VALUE);
+    for (int pc = c->next; pc < c->ncode && !loop && !tail;) {
         int base, oparg, op;
         int next = decode(c, pc, &base, &oparg, &op);
         loop = base == JUMP_BACKWARD && jump_target(base, oparg, next) <= c->pc;
         pc = next;
     }
-    if (c->depth > (c->kernel ? 2 : 1) || c->ncalls++ > 0 || loop) {
+    if (c->depth > (c->kernel ? 2 : 1) + tail || c->ncalls++ > 0 || loop) {
         if (_PyRuntime.jit.debug) {
             fprintf(stderr, "jit: a call it cannot inline at %s@%d: depth %d, calls %d, loop after %d\n",
                     PyUnicode_AsUTF8(c->code->co_qualname), c->pc, c->depth, c->ncalls, loop);
@@ -4359,6 +4456,67 @@ call_dispatch(struct ctx *c, int n)
     return 1;
 }
 
+/* The table in which the generic path of an iterator's step at this site
+   votes for the class to take in line (lu_jit_class_vote), made if it has
+   none; the unit recompiles when it arms one. A site that may not
+   speculate takes it too: the arm tests the class, it does not guard it. */
+static struct lu_opclasses *
+step_classes(struct ctx *c)
+{
+    struct lu_opclasses *t = lu_jit_want_classes(c->code, (int)(c->cache - 1 - lu_code_start(c->code)));
+    struct lu_fdep dep = { .kind = LU_DEP_CALLEES, .obj = (uintptr_t)t, .code = c->code, .pc = c->pc };
+    lu_ir_dep(c->f, &dep);
+    return t;
+}
+
+/* An iterator's step that no arm names (it, of unknown class), where its
+   site has armed classes: the instruction built again with each class
+   known, in line, and generically for any other class, joined after. 1
+   when built, 0 when the site has none. */
+static int
+hot_arm(struct ctx *c, lu_v it, int (*build)(struct ctx *))
+{
+    if (c->generic_step || known_type(c, it) != NULL) {
+        return 0;
+    }
+    struct lu_opclasses *t = lu_jit_opclasses(c->code, (int)(c->cache - 1 - lu_code_start(c->code)));
+    int m = t != NULL ? __atomic_load_n(&t->narmed, __ATOMIC_ACQUIRE) : 0;
+    if (m == 0) {
+        return 0;
+    }
+    struct ctx at = *c;
+    struct bstate base;
+    state_copy(c, &base, &c->st);
+    struct path ends[LU_OPCLASS_WAYS + 1];
+    int ncalls = c->ncalls, most = ncalls;     /* the arms are alternatives: one call's worth */
+    for (int i = 0; i <= m; i++) {
+        c->ncalls = ncalls;
+        int other = i < m ? lu_ir_block(c->f) : -1;
+        if (i < m) {
+            test_word(c, it, offsetof(PyObject, ob_type), (PyObject *)t->armed[i], other);
+            set_known(c, it, t->armed[i]);
+        }
+        c->generic_step = i == m;
+        int built = build(c);
+        c->generic_step = 0;
+        if (built < 0 && c->failed) {
+            return -1;
+        }
+        ends[i] = path_here(c);
+        if (built < 0) {
+            ends[i].block = -1;
+        }
+        most = c->ncalls > most ? c->ncalls : most;
+        c->next = at.next;
+        c->snap = at.snap;
+        state_copy(c, &c->st, &base);
+        c->cur = other;
+    }
+    c->ncalls = most;
+    join_paths(c, ends, m + 1);
+    return 1;
+}
+
 static int
 call(struct ctx *c)
 {
@@ -4398,6 +4556,13 @@ call(struct ctx *c)
            most; but in a FOR_ITER's step, the loop's body. */
         int kinds = feedback(c, c->cache);
         int armed = type_arms(c, n >= 2 ? 2 : 1, n, n >= 2 ? n - 1 : n, kinds & 0xff, kinds >> 8, call);
+        if (armed != 0) {
+            return armed < 0 ? -1 : 0;
+        }
+    }
+    if (n == 1 && self == LU_NOV && kfn != NULL && is_next_item(kfn)) {
+        /* An iterator's step, also in kernel code: its hot class in line. */
+        int armed = hot_arm(c, peek(c, 1), call);
         if (armed != 0) {
             return armed < 0 ? -1 : 0;
         }
@@ -4518,6 +4683,15 @@ call(struct ctx *c)
     PyCodeObject *gco;
     PyFunctionObject *instead = NULL;   /* the function the call became, if not the callable's */
     if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
+        && known_type(c, args[0]) == &PyGen_Type && PyUnicode_CompareWithASCIIString(fn->func_qualname, "get_iter") == 0) {
+        /* A generator is its own iterator (GET_ITER's rule), at any depth. */
+        lu_v g = args[0];
+        incref(c, g);
+        pop_call(c, n);
+        push(c, g, 1);
+        return 0;
+    }
+    if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
         && PyUnicode_CompareWithASCIIString(fn->func_qualname, "next_item") == 0
         && (gco = gen_made(c, held_once(c, args[0]), &gfn)) != NULL && local_holds(c, args[0])) {
         /* The iteration step of a generator whose code is known: resumed in line. */
@@ -4528,8 +4702,7 @@ call(struct ctx *c)
             return 0;
         }
     }
-    if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)
-        && PyUnicode_CompareWithASCIIString(fn->func_qualname, "next_item") == 0
+    if (fn != NULL && bound == NULL && self == LU_NOV && n == 1 && is_next_item(fn)
         && (known_type(c, args[0]) == NULL || known_type(c, args[0]) == &PyGen_Type
             || not_inlinable(c, fn, 1, 0) != NULL)) {
         /* next_item is FOR_ITER's step, which C takes for the iterators it
@@ -4538,7 +4711,9 @@ call(struct ctx *c)
         if (!opaque_call(c)) {
             return -1;
         }
-        r = helper_raising(c, H_for_iter, 1, args, n + 2);
+        struct lu_opclasses *classes = known_type(c, args[0]) == NULL ? step_classes(c) : NULL;
+        lu_v hargs[2] = { args[0], const_i(c, (int64_t)(intptr_t)classes) };
+        r = helper_raising(c, H_for_iter, 2, hargs, n + 2);
         pop_call(c, n);
         push(c, r, 1);
         return 0;
@@ -5006,6 +5181,12 @@ for_iter(struct ctx *c)
     if (kind == 0) {
         kind = guessed;
     }
+    if (kind != LU_ITER_RANGE && kind != LU_ITER_LIST && kind != LU_ITER_TUPLE) {
+        int armed = hot_arm(c, it, for_iter);
+        if (armed != 0) {
+            return armed < 0 ? -1 : 0;
+        }
+    }
     int range = known_type(c, it) == &PyRangeIter_Type || kind == LU_ITER_RANGE;
     lu_v done;
     if (range) {
@@ -5018,7 +5199,9 @@ for_iter(struct ctx *c)
         done = emit(c, OP_IS, REP_BIT, v, konst(c, NULL), LU_NOV, 0);
     }
     else if (opaque_call(c)) {
-        v = helper_raising(c, H_for_iter, 1, &it, 0);
+        struct lu_opclasses *classes = known_type(c, it) == NULL ? step_classes(c) : NULL;
+        lu_v hargs[2] = { it, const_i(c, (int64_t)(intptr_t)classes) };
+        v = helper_raising(c, H_for_iter, 2, hargs, 0);
         done = emit(c, OP_IS, REP_BIT, v, konst(c, LU_MISSING), LU_NOV, 0);
     }
     else {

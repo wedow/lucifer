@@ -8,9 +8,9 @@ in), and the error texts."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, list_append,
-    repr_enter, repr_leave, is_subtype, kernel_set,
+    repr_enter, repr_leave, is_subtype, kernel_set, kernel_twin,
     set_new, set_probe, set_add_entry, set_discard_entry, set_reserve, set_compact,
-    set_clear, set_pop, set_swap, set_merge_clean, set_info, set_hash_impl, set_reset_hash,
+    set_clear, set_pop, set_swap, set_merge_clean, set_info, set_hash_impl, set_reset_hash, set_add_simple,
     set_sizeof, setiter_new, setiter_next, setiter_len, setiter_copy,
 )
 from _lucifer import _boot, _format, operators, iter as _iter, list as _list, dict as _dict
@@ -172,13 +172,26 @@ def update_dict(so, other):
         e = next_dict_entry(other, e[0])
 
 
+get_iter = _iter.get_iter
+next_item = _iter.next_item
+
+
 def update_iterable(so, other):
-    it = _iter.get_iter(other)
+    it = get_iter(other)
     while True:
-        key = _iter.next_item(it)
+        key = next_item(it)
         if key is MISSING:
             return
+        if not set_add_simple(so, key):
+            return _update_rest(so, it, key)
+
+
+def _update_rest(so, it, key):
+    """update_iterable from a key the runtime cannot add itself on: the
+    kernel's adds, out of the loop that compiles with the runtime's."""
+    while key is not MISSING:
         add_key(so, key)
+        key = next_item(it)
 
 
 def update_lock_held(so, other):
@@ -188,6 +201,19 @@ def update_lock_held(so, other):
         update_dict(so, other)
     else:
         update_iterable(so, other)
+
+
+def _set_init1(self, iterable):
+    """set.__init__ with one argument, also its twin (kernel_twin): another
+    set or a dict merged, anything else iterated here, a frame less deep, so
+    that a generator resumes in line."""
+    if set_info(self, FILL):
+        clear(self)
+    set_reset_hash(self)
+    if kind(iterable, 'set') or type(iterable) is dict:
+        update_internal(self, iterable)
+    else:
+        update_iterable(self, iterable)
 
 
 def update_internal(so, other):
@@ -490,11 +516,14 @@ class set:
         if kwargs and (type(self) is set or type_lookup(type(self), '__new__') is type_lookup(set, '__new__')):
             error(TypeError, 'set() takes no keyword arguments')
         iterable = unpack_one(type(self), args)
-        if set_info(self, FILL):
-            clear(self)
-        set_reset_hash(self)
         if iterable is not MISSING:
-            update_internal(self, iterable)
+            _set_init1(self, iterable)
+        else:
+            if set_info(self, FILL):
+                clear(self)
+            set_reset_hash(self)
+
+    kernel_twin(__init__, _set_init1)
 
     def __repr__(self):
         return set_repr(self)

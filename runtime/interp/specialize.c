@@ -46,7 +46,7 @@ const uint8_t lu_opcode_caches[256] = {
     [LOAD_ATTR_WITH_HINT] = 9, [LOAD_ATTR_METHOD_NO_DICT] = 9, [LOAD_ATTR_METHOD_WITH_VALUES] = 9,
     [LOAD_ATTR_NONDESCRIPTOR_NO_DICT] = 9, [LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES] = 9,
     [LOAD_ATTR_SLOT] = 9, [STORE_ATTR_SLOT] = 4, [STORE_ATTR_WITH_HINT] = 4,
-    [LOAD_ATTR_INSTANCE_VALUE] = 9, [STORE_ATTR_INSTANCE_VALUE] = 4,
+    [LOAD_ATTR_INSTANCE_VALUE] = 9, [STORE_ATTR_INSTANCE_VALUE] = 4, [LOAD_ATTR_PROPERTY] = 9,
     [INSTRUMENTED_LOAD_SUPER_ATTR] = 1, [INSTRUMENTED_JUMP_BACKWARD] = 1,
     [INSTRUMENTED_POP_JUMP_IF_TRUE] = 1, [INSTRUMENTED_POP_JUMP_IF_FALSE] = 1,
     [INSTRUMENTED_POP_JUMP_IF_NONE] = 1, [INSTRUMENTED_POP_JUMP_IF_NOT_NONE] = 1,
@@ -332,6 +332,12 @@ instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, ui
     }
     else if (kind == DESCR_NON_DESCRIPTOR) {
         op = managed ? LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES : LOAD_ATTR_NONDESCRIPTOR_NO_DICT;
+    }
+    else if (!method && Py_IS_TYPE(*descr, &PyProperty_Type)
+             && PyFunction_Check(lu_property_fget(*descr))) {
+        /* A property whose getter is a function: the getter called, which
+           is read from the property each time (its __init__ may change it). */
+        op = LOAD_ATTR_PROPERTY;
     }
     if (op == LOAD_ATTR || !cacheable(*descr)) {
         Py_CLEAR(*descr);

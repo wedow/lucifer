@@ -1290,6 +1290,24 @@ lu_staticmethod_get(PyObject *descr)
     return Py_IS_TYPE(descr, &PyStaticMethod_Type) ? lu_try_xget_ref(&((classmethod *)descr)->cm_callable) : NULL;
 }
 
+PyObject *
+lu_property_fget(PyObject *prop)
+{
+    return __atomic_load_n((PyObject **)((char *)prop + lu_field_offset(&PyProperty_Type, 0)), __ATOMIC_ACQUIRE);
+}
+
+static PyObject *descr_bound(PyObject *d, PyObject *obj);
+
+PyObject *
+lu_method_descr_bind(PyObject *descr, PyObject *obj)
+{
+    if (!(Py_IS_TYPE(descr, &PyMethodDescr_Type) || Py_IS_TYPE(descr, &PyWrapperDescr_Type))
+        || !PyObject_TypeCheck(obj, PyDescr_TYPE(descr))) {
+        return NULL;
+    }
+    return descr_bound(descr, obj);
+}
+
 int
 lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value)
 {
@@ -1492,10 +1510,8 @@ prim_descr_type(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
    classmethod descriptor bound to the type obj, a slot wrapper bound to
    obj (a method-wrapper). The kernel has checked obj's type. */
 static PyObject *
-prim_bind(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+descr_bound(PyObject *d, PyObject *obj)
 {
-    ARGS(2);
-    PyObject *d = args[0], *obj = args[1];
     if (Py_IS_TYPE(d, &PyMethodDescr_Type) || Py_IS_TYPE(d, &PyClassMethodDescr_Type)) {
         PyMethodDef *ml = ((PyMethodDescrObject *)d)->d_method;
         /* A METH_METHOD function takes the class the descriptor was made for. */
@@ -1506,8 +1522,18 @@ prim_bind(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (Py_IS_TYPE(d, &PyWrapperDescr_Type)) {
         return lu_method_wrapper_new(d, obj);
     }
-    lu_err_format(PyExc_TypeError, "bind() needs a method or wrapper descriptor");
     return NULL;
+}
+
+static PyObject *
+prim_bind(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2);
+    PyObject *r = descr_bound(args[0], args[1]);
+    if (r == NULL && !PyErr_Occurred()) {
+        lu_err_format(PyExc_TypeError, "bind() needs a method or wrapper descriptor");
+    }
+    return r;
 }
 
 /* method_new(func, self): PyMethod_New. */

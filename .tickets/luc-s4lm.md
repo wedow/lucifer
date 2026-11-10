@@ -23,3 +23,7 @@ luc-esc2 did not take this on. Related, landed: a generator's loops that contain
 **2026-11-09T04:45:21Z**
 
 luc-vxsk: Flask's in-process run still takes about 95 interpreted generator resumes per request, Jinja's delegating root generators (luc-hhnm).
+
+**2026-11-10T17:17:13Z**
+
+luc-custom3: set(genexpr) now runs the generator in its loop (fc47098: a set.__init__ twin, native set adds, get_iter of a generator folded at any depth, the last inline level open to a resumed generator, tail calls one level deeper), so nqueens resumes 1.27M fewer generators per run (2059M -> 1460M instructions per loop). Not done here: calls from a resumed body. lu_jit_frames_push/pop and the kept-frame exit would take the generator's own frame (relink on push, unlink on pop, no code/func incref when kept, the NEXT entry popped off its caller's stack), and calls_out would allow IF_PY; but in the case that matters (struct's _unpack, tuple(genexpr) over _unpack_item) the generator sits at depth 3 and its call is refused by the opaque-call depth limit for user code (1), and every call would push the frames out of line, so whether it beats the generator's own unit is unmeasured. The generator object is still made per genexpr call (virtual generators not started).

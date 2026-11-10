@@ -333,6 +333,15 @@ struct lu_opclasses {
     int n;                      /* entries published, release-stored after the entry */
     int mega;
     struct { PyTypeObject *left, *right; } e[LU_OPCLASS_WAYS];
+    /* An iterator's step that no arm names (a megamorphic FOR_ITER, or a
+       call of the kernel's next_item): the class its generic path meets
+       most, by a majority vote of those steps (lu_jit_class_vote), joins
+       the armed classes (each step taken in line, generic for the rest)
+       once its votes reach `need`, which each class armed doubles. Up to
+       LU_OPCLASS_WAYS; armed[] is published before narmed. */
+    PyTypeObject *hot, *armed[LU_OPCLASS_WAYS];
+    int narmed;
+    uint32_t votes, need;
 };
 
 /* The site's table, or NULL. The site is the operator's code unit. */
@@ -341,6 +350,10 @@ void lu_jit_opclass_note(PyCodeObject *code, int pc, PyTypeObject *left, PyTypeO
 /* The site's table, made empty if it had none: a build asked for its
    classes, which the interpreter notes from then on. */
 struct lu_opclasses *lu_jit_want_classes(PyCodeObject *code, int pc);
+/* The generic path of a step at the site met an iterator of class tp: its
+   vote, and the units that depend on the table recompile when it arms a
+   class. */
+void lu_jit_class_vote(struct lu_opclasses *t, PyTypeObject *tp);
 
 /* The interpreter's generic path of an operator at `instr` met left and
    right, of `kinds` (lu_jit_observe's): a warm code's site with a table

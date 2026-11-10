@@ -1515,7 +1515,7 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
     int op = site[0].op.code;
     if (op != LOAD_ATTR_INSTANCE_VALUE && op != LOAD_ATTR_METHOD_NO_DICT && op != LOAD_ATTR_METHOD_WITH_VALUES
         && op != LOAD_ATTR_NONDESCRIPTOR_NO_DICT && op != LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES
-        && op != STORE_ATTR_INSTANCE_VALUE) {
+        && op != STORE_ATTR_INSTANCE_VALUE && op != LOAD_ATTR_PROPERTY) {
         return;
     }
     struct lu_pic_entry e = { lu_cache_load32(site + 1 + LA_VERSION), (uint16_t)op, lu_cache_load(site + 1 + LA_INDEX),
@@ -1719,6 +1719,55 @@ lu_jit_opclass_note(PyCodeObject *code, int pc, PyTypeObject *left, PyTypeObject
     }
 }
 
+/* The votes for the first class armed at a site: the steps a loop that
+   meets it all along makes before it runs in line. */
+#define LU_HOT_VOTES 256
+
+void
+lu_jit_class_vote(struct lu_opclasses *t, PyTypeObject *tp)
+{
+    /* Races lose votes or let a wrong class lead: an armed class is a
+       speculation the generic path backs, and only the lock arms one. */
+    PyTypeObject *hot = __atomic_load_n(&t->hot, __ATOMIC_RELAXED);
+    uint32_t votes = __atomic_load_n(&t->votes, __ATOMIC_RELAXED);
+    if (hot != tp) {
+        if (votes > 0) {
+            __atomic_store_n(&t->votes, votes - 1, __ATOMIC_RELAXED);
+        }
+        else {
+            __atomic_store_n(&t->hot, tp, __ATOMIC_RELAXED);
+            __atomic_store_n(&t->votes, 1, __ATOMIC_RELAXED);
+        }
+        return;
+    }
+    uint32_t need = __atomic_load_n(&t->need, __ATOMIC_RELAXED);
+    if (votes + 1 < (need != 0 ? need : LU_HOT_VOTES)) {
+        __atomic_store_n(&t->votes, votes + 1, __ATOMIC_RELAXED);
+        return;
+    }
+    int armed = 0;
+    PyMutex_Lock(&_PyRuntime.pic_lock);
+    int known = 0;
+    for (int i = 0; i < t->narmed; i++) {
+        known |= t->armed[i] == tp;
+    }
+    if (t->hot == tp && !known && t->narmed < LU_OPCLASS_WAYS) {
+        t->armed[t->narmed] = tp;
+        __atomic_store_n(&t->narmed, t->narmed + 1, __ATOMIC_RELEASE);
+        t->need = (t->need != 0 ? t->need : LU_HOT_VOTES) * 2;
+        armed = 1;
+    }
+    t->hot = NULL;
+    t->votes = 0;
+    PyMutex_Unlock(&_PyRuntime.pic_lock);
+    if (armed) {
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: step arms %s\n", tp->tp_name);
+        }
+        lu_jit_invalidate(LU_DEP_CALLEES, (uintptr_t)t, 0);
+    }
+}
+
 void
 lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
 {
@@ -1759,6 +1808,17 @@ lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
         }
         if (t != NULL) {
             t->n = k;
+            if (t->hot != NULL && dead((PyObject *)t->hot)) {
+                t->hot = NULL;
+                t->votes = 0;
+            }
+            int a = 0;
+            for (int i = 0; i < t->narmed; i++) {
+                if (!dead((PyObject *)t->armed[i])) {
+                    t->armed[a++] = t->armed[i];
+                }
+            }
+            t->narmed = a;
         }
     }
 }
