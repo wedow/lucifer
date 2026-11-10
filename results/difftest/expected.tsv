@@ -86,6 +86,7 @@ tests/diff/corpus/float_format_boundaries.py	NOTRUN	0.000000
 tests/diff/corpus/float_hex_ratio.py	NOTRUN	0.000000
 tests/diff/corpus/float_nan_infinity.py	NOTRUN	0.000000
 tests/diff/corpus/float_pack_bits.py	NOTRUN	0.000000
+tests/diff/corpus/float_pow_paths.py	NOTRUN	0.000000
 tests/diff/corpus/float_repr_roundtrip.py	NOTRUN	0.000000
 tests/diff/corpus/float_round_ties.py	NOTRUN	0.000000
 tests/diff/corpus/float_signed_zero.py	NOTRUN	0.000000

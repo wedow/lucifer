@@ -346,6 +346,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed);
     X(raise_tb) \
     X(bytes_concat) \
     X(bind_method) \
+    X(float_pow) \
     X(reraise) \
     X(load_special) \
     X(unpack)

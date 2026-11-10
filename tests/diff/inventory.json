@@ -522,6 +522,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/float_pow_paths.py": {
+      "exit": 0,
+      "sha256": "9407897114b9bebbdb58319480e52137d4ff2dc3253cb21d3daeb5277470c453",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/float_repr_roundtrip.py": {
       "exit": 0,
       "sha256": "0da3b9e8880ba4cca7496b174661ab2a2622373a1236fd2d612d5cb43146fdf4",

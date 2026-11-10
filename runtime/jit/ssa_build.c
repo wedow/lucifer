@@ -1981,6 +1981,14 @@ binary_op(struct ctx *c)
             r = LU_NOV;
         }
         c->island = NULL;
+        if (r == LU_NOV && !c->failed && base == NB_POWER && (lk == LU_KIND_FLOAT || rk == LU_KIND_FLOAT)) {
+            /* float.__pow__ in C, as the kernel's dispatcher would reach it. */
+            guard_type(c, a, lk == LU_KIND_FLOAT ? &PyFloat_Type : &PyLong_Type);
+            guard_type(c, b, rk == LU_KIND_FLOAT ? &PyFloat_Type : &PyLong_Type);
+            lu_v args[2] = { a, b };
+            r = helper_raising(c, H_float_pow, 2, args, 2);
+            rown = 1;
+        }
     }
     else if (op == NB_MULTIPLY && ((lk == LU_KIND_LIST && rk == LU_KIND_INT) || (lk == LU_KIND_INT && rk == LU_KIND_LIST))) {
         /* list.__mul__ and __rmul__ of an exact list and an int: the copies

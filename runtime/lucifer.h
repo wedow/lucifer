@@ -1538,6 +1538,9 @@ PyObject *lu_binary_foreign(PyObject *a, PyObject *b, int op);
    load_special binds it: a new reference, or NULL (no error) for the
    kernel to look it up. */
 PyObject *lu_special_function(PyObject *owner, int which);
+/* float.__pow__ of a float and a float or int (either side), without a
+   modulus: the result, or NULL with the error (runs no Python). */
+PyObject *lu_float_pow(PyObject *a, PyObject *b);
 /* a + b for two exact bytes. */
 PyObject *lu_bytes_concat(PyObject *a, PyObject *b);
 /* Whether lu_binary_foreign takes the operator for operands of these types. */
