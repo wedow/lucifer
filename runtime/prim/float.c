@@ -1096,12 +1096,13 @@ PyMethodDef lu_float_methods[] = {
 };
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
+#define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_float_methods[] = {
-    FAST(float_add), FAST(float_sub), FAST(float_mul), FAST(float_truediv), FAST(float_floordiv),
-    FAST(float_mod), FAST(float_divmod), FAST(float_pow), FAST(float_neg), FAST(float_abs),
-    FAST(float_exact), FAST(float_subtype), FAST(float_hash), FAST(float_cmp), FAST(float_repr),
-    FAST(float_format), FAST(float_from_text), FAST(float_integral), FAST(float_is_integer),
-    FAST(float_round), FAST(float_as_ratio), FAST(float_hex), FAST(float_fromhex),
+    PURE(float_add), PURE(float_sub), PURE(float_mul), PURE(float_truediv), PURE(float_floordiv),
+    PURE(float_mod), PURE(float_divmod), PURE(float_pow), PURE(float_neg), PURE(float_abs),
+    PURE(float_exact), FAST(float_subtype), PURE(float_hash), PURE(float_cmp), PURE(float_repr),
+    PURE(float_format), FAST(float_from_text), PURE(float_integral), PURE(float_is_integer),
+    PURE(float_round), PURE(float_as_ratio), PURE(float_hex), PURE(float_fromhex),
     { NULL, NULL, 0, NULL },
 };
 
