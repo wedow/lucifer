@@ -291,9 +291,11 @@ lu_set_insert_clean(setentry *table, size_t mask, PyObject *key, Py_hash_t hash)
 }
 
 /* set_table_resize. The new table is filled before it is published, and the
-   smalltable is never refilled under a reader: a table is always a new one. */
-int
-lu_set_resize(PySetObject *so, Py_ssize_t minused)
+   smalltable is never refilled under a reader: a table is always a new one.
+   minused must be read under the critical section, with the keys it counts:
+   a table too small for them never finds the empty entry an insert needs. */
+static int
+set_resize(PySetObject *so, Py_ssize_t minused)
 {
     size_t newsize = PySet_MINSIZE;
     while (newsize <= (size_t)minused) {
@@ -320,6 +322,21 @@ lu_set_resize(PySetObject *so, Py_ssize_t minused)
         lu_qsbr_retire(table_block(oldtable));
     }
     return 0;
+}
+
+int
+lu_set_reserve(PySetObject *so, Py_ssize_t n)
+{
+    if ((so->fill + n) * 5 < (Py_ssize_t)so->mask * 3) {
+        return 0;
+    }
+    return set_resize(so, (so->used + n) * 2);
+}
+
+int
+lu_set_rebuild(PySetObject *so)
+{
+    return set_resize(so, so->used > 50000 ? so->used * 2 : so->used * 4);
 }
 
 /* set_add_entry from the point where the probe found no equal key: the key
@@ -349,7 +366,7 @@ lu_set_insert(PySetObject *so, PyObject *key, Py_hash_t hash)
                 if ((size_t)so->fill * 5 < mask * 3) {
                     return 0;
                 }
-                return lu_set_resize(so, so->used > 50000 ? so->used * 2 : so->used * 4);
+                return lu_set_rebuild(so);
             }
             if (entry->hash == -1) {
                 freeslot = entry;
