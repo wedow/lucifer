@@ -806,16 +806,21 @@ slot_base(PyTypeObject *tp, int where, int create)
 int
 lu_nb_slot_kind(PyTypeObject *tp, size_t offset)
 {
-    void *fn = tp->tp_as_number != NULL ? *(void **)((char *)tp->tp_as_number + offset) : NULL;
-    if (fn == NULL) {
-        return 0;
-    }
-    for (size_t i = 0; i < sizeof slots / sizeof slots[0]; i++) {
-        if (slots[i].where == IN_NUMBER && slots[i].offset == offset) {
-            return fn == slots[i].thunk ? -1 : 1;
+    /* The thunk of each PyNumberMethods field, by its index; the table is
+       the same whichever thread fills it first. */
+    static void *thunks[sizeof(PyNumberMethods) / sizeof(void *)];
+    static int filled;
+    if (!__atomic_load_n(&filled, __ATOMIC_ACQUIRE)) {
+        for (size_t i = 0; i < sizeof slots / sizeof slots[0]; i++) {
+            if (slots[i].where == IN_NUMBER) {
+                thunks[slots[i].offset / sizeof(void *)] = slots[i].thunk;
+            }
         }
+        __atomic_store_n(&filled, 1, __ATOMIC_RELEASE);
     }
-    return -1;
+    void *fn = tp->tp_as_number != NULL ? *(void **)((char *)tp->tp_as_number + offset) : NULL;
+    void *thunk = thunks[offset / sizeof(void *)];
+    return fn == NULL ? 0 : thunk == NULL || fn == thunk ? -1 : 1;
 }
 
 int

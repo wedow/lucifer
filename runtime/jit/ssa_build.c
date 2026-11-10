@@ -207,25 +207,32 @@ static void set_known(struct ctx *c, lu_v v, PyTypeObject *t);
 static int decode(struct ctx *c, int pc, int *base, int *oparg, int *opcode);
 static int jump_target(int op, int oparg, int next);
 
-/* Whether the instruction binds (or unbinds) local i. */
-static int
-binds(int base, int oparg, int i)
+/* Per local, how many places bind (or unbind) it, up to 2: its
+   parameter's binding, and each store. */
+static uint8_t *
+bindings(struct ctx *c)
 {
-    return ((base == STORE_FAST || base == DELETE_FAST || base == LOAD_FAST_AND_CLEAR || base == MAKE_CELL)
-            && oparg == i)
-        || ((base == STORE_FAST_LOAD_FAST || base == STORE_FAST_STORE_FAST) && oparg >> 4 == i)
-        || (base == STORE_FAST_STORE_FAST && (oparg & 15) == i);
-}
-
-/* How many places bind local i: its parameter's binding, and each store. */
-static int
-bindings(struct ctx *c, int i)
-{
-    int n = i < c->code->co_argcount;
+    uint8_t *n = lu_ir_alloc(c->f, (size_t)c->nlocals + 1);
+    for (int i = 0; i < c->nlocals; i++) {
+        n[i] = i < c->code->co_argcount;
+    }
     for (int pc = 0; pc < c->ncode;) {
         int base, oparg, op;
         int next = decode(c, pc, &base, &oparg, &op);
-        n += binds(base, oparg, i);
+        int a = -1, b = -1;
+        if (base == STORE_FAST || base == DELETE_FAST || base == LOAD_FAST_AND_CLEAR || base == MAKE_CELL) {
+            a = oparg;
+        }
+        else if (base == STORE_FAST_LOAD_FAST || base == STORE_FAST_STORE_FAST) {
+            a = oparg >> 4;
+            b = base == STORE_FAST_STORE_FAST ? oparg & 15 : -1;
+        }
+        for (int k = 0; k < 2; k++) {
+            int i = k == 0 ? a : b;
+            if (i >= 0 && i < c->nlocals && n[i] < 2) {
+                n[i]++;
+            }
+        }
         pc = next;
     }
     return n;
@@ -235,9 +242,9 @@ bindings(struct ctx *c, int i)
 static uint8_t *
 fixed_params(struct ctx *c)
 {
-    uint8_t *fixed = lu_ir_alloc(c->f, (size_t)c->nlocals + 1);
+    uint8_t *fixed = bindings(c);
     for (int i = 0; i < c->nlocals; i++) {
-        fixed[i] = i < c->code->co_argcount && bindings(c, i) == 1;
+        fixed[i] = i < c->code->co_argcount && fixed[i] == 1;
     }
     return fixed;
 }
@@ -1652,6 +1659,15 @@ static int unary_op(struct ctx *c);
 static int call(struct ctx *c);
 static int type_arms(struct ctx *c, int n, int d0, int d1, int lk, int rk, int (*build)(struct ctx *));
 
+/* Whether v is a constant int a machine int cannot hold: an int kind's
+   unboxed path would always leave on it. */
+static int
+wide_const(struct ctx *c, lu_v v)
+{
+    PyObject *k = I(c, v)->op == OP_CONST ? known(c, v) : NULL;
+    return k != NULL && PyLong_CheckExact(k) && lu_jit_kind(k) != LU_KIND_INT;
+}
+
 /* The exact type a kind names, or NULL for OTHER. */
 static PyTypeObject *
 kind_type(int kind)
@@ -1891,9 +1907,9 @@ binary_op(struct ctx *c)
     if (nospec(c, c->pc)) {
         lk = rk = LU_KIND_OTHER;
     }
-    if (known_type(c, a) == &PyLong_Type) lk = LU_KIND_INT;
+    if (known_type(c, a) == &PyLong_Type && !wide_const(c, a)) lk = LU_KIND_INT;
     if (known_type(c, a) == &PyFloat_Type) lk = LU_KIND_FLOAT;
-    if (known_type(c, b) == &PyLong_Type) rk = LU_KIND_INT;
+    if (known_type(c, b) == &PyLong_Type && !wide_const(c, b)) rk = LU_KIND_INT;
     if (known_type(c, b) == &PyFloat_Type) rk = LU_KIND_FLOAT;
     if (op != NB_SUBSCR) {
         int armed = operator_arms(c, 2, lk, rk, binary_op);
@@ -2009,9 +2025,9 @@ compare_op(struct ctx *c)
     if (nospec(c, c->pc)) {
         lk = rk = LU_KIND_OTHER;
     }
-    if (known_type(c, a) == &PyLong_Type) lk = LU_KIND_INT;
+    if (known_type(c, a) == &PyLong_Type && !wide_const(c, a)) lk = LU_KIND_INT;
     if (known_type(c, a) == &PyFloat_Type) lk = LU_KIND_FLOAT;
-    if (known_type(c, b) == &PyLong_Type) rk = LU_KIND_INT;
+    if (known_type(c, b) == &PyLong_Type && !wide_const(c, b)) rk = LU_KIND_INT;
     if (known_type(c, b) == &PyFloat_Type) rk = LU_KIND_FLOAT;
     int armed = operator_arms(c, 2, lk, rk, compare_op);
     if (armed != 0) {
@@ -2476,7 +2492,7 @@ held_once(struct ctx *c, lu_v v)
 {
     for (int i = 0; I(c, v)->op == OP_PHI && i < c->nlocals; i++) {
         if (c->st.v[i] == v) {
-            lu_v w = bindings(c, i) == 1 ? phi_one(c, v, 0) : LU_NOV;
+            lu_v w = bindings(c)[i] == 1 ? phi_one(c, v, 0) : LU_NOV;
             return w != LU_NOV ? w : v;
         }
     }
