@@ -125,6 +125,7 @@ tests/diff/corpus/sort_key_once.py	NOTRUN	0.000000
 tests/diff/corpus/sort_reverse_stable.py	NOTRUN	0.000000
 tests/diff/corpus/sort_stability.py	NOTRUN	0.000000
 tests/diff/corpus/threads_patch_mid_loop.py	NOTRUN	0.000000
+tests/diff/corpus/truth_native_types.py	NOTRUN	0.000000
 tests/diff/corpus/unicode_case_expansion.py	NOTRUN	0.000000
 tests/diff/corpus/unicode_format_map.py	NOTRUN	0.000000
 tests/diff/corpus/unicode_predicates.py	NOTRUN	0.000000

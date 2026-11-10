@@ -2115,6 +2115,10 @@ truth(struct ctx *c, lu_v v)
     if (t == &PyLong_Type) {
         return emit(c, OP_CMP_I, REP_BIT, unbox_int(c, v), const_i(c, 0), LU_NOV, Py_NE);
     }
+    if (t == &PyFloat_Type) {
+        return emit(c, OP_CMP_F, REP_BIT, unbox_float(c, v), emit(c, OP_CONST_F, REP_F64, LU_NOV, LU_NOV, LU_NOV, 0),
+                    LU_NOV, Py_NE);    /* 0.0's bits; -0.0 compares equal, as it is false */
+    }
     lu_v bit = emit(c, OP_TRUTH, REP_BIT, v, LU_NOV, LU_NOV, 0);
     I(c, bit)->fs = before(c);
     I(c, bit)->drop = 1;

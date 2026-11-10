@@ -119,6 +119,15 @@ lu_truth_exact(PyObject *v)
     if (PyDict_CheckExact(v)) {
         return ((PyDictObject *)v)->ma_used != 0;
     }
+    if (PyFloat_CheckExact(v)) {
+        return PyFloat_AS_DOUBLE(v) != 0.0;
+    }
+    if (PyBytes_CheckExact(v)) {
+        return PyBytes_GET_SIZE(v) != 0;
+    }
+    if (PySet_CheckExact(v) || PyFrozenSet_CheckExact(v)) {
+        return ((PySetObject *)v)->used != 0;
+    }
     PyTypeObject *tp = Py_TYPE(v);
     if ((tp->tp_as_number == NULL || tp->tp_as_number->nb_bool == NULL)
         && (tp->tp_as_mapping == NULL || tp->tp_as_mapping->mp_length == NULL)

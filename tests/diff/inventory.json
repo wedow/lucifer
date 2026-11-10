@@ -756,6 +756,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/truth_native_types.py": {
+      "exit": 0,
+      "sha256": "7eb3a67a6672e36b5a9d94eee3937a6d65252355313c29f31e871846f11594c5",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/unicode_case_expansion.py": {
       "exit": 0,
       "sha256": "cd2896d94688cf81cdcf3f642be2b37cc90959459e52ccbf6cc1c0003d48534e",
