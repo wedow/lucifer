@@ -48,7 +48,8 @@ readline, libmpdec and libuuid:
 - `_dbmmodule.c` (`_dbm`), `_gdbmmodule.c` (`_gdbm`), `readline.c` (`readline`),
   `termios.c` (`termios`), `syslogmodule.c` (`syslog`), `_uuidmodule.c` (`_uuid`)
 - `_decimal/_decimal.c` and `_decimal/docstrings.h` (`_decimal`, over the system's
-  libmpdec; the tag's bundled `_decimal/libmpdec/` is not copied)
+  libmpdec, else over `_decimal/libmpdec/`: the sources and headers of the tag's
+  `LIBMPDEC_OBJS`, built with its x64 flags)
 
 `runtime/capi/internal.c` holds `_PyBytesWriter_*` of `Objects/bytesobject.c`,
 adapted (no debug-build checks).

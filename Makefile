@@ -139,7 +139,8 @@ STDLIB_EXTS := _ssl _sqlite3 _bz2 pyexpat _elementtree _pickle cmath _multiproce
 have = $(shell printf '\043include <$(1)>\n' | $(CC) -E -x c - >/dev/null 2>&1 && echo $(2))
 STDLIB_EXTS += $(call have,tk.h,_tkinter) $(call have,lzma.h,_lzma) $(call have,zstd.h,_zstd) \
 	$(call have,panel.h,_curses _curses_panel) $(call have,ndbm.h,_dbm) $(call have,gdbm.h,_gdbm) \
-	$(call have,readline/readline.h,readline) $(call have,mpdecimal.h,_decimal) $(call have,uuid/uuid.h,_uuid)
+	$(call have,readline/readline.h,readline) _decimal $(call have,uuid/uuid.h,_uuid)
+SYSTEM_MPDEC := $(call have,mpdecimal.h,yes)
 STDLIB_EXT_FILES = $(STDLIB_EXTS:%=$(DYNLOAD)/%$(EXT_SUFFIX))
 all: $(STDLIB_EXT_FILES)
 $(DYNLOAD)/_ssl$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_ssl.c
@@ -182,8 +183,13 @@ $(DYNLOAD)/_gdbm$(EXT_SUFFIX): EXT_LIBS = -lgdbm
 $(DYNLOAD)/readline$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/readline.c
 $(DYNLOAD)/readline$(EXT_SUFFIX): EXT_CFLAGS = -D_DEFAULT_SOURCE
 $(DYNLOAD)/readline$(EXT_SUFFIX): EXT_LIBS = -lreadline
-$(DYNLOAD)/_decimal$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_decimal/_decimal.c
-$(DYNLOAD)/_decimal$(EXT_SUFFIX): EXT_LIBS = -lmpdec -lm
+# _decimal over the system's libmpdec, else over the tag's copy (configure's
+# USE_BUNDLED_LIBMPDEC, x64 machine).
+$(DYNLOAD)/_decimal$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_decimal/_decimal.c \
+	$(if $(SYSTEM_MPDEC),,$(wildcard $(CPY_MODULES)/_decimal/libmpdec/*.c))
+$(DYNLOAD)/_decimal$(EXT_SUFFIX): EXT_CFLAGS = \
+	$(if $(SYSTEM_MPDEC),,-I$(CPY_MODULES)/_decimal/libmpdec -DCONFIG_64=1 -DASM=1)
+$(DYNLOAD)/_decimal$(EXT_SUFFIX): EXT_LIBS = $(if $(SYSTEM_MPDEC),-lmpdec) -lm
 $(DYNLOAD)/_uuid$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_uuidmodule.c
 $(DYNLOAD)/_uuid$(EXT_SUFFIX): EXT_CFLAGS = $(shell pkg-config --cflags uuid)
 $(DYNLOAD)/_uuid$(EXT_SUFFIX): EXT_LIBS = -luuid
