@@ -1,6 +1,6 @@
 ---
 id: luc-6scb
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-10T19:21:54Z
@@ -16,3 +16,9 @@ This is what mako lost on luc-custom3: with the poll serving merges and collecti
 
 Levers, general: (1) version a compiled loop on its iterator's exact type at the loop's entry when the type is unknown, so each iterable type gets the inlined step (the loop-invariant type, not the site's profile, which next_item shares with every caller); (2) at least make the generic step cheap: the registry lookup O(1) and folded where the type is known only at run time, and the __next__ call as a cached direct call keyed on the type.
 
+
+## Notes
+
+**2026-11-10T19:50:29Z**
+
+Done on luc-custom3 (a3b985e): the generic step votes for the class it meets in the site's class table (majority vote); a winner joins the site's armed classes (up to four, each doubling the votes the next needs), and the unit recompiles with a class test per armed class, the step in line for it, and the generic step for the rest. A call of next_item counts as a step (in_step), so the frames it inlines call what they call. The generic step calls a Python class's __next__ itself (StopIteration its end) instead of the kernel's next_item. mako per loop 765M -> 627M instructions (master 629M). The join over a deque after eleven classes: 217 -> 122 ns per item (CPython 10 ns); what is left is the deque iterator's own Python body (slot loads through helpers, the counter boxed). A user class's __next__ that ends by raising StopIteration still leaves its inlined copy at the raise (its frame needs a traceback entry), so the unit calls it instead: through the cheap generic step, one compiled call per item. Lane: jitcheck megaiter.
