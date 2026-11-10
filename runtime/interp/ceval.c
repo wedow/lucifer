@@ -591,18 +591,10 @@ lu_binary_foreign(PyObject *a, PyObject *b, int op)
 PyObject *
 lu_special_function(PyObject *owner, int which)
 {
-    static const char *const names[4] = { "__enter__", "__exit__", "__aenter__", "__aexit__" };
-    static PyObject *interned[4];
-    if (which < 0 || which > 3) {
-        return NULL;
-    }
-    PyObject *name = __atomic_load_n(&interned[which], __ATOMIC_ACQUIRE);
+    PyObject *name = which == 0 ? LU_ID(__enter__) : which == 1 ? LU_ID(__exit__)
+        : which == 2 ? LU_ID(__aenter__) : which == 3 ? LU_ID(__aexit__) : NULL;
     if (name == NULL) {
-        if ((name = PyUnicode_InternFromString(names[which])) == NULL) {
-            PyErr_Clear();
-            return NULL;
-        }
-        __atomic_store_n(&interned[which], name, __ATOMIC_RELEASE);     /* interned: immortal */
+        return NULL;
     }
     PyObject *f = _PyType_LookupRef(Py_TYPE(owner), name);
     if (f != NULL && !PyFunction_Check(f) && !Py_IS_TYPE(f, &PyMethodDescr_Type)) {
