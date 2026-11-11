@@ -966,10 +966,14 @@ h_send(PyObject *receiver, PyObject *v)
         if (pair == NULL) {
             return NULL;
         }
-        t->sent_returned = PyTuple_GET_ITEM(pair, 1) == Py_True;
-        PyObject *r = Py_NewRef(PyTuple_GET_ITEM(pair, 0));
+        /* The poll may run code that sends too: the flag is stored after it. */
+        int returned = PyTuple_GET_ITEM(pair, 1) == Py_True;
+        PyObject *r = polled(t, Py_NewRef(PyTuple_GET_ITEM(pair, 0)));
         Py_DECREF(pair);
-        return polled(t, r);
+        if (r != NULL) {
+            t->sent_returned = returned;
+        }
+        return r;
     }
     struct lu_frame *f = lu_gen_resume(&t->ts, receiver, Py_NewRef(v));
     if (f == NULL) {
