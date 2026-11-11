@@ -174,7 +174,16 @@ def _throw(gen, typ, val, tb, close_on_genexit):
             return _result(gen, gen_throw(gen, e, depth))
         gen_set_running(gen, depth, False)
         return ret
-    return _result(gen, gen_throw(gen, _normalized(typ, val, tb), depth))
+    if depth == 0:
+        return _result(gen, gen_throw(gen, _normalized(typ, val, tb), 0))
+    # The generators above the target run while its exception is made, as
+    # in CPython's recursion: a constructor that resumes them fails.
+    gen_set_running(gen, depth - 1, True)
+    try:
+        exc = _normalized(typ, val, tb)
+    finally:
+        gen_set_running(gen, depth - 1, False)
+    return _result(gen, gen_throw(gen, exc, depth))
 
 
 def _close_one(gen, exc):
