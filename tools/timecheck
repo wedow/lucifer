@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Wall-clock bounds for two costs that grow with the compiler.
+"""Wall-clock bounds for three costs that grow with the compiler.
 
   uncaught   a script that raises and is not caught: the traceback display
              imports `traceback`, whose modules compile source at import
              (namedtuple, dataclasses) and create the _ast classes
   huge       exec of a 100,000-line function, the size of the one in
              test_sys_settrace.test_jump_extended_args_for_iter
+  unwind     20,000 exceptions raised and caught at the end of a 20,000-line
+             function: each unwind and traceback finds its instruction start
 
 Each case runs on BIN, and on the oracle when --oracle is given, and prints
 both times. Exit status 1 when BIN is slower than a bound or its stderr
@@ -14,7 +16,7 @@ differs from the oracle's. An idle host measures uncaught 0.17 s and huge
 3.2 s seen). They catch a return of a quadratic or per-import cost, not a few
 percent.
 
-usage: timecheck --lucifer BIN [--oracle PYTHON] [--max-uncaught S] [--max-huge S]
+usage: timecheck --lucifer BIN [--oracle PYTHON] [--max-uncaught S] [--max-huge S] [--max-unwind S]
 """
 import argparse
 import subprocess
@@ -32,6 +34,16 @@ HUGE = "\n".join([
     "f([])",
 ])
 UNCAUGHT = 'raise ValueError("x")\n'
+UNWIND = "\n".join([
+    "def f():",
+    *("    x = 1" for _ in range(20_000)),
+    "    for _ in range(20_000):",
+    "        try:",
+    "            raise ValueError",
+    "        except ValueError:",
+    "            pass",
+    "f()",
+])
 
 
 def run(interpreter, script, limit):
@@ -49,11 +61,13 @@ def main():
     parser.add_argument("--oracle")
     parser.add_argument("--max-uncaught", type=float, default=0.6)
     parser.add_argument("--max-huge", type=float, default=5.0)
+    parser.add_argument("--max-unwind", type=float, default=1.0)
     args = parser.parse_args()
     failed = False
     with tempfile.TemporaryDirectory() as tmp:
         for name, source, bound in (("uncaught", UNCAUGHT, args.max_uncaught),
-                                    ("huge", HUGE.replace("f([])", "spam = ()\nf([])"), args.max_huge)):
+                                    ("huge", HUGE.replace("f([])", "spam = ()\nf([])"), args.max_huge),
+                                    ("unwind", UNWIND, args.max_unwind)):
             script = Path(tmp, name + ".py")
             script.write_text(source)
             seconds, child = run(args.lucifer, str(script), bound * 2)

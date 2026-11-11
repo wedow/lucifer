@@ -390,15 +390,18 @@ lu_code_new(const struct lu_code_fields *c)
         return NULL;
     }
     Py_ssize_t nbytes = PyBytes_GET_SIZE(c->code);
+    Py_ssize_t nunits = nbytes / (Py_ssize_t)sizeof(lu_codeunit);
+    /* The bytecode, then the instruction-start map (lu_code_starts). */
+    size_t starts_at = (offsetof(PyCodeObject, co_code_adaptive) + nbytes + 7) & ~(size_t)7;
     PyCodeObject *co = (PyCodeObject *)lu_object_new(&PyCode_Type,
-        offsetof(PyCodeObject, co_code_adaptive) + nbytes);
+        starts_at + (nunits + 63) / 64 * sizeof(uint64_t));
     if (co == NULL) {
         return NULL;
     }
     /* Deferred reference counting: frames count their code, but a count that
        reaches zero frees nothing; only a collection does. */
     lu_set_deferred((PyObject *)co);
-    Py_SET_SIZE(co, nbytes / (Py_ssize_t)sizeof(lu_codeunit));
+    Py_SET_SIZE(co, nunits);
     co->co_consts = Py_NewRef(c->consts);
     co->co_names = Py_NewRef(c->names);
     co->co_exceptiontable = Py_NewRef(c->exceptiontable);
@@ -428,6 +431,10 @@ lu_code_new(const struct lu_code_fields *c)
     co->co_nlocalsplus = nlocalsplus;
     co->co_framesize = nlocalsplus + co->co_stacksize + (int)LU_FRAME_SPECIALS;
     memcpy(co->co_code_adaptive, PyBytes_AS_STRING(c->code), nbytes);
+    uint64_t *starts = lu_code_starts(co);
+    for (Py_ssize_t i = 0; i < nunits; i += 1 + lu_opcode_caches[lu_code_start(co)[i].op.code]) {
+        starts[i / 64] |= (uint64_t)1 << (i % 64);
+    }
     /* Instrumentation starts at the first RESUME. */
     while (co->_co_firsttraceable < Py_SIZE(co)
            && lu_code_start(co)[co->_co_firsttraceable].op.code != RESUME) {
