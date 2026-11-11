@@ -3769,6 +3769,18 @@ intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
         I(c, r)->fs = before(c);
         return box_int(c, r);
     }
+    if (nargs == 1 && strcmp(name, "static_type") == 0 && known(c, args[0]) != NULL
+        && PyUnicode_CheckExact(known(c, args[0]))) {
+        /* A static type by name: immortal, and the same every time. */
+        const char *tname = PyUnicode_AsUTF8(known(c, args[0]));
+        PyTypeObject *t = tname != NULL ? lu_static_type(tname) : NULL;
+        if (t == NULL) {
+            PyErr_Clear();
+            return LU_NOV;
+        }
+        *owned = 0;
+        return konst(c, (PyObject *)t);
+    }
     if (nargs == 2 && strcmp(name, "type_lookup") == 0 && known(c, args[0]) != NULL
         && PyType_Check(known(c, args[0])) && known(c, args[1]) != NULL && PyUnicode_CheckExact(known(c, args[1]))) {
         /* A constant type's attribute: a static type's never changes, a
