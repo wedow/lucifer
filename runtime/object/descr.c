@@ -1797,10 +1797,11 @@ prim_kernel_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
+#define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_descr_methods[] = {
     FAST(kernel_get), FAST(setattr_native),
-    FAST(make_function), FAST(make_getset), FAST(getset_kernel), FAST(getset_get),
-    FAST(getset_set), FAST(member_get), FAST(member_peek), FAST(member_set), FAST(descr_type), FAST(bind),
-    FAST(method_new), FAST(instancemethod_new), FAST(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set), FAST(kernel_twin), FAST(next_missing_set), FAST(next_missing_of),
+    FAST(make_function), FAST(make_getset), PURE(getset_kernel), FAST(getset_get),
+    FAST(getset_set), PURE(member_get), PURE(member_peek), FAST(member_set), PURE(descr_type), FAST(bind),
+    FAST(method_new), FAST(instancemethod_new), PURE(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set), FAST(kernel_twin), FAST(next_missing_set), FAST(next_missing_of),
     { NULL, NULL, 0, NULL },
 };

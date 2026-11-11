@@ -514,10 +514,11 @@ lu_dict_views_init(void)
 }
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
+#define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_dict_methods[] = {
     FAST(dict_new), FAST(dict_probe), FAST(dict_find), FAST(dict_put), FAST(dict_key), FAST(dict_value), FAST(dict_hash),
     FAST(dict_stamp), FAST(dict_insert), FAST(dict_replace), FAST(dict_remove), FAST(dict_popitem),
-    FAST(dict_clear), FAST(dict_next), FAST(dict_prev), FAST(dict_keys_id), FAST(dict_copy),
+    FAST(dict_clear), FAST(dict_next), FAST(dict_prev), PURE(dict_keys_id), FAST(dict_copy),
     FAST(dict_merge_prepare), FAST(dict_sizeof), FAST(dictiter_new), FAST(dictiter_next),
     FAST(dictiter_len), FAST(dictiter_copy), FAST(dictview_new), FAST(dictview_dict),
     { NULL, NULL, 0, NULL },
