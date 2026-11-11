@@ -1218,17 +1218,24 @@ reject(const char *what)
     return NULL;
 }
 
-/* to_bytes: two's complement of `length` bytes. */
+/* to_bytes: two's complement of `length` bytes, written into the bytes
+   object made first, as CPython's int_to_bytes makes it (its size errors). */
 static PyObject *
 long_to_bytes(PyObject *a, Py_ssize_t length, int little, int is_signed)
 {
+    PyObject *r = PyBytes_FromStringAndSize(NULL, length);
+    if (r == NULL) {
+        return NULL;
+    }
     big x = view(a);
     if (x.neg && !is_signed) {
+        Py_DECREF(r);
         return reject("can't convert negative int to unsigned");
     }
     /* m = x for x >= 0, |x| - 1 for a negative x, whose bytes get inverted. */
     digit *m = dcalloc(x.n + 1);
     if (m == NULL) {
+        Py_DECREF(r);
         return NULL;
     }
     memcpy(m, x.d, x.n * sizeof(digit));
@@ -1238,16 +1245,13 @@ long_to_bytes(PyObject *a, Py_ssize_t length, int little, int is_signed)
     }
     Py_ssize_t nm = normalize(m, x.n + 1);
     int64_t bits = nm ? (int64_t)(nm - 1) * SHIFT + bit_length_digit(m[nm - 1]) : 0;
-    int64_t room = (int64_t)length * 8 - (is_signed ? 1 : 0);
+    int64_t room = length > INT64_MAX / 8 ? INT64_MAX : (int64_t)length * 8 - (is_signed ? 1 : 0);
     if (x.neg ? (length == 0 || bits > room) : (nm != 0 && bits > room)) {
         PyMem_Free(m);
+        Py_DECREF(r);
         return reject("int too big to convert");
     }
-    char *out = PyMem_Malloc(length > 0 ? length : 1);
-    if (out == NULL) {
-        PyMem_Free(m);
-        return PyErr_NoMemory();
-    }
+    char *out = PyBytes_AS_STRING(r);
     twodigits acc = 0;
     int accbits = 0;
     Py_ssize_t di = 0;
@@ -1262,8 +1266,6 @@ long_to_bytes(PyObject *a, Py_ssize_t length, int little, int is_signed)
         out[little ? i : length - 1 - i] = x.neg ? (char)~byte : (char)byte;
     }
     PyMem_Free(m);
-    PyObject *r = PyBytes_FromStringAndSize(out, length);
-    PyMem_Free(out);
     return r;
 }
 

@@ -571,13 +571,16 @@ def _odd_product(start, stop):
     return _odd_product(start, middle) * _odd_product(middle, stop)
 
 
+_LLONG_MAX = (1 << 63) - 1
+
+
 def factorial(n, /):
     """Find n!."""
     n = _index(n)
     if n < 0:
         raise ValueError('factorial() not defined for negative values')
-    if n > (1 << 63) - 1:
-        raise OverflowError('factorial() argument should not exceed %d' % ((1 << 63) - 1))
+    if n > _LLONG_MAX:
+        raise OverflowError('factorial() argument should not exceed %d' % _LLONG_MAX)
     if n < 2:
         return 1
     inner = outer = 1
@@ -603,6 +606,8 @@ def comb(n, k, /):
     if k > n:
         return 0
     k = min(k, n - k)
+    if k > _LLONG_MAX:
+        raise OverflowError('min(n - k, k) must not exceed %d' % _LLONG_MAX)
     result = 1
     for i in range(1, k + 1):
         result = result * (n - k + i) // i
@@ -620,6 +625,8 @@ def perm(n, k=None, /):
         raise ValueError('k must be a non-negative integer')
     if k > n:
         return 0
+    if k > _LLONG_MAX:
+        raise OverflowError('k must not exceed %d' % _LLONG_MAX)
     result = 1
     for i in range(n - k + 1, n + 1):
         result *= i
