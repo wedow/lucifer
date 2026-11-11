@@ -1,6 +1,6 @@
 ---
 id: luc-c6sa
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T04:20:08Z

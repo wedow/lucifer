@@ -1179,6 +1179,7 @@ lu_descr_init(void)
     ITER_LAYOUT(PyEnum_Type);
     ITER_LAYOUT(PyReversed_Type);
     ITER_LAYOUT(PyCallIter_Type);
+    ITER_LAYOUT(lu_memory_iterator_type);
     layout(&Py_GenericAliasType, sizeof(aliasfields), 0, alias, NULL, NULL);
     layout(&_PyUnion_Type, sizeof(aliasfields), 0, alias, NULL, NULL);
 }
@@ -1574,9 +1575,9 @@ lu_field_offset(PyTypeObject *tp, long i)
                                            &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type,
                                            &PyMap_Type, &PyFilter_Type, &PyZip_Type,
                                            &PyEnum_Type, &PyReversed_Type, &PyCallIter_Type,
-                                           &PyFrameLocalsProxy_Type,
+                                           &lu_memory_iterator_type, &PyFrameLocalsProxy_Type,
                                            &Py_GenericAliasType, &_PyUnion_Type };
-    static const int counts[] = { 5, 2, 2, 3, 1, 1, 3, 3, 1, 3, 3, 3, 3, 3, 3, 1, 4, 4 };
+    static const int counts[] = { 5, 2, 2, 3, 1, 1, 3, 3, 1, 3, 3, 3, 3, 3, 3, 3, 1, 4, 4 };
     /* the exact types first: a subclass instance is the rare case */
     size_t t = 0, n = sizeof types / sizeof types[0];
     while (t < n && tp != types[t]) {

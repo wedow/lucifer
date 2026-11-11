@@ -28,3 +28,15 @@ try:
     struct.calcsize('<z')
 except struct.error as e:
     print(e)
+# A huge repeat count is a run, never expanded: the size check comes first.
+for fmt in ('>2147483647q', '<9223372036854775807x', '<4611686018427387904q', '<9223372036854775808b'):
+    try:
+        print(fmt, struct.calcsize(fmt))
+        struct.unpack(fmt, b'\0' * 8)
+    except struct.error as e:
+        print(fmt, e)
+print(struct.pack('<3h2s0i2B', 1, 2, 3, b'xy', 4, 5), struct.unpack('<3h2x2B', b'\1\0\2\0\3\0\0\0\4\5'))
+try:
+    struct.pack('<3h', 1, 2)
+except struct.error as e:
+    print(e)

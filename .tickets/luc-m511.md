@@ -1,6 +1,6 @@
 ---
 id: luc-m511
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T03:08:31Z

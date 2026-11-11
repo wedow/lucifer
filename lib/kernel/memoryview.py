@@ -5,7 +5,7 @@ slices, arguments and the error texts."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, ns_items, static_type, type_tp_name, type_lookup,
-    int_format, address, b_check, kernel_twin,
+    int_format, address, b_check, kernel_twin, alloc, field_get, field_set, str_len, str_ord,
     mv_new, mv_release, mv_released, mv_attr, mv_len, mv_tobytes, mv_tolist, mv_item,
     mv_set_item, mv_slice, mv_set_slice, mv_cast, mv_toreadonly, mv_eq, mv_hash,
 )
@@ -56,6 +56,15 @@ def _lookup(self, key):
         n = mv_len(self)
         return i + n if i < 0 else i
     error(TypeError, 'memoryview: invalid slice key')
+
+
+def _item(self, i):
+    """memory_item: the 1-D item i; a NULL in a pointer table is an error,
+    where CPython would crash."""
+    v = mv_item(self, i)
+    if v is MISSING:
+        error(ValueError, 'memoryview: NULL item pointer')
+    return v
 
 
 def _count(self, key):
@@ -109,7 +118,7 @@ class memoryview:
             return mv_new(self)
         if kind(key, 'tuple') and size(key) == 0 and mv_attr(self, 'ndim') == 0:
             return mv_item(self, 0)
-        return mv_item(self, _lookup(self, key))
+        return _item(self, _lookup(self, key))
 
     def __setitem__(self, key, value):
         mv_attr(self, 'ndim')
@@ -128,7 +137,20 @@ class memoryview:
         error(TypeError, 'cannot delete memory')
 
     def __iter__(self):
-        return _iter.get_iter(mv_tolist(self))
+        ndim = mv_attr(self, 'ndim')
+        if ndim == 0:
+            error(TypeError, 'invalid indexing of 0-dim memory')
+        if ndim > 1:
+            error(NotImplementedError, 'multi-dimensional sub-views are not implemented')
+        fmt = mv_attr(self, 'format')
+        n = str_len(fmt)
+        if n - (1 if n and str_ord(fmt, 0) == 64 else 0) != 1:     # adjust_fmt
+            error(NotImplementedError, _cat('memoryview: unsupported format ', fmt))
+        it = alloc(memory_iterator, memory_iterator)
+        field_set(it, 0, self)
+        field_set(it, 1, 0)
+        field_set(it, 2, mv_len(self))
+        return it
 
     def __eq__(self, other):
         return mv_eq(self, other)
@@ -192,29 +214,32 @@ class memoryview:
         return mv_cast(self, format, shape)
 
     def count(self, *args, **kwargs):
-        value = _b._o(self, 'count', args, kwargs)
         """Count the number of occurrences of a value."""
+        value = _b._o(self, 'count', args, kwargs)
         n = 0
-        for x in mv_tolist(self):
-            if x == value:
+        for x in self:
+            if x is value or x == value:
                 n += 1
         return n
 
     def index(self, value, *args):
         """Return the index of the first occurrence of a value."""
-        items = mv_tolist(self)
-        n = size(items)
+        ndim = mv_attr(self, 'ndim')
+        if ndim == 0:
+            error(TypeError, 'invalid lookup on 0-dim memory')
+        if ndim > 1:
+            error(NotImplementedError, 'multi-dimensional lookup is not implemented')
+        n = mv_len(self)
         start = as_ssize(args[0], None) if size(args) > 0 else 0
         stop = as_ssize(args[1], None) if size(args) > 1 else n
         if start < 0:
-            start += n
-            if start < 0:
-                start = 0
+            start = start + n if start + n > 0 else 0
         if stop < 0:
-            stop += n
+            stop = stop + n if stop + n > 0 else 0
         i = start
-        while i < n and i < stop:
-            if items[i] == value:
+        while i < stop and i < n:
+            x = _item(self, i)
+            if x is value or x == value:
                 return i
             i += 1
         error(ValueError, 'memoryview.index(x): x not found')
@@ -232,3 +257,33 @@ class memoryview:
     f_contiguous = getset(_attr('f_contiguous'))
     contiguous = getset(_attr('contiguous'))
 
+
+def _memoryiter_next(it):
+    """memoryiter_next over the fields (view, index, length): the next item,
+    or MISSING at the end and at an item whose pointer is NULL, which the
+    index passes as CPython's does."""
+    mv = field_get(it, 0)
+    if mv is None:
+        return MISSING
+    i = field_get(it, 1)
+    if i < field_get(it, 2):
+        mv_attr(mv, 'ndim')     # CHECK_RELEASED
+        field_set(it, 1, i + 1)
+        return mv_item(mv, i)
+    field_set(it, 0, None)
+    return MISSING
+
+
+@kernel_type(static_type('memory_iterator'))
+class memory_iterator:
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        v = _memoryiter_next(self)
+        if v is MISSING:
+            raise StopIteration
+        return v
+
+
+_iter.next_missing_set(memory_iterator, _memoryiter_next)

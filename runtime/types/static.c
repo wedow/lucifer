@@ -215,6 +215,10 @@ PyTypeObject lu_method_wrapper_type = { PyVarObject_HEAD_INIT(&PyType_Type, 0)
    __buffer__ gave, which runs its __release_buffer__ (runtime/types/slots.c). */
 PyTypeObject lu_buffer_wrapper_type = { PyVarObject_HEAD_INIT(&PyType_Type, 0)
     .tp_name = "_buffer_wrapper", .tp_base = &PyBaseObject_Type };
+/* memory_iterator (Objects/memoryobject.c _PyMemoryIter_Type), unexported:
+   its behaviour is kernel Python over three fields (runtime/object/descr.c). */
+PyTypeObject lu_memory_iterator_type = { PyVarObject_HEAD_INIT(&PyType_Type, 0)
+    .tp_name = "memory_iterator", .tp_base = &PyBaseObject_Type };
 /* Defined with their code (runtime/interp/gen.c). */
 extern PyTypeObject lu_coro_wrapper_type, lu_async_gen_athrow_type, lu_async_gen_wrapped_type;
 
@@ -224,7 +228,8 @@ extern PyTypeObject lu_coro_wrapper_type, lu_async_gen_athrow_type, lu_async_gen
 #define LU_TYPE_ENTRY(sym, name, flags, base) &sym,
 PyTypeObject *const lu_static_types[] = {
     &PyBaseObject_Type, &PyType_Type, LU_STATIC_TYPES(LU_TYPE_ENTRY)
-    LU_EXCEPTIONS(LU_EXC_ENTRY) &lu_method_wrapper_type, &lu_buffer_wrapper_type, &lu_coro_wrapper_type,
+    LU_EXCEPTIONS(LU_EXC_ENTRY) &lu_method_wrapper_type, &lu_buffer_wrapper_type, &lu_memory_iterator_type,
+    &lu_coro_wrapper_type,
     &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type, NULL };
 PyObject *PyExc_EnvironmentError = (PyObject *)&lu_exc_OSError;
 PyObject *PyExc_IOError = (PyObject *)&lu_exc_OSError;

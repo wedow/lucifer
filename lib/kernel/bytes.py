@@ -21,6 +21,7 @@ classmethod_ = _boot.classmethod_
 call_special = _boot.call_special
 index = operators.index
 as_ssize = operators.as_ssize
+ssize_arg = operators.ssize_arg
 truth = operators.truth
 slice_bounds = _slice.slice_bounds
 slice_index = _slice.slice_index
@@ -60,13 +61,6 @@ def _args(name, args, lo, hi):
         args = (*args, MISSING)
         n += 1
     return args
-
-
-def _ssize(x):
-    n = index(x)
-    if n > _SSIZE_MAX or n < -_SSIZE_MAX - 1:
-        error(OverflowError, 'Python int too large to convert to C ssize_t')
-    return n
 
 
 def _tname(self):
@@ -202,7 +196,7 @@ def _split_args(name, args, kwargs):
     sep, maxsplit = _parse(name, args, kwargs, ('sep', 'maxsplit'), 0)
     if sep is MISSING:
         sep = None
-    return sep, -1 if maxsplit is MISSING else as_ssize(maxsplit, None)
+    return sep, -1 if maxsplit is MISSING else ssize_arg(maxsplit)
 
 
 def _all(self, pieces):
@@ -344,7 +338,7 @@ def _m_join(self, *args, **kwargs):
 
 def _m_replace(self, *args, **kwargs):
     old, new, count = _a(self, 'replace', args, kwargs, 2, 3)
-    return _out(self, b_replace(self, old, new, -1 if count is MISSING else as_ssize(count, None)))
+    return _out(self, b_replace(self, old, new, -1 if count is MISSING else ssize_arg(count)))
 
 
 def _chars(args, name):
@@ -399,7 +393,7 @@ def _is(mode, name):
 
 def _m_center(self, *args, **kwargs):
     width, fill = _a(self, 'center', args, kwargs, 1, 2)
-    width = as_ssize(width, None)
+    width = ssize_arg(width)
     fill = _fill_arg('center', fill)
     n = b_len(self)
     if width <= n:
@@ -411,7 +405,7 @@ def _m_center(self, *args, **kwargs):
 
 def _m_ljust(self, *args, **kwargs):
     width, fill = _a(self, 'ljust', args, kwargs, 1, 2)
-    width = as_ssize(width, None)
+    width = ssize_arg(width)
     fill = _fill_arg('ljust', fill)
     n = b_len(self)
     return _out(self, b_concat(self, _pad(fill, width - n)))
@@ -419,7 +413,7 @@ def _m_ljust(self, *args, **kwargs):
 
 def _m_rjust(self, *args, **kwargs):
     width, fill = _a(self, 'rjust', args, kwargs, 1, 2)
-    width = as_ssize(width, None)
+    width = ssize_arg(width)
     fill = _fill_arg('rjust', fill)
     n = b_len(self)
     return _out(self, b_concat(_pad(fill, width - n), self))
@@ -427,7 +421,7 @@ def _m_rjust(self, *args, **kwargs):
 
 def _m_zfill(self, *args, **kwargs):
     width = _o(self, 'zfill', args, kwargs)
-    width = as_ssize(width, None)
+    width = ssize_arg(width)
     n = b_len(self)
     if width <= n:
         return _out(self, b_bytes(self))
@@ -439,7 +433,7 @@ def _m_zfill(self, *args, **kwargs):
 
 def _m_expandtabs(self, *args, **kwargs):
     tabsize, = _parse('expandtabs', args, kwargs, ('tabsize',), 0)
-    return _out(self, b_expandtabs(self, 8 if tabsize is MISSING else as_ssize(tabsize, None)))
+    return _out(self, b_expandtabs(self, 8 if tabsize is MISSING else operators.int_arg(tabsize)))
 
 
 def _m_translate(self, *args, **kwargs):
@@ -1098,7 +1092,7 @@ Construct a mutable bytearray object from:
 
     def resize(self, *args, **kwargs):
         """Resize the internal buffer of bytearray to len."""
-        ba_resize(self, _ssize(_o(self, 'resize', args, kwargs)))
+        ba_resize(self, ssize_arg(_o(self, 'resize', args, kwargs)))
 
 
 operators.add_sequence(bytes)

@@ -152,7 +152,7 @@ When step is given, it specifies the increment (or decrement)."""
     def __contains__(self, ob):
         if _is_int(ob):
             return True if _contains_int(self, ob) else False
-        return _search(self, ob, 'count') > 0
+        return _search(self, ob, 'index') >= 0
 
     def __eq__(self, other):
         if type(other) is not range:

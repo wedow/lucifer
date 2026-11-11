@@ -35,6 +35,7 @@ lucifer_slots	runtime/prim/module.c	_lucifer's PyModuleDef_Slot table, never wri
 lu_lucifer_module	runtime/prim/module.c	_lucifer's PyModuleDef, never written; one per process, as every extension's def
 lu_method_wrapper_type	runtime/types/static.c	method-wrapper, a private static type; the kernel fills in its slots once at startup
 lu_buffer_wrapper_type	runtime/types/static.c	_buffer_wrapper, a private static type; its layout is set once at startup
+lu_memory_iterator_type	runtime/types/static.c	memory_iterator, a private static type; the kernel fills in its slots once at startup
 lu_buffer_wrapper_procs	runtime/types/slots.c	_buffer_wrapper's buffer slots, constant after startup
 raising.*	-	thread-local guard: PyErr_NoMemory runs out of memory making a MemoryError and takes the last resort; its TLS symbol has no line
 lu_static_types	runtime/types/static.c	const table of the static builtin types; relocated by ld.so, then read-only (RELRO)
