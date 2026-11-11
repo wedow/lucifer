@@ -345,7 +345,7 @@ fuzzdiff: bin/lucifer build/lib/stamp oracle-exts $(EXT_DIR)/accelerators
 	ln -sf $$($(ORACLE_T) -c 'import _testbuffer; print(_testbuffer.__file__)') $(EXT_DIR)/
 	PYTHONPATH=$(abspath $(EXT_DIR)) python3 tools/fuzzdiff/run.py --oracle $(ORACLE_T) $(FUZZDIFF)
 
-# Wall-clock bounds: an uncaught exception, a 100,000-line function.
+# Wall-clock bounds: an uncaught exception, a 100,000-line function, unwinds in a long one.
 check-timing: bin/lucifer build/lib/stamp
 	$(STEP) python3 tools/timecheck --lucifer bin/lucifer --oracle $(ORACLE_T)
 
