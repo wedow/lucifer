@@ -4303,12 +4303,13 @@ in_step(struct ctx *c)
 
 /* Whether the call at c->pc, which this frame cannot inline, compiles
    here. In an inlined frame it pushes the inlined frames as real ones, in
-   line (luc-hez4), for the call: so a callee three deep (kernel code four,
+   line (luc-hez4), for the call: so a callee two deep (kernel code three,
    so that a twin or a dispatcher inlines with what it calls; a tail call,
-   after which the frame only returns, one deeper still) with up to four
-   such calls outside its loops inlines, and any other is called instead
-   (the inline is undone), which keeps the inline budget for the calls
-   that inline.
+   after which the frame only returns, one deeper still) with one such
+   call outside its loops inlines, and any other is called instead (the
+   inline is undone), which keeps the inline budget for the calls that
+   inline. Measured: up to four calls a frame made AWFY Json's steady state
+   30% slower (frames pushed at more calls) for mako's 9%.
    The frames of a FOR_ITER's step in line (iter_step) call whatever they
    call, and run Python-running helpers: the step is the loop's body. A call the interpreter never made
    there leaves (a cold path's call would make the root's locals real
@@ -4333,7 +4334,7 @@ opaque_call(struct ctx *c)
         loop = base == JUMP_BACKWARD && jump_target(base, oparg, next) <= c->pc;
         pc = next;
     }
-    if (c->depth > (c->kernel ? 4 : 3) + tail || c->ncalls++ >= 4 || loop) {
+    if (c->depth > (c->kernel ? 3 : 2) + tail || c->ncalls++ > 0 || loop) {
         if (_PyRuntime.jit.debug) {
             fprintf(stderr, "jit: a call it cannot inline at %s@%d: depth %d, calls %d, loop after %d\n",
                     PyUnicode_AsUTF8(c->code->co_qualname), c->pc, c->depth, c->ncalls, loop);
