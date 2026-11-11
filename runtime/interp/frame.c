@@ -369,6 +369,24 @@ lu_frame_retire(struct lu_frame *f)
     return taken;
 }
 
+void
+lu_frame_retire_lent(struct lu_frame *f)
+{
+    if (f->frame_obj == NULL) {
+        return;
+    }
+    Py_INCREF(f->func);
+    for (PyObject **p = f->localsplus; p < f->stackpointer; p++) {
+        Py_XINCREF(*p);
+    }
+    if (!lu_frame_retire(f)) {
+        Py_DECREF(f->func);
+        for (PyObject **p = f->localsplus; p < f->stackpointer; p++) {
+            Py_XDECREF(*p);
+        }
+    }
+}
+
 static int
 frame_traverse(PyObject *op, visitproc visit, void *arg)
 {

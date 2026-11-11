@@ -25,6 +25,7 @@
 #include "jit/jit.h"
 #include "object/dict.h"
 #include "object/set.h"
+#include "prim/bytes.h"
 
 #include "opcode.h"
 #include "opcode_ids.h"
@@ -486,6 +487,16 @@ lu_slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObje
 int
 lu_store_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *v)
 {
+    if (PyByteArray_CheckExact(container)
+        && (PyBytes_CheckExact(v) || PyByteArray_CheckExact(v) || PyMemoryView_Check(v))) {
+        int r;
+        Py_BEGIN_CRITICAL_SECTION(container);
+        Py_ssize_t lo, step, count;
+        r = !slice_unpack(start, stop, NULL, Py_SIZE(container), &lo, &step, &count) ? 1
+            : lu_bytearray_splice(container, lo, lo + count, v);
+        Py_END_CRITICAL_SECTION();
+        return r;
+    }
     if (!PyList_CheckExact(container) || !(PyList_CheckExact(v) || PyTuple_CheckExact(v))) {
         return 1;
     }
@@ -501,47 +512,57 @@ lu_store_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyOb
     }
 }
 
+static const size_t nb_binary[] = {
+    offsetof(PyNumberMethods, nb_add), offsetof(PyNumberMethods, nb_and),
+    offsetof(PyNumberMethods, nb_floor_divide), offsetof(PyNumberMethods, nb_lshift),
+    offsetof(PyNumberMethods, nb_matrix_multiply), offsetof(PyNumberMethods, nb_multiply),
+    offsetof(PyNumberMethods, nb_remainder), offsetof(PyNumberMethods, nb_or),
+    offsetof(PyNumberMethods, nb_power), offsetof(PyNumberMethods, nb_rshift),
+    offsetof(PyNumberMethods, nb_subtract), offsetof(PyNumberMethods, nb_true_divide),
+    offsetof(PyNumberMethods, nb_xor),
+};
+static const size_t nb_inplace[] = {
+    offsetof(PyNumberMethods, nb_inplace_add), offsetof(PyNumberMethods, nb_inplace_and),
+    offsetof(PyNumberMethods, nb_inplace_floor_divide), offsetof(PyNumberMethods, nb_inplace_lshift),
+    offsetof(PyNumberMethods, nb_inplace_matrix_multiply), offsetof(PyNumberMethods, nb_inplace_multiply),
+    offsetof(PyNumberMethods, nb_inplace_remainder), offsetof(PyNumberMethods, nb_inplace_or),
+    offsetof(PyNumberMethods, nb_inplace_power), offsetof(PyNumberMethods, nb_inplace_rshift),
+    offsetof(PyNumberMethods, nb_inplace_subtract), offsetof(PyNumberMethods, nb_inplace_true_divide),
+    offsetof(PyNumberMethods, nb_inplace_xor),
+};
+
+int
+lu_binary_is_foreign(PyTypeObject *ta, PyTypeObject *tb, int op)
+{
+    if (op < NB_ADD || op > NB_INPLACE_XOR) {
+        return 0;
+    }
+    int base = op >= NB_INPLACE_ADD ? op - NB_INPLACE_ADD : op;
+    int ka = lu_nb_slot_kind(ta, nb_binary[base]), kb = tb != ta ? lu_nb_slot_kind(tb, nb_binary[base]) : 0;
+    int ki = op >= NB_INPLACE_ADD ? lu_nb_slot_kind(ta, nb_inplace[base]) : 0;
+    return ka >= 0 && kb >= 0 && ki >= 0 && ka + kb + ki > 0;
+}
+
 PyObject *
 lu_binary_foreign(PyObject *a, PyObject *b, int op)
 {
-    static const size_t binary[] = {
-        offsetof(PyNumberMethods, nb_add), offsetof(PyNumberMethods, nb_and),
-        offsetof(PyNumberMethods, nb_floor_divide), offsetof(PyNumberMethods, nb_lshift),
-        offsetof(PyNumberMethods, nb_matrix_multiply), offsetof(PyNumberMethods, nb_multiply),
-        offsetof(PyNumberMethods, nb_remainder), offsetof(PyNumberMethods, nb_or),
-        offsetof(PyNumberMethods, nb_power), offsetof(PyNumberMethods, nb_rshift),
-        offsetof(PyNumberMethods, nb_subtract), offsetof(PyNumberMethods, nb_true_divide),
-        offsetof(PyNumberMethods, nb_xor),
-    };
-    static const size_t inplace[] = {
-        offsetof(PyNumberMethods, nb_inplace_add), offsetof(PyNumberMethods, nb_inplace_and),
-        offsetof(PyNumberMethods, nb_inplace_floor_divide), offsetof(PyNumberMethods, nb_inplace_lshift),
-        offsetof(PyNumberMethods, nb_inplace_matrix_multiply), offsetof(PyNumberMethods, nb_inplace_multiply),
-        offsetof(PyNumberMethods, nb_inplace_remainder), offsetof(PyNumberMethods, nb_inplace_or),
-        offsetof(PyNumberMethods, nb_inplace_power), offsetof(PyNumberMethods, nb_inplace_rshift),
-        offsetof(PyNumberMethods, nb_inplace_subtract), offsetof(PyNumberMethods, nb_inplace_true_divide),
-        offsetof(PyNumberMethods, nb_inplace_xor),
-    };
-    if (op < NB_ADD || op > NB_INPLACE_XOR) {
-        return NULL;
-    }
-    int base = op >= NB_INPLACE_ADD ? op - NB_INPLACE_ADD : op, power = base == NB_POWER;
     PyTypeObject *ta = Py_TYPE(a), *tb = Py_TYPE(b);
-    int ka = lu_nb_slot_kind(ta, binary[base]), kb = tb != ta ? lu_nb_slot_kind(tb, binary[base]) : 0;
-    int ki = op >= NB_INPLACE_ADD ? lu_nb_slot_kind(ta, inplace[base]) : 0;
-    if (ka < 0 || kb < 0 || ki < 0 || ka + kb + ki == 0) {
+    if (!lu_binary_is_foreign(ta, tb, op)) {
         return NULL;            /* the runtime's slot, or none at all */
     }
+    int base = op >= NB_INPLACE_ADD ? op - NB_INPLACE_ADD : op, power = base == NB_POWER;
+    int ka = lu_nb_slot_kind(ta, nb_binary[base]), kb = tb != ta ? lu_nb_slot_kind(tb, nb_binary[base]) : 0;
+    int ki = op >= NB_INPLACE_ADD ? lu_nb_slot_kind(ta, nb_inplace[base]) : 0;
 #define NB_SLOT(t, off) (*(void **)((char *)(t)->tp_as_number + (off)))
 #define NB_CALL(f) (power ? ((ternaryfunc)(f))(a, b, Py_None) : ((binaryfunc)(f))(a, b))
     PyObject *r;
     if (ki > 0) {
-        if ((r = NB_CALL(NB_SLOT(ta, inplace[base]))) != Py_NotImplemented) {
+        if ((r = NB_CALL(NB_SLOT(ta, nb_inplace[base]))) != Py_NotImplemented) {
             return r;
         }
         Py_DECREF(r);
     }
-    void *slotv = ka > 0 ? NB_SLOT(ta, binary[base]) : NULL, *slotw = kb > 0 ? NB_SLOT(tb, binary[base]) : NULL;
+    void *slotv = ka > 0 ? NB_SLOT(ta, nb_binary[base]) : NULL, *slotw = kb > 0 ? NB_SLOT(tb, nb_binary[base]) : NULL;
     slotw = slotw == slotv ? NULL : slotw;
     if (slotv != NULL) {
         if (slotw != NULL && PyType_IsSubtype(tb, ta)) {
@@ -565,6 +586,21 @@ lu_binary_foreign(PyObject *a, PyObject *b, int op)
     return NULL;
 #undef NB_CALL
 #undef NB_SLOT
+}
+
+PyObject *
+lu_special_function(PyObject *owner, int which)
+{
+    PyObject *name = which == 0 ? LU_ID(__enter__) : which == 1 ? LU_ID(__exit__)
+        : which == 2 ? LU_ID(__aenter__) : which == 3 ? LU_ID(__aexit__) : NULL;
+    if (name == NULL) {
+        return NULL;
+    }
+    PyObject *f = _PyType_LookupRef(Py_TYPE(owner), name);
+    if (f != NULL && !PyFunction_Check(f) && !Py_IS_TYPE(f, &PyMethodDescr_Type)) {
+        Py_CLEAR(f);
+    }
+    return f;
 }
 
 int
@@ -681,6 +717,9 @@ lu_contains_native(PyObject *container, PyObject *item)
     }
     if (PyTuple_CheckExact(container)) {
         return items_contain(((PyTupleObject *)container)->ob_item, Py_SIZE(container), item);
+    }
+    if (PyUnicode_CheckExact(container) && PyUnicode_CheckExact(item)) {
+        return lu_str_contains(container, item);
     }
     if (PyList_CheckExact(container)) {
         Py_BEGIN_CRITICAL_SECTION(container);
@@ -3041,6 +3080,18 @@ op_LOAD_ATTR_METHOD: {
     if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
         goto op_LOAD_ATTR;
     }
+    if (opcode == LOAD_ATTR_METHOD_NO_DICT && !(oparg & 1)) {
+        SAVE_FRAME();
+        PyObject *bound = lu_bind_method(descr, owner);
+        if (bound == NULL) {
+            ERROR_IF(PyErr_Occurred());
+            goto op_LOAD_ATTR;
+        }
+        SKIP_CACHES();
+        TOP() = bound;
+        Py_DECREF(owner);
+        DISPATCH();
+    }
     SKIP_CACHES();
     TOP() = Py_NewRef(descr);       /* deferred: no collection since the load (specialize.c) */
     if (opcode == LOAD_ATTR_METHOD_NO_DICT || opcode == LOAD_ATTR_METHOD_WITH_VALUES) {
@@ -3672,10 +3723,14 @@ op_BINARY_OP: {
         }
         Py_DECREF(res);
     }
-    else if ((oparg == NB_ADD || oparg == NB_INPLACE_ADD) && PyUnicode_CheckExact(left)
-             && PyUnicode_CheckExact(right)) {
+    else if (((oparg == NB_ADD || oparg == NB_INPLACE_ADD)
+              && ((PyUnicode_CheckExact(left) && PyUnicode_CheckExact(right))
+                  || (PyBytes_CheckExact(left) && PyBytes_CheckExact(right))))
+             || (oparg == NB_ADD && ((PyList_CheckExact(left) && PyList_CheckExact(right))
+                                     || (PyTuple_CheckExact(left) && PyTuple_CheckExact(right))))) {
         SAVE_FRAME();
-        PyObject *res = lu_str_concat(left, right);
+        PyObject *res = PyBytes_CheckExact(left) ? lu_bytes_concat(left, right)
+            : PyUnicode_CheckExact(left) ? lu_str_concat(left, right) : lu_seq_concat(left, right);
         ERROR_IF(res == NULL);
         sp--;
         TOP() = res;
@@ -4046,6 +4101,13 @@ op_CALL_INTRINSIC_2: {
 
 op_LOAD_SPECIAL: {
     /* owner -- attr, self_or_null; looked up on the type, never the instance */
+    PyObject *special = lu_special_function(TOP(), oparg);
+    if (special != NULL) {
+        PyObject *owner = TOP();
+        TOP() = special;
+        PUSH(owner);
+        DISPATCH();
+    }
     SAVE_FRAME();
     kargs[0] = POP();
     kargs[1] = lu_small_int(oparg);

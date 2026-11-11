@@ -189,6 +189,10 @@ PyCodeObject *lu_frame_code(PyFrameObject *frame);
    a share of the code; 1 then, and the caller must not release those. Else
    0, with the frame object dropped. */
 int lu_frame_retire(struct lu_frame *f);
+/* The same for a frame compiled code lent its function and locals
+   (lu_frame_push_lent): the frame object's copy takes references of its
+   own, and the frame can go as it came. */
+void lu_frame_retire_lent(struct lu_frame *f);
 
 /* frame.clear() (frame_clear_impl): 0, or -1 with RuntimeError for a frame
    that is executing or suspended. */

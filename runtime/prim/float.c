@@ -237,6 +237,15 @@ prim_float_floordiv(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 /* an odd integer; x is not an infinity or nan */
 #define DOUBLE_IS_ODD_INTEGER(x) (fmod(fabs(x), 2.0) == 1.0)
 
+static PyObject *prim_float_pow(PyObject *m, PyObject *const *args, Py_ssize_t nargs);
+
+PyObject *
+lu_float_pow(PyObject *a, PyObject *b)
+{
+    PyObject *args[3] = { a, b, Py_None };
+    return prim_float_pow(NULL, args, 3);
+}
+
 /* float_pow(v, w, z): z must be None. */
 static PyObject *
 prim_float_pow(PyObject *m, PyObject *const *args, Py_ssize_t nargs)

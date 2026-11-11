@@ -5,7 +5,7 @@ slices, arguments and the error texts."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, ns_items, static_type, type_tp_name, type_lookup,
-    int_format, address, b_check,
+    int_format, address, b_check, kernel_twin,
     mv_new, mv_release, mv_released, mv_attr, mv_len, mv_tobytes, mv_tolist, mv_item,
     mv_set_item, mv_slice, mv_set_slice, mv_cast, mv_toreadonly, mv_eq, mv_hash,
 )
@@ -65,6 +65,13 @@ def _count(self, key):
     return slice_bounds(key, mv_len(self))
 
 
+def _mv_new1(cls, obj):
+    """memoryview(obj) (kernel_twin): the view, without the argument parsing."""
+    if not kind(cls, 'type'):
+        error(TypeError, _cat('memoryview.__new__(X): X is not a type object (', _name(cls), ')'))
+    return mv_new(obj)
+
+
 @kernel_type(static_type('memoryview'))
 class memoryview:
     """Create a new memoryview object which references the given object."""
@@ -87,6 +94,8 @@ class memoryview:
         if obj is MISSING:
             error(TypeError, "memoryview() missing required argument 'object' (pos 1)")
         return mv_new(obj)
+
+    kernel_twin(__new__, _mv_new1)
 
     def __len__(self):
         return mv_len(self)

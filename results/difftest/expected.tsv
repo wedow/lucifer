@@ -24,7 +24,11 @@ tests/diff/corpus/augassign_list_alias.py	NOTRUN	0.000000
 tests/diff/corpus/augassign_notimplemented.py	NOTRUN	0.000000
 tests/diff/corpus/augassign_subscript_order.py	NOTRUN	0.000000
 tests/diff/corpus/augassign_tuple_item_partial.py	NOTRUN	0.000000
+tests/diff/corpus/bound_builtin_calls.py	NOTRUN	0.000000
+tests/diff/corpus/bound_method_attrs.py	NOTRUN	0.000000
 tests/diff/corpus/builtin_rebinding.py	NOTRUN	0.000000
+tests/diff/corpus/bytearray_slice_stores.py	NOTRUN	0.000000
+tests/diff/corpus/bytes_concat_paths.py	NOTRUN	0.000000
 tests/diff/corpus/class_attribute_delete.py	NOTRUN	0.000000
 tests/diff/corpus/class_bases_invalidation.py	NOTRUN	0.000000
 tests/diff/corpus/class_mro_diamond.py	NOTRUN	0.000000
@@ -64,6 +68,7 @@ tests/diff/corpus/dict_hash_exception.py	NOTRUN	0.000000
 tests/diff/corpus/dict_iterator_resize.py	NOTRUN	0.000000
 tests/diff/corpus/dict_iterator_value_change.py	NOTRUN	0.000000
 tests/diff/corpus/dict_missing_subclass.py	NOTRUN	0.000000
+tests/diff/corpus/dict_mode_instances.py	NOTRUN	0.000000
 tests/diff/corpus/dict_reinsert_order.py	NOTRUN	0.000000
 tests/diff/corpus/dict_views_dynamic.py	NOTRUN	0.000000
 tests/diff/corpus/exception_explicit_chain.py	NOTRUN	0.000000
@@ -82,9 +87,11 @@ tests/diff/corpus/float_format_boundaries.py	NOTRUN	0.000000
 tests/diff/corpus/float_hex_ratio.py	NOTRUN	0.000000
 tests/diff/corpus/float_nan_infinity.py	NOTRUN	0.000000
 tests/diff/corpus/float_pack_bits.py	NOTRUN	0.000000
+tests/diff/corpus/float_pow_paths.py	NOTRUN	0.000000
 tests/diff/corpus/float_repr_roundtrip.py	NOTRUN	0.000000
 tests/diff/corpus/float_round_ties.py	NOTRUN	0.000000
 tests/diff/corpus/float_signed_zero.py	NOTRUN	0.000000
+tests/diff/corpus/foreign_number_slots.py	NOTRUN	0.000000
 tests/diff/corpus/function_defaults_kwonly.py	NOTRUN	0.000000
 tests/diff/corpus/gc_in_compiled_loop.py	NOTRUN	0.000000
 tests/diff/corpus/generator_close_delegation.py	NOTRUN	0.000000
@@ -102,6 +109,7 @@ tests/diff/corpus/int_float_comparison.py	NOTRUN	0.000000
 tests/diff/corpus/int_floor_mod_signs.py	NOTRUN	0.000000
 tests/diff/corpus/int_index_protocol.py	NOTRUN	0.000000
 tests/diff/corpus/int_multiply_overflow.py	NOTRUN	0.000000
+tests/diff/corpus/int_of_float_paths.py	NOTRUN	0.000000
 tests/diff/corpus/int_power_modular.py	NOTRUN	0.000000
 tests/diff/corpus/int_reflected_operator.py	NOTRUN	0.000000
 tests/diff/corpus/int_shift_edges.py	NOTRUN	0.000000
@@ -115,8 +123,13 @@ tests/diff/corpus/metaclass_call.py	NOTRUN	0.000000
 tests/diff/corpus/metaclass_init_subclass.py	NOTRUN	0.000000
 tests/diff/corpus/metaclass_instancecheck.py	NOTRUN	0.000000
 tests/diff/corpus/metaclass_prepare_order.py	NOTRUN	0.000000
+tests/diff/corpus/module_attr_constants.py	NOTRUN	0.000000
+tests/diff/corpus/module_builtin_calls.py	NOTRUN	0.000000
 tests/diff/corpus/pattern_mapping_sequence.py	NOTRUN	0.000000
+tests/diff/corpus/raise_through_inlined.py	NOTRUN	0.000000
 tests/diff/corpus/repr_address_normalization.py	NOTRUN	0.000000
+tests/diff/corpus/seq_concat_paths.py	NOTRUN	0.000000
+tests/diff/corpus/shadowed_class_attrs.py	NOTRUN	0.000000
 tests/diff/corpus/slots_delete_descriptor.py	NOTRUN	0.000000
 tests/diff/corpus/slots_inheritance.py	NOTRUN	0.000000
 tests/diff/corpus/slots_missing_dict.py	NOTRUN	0.000000
@@ -125,6 +138,8 @@ tests/diff/corpus/sort_key_mutation.py	NOTRUN	0.000000
 tests/diff/corpus/sort_key_once.py	NOTRUN	0.000000
 tests/diff/corpus/sort_reverse_stable.py	NOTRUN	0.000000
 tests/diff/corpus/sort_stability.py	NOTRUN	0.000000
+tests/diff/corpus/str_contains_paths.py	NOTRUN	0.000000
+tests/diff/corpus/str_join_concat_paths.py	NOTRUN	0.000000
 tests/diff/corpus/threads_patch_mid_loop.py	NOTRUN	0.000000
 tests/diff/corpus/truth_native_types.py	NOTRUN	0.000000
 tests/diff/corpus/unicode_case_expansion.py	NOTRUN	0.000000
@@ -139,6 +154,7 @@ tests/diff/corpus/weakref_explicit_collection.py	NOTRUN	0.000000
 tests/diff/corpus/weakref_finalize_call_once.py	NOTRUN	0.000000
 tests/diff/corpus/weakref_slots.py	NOTRUN	0.000000
 tests/diff/corpus/weakref_weakmethod.py	NOTRUN	0.000000
+tests/diff/corpus/with_and_zip_paths.py	NOTRUN	0.000000
 tests/diff/generated/seed_31410_0000.py	NOTRUN	0.000000
 tests/diff/generated/seed_31410_0001.py	NOTRUN	0.000000
 tests/diff/generated/seed_31410_0002.py	NOTRUN	0.000000

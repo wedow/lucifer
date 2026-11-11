@@ -17,6 +17,9 @@ typedef struct {
 int lu_bv_get(PyObject *o, lu_bv *v);
 void lu_bv_put(lu_bv *v);
 
+/* ba[start:stop] = data for a bytes-like data, under ba's critical
+   section: 0, or -1 with an error set. */
+int lu_bytearray_splice(PyObject *ba, Py_ssize_t start, Py_ssize_t stop, PyObject *data);
 /* bytearray.append of a byte value 0..255: 0, or -1 with an error set. */
 int lu_bytearray_append(PyObject *ba, int byte);
 

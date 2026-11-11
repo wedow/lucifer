@@ -592,6 +592,13 @@ h_binary_op(PyObject *a, PyObject *b, int64_t op)
     else if ((op == NB_ADD || op == NB_INPLACE_ADD) && PyUnicode_CheckExact(a) && PyUnicode_CheckExact(b)) {
         return lu_str_concat(a, b);
     }
+    else if ((op == NB_ADD || op == NB_INPLACE_ADD) && PyBytes_CheckExact(a) && PyBytes_CheckExact(b)) {
+        return lu_bytes_concat(a, b);
+    }
+    else if (op == NB_ADD && ((PyList_CheckExact(a) && PyList_CheckExact(b))
+                              || (PyTuple_CheckExact(a) && PyTuple_CheckExact(b)))) {
+        return lu_seq_concat(a, b);
+    }
     else {
         PyObject *r = lu_binary_foreign(a, b, (int)op);
         if (r != NULL || PyErr_Occurred()) {
@@ -705,22 +712,28 @@ h_for_iter(PyObject *it, struct lu_opclasses *classes)
     if (classes != NULL) {
         lu_jit_class_vote(classes, t);
     }
-    if (lu_next_missing_of((PyObject *)t) == Py_None) {
-        /* No kernel step of its own: its __next__, a Python function, as
-           next_item calls it, without its frame. */
-        PyObject *f = _PyType_LookupRef(t, LU_ID(__next__));
-        if (f != NULL && PyFunction_Check(f)) {
-            PyObject *v = task->ts.interp->eval_frame == NULL
-                ? polled(task, call_function(task, (PyFunctionObject *)f, &it, 1, NULL)) : lu_call(f, &it, 1, NULL);
-            Py_DECREF(f);
-            if (v == NULL && PyErr_ExceptionMatches(PyExc_StopIteration)) {
-                PyErr_Clear();
-                return Py_NewRef(LU_MISSING);
-            }
-            return v;
-        }
-        Py_XDECREF(f);
+    if (t == &PyDictIterKey_Type || t == &PyDictIterValue_Type || t == &PyDictIterItem_Type) {
+        return lu_dictiter_next(it);
     }
+    /* As next_item steps it, without its frame: the class's kernel step
+       (the registry holds it), else its __next__, a Python function. */
+    PyObject *step = lu_next_missing_of((PyObject *)t);
+    if (step != Py_None) {
+        return PyFunction_Check(step) && task->ts.interp->eval_frame == NULL
+            ? polled(task, call_function(task, (PyFunctionObject *)step, &it, 1, NULL)) : lu_call(step, &it, 1, NULL);
+    }
+    PyObject *f = _PyType_LookupRef(t, LU_ID(__next__));
+    if (f != NULL && PyFunction_Check(f)) {
+        PyObject *v = task->ts.interp->eval_frame == NULL
+            ? polled(task, call_function(task, (PyFunctionObject *)f, &it, 1, NULL)) : lu_call(f, &it, 1, NULL);
+        Py_DECREF(f);
+        if (v == NULL && PyErr_ExceptionMatches(PyExc_StopIteration)) {
+            PyErr_Clear();
+            return Py_NewRef(LU_MISSING);
+        }
+        return v;
+    }
+    Py_XDECREF(f);
     return lu_call_kernel(LU_K_next_item, &it, 1);
 }
 
@@ -1420,6 +1433,31 @@ h_raise(PyObject *exc, PyObject *cause)
     return NULL;
 }
 
+/* raise exc [from cause] in the innermost of `frames` inlined frames
+   (pushed for the call) that the exception leaves to a handler of the
+   unit: each but a kernel frame makes its traceback entry, as the
+   interpreter unwinds them, the innermost at the raise (lasti), and its
+   frame object takes its locals, so that the frames go as they came.
+   Where a tool watches, the exit's unwinding makes the entries. */
+static PyObject *
+h_raise_tb(PyObject *exc, PyObject *cause, int64_t frames, int64_t lasti)
+{
+    h_raise(exc, cause);
+    PyThreadState *ts = PyThreadState_Get();
+    if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RAISE)
+        || !lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_PY_UNWIND)) {
+        return NULL;
+    }
+    struct lu_frame *f = (struct lu_frame *)ts->current_frame;
+    for (int64_t i = 0; i < frames && f != NULL; i++, f = f->previous) {
+        if (f->owner != LU_FRAME_KERNEL_HIDDEN) {
+            lu_traceback_here(f, i == 0 ? lasti : f->instr - lu_code_start(f->code));
+            lu_frame_retire_lent(f);
+        }
+    }
+    return NULL;
+}
+
 /* A bare raise (exc NULL) or RERAISE in kernel code, which makes no
    traceback entry: the exception raised again as it is. Always NULL. */
 static PyObject *
@@ -1440,6 +1478,12 @@ h_reraise(PyObject *exc)
 static PyObject *
 h_load_special(PyObject *owner, int64_t which)
 {
+    PyObject *f = lu_special_function(owner, (int)which);
+    if (f != NULL) {
+        PyObject *bound = PyFunction_Check(f) ? PyMethod_New(f, owner) : lu_method_descr_bind(f, owner);
+        Py_DECREF(f);
+        return bound;
+    }
     PyObject *args[2] = { owner, lu_small_int((int)which) };
     return lu_call_kernel(LU_K_load_special, args, 2);
 }
@@ -1561,6 +1605,11 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, IF_SEEN, 1 },
     [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, IF_RAISE, 2 },
     [H_raise] = { (void *)h_raise, "raise", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_seq_concat] = { (void *)lu_seq_concat, "seq_concat", REP_OBJ, IF_RAISE, 2 },
+    [H_float_pow] = { (void *)lu_float_pow, "float_pow", REP_OBJ, IF_RAISE, 2 },
+    [H_bind_method] = { (void *)lu_bind_method, "bind_method", REP_OBJ, 0, 2 },
+    [H_bytes_concat] = { (void *)lu_bytes_concat, "bytes_concat", REP_OBJ, IF_RAISE, 2 },
+    [H_raise_tb] = { (void *)h_raise_tb, "raise_tb", REP_OBJ, IF_RAISE | IF_PY, 4 },
     [H_reraise] = { (void *)h_reraise, "reraise", REP_OBJ, IF_RAISE, 1 },
     [H_load_special] = { (void *)h_load_special, "load_special", REP_OBJ, IF_RAISE | IF_PY, 2 },
     [H_unpack] = { (void *)h_unpack, "unpack", REP_OBJ, IF_RAISE | IF_PY, 2 },

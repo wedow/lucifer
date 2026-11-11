@@ -1293,10 +1293,20 @@ lu_staticmethod_get(PyObject *descr)
 PyObject *
 lu_property_fget(PyObject *prop)
 {
+    if (Py_IS_TYPE(prop, &PyGetSetDescr_Type)) {
+        PyGetSetDef *def = ((PyGetSetDescrObject *)prop)->d_getset;
+        return def->get == kernel_getset_get ? ((struct lu_kernel_getset *)def->closure)->fget : NULL;
+    }
     return __atomic_load_n((PyObject **)((char *)prop + lu_field_offset(&PyProperty_Type, 0)), __ATOMIC_ACQUIRE);
 }
 
 static PyObject *descr_bound(PyObject *d, PyObject *obj);
+
+PyObject *
+lu_bind_method(PyObject *descr, PyObject *obj)
+{
+    return PyFunction_Check(descr) ? PyMethod_New(descr, obj) : lu_method_descr_bind(descr, obj);
+}
 
 PyObject *
 lu_method_descr_bind(PyObject *descr, PyObject *obj)

@@ -260,12 +260,17 @@ clamp(Py_ssize_t i, Py_ssize_t n)
 /* ba_splice(ba, start, stop, data): replaces ba[start:stop] by data. */
 PRIM(ba_splice, 4)
 {
-    PyObject *ba = args[0];
     IDX(1, start); IDX(2, stop);
+    return lu_bytearray_splice(args[0], start, stop, args[3]) < 0 ? NULL : Py_NewRef(Py_None);
+}
+
+int
+lu_bytearray_splice(PyObject *ba, Py_ssize_t start, Py_ssize_t stop, PyObject *data)
+{
     lu_bv src;
     unsigned char *copy;
-    if (src_get(ba, args[3], &src, &copy) < 0) {
-        return NULL;
+    if (src_get(ba, data, &src, &copy) < 0) {
+        return -1;
     }
     Py_ssize_t n = Py_SIZE(ba);
     start = clamp(start, n);
@@ -300,7 +305,7 @@ PRIM(ba_splice, 4)
     }
     PyMem_Free(copy);
     lu_bv_put(&src);
-    return Py_XNewRef(r);
+    return r == NULL ? -1 : 0;
 }
 
 /* ba_set_step(ba, start, step, count, data): ba[start::step] = data, count
@@ -1957,6 +1962,24 @@ PyBytes_Join(PyObject *sep, PyObject *iterable)
     PyObject *args[2] = { sep, items };
     PyObject *r = prim_b_join(NULL, args, 2);
     Py_DECREF(items);
+    return r;
+}
+
+PyObject *
+lu_bytes_concat(PyObject *a, PyObject *b)
+{
+    Py_ssize_t na = PyBytes_GET_SIZE(a), nb = PyBytes_GET_SIZE(b);
+    if (na == 0 || nb == 0) {
+        return Py_NewRef(na == 0 ? b : a);
+    }
+    if (na > PY_SSIZE_T_MAX - nb) {
+        return PyErr_NoMemory();
+    }
+    PyObject *r = PyBytes_FromStringAndSize(NULL, na + nb);
+    if (r != NULL) {
+        memcpy(PyBytes_AS_STRING(r), PyBytes_AS_STRING(a), na);
+        memcpy(PyBytes_AS_STRING(r) + na, PyBytes_AS_STRING(b), nb);
+    }
     return r;
 }
 

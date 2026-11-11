@@ -577,7 +577,7 @@ errors defaults to 'strict'."""
         if kind(iterable, 'tuple'):
             items = iterable
         elif kind(iterable, 'list'):
-            items = (*iterable,)
+            items = iterable
         else:
             if (type_lookup(type(iterable), '__iter__') is MISSING
                     and type_lookup(type(iterable), '__getitem__') is MISSING):

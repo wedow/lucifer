@@ -265,6 +265,16 @@ prim_seq_concat(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 PyObject *
+lu_seq_concat(PyObject *a, PyObject *b)
+{
+    if (PyTuple_CheckExact(a) && (Py_SIZE(a) == 0 || Py_SIZE(b) == 0)) {
+        return Py_NewRef(Py_SIZE(b) == 0 ? a : b);      /* tupleconcat's: t + () is t */
+    }
+    PyObject *args[3] = { a, b, PyTuple_CheckExact(a) ? Py_True : Py_False };
+    return prim_seq_concat(NULL, args, 3);
+}
+
+PyObject *
 lu_seq_repeat(PyObject *seq, Py_ssize_t n, int as_tuple)
 {
     Py_ssize_t size;

@@ -922,7 +922,7 @@ struct lu_static_objects {
     X(__imod__) X(__ipow__) X(__ilshift__) X(__irshift__) X(__iand__) X(__ixor__) \
     X(__ior__) X(__import__) X(__ifloordiv__) X(__itruediv__) X(__imatmul__) X(__neg__) X(__pos__) \
     X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__) X(mro) X(__getattribute__) X(__static_attributes__) X(__getattr__) X(__setattr__) X(__delattr__) \
-    X(_data)
+    X(_data) X(__enter__) X(__exit__) X(__aenter__) X(__aexit__)
 struct lu_identifiers {
 #define LU_ID_FIELD(name) PyObject *name;
     LU_IDENTIFIERS(LU_ID_FIELD)
@@ -1446,7 +1446,10 @@ PyObject *lu_staticmethod_get(PyObject *descr);
    (a builtin method, a method-wrapper), or NULL without an error for any
    other descriptor or an obj not of its class. */
 PyObject *lu_method_descr_bind(PyObject *descr, PyObject *obj);
-/* A property's getter (borrowed, read once; NULL or None for none). */
+/* A function or a method descriptor bound to obj, as its __get__ binds it. */
+PyObject *lu_bind_method(PyObject *descr, PyObject *obj);
+/* A property's getter, or a kernel getset's (borrowed, read once; NULL or None
+   for none, and NULL for another getset). */
 PyObject *lu_property_fget(PyObject *prop);
 /* Where a classmethod's and a staticmethod's callable is (compiled code reads it). */
 extern const Py_ssize_t lu_classmethod_callable_offset;
@@ -1513,8 +1516,9 @@ PyObject *lu_slice_native(PyObject *container, PyObject *start, PyObject *stop, 
    the bounds clamped under the list's lock: 0, -1 with an error, or 1 when
    the list's length is no longer expect (>= 0) and nothing was done. */
 int lu_list_splice(PyListObject *l, Py_ssize_t lo, Py_ssize_t hi, PyObject *seq, Py_ssize_t expect);
-/* container[start:stop] = v without Python: an exact list, int or None
-   bounds and a tuple or list v. 0, -1 with an error, or 1 when the kernel
+/* container[start:stop] = v without Python: int or None bounds, and an
+   exact list with a tuple or list v, or an exact bytearray with a bytes,
+   bytearray or memoryview v. 0, -1 with an error, or 1 when the kernel
    must do it. */
 int lu_store_slice_native(PyObject *container, PyObject *start, PyObject *stop, PyObject *v);
 /* container[sub] = v for a slice sub without a step, as lu_store_slice_native. */
@@ -1528,6 +1532,23 @@ int lu_nb_slot_kind(PyTypeObject *tp, size_t offset);
    NULL (with an error when a slot raised) when it is the kernel's to
    decide, because a slot is the runtime's or every slot declined. */
 PyObject *lu_binary_foreign(PyObject *a, PyObject *b, int op);
+/* LOAD_SPECIAL's method `which` (0 __enter__, 1 __exit__, 2 __aenter__,
+   3 __aexit__) on owner's type when it is a function or a method
+   descriptor, which a call with owner first runs as the kernel's
+   load_special binds it: a new reference, or NULL (no error) for the
+   kernel to look it up. */
+PyObject *lu_special_function(PyObject *owner, int which);
+/* float.__pow__ of a float and a float or int (either side), without a
+   modulus: the result, or NULL with the error (runs no Python). */
+PyObject *lu_float_pow(PyObject *a, PyObject *b);
+/* a + b for two exact lists or two exact tuples. */
+PyObject *lu_seq_concat(PyObject *a, PyObject *b);
+/* sub in s for two strs (no Python, no error). */
+int lu_str_contains(PyObject *s, PyObject *sub);
+/* a + b for two exact bytes. */
+PyObject *lu_bytes_concat(PyObject *a, PyObject *b);
+/* Whether lu_binary_foreign takes the operator for operands of these types. */
+int lu_binary_is_foreign(PyTypeObject *ta, PyTypeObject *tb, int op);
 /* container[start:stop] for an exact list, tuple, str or bytes by machine-int
    bounds, either None as `none` says (bit 0 the start, bit 1 the stop): a new
    reference, or NULL without an error for another type. */

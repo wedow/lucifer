@@ -49,7 +49,7 @@ def warm():
     out = []
     for _ in range(300):
         for make in SOURCES:
-            out.append(''.join(make()))
+            out.append(''.join(sorted(''.join(make()))))  # a set's order varies with the hash seed
             out.append(len(set(make())))
     return out
 

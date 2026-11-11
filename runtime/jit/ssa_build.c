@@ -192,6 +192,7 @@ static int build_block(struct ctx *c, int bi);
 static int step(struct ctx *c, int pc, struct lu_block *entry);
 static int call_dispatch(struct ctx *c, int n);
 static int call(struct ctx *c);
+static int opaque_call(struct ctx *c);
 
 /* A site's operand kinds (runtime/jit/jit.h), counted: none means the
    interpreter has never run it. Attribute sites count in cached_site. */
@@ -583,7 +584,7 @@ helper(struct ctx *c, int id, int nargs, const lu_v *args)
     return v;
 }
 
-static int catcher(struct ctx *c, struct lu_fs *fs, struct ctx **k, int *handler, int *level, int *lasti,
+static int catcher(struct ctx *c, struct lu_fs *fs, int user, struct ctx **k, int *handler, int *level, int *lasti,
                    int *at);
 static void catch_here(struct ctx *c, struct lu_fs *fs, int drop, struct ctx *k, int handler, int level,
                        int lasti, int at);
@@ -611,7 +612,7 @@ helper_raising_at(struct ctx *c, int id, int nargs, const lu_v *args, int drop, 
     I(c, v)->drop = (uint8_t)drop;
     struct ctx *k;
     int handler, level, lasti, at;
-    if (lu_helpers[id].rep == REP_OBJ && catcher(c, fs, &k, &handler, &level, &lasti, &at)) {
+    if (lu_helpers[id].rep == REP_OBJ && catcher(c, fs, id == H_raise_tb, &k, &handler, &level, &lasti, &at)) {
         I(c, v)->flags |= INS_CAUGHT;
         lu_v raised = emit(c, OP_IS, REP_BIT, v, konst(c, NULL), LU_NOV, 0);
         int landing = lu_ir_block(c->f), cont = lu_ir_block(c->f);
@@ -891,17 +892,22 @@ folded_after(struct ctx *c, int bi)
    table covers the instruction (the call, in a caller), the handler with
    its stack level and lasti flag, and the instruction there (at). Only
    through frames that make no traceback entry (kernel code) and the root,
-   whose frame is real; and only to a handler not built yet. fs is c's
-   state before the instruction. */
+   whose frame is real, or for a raise that makes the entries itself
+   (user, H_raise_tb), also through other inlined frames without a handler
+   there; and only to a handler not built yet. fs is c's state before the
+   instruction. */
 static int
-catcher(struct ctx *c, struct lu_fs *fs, struct ctx **k, int *handler, int *level, int *lasti, int *at)
+catcher(struct ctx *c, struct lu_fs *fs, int user, struct ctx **k, int *handler, int *level, int *lasti, int *at)
 {
     for (struct ctx *x = c; x != NULL; x = x->parent, fs = fs->caller) {
-        if (x->parent != NULL && !hidden(x->code)) {
-            return 0;
-        }
         lu_codeunit *start = lu_code_start(x->code);
         int pc = (int)(lu_instr_before(x->code, start + x->next) - start);
+        if (x->parent != NULL && !hidden(x->code)) {
+            if (!user || lu_exception_handler(x->code, pc, level, handler, lasti)) {
+                return 0;
+            }
+            continue;
+        }
         if (lu_exception_handler(x->code, pc, level, handler, lasti)) {
             int bi = *handler < x->ncode ? x->blkat[*handler] : -1;
             if (bi < 0 || !x->bb[bi].exc || x->bb[bi].done || *level > fs->nstack
@@ -1975,6 +1981,16 @@ binary_op(struct ctx *c)
             r = LU_NOV;
         }
         c->island = NULL;
+        if (r == LU_NOV && !c->failed && base == NB_POWER && lk != rk) {
+            /* A float to an int's power, or an int to a float's: float.__pow__
+               in C, which the kernel's dispatcher reaches only through its
+               slot wrapper. Two floats inline the kernel's float.__pow__. */
+            guard_type(c, a, lk == LU_KIND_FLOAT ? &PyFloat_Type : &PyLong_Type);
+            guard_type(c, b, rk == LU_KIND_FLOAT ? &PyFloat_Type : &PyLong_Type);
+            lu_v args[2] = { a, b };
+            r = helper_raising(c, H_float_pow, 2, args, 2);
+            rown = 1;
+        }
     }
     else if (op == NB_MULTIPLY && ((lk == LU_KIND_LIST && rk == LU_KIND_INT) || (lk == LU_KIND_INT && rk == LU_KIND_LIST))) {
         /* list.__mul__ and __rmul__ of an exact list and an int: the copies
@@ -1991,6 +2007,37 @@ binary_op(struct ctx *c)
         guard_type(c, b, &PyUnicode_Type);
         lu_v args[2] = { a, b };
         r = helper_raising(c, H_str_concat, 2, args, 2);
+    }
+    else if (lk == LU_KIND_BYTES && rk == LU_KIND_BYTES && base == NB_ADD) {
+        /* So do two exact bytes. */
+        guard_type(c, a, &PyBytes_Type);
+        guard_type(c, b, &PyBytes_Type);
+        lu_v args[2] = { a, b };
+        r = helper_raising(c, H_bytes_concat, 2, args, 2);
+    }
+    else if (op == NB_ADD && ((lk == LU_KIND_LIST && rk == LU_KIND_LIST) || (lk == LU_KIND_TUPLE && rk == LU_KIND_TUPLE))) {
+        /* And two exact lists, or tuples, into a new one. */
+        PyTypeObject *t = lk == LU_KIND_LIST ? &PyList_Type : &PyTuple_Type;
+        guard_type(c, a, t);
+        guard_type(c, b, t);
+        lu_v args[2] = { a, b };
+        r = helper_raising(c, H_seq_concat, 2, args, 2);
+        set_made(c, r, t);
+    }
+    PyTypeObject *ta = known_type(c, a), *tb = known_type(c, b);
+    int bitwise = base == NB_AND || base == NB_OR || base == NB_XOR;
+    int ints = ta != NULL && tb != NULL && (ta == &PyLong_Type || (ta == &PyBool_Type && !bitwise))
+        && (tb == &PyLong_Type || (tb == &PyBool_Type && !bitwise)) && op != NB_SUBSCR;
+    if (r == LU_NOV && ta != NULL && tb != NULL && (ints || lu_binary_is_foreign(ta, tb, op))) {
+        /* Extension types' number slots: called as binary_op1 calls them,
+           not through the kernel's dispatcher, which finds their wrappers.
+           So are ints and bools, which compute as ints, as the
+           interpreter computes them. */
+        if (!opaque_call(c)) {
+            return -1;
+        }
+        lu_v args[3] = { a, b, const_i(c, op) };
+        r = helper_raising(c, H_binary_op, 3, args, 2);
     }
     if (r == LU_NOV && !c->failed && op != NB_SUBSCR && kernel_operator(c, LU_K_binary_op, 2, op)) {
         return 0;
@@ -3064,9 +3111,11 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                 struct mark m;
                 mark_take(c, &m);       /* a getter that does not inline leaves nothing behind */
                 konst(c, fget);
-                lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, e.descr), LU_NOV, LU_NOV,
-                                 lu_field_offset(&PyProperty_Type, 0));
-                guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+                if (Py_IS_TYPE(e.descr, &PyProperty_Type)) {      /* a kernel getset's getter is fixed */
+                    lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, e.descr), LU_NOV, LU_NOV,
+                                     lu_field_offset(&PyProperty_Type, 0));
+                    guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+                }
                 struct bstate saved;
                 state_copy(c, &saved, &c->st);
                 lu_v args[1] = { owner };
@@ -3110,11 +3159,20 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                     guard(c, OP_GUARD_BIT, lacks, 1);
                 }
             }
-            /* A copy keeps the method a constant, which its call inlines; a join owns its inputs. */
-            a1 = konst(c, e.descr);
-            own1 = end < 0;
-            if (own1) {
-                incref(c, a1);
+            if (!method && e.op == LOAD_ATTR_METHOD_NO_DICT) {
+                /* The method as an attribute: bound in C. */
+                lu_v args[2] = { konst(c, e.descr), owner };
+                a1 = helper(c, H_bind_method, 2, args);
+                guard_after(c, OP_GUARD_NOT_NULL, a1, 0);
+                own1 = 1;
+            }
+            else {
+                /* A copy keeps the method a constant, which its call inlines; a join owns its inputs. */
+                a1 = konst(c, e.descr);
+                own1 = end < 0;
+                if (own1) {
+                    incref(c, a1);
+                }
             }
             if (method && (e.op == LOAD_ATTR_METHOD_NO_DICT || e.op == LOAD_ATTR_METHOD_WITH_VALUES)) {
                 a2 = end < 0 ? take(c, owner, own) : owner;
@@ -3198,6 +3256,25 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
 static int
 load_attr(struct ctx *c)
 {
+    /* A known module's attribute (math.sqrt) in a program's code: a
+       constant, guarded as a global is (dict_const); one rebound on every
+       call leaves the site to its cache. Kernel code reaches its modules'
+       functions as its dispatchers choose, which a constant would bypass. */
+    PyObject *mod = known(c, peek(c, 1));
+    if (mod != NULL && PyModule_CheckExact(mod) && !c->kernel && !nospec(c, c->pc)) {
+        PyObject *v = dict_const(c, PyModule_GetDict(mod), NULL, name_at(c, c->oparg >> 1));
+        if (v != NULL) {
+            int own;
+            lu_v owner = pop(c, &own);
+            release(c, owner, own);
+            push(c, konst(c, v), 0);
+            Py_DECREF(v);       /* the unit holds its constants */
+            if (c->oparg & 1) {
+                push(c, LU_NOV, 0);
+            }
+            return 0;
+        }
+    }
     uint32_t version;
     uint16_t index;
     PyObject *descr;
@@ -3239,6 +3316,14 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
             guard(c, OP_GUARD_BIT, helper(c, H_dict_lacks, 2, args), 1);
         }
         pop(c, NULL);
+        if (op == LOAD_ATTR_METHOD_NO_DICT && !method) {
+            lu_v args[2] = { konst(c, descr), owner };
+            lu_v bound = helper(c, H_bind_method, 2, args);
+            guard_after(c, OP_GUARD_NOT_NULL, bound, 0);
+            release(c, owner, own);
+            push(c, bound, 1);
+            return 0;
+        }
         push(c, konst(c, descr), 0);
         if (op == LOAD_ATTR_METHOD_NO_DICT || op == LOAD_ATTR_METHOD_WITH_VALUES) {
             push(c, owner, own);
@@ -3262,8 +3347,10 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         mark_take(c, &m);       /* a getter that does not inline leaves nothing behind */
         guard_version(c, owner, version);
         konst(c, fget);         /* the unit keeps the getter it inlines */
-        lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, descr), LU_NOV, LU_NOV, lu_field_offset(&PyProperty_Type, 0));
-        guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+        if (Py_IS_TYPE(descr, &PyProperty_Type)) {          /* a kernel getset's getter is fixed */
+            lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, descr), LU_NOV, LU_NOV, lu_field_offset(&PyProperty_Type, 0));
+            guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+        }
         struct bstate saved;
         state_copy(c, &saved, &c->st);
         c->st.sp -= 1;          /* the getter takes the owner's reference */
@@ -4216,12 +4303,13 @@ in_step(struct ctx *c)
 
 /* Whether the call at c->pc, which this frame cannot inline, compiles
    here. In an inlined frame it pushes the inlined frames as real ones, in
-   line (luc-hez4), for the call: so a callee one deep (kernel code two,
+   line (luc-hez4), for the call: so a callee two deep (kernel code three,
    so that a twin or a dispatcher inlines with what it calls; a tail call,
    after which the frame only returns, one deeper still) with one such
-   call outside its loops inlines, and any other is called instead
-   (the inline is undone), which keeps the inline budget for the calls
-   that inline.
+   call outside its loops inlines, and any other is called instead (the
+   inline is undone), which keeps the inline budget for the calls that
+   inline. Measured: up to four calls a frame made AWFY Json's steady state
+   30% slower (frames pushed at more calls) for mako's 9%.
    The frames of a FOR_ITER's step in line (iter_step) call whatever they
    call, and run Python-running helpers: the step is the loop's body. A call the interpreter never made
    there leaves (a cold path's call would make the root's locals real
@@ -4246,7 +4334,7 @@ opaque_call(struct ctx *c)
         loop = base == JUMP_BACKWARD && jump_target(base, oparg, next) <= c->pc;
         pc = next;
     }
-    if (c->depth > (c->kernel ? 2 : 1) + tail || c->ncalls++ > 0 || loop) {
+    if (c->depth > (c->kernel ? 3 : 2) + tail || c->ncalls++ > 0 || loop) {
         if (_PyRuntime.jit.debug) {
             fprintf(stderr, "jit: a call it cannot inline at %s@%d: depth %d, calls %d, loop after %d\n",
                     PyUnicode_AsUTF8(c->code->co_qualname), c->pc, c->depth, c->ncalls, loop);
@@ -4336,6 +4424,13 @@ static lu_v
 callee_test(struct ctx *c, lu_v callable, const struct lu_callee *e, int fail)
 {
     lu_v fv = callable;
+    if (e->kind & LU_CALLEE_CMETH) {
+        /* A builtin method of that def: its kernel function, a constant. */
+        test_word(c, callable, offsetof(PyObject, ob_type), (PyObject *)&PyCFunction_Type, fail);
+        lu_v ml = emit(c, OP_LOAD, REP_I64, callable, LU_NOV, LU_NOV, offsetof(PyCFunctionObject, m_ml));
+        test_bit(c, emit(c, OP_CMP_I, REP_BIT, ml, const_i(c, (int64_t)(intptr_t)e->globals), LU_NOV, Py_EQ), fail);
+        return konst(c, e->obj);
+    }
     if (e->kind & LU_CALLEE_BOUND) {
         test_word(c, callable, offsetof(PyObject, ob_type), (PyObject *)&PyMethod_Type, fail);
         fv = emit(c, OP_LOAD, REP_OBJ, callable, LU_NOV, LU_NOV, offsetof(PyMethodObject, im_func));
@@ -4405,9 +4500,10 @@ call_dispatch(struct ctx *c, int n)
         c->ncalls = ncalls;
         int fail = i < m - 1 ? lu_ir_block(c->f) : -1;
         lu_v fv = callee_test(c, callable, &e[i], fail);
-        if (e[i].kind & LU_CALLEE_BOUND) {
+        if (e[i].kind & (LU_CALLEE_BOUND | LU_CALLEE_CMETH)) {
             /* The bound method's self and function become the call's, and it goes. */
-            lu_v self = emit(c, OP_LOAD, REP_OBJ, callable, LU_NOV, LU_NOV, offsetof(PyMethodObject, im_self));
+            lu_v self = emit(c, OP_LOAD, REP_OBJ, callable, LU_NOV, LU_NOV, e[i].kind & LU_CALLEE_CMETH
+                             ? offsetof(PyCFunctionObject, m_self) : offsetof(PyMethodObject, im_self));
             incref(c, self);
             c->st.v[callable_at + 1] = self;
             c->st.own[callable_at + 1] = 1;
@@ -4429,7 +4525,7 @@ call_dispatch(struct ctx *c, int n)
             c->code_value = fv;
         }
         else {
-            if (!(e[i].kind & LU_CALLEE_BOUND)) {
+            if (!(e[i].kind & (LU_CALLEE_BOUND | LU_CALLEE_CMETH))) {
                 release(c, callable, own);      /* the constant is the same object */
             }
             c->st.v[callable_at] = konst(c, e[i].obj);
@@ -4847,6 +4943,12 @@ call(struct ctx *c)
     }
     if (gco != NULL && gfn != NULL) {
         guard_func(c, gfn);     /* its code is what the call runs */
+    }
+    if (instead == NULL && newfn == NULL && fn != NULL && bound == NULL && kc != NULL
+        && ((PyCFunction_Check(kc) && self == LU_NOV) || (Py_IS_TYPE(kc, &PyMethodDescr_Type) && self != LU_NOV))) {
+        /* A builtin, or a method descriptor its own instance loaded, whose
+           kernel function did not inline: that function called. */
+        instead = fn;
     }
     lu_v hargs[34];
     int nh = n + 2;
@@ -6169,13 +6271,25 @@ translate(struct ctx *c)
         int handler, level, lasti, at;
         int again = c->base == RERAISE || oparg == 0;
         if ((again && !hidden(c->code))
-            || (c->parent != NULL && !catcher(c, before(c), &k, &handler, &level, &lasti, &at))) {
+            || (c->parent != NULL && !catcher(c, before(c), !again, &k, &handler, &level, &lasti, &at))) {
             unsupported(c);
             return -1;
+        }
+        int frames = 0;         /* the inlined frames it leaves, which make their own entries */
+        for (struct ctx *x = c; c->parent != NULL && x != k; x = x->parent) {
+            frames++;
         }
         if (again) {
             lu_v exc = c->base == RERAISE ? peek(c, 1) : const_i(c, 0);
             helper_raising(c, H_reraise, 1, &exc, c->base == RERAISE);
+        }
+        else if (frames > 0 && !hidden(c->code)) {
+            /* Through user frames: each makes its traceback entry, as the
+               interpreter's unwinding would, from the frames pushed for
+               the helper. */
+            lu_v args[4] = { peek(c, oparg), oparg == 2 ? peek(c, 1) : konst(c, LU_MISSING), const_i(c, frames),
+                             const_i(c, c->pc) };
+            helper_raising(c, H_raise_tb, 4, args, oparg);
         }
         else {
             lu_v args[2] = { peek(c, oparg), oparg == 2 ? peek(c, 1) : konst(c, LU_MISSING) };

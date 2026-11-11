@@ -150,9 +150,33 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/bound_builtin_calls.py": {
+      "exit": 0,
+      "sha256": "8161879d00c253cbca1872e2be171d0d7d34e3399423337f845b26300292ecc2",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/bound_method_attrs.py": {
+      "exit": 0,
+      "sha256": "c7cc1d17a967b2fd62249e3ba04bc9f50f4e233ddc8afa35b7264ef0d44036e1",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/builtin_rebinding.py": {
       "exit": 0,
       "sha256": "3372b7fa3f22297951d9003b0adf503d8ff00faf3cb64bb41d04bef2d4edc6d2",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/bytearray_slice_stores.py": {
+      "exit": 0,
+      "sha256": "10b740b584df1794c77efb6092299477443b198bec94f58a7d67537e0ae2a60b",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/bytes_concat_paths.py": {
+      "exit": 0,
+      "sha256": "7061c7058bf9d79e7163ffa7bde480108332a90b235eacdfbeac08c7d533c1f5",
       "state": false,
       "timing": false
     },
@@ -390,6 +414,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/dict_mode_instances.py": {
+      "exit": 0,
+      "sha256": "e83488e9b9d18eb7c47caf2d32af9947ede56324ac6d9f4d4d3c40874f0ab49b",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/dict_reinsert_order.py": {
       "exit": 0,
       "sha256": "f7ee6e113a11f7d37f6824bec3976998221d131972b1bd72db389dd7be180c99",
@@ -498,6 +528,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/float_pow_paths.py": {
+      "exit": 0,
+      "sha256": "9407897114b9bebbdb58319480e52137d4ff2dc3253cb21d3daeb5277470c453",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/float_repr_roundtrip.py": {
       "exit": 0,
       "sha256": "0da3b9e8880ba4cca7496b174661ab2a2622373a1236fd2d612d5cb43146fdf4",
@@ -513,6 +549,12 @@
     "tests/diff/corpus/float_signed_zero.py": {
       "exit": 0,
       "sha256": "7d6a086d883dbc5edbf765f5d1697e0f1f5347f5690b8ad77acd95855b194c20",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/foreign_number_slots.py": {
+      "exit": 0,
+      "sha256": "cbad7e0aaa8c0484d27cc250698f7978049617af8ae65d16cfe0a15fbc22c359",
       "state": false,
       "timing": false
     },
@@ -618,6 +660,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/int_of_float_paths.py": {
+      "exit": 0,
+      "sha256": "d3fa9764fd950eccc5110be02bbd3339a69dd07d70dba5a8a026d99913496555",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/int_power_modular.py": {
       "exit": 0,
       "sha256": "91a4abef73cc5d0e1f2f1ed6b74f49aa5575b4d97e53ee301eea3181b60a4242",
@@ -696,15 +744,45 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/module_attr_constants.py": {
+      "exit": 0,
+      "sha256": "e4d50f1a40202b965215ac84a8044727ea68c4ba2ac5222a3d12638b010a070d",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/module_builtin_calls.py": {
+      "exit": 0,
+      "sha256": "21ee1a78e6b540cf97a6596dc9a323b40c9cf94f4f54356ca3bbef06cbdc1214",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/pattern_mapping_sequence.py": {
       "exit": 0,
       "sha256": "98a2ce47db272acabbbe9b79e1ca864219a22bccb74550079e82cee377135c44",
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/raise_through_inlined.py": {
+      "exit": 0,
+      "sha256": "8f1182dd93f228461bdd5b8f46b88a719bf49c29727501104a3b31e8f46d1631",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/repr_address_normalization.py": {
       "exit": 0,
       "sha256": "14c861c9fd724635bf7613d9bb1c31e394a956c2868282ca491e961a485cb161",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/seq_concat_paths.py": {
+      "exit": 0,
+      "sha256": "bad719ee4a245e35fc70d6733f841d8aff9eaf017017563d6c5064b854e56a37",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/shadowed_class_attrs.py": {
+      "exit": 0,
+      "sha256": "ec1d4a438ce37e9709622f0d7dfec3605cbb7899377964704b7b772f43734ed2",
       "state": false,
       "timing": false
     },
@@ -753,6 +831,18 @@
     "tests/diff/corpus/sort_stability.py": {
       "exit": 0,
       "sha256": "94e749c6a847aaa797b3a6c7b890c89ceec0bab06042381dab84637b47f58eb2",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/str_contains_paths.py": {
+      "exit": 0,
+      "sha256": "7b0d5485270a5bd0674721301ace1c9e9e92e02e7bf9187b28cb7792b52c5992",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/str_join_concat_paths.py": {
+      "exit": 0,
+      "sha256": "33b47ed0407da8425798531d6a518440fff4ba4ad63992f2aabdb0a85f2e882c",
       "state": false,
       "timing": false
     },
@@ -837,6 +927,12 @@
     "tests/diff/corpus/weakref_weakmethod.py": {
       "exit": 0,
       "sha256": "bfdbe9bdf5ad2b0d8f115270bfbf35d93a391bf705929341f0faad8a0c8368f3",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/with_and_zip_paths.py": {
+      "exit": 0,
+      "sha256": "176479d53cb34885b2dcddbb205290c720d67ccc514d6dddc6713f5897640691",
       "state": false,
       "timing": false
     },
