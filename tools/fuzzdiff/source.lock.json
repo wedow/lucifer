@@ -1,0 +1,4 @@
+[
+ {"name": "python-formalization", "url": "https://codeload.github.com/Broyojo/python-formalization/tar.gz/4f4ff576020569ad823538eff4fe2a7fbded36d5", "sha256": "09b5862a04c7ec19bc153fc3f41836482447c45bb0fcecb4959cc95c5074b2e6", "tree": "python-formalization-4f4ff576020569ad823538eff4fe2a7fbded36d5", "note": "Apache-2.0, fetched and never committed: the difftest case generators"},
+ {"name": "python.gram", "url": "https://raw.githubusercontent.com/python/cpython/b703b2c5e704341d61e367b9b940b77ed11dded0/Grammar/python.gram", "sha256": "4d0c574b586ebc67462c15a8e9f9b5ebfd84b5c8c5901ec9cf05707d571bb63f", "note": "v3.14.10's grammar, which pygrammar_diff's peg part parses with third_party/cpython's pegen"}
+]

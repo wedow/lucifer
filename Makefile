@@ -86,7 +86,7 @@ STEP_TMO = 3600
 RUN = timeout -k 10 $(TMO)
 STEP = timeout -k 10 $(STEP_TMO)
 
-.PHONY: all oracle-exts abi-audit check check-jit check-kernel-jit check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler check-timing
+.PHONY: all oracle-exts fuzzdiff abi-audit check check-jit check-kernel-jit check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler check-timing
 all: bin/lucifer build/lib/stamp
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -299,6 +299,7 @@ check-harness:
 	python3 tools/numpytest/check.py
 	python3 tools/bench/check
 	python3 tools/difftest/check.py
+	python3 tools/fuzzdiff/check.py
 	python3 tools/ftcorpus/check.py
 	python3 tools/pypi/check.py
 	python3 tools/readme/check.py
@@ -329,6 +330,12 @@ check-jit: bin/lucifer build/lib/stamp $(STDLIB_EXT_FILES)
 	    --results build/difftest/$$name --work build/difftest/$$name/work || { echo "FAIL difftest $$name"; exit 1; }; \
 	  echo "PASS difftest $$name"; \
 	done
+
+# python-formalization's case generators against the oracle (tools/fuzzdiff/run.py --help).
+# Lucifer gets the oracle's test and accelerator modules, which some generators import.
+FUZZDIFF ?= --seed 1 --seed 2
+fuzzdiff: bin/lucifer build/lib/stamp oracle-exts $(EXT_DIR)/accelerators
+	PYTHONPATH=$(abspath $(EXT_DIR)) python3 tools/fuzzdiff/run.py --oracle $(ORACLE_T) $(FUZZDIFF)
 
 # Wall-clock bounds: an uncaught exception, a 100,000-line function.
 check-timing: bin/lucifer build/lib/stamp
