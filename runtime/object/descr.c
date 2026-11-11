@@ -1491,6 +1491,24 @@ prim_member_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyMember_GetOne((const char *)args[1], ((PyMemberDescrObject *)args[0])->d_member);
 }
 
+/* member_peek(d, obj): member_get, but MISSING for an object slot that is
+   unset, where member_get raises AttributeError: the optional lookups
+   (getattr with a default, hasattr) that would only catch it. */
+static PyObject *
+prim_member_peek(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2);
+    if (!is_descr(args[0], &PyMemberDescr_Type)) {
+        return NULL;
+    }
+    PyMemberDef *def = ((PyMemberDescrObject *)args[0])->d_member;
+    if (def->type == Py_T_OBJECT_EX
+        && __atomic_load_n((PyObject **)((char *)args[1] + def->offset), __ATOMIC_ACQUIRE) == NULL) {
+        return Py_NewRef(LU_MISSING);
+    }
+    return PyMember_GetOne((const char *)args[1], def);
+}
+
 static PyObject *
 prim_member_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -1782,7 +1800,7 @@ prim_kernel_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 PyMethodDef lu_prim_descr_methods[] = {
     FAST(kernel_get), FAST(setattr_native),
     FAST(make_function), FAST(make_getset), FAST(getset_kernel), FAST(getset_get),
-    FAST(getset_set), FAST(member_get), FAST(member_set), FAST(descr_type), FAST(bind),
+    FAST(getset_set), FAST(member_get), FAST(member_peek), FAST(member_set), FAST(descr_type), FAST(bind),
     FAST(method_new), FAST(instancemethod_new), FAST(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set), FAST(kernel_twin), FAST(next_missing_set), FAST(next_missing_of),
     { NULL, NULL, 0, NULL },
 };
