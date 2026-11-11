@@ -5,7 +5,7 @@ slices, arguments and the error texts."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, ns_items, static_type, type_tp_name, type_lookup,
-    int_format, address, b_check, kernel_twin, alloc, field_get, field_set,
+    int_format, address, b_check, kernel_twin, alloc, field_get, field_set, str_len, str_ord,
     mv_new, mv_release, mv_released, mv_attr, mv_len, mv_tobytes, mv_tolist, mv_item,
     mv_set_item, mv_slice, mv_set_slice, mv_cast, mv_toreadonly, mv_eq, mv_hash,
 )
@@ -142,6 +142,10 @@ class memoryview:
             error(TypeError, 'invalid indexing of 0-dim memory')
         if ndim > 1:
             error(NotImplementedError, 'multi-dimensional sub-views are not implemented')
+        fmt = mv_attr(self, 'format')
+        n = str_len(fmt)
+        if n - (1 if n and str_ord(fmt, 0) == 64 else 0) != 1:     # adjust_fmt
+            error(NotImplementedError, _cat('memoryview: unsupported format ', fmt))
         it = alloc(memory_iterator, memory_iterator)
         field_set(it, 0, self)
         field_set(it, 1, 0)

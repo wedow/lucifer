@@ -61,3 +61,20 @@ try:
     next(it)
 except Exception as e:
     print(type(e).__name__, e)
+
+# iter() checks the format up front, as memory_iter does, even for an empty view.
+words = (ct.c_int * 2)(1, 2)
+from_buffer = ct.pythonapi.PyMemoryView_FromBuffer
+for fmt, n, itemsize in ((b"<i", 2, 4), (b"<i", 0, 4), (b"2i", 1, 8), (b"@i", 2, 4), (b"i", 0, 4)):
+    fbuf = ct.create_string_buffer(fmt)
+    shp = (ct.c_ssize_t * 1)(n)
+    std = (ct.c_ssize_t * 1)(itemsize)
+    v = from_buffer(ct.byref(Buf(ct.addressof(words), None, n * itemsize, itemsize, 1, 1,
+                                 ct.cast(fbuf, ct.c_char_p), ct.addressof(shp), ct.addressof(std),
+                                 None, None)))
+    try:
+        it = iter(v)
+        print(v.format, 'iter ok', list(it))
+    except Exception as e:
+        print(v.format, type(e).__name__, e)
+print(list(memoryview(b'')), list(memoryview(b'').cast('i')))

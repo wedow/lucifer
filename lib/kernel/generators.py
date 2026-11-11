@@ -178,11 +178,14 @@ def _throw(gen, typ, val, tb, close_on_genexit):
         return _result(gen, gen_throw(gen, _normalized(typ, val, tb), 0))
     # The generators above the target run while its exception is made, as
     # in CPython's recursion: a constructor that resumes them fails.
+    # A constructor that fails throws its error into the delegator instead.
     gen_set_running(gen, depth - 1, True)
     try:
         exc = _normalized(typ, val, tb)
-    finally:
+    except BaseException as e:
         gen_set_running(gen, depth - 1, False)
+        return _result(gen, gen_throw(gen, e, depth - 1))
+    gen_set_running(gen, depth - 1, False)
     return _result(gen, gen_throw(gen, exc, depth))
 
 

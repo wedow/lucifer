@@ -163,10 +163,11 @@ class Struct:
 Return a new Struct object which writes and reads binary data according to
 the format string."""
 
-    __slots__ = ('_items', '_size', '_nvalues', '_little', '_format', '__weakref__')
+    __slots__ = ('_items', '_flat', '_size', '_nvalues', '_little', '_format', '__weakref__')
 
     def __init__(self, format):
         self._items, self._size, self._nvalues, self._little, _ = _compile(format)
+        self._flat = None
         self._format = format if isinstance(format, str) else format.decode('ascii')
 
     @property
@@ -183,7 +184,10 @@ the format string."""
         if len(args) != self._nvalues:
             raise error('pack expected %d items for packing (got %d)' % (self._nvalues, len(args)))
         out = bytearray(self._size)
-        for (code, count, offset, size), value in zip(_each(self._items), args):
+        flat = self._flat
+        if flat is None:
+            flat = self._expand()
+        for (code, count, offset, size), value in zip(flat, args):
             data = _pack_item(code, count, size, value, self._little)
             out[offset:offset + len(data)] = data
         return bytes(out)
@@ -214,9 +218,19 @@ the format string."""
                         '(actual buffer size is %d)' % (self._size + offset, self._size, offset, length))
         view[offset:offset + self._size] = self._pack(args)
 
+    def _expand(self):
+        """The runs one value at a time, made at the first pack or unpack:
+        the size and count checks before it admit a huge repeat count only
+        with that many values at hand."""
+        self._flat = tuple(_each(self._items))
+        return self._flat
+
     def _unpack(self, data):
+        flat = self._flat
+        if flat is None:
+            flat = self._expand()
         return tuple(_unpack_item(code, count, size, data[offset:offset + size], self._little)
-                     for code, count, offset, size in _each(self._items))
+                     for code, count, offset, size in flat)
 
     def unpack(self, buffer, /):
         """Return a tuple containing unpacked values.

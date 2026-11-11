@@ -51,3 +51,58 @@ o = outer()
 print(next(o))
 print(o.throw(Finish))
 print(list(o))
+
+
+# The exception's constructor raises: that error is thrown into the
+# delegator instead, as _gen_throw's failed throw_here is.
+class Refuses(Exception):
+    def __init__(self, *a):
+        raise KeyError('constructor')
+
+
+def chain():
+    yield from sub()
+    yield 'end'
+
+
+c = chain()
+print(next(c))
+try:
+    c.throw(Refuses)
+except KeyError as e:
+    print('KeyError', e)
+print(list(c))
+
+
+# Throwing into a finished coroutine through yield from.
+class Awaitable:
+    def __await__(self):
+        yield 'tick'
+
+
+async def inner():
+    await Awaitable()
+    return 'done'
+
+
+co = inner()
+
+
+def drive():
+    try:
+        yield from co.__await__()
+    except RuntimeError as e:
+        print('drive caught', type(e).__name__, e)
+        yield 'recovered'
+
+
+d = drive()
+print(next(d))
+try:
+    co.send(None)
+except StopIteration as e:
+    print('inner finished', e.value)
+try:
+    print(d.throw(ValueError('late')))
+except Exception as e:
+    print(type(e).__name__, e)
