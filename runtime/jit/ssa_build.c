@@ -195,6 +195,7 @@ static int call(struct ctx *c);
 static int opaque_call(struct ctx *c);
 static lu_v inline_or_default(struct ctx *c, lu_v owner, int64_t offset, PyObject *dflt);
 static lu_v getter_call(struct ctx *c, PyObject *fget, lu_v owner);
+static void guard_fget(struct ctx *c, PyObject *descr, PyObject *fget);
 
 /* A site's operand kinds (runtime/jit/jit.h), counted: none means the
    interpreter has never run it. Attribute sites count in cached_site. */
@@ -3118,11 +3119,7 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                 struct mark m;
                 mark_take(c, &m);       /* a getter that does not inline leaves nothing behind */
                 konst(c, fget);
-                if (Py_IS_TYPE(e.descr, &PyProperty_Type)) {      /* a kernel getset's getter is fixed */
-                    lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, e.descr), LU_NOV, LU_NOV,
-                                     lu_field_offset(&PyProperty_Type, 0));
-                    guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
-                }
+                guard_fget(c, e.descr, fget);
                 struct bstate saved;
                 state_copy(c, &saved, &c->st);
                 lu_v args[1] = { owner };
@@ -3135,7 +3132,9 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                 mark_free(&m);
             }
             if (!inlined && c->parent == NULL && !c->failed && PyFunction_Check(fget)) {
-                /* The root calls a getter that does not inline. */
+                /* The root calls a getter that does not inline: the one the
+                   property still holds (the attempt's guard went with it). */
+                guard_fget(c, e.descr, fget);
                 a1 = getter_call(c, fget, owner);
                 release(c, owner, own);
                 inlined = -1;
@@ -3313,6 +3312,17 @@ load_attr(struct ctx *c)
     return r;
 }
 
+/* A property's getter is still fget: property.__init__ replaces it without
+   a new class version. A kernel getset's getter is fixed. */
+static void
+guard_fget(struct ctx *c, PyObject *descr, PyObject *fget)
+{
+    if (Py_IS_TYPE(descr, &PyProperty_Type)) {
+        lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, descr), LU_NOV, LU_NOV, lu_field_offset(&PyProperty_Type, 0));
+        guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+    }
+}
+
 /* A property's getter, a function, called with owner as a CALL calls it
    (the frame pushed for an inlined caller): a new reference. */
 static lu_v
@@ -3410,10 +3420,7 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         mark_take(c, &m);       /* a getter that does not inline leaves nothing behind */
         guard_version(c, owner, version);
         konst(c, fget);         /* the unit keeps the getter it inlines */
-        if (Py_IS_TYPE(descr, &PyProperty_Type)) {          /* a kernel getset's getter is fixed */
-            lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, descr), LU_NOV, LU_NOV, lu_field_offset(&PyProperty_Type, 0));
-            guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
-        }
+        guard_fget(c, descr, fget);
         struct bstate saved;
         state_copy(c, &saved, &c->st);
         c->st.sp -= 1;          /* the getter takes the owner's reference */
@@ -3433,11 +3440,7 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
             /* A getter that does not inline is called, without the
                attribute lookup and the property's __get__. */
             guard_version(c, owner, version);
-            if (Py_IS_TYPE(descr, &PyProperty_Type)) {
-                lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, descr), LU_NOV, LU_NOV,
-                                 lu_field_offset(&PyProperty_Type, 0));
-                guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
-            }
+            guard_fget(c, descr, fget);
             r = getter_call(c, fget, owner);
             pop(c, NULL);
             release(c, owner, own);
