@@ -31,6 +31,7 @@ tests/diff/corpus/bytearray_slice_stores.py	NOTRUN	0.000000
 tests/diff/corpus/bytes_concat_paths.py	NOTRUN	0.000000
 tests/diff/corpus/class_attribute_delete.py	NOTRUN	0.000000
 tests/diff/corpus/class_bases_invalidation.py	NOTRUN	0.000000
+tests/diff/corpus/class_default_attrs.py	NOTRUN	0.000000
 tests/diff/corpus/class_mro_diamond.py	NOTRUN	0.000000
 tests/diff/corpus/closure_cell_mutation.py	NOTRUN	0.000000
 tests/diff/corpus/closure_class_scope.py	NOTRUN	0.000000
