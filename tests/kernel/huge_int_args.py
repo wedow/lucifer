@@ -38,3 +38,6 @@ t("center 2**63 bytearray", lambda: bytearray(b"a").center(2**63))
 t("zfill 2**63 str", lambda: "1".zfill(2**63))
 t("split bytes 2**63", lambda: b"a b".split(maxsplit=2**63))
 t("small", lambda: ("x".rjust(3), b"1".zfill(3), "a b c".split(None, 1), b"a b c".rsplit(None, 1)))
+# chr() takes any int: out of range is a ValueError, never an OverflowError.
+for v in (2**63, 2**31, -2**31 - 1, -2**63 - 1, 2**64, 0x110000, -1, True):
+    t(('chr', v), lambda: chr(v))
