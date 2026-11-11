@@ -1,5 +1,5 @@
 """Bulk reads of a set or dict that another thread changes: set.update from a
-set and from a dict, set union, and dict.fromkeys. Each takes the source
+set and from a dict, set union, dict.update and dict.fromkeys. Each takes the source
 whole, as CPython's merges do under both objects' locks: a key is never
 paired with another key's hash, and the keys the source held throughout are
 all copied, however the other thread reuses entries or resizes the table."""
@@ -34,7 +34,7 @@ def check(name, take, source):
         for _ in range(ROUNDS):
             try:
                 got = take(source)
-            except TypeError:
+            except (TypeError, RuntimeError):
                 errors += 1
                 continue
             lost += sum(k not in got for k in STABLE)
@@ -51,8 +51,15 @@ def into_set(source):
     return s
 
 
+def into_dict(source):
+    d = {-1: -1}
+    d.update(source)
+    return d
+
+
 check('set.update(set)', into_set, set(STABLE))
 check('set.update(dict)', into_set, dict.fromkeys(STABLE))
 check('set | set', lambda source: {-1} | source, set(STABLE))
+check('dict.update(dict)', into_dict, dict.fromkeys(STABLE))
 check('dict.fromkeys(dict)', dict.fromkeys, dict.fromkeys(STABLE))
 check('dict.fromkeys(set)', dict.fromkeys, set(STABLE))

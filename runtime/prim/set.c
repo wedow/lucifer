@@ -7,6 +7,7 @@
 
 #include "prim/prim.h"
 #include "object/set.h"
+#include "object/dict.h"
 
 #include <string.h>
 
@@ -37,6 +38,23 @@ static int
 active(PySetObject *so, Py_ssize_t i)
 {
     return i >= 0 && i <= so->mask && so->table[i].key != NULL && so->table[i].key != LU_SET_DUMMY;
+}
+
+/* (pos, key, hash); NULL with an error set. */
+static PyObject *
+entry_tuple(Py_ssize_t pos, PyObject *key, Py_hash_t hash)
+{
+    PyObject *at = PyLong_FromSsize_t(pos), *h = PyLong_FromSsize_t(hash);
+    PyObject *t = at != NULL && h != NULL ? PyTuple_New(3) : NULL;
+    if (t == NULL) {
+        Py_XDECREF(at);
+        Py_XDECREF(h);
+        return NULL;
+    }
+    PyTuple_SET_ITEM(t, 0, at);
+    PyTuple_SET_ITEM(t, 1, Py_NewRef(key));
+    PyTuple_SET_ITEM(t, 2, h);
+    return t;
 }
 
 /* set_new(cls): an empty set or frozenset of class cls. */
@@ -105,7 +123,7 @@ prim_set_discard_entry(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return verdict_result(verdict, candidate);
 }
 
-/* set_entry(s, i): an active entry's (key, hash), else MISSING. Read under
+/* set_entry(s, i): (i + 1, key, hash) of active entry i, else MISSING. Read under
    the set's critical section: a discard frees keys, an add reuses the entry,
    and the table is replaced apart from its mask. */
 static PyObject *
@@ -114,12 +132,14 @@ prim_set_entry(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(2); SET(0); SSIZE(1, i);
     PySetObject *so = (PySetObject *)args[0];
     PyObject *entry = NULL;
+    int is_active;
     Py_BEGIN_CRITICAL_SECTION(so);
-    if (active(so, i)) {
-        entry = Py_BuildValue("(On)", so->table[i].key, so->table[i].hash);
+    is_active = active(so, i);
+    if (is_active) {
+        entry = entry_tuple(i + 1, so->table[i].key, so->table[i].hash);
     }
     Py_END_CRITICAL_SECTION();
-    return entry != NULL ? entry : PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
+    return is_active ? entry : Py_NewRef(LU_MISSING);
 }
 
 /* set_entries(s): the active entries' keys and hashes, (k0, h0, k1, h1, ...)
@@ -225,36 +245,46 @@ prim_set_swap(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return lu_set_swap((PySetObject *)args[0], (PySetObject *)args[1]) < 0 ? NULL : Py_NewRef(Py_None);
 }
 
-/* set_merge(so, other), set_merge_dict(so, d): set.update from a set or a
-   dict, whole under both critical sections. */
+/* set_merge(so, other, i), set_merge_dict(so, d, i): set.update from a set or
+   a dict, under both critical sections from entry i on: None once done, or
+   (entry, key, hash) of a key that only __eq__ can judge, for the kernel to
+   add before it resumes at the next entry. */
 static PyObject *
 prim_set_merge(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(2); SET(0); SET(1);
-    if (args[0] == args[1]) {
+    ARGS(3); SET(0); SET(1); SSIZE(2, pos);
+    PySetObject *so = (PySetObject *)args[0], *other = (PySetObject *)args[1];
+    if (so == other) {
         lu_err_format(PyExc_SystemError, "set_merge() needs two sets");
         return NULL;
     }
-    int err;
-    Py_BEGIN_CRITICAL_SECTION2(args[0], args[1]);
-    err = lu_set_merge((PySetObject *)args[0], (PySetObject *)args[1]);
+    PyObject *result = NULL;
+    Py_BEGIN_CRITICAL_SECTION2(so, other);
+    if (lu_set_merge(so, other, &pos) == 0) {
+        result = pos < 0 ? Py_NewRef(Py_None) : entry_tuple(pos, other->table[pos].key, other->table[pos].hash);
+    }
     Py_END_CRITICAL_SECTION2();
-    return err < 0 ? NULL : Py_NewRef(Py_None);
+    return result;
 }
 
 static PyObject *
 prim_set_merge_dict(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(2); SET(0);
+    ARGS(3); SET(0); SSIZE(2, pos);
     if (!PyDict_Check(args[1])) {
         lu_err_format(PyExc_TypeError, "set_merge_dict() needs a dict");
         return NULL;
     }
-    int err;
-    Py_BEGIN_CRITICAL_SECTION2(args[0], args[1]);
-    err = lu_set_merge_dict((PySetObject *)args[0], (PyDictObject *)args[1]);
+    PySetObject *so = (PySetObject *)args[0];
+    PyDictObject *other = (PyDictObject *)args[1];
+    PyObject *result = NULL;
+    Py_BEGIN_CRITICAL_SECTION2(so, other);
+    if (lu_set_merge_dict(so, other, &pos) == 0) {
+        result = pos < 0 ? Py_NewRef(Py_None)
+               : entry_tuple(pos, lu_dk_key(other->ma_keys, pos), lu_dk_hash(other->ma_keys, pos));
+    }
     Py_END_CRITICAL_SECTION2();
-    return err < 0 ? NULL : Py_NewRef(Py_None);
+    return result;
 }
 
 /* set_info(s, which): 0 fill, 1 used, 2 mask, 3 finger, 4 the cached hash. */

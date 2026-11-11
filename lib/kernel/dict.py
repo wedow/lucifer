@@ -9,7 +9,7 @@ from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, list_append,
     repr_enter, repr_leave, set_slot, kernel_set,
     dict_new, dict_probe, dict_find, dict_put, dict_key, dict_value, dict_entry, dict_stamp, dict_insert, dict_replace, dict_remove,
-    dict_popitem, dict_clear, dict_next, dict_prev, dict_keys_id, dict_copy, dict_merge_prepare,
+    dict_popitem, dict_clear, dict_next, dict_prev, dict_keys_id, dict_copy, dict_merge,
     dict_sizeof, dictiter_new, dictiter_next, dictiter_len, dictiter_copy, dictview_new,
     dictview_dict, set_next, set_entry, set_entries,
 )
@@ -171,9 +171,9 @@ def next_entry(d, i):
         if i < 0:
             return None
         e = dict_entry(d, i)
-        i += 1
         if e is not MISSING:
-            return i, e[0], e[1], e[2]
+            return e
+        i += 1
 
 
 def next_set_entry(s, i):
@@ -183,23 +183,22 @@ def next_set_entry(s, i):
         if i < 0:
             return None
         e = set_entry(s, i)
-        i += 1
         if e is not MISSING:
-            return i, e[0], e[1]
+            return e
+        i += 1
 
 
 # update, merge and fromkeys (dict_merge, merge_from_seq2, _PyDict_FromKeys)
 
 def merge_dict(a, b, override):
     """dict_dict_merge: the entries of the dict b into a; override 0 keeps the
-    keys a has, 1 replaces them, 2 raises KeyError for them."""
-    if dict_merge_prepare(a, b):
-        return
-    n = size(b)
-    whole = dict_copy(b)            # under b's lock: no entry torn or passed over
-    e = next_entry(whole, 0)
-    while e is not None:
-        i, key, value, h = e
+    keys a has, 1 replaces them, 2 raises KeyError for them. The merge runs
+    under both dicts' locks; an entry whose key only __eq__ can judge (or, for
+    override 2, one a holds) comes back here, is handled outside the locks,
+    and the merge goes on after it."""
+    stop = dict_merge(a, b, override, 0)
+    while stop is not None:
+        i, key, value, h, n = stop
         if override == 1:
             store(a, key, h, value)
         elif lookup(a, key, h) >= 0:
@@ -209,7 +208,7 @@ def merge_dict(a, b, override):
             store(a, key, h, value)
         if size(b) != n:
             error(RuntimeError, 'dict mutated during update')
-        e = next_entry(whole, i)
+        stop = dict_merge(a, b, override, i + 1)
 
 
 def mapping_keys(o):

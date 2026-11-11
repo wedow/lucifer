@@ -301,10 +301,11 @@ C extension ─▶ C-API function ─▶ thunk ───────┤      └
   Kernel mutators that CPython makes atomic (`list.append`, `dict.__setitem__`,
   `set.add`, …) bracket their commit with the same `PyCriticalSection` C uses, so
   extension code and kernel code exclude each other. Hash and `__eq__` callbacks
-  run outside commit regions and revalidate afterwards (research 02 §3.3). The
-  exception is a set merge (`set.update` from a set or dict), which CPython makes
-  atomic under both objects' sections: its primitive holds them for the whole
-  merge and calls `__eq__` inside them, and they suspend if `__eq__` blocks.
+  run outside commit regions and revalidate afterwards (research 02 §3.3). A
+  merge from a set or dict (`set.update`, `dict.update`, `{**a, **b}`) holds both
+  objects' sections for the whole merge, as CPython does; a key that only
+  `__eq__` can judge stops it, and the kernel handles that key outside the
+  sections and resumes the merge after it.
 
 ### 4.5 JIT representation freedom
 

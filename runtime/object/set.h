@@ -2,9 +2,8 @@
    and the resize policy, so iteration order equals the oracle's. Defined
    once for the marshal reader's frozenset build (lu_set_add) and the
    kernel's set and frozenset (runtime/prim/set.c, lib/kernel/set.py).
-   Like the dict probe, the probes run no Python: a key that only __eq__ can
-   judge comes back as a candidate. lu_set_add_entry and the merges judge it
-   with lu_eq. */
+   Like the dict probe, nothing here runs Python: a key that only __eq__ can
+   judge comes back as a candidate. */
 #ifndef LU_SET_H
 #define LU_SET_H
 
@@ -41,15 +40,14 @@ void lu_set_insert_clean(setentry *table, size_t mask, PyObject *key, Py_hash_t 
    growth, a difference_update's dropping of dummies). */
 int lu_set_reserve(PySetObject *so, Py_ssize_t n);
 int lu_set_rebuild(PySetObject *so);
-/* set_add_entry with lu_eq judging candidates: the marshal reader's add
-   (lu_set_add hashes first) and the merges'. */
-int lu_set_add_entry(PySetObject *so, PyObject *key, Py_hash_t hash);
-/* set_merge_lock_held and set_update_dict_lock_held: the keys of `other`
-   into `so`, with both objects' critical sections held by the caller for
-   the whole merge, as CPython does. __eq__ runs inside them, as there, and
-   suspends them only if it blocks. */
-int lu_set_merge(PySetObject *so, PySetObject *other);
-int lu_set_merge_dict(PySetObject *so, PyDictObject *other);
+/* set_merge_lock_held and set_update_dict_lock_held, under both objects'
+   critical sections, which the caller holds: the keys of `other` from its
+   entry *pos on (0 for the start, which presizes) go into `so`. A key that
+   meets one only __eq__ can judge stops the merge with *pos naming its
+   entry; the kernel adds that key and resumes after it. *pos is -1 once the
+   merge is done. */
+int lu_set_merge(PySetObject *so, PySetObject *other, Py_ssize_t *pos);
+int lu_set_merge_dict(PySetObject *so, PyDictObject *other, Py_ssize_t *pos);
 /* set_clear_internal: empties the set, releasing its keys. */
 void lu_set_clear(PySetObject *so);
 /* set_swap_bodies, for an `a` that lock-free readers may probe and a `b`

@@ -935,6 +935,43 @@ lu_dict_merge_prepare(PyDictObject *mp, PyDictObject *other)
     return 0;
 }
 
+int
+lu_dict_merge_dict(PyDictObject *mp, PyDictObject *other, int override, Py_ssize_t *pos)
+{
+    Py_ssize_t ix = *pos;
+    *pos = -1;
+    if (ix == 0) {
+        int done = lu_dict_merge_prepare(mp, other);
+        if (done != 0) {
+            return done < 0 ? -1 : 0;
+        }
+    }
+    for (; ix < other->ma_keys->dk_nentries; ix++) {
+        PyDictKeysObject *dk = other->ma_keys;
+        PyObject *value = lu_dk_value(dk, ix);
+        if (value == NULL) {
+            continue;
+        }
+        PyObject *key = lu_dk_key(dk, ix);
+        Py_hash_t hash = lu_dk_hash(dk, ix);
+        Py_ssize_t steps = 0;
+        Py_ssize_t found = probe_keys(mp->ma_keys, key, hash, &steps, 1);
+        if (found <= LU_PROBE_CANDIDATE(0) || (found >= 0 && override == 2)) {
+            *pos = ix;
+            return 0;
+        }
+        if (found < 0) {
+            if (lu_dict_insert(mp, key, hash, value) < 0) {
+                return -1;
+            }
+        }
+        else if (override == 1) {
+            lu_dict_replace(mp, found, value);
+        }
+    }
+    return 0;
+}
+
 PyObject *
 lu_dict_copy(PyDictObject *o)
 {
