@@ -192,6 +192,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/class_default_attrs.py": {
+      "exit": 0,
+      "sha256": "cd45d279ee929454989ab701e34f57237328f3a43db953cdd9844fd3cf438915",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/class_mro_diamond.py": {
       "exit": 0,
       "sha256": "a22f5cb9af587ef7c6898d36de9b5091de577f73f330a64a6386b0722a54cebb",
