@@ -597,8 +597,9 @@ lu_special_function(PyObject *owner, int which)
         return NULL;
     }
     PyObject *f = _PyType_LookupRef(Py_TYPE(owner), name);
-    if (f != NULL && !PyFunction_Check(f) && !Py_IS_TYPE(f, &PyMethodDescr_Type)) {
-        Py_CLEAR(f);
+    if (f != NULL && !PyFunction_Check(f)
+        && !(Py_IS_TYPE(f, &PyMethodDescr_Type) && PyObject_TypeCheck(owner, PyDescr_TYPE(f)))) {
+        Py_CLEAR(f);            /* another type's descriptor: the kernel's __get__ raises its error */
     }
     return f;
 }

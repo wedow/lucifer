@@ -762,9 +762,21 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/raise_inlined_monitored.py": {
+      "exit": 0,
+      "sha256": "d5306eef4073a011386d044904b2de60b614c6e51f68dbe393c969b583e8cf57",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/raise_through_inlined.py": {
       "exit": 0,
       "sha256": "8f1182dd93f228461bdd5b8f46b88a719bf49c29727501104a3b31e8f46d1631",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/raise_two_frames_deep.py": {
+      "exit": 0,
+      "sha256": "58cd85e5f37e2fe4bfd17502bb4fc05d530175a6d3d15b9c4ddfcf38ab9f3760",
       "state": false,
       "timing": false
     },
@@ -933,6 +945,12 @@
     "tests/diff/corpus/with_and_zip_paths.py": {
       "exit": 0,
       "sha256": "176479d53cb34885b2dcddbb205290c720d67ccc514d6dddc6713f5897640691",
+      "state": false,
+      "timing": false
+    },
+    "tests/diff/corpus/with_wrong_descriptor.py": {
+      "exit": 0,
+      "sha256": "6ffe2cf22a81e2926b05df626f4d7c1cc1b7adce63a3b720b9abbdcbc2b354b7",
       "state": false,
       "timing": false
     },
