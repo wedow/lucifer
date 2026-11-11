@@ -2687,7 +2687,7 @@ def _checked(fast, generic):
         twin = _State()
         for name in _State.__slots__:
             setattr(twin, name, getattr(st, name))
-        twin.mark = list(st.mark)
+        twin.mark = st.mark[:]
         want = generic(twin)
         got = fast(st)
         if want != got or (want and (twin.start, twin.ptr, twin.lastmark, twin.lastindex, twin.mark[:twin.lastmark + 1])
