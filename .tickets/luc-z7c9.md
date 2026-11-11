@@ -1,6 +1,6 @@
 ---
 id: luc-z7c9
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T04:17:20Z

@@ -254,7 +254,7 @@ def decimal(n):
 
 def ssize_arg(x):
     """A clinic Py_ssize_t argument: x through __index__, which must fit."""
-    n = index(x)
+    n = x if type(x) is int else index(x)
     if n > _SSIZE_MAX or n < _SSIZE_MIN:
         error(OverflowError, 'Python int too large to convert to C ssize_t')
     return n
@@ -262,7 +262,7 @@ def ssize_arg(x):
 
 def int_arg(x):
     """A clinic C int argument: x through __index__, which must fit."""
-    n = index(x)
+    n = x if type(x) is int else index(x)
     if n > 2147483647 or n < -2147483648:
         error(OverflowError, 'Python int too large to convert to C int')
     return n

@@ -1368,6 +1368,7 @@ extern PyTypeObject lu_method_wrapper_type;
 typedef struct { PyObject_HEAD PyObject *mv, *obj; } lu_buffer_wrapper;
 extern PyTypeObject lu_buffer_wrapper_type;
 extern PyBufferProcs lu_buffer_wrapper_procs;
+extern PyTypeObject lu_memory_iterator_type;
 int lu_types_init(PyInterpreterState *interp);
 /* Fills each static type's unset slots from its bases (inherit_slots); run
    after every kernel module, as kernel classes install slots. */

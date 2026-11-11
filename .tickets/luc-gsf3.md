@@ -1,6 +1,6 @@
 ---
 id: luc-gsf3
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T02:47:17Z
