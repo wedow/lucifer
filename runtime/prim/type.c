@@ -522,17 +522,8 @@ _PyType_Lookup(PyTypeObject *tp, PyObject *name)
 }
 
 PyObject *
-lu_super_attr_native(PyObject *cls, PyObject *obj, PyObject *name)
+lu_super_lookup(PyTypeObject *start, PyObject *cls, PyObject *name)
 {
-    if (!PyType_Check(cls) || !PyUnicode_CheckExact(name)) {
-        return NULL;
-    }
-    /* supercheck's first two answers; the third (a __class__ that differs) is the kernel's. */
-    PyTypeObject *start = PyType_Check(obj) && lu_type_is_subtype((PyTypeObject *)obj, (PyTypeObject *)cls)
-        ? (PyTypeObject *)obj : Py_TYPE(obj);
-    if (!lu_type_is_subtype(start, (PyTypeObject *)cls)) {
-        return NULL;
-    }
     PyObject *mro = __atomic_load_n(&start->tp_mro, __ATOMIC_ACQUIRE);
     if (mro == NULL) {
         return NULL;
@@ -548,6 +539,22 @@ lu_super_attr_native(PyObject *cls, PyObject *obj, PyObject *name)
         v = dict != NULL ? lu_ns_get(dict, name) : NULL;
     }
     Py_DECREF(mro);
+    return v;
+}
+
+PyObject *
+lu_super_attr_native(PyObject *cls, PyObject *obj, PyObject *name)
+{
+    if (!PyType_Check(cls) || !PyUnicode_CheckExact(name)) {
+        return NULL;
+    }
+    /* supercheck's first two answers; the third (a __class__ that differs) is the kernel's. */
+    PyTypeObject *start = PyType_Check(obj) && lu_type_is_subtype((PyTypeObject *)obj, (PyTypeObject *)cls)
+        ? (PyTypeObject *)obj : Py_TYPE(obj);
+    if (!lu_type_is_subtype(start, (PyTypeObject *)cls)) {
+        return NULL;
+    }
+    PyObject *v = lu_super_lookup(start, cls, name);
     if (v == NULL) {
         return NULL;
     }
@@ -2169,8 +2176,8 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
     }
     /* Exception types share one allocation rule: a static exception class
        builds its instances with its base exception's __new__. */
-    int inherited = !is_static_builtin(staticbase) && staticbase->tp_new == owner->tp_new;
-    if (staticbase != owner && !inherited
+    if (staticbase != owner
+        && !(staticbase->tp_new == owner->tp_new && !is_static_builtin(staticbase))     /* inherited */
         && !(PyExceptionClass_Check(staticbase) && PyExceptionClass_Check(owner))) {
         if (staticbase->tp_new == NULL) {
             /* A static type with no tp_new cannot be instantiated
@@ -2625,18 +2632,30 @@ prim_call_with_locals(PyThreadState *ts, PyObject *const *args, Py_ssize_t nargs
 }
 
 /* static_type(name): the static builtin type whose tp_name is name. */
+/* The runtime's static type of that tp_name, or NULL: a constant, which the
+   tier folds static_type('...') to. */
+PyTypeObject *
+lu_static_type(const char *name)
+{
+    for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
+        if (!strcmp((*t)->tp_name, name)) {
+            return *t;
+        }
+    }
+    return NULL;
+}
+
 static PyObject *
 prim_static_type(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1);
     const char *name = PyUnicode_Check(args[0]) ? PyUnicode_AsUTF8(args[0]) : "";
-    for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
-        if (!strcmp((*t)->tp_name, name)) {
-            return Py_NewRef((PyObject *)*t);
-        }
+    PyTypeObject *t = name != NULL ? lu_static_type(name) : NULL;
+    if (t == NULL) {
+        lu_err_format(PyExc_SystemError, "static_type: no type '%s'", name != NULL ? name : "");
+        return NULL;
     }
-    lu_err_format(PyExc_SystemError, "static_type: no type '%s'", name);
-    return NULL;
+    return Py_NewRef((PyObject *)t);
 }
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }

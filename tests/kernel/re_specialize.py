@@ -17,9 +17,16 @@ PATTERNS = [
     ('([0a-z][a-z0-9]*,)+', 0), ('(?:[a-z][a-z0-9]*,)+x', 0), ('(?:ab)*abc', 0), ('(a|b)*c', 0), ('(?:ab)*?c', 0),
     (r'(?:\\.|[^"\\])*"', 0), (r'(\d+)(?:\.(\d+))?', 0), ('(a(b)?)+', 0), ('(?:(a)|b){2,3}', 0), ('(?:a|b){0,2}?c', 0),
     (r'(<(.+?)(\s.*?)?>)', 0), ('(?:x*)*y', 0), ('(?:a?)*?b', 0),
+    # repeats whose iterations backtrack: greedy, lazy, counted, nested, empty iterations, in lookarounds
+    ('(?:a|ab)*c', 0), ('(<(.|\\s)+>)', 0), (r'((?:(?!_)\w)+(?:[-._+:](?:(?!_)\w)+)*)::', 0), ('(?:a|ab)*?c', 0),
+    ('(?:(a)|ab){2,}?c', 0), ('(?:a|ab){1,3}c', 0), ('(?:(a)|b(a)?){2}', 0), ('(?:(?:a|ab)+b)*c', 0),
+    ('((?:a|ab)*(c|d))*e', 0), ('(x)((?:a|ab)*)(c)', 0), ('(?:a|)*b', 0), ('(?:|a)*?b', 0), ('(?=(?:a|ab)*c)a', 0),
+    ('(?:(b)|a(?:b|))*?c', 0), ('(?:(a|ab)(c|bcd))*(d*)', 0),
     # atomic groups, possessive groups, lookarounds
     ('(?>a|ab)c', 0), ('(?>a+)b', 0), ('(?:ab|a)*+c', 0), ('(?:a|b)++', 0), ('(?=ab)a', 0), ('(?!ab)a.', 0),
     ('(?<=a)b', 0), ('(?<!a)b', 0), ('(?=(a+))a*b\\1', 0), ('a(?!b|c)', 0), ('(?<=(a))(b)', 0),
+    # searches whose first character is known past zero-width starts, and ones that may match empty
+    (r'(^|(?<=\s))\*\w+\*', 0), ('(?<=x)(?:Ab|c)', re.I), (r'(?<!\w)(?:ab|c)+$', 0), (r'\s*(?:(ab|c)\s+)?(.*)\Z', 0),
     # backreferences, conditionals
     (r'(a+)\1', 0), (r'(?i)(a+)\1', 0), (r'(\w)\1', 0), ('(a)?(?(1)b|c)', 0), ('(a)?(?(1)b+|c)d', 0),
     (r'(?P<q>["\'])(.*?)(?P=q)', 0),
@@ -28,11 +35,15 @@ PATTERNS = [
     # case-insensitive and Unicode
     ('hello', re.I), ('[a-z]+', re.I), ('stra\xdfe', re.I), ('k', re.I), (r'\w+', 0), (r'\w+', re.A), ('[Ѐ-ӿ]+', 0),
     (r'\d+', 0), (r'\s+', 0), ('.', re.S),
+    # sets of several items, below and above 255
+    ('[^\\x00-\\x08\\u0100-\\u017f\\U0001f600]+', 0), ('[a-cx-z\\xdf\\u0400-\\u04ff]+', re.I),
+    (r'[\s\d\u2000-\u200a_]+', 0), ('[\\x01-\\x08\\x0b\\x0e-\\x1f\\x7f-\\x9f\\ufdd0-\\ufdef\\U0001fffe]', 0),
 ]
 SUBJECTS = ['', 'a', 'ab', 'abc', 'aab', 'abab', 'ababc', 'aaab', 'Python Perl', 'xx Tcl yy', 'abcd',
             'a b  c', 'ab1,cd,x', '"a\\"b"', 'xyz xaz', '12-3 45', 'hello World', 'Hello\nab\n',
             'STRASSE stra\xdfe', 'K k K', 'жук ab', '<a href> <b>', '1.25', 'aa aa', "'q' \"r\"", 'b',
-            'cd ef', 'abbc', 'xxxy', 'x', ' \n']
+            'cd ef', 'abbc', 'xxxy', 'x', ' \n', 'aabababc', 'xababce', 'ab_c-d::', '<a\nb>c>', 'abacbcdd',
+            '\x01ab\u2003c\U0001f600\u015d\x85 ЖЖ\ufdd5', '*a* x*b_c* xAB xc']
 
 
 def results(p, s):
@@ -64,6 +75,11 @@ for src in ('[Ѐ-ӿ]\\W', '(?:ж.)*', '\U0001f600a', '.a$'):
     print(repr(src), [(len(p.findall(wide)), p.search(wide).span()) for _ in range(60)][-1])
 p = re.compile('(?:ab)*c')
 print([p.match('ab' * n + 'c').span() for n in (0, 1, 500)], re.match('a*?b', 'a' * 3000 + 'b').span())
+# iterations that backtrack, more of them than the stack holds frames
+p = re.compile('(?:a|ab)*c')
+print([[p.match('ab' * n + 'c').span(), p.search('x' + 'ab' * n + 'c').span()] for n in (0, 1, 500, 20000)])
+p = re.compile('(?:a|ab)*?c')
+print([p.match('ab' * n + 'c').span() for n in (0, 1, 500, 20000) for _ in range(3)])
 
 # Every pattern above compiled at its first use and checked against the interpreter on each call.
 CHILD = '''
