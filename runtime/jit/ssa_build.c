@@ -193,6 +193,8 @@ static int step(struct ctx *c, int pc, struct lu_block *entry);
 static int call_dispatch(struct ctx *c, int n);
 static int call(struct ctx *c);
 static int opaque_call(struct ctx *c);
+static lu_v inline_or_default(struct ctx *c, lu_v owner, int64_t offset, PyObject *dflt);
+static lu_v getter_call(struct ctx *c, PyObject *fget, lu_v owner);
 
 /* A site's operand kinds (runtime/jit/jit.h), counted: none means the
    interpreter has never run it. Attribute sites count in cached_site. */
@@ -3086,7 +3088,12 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
         c->cur = arm;
         lu_v a1, a2 = LU_NOV;
         int own1 = 1, own2 = 0;
-        if (e.op == LOAD_ATTR_INSTANCE_VALUE) {
+        if (e.op == LOAD_ATTR_INSTANCE_VALUE && e.descr != NULL) {
+            /* The class's plain value answers an instance that has none. */
+            a1 = inline_or_default(c, owner, e.index, e.descr);
+            release(c, owner, own);
+        }
+        else if (e.op == LOAD_ATTR_INSTANCE_VALUE) {
             /* An instance of the class that lacks the attribute (its class
                attribute answers until it sets its own) takes the generic
                path. */
@@ -3127,6 +3134,12 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                 }
                 mark_free(&m);
             }
+            if (!inlined && c->parent == NULL && !c->failed && PyFunction_Check(fget)) {
+                /* The root calls a getter that does not inline. */
+                a1 = getter_call(c, fget, owner);
+                release(c, owner, own);
+                inlined = -1;
+            }
             if (!inlined) {
                 if (c->failed) {
                     return -1;
@@ -3136,11 +3149,13 @@ load_attr_poly(struct ctx *c, struct lu_pic *pic, int n)
                 c->cur = next;
                 continue;
             }
-            if (c->cur < 0) {
+            if (inlined > 0 && c->cur < 0) {
                 c->cur = next;  /* every way through the getter raised */
                 continue;
             }
-            a1 = rown ? r : (incref(c, r), r);
+            if (inlined > 0) {
+                a1 = rown ? r : (incref(c, r), r);
+            }
         }
         else {
             if (e.op == LOAD_ATTR_METHOD_WITH_VALUES || e.op == LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES) {
@@ -3298,6 +3313,54 @@ load_attr(struct ctx *c)
     return r;
 }
 
+/* A property's getter, a function, called with owner as a CALL calls it
+   (the frame pushed for an inlined caller): a new reference. */
+static lu_v
+getter_call(struct ctx *c, PyObject *fget, lu_v owner)
+{
+    lu_v hargs[3] = { konst(c, fget), konst(c, NULL), owner };
+    lu_v r = helper_raising(c, H_call, 3, hargs, 1);
+    guard_after(c, OP_GUARD_NOT_NULL, r, 1);    /* declined: the C stack is too deep */
+    return r;
+}
+
+/* LOAD_ATTR_INSTANCE_VALUE of a name the class also has as a plain value
+   (dflt, which the class's version keeps): the instance's own value, or
+   dflt while the instance keeps its values in line and has none. A new
+   reference. */
+static lu_v
+inline_or_default(struct ctx *c, lu_v owner, int64_t offset, PyObject *dflt)
+{
+    struct lu_func *f = c->f;
+    lu_v word = emit(c, OP_LOAD, REP_I64, owner, LU_NOV, LU_NOV, offset);
+    lu_v set = emit(c, OP_CMP_I, REP_BIT, word, const_i(c, 0), LU_NOV, Py_NE);
+    int hit = lu_ir_block(f), absent = lu_ir_block(f), join = lu_ir_block(f);
+    lu_ir_edge(f, c->cur, hit);
+    lu_ir_edge(f, c->cur, absent);
+    emit(c, OP_BRANCH, REP_NONE, set, LU_NOV, LU_NOV, 0);
+    c->cur = absent;
+    lu_v flags = emit(c, OP_LOAD, REP_I64, owner, LU_NOV, LU_NOV, offsetof(PyObject, ob_flags));
+    I(c, flags)->imm2 = 4;
+    lu_v in_dict = emit(c, OP_AND_I, REP_I64, flags, const_i(c, LU_ATTRS_IN_DICT), LU_NOV, 0);
+    guard(c, OP_GUARD_BIT, emit(c, OP_CMP_I, REP_BIT, in_dict, const_i(c, 0), LU_NOV, Py_EQ), 1);
+    lu_v d = konst(c, dflt);
+    incref(c, d);
+    emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+    lu_ir_edge(f, c->cur, join);
+    c->cur = hit;
+    lu_v v = emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, offset);
+    I(c, v)->fs = before(c);
+    emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+    lu_ir_edge(f, c->cur, join);
+    c->cur = join;
+    lu_v phi = lu_ir_emit(f, join, OP_PHI, REP_OBJ, LU_NOV, LU_NOV, LU_NOV, -1);
+    I(c, phi)->nargs = 2;
+    I(c, phi)->args = malloc(sizeof(lu_v) * 2);
+    I(c, phi)->args[0] = d;
+    I(c, phi)->args[1] = v;
+    return phi;
+}
+
 static int
 load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr)
 {
@@ -3364,10 +3427,22 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
         }
         mark_free(&m);
         if (!ok) {
-            if (c->failed) {
+            if (c->failed || !opaque_call(c)) {
                 return -1;
             }
-            break;
+            /* A getter that does not inline is called, without the
+               attribute lookup and the property's __get__. */
+            guard_version(c, owner, version);
+            if (Py_IS_TYPE(descr, &PyProperty_Type)) {
+                lu_v held = emit(c, OP_LOAD, REP_OBJ, konst(c, descr), LU_NOV, LU_NOV,
+                                 lu_field_offset(&PyProperty_Type, 0));
+                guard(c, OP_GUARD_IS, held, (int64_t)(intptr_t)fget);
+            }
+            r = getter_call(c, fget, owner);
+            pop(c, NULL);
+            release(c, owner, own);
+            push(c, r, 1);
+            return 0;
         }
         if (c->cur >= 0) {
             push(c, r, rown);
@@ -3391,7 +3466,10 @@ load_attr_cached(struct ctx *c, int op, uint32_t version, uint16_t index, PyObje
     case LOAD_ATTR_INSTANCE_VALUE: {
         guard_version(c, owner, version);
         lu_v v;
-        if (op == LOAD_ATTR_INSTANCE_VALUE) {
+        if (op == LOAD_ATTR_INSTANCE_VALUE && descr != NULL) {
+            v = inline_or_default(c, owner, index, descr);
+        }
+        else if (op == LOAD_ATTR_INSTANCE_VALUE) {
             v = emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, index);
             I(c, v)->fs = before(c);
         }
