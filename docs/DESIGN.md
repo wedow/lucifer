@@ -274,7 +274,8 @@ C extension ─▶ C-API function ─▶ thunk ───────┤      └
   them as intrinsics. Families follow research 03 §5: object/layout (allocate a
   layout, read/write a field, incref/decref, type and identity); scalars (compact-int
   fast arithmetic with overflow flag, digit-vector kernels, IEEE ops, `dtoa`
-  shortest repr and correctly rounded parse, from `Python/dtoa.c`); storage (ref
+  shortest repr from `Python/dtoa.c`, correctly rounded parse from a C port of
+  fast_float); storage (ref
   arrays, 1/2/4-byte char storage, copy/fill/compare/find with refcount-correct
   bulk moves); namespace dict (lookup/insert/delete for exact-str keys, used by
   `LOAD_GLOBAL`, `LOAD_ATTR` on modules/types and `_PyType_Lookup`); sync (`PyMutex`,

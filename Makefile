@@ -202,7 +202,14 @@ $(DYNLOAD)/%$(EXT_SUFFIX): $(shell find $(CPY_MODULES) third_party/cpython/Inclu
 abi-audit: bin/lucifer
 	python3 tools/abi/audit.py $(EXPORTS) bin/lucifer
 
-check: check-blocking check-globals check-capi check-kernel check-kernel-jit check-embed
+check: check-fast-float check-blocking check-globals check-capi check-kernel check-kernel-jit check-embed
+
+build/tests/fast_float: tests/fast_float.c runtime/prim/fast_float.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -std=gnu11 -o $@ $^ -lm
+
+check-fast-float: build/tests/fast_float
+	$<
 
 # Blocking calls only in runtime/prim/os.c, inside the syscall bracket.
 check-blocking: $(MAIN) $(LIB_OBJS)
