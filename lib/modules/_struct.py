@@ -29,7 +29,9 @@ _MODES = {'@': (True, 'little'), '=': (False, 'little'), '<': (False, 'little'),
 
 
 def _compile(fmt):
-    """(items, size, little): items are (code, count, offset, size)."""
+    """(items, size, nvalues, little, native): items are (code, count, offset, size) runs of
+    `count` items of `size` bytes, or for 's' and 'p' one string of `count` bytes. A
+    repeat count is never expanded, so a huge one costs nothing until data meets it."""
     if isinstance(fmt, bytes):
         fmt = fmt.decode('ascii')
     elif not isinstance(fmt, str):
@@ -40,10 +42,8 @@ def _compile(fmt):
     if fmt[:1] in _MODES:
         native, order = _MODES[fmt[0]]
         i = 1
-    elif fmt[:1] == '':
-        native = True
     items = []
-    offset = 0
+    offset = nvalues = 0
     count = None
     while i < len(fmt):
         c = fmt[i]
@@ -52,7 +52,7 @@ def _compile(fmt):
             continue
         if '0' <= c <= '9':
             count = (count or 0) * 10 + ord(c) - 48
-            if count > (1 << 62):
+            if count > _SSIZE_MAX:
                 raise error('total struct size too long')
             continue
         entry = _CODES.get(c)
@@ -62,24 +62,35 @@ def _compile(fmt):
         n = 1 if count is None else count
         if native and c not in 'xspc?' and offset % size:
             offset += size - offset % size
-        elif native and c in 'bB?' or c in 'xcsp':
-            pass
         if c in 'sp':
             items.append((c, n, offset, n))
             offset += n
+            nvalues += 1
         elif c == 'x':
             offset += n
-        else:
-            for _ in range(n):
-                items.append((c, 1, offset, size))
-                offset += size
+        elif n:
+            items.append((c, n, offset, size))
+            offset += n * size
+            nvalues += n
+        if offset > _SSIZE_MAX:
+            raise error('total struct size too long')
         count = None
     if count is not None:
         raise error('repeat count given without format specifier')
-    return tuple(items), offset, order == 'little', native
+    return tuple(items), offset, nvalues, order == 'little', native
 
 
-_LIMITS = {}
+def _each(items):
+    """The runs one value at a time, as (code, count, offset, size)."""
+    for code, count, offset, size in items:
+        if code in 'sp':
+            yield code, count, offset, size
+        else:
+            for k in range(count):
+                yield code, 1, offset + k * size, size
+
+
+_SSIZE_MAX = (1 << 63) - 1
 
 
 def _int(value, code, size, signed):
@@ -152,10 +163,11 @@ class Struct:
 Return a new Struct object which writes and reads binary data according to
 the format string."""
 
-    __slots__ = ('_items', '_size', '_little', '_format', '__weakref__')
+    __slots__ = ('_items', '_flat', '_size', '_nvalues', '_little', '_format', '__weakref__')
 
     def __init__(self, format):
-        self._items, self._size, self._little, _ = _compile(format)
+        self._items, self._size, self._nvalues, self._little, _ = _compile(format)
+        self._flat = None
         self._format = format if isinstance(format, str) else format.decode('ascii')
 
     @property
@@ -169,11 +181,13 @@ the format string."""
         return self._size
 
     def _pack(self, args):
-        values = [item for item in self._items if item[0] != 'x']
-        if len(args) != len(values):
-            raise error('pack expected %d items for packing (got %d)' % (len(values), len(args)))
+        if len(args) != self._nvalues:
+            raise error('pack expected %d items for packing (got %d)' % (self._nvalues, len(args)))
         out = bytearray(self._size)
-        for (code, count, offset, size), value in zip(values, args):
+        flat = self._flat
+        if flat is None:
+            flat = self._expand()
+        for (code, count, offset, size), value in zip(flat, args):
             data = _pack_item(code, count, size, value, self._little)
             out[offset:offset + len(data)] = data
         return bytes(out)
@@ -204,9 +218,19 @@ the format string."""
                         '(actual buffer size is %d)' % (self._size + offset, self._size, offset, length))
         view[offset:offset + self._size] = self._pack(args)
 
+    def _expand(self):
+        """The runs one value at a time, made at the first pack or unpack:
+        the size and count checks before it admit a huge repeat count only
+        with that many values at hand."""
+        self._flat = tuple(_each(self._items))
+        return self._flat
+
     def _unpack(self, data):
+        flat = self._flat
+        if flat is None:
+            flat = self._expand()
         return tuple(_unpack_item(code, count, size, data[offset:offset + size], self._little)
-                     for code, count, offset, size in self._items if code != 'x')
+                     for code, count, offset, size in flat)
 
     def unpack(self, buffer, /):
         """Return a tuple containing unpacked values.

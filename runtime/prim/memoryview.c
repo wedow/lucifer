@@ -645,7 +645,13 @@ list_rec(const char *buf, const Py_buffer *v, int dim, char c)
     for (Py_ssize_t i = 0; list != NULL && i < n; i++) {
         const char *p = buf + i * v->strides[dim];
         if (v->suboffsets && v->suboffsets[dim] >= 0) {
-            p = *(const char *const *)p + v->suboffsets[dim];
+            p = *(const char *const *)p;
+            if (p == NULL) {
+                PyErr_SetString(PyExc_ValueError, "memoryview: NULL item pointer");
+                Py_CLEAR(list);
+                break;
+            }
+            p += v->suboffsets[dim];
         }
         PyObject *x = dim == v->ndim - 1 ? unpack_item(p, c) : list_rec(p, v, dim + 1, c);
         if (x == NULL || lu_list_append(list, x) < 0) {
@@ -675,7 +681,21 @@ prim_mv_tolist(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return list_rec(mv->view.buf, &mv->view, 0, c);
 }
 
-/* mv_item(mv, i): the 1-D item at the normalized index. */
+/* The address of the 1-D item i, through the pointer table of a view with
+   suboffsets; NULL when the table holds NULL there. */
+static char *
+item_ptr(const Py_buffer *v, Py_ssize_t i)
+{
+    char *p = (char *)v->buf + i * v->strides[0];
+    if (v->suboffsets && v->suboffsets[0] >= 0) {
+        p = *(char **)p;
+        return p != NULL ? p + v->suboffsets[0] : NULL;
+    }
+    return p;
+}
+
+/* mv_item(mv, i): the 1-D item at the normalized index, or MISSING when its
+   pointer is NULL (memoryiter_next's end; CPython's indexing would crash). */
 static PyObject *
 prim_mv_item(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -696,11 +716,8 @@ prim_mv_item(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_NotImplementedError, "memoryview: format %s not supported", v->format);
         return NULL;
     }
-    const char *p = (const char *)v->buf + i * v->strides[0];
-    if (v->suboffsets && v->suboffsets[0] >= 0) {
-        p = *(const char *const *)p + v->suboffsets[0];
-    }
-    return unpack_item(p, c);
+    const char *p = item_ptr(v, i);
+    return p != NULL ? unpack_item(p, c) : Py_NewRef(LU_MISSING);
 }
 
 /* mv_set_item(mv, i, value) */
@@ -728,9 +745,10 @@ prim_mv_set_item(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_NotImplementedError, "memoryview: format %s not supported", v->format);
         return NULL;
     }
-    char *p = (char *)v->buf + i * v->strides[0];
-    if (v->suboffsets && v->suboffsets[0] >= 0) {
-        p = *(char **)p + v->suboffsets[0];
+    char *p = item_ptr(v, i);
+    if (p == NULL) {
+        PyErr_SetString(PyExc_ValueError, "memoryview: NULL item pointer");
+        return NULL;
     }
     if (pack_item(mv, p, c, args[2], v->format) < 0) {
         return NULL;

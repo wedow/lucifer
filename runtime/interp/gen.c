@@ -548,13 +548,6 @@ prim_gen_throw(PyThreadState *ts, PyObject *const *args, Py_ssize_t nargs)
         PyErr_SetRaisedException(Py_NewRef(exc));
         return NULL;
     }
-    if (check_resumable(gen, NULL) != 0) {
-        return NULL;
-    }
-    if (ts->py_recursion_remaining <= depth) {
-        lu_err_format(PyExc_RecursionError, "maximum recursion depth exceeded");
-        return NULL;
-    }
     struct lu_gen *g = gen;
     for (long i = 0; i < depth; i++) {
         PyObject *yf = yield_from(g);
@@ -562,9 +555,17 @@ prim_gen_throw(PyThreadState *ts, PyObject *const *args, Py_ssize_t nargs)
             lu_err_format(PyExc_SystemError, "gen_throw: no generator %ld steps down", i + 1);
             return NULL;
         }
+        if (finished((struct lu_gen *)yf) && !Py_IS_TYPE(yf, &PyCoro_Type)) {
+            depth = i;      /* a finished generator raises exc back to its delegator */
+            break;
+        }
         g = (struct lu_gen *)yf;
     }
-    if (g != gen && check_resumable(g, NULL) != 0) {
+    if (check_resumable(g, NULL) != 0) {
+        return NULL;
+    }
+    if (ts->py_recursion_remaining <= depth) {
+        lu_err_format(PyExc_RecursionError, "maximum recursion depth exceeded");
         return NULL;
     }
     struct lu_frame *previous = (struct lu_frame *)ts->current_frame;

@@ -211,9 +211,7 @@ __call__() method."""
 
 def chr(i, /):
     """Return a Unicode string of one character with ordinal i; 0 <= i <= 0x10ffff."""
-    n = index(i)
-    if n > 2147483647 or n < -2147483648:
-        error(OverflowError, 'Python int too large to convert to C int')
+    n = i if type(i) is int else index(i)
     if n < 0 or n > 0x10FFFF:
         error(ValueError, 'chr() arg not in range(0x110000)')
     return str_chr(n)

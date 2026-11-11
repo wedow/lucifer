@@ -1,6 +1,6 @@
 ---
 id: luc-0cfv
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T03:34:56Z

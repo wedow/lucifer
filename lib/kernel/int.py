@@ -406,7 +406,7 @@ Also known as the population count.
     Determines whether two's complement is used to represent the integer.
     If signed is False and a negative integer is given, an OverflowError
     is raised."""
-        length = index(length)
+        length = operators.ssize_arg(length)
         little = _byteorder(byteorder, 'to_bytes')
         if length < 0:
             error(ValueError, 'length argument must be non-negative')
