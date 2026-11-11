@@ -110,7 +110,10 @@ C under `runtime/` adapted from this tag's sources, under the PSF License
 - `runtime/prim/pystrtod.c` from `Python/pystrtod.c` (`_Py_parse_inf_or_nan`,
   `PyOS_string_to_double`, `PyOS_double_to_string` over `format_float_short`):
   the `_PY_SHORT_FLOAT_REPR == 1` paths only; errors are raised with
-  `lu_err_format` instead of `PyErr_Format`; no x87 precision control.
+  `lu_err_format` instead of `PyErr_Format`; no x87 precision control;
+  `_PyOS_ascii_strtod` parses with the fast_float port
+  (`runtime/prim/fast_float.c`, see `third_party/fast_float`) instead of
+  `_Py_dg_strtod`, which never fails for memory, so the `ENOMEM` path is gone.
 - `runtime/prim/float.c` from `Objects/floatobject.c` (arithmetic, `float_pow`,
   `float_richcompare` with ints, `double_round`, `hex`/`fromhex`,
   `as_integer_ratio`, `float_from_string_inner`) and

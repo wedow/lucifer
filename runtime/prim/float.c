@@ -3,7 +3,8 @@
    take a float or an int on either side and answer NotImplemented for any
    other operand, so reflection and the error messages live in
    lib/kernel/float.py and operators.py. Repr and formatting are
-   PyOS_double_to_string over dtoa.c; parsing is _Py_dg_strtod. */
+   PyOS_double_to_string over dtoa.c; parsing is PyOS_string_to_double over
+   fast_float.c. */
 
 #include "prim/prim.h"
 #include "prim/bytes.h"
