@@ -96,15 +96,33 @@ lu_caches_at(PyCodeObject *code, lu_codeunit *at)
         ? lu_instrumented_caches(code, at) : lu_opcode_caches[op];
 }
 
-/* The instruction that ends just before `after`, caches skipped. */
+/* The code's instruction starts: one bit per code unit, set at each
+   instruction's first unit, in the 8-aligned words after the bytecode. The
+   layout never changes, so lu_code_new writes the map once, before the code
+   is shared, and readers need no synchronization (runtime/interp/code.c). */
+static inline uint64_t *
+lu_code_starts(PyCodeObject *code)
+{
+    return (uint64_t *)(((uintptr_t)(lu_code_start(code) + Py_SIZE(code)) + 7) & ~(uintptr_t)7);
+}
+
+/* The instruction that ends just before `after`, caches skipped: the last
+   start below it. Unit 0 is a start, so the backward word walk ends. */
 static inline lu_codeunit *
 lu_instr_before(PyCodeObject *code, lu_codeunit *after)
 {
-    lu_codeunit *at = lu_code_start(code);
-    while (at + 1 + lu_caches_at(code, at) < after) {
-        at += 1 + lu_caches_at(code, at);
+    lu_codeunit *start = lu_code_start(code);
+    if (after <= start) {
+        return start;
     }
-    return at;
+    size_t i = (size_t)(after - 1 - start);
+    const uint64_t *starts = lu_code_starts(code);
+    const uint64_t *w = starts + i / 64;
+    uint64_t bits = *w & (~(uint64_t)0 >> (63 - i % 64));
+    while (bits == 0) {
+        bits = *--w;
+    }
+    return start + (w - starts) * 64 + 63 - __builtin_clzll(bits);
 }
 
 /* A frame compiled code runs: the instr of the state it published at its
