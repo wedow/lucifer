@@ -3,7 +3,8 @@ import json
 import re
 
 # Errors from names the 3.15 generators use that 3.14 lacks: such a case cannot run on the oracle.
-FUTURE = re.compile(r"name 'frozendict' is not defined|has no attribute 'get_theme'")
+FUTURE = re.compile(r"name 'frozendict' is not defined|has no attribute 'get_theme'"
+                    r"|unexpected keyword argument 'array_hook'")
 # Results the runner records for a process that died or ran out of time on a case, and the
 # worker's record of an exception that escaped the generator's own handling.
 FAILED = ('crash', 'timeout', 'worker_error')

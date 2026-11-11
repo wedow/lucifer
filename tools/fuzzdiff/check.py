@@ -1,5 +1,5 @@
 """Offline checks for the differential fuzzer: comparison rules, and a run of a fake generator on a
-target that differs, crashes and hangs on known cases."""
+target that generates, computes, crashes and hangs differently on known cases."""
 import io
 import json
 from pathlib import Path
@@ -14,12 +14,13 @@ GENERATOR = '''import os, time
 import common
 
 def gen_case(rng):
-    rng.random()
+    if os.environ.get("FAKE_TARGET") and len(CASES) == 7:
+        rng.random()  # the target generates case 7 differently; later cases must stay aligned
     DRAWS.append(0)
     if len(DRAWS) % 4 == 0:
         return None
     CASES.append(0)
-    return {"n": len(CASES) - 1, "fn": "f"}
+    return {"n": len(CASES) - 1, "fn": "f", "r": rng.randrange(1000)}
 
 DRAWS, CASES = [], []
 
@@ -76,10 +77,11 @@ class Run(unittest.TestCase):
             log = io.StringIO()
             counts = fuzz('fake_diff', 0, 30, 8, oracle, target, difftest / 'scratch', log)
         self.assertEqual({key: counts[key] for key in ('cases', 'match', 'mismatch', 'skip', 'error')},
-                         {'cases': 30, 'match': 21, 'mismatch': 5, 'skip': 3, 'error': 1})
+                         {'cases': 30, 'match': 20, 'mismatch': 6, 'skip': 3, 'error': 1})
         self.assertEqual(counts['dropped'], {'none': 9, 'future': 0, 'error': 0})
         records = {record['index']: record for record in map(json.loads, log.getvalue().splitlines())}
-        self.assertEqual(sorted(records), [3, 5, 13, 16, 17, 23, 25, 27, 29])
+        self.assertEqual(sorted(records), [3, 5, 7, 13, 16, 17, 23, 25, 27, 29])
+        self.assertNotEqual(records[7]['target_case']['r'], records[7]['case']['r'])
         self.assertEqual(records[13]['oracle']['ok'], 13)
         self.assertEqual(records[13]['target']['ok'], 14)
         self.assertEqual(records[17]['target']['crash'], 'exit -6')

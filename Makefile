@@ -335,6 +335,7 @@ check-jit: bin/lucifer build/lib/stamp $(STDLIB_EXT_FILES)
 # Lucifer gets the oracle's test and accelerator modules, which some generators import.
 FUZZDIFF ?= --seed 1 --seed 2
 fuzzdiff: bin/lucifer build/lib/stamp oracle-exts $(EXT_DIR)/accelerators
+	ln -sf $$($(ORACLE_T) -c 'import _testbuffer; print(_testbuffer.__file__)') $(EXT_DIR)/
 	PYTHONPATH=$(abspath $(EXT_DIR)) python3 tools/fuzzdiff/run.py --oracle $(ORACLE_T) $(FUZZDIFF)
 
 # Wall-clock bounds: an uncaught exception, a 100,000-line function.

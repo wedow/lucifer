@@ -21,10 +21,25 @@ class Captured(Exception):
     pass
 
 
-def load(difftest, spec):
-    # 3.15's math.integer holds math's integer functions, which 3.14 has in math alone.
+def adapt():
+    """Let the generators' cases run on any 3.14 runtime."""
     import math
-    math.integer = math
+    math.integer = math  # 3.15's math.integer holds math's integer functions, which 3.14 has in math
+    try:
+        from test.support import import_helper
+    except ImportError:  # an interpreter without the test package
+        return
+    fresh_import = import_helper.import_fresh_module
+
+    def import_fresh_module(name, fresh=(), blocked=(), **options):
+        """Lucifer implements some accelerated modules in Python alone: their "C twin" is the module."""
+        module = fresh_import(name, fresh, blocked, **options)
+        return module if module or not fresh else fresh_import(name, (), blocked, **options)
+    import_helper.import_fresh_module = import_fresh_module
+
+
+def load(difftest, spec):
+    adapt()
     sys.path.insert(0, difftest)
     import common
     if ':' in spec:
@@ -49,21 +64,23 @@ def load(difftest, spec):
 
 
 def generate(gen, seed, count):
-    """`count` cases, and how many draws were dropped: None, 3.15-only, or a generator exception."""
-    rng = random.Random(seed)
+    """`count` cases, and how many draws were dropped: None, 3.15-only, or a generator exception.
+    Each case draws from its own generator, so a case the target generates differently (some
+    generators run the code under test while generating) leaves the cases after it aligned."""
     cases, dropped = [], {'none': 0, 'future': 0, 'error': 0}
-    while len(cases) < count:
-        try:
-            case = gen(rng)
-        except Exception as error:
-            dropped['future' if FUTURE.search(str(error)) else 'error'] += 1
-            if dropped['error'] > count:
-                raise
-            continue
-        if case is None:
-            dropped['none'] += 1
-        else:
-            cases.append(case)
+    for index in range(count):
+        rng = random.Random(f'{seed}/{index}')
+        case = None
+        while case is None:
+            try:
+                case = gen(rng)
+            except Exception as error:
+                dropped['future' if FUTURE.search(str(error)) else 'error'] += 1
+                if dropped['error'] > count:
+                    raise
+                continue
+            dropped['none'] += case is None
+        cases.append(case)
     return cases, dropped
 
 

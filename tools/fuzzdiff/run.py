@@ -16,6 +16,7 @@ from pathlib import Path
 import resource
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -96,17 +97,21 @@ class Interpreter:
                         CPYTHON_SRC=str(cpython))
 
     def limit(self):
+        os.setsid()  # a group of its own, so a timeout also ends the children cases fork
         resource.setrlimit(resource.RLIMIT_AS, (self.memory, self.memory))
 
     def worker(self, *args):
         """Run the worker; returns its exit status ('timeout' for one killed for time) and stderr tail."""
-        try:
-            proc = subprocess.run(self.command + [str(WORKER), str(self.difftest), *map(str, args)],
-                                  env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.PIPE, timeout=self.timeout, preexec_fn=self.limit)
-        except subprocess.TimeoutExpired:
-            return 'timeout', ''
-        return proc.returncode, proc.stderr.decode(errors='replace')[-2000:]
+        with subprocess.Popen(self.command + [str(WORKER), str(self.difftest), *map(str, args)], env=self.env,
+                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                              preexec_fn=self.limit) as proc:
+            try:
+                err = proc.communicate(timeout=self.timeout)[1]
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.communicate()
+                return 'timeout', ''
+        return proc.returncode, err.decode(errors='replace')[-2000:]
 
     def run(self, spec, seed, start, stop, out):
         """The dropped-draw tally and a [case, result] pair for each case in [start, stop). A case
@@ -147,8 +152,11 @@ def fuzz(name, seed, count, batch, oracle, target, scratch, log):
         for index, (status, w, g) in enumerate(zip(statuses, want, got), start):
             counts[status] += 1
             if status != 'match':
-                log.write(json.dumps({'status': status, 'seed': seed, 'index': index, 'case': w[0],
-                                      'oracle': w[1], 'target': g[1]}) + '\n')
+                record = {'status': status, 'seed': seed, 'index': index, 'case': w[0], 'oracle': w[1],
+                          'target': g[1]}
+                if g[0] not in (None, w[0]):
+                    record['target_case'] = g[0]  # the target generated another case
+                log.write(json.dumps(record) + '\n')
     scratch.unlink(missing_ok=True)
     counts['dropped'] = dropped
     return counts
