@@ -31,7 +31,7 @@ live_entry(PyObject *d, Py_ssize_t ix)
     return ix >= 0 && ix < dk->dk_nentries && lu_dk_value(dk, ix) != NULL;
 }
 
-enum { READ_KEY, READ_VALUE, READ_HASH };
+enum { READ_KEY, READ_VALUE, READ_ENTRY };
 
 static PyObject *
 int_of(Py_ssize_t n)
@@ -45,10 +45,12 @@ bool_of(int v)
     return Py_NewRef(v ? Py_True : Py_False);
 }
 
-/* The key, value or hash of live entry ix, else MISSING. Lock-free it takes
-   a reference to the key or value only if that is alive and the entry is
-   still in the dict's table (lu_try_xget_ref); when it cannot, it reads
-   under the dict's critical section. */
+/* The key or value of live entry ix, or the (key, value, hash) of it, else
+   MISSING. Lock-free it takes a reference to the key or value only if that
+   is alive and the entry is still in the dict's table (lu_try_xget_ref);
+   when it cannot, it reads under the dict's critical section. Within one
+   table an entry's key and hash never change, so the three come from the
+   same entry. */
 static PyObject *
 read_entry(PyObject *d, Py_ssize_t ix, int what)
 {
@@ -58,30 +60,28 @@ read_entry(PyObject *d, Py_ssize_t ix, int what)
     if (ix >= 0 && ix < dk->dk_nentries) {
         PyObject *ref = lu_try_xget_ref(what == READ_VALUE ? lu_dk_value_slot(dk, ix)
                                                            : lu_dk_key_slot(dk, ix));
+        PyObject *value = what == READ_ENTRY && ref != NULL ? lu_try_xget_ref(lu_dk_value_slot(dk, ix)) : NULL;
         if (ref != NULL && dk == __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE)
-            && lu_dk_value(dk, ix) != NULL) {
-            if (what == READ_HASH) {
-                result = int_of(lu_dk_hash_of(dk, ix, ref));
-                Py_DECREF(ref);
-            }
-            else {
-                result = ref;
-            }
+            && lu_dk_value(dk, ix) != NULL && (what != READ_ENTRY || value != NULL)) {
+            result = what == READ_ENTRY ? Py_BuildValue("(NNn)", ref, value, lu_dk_hash_of(dk, ix, ref)) : ref;
         }
         else {
             Py_XDECREF(ref);
+            Py_XDECREF(value);
         }
     }
-    if (result == NULL) {
+    if (result == NULL && !PyErr_Occurred()) {
         Py_BEGIN_CRITICAL_SECTION(d);
         dk = mp->ma_keys;
         if (ix >= 0 && ix < dk->dk_nentries && lu_dk_value(dk, ix) != NULL) {
-            result = what == READ_HASH ? int_of(lu_dk_hash(dk, ix))
-                   : lu_new_ref_with_lock(what == READ_VALUE ? lu_dk_value(dk, ix) : lu_dk_key(dk, ix));
+            result = what == READ_ENTRY
+                ? Py_BuildValue("(NNn)", lu_new_ref_with_lock(lu_dk_key(dk, ix)),
+                                lu_new_ref_with_lock(lu_dk_value(dk, ix)), lu_dk_hash(dk, ix))
+                : lu_new_ref_with_lock(what == READ_VALUE ? lu_dk_value(dk, ix) : lu_dk_key(dk, ix));
         }
         Py_END_CRITICAL_SECTION();
     }
-    return result != NULL ? result : Py_NewRef(LU_MISSING);
+    return result != NULL ? result : PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
 }
 
 /* dict_new(cls): an empty dict of the class cls, a subclass of dict. */
@@ -127,8 +127,8 @@ prim_dict_put(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return done == -2 ? NULL : Py_NewRef(done == 1 ? Py_True : Py_NotImplemented);
 }
 
-/* dict_key(d, ix), dict_value(d, ix), dict_hash(d, ix): the live entry's key,
-   value or hash, else MISSING. */
+/* dict_key(d, ix), dict_value(d, ix): the live entry's key or value;
+   dict_entry(d, ix): its (key, value, hash); else MISSING. */
 static PyObject *
 prim_dict_key(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -144,10 +144,10 @@ prim_dict_value(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 static PyObject *
-prim_dict_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+prim_dict_entry(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); DICT(0); SSIZE(1, ix);
-    return read_entry(args[0], ix, READ_HASH);
+    return read_entry(args[0], ix, READ_ENTRY);
 }
 
 /* dict_stamp(d): what the commits below take, read before the lookup. */
@@ -515,7 +515,7 @@ lu_dict_views_init(void)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_dict_methods[] = {
-    FAST(dict_new), FAST(dict_probe), FAST(dict_find), FAST(dict_put), FAST(dict_key), FAST(dict_value), FAST(dict_hash),
+    FAST(dict_new), FAST(dict_probe), FAST(dict_find), FAST(dict_put), FAST(dict_key), FAST(dict_value), FAST(dict_entry),
     FAST(dict_stamp), FAST(dict_insert), FAST(dict_replace), FAST(dict_remove), FAST(dict_popitem),
     FAST(dict_clear), FAST(dict_next), FAST(dict_prev), FAST(dict_keys_id), FAST(dict_copy),
     FAST(dict_merge_prepare), FAST(dict_sizeof), FAST(dictiter_new), FAST(dictiter_next),

@@ -9,8 +9,8 @@ in), and the error texts."""
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, list_append,
     repr_enter, repr_leave, is_subtype, kernel_set, kernel_twin,
-    set_new, set_probe, set_add_entry, set_discard_entry, set_reserve, set_compact,
-    set_clear, set_pop, set_swap, set_merge_clean, set_info, set_hash_impl, set_reset_hash, set_add_simple,
+    set_new, set_probe, set_add_entry, set_discard_entry, set_compact,
+    set_clear, set_pop, set_swap, set_merge, set_merge_dict, set_info, set_hash_impl, set_reset_hash, set_add_simple,
     set_sizeof, setiter_new, setiter_next, setiter_len, setiter_copy,
 )
 from _lucifer import _boot, _format, operators, iter as _iter, list as _list, dict as _dict
@@ -155,21 +155,11 @@ def merge(so, other):
     """set_merge_lock_held: the keys of the set other into so."""
     if other is so or size(other) == 0:
         return
-    set_reserve(so, size(other))
-    if set_info(so, FILL) == 0 and set_merge_clean(so, other):
-        return
-    e = next_set_entry(other, 0)
-    while e is not None:
-        add_entry(so, e[1], e[2])
-        e = next_set_entry(other, e[0])
+    set_merge(so, other)
 
 
 def update_dict(so, other):
-    set_reserve(so, size(other))
-    e = next_dict_entry(other, 0)
-    while e is not None:
-        add_entry(so, e[1], e[3])
-        e = next_dict_entry(other, e[0])
+    set_merge_dict(so, other)
 
 
 get_iter = _iter.get_iter

@@ -105,35 +105,46 @@ prim_set_discard_entry(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return verdict_result(verdict, candidate);
 }
 
-/* set_key(s, i), set_hash(s, i): an active entry's key or hash, else MISSING.
-   Read under the set's critical section: a discard frees keys, and the table
-   is replaced apart from its mask. */
+/* set_entry(s, i): an active entry's (key, hash), else MISSING. Read under
+   the set's critical section: a discard frees keys, an add reuses the entry,
+   and the table is replaced apart from its mask. */
 static PyObject *
-prim_set_key(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+prim_set_entry(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); SET(0); SSIZE(1, i);
     PySetObject *so = (PySetObject *)args[0];
-    PyObject *key = NULL;
+    PyObject *entry = NULL;
     Py_BEGIN_CRITICAL_SECTION(so);
-    key = active(so, i) ? Py_NewRef(so->table[i].key) : NULL;
-    Py_END_CRITICAL_SECTION();
-    return key != NULL ? key : Py_NewRef(LU_MISSING);
-}
-
-static PyObject *
-prim_set_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
-{
-    ARGS(2); SET(0); SSIZE(1, i);
-    PySetObject *so = (PySetObject *)args[0];
-    Py_hash_t hash = 0;
-    int is_active;
-    Py_BEGIN_CRITICAL_SECTION(so);
-    is_active = active(so, i);
-    if (is_active) {
-        hash = so->table[i].hash;
+    if (active(so, i)) {
+        entry = Py_BuildValue("(On)", so->table[i].key, so->table[i].hash);
     }
     Py_END_CRITICAL_SECTION();
-    return is_active ? int_of(hash) : Py_NewRef(LU_MISSING);
+    return entry != NULL ? entry : PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
+}
+
+/* set_entries(s): the active entries' keys and hashes, (k0, h0, k1, h1, ...)
+   in table order, read whole under the set's critical section. */
+static PyObject *
+prim_set_entries(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); SET(0);
+    PySetObject *so = (PySetObject *)args[0];
+    PyObject *entries;
+    Py_BEGIN_CRITICAL_SECTION(so);
+    entries = PyTuple_New(2 * so->used);
+    for (Py_ssize_t i = 0, n = 0; entries != NULL && i <= so->mask; i++) {
+        if (active(so, i)) {
+            PyObject *hash = PyLong_FromSsize_t(so->table[i].hash);
+            if (hash == NULL) {
+                Py_CLEAR(entries);
+                break;
+            }
+            PyTuple_SET_ITEM(entries, n++, Py_NewRef(so->table[i].key));
+            PyTuple_SET_ITEM(entries, n++, hash);
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    return entries;
 }
 
 /* set_next(s, i): the active entry at or after i, or -1. */
@@ -152,18 +163,6 @@ prim_set_next(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     Py_END_CRITICAL_SECTION();
     return int_of(found);
-}
-
-/* set_reserve(s, n): room for n more keys, sized from s under its lock. */
-static PyObject *
-prim_set_reserve(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
-{
-    ARGS(2); SET(0); SSIZE(1, n);
-    int err;
-    Py_BEGIN_CRITICAL_SECTION(args[0]);
-    err = lu_set_reserve((PySetObject *)args[0], n);
-    Py_END_CRITICAL_SECTION();
-    return err < 0 ? NULL : Py_NewRef(Py_None);
 }
 
 /* set_compact(s): set_difference_update_internal's last step, a new table
@@ -226,53 +225,36 @@ prim_set_swap(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return lu_set_swap((PySetObject *)args[0], (PySetObject *)args[1]) < 0 ? NULL : Py_NewRef(Py_None);
 }
 
-/* set_merge_clean(so, other): the first two cases of set_merge_lock_held,
-   for a so with no entries (fill 0) and an other with some: room is made for
-   other's keys (a clear since the caller's presize leaves the small table),
-   then the table is copied when the sizes agree and there are no dummies,
-   else each key is inserted. False,
-   with nothing done, when another thread has added to so since the caller
-   looked. */
+/* set_merge(so, other), set_merge_dict(so, d): set.update from a set or a
+   dict, whole under both critical sections. */
 static PyObject *
-prim_set_merge_clean(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+prim_set_merge(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); SET(0); SET(1);
-    PySetObject *so = (PySetObject *)args[0], *other = (PySetObject *)args[1];
-    if (so == other) {
-        lu_err_format(PyExc_SystemError, "set_merge_clean() needs two sets");
+    if (args[0] == args[1]) {
+        lu_err_format(PyExc_SystemError, "set_merge() needs two sets");
         return NULL;
     }
-    int merged = 0;
-    Py_BEGIN_CRITICAL_SECTION2(so, other);
-    if (so->fill != 0) {
-        /* not clean */
-    }
-    else if (lu_set_reserve(so, other->used) < 0) {
-        merged = -1;
-    }
-    else if (so->mask == other->mask && other->fill == other->used) {
-        merged = 1;
-        for (Py_ssize_t i = 0; i <= other->mask; i++) {
-            if (other->table[i].key != NULL) {
-                so->table[i].key = Py_NewRef(other->table[i].key);
-                so->table[i].hash = other->table[i].hash;
-            }
-        }
-        so->fill = other->fill;
-        so->used = other->used;
-    }
-    else {
-        merged = 1;
-        so->fill = so->used = other->used;
-        for (Py_ssize_t i = 0; i <= other->mask; i++) {
-            PyObject *key = other->table[i].key;
-            if (key != NULL && key != LU_SET_DUMMY) {
-                lu_set_insert_clean(so->table, so->mask, Py_NewRef(key), other->table[i].hash);
-            }
-        }
-    }
+    int err;
+    Py_BEGIN_CRITICAL_SECTION2(args[0], args[1]);
+    err = lu_set_merge((PySetObject *)args[0], (PySetObject *)args[1]);
     Py_END_CRITICAL_SECTION2();
-    return merged < 0 ? NULL : bool_of(merged);
+    return err < 0 ? NULL : Py_NewRef(Py_None);
+}
+
+static PyObject *
+prim_set_merge_dict(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2); SET(0);
+    if (!PyDict_Check(args[1])) {
+        lu_err_format(PyExc_TypeError, "set_merge_dict() needs a dict");
+        return NULL;
+    }
+    int err;
+    Py_BEGIN_CRITICAL_SECTION2(args[0], args[1]);
+    err = lu_set_merge_dict((PySetObject *)args[0], (PyDictObject *)args[1]);
+    Py_END_CRITICAL_SECTION2();
+    return err < 0 ? NULL : Py_NewRef(Py_None);
 }
 
 /* set_info(s, which): 0 fill, 1 used, 2 mask, 3 finger, 4 the cached hash. */
@@ -450,9 +432,9 @@ prim_set_add_simple(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 #define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_set_methods[] = {
-    FAST(set_new), FAST(set_probe), FAST(set_add_entry), FAST(set_discard_entry), FAST(set_key), FAST(set_hash),
-    FAST(set_next), FAST(set_reserve), FAST(set_compact), FAST(set_clear), FAST(set_pop),
-    FAST(set_swap), FAST(set_merge_clean), PURE(set_info), FAST(set_hash_impl),
+    FAST(set_new), FAST(set_probe), FAST(set_add_entry), FAST(set_discard_entry), FAST(set_entry), FAST(set_entries),
+    FAST(set_next), FAST(set_compact), FAST(set_clear), FAST(set_pop),
+    FAST(set_swap), FAST(set_merge), FAST(set_merge_dict), PURE(set_info), FAST(set_hash_impl),
     PURE(set_reset_hash), PURE(set_add_simple), FAST(set_sizeof), FAST(setiter_new), FAST(setiter_next),
     FAST(setiter_len), FAST(setiter_copy),
     { NULL, NULL, 0, NULL },

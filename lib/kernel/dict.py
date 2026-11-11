@@ -8,10 +8,10 @@ protocols and the error texts."""
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, list_append,
     repr_enter, repr_leave, set_slot, kernel_set,
-    dict_new, dict_probe, dict_find, dict_put, dict_key, dict_value, dict_hash, dict_stamp, dict_insert, dict_replace, dict_remove,
+    dict_new, dict_probe, dict_find, dict_put, dict_key, dict_value, dict_entry, dict_stamp, dict_insert, dict_replace, dict_remove,
     dict_popitem, dict_clear, dict_next, dict_prev, dict_keys_id, dict_copy, dict_merge_prepare,
     dict_sizeof, dictiter_new, dictiter_next, dictiter_len, dictiter_copy, dictview_new,
-    dictview_dict, set_next, set_key, set_hash,
+    dictview_dict, set_next, set_entry, set_entries,
 )
 from _lucifer import _boot, _format, operators, iter as _iter, list as _list, str as _str
 
@@ -170,12 +170,10 @@ def next_entry(d, i):
         i = dict_next(d, i)
         if i < 0:
             return None
-        key = dict_key(d, i)
-        value = dict_value(d, i)
-        h = dict_hash(d, i)
+        e = dict_entry(d, i)
         i += 1
-        if key is not MISSING and value is not MISSING:
-            return i, key, value, h
+        if e is not MISSING:
+            return i, e[0], e[1], e[2]
 
 
 def next_set_entry(s, i):
@@ -184,11 +182,10 @@ def next_set_entry(s, i):
         i = set_next(s, i)
         if i < 0:
             return None
-        key = set_key(s, i)
-        h = set_hash(s, i)
+        e = set_entry(s, i)
         i += 1
-        if key is not MISSING:
-            return i, key, h
+        if e is not MISSING:
+            return i, e[0], e[1]
 
 
 # update, merge and fromkeys (dict_merge, merge_from_seq2, _PyDict_FromKeys)
@@ -199,7 +196,8 @@ def merge_dict(a, b, override):
     if dict_merge_prepare(a, b):
         return
     n = size(b)
-    e = next_entry(b, 0)
+    whole = dict_copy(b)            # under b's lock: no entry torn or passed over
+    e = next_entry(whole, 0)
     while e is not None:
         i, key, value, h = e
         if override == 1:
@@ -211,7 +209,7 @@ def merge_dict(a, b, override):
             store(a, key, h, value)
         if size(b) != n:
             error(RuntimeError, 'dict mutated during update')
-        e = next_entry(b, i)
+        e = next_entry(whole, i)
 
 
 def mapping_keys(o):
@@ -336,16 +334,16 @@ def fromkeys(cls, iterable, value):
     d = cls()
     if type(d) is dict:
         if type(iterable) is dict:
+            iterable = dict_copy(iterable)  # the source whole, as under its lock
             e = next_entry(iterable, 0)
             while e is not None:
                 store(d, e[1], e[3], value)
                 e = next_entry(iterable, e[0])
             return d
         if type(iterable) is set or type(iterable) is frozenset:
-            e = next_set_entry(iterable, 0)
-            while e is not None:
-                store(d, e[1], e[2], value)
-                e = next_set_entry(iterable, e[0])
+            entries = set_entries(iterable)     # the source whole, as under its lock
+            for i in range(0, size(entries), 2):
+                store(d, entries[i], entries[i + 1], value)
             return d
     it = _iter.get_iter(iterable)
     if type(d) is dict:
