@@ -1373,6 +1373,7 @@ int lu_types_init(PyInterpreterState *interp);
 /* Fills each static type's unset slots from its bases (inherit_slots); run
    after every kernel module, as kernel classes install slots. */
 int lu_static_types_inherit(void);
+PyTypeObject *lu_static_type(const char *name);
 /* The type's dict: in interpreter state for static builtin types. Borrowed. */
 PyObject *lu_type_dict(PyTypeObject *tp);
 /* The fully qualified name, module<sep>qualname (runtime/capi/typespec.c). */
