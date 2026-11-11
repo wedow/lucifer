@@ -6,7 +6,9 @@
    thread, each call exactly once and a failing call leaving the rest for the
    next poll; and an object queued to its owner's refcount-merge queue being
    freed at the owner's next poll; and a signal that arrives before a lock
-   wait begins, as one does while a builtin runs, ending that wait. The
+   wait begins, as one does while a builtin runs, ending that wait, with its
+   handler run there or, for PyThread_acquire_lock_timed, left to the caller,
+   whatever the delay between the signal and the wait. The
    interpreter is started here so that exceptions can be raised. */
 
 #include "Python.h"
@@ -358,6 +360,57 @@ check_signal_before_lock_wait(void)
     PyMutex_Unlock(&m);
 }
 
+/* PyThread_acquire_lock_timed with intr_flag, called detached as CPython's
+   callers do: a signal ends the wait with PY_LOCK_INTR and no exception, and
+   the caller runs the handler with Py_MakePendingCalls. */
+static void
+check_intr_flag_leaves_handlers_to_caller(void)
+{
+    PyThread_type_lock lock = PyThread_allocate_lock();
+    PyThread_acquire_lock(lock, 1);
+    raise(SIGUSR1);
+    PyLockStatus r;
+    Py_BEGIN_ALLOW_THREADS
+    r = PyThread_acquire_lock_timed(lock, 2000000, 1);
+    Py_END_ALLOW_THREADS
+    CHECK(r == PY_LOCK_INTR);
+    CHECK(!PyErr_Occurred());
+    CHECK(Py_MakePendingCalls() < 0);
+    CHECK(PyErr_ExceptionMatches(PyExc_ZeroDivisionError));
+    PyErr_Clear();
+    PyThread_release_lock(lock);
+    PyThread_free_lock(lock);
+}
+
+/* SIGALRM at delays from 1 to 119 microseconds around time.sleep, a held
+   lock's acquire and SimpleQueue.get, so that some arrive while the call is
+   on its way to its wait: each wait must end at once with the handler's
+   exception. CPython loses such signals (the waits run to their timeouts),
+   so this is no kernel program compared with it. */
+static void
+check_signal_sweep(void)
+{
+    CHECK(PyRun_SimpleString(
+        "import queue, signal, threading, time\n"
+        "class Interrupted(Exception): pass\n"
+        "def interrupt(signum, frame): raise Interrupted\n"
+        "old = signal.signal(signal.SIGALRM, interrupt)\n"
+        "lock = threading.Lock(); lock.acquire()\n"
+        "q = queue.SimpleQueue()\n"
+        "waits = (lambda: time.sleep(5), lambda: lock.acquire(timeout=5), lambda: q.get(timeout=5))\n"
+        "late = 0\n"
+        "for i in range(600):\n"
+        "    start = time.monotonic()\n"
+        "    try:\n"
+        "        signal.setitimer(signal.ITIMER_REAL, (i % 60) * 2e-6 + 1e-6)\n"
+        "        waits[i % 3]()\n"
+        "    except Interrupted:\n"
+        "        pass\n"
+        "    late += time.monotonic() - start > 1\n"
+        "signal.signal(signal.SIGALRM, old)\n"
+        "assert late == 0, late\n") == 0);
+}
+
 __attribute__((constructor)) static void
 check(void)
 {
@@ -375,6 +428,8 @@ check(void)
     check_pending_calls();
     check_merge_at_poll();
     check_signal_before_lock_wait();
+    check_intr_flag_leaves_handlers_to_caller();
+    check_signal_sweep();
 
     if (failures == 0) {
         puts("capi poll ok");

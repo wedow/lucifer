@@ -288,7 +288,7 @@ lu_pending_calls_handle(PyThreadState *ts)
 LU_EXPORT int
 _PyEval_MakePendingCalls(PyThreadState *ts)
 {
-    if (lu_thread_can_handle_signals() && lu_signals_handle(ts) < 0) {
+    if (lu_signals_handle(ts) < 0) {
         return -1;
     }
     return lu_pending_calls_handle(ts);

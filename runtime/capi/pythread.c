@@ -108,7 +108,7 @@ PyLockStatus
 PyThread_acquire_lock_timed(PyThread_type_lock lock, PY_TIMEOUT_T microseconds, int intr_flag)
 {
     PyTime_t timeout = microseconds < 0 ? -1 : microseconds * 1000;
-    return _PyMutex_LockTimed(lock, timeout, _PY_LOCK_DETACH | (intr_flag ? _PY_LOCK_HANDLE_SIGNALS : 0));
+    return _PyMutex_LockTimed(lock, timeout, _PY_LOCK_DETACH | (intr_flag ? _PY_LOCK_FAIL_IF_INTERRUPTED : 0));
 }
 
 int
