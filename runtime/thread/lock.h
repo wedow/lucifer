@@ -46,6 +46,7 @@ typedef enum _PyLockFlags {
     _Py_LOCK_DONT_DETACH = 0,           /* stay attached while waiting */
     _PY_LOCK_DETACH = 1,                /* detach while waiting */
     _PY_LOCK_HANDLE_SIGNALS = 2,        /* run pending calls when interrupted */
+    _PY_LOCK_FAIL_IF_INTERRUPTED = 4,   /* PY_LOCK_INTR when interrupted, the handler left to the caller */
 } _PyLockFlags;
 
 PyLockStatus _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout_ns, _PyLockFlags flags);
@@ -59,8 +60,8 @@ int PyEvent_WaitTimed(PyEvent *evt, PyTime_t timeout_ns, int detach);
 
 /* The parking lot: compare-and-sleep on an address, and wake. Park's last
    argument is CPython's `detach`, read as _PyLockFlags: 1 detaches, and
-   _PY_LOCK_HANDLE_SIGNALS ends the park with Py_PARK_INTR at a signal whose
-   handler the caller then runs. */
+   _PY_LOCK_HANDLE_SIGNALS or _PY_LOCK_FAIL_IF_INTERRUPTED ends the park with
+   Py_PARK_INTR at a signal with a Python handler. */
 enum {
     Py_PARK_OK = LU_PARK_OK,            /* unparked by another thread */
     Py_PARK_AGAIN = -1,                 /* *address did not match *expected */
