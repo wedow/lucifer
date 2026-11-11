@@ -12,3 +12,9 @@ tags: [perf, jit]
 
 A load through an instance of a class attribute that is no descriptor specializes only when the cache may name the value without owning it (immortal or deferred refcount), so a class constant like pickle's _Framer._FRAME_SIZE_TARGET (65536) or a class dict (_Pickler.dispatch) stays generic: 15.7k and 10k generic loads in 3 loops of pickle_pure_python on luc-custom4. ints and strs cannot be deferred (not GC objects). Compiled code could fold the value as a constant it owns (konst) under the class's version (the type's watcher already invalidates), which needs the PIC or the cached site to name the class rather than the value.
 
+
+## Notes
+
+**2026-11-11T05:45:03Z**
+
+Shelved 2026-11-11. On pickle_pure_python the generic class-constant loads this targets run about 8.8k times per loop, under 0.5% of the loop's instructions, so the change would not pay for itself. Reopen if a program shows these loads in its profile.
