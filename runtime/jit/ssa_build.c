@@ -5417,6 +5417,7 @@ iter_step(struct ctx *c, lu_v it, int exit_pc)
 static int
 for_iter(struct ctx *c)
 {
+    lu_v first = c->f->nins;
     lu_v it = peek(c, 1);
     int exit_pc = jump_target(FOR_ITER, c->oparg, c->next);
     PyFunctionObject *gfn;
@@ -5489,10 +5490,26 @@ for_iter(struct ctx *c)
         return -1;
     }
     normalize(c);
-    edge_to(c, exit_pc);
-    int body = lu_ir_block(c->f);
+    int body = lu_ir_block(c->f), out = -1;
+    if (c->observed) {
+        /* The step's call may have let a walker see the frames: each way
+           on has the frames guard after it, as SEND's has. */
+        out = lu_ir_block(c->f);
+        lu_ir_edge(c->f, c->cur, out);
+    }
+    else {
+        edge_to(c, exit_pc);
+    }
     lu_ir_edge(c->f, c->cur, body);
     emit(c, OP_BRANCH, REP_NONE, done, LU_NOV, LU_NOV, 0);
+    if (out >= 0) {
+        int next = c->next;
+        c->cur = out;
+        c->next = exit_pc;
+        frames_guard(c, first);
+        jump_to(c, exit_pc);
+        c->next = next;
+    }
     c->cur = body;
     if (range) {
         v = box_int(c, emit(c, OP_RITER_NEXT, REP_I64, it, LU_NOV, LU_NOV, 0));
