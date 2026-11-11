@@ -1,5 +1,5 @@
-/* PyOS_string_to_double and PyOS_double_to_string over dtoa.c, from
-   Python/pystrtod.c (the _PY_SHORT_FLOAT_REPR == 1 paths only). */
+/* PyOS_string_to_double over fast_float.c and PyOS_double_to_string over
+   dtoa.c, from Python/pystrtod.c (the _PY_SHORT_FLOAT_REPR == 1 paths only). */
 
 #include "lucifer.h"
 
@@ -7,7 +7,7 @@
 #include <math.h>
 #include <string.h>
 
-extern double _Py_dg_strtod(const char *str, char **ptr);
+extern double lu_fast_float_strtod(const char *str, char **ptr);
 extern char *_Py_dg_dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve);
 extern void _Py_dg_freedtoa(char *s);
 
@@ -87,9 +87,8 @@ _Py_parse_inf_or_nan(const char *p, char **endptr)
  *
  * If the correct value would cause overflow, plus or minus %HUGE_VAL
  * is returned (according to the sign of the value), and %ERANGE is
- * stored in %errno. If the correct value would cause underflow,
- * zero is returned and %ERANGE is stored in %errno.
- * If memory allocation fails, %ENOMEM is stored in %errno.
+ * stored in %errno. Underflow returns zero (or a subnormal) without
+ * setting %errno.
  *
  * This function resets %errno before calling strtod() so that
  * you can reliably detect overflow and underflow.
@@ -109,7 +108,7 @@ _PyOS_ascii_strtod(const char *nptr, char **endptr)
     errno = 0;
 
     _Py_SET_53BIT_PRECISION_START;
-    result = _Py_dg_strtod(nptr, endptr);
+    result = lu_fast_float_strtod(nptr, endptr);
     _Py_SET_53BIT_PRECISION_END;
 
     if (*endptr == nptr)
@@ -156,11 +155,7 @@ PyOS_string_to_double(const char *s,
     errno = 0;
     x = _PyOS_ascii_strtod(s, &fail_pos);
 
-    if (errno == ENOMEM) {
-        PyErr_NoMemory();
-        fail_pos = (char *)s;
-    }
-    else if (!endptr && (fail_pos == s || *fail_pos != '\0'))
+    if (!endptr && (fail_pos == s || *fail_pos != '\0'))
         lu_err_format(PyExc_ValueError,
                       "could not convert string to float: "
                       "'%.200s'", s);
