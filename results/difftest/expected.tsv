@@ -119,6 +119,7 @@ tests/diff/corpus/iter_megamorphic.py	NOTRUN	0.000000
 tests/diff/corpus/list_iteration_mutation.py	NOTRUN	0.000000
 tests/diff/corpus/list_slice_alias.py	NOTRUN	0.000000
 tests/diff/corpus/list_slice_store_native.py	NOTRUN	0.000000
+tests/diff/corpus/loop_end_frame_write.py	NOTRUN	0.000000
 tests/diff/corpus/memoryview_alias_release.py	NOTRUN	0.000000
 tests/diff/corpus/metaclass_call.py	NOTRUN	0.000000
 tests/diff/corpus/metaclass_init_subclass.py	NOTRUN	0.000000

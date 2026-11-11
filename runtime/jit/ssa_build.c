@@ -1468,9 +1468,16 @@ raw_bound(struct ctx *c, lu_v v, lu_v *raw, int *none, int bit)
     return 1;
 }
 
+/* A box of a raw int. A small constant is the cached int itself, every
+   box of it is that object, so that what reads a constant folds on it (a
+   kernel table indexed by a constant computed from an oparg). */
 static lu_v
 box_int(struct ctx *c, lu_v i)
 {
+    if (I(c, i)->op == OP_CONST_I && I(c, i)->imm >= -LU_NSMALLNEGINTS && I(c, i)->imm < LU_NSMALLPOSINTS) {
+        PyObject *o = PyLong_FromLongLong(I(c, i)->imm);   /* immortal */
+        return konst(c, o);
+    }
     return emit(c, OP_BOX_INT, REP_OBJ, i, LU_NOV, LU_NOV, 0);
 }
 
@@ -1485,6 +1492,9 @@ box_float(struct ctx *c, lu_v d)
 static lu_v
 rebox(struct ctx *c, lu_v o, PyTypeObject *t)
 {
+    if (known(c, o) != NULL) {
+        return o;               /* a constant: its raw value is a constant too */
+    }
     lu_v b = t == &PyLong_Type ? box_int(c, unbox_int(c, o)) : box_float(c, unbox_float(c, o));
     I(c, b)->b = o;
     return b;
@@ -5399,6 +5409,7 @@ iter_step(struct ctx *c, lu_v it, int exit_pc)
 static int
 for_iter(struct ctx *c)
 {
+    lu_v first = c->f->nins;
     lu_v it = peek(c, 1);
     int exit_pc = jump_target(FOR_ITER, c->oparg, c->next);
     PyFunctionObject *gfn;
@@ -5471,10 +5482,26 @@ for_iter(struct ctx *c)
         return -1;
     }
     normalize(c);
-    edge_to(c, exit_pc);
-    int body = lu_ir_block(c->f);
+    int body = lu_ir_block(c->f), out = -1;
+    if (c->observed) {
+        /* The step's call may have let a walker see the frames: each way
+           on has the frames guard after it, as SEND's has. */
+        out = lu_ir_block(c->f);
+        lu_ir_edge(c->f, c->cur, out);
+    }
+    else {
+        edge_to(c, exit_pc);
+    }
     lu_ir_edge(c->f, c->cur, body);
     emit(c, OP_BRANCH, REP_NONE, done, LU_NOV, LU_NOV, 0);
+    if (out >= 0) {
+        int next = c->next;
+        c->cur = out;
+        c->next = exit_pc;
+        frames_guard(c, first);
+        jump_to(c, exit_pc);
+        c->next = next;
+    }
     c->cur = body;
     if (range) {
         v = box_int(c, emit(c, OP_RITER_NEXT, REP_I64, it, LU_NOV, LU_NOV, 0));

@@ -720,6 +720,12 @@
       "state": false,
       "timing": false
     },
+    "tests/diff/corpus/loop_end_frame_write.py": {
+      "exit": 0,
+      "sha256": "eb6be3f80915325f5c88b7c0bfbf17e1f0badb5c558baf8a38dc682c5e74aad5",
+      "state": false,
+      "timing": false
+    },
     "tests/diff/corpus/memoryview_alias_release.py": {
       "exit": 0,
       "sha256": "cea0cc4719b4a8374425d271a7a6fc1d4e042aad33a3b3a55235916bd0b9f32c",
