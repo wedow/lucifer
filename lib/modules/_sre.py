@@ -1572,6 +1572,10 @@ def _disjoint(code, a, b):
     return True
 
 
+_FAIL = '<fail>'        # a continuation's failure, while it is not known whether it is in line
+_INLINE_REST = 60       # lines
+
+
 class _Gen:
     """Python source for one entry of one pattern's code."""
 
@@ -1586,6 +1590,7 @@ class _Gen:
         self.untils = {}        # the UNTIL of a REPEAT emitted as an optional body -> (tail, its inrep)
         self.live = []          # the repeats emitted as functions whose UNTIL the code being emitted reaches
         self.rec_names = {}
+        self.rest_names = {}
         self.n = 0
         self.limit = 4000 + 400 * len(code)
 
@@ -1873,7 +1878,8 @@ class _Gen:
             elif op == JUMP:
                 if stop is not None:
                     raise _Unsupported
-                pc += 1 + code[pc + 1]
+                self.rest(pc + 1 + code[pc + 1], ind, fail, inrep, succ)
+                return
             elif op == GROUPREF or op == GROUPREF_IGNORE or op == GROUPREF_UNI_IGNORE or op == GROUPREF_LOC_IGNORE:
                 self.groupref(op, code[pc + 1], ind, fail)
                 pc += 2
@@ -2028,7 +2034,7 @@ class _Gen:
         firsts = [self.first_set(body, True) for body, jump in alts]
         if all([f and 'end' not in f and 'nl' not in f for f in firsts]) and all(
                 [self.excludes(firsts[i], firsts[j], False) for i in range(len(firsts)) for j in range(i)]):
-            if self.try_straight(self.dispatch, alts, firsts, ind, fail, inrep, succ):
+            if self.try_straight(self.dispatch, alts, firsts, ind, fail, inrep, succ, stop is None):
                 return after
         if stop is not None:
             raise _Branchy
@@ -2055,15 +2061,17 @@ class _Gen:
             del self.out[mark:]
             for k, (body, jump) in enumerate(alts):
                 self.w(ind + 1, '%s a%d == %d:' % ('if' if k == 0 else 'elif', n, k + 1))
-                self.seq(body, None, ind + 2, 'continue', inrep, succ)
+                self.rest(body, ind + 2, 'continue', inrep, succ)
         self.w(ind + 1, 'else:')
         self.w(ind + 2, 'break')
         if shared:
-            self.seq(after, None, ind + 1, 'continue', inrep, succ)
+            self.rest(after, ind + 1, 'continue', inrep, succ)
         self.w(ind, fail)
         return None
 
-    def dispatch(self, alts, firsts, ind, fail, inrep, succ):
+    def dispatch(self, alts, firsts, ind, fail, inrep, succ, outline):
+        """Alternatives at most one of which can start. outline: the continuation is this code's, so a
+        long alternative may be a call of its continuation function instead."""
         self.w(ind, 'if ptr >= end: %s' % fail)
         self.w(ind, 'ch = text[ptr]')
         preps = []
@@ -2081,6 +2089,9 @@ class _Gen:
             self.w(ind, '%s %s:' % ('if' if k == 0 else 'elif', conds[k]))
             start = len(self.out)
             self.seq(body, jump, ind + 1, fail, inrep, succ)
+            if outline and len(self.out) - start > _INLINE_REST:
+                del self.out[start:]
+                self.rest(body, ind + 1, fail, inrep, succ)
             self.nonempty(start, ind + 1)
         self.w(ind, 'else:')
         self.w(ind + 1, fail)
@@ -2203,7 +2214,7 @@ class _Gen:
             self.w(ind + 1, 'b%d = 1' % n)
             if maximum != MAXREPEAT:
                 self.w(ind + 1, 'if c%d > %d: break' % (n, maximum))
-        self.seq(tail, None, ind + 1, 'continue', inrep, succ)
+        self.rest(tail, ind + 1, 'continue', inrep, succ)
         self.w(ind, fail)
         return None
 
@@ -2288,11 +2299,11 @@ class _Gen:
             self.w(ind, 'while True:')
             self.w(ind + 1, 'a%d += 1' % n)
             self.w(ind + 1, 'if a%d == 1:' % n)
-            self.seq(body, None, ind + 2, 'continue', True, succ)
+            self.rest(body, ind + 2, 'continue', True, succ)
             self.w(ind + 1, 'elif a%d == 2:' % n)
             self.restore(n, ind + 2, True)
             self.w(ind + 2, 'ptr = p%d' % n)
-            self.seq(tail, None, ind + 2, 'continue', inrep, succ)
+            self.rest(tail, ind + 2, 'continue', inrep, succ)
             self.w(ind + 1, 'else:')
             self.w(ind + 2, 'break')
             self.w(ind, fail)
@@ -2315,7 +2326,7 @@ class _Gen:
                 self.w(ind + 2, 'p%d = k%d.pop()' % (n, n))
             self.w(ind + 2, 'ptr = p%d' % n)
             self.w(ind + 1, 'b%d = 1' % n)
-            self.seq(tail, None, ind + 1, 'continue', inrep, succ)
+            self.rest(tail, ind + 1, 'continue', inrep, succ)
             self.w(ind, fail)
             return None
         self.loop(n, iteration, minimum, minimum, ind, fail, snap, False)
@@ -2336,7 +2347,7 @@ class _Gen:
         self.w(ind + 1, 'b%d = 1' % n)
         self.w(ind + 1, 't%d = ptr' % n)
         self.save(n, ind + 1, inrep)
-        self.seq(tail, None, ind + 1, 'continue', inrep, succ)
+        self.rest(tail, ind + 1, 'continue', inrep, succ)
         self.w(ind, fail)
         return None
 
@@ -2366,6 +2377,31 @@ class _Gen:
 
     def live_args(self, live):
         return ''.join([', c%d, v%d' % (item[0], item[0]) for item in live])
+
+    def rest(self, pc, ind, fail, inrep, succ):
+        """The continuation from pc to the end of the (sub)match, after a choice point: in line while
+        it is short, else a call of one function that every choice point continuing at pc shares, so
+        the code stays linear in the pattern and each part of it compiles on its own."""
+        key = (pc, inrep, succ, tuple(self.live))
+        name = self.rest_names.get(key)
+        if name is None:
+            saved = self.out
+            self.out = []
+            self.seq(pc, None, 1, _FAIL, inrep, succ)
+            body = self.out
+            self.out = saved
+            if len(body) <= _INLINE_REST:
+                for item in body:
+                    self.w(ind + item[0] - 1, item[1].replace(_FAIL, fail))
+                return
+            name = self.rest_names[key] = '_t%d' % self.new()
+            self.subs.append([(0, 'def %s(st, text, end, mark, ptr, lastmark, lastindex%s%s):'
+                               % (name, self.context(succ), self.live_args(self.live)))]
+                             + [(item[0], item[1].replace(_FAIL, 'return -1')) for item in body])
+        self.w(ind, 'q = %s(st, text, end, mark, ptr, lastmark, lastindex%s%s)'
+               % (name, self.context(succ), self.live_args(self.live)))
+        self.w(ind, 'if q >= 0: return q')
+        self.w(ind, fail)
 
     def call_repeat(self, pc, ind, fail, inrep, succ):
         key = (pc, inrep, succ, tuple(self.live))
@@ -2406,7 +2442,7 @@ class _Gen:
             self.live = outer
 
         def tail_(ind, fail):
-            self.seq(tail, None, ind, fail, inrep, succ)
+            self.rest(tail, ind, fail, inrep, succ)
         if minimum:
             self.w(1, 'if c%d < %d:' % (n, minimum))
             iteration(2, 'return -1')
