@@ -1178,6 +1178,9 @@ void lu_weakref_init(void);
 void lu_clear_weakrefs(PyObject *ob);
 PyObject *lu_weakref_new(PyTypeObject *type, PyObject *ob, PyObject *callback);
 PyObject *lu_weakref_get(PyObject *ref);
+/* ref's referent, borrowed, under a try-lock of its stripe; 0 when busy or dying (weakref.c). */
+int lu_weakref_peek(PyObject *ref, PyMutex *already, PyObject **ob, PyMutex **held);
+void lu_weakref_unpeek(PyMutex *held);
 /* The head of ob's list of weak references, or NULL if its type has none. */
 PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
