@@ -90,6 +90,7 @@ INFO_LITERAL = 2
 INFO_CHARSET = 4
 
 _SSIZE_MAX = sys.maxsize
+_SSIZE_MIN = -sys.maxsize - 1
 
 # ---------------------------------------------------------------------------
 # Character predicates. The locale ones are those of the C locale.
@@ -356,7 +357,7 @@ def _ssize(value):
             raise TypeError("'%s' object cannot be interpreted as an integer" % type(value).__name__) from None
         value = method(value)
     value = int.__index__(value)    # the value, as C reads it: no subclass's methods run
-    if value > _SSIZE_MAX or value < -_SSIZE_MAX - 1:
+    if value > _SSIZE_MAX or value < _SSIZE_MIN:
         raise OverflowError("Python int too large to convert to C ssize_t")
     return value
 
@@ -1318,9 +1319,11 @@ def _starts(code, tests, ch):
     return False
 
 
-def _search_generic(st):
+def _search_generic(st, sp=None):
     """SRE(search): the leftmost match from st.start; 1 with the span in
-    st.start and st.ptr, or 0."""
+    st.start and st.ptr, or 0. With a _Spec, each further attempt is charged
+    to its budget, and once that is spent the search stops undecided: -1, with
+    the next position in st.start."""
     code = st.code
     text = st.text
     ptr = st.start
@@ -1359,6 +1362,11 @@ def _search_generic(st):
             i = _search_prefix(text, prefix, ptr, end)
             if i < 0:
                 return 0
+            if sp is not None and i > st.start:
+                sp.budget -= _CALL_COST + i - st.start
+                if sp.budget <= 0:
+                    st.start = i
+                    return -1
             st.start = i
             st.ptr = i + prefix_skip
             if flags & INFO_LITERAL:
@@ -1384,6 +1392,11 @@ def _search_generic(st):
                     ptr += 1
             if ptr >= end:
                 return 0
+            if sp is not None and ptr > st.start:
+                sp.budget -= _CALL_COST + ptr - st.start
+                if sp.budget <= 0:
+                    st.start = ptr
+                    return -1
             st.start = ptr
             st.ptr = ptr
             status = _match(st, pattern, False)
@@ -1402,6 +1415,11 @@ def _search_generic(st):
         while not status and ptr < end:
             ptr += 1
             _state_reset(st)
+            if sp is not None:
+                sp.budget -= _CALL_COST + 1
+                if sp.budget <= 0:
+                    st.start = ptr
+                    return -1
             st.start = st.ptr = ptr
             status = _match(st, pattern, False)
     return status
@@ -1415,10 +1433,11 @@ def _search_generic(st):
 # A failure jumps to the innermost choice point: `continue` of the loop that
 # tries its next alternative, or the fail statement its caller gave. A success
 # returns from the matcher, so the rest of the pattern (the continuation) is
-# emitted inside every choice point's loop. The marks, lastmark and lastindex
-# follow the interpreter's saves and restores exactly, so the generic engine
-# stays the reference: a code word the generator does not handle leaves the
-# pattern on it, and -X lucifer_stress=sre runs both and compares.
+# emitted inside every choice point's loop, except after a repeat whose
+# iterations backtrack, which is a function per iteration. The marks, lastmark
+# and lastindex follow the interpreter's saves and restores exactly, so the
+# generic engine stays the reference: a code word the generator does not handle
+# leaves the pattern on it, and -X lucifer_stress=sre runs both and compares.
 
 class _Unsupported(Exception):
     """The code has a construct the generator leaves to the interpreter."""
@@ -1563,6 +1582,8 @@ class _Gen:
         self.memo = {}          # (test pc, test pc) -> disjoint
         self.loops = {}         # a REPEAT's UNTIL pc -> (body, tail)
         self.untils = {}        # the UNTIL of a REPEAT emitted as an optional body -> (tail, its inrep)
+        self.live = []          # the repeats emitted as functions whose UNTIL the code being emitted reaches
+        self.rec_names = {}
         self.n = 0
         self.limit = 4000 + 400 * len(code)
 
@@ -1870,6 +1891,9 @@ class _Gen:
                 pc = self.assert_(pc, ind, fail, inrep, succ)
             elif op == ASSERT_NOT:
                 pc = self.assert_not(pc, ind, fail, inrep)
+            elif (op == MAX_UNTIL or op == MIN_UNTIL) and self.live and self.live[-1][1] == pc:
+                self.next_iteration(ind, fail, succ)
+                return
             elif (op == MAX_UNTIL or op == MIN_UNTIL) and pc in self.untils:
                 pc, inrep = self.untils[pc]
             else:
@@ -2272,7 +2296,8 @@ class _Gen:
             self.w(ind, fail)
             return None
         if not plain:
-            raise _Unsupported      # backtracking into one of many iterations: the interpreter's
+            self.call_repeat(pc, ind, fail, inrep, succ)
+            return None
         if not lazy:
             self.loop(n, iteration, minimum, maximum, ind, fail, snap, not straight)
             if straight:
@@ -2319,11 +2344,96 @@ class _Gen:
         name = self.sub_names.get(key)
         if name is None:
             name = self.sub_names[key] = '_sub%d' % self.new()
-            saved = self.out
+            saved = self.out, self.live
             self.out = [(0, 'def %s(st, text, end, mark, ptr, lastmark, lastindex):' % name)]
+            self.live = []
             self.seq(body, None, 1, 'return -1', inrep, 'sub')
             self.subs.append(self.out)
-            self.out = saved
+            self.out, self.live = saved
+        return name
+
+    # --- repeats whose iterations backtrack -------------------------------
+    # Such a repeat is a function r(..., c, v) for its UNTIL (sre_lib.h's MAX_UNTIL or MIN_UNTIL) after
+    # c iterations, the last of which started at v: it tries another iteration, whose end calls r(c + 1)
+    # again, and the tail with the rest of the match. Each iteration costs a Python frame, so a match
+    # deeper than the recursion limit raises RecursionError, and the entry reruns the interpreter.
+
+    def context(self, succ):
+        """The entry's locals the success code of succ reads, as arguments."""
+        return {'match': ', start, match_all, adv', 'search': ', start, pos, adv'}.get(succ, '')
+
+    def live_args(self, live):
+        return ''.join([', c%d, v%d' % (item[0], item[0]) for item in live])
+
+    def call_repeat(self, pc, ind, fail, inrep, succ):
+        key = (pc, inrep, succ, tuple(self.live))
+        name = self.rec_names.get(key)
+        if name is None:
+            name = self.rec_names[key] = self.repeat_function(pc, inrep, succ)
+        self.w(ind, 'q = %s(st, text, end, mark, ptr, lastmark, lastindex%s%s, 0, -1)'
+               % (name, self.context(succ), self.live_args(self.live)))
+        self.w(ind, 'if q >= 0: return q')
+        self.w(ind, fail)
+
+    def next_iteration(self, ind, fail, succ):
+        """At the UNTIL of the innermost live repeat: an iteration ended."""
+        n, until, name = self.live[-1]
+        self.w(ind, 'q = %s(st, text, end, mark, ptr, lastmark, lastindex%s%s, c%d + 1, v%d)'
+               % (name, self.context(succ), self.live_args(self.live[:-1]), n, n))
+        self.w(ind, 'if q >= 0: return q')
+        self.w(ind, fail)
+
+    def repeat_function(self, pc, inrep, succ):
+        code = self.code
+        minimum = code[pc + 2]
+        maximum = code[pc + 3]
+        body = pc + 4
+        until = pc + 1 + code[pc + 1]
+        tail = until + 1
+        n = self.new()
+        name = '_r%d' % n
+        outer = self.live
+        saved = self.out
+        self.out = [(0, 'def %s(st, text, end, mark, ptr, lastmark, lastindex%s%s, c%d, v%d):'
+                     % (name, self.context(succ), self.live_args(outer), n, n))]
+        inner = outer + [(n, until, name)]
+
+        def iteration(ind, fail):
+            self.live = inner
+            self.seq(body, None, ind, fail, True, succ)
+            self.live = outer
+
+        def tail_(ind, fail):
+            self.seq(tail, None, ind, fail, inrep, succ)
+        if minimum:
+            self.w(1, 'if c%d < %d:' % (n, minimum))
+            iteration(2, 'return -1')
+        self.w(1, 'p%d = ptr' % n)
+        self.save(n, 1, False)
+        if code[until] == MAX_UNTIL:
+            # another iteration while the last one advanced, else the tail
+            self.w(1, 'if %sptr != v%d:' % ('' if maximum == MAXREPEAT else 'c%d < %d and ' % (n, maximum), n))
+            self.w(2, 's%d = mark[:lastmark + 1] if lastmark >= 0 else None' % n)
+            self.w(2, 'v%d = ptr' % n)
+            self.w(2, 'while True:')
+            iteration(3, 'break')
+            self.w(2, 'if m%d >= 0: mark[:m%d + 1] = s%d' % (n, n, n))
+            self.restore(n, 2, False)
+            self.w(2, 'ptr = p%d' % n)
+            tail_(1, 'return -1')
+        else:
+            # the tail first, then another iteration
+            if inrep:
+                self.w(1, 's%d = mark[:lastmark + 1] if lastmark >= 0 else None' % n)
+            self.w(1, 'while True:')
+            tail_(2, 'break')
+            self.restore(n, 1, inrep)
+            self.w(1, 'ptr = p%d' % n)
+            self.w(1, 'if %sptr == v%d: return -1' % ('' if maximum == MAXREPEAT else 'c%d >= %d or ' % (n, maximum), n))
+            self.w(1, 'v%d = ptr' % n)
+            iteration(1, 'return -1')
+        self.subs.append(self.out)
+        self.out = saved
         return name
 
     def atomic_body(self, body, stop, ind, fail, inrep, succ):
@@ -2439,7 +2549,6 @@ class _Gen:
                 w(1, 'if end - start < %d: return 0' % need)
             pc = 1 + code[1]
         w(1, 'adv = st.must_advance')
-        w(1, 'st.must_advance = False')
         if flags & INFO_PREFIX:
             w(1, 'adv = False')
             skip = code[6]
@@ -2588,29 +2697,43 @@ def _checked(fast, generic):
     return run
 
 
+def _rerun(st, generic):
+    """generic(st) after a specialized entry ran out of frames. The entries start from a reset state
+    (lastmark -1) and store into it only on success, but for the submatches' lastmark."""
+    st.lastmark = st.lastindex = -1
+    return generic(st)
+
+
 def _match_entry(st):
-    f = st.spec.match
-    if f is not None:
-        return f(st)
     sp = st.spec
-    if sp.budget <= 0:
-        return _specialize(sp, 'match')(st)
-    status = _match(st, 0, True)
-    sp.budget -= _CALL_COST + (st.ptr - st.start if status else 0)
-    return status
+    f = sp.match
+    if f is None:
+        if sp.budget > 0:
+            status = _match(st, 0, True)
+            sp.budget -= _CALL_COST + (st.ptr - st.start if status else 0)
+            return status
+        f = _specialize(sp, 'match')
+    try:
+        return f(st)
+    except RecursionError:
+        return _rerun(st, _match_top)
 
 
 def _search(st):
-    f = st.spec.search
-    if f is not None:
-        return f(st)
     sp = st.spec
-    if sp.budget <= 0:
-        return _specialize(sp, 'search')(st)
-    start = st.start
-    status = _search_generic(st)
-    sp.budget -= _CALL_COST + ((st.ptr if status else st.end) - start)
-    return status
+    f = sp.search
+    if f is None:
+        if sp.budget > 0:
+            status = _search_generic(st, sp)
+            if status >= 0:
+                sp.budget -= _CALL_COST + (st.ptr - st.start if status else 0)
+                return status
+            _state_reset(st)
+        f = _specialize(sp, 'search')
+    try:
+        return f(st)
+    except RecursionError:
+        return _rerun(st, _search_generic)
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,11 @@ PATTERNS = [
     ('([0a-z][a-z0-9]*,)+', 0), ('(?:[a-z][a-z0-9]*,)+x', 0), ('(?:ab)*abc', 0), ('(a|b)*c', 0), ('(?:ab)*?c', 0),
     (r'(?:\\.|[^"\\])*"', 0), (r'(\d+)(?:\.(\d+))?', 0), ('(a(b)?)+', 0), ('(?:(a)|b){2,3}', 0), ('(?:a|b){0,2}?c', 0),
     (r'(<(.+?)(\s.*?)?>)', 0), ('(?:x*)*y', 0), ('(?:a?)*?b', 0),
+    # repeats whose iterations backtrack: greedy, lazy, counted, nested, empty iterations, in lookarounds
+    ('(?:a|ab)*c', 0), ('(<(.|\\s)+>)', 0), (r'((?:(?!_)\w)+(?:[-._+:](?:(?!_)\w)+)*)::', 0), ('(?:a|ab)*?c', 0),
+    ('(?:(a)|ab){2,}?c', 0), ('(?:a|ab){1,3}c', 0), ('(?:(a)|b(a)?){2}', 0), ('(?:(?:a|ab)+b)*c', 0),
+    ('((?:a|ab)*(c|d))*e', 0), ('(x)((?:a|ab)*)(c)', 0), ('(?:a|)*b', 0), ('(?:|a)*?b', 0), ('(?=(?:a|ab)*c)a', 0),
+    ('(?:(b)|a(?:b|))*?c', 0), ('(?:(a|ab)(c|bcd))*(d*)', 0),
     # atomic groups, possessive groups, lookarounds
     ('(?>a|ab)c', 0), ('(?>a+)b', 0), ('(?:ab|a)*+c', 0), ('(?:a|b)++', 0), ('(?=ab)a', 0), ('(?!ab)a.', 0),
     ('(?<=a)b', 0), ('(?<!a)b', 0), ('(?=(a+))a*b\\1', 0), ('a(?!b|c)', 0), ('(?<=(a))(b)', 0),
@@ -32,7 +37,7 @@ PATTERNS = [
 SUBJECTS = ['', 'a', 'ab', 'abc', 'aab', 'abab', 'ababc', 'aaab', 'Python Perl', 'xx Tcl yy', 'abcd',
             'a b  c', 'ab1,cd,x', '"a\\"b"', 'xyz xaz', '12-3 45', 'hello World', 'Hello\nab\n',
             'STRASSE stra\xdfe', 'K k K', 'жук ab', '<a href> <b>', '1.25', 'aa aa', "'q' \"r\"", 'b',
-            'cd ef', 'abbc', 'xxxy', 'x', ' \n']
+            'cd ef', 'abbc', 'xxxy', 'x', ' \n', 'aabababc', 'xababce', 'ab_c-d::', '<a\nb>c>', 'abacbcdd']
 
 
 def results(p, s):
@@ -64,6 +69,11 @@ for src in ('[Ѐ-ӿ]\\W', '(?:ж.)*', '\U0001f600a', '.a$'):
     print(repr(src), [(len(p.findall(wide)), p.search(wide).span()) for _ in range(60)][-1])
 p = re.compile('(?:ab)*c')
 print([p.match('ab' * n + 'c').span() for n in (0, 1, 500)], re.match('a*?b', 'a' * 3000 + 'b').span())
+# iterations that backtrack, more of them than the stack holds frames
+p = re.compile('(?:a|ab)*c')
+print([[p.match('ab' * n + 'c').span(), p.search('x' + 'ab' * n + 'c').span()] for n in (0, 1, 500, 20000)])
+p = re.compile('(?:a|ab)*?c')
+print([p.match('ab' * n + 'c').span() for n in (0, 1, 500, 20000) for _ in range(3)])
 
 # Every pattern above compiled at its first use and checked against the interpreter on each call.
 CHILD = '''
