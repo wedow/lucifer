@@ -87,8 +87,8 @@ _Py_parse_inf_or_nan(const char *p, char **endptr)
  *
  * If the correct value would cause overflow, plus or minus %HUGE_VAL
  * is returned (according to the sign of the value), and %ERANGE is
- * stored in %errno. If the correct value would cause underflow,
- * zero is returned and %ERANGE is stored in %errno.
+ * stored in %errno. Underflow returns zero (or a subnormal) without
+ * setting %errno.
  *
  * This function resets %errno before calling strtod() so that
  * you can reliably detect overflow and underflow.
