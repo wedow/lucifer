@@ -350,13 +350,14 @@ def _getstring(string):
 
 
 def _ssize(value):
-    if not isinstance(value, int):
-        try:
-            method = type(value).__index__
-        except AttributeError:
-            raise TypeError("'%s' object cannot be interpreted as an integer" % type(value).__name__) from None
-        value = method(value)
-    value = int.__index__(value)    # the value, as C reads it: no subclass's methods run
+    if type(value) is not int:
+        if not isinstance(value, int):
+            try:
+                method = type(value).__index__
+            except AttributeError:
+                raise TypeError("'%s' object cannot be interpreted as an integer" % type(value).__name__) from None
+            value = method(value)
+        value = int.__index__(value)    # the value, as C reads it: no subclass's methods run
     if value > _SSIZE_MAX or value < _SSIZE_MIN:
         raise OverflowError("Python int too large to convert to C ssize_t")
     return value
@@ -371,7 +372,7 @@ class _Rep:
 class _State:
     """SRE_STATE."""
 
-    __slots__ = ('code', 'first', 'spec', 'text', 'string', 'data', 'isbytes', 'start', 'end', 'ptr', 'pos', 'endpos',
+    __slots__ = ('pattern', 'text', 'string', 'data', 'isbytes', 'start', 'end', 'ptr', 'pos', 'endpos',
                  'lastmark', 'lastindex', 'mark', 'match_all', 'must_advance')
 
 
@@ -385,9 +386,7 @@ def _state_init(pattern, string, start, end):
     start = 0 if start < 0 else length if start > length else start
     end = 0 if end < 0 else length if end > length else end
     st = _State()
-    st.code = pattern.code
-    st.first = pattern._first
-    st.spec = pattern._spec
+    st.pattern = pattern
     st.text = data if isbytes else _text_of(data)
     st.string = string
     st.data = data
@@ -399,10 +398,13 @@ def _state_init(pattern, string, start, end):
     st.endpos = end
     st.lastmark = -1
     st.lastindex = -1
-    st.mark = [None] * (2 * pattern.groups)
+    st.mark = [None] * (2 * pattern.groups) if pattern.groups else _NO_MARKS
     st.match_all = False
     st.must_advance = False
     return st
+
+
+_NO_MARKS = ()     # the marks of a pattern without groups, which nothing writes
 
 
 def _state_reset(st):
@@ -540,7 +542,7 @@ def _count(st, code, text, pattern, ptr, end, maxcount):
 def _match(st, pattern, toplevel):
     """SRE(match): does the code at `pattern` match at st.ptr? Returns 1 and
     leaves the end in st.ptr, or 0."""
-    code = st.code
+    code = st.pattern.code
     text = st.text
     end = st.end
     start = st.start
@@ -1324,7 +1326,7 @@ def _search_generic(st, sp=None):
     st.start and st.ptr, or 0. With a _Spec, each further attempt is charged
     to its budget, and once that is spent the search stops undecided: -1, with
     the next position in st.start."""
-    code = st.code
+    code = st.pattern.code
     text = st.text
     ptr = st.start
     end = st.end
@@ -1352,7 +1354,7 @@ def _search_generic(st, sp=None):
         elif flags & INFO_CHARSET:
             charset = 5
         pattern = 1 + code[1]
-    first = st.first
+    first = st.pattern._first
 
     if prefix is not None:
         # the pattern starts with a literal prefix
@@ -2705,7 +2707,7 @@ def _rerun(st, generic):
 
 
 def _match_entry(st):
-    sp = st.spec
+    sp = st.pattern._spec
     f = sp.match
     if f is None:
         if sp.budget > 0:
@@ -2720,7 +2722,7 @@ def _match_entry(st):
 
 
 def _search(st):
-    sp = st.spec
+    sp = st.pattern._spec
     f = sp.search
     if f is None:
         if sp.budget > 0:
