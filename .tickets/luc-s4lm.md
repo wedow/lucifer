@@ -31,3 +31,7 @@ luc-custom3: set(genexpr) now runs the generator in its loop (fc47098: a set.__i
 **2026-11-10T21:46:59Z**
 
 luc-custom4: the opaque-call bounds are now three frames deep (four in kernel code) with up to four calls per inlined frame (c8b87e6; mako -13%, raytrace -4%, telco/pickle/unpickle -3 to -4%). Measured before taking the rest: generator resumes through their own unit are ~10k per loop in telco, ~47k in nqueens, ~30k in raytrace, under 1% of each at ~200 instructions a resume, and the lent frames pushed for calls from inlined frames are 2-6% of instructions (mako 558k pushes per loop, json_dumps 400k, pickle 187k, ~55 instructions each with their pop). Neither lazy frames nor calls from resumed generator bodies pays its cost on these programs yet; the generator objects made per genexpr call remain (virtual generators not started).
+
+**2026-11-11T00:09:27Z**
+
+Correction (d683a88): the four calls per inlined frame went back to one after AWFY Json's steady state measured 30% slower with them; the bound is one frame deeper than master (two, three in kernel code).
