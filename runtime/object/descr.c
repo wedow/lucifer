@@ -1493,7 +1493,8 @@ prim_member_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 /* member_peek(d, obj): member_get, but MISSING for an object slot that is
    unset, where member_get raises AttributeError: the optional lookups
-   (getattr with a default, hasattr) that would only catch it. */
+   (getattr with a default, hasattr) that would only catch it. It runs no
+   Python, where member_get may (making the AttributeError does). */
 static PyObject *
 prim_member_peek(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -1502,11 +1503,16 @@ prim_member_peek(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return NULL;
     }
     PyMemberDef *def = ((PyMemberDescrObject *)args[0])->d_member;
-    if (def->type == Py_T_OBJECT_EX
-        && __atomic_load_n((PyObject **)((char *)args[1] + def->offset), __ATOMIC_ACQUIRE) == NULL) {
-        return Py_NewRef(LU_MISSING);
+    if (def->type != Py_T_OBJECT_EX) {
+        return PyMember_GetOne((const char *)args[1], def);
     }
-    return PyMember_GetOne((const char *)args[1], def);
+    /* Read as PyMember_GetOne reads it, without the AttributeError, whose
+       making runs Python (its class has a Python __init__). */
+    PyObject *v;
+    Py_BEGIN_CRITICAL_SECTION(args[1]);
+    v = Py_XNewRef(*(PyObject **)((char *)args[1] + def->offset));
+    Py_END_CRITICAL_SECTION();
+    return v != NULL ? v : Py_NewRef(LU_MISSING);
 }
 
 static PyObject *
@@ -1801,7 +1807,7 @@ prim_kernel_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 PyMethodDef lu_prim_descr_methods[] = {
     FAST(kernel_get), FAST(setattr_native),
     FAST(make_function), FAST(make_getset), PURE(getset_kernel), FAST(getset_get),
-    FAST(getset_set), PURE(member_get), PURE(member_peek), FAST(member_set), PURE(descr_type), FAST(bind),
+    FAST(getset_set), FAST(member_get), PURE(member_peek), FAST(member_set), PURE(descr_type), FAST(bind),
     FAST(method_new), FAST(instancemethod_new), PURE(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set), FAST(kernel_twin), FAST(next_missing_set), FAST(next_missing_of),
     { NULL, NULL, 0, NULL },
 };

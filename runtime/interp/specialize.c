@@ -331,12 +331,19 @@ instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, ui
                 *second = (uint32_t)offset;
                 op = LOAD_ATTR_INSTANCE_VALUE;
             }
+            if (op != LOAD_ATTR_INSTANCE_VALUE || kind != DESCR_NON_DESCRIPTOR || method || !cacheable(*descr)) {
+                Py_CLEAR(*descr);
+            }
+            /* else the class's value, for compiled code to answer an
+               instance that has none of its own (an _IOBase's __closed) */
         }
-        else if ((hint = dict_hint(owner, managed, name)) >= 0) {
-            *second = (uint32_t)hint;
-            op = LOAD_ATTR_WITH_HINT;
+        else {
+            if ((hint = dict_hint(owner, managed, name)) >= 0) {
+                *second = (uint32_t)hint;
+                op = LOAD_ATTR_WITH_HINT;
+            }
+            Py_CLEAR(*descr);
         }
-        Py_CLEAR(*descr);
     }
     else if (kind == DESCR_ABSENT || (kind == DESCR_NON_DESCRIPTOR && !method && dict_hint(owner, managed, name) >= 0)) {
         /* In the instance's dict, at an entry whose key is this very str;
