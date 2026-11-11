@@ -2649,7 +2649,7 @@ PyMethodDef lu_prim_type_methods[] = {
     FAST(type_subclasses), FAST(type_modified), PURE(is_subtype), FAST(alloc), FAST(new_check),
     PURE(type_tp_name), FAST(type_text_signature), FAST(type_static_module), PURE(size),
     PURE(truth_exact), PURE(instance_dict), FAST(instance_load), FAST(instance_store), FAST(set_class), FAST(caller_globals), FAST(super_args),
-    FAST(error), FAST(attribute_error), FAST(ns_get), FAST(ns_set), FAST(ns_del), FAST(ns_items),
+    FAST(error), FAST(attribute_error), FAST(ns_get), FAST(ns_set), FAST(ns_del), PURE(ns_items),
     PURE(kind),
     FAST(cell_get), FAST(cell_set), FAST(address), FAST(object_hash),
     FAST(object_is_immortal), FAST(enable_deferred),

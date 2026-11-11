@@ -5,6 +5,24 @@
 
 #include "lucifer.h"
 
+/* A tuple of n new references, which it takes; NULL (and all released)
+   when one of them or the tuple could not be made. */
+static inline PyObject *
+lu_tuple_of(Py_ssize_t n, PyObject **items)
+{
+    PyObject *t = PyTuple_New(n);
+    for (Py_ssize_t i = 0; i < n; i++) {
+        if (t == NULL || items[i] == NULL) {
+            Py_CLEAR(t);
+            Py_XDECREF(items[i]);
+        }
+        else {
+            PyTuple_SET_ITEM(t, i, items[i]);
+        }
+    }
+    return t;
+}
+
 /* Per-interpreter state of the _lucifer module. */
 struct lu_prim_state {
     PyInterpreterState *interp;         /* the interpreter the module belongs to */

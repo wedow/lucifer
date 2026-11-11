@@ -301,7 +301,12 @@ C extension ─▶ C-API function ─▶ thunk ───────┤      └
   Kernel mutators that CPython makes atomic (`list.append`, `dict.__setitem__`,
   `set.add`, …) bracket their commit with the same `PyCriticalSection` C uses, so
   extension code and kernel code exclude each other. Hash and `__eq__` callbacks
-  run outside commit regions and revalidate afterwards (research 02 §3.3).
+  run outside commit regions and revalidate afterwards (research 02 §3.3). The
+  exception is a merge from a set or dict (`set.update`, `dict.update`,
+  `{**a, **b}`), one primitive that holds both objects' sections for the whole
+  merge as CPython's does: Python runs inside them, `__eq__` for a key only it
+  can judge and `__del__` of a replaced value, and the sections are suspended
+  if that code blocks, as in CPython.
 
 ### 4.5 JIT representation freedom
 
@@ -451,8 +456,9 @@ A task may leave its carrier only at a park or a safepoint, and only when
   counts as detached. That is exactly cp314t.
 - **Invariants at a migration point:**
   - no C frame;
-  - no critical section held (kernel commit regions contain no safepoint, and a
-    section suspended by a detach is inside C);
+  - no critical section held (kernel commit regions contain no safepoint, a
+    section suspended by a detach is inside C, and the Python a merge
+    primitive runs inside its sections (§4.4) is a nested eval loop, pinned);
   - no open QSBR read interval (primitives close theirs before returning).
 - **Identity-keyed state uses the task ident, never the carrier.** This covers
   the owners of `RLock`, `_thread.lock` and import locks, `threading.local`, and

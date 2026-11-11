@@ -89,7 +89,7 @@ _PyParkingLot_Park(const void *addr, const void *expected, size_t size,
         return Py_PARK_AGAIN;
     }
     lu_wait_begin(&wait.wait);
-    wait.wait.signals = (flags & _PY_LOCK_HANDLE_SIGNALS) != 0;
+    wait.wait.signals = (flags & (_PY_LOCK_HANDLE_SIGNALS | _PY_LOCK_FAIL_IF_INTERRUPTED)) != 0;
     enqueue(bucket, &wait);
     pthread_mutex_unlock(&bucket->lock.mutex);
 

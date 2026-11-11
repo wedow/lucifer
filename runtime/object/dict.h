@@ -173,6 +173,12 @@ PyObject *lu_dict_copy(PyDictObject *mp);
 /* The first step of updating mp from a dict: clones the table when mp is empty
    and the other is clean (1), else makes room for the entries (0); -1 on error. */
 int lu_dict_merge_prepare(PyDictObject *mp, PyDictObject *other);
+/* dict_dict_merge: the entries of `other` into mp under both dicts'
+   critical sections, which the caller holds for the whole merge as CPython
+   does; `override` 0 keeps mp's keys, 1 replaces their values, 2 raises
+   KeyError. __eq__ judges what the probe cannot, inside the sections
+   (DESIGN 4.4), and a change to other's size raises RuntimeError. */
+int lu_dict_merge_dict(PyDictObject *mp, PyDictObject *other, int override);
 /* The entry number of exact-str `key` in a namespace dict, or -1. */
 Py_ssize_t lu_ns_index(PyObject *dict, PyObject *key);
 /* Lookup and store of an exact str or int key in any dict, decided without
