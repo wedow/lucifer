@@ -1675,9 +1675,13 @@ class _Gen:
         return '%s(%s)' % (neg, e)
 
     def charset(self, s, c):
-        """The membership of c in the set whose items start at s, as one expression."""
+        """The membership of c in the set whose items start at s, as one expression. A set of several
+        items, or a big charset, is a table for the code points below 256 and its items that reach
+        above."""
         code = self.code
+        start = s
         parts = []
+        high = []               # the parts that may hold a code point above 255
         neg = False
         if code[s] == NEGATE:
             neg = True
@@ -1688,16 +1692,22 @@ class _Gen:
                 break
             if op == LITERAL:
                 parts.append('%s == %d' % (c, code[s + 1]))
+                if code[s + 1] > 255:
+                    high.append(parts[-1])
                 s += 2
             elif op == RANGE:
                 parts.append('%d <= %s <= %d' % (code[s + 1], c, code[s + 2]))
+                if code[s + 2] > 255:
+                    high.append(parts[-1])
                 s += 3
             elif op == RANGE_UNI_IGNORE:
                 lo, hi = code[s + 1], code[s + 2]
                 parts.append('%d <= %s <= %d or %d <= _upper_unicode(%s) <= %d' % (lo, c, hi, lo, c, hi))
+                high.append(parts[-1])
                 s += 3
             elif op == CATEGORY:
                 parts.append(self.category(code[s + 1], c))
+                high.append(parts[-1])
                 s += 2
             elif op == CHARSET:
                 table = bytes([(code[s + 1 + (i >> 5)] >> (i & 31)) & 1 for i in range(256)])
@@ -1705,9 +1715,14 @@ class _Gen:
                 s += 9
             elif op == BIGCHARSET:
                 parts.append('_charset(_code, %d, %s)' % (s, c))   # it and the items after it
+                high.append(parts[-1])
                 break
             else:
                 raise _Unsupported
+        if len(parts) > 2 or op == BIGCHARSET:
+            table = bytes([1 if _charset(code, start, i) else 0 for i in range(256)])
+            e = ' or '.join(['(%s)' % p for p in high]) or 'False'
+            return '(%s[%s] != 0 if %s < 256 else %s(%s))' % (self.const(table), c, c, 'not ' if neg else '', e)
         e = ' or '.join(['(%s)' % p for p in parts]) or 'False'
         return 'not (%s)' % e if neg else e
 

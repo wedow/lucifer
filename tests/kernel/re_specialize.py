@@ -33,11 +33,15 @@ PATTERNS = [
     # case-insensitive and Unicode
     ('hello', re.I), ('[a-z]+', re.I), ('stra\xdfe', re.I), ('k', re.I), (r'\w+', 0), (r'\w+', re.A), ('[Ѐ-ӿ]+', 0),
     (r'\d+', 0), (r'\s+', 0), ('.', re.S),
+    # sets of several items, below and above 255
+    ('[^\\x00-\\x08\\u0100-\\u017f\\U0001f600]+', 0), ('[a-cx-z\\xdf\\u0400-\\u04ff]+', re.I),
+    (r'[\s\d\u2000-\u200a_]+', 0), ('[\\x01-\\x08\\x0b\\x0e-\\x1f\\x7f-\\x9f\\ufdd0-\\ufdef\\U0001fffe]', 0),
 ]
 SUBJECTS = ['', 'a', 'ab', 'abc', 'aab', 'abab', 'ababc', 'aaab', 'Python Perl', 'xx Tcl yy', 'abcd',
             'a b  c', 'ab1,cd,x', '"a\\"b"', 'xyz xaz', '12-3 45', 'hello World', 'Hello\nab\n',
             'STRASSE stra\xdfe', 'K k K', 'жук ab', '<a href> <b>', '1.25', 'aa aa', "'q' \"r\"", 'b',
-            'cd ef', 'abbc', 'xxxy', 'x', ' \n', 'aabababc', 'xababce', 'ab_c-d::', '<a\nb>c>', 'abacbcdd']
+            'cd ef', 'abbc', 'xxxy', 'x', ' \n', 'aabababc', 'xababce', 'ab_c-d::', '<a\nb>c>', 'abacbcdd',
+            '\x01ab\u2003c\U0001f600\u015d\x85 ЖЖ\ufdd5']
 
 
 def results(p, s):
