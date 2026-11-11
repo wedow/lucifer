@@ -3746,6 +3746,82 @@ guard_type_version(struct ctx *c, PyTypeObject *t, uint32_t version)
     I(c, g)->imm2 = GV_TYPE_ITSELF;
 }
 
+/* super().name of a known class and an instance of a known (or guarded)
+   exact type (_PySuper_Lookup, folded): the name's value in the type's MRO after the
+   class, kept while the type's version holds. In the method form a
+   function or a method descriptor is pushed with the instance, as
+   CPython's LOAD_SUPER_ATTR_METHOD does; a plain class value is pushed
+   as it is. Anything else (a descriptor that binds, a miss) is left to
+   the generic path. Returns 1 when folded. */
+static int
+super_attr_fold(struct ctx *c, int oparg)
+{
+    lu_v selfv = peek(c, 1);
+    PyObject *sup = known(c, peek(c, 3)), *cls = known(c, peek(c, 2));
+    if (sup != (PyObject *)&PySuper_Type || cls == NULL || !PyType_Check(cls) || nospec(c, c->pc)) {
+        return 0;
+    }
+    /* An instance of no known type is taken to be of the class itself, the
+       usual case, under a guard: one that keeps failing makes the site
+       NOSPEC, and the generic path serves it. */
+    PyTypeObject *st = known_type(c, selfv);
+    int speculate = st == NULL;
+    st = speculate ? (PyTypeObject *)cls : st;
+    if (PyType_IsSubtype(st, &PyType_Type) || !PyType_IsSubtype(st, (PyTypeObject *)cls)) {
+        return 0;
+    }
+    uint32_t version = 0;
+    if (!(st->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) && !type_fact(c, st, &version)) {
+        return 0;
+    }
+    PyObject *name = PyTuple_GET_ITEM(c->code->co_names, oparg >> 2);
+    PyObject *mro = st->tp_mro, *res = NULL;
+    Py_ssize_t n = mro != NULL ? PyTuple_GET_SIZE(mro) : 0, i = 0;
+    while (i < n && PyTuple_GET_ITEM(mro, i) != cls) {
+        i++;
+    }
+    for (i++; i < n && res == NULL; i++) {
+        PyObject *dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i));
+        res = dict != NULL ? lu_ns_get(dict, name) : NULL;     /* a new reference */
+    }
+    int method = oparg & 1;
+    int plain = res != NULL && Py_TYPE(res)->tp_descr_get == NULL;
+    int unbound = res != NULL && (PyFunction_Check(res) || (Py_TYPE(res)->tp_flags & Py_TPFLAGS_METHOD_DESCRIPTOR));
+    if (res == NULL || !(plain || (method && unbound))
+        || (version != 0 && __atomic_load_n(&st->tp_version_tag, __ATOMIC_ACQUIRE) != version)) {
+        Py_XDECREF(res);
+        return 0;
+    }
+    if (speculate) {
+        guard_type(c, selfv, st);
+    }
+    if (version != 0) {
+        guard_type_version(c, st, version);
+    }
+    int own;
+    lu_v self = pop(c, &own);
+    for (int k = 0; k < 2; k++) {
+        int o;
+        lu_v w = pop(c, &o);
+        release(c, w, o);
+    }
+    push(c, konst(c, res), 0);
+    Py_DECREF(res);             /* the unit holds its constants */
+    if (method) {
+        if (plain) {
+            release(c, self, own);
+            push(c, LU_NOV, 0);
+        }
+        else {
+            push(c, self, own);
+        }
+    }
+    else {
+        release(c, self, own);
+    }
+    return 1;
+}
+
 /* A primitive as IR, when its operands' types allow: the result, or LU_NOV. */
 static lu_v
 intrinsic(struct ctx *c, const char *name, lu_v *args, int nargs, int *owned)
@@ -5704,6 +5780,9 @@ translate(struct ctx *c)
     case CALL:
         return call(c);
     case LOAD_SUPER_ATTR: {
+        if (super_attr_fold(c, oparg)) {
+            return 0;
+        }
         if (!opaque_call(c)) {
             return -1;
         }
