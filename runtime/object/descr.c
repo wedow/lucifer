@@ -1606,7 +1606,13 @@ field_offset(PyObject *obj, PyObject *index)
 PyObject *
 lu_field_get(PyObject *obj, Py_ssize_t off)
 {
-    PyObject *v;
+    /* Without the lock first, as a list's item is read: the reference is
+       taken only if the value is alive and still the field's. */
+    PyObject **field = (PyObject **)((char *)obj + off);
+    PyObject *v = lu_try_xget_ref(field);
+    if (v != NULL) {
+        return v;
+    }
     Py_BEGIN_CRITICAL_SECTION(obj);
     v = *(PyObject **)((char *)obj + off);
     v = Py_NewRef(v != NULL ? v : Py_None);
@@ -1620,7 +1626,7 @@ lu_field_set(PyObject *obj, Py_ssize_t off, PyObject *value)
     PyObject *old;
     Py_BEGIN_CRITICAL_SECTION(obj);
     old = *(PyObject **)((char *)obj + off);
-    *(PyObject **)((char *)obj + off) = Py_NewRef(value);
+    _Py_atomic_store_ptr_release((PyObject **)((char *)obj + off), Py_NewRef(value));
     Py_END_CRITICAL_SECTION();
     Py_XDECREF(old);            /* outside the lock: a finalizer may run */
 }

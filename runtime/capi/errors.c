@@ -106,6 +106,21 @@ plain_exception_call(PyObject *type, PyObject *const *args, size_t nargsf, PyObj
     return exc;
 }
 
+/* StopIteration's own construction, which StopIteration_init adds to
+   BaseException's: its value is the first argument (None, kept as NULL). */
+static PyObject *
+stop_iteration_call(PyObject *type, PyObject *const *args, size_t nargsf, PyObject *kwnames)
+{
+    if (kwnames != NULL && PyTuple_GET_SIZE(kwnames) > 0) {
+        return _PyObject_MakeTpCall(PyThreadState_Get(), type, args, PyVectorcall_NARGS(nargsf), kwnames);
+    }
+    PyObject *exc = plain_exception_call(type, args, nargsf, NULL);
+    if (exc != NULL && PyVectorcall_NARGS(nargsf) > 0 && args[0] != Py_None) {
+        ((PyStopIterationObject *)exc)->value = Py_NewRef(args[0]);
+    }
+    return exc;
+}
+
 void
 lu_exc_vectorcalls(void)
 {
@@ -114,6 +129,10 @@ lu_exc_vectorcalls(void)
         if (PyType_IsSubtype(*t, (PyTypeObject *)PyExc_BaseException) && plain_exception(*t)) {
             (*t)->tp_vectorcall = plain_exception_call;
         }
+    }
+    PyTypeObject *stop = (PyTypeObject *)PyExc_StopIteration, *base = (PyTypeObject *)PyExc_BaseException;
+    if (_PyType_Lookup(stop, LU_ID(__new__)) == _PyType_Lookup(base, LU_ID(__new__))) {
+        stop->tp_vectorcall = stop_iteration_call;
     }
 }
 

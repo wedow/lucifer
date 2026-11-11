@@ -2136,20 +2136,6 @@ prim_is_subtype(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return bool_of(PyType_IsSubtype((PyTypeObject *)args[0], (PyTypeObject *)args[1]));
 }
 
-/* tp_new_wrapper's checks for owner.__new__(cls): cls is a subtype of owner
-   and owner is its static base, or an extension type inherited owner's tp_new. */
-/* One of the runtime's own static types, not an extension's. */
-static int
-is_runtime_type(PyTypeObject *tp)
-{
-    for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
-        if (*t == tp) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 /* Set by C calling a builtin's tp_new directly (slot_tp_new_builtin): there is
    no tp_new_wrapper in that call to check, and the first check made on behalf
    of the call is the one it stands for. */
@@ -2161,15 +2147,14 @@ lu_new_check_skip(int on)
     new_check_skipped = on;
 }
 
+/* tp_new_wrapper's checks for owner.__new__(cls): cls is a subtype of owner
+   and owner is its static base, or an extension type inherited owner's tp_new. */
 static int
 check_new(PyTypeObject *tp, PyTypeObject *owner)
 {
     if (new_check_skipped) {
         new_check_skipped = 0;
         return 0;
-    }
-    if (tp == owner && !(tp->tp_flags & Py_TPFLAGS_HEAPTYPE)) {
-        return 0;   /* a static type is its own static base, which no refusal below allows */
     }
     PyTypeObject *staticbase = tp;
     if (!PyType_IsSubtype(tp, owner)) {
@@ -2184,7 +2169,7 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
     }
     /* Exception types share one allocation rule: a static exception class
        builds its instances with its base exception's __new__. */
-    int inherited = !is_runtime_type(staticbase) && staticbase->tp_new == owner->tp_new;
+    int inherited = !is_static_builtin(staticbase) && staticbase->tp_new == owner->tp_new;
     if (staticbase != owner && !inherited
         && !(PyExceptionClass_Check(staticbase) && PyExceptionClass_Check(owner))) {
         if (staticbase->tp_new == NULL) {
