@@ -39,24 +39,6 @@ int_of(Py_ssize_t n)
     return PyLong_FromLongLong(n);
 }
 
-/* A tuple of n new references, which it takes; NULL (and all released)
-   when one of them or the tuple could not be made. */
-static PyObject *
-tuple_of(Py_ssize_t n, PyObject **items)
-{
-    PyObject *t = PyTuple_New(n);
-    for (Py_ssize_t i = 0; i < n; i++) {
-        if (t == NULL || items[i] == NULL) {
-            Py_CLEAR(t);
-            Py_XDECREF(items[i]);
-        }
-        else {
-            PyTuple_SET_ITEM(t, i, items[i]);
-        }
-    }
-    return t;
-}
-
 static PyObject *
 bool_of(int v)
 {
@@ -67,7 +49,8 @@ bool_of(int v)
    MISSING. Lock-free it takes a reference to the key or value only if that
    is alive and the entry is still in the dict's table (lu_try_xget_ref);
    when it cannot, it reads under the dict's critical section. Within one
-   table an entry's key and hash never change, so the three come from the
+   table and serial an entry's key and hash never change (popitem hands
+   entry numbers out again under a new serial), so the three come from the
    same entry. */
 static PyObject *
 read_entry(PyObject *d, Py_ssize_t ix, int what)
@@ -75,14 +58,16 @@ read_entry(PyObject *d, Py_ssize_t ix, int what)
     PyDictObject *mp = (PyDictObject *)d;
     PyObject *result = NULL;
     PyDictKeysObject *dk = __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE);
+    Py_ssize_t serial = __atomic_load_n(&dk->dk_serial, __ATOMIC_ACQUIRE);
     if (ix >= 0 && ix < dk->dk_nentries) {
         PyObject *ref = lu_try_xget_ref(what == READ_VALUE ? lu_dk_value_slot(dk, ix)
                                                            : lu_dk_key_slot(dk, ix));
         PyObject *value = what == READ_ENTRY && ref != NULL ? lu_try_xget_ref(lu_dk_value_slot(dk, ix)) : NULL;
         if (ref != NULL && dk == __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE)
+            && __atomic_load_n(&dk->dk_serial, __ATOMIC_ACQUIRE) == serial
             && lu_dk_value(dk, ix) != NULL && (what != READ_ENTRY || value != NULL)) {
             result = what == READ_ENTRY
-                ? tuple_of(4, (PyObject *[]){ int_of(ix + 1), ref, value, int_of(lu_dk_hash_of(dk, ix, ref)) }) : ref;
+                ? lu_tuple_of(4, (PyObject *[]){ int_of(ix + 1), ref, value, int_of(lu_dk_hash_of(dk, ix, ref)) }) : ref;
         }
         else {
             Py_XDECREF(ref);
@@ -94,7 +79,7 @@ read_entry(PyObject *d, Py_ssize_t ix, int what)
         dk = mp->ma_keys;
         if (ix >= 0 && ix < dk->dk_nentries && lu_dk_value(dk, ix) != NULL) {
             result = what == READ_ENTRY
-                ? tuple_of(4, (PyObject *[]){ int_of(ix + 1), lu_new_ref_with_lock(lu_dk_key(dk, ix)),
+                ? lu_tuple_of(4, (PyObject *[]){ int_of(ix + 1), lu_new_ref_with_lock(lu_dk_key(dk, ix)),
                                               lu_new_ref_with_lock(lu_dk_value(dk, ix)), int_of(lu_dk_hash(dk, ix)) })
                 : lu_new_ref_with_lock(what == READ_VALUE ? lu_dk_value(dk, ix) : lu_dk_key(dk, ix));
         }
@@ -288,25 +273,17 @@ prim_dict_copy(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return copy;
 }
 
-/* dict_merge(d, other, override, i): dict_dict_merge under both critical
-   sections from entry i on: None once done, else (entry, key, value, hash,
-   len(other)) of the entry the kernel must handle before it resumes at the
-   next one; len(other) is what the kernel's "mutated" check compares with. */
+/* dict_merge(d, other, override): dict_dict_merge, whole under both
+   critical sections. */
 static PyObject *
 prim_dict_merge(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(4); DICT(0); DICT(1); SSIZE(2, override); SSIZE(3, pos);
-    PyDictObject *mp = (PyDictObject *)args[0], *other = (PyDictObject *)args[1];
-    PyObject *result = NULL;
-    Py_BEGIN_CRITICAL_SECTION2(mp, other);
-    if (lu_dict_merge_dict(mp, other, (int)override, &pos) == 0) {
-        PyDictKeysObject *dk = other->ma_keys;
-        result = pos < 0 ? Py_NewRef(Py_None)
-            : tuple_of(5, (PyObject *[]){ int_of(pos), Py_NewRef(lu_dk_key(dk, pos)), Py_NewRef(lu_dk_value(dk, pos)),
-                                          int_of(lu_dk_hash(dk, pos)), int_of(other->ma_used) });
-    }
+    ARGS(3); DICT(0); DICT(1); SSIZE(2, override);
+    int err;
+    Py_BEGIN_CRITICAL_SECTION2(args[0], args[1]);
+    err = lu_dict_merge_dict((PyDictObject *)args[0], (PyDictObject *)args[1], (int)override);
     Py_END_CRITICAL_SECTION2();
-    return result;
+    return err < 0 ? NULL : Py_NewRef(Py_None);
 }
 
 static PyObject *

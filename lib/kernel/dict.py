@@ -191,24 +191,10 @@ def next_set_entry(s, i):
 # update, merge and fromkeys (dict_merge, merge_from_seq2, _PyDict_FromKeys)
 
 def merge_dict(a, b, override):
-    """dict_dict_merge: the entries of the dict b into a; override 0 keeps the
-    keys a has, 1 replaces them, 2 raises KeyError for them. The merge runs
-    under both dicts' locks; an entry whose key only __eq__ can judge (or, for
-    override 2, one a holds) comes back here, is handled outside the locks,
-    and the merge goes on after it."""
-    stop = dict_merge(a, b, override, 0)
-    while stop is not None:
-        i, key, value, h, n = stop
-        if override == 1:
-            store(a, key, h, value)
-        elif lookup(a, key, h) >= 0:
-            if override != 0:
-                key_error(key)
-        else:
-            store(a, key, h, value)
-        if size(b) != n:
-            error(RuntimeError, 'dict mutated during update')
-        stop = dict_merge(a, b, override, i + 1)
+    """dict_dict_merge: the entries of the dict b into a under both dicts'
+    locks; override 0 keeps the keys a has, 1 replaces them, 2 raises
+    KeyError for them."""
+    dict_merge(a, b, override)
 
 
 def mapping_keys(o):

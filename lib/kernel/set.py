@@ -153,22 +153,15 @@ def make_basetype(cls, iterable):
 
 def merge(so, other):
     """set_merge_lock_held: the keys of the set other into so, under both
-    sets' locks. A key that meets one only __eq__ can judge comes back here,
-    is added with __eq__ outside the locks, and the merge goes on after it."""
+    sets' locks."""
     if other is so or size(other) == 0:
         return
-    stop = set_merge(so, other, 0)
-    while stop is not None:
-        add_entry(so, stop[1], stop[2])
-        stop = set_merge(so, other, stop[0] + 1)
+    set_merge(so, other)
 
 
 def update_dict(so, other):
-    """set_update_dict_lock_held, as merge."""
-    stop = set_merge_dict(so, other, 0)
-    while stop is not None:
-        add_entry(so, stop[1], stop[2])
-        stop = set_merge_dict(so, other, stop[0] + 1)
+    """set_update_dict_lock_held."""
+    set_merge_dict(so, other)
 
 
 get_iter = _iter.get_iter

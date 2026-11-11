@@ -89,3 +89,107 @@ try:
     print('mutated', 'no error')
 except RuntimeError as e:
     print('mutated', e)
+
+
+# A table holding a non-str key grows for str keys merged in: it must stay a
+# table that keeps each entry's hash.
+big = int('1' + '0' * 20)
+d = {big: 'x', 5: 'y', (1, 2): 'z'}
+d.update({c: 0 for c in 'abcdefghij'})
+fresh = (int('1' + '0' * 20), int('5'), tuple([1, 2]))     # equal keys, other objects
+print('resize kind', [d.get(k) for k in fresh], len(d), sorted(k for k in d if type(k) is str))
+
+
+# A value replaced by the merge whose __del__ changes the source.
+class Drops:
+    def __del__(self):
+        source['z'] = 1
+
+
+target = {1: Drops()}
+source = {1: 2, 3: 4}
+try:
+    target.update(source)
+    print('del mutated', 'no error')
+except RuntimeError as e:
+    print('del mutated', e)
+
+
+# __eq__ that changes the source during the merge: a set cleared, a dict that
+# grows (set.update reads it as it is; dict.update raises).
+class Clears(K):
+    __hash__ = K.__hash__
+
+    def __eq__(self, other):
+        self.target.clear()
+        return super().__eq__(other)
+
+
+source = {Clears(1), 2, 3}
+for k in source:
+    if type(k) is Clears:
+        k.target = source
+s = {K(1)}
+s.update(source)
+print('eq clears source', sorted(type(k).__name__ for k in s), sorted(k for k in s if type(k) is int))
+
+
+class Grows(K):
+    __hash__ = K.__hash__
+
+    def __eq__(self, other):
+        self.target.update({100 + i: i for i in range(40)})
+        return super().__eq__(other)
+
+
+g = Grows(1)
+source = {g: 0, 2: 0, 3: 0}
+g.target = source
+s = {K(1)}
+s.update(source)
+print('eq grows dict source', len(s), sum(type(k) is int for k in s))
+g.target = source = {g: 0, 2: 0, 3: 0}
+try:
+    {K(1): 0}.update(source)
+    print('eq grows dict update', 'no error')
+except RuntimeError as e:
+    print('eq grows dict update', e)
+
+
+# __eq__ that, inside a merge of its own (a third object's lock), adds to the
+# set being merged into, and one that reads a dict, then adds.
+outer = {K(1)}
+
+
+class AddsToOuter(K):
+    __hash__ = K.__hash__
+
+    def __eq__(self, other):
+        outer.add(7)
+        return super().__eq__(other)
+
+
+class Nested(K):
+    __hash__ = K.__hash__
+
+    def __eq__(self, other):
+        third = {AddsToOuter(5)}
+        third.update({AddsToOuter(5)})
+        return super().__eq__(other)
+
+
+outer.update({Nested(1), 2})
+print('eq nests merge', len(outer), sorted(k for k in outer if type(k) is int))
+lookup = {'x': 8}
+
+
+class ReadsThenAdds(K):
+    __hash__ = K.__hash__
+
+    def __eq__(self, other):
+        outer.add(lookup['x'])
+        return super().__eq__(other)
+
+
+outer.update({ReadsThenAdds(1)})
+print('eq reads then adds', sorted(k for k in outer if type(k) is int))

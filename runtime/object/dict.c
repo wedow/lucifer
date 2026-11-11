@@ -668,6 +668,7 @@ static int
 resize(PyDictObject *mp, uint8_t log2_newsize, int unicode)
 {
     PyDictKeysObject *old = mp->ma_keys;
+    unicode = unicode && lu_dk_is_unicode(old);     /* a general table's keys keep their hashes */
     PyDictKeysObject *dk = new_keys(log2_newsize, unicode);
     if (dk == NULL) {
         return -1;
@@ -935,38 +936,75 @@ lu_dict_merge_prepare(PyDictObject *mp, PyDictObject *other)
     return 0;
 }
 
-int
-lu_dict_merge_dict(PyDictObject *mp, PyDictObject *other, int override, Py_ssize_t *pos)
+void _PyErr_SetKeyError(PyObject *arg);
+
+/* _Py_dict_lookup under mp's critical section, where __eq__ judges what the
+   probe cannot: the entry of `key`, -1 when absent, -2 on error. A
+   comparison that changed the table or the candidate's entry starts the
+   probe over. */
+static Py_ssize_t
+lookup_locked(PyDictObject *mp, PyObject *key, Py_hash_t hash)
 {
-    Py_ssize_t ix = *pos;
-    *pos = -1;
-    if (ix == 0) {
-        int done = lu_dict_merge_prepare(mp, other);
-        if (done != 0) {
-            return done < 0 ? -1 : 0;
+    Py_ssize_t steps = 0;
+    for (;;) {
+        PyDictKeysObject *dk = mp->ma_keys;
+        Py_ssize_t ix = probe_keys(dk, key, hash, &steps, 1);
+        if (ix > LU_PROBE_CANDIDATE(0)) {
+            return ix;
+        }
+        ix = LU_PROBE_CANDIDATE(ix);            /* the encoding is its own inverse */
+        PyObject *startkey = Py_NewRef(lu_dk_key(dk, ix));
+        int cmp = PyObject_RichCompareBool(startkey, key, Py_EQ);
+        int same = mp->ma_keys == dk && lu_dk_key(dk, ix) == startkey && lu_dk_value(dk, ix) != NULL;
+        Py_DECREF(startkey);
+        if (cmp < 0) {
+            return -2;
+        }
+        if (!same) {
+            steps = 0;
+        }
+        else if (cmp > 0) {
+            return ix;
         }
     }
-    for (; ix < other->ma_keys->dk_nentries; ix++) {
+}
+
+int
+lu_dict_merge_dict(PyDictObject *mp, PyDictObject *other, int override)
+{
+    int done = lu_dict_merge_prepare(mp, other);
+    if (done != 0) {
+        return done < 0 ? -1 : 0;
+    }
+    Py_ssize_t orig_size = other->ma_used;
+    for (Py_ssize_t ix = 0; ix < other->ma_keys->dk_nentries; ix++) {
         PyDictKeysObject *dk = other->ma_keys;
-        PyObject *value = lu_dk_value(dk, ix);
-        if (value == NULL) {
+        if (lu_dk_value(dk, ix) == NULL) {
             continue;
         }
-        PyObject *key = lu_dk_key(dk, ix);
+        PyObject *key = Py_NewRef(lu_dk_key(dk, ix));
+        PyObject *value = Py_NewRef(lu_dk_value(dk, ix));
         Py_hash_t hash = lu_dk_hash(dk, ix);
-        Py_ssize_t steps = 0;
-        Py_ssize_t found = probe_keys(mp->ma_keys, key, hash, &steps, 1);
-        if (found <= LU_PROBE_CANDIDATE(0) || (found >= 0 && override == 2)) {
-            *pos = ix;
-            return 0;
+        Py_ssize_t found = lookup_locked(mp, key, hash);
+        int err = found == -2 ? -1 : 0;
+        if (found == -1) {
+            err = lu_dict_insert(mp, key, hash, value);
         }
-        if (found < 0) {
-            if (lu_dict_insert(mp, key, hash, value) < 0) {
-                return -1;
-            }
-        }
-        else if (override == 1) {
+        else if (found >= 0 && override == 1) {
             lu_dict_replace(mp, found, value);
+        }
+        else if (found >= 0 && override == 2) {
+            _PyErr_SetKeyError(key);
+            err = -1;
+        }
+        Py_DECREF(key);
+        Py_DECREF(value);
+        if (err < 0) {
+            return -1;
+        }
+        if (other->ma_used != orig_size) {
+            PyErr_SetString(PyExc_RuntimeError, "dict mutated during update");
+            return -1;
         }
     }
     return 0;
