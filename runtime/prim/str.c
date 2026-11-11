@@ -1040,6 +1040,10 @@ prim_str_encode(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(3); STR(0); STR(1); STR(2);
     PyObject *s = args[0];
     int codec = codec_of(args[1]), handler = handler_of(args[2]);
+    /* A str whose characters all fit the codec's single bytes is its own encoding. */
+    if (codec == LATIN1 ? KIND(s) == PyUnicode_1BYTE_KIND : PyUnicode_IS_ASCII(s)) {
+        return PyBytes_FromStringAndSize((const char *)DATA(s), LEN(s));
+    }
     Py_UCS4 limit = codec == UTF8 ? 0x10ffff : codec == LATIN1 ? 0xff : 0x7f;
     const char *reason = codec == UTF8 ? "surrogates not allowed"
         : codec == LATIN1 ? "ordinal not in range(256)" : "ordinal not in range(128)";
