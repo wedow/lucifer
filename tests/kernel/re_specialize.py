@@ -25,6 +25,8 @@ PATTERNS = [
     # atomic groups, possessive groups, lookarounds
     ('(?>a|ab)c', 0), ('(?>a+)b', 0), ('(?:ab|a)*+c', 0), ('(?:a|b)++', 0), ('(?=ab)a', 0), ('(?!ab)a.', 0),
     ('(?<=a)b', 0), ('(?<!a)b', 0), ('(?=(a+))a*b\\1', 0), ('a(?!b|c)', 0), ('(?<=(a))(b)', 0),
+    # searches whose first character is known past zero-width starts, and ones that may match empty
+    (r'(^|(?<=\s))\*\w+\*', 0), ('(?<=x)(?:Ab|c)', re.I), (r'(?<!\w)(?:ab|c)+$', 0), (r'\s*(?:(ab|c)\s+)?(.*)\Z', 0),
     # backreferences, conditionals
     (r'(a+)\1', 0), (r'(?i)(a+)\1', 0), (r'(\w)\1', 0), ('(a)?(?(1)b|c)', 0), ('(a)?(?(1)b+|c)d', 0),
     (r'(?P<q>["\'])(.*?)(?P=q)', 0),
@@ -41,7 +43,7 @@ SUBJECTS = ['', 'a', 'ab', 'abc', 'aab', 'abab', 'ababc', 'aaab', 'Python Perl',
             'a b  c', 'ab1,cd,x', '"a\\"b"', 'xyz xaz', '12-3 45', 'hello World', 'Hello\nab\n',
             'STRASSE stra\xdfe', 'K k K', 'жук ab', '<a href> <b>', '1.25', 'aa aa', "'q' \"r\"", 'b',
             'cd ef', 'abbc', 'xxxy', 'x', ' \n', 'aabababc', 'xababce', 'ab_c-d::', '<a\nb>c>', 'abacbcdd',
-            '\x01ab\u2003c\U0001f600\u015d\x85 ЖЖ\ufdd5']
+            '\x01ab\u2003c\U0001f600\u015d\x85 ЖЖ\ufdd5', '*a* x*b_c* xAB xc']
 
 
 def results(p, s):

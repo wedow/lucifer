@@ -2628,11 +2628,23 @@ class _Gen:
             w(1, 'return 0')
             return
         tests = None
+        preps = []
         if flags & INFO_CHARSET:
             tests = self.charset(5, 'ch')
         elif first is not None:
             tests = ' or '.join(['(%s)' % (self.charset(at, 'ch') if op == IN else 'ch %s %d' % (
                 '==' if op == LITERAL else '!=', code[at])) for op, at in first])
+        elif need and not (code[pc] == AT and (code[pc + 1] == AT_BEGINNING or code[pc + 1] == AT_BEGINNING_STRING)):
+            # every match, never empty, takes a first character that passes one of these tests
+            starts = self.first_set(pc, True)
+            if starts and 'end' not in starts and 'nl' not in starts:
+                conds = []
+                for at in starts:
+                    prep, e = self.cond(at)
+                    preps.extend([line for line in prep if line not in preps])
+                    if '(%s)' % e not in conds:
+                        conds.append('(%s)' % e)
+                tests = ' or '.join(conds)
         if tests is not None:
             w(1, 'adv = False')
             w(1, 'pos = start - 1')
@@ -2640,6 +2652,8 @@ class _Gen:
             w(2, 'pos += 1')
             w(2, 'while pos < end:')
             w(3, 'ch = text[pos]')
+            for line in preps:
+                w(3, line)
             w(3, 'if %s: break' % tests)
             w(3, 'pos += 1')
             w(2, 'if pos >= end: return 0')
