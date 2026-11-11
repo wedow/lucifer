@@ -1400,6 +1400,8 @@ def _search_generic(st, sp=None):
                 while ptr < end and not _starts(code, first, text[ptr]):
                     ptr += 1
             if ptr >= end:
+                if sp is not None:
+                    sp.budget -= ptr - st.start
                 return 0
             if sp is not None and ptr > st.start:
                 sp.budget -= _CALL_COST + ptr - st.start
