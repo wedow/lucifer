@@ -541,7 +541,8 @@ def _count(st, code, text, pattern, ptr, end, maxcount):
 
 def _match(st, pattern, toplevel):
     """SRE(match): does the code at `pattern` match at st.ptr? Returns 1 and
-    leaves the end in st.ptr, or 0."""
+    leaves the end in st.ptr, or 0. Its work, steps and characters counted,
+    is charged to the pattern's specialization budget."""
     code = st.pattern.code
     text = st.text
     end = st.end
@@ -563,8 +564,10 @@ def _match(st, pattern, toplevel):
     clm = clx = 0
     ptr = 0
     label = _ENTER
+    work = 0
 
     while True:
+        work += 1
         if label == _ENTER:
             ptr = sptr
             if code[pattern] == INFO:
@@ -582,6 +585,7 @@ def _match(st, pattern, toplevel):
             while True:
                 op = code[pattern]
                 pattern += 1
+                work += 1
                 if op == LITERAL:
                     if ptr >= end or text[ptr] != code[pattern]:
                         ret = 0
@@ -728,6 +732,7 @@ def _match(st, pattern, toplevel):
                         break
                     count = _count(st, code, text, pattern + 3, ptr, end, code[pattern + 2])
                     ptr += count
+                    work += count
                     if count < code[pattern + 1]:
                         ret = 0
                         label = _EXIT
@@ -779,6 +784,7 @@ def _match(st, pattern, toplevel):
                         break
                     count = _count(st, code, text, pattern + 3, ptr, end, code[pattern + 2])
                     ptr += count
+                    work += count
                     if count < code[pattern + 1]:
                         ret = 0
                         label = _EXIT
@@ -1242,6 +1248,7 @@ def _match(st, pattern, toplevel):
                 st.ptr = sptr
                 st.lastmark = lastmark
                 st.lastindex = lastindex
+                st.pattern._spec.budget -= work
                 return ret
             label, pattern, ptr, toplevel, count, u, clm, clx = stack.pop()
 
@@ -2705,9 +2712,9 @@ class _Spec:
         self.search = None
 
 
-# The interpreter's work is charged as _CALL_COST per call plus one per character the match or
-# search covered; a pattern is specialized once it has used _BUDGET_PER_WORD of that per code word,
-# so the cost of generating and compiling its source (linear in the code) stays a fraction of it.
+# The interpreter's work is charged as _CALL_COST per call and per search attempt, one per position
+# a search passes, and _match's own steps and characters; a pattern is specialized once it has used
+# _BUDGET_PER_WORD of that per code word, about what generating and compiling its source costs.
 _CALL_COST = 32
 _BUDGET_PER_WORD = 64
 _CHECK = 'sre' in str(sys._xoptions.get('lucifer_stress', '')).split(',')
@@ -2762,9 +2769,8 @@ def _match_entry(st):
     f = sp.match
     if f is None:
         if sp.budget > 0:
-            status = _match(st, 0, True)
-            sp.budget -= _CALL_COST + (st.ptr - st.start if status else 0)
-            return status
+            sp.budget -= _CALL_COST
+            return _match(st, 0, True)
         f = _specialize(sp, 'match')
     try:
         return f(st)
@@ -2777,9 +2783,9 @@ def _search(st):
     f = sp.search
     if f is None:
         if sp.budget > 0:
+            sp.budget -= _CALL_COST
             status = _search_generic(st, sp)
             if status >= 0:
-                sp.budget -= _CALL_COST + (st.ptr - st.start if status else 0)
                 return status
             _state_reset(st)
         f = _specialize(sp, 'search')
