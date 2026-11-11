@@ -9,7 +9,7 @@ dict, then non-data descriptors and plain class attributes.
 from _lucifer import (
     MISSING, error, attribute_error, str_join, kind, type_lookup, type_dict, type_bases, type_tp_name, type_qualname,
     instance_dict, instance_load, instance_store, ns_get, ns_set, ns_del, alloc, set_class, kernel_set, address,
-    object_hash, type_flag, object_size, type_can_new,
+    object_hash, type_flag, object_size, type_can_new, static_type, is_subtype, descr_type, member_peek,
 )
 from _lucifer import _boot
 
@@ -22,6 +22,7 @@ call_special = _boot.call_special
 __all__ = ('object',)
 
 
+_member_descriptor = static_type('member_descriptor')
 _IS_ABSTRACT = 1 << 20          # Py_TPFLAGS_IS_ABSTRACT
 _MANAGED_DICT = 1 << 4          # Py_TPFLAGS_MANAGED_DICT
 
@@ -59,6 +60,8 @@ def generic_getattr(obj, name, suppress=False, dct=MISSING):
     if descr is not MISSING:
         get = type_lookup(type(descr), '__get__')
         if get is not MISSING and is_data(descr):
+            if suppress and type(descr) is _member_descriptor and is_subtype(tp, descr_type(descr)):
+                return member_peek(descr, obj)      # an unset slot misses without an AttributeError
             return get(descr, obj, tp)
     v = instance_load(obj, name) if dct is MISSING else ns_get(dct, name, MISSING)
     if v is not MISSING:
