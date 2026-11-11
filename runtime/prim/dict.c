@@ -31,7 +31,7 @@ live_entry(PyObject *d, Py_ssize_t ix)
     return ix >= 0 && ix < dk->dk_nentries && lu_dk_value(dk, ix) != NULL;
 }
 
-enum { READ_KEY, READ_VALUE, READ_HASH };
+enum { READ_KEY, READ_VALUE, READ_ENTRY };
 
 static PyObject *
 int_of(Py_ssize_t n)
@@ -45,43 +45,47 @@ bool_of(int v)
     return Py_NewRef(v ? Py_True : Py_False);
 }
 
-/* The key, value or hash of live entry ix, else MISSING. Lock-free it takes
-   a reference to the key or value only if that is alive and the entry is
-   still in the dict's table (lu_try_xget_ref); when it cannot, it reads
-   under the dict's critical section. */
+/* The key or value of live entry ix, or (ix + 1, key, value, hash), else
+   MISSING. Lock-free it takes a reference to the key or value only if that
+   is alive and the entry is still in the dict's table (lu_try_xget_ref);
+   when it cannot, it reads under the dict's critical section. Within one
+   table and serial an entry's key and hash never change (popitem hands
+   entry numbers out again under a new serial), so the three come from the
+   same entry. */
 static PyObject *
 read_entry(PyObject *d, Py_ssize_t ix, int what)
 {
     PyDictObject *mp = (PyDictObject *)d;
     PyObject *result = NULL;
     PyDictKeysObject *dk = __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE);
+    Py_ssize_t serial = __atomic_load_n(&dk->dk_serial, __ATOMIC_ACQUIRE);
     if (ix >= 0 && ix < dk->dk_nentries) {
         PyObject *ref = lu_try_xget_ref(what == READ_VALUE ? lu_dk_value_slot(dk, ix)
                                                            : lu_dk_key_slot(dk, ix));
+        PyObject *value = what == READ_ENTRY && ref != NULL ? lu_try_xget_ref(lu_dk_value_slot(dk, ix)) : NULL;
         if (ref != NULL && dk == __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE)
-            && lu_dk_value(dk, ix) != NULL) {
-            if (what == READ_HASH) {
-                result = int_of(lu_dk_hash_of(dk, ix, ref));
-                Py_DECREF(ref);
-            }
-            else {
-                result = ref;
-            }
+            && __atomic_load_n(&dk->dk_serial, __ATOMIC_ACQUIRE) == serial
+            && lu_dk_value(dk, ix) != NULL && (what != READ_ENTRY || value != NULL)) {
+            result = what == READ_ENTRY
+                ? lu_tuple_of(4, (PyObject *[]){ int_of(ix + 1), ref, value, int_of(lu_dk_hash_of(dk, ix, ref)) }) : ref;
         }
         else {
             Py_XDECREF(ref);
+            Py_XDECREF(value);
         }
     }
-    if (result == NULL) {
+    if (result == NULL && !PyErr_Occurred()) {
         Py_BEGIN_CRITICAL_SECTION(d);
         dk = mp->ma_keys;
         if (ix >= 0 && ix < dk->dk_nentries && lu_dk_value(dk, ix) != NULL) {
-            result = what == READ_HASH ? int_of(lu_dk_hash(dk, ix))
-                   : lu_new_ref_with_lock(what == READ_VALUE ? lu_dk_value(dk, ix) : lu_dk_key(dk, ix));
+            result = what == READ_ENTRY
+                ? lu_tuple_of(4, (PyObject *[]){ int_of(ix + 1), lu_new_ref_with_lock(lu_dk_key(dk, ix)),
+                                              lu_new_ref_with_lock(lu_dk_value(dk, ix)), int_of(lu_dk_hash(dk, ix)) })
+                : lu_new_ref_with_lock(what == READ_VALUE ? lu_dk_value(dk, ix) : lu_dk_key(dk, ix));
         }
         Py_END_CRITICAL_SECTION();
     }
-    return result != NULL ? result : Py_NewRef(LU_MISSING);
+    return result != NULL ? result : PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
 }
 
 /* dict_new(cls): an empty dict of the class cls, a subclass of dict. */
@@ -127,8 +131,8 @@ prim_dict_put(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return done == -2 ? NULL : Py_NewRef(done == 1 ? Py_True : Py_NotImplemented);
 }
 
-/* dict_key(d, ix), dict_value(d, ix), dict_hash(d, ix): the live entry's key,
-   value or hash, else MISSING. */
+/* dict_key(d, ix), dict_value(d, ix): the live entry's key or value;
+   dict_entry(d, ix): (ix + 1, key, value, hash), next_entry's answer; else MISSING. */
 static PyObject *
 prim_dict_key(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -144,10 +148,10 @@ prim_dict_value(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 static PyObject *
-prim_dict_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+prim_dict_entry(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); DICT(0); SSIZE(1, ix);
-    return read_entry(args[0], ix, READ_HASH);
+    return read_entry(args[0], ix, READ_ENTRY);
 }
 
 /* dict_stamp(d): what the commits below take, read before the lookup. */
@@ -269,17 +273,17 @@ prim_dict_copy(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return copy;
 }
 
-/* dict_merge_prepare(d, other): True when updating d from other needs no
-   more, False when the entries of other must be added. */
+/* dict_merge(d, other, override): dict_dict_merge, whole under both
+   critical sections. */
 static PyObject *
-prim_dict_merge_prepare(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+prim_dict_merge(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(2); DICT(0); DICT(1);
-    int done;
+    ARGS(3); DICT(0); DICT(1); SSIZE(2, override);
+    int err;
     Py_BEGIN_CRITICAL_SECTION2(args[0], args[1]);
-    done = lu_dict_merge_prepare((PyDictObject *)args[0], (PyDictObject *)args[1]);
+    err = lu_dict_merge_dict((PyDictObject *)args[0], (PyDictObject *)args[1], (int)override);
     Py_END_CRITICAL_SECTION2();
-    return done < 0 ? NULL : bool_of(done);
+    return err < 0 ? NULL : Py_NewRef(Py_None);
 }
 
 static PyObject *
@@ -516,10 +520,10 @@ lu_dict_views_init(void)
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 #define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_dict_methods[] = {
-    FAST(dict_new), FAST(dict_probe), FAST(dict_find), FAST(dict_put), FAST(dict_key), FAST(dict_value), FAST(dict_hash),
+    FAST(dict_new), FAST(dict_probe), FAST(dict_find), FAST(dict_put), FAST(dict_key), FAST(dict_value), FAST(dict_entry),
     FAST(dict_stamp), FAST(dict_insert), FAST(dict_replace), FAST(dict_remove), FAST(dict_popitem),
     FAST(dict_clear), FAST(dict_next), FAST(dict_prev), PURE(dict_keys_id), FAST(dict_copy),
-    FAST(dict_merge_prepare), FAST(dict_sizeof), FAST(dictiter_new), FAST(dictiter_next),
+    FAST(dict_merge), FAST(dict_sizeof), FAST(dictiter_new), FAST(dictiter_next),
     FAST(dictiter_len), FAST(dictiter_copy), FAST(dictview_new), FAST(dictview_dict),
     { NULL, NULL, 0, NULL },
 };

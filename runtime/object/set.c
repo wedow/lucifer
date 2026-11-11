@@ -5,6 +5,7 @@
    (lu_set_add) compares natively with lu_eq. */
 
 #include "object/set.h"
+#include "object/dict.h"
 
 #include <string.h>
 
@@ -469,23 +470,21 @@ lu_set_add_simple(PyObject *set, PyObject *key)
     }
 }
 
-/* The marshal reader's add: keys compare with lu_eq. */
-int
-lu_set_add(PyObject *set, PyObject *key)
+/* set_add_entry, a candidate judged by `eq` (1, 0, or -1 with an error set):
+   the probe and commit run in the set's section, the judging outside it, and
+   a judged-unequal key is passed over when the add comes back. */
+static int
+add_judged(PySetObject *so, PyObject *key, Py_hash_t hash, int (*eq)(PyObject *, PyObject *))
 {
-    Py_hash_t hash = lu_hash(key);
-    if (hash == -1) {
-        return -1;
-    }
     PyObject *judged = NULL;
     for (;;) {
         PyObject *candidate;
-        int verdict = lu_set_add_native((PySetObject *)set, key, hash, judged, &candidate);
+        int verdict = lu_set_add_native(so, key, hash, judged, &candidate);
         if (verdict != LU_SET_CANDIDATE) {
             Py_XDECREF(judged);
             return verdict < 0 ? -1 : 0;
         }
-        int cmp = lu_eq(candidate, key);
+        int cmp = eq(candidate, key);
         PyObject *more = cmp == 0 ? judged_push(judged, candidate) : NULL;
         Py_DECREF(candidate);
         Py_XDECREF(judged);
@@ -496,6 +495,83 @@ lu_set_add(PyObject *set, PyObject *key)
             return -1;
         }
     }
+}
+
+/* The marshal reader's add: keys compare with lu_eq. */
+int
+lu_set_add(PyObject *set, PyObject *key)
+{
+    Py_hash_t hash = lu_hash(key);
+    return hash == -1 ? -1 : add_judged((PySetObject *)set, key, hash, lu_eq);
+}
+
+static int
+python_eq(PyObject *a, PyObject *b)
+{
+    return PyObject_RichCompareBool(a, b, Py_EQ);
+}
+
+/* A merge's key: a reference is held while __eq__ runs, which may change
+   the table the key came from. */
+static int
+merge_key(PySetObject *so, PyObject *key, Py_hash_t hash)
+{
+    Py_INCREF(key);
+    int err = add_judged(so, key, hash, python_eq);
+    Py_DECREF(key);
+    return err;
+}
+
+int
+lu_set_merge(PySetObject *so, PySetObject *other)
+{
+    if (lu_set_reserve(so, other->used) < 0) {
+        return -1;
+    }
+    if (so->fill == 0 && so->mask == other->mask && other->fill == other->used) {
+        for (Py_ssize_t i = 0; i <= other->mask; i++) {
+            if (other->table[i].key != NULL) {
+                so->table[i].key = Py_NewRef(other->table[i].key);
+                so->table[i].hash = other->table[i].hash;
+            }
+        }
+        so->fill = other->fill;
+        so->used = other->used;
+        return 0;
+    }
+    if (so->fill == 0) {
+        so->fill = so->used = other->used;
+        for (Py_ssize_t i = 0; i <= other->mask; i++) {
+            PyObject *key = other->table[i].key;
+            if (key != NULL && key != LU_SET_DUMMY) {
+                lu_set_insert_clean(so->table, so->mask, Py_NewRef(key), other->table[i].hash);
+            }
+        }
+        return 0;
+    }
+    /* other's table and mask are read afresh at each entry, as __eq__ may change them. */
+    for (Py_ssize_t i = 0; i <= other->mask; i++) {
+        PyObject *key = other->table[i].key;
+        if (key != NULL && key != LU_SET_DUMMY && merge_key(so, key, other->table[i].hash) < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+int
+lu_set_merge_dict(PySetObject *so, PyDictObject *other)
+{
+    if (lu_set_reserve(so, other->ma_used) < 0) {
+        return -1;
+    }
+    for (Py_ssize_t ix = 0; ix < other->ma_keys->dk_nentries; ix++) {
+        PyDictKeysObject *dk = other->ma_keys;
+        if (lu_dk_value(dk, ix) != NULL && merge_key(so, lu_dk_key(dk, ix), lu_dk_hash(dk, ix)) < 0) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 static Py_uhash_t
