@@ -389,9 +389,49 @@ eq_class(PyObject *v)
          : v == Py_None || tp == &PyType_Type ? EQ_IDENT : EQ_OTHER;
 }
 
+/* Whether instances of tp compare and hash by identity, from the answers
+   identity_keyed keeps only: a weakref's referent is read under a try-lock,
+   where no lookup may run. */
+static int
+identity_known(PyTypeObject *tp)
+{
+    if (tp == &PyType_Type) {
+        return 1;
+    }
+    unsigned int version = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE);
+    return version != 0 && identity_seen[version % IDENTITY_SEEN].version == version
+        && identity_seen[version % IDENTITY_SEEN].answer;
+}
+
+/* weakref_richcompare of two exact references: identity once either
+   referent has died, else the referents' own __eq__, decided here only for
+   referents that compare by identity; -1 for the kernel otherwise. Nothing
+   is referenced and nothing waits (lu_weakref_peek). */
+static int
+weakref_eq(PyObject *a, PyObject *b)
+{
+    PyObject *x, *y;
+    PyMutex *hx, *hy;
+    if (!lu_weakref_peek(a, NULL, &x, &hx)) {
+        return -1;
+    }
+    if (!lu_weakref_peek(b, hx, &y, &hy)) {
+        lu_weakref_unpeek(hx);
+        return -1;
+    }
+    int eq = x == NULL || y == NULL ? a == b
+        : identity_known(Py_TYPE(x)) && identity_known(Py_TYPE(y)) ? x == y : -1;
+    lu_weakref_unpeek(hy);
+    lu_weakref_unpeek(hx);
+    return eq;
+}
+
 static int
 native_eq(PyObject *a, PyObject *b, int depth)
 {
+    if (Py_IS_TYPE(a, &_PyWeakref_RefType) && Py_IS_TYPE(b, &_PyWeakref_RefType)) {
+        return weakref_eq(a, b);
+    }
     int ca = eq_class(a), cb = eq_class(b);
     if (ca == EQ_OTHER || cb == EQ_OTHER) {
         return -1;
@@ -503,6 +543,28 @@ hash_native(PyObject *key, Py_hash_t *hash, int depth)
     }
     else if (kt == &PyType_Type || identity_keyed(kt)) {
         *hash = Py_HashPointer(key);
+    }
+    else if (kt == &_PyWeakref_RefType) {
+        /* weakref.__hash__: the referent's, kept once taken. Here only a
+           referent hashed by identity is taken, without a reference or a
+           wait (lu_weakref_peek); a dead one's error is the kernel's. */
+        PyWeakReference *ref = (PyWeakReference *)key;
+        Py_hash_t h = __atomic_load_n(&ref->hash, __ATOMIC_RELAXED);
+        if (h == -1) {
+            PyObject *ob;
+            PyMutex *held;
+            if (!lu_weakref_peek(key, NULL, &ob, &held)) {
+                return 0;
+            }
+            int known = ob != NULL && identity_known(Py_TYPE(ob));
+            h = known ? Py_HashPointer(ob) : -1;
+            lu_weakref_unpeek(held);
+            if (!known) {
+                return 0;
+            }
+            __atomic_store_n(&ref->hash, h, __ATOMIC_RELAXED);
+        }
+        *hash = h;
     }
     else if (kt == &PyTuple_Type && depth < LU_NATIVE_DEPTH) {
         PyTupleObject *t = (PyTupleObject *)key;

@@ -948,17 +948,32 @@ h_gen_send(PyObject *callable, PyObject *gen, PyObject *value)
     return f != NULL ? polled(t, run_resumed(t, f)) : NULL;
 }
 
-/* SEND to a generator or coroutine, the receivers the interpreter resumes
-   itself: what it yields, or returns (h_gen_done then says so; a finished
-   generator returns None); NULL with an exception. Anything else is
-   declined: the interpreter sends to it. */
+/* SEND: a generator or coroutine is resumed as the interpreter resumes it:
+   what it yields, or returns (h_gen_done then says so; a finished generator
+   returns None); NULL with an exception. Any other receiver (an async
+   generator's asend, an __await__ iterator) is the kernel's send, whose pair
+   says whether it returned. */
 static PyObject *
 h_send(PyObject *receiver, PyObject *v)
 {
     struct lu_task *t = lu_current_task();
-    if ((!Py_IS_TYPE(receiver, &PyGen_Type) && !Py_IS_TYPE(receiver, &PyCoro_Type))
-        || t->ts.interp->eval_frame != NULL || stack_low()) {
+    if (t->ts.interp->eval_frame != NULL || stack_low()) {
         return LU_JIT_DECLINED;
+    }
+    if (!Py_IS_TYPE(receiver, &PyGen_Type) && !Py_IS_TYPE(receiver, &PyCoro_Type)) {
+        PyObject *args[2] = { receiver, v };
+        PyObject *pair = lu_call_kernel(LU_K_send, args, 2);
+        if (pair == NULL) {
+            return NULL;
+        }
+        /* The poll may run code that sends too: the flag is stored after it. */
+        int returned = PyTuple_GET_ITEM(pair, 1) == Py_True;
+        PyObject *r = polled(t, Py_NewRef(PyTuple_GET_ITEM(pair, 0)));
+        Py_DECREF(pair);
+        if (r != NULL) {
+            t->sent_returned = returned;
+        }
+        return r;
     }
     struct lu_frame *f = lu_gen_resume(&t->ts, receiver, Py_NewRef(v));
     if (f == NULL) {
@@ -968,9 +983,12 @@ h_send(PyObject *receiver, PyObject *v)
 }
 
 static int
-h_gen_done(PyObject *gen)
+h_gen_done(PyObject *receiver)
 {
-    return ((struct lu_gen *)gen)->frame_state >= LU_GEN_COMPLETED;
+    if (!Py_IS_TYPE(receiver, &PyGen_Type) && !Py_IS_TYPE(receiver, &PyCoro_Type)) {
+        return lu_current_task()->sent_returned;
+    }
+    return ((struct lu_gen *)receiver)->frame_state >= LU_GEN_COMPLETED;
 }
 
 static PyObject *
@@ -1109,6 +1127,10 @@ static PyObject *
 h_super_attr(PyObject *gsuper, PyObject *cls, PyObject *self, PyObject *name, intptr_t two)
 {
     if (gsuper == (PyObject *)&PySuper_Type && PyType_Check(cls)) {
+        PyObject *v = lu_super_attr_native(cls, self, name);
+        if (v != NULL || PyErr_Occurred()) {
+            return v;
+        }
         PyObject *args[3] = { cls, self, name };
         return lu_call_kernel(LU_K_super_getattr, args, 3);
     }

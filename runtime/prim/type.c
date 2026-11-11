@@ -521,6 +521,58 @@ _PyType_Lookup(PyTypeObject *tp, PyObject *name)
     return type_lookup(tp, name, 0);
 }
 
+PyObject *
+lu_super_lookup(PyTypeObject *start, PyObject *cls, PyObject *name)
+{
+    PyObject *mro = __atomic_load_n(&start->tp_mro, __ATOMIC_ACQUIRE);
+    if (mro == NULL) {
+        return NULL;
+    }
+    Py_INCREF(mro);
+    PyObject *v = NULL;
+    Py_ssize_t n = PyTuple_GET_SIZE(mro), i = 0;
+    while (i < n && PyTuple_GET_ITEM(mro, i) != cls) {
+        i++;
+    }
+    for (i++; v == NULL && i < n; i++) {
+        PyObject *dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i));
+        v = dict != NULL ? lu_ns_get(dict, name) : NULL;
+    }
+    Py_DECREF(mro);
+    return v;
+}
+
+PyObject *
+lu_super_attr_native(PyObject *cls, PyObject *obj, PyObject *name)
+{
+    if (!PyType_Check(cls) || !PyUnicode_CheckExact(name)) {
+        return NULL;
+    }
+    /* supercheck's first two answers; the third (a __class__ that differs) is the kernel's. */
+    PyTypeObject *start = PyType_Check(obj) && lu_type_is_subtype((PyTypeObject *)obj, (PyTypeObject *)cls)
+        ? (PyTypeObject *)obj : Py_TYPE(obj);
+    if (!lu_type_is_subtype(start, (PyTypeObject *)cls)) {
+        return NULL;
+    }
+    PyObject *v = lu_super_lookup(start, cls, name);
+    if (v == NULL) {
+        return NULL;
+    }
+    if (PyFunction_Check(v)) {
+        if ((PyObject *)start == obj) {
+            return v;   /* function.__get__(None, type) */
+        }
+        PyObject *m = PyMethod_New(v, obj);
+        Py_DECREF(v);
+        return m;
+    }
+    if (_PyType_Lookup(Py_TYPE(v), LU_ID(__get__)) == NULL) {
+        return v;
+    }
+    Py_DECREF(v);
+    return NULL;
+}
+
 #undef PyType_IsSubtype
 int
 PyType_IsSubtype(PyTypeObject *a, PyTypeObject *b)
@@ -2091,20 +2143,6 @@ prim_is_subtype(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return bool_of(PyType_IsSubtype((PyTypeObject *)args[0], (PyTypeObject *)args[1]));
 }
 
-/* tp_new_wrapper's checks for owner.__new__(cls): cls is a subtype of owner
-   and owner is its static base, or an extension type inherited owner's tp_new. */
-/* One of the runtime's own static types, not an extension's. */
-static int
-is_runtime_type(PyTypeObject *tp)
-{
-    for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
-        if (*t == tp) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 /* Set by C calling a builtin's tp_new directly (slot_tp_new_builtin): there is
    no tp_new_wrapper in that call to check, and the first check made on behalf
    of the call is the one it stands for. */
@@ -2116,6 +2154,8 @@ lu_new_check_skip(int on)
     new_check_skipped = on;
 }
 
+/* tp_new_wrapper's checks for owner.__new__(cls): cls is a subtype of owner
+   and owner is its static base, or an extension type inherited owner's tp_new. */
 static int
 check_new(PyTypeObject *tp, PyTypeObject *owner)
 {
@@ -2137,7 +2177,7 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
     /* Exception types share one allocation rule: a static exception class
        builds its instances with its base exception's __new__. */
     if (staticbase != owner
-        && !(staticbase->tp_new == owner->tp_new && !is_runtime_type(staticbase))      /* inherited */
+        && !(staticbase->tp_new == owner->tp_new && !is_static_builtin(staticbase))     /* inherited */
         && !(PyExceptionClass_Check(staticbase) && PyExceptionClass_Check(owner))) {
         if (staticbase->tp_new == NULL) {
             /* A static type with no tp_new cannot be instantiated

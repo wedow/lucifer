@@ -3344,6 +3344,19 @@ op_LOAD_SUPER_ATTR: {
     SKIP_CACHES();
     kret = (oparg & 1) ? LU_RETURN_METHOD : LU_RETURN_PUSH;
     if (sp[-3] == (PyObject *)&PySuper_Type && PyType_Check(sp[-2])) {
+        SAVE_FRAME();
+        PyObject *v = lu_super_attr_native(sp[-2], sp[-1], name);
+        if (v != NULL) {
+            for (int i = 0; i < 3; i++) {
+                Py_DECREF(POP());
+            }
+            PUSH(v);
+            if (oparg & 1) {
+                PUSH(NULL);
+            }
+            DISPATCH();
+        }
+        ERROR_IF(PyErr_Occurred());
         kargs[2] = Py_NewRef(name);
         kargs[1] = POP();
         kargs[0] = POP();

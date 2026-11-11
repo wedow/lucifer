@@ -298,6 +298,47 @@ lu_weakref_get(PyObject *ref)
     return result;
 }
 
+/* For native hashing and comparison, which may neither block nor run code
+   (dict.c): the referent of ref, borrowed, NULL once it has died. While the
+   referent's stripe is held (*held, taken by a try-lock unless `already`
+   is that stripe) it cannot finish dying, since clearing its references
+   takes the stripe. 0, holding nothing, when the stripe is busy or the
+   referent is dying: the caller declines. */
+int
+lu_weakref_peek(PyObject *ref, PyMutex *already, PyObject **ob, PyMutex **held)
+{
+    PyWeakReference *r = (PyWeakReference *)ref;
+    PyObject *o = __atomic_load_n(&r->wr_object, __ATOMIC_ACQUIRE);
+    *held = NULL;
+    *ob = NULL;
+    if (o == Py_None) {
+        return 1;
+    }
+    PyMutex *m = stripe(o);
+    if (m != already) {
+        uint8_t unlocked = _Py_UNLOCKED;
+        if (!_Py_atomic_compare_exchange_uint8(&m->_bits, &unlocked, _Py_LOCKED)) {
+            return 0;
+        }
+        *held = m;
+    }
+    if (r->wr_object != o || Py_REFCNT(o) == 0) {
+        lu_weakref_unpeek(*held);
+        *held = NULL;
+        return 0;
+    }
+    *ob = o;
+    return 1;
+}
+
+void
+lu_weakref_unpeek(PyMutex *held)
+{
+    if (held != NULL) {
+        PyMutex_Unlock(held);
+    }
+}
+
 /* weakref_get(ref): the referent, or None once it is dead. */
 static PyObject *
 prim_weakref_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)

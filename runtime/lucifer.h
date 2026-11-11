@@ -566,6 +566,7 @@ struct lu_task {
     uint64_t rng;               /* seeded handoff's choices */
     int gc_alloc_count;         /* the carrier's buffered GC allocation count, carried
                                    while the task is between carriers */
+    int sent_returned;          /* compiled SEND's kernel send: whether the receiver returned */
 };
 
 /* Quiescent-state-based reclamation (runtime/thread/qsbr.c), after
@@ -1177,6 +1178,9 @@ void lu_weakref_init(void);
 void lu_clear_weakrefs(PyObject *ob);
 PyObject *lu_weakref_new(PyTypeObject *type, PyObject *ob, PyObject *callback);
 PyObject *lu_weakref_get(PyObject *ref);
+/* ref's referent, borrowed, under a try-lock of its stripe; 0 when busy or dying (weakref.c). */
+int lu_weakref_peek(PyObject *ref, PyMutex *already, PyObject **ob, PyMutex **held);
+void lu_weakref_unpeek(PyMutex *held);
 /* The head of ob's list of weak references, or NULL if its type has none. */
 PyWeakReference **lu_weakref_list(PyObject *ob);
 void lu_descr_init(void);
@@ -1403,6 +1407,13 @@ int lu_type_add_descriptors(PyTypeObject *tp);
 /* Adds wrapper descriptors (__add__, __len__, ...) for the C slots tp has
    of its own (runtime/types/wrappers.c). */
 int lu_type_add_operators(PyTypeObject *tp);
+/* super(cls, obj).name (LOAD_SUPER_ATTR) when it needs no Python: a function
+   (bound to an instance) or a value that is no descriptor, found after cls in
+   the MRO of obj or its type. NULL, without an error unless one occurred,
+   when the kernel's super_getattr must decide. */
+PyObject *lu_super_attr_native(PyObject *cls, PyObject *obj, PyObject *name);
+/* name's value in start's MRO after cls (do_super_lookup's walk), new, or NULL. */
+PyObject *lu_super_lookup(PyTypeObject *start, PyObject *cls, PyObject *name);
 /* object.__new__(tp): a new instance of tp, refusing a tp whose static base is not owner. */
 PyObject *lu_alloc_instance(PyTypeObject *tp, PyTypeObject *owner);
 

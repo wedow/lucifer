@@ -3785,15 +3785,7 @@ super_attr_fold(struct ctx *c, int oparg)
         return 0;
     }
     PyObject *name = PyTuple_GET_ITEM(c->code->co_names, oparg >> 2);
-    PyObject *mro = st->tp_mro, *res = NULL;
-    Py_ssize_t n = mro != NULL ? PyTuple_GET_SIZE(mro) : 0, i = 0;
-    while (i < n && PyTuple_GET_ITEM(mro, i) != cls) {
-        i++;
-    }
-    for (i++; i < n && res == NULL; i++) {
-        PyObject *dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i));
-        res = dict != NULL ? lu_ns_get(dict, name) : NULL;     /* a new reference */
-    }
+    PyObject *res = lu_super_lookup(st, cls, name);
     int method = oparg & 1;
     int plain = res != NULL && Py_TYPE(res)->tp_descr_get == NULL;
     int unbound = res != NULL && (PyFunction_Check(res) || (Py_TYPE(res)->tp_flags & Py_TPFLAGS_METHOD_DESCRIPTOR));
@@ -5828,10 +5820,10 @@ translate(struct ctx *c)
         return 0;
     }
     case SEND: {
-        /* A generator or coroutine receiver is resumed (any other declines,
-           and the interpreter sends to it): what it yields stays on the
-           stack for the YIELD_VALUE after; what it returns leaves the
-           yield-from loop. Generator code is never inlined. */
+        /* A generator or coroutine receiver is resumed (any other is the
+           kernel's send): what it yields stays on the stack for the
+           YIELD_VALUE after; what it returns leaves the yield-from loop.
+           Generator code is never inlined. */
         if (nospec(c, c->pc)) {
             unsupported(c);
             return -1;
