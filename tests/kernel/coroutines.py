@@ -258,6 +258,97 @@ async def drive_asend():
 print('asend', run(drive_asend()))
 
 
+# async for over nested async generators: requests pass up through every
+# level, values of any kind come down, and errors end each level.
+async def odd_values():
+    yield None
+    yield (1, 2)
+    yield StopIteration('as a value')
+    yield await Suspend(5)
+
+
+async def relay(inner, depth):
+    async for v in (relay(inner, depth - 1) if depth else inner):
+        yield v
+
+
+async def collect(src):
+    out = []
+    async for v in src:
+        out.append(v if type(v) is not StopIteration else ('stop', v.args))
+    return out
+
+
+print('nested agen', run(collect(relay(odd_values(), 3))))
+
+
+async def raises_midway():
+    yield 1
+    raise KeyError('mid')
+
+
+async def catch_midway():
+    src = relay(raises_midway(), 2)
+    got = []
+    try:
+        async for v in src:
+            got.append(v)
+    except KeyError as e:
+        got.append(('caught', e.args))
+    try:
+        await src.__anext__()
+    except StopAsyncIteration:
+        got.append('closed after error')
+    return got
+
+
+print('agen error', run(catch_midway()))
+
+
+async def reentrant():
+    a = agen(2)
+    first = a.__anext__()
+    first.send(None)
+    try:
+        async for v in a:
+            pass
+    except RuntimeError as e:
+        return 'refused', e.args
+
+
+print('agen running', run(reentrant()))
+
+
+class Countdown:
+    """An awaitable whose __await__ is an iterator object, not a generator:
+    it yields n requests, then returns what was sent last."""
+
+    def __init__(self, n):
+        self.n = n
+
+    def __await__(self):
+        return self
+
+    def __next__(self):
+        return self.send(None)
+
+    def send(self, value):
+        if self.n == 0:
+            raise StopIteration(('sent', value))
+        self.n -= 1
+        return self.n
+
+
+async def await_iterators():
+    out = []
+    for n in range(3):
+        out.append(await Countdown(n))
+    return out
+
+
+print('iterator awaits', run(await_iterators()))
+
+
 async def acleanup():
     try:
         yield 1

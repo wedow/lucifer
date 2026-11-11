@@ -521,6 +521,51 @@ _PyType_Lookup(PyTypeObject *tp, PyObject *name)
     return type_lookup(tp, name, 0);
 }
 
+PyObject *
+lu_super_attr_native(PyObject *cls, PyObject *obj, PyObject *name)
+{
+    if (!PyType_Check(cls) || !PyUnicode_CheckExact(name)) {
+        return NULL;
+    }
+    /* supercheck's first two answers; the third (a __class__ that differs) is the kernel's. */
+    PyTypeObject *start = PyType_Check(obj) && lu_type_is_subtype((PyTypeObject *)obj, (PyTypeObject *)cls)
+        ? (PyTypeObject *)obj : Py_TYPE(obj);
+    if (!lu_type_is_subtype(start, (PyTypeObject *)cls)) {
+        return NULL;
+    }
+    PyObject *mro = __atomic_load_n(&start->tp_mro, __ATOMIC_ACQUIRE);
+    if (mro == NULL) {
+        return NULL;
+    }
+    Py_INCREF(mro);
+    PyObject *v = NULL;
+    Py_ssize_t n = PyTuple_GET_SIZE(mro), i = 0;
+    while (i < n && PyTuple_GET_ITEM(mro, i) != cls) {
+        i++;
+    }
+    for (i++; v == NULL && i < n; i++) {
+        PyObject *dict = lu_type_dict((PyTypeObject *)PyTuple_GET_ITEM(mro, i));
+        v = dict != NULL ? lu_ns_get(dict, name) : NULL;
+    }
+    Py_DECREF(mro);
+    if (v == NULL) {
+        return NULL;
+    }
+    if (PyFunction_Check(v)) {
+        if ((PyObject *)start == obj) {
+            return v;   /* function.__get__(None, type) */
+        }
+        PyObject *m = PyMethod_New(v, obj);
+        Py_DECREF(v);
+        return m;
+    }
+    if (_PyType_Lookup(Py_TYPE(v), LU_ID(__get__)) == NULL) {
+        return v;
+    }
+    Py_DECREF(v);
+    return NULL;
+}
+
 #undef PyType_IsSubtype
 int
 PyType_IsSubtype(PyTypeObject *a, PyTypeObject *b)
@@ -2122,6 +2167,9 @@ check_new(PyTypeObject *tp, PyTypeObject *owner)
     if (new_check_skipped) {
         new_check_skipped = 0;
         return 0;
+    }
+    if (tp == owner && !(tp->tp_flags & Py_TPFLAGS_HEAPTYPE)) {
+        return 0;   /* a static type is its own static base, which no refusal below allows */
     }
     PyTypeObject *staticbase = tp;
     if (!PyType_IsSubtype(tp, owner)) {

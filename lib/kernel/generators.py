@@ -381,13 +381,14 @@ def get_aiter(obj):
 
 def get_anext(aiter):
     """GET_ANEXT."""
+    if type(aiter) is _async_generator:
+        _init_hooks(aiter)
+        return _awaitable(_asend, aiter, None)
     f = type_lookup(type(aiter), '__anext__')
     if f is MISSING:
         error(TypeError, str_join('', (
             "'async for' requires an iterator with __anext__ method, got ", _name(aiter))))
     nxt = call_special(f, aiter)
-    if type(aiter) is _async_generator:
-        return nxt
     try:
         return _awaitable_iter(nxt)
     except BaseException as e:
@@ -398,6 +399,8 @@ def get_anext(aiter):
 def send(receiver, value):
     """SEND to a receiver that is not a generator: (what it yielded, False),
     or (its return value, True)."""
+    if type(receiver) is _asend:
+        return _asend_step(receiver, value)
     if value is None and _iter.ends_quietly(type(receiver)):
         item = _iter.next_item(receiver)
         return (None, True) if item is MISSING else (item, False)
@@ -500,7 +503,9 @@ def _asend_closed():
     error(RuntimeError, 'cannot reuse already awaited __anext__()/asend()')
 
 
-def _asend_send(self, value):
+def _asend_step(self, value):
+    """async_gen_asend_send as SEND takes it: (what the generator awaits, False),
+    or (the value of an async yield, True), which ends the awaitable."""
     agen, sendval, state = field_get(self, 0), field_get(self, 1), field_get(self, 2)
     if state == _CLOSED:
         _asend_closed()
@@ -513,10 +518,25 @@ def _asend_send(self, value):
         field_set(self, 2, _ITER)
     gen_flag(agen, _RUNNING_ASYNC, True)
     try:
-        return _unwrap(agen, lambda: _send(agen, value))
-    except BaseException:
+        r = _send(agen, value)
+    except BaseException as e:
+        if _matches(e, StopAsyncIteration) or _matches(e, GeneratorExit):
+            gen_flag(agen, _AG_CLOSED, True)
+        gen_flag(agen, _RUNNING_ASYNC, False)
         field_set(self, 2, _CLOSED)
         raise
+    if type(r) is _wrapped:
+        gen_flag(agen, _RUNNING_ASYNC, False)
+        field_set(self, 2, _CLOSED)
+        return field_get(r, 0), True
+    return r, False
+
+
+def _asend_send(self, value):
+    r, done = _asend_step(self, value)
+    if done:
+        raise StopIteration(r)
+    return r
 
 
 def _asend_throw(self, typ, val, tb):

@@ -389,9 +389,29 @@ eq_class(PyObject *v)
          : v == Py_None || tp == &PyType_Type ? EQ_IDENT : EQ_OTHER;
 }
 
+static int native_eq(PyObject *a, PyObject *b, int depth);
+
+/* weakref.__eq__ of two exact references: their referents compared, or
+   identity once either has died. */
+static int
+weakref_eq(PyObject *a, PyObject *b, int depth)
+{
+    PyObject *x = lu_weakref_get(a), *y = lu_weakref_get(b);
+    int eq = x == NULL || y == NULL ? a == b
+        : x == y ? 1
+        : identity_keyed(Py_TYPE(x)) && identity_keyed(Py_TYPE(y)) ? 0
+        : depth < LU_NATIVE_DEPTH ? native_eq(x, y, depth + 1) : -1;
+    Py_XDECREF(x);
+    Py_XDECREF(y);
+    return eq;
+}
+
 static int
 native_eq(PyObject *a, PyObject *b, int depth)
 {
+    if (Py_IS_TYPE(a, &_PyWeakref_RefType) && Py_IS_TYPE(b, &_PyWeakref_RefType)) {
+        return weakref_eq(a, b, depth);
+    }
     int ca = eq_class(a), cb = eq_class(b);
     if (ca == EQ_OTHER || cb == EQ_OTHER) {
         return -1;
@@ -503,6 +523,22 @@ hash_native(PyObject *key, Py_hash_t *hash, int depth)
     }
     else if (kt == &PyType_Type || identity_keyed(kt)) {
         *hash = Py_HashPointer(key);
+    }
+    else if (kt == &_PyWeakref_RefType && depth < LU_NATIVE_DEPTH) {
+        /* weakref.__hash__: the referent's, kept once taken; a dead
+           referent's error is the kernel's. */
+        PyWeakReference *ref = (PyWeakReference *)key;
+        Py_hash_t h = __atomic_load_n(&ref->hash, __ATOMIC_RELAXED);
+        if (h == -1) {
+            PyObject *ob = lu_weakref_get(key);
+            int known = ob != NULL && hash_native(ob, &h, depth + 1);
+            Py_XDECREF(ob);
+            if (!known) {
+                return 0;
+            }
+            __atomic_store_n(&ref->hash, h, __ATOMIC_RELAXED);
+        }
+        *hash = h;
     }
     else if (kt == &PyTuple_Type && depth < LU_NATIVE_DEPTH) {
         PyTupleObject *t = (PyTupleObject *)key;

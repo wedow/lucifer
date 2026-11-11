@@ -150,6 +150,15 @@ prim_dict_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return read_entry(args[0], ix, READ_HASH);
 }
 
+/* native_hash(x): PyObject_Hash(x) when no Python computes it (lu_hash_native), else MISSING. */
+static PyObject *
+prim_native_hash(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    Py_hash_t h;
+    return lu_hash_native(args[0], &h) ? PyLong_FromSsize_t(h) : Py_NewRef(LU_MISSING);
+}
+
 /* dict_stamp(d): what the commits below take, read before the lookup. */
 static PyObject *
 prim_dict_stamp(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -515,7 +524,7 @@ lu_dict_views_init(void)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_dict_methods[] = {
-    FAST(dict_new), FAST(dict_probe), FAST(dict_find), FAST(dict_put), FAST(dict_key), FAST(dict_value), FAST(dict_hash),
+    FAST(dict_new), FAST(dict_probe), FAST(dict_find), FAST(dict_put), FAST(dict_key), FAST(dict_value), FAST(dict_hash), FAST(native_hash),
     FAST(dict_stamp), FAST(dict_insert), FAST(dict_replace), FAST(dict_remove), FAST(dict_popitem),
     FAST(dict_clear), FAST(dict_next), FAST(dict_prev), FAST(dict_keys_id), FAST(dict_copy),
     FAST(dict_merge_prepare), FAST(dict_sizeof), FAST(dictiter_new), FAST(dictiter_next),

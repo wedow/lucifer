@@ -493,10 +493,50 @@ borrowed_code_refs(struct _is *interp)
     pthread_mutex_unlock(&interp->tasks_lock.mutex);
 }
 
+/* gc_mark_alive_from_roots: what the interpreter itself holds, and all it
+   reaches, is reachable whatever its counts say: the modules, the builtins,
+   the static types' dicts and the kernel's functions, which are most of a
+   program's heap. The passes below pass these over, and scan_heap_visitor
+   clears the mark. Each object is traversed once, as mark_reachable does. */
+static int
+visit_mark_alive(PyObject *op, void *stack)
+{
+    if (op != NULL && lu_gc_is_tracked(op) && !gc_is_alive(op) && !gc_is_frozen(op) && !_Py_IsImmortal(op)
+        && !gc_maybe_untrack(op)) {
+        op->ob_gc_bits |= LU_GC_ALIVE;
+        lu_stack_push(stack, op);
+    }
+    return 0;
+}
+
+static void
+mark_alive_from_roots(struct _is *interp)
+{
+    struct lu_stack stack = { NULL, 0, 0 };
+    PyObject *roots[] = { interp->sysdict, interp->builtins, interp->dict, interp->modules,
+                          interp->importlib, interp->kernel_rebound, interp->kernel_twins,
+                          interp->kernel_nexts };
+    for (size_t i = 0; i < sizeof roots / sizeof roots[0]; i++) {
+        visit_mark_alive(roots[i], &stack);
+    }
+    for (int i = 0; i < LU_K_COUNT; i++) {
+        visit_mark_alive(interp->kernel[i], &stack);
+    }
+    for (int i = 0; i < LU_MAX_STATIC_TYPES; i++) {
+        visit_mark_alive(interp->static_types[i].tp_dict, &stack);
+        visit_mark_alive(interp->static_types[i].tp_subclasses, &stack);
+    }
+    while (stack.n > 0) {
+        traverse(stack.items[--stack.n], visit_mark_alive, &stack);
+    }
+    free(stack.items);
+}
+
 static void
 deduce_unreachable_heap(struct collection_state *state)
 {
     struct _is *interp = state->interp;
+    mark_alive_from_roots(interp);
     visit_heaps(interp, update_refs, &state->base);
     borrowed_code_refs(interp);
     visit_heaps(interp, mark_heap_visitor, &state->base);

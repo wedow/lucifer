@@ -5629,10 +5629,10 @@ translate(struct ctx *c)
         return 0;
     }
     case SEND: {
-        /* A generator or coroutine receiver is resumed (any other declines,
-           and the interpreter sends to it): what it yields stays on the
-           stack for the YIELD_VALUE after; what it returns leaves the
-           yield-from loop. Generator code is never inlined. */
+        /* A generator or coroutine receiver is resumed (any other is the
+           kernel's send): what it yields stays on the stack for the
+           YIELD_VALUE after; what it returns leaves the yield-from loop.
+           Generator code is never inlined. */
         if (nospec(c, c->pc)) {
             unsupported(c);
             return -1;
