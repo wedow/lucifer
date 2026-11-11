@@ -17,6 +17,7 @@ from _lucifer import _boot, operators, slice as _slice, tuple as _tuple, iter as
 kernel_type = _boot.kernel_type
 index = operators.index
 as_ssize = operators.as_ssize
+ssize_arg = operators.ssize_arg
 decimal = operators.decimal
 truth = operators.truth
 slice_bounds = _slice.slice_bounds
@@ -40,14 +41,6 @@ def splice(lst, lo, hi, seq):
 
 def _name(x):
     return type_tp_name(type(x))
-
-
-def ssize_arg(x):
-    """A clinic Py_ssize_t argument: index(x), which must fit."""
-    n = index(x)
-    if n > _SSIZE_MAX or n < -_SSIZE_MAX - 1:
-        error(OverflowError, 'Python int too large to convert to C ssize_t')
-    return n
 
 
 def sequence_fast(value, message):

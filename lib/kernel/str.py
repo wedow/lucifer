@@ -16,6 +16,8 @@ kernel_type = _boot.kernel_type
 classmethod_ = _boot.classmethod_
 call_special = _boot.call_special
 index = operators.index
+ssize_arg = operators.ssize_arg
+int_arg = operators.int_arg
 to_str = _format.to_str
 to_repr = _format.to_repr
 to_ascii = _format.to_ascii
@@ -80,13 +82,6 @@ def _str_arg(x, fname, pos):
     if not kind(x, 'str'):
         error(TypeError, _cat(fname, '() argument ', pos, ' must be str, not ', _name(x)))
     return x
-
-
-def _ssize(x):
-    """An argument taken as Py_ssize_t, through __index__."""
-    if kind(x, 'int'):
-        return x
-    return index(x)
 
 
 def _slice_index(x, default):
@@ -164,7 +159,7 @@ def _fill(args, name):
         error(TypeError, _cat('The fill character must be a unicode character, not ', _name(fill)))
     elif str_len(fill) != 1:
         error(TypeError, 'The fill character must be exactly one character long')
-    return _ssize(width), fill
+    return ssize_arg(width), fill
 
 
 def _pad(fill, n):
@@ -199,7 +194,7 @@ def _split_args(name, args, kwargs, first):
         sep = None
     elif sep is not None and not kind(sep, 'str'):
         error(TypeError, _cat('must be str or None, not ', _name(sep)))
-    maxsplit = -1 if maxsplit is MISSING else _ssize(maxsplit)
+    maxsplit = -1 if maxsplit is MISSING else ssize_arg(maxsplit)
     return sep, maxsplit
 
 
@@ -604,7 +599,7 @@ errors defaults to 'strict'."""
             old, new = args
         _str_arg(old, 'replace', '1')
         _str_arg(new, 'replace', '2')
-        return str_replace(self, old, new, -1 if count is MISSING else _ssize(count))
+        return str_replace(self, old, new, -1 if count is MISSING else ssize_arg(count))
 
     def strip(self, *args):
         return str_strip(self, _chars('strip', args), 3)
@@ -679,7 +674,7 @@ errors defaults to 'strict'."""
     def zfill(self, *args, **kwargs):
         _one('zfill', args, kwargs)
         for w in args:
-            width = _ssize(w)
+            width = ssize_arg(w)
         n = str_len(self)
         if width <= n:
             return _exact(self)
@@ -694,11 +689,11 @@ errors defaults to 'strict'."""
         if n > 1:
             error(TypeError, _cat('expandtabs() takes at most 1 argument (', _decimal(n), ' given)'))
         for a in args:
-            tabsize = _ssize(a)
+            tabsize = int_arg(a)
         for key, value in ns_items(kwargs):
             if key != 'tabsize':
                 error(TypeError, _cat("expandtabs() got an unexpected keyword argument '", key, "'"))
-            tabsize = _ssize(value)
+            tabsize = int_arg(value)
         return str_expandtabs(self, tabsize)
 
     def translate(self, table, /):
