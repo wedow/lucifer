@@ -1468,9 +1468,16 @@ raw_bound(struct ctx *c, lu_v v, lu_v *raw, int *none, int bit)
     return 1;
 }
 
+/* A box of a raw int. A small constant is the cached int itself, every
+   box of it is that object, so that what reads a constant folds on it (a
+   kernel table indexed by a constant computed from an oparg). */
 static lu_v
 box_int(struct ctx *c, lu_v i)
 {
+    if (I(c, i)->op == OP_CONST_I && I(c, i)->imm >= -LU_NSMALLNEGINTS && I(c, i)->imm < LU_NSMALLPOSINTS) {
+        PyObject *o = PyLong_FromLongLong(I(c, i)->imm);   /* immortal */
+        return konst(c, o);
+    }
     return emit(c, OP_BOX_INT, REP_OBJ, i, LU_NOV, LU_NOV, 0);
 }
 
@@ -1485,6 +1492,9 @@ box_float(struct ctx *c, lu_v d)
 static lu_v
 rebox(struct ctx *c, lu_v o, PyTypeObject *t)
 {
+    if (known(c, o) != NULL) {
+        return o;               /* a constant: its raw value is a constant too */
+    }
     lu_v b = t == &PyLong_Type ? box_int(c, unbox_int(c, o)) : box_float(c, unbox_float(c, o));
     I(c, b)->b = o;
     return b;
