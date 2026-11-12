@@ -13,12 +13,12 @@ Status, refreshed by each daily status run (details: `tools/scoreboard`):
 <!-- stats:begin -->
 | Metric | Score | Counts |
 |---|---|---|
-| Speed vs CPython 3.14t, composite across benchmark suites | 0.43x CPython's speed | geomean of 122 programs, 0 fail, 2026-11-11 |
+| Speed vs CPython 3.14t, composite across benchmark suites | 0.48x CPython's speed | geomean of 122 programs, 0 fail, 2026-11-12 |
 | C-API functions implemented | 70.5% | 1,148 of 1,628 |
 | numpy test suite passing | 97.0% | 50,714 of 52,273 collected, run 2026-11-08 |
 | `Lib/test` passing, relative to CPython | 70.6% | 35,857 of CPython's 50,816, run 2026-11-09 |
-| Kernel programs passing in every mode | 100.0% | 694 of 694, 3 modes |
-| Differential programs matching CPython in every JIT mode | 100.0% | 191 of 191, 2 modes |
+| Kernel programs passing in every mode | 100.0% | 711 of 711, 3 modes |
+| Differential programs matching CPython in every JIT mode | 100.0% | 193 of 193, 2 modes |
 <!-- stats:end -->
 
 License: MIT (see LICENSE). Vendored third-party code under `third_party/` keeps its own license.
