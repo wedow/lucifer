@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Per-test conformance floor: every corpus through its own harness in one interpreter mode.
 
-  floor run --mode MODE --out DIR [--corpus NAME]... [--runs N]
+  floor run --mode MODE --out DIR [--corpus NAME]... [--runs N] [--jobs N]
       one DIR/CORPUS.tsv per corpus (test id, status; sorted) and DIR/summary.md
   floor compare FLOOR DIR
       every test PASS in FLOOR and not PASS in DIR (a corpus DIR lacks is skipped); exit 1 if any
 
 Modes: off (-X lucifer_jit=off), on (default flags), jit (-X lucifer_jit=always),
 deopt (-X lucifer_jit=always -X lucifer_stress=deopt:7).
+
+Each corpus splits into units, one harness invocation each (a Lib/test module, a numpy test
+file, a fuzzdiff generator and seed, ...). Units of every corpus share one queue of --jobs
+workers (default: every CPU this process may use), longest first by the seconds each took last time
+(build/floor/unit-seconds.json; units never timed go first).
 
 With --runs N each corpus runs N times; a test is PASS only if every run passed it, and a
 test whose status changed between runs is listed as flaky in the summary.
@@ -16,8 +21,7 @@ Run from the repository root on a built tree. Environment, as tools/status takes
   LUCIFER        the executable under test (default bin/lucifer)
   ORACLE_T       the CPython 3.14t reference interpreter
   HOST_PYTHON    CPython 3.14 for kernelcheck and compilercheck, and for make
-  TEST_PREFIX    command words put in front of each harness run, shard or package (a host lock, say)
-  LIBTEST_JOBS   parallel Lib/test modules (default 6)
+  TEST_PREFIX    command words put in front of each unit's harness run
   NUMPY_SITE, NUMPY_CACHE   prepared site-packages and wheel cache (numpy)
   FT_WORK        the package workspace from tools/ftcorpus/prepare.py (ft-packages)
   PYPI_CACHE     the wheel and source cache (pypi)
@@ -26,6 +30,7 @@ A corpus whose environment is missing is reported and skipped.
 """
 import argparse
 import collections
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
 import json
 import os
@@ -35,7 +40,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
+import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,10 +53,11 @@ MODES = {
 # The same modes in the harnesses that name them themselves.
 KERNEL_LANES = {"off": "jit-off", "on": "plain", "jit": "jit", "deopt": "jit-deopt"}
 JITCHECK_MODES = {"off": "off", "on": "on", "jit": "always", "deopt": "deopt:7"}
-# Shards keep each harness run short, so a shared host interleaves other work between them.
-LIBTEST_SHARDS = 24
-FT_SHARDS = 12
 LINE = re.compile(r"^(PASS|FAIL|XPASS|XFAIL) (.+)$", re.M)
+# The harnesses' order of outcomes: a test two units report (a case two Lib/test modules share) keeps the worst.
+RANK = {s: i for i, s in enumerate(["PASS", "SKIP", "XFAIL", "NOTRUN", "XPASS", "FAIL", "ERROR", "CRASH", "TIMEOUT"])}
+HISTORY = ROOT / "build/floor/unit-seconds.json"
+LOG_LOCK = threading.Lock()
 
 
 class Missing(Exception):
@@ -70,7 +76,7 @@ def run(argv, log, cwd=ROOT, prefixed=True):
     words = shlex.split(os.environ.get("TEST_PREFIX", "")) if prefixed else []
     done = subprocess.run(words + argv, cwd=cwd, text=True, errors="replace",
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    with log.open("a") as f:
+    with LOG_LOCK, log.open("a") as f:
         f.write(f"$ {shlex.join(argv)}\n{done.stdout}\nexit {done.returncode}\n")
     return done.stdout
 
@@ -89,12 +95,21 @@ def manifest(path):
         return {row["id"]: row["status"] for row in csv.DictReader(f, delimiter="\t")}
 
 
-def results_copy(suite, work):
-    """A scratch copy of results/SUITE without earlier lucifer runs, for a harness's --results."""
-    target = work / "results" / suite
-    shutil.rmtree(target, ignore_errors=True)
-    shutil.copytree(ROOT / "results" / suite, target,
-                    ignore=lambda d, names: [n for n in names if re.fullmatch(r"lucifer(-.*)?\.(tsv|json)", n)])
+def unit_manifest(path):
+    """A unit's manifest, which lists every test of its corpus: read once, then removed to spare the disk."""
+    rows = manifest(path)
+    path.unlink()
+    return rows
+
+
+def unit_results(suite, directory):
+    """A unit's own results/SUITE: links to the inputs there, so harness runs write their manifests apart."""
+    target = directory / "results" / suite
+    shutil.rmtree(directory / "results", ignore_errors=True)
+    target.mkdir(parents=True)
+    for path in (ROOT / "results" / suite).iterdir():
+        if not re.fullmatch(r"lucifer(-.*)?\.(tsv|json)", path.name):
+            (target / path.name).symlink_to(path)
     return target
 
 
@@ -108,36 +123,45 @@ def output_lines(text):
     return rows
 
 
-# --- corpora: each takes (mode, flags, work, log) and returns {test id: status} --------------
+# --- corpora: each takes (mode, flags, work, log) and returns its units, {label: function}; -----
+# --- a unit runs one harness invocation and returns {test id: status} for the tests it owns ----
 
-KERNEL_SHARD = 60     # programs per harness run: one hold of the host each, a few minutes
+KERNEL_SHARD = 60     # programs per harness run
 
 
 def kernel(mode, flags, work, log):
     names = sorted(p.stem for p in (ROOT / "tests/kernel").glob("*.py"))
-    rows = {}
-    for start in range(0, len(names), KERNEL_SHARD):
+
+    def shard(programs):
         out = run([env("HOST_PYTHON"), "tools/kernelcheck", "--oracle", env("ORACLE_T"), "--lucifer",
-                   env("LUCIFER", "bin/lucifer"), "--lane", KERNEL_LANES[mode],
-                   "--programs", " ".join(names[start:start + KERNEL_SHARD])], log)
-        shard = output_lines(out)
+                   env("LUCIFER", "bin/lucifer"), "--lane", KERNEL_LANES[mode], "--programs", " ".join(programs)], log)
+        rows = output_lines(out)
         total = re.search(r"\d+/(\d+) checks pass", out)
-        if not total or int(total[1]) != len(shard):
+        if not total or int(total[1]) != len(rows):
             rows["kernelcheck"] = "CRASH"  # the harness did not report every check
-        rows.update(shard)
-    return rows
+        return rows
+    return {str(start): lambda p=names[start:start + KERNEL_SHARD]: shard(p)
+            for start in range(0, len(names), KERNEL_SHARD)}
 
 
+def whole(corpus):
+    """A corpus that runs as one unit."""
+    return lambda mode, flags, work, log: {"all": lambda: corpus(mode, flags, work, log)}
+
+
+@whole
 def capi(mode, flags, work, log):
     """make check-capi (stops at the first failure: later tests are missing, so not PASS)."""
     return output_lines(make("check-capi", log, LUCIFER_FLAGS=shlex.join(flags)))
 
 
+@whole
 def embed(mode, flags, work, log):
     """The embedding program; an embedder passes no command-line flags, so every mode runs the default."""
     return {"embed": "PASS" if "PASS embed" in make("check-embed", log) else "FAIL"}
 
 
+@whole
 def difftest(mode, flags, work, log):
     results = work / "difftest"
     shutil.rmtree(results, ignore_errors=True)
@@ -146,12 +170,14 @@ def difftest(mode, flags, work, log):
     return manifest(results / "lucifer.tsv")
 
 
+@whole
 def jitcheck(mode, flags, work, log):
     out = run(["python3", "tools/jitcheck", "--lucifer", env("LUCIFER", "bin/lucifer"), "--oracle", env("ORACLE_T"),
                "--modes", JITCHECK_MODES[mode]], log)
     return {k.split(" ")[0]: v for k, v in output_lines(out).items()}
 
 
+@whole
 def compiler(mode, flags, work, log):
     """Marshaled code per file of each compilercheck corpus; the files listed as differing fail."""
     out = run([env("HOST_PYTHON"), "tools/compilercheck", "--lucifer", lucifer(flags), "--oracle", env("ORACLE_T"),
@@ -175,68 +201,117 @@ def compilercheck_corpus(name):
 
 
 def libtest(mode, flags, work, log):
-    results = results_copy("libtest", work)
-    for shard in range(LIBTEST_SHARDS):
+    """A unit per Lib/test module (--shard I/N over N modules picks module I)."""
+    modules = {}
+    for build in json.loads((ROOT / "results/libtest/inventory.json").read_text()).values():
+        for module, entry in build.items():
+            modules.setdefault(module, set()).update(entry["cases"])
+    names = sorted(modules)
+
+    def unit(index, module):
+        directory = work / "libtest" / module
+        results = unit_results("libtest", directory)
         run(["python3", "tools/libtest/run.py", "run", "--python", lucifer(flags), "--runtime", "lucifer",
-             "--source", "installed", "--jobs", env("LIBTEST_JOBS", "6"), "--results", str(results),
-             "--raw-dir", str(work / "libtest-raw"), "--shard", f"{shard}/{LIBTEST_SHARDS}", "--resume"], log)
-    return manifest(results / "lucifer.tsv")
+             "--source", "installed", "--jobs", "1", "--results", str(results),
+             "--raw-dir", str(directory / "raw"), "--shard", f"{index}/{len(names)}"], log)
+        rows = unit_manifest(results / "lucifer.tsv")
+        # A case other modules share is the worst of theirs in the manifest; this module's own is here.
+        shared = json.loads((results / "lucifer.json").read_text()).get("shared_cases", {}).get(module, {})
+        return {key: shared[key][0] if key in shared else rows[key] for key in modules[module]}
+    return {module: lambda i=i, m=module: unit(i, m) for i, module in enumerate(names)}
+
+
+# The whole-file deadline is a backstop for a wedged process; pytest-timeout times each test.
+NUMPY_FILE_TIMEOUT = 3600
 
 
 def numpy(mode, flags, work, log):
+    """A unit per numpy test file."""
     site, cache = env("NUMPY_SITE"), env("NUMPY_CACHE")
-    results = results_copy("numpytest", work)
-    ids = manifest(results / "expected.tsv")
-    # The daily's shards: one per numpy/_core test file, one per other package directory.
-    shards = sorted({i.split("::")[0] if i.startswith("numpy/_core/") else "/".join(i.split("/")[:2]) for i in ids})
-    for shard in shards:
+    files = collections.defaultdict(list)
+    for i in manifest(ROOT / "results/numpytest/expected.tsv"):
+        files[i.split("::")[0]].append(i)
+
+    def unit(path):
+        directory = work / "numpy" / path
+        results = unit_results("numpytest", directory)
         run(["python3", "tools/numpytest/run.py", "run", "--python", lucifer(flags), "--runtime", "lucifer",
              "--site", site, "--cache", cache, "--work", str(work / "numpy-raw"), "--results", str(results.parent),
-             "--shard", shard], log)
-    return manifest(results / "lucifer.tsv")
+             "--shard", path, "--timeout", str(NUMPY_FILE_TIMEOUT)], log)
+        rows = unit_manifest(results / "lucifer.tsv")
+        return {i: rows[i] for i in files[path]}
+    return {path: lambda p=path: unit(p) for path in sorted(files)}
 
 
-def ftcorpus(suite, extra):
+def ftcorpus(suite):
     def corpus(mode, flags, work, log):
-        results = results_copy(suite, work)
-        units = json.loads((results / "inventory.json").read_text())["units"]
-        # ft-cpython in shards, ft-packages a package at a time.
-        parts = ([["--shard", f"{i}/{FT_SHARDS}"] for i in range(FT_SHARDS)] if suite == "ft-cpython" else
-                 [["--select", p] for p in sorted({u.split("/")[1] for u in units})])
-        for part in parts:
+        """ft-cpython: a unit per module and lane. ft-packages: a unit per package, its two lanes
+        together, since both run in the package's one test tree."""
+        extra = ["--work", env("FT_WORK")] if suite == "ft-packages" else []
+        units = json.loads((ROOT / "results" / suite / "inventory.json").read_text())["units"]
+        names = sorted(units)
+        if suite == "ft-cpython":
+            parts = {name: (["--shard", f"{i}/{len(names)}"], [name]) for i, name in enumerate(names)}
+        else:
+            packages = sorted({n.split("/")[1] for n in names})
+            parts = {p: (["--select", p], [n for n in names if n.split("/")[1] == p]) for p in packages}
+
+        def unit(label, selection, owned):
+            directory = work / suite / label
+            results = unit_results(suite, directory)
             run(["python3", "tools/ftcorpus/run.py", suite, "run", "--python", lucifer(flags), "--runtime", "lucifer",
-                 "--results", str(results), "--raw-dir", str(work / f"{suite}-raw"), *extra(), *part, "--resume"], log)
-        return manifest(results / "lucifer.tsv")
+                 "--results", str(results), "--raw-dir", str(directory / "raw"), *extra, *selection], log)
+            rows = unit_manifest(results / "lucifer.tsv")
+            shared = json.loads((results / "lucifer.json").read_text()).get("shared_outcomes", {})
+            mine = {}
+            for name in owned:
+                # Package ids carry the package; CPython ids already name the module.
+                prefix = name.split("/")[0] + "/" + (name.split("/")[1] + "/" if suite == "ft-packages" else "")
+                for key in (prefix + case for case in units[name]):
+                    mine[key] = shared.get(name, {}).get(key, [rows[key]])[0]
+            return mine
+        return {label: lambda l=label, s=s, o=o: unit(l, s, o) for label, (s, o) in parts.items()}
     return corpus
 
 
 def pypi(mode, flags, work, log):
     cache, default_site = env("PYPI_CACHE"), env("PYPI_SITE")
-    rows = {}
-    for package in json.loads((ROOT / "tools/pypi/corpus.json").read_text())["packages"]:
-        results = results_copy(f"pypi/{package}", work).parent
+
+    def unit(package):
+        results = unit_results(f"pypi/{package}", work / "pypi" / package).parent
         site = os.environ.get(f"PYPI_SITE_{package}", default_site)
         run(["python3", "tools/pypi/run.py", "run", "--python", lucifer(flags), "--package", package,
              "--runtime", "lucifer", "--cache", cache, "--work", str(work / "pypi-work"), "--site", site,
              "--results", str(results)], log)
-        rows.update({f"{package}/{k}": v for k, v in manifest(results / package / "lucifer.tsv").items()})
-    return rows
+        return {f"{package}/{k}": v for k, v in manifest(results / package / "lucifer.tsv").items()}
+    packages = json.loads((ROOT / "tools/pypi/corpus.json").read_text())["packages"]
+    return {package: lambda p=package: unit(p) for package in packages}
 
 
 def fuzzdiff(mode, flags, work, log):
-    """Each generated case: match PASS, mismatch FAIL, skip SKIP, error (the oracle has no result) ERROR."""
+    """A unit per generator and seed. Each case: match PASS, mismatch FAIL, skip SKIP, error (the oracle
+    has no result) ERROR."""
     fuzz = ROOT / "build/fuzzdiff"
-    out = make("fuzzdiff", log, FUZZDIFF=shlex.join(["--seed", "1", "--seed", "2", "--python", lucifer(flags)]))
+    # Links the modules the generators import and unpacks the generators once, running no case.
+    generators = [json.loads(line)["generator"] for line in make("fuzzdiff", log, FUZZDIFF="--cases 0").splitlines()
+                  if line.startswith("{") and '"generator"' in line]
     named = {"mismatch": "FAIL", "skip": "SKIP", "error": "ERROR"}
-    rows = {}
-    for line in out.splitlines():
-        if line.startswith("{") and '"generator"' in line:
-            c = json.loads(line)
-            stem = f"{c['generator']}-s{c['seed']}"
-            rows.update({f"{stem}/{i}": "PASS" for i in range(c["cases"])})
-            for record in map(json.loads, (fuzz / "results" / f"{stem}.jsonl").read_text().splitlines()):
-                rows[f"{stem}/{record['index']}"] = named[record["status"]]
-    return rows
+
+    def unit(generator, seed):
+        out = run(["env", f"PYTHONPATH={ROOT / 'build/tests/capi/ext'}", "python3", "tools/fuzzdiff/run.py",
+                   "--oracle", env("ORACLE_T"), generator, "--seed", str(seed), "--python", lucifer(flags)], log)
+        rows = {}
+        for line in out.splitlines():
+            if line.startswith("{") and '"generator"' in line:
+                c = json.loads(line)
+                stem = f"{c['generator']}-s{c['seed']}"
+                rows.update({f"{stem}/{i}": "PASS" for i in range(c["cases"])})
+                for record in map(json.loads, (fuzz / "results" / f"{stem}.jsonl").read_text().splitlines()):
+                    rows[f"{stem}/{record['index']}"] = named[record["status"]]
+        if not rows:
+            raise ValueError(f"fuzzdiff {generator} seed {seed} reported nothing")
+        return rows
+    return {f"{g}-s{s}": lambda g=g, s=s: unit(g, s) for g in generators for s in (1, 2)}
 
 
 def workloads(mode, flags, work, log):
@@ -248,12 +323,12 @@ def workloads(mode, flags, work, log):
     ref.write_text(json.dumps(reference))
     named = {"ok": "PASS", "fail": "FAIL", "wrong": "FAIL", "crash": "CRASH", "timeout": "TIMEOUT",
              "noreference": "SKIP"}
-    rows = {}
-    for program in sorted(reference):
+
+    def unit(program):
         out = run(["python3", "tools/bench/corpus", "time", str(site), "--run", lucifer(flags), "--reference", str(ref),
                    "--programs", program], log)
-        rows.update({p: named[r["status"]] for p, r in json.loads(out.strip().splitlines()[-1]).items()})
-    return rows
+        return {p: named[r["status"]] for p, r in json.loads(out.strip().splitlines()[-1]).items()}
+    return {program: lambda p=program: unit(p) for program in sorted(reference)}
 
 
 CORPORA = {
@@ -266,8 +341,8 @@ CORPORA = {
     "fuzzdiff": fuzzdiff,
     "workloads": workloads,
     "libtest": libtest,
-    "ft-cpython": ftcorpus("ft-cpython", lambda: []),
-    "ft-packages": ftcorpus("ft-packages", lambda: ["--work", env("FT_WORK")]),
+    "ft-cpython": ftcorpus("ft-cpython"),
+    "ft-packages": ftcorpus("ft-packages"),
     "pypi": pypi,
     "numpy": numpy,
 }
@@ -294,18 +369,21 @@ def read_tsv(path):
 
 
 def write_summary(out, mode):
-    """summary.md from every CORPUS.tsv in out, keeping the wall times and flaky lists already recorded."""
+    """summary.md from every CORPUS.tsv in out, keeping the unit seconds and flaky lists already recorded."""
     path = out / "summary.json"
     notes = json.loads(path.read_text()) if path.exists() else {}
     statuses = ["PASS", "FAIL", "ERROR", "SKIP", "XFAIL", "XPASS", "TIMEOUT", "CRASH", "NOTRUN"]
     md = [f"# Conformance floor: mode {mode} ({shlex.join(MODES[mode]) or 'default flags'})", "",
-          "| corpus | runs | wall s | total | " + " | ".join(statuses) + " |", "|---" * (len(statuses) + 4) + "|"]
+          "| corpus | runs | unit s | total | " + " | ".join(statuses) + " |", "|---" * (len(statuses) + 4) + "|"]
     for name in CORPORA:
         if (out / f"{name}.tsv").exists():
             counts = collections.Counter(read_tsv(out / f"{name}.tsv").values())
             n = notes.get(name, {})
             md.append(f"| {name} | {n.get('runs', '-')} | {n.get('seconds', '-')} | {sum(counts.values())} | "
                       + " | ".join(str(counts.get(s, 0)) for s in statuses) + " |")
+    if "wall" in notes:
+        md += ["", f"Unit s is the corpus's units' seconds summed; the last run took {notes['wall']['seconds']} s "
+                   f"of wall time with {notes['wall']['jobs']} jobs."]
     for name, n in notes.items():
         if n.get("flaky"):
             md += ["", f"## Flaky in {name} (recorded as not PASS)", ""] + [f"- {i}" for i in n["flaky"]]
@@ -322,32 +400,67 @@ def run_mode(args):
     work.mkdir(parents=True, exist_ok=True)
     path = out / "summary.json"
     notes = json.loads(path.read_text()) if path.exists() else {}
+    history = json.loads(HISTORY.read_text()) if HISTORY.exists() else {}
+    started = time.monotonic()
     # The oracle's _testcapi and friends beside the standard library: kernel, capi and Lib/test programs import them.
     make("oracle-exts", work / "oracle-exts.log")
-    failed = False
+    units, logs, failed, dropped = {}, {}, set(), set()
+
+    def skip(name, why):
+        print(f"{name}: skipped, {why}", flush=True)
+        notes[name] = {"skipped": str(why)}
+        dropped.add(name)
     for name in args.corpus or CORPORA:
-        log = work / f"{name}.log"
-        log.unlink(missing_ok=True)
-        start, runs = time.monotonic(), []
+        logs[name] = work / f"{name}.log"
+        logs[name].unlink(missing_ok=True)
         try:
-            for _ in range(args.runs):
-                runs.append(CORPORA[name](args.mode, flags, work, log))
+            units[name] = CORPORA[name](args.mode, flags, work, logs[name])
         except Missing as why:
-            print(f"{name}: skipped, {why}", flush=True)
-            notes[name] = {"skipped": str(why)}
-            path.write_text(json.dumps(notes, indent=1) + "\n")
-            continue
-        except (OSError, ValueError, KeyError, IndexError) as error:
-            print(f"{name}: harness produced no results ({error!r}); see {log}", flush=True)
-            failed = True
-            continue
-        rows, flaky = merge(runs)
-        write_tsv(out / f"{name}.tsv", rows)
-        notes[name] = {"runs": args.runs, "seconds": round(time.monotonic() - start), "flaky": sorted(flaky)}
-        path.write_text(json.dumps(notes, indent=1) + "\n")
-        write_summary(out, args.mode)
-        print(f"{name}: {dict(collections.Counter(rows.values()))} in {notes[name]['seconds']} s", flush=True)
+            skip(name, why)
+    runs = {name: [] for name in units}
+
+    def timed(key, unit):
+        start = time.monotonic()
+        try:
+            return unit()
+        finally:
+            history[key] = round(time.monotonic() - start, 1)
+    for _ in range(args.runs):  # a run's units reuse its scratch directories, so runs follow one another
+        rows = {name: {} for name in units}
+        left = collections.Counter({name: len(u) for name, u in units.items()})
+        queue = sorted((f"{name}/{label}", name, unit) for name, u in units.items() for label, unit in u.items())
+        queue.sort(key=lambda t: -history.get(t[0], float("inf")))
+        with ThreadPoolExecutor(args.jobs) as pool:
+            futures = {pool.submit(timed, key, unit): (key, name) for key, name, unit in queue}
+            for future in as_completed(futures):
+                key, name = futures[future]
+                try:
+                    for i, status in future.result().items():
+                        old = rows[name].get(i)
+                        rows[name][i] = status if old is None or RANK[status] > RANK[old] else old
+                except Missing as why:
+                    skip(name, why)
+                except (OSError, ValueError, KeyError, IndexError) as error:
+                    print(f"{key}: harness produced no results ({error!r}); see {logs[name]}", flush=True)
+                    failed.add(name)
+                    dropped.add(name)
+                left[name] -= 1
+                if not left[name] and name not in dropped:
+                    runs[name].append(rows[name])
+                    if len(runs[name]) == args.runs:
+                        merged, flaky = merge(runs[name])
+                        write_tsv(out / f"{name}.tsv", merged)
+                        seconds = round(sum(history[f"{name}/{label}"] for label in units[name]))
+                        notes[name] = {"runs": args.runs, "seconds": seconds, "flaky": sorted(flaky)}
+                        path.write_text(json.dumps(notes, indent=1) + "\n")
+                        write_summary(out, args.mode)
+                        print(f"{name}: {dict(collections.Counter(merged.values()))}, units {seconds} s", flush=True)
+        HISTORY.parent.mkdir(parents=True, exist_ok=True)
+        HISTORY.write_text(json.dumps(history, indent=1, sort_keys=True) + "\n")
+    notes["wall"] = {"seconds": round(time.monotonic() - started), "jobs": args.jobs}
+    path.write_text(json.dumps(notes, indent=1) + "\n")
     write_summary(out, args.mode)
+    print(f"wall {notes['wall']['seconds']} s with {args.jobs} jobs", flush=True)
     return 1 if failed else 0
 
 
@@ -376,6 +489,8 @@ def main():
     r.add_argument("--work", type=Path, help="logs and scratch results (default build/floor/MODE)")
     r.add_argument("--corpus", action="append", choices=CORPORA)
     r.add_argument("--runs", type=int, default=1)
+    r.add_argument("--jobs", type=int, default=len(os.sched_getaffinity(0)),
+                   help="units run at once (default: every CPU this process may use)")
     c = sub.add_parser("compare")
     c.add_argument("floor", type=Path)
     c.add_argument("dir", type=Path)
