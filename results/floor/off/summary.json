@@ -1,0 +1,62 @@
+{
+ "kernel": {
+  "runs": 2,
+  "seconds": 541,
+  "flaky": []
+ },
+ "capi": {
+  "runs": 2,
+  "seconds": 96,
+  "flaky": []
+ },
+ "embed": {
+  "runs": 2,
+  "seconds": 2,
+  "flaky": []
+ },
+ "jitcheck": {
+  "runs": 2,
+  "seconds": 1,
+  "flaky": []
+ },
+ "difftest": {
+  "runs": 2,
+  "seconds": 126,
+  "flaky": []
+ },
+ "compiler": {
+  "runs": 2,
+  "seconds": 33,
+  "flaky": []
+ },
+ "fuzzdiff": {
+  "runs": 1,
+  "seconds": 4724,
+  "flaky": []
+ },
+ "libtest": {
+  "runs": 1,
+  "seconds": 6783,
+  "flaky": []
+ },
+ "ft-cpython": {
+  "runs": 1,
+  "seconds": 1902,
+  "flaky": []
+ },
+ "pypi": {
+  "runs": 1,
+  "seconds": 663,
+  "flaky": []
+ },
+ "ft-packages": {
+  "runs": 1,
+  "seconds": 259,
+  "flaky": []
+ },
+ "numpy": {
+  "runs": 1,
+  "seconds": 8226,
+  "flaky": []
+ }
+}

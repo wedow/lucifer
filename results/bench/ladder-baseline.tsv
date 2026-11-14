@@ -1,0 +1,208 @@
+case	runtime	instructions	cycles	spread_pct
+mako.l0	lucifer	21	76	31.7
+mako.l0	cpython	89	21	4.3
+mako.l0	pypy	14	-18	2.1
+mako.l1	lucifer	404	155	0.5
+mako.l1	cpython	278	126	1.0
+mako.l1	pypy	29	20	2.9
+mako.l2	lucifer	1939	872	0.7
+mako.l2	cpython	1291	568	1.0
+mako.l2	pypy	245	97	1.2
+mako.l3	lucifer	10204	4333	0.2
+mako.l3	cpython	4240	1671	0.3
+mako.l3	pypy	1247	531	0.5
+mako.l4	lucifer	10612	4370	0.1
+mako.l4	cpython	4429	1920	0.3
+mako.l4	pypy	1296	640	0.5
+pickle.empty	lucifer	309	137	5.1
+pickle.empty	cpython	181	77	10.0
+pickle.empty	pypy	35	37	4.7
+pickle.empty_s	lucifer	396	189	56.2
+pickle.empty_s	cpython	201	73	31.0
+pickle.empty_s	pypy	44	71	4.8
+pickle.commit	lucifer	1212	468	12.5
+pickle.commit	cpython	1275	390	0.9
+pickle.commit	pypy	32	67	3.3
+pickle.pid	lucifer	327	184	4.5
+pickle.pid	cpython	576	178	2.6
+pickle.pid	pypy	23	3	5.8
+pickle.memo_get	lucifer	1500	552	5.8
+pickle.memo_get	cpython	956	340	0.0
+pickle.memo_get	pypy	467	277	0.8
+pickle.getattr_default	lucifer	848	393	1.2
+pickle.getattr_default	cpython	886	299	0.0
+pickle.getattr_default	pypy	22	6	8.5
+pickle.dispatch	lucifer	1316	533	5.4
+pickle.dispatch	cpython	1048	392	0.5
+pickle.dispatch	pypy	135	42	0.6
+pickle.encode	lucifer	9191	4235	3.7
+pickle.encode	cpython	969	383	0.1
+pickle.encode	pypy	28	-9	6.6
+pickle.pack_b	lucifer	20205	10721	1.4
+pickle.pack_b	cpython	956	364	2.2
+pickle.pack_b	pypy	49	46	5.6
+pickle.concat	lucifer	1140	781	8.1
+pickle.concat	cpython	1308	434	3.9
+pickle.concat	pypy	23	14	7.4
+pickle.write	lucifer	6410	2969	1.2
+pickle.write	cpython	1233	499	2.8
+pickle.write	pypy	84	74	3.6
+pickle.memo_store	lucifer	1642	956	11.2
+pickle.memo_store	cpython	1428	594	1.4
+pickle.memo_store	pypy	650	407	0.3
+pickle.save	lucifer	43306	28056	0.3
+pickle.save	cpython	12159	5089	0.4
+pickle.save	pypy	679	322	2.0
+genshi.g0	lucifer	6523	3017	0.6
+genshi.g0	cpython	4779	1931	1.1
+genshi.g0	pypy	1080	549	1.3
+genshi.g1	lucifer	6739	2711	2.9
+genshi.g1	cpython	6022	2422	0.0
+genshi.g1	pypy	1352	538	0.2
+genshi.g2	lucifer	44379	25500	0.3
+genshi.g2	cpython	16902	7313	0.0
+genshi.g2	pypy	2359	970	10.5
+genshi.g3	lucifer	46507	27009	0.5
+genshi.g3	cpython	19110	8533	0.1
+genshi.g3	pypy	2871	1363	0.3
+call.empty	lucifer	16	19	26.1
+call.empty	cpython	183	63	0.8
+call.empty	pypy	12	4	0.4
+call.rec0	lucifer	158	66	0.3
+call.rec0	cpython	631	199	0.1
+call.rec0	pypy	12	5	0.3
+call.rec1	lucifer	410	165	1.1
+call.rec1	cpython	1119	364	0.0
+call.rec1	pypy	12	3	0.3
+call.rec2	lucifer	624	244	0.0
+call.rec2	cpython	1607	498	0.1
+call.rec2	pypy	12	8	0.4
+call.rec12	lucifer	2774	1137	0.0
+call.rec12	cpython	6487	2094	0.0
+call.rec12	pypy	994	648	0.0
+call.krec2	lucifer	1070	368	0.0
+call.krec2	cpython	1959	679	0.0
+call.krec2	pypy	12	3	0.4
+call.krec12	lucifer	5420	1883	0.0
+call.krec12	cpython	8599	2932	0.0
+call.krec12	pypy	999	716	0.0
+call.srec2	lucifer	1957	811	0.0
+call.srec2	cpython	2454	830	0.0
+call.srec2	pypy	12	4	0.4
+call.srec12	lucifer	9728	3778	0.0
+call.srec12	cpython	10314	3406	0.0
+call.srec12	pypy	1005	782	0.0
+call.skrec2	lucifer	2959	1264	0.0
+call.skrec2	cpython	3009	1145	0.0
+call.skrec2	pypy	12	2	0.2
+call.skrec12	lucifer	14103	5387	0.0
+call.skrec12	cpython	12719	4693	0.0
+call.skrec12	pypy	1038	958	0.0
+call.meth2	lucifer	544	209	0.7
+call.meth2	cpython	1629	531	0.0
+call.meth2	pypy	12	6	0.7
+call.meth12	lucifer	2855	1062	0.0
+call.meth12	cpython	6669	2108	0.0
+call.meth12	pypy	1427	1219	0.0
+call.replace	lucifer	1650	661	0.0
+call.replace	cpython	698	227	0.0
+call.replace	pypy	168	58	0.0
+call.dget	lucifer	532	191	0.1
+call.dget	cpython	558	185	0.0
+call.dget	pypy	124	37	0.0
+call.lappend	lucifer	251	128	1.6
+call.lappend	cpython	310	129	0.5
+call.lappend	pypy	71	47	1.9
+call.dqappend	lucifer	396	155	0.1
+call.dqappend	cpython	369	140	0.3
+call.dqappend	pypy	26	9	0.4
+call.isinst	lucifer	20	10	37.4
+call.isinst	cpython	425	133	0.1
+call.isinst	pypy	12	4	0.4
+call.isinst_t	lucifer	446	210	0.1
+call.isinst_t	cpython	1107	399	0.0
+call.isinst_t	pypy	12	2	0.1
+call.gen_fused	lucifer	636	244	0.1
+call.gen_fused	cpython	375	116	0.1
+call.gen_fused	pypy	52	24	0.2
+call.gen_call	lucifer	919	373	0.1
+call.gen_call	cpython	1285	397	0.0
+call.gen_call	pypy	52	27	0.1
+call.attr	lucifer	40	15	1.3
+call.attr	cpython	250	80	0.0
+call.attr	pypy	12	5	0.4
+pack.empty	lucifer	117	80	2.2
+pack.empty	cpython	159	89	0.2
+pack.empty	pypy	22	19	4.3
+pack.pack_b	lucifer	20016	10232	0.4
+pack.pack_b	cpython	914	369	0.0
+pack.pack_b	pypy	51	43	2.1
+pack.spack	lucifer	17324	8425	0.0
+pack.spack	cpython	643	236	0.1
+pack.spack	pypy	51	40	2.1
+pack.genpack	lucifer	2296	998	3.7
+pack.genpack	cpython	1541	578	0.1
+pack.genpack	pypy	171	93	1.0
+pack.tobytes	lucifer	2185	822	4.2
+pack.tobytes	cpython	780	274	0.2
+pack.tobytes	pypy	167	77	1.4
+mako.html_escape	lucifer	8265	3461	
+mako.html_escape	cpython	2949	1103	
+mako.html_escape	pypy	1002	434	
+pickle.pack	lucifer	19809	10532	
+pickle.pack	cpython	755	291	
+pickle.pack	pypy	4	-25	
+genshi.eval_and_yields	lucifer	39767	24298	
+genshi.eval_and_yields	cpython	13088	6111	
+genshi.eval_and_yields	pypy	1519	825	
+op.call_positional	lucifer	215	89	
+op.call_positional	cpython	488	160	
+op.call_positional	pypy	98	64	
+op.call_from_inlined	lucifer	251	99	
+op.call_from_inlined	cpython	488	165	
+op.call_from_inlined	pypy	-0	-2	
+op.call_keyword	lucifer	435	152	
+op.call_keyword	cpython	664	225	
+op.call_keyword	pypy	99	71	
+op.call_method	lucifer	231	85	
+op.call_method	cpython	504	158	
+op.call_method	pypy	141	121	
+op.call_star	lucifer	777	297	
+op.call_star	cpython	786	258	
+op.call_star	pypy	99	78	
+op.call_star_kw	lucifer	1114	412	
+op.call_star_kw	cpython	971	355	
+op.call_star_kw	pypy	103	96	
+op.gen_item_fused	lucifer	619	224	
+op.gen_item_fused	cpython	192	53	
+op.gen_item_fused	pypy	40	21	
+op.gen_item_call	lucifer	510	208	
+op.gen_item_call	cpython	166	33	
+op.gen_item_call	pypy	40	24	
+op.str_replace	lucifer	1633	642	
+op.str_replace	cpython	515	164	
+op.str_replace	pypy	156	55	
+op.dict_get	lucifer	516	172	
+op.dict_get	cpython	375	122	
+op.dict_get	pypy	112	33	
+op.list_append	lucifer	235	109	
+op.list_append	cpython	127	66	
+op.list_append	pypy	60	43	
+op.deque_append	lucifer	379	136	
+op.deque_append	cpython	186	77	
+op.deque_append	pypy	14	5	
+op.isinstance_str	lucifer	4	-9	
+op.isinstance_str	cpython	242	70	
+op.isinstance_str	pypy	0	-0	
+op.isinstance_tuple	lucifer	430	191	
+op.isinstance_tuple	cpython	924	336	
+op.isinstance_tuple	pypy	0	-1	
+op.attr_load	lucifer	23	-4	
+op.attr_load	cpython	67	17	
+op.attr_load	pypy	0	2	
+op.int_to_bytes	lucifer	2068	742	
+op.int_to_bytes	cpython	621	185	
+op.int_to_bytes	pypy	145	58	
+op.hand_packer	lucifer	2179	918	
+op.hand_packer	cpython	1381	489	
+op.hand_packer	pypy	150	74	

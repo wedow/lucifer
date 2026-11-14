@@ -2036,6 +2036,15 @@ class _Gen:
 
     # --- constructs -----------------------------------------------------
 
+    def exclusive(self, firsts):
+        """Whether no two alternatives can start at the same character. It stops at the first pair
+        that can: a branch of thousands of words is decided by its first few."""
+        for i in range(len(firsts)):
+            for j in range(i):
+                if not self.excludes(firsts[i], firsts[j], False):
+                    return False
+        return True
+
     def branch(self, pc, stop, ind, fail, inrep, succ):
         code = self.code
         alts = []
@@ -2056,8 +2065,7 @@ class _Gen:
         # Alternatives whose first characters exclude each other: at most one can start, so the
         # branch never backtracks into another and is plain control flow.
         firsts = [self.first_set(body, True) for body, jump in alts]
-        if all([f and 'end' not in f and 'nl' not in f for f in firsts]) and all(
-                [self.excludes(firsts[i], firsts[j], False) for i in range(len(firsts)) for j in range(i)]):
+        if all([f and 'end' not in f and 'nl' not in f for f in firsts]) and self.exclusive(firsts):
             if self.try_straight(self.dispatch, alts, firsts, ind, fail, inrep, succ, stop is None):
                 return after
         if stop is not None:

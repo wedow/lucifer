@@ -2,8 +2,8 @@
 
    Positions number instructions in emission order, two apart. Liveness is
    the usual backward dataflow over blocks, with frame states counted as
-   uses: an exit reads every value its state names (a virtual box's raw
-   input stands for it, a virtual object's fields there for it). Each
+   uses: an exit reads every value its state names (a virtual object's
+   fields stand for it). Each
    value then gets one interval, from its definition to its last use,
    stretched over every block it is live through, so a value live around a
    loop holds its location through the whole loop. Values in one interval keep one location: no splitting.
@@ -14,8 +14,8 @@
    preserves (the C ABI's callee-saved ones), so a value live across one
    gets one of those for its whole interval, or a spill word when none is
    free, when it is a float, or when an instruction it lives across uses
-   them itself (clobbers_saved). A call that publishes the root frame's
-   state (lu_publishes) reads the root locals it names during the call
+   them itself (clobbers_saved). A call that publishes its frame state
+   (lu_publishes) lets walkers read the values it names during the call
    from memory, so they count as live across it and are spilled. The rest
    go through linear scan over the target's other registers first; when
    none is free, the interval that ends last is spilled. Constants take no location: the
@@ -37,69 +37,62 @@ static int
 allocatable(struct lu_func *f, lu_v v)
 {
     struct lu_ins *in = &f->ins[v];
-    return !(in->flags & (INS_DEAD | INS_VIRTUAL)) && in->rep != REP_NONE && in->op != OP_CONST
+    return !(in->flags & INS_DEAD) && in->rep != REP_NONE && in->op != OP_CONST
         && in->op != OP_CONST_I && in->op != OP_CONST_F;
 }
 
-/* What a use of v reads: a virtual box reads its raw input. */
 static lu_v
 used(struct lu_func *f, lu_v v)
 {
-    if (v == LU_NOV) {
-        return LU_NOV;
-    }
-    if (f->ins[v].flags & INS_VIRTUAL) {
-        v = f->ins[v].b != LU_NOV ? f->ins[v].b : f->ins[v].a;
-    }
     return v != LU_NOV && allocatable(f, v) ? v : LU_NOV;
 }
 
 #define BIT_SET(set, v) ((set)[(v) >> 6] |= (word)1 << ((v) & 63))
 #define BIT_CLR(set, v) ((set)[(v) >> 6] &= ~((word)1 << ((v) & 63)))
 
-/* Calls fn(f, v, arg) for every value instruction `in` reads, phi inputs
-   excepted: a virtual object reads its fields there (at). */
+struct visit {
+    void (*fn)(struct lu_func *, lu_v, void *);
+    void *arg;
+};
+
 static void
-use_of(struct lu_func *f, lu_v v, lu_v at, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
+visit_used(struct lu_func *f, lu_v v, void *arg)
 {
-    if (v != LU_NOV && lu_object_shape(f, v) != LU_NOV) {
-        int max = f->ins[v].nargs > f->ins[v].nfields ? f->ins[v].nargs : f->ins[v].nfields;
-        lu_v *vals = malloc(sizeof(lu_v) * (size_t)(max ? max : 1));
-        int32_t *offs = malloc(sizeof(int32_t) * (size_t)(max ? max : 1));
-        int n = lu_object_fields(f, v, at, vals, offs);
-        for (int i = 0; i < n; i++) {
-            use_of(f, vals[i], at, fn, arg);
-        }
-        free(vals);
-        free(offs);
-        return;
-    }
-    lu_v u = used(f, v);
-    if (u != LU_NOV) {
-        fn(f, u, arg);
-    }
-    if (v != LU_NOV && (f->ins[v].flags & INS_VIRTUAL) && (u = used(f, f->ins[v].c)) != LU_NOV) {
-        fn(f, u, arg);          /* a box that may stand for NULL reads its bit too */
+    struct visit *vis = arg;
+    if (used(f, v) != LU_NOV) {
+        vis->fn(f, v, vis->arg);
     }
 }
 
+/* Calls fn(f, v, arg) for every value the state fs names that has a
+   location. */
+static void
+each_state_use(struct lu_func *f, struct lu_fs *fs, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
+{
+    struct visit vis = { fn, arg };
+    lu_fs_each(f, fs, visit_used, &vis);
+}
+
+/* Calls fn(f, v, arg) for every value instruction `in` reads, phi inputs
+   excepted: its operands, and what its frame state names. */
 static void
 each_use(struct lu_func *f, struct lu_ins *in, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
-    lu_v at = (lu_v)(in - f->ins);
     lu_v ops[3] = { in->a, in->b, in->c };
     for (int i = 0; i < 3; i++) {
-        use_of(f, ops[i], at, fn, arg);
+        if (used(f, ops[i]) != LU_NOV) {
+            fn(f, ops[i], arg);
+        }
     }
     if (in->op != OP_PHI) {
         for (int i = 0; i < in->nargs; i++) {
-            use_of(f, in->args[i], at, fn, arg);
+            if (used(f, in->args[i]) != LU_NOV) {
+                fn(f, in->args[i], arg);
+            }
         }
     }
-    for (struct lu_fs *fs = in->fs; fs != NULL; fs = fs->caller) {
-        for (int i = 0; i < fs->nlocals + fs->nstack; i++) {
-            use_of(f, fs->vals[i], at, fn, arg);
-        }
+    if (in->fs != NULL) {
+        each_state_use(f, in->fs, fn, arg);
     }
 }
 
@@ -322,25 +315,15 @@ lu_regalloc(struct lu_func *f)
                 struct use_at at = { ins->pos };
                 each_use(f, ins, extend_use, &at);
             }
-            if (lu_alloc_call(ins)) {
-                /* Its exits leave after its call: what their states read
-                   lives across it. */
+            if (lu_alloc_call(ins) && ins->fs != NULL) {
+                /* Its exits leave after its call: what their state reads
+                   lives across it. A call that publishes that state
+                   (lu_publishes) is read by walkers during the call, from
+                   memory. */
                 struct use_at after = { ins->pos + 1 };
-                for (struct lu_fs *fs = ins->fs; fs != NULL; fs = fs->caller) {
-                    for (int i = 0; i < fs->nlocals + fs->nstack; i++) {
-                        use_of(f, fs->vals[i], v, extend_use, &after);
-                    }
-                }
-            }
-            if (lu_publishes(ins)) {
-                struct lu_fs *root = ins->fs;
-                while (root->caller != NULL) {
-                    root = root->caller;
-                }
-                struct use_at after = { ins->pos + 1 };
-                for (int i = 0; i < root->nlocals; i++) {
-                    use_of(f, root->vals[i], v, extend_use, &after);
-                    use_of(f, root->vals[i], v, mark_memory, memory);
+                each_state_use(f, ins->fs, extend_use, &after);
+                if (lu_publishes(ins)) {
+                    each_state_use(f, ins->fs, mark_memory, memory);
                 }
             }
             if (lu_alloc_call(ins)) {

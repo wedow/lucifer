@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+"""Per-test conformance floor: every corpus through its own harness in one interpreter mode.
+
+  floor run --mode MODE --out DIR [--corpus NAME]... [--runs N]
+      one DIR/CORPUS.tsv per corpus (test id, status; sorted) and DIR/summary.md
+  floor compare FLOOR DIR
+      every test PASS in FLOOR and not PASS in DIR (a corpus DIR lacks is skipped); exit 1 if any
+
+Modes: off (-X lucifer_jit=off), on (default flags), jit (-X lucifer_jit=always),
+deopt (-X lucifer_jit=always -X lucifer_stress=deopt:7).
+
+With --runs N each corpus runs N times; a test is PASS only if every run passed it, and a
+test whose status changed between runs is listed as flaky in the summary.
+
+Run from the repository root on a built tree. Environment, as tools/status takes it:
+  LUCIFER        the executable under test (default bin/lucifer)
+  ORACLE_T       the CPython 3.14t reference interpreter
+  HOST_PYTHON    CPython 3.14 for kernelcheck and compilercheck, and for make
+  TEST_PREFIX    command words put in front of each harness run, shard or package (a host lock, say)
+  LIBTEST_JOBS   parallel Lib/test modules (default 6)
+  NUMPY_SITE, NUMPY_CACHE   prepared site-packages and wheel cache (numpy)
+  FT_WORK        the package workspace from tools/ftcorpus/prepare.py (ft-packages)
+  PYPI_CACHE     the wheel and source cache (pypi)
+  PYPI_SITE      installed cp314t site-packages; PYPI_SITE_<package> overrides it per package
+A corpus whose environment is missing is reported and skipped.
+"""
+import argparse
+import collections
+import csv
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+MODES = {
+    "off": ["-X", "lucifer_jit=off"],
+    "on": [],
+    "jit": ["-X", "lucifer_jit=always"],
+    "deopt": ["-X", "lucifer_jit=always", "-X", "lucifer_stress=deopt:7"],
+}
+# The same modes in the harnesses that name them themselves.
+KERNEL_LANES = {"off": "jit-off", "on": "plain", "jit": "jit", "deopt": "jit-deopt"}
+JITCHECK_MODES = {"off": "off", "on": "on", "jit": "always", "deopt": "deopt:7"}
+# Shards keep each harness run short, so a shared host interleaves other work between them.
+LIBTEST_SHARDS = 24
+FT_SHARDS = 12
+LINE = re.compile(r"^(PASS|FAIL|XPASS|XFAIL) (.+)$", re.M)
+
+
+class Missing(Exception):
+    """A corpus's environment is not set up."""
+
+
+def env(name, default=None):
+    value = os.environ.get(name, default)
+    if value is None:
+        raise Missing(f"{name} is not set")
+    return value
+
+
+def run(argv, log, cwd=ROOT, prefixed=True):
+    """Run a harness step, appending its output to log; the output."""
+    words = shlex.split(os.environ.get("TEST_PREFIX", "")) if prefixed else []
+    done = subprocess.run(words + argv, cwd=cwd, text=True, errors="replace",
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    with log.open("a") as f:
+        f.write(f"$ {shlex.join(argv)}\n{done.stdout}\nexit {done.returncode}\n")
+    return done.stdout
+
+
+def make(target, log, **variables):
+    flags = [f"{v}={os.environ[v]}" for v in ("ORACLE_T", "HOST_PYTHON") if v in os.environ]
+    return run(["make", target, *flags, *(f"{k}={v}" for k, v in variables.items())], log)
+
+
+def lucifer(flags):
+    return shlex.join([str(Path(env("LUCIFER", "bin/lucifer")).resolve()), *flags])
+
+
+def manifest(path):
+    with path.open(newline="") as f:
+        return {row["id"]: row["status"] for row in csv.DictReader(f, delimiter="\t")}
+
+
+def results_copy(suite, work):
+    """A scratch copy of results/SUITE without earlier lucifer runs, for a harness's --results."""
+    target = work / "results" / suite
+    shutil.rmtree(target, ignore_errors=True)
+    shutil.copytree(ROOT / "results" / suite, target,
+                    ignore=lambda d, names: [n for n in names if re.fullmatch(r"lucifer(-.*)?\.(tsv|json)", n)])
+    return target
+
+
+def output_lines(text):
+    """{id: status} from PASS/FAIL lines; the detail after an id (': exit ...', a count) is dropped."""
+    rows = {}
+    for status, rest in LINE.findall(text):
+        rest = re.sub(r": exit .*$| \(run \d+\)$| \(luc-\w+\)$", "", rest)
+        rest = re.sub(r"^(stress: gc:\d+) .*", r"\1", rest)
+        rows[rest] = status
+    return rows
+
+
+# --- corpora: each takes (mode, flags, work, log) and returns {test id: status} --------------
+
+KERNEL_SHARD = 60     # programs per harness run: one hold of the host each, a few minutes
+
+
+def kernel(mode, flags, work, log):
+    names = sorted(p.stem for p in (ROOT / "tests/kernel").glob("*.py"))
+    rows = {}
+    for start in range(0, len(names), KERNEL_SHARD):
+        out = run([env("HOST_PYTHON"), "tools/kernelcheck", "--oracle", env("ORACLE_T"), "--lucifer",
+                   env("LUCIFER", "bin/lucifer"), "--lane", KERNEL_LANES[mode],
+                   "--programs", " ".join(names[start:start + KERNEL_SHARD])], log)
+        shard = output_lines(out)
+        total = re.search(r"\d+/(\d+) checks pass", out)
+        if not total or int(total[1]) != len(shard):
+            rows["kernelcheck"] = "CRASH"  # the harness did not report every check
+        rows.update(shard)
+    return rows
+
+
+def capi(mode, flags, work, log):
+    """make check-capi (stops at the first failure: later tests are missing, so not PASS)."""
+    return output_lines(make("check-capi", log, LUCIFER_FLAGS=shlex.join(flags)))
+
+
+def embed(mode, flags, work, log):
+    """The embedding program; an embedder passes no command-line flags, so every mode runs the default."""
+    return {"embed": "PASS" if "PASS embed" in make("check-embed", log) else "FAIL"}
+
+
+def difftest(mode, flags, work, log):
+    results = work / "difftest"
+    shutil.rmtree(results, ignore_errors=True)
+    run(["python3", "tools/difftest", "run", "--oracle", env("ORACLE_T"), "--python", lucifer(flags),
+         "--runtime", "lucifer", "--results", str(results), "--work", str(results / "work")], log)
+    return manifest(results / "lucifer.tsv")
+
+
+def jitcheck(mode, flags, work, log):
+    out = run(["python3", "tools/jitcheck", "--lucifer", env("LUCIFER", "bin/lucifer"), "--oracle", env("ORACLE_T"),
+               "--modes", JITCHECK_MODES[mode]], log)
+    return {k.split(" ")[0]: v for k, v in output_lines(out).items()}
+
+
+def compiler(mode, flags, work, log):
+    """Marshaled code per file of each compilercheck corpus; the files listed as differing fail."""
+    out = run([env("HOST_PYTHON"), "tools/compilercheck", "--lucifer", lucifer(flags), "--oracle", env("ORACLE_T"),
+               "--show", "1000000"], log)
+    rows, name = {}, None
+    for line in out.splitlines():
+        if m := re.match(r"(\w+): \d+ of \d+ files marshal identically", line):
+            name = m[1]
+            rows.update({f"{name}:{p}": "PASS" for p in compilercheck_corpus(name)})
+        elif name and line.startswith("    "):
+            rows[f"{name}:{line.strip().split(': ', 1)[0]}"] = "FAIL"
+    return rows
+
+
+def compilercheck_corpus(name):
+    import importlib.machinery, importlib.util
+    loader = importlib.machinery.SourceFileLoader("compilercheck", str(ROOT / "tools/compilercheck"))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader("compilercheck", loader))
+    loader.exec_module(module)
+    return [str(p.relative_to(ROOT)) for p in module.corpus(name)]
+
+
+def libtest(mode, flags, work, log):
+    results = results_copy("libtest", work)
+    for shard in range(LIBTEST_SHARDS):
+        run(["python3", "tools/libtest/run.py", "run", "--python", lucifer(flags), "--runtime", "lucifer",
+             "--source", "installed", "--jobs", env("LIBTEST_JOBS", "6"), "--results", str(results),
+             "--raw-dir", str(work / "libtest-raw"), "--shard", f"{shard}/{LIBTEST_SHARDS}", "--resume"], log)
+    return manifest(results / "lucifer.tsv")
+
+
+def numpy(mode, flags, work, log):
+    site, cache = env("NUMPY_SITE"), env("NUMPY_CACHE")
+    results = results_copy("numpytest", work)
+    ids = manifest(results / "expected.tsv")
+    # The daily's shards: one per numpy/_core test file, one per other package directory.
+    shards = sorted({i.split("::")[0] if i.startswith("numpy/_core/") else "/".join(i.split("/")[:2]) for i in ids})
+    for shard in shards:
+        run(["python3", "tools/numpytest/run.py", "run", "--python", lucifer(flags), "--runtime", "lucifer",
+             "--site", site, "--cache", cache, "--work", str(work / "numpy-raw"), "--results", str(results.parent),
+             "--shard", shard], log)
+    return manifest(results / "lucifer.tsv")
+
+
+def ftcorpus(suite, extra):
+    def corpus(mode, flags, work, log):
+        results = results_copy(suite, work)
+        units = json.loads((results / "inventory.json").read_text())["units"]
+        # ft-cpython in shards, ft-packages a package at a time.
+        parts = ([["--shard", f"{i}/{FT_SHARDS}"] for i in range(FT_SHARDS)] if suite == "ft-cpython" else
+                 [["--select", p] for p in sorted({u.split("/")[1] for u in units})])
+        for part in parts:
+            run(["python3", "tools/ftcorpus/run.py", suite, "run", "--python", lucifer(flags), "--runtime", "lucifer",
+                 "--results", str(results), "--raw-dir", str(work / f"{suite}-raw"), *extra(), *part, "--resume"], log)
+        return manifest(results / "lucifer.tsv")
+    return corpus
+
+
+def pypi(mode, flags, work, log):
+    cache, default_site = env("PYPI_CACHE"), env("PYPI_SITE")
+    rows = {}
+    for package in json.loads((ROOT / "tools/pypi/corpus.json").read_text())["packages"]:
+        results = results_copy(f"pypi/{package}", work).parent
+        site = os.environ.get(f"PYPI_SITE_{package}", default_site)
+        run(["python3", "tools/pypi/run.py", "run", "--python", lucifer(flags), "--package", package,
+             "--runtime", "lucifer", "--cache", cache, "--work", str(work / "pypi-work"), "--site", site,
+             "--results", str(results)], log)
+        rows.update({f"{package}/{k}": v for k, v in manifest(results / package / "lucifer.tsv").items()})
+    return rows
+
+
+def fuzzdiff(mode, flags, work, log):
+    """Each generated case: match PASS, mismatch FAIL, skip SKIP, error (the oracle has no result) ERROR."""
+    fuzz = ROOT / "build/fuzzdiff"
+    out = make("fuzzdiff", log, FUZZDIFF=shlex.join(["--seed", "1", "--seed", "2", "--python", lucifer(flags)]))
+    named = {"mismatch": "FAIL", "skip": "SKIP", "error": "ERROR"}
+    rows = {}
+    for line in out.splitlines():
+        if line.startswith("{") and '"generator"' in line:
+            c = json.loads(line)
+            stem = f"{c['generator']}-s{c['seed']}"
+            rows.update({f"{stem}/{i}": "PASS" for i in range(c["cases"])})
+            for record in map(json.loads, (fuzz / "results" / f"{stem}.jsonl").read_text().splitlines()):
+                rows[f"{stem}/{record['index']}"] = named[record["status"]]
+    return rows
+
+
+def workloads(mode, flags, work, log):
+    """tools/bench/corpus programs against the CPython reference's checks: their output must match."""
+    site = ROOT / "build/corpus/site"
+    run(["python3", "tools/bench/corpus", "prepare", str(site)], log, prefixed=False)
+    reference = json.loads((ROOT / "results/status-reference.json").read_text())["corpus"]
+    ref = work / "corpus-reference.json"
+    ref.write_text(json.dumps(reference))
+    named = {"ok": "PASS", "fail": "FAIL", "wrong": "FAIL", "crash": "CRASH", "timeout": "TIMEOUT",
+             "noreference": "SKIP"}
+    rows = {}
+    for program in sorted(reference):
+        out = run(["python3", "tools/bench/corpus", "time", str(site), "--run", lucifer(flags), "--reference", str(ref),
+                   "--programs", program], log)
+        rows.update({p: named[r["status"]] for p, r in json.loads(out.strip().splitlines()[-1]).items()})
+    return rows
+
+
+CORPORA = {
+    "kernel": kernel,
+    "capi": capi,
+    "embed": embed,
+    "difftest": difftest,
+    "jitcheck": jitcheck,
+    "compiler": compiler,
+    "fuzzdiff": fuzzdiff,
+    "workloads": workloads,
+    "libtest": libtest,
+    "ft-cpython": ftcorpus("ft-cpython", lambda: []),
+    "ft-packages": ftcorpus("ft-packages", lambda: ["--work", env("FT_WORK")]),
+    "pypi": pypi,
+    "numpy": numpy,
+}
+
+
+# --- records --------------------------------------------------------------------------------
+
+def merge(runs):
+    """A test passes only if it passed every run; (rows, flaky ids)."""
+    rows, flaky = {}, set()
+    for i in set().union(*runs):
+        seen = [r.get(i, "NOTRUN") for r in runs]
+        rows[i] = next((s for s in seen if s != "PASS"), "PASS")
+        flaky |= {i} if len(set(seen)) > 1 else set()
+    return rows, flaky
+
+
+def write_tsv(path, rows):
+    path.write_text("".join(f"{i}\t{rows[i]}\n" for i in sorted(rows)))
+
+
+def read_tsv(path):
+    return dict(line.split("\t") for line in path.read_text().splitlines())
+
+
+def write_summary(out, mode):
+    """summary.md from every CORPUS.tsv in out, keeping the wall times and flaky lists already recorded."""
+    path = out / "summary.json"
+    notes = json.loads(path.read_text()) if path.exists() else {}
+    statuses = ["PASS", "FAIL", "ERROR", "SKIP", "XFAIL", "XPASS", "TIMEOUT", "CRASH", "NOTRUN"]
+    md = [f"# Conformance floor: mode {mode} ({shlex.join(MODES[mode]) or 'default flags'})", "",
+          "| corpus | runs | wall s | total | " + " | ".join(statuses) + " |", "|---" * (len(statuses) + 4) + "|"]
+    for name in CORPORA:
+        if (out / f"{name}.tsv").exists():
+            counts = collections.Counter(read_tsv(out / f"{name}.tsv").values())
+            n = notes.get(name, {})
+            md.append(f"| {name} | {n.get('runs', '-')} | {n.get('seconds', '-')} | {sum(counts.values())} | "
+                      + " | ".join(str(counts.get(s, 0)) for s in statuses) + " |")
+    for name, n in notes.items():
+        if n.get("flaky"):
+            md += ["", f"## Flaky in {name} (recorded as not PASS)", ""] + [f"- {i}" for i in n["flaky"]]
+        if n.get("skipped"):
+            md += ["", f"## {name} not run: {n['skipped']}"]
+    (out / "summary.md").write_text("\n".join(md) + "\n")
+
+
+def run_mode(args):
+    flags = MODES[args.mode]
+    out = args.out.resolve()
+    work = (args.work or ROOT / "build/floor" / args.mode).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    work.mkdir(parents=True, exist_ok=True)
+    path = out / "summary.json"
+    notes = json.loads(path.read_text()) if path.exists() else {}
+    # The oracle's _testcapi and friends beside the standard library: kernel, capi and Lib/test programs import them.
+    make("oracle-exts", work / "oracle-exts.log")
+    failed = False
+    for name in args.corpus or CORPORA:
+        log = work / f"{name}.log"
+        log.unlink(missing_ok=True)
+        start, runs = time.monotonic(), []
+        try:
+            for _ in range(args.runs):
+                runs.append(CORPORA[name](args.mode, flags, work, log))
+        except Missing as why:
+            print(f"{name}: skipped, {why}", flush=True)
+            notes[name] = {"skipped": str(why)}
+            path.write_text(json.dumps(notes, indent=1) + "\n")
+            continue
+        except (OSError, ValueError, KeyError, IndexError) as error:
+            print(f"{name}: harness produced no results ({error!r}); see {log}", flush=True)
+            failed = True
+            continue
+        rows, flaky = merge(runs)
+        write_tsv(out / f"{name}.tsv", rows)
+        notes[name] = {"runs": args.runs, "seconds": round(time.monotonic() - start), "flaky": sorted(flaky)}
+        path.write_text(json.dumps(notes, indent=1) + "\n")
+        write_summary(out, args.mode)
+        print(f"{name}: {dict(collections.Counter(rows.values()))} in {notes[name]['seconds']} s", flush=True)
+    write_summary(out, args.mode)
+    return 1 if failed else 0
+
+
+def compare(args):
+    regressed = 0
+    for floor_tsv in sorted(args.floor.glob("*.tsv")):
+        mine = args.dir / floor_tsv.name
+        if not mine.exists():
+            print(f"{floor_tsv.stem}: not in {args.dir}, skipped")
+            continue
+        now = read_tsv(mine)
+        for i, status in sorted(read_tsv(floor_tsv).items()):
+            if status == "PASS" and now.get(i) != "PASS":
+                print(f"{floor_tsv.stem}\t{i}\t{now.get(i, 'MISSING')}")
+                regressed += 1
+    print(f"{regressed} floor passes not passing")
+    return 1 if regressed else 0
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="action", required=True)
+    r = sub.add_parser("run")
+    r.add_argument("--mode", choices=MODES, required=True)
+    r.add_argument("--out", type=Path, required=True)
+    r.add_argument("--work", type=Path, help="logs and scratch results (default build/floor/MODE)")
+    r.add_argument("--corpus", action="append", choices=CORPORA)
+    r.add_argument("--runs", type=int, default=1)
+    c = sub.add_parser("compare")
+    c.add_argument("floor", type=Path)
+    c.add_argument("dir", type=Path)
+    args = p.parse_args()
+    return run_mode(args) if args.action == "run" else compare(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

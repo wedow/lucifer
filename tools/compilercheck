@@ -19,6 +19,7 @@ import argparse
 import concurrent.futures
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
@@ -64,7 +65,7 @@ for path in sys.argv[1:]:
 
 def run_driver(interpreter, paths):
     """{path: output line} of DRIVER run by interpreter -I -S over paths (relative to ROOT)."""
-    child = subprocess.run([interpreter, "-I", "-S", "-c", DRIVER, *paths], cwd=ROOT,
+    child = subprocess.run([*shlex.split(interpreter), "-I", "-S", "-c", DRIVER, *paths], cwd=ROOT,
                            capture_output=True, text=True, errors="replace", timeout=TIMEOUT * len(paths))
     lines = {line.split(" ", 1)[0]: line for line in child.stdout.splitlines()}
     return {p: lines.get(p, f"{p} no output (exit {child.returncode}): {child.stderr.strip()[-300:]}")
@@ -96,7 +97,7 @@ def main():
     parser.add_argument("--require", default="", help="corpora that must be fully identical")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--show", type=int, default=5, help="differences listed per corpus")
-    parser.add_argument("--lucifer", required=True, help="the runtime to check")
+    parser.add_argument("--lucifer", required=True, help="the runtime to check, with any flags, as shell words")
     parser.add_argument("--oracle", required=True, help="free-threaded CPython 3.14 that --lucifer is compared with")
     parser.add_argument("files", nargs="*", type=Path, help="check these files instead of corpora")
     args = parser.parse_args()

@@ -51,8 +51,9 @@ PyObject *
 lu_gen_new(PyThreadState *ts, struct lu_frame *f)
 {
     PyCodeObject *code = f->code;
-    PyTypeObject *tp = (code->co_flags & CO_COROUTINE) ? &PyCoro_Type
-                     : (code->co_flags & CO_ASYNC_GENERATOR) ? &PyAsyncGen_Type : &PyGen_Type;
+    /* _Py_MakeCoro: exactly CO_GENERATOR or exactly CO_ASYNC_GENERATOR pick those; anything else a coroutine. */
+    int kind = code->co_flags & LU_CO_GENERATORS;
+    PyTypeObject *tp = kind == CO_GENERATOR ? &PyGen_Type : kind == CO_ASYNC_GENERATOR ? &PyAsyncGen_Type : &PyCoro_Type;
     struct lu_gen *gen = (struct lu_gen *)lu_object_new(
         tp, offsetof(struct lu_gen, frame) + (size_t)code->co_framesize * sizeof(PyObject *));
     if (gen == NULL) {
@@ -90,18 +91,6 @@ start(PyThreadState *ts, struct lu_gen *gen, struct lu_frame *previous, _PyErr_S
     gen->frame_state = LU_GEN_EXECUTING;
     gen->exc_state.previous_item = exc_prev;
     return 0;
-}
-
-void
-lu_gen_relink(PyThreadState *ts, struct lu_frame *f, struct lu_frame *previous, int ret)
-{
-    struct lu_gen *gen = lu_gen_of(f);
-    ts->py_recursion_remaining--;
-    gen->frame.previous = previous;
-    gen->frame.ret = (uint8_t)ret;
-    gen->frame_state = LU_GEN_EXECUTING;
-    gen->exc_state.previous_item = ts->exc_info;
-    ts->exc_info = &gen->exc_state;
 }
 
 /* gen_send_ex2's refusals: -1 with an error, 1 when gen is finished and
@@ -179,46 +168,6 @@ clear_frame(struct lu_gen *gen)
         Py_CLEAR(f->func);
     }
     Py_CLEAR(gen->exc_state.exc_value);
-}
-
-void
-lu_gen_finish_in_line(PyObject *o)
-{
-    struct lu_gen *gen = (struct lu_gen *)o;
-    gen->frame.stackpointer = gen->frame.localsplus;    /* compiled code released them */
-    clear_frame(gen);
-}
-
-int64_t
-lu_gen_enter_in_line(PyObject *o, PyObject *code)
-{
-    struct lu_gen *gen = (struct lu_gen *)o;
-    if (!Py_IS_TYPE(o, &PyGen_Type) || (PyObject *)gen->frame.code != code || gen->frame.frame_obj != NULL
-        || gen->frame_state == LU_GEN_EXECUTING || gen->frame_state == LU_GEN_SUSPENDED_YIELD_FROM) {
-        return -2;
-    }
-    if (finished(gen)) {
-        return -1;
-    }
-    PyCodeObject *co = (PyCodeObject *)code;
-    lu_codeunit *start = lu_code_start(co);
-    int pc = (int)(gen->frame.instr - start);
-    if (gen->frame_state == LU_GEN_CREATED) {
-        pc += 1 + lu_opcode_caches[POP_TOP];    /* past the POP_TOP of the value a resume sends it */
-    }
-    gen->frame_state = LU_GEN_EXECUTING;
-    return pc + 1 + lu_opcode_caches[RESUME];
-}
-
-void
-lu_gen_yielded_in_line(PyObject *o, int64_t depth, int64_t resume)
-{
-    struct lu_gen *gen = (struct lu_gen *)o;
-    lu_codeunit *at = lu_code_start(gen->frame.code) + resume;
-    gen->frame.stackpointer = gen->frame.localsplus + depth;
-    gen->frame.instr = at;
-    gen->frame.last = at - 1 - lu_opcode_caches[YIELD_VALUE];
-    gen->frame_state = LU_GEN_SUSPENDED;
 }
 
 void

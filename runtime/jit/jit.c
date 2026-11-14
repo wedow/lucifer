@@ -38,7 +38,8 @@
    Code the interpreter has not run (on the first call under
    -X lucifer_jit=always, or a path that turned hot later) has no feedback
    to speculate on, and generic paths never fail a guard to ask for a
-   recompile. A compile that finds most of its sites never ran is put off:
+   recompile. A compile that finds most of its sites never ran is put off
+   (a first build that takes no call in line finds out):
    the interpreter runs that entry a few times first, once per entry. So
    is one that met an operator site without classes, which the
    interpreter notes only at sites a build asked about: code no build
@@ -70,12 +71,19 @@
 #define MAX_LEVEL 25
 /* seen bits. */
 #define WARMED 1                /* the entry's compile was put off for feedback once */
+/* Instructions a unit may have and still take a call in line at first
+   (what the evaluator folds away costs it nothing), the entries
+   after which a unit that left calls out is built again with twice that,
+   and how often: past it a build costs more than its unit's code earns
+   back (a regex engine inlined whole took minutes). */
+#define INLINE_BUDGET 1000
+#define HOT_ENTRIES 4096
+#define MAX_GROWN 4
 /* Entries a unit counts: one past this many is not retired, and the count
    is only read, so calls from many threads share its line. */
 #define ENTRIES_SEEN (1u << 16)
 
 struct lu_jit_code {
-    struct lu_jit_direct direct;        /* first: compiled callers read it (target.h) */
     int compiling;              /* a thread is compiling: others interpret */
     int disabled;               /* LUCIFER_JIT_ONLY does not list it */
     int level;                  /* the wait's doublings: retirements and failed compiles, less decay */
@@ -90,25 +98,28 @@ struct lu_jit_code {
     unsigned long marked;       /* marks when a site of it (or noinline) was last marked */
     int call_pc;                /* where a call enters (call_entry), or -1 */
     struct lu_pic **pics;       /* per code unit: an attribute site's polymorphic cache */
-    /* A generator's code: per code unit, 1 where a resumed frame goes on
-       (after each RESUME), all of them entries of one unit, found at the
-       first of them (resume_key; -1 for other code). */
-    uint8_t *resume;
-    int resume_key;
-    lu_codeunit *fresh;         /* where a generator that never ran stands (the POP_TOP before the first RESUME) */
+    int grown;                  /* doublings of the inlining budget: a hot unit that left calls out asked */
     struct lu_callees **callees;        /* per code unit: a call site's callees */
     struct lu_opclasses **opclasses;    /* per code unit: an operator site's operand classes */
-    struct ctxmark *ctx;                /* a root's marks on kernel code inlined in it, by context */
-    int nctx, capctx;
-    PyMutex ctx_lock;                   /* the marks' */
+    struct lu_prof *profs;              /* a root's: what it learned of values, by context (target.h) */
+    unsigned long learned;              /* how often one of them changed */
+    PyMutex prof_lock;                  /* theirs */
 };
 
-/* A root's mark on kernel code by context (target.h): its failures and bits. */
-struct ctxmark {
+struct lu_prof {
+    struct lu_prof *next;
     uint64_t key;
+    struct lu_jit_code *jc;     /* the root's */
+    PyTypeObject *type;         /* the type the value had (a reference), or NULL before any */
+    uint8_t poly;               /* it had another too, or the guard on it kept failing: nothing to rely on */
     uint16_t fails;
-    uint8_t bits;
+    uint32_t passes;            /* times met with nothing new while the root knew more than the unit */
 };
+
+/* Passes of a place, with more learned than its unit was built with,
+   before the unit is built again: a build costs about what that many
+   passes of unspecialized code do. */
+#define REBUILD_PASSES 16
 
 static struct {
     unsigned long compiles, failures, entries, returns, units_dead, direct, compiled, invalidated, waited, retired;
@@ -123,7 +134,6 @@ static struct {
     unsigned long failure_reasons[8];
     const char *failure_names[8];
     unsigned long c_paths[C_PATHS];
-    unsigned long why_not[WHY_NOTS];
 } stats;
 
 /* Sites marked generic (nospec, noinline) so far: a unit built after a
@@ -254,139 +264,6 @@ lu_jit_c_path_count(enum lu_c_path k)
     count(&stats.c_paths[k], 1);
 }
 
-/* -X lucifer_jit_stats: the callees behind the why-not counts, by kind and
-   identity (a code, a type, a method definition, a descriptor), named when
-   first seen: the report lists the most called. */
-#define WHY_NOT_CALLEES 8192
-static struct {
-    PyMutex lock;
-    struct { int kind; void *key; char *name; unsigned long n; } e[WHY_NOT_CALLEES];
-} why_not_callees;
-
-static void
-why_not_callee(enum lu_why_not k, PyObject *callable)
-{
-    void *key = Py_TYPE(callable);
-    char buf[200];
-    const char *name = NULL;
-    if (Py_IS_TYPE(callable, &PyMethod_Type)) {
-        callable = PyMethod_GET_FUNCTION(callable);
-        key = Py_TYPE(callable);
-    }
-    if (PyFunction_Check(callable)) {
-        key = ((PyFunctionObject *)callable)->func_code;
-    }
-    else if (PyType_Check(callable) || PyCFunction_Check(callable)) {
-        key = PyCFunction_Check(callable) ? (void *)((PyCFunctionObject *)callable)->m_ml : callable;
-    }
-    else if (Py_IS_TYPE(callable, &PyMethodDescr_Type) || Py_IS_TYPE(callable, &PyWrapperDescr_Type)) {
-        key = callable;
-    }
-    uintptr_t h = ((uintptr_t)key >> 4) * 31 + (uintptr_t)k;
-    PyMutex_Lock(&why_not_callees.lock);
-    for (int i = 0; i < WHY_NOT_CALLEES; i++) {
-        int at = (int)((h + (uintptr_t)i) % WHY_NOT_CALLEES);
-        if (why_not_callees.e[at].key == key && why_not_callees.e[at].kind == (int)k) {
-            why_not_callees.e[at].n++;
-            break;
-        }
-        if (why_not_callees.e[at].key == NULL) {
-            if (PyType_Check(callable)) {
-                snprintf(buf, sizeof buf, "class %s", ((PyTypeObject *)callable)->tp_name);
-            }
-            else if (Py_IS_TYPE(callable, &PyMethodDescr_Type) || Py_IS_TYPE(callable, &PyWrapperDescr_Type)) {
-                PyDescrObject *d = (PyDescrObject *)callable;
-                snprintf(buf, sizeof buf, "%s %s.%s", Py_TYPE(callable)->tp_name, d->d_type->tp_name,
-                         d->d_name != NULL ? PyUnicode_AsUTF8(d->d_name) : "?");
-            }
-            else if (PyFunction_Check(callable) || PyCFunction_Check(callable)) {
-                name = lu_function_str(callable, buf, sizeof buf);
-                if (name != buf) {
-                    snprintf(buf, sizeof buf, "%s", name);
-                }
-            }
-            else {
-                snprintf(buf, sizeof buf, "<%s>", Py_TYPE(callable)->tp_name);
-            }
-            why_not_callees.e[at].key = key;
-            why_not_callees.e[at].kind = (int)k;
-            why_not_callees.e[at].name = strdup(buf);
-            why_not_callees.e[at].n = 1;
-            break;
-        }
-    }
-    PyMutex_Unlock(&why_not_callees.lock);
-}
-
-static void
-report_why_not_callees(void)
-{
-    static const char names[WHY_NOTS][16] = {
-#define LU_WHY_NOT_NAME(name) #name,
-        LU_WHY_NOT(LU_WHY_NOT_NAME)
-#undef LU_WHY_NOT_NAME
-    };
-    for (int shown = 0; shown < 40; shown++) {
-        int best = -1;
-        for (int i = 0; i < WHY_NOT_CALLEES; i++) {
-            if (why_not_callees.e[i].n > 0 && (best < 0 || why_not_callees.e[i].n > why_not_callees.e[best].n)) {
-                best = i;
-            }
-        }
-        if (best < 0) {
-            break;
-        }
-        fprintf(stderr, "jit: whynot %s %lu %s\n", names[why_not_callees.e[best].kind], why_not_callees.e[best].n,
-                why_not_callees.e[best].name);
-        why_not_callees.e[best].n = 0;
-    }
-}
-
-void
-lu_jit_why_not_count(enum lu_why_not k, PyObject *callable)
-{
-    count(&stats.why_not[k], 1);
-    why_not_callee(k, callable);
-}
-
-static struct lu_jit_code *state_of(PyCodeObject *code);
-
-void
-lu_jit_why_not(PyObject *callable, Py_ssize_t nargs)
-{
-    if (Py_IS_TYPE(callable, &PyMethod_Type)) {
-        callable = PyMethod_GET_FUNCTION(callable);
-        nargs++;
-    }
-    enum lu_why_not k;
-    if (!PyFunction_Check(callable)) {
-        k = PyType_Check(callable) ? WHY_NOT_type
-            : PyCFunction_Check(callable) || Py_IS_TYPE(callable, &PyMethodDescr_Type) ? WHY_NOT_builtin
-            : WHY_NOT_object;
-    }
-    else {
-        PyCodeObject *code = (PyCodeObject *)((PyFunctionObject *)callable)->func_code;
-        struct lu_jit_code *jc = state_of(code);
-        int pc = jc != NULL ? jc->call_pc : -1;
-        k = code->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR) ? WHY_NOT_generator
-            : jc == NULL ? WHY_NOT_cold
-            : pc <= 0 || jc->direct.nargs < 0 ? WHY_NOT_prologue
-            : nargs > jc->direct.nargs ? WHY_NOT_toomany
-            : __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) ? WHY_NOT_excluded
-            : __atomic_load_n(&jc->wait[pc], __ATOMIC_RELAXED) != 0 ? WHY_NOT_waiting
-            : __atomic_load_n(&jc->direct.entry, __ATOMIC_RELAXED) == NULL ? WHY_NOT_nounit
-            : WHY_NOT_entry;
-    }
-    count(&stats.why_not[k], 1);
-    why_not_callee(k, callable);
-}
-
-unsigned long *
-lu_jit_direct_count(void)
-{
-    return _PyRuntime.jit.stats ? &stats.compiled : NULL;
-}
-
 static struct lu_jit_code *
 state_of(PyCodeObject *code)
 {
@@ -425,24 +302,6 @@ state_for(PyCodeObject *code)
     jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint32_t));
     jc->seen = calloc((size_t)jc->ncode + 1, 1);
     jc->call_pc = lu_jit_call_entry(code);
-    jc->resume_key = -1;
-    if (code->co_flags & LU_CO_GENERATORS) {
-        jc->resume = calloc((size_t)jc->ncode + 1, 1);
-        for (int pc = 0; pc < jc->ncode; pc = lu_jit_next_pc(code, pc)) {
-            if (lu_base_opcode(code, pc) == RETURN_GENERATOR) {
-                jc->fresh = lu_code_start(code) + lu_jit_next_pc(code, pc);
-            }
-            if (lu_base_opcode(code, pc) == RESUME) {
-                int at = lu_jit_next_pc(code, pc);
-                jc->resume[at] = 1;
-                jc->resume_key = jc->resume_key < 0 ? at : jc->resume_key;
-            }
-        }
-    }
-    /* Compiled code and C call the call entry's unit directly. */
-    jc->direct.nargs = jc->call_pc <= 0 || code->co_argcount >= 100 ? -1
-        : code->co_flags & CO_VARARGS ? LU_DIRECT_ANY : code->co_argcount;
-    jc->direct.call_pc = jc->call_pc;
     uintptr_t seen = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
     while (seen == 0 || (seen & 1)) {
         if (__atomic_compare_exchange_n((uintptr_t *)&code->co_executors, &seen, (uintptr_t)jc, 0,
@@ -454,7 +313,6 @@ state_for(PyCodeObject *code)
     free(jc->fails);
     free(jc->wait);
     free(jc->seen);
-    free(jc->resume);
     free(jc);
     return (struct lu_jit_code *)seen;
 }
@@ -482,50 +340,95 @@ lu_jit_nohoist_set(PyCodeObject *code, int pc)
     }
 }
 
-/* The root's mark for key, made when `create` (under its ctx_lock), or NULL. */
-static struct ctxmark *
-ctx_entry(struct lu_jit_code *jc, uint64_t key, int create)
+PyObject lu_jit_unbound = { .ob_flags = _Py_STATICALLY_ALLOCATED_FLAG, .ob_ref_local = _Py_IMMORTAL_REFCNT_LOCAL,
+                             .ob_type = &PyBaseObject_Type };
+
+struct lu_prof *
+lu_jit_prof(PyCodeObject *root, uint64_t key)
 {
-    for (int i = 0; i < jc->nctx; i++) {
-        if (jc->ctx[i].key == key) {
-            return &jc->ctx[i];
-        }
+    struct lu_jit_code *jc = state_for(root);
+    PyMutex_Lock(&jc->prof_lock);
+    struct lu_prof *p = jc->profs;
+    while (p != NULL && p->key != key) {
+        p = p->next;
     }
-    if (!create) {
-        return NULL;
+    if (p == NULL && (p = calloc(1, sizeof(struct lu_prof))) != NULL) {
+        p->key = key;
+        p->jc = jc;
+        p->next = jc->profs;
+        jc->profs = p;
     }
-    if (jc->nctx == jc->capctx) {
-        jc->capctx = jc->capctx ? jc->capctx * 2 : 8;
-        jc->ctx = realloc(jc->ctx, sizeof(struct ctxmark) * (size_t)jc->capctx);
-    }
-    jc->ctx[jc->nctx] = (struct ctxmark){ .key = key };
-    return &jc->ctx[jc->nctx++];
+    PyMutex_Unlock(&jc->prof_lock);
+    return p;
+}
+
+PyTypeObject *
+lu_jit_prof_type(struct lu_prof *p, int *poly)
+{
+    PyMutex_Lock(&p->jc->prof_lock);
+    PyTypeObject *t = (PyTypeObject *)Py_XNewRef((PyObject *)p->type);
+    *poly = p->poly;
+    PyMutex_Unlock(&p->jc->prof_lock);
+    return t;
+}
+
+unsigned long
+lu_jit_prof_learned(PyCodeObject *root)
+{
+    return __atomic_load_n(&state_for(root)->learned, __ATOMIC_RELAXED);
 }
 
 int
-lu_jit_ctx_marked(PyCodeObject *root, uint64_t key, int bit)
+lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
 {
-    struct lu_jit_code *jc = state_of(root);
-    if (jc == NULL) {
-        return 0;
+    struct lu_jit_code *jc = p->jc;
+    PyTypeObject *t = Py_TYPE(o);
+    if (__atomic_load_n(&p->type, __ATOMIC_RELAXED) == t || __atomic_load_n(&p->poly, __ATOMIC_RELAXED)) {
+        /* Nothing new here; once the root has learned anything since the
+           unit was built, and the place has been passed often enough for
+           another build to pay, the unit is built again. */
+        return __atomic_load_n(&jc->learned, __ATOMIC_RELAXED) == learned
+            || __atomic_add_fetch(&p->passes, 1, __ATOMIC_RELAXED) < REBUILD_PASSES;
     }
-    PyMutex_Lock(&jc->ctx_lock);
-    struct ctxmark *m = ctx_entry(jc, key, 0);
-    int set = m != NULL && (m->bits & bit);
-    PyMutex_Unlock(&jc->ctx_lock);
-    return set;
+    PyMutex_Lock(&jc->prof_lock);
+    if (p->type == NULL) {
+        __atomic_store_n(&p->type, (PyTypeObject *)Py_NewRef((PyObject *)t), __ATOMIC_RELAXED);
+        jc->learned++;
+    }
+    else if (p->type != t && !p->poly) {
+        __atomic_store_n(&p->poly, 1, __ATOMIC_RELAXED);
+        jc->learned++;
+    }
+    PyMutex_Unlock(&jc->prof_lock);
+    return 1;
 }
 
-/* The context of the exit's frame k (frames 1..k kernel code inlined in
-   the root), and with `pc` 0 that of the call that inlined it. */
-static uint64_t
-exit_context(struct lu_deopt *d, int k, int pc)
+static void kill(struct lu_jit_code *jc, struct lu_unit *u);
+
+/* An exit a learned type's site took: the unit is built again with what
+   the root knows now, at once, when its sites reported; when the type
+   keeps being another, nothing is relied on there and every unit of the
+   root is built again. */
+static void
+prof_exit(struct lu_deopt *d)
 {
-    uint64_t h = 0;
-    for (int i = 0; i < k; i++) {
-        h = lu_jit_ctx_mix(h, d->frames[i].code, d->frames[i].pc);
+    struct lu_prof *p = d->prof;
+    struct lu_jit_code *jc = p->jc;
+    if (d->tier) {
+        kill(jc, d->unit);
+        __atomic_store_n(&jc->wait[d->unit->entry_pc], 0, __ATOMIC_RELAXED);
+        return;
     }
-    return lu_jit_ctx_mix(h, d->frames[k].code, pc ? d->frames[k].pc : -1);
+    PyMutex_Lock(&jc->prof_lock);
+    int now = !p->poly && ++p->fails >= GUARD_FAILS;
+    if (now) {
+        p->poly = 1;
+        jc->learned++;
+    }
+    PyMutex_Unlock(&jc->prof_lock);
+    for (struct lu_unit *u = now ? __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE) : NULL; u != NULL; u = u->next) {
+        kill(jc, u);
+    }
 }
 
 int
@@ -576,11 +479,14 @@ free_unit(struct lu_unit *u)
     for (int i = 0; i < u->ndeopts; i++) {
         struct lu_deopt *d = u->deopts[i];
         for (int k = 0; k < d->nframes; k++) {
-            lu_jit_dv_free(d->frames[k].vals, d->frames[k].nlocals + d->frames[k].nstack);
             free(d->frames[k].vals);
         }
+        for (int k = 0; k < d->nobjs; k++) {
+            free(d->objs[k].fields);
+        }
         free(d->frames);
-        free(d->release);
+        free(d->objs);
+        free(d->owned);
         free(d);
     }
     free(u->deopts);
@@ -618,11 +524,10 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     u->code = frame->code;
     u->built = __atomic_load_n(&marks, __ATOMIC_ACQUIRE);
     f.code = frame->code;
-    /* A generator's resume unit (keyed at its first resume point) is
-       compiled where this frame stands, one of its entries. */
     f.entry_pc = (int)(frame->instr - lu_code_start(frame->code));
-    f.resume = pc == jc->resume_key;
-    f.direct = pc == jc->call_pc && jc->direct.nargs >= 0;
+    /* What the evaluator may inline, in code units: a unit that stayed hot
+       with calls left out is built again with twice as much. */
+    f.budget = INLINE_BUDGET << jc->grown;
     f.stress = _PyRuntime.stress.deopt != 0;
     if (f.stress) {
         u->stress_counter = malloc(sizeof(long));
@@ -631,21 +536,30 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     double t0 = now();
     int dump = _PyRuntime.jit.dump;
     if (dump) {
-        fprintf(stderr, "jit: compiling %s@%d%s\n", PyUnicode_AsUTF8(frame->code->co_qualname), pc,
-                f.resume ? " (resume)" : "");
+        fprintf(stderr, "jit: compiling %s@%d\n", PyUnicode_AsUTF8(frame->code->co_qualname), pc);
+    }
+    if (!(jc->seen[pc] & WARMED)) {
+        /* Whether the interpreter has run the entry's own code, a build
+           that takes no call in line can say: it reads every site of the
+           entry's code and none of a callee's, at a fraction of the cost
+           of the build that would be thrown away. */
+        int budget = f.budget;
+        f.budget = -1;
+        int cold = lu_ssa_build(&f, frame) == 0 && f.cold > 0 && 2 * f.cold >= f.sites;
+        f.budget = budget;
+        if (cold) {
+            stats.phase_seconds[4] += now() - t0;
+            /* Most of it never ran: the interpreter runs the entry a few times
+               to gather feedback, and the compile after that stands. */
+            jc->seen[pc] |= WARMED;
+            __atomic_store_n(&jc->wait[pc], WARMUP, __ATOMIC_RELAXED);
+            lu_ir_free(&f);
+            free_unit(u);
+            return NULL;
+        }
     }
     int ok = lu_ssa_build(&f, frame) == 0;
     double t1 = now();
-    if (ok && ((f.cold > 0 && 2 * f.cold >= f.sites) || f.unfed) && !(jc->seen[pc] & WARMED)) {
-        stats.phase_seconds[4] += t1 - t0;
-        /* Most of it never ran: the interpreter runs the entry a few times
-           to gather feedback, and the compile after that stands. */
-        jc->seen[pc] |= WARMED;
-        __atomic_store_n(&jc->wait[pc], WARMUP, __ATOMIC_RELAXED);
-        lu_ir_free(&f);
-        free_unit(u);
-        return NULL;
-    }
     ok = ok && lu_ssa_optimize(&f) == 0;
     double t2 = now(), t3 = t2;
     if (_PyRuntime.jit.stats) {
@@ -694,14 +608,16 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     }
     u->entry_pc = pc;
     u->loops = f.loops > 0;
+    u->refused = f.refused;
     u->consts = f.consts;
     u->nconsts = f.nconsts;
     f.consts = NULL;
     f.nconsts = 0;
     count(&stats.code_bytes, u->code_bytes);
     if (_PyRuntime.jit.debug) {
-        fprintf(stderr, "jit: compiled %s@%d: %zu bytes, %d calls inlined\n", PyUnicode_AsUTF8(frame->code->co_qualname),
-                pc, u->code_bytes, f.ninlined);
+        fprintf(stderr, "jit: compiled %s@%d: %zu bytes, %d calls inlined (%s:%d)\n",
+                PyUnicode_AsUTF8(frame->code->co_qualname), pc, u->code_bytes, f.ninlined,
+                PyUnicode_AsUTF8(frame->code->co_filename), frame->code->co_firstlineno);
     }
     if (u->counts != NULL) {
         char name[256];
@@ -745,10 +661,6 @@ wait_at(struct lu_jit_code *jc, int pc)
 static void
 kill(struct lu_jit_code *jc, struct lu_unit *u)
 {
-    void *entry = u->direct;
-    if (entry != NULL) {
-        __atomic_compare_exchange_n(&jc->direct.entry, &entry, NULL, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
-    }
     if (__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
         return;
     }
@@ -896,9 +808,6 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
         if (u != NULL) {
             u->next = jc->units;
             __atomic_store_n(&jc->units, u, __ATOMIC_RELEASE);
-            if (u->direct != NULL) {
-                __atomic_store_n(&jc->direct.entry, u->direct, __ATOMIC_RELEASE);
-            }
         }
         else if (jc->wait[pc] == 0) {
             /* It failed: tried again later, like a unit that died. (A compile
@@ -932,13 +841,6 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     int pc = (int)(frame->instr - lu_code_start(code));
     struct lu_jit_code *jc = state_of(code);
     struct lu_unit *u = NULL;
-    if ((code->co_flags & LU_CO_GENERATORS) && jc == NULL) {
-        jc = state_for(code);
-    }
-    int resumed = jc != NULL && jc->resume != NULL && jc->resume[pc];
-    if (resumed) {
-        pc = jc->resume_key;    /* every resume point enters the one unit */
-    }
     if (jc != NULL) {
         uint32_t wait = __atomic_load_n(&jc->wait[pc], __ATOMIC_RELAXED);
         if (wait != 0 || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED)) {
@@ -954,7 +856,14 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         return LU_JIT_NONE;
     }
     count(&stats.entries, 1);
-    count(&stats.resumes_compiled, (unsigned long)resumed);
+    if (u->refused && __atomic_load_n(&u->entries, __ATOMIC_RELAXED) == HOT_ENTRIES && jc != NULL
+        && jc->grown < MAX_GROWN) {
+        /* It stayed hot with calls left out of line for want of budget:
+           the next build of this code gets twice as much. */
+        __atomic_store_n(&jc->grown, jc->grown + 1, __ATOMIC_RELAXED);
+        kill(jc, u);
+        return LU_JIT_NONE;
+    }
     bump_entries(u);
     int debug = _PyRuntime.jit.debug;
     if (debug) {
@@ -1006,128 +915,6 @@ prologue(struct lu_frame *frame)
     return 0;
 }
 
-/* The parameter keyword names: its index among those that take keywords
-   (from the positional-only ones on), or -1. Exact strs only, compared
-   by identity first, as the names are interned; no Python runs. */
-static int
-keyword_index(PyCodeObject *code, PyObject *name)
-{
-    int total = code->co_argcount + code->co_kwonlyargcount;
-    PyObject **names = &PyTuple_GET_ITEM(code->co_localsplusnames, 0);
-    for (int j = code->co_posonlyargcount; j < total; j++) {
-        if (names[j] == name) {
-            return j;
-        }
-    }
-    for (int j = code->co_posonlyargcount; j < total; j++) {
-        if (lu_str_eq(names[j], name)) {
-            return j;
-        }
-    }
-    return -1;
-}
-
-struct lu_frame *
-lu_jit_bind(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, int given, PyObject *kwnames,
-            int nborrowed)
-{
-    PyCodeObject *code = (PyCodeObject *)func->func_code;
-    PyObject **base = ts->datastack_top;
-    if (base == NULL || ts->datastack_limit - base < code->co_framesize) {
-        return NULL;            /* the entry's caller pops it to here: a new chunk would not be */
-    }
-    ts->datastack_top = base + code->co_framesize;
-    struct lu_frame *f = (struct lu_frame *)base;
-    *f = (struct lu_frame){ .code = code, .func = (PyObject *)func, .globals = func->func_globals,
-                            .builtins = func->func_builtins, .ret = LU_RETURN_PUSH, .jit_lent = 1,
-                            .previous = (struct lu_frame *)ts->current_frame };
-    f->instr = lu_code_start(code) + ((struct lu_jit_direct *)code->co_executors)->call_pc;
-    f->last = f->instr - 1 - lu_opcode_caches[RESUME];
-    f->stackpointer = f->localsplus;    /* compiled code's from here */
-    PyObject **locals = f->localsplus;
-    for (int i = 0; i < code->co_nlocalsplus; i++) {
-        locals[i] = NULL;
-    }
-    int argc = code->co_argcount, total = argc + code->co_kwonlyargcount;
-    int star = (code->co_flags & CO_VARARGS) != 0, nkw = kwnames != NULL ? (int)PyTuple_GET_SIZE(kwnames) : 0;
-    PyObject *kwdict = NULL;
-    int n = given < argc ? given : argc;
-    for (int i = 0; i < n; i++) {
-        locals[i] = i < nborrowed ? args[i] : Py_NewRef(args[i]);
-    }
-    if (given > argc && !star) {
-        goto decline;
-    }
-    for (int k = 0; k < nkw; k++) {
-        PyObject *name = PyTuple_GET_ITEM(kwnames, k), *value = args[given + k];
-        int j = PyUnicode_CheckExact(name) ? keyword_index(code, name) : -2;
-        if (j >= 0 && locals[j] == NULL) {
-            locals[j] = j < nborrowed ? value : Py_NewRef(value);
-            continue;
-        }
-        if (j != -1 || !(code->co_flags & CO_VARKEYWORDS)) {
-            goto decline;       /* not a str, given twice, or a name it does not take */
-        }
-        if ((kwdict == NULL && (kwdict = PyDict_New()) == NULL) || lu_ns_insert(kwdict, name, value) < 0) {
-            goto decline;
-        }
-    }
-    /* What the call leaves out: defaults, never borrowed. */
-    PyObject *defaults = func->func_defaults, *kwdefaults = func->func_kwdefaults;
-    int first = argc - (defaults != NULL ? (int)PyTuple_GET_SIZE(defaults) : 0);
-    for (int i = 0; i < argc; i++) {
-        if (locals[i] == NULL) {
-            if (i < first || i < nborrowed) {
-                goto decline;
-            }
-            locals[i] = Py_NewRef(PyTuple_GET_ITEM(defaults, i - first));
-        }
-    }
-    for (int j = argc; j < total; j++) {
-        if (locals[j] == NULL) {
-            PyObject *d = kwdefaults != NULL && PyDict_CheckExact(kwdefaults)
-                ? lu_ns_get(kwdefaults, PyTuple_GET_ITEM(code->co_localsplusnames, j)) : NULL;
-            if (d == NULL) {
-                goto decline;
-            }
-            locals[j] = d;
-        }
-    }
-    if (star) {
-        PyObject *rest = given > argc ? PyTuple_New(given - argc)
-            : Py_NewRef((PyObject *)&_PyRuntime.singletons.empty_tuple);
-        if (rest == NULL) {
-            goto decline;
-        }
-        for (int i = argc; i < given; i++) {
-            PyTuple_SET_ITEM(rest, i - argc, Py_NewRef(args[i]));
-        }
-        locals[total] = rest;
-    }
-    if (code->co_flags & CO_VARKEYWORDS) {
-        if (kwdict == NULL && (kwdict = PyDict_New()) == NULL) {
-            goto decline;
-        }
-        locals[total + star] = kwdict;
-        kwdict = NULL;
-    }
-    if (prologue(f) < 0) {
-        goto decline;
-    }
-    return f;
-decline:
-    /* The binding would raise, or memory ran out: the slow way does it again. */
-    PyErr_Clear();
-    Py_XDECREF(kwdict);
-    for (int i = 0; i < code->co_nlocalsplus; i++) {
-        if (i >= nborrowed) {
-            Py_XDECREF(locals[i]);
-        }
-    }
-    ts->datastack_top = base;
-    return NULL;
-}
-
 PyObject *
 lu_jit_new_gen(PyThreadState *ts, struct lu_frame *frame)
 {
@@ -1136,11 +923,11 @@ lu_jit_new_gen(PyThreadState *ts, struct lu_frame *frame)
     while (at->op.code == MAKE_CELL || at->op.code == COPY_FREE_VARS) {
         at++;
     }
-    PyObject *gen = NULL;
     if (at->op.code != RETURN_GENERATOR) {
-        PyErr_SetString(PyExc_SystemError, "a generator's code that does not start with RETURN_GENERATOR");
+        return LU_JIT_DECLINED;
     }
-    else if (prologue(frame) == 0) {
+    PyObject *gen = NULL;
+    if (prologue(frame) == 0) {
         frame->last = at;
         frame->instr = at + 1 + lu_opcode_caches[RETURN_GENERATOR];
         frame->stackpointer = frame->localsplus + code->co_nlocalsplus;
@@ -1204,87 +991,10 @@ lu_jit_note_resume(void)
     count(&stats.resumes, 1);
 }
 
-int
-lu_jit_resume(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
-{
-    PyCodeObject *code = frame->code;
-    struct lu_jit_code *jc = state_of(code);
-    struct lu_task *task = (struct lu_task *)ts;
-    /* lu_jit_run's conditions, and no hook: a PEP 523 hook sees resumes. */
-    uintptr_t poll = __atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED);
-    if (jc == NULL || jc->resume_key < 0 || frame->locals != NULL || (poll & LU_POLL_EVENTS_MASK)
-        || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) || code->_co_monitoring != NULL
-        || ts->tracing || code->_co_instrumentation_version != (poll & ~LU_POLL_EVENTS_MASK)
-        || ts->interp->eval_frame != NULL) {
-        return 0;
-    }
-    uint32_t wait = __atomic_load_n(&jc->wait[jc->resume_key], __ATOMIC_RELAXED);
-    if (wait != 0) {
-        /* A dead resume unit's entry counts its wait down here too. */
-        __atomic_store_n(&jc->wait[jc->resume_key], wait - 1, __ATOMIC_RELAXED);
-        count(&stats.waited, 1);
-        return 0;
-    }
-    /* What the interpreter runs before the unit's entry: a frame that
-       never ran pops the None it was sent, then RESUME (the instruction
-       before each resume point, whose caches it has). */
-    lu_codeunit *start = lu_code_start(code);
-    int fresh = frame->instr == jc->fresh;
-    int pc = fresh ? jc->resume_key - 1 - lu_opcode_caches[RESUME] : (int)(frame->instr - start);
-    int at = pc + 1 + lu_opcode_caches[RESUME];
-    /* Inside `yield from` or `await` the delegation runs in the eval loop
-       (ceval.c RESUME). */
-    struct lu_unit *u = at < jc->ncode && jc->resume[at] && (start[pc].op.arg & 3) < 2
-        ? find(jc, jc->resume_key) : NULL;
-    if (u == NULL) {
-        return 0;
-    }
-    if (fresh) {
-        Py_DECREF(*--frame->stackpointer);
-    }
-    frame->instr = start + at;
-    frame->last = start + pc;
-    struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
-    entry.previous = (struct lu_frame *)ts->current_frame;
-    frame->previous = &entry;
-    ts->current_frame = (struct _PyInterpreterFrame *)frame;
-    count(&stats.entries, 1);
-    count(&stats.resumes_compiled, 1);
-    bump_entries(u);
-    int r = u->fn(ts, frame, result);
-    if (r == LU_JIT_RETURN) {
-        uint8_t ret = frame->ret;
-        lu_gen_finish(ts, frame);
-        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
-        if (ret == LU_RETURN_FOR_ITER) {
-            Py_DECREF(*result);
-            *result = LU_MISSING;
-        }
-        return 1;
-    }
-    if (r == LU_JIT_YIELD) {
-        lu_gen_suspend(ts, frame, frame->last->op.arg);
-        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
-        return 1;
-    }
-    lu_codeunit *y = frame->instr;
-    if (r == LU_JIT_DEOPT && (struct lu_frame *)ts->current_frame == frame && y->op.code == YIELD_VALUE) {
-        /* Left at a yield (EXIT_YIELD): YIELD_VALUE, as the interpreter runs it. */
-        *result = *--frame->stackpointer;
-        frame->last = y;
-        frame->instr = y + 1 + lu_opcode_caches[YIELD_VALUE];
-        lu_gen_suspend(ts, frame, y->op.arg);
-        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
-        return 1;
-    }
-    *result = lu_eval_continue(ts, r == LU_JIT_ERROR);
-    return 1;
-}
-
 /* Whether frame k of an error exit has a handler where it stands: the
    innermost at the raising instruction, each caller at its call. */
-int
-lu_jit_handles(struct lu_deopt *d, int k)
+static int
+handles(struct lu_deopt *d, int k)
 {
     struct lu_deopt_frame *fr = &d->frames[k];
     lu_codeunit *start = lu_code_start(fr->code);
@@ -1299,22 +1009,10 @@ static int
 handling_frame(struct lu_deopt *d)
 {
     int k = d->nframes - 1;
-    while (k >= 0 && !lu_jit_handles(d, k)) {
+    while (k >= 0 && !handles(d, k)) {
         k--;
     }
     return k;
-}
-
-/* An error exit that leaves as its direct call's result (deopt.c). */
-void
-lu_jit_note_raised(struct lu_deopt *d)
-{
-    count(&stats.raised, 1);
-    if (_PyRuntime.jit.debug) {
-        struct lu_deopt_frame *in = &d->frames[d->nframes - 1];
-        fprintf(stderr, "jit: raised %s@%d op %d depth %d\n", PyUnicode_AsUTF8(in->code->co_qualname), in->pc,
-                d->opcode, d->nframes);
-    }
 }
 
 /* An exit was taken: its counts; for a guard that keeps failing, no
@@ -1325,44 +1023,6 @@ lu_jit_note_raised(struct lu_deopt *d)
    frame's handler keeps taking (compiled code takes only the root's and
    kernel frames', which make no traceback entry) is treated as a side
    exit there: the function is called instead, and its own unit takes it. */
-/* lu_jit_note_exit for kernel code inlined in the root (frame k): the
-   failures count, and the mark goes, in the root's marks by context, so
-   that the kernel function compiles differently only where its copy
-   failed. */
-static void
-note_in_context(struct lu_deopt *d, struct lu_unit *u, int k)
-{
-    int bit = d->reason == EXIT_GUARD ? LU_CTX_NOSPEC : LU_CTX_NOINLINE;
-    uint64_t key = exit_context(d, k, bit == LU_CTX_NOSPEC);
-    struct lu_jit_code *root = state_for(d->frames[0].code);
-    PyMutex_Lock(&root->ctx_lock);
-    struct ctxmark *m = ctx_entry(root, key, 1);
-    int n = m->fails < UINT16_MAX ? ++m->fails : m->fails;
-    int again = (m->bits & bit) != 0;
-    if (n >= GUARD_FAILS) {
-        m->bits |= (uint8_t)bit;
-    }
-    PyMutex_Unlock(&root->ctx_lock);
-    if (n < GUARD_FAILS) {
-        return;
-    }
-    if (!again) {
-        __atomic_store_n(&root->marked, __atomic_add_fetch(&marks, 1, __ATOMIC_RELEASE), __ATOMIC_RELAXED);
-    }
-    else if (__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
-        return;
-    }
-    else if (u->built >= __atomic_load_n(&root->marked, __ATOMIC_RELAXED)) {
-        leave(d, u, 1);
-        return;
-    }
-    say_recompile(d->frames[0].code, bit == LU_CTX_NOINLINE ? "inlined copy leaves here" : "guard fails here",
-                  d->frames[k].code, d->frames[k].pc);
-    for (struct lu_unit *r = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); r != NULL; r = r->next) {
-        kill(root, r);
-    }
-}
-
 void
 lu_jit_note_exit(struct lu_deopt *d)
 {
@@ -1376,22 +1036,11 @@ lu_jit_note_exit(struct lu_deopt *d)
         fprintf(stderr, "jit: exit %s %s@%d op %d depth %d\n", reasons[d->reason],
                 PyUnicode_AsUTF8(in->code->co_qualname), in->pc, d->opcode, d->nframes);
     }
-    struct lu_unit *u = d->unit;
-    if (d->reason == EXIT_GUARD && d->blame_code != NULL) {
-        /* A guard moved out of a loop failed: its site keeps it in place,
-           and the code recompiles. */
-        if (_PyRuntime.jit.debug) {
-            fprintf(stderr, "jit: hoisted guard failed, from %s@%d\n", PyUnicode_AsUTF8(d->blame_code->co_qualname),
-                    d->blame_pc);
-        }
-        lu_jit_nohoist_set(d->blame_code, d->blame_pc);
-        say_recompile(d->frames[0].code, "hoisted guard", d->blame_code, d->blame_pc);
-        struct lu_jit_code *root = state_for(d->frames[0].code);
-        for (struct lu_unit *r = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); r != NULL; r = r->next) {
-            lu_jit_unit_kill(r);
-        }
+    if (d->prof != NULL) {
+        prof_exit(d);
         return;
     }
+    struct lu_unit *u = d->unit;
     int handled = d->reason == EXIT_ERROR ? handling_frame(d) : d->nframes - 1;
     if (handled < 0) {
         return;
@@ -1405,18 +1054,22 @@ lu_jit_note_exit(struct lu_deopt *d)
     if (d->reason != EXIT_GUARD && d->reason != EXIT_ERROR && !(d->reason == EXIT_SIDE && d->nframes > 1)) {
         return;
     }
+    /* The site the exit counts against: the instruction it left at, or
+       for a guard that speculates for a loop header, the header. */
     struct lu_deopt_frame *inner = &d->frames[handled];
-    if (handled > 0 && (inner->code->co_flags & LU_CO_KERNEL)) {
-        note_in_context(d, u, handled);
-        return;
+    PyCodeObject *site = inner->code;
+    int site_pc = inner->pc;
+    if (d->reason == EXIT_GUARD && d->blame_code != NULL) {
+        site = d->blame_code;
+        site_pc = d->blame_pc;
     }
-    struct lu_jit_code *jc = state_for(inner->code);
-    if (inner->pc < 0 || inner->pc >= jc->ncode) {
+    struct lu_jit_code *jc = state_for(site);
+    if (site_pc < 0 || site_pc >= jc->ncode) {
         return;
     }
     /* Past the threshold too: another root that inlined the same copy before
        the flag was set leaves here as well, and is recompiled when it does. */
-    uint16_t n = __atomic_add_fetch(&jc->fails[inner->pc], 1, __ATOMIC_RELAXED);
+    uint16_t n = __atomic_add_fetch(&jc->fails[site_pc], 1, __ATOMIC_RELAXED);
     if (n >= GUARD_FAILS) {
         int again;
         if (d->reason != EXIT_GUARD) {
@@ -1425,7 +1078,7 @@ lu_jit_note_exit(struct lu_deopt *d)
             again = __atomic_exchange_n(&jc->noinline, 1, __ATOMIC_RELAXED);
         }
         else {
-            again = __atomic_fetch_or(&jc->nospec[inner->pc], NOSPEC, __ATOMIC_RELAXED) & NOSPEC;
+            again = __atomic_fetch_or(&jc->nospec[site_pc], NOSPEC, __ATOMIC_RELAXED) & NOSPEC;
         }
         /* Every unit of the root code dies and recompiles after its wait.
            A dead unit still running (a recursion's older activations) that
@@ -1445,8 +1098,7 @@ lu_jit_note_exit(struct lu_deopt *d)
             leave(d, u, 1);
             return;
         }
-        say_recompile(d->frames[0].code, d->reason != EXIT_GUARD ? "inlined copy leaves" : "guard fails", inner->code,
-                      inner->pc);
+        say_recompile(d->frames[0].code, d->reason != EXIT_GUARD ? "inlined copy leaves" : "guard fails", site, site_pc);
         struct lu_jit_code *root = state_for(d->frames[0].code);
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
             kill(root, u);
@@ -1857,12 +1509,15 @@ lu_jit_code_free(PyCodeObject *code)
         free(jc->opclasses[i]);
     }
     free(jc->opclasses);
-    free(jc->ctx);
+    for (struct lu_prof *p = jc->profs, *next; p != NULL; p = next) {
+        next = p->next;
+        Py_XDECREF(p->type);
+        free(p);
+    }
     free(jc->nospec);
     free(jc->fails);
     free(jc->wait);
     free(jc->seen);
-    free(jc->resume);
     free(jc);
     code->co_executors = NULL;
 }
@@ -1911,17 +1566,7 @@ lu_jit_report(void)
         LU_C_PATHS(LU_C_PATH_NAME)
 #undef LU_C_PATH_NAME
     };
-    static const char why_not_names[WHY_NOTS][16] = {
-#define LU_WHY_NOT_NAME(name) #name,
-        LU_WHY_NOT(LU_WHY_NOT_NAME)
-#undef LU_WHY_NOT_NAME
-    };
-    fprintf(stderr, "\njit: whynot");
-    for (int k = 0; k < WHY_NOTS; k++) {
-        fprintf(stderr, "%s %s %lu", k ? "," : "", why_not_names[k], stats.why_not[k]);
-    }
     fprintf(stderr, "\n");
-    report_why_not_callees();
     fprintf(stderr, "jit: C paths");
     for (int k = 0; k < C_PATHS; k++) {
         fprintf(stderr, "%s %s %lu", k ? "," : "", c_path_names[k], stats.c_paths[k]);

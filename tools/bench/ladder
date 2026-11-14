@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Instruction ladders: per-iteration cost of named loops, by process difference.
+
+  tools/bench/ladder [--runtime NAME=CMD ...] [--rounds N] [--only REGEX]
+                     [--prefix "WORDS"] [--site DIR] [--out FILE]
+
+Each case runs `perf stat -e instructions:u,cycles:u -- PREFIX CMD ladders/FILE CASE WARM REPS`
+at REPS = lo and REPS = hi; its cost is (count(hi) - count(lo)) / ((hi - lo) * per), `per` being
+the iterations one rep executes, so startup, imports and warm-up cancel. Runtimes alternate within
+a round and the median over rounds is kept. Derived rows (a ladder step, a call slope, an
+operation minus its empty loop) are computed from the medians.
+
+Runtimes default to lucifer=bin/lucifer, plus cpython=$ORACLE_T and pypy=$PYPY when set; any
+--runtime replaces the defaults. PREFIX pins the measured process, e.g. "taskset -c 3".
+Mako, Genshi and six import from --site (default build/corpus/site, from `tools/bench/corpus
+prepare`). Writes a TSV (case, runtime, instructions, cycles, instruction spread in percent).
+Host stdlib only.
+"""
+import argparse
+import os
+from pathlib import Path
+import re
+import shlex
+import statistics
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[2]
+LADDERS = Path(__file__).resolve().parent / "ladders"
+
+
+def group(prefix, file, warm, lo, hi, per, names):
+    return [(f"{prefix}.{n}", file, n, warm, lo, hi, per(n) if callable(per) else per) for n in names]
+
+
+STR_ONLY = {"empty_s", "encode", "pack_b", "concat", "write"}
+
+# (name, file, case, warm-up reps, lo reps, hi reps, iterations per rep)
+CASES = (
+    group("mako", "mako_cell.py", 20, 20, 60, 22500, ["l0", "l1", "l2", "l3", "l4"])
+    + group("pickle", "pickle_save.py", 10, 5, 25, lambda n: 4400 if n in STR_ONLY else 6200,
+            ["empty", "empty_s", "commit", "pid", "memo_get", "getattr_default", "dispatch",
+             "encode", "pack_b", "concat", "write", "memo_store", "save"])
+    + group("genshi", "genshi_cell.py", 5, 3, 13, 10000, ["g0", "g1", "g2", "g3"])
+    + group("call", "call.py", 30, 20, 120, 20000,
+            ["empty", "rec0", "rec1", "rec2", "rec12", "krec2", "krec12", "srec2", "srec12",
+             "skrec2", "skrec12", "meth2", "meth12", "replace", "dget", "lappend", "dqappend",
+             "isinst", "isinst_t", "gen_fused", "gen_call", "attr"])
+    + group("pack", "pack.py", 10, 5, 25, 4400, ["empty", "pack_b", "spack", "genpack", "tobytes"])
+)
+
+# (name, case, minus case, divisor)
+DERIVED = [
+    ("mako.html_escape", "mako.l3", "mako.l2", 1),
+    ("pickle.pack", "pickle.pack_b", "pickle.empty_s", 1),
+    ("genshi.eval_and_yields", "genshi.g3", "genshi.g1", 1),
+    ("op.call_positional", "call.rec12", "call.rec2", 10),
+    ("op.call_from_inlined", "call.rec1", "call.rec0", 1),
+    ("op.call_keyword", "call.krec12", "call.krec2", 10),
+    ("op.call_method", "call.meth12", "call.meth2", 10),
+    ("op.call_star", "call.srec12", "call.srec2", 10),
+    ("op.call_star_kw", "call.skrec12", "call.skrec2", 10),
+    ("op.gen_item_fused", "call.gen_fused", "call.empty", 1),
+    ("op.gen_item_call", "call.gen_call", "call.rec1", 1),
+    ("op.str_replace", "call.replace", "call.empty", 1),
+    ("op.dict_get", "call.dget", "call.empty", 1),
+    ("op.list_append", "call.lappend", "call.empty", 1),
+    ("op.deque_append", "call.dqappend", "call.empty", 1),
+    ("op.isinstance_str", "call.isinst", "call.empty", 1),
+    ("op.isinstance_tuple", "call.isinst_t", "call.empty", 1),
+    ("op.attr_load", "call.attr", "call.empty", 1),
+    ("op.int_to_bytes", "pack.tobytes", "pack.empty", 1),
+    ("op.hand_packer", "pack.genpack", "pack.empty", 1),
+]
+
+
+def parse():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--runtime", action="append", metavar="NAME=CMD", help="repeatable")
+    ap.add_argument("--rounds", type=int, default=5)
+    ap.add_argument("--only", metavar="REGEX", help="cases whose name matches")
+    ap.add_argument("--prefix", default="", metavar="WORDS", help="words in front of each measured command")
+    ap.add_argument("--site", default=str(ROOT / "build/corpus/site"))
+    ap.add_argument("--out", default=str(ROOT / "build/ladder.tsv"))
+    a = ap.parse_args()
+    if a.runtime:
+        a.runtimes = dict(r.split("=", 1) for r in a.runtime)
+    else:
+        a.runtimes = {"lucifer": str(ROOT / "bin/lucifer")}
+        for name, var in (("cpython", "ORACLE_T"), ("pypy", "PYPY")):
+            if os.environ.get(var):
+                a.runtimes[name] = os.environ[var]
+    return a
+
+
+def count(argv, env):
+    r = subprocess.run(["perf", "stat", "-x", ",", "-e", "instructions:u,cycles:u", "--"] + argv,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env, text=True)
+    vals = {}
+    for line in r.stderr.splitlines():
+        f = line.split(",")
+        if len(f) > 3 and f[2].startswith(("instructions", "cycles")):
+            vals[f[2].split(":")[0]] = int(f[0])
+    if r.returncode or len(vals) < 2:
+        sys.exit(f"failed: {shlex.join(argv)}\n{r.stderr[-1500:]}")
+    return vals["instructions"], vals["cycles"]
+
+
+def measure(a, cases):
+    env = {**os.environ, "PYTHONHASHSEED": "0", "PYTHONPATH": a.site}
+    samples = {}
+    for rnd in range(a.rounds):
+        for name, file, case, warm, lo, hi, per in cases:
+            for rt, cmd in a.runtimes.items():
+                base = shlex.split(a.prefix) + shlex.split(cmd) + [str(LADDERS / file), case, str(warm)]
+                i1, c1 = count(base + [str(lo)], env)
+                i2, c2 = count(base + [str(hi)], env)
+                n = (hi - lo) * per
+                samples.setdefault((name, rt), []).append(((i2 - i1) / n, (c2 - c1) / n))
+        print(f"round {rnd + 1}/{a.rounds} done", file=sys.stderr, flush=True)
+    return samples
+
+
+def summarize(samples, runtimes):
+    rows = {}
+    for (name, rt), vals in samples.items():
+        ins = [v[0] for v in vals]
+        med = statistics.median(ins)
+        spread = 100 * (max(ins) - min(ins)) / med if med > 0 else 0.0
+        rows.setdefault(name, {})[rt] = (med, statistics.median(v[1] for v in vals), spread)
+    for name, plus, minus, div in DERIVED:
+        if plus in rows and minus in rows:
+            rows[name] = {rt: tuple((rows[plus][rt][k] - rows[minus][rt][k]) / div for k in (0, 1)) + (None,)
+                          for rt in runtimes if rt in rows[plus] and rt in rows[minus]}
+    return rows
+
+
+def table(rows, runtimes, k, title):
+    w = max(len(n) for n in rows)
+    print(f"\n{title}\n{'case':<{w}}" + "".join(f"{rt:>12}" for rt in runtimes))
+    for name, by in rows.items():
+        print(f"{name:<{w}}" + "".join(f"{by[rt][k]:>12,.0f}" if rt in by else f"{'':>12}" for rt in runtimes))
+
+
+def main():
+    a = parse()
+    cases = [c for c in CASES if not a.only or re.search(a.only, c[0])]
+    if not cases:
+        sys.exit(f"no case matches {a.only!r}")
+    rows = summarize(measure(a, cases), a.runtimes)
+    table(rows, a.runtimes, 0, "instructions per iteration (median)")
+    table(rows, a.runtimes, 1, "cycles per iteration (median)")
+    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+    with open(a.out, "w") as f:
+        f.write("case\truntime\tinstructions\tcycles\tspread_pct\n")
+        for name, by in rows.items():
+            for rt, (ins, cyc, spread) in by.items():
+                f.write(f"{name}\t{rt}\t{ins:.0f}\t{cyc:.0f}\t{'' if spread is None else f'{spread:.1f}'}\n")
+    print(f"\nwrote {a.out}", file=sys.stderr)
+
+
+main()

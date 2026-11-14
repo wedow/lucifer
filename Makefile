@@ -231,7 +231,7 @@ build/tests/capi/%.so: tests/capi/%.c
 # Extension modules, imported unmodified: the oracle's own _bisect, _heapq and
 # _statistics, found beside the oracle, and tests/capi's modules, built here.
 # Each EXT_PROGRAMS program prints the same stdout, stderr and exit status
-# under the oracle and bin/lucifer.
+# under the oracle and bin/lucifer. LUCIFER_FLAGS go to bin/lucifer (tools/floor's modes).
 EXT_DIR = build/tests/capi/ext
 EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c tests/capi/capi_monitoring.c tests/capi/capi_conv.c tests/capi/ready.c
 EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run capi_conv_run testcapi_import container_refs ready_run list_capi_run bad_modules_run given_matches_run
@@ -264,7 +264,7 @@ check-capi-ext: bin/lucifer oracle-exts $(EXT_DIR)/accelerators $(EXT_DIR)/exc_c
 	  $(foreach m,$(SLOTS_MODULES),$(EXT_DIR)/slots_$(m)$(EXT_SUFFIX))
 	@for p in $(EXT_PROGRAMS); do \
 	  { PYTHONPATH=$(EXT_DIR) $(RUN) $(ORACLE_T) tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.expected; \
-	  { PYTHONPATH=$(EXT_DIR) $(RUN) bin/lucifer tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.actual; \
+	  { PYTHONPATH=$(EXT_DIR) $(RUN) bin/lucifer $(LUCIFER_FLAGS) tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.actual; \
 	  diff $(EXT_DIR)/$$p.expected $(EXT_DIR)/$$p.actual > $(EXT_DIR)/$$p.diff || { cat $(EXT_DIR)/$$p.diff; echo "FAIL $$p"; exit 1; }; \
 	  echo "PASS $$p"; \
 	done
@@ -273,7 +273,7 @@ check-capi: bin/lucifer $(CAPI_TESTS) check-capi-ext
 	@for so in $(CAPI_TESTS); do \
 	  name=$$(basename $$so .so); \
 	  for run in $$(seq 15); do \
-	    out=$$($(RUN) env LD_BIND_NOW=1 LD_PRELOAD=./$$so bin/lucifer 2>&1); \
+	    out=$$($(RUN) env LD_BIND_NOW=1 LD_PRELOAD=./$$so bin/lucifer $(LUCIFER_FLAGS) 2>&1); \
 	    [ "$$out" = "capi $$name ok" ] || { echo "FAIL $$name (run $$run)"; exit 1; }; \
 	  done; echo "PASS $$name"; \
 	done

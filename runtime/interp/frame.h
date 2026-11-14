@@ -47,6 +47,7 @@ enum lu_frame_return {
 };
 
 struct lu_deopt;
+struct lu_forced;
 
 struct lu_frame {
     PyCodeObject *code;         /* strong */
@@ -61,13 +62,16 @@ struct lu_frame {
     PyObject **stackpointer;    /* the value stack's top, valid with instr */
     uint8_t owner;              /* enum lu_frame_owner */
     uint8_t ret;                /* enum lu_frame_return */
-    uint8_t jit_lent;           /* pushed by a direct call (runtime/jit): func is the caller's, borrowed */
+    uint8_t home;               /* LU_FRAME_JIT: the owner it had when compiled code took it, and has again
+                                   when compiled code leaves it */
     /* LU_FRAME_JIT: where its values are while it calls something during
-       which a walker may see it (runtime/jit/deopt.c), NULL otherwise; the
-       spill words. */
+       which a walker may see it (runtime/jit/exit.c), NULL otherwise; the
+       spill words; the registers a slow path saved, when jit_desc says so;
+       and what walkers made real of it, NULL until one does. */
     struct lu_deopt *jit_desc;
     const uint64_t *jit_spills;
-    const uint64_t *jit_regs;   /* the registers a slow path saved, when jit_desc says so */
+    const uint64_t *jit_regs;
+    struct lu_forced *jit_forced;
     PyObject *localsplus[];     /* fast locals, cells and free variables, then the stack */
 };
 
@@ -126,7 +130,7 @@ lu_instr_before(PyCodeObject *code, lu_codeunit *after)
 }
 
 /* A frame compiled code runs: the instr of the state it published at its
-   call (runtime/jit/deopt.c). */
+   call (runtime/jit/exit.c). */
 lu_codeunit *lu_jit_instr(struct lu_frame *f);
 
 /* The code unit of the instruction the frame last started: the one before
@@ -148,21 +152,12 @@ lu_frame_owner_for(PyCodeObject *code)
 /* Code whose frames live in a generator, coroutine or async generator. */
 #define LU_CO_GENERATORS (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR)
 
-/* The owner compiled code gives a frame of `code` back with: a generator's
-   own frame runs only embedded in its object (RETURN_GENERATOR, its
-   first instruction, is the interpreter's). */
-static inline uint8_t
-lu_frame_home(PyCodeObject *code)
-{
-    return (code->co_flags & LU_CO_GENERATORS) ? LU_FRAME_GENERATOR : lu_frame_owner_for(code);
-}
-
 /* Whether f is a generator's frame, whoever runs it. */
 static inline int
 lu_frame_in_gen(struct lu_frame *f)
 {
     uint8_t owner = __atomic_load_n(&f->owner, __ATOMIC_ACQUIRE);
-    return owner == LU_FRAME_GENERATOR || (owner == LU_FRAME_JIT && (f->code->co_flags & LU_CO_GENERATORS));
+    return owner == LU_FRAME_GENERATOR || (owner == LU_FRAME_JIT && f->home == LU_FRAME_GENERATOR);
 }
 
 /* What local i's slot holds (a cell for a cell variable) as a new reference,
@@ -178,9 +173,20 @@ int lu_frame_sync(struct lu_frame *f);
 
 /* The walker (FOUNDATIONS 2.2): calls visit(f, arg) on `from` and then each
    frame outward until it returns nonzero, and returns that frame, or NULL.
-   Every owner appears, entry markers and kernel-hidden frames included. */
+   Every owner appears, entry markers and kernel-hidden frames included.
+   Frames of a user's code that compiled code inlined are made real as the
+   walk reaches them (runtime/jit/exit.c). */
 struct lu_frame *lu_frame_walk(struct lu_frame *from, int (*visit)(struct lu_frame *, void *),
                                void *arg);
+
+/* The task's running frame as its own code sees it: compiled code's
+   inlined frames, kernel ones too, are made real first. NULL without one,
+   or with MemoryError when they cannot be made. */
+struct lu_frame *lu_frame_current(PyThreadState *ts);
+
+/* The code of the frame the task runs, read without making anything: an
+   inlined frame's when compiled code is in a call from one. */
+PyCodeObject *lu_frame_running_code(struct lu_frame *f);
 
 /* What a user sees of the stack: frames of Python code, not C entry markers
    and not kernel builtins, which look like C. The `depth`th such frame at or
@@ -207,10 +213,10 @@ PyCodeObject *lu_frame_code(PyFrameObject *frame);
    a share of the code; 1 then, and the caller must not release those. Else
    0, with the frame object dropped. */
 int lu_frame_retire(struct lu_frame *f);
-/* The same for a frame compiled code lent its function and locals
-   (lu_frame_push_lent): the frame object's copy takes references of its
-   own, and the frame can go as it came. */
-void lu_frame_retire_lent(struct lu_frame *f);
+/* The record `from` is replaced by `to` (an inlined frame a walker made
+   real moves onto the datastack): its frame object, if it has one, reads
+   through `to` from now on. */
+void lu_frame_rehome(struct lu_frame *from, struct lu_frame *to);
 
 /* frame.clear() (frame_clear_impl): 0, or -1 with RuntimeError for a frame
    that is executing or suspended. */
@@ -233,16 +239,9 @@ struct lu_frame *lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObje
    be the task's topmost. */
 void lu_frame_pop(PyThreadState *ts, struct lu_frame *f);
 
-/* A frame whose code, function and locals compiled code lends it while a
-   call from an inlined frame runs (runtime/jit/deopt.c): pushed holding no
-   references, its locals unset, past the recursion limit if need be (the
-   code checked for room); NULL when out of memory. Popped as it was
-   pushed, or made an ordinary frame by taking the references. */
 /* Room for `words` more datastack words in the current chunk, which a new
    one gives when it has none: -1 when out of memory. */
 int lu_frame_reserve(PyThreadState *ts, size_t words);
-struct lu_frame *lu_frame_push_lent(PyThreadState *ts, PyFunctionObject *func);
-void lu_frame_pop_lent(PyThreadState *ts, struct lu_frame *f);
 
 /* Pushes a frame for `func` and binds the call arguments to it
    (initialize_locals): args[0..nargs) are positional, then one value per

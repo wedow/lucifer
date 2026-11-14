@@ -61,8 +61,8 @@ alloc_frame(PyThreadState *ts, PyFunctionObject *func)
     f->instr = f->last = lu_code_start(code);
     f->owner = lu_frame_owner_for(code);
     f->ret = LU_RETURN_PUSH;
-    f->jit_lent = 0;
     f->jit_desc = NULL;
+    f->jit_forced = NULL;
     f->stackpointer = f->localsplus + code->co_nlocalsplus;
     return f;
 }
@@ -122,23 +122,6 @@ lu_frame_reserve(PyThreadState *ts, size_t words)
     return 0;
 }
 
-struct lu_frame *
-lu_frame_push_lent(PyThreadState *ts, PyFunctionObject *func)
-{
-    struct lu_frame *f = alloc_frame(ts, func);
-    if (f != NULL) {
-        ts->py_recursion_remaining--;
-    }
-    return f;
-}
-
-void
-lu_frame_pop_lent(PyThreadState *ts, struct lu_frame *f)
-{
-    ts->py_recursion_remaining++;
-    free_frame(ts, f);
-}
-
 /* The references a frame holds, except its code. */
 static void
 release_refs(struct lu_frame *f)
@@ -171,7 +154,7 @@ lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
 
 /* Frames compiled code runs (LU_FRAME_JIT). Their own task reads them only
    from inside a call they made, where they published where their values
-   are (runtime/jit/deopt.c). Another task stops the world first: the owner
+   are (runtime/jit/exit.c). Another task stops the world first: the owner
    is then inside such a call too, or has left compiled code at a poll,
    which made its frames the interpreter's. */
 
@@ -224,15 +207,61 @@ lu_frame_sync(struct lu_frame *f)
 /* The walker (FOUNDATIONS 2.2). Links are single-store pushes and pops, so a
    reader that interrupts the owner sees a valid chain. */
 
+struct lu_frame *lu_jit_force(struct lu_frame *f, int all);
+PyCodeObject *lu_jit_running_code(struct lu_frame *f);
+
+/* The frame a walk goes on with at f: a frame compiled code runs stands
+   for the user frames it inlined, which are made real here (the walker's
+   own task, inside a call the code made) and linked below `above`. One
+   that cannot be made is passed over: the walk sees the root alone. */
+static struct lu_frame *
+seen(struct lu_frame *f, struct lu_frame *above)
+{
+    if (f == NULL || __atomic_load_n(&f->owner, __ATOMIC_ACQUIRE) != LU_FRAME_JIT) {
+        return f;
+    }
+    PyObject *exc = PyErr_GetRaisedException();     /* a walk with an exception in flight keeps it */
+    struct lu_frame *top = lu_jit_force(f, 0);
+    if (top == NULL) {
+        PyErr_Clear();
+        top = f;
+    }
+    PyErr_SetRaisedException(exc);
+    if (top == f) {
+        return f;
+    }
+    if (top != f && above != NULL) {
+        __atomic_store_n(&above->previous, top, __ATOMIC_RELEASE);
+    }
+    return top;
+}
+
 struct lu_frame *
 lu_frame_walk(struct lu_frame *from, int (*visit)(struct lu_frame *, void *), void *arg)
 {
-    for (struct lu_frame *f = from; f != NULL; f = f->previous) {
+    struct lu_frame *above = NULL;
+    for (struct lu_frame *f = seen(from, NULL); f != NULL; above = f, f = seen(f->previous, above)) {
         if (visit(f, arg)) {
             return f;
         }
     }
     return NULL;
+}
+
+struct lu_frame *
+lu_frame_current(PyThreadState *ts)
+{
+    struct lu_frame *f = (struct lu_frame *)ts->current_frame;
+    if (f == NULL || f->owner != LU_FRAME_JIT) {
+        return f;
+    }
+    return lu_jit_force(f, 1);
+}
+
+PyCodeObject *
+lu_frame_running_code(struct lu_frame *f)
+{
+    return f->owner == LU_FRAME_JIT ? lu_jit_running_code(f) : f->code;
 }
 
 static int
@@ -305,6 +334,16 @@ lu_frame_object(struct lu_frame *f)
     return Py_NewRef((PyObject *)f->frame_obj);
 }
 
+void
+lu_frame_rehome(struct lu_frame *from, struct lu_frame *to)
+{
+    to->frame_obj = from->frame_obj;
+    from->frame_obj = NULL;
+    if (to->frame_obj != NULL) {
+        FO(to->frame_obj)->f_frame = to;
+    }
+}
+
 /* PyFrame_New: a frame that is not executing and owns its own record, as a
    frame object does once its frame has stopped. */
 LU_EXPORT PyFrameObject *
@@ -369,23 +408,6 @@ lu_frame_retire(struct lu_frame *f)
     return taken;
 }
 
-void
-lu_frame_retire_lent(struct lu_frame *f)
-{
-    if (f->frame_obj == NULL) {
-        return;
-    }
-    Py_INCREF(f->func);
-    for (PyObject **p = f->localsplus; p < f->stackpointer; p++) {
-        Py_XINCREF(*p);
-    }
-    if (!lu_frame_retire(f)) {
-        Py_DECREF(f->func);
-        for (PyObject **p = f->localsplus; p < f->stackpointer; p++) {
-            Py_XDECREF(*p);
-        }
-    }
-}
 
 static int
 frame_traverse(PyObject *op, visitproc visit, void *arg)

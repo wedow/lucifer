@@ -92,11 +92,6 @@ function_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
     Py_ssize_t total = nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
     PyThreadState *ts = PyThreadState_Get();
     PyObject *result;
-    /* A compiled callee is entered directly, as compiled code calls it. */
-    if (ts->current_exception == NULL && ts->current_frame != NULL
-        && lu_jit_call(ts, func, args, nargs, kwnames, &result)) {
-        return result;
-    }
     PyObject *small[16];
     PyObject **owned = total <= 16 ? small : PyMem_Malloc(total * sizeof(PyObject *));
     if (owned == NULL) {

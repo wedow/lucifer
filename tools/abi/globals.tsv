@@ -198,12 +198,12 @@ stats	runtime/jit/jit.c	the optimizing tier's process-wide counts (-X lucifer_ji
 census	runtime/jit/jit.c	the units whose execution -X lucifer_jit_stats counts, and the counts of freed ones; process-wide like the units, under its lock
 allocs	runtime/jit/jit.c	the allocation sites -X lucifer_jit_stats counts, kept for the process; under its lock
 marks	runtime/jit/jit.c	the count of sites the optimizing tier has marked generic, a process-wide clock units are stamped with; atomic
-why_not_callees	runtime/jit/jit.c	the callees behind -X lucifer_jit_stats' why-not counts, kept for the process; under its lock
 buckets	runtime/jit/deps.c	compiled units' dependencies by the change that takes them back; process-wide like the units, each bucket under its own lock
 compiles	runtime/jit/deps.c	the tickets compiles take and how many run, so writers know when to stamp; atomic counters
-binary_names	runtime/jit/ssa_build.c	const table of BINARY_OP method names; relocated by ld.so, then read-only (RELRO)
-compare_names	runtime/jit/ssa_build.c	const table of COMPARE_OP method names; relocated by ld.so, then read-only (RELRO)
-fops.*	runtime/jit/ssa_build.c	const table of float primitives and their IR; relocated by ld.so, then read-only (RELRO)
+fops.*	runtime/jit/eval_prims.c	const table of float primitives and their IR; relocated by ld.so, then read-only (RELRO)
+kind_types.*	runtime/jit/eval_arith.c	const table of exact types and the operand kinds they are; relocated by ld.so, then read-only (RELRO)
+built_types.*	runtime/jit/eval_ops.c	const table of the types the BUILD_ instructions make; relocated by ld.so, then read-only (RELRO)
+vkind_names.*	runtime/jit/ssa.c	const table of virtual object kind names, for the IR dump; relocated by ld.so, then read-only (RELRO)
 lu_helpers	runtime/jit/helpers.c	const table of the helpers compiled code calls; relocated by ld.so, then read-only (RELRO)
 lu_op_names	runtime/jit/ssa.c	const table of IR operation names; relocated by ld.so, then read-only (RELRO)
 lu_count_names	runtime/jit/ssa.c	const table of census count names; relocated by ld.so, then read-only (RELRO)
@@ -217,11 +217,14 @@ stack_floor	-	thread-local: the lowest C stack address a call from compiled code
 managed_buffer_type	runtime/prim/memoryview.c	a static type, its slots filled once at startup (lu_memoryview_init)
 ring_type	runtime/prim/deque.c	the deque's ring buffer, a private static type complete at compile time
 readline_lock	runtime/capi/myreadline.c	_PyOS_ReadlineLock: one readline at a time across threads
-stress_calls	-	per thread (its TLS symbol has no line): calls from inlined frames counted for -X lucifer_stress=deopt:N (runtime/jit/deopt.c)
-kept_by_stress	-	per thread (its TLS symbol has no line): the last call from an inlined frame kept its frames only for deopt:N, so its exit counts as a stress exit (runtime/jit/deopt.c)
 picklebuf_methods	runtime/object/picklebuf.c	pickle.PickleBuffer's PyMethodDef table, never written; the API takes it non-const
 picklebuf_as_buffer	runtime/object/picklebuf.c	pickle.PickleBuffer's PyBufferProcs, never written; tp_as_buffer takes it non-const
 socket_base_members	runtime/prim/module.c	_lucifer.socket_base's PyMemberDef table, never written; the API takes it non-const
 socket_base_getset	runtime/prim/module.c	_lucifer.socket_base's PyGetSetDef table, never written; the API takes it non-const
 socket_base_slots	runtime/prim/module.c	_lucifer.socket_base's PyType_Slot table, never written; the API takes it non-const
 socket_base_spec	runtime/prim/module.c	_lucifer.socket_base's PyType_Spec, never written; the API takes it non-const
+strs.*	runtime/jit/eval_prims.c	const table of the primitives whose result is always an exact str; relocated by ld.so, then read-only (RELRO)
+ints.*	runtime/jit/eval_prims.c	const table of the primitives whose result is always an exact int; relocated by ld.so, then read-only (RELRO)
+bools.*	runtime/jit/eval_prims.c	const table of the primitives whose result is always a bool; relocated by ld.so, then read-only (RELRO)
+known.*	runtime/jit/eval_prims.c	const table pairing those tables with their types; relocated by ld.so, then read-only (RELRO)
+lu_jit_unbound	runtime/jit/jit.c	the immortal marker compiled code carries beside a raw number while its local is unbound; never written after load

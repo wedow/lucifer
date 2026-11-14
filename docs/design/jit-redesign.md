@@ -9,26 +9,40 @@ engine design (cited as ENGINE) and an adaptive optimization roadmap (cited
 as ADAPTIVE). This document checks both against the code, re-measures the
 numbers they rest on, and replaces their sequencing.
 
+Round 2 (same date, master at `2dc44d5`, whose JIT sources are those of
+`fba0b79`): a third external document (cited as ROUND2) answered how to go
+from this plan's end state to PyPy's level under the cp314t ABI. It was
+written from the residual-code, PyPy-trace and side-by-side studies of the
+three loops (cited as the side-by-side study; not in the tree). Its claims
+were checked against the code (appendix C).
+
+Round 3 (same date): the round-2 review treated machinery ROUND2 assumed
+and the tree lacks as errors in ROUND2, and set gates well short of its
+targets. That is withdrawn. Missing machinery is built, and a layer that
+is not a foundation for the end state is replaced. The architecture and
+the plan are now `jit-architecture.md`; this document keeps the baselines
+(§1), the evidence (§2), the targets (§4), the tests (§5), the risks (§6)
+and the checked claims (appendices).
+
 Every number is marked **verified** (measured for this document on
-`fba0b79`) or **packet** (taken from the studies or the external documents,
-not re-measured). Method is in appendix B.
+`fba0b79`), **packet** (taken from the studies or the external documents,
+not re-measured) or **estimated** (a prediction or a budget nobody has
+measured). Method is in appendix B.
 
 ## 0. Owner decisions
 
 Open. Each has a recommendation; the roadmap below assumes the
 recommendations.
 
-1. **What is the bar?** ENGINE and ADAPTIVE set "10x CPython and within 3x
-   of Go". The brief said PyPy's level on real programs and multiples on
-   compute. *Recommend:* gate milestones on instructions per iteration of
-   named loops against CPython and PyPy (§1), keep the 122-program geomean
-   as the headline, and treat 10x on compute as a later bar. No milestone
-   here is priced to reach it.
-2. **Lazy frames before call-shape binding?** ENGINE lands binding first and
-   lazy frame states after its second increment. *Recommend:* lazy frames
-   first (M1). §2 shows binding has no effect on Mako until two other
-   blockers go, and the one-call experiment showed nothing that widens
-   inlining pays while inlined frames are pushed eagerly.
+1. **What is the bar?** PyPy's neighbourhood or better on real programs
+   under full cp314t compatibility. The targets are ROUND2's per-loop
+   figures (§4), gated in instructions per iteration of named loops
+   against CPython and PyPy (§1). The 122-program geomean stays the
+   headline.
+2. **Lazy frames before call-shape binding?** Settled by the
+   architecture: a frame is a virtual object from the first slice, and
+   binding is evaluated against it. Nothing widens inlining over pushed
+   frames.
 3. **Build the task-owned activation stack?** ENGINE makes compiled calls
    jumps with continuation records on a task stack, so a task can migrate
    under compiled callers. *Recommend:* no, not now. Migration exists only
@@ -36,11 +50,10 @@ recommendations.
    measurable today, and DESIGN 5.2 (no stack switching, a park returns to
    the carrier loop) already holds if a park stays an exit. Revisit when a
    real scheduler exists and parks per call are measured on the web tiers.
-4. **Private entries: how early?** They are M5 here, after binding and
-   effects. A compiled positional call is already 215 instructions against
-   CPython's 488 (verified); the call protocol is 7–10% of the three band
-   loops (packet). *Recommend:* keep M5. It is a 10–20% lever on call-heavy
-   code, not the multi-x part.
+4. **Private entries.** Part of the call protocol that replaces the direct
+   entry (`jit-architecture.md` §4.4), not a late milestone. A compiled
+   positional call is 215 instructions against CPython's 488 and PyPy's 98
+   (verified).
 5. **ADAPTIVE's content proofs and M5–M7** (the proof that `str(int)` has
    no character `html_escape` replaces; adaptive data layout; indexes;
    incremental recomputation). The only evidence offered is the Mako
@@ -48,20 +61,36 @@ recommendations.
    second, unrelated program shows the pattern.
 6. **A persistent code cache and a compiled kernel image for one-shot
    runs.** Compile plus import is 25–60% of a first run (packet), and the
-   cli suite is the worst row (5.64x, daily). *Recommend:* M11, after the
-   unit shape settles, but apply the constraint now: new metadata (frame
-   descriptors, binding plans, struct plans) holds no raw pointers that a
-   constant table could hold.
-7. **Kernel code written for the compiler.** M7 generates per-format
-   packers in `_struct` and needs one new primitive that stores bytes into a
-   fresh `bytes`. `int.to_bytes` alone costs 2,067 instructions (verified).
-   *Recommend:* allow generated kernel Python and small primitives of this
-   kind; they are not accelerators.
-8. **Are diagnostic switches behaviour flags?** M0 extends
+   cli suite is the worst row (5.64x, daily). *Recommend:* yes, after the
+   replacement (stage S10), with the constraint applied from the first slice: new
+   metadata (safepoint tables, binding plans, summaries) holds no raw
+   pointers that a constant table could hold.
+7. **Kernel code written for the compiler.** Kernel modules stay as
+   written and the evaluator specializes them on their constant inputs;
+   per-format generated packers are not built. Small primitives under
+   kernel Python and kernel code rewritten so the evaluator can follow it
+   are allowed; they are not accelerators.
+8. **Are diagnostic switches behaviour flags?** The survivors report extends
    `-X lucifer_jit_stats` and `LUCIFER_JIT_DEBUG`. They change no
    optimization decision. ENGINE's 2x2 "factorial builds" would be
    switchable optimizations. *Recommend:* diagnostics stay; ablations are
    branches, never switches in the tree.
+9. **May a reference count read lower than CPython's while its holder is
+   virtual?** Today a virtual tuple or instance keeps a counted reference
+   to each field, so `sys.getrefcount` and `Py_REFCNT` of a child agree
+   with CPython. PyPy's level needs those pairs gone. ROUND2 says
+   no concession is needed, yet its own rule keeps every pair an observer
+   could distinguish, which is all of them. Finalizer and weakref timing
+   would not change: the last release stays where it is. CPython 3.14's
+   borrowed stack references already changed what `getrefcount` returns.
+   *Recommend:* allow it; exact counts are not part of the bar, release
+   order is.
+10. **Where may `MemoryError` surface when a virtual object is made
+    late?** ROUND2 wants storage reserved where the source allocates, so a
+    later exit or walker can never fail. A reservation is an allocation on
+    the hot path and defeats the point. *Recommend:* no reservations. An
+    exit that cannot allocate raises `MemoryError` at its instruction; a
+    walker that cannot gets it in the walking thread. No abort (§5).
 
 ## 1. Baseline, verified at fba0b79
 
@@ -155,8 +184,9 @@ instructions (packet).
 **Library interpreters need their own lever, and it is smaller than
 forecast.** A straight-line packer for `"<B"` written by hand runs 2,174
 instructions (verified) against 19,846, because `int.to_bytes` is itself
-2,067. Generated plans need a byte-store primitive under them to reach
-CPython's 755.
+2,067. So the lever is not a packer per format but an evaluator that follows
+the constant format through `_struct` as written, down to a byte store
+(`jit-architecture.md` §2).
 
 **Genshi has no single cause.** Its profile (verified, by symbol) is a long
 tail: the interpreter 14% (eval'd code is never compiled), type lookups 7%,
@@ -165,151 +195,46 @@ is worth more than about 15% of the cell.
 
 ## 3. Architecture of record
 
-ENGINE's terms, corrected against the code. One compiler, one IR, one
-interpreter as the exit target, as now.
+Superseded by `jit-architecture.md`: the per-layer audit (its §2), what is
+fundamental and what is inherited (§3), the end state (§4) and what is
+deleted (§5). Two things carry over unchanged: one compiler, one IR and
+the interpreter as the exit target; and no task-owned activation stack
+(decision 3).
 
-**Region.** The unit of compilation stays "one entry at a bytecode
-boundary" (call entry, loop header, generator resume) and grows by
-inlining over block SSA with joins. What changes is selection: sites carry
-execution counts, budgets count IR after folding rather than bytecode
-units, and a unit that stays hot is recompiled with a larger budget. The
-four fixed limits (400 units, depth 4, 3,000 inlines, the one-call rule)
-go. No trace recorder and no second backend.
+## 4. Targets
 
-**Activation and frame state.** A logical Python frame in compiled code is
-a frame state: code, instruction, locals, stack, ownership, how it returns.
-At compile time this is `struct lu_fs`, a node with a `caller` link. At run
-time it is `struct lu_deopt`, today a flat copy of every frame per exit;
-it becomes the same linked shape, one node per frame per safepoint, the
-caller chain shared by every safepoint inside an inline. Three consumers
-read one description, as today: exits, calls, walkers.
+The milestones M0–M12 are superseded by the stages of
+`jit-architecture.md` §7, which lists what each stage subsumes. Per-stage
+predictions are in its §9.
 
-**Lazy frames.** No frame of a compiled activation is made real until
-something observes it. Before a call that may run Python, compiled code
-stores the descriptor pointer (two stores, as the root does now). Every
-walker goes through one accessor that, on meeting a frame with a
-descriptor, makes the inlined frames it names: heap frames linked between
-the root and its callee, values taken from the spill words. A frame so
-observed is canonical from then on: virtual objects are built once and
-remembered per activation, and compiled code leaves at its guard after the
-call (`GUARD_FRAMES`, already there), handing those frames to the
-interpreter as it hands kept frames now. Deleted: lent frames,
-`lu_jit_frames_push` and `_pop`, the in-line push, the kept-frame matching,
-both "locals stay real" rules, and the fatal paths in the push. A park is
-an exit, as now.
+Instructions per iteration:
 
-**Returning call.** A call the region keeps is an IR instruction with a
-callee, arguments, an effect summary and normal and exceptional
-successors, not a helper with flags. Facts and virtual objects survive it
-according to the summary. It is backed by the existing direct entry until
-private entries land.
-
-**Private entry.** A caller that has guarded the callee enters a unit's
-body past the checks it proved. The checks that are properties of the
-world (tools on, a hook installed, the unit dead) move from every call to
-invalidation: the caller depends on the callee unit (`LU_DEP_CALLEES`
-exists). The callee's frame is lazy by the same mechanism as an inlined
-one. Calls stay native calls on the C stack, bounded by the existing stack
-floor.
-
-**Binding plan.** One description of how a call shape binds to a signature
-(positional, keyword names, defaults, rest, keyword rest), computed once
-per (code, shape), read by the C binder and the builder. For an inlined
-call the rest tuple is virtual (it already is) and the keyword dict is a
-virtual mapping with a known key set. For a call that stays out of line, a
-shape-specialized entry binds in compiled code. The 13 hand-written twins
-go, one by one, as their wrappers fold.
-
-**Folding at build.** The builder folds what its facts decide: a branch on
-a constant or a known size, an unpack or index of a known tuple, iteration
-over a tuple of known length (unrolled) or an empty mapping. Arms it folds
-away are not built.
-
-**Effect summary.** Each primitive and helper states what it may do: read
-or write which heap facts, allocate, raise, run Python, release a value
-that may finalize, park. This replaces `LU_METH_NOPY`, `LU_METH_FRAME`,
-`IF_PY` and `IF_SEEN`. An instruction publishes only if it may be observed
-and kills only the facts it may write. A compiled callee carries a
-versioned summary of the same kind, so a returning call need not kill
-everything.
-
-**Plans in kernel Python.** Where a stdlib module interprets a stable
-input (a struct format, later a codec choice or a BytesIO write path), the
-module generates straight-line Python per input from its one parser, as
-`_sre` does per pattern, and keeps the general executor for cold inputs.
-
-**Namespace entry.** Code without `CO_OPTIMIZED` (eval, exec, class and
-module bodies) compiles when its namespaces are exact dicts; name lookup
-is locals, globals, builtins with dict-key dependencies. Any other mapping
-runs in the interpreter.
-
-**Generators.** A generator frame is an activation like any other: resumed
-in line when its code is known (guarded, including at a loop entered by
-OSR), allowed to call Python once frames are lazy, and otherwise resumed
-through a private resume entry rather than `lu_jit_resume`.
-
-**Invalidation.** A unit that relies on a fact checks its own `dead` word
-at its polls. A writer kills the dependent units and signals nobody else.
-
-Not adopted: the task-owned activation stack (decision 3), content
-repertoire proofs, storage strategies, indexes and incremental
-recomputation (decision 5), a baseline compiler.
-
-## 4. Milestones
-
-Dependency order. Each is one branch, lands on its own behind the gates in
-§5, and states a prediction that can fail. "h" is agent-hours (builder plus
-review), from this repository's measured rate. Wall time uses
-T′ = T·(1 − p·(1 − r)), p the loop's verified share of the program's
-instructions and r the loop's predicted instruction ratio.
-
-| | milestone | needs | h | predicted effect (falsifier) |
+| loop | now (verified) | target (estimated) | PyPy (verified) | CPython 3.14t (verified) |
 |---|---|---|---|---|
-| M0 | Survivors report and committed ladders | | 4 | No instruction change (±0.5%) with stats off. The report names, for the three loops, every surviving allocation, call, publish and refcount pair with its count and the rule that kept it. |
-| M1 | Lazy inlined frames; then drop the one-call, depth and loop-after rules | M0 | 25 | Call from an inlined frame 251 → ≤ 220. With the rules gone, every program the experiment made slower is now no slower than master (chameleon, pycodestyle, markdown, mako, pickle: ≤ 0%), and Json, Havlak, DeltaBlue keep ≥ 4% fewer instructions. pickle `save` and Genshi cell ≤ −5%. black's code bytes ≤ 1.3x. |
-| M2 | Folding at build; post-fold budgets | M0 | 15 | `isinstance(x, (int, float))` 430 → ≤ 60. Mako allocates 0 tuples per cell (from 5) once M1 is in; cell ≤ 9,900. No program compiles more than 5% slower. |
-| M3 | Binding plans: virtual keyword rest, shape-specialized entries | M1, M2 | 20 | Mako cell ≤ 4,700 (bound: 4,254 by emulation); 0 tuples, dicts and lists per cell at `html_escape`. `str.replace` 1,633 → ≤ 450. Calls: keyword 435 → ≤ 260, `*args` 777 → ≤ 300, `*args, **kwargs` 1,114 → ≤ 320. mako 49.4 → 33–37 ms. Generality: chameleon, typing_runtime_protocols and pickle each ≥ 5% fewer instructions, or the mechanism is Mako-shaped. |
-| M4 | Effect summaries for primitives and helpers | M0 | 20 | `deque.append` 379 → ≤ 150, `list.append` 234 → ≤ 90, `dict.get` 516 → ≤ 250. Liveness checks per Bounce `bounce()` 11 → ≤ 3. AWFY geomean 0.371 → ≤ 0.33. |
-| M5 | Private entries; lazy callee frames | M1, M4 | 30 | Positional call 215 → ≤ 80, method 231 → ≤ 90. Richards 1,898 → ≤ 1,650 ms. pickle `save` and Genshi cell each a further ≥ 5%. |
-| M6 | Returning-call instruction; site counts; hot recompile; callee summaries | M1, M4 | 35 | pickle `save` and Genshi cell each a further ≥ 10%. No AWFY row more than 2% slower. black one-shot time ≤ +3%. |
-| M7 | Generated struct plans and a byte-store primitive; then `BytesIO.write` and `str.encode` paths | none | 10 | `pack("<B", n)` 19,846 → ≤ 2,300 at the first landing, ≤ 600 with the primitive. `save` 43,326 → ≤ 26,000. pickle_pure_python 2.10 → 1.4–1.6 ms; unpickle_pure_python ≥ 20% faster. |
-| M8 | Namespace entries | M0 | 18 | Genshi cell ≤ 41,000; genshi 398 → ≤ 380 ms. The interpreter's share of the cell falls from 14% to ≤ 4%. |
-| M9 | Generators: guarded in-line resume at OSR, calls from in-line resumes, private resume entry | M1, M5 | 25 | Generator item 510–619 → ≤ 200 out of line, ≤ 60 in line. Genshi `g1` 6,734 → ≤ 4,500. pyperformance generators 1.98x → ≤ 1.3x; async_tree 3.57x → ≤ 3.0x. |
-| M10 | Targeted invalidation | M0 | 8 | With 8 threads in compiled loops and one thread redefining an unrelated class, exits in the 8 threads: 0 (now one each per redefinition). |
-| M11 | Persistent unit cache and compiled kernel image | M6 | 40 | cli geomean 5.64 → ≤ 4.0; isort, markdown, black first runs ≥ 30% faster. |
-| M12 | Ownership and escape across returning calls: refcount pairs, locks on unpublished objects, allocation removal through summaries | M4, M6 | 50 | Bounce 627 instructions per operation (packet) → ≤ 250; AWFY geomean ≤ 0.22. Unpriced beyond this first slice. |
+| Mako cell | 10,612 | 1,200–1,700 | 1,296 | 4,421 |
+| pickle `save` | 43,326 | 1,000–1,400 | 682 | 12,185 |
+| Genshi cell | 46,522 | 4,000–5,000 | 2,867 | 19,086 |
 
-About 300 agent-hours. M0, M2, M4, M7, M8 and M10 have no dependency on M1
-and run beside it; at most two JIT-core branches (`ssa_build.c`,
-`ssa_opt.c`) at once, to keep merges small.
+The targets are ROUND2's, which adopts the side-by-side study's estimate
+of what a cp314t runtime with PyPy's optimizer still executes (Mako
+widened by 100–200). Mako's is supported by measurement: it is one unit
+already, its real work is 880 instructions (packet) and the emulation
+reaches 4,254 (verified). Nothing measured confirms or contradicts the
+other two; they are the targets regardless, and the plan is judged
+against them.
 
-**M0.** The pieces exist: `-X lucifer_jit_stats` counts executed guards,
-references, calls and allocations by site; `LUCIFER_JIT_DEBUG` prints why
-an object is not virtual and why a callee is not inlined. M0 joins them
-into one ranked table per unit (rule, witness instruction, executed count)
-and commits the loop and call ladders used here to `tools/bench`, with
-their CPython and PyPy columns. It is the acceptance check for M1–M3,
-whose first two change Mako little by themselves.
+The loops are not the programs. With the Mako cell at its target the mako
+benchmark is still 279–290M instructions against CPython's 159.4M (derived
+from verified counts): the cell is 49% of it.
 
-**M1.** Stage 1: the linked run-time descriptor and the walker accessor
-(about 30 uses of `->previous` outside `runtime/jit`, in seven files), inlined
-frames observed through it, lent frames deleted. Stage 2: virtual objects
-as locals, built once per activation. Stage 3: delete the one-call, depth
-and loop-after rules (rebase `31721c4`). `faulthandler` walks frames in a
-signal handler and cannot allocate: it reads code and line from the
-descriptor without making frames.
-
-**M5.** Stage A, the proved entry, needs only dependencies. Stage B, the
-lazy callee frame, reuses M1's accessor for root frames.
-
-**End state after M1–M9**, if every prediction holds: Mako cell about
-3,700 (0.85x CPython, 2.9x PyPy), pickle `save` about 15,000 (1.2x, 22x),
-Genshi cell about 30,000 (1.6x, 10x). M12 is where the rest of the gap to
-PyPy is, and it is the least certain item here.
+Compatibility: the targets exceed PyPy by −200 to +200 (Mako), 300–700
+(pickle) and 1,100–2,100 (Genshi) instructions (packet estimates), under
+5% of each gap. The only concessions used are decisions 9 and 10.
 
 ## 5. Correctness plan
 
-The gates are the existing ones; nothing lands without all five green:
+The gates are the existing ones, over the floor recorded with the tier off
+(`jit-architecture.md` §6); nothing lands without all five green:
 `make check` (kernel programs plain, `jit` and `jit-deopt` lanes: 711 each),
 `make abi-audit`, `make check-jit` (jitcheck; difftest `always` and
 `deopt:7`: 193 each), `make check-harness`, `make check-compiler`. Tests are
@@ -317,35 +242,38 @@ binary-level against the CPython oracle and are written first.
 
 | mechanism | new binary-level tests | lane |
 |---|---|---|
-| Lazy frames (M1, M5) | From a callee of an inlined frame: `sys._getframe(n)` identity and `f_back` chain, `f_lineno`, `f_locals` read and write-through with the next use, a traceback kept past the frame, `settrace` and `sys.monitoring` turned on inside the callee with the full event log, the same from a C extension callback (`PyEval_GetFrame`, `PyFrame_GetBack`), `sys._current_frames` from another thread, `faulthandler` dump. Each compared with the oracle. | check-kernel `jit`, `jit-deopt`; check-capi-ext |
+| Virtual frames | From a callee of an inlined frame: `sys._getframe(n)` identity and `f_back` chain, `f_lineno`, `f_locals` read and write-through with the next use, a traceback kept past the frame, `settrace` and `sys.monitoring` turned on inside the callee with the full event log, the same from a C extension callback (`PyEval_GetFrame`, `PyFrame_GetBack`), `sys._current_frames` from another thread, `faulthandler` dump. Each compared with the oracle. | check-kernel `jit`, `jit-deopt`; check-capi-ext |
 | Virtual objects in locals | `id()` and `is` of a tuple or instance seen by a walker and again after the exit; a walker mutating a virtual instance | check-kernel `jit-deopt` |
 | Every exit resumes once | `deopt:N` already fails every Nth guard; add a seed sweep (seed 0 misses sites, packet) and a count-of-effects test per boundary kind: before an effect, after it, raising | difftest `deopt` |
-| Binding plans (M3) | The CPython `test_extcall`, `test_keywordonlyarg`, `test_positional_only_arg` shapes through compiled callers: duplicate keywords, mutated `__defaults__` and `__kwdefaults__` between calls, kwargs retained, mutated and passed to C | check-kernel `jit` |
-| Effect summaries (M4) | Each summary is checked by a stress mode that runs a finalizer, a collection and a class mutation at every primitive call that claims it cannot be observed; a wrong claim fails differential output | new `lucifer_stress` kind in check-kernel-jit |
-| Private entries (M5) | Rebind the callee, change defaults, install a trace function, a PEP 523 hook and monitoring between and during calls; recursion to the limit; the 512 KiB stack lane | check-kernel `jit`; deep_recursion |
-| Namespace entries (M8) | `exec` and `eval` with dict subclasses, a `__prepare__` mapping, `__builtins__` replaced, names deleted and rebound between runs | check-kernel `jit` |
-| Generators (M9) | `send` before start, `throw`, `close` with `finally`, reentrant resume, `gi_frame` and `gi_running` from the consumer and from a callee, `StopIteration` conversion | check-kernel `jit`, `jit-deopt` |
-| Free threading | Handoff and `gc:N` lanes run with `-X lucifer_jit=always` and `deopt:N` together (today they run by hand without the JIT flags); a writer/reader test that requires the post-acknowledgement lookup to see the new binding (M10) | check-kernel, new lane |
-| No allocation-failure aborts | Allocation-fault injection at exits and frame materialization; the three fatal paths in `deopt.c` become recoverable or unreachable (M1 deletes two) | new lane |
-| Performance | The M0 ladders, checked in with bounds; the 39 jitcheck growth lanes (packet), rewritten where they assert the units M1 and M6 change | check-jit; daily |
+| Binding plans | The CPython `test_extcall`, `test_keywordonlyarg`, `test_positional_only_arg` shapes through compiled callers: duplicate keywords, mutated `__defaults__` and `__kwdefaults__` between calls, kwargs retained, mutated and passed to C | check-kernel `jit` |
+| Effect summaries | Each summary is checked by a stress mode that runs a finalizer, a collection and a class mutation at every primitive call that claims it cannot be observed; a wrong claim fails differential output | new `lucifer_stress` kind in check-kernel-jit |
+| Entries by shape | Rebind the callee, change defaults, install a trace function, a PEP 523 hook and monitoring between and during calls; recursion to the limit; the 512 KiB stack lane | check-kernel `jit`; deep_recursion |
+| Namespace entries | `exec` and `eval` with dict subclasses, a `__prepare__` mapping, `__builtins__` replaced, names deleted and rebound between runs | check-kernel `jit` |
+| Generators | `send` before start, `throw`, `close` with `finally`, reentrant resume, `gi_frame` and `gi_running` from the consumer and from a callee, `StopIteration` conversion | check-kernel `jit`, `jit-deopt` |
+| Free threading | Handoff and `gc:N` lanes run with `-X lucifer_jit=always` and `deopt:N` together (today they run by hand without the JIT flags); a writer/reader test that requires the post-acknowledgement lookup to see the new binding | check-kernel, new lane |
+| No allocation-failure aborts | Allocation-fault injection at exits and frame materialization; no fatal path in the materializer | new lane |
+| Virtual object kinds | Per kind: identity and contents of an object made on a cold edge, seen from Python and from a C extension; an exception before and after the store that publishes it, with a count of effects; a walker forcing it mid-call and the caller's alias afterwards; `gc.get_objects` and `gc.get_referrers` from a callee | check-kernel `jit`, `jit-deopt`; check-capi-ext |
+| Ownership and locks | Two threads publishing, replacing and clearing a container while compiled code fills or reads it; a finalizer and a weakref callback on a value whose pair was removed, order compared with the oracle; the summary stress kind run at every moved or borrowed reference | handoff and `gc:N` lanes with the JIT |
+| Byte parts, dict probes, namespaces | Output bytes and exception text against the oracle for non-ASCII, an exported buffer, a seek between writes, a writer replaced mid-`save`; a dispatch key rebound, an `id` collision with a non-int key; a locals mapping that mutates itself, an audit hook that raises, `__builtins__` present after `eval` | check-kernel `jit`, `jit-deopt` |
+| Fused and in-line resumes | The generator tests through a fused pair, plus `throw` and `close` on each side of a yield and two threads resuming one generator | check-kernel `jit`, `jit-deopt` |
+| Performance | The ladders, checked in with bounds; the 39 jitcheck growth lanes (packet), rewritten for the new design | check-jit; daily |
 
-Reviews: M1, M5, M9 and M10 touch frames, GC roots and cross-thread state
-and get the full review with tests; the rest get the routine one.
+Reviews are assigned per stage in `jit-architecture.md` §7.
 
 ## 6. Risks
 
+The design's own risks are in `jit-architecture.md` §9. These remain:
+
 | risk | measurement that settles it |
 |---|---|
-| Observed frames deopt too often: logging's `findCaller`, tracebacks that outlive frames, and `inspect` users make frame objects on hot paths | `EXIT_FRAME` exits per 1,000 calls over the corpus before and after M1. If any program exceeds 1, let an observation that wrote nothing and took no virtual object be dropped without an exit. |
-| Deep inlining grows code and compile time again (black went from 14.6 to 45.8 MB unbounded, packet) | Code bytes, descriptor bytes and compile ms per program in the daily, from M1 on. The linked descriptor should make descriptor bytes grow with frames, not frames × exits. |
-| M1 and M2 show nothing on programs until M3 | M0's report: the named rules disappear from the three loops' survivor tables. That, not wall time, gates M1 and M2. |
-| Binding plans help only Mako | The M3 generality row. Also the count of kernel functions taking `*args` (177 definitions in `lib/kernel`) that fold fully. |
-| Effect summaries are wrong | The M4 stress kind. A wrong summary is a miscompile, so the default for an unlisted primitive is "may do anything". |
-| Lazy frames hide roots from the GC's mark-alive pass, so it does more work | GC instructions per Genshi cell before and after M1. Frame references stay counted, so only speed is at stake. |
-| Generated packers and plans cost more to make than they save in one-shot runs | First-run time of pickle, unpickle and the cli suite with M7; generate on reuse count, not on first use. |
+| Binding plans help only Mako | Programs outside the band at the slice. Also the count of kernel functions taking `*args` (177 definitions in `lib/kernel`) that fold fully. |
+| Lazy frames hide roots from the GC's mark-alive pass, so it does more work | GC instructions per Genshi cell, before and after. Frame references stay counted, so only speed is at stake. |
 | A park under compiled callers deopts the whole native chain | Not measurable until a scheduler exists. Then: parks per 1,000 calls and frames rebuilt per park on the web tiers. This is what would reopen decision 3. |
-| The band reaches CPython's level and stops there | The end-state row in §4. If M3 and M7 hit their bounds and the loops are still over 2x PyPy, the remainder is allocation, refcounts and locks: M12 moves up. |
-| Kernel Python is slower than the C it replaces even when compiled well (`int.to_bytes` 3.3x, `dict.get` 1.4x) | The per-operation ladder after M4. Any operation still over 1.5x CPython gets a primitive under it, which the bet allows; a module moved to C would not be. |
+| The targets have no margin: they assume an optimizer as good as PyPy's on every line at once | Each stage's gate, against its measured parent. A missed gate is priced by the survivors report before the next stage starts. The target does not move. |
+| Sinking grows code: a make on every cold edge, and exits that name more objects | Code and descriptor bytes per program in the daily; makes share one out-of-line stub per kind. |
+| A callee recompile voids its summary and kills every caller that relied on it | Units killed per callee recompile over the corpus. If callers die in chains, a caller relies on the summary's content hash, not the unit. |
+| The mechanisms fit the three loops and little else | Every stage names programs outside the band. A mechanism that moves only its loop does not land. |
+| Kernel Python is slower than the C it replaces even when compiled well (`int.to_bytes` 3.3x, `dict.get` 1.4x) | The per-operation ladder once S2 lands. Any operation still over 1.5x CPython gets a primitive under it, which the bet allows; a module moved to C would not be. |
 
 ## Appendix A. Corrections to ENGINE and ADAPTIVE
 
@@ -373,7 +301,7 @@ D: done since `10db560`.
 | A private call costs 15–45 instructions as a jump with a saved continuation | Unverified, and the target ignores that a return by indirect jump loses the return predictor. Native calls keep it. |
 | CPython's positional call is about 593 instructions | W on this ladder: 488. PyPy's residual call, which ENGINE lists as unmeasured, is 98. |
 | ADAPTIVE M1: prove `str(int)` contains no escaped character and delete the five searches | Benchmark-shaped: the Mako benchmark escapes `range(150)`. Not adopted (decision 5). |
-| ENGINE and ADAPTIVE disagree on when the task stack lands (after increment 2; in M2 "in slices") and neither lands lazy frames before widening inlining | Resolved here: lazy frames are M1, the task stack is not built. |
+| ENGINE and ADAPTIVE disagree on when the task stack lands (after increment 2; in M2 "in slices") and neither lands lazy frames before widening inlining | Resolved: frames are virtual from the first slice; the task stack is not built. |
 
 ## Appendix B. Method
 
@@ -397,5 +325,41 @@ D: done since `10db560`.
 - Whole-program wall times are the daily's and were not re-run. Cycle
   counts by process difference on whole benchmarks spread 25–130% and are
   not used.
-- M0 commits the ladders; until then they live with this branch's working
+- Stage S0 commits the ladders; until then they live with this branch's working
   files.
+
+## Appendix C. Round 2, checked
+
+ROUND2's claims about the code, checked at `2dc44d5`, and its arithmetic
+on the baselines. C: confirmed. W: wrong as a statement about the tree.
+S: stale (already there). U: under-specified. B: not in the tree, to
+build (`jit-architecture.md` section in brackets).
+
+| claim | status |
+|---|---|
+| Ladder differences, ratios to PyPy and CPython, gap shares, the pickle mix (42 new strings, 2 hits, 13 `BININT1`, 4 `BININT`, 1 `LONG1`; 104 writes per 62 saves), the weighted pickle budget (895–1,218 plus 110–180), the Genshi sums, the mako whole-benchmark figure | C, all re-derived. |
+| "Compatible engineering targets" of 1,000–1,400 (pickle) and 4,000–5,000 (Genshi); compatibility costs at most 5% of each gap | Adopted as the targets (§4). They are the side-by-side study's estimates (Mako plus 100–200), not an independent derivation; nothing measured confirms or contradicts them. |
+| pickle's new-string path budget, 1,020–1,380 | U. Its itemized lines sum to 305–615; the other 400–1,075 is driver, frames and guards, unitemized, where 406 guards and 24 calls run today. The stage that removes those must show it. |
+| Mako: five searches in 800–950 | U. The searches' own work is 880 today (packet), leaving at most 14 instructions per call for the call, the no-match test and the reference. Tested at the first slice. |
+| Genshi: `g2 − g1` ≤ 28,000 as the first gate after namespace entries | U. The last step, 8,000 → 2,450, is assigned to "remaining expression fast paths" with no mechanism named. The architecture's answer is evaluation through `eval` with virtual namespaces [§4.2, S7]. |
+| The trace-region experiment runs "after M1/M4/M6" (its §6) and "after profiled M12 landings" (its §7) | Inconsistent. Here: tail duplication is built in; a recorder is tried only if joins cost over 10% of a band loop [§9]. |
+| The projected-tuple increment needs M4 and M6 | B. Virtual aggregates as entry fields, with a second return word for a callee that kept one [§4.4, S8]. |
+| "Extend `objects`, `escape`, `rewrite` and their phi handling" in `ssa_opt.c` | B, by replacement. `objects` makes an object virtual only if every use qualifies; `escape` covers boxes and an unfilled dict. Per-path virtual objects live in the evaluator's state, and these passes go [§4.1, §4.2]. |
+| "Finite field paths already used by the partial evaluator" | B. The tree has neither. The partial evaluator is the new builder; a field path is a field of a virtual object in its state [§4.1, §4.2]. |
+| Publish summaries through "the compile ticket and dependency publication in `deps.c`" | C for the protocol (`lu_jit_deps_begin`, `lu_jit_deps_publish`). B for the dependency on a callee's unit and summary: the kinds today are a type's version, a dict's keys, one value of a dict, a function's code and defaults, and a call site's callee set [§4.4]. |
+| An "exact dict value dependency" is to be added for `dispatch` | S. `LU_DEP_VALUE` exists and `dict_const` uses it (keys-version guard plus an identity guard on the value word). The limit is that `dict_const` takes constant names in string-keyed tables; `dispatch` is keyed by types. |
+| A returning call with normal, raised and deopt or park continuations | B. The raise edge exists (`catcher`, `catch_here`); deopt and park are exits. A callee that leaves compiled code sets its caller's forced word, which the caller tests after the call [§4.3, §4.4]. |
+| An internal entry "keyed by the guarded representation" | B. Today a code object has one live unit per entry instruction and one direct entry taking borrowed `PyObject **`. Entries keyed by (entry instruction, shape) replace it [§4.4]. |
+| Generated packers in `lib/kernel/_struct.py`; "the codec/IO kernel" | W. `lib/modules/_struct.py`, `_io.py`, `_codecs.py`. |
+| `eval` "retires after 50 entries/50 exits" | C. A unit without loops is retired after 50 leaves on at least half its entries; each retirement doubles its wait, nothing is permanent. |
+| M8 touches `compile_at`, `not_inlinable` and `lu_jit_run` | C. The first two test `CO_OPTIMIZED`; `lu_jit_run` refuses a frame with a locals mapping. |
+| `lu_fs` stays compile-time; frames extend `lu_deopt` | C. |
+| The fatal materialization paths | C. `deopt.c`: out of memory rebuilding a virtual object, three for no room, and four that assert invariants (a published value in a register, a call from a generator resumed in line, a virtual local in a lent frame, kept frames that do not match). |
+| Frame references are counted; the deferred bit serves caches and code, with the lent-code exception | C. Deferred: code objects, top-level functions, descriptors. |
+| Lock elision exists for instances, not containers | C. |
+| References: "keep the RC operations when a legal observer of that child could distinguish their removal", with "no concession needed" | W, inconsistent with its budgets. Any callee can read a count. Today's virtual objects keep counted references to their fields; removing them is decision 9. |
+| "Deopt cannot invent a new allocation exception": reserve storage at the source allocation | Not adopted (decision 10). |
+| Heap enumeration: "disable that virtualization class until enumeration is supported" | Not adopted: a self-disabling optimization is a behaviour switch. Enumeration forces frames. |
+| A segment return convention for strings and bytes carried across out-of-line calls | B, as one kind among the others: parts are fields of a virtual string or bytes, and cross a kept call as any aggregate's fields do [§4.1, §4.4]. |
+| The Smalltalk "escaped but unread" idea | U. Not in the donor tours. |
+| The first slice is M0 → M1 → the projected tuple, pulling M4, M5 and M6 forward | Replaced. The slice is the evaluator, virtual frames and the materializer on the Mako cell, where the claim can be measured against 880 instructions of real work; aggregates across kept calls follow as S8 [§8]. |

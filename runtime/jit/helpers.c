@@ -2,7 +2,8 @@
    does what the interpreter's instruction does for the same operands: its
    native fast path, else the kernel function the interpreter would push
    (here called through a nested eval, as C callers do). None takes a
-   reference it is given; each result is a new reference. */
+   reference it is given; each result is a new reference. The table at
+   the end gives each its effects (ssa.h FX_*), which the evaluator reads. */
 #include "jit/target.h"
 
 #include <errno.h>
@@ -200,8 +201,21 @@ h_build_tuple(PyObject **argv, intptr_t n)
     return tuple_of(argv, n);
 }
 
+/* An instance of a kernel type with fields (argv[0]) as its __new__
+   allocates it, its fields those after it (NULL: unset). */
+static PyObject *
+h_fields_new(PyObject **argv, intptr_t n)
+{
+    PyTypeObject *tp = (PyTypeObject *)argv[0];
+    PyObject *o = lu_alloc_instance(tp, tp);
+    for (intptr_t i = 1; o != NULL && i < n; i++) {
+        *(PyObject **)((char *)o + lu_field_offset(tp, (long)i - 1)) = Py_XNewRef(argv[i]);
+    }
+    return o;
+}
+
 /* An instance of a class whose instances object.__new__ makes, as
-   PyType_GenericAlloc makes it (ssa_build.c's class calls). */
+   PyType_GenericAlloc makes it. */
 static PyObject *
 h_new_object(PyTypeObject *tp)
 {
@@ -392,6 +406,12 @@ h_dict_lacks(PyObject *owner, PyObject *name)
 {
     PyObject *dict = LU_MANAGED_DICT(owner);
     return dict == NULL || (PyDict_CheckExact(dict) && lu_ns_lookup(dict, name) == NULL);
+}
+
+static intptr_t
+h_profile(struct lu_prof *p, PyObject *o, intptr_t learned)
+{
+    return lu_jit_prof_note(p, o, (unsigned long)learned);
 }
 
 static PyObject *
@@ -670,22 +690,19 @@ h_get_iter(PyObject *v)
     return it != NULL || PyErr_Occurred() ? it : lu_call_kernel(LU_K_get_iter, &v, 1);
 }
 
-/* Runs a generator's frame, resumed for compiled code: through its resume
-   unit when it has one, else in a nested activation. */
+/* Runs a generator's frame, resumed for compiled code, in a nested
+   activation, which enters its unit where it has one. */
 static PyObject *
 run_resumed(struct lu_task *t, struct lu_frame *f)
 {
-    PyObject *v;
     t->pin++;
-    if (!lu_jit_resume(&t->ts, f, &v)) {
-        v = lu_eval(&t->ts, f);
-    }
+    PyObject *v = lu_eval(&t->ts, f);
     t->pin--;
     return v;
 }
 
 static PyObject *call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs,
-                               PyObject *kwnames);
+                               PyObject *kwnames, uint64_t takes);
 static PyObject *polled(struct lu_task *t, PyObject *r);
 
 /* The next item, LU_MISSING when exhausted, or NULL with an exception. A
@@ -720,12 +737,12 @@ h_for_iter(PyObject *it, struct lu_opclasses *classes)
     PyObject *step = lu_next_missing_of((PyObject *)t);
     if (step != Py_None) {
         return PyFunction_Check(step) && task->ts.interp->eval_frame == NULL
-            ? polled(task, call_function(task, (PyFunctionObject *)step, &it, 1, NULL)) : lu_call(step, &it, 1, NULL);
+            ? polled(task, call_function(task, (PyFunctionObject *)step, &it, 1, NULL, 0)) : lu_call(step, &it, 1, NULL);
     }
     PyObject *f = _PyType_LookupRef(t, LU_ID(__next__));
     if (f != NULL && PyFunction_Check(f)) {
         PyObject *v = task->ts.interp->eval_frame == NULL
-            ? polled(task, call_function(task, (PyFunctionObject *)f, &it, 1, NULL)) : lu_call(f, &it, 1, NULL);
+            ? polled(task, call_function(task, (PyFunctionObject *)f, &it, 1, NULL, 0)) : lu_call(f, &it, 1, NULL);
         Py_DECREF(f);
         if (v == NULL && PyErr_ExceptionMatches(PyExc_StopIteration)) {
             PyErr_Clear();
@@ -787,9 +804,8 @@ h_range_iter(int64_t start, int64_t stop, int64_t step)
     return (PyObject *)it;
 }
 
-/* A loop's iterator after a step (ssa_build.c for_iter): a new one with
-   the fields given. Compiled code makes one only when the stack entry it
-   stands for is not virtual (ssa_opt.c 3c); an exit makes it otherwise. */
+/* A list's or a tuple's iterator at an index: the one a loop's iterator
+   is once something needs it to exist (eval_emit.c lu_ev_val). */
 static PyObject *
 h_seqiter_new(PyObject *seq, int64_t index)
 {
@@ -825,69 +841,60 @@ stack_low(void)
     return &here < lu_current_task()->carrier->jit_stack_floor;
 }
 
-int
-lu_jit_call(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames,
-            PyObject **result)
+/* The arguments of the call compiled code is making (bits by argv index)
+   whose stack entries hold references of their own while it runs: the
+   root frame's published state says (struct lu_deopt). */
+static uint64_t
+taken_args(struct lu_task *t)
 {
-    PyCodeObject *co = (PyCodeObject *)func->func_code;
-    uintptr_t jc = (uintptr_t)__atomic_load_n(&co->co_executors, __ATOMIC_ACQUIRE);
-    if (jc == 0 || (jc & 1) || nargs > ((struct lu_jit_direct *)jc)->nargs) {
-        return 0;
-    }
-    char *entry = __atomic_load_n(&((struct lu_jit_direct *)jc)->entry, __ATOMIC_ACQUIRE);
-    PyObject *v;
-    int r = 0;
-    if (entry != NULL && kwnames == NULL) {
-        r = ((int (*)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, int))(void *)entry)(
-            ts, func, args, &v, (int)nargs);
-    }
-    else if (entry != NULL) {
-        r = ((int (*)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, int, PyObject *))(void *)
-             (entry - LU_DIRECT_KW))(ts, func, args, &v, (int)nargs, kwnames);
-    }
-    if (r == 0) {
-        return 0;
-    }
-    *result = r == LU_JIT_RETURN ? v : lu_jit_call_finish(ts, (struct lu_frame *)v, r);
-    return 1;
+    struct lu_deopt *d = ((struct lu_frame *)t->ts.current_frame)->jit_desc;
+    return d != NULL ? d->takes : 0;
 }
 
-/* A Python function's call, as CALL and CALL_KW make it: into its code's
-   direct entry when it has one, else the frame is pushed and bound (by
-   plain stores when the arguments are exactly its positional parameters),
-   then run by lu_eval, which enters a compiled unit directly. */
+/* A Python function's call, as CALL and CALL_KW make it: the frame is
+   pushed and bound (by plain stores when the arguments are exactly its
+   positional parameters), then run by lu_eval, which enters a compiled
+   unit at its call entry. The interpreter moves its operands into the
+   callee's frame: so the arguments in `takes` (bits by index), whose
+   stack entries hold references of their own, give those to the
+   parameters for the call, and have them again after it. */
 static PyObject *
-call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
+call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames,
+              uint64_t takes)
 {
-    PyObject *v;
-    if (lu_jit_call(&t->ts, func, args, nargs, kwnames, &v)) {
-        return v;
-    }
     PyCodeObject *co = (PyCodeObject *)func->func_code;
     struct lu_frame *f;
+    Py_ssize_t total = nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
+    takes &= total < 64 ? ((uint64_t)1 << total) - 1 : ~(uint64_t)0;
     if (co->co_argcount == nargs && co->co_kwonlyargcount == 0 && kwnames == NULL
         && !(co->co_flags & (CO_VARARGS | CO_VARKEYWORDS))) {
         if ((f = lu_frame_push(&t->ts, func, NULL)) == NULL) {
             return NULL;
         }
         for (Py_ssize_t i = 0; i < nargs; i++) {
-            f->localsplus[i] = Py_NewRef(args[i]);
+            f->localsplus[i] = i < 64 && ((takes >> i) & 1) ? args[i] : Py_NewRef(args[i]);
         }
     }
     else {
-        for (Py_ssize_t i = 0; i < nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0); i++) {
-            Py_INCREF(args[i]);
+        for (Py_ssize_t i = 0; i < total; i++) {
+            if (!(i < 64 && ((takes >> i) & 1))) {
+                Py_INCREF(args[i]);
+            }
         }
-        if ((f = lu_frame_call(&t->ts, func, (PyObject **)args, nargs, kwnames)) == NULL) {
-            return NULL;
+        f = lu_frame_call(&t->ts, func, (PyObject **)args, nargs, kwnames);
+    }
+    PyObject *r = NULL;
+    if (f != NULL) {
+        r = co->_co_monitoring == NULL && !t->ts.tracing ? lu_jit_new_gen(&t->ts, f) : LU_JIT_DECLINED;
+        if (r == LU_JIT_DECLINED) {
+            t->pin++;
+            r = lu_eval(&t->ts, f);
+            t->pin--;
         }
     }
-    if ((co->co_flags & LU_CO_GENERATORS) && co->_co_monitoring == NULL && !t->ts.tracing) {
-        return lu_jit_new_gen(&t->ts, f);
+    for (; takes != 0; takes &= takes - 1) {
+        Py_INCREF(args[__builtin_ctzll(takes)]);
     }
-    t->pin++;
-    PyObject *r = lu_eval(&t->ts, f);
-    t->pin--;
     return r;
 }
 
@@ -911,41 +918,6 @@ polled(struct lu_task *t, PyObject *r)
         Py_CLEAR(r);
     }
     return r;
-}
-
-PyObject *
-lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r)
-{
-    if (r == LU_JIT_RAISED) {
-        return NULL;            /* the callee is gone; its exception is the call's */
-    }
-    struct lu_task *t = (struct lu_task *)ts;
-    /* The callee's frame returns into a C-entry marker, as under lu_eval. */
-    struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
-    entry.previous = callee->previous;
-    callee->previous = &entry;
-    t->pin++;
-    PyObject *v = lu_eval_continue(ts, r == LU_JIT_ERROR);
-    t->pin--;
-    return polled(t, v);
-}
-
-/* gen_send(gen, value), the frame primitive next(), send() and the
-   iteration step resume a generator with: what it yields or returns, or
-   NULL with an exception (StopIteration when it had finished). */
-static PyObject *
-h_gen_send(PyObject *callable, PyObject *gen, PyObject *value)
-{
-    struct lu_task *t = lu_current_task();
-    if (stack_low() || t->ts.interp->eval_frame != NULL) {
-        return LU_JIT_DECLINED;
-    }
-    struct lu_frame *(*prim)(PyThreadState *, PyObject *const *, Py_ssize_t) =
-        (struct lu_frame *(*)(PyThreadState *, PyObject *const *, Py_ssize_t))(void (*)(void))
-        ((PyCFunctionObject *)callable)->m_ml->ml_meth;
-    PyObject *args[2] = { gen, value };
-    struct lu_frame *f = prim(&t->ts, args, 2);
-    return f != NULL ? polled(t, run_resumed(t, f)) : NULL;
 }
 
 /* SEND: a generator or coroutine is resumed as the interpreter resumes it:
@@ -1057,12 +1029,13 @@ h_call(PyObject **argv, intptr_t n)
     PyObject *const *args = argv[1] != NULL ? argv + 1 : argv + 2;
     size_t nargs = (size_t)(argv[1] != NULL ? n - 1 : n - 2);
     PyObject *target, *self, *r = NULL;
-    if (_PyRuntime.jit.stats) {
-        lu_jit_why_not(callable, (Py_ssize_t)nargs);
+    uint64_t takes = taken_args(t);
+    if (callable == (PyObject *)&PyType_Type && nargs == 1) {
+        return Py_NewRef((PyObject *)Py_TYPE(args[0]));         /* type(x), as the interpreter's CALL answers it */
     }
     if (t->ts.interp->eval_frame == NULL) {
         if (PyFunction_Check(callable)) {
-            r = call_function(t, (PyFunctionObject *)callable, args, (Py_ssize_t)nargs, NULL);
+            r = call_function(t, (PyFunctionObject *)callable, args, (Py_ssize_t)nargs, NULL, takes >> (args - argv));
             goto called;
         }
         if (Py_IS_TYPE(callable, &PyMethod_Type) && argv[1] == NULL
@@ -1070,7 +1043,7 @@ h_call(PyObject **argv, intptr_t n)
             /* A bound method: its self goes in the free word before the arguments. */
             argv[1] = PyMethod_GET_SELF(callable);
             r = call_function(t, (PyFunctionObject *)PyMethod_GET_FUNCTION(callable), argv + 1,
-                              (Py_ssize_t)nargs + 1, NULL);
+                              (Py_ssize_t)nargs + 1, NULL, takes >> 1);
             argv[1] = NULL;
             goto called;
         }
@@ -1088,11 +1061,11 @@ h_call(PyObject **argv, intptr_t n)
         /* The kernel function C does not answer runs as the interpreter
            calls it: its frame pushed directly, self in the free word. */
         if (self == NULL) {
-            r = call_function(t, (PyFunctionObject *)target, args, (Py_ssize_t)nargs, NULL);
+            r = call_function(t, (PyFunctionObject *)target, args, (Py_ssize_t)nargs, NULL, takes >> (args - argv));
         }
         else {
             argv[1] = self;
-            r = call_function(t, (PyFunctionObject *)target, argv + 1, (Py_ssize_t)nargs + 1, NULL);
+            r = call_function(t, (PyFunctionObject *)target, argv + 1, (Py_ssize_t)nargs + 1, NULL, takes >> 1);
             argv[1] = NULL;
         }
         goto called;
@@ -1159,25 +1132,17 @@ h_call_kw(PyObject **argv, intptr_t n)
     PyFunctionObject *func = PyFunction_Check(callable) ? (PyFunctionObject *)callable
         : Py_IS_TYPE(callable, &PyMethod_Type) && argv[1] == NULL && PyFunction_Check(PyMethod_GET_FUNCTION(callable))
         ? (PyFunctionObject *)PyMethod_GET_FUNCTION(callable) : NULL;
-    if (_PyRuntime.jit.stats) {
-        if (func != NULL) {
-            lu_jit_why_not(callable, (Py_ssize_t)nargs);
-        }
-        else {
-            lu_jit_why_not_count(WHY_NOT_kw, callable);
-        }
-    }
     if (func == NULL || t->ts.interp->eval_frame != NULL) {
         return call_generic(callable, args, nargs, kwnames);
     }
     PyObject *r;
     if ((PyObject *)func == callable) {
-        r = call_function(t, func, args, (Py_ssize_t)nargs, kwnames);
+        r = call_function(t, func, args, (Py_ssize_t)nargs, kwnames, taken_args(t) >> (args - argv));
     }
     else {
         /* A bound method: its self goes in the free word before the arguments. */
         argv[1] = PyMethod_GET_SELF(callable);
-        r = call_function(t, func, argv + 1, (Py_ssize_t)nargs + 1, kwnames);
+        r = call_function(t, func, argv + 1, (Py_ssize_t)nargs + 1, kwnames, taken_args(t) >> 1);
         argv[1] = NULL;
     }
     return polled(t, r);
@@ -1187,9 +1152,6 @@ h_call_kw(PyObject **argv, intptr_t n)
 static PyObject *
 h_call_ex(PyObject *callable, PyObject *callargs, PyObject *kwargs)
 {
-    if (_PyRuntime.jit.stats) {
-        lu_jit_why_not_count(WHY_NOT_star, callable);
-    }
     if (declines(callable)) {
         return LU_JIT_DECLINED;
     }
@@ -1205,44 +1167,6 @@ h_call_ex(PyObject *callable, PyObject *callargs, PyObject *kwargs)
         }
         Py_XDECREF(kwnames);
         PyMem_Free(args - 1);
-    }
-    return r;
-}
-
-/* f(a, ..., *args, **kwargs) in hidden code (ssa_build.c forward_call):
-   argv is the callable, its NULL, the leading arguments, the star tuple
-   and the keyword dict or NULL, which the call takes as
-   they are: no list, tuple or dict is made for it. Declines anything
-   CALL_FUNCTION_EX would make more of: a star argument that is not an
-   exact tuple, or keywords that are not an exact dict of str keys. */
-static PyObject *
-h_call_forward(PyObject **argv, intptr_t n)
-{
-    PyObject *star = argv[n - 2], *kw = argv[n - 1];
-    intptr_t lead = n - 4;
-    if (!PyTuple_CheckExact(star) || (kw != NULL && (!PyDict_CheckExact(kw) || !lu_dict_str_keys(kw)))) {
-        return LU_JIT_DECLINED;
-    }
-    if (kw != NULL && PyDict_GET_SIZE(kw) > 0) {
-        PyObject *t = PyTuple_New(lead + PyTuple_GET_SIZE(star));
-        for (intptr_t i = 0; t != NULL && i < PyTuple_GET_SIZE(t); i++) {
-            PyTuple_SET_ITEM(t, i, Py_NewRef(i < lead ? argv[2 + i] : PyTuple_GET_ITEM(star, i - lead)));
-        }
-        PyObject *r = t != NULL ? h_call_ex(argv[0], t, kw) : NULL;
-        Py_XDECREF(t);
-        return r;
-    }
-    /* The tuple holds its items while the call runs: they are borrowed. */
-    intptr_t m = 2 + lead + PyTuple_GET_SIZE(star);
-    PyObject *few[16], **all = m <= 16 ? few : PyMem_Malloc(sizeof(PyObject *) * (size_t)m);
-    if (all == NULL) {
-        return PyErr_NoMemory();
-    }
-    memcpy(all, argv, sizeof(PyObject *) * (size_t)(2 + lead));
-    memcpy(all + 2 + lead, ((PyTupleObject *)star)->ob_item, sizeof(PyObject *) * (size_t)PyTuple_GET_SIZE(star));
-    PyObject *r = h_call(all, m);
-    if (all != few) {
-        PyMem_Free(all);
     }
     return r;
 }
@@ -1391,27 +1315,6 @@ h_call_special(PyObject **argv, intptr_t n)
 
 /* --- exceptions --- */
 
-/* The landing of an exception a handler of the unit takes (ssa_build.c
-   catch_here): the exception, taken, after the root frame's traceback
-   entry at code unit lasti (none when -1). NULL with the exception still
-   set where the interpreter unwinds instead: a tool watches exceptions
-   raised or handled, or a call kept inlined frames pushed, so that the
-   root is not the task's current frame. */
-static PyObject *
-h_catch(PyObject *code, int64_t lasti)
-{
-    PyThreadState *ts = PyThreadState_Get();
-    struct lu_frame *f = (struct lu_frame *)ts->current_frame;
-    if (f->code != (PyCodeObject *)code || !lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RAISE)
-        || !lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_EXCEPTION_HANDLED)) {
-        return NULL;
-    }
-    if (lasti >= 0) {
-        lu_traceback_here(f, lasti);
-    }
-    return PyErr_GetRaisedException();
-}
-
 /* PUSH_EXC_INFO: exc becomes the handled exception; the one before it (or None). */
 static PyObject *
 h_push_exc_info(PyObject *exc)
@@ -1451,31 +1354,6 @@ h_raise(PyObject *exc, PyObject *cause)
     if (r != NULL) {
         Py_DECREF(r);
         lu_err_format(PyExc_SystemError, "do_raise returned");
-    }
-    return NULL;
-}
-
-/* raise exc [from cause] in the innermost of `frames` inlined frames
-   (pushed for the call) that the exception leaves to a handler of the
-   unit: each but a kernel frame makes its traceback entry, as the
-   interpreter unwinds them, the innermost at the raise (lasti), and its
-   frame object takes its locals, so that the frames go as they came.
-   Where a tool watches, the exit's unwinding makes the entries. */
-static PyObject *
-h_raise_tb(PyObject *exc, PyObject *cause, int64_t frames, int64_t lasti)
-{
-    h_raise(exc, cause);
-    PyThreadState *ts = PyThreadState_Get();
-    if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_RAISE)
-        || !lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_PY_UNWIND)) {
-        return NULL;
-    }
-    struct lu_frame *f = (struct lu_frame *)ts->current_frame;
-    for (int64_t i = 0; i < frames && f != NULL; i++, f = f->previous) {
-        if (f->owner != LU_FRAME_KERNEL_HIDDEN) {
-            lu_traceback_here(f, i == 0 ? lasti : f->instr - lu_code_start(f->code));
-            lu_frame_retire_lent(f);
-        }
     }
     return NULL;
 }
@@ -1538,101 +1416,90 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_box_int] = { (void *)lu_jit_box_int, "box_int", REP_OBJ, 0, 1 },
     [H_box_float] = { (void *)lu_jit_box_float, "box_float", REP_OBJ, 0, 1 },
     [H_decref] = { (void *)lu_jit_decref, "decref", REP_NONE, 0, 1 },
-    [H_truth] = { (void *)lu_jit_truth, "truth", REP_BIT, IF_RAISE | IF_PY, 1 },
-    [H_list_item] = { (void *)lu_jit_list_item, "list_item", REP_OBJ, IF_SEEN, 2 },
-    [H_list_store] = { (void *)lu_jit_list_store, "list_store", REP_BIT, IF_SEEN, 3 },
+    [H_truth] = { (void *)lu_jit_truth, "truth", REP_BIT, FX_RAISE | FX_PY, 1 },
+    [H_list_item] = { (void *)lu_jit_list_item, "list_item", REP_OBJ, FX_SEEN, 2 },
+    [H_list_store] = { (void *)lu_jit_list_store, "list_store", REP_BIT, FX_SEEN, 3 },
     [H_attr_load] = { (void *)lu_jit_attr_load, "attr_load", REP_OBJ, 0, 4 },
-    [H_attr_store] = { (void *)h_attr_store, "attr_store", REP_BIT, IF_SEEN, 4 },
+    [H_attr_store] = { (void *)h_attr_store, "attr_store", REP_BIT, FX_SEEN, 4 },
     [H_slot_load] = { (void *)h_slot_load, "slot_load", REP_OBJ, 0, 2 },
-    [H_slot_store] = { (void *)h_slot_store, "slot_store", REP_NONE, IF_SEEN, 3 },
+    [H_slot_store] = { (void *)h_slot_store, "slot_store", REP_NONE, FX_SEEN, 3 },
     [H_dict_lacks] = { (void *)h_dict_lacks, "dict_lacks", REP_BIT, 0, 2 },
-    [H_cell_load] = { (void *)h_cell_load, "cell_load", REP_OBJ, IF_SEEN, 1 },
+    [H_profile] = { (void *)h_profile, "profile", REP_BIT, 0, 3 },
+    [H_cell_load] = { (void *)h_cell_load, "cell_load", REP_OBJ, FX_SEEN, 1 },
     [H_compare_ideq] = { (void *)h_compare_ideq, "compare_ideq", REP_BIT, 0, 3 },
-    [H_str_concat] = { (void *)lu_str_concat, "str_concat", REP_OBJ, IF_RAISE, 2 },
-    [H_binary_op] = { (void *)h_binary_op, "binary_op", REP_OBJ, IF_RAISE | IF_PY, 3 },
-    [H_compare_op] = { (void *)h_compare_op, "compare_op", REP_OBJ, IF_RAISE | IF_PY, 3 },
-    [H_setitem] = { (void *)h_setitem, "setitem", REP_BIT, IF_RAISE | IF_PY, 3 },
-    [H_delitem] = { (void *)h_delitem, "delitem", REP_BIT, IF_RAISE | IF_PY, 2 },
-    [H_list_extend] = { (void *)h_list_extend, "list_extend", REP_BIT, IF_RAISE | IF_PY, 2 },
-    [H_list_extend_seq] = { (void *)h_list_extend, "list_extend_seq", REP_BIT, IF_RAISE, 2 },
-    [H_load_attr] = { (void *)h_load_attr_pic, "load_attr", REP_OBJ, IF_RAISE | IF_PY, 3 },
-    [H_load_method] = { (void *)h_load_method, "load_method", REP_OBJ, IF_RAISE | IF_PY, 3 },
-    [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, IF_RAISE | IF_PY, 4 },
-    [H_load_global] = { (void *)h_load_global, "load_global", REP_OBJ, IF_RAISE, 4 },
-    [H_store_global] = { (void *)h_store_global, "store_global", REP_BIT, IF_RAISE | IF_SEEN, 3 },
-    [H_build_slice] = { (void *)h_build_slice, "build_slice", REP_OBJ, IF_RAISE, 3 },
-    [H_convert_value] = { (void *)h_convert_value, "convert_value", REP_OBJ, IF_RAISE | IF_PY, 2 },
-    [H_format] = { (void *)h_format, "format", REP_OBJ, IF_RAISE | IF_PY, 2 },
-    [H_build_string] = { (void *)h_build_string, "build_string", REP_OBJ, IF_RAISE, 0 },
-    [H_call] = { (void *)h_call, "call", REP_OBJ, IF_RAISE | IF_PY, 0 },
-    [H_call_special] = { (void *)h_call_special, "call_special", REP_OBJ, IF_RAISE | IF_PY, 0 },
-    [H_super_attr] = { (void *)h_super_attr, "super_attr", REP_OBJ, IF_RAISE | IF_PY, 5 },
-    [H_prim] = { (void *)h_prim, "prim", REP_OBJ, IF_RAISE | IF_SEEN, 0 },
-    [H_prim_call] = { (void *)h_prim_call, "prim_call", REP_OBJ, IF_RAISE | IF_PY, 0 },
-    [H_make_function] = { (void *)h_make_function, "make_function", REP_OBJ, IF_RAISE | IF_PY, 2 },
-    [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, IF_SEEN, 3 },
-    [H_cell_store] = { (void *)h_cell_store, "cell_store", REP_NONE, IF_SEEN, 2 },
-    [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, IF_RAISE | IF_PY, 1 },
-    [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, IF_RAISE | IF_PY, 2 },
-    [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, IF_SEEN, 1 },
-    [H_seqiter_step] = { (void *)h_seqiter_step, "seqiter_step", REP_OBJ, IF_SEEN, 1 },
-    [H_field_get] = { (void *)lu_field_get, "field_get", REP_OBJ, IF_SEEN, 2 },
-    [H_str_char] = { (void *)h_str_char, "str_char", REP_OBJ, IF_RAISE, 1 },
-    [H_field_set] = { (void *)lu_field_set, "field_set", REP_NONE, IF_SEEN, 3 },
+    [H_str_concat] = { (void *)lu_str_concat, "str_concat", REP_OBJ, FX_RAISE, 2 },
+    [H_binary_op] = { (void *)h_binary_op, "binary_op", REP_OBJ, FX_RAISE | FX_PY, 3 },
+    [H_compare_op] = { (void *)h_compare_op, "compare_op", REP_OBJ, FX_RAISE | FX_PY, 3 },
+    [H_setitem] = { (void *)h_setitem, "setitem", REP_BIT, FX_RAISE | FX_PY, 3 },
+    [H_delitem] = { (void *)h_delitem, "delitem", REP_BIT, FX_RAISE | FX_PY, 2 },
+    [H_list_extend] = { (void *)h_list_extend, "list_extend", REP_BIT, FX_RAISE | FX_PY, 2 },
+    [H_load_attr] = { (void *)h_load_attr_pic, "load_attr", REP_OBJ, FX_RAISE | FX_PY, 3 },
+    [H_load_method] = { (void *)h_load_method, "load_method", REP_OBJ, FX_RAISE | FX_PY, 3 },
+    [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, FX_RAISE | FX_PY, 4 },
+    [H_load_global] = { (void *)h_load_global, "load_global", REP_OBJ, FX_RAISE | FX_DECLINES, 4 },
+    [H_store_global] = { (void *)h_store_global, "store_global", REP_BIT, FX_RAISE | FX_SEEN, 3 },
+    [H_build_slice] = { (void *)h_build_slice, "build_slice", REP_OBJ, FX_RAISE, 3 },
+    [H_convert_value] = { (void *)h_convert_value, "convert_value", REP_OBJ, FX_RAISE | FX_PY, 2 },
+    [H_format] = { (void *)h_format, "format", REP_OBJ, FX_RAISE | FX_PY, 2 },
+    [H_build_string] = { (void *)h_build_string, "build_string", REP_OBJ, FX_RAISE, 0 },
+    [H_call] = { (void *)h_call, "call", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
+    [H_call_special] = { (void *)h_call_special, "call_special", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
+    [H_super_attr] = { (void *)h_super_attr, "super_attr", REP_OBJ, FX_RAISE | FX_PY, 5 },
+    [H_prim] = { (void *)h_prim, "prim", REP_OBJ, FX_RAISE | FX_SEEN, 0 },
+    [H_prim_call] = { (void *)h_prim_call, "prim_call", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
+    [H_make_function] = { (void *)h_make_function, "make_function", REP_OBJ, FX_RAISE | FX_PY, 2 },
+    [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, FX_SEEN, 3 },
+    [H_cell_store] = { (void *)h_cell_store, "cell_store", REP_NONE, FX_SEEN, 2 },
+    [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, FX_RAISE | FX_PY, 1 },
+    [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, FX_RAISE | FX_PY, 2 },
+    [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, FX_SEEN, 1 },
+    [H_seqiter_step] = { (void *)h_seqiter_step, "seqiter_step", REP_OBJ, FX_SEEN, 1 },
+    [H_field_get] = { (void *)lu_field_get, "field_get", REP_OBJ, FX_SEEN, 2 },
+    [H_str_char] = { (void *)h_str_char, "str_char", REP_OBJ, FX_RAISE, 1 },
+    [H_field_set] = { (void *)lu_field_set, "field_set", REP_NONE, FX_SEEN, 3 },
     [H_range_iter] = { (void *)h_range_iter, "range_iter", REP_OBJ, 0, 3 },
     [H_listiter_new] = { (void *)h_seqiter_new, "listiter_new", REP_OBJ, 0, 2 },
     [H_tupleiter_new] = { (void *)h_seqiter_new, "tupleiter_new", REP_OBJ, 0, 2 },
     [H_rangeiter_new] = { (void *)h_rangeiter_new, "rangeiter_new", REP_OBJ, 0, 3 },
-    [H_unary] = { (void *)h_unary, "unary", REP_OBJ, IF_RAISE | IF_PY, 2 },
-    [H_list_append] = { (void *)h_list_append, "list_append", REP_BIT, IF_RAISE | IF_SEEN, 2 },
-    [H_list_repeat] = { (void *)h_list_repeat, "list_repeat", REP_OBJ, IF_RAISE | IF_SEEN, 2 },
-    /* Of a display no other thread can have seen (ssa_build.c): the items it
-       releases are the display's still, so none is the last reference. */
-    [H_list_repeat_fresh] = { (void *)h_list_repeat, "list_repeat_fresh", REP_OBJ, IF_RAISE, 2 },
-    [H_build_list] = { (void *)h_build_list, "build_list", REP_OBJ, IF_RAISE, 0 },
-    [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, IF_RAISE, 0 },
-    [H_new_object] = { (void *)h_new_object, "new_object", REP_OBJ, IF_RAISE, 1 },
-    [H_new_dict] = { (void *)h_new_dict, "new_dict", REP_OBJ, IF_RAISE, 0 },
-    [H_contains] = { (void *)h_contains, "contains", REP_OBJ, IF_RAISE | IF_PY, 3 },
-    [H_list_push] = { (void *)h_list_push, "list_push", REP_BIT, IF_RAISE, 2 },
-    [H_build_set] = { (void *)h_build_set, "build_set", REP_OBJ, IF_RAISE | IF_PY, 0 },
-    [H_build_map] = { (void *)h_build_map, "build_map", REP_OBJ, IF_RAISE | IF_PY, 0 },
-    [H_set_add] = { (void *)h_set_add, "set_add", REP_BIT, IF_RAISE | IF_PY, 2 },
-    [H_list_to_tuple] = { (void *)h_list_to_tuple, "list_to_tuple", REP_OBJ, IF_RAISE | IF_SEEN, 2 },
-    [H_unpack_exact] = { (void *)h_unpack_exact, "unpack_exact", REP_OBJ, IF_RAISE | IF_SEEN, 2 },
-    [H_gen_send] = { (void *)h_gen_send, "gen_send", REP_OBJ, IF_RAISE | IF_PY, 3 },
-    [H_send] = { (void *)h_send, "send", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_unary] = { (void *)h_unary, "unary", REP_OBJ, FX_RAISE | FX_PY, 2 },
+    [H_list_append] = { (void *)h_list_append, "list_append", REP_BIT, FX_RAISE | FX_SEEN, 2 },
+    [H_list_repeat] = { (void *)h_list_repeat, "list_repeat", REP_OBJ, FX_RAISE | FX_SEEN, 2 },
+    [H_build_list] = { (void *)h_build_list, "build_list", REP_OBJ, FX_RAISE, 0 },
+    [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, FX_RAISE, 0 },
+    [H_fields_new] = { (void *)h_fields_new, "fields_new", REP_OBJ, FX_RAISE, 0 },
+    [H_new_object] = { (void *)h_new_object, "new_object", REP_OBJ, FX_RAISE, 1 },
+    [H_new_dict] = { (void *)h_new_dict, "new_dict", REP_OBJ, FX_RAISE, 0 },
+    [H_contains] = { (void *)h_contains, "contains", REP_OBJ, FX_RAISE | FX_PY, 3 },
+    [H_list_push] = { (void *)h_list_push, "list_push", REP_BIT, FX_RAISE, 2 },
+    [H_build_set] = { (void *)h_build_set, "build_set", REP_OBJ, FX_RAISE | FX_PY, 0 },
+    [H_build_map] = { (void *)h_build_map, "build_map", REP_OBJ, FX_RAISE | FX_PY, 0 },
+    [H_set_add] = { (void *)h_set_add, "set_add", REP_BIT, FX_RAISE | FX_PY, 2 },
+    [H_list_to_tuple] = { (void *)h_list_to_tuple, "list_to_tuple", REP_OBJ, FX_RAISE | FX_SEEN | FX_DECLINES, 2 },
+    [H_unpack_exact] = { (void *)h_unpack_exact, "unpack_exact", REP_OBJ, FX_RAISE | FX_SEEN | FX_DECLINES, 2 },
+    [H_send] = { (void *)h_send, "send", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 2 },
     [H_gen_done] = { (void *)h_gen_done, "gen_done", REP_BIT, 0, 1 },
-    [H_get_awaitable] = { (void *)h_get_awaitable, "get_awaitable", REP_OBJ, IF_RAISE | IF_PY, 2 },
-    [H_get_yield_from_iter] = { (void *)h_get_yield_from_iter, "get_yield_from_iter", REP_OBJ, IF_RAISE | IF_PY, 2 },
-    [H_get_aiter] = { (void *)h_get_aiter, "get_aiter", REP_OBJ, IF_RAISE | IF_PY, 1 },
-    [H_get_anext] = { (void *)h_get_anext, "get_anext", REP_OBJ, IF_RAISE | IF_PY, 1 },
-    [H_gen_enter] = { (void *)lu_gen_enter_in_line, "gen_enter", REP_I64, 0, 2 },
-    [H_gen_yielded] = { (void *)lu_gen_yielded_in_line, "gen_yielded", REP_NONE, 0, 3 },
-    [H_gen_finish] = { (void *)lu_gen_finish_in_line, "gen_finish", REP_NONE, IF_SEEN, 1 },
-    [H_async_gen_wrap] = { (void *)lu_async_gen_wrap, "async_gen_wrap", REP_OBJ, IF_RAISE, 1 },
-    [H_get_iter_seq] = { (void *)lu_get_iter_exact, "get_iter_seq", REP_OBJ, IF_RAISE, 1 },
-    [H_binary_slice] = { (void *)h_binary_slice, "binary_slice", REP_OBJ, IF_RAISE | IF_PY, 4 },
-    [H_slice_native] = { (void *)h_binary_slice, "slice_native", REP_OBJ, IF_RAISE, 4 },
-    [H_binary_slice_raw] = { (void *)h_binary_slice_raw, "binary_slice_raw", REP_OBJ, IF_RAISE | IF_PY, 4 },
-    [H_slice_native_raw] = { (void *)h_binary_slice_raw, "slice_native_raw", REP_OBJ, IF_RAISE, 4 },
-    [H_store_slice] = { (void *)h_store_slice, "store_slice", REP_BIT, IF_RAISE | IF_PY, 4 },
-    [H_call_kw] = { (void *)h_call_kw, "call_kw", REP_OBJ, IF_RAISE | IF_PY, 0 },
-    [H_call_ex] = { (void *)h_call_ex, "call_ex", REP_OBJ, IF_RAISE | IF_PY, 3 },
-    [H_call_forward] = { (void *)h_call_forward, "call_forward", REP_OBJ, IF_RAISE | IF_PY, 0 },
-    [H_dict_merge] = { (void *)h_dict_merge, "dict_merge", REP_BIT, IF_RAISE | IF_PY, 3 },
-    [H_dict_update] = { (void *)h_dict_update, "dict_update", REP_BIT, IF_RAISE | IF_PY, 2 },
-    [H_catch] = { (void *)h_catch, "catch", REP_OBJ, IF_RAISE, 2 },
+    [H_get_awaitable] = { (void *)h_get_awaitable, "get_awaitable", REP_OBJ, FX_RAISE | FX_PY, 2 },
+    [H_get_yield_from_iter] = { (void *)h_get_yield_from_iter, "get_yield_from_iter", REP_OBJ, FX_RAISE | FX_PY, 2 },
+    [H_get_aiter] = { (void *)h_get_aiter, "get_aiter", REP_OBJ, FX_RAISE | FX_PY, 1 },
+    [H_get_anext] = { (void *)h_get_anext, "get_anext", REP_OBJ, FX_RAISE | FX_PY, 1 },
+    [H_async_gen_wrap] = { (void *)lu_async_gen_wrap, "async_gen_wrap", REP_OBJ, FX_RAISE, 1 },
+    [H_get_iter_seq] = { (void *)lu_get_iter_exact, "get_iter_seq", REP_OBJ, FX_RAISE, 1 },
+    [H_binary_slice] = { (void *)h_binary_slice, "binary_slice", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 4 },
+    [H_binary_slice_raw] = { (void *)h_binary_slice_raw, "binary_slice_raw", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 4 },
+    [H_store_slice] = { (void *)h_store_slice, "store_slice", REP_BIT, FX_RAISE | FX_PY, 4 },
+    [H_call_kw] = { (void *)h_call_kw, "call_kw", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
+    [H_call_ex] = { (void *)h_call_ex, "call_ex", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 3 },
+    [H_dict_merge] = { (void *)h_dict_merge, "dict_merge", REP_BIT, FX_RAISE | FX_PY, 3 },
+    [H_dict_update] = { (void *)h_dict_update, "dict_update", REP_BIT, FX_RAISE | FX_PY, 2 },
     [H_push_exc_info] = { (void *)h_push_exc_info, "push_exc_info", REP_OBJ, 0, 1 },
-    [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, IF_SEEN, 1 },
-    [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, IF_RAISE, 2 },
-    [H_raise] = { (void *)h_raise, "raise", REP_OBJ, IF_RAISE | IF_PY, 2 },
-    [H_seq_concat] = { (void *)lu_seq_concat, "seq_concat", REP_OBJ, IF_RAISE, 2 },
-    [H_float_pow] = { (void *)lu_float_pow, "float_pow", REP_OBJ, IF_RAISE, 2 },
-    [H_bind_method] = { (void *)lu_bind_method, "bind_method", REP_OBJ, 0, 2 },
-    [H_bytes_concat] = { (void *)lu_bytes_concat, "bytes_concat", REP_OBJ, IF_RAISE, 2 },
-    [H_raise_tb] = { (void *)h_raise_tb, "raise_tb", REP_OBJ, IF_RAISE | IF_PY, 4 },
-    [H_reraise] = { (void *)h_reraise, "reraise", REP_OBJ, IF_RAISE, 1 },
-    [H_load_special] = { (void *)h_load_special, "load_special", REP_OBJ, IF_RAISE | IF_PY, 2 },
-    [H_unpack] = { (void *)h_unpack, "unpack", REP_OBJ, IF_RAISE | IF_PY, 2 },
+    [H_pop_except] = { (void *)h_pop_except, "pop_except", REP_NONE, FX_SEEN, 1 },
+    [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, FX_RAISE, 2 },
+    [H_raise] = { (void *)h_raise, "raise", REP_OBJ, FX_RAISE | FX_PY, 2 },
+    [H_seq_concat] = { (void *)lu_seq_concat, "seq_concat", REP_OBJ, FX_RAISE, 2 },
+    [H_float_pow] = { (void *)lu_float_pow, "float_pow", REP_OBJ, FX_RAISE, 2 },
+    [H_bind_method] = { (void *)lu_bind_method, "bind_method", REP_OBJ, FX_RAISE, 2 },
+    [H_bytes_concat] = { (void *)lu_bytes_concat, "bytes_concat", REP_OBJ, FX_RAISE, 2 },
+    [H_reraise] = { (void *)h_reraise, "reraise", REP_OBJ, FX_RAISE, 1 },
+    [H_load_special] = { (void *)h_load_special, "load_special", REP_OBJ, FX_RAISE | FX_PY, 2 },
+    [H_unpack] = { (void *)h_unpack, "unpack", REP_OBJ, FX_RAISE | FX_PY, 2 },
 };

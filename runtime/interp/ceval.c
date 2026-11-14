@@ -1497,7 +1497,7 @@ op_RESUME: {
        `yield from` or `await` stays here: this loop runs the delegation
        chain by switching frames, which a unit per level would pay a
        nested entry and a yield for. */
-    if ((oparg == 0 || ((code->co_flags & LU_CO_GENERATORS)
+    if ((oparg == 0 || (frame->owner == LU_FRAME_GENERATOR
                         && (oparg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM))
         && lu_jit_on() && lu_jit_call_hot(code)) {
         goto jit_enter;
@@ -2133,7 +2133,7 @@ op_INSTRUMENTED_YIELD_VALUE: {
 op_YIELD_VALUE:
     retval = POP();
     SAVE_FRAME();
-yield_frame: {
+    {
     /* The frame is saved at its resume point; YIELD_VALUE's oparg. */
     struct lu_frame *caller = frame->previous;
     uint8_t ret = frame->ret;
@@ -2923,12 +2923,6 @@ jit_enter:
         frame = (struct lu_frame *)ts->current_frame;
         LOAD_FRAME();
         goto error;
-    case LU_JIT_YIELD:
-        retval = result;
-        oparg = frame->last->op.arg;
-        goto yield_frame;
-    case LU_JIT_RAISED:         /* only a direct call's frame */
-        break;
     }
     Py_UNREACHABLE();
 

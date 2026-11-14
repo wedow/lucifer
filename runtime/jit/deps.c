@@ -8,7 +8,7 @@
    lu_jit_invalidate after the change: every unit that depends on it is
    marked dead, and every task's poll bit is raised. Compiled code checks
    that its unit lives at its polls and, after any instruction that may run
-   code or mutate (lu_ssa_optimize's facts pass), before it next relies on a
+   code or mutate, before it next relies on a
    fact, so another thread's change reaches it at its next poll and the
    running thread's own change at once.
 

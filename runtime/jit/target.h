@@ -1,5 +1,5 @@
 /* The boundary between the optimizing tier's passes and a machine
-   (FOUNDATIONS 2.11): runtime/jit/ssa*.c and regalloc.c include only this.
+   (FOUNDATIONS 2.11): the passes (eval.c, opt.c, regalloc.c) include only this.
    A target names its allocatable registers and lowers an allocated
    function to code; the unit it fills is arch-neutral, and so is the
    deopt description each exit carries. runtime/jit/x86_64/ is the one
@@ -43,38 +43,35 @@ struct lu_target {
 };
 extern const struct lu_target lu_target;
 
-/* One value of an exit's frame state: where it is and what the frame
-   holds for it. */
+/* An exit's description (runtime/jit/exit.c): where each value of its
+   frame state is. A slot or a field is NULL, a constant, an object at a
+   location, a raw word at a location (or a constant), or a virtual object,
+   named by its index among the exit's so that every slot that names one
+   gets the one object. */
 enum lu_dv_kind {
     DV_NULL,                    /* an unbound local, or a NULL stack entry */
     DV_CONST,                   /* imm: an object the unit keeps */
     DV_OBJ,                     /* an object at loc */
-    DV_BOX_I64,                 /* a virtual int: its raw value at loc, or imm when loc is none; fields: the
-                                   objects (at their offsets) whose attribute it was stored into raw */
-    DV_BOX_F64,                 /* a virtual float: the same */
-    DV_NEW_DICT,                /* a virtual empty dict (a **kwargs nothing filled) */
-    DV_BOOL,                    /* a virtual bool: True when the bit at loc (or imm), xor bitimm, is 1 */
-    DV_TUPLE,                   /* a virtual tuple: its items are fields[i] */
-    DV_INSTANCE,                /* a virtual instance of the type imm: fields[i] in the inline word at byte fields[i].off */
-    DV_ITER,                    /* a virtual loop iterator of the type imm: fields[i] in the word at byte fields[i].off */
-    DV_RAW,                     /* a field's raw word: at loc, or imm when loc is none */
+    DV_RAW,                     /* a raw word at loc, or imm when loc is none */
+    DV_VIRT,                    /* imm: the index of a virtual object in the exit's objs */
 };
 
 struct lu_dv {
     uint8_t kind;
-    uint8_t owned;              /* DV_OBJ: compiled code holds a reference for this entry */
-    uint8_t maybe_null;         /* DV_BOX_*: NULL when the bit at bitloc (or bitimm) is 0 */
-    uint8_t bitimm;
     int32_t loc;
-    int32_t bitloc;
-    int32_t vid;                /* the SSA value: one virtual box is built once per exit */
     int64_t imm;
-    int32_t off;                /* a field's place */
-    int32_t nfields;            /* DV_TUPLE, DV_INSTANCE, DV_ITER: the fields, each a raw word or a reference the */
-    struct lu_dv *fields;       /* object holds (DV_OBJ: owned), which moves into the object made */
 };
-/* Frees the fields n values describe. */
-void lu_jit_dv_free(struct lu_dv *vals, int n);
+
+/* A virtual object an exit names: its state id (the same in every exit
+   of the unit that names that object), kind (enum lu_vkind) and fields. */
+struct lu_dobj {
+    uint8_t kind;
+    uint8_t neg;
+    int32_t id;
+    PyTypeObject *type;
+    int nfields;
+    struct lu_dv *fields;
+};
 
 struct lu_deopt_frame {
     PyCodeObject *code;
@@ -83,8 +80,6 @@ struct lu_deopt_frame {
     int nlocals, nstack;
     struct lu_dv *vals;
     uint8_t ret;                /* how the frame returns when rebuilt (lu_fs) */
-    uint8_t gen;                /* the frame of the generator its caller's top stack entry holds, which
-                                   returns to it as this enum lu_frame_return says (0: not one) */
 };
 
 /* Why compiled code left, for the counts. */
@@ -103,58 +98,39 @@ struct lu_deopt {
     long *stress;               /* EXIT_STRESS: the counter to reset */
     int nframes;
     struct lu_deopt_frame *frames;      /* outermost first */
+    int nobjs;
+    struct lu_dobj *objs;       /* the virtual objects the frames name */
+    int nowned;                 /* the references compiled code holds here, each an object at a location: */
+    int32_t *owned;             /* released last, after every slot took its own */
     int error;                  /* leave with the exception set */
     int drop;                   /* then pop this many stack entries of the innermost frame */
     int reason;                 /* enum lu_exit_reason */
     int opcode;                 /* the base opcode at the exit, for the counts */
     struct lu_unit *unit;       /* the unit it leaves */
-    PyCodeObject *blame_code;   /* a guard moved out of a loop: the site it came from */
+    PyCodeObject *blame_code;   /* a guard that speculates for another site: the site */
     int blame_pc;
-    int call_pc;                /* lu_jit_frames_push: the innermost frame's instruction during the call */
-    int nrelease;               /* references compiled code still holds that no frame takes: released last */
-    struct lu_dv *release;
-    lu_codeunit *instr;         /* published: the instruction the root frame shows as running (lu_jit_instr) */
+    struct lu_prof *prof;       /* a guard on a learned type, or (tier) the report that more was learned */
+    uint8_t tier;
+    lu_codeunit *instr;         /* published: the instruction the innermost frame shows as running */
+    uint64_t takes;             /* published by a call: its arguments (bits by index) whose stack entries hold
+                                   references of their own for the call, which a Python callee's parameters take */
     uint8_t regs;               /* published by a slow path that saved every register at the frame's jit_regs */
+    uint8_t visible;            /* an inlined frame is a user's: a walker makes the frames real */
 };
 
-/* A code object's entry for calls from compiled code, the first field of
-   its JIT state (co_executors, runtime/jit/jit.c). `entry` is the live
-   call-entry unit's direct entry, or NULL:
-     int entry(PyThreadState *ts, PyFunctionObject *func, PyObject **args, PyObject **result,
-               int given, PyObject *kwnames)
-   takes `given` positional arguments (up to nargs), borrowed, pushes and
-   binds the frame above the task's current one as the interpreter would
-   (defaults, keyword-only parameters, star parameters, the prologue's
-   cells and free variables) and runs it. The keyword entry, the
-   LU_DIRECT_KW bytes before entry, takes as well one value per name in
-   kwnames (a sixth argument; positional callers pay nothing for it). 1: it returned *result and was popped; 0:
-   nothing was done (the interpreter's checks at a call failed: a poll is
-   pending, a tool or hook is on, no room; or the binding would raise,
-   which the slow way then does); else the enum lu_jit_result of an exit,
-   with the frame, in *result, left to the interpreter
-   (lu_jit_call_finish). */
-struct lu_jit_direct {
-    void *entry;
-    int nargs;                  /* the most positional arguments it takes (LU_DIRECT_ANY), or -1: never called directly */
-    int call_pc;                /* where the call entry's unit starts */
-};
-#define LU_DIRECT_ANY 0x7fffffff
-#define LU_DIRECT_KW 8
+/* The activation's forced state (runtime/jit/exit.c), made when a walker
+   first needs a frame or an object of it that compiled code kept virtual:
+   the objects made, by state id, and the inlined frames' records. Every
+   later request, and the exit compiled code then takes, finds them here. */
+struct lu_forced;
+void lu_jit_forced_free(struct lu_forced *fo);
 
-/* What the direct entry does not bind in line (runtime/jit/helpers.c): a
-   frame for func bound to the call's arguments, not yet current, holding
-   its first nborrowed parameters borrowed, or NULL with nothing changed. */
-struct lu_frame *lu_jit_bind(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, int given,
-                             PyObject *kwnames, int nborrowed);
-
-/* The rest of a direct call whose callee left compiled code with `r`
-   (runtime/jit/helpers.c): the interpreter runs the callee's frame and
-   any above it, and its value or NULL with an exception comes back. */
-PyObject *lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r);
-
-/* -X lucifer_jit_stats' count of calls compiled code makes into compiled
-   code (direct entries), or NULL when the counts are off. */
-unsigned long *lu_jit_direct_count(void);
+/* The innermost frame of `f`, a frame compiled code runs, once its
+   inlined frames are real: records off the datastack, linked above the
+   root. They are made when the call the code is in shows a user's frame
+   among them, or always with `all`; else f comes back as it is. NULL with
+   an exception when one cannot be made. */
+struct lu_frame *lu_jit_force(struct lu_frame *f, int all);
 
 /* A compiled entry into a code object at one bytecode boundary. */
 struct lu_unit {
@@ -162,7 +138,6 @@ struct lu_unit {
     PyCodeObject *code;         /* whose unit it is (borrowed: the code frees its units) */
     int entry_pc;
     int (*fn)(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
-    void *direct;               /* the call entry's direct entry (struct lu_jit_direct), or NULL */
     void *mem;
     size_t size;
     size_t code_bytes;
@@ -176,6 +151,7 @@ struct lu_unit {
     unsigned long entered;      /* every entry, under -X lucifer_jit_stats */
     unsigned long leaves;       /* exits no recompile can remove: side exits of the root frame, errors */
     int loops;                  /* the code has a back edge: an entry may do unbounded work */
+    int refused;                /* calls it left out of line for want of budget (jit.c grows it) */
     int dead;
     unsigned long built;        /* sites marked generic before its build began (jit.c) */
     struct lu_dep *deps;        /* what it relies on between polls (runtime/jit/deps.c) */
@@ -231,27 +207,16 @@ int lu_jit_nohoist(PyCodeObject *code, int pc);
 int lu_target_emit(struct lu_func *f, struct lu_unit *unit);
 void lu_target_free(struct lu_unit *unit);
 
-/* The exits' common path (runtime/jit/deopt.c), which the code calls with
+/* The exits' common path (runtime/jit/exit.c), which the code calls with
    the registers it saved: general registers in gpr[0..15], float registers
    in fpr[0..15], and the spill words below `spills`. Rebuilds the frames
    and returns the enum lu_jit_result the unit returns. */
 int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
                  const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills);
 
-/* Around a Python-running helper called from an inlined frame
-   (runtime/jit/deopt.c): pushes the inlined frames d names as the
-   interpreter would have them during the call, with their locals, read as
-   lu_jit_deopt reads them; then pops them again, unless the callee made a
-   frame object of one. Kept frames are the ones the next exit (the call's
-   error exit or the frames guard after it) hands the interpreter. */
-void lu_jit_frames_push(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
-                        const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills);
-void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed);
-
 /* The helpers compiled code calls, by id; runtime/jit/helpers.c gives each
-   its result, flags (IF_RAISE: NULL, or -1 for a bit, raised; IF_PY: may
-   run Python; IF_SEEN: may release a value whose finalizer does, or park)
-   and argument count (0: an array and its length). */
+   its result, effects (FX_*) and argument count (0: an array and its
+   length). */
 #define LU_HELPERS(X) \
     X(box_int) \
     X(box_float) \
@@ -263,7 +228,7 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed);
     X(attr_store) \
     X(slot_load) \
     X(slot_store) \
-    X(dict_lacks) \
+    X(dict_lacks) X(profile) X(fields_new) \
     X(cell_load) \
     X(compare_ideq) \
     X(binary_op) \
@@ -272,7 +237,6 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed);
     X(setitem) \
     X(delitem) \
     X(list_extend) \
-    X(list_extend_seq) \
     X(load_attr) \
     X(load_method) \
     X(store_attr) \
@@ -304,7 +268,6 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed);
     X(unary) \
     X(list_append) \
     X(list_repeat) \
-    X(list_repeat_fresh) \
     X(build_list) \
     X(build_tuple) \
     X(new_object) \
@@ -317,33 +280,24 @@ void lu_jit_frames_pop(PyThreadState *ts, struct lu_frame *root, int stressed);
     X(list_to_tuple) \
     X(unpack_exact) \
     X(async_gen_wrap) \
-    X(gen_send) \
     X(send) \
     X(gen_done) \
     X(get_awaitable) \
     X(get_yield_from_iter) \
     X(get_aiter) \
     X(get_anext) \
-    X(gen_enter) \
-    X(gen_yielded) \
-    X(gen_finish) \
     X(get_iter_seq) \
     X(binary_slice) \
-    X(slice_native) \
     X(binary_slice_raw) \
-    X(slice_native_raw) \
     X(store_slice) \
     X(call_kw) \
     X(call_ex) \
-    X(call_forward) \
     X(dict_merge) \
     X(dict_update) \
-    X(catch) \
     X(push_exc_info) \
     X(pop_except) \
     X(exc_match) \
     X(raise) \
-    X(raise_tb) \
     X(bytes_concat) \
     X(bind_method) \
     X(float_pow) \
@@ -360,34 +314,36 @@ enum lu_helper_id {
 };
 extern const struct lu_helper lu_helpers[H_COUNT];
 
-/* Whether a walker may see the root frame during the instruction's call
-   to C: the call may run Python (IF_PY), or release a value whose
-   finalizer does, or park the task (IF_SEEN). It publishes the root
-   frame's state for walkers while it does (runtime/jit/deopt.c): every
-   root local that state names is in memory during the call. */
+/* Whether a walker may see the frames during the instruction's call to
+   C: it may run Python, release a value whose type runs code, or park the
+   task. It publishes its state for walkers while it does
+   (runtime/jit/exit.c): every value that state names is in memory during
+   the call. */
 static inline int
 lu_publishes(const struct lu_ins *in)
 {
-    if (in->fs == NULL || (in->flags & (INS_VIRTUAL | INS_FRESH))) {
+    if (in->fs == NULL) {
         return 0;
     }
     switch (in->op) {
     case OP_HELPER:
-        return (lu_helpers[in->imm].flags & (IF_PY | IF_SEEN)) != 0;
+        return (lu_helpers[in->imm].fx & (FX_PY | FX_SEEN)) != 0;
     case OP_TRUTH:
         return in->imm != 1;    /* imm 1: a layout's own truth, which runs no Python */
+    case OP_DECREF:
+        return in->imm == 1;
     default:
         return (lu_op_flags[in->op] & IF_SEEN) != 0;
     }
 }
 
-/* Marks on kernel code by inlining context (runtime/jit/jit.c): a kernel
-   function inlined in a root is customized for the place it is inlined
-   at, so that a guard of its copy that keeps failing there, or a copy
-   that keeps leaving, changes how it compiles there and nowhere else.
-   The context is the root's code and the chain of frames from the root
-   to the frame the mark is about, each a code and the instruction its
-   frame state shows (a caller's: the one after its call), hashed. */
+/* What a root learned of a value where code inlined in it wanted the
+   value's type and nothing told it (runtime/jit/jit.c): compiled code
+   reports the type there, and the next build of the root guards on it.
+   The place is a context: the chain of frames from the root to the frame
+   asking, each a code and the instruction it is at, hashed, so that
+   kernel code is customized for the place it is inlined at and nowhere
+   else. */
 static inline uint64_t
 lu_jit_ctx_mix(uint64_t h, const void *code, int pc)
 {
@@ -395,10 +351,21 @@ lu_jit_ctx_mix(uint64_t h, const void *code, int pc)
     h ^= (uint64_t)(uint32_t)pc * 0xff51afd7ed558ccdULL;
     return h * 0xc4ceb9fe1a85ec53ULL;
 }
-/* Whether `root`'s context mark `key` has `bit` (NOSPEC 1 or NOINLINE 4). */
-int lu_jit_ctx_marked(PyCodeObject *root, uint64_t key, int bit);
-#define LU_CTX_NOSPEC 1
-#define LU_CTX_NOINLINE 4
+/* What the object beside a raw value is while the local is unbound: a
+   loop that binds a local to a number on every turn carries the number
+   raw from its first, where the local has no value yet. */
+extern PyObject lu_jit_unbound;
+
+struct lu_prof;
+/* The root's record for the context `key`, made if new; NULL without memory. */
+struct lu_prof *lu_jit_prof(PyCodeObject *root, uint64_t key);
+/* The type it met (a new reference) or NULL, and whether it met more than one. */
+PyTypeObject *lu_jit_prof_type(struct lu_prof *p, int *poly);
+/* A count that changes whenever a record of the root does. */
+unsigned long lu_jit_prof_learned(PyCodeObject *root);
+/* Compiled code met `o` there, in a unit built when the count was
+   `learned`: 0 when the unit is to leave and be built again. */
+int lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned);
 
 /* POW_F's call (runtime/jit/helpers.c): a NaN with these bits where the
    power raises or is complex. */
@@ -412,7 +379,7 @@ double lu_jit_float_pow(double v, double w);
 static inline int
 lu_alloc_call(const struct lu_ins *in)
 {
-    return (lu_op_flags[in->op] & IF_CALL) && in->op != OP_PHI && !(in->op == OP_DECREF && !lu_publishes(in));
+    return (lu_op_flags[in->op] & IF_CALL) && !(in->op == OP_DECREF && !lu_publishes(in));
 }
 
 /* -X lucifer_jit_stats: how often compiled code takes the C path of an
@@ -447,27 +414,6 @@ unsigned long *lu_jit_alloc_site(PyCodeObject *code, int pc, int kind);
             lu_jit_c_path_count(C_PATH_##name); \
         } \
     } while (0)
-
-/* -X lucifer_jit_stats: why a call compiled code did not inline missed
-   the callee's direct entry (runtime/jit/jit.c classifies a call reaching
-   a C helper): a keyword call of what is not a Python function, or a
-   star call; a callable that is a type, a C function or something else;
-   a generator's code; a prologue that is not cells and free variables;
-   more arguments than parameters; a code that never got hot, that
-   LUCIFER_JIT_ONLY leaves out, whose call entry waits in the interpreter
-   (its unit died), or has no live unit there; or a live entry, which the
-   helper enters itself. */
-#define LU_WHY_NOT(X) X(kw) X(star) X(type) X(builtin) X(object) X(generator) \
-    X(prologue) X(toomany) X(cold) X(excluded) X(waiting) X(nounit) X(entry)
-enum lu_why_not {
-#define LU_WHY_NOT_ENUM(name) WHY_NOT_##name,
-    LU_WHY_NOT(LU_WHY_NOT_ENUM)
-#undef LU_WHY_NOT_ENUM
-    WHY_NOTS
-};
-void lu_jit_why_not_count(enum lu_why_not k, PyObject *callable);
-/* A call of callable with nargs positional arguments: its reason. */
-void lu_jit_why_not(PyObject *callable, Py_ssize_t nargs);
 
 /* A helper's result that is not an answer: the call needs the interpreter
    (a C stack too deep to recurse on), so compiled code deopts. */

@@ -1,0 +1,564 @@
+/* Making what compiled code kept virtual (docs/design/jit-architecture.md
+   4.3): one routine turns a description (target.h struct lu_deopt) into
+   objects and frames, for its three callers.
+
+   An exit. Compiled code leaves at a bytecode boundary that has not
+   executed: the root frame's slots are filled, each inlined frame is
+   pushed above it as the interpreter would have pushed it at its call,
+   and the innermost is the task's current frame. A slot takes a new
+   reference; the references compiled code held are dropped last, so a
+   finalizer sees whole frames.
+
+   A walker. While compiled code is in a call during which its frames may
+   be seen, the root frame names that call's description (jit_desc) and
+   the spill words, where the allocator keeps every value the description
+   names. A walker that needs the root's locals gives the frame real slots
+   (lu_jit_sync); one that reaches inlined frames a user can see gets a
+   record for each, off the datastack, linked above the root
+   (lu_jit_force). Either way the root is no longer compiled code's, which
+   the code tests after the call (GUARD_FRAMES) and leaves through an
+   ordinary exit. That exit keeps the slots a walker may have written and
+   moves the records onto the datastack.
+
+   Identity. A virtual object is made at most once per activation: the
+   first to need it enters it in the activation's forced table by state
+   id, and every later request, the exit's included, takes it from there.
+   Within one exit, objects are also shared by their index.
+
+   No memory: the exit raises MemoryError at its instruction, with the
+   slots it could not fill unbound; a walker gets it in its own thread. */
+#include "jit/target.h"
+#include "jit/jit.h"
+#include "interp/instrument.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+void lu_jit_note_exit(struct lu_deopt *d);
+int lu_jit_next_pc(PyCodeObject *code, int pc);
+
+struct lu_forced {
+    int nobjs, capobjs;
+    struct {
+        int32_t id;
+        PyObject *obj;          /* the table's own reference */
+    } *objs;
+    int nframes;
+    struct lu_frame **frames;   /* the inlined frames, outermost first */
+};
+
+/* Where an activation's values are, and what this pass has made. */
+struct maker {
+    const uint64_t *gpr, *fpr, *spills;
+    struct lu_deopt *d;
+    struct lu_forced *forced;   /* the activation's table, or NULL */
+    PyObject **made;            /* per virtual object of d: made by this pass (borrowed from `refs`) */
+    PyObject **refs;            /* this pass's own references to what it made, dropped at its end */
+    int nrefs;
+    int failed;                 /* an allocation failed: MemoryError is set */
+};
+
+static uint64_t
+at(struct maker *m, int32_t loc)
+{
+    if (LU_LOC_IS_SPILL(loc)) {
+        return *(const uint64_t *)((const char *)m->spills - 8 * LU_LOC_SPILL_INDEX(loc));
+    }
+    if (m->gpr == NULL || loc == LU_LOC_NONE) {
+        return 0;               /* the allocator keeps published values in memory */
+    }
+    return loc >= LU_LOC_FPR ? m->fpr[loc - LU_LOC_FPR] : m->gpr[loc];
+}
+
+static uint64_t
+raw(struct maker *m, const struct lu_dv *dv)
+{
+    return dv->loc == LU_LOC_NONE ? (uint64_t)dv->imm : at(m, dv->loc);
+}
+
+static PyObject *take(struct maker *m, const struct lu_dv *dv);
+
+static PyObject *
+forced_find(struct lu_forced *fo, int32_t id)
+{
+    for (int i = 0; fo != NULL && i < fo->nobjs; i++) {
+        if (fo->objs[i].id == id) {
+            return fo->objs[i].obj;
+        }
+    }
+    return NULL;
+}
+
+static int
+forced_add(struct lu_forced *fo, int32_t id, PyObject *o)
+{
+    if (fo->nobjs == fo->capobjs) {
+        int cap = fo->capobjs ? 2 * fo->capobjs : 8;
+        void *p = realloc(fo->objs, sizeof(*fo->objs) * (size_t)cap);
+        if (p == NULL) {
+            return -1;
+        }
+        fo->objs = p;
+        fo->capobjs = cap;
+    }
+    fo->objs[fo->nobjs].id = id;
+    fo->objs[fo->nobjs++].obj = Py_NewRef(o);
+    return 0;
+}
+
+/* Virtual object k of the description, made now unless it was: borrowed,
+   or NULL with the pass failed. */
+static PyObject *
+object(struct maker *m, int k)
+{
+    if (m->made[k] != NULL) {
+        return m->made[k];
+    }
+    const struct lu_dobj *ob = &m->d->objs[k];
+    PyObject *o = forced_find(m->forced, ob->id);
+    if (o != NULL) {
+        return m->made[k] = o;
+    }
+    if ((ob->kind == VK_BOX_INT || ob->kind == VK_BOX_FLOAT) && ob->nfields == 2) {
+        o = take(m, &ob->fields[1]);    /* the object the value came in as, where it did */
+    }
+    switch (o != NULL ? VK_KINDS : ob->kind) {
+    case VK_KINDS:
+        break;
+    case VK_BOX_INT:
+        o = PyLong_FromLongLong((long long)raw(m, &ob->fields[0]));
+        break;
+    case VK_BOX_FLOAT: {
+        uint64_t bits = raw(m, &ob->fields[0]);
+        double v;
+        memcpy(&v, &bits, 8);
+        o = PyFloat_FromDouble(v);
+        break;
+    }
+    case VK_BOOL:
+        o = Py_NewRef(((raw(m, &ob->fields[0]) ^ ob->neg) & 1) ? Py_True : Py_False);
+        break;
+    case VK_TUPLE:
+        o = PyTuple_New(ob->nfields);
+        for (int i = 0; o != NULL && i < ob->nfields; i++) {
+            PyTuple_SET_ITEM(o, i, take(m, &ob->fields[i]));
+        }
+        break;
+    case VK_SEQITER:
+        o = lu_object_new(ob->type, sizeof(seqiterobject));
+        if (o != NULL) {
+            ((seqiterobject *)o)->it_seq = take(m, &ob->fields[0]);
+            ((seqiterobject *)o)->it_index = (Py_ssize_t)raw(m, &ob->fields[1]);
+        }
+        break;
+    case VK_METHOD: {
+        PyObject *fn = take(m, &ob->fields[0]), *self = take(m, &ob->fields[1]);
+        o = fn != NULL && self != NULL ? PyMethod_New(fn, self) : NULL;
+        Py_XDECREF(fn);
+        Py_XDECREF(self);
+        break;
+    }
+    case VK_FIELDS:
+        o = lu_alloc_instance(ob->type, ob->type);
+        for (int i = 0; o != NULL && i < ob->nfields; i++) {
+            const struct lu_dv *dv = &ob->fields[i];
+            if (dv->kind != DV_CONST || dv->imm != 0) {
+                *(PyObject **)((char *)o + lu_field_offset(ob->type, i)) = take(m, dv);
+            }
+        }
+        break;
+    case VK_LIST:
+        o = PyList_New(ob->nfields);
+        for (int i = 0; o != NULL && i < ob->nfields; i++) {
+            PyList_SET_ITEM(o, i, take(m, &ob->fields[i]));
+        }
+        break;
+    case VK_DICT:
+        o = PyDict_New();
+        for (int i = 0; o != NULL && i + 1 < ob->nfields; i += 2) {
+            PyObject *key = take(m, &ob->fields[i]), *value = take(m, &ob->fields[i + 1]);
+            if (key == NULL || value == NULL || PyDict_SetItem(o, key, value) < 0) {
+                m->failed = 1;
+            }
+            Py_XDECREF(key);
+            Py_XDECREF(value);
+        }
+        break;
+    default:
+        PyErr_SetString(PyExc_SystemError, "an exit names a virtual object of no kind");
+        break;
+    }
+    if (o == NULL || m->failed) {
+        m->failed = 1;
+        Py_XDECREF(o);
+        return NULL;
+    }
+    m->refs[m->nrefs++] = o;
+    if (m->forced != NULL && forced_add(m->forced, ob->id, o) < 0) {
+        PyErr_NoMemory();
+        m->failed = 1;
+        return NULL;
+    }
+    return m->made[k] = o;
+}
+
+/* A new reference to what dv names, or NULL (an unbound slot, or the pass
+   failed). */
+static PyObject *
+take(struct maker *m, const struct lu_dv *dv)
+{
+    switch (dv->kind) {
+    case DV_CONST:
+        return Py_NewRef((PyObject *)(intptr_t)dv->imm);
+    case DV_OBJ:
+        return Py_XNewRef((PyObject *)(uintptr_t)at(m, dv->loc));
+    case DV_VIRT: {
+        PyObject *o = object(m, (int)dv->imm);
+        return o == &lu_jit_unbound ? NULL : Py_XNewRef(o);     /* a number's local, unbound */
+    }
+    default:
+        return NULL;
+    }
+}
+
+static int
+maker_init(struct maker *m, struct lu_frame *root, struct lu_deopt *d,
+           const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills)
+{
+    *m = (struct maker){ .gpr = gpr, .fpr = fpr, .spills = spills, .d = d, .forced = root->jit_forced };
+    size_t n = (size_t)(d->nobjs ? d->nobjs : 1);
+    m->made = calloc(n, sizeof(PyObject *));
+    m->refs = calloc(n, sizeof(PyObject *));
+    if (m->made == NULL || m->refs == NULL) {
+        free(m->made);
+        free(m->refs);
+        PyErr_NoMemory();
+        return -1;
+    }
+    return 0;
+}
+
+static void
+maker_done(struct maker *m)
+{
+    for (int i = 0; i < m->nrefs; i++) {
+        Py_DECREF(m->refs[i]);
+    }
+    free(m->made);
+    free(m->refs);
+}
+
+/* The published description's reader: the registers a slow path saved,
+   when it says so, and the spill words. */
+static int
+published(struct maker *m, struct lu_frame *f, struct lu_deopt *d)
+{
+    const uint64_t *saved = d->regs ? f->jit_regs : NULL;
+    return maker_init(m, f, d, saved, saved != NULL ? saved + 16 : NULL, f->jit_spills);
+}
+
+void
+lu_jit_forced_free(struct lu_forced *fo)
+{
+    if (fo == NULL) {
+        return;
+    }
+    for (int i = 0; i < fo->nobjs; i++) {
+        Py_DECREF(fo->objs[i].obj);
+    }
+    free(fo->objs);
+    free(fo->frames);
+    free(fo);
+}
+
+static struct lu_forced *
+forced_of(struct lu_frame *root)
+{
+    if (root->jit_forced == NULL) {
+        root->jit_forced = calloc(1, sizeof(struct lu_forced));
+        if (root->jit_forced == NULL) {
+            PyErr_NoMemory();
+        }
+    }
+    return root->jit_forced;
+}
+
+/* The instruction frame k of d shows as the one after the last it began:
+   the innermost is in its call, the others are past theirs. */
+static lu_codeunit *
+shown(struct lu_deopt *d, int k)
+{
+    return k == d->nframes - 1 ? d->instr : lu_code_start(d->frames[k].code) + d->frames[k].pc;
+}
+
+lu_codeunit *
+lu_jit_instr(struct lu_frame *f)
+{
+    struct lu_deopt *d = __atomic_load_n(&f->jit_desc, __ATOMIC_ACQUIRE);
+    return d != NULL ? shown(d, 0) : f->instr;
+}
+
+PyCodeObject *
+lu_jit_running_code(struct lu_frame *f)
+{
+    struct lu_deopt *d = __atomic_load_n(&f->jit_desc, __ATOMIC_ACQUIRE);
+    return d != NULL ? d->frames[d->nframes - 1].code : f->code;
+}
+
+/* The root gets real slots, each with a reference of its own, its
+   instruction, and the interpreter's owner. -1 with an exception set. */
+static int
+sync_root(struct maker *m, struct lu_frame *f)
+{
+    struct lu_deopt_frame *fr = &m->d->frames[0];
+    for (int i = 0; i < fr->nlocals; i++) {
+        f->localsplus[i] = take(m, &fr->vals[i]);
+    }
+    f->stackpointer = f->localsplus + fr->nlocals;
+    f->instr = shown(m->d, 0);
+    f->last = lu_instr_before(f->code, f->instr);
+    __atomic_store_n(&f->owner, f->home, __ATOMIC_RELEASE);
+    return m->failed ? -1 : 0;
+}
+
+int
+lu_jit_sync(struct lu_frame *f)
+{
+    struct lu_deopt *d = __atomic_load_n(&f->jit_desc, __ATOMIC_ACQUIRE);
+    if (d == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "cannot write the locals of a frame compiled code is running");
+        return -1;
+    }
+    struct maker m;
+    if (forced_of(f) == NULL || published(&m, f, d) < 0) {
+        return -1;
+    }
+    int r = sync_root(&m, f);
+    maker_done(&m);
+    return r;
+}
+
+/* Local i of a root frame compiled code runs, as a new reference: the
+   frame gets its slots (so that what is read once is the object read
+   again), or NULL (unbound) outside a call that published. */
+PyObject *
+lu_jit_slot(struct lu_frame *f, int i)
+{
+    if (__atomic_load_n(&f->jit_desc, __ATOMIC_ACQUIRE) == NULL) {
+        return NULL;
+    }
+    /* A reader with an exception in flight (a traceback being made) keeps it. */
+    PyObject *exc = PyErr_GetRaisedException();
+    int r = lu_jit_sync(f);
+    PyErr_Clear();
+    PyErr_SetRaisedException(exc);
+    return r < 0 ? NULL : Py_XNewRef(f->localsplus[i]);
+}
+
+/* A record for inlined frame k of d, as the interpreter would hold the
+   frame during the call: its locals, no stack. */
+static struct lu_frame *
+record(struct maker *m, int k, struct lu_frame *previous)
+{
+    struct lu_deopt_frame *fr = &m->d->frames[k];
+    PyFunctionObject *func = (PyFunctionObject *)fr->func;
+    struct lu_frame *f = calloc(1, sizeof(PyObject *) * (size_t)fr->code->co_framesize);
+    if (f == NULL) {
+        PyErr_NoMemory();
+        m->failed = 1;
+        return NULL;
+    }
+    f->code = (PyCodeObject *)Py_NewRef(fr->code);
+    f->func = Py_NewRef(fr->func);
+    f->globals = func->func_globals;
+    f->builtins = func->func_builtins;
+    f->owner = lu_frame_owner_for(fr->code);
+    f->ret = fr->ret;
+    f->previous = previous;
+    for (int i = 0; i < fr->nlocals; i++) {
+        f->localsplus[i] = take(m, &fr->vals[i]);
+    }
+    f->stackpointer = f->localsplus + fr->nlocals;
+    f->instr = shown(m->d, k);
+    f->last = lu_instr_before(f->code, f->instr);
+    return f;
+}
+
+static int
+own_frame(struct lu_frame *f)
+{
+    for (struct lu_frame *p = (struct lu_frame *)PyThreadState_Get()->current_frame; p != NULL; p = p->previous) {
+        if (p == f) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+struct lu_frame *
+lu_jit_force(struct lu_frame *f, int all)
+{
+    struct lu_deopt *d = __atomic_load_n(&f->jit_desc, __ATOMIC_ACQUIRE);
+    if (d == NULL || d->nframes == 1 || !(all || d->visible) || !own_frame(f)) {
+        return f;
+    }
+    struct lu_forced *fo = forced_of(f);
+    struct maker m;
+    if (fo == NULL || published(&m, f, d) < 0) {
+        return NULL;
+    }
+    if (fo->frames == NULL) {
+        fo->frames = calloc((size_t)d->nframes, sizeof(struct lu_frame *));
+        if (fo->frames == NULL) {
+            PyErr_NoMemory();
+            m.failed = 1;
+        }
+    }
+    if (!m.failed && f->owner == LU_FRAME_JIT) {
+        sync_root(&m, f);
+    }
+    struct lu_frame *top = f;
+    for (int k = 1; !m.failed && k < d->nframes; k++) {
+        if (k - 1 < fo->nframes) {
+            top = fo->frames[k - 1];
+            continue;
+        }
+        struct lu_frame *r = record(&m, k, top);
+        if (r == NULL) {
+            break;
+        }
+        fo->frames[fo->nframes++] = r;
+        top = r;
+    }
+    int failed = m.failed;
+    maker_done(&m);
+    if (failed) {
+        return NULL;            /* what was made stays: the exit finds it */
+    }
+    PyThreadState *ts = PyThreadState_Get();
+    if (ts->current_frame == (struct _PyInterpreterFrame *)f) {
+        ts->current_frame = (struct _PyInterpreterFrame *)top;
+    }
+    return top;
+}
+
+/* Inlined frame k, pushed above top with its locals: moved from the
+   record a walker made, which keeps what the walker wrote, else made now.
+   NULL with an exception set when the datastack has no room. */
+static struct lu_frame *
+push_inlined(PyThreadState *ts, struct maker *m, int k, struct lu_frame *top)
+{
+    struct lu_deopt_frame *fr = &m->d->frames[k];
+    struct lu_frame *f = lu_frame_push(ts, (PyFunctionObject *)fr->func, NULL);
+    if (f == NULL) {
+        return NULL;
+    }
+    struct lu_frame *rec = m->forced != NULL && k - 1 < m->forced->nframes ? m->forced->frames[k - 1] : NULL;
+    if (rec != NULL) {
+        for (int i = 0; i < fr->nlocals; i++) {
+            f->localsplus[i] = rec->localsplus[i];
+        }
+        f->locals = rec->locals;
+        lu_frame_rehome(rec, f);
+        Py_DECREF(rec->code);
+        Py_DECREF(rec->func);
+        free(rec);
+        m->forced->frames[k - 1] = NULL;
+    }
+    else {
+        for (int i = 0; i < fr->nlocals; i++) {
+            f->localsplus[i] = take(m, &fr->vals[i]);
+        }
+    }
+    f->ret = fr->ret;
+    f->instr = f->last = lu_code_start(fr->code) + fr->pc;
+    f->previous = top;
+    return f;
+}
+
+int
+lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
+             const uint64_t *gpr, const uint64_t *fpr, const uint64_t *spills)
+{
+    lu_jit_note_exit(d);
+    struct maker m;
+    int nomem = maker_init(&m, root, d, gpr, fpr, spills) < 0;
+    /* A walker that made the root real (lu_jit_sync) left it its slots. */
+    int synced = root->owner != LU_FRAME_JIT;
+    struct lu_deopt_frame *fr = &d->frames[0];
+    for (int i = 0; !nomem && !synced && i < fr->nlocals; i++) {
+        root->localsplus[i] = take(&m, &fr->vals[i]);
+    }
+    PyObject **sp = root->localsplus + (nomem && !synced ? 0 : fr->nlocals);
+    for (int j = 0; !nomem && j < fr->nstack; j++) {
+        *sp++ = take(&m, &fr->vals[fr->nlocals + j]);
+    }
+    root->stackpointer = sp;
+    root->instr = root->last = lu_code_start(fr->code) + fr->pc;
+    root->jit_desc = NULL;
+    root->owner = root->home;
+    struct lu_frame *top = root;
+    int unpushed = 0;
+    ts->py_recursion_remaining += d->nframes - 1;       /* compiled code counted its inlined frames; pushing counts them */
+    for (int k = 1; !nomem && k < d->nframes; k++) {
+        struct lu_frame *f = push_inlined(ts, &m, k, top);
+        if (f == NULL) {
+            unpushed = 1;       /* its caller raises at its call */
+            break;
+        }
+        fr = &d->frames[k];
+        sp = f->localsplus + fr->nlocals;
+        for (int j = 0; j < fr->nstack; j++) {
+            *sp++ = take(&m, &fr->vals[fr->nlocals + j]);
+        }
+        f->stackpointer = sp;
+        top = f;
+    }
+    ts->current_frame = (struct _PyInterpreterFrame *)top;
+    int failed = nomem || unpushed || m.failed;
+    if (d->error && !unpushed && !nomem) {
+        /* The raising instruction consumed its operands; the interpreter
+           unwinds from the instruction after it. */
+        for (int i = 0; i < d->drop && top->stackpointer > top->localsplus + top->code->co_nlocalsplus; i++) {
+            PyObject *v = *--top->stackpointer;
+            Py_XDECREF(v);
+        }
+        top->instr = top->last = lu_code_start(top->code)
+            + lu_jit_next_pc(top->code, (int)(top->instr - lu_code_start(top->code)));
+    }
+    else if (failed && !unpushed) {
+        /* MemoryError at the instruction the exit names, before it ran. */
+        top->instr = top->last = lu_code_start(top->code)
+            + lu_jit_next_pc(top->code, (int)(top->instr - lu_code_start(top->code)));
+    }
+    if (d->reason == EXIT_STRESS && d->stress != NULL) {
+        __atomic_store_n(d->stress, (long)_PyRuntime.stress.deopt, __ATOMIC_RELAXED);
+    }
+    /* Compiled code's own references go last: every slot has its own. */
+    if (!nomem) {
+        for (int i = 0; i < d->nowned; i++) {
+            PyObject *o = (PyObject *)(uintptr_t)at(&m, d->owned[i]);
+            Py_XDECREF(o);
+        }
+        maker_done(&m);
+    }
+    struct lu_forced *fo = root->jit_forced;
+    root->jit_forced = NULL;
+    if (fo != NULL) {
+        /* A record no frame of this exit took (none in a correct unit). */
+        for (int k = 0; k < fo->nframes; k++) {
+            struct lu_frame *rec = fo->frames[k];
+            if (rec != NULL) {
+                for (PyObject **p = rec->localsplus; p < rec->stackpointer; p++) {
+                    Py_XDECREF(*p);
+                }
+                Py_XDECREF(rec->locals);
+                Py_DECREF(rec->code);
+                Py_DECREF(rec->func);
+                free(rec);
+            }
+        }
+        lu_jit_forced_free(fo);
+    }
+    return d->error || failed ? LU_JIT_ERROR : LU_JIT_DEOPT;
+}

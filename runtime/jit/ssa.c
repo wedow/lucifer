@@ -26,9 +26,6 @@ const char *const lu_count_names[CNT_COUNT] = {
 int
 lu_count_kind(const struct lu_ins *in)
 {
-    if (in->flags & INS_VIRTUAL) {
-        return -1;              /* nothing runs */
-    }
     switch (in->op) {
     case OP_GUARD_TYPE: return CNT_guard_type;
     case OP_GUARD_VERSION:
@@ -58,99 +55,95 @@ lu_count_kind(const struct lu_ins *in)
     }
 }
 
-/* The position of instruction v in its block. */
-static int
-index_in_block(struct lu_func *f, lu_v v)
+struct lu_vobj *
+lu_ir_vobj(struct lu_func *f, int kind, PyTypeObject *type, int n)
 {
-    struct lu_block *bl = &f->blocks[f->ins[v].block];
-    for (int i = 0; i < bl->nins; i++) {
-        if (bl->ins[i] == v) {
-            return i;
+    struct lu_vobj *o = lu_ir_alloc(f, sizeof(struct lu_vobj));
+    o->kind = (uint8_t)kind;
+    o->type = type;
+    o->n = n;
+    o->f = lu_ir_alloc(f, sizeof(lu_v) * (size_t)(n ? n : 1));
+    for (int i = 0; i < n; i++) {
+        o->f[i] = LU_NOV;
+    }
+    return o;
+}
+
+struct lu_vobj *
+lu_fs_vobj(struct lu_func *f, const struct lu_fs *fs, int id, lu_v *real)
+{
+    *real = LU_NOV;
+    for (int i = fs->nbinds - 1; i >= 0; i--) {
+        if (fs->binds[i].id == id) {
+            *real = fs->binds[i].real;
+            return fs->binds[i].obj;
         }
     }
-    return -1;
+    return f->vobjs[id];
 }
 
-int
-lu_ssa_before(struct lu_func *f, lu_v s, lu_v x)
+/* The values virtual object reference r stands for at fs: the object it
+   became, or its fields, through any that are virtual themselves. Records
+   form no cycles: a field is set when its record is made. */
+static void
+each_ref(struct lu_func *f, const struct lu_fs *fs, lu_v r, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
-    int bs = f->ins[s].block, b = f->ins[x].block;
-    if (bs == b) {
-        return s != x && index_in_block(f, s) < index_in_block(f, x);
+    if (r == LU_NOV) {
+        return;
     }
-    while (b != bs && b > 0) {
-        b = f->idom[b];
+    if (!LU_IS_VIRT(r)) {
+        fn(f, r, arg);
+        return;
     }
-    return b == bs;
+    lu_v real;
+    struct lu_vobj *o = lu_fs_vobj(f, fs, LU_VIRT_ID(r), &real);
+    if (real != LU_NOV) {
+        fn(f, real, arg);
+        return;
+    }
+    for (int i = 0; i < o->n; i++) {
+        each_ref(f, fs, o->f[i], fn, arg);
+    }
 }
 
-lu_v
-lu_object_shape(struct lu_func *f, lu_v v)
+void
+lu_fs_each(struct lu_func *f, const struct lu_fs *fs, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
-    struct lu_ins *in = &f->ins[v];
-    if (!(in->flags & INS_VIRTUAL) || in->flags & INS_DEAD) {
-        return LU_NOV;
+    for (int i = 0; i < fs->nheld; i++) {
+        fn(f, fs->held[i], arg);
     }
-    if (in->op == OP_PHI) {
-        return in->c;
-    }
-    return in->op == OP_HELPER && (in->imm == H_build_tuple || in->imm == H_new_object || lu_iter_type(in) != NULL)
-        ? v : LU_NOV;
-}
-
-int32_t
-lu_object_place(const struct lu_ins *shape, int k)
-{
-    if (shape->imm == H_rangeiter_new) {
-        static const int32_t range[3] = { offsetof(rangeiterobject, start), offsetof(rangeiterobject, step),
-                                          offsetof(rangeiterobject, len) };
-        return range[k];
-    }
-    if (shape->imm != H_build_tuple) {
-        return k == 0 ? (int32_t)offsetof(seqiterobject, it_seq) : (int32_t)offsetof(seqiterobject, it_index);
-    }
-    return k;
-}
-
-int
-lu_object_fields(struct lu_func *f, lu_v v, lu_v at, lu_v *vals, int32_t *offs)
-{
-    struct lu_ins *in = &f->ins[v];
-    struct lu_ins *shape = &f->ins[in->op == OP_PHI ? in->c : v];
-    int n = 0;
-    if (in->op == OP_PHI || shape->imm != H_new_object) {
-        /* Its fields are its arguments, or a phi's are the phis of theirs. */
-        int nf = in->op == OP_PHI ? in->nfields : in->nargs;
-        for (int i = 0; i < nf; i++) {
-            vals[n] = in->op == OP_PHI ? in->fields[i] : in->args[i];
-            offs[n++] = lu_object_place(shape, i);
-        }
-        return n;
-    }
-    for (int i = 0; i < in->nfields; i++) {
-        struct lu_ins *st = &f->ins[in->fields[i]];
-        if (lu_ssa_before(f, in->fields[i], at)) {
-            vals[n] = st->b;
-            offs[n++] = (int32_t)st->imm;
+    for (const struct lu_fs *p = fs; p != NULL; p = p->caller) {
+        for (int i = 0; i < p->nlocals + p->nstack; i++) {
+            each_ref(f, fs, *lu_fs_slot(p, i), fn, arg);
         }
     }
-    return n;
 }
 
-PyTypeObject *
-lu_iter_type(const struct lu_ins *in)
+void
+lu_fs_rewrite(struct lu_func *f, struct lu_fs *fs, lu_v (*fn)(lu_v))
 {
-    if (in->op != OP_HELPER) {
-        return NULL;
+    for (int i = 0; i < fs->nheld; i++) {
+        fs->held[i] = fn(fs->held[i]);
     }
-    return in->imm == H_listiter_new ? &PyListIter_Type : in->imm == H_tupleiter_new ? &PyTupleIter_Type
-        : in->imm == H_rangeiter_new ? &PyRangeIter_Type : NULL;
+    for (int i = 0; i < fs->nbinds; i++) {
+        if (fs->binds[i].real != LU_NOV) {
+            fs->binds[i].real = fn(fs->binds[i].real);
+        }
+    }
+    for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
+        for (int i = 0; i < p->nlocals + p->nstack; i++) {
+            lu_v *slot = lu_fs_slot(p, i);
+            if (*slot >= 0) {
+                *slot = fn(*slot);
+            }
+        }
+    }
 }
 
 int
 lu_alloc_kind(const struct lu_ins *in)
 {
-    if (in->flags & (INS_VIRTUAL | INS_DEAD)) {
+    if (in->flags & INS_DEAD) {
         return -1;
     }
     switch (in->op) {
@@ -165,7 +158,7 @@ lu_alloc_kind(const struct lu_ins *in)
     case H_box_int: return ALLOC_int;
     case H_box_float: return ALLOC_float;
     case H_build_tuple: case H_list_to_tuple: return ALLOC_tuple;
-    case H_build_list: case H_list_repeat: case H_list_repeat_fresh: return ALLOC_list;
+    case H_build_list: case H_list_repeat: return ALLOC_list;
     case H_new_dict: case H_build_map: return ALLOC_dict;
     case H_build_set: return ALLOC_set;
     case H_new_object: return ALLOC_instance;
@@ -240,6 +233,14 @@ lu_ir_alloc(struct lu_func *f, size_t size)
 }
 
 int
+lu_ir_vobj_id(struct lu_func *f, struct lu_vobj *o)
+{
+    f->vobjs = grow(f->vobjs, &f->capvobjs, f->nvobjs + 1, sizeof(struct lu_vobj *));
+    f->vobjs[f->nvobjs] = o;
+    return f->nvobjs++;
+}
+
+int
 lu_ir_block(struct lu_func *f)
 {
     f->blocks = grow(f->blocks, &f->capblocks, f->nblocks + 1, sizeof(struct lu_block));
@@ -284,7 +285,7 @@ lu_ir_emit(struct lu_func *f, int block, int op, int rep, lu_v a, lu_v b, lu_v c
         bl->ins[at] = v;
         bl->nins++;
     }
-    else {
+    else if (block >= 0) {
         block_append(f, block, v);
     }
     return v;
@@ -325,7 +326,7 @@ lu_ir_free(struct lu_func *f)
     free(f->blocks);
     free(f->ins);
     free(f->known);
-    free(f->known_block);
+    free(f->vobjs);
     free(f->deps);
     free(f->order);
     free(f->idom);
@@ -340,14 +341,39 @@ lu_ir_free(struct lu_func *f)
 }
 
 static void
-dump_fs(struct lu_fs *fs, FILE *out)
+dump_ref(struct lu_func *f, struct lu_fs *fs, lu_v r, FILE *out)
 {
-    for (; fs != NULL; fs = fs->caller) {
-        fprintf(out, " [%s@%d", PyUnicode_AsUTF8(fs->code->co_name), fs->pc);
-        for (int i = 0; i < fs->nlocals + fs->nstack; i++) {
-            fprintf(out, "%s%s%d%s", i == fs->nlocals ? " |" : "", " v", fs->vals[i], fs->owned[i] ? "+" : "");
+    static const char *const vkind_names[VK_KINDS] = { "int", "float", "bool", "tuple", "iter", "dict", "list", "method", "fields" };
+    if (!LU_IS_VIRT(r)) {
+        fprintf(out, " v%d", r);
+        return;
+    }
+    lu_v real;
+    struct lu_vobj *o = lu_fs_vobj(f, fs, LU_VIRT_ID(r), &real);
+    if (real != LU_NOV) {
+        fprintf(out, " o%d=v%d", LU_VIRT_ID(r), real);
+        return;
+    }
+    fprintf(out, " o%d:%s(", LU_VIRT_ID(r), vkind_names[o->kind]);
+    for (int i = 0; i < o->n; i++) {
+        dump_ref(f, fs, o->f[i], out);
+    }
+    fprintf(out, " )");
+}
+
+static void
+dump_fs(struct lu_func *f, struct lu_fs *fs, FILE *out)
+{
+    for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
+        fprintf(out, " [%s@%d", PyUnicode_AsUTF8(p->code->co_name), p->pc);
+        for (int i = 0; i < p->nlocals + p->nstack; i++) {
+            fprintf(out, "%s", i == p->nlocals ? " |" : "");
+            dump_ref(f, fs, *lu_fs_slot(p, i), out);
         }
         fprintf(out, "]");
+    }
+    for (int i = 0; i < fs->nheld; i++) {
+        fprintf(out, " held v%d", fs->held[i]);
     }
 }
 
@@ -370,20 +396,28 @@ lu_ir_dump(struct lu_func *f, FILE *out)
             if (in->flags & INS_DEAD) {
                 continue;
             }
-            fprintf(out, "  v%d = %s%s r%d", v, lu_op_names[in->op], in->flags & INS_VIRTUAL ? "(virtual)" : "",
-                    in->rep);
+            fprintf(out, "  v%d = %s%s r%d", v, lu_op_names[in->op], in->flags & INS_OWNED ? "+" : "", in->rep);
             if (in->a != LU_NOV) fprintf(out, " v%d", in->a);
             if (in->b != LU_NOV) fprintf(out, " v%d", in->b);
             if (in->c != LU_NOV) fprintf(out, " v%d", in->c);
             for (int j = 0; j < in->nargs; j++) {
                 fprintf(out, " v%d", in->args[j]);
             }
-            fprintf(out, " #%lld", (long long)in->imm);
+            if (in->op == OP_HELPER) {
+                fprintf(out, " %s", lu_helpers[in->imm].name);
+                if (in->nargs > 0 && f->ins[in->args[0]].op == OP_CONST && f->ins[in->args[0]].imm != 0
+                    && PyCFunction_Check((PyObject *)(intptr_t)f->ins[in->args[0]].imm)) {
+                    fprintf(out, ":%s", ((PyCFunctionObject *)(intptr_t)f->ins[in->args[0]].imm)->m_ml->ml_name);
+                }
+            }
+            else {
+                fprintf(out, " #%lld", (long long)in->imm);
+            }
             if (in->loc != LU_LOC_NONE) {
                 fprintf(out, " @%d", in->loc);
             }
             if (in->fs != NULL) {
-                dump_fs(in->fs, out);
+                dump_fs(f, in->fs, out);
             }
             fprintf(out, "\n");
         }

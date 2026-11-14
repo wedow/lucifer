@@ -1,23 +1,24 @@
-/* Block SSA for the optimizing tier (DESIGN 6.2), after the donor's block
-   SSA: a function is blocks of instructions, each instruction defines at
-   most one value, phis start blocks, and every instruction that can leave
-   compiled code carries the frame state to leave with.
+/* Block SSA for the optimizing tier (docs/design/jit-architecture.md): a
+   function is blocks of instructions, each instruction defines at most one
+   value, phis start blocks, and every instruction that can leave compiled
+   code carries the frame state to leave with.
 
-   Frame states follow the donor's BEFORE rule: a state names the values of
-   every local and stack entry of each frame at a bytecode boundary that has
-   not executed, so a guard that fails hands the interpreter an instruction
-   to run as if compiled code had never started it. Nothing it did is
-   replayed: guards come before an instruction's first effect, and a pure
-   island (an operator whose kernel method folded into unboxed arithmetic)
-   restarts from its operator's boundary. A state is values, never
-   locations; the backend says where each value lives at each exit.
+   Values are objects (REP_OBJ), raw int64 or binary64 (REP_I64, REP_F64),
+   or a condition (REP_BIT). The graph holds only what runs: an object the
+   evaluator kept virtual (runtime/jit/eval.c) is no instruction. It is a
+   record (struct lu_vobj) that frame states name, with its fields, and an
+   exit that names it makes it, once (runtime/jit/exit.c).
 
-   Values are objects (REP_OBJ, a PyObject * the code holds a reference to
-   or borrows), raw int64 or binary64 (REP_I64, REP_F64), or a condition
-   (REP_BIT, 0 or 1). A raw value reaches the interpreter or the heap only
-   through a box (BOX_INT, BOX_FLOAT); a box whose every use is a frame
-   state, an unbox or a release is virtual and allocates only if a deopt
-   needs it, once per exit, so aliases stay one object (DESIGN 4.5). */
+   A frame state names, per frame, every local and stack entry at a
+   bytecode boundary that has not executed, innermost frame first: a guard
+   that fails hands the interpreter an instruction to run as if compiled
+   code had never started it. An inlined frame is nothing but its state.
+
+   References: an object value flagged INS_OWNED carries one reference of
+   compiled code's from its definition until the evaluator releases it
+   (DECREF), which it does where the last slot of the state stops naming
+   it. A slot holds no reference of its own; an exit gives every slot it
+   fills a new one and then drops compiled code's. */
 #ifndef LU_JIT_SSA_H
 #define LU_JIT_SSA_H
 
@@ -33,6 +34,11 @@
 
 typedef int32_t lu_v;           /* a value: the index of the instruction that defines it */
 #define LU_NOV (-1)
+/* In a frame state or a virtual object's field, a value may instead name
+   a virtual object by its id. Instruction operands never do. */
+#define LU_VIRT(id) (-2 - (id))
+#define LU_IS_VIRT(r) ((r) <= -2)
+#define LU_VIRT_ID(r) (-2 - (r))
 
 enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
 
@@ -43,9 +49,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
 #define IF_CALL     0x08        /* calls C: every register is dead across it */
 #define IF_PURE     0x10        /* a value of its operands alone */
 #define IF_TERM     0x20        /* ends its block */
-#define IF_PY       0x40        /* may run Python: the frame must be observable */
-#define IF_SEEN     0x80        /* may release a value whose finalizer runs Python, or park the task:
-                                   a walker may see the frame, which publishes its state (lu_publishes) */
+#define IF_SEEN     0x40        /* its C may let a walker see the frames: it publishes its state */
 
 /* X(name, result rep, flags) */
 #define LU_IR_OPS(X) \
@@ -58,7 +62,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(PHI, REP_NONE, 0)                 /* args: one input per predecessor; rep set by the builder */ \
     X(UNBOX_INT, REP_I64, IF_GUARD | IF_EFFECT)     /* a: an exact int that fits one digit; kept, since */ \
     X(UNBOX_FLOAT, REP_F64, IF_GUARD | IF_EFFECT)   /* a's known type lets later code fold */ \
-    X(BOX_INT, REP_OBJ, 0)              /* a: i64; a new reference; b: the object it was unboxed from; c: a bit, NULL when 0 */ \
+    X(BOX_INT, REP_OBJ, 0)              /* a: i64; a new reference; b: the object it is when not NULL */ \
     X(BOX_FLOAT, REP_OBJ, 0)            /* a: f64; a new reference; b: the same */ \
     X(I2F, REP_F64, IF_PURE)            /* a: i64, rounded as int.__float__ */ \
     X(ADD_I, REP_I64, IF_GUARD)         /* overflow deopts */ \
@@ -85,7 +89,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(CMP_F, REP_BIT, IF_PURE)          /* imm: Py_LT .. Py_GE, false on NaN except != */ \
     X(IS, REP_BIT, IF_PURE)             /* a is b */ \
     X(NOT, REP_BIT, IF_PURE) \
-    X(BOOL, REP_OBJ, IF_PURE)           /* a: bit; Py_True or Py_False, immortal; imm 1 (virtual): of NOT a */ \
+    X(BOOL, REP_OBJ, IF_PURE)           /* a: bit; Py_True or Py_False, immortal */ \
     X(TRUTH, REP_BIT, IF_RAISE | IF_CALL | IF_EFFECT)       /* a: any object, as TO_BOOL decides */ \
     X(GUARD_TYPE, REP_NONE, IF_GUARD)   /* Py_TYPE(a) == imm */ \
     X(GUARD_VERSION, REP_NONE, IF_GUARD)        /* a version == imm; imm2 says which (GV_*) */ \
@@ -93,10 +97,9 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(GUARD_BIT, REP_NONE, IF_GUARD)    /* a == imm */ \
     X(GUARD_NOT_NULL, REP_NONE, IF_GUARD)       /* a != NULL */ \
     X(GUARD_DEPTH, REP_NONE, IF_GUARD | IF_EFFECT)  /* the task's py_recursion_remaining >= imm (at entry) */ \
-    X(GUARD_FRAMES, REP_NONE, IF_GUARD | IF_EFFECT) /* a call left no inlined frame pushed and the root     \
-                                                       compiled code's (runtime/jit/deopt.c); imm 1: and    \
-                                                       without a frame object another holds; imm2: the      \
-                                                       instruction's first IR instruction */ \
+    X(GUARD_FRAMES, REP_NONE, IF_GUARD | IF_EFFECT) /* no walker made the frames real during the instruction's   \
+                                                       calls (runtime/jit/exit.c); imm 1: nor holds the root's  \
+                                                       frame object, which would take its locals at a return */ \
     X(LOAD, REP_NONE, 0)                /* *(a + imm), rep set by the builder; a borrowed object; imm2 4: 32 bits */ \
     X(STORE, REP_NONE, IF_EFFECT)       /* *(a + imm) = b, raw */ \
     X(LIST_ITEM, REP_OBJ, IF_GUARD)    /* a: an exact list (imm 1: tuple), b: i64 index; deopts out of range; publishes on its slow path (parked_call) */ \
@@ -114,14 +117,15 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(INLINE_STORE_I, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* the same for the int b */ \
     X(GLOBAL_LOAD, REP_OBJ, IF_GUARD | IF_CALL) /* imm: the dict, imm2: keys version << 32 | entry */ \
     X(INCREF, REP_NONE, IF_EFFECT) \
-    X(DECREF, REP_NONE, IF_EFFECT | IF_CALL | IF_SEEN)  /* imm 1: may run a finalizer, published at fs when it has one */ \
-    X(RITER_NEXT, REP_I64, 0)           /* a: an exact range_iterator; the next value, stepping it */ \
+    X(DECREF, REP_NONE, IF_EFFECT | IF_CALL)    /* imm 1: its type may run code when freed: publishes fs */ \
+    X(RITER_NEXT, REP_I64, IF_EFFECT)   /* a: an exact range_iterator; the next value, stepping it */ \
     X(RITER_DONE, REP_BIT, 0)           /* a: an exact range_iterator: exhausted */ \
-    X(HELPER, REP_NONE, IF_EFFECT | IF_CALL)    /* imm: the helper, args; rep and flags from it */ \
+    X(HELPER, REP_NONE, IF_EFFECT | IF_CALL)    /* imm: the helper, args; rep and effects from it */ \
     X(JUMP, REP_NONE, IF_TERM) \
     X(BRANCH, REP_NONE, IF_TERM)        /* a: bit; to succ[0] when 1 */ \
     X(RETURN, REP_NONE, IF_TERM)        /* a: the frame's result, owned */ \
-    X(UNLINK, REP_NONE, IF_EFFECT)      /* the root frame leaves the stack before its locals go */ \
+    X(UNLINK, REP_NONE, IF_EFFECT)      /* the root frame leaves the stack before its locals go (a generator's stays) */ \
+    X(DEPTH, REP_NONE, IF_EFFECT)       /* the task's py_recursion_remaining += imm: an inlined frame is entered or left */ \
     X(DEOPT, REP_NONE, IF_TERM)         /* leaves unconditionally at fs; imm: the reason */ \
     X(POLL, REP_NONE, IF_GUARD)         /* a back-edge: leaves at fs if the poll word is set */ \
     X(CHECK_LIVE, REP_NONE, IF_GUARD | IF_EFFECT)   /* leaves at fs, as a poll does, once the unit is dead */
@@ -145,44 +149,81 @@ enum lu_op {
 extern const char *const lu_op_names[OP_COUNT];
 extern const uint8_t lu_op_flags[OP_COUNT];
 
+/* A virtual object: an object the code made that nothing has yet needed
+   to exist. Its kind says how to make it and which operations the
+   evaluator answers from its fields. Records are immutable: a change
+   makes a new record under the same id (struct lu_bind). */
+enum lu_vkind {
+    VK_BOX_INT,                 /* f[0]: its value, an i64; f[1] (n 2): the object it is where it came in as one, else NULL */
+    VK_BOX_FLOAT,               /* f[0]: its value, an f64; f[1]: the same */
+    VK_BOOL,                    /* f[0]: a bit; neg: True when it is 0 */
+    VK_TUPLE,                   /* f[i]: item i */
+    VK_SEQITER,                 /* type: the list or tuple iterator's; f[0]: the sequence, f[1]: the index, an i64 */
+    VK_DICT,                    /* an exact dict of str keys in order: f[2i] the key (a constant), f[2i+1] its value */
+    VK_LIST,                    /* an exact list: f[i] item i */
+    VK_METHOD,                  /* a bound method: f[0] its function, f[1] its self */
+    VK_FIELDS,                  /* an instance of a kernel type with fields (lu_field_offset): f[i] field i, the
+                                   constant NULL while unset */
+    VK_KINDS
+};
+
+/* Kinds whose object may change once it exists: a record of one says
+   nothing after that. */
+#define LU_VKIND_MUTABLE(kind) ((kind) == VK_SEQITER || (kind) == VK_DICT || (kind) == VK_LIST || (kind) == VK_FIELDS)
+
+struct lu_vobj {
+    uint8_t kind;               /* enum lu_vkind */
+    uint8_t neg;
+    int n;
+    PyTypeObject *type;         /* the exact type of the object it makes */
+    lu_v *f;                    /* values, or other virtual objects */
+};
+
+/* What a path knows of virtual object `id` beyond its first record: the
+   record it has now, and the value that is the object once the path made
+   it (LU_NOV while it is virtual). A real object keeps its record while
+   its kind cannot change (a tuple's items stay known); one that can has
+   none (obj NULL). */
+struct lu_bind {
+    int id;
+    lu_v real;
+    struct lu_vobj *obj;
+};
+
 /* A frame state: the frame `code` at the boundary before the instruction
    at pc (code units), and for an inlined frame, its caller's state, which
-   is at the boundary after the call with the call's operands gone. */
+   is at the boundary after the call with the call's operands gone. The
+   state an instruction holds (the innermost frame's) also carries the
+   path's virtual objects and the references compiled code holds that no
+   slot names (held), which an exit there releases. */
 struct lu_fs {
     struct lu_fs *caller;
     PyCodeObject *code;
     PyObject *func;
     int pc;
     int nlocals, nstack;
-    lu_v *vals;                 /* locals, then the stack bottom up; LU_NOV is NULL */
-    uint8_t *owned;             /* per entry: compiled code holds a reference for it */
-    uint8_t ret;                /* how an inlined frame returns when rebuilt: LU_RETURN_FOR_ITER for
-                                   the step of a FOR_ITER (ssa_build.c iter_step), else 0 (a push) */
-    uint8_t gen;                /* a generator's frame its caller resumed in line: the generator is
-                                   the caller's top stack entry (ssa_build.c inline_resume), and this
-                                   says how it returns (LU_RETURN_FOR_ITER or _NEXT; 0: not one) */
+    lu_v *locals;               /* LU_NOV is NULL. States of one frame whose locals are the same share them */
+    lu_v *stack;                /* bottom up */
+    uint8_t ret;                /* how an inlined frame returns when rebuilt (enum lu_frame_return) */
+    struct lu_bind *binds;
+    int nbinds;
+    lu_v *held;
+    int nheld;
 };
+
+/* Slot i of the frame: its locals, then its stack. */
+static inline lu_v *
+lu_fs_slot(const struct lu_fs *p, int i)
+{
+    return i < p->nlocals ? &p->locals[i] : &p->stack[i - p->nlocals];
+}
 
 /* Instruction flags kept per instruction. */
 enum {
     INS_DEAD = 1,               /* removed */
-    INS_VIRTUAL = 2,            /* a box nothing observes: built only at an exit */
-    INS_NOSTRESS = 4,           /* a guard after its instruction's effect: deopt:N never fails it; a
-                                   Python-running helper whose frames deopt:N never keeps */
-    INS_CAUGHT = 8,             /* a raising helper whose NULL result the code branches on: a handler takes it */
-    INS_FRESH = 16,             /* an inline store into an instance this code made that no other thread
-                                   can have seen yet, of a name it lacks: it takes no lock, releases
-                                   nothing and publishes nothing (ssa_opt.c 3c) */
+    INS_OWNED = 2,              /* an object value that carries a reference of compiled code's */
+    INS_NOSTRESS = 4,           /* a guard after its instruction's effect: deopt:N never fails it */
 };
-/* A virtual object (ssa_opt.c step 3c) is a tuple build, an instance
-   allocation, a loop iterator (lu_iter_type) or a phi of such objects,
-   flagged INS_VIRTUAL: never made in compiled code, but by an exit that
-   names it, once per exit, with the fields it has there
-   (lu_object_fields). A tuple's or an iterator's fields are its
-   arguments, a phi's the phis of its inputs' fields (its `fields`; its c
-   names an input whose shape it has). An instance's fields are the stores
-   into it, which stay in place, virtual, so that where they are says
-   which fields an exit sees. */
 
 struct lu_ins {
     uint8_t op;
@@ -193,11 +234,11 @@ struct lu_ins {
     lu_v a, b, c;
     int64_t imm, imm2;
     struct lu_fs *fs;           /* where a guard or a raise leaves */
-    struct lu_fs *origin;       /* a guard moved out of a loop: where it was, which its failure blames */
+    PyCodeObject *blame;        /* a guard that speculates for another site (a loop header's): its failure counts there */
+    int blame_pc;
+    struct lu_prof *prof;       /* a guard on a learned type, or on a report of one (target.h) */
     PyCodeObject *src;          /* the bytecode it was built for (NULL: the optimizer's), for the counts */
     int src_pc;
-    int nfields;                /* a virtual instance: its stores */
-    lu_v *fields;
     int nargs;
     lu_v *args;                 /* PHI: per predecessor; HELPER: the arguments */
     /* The backend's: the position in the linear order, and the location. */
@@ -218,21 +259,24 @@ struct lu_block {
     struct lu_fs *entry_fs;     /* a join's state at its start, its phis as values: a loop's guards move before it */
 };
 
-/* Helpers compiled code calls (runtime/jit/helpers.c). */
+/* What a helper's C may do, which decides what the evaluator must have
+   real and what it forgets across the call. */
+enum {
+    FX_RAISE = 1,               /* a NULL (or -1 for REP_I64/BIT) result raised */
+    FX_PY = 2,                  /* may run Python: frames are observable and anything reachable may change */
+    FX_SEEN = 4,                /* may release a value of any type, or park: frames are observable */
+    FX_ALLOC = 8,               /* allocates */
+    FX_DECLINES = 16,           /* may answer LU_JIT_DECLINED with nothing done: the interpreter runs the instruction */
+};
+
+/* Helpers compiled code calls (runtime/jit/helpers.c). None keeps a
+   reference it is given; an object result is a new reference. */
 struct lu_helper {
     void *fn;
     const char *name;
     uint8_t rep;                /* result */
-    uint8_t flags;              /* IF_RAISE: a NULL (or -1 for REP_I64/BIT) result raised */
-    uint8_t nargs;
-};
-
-/* A value that is a generator, made by a call of a generator function
-   whose code (and function, when it is a constant) the builder knows. */
-struct lu_gen_made {
-    lu_v v;
-    PyCodeObject *code;
-    PyFunctionObject *func;
+    uint8_t fx;
+    uint8_t nargs;              /* 0: an array and its length */
 };
 
 struct lu_func {
@@ -244,9 +288,6 @@ struct lu_func {
     int norder;
     PyCodeObject *code;
     int entry_pc;
-    int direct;                 /* the call entry of a code compiled code may call directly */
-    int resume;                 /* a generator's resume unit: an entry per resume point (frame->instr picks) */
-    int nborrowed;              /* leading parameters the root borrows (ssa_build.c) */
     int stress;                 /* deopt:N is on: guards count */
     PyObject **consts;          /* strong references the unit keeps */
     int nconsts, capconsts;
@@ -257,24 +298,24 @@ struct lu_func {
     const char *fail;           /* why the compile gave up */
     int bailouts[256];          /* side exits planted per base opcode */
     int nspill;                 /* spill words the allocator used */
-    PyTypeObject **known;       /* per value: the exact type a guard proved, or NULL */
-    int *known_block;           /* and the block of that guard */
+    PyTypeObject **known;       /* per value: the exact type its definition gives it, or NULL */
     int capknown;
+    struct lu_vobj **vobjs;     /* virtual objects by id: their first records */
+    int nvobjs, capvobjs;
     int ninlined;
-    int room;                   /* the recursion budget the deepest inlined frame needs */
     int loops;                  /* back edges built: one entry may run unbounded work */
     int sites, cold;            /* sites with feedback, and those the interpreter never ran */
-    int unfed;                  /* an operator site had no classes noted yet (lu_jit_want_classes) */
+    int refused;                /* calls left out of line for want of budget */
+    int budget;                 /* instructions past which the evaluator inlines no more (jit.c) */
     struct lu_fdep *deps;       /* the facts the code relies on between polls */
     int ndeps, capdeps;
     int *idom;                  /* per block, once optimized: its immediate dominator (-1: unreached) */
-    struct lu_gen_made *gens;   /* values that are generators of a known code (ssa_build.c) */
-    int ngens, capgens;
 };
 
 /* Building and editing. */
 void *lu_ir_alloc(struct lu_func *f, size_t size);
 int lu_ir_block(struct lu_func *f);
+/* A block of -1 is none: a constant, which runs nowhere. */
 lu_v lu_ir_emit(struct lu_func *f, int block, int op, int rep, lu_v a, lu_v b, lu_v c, int64_t imm);
 void lu_ir_edge(struct lu_func *f, int from, int to);
 lu_v lu_ir_const(struct lu_func *f, int block, PyObject *o);
@@ -289,28 +330,29 @@ lu_ins(struct lu_func *f, lu_v v)
     return &f->ins[v];
 }
 
-/* The passes, in order (runtime/jit/ssa_*.c). Each returns 0, or -1 with
+/* The passes, in order (runtime/jit/eval.c, opt.c, regalloc.c). Each returns 0, or -1 with
    f->fail set. */
 int lu_ssa_build(struct lu_func *f, struct lu_frame *frame);
 int lu_ssa_optimize(struct lu_func *f);
+/* Guards a dependency stands for go (runtime/jit/facts.c). After the order is set. */
+int lu_ssa_facts(struct lu_func *f);
 int lu_regalloc(struct lu_func *f);
 
-/* Whether instruction s runs before x on every path to x. */
-int lu_ssa_before(struct lu_func *f, lu_v s, lu_v x);
-/* The fields virtual object v has where instruction `at` runs: their
-   values into vals (room for every field) and their places into offs (an
-   instance's or an iterator's byte offsets, a tuple's indexes); the count. */
-int lu_object_fields(struct lu_func *f, lu_v v, lu_v at, lu_v *vals, int32_t *offs);
-/* The instruction whose shape virtual object v has (the build, or a phi's
-   input), or LU_NOV when v is not a virtual object. */
-lu_v lu_object_shape(struct lu_func *f, lu_v v);
-/* The place of field k of an object of shape's kind whose fields are its
-   arguments: a tuple's index, an iterator's byte offset. */
-int32_t lu_object_place(const struct lu_ins *shape, int k);
+/* A new virtual object record of n fields (zeroed), and a new id for it. */
+struct lu_vobj *lu_ir_vobj(struct lu_func *f, int kind, PyTypeObject *type, int n);
+int lu_ir_vobj_id(struct lu_func *f, struct lu_vobj *o);
 
-/* The type of the loop iterator a listiter_new, tupleiter_new or
-   rangeiter_new helper makes (ssa_build.c for_step), else NULL. */
-PyTypeObject *lu_iter_type(const struct lu_ins *in);
+/* What state fs knows of virtual object id: its record (NULL: none, it is
+   real and may have changed) and, in *real, the value that is the object
+   (LU_NOV while virtual). */
+struct lu_vobj *lu_fs_vobj(struct lu_func *f, const struct lu_fs *fs, int id, lu_v *real);
+
+/* Calls fn(f, v, arg) for every instruction value an exit at fs reads:
+   its slots, the fields of the virtual objects they reach, the objects
+   virtual ones became, and what it holds. A value may come more than once. */
+void lu_fs_each(struct lu_func *f, const struct lu_fs *fs, void (*fn)(struct lu_func *, lu_v, void *), void *arg);
+/* The same for the slots and fields themselves, to rewrite them. */
+void lu_fs_rewrite(struct lu_func *f, struct lu_fs *fs, lu_v (*fn)(lu_v));
 
 /* JIT build statistics, for -X lucifer_jit_stats. */
 extern unsigned long lu_jit_bailout_counts[256];

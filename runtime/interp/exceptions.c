@@ -1031,7 +1031,11 @@ static PyObject *
 prim_caller_traceback(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(0);
-    struct lu_frame *f = ((struct lu_frame *)PyThreadState_Get()->current_frame)->previous;
+    struct lu_frame *f = lu_frame_current(PyThreadState_Get());
+    if (f == NULL) {
+        return NULL;
+    }
+    f = f->previous;
     PyObject *fr = lu_frame_object(f);
     PyObject *tb = fr != NULL
         ? (PyObject *)tb_new(fr, NULL, (int)(lu_frame_lasti(f) * sizeof(lu_codeunit))) : NULL;

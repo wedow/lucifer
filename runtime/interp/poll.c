@@ -19,7 +19,7 @@ static int
 in_builtin(PyThreadState *ts)
 {
     struct lu_frame *f = (struct lu_frame *)ts->current_frame;
-    return f != NULL && f->owner != LU_FRAME_C_ENTRY && (f->code->co_flags & LU_CO_KERNEL);
+    return f != NULL && f->owner != LU_FRAME_C_ENTRY && (lu_frame_running_code(f)->co_flags & LU_CO_KERNEL);
 }
 
 #define LU_POLL_NO_PRODUCER (LU_POLL_GIL_DROP_REQUEST | LU_POLL_JIT_INVALIDATE_COLD \

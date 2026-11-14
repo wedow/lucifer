@@ -1323,7 +1323,7 @@ void lu_fh_thread_exit(PyThreadState *ts);
 void lu_fh_fatal(const char *func, const char *msg) __attribute__((noreturn));
 PyObject *lu_function_new(PyObject *code, PyObject *globals);
 /* A function of code in globals that no watcher hears of: what compiled
-   code names the frames of an inlined closure by (runtime/jit/ssa_build.c). */
+   code names the frames of an inlined closure by (runtime/jit/eval_call.c). */
 PyObject *lu_function_template(PyObject *code, PyObject *globals);
 /* function.__new__ over (code, globals, name, defaults, closure, kwdefaults). */
 PyObject *lu_function_from_args(PyObject *const *args);
