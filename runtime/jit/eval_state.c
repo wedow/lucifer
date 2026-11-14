@@ -286,6 +286,29 @@ lu_ev_const(struct ctx *c, lu_v r)
     return (PyObject *)(intptr_t)I(c, r)->imm;
 }
 
+/* An object's class can be reassigned (object.__class__, prim/type.c
+   set_class), by any code the unit calls. So what is known of the type of
+   an object whose class allows it is relied on as of that class's
+   version: a dependency of the unit, which the reassignment takes back,
+   and which compiled code learns of where it checks its frames after a
+   call (GUARD_FRAMES). A class with no version to rely on is not known. */
+static PyTypeObject *
+relied(struct ctx *c, PyTypeObject *t)
+{
+    struct gctx *g = c->g;
+    if (t == NULL || t == g->relied || ((t->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) && !PyType_IsSubtype(t, &PyModule_Type))) {
+        return t;
+    }
+    uint32_t version = lu_type_assign_version(t) ? __atomic_load_n(&t->tp_version_tag, __ATOMIC_ACQUIRE) : 0;
+    if (version == 0) {
+        return NULL;
+    }
+    struct lu_fdep dep = { .kind = LU_DEP_TYPE, .obj = version, .code = c->code, .pc = c->pc };
+    lu_ir_dep(g->f, &dep);
+    g->relied = t;
+    return t;
+}
+
 PyTypeObject *
 lu_ev_type(struct ctx *c, lu_v r)
 {
@@ -299,14 +322,14 @@ lu_ev_type(struct ctx *c, lu_v r)
     }
     PyObject *k = lu_ev_const(c, r);
     if (k != NULL) {
-        return Py_TYPE(k);
+        return relied(c, Py_TYPE(k));
     }
     struct lu_func *f = c->g->f;
     if (r < f->capknown && f->known[r] != NULL) {
-        return f->known[r];
+        return relied(c, f->known[r]);
     }
     struct fact *fa = lu_ev_fact(c, r, 0);
-    return fa != NULL ? fa->t : NULL;
+    return fa != NULL ? relied(c, fa->t) : NULL;
 }
 
 struct lu_fs *

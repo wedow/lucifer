@@ -4,9 +4,11 @@
    and defaults, a class's version) becomes a dependency of the unit
    (runtime/jit/deps.c). A writer that changes the fact kills the unit,
    which then leaves at its next poll; the running thread's own change
-   must reach it at once, so where the unit may have run code or mutated
-   since it last knew itself alive, the guard becomes a check that the
-   unit lives, and elsewhere it goes.
+   must reach it at once: a unit with dependencies checks that it lives
+   where it checks its frames after an instruction that may have run code
+   (GUARD_FRAMES), and where it may have run code or mutated since it
+   last knew itself alive, the guard becomes such a check; elsewhere it
+   goes.
 
    A site whose fact a writer took back before (lu_jit_nohoist) keeps its
    guard in place: a global rebound again and again must not kill the
@@ -123,7 +125,7 @@ lu_ssa_facts(struct lu_func *f)
                     }
                     ok = 1;
                 }
-                else if (in->op == OP_POLL || in->op == OP_CHECK_LIVE) {
+                else if (in->op == OP_POLL || in->op == OP_CHECK_LIVE || in->op == OP_GUARD_FRAMES) {
                     ok = 1;
                 }
                 else if (unsettles(in)) {

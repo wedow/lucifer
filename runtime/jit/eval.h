@@ -164,6 +164,7 @@ struct gctx {
     const lu_v *base_of;
     uint32_t epoch;             /* moves when a local, a virtual object or the frames change (lu_ev_changed) */
     int maxdepth;               /* the deepest inlined frame */
+    PyTypeObject *relied;       /* the class last made a dependency for what is known of an object's type */
 };
 
 /* Per-code JIT state the evaluator consults (jit.c). */
