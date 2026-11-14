@@ -2579,7 +2579,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jmp(a, take);
         bind(a, have);
         alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED_INT);
-        jcc(a, CC_BE, unlock_slow);             /* an unboxed value */
+        jcc(a, CC_A, take);
+        alu_rr(a, ALU_XOR, RBX, RBX);           /* an unboxed value: no object to release */
         bind(a, take);
         load32(a, RCX, RSI, offsetof(PyObject, ob_ref_local));
         rex(a, 0, 0, 0, RCX);
