@@ -138,9 +138,31 @@ is_user_frame(struct lu_frame *f)
     return 1;
 }
 
-static void
-dump_frames(int fd, struct lu_frame *f)
+static struct lu_frame *
+top_frame(PyThreadState *ts)
 {
+    return ts != NULL ? (struct lu_frame *)ts->current_frame : NULL;
+}
+
+/* The code unit frame f of task ts last started. Another task's frame is
+   read through its saved instruction alone: this thread need not be
+   attached, so no stop of the world keeps a running unit's published
+   state (jit_desc), which a collection may free, alive meanwhile, and
+   compiled code's frame shows the instruction it entered at. */
+static Py_ssize_t
+frame_lasti(PyThreadState *ts, struct lu_frame *f)
+{
+    if (ts == PyThreadState_GetUnchecked()) {
+        return lu_frame_lasti(f);
+    }
+    lu_codeunit *instr = __atomic_load_n(&f->instr, __ATOMIC_RELAXED);
+    return lu_instr_before(f->code, instr) - lu_code_start(f->code);
+}
+
+static void
+dump_frames(int fd, PyThreadState *ts)
+{
+    struct lu_frame *f = top_frame(ts);
     int depth = 0, shown = 0;
     for (; f != NULL && depth < 4 * MAX_FRAMES; f = f->previous, depth++) {
         if (!is_user_frame(f)) {
@@ -154,7 +176,7 @@ dump_frames(int fd, struct lu_frame *f)
         outs(fd, "  File \"");
         out_text(fd, co->co_filename);
         outs(fd, "\", line ");
-        int line = PyCode_Addr2Line(co, (int)(lu_frame_lasti(f) * sizeof(lu_codeunit)));
+        int line = PyCode_Addr2Line(co, (int)(frame_lasti(ts, f) * sizeof(lu_codeunit)));
         if (line >= 0) {
             out_dec(fd, line);
         }
@@ -168,12 +190,6 @@ dump_frames(int fd, struct lu_frame *f)
     if (shown == 0) {
         outs(fd, "  <no Python frame>\n");
     }
-}
-
-static struct lu_frame *
-top_frame(PyThreadState *ts)
-{
-    return ts != NULL ? (struct lu_frame *)ts->current_frame : NULL;
 }
 
 /* The tasks of threads (the main task and the threads started by _thread), for
@@ -220,7 +236,7 @@ dump_thread(int fd, PyThreadState *ts, int current)
     outs(fd, current ? "Current thread 0x" : "Thread 0x");
     out_hex(fd, (uintptr_t)ts->thread_id, 2 * sizeof(void *));
     outs(fd, " (most recent call first):\n");
-    dump_frames(fd, top_frame(ts));
+    dump_frames(fd, ts);
 }
 
 /* The stacks of the threads other than `current`, then current's: all threads
@@ -231,7 +247,7 @@ dump_threads(int fd, PyThreadState *current, int all_threads)
 {
     if (!all_threads) {
         outs(fd, "Stack (most recent call first):\n");
-        dump_frames(fd, top_frame(current));
+        dump_frames(fd, current);
         return;
     }
     int first = 1;
@@ -321,7 +337,7 @@ dump_fatal(int fd, const char *header, int all_threads, int c_stack, int in_hand
     }
     outs(fd, "Stack (most recent call first):\n");
     if (ts != NULL) {
-        dump_frames(fd, top_frame(ts));
+        dump_frames(fd, ts);
     }
     else {
         outs(fd, "  <tstate is freed>\n");
@@ -488,7 +504,7 @@ lu_fh_fatal(const char *func, const char *msg)
     PyThreadState *ts = PyThreadState_GetUnchecked();
     outs(fd, "Stack (most recent call first):\n");
     if (ts != NULL) {
-        dump_frames(fd, top_frame(ts));
+        dump_frames(fd, ts);
     }
     else {
         outs(fd, "  <tstate is freed>\n");

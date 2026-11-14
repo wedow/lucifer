@@ -585,6 +585,7 @@ struct lu_task {
     int gc_alloc_count;         /* the carrier's buffered GC allocation count, carried
                                    while the task is between carriers */
     int sent_returned;          /* compiled SEND's kernel send: whether the receiver returned */
+    struct lu_jit_act *jit_act; /* the innermost activation of a compiled unit (runtime/jit/jit.c) */
 };
 
 /* Quiescent-state-based reclamation (runtime/thread/qsbr.c), after

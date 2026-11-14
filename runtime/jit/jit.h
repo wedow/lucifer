@@ -390,6 +390,13 @@ struct lu_fdep {
 /* Releases a code object's compiled units (code_dealloc). */
 void lu_jit_code_free(PyCodeObject *code);
 
+/* A collection frees dead units (runtime/jit/jit.c): with the world
+   stopped, it takes those no activation is in off every list a thread
+   reads, and frees them once the world runs again. */
+struct lu_unit;
+struct lu_unit *lu_jit_reclaim(PyInterpreterState *interp);
+void lu_jit_reclaim_free(struct lu_unit *units);
+
 /* Prints the tier's counts to stderr (-X lucifer_jit_stats), at exit. */
 void lu_jit_report(void);
 

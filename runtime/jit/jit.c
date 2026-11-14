@@ -4,15 +4,14 @@
 
    Compiles run synchronously in the thread that found the code hot, one
    per code object at a time; another thread meanwhile interprets. A unit
-   is published by a release store after it is complete, and never freed
-   while its code lives. A unit may rely on what only a writer changes (a
-   type's version, a dict's keys or one key's value, a function's code)
-   between polls: a change another thread makes reaches it at its next
-   poll, and the running thread's own at once (DESIGN 6.2 step 8,
-   runtime/jit/deps.c). A unit also goes dead when one guard keeps failing,
-   which marks its instruction not to be speculated on again (the donor's
-   exit-driven recompile): each such death moves one site toward generic,
-   once.
+   is published by a release store after it is complete. A unit may rely
+   on what only a writer changes (a type's version, a dict's keys or one
+   key's value, a function's code) between polls: a change another thread
+   makes reaches it at its next poll, and the running thread's own at once
+   (DESIGN 6.2 step 8, runtime/jit/deps.c). A unit also goes dead when one
+   guard keeps failing, which marks its instruction not to be speculated
+   on again (the donor's exit-driven recompile): each such death moves one
+   site toward generic, once.
 
    An exit no recompile can remove (an instruction the tier does not
    compile, an exception the unit does not handle, a guard a unit built
@@ -43,7 +42,11 @@
    the interpreter runs that entry a few times first, once per entry. So
    is one that met an operator site without classes, which the
    interpreter notes only at sites a build asked about: code no build
-   reads pays nothing for them. */
+   reads pays nothing for them.
+
+   A dead unit is freed once nothing can be in it (reclaim, below): not
+   when its code dies, which module code never does, nor at once, since
+   activations of it may still run. */
 #include "jit/jit.h"
 #include "jit/target.h"
 #include "interp/specialize.h"
@@ -87,8 +90,7 @@ struct lu_jit_code {
     int compiling;              /* a thread is compiling: others interpret */
     int disabled;               /* LUCIFER_JIT_ONLY does not list it */
     int level;                  /* the wait's doublings: retirements and failed compiles, less decay */
-    struct lu_unit *units;
-    struct lu_unit *retired;    /* units off the list, freed with the code */
+    struct lu_unit *units;      /* live ones and dead ones not yet freed */
     int ncode;
     uint8_t *nospec;            /* per code unit: NOSPEC, do not speculate; NOHOIST, keep its guards in place */
     uint16_t *fails;            /* per code unit: guard failures */
@@ -472,9 +474,54 @@ note_failure(const char *why)
     }
 }
 
+/* An activation of a unit, linked from its task (freeing dead units, below). */
+struct lu_jit_act {
+    struct lu_unit *unit;
+    struct lu_jit_act *outer;
+};
+
+/* The dead units not yet freed, the count of them, and of those freed. */
+static struct { pthread_mutex_t lock; struct lu_unit *head; unsigned long n, freed; } dying = {
+    .lock = PTHREAD_MUTEX_INITIALIZER };
+
+static void
+dying_unlink(struct lu_unit *u)
+{
+    *u->dying_pprev = u->dying_next;
+    if (u->dying_next != NULL) {
+        u->dying_next->dying_pprev = u->dying_pprev;
+    }
+    u->dying_pprev = NULL;
+    dying.n--;
+}
+
+/* The unit just died: it waits on the dying list. */
+static void
+dying_add(struct lu_unit *u)
+{
+    pthread_mutex_lock(&dying.lock);
+    u->dying_next = dying.head;
+    u->dying_pprev = &dying.head;
+    if (dying.head != NULL) {
+        dying.head->dying_pprev = &u->dying_next;
+    }
+    dying.head = u;
+    dying.n++;
+    pthread_mutex_unlock(&dying.lock);
+}
+
+/* Frees a unit no thread can reach: its dependencies first, after which
+   no writer kills it, so a unit that died unpublished (a compile a writer
+   overtook) leaves the dying list here. */
 static void
 free_unit(struct lu_unit *u)
 {
+    lu_jit_deps_free(u);
+    if (u->dying_pprev != NULL) {
+        pthread_mutex_lock(&dying.lock);
+        dying_unlink(u);
+        pthread_mutex_unlock(&dying.lock);
+    }
     lu_target_free(u);
     for (int i = 0; i < u->ndeopts; i++) {
         struct lu_deopt *d = u->deopts[i];
@@ -496,7 +543,6 @@ free_unit(struct lu_unit *u)
     }
     free(u->consts);
     free(u->stress_counter);
-    lu_jit_deps_free(u);
     if (u->counts != NULL) {
         /* Its counts stay in the report's totals. */
         PyMutex_Lock(&census.lock);
@@ -514,6 +560,104 @@ free_unit(struct lu_unit *u)
         free(u->stats_name);
     }
     free(u);
+}
+
+/* Freeing dead units.
+
+   A unit is in use while an activation runs it or a thread reads its
+   code's list of units. An activation is a call of the unit's code from
+   lu_jit_enter or lu_jit_run, which links it from its task (jit_act) for
+   exactly that call, innermost first. Whatever reads a unit's code or
+   descriptions does so inside one: compiled code, its exits
+   (lu_jit_deopt returns into the unit's epilogue), walkers that read a
+   frame's published state (frame->jit_desc, which only an activation
+   sets and which is cleared before it returns), and a generator's units,
+   which leave at every yield, so a suspended generator is in none.
+
+   A unit goes on the dying list when it dies. A collection, with the
+   world stopped, marks every unit some task's activation is in, takes
+   each dying unit none is in off its code's list and the dying list, and
+   frees them once the world runs again. No thread can still reach one:
+
+   - Every other task is stopped at a poll or detached, and nothing
+     between taking a unit from the code's list (find) and linking the
+     activation polls, detaches or takes a lock that may park: the marks
+     see every activation that can run the unit.
+   - Nothing that walks a code's list (find, the loops that kill its
+     units) polls, detaches or parks either: no thread stands on the list
+     when it changes, and after it none finds the unit.
+   - A compile in progress (its code's compiling flag) may hold a unit it
+     has not linked yet, which an invalidation may have killed: that
+     code's dying units wait for the next collection.
+   - A walker reading another task's published state (sys._current_frames,
+     a frame object's line) is attached: the state was an activation's
+     when it loaded jit_desc, and no stop frees that unit before the
+     walker's next poll. faulthandler, which need not be attached, reads
+     only its own task's.
+   - The dependency buckets (deps.c) name the unit until the free unlinks
+     its dependencies under their locks, so a writer that took the unit
+     from a bucket is done with it.
+   - Code dealloc takes its units off its list and the dying list under
+     the dying lock before it frees them, so each unit is freed once; the
+     free after the restart touches neither the code nor its state, which
+     may be gone. A writer may still kill one of them while the dealloc
+     waits on a bucket's lock to free its dependencies, putting it back on
+     the dying list: a collection then finds it on no code's list and
+     leaves it to the dealloc, whose free takes it off again.
+
+   The dying lock is a pthread mutex: a holder never detaches, so none is
+   stopped while it holds the lock. */
+
+struct lu_unit *
+lu_jit_reclaim(PyInterpreterState *interp)
+{
+    if (__atomic_load_n(&dying.head, __ATOMIC_RELAXED) == NULL) {
+        return NULL;
+    }
+    pthread_mutex_lock(&interp->tasks_lock.mutex);
+    for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
+        for (struct lu_jit_act *a = ((struct lu_task *)ts)->jit_act; a != NULL; a = a->outer) {
+            a->unit->held = 1;
+        }
+    }
+    pthread_mutex_lock(&dying.lock);
+    struct lu_unit *freed = NULL;
+    for (struct lu_unit *u = dying.head, *next; u != NULL; u = next) {
+        next = u->dying_next;
+        struct lu_jit_code *jc = state_of(u->code);
+        if (u->held || jc->compiling) {
+            continue;
+        }
+        struct lu_unit **link = &jc->units;
+        while (*link != NULL && *link != u) {
+            link = &(*link)->next;
+        }
+        if (*link == NULL) {
+            continue;           /* its code is freeing it */
+        }
+        __atomic_store_n(link, u->next, __ATOMIC_RELEASE);
+        dying_unlink(u);
+        u->next = freed;
+        freed = u;
+    }
+    pthread_mutex_unlock(&dying.lock);
+    for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
+        for (struct lu_jit_act *a = ((struct lu_task *)ts)->jit_act; a != NULL; a = a->outer) {
+            a->unit->held = 0;
+        }
+    }
+    pthread_mutex_unlock(&interp->tasks_lock.mutex);
+    return freed;
+}
+
+void
+lu_jit_reclaim_free(struct lu_unit *units)
+{
+    for (struct lu_unit *u = units, *next; u != NULL; u = next) {
+        next = u->next;
+        free_unit(u);
+        count(&dying.freed, 1);
+    }
 }
 
 static struct lu_unit *
@@ -664,6 +808,7 @@ kill(struct lu_jit_code *jc, struct lu_unit *u)
     if (__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
         return;
     }
+    dying_add(u);
     count(&stats.units_dead, 1);
     unsigned long served = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
     if (2 * __atomic_load_n(&u->leaves, __ATOMIC_RELAXED) < served) {
@@ -759,25 +904,6 @@ listed(const char *list, const char *name)
     return 0;
 }
 
-/* Units of the code that were retired are moved off the list find walks
-   (a reader standing on one walks on into the retired list, which holds
-   nothing to find), and freed with the code. The compiling lock is held. */
-static void
-sweep(struct lu_jit_code *jc)
-{
-    struct lu_unit **link = &jc->units;
-    for (struct lu_unit *u = *link; u != NULL; u = *link) {
-        if (__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
-            __atomic_store_n(link, u->next, __ATOMIC_RELEASE);
-            __atomic_store_n(&u->next, jc->retired, __ATOMIC_RELEASE);
-            jc->retired = u;
-        }
-        else {
-            link = &u->next;
-        }
-    }
-}
-
 /* The unit to enter at pc, compiled now if this thread may: the checks
    that hold for the code's whole life are made here, before its first
    unit. */
@@ -799,7 +925,6 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
         || !__atomic_compare_exchange_n(&jc->compiling, &idle, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
         return NULL;
     }
-    sweep(jc);
     struct lu_unit *u = find(jc, pc);
     if (u == NULL) {
         uint64_t ticket = lu_jit_deps_begin();     /* before anything the build reads */
@@ -864,12 +989,15 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         kill(jc, u);
         return LU_JIT_NONE;
     }
+    struct lu_jit_act act = { u, task->jit_act };
+    task->jit_act = &act;
     bump_entries(u);
     int debug = _PyRuntime.jit.debug;
     if (debug) {
         fprintf(stderr, "jit: enter %s@%d\n", PyUnicode_AsUTF8(code->co_qualname), pc);
     }
     int r = u->fn(ts, frame, result);
+    task->jit_act = act.outer;
     if (debug) {
         struct lu_frame *cf = (struct lu_frame *)ts->current_frame;
         int py = cf != NULL && cf->code != NULL;       /* else back in a C caller, or its shim frame */
@@ -957,6 +1085,8 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     if (u == NULL) {
         return 0;
     }
+    struct lu_jit_act act = { u, task->jit_act };
+    task->jit_act = &act;
     if (_PyRuntime.jit.debug) {
         fprintf(stderr, "jit: call %s\n", PyUnicode_AsUTF8(code->co_qualname));
     }
@@ -966,6 +1096,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     frame->previous = &entry;
     ts->current_frame = (struct _PyInterpreterFrame *)frame;
     if (pc > 1 && prologue(frame) < 0) {
+        task->jit_act = act.outer;
         *result = lu_eval_continue(ts, 1);
         return 1;
     }
@@ -975,6 +1106,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     count(&stats.direct, 1);
     bump_entries(u);
     int r = u->fn(ts, frame, result);
+    task->jit_act = act.outer;
     if (r == LU_JIT_RETURN) {
         lu_frame_pop(ts, frame);
         ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
@@ -1489,11 +1621,16 @@ lu_jit_code_free(PyCodeObject *code)
     if (jc == NULL) {
         return;
     }
-    for (struct lu_unit *u = jc->units, *next; u != NULL; u = next) {
-        next = u->next;
-        free_unit(u);
+    pthread_mutex_lock(&dying.lock);
+    struct lu_unit *units = jc->units;
+    jc->units = NULL;
+    for (struct lu_unit *u = units; u != NULL; u = u->next) {
+        if (u->dying_pprev != NULL) {
+            dying_unlink(u);
+        }
     }
-    for (struct lu_unit *u = jc->retired, *next; u != NULL; u = next) {
+    pthread_mutex_unlock(&dying.lock);
+    for (struct lu_unit *u = units, *next; u != NULL; u = next) {
         next = u->next;
         free_unit(u);
     }
@@ -1549,6 +1686,7 @@ lu_jit_report(void)
     }
     fprintf(stderr, ", raised %lu\n", stats.raised);
     fprintf(stderr, "jit: entries waited %lu, units retired %lu\n", stats.waited, stats.retired);
+    fprintf(stderr, "jit: units freed %lu, dead held %lu\n", dying.freed, dying.n);
     fprintf(stderr, "jit: side exits compiled (bailouts) by opcode:");
     for (int i = 0; i < 256; i++) {
         if (stats.bailouts[i]) {

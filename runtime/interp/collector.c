@@ -42,6 +42,7 @@
 
 #include "interp/exceptions.h"
 #include "interp/specialize.h"
+#include "jit/jit.h"
 #include "prim/prim.h"
 #include "lucifer.h"
 
@@ -748,6 +749,7 @@ collect_internal(struct collection_state *state, int generation)
         }
     }
     clear_weakrefs(state, 1);
+    struct lu_unit *dead_units = lu_jit_reclaim(interp);
     start_the_world(interp);
 
     /* Callbacks and finalizers run with the world going, so that a lock one
@@ -755,6 +757,7 @@ collect_internal(struct collection_state *state, int generation)
     while ((op = worklist_pop(&state->objs_to_decref)) != NULL) {
         Py_DECREF(op);
     }
+    lu_jit_reclaim_free(dead_units);
     call_weakref_callbacks(state);
     finalize_garbage(state);
 

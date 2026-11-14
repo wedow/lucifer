@@ -153,6 +153,10 @@ struct lu_unit {
     int loops;                  /* the code has a back edge: an entry may do unbounded work */
     int refused;                /* calls it left out of line for want of budget (jit.c grows it) */
     int dead;
+    /* While dead and not yet freed: the list of such units, and whether
+       a collection found an activation in it (jit.c). */
+    struct lu_unit *dying_next, **dying_pprev;
+    int held;
     unsigned long built;        /* sites marked generic before its build began (jit.c) */
     struct lu_dep *deps;        /* what it relies on between polls (runtime/jit/deps.c) */
     int ndeps;
