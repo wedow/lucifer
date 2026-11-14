@@ -443,7 +443,6 @@ def run_mode(args):
                 except (OSError, ValueError, KeyError, IndexError) as error:
                     print(f"{key}: harness produced no results ({error!r}); see {logs[name]}", flush=True)
                     failed.add(name)
-                    dropped.add(name)
                 left[name] -= 1
                 if not left[name] and name not in dropped:
                     runs[name].append(rows[name])
