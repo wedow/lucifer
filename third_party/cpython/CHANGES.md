@@ -47,6 +47,7 @@ readline, libmpdec and libuuid:
   `_zstd/` (`_zstd`), `_cursesmodule.c` (`_curses`), `_curses_panel.c` (`_curses_panel`)
 - `_dbmmodule.c` (`_dbm`), `_gdbmmodule.c` (`_gdbm`), `readline.c` (`readline`),
   `termios.c` (`termios`), `syslogmodule.c` (`syslog`), `_uuidmodule.c` (`_uuid`)
+- `_lsprof.c`, `rotatingtree.c` and `rotatingtree.h` (`_lsprof`)
 - `_decimal/_decimal.c` and `_decimal/docstrings.h` (`_decimal`, over the system's
   libmpdec, else over `_decimal/libmpdec/`: the sources and headers of the tag's
   `LIBMPDEC_OBJS`, built with its x64 flags)

@@ -431,6 +431,9 @@ start_module(struct _is *interp, const struct lu_frozen *m, int frozen)
         Py_XDECREF(module);
         return NULL;
     }
+    if (!frozen) {
+        lu_hide_frames(code);           /* a builtin port, as port_exec runs one */
+    }
     PyObject *origname = frozen ? PyUnicode_FromString(m->orig != NULL ? m->orig : m->name) : NULL;
     int err = (frozen && (origname == NULL
                || lu_ns_insert(PyModule_GetDict(module), PyUnicode_InternFromString("__origname__"), origname) < 0))

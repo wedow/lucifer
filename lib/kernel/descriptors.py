@@ -43,6 +43,12 @@ def _quote(s):
     return str_join('', ("'", s, "'"))
 
 
+def _descr_repr(what, descr):
+    """descr_repr: the descriptor's kind, name and class."""
+    return str_join('', ('<', what, " '", descr.__name__, "' of '",
+                         type_tp_name(descr_type(descr)), "' objects>"))
+
+
 def _descr_check(descr, obj):
     """descr_check: obj must be an instance of the descriptor's class."""
     owner = descr_type(descr)
@@ -187,6 +193,9 @@ class method_descriptor:
         _descr_check(self, instance)
         return bind(self, instance)
 
+    def __repr__(self):
+        return _descr_repr('method', self)
+
 
 @kernel_type(static_type('classmethod_descriptor'))
 class classmethod_descriptor:
@@ -201,6 +210,9 @@ class classmethod_descriptor:
                 "'")))
         return bind(self, owner)
 
+    def __repr__(self):
+        return _descr_repr('method', self)
+
 
 @kernel_type(static_type('wrapper_descriptor'))
 class wrapper_descriptor:
@@ -209,6 +221,17 @@ class wrapper_descriptor:
             return self
         _descr_check(self, instance)
         return bind(self, instance)
+
+    def __repr__(self):
+        return _descr_repr('slot wrapper', self)
+
+
+@kernel_type(static_type('method-wrapper'))
+class method_wrapper:
+    def __repr__(self):
+        owner = self.__self__
+        return str_join('', ("<method-wrapper '", self.__name__, "' of ", type_tp_name(type(owner)),
+                             ' object at ', address(owner), '>'))
 
 
 def _call(self, /, *args, **kwargs):
@@ -238,6 +261,9 @@ class member_descriptor:
         _descr_check(self, instance)
         member_set(self, instance, MISSING)
 
+    def __repr__(self):
+        return _descr_repr('member', self)
+
 
 @kernel_type(static_type('getset_descriptor'))
 class getset_descriptor:
@@ -258,6 +284,9 @@ class getset_descriptor:
     def __delete__(self, instance):
         _descr_check(self, instance)
         _getset_store(self, instance, MISSING)
+
+    def __repr__(self):
+        return _descr_repr('attribute', self)
 
 
 def _getset_store(descr, instance, value):

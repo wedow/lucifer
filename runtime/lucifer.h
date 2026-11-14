@@ -1745,6 +1745,12 @@ PyObject *lu_range_iter(PyObject *r);
 void lu_err_format(PyObject *type, const char *format, ...)
     __attribute__((format(printf, 2, 3)));
 void lu_err_format_from_cause(PyObject *type, const char *format, const char *name);
+#ifndef LU_STUBS   /* exported internals, which stubs.c defines as void (void) */
+PyObject *_PyErr_FormatFromCause(PyObject *exception, const char *format, ...);
+/* Objects/call.c's check of a C function's result; TSTATE is unused. */
+PyObject *_Py_CheckFunctionResult(PyThreadState *tstate, PyObject *callable, PyObject *result,
+                                  const char *where);
+#endif
 
 /* Inline bodies of exported C-API functions on the runtime's hot paths. The
    runtime's own calls of those names compile to these; the exported

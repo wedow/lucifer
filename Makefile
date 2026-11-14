@@ -133,7 +133,7 @@ EXT_SUFFIX = .cpython-314t-x86_64-linux-gnu.so
 CPY_MODULES = third_party/cpython/Modules
 CJK_CODECS = _codecs_cn _codecs_hk _codecs_iso2022 _codecs_jp _codecs_kr _codecs_tw
 STDLIB_EXTS := _ssl _sqlite3 _bz2 pyexpat _elementtree _pickle cmath _multiprocessing _posixshmem _multibytecodec \
-	$(CJK_CODECS) termios syslog
+	$(CJK_CODECS) termios syslog _lsprof
 # A module over an optional library is built when the library's header is found,
 # as CPython's configure decides; without it the import fails as in CPython.
 have = $(shell printf '\043include <$(1)>\n' | $(CC) -E -x c - >/dev/null 2>&1 && echo $(2))
@@ -162,6 +162,7 @@ $(DYNLOAD)/_multibytecodec$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/cjkcodecs/mult
 $(CJK_CODECS:%=$(DYNLOAD)/%$(EXT_SUFFIX)): EXT_SRC = $(CPY_MODULES)/cjkcodecs/$*.c
 $(DYNLOAD)/termios$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/termios.c
 $(DYNLOAD)/syslog$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/syslogmodule.c
+$(DYNLOAD)/_lsprof$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_lsprof.c $(CPY_MODULES)/rotatingtree.c
 $(DYNLOAD)/_tkinter$(EXT_SUFFIX): EXT_SRC = $(CPY_MODULES)/_tkinter.c $(CPY_MODULES)/tkappinit.c
 $(DYNLOAD)/_tkinter$(EXT_SUFFIX): EXT_CFLAGS = -Wno-strict-prototypes -DWITH_APPINIT=1
 $(DYNLOAD)/_tkinter$(EXT_SUFFIX): EXT_LIBS = -ltk8.6 -ltcl8.6

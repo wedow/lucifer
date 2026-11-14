@@ -336,27 +336,26 @@ no_keywords(PyObject *callable, PyObject *kwnames)
     return 0;
 }
 
-/* _Py_CheckFunctionResult: a C function must not return NULL without an
-   exception, nor a result with one set (Objects/call.c). */
-static PyObject *
-check_function_result(PyObject *callable, PyObject *result)
+/* Objects/call.c: a C function must not return NULL without an exception,
+   nor a result with one set. */
+LU_EXPORT PyObject *
+_Py_CheckFunctionResult(PyThreadState *tstate, PyObject *callable, PyObject *result,
+                        const char *where)
 {
-    char buf[300];
+    if ((result != NULL) == !PyErr_Occurred()) {
+        return result;
+    }
     if (result != NULL) {
-        if (!PyErr_Occurred()) {
-            return result;
-        }
-        lu_function_str(callable, buf, sizeof buf);
-        lu_err_format_from_cause(PyExc_SystemError,
-                                 "%s returned a result with an exception set", buf);
         Py_DECREF(result);
-        return NULL;
+        return callable != NULL
+            ? _PyErr_FormatFromCause(PyExc_SystemError,
+                                     "%R returned a result with an exception set", callable)
+            : _PyErr_FormatFromCause(PyExc_SystemError,
+                                     "%s returned a result with an exception set", where);
     }
-    if (!PyErr_Occurred()) {
-        lu_function_str(callable, buf, sizeof buf);
-        lu_err_format(PyExc_SystemError, "%s returned NULL without setting an exception", buf);
-    }
-    return NULL;
+    return callable != NULL
+        ? PyErr_Format(PyExc_SystemError, "%R returned NULL without setting an exception", callable)
+        : PyErr_Format(PyExc_SystemError, "%s returned NULL without setting an exception", where);
 }
 
 static PyObject *
@@ -372,8 +371,8 @@ vectorcall_noargs(PyObject *callable, PyObject *const *args, size_t nargsf, PyOb
                       lu_function_str(callable, buf, sizeof buf), nargs);
         return NULL;
     }
-    return check_function_result(callable,
-                                  CFUNC(callable)->m_ml->ml_meth(CFUNC(callable)->m_self, NULL));
+    return _Py_CheckFunctionResult(NULL, callable,
+                                  CFUNC(callable)->m_ml->ml_meth(CFUNC(callable)->m_self, NULL), NULL);
 }
 
 static PyObject *
@@ -389,8 +388,8 @@ vectorcall_o(PyObject *callable, PyObject *const *args, size_t nargsf, PyObject 
                       lu_function_str(callable, buf, sizeof buf), nargs);
         return NULL;
     }
-    return check_function_result(callable,
-                                  CFUNC(callable)->m_ml->ml_meth(CFUNC(callable)->m_self, args[0]));
+    return _Py_CheckFunctionResult(NULL, callable,
+                                  CFUNC(callable)->m_ml->ml_meth(CFUNC(callable)->m_self, args[0]), NULL);
 }
 
 static PyObject *
@@ -400,8 +399,8 @@ vectorcall_fastcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
         return NULL;
     }
     _PyCFunctionFast meth = (_PyCFunctionFast)(void (*)(void))CFUNC(callable)->m_ml->ml_meth;
-    return check_function_result(callable,
-                                  meth(CFUNC(callable)->m_self, args, PyVectorcall_NARGS(nargsf)));
+    return _Py_CheckFunctionResult(NULL, callable,
+                                  meth(CFUNC(callable)->m_self, args, PyVectorcall_NARGS(nargsf)), NULL);
 }
 
 static PyObject *
@@ -410,8 +409,8 @@ vectorcall_fastcall_keywords(PyObject *callable, PyObject *const *args, size_t n
 {
     _PyCFunctionFastWithKeywords meth =
         (_PyCFunctionFastWithKeywords)(void (*)(void))CFUNC(callable)->m_ml->ml_meth;
-    return check_function_result(
-        callable, meth(CFUNC(callable)->m_self, args, PyVectorcall_NARGS(nargsf), kwnames));
+    return _Py_CheckFunctionResult(
+        NULL, callable, meth(CFUNC(callable)->m_self, args, PyVectorcall_NARGS(nargsf), kwnames), NULL);
 }
 
 /* A METH_METHOD function takes the defining class between self and the
@@ -424,8 +423,8 @@ vectorcall_method_fastcall_keywords(PyObject *callable, PyObject *const *args, s
     PyObject *(*meth)(PyObject *, PyTypeObject *, PyObject *const *, Py_ssize_t, PyObject *) =
         (PyObject *(*)(PyObject *, PyTypeObject *, PyObject *const *, Py_ssize_t, PyObject *))
         (void (*)(void))m->func.m_ml->ml_meth;
-    return check_function_result(
-        callable, meth(m->func.m_self, m->mm_class, args, PyVectorcall_NARGS(nargsf), kwnames));
+    return _Py_CheckFunctionResult(
+        NULL, callable, meth(m->func.m_self, m->mm_class, args, PyVectorcall_NARGS(nargsf), kwnames), NULL);
 }
 
 static PyObject *
@@ -462,7 +461,7 @@ vectorcall_varargs(PyObject *callable, PyObject *const *args, size_t nargsf, PyO
         : ml->ml_meth(CFUNC(callable)->m_self, tuple);
     Py_XDECREF(kwargs);
     Py_DECREF(tuple);
-    return check_function_result(callable, result);
+    return _Py_CheckFunctionResult(NULL, callable, result, NULL);
 }
 
 /* A frame primitive called from C runs its frame in a nested eval loop. */

@@ -14,3 +14,8 @@ def loads(data, /, *, allow_code=True):
 def dumps(value, version=version, /, *, allow_code=True):
     """Return the bytes object that would be written to a file by dump(value, file)."""
     return _dumps(value, version, allow_code)
+
+
+def dump(value, file, version=version, /, *, allow_code=True):
+    """Write the value on the open file: dumps(value), written by one file.write call."""
+    file.write(_dumps(value, version, allow_code))

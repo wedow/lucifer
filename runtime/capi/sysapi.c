@@ -382,6 +382,7 @@ PyContextVar_Reset(PyObject *var, PyObject *token)
 /* The clock queries (Python/pytime.c): nanoseconds since the epoch of each
    clock. Raw and checked forms read the same clock here. */
 
+#include <math.h>
 #include <time.h>
 
 static PyTime_t
@@ -488,6 +489,78 @@ LU_EXPORT PyTime_t
 _PyTime_AsMicroseconds(PyTime_t t, int round)
 {
     return pytime_divide(t, 1000, round);
+}
+
+/* Conversions into PyTime_t of Python/pytime.c: seconds, an int of
+   nanoseconds, and an int or float of seconds rounded by ROUND. */
+LU_EXPORT PyTime_t
+_PyTime_FromSeconds(int seconds)
+{
+    return (PyTime_t)seconds * 1000000000;
+}
+
+static void
+pytime_overflow(void)
+{
+    PyErr_SetString(PyExc_OverflowError, "timestamp too large to convert to C PyTime_t");
+}
+
+LU_EXPORT int
+_PyTime_FromLong(PyTime_t *tp, PyObject *obj)
+{
+    if (!PyLong_Check(obj)) {
+        PyErr_Format(PyExc_TypeError, "expect int, got %s", Py_TYPE(obj)->tp_name);
+        return -1;
+    }
+    long long ns = PyLong_AsLongLong(obj);
+    if (ns == -1 && PyErr_Occurred()) {
+        if (PyErr_ExceptionMatches(PyExc_OverflowError)) {
+            pytime_overflow();
+        }
+        return -1;
+    }
+    *tp = ns;
+    return 0;
+}
+
+LU_EXPORT int
+_PyTime_FromSecondsObject(PyTime_t *tp, PyObject *obj, int round)
+{
+    if (PyFloat_Check(obj)) {
+        /* volatile keeps the rounding of the product what CPython's is. */
+        volatile double d = PyFloat_AsDouble(obj);
+        if (isnan(d)) {
+            PyErr_SetString(PyExc_ValueError, "Invalid value NaN (not a number)");
+            return -1;
+        }
+        d *= 1e9;
+        d = round == 0 ? floor(d) : round == 1 ? ceil(d) : round == 2 ? nearbyint(d)
+            : d >= 0 ? ceil(d) : floor(d);
+        if (!((double)PyTime_MIN <= d && d < -(double)PyTime_MIN)) {
+            PyErr_SetString(PyExc_OverflowError, "timestamp out of range for platform time_t");
+            *tp = 0;
+            return -1;
+        }
+        *tp = (PyTime_t)d;
+        return 0;
+    }
+    long long sec = PyLong_AsLongLong(obj);
+    if (sec == -1 && PyErr_Occurred()) {
+        if (PyErr_ExceptionMatches(PyExc_OverflowError)) {
+            pytime_overflow();
+        }
+        else if (PyErr_ExceptionMatches(PyExc_TypeError)) {
+            PyErr_Format(PyExc_TypeError,
+                         "'%T' object cannot be interpreted as an integer or float", obj);
+        }
+        return -1;
+    }
+    if (sec < PyTime_MIN / 1000000000 || PyTime_MAX / 1000000000 < sec) {
+        pytime_overflow();
+        return -1;
+    }
+    *tp = sec * 1000000000;
+    return 0;
 }
 
 /* A deadline TIMEOUT from now on the monotonic clock, and the time left
