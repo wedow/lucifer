@@ -228,6 +228,28 @@ lu_ev_load_attr(struct ctx *c)
     return 0;
 }
 
+/* The raw value of v, the instruction's operand on top of the stack but
+   one, when v is an int or a float that does not exist and nothing else
+   names: the attribute takes the number itself (object/attrs.c, unboxed
+   values), and its first reader that needs an object makes the only one
+   there ever is. LU_NOV for any other value, which is stored as an
+   object; *op is the store's instruction. */
+static lu_v
+temporary_number(struct ctx *c, lu_v v, int *op)
+{
+    lu_v real;
+    struct lu_vobj *o = LU_IS_VIRT(v) ? lu_ev_virt(c->g, &c->g->st, v, &real) : NULL;
+    if (o == NULL || real != LU_NOV || o->n != 1 || (o->kind != VK_BOX_INT && o->kind != VK_BOX_FLOAT)) {
+        return LU_NOV;
+    }
+    lu_v *slot = &slots(c)[c->nlocals + *depth_of(c) - 2];
+    *slot = LU_NOV;
+    int named = lu_ev_reaches(c->g, &c->g->st, LU_VIRT_ID(v));
+    *slot = v;
+    *op = o->kind == VK_BOX_INT ? OP_INLINE_STORE_I : OP_INLINE_STORE_F;
+    return named ? LU_NOV : o->f[0];
+}
+
 int
 lu_ev_store_attr(struct ctx *c)
 {
@@ -244,7 +266,10 @@ lu_ev_store_attr(struct ctx *c)
     }
     else if (op == STORE_ATTR_INSTANCE_VALUE) {
         lu_ev_guard_version(c, owner, version);
-        lu_v st = lu_ev_emit(c, OP_INLINE_STORE, REP_NONE, owner, lu_ev_val(c, v), LU_NOV, index);
+        int raw_op;
+        lu_v raw = temporary_number(c, v, &raw_op);
+        lu_v st = raw != LU_NOV ? lu_ev_emit(c, raw_op, REP_NONE, owner, raw, LU_NOV, index)
+                                : lu_ev_emit(c, OP_INLINE_STORE, REP_NONE, owner, lu_ev_val(c, v), LU_NOV, index);
         I(c, st)->fs = lu_ev_exit_fs(c);
         c->g->observed = 1;     /* the value it replaces is released */
     }

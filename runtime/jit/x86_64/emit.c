@@ -1780,19 +1780,27 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
     jcc(a, CC_NE, fail);
     bind(a, held);
     if (is_int) {
-        /* A compact int, as UNBOX_INT reads it. */
+        /* An int, as UNBOX_INT reads it: one digit here, more in C. */
+        int wide = new_label(a);
         load(a, RCX, RAX, offsetof(PyLongObject, long_value.lv_tag));
         alu_ri(a, ALU_CMP, RCX, 2 << _PyLong_NON_SIZE_BITS);
-        jcc(a, CC_AE, fail);
+        jcc(a, CC_AE, wide);
         load32(a, RAX, RAX, offsetof(PyLongObject, long_value.ob_digit));
-        int pos = new_label(a);
         rex(a, 0, 0, 0, RCX);
         b1(a, 0xF6);
         modrm_rr(a, 0, RCX);
         b1(a, 2);                               /* test cl, 2: negative */
-        jcc(a, CC_E, pos);
+        jcc(a, CC_E, done);
         unary(a, 3, RAX);
-        bind(a, pos);
+        jmp(a, done);
+        bind(a, wide);
+        save_volatile(a);
+        mov_rr(a, RDI, RAX);
+        call_abs(a, (void *)lu_jit_unbox_wide);
+        restore_volatile(a);
+        mov_ri(a, RCX, INT64_MIN);
+        alu_rr(a, ALU_CMP, RAX, RCX);
+        jcc(a, CC_E, fail);
     }
     else {
         sse_rm(a, 0xF2, 0x10, 0, RAX, offsetof(PyFloatObject, ob_fval));
