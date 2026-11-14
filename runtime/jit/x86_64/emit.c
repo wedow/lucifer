@@ -3060,6 +3060,9 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
                 modrm_mem(a, 0, R11, 0);        /* inc qword [r11] */
             }
             alloc_count_before(a, bl->ins[i]);
+            if (_PyRuntime.jit.dump) {
+                fprintf(stderr, "  code +%d v%d\n", a->n, bl->ins[i]);    /* with the unit's address below: a profile by instruction */
+            }
             if (emit_ins(a, bl->ins[i], next, labels) < 0) {
                 free(labels);
                 return -1;
@@ -3133,6 +3136,9 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     unit->mem = mem;
     unit->size = size;
     unit->code_bytes = (size_t)a->n;
+    if (_PyRuntime.jit.dump) {
+        fprintf(stderr, "jit: code at %p, %d bytes\n", (void *)mem, a->n);
+    }
     unit->fn = (int (*)(PyThreadState *, struct lu_frame *, PyObject **))mem;
     free(a->buf);
     free(a->labels);
