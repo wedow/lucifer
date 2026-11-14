@@ -32,6 +32,41 @@ float_ir(struct ctx *c, int op, lu_v a, lu_v b)
     return lu_ev_box_float(c, r);
 }
 
+/* What a class's attributes and bases are is read as of a version: a
+   static type has none to change (*version 0); a class that may change
+   has the one it has now, unless this site's guesses kept failing. What
+   was read then stands when class_relied says the version is still the
+   class's: it is guarded there, and the guard becomes a dependency of the
+   unit (facts.c), which a change to the class or to a base of it kills. */
+static int
+class_as_of(struct ctx *c, PyTypeObject *t, uint32_t *version)
+{
+    *version = 0;
+    if (t->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) {
+        return 1;
+    }
+    if (nospec(c, c->pc) || !lu_type_assign_version(t)) {
+        return 0;
+    }
+    *version = __atomic_load_n(&t->tp_version_tag, __ATOMIC_ACQUIRE);
+    return *version != 0;
+}
+
+static int
+class_relied(struct ctx *c, lu_v type, uint32_t version)
+{
+    if (version == 0) {
+        return 1;
+    }
+    PyTypeObject *t = (PyTypeObject *)lu_ev_const(c, type);
+    if (__atomic_load_n(&t->tp_version_tag, __ATOMIC_ACQUIRE) != version) {
+        return 0;
+    }
+    lu_v gv = lu_ev_guard(c, OP_GUARD_VERSION, type, version);
+    I(c, gv)->imm2 = GV_TYPE_ITSELF;
+    return 1;
+}
+
 static lu_v
 size_of(struct ctx *c, lu_v r)
 {
@@ -149,11 +184,12 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
         PyErr_Clear();
         return t != NULL ? lu_ev_konst(c, (PyObject *)t) : LU_EV_NONE;
     }
-    if (nargs == 2 && strcmp(name, "type_lookup") == 0 && k0 != NULL && PyType_Check(k0)
-        && (((PyTypeObject *)k0)->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) && k1 != NULL && PyUnicode_CheckExact(k1)) {
-        /* A static type's attribute never changes. */
+    uint32_t version;
+    if (nargs == 2 && strcmp(name, "type_lookup") == 0 && k0 != NULL && PyType_Check(k0) && k1 != NULL
+        && PyUnicode_CheckExact(k1) && class_as_of(c, (PyTypeObject *)k0, &version)) {
         PyObject *r = _PyType_Lookup((PyTypeObject *)k0, k1);
-        return lu_ev_konst(c, r != NULL ? r : LU_MISSING);
+        lu_v k = lu_ev_konst(c, r != NULL ? r : LU_MISSING);
+        return class_relied(c, args[0], version) ? k : LU_EV_NONE;
     }
     if (nargs == 1 && strcmp(name, "type_can_new") == 0 && k0 != NULL && PyType_Check(k0)
         && (((PyTypeObject *)k0)->tp_flags & Py_TPFLAGS_IMMUTABLETYPE)) {
@@ -163,9 +199,10 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
         /* The registry is made at boot and only read after. */
         return lu_ev_konst(c, lu_next_missing_of(k0));
     }
-    if (nargs == 2 && strcmp(name, "is_subtype") == 0 && k0 != NULL && PyType_Check(k0)
-        && (((PyTypeObject *)k0)->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) && k1 != NULL && PyType_Check(k1)) {
-        return truth_const(c, PyType_IsSubtype((PyTypeObject *)k0, (PyTypeObject *)k1));
+    if (nargs == 2 && strcmp(name, "is_subtype") == 0 && k0 != NULL && PyType_Check(k0) && k1 != NULL
+        && PyType_Check(k1) && class_as_of(c, (PyTypeObject *)k0, &version)) {
+        int sub = PyType_IsSubtype((PyTypeObject *)k0, (PyTypeObject *)k1);
+        return class_relied(c, args[0], version) ? truth_const(c, sub) : LU_EV_NONE;
     }
     if (nargs == 2 && strcmp(name, "kind") == 0 && k1 != NULL && PyUnicode_CheckExact(k1)
         && lu_ev_learn_type(c, args[0], 0) != NULL) {
