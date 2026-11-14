@@ -119,8 +119,14 @@ object(struct maker *m, int k)
     if (o != NULL) {
         return m->made[k] = o;
     }
-    if ((ob->kind == VK_BOX_INT || ob->kind == VK_BOX_FLOAT) && ob->nfields == 2) {
+    if ((ob->kind == VK_BOX_INT || ob->kind == VK_BOX_FLOAT) && ob->nfields >= 2) {
         o = take(m, &ob->fields[1]);    /* the object the value came in as, where it did */
+        if (o == NULL && ob->nfields == 4 && !PyErr_Occurred()) {
+            /* Read unboxed from an attribute: the attribute's own object,
+               while it is still that number. */
+            o = lu_inline_number((PyObject *)(uintptr_t)raw(m, &ob->fields[2]), (Py_ssize_t)raw(m, &ob->fields[3]),
+                                 raw(m, &ob->fields[0]), ob->kind == VK_BOX_FLOAT);
+        }
     }
     switch (o != NULL ? VK_KINDS : ob->kind) {
     case VK_KINDS:

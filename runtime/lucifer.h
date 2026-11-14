@@ -331,6 +331,9 @@ PyObject *lu_inline_get(PyObject *obj, PyObject **word);
    while the word still holds that value unboxed, so that the box the
    exit's frame names and the attribute are one object. */
 void lu_inline_install(PyObject *obj, PyObject **word, PyObject *box);
+/* The object of obj's inline value at byte `offset` (as lu_inline_get makes it) if it is the exact float
+   (int) with these bits; else NULL, with no exception. A new reference. */
+PyObject *lu_inline_number(PyObject *obj, Py_ssize_t offset, uint64_t bits, int is_float);
 int lu_inline_traverse(PyObject *obj, visitproc visit, void *arg);
 /* Every unboxed value of the instance gets its box, as a reader would make
    it: before gc.get_referents shows what the instance references. 0, or -1

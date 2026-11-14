@@ -96,54 +96,85 @@ trivial_phis(struct lu_func *f)
     return changed;
 }
 
-/* What the one frame state names of the loads in question (want[v] != 0):
-   a stack entry may; a local, a virtual object's field or the object one
-   became may not (want[v] = BAD). `sink`: the stack entries that name a
-   load whose box[v] is set name that virtual object instead. */
-enum { WANT_INT = 1, WANT_FLOAT = 2, WANT_BAD = 4 };
+/* An attribute read from an instance's inline values only to be unboxed
+   is read as the number (INLINE_LOAD_I, _F), so that a value stored
+   unboxed (eval_attr.c) never becomes an object. The load qualifies when
+   compiled code does nothing with its value but unbox it, as one kind and
+   in the load's own block, so that the read leaves no oftener than the
+   unboxing did. What frame states name is then a number that is no
+   object yet (a virtual box), in one of two forms:
+
+   - States name it on their stacks only: an exit makes an object for the
+     instruction that would have consumed it, which no program can tell
+     from the attribute's. Nothing is held.
+   - States name it in a local or in an object that does not exist, where
+     the program could compare it with the attribute's own object. The
+     load keeps the object the word held when it held one
+     (INLINE_ORIGIN), and the box names the instance, so that an exit
+     takes the attribute's object while the attribute is still that
+     number (docs/design/jit-architecture.md 10, concession 3). Every
+     state that names the value must name the instance too. */
+enum { WANT_INT = 1, WANT_FLOAT = 2, WANT_BAD = 4, WANT_DEEP = 8, WANT_LOOSE = 16 };
+
+struct naming {
+    uint8_t *want;
+    int *seen;                  /* per value: 1 + the instruction whose state last named it */
+    int at;
+};
 
 static void
-state_names(struct lu_fs *fs, uint8_t *want, const lu_v *box)
+note_named(struct lu_func *f, lu_v v, void *arg)
 {
-    for (int i = 0; i < fs->nbinds; i++) {
-        struct lu_vobj *o = fs->binds[i].obj;
-        if (fs->binds[i].real >= 0) {
-            want[fs->binds[i].real] |= WANT_BAD;
-        }
-        for (int k = 0; o != NULL && k < o->n; k++) {
-            if (o->f[k] >= 0) {
-                want[o->f[k]] |= WANT_BAD;
-            }
-        }
+    struct naming *n = arg;
+    n->seen[v] = n->at + 1;
+}
+
+/* A load a state names without its instance cannot find the attribute
+   again at an exit. */
+static void
+note_loose(struct lu_func *f, lu_v v, void *arg)
+{
+    struct naming *n = arg;
+    struct lu_ins *in = &f->ins[v];
+    if (in->op == OP_INLINE_LOAD && n->seen[in->a] != n->at + 1) {
+        n->want[v] |= WANT_LOOSE;
     }
-    for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
-        for (int i = 0; i < p->nlocals; i++) {
-            if (p->locals[i] >= 0) {
-                want[p->locals[i]] |= WANT_BAD;
-            }
-        }
-        for (int i = 0; box != NULL && i < p->nstack; i++) {
-            if (p->stack[i] >= 0 && box[p->stack[i]] != LU_NOV) {
-                p->stack[i] = box[p->stack[i]];
-            }
+}
+
+static void
+record_names(struct lu_vobj *o, uint8_t *want)
+{
+    for (int k = 0; o != NULL && k < o->n; k++) {
+        if (o->f[k] >= 0) {
+            want[o->f[k]] |= WANT_DEEP;
         }
     }
 }
 
-/* An attribute read from an instance's inline values only to be unboxed
-   is read as the number (INLINE_LOAD_I, _F): no reference is taken, and a
-   value stored unboxed (eval_attr.c) never becomes an object. The load
-   qualifies when compiled code does nothing with its value but unbox it,
-   as one kind and in the load's own block, so that the read leaves no
-   oftener than the unboxing did, and when frame states name the value on
-   their stacks only: there it is a number that is no object yet, and an
-   exit makes one for the instruction that would have consumed it. A
-   local would let the program compare it with the attribute's own. */
+/* The slot or field names the load's box from now on. */
+static void
+sink(lu_v *r, const lu_v *box)
+{
+    if (*r >= 0 && box[*r] != LU_NOV) {
+        *r = box[*r];
+    }
+}
+
+static void
+sink_record(struct lu_vobj *o, const lu_v *box)
+{
+    for (int k = 0; o != NULL && k < o->n; k++) {
+        sink(&o->f[k], box);
+    }
+}
+
 static int
 raw_loads(struct lu_func *f)
 {
-    int n = f->nins, changed = 0;
+    int n = f->nins, records = f->nvobjs, changed = 0;
     uint8_t *want = calloc((size_t)n + 1, 1);
+    char *unboxed = calloc((size_t)n + 1, 1);
+    struct naming names = { want, calloc((size_t)n + 1, sizeof(int)), 0 };
     for (int v = 0; v < n; v++) {
         struct lu_ins *in = &f->ins[v];
         if (in->flags & INS_DEAD) {
@@ -153,6 +184,7 @@ raw_loads(struct lu_func *f)
         int unbox = in->op == OP_UNBOX_INT ? WANT_INT : in->op == OP_UNBOX_FLOAT ? WANT_FLOAT : 0;
         if (x >= 0 && unbox && in->block == f->ins[x].block) {
             want[x] |= unbox;
+            unboxed[x] = 1;     /* a type guard asks for no number: only a load that is unboxed counts */
         }
         else if (x >= 0 && in->op == OP_GUARD_TYPE && (in->imm == (int64_t)(intptr_t)&PyLong_Type
                                                          || in->imm == (int64_t)(intptr_t)&PyFloat_Type)) {
@@ -172,39 +204,79 @@ raw_loads(struct lu_func *f)
                 want[in->args[i]] |= WANT_BAD;
             }
         }
-        if (in->fs != NULL) {
-            state_names(in->fs, want, NULL);
+        if (in->fs == NULL) {
+            continue;
         }
-    }
-    for (int i = 0; i < f->nvobjs; i++) {
-        for (int k = 0; k < f->vobjs[i]->n; k++) {
-            if (f->vobjs[i]->f[k] >= 0) {
-                want[f->vobjs[i]->f[k]] |= WANT_BAD;
+        for (int i = 0; i < in->fs->nbinds; i++) {
+            if (in->fs->binds[i].real >= 0) {
+                want[in->fs->binds[i].real] |= WANT_BAD;
+            }
+            record_names(in->fs->binds[i].obj, want);
+        }
+        for (struct lu_fs *p = in->fs; p != NULL; p = p->caller) {
+            for (int i = 0; i < p->nlocals; i++) {
+                if (p->locals[i] >= 0) {
+                    want[p->locals[i]] |= WANT_DEEP;
+                }
             }
         }
+        struct lu_fs slots = *in->fs;
+        slots.nheld = 0;
+        names.at = v;
+        lu_fs_each(f, &slots, note_named, &names);
+        lu_fs_each(f, &slots, note_loose, &names);
     }
-    /* A type guard asks for no number: only a load that is unboxed counts. */
-    char *unboxed = calloc((size_t)n + 1, 1);
-    for (int v = 0; v < n; v++) {
-        struct lu_ins *in = &f->ins[v];
-        unboxed[in->a >= 0 ? in->a : n] |= !(in->flags & INS_DEAD) && (in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT);
+    for (int i = 0; i < f->nvobjs; i++) {
+        record_names(f->vobjs[i], want);
     }
     lu_v *box = malloc(sizeof(lu_v) * (size_t)(n + 1));
     for (int v = 0; v < n; v++) {
-        struct lu_ins *in = &f->ins[v];
         box[v] = LU_NOV;
-        if ((in->flags & INS_DEAD) || in->op != OP_INLINE_LOAD || !unboxed[v]
-            || (want[v] != WANT_INT && want[v] != WANT_FLOAT)) {
+        int kind = want[v] & (WANT_INT | WANT_FLOAT | WANT_BAD), deep = want[v] & WANT_DEEP;
+        if ((f->ins[v].flags & INS_DEAD) || f->ins[v].op != OP_INLINE_LOAD || !unboxed[v]
+            || (kind != WANT_INT && kind != WANT_FLOAT) || (deep && (want[v] & WANT_LOOSE))) {
             continue;
         }
-        int fl = want[v] == WANT_FLOAT;
-        struct lu_vobj *o = lu_ir_vobj(f, fl ? VK_BOX_FLOAT : VK_BOX_INT, fl ? &PyFloat_Type : &PyLong_Type, 1);
-        o->f[0] = v;
+        int fl = kind == WANT_FLOAT, op = fl ? OP_INLINE_LOAD_F : OP_INLINE_LOAD_I, rep = fl ? REP_F64 : REP_I64;
+        struct lu_vobj *o = lu_ir_vobj(f, fl ? VK_BOX_FLOAT : VK_BOX_INT, fl ? &PyFloat_Type : &PyLong_Type, deep ? 4 : 1);
         box[v] = LU_VIRT(lu_ir_vobj_id(f, o));
-        in->op = fl ? OP_INLINE_LOAD_F : OP_INLINE_LOAD_I;
-        in->rep = fl ? REP_F64 : REP_I64;
-        in->flags &= ~INS_OWNED;
         changed = 1;
+        if (!deep) {
+            o->f[0] = v;
+            f->ins[v].op = (uint8_t)op;
+            f->ins[v].rep = (uint8_t)rep;
+            f->ins[v].flags &= ~INS_OWNED;
+            continue;
+        }
+        /* The load becomes the word's object, and the number is read after it. */
+        int block = f->ins[v].block;
+        lu_v r = lu_ir_emit(f, block, op, rep, f->ins[v].a, v, LU_NOV, f->ins[v].imm);
+        struct lu_ins *in = &f->ins[v], *raw = &f->ins[r];
+        struct lu_block *bl = &f->blocks[block];
+        int at = 0;
+        while (bl->ins[at] != v) {
+            at++;
+        }
+        memmove(&bl->ins[at + 2], &bl->ins[at + 1], sizeof(int) * (size_t)(bl->nins - at - 2));
+        bl->ins[at + 1] = r;
+        raw->src = in->src;
+        raw->src_pc = in->src_pc;
+        raw->fs = lu_ir_alloc(f, sizeof(struct lu_fs));
+        *raw->fs = *in->fs;     /* an exit from the read gives the object back */
+        raw->fs->held = lu_ir_alloc(f, sizeof(lu_v) * (size_t)(in->fs->nheld + 1));
+        memcpy(raw->fs->held, in->fs->held, sizeof(lu_v) * (size_t)in->fs->nheld);
+        raw->fs->held[raw->fs->nheld++] = v;
+        in->op = OP_INLINE_ORIGIN;
+        o->f[0] = r;
+        o->f[1] = v;
+        o->f[2] = in->a;
+        o->f[3] = lu_ir_emit(f, -1, OP_CONST_I, REP_I64, LU_NOV, LU_NOV, LU_NOV, in->imm);
+    }
+    if (changed) {
+        fwd = realloc(fwd, sizeof(lu_v) * (size_t)(f->nins + 1));
+        for (int v = n; v < f->nins; v++) {
+            fwd[v] = v;
+        }
     }
     for (int v = 0; changed && v < n; v++) {
         struct lu_ins *in = &f->ins[v];
@@ -212,18 +284,33 @@ raw_loads(struct lu_func *f)
             continue;
         }
         if (in->fs != NULL) {
-            state_names(in->fs, want, box);
+            for (int i = 0; i < in->fs->nbinds; i++) {
+                sink_record(in->fs->binds[i].obj, box);
+            }
+            for (struct lu_fs *p = in->fs; p != NULL; p = p->caller) {
+                for (int i = 0; i < p->nlocals + p->nstack; i++) {
+                    sink(lu_fs_slot(p, i), box);
+                }
+            }
         }
         if (in->a < 0 || box[in->a] == LU_NOV) {
             continue;
         }
+        struct lu_ins *load = &f->ins[in->a];
         if (in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT) {
-            fwd[v] = in->a;
+            fwd[v] = load->op == OP_INLINE_ORIGIN ? f->vobjs[LU_VIRT_ID(box[in->a])]->f[0] : in->a;
+            in->flags |= INS_DEAD;
         }
-        in->flags |= INS_DEAD;  /* an unboxing, a type guard or a release of what is a number now */
+        else if (in->op == OP_GUARD_TYPE || load->op != OP_INLINE_ORIGIN) {
+            in->flags |= INS_DEAD;      /* a type guard of what is a number; a release of what is no object */
+        }
+    }
+    for (int i = 0; changed && i < records; i++) {
+        sink_record(f->vobjs[i], box);
     }
     free(want);
     free(unboxed);
+    free(names.seen);
     free(box);
     return changed;
 }

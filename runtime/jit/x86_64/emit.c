@@ -1743,8 +1743,14 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
 {
     int is_int = in->op == OP_INLINE_LOAD_I;
     int fail = guard_exit(a, in);
-    int boxed = new_label(a), done = new_label(a);
+    int boxed = new_label(a), done = new_label(a), typed = new_label(a), held = new_label(a);
     int r = gpr_of(a, in->a, RDX);
+    if (in->b != LU_NOV) {
+        /* The object the word held is the number, and held already. */
+        to_gpr(a, RAX, in->b);
+        test_rr(a, RAX, RAX);
+        jcc(a, CC_NE, typed);
+    }
     rex(a, 0, 0, 0, r);
     b1(a, 0xF6);
     modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
@@ -1761,23 +1767,30 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
     }
     jmp(a, done);
     bind(a, boxed);
-    alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
-    jcc(a, CC_BE, fail);                        /* absent, or the other kind unboxed */
+    if (in->b != LU_NOV) {
+        jmp(a, fail);                           /* unboxed when its object was asked for, and an object now */
+    }
+    else {
+        alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+        jcc(a, CC_BE, fail);                    /* absent, or the other kind unboxed */
+    }
+    bind(a, typed);
     mov_ri(a, RCX, (int64_t)(intptr_t)(is_int ? &PyLong_Type : &PyFloat_Type));
     cmp_rm(a, RCX, RAX, offsetof(PyObject, ob_type));
     jcc(a, CC_NE, fail);
-    int held = new_label(a);
-    load32(a, RCX, RAX, offsetof(PyObject, ob_ref_local));
-    cmp32_ri8(a, RCX, -1);
-    jcc(a, CC_E, held);                         /* immortal (a small int) */
-    b1(a, 0x64);
-    b1(a, 0x4C);
-    b1(a, 0x8B);
-    b1(a, 0x1C);
-    b1(a, 0x25);
-    b4(a, 0);                                   /* mov r11, fs:[0] */
-    cmp_rm(a, R11, RAX, offsetof(PyObject, ob_tid));
-    jcc(a, CC_NE, fail);
+    if (in->b == LU_NOV) {
+        load32(a, RCX, RAX, offsetof(PyObject, ob_ref_local));
+        cmp32_ri8(a, RCX, -1);
+        jcc(a, CC_E, held);                     /* immortal (a small int) */
+        b1(a, 0x64);
+        b1(a, 0x4C);
+        b1(a, 0x8B);
+        b1(a, 0x1C);
+        b1(a, 0x25);
+        b4(a, 0);                               /* mov r11, fs:[0] */
+        cmp_rm(a, R11, RAX, offsetof(PyObject, ob_tid));
+        jcc(a, CC_NE, fail);
+    }
     bind(a, held);
     if (is_int) {
         /* An int, as UNBOX_INT reads it: one digit here, more in C. */
@@ -2677,6 +2690,29 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     case OP_INLINE_LOAD_F: case OP_INLINE_LOAD_I:
         inline_load_raw(a, in, v);
         return 0;
+    case OP_INLINE_ORIGIN: {
+        /* As INLINE_LOAD, but for an unboxed value, which is no object. */
+        int fail = guard_exit(a, in);
+        int have = new_label(a), done = new_label(a);
+        r = gpr_of(a, in->a, RDX);
+        rex(a, 0, 0, 0, r);
+        b1(a, 0xF6);
+        modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
+        b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
+        jcc(a, CC_NE, fail);
+        load(a, RAX, r, (int32_t)in->imm);
+        test_rr(a, RAX, RAX);
+        jcc(a, CC_E, fail);
+        alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+        jcc(a, CC_A, have);
+        alu_rr(a, ALU_XOR, RAX, RAX);
+        jmp(a, done);
+        bind(a, have);
+        incref_owned_or_exit(a, RAX, fail);
+        bind(a, done);
+        def_gpr(a, v, RAX);
+        return 0;
+    }
     case OP_INLINE_STORE_F: case OP_INLINE_STORE_I:
         inline_store_raw(a, v);
         return 0;

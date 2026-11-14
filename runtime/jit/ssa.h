@@ -112,7 +112,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
                                                        imm2: 1 + the words after it in the class's room (0: unknown) */ \
     X(INLINE_LOAD, REP_OBJ, IF_GUARD)   /* a's inline value at byte imm, while it keeps them; scratch registers only */ \
     X(INLINE_LOAD_F, REP_F64, IF_GUARD) /* the same as binary64: an unboxed float's, or an exact float's */ \
-    X(INLINE_LOAD_I, REP_I64, IF_GUARD) /* the same as int64: an unboxed int's, or a compact int's */ \
+    X(INLINE_LOAD_I, REP_I64, IF_GUARD) /* the same as int64: an unboxed int's, or an int's; b (both): the word's object as INLINE_ORIGIN read it, whose number it is when not NULL */ \
+    X(INLINE_ORIGIN, REP_OBJ, IF_GUARD) /* a's inline value at byte imm as the object it is, a new reference; NULL when it is unboxed */ \
     X(INLINE_STORE_F, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* a's inline word at byte imm = the float b, unboxed */ \
     X(INLINE_STORE_I, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* the same for the int b */ \
     X(GLOBAL_LOAD, REP_OBJ, IF_GUARD | IF_CALL) /* imm: the dict, imm2: keys version << 32 | entry */ \
@@ -154,7 +155,8 @@ extern const uint8_t lu_op_flags[OP_COUNT];
    evaluator answers from its fields. Records are immutable: a change
    makes a new record under the same id (struct lu_bind). */
 enum lu_vkind {
-    VK_BOX_INT,                 /* f[0]: its value, an i64; f[1] (n 2): the object it is where it came in as one, else NULL */
+    VK_BOX_INT,                 /* f[0]: its value, an i64; f[1] (n 2, 4): the object it is where it came in as one, else NULL;
+                                   f[2], f[3] (n 4): the instance and the byte of the inline value it was read from */
     VK_BOX_FLOAT,               /* f[0]: its value, an f64; f[1]: the same */
     VK_BOOL,                    /* f[0]: a bit; neg: True when it is 0 */
     VK_TUPLE,                   /* f[i]: item i */

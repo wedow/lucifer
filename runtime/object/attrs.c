@@ -407,6 +407,29 @@ lu_inline_get(PyObject *obj, PyObject **word)
     return v;
 }
 
+PyObject *
+lu_inline_number(PyObject *obj, Py_ssize_t offset, uint64_t bits, int is_float)
+{
+    PyObject *v = lu_inline_live(obj) ? lu_inline_get(obj, (PyObject **)((char *)obj + offset)) : NULL;
+    if (v == NULL) {
+        return NULL;
+    }
+    uint64_t have = bits + 1;
+    if (is_float && PyFloat_CheckExact(v)) {
+        double d = PyFloat_AS_DOUBLE(v);
+        memcpy(&have, &d, sizeof have);
+    }
+    else if (!is_float && PyLong_CheckExact(v)) {
+        int overflow;
+        long long x = PyLong_AsLongLongAndOverflow(v, &overflow);
+        have = overflow ? bits + 1 : (uint64_t)x;
+    }
+    if (have != bits) {
+        Py_CLEAR(v);
+    }
+    return v;
+}
+
 /* Moves the inline values into a new dict, in the object's critical section. */
 static int
 move_to_dict(PyObject *obj)
