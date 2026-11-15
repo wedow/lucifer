@@ -523,21 +523,7 @@ free_unit(struct lu_unit *u)
         pthread_mutex_unlock(&dying.lock);
     }
     lu_target_free(u);
-    for (int i = 0; i < u->ndeopts; i++) {
-        struct lu_deopt *d = u->deopts[i];
-        for (int k = 0; k < d->nobjs; k++) {
-            free(d->objs[k].fields);
-        }
-        free(d->objs);
-        free(d->owned);
-        free(d);
-    }
-    free(u->deopts);
-    free(u->deopt_table);
-    for (int i = 0; i < u->nframes; i++) {
-        free(u->frames[i].vals);
-    }
-    free(u->frames);
+    free(u->exits);
     for (int i = 0; i < u->nconsts; i++) {
         Py_XDECREF(u->consts[i]);
     }

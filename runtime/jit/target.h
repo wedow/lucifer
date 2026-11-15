@@ -45,32 +45,52 @@ extern const struct lu_target lu_target;
 
 /* An exit's description (runtime/jit/exit.c): where each value of its
    frame state is. A slot or a field is NULL, a constant, an object at a
-   location, a raw word at a location (or a constant), or a virtual object,
-   named by its index among the exit's so that every slot that names one
-   gets the one object. */
+   location, a raw word at a location or a constant one, or a virtual
+   object, named by its index among the exit's so that every slot that
+   names one gets the one object. Each value is packed in 32 bits: its
+   kind in the low three, and above them a location (lu_pv_loc) or an
+   index. A unit keeps every description in one block (struct lu_unit):
+   its exits, the frame records they share, their virtual objects, the
+   values those name, the constants the values name, and the locations of
+   the references compiled code owns at each exit. */
 enum lu_dv_kind {
     DV_NULL,                    /* an unbound local, or a NULL stack entry */
-    DV_CONST,                   /* imm: an object the unit keeps */
-    DV_OBJ,                     /* an object at loc */
-    DV_RAW,                     /* a raw word at loc, or imm when loc is none */
-    DV_VIRT,                    /* imm: the index of a virtual object in the exit's objs */
+    DV_CONST,                   /* an object the unit keeps: the unit's imms[index] */
+    DV_OBJ,                     /* an object at the location */
+    DV_RAW,                     /* a raw word at the location */
+    DV_IMM,                     /* a raw word: the unit's imms[index] */
+    DV_VIRT,                    /* the virtual object of that index among the exit's */
 };
+typedef uint32_t lu_pv;
+#define LU_PV(kind, arg) ((lu_pv)(arg) << 3 | (lu_pv)(kind))
+#define LU_PV_KIND(v) ((v) & 7)
+#define LU_PV_ARG(v) ((v) >> 3)
+/* A location as a value's argument: registers as they are, spill words
+   after them, and none. */
+#define LU_PV_NOLOC 0x1fffffffu
 
-struct lu_dv {
-    uint8_t kind;
-    int32_t loc;
-    int64_t imm;
-};
+static inline uint32_t
+lu_pv_arg_of_loc(int32_t loc)
+{
+    return loc == LU_LOC_NONE ? LU_PV_NOLOC : LU_LOC_IS_SPILL(loc) ? 32 + (uint32_t)LU_LOC_SPILL_INDEX(loc) : (uint32_t)loc;
+}
+
+static inline int32_t
+lu_pv_loc(lu_pv v)
+{
+    uint32_t arg = LU_PV_ARG(v);
+    return arg == LU_PV_NOLOC ? LU_LOC_NONE : arg >= 32 ? LU_LOC_SPILL((int32_t)(arg - 32)) : (int32_t)arg;
+}
 
 /* A virtual object an exit names: its state id (the same in every exit
    of the unit that names that object), kind (enum lu_vkind) and fields. */
 struct lu_dobj {
+    PyTypeObject *type;
+    int32_t id;
+    uint32_t fields;            /* the unit's vals from here on */
+    int32_t nfields;
     uint8_t kind;
     uint8_t neg;
-    int32_t id;
-    PyTypeObject *type;
-    int nfields;
-    struct lu_dv *fields;
 };
 
 /* A frame of an exit: the unit's exits share each distinct one, which
@@ -79,10 +99,10 @@ struct lu_dobj {
 struct lu_deopt_frame {
     PyCodeObject *code;
     PyObject *func;
-    int pc;
-    int nlocals, nstack;
-    int caller;                 /* the caller's record, or -1 for the root frame */
-    struct lu_dv *vals;
+    int32_t pc;
+    int32_t caller;             /* the caller's record, or -1 for the root frame */
+    uint32_t vals;              /* the unit's vals from here on: the locals, then the stack */
+    int32_t nlocals, nstack;
     uint8_t ret;                /* how the frame returns when rebuilt (lu_fs) */
 };
 
@@ -99,25 +119,23 @@ enum lu_exit_reason {
 };
 
 struct lu_deopt {
-    long *stress;               /* EXIT_STRESS: the counter to reset */
-    int nframes;
-    int frame;                  /* the innermost frame's record in the unit's frames */
-    int nobjs;
-    struct lu_dobj *objs;       /* the virtual objects the frames name */
-    int nowned;                 /* the references compiled code holds here, each an object at a location: */
-    int32_t *owned;             /* released last, after every slot took its own */
-    int error;                  /* leave with the exception set */
-    int drop;                   /* then pop this many stack entries of the innermost frame */
-    int reason;                 /* enum lu_exit_reason */
-    int opcode;                 /* the base opcode at the exit, for the counts */
     struct lu_unit *unit;       /* the unit it leaves */
     PyCodeObject *blame_code;   /* a guard that speculates for another site: the site */
-    int blame_pc;
     struct lu_prof *prof;       /* a guard on a learned type, or (tier) the report that more was learned */
-    uint8_t tier;
-    lu_codeunit *instr;         /* published: the instruction the innermost frame shows as running */
     uint64_t takes;             /* published by a call: its arguments (bits by index) whose stack entries hold
                                    references of their own for the call, which a Python callee's parameters take */
+    int32_t frame;              /* the innermost frame's record in the unit's frames */
+    int32_t nframes;
+    uint32_t objs, nobjs;       /* the virtual objects the frames name: the unit's objs from objs on */
+    uint32_t owned, nowned;     /* the references compiled code holds here, each an object at a location (the
+                                   unit's owned from `owned` on): released last, after every slot took its own */
+    int32_t blame_pc;
+    int32_t instr;              /* published: the code unit the innermost frame shows as running */
+    int32_t drop;               /* with error, pop this many stack entries of the innermost frame */
+    uint8_t error;              /* leave with the exception set */
+    uint8_t reason;             /* enum lu_exit_reason */
+    uint8_t opcode;             /* the base opcode at the exit, for the counts */
+    uint8_t tier;
     uint8_t regs;               /* published by a slow path that saved every register at the frame's jit_regs */
     uint8_t visible;            /* an inlined frame is a user's: a walker makes the frames real */
 };
@@ -145,11 +163,16 @@ struct lu_unit {
     void *mem;
     size_t size;
     size_t code_bytes;
-    struct lu_deopt **deopts;
-    struct lu_deopt ***deopt_table;     /* what the exits' common path reads */
+    /* Its exits' descriptions, all in one block that starts with the
+       exits (which their common path indexes) and that free releases. */
+    struct lu_deopt *exits;
     int ndeopts;
     struct lu_deopt_frame *frames;      /* the frame records its exits share */
     int nframes;
+    struct lu_dobj *objs;
+    lu_pv *vals;
+    int64_t *imms;
+    int32_t *owned;
     PyObject **consts;
     int nconsts;
     long *stress_counter;       /* -X lucifer_stress=deopt:N: guards fail when it reaches 0 */
@@ -182,6 +205,13 @@ lu_deopt_frame(const struct lu_deopt *d, int k)
         fr = &d->unit->frames[fr->caller];
     }
     return fr;
+}
+
+/* Virtual object k of exit d. */
+static inline const struct lu_dobj *
+lu_deopt_obj(const struct lu_deopt *d, int k)
+{
+    return &d->unit->objs[d->objs + (uint32_t)k];
 }
 
 /* What -X lucifer_jit_stats counts as compiled code runs it: the census of

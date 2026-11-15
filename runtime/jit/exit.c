@@ -70,13 +70,14 @@ at(struct maker *m, int32_t loc)
     return loc >= LU_LOC_FPR ? m->fpr[loc - LU_LOC_FPR] : m->gpr[loc];
 }
 
+/* A raw word's value: a constant, or the word at its location. */
 static uint64_t
-raw(struct maker *m, const struct lu_dv *dv)
+raw(struct maker *m, lu_pv v)
 {
-    return dv->loc == LU_LOC_NONE ? (uint64_t)dv->imm : at(m, dv->loc);
+    return LU_PV_KIND(v) == DV_IMM ? (uint64_t)m->d->unit->imms[LU_PV_ARG(v)] : at(m, lu_pv_loc(v));
 }
 
-static PyObject *take(struct maker *m, const struct lu_dv *dv);
+static PyObject *take(struct maker *m, lu_pv v);
 
 static PyObject *
 forced_find(struct lu_forced *fo, int32_t id)
@@ -114,51 +115,52 @@ object(struct maker *m, int k)
     if (m->made[k] != NULL) {
         return m->made[k];
     }
-    const struct lu_dobj *ob = &m->d->objs[k];
+    const struct lu_dobj *ob = lu_deopt_obj(m->d, k);
+    const lu_pv *fields = m->d->unit->vals + ob->fields;
     PyObject *o = forced_find(m->forced, ob->id);
     if (o != NULL) {
         return m->made[k] = o;
     }
     if ((ob->kind == VK_BOX_INT || ob->kind == VK_BOX_FLOAT) && ob->nfields >= 2) {
-        o = take(m, &ob->fields[1]);    /* the object the value came in as, where it did */
+        o = take(m, fields[1]);         /* the object the value came in as, where it did */
         if (o == NULL && ob->nfields == 4 && !PyErr_Occurred()) {
             /* Read unboxed from an attribute: the attribute's own object,
                while it is still that number. */
-            o = lu_inline_number((PyObject *)(uintptr_t)raw(m, &ob->fields[2]), (Py_ssize_t)raw(m, &ob->fields[3]),
-                                 raw(m, &ob->fields[0]), ob->kind == VK_BOX_FLOAT);
+            o = lu_inline_number((PyObject *)(uintptr_t)raw(m, fields[2]), (Py_ssize_t)raw(m, fields[3]),
+                                 raw(m, fields[0]), ob->kind == VK_BOX_FLOAT);
         }
     }
     switch (o != NULL ? VK_KINDS : ob->kind) {
     case VK_KINDS:
         break;
     case VK_BOX_INT:
-        o = PyLong_FromLongLong((long long)raw(m, &ob->fields[0]));
+        o = PyLong_FromLongLong((long long)raw(m, fields[0]));
         break;
     case VK_BOX_FLOAT: {
-        uint64_t bits = raw(m, &ob->fields[0]);
+        uint64_t bits = raw(m, fields[0]);
         double v;
         memcpy(&v, &bits, 8);
         o = PyFloat_FromDouble(v);
         break;
     }
     case VK_BOOL:
-        o = Py_NewRef(((raw(m, &ob->fields[0]) ^ ob->neg) & 1) ? Py_True : Py_False);
+        o = Py_NewRef(((raw(m, fields[0]) ^ ob->neg) & 1) ? Py_True : Py_False);
         break;
     case VK_TUPLE:
         o = PyTuple_New(ob->nfields);
         for (int i = 0; o != NULL && i < ob->nfields; i++) {
-            PyTuple_SET_ITEM(o, i, take(m, &ob->fields[i]));
+            PyTuple_SET_ITEM(o, i, take(m, fields[i]));
         }
         break;
     case VK_SEQITER:
         o = lu_object_new(ob->type, sizeof(seqiterobject));
         if (o != NULL) {
-            ((seqiterobject *)o)->it_seq = take(m, &ob->fields[0]);
-            ((seqiterobject *)o)->it_index = (Py_ssize_t)raw(m, &ob->fields[1]);
+            ((seqiterobject *)o)->it_seq = take(m, fields[0]);
+            ((seqiterobject *)o)->it_index = (Py_ssize_t)raw(m, fields[1]);
         }
         break;
     case VK_METHOD: {
-        PyObject *fn = take(m, &ob->fields[0]), *self = take(m, &ob->fields[1]);
+        PyObject *fn = take(m, fields[0]), *self = take(m, fields[1]);
         o = fn != NULL && self != NULL ? PyMethod_New(fn, self) : NULL;
         Py_XDECREF(fn);
         Py_XDECREF(self);
@@ -167,22 +169,19 @@ object(struct maker *m, int k)
     case VK_FIELDS:
         o = lu_alloc_instance(ob->type, ob->type);
         for (int i = 0; o != NULL && i < ob->nfields; i++) {
-            const struct lu_dv *dv = &ob->fields[i];
-            if (dv->kind != DV_CONST || dv->imm != 0) {
-                *(PyObject **)((char *)o + lu_field_offset(ob->type, i)) = take(m, dv);
-            }
+            *(PyObject **)((char *)o + lu_field_offset(ob->type, i)) = take(m, fields[i]);
         }
         break;
     case VK_LIST:
         o = PyList_New(ob->nfields);
         for (int i = 0; o != NULL && i < ob->nfields; i++) {
-            PyList_SET_ITEM(o, i, take(m, &ob->fields[i]));
+            PyList_SET_ITEM(o, i, take(m, fields[i]));
         }
         break;
     case VK_DICT:
         o = PyDict_New();
         for (int i = 0; o != NULL && i + 1 < ob->nfields; i += 2) {
-            PyObject *key = take(m, &ob->fields[i]), *value = take(m, &ob->fields[i + 1]);
+            PyObject *key = take(m, fields[i]), *value = take(m, fields[i + 1]);
             if (key == NULL || value == NULL || PyDict_SetItem(o, key, value) < 0) {
                 m->failed = 1;
             }
@@ -208,18 +207,18 @@ object(struct maker *m, int k)
     return m->made[k] = o;
 }
 
-/* A new reference to what dv names, or NULL (an unbound slot, or the pass
+/* A new reference to what v names, or NULL (an unbound slot, or the pass
    failed). */
 static PyObject *
-take(struct maker *m, const struct lu_dv *dv)
+take(struct maker *m, lu_pv v)
 {
-    switch (dv->kind) {
+    switch (LU_PV_KIND(v)) {
     case DV_CONST:
-        return Py_NewRef((PyObject *)(intptr_t)dv->imm);
+        return Py_NewRef((PyObject *)(intptr_t)m->d->unit->imms[LU_PV_ARG(v)]);
     case DV_OBJ:
-        return Py_XNewRef((PyObject *)(uintptr_t)at(m, dv->loc));
+        return Py_XNewRef((PyObject *)(uintptr_t)at(m, lu_pv_loc(v)));
     case DV_VIRT: {
-        PyObject *o = object(m, (int)dv->imm);
+        PyObject *o = object(m, (int)LU_PV_ARG(v));
         return o == &lu_jit_unbound ? NULL : Py_XNewRef(o);     /* a number's local, unbound */
     }
     default:
@@ -295,7 +294,7 @@ static lu_codeunit *
 shown(struct lu_deopt *d, int k)
 {
     const struct lu_deopt_frame *fr = lu_deopt_frame(d, k);
-    return k == d->nframes - 1 ? d->instr : lu_code_start(fr->code) + fr->pc;
+    return lu_code_start(fr->code) + (k == d->nframes - 1 ? d->instr : fr->pc);
 }
 
 lu_codeunit *
@@ -318,8 +317,9 @@ static int
 sync_root(struct maker *m, struct lu_frame *f)
 {
     const struct lu_deopt_frame *fr = lu_deopt_frame(m->d, 0);
+    const lu_pv *vals = m->d->unit->vals + fr->vals;
     for (int i = 0; i < fr->nlocals; i++) {
-        f->localsplus[i] = take(m, &fr->vals[i]);
+        f->localsplus[i] = take(m, vals[i]);
     }
     f->stackpointer = f->localsplus + fr->nlocals;
     f->instr = shown(m->d, 0);
@@ -382,8 +382,9 @@ record(struct maker *m, int k, struct lu_frame *previous)
     f->owner = lu_frame_owner_for(fr->code);
     f->ret = fr->ret;
     f->previous = previous;
+    const lu_pv *vals = m->d->unit->vals + fr->vals;
     for (int i = 0; i < fr->nlocals; i++) {
-        f->localsplus[i] = take(m, &fr->vals[i]);
+        f->localsplus[i] = take(m, vals[i]);
     }
     f->stackpointer = f->localsplus + fr->nlocals;
     f->instr = shown(m->d, k);
@@ -473,8 +474,9 @@ push_inlined(PyThreadState *ts, struct maker *m, int k, struct lu_frame *top)
         m->forced->frames[k - 1] = NULL;
     }
     else {
+        const lu_pv *vals = m->d->unit->vals + fr->vals;
         for (int i = 0; i < fr->nlocals; i++) {
-            f->localsplus[i] = take(m, &fr->vals[i]);
+            f->localsplus[i] = take(m, vals[i]);
         }
     }
     f->ret = fr->ret;
@@ -493,12 +495,13 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     /* A walker that made the root real (lu_jit_sync) left it its slots. */
     int synced = root->owner != LU_FRAME_JIT;
     const struct lu_deopt_frame *fr = lu_deopt_frame(d, 0);
+    const lu_pv *vals = d->unit->vals + fr->vals;
     for (int i = 0; !nomem && !synced && i < fr->nlocals; i++) {
-        root->localsplus[i] = take(&m, &fr->vals[i]);
+        root->localsplus[i] = take(&m, vals[i]);
     }
     PyObject **sp = root->localsplus + (nomem && !synced ? 0 : fr->nlocals);
     for (int j = 0; !nomem && j < fr->nstack; j++) {
-        *sp++ = take(&m, &fr->vals[fr->nlocals + j]);
+        *sp++ = take(&m, vals[fr->nlocals + j]);
     }
     root->stackpointer = sp;
     root->instr = root->last = lu_code_start(fr->code) + fr->pc;
@@ -515,9 +518,10 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
             break;
         }
         fr = lu_deopt_frame(d, k);
+        vals = d->unit->vals + fr->vals;
         sp = f->localsplus + fr->nlocals;
         for (int j = 0; j < fr->nstack; j++) {
-            *sp++ = take(&m, &fr->vals[fr->nlocals + j]);
+            *sp++ = take(&m, vals[fr->nlocals + j]);
         }
         f->stackpointer = sp;
         top = f;
@@ -539,13 +543,13 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
         top->instr = top->last = lu_code_start(top->code)
             + lu_jit_next_pc(top->code, (int)(top->instr - lu_code_start(top->code)));
     }
-    if (d->reason == EXIT_STRESS && d->stress != NULL) {
-        __atomic_store_n(d->stress, (long)_PyRuntime.stress.deopt, __ATOMIC_RELAXED);
+    if (d->reason == EXIT_STRESS) {
+        __atomic_store_n(d->unit->stress_counter, (long)_PyRuntime.stress.deopt, __ATOMIC_RELAXED);
     }
     /* Compiled code's own references go last: every slot has its own. */
     if (!nomem) {
-        for (int i = 0; i < d->nowned; i++) {
-            PyObject *o = (PyObject *)(uintptr_t)at(&m, d->owned[i]);
+        for (uint32_t i = 0; i < d->nowned; i++) {
+            PyObject *o = (PyObject *)(uintptr_t)at(&m, d->unit->owned[d->owned + i]);
             Py_XDECREF(o);
         }
         maker_done(&m);

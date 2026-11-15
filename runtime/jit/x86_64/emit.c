@@ -55,7 +55,39 @@ struct patch {
 
 struct exit_site {
     int label;                  /* the stub's label */
-    struct lu_deopt *d;
+    struct lu_deopt *d;         /* its description as built, a struct pending's */
+};
+
+/* An exit's description until the unit's are packed: its index too. */
+struct pending {
+    struct lu_deopt d;
+    int index;
+};
+
+/* Indices into an array, by a hash of what they index (lookup): -1 is
+   none, and there are a power of two slots. */
+struct table {
+    int *slots;
+    uint32_t cap, n;
+};
+
+/* A unit's descriptions as they are built, packed into one block once
+   its code is done (pack): the frame records its exits share, their
+   virtual objects (each exit's in a row), the values frames and objects
+   name, the constant words those name, and owned locations (each exit's
+   in a row). */
+struct build {
+    struct lu_deopt_frame *frames;
+    struct lu_dobj *objs;
+    lu_pv *vals;
+    int64_t *imms;
+    int32_t *owned;
+    uint32_t nframes, nobjs, nvals, nimms, nowned;
+    uint32_t capframes, capobjs, capvals, capimms, capowned;
+    struct table frame_table, imm_table;
+    lu_pv *room;                /* an exit's slots, as make_deopt describes them */
+    struct lu_fs **chain;       /* its frame states, outermost first */
+    uint32_t caproom, capchain;
 };
 
 /* The references the frames' slots are owed for an object a published
@@ -85,14 +117,10 @@ struct asm_ {
     struct hold *held;          /* what the published call in hand holds of what it is handed */
     int nheld;
     int inlined;                /* the published call's inlined frames, counted toward the limit across it */
-    /* The unit's frame records by content (frame_record): indices into
-       unit->frames, -1 for none, in a table of a power of two entries;
-       and room to describe an exit's frames in. */
-    int *frame_table;
-    int frame_cap, frame_room;
-    struct lu_dv *vals;
-    struct lu_fs **chain;
-    int capvals, capchain;
+    struct build b;
+    /* The code that publishes an exit's state: where its address goes. */
+    struct { int at, exit; } *pubs;
+    uint32_t npubs, cappubs;
 };
 
 /* The instructions whose code keeps its own values in RBX, R12 and R13
@@ -829,32 +857,105 @@ parallel_moves(struct asm_ *a, struct move *moves, int n)
 
 /* --- exits --- */
 
+/* p, grown to hold `need` items of `size` bytes: *cap doubles. */
+static void *
+grow(void *p, uint32_t *cap, uint32_t need, size_t size)
+{
+    if (need > *cap) {
+        *cap = need > 2 * *cap ? need : 2 * *cap;
+        p = realloc(p, size * *cap);
+    }
+    return p;
+}
+
+static uint64_t
+mix(uint64_t h, uint64_t v)
+{
+    h = (h ^ v) * 0x100000001b3ull;
+    return h ^ h >> 29;
+}
+
+/* The slot of t for a key of hash h: the one whose index `same` matches
+   to the key, or the empty one the key's index goes in. t grows first,
+   rehashing its indices by `hash`. */
+static int *
+lookup(struct table *t, struct build *b, uint64_t h, const void *key,
+       uint64_t (*hash)(struct build *, int), int (*same)(struct build *, int, const void *))
+{
+    if (2 * (t->n + 1) > t->cap) {
+        uint32_t cap = t->cap ? 2 * t->cap : 256;
+        int *slots = malloc(sizeof(int) * cap);
+        memset(slots, -1, sizeof(int) * cap);
+        for (uint32_t i = 0; i < t->cap; i++) {
+            if (t->slots[i] >= 0) {
+                uint32_t j = (uint32_t)hash(b, t->slots[i]) & (cap - 1);
+                while (slots[j] >= 0) {
+                    j = (j + 1) & (cap - 1);
+                }
+                slots[j] = t->slots[i];
+            }
+        }
+        free(t->slots);
+        t->slots = slots;
+        t->cap = cap;
+    }
+    uint32_t j = (uint32_t)h & (t->cap - 1);
+    while (t->slots[j] >= 0 && !same(b, t->slots[j], key)) {
+        j = (j + 1) & (t->cap - 1);
+    }
+    return &t->slots[j];
+}
+
+static uint64_t
+imm_hash(struct build *b, int i)
+{
+    return mix(0xcbf29ce484222325ull, (uint64_t)b->imms[i]);
+}
+
+static int
+imm_same(struct build *b, int i, const void *key)
+{
+    return b->imms[i] == *(const int64_t *)key;
+}
+
+/* The index of constant word w among the unit's, entered if new. */
+static uint32_t
+imm_index(struct build *b, int64_t w)
+{
+    int *slot = lookup(&b->imm_table, b, mix(0xcbf29ce484222325ull, (uint64_t)w), &w, imm_hash, imm_same);
+    if (*slot < 0) {
+        b->imms = grow(b->imms, &b->capimms, b->nimms + 1, sizeof *b->imms);
+        b->imms[b->nimms] = w;
+        *slot = (int)b->nimms++;
+        b->imm_table.n++;
+    }
+    return (uint32_t)*slot;
+}
+
 /* Where instruction value v is, for an exit: a raw word's or an
-   object's location. */
-static struct lu_dv
+   object's location, or a constant. */
+static lu_pv
 place(struct asm_ *a, lu_v v)
 {
     struct lu_ins *in = I(a, v);
-    struct lu_dv dv = { .kind = in->rep == REP_OBJ ? DV_OBJ : DV_RAW, .loc = in->loc };
     if (in->op == OP_CONST) {
-        dv.kind = in->imm == 0 ? DV_NULL : DV_CONST;
-        dv.imm = in->imm;
-        dv.loc = LU_LOC_NONE;
+        return in->imm == 0 ? LU_PV(DV_NULL, 0) : LU_PV(DV_CONST, imm_index(&a->b, in->imm));
     }
-    else if (in->op == OP_CONST_I || in->op == OP_CONST_F) {
-        dv.imm = in->imm;
-        dv.loc = LU_LOC_NONE;
+    if (in->op == OP_CONST_I || in->op == OP_CONST_F) {
+        return in->rep == REP_OBJ ? LU_PV(DV_OBJ, LU_PV_NOLOC) : LU_PV(DV_IMM, imm_index(&a->b, in->imm));
     }
-    return dv;
+    return LU_PV(in->rep == REP_OBJ ? DV_OBJ : DV_RAW, lu_pv_arg_of_loc(in->loc));
 }
 
 /* What a slot or a field of state fs holds: a value's place, or a virtual
-   object, entered once among d's with its fields described. */
-static struct lu_dv
+   object, entered once among d's (after the objects already entered,
+   which are d's alone while make_deopt builds d) with its fields
+   described. */
+static lu_pv
 describe(struct asm_ *a, struct lu_deopt *d, struct lu_fs *fs, lu_v r)
 {
     if (r == LU_NOV) {
-        return (struct lu_dv){ .kind = DV_NULL, .loc = LU_LOC_NONE };
+        return LU_PV(DV_NULL, 0);
     }
     if (!LU_IS_VIRT(r)) {
         return place(a, r);
@@ -864,163 +965,222 @@ describe(struct asm_ *a, struct lu_deopt *d, struct lu_fs *fs, lu_v r)
     if (real != LU_NOV) {
         return place(a, real);
     }
-    int k = 0;
-    while (k < d->nobjs && d->objs[k].id != LU_VIRT_ID(r)) {
+    struct build *b = &a->b;
+    uint32_t k = 0;
+    while (k < d->nobjs && b->objs[d->objs + k].id != LU_VIRT_ID(r)) {
         k++;
     }
     if (k == d->nobjs) {
-        d->objs = realloc(d->objs, sizeof(struct lu_dobj) * (size_t)(d->nobjs + 1));
-        d->objs[k] = (struct lu_dobj){ .id = LU_VIRT_ID(r) };       /* entered before its fields look for theirs */
+        /* Entered before its fields look for theirs; their values have
+           their row before any object they enter. */
+        uint32_t fields = b->nvals;
+        b->vals = grow(b->vals, &b->capvals, b->nvals + (uint32_t)o->n, sizeof *b->vals);
+        b->nvals += (uint32_t)o->n;
+        b->objs = grow(b->objs, &b->capobjs, b->nobjs + 1, sizeof *b->objs);
+        b->objs[b->nobjs++] = (struct lu_dobj){ .kind = o->kind, .neg = o->neg, .id = LU_VIRT_ID(r),
+                                                .type = o->type, .nfields = o->n, .fields = fields };
         d->nobjs++;
-        struct lu_dv *fields = calloc((size_t)(o->n ? o->n : 1), sizeof(struct lu_dv));
         for (int i = 0; i < o->n; i++) {
-            fields[i] = describe(a, d, fs, o->f[i]);    /* may move d->objs */
+            lu_pv v = describe(a, d, fs, o->f[i]);      /* may move b->vals */
+            b->vals[fields + (uint32_t)i] = v;
         }
-        d->objs[k] = (struct lu_dobj){ .kind = o->kind, .neg = o->neg, .id = LU_VIRT_ID(r), .type = o->type,
-                                       .nfields = o->n, .fields = fields };
     }
-    return (struct lu_dv){ .kind = DV_VIRT, .loc = LU_LOC_NONE, .imm = k };
+    return LU_PV(DV_VIRT, k);
 }
 
-/* An exit drops the reference of every owned value its state names. */
+/* An exit drops the reference of every owned value its state names: d's
+   row of owned locations, the last in the unit's while it is built. */
+struct owning {
+    struct build *b;
+    struct lu_deopt *d;
+};
+
 static void
 note_owned(struct lu_func *f, lu_v v, void *arg)
 {
-    struct lu_deopt *d = arg;
+    struct owning *w = arg;
+    struct build *b = w->b;
     struct lu_ins *in = &f->ins[v];
     if (!(in->flags & INS_OWNED) || in->loc == LU_LOC_NONE) {
         return;
     }
-    for (int i = 0; i < d->nowned; i++) {
-        if (d->owned[i] == in->loc) {
+    for (uint32_t i = w->d->owned; i < b->nowned; i++) {
+        if (b->owned[i] == in->loc) {
             return;             /* named twice: one value, one location */
         }
     }
-    d->owned = realloc(d->owned, sizeof(int32_t) * (size_t)(d->nowned + 1));
-    d->owned[d->nowned++] = in->loc;
+    b->owned = grow(b->owned, &b->capowned, b->nowned + 1, sizeof *b->owned);
+    b->owned[b->nowned++] = in->loc;
+    w->d->nowned++;
 }
 
-static int
-same_frame(const struct lu_deopt_frame *x, const struct lu_deopt_frame *y)
-{
-    if (x->code != y->code || x->func != y->func || x->pc != y->pc || x->ret != y->ret || x->caller != y->caller
-        || x->nlocals != y->nlocals || x->nstack != y->nstack) {
-        return 0;
-    }
-    for (int i = 0; i < x->nlocals + x->nstack; i++) {
-        if (x->vals[i].kind != y->vals[i].kind || x->vals[i].loc != y->vals[i].loc || x->vals[i].imm != y->vals[i].imm) {
-            return 0;
-        }
-    }
-    return 1;
-}
+/* A frame record to find among the unit's: its values elsewhere. */
+struct frame_key {
+    struct lu_deopt_frame fr;
+    const lu_pv *vals;
+};
 
 static uint64_t
-mix(uint64_t h, uint64_t v)
-{
-    return (h ^ v) * 0x100000001b3ull;
-}
-
-static uint64_t
-frame_hash(const struct lu_deopt_frame *fr)
+frame_hash_of(const struct lu_deopt_frame *fr, const lu_pv *vals)
 {
     uint64_t h = 0xcbf29ce484222325ull;
     h = mix(h, (uintptr_t)fr->code);
     h = mix(h, (uintptr_t)fr->func);
-    h = mix(h, (uint64_t)fr->pc << 32 | (uint32_t)fr->caller);
-    h = mix(h, (uint64_t)fr->nlocals << 32 | (uint64_t)fr->nstack << 8 | fr->ret);
+    h = mix(h, (uint64_t)(uint32_t)fr->pc << 32 | (uint32_t)fr->caller);
+    h = mix(h, (uint64_t)(uint32_t)fr->nlocals << 32 | (uint64_t)(uint32_t)fr->nstack << 8 | fr->ret);
     for (int i = 0; i < fr->nlocals + fr->nstack; i++) {
-        h = mix(h, (uint64_t)fr->vals[i].kind << 32 | (uint32_t)fr->vals[i].loc);
-        h = mix(h, (uint64_t)fr->vals[i].imm);
+        h = mix(h, vals[i]);
     }
-    return h ^ h >> 29;
+    return h;
 }
 
-/* The unit's record of frame `fr` (its vals in the caller's room): one
-   it has, or a copy entered now. */
-static int
-frame_record(struct asm_ *a, const struct lu_deopt_frame *fr)
+static uint64_t
+frame_hash(struct build *b, int i)
 {
-    struct lu_unit *u = a->unit;
-    if (2 * (u->nframes + 1) > a->frame_cap) {
-        free(a->frame_table);
-        a->frame_cap = a->frame_cap ? 2 * a->frame_cap : 256;
-        a->frame_table = malloc(sizeof(int) * (size_t)a->frame_cap);
-        memset(a->frame_table, -1, sizeof(int) * (size_t)a->frame_cap);
-        for (int r = 0; r < u->nframes; r++) {
-            size_t j = frame_hash(&u->frames[r]) & (size_t)(a->frame_cap - 1);
-            while (a->frame_table[j] >= 0) {
-                j = (j + 1) & (size_t)(a->frame_cap - 1);
-            }
-            a->frame_table[j] = r;
-        }
+    return frame_hash_of(&b->frames[i], b->vals + b->frames[i].vals);
+}
+
+static int
+frame_same(struct build *b, int i, const void *key)
+{
+    const struct frame_key *k = key;
+    const struct lu_deopt_frame *x = &b->frames[i], *y = &k->fr;
+    return x->code == y->code && x->func == y->func && x->pc == y->pc && x->ret == y->ret
+        && x->caller == y->caller && x->nlocals == y->nlocals && x->nstack == y->nstack
+        && memcmp(b->vals + x->vals, k->vals, sizeof(lu_pv) * (size_t)(x->nlocals + x->nstack)) == 0;
+}
+
+/* The unit's record of a frame: one it has, or a copy entered now. */
+static int
+frame_record(struct build *b, const struct frame_key *k)
+{
+    int *slot = lookup(&b->frame_table, b, frame_hash_of(&k->fr, k->vals), k, frame_hash, frame_same);
+    if (*slot >= 0) {
+        return *slot;
     }
-    size_t j = frame_hash(fr) & (size_t)(a->frame_cap - 1);
-    for (; a->frame_table[j] >= 0; j = (j + 1) & (size_t)(a->frame_cap - 1)) {
-        if (same_frame(&u->frames[a->frame_table[j]], fr)) {
-            return a->frame_table[j];
-        }
-    }
-    if (u->nframes == a->frame_room) {
-        a->frame_room = a->frame_room ? 2 * a->frame_room : 64;
-        u->frames = realloc(u->frames, sizeof(struct lu_deopt_frame) * (size_t)a->frame_room);
-    }
-    int m = fr->nlocals + fr->nstack;
-    struct lu_deopt_frame *r = &u->frames[u->nframes];
-    *r = *fr;
-    r->vals = malloc(sizeof(struct lu_dv) * (size_t)(m ? m : 1));
-    memcpy(r->vals, fr->vals, sizeof(struct lu_dv) * (size_t)m);
-    a->frame_table[j] = u->nframes;
-    return u->nframes++;
+    uint32_t m = (uint32_t)(k->fr.nlocals + k->fr.nstack);
+    b->vals = grow(b->vals, &b->capvals, b->nvals + m, sizeof *b->vals);
+    memcpy(b->vals + b->nvals, k->vals, sizeof(lu_pv) * m);
+    b->frames = grow(b->frames, &b->capframes, b->nframes + 1, sizeof *b->frames);
+    b->frames[b->nframes] = k->fr;
+    b->frames[b->nframes].vals = b->nvals;
+    b->nvals += m;
+    *slot = (int)b->nframes++;
+    b->frame_table.n++;
+    return *slot;
 }
 
 static struct lu_deopt *
 make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
 {
-    struct lu_deopt *d = calloc(1, sizeof(struct lu_deopt));
+    struct build *b = &a->b;
+    struct pending *x = calloc(1, sizeof *x);
+    x->index = a->nexits;
+    struct lu_deopt *d = &x->d;
     d->unit = a->unit;
+    d->objs = b->nobjs;
+    d->owned = b->nowned;
     /* The frames outermost first, each slot described into the room,
        innermost first (the order its virtual objects are entered in). */
-    int n = 0, nvals = 0;
+    uint32_t n = 0, nvals = 0;
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
         n++;
-        nvals += p->nlocals + p->nstack;
+        nvals += (uint32_t)(p->nlocals + p->nstack);
     }
-    if (n > a->capchain) {
-        a->capchain = 2 * n;
-        a->chain = realloc(a->chain, sizeof(struct lu_fs *) * (size_t)a->capchain);
-    }
-    if (nvals > a->capvals) {
-        a->capvals = 2 * nvals;
-        a->vals = realloc(a->vals, sizeof(struct lu_dv) * (size_t)a->capvals);
-    }
-    int k = n, end = nvals;
+    b->chain = grow(b->chain, &b->capchain, n, sizeof *b->chain);
+    b->room = grow(b->room, &b->caproom, nvals, sizeof *b->room);
+    uint32_t k = n, end = nvals;
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
-        a->chain[--k] = p;
+        b->chain[--k] = p;
         int m = p->nlocals + p->nstack;
-        end -= m;
+        end -= (uint32_t)m;
         for (int i = 0; i < m; i++) {
-            a->vals[end + i] = describe(a, d, fs, *lu_fs_slot(p, i));
+            b->room[end + (uint32_t)i] = describe(a, d, fs, *lu_fs_slot(p, i));
         }
         d->visible |= k > 0 && !(p->code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN));
     }
     int caller = -1;
     for (k = 0; k < n; k++) {
-        struct lu_fs *p = a->chain[k];
-        struct lu_deopt_frame fr = { .code = p->code, .func = p->func, .pc = p->pc, .ret = p->ret,
-                                     .nlocals = p->nlocals, .nstack = p->nstack, .caller = caller,
-                                     .vals = a->vals + end };
-        end += p->nlocals + p->nstack;
-        caller = frame_record(a, &fr);
+        struct lu_fs *p = b->chain[k];
+        struct frame_key key = { .fr = { .code = p->code, .func = p->func, .pc = p->pc, .ret = p->ret,
+                                         .nlocals = p->nlocals, .nstack = p->nstack, .caller = caller },
+                                 .vals = b->room + end };
+        end += (uint32_t)(p->nlocals + p->nstack);
+        caller = frame_record(b, &key);
     }
-    d->nframes = n;
+    d->nframes = (int32_t)n;
     d->frame = caller;
-    lu_fs_each(a->f, fs, note_owned, d);
-    d->reason = reason;
-    d->error = error;
+    lu_fs_each(a->f, fs, note_owned, &(struct owning){ b, d });
+    d->reason = (uint8_t)reason;
+    d->error = (uint8_t)error;
     d->drop = drop;
-    d->opcode = lu_base_opcode(fs->code, fs->pc);
+    d->opcode = (uint8_t)lu_base_opcode(fs->code, fs->pc);
     return d;
+}
+
+/* The unit's descriptions in one block, from the exits on (struct
+   lu_unit), each exit's builder freed; and the addresses of the exits
+   and of each published state written into the code that reads them. */
+static void
+pack(struct asm_ *a, struct lu_unit *u)
+{
+    struct build *b = &a->b;
+    size_t sizes[] = { sizeof(struct lu_deopt) * (size_t)a->nexits, sizeof(struct lu_deopt_frame) * b->nframes,
+                       sizeof(struct lu_dobj) * b->nobjs, sizeof(int64_t) * b->nimms, sizeof(lu_pv) * b->nvals,
+                       sizeof(int32_t) * b->nowned };
+    const void *from[] = { NULL, b->frames, b->objs, b->imms, b->vals, b->owned };
+    void *to[6];
+    size_t total = 0;
+    for (int i = 0; i < 6; i++) {
+        total += sizes[i];
+    }
+    char *block = malloc(total ? total : 1);
+    for (int i = 0; i < 6; i++) {
+        to[i] = block;
+        if (from[i] != NULL) {
+            memcpy(block, from[i], sizes[i]);
+        }
+        block += sizes[i];
+    }
+    u->exits = to[0];
+    u->frames = to[1];
+    u->objs = to[2];
+    u->imms = to[3];
+    u->vals = to[4];
+    u->owned = to[5];
+    u->ndeopts = a->nexits;
+    u->nframes = (int)b->nframes;
+    for (int i = 0; i < a->nexits; i++) {
+        u->exits[i] = *a->exits[i].d;
+        free(a->exits[i].d);
+    }
+    a->nexits = 0;
+    int64_t p = (int64_t)(intptr_t)u->exits;
+    memcpy(a->buf + a->deopts_patch, &p, 8);
+    for (uint32_t i = 0; i < a->npubs; i++) {
+        p = (int64_t)(intptr_t)&u->exits[a->pubs[i].exit];
+        memcpy(a->buf + a->pubs[i].at, &p, 8);
+    }
+}
+
+/* What building the descriptions holds, the exits not yet packed too. */
+static void
+build_free(struct asm_ *a)
+{
+    struct build *b = &a->b;
+    for (int i = 0; i < a->nexits; i++) {
+        free(a->exits[i].d);
+    }
+    free(b->frames);
+    free(b->objs);
+    free(b->vals);
+    free(b->imms);
+    free(b->owned);
+    free(b->frame_table.slots);
+    free(b->imm_table.slots);
+    free(b->room);
+    free(b->chain);
+    free(a->pubs);
 }
 
 /* A label to jump to that leaves at fs. */
@@ -1032,7 +1192,8 @@ exit_to(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
         a->exits = realloc(a->exits, sizeof(struct exit_site) * (size_t)a->capexits);
     }
     int label = new_label(a);
-    a->exits[a->nexits++] = (struct exit_site){ label, make_deopt(a, fs, reason, error, drop) };
+    struct lu_deopt *d = make_deopt(a, fs, reason, error, drop);      /* its index is nexits */
+    a->exits[a->nexits++] = (struct exit_site){ label, d };
     return label;
 }
 
@@ -1043,7 +1204,6 @@ stress_exit(struct asm_ *a, struct lu_ins *in)
 {
     if (a->f->stress && !(in->flags & INS_NOSTRESS)) {
         int stress = exit_to(a, in->fs, EXIT_STRESS, 0, 0);
-        a->exits[a->nexits - 1].d->stress = a->unit->stress_counter;
         mov_ri(a, R11, (int64_t)(intptr_t)a->unit->stress_counter);
         rex(a, 1, 0, 0, R11);
         b1(a, 0xFF);
@@ -1205,13 +1365,15 @@ static void
 publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
 {
     struct lu_fs *fs = in->fs;
-    int next = in->op != OP_DECREF ? lu_jit_next_pc(fs->code, fs->pc) : fs->pc;
     a->inlined = d->nframes - 1;
     if (a->inlined > 0) {
         depth_add(a, -a->inlined);
     }
-    d->instr = lu_code_start(fs->code) + next;
-    mov_ri(a, RAX, (int64_t)(intptr_t)d);
+    d->instr = in->op != OP_DECREF ? lu_jit_next_pc(fs->code, fs->pc) : fs->pc;
+    a->pubs = grow(a->pubs, &a->cappubs, a->npubs + 1, sizeof *a->pubs);
+    a->pubs[a->npubs].at = a->n + 2;
+    a->pubs[a->npubs++].exit = ((struct pending *)d)->index;
+    mov_ri(a, RAX, 0x1122334455667788LL);       /* d's address, patched (pack) */
     store(a, R15, offsetof(struct lu_frame, jit_desc), RAX);
     a->nheld = d->regs ? 0 : holds_of(a, in, &a->held);
     d->takes = takes_of(a, in, a->held, a->nheld);
@@ -3142,10 +3304,12 @@ exits(struct asm_ *a)
     }
     load(a, RAX, RSP, 264);                     /* the index */
     a->deopts_patch = a->n + 2;
-    mov_ri(a, RDX, 0x1122334455667788LL);       /* the exits' table, patched */
-    load(a, RDX, RDX, 0);
-    /* rdx = table[rax] */
-    b1(a, 0x48); b1(a, 0x8B); b1(a, 0x14); b1(a, 0xC2);        /* mov rdx, [rdx+rax*8] */
+    mov_ri(a, RDX, 0x1122334455667788LL);       /* the exits, patched (pack) */
+    rex(a, 1, RAX, 0, RAX);
+    b1(a, 0x69);
+    modrm_rr(a, RAX, RAX);
+    b4(a, (int32_t)sizeof(struct lu_deopt));   /* imul rax, rax, size */
+    alu_rr(a, ALU_ADD, RDX, RAX);               /* rdx = &exits[rax] */
     mov_rr(a, RDI, R14);
     mov_rr(a, RSI, R15);
     mov_rr(a, RCX, RSP);
@@ -3157,15 +3321,6 @@ exits(struct asm_ *a)
     modrm_mem(a, R9, RBP, SPILL_BASE);          /* lea r9, [rbp+SPILL_BASE] */
     call_abs(a, (void *)lu_jit_deopt);
     jmp(a, a->epilogue);
-}
-
-/* What make_deopt builds frame records with. */
-static void
-free_rooms(struct asm_ *a)
-{
-    free(a->frame_table);
-    free(a->vals);
-    free(a->chain);
 }
 
 int
@@ -3229,14 +3384,14 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
             }
             if (emit_ins(a, bl->ins[i], next, labels) < 0) {
                 free(labels);
-                free_rooms(a);
+                build_free(a);
                 return -1;
             }
         }
         if (l2 > 0 && a->n - start > l2) {
             f->fail = "a block larger than the L2 cache";
             free(labels);
-            free_rooms(a);
+            build_free(a);
             return -1;
         }
         lu_v last = bl->nins ? bl->ins[bl->nins - 1] : LU_NOV;
@@ -3277,22 +3432,13 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
         int32_t rel = target - (a->patches[i].at + 4);
         memcpy(a->buf + a->patches[i].at, &rel, 4);
     }
-    unit->ndeopts = a->nexits;
-    unit->deopts = malloc(sizeof(struct lu_deopt *) * (size_t)(a->nexits + 1));
-    for (int i = 0; i < a->nexits; i++) {
-        unit->deopts[i] = a->exits[i].d;
-    }
-    struct lu_deopt ***table = malloc(sizeof(*table));
-    *table = unit->deopts;
-    unit->deopt_table = table;
-    int64_t tp = (int64_t)(intptr_t)table;
-    memcpy(a->buf + a->deopts_patch, &tp, 8);
+    pack(a, unit);
     /* Publication: written through one view, run through the other. */
     void *rw, *mem = lu_code_alloc((size_t)a->n, &rw);
     if (mem == NULL) {
         f->fail = "no memory for code";
         free(a->buf);
-        free_rooms(a);
+        build_free(a);
         return -1;
     }
     memcpy(rw, a->buf, (size_t)a->n);
@@ -3307,7 +3453,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     free(a->labels);
     free(a->patches);
     free(a->exits);
-    free_rooms(a);
+    build_free(a);
     return 0;
 }
 
