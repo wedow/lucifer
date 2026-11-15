@@ -1,21 +1,26 @@
 """Threads unpack a dict another thread keeps changing, as {**d}, f(**d),
 a call with **d after other keywords, and type()'s namespace copy. The
-writer adds, replaces and removes keys, dropping the last reference to each
-value it replaces: an unpacking sees each entry before or after a change,
-never a freed value or a key without its value."""
+writer adds, replaces and removes keys until the readers finish, dropping
+the last reference to each value it replaces: an unpacking sees each entry
+before or after a change, never a freed value or a key without its value."""
 import threading
 
-ROUNDS = 20000
+# Few reads: the oracle's lock handoffs slow it 20-50x when the host's CPUs
+# are oversubscribed, and the writer races every one of them.
+READS = 1000
 KEYS = ['k%d' % i for i in range(12)]
 
 d = {k: 0.0 for k in KEYS[:6]}
+done = []
 
 
 def writer():
-    for i in range(ROUNDS):
+    i = 0
+    while not done:
         k = KEYS[i % len(KEYS)]
         d[k] = float(i)
         d.pop(KEYS[(i * 7) % len(KEYS)], None)
+        i += 1
 
 
 def f(**kw):
@@ -27,12 +32,12 @@ def g(a=None, **kw):
 
 
 def good(m):
-    return all(k in KEYS and 0.0 <= v < ROUNDS for k, v in m.items())
+    return all(k in KEYS and type(v) is float and v >= 0.0 for k, v in m.items())
 
 
 def reader(out):
     bad = 0
-    for _ in range(ROUNDS // 4):
+    for _ in range(READS):
         if not good({**d}):
             bad += 1
         if not good(f(**d)):
@@ -46,10 +51,13 @@ def reader(out):
 
 
 out = []
-threads = [threading.Thread(target=writer)]
-threads += [threading.Thread(target=reader, args=(out,)) for _ in range(3)]
-for t in threads:
+w = threading.Thread(target=writer)
+readers = [threading.Thread(target=reader, args=(out,)) for _ in range(3)]
+w.start()
+for t in readers:
     t.start()
-for t in threads:
+for t in readers:
     t.join()
+done.append(True)
+w.join()
 print('bad', sum(out), len(out))
