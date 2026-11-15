@@ -1085,14 +1085,24 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     /* lu_jit_enter's conditions, and RESUME's: no poll pending, the code
        instrumented for the tools as they are now. */
     uintptr_t poll = __atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED);
-    if (jc == NULL || jc->call_pc <= 0 || frame->locals != NULL || frame->owner == LU_FRAME_GENERATOR
+    /* A generator's frame, resumed, goes on in the unit entered after
+       the RESUME it was saved at (a yield's, not a delegation's, which
+       the interpreter's loop runs), if there is one: with no turn of the
+       interpreter. */
+    int gen = frame->owner == LU_FRAME_GENERATOR;
+    if (gen && !(frame->instr->op.code == RESUME && frame->instr->op.arg != 0
+                 && (frame->instr->op.arg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM)) {
+        return 0;
+    }
+    int at = gen ? (int)(frame->instr - lu_code_start(code)) + 1 + lu_opcode_caches[RESUME] : jc != NULL ? jc->call_pc : 0;
+    if (jc == NULL || at <= 0 || frame->locals != NULL
         || (poll & LU_POLL_EVENTS_MASK)
         || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) || code->_co_monitoring != NULL
         || ts->tracing || code->_co_instrumentation_version != (poll & ~LU_POLL_EVENTS_MASK)) {
         return 0;
     }
     /* A unit is live only while its entry does not wait (kill marks it dead). */
-    struct lu_unit *u = find(jc, jc->call_pc);
+    struct lu_unit *u = find(jc, at);
     if (u == NULL) {
         return 0;
     }
@@ -1106,7 +1116,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     entry.previous = (struct lu_frame *)ts->current_frame;
     frame->previous = &entry;
     ts->current_frame = (struct _PyInterpreterFrame *)frame;
-    if (pc > 1 && prologue(frame) < 0) {
+    if (!gen && pc > 1 && prologue(frame) < 0) {
         task->jit_act = act.outer;
         *result = lu_eval_continue(ts, 1);
         return 1;
@@ -1114,11 +1124,26 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     frame->instr = lu_code_start(code) + pc;
     frame->last = frame->instr - 1 - lu_opcode_caches[RESUME];
     lu_qsbr_quiescent(task->carrier);
-    count(&stats.direct, 1);
+    count(gen ? &stats.resumes_compiled : &stats.direct, 1);
     bump_entries(u);
     int r = u->fn(ts, frame, result);
     task->jit_act = act.outer;
-    if (r == LU_JIT_RETURN) {
+    if (r == LU_JIT_YIELD) {
+        /* As the interpreter's YIELD_VALUE, back to a C caller. */
+        lu_gen_suspend(ts, frame, frame->instr[-1].op.arg);
+        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
+    }
+    else if (r == LU_JIT_RETURN && gen) {
+        /* As its return_frame: a loop's step ends with no value. */
+        uint8_t ret = frame->ret;
+        lu_gen_finish(ts, frame);
+        if (ret == LU_RETURN_FOR_ITER || ret == LU_RETURN_NEXT) {
+            Py_DECREF(*result);
+            *result = LU_MISSING;
+        }
+        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
+    }
+    else if (r == LU_JIT_RETURN) {
         lu_frame_pop(ts, frame);
         ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
     }

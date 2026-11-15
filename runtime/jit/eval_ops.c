@@ -267,6 +267,58 @@ load_common_constant(struct ctx *c)
     return 0;
 }
 
+/* A generator's root frame yields: its slots get their values, as
+   objects, each with a reference of its own (compiled code's one
+   reference per owned value goes to a slot that names it), and the unit
+   returns the value yielded with the frame saved at its resume point,
+   where a unit is entered again. Nothing goes through the exit's
+   materializer. */
+static int
+yield_value(struct ctx *c)
+{
+    struct gctx *g = c->g;
+    int n = c->nlocals + *depth_of(c) - 1;
+    lu_v *vals = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(n + 1));
+    int *need = lu_ir_alloc(g->f, sizeof(int) * (size_t)(n + 1));
+    for (int i = 0; i <= n; i++) {
+        lu_v r = slots(c)[i];           /* the last is the value yielded */
+        vals[i] = r == LU_NOV ? lu_ev_konst(c, NULL) : lu_ev_val(c, r);
+        if (g->f->fail != NULL) {
+            return -1;
+        }
+    }
+    if (g->observed) {
+        lu_v w = lu_ev_guard(c, OP_GUARD_FRAMES, LU_NOV, 0);
+        I(c, w)->flags |= INS_NOSTRESS;
+    }
+    /* Each value needs a reference per slot that names it, and the one
+       yielded one more; an owned value has one already. */
+    for (int i = 0; i <= n; i++) {
+        need[i] = 1;
+        for (int k = 0; k < i; k++) {
+            if (vals[k] == vals[i]) {
+                need[k]++;
+                need[i] = 0;
+                break;
+            }
+        }
+    }
+    for (int i = 0; i <= n; i++) {
+        for (int k = (I(c, vals[i])->flags & INS_OWNED) ? 1 : 0; k < need[i]; k++) {
+            lu_ev_retain(c, vals[i]);
+        }
+    }
+    for (int i = 0; i < n; i++) {
+        lu_ev_emit(c, OP_FRAME_STORE, REP_NONE, vals[i], LU_NOV, LU_NOV, i);
+    }
+    lu_v y = lu_ev_emit(c, OP_YIELD, REP_NONE, vals[n], LU_NOV, LU_NOV, n);
+    I(c, y)->imm2 = c->next;
+    g->cur = -1;
+    g->npending = 0;
+    g->observed = 0;
+    return 0;
+}
+
 int
 lu_ev_instruction(struct ctx *c)
 {
@@ -674,10 +726,11 @@ lu_ev_instruction(struct ctx *c)
         return 0;
     }
     case YIELD_VALUE:
-        /* The generator yields in the interpreter: the unit leaves its
-           frame at the YIELD_VALUE, and is entered again after the resume. */
-        lu_ev_side_exit(c, c->parent == NULL ? EXIT_YIELD : EXIT_SIDE);
-        return 0;
+        if (c->parent != NULL) {
+            lu_ev_side_exit(c, EXIT_SIDE);
+            return 0;
+        }
+        return yield_value(c);
     default:
         lu_ev_side_exit(c, EXIT_SIDE);
         return 0;

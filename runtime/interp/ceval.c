@@ -32,10 +32,6 @@
 #include "prim/prim.h"
 #include "prim/bytes.h"
 
-/* Include/internal/pycore_opcode_utils.h */
-#define RESUME_AFTER_YIELD_FROM 2
-#define RESUME_OPARG_LOCATION_MASK 0x3
-
 #define NAME_ERROR_MSG "name '%.200s' is not defined"
 #define UNBOUNDLOCAL_ERROR_MSG \
     "cannot access local variable '%s' where it is not associated with a value"
@@ -2133,6 +2129,7 @@ op_INSTRUMENTED_YIELD_VALUE: {
 op_YIELD_VALUE:
     retval = POP();
     SAVE_FRAME();
+yielded:
     {
     /* The frame is saved at its resume point; YIELD_VALUE's oparg. */
     struct lu_frame *caller = frame->previous;
@@ -2923,6 +2920,11 @@ jit_enter:
         frame = (struct lu_frame *)ts->current_frame;
         LOAD_FRAME();
         goto error;
+    case LU_JIT_YIELD:
+        /* The unit saved the frame as YIELD_VALUE does: its oparg is the instruction's before the resume point. */
+        retval = result;
+        oparg = frame->instr[-1].op.arg;
+        goto yielded;
     }
     Py_UNREACHABLE();
 

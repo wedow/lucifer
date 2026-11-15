@@ -26,6 +26,9 @@ enum lu_jit_result {
     LU_JIT_DEOPT,       /* frames were handed back at an unexecuted boundary: continue
                            with ts->current_frame, which may be an inlined callee's */
     LU_JIT_ERROR,       /* ts->current_frame raised: unwind from its instr */
+    LU_JIT_YIELD,       /* the frame, a generator's, yields *result (a new reference): it is saved at its
+                           resume point with its values, as the interpreter's YIELD_VALUE saves it, and is
+                           still to be suspended */
 };
 
 /* Back-edges (at one site) or calls before a code is compiled

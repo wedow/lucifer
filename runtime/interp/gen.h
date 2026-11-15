@@ -48,6 +48,11 @@ struct lu_frame *lu_gen_resume(PyThreadState *ts, PyObject *gen, PyObject *arg);
 
 /* YIELD_VALUE and the frame's exit: the generator stops running, as
    suspended (oparg 0 or 1 of YIELD_VALUE) or finished. */
+/* RESUME's oparg says where the code resumes: its low bits are 0 at a
+   call, 1 after a yield, 2 and 3 inside a delegation (yield from, await). */
+#define RESUME_AFTER_YIELD_FROM 2
+#define RESUME_OPARG_LOCATION_MASK 0x3
+
 void lu_gen_suspend(PyThreadState *ts, struct lu_frame *f, int oparg);
 void lu_gen_finish(PyThreadState *ts, struct lu_frame *f);
 

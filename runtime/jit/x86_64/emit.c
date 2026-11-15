@@ -3210,6 +3210,29 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         bind(a, stays);
         return 0;
     }
+    case OP_FRAME_STORE:
+        r = gpr_of(a, in->a, RAX);
+        store(a, R15, (int32_t)(offsetof(struct lu_frame, localsplus) + 8 * in->imm), r);
+        return 0;
+    case OP_YIELD: {
+        lu_codeunit *start = lu_code_start(f->code);
+        to_gpr(a, RCX, in->a);
+        load(a, RAX, RBP, RESULT_SLOT);
+        store(a, RAX, 0, RCX);
+        rex(a, 1, RAX, 0, R15);
+        b1(a, 0x8D);
+        modrm_mem(a, RAX, R15, (int32_t)(offsetof(struct lu_frame, localsplus) + 8 * in->imm));
+        store(a, R15, offsetof(struct lu_frame, stackpointer), RAX);
+        mov_ri(a, RAX, (int64_t)(intptr_t)(start + in->imm2));
+        store(a, R15, offsetof(struct lu_frame, instr), RAX);
+        mov_ri(a, RAX, (int64_t)(intptr_t)(start + in->src_pc));
+        store(a, R15, offsetof(struct lu_frame, last), RAX);
+        op_rm(a, 0, 0x0FB6, RAX, R15, offsetof(struct lu_frame, home));
+        op_rm(a, 0, 0x88, RAX, R15, offsetof(struct lu_frame, owner));
+        mov_ri(a, RAX, LU_JIT_YIELD);
+        jmp(a, a->epilogue);
+        return 0;
+    }
     case OP_RETURN:
         to_gpr(a, RCX, in->a);
         load(a, RAX, RBP, RESULT_SLOT);
