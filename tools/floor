@@ -543,11 +543,10 @@ SLICED = ["libtest", "fuzzdiff", "ft-cpython", "pypi", "numpy"]
 
 
 def changed_paths(base):
-    """Paths that differ from where HEAD left base, committed or not, and untracked ones."""
+    """Tracked paths that differ from where HEAD left base, committed or not; untracked files (logs, scratch)
+    never count."""
     git = lambda *a: subprocess.run(["git", *a], cwd=ROOT, check=True, capture_output=True, text=True).stdout
-    since = git("merge-base", base, "HEAD").strip()
-    untracked = git("ls-files", "--others", "--exclude-standard")
-    return set(git("diff", "--name-only", since).split()) | set(untracked.split())
+    return set(git("diff", "--name-only", git("merge-base", base, "HEAD").strip()).split())
 
 
 def slice_modes(paths):
