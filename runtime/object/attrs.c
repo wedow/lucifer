@@ -516,6 +516,8 @@ lu_instance_dict(PyObject *obj, int create)
     return d;
 }
 
+void _PyObject_XDecRefDelayed(PyObject *op);     /* runtime/thread/qsbr.c */
+
 int
 lu_instance_set_dict(PyObject *obj, PyObject *dict)
 {
@@ -527,7 +529,9 @@ lu_instance_set_dict(PyObject *obj, PyObject *dict)
     if (lu_inline_live(obj) && detach_inline(obj) < 0) {
         return -1;
     }
-    Py_XDECREF(__atomic_exchange_n(p, Py_XNewRef(dict), __ATOMIC_ACQ_REL));
+    /* Lock-free readers may still hold the old dict borrowed: it goes once
+       they are done, as CPython's _PyObject_SetManagedDict lets it. */
+    _PyObject_XDecRefDelayed(__atomic_exchange_n(p, Py_XNewRef(dict), __ATOMIC_ACQ_REL));
     return 0;
 }
 
