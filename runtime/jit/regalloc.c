@@ -105,11 +105,35 @@ mark_live(struct lu_func *f, lu_v v, void *set)
     BIT_SET((word *)set, v);
 }
 
+static __thread int *istart, *iend;     /* the allocation in progress on this thread */
+
+static void
+extend(struct lu_func *f, lu_v v, int pos)
+{
+    if (istart[v] > pos) istart[v] = pos;
+    if (iend[v] < pos) iend[v] = pos;
+}
+
+/* A value a state reads: live where it is read, to the read's position. */
+struct state_read {
+    word *gen;
+    int pos;
+};
+
+static void
+read_by_state(struct lu_func *f, lu_v v, void *arg)
+{
+    struct state_read *r = arg;
+    BIT_SET(r->gen, v);
+    extend(f, v, r->pos);
+}
+
 /* The backward dataflow, with each block's transfer made once: what its
    instructions read before they define it (gen), what they define
    (kill), and what its successors' phis read from it. A block's live-in
    is gen | (live-out & ~kill), live-out its successors' live-ins and the
-   phi inputs. */
+   phi inputs. What states read is walked here only, so the walk also
+   stretches its intervals: to after a call, whose exits leave after it. */
 static void
 liveness(struct lu_func *f, struct live *L)
 {
@@ -152,7 +176,8 @@ liveness(struct lu_func *f, struct live *L)
             if (ins->op != OP_PHI) {
                 each_operand_use(f, ins, mark_live, g);
                 if (ins->fs != NULL) {
-                    each_state_use(f, ins->fs, mark, mark_live, g);
+                    struct state_read r = { g, ins->pos + (lu_alloc_call(ins) ? 1 : 0) };
+                    each_state_use(f, ins->fs, mark, read_by_state, &r);
                 }
             }
         }
@@ -207,15 +232,6 @@ struct interval {
     int crosses;                /* a call */
     int memory;                 /* a call that clobbers the preserved registers, or one that publishes it */
 };
-
-static __thread int *istart, *iend;     /* the allocation in progress on this thread */
-
-static void
-extend(struct lu_func *f, lu_v v, int pos)
-{
-    if (istart[v] > pos) istart[v] = pos;
-    if (iend[v] < pos) iend[v] = pos;
-}
 
 struct use_at {
     int pos;
@@ -291,14 +307,14 @@ lu_regalloc(struct lu_func *f)
         bl->end = pos;
         pos += 2;
     }
-    struct live L;
-    liveness(f, &L);
     istart = malloc(sizeof(int) * (size_t)f->nins);
     iend = malloc(sizeof(int) * (size_t)f->nins);
     for (int v = 0; v < f->nins; v++) {
         istart[v] = INT32_MAX;
         iend[v] = -1;
     }
+    struct live L;
+    liveness(f, &L);
     int *calls = malloc(sizeof(int) * (size_t)(f->nins + 1)), ncalls = 0;
     int *hard = malloc(sizeof(int) * (size_t)(f->nins + 1)), nhard = 0;
     char *memory = calloc((size_t)f->nins + 1, 1);
@@ -334,18 +350,6 @@ lu_regalloc(struct lu_func *f)
                 if (lu_target.clobbers_saved(ins)) {
                     hard[nhard++] = ins->pos;
                 }
-            }
-        }
-        /* What states read, last first: a caller's frame is seen once per
-           block, at its last reader (what it names was made before the
-           first). A call's exits leave after it, so what their state
-           reads lives across the call. */
-        uint32_t mark = ++f->marks;
-        for (int i = bl->nins - 1; i >= 0; i--) {
-            struct lu_ins *ins = &f->ins[bl->ins[i]];
-            if (ins->op != OP_PHI && ins->fs != NULL) {
-                struct use_at at = { ins->pos + (lu_alloc_call(ins) ? 1 : 0) };
-                each_state_use(f, ins->fs, mark, extend_use, &at);
             }
         }
         /* Phi inputs are read at the end of their predecessor. */
