@@ -271,7 +271,7 @@ def qualnames(program):
 # stage docs/design/jit-architecture.md section 11 lists as not built
 # (entries by shape for calls that are not inlined, handlers and generators
 # inside a unit, polymorphic sites). Their programs' output is still checked.
-NOT_BUILT = frozenset("""calls raised caught compiled ccalls shapes cmethods inlinedpoly perfcalls classes objects
+NOT_BUILT = frozenset("""calls raised caught ccalls shapes cmethods classes objects
 iterators forward slices guards gens unpack useriter order""".split())
 
 
