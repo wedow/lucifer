@@ -23,6 +23,10 @@ static int
 index_arg(PyObject *o, Py_ssize_t *out)
 {
     long v;
+    if (PyLong_CheckExact(o) && _PyLong_IsCompact((PyLongObject *)o)) {
+        *out = (Py_ssize_t)_PyLong_CompactValue((PyLongObject *)o);
+        return 0;
+    }
     if (!PyLong_Check(o)) {
         lu_err_format(PyExc_TypeError, "an int is required, not '%.200s'", Py_TYPE(o)->tp_name);
         return -1;
@@ -152,8 +156,11 @@ find_in(PyObject *s, PyObject *sub, Py_ssize_t start, Py_ssize_t end, int last)
         return -1;
     }
     if (!last && KIND(s) == 1 && KIND(sub) == 1) {
-        const char *at = memmem((const char *)DATA(s) + start, end - start, DATA(sub), n);
-        return at == NULL ? -1 : at - (const char *)DATA(s);
+        /* One character, the common needle, wants no search set-up. */
+        const char *data = DATA(s), *needle = DATA(sub);
+        const char *at = n == 1 ? memchr(data + start, needle[0], end - start)
+                                : memmem(data + start, end - start, needle, n);
+        return at == NULL ? -1 : at - data;
     }
     if (n == 0) {
         return last ? end : start;
@@ -217,6 +224,38 @@ prim_str_replace(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     Py_ssize_t len = LEN(s), n = LEN(old);
     if (count == 0) {
         return substring(s, 0, len);
+    }
+    if (PyUnicode_IS_ASCII(s) && PyUnicode_IS_ASCII(new) && KIND(old) == 1 && n > 0) {
+        /* ASCII text and replacement: the matches counted, then the result
+           written straight into its str. */
+        Py_ssize_t matches = 0, at = 0, nlen = LEN(new);
+        while ((count < 0 || matches < count) && (at = find_in(s, old, at, len, 0)) >= 0) {
+            matches++;
+            at += n;
+        }
+        if (matches == 0) {
+            return substring(s, 0, len);
+        }
+        Py_ssize_t rlen = len + matches * (nlen - n);
+        if (rlen > 1) {
+            PyObject *r = PyUnicode_New(rlen, 127);
+            if (r == NULL) {
+                return NULL;
+            }
+            const char *from = DATA(s), *with = DATA(new);
+            char *to = DATA(r);
+            Py_ssize_t i = 0;
+            for (Py_ssize_t k = 0; k < matches; k++) {
+                at = find_in(s, old, i, len, 0);
+                memcpy(to, from + i, at - i);
+                to += at - i;
+                memcpy(to, with, nlen);
+                to += nlen;
+                i = at + n;
+            }
+            memcpy(to, from + i, len - i);
+            return r;
+        }
     }
     ubuf b = { 0 };
     Py_ssize_t i = 0, done = 0;
@@ -751,6 +790,22 @@ prim_str_case(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2); STR(0); IDX(1, which);
     PyObject *s = args[0];
+    if (PyUnicode_IS_ASCII(s) && LEN(s) > 1 && (which == CASE_LOWER || which == CASE_UPPER || which == CASE_CASEFOLD)) {
+        /* ASCII maps to ASCII of the same length, written straight into the result. */
+        Py_ssize_t len = LEN(s);
+        PyObject *r = PyUnicode_New(len, 127);
+        if (r == NULL) {
+            return NULL;
+        }
+        const unsigned char *from = PyUnicode_1BYTE_DATA(s);
+        unsigned char *to = PyUnicode_1BYTE_DATA(r);
+        unsigned char lo = which == CASE_UPPER ? 'a' : 'A';
+        for (Py_ssize_t i = 0; i < len; i++) {
+            unsigned char c = from[i];
+            to[i] = (unsigned char)(c - lo) < 26 ? c ^ 0x20 : c;
+        }
+        return r;
+    }
     ubuf b = { 0 };
     int previous_is_cased = 0;
     for (Py_ssize_t i = 0; i < LEN(s); i++) {

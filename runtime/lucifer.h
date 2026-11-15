@@ -9,6 +9,21 @@
 #include <pthread.h>
 #include <stdint.h>
 
+/* The vendored header's string-data accessor is a static inline function
+   the compiler keeps out of line: a call on every character access of the
+   primitives. The runtime reads it in line. */
+static inline Py_ALWAYS_INLINE void *
+lu_str_data(PyObject *op)
+{
+    PyASCIIObject *a = (PyASCIIObject *)op;
+    if (!a->state.compact) {
+        return ((PyUnicodeObject *)op)->data.any;
+    }
+    return a->state.ascii ? (void *)(a + 1) : (void *)((PyCompactUnicodeObject *)op + 1);
+}
+#undef PyUnicode_DATA
+#define PyUnicode_DATA(op) lu_str_data(_PyObject_CAST(op))
+
 #define LU_EXPORT __attribute__((visibility("default")))
 #define LU_STUB __attribute__((weak))
 #define LU_UNIMPLEMENTED(name) lu_unimplemented(name)

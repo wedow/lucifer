@@ -1318,11 +1318,15 @@ format_binary(big a, int base, int prefix)
     int64_t total = a.n ? (int64_t)(a.n - 1) * SHIFT + bit_length_digit(a.d[a.n - 1]) : 1;
     Py_ssize_t ndigits = (Py_ssize_t)((total + bits - 1) / bits);
     Py_ssize_t len = a.neg + (prefix ? 2 : 0) + ndigits;
-    char *buf = PyMem_Malloc(len + 1), *p = buf + len;
-    if (buf == NULL) {
-        return PyErr_NoMemory();
+    if (len == 1) {
+        return (PyObject *)&_PyRuntime.singletons.latin1[(unsigned char)"0123456789abcdef"[a.n ? a.d[0] : 0]];
     }
-    *p = 0;
+    /* The digits go straight into the result, right to left. */
+    PyObject *r = PyUnicode_New(len, 127);
+    if (r == NULL) {
+        return NULL;
+    }
+    char *p = (char *)PyUnicode_1BYTE_DATA(r) + len;
     if (a.n == 0) {
         *--p = '0';
     }
@@ -1344,8 +1348,6 @@ format_binary(big a, int base, int prefix)
     if (a.neg) {
         *--p = '-';
     }
-    PyObject *r = lu_str_from_utf8(buf, len, 0);
-    PyMem_Free(buf);
     return r;
 }
 
@@ -1360,9 +1362,12 @@ format_decimal(big a)
             return NULL;
         }
     }
+    /* Base 10**9 digits, least significant first: on the stack for any
+       int of a few digits, which is nearly every one formatted. */
     int d = (33 * DECIMAL_SHIFT) / (10 * SHIFT - 33 * DECIMAL_SHIFT);
     Py_ssize_t cap = 1 + size_a + size_a / d;
-    digit *pout = dalloc(cap);
+    digit small[16];
+    digit *pout = cap <= 16 ? small : dalloc(cap);
     if (pout == NULL) {
         return NULL;
     }
@@ -1388,20 +1393,24 @@ format_decimal(big a)
         tenpow *= 10;
         len++;
     }
+    PyObject *r = NULL;
     if (len > STR_DIGITS_THRESHOLD) {
         int limit = max_str_digits();
         if (limit > 0 && len - a.neg > limit) {
-            PyMem_Free(pout);
             lu_err_format(PyExc_ValueError, TO_STR_ERROR, limit);
-            return NULL;
+            goto done;
         }
     }
-    char *buf = PyMem_Malloc(len + 1), *p = buf + len;
-    if (buf == NULL) {
-        PyMem_Free(pout);
-        return PyErr_NoMemory();
+    if (len == 1) {
+        r = (PyObject *)&_PyRuntime.singletons.latin1['0' + pout[0]];
+        goto done;
     }
-    *p = 0;
+    /* The digits go straight into the result, right to left. */
+    r = PyUnicode_New(len, 127);
+    if (r == NULL) {
+        goto done;
+    }
+    char *p = (char *)PyUnicode_1BYTE_DATA(r) + len;
     for (Py_ssize_t i = 0; i < size - 1; i++) {
         rem = pout[i];
         for (int j = 0; j < DECIMAL_SHIFT; j++) {
@@ -1417,9 +1426,10 @@ format_decimal(big a)
     if (a.neg) {
         *--p = '-';
     }
-    PyMem_Free(pout);
-    PyObject *r = lu_str_from_utf8(buf, len, 0);
-    PyMem_Free(buf);
+done:
+    if (pout != small) {
+        PyMem_Free(pout);
+    }
     return r;
 }
 
@@ -1910,7 +1920,7 @@ PyMethodDef lu_prim_int_methods[] = {
     PURE(int_divmod), PURE(int_pow), PURE(int_truediv), PURE(int_neg), PURE(int_abs),
     PURE(int_invert), PURE(int_shift), PURE(int_bitwise), PURE(int_cmp),
     PURE(int_bit_length), PURE(int_bit_count), PURE(int_hash), FAST(int_to_bytes),
-    FAST(int_from_bytes), FAST(int_format), FAST(int_from_text), PURE(int_as_double),
+    FAST(int_from_bytes), PURE(int_format), FAST(int_from_text), PURE(int_as_double),
     PURE(int_from_double), FAST(int_subtype), PURE(int_max_str_digits),
     FAST(set_int_max_str_digits), PURE(int_is_zero),
     { NULL, NULL, 0, NULL },
