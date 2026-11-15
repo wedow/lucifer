@@ -171,6 +171,17 @@ sink_record(struct lu_vobj *o, const lu_v *box)
 static int
 raw_loads(struct lu_func *f)
 {
+    /* Only a load some unboxing reads in its block qualifies: without one
+       there is nothing to learn from the states. */
+    int any = 0;
+    for (int v = 0; v < f->nins && !any; v++) {
+        struct lu_ins *in = &f->ins[v];
+        any = !(in->flags & INS_DEAD) && (in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT) && in->a >= 0
+            && f->ins[in->a].op == OP_INLINE_LOAD && in->block == f->ins[in->a].block;
+    }
+    if (!any) {
+        return 0;
+    }
     int n = f->nins, records = f->nvobjs, changed = 0;
     uint8_t *want = calloc((size_t)n + 1, 1);
     char *unboxed = calloc((size_t)n + 1, 1);
