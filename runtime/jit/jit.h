@@ -242,13 +242,21 @@ struct lu_pic {
     int store;                  /* a STORE_ATTR site's */
     int n;                      /* entries published, release-stored after the entry */
     int tries;                  /* shapes looked at: a site whose owners have none stops looking */
+    unsigned passes;            /* generic loads by units built for fewer shapes than it has now */
     struct lu_pic_entry e[LU_PIC_WAYS];
 };
 
+/* Whether a cache of n shapes may gain one: it has room, and has not
+   looked at so many owners with none to give that it stopped. */
+static inline int
+lu_jit_pic_learns(struct lu_pic *pic, int n)
+{
+    return n < LU_PIC_WAYS && __atomic_load_n(&pic->tries, __ATOMIC_RELAXED) < 4 * LU_PIC_WAYS;
+}
 /* The site's cache, made when `create`; NULL without one. */
 struct lu_pic *lu_jit_pic(PyCodeObject *code, int pc, int create);
-/* A generic load at the site met owner: its shape joins the cache, and the
-   code recompiles to test for it, while there is room. */
+/* A generic load at the site met owner: its shape joins the cache, while
+   there is room. */
 void lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name);
 /* The interpreter's generic load or store at pc of code that has compiled units met
    owner: the site's cache (made now) notes its shape, so that a unit that

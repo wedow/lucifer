@@ -1268,7 +1268,7 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
             return;
         }
     }
-    if (n == LU_PIC_WAYS || __atomic_load_n(&pic->tries, __ATOMIC_RELAXED) >= 4 * LU_PIC_WAYS) {
+    if (!lu_jit_pic_learns(pic, n)) {
         return;                 /* megamorphic, or shapes no entry can hold: the generic path it is */
     }
     __atomic_fetch_add(&pic->tries, 1, __ATOMIC_RELAXED);
@@ -1304,15 +1304,9 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
         added = 1;
     }
     PyMutex_Unlock(&_PyRuntime.pic_lock);
-    if (added) {
-        /* The code's units recompile at their next entry, testing for it. */
-        if (_PyRuntime.jit.debug) {
-            fprintf(stderr, "jit: pic grows %s for %s\n", PyUnicode_AsUTF8(pic->code->co_qualname), tp->tp_name);
-        }
-        struct lu_jit_code *jc = state_of(pic->code);
-        for (struct lu_unit *u = __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
-            kill(jc, u);
-        }
+    if (added && _PyRuntime.jit.debug) {
+        /* A unit that tests for fewer shapes is built again when its generic load next runs (eval_attr.c). */
+        fprintf(stderr, "jit: pic grows %s for %s\n", PyUnicode_AsUTF8(pic->code->co_qualname), tp->tp_name);
     }
 }
 

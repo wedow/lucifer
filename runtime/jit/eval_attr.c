@@ -140,37 +140,16 @@ replace_owner(struct ctx *c, lu_v attr, lu_v self)
     }
 }
 
-int
-lu_ev_load_attr(struct ctx *c)
+/* The attribute loaded as specialization `op` has it (version, index and
+   descr are that specialization's), in place of the owner on the stack;
+   any other way through the generic load, which tells `pic` (the site's
+   cache of shapes, or NULL) what it meets. */
+static int
+load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr, struct lu_pic *pic)
 {
     lu_v owner = lu_ev_peek(c, 1), v;
     int method = c->oparg & 1;
     PyObject *name = name_at(c, c->oparg >> 1);
-    /* A known module's attribute: a constant, guarded
-       as a global is. */
-    PyObject *mod = lu_ev_const(c, owner);
-    if (mod != NULL && PyModule_CheckExact(mod) && !nospec(c, c->pc)) {
-        PyObject *k = lu_ev_dict_const(c, PyModule_GetDict(mod), NULL, name);
-        if (k != NULL) {
-            replace_owner(c, lu_ev_konst(c, k), LU_NOV);
-            Py_DECREF(k);       /* the unit holds its constants */
-            return 0;
-        }
-    }
-    if (mod != NULL && PyType_Check(mod) && Py_IS_TYPE(mod, &PyType_Type)
-        && (((PyTypeObject *)mod)->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) && _PyType_Lookup(&PyType_Type, name) == NULL) {
-        /* A function of a type that cannot change, read from the type: itself. */
-        PyObject *k = _PyType_Lookup((PyTypeObject *)mod, name);
-        if (k != NULL && PyFunction_Check(k)) {
-            replace_owner(c, lu_ev_konst(c, k), LU_NOV);
-            return 0;
-        }
-    }
-    uint32_t version = 0;
-    uint16_t index = 0;
-    PyObject *descr = NULL;
-    /* An object the code made has no cache to read: its own lookup. */
-    int op = LU_IS_VIRT(owner) ? LOAD_ATTR : cached_site(c, LOAD_ATTR, &version, &index, &descr);
     switch (op) {
     case LOAD_ATTR_METHOD_NO_DICT: case LOAD_ATTR_METHOD_WITH_VALUES:
     case LOAD_ATTR_NONDESCRIPTOR_NO_DICT: case LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES: {
@@ -217,15 +196,101 @@ lu_ev_load_attr(struct ctx *c)
         }
         /* fall through: a class default stands behind the instance's value */
     default: {
-        lu_v args[3] = { owner, lu_ev_konst(c, name), lu_ev_const_i(c, 0) };
+        lu_v args[3] = { owner, lu_ev_konst(c, name), lu_ev_const_i(c, (int64_t)(intptr_t)pic) };
         v = lu_ev_helper(c, method ? H_load_method : H_load_attr, 3, args, 1);
         /* load_method answers the bound method or attribute; CALL unbinds it. */
         replace_owner(c, v, LU_NOV);
         break;
     }
     }
-    Py_XDECREF(descr);
     return 0;
+}
+
+/* The site's shapes from the i-th of n on: a test of the owner's type
+   version for each, with the load as that shape has it; then any other
+   owner's, generic. Each way is built to the instruction's end, and they
+   join after it. A unit built for fewer shapes than the cache has now
+   leaves from its generic load to be built again, itself alone. */
+static int
+load_ways(struct ctx *c, struct lu_pic *pic, int n, int i)
+{
+    lu_v owner = lu_ev_peek(c, 1);
+    if (i == n) {
+        /* A cache that is full, or that has stopped looking, learns no
+           more: the generic load tells it nothing. */
+        if (!lu_jit_pic_learns(pic, n)) {
+            return load_as(c, LOAD_ATTR, 0, 0, NULL, NULL);
+        }
+        uint64_t key = (uint64_t)n;
+        for (struct ctx *k = c; k != NULL; k = k->parent) {
+            key = lu_jit_ctx_mix(key, k->code, k->pc);
+        }
+        lu_v args[2] = { lu_ev_const_i(c, (int64_t)(intptr_t)pic), lu_ev_const_i(c, n) };
+        I(c, lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_pic_same, 2, args, 0), 1))->prof
+            = lu_jit_prof(c->g->f->code, key);
+        return load_as(c, LOAD_ATTR, 0, 0, NULL, pic);
+    }
+    struct lu_pic_entry e = pic->e[i];
+    if (i == 0) {
+        lu_ev_guard(c, OP_GUARD_NOT_NULL, owner, 0);
+    }
+    lu_v type = lu_ev_emit(c, OP_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, offsetof(PyObject, ob_type));
+    lu_v version = lu_ev_emit(c, OP_LOAD, REP_I64, type, LU_NOV, LU_NOV, offsetof(PyTypeObject, tp_version_tag));
+    I(c, version)->imm2 = 4;
+    struct split s;
+    lu_ev_split(c, lu_ev_emit(c, OP_CMP_I, REP_BIT, version, lu_ev_const_i(c, e.version), LU_NOV, Py_EQ), &s);
+    if (e.descr != NULL) {
+        lu_ev_konst(c, e.descr);
+    }
+    if (load_as(c, e.op, e.version, e.index, e.descr, pic) < 0) {
+        return -1;
+    }
+    lu_ev_split_else(c, &s);
+    if (load_ways(c, pic, n, i + 1) < 0) {
+        return -1;
+    }
+    lu_ev_split_end(c, &s);
+    return 0;
+}
+
+int
+lu_ev_load_attr(struct ctx *c)
+{
+    lu_v owner = lu_ev_peek(c, 1), v;
+    int method = c->oparg & 1;
+    PyObject *name = name_at(c, c->oparg >> 1);
+    /* A known module's attribute: a constant, guarded
+       as a global is. */
+    PyObject *mod = lu_ev_const(c, owner);
+    if (mod != NULL && PyModule_CheckExact(mod) && !nospec(c, c->pc)) {
+        PyObject *k = lu_ev_dict_const(c, PyModule_GetDict(mod), NULL, name);
+        if (k != NULL) {
+            replace_owner(c, lu_ev_konst(c, k), LU_NOV);
+            Py_DECREF(k);       /* the unit holds its constants */
+            return 0;
+        }
+    }
+    if (mod != NULL && PyType_Check(mod) && Py_IS_TYPE(mod, &PyType_Type)
+        && (((PyTypeObject *)mod)->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) && _PyType_Lookup(&PyType_Type, name) == NULL) {
+        /* A function of a type that cannot change, read from the type: itself. */
+        PyObject *k = _PyType_Lookup((PyTypeObject *)mod, name);
+        if (k != NULL && PyFunction_Check(k)) {
+            replace_owner(c, lu_ev_konst(c, k), LU_NOV);
+            return 0;
+        }
+    }
+    uint32_t version = 0;
+    uint16_t index = 0;
+    PyObject *descr = NULL;
+    /* An object the code made has no cache to read: its own lookup. */
+    int op = LU_IS_VIRT(owner) ? LOAD_ATTR : cached_site(c, LOAD_ATTR, &version, &index, &descr);
+    /* A site with no one shape has a cache of the few it met (jit.h). */
+    struct lu_pic *pic = op == LOAD_ATTR && owner >= 0 && !nospec(c, c->pc)
+        ? lu_jit_pic(c->code, (int)(c->cache - 1 - lu_code_start(c->code)), 1) : NULL;
+    int done = pic != NULL ? load_ways(c, pic, __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE), 0)
+                           : load_as(c, op, version, index, descr, NULL);
+    Py_XDECREF(descr);
+    return done;
 }
 
 /* The raw value of v, the instruction's operand on top of the stack but

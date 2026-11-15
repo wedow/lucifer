@@ -414,6 +414,19 @@ h_profile(struct lu_prof *p, PyObject *o, intptr_t learned)
     return lu_jit_prof_note(p, o, (unsigned long)learned);
 }
 
+/* Whether an attribute site's cache is as a unit was built for: the n
+   shapes it tests for, and still learning. Once it has more shapes, or
+   has stopped looking, the unit is built again: not at the first such
+   load but at one in 64, so that the shapes that come together are
+   learned together. */
+static intptr_t
+h_pic_same(struct lu_pic *pic, intptr_t n)
+{
+    int now = __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE);
+    return (now == n && lu_jit_pic_learns(pic, now))
+        || (__atomic_add_fetch(&pic->passes, 1, __ATOMIC_RELAXED) & 63) != 0;
+}
+
 static PyObject *
 h_cell_load(PyObject *cell)
 {
@@ -1425,6 +1438,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_slot_store] = { (void *)h_slot_store, "slot_store", REP_NONE, FX_SEEN, 3 },
     [H_dict_lacks] = { (void *)h_dict_lacks, "dict_lacks", REP_BIT, 0, 2 },
     [H_profile] = { (void *)h_profile, "profile", REP_BIT, 0, 3 },
+    [H_pic_same] = { (void *)h_pic_same, "pic_same", REP_BIT, 0, 2 },
     [H_cell_load] = { (void *)h_cell_load, "cell_load", REP_OBJ, FX_SEEN, 1 },
     [H_compare_ideq] = { (void *)h_compare_ideq, "compare_ideq", REP_BIT, 0, 3 },
     [H_str_concat] = { (void *)lu_str_concat, "str_concat", REP_OBJ, FX_RAISE, 2 },
