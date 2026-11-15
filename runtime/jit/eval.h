@@ -222,8 +222,9 @@ struct fact *lu_ev_fact(struct ctx *c, lu_v v, int create);
 /* The type every use of instruction value v has (its definition gives it). */
 void lu_ev_def_type(struct ctx *c, lu_v v, PyTypeObject *t);
 /* r's exact type: what is known, else what the root learned of the
-   `which`-th value this instruction asks about (guarded); NULL when it
-   knows none yet, and compiled code then reports the type here. */
+   `which`-th value this instruction asks about (guarded), as far as
+   lu_ev_type knows it; NULL when it knows none yet, and compiled code then
+   reports the type here. */
 PyTypeObject *lu_ev_learn_type(struct ctx *c, lu_v r, int which);
 
 /* The innermost frame's state at pc as a frame state, with the path's

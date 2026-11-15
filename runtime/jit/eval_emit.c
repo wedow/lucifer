@@ -126,7 +126,7 @@ lu_ev_learn_type(struct ctx *c, lu_v r, int which)
         Py_DECREF(t);           /* the unit holds its constants */
         I(c, lu_ev_guard(c, OP_GUARD_TYPE, r, (int64_t)(intptr_t)t))->prof = p;
         lu_ev_set_type(c, r, t);
-        return t;
+        return lu_ev_type(c, r);        /* none, of a class with no version to rely on */
     }
     lu_v args[3] = { lu_ev_const_i(c, (int64_t)(intptr_t)p), r, lu_ev_const_i(c, (int64_t)c->g->learned) };
     I(c, lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_profile, 3, args, 0), 1))->prof = p;
