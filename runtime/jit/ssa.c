@@ -208,7 +208,7 @@ lu_alloc_kind(const struct lu_ins *in)
     case H_build_list: case H_list_repeat: return ALLOC_list;
     case H_new_dict: case H_build_map: return ALLOC_dict;
     case H_build_set: return ALLOC_set;
-    case H_new_object: return ALLOC_instance;
+    case H_new_object: case H_fields_new: return ALLOC_instance;
     case H_get_iter: case H_get_iter_seq: case H_range_iter: case H_listiter_new: case H_tupleiter_new:
     case H_rangeiter_new:
         return ALLOC_iterator;

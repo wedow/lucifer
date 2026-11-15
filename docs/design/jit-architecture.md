@@ -759,11 +759,32 @@ root at its entry instruction and no inlined frames, as the root does
 today.
 
 **Loops are rebuilt whole.** A loop header takes its preheader's state
-with a phi for each local the loop assigns, each stack entry and each
-field of a mutable virtual object. A back-edge whose state does not fit
-(another kind, another length) records the header as weaker and the unit
-is built again from the start; there is no undo of partial graphs. Each
-rebuild weakens one header, so it ends.
+with a phi for each local the loop assigns and each stack entry that is
+an object or a number. A virtual object on the stack, or one a slot that
+stays reaches, stays virtual round the loop under its id: a field that is
+a raw word (an iterator's index) is a phi, and a field a back-edge shows
+changing is one in the next build, raw where it carries a number. A
+back-edge whose state does not fit (another kind, another length, an
+object made in the loop) records what was wrong as a hint for the header
+and the unit is built again from the start; there is no undo of partial
+graphs. A hint names a carried object by the way to it from the frame's
+slots, since ids are a build's own. Each rebuild knows strictly more, so
+it ends.
+
+**A join keeps a virtual object the edges changed differently.** When no
+edge made it and its records have one layout, each field that differs is
+a place of the join like a slot: a raw phi for a number, an object's phi
+otherwise, whose inputs are made real on their edges before the phis
+exist. An object some edge made, or whose layouts differ, is made on
+every edge.
+
+**A call in tail position returns through its caller.** Where an inlined
+frame's call is followed by `RETURN_VALUE`, each of the callee's returns
+goes on through that instruction on its own path instead of joining the
+others first, so what one return knows of its value (the constant that
+ends a loop, a tuple the consumer unpacks) is known where the value is
+used. This is tail duplication of one instruction; the general form is
+not built.
 
 **An inlined callee is checked before it is evaluated.** A scan of its
 bytecode for instructions the evaluator does not compile decides whether
@@ -846,9 +867,8 @@ What decides how code is specialized:
 Not built yet, each a stage of §7:
 
 - Virtual instances of classes, cells, slices, generators, strings as
-  parts (S2, S5, S6). A virtual object that is changed lives until the
-  next loop header or join that disagrees; only list and tuple iterators
-  are carried round a loop as phis.
+  parts (S2, S5, S6). A virtual object whose layout changes in a loop
+  (a list appended to, a dict given a key) exists before the loop.
 - Dependencies and hoisting: a global's guards run where it is read.
 - Handlers inside a unit: a raise exits. Generators leave at each yield.
 - Polymorphic attribute sites take the generic helper.

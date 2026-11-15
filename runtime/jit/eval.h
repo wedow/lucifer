@@ -57,8 +57,31 @@ struct edge {
     struct state st;
 };
 
-/* What a loop header made of a slot, for its back-edges to meet. */
-enum { SLOT_SAME, SLOT_RAW, SLOT_OBJ };
+/* What a join or a loop header may replace with a phi is a place: a slot
+   of the innermost frame (id < 0, `at` the slot), or a field of a virtual
+   object that stays virtual across it (id the object's, `at` the field).
+   The frame's slots come first, slot i at index i. */
+struct place {
+    int id, at;
+};
+
+/* What was made of a place. */
+enum {
+    PLACE_SAME,                 /* nothing: it holds what it held */
+    PLACE_RAW,                  /* a number that is no object: a raw phi, and beside it (origin) the phi of
+                                   the object the number was, where an edge had one */
+    PLACE_OBJ,                  /* an object's phi, which holds a reference */
+    PLACE_DIRECT,               /* a field that is a raw word (an iterator's index): its phi */
+};
+
+struct places {
+    struct place *at;
+    uint8_t *kind;
+    lu_v *phi;                  /* the phi (places that held the same values on every edge share one), or LU_NOV */
+    lu_v *origin;
+    int *lead;                  /* the first place with that phi: itself, or -1 without one */
+    int n, cap;
+};
 
 struct bblk {
     int pc;
@@ -68,13 +91,13 @@ struct bblk {
     int ir;                     /* a loop header's graph block */
     struct edge *in;            /* forward edges waiting for it to be built */
     int nin, capin;
-    uint8_t *slot_kind;         /* a built loop header: per slot, SLOT_* */
-    lu_v *slot_phi;             /* and its phi */
-    lu_v *slot_origin;          /* and, beside a raw phi, the phi of the object the value was */
-    lu_v *slot_ref;             /* and what the slot holds at the header */
-    int *iter_id;               /* the virtual iterators the loop steps: their ids */
-    lu_v *iter_phi;             /* and their index phis */
-    int niter;
+    struct places P;            /* a built loop header: its frame's slots, then every field of the virtual
+                                   objects it carries, for its back-edges to meet */
+    lu_v *ref;                  /* per place: what it holds at the header */
+    uint64_t *key;              /* per place: what names it in a hint */
+    int *carried;               /* the virtual objects the loop may change that the header left virtual: their ids */
+    uint64_t *carried_key;      /* and what names each in a hint */
+    int ncarried;
     struct state hdr;           /* the state at the header */
 };
 
@@ -119,13 +142,17 @@ struct ctx {
     int nrets, caprets;
 };
 
-/* What a rebuild knows from the build before it (eval_flow.c): a loop
-   header's slot that carries a box wants a raw phi; one whose back-edge did
-   not fit gets an object. */
-enum { HINT_INT = 1, HINT_FLOAT, HINT_OBJ };
+/* What a rebuild knows from the build before it (eval_flow.c), per place
+   of a loop header: a field of a virtual object the loop carries changes
+   round it; a place that carries a box wants a raw phi; one whose
+   back-edge did not fit gets an object. A hint only grows stronger, in
+   that order. Of a carried object itself (lu_ev_object_key) HINT_OBJ says
+   that it exists before the loop. */
+enum { HINT_VARIES = 1, HINT_INT, HINT_FLOAT, HINT_OBJ };
 struct hint {
     PyCodeObject *code;
-    int pc, slot, kind;
+    int pc, kind;
+    uint64_t place;             /* a slot's index, or a key (eval_flow.c) */
 };
 
 /* One build. */
@@ -340,8 +367,8 @@ int lu_ev_jump_target(int op, int oparg, int next);
    reach without an exception; and one opcode (eval_ops.c). */
 int lu_ev_supported(struct gctx *g, PyCodeObject *code);
 int lu_ev_op_supported(int base);
-void lu_ev_hint(struct gctx *g, PyCodeObject *code, int pc, int slot, int kind);
-int lu_ev_hinted(struct gctx *g, PyCodeObject *code, int pc, int slot);
+void lu_ev_hint(struct gctx *g, PyCodeObject *code, int pc, uint64_t place, int kind);
+int lu_ev_hinted(struct gctx *g, PyCodeObject *code, int pc, uint64_t place);
 
 /* --- the instructions: 0, or -1 when the frame cannot go on (f->fail set) --- */
 

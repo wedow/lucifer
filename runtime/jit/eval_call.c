@@ -441,6 +441,54 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, lu_v *args, int npo
     return 1;
 }
 
+/* Whether frame c's caller returns what c returns: its call is followed
+   by RETURN_VALUE, in a frame that is itself in line. Each of c's returns
+   then goes on through the caller's, one by one, instead of joining the
+   others first: what one of them knows of its value (a constant that
+   ends a loop, a tuple its consumer unpacks) is still known where the
+   caller's caller takes it. */
+static int
+returns_through(struct ctx *c)
+{
+    struct ctx *p = c->parent;
+    int base, oparg, op;
+    if (c->ret != LU_RETURN_PUSH || p->parent == NULL || p->next >= p->ncode) {
+        return 0;
+    }
+    lu_ev_decode(p, p->next, &base, &oparg, &op);
+    return base == RETURN_VALUE;
+}
+
+/* The RETURN_VALUE after p's current instruction, a call, evaluated on
+   the path one of the callee's returns came by. The call is p's
+   instruction again after it: the callee's other paths are still to be
+   built. */
+static int
+return_through(struct ctx *p)
+{
+    struct ctx call = *p;
+    struct undo *undo = lu_ir_alloc(p->g->f, sizeof(struct undo) * (size_t)(p->nundo ? p->nundo : 1));
+    memcpy(undo, p->undo, sizeof(struct undo) * (size_t)p->nundo);
+    p->pc = call.next;
+    p->next = lu_ev_decode(p, p->pc, &p->base, &p->oparg, &p->opcode);
+    p->cache = lu_code_start(p->code) + p->next - lu_opcode_caches[p->base];
+    lu_ev_begin(p, p->pc);
+    int r = lu_ev_return(p);
+    p->pc = call.pc;
+    p->next = call.next;
+    p->base = call.base;
+    p->oparg = call.oparg;
+    p->opcode = call.opcode;
+    p->cache = call.cache;
+    p->snap = call.snap;
+    p->snap_pc = call.snap_pc;
+    p->snap_sp = call.snap_sp;
+    p->snap_live = call.snap_live;
+    p->nundo = call.nundo;
+    memcpy(p->undo, undo, sizeof(struct undo) * (size_t)call.nundo);
+    return r;
+}
+
 int
 lu_ev_return(struct ctx *c)
 {
@@ -505,6 +553,9 @@ lu_ev_return(struct ctx *c)
     lu_ev_settle(p, p->next);
     if (g->cur < 0) {
         return 0;
+    }
+    if (returns_through(c)) {
+        return return_through(p);
     }
     if (c->nrets == c->caprets) {
         int cap = c->caprets ? 2 * c->caprets : 4;

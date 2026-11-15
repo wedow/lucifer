@@ -101,6 +101,23 @@ def gen_call(x):
     for i in calling_gen(N, x):
         pass
 
+SEQ = list(range(N))
+
+def double(v):
+    return v + v
+
+def enum(x):
+    for i, v in enumerate(SEQ):
+        pass
+
+def zip2(x):
+    for a, b in zip(SEQ, SEQ):
+        pass
+
+def mapf(x):
+    for v in map(double, SEQ):
+        pass
+
 def attr(x):
     o = C(); o.v = x
     for i in range(N):

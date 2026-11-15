@@ -5,17 +5,25 @@
    reaches it over edges, each an open graph block and a state. A block is
    built once, lowest instruction first, so every forward edge to it is
    there when it is: one edge goes on in its own graph block, several are
-   joined (merge). A value that differs between edges becomes a phi; a
-   virtual object stays virtual when every edge has it so.
+   joined (merge). What a join or a loop header may replace with a phi is
+   a place: a slot of the frame, or a field of a virtual object. A slot
+   that differs between edges becomes a phi. A virtual object the edges
+   know differently stays virtual when no edge made it and its records
+   have one layout: each field that differs is a place of the join, and
+   gets a phi as a slot does. Otherwise it is made real on every edge.
 
    A loop header is built from its forward edges before its back-edges
    exist. It makes a phi for each slot the loop may change: a raw one
    where the slot holds an int or a float (a box that never exists), an
-   object's otherwise. A back-edge must then fit what the header made. One
-   that does not records a hint for the header (the slot gets an object; a
-   box the loop carries wants a raw phi) and the whole build starts over
-   with it: nothing is undone piecemeal, and each rebuild knows strictly
-   more. */
+   object's otherwise. A virtual object the loop may change is carried
+   round it virtual, its fields places of the header: a field that is a
+   raw word (an iterator's index) is a phi, the others stay what they are
+   until a back-edge shows one changing. A back-edge must fit what the
+   header made. One that does not records a hint for the header (the
+   place gets a phi, a raw one for a box the loop carries, or an object;
+   an object that came back made, or in another layout, exists before
+   the loop) and the whole build starts over with it: nothing is undone
+   piecemeal, and each rebuild knows strictly more. */
 #include "jit/eval.h"
 
 #include <stdlib.h>
@@ -229,15 +237,18 @@ block_at(struct ctx *c, int pc)
 }
 
 void
-lu_ev_hint(struct gctx *g, PyCodeObject *code, int pc, int slot, int kind)
+lu_ev_hint(struct gctx *g, PyCodeObject *code, int pc, uint64_t place, int kind)
 {
     for (int i = 0; i < g->nhints; i++) {
         struct hint *h = &g->hints[i];
-        if (h->code == code && h->pc == pc && h->slot == slot) {
-            if (h->kind != kind) {
-                h->kind = HINT_OBJ;     /* two shapes: the slot holds an object */
-                g->restart = 1;
+        if (h->code == code && h->pc == pc && h->place == place) {
+            /* Stronger than what was known, or two shapes: an object. */
+            int now = h->kind == kind || kind == HINT_VARIES ? h->kind : h->kind == HINT_VARIES ? kind : HINT_OBJ;
+            if (now == h->kind) {
+                g->f->fail = "a loop whose shape does not settle";      /* the header had the hint and did not fit */
             }
+            h->kind = now;
+            g->restart = 1;
             return;
         }
     }
@@ -245,16 +256,16 @@ lu_ev_hint(struct gctx *g, PyCodeObject *code, int pc, int slot, int kind)
         g->caphints = g->caphints ? 2 * g->caphints : 16;
         g->hints = realloc(g->hints, sizeof(struct hint) * (size_t)g->caphints);
     }
-    g->hints[g->nhints++] = (struct hint){ code, pc, slot, kind };
+    g->hints[g->nhints++] = (struct hint){ code, pc, kind, place };
     g->restart = 1;
 }
 
 int
-lu_ev_hinted(struct gctx *g, PyCodeObject *code, int pc, int slot)
+lu_ev_hinted(struct gctx *g, PyCodeObject *code, int pc, uint64_t place)
 {
     for (int i = 0; i < g->nhints; i++) {
         struct hint *h = &g->hints[i];
-        if (h->code == code && h->pc == pc && h->slot == slot) {
+        if (h->code == code && h->pc == pc && h->place == place) {
             return h->kind;
         }
     }
@@ -384,101 +395,200 @@ enter_edge(struct ctx *c, struct edge *e, int pc)
     lu_ev_begin(c, pc);
 }
 
-/* Per slot of a loop header, whose phis are distinct, the slot whose phi
-   it takes first (lead): itself, or -1 without one. */
-static int *
-distinct_leads(struct gctx *g, const lu_v *phis, int nslots)
+/* --- places --- */
+
+static void *
+regrow(struct gctx *g, const void *old, int n, int cap, size_t size)
 {
-    int *lead = lu_ir_alloc(g->f, sizeof(int) * (size_t)(nslots ? nslots : 1));
-    for (int i = 0; i < nslots; i++) {
-        lead[i] = phis[i] != LU_NOV ? i : -1;
+    void *p = lu_ir_alloc(g->f, size * (size_t)(cap ? cap : 1));
+    if (n > 0) {
+        memcpy(p, old, size * (size_t)n);
     }
-    return lead;
+    return p;
 }
 
-/* What each phi of a join takes on the current edge: per slot, the
-   object an object phi takes (made real here if it was not), the object a
-   raw phi's value stands for if there is one, or LU_NOV. `phis` holds,
-   per slot, the phi that replaces it (slots that held the same values
-   share one) or LU_NOV, and lead the first slot with that phi (-1: none). */
-static lu_v *
-edge_inputs(struct ctx *c, const lu_v *phis, const int *lead, int nslots)
+static int
+place_add(struct gctx *g, struct places *P, int id, int at)
+{
+    if (P->n == P->cap) {
+        int cap = P->cap ? 2 * P->cap : 16;
+        P->at = regrow(g, P->at, P->n, cap, sizeof(struct place));
+        P->kind = regrow(g, P->kind, P->n, cap, 1);
+        P->phi = regrow(g, P->phi, P->n, cap, sizeof(lu_v));
+        P->origin = regrow(g, P->origin, P->n, cap, sizeof(lu_v));
+        P->lead = regrow(g, P->lead, P->n, cap, sizeof(int));
+        P->cap = cap;
+    }
+    P->at[P->n] = (struct place){ id, at };
+    P->kind[P->n] = PLACE_SAME;
+    P->phi[P->n] = P->origin[P->n] = LU_NOV;
+    P->lead[P->n] = -1;
+    return P->n++;
+}
+
+/* The slots of c's frame, each a place nothing is made of yet. */
+static void
+places_of_slots(struct ctx *c, struct places *P, int nslots)
+{
+    *P = (struct places){ 0 };
+    for (int i = 0; i < nslots; i++) {
+        place_add(c->g, P, -1, i);
+    }
+}
+
+/* Virtual object id's record in the state while nothing has made it, else NULL. */
+static struct lu_vobj *
+unmade_in(struct gctx *g, const struct state *st, int id)
+{
+    lu_v real;
+    struct lu_vobj *o = lu_ev_virt(g, st, LU_VIRT(id), &real);
+    return real == LU_NOV ? o : NULL;
+}
+
+/* What the place holds in the state; nothing for a field of an object
+   that was made. */
+static lu_v
+place_get(struct gctx *g, const struct state *st, struct place pl)
+{
+    if (pl.id < 0) {
+        return st->v[st->depth][pl.at];
+    }
+    struct lu_vobj *o = unmade_in(g, st, pl.id);
+    return o != NULL && pl.at < o->n ? o->f[pl.at] : LU_NOV;
+}
+
+/* How a field's value can meet another across a join: not at all (the
+   field is unset), as a raw word of its representation, or as an object. */
+enum { FIELD_UNSET = 0, FIELD_OBJ = REP_OBJ };
+
+static int
+field_class(struct ctx *c, lu_v v)
+{
+    if (v == LU_NOV || (v >= 0 && I(c, v)->op == OP_CONST && I(c, v)->imm == 0)) {
+        return FIELD_UNSET;
+    }
+    return v >= 0 ? I(c, v)->rep : FIELD_OBJ;
+}
+
+/* What each phi takes on the current edge, for the places from `from`
+   on: the object an object phi takes (made real here if it was not), the
+   object a raw phi's value stands for if there is one, or LU_NOV. */
+static void
+edge_inputs(struct ctx *c, const struct places *P, int from, lu_v *in)
 {
     struct gctx *g = c->g;
-    lu_v *in = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(nslots ? nslots : 1));
-    for (int i = 0; i < nslots; i++) {
-        in[i] = LU_NOV;
-        if (lead[i] != i) {
+    for (int p = from; p < P->n; p++) {
+        in[p] = LU_NOV;
+        if (P->lead[p] != p || P->kind[p] == PLACE_DIRECT) {
             continue;
         }
-        lu_v r = slots(c)[i];
-        if (I(c, phis[i])->rep == REP_OBJ) {
-            in[i] = r == LU_NOV ? lu_ev_konst(c, NULL) : lu_ev_val(c, r);
+        lu_v r = place_get(g, &g->st, P->at[p]);
+        if (P->kind[p] == PLACE_OBJ) {
+            in[p] = r == LU_NOV ? lu_ev_konst(c, NULL) : lu_ev_val(c, r);
         }
         else if (LU_IS_VIRT(r)) {
             /* The object the box became here, or the one it came from. */
-            struct lu_vobj *o = lu_ev_virt(g, &g->st, r, &in[i]);
-            if (in[i] == LU_NOV && o != NULL && o->n == 2) {
-                in[i] = o->f[1];
+            struct lu_vobj *o = lu_ev_virt(g, &g->st, r, &in[p]);
+            if (in[p] == LU_NOV && o != NULL && o->n == 2) {
+                in[p] = o->f[1];
             }
         }
         else if (r == LU_NOV) {
-            in[i] = lu_ev_konst(c, &lu_jit_unbound);
+            in[p] = lu_ev_konst(c, &lu_jit_unbound);
         }
         else if (lu_ev_const(c, r) == NULL) {
-            in[i] = r;          /* the object whose raw value the phi takes */
+            in[p] = r;          /* the object whose raw value the phi takes */
         }
     }
-    return in;
 }
 
-/* Whether slot i comes round a loop unchanged: what its phi would take is
-   the phi itself. The slot goes on naming it, with the reference it has. */
+/* Whether place p comes round a loop unchanged: what its phi would take
+   is the phi itself. The place goes on naming it, with the reference it has. */
 static int
-carried(struct ctx *c, const lu_v *phis, const lu_v *origin, const lu_v *in, int i)
+carried(const struct places *P, const lu_v *in, int p)
 {
-    return phis[i] != LU_NOV && in[i] != LU_NOV && in[i] == (I(c, phis[i])->rep == REP_OBJ ? phis[i] : origin[i]);
+    return P->phi[p] != LU_NOV && in[p] != LU_NOV && in[p] == (P->kind[p] == PLACE_OBJ ? P->phi[p] : P->origin[p]);
 }
 
-/* The phis take their inputs. An object phi takes a reference: the
-   value's own when no slot left names it and no earlier phi took it, a
-   new one otherwise. A raw phi's inputs were added by its maker; the
-   object its value stood for on this edge goes to the phi beside it
-   (origin[i], which keeps `is` true of a value that was an object before
-   the join), or is released when there is none and nothing names it. A
-   slot a loop carries unchanged gives nothing up: it is one of the slots
-   left. */
-static void
-edge_take(struct ctx *c, const lu_v *phis, const int *lead, const lu_v *origin, const lu_v *in, int nslots, int pc)
+/* The state at pc as an exit would read it, without what the phis take
+   over on this edge: the slots among them hold nothing, and the virtual
+   objects among whose fields they are have records without them. */
+static struct lu_fs *
+rest_of(struct ctx *c, const struct places *P, const lu_v *in, int pc)
 {
     struct gctx *g = c->g;
     struct lu_fs *rest = lu_ev_snapshot(c, pc);
-    for (int i = 0; i < nslots; i++) {
-        if (phis[i] != LU_NOV && !carried(c, phis, origin, in, i)) {
-            *lu_fs_slot(rest, i) = LU_NOV;
+    struct lu_vobj *copy = NULL;
+    int copied = -1, own = 0;
+    for (int p = 0; p < P->n; p++) {
+        struct place pl = P->at[p];
+        if (P->phi[p] == LU_NOV || P->kind[p] == PLACE_DIRECT || carried(P, in, p)) {
+            continue;
         }
+        if (pl.id < 0) {
+            *lu_fs_slot(rest, pl.at) = LU_NOV;
+            continue;
+        }
+        if (copied != pl.id) {
+            /* An object's fields are places in a row: its record is copied once. */
+            lu_v real;
+            struct lu_vobj *o = lu_fs_vobj(g->f, rest, pl.id, &real);
+            if (o == NULL || real != LU_NOV) {
+                continue;
+            }
+            copy = lu_ir_vobj(g->f, o->kind, o->type, o->n);
+            copy->neg = o->neg;
+            memcpy(copy->f, o->f, sizeof(lu_v) * (size_t)o->n);
+            if (!own) {
+                rest->binds = regrow(g, rest->binds, rest->nbinds, rest->nbinds + P->n, sizeof(struct lu_bind));
+                own = 1;
+            }
+            int b = rest->nbinds - 1;
+            while (b >= 0 && rest->binds[b].id != pl.id) {
+                b--;
+            }
+            b = b >= 0 ? b : rest->nbinds++;
+            rest->binds[b] = (struct lu_bind){ pl.id, LU_NOV, copy };
+            copied = pl.id;
+        }
+        copy->f[pl.at] = LU_NOV;
     }
-    lu_ev_names_walk(g, rest);
-    for (int i = 0; i < nslots; i++) {
-        lu_v x = in[i];
+    return rest;
+}
+
+/* The phis take their inputs. An object phi takes a reference: the
+   value's own when no place left names it and no earlier phi took it, a
+   new one otherwise. A raw phi's inputs were added by its maker; the
+   object its value stood for on this edge goes to the phi beside it
+   (origin, which keeps `is` true of a value that was an object before
+   the join), or is released when there is none and nothing names it. A
+   place a loop carries unchanged gives nothing up: it is one of the
+   places left. */
+static void
+edge_take(struct ctx *c, const struct places *P, const lu_v *in, int pc)
+{
+    struct gctx *g = c->g;
+    lu_ev_names_walk(g, rest_of(c, P, in, pc));
+    for (int p = 0; p < P->n; p++) {
+        lu_v x = in[p], phi = P->phi[p], origin = P->origin[p];
         if (x == LU_NOV) {
-            if (lead[i] == i && origin[i] != LU_NOV) {
-                phi_add(c, origin[i], lu_ev_konst(c, NULL));    /* no object yet on this edge */
+            if (P->lead[p] == p && origin != LU_NOV) {
+                phi_add(c, origin, lu_ev_konst(c, NULL));       /* no object yet on this edge */
             }
             continue;
         }
-        if (carried(c, phis, origin, in, i)) {
-            phi_add(c, I(c, phis[i])->rep == REP_OBJ ? phis[i] : origin[i], x);
+        if (carried(P, in, p)) {
+            phi_add(c, P->kind[p] == PLACE_OBJ ? phi : origin, x);
             continue;
         }
         int owned = (I(c, x)->flags & INS_OWNED) != 0;
         int free_now = owned && !lu_ev_names(g, x);
-        for (int k = 0; k < i && free_now; k++) {
+        for (int k = 0; k < p && free_now; k++) {
             free_now = in[k] != x;      /* an earlier phi took it, or it was released */
         }
-        if (I(c, phis[i])->rep != REP_OBJ) {
-            if (origin[i] != LU_NOV) {
-                phi_add(c, origin[i], x);
+        if (P->kind[p] != PLACE_OBJ) {
+            if (origin != LU_NOV) {
+                phi_add(c, origin, x);
                 if (owned && !free_now) {
                     lu_ev_retain(c, x);
                 }
@@ -488,118 +598,379 @@ edge_take(struct ctx *c, const lu_v *phis, const int *lead, const lu_v *origin, 
             }
             continue;
         }
-        phi_add(c, phis[i], x);
-        if ((I(c, phis[i])->flags & INS_OWNED) && !free_now) {
+        phi_add(c, phi, x);
+        if ((I(c, phi)->flags & INS_OWNED) && !free_now) {
             lu_ev_retain(c, x);
         }
     }
 }
 
-/* Whether what state `a` knows of the virtual objects r reaches is what
-   state `b` knows: the same records, the same objects made. */
-static int
-same_binding(struct gctx *g, const struct state *a, const struct state *b, lu_v r)
+/* What each place holds after the join: its phi, the box of a raw one
+   (places that share a phi share the box), or LU_NOV where it holds what
+   it held. In the joined state. */
+static lu_v *
+joined_values(struct ctx *c, const struct places *P)
 {
-    if (!LU_IS_VIRT(r)) {
-        return 1;
+    lu_v *out = lu_ir_alloc(c->g->f, sizeof(lu_v) * (size_t)(P->n ? P->n : 1));
+    for (int p = 0; p < P->n; p++) {
+        out[p] = P->phi[p] == LU_NOV ? LU_NOV : P->lead[p] != p ? out[P->lead[p]]
+            : P->kind[p] == PLACE_RAW ? box_of(c, P->phi[p], P->origin[p]) : P->phi[p];
     }
-    lu_v ra, rb;
-    struct lu_vobj *oa = lu_ev_virt(g, a, r, &ra), *ob = lu_ev_virt(g, b, r, &rb);
-    if (oa != ob || ra != rb) {
-        return 0;
-    }
-    for (int i = 0; oa != NULL && ra == LU_NOV && i < oa->n; i++) {
-        if (!same_binding(g, a, b, oa->f[i])) {
-            return 0;
-        }
-    }
-    return 1;
+    return out;
 }
 
-/* Whether the slots of the state that stay (phis[i] == LU_NOV) reach
-   virtual object id. */
-static int
-stays_reached(struct gctx *g, const struct state *st, const lu_v *phis, int id)
+/* A record like o, its own. */
+static struct lu_vobj *
+record_copy(struct gctx *g, const struct lu_vobj *o)
 {
-    struct state rest = *st;
-    int d = st->depth, n = st->nlocals[d] + st->sp[d];
-    lu_v *v = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(st->cap[d] ? st->cap[d] : 1));
-    lu_v **frames = lu_ir_alloc(g->f, sizeof(lu_v *) * (size_t)(d + 1));
-    memcpy(frames, st->v, sizeof(lu_v *) * (size_t)(d + 1));
-    memcpy(v, st->v[d], sizeof(lu_v) * (size_t)st->cap[d]);
-    for (int i = 0; i < n; i++) {
-        if (phis[i] != LU_NOV) {
-            v[i] = LU_NOV;
-        }
-    }
-    frames[d] = v;
-    rest.v = frames;
-    return lu_ev_reaches(g, &rest, id);
+    struct lu_vobj *n = lu_ir_vobj(g->f, o->kind, o->type, o->n);
+    n->neg = o->neg;
+    memcpy(n->f, o->f, sizeof(lu_v) * (size_t)o->n);
+    return n;
 }
+
+/* --- joins --- */
+
+struct join {
+    struct edge *edges;
+    int n, pc, J, nslots;
+    struct places P;
+};
 
 /* What the joined state knows of a virtual object the edges knew
-   differently. */
+   differently: the phi of the objects it was made on each edge, or the
+   record whose differing fields are places of the join. */
 struct override {
     int id;
     lu_v real;
     struct lu_vobj *obj;
 };
 
-/* Virtual object `id`, which the edges know differently and the joined
-   state still reaches, made one thing for the join J: an object on every
-   edge (a phi of them, which takes each edge's) when any edge made it,
-   else a record whose differing fields are phis. The edges' own states
-   stay as they are: their exits read them. */
-static struct override
-reconcile(struct ctx *c, struct edge *edges, int n, int pc, int id, int J)
+/* The edge's state and block are the current ones, for what a value is
+   there; no instruction begins. */
+static void
+on_edge(struct ctx *c, struct edge *e)
+{
+    c->g->st = e->st;
+    lu_ev_changed(c->g);
+    c->g->cur = e->block;
+}
+
+static lu_v *
+edge_values(struct ctx *c, struct join *j, struct place pl)
+{
+    lu_v *vals = lu_ir_alloc(c->g->f, sizeof(lu_v) * (size_t)j->n);
+    for (int e = 0; e < j->n; e++) {
+        vals[e] = place_get(c->g, &j->edges[e].st, pl);
+    }
+    return vals;
+}
+
+/* The representation of the phi for objects that are vals[e] on edge e:
+   REP_BIT for a bool that is no object on every edge (a flag set on some
+   paths), a raw one for a box of one kind on every edge, else REP_OBJ. */
+static int
+join_rep(struct ctx *c, struct join *j, const lu_v *vals)
+{
+    int bits = 1, rep = REP_NONE;
+    for (int e = 0; e < j->n && (bits || e == 0 || rep != REP_NONE); e++) {
+        on_edge(c, &j->edges[e]);
+        bits = bits && is_bit(c, vals[e]);
+        int re = raw_rep(c, vals[e]);
+        rep = e == 0 || re == rep ? re : REP_NONE;
+    }
+    return bits ? REP_BIT : rep != REP_NONE ? rep : REP_OBJ;
+}
+
+/* Place p, which differs between the edges, gets its phi. An object phi
+   takes its inputs later (edge_take), once each edge has made them. */
+static void
+join_place(struct ctx *c, struct join *j, int p)
 {
     struct gctx *g = c->g;
-    lu_v r = LU_VIRT(id);
-    int any_real = 0, kind = -1;
+    struct places *P = &j->P;
+    lu_v *vals = edge_values(c, j, P->at[p]);
+    /* Places that hold the same values on every edge are one value after. */
+    for (int k = 0; k < p; k++) {
+        int eq = P->lead[k] == k;
+        for (int e = 0; e < j->n && eq; e++) {
+            eq = place_get(g, &j->edges[e].st, P->at[k]) == vals[e];
+        }
+        if (eq) {
+            P->kind[p] = P->kind[k];
+            P->phi[p] = P->phi[k];
+            P->lead[p] = k;
+            return;
+        }
+    }
+    P->lead[p] = p;
+    if (vals[0] >= 0 && I(c, vals[0])->rep != REP_OBJ) {
+        P->kind[p] = PLACE_DIRECT;
+        P->phi[p] = new_phi(c, j->J, I(c, vals[0])->rep);
+        for (int e = 0; e < j->n; e++) {
+            phi_add(c, P->phi[p], vals[e]);
+        }
+        return;
+    }
+    int rep = join_rep(c, j, vals);
+    P->phi[p] = new_phi(c, j->J, rep);
+    if (rep == REP_OBJ) {
+        P->kind[p] = PLACE_OBJ;
+        I(c, P->phi[p])->flags |= INS_OWNED;
+        return;
+    }
+    P->kind[p] = PLACE_RAW;
+    int came = 0;
+    for (int e = 0; e < j->n; e++) {
+        on_edge(c, &j->edges[e]);
+        lu_v r = vals[e], real;
+        phi_add(c, P->phi[p], rep == REP_BIT ? lu_ev_truth(c, r) : raw_of(c, r, rep));
+        came |= rep != REP_BIT && LU_IS_VIRT(r) && lu_ev_virt(g, &g->st, r, &real)->n == 2;
+    }
+    if (came) {
+        P->origin[p] = origin_phi(c, j->J, P->phi[p]);  /* a box that was an object on some edge */
+    }
+}
+
+/* Whether every edge knows virtual object id the same: one record, one
+   object made. */
+static int
+same_on_edges(struct ctx *c, struct join *j, int id)
+{
+    lu_v r0, r;
+    struct lu_vobj *o0 = lu_ev_virt(c->g, &j->edges[0].st, LU_VIRT(id), &r0);
+    for (int e = 1; e < j->n; e++) {
+        if (lu_ev_virt(c->g, &j->edges[e].st, LU_VIRT(id), &r) != o0 || r != r0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Virtual object id, which the edges know differently, as it can stay
+   virtual after the join (its record on the first edge), or NULL: no edge
+   made it, and its records have one layout, so that each field that
+   differs can be a phi. */
+static struct lu_vobj *
+stays_virtual(struct ctx *c, struct join *j, int id)
+{
+    struct gctx *g = c->g;
+    struct lu_vobj *first = unmade_in(g, &j->edges[0].st, id);
+    if (first == NULL || !LU_VKIND_MUTABLE(first->kind)) {
+        return NULL;
+    }
+    for (int e = 1; e < j->n; e++) {
+        struct lu_vobj *o = unmade_in(g, &j->edges[e].st, id);
+        if (o == NULL || o->kind != first->kind || o->n != first->n || o->type != first->type || o->neg != first->neg) {
+            return NULL;
+        }
+        for (int k = 0; k < o->n; k++) {
+            if (o->f[k] != first->f[k]
+                && ((o->kind == VK_DICT && !(k & 1)) || field_class(c, o->f[k]) == FIELD_UNSET
+                    || field_class(c, o->f[k]) != field_class(c, first->f[k]))) {
+                return NULL;
+            }
+        }
+    }
+    return first;
+}
+
+/* Whether field k of virtual object id differs between the edges while
+   the object can stay virtual: the join makes a phi of it. */
+static int
+field_differs(struct ctx *c, struct join *j, int id, int k)
+{
+    struct lu_vobj *first = stays_virtual(c, j, id);
+    for (int e = 1; first != NULL && e < j->n; e++) {
+        if (unmade_in(c->g, &j->edges[e].st, id)->f[k] != first->f[k]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+reaches_past(struct ctx *c, struct join *j, const struct state *st, lu_v r, int id)
+{
+    if (!LU_IS_VIRT(r)) {
+        return 0;
+    }
+    if (LU_VIRT_ID(r) == id) {
+        return 1;
+    }
+    struct lu_vobj *o = unmade_in(c->g, st, LU_VIRT_ID(r));
+    for (int k = 0; o != NULL && k < o->n; k++) {
+        if (LU_IS_VIRT(o->f[k]) && !field_differs(c, j, LU_VIRT_ID(r), k) && reaches_past(c, j, st, o->f[k], id)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Whether some edge's state reaches virtual object id through places
+   that stay: not through a slot that has a phi, nor through a field that
+   will get one. */
+static int
+stays_reached(struct ctx *c, struct join *j, int id)
+{
+    for (int e = 0; e < j->n; e++) {
+        const struct state *st = &j->edges[e].st;
+        for (int d = 0; d <= st->depth; d++) {
+            for (int i = 0; i < st->nlocals[d] + st->sp[d]; i++) {
+                if (!(d == st->depth && j->P.phi[i] != LU_NOV) && reaches_past(c, j, st, st->v[d][i], id)) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+/* Something is made on edge e, before the instruction the join is at. */
+static void
+edge_begin(struct ctx *c, struct join *j, int e)
+{
+    enter_edge(c, &j->edges[e], j->pc);
+}
+
+static void
+edge_end(struct ctx *c, struct join *j, int e)
+{
+    lu_ev_settle(c, j->pc);
+    j->edges[e].block = c->g->cur;
+    j->edges[e].st = c->g->st;
+}
+
+/* Virtual object id, which stays virtual: what its fields' object phis
+   will take is made real on each edge now, so that nothing is made once
+   the phis exist. Whether anything was. */
+static int
+fields_made(struct ctx *c, struct join *j, int id)
+{
+    struct gctx *g = c->g;
+    int n = unmade_in(g, &j->edges[0].st, id)->n, made = 0;
+    for (int k = 0; k < n && !made; k++) {
+        lu_v *vals = edge_values(c, j, (struct place){ id, k });
+        if (!field_differs(c, j, id, k) || field_class(c, vals[0]) != FIELD_OBJ || join_rep(c, j, vals) != REP_OBJ) {
+            continue;
+        }
+        for (int e = 0; e < j->n; e++) {
+            if (LU_IS_VIRT(vals[e]) && unmade_in(g, &j->edges[e].st, LU_VIRT_ID(vals[e])) != NULL) {
+                edge_begin(c, j, e);
+                lu_ev_val(c, vals[e]);
+                edge_end(c, j, e);
+                made = 1;
+            }
+        }
+    }
+    return made;
+}
+
+/* Virtual object id, which cannot stay virtual, is an object on every
+   edge: a phi of them, which takes each edge's. */
+static struct override
+made_real(struct ctx *c, struct join *j, int id)
+{
+    struct gctx *g = c->g;
+    lu_v r = LU_VIRT(id), real;
     struct lu_vobj *first = NULL;
-    for (int e = 0; e < n; e++) {
-        lu_v real;
-        struct lu_vobj *o = lu_ev_virt(g, &edges[e].st, r, &real);
-        any_real |= real != LU_NOV;
-        if (o != NULL) {
-            first = first != NULL ? first : o;
-            kind = o->kind;
+    for (int e = 0; e < j->n && first == NULL; e++) {
+        first = lu_ev_virt(g, &j->edges[e].st, r, &real);
+    }
+    lu_v phi = new_phi(c, j->J, REP_OBJ);
+    int owned = 0;
+    PyTypeObject *type = NULL;
+    for (int e = 0; e < j->n; e++) {
+        edge_begin(c, j, e);
+        lu_v x = lu_ev_val(c, r);
+        type = e == 0 || type == lu_ev_type(c, x) ? lu_ev_type(c, x) : NULL;
+        owned |= (I(c, x)->flags & INS_OWNED) != 0;
+        phi_add(c, phi, x);
+        g->keep = x;            /* the phi's now, even where this edge's state does not reach it */
+        edge_end(c, j, e);
+        g->keep = LU_NOV;
+    }
+    if (owned) {
+        I(c, phi)->flags |= INS_OWNED;
+    }
+    if (first != NULL || type != NULL) {
+        lu_ev_def_type(c, phi, first != NULL ? first->type : type);     /* the one object, whichever edge made it */
+    }
+    return (struct override){ id, phi, first == NULL || LU_VKIND_MUTABLE(first->kind) ? NULL : first };
+}
+
+/* The next virtual object, from position *e, *b of the edges' binds on,
+   that the edges know differently, that the joined state still reaches
+   and that `over` does not speak for; -1 when there is none. Whether an
+   object differs does not depend on the edge that names it: `seen` has
+   each looked at once per round. */
+static int
+next_differing(struct ctx *c, struct join *j, const struct override *over, int nover, char *seen, int *e, int *b)
+{
+    for (; *e < j->n; ++*e, *b = 0) {
+        for (; *b < j->edges[*e].st.nbinds; ++*b) {
+            int id = j->edges[*e].st.binds[*b].id, done = seen[id];
+            seen[id] = 1;
+            for (int k = 0; k < nover; k++) {
+                done |= over[k].id == id;
+            }
+            if (!done && !same_on_edges(c, j, id) && stays_reached(c, j, id)) {
+                return id;
+            }
         }
     }
-    if (any_real || first == NULL || kind != VK_SEQITER) {
-        lu_v phi = new_phi(c, J, REP_OBJ);
-        int owned = 0;
-        PyTypeObject *type = NULL;
-        for (int e = 0; e < n; e++) {
-            enter_edge(c, &edges[e], pc);
-            lu_v x = lu_ev_val(c, r);
-            type = e == 0 || type == lu_ev_type(c, x) ? lu_ev_type(c, x) : NULL;
-            owned |= (I(c, x)->flags & INS_OWNED) != 0;
-            phi_add(c, phi, x);
-            g->keep = x;        /* the phi's now, even where this edge's state does not reach it */
-            lu_ev_settle(c, pc);
-            g->keep = LU_NOV;
-            edges[e].block = g->cur;
-            edges[e].st = g->st;
+    return -1;
+}
+
+/* Virtual objects the joined state still reaches mean one thing after
+   the join: an object the edges know differently stays virtual when it
+   can, its differing fields places of the join, and is made real on
+   every edge otherwise. First everything that must exist is made, round
+   by round, since making one object real may make others real; then the
+   objects that stay virtual get their records and places, which makes
+   nothing. */
+static struct override *
+reconcile(struct ctx *c, struct join *j, int *count)
+{
+    struct gctx *g = c->g;
+    struct override *over = NULL;
+    int nover = 0, capover = 0, id;
+    for (int changed = 1; changed;) {
+        changed = 0;
+        char *seen = lu_ir_alloc(g->f, (size_t)g->f->nvobjs + 1);
+        for (int e = 0, b = 0; !changed && (id = next_differing(c, j, over, nover, seen, &e, &b)) >= 0;) {
+            if (stays_virtual(c, j, id) != NULL) {
+                changed = fields_made(c, j, id);
+                continue;
+            }
+            if (nover == capover) {
+                capover = capover ? 2 * capover : 4;
+                over = regrow(g, over, nover, capover, sizeof(struct override));
+            }
+            over[nover++] = made_real(c, j, id);
+            changed = 1;
         }
-        if (owned) {
-            I(c, phi)->flags |= INS_OWNED;
-        }
-        if (first != NULL || type != NULL) {
-            lu_ev_def_type(c, phi, first != NULL ? first->type : type);     /* the one object, whichever edge made it */
-        }
-        return (struct override){ id, phi, kind < 0 || LU_VKIND_MUTABLE(kind) ? NULL : first };
     }
-    /* An iterator stepped differently on each edge: its index is a phi. */
-    struct lu_vobj *o = lu_ir_vobj(g->f, VK_SEQITER, first->type, 2);
-    lu_v phi = new_phi(c, J, REP_I64);
-    o->f[0] = first->f[0];
-    o->f[1] = phi;
-    for (int e = 0; e < n; e++) {
-        lu_v real;
-        phi_add(c, phi, lu_ev_virt(g, &edges[e].st, r, &real)->f[1]);
+    char *seen = lu_ir_alloc(g->f, (size_t)g->f->nvobjs + 1);
+    for (int e = 0, b = 0; (id = next_differing(c, j, over, nover, seen, &e, &b)) >= 0;) {
+        struct lu_vobj *first = stays_virtual(c, j, id);
+        if (first == NULL) {
+            g->f->fail = "a join whose objects do not settle";
+            break;
+        }
+        for (int k = 0; k < first->n; k++) {
+            if (field_differs(c, j, id, k)) {
+                join_place(c, j, place_add(g, &j->P, id, k));
+            }
+        }
+        if (nover == capover) {
+            capover = capover ? 2 * capover : 4;
+            over = regrow(g, over, nover, capover, sizeof(struct override));
+        }
+        over[nover++] = (struct override){ id, LU_NOV, record_copy(g, first) };
     }
-    return (struct override){ id, LU_NOV, o };
+    *count = nover;
+    return over;
 }
 
 void
@@ -612,137 +983,41 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
         lu_ev_changed(g);
         return;
     }
-    int J = lu_ir_block(g->f);
     int d = edges[0].st.depth;
-    int nslots = edges[0].st.nlocals[d] + edges[0].st.sp[d];
-    lu_v *phis = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(nslots ? nslots : 1));
-    lu_v *origin = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(nslots ? nslots : 1));
-    int *lead = lu_ir_alloc(g->f, sizeof(int) * (size_t)(nslots ? nslots : 1));
+    struct join j = { .edges = edges, .n = n, .pc = pc, .J = lu_ir_block(g->f),
+                      .nslots = edges[0].st.nlocals[d] + edges[0].st.sp[d] };
+    struct places *P = &j.P;
+    places_of_slots(c, P, j.nslots);
     /* The slots: one that differs between edges becomes a phi. */
-    for (int i = 0; i < nslots; i++) {
+    for (int i = 0; i < j.nslots; i++) {
         lu_v r0 = edges[0].st.v[d][i];
-        origin[i] = LU_NOV;
         int same = 1;
         for (int e = 1; e < n; e++) {
             same &= edges[e].st.v[d][i] == r0;
         }
-        phis[i] = LU_NOV;
-        lead[i] = -1;
-        if (same) {
-            continue;
+        if (!same) {
+            join_place(c, &j, i);
         }
-        /* Slots that hold the same values on every edge are one value after. */
-        int twin = -1;
-        for (int k = 0; k < i && twin < 0; k++) {
-            int eq = phis[k] != LU_NOV;
-            for (int e = 0; e < n && eq; e++) {
-                eq = edges[e].st.v[d][k] == edges[e].st.v[d][i];
-            }
-            twin = eq ? k : -1;
-        }
-        if (twin >= 0) {
-            phis[i] = phis[twin];
-            lead[i] = twin;
-            continue;
-        }
-        lead[i] = i;
-        int bits = 1;
-        for (int e = 0; e < n && bits; e++) {
-            g->st = edges[e].st;
-            lu_ev_changed(g);
-            bits = is_bit(c, edges[e].st.v[d][i]);
-        }
-        if (bits) {
-            /* A bool on every edge (a flag set on some paths): its bit is the phi. */
-            phis[i] = new_phi(c, J, REP_BIT);
-            for (int e = 0; e < n; e++) {
-                g->st = edges[e].st;
-                lu_ev_changed(g);
-                g->cur = edges[e].block;
-                phi_add(c, phis[i], lu_ev_truth(c, edges[e].st.v[d][i]));
-            }
-            continue;
-        }
-        int rep = REP_NONE;
-        for (int e = 0; e < n; e++) {
-            g->st = edges[e].st;
-            lu_ev_changed(g);
-            int re = raw_rep(c, edges[e].st.v[d][i]);
-            rep = e == 0 || re == rep ? re : REP_NONE;
-            if (rep == REP_NONE) {
-                break;
-            }
-        }
-        if (rep != REP_NONE) {
-            /* A box on every edge: its value is the phi, and it stays no object. */
-            phis[i] = new_phi(c, J, rep);
-            int came = 0;
-            for (int e = 0; e < n; e++) {
-                g->st = edges[e].st;
-                lu_ev_changed(g);
-                g->cur = edges[e].block;
-                lu_v r = edges[e].st.v[d][i], real;
-                phi_add(c, phis[i], raw_of(c, r, rep));
-                came |= LU_IS_VIRT(r) && lu_ev_virt(g, &g->st, r, &real)->n == 2;
-            }
-            if (came) {
-                origin[i] = origin_phi(c, J, phis[i]);  /* a box that was an object on some edge */
-            }
-            continue;
-        }
-        phis[i] = new_phi(c, J, REP_OBJ);
-        I(c, phis[i])->flags |= INS_OWNED;
     }
     /* What the object phis take is made real on each edge. */
     lu_v **in = lu_ir_alloc(g->f, sizeof(lu_v *) * (size_t)n);
     for (int e = 0; e < n; e++) {
-        enter_edge(c, &edges[e], pc);
-        in[e] = edge_inputs(c, phis, lead, nslots);
-        lu_ev_settle(c, pc);
-        edges[e].block = g->cur;
-        edges[e].st = g->st;
+        in[e] = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(j.nslots ? j.nslots : 1));
+        edge_begin(c, &j, e);
+        edge_inputs(c, P, 0, in[e]);
+        edge_end(c, &j, e);
     }
-    /* Virtual objects the joined state still reaches mean one thing after
-       the join. Making one real may make others real, so until none differs.
-       Whether an object differs does not depend on the edge that names it:
-       each is looked at once per round. */
-    struct override *over = NULL;
-    int nover = 0, capover = 0;
-    for (int changed = 1; changed;) {
-        changed = 0;
-        char *seen = lu_ir_alloc(g->f, (size_t)g->f->nvobjs + 1);
-        for (int e = 0; e < n && !changed; e++) {
-            for (int b = 0; b < edges[e].st.nbinds && !changed; b++) {
-                int id = edges[e].st.binds[b].id, done = seen[id], same = 1, reached = 0;
-                seen[id] = 1;
-                for (int k = 0; k < nover; k++) {
-                    done |= over[k].id == id;
-                }
-                for (int k = 0; k < n && same && !done; k++) {
-                    same = same_binding(g, &edges[e].st, &edges[k].st, LU_VIRT(id));
-                }
-                for (int k = 0; k < n && !same && !done && !reached; k++) {
-                    reached = stays_reached(g, &edges[k].st, phis, id);
-                }
-                if (done || same || !reached) {
-                    continue;
-                }
-                if (nover == capover) {
-                    capover = capover ? 2 * capover : 4;
-                    struct override *p = lu_ir_alloc(g->f, sizeof(struct override) * (size_t)capover);
-                    memcpy(p, over, sizeof(struct override) * (size_t)nover);
-                    over = p;
-                }
-                over[nover++] = reconcile(c, edges, n, pc, id, J);
-                changed = 1;
-            }
-        }
-    }
+    int nover;
+    struct override *over = reconcile(c, &j, &nover);
     for (int e = 0; e < n; e++) {
         enter_edge(c, &edges[e], pc);
-        edge_take(c, phis, lead, origin, in[e], nslots, pc);
+        if (P->n > j.nslots) {
+            in[e] = regrow(g, in[e], j.nslots, P->n, sizeof(lu_v));
+            edge_inputs(c, P, j.nslots, in[e]);
+        }
+        edge_take(c, P, in[e], pc);
         lu_ev_settle(c, pc);
-        lu_ir_edge(g->f, g->cur, J);
+        lu_ir_edge(g->f, g->cur, j.J);
         lu_ev_emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
         edges[e].st = g->st;
     }
@@ -750,22 +1025,20 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
        A fact holds after the join when every edge has it. */
     g->st = edges[0].st;
     lu_ev_changed(g);
-    g->cur = J;
+    g->cur = j.J;
+    lu_v *out = joined_values(c, P);
+    for (int p = j.nslots, k = 0; p < P->n; p++) {
+        while (over[k].id != P->at[p].id || over[k].real != LU_NOV) {
+            k = (k + 1) % nover;
+        }
+        over[k].obj->f[P->at[p].at] = out[p];
+    }
     for (int k = 0; k < nover; k++) {
         lu_ev_bind(g, &g->st, over[k].id, over[k].real, over[k].obj);
     }
-    for (int i = 0; i < nslots; i++) {
-        if (phis[i] == LU_NOV) {
-            continue;
-        }
-        if (lead[i] != i) {
-            g->st.v[d][i] = g->st.v[d][lead[i]];
-        }
-        else if (I(c, phis[i])->rep == REP_OBJ) {
-            g->st.v[d][i] = phis[i];
-        }
-        else {
-            g->st.v[d][i] = box_of(c, phis[i], origin[i]);
+    for (int i = 0; i < j.nslots; i++) {
+        if (out[i] != LU_NOV) {
+            g->st.v[d][i] = out[i];
         }
     }
     g->npending = 0;
@@ -827,40 +1100,8 @@ assigned(struct ctx *c, int from, int to)
     return set;
 }
 
-#define MAX_ITERS 64
-
-/* Calls fn on every virtual iterator the innermost frame's slots reach
-   that is still no object. */
-static void
-each_iter(struct ctx *c, lu_v r, int *ids, int *n)
-{
-    if (!LU_IS_VIRT(r)) {
-        return;
-    }
-    lu_v real;
-    struct lu_vobj *o = lu_ev_virt(c->g, &c->g->st, r, &real);
-    if (o == NULL || real != LU_NOV) {
-        return;
-    }
-    if (o->kind == VK_SEQITER) {
-        for (int i = 0; i < *n; i++) {
-            if (ids[i] == LU_VIRT_ID(r)) {
-                return;
-            }
-        }
-        if (*n == MAX_ITERS) {
-            lu_ev_val(c, r);    /* more iterators than a header tracks: this one exists */
-            return;
-        }
-        ids[(*n)++] = LU_VIRT_ID(r);
-    }
-    for (int i = 0; i < o->n; i++) {
-        each_iter(c, o->f[i], ids, n);
-    }
-}
-
-/* A guard the header made for a loop-carried slot blames the header: when
-   it keeps failing, the header stops speculating (nospec). */
+/* A guard the header made for a loop-carried place blames the header:
+   when it keeps failing, the header stops speculating (nospec). */
 static void
 blame_header(struct ctx *c, lu_v from, int pc)
 {
@@ -872,13 +1113,12 @@ blame_header(struct ctx *c, lu_v from, int pc)
     }
 }
 
-/* The raw representation the header gives a slot that holds r, or
+/* The raw representation the header gives a place that holds r, or
    REP_NONE for an object: a box, a constant, an object known to be an int
-   or a float, or what an earlier build saw the loop carry there. */
+   or a float, or what an earlier build saw the loop carry there (hint). */
 static int
-header_rep(struct ctx *c, lu_v r, int pc, int slot)
+header_rep(struct ctx *c, lu_v r, int pc, int hint)
 {
-    int hint = lu_ev_hinted(c->g, c->code, pc, slot);
     if (hint == HINT_OBJ || nospec(c, pc)) {
         return REP_NONE;
     }
@@ -898,7 +1138,136 @@ header_rep(struct ctx *c, lu_v r, int pc, int slot)
         : t == &PyFloat_Type || (t == NULL && hint == HINT_FLOAT) ? REP_F64 : REP_NONE;
 }
 
-/* The loop header at pc, from the state its forward edges joined into. */
+/* A hint names a slot by its index, and a virtual object a header carries
+   by the way to it from the frame's slots (the slot, then the field of
+   each object on the way), which a rebuild finds again: ids are a build's
+   own. The object's key names the object itself, and with a field's
+   index that field. */
+#define KEYED ((uint64_t)1 << 63)
+
+static uint64_t
+key_step(uint64_t key, int i)
+{
+    return (key ^ ((uint64_t)i + 0x9e3779b97f4a7c15ULL + (key << 6) + (key >> 2))) | KEYED;
+}
+
+/* The virtual objects a loop may change that nothing has made, as the
+   frame's slots reach them, each once. */
+struct carry {
+    int *id;
+    uint64_t *key;
+    int n, cap;
+};
+
+static void
+find_carried(struct ctx *c, lu_v r, uint64_t key, struct carry *k)
+{
+    struct gctx *g = c->g;
+    struct lu_vobj *o = LU_IS_VIRT(r) ? unmade_in(g, &g->st, LU_VIRT_ID(r)) : NULL;
+    if (o == NULL) {
+        return;
+    }
+    if (LU_VKIND_MUTABLE(o->kind)) {
+        for (int i = 0; i < k->n; i++) {
+            if (k->id[i] == LU_VIRT_ID(r)) {
+                return;
+            }
+        }
+        if (k->n == k->cap) {
+            int cap = k->cap ? 2 * k->cap : 8;
+            k->id = regrow(g, k->id, k->n, cap, sizeof(int));
+            k->key = regrow(g, k->key, k->n, cap, sizeof(uint64_t));
+            k->cap = cap;
+        }
+        k->id[k->n] = LU_VIRT_ID(r);
+        k->key[k->n++] = key;
+    }
+    for (int i = 0; i < o->n; i++) {
+        find_carried(c, o->f[i], key_step(key, i + 1), k);
+    }
+}
+
+static void
+carried_objects(struct ctx *c, int nslots, struct carry *k)
+{
+    k->n = 0;
+    for (int i = 0; i < nslots; i++) {
+        find_carried(c, slots(c)[i], key_step(0, i), k);
+    }
+}
+
+/* Whether a header can carry field i of a virtual object as a phi of
+   objects or numbers: a dict's keys are its layout, and a field that is
+   unset cannot be told from one that holds an object once it is a phi. */
+static int
+field_carriable(struct ctx *c, const struct lu_vobj *o, int i)
+{
+    return !(o->kind == VK_DICT && !(i & 1)) && field_class(c, o->f[i]) != FIELD_UNSET;
+}
+
+/* What the hints say must exist before the loop is made, until the
+   virtual objects left are the ones the header carries: an object a
+   back-edge did not find as the header left it, one with a field that
+   changes and cannot be a phi, and whatever an object phi of a field
+   takes. Making one real may make others real. */
+static void
+carried_settle(struct ctx *c, int pc, int nslots, struct carry *k)
+{
+    struct gctx *g = c->g;
+    for (int made = 1; made;) {
+        made = 0;
+        carried_objects(c, nslots, k);
+        for (int j = 0; j < k->n && !made; j++) {
+            struct lu_vobj *o = unmade_in(g, &g->st, k->id[j]);
+            lu_v make = lu_ev_hinted(g, c->code, pc, k->key[j]) == HINT_OBJ ? LU_VIRT(k->id[j]) : LU_NOV;
+            for (int i = 0; i < o->n && make == LU_NOV; i++) {
+                int hint = lu_ev_hinted(g, c->code, pc, key_step(k->key[j], i + 1)), cls = field_class(c, o->f[i]);
+                if (hint == 0 || (cls != FIELD_UNSET && cls != FIELD_OBJ)) {
+                    continue;
+                }
+                if (!field_carriable(c, o, i)) {
+                    make = LU_VIRT(k->id[j]);
+                }
+                else if (header_rep(c, o->f[i], pc, hint) == REP_NONE && LU_IS_VIRT(o->f[i])
+                         && unmade_in(g, &g->st, LU_VIRT_ID(o->f[i])) != NULL) {
+                    make = o->f[i];
+                }
+            }
+            if (make != LU_NOV) {
+                lu_ev_val(c, make);
+                made = 1;
+            }
+        }
+    }
+}
+
+/* Place p of a header, which holds r, gets a phi for what the loop makes
+   of it: a raw one where it holds an int or a float (a box that never
+   exists), an object's otherwise. */
+static void
+header_place(struct ctx *c, struct places *P, int p, lu_v r, int H, int pc, int hint)
+{
+    int rep = header_rep(c, r, pc, hint);
+    P->lead[p] = p;
+    if (rep != REP_NONE) {
+        P->kind[p] = PLACE_RAW;
+        P->phi[p] = new_phi(c, H, rep);
+        phi_add(c, P->phi[p], raw_of(c, r, rep));
+        P->origin[p] = origin_phi(c, H, P->phi[p]);
+        return;
+    }
+    P->kind[p] = PLACE_OBJ;
+    P->phi[p] = new_phi(c, H, REP_OBJ);
+    I(c, P->phi[p])->flags |= INS_OWNED;
+}
+
+/* The loop header at pc, from the state its forward edges joined into.
+   A local the loop does not assign stays as it is, and so does an object
+   on the stack that nothing has made, unless it is a number or a bool:
+   the loop works above it. The other slots get phis. A virtual object
+   the loop may change (an iterator it steps, an instance whose fields it
+   sets) stays virtual, under its id: a field that is a raw word is a phi,
+   and so is a field an earlier build saw a back-edge change. */
 static void
 build_header(struct ctx *c, struct bblk *bb)
 {
@@ -910,95 +1279,141 @@ build_header(struct ctx *c, struct bblk *bb)
     c->pc = pc;
     lu_ev_begin(c, pc);
     char *set = assigned(c, pc, bb->loop_end);
-    bb->slot_kind = lu_ir_alloc(g->f, (size_t)nslots + 1);
-    bb->slot_phi = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(nslots + 1));
-    bb->slot_ref = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(nslots + 1));
-    lu_v *phis = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(nslots + 1));
-    lu_v *origin = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(nslots + 1));
-    bb->slot_origin = origin;
+    struct places *P = &bb->P;
+    places_of_slots(c, P, nslots);
     lu_v first = g->f->nins;
-    if (lu_ev_hinted(g, c->code, pc, -1) == HINT_OBJ) {
-        /* An iterator the loop let out exists before it. */
-        for (int i = 0; i < nslots; i++) {
-            lu_v real;
-            lu_v r = slots(c)[i];
-            if (LU_IS_VIRT(r) && lu_ev_virt(g, &g->st, r, &real) != NULL
-                && lu_ev_virt(g, &g->st, r, &real)->kind == VK_SEQITER) {
-                lu_ev_val(c, r);
+    for (int i = 0; i < nslots; i++) {
+        lu_v r = slots(c)[i];
+        int hint = lu_ev_hinted(g, c->code, pc, (uint64_t)i);
+        struct lu_vobj *o = LU_IS_VIRT(r) ? unmade_in(g, &g->st, LU_VIRT_ID(r)) : NULL;
+        int stays = i < c->nlocals ? !set[i] || (o != NULL && o->kind == VK_SEQITER)
+            : o != NULL && o->kind != VK_BOX_INT && o->kind != VK_BOX_FLOAT && o->kind != VK_BOOL;
+        if (!stays || hint == HINT_OBJ) {
+            header_place(c, P, i, r, H, pc, hint);
+        }
+    }
+    lu_v *in = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(nslots ? nslots : 1));
+    edge_inputs(c, P, 0, in);
+    struct carry k = { 0 };
+    carried_settle(c, pc, nslots, &k);
+    for (int j = 0; j < k.n; j++) {
+        struct lu_vobj *o = unmade_in(g, &g->st, k.id[j]);
+        for (int i = 0; i < o->n; i++) {
+            int p = place_add(g, P, k.id[j], i), cls = field_class(c, o->f[i]);
+            int hint = lu_ev_hinted(g, c->code, pc, key_step(k.key[j], i + 1));
+            if (cls != FIELD_UNSET && cls != FIELD_OBJ) {
+                P->kind[p] = PLACE_DIRECT;
+                P->lead[p] = p;
+                P->phi[p] = new_phi(c, H, cls);
+                phi_add(c, P->phi[p], o->f[i]);
+            }
+            else if (hint != 0) {
+                header_place(c, P, p, o->f[i], H, pc, hint);
             }
         }
     }
-    for (int i = 0; i < nslots; i++) {
-        lu_v r = slots(c)[i];
-        phis[i] = origin[i] = LU_NOV;
-        bb->slot_kind[i] = SLOT_SAME;
-        int fixed = i < c->nlocals && !set[i] && lu_ev_hinted(g, c->code, pc, i) != HINT_OBJ;
-        lu_v real = LU_NOV;
-        struct lu_vobj *o = LU_IS_VIRT(r) ? lu_ev_virt(g, &g->st, r, &real) : NULL;
-        if (fixed || (o != NULL && real == LU_NOV && o->kind == VK_SEQITER)) {
-            continue;
-        }
-        int rep = header_rep(c, r, pc, i);
-        if (rep != REP_NONE) {
-            phis[i] = new_phi(c, H, rep);
-            phi_add(c, phis[i], raw_of(c, r, rep));
-            origin[i] = origin_phi(c, H, phis[i]);
-            bb->slot_kind[i] = SLOT_RAW;
-            continue;
-        }
-        phis[i] = new_phi(c, H, REP_OBJ);
-        I(c, phis[i])->flags |= INS_OWNED;
-        bb->slot_kind[i] = SLOT_OBJ;
-    }
     blame_header(c, first, pc);
-    int *lead = distinct_leads(g, phis, nslots);
-    edge_take(c, phis, lead, origin, edge_inputs(c, phis, lead, nslots), nslots, pc);
-    /* Iterators the loop steps: the index is a phi, under the same id. */
-    int *ids = lu_ir_alloc(g->f, sizeof(int) * (size_t)(MAX_ITERS + 1));
-    bb->niter = 0;
-    for (int i = 0; i < nslots; i++) {
-        each_iter(c, slots(c)[i], ids, &bb->niter);
-    }
-    bb->iter_id = ids;
-    bb->iter_phi = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(bb->niter + 1));
-    for (int k = 0; k < bb->niter; k++) {
-        lu_v real;
-        struct lu_vobj *o = lu_ev_virt(g, &g->st, LU_VIRT(ids[k]), &real);
-        struct lu_vobj *n = lu_ir_vobj(g->f, VK_SEQITER, o->type, 2);
-        bb->iter_phi[k] = new_phi(c, H, REP_I64);
-        phi_add(c, bb->iter_phi[k], o->f[1]);
-        n->f[0] = o->f[0];
-        n->f[1] = bb->iter_phi[k];
-        lu_ev_bind(g, &g->st, ids[k], LU_NOV, n);
-    }
+    in = regrow(g, in, nslots, P->n, sizeof(lu_v));
+    edge_inputs(c, P, nslots, in);
+    edge_take(c, P, in, pc);
     lu_ev_settle(c, pc);
     lu_ir_edge(g->f, g->cur, H);
     lu_ev_emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
     g->cur = H;
+    lu_v *out = joined_values(c, P);
+    bb->ref = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(P->n ? P->n : 1));
+    bb->key = lu_ir_alloc(g->f, sizeof(uint64_t) * (size_t)(P->n ? P->n : 1));
     for (int i = 0; i < nslots; i++) {
-        if (phis[i] != LU_NOV) {
-            slots(c)[i] = I(c, phis[i])->rep == REP_OBJ ? phis[i] : box_of(c, phis[i], origin[i]);
+        if (out[i] != LU_NOV) {
+            slots(c)[i] = out[i];
         }
-        bb->slot_phi[i] = phis[i];
-        bb->slot_ref[i] = slots(c)[i];
+        bb->ref[i] = slots(c)[i];
+        bb->key[i] = (uint64_t)i;
     }
+    for (int j = 0, p = nslots; j < k.n; j++) {
+        struct lu_vobj *o = record_copy(g, unmade_in(g, &g->st, k.id[j]));
+        for (int i = 0; i < o->n; i++, p++) {
+            if (out[p] != LU_NOV) {
+                o->f[i] = out[p];
+            }
+            bb->ref[p] = o->f[i];
+            bb->key[p] = key_step(k.key[j], i + 1);
+        }
+        lu_ev_bind(g, &g->st, k.id[j], LU_NOV, o);
+    }
+    bb->carried = k.id;
+    bb->carried_key = k.key;
+    bb->ncarried = k.n;
     g->npending = 0;
     lu_ev_changed(g);
     bb->ir = H;
     lu_ev_state_copy(g, &bb->hdr, &g->st);
 }
 
-/* Whether r is an iterator the loop steps: its index differs from the
-   header's by design, and goes to the index's phi. */
+/* Whether what the current state knows of the virtual objects r reaches
+   is what the header knew: the same records, the same objects made. An
+   object the header carries differs by design: its fields are places. */
 static int
-stepped(const struct bblk *bb, lu_v r)
+same_binding(struct gctx *g, const struct bblk *bb, lu_v r)
 {
-    for (int k = 0; LU_IS_VIRT(r) && k < bb->niter; k++) {
-        if (bb->iter_id[k] == LU_VIRT_ID(r)) {
+    if (!LU_IS_VIRT(r)) {
+        return 1;
+    }
+    for (int j = 0; j < bb->ncarried; j++) {
+        if (bb->carried[j] == LU_VIRT_ID(r)) {
             return 1;
         }
     }
-    return 0;
+    lu_v ra, rb;
+    struct lu_vobj *oa = lu_ev_virt(g, &g->st, r, &ra), *ob = lu_ev_virt(g, &bb->hdr, r, &rb);
+    if (oa != ob || ra != rb) {
+        return 0;
+    }
+    for (int i = 0; oa != NULL && ra == LU_NOV && i < oa->n; i++) {
+        if (!same_binding(g, bb, oa->f[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* The header's carried objects must come round as it left them: made by
+   nothing, with the header's layout, each field a value its place can
+   take. One that does not exists before the loop in the next build. */
+static void
+check_carried(struct ctx *c, struct bblk *bb)
+{
+    struct gctx *g = c->g;
+    for (int j = 0; j < bb->ncarried; j++) {
+        struct lu_vobj *o = unmade_in(g, &g->st, bb->carried[j]), *h = unmade_in(g, &bb->hdr, bb->carried[j]);
+        int fits = o != NULL && o->kind == h->kind && o->n == h->n && o->type == h->type && o->neg == h->neg;
+        for (int i = 0; fits && i < o->n; i++) {
+            fits = o->f[i] == h->f[i]
+                || (field_carriable(c, o, i) && field_class(c, o->f[i]) == field_class(c, h->f[i]));
+        }
+        if (!fits) {
+            lu_ev_hint(g, c->code, bb->pc, bb->carried_key[j], HINT_OBJ);
+        }
+    }
+}
+
+/* A place the header left alone must hold what it held: a slot that does
+   not becomes an object's phi in the next build, a field a phi of what
+   the loop carries in it. */
+static void
+check_same(struct ctx *c, struct bblk *bb)
+{
+    struct gctx *g = c->g;
+    const struct places *P = &bb->P;
+    for (int p = 0; p < P->n; p++) {
+        lu_v r = place_get(g, &g->st, P->at[p]);
+        if (P->kind[p] != PLACE_SAME || (r == bb->ref[p] && same_binding(g, bb, r))) {
+            continue;
+        }
+        int rep = P->at[p].id < 0 || lu_ev_const(c, r) != NULL || nospec(c, bb->pc) ? REP_OBJ : raw_rep(c, r);
+        lu_ev_hint(g, c->code, bb->pc, bb->key[p],
+                   P->at[p].id < 0 ? HINT_OBJ : rep == REP_I64 ? HINT_INT : rep == REP_F64 ? HINT_FLOAT : HINT_VARIES);
+    }
 }
 
 /* A back-edge into the built header: the state it carries is given the
@@ -1007,44 +1422,37 @@ static void
 back_edge(struct ctx *c, struct bblk *bb)
 {
     struct gctx *g = c->g;
-    int pc = bb->pc, nslots = c->nlocals + *depth_of(c);
+    const struct places *P = &bb->P;
+    int pc = bb->pc;
     g->npending = 0;
     g->observed = 0;
     c->pc = pc;
     lu_ev_begin(c, pc);
-    lu_v *phis = bb->slot_phi;
     lu_v first = g->f->nins;
-    for (int k = 0; k < bb->niter; k++) {
-        lu_v real;
-        struct lu_vobj *o = lu_ev_virt(g, &g->st, LU_VIRT(bb->iter_id[k]), &real);
-        if (o == NULL || real != LU_NOV) {
-            lu_ev_hint(g, c->code, pc, -1, HINT_OBJ);
-            continue;
-        }
-        phi_add(c, bb->iter_phi[k], o->f[1]);
+    check_carried(c, bb);
+    if (g->restart) {
+        g->cur = -1;
+        return;
     }
-    for (int i = 0; i < nslots; i++) {
-        lu_v r = slots(c)[i];
-        if (bb->slot_kind[i] == SLOT_SAME) {
-            if (r != bb->slot_ref[i] || !(stepped(bb, r) || same_binding(g, &g->st, &bb->hdr, r))) {
-                lu_ev_hint(g, c->code, pc, i, HINT_OBJ);
-            }
-        }
-        else if (bb->slot_kind[i] == SLOT_RAW) {
-            int rep = I(c, phis[i])->rep, have = raw_rep(c, r);
+    check_same(c, bb);
+    for (int p = 0; p < P->n; p++) {
+        lu_v r = place_get(g, &g->st, P->at[p]);
+        if (P->kind[p] == PLACE_RAW) {
+            int rep = I(c, P->phi[p])->rep, have = raw_rep(c, r);
             PyTypeObject *t = lu_ev_type(c, r);
             int typed = t == &PyLong_Type ? REP_I64 : t == &PyFloat_Type ? REP_F64 : REP_NONE;
             if (have == rep || typed == rep || r == LU_NOV || (!LU_IS_VIRT(r) && t == NULL)) {
-                phi_add(c, phis[i], raw_of(c, r, rep));         /* an unknown object: a guard, the header's */
+                phi_add(c, P->phi[p], raw_of(c, r, rep));       /* an unknown object: a guard, the header's */
             }
             else {
-                lu_ev_hint(g, c->code, pc, i, HINT_OBJ);
+                lu_ev_hint(g, c->code, pc, bb->key[p], HINT_OBJ);
             }
         }
-        else if (raw_rep(c, r) != REP_NONE && !LU_IS_VIRT(bb->slot_ref[i]) && lu_ev_const(c, r) == NULL
-                 && lu_ev_hinted(g, c->code, pc, i) == 0 && !nospec(c, pc)) {
+        else if (P->kind[p] == PLACE_OBJ && raw_rep(c, r) != REP_NONE && !LU_IS_VIRT(bb->ref[p])
+                 && lu_ev_const(c, r) == NULL && lu_ev_hinted(g, c->code, pc, bb->key[p]) <= HINT_VARIES
+                 && !nospec(c, pc)) {
             /* The loop carries a box where the header took an object. */
-            lu_ev_hint(g, c->code, pc, i, raw_rep(c, r) == REP_I64 ? HINT_INT : HINT_FLOAT);
+            lu_ev_hint(g, c->code, pc, bb->key[p], raw_rep(c, r) == REP_I64 ? HINT_INT : HINT_FLOAT);
         }
     }
     if (g->restart) {
@@ -1052,19 +1460,23 @@ back_edge(struct ctx *c, struct bblk *bb)
         return;
     }
     blame_header(c, first, pc);
-    int *lead = distinct_leads(g, phis, nslots);
-    edge_take(c, phis, lead, bb->slot_origin, edge_inputs(c, phis, lead, nslots), nslots, pc);
-    /* What the phis took was made real here: a slot the header left alone
+    lu_v *in = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(P->n ? P->n : 1));
+    edge_inputs(c, P, 0, in);
+    edge_take(c, P, in, pc);
+    /* What the phis took was made real here: what the header left alone
        must not have changed with it. */
-    for (int i = 0; i < nslots; i++) {
-        if (bb->slot_kind[i] == SLOT_SAME && !stepped(bb, slots(c)[i])
-            && !same_binding(g, &g->st, &bb->hdr, slots(c)[i])) {
-            lu_ev_hint(g, c->code, pc, i, HINT_OBJ);
-        }
+    check_carried(c, bb);
+    if (!g->restart) {
+        check_same(c, bb);
     }
     if (g->restart) {
         g->cur = -1;
         return;
+    }
+    for (int p = 0; p < P->n; p++) {
+        if (P->kind[p] == PLACE_DIRECT) {
+            phi_add(c, P->phi[p], place_get(g, &g->st, P->at[p]));
+        }
     }
     lu_ev_settle(c, pc);
     lu_ir_edge(g->f, g->cur, bb->ir);
@@ -1084,7 +1496,7 @@ add_edge(struct ctx *c, int pc)
         return;
     }
     struct bblk *bb = block_at(c, pc);
-    if (bb->built && bb->loop && bb->slot_kind != NULL) {
+    if (bb->built && bb->loop && bb->ref != NULL) {
         back_edge(c, bb);
         return;
     }

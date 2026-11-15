@@ -53,6 +53,17 @@ def _check_strict(fname, iters, i):
             _lengths(fname, j, False)
 
 
+def _map_new2(cls, func, a):
+    """map(func, a) (kernel_twin): the common map, without the argument parsing."""
+    if cls is not map:
+        _boot.check_new(cls, map)
+    self = alloc(cls, map)
+    field_set(self, 0, (get_iter(a),))
+    field_set(self, 1, func)
+    field_set(self, 2, False)
+    return self
+
+
 @kernel_type(static_type('map'))
 class map:
     """Make an iterator that computes the function using arguments from
@@ -76,6 +87,8 @@ raise a ValueError."""
         field_set(self, 2, strict)
         return self
 
+    kernel_twin(__new__, _map_new2)
+
     def __iter__(self):
         return self
 
@@ -87,7 +100,14 @@ raise a ValueError."""
 
 
 def _map_next(self):
+    """The next value of a map, or MISSING at its end. One iterator, the
+    common map, makes no list."""
     iters = field_get(self, 0)
+    if size(iters) == 1:
+        v = next_item(iters[0])
+        if v is MISSING:
+            return MISSING
+        return field_get(self, 1)(v)
     values = []
     for i in range(size(iters)):
         v = next_item(iters[i])
@@ -114,6 +134,17 @@ def _filter_next(self):
             return item
 
 
+def _filter_new2(cls, func, iterable):
+    """filter(func, iterable) (kernel_twin): without the argument parsing."""
+    if cls is not filter:
+        _boot.check_new(cls, filter)
+    it = get_iter(iterable)
+    self = alloc(cls, filter)
+    field_set(self, 0, func)
+    field_set(self, 1, it)
+    return self
+
+
 @kernel_type(static_type('filter'))
 class filter:
     """Return an iterator yielding those items of iterable for which function(item)
@@ -131,6 +162,8 @@ is true. If function is None, return the items that are true."""
         field_set(self, 0, args[0])
         field_set(self, 1, it)
         return self
+
+    kernel_twin(__new__, _filter_new2)
 
     def __iter__(self):
         return self
@@ -226,6 +259,29 @@ raise a ValueError."""
         return v
 
 
+def _enumerate_new1(cls, iterable):
+    """enumerate(iterable) (kernel_twin): without the argument parsing."""
+    if cls is not enumerate:
+        _boot.check_new(cls, enumerate)
+    it = get_iter(iterable)
+    self = alloc(cls, enumerate)
+    field_set(self, 0, it)
+    field_set(self, 1, 0)
+    return self
+
+
+def _enumerate_new2(cls, iterable, start):
+    """enumerate(iterable, start) (kernel_twin): the same with a start."""
+    if cls is not enumerate:
+        _boot.check_new(cls, enumerate)
+    start = index(start)
+    it = get_iter(iterable)
+    self = alloc(cls, enumerate)
+    field_set(self, 0, it)
+    field_set(self, 1, start)
+    return self
+
+
 @kernel_type(static_type('enumerate'))
 class enumerate:
     """Return an enumerate object.
@@ -256,6 +312,9 @@ enumerate is useful for obtaining an indexed list:
         field_set(self, 0, it)
         field_set(self, 1, start)
         return self
+
+    kernel_twin(__new__, _enumerate_new1)
+    kernel_twin(__new__, _enumerate_new2)
 
     def __iter__(self):
         return self
