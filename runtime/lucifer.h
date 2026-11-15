@@ -608,6 +608,9 @@ struct lu_qsbr {
     struct lu_carrier *next;    /* the registry's list */
 };
 
+#define LU_FREE_MAX 100
+#define LU_FREE_TUPLE_SIZES 20
+
 /* A carrier's state in one interpreter, created on first use there. */
 struct lu_entry {
     struct _is *interp;
@@ -618,13 +621,49 @@ struct lu_entry {
     int nbound;                 /* tasks bound here; the owner record is registered while > 0 */
     struct lu_mimalloc_state mimalloc;
     struct lu_brc_owner brc;
-    /* Freed floats and one-digit ints kept for reuse (CPython's per-thread
-       freelists), linked through the word after the header (LU_FREE_NEXT);
-       runtime/object/layouts.c, and compiled code's boxes. */
+    /* Freed objects kept for reuse (CPython's per-thread freelists), up to
+       LU_FREE_MAX of each kind, linked through the word after the header
+       (LU_FREE_NEXT): floats, one-digit ints, tuples of 1 to
+       LU_FREE_TUPLE_SIZES items and exact dicts. The GC kinds wait
+       untracked, which the collector passes over. runtime/object/layouts.c
+       and dict.c, and compiled code's boxes and tuple builds. */
     struct lu_freelist { PyObject *head; int n; } free_floats, free_ints;
+    struct lu_freelist free_tuples[LU_FREE_TUPLE_SIZES], free_dicts;
 };
 
 #define LU_FREE_NEXT(op) (*(PyObject **)((char *)(op) + sizeof(PyObject)))
+
+/* A freed object of the list's kind, born again (_Py_NewReference: the
+   collector's bits clear), or NULL. A lock-free reader of a stale pointer
+   finds the same kind's header in a waiting object, as it would in a
+   reused mimalloc block, with no owner and no count, so its try-incref
+   fails as on any dead object (an owner's would succeed: it increments
+   the local count unchecked). */
+static inline PyObject *
+lu_freelist_pop(struct lu_freelist *fl)
+{
+    PyObject *op = fl->head;
+    if (op != NULL) {
+        fl->head = LU_FREE_NEXT(op);
+        fl->n--;
+        _Py_NewReference(op);
+    }
+    return op;
+}
+
+/* Keeps a dead object for reuse: 1, or 0 when the list is full. */
+static inline int
+lu_freelist_push(struct lu_freelist *fl, PyObject *op)
+{
+    if (fl->n >= LU_FREE_MAX) {
+        return 0;
+    }
+    LU_FREE_NEXT(op) = fl->head;
+    _Py_atomic_store_uintptr_relaxed(&op->ob_tid, 0);
+    fl->head = op;
+    fl->n++;
+    return 1;
+}
 
 /* The carrier record is per pthread, reached through the one thread-local
    word (DESIGN 5.3). It is created by the thread's first allocation or its
@@ -889,7 +928,11 @@ lu_current_task(void)
 /* Called when a carrier binds and retires. */
 void lu_mimalloc_bind(struct lu_entry *entry);
 void lu_mimalloc_abandon(struct lu_entry *entry);
-void lu_freelists_clear(struct lu_entry *entry);       /* runtime/object/layouts.c */
+/* The objects an entry keeps for reuse (runtime/object/layouts.c): all freed
+   now, or moved onto a chain linked through LU_FREE_NEXT and freed later. */
+void lu_freelists_clear(struct lu_entry *entry);
+void lu_freelists_take(struct lu_entry *entry, PyObject **chain);
+void lu_freelists_free(PyObject *chain);
 void lu_brc_register(struct lu_entry *entry);
 void lu_brc_retire(struct lu_entry *entry);
 /* A scheduler carrier stops or starts running a task (runtime/thread/task.c). */

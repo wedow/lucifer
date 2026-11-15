@@ -1866,9 +1866,9 @@ emit_box(struct asm_ *a, struct lu_ins *in)
 }
 
 /* BUILD_TUPLE and BUILD_LIST of a few items in line, as PyTuple_New and
-   PyList_New make them: the object (and a list's array) popped from the
-   carrier's mimalloc pages, counted for the collector, tracked, and filled
-   with new references. The helper takes the rest: a page with no block at
+   PyList_New make them: a tuple from the carrier's freed ones, else the
+   object (and a list's array) popped from the carrier's mimalloc pages and
+   counted for the collector; tracked, and filled with new references. The helper takes the rest: a page with no block at
    hand, a collection due, a hook that sees allocations, and
    -X lucifer_stress=gc:N. 0 when the build is the helper's alone. */
 #define BUILD_INLINE 8
@@ -1895,6 +1895,23 @@ emit_build(struct asm_ *a, lu_v v)
     jcc(a, CC_NE, slow);
     load(a, RAX, R14, offsetof(struct lu_task, carrier));
     load(a, RAX, RAX, offsetof(struct lu_carrier, current));
+    int header = new_label(a);
+    if (!is_list && n <= LU_FREE_TUPLE_SIZES) {
+        /* A freed tuple of n items first, as PyTuple_New takes one: reuse,
+           not an allocation, for the collector's count. */
+        int page = new_label(a);
+        int32_t list = (int32_t)(offsetof(struct lu_entry, free_tuples) + (size_t)(n - 1) * sizeof(struct lu_freelist));
+        load(a, RDX, RAX, list + (int32_t)offsetof(struct lu_freelist, head));
+        test_rr(a, RDX, RDX);
+        jcc(a, CC_E, page);
+        load(a, R11, RDX, sizeof(PyObject));   /* LU_FREE_NEXT */
+        store(a, RAX, list + (int32_t)offsetof(struct lu_freelist, head), R11);
+        b1(a, 0x83);
+        modrm_mem(a, ALU_SUB, RAX, list + (int32_t)offsetof(struct lu_freelist, n));
+        b1(a, 1);                               /* sub dword [rax+n], 1 */
+        jmp(a, header);
+        bind(a, page);
+    }
     cmp_mi(a, 0, RAX, offsetof(struct lu_entry, gc_alloc_count), LU_GC_ALLOC_FLUSH - 1);
     jcc(a, CC_GE, slow);                        /* lu_gc_record_allocation would flush the count */
     pop_block(a, LU_HEAP_GC, size, RDX, RCX, slow);
@@ -1904,6 +1921,7 @@ emit_build(struct asm_ *a, lu_v v)
     b1(a, 0x83);
     modrm_mem(a, ALU_ADD, RAX, offsetof(struct lu_entry, gc_alloc_count));
     b1(a, 1);                                   /* add dword [rax+count], 1 */
+    bind(a, header);
     thread_id(a, R11);
     store(a, RDX, offsetof(PyObject, ob_tid), R11);
     store32_mi(a, RDX, offsetof(PyObject, ob_flags), (int32_t)((uint32_t)LU_GC_TRACKED << 24));    /* ob_gc_bits */

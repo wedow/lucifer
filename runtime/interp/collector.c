@@ -769,7 +769,22 @@ collect_internal(struct collection_state *state, int generation)
     if (state->reason != LU_GC_REASON_STRESS) {
         gc->long_lived_total = state->long_lived_total;
     }
+    /* A full collection empties every carrier's free lists, as CPython's
+       clears every thread's: an idle carrier keeps nothing. They are
+       taken while the world is stopped and freed once it goes. */
+    PyObject *kept = NULL;
+    if (generation == 2) {
+        for (struct lu_carrier *c = __atomic_load_n(&_PyRuntime.qsbr.head, __ATOMIC_ACQUIRE); c != NULL;
+             c = c->qsbr.next) {
+            for (struct lu_entry *e = c->entries; e != NULL; e = e->next) {
+                if (e->interp == interp) {
+                    lu_freelists_take(e, &kept);
+                }
+            }
+        }
+    }
     start_the_world(interp);
+    lu_freelists_free(kept);
 
     delete_garbage(state);
     if (state->reason != LU_GC_REASON_STRESS) {

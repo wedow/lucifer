@@ -81,8 +81,22 @@ new_keys(uint8_t log2_size, int unicode)
 PyObject *
 lu_dict_alloc(PyTypeObject *tp)
 {
-    PyDictObject *mp = (PyDictObject *)(tp == &PyDict_Type
-        ? lu_object_new(&PyDict_Type, sizeof(PyDictObject)) : tp->tp_alloc(tp, 0));
+    PyDictObject *mp = NULL;
+    if (tp == &PyDict_Type) {
+        mp = (PyDictObject *)lu_freelist_pop(&lu_current_entry()->free_dicts);
+        if (mp != NULL) {
+            mp->ob_base.ob_gc_bits = LU_GC_TRACKED;
+            mp->ma_used = 0;
+            mp->_ma_watcher_tag = 0;
+            mp->ma_values = NULL;
+        }
+        else {
+            mp = (PyDictObject *)lu_object_new(&PyDict_Type, sizeof(PyDictObject));
+        }
+    }
+    else {
+        mp = (PyDictObject *)tp->tp_alloc(tp, 0);
+    }
     if (mp != NULL) {
         mp->ma_keys = LU_EMPTY_KEYS;
     }
@@ -309,6 +323,9 @@ dict_dealloc(PyObject *op)
     PyDictObject *mp = (PyDictObject *)op;
     lu_dict_notify(mp, PyDict_EVENT_DEALLOCATED, NULL, NULL);
     free_entries(mp->ma_keys);
+    if (Py_IS_TYPE(op, &PyDict_Type) && lu_freelist_push(&lu_current_entry()->free_dicts, op)) {
+        return;
+    }
     lu_object_free(op);
 }
 

@@ -52,55 +52,45 @@ immortal_header(PyObject *op, PyTypeObject *tp)
 
 #define LONG_HEADER offsetof(PyLongObject, long_value.ob_digit)
 
-/* Floats and one-digit ints come and go in arithmetic: up to FREE_MAX
-   freed ones of each per carrier wait for reuse, linked through the word
-   after the header. A lock-free reader of a stale pointer finds the same
-   type's header there, as it would in a reused mimalloc block, with no
-   owner and no count, so its try-incref fails as on any dead object (an
-   owner's would succeed: it increments the local count unchecked). */
-#define FREE_MAX 100
-
-static PyObject *
-freelist_pop(struct lu_freelist *fl)
-{
-    PyObject *op = fl->head;
-    if (op != NULL) {
-        fl->head = LU_FREE_NEXT(op);
-        fl->n--;
-        _Py_NewReference(op);
-    }
-    return op;
-}
-
-static int
-freelist_push(struct lu_freelist *fl, PyObject *op)
-{
-    if (fl->n >= FREE_MAX) {
-        return 0;
-    }
-    LU_FREE_NEXT(op) = fl->head;
-    _Py_atomic_store_uintptr_relaxed(&op->ob_tid, 0);
-    fl->head = op;
-    fl->n++;
-    return 1;
-}
-
 static void
-freelist_clear(struct lu_freelist *fl)
+freelist_take(struct lu_freelist *fl, PyObject **chain)
 {
     while (fl->head != NULL) {
         PyObject *op = fl->head;
         fl->head = LU_FREE_NEXT(op);
-        lu_object_free(op);
+        LU_FREE_NEXT(op) = *chain;
+        *chain = op;
     }
     fl->n = 0;
 }
 
 void
+lu_freelists_take(struct lu_entry *e, PyObject **chain)
+{
+    freelist_take(&e->free_floats, chain);
+    freelist_take(&e->free_ints, chain);
+    for (int i = 0; i < LU_FREE_TUPLE_SIZES; i++) {
+        freelist_take(&e->free_tuples[i], chain);
+    }
+    freelist_take(&e->free_dicts, chain);
+}
+
+void
+lu_freelists_free(PyObject *chain)
+{
+    while (chain != NULL) {
+        PyObject *next = LU_FREE_NEXT(chain);
+        lu_object_free(chain);
+        chain = next;
+    }
+}
+
+void
 lu_freelists_clear(struct lu_entry *e)
 {
-    freelist_clear(&e->free_floats);
-    freelist_clear(&e->free_ints);
+    PyObject *chain = NULL;
+    lu_freelists_take(e, &chain);
+    lu_freelists_free(chain);
 }
 
 static void
@@ -115,7 +105,7 @@ set_tag(PyLongObject *v, int sign, Py_ssize_t ndigits)
 PyLongObject *
 lu_long_alloc(Py_ssize_t ndigits)
 {
-    PyLongObject *v = ndigits <= 1 ? (PyLongObject *)freelist_pop(&lu_current_entry()->free_ints) : NULL;
+    PyLongObject *v = ndigits <= 1 ? (PyLongObject *)lu_freelist_pop(&lu_current_entry()->free_ints) : NULL;
     if (v != NULL) {
         v->long_value.ob_digit[0] = 0;
     }
@@ -260,7 +250,7 @@ plain_dealloc(PyObject *op)
 PyObject *
 PyFloat_FromDouble(double value)
 {
-    PyObject *op = freelist_pop(&lu_current_entry()->free_floats);
+    PyObject *op = lu_freelist_pop(&lu_current_entry()->free_floats);
     if (op == NULL && (op = lu_object_new(&PyFloat_Type, sizeof(PyFloatObject))) == NULL) {
         return NULL;
     }
@@ -271,7 +261,7 @@ PyFloat_FromDouble(double value)
 static void
 float_dealloc(PyObject *op)
 {
-    if (!PyFloat_CheckExact(op) || !freelist_push(&lu_current_entry()->free_floats, op)) {
+    if (!PyFloat_CheckExact(op) || !lu_freelist_push(&lu_current_entry()->free_floats, op)) {
         lu_object_free(op);
     }
 }
@@ -280,7 +270,7 @@ static void
 long_dealloc(PyObject *op)
 {
     if (!PyLong_CheckExact(op) || !_PyLong_IsCompact((PyLongObject *)op)
-        || !freelist_push(&lu_current_entry()->free_ints, op)) {
+        || !lu_freelist_push(&lu_current_entry()->free_ints, op)) {
         lu_object_free(op);
     }
 }
@@ -353,8 +343,14 @@ PyTuple_New(Py_ssize_t size)
     if (size == 0) {
         return (PyObject *)&_PyRuntime.singletons.empty_tuple;
     }
-    PyTupleObject *op = (PyTupleObject *)lu_object_new(&PyTuple_Type,
-        offsetof(PyTupleObject, ob_item) + size * sizeof(PyObject *));
+    PyTupleObject *op = size <= LU_FREE_TUPLE_SIZES
+        ? (PyTupleObject *)lu_freelist_pop(&lu_current_entry()->free_tuples[size - 1]) : NULL;
+    if (op != NULL) {
+        op->ob_base.ob_base.ob_gc_bits = LU_GC_TRACKED;
+    }
+    else {
+        op = (PyTupleObject *)lu_object_new(&PyTuple_Type, offsetof(PyTupleObject, ob_item) + size * sizeof(PyObject *));
+    }
     if (op == NULL) {
         return NULL;
     }
@@ -447,8 +443,13 @@ static void
 tuple_dealloc(PyObject *op)
 {
     PyTupleObject *t = (PyTupleObject *)op;
-    for (Py_ssize_t i = Py_SIZE(t); --i >= 0; ) {
+    Py_ssize_t n = Py_SIZE(t);
+    for (Py_ssize_t i = n; --i >= 0; ) {
         Py_XDECREF(t->ob_item[i]);
+    }
+    if (n > 0 && n <= LU_FREE_TUPLE_SIZES && Py_IS_TYPE(op, &PyTuple_Type)
+        && lu_freelist_push(&lu_current_entry()->free_tuples[n - 1], op)) {
+        return;
     }
     lu_object_free(op);
 }
