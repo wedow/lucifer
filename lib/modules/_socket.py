@@ -1,9 +1,8 @@
 """_socket (Modules/socketmodule.c): the constants, the error classes, the
 address conversion functions, and stream sockets over AF_INET, AF_INET6 and
 AF_UNIX: create, bind, listen, accept, connect, options, and blocking, timed
-and nonblocking I/O. Addresses cross into the runtime as raw sockaddr bytes,
-packed and unpacked here. Datagram calls (sendto, recvfrom) and recv/send flags
-are not supported yet."""
+and nonblocking I/O, and datagrams (sendto, recvfrom). Addresses cross into the
+runtime as raw sockaddr bytes, packed and unpacked here."""
 
 import errno as _errno
 import _lucifer
@@ -195,13 +194,19 @@ class socket(_lucifer.socket_base()):
 
     timeout = property(gettimeout)
 
-    def recv(self, bufsize, flags=0, /):
+    def _recvfrom(self, bufsize, flags, caller):
         if bufsize < 0:
-            raise ValueError('negative buffersize in recv')
+            raise ValueError('negative buffersize in ' + caller)
         fd = self._check()
-        _no_flags(flags)
         self._wait(_POLLIN)
-        return _posix.read(fd, bufsize)
+        return _lucifer.os_recvfrom(fd, bufsize, flags)
+
+    def recv(self, bufsize, flags=0, /):
+        return self._recvfrom(bufsize, flags, 'recv')[0]
+
+    def recvfrom(self, bufsize, flags=0, /):
+        data, address = self._recvfrom(bufsize, flags, 'recvfrom')
+        return data, _unpack(address)
 
     def recv_into(self, buffer, nbytes=0, flags=0):
         view = memoryview(buffer).cast('B')
@@ -213,14 +218,33 @@ class socket(_lucifer.socket_base()):
         view[:len(data)] = data
         return len(data)
 
-    def send(self, data, flags=0, /):
+    def recvfrom_into(self, buffer, nbytes=0, flags=0):
+        view = memoryview(buffer)
+        if view.readonly:
+            raise TypeError('recvfrom_into() argument 1 must be read-write bytes-like object, not %s'
+                            % type(buffer).__name__)
+        view = view.cast('B')
+        if nbytes > len(view):
+            raise ValueError('nbytes is greater than the length of the buffer')
+        data, address = self._recvfrom(nbytes or len(view), flags, 'recvfrom_into')
+        view[:len(data)] = data
+        return len(data), _unpack(address)
+
+    def _sendto(self, data, flags, address):
         fd = self._check()
-        _no_flags(flags)
         self._wait(_POLLOUT)
-        return _posix.write(fd, data)
+        return _lucifer.os_sendto(fd, data, flags, address)
+
+    def send(self, data, flags=0, /):
+        return self._sendto(data, flags, None)
+
+    def sendto(self, data, *args):
+        if not 1 <= len(args) <= 2:
+            raise TypeError('sendto() takes 2 or 3 arguments (%d given)' % (len(args) + 1))
+        return self._sendto(data, args[0] if len(args) == 2 else 0, _pack(self._family, args[-1], 'sendto'))
 
     def bind(self, address, /):
-        _lucifer.os_sockaddr('bind', self._check(), _pack(self._family, address))
+        _lucifer.os_sockaddr('bind', self._check(), _pack(self._family, address, 'bind'))
 
     def listen(self, backlog=128, /):
         _posix._call('listen', self._check(), max(0, backlog))
@@ -234,7 +258,7 @@ class socket(_lucifer.socket_base()):
     def connect(self, address, /):
         fd = self._check()
         try:
-            _lucifer.os_sockaddr('connect', fd, _pack(self._family, address))
+            _lucifer.os_sockaddr('connect', fd, _pack(self._family, address, 'connect'))
         except BlockingIOError as e:
             if not self._timeout or e.errno != _errno.EINPROGRESS:
                 raise
@@ -279,15 +303,7 @@ class socket(_lucifer.socket_base()):
     def dup(self):
         return socket(self._family, self._type, self._proto, _posix.dup(self._check()))
 
-    recvfrom = recvfrom_into = sendto = _unsupported
-
-
 _POLLIN, _POLLOUT = 1, 4
-
-
-def _no_flags(flags):
-    if flags:
-        raise OSError(_errno.ENOSYS, 'socket flags are not supported yet')
 
 
 def _host(family, host):
@@ -304,35 +320,40 @@ def _host(family, host):
     return packed
 
 
-def _port(address):
+def _port(address, caller):
     port = address[1]
     if not isinstance(port, int):
         raise TypeError("'%s' object cannot be interpreted as an integer" % type(port).__name__)
     if not 0 <= port <= 0xffff:
-        raise OverflowError('bind(): port must be 0-65535.')
+        raise OverflowError('%s(): port must be 0-65535.' % caller)
     return port.to_bytes(2, 'big')
 
 
-def _pack(family, address):
+def _pack(family, address, caller):
     """The sockaddr bytes of a Python address (struct sockaddr_in, sockaddr_in6, sockaddr_un)."""
     head = family.to_bytes(2, 'little')
+    if family in (AF_INET, AF_INET6) and not isinstance(address, tuple):
+        raise TypeError('%s(): %s address must be tuple, not %s'
+                        % (caller, 'AF_INET' if family == AF_INET else 'AF_INET6', type(address).__name__))
     if family == AF_INET:
-        if not isinstance(address, tuple) or len(address) != 2:
-            raise TypeError('AF_INET address must be tuple, not %s' % type(address).__name__)
-        return head + _port(address) + _host(family, address[0]) + bytes(8)
+        if len(address) != 2:
+            raise TypeError('AF_INET address must be a pair (host, port)')
+        return head + _port(address, caller) + _host(family, address[0]) + bytes(8)
     if family == AF_INET6:
-        if not isinstance(address, tuple) or not 2 <= len(address) <= 4:
+        if not 2 <= len(address) <= 4:
             raise TypeError('AF_INET6 address must be a tuple (host, port[, flowinfo[, scopeid]])')
         flowinfo, scope = (tuple(address[2:]) + (0, 0))[:2]
-        return (head + _port(address) + flowinfo.to_bytes(4, 'big') + _host(family, address[0])
+        return (head + _port(address, caller) + flowinfo.to_bytes(4, 'big') + _host(family, address[0])
                 + scope.to_bytes(4, 'little'))
     if family == AF_UNIX:
         path = address.encode('utf-8', 'surrogateescape') if isinstance(address, str) else bytes(address)
-        return head + path + (b'' if path[:1] == b'\0' else b'\0')
+        return head + path
     raise OSError(_errno.EAFNOSUPPORT, 'Address family not supported by protocol')
 
 
 def _unpack(sockaddr):
+    if sockaddr is None:
+        return None
     family = int.from_bytes(sockaddr[:2], 'little')
     if family == AF_INET:
         return _lucifer.os_inet_ntop(family, sockaddr[4:8]), int.from_bytes(sockaddr[2:4], 'big')
@@ -455,6 +476,33 @@ def gethostbyname(hostname, /):
     for family, _, _, _, address in getaddrinfo(hostname, None, AF_INET, SOCK_STREAM):
         return address[0]
     raise gaierror(-2, 'Name or service not known')
+
+
+def getnameinfo(sockaddr, flags, /):
+    """Get host and port for a sockaddr."""
+    if not isinstance(sockaddr, tuple):
+        raise TypeError('getnameinfo() argument 1 must be a tuple')
+    if not 2 <= len(sockaddr) <= 4 or not isinstance(sockaddr[0], str):
+        raise TypeError('getnameinfo(): illegal sockaddr argument')
+    host, port, flowinfo, scope = sockaddr + (0,) * (4 - len(sockaddr))
+    for n in (port, flowinfo, scope):
+        if not isinstance(n, int):
+            raise TypeError("'%s' object cannot be interpreted as an integer" % type(n).__name__)
+    flowinfo, scope = flowinfo & 0xffffffff, scope & 0xffffffff
+    if flowinfo > 0xfffff:
+        raise OverflowError('getnameinfo(): flowinfo must be 0-1048575.')
+    found = getaddrinfo(host, str(port), AF_UNSPEC, SOCK_DGRAM, 0, AI_NUMERICHOST)
+    if len(found) > 1:
+        raise OSError('sockaddr resolved to multiple addresses')
+    family, _, _, _, address = found[0]
+    if family == AF_INET and len(sockaddr) != 2:
+        raise OSError('IPv4 sockaddr must be 2 tuple')
+    if family == AF_INET6:
+        address = address[0], address[1], flowinfo, scope
+    found = _lucifer.os_getnameinfo(_pack(family, address, 'getnameinfo'), flags)
+    if isinstance(found[0], int):
+        raise gaierror(*found)
+    return found
 
 
 def gethostbyaddr(ip_address, /):

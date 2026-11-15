@@ -2,7 +2,7 @@
 id: luc-zj23
 status: open
 deps: []
-links: []
+links: [luc-5ot9]
 created: 2026-11-04T11:33:22Z
 type: feature
 priority: 2

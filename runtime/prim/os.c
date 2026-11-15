@@ -1061,6 +1061,77 @@ prim_os_sockaddr(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return address == NULL || strcmp(op, "accept") != 0 ? address : Py_BuildValue("(iN)", r, address);
 }
 
+/* sendto(fd, data, flags, address): the count sent, data any bytes-like object, address the raw
+   sockaddr bytes or None for a connected socket (send(2)). */
+static PyObject *
+prim_os_sendto(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd, flags;
+    if (nargs != 4 || int_arg(args[0], &fd) < 0 || int_arg(args[2], &flags) < 0
+        || (args[3] != Py_None && (!PyBytes_Check(args[3])
+                                   || PyBytes_GET_SIZE(args[3]) > (Py_ssize_t)sizeof(struct sockaddr_storage)))) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "sendto(fd, data, flags, address)"), NULL);
+    }
+    Py_buffer data;
+    if (PyObject_GetBuffer(args[1], &data, PyBUF_SIMPLE) < 0) {
+        return NULL;
+    }
+    const struct sockaddr *sa = args[3] == Py_None ? NULL : (const struct sockaddr *)PyBytes_AS_STRING(args[3]);
+    socklen_t len = args[3] == Py_None ? 0 : (socklen_t)PyBytes_GET_SIZE(args[3]);
+    ssize_t n;
+    do {
+        n = LU_SYSCALL(sendto((int)fd, data.buf, (size_t)data.len, (int)flags, sa, len));
+    } while (n < 0 && interrupted());
+    PyBuffer_Release(&data);
+    if (n < 0) {
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
+        return NULL;
+    }
+    return PyLong_FromSsize_t(n);
+}
+
+/* recvfrom(fd, size, flags): (up to size bytes, the sender's raw sockaddr bytes or None when the
+   socket gives no address). */
+static PyObject *
+prim_os_recvfrom(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd, size, flags;
+    if (nargs != 3 || int_arg(args[0], &fd) < 0 || int_arg(args[1], &size) < 0 || int_arg(args[2], &flags) < 0) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "recvfrom(fd, size, flags)"), NULL);
+    }
+    PyObject *bytes = PyBytes_FromStringAndSize(NULL, size);
+    if (bytes == NULL) {
+        return NULL;
+    }
+    struct sockaddr_storage sa;
+    socklen_t len;
+    ssize_t n;
+    do {
+        len = sizeof sa;
+        n = LU_SYSCALL(recvfrom((int)fd, PyBytes_AS_STRING(bytes), (size_t)size, (int)flags,
+                                (struct sockaddr *)&sa, &len));
+    } while (n < 0 && interrupted());
+    if (n < 0) {
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
+        Py_DECREF(bytes);
+        return NULL;
+    }
+    if (n < size) {
+        PyObject *shorter = PyBytes_FromStringAndSize(PyBytes_AS_STRING(bytes), n);
+        Py_SETREF(bytes, shorter);
+        if (bytes == NULL) {
+            return NULL;
+        }
+    }
+    PyObject *address = len == 0 ? Py_NewRef(Py_None)
+        : PyBytes_FromStringAndSize((const char *)&sa, len < sizeof sa ? len : sizeof sa);
+    return address == NULL ? (Py_DECREF(bytes), NULL) : Py_BuildValue("(NN)", bytes, address);
+}
+
 /* setsockopt(fd, level, name, value): value an int or a bytes-like option buffer. */
 static PyObject *
 prim_os_setsockopt(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -1100,6 +1171,22 @@ prim_os_getsockopt(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return NULL;
     }
     return buflen == 0 ? PyLong_FromLong(flag) : PyBytes_FromStringAndSize(buf, len);
+}
+
+/* getnameinfo(address, flags): (host, service) of raw sockaddr bytes, or (error, message) when the
+   resolver fails. It may wait for a name server, so it runs in the bracket. */
+static PyObject *
+prim_os_getnameinfo(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long flags;
+    if (nargs != 2 || !PyBytes_Check(args[0]) || int_arg(args[1], &flags) < 0) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "getnameinfo(address, flags)"), NULL);
+    }
+    char host[NI_MAXHOST], service[NI_MAXSERV];
+    int err = LU_SYSCALL(getnameinfo((const struct sockaddr *)PyBytes_AS_STRING(args[0]),
+                                     (socklen_t)PyBytes_GET_SIZE(args[0]), host, sizeof host,
+                                     service, sizeof service, (int)flags));
+    return err != 0 ? Py_BuildValue("(is)", err, gai_strerror(err)) : Py_BuildValue("(ss)", host, service);
 }
 
 /* gethostbyaddr(family, packed): (name, [alias], [packed address]), or (h_errno, message) when the
@@ -2141,7 +2228,10 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_sockaddr", (PyCFunction)(void (*)(void))prim_os_sockaddr, METH_FASTCALL, NULL },
     { "os_setsockopt", (PyCFunction)(void (*)(void))prim_os_setsockopt, METH_FASTCALL, NULL },
     { "os_getsockopt", (PyCFunction)(void (*)(void))prim_os_getsockopt, METH_FASTCALL, NULL },
+    { "os_sendto", (PyCFunction)(void (*)(void))prim_os_sendto, METH_FASTCALL, NULL },
+    { "os_recvfrom", (PyCFunction)(void (*)(void))prim_os_recvfrom, METH_FASTCALL, NULL },
     { "os_gethostbyaddr", (PyCFunction)(void (*)(void))prim_os_gethostbyaddr, METH_FASTCALL, NULL },
+    { "os_getnameinfo", (PyCFunction)(void (*)(void))prim_os_getnameinfo, METH_FASTCALL, NULL },
     { "os_inet_pton", (PyCFunction)(void (*)(void))prim_os_inet_pton, METH_FASTCALL, NULL },
     { "os_inet_ntop", (PyCFunction)(void (*)(void))prim_os_inet_ntop, METH_FASTCALL, NULL },
     { "os_uname", (PyCFunction)(void (*)(void))prim_os_uname, METH_FASTCALL, NULL },
