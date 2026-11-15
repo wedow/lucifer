@@ -1077,6 +1077,73 @@ lu_ev_fork(struct ctx *c, lu_v bit, int pc_true)
 }
 
 void
+lu_ev_split(struct ctx *c, lu_v bit, struct split *s)
+{
+    struct gctx *g = c->g;
+    int T = lu_ir_block(g->f);
+    s->other = lu_ir_block(g->f);
+    s->n = 0;
+    lu_ir_edge(g->f, g->cur, T);
+    lu_ir_edge(g->f, g->cur, s->other);
+    lu_ev_emit(c, OP_BRANCH, REP_NONE, bit, LU_NOV, LU_NOV, 0);
+    lu_ev_state_copy(g, &s->saved, &g->st);
+    s->pc = c->pc;
+    s->sp = c->snap_sp;
+    s->npending = g->npending;
+    s->observed = g->observed;
+    s->pending = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(g->npending ? g->npending : 1));
+    memcpy(s->pending, g->pending, sizeof(lu_v) * (size_t)g->npending);
+    g->cur = T;
+}
+
+/* A way of a split instruction reached the instruction's end. */
+static void
+split_arm(struct ctx *c, struct split *s)
+{
+    struct gctx *g = c->g;
+    if (g->cur >= 0 && !g->restart) {
+        lu_ev_settle(c, c->next);
+    }
+    if (g->cur >= 0 && !g->restart) {
+        s->arms[s->n].block = g->cur;
+        lu_ev_state_copy(g, &s->arms[s->n].st, &g->st);
+        s->n++;
+    }
+}
+
+void
+lu_ev_split_else(struct ctx *c, struct split *s)
+{
+    struct gctx *g = c->g;
+    split_arm(c, s);
+    g->st = s->saved;
+    lu_ev_changed(g);
+    /* The instruction begins again: a way that split left the frame at
+       the instruction's end (its join's). */
+    c->pc = s->pc;
+    lu_ev_begin(c, s->pc);
+    c->snap_sp = s->sp;
+    g->npending = 0;
+    for (int i = 0; i < s->npending; i++) {
+        lu_ev_drop(c, s->pending[i]);
+    }
+    g->observed = s->observed;
+    g->cur = s->other;
+}
+
+void
+lu_ev_split_end(struct ctx *c, struct split *s)
+{
+    struct gctx *g = c->g;
+    split_arm(c, s);
+    if (s->n == 0 || g->restart) {
+        g->cur = -1;
+        return;
+    }
+    lu_ev_merge(c, s->arms, s->n, c->next);
+}
+
+void
 lu_ev_branch(struct ctx *c, lu_v bit, int pc_true, int pc_false)
 {
     lu_ev_fork(c, bit, pc_true);

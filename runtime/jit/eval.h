@@ -300,6 +300,24 @@ void lu_ev_branch(struct ctx *c, lu_v bit, int pc_true, int pc_false);
 /* When bit is 1 control goes to pc_true; the evaluation goes on where it
    is 0 (nowhere, if bit is a constant 1). */
 void lu_ev_fork(struct ctx *c, lu_v bit, int pc_true);
+/* The current instruction goes two ways on a bit, each way built to its
+   end and the two joined after it: lu_ev_split begins the way taken when
+   the bit is 1, lu_ev_split_else ends it and begins the other, and
+   lu_ev_split_end ends that and joins what reached the instruction's
+   end (control goes nowhere when neither did). The instruction has
+   changed no slot yet when it splits; a way may split again. */
+struct split {
+    int other;                  /* the graph block of the way not yet built */
+    int pc, sp;                 /* the instruction, and its frame's stack depth before it */
+    struct state saved;
+    lu_v *pending;
+    int npending, observed;
+    struct edge arms[2];
+    int n;
+};
+void lu_ev_split(struct ctx *c, lu_v bit, struct split *s);
+void lu_ev_split_else(struct ctx *c, struct split *s);
+void lu_ev_split_end(struct ctx *c, struct split *s);
 /* Joins the edges, which arrive before the instruction at pc of frame c,
    into one block and state (g->cur, g->st). */
 void lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc);

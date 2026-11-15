@@ -162,12 +162,49 @@ subscript(struct ctx *c, lu_v a, lu_v b, int lk, int rk)
     return LU_NOV;
 }
 
+/* An operand the site met as an int at times and as a float at others,
+   and nothing else, with its type not known here: the instruction is
+   built both ways, switched on the operand's type where it runs (an int
+   that turned float in a sum, a parameter given either). LU_NOV when
+   neither operand is one. */
+static lu_v
+int_or_float(struct ctx *c, lu_v a, lu_v b, int lk, int rk)
+{
+    int both = LU_KIND_INT | LU_KIND_FLOAT;
+    lu_v v = lk == both ? a : rk == both ? b : LU_NOV;
+    return v >= 0 && I(c, v)->rep == REP_OBJ ? v : LU_NOV;
+}
+
+static int
+both_ways(struct ctx *c, lu_v v, int (*build)(struct ctx *))
+{
+    lu_ev_guard(c, OP_GUARD_NOT_NULL, v, 0);    /* an unbound local: the interpreter raises */
+    lu_v type = lu_ev_emit(c, OP_LOAD, REP_OBJ, v, LU_NOV, LU_NOV, offsetof(PyObject, ob_type));
+    lu_v is = lu_ev_emit(c, OP_IS, REP_BIT, type, lu_ev_konst(c, (PyObject *)&PyFloat_Type), LU_NOV, 0);
+    struct split s;
+    lu_ev_split(c, is, &s);
+    lu_ev_set_type(c, v, &PyFloat_Type);
+    if (build(c) < 0) {
+        return -1;
+    }
+    lu_ev_split_else(c, &s);
+    lu_ev_guard_type(c, v, &PyLong_Type);
+    if (build(c) < 0) {
+        return -1;
+    }
+    lu_ev_split_end(c, &s);
+    return 0;
+}
+
 int
 lu_ev_binary_op(struct ctx *c)
 {
     lu_v b = lu_ev_peek(c, 1), a = lu_ev_peek(c, 2);
     int lk, rk, op = c->oparg;
     operand_kinds(c, a, b, lu_ev_feedback(c, c->cache + 1), &lk, &rk);
+    if (op != NB_SUBSCR && int_or_float(c, a, b, lk, rk) != LU_NOV) {
+        return both_ways(c, int_or_float(c, a, b, lk, rk), lu_ev_binary_op);
+    }
     int base = op >= NB_INPLACE_ADD && op != NB_SUBSCR ? op - NB_INPLACE_ADD : op;
     int num_l = lk == LU_KIND_INT || lk == LU_KIND_FLOAT, num_r = rk == LU_KIND_INT || rk == LU_KIND_FLOAT;
     lu_v r = LU_NOV;
@@ -225,6 +262,9 @@ lu_ev_compare_op(struct ctx *c)
     lu_v b = lu_ev_peek(c, 1), a = lu_ev_peek(c, 2);
     int lk, rk, op = c->oparg >> 5;
     operand_kinds(c, a, b, lu_ev_feedback(c, c->cache), &lk, &rk);
+    if (int_or_float(c, a, b, lk, rk) != LU_NOV) {
+        return both_ways(c, int_or_float(c, a, b, lk, rk), lu_ev_compare_op);
+    }
     lu_v bit = LU_NOV, r;
     if (lk == LU_KIND_INT && rk == LU_KIND_INT) {
         lu_v x = lu_ev_unbox_int(c, a), y = lu_ev_unbox_int(c, b);
