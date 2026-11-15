@@ -360,11 +360,6 @@ lu_ir_free(struct lu_func *f)
         free(f->blocks[i].ins);
         free(f->blocks[i].preds);
     }
-    for (int v = 0; v < f->nins; v++) {
-        if (f->ins[v].op == OP_PHI) {
-            free(f->ins[v].args);
-        }
-    }
     free(f->blocks);
     free(f->ins);
     free(f->known);

@@ -316,14 +316,14 @@ is_bit(struct ctx *c, lu_v r)
     return k == Py_True || k == Py_False || (o != NULL && real == LU_NOV && o->kind == VK_BOOL);
 }
 
-static lu_v new_phi(struct ctx *c, int block, int rep, int cap);
+static lu_v new_phi(struct ctx *c, int block, int rep);
 
 /* The phi beside a raw phi that carries the object its value was, where
    an edge has one (NULL elsewhere), and the box of the two. */
 static lu_v
 origin_phi(struct ctx *c, int block, lu_v raw)
 {
-    lu_v phi = new_phi(c, block, REP_OBJ, 2);
+    lu_v phi = new_phi(c, block, REP_OBJ);
     I(c, phi)->flags |= INS_OWNED;
     lu_ev_def_type(c, phi, I(c, raw)->rep == REP_I64 ? &PyLong_Type : &PyFloat_Type);
     return phi;
@@ -347,12 +347,10 @@ box_of(struct ctx *c, lu_v raw, lu_v origin)
 }
 
 static lu_v
-new_phi(struct ctx *c, int block, int rep, int cap)
+new_phi(struct ctx *c, int block, int rep)
 {
     struct lu_func *f = c->g->f;
     lu_v phi = lu_ir_emit(f, block, OP_PHI, rep, LU_NOV, LU_NOV, LU_NOV, 0);
-    f->ins[phi].args = malloc(sizeof(lu_v) * (size_t)(cap ? cap : 1));
-    f->ins[phi].nargs = 0;
     f->ins[phi].src = c->code;
     f->ins[phi].src_pc = c->pc;
     return phi;
@@ -362,7 +360,12 @@ static void
 phi_add(struct ctx *c, lu_v phi, lu_v arg)
 {
     struct lu_ins *in = I(c, phi);
-    in->args = realloc(in->args, sizeof(lu_v) * (size_t)(in->nargs + 1));
+    if (in->nargs == 0 || (in->nargs >= 2 && (in->nargs & (in->nargs - 1)) == 0)) {
+        /* Full: room for twice as many (2, 4, 8 ...), in the arena. */
+        lu_v *args = lu_ir_alloc(c->g->f, sizeof(lu_v) * (size_t)(in->nargs ? 2 * in->nargs : 2));
+        memcpy(args, in->args, sizeof(lu_v) * (size_t)in->nargs);
+        in->args = args;
+    }
     in->args[in->nargs++] = arg;
 }
 
@@ -564,7 +567,7 @@ reconcile(struct ctx *c, struct edge *edges, int n, int pc, int id, int J)
         }
     }
     if (any_real || first == NULL || kind != VK_SEQITER) {
-        lu_v phi = new_phi(c, J, REP_OBJ, n);
+        lu_v phi = new_phi(c, J, REP_OBJ);
         int owned = 0;
         PyTypeObject *type = NULL;
         for (int e = 0; e < n; e++) {
@@ -589,7 +592,7 @@ reconcile(struct ctx *c, struct edge *edges, int n, int pc, int id, int J)
     }
     /* An iterator stepped differently on each edge: its index is a phi. */
     struct lu_vobj *o = lu_ir_vobj(g->f, VK_SEQITER, first->type, 2);
-    lu_v phi = new_phi(c, J, REP_I64, n);
+    lu_v phi = new_phi(c, J, REP_I64);
     o->f[0] = first->f[0];
     o->f[1] = phi;
     for (int e = 0; e < n; e++) {
@@ -651,7 +654,7 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
         }
         if (bits) {
             /* A bool on every edge (a flag set on some paths): its bit is the phi. */
-            phis[i] = new_phi(c, J, REP_BIT, n);
+            phis[i] = new_phi(c, J, REP_BIT);
             for (int e = 0; e < n; e++) {
                 g->st = edges[e].st;
                 lu_ev_changed(g);
@@ -672,7 +675,7 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
         }
         if (rep != REP_NONE) {
             /* A box on every edge: its value is the phi, and it stays no object. */
-            phis[i] = new_phi(c, J, rep, n);
+            phis[i] = new_phi(c, J, rep);
             int came = 0;
             for (int e = 0; e < n; e++) {
                 g->st = edges[e].st;
@@ -687,7 +690,7 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
             }
             continue;
         }
-        phis[i] = new_phi(c, J, REP_OBJ, n);
+        phis[i] = new_phi(c, J, REP_OBJ);
         I(c, phis[i])->flags |= INS_OWNED;
     }
     /* What the object phis take is made real on each edge. */
@@ -937,13 +940,13 @@ build_header(struct ctx *c, struct bblk *bb)
         }
         int rep = header_rep(c, r, pc, i);
         if (rep != REP_NONE) {
-            phis[i] = new_phi(c, H, rep, 2);
+            phis[i] = new_phi(c, H, rep);
             phi_add(c, phis[i], raw_of(c, r, rep));
             origin[i] = origin_phi(c, H, phis[i]);
             bb->slot_kind[i] = SLOT_RAW;
             continue;
         }
-        phis[i] = new_phi(c, H, REP_OBJ, 2);
+        phis[i] = new_phi(c, H, REP_OBJ);
         I(c, phis[i])->flags |= INS_OWNED;
         bb->slot_kind[i] = SLOT_OBJ;
     }
@@ -962,7 +965,7 @@ build_header(struct ctx *c, struct bblk *bb)
         lu_v real;
         struct lu_vobj *o = lu_ev_virt(g, &g->st, LU_VIRT(ids[k]), &real);
         struct lu_vobj *n = lu_ir_vobj(g->f, VK_SEQITER, o->type, 2);
-        bb->iter_phi[k] = new_phi(c, H, REP_I64, 2);
+        bb->iter_phi[k] = new_phi(c, H, REP_I64);
         phi_add(c, bb->iter_phi[k], o->f[1]);
         n->f[0] = o->f[0];
         n->f[1] = bb->iter_phi[k];
