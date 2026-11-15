@@ -141,27 +141,34 @@ clobbers_saved(const struct lu_ins *in)
 /* --- the buffer --- */
 
 static void
+grow_buf(struct asm_ *a, int n)
+{
+    a->cap = a->cap ? a->cap * 2 : 4096;
+    while (a->n + n > a->cap) {
+        a->cap *= 2;
+    }
+    a->buf = realloc(a->buf, (size_t)a->cap);
+}
+
+/* In line: a call to store a byte cost more than the store. */
+static inline Py_ALWAYS_INLINE void
 put(struct asm_ *a, const void *p, int n)
 {
     if (a->n + n > a->cap) {
-        a->cap = a->cap ? a->cap * 2 : 4096;
-        while (a->n + n > a->cap) {
-            a->cap *= 2;
-        }
-        a->buf = realloc(a->buf, (size_t)a->cap);
+        grow_buf(a, n);
     }
     memcpy(a->buf + a->n, p, (size_t)n);
     a->n += n;
 }
 
-static void
+static inline Py_ALWAYS_INLINE void
 b1(struct asm_ *a, int x)
 {
     uint8_t c = (uint8_t)x;
     put(a, &c, 1);
 }
 
-static void
+static inline Py_ALWAYS_INLINE void
 b4(struct asm_ *a, int32_t x)
 {
     put(a, &x, 4);
