@@ -260,23 +260,18 @@ lu_ir_dep(struct lu_func *f, struct lu_fdep *dep)
 }
 
 void *
-lu_ir_alloc(struct lu_func *f, size_t size)
+lu_ir_alloc_chunk(struct lu_func *f, size_t size)
 {
-    size = (size + 15) & ~(size_t)15;
-    if (f->arena == NULL || f->arena_used + size > f->arena_cap) {
-        size_t cap = size > 65536 ? size : 65536;
-        f->chunks = realloc(f->chunks, sizeof(char *) * (size_t)(f->nchunks + 1));
-        f->arena = calloc(1, cap);
-        if (f->chunks == NULL || f->arena == NULL) {
-            Py_FatalError("lucifer jit: out of memory");
-        }
-        f->chunks[f->nchunks++] = f->arena;
-        f->arena_used = 0;
-        f->arena_cap = cap;
+    size_t cap = size > 65536 ? size : 65536;
+    f->chunks = realloc(f->chunks, sizeof(char *) * (size_t)(f->nchunks + 1));
+    f->arena = calloc(1, cap);
+    if (f->chunks == NULL || f->arena == NULL) {
+        Py_FatalError("lucifer jit: out of memory");
     }
-    void *p = f->arena + f->arena_used;
-    f->arena_used += size;
-    return p;
+    f->chunks[f->nchunks++] = f->arena;
+    f->arena_used = size;
+    f->arena_cap = cap;
+    return f->arena;
 }
 
 int

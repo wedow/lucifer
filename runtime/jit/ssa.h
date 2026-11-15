@@ -319,7 +319,20 @@ struct lu_func {
 };
 
 /* Building and editing. */
-void *lu_ir_alloc(struct lu_func *f, size_t size);
+/* Zeroed memory that lives as long as f: the common case in line, a new
+   chunk out of line. */
+void *lu_ir_alloc_chunk(struct lu_func *f, size_t size);
+static inline void *
+lu_ir_alloc(struct lu_func *f, size_t size)
+{
+    size = (size + 15) & ~(size_t)15;
+    if (f->arena == NULL || f->arena_used + size > f->arena_cap) {
+        return lu_ir_alloc_chunk(f, size);
+    }
+    void *p = f->arena + f->arena_used;
+    f->arena_used += size;
+    return p;
+}
 int lu_ir_block(struct lu_func *f);
 /* A block of -1 is none: a constant, which runs nowhere. */
 lu_v lu_ir_emit(struct lu_func *f, int block, int op, int rep, lu_v a, lu_v b, lu_v c, int64_t imm);
