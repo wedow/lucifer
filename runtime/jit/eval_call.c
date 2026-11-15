@@ -52,10 +52,26 @@ target_of(PyObject *o, PyObject **bound)
     return fn != NULL && PyFunction_Check(fn) ? (PyFunctionObject *)fn : NULL;
 }
 
+/* A reference of compiled code's own to the object in a's word at `offset`
+   (a method's self): the method may go before the call it was read for
+   ends. */
+static lu_v
+held_field(struct ctx *c, lu_v a, size_t offset)
+{
+    lu_v v = lu_ev_emit(c, OP_LOAD, REP_OBJ, a, LU_NOV, LU_NOV, (int64_t)offset);
+    lu_ev_emit(c, OP_INCREF, REP_NONE, v, LU_NOV, LU_NOV, 0);
+    return lu_ev_own(c, v);
+}
+
 /* A callable that is not a constant, at a site that met one function
-   only: guarded to be it, and a constant from here. */
+   only (the site's callee table, jit.h): guarded to be it, and a constant
+   from here. The function is met by itself, with a self beside it where
+   the stack holds one; as a bound method object, a Python function's or a
+   builtin method's of a kernel type (f = d.append), whose self is then
+   read from the object into *self. NULL when the site says no such
+   thing. */
 static PyObject *
-speculate_callee(struct ctx *c, lu_v callable, lu_v self)
+speculate_callee(struct ctx *c, lu_v callable, lu_v *self)
 {
     if (callable == LU_NOV || LU_IS_VIRT(callable) || nospec(c, c->pc)) {
         return NULL;
@@ -65,14 +81,36 @@ speculate_callee(struct ctx *c, lu_v callable, lu_v self)
         return NULL;
     }
     struct lu_callee e = t->e[0];
-    /* Named by itself, and passed a self only where the stack holds one:
-       then the value called is the function. */
-    if ((e.kind & (LU_CALLEE_CODE | LU_CALLEE_CMETH)) || !PyFunction_Check(e.obj)
-        || ((e.kind & LU_CALLEE_BOUND) != 0) != (self != LU_NOV)) {
+    if ((e.kind & LU_CALLEE_CODE) || !PyFunction_Check(e.obj)) {
         return NULL;
     }
-    lu_ev_guard(c, OP_GUARD_IS, callable, (int64_t)(intptr_t)e.obj);
-    lu_ev_konst(c, e.obj);      /* the unit keeps what it compares with */
+    if (e.kind & LU_CALLEE_CMETH) {
+        /* A builtin method bound to its self: the kernel function its
+           definition names, called with that self. */
+        if (*self != LU_NOV) {
+            return NULL;
+        }
+        lu_ev_guard_type(c, callable, &PyCFunction_Type);
+        lu_v g = lu_ev_guard(c, OP_GUARD_IS, callable, (int64_t)(intptr_t)e.globals);
+        I(c, g)->imm2 = GI_FIELD | (int64_t)offsetof(PyCFunctionObject, m_ml);
+        *self = held_field(c, callable, offsetof(PyCFunctionObject, m_self));
+    }
+    else if ((e.kind & LU_CALLEE_BOUND) && *self == LU_NOV) {
+        /* A bound method object: its function, called with its self. */
+        lu_ev_guard_type(c, callable, &PyMethod_Type);
+        lu_v g = lu_ev_guard(c, OP_GUARD_IS, callable, (int64_t)(intptr_t)e.obj);
+        I(c, g)->imm2 = GI_FIELD | (int64_t)offsetof(PyMethodObject, im_func);
+        *self = held_field(c, callable, offsetof(PyMethodObject, im_self));
+    }
+    else if (((e.kind & LU_CALLEE_BOUND) != 0) == (*self != LU_NOV)) {
+        /* Named by itself, and passed a self only where the stack holds one:
+           then the value called is the function. */
+        lu_ev_guard(c, OP_GUARD_IS, callable, (int64_t)(intptr_t)e.obj);
+    }
+    else {
+        return NULL;
+    }
+    lu_ev_konst(c, e.obj);      /* the unit keeps what it compares with and calls */
     return e.obj;
 }
 
@@ -455,9 +493,9 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
         self = mo->f[1];
     }
     PyObject *kc = lu_ev_const(c, callable);
-    lu_v r = LU_EV_NONE;
+    lu_v r = LU_EV_NONE, written = self;        /* the self the instruction has, for a call made as written */
     if (kc == NULL && site) {
-        kc = speculate_callee(c, callable, self);
+        kc = speculate_callee(c, callable, &self);
     }
     const char *prim = primitive_name(kc);
     if (prim != NULL && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_FRAME)) {
@@ -555,14 +593,11 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }
-        if (self == callable) {
-            self = LU_NOV;      /* the class call that did not inline is made as written */
-        }
     }
     /* As the interpreter makes it: argv is the callable, self or NULL, the
        arguments (then the keyword names). */
     args[0] = callable;
-    args[1] = self;
+    args[1] = written;
     memcpy(args + 2, a, sizeof(lu_v) * (size_t)(n + nkw));
     if (nkw > 0) {
         args[2 + n + nkw] = lu_ev_konst(c, kwnames);
