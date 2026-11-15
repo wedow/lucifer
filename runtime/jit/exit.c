@@ -505,7 +505,8 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     root->owner = root->home;
     struct lu_frame *top = root;
     int unpushed = 0;
-    ts->py_recursion_remaining += d->nframes - 1;       /* compiled code counted its inlined frames; pushing counts them */
+    /* Compiled code counts its inlined frames only across its calls
+       (runtime/jit/x86_64/emit.c publish): pushing them counts them. */
     for (int k = 1; !nomem && k < d->nframes; k++) {
         struct lu_frame *f = push_inlined(ts, &m, k, top);
         if (f == NULL) {

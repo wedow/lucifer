@@ -103,7 +103,10 @@ not_inlinable(struct ctx *c, PyFunctionObject *fn)
     if (again > 1) {
         return "recursive";
     }
-    if (c->g->f->nins > c->g->budget) {
+    /* An inlined frame's entry and return each cost an instruction once
+       (the recursion count, kept now only across calls): the budget, tuned
+       with them, still charges them. */
+    if (c->g->f->nins + 2 * c->g->f->ninlined > c->g->budget) {
         c->g->f->refused++;
         return "over budget";
     }
@@ -337,7 +340,6 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, int npos, PyObject 
         g->maxdepth = k->depth;
     }
     g->f->ninlined++;
-    lu_ev_emit(c, OP_DEPTH, REP_NONE, LU_NOV, LU_NOV, LU_NOV, -1);      /* the frame counts toward the limit, as pushed */
     /* The call's own releases (a callable nothing names now) come before
        the callee's first instruction, where its frame is whole. */
     k->pc = 0;
@@ -402,7 +404,6 @@ lu_ev_return(struct ctx *c)
         lu_ev_drop(c, slots(c)[i]);
     }
     lu_ev_state_pop(g);
-    lu_ev_emit(c, OP_DEPTH, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 1);
     if (c->ret == LU_RETURN_FOR_ITER) {
         if (lu_ev_const(c, v) == LU_MISSING) {
             /* The iterator is exhausted on this path: the caller's loop ends. */

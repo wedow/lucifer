@@ -85,6 +85,7 @@ struct asm_ {
     uint32_t volatiles;         /* the caller-saved registers the unit allocates, by location */
     struct hold *held;          /* what the published call in hand holds of what it is handed */
     int nheld;
+    int inlined;                /* the published call's inlined frames, counted toward the limit across it */
 };
 
 /* The instructions whose code keeps its own values in RBX, R12 and R13
@@ -1091,12 +1092,28 @@ takes_of(struct asm_ *a, struct lu_ins *in, const struct hold *h, int nh)
    objects the call is handed get the references the frames' slots are
    owed (holds_of), unless
    the call only parks (its registers saved: no code of this thread runs
-   that could count them). Clobbers RAX and R11. */
+   that could count them). The inlined frames count toward the recursion
+   limit only here, across the call, where Python code may run or a walker
+   may read the count: entering and leaving one costs nothing, and an exit
+   pushes them (runtime/jit/exit.c). Clobbers RAX, R11 and the flags. */
+static void
+depth_add(struct asm_ *a, int32_t n)
+{
+    rex(a, 0, 0, 0, R14);
+    b1(a, 0x81);
+    modrm_mem(a, ALU_ADD, R14, offsetof(PyThreadState, py_recursion_remaining));
+    b4(a, n);                                   /* add dword [r14+remaining], n */
+}
+
 static void
 publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
 {
     struct lu_fs *fs = in->fs;
     int next = in->op != OP_DECREF ? lu_jit_next_pc(fs->code, fs->pc) : fs->pc;
+    a->inlined = d->nframes - 1;
+    if (a->inlined > 0) {
+        depth_add(a, -a->inlined);
+    }
     d->instr = lu_code_start(fs->code) + next;
     mov_ri(a, RAX, (int64_t)(intptr_t)d);
     store(a, R15, offsetof(struct lu_frame, jit_desc), RAX);
@@ -1120,6 +1137,10 @@ publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
 static void
 unpublish(struct asm_ *a, int rep)
 {
+    if (a->inlined > 0) {
+        depth_add(a, a->inlined);
+        a->inlined = 0;
+    }
     store_mi(a, R15, offsetof(struct lu_frame, jit_desc), 0);
     if (a->nheld == 0) {
         return;
@@ -2893,12 +2914,6 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     }
     case OP_DEOPT:
         jmp(a, exit_to(a, in->fs, (int)in->imm, 0, 0));
-        return 0;
-    case OP_DEPTH:
-        rex(a, 0, 0, 0, R14);
-        b1(a, 0x83);
-        modrm_mem(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));
-        b1(a, (int)in->imm & 0xff);             /* add dword [r14+remaining], imm8 */
         return 0;
     case OP_UNLINK: {
         /* A generator's frame stays the current one until lu_gen_finish. */
