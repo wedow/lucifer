@@ -2404,9 +2404,10 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int seen = exit_to(a, in->fs, EXIT_FRAME, 0, 0);
         cmp8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
         jcc(a, CC_NE, seen);
-        if (f->ndeps > 0) {
+        if (f->ndeps > 0 && !(in->imm & 1)) {
             /* Nor did the code the instruction ran take back a fact the
-               unit relies on (runtime/jit/facts.c): the same way out. */
+               unit relies on (runtime/jit/facts.c): the same way out. A
+               frame that returns relies on nothing more. */
             mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
             cmp_mi(a, 0, R11, 0, 0);
             jcc(a, CC_NE, seen);

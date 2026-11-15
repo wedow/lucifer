@@ -125,7 +125,7 @@ lu_ssa_facts(struct lu_func *f)
                     }
                     ok = 1;
                 }
-                else if (in->op == OP_POLL || in->op == OP_CHECK_LIVE || in->op == OP_GUARD_FRAMES) {
+                else if (in->op == OP_POLL || in->op == OP_CHECK_LIVE || (in->op == OP_GUARD_FRAMES && !(in->imm & 1))) {
                     ok = 1;
                 }
                 else if (unsettles(in)) {
