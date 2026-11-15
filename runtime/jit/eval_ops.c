@@ -604,6 +604,18 @@ lu_ev_instruction(struct ctx *c)
         /* The root's were copied before its entry; an inlined function's
            closure is a constant. */
         PyObject *closure = c->func != NULL ? c->func->func_closure : NULL;
+        if (c->parent != NULL && c->funcv != LU_NOV) {
+            /* The cells of the function called, which the frame's state
+               names for as long as the frame is there. */
+            lu_v cells = lu_ev_emit(c, OP_LOAD, REP_OBJ, c->funcv, LU_NOV, LU_NOV, offsetof(PyFunctionObject, func_closure));
+            for (int i = 0; i < oparg; i++) {
+                lu_v cell = lu_ev_emit(c, OP_LOAD, REP_OBJ, cells, LU_NOV, LU_NOV,
+                                       (int64_t)(offsetof(PyTupleObject, ob_item) + sizeof(PyObject *) * (size_t)i));
+                lu_ev_def_type(c, cell, &PyCell_Type);
+                lu_ev_set_local(c, c->nlocals - oparg + i, cell);
+            }
+            return 0;
+        }
         if (c->parent == NULL || closure == NULL) {
             c->g->f->fail = "free variables copied inside a unit";
             return -1;

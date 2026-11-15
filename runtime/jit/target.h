@@ -99,6 +99,7 @@ struct lu_dobj {
 struct lu_deopt_frame {
     PyCodeObject *code;
     PyObject *func;
+    lu_pv funcv;                /* where the frame's function is, when it is a value (lu_fs); DV_NULL: func */
     int32_t pc;
     int32_t caller;             /* the caller's record, or -1 for the root frame */
     uint32_t vals;              /* the unit's vals from here on: the locals, then the stack */

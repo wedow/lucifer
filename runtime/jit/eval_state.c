@@ -340,6 +340,7 @@ lu_ev_snapshot(struct ctx *c, int pc)
     fs->caller = c->caller_fs;
     fs->code = c->code;
     fs->func = c->func != NULL ? (PyObject *)c->func : g->live->func;
+    fs->funcv = c->funcv;
     fs->pc = pc;
     fs->nlocals = c->nlocals;
     fs->nstack = *depth_of(c);
@@ -463,7 +464,7 @@ walk_base(struct ctx *c)
     g->base_stamp++;
     g->base_named = stamps(g, g->base_named, &g->capbase_named, g->f->nins);
     g->base_reached = stamps(g, g->base_reached, &g->capbase_reached, g->f->nvobjs);
-    struct lu_fs base = { .caller = c->caller_fs, .nlocals = c->nlocals, .locals = slots(c),
+    struct lu_fs base = { .caller = c->caller_fs, .funcv = c->funcv, .nlocals = c->nlocals, .locals = slots(c),
                           .binds = g->st.binds, .nbinds = g->st.nbinds };
     struct walk w = { g, g->base_named, g->base_stamp };
     lu_fs_each(g->f, &base, stamp_value, &w);
@@ -483,7 +484,7 @@ walk_stack(struct ctx *c, lu_v *stack, int n)
     g->stamp++;
     g->named = stamps(g, g->named, &g->capnamed, g->f->nins);
     g->reached = stamps(g, g->reached, &g->capreached, g->f->nvobjs);
-    struct lu_fs top = { .nstack = n, .stack = stack, .binds = g->st.binds, .nbinds = g->st.nbinds };
+    struct lu_fs top = { .funcv = LU_NOV, .nstack = n, .stack = stack, .binds = g->st.binds, .nbinds = g->st.nbinds };
     struct walk w = { g, g->named, g->stamp };
     lu_fs_each(g->f, &top, stamp_value, &w);
     for (int i = 0; i < n; i++) {
@@ -573,6 +574,7 @@ snap(struct ctx *c)
     fs->caller = c->caller_fs;
     fs->code = c->code;
     fs->func = c->func != NULL ? (PyObject *)c->func : g->live->func;
+    fs->funcv = c->funcv;
     fs->pc = c->snap_pc;
     fs->nlocals = c->nlocals;
     fs->nstack = c->snap_sp;

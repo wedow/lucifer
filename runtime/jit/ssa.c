@@ -114,6 +114,9 @@ lu_fs_each(struct lu_func *f, const struct lu_fs *fs, void (*fn)(struct lu_func 
         fn(f, fs->held[i], arg);
     }
     for (const struct lu_fs *p = fs; p != NULL; p = p->caller) {
+        if (p->funcv >= 0) {
+            fn(f, p->funcv, arg);
+        }
         for (int i = 0; i < p->nlocals + p->nstack; i++) {
             each_ref(f, fs, *lu_fs_slot(p, i), fn, arg);
         }
@@ -132,6 +135,9 @@ lu_fs_rewrite(struct lu_func *f, struct lu_fs *fs, lu_v (*fn)(lu_v))
         }
     }
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
+        if (p->funcv >= 0) {
+            p->funcv = fn(p->funcv);
+        }
         for (int i = 0; i < p->nlocals + p->nstack; i++) {
             lu_v *slot = lu_fs_slot(p, i);
             if (*slot >= 0) {

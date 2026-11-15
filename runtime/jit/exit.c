@@ -362,13 +362,22 @@ lu_jit_slot(struct lu_frame *f, int i)
     return r < 0 ? NULL : Py_XNewRef(f->localsplus[i]);
 }
 
+/* The frame's function: the one called, where the unit knew it by its
+   code only and carries it as a value. */
+static PyObject *
+frame_func(struct maker *m, const struct lu_deopt_frame *fr)
+{
+    return LU_PV_KIND(fr->funcv) == DV_OBJ ? (PyObject *)(uintptr_t)at(m, lu_pv_loc(fr->funcv))
+        : LU_PV_KIND(fr->funcv) == DV_CONST ? (PyObject *)(intptr_t)m->d->unit->imms[LU_PV_ARG(fr->funcv)] : fr->func;
+}
+
 /* A record for inlined frame k of d, as the interpreter would hold the
    frame during the call: its locals, no stack. */
 static struct lu_frame *
 record(struct maker *m, int k, struct lu_frame *previous)
 {
     const struct lu_deopt_frame *fr = lu_deopt_frame(m->d, k);
-    PyFunctionObject *func = (PyFunctionObject *)fr->func;
+    PyFunctionObject *func = (PyFunctionObject *)frame_func(m, fr);
     struct lu_frame *f = calloc(1, sizeof(PyObject *) * (size_t)fr->code->co_framesize);
     if (f == NULL) {
         PyErr_NoMemory();
@@ -376,7 +385,7 @@ record(struct maker *m, int k, struct lu_frame *previous)
         return NULL;
     }
     f->code = (PyCodeObject *)Py_NewRef(fr->code);
-    f->func = Py_NewRef(fr->func);
+    f->func = Py_NewRef((PyObject *)func);
     f->globals = func->func_globals;
     f->builtins = func->func_builtins;
     f->owner = lu_frame_owner_for(fr->code);
@@ -457,7 +466,7 @@ static struct lu_frame *
 push_inlined(PyThreadState *ts, struct maker *m, int k, struct lu_frame *top)
 {
     const struct lu_deopt_frame *fr = lu_deopt_frame(m->d, k);
-    struct lu_frame *f = lu_frame_push(ts, (PyFunctionObject *)fr->func, NULL);
+    struct lu_frame *f = lu_frame_push(ts, (PyFunctionObject *)frame_func(m, fr), NULL);
     if (f == NULL) {
         return NULL;
     }

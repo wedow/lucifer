@@ -1174,7 +1174,7 @@ build_root(struct gctx *g)
     struct lu_func *f = g->f;
     struct lu_frame *frame = g->live;
     PyCodeObject *co = frame->code;
-    struct ctx root = { 0 }, *c = &root;
+    struct ctx root = { .funcv = LU_NOV }, *c = &root;
     c->g = g;
     c->code = co;
     c->func = PyFunction_Check(frame->func) ? (PyFunctionObject *)frame->func : NULL;

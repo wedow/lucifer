@@ -201,6 +201,8 @@ struct lu_fs {
     struct lu_fs *caller;
     PyCodeObject *code;
     PyObject *func;
+    lu_v funcv;                 /* the function called, where the unit knows it by its code only (func is then
+                                   one of that code's, made for the build); LU_NOV where func is the function */
     int pc;
     int nlocals, nstack;
     lu_v *locals;               /* LU_NOV is NULL. States of one frame whose locals are the same share them */

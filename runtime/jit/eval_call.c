@@ -63,6 +63,37 @@ held_field(struct ctx *c, lu_v a, size_t offset)
     return lu_ev_own(c, v);
 }
 
+/* A function that stands, in all they share, for every function of the
+   code and globals: what a call of one of them is built from, while the
+   function called goes with its frame as a value (struct ctx funcv) and
+   gives its own cells. It has no defaults, so a call that needs one is
+   not bound from it. The value is guarded to be such a function; one the
+   unit made itself (`made`) is one unless its code was changed since.
+   The unit keeps it; NULL when it cannot be made. */
+static PyObject *
+function_of_code(struct ctx *c, lu_v callable, PyObject *code, PyObject *globals, int made)
+{
+    PyObject *one = lu_function_new(code, globals);
+    if (one == NULL) {
+        PyErr_Clear();
+        return NULL;
+    }
+    static const size_t shared[] = { offsetof(PyFunctionObject, func_code), offsetof(PyFunctionObject, func_globals),
+                                     offsetof(PyFunctionObject, func_builtins) };
+    PyObject *same[] = { code, globals, ((PyFunctionObject *)one)->func_builtins };
+    if (!made) {
+        lu_ev_guard_type(c, callable, &PyFunction_Type);
+    }
+    for (int i = 0; i < (made ? 1 : 3); i++) {
+        lu_v g = lu_ev_guard(c, OP_GUARD_IS, callable, (int64_t)(intptr_t)same[i]);
+        I(c, g)->imm2 = GI_FIELD | (int64_t)shared[i];
+        lu_ev_konst(c, same[i]);
+    }
+    lu_ev_konst(c, one);
+    Py_DECREF(one);             /* the unit holds its constants */
+    return one;
+}
+
 /* A callable that is not a constant, at a site that met one function
    only (the site's callee table, jit.h): guarded to be it, and a constant
    from here. The function is met by itself, with a self beside it where
@@ -71,7 +102,7 @@ held_field(struct ctx *c, lu_v a, size_t offset)
    read from the object into *self. NULL when the site says no such
    thing. */
 static PyObject *
-speculate_callee(struct ctx *c, lu_v callable, lu_v *self)
+speculate_callee(struct ctx *c, lu_v callable, lu_v *self, lu_v *funcv)
 {
     if (callable == LU_NOV || LU_IS_VIRT(callable) || nospec(c, c->pc)) {
         return NULL;
@@ -81,7 +112,18 @@ speculate_callee(struct ctx *c, lu_v callable, lu_v *self)
         return NULL;
     }
     struct lu_callee e = t->e[0];
-    if ((e.kind & LU_CALLEE_CODE) || !PyFunction_Check(e.obj)) {
+    if (e.kind & LU_CALLEE_CODE) {
+        /* Functions of one code and globals, each made anew (a closure, a
+           lambda): the value called is guarded to be one of them. */
+        if (!PyCode_Check(e.obj) || e.globals == NULL || !PyDict_CheckExact(e.globals)
+            || ((e.kind & LU_CALLEE_BOUND) != 0) != (*self != LU_NOV)) {
+            return NULL;
+        }
+        PyObject *one = function_of_code(c, callable, e.obj, e.globals, 0);
+        *funcv = one != NULL ? callable : LU_NOV;
+        return one;
+    }
+    if (!PyFunction_Check(e.obj)) {
         return NULL;
     }
     if (e.kind & LU_CALLEE_CMETH) {
@@ -116,14 +158,14 @@ speculate_callee(struct ctx *c, lu_v callable, lu_v *self)
 
 /* Why fn cannot be evaluated in line for a call here, or NULL. */
 static const char *
-not_inlinable(struct ctx *c, PyFunctionObject *fn)
+not_inlinable(struct ctx *c, PyFunctionObject *fn, lu_v funcv)
 {
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
     int kernel = (co->co_flags & LU_CO_KERNEL) != 0;
     if (!PyCode_Check(co) || (co->co_flags & (LU_CO_GENERATORS | CO_ITERABLE_COROUTINE)) || !(co->co_flags & CO_OPTIMIZED)) {
         return "not plain code";
     }
-    if (co->_co_monitoring != NULL || (!kernel && fn->func_version < 2)) {
+    if (co->_co_monitoring != NULL || (!kernel && funcv == LU_NOV && fn->func_version < 2)) {
         return "watched, or unversioned";
     }
     if (lu_jit_noinline(co)) {
@@ -301,8 +343,8 @@ class_init(struct ctx *c, PyTypeObject *tp, int nargs, PyFunctionObject **init, 
    after the call. 0 when the call is to be made out of line instead
    (nothing was changed); -1 when the build failed. */
 static int
-inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, int npos, PyObject *kwnames, int nops, PyTypeObject *cls,
-            int ret)
+inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, lu_v *args, int npos, PyObject *kwnames, int nops,
+            PyTypeObject *cls, int ret)
 {
     struct gctx *g = c->g;
     if (kwnames == NULL && cls == NULL && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)) {
@@ -311,7 +353,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, int npos, PyObject 
         fn = twin != NULL ? twin : fn;
     }
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
-    const char *why = not_inlinable(c, fn);
+    const char *why = not_inlinable(c, fn, funcv);
     if (why != NULL) {
         if (_PyRuntime.jit.debug) {
             fprintf(stderr, "jit: %s not inlined at %s@%d: %s\n", PyUnicode_AsUTF8(co->co_qualname),
@@ -347,7 +389,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, int npos, PyObject 
         lu_ev_def_type(c, args[0], cls);
     }
     bind(c, fn, args, npos, kwnames, locals, 0);
-    if (!(co->co_flags & LU_CO_KERNEL)) {
+    if (!(co->co_flags & LU_CO_KERNEL) && funcv == LU_NOV) {
         /* Its code and defaults are what the unit was built from. */
         lu_v gv = lu_ev_guard(c, OP_GUARD_VERSION, lu_ev_konst(c, (PyObject *)fn), fn->func_version);
         I(c, gv)->imm2 = GV_FUNC;
@@ -366,6 +408,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v *args, int npos, PyObject 
     k->depth = c->depth + 1;
     k->code = co;
     k->func = fn;
+    k->funcv = funcv;
     k->globals = fn->func_globals;
     k->builtins = fn->func_builtins;
     k->kernel = (co->co_flags & LU_CO_KERNEL) != 0;
@@ -441,6 +484,7 @@ lu_ev_return(struct ctx *c)
     for (int i = 0; i < c->nlocals + *depth_of(c); i++) {
         lu_ev_drop(c, slots(c)[i]);
     }
+    lu_ev_drop(c, c->funcv);
     lu_ev_state_pop(g);
     if (c->ret == LU_RETURN_FOR_ITER) {
         if (lu_ev_const(c, v) == LU_MISSING) {
@@ -494,8 +538,16 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
     }
     PyObject *kc = lu_ev_const(c, callable);
     lu_v r = LU_EV_NONE, written = self;        /* the self the instruction has, for a call made as written */
+    lu_v funcv = LU_NOV;
+    if (kc == NULL && self == LU_NOV && callable >= 0 && I(c, callable)->op == OP_HELPER
+        && I(c, callable)->imm == H_make_function && !nospec(c, c->pc)) {
+        /* A function the unit made (a lambda passed down to where it is called). */
+        PyObject *code = lu_ev_const(c, I(c, callable)->args[0]), *globals = lu_ev_const(c, I(c, callable)->args[1]);
+        kc = code != NULL && globals != NULL ? function_of_code(c, callable, code, globals, 1) : NULL;
+        funcv = kc != NULL ? callable : LU_NOV;
+    }
     if (kc == NULL && site) {
-        kc = speculate_callee(c, callable, &self);
+        kc = speculate_callee(c, callable, &self, &funcv);
     }
     const char *prim = primitive_name(kc);
     if (prim != NULL && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_FRAME)) {
@@ -546,7 +598,7 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
         PyTypeObject *tp = (PyTypeObject *)kc;
         args[0] = LU_NOV;       /* the instance, made once the call is known to inline */
         memcpy(args + 1, a, sizeof(lu_v) * (size_t)n);
-        if (init == NULL || not_inlinable(c, init) == NULL) {
+        if (init == NULL || not_inlinable(c, init, LU_NOV) == NULL) {
             /* The class and its metaclass are as they were: the same __new__ and __init__. */
             lu_v gv = lu_ev_guard(c, OP_GUARD_VERSION, callable, version);
             I(c, gv)->imm2 = GV_TYPE_ITSELF;
@@ -564,7 +616,7 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
             lu_ev_push(c, obj);
             return 0;
         }
-        int done = inline_call(c, init, args, n + 1, NULL, nops, tp, LU_RETURN_INIT);
+        int done = inline_call(c, init, LU_NOV, args, n + 1, NULL, nops, tp, LU_RETURN_INIT);
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }
@@ -589,7 +641,7 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
             args[k++] = self;
         }
         memcpy(args + k, a, sizeof(lu_v) * (size_t)(n + nkw));
-        int done = inline_call(c, fn, args, k + n, kwnames, nops, NULL, LU_RETURN_PUSH);
+        int done = inline_call(c, fn, funcv, args, k + n, kwnames, nops, NULL, LU_RETURN_PUSH);
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }
@@ -623,7 +675,7 @@ lu_ev_kernel_op(struct ctx *c, int kid, lu_v *args, int n, int nops, int ret)
         known &= t != NULL && t != &PyList_Type && t != &PyDict_Type && t != &PySet_Type && t != &PyByteArray_Type
             && t != &PyDictIterKey_Type && t != &PyDictIterValue_Type && t != &PyDictIterItem_Type;
     }
-    return known ? inline_call(c, (PyFunctionObject *)kf, args, n, NULL, nops, NULL, ret) : 0;
+    return known ? inline_call(c, (PyFunctionObject *)kf, LU_NOV, args, n, NULL, nops, NULL, ret) : 0;
 }
 
 int

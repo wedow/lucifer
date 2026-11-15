@@ -87,6 +87,8 @@ struct ctx {
     int depth;
     PyCodeObject *code;
     PyFunctionObject *func;     /* NULL for the root when its function is not a function */
+    lu_v funcv;                 /* an inlined frame's function as a value, where the call knew it by its code
+                                   only (func then stands for it in all but its closure); else LU_NOV */
     PyObject *globals, *builtins;
     int kernel;                 /* kernel code: its module's globals fold */
     int ncode, nlocals;

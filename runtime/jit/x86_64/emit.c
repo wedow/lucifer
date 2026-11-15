@@ -1025,7 +1025,7 @@ frame_hash_of(const struct lu_deopt_frame *fr, const lu_pv *vals)
 {
     uint64_t h = 0xcbf29ce484222325ull;
     h = mix(h, (uintptr_t)fr->code);
-    h = mix(h, (uintptr_t)fr->func);
+    h = mix(h, (uintptr_t)fr->func ^ (uint64_t)fr->funcv << 40);
     h = mix(h, (uint64_t)(uint32_t)fr->pc << 32 | (uint32_t)fr->caller);
     h = mix(h, (uint64_t)(uint32_t)fr->nlocals << 32 | (uint64_t)(uint32_t)fr->nstack << 8 | fr->ret);
     for (int i = 0; i < fr->nlocals + fr->nstack; i++) {
@@ -1045,7 +1045,7 @@ frame_same(struct build *b, int i, const void *key)
 {
     const struct frame_key *k = key;
     const struct lu_deopt_frame *x = &b->frames[i], *y = &k->fr;
-    return x->code == y->code && x->func == y->func && x->pc == y->pc && x->ret == y->ret
+    return x->code == y->code && x->func == y->func && x->funcv == y->funcv && x->pc == y->pc && x->ret == y->ret
         && x->caller == y->caller && x->nlocals == y->nlocals && x->nstack == y->nstack
         && memcmp(b->vals + x->vals, k->vals, sizeof(lu_pv) * (size_t)(x->nlocals + x->nstack)) == 0;
 }
@@ -1103,6 +1103,7 @@ make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
     for (k = 0; k < n; k++) {
         struct lu_fs *p = b->chain[k];
         struct frame_key key = { .fr = { .code = p->code, .func = p->func, .pc = p->pc, .ret = p->ret,
+                                         .funcv = p->funcv >= 0 ? place(a, p->funcv) : LU_PV(DV_NULL, 0),
                                          .nlocals = p->nlocals, .nstack = p->nstack, .caller = caller },
                                  .vals = b->room + end };
         end += (uint32_t)(p->nlocals + p->nstack);
