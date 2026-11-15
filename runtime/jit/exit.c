@@ -294,7 +294,8 @@ forced_of(struct lu_frame *root)
 static lu_codeunit *
 shown(struct lu_deopt *d, int k)
 {
-    return k == d->nframes - 1 ? d->instr : lu_code_start(d->frames[k].code) + d->frames[k].pc;
+    const struct lu_deopt_frame *fr = lu_deopt_frame(d, k);
+    return k == d->nframes - 1 ? d->instr : lu_code_start(fr->code) + fr->pc;
 }
 
 lu_codeunit *
@@ -308,7 +309,7 @@ PyCodeObject *
 lu_jit_running_code(struct lu_frame *f)
 {
     struct lu_deopt *d = __atomic_load_n(&f->jit_desc, __ATOMIC_ACQUIRE);
-    return d != NULL ? d->frames[d->nframes - 1].code : f->code;
+    return d != NULL ? lu_deopt_frame(d, d->nframes - 1)->code : f->code;
 }
 
 /* The root gets real slots, each with a reference of its own, its
@@ -316,7 +317,7 @@ lu_jit_running_code(struct lu_frame *f)
 static int
 sync_root(struct maker *m, struct lu_frame *f)
 {
-    struct lu_deopt_frame *fr = &m->d->frames[0];
+    const struct lu_deopt_frame *fr = lu_deopt_frame(m->d, 0);
     for (int i = 0; i < fr->nlocals; i++) {
         f->localsplus[i] = take(m, &fr->vals[i]);
     }
@@ -366,7 +367,7 @@ lu_jit_slot(struct lu_frame *f, int i)
 static struct lu_frame *
 record(struct maker *m, int k, struct lu_frame *previous)
 {
-    struct lu_deopt_frame *fr = &m->d->frames[k];
+    const struct lu_deopt_frame *fr = lu_deopt_frame(m->d, k);
     PyFunctionObject *func = (PyFunctionObject *)fr->func;
     struct lu_frame *f = calloc(1, sizeof(PyObject *) * (size_t)fr->code->co_framesize);
     if (f == NULL) {
@@ -454,7 +455,7 @@ lu_jit_force(struct lu_frame *f, int all)
 static struct lu_frame *
 push_inlined(PyThreadState *ts, struct maker *m, int k, struct lu_frame *top)
 {
-    struct lu_deopt_frame *fr = &m->d->frames[k];
+    const struct lu_deopt_frame *fr = lu_deopt_frame(m->d, k);
     struct lu_frame *f = lu_frame_push(ts, (PyFunctionObject *)fr->func, NULL);
     if (f == NULL) {
         return NULL;
@@ -491,7 +492,7 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
     int nomem = maker_init(&m, root, d, gpr, fpr, spills) < 0;
     /* A walker that made the root real (lu_jit_sync) left it its slots. */
     int synced = root->owner != LU_FRAME_JIT;
-    struct lu_deopt_frame *fr = &d->frames[0];
+    const struct lu_deopt_frame *fr = lu_deopt_frame(d, 0);
     for (int i = 0; !nomem && !synced && i < fr->nlocals; i++) {
         root->localsplus[i] = take(&m, &fr->vals[i]);
     }
@@ -513,7 +514,7 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
             unpushed = 1;       /* its caller raises at its call */
             break;
         }
-        fr = &d->frames[k];
+        fr = lu_deopt_frame(d, k);
         sp = f->localsplus + fr->nlocals;
         for (int j = 0; j < fr->nstack; j++) {
             *sp++ = take(&m, &fr->vals[fr->nlocals + j]);

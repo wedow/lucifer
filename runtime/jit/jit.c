@@ -525,19 +525,19 @@ free_unit(struct lu_unit *u)
     lu_target_free(u);
     for (int i = 0; i < u->ndeopts; i++) {
         struct lu_deopt *d = u->deopts[i];
-        for (int k = 0; k < d->nframes; k++) {
-            free(d->frames[k].vals);
-        }
         for (int k = 0; k < d->nobjs; k++) {
             free(d->objs[k].fields);
         }
-        free(d->frames);
         free(d->objs);
         free(d->owned);
         free(d);
     }
     free(u->deopts);
     free(u->deopt_table);
+    for (int i = 0; i < u->nframes; i++) {
+        free(u->frames[i].vals);
+    }
+    free(u->frames);
     for (int i = 0; i < u->nconsts; i++) {
         Py_XDECREF(u->consts[i]);
     }
@@ -873,7 +873,7 @@ leave(struct lu_deopt *d, struct lu_unit *u, int kept)
     unsigned long n = bump(&u->leaves);
     unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
     if ((kept || !u->loops) && n >= LEAVES && 2 * n >= entries && entries < ENTRIES_SEEN) {
-        retire(state_for(d->frames[0].code), u);
+        retire(state_for(lu_deopt_frame(d, 0)->code), u);
     }
 }
 
@@ -1128,7 +1128,7 @@ lu_jit_note_resume(void)
 static int
 handles(struct lu_deopt *d, int k)
 {
-    struct lu_deopt_frame *fr = &d->frames[k];
+    const struct lu_deopt_frame *fr = lu_deopt_frame(d, k);
     lu_codeunit *start = lu_code_start(fr->code);
     int at = k == d->nframes - 1 ? fr->pc : (int)(lu_instr_before(fr->code, start + fr->pc) - start);
     int level, handler, lasti;
@@ -1164,7 +1164,7 @@ lu_jit_note_exit(struct lu_deopt *d)
     }
     count(&stats.taken[d->opcode & 0xff], 1);
     if (_PyRuntime.jit.debug) {
-        struct lu_deopt_frame *in = &d->frames[d->nframes - 1];
+        const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
         fprintf(stderr, "jit: exit %s %s@%d op %d depth %d\n", reasons[d->reason],
                 PyUnicode_AsUTF8(in->code->co_qualname), in->pc, d->opcode, d->nframes);
     }
@@ -1188,7 +1188,7 @@ lu_jit_note_exit(struct lu_deopt *d)
     }
     /* The site the exit counts against: the instruction it left at, or
        for a guard that speculates for a loop header, the header. */
-    struct lu_deopt_frame *inner = &d->frames[handled];
+    const struct lu_deopt_frame *inner = lu_deopt_frame(d, handled);
     PyCodeObject *site = inner->code;
     int site_pc = inner->pc;
     if (d->reason == EXIT_GUARD && d->blame_code != NULL) {
@@ -1230,8 +1230,9 @@ lu_jit_note_exit(struct lu_deopt *d)
             leave(d, u, 1);
             return;
         }
-        say_recompile(d->frames[0].code, d->reason != EXIT_GUARD ? "inlined copy leaves" : "guard fails", site, site_pc);
-        struct lu_jit_code *root = state_for(d->frames[0].code);
+        PyCodeObject *code = lu_deopt_frame(d, 0)->code;
+        say_recompile(code, d->reason != EXIT_GUARD ? "inlined copy leaves" : "guard fails", site, site_pc);
+        struct lu_jit_code *root = state_for(code);
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
             kill(root, u);
         }

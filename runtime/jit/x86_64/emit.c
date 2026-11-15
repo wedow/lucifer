@@ -85,6 +85,14 @@ struct asm_ {
     struct hold *held;          /* what the published call in hand holds of what it is handed */
     int nheld;
     int inlined;                /* the published call's inlined frames, counted toward the limit across it */
+    /* The unit's frame records by content (frame_record): indices into
+       unit->frames, -1 for none, in a table of a power of two entries;
+       and room to describe an exit's frames in. */
+    int *frame_table;
+    int frame_cap, frame_room;
+    struct lu_dv *vals;
+    struct lu_fs **chain;
+    int capvals, capchain;
 };
 
 /* The instructions whose code keeps its own values in RBX, R12 and R13
@@ -892,32 +900,121 @@ note_owned(struct lu_func *f, lu_v v, void *arg)
     d->owned[d->nowned++] = in->loc;
 }
 
+static int
+same_frame(const struct lu_deopt_frame *x, const struct lu_deopt_frame *y)
+{
+    if (x->code != y->code || x->func != y->func || x->pc != y->pc || x->ret != y->ret || x->caller != y->caller
+        || x->nlocals != y->nlocals || x->nstack != y->nstack) {
+        return 0;
+    }
+    for (int i = 0; i < x->nlocals + x->nstack; i++) {
+        if (x->vals[i].kind != y->vals[i].kind || x->vals[i].loc != y->vals[i].loc || x->vals[i].imm != y->vals[i].imm) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static uint64_t
+mix(uint64_t h, uint64_t v)
+{
+    return (h ^ v) * 0x100000001b3ull;
+}
+
+static uint64_t
+frame_hash(const struct lu_deopt_frame *fr)
+{
+    uint64_t h = 0xcbf29ce484222325ull;
+    h = mix(h, (uintptr_t)fr->code);
+    h = mix(h, (uintptr_t)fr->func);
+    h = mix(h, (uint64_t)fr->pc << 32 | (uint32_t)fr->caller);
+    h = mix(h, (uint64_t)fr->nlocals << 32 | (uint64_t)fr->nstack << 8 | fr->ret);
+    for (int i = 0; i < fr->nlocals + fr->nstack; i++) {
+        h = mix(h, (uint64_t)fr->vals[i].kind << 32 | (uint32_t)fr->vals[i].loc);
+        h = mix(h, (uint64_t)fr->vals[i].imm);
+    }
+    return h ^ h >> 29;
+}
+
+/* The unit's record of frame `fr` (its vals in the caller's room): one
+   it has, or a copy entered now. */
+static int
+frame_record(struct asm_ *a, const struct lu_deopt_frame *fr)
+{
+    struct lu_unit *u = a->unit;
+    if (2 * (u->nframes + 1) > a->frame_cap) {
+        free(a->frame_table);
+        a->frame_cap = a->frame_cap ? 2 * a->frame_cap : 256;
+        a->frame_table = malloc(sizeof(int) * (size_t)a->frame_cap);
+        memset(a->frame_table, -1, sizeof(int) * (size_t)a->frame_cap);
+        for (int r = 0; r < u->nframes; r++) {
+            size_t j = frame_hash(&u->frames[r]) & (size_t)(a->frame_cap - 1);
+            while (a->frame_table[j] >= 0) {
+                j = (j + 1) & (size_t)(a->frame_cap - 1);
+            }
+            a->frame_table[j] = r;
+        }
+    }
+    size_t j = frame_hash(fr) & (size_t)(a->frame_cap - 1);
+    for (; a->frame_table[j] >= 0; j = (j + 1) & (size_t)(a->frame_cap - 1)) {
+        if (same_frame(&u->frames[a->frame_table[j]], fr)) {
+            return a->frame_table[j];
+        }
+    }
+    if (u->nframes == a->frame_room) {
+        a->frame_room = a->frame_room ? 2 * a->frame_room : 64;
+        u->frames = realloc(u->frames, sizeof(struct lu_deopt_frame) * (size_t)a->frame_room);
+    }
+    int m = fr->nlocals + fr->nstack;
+    struct lu_deopt_frame *r = &u->frames[u->nframes];
+    *r = *fr;
+    r->vals = malloc(sizeof(struct lu_dv) * (size_t)(m ? m : 1));
+    memcpy(r->vals, fr->vals, sizeof(struct lu_dv) * (size_t)m);
+    a->frame_table[j] = u->nframes;
+    return u->nframes++;
+}
+
 static struct lu_deopt *
 make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
 {
     struct lu_deopt *d = calloc(1, sizeof(struct lu_deopt));
-    int n = 0;
+    d->unit = a->unit;
+    /* The frames outermost first, each slot described into the room,
+       innermost first (the order its virtual objects are entered in). */
+    int n = 0, nvals = 0;
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
         n++;
+        nvals += p->nlocals + p->nstack;
     }
-    d->nframes = n;
-    d->frames = calloc((size_t)n, sizeof(struct lu_deopt_frame));
-    int k = n - 1;
-    for (struct lu_fs *p = fs; p != NULL; p = p->caller, k--) {
-        struct lu_deopt_frame *fr = &d->frames[k];
-        fr->code = p->code;
-        fr->func = p->func;
-        fr->pc = p->pc;
-        fr->ret = p->ret;
-        fr->nlocals = p->nlocals;
-        fr->nstack = p->nstack;
+    if (n > a->capchain) {
+        a->capchain = 2 * n;
+        a->chain = realloc(a->chain, sizeof(struct lu_fs *) * (size_t)a->capchain);
+    }
+    if (nvals > a->capvals) {
+        a->capvals = 2 * nvals;
+        a->vals = realloc(a->vals, sizeof(struct lu_dv) * (size_t)a->capvals);
+    }
+    int k = n, end = nvals;
+    for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
+        a->chain[--k] = p;
         int m = p->nlocals + p->nstack;
-        fr->vals = calloc((size_t)(m ? m : 1), sizeof(struct lu_dv));
+        end -= m;
         for (int i = 0; i < m; i++) {
-            fr->vals[i] = describe(a, d, fs, *lu_fs_slot(p, i));
+            a->vals[end + i] = describe(a, d, fs, *lu_fs_slot(p, i));
         }
         d->visible |= k > 0 && !(p->code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN));
     }
+    int caller = -1;
+    for (k = 0; k < n; k++) {
+        struct lu_fs *p = a->chain[k];
+        struct lu_deopt_frame fr = { .code = p->code, .func = p->func, .pc = p->pc, .ret = p->ret,
+                                     .nlocals = p->nlocals, .nstack = p->nstack, .caller = caller,
+                                     .vals = a->vals + end };
+        end += p->nlocals + p->nstack;
+        caller = frame_record(a, &fr);
+    }
+    d->nframes = n;
+    d->frame = caller;
     lu_fs_each(a->f, fs, note_owned, d);
     d->reason = reason;
     d->error = error;
@@ -3062,6 +3159,15 @@ exits(struct asm_ *a)
     jmp(a, a->epilogue);
 }
 
+/* What make_deopt builds frame records with. */
+static void
+free_rooms(struct asm_ *a)
+{
+    free(a->frame_table);
+    free(a->vals);
+    free(a->chain);
+}
+
 int
 lu_target_emit(struct lu_func *f, struct lu_unit *unit)
 {
@@ -3123,12 +3229,14 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
             }
             if (emit_ins(a, bl->ins[i], next, labels) < 0) {
                 free(labels);
+                free_rooms(a);
                 return -1;
             }
         }
         if (l2 > 0 && a->n - start > l2) {
             f->fail = "a block larger than the L2 cache";
             free(labels);
+            free_rooms(a);
             return -1;
         }
         lu_v last = bl->nins ? bl->ins[bl->nins - 1] : LU_NOV;
@@ -3173,7 +3281,6 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     unit->deopts = malloc(sizeof(struct lu_deopt *) * (size_t)(a->nexits + 1));
     for (int i = 0; i < a->nexits; i++) {
         unit->deopts[i] = a->exits[i].d;
-        unit->deopts[i]->unit = unit;
     }
     struct lu_deopt ***table = malloc(sizeof(*table));
     *table = unit->deopts;
@@ -3185,6 +3292,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     if (mem == NULL) {
         f->fail = "no memory for code";
         free(a->buf);
+        free_rooms(a);
         return -1;
     }
     memcpy(rw, a->buf, (size_t)a->n);
@@ -3199,6 +3307,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     free(a->labels);
     free(a->patches);
     free(a->exits);
+    free_rooms(a);
     return 0;
 }
 

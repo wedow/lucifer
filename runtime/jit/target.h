@@ -73,11 +73,15 @@ struct lu_dobj {
     struct lu_dv *fields;
 };
 
+/* A frame of an exit: the unit's exits share each distinct one, which
+   names the record of the frame that called it, so an exit names only
+   its innermost frame. */
 struct lu_deopt_frame {
     PyCodeObject *code;
     PyObject *func;
     int pc;
     int nlocals, nstack;
+    int caller;                 /* the caller's record, or -1 for the root frame */
     struct lu_dv *vals;
     uint8_t ret;                /* how the frame returns when rebuilt (lu_fs) */
 };
@@ -97,7 +101,7 @@ enum lu_exit_reason {
 struct lu_deopt {
     long *stress;               /* EXIT_STRESS: the counter to reset */
     int nframes;
-    struct lu_deopt_frame *frames;      /* outermost first */
+    int frame;                  /* the innermost frame's record in the unit's frames */
     int nobjs;
     struct lu_dobj *objs;       /* the virtual objects the frames name */
     int nowned;                 /* the references compiled code holds here, each an object at a location: */
@@ -144,6 +148,8 @@ struct lu_unit {
     struct lu_deopt **deopts;
     struct lu_deopt ***deopt_table;     /* what the exits' common path reads */
     int ndeopts;
+    struct lu_deopt_frame *frames;      /* the frame records its exits share */
+    int nframes;
     PyObject **consts;
     int nconsts;
     long *stress_counter;       /* -X lucifer_stress=deopt:N: guards fail when it reaches 0 */
@@ -166,6 +172,17 @@ struct lu_unit {
     char *stats_name;
     struct lu_unit *stats_next;
 };
+
+/* Frame k of exit d, 0 the root frame. */
+static inline const struct lu_deopt_frame *
+lu_deopt_frame(const struct lu_deopt *d, int k)
+{
+    const struct lu_deopt_frame *fr = &d->unit->frames[d->frame];
+    for (int i = d->nframes - 1; i > k; i--) {
+        fr = &d->unit->frames[fr->caller];
+    }
+    return fr;
+}
 
 /* What -X lucifer_jit_stats counts as compiled code runs it: the census of
    guards, loads and calls per unit. */
