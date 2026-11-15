@@ -133,6 +133,7 @@ static struct {
     unsigned long code_bytes;
     double compile_seconds;
     double phase_seconds[5];            /* build, optimize, regalloc, emit; builds put off for feedback */
+    unsigned long ir;                   /* instructions the compiles built */
     unsigned long failure_reasons[8];
     const char *failure_names[8];
     unsigned long c_paths[C_PATHS];
@@ -690,6 +691,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     }
     int ok = lu_ssa_build(&f, frame) == 0;
     double t1 = now();
+    count(&stats.ir, (unsigned long)f.nins);
     ok = ok && lu_ssa_optimize(&f) == 0;
     double t2 = now(), t3 = t2;
     if (_PyRuntime.jit.stats) {
@@ -1652,8 +1654,8 @@ lu_jit_report(void)
             "compile time %.1f ms, code %lu bytes\n", stats.compiles, stats.failures, stats.units_dead,
             stats.inlined, stats.compile_seconds * 1e3, stats.code_bytes);
     fprintf(stderr, "jit: compile phases: build %.1f ms, optimize %.1f ms, regalloc %.1f ms, emit %.1f ms, "
-            "builds put off %.1f ms\n", stats.phase_seconds[0] * 1e3, stats.phase_seconds[1] * 1e3,
-            stats.phase_seconds[2] * 1e3, stats.phase_seconds[3] * 1e3, stats.phase_seconds[4] * 1e3);
+            "builds put off %.1f ms, ir instructions %lu\n", stats.phase_seconds[0] * 1e3, stats.phase_seconds[1] * 1e3,
+            stats.phase_seconds[2] * 1e3, stats.phase_seconds[3] * 1e3, stats.phase_seconds[4] * 1e3, stats.ir);
     fprintf(stderr, "jit: units invalidated %lu\n", stats.invalidated);
     fprintf(stderr, "jit: generator resumes interpreted %lu, compiled %lu\n",
             stats.resumes > stats.resumes_compiled ? stats.resumes - stats.resumes_compiled : 0, stats.resumes_compiled);
