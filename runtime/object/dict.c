@@ -321,7 +321,16 @@ static void
 dict_dealloc(PyObject *op)
 {
     PyDictObject *mp = (PyDictObject *)op;
-    lu_dict_notify(mp, PyDict_EVENT_DEALLOCATED, NULL, NULL);
+    if (__atomic_load_n(&mp->_ma_watcher_tag, __ATOMIC_ACQUIRE) & ((1 << LU_MAX_WATCHERS) - 1)) {
+        /* A watcher sees the dict alive, with a reference of the event's,
+           and may keep it (CPython's _PyObject_ResurrectStart/End). */
+        lu_resurrect_start(op);
+        lu_dict_notify(mp, PyDict_EVENT_DEALLOCATED, NULL, NULL);
+        if (lu_resurrect_end(op) != 0) {
+            op->ob_gc_bits |= LU_GC_TRACKED;
+            return;
+        }
+    }
     free_entries(mp->ma_keys);
     if (Py_IS_TYPE(op, &PyDict_Type) && lu_freelist_push(&lu_current_entry()->free_dicts, op)) {
         return;

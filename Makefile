@@ -234,8 +234,10 @@ build/tests/capi/%.so: tests/capi/%.c
 # Each EXT_PROGRAMS program prints the same stdout, stderr and exit status
 # under the oracle and bin/lucifer. LUCIFER_FLAGS go to bin/lucifer (tools/floor's modes).
 EXT_DIR = build/tests/capi/ext
-EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c tests/capi/capi_monitoring.c tests/capi/capi_conv.c tests/capi/ready.c
-EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run capi_conv_run testcapi_import container_refs ready_run list_capi_run bad_modules_run given_matches_run
+EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c tests/capi/capi_monitoring.c tests/capi/capi_conv.c tests/capi/ready.c \
+	tests/capi/dict_watch_resurrect.c
+EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run capi_conv_run testcapi_import container_refs ready_run list_capi_run bad_modules_run given_matches_run \
+	dict_watch_resurrect_run
 SLOTS_MODULES = plain noshare shared_gil create two_exec unknown negative two_create two_interp \
 	two_gil not_module not_module_exec create_fails create_raises exec_fails exec_raises
 
@@ -262,6 +264,7 @@ $(EXT_DIR)/accelerators:
 
 check-capi-ext: bin/lucifer oracle-exts $(EXT_DIR)/accelerators $(EXT_DIR)/exc_cross$(EXT_SUFFIX) \
 	  $(EXT_DIR)/capi_monitoring$(EXT_SUFFIX) $(EXT_DIR)/capi_conv$(EXT_SUFFIX) $(EXT_DIR)/ready$(EXT_SUFFIX) \
+	  $(EXT_DIR)/dict_watch_resurrect$(EXT_SUFFIX) \
 	  $(foreach m,$(SLOTS_MODULES),$(EXT_DIR)/slots_$(m)$(EXT_SUFFIX))
 	@for p in $(EXT_PROGRAMS); do \
 	  { PYTHONPATH=$(EXT_DIR) $(RUN) $(ORACLE_T) tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.expected; \
