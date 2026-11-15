@@ -609,6 +609,86 @@ the call rather than where the callee lets go of it. What an instruction
 makes real from a virtual object keeps the record's references until the
 instruction ends.
 
+**Concessions.** Where compiled code may differ from CPython 3.14t, and
+nowhere else:
+
+1. A reference count read from C may be lower while its holder is virtual
+   (above).
+2. A late materialization that cannot allocate raises `MemoryError` at the
+   exit or in the walker (§4.3).
+3. If an equal int or float is stored into the attribute between a raw
+   load and an exit, the identity of the materialized box may differ from
+   CPython's.
+
+**Numbers in attributes are numbers.** An instance's inline values hold a
+float or an int either as an object or unboxed, a marker beside a raw word
+(`object/attrs.c`). A store of a number that does not exist and that
+nothing else names writes the raw word (`eval_attr.c`); a load that
+compiled code only unboxes reads it (`opt.c` `raw_loads`). Neither makes
+an object or takes a reference. A value loaded raw that frame states name
+on their stacks is a number that is no object there, and an exit makes one
+for the instruction that would have consumed it. Carrying such a value in
+a local or into an inlined call, where the program could compare it with
+the attribute's own object, is what concession 3 is for: the load then
+keeps the object the word held when it held one, and an exit that has to
+make the object gives the attribute the same one while the attribute
+still holds that number.
+
+**What is known of an object's type is a dependency on its class.** A
+class's version covers its attributes and bases; `__class__` assignment
+takes back the old class's version as well (`prim/type.c` `set_class`).
+The evaluator records the dependency wherever it answers what type a
+value of a reassignable class has (`eval_state.c` `lu_ev_type`), and a
+unit with dependencies checks that it lives in the check of its frames
+after every instruction that may have run code (`GUARD_FRAMES`), so the
+running thread's own reassignment or class change is seen before the next
+instruction relies on it.
+
+**Locks on attribute stores (S4): the argument, before the code.** A
+store to an instance's inline values takes the object's lock byte and
+releases it: two locked instructions, the largest single cost of a store
+(27% of Bounce's cycles in two stores). The lock serializes writers with
+each other, with a reader that installs an unboxed value's box, and with
+the move of the values to a dict. Two elisions are sound, on separate
+grounds.
+
+*An object that is not published.* An instance the unit made
+(`H_new_object`) is private until the unit hands it to anything that can
+keep it: an argument of a call or helper, a value stored to the heap, a
+return, an exit. While private, another thread can reach it only through
+a walker: one that reads this thread's frames (`sys._current_frames`, a
+traceback) or one that reads the collector's heap (`gc.get_objects`,
+`gc.get_referrers`). A walker of frames runs only while this thread is
+stopped at a published call or a poll, and makes the frames real, which
+the unit sees in its frame check after the call, before its next
+instruction: it leaves, and the interpreter locks. So a private
+object's stores need no lock if (a) privacy is a fact of the path, lost
+at any use that hands the object on and at every loop header and join
+that does not prove it, and (b) every walker that can hand out the object
+makes the frames real. (b) does not hold today for the collector's
+walkers: `lu_gc_get_objects` and `lu_gc_get_referrers` return tracked
+objects without touching compiled activations. Either they make every
+task's compiled activations real while the world is stopped, or a private
+instance stays untracked until it is published. The first is the
+existing mechanism and is the one to build; it belongs with the walkers
+in `exit.c`.
+
+*A number over a number, on a published object.* Where the word already
+holds an unboxed number and the store writes one, the marker does not
+change and only the raw word does. Writers of raw words need no order
+among themselves: the last store wins, as with the lock. What the lock
+protects is a holder that reads the raw word to copy it elsewhere: the
+reader that installs a box, and the move to a dict. Each of those would
+have to detect a raw store made after its read: with one barrier on each
+side (the writer writes the raw word with an exchange and then reads the
+value word again, taking the locked path if it is no longer the marker;
+the holder publishes its object or flag and then reads the raw word
+again, redoing its copy if it changed), one of the two always sees the
+other. That is one locked instruction instead of two, and it changes
+every holder in `attrs.c`. It is not built; it needs the race review and
+the stress lanes (`threads_unboxed_race` and a writer against `__dict__`
+and against `del`) before it is.
+
 **The run-time frame description is a structure, not a byte stream
 (§4.3).** One description per exit or call: frames, virtual objects by
 state id shared between frames, a recipe per field. The byte stream is a
