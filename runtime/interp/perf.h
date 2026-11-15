@@ -18,6 +18,9 @@ PyObject *lu_perf_eval(PyThreadState *ts, struct _PyInterpreterFrame *f, int thr
 /* Names a compiled unit of `code`, entered at `pc`, in the active backend:
    nothing when the trampolines are off. */
 void lu_perf_unit(const void *addr, size_t size, PyCodeObject *code, int pc);
+/* Whether a perf map has named a unit's range: the map cannot say that a
+   range was freed, so freed ranges are not reused (runtime/jit/codemem.c). */
+int lu_perf_names_ranges(void);
 
 extern PyMethodDef lu_sys_perf_methods[];
 

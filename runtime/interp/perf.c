@@ -52,6 +52,7 @@ static struct {
     size_t arena_left;
     uint64_t arena_epoch;
     Py_ssize_t extra_index;     /* the code-extra slot that holds each code's copy */
+    int named_units;            /* a perf map has named a compiled unit's range */
 } perf = { .lock = { PTHREAD_MUTEX_INITIALIZER }, .extra_index = -1 };
 
 /* A forked child keeps its parent's copies only when they persist. */
@@ -329,8 +330,17 @@ lu_perf_unit(const void *addr, size_t size, PyCodeObject *code, int pc)
     }
     lock();
     write_entry(kind, addr, size, name, lu_target.fp_cfi, (size_t)lu_target.nfp_cfi);
+    if (kind == LU_PERF_MAP) {
+        __atomic_store_n(&perf.named_units, 1, __ATOMIC_RELAXED);
+    }
     unlock();
     free(name);
+}
+
+int
+lu_perf_names_ranges(void)
+{
+    return __atomic_load_n(&perf.named_units, __ATOMIC_RELAXED);
 }
 
 /* The trampolines */

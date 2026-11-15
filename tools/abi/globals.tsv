@@ -197,6 +197,7 @@ _parser.*	.c.h	Argument Clinic's argument parser of a method; _PyArg_UnpackKeywo
 stats	runtime/jit/jit.c	the optimizing tier's process-wide counts (-X lucifer_jit_stats); compiled units are process-wide too
 census	runtime/jit/jit.c	the units whose execution -X lucifer_jit_stats counts, and the counts of freed ones; process-wide like the units, under its lock
 dying	runtime/jit/jit.c	the dead compiled units not yet freed, which a collection frees; process-wide like the units, under its lock
+code_pool	runtime/jit/codemem.c	the chunks of executable memory compiled units take ranges from, and the free ranges; process-wide like the units, under its lock
 allocs	runtime/jit/jit.c	the allocation sites -X lucifer_jit_stats counts, kept for the process; under its lock
 marks	runtime/jit/jit.c	the count of sites the optimizing tier has marked generic, a process-wide clock units are stamped with; atomic
 buckets	runtime/jit/deps.c	compiled units' dependencies by the change that takes them back; process-wide like the units, each bucket under its own lock

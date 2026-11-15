@@ -773,6 +773,9 @@ void lu_task_signal(struct lu_task *t, uintptr_t bits);
 
 /* os.fork (runtime/thread/fork.c): the pid in the parent, 0 in the child, -1 with errno set. */
 long lu_fork(void);
+/* The child's own copy of compiled code, which it shares with the parent
+   until then (runtime/jit/codemem.c). */
+void lu_jit_code_after_fork(void);
 /* The child of a fork made by the main task on the second carrier has no home carrier thread to
    return the program's result to: the thread that finished it finishes the program
    (runtime/pylifecycle.c). */

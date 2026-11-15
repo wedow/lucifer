@@ -18,7 +18,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <unistd.h>
 
 enum { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15 };
@@ -3181,19 +3180,16 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     unit->deopt_table = table;
     int64_t tp = (int64_t)(intptr_t)table;
     memcpy(a->buf + a->deopts_patch, &tp, 8);
-    /* Publication: written, then executable. */
-    size_t page = (size_t)sysconf(_SC_PAGESIZE);
-    size_t size = ((size_t)a->n + page - 1) & ~(page - 1);
-    void *mem = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (mem == MAP_FAILED) {
+    /* Publication: written through one view, run through the other. */
+    void *rw, *mem = lu_code_alloc((size_t)a->n, &rw);
+    if (mem == NULL) {
         f->fail = "no memory for code";
         free(a->buf);
         return -1;
     }
-    memcpy(mem, a->buf, (size_t)a->n);
-    mprotect(mem, size, PROT_READ | PROT_EXEC);
+    memcpy(rw, a->buf, (size_t)a->n);
     unit->mem = mem;
-    unit->size = size;
+    unit->size = (size_t)a->n;
     unit->code_bytes = (size_t)a->n;
     if (_PyRuntime.jit.dump) {
         fprintf(stderr, "jit: code at %p, %d bytes\n", (void *)mem, a->n);
@@ -3209,7 +3205,5 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
 void
 lu_target_free(struct lu_unit *unit)
 {
-    if (unit->mem != NULL) {
-        munmap(unit->mem, unit->size);
-    }
+    lu_code_free(unit->mem, unit->size);
 }

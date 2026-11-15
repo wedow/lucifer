@@ -206,6 +206,12 @@ void lu_jit_unit_kill(struct lu_unit *u);
 void lu_jit_nohoist_set(PyCodeObject *code, int pc);
 int lu_jit_nohoist(PyCodeObject *code, int pc);
 
+/* Executable memory (runtime/jit/codemem.c): n bytes to run code from,
+   and through *rw the same bytes to write it in; NULL without memory.
+   Free gives back a unit's range once nothing can run it. */
+void *lu_code_alloc(size_t n, void **rw);
+void lu_code_free(void *code, size_t n);
+
 /* Lowers an allocated function into unit: code, exits, constants. 0, or
    -1 with f->fail set. */
 int lu_target_emit(struct lu_func *f, struct lu_unit *unit);
