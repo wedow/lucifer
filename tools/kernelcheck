@@ -16,11 +16,14 @@ programs given as source (-c, a .py script, standard input, imports that write
 __pycache__): the oracle and bin/lucifer run each in the same directory, and the
 output, exit status and the .pyc files left behind must be identical.
 The SIGINT probe runs a -c program at both launch dispositions: default, and
-SIGINT ignored, as a background job starts.
+SIGINT ignored, as a background job starts. The oracle runs each program once:
+its results are kept in build/tests/kernel/oracle (ORACLE_RESULTS).
 """
 import argparse
+import ast
 import difflib
 import dis
+import hashlib
 import importlib.machinery
 import importlib.util
 import os
@@ -44,6 +47,12 @@ TIMEOUT = 120
 # nanoseconds each: its heaviest programs take a minute or more on a quiet host.
 HANDOFF_TIMEOUT = 600
 MAGIC = (3627).to_bytes(2, "little") + b"\r\n"
+# The oracle's result is a function of the program's name and text, its flags, environment and input, and the
+# oracle's build: kept here, each lane and every later run reads it instead of running CPython again, and a loaded
+# host's timeouts and stalls in CPython stop failing checks. It runs once per program, so with room to spare; a run
+# that still times out is not kept.
+ORACLE_RESULTS = BUILD / "oracle"
+ORACLE_TIMEOUT = 600
 # Lanes are the -X policies a program runs under, on the oracle as well:
 # CPython only records an unknown -X option in sys._xoptions. "handoff:N" is
 # the handoff scheduler with seed N.
@@ -228,18 +237,35 @@ def ignore_int():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
-def run(interpreter, flags, pyc, env=None):
-    """env None: -I -S with the inherited environment; else -S with exactly env."""
+def run(interpreter, flags, pyc, env, cwd, timeout=None):
+    """env None: -I -S with the inherited environment; else -S with exactly env. Runs in cwd."""
     stdin = STDIN.get(pyc.stem, b"")
     isolation = ["-I", "-S"] if env is None else ["-S"]
-    timeout = HANDOFF_TIMEOUT if any(f.startswith(("lucifer_handoff", "lucifer_stress")) for f in flags) else TIMEOUT
+    stress = any(f.startswith(("lucifer_handoff", "lucifer_stress")) for f in flags)
+    timeout = timeout or (HANDOFF_TIMEOUT if stress else TIMEOUT)
     try:
         child = subprocess.run([interpreter, *isolation, *flags, str(pyc)],
                                capture_output=True, timeout=timeout, env=env,
-                               input=stdin, preexec_fn=limit_stack, cwd=BUILD)
+                               input=stdin, preexec_fn=limit_stack, cwd=cwd)
     except subprocess.TimeoutExpired:
         return ("timeout", b"", b"")
     return (child.returncode, child.stdout, child.stderr)
+
+
+def oracle_run(oracle, build, flags, pyc, env, cwd):
+    """run() on the oracle, from ORACLE_RESULTS when this program (its name is in tracebacks), flags,
+    environment and input have run on this oracle build before."""
+    inputs = (build, pyc.stem, flags, None if env is None else sorted(env.items()), STDIN.get(pyc.stem, b""))
+    key = hashlib.sha256(repr(inputs).encode() + (SOURCES / f"{pyc.stem}.py").read_bytes()).hexdigest()
+    path = ORACLE_RESULTS / key
+    if path.exists():
+        return ast.literal_eval(path.read_text())
+    result = run(oracle, flags, pyc, env, cwd, ORACLE_TIMEOUT)
+    if result[0] != "timeout":
+        partial = path.with_name(f"{key}.{os.getpid()}")
+        partial.write_text(repr(result))
+        partial.replace(path)
+    return result
 
 
 def compile_program(name):
@@ -346,7 +372,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--oracle", help="free-threaded CPython 3.14")
     parser.add_argument("--lucifer", default=str(ROOT / "bin" / "lucifer"))
-    parser.add_argument("--programs", default="", help="space-separated names")
+    parser.add_argument("--programs", default="", help="space-separated names: these programs alone")
+    parser.add_argument("--checks", action="store_true",
+                        help="the checks that are not programs alone (flag rows, stress, SIGINT, source programs)")
     parser.add_argument("--lane", default="plain")
     parser.add_argument("--opcodes", action="store_true", help="check the eval loop handles every base opcode")
     args = parser.parse_args()
@@ -360,8 +388,14 @@ def main():
     if args.lane not in LANES:
         sys.exit(f"kernelcheck: unknown lane {args.lane!r}")
     names = args.programs.split() or LANE_PROGRAMS.get(args.lane) or sorted(p.stem for p in SOURCES.glob("*.py"))
+    if args.checks:
+        names = []
     lucifer = str(Path(args.lucifer).resolve())
-    BUILD.mkdir(parents=True, exist_ok=True)
+    ORACLE_RESULTS.mkdir(parents=True, exist_ok=True)
+    build = subprocess.run([args.oracle, "-VV"], capture_output=True, text=True, timeout=TIMEOUT, check=True).stdout
+    # Each lane's programs run in a directory of its own: lanes run at once and programs write files there.
+    cwd = BUILD / "cwd" / args.lane
+    cwd.mkdir(parents=True, exist_ok=True)
 
     failed = total = 0
     for name in names:
@@ -369,10 +403,10 @@ def main():
         for flags, env in RUNS.get(name, [([], None)]):
             label = name if not flags and env is None else f"{name} {flags} {env or ''}".rstrip()
             total += 1
-            oracle = run(args.oracle, LANES[args.lane] + flags, pyc, env)
+            oracle = oracle_run(args.oracle, build, LANES[args.lane] + flags, pyc, env, cwd)
             if args.lane.startswith("handoff") and name in HANDOFF_STDOUT:
                 oracle = (oracle[0], HANDOFF_STDOUT[name], oracle[2])
-            ours = run(lucifer, LANES[args.lane] + flags, pyc, env)
+            ours = run(lucifer, LANES[args.lane] + flags, pyc, env, cwd)
             if args.lane.startswith("handoff") and name in HANDOFF_XFAIL and oracle[0] == ours[0]:
                 print(f"{'XPASS' if oracle == ours else 'XFAIL'} {label} ({HANDOFF_XFAIL[name]})")
             elif oracle == ours:
@@ -383,8 +417,8 @@ def main():
         if name in SEEDED:
             label = f"{name} unseeded"
             total += 1
-            oracle = run(args.oracle, LANES[args.lane], pyc, {})
-            first, second = (run(lucifer, LANES[args.lane], pyc, {}) for _ in range(2))
+            oracle = oracle_run(args.oracle, build, LANES[args.lane], pyc, {}, cwd)
+            first, second = (run(lucifer, LANES[args.lane], pyc, {}, cwd) for _ in range(2))
             head = lambda r: r[1].split(b"\n")[0]
             if first[0] == 0 and head(first) == head(oracle) and first[1] != second[1]:
                 print(f"PASS {label}")
@@ -392,6 +426,9 @@ def main():
                 failed += 1
                 print(f"FAIL {label}: exit {first[0]}, flag line {head(first)!r} vs {head(oracle)!r}, "
                       f"runs {'differ' if first[1] != second[1] else 'are identical'}")
+    if args.programs.split():
+        print(f"{total - failed}/{total} checks pass ({args.lane})")
+        return 1 if failed else 0
     compile_program("hello")
     for label, flags, status, text in FLAG_ROWS:
         child = subprocess.run([lucifer, *flags], capture_output=True, timeout=TIMEOUT, cwd=BUILD)

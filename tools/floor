@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 """Per-test conformance floor: every corpus through its own harness in one interpreter mode.
 
-  floor run --mode MODE --out DIR [--corpus NAME]... [--runs N] [--jobs N]
+  floor run --mode MODE --out DIR [--corpus NAME]... [--unit CORPUS/LABEL]... [--runs N] [--jobs N]
       one DIR/CORPUS.tsv per corpus (test id, status; sorted) and DIR/summary.md
   floor compare FLOOR DIR
       every test PASS in FLOOR and not PASS in DIR (a corpus DIR lacks is skipped); exit 1 if any
+  floor quick [--base REF] [--jobs N]
+      the per-change gate: builds, then runs kernel, difftest and jitcheck whole in their gate lanes
+      and the units results/floor/quick.tsv lists in the modes the change calls for (slice_modes),
+      all from one queue; prints each floor pass lost against results/floor/off, PASS or FAIL, and
+      the wall time from the start of the build
+  floor select --budget S [--past DIR]... [--now DIR]... [--history FILE]
+      rewrites results/floor/quick.tsv from floor runs of the tier: the units with the most
+      catches, floor passes and stdlib topics per second, within S unit seconds per mode
 
 Modes: off (-X lucifer_jit=off), on (default flags), jit (-X lucifer_jit=always),
 deopt (-X lucifer_jit=always -X lucifer_stress=deopt:7).
@@ -33,6 +41,7 @@ import collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -126,22 +135,30 @@ def output_lines(text):
 # --- corpora: each takes (mode, flags, work, log) and returns its units, {label: function}; -----
 # --- a unit runs one harness invocation and returns {test id: status} for the tests it owns ----
 
-KERNEL_SHARD = 60     # programs per harness run
+KERNEL_SHARD = 20     # programs per harness run
+
+
+def kernel_programs():
+    return sorted(p.stem for p in (ROOT / "tests/kernel").glob("*.py"))
+
+
+def kernelcheck(mode, selection, log):
+    """kernelcheck in MODE's lane on --programs NAMES or --checks; {check: status}."""
+    out = run([env("HOST_PYTHON"), "tools/kernelcheck", "--oracle", env("ORACLE_T"), "--lucifer",
+               env("LUCIFER", "bin/lucifer"), "--lane", KERNEL_LANES[mode], *selection], log)
+    rows = output_lines(out)
+    total = re.search(r"\d+/(\d+) checks pass", out)
+    if not total or int(total[1]) != len(rows):
+        rows["kernelcheck"] = "CRASH"  # the harness did not report every check
+    return rows
 
 
 def kernel(mode, flags, work, log):
-    names = sorted(p.stem for p in (ROOT / "tests/kernel").glob("*.py"))
-
-    def shard(programs):
-        out = run([env("HOST_PYTHON"), "tools/kernelcheck", "--oracle", env("ORACLE_T"), "--lucifer",
-                   env("LUCIFER", "bin/lucifer"), "--lane", KERNEL_LANES[mode], "--programs", " ".join(programs)], log)
-        rows = output_lines(out)
-        total = re.search(r"\d+/(\d+) checks pass", out)
-        if not total or int(total[1]) != len(rows):
-            rows["kernelcheck"] = "CRASH"  # the harness did not report every check
-        return rows
-    return {str(start): lambda p=names[start:start + KERNEL_SHARD]: shard(p)
-            for start in range(0, len(names), KERNEL_SHARD)}
+    names = kernel_programs()
+    # The checks that are not programs run once, as a unit of their own.
+    return {"checks": lambda: kernelcheck(mode, ["--checks"], log),
+            **{str(start): lambda p=names[start:start + KERNEL_SHARD]:
+               kernelcheck(mode, ["--programs", " ".join(p)], log) for start in range(0, len(names), KERNEL_SHARD)}}
 
 
 def whole(corpus):
@@ -161,13 +178,20 @@ def embed(mode, flags, work, log):
     return {"embed": "PASS" if "PASS embed" in make("check-embed", log) else "FAIL"}
 
 
-@whole
 def difftest(mode, flags, work, log):
-    results = work / "difftest"
-    shutil.rmtree(results, ignore_errors=True)
-    run(["python3", "tools/difftest", "run", "--oracle", env("ORACLE_T"), "--python", lucifer(flags),
-         "--runtime", "lucifer", "--results", str(results), "--work", str(results / "work")], log)
-    return manifest(results / "lucifer.tsv")
+    """A unit per ID prefix: a directory of tests/diff, and the corpus by first letter."""
+    corpus = "tests/diff/corpus/"
+    ids = manifest(ROOT / "results/difftest/expected.tsv")
+    prefixes = sorted({i[:len(corpus) + 1] if i.startswith(corpus) else i.rsplit("/", 1)[0] + "/" for i in ids})
+
+    def unit(prefix):
+        results = work / "difftest" / prefix.replace("/", "_")
+        shutil.rmtree(results, ignore_errors=True)
+        run(["python3", "tools/difftest", "run", "--oracle", env("ORACLE_T"), "--python", lucifer(flags),
+             "--runtime", "lucifer", "--results", str(results), "--work", str(results / "work"), "--select", prefix],
+            log)
+        return {i: status for i, status in manifest(results / "lucifer.tsv").items() if i.startswith(prefix)}
+    return {prefix: lambda p=prefix: unit(p) for prefix in prefixes}
 
 
 @whole
@@ -291,15 +315,20 @@ def pypi(mode, flags, work, log):
 def fuzzdiff(mode, flags, work, log):
     """A unit per generator and seed. Each case: match PASS, mismatch FAIL, skip SKIP, error (the oracle
     has no result) ERROR."""
-    fuzz = ROOT / "build/fuzzdiff"
     # Links the modules the generators import and unpacks the generators once, running no case.
     generators = [json.loads(line)["generator"] for line in make("fuzzdiff", log, FUZZDIFF="--cases 0").splitlines()
                   if line.startswith("{") and '"generator"' in line]
+    # Each mode's results and scratch files apart, over the one unpacked tree: modes may run at once.
+    fuzz = work / "fuzzdiff"
+    fuzz.mkdir(exist_ok=True)
+    for name in ("python-formalization", "cpython"):
+        (fuzz / name).is_symlink() or (fuzz / name).symlink_to(ROOT / "build/fuzzdiff" / name)
     named = {"mismatch": "FAIL", "skip": "SKIP", "error": "ERROR"}
 
     def unit(generator, seed):
         out = run(["env", f"PYTHONPATH={ROOT / 'build/tests/capi/ext'}", "python3", "tools/fuzzdiff/run.py",
-                   "--oracle", env("ORACLE_T"), generator, "--seed", str(seed), "--python", lucifer(flags)], log)
+                   "--oracle", env("ORACLE_T"), generator, "--seed", str(seed), "--python", lucifer(flags),
+                   "--work", str(fuzz)], log)
         rows = {}
         for line in out.splitlines():
             if line.startswith("{") and '"generator"' in line:
@@ -392,75 +421,99 @@ def write_summary(out, mode):
     (out / "summary.md").write_text("\n".join(md) + "\n")
 
 
-def run_mode(args):
-    flags = MODES[args.mode]
-    out = args.out.resolve()
-    work = (args.work or ROOT / "build/floor" / args.mode).resolve()
-    out.mkdir(parents=True, exist_ok=True)
-    work.mkdir(parents=True, exist_ok=True)
-    path = out / "summary.json"
-    notes = json.loads(path.read_text()) if path.exists() else {}
+def run_targets(targets, runs, jobs):
+    """Run the units of every target, (mode, out, work, corpora, keep), from one queue of jobs workers,
+    longest first by the seconds each took last time (build/floor/unit-seconds.json; units never timed
+    go first). keep(corpus, label) picks a corpus's units. A target's CORPUS.tsv and summary are written
+    as each of its corpora finishes. Returns the corpora, as (mode, corpus), with a unit that produced
+    no results."""
     history = json.loads(HISTORY.read_text()) if HISTORY.exists() else {}
     started = time.monotonic()
-    # The oracle's _testcapi and friends beside the standard library: kernel, capi and Lib/test programs import them.
-    make("oracle-exts", work / "oracle-exts.log")
-    units, logs, failed, dropped = {}, {}, set(), set()
+    units, logs, notes, seconds, failed, dropped = {}, {}, {}, {}, set(), set()
 
-    def skip(name, why):
-        print(f"{name}: skipped, {why}", flush=True)
-        notes[name] = {"skipped": str(why)}
-        dropped.add(name)
-    for name in args.corpus or CORPORA:
-        logs[name] = work / f"{name}.log"
-        logs[name].unlink(missing_ok=True)
-        try:
-            units[name] = CORPORA[name](args.mode, flags, work, logs[name])
-        except Missing as why:
-            skip(name, why)
-    runs = {name: [] for name in units}
+    def skip(target, why):
+        mode, name, out = target
+        print(f"{name} ({mode}): skipped, {why}", flush=True)
+        notes[out][name] = {"skipped": str(why)}
+        dropped.add(target)
+    for mode, out, work, corpora, keep in targets:
+        out.mkdir(parents=True, exist_ok=True)
+        work.mkdir(parents=True, exist_ok=True)
+        path = out / "summary.json"
+        notes[out] = json.loads(path.read_text()) if path.exists() else {}
+        # The oracle's _testcapi and friends beside the standard library: kernel, capi and Lib/test import them.
+        make("oracle-exts", work / "oracle-exts.log")
+        for name in corpora:
+            target = (mode, name, out)
+            logs[target] = work / f"{name}.log"
+            logs[target].unlink(missing_ok=True)
+            try:
+                every = CORPORA[name](mode, MODES[mode], work, logs[target])
+                units[target] = {label: unit for label, unit in every.items() if keep(name, label)}
+            except Missing as why:
+                skip(target, why)
+    collected = {target: [] for target in units}
 
-    def timed(key, unit):
+    def timed(target, label, unit):
         start = time.monotonic()
         try:
             return unit()
         finally:
-            history[key] = round(time.monotonic() - start, 1)
-    for _ in range(args.runs):  # a run's units reuse its scratch directories, so runs follow one another
-        rows = {name: {} for name in units}
-        left = collections.Counter({name: len(u) for name, u in units.items()})
-        queue = sorted((f"{name}/{label}", name, unit) for name, u in units.items() for label, unit in u.items())
-        queue.sort(key=lambda t: -history.get(t[0], float("inf")))
-        with ThreadPoolExecutor(args.jobs) as pool:
-            futures = {pool.submit(timed, key, unit): (key, name) for key, name, unit in queue}
+            seconds[target, label] = history[f"{target[1]}/{label}"] = round(time.monotonic() - start, 1)
+    for _ in range(runs):  # a run's units reuse its scratch directories, so runs follow one another
+        rows = {target: {} for target in units}
+        left = collections.Counter({target: len(u) for target, u in units.items()})
+        queue = [(target, label, unit) for target, u in units.items() for label, unit in sorted(u.items())]
+        queue.sort(key=lambda q: -history.get(f"{q[0][1]}/{q[1]}", float("inf")))
+        with ThreadPoolExecutor(jobs) as pool:
+            futures = {pool.submit(timed, *q): q[:2] for q in queue}
             for future in as_completed(futures):
-                key, name = futures[future]
+                target, label = futures[future]
+                mode, name, out = target
                 try:
                     for i, status in future.result().items():
-                        old = rows[name].get(i)
-                        rows[name][i] = status if old is None or RANK[status] > RANK[old] else old
+                        old = rows[target].get(i)
+                        rows[target][i] = status if old is None or RANK[status] > RANK[old] else old
                 except Missing as why:
-                    skip(name, why)
+                    skip(target, why)
                 except (OSError, ValueError, KeyError, IndexError) as error:
-                    print(f"{key}: harness produced no results ({error!r}); see {logs[name]}", flush=True)
-                    failed.add(name)
-                left[name] -= 1
-                if not left[name] and name not in dropped:
-                    runs[name].append(rows[name])
-                    if len(runs[name]) == args.runs:
-                        merged, flaky = merge(runs[name])
+                    print(f"{name}/{label} ({mode}): harness produced no results ({error!r}); see {logs[target]}",
+                          flush=True)
+                    failed.add((mode, name))
+                left[target] -= 1
+                if not left[target] and target not in dropped:
+                    collected[target].append(rows[target])
+                    if len(collected[target]) == runs:
+                        merged, flaky = merge(collected[target])
                         write_tsv(out / f"{name}.tsv", merged)
-                        seconds = round(sum(history[f"{name}/{label}"] for label in units[name]))
-                        notes[name] = {"runs": args.runs, "seconds": seconds, "flaky": sorted(flaky)}
-                        path.write_text(json.dumps(notes, indent=1) + "\n")
-                        write_summary(out, args.mode)
-                        print(f"{name}: {dict(collections.Counter(merged.values()))}, units {seconds} s", flush=True)
+                        total = round(sum(seconds[target, label] for label in units[target]))
+                        notes[out][name] = {"runs": runs, "seconds": total, "flaky": sorted(flaky)}
+                        (out / "summary.json").write_text(json.dumps(notes[out], indent=1) + "\n")
+                        write_summary(out, mode)
+                        print(f"{name} ({mode}): {dict(collections.Counter(merged.values()))}, units {total} s",
+                              flush=True)
         HISTORY.parent.mkdir(parents=True, exist_ok=True)
         HISTORY.write_text(json.dumps(history, indent=1, sort_keys=True) + "\n")
-    notes["wall"] = {"seconds": round(time.monotonic() - started), "jobs": args.jobs}
-    path.write_text(json.dumps(notes, indent=1) + "\n")
-    write_summary(out, args.mode)
-    print(f"wall {notes['wall']['seconds']} s with {args.jobs} jobs", flush=True)
-    return 1 if failed else 0
+    wall = round(time.monotonic() - started)
+    for mode, out, *_ in targets:
+        notes[out]["wall"] = {"seconds": wall, "jobs": jobs}
+        (out / "summary.json").write_text(json.dumps(notes[out], indent=1) + "\n")
+        write_summary(out, mode)
+    print(f"wall {wall} s with {jobs} jobs", flush=True)
+    return failed
+
+
+def run_mode(args):
+    out = args.out.resolve()
+    work = (args.work or ROOT / "build/floor" / args.mode).resolve()
+    keep = lambda name, label: not args.unit or f"{name}/{label}" in args.unit
+    corpora = args.corpus or sorted({u.split("/")[0] for u in args.unit or ()}, key=list(CORPORA).index) or CORPORA
+    return 1 if run_targets([(args.mode, out, work, corpora, keep)], args.runs, args.jobs) else 0
+
+
+def lost(floor, now, ids):
+    """(id, status now) for each of ids that is PASS in floor and not PASS now."""
+    return [(i, now.get(i, "MISSING")) for i in sorted(ids) if floor.get(i) == "PASS" and now.get(i) != "PASS"]
 
 
 def compare(args):
@@ -470,13 +523,173 @@ def compare(args):
         if not mine.exists():
             print(f"{floor_tsv.stem}: not in {args.dir}, skipped")
             continue
-        now = read_tsv(mine)
-        for i, status in sorted(read_tsv(floor_tsv).items()):
-            if status == "PASS" and now.get(i) != "PASS":
-                print(f"{floor_tsv.stem}\t{i}\t{now.get(i, 'MISSING')}")
-                regressed += 1
+        floor = read_tsv(floor_tsv)
+        for i, status in lost(floor, read_tsv(mine), floor):
+            print(f"{floor_tsv.stem}\t{i}\t{status}")
+            regressed += 1
     print(f"{regressed} floor passes not passing")
     return 1 if regressed else 0
+
+
+# --- quick: the per-change gate ---------------------------------------------------------------
+
+FLOOR = ROOT / "results/floor/off"
+SELECTION = ROOT / "results/floor/quick.tsv"
+# Run whole on every change: the kernel programs in the plain, jit and jit-deopt lanes; difftest and
+# jitcheck compiled at first call, without and with failing guards.
+WHOLE = {"on": ["kernel"], "jit": ["kernel", "difftest", "jitcheck"], "deopt": ["kernel", "difftest", "jitcheck"]}
+# Run as the units SELECTION lists, in the modes the change calls for.
+SLICED = ["libtest", "fuzzdiff", "ft-cpython", "pypi", "numpy"]
+
+
+def changed_paths(base):
+    """Paths that differ from where HEAD left base, committed or not, and untracked ones."""
+    git = lambda *a: subprocess.run(["git", *a], cwd=ROOT, check=True, capture_output=True, text=True).stdout
+    since = git("merge-base", base, "HEAD").strip()
+    untracked = git("ls-files", "--others", "--exclude-standard")
+    return set(git("diff", "--name-only", since).split()) | set(untracked.split())
+
+
+def slice_modes(paths):
+    """Tests and docs alone: no slice. The tier alone: the slice compiled, at first call and with failing
+    guards. Anything else (the interpreter, the kernel, lib/, the C-API, tools, results), or no change
+    at all: the slice in those modes and with the tier off too."""
+    light = lambda p: p.startswith(("tests/", "docs/", ".tickets/")) or p.endswith(".md")
+    if paths and all(map(light, paths)):
+        return []
+    if paths and all(light(p) or p.startswith("runtime/jit/") for p in paths):
+        return ["jit", "deopt"]
+    return ["off", "jit", "deopt"]
+
+
+def quick(args):
+    started = time.monotonic()
+    modes = slice_modes(changed_paths(args.base))
+    print(f"quick: slice in {', '.join(modes) or 'no mode'} (changes against {args.base})", flush=True)
+    build = ["make", f"-j{args.jobs}", "all", *(f"{v}={os.environ[v]}" for v in ("ORACLE_T", "HOST_PYTHON")
+                                              if v in os.environ)]
+    done = subprocess.run(build, cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    print(f"quick: build {round(time.monotonic() - started)} s", flush=True)
+    if done.returncode:
+        print(done.stdout[-5000:] + "quick: FAIL, the build failed")
+        return 1
+    selection = {line.split("\t")[0] for line in SELECTION.read_text().splitlines() if not line.startswith("#")}
+    sliced = [name for name in SLICED if any(unit.startswith(name + "/") for unit in selection)]
+    keep = lambda name, label: name not in SLICED or f"{name}/{label}" in selection
+    out = args.out.resolve()
+    shutil.rmtree(out, ignore_errors=True)
+    targets = [(mode, out / mode, ROOT / "build/floor/quick-work" / mode,
+                WHOLE.get(mode, []) + (sliced if mode in modes else []), keep)
+               for mode in MODES if WHOLE.get(mode) or mode in modes]
+    failed = run_targets(targets, 1, args.jobs)
+    regressed = 0
+    for mode, out, _, corpora, _ in targets:
+        for name in corpora:
+            path = out / f"{name}.tsv"
+            if not path.exists():
+                print(f"NOTRUN {mode} {name}")
+                failed.add((mode, name))
+                continue
+            floor, now = read_tsv(FLOOR / path.name), read_tsv(path)
+            if name not in SLICED:  # a whole corpus passes whole, as its gate does, tests newer than the floor too
+                floor = dict.fromkeys(floor.keys() | now.keys(), "PASS")
+            missed = lost(floor, now, now if name in SLICED else floor)
+            if name == "kernel" and missed:
+                missed = retry_kernel(mode, missed, ROOT / "build/floor/quick-work" / mode / "kernel-retry.log")
+            for i, status in missed:
+                print(f"LOST {mode} {name} {i} {status}")
+                regressed += 1
+    verdict = "FAIL" if regressed or failed else "PASS"
+    print(f"quick: {verdict}, {regressed} floor passes lost, {len(failed)} corpora with units that gave no results"
+          f" ({', '.join(sorted(f'{n} {m}' for m, n in failed))}); wall {round(time.monotonic() - started)} s")
+    return 1 if verdict == "FAIL" else 0
+
+
+def retry_kernel(mode, missed, log):
+    """A kernel program's thread schedule varies with the host's load: each check that failed runs once
+    more, alone, and fails the gate only if it fails again. Those that pass are printed as FLAKY."""
+    names = set(kernel_programs())
+    programs = sorted({i.split()[0] for i, _ in missed if i.split()[0] in names})
+    again = kernelcheck(mode, ["--programs", " ".join(programs)], log) if programs else {}
+    if any(i.split()[0] not in names | {"kernelcheck"} for i, _ in missed):
+        again.update(kernelcheck(mode, ["--checks"], log))
+    for i, status in missed:
+        if again.get(i) == "PASS":
+            print(f"FLAKY {mode} kernel {i} {status}, then PASS")
+    return [(i, status) for i, status in missed if again.get(i) != "PASS"]
+
+
+# --- select: which units quick runs --------------------------------------------------------------
+
+# Parts of the standard library a change to the tier or the interpreter most often breaks.
+TOPICS = re.compile(r"(^|[./])test_(re|json|pickle\w*|collections|itertools|functools|dataclasses|typing|enum|"
+                    r"asyncio|threading|generators|coroutines|exceptions|traceback|frame|sys|sys_settrace|"
+                    r"monitoring|gc|weakref|unicode\w*|str\w*|int|long|float|struct|io|memoryio|fileio|"
+                    r"contextlib|scope|descr|class|dict|list|set|tuple|deque|operator|copy|bytes)($|[._])")
+
+
+def units_of(corpus):
+    """A sliced corpus's test id -> the labels of the units that report it."""
+    if corpus == "libtest":
+        owners = collections.defaultdict(set)
+        for build in json.loads((ROOT / "results/libtest/inventory.json").read_text()).values():
+            for module, entry in build.items():
+                for case in entry["cases"]:
+                    owners[case].add(module)
+        return lambda i: owners.get(i, set())
+    if corpus == "ft-cpython":
+        owners = collections.defaultdict(set)
+        for name, cases in json.loads((ROOT / "results/ft-cpython/inventory.json").read_text())["units"].items():
+            for case in cases:
+                owners[name.split("/")[0] + "/" + case].add(name)
+        return lambda i: owners.get(i, set())
+    if corpus == "numpy":
+        return lambda i: {i.split("::")[0]}
+    return lambda i: {i.split("/")[0]}  # fuzzdiff GENERATOR-sSEED/N, pypi PACKAGE/...
+
+
+def select(args):
+    """Score each unit of the sliced corpora that some floor pass belongs to, by what it caught per
+    second, and take the best until the budget is spent."""
+    seconds = json.loads(args.history.read_text())
+    passes, losses, broken = collections.Counter(), collections.Counter(), set()
+    for corpus in SLICED:
+        owner, floor = units_of(corpus), read_tsv(FLOOR / f"{corpus}.tsv")
+        for i, status in floor.items():
+            for label in owner(i) if status == "PASS" else ():
+                passes[f"{corpus}/{label}"] += 1
+        for directory, past in [(d, True) for d in args.past] + [(d, False) for d in args.now]:
+            if (directory / f"{corpus}.tsv").exists():
+                now = read_tsv(directory / f"{corpus}.tsv")
+                hit = {f"{corpus}/{label}" for i, _ in lost(floor, now, now) for label in owner(i)}
+                losses.update(hit) if past else broken.update(hit)
+    scored = []
+    for unit in passes:
+        cost = seconds.get(unit)
+        if unit in broken or cost is None or cost > args.max_unit:
+            continue  # failing now, never timed, or too long to run beside the rest
+        topic = unit.startswith(("libtest/", "ft-cpython/")) and bool(TOPICS.search(unit.split("/", 1)[1]))
+        value = math.sqrt(passes[unit]) * (1 + losses[unit]) * (2 if topic else 1)
+        scored.append((value / max(cost, 1), unit, cost, losses[unit], topic, passes[unit]))
+    scored.sort(reverse=True)
+    # Units that caught the tier before first, then each corpus's best, then by score; a Lib/test module once,
+    # from libtest or ft-cpython's serial lane.
+    catchers = [row for row in scored if row[3]]
+    firsts = [next(row for row in scored if row[1].startswith(corpus + "/")) for corpus in SLICED
+              if any(row[1].startswith(corpus + "/") for row in scored)]
+    module = lambda unit: re.sub(r"^(libtest|ft-cpython/serial)/", "", unit)
+    rows, spent, taken = [], 0, set()
+    for score, unit, cost, caught, topic, count in catchers + firsts + scored:
+        if spent + cost <= args.budget and module(unit) not in taken:
+            spent += cost
+            taken.add(module(unit))
+            rows.append(f"{unit}\t{cost}\t{caught}\t{int(topic)}\t{count}\t{score:.3f}")
+    SELECTION.write_text(
+        f"# tools/floor select: {len(rows)} units, {round(spent)} s of {args.budget} budget per mode, units over "
+        f"{args.max_unit} s left out; {len(args.past)} past and {len(args.now)} current tier runs\n"
+        "# unit\tseconds\tpast runs it lost passes in\tstdlib topic\tfloor passes\tscore\n" + "\n".join(rows) + "\n")
+    print(f"{len(rows)} units, {round(spent)} s; by corpus {dict(collections.Counter(r.split('/')[0] for r in rows))}")
+    return 0
 
 
 def main():
@@ -487,14 +700,27 @@ def main():
     r.add_argument("--out", type=Path, required=True)
     r.add_argument("--work", type=Path, help="logs and scratch results (default build/floor/MODE)")
     r.add_argument("--corpus", action="append", choices=CORPORA)
+    r.add_argument("--unit", action="append", help="CORPUS/LABEL: run this unit alone (repeatable)")
     r.add_argument("--runs", type=int, default=1)
     r.add_argument("--jobs", type=int, default=len(os.sched_getaffinity(0)),
                    help="units run at once (default: every CPU this process may use)")
     c = sub.add_parser("compare")
     c.add_argument("floor", type=Path)
     c.add_argument("dir", type=Path)
+    q = sub.add_parser("quick")
+    q.add_argument("--base", default="origin/master", help="what the change is against (default origin/master)")
+    q.add_argument("--out", type=Path, default=ROOT / "build/floor/quick")
+    q.add_argument("--jobs", type=int, default=len(os.sched_getaffinity(0)))
+    s = sub.add_parser("select")
+    s.add_argument("--past", type=Path, action="append", default=[],
+                   help="an earlier floor run of the tier (jit or deopt); a unit that lost passes there scores higher")
+    s.add_argument("--now", type=Path, action="append", default=[],
+                   help="a floor run of the tier on master; a unit that loses passes there is left out")
+    s.add_argument("--history", type=Path, default=HISTORY, help="unit seconds (default build/floor/unit-seconds.json)")
+    s.add_argument("--budget", type=float, required=True, help="unit seconds per mode")
+    s.add_argument("--max-unit", type=float, default=240)
     args = p.parse_args()
-    return run_mode(args) if args.action == "run" else compare(args)
+    return {"run": run_mode, "compare": compare, "quick": quick, "select": select}[args.action](args)
 
 
 if __name__ == "__main__":
