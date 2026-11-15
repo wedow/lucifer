@@ -242,6 +242,17 @@ raw_of(struct ctx *c, lu_v r, int rep)
     return rep == REP_I64 ? lu_ev_unbox_int(c, r) : lu_ev_unbox_float(c, r);
 }
 
+/* Whether r is a bool that is no object: True or False themselves, or one
+   compiled code has not made. Its bit is lu_ev_truth's. */
+static int
+is_bit(struct ctx *c, lu_v r)
+{
+    PyObject *k = r >= 0 ? lu_ev_const(c, r) : NULL;
+    lu_v real = LU_NOV;
+    struct lu_vobj *o = LU_IS_VIRT(r) ? lu_ev_virt(c->g, &c->g->st, r, &real) : NULL;
+    return k == Py_True || k == Py_False || (o != NULL && real == LU_NOV && o->kind == VK_BOOL);
+}
+
 static lu_v new_phi(struct ctx *c, int block, int rep, int cap);
 
 /* The phi beside a raw phi that carries the object its value was, where
@@ -258,6 +269,9 @@ origin_phi(struct ctx *c, int block, lu_v raw)
 static lu_v
 box_of(struct ctx *c, lu_v raw, lu_v origin)
 {
+    if (I(c, raw)->rep == REP_BIT) {
+        return lu_ev_bool(c, raw, 0);
+    }
     if (origin == LU_NOV) {
         return I(c, raw)->rep == REP_I64 ? lu_ev_box_int(c, raw) : lu_ev_box_float(c, raw);
     }
@@ -555,6 +569,23 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
         }
         if (twin >= 0) {
             phis[i] = phis[twin];
+            continue;
+        }
+        int bits = 1;
+        for (int e = 0; e < n && bits; e++) {
+            g->st = edges[e].st;
+            lu_ev_changed(g);
+            bits = is_bit(c, edges[e].st.v[d][i]);
+        }
+        if (bits) {
+            /* A bool on every edge (a flag set on some paths): its bit is the phi. */
+            phis[i] = new_phi(c, J, REP_BIT, n);
+            for (int e = 0; e < n; e++) {
+                g->st = edges[e].st;
+                lu_ev_changed(g);
+                g->cur = edges[e].block;
+                phi_add(c, phis[i], lu_ev_truth(c, edges[e].st.v[d][i]));
+            }
             continue;
         }
         int rep = REP_NONE;
