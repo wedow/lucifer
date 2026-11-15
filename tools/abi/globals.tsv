@@ -214,8 +214,8 @@ iend	-	thread-local: the register allocation running on this thread; its TLS sym
 identity_seen	-	thread-local: per type version, whether a dict key's class keeps object's __hash__ and __eq__; its TLS symbol has no line
 eq_seen	-	thread-local: the last type compiled code asked whether == is identity for; its TLS symbol has no line
 stack_floor	-	thread-local: the lowest C stack address a call from compiled code may recurse to; its TLS symbol has no line
-managed_buffer_type	runtime/prim/memoryview.c	a static type, its slots filled once at startup (lu_memoryview_init)
-ring_type	runtime/prim/deque.c	the deque's ring buffer, a private static type complete at compile time
+lu_managed_buffer_type	runtime/prim/memoryview.c	a private static type, readied at startup; its slots filled once then (lu_memoryview_init)
+lu_ring_type	runtime/prim/deque.c	the deque's ring buffer, a private static type readied at startup
 readline_lock	runtime/capi/myreadline.c	_PyOS_ReadlineLock: one readline at a time across threads
 picklebuf_methods	runtime/object/picklebuf.c	pickle.PickleBuffer's PyMethodDef table, never written; the API takes it non-const
 picklebuf_as_buffer	runtime/object/picklebuf.c	pickle.PickleBuffer's PyBufferProcs, never written; tp_as_buffer takes it non-const

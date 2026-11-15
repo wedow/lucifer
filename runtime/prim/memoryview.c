@@ -330,9 +330,11 @@ init_len(Py_buffer *view)
 /* The managed buffer: mbuf_release, mbuf_dealloc, mbuf_traverse and mbuf_clear
    of Objects/memoryobject.c. */
 
-static PyTypeObject managed_buffer_type = {
+/* Listed in lu_static_types, which readies it: gc.get_objects() hands buffers out. */
+PyTypeObject lu_managed_buffer_type = {
     PyVarObject_HEAD_INIT(&PyType_Type, 0)
     .tp_name = "managedbuffer",
+    .tp_base = &PyBaseObject_Type,
     .tp_basicsize = sizeof(_PyManagedBufferObject),
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
 };
@@ -371,7 +373,7 @@ mbuf_clear(PyObject *op)
 static _PyManagedBufferObject *
 mbuf_new(void)
 {
-    return (_PyManagedBufferObject *)lu_object_new(&managed_buffer_type, sizeof(_PyManagedBufferObject));
+    return (_PyManagedBufferObject *)lu_object_new(&lu_managed_buffer_type, sizeof(_PyManagedBufferObject));
 }
 
 /* A view on mb with the layout of src (the master when NULL). */
@@ -1111,9 +1113,9 @@ lu_memoryview_init(void)
     PyMemoryView_Type.tp_dealloc = memory_dealloc;
     PyMemoryView_Type.tp_traverse = memory_traverse;
     PyMemoryView_Type.tp_clear = memory_clear;
-    managed_buffer_type.tp_dealloc = mbuf_dealloc;
-    managed_buffer_type.tp_traverse = mbuf_traverse;
-    managed_buffer_type.tp_clear = mbuf_clear;
+    lu_managed_buffer_type.tp_dealloc = mbuf_dealloc;
+    lu_managed_buffer_type.tp_traverse = mbuf_traverse;
+    lu_managed_buffer_type.tp_clear = mbuf_clear;
     PyMemoryView_Type.tp_as_buffer = &memory_as_buffer;
 }
 

@@ -219,8 +219,9 @@ PyTypeObject lu_buffer_wrapper_type = { PyVarObject_HEAD_INIT(&PyType_Type, 0)
    its behaviour is kernel Python over three fields (runtime/object/descr.c). */
 PyTypeObject lu_memory_iterator_type = { PyVarObject_HEAD_INIT(&PyType_Type, 0)
     .tp_name = "memory_iterator", .tp_base = &PyBaseObject_Type };
-/* Defined with their code (runtime/interp/gen.c). */
-extern PyTypeObject lu_coro_wrapper_type, lu_async_gen_athrow_type, lu_async_gen_wrapped_type;
+/* Defined with their code (runtime/interp/gen.c, runtime/prim/deque.c, runtime/prim/memoryview.c). */
+extern PyTypeObject lu_coro_wrapper_type, lu_async_gen_athrow_type, lu_async_gen_wrapped_type,
+    lu_ring_type, lu_managed_buffer_type;
 
 /* Every static builtin type, in index order: its dict and subclasses live in
    each interpreter's static_types[index] (FOUNDATIONS 2.1). Object first,
@@ -230,7 +231,7 @@ PyTypeObject *const lu_static_types[] = {
     &PyBaseObject_Type, &PyType_Type, LU_STATIC_TYPES(LU_TYPE_ENTRY)
     LU_EXCEPTIONS(LU_EXC_ENTRY) &lu_method_wrapper_type, &lu_buffer_wrapper_type, &lu_memory_iterator_type,
     &lu_coro_wrapper_type,
-    &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type, NULL };
+    &lu_async_gen_athrow_type, &lu_async_gen_wrapped_type, &lu_ring_type, &lu_managed_buffer_type, NULL };
 PyObject *PyExc_EnvironmentError = (PyObject *)&lu_exc_OSError;
 PyObject *PyExc_IOError = (PyObject *)&lu_exc_OSError;
 

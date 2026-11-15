@@ -113,11 +113,11 @@ put(ring *r, PyObject *item, int left, Py_ssize_t maxlen, PyObject **dropped)
     return 0;
 }
 
-#define ARGS(n) do { if (nargs != (n) || !Py_IS_TYPE(args[0], &ring_type)) { \
+#define ARGS(n) do { if (nargs != (n) || !Py_IS_TYPE(args[0], &lu_ring_type)) { \
         lu_err_format(PyExc_TypeError, "%s() takes a ring and %d more arguments", __func__ + 5, (n) - 1); \
         return NULL; } } while (0)
 
-static PyTypeObject ring_type;
+extern PyTypeObject lu_ring_type;
 
 /* An index or count argument; a value past a C long is an OverflowError. */
 static int
@@ -156,7 +156,7 @@ prim_ring_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "ring_new() takes no arguments");
         return NULL;
     }
-    return lu_object_new(&ring_type, sizeof(ring));
+    return lu_object_new(&lu_ring_type, sizeof(ring));
 }
 
 /* ring_push(r, item, left, maxlen) */
@@ -524,9 +524,11 @@ ring_dealloc(PyObject *op)
     lu_object_free(op);
 }
 
-static PyTypeObject ring_type = {
+/* Listed in lu_static_types, which readies it: gc.get_objects() hands rings out. */
+PyTypeObject lu_ring_type = {
     PyVarObject_HEAD_INIT(&PyType_Type, 0)
     .tp_name = "deque_ring",
+    .tp_base = &PyBaseObject_Type,
     .tp_basicsize = sizeof(ring),
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
     .tp_dealloc = ring_dealloc,
