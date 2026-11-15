@@ -505,7 +505,7 @@ lu_ev_named(struct gctx *g, lu_v v)
     if (g->named[v] == g->stamp) {
         return 1;
     }
-    if (g->base_stamp != 0 && v < g->capbase_named && g->base_named[v] == g->base_stamp) {
+    if (g->base_ctx != NULL && v < g->capbase_named && g->base_named[v] == g->base_stamp) {
         return 1;
     }
     g->named[v] = g->stamp;     /* asked once: the asker deals with it */
@@ -518,7 +518,7 @@ lu_ev_reached(struct gctx *g, int id)
     if (g->reached[id] == g->stamp) {
         return 1;
     }
-    if (g->base_stamp != 0 && id < g->capbase_reached && g->base_reached[id] == g->base_stamp) {
+    if (g->base_ctx != NULL && id < g->capbase_reached && g->base_reached[id] == g->base_stamp) {
         return 1;
     }
     g->reached[id] = g->stamp;
@@ -621,7 +621,6 @@ lu_ev_exit_fs(struct ctx *c)
             walk_stack(c, fs->stack, fs->nstack);
         }
         else {
-            g->base_stamp = 0;
             g->base_ctx = NULL;
             g->stamp++;
             g->named = stamps(g, g->named, &g->capnamed, g->f->nins);
