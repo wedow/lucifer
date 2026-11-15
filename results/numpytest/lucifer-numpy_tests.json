@@ -111,7 +111,7 @@
     "free_threaded_build": true,
     "gil_enabled": false
   },
-  "interpreter_sha256": "5ff1fcc8fbdc777322a6c3c39161832af6deb23e7bd22b2b36d9c7f930344963",
+  "interpreter_sha256": "ef7bd55cd581935cdd3b23cfd22f220a185074f866f17498b71af855f30c96a1",
   "exitstatus": 1,
   "unexpected": [],
   "not_collected": [],
@@ -128,7 +128,6 @@
     "numpy/tests/test_ctypeslib.py::TestNdpointerCFunc::test_return[float]": "_ctypes.ArgumentError: argument 1: unsupported argument",
     "numpy/tests/test_ctypeslib.py::TestNdpointerCFunc::test_return[overlapping-fields]": "_ctypes.ArgumentError: argument 1: unsupported argument",
     "numpy/tests/test_ctypeslib.py::TestNdpointerCFunc::test_vague_return_value": "_ctypes.ArgumentError: argument 1: unsupported argument",
-    "numpy/tests/test_ctypeslib.py::TestAsArray::test_array": "AssertionError: ",
     "numpy/tests/test_ctypeslib.py::TestAsArray::test_struct_array_pointer": "AssertionError: ",
     "numpy/tests/test_scripts.py::test_f2py[f2py3]": "Test is unreliable",
     "numpy/tests/test_scripts.py::test_f2py[f2py3.14]": "Test is unreliable"
@@ -230,14 +229,12 @@
     "url": "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz"
   },
   "counts": {
-    "PASS": 50714,
+    "PASS": 50745,
     "XFAIL": 30,
-    "SKIP": 1103,
-    "ERROR": 229,
-    "FAIL": 59,
-    "TIMEOUT": 1,
-    "NOTRUN": 135,
+    "SKIP": 1098,
+    "ERROR": 351,
+    "FAIL": 47,
     "XPASS": 2
   },
-  "recorded_at": "2026-11-08T07:52:14.707419+00:00"
+  "recorded_at": "2026-11-15T07:30:16.606587+00:00"
 }

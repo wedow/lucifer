@@ -111,7 +111,7 @@
     "free_threaded_build": true,
     "gil_enabled": false
   },
-  "interpreter_sha256": "5ff1fcc8fbdc777322a6c3c39161832af6deb23e7bd22b2b36d9c7f930344963",
+  "interpreter_sha256": "ef7bd55cd581935cdd3b23cfd22f220a185074f866f17498b71af855f30c96a1",
   "exitstatus": 0,
   "unexpected": [],
   "not_collected": [],
@@ -221,15 +221,14 @@
     "url": "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz"
   },
   "counts": {
-    "PASS": 50299,
+    "PASS": 50714,
     "XFAIL": 30,
     "SKIP": 1103,
-    "ERROR": 85,
-    "FAIL": 67,
-    "NOTRUN": 684,
-    "TIMEOUT": 2,
-    "CRASH": 1,
+    "ERROR": 349,
+    "FAIL": 59,
+    "TIMEOUT": 1,
+    "NOTRUN": 15,
     "XPASS": 2
   },
-  "recorded_at": "2026-11-08T07:03:10.098673+00:00"
+  "recorded_at": "2026-11-15T06:50:10.892626+00:00"
 }

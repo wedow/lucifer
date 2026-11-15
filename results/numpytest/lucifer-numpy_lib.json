@@ -111,8 +111,8 @@
     "free_threaded_build": true,
     "gil_enabled": false
   },
-  "interpreter_sha256": "5ff1fcc8fbdc777322a6c3c39161832af6deb23e7bd22b2b36d9c7f930344963",
-  "exitstatus": 1,
+  "interpreter_sha256": "ef7bd55cd581935cdd3b23cfd22f220a185074f866f17498b71af855f30c96a1",
+  "exitstatus": 0,
   "unexpected": [],
   "not_collected": [],
   "crashed": {},
@@ -121,10 +121,9 @@
     "abiflags": "t",
     "free_threaded_build": true,
     "gil_enabled": false,
-    "exitstatus": 1
+    "exitstatus": 0
   },
   "reasons": {
-    "numpy/lib/tests/test__datasource.py::TestDataSourceOpen::test_ValidBz2File": "Skipped",
     "numpy/lib/tests/test_function_base.py::TestLeaks::test_frompyfunc_leaks[bound-20]": "Functions are immortalized if a thread is launched, making this test flaky",
     "numpy/lib/tests/test_function_base.py::TestLeaks::test_frompyfunc_leaks[unbound-0]": "Functions are immortalized if a thread is launched, making this test flaky",
     "numpy/lib/tests/test_function_base.py::TestDigitize::test_large_integers_decreasing": "gh-11022: np._core.multiarray._monoticity loses precision",
@@ -201,12 +200,6 @@
     "numpy/lib/tests/test_function_base.py::TestQuantile::test_quantile_add_and_multiply_constant[0.9-higher-True]": "Weights not supported by method.",
     "numpy/lib/tests/test_function_base.py::TestQuantile::test_quantile_add_and_multiply_constant[0.9-midpoint-True]": "Weights not supported by method.",
     "numpy/lib/tests/test_histograms.py::TestHistogram::test_big_arrays": "Bad memory reports lead to OOM in ci testing",
-    "numpy/lib/tests/test_io.py::TestSaveTxt::test_large_zip": "AttributeError: module 'os' has no attribute 'statvfs'",
-    "numpy/lib/tests/test_io.py::TestLoadTxt::test_compressed_bz2": "Needs bz2",
-    "numpy/lib/tests/test_io.py::TestLoadTxt::test_compressed_lzma": "Needs lzma",
-    "numpy/lib/tests/test_io.py::TestLoadTxt::test_usecols": "AssertionError: ",
-    "numpy/lib/tests/test_io.py::TestFromTxt::test_compressed_bz2": "Needs bz2",
-    "numpy/lib/tests/test_io.py::TestFromTxt::test_compressed_lzma": "Needs lzma",
     "numpy/lib/tests/test_loadtxt.py::test_nul_character_error[g]": "longdouble/clongdouble assignment may misbehave.",
     "numpy/lib/tests/test_loadtxt.py::test_nul_character_error[G]": "longdouble/clongdouble assignment may misbehave.",
     "numpy/lib/tests/test_loadtxt.py::test_no_thousands_support[e]": "half assignment currently uses Python float converter",
@@ -395,14 +388,12 @@
     "url": "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz"
   },
   "counts": {
-    "PASS": 50537,
+    "PASS": 50743,
     "XFAIL": 30,
-    "SKIP": 1103,
-    "ERROR": 229,
-    "FAIL": 61,
-    "TIMEOUT": 2,
-    "NOTRUN": 309,
+    "SKIP": 1098,
+    "ERROR": 351,
+    "FAIL": 49,
     "XPASS": 2
   },
-  "recorded_at": "2026-11-08T07:45:25.420769+00:00"
+  "recorded_at": "2026-11-15T07:23:54.004913+00:00"
 }

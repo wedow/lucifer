@@ -111,8 +111,8 @@
     "free_threaded_build": true,
     "gil_enabled": false
   },
-  "interpreter_sha256": "5ff1fcc8fbdc777322a6c3c39161832af6deb23e7bd22b2b36d9c7f930344963",
-  "exitstatus": 1,
+  "interpreter_sha256": "ef7bd55cd581935cdd3b23cfd22f220a185074f866f17498b71af855f30c96a1",
+  "exitstatus": 0,
   "unexpected": [],
   "not_collected": [],
   "crashed": {},
@@ -121,10 +121,9 @@
     "abiflags": "t",
     "free_threaded_build": true,
     "gil_enabled": false,
-    "exitstatus": 1
+    "exitstatus": 0
   },
   "reasons": {
-    "numpy/_core/tests/test_umath.py::TestComplexFunctions::test_against_cmath": "ModuleNotFoundError: No module named 'cmath'",
     "numpy/_core/tests/test_umath.py::test_memoverlap_accumulate_cmp[matmul-?]": "For generic signatures only",
     "numpy/_core/tests/test_umath.py::test_memoverlap_accumulate_cmp[matvec-?]": "For generic signatures only",
     "numpy/_core/tests/test_umath.py::test_memoverlap_accumulate_cmp[vecdot-?]": "For generic signatures only",
@@ -283,14 +282,14 @@
     "url": "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz"
   },
   "counts": {
-    "PASS": 50495,
+    "PASS": 50722,
     "XFAIL": 30,
     "SKIP": 1103,
-    "ERROR": 85,
-    "FAIL": 63,
-    "NOTRUN": 494,
-    "XPASS": 2,
-    "TIMEOUT": 1
+    "ERROR": 349,
+    "FAIL": 51,
+    "TIMEOUT": 1,
+    "NOTRUN": 15,
+    "XPASS": 2
   },
-  "recorded_at": "2026-11-08T07:33:00.648280+00:00"
+  "recorded_at": "2026-11-15T07:13:30.336475+00:00"
 }

@@ -111,7 +111,7 @@
     "free_threaded_build": true,
     "gil_enabled": false
   },
-  "interpreter_sha256": "5ff1fcc8fbdc777322a6c3c39161832af6deb23e7bd22b2b36d9c7f930344963",
+  "interpreter_sha256": "ef7bd55cd581935cdd3b23cfd22f220a185074f866f17498b71af855f30c96a1",
   "exitstatus": 1,
   "unexpected": [],
   "not_collected": [],
@@ -128,8 +128,8 @@
     "numpy/_core/tests/test_dtype.py::TestDTypeMakeCanonical::test_structured": "AttributeError: 'ArtificialRandom' object has no attribute '_ArtificialRandom__data'",
     "numpy/_core/tests/test_dtype.py::TestPickling::test_pickling_large": "dtype conversion doesn't allow this yet.",
     "numpy/_core/tests/test_dtype.py::TestDTypeClasses::test_basic_dtypes_subclass_properties[rational2]": "SystemError: '<class 'numpy._core._rational_tests.Rational2DType'>' must not inherit np.dtype.__new__(). User DTypes should currently call `PyArrayDescr_Type.tp_new` from their new.",
-    "numpy/_core/tests/test_dtype.py::TestFromCTypes::test_big_endian_structure_packed": "AssertionError: assert dtype([('one'...two', '<u4')]) == dtype([('one'...two', '>u4')])",
-    "numpy/_core/tests/test_dtype.py::TestFromCTypes::test_big_endian_structure": "AssertionError: assert dtype([('a', ...], align=True) == dtype([('a', ...], align=True)"
+    "numpy/_core/tests/test_dtype.py::TestFromCTypes::test_big_endian_structure_packed": "AssertionError: assert dtype([('one', 'u1'), ('two', '<u4')]) == dtype([('one', 'u1'), ('two', '>u4')])",
+    "numpy/_core/tests/test_dtype.py::TestFromCTypes::test_big_endian_structure": "AssertionError: assert dtype([('a', 'u1'), ('b', '<u2')], align=True) == dtype([('a', 'u1'), ('b', '>u2')], align=True)"
   },
   "artifact_after": {
     "wheel": "numpy-2.5.4-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
@@ -228,15 +228,14 @@
     "url": "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz"
   },
   "counts": {
-    "PASS": 50299,
+    "PASS": 50714,
     "XFAIL": 30,
     "SKIP": 1103,
-    "ERROR": 85,
-    "FAIL": 67,
-    "NOTRUN": 684,
-    "TIMEOUT": 2,
-    "CRASH": 1,
+    "ERROR": 349,
+    "FAIL": 59,
+    "TIMEOUT": 1,
+    "NOTRUN": 15,
     "XPASS": 2
   },
-  "recorded_at": "2026-11-08T07:06:04.898911+00:00"
+  "recorded_at": "2026-11-15T06:52:54.952703+00:00"
 }
