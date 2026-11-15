@@ -87,37 +87,30 @@ should_collect(struct lu_gc *gc)
 }
 
 void
-lu_gc_record_allocation(struct lu_entry *e)
+lu_gc_flush_count(struct lu_entry *e)
 {
     struct lu_gc *gc = &e->interp->gc;
-    if (++e->gc_alloc_count >= LU_GC_ALLOC_FLUSH) {
+    if (e->gc_alloc_count > 0) {
         __atomic_fetch_add(&gc->young_count, e->gc_alloc_count, __ATOMIC_RELAXED);
         e->gc_alloc_count = 0;
         if (should_collect(gc) && !__atomic_load_n(&gc->collecting, __ATOMIC_RELAXED)) {
             lu_poll_set(e->carrier, LU_POLL_GC_SCHEDULED);
         }
+        return;
     }
-}
-
-void
-lu_gc_record_deallocation(struct lu_entry *e)
-{
-    struct lu_gc *gc = &e->interp->gc;
-    if (--e->gc_alloc_count <= -LU_GC_ALLOC_FLUSH) {
-        int count = __atomic_load_n(&gc->young_count, __ATOMIC_RELAXED);
-        int new_count;
-        do {
-            if (count == 0) {
-                break;
-            }
-            new_count = count + e->gc_alloc_count;
-            if (new_count < 0) {
-                new_count = 0;
-            }
-        } while (!__atomic_compare_exchange_n(&gc->young_count, &count, new_count, 0,
-                                              __ATOMIC_RELAXED, __ATOMIC_RELAXED));
-        e->gc_alloc_count = 0;
-    }
+    int count = __atomic_load_n(&gc->young_count, __ATOMIC_RELAXED);
+    int new_count;
+    do {
+        if (count == 0) {
+            break;
+        }
+        new_count = count + e->gc_alloc_count;
+        if (new_count < 0) {
+            new_count = 0;
+        }
+    } while (!__atomic_compare_exchange_n(&gc->young_count, &count, new_count, 0,
+                                          __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+    e->gc_alloc_count = 0;
 }
 
 /* invoke_gc_callback: gc.py's runner calls each of gc.callbacks. */

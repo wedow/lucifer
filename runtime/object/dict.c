@@ -111,9 +111,9 @@ event_name(PyDict_WatchEvent event)
     return "PyDict_EVENT_?";
 }
 
-static void
-send_event(int watcher_bits, PyDict_WatchEvent event, PyDictObject *mp, PyObject *key,
-           PyObject *value)
+void
+lu_dict_send_event(int watcher_bits, PyDict_WatchEvent event, PyDictObject *mp, PyObject *key,
+                   PyObject *value)
 {
     PyInterpreterState *interp = PyInterpreterState_Get();
     for (int i = 0; watcher_bits != 0; i++, watcher_bits >>= 1) {
@@ -142,15 +142,6 @@ changed(PyDictObject *mp, Py_ssize_t ix)
         else {
             lu_jit_invalidate(LU_DEP_KEYS, (uintptr_t)mp, 0);
         }
-    }
-}
-
-void
-lu_dict_notify(PyDictObject *mp, PyDict_WatchEvent event, PyObject *key, PyObject *value)
-{
-    int bits = (int)(__atomic_load_n(&mp->_ma_watcher_tag, __ATOMIC_ACQUIRE) & ((1 << LU_MAX_WATCHERS) - 1));
-    if (bits) {
-        send_event(bits, event, mp, key, value);
     }
 }
 
@@ -1151,7 +1142,8 @@ lu_ns_insert(PyObject *dict, PyObject *key, PyObject *value)
                       Py_TYPE(key)->tp_name);
         return -1;
     }
-    Py_ssize_t ix = ns_find(dict, key);
+    /* A dict with no items has nothing to find: a new one being filled. */
+    Py_ssize_t ix = ((PyDictObject *)dict)->ma_used == 0 ? -1 : ns_find(dict, key);
     if (ix >= 0) {
         lu_dict_replace((PyDictObject *)dict, ix, value);
         return 0;

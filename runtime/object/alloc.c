@@ -138,6 +138,25 @@ _PyMem_mi_heap_collect_qsbr(mi_heap_t *heap)
 }
 
 
+/* mi_heap_malloc, but a small block's empty free list first takes the
+   blocks this thread freed on the page since (_mi_page_free_collect's
+   usual case), as compiled code's in-line allocations do (pop_block):
+   only a page with neither goes the generic way. */
+static inline void *
+heap_malloc(mi_heap_t *heap, size_t size)
+{
+    if (size > MI_SMALL_SIZE_MAX) {
+        return mi_heap_malloc(heap, size);
+    }
+    mi_page_t *page = _mi_heap_get_free_small_page(heap, size);
+    if (page->free == NULL && page->local_free != NULL) {
+        page->free = page->local_free;
+        page->local_free = NULL;
+        page->free_is_zero = false;
+    }
+    return mi_heap_malloc_small(heap, size);
+}
+
 /* Default hooks. */
 
 void *
@@ -170,7 +189,7 @@ lu_raw_free(void *ctx, void *ptr)
 void *
 lu_mem_malloc(void *ctx, size_t size)
 {
-    return mi_heap_malloc(&lu_current_entry()->mimalloc.heaps[LU_HEAP_MEM], size);
+    return heap_malloc(&lu_current_entry()->mimalloc.heaps[LU_HEAP_MEM], size);
 }
 
 void *
@@ -194,7 +213,7 @@ lu_mem_free(void *ctx, void *ptr)
 void *
 lu_obj_malloc(void *ctx, size_t size)
 {
-    return mi_heap_malloc(lu_current_entry()->mimalloc.current_object_heap, size);
+    return heap_malloc(lu_current_entry()->mimalloc.current_object_heap, size);
 }
 
 void *
@@ -257,6 +276,24 @@ lu_mimalloc_abandon(struct lu_entry *entry)
     }
 }
 
+/* A block of `size` bytes from the carrier's object heap `heap`: straight
+   from mimalloc's page while no hook sees allocations, as compiled code's
+   in-line allocations take it (runtime/jit/x86_64/emit.c pop_block), else
+   through the object domain, whose default allocates from
+   current_object_heap. */
+static void *
+object_block(struct lu_entry *e, int heap, size_t size)
+{
+    struct lu_mimalloc_state *m = &e->mimalloc;
+    if (!__atomic_load_n(&_PyRuntime.allocators.observed, __ATOMIC_RELAXED)) {
+        return heap_malloc(&m->heaps[heap], size);
+    }
+    m->current_object_heap = &m->heaps[heap];
+    void *mem = PyObject_Malloc(size);
+    m->current_object_heap = &m->heaps[LU_HEAP_OBJECT];
+    return mem;
+}
+
 /* _PyObject_MallocWithType, _PyObject_GetAllocationHeap and gc_alloc. */
 void *
 lu_gc_alloc(PyTypeObject *tp, size_t size, size_t presize)
@@ -265,11 +302,8 @@ lu_gc_alloc(PyTypeObject *tp, size_t size, size_t presize)
         return NULL;
     }
     struct lu_entry *e = lu_current_entry();
-    struct lu_mimalloc_state *m = &e->mimalloc;
-    m->current_object_heap =
-        &m->heaps[(tp->tp_flags & Py_TPFLAGS_PREHEADER) ? LU_HEAP_GC_PRE : LU_HEAP_GC];
-    char *mem = PyObject_Malloc(presize + size);
-    m->current_object_heap = &m->heaps[LU_HEAP_OBJECT];
+    char *mem = object_block(e, (tp->tp_flags & Py_TPFLAGS_PREHEADER) ? LU_HEAP_GC_PRE : LU_HEAP_GC,
+                             presize + size);
     if (mem == NULL) {
         return NULL;
     }
@@ -283,6 +317,38 @@ lu_gc_alloc(PyTypeObject *tp, size_t size, size_t presize)
         lu_poll_set(e->carrier, LU_POLL_STRESS_TICK);   /* a collection, from M0.2 */
     }
     return mem + presize;
+}
+
+/* The objects the runtime makes natively: zeroed, GC types tracked. */
+PyObject *
+lu_object_new(PyTypeObject *tp, size_t size)
+{
+    int gc = (tp->tp_flags & Py_TPFLAGS_HAVE_GC) != 0;
+    PyObject *op = gc ? lu_gc_alloc(tp, size, 0) : object_block(lu_current_entry(), LU_HEAP_OBJECT, size);
+    if (op == NULL) {
+        return PyErr_NoMemory();
+    }
+    memset(op + 1, 0, size - sizeof(PyObject));
+    lu_object_init(op, tp, gc ? LU_GC_TRACKED : 0);
+    return op;
+}
+
+void
+lu_object_free(PyObject *op)
+{
+    unsigned long flags = Py_TYPE(op)->tp_flags;
+    if (flags & Py_TPFLAGS_HAVE_GC) {
+        lu_gc_record_deallocation(lu_current_entry());
+    }
+    op->ob_gc_bits &= ~LU_GC_TRACKED;
+    /* A heap subclass's instances start at the preheader. */
+    void *mem = (char *)op - ((flags & Py_TPFLAGS_PREHEADER) ? 2 * sizeof(PyObject *) : 0);
+    if (__atomic_load_n(&_PyRuntime.allocators.observed, __ATOMIC_RELAXED)) {
+        PyObject_Free(mem);
+    }
+    else {
+        mi_free(mem);
+    }
 }
 
 /* The public entry points. */

@@ -146,6 +146,35 @@ dealloc_now(PyObject *op)
     dealloc(op);
 }
 
+/* Queues op past the depth: 1, or 0 when there is no room to. */
+static __attribute__((noinline)) int
+trash_park(PyObject *op)
+{
+    if (trash.length == trash.capacity) {
+        size_t capacity = trash.capacity ? trash.capacity * 2 : 64;
+        PyObject **queue = realloc(trash.queue, capacity * sizeof *queue);
+        if (queue != NULL) {
+            trash.queue = queue;
+            trash.capacity = capacity;
+        }
+    }
+    if (trash.length < trash.capacity) {
+        trash.queue[trash.length++] = op;
+        return 1;
+    }
+    return 0;
+}
+
+static __attribute__((noinline)) void
+trash_drain(void)
+{
+    while (trash.length > 0) {
+        trash.depth++;
+        dealloc_now(trash.queue[--trash.length]);
+        trash.depth--;
+    }
+}
+
 void
 _Py_Dealloc(PyObject *op)
 {
@@ -153,28 +182,13 @@ _Py_Dealloc(PyObject *op)
        dealloc runs: the collector must not find a zero count over live fields,
        or an object parked in the trash queue. */
     op->ob_gc_bits &= ~LU_GC_TRACKED;
-    if (trash.depth >= LU_TRASH_DEPTH) {
-        if (trash.length == trash.capacity) {
-            size_t capacity = trash.capacity ? trash.capacity * 2 : 64;
-            PyObject **queue = realloc(trash.queue, capacity * sizeof *queue);
-            if (queue != NULL) {
-                trash.queue = queue;
-                trash.capacity = capacity;
-            }
-        }
-        if (trash.length < trash.capacity) {
-            trash.queue[trash.length++] = op;
-            return;
-        }
+    if (trash.depth >= LU_TRASH_DEPTH && trash_park(op)) {
+        return;
     }
     trash.depth++;
     dealloc_now(op);
-    if (--trash.depth == 0) {
-        while (trash.length > 0) {
-            trash.depth++;
-            dealloc_now(trash.queue[--trash.length]);
-            trash.depth--;
-        }
+    if (--trash.depth == 0 && trash.length > 0) {
+        trash_drain();
     }
 }
 

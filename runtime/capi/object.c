@@ -12,11 +12,7 @@ PyObject_Init(PyObject *op, PyTypeObject *tp)
     if (op == NULL) {
         return PyErr_NoMemory();
     }
-    Py_SET_TYPE(op, tp);
-    if (tp->tp_flags & Py_TPFLAGS_HEAPTYPE) {
-        Py_INCREF(tp);
-    }
-    _Py_NewReference(op);
+    lu_object_init(op, tp, 0);
     return op;
 }
 

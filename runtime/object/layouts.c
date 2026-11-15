@@ -22,34 +22,6 @@ set_layout(PyTypeObject *tp, Py_ssize_t basicsize, Py_ssize_t itemsize,
     tp->tp_dealloc = dealloc;
 }
 
-PyObject *
-lu_object_new(PyTypeObject *tp, size_t size)
-{
-    int gc = (tp->tp_flags & Py_TPFLAGS_HAVE_GC) != 0;
-    PyObject *op = gc ? lu_gc_alloc(tp, size, 0) : PyObject_Malloc(size);
-    if (op == NULL) {
-        return PyErr_NoMemory();
-    }
-    memset(op, 0, size);
-    PyObject_Init(op, tp);
-    if (gc) {
-        op->ob_gc_bits |= LU_GC_TRACKED;
-    }
-    return op;
-}
-
-void
-lu_object_free(PyObject *op)
-{
-    if (Py_TYPE(op)->tp_flags & Py_TPFLAGS_HAVE_GC) {
-        lu_gc_record_deallocation(lu_current_entry());
-    }
-    op->ob_gc_bits &= ~LU_GC_TRACKED;
-    /* A heap subclass's instances start at the preheader. */
-    size_t presize = (Py_TYPE(op)->tp_flags & Py_TPFLAGS_PREHEADER) ? 2 * sizeof(PyObject *) : 0;
-    PyObject_Free((char *)op - presize);
-}
-
 int
 lu_fields_traverse(PyObject *op, Py_ssize_t first, Py_ssize_t end, visitproc visit, void *arg)
 {

@@ -786,12 +786,29 @@ void lu_stw_task_delete(struct _is *interp, struct lu_task *t);
    this many (LOCAL_ALLOC_COUNT_THRESHOLD); compiled code's in-line
    allocations count in the same word. */
 #define LU_GC_ALLOC_FLUSH 512
-void lu_gc_record_allocation(struct lu_entry *entry);
+/* Adds a full batch (either sign) to the interpreter's count. */
+void lu_gc_flush_count(struct lu_entry *entry);
+
+static inline void
+lu_gc_record_allocation(struct lu_entry *e)
+{
+    if (++e->gc_alloc_count >= LU_GC_ALLOC_FLUSH) {
+        lu_gc_flush_count(e);
+    }
+}
+
+static inline void
+lu_gc_record_deallocation(struct lu_entry *e)
+{
+    if (--e->gc_alloc_count <= -LU_GC_ALLOC_FLUSH) {
+        lu_gc_flush_count(e);
+    }
+}
+
 /* Sets _PyRuntime.allocators.observed after the allocators or the reference
    tracer change: a mem or object allocator other than the runtime's, or a
    tracer (runtime/object/alloc.c). */
 void lu_alloc_observe(void);
-void lu_gc_record_deallocation(struct lu_entry *entry);
 /* Why a collection runs (runtime/interp/collector.c). */
 enum { LU_GC_REASON_HEAP, LU_GC_REASON_MANUAL, LU_GC_REASON_SHUTDOWN, LU_GC_REASON_STRESS };
 /* gc.set_debug flags. */
@@ -1024,6 +1041,28 @@ extern LU_EXPORT union lu_runtime {
     };
     unsigned char oracle_size[LU_RUNTIME_SIZE];
 } _PyRuntime;
+
+/* The header PyObject_Init gives a block, written once: the type (a heap
+   type's referenced), owned by this thread with one local reference, and
+   the collector's bits. The reference tracer hears of the birth. */
+static inline void
+lu_object_init(PyObject *op, PyTypeObject *tp, uint8_t gc_bits)
+{
+    op->ob_tid = _Py_ThreadId();
+    op->ob_flags = 0;
+    op->ob_mutex = (PyMutex){ 0 };
+    op->ob_gc_bits = gc_bits;
+    op->ob_ref_local = 1;
+    op->ob_ref_shared = 0;
+    op->ob_type = tp;
+    if (tp->tp_flags & Py_TPFLAGS_HEAPTYPE) {
+        Py_INCREF(tp);
+    }
+    PyRefTracer tracer = _PyRuntime.ref_tracer.func;
+    if (tracer != NULL) {
+        tracer(op, PyRefTracer_CREATE, _PyRuntime.ref_tracer.data);
+    }
+}
 
 static inline void
 lu_qsbr_quiescent(struct lu_carrier *c)
@@ -1595,8 +1634,19 @@ PyObject *lu_call_special(PyObject *self, PyObject *name, PyObject *const *args,
 
 /* The one path that tells watchers about a dict change (FOUNDATIONS 2.4):
    the namespace primitives and the kernel's dict primitives call it before
-   they change `mp`. key and value are borrowed. */
-void lu_dict_notify(PyDictObject *mp, PyDict_WatchEvent event, PyObject *key, PyObject *value);
+   they change `mp`. key and value are borrowed. A dict nothing watches
+   costs one load. */
+void lu_dict_send_event(int watcher_bits, PyDict_WatchEvent event, PyDictObject *mp, PyObject *key,
+                        PyObject *value);
+
+static inline void
+lu_dict_notify(PyDictObject *mp, PyDict_WatchEvent event, PyObject *key, PyObject *value)
+{
+    int bits = (int)(__atomic_load_n(&mp->_ma_watcher_tag, __ATOMIC_ACQUIRE) & ((1 << LU_MAX_WATCHERS) - 1));
+    if (bits) {
+        lu_dict_send_event(bits, event, mp, key, value);
+    }
+}
 /* The version of mp's keys table as it stands (1..65535 for a caller that
    keeps it in a cache word), assigned on first ask and cleared by any change
    to the table's keys; 0 when none can be given. */

@@ -679,15 +679,12 @@ PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
     }
     memset(mem - presize, 0, presize + size);
     PyObject *op = (PyObject *)mem;
-    PyObject_Init(op, tp);
+    lu_object_init(op, tp, gc ? LU_GC_TRACKED : 0);
     if (room > 0) {
         op->ob_flags |= lu_inline_room_flags(tp, room);
     }
     if (tp->tp_itemsize != 0) {
         Py_SET_SIZE(op, nitems);
-    }
-    if (gc) {
-        op->ob_gc_bits |= LU_GC_TRACKED;
     }
     return op;
 }
