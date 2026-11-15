@@ -263,9 +263,11 @@ lu_ev_changed(struct gctx *g)
 {
     g->epoch++;
 }
-/* Whether state fs names instruction value v (a slot, a virtual object's
-   field, the object a virtual one became), other than as held. */
-int lu_ev_names(struct gctx *g, struct lu_fs *fs, lu_v v);
+/* Walks state fs once, after which lu_ev_names says whether it names
+   instruction value v (a slot, a virtual object's field, the object a
+   virtual one became), other than as held, until the next walk. */
+void lu_ev_names_walk(struct gctx *g, struct lu_fs *fs);
+int lu_ev_names(struct gctx *g, lu_v v);
 /* Whether the state's slots reach virtual object id. */
 int lu_ev_reaches(struct gctx *g, const struct state *st, int id);
 

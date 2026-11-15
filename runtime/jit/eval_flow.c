@@ -381,23 +381,31 @@ enter_edge(struct ctx *c, struct edge *e, int pc)
     lu_ev_begin(c, pc);
 }
 
+/* Per slot of a loop header, whose phis are distinct, the slot whose phi
+   it takes first (lead): itself, or -1 without one. */
+static int *
+distinct_leads(struct gctx *g, const lu_v *phis, int nslots)
+{
+    int *lead = lu_ir_alloc(g->f, sizeof(int) * (size_t)(nslots ? nslots : 1));
+    for (int i = 0; i < nslots; i++) {
+        lead[i] = phis[i] != LU_NOV ? i : -1;
+    }
+    return lead;
+}
+
 /* What each phi of a join takes on the current edge: per slot, the
    object an object phi takes (made real here if it was not), the object a
    raw phi's value stands for if there is one, or LU_NOV. `phis` holds,
    per slot, the phi that replaces it (slots that held the same values
-   share one) or LU_NOV. */
+   share one) or LU_NOV, and lead the first slot with that phi (-1: none). */
 static lu_v *
-edge_inputs(struct ctx *c, const lu_v *phis, int nslots)
+edge_inputs(struct ctx *c, const lu_v *phis, const int *lead, int nslots)
 {
     struct gctx *g = c->g;
     lu_v *in = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(nslots ? nslots : 1));
     for (int i = 0; i < nslots; i++) {
         in[i] = LU_NOV;
-        int twin = phis[i] == LU_NOV;
-        for (int k = 0; k < i; k++) {
-            twin |= phis[k] == phis[i];
-        }
-        if (twin) {
+        if (lead[i] != i) {
             continue;
         }
         lu_v r = slots(c)[i];
@@ -438,7 +446,7 @@ carried(struct ctx *c, const lu_v *phis, const lu_v *origin, const lu_v *in, int
    slot a loop carries unchanged gives nothing up: it is one of the slots
    left. */
 static void
-edge_take(struct ctx *c, const lu_v *phis, const lu_v *origin, const lu_v *in, int nslots, int pc)
+edge_take(struct ctx *c, const lu_v *phis, const int *lead, const lu_v *origin, const lu_v *in, int nslots, int pc)
 {
     struct gctx *g = c->g;
     struct lu_fs *rest = lu_ev_snapshot(c, pc);
@@ -447,14 +455,11 @@ edge_take(struct ctx *c, const lu_v *phis, const lu_v *origin, const lu_v *in, i
             *lu_fs_slot(rest, i) = LU_NOV;
         }
     }
+    lu_ev_names_walk(g, rest);
     for (int i = 0; i < nslots; i++) {
         lu_v x = in[i];
         if (x == LU_NOV) {
-            int twin = phis[i] == LU_NOV || origin[i] == LU_NOV;
-            for (int k = 0; k < i; k++) {
-                twin |= phis[k] == phis[i];
-            }
-            if (!twin) {
+            if (lead[i] == i && origin[i] != LU_NOV) {
                 phi_add(c, origin[i], lu_ev_konst(c, NULL));    /* no object yet on this edge */
             }
             continue;
@@ -464,7 +469,7 @@ edge_take(struct ctx *c, const lu_v *phis, const lu_v *origin, const lu_v *in, i
             continue;
         }
         int owned = (I(c, x)->flags & INS_OWNED) != 0;
-        int free_now = owned && !lu_ev_names(g, rest, x);
+        int free_now = owned && !lu_ev_names(g, x);
         for (int k = 0; k < i && free_now; k++) {
             free_now = in[k] != x;      /* an earlier phi took it, or it was released */
         }
@@ -609,6 +614,7 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
     int nslots = edges[0].st.nlocals[d] + edges[0].st.sp[d];
     lu_v *phis = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(nslots ? nslots : 1));
     lu_v *origin = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(nslots ? nslots : 1));
+    int *lead = lu_ir_alloc(g->f, sizeof(int) * (size_t)(nslots ? nslots : 1));
     /* The slots: one that differs between edges becomes a phi. */
     for (int i = 0; i < nslots; i++) {
         lu_v r0 = edges[0].st.v[d][i];
@@ -618,6 +624,7 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
             same &= edges[e].st.v[d][i] == r0;
         }
         phis[i] = LU_NOV;
+        lead[i] = -1;
         if (same) {
             continue;
         }
@@ -632,8 +639,10 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
         }
         if (twin >= 0) {
             phis[i] = phis[twin];
+            lead[i] = twin;
             continue;
         }
+        lead[i] = i;
         int bits = 1;
         for (int e = 0; e < n && bits; e++) {
             g->st = edges[e].st;
@@ -685,7 +694,7 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
     lu_v **in = lu_ir_alloc(g->f, sizeof(lu_v *) * (size_t)n);
     for (int e = 0; e < n; e++) {
         enter_edge(c, &edges[e], pc);
-        in[e] = edge_inputs(c, phis, nslots);
+        in[e] = edge_inputs(c, phis, lead, nslots);
         lu_ev_settle(c, pc);
         edges[e].block = g->cur;
         edges[e].st = g->st;
@@ -728,7 +737,7 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
     }
     for (int e = 0; e < n; e++) {
         enter_edge(c, &edges[e], pc);
-        edge_take(c, phis, origin, in[e], nslots, pc);
+        edge_take(c, phis, lead, origin, in[e], nslots, pc);
         lu_ev_settle(c, pc);
         lu_ir_edge(g->f, g->cur, J);
         lu_ev_emit(c, OP_JUMP, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
@@ -746,12 +755,8 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
         if (phis[i] == LU_NOV) {
             continue;
         }
-        int twin = -1;
-        for (int k = 0; k < i && twin < 0; k++) {
-            twin = phis[k] == phis[i] ? k : -1;
-        }
-        if (twin >= 0) {
-            g->st.v[d][i] = g->st.v[d][twin];
+        if (lead[i] != i) {
+            g->st.v[d][i] = g->st.v[d][lead[i]];
         }
         else if (I(c, phis[i])->rep == REP_OBJ) {
             g->st.v[d][i] = phis[i];
@@ -943,7 +948,8 @@ build_header(struct ctx *c, struct bblk *bb)
         bb->slot_kind[i] = SLOT_OBJ;
     }
     blame_header(c, first, pc);
-    edge_take(c, phis, origin, edge_inputs(c, phis, nslots), nslots, pc);
+    int *lead = distinct_leads(g, phis, nslots);
+    edge_take(c, phis, lead, origin, edge_inputs(c, phis, lead, nslots), nslots, pc);
     /* Iterators the loop steps: the index is a phi, under the same id. */
     int *ids = lu_ir_alloc(g->f, sizeof(int) * (size_t)(MAX_ITERS + 1));
     bb->niter = 0;
@@ -1043,7 +1049,8 @@ back_edge(struct ctx *c, struct bblk *bb)
         return;
     }
     blame_header(c, first, pc);
-    edge_take(c, phis, bb->slot_origin, edge_inputs(c, phis, nslots), nslots, pc);
+    int *lead = distinct_leads(g, phis, nslots);
+    edge_take(c, phis, lead, bb->slot_origin, edge_inputs(c, phis, lead, nslots), nslots, pc);
     /* What the phis took was made real here: a slot the header left alone
        must not have changed with it. */
     for (int i = 0; i < nslots; i++) {

@@ -352,28 +352,6 @@ lu_ev_snapshot(struct ctx *c, int pc)
     return fs;
 }
 
-struct find {
-    lu_v v;
-    int found;
-};
-
-static void
-find_value(struct lu_func *f, lu_v v, void *arg)
-{
-    struct find *fi = arg;
-    fi->found |= v == fi->v;
-}
-
-int
-lu_ev_names(struct gctx *g, struct lu_fs *fs, lu_v v)
-{
-    struct lu_fs slots_only = *fs;
-    slots_only.nheld = 0;
-    struct find fi = { v, 0 };
-    lu_fs_each(g->f, &slots_only, find_value, &fi);
-    return fi.found;
-}
-
 static int
 reaches(struct gctx *g, const struct state *st, lu_v r, int id)
 {
@@ -497,6 +475,23 @@ lu_ev_walk(struct ctx *c)
 {
     walk_base(c);
     walk_stack(c, slots(c) + c->nlocals, *depth_of(c));
+}
+
+void
+lu_ev_names_walk(struct gctx *g, struct lu_fs *fs)
+{
+    struct lu_fs slots_only = *fs;
+    slots_only.nheld = 0;
+    g->stamp++;
+    g->named = stamps(g, g->named, &g->capnamed, g->f->nins);
+    struct walk w = { g, g->named, g->stamp };
+    lu_fs_each(g->f, &slots_only, stamp_value, &w);
+}
+
+int
+lu_ev_names(struct gctx *g, lu_v v)
+{
+    return g->named[v] == g->stamp;
 }
 
 int
