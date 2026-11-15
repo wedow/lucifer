@@ -212,6 +212,8 @@ struct lu_fs {
     int nbinds;
     lu_v *held;
     int nheld;
+    uint32_t mark;              /* the walk that last saw it as a caller (lu_fs_each_once) */
+    uint8_t virt;               /* and whether a slot of it names a virtual object then */
 };
 
 /* Slot i of the frame: its locals, then its stack. */
@@ -306,6 +308,7 @@ struct lu_func {
     struct lu_vobj **vobjs;     /* virtual objects by id: their first records */
     int nvobjs, capvobjs;
     int ninlined;
+    uint32_t marks;             /* walks begun with lu_fs_each_once */
     int loops;                  /* back edges built: one entry may run unbounded work */
     int sites, cold;            /* sites with feedback, and those the interpreter never ran */
     int refused;                /* calls left out of line for want of budget */
@@ -354,8 +357,16 @@ struct lu_vobj *lu_fs_vobj(struct lu_func *f, const struct lu_fs *fs, int id, lu
    its slots, the fields of the virtual objects they reach, the objects
    virtual ones became, and what it holds. A value may come more than once. */
 void lu_fs_each(struct lu_func *f, const struct lu_fs *fs, void (*fn)(struct lu_func *, lu_v, void *), void *arg);
-/* The same for the slots and fields themselves, to rewrite them. */
-void lu_fs_rewrite(struct lu_func *f, struct lu_fs *fs, lu_v (*fn)(lu_v));
+/* lu_fs_each, for a walk that needs each value once: a caller's frame
+   seen before under the same mark (++f->marks begins a walk) gives only
+   what its virtual objects stand for at fs. Inlined code's states share
+   their callers' frames. */
+void lu_fs_each_once(struct lu_func *f, const struct lu_fs *fs, uint32_t mark,
+                     void (*fn)(struct lu_func *, lu_v, void *), void *arg);
+/* The same for the slots and fields themselves, to rewrite them with fn,
+   which gives what it gave before for a value it returned: a caller's
+   frame rewritten under the same mark is not again. */
+void lu_fs_rewrite(struct lu_func *f, struct lu_fs *fs, uint32_t mark, lu_v (*fn)(lu_v));
 
 /* JIT build statistics, for -X lucifer_jit_stats. */
 extern unsigned long lu_jit_bailout_counts[256];

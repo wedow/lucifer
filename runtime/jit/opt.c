@@ -33,6 +33,7 @@ resolve(lu_v v)
 static void
 rewrite(struct lu_func *f)
 {
+    uint32_t mark = ++f->marks;
     for (int v = 0; v < f->nins; v++) {
         struct lu_ins *in = &f->ins[v];
         if (in->flags & INS_DEAD) {
@@ -45,7 +46,7 @@ rewrite(struct lu_func *f)
             in->args[i] = resolve(in->args[i]);
         }
         if (in->fs != NULL) {
-            lu_fs_rewrite(f, in->fs, resolve);
+            lu_fs_rewrite(f, in->fs, mark, resolve);
             for (int i = 0; i < in->fs->nbinds; i++) {
                 struct lu_vobj *o = in->fs->binds[i].obj;
                 for (int k = 0; o != NULL && k < o->n; k++) {
@@ -351,20 +352,23 @@ each_operand(struct lu_func *f, struct lu_ins *in, void (*fn)(struct lu_func *, 
     for (int i = 0; i < in->nargs; i++) {
         fn(f, in->args[i], arg);
     }
-    if (in->fs != NULL) {
-        lu_fs_each(f, in->fs, fn, arg);
-    }
 }
 
 /* Values nothing reads go, and then what only they read. Guards stay:
-   what they prove was used to fold code that is no longer there. */
+   what they prove was used to fold code that is no longer there. An
+   instruction with a state is one that stays, so what a state names is
+   read for good: counted once. */
 static void
 dce(struct lu_func *f)
 {
     int *uses = calloc((size_t)f->nins + 1, sizeof(int));
+    uint32_t mark = ++f->marks;
     for (int v = 0; v < f->nins; v++) {
         if (!(f->ins[v].flags & INS_DEAD)) {
             each_operand(f, &f->ins[v], count_use, uses);
+            if (f->ins[v].fs != NULL) {
+                lu_fs_each_once(f, f->ins[v].fs, mark, count_use, uses);
+            }
         }
     }
     for (int changed = 1; changed;) {

@@ -124,7 +124,41 @@ lu_fs_each(struct lu_func *f, const struct lu_fs *fs, void (*fn)(struct lu_func 
 }
 
 void
-lu_fs_rewrite(struct lu_func *f, struct lu_fs *fs, lu_v (*fn)(lu_v))
+lu_fs_each_once(struct lu_func *f, const struct lu_fs *fs, uint32_t mark,
+                void (*fn)(struct lu_func *, lu_v, void *), void *arg)
+{
+    for (int i = 0; i < fs->nheld; i++) {
+        fn(f, fs->held[i], arg);
+    }
+    for (struct lu_fs *p = (struct lu_fs *)fs; p != NULL; p = p->caller) {
+        int n = p->nlocals + p->nstack;
+        if (p != fs && p->mark == mark) {
+            for (int i = 0; p->virt && i < n; i++) {
+                lu_v r = *lu_fs_slot(p, i);
+                if (LU_IS_VIRT(r)) {
+                    each_ref(f, fs, r, fn, arg);
+                }
+            }
+            continue;
+        }
+        if (p->funcv >= 0) {
+            fn(f, p->funcv, arg);
+        }
+        uint8_t virt = 0;
+        for (int i = 0; i < n; i++) {
+            lu_v r = *lu_fs_slot(p, i);
+            virt |= LU_IS_VIRT(r);
+            each_ref(f, fs, r, fn, arg);
+        }
+        if (p != fs) {
+            p->mark = mark;
+            p->virt = virt;
+        }
+    }
+}
+
+void
+lu_fs_rewrite(struct lu_func *f, struct lu_fs *fs, uint32_t mark, lu_v (*fn)(lu_v))
 {
     for (int i = 0; i < fs->nheld; i++) {
         fs->held[i] = fn(fs->held[i]);
@@ -135,6 +169,12 @@ lu_fs_rewrite(struct lu_func *f, struct lu_fs *fs, lu_v (*fn)(lu_v))
         }
     }
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
+        if (p != fs && p->mark == mark) {
+            continue;
+        }
+        if (p != fs) {
+            p->mark = mark;
+        }
         if (p->funcv >= 0) {
             p->funcv = fn(p->funcv);
         }

@@ -65,18 +65,24 @@ visit_used(struct lu_func *f, lu_v v, void *arg)
 }
 
 /* Calls fn(f, v, arg) for every value the state fs names that has a
-   location. */
+   location; with a mark, once per walk for what callers' frames name
+   (lu_fs_each_once). */
 static void
-each_state_use(struct lu_func *f, struct lu_fs *fs, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
+each_state_use(struct lu_func *f, struct lu_fs *fs, uint32_t mark, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
     struct visit vis = { fn, arg };
-    lu_fs_each(f, fs, visit_used, &vis);
+    if (mark != 0) {
+        lu_fs_each_once(f, fs, mark, visit_used, &vis);
+    }
+    else {
+        lu_fs_each(f, fs, visit_used, &vis);
+    }
 }
 
-/* Calls fn(f, v, arg) for every value instruction `in` reads, phi inputs
-   excepted: its operands, and what its frame state names. */
+/* Calls fn(f, v, arg) for every value instruction `in` reads as an
+   operand, phi inputs excepted. */
 static void
-each_use(struct lu_func *f, struct lu_ins *in, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
+each_operand_use(struct lu_func *f, struct lu_ins *in, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
     lu_v ops[3] = { in->a, in->b, in->c };
     for (int i = 0; i < 3; i++) {
@@ -90,9 +96,6 @@ each_use(struct lu_func *f, struct lu_ins *in, void (*fn)(struct lu_func *, lu_v
                 fn(f, in->args[i], arg);
             }
         }
-    }
-    if (in->fs != NULL) {
-        each_state_use(f, in->fs, fn, arg);
     }
 }
 
@@ -138,13 +141,19 @@ liveness(struct lu_func *f, struct live *L)
                 }
             }
         }
+        /* A value a state names was made before the state's instruction,
+           so one sight of a caller's frame per block says what it reads. */
+        uint32_t mark = ++f->marks;
         for (int i = bl->nins - 1; i >= 0; i--) {
             lu_v v = bl->ins[i];
             struct lu_ins *ins = &f->ins[v];
             BIT_CLR(g, v);
             BIT_SET(d, v);
             if (ins->op != OP_PHI) {
-                each_use(f, ins, mark_live, g);
+                each_operand_use(f, ins, mark_live, g);
+                if (ins->fs != NULL) {
+                    each_state_use(f, ins->fs, mark, mark_live, g);
+                }
             }
         }
     }
@@ -313,24 +322,30 @@ lu_regalloc(struct lu_func *f)
             }
             if (ins->op != OP_PHI) {
                 struct use_at at = { ins->pos };
-                each_use(f, ins, extend_use, &at);
+                each_operand_use(f, ins, extend_use, &at);
             }
-            if (lu_alloc_call(ins) && ins->fs != NULL) {
-                /* Its exits leave after its call: what their state reads
-                   lives across it. A call that publishes that state
-                   (lu_publishes) is read by walkers during the call, from
-                   memory. */
-                struct use_at after = { ins->pos + 1 };
-                each_state_use(f, ins->fs, extend_use, &after);
-                if (lu_publishes(ins)) {
-                    each_state_use(f, ins->fs, mark_memory, memory);
-                }
+            if (lu_alloc_call(ins) && ins->fs != NULL && lu_publishes(ins)) {
+                /* A call that publishes its state (lu_publishes) is read by
+                   walkers during the call, from memory. */
+                each_state_use(f, ins->fs, 0, mark_memory, memory);
             }
             if (lu_alloc_call(ins)) {
                 calls[ncalls++] = ins->pos;
                 if (lu_target.clobbers_saved(ins)) {
                     hard[nhard++] = ins->pos;
                 }
+            }
+        }
+        /* What states read, last first: a caller's frame is seen once per
+           block, at its last reader (what it names was made before the
+           first). A call's exits leave after it, so what their state
+           reads lives across the call. */
+        uint32_t mark = ++f->marks;
+        for (int i = bl->nins - 1; i >= 0; i--) {
+            struct lu_ins *ins = &f->ins[bl->ins[i]];
+            if (ins->op != OP_PHI && ins->fs != NULL) {
+                struct use_at at = { ins->pos + (lu_alloc_call(ins) ? 1 : 0) };
+                each_state_use(f, ins->fs, mark, extend_use, &at);
             }
         }
         /* Phi inputs are read at the end of their predecessor. */
