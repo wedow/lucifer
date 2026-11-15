@@ -274,8 +274,25 @@ code; costs estimated):
 - One atomic transition per resume of a reachable generator.
 - One identity per object once anything has observed it.
 
-ROUND2 prices all of this at under 5% of each gap. Nothing measured
-contradicts that.
+ROUND2 priced all of this at under 5% of each gap. Measured on this
+runtime (2026-11-15, the residual census of the three loops; instructions
+inside a compiled loop, verified), the C behind these items costs 3 to 10
+times what was assumed above:
+
+| item | assumed | measured |
+|---|---:|---:|
+| a 2-tuple: build, store, free the previous one | 40–80 per object | 261 |
+| a one-key dict: build, store, free | 40–80 per object | 895 |
+| `str(7)`: format, allocate, free | | 469 |
+| a critical section pair on a reachable builtin | 10–20 | about 110 |
+| `d['k'] = x`, existing key | | 337 |
+
+The items stay fundamental; their price is the runtime's to fix, not the
+middle end's: an allocation fast path (the small-size path in line, no
+collector bookkeeping before an object is tracked), the lock's
+uncontended path in line, recursion-depth updates only around calls that
+stay out of line, and primitives that do their work without temporary
+buffers or out-of-line accessors.
 
 **Inherited**, and removed by the design: an interpreter frame per compiled
 activation; lent frames and real locals at publishing instructions; rest
@@ -482,9 +499,10 @@ Sizes are lines of C, estimated; the deletion is counted from the tree.
 | S0 | Committed ladders (`tools/bench/ladder`) and the floor (`tools/floor`) | M0 | 700 (Python) |
 | S1 | The spine: state, evaluator, kinds for boxes, tuple, dict, list, instance, iterators and frame; frame states, materializer, walker accessor; descriptors for the primitives reached; deletion of the old middle end | M1, M2, M3 inlined, M4 in part, M12a | +4,500, −11,000 |
 | S2 | Coverage: the remaining opcodes and idioms (attribute caches, class construction, closures, handlers, `with`, keyword calls, iteration), loops and hoisting, loop and resume entries, descriptors for all primitives (about 515) with the stress lane that checks them | M4 | +5,000 |
+| S2c | The call target from the site's profile (§4.2): a callable that is a value (a parameter, a local) at a site that met one function is guarded to be it and its call continued in line; a bound method object's self is read from it. Then the same for a function known by its code (a closure made anew per call), and the budget spent by site count, not in source order | | +400 |
 | S3 | Entries by shape with register arguments and raw ints and floats, generic binder, inferred summaries, unit dependencies, per-unit invalidation, the activation as a machine frame | M3 out of line, M5, M6, M10 | +2,500 |
 | S4 | Ownership beyond the evaluator's rule (§10): anchors, private containers without locks, acquire protocols in line | M12b | +600 |
-| S5 | Kernel reach: elidable folding, once-written attributes, object-keyed value dependencies, unrolling over constant sequences, string and bytes parts, memoryview, the transfer functions | M7, M12c, M12d, M12e | +2,000 |
+| S5 | Kernel reach: elidable folding, once-written attributes, object-keyed value dependencies, unrolling over constant sequences, string and bytes parts, memoryview, the transfer functions; `bytearray` as a virtual kind, a mutable bytes builder (`_struct._pack` fills one by slices: without it `pack` keeps about 600 per call) | M7, M12c, M12d, M12e | +2,300 |
 | S6 | Generators: virtual generator and frame, fusion, in-line resume of an existing generator, yielded fields | M9, M12g | +1,500 |
 | S7 | Namespace code: entries for code with exact dict namespaces, virtual namespaces, `eval` inlined on a profiled code value | M8, M12f | +1,200 |
 | S8 | Virtual aggregates as entry fields, with the second return word | M12p | +1,000 |
@@ -550,6 +568,27 @@ numbers are ROUND2's budgets; its itemized lines cover about a third of
 pickle's, and nothing measured confirms the rest. They are the target all
 the same. The stage that tests them is S5 for pickle and S7 for Genshi,
 each of which must remove most of its loop or name what survived.
+
+Measured after the middle end landed, and projected from a census of
+what is left per loop (2026-11-15; projections estimated):
+
+| loop | master (verified) | after the stages above | with the runtime's four fixes (§3) | target | PyPy |
+|---|---:|---:|---:|---:|---:|
+| Mako cell | 6,304 | about 2,170 | about 910 | 1,200–1,700 | 1,296 |
+| pickle `save` | 71,921 | about 1,900 (1,500–2,400) | about 1,100–1,800 | 1,000–1,400 | 682 |
+| Genshi cell | 63,192 | about 3,500 (3,000–5,500) | about 2,400 | 4,000–5,000 | 2,867 |
+
+The stages alone miss the band on Mako and pickle: what is left is the
+C runtime's price per object and per lock (§3), not residual code. The
+order by instructions removed (Mako / pickle / Genshi): calls that stay
+out of line, by the profiled call target (S2c), entries (S3) and the
+budget, 2,000 / 18,000 / 11,000; kernel specialization on constants (S5),
+1,300 / 30,000 / 300; generators as frames (S6), 0 / 0 / 18,000; mutable
+virtual objects and bytes builders, 0 / 10,000 / 5,000; polymorphic
+attribute caches with class-version folding, 124 / 9,000 / 5,300; then
+namespace entries (S7, 9,000 on Genshi), reference elision (S4), and
+primitive descriptors that drop the frame check and the result-type guard
+after a primitive that cannot be observed.
 
 The loops are not the programs: the Mako cell is 49% of its benchmark
 (verified). The 122-program geomean stays the headline, and each stage
