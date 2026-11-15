@@ -190,7 +190,7 @@ not_inlinable(struct ctx *c, PyFunctionObject *fn, lu_v funcv)
         c->g->f->refused++;
         return "over budget";
     }
-    if (!lu_ev_supported(co)) {
+    if (!lu_ev_supported(c->g, co)) {
         return "an instruction the evaluator lacks";
     }
     return NULL;

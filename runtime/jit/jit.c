@@ -97,6 +97,7 @@ struct lu_jit_code {
     uint32_t *wait;             /* per code unit: entries to leave to the interpreter */
     uint8_t *seen;              /* per code unit: WARMED */
     int noinline;               /* a side exit in an inlined copy keeps leaving: call it instead */
+    struct lu_ev_scan *scan;    /* the evaluator's scan of its blocks (eval_flow.c), once made */
     unsigned long marked;       /* marks when a site of it (or noinline) was last marked */
     int call_pc;                /* where a call enters (call_entry), or -1 */
     struct lu_pic **pics;       /* per code unit: an attribute site's polymorphic cache */
@@ -439,6 +440,28 @@ lu_jit_noinline(PyCodeObject *code)
 {
     struct lu_jit_code *jc = state_of(code);
     return jc != NULL && __atomic_load_n(&jc->noinline, __ATOMIC_RELAXED);
+}
+
+struct lu_ev_scan *
+lu_jit_scan(PyCodeObject *code)
+{
+    struct lu_jit_code *jc = state_of(code);
+    return jc != NULL ? __atomic_load_n(&jc->scan, __ATOMIC_ACQUIRE) : NULL;
+}
+
+struct lu_ev_scan *
+lu_jit_keep_scan(PyCodeObject *code, struct lu_ev_scan *scan)
+{
+    struct lu_jit_code *jc = state_of(code);
+    if (jc == NULL) {
+        return NULL;
+    }
+    struct lu_ev_scan *kept = NULL;
+    if (__atomic_compare_exchange_n(&jc->scan, &kept, scan, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        return scan;
+    }
+    free(scan);
+    return kept;
 }
 
 int
@@ -1629,6 +1652,7 @@ lu_jit_code_free(PyCodeObject *code)
         free(jc->opclasses[i]);
     }
     free(jc->opclasses);
+    free(jc->scan);
     for (struct lu_prof *p = jc->profs, *next; p != NULL; p = next) {
         next = p->next;
         Py_XDECREF(p->type);

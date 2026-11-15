@@ -94,7 +94,8 @@ struct ctx {
     int ncode, nlocals;
     struct bblk *bb;
     int nbb;
-    int *blkat;                 /* code unit -> bblk index, or -1 */
+    int lo;                     /* blocks below it are built or not reached yet */
+    const int *blkat;           /* code unit -> bblk index, or -1 */
     struct lu_fs *caller_fs;    /* an inlined frame's caller, after the call */
     int ret;                    /* how an inlined frame returns (enum lu_frame_return): a value pushed, an
                                    __init__'s None dropped, the instance already on its caller's stack, or
@@ -173,6 +174,13 @@ struct gctx {
 int lu_jit_nospec(PyCodeObject *code, int pc);
 int lu_jit_next_pc(PyCodeObject *code, int pc);
 int lu_jit_noinline(PyCodeObject *code);
+/* The evaluator's scan of a code (eval_flow.c), kept with the code's JIT
+   state: the one kept, or NULL; and one to keep, malloc'd, which the
+   state takes (or frees for one another thread kept first), NULL when the
+   code has no state and the caller keeps it. */
+struct lu_ev_scan;
+struct lu_ev_scan *lu_jit_scan(PyCodeObject *code);
+struct lu_ev_scan *lu_jit_keep_scan(PyCodeObject *code, struct lu_ev_scan *scan);
 
 /* --- eval_state.c --- */
 
@@ -328,7 +336,7 @@ int lu_ev_decode(struct ctx *c, int pc, int *base, int *oparg, int *opcode);
 int lu_ev_jump_target(int op, int oparg, int next);
 /* Whether the evaluator compiles every instruction of code a call can
    reach without an exception; and one opcode (eval_ops.c). */
-int lu_ev_supported(PyCodeObject *code);
+int lu_ev_supported(struct gctx *g, PyCodeObject *code);
 int lu_ev_op_supported(int base);
 void lu_ev_hint(struct gctx *g, PyCodeObject *code, int pc, int slot, int kind);
 int lu_ev_hinted(struct gctx *g, PyCodeObject *code, int pc, int slot);

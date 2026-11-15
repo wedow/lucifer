@@ -63,22 +63,32 @@ terminal(int op)
     return op == RETURN_VALUE || op == RAISE_VARARGS || op == RERAISE || op == YIELD_VALUE;
 }
 
-/* Marks what a call of the code can reach without an exception, from its
-   first instruction; 0 when a reachable instruction is not compiled. */
-int
-lu_ev_supported(PyCodeObject *code)
+/* What every evaluation of a code starts from, made once per code and
+   kept with its JIT state (jit.c), or in the build's arena while it has
+   none: its blocks, and whether the evaluator compiles what a call of it
+   can reach. One allocation without pointers, so that it can be copied. */
+struct lu_ev_scan {
+    int ncode;
+    int ok;                     /* every jump lands in the code */
+    int supported;              /* every instruction a call reaches without an exception is compiled */
+    int nbb;
+    int data[];                 /* blkat[ncode + 1] (a block's index, or -1), then per block its pc and loop end */
+};
+
+/* Whether every instruction a call of the code reaches from its first
+   without an exception is compiled. */
+static int
+reach_supported(struct ctx *c, int n)
 {
-    struct ctx c = { .code = code };
-    int n = (int)Py_SIZE(code), ok = 1;
     char *seen = calloc((size_t)n + 1, 1);
-    int *stack = malloc(sizeof(int) * (size_t)(n + 1)), sp = 0;
+    int *stack = malloc(sizeof(int) * (size_t)(n + 1)), sp = 0, ok = 1;
     stack[sp++] = 0;
     while (sp > 0 && ok) {
         int pc = stack[--sp];
         while (pc < n && !seen[pc]) {
             seen[pc] = 1;
             int base, oparg, op;
-            int next = lu_ev_decode(&c, pc, &base, &oparg, &op);
+            int next = lu_ev_decode(c, pc, &base, &oparg, &op);
             if (!lu_ev_op_supported(base)) {
                 ok = 0;
                 break;
@@ -104,23 +114,23 @@ lu_ev_supported(PyCodeObject *code)
     return ok;
 }
 
-/* The blocks of c's code: every jump target and every instruction after
-   a jump, a branch or an end. */
-static int
-scan(struct ctx *c)
+/* The code's blocks: every jump target and every instruction after a
+   jump, a branch or an end. Malloc'd. */
+static struct lu_ev_scan *
+make_scan(PyCodeObject *code)
 {
-    struct lu_func *f = c->g->f;
-    int n = c->ncode;
-    c->blkat = lu_ir_alloc(f, sizeof(int) * (size_t)(n + 1));
-    int *loop_end = lu_ir_alloc(f, sizeof(int) * (size_t)(n + 1));
-    char *start = lu_ir_alloc(f, (size_t)n + 1);
+    struct ctx c = { .code = code };
+    int n = (int)Py_SIZE(code), ok = 1, nbb = 0;
+    char *start = calloc((size_t)n + 1, 1);
+    int *loop_end = calloc((size_t)n + 1, sizeof(int));
     for (int pc = 0; pc < n;) {
         int base, oparg, op;
-        int next = lu_ev_decode(c, pc, &base, &oparg, &op);
+        int next = lu_ev_decode(&c, pc, &base, &oparg, &op);
         if (is_jump(base) || is_branch(base)) {
             int target = lu_ev_jump_target(base, oparg, next);
             if (target < 0 || target >= n) {
-                return -1;
+                ok = 0;
+                break;
             }
             start[target] = 1;
             if (target <= pc && loop_end[target] < pc + 1) {
@@ -132,21 +142,71 @@ scan(struct ctx *c)
         }
         pc = next;
     }
-    int nbb = 0;
     for (int pc = 0; pc < n; pc++) {
         nbb += start[pc];
     }
-    c->bb = lu_ir_alloc(f, sizeof(struct bblk) * (size_t)(nbb + 2));
-    c->nbb = 0;
-    for (int pc = 0; pc < n; pc++) {
-        c->blkat[pc] = -1;
-        if (start[pc]) {
-            c->blkat[pc] = c->nbb;
-            c->bb[c->nbb].pc = pc;
-            c->bb[c->nbb].loop = loop_end[pc] != 0;
-            c->bb[c->nbb].loop_end = loop_end[pc];
-            c->nbb++;
+    struct lu_ev_scan *s = malloc(sizeof(struct lu_ev_scan) + sizeof(int) * (size_t)(n + 1 + 2 * nbb));
+    int *blkat = s->data, *bbs = s->data + n + 1;
+    s->ncode = n;
+    s->ok = ok;
+    s->nbb = 0;
+    for (int pc = 0; pc <= n; pc++) {
+        blkat[pc] = -1;
+        if (pc < n && start[pc]) {
+            blkat[pc] = s->nbb;
+            bbs[2 * s->nbb] = pc;
+            bbs[2 * s->nbb + 1] = loop_end[pc];
+            s->nbb++;
         }
+    }
+    free(start);
+    free(loop_end);
+    s->supported = ok && reach_supported(&c, n);
+    return s;
+}
+
+static const struct lu_ev_scan *
+scan_of(struct gctx *g, PyCodeObject *code)
+{
+    struct lu_ev_scan *s = lu_jit_scan(code);
+    if (s != NULL) {
+        return s;
+    }
+    s = make_scan(code);
+    struct lu_ev_scan *kept = lu_jit_keep_scan(code, s);
+    if (kept == NULL) {
+        size_t size = sizeof(struct lu_ev_scan) + sizeof(int) * (size_t)(s->ncode + 1 + 2 * s->nbb);
+        kept = lu_ir_alloc(g->f, size);
+        memcpy(kept, s, size);
+        free(s);
+    }
+    return kept;
+}
+
+int
+lu_ev_supported(struct gctx *g, PyCodeObject *code)
+{
+    return scan_of(g, code)->supported;
+}
+
+/* c's blocks, from its code's scan, whose table of where they start c
+   reads until its entry needs a block of its own (block_at). */
+static int
+scan(struct ctx *c)
+{
+    const struct lu_ev_scan *s = scan_of(c->g, c->code);
+    if (!s->ok) {
+        return -1;
+    }
+    const int *bbs = s->data + s->ncode + 1;
+    c->blkat = s->data;
+    c->bb = lu_ir_alloc(c->g->f, sizeof(struct bblk) * (size_t)(s->nbb + 2));
+    c->nbb = s->nbb;
+    c->lo = 0;
+    for (int i = 0; i < s->nbb; i++) {
+        c->bb[i].pc = bbs[2 * i];
+        c->bb[i].loop = bbs[2 * i + 1] != 0;
+        c->bb[i].loop_end = bbs[2 * i + 1];
     }
     return 0;
 }
@@ -158,7 +218,10 @@ block_at(struct ctx *c, int pc)
 {
     if (c->blkat[pc] < 0) {
         /* Blocks stay sorted only by lookup: the walk picks the lowest pc. */
-        c->blkat[pc] = c->nbb;
+        int *blkat = lu_ir_alloc(c->g->f, sizeof(int) * (size_t)(c->ncode + 1));
+        memcpy(blkat, c->blkat, sizeof(int) * (size_t)(c->ncode + 1));
+        blkat[pc] = c->nbb;
+        c->blkat = blkat;
         c->bb[c->nbb].pc = pc;
         c->nbb++;
     }
@@ -1021,6 +1084,9 @@ add_edge(struct ctx *c, int pc)
         g->cur = -1;
         return;
     }
+    if (bb - c->bb < c->lo) {
+        c->lo = (int)(bb - c->bb);
+    }
     if (bb->nin == bb->capin) {
         int cap = bb->capin ? 2 * bb->capin : 2;
         struct edge *p = lu_ir_alloc(g->f, sizeof(struct edge) * (size_t)cap);
@@ -1204,17 +1270,16 @@ lu_ev_build(struct ctx *c, int pc)
     }
     add_edge(c, pc);
     for (;;) {
-        struct bblk *next = NULL;
-        for (int i = 0; i < c->nbb; i++) {
-            struct bblk *bb = &c->bb[i];
-            if (!bb->built && bb->nin > 0 && (next == NULL || bb->pc < next->pc)) {
-                next = bb;
-            }
+        /* The lowest block control reaches that is not built: blocks are
+           in order of their pc but for the entry's, which is built first,
+           and an edge to one below the cursor moves it back. */
+        while (c->lo < c->nbb && (c->bb[c->lo].built || c->bb[c->lo].nin == 0)) {
+            c->lo++;
         }
-        if (next == NULL || g->restart) {
+        if (c->lo == c->nbb || g->restart) {
             return 0;
         }
-        if (build_block(c, next) < 0) {
+        if (build_block(c, &c->bb[c->lo]) < 0) {
             return -1;
         }
     }
