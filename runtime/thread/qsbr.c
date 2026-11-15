@@ -9,8 +9,12 @@
    detached carrier is offline and holds nothing. The least
    sequence over the attached carriers is the read sequence; an item is freed
    once the read sequence has reached its goal. Each carrier keeps its own
-   queue, in goal order, and processes it from the poll handler; an exiting
-   carrier leaves what it could not free to the next carrier that processes.
+   queue, in goal order, and processes it only with a task attached (the poll
+   handler, or a retire that finds it long), as CPython processes a thread's
+   queue only attached: a release can run any finalizer, and a carrier with no
+   task attached is not stopped by a stop-the-world, whose collection borrows
+   ob_tid and empties the free lists. An exiting carrier leaves its queue to
+   the next carrier that processes.
 
    Unlike CPython's array of per-thread states, the carriers form a list under
    the registry lock, which scans and advances take. */
@@ -194,12 +198,11 @@ lu_qsbr_process(struct lu_carrier *c)
     process_orphans();
 }
 
-/* An exiting carrier: goes offline and leaves its unfreed items behind. */
+/* An exiting carrier, with no task attached: goes offline and leaves its items behind. */
 void
 lu_qsbr_unregister(struct lu_carrier *c)
 {
     lu_qsbr_detach(c);
-    process_queue(&c->qsbr.queue);
     pthread_mutex_lock(&_PyRuntime.qsbr.lock.mutex);
     struct lu_qsbr_queue *q = &c->qsbr.queue;
     for (size_t i = q->first; i < q->n; i++) {

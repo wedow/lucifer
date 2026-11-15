@@ -12,8 +12,7 @@
 
    Under -X lucifer_handoff the main task may be on the second carrier, and then the thread that
    called the program (the home carrier's) is gone in the child: the surviving thread finishes the
-   program, through lu_main_finished. Both scheduler carriers do their frees under the scheduler
-   lock, so the fork never finds one in the middle of a free. */
+   program, through lu_main_finished. */
 
 #define _GNU_SOURCE
 #include "thread/lock.h"

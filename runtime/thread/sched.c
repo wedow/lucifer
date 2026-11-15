@@ -135,15 +135,8 @@ run_loop(struct lu_carrier *c, struct lu_task *waiting)
             if (waiting == NULL && __atomic_load_n(&_PyRuntime.sched.stop, __ATOMIC_ACQUIRE)) {
                 return NULL;
             }
-            /* Nothing runs here, so nothing reads storage this carrier has
-               retired: free what it can before sleeping. */
-            if (c->qsbr.queue.first < c->qsbr.queue.n) {
-                /* Under the scheduler lock, which os.fork takes: a fork never finds this carrier
-                   in the middle of a free. */
-                pthread_mutex_lock(&_PyRuntime.sched.lock.mutex);
-                lu_qsbr_process(c);
-                pthread_mutex_unlock(&_PyRuntime.sched.lock.mutex);
-            }
+            /* No task is attached, so a stop-the-world does not wait for this carrier: what it
+               has retired waits for the next task here, as a detached thread's queue does. */
             lu_carrier_sleep(c, seq);
             continue;
         }
