@@ -232,7 +232,8 @@ void lu_jit_note_resume(void);
 #define LU_PIC_WAYS 4
 struct lu_pic_entry {
     uint32_t version;
-    uint16_t op;                /* LOAD_ATTR_INSTANCE_VALUE, _METHOD_* or _NONDESCRIPTOR_*; STORE_ATTR_INSTANCE_VALUE */
+    uint16_t op;                /* LOAD_ATTR_INSTANCE_VALUE, _WITH_HINT, _SLOT, _METHOD_*, _NONDESCRIPTOR_* or _PROPERTY;
+                                   STORE_ATTR_INSTANCE_VALUE, _WITH_HINT or _SLOT */
     uint16_t index;
     PyObject *descr;
 };

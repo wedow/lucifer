@@ -206,20 +206,24 @@ load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr
     return 0;
 }
 
+/* How an attribute instruction is built as one specialization has it. */
+typedef int attr_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr, struct lu_pic *pic);
+
 /* The site's shapes from the i-th of n on: a test of the owner's type
-   version for each, with the load as that shape has it; then any other
-   owner's, generic. Each way is built to the instruction's end, and they
-   join after it. A unit built for fewer shapes than the cache has now
-   leaves from its generic load to be built again, itself alone. */
+   version for each, with the load or store as that shape has it (`as`);
+   then any other owner's, `generic`. Each way is built to the
+   instruction's end, and they join after it. A unit built for fewer
+   shapes than the cache has now leaves from its generic way to be built
+   again, itself alone. */
 static int
-load_ways(struct ctx *c, struct lu_pic *pic, int n, int i)
+attr_ways(struct ctx *c, struct lu_pic *pic, int n, int i, attr_as *as, int generic)
 {
     lu_v owner = lu_ev_peek(c, 1);
     if (i == n) {
         /* A cache that is full, or that has stopped looking, learns no
            more: the generic load tells it nothing. */
         if (!lu_jit_pic_learns(pic, n)) {
-            return load_as(c, LOAD_ATTR, 0, 0, NULL, NULL);
+            return as(c, generic, 0, 0, NULL, NULL);
         }
         uint64_t key = (uint64_t)n;
         for (struct ctx *k = c; k != NULL; k = k->parent) {
@@ -228,7 +232,7 @@ load_ways(struct ctx *c, struct lu_pic *pic, int n, int i)
         lu_v args[2] = { lu_ev_const_i(c, (int64_t)(intptr_t)pic), lu_ev_const_i(c, n) };
         I(c, lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_pic_same, 2, args, 0), 1))->prof
             = lu_jit_prof(c->g->f->code, key);
-        return load_as(c, LOAD_ATTR, 0, 0, NULL, pic);
+        return as(c, generic, 0, 0, NULL, pic);
     }
     struct lu_pic_entry e = pic->e[i];
     if (i == 0) {
@@ -242,11 +246,11 @@ load_ways(struct ctx *c, struct lu_pic *pic, int n, int i)
     if (e.descr != NULL) {
         lu_ev_konst(c, e.descr);
     }
-    if (load_as(c, e.op, e.version, e.index, e.descr, pic) < 0) {
+    if (as(c, e.op, e.version, e.index, e.descr, pic) < 0) {
         return -1;
     }
     lu_ev_split_else(c, &s);
-    if (load_ways(c, pic, n, i + 1) < 0) {
+    if (attr_ways(c, pic, n, i + 1, as, generic) < 0) {
         return -1;
     }
     lu_ev_split_end(c, &s);
@@ -256,8 +260,7 @@ load_ways(struct ctx *c, struct lu_pic *pic, int n, int i)
 int
 lu_ev_load_attr(struct ctx *c)
 {
-    lu_v owner = lu_ev_peek(c, 1), v;
-    int method = c->oparg & 1;
+    lu_v owner = lu_ev_peek(c, 1);
     PyObject *name = name_at(c, c->oparg >> 1);
     /* A known module's attribute: a constant, guarded
        as a global is. */
@@ -287,7 +290,7 @@ lu_ev_load_attr(struct ctx *c)
     /* A site with no one shape has a cache of the few it met (jit.h). */
     struct lu_pic *pic = op == LOAD_ATTR && owner >= 0 && !nospec(c, c->pc)
         ? lu_jit_pic(c->code, (int)(c->cache - 1 - lu_code_start(c->code)), 1) : NULL;
-    int done = pic != NULL ? load_ways(c, pic, __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE), 0)
+    int done = pic != NULL ? attr_ways(c, pic, __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE), 0, load_as, LOAD_ATTR)
                            : load_as(c, op, version, index, descr, NULL);
     Py_XDECREF(descr);
     return done;
@@ -315,15 +318,13 @@ temporary_number(struct ctx *c, lu_v v, int *op)
     return named ? LU_NOV : o->f[0];
 }
 
-int
-lu_ev_store_attr(struct ctx *c)
+/* The store as specialization `op` has it, its operands popped; any other
+   way through the generic store, which tells `pic` what it meets. */
+static int
+store_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr, struct lu_pic *pic)
 {
     lu_v owner = lu_ev_peek(c, 1), v = lu_ev_peek(c, 2);
     PyObject *name = name_at(c, c->oparg);
-    uint32_t version = 0;
-    uint16_t index = 0;
-    PyObject *unused;
-    int op = LU_IS_VIRT(owner) ? STORE_ATTR : cached_site(c, STORE_ATTR, &version, &index, &unused);
     if (op == STORE_ATTR_WITH_HINT) {
         lu_v args[4] = { owner, v, lu_ev_konst(c, name), lu_ev_const_i(c, version) };
         lu_v g = lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_attr_store, 4, args, 0), 1);
@@ -344,10 +345,24 @@ lu_ev_store_attr(struct ctx *c)
         lu_ev_helper(c, H_slot_store, 3, args, 0);
     }
     else {
-        lu_v args[4] = { owner, lu_ev_konst(c, name), v, lu_ev_const_i(c, 0) };
+        lu_v args[4] = { owner, lu_ev_konst(c, name), v, lu_ev_const_i(c, (int64_t)(intptr_t)pic) };
         lu_ev_helper(c, H_store_attr, 4, args, 2);
     }
     lu_ev_pop(c);
     lu_ev_pop(c);
     return 0;
+}
+
+int
+lu_ev_store_attr(struct ctx *c)
+{
+    lu_v owner = lu_ev_peek(c, 1);
+    uint32_t version = 0;
+    uint16_t index = 0;
+    PyObject *unused;
+    int op = LU_IS_VIRT(owner) ? STORE_ATTR : cached_site(c, STORE_ATTR, &version, &index, &unused);
+    struct lu_pic *pic = op == STORE_ATTR && owner >= 0 && !nospec(c, c->pc)
+        ? lu_jit_pic(c->code, (int)(c->cache - 1 - lu_code_start(c->code)), 1) : NULL;
+    return pic != NULL ? attr_ways(c, pic, __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE), 0, store_as, STORE_ATTR)
+                       : store_as(c, op, version, index, NULL, NULL);
 }

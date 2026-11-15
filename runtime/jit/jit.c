@@ -1311,7 +1311,8 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
     int op = site[0].op.code;
     if (op != LOAD_ATTR_INSTANCE_VALUE && op != LOAD_ATTR_METHOD_NO_DICT && op != LOAD_ATTR_METHOD_WITH_VALUES
         && op != LOAD_ATTR_NONDESCRIPTOR_NO_DICT && op != LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES
-        && op != STORE_ATTR_INSTANCE_VALUE && op != LOAD_ATTR_PROPERTY) {
+        && op != LOAD_ATTR_WITH_HINT && op != LOAD_ATTR_SLOT && op != LOAD_ATTR_PROPERTY
+        && op != STORE_ATTR_INSTANCE_VALUE && op != STORE_ATTR_WITH_HINT && op != STORE_ATTR_SLOT) {
         return;
     }
     struct lu_pic_entry e = { lu_cache_load32(site + 1 + LA_VERSION), (uint16_t)op, lu_cache_load(site + 1 + LA_INDEX),

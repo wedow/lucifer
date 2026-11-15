@@ -128,7 +128,63 @@ def missing(n):
     return hits
 
 
+class G:
+    def __init__(self, i):
+        self.__dict__['x'] = i          # its attributes live in a dict
+        self.__dict__['y'] = i + 1
+        for k in range(i % 5):
+            setattr(self, 'extra%d' % k, k)     # and not all at the same place
+
+    def area(self):
+        return self.__dict__['x']
+
+    kind = 'g'
+
+
+class H:
+    __slots__ = ('x', 'y', 'n')
+    kind = 'h'
+
+    def __init__(self, i):
+        self.x = i
+        self.y = 2
+
+    def area(self):
+        return self.y
+
+
+def stores(n, classes):
+    objs = [classes[i % len(classes)](i) for i in range(48)]
+    for i in range(n):
+        o = objs[i % 48]
+        o.x = o.x + 1
+        o.y = i
+        if i % 97 == 0:
+            o.x = 0.5
+    out = sorted((type(o).__name__, o.x, o.y) for o in objs)
+    return out[:3], out[-3:], sum(o.x for o in objs)
+
+
+def store_errors(n):
+    objs = [A(1), H(2), D(3), A(4)]
+    bad = 0
+    for i in range(n):
+        o = objs[i % 4]
+        try:
+            o.n = i                     # D has no such slot
+        except AttributeError:
+            bad += 1
+    return bad, objs[0].n, objs[1].n, objs[3].n
+
+
 print('two', mix(N, [A, B]))
+print('dicts', mix(N, [A, G]))
+print('slots', mix(N, [H, D, A]))
+print('all', mix(N, [A, B, G, H]))
+print('stores2', stores(N, [A, B]))
+print('stores4', stores(N, [A, G, H, D]))
+print('stores5', stores(N, [A, B, G, H, D]))
+print('store_errors', store_errors(N))
 print('three', mix(N, [A, B, C]))
 print('five', mix(N, [A, B, C, D, E]))
 print('six', mix(N, [A, B, C, D, E, F]))
