@@ -132,6 +132,76 @@ def reflected(n):
     return out[-5:]
 
 
-for f in (plain_eq, eq_added, base_changed, base_method, reclassed, churn, reflected):
+import enum
+
+
+class Direction(enum.Enum):
+    FORWARD = 1
+    BACKWARD = 2
+
+
+class Limits:
+    LOW = 3
+    HIGH = 10 ** 6
+    NAME = 'limits'
+
+
+class Narrow(Limits):
+    LOW = 5
+
+
+class Meta(type):
+    def __getattr__(cls, name):
+        if name == 'MISSING':
+            return 'made up'
+        raise AttributeError(name)
+
+
+class Dynamic(metaclass=Meta):
+    PRESENT = 'here'
+
+
+def class_constants(n):
+    hits = 0
+    for i in range(n):
+        d = Direction.FORWARD if i % 3 else Direction.BACKWARD
+        if d is Direction.FORWARD:
+            hits += Limits.LOW
+        elif Narrow.LOW < Narrow.HIGH:
+            hits += Narrow.LOW + len(Limits.NAME)
+    return hits, Direction.FORWARD.name, Direction.BACKWARD.value
+
+
+def class_constants_change(n):
+    out = []
+    for i in range(n):
+        if i == n - 12:
+            Limits.LOW = 30
+        if i == n - 9:
+            Narrow.LOW = 50
+        if i == n - 6:
+            del Narrow.LOW
+        if i == n - 3:
+            Limits.LOW = property(lambda self: 1)
+        out.append((Limits.LOW if not isinstance(Limits.LOW, property) else 'prop', Narrow.LOW if not isinstance(Narrow.LOW, property) else 'prop'))
+    Limits.LOW = 3
+    Narrow.LOW = 5
+    return out[-14:]
+
+
+def metaclass_attrs(n):
+    out = []
+    for i in range(n):
+        if i == n - 4:
+            Meta.PRESENT = 'meta data'          # no descriptor: the class's own still wins
+        if i == n - 2:
+            Meta.PRESENT = property(lambda cls: 'meta property')
+        out.append((Dynamic.PRESENT, Dynamic.MISSING))
+    del Meta.PRESENT
+    return out[-6:]
+
+
+for f in (plain_eq, eq_added, base_changed, base_method, reclassed, churn, reflected, class_constants,
+          class_constants_change, metaclass_attrs):
     print(f.__name__, f(N))
     print(f.__name__, f(N // 4))

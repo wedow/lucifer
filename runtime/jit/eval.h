@@ -373,6 +373,14 @@ int lu_ev_kernel_op(struct ctx *c, int kid, lu_v *args, int n, int nops, int ret
 int lu_ev_return(struct ctx *c);
 int lu_ev_get_iter(struct ctx *c);              /* eval_iter.c */
 int lu_ev_for_iter(struct ctx *c);
+/* What a class's attributes and bases are is read as of a version
+   (eval_prims.c): lu_ev_class_as_of gives the version to read at (0 for a
+   static type, which has none to change), or 0 when the class has none
+   to rely on; what was read stands once lu_ev_class_relied says the
+   version is still the class's (`type` is the class as a constant): it
+   is then a dependency of the unit. */
+int lu_ev_class_as_of(struct ctx *c, PyTypeObject *t, uint32_t *version);
+int lu_ev_class_relied(struct ctx *c, lu_v type, uint32_t version);
 /* A call of the primitive `name` answered from the state: the result, or
    LU_NOV - 1 when the call must be made (eval_prims.c). */
 #define LU_EV_NONE (INT32_MIN)

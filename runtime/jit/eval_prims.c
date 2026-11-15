@@ -38,8 +38,8 @@ float_ir(struct ctx *c, int op, lu_v a, lu_v b)
    was read then stands when class_relied says the version is still the
    class's: it is guarded there, and the guard becomes a dependency of the
    unit (facts.c), which a change to the class or to a base of it kills. */
-static int
-class_as_of(struct ctx *c, PyTypeObject *t, uint32_t *version)
+int
+lu_ev_class_as_of(struct ctx *c, PyTypeObject *t, uint32_t *version)
 {
     *version = 0;
     if (t->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) {
@@ -52,8 +52,8 @@ class_as_of(struct ctx *c, PyTypeObject *t, uint32_t *version)
     return *version != 0;
 }
 
-static int
-class_relied(struct ctx *c, lu_v type, uint32_t version)
+int
+lu_ev_class_relied(struct ctx *c, lu_v type, uint32_t version)
 {
     if (version == 0) {
         return 1;
@@ -186,10 +186,10 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
     }
     uint32_t version;
     if (nargs == 2 && strcmp(name, "type_lookup") == 0 && k0 != NULL && PyType_Check(k0) && k1 != NULL
-        && PyUnicode_CheckExact(k1) && class_as_of(c, (PyTypeObject *)k0, &version)) {
+        && PyUnicode_CheckExact(k1) && lu_ev_class_as_of(c, (PyTypeObject *)k0, &version)) {
         PyObject *r = _PyType_Lookup((PyTypeObject *)k0, k1);
         lu_v k = lu_ev_konst(c, r != NULL ? r : LU_MISSING);
-        return class_relied(c, args[0], version) ? k : LU_EV_NONE;
+        return lu_ev_class_relied(c, args[0], version) ? k : LU_EV_NONE;
     }
     if (nargs == 1 && strcmp(name, "type_can_new") == 0 && k0 != NULL && PyType_Check(k0)
         && (((PyTypeObject *)k0)->tp_flags & Py_TPFLAGS_IMMUTABLETYPE)) {
@@ -200,9 +200,9 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
         return lu_ev_konst(c, lu_next_missing_of(k0));
     }
     if (nargs == 2 && strcmp(name, "is_subtype") == 0 && k0 != NULL && PyType_Check(k0) && k1 != NULL
-        && PyType_Check(k1) && class_as_of(c, (PyTypeObject *)k0, &version)) {
+        && PyType_Check(k1) && lu_ev_class_as_of(c, (PyTypeObject *)k0, &version)) {
         int sub = PyType_IsSubtype((PyTypeObject *)k0, (PyTypeObject *)k1);
-        return class_relied(c, args[0], version) ? truth_const(c, sub) : LU_EV_NONE;
+        return lu_ev_class_relied(c, args[0], version) ? truth_const(c, sub) : LU_EV_NONE;
     }
     if (nargs == 2 && strcmp(name, "kind") == 0 && k1 != NULL && PyUnicode_CheckExact(k1)
         && lu_ev_learn_type(c, args[0], 0) != NULL) {

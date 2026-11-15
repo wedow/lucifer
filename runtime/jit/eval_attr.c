@@ -257,6 +257,35 @@ attr_ways(struct ctx *c, struct lu_pic *pic, int n, int i, attr_as *as, int gene
     return 0;
 }
 
+/* A plain attribute of a class the unit knows (Color.RED, a constant kept
+   on a class), as type.__getattribute__ finds it: the metaclass has
+   nothing by the name and its lookup is type's own, and what the class
+   has is no descriptor. Read as of both classes' versions, which the unit
+   then depends on. 1 with the attribute in place of the owner; 0 when
+   it is not such an attribute. */
+static int
+class_attribute(struct ctx *c, lu_v owner, PyTypeObject *cls, PyObject *name)
+{
+    PyTypeObject *meta = Py_TYPE(cls);
+    uint32_t vc, vm;
+    if (nospec(c, c->pc) || !PyType_Check((PyObject *)meta) || !lu_ev_class_as_of(c, cls, &vc)
+        || !lu_ev_class_as_of(c, meta, &vm)) {
+        return 0;
+    }
+    PyObject *k = _PyType_Lookup(cls, name);
+    if (k == NULL || Py_TYPE(k)->tp_descr_get != NULL || _PyType_Lookup(meta, name) != NULL
+        || _PyType_Lookup(meta, LU_ID(__getattr__)) != NULL
+        || _PyType_Lookup(meta, LU_ID(__getattribute__)) != _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__))) {
+        return 0;
+    }
+    lu_v value = lu_ev_konst(c, k);
+    if (!lu_ev_class_relied(c, owner, vc) || !lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)meta), vm)) {
+        return 0;
+    }
+    replace_owner(c, value, LU_NOV);
+    return 1;
+}
+
 int
 lu_ev_load_attr(struct ctx *c)
 {
@@ -285,10 +314,14 @@ lu_ev_load_attr(struct ctx *c)
     uint32_t version = 0;
     uint16_t index = 0;
     PyObject *descr = NULL;
+    if (mod != NULL && PyType_Check(mod) && class_attribute(c, owner, (PyTypeObject *)mod, name)) {
+        return 0;
+    }
     /* An object the code made has no cache to read: its own lookup. */
     int op = LU_IS_VIRT(owner) ? LOAD_ATTR : cached_site(c, LOAD_ATTR, &version, &index, &descr);
-    /* A site with no one shape has a cache of the few it met (jit.h). */
-    struct lu_pic *pic = op == LOAD_ATTR && owner >= 0 && !nospec(c, c->pc)
+    /* A site with no one shape has a cache of the few it met (jit.h), and
+       so has one whose one shape kept failing: its tests leave nowhere. */
+    struct lu_pic *pic = op == LOAD_ATTR && owner >= 0
         ? lu_jit_pic(c->code, (int)(c->cache - 1 - lu_code_start(c->code)), 1) : NULL;
     int done = pic != NULL ? attr_ways(c, pic, __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE), 0, load_as, LOAD_ATTR)
                            : load_as(c, op, version, index, descr, NULL);
@@ -361,7 +394,7 @@ lu_ev_store_attr(struct ctx *c)
     uint16_t index = 0;
     PyObject *unused;
     int op = LU_IS_VIRT(owner) ? STORE_ATTR : cached_site(c, STORE_ATTR, &version, &index, &unused);
-    struct lu_pic *pic = op == STORE_ATTR && owner >= 0 && !nospec(c, c->pc)
+    struct lu_pic *pic = op == STORE_ATTR && owner >= 0
         ? lu_jit_pic(c->code, (int)(c->cache - 1 - lu_code_start(c->code)), 1) : NULL;
     return pic != NULL ? attr_ways(c, pic, __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE), 0, store_as, STORE_ATTR)
                        : store_as(c, op, version, index, NULL, NULL);
