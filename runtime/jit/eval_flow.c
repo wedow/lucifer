@@ -691,14 +691,18 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
         edges[e].st = g->st;
     }
     /* Virtual objects the joined state still reaches mean one thing after
-       the join. Making one real may make others real, so until none differs. */
+       the join. Making one real may make others real, so until none differs.
+       Whether an object differs does not depend on the edge that names it:
+       each is looked at once per round. */
     struct override *over = NULL;
     int nover = 0, capover = 0;
     for (int changed = 1; changed;) {
         changed = 0;
+        char *seen = lu_ir_alloc(g->f, (size_t)g->f->nvobjs + 1);
         for (int e = 0; e < n && !changed; e++) {
             for (int b = 0; b < edges[e].st.nbinds && !changed; b++) {
-                int id = edges[e].st.binds[b].id, done = 0, same = 1, reached = 0;
+                int id = edges[e].st.binds[b].id, done = seen[id], same = 1, reached = 0;
+                seen[id] = 1;
                 for (int k = 0; k < nover; k++) {
                     done |= over[k].id == id;
                 }
