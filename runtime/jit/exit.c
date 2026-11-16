@@ -154,13 +154,12 @@ object(struct maker *m, int k)
             PyTuple_SET_ITEM(o, i, take(m, fields[i]));
         }
         break;
-    case VK_SEQITER:
-        o = lu_object_new(ob->type, sizeof(seqiterobject));
-        if (o != NULL) {
-            ((seqiterobject *)o)->it_seq = take(m, fields[0]);
-            ((seqiterobject *)o)->it_index = (Py_ssize_t)raw(m, fields[1]);
-        }
+    case VK_SEQITER: {
+        PyObject *seq = take(m, fields[0]);
+        o = seq != NULL ? lu_seqiter_at(ob->type, seq, (Py_ssize_t)raw(m, fields[1])) : NULL;
+        Py_XDECREF(seq);
         break;
+    }
     case VK_METHOD: {
         PyObject *fn = take(m, fields[0]), *self = take(m, fields[1]);
         o = fn != NULL && self != NULL ? PyMethod_New(fn, self) : NULL;

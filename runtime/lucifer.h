@@ -1833,6 +1833,10 @@ typedef struct {
     Py_ssize_t it_index;
     PyObject *it_seq;
 } seqiterobject;
+/* A tuple's or list's iterator of seq at index; at LU_SEQITER_DONE, compiled
+   code's mark for one that ended while it did not exist, it is exhausted. */
+#define LU_SEQITER_DONE PY_SSIZE_T_MAX
+PyObject *lu_seqiter_at(PyTypeObject *tp, PyObject *seq, Py_ssize_t index);
 /* range_iterator (runtime/prim/storage.c): the values as C longs, which
    compiled code steps in place (runtime/jit). */
 typedef struct {

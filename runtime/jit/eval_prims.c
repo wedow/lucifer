@@ -234,6 +234,11 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
         }
         return r;
     }
+    if (nargs == 2 && strcmp(name, "iter_new") == 0
+        && ((k0 == (PyObject *)&PyListIter_Type && type_at(c, args, 1) == &PyList_Type)
+            || (k0 == (PyObject *)&PyTupleIter_Type && type_at(c, args, 1) == &PyTuple_Type))) {
+        return lu_ev_seqiter_new(c, args[1]);       /* the iterator the kernel makes, as GET_ITER's */
+    }
     if ((nargs == 2 && strcmp(name, "field_get") == 0) || (nargs == 3 && strcmp(name, "field_set") == 0)) {
         lu_v real;
         struct lu_vobj *o = LU_IS_VIRT(args[0]) ? lu_ev_virt(c->g, &c->g->st, args[0], &real) : NULL;

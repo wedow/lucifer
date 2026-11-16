@@ -480,6 +480,11 @@ int lu_ev_gen_back_edge(struct ctx *c, lu_v phi, lu_v now);
 int lu_ev_returned(struct ctx *c, lu_v v);
 int lu_ev_get_iter(struct ctx *c);              /* eval_iter.c */
 int lu_ev_for_iter(struct ctx *c);
+/* An exact list's or tuple's iterator that does not exist, at its start;
+   the kernel's seqiter_next of one, a call of nops entries, done in place
+   (1), or 0 when the iterator exists. */
+lu_v lu_ev_seqiter_new(struct ctx *c, lu_v seq);
+int lu_ev_seqiter_next(struct ctx *c, lu_v it, int nops);
 /* What a class's attributes and bases are is read as of a version
    (eval_prims.c): lu_ev_class_as_of gives the version to read at (0 for a
    static type, which has none to change), or 0 when the class has none

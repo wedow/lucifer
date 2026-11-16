@@ -859,14 +859,11 @@ h_range_iter(int64_t start, int64_t stop, int64_t step)
 static PyObject *
 h_seqiter_new(PyObject *seq, int64_t index)
 {
-    seqiterobject *it = (seqiterobject *)lu_object_new(
-        Py_IS_TYPE(seq, &PyTuple_Type) ? &PyTupleIter_Type : &PyListIter_Type, sizeof(seqiterobject));
+    PyObject *it = lu_seqiter_at(Py_IS_TYPE(seq, &PyTuple_Type) ? &PyTupleIter_Type : &PyListIter_Type, seq, index);
     if (it == NULL) {
         Py_FatalError("lucifer jit: out of memory stepping a loop");
     }
-    it->it_seq = Py_NewRef(seq);
-    it->it_index = index;
-    return (PyObject *)it;
+    return it;
 }
 
 static PyObject *

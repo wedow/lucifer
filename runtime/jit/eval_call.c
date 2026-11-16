@@ -637,6 +637,10 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
             lu_ev_own(c, r);
         }
     }
+    else if (prim != NULL && self == LU_NOV && nkw == 0 && n == 1 && strcmp(prim, "seqiter_next") == 0
+             && lu_ev_seqiter_next(c, a[0], nops)) {
+        return 0;
+    }
     else if (prim != NULL && self == LU_NOV && nkw == 0) {
         lu_v args[MAX_ARGS + 2];
         args[0] = callable;

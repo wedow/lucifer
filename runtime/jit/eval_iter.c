@@ -28,11 +28,7 @@ lu_ev_get_iter(struct ctx *c)
     }
     lu_v w;
     if (t == &PyTuple_Type || t == &PyList_Type) {
-        struct lu_vobj *o;
-        lu_v seq = lu_ev_val(c, v);
-        w = lu_ev_virt_new(c, VK_SEQITER, t == &PyTuple_Type ? &PyTupleIter_Type : &PyListIter_Type, 2, &o);
-        o->f[0] = seq;
-        o->f[1] = lu_ev_const_i(c, 0);
+        w = lu_ev_seqiter_new(c, v);
     }
     else {
         int done = lu_ev_kernel_op(c, LU_K_get_iter, &v, 1, 1, LU_RETURN_PUSH);
@@ -46,37 +42,115 @@ lu_ev_get_iter(struct ctx *c)
     return 0;
 }
 
-/* The step of an iterator that does not exist: past the end the loop is
-   left; else the item is read and the iterator is the same one, an index
-   on. A list's size is read each time, so its changes in the loop show. */
-static int
-virtual_step(struct ctx *c, lu_v it, struct lu_vobj *o, int exit_pc)
+/* The iterator of an exact list or tuple, at its start: it does not
+   exist. */
+lu_v
+lu_ev_seqiter_new(struct ctx *c, lu_v seq)
 {
-    struct gctx *g = c->g;
-    int tuple = o->type == &PyTupleIter_Type;
+    struct lu_vobj *o;
+    lu_v r = lu_ev_virt_new(c, VK_SEQITER, lu_ev_type(c, seq) == &PyTuple_Type ? &PyTupleIter_Type : &PyListIter_Type,
+                            2, &o);
+    o->f[0] = lu_ev_val(c, seq);
+    o->f[1] = lu_ev_const_i(c, 0);
+    return r;
+}
+
+/* The bit that is true past the end of an iterator that does not exist.
+   A list's size is read each time, so its changes in the loop show. */
+static lu_v
+seq_end(struct ctx *c, struct lu_vobj *o)
+{
     lu_v seq = o->f[0], index = o->f[1];
     PyObject *k = lu_ev_const(c, seq);
-    if (k != NULL && PyTuple_CheckExact(k) && PyTuple_GET_SIZE(k) == 0) {
-        lu_ev_fork(c, lu_ev_const_i(c, 1), exit_pc);    /* nothing to step over: the loop is not built */
-        return 0;
+    if ((k != NULL && PyTuple_CheckExact(k) && PyTuple_GET_SIZE(k) == 0)
+        || (I(c, index)->op == OP_CONST_I && I(c, index)->imm == LU_SEQITER_DONE)) {
+        return lu_ev_const_i(c, 1);
     }
     lu_v size = k != NULL && PyTuple_CheckExact(k) ? lu_ev_const_i(c, PyTuple_GET_SIZE(k))
         : lu_ev_emit(c, OP_LOAD, REP_I64, seq, LU_NOV, LU_NOV, offsetof(PyVarObject, ob_size));
-    lu_ev_fork(c, lu_ev_emit(c, OP_CMP_I, REP_BIT, index, size, LU_NOV, Py_GE), exit_pc);
-    if (g->cur < 0) {
-        return 0;
-    }
-    lu_v item = lu_ev_emit(c, OP_LIST_ITEM, REP_OBJ, seq, index, LU_NOV, tuple);
+    return lu_ev_emit(c, OP_CMP_I, REP_BIT, index, size, LU_NOV, Py_GE);
+}
+
+/* The iterator past its end: stepped again it ends again, whatever its
+   list does after, as the interpreter's lets go of its sequence. */
+static void
+seq_done(struct ctx *c, lu_v it, struct lu_vobj *o)
+{
+    struct lu_vobj *done = lu_ir_vobj(c->g->f, VK_SEQITER, o->type, 2);
+    done->f[0] = o->f[0];
+    done->f[1] = lu_ev_const_i(c, LU_SEQITER_DONE);
+    lu_ev_bind(c->g, &c->g->st, LU_VIRT_ID(it), LU_NOV, done);
+}
+
+/* Before the end: the item at the index, and the iterator an index on. */
+static lu_v
+seq_item(struct ctx *c, lu_v it, struct lu_vobj *o)
+{
+    lu_v seq = o->f[0], index = o->f[1];
+    lu_v item = lu_ev_emit(c, OP_LIST_ITEM, REP_OBJ, seq, index, LU_NOV, o->type == &PyTupleIter_Type);
     I(c, item)->fs = lu_ev_exit_fs(c);
     lu_ev_own(c, item);
     lu_v next = lu_ev_emit(c, OP_ADD_I, REP_I64, index, lu_ev_const_i(c, 1), LU_NOV, 0);
     I(c, next)->fs = lu_ev_exit_fs(c);
-    struct lu_vobj *stepped = lu_ir_vobj(g->f, VK_SEQITER, o->type, 2);
+    struct lu_vobj *stepped = lu_ir_vobj(c->g->f, VK_SEQITER, o->type, 2);
     stepped->f[0] = seq;
     stepped->f[1] = next;
-    lu_ev_bind(g, &g->st, LU_VIRT_ID(it), LU_NOV, stepped);
-    lu_ev_push(c, item);
+    lu_ev_bind(c->g, &c->g->st, LU_VIRT_ID(it), LU_NOV, stepped);
+    return item;
+}
+
+/* FOR_ITER's step of an iterator that does not exist: past the end the
+   loop is left. */
+static int
+virtual_step(struct ctx *c, lu_v it, struct lu_vobj *o, int exit_pc)
+{
+    lu_v end = seq_end(c, o);
+    seq_done(c, it, o);         /* on the way out */
+    lu_ev_fork(c, end, exit_pc);
+    if (c->g->cur < 0 || (I(c, end)->op == OP_CONST_I && I(c, end)->imm)) {
+        return 0;
+    }
+    lu_ev_bind(c->g, &c->g->st, LU_VIRT_ID(it), LU_NOV, o);    /* and not on the way on */
+    lu_ev_push(c, seq_item(c, it, o));
     return 0;
+}
+
+static void
+call_result(struct ctx *c, int nops, lu_v r)
+{
+    for (int i = 0; i < nops; i++) {
+        lu_ev_pop(c);
+    }
+    lu_ev_push(c, r);
+}
+
+/* The kernel's seqiter_next(it), a call of nops stack entries, of an
+   iterator that does not exist: its item, or MISSING past the end, each
+   way to the call's end. 0 when it exists. */
+int
+lu_ev_seqiter_next(struct ctx *c, lu_v it, int nops)
+{
+    lu_v real;
+    struct lu_vobj *o = LU_IS_VIRT(it) ? lu_ev_virt(c->g, &c->g->st, it, &real) : NULL;
+    if (o == NULL || real != LU_NOV || o->kind != VK_SEQITER) {
+        return 0;
+    }
+    lu_v end = seq_end(c, o);
+    if (I(c, end)->op == OP_CONST_I) {
+        if (I(c, end)->imm) {
+            seq_done(c, it, o);
+        }
+        call_result(c, nops, I(c, end)->imm ? lu_ev_konst(c, LU_MISSING) : seq_item(c, it, o));
+        return 1;
+    }
+    struct split s;
+    lu_ev_split(c, end, &s);
+    seq_done(c, it, o);
+    call_result(c, nops, lu_ev_konst(c, LU_MISSING));
+    lu_ev_split_else(c, &s);
+    call_result(c, nops, seq_item(c, it, o));
+    lu_ev_split_end(c, &s);
+    return 1;
 }
 
 int

@@ -878,6 +878,17 @@ prim_iter_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return (PyObject *)it;
 }
 
+PyObject *
+lu_seqiter_at(PyTypeObject *tp, PyObject *seq, Py_ssize_t index)
+{
+    seqiterobject *it = (seqiterobject *)lu_object_new(tp, sizeof(seqiterobject));
+    if (it != NULL) {
+        it->it_index = index;
+        it->it_seq = index == LU_SEQITER_DONE ? NULL : Py_NewRef(seq);
+    }
+    return (PyObject *)it;
+}
+
 /* Moves the iterator past v, the item at its index, or with v NULL leaves
    it exhausted; the sequence it lets go of is in *dead. */
 static void
