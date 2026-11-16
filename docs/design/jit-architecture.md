@@ -953,7 +953,8 @@ Not built yet, each a stage of §7:
 
 - Virtual cells, slices, strings as parts (S2, S5). A virtual object a
   loop makes afresh each turn and keeps in a local across its back-edge
-  is made real there. `yield from` on a generator resumed in line; a generator a call
+  is made real there, except an instance (VK_INST): the loop is peeled,
+  and the header carries the new instance in place of the old one. `yield from` on a generator resumed in line; a generator a call
   the unit did not inline returned is not shown to the unit and is
   resumed through C (S6). A virtual object whose layout changes in a loop
   (a list appended to, a dict given a key) exists before the loop.

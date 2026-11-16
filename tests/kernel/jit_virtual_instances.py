@@ -188,6 +188,37 @@ def identity(n):
     return same
 
 
+def fresh_each_turn(n):
+    s = 0
+    seen = []
+    prev = None
+    for i in range(n):
+        if i % 1000 == 7:
+            f = sys._getframe()
+            p_then = f.f_locals['p']
+            seen.append((p_then.x, p_then.y, f.f_locals['q'].x))
+        if i % 1500 == 3:
+            seen.append(prev is p)
+            prev = p
+        p = P(i, -i)
+        q = p.plus(P(1, 2))
+        v = V(i, q.y)
+        s += q.norm1() + v.dot(v)
+    return s, seen, p.x, q.y, v.x
+
+
+def fresh_linked(n):
+    node = None
+    for i in range(n):
+        node = Box(node)
+        node.count = i
+    k = 0
+    while node is not None:
+        k += node.count
+        node = node.item
+    return k
+
+
 print(slots_sum(N))
 print(subclass_slots(N))
 print(inline_values(N))
@@ -199,3 +230,5 @@ print(finalized(N))
 print(custom_setattr(N))
 print(class_changes(N))
 print(identity(N))
+print(fresh_each_turn(N))
+print(fresh_linked(N))

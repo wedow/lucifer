@@ -1424,7 +1424,9 @@ carries_generator(struct ctx *c, int nslots)
    the loop works above it. In a loop that carries a generator (one that
    may be peeled: close_loop) a local that is unbound stays so until a
    back-edge brings it bound, and a real object on the stack stays too.
-   The other slots get phis. A virtual object
+   An instance in a local stays too, under its id: a back-edge brings the
+   one the loop made afresh in its place (fresh_kept). The other slots get
+   phis. A virtual object
    the loop may change (an iterator it steps, an instance whose fields it
    sets) stays virtual, under its id: a field that is a raw word is a phi,
    and so is a field an earlier build saw a back-edge change. */
@@ -1447,7 +1449,8 @@ build_header(struct ctx *c, struct bblk *bb)
         struct lu_vobj *o = LU_IS_VIRT(r) ? unmade_in(g, &g->st, LU_VIRT_ID(r)) : NULL;
         int number = o != NULL && (o->kind == VK_BOX_INT || o->kind == VK_BOX_FLOAT || o->kind == VK_BOOL);
         int stays = i < c->nlocals
-            ? !set[i] || (o != NULL && o->kind == VK_SEQITER) || (bb->gen && r == LU_NOV && hint == 0)
+            ? !set[i] || (o != NULL && (o->kind == VK_SEQITER || o->kind == VK_INST))
+                || (bb->gen && r == LU_NOV && hint == 0)
             : !number && (o != NULL || bb->gen);
         if (!stays || hint == HINT_OBJ) {
             header_place(c, P, i, r, H, pc, hint);
@@ -1581,6 +1584,53 @@ check_same(struct ctx *c, struct bblk *bb)
     }
 }
 
+/* Whether r is an instance nothing has made, and its record. */
+static struct lu_vobj *
+unmade_instance_in(struct gctx *g, const struct state *st, lu_v r)
+{
+    struct lu_vobj *o = LU_IS_VIRT(r) ? unmade_in(g, st, LU_VIRT_ID(r)) : NULL;
+    return o != NULL && o->kind == VK_INST ? o : NULL;
+}
+
+/* A local that holds an instance the header carries, and on this back-edge
+   one the loop made afresh with the same class and attributes, which only
+   that local reaches, while nothing reaches the header's any more: the
+   new one is the header's from here, under its id. Nothing can tell two
+   objects apart that are never both alive. */
+static void
+fresh_kept(struct ctx *c, struct bblk *bb)
+{
+    struct gctx *g = c->g;
+    int own = 0;
+    for (int i = 0; i < c->nlocals; i++) {
+        lu_v h = bb->ref[i], b = slots(c)[i];
+        struct lu_vobj *ho = b != h ? unmade_instance_in(g, &bb->hdr, h) : NULL;
+        struct lu_vobj *bo = ho != NULL ? unmade_instance_in(g, &g->st, b) : NULL;
+        int same = bo != NULL && bo->type == ho->type && bo->n == ho->n;
+        for (int k = 0; same && k < bo->n; k += 2) {
+            same = bo->f[k] == ho->f[k];
+        }
+        if (!same || lu_ev_reaches(g, &g->st, LU_VIRT_ID(h))) {
+            continue;
+        }
+        if (!own) {
+            /* The edge's state is kept for the build to enter again: this one is a copy. */
+            struct state st;
+            lu_ev_state_copy(g, &st, &g->st);
+            g->st = st;
+            lu_ev_changed(g);
+            own = 1;
+        }
+        slots(c)[i] = LU_NOV;
+        int shared = lu_ev_reaches(g, &g->st, LU_VIRT_ID(b));
+        slots(c)[i] = b;
+        if (!shared) {
+            lu_ev_bind(g, &g->st, LU_VIRT_ID(h), LU_NOV, record_copy(g, bo));
+            lu_ev_set_local(c, i, h);
+        }
+    }
+}
+
 /* Whether the current state, a back-edge's, has the shape the header
    made: where it has not, the header gets a hint (lu_ev_hint). With
    `wire`, a raw phi takes its input as its place is found to fit. */
@@ -1590,6 +1640,7 @@ edge_fit(struct ctx *c, struct bblk *bb, int wire)
     struct gctx *g = c->g;
     const struct places *P = &bb->P;
     int pc = bb->pc;
+    fresh_kept(c, bb);
     check_carried(c, bb);
     if (g->restart || g->misfit) {
         return;
@@ -1611,6 +1662,10 @@ edge_fit(struct ctx *c, struct bblk *bb, int wire)
             else if (wire) {
                 phi_add(c, P->phi[p], raw_of(c, r, rep));       /* an unknown object: a guard, the header's */
             }
+        }
+        else if (P->kind[p] == PLACE_OBJ && P->at[p].id < 0 && P->at[p].at < c->nlocals && g->trying
+                 && unmade_instance_in(g, &g->st, r) != NULL && lu_ev_hinted(g, c->code, pc, bb->key[p]) < HINT_OBJ) {
+            g->misfit |= MISFIT_FRESH;  /* a turn of its own first: the header then carries the instance */
         }
         else if (P->kind[p] == PLACE_OBJ && raw_rep(c, r) != REP_NONE && !LU_IS_VIRT(bb->ref[p])
                  && lu_ev_const(c, r) == NULL && lu_ev_hinted(g, c->code, pc, bb->key[p]) <= HINT_VARIES
@@ -1718,9 +1773,10 @@ add_edge(struct ctx *c, int pc)
     }
     if (bb->built && bb->loop && bb->ref != NULL && !bb->closed) {
         edge_keep(g, &bb->back, &bb->nback, &bb->capback);      /* until the loop is built to its end (close_loop) */
-        if (!bb->gen && bb->nback == 1 && !(peel_room(g, bb) && kept_misfit(c, bb, MISFIT_KIND))) {
-            /* Only a number that changes kind makes a loop without a
-               generator wait: this edge meets the header now. */
+        if (!bb->gen && bb->nback == 1 && !(peel_room(g, bb) && kept_misfit(c, bb, MISFIT_KIND | MISFIT_FRESH))) {
+            /* Only a number that changes kind, or an instance a local is
+               given afresh, makes a loop without a generator wait: this
+               edge meets the header now. */
             bb->nback = 0;
             bb->closed = 1;
             enter_edge(c, &bb->back[0], bb->pc);
@@ -1787,7 +1843,7 @@ close_loop(struct ctx *c, struct bblk *bb)
     struct gctx *g = c->g;
     struct edge *back = bb->back;
     int n = bb->nback, pc = bb->pc;
-    int want = kept_misfit(c, bb, bb->gen ? MISFIT : MISFIT_KIND);
+    int want = kept_misfit(c, bb, bb->gen ? MISFIT : MISFIT_KIND | MISFIT_FRESH);
     int peel = want && peel_room(g, bb);
     g->f->refused += want && !peel;
     bb->nback = 0;

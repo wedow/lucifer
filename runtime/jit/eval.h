@@ -163,7 +163,7 @@ struct ctx {
    that order. Of a carried object itself (lu_ev_object_key) HINT_OBJ says
    that it exists before the loop. */
 enum { HINT_VARIES = 1, HINT_INT, HINT_FLOAT, HINT_OBJ };
-enum { MISFIT = 1, MISFIT_KIND = 2 };
+enum { MISFIT = 1, MISFIT_KIND = 2, MISFIT_FRESH = 4 };
 struct hint {
     PyCodeObject *code;
     int pc, kind;
@@ -196,7 +196,8 @@ struct gctx {
     int restart;                /* a hint was added: the build starts over */
     int trying;                 /* a back-edge is only tried against its header: a hint it would give is */
     int misfit;                 /* not recorded and restarts nothing, and misfit says there was one (MISFIT, */
-                                /* and MISFIT_KIND when a number's phi was brought a number of another kind) */
+                                /* and MISFIT_KIND when a number's phi was brought a number of another kind,
+                                   MISFIT_FRESH when a local's object phi an instance the loop made) */
     unsigned long learned;      /* the root's count of what it learned, when the build began */
     int ret_missing;            /* the call just inlined for a FOR_ITER may have answered MISSING */
     struct hint *hints;
