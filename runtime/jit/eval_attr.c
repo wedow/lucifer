@@ -198,13 +198,14 @@ slot_member(PyObject *d)
         && ((PyMemberDescrObject *)d)->d_member->type == Py_T_OBJECT_EX;
 }
 
-/* The class's attribute `name` as of a version the unit then relies on:
-   *d borrowed (NULL: it has none). 0 when the class has no version. */
+/* The class's attribute `name` as of a version the unit then relies on
+   (what made the instance virtual holds while it does): *d borrowed
+   (NULL: it has none). 0 when the class has no version. */
 static int
 class_entry(struct ctx *c, PyTypeObject *tp, PyObject *name, PyObject **d)
 {
     uint32_t version;
-    if (!instance_kind(tp) || !lu_ev_class_as_of(c, tp, &version)) {
+    if (!lu_ev_class_as_of(c, tp, &version)) {
         return 0;
     }
     *d = _PyType_Lookup(tp, name);

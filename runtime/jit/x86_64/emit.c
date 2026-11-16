@@ -116,6 +116,7 @@ struct asm_ {
     uint32_t volatiles;         /* the caller-saved registers the unit allocates, by location */
     struct hold *held;          /* what the published call in hand holds of what it is handed */
     int nheld;
+    uint32_t *walked, walk;     /* per virtual object, the holds_of walk that went through it last */
     int inlined;                /* the published call's inlined frames, counted toward the limit across it */
     struct build b;
     /* The code that publishes an exit's state: where its address goes. */
@@ -1288,9 +1289,9 @@ hold_add(struct asm_ *a, struct lu_ins *in, struct hold *h, int *nh, lu_v v)
 
 /* The names a slot's value v gives: v itself, or the object it became;
    for an object not yet made, what that object would hold a reference
-   to, once per object however many slots reach it (`seen`, its ids). */
+   to, once per object however many slots reach it. */
 static void
-hold_names(struct asm_ *a, struct lu_ins *in, lu_v v, struct hold *h, int *nh, int *seen, int *nseen)
+hold_names(struct asm_ *a, struct lu_ins *in, lu_v v, struct hold *h, int *nh)
 {
     if (!LU_IS_VIRT(v)) {
         hold_add(a, in, h, nh, v);
@@ -1302,17 +1303,15 @@ hold_names(struct asm_ *a, struct lu_ins *in, lu_v v, struct hold *h, int *nh, i
         hold_add(a, in, h, nh, v);
         return;
     }
-    for (int i = 0; i < *nseen; i++) {
-        if (seen[i] == id) {
-            return;
-        }
+    if (a->walked[id] == a->walk) {
+        return;
     }
-    seen[(*nseen)++] = id;
+    a->walked[id] = a->walk;
     if (o->kind == VK_BOX_INT || o->kind == VK_BOX_FLOAT || o->kind == VK_BOOL) {
         return;                 /* raw values, and the object a number came in as */
     }
     for (int i = 0; i < o->n; i++) {
-        hold_names(a, in, o->f[i], h, nh, seen, nseen);
+        hold_names(a, in, o->f[i], h, nh);
     }
 }
 
@@ -1330,12 +1329,15 @@ static int
 holds_of(struct asm_ *a, struct lu_ins *in, struct hold **out)
 {
     struct lu_fs *fs = in->fs;
-    int nh = 0, nseen = 0;
+    int nh = 0;
     struct hold *h = lu_ir_alloc(a->f, sizeof(struct hold) * (size_t)(in->nargs + 3));
-    int *seen = lu_ir_alloc(a->f, sizeof(int) * (size_t)(a->f->nvobjs + 1));
+    if (a->walked == NULL) {
+        a->walked = lu_ir_alloc(a->f, sizeof(uint32_t) * (size_t)(a->f->nvobjs + 1));
+    }
+    a->walk++;
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
         for (int i = 0; i < p->nlocals + p->nstack; i++) {
-            hold_names(a, in, *lu_fs_slot(p, i), h, &nh, seen, &nseen);
+            hold_names(a, in, *lu_fs_slot(p, i), h, &nh);
         }
     }
     int kept = 0;
