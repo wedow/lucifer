@@ -206,16 +206,29 @@ lu_ev_gen_back_edge(struct ctx *c, lu_v phi, lu_v now)
 
 /* --- the step --- */
 
-/* Whether the unit has room to run the generator's code in line here. */
-static int
-room(struct ctx *c, PyCodeObject *co)
+/* Why the unit cannot run the generator's code in line here, or NULL
+   when it has room. */
+static const char *
+no_room(struct ctx *c, PyCodeObject *co)
 {
     int again = 0;
     for (struct ctx *k = c; k != NULL; k = k->parent) {
         again += k->code == co;
     }
-    return c->depth < 24 && again <= 1 && !lu_jit_noinline(co)
-        && c->g->f->nins + 2 * c->g->f->ninlined <= c->g->budget;
+    if (c->depth >= 24) {
+        return "too deep";
+    }
+    if (again > 1) {
+        return "its code runs in line twice already";
+    }
+    if (lu_jit_noinline(co)) {
+        return "its inlined copies kept leaving";
+    }
+    if (c->g->f->nins + 2 * c->g->f->ninlined > c->g->budget) {
+        c->g->f->refused++;
+        return "over budget";
+    }
+    return NULL;
 }
 
 /* The generator stands at code unit pc: its frame joins the state with
@@ -311,8 +324,7 @@ lu_ev_gen_step(struct ctx *c, lu_v it, int exit_pc)
     if (c->g->f->fail != NULL) {
         return -1;
     }
-    if (!room(c, co)) {
-        c->g->f->refused++;
+    if (no_room(c, co) != NULL) {
         lu_ev_val(c, it);
         return 0;
     }
@@ -607,11 +619,12 @@ lu_ev_gen_adopt(struct ctx *c, lu_v it, int exit_pc)
     }
     PyFunctionObject *fn = (PyFunctionObject *)func;
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
-    if ((co->co_flags & (LU_CO_GENERATORS | CO_ITERABLE_COROUTINE)) != CO_GENERATOR || co->_co_monitoring != NULL
-        || !room(c, co)) {
-        if (_PyRuntime.jit.debug) {
-            fprintf(stderr, "jit: generator %s stepped through C at %s@%d: no room\n",
-                    PyUnicode_AsUTF8(co->co_qualname), PyUnicode_AsUTF8(c->code->co_qualname), c->pc);
+    const char *why = (co->co_flags & (LU_CO_GENERATORS | CO_ITERABLE_COROUTINE)) != CO_GENERATOR ? "not a plain generator"
+        : co->_co_monitoring != NULL ? "a tool watches its code" : no_room(c, co);
+    if (why != NULL) {
+        if (_PyRuntime.jit.debug && g->budget >= 0) {
+            fprintf(stderr, "jit: generator %s stepped through C at %s@%d: %s\n",
+                    PyUnicode_AsUTF8(co->co_qualname), PyUnicode_AsUTF8(c->code->co_qualname), c->pc, why);
         }
         return 0;
     }
