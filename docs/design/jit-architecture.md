@@ -776,7 +776,10 @@ edge made it and its records have one layout, each field that differs is
 a place of the join like a slot: a raw phi for a number, an object's phi
 otherwise, whose inputs are made real on their edges before the phis
 exist. An object some edge made, or whose layouts differ, is made on
-every edge.
+every edge. A slot that holds a different virtual tuple on each edge (two
+arms each built their result) holds one virtual tuple after, its items
+that differ places of the join, when nothing else on an edge reaches the
+edge's tuple.
 
 **A generator the unit makes is a virtual frame.** A call of a plain
 generator function evaluates its prologue in line; `RETURN_GENERATOR`
@@ -794,7 +797,11 @@ materializer runs that frame as the generator's own, above its
 consumer's. Only generators whose suspensions are all outside `try` and
 `with` blocks are taken, so that dropping one unfinished releases what
 its frame holds and runs nothing; one with cell variables, or that
-delegates (`yield from`), is a real generator still.
+delegates (`yield from`), is a real generator still. A frame entered
+where a loop may be running (a generator's, in line or as a unit of its
+own) builds the way from its entry to the first loop header on blocks of
+its own: the loop builds the same code again as its own, and joins
+nothing with the way in.
 
 **A unit entered inside a loop leaves at the back-edge of the loop
 around it.** Its entry's state (an iterator or generator the interpreter

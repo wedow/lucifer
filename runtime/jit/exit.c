@@ -414,6 +414,7 @@ gen_frame(PyThreadState *ts, struct maker *m, const struct lu_deopt_frame *fr, s
         f->stackpointer = f->localsplus + fr->nlocals;
     }
     ts->py_recursion_remaining -= counted;
+    f->previous = previous;     /* a walker's record of its caller gave way to the caller's frame */
     f->ret = fr->ret;
     f->instr = shown(m->d, k);
     f->last = lu_instr_before(f->code, f->instr);

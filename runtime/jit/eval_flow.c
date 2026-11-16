@@ -198,9 +198,14 @@ lu_ev_supported(struct gctx *g, PyCodeObject *code)
 }
 
 /* c's blocks, from its code's scan, whose table of where they start c
-   reads until its entry needs a block of its own (block_at). */
+   reads until its entry needs a block of its own (block_at). A frame
+   entered where a loop may already be running (a generator's, where it
+   resumes) gets a second set: the way from the entry to the first loop
+   header is built on blocks of its own, so that the loop, when it comes
+   to the same code, builds it as its own and joins nothing with the way
+   in. c->loops holds the blocks the loops are built on meanwhile. */
 static int
-scan(struct ctx *c)
+scan(struct ctx *c, int entered_inside)
 {
     const struct lu_ev_scan *s = scan_of(c->g, c->code);
     if (!s->ok) {
@@ -208,13 +213,20 @@ scan(struct ctx *c)
     }
     const int *bbs = s->data + s->ncode + 1;
     c->blkat = s->data;
-    c->bb = lu_ir_alloc(c->g->f, sizeof(struct bblk) * (size_t)(s->nbb + 2));
     c->nbb = s->nbb;
     c->lo = 0;
-    for (int i = 0; i < s->nbb; i++) {
-        c->bb[i].pc = bbs[2 * i];
-        c->bb[i].loop = bbs[2 * i + 1] != 0;
-        c->bb[i].loop_end = bbs[2 * i + 1];
+    for (int way = 0; way < 2; way++) {
+        struct bblk *bb = lu_ir_alloc(c->g->f, sizeof(struct bblk) * (size_t)(s->nbb + 2));
+        for (int i = 0; i < s->nbb; i++) {
+            bb[i].pc = bbs[2 * i];
+            bb[i].loop = bbs[2 * i + 1] != 0;
+            bb[i].loop_end = bbs[2 * i + 1];
+        }
+        c->loops = way == 0 && entered_inside ? bb : c->loops;
+        c->bb = bb;
+        if (!entered_inside) {
+            break;
+        }
     }
     return 0;
 }
@@ -488,7 +500,7 @@ edge_inputs(struct ctx *c, const struct places *P, int from, lu_v *in)
     struct gctx *g = c->g;
     for (int p = from; p < P->n; p++) {
         in[p] = LU_NOV;
-        if (P->lead[p] != p || P->kind[p] == PLACE_DIRECT) {
+        if (P->lead[p] != p || P->kind[p] == PLACE_DIRECT || P->kind[p] == PLACE_VIRT) {
             continue;
         }
         lu_v r = place_get(g, &g->st, P->at[p]);
@@ -640,12 +652,6 @@ record_copy(struct gctx *g, const struct lu_vobj *o)
 
 /* --- joins --- */
 
-struct join {
-    struct edge *edges;
-    int n, pc, J, nslots;
-    struct places P;
-};
-
 /* What the joined state knows of a virtual object the edges knew
    differently: the phi of the objects it was made on each edge, or the
    record whose differing fields are places of the join. */
@@ -653,6 +659,14 @@ struct override {
     int id;
     lu_v real;
     struct lu_vobj *obj;
+};
+
+struct join {
+    struct edge *edges;
+    int n, pc, J, nslots;
+    struct places P;
+    struct override *one;       /* the tuples the join made one of (PLACE_VIRT): their ids and records */
+    int none, capone;
 };
 
 /* The edge's state and block are the current ones, for what a value is
@@ -691,6 +705,84 @@ join_rep(struct ctx *c, struct join *j, const lu_v *vals)
     return bits ? REP_BIT : rep != REP_NONE ? rep : REP_OBJ;
 }
 
+static int
+reaches_id(struct gctx *g, const struct state *st, lu_v r, int id)
+{
+    if (!LU_IS_VIRT(r)) {
+        return 0;
+    }
+    if (LU_VIRT_ID(r) == id) {
+        return 1;
+    }
+    struct lu_vobj *o = unmade_in(g, st, LU_VIRT_ID(r));
+    for (int k = 0; o != NULL && k < o->n; k++) {
+        if (reaches_id(g, st, o->f[k], id)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void join_place(struct ctx *c, struct join *j, int p);
+
+/* Whether the place holds, on every edge, a tuple nothing has made that
+   only this place and the slots that hold the very same values reach:
+   tuples of one size, a different one on some edges (two arms each built
+   their result). They are one tuple after the join, virtual still, whose
+   items that differ are places of the join; nothing can tell it from the
+   edge's own, which nothing else names. Then the place is given it. */
+static int
+join_tuples(struct ctx *c, struct join *j, int p, const lu_v *vals)
+{
+    struct gctx *g = c->g;
+    struct places *P = &j->P;
+    struct lu_vobj *first = NULL;
+    for (int e = 0; e < j->n; e++) {
+        const struct state *st = &j->edges[e].st;
+        struct lu_vobj *o = LU_IS_VIRT(vals[e]) ? unmade_in(g, st, LU_VIRT_ID(vals[e])) : NULL;
+        if (o == NULL || o->kind != VK_TUPLE || (first != NULL && o->n != first->n)) {
+            return 0;
+        }
+        first = first != NULL ? first : o;
+        for (int d = 0; d <= st->depth; d++) {
+            for (int i = 0; i < st->nlocals[d] + st->sp[d]; i++) {
+                int same = d == st->depth;
+                for (int k = 0; k < j->n && same; k++) {
+                    same = j->edges[k].st.v[d][i] == vals[k];
+                }
+                if (!same && reaches_id(g, st, st->v[d][i], LU_VIRT_ID(vals[e]))) {
+                    return 0;
+                }
+            }
+        }
+    }
+    struct lu_vobj *one = lu_ir_vobj(g->f, VK_TUPLE, first->type, first->n);
+    int id = lu_ir_vobj_id(g->f, one);
+    P->kind[p] = PLACE_VIRT;
+    P->phi[p] = LU_VIRT(id);
+    if (j->none == j->capone) {
+        j->capone = j->capone ? 2 * j->capone : 4;
+        j->one = regrow(g, j->one, j->none, j->capone, sizeof(struct override));
+    }
+    j->one[j->none++] = (struct override){ id, LU_NOV, one };
+    /* On each edge the new tuple is the edge's own, for what its items are there. */
+    for (int e = 0; e < j->n; e++) {
+        lu_ev_bind(g, &j->edges[e].st, id, LU_NOV, unmade_in(g, &j->edges[e].st, LU_VIRT_ID(vals[e])));
+    }
+    for (int k = 0; k < one->n; k++) {
+        lu_v *items = edge_values(c, j, (struct place){ id, k });
+        int same = 1;
+        for (int e = 1; e < j->n; e++) {
+            same &= items[e] == items[0];
+        }
+        one->f[k] = items[0];
+        if (!same) {
+            join_place(c, j, place_add(g, P, id, k));
+        }
+    }
+    return 1;
+}
+
 /* Place p, which differs between the edges, gets its phi. An object phi
    takes its inputs later (edge_take), once each edge has made them. */
 static void
@@ -722,6 +814,9 @@ join_place(struct ctx *c, struct join *j, int p)
         return;
     }
     int rep = join_rep(c, j, vals);
+    if (rep == REP_OBJ && join_tuples(c, j, p, vals)) {
+        return;
+    }
     P->phi[p] = new_phi(c, j->J, rep);
     if (rep == REP_OBJ) {
         P->kind[p] = PLACE_OBJ;
@@ -1011,8 +1106,9 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
     }
     /* What the object phis take is made real on each edge. */
     lu_v **in = lu_ir_alloc(g->f, sizeof(lu_v *) * (size_t)n);
+    int had = P->n;
     for (int e = 0; e < n; e++) {
-        in[e] = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(j.nslots ? j.nslots : 1));
+        in[e] = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(had ? had : 1));
         edge_begin(c, &j, e);
         edge_inputs(c, P, 0, in[e]);
         edge_end(c, &j, e);
@@ -1021,9 +1117,9 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
     struct override *over = reconcile(c, &j, &nover);
     for (int e = 0; e < n; e++) {
         enter_edge(c, &edges[e], pc);
-        if (P->n > j.nslots) {
-            in[e] = regrow(g, in[e], j.nslots, P->n, sizeof(lu_v));
-            edge_inputs(c, P, j.nslots, in[e]);
+        if (P->n > had) {
+            in[e] = regrow(g, in[e], had, P->n, sizeof(lu_v));
+            edge_inputs(c, P, had, in[e]);
         }
         edge_take(c, P, in[e], pc);
         lu_ev_settle(c, pc);
@@ -1037,14 +1133,21 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
     lu_ev_changed(g);
     g->cur = j.J;
     lu_v *out = joined_values(c, P);
-    for (int p = j.nslots, k = 0; p < P->n; p++) {
-        while (over[k].id != P->at[p].id || over[k].real != LU_NOV) {
-            k = (k + 1) % nover;
+    for (int p = j.nslots; p < P->n; p++) {
+        struct lu_vobj *o = NULL;
+        for (int k = 0; k < j.none && o == NULL; k++) {
+            o = j.one[k].id == P->at[p].id ? j.one[k].obj : NULL;
         }
-        over[k].obj->f[P->at[p].at] = out[p];
+        for (int k = 0; k < nover && o == NULL; k++) {
+            o = over[k].id == P->at[p].id && over[k].real == LU_NOV ? over[k].obj : NULL;
+        }
+        o->f[P->at[p].at] = out[p];
     }
     for (int k = 0; k < nover; k++) {
         lu_ev_bind(g, &g->st, over[k].id, over[k].real, over[k].obj);
+    }
+    for (int k = 0; k < j.none; k++) {
+        lu_ev_bind(g, &g->st, j.one[k].id, LU_NOV, j.one[k].obj);
     }
     for (int i = 0; i < j.nslots; i++) {
         if (out[i] != LU_NOV) {
@@ -1512,6 +1615,10 @@ add_edge(struct ctx *c, int pc)
         return;
     }
     struct bblk *bb = block_at(c, pc);
+    int way_in = c->loops != NULL && !bb->loop;
+    if (c->loops != NULL && bb->loop) {
+        bb = &c->loops[bb - c->bb];     /* the way in reached a loop: the loop's own blocks from here */
+    }
     if (bb->built && bb->loop && bb->ref != NULL) {
         back_edge(c, bb);
         return;
@@ -1526,7 +1633,7 @@ add_edge(struct ctx *c, int pc)
         g->cur = -1;
         return;
     }
-    if (bb - c->bb < c->lo) {
+    if ((c->loops == NULL || way_in) && bb - c->bb < c->lo) {
         c->lo = (int)(bb - c->bb);
     }
     if (bb->nin == bb->capin) {
@@ -1706,10 +1813,12 @@ lu_ev_build(struct ctx *c, int pc)
     struct gctx *g = c->g;
     c->ncode = (int)Py_SIZE(c->code);
     c->nlocals = c->code->co_nlocalsplus;
-    if (scan(c) < 0) {
+    int scanned = 0;
+    if (scan(c, pc != (c->parent != NULL ? 0 : lu_jit_call_entry(c->code))) < 0) {
         g->f->fail = "unfollowable jumps";
         return -1;
     }
+    scanned = c->nbb;
     add_edge(c, pc);
     for (;;) {
         /* The lowest block control reaches that is not built: blocks are
@@ -1718,8 +1827,21 @@ lu_ev_build(struct ctx *c, int pc)
         while (c->lo < c->nbb && (c->bb[c->lo].built || c->bb[c->lo].nin == 0)) {
             c->lo++;
         }
-        if (c->lo == c->nbb || g->restart) {
+        if (g->restart) {
             return 0;
+        }
+        if (c->lo == c->nbb) {
+            if (c->loops == NULL) {
+                return 0;
+            }
+            /* The way in is built: now the loops it reached. */
+            for (int i = scanned; i < c->nbb; i++) {
+                c->loops[i].pc = c->bb[i].pc;
+            }
+            c->bb = c->loops;
+            c->loops = NULL;
+            c->lo = 0;
+            continue;
         }
         if (build_block(c, &c->bb[c->lo]) < 0) {
             return -1;

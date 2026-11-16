@@ -72,6 +72,8 @@ enum {
                                    the object the number was, where an edge had one */
     PLACE_OBJ,                  /* an object's phi, which holds a reference */
     PLACE_DIRECT,               /* a field that is a raw word (an iterator's index): its phi */
+    PLACE_VIRT,                 /* a tuple that is no object on any edge, a different one on each: one virtual
+                                   tuple (its reference in place of a phi), whose items are places of the join */
 };
 
 struct places {
@@ -117,6 +119,7 @@ struct ctx {
     int ncode, nlocals;
     struct bblk *bb;
     int nbb;
+    struct bblk *loops;         /* while the way in from an entry inside a loop is built: the loops' blocks */
     int lo;                     /* blocks below it are built or not reached yet */
     const int *blkat;           /* code unit -> bblk index, or -1 */
     struct lu_fs *caller_fs;    /* an inlined frame's caller, after the call */

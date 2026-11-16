@@ -5,8 +5,9 @@
 # running, with its frame above the consumer's), a generator the program
 # takes out of the loop must go on where the loop left it, and one dropped
 # inside a try block must run its finally. tools/jitcheck also runs this
-# at two sizes and requires that the resumes the interpreter runs and the
-# ints and tuples compiled code allocates do not grow with the iterations.
+# at two sizes and requires that the resumes the interpreter and compiled
+# code run and the ints and tuples compiled code allocates do not grow
+# with the iterations.
 import sys
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
@@ -71,21 +72,37 @@ def fused_two(n):
 L = [3, 1, 4, 1, 5, 9, 2, 6]
 
 
-def step(i):
-    return fused_count(9) + fused_pairs(L) + fused_evens(7) + fused_two(8) + (i & 3)
-
-
-step(0)
-
-
-def hot(n):
+# One hot loop per consumer, so that each unit has room for its generator.
+def hot_count(n):
     s = 0
     for i in range(n):
-        s += step(i)
+        s += fused_count(9) + (i & 3)
     return s
 
 
-print('hot', hot(N))
+def hot_pairs(n):
+    s = 0
+    for i in range(n):
+        s += fused_pairs(L) + (i & 3)
+    return s
+
+
+def hot_evens(n):
+    s = 0
+    for i in range(n):
+        s += fused_evens(7) + (i & 3)
+    return s
+
+
+def hot_two(n):
+    s = 0
+    for i in range(n):
+        s += fused_two(8) + (i & 3)
+    return s
+
+
+fused_count(9), fused_pairs(L), fused_evens(7), fused_two(8)
+print('hot', hot_count(N), hot_pairs(N), hot_evens(N), hot_two(N))
 
 # The rest runs a fixed number of times, whatever N is.
 K = 300
@@ -177,6 +194,25 @@ def seen_by_frame():
 
 
 print('seen_by_frame', seen_by_frame())
+
+
+def last_frame(n):
+    out = None
+    for t in frames(n):
+        out = t
+    return out
+
+
+def seen_through_a_call():
+    """The walker's caller chain has a frame compiled code inlined between
+    the generator's and the unit's own."""
+    out = []
+    for r in range(K):
+        out.append(last_frame(2 + r % 2))
+    return out[-2:]
+
+
+print('seen_through_a_call', seen_through_a_call())
 
 
 def failing(n, r):

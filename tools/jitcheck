@@ -91,9 +91,10 @@ require that a count of the tier's does not grow with the iterations:
          without being made.
   fused  tests/kernel/jit_virtual_generators.py, whose hot loop runs for
          loops over generators it makes: the resumes the interpreter and
-         compiled code run, and the ints, tuples and iterators compiled
-         code allocates. The loop runs the generator's body in line, and
-         the generator never exists.
+         compiled code run, and the ints and tuples compiled code
+         allocates. The loop runs the generator's body in line: the
+         generator never exists, and a tuple it yields is unpacked
+         without being made.
   forward  tests/kernel/jit_forward_calls.py, whose hot code calls classes
          through type.__call__ and operators through call_special, which
          forward their arguments with f(a, *args, **kwargs): the tuples,
@@ -233,7 +234,7 @@ GROWTH = {
                 r'jit: allocations by kind: int (\d+), .*tuple (\d+), list (\d+), dict (\d+), .*instance (\d+)', 0),
     'fused': ('jit_virtual_generators.py',
               r'jit: generator resumes interpreted (\d+), compiled (\d+)'
-              r'|jit: allocations by kind: int (\d+), .*tuple (\d+), .*iterator (\d+)', 0),
+              r'|jit: allocations by kind: int (\d+), .*tuple (\d+)', 0),
     'forward': ('jit_forward_calls.py', r'jit: allocations by kind: .*tuple (\d+), list (\d+), dict (\d+)', 0),
     'slices': ('jit_slices.py', r'jit: allocations by kind: int (\d+)', 0),
     'guards': ('jit_guards.py', r'jit: unit hot@\d+ entries \d+ guards (\d+)', 0),
