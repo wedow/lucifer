@@ -1201,8 +1201,12 @@ lu_jit_note_exit(struct lu_deopt *d)
     count(&stats.taken[d->opcode & 0xff], 1);
     if (_PyRuntime.jit.debug) {
         const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
-        fprintf(stderr, "jit: exit %s %s@%d op %d depth %d\n", reasons[d->reason],
-                PyUnicode_AsUTF8(in->code->co_qualname), in->pc, d->opcode, d->nframes);
+        const struct lu_deopt_frame *root = lu_deopt_frame(d, 0);
+        PyObject *exc = d->reason == EXIT_ERROR ? lu_err_occurred() : NULL;
+        fprintf(stderr, "jit: exit %s %s@%d op %d depth %d root %s%s%s\n", reasons[d->reason],
+                PyUnicode_AsUTF8(in->code->co_qualname), in->pc, d->opcode, d->nframes,
+                PyUnicode_AsUTF8(root->code->co_qualname), exc != NULL ? " raising " : "",
+                exc != NULL ? ((PyTypeObject *)exc)->tp_name : "");
     }
     if (d->prof != NULL) {
         prof_exit(d);
