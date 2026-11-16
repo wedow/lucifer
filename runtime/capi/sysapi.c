@@ -3,6 +3,7 @@
    pythonrun.c, ceval.c). */
 
 #include "lucifer.h"
+#include "interp/frame.h"
 
 #include <pthread.h>
 #include <stdarg.h>
@@ -315,8 +316,12 @@ PyEval_GetFrameGlobals(void)
 PyObject *
 PyEval_GetBuiltins(void)
 {
+    PyObject *b = lu_frame_user_builtins((struct lu_frame *)PyThreadState_Get()->current_frame);
+    if (b != NULL) {
+        return b;
+    }
     PyFrameObject *frame = PyEval_GetFrame();
-    PyObject *b = frame != NULL ? PyFrame_GetBuiltins(frame) : NULL;
+    b = frame != NULL ? PyFrame_GetBuiltins(frame) : NULL;
     if (b == NULL || b == Py_None) {
         return PyInterpreterState_Get()->builtins;
     }

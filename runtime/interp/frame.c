@@ -216,6 +216,7 @@ lu_frame_sync(struct lu_frame *f)
 
 struct lu_frame *lu_jit_force(struct lu_frame *f, int all);
 PyCodeObject *lu_jit_running_code(struct lu_frame *f);
+int lu_jit_user_builtins(struct lu_frame *f, PyObject **out);
 
 /* The frame a walk goes on with at f: a frame compiled code runs stands
    for the user frames it inlined, which are made real here (the walker's
@@ -269,6 +270,23 @@ PyCodeObject *
 lu_frame_running_code(struct lu_frame *f)
 {
     return f->owner == LU_FRAME_JIT ? lu_jit_running_code(f) : f->code;
+}
+
+PyObject *
+lu_frame_user_builtins(struct lu_frame *f)
+{
+    for (; f != NULL; f = f->previous) {
+        PyObject *b;
+        int r = f->owner == LU_FRAME_JIT ? lu_jit_user_builtins(f, &b) : 0;
+        if (r != 0) {
+            return r > 0 ? b : NULL;
+        }
+        if (f->owner != LU_FRAME_JIT && f->owner != LU_FRAME_C_ENTRY
+            && !(f->code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN))) {
+            return f->builtins;
+        }
+    }
+    return NULL;
 }
 
 static int

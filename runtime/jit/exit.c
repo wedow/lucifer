@@ -332,6 +332,32 @@ lu_jit_running_code(struct lu_frame *f)
     return d != NULL ? lu_deopt_frame(d, d->nframes - 1)->code : f->code;
 }
 
+/* The builtins of the innermost frame f stands for that is not the
+   kernel's, read without making anything: 1 with *out set, 0 when f
+   stands for kernel frames only, -1 when the function of that frame is
+   a value compiled code holds. */
+int
+lu_jit_user_builtins(struct lu_frame *f, PyObject **out)
+{
+    struct lu_deopt *d = __atomic_load_n(&f->jit_desc, __ATOMIC_ACQUIRE);
+    for (int k = d != NULL ? d->nframes - 1 : 0; k >= 0; k--) {
+        const struct lu_deopt_frame *fr = d != NULL ? lu_deopt_frame(d, k) : NULL;
+        if ((fr != NULL ? fr->code : f->code)->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) {
+            continue;
+        }
+        if (k == 0) {
+            *out = f->builtins;
+            return 1;
+        }
+        if (LU_PV_KIND(fr->funcv) != DV_NULL || fr->func == NULL || !PyFunction_Check(fr->func)) {
+            return -1;
+        }
+        *out = ((PyFunctionObject *)fr->func)->func_builtins;
+        return 1;
+    }
+    return 0;
+}
+
 /* The root gets real slots, each with a reference of its own, its
    instruction, and the interpreter's owner. -1 with an exception set. */
 static int

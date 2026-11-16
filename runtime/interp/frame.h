@@ -193,6 +193,11 @@ PyCodeObject *lu_frame_running_code(struct lu_frame *f);
    outward of `from` (0 is the first), or NULL. */
 struct lu_frame *lu_frame_user(struct lu_frame *from, Py_ssize_t depth);
 
+/* The builtins of lu_frame_user(from, 0), read without making anything,
+   as CPython reads f_builtins; NULL when there is none, or compiled code
+   holds that frame's function as a value. */
+PyObject *lu_frame_user_builtins(struct lu_frame *from);
+
 /* The frame's PyFrameObject, made on first use and kept by the record. It
    owns nothing and reads through the record until the frame stops executing.
    Returns a new reference, or NULL with an exception set. */
