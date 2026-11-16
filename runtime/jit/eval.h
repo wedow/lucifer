@@ -339,6 +339,8 @@ void lu_ev_names_walk(struct gctx *g, struct lu_fs *fs);
 int lu_ev_names(struct gctx *g, lu_v v);
 /* Whether the state's slots reach virtual object id. */
 int lu_ev_reaches(struct gctx *g, const struct state *st, int id);
+/* Whether r is virtual object id, or one whose fields reach it (eval_flow.c). */
+int lu_ev_reaches_id(struct gctx *g, const struct state *st, lu_v r, int id);
 
 /* --- eval_emit.c --- */
 
@@ -478,6 +480,12 @@ int lu_ev_gen_back_edge(struct ctx *c, lu_v phi, lu_v now);
    ret says, goes on after the caller's instruction (eval_call.c). The
    frame has left the state. */
 int lu_ev_returned(struct ctx *c, lu_v v);
+/* An instance of tp as object.__new__ makes it: one that does not exist
+   when its class allows (VK_INST, eval_attr.c). */
+lu_v lu_ev_new_instance(struct ctx *c, PyTypeObject *tp);
+/* That instance made, as the interpreter would have made it: object.__new__'s,
+   then its attributes stored in order as on a fresh instance. */
+lu_v lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o);
 int lu_ev_get_iter(struct ctx *c);              /* eval_iter.c */
 int lu_ev_for_iter(struct ctx *c);
 /* An exact list's or tuple's iterator that does not exist, at its start;

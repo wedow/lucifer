@@ -109,6 +109,20 @@ forced_add(struct lu_forced *fo, int32_t id, PyObject *o)
     return 0;
 }
 
+/* An instance of tp as object.__new__ makes it, with kv's n/2 names set
+   to their values in order: a VK_INST made. */
+static PyObject *
+instance_new(PyTypeObject *tp, PyObject *const *kv, int n)
+{
+    PyObject *o = PyType_GenericAlloc(tp, 0);
+    for (int i = 0; o != NULL && i + 1 < n; i += 2) {
+        if (PyObject_GenericSetAttr(o, kv[i], kv[i + 1]) < 0) {
+            Py_CLEAR(o);
+        }
+    }
+    return o;
+}
+
 /* Virtual object k of the description, made now unless it was: borrowed,
    or NULL with the pass failed. */
 static PyObject *
@@ -173,6 +187,18 @@ object(struct maker *m, int k)
             *(PyObject **)((char *)o + lu_field_offset(ob->type, i)) = take(m, fields[i]);
         }
         break;
+    case VK_INST: {
+        PyObject *kv[ob->nfields + 1];
+        int n = 0;
+        while (n < ob->nfields && (kv[n] = take(m, fields[n])) != NULL) {
+            n++;
+        }
+        o = n == ob->nfields ? instance_new(ob->type, kv, n) : NULL;
+        while (n > 0) {
+            Py_DECREF(kv[--n]);
+        }
+        break;
+    }
     case VK_LIST:
         o = PyList_New(ob->nfields);
         for (int i = 0; o != NULL && i < ob->nfields; i++) {

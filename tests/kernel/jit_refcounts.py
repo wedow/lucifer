@@ -1,6 +1,7 @@
 # A reference count read while compiled code runs is the count the
 # interpreter's frames would give: one per local and per stack entry that
-# names the object, in the frame that reads it and in its callers. Each
+# names the object, in the frame that reads it and in its callers, and one
+# per object a list, tuple or instance not yet made would hold. Each
 # shape is read again and again, as the interpreter runs it and as
 # compiled code does (and as that leaves at failing guards), and must
 # read the same every time.
@@ -80,6 +81,12 @@ def attribute():
     return grc(o.a), grc(o)
 
 
+def held():
+    x = C()
+    y = [x, (x, 1)]
+    return grc(x), len(y)
+
+
 def method():
     o = C()
     return o.__class__, grc(o)
@@ -106,7 +113,7 @@ def rebound(n):
 
 
 shapes = (one, two, three, passed, passed_twice, passed_kw, deeper, nested, temp, looped,
-          attribute, through_method)
+          attribute, held, through_method)
 for shape in shapes:
     seen = []
     for turn in range(400):

@@ -386,9 +386,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, lu_v *args, int npo
     if (cls != NULL) {
         /* A class called: the instance is made as object.__new__ makes
            it, and is __init__'s first argument. */
-        lu_v k = lu_ev_konst(c, (PyObject *)cls);
-        args[0] = lu_ev_helper(c, H_new_object, 1, &k, 0);
-        lu_ev_def_type(c, args[0], cls);
+        args[0] = lu_ev_new_instance(c, cls);
     }
     bind(c, fn, args, npos, kwnames, locals, 0);
     if (!(co->co_flags & LU_CO_KERNEL) && funcv == LU_NOV) {
@@ -683,8 +681,7 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
             }
         }
         if (init == NULL) {
-            lu_v obj = lu_ev_helper(c, H_new_object, 1, &callable, 0);
-            lu_ev_def_type(c, obj, tp);
+            lu_v obj = lu_ev_new_instance(c, tp);
             for (int i = 0; i < nops; i++) {
                 lu_ev_pop(c);
             }

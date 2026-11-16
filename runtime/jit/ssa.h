@@ -168,6 +168,8 @@ enum lu_vkind {
     VK_METHOD,                  /* a bound method: f[0] its function, f[1] its self */
     VK_FIELDS,                  /* an instance of a kernel type with fields (lu_field_offset): f[i] field i, the
                                    constant NULL while unset */
+    VK_INST,                    /* an instance of a class whose attributes are its own (__slots__, or values
+                                   inline): f[2i] a name (a constant str), f[2i+1] its value, in the order set */
     VK_GEN,                     /* a generator: f[GEN_FUNCV] its function where the unit knows it by its code only
                                    (else nothing), f[GEN_FN] the function, or the one that stands for it, a
                                    constant; f[GEN_PC] the code unit its frame resumes at, an i64 (GEN_FINISHED;
@@ -184,7 +186,7 @@ enum { GEN_FUNCV, GEN_FN, GEN_PC, GEN_DEPTH, GEN_SLOTS };
 /* Kinds whose object may change once it exists: a record of one says
    nothing after that. */
 #define LU_VKIND_MUTABLE(kind) \
-    ((kind) == VK_SEQITER || (kind) == VK_DICT || (kind) == VK_LIST || (kind) == VK_FIELDS || (kind) == VK_GEN)
+    ((kind) == VK_SEQITER || (kind) == VK_DICT || (kind) == VK_LIST || (kind) == VK_FIELDS || (kind) == VK_INST || (kind) == VK_GEN)
 
 struct lu_vobj {
     uint8_t kind;               /* enum lu_vkind */

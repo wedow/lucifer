@@ -200,6 +200,9 @@ lu_ev_val(struct ctx *c, lu_v r)
         lu_ev_def_type(c, v, o->type);
         break;
     }
+    case VK_INST:
+        v = lu_ev_instance_real(c, o);
+        break;
     case VK_LIST:
         v = lu_ev_helper(c, H_build_list, o->n, o->f, 0);
         lu_ev_def_type(c, v, &PyList_Type);

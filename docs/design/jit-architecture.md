@@ -902,8 +902,11 @@ starts from what is true.
 
 Virtual kinds: int and float boxes, bools, tuples, lists, str-keyed
 dicts, bound methods, list and tuple iterators, instances of the kernel
-types whose state is fields (`alloc`, `field_get`, `field_set`), and
-frames. Calls inline with positional, keyword, default, keyword-only and
+types whose state is fields (`alloc`, `field_get`, `field_set`),
+instances of classes whose attributes are their own (`__slots__` or
+values inline, object's own `__getattribute__` and `__setattr__`, no
+`__del__`), and frames. A call that is handed an object a virtual one
+holds gets the reference that object would hold. Calls inline with positional, keyword, default, keyword-only and
 rest parameters; `f(*args, **kwargs)` over a tuple and a dict that do not
 exist is the plain call; a kernel function called with a fixed number of
 arguments inlines its twin for that number.
@@ -948,8 +951,9 @@ What decides how code is specialized:
 
 Not built yet, each a stage of §7:
 
-- Virtual instances of classes, cells, slices, strings as parts (S2,
-  S5). `yield from` on a generator resumed in line; a generator a call
+- Virtual cells, slices, strings as parts (S2, S5). A virtual object a
+  loop makes afresh each turn and keeps in a local across its back-edge
+  is made real there. `yield from` on a generator resumed in line; a generator a call
   the unit did not inline returned is not shown to the unit and is
   resumed through C (S6). A virtual object whose layout changes in a loop
   (a list appended to, a dict given a key) exists before the loop.

@@ -1267,6 +1267,55 @@ hands(const struct lu_ins *in, lu_v v)
     return in->a == v || in->b == v || in->c == v;
 }
 
+/* One more name of v, when it is an object the call is handed. */
+static void
+hold_add(struct asm_ *a, struct lu_ins *in, struct hold *h, int *nh, lu_v v)
+{
+    if (v < 0 || I(a, v)->rep != REP_OBJ || I(a, v)->op == OP_CONST || I(a, v)->op == OP_BOOL || !hands(in, v)) {
+        return;
+    }
+    int k = 0;
+    while (k < *nh && h[k].v != v) {
+        k++;
+    }
+    if (k < *nh) {
+        h[k].n++;
+    }
+    else {
+        h[(*nh)++] = (struct hold){ v, (I(a, v)->flags & INS_OWNED) ? 0 : 1 };
+    }
+}
+
+/* The names a slot's value v gives: v itself, or the object it became;
+   for an object not yet made, what that object would hold a reference
+   to, once per object however many slots reach it (`seen`, its ids). */
+static void
+hold_names(struct asm_ *a, struct lu_ins *in, lu_v v, struct hold *h, int *nh, int *seen, int *nseen)
+{
+    if (!LU_IS_VIRT(v)) {
+        hold_add(a, in, h, nh, v);
+        return;
+    }
+    int id = LU_VIRT_ID(v);
+    struct lu_vobj *o = lu_fs_vobj(a->f, in->fs, id, &v);
+    if (v != LU_NOV) {
+        hold_add(a, in, h, nh, v);
+        return;
+    }
+    for (int i = 0; i < *nseen; i++) {
+        if (seen[i] == id) {
+            return;
+        }
+    }
+    seen[(*nseen)++] = id;
+    if (o->kind == VK_BOX_INT || o->kind == VK_BOX_FLOAT || o->kind == VK_BOOL) {
+        return;                 /* raw values, and the object a number came in as */
+    }
+    for (int i = 0; i < o->n; i++) {
+        hold_names(a, in, o->f[i], h, nh, seen, nseen);
+    }
+}
+
 /* What the frames' slots hold of the objects a published call is handed,
    beyond compiled code's one reference per object
    (docs/design/jit-architecture.md 10): the interpreter's frames hold a
@@ -1274,37 +1323,19 @@ hands(const struct lu_ins *in, lu_v v)
    per further slot that names an object compiled code owns, one per slot
    for an object it only borrows. Every frame of the state counts, an
    inlined one as the frame the interpreter would have pushed; an object
-   not yet made holds nothing. A constant is the unit's, held as long as
+   not yet made holds nothing itself, but one per field that names an
+   object, as the object would. A constant is the unit's, held as long as
    the unit is. */
 static int
 holds_of(struct asm_ *a, struct lu_ins *in, struct hold **out)
 {
     struct lu_fs *fs = in->fs;
-    int n = 0, nh = 0;
-    for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
-        n += p->nlocals + p->nstack;
-    }
-    struct hold *h = lu_ir_alloc(a->f, sizeof(struct hold) * (size_t)(n ? n : 1));
+    int nh = 0, nseen = 0;
+    struct hold *h = lu_ir_alloc(a->f, sizeof(struct hold) * (size_t)(in->nargs + 3));
+    int *seen = lu_ir_alloc(a->f, sizeof(int) * (size_t)(a->f->nvobjs + 1));
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
         for (int i = 0; i < p->nlocals + p->nstack; i++) {
-            lu_v v = *lu_fs_slot(p, i);
-            if (LU_IS_VIRT(v)) {
-                lu_fs_vobj(a->f, fs, LU_VIRT_ID(v), &v);        /* the object it became, if it did */
-            }
-            if (v < 0 || I(a, v)->rep != REP_OBJ || I(a, v)->op == OP_CONST || I(a, v)->op == OP_BOOL
-                || !hands(in, v)) {
-                continue;
-            }
-            int k = 0;
-            while (k < nh && h[k].v != v) {
-                k++;
-            }
-            if (k < nh) {
-                h[k].n++;
-            }
-            else {
-                h[nh++] = (struct hold){ v, (I(a, v)->flags & INS_OWNED) ? 0 : 1 };
-            }
+            hold_names(a, in, *lu_fs_slot(p, i), h, &nh, seen, &nseen);
         }
     }
     int kept = 0;

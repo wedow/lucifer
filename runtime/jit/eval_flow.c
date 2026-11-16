@@ -729,8 +729,8 @@ join_rep(struct ctx *c, struct join *j, struct place pl, const lu_v *vals)
     return bits ? REP_BIT : rep != REP_NONE ? rep : REP_OBJ;
 }
 
-static int
-reaches_id(struct gctx *g, const struct state *st, lu_v r, int id)
+int
+lu_ev_reaches_id(struct gctx *g, const struct state *st, lu_v r, int id)
 {
     if (!LU_IS_VIRT(r)) {
         return 0;
@@ -740,7 +740,7 @@ reaches_id(struct gctx *g, const struct state *st, lu_v r, int id)
     }
     struct lu_vobj *o = unmade_in(g, st, LU_VIRT_ID(r));
     for (int k = 0; o != NULL && k < o->n; k++) {
-        if (reaches_id(g, st, o->f[k], id)) {
+        if (lu_ev_reaches_id(g, st, o->f[k], id)) {
             return 1;
         }
     }
@@ -774,7 +774,7 @@ join_tuples(struct ctx *c, struct join *j, int p, const lu_v *vals)
                 for (int k = 0; k < j->n && same; k++) {
                     same = j->edges[k].st.v[d][i] == vals[k];
                 }
-                if (!same && reaches_id(g, st, st->v[d][i], LU_VIRT_ID(vals[e]))) {
+                if (!same && lu_ev_reaches_id(g, st, st->v[d][i], LU_VIRT_ID(vals[e]))) {
                     return 0;
                 }
             }
@@ -899,7 +899,7 @@ stays_virtual(struct ctx *c, struct join *j, int id)
         }
         for (int k = 0; k < o->n; k++) {
             if (o->f[k] != first->f[k]
-                && ((o->kind == VK_DICT && !(k & 1)) || place_class(c, o, o->f[k]) == FIELD_UNSET
+                && (((o->kind == VK_DICT || o->kind == VK_INST) && !(k & 1)) || place_class(c, o, o->f[k]) == FIELD_UNSET
                     || place_class(c, o, o->f[k]) != place_class(c, o, first->f[k]))) {
                 return NULL;
             }
@@ -1345,7 +1345,7 @@ carried_objects(struct ctx *c, int nslots, struct carry *k)
 static int
 field_carriable(struct ctx *c, const struct lu_vobj *o, int i)
 {
-    return !(o->kind == VK_DICT && !(i & 1)) && place_class(c, o, o->f[i]) != FIELD_UNSET;
+    return !((o->kind == VK_DICT || o->kind == VK_INST) && !(i & 1)) && place_class(c, o, o->f[i]) != FIELD_UNSET;
 }
 
 /* What the hints say must exist before the loop is made, until the

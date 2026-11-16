@@ -3,6 +3,7 @@
    interpreter specialized is compiled as its specialization does it;
    anything else is the interpreter's own lookup, called. */
 #include "jit/eval.h"
+#include "interp/specialize.h"
 
 PyObject *
 lu_ev_dict_const(struct ctx *c, PyObject *d, PyObject *b, PyObject *name)
@@ -138,6 +139,185 @@ replace_owner(struct ctx *c, lu_v attr, lu_v self)
     if (c->oparg & 1) {
         lu_ev_push(c, self);
     }
+}
+
+/* Whether instances of tp can be kept as VK_INST: made by object.__new__
+   (class_init), their attributes their own (__slots__ alone or values
+   inline, no dict of their own yet), found and set by object's own
+   __getattribute__ and __setattr__, and nothing run when they die. */
+static int
+instance_kind(PyTypeObject *tp)
+{
+    int slots_only = tp->tp_dictoffset == 0 && !(tp->tp_flags & Py_TPFLAGS_MANAGED_DICT);
+    return (tp->tp_flags & Py_TPFLAGS_HEAPTYPE) && tp->tp_finalize == NULL && tp->tp_del == NULL
+        && (slots_only || (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES))
+        && _PyType_Lookup(tp, LU_ID(__getattribute__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__getattribute__))
+        && _PyType_Lookup(tp, LU_ID(__setattr__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))
+        && _PyType_Lookup(tp, LU_ID(__getattr__)) == NULL;
+}
+
+lu_v
+lu_ev_new_instance(struct ctx *c, PyTypeObject *tp)
+{
+    lu_v k = lu_ev_konst(c, (PyObject *)tp);
+    if (!instance_kind(tp)) {
+        lu_v obj = lu_ev_helper(c, H_new_object, 1, &k, 0);
+        lu_ev_def_type(c, obj, tp);
+        return obj;
+    }
+    struct lu_vobj *o;
+    return lu_ev_virt_new(c, VK_INST, tp, 0, &o);      /* no attributes yet: nothing has needed it */
+}
+
+/* The record of an instance that does not exist, or NULL. */
+static struct lu_vobj *
+unmade_instance(struct ctx *c, lu_v r)
+{
+    lu_v real;
+    struct lu_vobj *o = LU_IS_VIRT(r) ? lu_ev_virt(c->g, &c->g->st, r, &real) : NULL;
+    return o != NULL && real == LU_NOV && o->kind == VK_INST ? o : NULL;
+}
+
+/* The index of name's value in record o, or -1. */
+static int
+held_at(struct ctx *c, const struct lu_vobj *o, PyObject *name)
+{
+    for (int i = 0; i < o->n; i += 2) {
+        if (lu_ev_const(c, o->f[i]) == name) {
+            return i + 1;
+        }
+    }
+    return -1;
+}
+
+/* A __slots__ member holding an object, which name finds on the class. */
+static int
+slot_member(PyObject *d)
+{
+    return d != NULL && Py_IS_TYPE(d, &PyMemberDescr_Type)
+        && ((PyMemberDescrObject *)d)->d_member->type == Py_T_OBJECT_EX;
+}
+
+/* The class's attribute `name` as of a version the unit then relies on:
+   *d borrowed (NULL: it has none). 0 when the class has no version. */
+static int
+class_entry(struct ctx *c, PyTypeObject *tp, PyObject *name, PyObject **d)
+{
+    uint32_t version;
+    if (!instance_kind(tp) || !lu_ev_class_as_of(c, tp, &version)) {
+        return 0;
+    }
+    *d = _PyType_Lookup(tp, name);
+    return lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)tp), version);
+}
+
+lu_v
+lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o)
+{
+    PyTypeObject *tp = o->type;
+    lu_v k = lu_ev_konst(c, (PyObject *)tp);
+    lu_v obj = lu_ev_helper(c, H_new_object, 1, &k, 0);
+    lu_ev_def_type(c, obj, tp);
+    for (int i = 0; i < o->n; i += 2) {
+        PyObject *name = lu_ev_const(c, o->f[i]), *d = _PyType_Lookup(tp, name);
+        lu_v val = lu_ev_val(c, o->f[i + 1]);
+        uint32_t version;
+        uint16_t index;
+        if (slot_member(d)) {
+            lu_v args[3] = { obj, lu_ev_const_i(c, ((PyMemberDescrObject *)d)->d_member->offset), val };
+            lu_ev_helper(c, H_slot_store, 3, args, 0);
+        }
+        else if (lu_specialize_store_fresh(tp, name, &version, &index) == STORE_ATTR_INSTANCE_VALUE
+                 && lu_ev_class_relied(c, k, version)) {
+            lu_v st = lu_ev_emit(c, OP_INLINE_STORE, REP_NONE, obj, val, LU_NOV, index);
+            I(c, st)->fs = lu_ev_exit_fs(c);
+            c->g->observed = 1;
+        }
+        else {
+            lu_v args[4] = { obj, lu_ev_konst(c, name), val, lu_ev_const_i(c, 0) };
+            lu_ev_helper(c, H_store_attr, 4, args, 0);
+        }
+    }
+    return obj;
+}
+
+/* LOAD_ATTR on an instance that does not exist, as object.__getattribute__
+   finds the name: 1 when answered in place of the owner (an unset slot
+   leaves, for the interpreter to raise), 0 to make it and load as usual. */
+static int
+instance_load(struct ctx *c, lu_v owner, struct lu_vobj *o, PyObject *name)
+{
+    PyObject *d;
+    if (!class_entry(c, o->type, name, &d)) {
+        return 0;
+    }
+    int at = held_at(c, o, name);
+    descrgetfunc get = d != NULL ? Py_TYPE(d)->tp_descr_get : NULL;
+    if (get != NULL && Py_TYPE(d)->tp_descr_set != NULL) {
+        if (!slot_member(d)) {
+            return 0;           /* a property, or another data descriptor */
+        }
+        if (at < 0) {
+            lu_ev_side_exit(c, EXIT_SIDE);
+            return 1;
+        }
+        replace_owner(c, o->f[at], LU_NOV);
+    }
+    else if (at >= 0) {
+        replace_owner(c, o->f[at], LU_NOV);
+    }
+    else if (d != NULL && PyFunction_Check(d) && (c->oparg & 1)) {
+        replace_owner(c, lu_ev_konst(c, d), owner);
+    }
+    else if (d != NULL && PyFunction_Check(d)) {
+        struct lu_vobj *m;
+        lu_v v = lu_ev_virt_new(c, VK_METHOD, &PyMethod_Type, 2, &m);
+        m->f[0] = lu_ev_konst(c, d);
+        m->f[1] = owner;
+        replace_owner(c, v, LU_NOV);
+    }
+    else if (d != NULL && get == NULL) {
+        replace_owner(c, lu_ev_konst(c, d), LU_NOV);
+    }
+    else {
+        return 0;
+    }
+    return 1;
+}
+
+/* STORE_ATTR on an instance that does not exist, as object.__setattr__
+   sets the name: its slot, or its value inline (a new name after the
+   others). 1 when done, its operands popped; 0 to make it and store as usual. */
+static int
+instance_store(struct ctx *c, lu_v owner, struct lu_vobj *o, PyObject *name)
+{
+    PyObject *d;
+    if (!class_entry(c, o->type, name, &d)) {
+        return 0;
+    }
+    int data = d != NULL && Py_TYPE(d)->tp_descr_set != NULL;
+    if (data ? !slot_member(d) || (((PyMemberDescrObject *)d)->d_member->flags & Py_READONLY)
+             : !(o->type->tp_flags & Py_TPFLAGS_INLINE_VALUES)) {
+        return 0;
+    }
+    if (lu_ev_reaches_id(c->g, &c->g->st, lu_ev_peek(c, 2), LU_VIRT_ID(owner))) {
+        return 0;               /* it would hold itself: made, it can */
+    }
+    int at = held_at(c, o, name);
+    struct lu_vobj *now = lu_ir_vobj(c->g->f, VK_INST, o->type, o->n + (at < 0 ? 2 : 0));
+    memcpy(now->f, o->f, sizeof(lu_v) * (size_t)o->n);
+    if (at < 0) {
+        at = o->n + 1;
+        now->f[at - 1] = lu_ev_konst(c, name);
+    }
+    else {
+        lu_ev_drop(c, o->f[at]);
+    }
+    now->f[at] = lu_ev_peek(c, 2);
+    lu_ev_bind(c->g, &c->g->st, LU_VIRT_ID(owner), LU_NOV, now);      /* the same object, changed */
+    lu_ev_pop(c);
+    lu_ev_pop(c);
+    return 1;
 }
 
 /* The attribute loaded as specialization `op` has it (version, index and
@@ -317,6 +497,10 @@ lu_ev_load_attr(struct ctx *c)
     if (mod != NULL && PyType_Check(mod) && class_attribute(c, owner, (PyTypeObject *)mod, name)) {
         return 0;
     }
+    struct lu_vobj *inst = unmade_instance(c, owner);
+    if (inst != NULL && instance_load(c, owner, inst, name)) {
+        return 0;
+    }
     /* An object the code made has no cache to read: its own lookup. */
     int op = LU_IS_VIRT(owner) ? LOAD_ATTR : cached_site(c, LOAD_ATTR, &version, &index, &descr);
     /* A site with no one shape has a cache of the few it met (jit.h), and
@@ -393,6 +577,10 @@ lu_ev_store_attr(struct ctx *c)
     uint32_t version = 0;
     uint16_t index = 0;
     PyObject *unused;
+    struct lu_vobj *inst = unmade_instance(c, owner);
+    if (inst != NULL && instance_store(c, owner, inst, name_at(c, c->oparg))) {
+        return 0;
+    }
     int op = LU_IS_VIRT(owner) ? STORE_ATTR : cached_site(c, STORE_ATTR, &version, &index, &unused);
     struct lu_pic *pic = op == STORE_ATTR && owner >= 0
         ? lu_jit_pic(c->code, (int)(c->cache - 1 - lu_code_start(c->code)), 1) : NULL;
