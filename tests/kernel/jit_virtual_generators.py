@@ -388,3 +388,83 @@ def existing():
 
 
 print('existing', existing())
+
+
+# The transitions of such a generator are made in line (it is taken where
+# it stands, and stood suspended again at each yield): each case here is
+# one the checks before the take must tell apart, or a yield whose
+# transition is not the plain one.
+def make_counter():
+    def inner(n):
+        for i in range(n):
+            yield i
+    return inner
+
+
+def closing(k):
+    def inner(n):
+        for i in range(n):
+            yield i + k
+    return inner
+
+
+def uneven(n):
+    # Yields with stacks of different depths.
+    for a in range(n // 3):
+        yield a
+        for b in range(2):
+            yield a * b
+    yield -1
+
+
+def transitions():
+    out = []
+    for r in range(4):
+        # One code, a function made anew each time; then closures, each with its own cell.
+        out.append(long_total(make_counter()(3000 + r)))
+        out.append(long_total(closing(r)(3000)))
+        out.append(long_total(closing(r + 10)(3000)))
+        out.append(long_total(uneven(3000)))
+        # A frame object taken between items: the generator is no longer taken in line.
+        g = count(3000)
+        s = 0
+        f = None
+        for i in g:
+            if i == 2000:
+                f = g.gi_frame
+            s += i
+        out.append((s, f.f_code.co_name, g.gi_frame))
+        # Finished, and iterated again.
+        out.append(long_total(g))
+        # Stepped by next() between the loop's own steps.
+        g = state_kept(range(3000))
+        s = 0
+        for v in g:
+            if v % 500000 < 3000:
+                s += next(g, 0)
+            s += v
+        out.append(s % 1000003)
+
+        # Running already when its own body iterates it.
+        def selfish():
+            for i in range(2500):
+                if i == 2400:
+                    try:
+                        for _ in me[0]:
+                            pass
+                    except ValueError as e:
+                        yield str(e)
+                yield i
+        me = [None]
+        me[0] = selfish()
+        said = None
+        n = 0
+        for v in me[0]:
+            if isinstance(v, str):
+                said = v
+            n += 1
+        out.append((said, n))
+    return out
+
+
+print('transitions', transitions())

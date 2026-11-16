@@ -387,6 +387,38 @@ lu_ev_gen_real(struct ctx *c, struct lu_vobj *o)
 /* What names a FOR_ITER's resume points among what a rebuild knows. */
 #define ADOPT_SITE ((uint64_t)1)
 
+/* The words of a generator the transitions are written through: the one
+   that holds its frame's state (three flags of async generators before
+   it, nothing after), and the one that holds its frame's owner (then how
+   it returns, then the owner it has when compiled code gives it back). A
+   plain generator's flags are 0, so each state is one value of the word. */
+_Static_assert(offsetof(struct lu_gen, hooks_inited) % 8 == 0
+               && offsetof(struct lu_gen, frame_state) == offsetof(struct lu_gen, hooks_inited) + 3
+               && offsetof(struct lu_gen, frame) == offsetof(struct lu_gen, hooks_inited) + 8,
+               "a generator's state shares a word with nothing but its flags");
+_Static_assert(offsetof(struct lu_frame, owner) % 8 == 0
+               && offsetof(struct lu_frame, ret) == offsetof(struct lu_frame, owner) + 1
+               && offsetof(struct lu_frame, home) == offsetof(struct lu_frame, owner) + 2
+               && offsetof(struct lu_frame, jit_desc) == offsetof(struct lu_frame, owner) + 8,
+               "a frame's owner shares a word with how it returns and its home");
+#define STATE_WORD ((int64_t)offsetof(struct lu_gen, hooks_inited))
+#define STATE_AS_WORD(state) ((int64_t)(uint8_t)(state) << 24)
+#define FRAME_WORD(field) ((int64_t)(offsetof(struct lu_gen, frame) + offsetof(struct lu_frame, field)))
+#define OWNER_AS_WORD(owner) ((int64_t)(owner) | (int64_t)LU_FRAME_GENERATOR << 16)
+
+static void
+word_is(struct ctx *c, lu_v it, int64_t offset, int64_t value)
+{
+    lu_v g = lu_ev_guard(c, OP_GUARD_IS, it, value);
+    I(c, g)->imm2 = GI_FIELD | offset;
+}
+
+static void
+word_set(struct ctx *c, lu_v it, int64_t offset, int64_t value)
+{
+    lu_ev_emit(c, OP_STORE, REP_NONE, it, lu_ev_const_i(c, value), LU_NOV, offset);
+}
+
 static size_t
 slot_offset(int i)
 {
@@ -439,9 +471,23 @@ adopt_at(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, 
 {
     struct gctx *g = c->g;
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
-    lu_v args[2] = { it, at };
-    lu_v took = lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_gen_take, 2, args, 0), 1);
-    I(c, took)->flags |= INS_NOSTRESS;  /* past it the generator runs: no leaving before the instruction */
+    /* As lu_gen_at, and the take, in line: it stands here suspended (a
+       yield's code unit) or not yet started (the first), nothing holds a
+       frame object or a locals mapping of it; then it runs, its frame
+       compiled code's. Until the stores, a guard leaves with nothing done. */
+    lu_v first = g->f->nins;
+    int started = lu_base_opcode(co, (int)(lu_instr_before(co, lu_code_start(co) + pc) - lu_code_start(co))) == YIELD_VALUE;
+    word_is(c, it, STATE_WORD, STATE_AS_WORD(started ? LU_GEN_SUSPENDED : LU_GEN_CREATED));
+    word_is(c, it, FRAME_WORD(frame_obj), 0);
+    word_is(c, it, FRAME_WORD(locals), 0);
+    for (lu_v v = first; v < g->f->nins; v++) {
+        if (I(c, v)->op == OP_GUARD_IS) {
+            I(c, v)->blame = I(c, at)->blame;
+            I(c, v)->blame_pc = I(c, at)->blame_pc;
+        }
+    }
+    word_set(c, it, STATE_WORD, STATE_AS_WORD(LU_GEN_EXECUTING));
+    word_set(c, it, FRAME_WORD(owner), OWNER_AS_WORD(LU_FRAME_JIT));
     struct ctx *k = lu_ir_alloc(g->f, sizeof(struct ctx));
     k->ret = LU_RETURN_FOR_ITER;
     k->gen = it;
@@ -459,6 +505,7 @@ adopt_at(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, 
     k->nlocals = co->co_nlocalsplus;
     k->caller_fs = lu_ev_snapshot(c, c->next);
     lu_ev_state_push(g, k->nlocals, k->nlocals + co->co_stacksize + 2);
+    k->depth_in = depth;
     k->nloaded = k->nlocals + depth;
     k->loaded = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(k->nloaded ? k->nloaded : 1));
     struct lu_frame *sf = seen != NULL ? &((struct lu_gen *)seen)->frame : NULL;
@@ -503,7 +550,9 @@ struct stands {
 static int
 adopt_among(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, const struct stands *s, int n)
 {
-    lu_v here = lu_ev_emit(c, OP_CMP_I, REP_BIT, at, lu_ev_const_i(c, s[0].pc), LU_NOV, Py_EQ);
+    lu_v here = lu_ev_emit(c, OP_CMP_I, REP_BIT, at,
+                           lu_ev_const_i(c, (int64_t)(intptr_t)(lu_code_start((PyCodeObject *)fn->func_code) + s[0].pc)),
+                           LU_NOV, Py_EQ);
     if (n == 1) {
         /* Anywhere else (a code unit not met yet, or it cannot run: it
            finished, or runs already) the interpreter steps it. */
@@ -512,8 +561,8 @@ adopt_among(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *see
         while (root->parent != NULL) {
             root = root->parent;
         }
-        I(c, g)->blame = root->code;
-        I(c, g)->blame_pc = root->pc;
+        I(c, g)->blame = I(c, at)->blame = root->code;
+        I(c, g)->blame_pc = I(c, at)->blame_pc = root->pc;
         return adopt_at(c, it, at, fn, seen, s[0].pc, s[0].depth);
     }
     struct split sp;
@@ -584,17 +633,27 @@ lu_ev_gen_adopt(struct ctx *c, lu_v it, int exit_pc)
     if (n == 0) {
         return 0;
     }
+    /* A generator of this code over these globals: of whichever function
+       made it (a closure made anew per call has one code). Where it
+       stands is the code unit its frame names. */
     lu_ev_guard_type(c, it, &PyGen_Type);
-    lu_ev_konst(c, func);       /* the unit keeps what its guard compares with */
-    lu_v same = lu_ev_guard(c, OP_GUARD_IS, it, (int64_t)(intptr_t)func);
-    I(c, same)->imm2 = GI_FIELD | (int64_t)(offsetof(struct lu_gen, frame) + offsetof(struct lu_frame, func));
-    lu_v at = lu_ev_helper(c, H_gen_at, 1, &it, 0);
+    lu_ev_konst(c, func);       /* the unit keeps what its guards compare with */
+    word_is(c, it, FRAME_WORD(code), (int64_t)(intptr_t)co);
+    word_is(c, it, FRAME_WORD(globals), (int64_t)(intptr_t)fn->func_globals);
+    word_is(c, it, FRAME_WORD(builtins), (int64_t)(intptr_t)fn->func_builtins);
+    if (co->co_nfreevars > 0) {
+        /* The evaluator reads a known function's cells as what they hold: then it is this function's. */
+        word_is(c, it, FRAME_WORD(func), (int64_t)(intptr_t)func);
+    }
+    lu_v at = lu_ev_emit(c, OP_LOAD, REP_I64, it, LU_NOV, LU_NOV, FRAME_WORD(instr));
     for (lu_v v = first; v < g->f->nins; v++) {
         if (lu_op_flags[I(c, v)->op] & IF_GUARD) {
             I(c, v)->blame = root->code;
             I(c, v)->blame_pc = root->pc;
         }
     }
+    I(c, at)->blame = root->code;       /* for the guards each code unit's step makes (adopt_at) */
+    I(c, at)->blame_pc = root->pc;
     return adopt_among(c, it, at, fn, seen, s, n) < 0 ? -1 : 1;
 }
 
@@ -662,7 +721,17 @@ adopted_yield(struct ctx *c)
         }
     }
     g->npending = kept;
-    lu_v args[3] = { it, lu_ev_const_i(c, c->next), lu_ev_const_i(c, depth) };
-    lu_ev_helper(c, H_gen_give, 3, args, 0);
+    if (depth != c->depth_in) {
+        lu_v args[3] = { it, lu_ev_const_i(c, c->next), lu_ev_const_i(c, depth) };
+        lu_ev_helper(c, H_gen_give, 3, args, 0);        /* its stack's top moved: lu_gen_give sets it too */
+    }
+    else {
+        /* As lu_gen_give, in line: where it resumes, its frame its own again, then suspended. */
+        lu_codeunit *resume = lu_code_start(c->code) + c->next;
+        word_set(c, it, FRAME_WORD(instr), (int64_t)(intptr_t)resume);
+        word_set(c, it, FRAME_WORD(last), (int64_t)(intptr_t)lu_instr_before(c->code, resume));
+        word_set(c, it, FRAME_WORD(owner), OWNER_AS_WORD(LU_FRAME_GENERATOR));
+        word_set(c, it, STATE_WORD, STATE_AS_WORD(LU_GEN_SUSPENDED));
+    }
     return lu_ev_returned(c, v);
 }

@@ -143,20 +143,6 @@ lu_gen_at(PyObject *o)
     return (long)(f->instr - lu_code_start(f->code));
 }
 
-int
-lu_gen_take(PyObject *o, long at)
-{
-    struct lu_gen *gen = (struct lu_gen *)o;
-    struct lu_frame *f = &gen->frame;
-    if (lu_gen_at(o) != at) {
-        return 0;
-    }
-    gen->frame_state = LU_GEN_EXECUTING;
-    f->home = LU_FRAME_GENERATOR;
-    __atomic_store_n(&f->owner, LU_FRAME_JIT, __ATOMIC_RELEASE);
-    return 1;
-}
-
 void
 lu_gen_give(PyObject *o, long pc, long depth)
 {

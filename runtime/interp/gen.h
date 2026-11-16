@@ -58,15 +58,14 @@ void lu_gen_enter_exc(PyThreadState *ts, PyObject *gen);
    (runtime/jit/eval_gen.c). lu_gen_at: the code unit an exact generator
    would resume at, when compiled code may run it so (suspended at a
    yield of its own or not yet started, no frame object, no locals
-   mapping); else -1. lu_gen_take: it stands at `at` still and is now
-   running, its frame compiled code's (LU_FRAME_JIT): the frame's words
-   are stale from here, and the code holds the references they held; 0
-   with nothing changed otherwise. lu_gen_give: compiled code stored what
-   the frame holds; it is suspended at code unit pc with a stack of
-   `depth`. lu_gen_over: it returned; compiled code released what the
-   frame held. */
+   mapping); else -1. Compiled code checks the same in line and takes it:
+   it is running, its frame compiled code's (LU_FRAME_JIT), the frame's
+   words stale from there, the code holding the references they held.
+   lu_gen_give: compiled code stored what the frame holds; it is
+   suspended at code unit pc with a stack of `depth` (in line too, where
+   the depth did not change). lu_gen_over: it returned; compiled code
+   released what the frame held. */
 long lu_gen_at(PyObject *gen);
-int lu_gen_take(PyObject *gen, long at);
 void lu_gen_give(PyObject *gen, long pc, long depth);
 void lu_gen_over(PyObject *gen);
 

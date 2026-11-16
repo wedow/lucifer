@@ -128,6 +128,7 @@ struct ctx {
     int adopted;
     lu_v *loaded;               /* an adopted frame: what each slot held when its words were loaded */
     int nloaded;
+    int depth_in;               /* and its stack's depth then */
     int ret;                    /* how an inlined frame returns (enum lu_frame_return): a value pushed, an
                                    __init__'s None dropped, the instance already on its caller's stack, or
                                    a FOR_ITER's item pushed unless it is MISSING */

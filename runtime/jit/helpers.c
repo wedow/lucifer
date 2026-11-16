@@ -238,18 +238,6 @@ h_gen_new(PyObject **argv, intptr_t n)
 }
 
 static intptr_t
-h_gen_at(PyObject *gen)
-{
-    return lu_gen_at(gen);
-}
-
-static intptr_t
-h_gen_take(PyObject *gen, intptr_t at)
-{
-    return lu_gen_take(gen, at);
-}
-
-static intptr_t
 h_gen_give(PyObject *gen, intptr_t pc, intptr_t depth)
 {
     lu_gen_give(gen, pc, depth);
@@ -1531,8 +1519,6 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, FX_RAISE, 0 },
     [H_fields_new] = { (void *)h_fields_new, "fields_new", REP_OBJ, FX_RAISE, 0 },
     [H_gen_new] = { (void *)h_gen_new, "gen_new", REP_OBJ, FX_RAISE, 0 },
-    [H_gen_at] = { (void *)h_gen_at, "gen_at", REP_I64, 0, 1 },
-    [H_gen_take] = { (void *)h_gen_take, "gen_take", REP_BIT, 0, 2 },
     [H_gen_give] = { (void *)h_gen_give, "gen_give", REP_BIT, 0, 3 },
     [H_gen_over] = { (void *)h_gen_over, "gen_over", REP_BIT, 0, 1 },
     [H_new_object] = { (void *)h_new_object, "new_object", REP_OBJ, FX_RAISE, 1 },
