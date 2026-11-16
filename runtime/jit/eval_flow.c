@@ -1821,6 +1821,12 @@ lu_ev_jump(struct ctx *c, int pc)
     add_edge(c, pc);
 }
 
+static void
+jump_arm(struct ctx *c, void *pc)
+{
+    lu_ev_jump(c, *(int *)pc);
+}
+
 void
 lu_ev_fork(struct ctx *c, lu_v bit, int pc_true)
 {
@@ -1834,6 +1840,13 @@ lu_ev_fork(struct ctx *c, lu_v bit, int pc_true)
         }
         return;
     }
+    lu_ev_fork_with(c, bit, jump_arm, &pc_true);
+}
+
+void
+lu_ev_fork_with(struct ctx *c, lu_v bit, void (*arm)(struct ctx *c, void *arg), void *arg)
+{
+    struct gctx *g = c->g;
     int T = lu_ir_block(g->f), F = lu_ir_block(g->f);
     lu_ir_edge(g->f, g->cur, T);
     lu_ir_edge(g->f, g->cur, F);
@@ -1845,7 +1858,7 @@ lu_ev_fork(struct ctx *c, lu_v bit, int pc_true)
     lu_v *pending = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(npending ? npending : 1));
     memcpy(pending, g->pending, sizeof(lu_v) * (size_t)npending);
     g->cur = T;
-    lu_ev_jump(c, pc_true);
+    arm(c, arg);
     g->st = saved;
     lu_ev_changed(g);
     g->npending = 0;

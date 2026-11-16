@@ -288,7 +288,7 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(attr_store) \
     X(slot_load) \
     X(slot_store) \
-    X(dict_lacks) X(profile) X(pic_same) X(fields_new) X(exc_new) X(exc_push) X(exc_pop) X(gen_new) X(gen_give) X(gen_over) \
+    X(dict_lacks) X(profile) X(pic_same) X(fields_new) X(exc_new) X(exc_push) X(exc_fetch) X(exc_pop) X(gen_new) X(gen_give) X(gen_over) \
     X(cell_load) \
     X(compare_ideq) \
     X(binary_op) \

@@ -3130,7 +3130,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     case OP_HELPER: {
         const struct lu_helper *h = &lu_helpers[in->imm];
         int err = -1;
-        if ((h->fx & FX_RAISE) && in->fs != NULL && (h->rep == REP_BIT || h->rep == REP_OBJ)) {
+        if ((h->fx & FX_RAISE) && in->fs != NULL && (h->rep == REP_BIT || h->rep == REP_OBJ) && !(in->flags & INS_CAUGHT)) {
             err = exit_to(a, in->fs, EXIT_ERROR, 1, in->drop);
         }
         struct lu_deopt *pub = NULL;

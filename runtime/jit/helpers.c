@@ -232,6 +232,13 @@ h_exc_push(PyObject *exc)
     return prev != NULL ? prev : Py_NewRef(Py_None);
 }
 
+/* What a helper the unit's handler takes raised, taken from the thread. */
+static PyObject *
+h_exc_fetch(PyObject **argv, intptr_t n)
+{
+    return PyErr_GetRaisedException();
+}
+
 /* POP_EXCEPT: exc_info holds prev again (nothing for None). */
 static void
 h_exc_pop(PyObject *prev)
@@ -1546,6 +1553,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_fields_new] = { (void *)h_fields_new, "fields_new", REP_OBJ, FX_RAISE, 0 },
     [H_exc_new] = { (void *)h_exc_new, "exc_new", REP_OBJ, FX_RAISE | FX_PY, 1 },
     [H_exc_push] = { (void *)h_exc_push, "exc_push", REP_OBJ, 0, 1 },
+    [H_exc_fetch] = { (void *)h_exc_fetch, "exc_fetch", REP_OBJ, 0, 0 },
     [H_exc_pop] = { (void *)h_exc_pop, "exc_pop", REP_NONE, FX_SEEN, 1 },
     [H_gen_new] = { (void *)h_gen_new, "gen_new", REP_OBJ, FX_RAISE, 0 },
     [H_gen_give] = { (void *)h_gen_give, "gen_give", REP_BIT, 0, 3 },

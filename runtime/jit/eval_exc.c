@@ -162,6 +162,33 @@ throw_to(struct ctx *c, struct ctx *h, int handler, int level, lu_v exc)
     g->cur = -1;
 }
 
+struct thrown {
+    struct ctx *h;
+    int handler, level;
+};
+
+/* The way a helper raised: what it raised, fetched before anything else
+   runs, to the handler. */
+static void
+raised_arm(struct ctx *c, void *arg)
+{
+    struct thrown *t = arg;
+    lu_v exc = lu_ev_helper(c, H_exc_fetch, 0, NULL, 0);
+    throw_to(c, t->h, t->handler, t->level, exc);
+}
+
+void
+lu_ev_caught(struct ctx *c, lu_v v)
+{
+    struct thrown t;
+    t.h = catcher(c, NULL, 0, &t.handler, &t.level);
+    if (t.h == NULL || c->g->cur < 0) {
+        return;
+    }
+    I(c, v)->flags |= INS_CAUGHT;
+    lu_ev_fork_with(c, lu_ev_emit(c, OP_IS, REP_BIT, v, lu_ev_konst(c, NULL), LU_NOV, 0), raised_arm, &t);
+}
+
 int
 lu_ev_raise(struct ctx *c)
 {

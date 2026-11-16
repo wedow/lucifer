@@ -381,6 +381,11 @@ void lu_ev_branch(struct ctx *c, lu_v bit, int pc_true, int pc_false);
 /* When bit is 1 control goes to pc_true; the evaluation goes on where it
    is 0 (nowhere, if bit is a constant 1). */
 void lu_ev_fork(struct ctx *c, lu_v bit, int pc_true);
+/* The same, the way taken when bit is 1 built by arm(c, arg) to its end. */
+void lu_ev_fork_with(struct ctx *c, lu_v bit, void (*arm)(struct ctx *c, void *arg), void *arg);
+/* After helper v, which raises by answering NULL: where a handler of the
+   unit takes what it raises, that way goes to the handler (eval_exc.c). */
+void lu_ev_caught(struct ctx *c, lu_v v);
 /* The current instruction goes two ways on a bit, each way built to its
    end and the two joined after it: lu_ev_split begins the way taken when
    the bit is 1, lu_ev_split_else ends it and begins the other, and

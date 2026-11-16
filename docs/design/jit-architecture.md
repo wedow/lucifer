@@ -959,8 +959,9 @@ Not built yet, each a stage of §7:
   (a list appended to, a dict given a key) exists before the loop.
 - Dependencies and hoisting: a global's guards run where it is read.
 - Handlers inside a unit only for `raise C` of a class the runtime
-  constructs, whose handler drops it unseen (eval_exc.c); any other raise
-  exits. Generators leave at each yield.
+  constructs, whose handler drops it unseen, and for what a helper raises
+  where every frame up to the handler is the kernel's (eval_exc.c); any
+  other raise exits. Generators leave at each yield.
 - Polymorphic attribute sites take the generic helper.
 - Entries by shape: a call that is not inlined is `H_call` into the
   callee's unit through C, about three times the direct entry PyPy makes.
