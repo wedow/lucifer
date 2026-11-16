@@ -208,6 +208,9 @@ lu_ev_val(struct ctx *c, lu_v r)
         v = lu_ev_helper(c, o->n == 0 ? H_new_dict : H_build_map, o->n, o->f, 0);
         lu_ev_def_type(c, v, &PyDict_Type);
         break;
+    case VK_GEN:
+        v = lu_ev_gen_real(c, o);
+        break;
     case VK_SEQITER: {
         lu_v fields[2] = { o->f[0], o->f[1] };
         v = lu_ev_helper(c, o->type == &PyListIter_Type ? H_listiter_new : H_tupleiter_new, 2, fields, 0);

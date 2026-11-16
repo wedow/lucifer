@@ -30,6 +30,7 @@
 #include "jit/target.h"
 #include "jit/jit.h"
 #include "interp/instrument.h"
+#include "interp/gen.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -189,6 +190,25 @@ object(struct maker *m, int k)
             Py_XDECREF(value);
         }
         break;
+    case VK_GEN: {
+        /* As it stands: suspended with what its frame holds, or finished.
+           One that runs gets its frame's contents where the frame is made. */
+        PyObject *fn = take(m, fields[GEN_FUNCV]);
+        fn = fn != NULL ? fn : take(m, fields[GEN_FN]);
+        int64_t pc = (int64_t)raw(m, fields[GEN_PC]);
+        o = fn != NULL ? lu_gen_blank((PyFunctionObject *)fn) : NULL;
+        if (o != NULL && pc != GEN_RUNNING) {
+            struct lu_frame *f = &((struct lu_gen *)o)->frame;
+            int held = pc < 0 ? 0 : f->code->co_nlocalsplus + (int)raw(m, fields[GEN_DEPTH]);
+            for (int i = 0; i < held; i++) {
+                f->localsplus[i] = take(m, fields[GEN_SLOTS + i]);
+            }
+            f->stackpointer = f->localsplus + (pc < 0 ? f->code->co_nlocalsplus : held);
+            lu_gen_stand(o, (int)pc);
+        }
+        Py_XDECREF(fn);
+        break;
+    }
     default:
         PyErr_SetString(PyExc_SystemError, "an exit names a virtual object of no kind");
         break;
@@ -371,12 +391,44 @@ frame_func(struct maker *m, const struct lu_deopt_frame *fr)
         : LU_PV_KIND(fr->funcv) == DV_CONST ? (PyObject *)(intptr_t)m->d->unit->imms[LU_PV_ARG(fr->funcv)] : fr->func;
 }
 
+/* Inlined frame k of d is the frame of a generator the unit resumed in
+   line: the generator is made (once per activation) and its own frame
+   runs above `previous` with the frame's locals, as a resumption by the
+   interpreter leaves it. A walker gets it so (counted 0: compiled code
+   has counted its inlined frames across the call); the exit counts it. */
+static struct lu_frame *
+gen_frame(PyThreadState *ts, struct maker *m, const struct lu_deopt_frame *fr, struct lu_frame *previous, int k,
+          int counted)
+{
+    PyObject *gen = object(m, (int)LU_PV_ARG(fr->gen));
+    if (gen == NULL) {
+        return NULL;
+    }
+    struct lu_frame *f = &((struct lu_gen *)gen)->frame;
+    if (f->previous == NULL) {
+        lu_gen_enter(ts, gen, previous);
+        const lu_pv *vals = m->d->unit->vals + fr->vals;
+        for (int i = 0; i < fr->nlocals; i++) {
+            f->localsplus[i] = take(m, vals[i]);
+        }
+        f->stackpointer = f->localsplus + fr->nlocals;
+    }
+    ts->py_recursion_remaining -= counted;
+    f->ret = fr->ret;
+    f->instr = shown(m->d, k);
+    f->last = lu_instr_before(f->code, f->instr);
+    return f;
+}
+
 /* A record for inlined frame k of d, as the interpreter would hold the
    frame during the call: its locals, no stack. */
 static struct lu_frame *
 record(struct maker *m, int k, struct lu_frame *previous)
 {
     const struct lu_deopt_frame *fr = lu_deopt_frame(m->d, k);
+    if (LU_PV_KIND(fr->gen) == DV_VIRT) {
+        return gen_frame(PyThreadState_Get(), m, fr, previous, k, 0);
+    }
     PyFunctionObject *func = (PyFunctionObject *)frame_func(m, fr);
     struct lu_frame *f = calloc(1, sizeof(PyObject *) * (size_t)fr->code->co_framesize);
     if (f == NULL) {
@@ -466,6 +518,16 @@ static struct lu_frame *
 push_inlined(PyThreadState *ts, struct maker *m, int k, struct lu_frame *top)
 {
     const struct lu_deopt_frame *fr = lu_deopt_frame(m->d, k);
+    if (LU_PV_KIND(fr->gen) == DV_VIRT) {
+        struct lu_frame *g = gen_frame(ts, m, fr, top, k, 1);
+        if (g != NULL) {
+            g->instr = g->last = lu_code_start(fr->code) + fr->pc;
+            if (m->forced != NULL && k - 1 < m->forced->nframes) {
+                m->forced->frames[k - 1] = NULL;        /* a walker's record of it was this frame */
+            }
+        }
+        return g;
+    }
     struct lu_frame *f = lu_frame_push(ts, (PyFunctionObject *)frame_func(m, fr), NULL);
     if (f == NULL) {
         return NULL;

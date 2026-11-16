@@ -105,6 +105,8 @@ struct lu_deopt_frame {
     uint32_t vals;              /* the unit's vals from here on: the locals, then the stack */
     int32_t nlocals, nstack;
     uint8_t ret;                /* how the frame returns when rebuilt (lu_fs) */
+    lu_pv gen;                  /* the generator whose frame this is, a virtual object of the exit (lu_fs);
+                                   DV_NULL for a call's frame */
 };
 
 /* Why compiled code left, for the counts. */
@@ -286,7 +288,7 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(attr_store) \
     X(slot_load) \
     X(slot_store) \
-    X(dict_lacks) X(profile) X(pic_same) X(fields_new) \
+    X(dict_lacks) X(profile) X(pic_same) X(fields_new) X(gen_new) \
     X(cell_load) \
     X(compare_ideq) \
     X(binary_op) \

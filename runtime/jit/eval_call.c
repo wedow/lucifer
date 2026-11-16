@@ -162,7 +162,8 @@ not_inlinable(struct ctx *c, PyFunctionObject *fn, lu_v funcv)
 {
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
     int kernel = (co->co_flags & LU_CO_KERNEL) != 0;
-    if (!PyCode_Check(co) || (co->co_flags & (LU_CO_GENERATORS | CO_ITERABLE_COROUTINE)) || !(co->co_flags & CO_OPTIMIZED)) {
+    if (!PyCode_Check(co) || !(co->co_flags & CO_OPTIMIZED)
+        || ((co->co_flags & (LU_CO_GENERATORS | CO_ITERABLE_COROUTINE)) && !lu_ev_gen_takes(co))) {
         return "not plain code";
     }
     if (co->_co_monitoring != NULL || (!kernel && funcv == LU_NOV && fn->func_version < 2)) {
@@ -524,7 +525,14 @@ lu_ev_return(struct ctx *c)
     /* The frame is gone before its references are; the value is the
        caller's stack entry, as whatever it is (a tuple returned to a
        caller that unpacks it never exists). */
-    struct ctx *p = c->parent;
+    if (LU_IS_VIRT(c->gen)) {
+        /* A generator resumed in line returns: it is finished, and its
+           consumer's loop ends with no value. */
+        lu_ev_gen_finish(c);
+        lu_ev_pop(c);
+        v = lu_ev_konst(c, LU_MISSING);
+        lu_ev_push(c, v);
+    }
     if (c->ret == LU_RETURN_INIT && lu_ev_const(c, v) != Py_None) {
         /* An __init__ that returns anything but None: the interpreter raises. */
         lu_ev_guard(c, OP_GUARD_BIT, lu_ev_emit(c, OP_IS, REP_BIT, lu_ev_val(c, v), lu_ev_konst(c, Py_None), LU_NOV, 0), 1);
@@ -534,6 +542,14 @@ lu_ev_return(struct ctx *c)
     }
     lu_ev_drop(c, c->funcv);
     lu_ev_state_pop(g);
+    return lu_ev_returned(c, v);
+}
+
+int
+lu_ev_returned(struct ctx *c, lu_v v)
+{
+    struct gctx *g = c->g;
+    struct ctx *p = c->parent;
     if (c->ret == LU_RETURN_FOR_ITER) {
         if (lu_ev_const(c, v) == LU_MISSING) {
             /* The iterator is exhausted on this path: the caller's loop ends. */

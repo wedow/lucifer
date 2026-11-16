@@ -168,12 +168,23 @@ enum lu_vkind {
     VK_METHOD,                  /* a bound method: f[0] its function, f[1] its self */
     VK_FIELDS,                  /* an instance of a kernel type with fields (lu_field_offset): f[i] field i, the
                                    constant NULL while unset */
+    VK_GEN,                     /* a generator: f[GEN_FUNCV] its function where the unit knows it by its code only
+                                   (else nothing), f[GEN_FN] the function, or the one that stands for it, a
+                                   constant; f[GEN_PC] the code unit its frame resumes at, an i64 (GEN_FINISHED;
+                                   GEN_RUNNING while a frame of the state is its frame, and holds what it
+                                   holds); f[GEN_DEPTH] its stack's depth there, an i64; then its frame's
+                                   locals and its stack's room, nothing where a slot holds nothing */
     VK_KINDS
 };
 
+enum { GEN_FUNCV, GEN_FN, GEN_PC, GEN_DEPTH, GEN_SLOTS };
+#define GEN_FINISHED (-1)
+#define GEN_RUNNING (-2)
+
 /* Kinds whose object may change once it exists: a record of one says
    nothing after that. */
-#define LU_VKIND_MUTABLE(kind) ((kind) == VK_SEQITER || (kind) == VK_DICT || (kind) == VK_LIST || (kind) == VK_FIELDS)
+#define LU_VKIND_MUTABLE(kind) \
+    ((kind) == VK_SEQITER || (kind) == VK_DICT || (kind) == VK_LIST || (kind) == VK_FIELDS || (kind) == VK_GEN)
 
 struct lu_vobj {
     uint8_t kind;               /* enum lu_vkind */
@@ -211,6 +222,8 @@ struct lu_fs {
     lu_v *locals;               /* LU_NOV is NULL. States of one frame whose locals are the same share them */
     lu_v *stack;                /* bottom up */
     uint8_t ret;                /* how an inlined frame returns when rebuilt (enum lu_frame_return) */
+    int gen;                    /* 1 + the id of the virtual generator whose frame this is, which it resumed
+                                   in line; 0 for a call's frame */
     struct lu_bind *binds;
     int nbinds;
     lu_v *held;

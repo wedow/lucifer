@@ -778,6 +778,24 @@ otherwise, whose inputs are made real on their edges before the phis
 exist. An object some edge made, or whose layouts differ, is made on
 every edge.
 
+**A generator the unit makes is a virtual frame.** A call of a plain
+generator function evaluates its prologue in line; `RETURN_GENERATOR`
+makes the frame's slots the fields of a virtual object of kind generator,
+with the code unit the frame resumes at and its stack's depth there. A
+`FOR_ITER` on one pushes those fields as a frame of the state, with the
+`None` a for loop sends, and evaluates the generator's code from the
+resume point to its next yield, where the slots become the fields again
+and the value is the loop's item, or to its return, which ends the loop.
+Round a consumer's loop the resume point is a phi: the header keeps the
+code units a back-edge brought (a hint, as for slots), and the step tests
+for each. One that escapes is made as it stands (`H_gen_new`); a frame
+state inside its body names the generator whose frame it is, and the
+materializer runs that frame as the generator's own, above its
+consumer's. Only generators whose suspensions are all outside `try` and
+`with` blocks are taken, so that dropping one unfinished releases what
+its frame holds and runs nothing; one with cell variables, or that
+delegates (`yield from`), is a real generator still.
+
 **A call in tail position returns through its caller.** Where an inlined
 frame's call is followed by `RETURN_VALUE`, each of the callee's returns
 goes on through that instruction on its own path instead of joining the
@@ -866,8 +884,11 @@ What decides how code is specialized:
 
 Not built yet, each a stage of §7:
 
-- Virtual instances of classes, cells, slices, generators, strings as
-  parts (S2, S5, S6). A virtual object whose layout changes in a loop
+- Virtual instances of classes, cells, slices, strings as parts (S2,
+  S5). A generator that already exists (a unit entered in its consumer's
+  loop, or one a call the unit did not inline made) is resumed through
+  C, with the cheap yield and the compiled resume; `yield from` on a
+  virtual generator (S6). A virtual object whose layout changes in a loop
   (a list appended to, a dict given a key) exists before the loop.
 - Dependencies and hoisting: a global's guards run where it is read.
 - Handlers inside a unit: a raise exits. Generators leave at each yield.

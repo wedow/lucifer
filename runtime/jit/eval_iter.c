@@ -90,6 +90,12 @@ lu_ev_for_iter(struct ctx *c)
         if (o != NULL && real == LU_NOV && o->kind == VK_SEQITER) {
             return virtual_step(c, it, o, exit_pc);
         }
+        if (o != NULL && real == LU_NOV && o->kind == VK_GEN) {
+            int done = lu_ev_gen_step(c, it, exit_pc);
+            if (done != 0) {
+                return done < 0 ? -1 : 0;
+            }
+        }
     }
     int kind = nospec(c, c->pc) ? LU_ITER_OTHER : lu_ev_feedback(c, c->cache);
     PyTypeObject *t = lu_ev_type(c, it);

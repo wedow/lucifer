@@ -76,6 +76,44 @@ lu_gen_new(PyThreadState *ts, struct lu_frame *f)
     return (PyObject *)gen;
 }
 
+static void clear_frame(struct lu_gen *gen);
+
+PyObject *
+lu_gen_blank(PyFunctionObject *func)
+{
+    PyCodeObject *code = (PyCodeObject *)func->func_code;
+    struct lu_gen *gen = (struct lu_gen *)lu_object_new(
+        &PyGen_Type, offsetof(struct lu_gen, frame) + (size_t)code->co_framesize * sizeof(PyObject *));
+    if (gen == NULL) {
+        return NULL;
+    }
+    gen->name = Py_NewRef(func->func_name);
+    gen->qualname = Py_NewRef(func->func_qualname);
+    struct lu_frame *f = &gen->frame;
+    f->code = (PyCodeObject *)Py_NewRef(code);
+    f->func = Py_NewRef(func);
+    f->globals = func->func_globals;
+    f->builtins = func->func_builtins;
+    f->owner = LU_FRAME_GENERATOR;
+    f->stackpointer = f->localsplus + code->co_nlocalsplus;
+    gen->frame_state = LU_GEN_CREATED;
+    return (PyObject *)gen;
+}
+
+void
+lu_gen_stand(PyObject *o, int pc)
+{
+    struct lu_gen *gen = (struct lu_gen *)o;
+    struct lu_frame *f = &gen->frame;
+    if (pc < 0) {
+        clear_frame(gen);
+        return;
+    }
+    f->instr = lu_code_start(f->code) + pc;
+    f->last = lu_instr_before(f->code, f->instr);
+    gen->frame_state = f->last->op.code == YIELD_VALUE ? (int8_t)(LU_GEN_SUSPENDED + f->last->op.arg) : LU_GEN_CREATED;
+}
+
 /* Starts gen running in the frame chain above `previous`, its exception
    state above `exc_prev`: the recursion check, then the links. */
 static int
@@ -91,6 +129,16 @@ start(PyThreadState *ts, struct lu_gen *gen, struct lu_frame *previous, _PyErr_S
     gen->frame_state = LU_GEN_EXECUTING;
     gen->exc_state.previous_item = exc_prev;
     return 0;
+}
+
+struct lu_frame *
+lu_gen_enter(PyThreadState *ts, PyObject *o, struct lu_frame *previous)
+{
+    struct lu_gen *gen = (struct lu_gen *)o;
+    ts->py_recursion_remaining++;       /* start's own check cannot fail: the unit made room at its entry */
+    start(ts, gen, previous, ts->exc_info);
+    ts->exc_info = &gen->exc_state;
+    return &gen->frame;
 }
 
 /* gen_send_ex2's refusals: -1 with an error, 1 when gen is finished and

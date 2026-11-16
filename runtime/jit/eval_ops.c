@@ -29,6 +29,7 @@ lu_ev_op_supported(int base)
     case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE: case DICT_UPDATE:
     case DELETE_FAST: case LOAD_SUPER_ATTR: case STORE_GLOBAL: case BUILD_SLICE: case CONVERT_VALUE:
     case FORMAT_SIMPLE: case FORMAT_WITH_SPEC: case BUILD_STRING: case LOAD_SPECIAL:
+    case RETURN_GENERATOR: case YIELD_VALUE:    /* a generator made in line (eval_gen.c) */
     case RAISE_VARARGS: case RERAISE:   /* the interpreter raises: an exit, on a path that is leaving anyway */
         return 1;
     default:
@@ -327,8 +328,10 @@ lu_ev_instruction(struct ctx *c)
     switch (c->base) {
     case NOP: case NOT_TAKEN:
         return 0;
+    case RETURN_GENERATOR:
+        return lu_ev_gen_make(c);
     case RESUME:
-        if (c->parent != NULL && !c->kernel) {
+        if (c->parent != NULL && !c->kernel && !LU_IS_VIRT(c->gen)) {
             /* An inlined call polls where the interpreter's would: a tool
                turned on since the compile sees the call. */
             lu_ev_guard(c, OP_POLL, LU_NOV, 0);
@@ -726,6 +729,9 @@ lu_ev_instruction(struct ctx *c)
         return 0;
     }
     case YIELD_VALUE:
+        if (LU_IS_VIRT(c->gen)) {
+            return lu_ev_gen_yield(c);
+        }
         if (c->parent != NULL) {
             lu_ev_side_exit(c, EXIT_SIDE);
             return 0;

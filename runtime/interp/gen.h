@@ -38,6 +38,18 @@ lu_gen_of(struct lu_frame *f)
    over the frame `f`'s contents; `f` is left empty for lu_frame_pop. */
 PyObject *lu_gen_new(PyThreadState *ts, struct lu_frame *f);
 
+/* For the tier, which makes a generator its code kept virtual
+   (runtime/jit/exit.c): lu_gen_blank gives a generator for a call of func
+   with an empty frame, for the caller to fill; lu_gen_stand says where
+   the filled frame stands (the code unit it resumes at, as a yield or
+   RETURN_GENERATOR left it; below 0: finished, whatever it held released);
+   lu_gen_enter starts it running above `previous`, as a resumption does
+   before it pushes the value sent, and gives its frame; the frame is not
+   counted against the recursion limit. */
+PyObject *lu_gen_blank(PyFunctionObject *func);
+void lu_gen_stand(PyObject *gen, int pc);
+struct lu_frame *lu_gen_enter(PyThreadState *ts, PyObject *gen, struct lu_frame *previous);
+
 /* Resumes `gen` (an exact generator, coroutine or async generator) with
    `arg` pushed on its frame (owned; NULL resumes as next() does): the frame
    is linked above the task's current frame, its exception state above the

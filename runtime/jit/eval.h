@@ -120,6 +120,8 @@ struct ctx {
     int lo;                     /* blocks below it are built or not reached yet */
     const int *blkat;           /* code unit -> bblk index, or -1 */
     struct lu_fs *caller_fs;    /* an inlined frame's caller, after the call */
+    lu_v gen;                   /* the virtual generator whose frame this is, resumed in line (eval_gen.c);
+                                   LU_NOV for a call's frame */
     int ret;                    /* how an inlined frame returns (enum lu_frame_return): a value pushed, an
                                    __init__'s None dropped, the instance already on its caller's stack, or
                                    a FOR_ITER's item pushed unless it is MISSING */
@@ -155,6 +157,18 @@ struct hint {
     uint64_t place;             /* a slot's index, or a key (eval_flow.c) */
 };
 
+/* What a rebuild knows of generators resumed in line, from the build
+   before it (eval_gen.c): the depth of a generator's stack at a code unit
+   it resumes at (place 0: `code` is the generator's), and a resume point
+   a back-edge brought round to a loop header's carried generator (`code`
+   and `at` the header's, `place` the generator's key there). */
+struct resume {
+    PyCodeObject *code;
+    int at;
+    uint64_t place;
+    int pc, depth;
+};
+
 /* One build. */
 struct gctx {
     struct lu_func *f;
@@ -171,6 +185,15 @@ struct gctx {
     int ret_missing;            /* the call just inlined for a FOR_ITER may have answered MISSING */
     struct hint *hints;
     int nhints, caphints;
+    struct resume *resumes;     /* what a rebuild knows of generators resumed in line (eval_gen.c) */
+    int nresumes, capresumes;
+    struct resume_phi {         /* a loop header's phi of a carried generator's resume point: its header */
+        lu_v phi;
+        PyCodeObject *code;
+        int pc;
+        uint64_t place;
+    } *resume_phis;
+    int nresume_phis, capresume_phis;
     struct konst {              /* the build's constants, hashed by kind and bits */
         int op;
         int64_t imm;
@@ -398,6 +421,32 @@ int lu_ev_call_ex(struct ctx *c);
    the instruction is still to be built, -1 when the build failed. */
 int lu_ev_kernel_op(struct ctx *c, int kid, lu_v *args, int n, int nops, int ret);
 int lu_ev_return(struct ctx *c);
+/* eval_gen.c: a generator the unit made and resumes in line never
+   exists. RETURN_GENERATOR in an inlined frame makes the frame's slots
+   the fields of a virtual generator, the call's value; FOR_ITER on one
+   (lu_ev_gen_step: 1 when it built the instruction, 0 when the generator
+   was made real for want of room and is stepped as any other) evaluates
+   its code from each code unit it may stand at to its next yield, which
+   makes the frame's slots its fields again and pushes the value in the
+   consumer (lu_ev_gen_yield), or to its return, which ends the
+   consumer's loop (lu_ev_gen_finish binds it finished). */
+int lu_ev_gen_takes(PyCodeObject *co);
+int lu_ev_gen_make(struct ctx *c);
+int lu_ev_gen_step(struct ctx *c, lu_v it, int exit_pc);
+int lu_ev_gen_yield(struct ctx *c);
+void lu_ev_gen_finish(struct ctx *c);
+lu_v lu_ev_gen_real(struct ctx *c, struct lu_vobj *o);
+/* The code units a resume point (a generator's GEN_PC) may be: n of
+   them in *pcs. A loop header's phi of one is registered with its place;
+   a back-edge's resume point the header's phi does not cover is recorded
+   for the next build (1 when one was). */
+int lu_ev_gen_resumes(struct ctx *c, lu_v v, int **pcs);
+void lu_ev_gen_header(struct ctx *c, lu_v phi, int pc, uint64_t place);
+int lu_ev_gen_back_edge(struct ctx *c, lu_v phi, lu_v now);
+/* A frame's return: value v, pushed on its caller's stack as the frame's
+   ret says, goes on after the caller's instruction (eval_call.c). The
+   frame has left the state. */
+int lu_ev_returned(struct ctx *c, lu_v v);
 int lu_ev_get_iter(struct ctx *c);              /* eval_iter.c */
 int lu_ev_for_iter(struct ctx *c);
 /* What a class's attributes and bases are is read as of a version

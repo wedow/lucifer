@@ -470,6 +470,15 @@ field_class(struct ctx *c, lu_v v)
     return v >= 0 ? I(c, v)->rep : FIELD_OBJ;
 }
 
+/* A generator's fields are its frame's slots: one that holds nothing is
+   an object's place all the same. */
+static int
+place_class(struct ctx *c, const struct lu_vobj *o, lu_v v)
+{
+    int cls = field_class(c, v);
+    return cls == FIELD_UNSET && o->kind == VK_GEN ? FIELD_OBJ : cls;
+}
+
 /* What each phi takes on the current edge, for the places from `from`
    on: the object an object phi takes (made real here if it was not), the
    object a raw phi's value stands for if there is one, or LU_NOV. */
@@ -766,8 +775,8 @@ stays_virtual(struct ctx *c, struct join *j, int id)
         }
         for (int k = 0; k < o->n; k++) {
             if (o->f[k] != first->f[k]
-                && ((o->kind == VK_DICT && !(k & 1)) || field_class(c, o->f[k]) == FIELD_UNSET
-                    || field_class(c, o->f[k]) != field_class(c, first->f[k]))) {
+                && ((o->kind == VK_DICT && !(k & 1)) || place_class(c, o, o->f[k]) == FIELD_UNSET
+                    || place_class(c, o, o->f[k]) != place_class(c, o, first->f[k]))) {
                 return NULL;
             }
         }
@@ -848,10 +857,11 @@ static int
 fields_made(struct ctx *c, struct join *j, int id)
 {
     struct gctx *g = c->g;
-    int n = unmade_in(g, &j->edges[0].st, id)->n, made = 0;
+    struct lu_vobj *first = unmade_in(g, &j->edges[0].st, id);
+    int n = first->n, made = 0;
     for (int k = 0; k < n && !made; k++) {
         lu_v *vals = edge_values(c, j, (struct place){ id, k });
-        if (!field_differs(c, j, id, k) || field_class(c, vals[0]) != FIELD_OBJ || join_rep(c, j, vals) != REP_OBJ) {
+        if (!field_differs(c, j, id, k) || place_class(c, first, vals[0]) != FIELD_OBJ || join_rep(c, j, vals) != REP_OBJ) {
             continue;
         }
         for (int e = 0; e < j->n; e++) {
@@ -1202,7 +1212,7 @@ carried_objects(struct ctx *c, int nslots, struct carry *k)
 static int
 field_carriable(struct ctx *c, const struct lu_vobj *o, int i)
 {
-    return !(o->kind == VK_DICT && !(i & 1)) && field_class(c, o->f[i]) != FIELD_UNSET;
+    return !(o->kind == VK_DICT && !(i & 1)) && place_class(c, o, o->f[i]) != FIELD_UNSET;
 }
 
 /* What the hints say must exist before the loop is made, until the
@@ -1306,6 +1316,9 @@ build_header(struct ctx *c, struct bblk *bb)
                 P->lead[p] = p;
                 P->phi[p] = new_phi(c, H, cls);
                 phi_add(c, P->phi[p], o->f[i]);
+                if (o->kind == VK_GEN && i == GEN_PC) {
+                    lu_ev_gen_header(c, P->phi[p], pc, key_step(k.key[j], i + 1));
+                }
             }
             else if (hint != 0) {
                 header_place(c, P, p, o->f[i], H, pc, hint);
@@ -1389,7 +1402,7 @@ check_carried(struct ctx *c, struct bblk *bb)
         int fits = o != NULL && o->kind == h->kind && o->n == h->n && o->type == h->type && o->neg == h->neg;
         for (int i = 0; fits && i < o->n; i++) {
             fits = o->f[i] == h->f[i]
-                || (field_carriable(c, o, i) && field_class(c, o->f[i]) == field_class(c, h->f[i]));
+                || (field_carriable(c, o, i) && place_class(c, o, o->f[i]) == place_class(c, o, h->f[i]));
         }
         if (!fits) {
             lu_ev_hint(g, c->code, bb->pc, bb->carried_key[j], HINT_OBJ);
@@ -1437,7 +1450,10 @@ back_edge(struct ctx *c, struct bblk *bb)
     check_same(c, bb);
     for (int p = 0; p < P->n; p++) {
         lu_v r = place_get(g, &g->st, P->at[p]);
-        if (P->kind[p] == PLACE_RAW) {
+        if (P->kind[p] == PLACE_DIRECT) {
+            lu_ev_gen_back_edge(c, P->phi[p], r);       /* a generator's resume point the header did not expect */
+        }
+        else if (P->kind[p] == PLACE_RAW) {
             int rep = I(c, P->phi[p])->rep, have = raw_rep(c, r);
             PyTypeObject *t = lu_ev_type(c, r);
             int typed = t == &PyLong_Type ? REP_I64 : t == &PyFloat_Type ? REP_F64 : REP_NONE;
@@ -1812,21 +1828,25 @@ lu_ssa_build(struct lu_func *f, struct lu_frame *frame)
     int r = -1;
     for (int tries = 0;; tries++) {
         struct hint *hints = g.hints;
+        struct resume *resumes = g.resumes;
+        int nresumes = g.nresumes, capresumes = g.capresumes;
         int nhints = g.nhints, caphints = g.caphints, budget = f->budget;
         reset(f);
         g = (struct gctx){ .f = f, .live = frame, .hints = hints, .nhints = nhints, .caphints = caphints,
+                           .resumes = resumes, .nresumes = nresumes, .capresumes = capresumes,
                            .budget = budget, .keep = LU_NOV, .learned = lu_jit_prof_learned(f->code) };
         r = build_root(&g);
         if (r < 0 || !g.restart) {
             break;
         }
-        if (tries > 2 * g.nhints + 2) {
+        if (tries > 2 * (g.nhints + g.nresumes) + 2) {
             f->fail = "loops whose shapes do not settle";
             r = -1;
             break;
         }
     }
     free(g.hints);
+    free(g.resumes);
     if (r < 0 && f->fail == NULL) {
         f->fail = "build failed";
     }

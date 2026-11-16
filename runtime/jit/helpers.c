@@ -214,6 +214,29 @@ h_fields_new(PyObject **argv, intptr_t n)
     return o;
 }
 
+/* A generator the unit kept virtual, as it stands: argv[0] its function,
+   argv[1] the code unit its frame resumes at (below 0: it finished),
+   argv[2] its stack's depth there, then its frame's locals and stack. */
+static PyObject *
+h_gen_new(PyObject **argv, intptr_t n)
+{
+    PyFunctionObject *fn = (PyFunctionObject *)argv[0];
+    intptr_t pc = (intptr_t)argv[1], held = ((PyCodeObject *)fn->func_code)->co_nlocalsplus + (intptr_t)argv[2];
+    PyObject *gen = lu_gen_blank(fn);
+    if (gen == NULL) {
+        return NULL;
+    }
+    struct lu_frame *f = &((struct lu_gen *)gen)->frame;
+    for (intptr_t i = 0; pc >= 0 && i < held; i++) {
+        f->localsplus[i] = Py_XNewRef(argv[3 + i]);
+    }
+    if (pc >= 0) {
+        f->stackpointer = f->localsplus + held;
+    }
+    lu_gen_stand(gen, (int)pc);
+    return gen;
+}
+
 /* An instance of a class whose instances object.__new__ makes, as
    PyType_GenericAlloc makes it. */
 static PyObject *
@@ -1481,6 +1504,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_build_list] = { (void *)h_build_list, "build_list", REP_OBJ, FX_RAISE, 0 },
     [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, FX_RAISE, 0 },
     [H_fields_new] = { (void *)h_fields_new, "fields_new", REP_OBJ, FX_RAISE, 0 },
+    [H_gen_new] = { (void *)h_gen_new, "gen_new", REP_OBJ, FX_RAISE, 0 },
     [H_new_object] = { (void *)h_new_object, "new_object", REP_OBJ, FX_RAISE, 1 },
     [H_new_dict] = { (void *)h_new_dict, "new_dict", REP_OBJ, FX_RAISE, 0 },
     [H_contains] = { (void *)h_contains, "contains", REP_OBJ, FX_RAISE | FX_PY, 3 },

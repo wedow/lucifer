@@ -210,7 +210,7 @@ lu_alloc_kind(const struct lu_ins *in)
     case H_build_set: return ALLOC_set;
     case H_new_object: case H_fields_new: return ALLOC_instance;
     case H_get_iter: case H_get_iter_seq: case H_range_iter: case H_listiter_new: case H_tupleiter_new:
-    case H_rangeiter_new:
+    case H_rangeiter_new: case H_gen_new:
         return ALLOC_iterator;
     case H_make_function: return ALLOC_function;
     case H_call: return ALLOC_class_call;
@@ -380,7 +380,7 @@ lu_ir_free(struct lu_func *f)
 static void
 dump_ref(struct lu_func *f, struct lu_fs *fs, lu_v r, FILE *out)
 {
-    static const char *const vkind_names[VK_KINDS] = { "int", "float", "bool", "tuple", "iter", "dict", "list", "method", "fields" };
+    static const char *const vkind_names[VK_KINDS] = { "int", "float", "bool", "tuple", "iter", "dict", "list", "method", "fields", "gen" };
     if (!LU_IS_VIRT(r)) {
         fprintf(out, " v%d", r);
         return;
