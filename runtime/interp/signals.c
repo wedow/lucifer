@@ -77,6 +77,11 @@ trip_signal(int signum)
     }
     else {
         trip(signum);
+        int wakeup = __atomic_load_n(&_PyRuntime.signals.wakeup_fd, __ATOMIC_SEQ_CST);
+        if (wakeup > 0) {
+            char byte = (char)signum;
+            lu_write_signal_safe(wakeup - 1, &byte, 1);
+        }
         redirect_to_main_task(signum);
     }
     errno = save_errno;
@@ -211,6 +216,24 @@ prim_signal_install(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
+/* signal_wakeup_fd(fd): the descriptor each signal's number is written to as it arrives, -1 for
+   none; answers the previous one (signal.set_wakeup_fd). Only the main thread sets it. */
+static PyObject *
+prim_signal_wakeup_fd(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    long fd;
+    if (!PyLong_Check(args[0]) || lu_long_as_long(args[0], &fd) < 0) {
+        return NULL;
+    }
+    if (!lu_thread_can_handle_signals()) {
+        lu_err_format(PyExc_ValueError, "set_wakeup_fd only works in main thread of the main interpreter");
+        return NULL;
+    }
+    int old = __atomic_exchange_n(&_PyRuntime.signals.wakeup_fd, fd < 0 ? 0 : (int)fd + 1, __ATOMIC_SEQ_CST);
+    return PyLong_FromLong(old - 1);
+}
+
 /* signal_raise(signum): raise(signum) in this thread, then the handlers it
    tripped run at once if this is the main thread (signal.raise_signal). */
 static PyObject *
@@ -294,7 +317,7 @@ PyOS_setsig(int sig, PyOS_sighandler_t handler)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_signal_methods[] = {
-    FAST(signal_install), FAST(signal_raise), FAST(signal_interrupt), FAST(signal_ignored),
+    FAST(signal_install), FAST(signal_raise), FAST(signal_interrupt), FAST(signal_ignored), FAST(signal_wakeup_fd),
     FAST(default_int_handler),
     { NULL, NULL, 0, NULL },
 };

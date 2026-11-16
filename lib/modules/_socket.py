@@ -1,8 +1,9 @@
 """_socket (Modules/socketmodule.c): the constants, the error classes, the
 address conversion functions, and stream sockets over AF_INET, AF_INET6 and
 AF_UNIX: create, bind, listen, accept, connect, options, and blocking, timed
-and nonblocking I/O, and datagrams (sendto, recvfrom). Addresses cross into the
-runtime as raw sockaddr bytes, packed and unpacked here."""
+and nonblocking I/O, datagrams (sendto, recvfrom), and messages with ancillary data
+(sendmsg, recvmsg). Addresses cross into the runtime as raw sockaddr bytes, packed
+and unpacked here."""
 
 import errno as _errno
 import _lucifer
@@ -242,6 +243,43 @@ class socket(_lucifer.socket_base()):
         if not 1 <= len(args) <= 2:
             raise TypeError('sendto() takes 2 or 3 arguments (%d given)' % (len(args) + 1))
         return self._sendto(data, args[0] if len(args) == 2 else 0, _pack(self._family, args[-1], 'sendto'))
+
+    def sendmsg(self, buffers, ancdata=(), flags=0, address=None, /):
+        try:
+            buffers = list(buffers)
+        except TypeError:
+            raise TypeError('sendmsg() argument 1 must be an iterable') from None
+        cmsgs = []
+        for item in ancdata:
+            if not isinstance(item, tuple) or len(item) != 3:
+                raise TypeError('[sendmsg() ancillary data items]() argument must be sequence of length 3')
+            level, kind, data = item
+            cmsgs.append((level.__index__(), kind.__index__(), bytes(memoryview(data))))
+        if address is not None:
+            address = _pack(self._family, address, 'sendmsg')
+        fd = self._check()
+        self._wait(_POLLOUT)
+        return _lucifer.os_sendmsg(fd, buffers, cmsgs, flags, address)
+
+    def recvmsg(self, bufsize, ancbufsize=0, flags=0, /):
+        if bufsize < 0:
+            raise ValueError('negative buffer size in recvmsg()')
+        if ancbufsize < 0:
+            raise ValueError('negative ancillary buffer size in recvmsg()')
+        fd = self._check()
+        self._wait(_POLLIN)
+        data, ancdata, msg_flags, address = _lucifer.os_recvmsg(fd, bufsize, ancbufsize, flags)
+        return data, ancdata, msg_flags, _unpack(address)
+
+    def recvmsg_into(self, buffers, ancbufsize=0, flags=0, /):
+        views = [memoryview(b).cast('B') for b in buffers]
+        data, ancdata, msg_flags, address = self.recvmsg(sum(map(len, views)), ancbufsize, flags)
+        start = 0
+        for view in views:
+            chunk = data[start:start + len(view)]
+            view[:len(chunk)] = chunk
+            start += len(chunk)
+        return len(data), ancdata, msg_flags, address
 
     def bind(self, address, /):
         _lucifer.os_sockaddr('bind', self._check(), _pack(self._family, address, 'bind'))
@@ -532,6 +570,23 @@ def socketpair(family=AF_UNIX, type=SOCK_STREAM, proto=0):
     """Create a pair of socket objects from the sockets returned by the platform socketpair() function."""
     a, b = _lucifer.os_socketpair(family, type | SOCK_CLOEXEC, proto)
     return socket(family, type, proto, a), socket(family, type, proto, b)
+
+
+_CMSGHDR = 16        # sizeof(struct cmsghdr), its data aligned to size_t: Linux on 64-bit targets
+
+
+def CMSG_LEN(length, /):
+    """Return the total length, without trailing padding, of an ancillary data item with associated data of the given length."""
+    if not 0 <= length <= 0x7fffffff - _CMSGHDR:
+        raise OverflowError('CMSG_LEN() argument out of range')
+    return _CMSGHDR + length
+
+
+def CMSG_SPACE(length, /):
+    """Return the buffer size needed for recvmsg() to receive an ancillary data item with associated data of the given length, along with any trailing padding."""
+    if not 0 <= length <= 0x7fffffff - _CMSGHDR - 7:
+        raise OverflowError('CMSG_SPACE() argument out of range')
+    return _CMSGHDR + ((length + 7) & ~7)
 
 
 def close(fd, /):

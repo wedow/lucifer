@@ -159,6 +159,17 @@ def read(fd, length, /):
     return _lucifer.os_read(fd, length)
 
 
+def readinto(fd, buffer, /):
+    """Read into a buffer object from a file descriptor; returns the number of bytes read."""
+    view = memoryview(buffer)
+    if view.readonly:
+        raise TypeError('readinto() argument 2 must be read-write bytes-like object, not %s' % type(buffer).__name__)
+    view = view.cast('B')
+    data = read(fd, len(view))
+    view[:len(data)] = data
+    return len(data)
+
+
 def write(fd, data, /):
     """Write a bytes object to a file descriptor."""
     return _lucifer.os_write(fd, data if type(data) is bytes else bytes(data))
@@ -386,7 +397,7 @@ def getppid():
 sysconf_names = {
     'SC_ARG_MAX': 0, 'SC_CHILD_MAX': 1, 'SC_CLK_TCK': 2, 'SC_NGROUPS_MAX': 3, 'SC_OPEN_MAX': 4,
     'SC_PAGESIZE': 30, 'SC_PAGE_SIZE': 30, 'SC_NPROCESSORS_CONF': 83, 'SC_NPROCESSORS_ONLN': 84,
-    'SC_PHYS_PAGES': 85, 'SC_AVPHYS_PAGES': 86,
+    'SC_PHYS_PAGES': 85, 'SC_AVPHYS_PAGES': 86, 'SC_IOV_MAX': 60,
 }
 
 

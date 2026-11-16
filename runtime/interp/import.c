@@ -253,7 +253,7 @@ prim_fix_co_filename(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
-/* marshal_loads(bytes): the object marshal.loads returns. */
+/* marshal_loads(bytes): (the object marshal.loads returns, the count of bytes it took). */
 static PyObject *
 prim_marshal_loads(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -261,7 +261,9 @@ prim_marshal_loads(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "marshal_loads(bytes)");
         return NULL;
     }
-    return PyMarshal_ReadObjectFromString(PyBytes_AS_STRING(args[0]), PyBytes_GET_SIZE(args[0]));
+    Py_ssize_t used;
+    PyObject *obj = lu_marshal_read_prefix(PyBytes_AS_STRING(args[0]), PyBytes_GET_SIZE(args[0]), &used);
+    return obj == NULL ? NULL : Py_BuildValue("(Nn)", obj, used);
 }
 
 /* marshal_dumps(obj, version, allow_code): the bytes marshal.dumps returns. */

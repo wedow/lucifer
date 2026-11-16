@@ -1132,6 +1132,146 @@ prim_os_recvfrom(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return address == NULL ? (Py_DECREF(bytes), NULL) : Py_BuildValue("(NN)", bytes, address);
 }
 
+/* sendmsg(fd, buffers, ancdata, flags, address): the count sent (sendmsg(2)). buffers is a list of
+   bytes-like objects, ancdata a list of (level, type, bytes) control messages, address the raw
+   sockaddr bytes or None. */
+static PyObject *
+prim_os_sendmsg(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd, flags;
+    if (nargs != 5 || int_arg(args[0], &fd) < 0 || !PyList_Check(args[1]) || !PyList_Check(args[2])
+        || int_arg(args[3], &flags) < 0
+        || (args[4] != Py_None && (!PyBytes_Check(args[4])
+                                   || PyBytes_GET_SIZE(args[4]) > (Py_ssize_t)sizeof(struct sockaddr_storage)))) {
+        return PyErr_Occurred() ? NULL
+            : (lu_err_format(PyExc_TypeError, "sendmsg(fd, buffers, ancdata, flags, address)"), NULL);
+    }
+    Py_ssize_t nbufs = PyList_GET_SIZE(args[1]), ncmsgs = PyList_GET_SIZE(args[2]);
+    size_t space = 0;
+    for (Py_ssize_t i = 0; i < ncmsgs; i++) {
+        PyObject *c = PyList_GET_ITEM(args[2], i);
+        if (!PyTuple_Check(c) || PyTuple_GET_SIZE(c) != 3 || !PyBytes_Check(PyTuple_GET_ITEM(c, 2))) {
+            return lu_err_format(PyExc_TypeError, "sendmsg() ancillary data items must be (int, int, bytes)"), NULL;
+        }
+        space += CMSG_SPACE((size_t)PyBytes_GET_SIZE(PyTuple_GET_ITEM(c, 2)));
+    }
+    Py_buffer *views = PyMem_Calloc(nbufs ? (size_t)nbufs : 1, sizeof *views);
+    struct iovec *iov = PyMem_Calloc(nbufs ? (size_t)nbufs : 1, sizeof *iov);
+    char *control = space ? PyMem_Calloc(1, space) : NULL;
+    PyObject *result = NULL;
+    Py_ssize_t got = 0;
+    if (views == NULL || iov == NULL || (space && control == NULL)) {
+        PyErr_NoMemory();
+        goto done;
+    }
+    for (; got < nbufs; got++) {
+        if (PyObject_GetBuffer(PyList_GET_ITEM(args[1], got), &views[got], PyBUF_SIMPLE) < 0) {
+            goto done;
+        }
+        iov[got].iov_base = views[got].buf;
+        iov[got].iov_len = (size_t)views[got].len;
+    }
+    struct msghdr msg = {
+        .msg_name = args[4] == Py_None ? NULL : PyBytes_AS_STRING(args[4]),
+        .msg_namelen = args[4] == Py_None ? 0 : (socklen_t)PyBytes_GET_SIZE(args[4]),
+        .msg_iov = iov, .msg_iovlen = (size_t)nbufs, .msg_control = control, .msg_controllen = space,
+    };
+    struct cmsghdr *cm = space ? CMSG_FIRSTHDR(&msg) : NULL;
+    for (Py_ssize_t i = 0; i < ncmsgs; i++, cm = CMSG_NXTHDR(&msg, cm)) {
+        PyObject *c = PyList_GET_ITEM(args[2], i), *data = PyTuple_GET_ITEM(c, 2);
+        long level, type;
+        if (int_arg(PyTuple_GET_ITEM(c, 0), &level) < 0 || int_arg(PyTuple_GET_ITEM(c, 1), &type) < 0) {
+            goto done;
+        }
+        cm->cmsg_level = (int)level;
+        cm->cmsg_type = (int)type;
+        cm->cmsg_len = CMSG_LEN((size_t)PyBytes_GET_SIZE(data));
+        memcpy(CMSG_DATA(cm), PyBytes_AS_STRING(data), (size_t)PyBytes_GET_SIZE(data));
+    }
+    ssize_t n;
+    do {
+        n = LU_SYSCALL(sendmsg((int)fd, &msg, (int)flags));
+    } while (n < 0 && interrupted());
+    if (n < 0) {
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
+        goto done;
+    }
+    result = PyLong_FromSsize_t(n);
+done:
+    for (Py_ssize_t i = 0; i < got; i++) {
+        PyBuffer_Release(&views[i]);
+    }
+    PyMem_Free(views);
+    PyMem_Free(iov);
+    PyMem_Free(control);
+    return result;
+}
+
+/* recvmsg(fd, size, ancsize, flags): (up to size bytes, a list of (level, type, bytes) control
+   messages from an ancsize-byte control buffer, the message flags, the sender's raw sockaddr bytes
+   or None) (recvmsg(2)). A control message the buffer cut short keeps the data that arrived, as
+   Modules/socketmodule.c sock_recvmsg_guts. */
+static PyObject *
+prim_os_recvmsg(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    long fd, size, ancsize, flags;
+    if (nargs != 4 || int_arg(args[0], &fd) < 0 || int_arg(args[1], &size) < 0
+        || int_arg(args[2], &ancsize) < 0 || int_arg(args[3], &flags) < 0) {
+        return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_TypeError, "recvmsg(fd, size, ancsize, flags)"), NULL);
+    }
+    PyObject *bytes = PyBytes_FromStringAndSize(NULL, size);
+    char *control = ancsize ? PyMem_Calloc(1, (size_t)ancsize) : NULL;
+    PyObject *cmsgs = PyList_New(0), *result = NULL;
+    if (bytes == NULL || cmsgs == NULL || (ancsize && control == NULL)) {
+        if (!PyErr_Occurred()) {
+            PyErr_NoMemory();
+        }
+        goto done;
+    }
+    struct sockaddr_storage sa;
+    struct iovec iov = { .iov_base = PyBytes_AS_STRING(bytes), .iov_len = (size_t)size };
+    struct msghdr msg;
+    ssize_t n;
+    do {
+        msg = (struct msghdr){ .msg_name = &sa, .msg_namelen = sizeof sa, .msg_iov = &iov, .msg_iovlen = 1,
+                               .msg_control = control, .msg_controllen = (size_t)ancsize };
+        n = LU_SYSCALL(recvmsg((int)fd, &msg, (int)flags));
+    } while (n < 0 && interrupted());
+    if (n < 0) {
+        if (!PyErr_Occurred()) {
+            set_oserror(errno, NULL);
+        }
+        goto done;
+    }
+    char *end = control + msg.msg_controllen;
+    for (struct cmsghdr *cm = msg.msg_controllen ? CMSG_FIRSTHDR(&msg) : NULL;
+         cm != NULL && (char *)CMSG_DATA(cm) <= end; cm = CMSG_NXTHDR(&msg, cm)) {
+        char *data = (char *)CMSG_DATA(cm), *stop = (char *)cm + cm->cmsg_len < end ? (char *)cm + cm->cmsg_len : end;
+        PyObject *item = Py_BuildValue("(iiy#)", cm->cmsg_level, cm->cmsg_type, data,
+                                       (Py_ssize_t)(stop > data ? stop - data : 0));
+        if (item == NULL || PyList_Append(cmsgs, item) < 0) {
+            Py_XDECREF(item);
+            goto done;
+        }
+        Py_DECREF(item);
+    }
+    if (n < size && _PyBytes_Resize(&bytes, n) < 0) {
+        goto done;
+    }
+    PyObject *address = msg.msg_namelen == 0 ? Py_NewRef(Py_None)
+        : PyBytes_FromStringAndSize((const char *)&sa, msg.msg_namelen < sizeof sa ? msg.msg_namelen : sizeof sa);
+    if (address != NULL) {
+        result = Py_BuildValue("(OOiN)", bytes, cmsgs, msg.msg_flags, address);
+    }
+done:
+    Py_XDECREF(bytes);
+    Py_XDECREF(cmsgs);
+    PyMem_Free(control);
+    return result;
+}
+
 /* setsockopt(fd, level, name, value): value an int or a bytes-like option buffer. */
 static PyObject *
 prim_os_setsockopt(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -2230,6 +2370,8 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_getsockopt", (PyCFunction)(void (*)(void))prim_os_getsockopt, METH_FASTCALL, NULL },
     { "os_sendto", (PyCFunction)(void (*)(void))prim_os_sendto, METH_FASTCALL, NULL },
     { "os_recvfrom", (PyCFunction)(void (*)(void))prim_os_recvfrom, METH_FASTCALL, NULL },
+    { "os_sendmsg", (PyCFunction)(void (*)(void))prim_os_sendmsg, METH_FASTCALL, NULL },
+    { "os_recvmsg", (PyCFunction)(void (*)(void))prim_os_recvmsg, METH_FASTCALL, NULL },
     { "os_gethostbyaddr", (PyCFunction)(void (*)(void))prim_os_gethostbyaddr, METH_FASTCALL, NULL },
     { "os_getnameinfo", (PyCFunction)(void (*)(void))prim_os_getnameinfo, METH_FASTCALL, NULL },
     { "os_inet_pton", (PyCFunction)(void (*)(void))prim_os_inet_pton, METH_FASTCALL, NULL },

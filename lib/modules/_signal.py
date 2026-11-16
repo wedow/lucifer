@@ -106,6 +106,23 @@ def strsignal(signalnum, /):
     return None
 
 
+def set_wakeup_fd(fd, /, *, warn_on_full_buffer=True):
+    """Sets the fd to be written to (with the signal number) when a signal comes in.
+
+A library can use this to wakeup select or poll.
+The previous fd or -1 is returned.
+
+The fd must be non-blocking."""
+    if not isinstance(fd, int):
+        raise TypeError("'%s' object cannot be interpreted as an integer" % type(fd).__name__)
+    if fd != -1:
+        import posix
+        posix.fstat(fd)
+        if posix.get_blocking(fd):
+            raise ValueError('the fd %i must be in non-blocking mode' % fd)
+    return _lucifer.signal_wakeup_fd(fd)
+
+
 def raise_signal(signalnum, /):
     """Send a signal to the executing process."""
     _check(signalnum)

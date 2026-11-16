@@ -1084,6 +1084,7 @@ extern LU_EXPORT union lu_runtime {
         struct {
             int tripped;                /* some handler's flag is set */
             int unhandled_keyboard_interrupt;   /* a KeyboardInterrupt ended the program: exit by SIGINT */
+            int wakeup_fd;              /* signal.set_wakeup_fd's descriptor plus one: 0 for none */
             struct {
                 int tripped;
                 int redirected;         /* signals sent on to the main task's thread, not yet arrived */
@@ -1400,6 +1401,7 @@ int lu_import_init(struct _is *interp);
 
 /* runtime/interp/marshal.c: marshal.dumps. */
 PyObject *lu_marshal_dumps(PyObject *x, int version, int allow_code);
+PyObject *lu_marshal_read_prefix(const char *str, Py_ssize_t len, Py_ssize_t *used);
 
 /* PyModuleObject (Include/internal/pycore_moduleobject.h). */
 typedef struct {

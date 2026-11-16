@@ -600,11 +600,13 @@ r_object(RFILE *p)
     return retval;
 }
 
+/* The object at the start of str, and in *used the bytes it took. */
 PyObject *
-PyMarshal_ReadObjectFromString(const char *str, Py_ssize_t len)
+lu_marshal_read_prefix(const char *str, Py_ssize_t len, Py_ssize_t *used)
 {
     RFILE rf = { .ptr = str, .end = str + len, .allow_code = 1 };
     PyObject *result = r_object(&rf);
+    *used = rf.ptr - str;
     if (result == NULL && !PyErr_Occurred()) {
         PyErr_SetString(PyExc_TypeError, "NULL object in marshal data for object");
     }
@@ -613,6 +615,13 @@ PyMarshal_ReadObjectFromString(const char *str, Py_ssize_t len)
     }
     PyMem_Free(rf.refs);
     return result;
+}
+
+PyObject *
+PyMarshal_ReadObjectFromString(const char *str, Py_ssize_t len)
+{
+    Py_ssize_t used;
+    return lu_marshal_read_prefix(str, len, &used);
 }
 
 /* The writer (w_object and its helpers). Objects seen more than once, or not

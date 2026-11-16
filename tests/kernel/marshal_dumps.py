@@ -77,3 +77,12 @@ loaded = marshal.loads(marshal.dumps(code))
 print(loaded.co_name, loaded.co_filename, loaded.co_firstlineno, loaded.co_flags)
 print(marshal.dumps(code) == marshal.dumps(loaded))
 print(marshal.loads(marshal.dumps(T(1, 'two', [3.0, b'4'], {'five': 5j}, frozenset([6])))))
+
+# dump and load on a file: each load reads one value and leaves the file just after it.
+import io
+f = io.BytesIO()
+marshal.dump([1, 'a'], f)
+marshal.dump(code, f)
+marshal.dump(None, f)
+f.seek(0)
+print(marshal.load(f), marshal.load(f).co_name, marshal.load(f), f.read())
