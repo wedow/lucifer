@@ -40,6 +40,7 @@ WEB_CPUS = "1,2,4,8"
 CORPUS = ROOT / "tools/bench/corpus"
 CORPUS_SITE = ROOT / "build/corpus/site"
 WEB_SCORE_CPUS = "8"  # the composite speed score takes the web point that uses every core: no GIL is the point
+WARM = "pyperformance-warm"  # a corpus suite that repeats another with more warm-up; the composite leaves it out
 LUCIFER = str(Path(os.environ.get("LUCIFER", "bin/lucifer")).resolve())
 
 
@@ -285,13 +286,16 @@ def suite_ratios(record):
 def suites_section(metrics, before):
     """Per suite: programs, failing and the geomean of the rest, as the README composite counts them."""
     now, then = suite_ratios(metrics), suite_ratios(before)
-    now, then["all"] = {**dict(sorted(now.items())), "all": sum(now.values(), [])}, sum(then.values(), [])
+    scored = lambda record: sum((v for k, v in record.items() if k != WARM), [])
+    now, then["all"] = {**dict(sorted(now.items())), "all": scored(now)}, scored(then)
     md = ["", "## Suites (time over CPython 3.14t, lower is faster; the README speed is 1 / the all row)", "",
           "| suite | programs | failing | geomean | yesterday |", "|---|---|---|---|---|"]
     for suite, values in now.items():
         md.append(f"| {suite} | {len(values)} | {values.count(None)} | {fmt(geomean([v for v in values if v]))} "
                   f"| {fmt(geomean([v for v in then.get(suite, []) if v]))} |")
-    return md
+    return md + ["", "cli, cadence and startup are end-to-end: whole-process wall time, startup, import and compile included. "
+                 f"{WARM} repeats pyperformance with more warm-up, so its gap to pyperformance is the cost of warming up; "
+                 "it is not in the all row."]
 
 
 def corpus_metrics(results, reference):

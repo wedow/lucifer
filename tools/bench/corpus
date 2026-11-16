@@ -2,9 +2,13 @@
 """The broad benchmark corpus: pinned upstream programs, run unmodified and identically by every runtime.
 
 Suites:
-  pyperformance  every benchmark in the pinned pyperformance release's MANIFEST, as
+  pyperformance  every benchmark in the pinned pyperformance release's MANIFEST but the startup ones, as
                  `run_benchmark.py [extra_opts] --worker -l LOOPS -w 1 -n 3 -o FILE`;
                  a program's time is the sum over its pyperf benchmarks of the best value
+  pyperformance-warm  the same programs with WARM_WARMUPS warm-up values instead of one: the gap to
+                 pyperformance is what warm-up costs
+  startup        the two pyperformance startup benchmarks (pyperf), and the wall time of importing
+                 STARTUP_IMPORTS in a fresh process (timed as a cli program)
   cli            real command-line programs over files from third_party/cpython;
                  a program's time is the best wall time of 3 runs after a warm-up run
   cadence        scripts shipped in the cadence-net release (a numpy brain simulation),
@@ -45,6 +49,9 @@ LOCK = HERE / "corpus.lock.json"
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "lucifer-corpus"
 TARGET = 0.1   # seconds per pyperf value on the calibrating runtime
 WARMUPS, VALUES, RUNS = 1, 3, 3
+WARM_WARMUPS = 10
+STARTUP = ("python_startup", "python_startup_no_site")  # pyperformance benchmarks that measure startup
+STARTUP_IMPORTS = "json, re, asyncio, typing, dataclasses, collections, functools, pathlib, subprocess, email.parser"
 TIMEOUT = 300  # seconds per run
 # Benchmarks the MANIFEST lists that the lock does not install.
 EXCLUDED = {"dask": "a distributed cluster over psutil, msgpack and dozens more"}
@@ -153,7 +160,11 @@ def pyperformance(site):
 
 
 def programs(site):
-    return {**{f"pyperformance.{n}": ("pyperf", a) for n, a in pyperformance(site).items()},
+    perf = pyperformance(site)
+    return {**{f"startup.{n}": ("pyperf", perf.pop(n)) for n in STARTUP if n in perf},
+            "startup.import_stdlib": ("cli", ["-c", f"import {STARTUP_IMPORTS}"]),
+            **{f"pyperformance.{n}": ("pyperf", a) for n, a in perf.items()},
+            **{f"pyperformance-warm.{n}": ("warm", a) for n, a in perf.items()},
             **{f"cli.{n}": ("cli", a) for n, a in CLI.items()},
             **{f"cadence.{n}": ("cli", [str(cadence_tree(site) / a[0]), *a[1:]]) for n, a in CADENCE.items()}}
 
@@ -202,7 +213,7 @@ def pyperf_run(command, argv, site, loops, values, warmups):
     return "ok", best, hashlib.sha256(err).hexdigest()
 
 
-def measure_pyperf(command, argv, site, reference):
+def measure_pyperf(command, argv, site, reference, warmups=WARMUPS):
     # A one-loop run first, with or without a reference: it calibrates, and it compiles the program's
     # modules, whose compile warnings (SyntaxWarning) would otherwise land in the checked stderr.
     status, best, _ = pyperf_run(command, argv, site, 1, 1, 0)
@@ -211,7 +222,7 @@ def measure_pyperf(command, argv, site, reference):
     # pyperf values are per inner loop; a loop is inner_loops of them.
     calibrated = max(1, round(TARGET / max(sum(v * inner for v, inner in best.values()), 1e-9)))
     loops = reference["loops"] if reference else calibrated
-    status, best, err = pyperf_run(command, argv, site, loops, VALUES, WARMUPS)
+    status, best, err = pyperf_run(command, argv, site, loops, VALUES, warmups)
     # pyperf prints timings on stdout; a benchmark that swallows an error still reports it on stderr.
     check = sorted(best) + [err]
     if status == "ok" and reference and check != reference["check"]:
@@ -239,6 +250,9 @@ def measure_cli(command, argv, site, reference):
             "check": check if status == "ok" else None}
 
 
+MEASURE = {"pyperf": measure_pyperf, "warm": lambda *a: measure_pyperf(*a, warmups=WARM_WARMUPS), "cli": measure_cli}
+
+
 def measure(site, command, reference, only):
     results = {}
     for program, (kind, argv) in programs(site).items():
@@ -249,7 +263,7 @@ def measure(site, command, reference, only):
             results[program] = {"status": "noreference", "seconds": None, "loops": None, "check": None}
             continue
         start = time.perf_counter()
-        results[program] = (measure_pyperf if kind == "pyperf" else measure_cli)(command, argv, site, ref)
+        results[program] = MEASURE[kind](command, argv, site, ref)
         print(f"{program}: {results[program]['status']} {results[program]['seconds']} "
               f"({time.perf_counter() - start:.1f} s)", file=sys.stderr, flush=True)
     return results

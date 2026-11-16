@@ -37,7 +37,7 @@ def worst_lane(name, m, suite):
 
 def table(results):
     date, m = latest(results)
-    recorded = [v for k, v in m.items() if k.endswith(".on_over_cpython")]
+    recorded = [v for k, v in m.items() if k.endswith(".on_over_cpython") and not k.startswith("pyperformance-warm.")]
     ratios = [float(v) for v in recorded if v]
     speed = math.exp(-sum(map(math.log, ratios)) / len(ratios))
     rows = [
