@@ -936,6 +936,50 @@ class BytesIO(_BufferedIOBase):
         """
         return self.read(size)
 
+    def _line(self, size):
+        """The next line, at most size bytes when size >= 0; b"" at the end."""
+        buf = self._buffer
+        pos = self._pos
+        end = buf.find(b"\n", pos) + 1 or len(buf)
+        if 0 <= size < end - pos:
+            end = pos + size
+        if end <= pos:
+            return b""
+        self._pos = end
+        return bytes(buf[pos:end])
+
+    def readline(self, size=-1, /):
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        return self._line(_size_arg(size))
+
+    def readlines(self, hint=None, /):
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        if hint is None:
+            hint = -1
+        elif not isinstance(hint, int):
+            raise TypeError(f"integer argument expected, got '{type(hint).__name__}'")
+        lines = []
+        n = 0
+        while line := self._line(-1):
+            lines.append(line)
+            n += len(line)
+            if 0 < hint <= n:
+                break
+        return lines
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        line = self._line(-1)
+        if not line:
+            raise StopIteration
+        return line
+
     def write(self, b):
         if isinstance(b, str):
             raise TypeError("a bytes-like object is required, not 'str'")
