@@ -102,7 +102,7 @@ bound(struct ctx *c, int i)
         lu_ev_side_exit(c, EXIT_SIDE);  /* the interpreter raises */
         return 0;
     }
-    if (!LU_IS_VIRT(v) && (I(c, v)->op == OP_ENTRY_LOCAL || I(c, v)->op == OP_PHI) && I(c, v)->rep == REP_OBJ
+    if (!LU_IS_VIRT(v) && (I(c, v)->op == OP_ENTRY_LOCAL || I(c, v)->op == OP_PHI || I(c, v)->op == OP_LOAD) && I(c, v)->rep == REP_OBJ
         && lu_ev_type(c, v) == NULL) {
         lu_ev_guard(c, OP_GUARD_NOT_NULL, v, 0);
     }
@@ -331,7 +331,7 @@ lu_ev_instruction(struct ctx *c)
     case RETURN_GENERATOR:
         return lu_ev_gen_make(c);
     case RESUME:
-        if (c->parent != NULL && !c->kernel && !LU_IS_VIRT(c->gen)) {
+        if (c->parent != NULL && !c->kernel && !lu_ev_in_gen(c)) {
             /* An inlined call polls where the interpreter's would: a tool
                turned on since the compile sees the call. */
             lu_ev_guard(c, OP_POLL, LU_NOV, 0);
@@ -741,7 +741,7 @@ lu_ev_instruction(struct ctx *c)
         return 0;
     }
     case YIELD_VALUE:
-        if (LU_IS_VIRT(c->gen)) {
+        if (lu_ev_in_gen(c)) {
             return lu_ev_gen_yield(c);
         }
         if (c->parent != NULL) {

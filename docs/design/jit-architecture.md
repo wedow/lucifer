@@ -803,6 +803,22 @@ own) builds the way from its entry to the first loop header on blocks of
 its own: the loop builds the same code again as its own, and joins
 nothing with the way in.
 
+**A generator that exists is resumed in line on its own frame.** A
+`FOR_ITER` on a value the unit's entry frame shows to be a generator (a
+slot of that frame, or a word of a generator shown so) guards its
+function, reads where it stands (`H_gen_at`), and per code unit this
+loop's steps have left it at takes it (`H_gen_take`: it is running, its
+frame compiled code's), loads its frame's words as a frame of the state,
+the unit's with the references they held, and runs its body as a virtual
+generator's is run. A yield stores back the words that changed, each
+with a reference of its own, and stands it suspended (`H_gen_give`); a
+return releases through the unit (`H_gen_over`). While it runs its frame
+is marked compiled code's, so that a reader of the generator's frame
+makes the activation real first, and the collector passes over its
+words. A guess that fails counts against the instruction the unit's own
+frame is at. The three helpers are calls still: about 300 instructions an
+item against 565, and the transitions in line are what is left to 40.
+
 **A unit entered inside a loop leaves at the back-edge of the loop
 around it.** Its entry's state (an iterator or generator the interpreter
 made) is what its loop header was built for; going round the outer loop
@@ -900,10 +916,10 @@ What decides how code is specialized:
 Not built yet, each a stage of §7:
 
 - Virtual instances of classes, cells, slices, strings as parts (S2,
-  S5). A generator that already exists (a unit entered in its consumer's
-  loop, or one a call the unit did not inline made) is resumed through
-  C, with the cheap yield and the compiled resume; `yield from` on a
-  virtual generator (S6). A virtual object whose layout changes in a loop
+  S5). `yield from` on a generator resumed in line; the transitions of
+  an existing generator's resume in line rather than through helpers; a
+  generator a call the unit did not inline returned is not shown to the
+  unit and is resumed through C (S6). A virtual object whose layout changes in a loop
   (a list appended to, a dict given a key) exists before the loop.
 - Dependencies and hoisting: a global's guards run where it is read.
 - Handlers inside a unit: a raise exits. Generators leave at each yield.

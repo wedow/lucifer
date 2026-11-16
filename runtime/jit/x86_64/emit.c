@@ -1113,7 +1113,8 @@ make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
         struct lu_fs *p = b->chain[k];
         struct frame_key key = { .fr = { .code = p->code, .func = p->func, .pc = p->pc, .ret = p->ret,
                                          .funcv = p->funcv >= 0 ? place(a, p->funcv) : LU_PV(DV_NULL, 0),
-                                         .gen = p->gen ? describe(a, d, fs, LU_VIRT(p->gen - 1)) : LU_PV(DV_NULL, 0),
+                                         .gen = p->gen > 0 ? describe(a, d, fs, LU_VIRT(p->gen - 1))
+                                             : p->gen < 0 ? place(a, -1 - p->gen) : LU_PV(DV_NULL, 0),
                                          .nlocals = p->nlocals, .nstack = p->nstack, .caller = caller },
                                  .vals = b->room + end };
         end += (uint32_t)(p->nlocals + p->nstack);

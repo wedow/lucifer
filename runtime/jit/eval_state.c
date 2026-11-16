@@ -347,7 +347,7 @@ lu_ev_snapshot(struct ctx *c, int pc)
     fs->locals = copy_of(g, slots(c), sizeof(lu_v) * (size_t)c->nlocals);
     fs->stack = copy_of(g, slots(c) + c->nlocals, sizeof(lu_v) * (size_t)fs->nstack);
     fs->ret = (uint8_t)c->ret;
-    fs->gen = LU_IS_VIRT(c->gen) ? 1 + LU_VIRT_ID(c->gen) : 0;
+    fs->gen = c->adopted ? -1 - c->gen : LU_IS_VIRT(c->gen) ? 1 + LU_VIRT_ID(c->gen) : 0;
     fs->nbinds = g->st.nbinds;
     fs->binds = copy_of(g, g->st.binds, sizeof(struct lu_bind) * (size_t)g->st.nbinds);
     return fs;
@@ -575,7 +575,7 @@ snap(struct ctx *c)
     fs->nlocals = c->nlocals;
     fs->nstack = c->snap_sp;
     fs->ret = (uint8_t)c->ret;
-    fs->gen = LU_IS_VIRT(c->gen) ? 1 + LU_VIRT_ID(c->gen) : 0;
+    fs->gen = c->adopted ? -1 - c->gen : LU_IS_VIRT(c->gen) ? 1 + LU_VIRT_ID(c->gen) : 0;
     if (!wrote && c->kept_of == slots(c) && c->kept_epoch == g->epoch) {
         fs->locals = c->kept_locals;
     }

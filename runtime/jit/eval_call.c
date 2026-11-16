@@ -525,7 +525,7 @@ lu_ev_return(struct ctx *c)
     /* The frame is gone before its references are; the value is the
        caller's stack entry, as whatever it is (a tuple returned to a
        caller that unpacks it never exists). */
-    if (LU_IS_VIRT(c->gen)) {
+    if (lu_ev_in_gen(c)) {
         /* A generator resumed in line returns: it is finished, and its
            consumer's loop ends with no value. */
         lu_ev_gen_finish(c);

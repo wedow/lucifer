@@ -45,10 +45,30 @@ PyObject *lu_gen_new(PyThreadState *ts, struct lu_frame *f);
    RETURN_GENERATOR left it; below 0: finished, whatever it held released);
    lu_gen_enter starts it running above `previous`, as a resumption does
    before it pushes the value sent, and gives its frame; the frame is not
-   counted against the recursion limit. */
+   counted against the recursion limit, and its exception state is not
+   yet the task's. lu_gen_enter_exc makes it so, once: only where the
+   task's current one is that of the code that resumed it (an exit; a
+   walker runs with its own callers' states above). */
 PyObject *lu_gen_blank(PyFunctionObject *func);
 void lu_gen_stand(PyObject *gen, int pc);
 struct lu_frame *lu_gen_enter(PyThreadState *ts, PyObject *gen, struct lu_frame *previous);
+void lu_gen_enter_exc(PyThreadState *ts, PyObject *gen);
+
+/* For the tier, which runs the body of a generator that exists in line
+   (runtime/jit/eval_gen.c). lu_gen_at: the code unit an exact generator
+   would resume at, when compiled code may run it so (suspended at a
+   yield of its own or not yet started, no frame object, no locals
+   mapping); else -1. lu_gen_take: it stands at `at` still and is now
+   running, its frame compiled code's (LU_FRAME_JIT): the frame's words
+   are stale from here, and the code holds the references they held; 0
+   with nothing changed otherwise. lu_gen_give: compiled code stored what
+   the frame holds; it is suspended at code unit pc with a stack of
+   `depth`. lu_gen_over: it returned; compiled code released what the
+   frame held. */
+long lu_gen_at(PyObject *gen);
+int lu_gen_take(PyObject *gen, long at);
+void lu_gen_give(PyObject *gen, long pc, long depth);
+void lu_gen_over(PyObject *gen);
 
 /* Resumes `gen` (an exact generator, coroutine or async generator) with
    `arg` pushed on its frame (owned; NULL resumes as next() does): the frame

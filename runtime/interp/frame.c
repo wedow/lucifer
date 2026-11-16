@@ -159,6 +159,7 @@ lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
    which made its frames the interpreter's. */
 
 PyObject *lu_jit_slot(struct lu_frame *f, int i);
+int lu_jit_surface(struct lu_frame *f);
 int lu_jit_sync(struct lu_frame *f);
 
 static int
@@ -181,6 +182,9 @@ lu_frame_slot(struct lu_frame *f, int i)
     if (on_own_chain(f)) {
         return lu_jit_slot(f, i);
     }
+    if (lu_jit_surface(f)) {
+        return Py_XNewRef(f->localsplus[i]);
+    }
     struct _is *interp = PyThreadState_Get()->interp;
     lu_stw_stop(interp);
     PyObject *v = f->owner == LU_FRAME_JIT ? lu_jit_slot(f, i) : Py_XNewRef(f->localsplus[i]);
@@ -196,6 +200,9 @@ lu_frame_sync(struct lu_frame *f)
     }
     if (on_own_chain(f)) {
         return lu_jit_sync(f);
+    }
+    if (lu_jit_surface(f)) {
+        return 0;
     }
     struct _is *interp = PyThreadState_Get()->interp;
     lu_stw_stop(interp);

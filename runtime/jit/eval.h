@@ -123,8 +123,11 @@ struct ctx {
     int lo;                     /* blocks below it are built or not reached yet */
     const int *blkat;           /* code unit -> bblk index, or -1 */
     struct lu_fs *caller_fs;    /* an inlined frame's caller, after the call */
-    lu_v gen;                   /* the virtual generator whose frame this is, resumed in line (eval_gen.c);
-                                   LU_NOV for a call's frame */
+    lu_v gen;                   /* the generator whose frame this is, its body run in line (eval_gen.c): a
+                                   virtual one, or with `adopted` the value that is one that exists */
+    int adopted;
+    lu_v *loaded;               /* an adopted frame: what each slot held when its words were loaded */
+    int nloaded;
     int ret;                    /* how an inlined frame returns (enum lu_frame_return): a value pushed, an
                                    __init__'s None dropped, the instance already on its caller's stack, or
                                    a FOR_ITER's item pushed unless it is MISSING */
@@ -188,6 +191,9 @@ struct gctx {
     int ret_missing;            /* the call just inlined for a FOR_ITER may have answered MISSING */
     struct hint *hints;
     int nhints, caphints;
+    PyObject **shown;           /* objects the entry frame shows the unit (eval_gen.c), each a reference */
+    lu_v *shown_as;             /* and the values they were when the unit was entered */
+    int nshown, capshown;
     struct resume *resumes;     /* what a rebuild knows of generators resumed in line (eval_gen.c) */
     int nresumes, capresumes;
     struct resume_phi {         /* a loop header's phi of a carried generator's resume point: its header */
@@ -433,6 +439,17 @@ int lu_ev_return(struct ctx *c);
    makes the frame's slots its fields again and pushes the value in the
    consumer (lu_ev_gen_yield), or to its return, which ends the
    consumer's loop (lu_ev_gen_finish binds it finished). */
+static inline int
+lu_ev_in_gen(const struct ctx *c)
+{
+    return c->adopted || LU_IS_VIRT(c->gen);
+}
+/* FOR_ITER on a value that is, by what the unit's entry frame shows, a
+   generator that exists: its function is guarded, it is marked running,
+   its frame's words become a frame of the state and its body runs in
+   line as a virtual one's does; a yield stores what changed back. 1 when
+   built, 0 when not taken, -1 when the build failed. */
+int lu_ev_gen_adopt(struct ctx *c, lu_v it, int exit_pc);
 int lu_ev_gen_takes(PyCodeObject *co);
 int lu_ev_gen_make(struct ctx *c);
 int lu_ev_gen_step(struct ctx *c, lu_v it, int exit_pc);

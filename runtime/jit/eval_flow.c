@@ -1963,6 +1963,11 @@ lu_ssa_build(struct lu_func *f, struct lu_frame *frame)
                            .resumes = resumes, .nresumes = nresumes, .capresumes = capresumes,
                            .budget = budget, .keep = LU_NOV, .learned = lu_jit_prof_learned(f->code) };
         r = build_root(&g);
+        for (int i = 0; i < g.nshown; i++) {
+            Py_DECREF(g.shown[i]);
+        }
+        free(g.shown);
+        free(g.shown_as);
         if (r < 0 || !g.restart) {
             break;
         }

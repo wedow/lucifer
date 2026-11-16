@@ -37,6 +37,7 @@
 
 void lu_jit_note_exit(struct lu_deopt *d);
 int lu_jit_next_pc(PyCodeObject *code, int pc);
+struct lu_frame *lu_jit_force(struct lu_frame *f, int all);
 
 struct lu_forced {
     int nobjs, capobjs;
@@ -400,13 +401,17 @@ static struct lu_frame *
 gen_frame(PyThreadState *ts, struct maker *m, const struct lu_deopt_frame *fr, struct lu_frame *previous, int k,
           int counted)
 {
-    PyObject *gen = object(m, (int)LU_PV_ARG(fr->gen));
+    /* A generator the unit made, or one that exists whose body it runs. */
+    PyObject *gen = LU_PV_KIND(fr->gen) == DV_VIRT ? object(m, (int)LU_PV_ARG(fr->gen))
+        : LU_PV_KIND(fr->gen) == DV_CONST ? (PyObject *)(intptr_t)m->d->unit->imms[LU_PV_ARG(fr->gen)]
+        : (PyObject *)(uintptr_t)at(m, lu_pv_loc(fr->gen));
     if (gen == NULL) {
         return NULL;
     }
     struct lu_frame *f = &((struct lu_gen *)gen)->frame;
     if (f->previous == NULL) {
         lu_gen_enter(ts, gen, previous);
+        __atomic_store_n(&f->owner, LU_FRAME_GENERATOR, __ATOMIC_RELEASE);     /* its words are its own again */
         const lu_pv *vals = m->d->unit->vals + fr->vals;
         for (int i = 0; i < fr->nlocals; i++) {
             f->localsplus[i] = take(m, vals[i]);
@@ -414,6 +419,9 @@ gen_frame(PyThreadState *ts, struct maker *m, const struct lu_deopt_frame *fr, s
         f->stackpointer = f->localsplus + fr->nlocals;
     }
     ts->py_recursion_remaining -= counted;
+    if (counted) {
+        lu_gen_enter_exc(ts, gen);
+    }
     f->previous = previous;     /* a walker's record of its caller gave way to the caller's frame */
     f->ret = fr->ret;
     f->instr = shown(m->d, k);
@@ -427,7 +435,7 @@ static struct lu_frame *
 record(struct maker *m, int k, struct lu_frame *previous)
 {
     const struct lu_deopt_frame *fr = lu_deopt_frame(m->d, k);
-    if (LU_PV_KIND(fr->gen) == DV_VIRT) {
+    if (LU_PV_KIND(fr->gen) != DV_NULL) {
         return gen_frame(PyThreadState_Get(), m, fr, previous, k, 0);
     }
     PyFunctionObject *func = (PyFunctionObject *)frame_func(m, fr);
@@ -463,6 +471,23 @@ own_frame(struct lu_frame *f)
         }
     }
     return 0;
+}
+
+int
+lu_jit_surface(struct lu_frame *f)
+{
+    if (f->home != LU_FRAME_GENERATOR || f->jit_desc != NULL) {
+        return 0;
+    }
+    /* A generator whose body this task's compiled code runs in line: the
+       activation that runs it makes its frames real, this one among them. */
+    for (struct lu_frame *p = (struct lu_frame *)PyThreadState_Get()->current_frame;
+         p != NULL && f->owner == LU_FRAME_JIT; p = p->previous) {
+        if (p->owner == LU_FRAME_JIT && p->jit_desc != NULL) {
+            lu_jit_force(p, 1);
+        }
+    }
+    return f->owner != LU_FRAME_JIT;
 }
 
 struct lu_frame *
@@ -519,7 +544,7 @@ static struct lu_frame *
 push_inlined(PyThreadState *ts, struct maker *m, int k, struct lu_frame *top)
 {
     const struct lu_deopt_frame *fr = lu_deopt_frame(m->d, k);
-    if (LU_PV_KIND(fr->gen) == DV_VIRT) {
+    if (LU_PV_KIND(fr->gen) != DV_NULL) {
         struct lu_frame *g = gen_frame(ts, m, fr, top, k, 1);
         if (g != NULL) {
             g->instr = g->last = lu_code_start(fr->code) + fr->pc;

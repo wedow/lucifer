@@ -121,7 +121,11 @@ lu_ev_for_iter(struct ctx *c)
     else {
         /* Any other iterator but a generator (resumed, not called): the
            kernel's step in line, MISSING at the end. */
-        int done = lu_ev_learn_type(c, it, 0) != &PyGen_Type
+        int done = !LU_IS_VIRT(it) ? lu_ev_gen_adopt(c, it, exit_pc) : 0;
+        if (done != 0) {
+            return done < 0 ? -1 : 0;
+        }
+        done = lu_ev_learn_type(c, it, 0) != &PyGen_Type
             ? lu_ev_kernel_op(c, LU_K_next_item, &it, 1, 0, LU_RETURN_FOR_ITER) : 0;
         if (done < 0) {
             return -1;

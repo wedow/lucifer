@@ -318,3 +318,73 @@ def genexp_total():
 
 
 print('genexp_total', genexp_total())
+
+
+# A generator that exists already when compiled code meets it (the unit
+# was entered in its consumer's loop, or the generator came from
+# elsewhere): the loop runs its body in line all the same, on the frame's
+# own words, which it stores back at each yield. The generator must be
+# as the interpreter would leave it wherever the program looks at it.
+def long_total(g):
+    s = 0
+    for v in g:
+        s += v
+    return s
+
+
+def mapped(src):
+    for v in src:
+        yield v * 2 + 1
+
+
+def looked_at(n):
+    for i in range(n):
+        yield (i, sys._getframe().f_lineno > 0, sys._getframe(1).f_code.co_name)
+
+
+def watching(g, n):
+    # The body reads its own generator's frame while it runs in line.
+    for i in range(n):
+        f = g[0].gi_frame
+        yield (i, g[0].gi_running, sorted(f.f_locals), f.f_back is not None)
+
+
+def existing():
+    out = []
+    for r in range(4):
+        out.append(long_total(count(4000 + r)))
+        out.append(long_total(mapped(mapped(count(3000)))))
+        g = count(5000)
+        s = 0
+        for i in g:
+            if i == 4990 + r:
+                break
+            s += i
+        out.append((s, next(g), g.gi_frame.f_locals['i'], list(g), next(g, 'done'), g.gi_frame))
+        s = 0
+        g = growing(3000, 39 if r == 2 else 0)
+        for v in g:
+            s += v % 1000
+        out.append(s)
+        g = failing(2500, 59)
+        try:
+            for i in g:
+                s += i
+        except ValueError as e:
+            out.append((s, str(e), next(g, 'finished'), g.gi_running))
+        out.append([t for t in looked_at(2500)][-1])
+        box = [None]
+        box[0] = watching(box, 2200)
+        last = None
+        for t in box[0]:
+            last = t
+        out.append(last)
+        g = state_kept(range(3000))
+        for v in g:
+            if v > 1000000:
+                break
+        out.append((g.send(5), next(g), g.gi_suspended))
+    return out
+
+
+print('existing', existing())

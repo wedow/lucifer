@@ -319,6 +319,8 @@ lu_ev_gen_step(struct ctx *c, lu_v it, int exit_pc)
     return resume_among(c, it, pcs, n, exit_pc) < 0 ? -1 : 1;
 }
 
+static int adopted_yield(struct ctx *c);
+
 int
 lu_ev_gen_yield(struct ctx *c)
 {
@@ -326,6 +328,9 @@ lu_ev_gen_yield(struct ctx *c)
     if (c->oparg != 0) {
         lu_ev_side_exit(c, EXIT_SIDE);  /* a delegation's yield: the interpreter's loop runs it */
         return 0;
+    }
+    if (c->adopted) {
+        return adopted_yield(c);
     }
     lu_v v = lu_ev_peek(c, 1);
     lu_ev_pop(c);
@@ -346,6 +351,11 @@ void
 lu_ev_gen_finish(struct ctx *c)
 {
     struct gctx *g = c->g;
+    if (c->adopted) {
+        /* The unit releases what the frame held, as its slots leave the state. */
+        lu_ev_helper(c, H_gen_over, 1, &c->gen, 0);
+        return;
+    }
     struct lu_vobj *o = record_of(c, c->gen), *done = lu_ir_vobj(g->f, VK_GEN, o->type, o->n);
     done->f[GEN_FUNCV] = o->f[GEN_FUNCV];
     done->f[GEN_FN] = o->f[GEN_FN];
@@ -370,4 +380,289 @@ lu_ev_gen_real(struct ctx *c, struct lu_vobj *o)
     lu_v v = lu_ev_helper(c, H_gen_new, o->n - 1, args, 0);
     lu_ev_def_type(c, v, &PyGen_Type);
     return v;
+}
+
+/* --- a generator that exists --- */
+
+/* What names a FOR_ITER's resume points among what a rebuild knows. */
+#define ADOPT_SITE ((uint64_t)1)
+
+static size_t
+slot_offset(int i)
+{
+    return offsetof(struct lu_gen, frame) + offsetof(struct lu_frame, localsplus) + sizeof(PyObject *) * (size_t)i;
+}
+
+/* The object value v was when the unit was entered, as the entry frame
+   shows it (borrowed), or NULL: a slot of the entry frame, through the
+   phis of the loops that carry it, or a word of the frame of a generator
+   shown so. What it says is a guess, guarded where it is used. */
+static PyObject *
+shown(struct ctx *c, lu_v v)
+{
+    struct gctx *g = c->g;
+    for (int hops = 0; v >= 0 && I(c, v)->op == OP_PHI && I(c, v)->nargs > 0 && hops < 8; hops++) {
+        v = I(c, v)->args[0];
+    }
+    if (v < 0) {
+        return NULL;
+    }
+    for (int i = 0; i < g->nshown; i++) {
+        if (g->shown_as[i] == v) {
+            return g->shown[i];
+        }
+    }
+    struct lu_frame *f = g->live;
+    int at = I(c, v)->op == OP_ENTRY_LOCAL ? (int)I(c, v)->imm
+        : I(c, v)->op == OP_ENTRY_STACK ? f->code->co_nlocalsplus + (int)I(c, v)->imm : -1;
+    return at >= 0 && f->localsplus + at < f->stackpointer ? f->localsplus[at] : NULL;
+}
+
+static void
+show(struct gctx *g, lu_v v, PyObject *o)
+{
+    if (g->nshown == g->capshown) {
+        g->capshown = g->capshown ? 2 * g->capshown : 8;
+        g->shown = realloc(g->shown, sizeof(PyObject *) * (size_t)g->capshown);
+        g->shown_as = realloc(g->shown_as, sizeof(lu_v) * (size_t)g->capshown);
+    }
+    g->shown[g->nshown] = o;
+    g->shown_as[g->nshown++] = v;
+}
+
+/* The generator stands at code unit pc, with a stack of `depth`: it is
+   taken (a race for it leaves before the instruction, nothing done), its
+   frame's words are loaded as a frame of the state, the unit's from here
+   with the references they held, and its code is evaluated from pc. */
+static int
+adopt_at(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, int pc, int depth)
+{
+    struct gctx *g = c->g;
+    PyCodeObject *co = (PyCodeObject *)fn->func_code;
+    lu_v args[2] = { it, at };
+    lu_v took = lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_gen_take, 2, args, 0), 1);
+    I(c, took)->flags |= INS_NOSTRESS;  /* past it the generator runs: no leaving before the instruction */
+    struct ctx *k = lu_ir_alloc(g->f, sizeof(struct ctx));
+    k->ret = LU_RETURN_FOR_ITER;
+    k->gen = it;
+    k->adopted = 1;
+    k->g = g;
+    k->parent = c;
+    k->depth = c->depth + 1;
+    k->code = co;
+    k->func = fn;
+    k->funcv = LU_NOV;
+    k->globals = fn->func_globals;
+    k->builtins = fn->func_builtins;
+    k->kernel = (co->co_flags & LU_CO_KERNEL) != 0;
+    k->ncode = (int)Py_SIZE(co);
+    k->nlocals = co->co_nlocalsplus;
+    k->caller_fs = lu_ev_snapshot(c, c->next);
+    lu_ev_state_push(g, k->nlocals, k->nlocals + co->co_stacksize + 2);
+    k->nloaded = k->nlocals + depth;
+    k->loaded = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(k->nloaded ? k->nloaded : 1));
+    struct lu_frame *sf = seen != NULL ? &((struct lu_gen *)seen)->frame : NULL;
+    for (int i = 0; i < k->nloaded; i++) {
+        lu_v v = lu_ev_emit(k, OP_LOAD, REP_OBJ, it, LU_NOV, LU_NOV, (int64_t)slot_offset(i));
+        I(k, v)->flags |= INS_OWNED;
+        k->loaded[i] = slots(k)[i] = v;
+        /* A generator among its words (the stream a filter reads) is shown as it is now. */
+        PyObject *inner = sf != NULL && sf->localsplus + i < sf->stackpointer ? lu_try_xget_ref(&sf->localsplus[i]) : NULL;
+        if (inner != NULL && Py_IS_TYPE(inner, &PyGen_Type)) {
+            show(g, v, inner);
+        }
+        else {
+            Py_XDECREF(inner);
+        }
+    }
+    *depth_of(k) = depth;
+    lu_ev_changed(g);
+    lu_ev_push(k, lu_ev_konst(k, Py_None));
+    if (k->depth > g->maxdepth) {
+        g->maxdepth = k->depth;
+    }
+    g->f->ninlined++;
+    k->pc = pc;
+    lu_ev_begin(k, pc);
+    lu_ev_settle(k, pc);
+    if (lu_ev_build(k, pc) < 0) {
+        return -1;
+    }
+    if (g->restart || k->nrets == 0) {
+        g->cur = -1;
+        return 0;
+    }
+    lu_ev_merge(c, k->rets, k->nrets, c->next);
+    return 0;
+}
+
+struct stands {
+    int pc, depth;
+};
+
+static int
+adopt_among(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, const struct stands *s, int n)
+{
+    lu_v here = lu_ev_emit(c, OP_CMP_I, REP_BIT, at, lu_ev_const_i(c, s[0].pc), LU_NOV, Py_EQ);
+    if (n == 1) {
+        /* Anywhere else (a code unit not met yet, or it cannot run: it
+           finished, or runs already) the interpreter steps it. */
+        lu_v g = lu_ev_guard(c, OP_GUARD_BIT, here, 1);
+        struct ctx *root = c;
+        while (root->parent != NULL) {
+            root = root->parent;
+        }
+        I(c, g)->blame = root->code;
+        I(c, g)->blame_pc = root->pc;
+        return adopt_at(c, it, at, fn, seen, s[0].pc, s[0].depth);
+    }
+    struct split sp;
+    lu_ev_split(c, here, &sp);
+    if (adopt_at(c, it, at, fn, seen, s[0].pc, s[0].depth) < 0) {
+        return -1;
+    }
+    lu_ev_split_else(c, &sp);
+    if (adopt_among(c, it, at, fn, seen, s + 1, n - 1) < 0) {
+        return -1;
+    }
+    lu_ev_split_end(c, &sp);
+    return 0;
+}
+
+int
+lu_ev_gen_adopt(struct ctx *c, lu_v it, int exit_pc)
+{
+    struct gctx *g = c->g;
+    PyObject *seen = shown(c, it);
+    PyTypeObject *t = lu_ev_type(c, it);
+    /* What is shown is shown to the unit's own frame: a guess that fails
+       counts against the instruction that frame is at, not against this
+       code wherever else it is inlined. */
+    struct ctx *root = c;
+    while (root->parent != NULL) {
+        root = root->parent;
+    }
+    if (seen == NULL || !Py_IS_TYPE(seen, &PyGen_Type) || (t != NULL && t != &PyGen_Type) || nospec(root, root->pc)) {
+        if (_PyRuntime.jit.debug && (t == &PyGen_Type || (seen != NULL && Py_IS_TYPE(seen, &PyGen_Type)))) {
+            fprintf(stderr, "jit: generator stepped through C at %s@%d: %s\n", PyUnicode_AsUTF8(c->code->co_qualname),
+                    c->pc, seen == NULL ? "not shown to the unit" : nospec(root, root->pc) ? "its guess kept failing"
+                    : "another type");
+        }
+        return 0;
+    }
+    lu_v first = g->f->nins;
+    struct lu_gen *sg = (struct lu_gen *)seen;
+    PyObject *func = sg->frame.func;
+    if (func == NULL || !PyFunction_Check(func)) {
+        return 0;
+    }
+    PyFunctionObject *fn = (PyFunctionObject *)func;
+    PyCodeObject *co = (PyCodeObject *)fn->func_code;
+    if ((co->co_flags & (LU_CO_GENERATORS | CO_ITERABLE_COROUTINE)) != CO_GENERATOR || co->_co_monitoring != NULL
+        || !room(c, co)) {
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: generator %s stepped through C at %s@%d: no room\n",
+                    PyUnicode_AsUTF8(co->co_qualname), PyUnicode_AsUTF8(c->code->co_qualname), c->pc);
+        }
+        return 0;
+    }
+    /* Where it stands now, and where this loop's steps left it before. */
+    long now = lu_gen_at(seen);
+    if (now >= 0) {
+        resume_note(g, co, 0, 0, (int)now, (int)(sg->frame.stackpointer - sg->frame.localsplus) - co->co_nlocalsplus);
+        resume_note(g, c->code, c->pc, ADOPT_SITE, (int)now, 0);
+    }
+    struct stands *s = lu_ir_alloc(g->f, sizeof(struct stands) * (size_t)(g->nresumes + 1));
+    int n = 0;
+    for (int i = 0; i < g->nresumes; i++) {
+        struct resume *r = &g->resumes[i], *d;
+        if (r->code == c->code && r->at == c->pc && r->place == ADOPT_SITE
+            && (d = resume_find(g, co, 0, 0, r->pc)) != NULL) {
+            s[n++] = (struct stands){ r->pc, d->depth };
+        }
+    }
+    if (n == 0) {
+        return 0;
+    }
+    lu_ev_guard_type(c, it, &PyGen_Type);
+    lu_ev_konst(c, func);       /* the unit keeps what its guard compares with */
+    lu_v same = lu_ev_guard(c, OP_GUARD_IS, it, (int64_t)(intptr_t)func);
+    I(c, same)->imm2 = GI_FIELD | (int64_t)(offsetof(struct lu_gen, frame) + offsetof(struct lu_frame, func));
+    lu_v at = lu_ev_helper(c, H_gen_at, 1, &it, 0);
+    for (lu_v v = first; v < g->f->nins; v++) {
+        if (lu_op_flags[I(c, v)->op] & IF_GUARD) {
+            I(c, v)->blame = root->code;
+            I(c, v)->blame_pc = root->pc;
+        }
+    }
+    return adopt_among(c, it, at, fn, seen, s, n) < 0 ? -1 : 1;
+}
+
+/* YIELD_VALUE in an adopted frame: the frame's words get what the slots
+   hold where that changed, each with a reference of its own (the unit's
+   one goes to the word when nothing of the state names the value
+   after), and the generator stands suspended at the next code unit. */
+static int
+adopted_yield(struct ctx *c)
+{
+    struct gctx *g = c->g;
+    struct ctx *p = c->parent;
+    lu_v it = c->gen, v = lu_ev_peek(c, 1);
+    lu_ev_pop(c);
+    int depth = *depth_of(c), n = c->nlocals + depth;
+    lu_v *vals = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(n ? n : 1));
+    for (int i = 0; i < n; i++) {
+        vals[i] = slots(c)[i] == LU_NOV ? lu_ev_konst(c, NULL) : lu_ev_val(c, slots(c)[i]);
+    }
+    if (g->f->fail != NULL) {
+        return -1;
+    }
+    if (g->observed) {
+        /* A walker that saw the frames during this instruction's calls
+           made the generator's frame real: it leaves before the words
+           are written and the generator given back. */
+        lu_v w = lu_ev_guard(c, OP_GUARD_FRAMES, LU_NOV, 0);
+        I(c, w)->flags |= INS_NOSTRESS;
+    }
+    resume_note(g, c->code, 0, 0, c->next, depth);
+    if (resume_note(g, p->code, p->pc, ADOPT_SITE, c->next, 0)) {
+        g->restart = 1;         /* the loop's next step finds it here: the step is built for that too */
+    }
+    lu_ev_state_pop(g);
+    /* What the state names once the frame is gone and the value is the consumer's. */
+    lu_ev_push(p, v);
+    lu_ev_names_walk(g, lu_ev_snapshot(p, p->next));
+    lu_ev_pop(p);
+    for (int i = 0; i < n; i++) {
+        lu_v x = vals[i];
+        int first = 1, owned = (I(c, x)->flags & INS_OWNED) != 0;
+        for (int k = 0; k < i && first; k++) {
+            first = vals[k] != x;
+        }
+        if (!(first && owned && !lu_ev_names(g, x))) {
+            lu_ev_retain(c, x);         /* the word's own; else the unit's reference moves into it */
+        }
+        if (!(i < c->nloaded && c->loaded[i] == x)) {
+            lu_ev_emit(c, OP_STORE, REP_NONE, it, x, LU_NOV, (int64_t)slot_offset(i));
+        }
+    }
+    /* The words hold their references: nothing of them is the instruction's to release. */
+    int kept = 0;
+    for (int i = 0; i < g->npending; i++) {
+        lu_v r = g->pending[i], real = r;
+        if (LU_IS_VIRT(r)) {
+            lu_ev_virt(g, &g->st, r, &real);
+        }
+        int word = 0;
+        for (int k = 0; k < n && !word; k++) {
+            word = real != LU_NOV && vals[k] == real;
+        }
+        if (!word) {
+            g->pending[kept++] = r;
+        }
+    }
+    g->npending = kept;
+    lu_v args[3] = { it, lu_ev_const_i(c, c->next), lu_ev_const_i(c, depth) };
+    lu_ev_helper(c, H_gen_give, 3, args, 0);
+    return lu_ev_returned(c, v);
 }

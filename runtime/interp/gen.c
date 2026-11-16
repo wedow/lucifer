@@ -131,14 +131,70 @@ start(PyThreadState *ts, struct lu_gen *gen, struct lu_frame *previous, _PyErr_S
     return 0;
 }
 
+long
+lu_gen_at(PyObject *o)
+{
+    struct lu_gen *gen = (struct lu_gen *)o;
+    struct lu_frame *f = &gen->frame;
+    if ((gen->frame_state != LU_GEN_SUSPENDED && gen->frame_state != LU_GEN_CREATED) || f->frame_obj != NULL
+        || f->locals != NULL) {
+        return -1;
+    }
+    return (long)(f->instr - lu_code_start(f->code));
+}
+
+int
+lu_gen_take(PyObject *o, long at)
+{
+    struct lu_gen *gen = (struct lu_gen *)o;
+    struct lu_frame *f = &gen->frame;
+    if (lu_gen_at(o) != at) {
+        return 0;
+    }
+    gen->frame_state = LU_GEN_EXECUTING;
+    f->home = LU_FRAME_GENERATOR;
+    __atomic_store_n(&f->owner, LU_FRAME_JIT, __ATOMIC_RELEASE);
+    return 1;
+}
+
+void
+lu_gen_give(PyObject *o, long pc, long depth)
+{
+    struct lu_gen *gen = (struct lu_gen *)o;
+    struct lu_frame *f = &gen->frame;
+    f->stackpointer = f->localsplus + f->code->co_nlocalsplus + depth;
+    __atomic_store_n(&f->owner, LU_FRAME_GENERATOR, __ATOMIC_RELEASE);
+    lu_gen_stand(o, (int)pc);
+}
+
+void
+lu_gen_over(PyObject *o)
+{
+    struct lu_gen *gen = (struct lu_gen *)o;
+    struct lu_frame *f = &gen->frame;
+    memset(f->localsplus, 0, sizeof(PyObject *) * (size_t)(f->code->co_nlocalsplus + f->code->co_stacksize));
+    f->stackpointer = f->localsplus;
+    __atomic_store_n(&f->owner, LU_FRAME_GENERATOR, __ATOMIC_RELEASE);
+    clear_frame(gen);
+}
+
 struct lu_frame *
 lu_gen_enter(PyThreadState *ts, PyObject *o, struct lu_frame *previous)
 {
     struct lu_gen *gen = (struct lu_gen *)o;
     ts->py_recursion_remaining++;       /* start's own check cannot fail: the unit made room at its entry */
-    start(ts, gen, previous, ts->exc_info);
-    ts->exc_info = &gen->exc_state;
+    start(ts, gen, previous, NULL);
     return &gen->frame;
+}
+
+void
+lu_gen_enter_exc(PyThreadState *ts, PyObject *o)
+{
+    struct lu_gen *gen = (struct lu_gen *)o;
+    if (ts->exc_info != &gen->exc_state) {
+        gen->exc_state.previous_item = ts->exc_info;
+        ts->exc_info = &gen->exc_state;
+    }
 }
 
 /* gen_send_ex2's refusals: -1 with an error, 1 when gen is finished and

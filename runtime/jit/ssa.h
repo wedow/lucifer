@@ -222,8 +222,9 @@ struct lu_fs {
     lu_v *locals;               /* LU_NOV is NULL. States of one frame whose locals are the same share them */
     lu_v *stack;                /* bottom up */
     uint8_t ret;                /* how an inlined frame returns when rebuilt (enum lu_frame_return) */
-    int gen;                    /* 1 + the id of the virtual generator whose frame this is, which it resumed
-                                   in line; 0 for a call's frame */
+    int gen;                    /* the generator whose frame this is, whose body the unit runs in line: 1 + the
+                                   id of a virtual one, -1 - the value that is one that exists; 0 for a
+                                   call's frame */
     struct lu_bind *binds;
     int nbinds;
     lu_v *held;
