@@ -170,6 +170,7 @@ enum lu_vkind {
                                    constant NULL while unset */
     VK_INST,                    /* an instance of a class whose attributes are its own (__slots__, or values
                                    inline): f[2i] a name (a constant str), f[2i+1] its value, in the order set */
+    VK_EXC,                     /* an exception the unit raised and its handler dropped: type its class, no fields */
     VK_GEN,                     /* a generator: f[GEN_FUNCV] its function where the unit knows it by its code only
                                    (else nothing), f[GEN_FN] the function, or the one that stands for it, a
                                    constant; f[GEN_PC] the code unit its frame resumes at, an i64 (GEN_FINISHED;

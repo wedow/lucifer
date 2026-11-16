@@ -486,6 +486,12 @@ lu_v lu_ev_new_instance(struct ctx *c, PyTypeObject *tp);
 /* That instance made, as the interpreter would have made it: object.__new__'s,
    then its attributes stored in order as on a fresh instance. */
 lu_v lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o);
+/* eval_exc.c: RAISE_VARARGS, taken by a handler of the unit where nothing
+   can tell; PUSH_EXC_INFO, POP_EXCEPT and CHECK_EXC_MATCH in it. */
+int lu_ev_raise(struct ctx *c);
+int lu_ev_push_exc_info(struct ctx *c);
+int lu_ev_pop_except(struct ctx *c);
+int lu_ev_check_exc_match(struct ctx *c);
 int lu_ev_get_iter(struct ctx *c);              /* eval_iter.c */
 int lu_ev_for_iter(struct ctx *c);
 /* An exact list's or tuple's iterator that does not exist, at its start;

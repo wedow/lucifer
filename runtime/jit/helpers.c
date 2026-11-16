@@ -214,6 +214,34 @@ h_fields_new(PyObject **argv, intptr_t n)
     return o;
 }
 
+/* An exception the unit raised and kept virtual (VK_EXC), made: its class called. */
+static PyObject *
+h_exc_new(PyObject *type)
+{
+    return PyObject_CallNoArgs(type);
+}
+
+/* PUSH_EXC_INFO of exc a call raised: exc_info holds it now; what it held
+   before, or None. */
+static PyObject *
+h_exc_push(PyObject *exc)
+{
+    _PyErr_StackItem *info = PyThreadState_Get()->exc_info;
+    PyObject *prev = info->exc_value;
+    info->exc_value = Py_NewRef(exc);
+    return prev != NULL ? prev : Py_NewRef(Py_None);
+}
+
+/* POP_EXCEPT: exc_info holds prev again (nothing for None). */
+static void
+h_exc_pop(PyObject *prev)
+{
+    _PyErr_StackItem *info = PyThreadState_Get()->exc_info;
+    PyObject *old = info->exc_value;
+    info->exc_value = prev != Py_None ? Py_NewRef(prev) : NULL;
+    Py_XDECREF(old);
+}
+
 /* A generator the unit kept virtual, as it stands: argv[0] its function,
    argv[1] the code unit its frame resumes at (below 0: it finished),
    argv[2] its stack's depth there, then its frame's locals and stack. */
@@ -1516,6 +1544,9 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_build_list] = { (void *)h_build_list, "build_list", REP_OBJ, FX_RAISE, 0 },
     [H_build_tuple] = { (void *)h_build_tuple, "build_tuple", REP_OBJ, FX_RAISE, 0 },
     [H_fields_new] = { (void *)h_fields_new, "fields_new", REP_OBJ, FX_RAISE, 0 },
+    [H_exc_new] = { (void *)h_exc_new, "exc_new", REP_OBJ, FX_RAISE | FX_PY, 1 },
+    [H_exc_push] = { (void *)h_exc_push, "exc_push", REP_OBJ, 0, 1 },
+    [H_exc_pop] = { (void *)h_exc_pop, "exc_pop", REP_NONE, FX_SEEN, 1 },
     [H_gen_new] = { (void *)h_gen_new, "gen_new", REP_OBJ, FX_RAISE, 0 },
     [H_gen_give] = { (void *)h_gen_give, "gen_give", REP_BIT, 0, 3 },
     [H_gen_over] = { (void *)h_gen_over, "gen_over", REP_BIT, 0, 1 },

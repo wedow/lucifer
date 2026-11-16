@@ -199,6 +199,9 @@ object(struct maker *m, int k)
         }
         break;
     }
+    case VK_EXC:
+        o = PyObject_CallNoArgs((PyObject *)ob->type);
+        break;
     case VK_LIST:
         o = PyList_New(ob->nfields);
         for (int i = 0; o != NULL && i < ob->nfields; i++) {
@@ -259,8 +262,14 @@ static PyObject *
 take(struct maker *m, lu_pv v)
 {
     switch (LU_PV_KIND(v)) {
-    case DV_CONST:
-        return Py_NewRef((PyObject *)(intptr_t)m->d->unit->imms[LU_PV_ARG(v)]);
+    case DV_CONST: {
+        PyObject *k = (PyObject *)(intptr_t)m->d->unit->imms[LU_PV_ARG(v)];
+        if (k == &lu_jit_exc_prev) {
+            k = PyThreadState_Get()->exc_info->exc_value;      /* what PUSH_EXC_INFO would have saved */
+            k = k != NULL ? k : Py_None;
+        }
+        return Py_NewRef(k);
+    }
     case DV_OBJ:
         return Py_XNewRef((PyObject *)(uintptr_t)at(m, lu_pv_loc(v)));
     case DV_VIRT: {

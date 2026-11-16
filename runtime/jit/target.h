@@ -288,7 +288,7 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(attr_store) \
     X(slot_load) \
     X(slot_store) \
-    X(dict_lacks) X(profile) X(pic_same) X(fields_new) X(gen_new) X(gen_give) X(gen_over) \
+    X(dict_lacks) X(profile) X(pic_same) X(fields_new) X(exc_new) X(exc_push) X(exc_pop) X(gen_new) X(gen_give) X(gen_over) \
     X(cell_load) \
     X(compare_ideq) \
     X(binary_op) \
@@ -415,6 +415,7 @@ lu_jit_ctx_mix(uint64_t h, const void *code, int pc)
    loop that binds a local to a number on every turn carries the number
    raw from its first, where the local has no value yet. */
 extern PyObject lu_jit_unbound;
+extern PyObject lu_jit_exc_prev;     /* eval_exc.c */
 
 struct lu_prof;
 /* The root's record for the context `key`, made if new; NULL without memory. */

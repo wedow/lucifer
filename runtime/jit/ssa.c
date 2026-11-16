@@ -389,7 +389,7 @@ lu_ir_free(struct lu_func *f)
 static void
 dump_ref(struct lu_func *f, struct lu_fs *fs, lu_v r, FILE *out)
 {
-    static const char *const vkind_names[VK_KINDS] = { "int", "float", "bool", "tuple", "iter", "dict", "list", "method", "fields", "inst", "gen" };
+    static const char *const vkind_names[VK_KINDS] = { "int", "float", "bool", "tuple", "iter", "dict", "list", "method", "fields", "inst", "exc", "gen" };
     if (!LU_IS_VIRT(r)) {
         fprintf(out, " v%d", r);
         return;

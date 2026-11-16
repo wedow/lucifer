@@ -31,6 +31,7 @@ lu_ev_op_supported(int base)
     case FORMAT_SIMPLE: case FORMAT_WITH_SPEC: case BUILD_STRING: case LOAD_SPECIAL:
     case RETURN_GENERATOR: case YIELD_VALUE:    /* a generator made in line (eval_gen.c) */
     case RAISE_VARARGS: case RERAISE:   /* the interpreter raises: an exit, on a path that is leaving anyway */
+    case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH:  /* a handler the unit's raise reached (eval_exc.c) */
         return 1;
     default:
         return 0;
@@ -740,6 +741,14 @@ lu_ev_instruction(struct ctx *c)
         }
         return 0;
     }
+    case RAISE_VARARGS:
+        return lu_ev_raise(c);
+    case PUSH_EXC_INFO:
+        return lu_ev_push_exc_info(c);
+    case POP_EXCEPT:
+        return lu_ev_pop_except(c);
+    case CHECK_EXC_MATCH:
+        return lu_ev_check_exc_match(c);
     case YIELD_VALUE:
         if (lu_ev_in_gen(c)) {
             return lu_ev_gen_yield(c);
