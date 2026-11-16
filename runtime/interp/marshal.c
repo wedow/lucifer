@@ -57,25 +57,67 @@ typedef struct {
     PyObject **refs;            /* owned references; NULL marks a reserved slot */
     Py_ssize_t nrefs, refs_cap;
     int allow_code;
+    PyObject *readable;         /* marshal.load's file, read through readinto; NULL reads ptr to end */
+    char *buf;                  /* the bytes read from readable last */
+    Py_ssize_t buf_size;
 } RFILE;
 
 static PyObject *r_object(RFILE *p);
 
+/* The next n bytes: from the string, or exactly n read from readable into buf (Python/marshal.c). */
 static const char *
 r_string(Py_ssize_t n, RFILE *p)
 {
-    if (p->end - p->ptr < n) {
-        PyErr_SetString(PyExc_EOFError, "marshal data too short");
+    if (p->readable == NULL) {
+        if (p->end - p->ptr < n) {
+            PyErr_SetString(PyExc_EOFError, "marshal data too short");
+            return NULL;
+        }
+        const char *res = p->ptr;
+        p->ptr += n;
+        return res;
+    }
+    if (n == 0) {
+        return "";
+    }
+    if (n > p->buf_size) {
+        char *buf = PyMem_Realloc(p->buf, (size_t)n);
+        if (buf == NULL) {
+            PyErr_NoMemory();
+            return NULL;
+        }
+        p->buf = buf;
+        p->buf_size = n;
+    }
+    Py_ssize_t read = -1;
+    PyObject *view = PyMemoryView_FromMemory(p->buf, n, PyBUF_WRITE);
+    PyObject *res = view != NULL ? PyObject_CallMethod(p->readable, "readinto", "N", view) : NULL;
+    if (res != NULL) {
+        read = PyNumber_AsSsize_t(res, PyExc_ValueError);
+        Py_DECREF(res);
+    }
+    if (read != n) {
+        if (!PyErr_Occurred()) {
+            if (read > n) {
+                lu_err_format(PyExc_ValueError, "read() returned too much data: %zd bytes requested, %zd returned",
+                              n, read);
+            }
+            else {
+                PyErr_SetString(PyExc_EOFError, "EOF read where not expected");
+            }
+        }
         return NULL;
     }
-    const char *res = p->ptr;
-    p->ptr += n;
-    return res;
+    return p->buf;
 }
 
 static int
 r_byte(RFILE *p)
 {
+    if (p->readable != NULL) {
+        const char *b = r_string(1, p);
+        return b == NULL ? EOF : (unsigned char)*b;
+    }
     if (p->ptr < p->end) {
         return (unsigned char)*p->ptr++;
     }
@@ -600,28 +642,35 @@ r_object(RFILE *p)
     return retval;
 }
 
-/* The object at the start of str, and in *used the bytes it took. */
-PyObject *
-lu_marshal_read_prefix(const char *str, Py_ssize_t len, Py_ssize_t *used)
+/* The object rf reads, and its references released. */
+static PyObject *
+read_object(RFILE *rf)
 {
-    RFILE rf = { .ptr = str, .end = str + len, .allow_code = 1 };
-    PyObject *result = r_object(&rf);
-    *used = rf.ptr - str;
+    PyObject *result = r_object(rf);
     if (result == NULL && !PyErr_Occurred()) {
         PyErr_SetString(PyExc_TypeError, "NULL object in marshal data for object");
     }
-    for (Py_ssize_t i = 0; i < rf.nrefs; i++) {
-        Py_XDECREF(rf.refs[i]);
+    for (Py_ssize_t i = 0; i < rf->nrefs; i++) {
+        Py_XDECREF(rf->refs[i]);
     }
-    PyMem_Free(rf.refs);
+    PyMem_Free(rf->refs);
+    PyMem_Free(rf->buf);
     return result;
 }
 
 PyObject *
 PyMarshal_ReadObjectFromString(const char *str, Py_ssize_t len)
 {
-    Py_ssize_t used;
-    return lu_marshal_read_prefix(str, len, &used);
+    RFILE rf = { .ptr = str, .end = str + len, .allow_code = 1 };
+    return read_object(&rf);
+}
+
+/* marshal.load: one object read from file through its readinto, no further than the object. */
+PyObject *
+lu_marshal_load(PyObject *file)
+{
+    RFILE rf = { .readable = file, .allow_code = 1 };
+    return read_object(&rf);
 }
 
 /* The writer (w_object and its helpers). Objects seen more than once, or not

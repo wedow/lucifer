@@ -115,6 +115,9 @@ The previous fd or -1 is returned.
 The fd must be non-blocking."""
     if not isinstance(fd, int):
         raise TypeError("'%s' object cannot be interpreted as an integer" % type(fd).__name__)
+    import _thread
+    if _thread.get_ident() != _thread._get_main_thread_ident():
+        raise ValueError('set_wakeup_fd only works in main thread of the main interpreter')
     if fd != -1:
         import posix
         posix.fstat(fd)

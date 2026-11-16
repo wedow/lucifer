@@ -1209,6 +1209,25 @@ done:
     return result;
 }
 
+/* The descriptors that SCM_RIGHTS messages in msg brought, closed: a receive that cannot answer
+   them must not leak them. */
+static void
+close_rights(struct msghdr *msg)
+{
+    char *end = (char *)msg->msg_control + msg->msg_controllen;
+    for (struct cmsghdr *cm = msg->msg_controllen ? CMSG_FIRSTHDR(msg) : NULL; cm != NULL; cm = CMSG_NXTHDR(msg, cm)) {
+        if (cm->cmsg_level != SOL_SOCKET || cm->cmsg_type != SCM_RIGHTS) {
+            continue;
+        }
+        char *stop = (char *)cm + cm->cmsg_len < end ? (char *)cm + cm->cmsg_len : end;
+        for (char *p = (char *)CMSG_DATA(cm); p + sizeof(int) <= stop; p += sizeof(int)) {
+            int fd;
+            memcpy(&fd, p, sizeof fd);
+            LU_SYSCALL(close(fd));
+        }
+    }
+}
+
 /* recvmsg(fd, size, ancsize, flags): (up to size bytes, a list of (level, type, bytes) control
    messages from an ancsize-byte control buffer, the message flags, the sender's raw sockaddr bytes
    or None) (recvmsg(2)). A control message the buffer cut short keeps the data that arrived, as
@@ -1224,6 +1243,8 @@ prim_os_recvmsg(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *bytes = PyBytes_FromStringAndSize(NULL, size);
     char *control = ancsize ? PyMem_Calloc(1, (size_t)ancsize) : NULL;
     PyObject *cmsgs = PyList_New(0), *result = NULL;
+    struct msghdr msg;
+    ssize_t n = -1;         /* until received: nothing to close */
     if (bytes == NULL || cmsgs == NULL || (ancsize && control == NULL)) {
         if (!PyErr_Occurred()) {
             PyErr_NoMemory();
@@ -1232,8 +1253,6 @@ prim_os_recvmsg(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     struct sockaddr_storage sa;
     struct iovec iov = { .iov_base = PyBytes_AS_STRING(bytes), .iov_len = (size_t)size };
-    struct msghdr msg;
-    ssize_t n;
     do {
         msg = (struct msghdr){ .msg_name = &sa, .msg_namelen = sizeof sa, .msg_iov = &iov, .msg_iovlen = 1,
                                .msg_control = control, .msg_controllen = (size_t)ancsize };
@@ -1266,6 +1285,9 @@ prim_os_recvmsg(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         result = Py_BuildValue("(OOiN)", bytes, cmsgs, msg.msg_flags, address);
     }
 done:
+    if (result == NULL && n >= 0) {
+        close_rights(&msg);
+    }
     Py_XDECREF(bytes);
     Py_XDECREF(cmsgs);
     PyMem_Free(control);

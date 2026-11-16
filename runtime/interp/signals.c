@@ -217,17 +217,13 @@ prim_signal_install(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* signal_wakeup_fd(fd): the descriptor each signal's number is written to as it arrives, -1 for
-   none; answers the previous one (signal.set_wakeup_fd). Only the main thread sets it. */
+   none; answers the previous one (signal.set_wakeup_fd, which lets only the main thread set it). */
 static PyObject *
 prim_signal_wakeup_fd(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1);
     long fd;
     if (!PyLong_Check(args[0]) || lu_long_as_long(args[0], &fd) < 0) {
-        return NULL;
-    }
-    if (!lu_thread_can_handle_signals()) {
-        lu_err_format(PyExc_ValueError, "set_wakeup_fd only works in main thread of the main interpreter");
         return NULL;
     }
     int old = __atomic_exchange_n(&_PyRuntime.signals.wakeup_fd, fd < 0 ? 0 : (int)fd + 1, __ATOMIC_SEQ_CST);

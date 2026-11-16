@@ -93,6 +93,10 @@ static void
 child_after_fork(struct _is *interp, struct lu_task *self)
 {
     reinit_registry();
+    /* Signals sent on to a carrier thread that is gone never arrive. */
+    for (int i = 0; i < LU_NSIG; i++) {
+        _PyRuntime.signals.handlers[i].redirected = 0;
+    }
     /* The waits of the threads that are gone. */
     for (int i = 0; i < LU_WAIT_BUCKETS; i++) {
         _PyRuntime.waits.buckets[i].head = NULL;

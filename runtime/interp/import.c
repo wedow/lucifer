@@ -253,7 +253,7 @@ prim_fix_co_filename(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
-/* marshal_loads(bytes): (the object marshal.loads returns, the count of bytes it took). */
+/* marshal_loads(bytes): the object marshal.loads returns. */
 static PyObject *
 prim_marshal_loads(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -261,9 +261,18 @@ prim_marshal_loads(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "marshal_loads(bytes)");
         return NULL;
     }
-    Py_ssize_t used;
-    PyObject *obj = lu_marshal_read_prefix(PyBytes_AS_STRING(args[0]), PyBytes_GET_SIZE(args[0]), &used);
-    return obj == NULL ? NULL : Py_BuildValue("(Nn)", obj, used);
+    return PyMarshal_ReadObjectFromString(PyBytes_AS_STRING(args[0]), PyBytes_GET_SIZE(args[0]));
+}
+
+/* marshal_load(file): the object marshal.load reads from file. */
+static PyObject *
+prim_marshal_load(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 1) {
+        lu_err_format(PyExc_TypeError, "marshal_load(file)");
+        return NULL;
+    }
+    return lu_marshal_load(args[0]);
 }
 
 /* marshal_dumps(obj, version, allow_code): the bytes marshal.dumps returns. */
@@ -401,7 +410,7 @@ PyMethodDef lu_prim_import_methods[] = {
     FAST(ext_create), FAST(ext_exec),
     FAST(port_exists), FAST(port_create), FAST(port_exec), FAST(frozen_find), FAST(frozen_is_package),
     FAST(frozen_code),
-    FAST(frozen_names), FAST(import_state), FAST(fix_co_filename), FAST(marshal_loads), FAST(marshal_dumps),
+    FAST(frozen_names), FAST(import_state), FAST(fix_co_filename), FAST(marshal_loads), FAST(marshal_load), FAST(marshal_dumps),
     { NULL, NULL, 0, NULL },
 };
 

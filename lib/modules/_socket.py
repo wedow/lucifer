@@ -272,7 +272,13 @@ class socket(_lucifer.socket_base()):
         return data, ancdata, msg_flags, _unpack(address)
 
     def recvmsg_into(self, buffers, ancbufsize=0, flags=0, /):
-        views = [memoryview(b).cast('B') for b in buffers]
+        try:
+            views = [memoryview(b) for b in buffers]
+        except TypeError:
+            views = None
+        if views is None or any(v.readonly or not v.contiguous for v in views):
+            raise TypeError('recvmsg_into() argument 1 must be an iterable of single-segment read-write buffers')
+        views = [v.cast('B') for v in views]
         data, ancdata, msg_flags, address = self.recvmsg(sum(map(len, views)), ancbufsize, flags)
         start = 0
         for view in views:
