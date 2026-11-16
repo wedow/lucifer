@@ -1425,7 +1425,7 @@ build_header(struct ctx *c, struct bblk *bb)
                 P->phi[p] = new_phi(c, H, cls);
                 phi_add(c, P->phi[p], o->f[i]);
                 if (o->kind == VK_GEN && i == GEN_PC) {
-                    lu_ev_gen_header(c, P->phi[p], pc, key_step(k.key[j], i + 1));
+                    lu_ev_gen_header(c, o, P->phi[p], pc, key_step(k.key[j], i + 1));
                 }
             }
             else if (hint != 0) {

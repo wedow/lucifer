@@ -199,7 +199,7 @@ struct gctx {
     int nresumes, capresumes;
     struct resume_phi {         /* a loop header's phi of a carried generator's resume point: its header */
         lu_v phi;
-        PyCodeObject *code;
+        PyCodeObject *code, *gen;       /* the header's, the generator's */
         int pc;
         uint64_t place;
     } *resume_phis;
@@ -458,11 +458,12 @@ int lu_ev_gen_yield(struct ctx *c);
 void lu_ev_gen_finish(struct ctx *c);
 lu_v lu_ev_gen_real(struct ctx *c, struct lu_vobj *o);
 /* The code units a resume point (a generator's GEN_PC) may be: n of
-   them in *pcs. A loop header's phi of one is registered with its place;
+   them in *pcs. A loop header's phi of one (generator o's) is registered
+   with its place;
    a back-edge's resume point the header's phi does not cover is recorded
    for the next build (1 when one was). */
 int lu_ev_gen_resumes(struct ctx *c, lu_v v, int **pcs);
-void lu_ev_gen_header(struct ctx *c, lu_v phi, int pc, uint64_t place);
+void lu_ev_gen_header(struct ctx *c, const struct lu_vobj *o, lu_v phi, int pc, uint64_t place);
 int lu_ev_gen_back_edge(struct ctx *c, lu_v phi, lu_v now);
 /* A frame's return: value v, pushed on its caller's stack as the frame's
    ret says, goes on after the caller's instruction (eval_call.c). The

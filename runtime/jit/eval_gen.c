@@ -143,8 +143,12 @@ pcs_of(struct ctx *c, lu_v v, struct pcs *s)
     for (int i = 0; i < g->nresume_phis; i++) {
         struct resume_phi *h = &g->resume_phis[i];
         for (int k = 0; h->phi == v && k < g->nresumes; k++) {
+            /* Every inlined copy of the header's code notes under one
+               name, each for the generator it met: only what this
+               generator's code can stand at is this phi's. */
             struct resume *r = &g->resumes[k];
-            if (r->code == h->code && r->at == h->pc && r->place == h->place) {
+            if (r->code == h->code && r->at == h->pc && r->place == h->place
+                && (r->pc == GEN_FINISHED || resume_find(g, h->gen, 0, 0, r->pc) != NULL)) {
                 pcs_add(s, r->pc);
             }
         }
@@ -167,9 +171,10 @@ lu_ev_gen_resumes(struct ctx *c, lu_v v, int **pcs)
 }
 
 void
-lu_ev_gen_header(struct ctx *c, lu_v phi, int pc, uint64_t place)
+lu_ev_gen_header(struct ctx *c, const struct lu_vobj *o, lu_v phi, int pc, uint64_t place)
 {
     struct gctx *g = c->g;
+    PyCodeObject *gen = (PyCodeObject *)((PyFunctionObject *)lu_ev_const(c, o->f[GEN_FN]))->func_code;
     if (g->nresume_phis == g->capresume_phis) {
         int cap = g->capresume_phis ? 2 * g->capresume_phis : 4;
         struct resume_phi *p = lu_ir_alloc(g->f, sizeof(struct resume_phi) * (size_t)cap);
@@ -177,7 +182,7 @@ lu_ev_gen_header(struct ctx *c, lu_v phi, int pc, uint64_t place)
         g->resume_phis = p;
         g->capresume_phis = cap;
     }
-    g->resume_phis[g->nresume_phis++] = (struct resume_phi){ phi, c->code, pc, place };
+    g->resume_phis[g->nresume_phis++] = (struct resume_phi){ phi, c->code, gen, pc, place };
 }
 
 int
