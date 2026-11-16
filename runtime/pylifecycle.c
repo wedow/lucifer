@@ -557,11 +557,16 @@ Py_InitializeFromConfig(const PyConfig *src)
     __atomic_store_n(&_PyRuntime.main_task, (struct lu_task *)main_task, __ATOMIC_RELEASE);
     PyEval_RestoreThread(main_task);
     lu_layouts_init();
+    /* What boot makes lives as long as the interpreter: no collection runs
+       during boot, and its objects count as long-lived, as survivors of a
+       collection would, so they do not bring the first one forward. */
+    interp->gc.long_lived_total = PY_SSIZE_T_MAX;
     if (boot_native(interp) < 0 || lu_kernel_boot(interp) < 0 || lu_sys_configure(interp) < 0
         || lu_import_init(interp) < 0 || lu_sys_init_streams(interp) < 0) {
         report();
         return PyStatus_Exit(1);
     }
+    interp->gc.long_lived_total = __atomic_exchange_n(&interp->gc.young_count, 0, __ATOMIC_RELAXED);
     faulthandler_start(interp);
     if (lu_perf_start(interp) < 0) {
         report();
