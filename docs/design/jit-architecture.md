@@ -758,18 +758,43 @@ locals a walker wrote. An activation that has published nothing shows its
 root at its entry instruction and no inlined frames, as the root does
 today.
 
-**Loops are rebuilt whole.** A loop header takes its preheader's state
-with a phi for each local the loop assigns and each stack entry that is
-an object or a number. A virtual object on the stack, or one a slot that
-stays reaches, stays virtual round the loop under its id: a field that is
-a raw word (an iterator's index) is a phi, and a field a back-edge shows
-changing is one in the next build, raw where it carries a number. A
-back-edge whose state does not fit (another kind, another length, an
-object made in the loop) records what was wrong as a hint for the header
-and the unit is built again from the start; there is no undo of partial
-graphs. A hint names a carried object by the way to it from the frame's
-slots, since ids are a build's own. Each rebuild knows strictly more, so
-it ends.
+**Loops are rebuilt whole; some first turns are peeled.** A loop header
+takes its preheader's state with a phi for each local the loop assigns
+and each stack entry that is an object or a number. A virtual object on
+the stack, or one a slot that stays reaches, stays virtual round the
+loop under its id: a field that is a raw word (an iterator's index) is a
+phi, and a field a back-edge shows changing is one in the next build,
+raw where it carries a number. A back-edge whose state does not fit
+(another kind, another length, an object made in the loop) records what
+was wrong as a hint for the header and the unit is built again from the
+start; there is no undo of partial graphs. A hint names a carried object
+by the way to it from the frame's slots, since ids are a build's own.
+Each rebuild knows strictly more, so it ends.
+
+A hint gives the header a phi, which is the right answer wherever the
+loop changes the place every turn. Two misfits come from the first turn
+alone, and there a phi loses what the later turns know: a loop that
+carries a generator run in line (its first turn starts the generator, or
+leaves it at another yield, and makes what the generator's frame holds
+from then on), and a number that comes round as a number of another kind
+(a sum begun as 0 that adds floats). Such a loop's back-edges wait until
+it is built to its end (a loop without a generator waits only once its
+first back-edge shows the number). If one does not fit and the unit had
+room when the loop began, what was built is the loop's first turn only:
+its back-edges are joined and the loop is built again, with the loops
+inside it, from the state they bring. A generator's consumer then has
+one resume point and no test per item, an object the first turn makes
+inside the generator is carried with it, and the sum is a raw float. The
+first turn costs the unit nothing of its budget. In a loop that carries
+a generator an unbound local stays unbound at the header, and a real
+object on the stack stays, until a back-edge brings them otherwise; where
+the way past such a loop meets the way out of it, a local that is
+unbound on one and a number on the other is a raw phi with
+`lu_jit_unbound` beside it, as at a header. A back-edge that does not
+fit the second header, or any other misfit, is a hint. Peeling every
+loop on any misfit (it fired on nearly every `for` loop, whose variable
+is bound only by the first turn) made compile time up to 2.5x and code
+up to 1.7x for gains of a few percent.
 
 **A join keeps a virtual object the edges changed differently.** When no
 edge made it and its records have one layout, each field that differs is
@@ -790,8 +815,9 @@ with the code unit the frame resumes at and its stack's depth there. A
 resume point to its next yield, where the slots become the fields again
 and the value is the loop's item, or to its return, which ends the loop.
 Round a consumer's loop the resume point is a phi: the header keeps the
-code units a back-edge brought (a hint, as for slots), and the step tests
-for each. One that escapes is made as it stands (`H_gen_new`); a frame
+code units a back-edge brought (a hint, as for slots, kept per
+generator code), and the step tests for each; a loop whose first turn
+was peeled starts with the generator at its yield, and has one. One that escapes is made as it stands (`H_gen_new`); a frame
 state inside its body names the generator whose frame it is, and the
 materializer runs that frame as the generator's own, above its
 consumer's. Only generators whose suspensions are all outside `try` and

@@ -18,12 +18,16 @@
    object's otherwise. A virtual object the loop may change is carried
    round it virtual, its fields places of the header: a field that is a
    raw word (an iterator's index) is a phi, the others stay what they are
-   until a back-edge shows one changing. A back-edge must fit what the
-   header made. One that does not records a hint for the header (the
-   place gets a phi, a raw one for a box the loop carries, or an object;
-   an object that came back made, or in another layout, exists before
-   the loop) and the whole build starts over with it: nothing is undone
-   piecemeal, and each rebuild knows strictly more. */
+   until a back-edge shows one changing. The back-edges wait until the
+   loop is built to its end and must then fit what the header made. Where
+   one does not in a way only the first turn causes (close_loop), the loop
+   as built is kept as its first turn and the loop is built again from
+   the state the back-edges bring. A back-edge that does not fit
+   otherwise, or does not fit that second header, records a hint for it
+   (the place gets a phi, a raw one for a box the loop carries, or an
+   object; an object that came back made, or in another layout, exists
+   before the loop) and the whole build starts over with it: nothing is
+   undone piecemeal, and each rebuild knows strictly more. */
 #include "jit/eval.h"
 
 #include <stdlib.h>
@@ -251,6 +255,10 @@ block_at(struct ctx *c, int pc)
 void
 lu_ev_hint(struct gctx *g, PyCodeObject *code, int pc, uint64_t place, int kind)
 {
+    if (g->trying) {
+        g->misfit |= MISFIT;
+        return;
+    }
     for (int i = 0; i < g->nhints; i++) {
         struct hint *h = &g->hints[i];
         if (h->code == code && h->pc == pc && h->place == place) {
@@ -392,6 +400,16 @@ phi_add(struct ctx *c, lu_v phi, lu_v arg)
     in->args[in->nargs++] = arg;
 }
 
+/* Code from here on is pc's. */
+static void
+begin_at(struct ctx *c, int pc)
+{
+    c->g->npending = 0;
+    c->g->observed = 0;
+    c->pc = pc;
+    lu_ev_begin(c, pc);
+}
+
 /* The edge's state becomes the current one, in its block, before the
    instruction at pc: what a join converts there is emitted in it. */
 static void
@@ -401,10 +419,7 @@ enter_edge(struct ctx *c, struct edge *e, int pc)
     g->cur = e->block;
     g->st = e->st;
     lu_ev_changed(g);
-    g->npending = 0;
-    g->observed = 0;
-    c->pc = pc;
-    lu_ev_begin(c, pc);
+    begin_at(c, pc);
 }
 
 /* --- places --- */
@@ -691,16 +706,25 @@ edge_values(struct ctx *c, struct join *j, struct place pl)
 
 /* The representation of the phi for objects that are vals[e] on edge e:
    REP_BIT for a bool that is no object on every edge (a flag set on some
-   paths), a raw one for a box of one kind on every edge, else REP_OBJ. */
+   paths), a raw one for a box of one kind on every edge, else REP_OBJ.
+   A local that is unbound on some edges and a box of one kind on the
+   others is a number too (a loop's variable where the way past the loop
+   meets the way out of it): its phi has lu_jit_unbound beside it for
+   those edges, as a loop header's has. */
 static int
-join_rep(struct ctx *c, struct join *j, const lu_v *vals)
+join_rep(struct ctx *c, struct join *j, struct place pl, const lu_v *vals)
 {
-    int bits = 1, rep = REP_NONE;
-    for (int e = 0; e < j->n && (bits || e == 0 || rep != REP_NONE); e++) {
+    int bits = 1, rep = REP_NONE, first = 1, local = pl.id < 0 && pl.at < c->nlocals;
+    for (int e = 0; e < j->n && (bits || first || rep != REP_NONE); e++) {
+        if (vals[e] == LU_NOV && local) {
+            bits = 0;
+            continue;
+        }
         on_edge(c, &j->edges[e]);
         bits = bits && is_bit(c, vals[e]);
         int re = raw_rep(c, vals[e]);
-        rep = e == 0 || re == rep ? re : REP_NONE;
+        rep = first || re == rep ? re : REP_NONE;
+        first = 0;
     }
     return bits ? REP_BIT : rep != REP_NONE ? rep : REP_OBJ;
 }
@@ -818,7 +842,7 @@ join_place(struct ctx *c, struct join *j, int p)
         }
         return;
     }
-    int rep = join_rep(c, j, vals);
+    int rep = join_rep(c, j, P->at[p], vals);
     if (rep == REP_OBJ && join_tuples(c, j, p, vals)) {
         return;
     }
@@ -834,10 +858,10 @@ join_place(struct ctx *c, struct join *j, int p)
         on_edge(c, &j->edges[e]);
         lu_v r = vals[e], real;
         phi_add(c, P->phi[p], rep == REP_BIT ? lu_ev_truth(c, r) : raw_of(c, r, rep));
-        came |= rep != REP_BIT && LU_IS_VIRT(r) && lu_ev_virt(g, &g->st, r, &real)->n == 2;
+        came |= rep != REP_BIT && (r == LU_NOV || (LU_IS_VIRT(r) && lu_ev_virt(g, &g->st, r, &real)->n == 2));
     }
     if (came) {
-        P->origin[p] = origin_phi(c, j->J, P->phi[p]);  /* a box that was an object on some edge */
+        P->origin[p] = origin_phi(c, j->J, P->phi[p]);  /* a box that was an object on some edge, or unbound */
     }
 }
 
@@ -961,7 +985,8 @@ fields_made(struct ctx *c, struct join *j, int id)
     int n = first->n, made = 0;
     for (int k = 0; k < n && !made; k++) {
         lu_v *vals = edge_values(c, j, (struct place){ id, k });
-        if (!field_differs(c, j, id, k) || place_class(c, first, vals[0]) != FIELD_OBJ || join_rep(c, j, vals) != REP_OBJ) {
+        if (!field_differs(c, j, id, k) || place_class(c, first, vals[0]) != FIELD_OBJ
+            || join_rep(c, j, (struct place){ id, k }, vals) != REP_OBJ) {
             continue;
         }
         for (int e = 0; e < j->n; e++) {
@@ -1379,10 +1404,27 @@ header_place(struct ctx *c, struct places *P, int p, lu_v r, int H, int pc, int 
     I(c, P->phi[p])->flags |= INS_OWNED;
 }
 
+/* Whether the state carries a generator run in line into the loop: its
+   first turn may be the one that starts it or leaves it somewhere new. */
+static int
+carries_generator(struct ctx *c, int nslots)
+{
+    struct carry k = { 0 };
+    carried_objects(c, nslots, &k);
+    int gen = 0;
+    for (int j = 0; j < k.n && !gen; j++) {
+        gen = unmade_in(c->g, &c->g->st, k.id[j])->kind == VK_GEN;
+    }
+    return gen;
+}
+
 /* The loop header at pc, from the state its forward edges joined into.
    A local the loop does not assign stays as it is, and so does an object
    on the stack that nothing has made, unless it is a number or a bool:
-   the loop works above it. The other slots get phis. A virtual object
+   the loop works above it. In a loop that carries a generator (one that
+   may be peeled: close_loop) a local that is unbound stays so until a
+   back-edge brings it bound, and a real object on the stack stays too.
+   The other slots get phis. A virtual object
    the loop may change (an iterator it steps, an instance whose fields it
    sets) stays virtual, under its id: a field that is a raw word is a phi,
    and so is a field an earlier build saw a back-edge change. */
@@ -1392,20 +1434,21 @@ build_header(struct ctx *c, struct bblk *bb)
     struct gctx *g = c->g;
     int pc = bb->pc, nslots = c->nlocals + *depth_of(c);
     int H = lu_ir_block(g->f);
-    g->npending = 0;
-    g->observed = 0;
-    c->pc = pc;
-    lu_ev_begin(c, pc);
+    bb->began = g->f->nins + 2 * g->f->ninlined;
+    begin_at(c, pc);
     char *set = assigned(c, pc, bb->loop_end);
     struct places *P = &bb->P;
     places_of_slots(c, P, nslots);
+    bb->gen = carries_generator(c, nslots);
     lu_v first = g->f->nins;
     for (int i = 0; i < nslots; i++) {
         lu_v r = slots(c)[i];
         int hint = lu_ev_hinted(g, c->code, pc, (uint64_t)i);
         struct lu_vobj *o = LU_IS_VIRT(r) ? unmade_in(g, &g->st, LU_VIRT_ID(r)) : NULL;
-        int stays = i < c->nlocals ? !set[i] || (o != NULL && o->kind == VK_SEQITER)
-            : o != NULL && o->kind != VK_BOX_INT && o->kind != VK_BOX_FLOAT && o->kind != VK_BOOL;
+        int number = o != NULL && (o->kind == VK_BOX_INT || o->kind == VK_BOX_FLOAT || o->kind == VK_BOOL);
+        int stays = i < c->nlocals
+            ? !set[i] || (o != NULL && o->kind == VK_SEQITER) || (bb->gen && r == LU_NOV && hint == 0)
+            : !number && (o != NULL || bb->gen);
         if (!stays || hint == HINT_OBJ) {
             header_place(c, P, i, r, H, pc, hint);
         }
@@ -1531,28 +1574,24 @@ check_same(struct ctx *c, struct bblk *bb)
         if (P->kind[p] != PLACE_SAME || (r == bb->ref[p] && same_binding(g, bb, r))) {
             continue;
         }
-        int rep = P->at[p].id < 0 || lu_ev_const(c, r) != NULL || nospec(c, bb->pc) ? REP_OBJ : raw_rep(c, r);
+        int slot = P->at[p].id < 0 && bb->ref[p] != LU_NOV;     /* an unbound local is hinted as a field is */
+        int rep = slot || lu_ev_const(c, r) != NULL || nospec(c, bb->pc) ? REP_OBJ : raw_rep(c, r);
         lu_ev_hint(g, c->code, bb->pc, bb->key[p],
-                   P->at[p].id < 0 ? HINT_OBJ : rep == REP_I64 ? HINT_INT : rep == REP_F64 ? HINT_FLOAT : HINT_VARIES);
+                   slot ? HINT_OBJ : rep == REP_I64 ? HINT_INT : rep == REP_F64 ? HINT_FLOAT : HINT_VARIES);
     }
 }
 
-/* A back-edge into the built header: the state it carries is given the
-   header's shape, or the header a hint and the build a restart. */
+/* Whether the current state, a back-edge's, has the shape the header
+   made: where it has not, the header gets a hint (lu_ev_hint). With
+   `wire`, a raw phi takes its input as its place is found to fit. */
 static void
-back_edge(struct ctx *c, struct bblk *bb)
+edge_fit(struct ctx *c, struct bblk *bb, int wire)
 {
     struct gctx *g = c->g;
     const struct places *P = &bb->P;
     int pc = bb->pc;
-    g->npending = 0;
-    g->observed = 0;
-    c->pc = pc;
-    lu_ev_begin(c, pc);
-    lu_v first = g->f->nins;
     check_carried(c, bb);
-    if (g->restart) {
-        g->cur = -1;
+    if (g->restart || g->misfit) {
         return;
     }
     check_same(c, bb);
@@ -1565,11 +1604,12 @@ back_edge(struct ctx *c, struct bblk *bb)
             int rep = I(c, P->phi[p])->rep, have = raw_rep(c, r);
             PyTypeObject *t = lu_ev_type(c, r);
             int typed = t == &PyLong_Type ? REP_I64 : t == &PyFloat_Type ? REP_F64 : REP_NONE;
-            if (have == rep || typed == rep || r == LU_NOV || (!LU_IS_VIRT(r) && t == NULL)) {
-                phi_add(c, P->phi[p], raw_of(c, r, rep));       /* an unknown object: a guard, the header's */
-            }
-            else {
+            if (!(have == rep || typed == rep || r == LU_NOV || (!LU_IS_VIRT(r) && t == NULL))) {
+                g->misfit |= g->trying && have != REP_NONE ? MISFIT_KIND : 0;  /* a number of another kind */
                 lu_ev_hint(g, c->code, pc, bb->key[p], HINT_OBJ);
+            }
+            else if (wire) {
+                phi_add(c, P->phi[p], raw_of(c, r, rep));       /* an unknown object: a guard, the header's */
             }
         }
         else if (P->kind[p] == PLACE_OBJ && raw_rep(c, r) != REP_NONE && !LU_IS_VIRT(bb->ref[p])
@@ -1579,6 +1619,18 @@ back_edge(struct ctx *c, struct bblk *bb)
             lu_ev_hint(g, c->code, pc, bb->key[p], raw_rep(c, r) == REP_I64 ? HINT_INT : HINT_FLOAT);
         }
     }
+}
+
+/* A back-edge into the built header: the state it carries is given the
+   header's shape, or the header a hint and the build a restart. */
+static void
+back_edge(struct ctx *c, struct bblk *bb)
+{
+    struct gctx *g = c->g;
+    const struct places *P = &bb->P;
+    int pc = bb->pc;
+    lu_v first = g->f->nins;
+    edge_fit(c, bb, 1);
     if (g->restart) {
         g->cur = -1;
         return;
@@ -1611,6 +1663,46 @@ back_edge(struct ctx *c, struct bblk *bb)
 
 /* --- edges --- */
 
+/* The current edge waits in a list, with its state. */
+static void
+edge_keep(struct gctx *g, struct edge **list, int *n, int *cap)
+{
+    if (*n == *cap) {
+        *cap = *cap ? 2 * *cap : 2;
+        *list = regrow(g, *list, *n, *cap, sizeof(struct edge));
+    }
+    (*list)[*n].block = g->cur;
+    lu_ev_state_copy(g, &(*list)[*n].st, &g->st);
+    (*n)++;
+    g->cur = -1;
+}
+
+/* Whether the unit had room when the loop began, for a second copy. */
+static int
+peel_room(const struct gctx *g, const struct bblk *bb)
+{
+    return g->budget >= 0 && bb->began <= g->budget;
+}
+
+/* Whether the back-edges kept so far, tried against the header, show a
+   misfit of the kind `fixes` names (close_loop). */
+static int
+kept_misfit(struct ctx *c, struct bblk *bb, int fixes)
+{
+    struct gctx *g = c->g;
+    g->trying = 1;
+    g->misfit = 0;
+    for (int i = 0; i < bb->nback && !(g->misfit & fixes); i++) {
+        enter_edge(c, &bb->back[i], bb->pc);
+        edge_fit(c, bb, 0);
+    }
+    g->trying = 0;
+    int found = (g->misfit & fixes) != 0;
+    g->misfit = 0;
+    g->cur = -1;
+    return found;
+}
+
 /* Control goes on at pc with the current state. */
 static void
 add_edge(struct ctx *c, int pc)
@@ -1624,7 +1716,20 @@ add_edge(struct ctx *c, int pc)
     if (c->loops != NULL && bb->loop) {
         bb = &c->loops[bb - c->bb];     /* the way in reached a loop: the loop's own blocks from here */
     }
+    if (bb->built && bb->loop && bb->ref != NULL && !bb->closed) {
+        edge_keep(g, &bb->back, &bb->nback, &bb->capback);      /* until the loop is built to its end (close_loop) */
+        if (!bb->gen && bb->nback == 1 && !(peel_room(g, bb) && kept_misfit(c, bb, MISFIT_KIND))) {
+            /* Only a number that changes kind makes a loop without a
+               generator wait: this edge meets the header now. */
+            bb->nback = 0;
+            bb->closed = 1;
+            enter_edge(c, &bb->back[0], bb->pc);
+            back_edge(c, bb);
+        }
+        return;
+    }
     if (bb->built && bb->loop && bb->ref != NULL) {
+        begin_at(c, bb->pc);
         back_edge(c, bb);
         return;
     }
@@ -1641,17 +1746,72 @@ add_edge(struct ctx *c, int pc)
     if ((c->loops == NULL || way_in) && bb - c->bb < c->lo) {
         c->lo = (int)(bb - c->bb);
     }
-    if (bb->nin == bb->capin) {
-        int cap = bb->capin ? 2 * bb->capin : 2;
-        struct edge *p = lu_ir_alloc(g->f, sizeof(struct edge) * (size_t)cap);
-        memcpy(p, bb->in, sizeof(struct edge) * (size_t)bb->nin);
-        bb->in = p;
-        bb->capin = cap;
+    edge_keep(g, &bb->in, &bb->nin, &bb->capin);
+}
+
+/* The innermost loop that is built to its end with back-edges waiting:
+   no block of its range that control reaches is still to be built. */
+static struct bblk *
+closable(struct ctx *c)
+{
+    struct bblk *loop = NULL;
+    for (int i = 0; i < c->nbb; i++) {
+        struct bblk *bb = &c->bb[i];
+        int open = bb->nback == 0 || (loop != NULL && bb->pc < loop->pc);
+        for (int k = 0; k < c->nbb && !open; k++) {
+            const struct bblk *in = &c->bb[k];
+            open = !in->built && in->nin > 0 && in->pc >= bb->pc && in->pc < bb->loop_end;
+        }
+        loop = open ? loop : bb;
     }
-    bb->in[bb->nin].block = g->cur;
-    lu_ev_state_copy(g, &bb->in[bb->nin].st, &g->st);
-    bb->nin++;
-    g->cur = -1;
+    return loop;
+}
+
+/* The back-edges of a loop built to its end meet its header. Where they
+   fit what it made they are its back-edges. Where one does not, the loop
+   as built is its first turn only (it is peeled): the back-edges are
+   joined, and the loop is built again from the state they bring, its
+   header's own, so that what the first turn settles (a local it binds, a
+   generator it starts, an object it makes inside one the loop carries)
+   is settled where the loop begins. The loops inside it are built anew
+   with it. A loop is peeled only where its first turn is unlike the
+   rest in a way a hint cannot give the header: it carries a generator
+   (the first turn starts it or leaves it at another yield), or a number
+   comes round as a number of another kind (a sum begun as 0 that adds
+   floats). Elsewhere, and in a header that has met its back-edges once
+   or that the unit had no room left to begin, a misfit gives hints and
+   the build a restart. */
+static void
+close_loop(struct ctx *c, struct bblk *bb)
+{
+    struct gctx *g = c->g;
+    struct edge *back = bb->back;
+    int n = bb->nback, pc = bb->pc;
+    int want = kept_misfit(c, bb, bb->gen ? MISFIT : MISFIT_KIND);
+    int peel = want && peel_room(g, bb);
+    g->f->refused += want && !peel;
+    bb->nback = 0;
+    bb->closed = 1;
+    if (!peel) {
+        for (int i = 0; i < n && !g->restart; i++) {
+            enter_edge(c, &back[i], pc);
+            back_edge(c, bb);
+        }
+        g->cur = -1;
+        return;
+    }
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: loop at %s@%d peeled\n", PyUnicode_AsUTF8(c->code->co_qualname), pc);
+    }
+    g->budget += g->f->nins + 2 * g->f->ninlined - bb->began;   /* the loop has the room its first turn had */
+    lu_ev_merge(c, back, n, pc);
+    for (int i = 0; i < c->nbb; i++) {
+        struct bblk *in = &c->bb[i];
+        if (in->pc >= pc && in->pc < bb->loop_end) {
+            *in = (struct bblk){ .pc = in->pc, .loop = in->loop, .loop_end = in->loop_end, .closed = in == bb };
+        }
+    }
+    add_edge(c, pc);
 }
 
 void
@@ -1834,6 +1994,11 @@ lu_ev_build(struct ctx *c, int pc)
         }
         if (g->restart) {
             return 0;
+        }
+        struct bblk *loop = closable(c);
+        if (loop != NULL) {
+            close_loop(c, loop);
+            continue;
         }
         if (c->lo == c->nbb) {
             if (c->loops == NULL) {

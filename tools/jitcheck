@@ -234,7 +234,7 @@ GROWTH = {
                 r'jit: allocations by kind: int (\d+), .*tuple (\d+), list (\d+), dict (\d+), .*instance (\d+)', 0),
     'fused': ('jit_virtual_generators.py',
               r'jit: generator resumes interpreted (\d+), compiled (\d+)'
-              r'|jit: allocations by kind: int (\d+), .*tuple (\d+)', 0),
+              r'|jit: allocations by kind: int (\d+), .*tuple (\d+), .*iterator (\d+)', 0),
     'forward': ('jit_forward_calls.py', r'jit: allocations by kind: .*tuple (\d+), list (\d+), dict (\d+)', 0),
     'slices': ('jit_slices.py', r'jit: allocations by kind: int (\d+)', 0),
     'guards': ('jit_guards.py', r'jit: unit hot@\d+ entries \d+ guards (\d+)', 0),

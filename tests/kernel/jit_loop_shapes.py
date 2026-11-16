@@ -123,3 +123,102 @@ print(growing(N))
 print(while_shapes(N))
 print(unbound_then_bound(N))
 print(tuples_carried(N))
+
+
+# A loop whose first turn is unlike the rest (it binds a local, starts a
+# generator, makes what the later turns carry) may be compiled as that
+# turn and then the loop: each way out of either must leave what the
+# interpreter leaves.
+def counting(n):
+    for i in range(n):
+        yield i
+
+
+def last_doubled(seq):
+    for x in seq:
+        last = x * 2
+    try:
+        return last
+    except UnboundLocalError:
+        return 'unbound'
+
+
+def last_halved(seq):
+    for x in seq:
+        half = x / 2
+    try:
+        return half
+    except UnboundLocalError:
+        return 'unbound'
+
+
+def leaves_early(n, k):
+    seen = -1
+    for i in counting(n):
+        if i == k:
+            break
+        seen = i
+    else:
+        return seen, 'ended'
+    return seen, i
+
+
+def previous_pairs(seq):
+    prev = None
+    out = 0
+    for x in seq:
+        if prev is not None:
+            out += prev * x
+        prev = x
+    return out, prev
+
+
+def first_is_text(seq):
+    x = 'start'
+    for v in seq:
+        x = (len(x) if isinstance(x, str) else x) + v
+    return x
+
+
+def inner_only(rows):
+    total = 0
+    for r in range(rows):
+        for v in counting(r % 5):
+            total += v + r
+    return total
+
+
+def grows_in_turn(n, at):
+    big = 1
+    for i in counting(n):
+        big = big * 1000003 * 1000003 * 1000003 * 1000003 if i == at else big + i
+    return big % 1000033
+
+
+def float_sum(seq, stop):
+    total = 0
+    for x in seq:
+        if x == stop:
+            break
+        total += x * 0.5
+    return total, type(total).__name__
+
+
+def carried_pair(seq):
+    t = None
+    for x in seq:
+        t = (x, t[0] if t is not None else -1)
+    return t
+
+
+def first_turns(n):
+    out = []
+    for r in range(n):
+        seq = (3, 1, 4, 1, 5)[:r % 6]
+        out.append((last_doubled(seq), last_halved(seq), leaves_early(6, r % 8), previous_pairs(seq),
+                    first_is_text(seq), grows_in_turn(5, r % 7), carried_pair(seq),
+                    float_sum(seq, r % 4)))
+    return len(set(out)), out[-7:], inner_only(n)
+
+
+print(first_turns(N))

@@ -203,7 +203,12 @@ lu_ev_gen_back_edge(struct ctx *c, lu_v phi, lu_v now)
         for (int k = 0; k < nhave; k++) {
             known |= have[k] == come[i];
         }
-        added |= !known && resume_note(g, h->code, h->pc, h->place, come[i], 0);
+        if (!known && g->trying) {
+            g->misfit |= MISFIT;
+        }
+        else if (!known) {
+            added |= resume_note(g, h->code, h->pc, h->place, come[i], 0);
+        }
     }
     g->restart |= added;
     return added;

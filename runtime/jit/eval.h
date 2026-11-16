@@ -93,6 +93,11 @@ struct bblk {
     int ir;                     /* a loop header's graph block */
     struct edge *in;            /* forward edges waiting for it to be built */
     int nin, capin;
+    struct edge *back;          /* a built loop header: back-edges waiting for the loop to be built to its end */
+    int nback, capback;
+    int closed;                 /* its back-edges have met it once: later ones fit it or give it a hint */
+    int began;                  /* what the unit had spent of its budget when the header was built */
+    int gen;                    /* the loop carries a generator run in line: it may be peeled */
     struct places P;            /* a built loop header: its frame's slots, then every field of the virtual
                                    objects it carries, for its back-edges to meet */
     lu_v *ref;                  /* per place: what it holds at the header */
@@ -158,6 +163,7 @@ struct ctx {
    that order. Of a carried object itself (lu_ev_object_key) HINT_OBJ says
    that it exists before the loop. */
 enum { HINT_VARIES = 1, HINT_INT, HINT_FLOAT, HINT_OBJ };
+enum { MISFIT = 1, MISFIT_KIND = 2 };
 struct hint {
     PyCodeObject *code;
     int pc, kind;
@@ -188,6 +194,9 @@ struct gctx {
     lu_v keep;                  /* a value whose reference leaves with the root's return: not released */
     int leaving;                /* the root returns: its frame is off the stack, and no walker's sight matters */
     int restart;                /* a hint was added: the build starts over */
+    int trying;                 /* a back-edge is only tried against its header: a hint it would give is */
+    int misfit;                 /* not recorded and restarts nothing, and misfit says there was one (MISFIT, */
+                                /* and MISFIT_KIND when a number's phi was brought a number of another kind) */
     unsigned long learned;      /* the root's count of what it learned, when the build began */
     int ret_missing;            /* the call just inlined for a FOR_ITER may have answered MISSING */
     struct hint *hints;

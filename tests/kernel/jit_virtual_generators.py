@@ -6,8 +6,8 @@
 # takes out of the loop must go on where the loop left it, and one dropped
 # inside a try block must run its finally. tools/jitcheck also runs this
 # at two sizes and requires that the resumes the interpreter and compiled
-# code run and the ints and tuples compiled code allocates do not grow
-# with the iterations.
+# code run and the ints, tuples and iterators compiled code allocates do
+# not grow with the iterations.
 import sys
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
