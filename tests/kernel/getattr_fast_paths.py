@@ -251,3 +251,77 @@ try:
     hasattr(b, 3)
 except TypeError as ex:
     print(44, ex)
+
+
+# classmethod and staticmethod read through a class or an instance, in a loop
+# hot enough to compile: bound to the class the lookup started from, except
+# where a subclass's __get__, a metaclass's data descriptor or hook decides.
+class CMBase:
+    @classmethod
+    def who(cls, x):
+        return (cls.__name__, x)
+
+    @staticmethod
+    def st(x):
+        return ('st', x)
+
+    wrapped = classmethod(type)
+
+
+class CMSub(CMBase):
+    pass
+
+
+class MyCM(classmethod):
+    def __get__(self, obj, owner=None):
+        return lambda x: ('mycm', x)
+
+
+class MetaD(type):
+    @property
+    def shadow(cls):
+        return lambda x: ('meta data', x)
+
+
+class CMMeta(metaclass=MetaD):
+    @classmethod
+    def shadow(cls, x):
+        return ('class', x)
+
+    mine = MyCM(lambda cls, x: x)
+
+
+class MetaGA(type):
+    def __getattribute__(cls, n):
+        return lambda x: ('meta hook', n, x)
+
+
+class CMHook(metaclass=MetaGA):
+    @classmethod
+    def who(cls, x):
+        return ('class', x)
+
+
+def reads(objs):
+    out = []
+    for i in range(300):
+        for o in objs:
+            out.append((o.who(i), o.st(i)))
+    return out[-len(objs):]
+
+
+print(50, reads([CMBase, CMSub, CMBase(), CMSub()]))
+print(51, CMBase.wrapped(), CMSub.who.__self__ is CMSub, CMSub().who.__self__ is CMSub, CMBase.st is CMSub().st)
+for i in range(300):
+    r = (CMMeta.shadow(i), CMMeta.mine(i), CMHook.who(i))
+print(52, r)
+late = classmethod.__new__(classmethod)
+CMBase.late = late
+try:
+    CMBase.late
+except Exception as ex:
+    print(53, type(ex).__name__)
+late.__init__(lambda cls: cls.__name__)
+print(54, CMBase.late(), CMSub.late(), CMSub().late())
+CMBase.who = classmethod(lambda cls, x: ('redefined', cls.__name__, x))
+print(55, reads([CMBase, CMSub, CMSub()]))

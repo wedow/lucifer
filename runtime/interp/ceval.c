@@ -740,8 +740,8 @@ object_attr_hook(PyTypeObject *tp, PyObject *id)
 /* LOAD_ATTR answers that need no Python: obj.__class__ for an object whose
    type keeps object's __class__, and a plain class attribute (no __get__, or
    a function, which a class returns unbound) of a class whose metaclass keeps
-   type's __getattribute__ and does not have the name. A new reference, or
-   NULL. */
+   type's __getattribute__ and does not have the name; a staticmethod's
+   callable, a classmethod bound to the class. A new reference, or NULL. */
 static PyObject *
 attr_shortcut(PyObject *owner, PyObject *name)
 {
@@ -762,7 +762,7 @@ attr_shortcut(PyObject *owner, PyObject *name)
     }
     PyObject *v = _PyType_LookupRef((PyTypeObject *)owner, name);
     if (v != NULL && Py_TYPE(v)->tp_descr_get != NULL && !PyFunction_Check(v)) {
-        Py_CLEAR(v);
+        Py_SETREF(v, lu_static_or_class_get(v, owner));
     }
     return v;
 }
@@ -809,7 +809,7 @@ lu_getattr_native(PyObject *owner, PyObject *name)
     }
     v = PyFunction_Check(descr) ? PyMethod_New(descr, owner)
         : Py_IS_TYPE(descr, &PyMethodDescr_Type) || Py_IS_TYPE(descr, &PyWrapperDescr_Type)
-        ? lu_method_descr_bind(descr, owner) : lu_staticmethod_get(descr);
+        ? lu_method_descr_bind(descr, owner) : lu_static_or_class_get(descr, (PyObject *)tp);
     Py_DECREF(descr);
     return v;
 }
