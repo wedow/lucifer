@@ -1,4 +1,4 @@
-# tools/floor select: 23 units, 445 s of 450.0 budget per mode, units over 60.0 s left out; 6 past and 9 current tier runs
+# tools/floor select: 22 units, 401 s of 450.0 budget per mode, units over 60.0 s left out; 6 past and 9 current tier runs
 # unit	seconds	past runs it lost passes in	stdlib topic	floor passes	score
 libtest/test_frame	11.3	1	1	47	2.427
 libtest/test_deque	16.8	1	1	78	2.103
@@ -6,7 +6,6 @@ libtest/test_re	40.5	2	1	158	1.862
 libtest/test_grammar	9.8	1	0	74	1.756
 libtest/test_ttk_textonly	8.4	1	0	13	0.858
 libtest/test.test_multiprocessing_spawn.test_threads	30.8	1	0	79	0.577
-libtest/test_http_cookiejar	43.6	1	0	81	0.413
 libtest/test_memoryio	9.9	0	1	177	2.688
 fuzzdiff/mathint_diff-s1	49.4	0	0	998	0.639
 ft-cpython/serial/test_enum	30.8	0	1	1076	2.130
