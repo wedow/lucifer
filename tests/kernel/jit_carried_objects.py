@@ -323,3 +323,32 @@ def seen_by_frame():
 
 
 print('seen_by_frame', seen_by_frame())
+
+
+SEEN = []
+
+
+def joined_tuple(a, flag):
+    """Each arm builds its own tuple around a number both made an object
+    of: after the join the item is the number of the arm that ran."""
+    n = a + 1000
+    if flag:
+        SEEN.append(n)
+        t = (n, 1)
+        n = None
+    else:
+        SEEN.append(n)
+        t = (n, 2)
+        n = None
+    return t[0] * 10 + t[1]
+
+
+def joined_tuples():
+    out = []
+    for r in range(K):
+        out.append(joined_tuple(r, r % 3 == 0))
+        SEEN.clear()
+    return out[-4:]
+
+
+print('joined_tuples', joined_tuples())

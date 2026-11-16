@@ -729,8 +729,8 @@ static void join_place(struct ctx *c, struct join *j, int p);
    only this place and the slots that hold the very same values reach:
    tuples of one size, a different one on some edges (two arms each built
    their result). They are one tuple after the join, virtual still, whose
-   items that differ are places of the join; nothing can tell it from the
-   edge's own, which nothing else names. Then the place is given it. */
+   items are places of the join; nothing can tell it from the edge's own,
+   which nothing else names. Then the place is given it. */
 static int
 join_tuples(struct ctx *c, struct join *j, int p, const lu_v *vals)
 {
@@ -769,9 +769,14 @@ join_tuples(struct ctx *c, struct join *j, int p, const lu_v *vals)
     for (int e = 0; e < j->n; e++) {
         lu_ev_bind(g, &j->edges[e].st, id, LU_NOV, unmade_in(g, &j->edges[e].st, LU_VIRT_ID(vals[e])));
     }
+    /* Every item but a constant all edges agree on is a place, the other
+       ones the edges agree on too: the slot is then gone like any slot
+       with a phi, and an item that is one virtual object the edges know
+       differently (a number each arm made an object of) is joined as a
+       slot holding it would be. */
     for (int k = 0; k < one->n; k++) {
         lu_v *items = edge_values(c, j, (struct place){ id, k });
-        int same = 1;
+        int same = lu_ev_const(c, items[0]) != NULL;
         for (int e = 1; e < j->n; e++) {
             same &= items[e] == items[0];
         }
