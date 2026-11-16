@@ -62,6 +62,7 @@
 /* nospec bits. */
 #define NOSPEC 1
 #define NOHOIST 2
+#define CATCH 4                 /* at a kernel handler: what a call raises under it is taken in the unit */
 /* A guard that fails this often makes its instruction generic. */
 #define GUARD_FAILS 50
 /* Exits a unit without loops takes, on at least half its entries, before
@@ -333,6 +334,13 @@ lu_jit_nohoist(PyCodeObject *code, int pc)
 {
     struct lu_jit_code *jc = state_of(code);
     return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & NOHOIST);
+}
+
+int
+lu_jit_catches(PyCodeObject *code, int pc)
+{
+    struct lu_jit_code *jc = state_of(code);
+    return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & CATCH);
 }
 
 void
@@ -1171,6 +1179,26 @@ handles(struct lu_deopt *d, int k)
     return lu_exception_handler(fr->code, at, &level, &handler, &lasti);
 }
 
+/* The handler (a code unit of frame k's code) that takes an error exit's
+   exception in the unit's build when told to (eval_exc.c): frame k's, when
+   every frame from the innermost to k is the kernel's and none a
+   generator's; else -1. */
+static int
+kernel_handler(struct lu_deopt *d, int k)
+{
+    for (int i = k; i < d->nframes; i++) {
+        PyCodeObject *co = lu_deopt_frame(d, i)->code;
+        if (!(co->co_flags & LU_CO_KERNEL) || (co->co_flags & LU_CO_GENERATORS)) {
+            return -1;
+        }
+    }
+    const struct lu_deopt_frame *fr = lu_deopt_frame(d, k);
+    lu_codeunit *start = lu_code_start(fr->code);
+    int at = k == d->nframes - 1 ? fr->pc : (int)(lu_instr_before(fr->code, start + fr->pc) - start);
+    int level, handler, lasti;
+    return lu_exception_handler(fr->code, at, &level, &handler, &lasti) && !lasti ? handler : -1;
+}
+
 /* The frame of an error exit whose handler takes its exception, as the
    interpreter unwinds it, or -1 when the exception leaves the root frame. */
 static int
@@ -1217,9 +1245,10 @@ lu_jit_note_exit(struct lu_deopt *d)
     if (handled < 0) {
         return;
     }
+    int caught = d->reason == EXIT_ERROR ? kernel_handler(d, handled) : -1;
     if (d->reason == EXIT_ERROR || (d->reason == EXIT_SIDE && d->nframes == 1)) {
         leave(d, u, 0);
-        if (d->reason != EXIT_ERROR || handled == 0) {
+        if (d->reason != EXIT_ERROR || (handled == 0 && caught < 0)) {
             return;
         }
     }
@@ -1244,7 +1273,13 @@ lu_jit_note_exit(struct lu_deopt *d)
     uint16_t n = __atomic_add_fetch(&jc->fails[site_pc], 1, __ATOMIC_RELAXED);
     if (n >= GUARD_FAILS) {
         int again;
-        if (d->reason != EXIT_GUARD) {
+        if (caught >= 0) {
+            /* A kernel handler keeps taking what a call raises: the unit is
+               built to take it there itself. */
+            struct lu_jit_code *hc = state_for(inner->code);
+            again = __atomic_fetch_or(&hc->nospec[caught], CATCH, __ATOMIC_RELAXED) & CATCH;
+        }
+        else if (d->reason != EXIT_GUARD) {
             /* The inlined copy keeps leaving here: it is called instead from
                now on (and if that call leaves its caller's copy, the caller next). */
             again = __atomic_exchange_n(&jc->noinline, 1, __ATOMIC_RELAXED);

@@ -133,7 +133,7 @@ catcher(struct ctx *c, PyTypeObject *t, int fresh, int *handler, int *level)
             return NULL;
         }
         if (lu_exception_handler(k->code, k->pc, level, handler, &lasti)) {
-            return !lasti && (!fresh || drops_unseen(k, *handler, t)) ? k : NULL;
+            return !lasti && (fresh ? drops_unseen(k, *handler, t) : lu_jit_catches(k->code, *handler)) ? k : NULL;
         }
     }
     return NULL;

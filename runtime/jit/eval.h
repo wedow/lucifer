@@ -242,6 +242,7 @@ struct gctx {
 
 /* Per-code JIT state the evaluator consults (jit.c). */
 int lu_jit_nospec(PyCodeObject *code, int pc);
+int lu_jit_catches(PyCodeObject *code, int pc);     /* the kernel handler at pc took what calls raised (jit.c) */
 int lu_jit_next_pc(PyCodeObject *code, int pc);
 int lu_jit_noinline(PyCodeObject *code);
 /* The evaluator's scan of a code (eval_flow.c), kept with the code's JIT
