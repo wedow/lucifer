@@ -374,7 +374,7 @@ lu_frame_rehome(struct lu_frame *from, struct lu_frame *to)
 LU_EXPORT PyFrameObject *
 PyFrame_New(PyThreadState *tstate, PyCodeObject *code, PyObject *globals, PyObject *locals)
 {
-    PyObject *func = PyFunction_New((PyObject *)code, globals);
+    PyObject *func = lu_function_for_frame((PyObject *)code, globals);
     if (func == NULL) {
         return NULL;
     }

@@ -99,7 +99,7 @@ prim_eval_code(PyThreadState *ts, PyObject *const *args, Py_ssize_t nargs)
         && lu_ns_insert(args[1], LU_ID(__builtins__), PyEval_GetBuiltins()) < 0) {
         return NULL;
     }
-    PyObject *func = lu_function_new(args[0], args[1]);
+    PyObject *func = lu_function_for_frame(args[0], args[1]);
     if (func == NULL) {
         return NULL;
     }

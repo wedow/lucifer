@@ -1431,6 +1431,10 @@ PyObject *lu_function_new(PyObject *code, PyObject *globals);
 /* A function of code in globals that no watcher hears of: what compiled
    code names the frames of an inlined closure by (runtime/jit/eval_call.c). */
 PyObject *lu_function_template(PyObject *code, PyObject *globals);
+/* The function exec, eval and PyEval_EvalCode run code in: its frame
+   holds it alone, so it is freed by its count, not left to a collection
+   (cp314t's _PyFunction_FromConstructor). */
+PyObject *lu_function_for_frame(PyObject *code, PyObject *globals);
 /* function.__new__ over (code, globals, name, defaults, closure, kwdefaults). */
 PyObject *lu_function_from_args(PyObject *const *args);
 /* A cell's value as a new reference, or NULL when empty (_PyCell_GetStackRef):

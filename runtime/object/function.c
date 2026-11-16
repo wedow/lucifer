@@ -133,7 +133,7 @@ builtins_of(PyObject *globals)
 }
 
 static PyObject *
-make_function(PyObject *code, PyObject *globals, int notify)
+make_function(PyObject *code, PyObject *globals, int notify, int defer)
 {
     PyCodeObject *co = (PyCodeObject *)code;
     PyFunctionObject *op = (PyFunctionObject *)lu_object_new(&PyFunction_Type,
@@ -151,7 +151,7 @@ make_function(PyObject *code, PyObject *globals, int notify)
     op->func_doc = Py_NewRef(doc);
     op->func_module = lu_ns_get(globals, LU_ID(__name__));
     op->vectorcall = function_vectorcall;
-    if (!(co->co_flags & CO_NESTED) || (co->co_flags & CO_METHOD)) {
+    if (defer && (!(co->co_flags & CO_NESTED) || (co->co_flags & CO_METHOD))) {
         /* cp314t: top-level functions and methods are freed by a collection
            only, which lets inline caches name them (specialize.c). */
         lu_set_deferred((PyObject *)op);
@@ -165,13 +165,19 @@ make_function(PyObject *code, PyObject *globals, int notify)
 PyObject *
 lu_function_new(PyObject *code, PyObject *globals)
 {
-    return make_function(code, globals, 1);
+    return make_function(code, globals, 1, 1);
 }
 
 PyObject *
 lu_function_template(PyObject *code, PyObject *globals)
 {
-    return make_function(code, globals, 0);
+    return make_function(code, globals, 0, 1);
+}
+
+PyObject *
+lu_function_for_frame(PyObject *code, PyObject *globals)
+{
+    return make_function(code, globals, 1, 0);
 }
 
 PyObject *

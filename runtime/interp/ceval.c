@@ -4325,7 +4325,7 @@ PyEval_EvalCode(PyObject *co, PyObject *globals, PyObject *locals)
         && lu_ns_insert(globals, LU_ID(__builtins__), ts->interp->builtins) < 0) {
         return NULL;
     }
-    PyObject *func = lu_function_new(co, globals);
+    PyObject *func = lu_function_for_frame(co, globals);
     if (func == NULL) {
         return NULL;
     }
@@ -4357,7 +4357,7 @@ PyEval_EvalCodeEx(PyObject *co, PyObject *globals, PyObject *locals,
         PyErr_BadInternalCall();
         return NULL;
     }
-    PyFunctionObject *func = (PyFunctionObject *)lu_function_new(co, globals);
+    PyFunctionObject *func = (PyFunctionObject *)lu_function_for_frame(co, globals);
     if (func == NULL) {
         return NULL;
     }
