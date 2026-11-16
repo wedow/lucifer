@@ -10,11 +10,14 @@ import sys
 CHILDREN = {
     "non-daemon joined": '''
 import threading, time
+main_done = threading.Event()
 def late():
+    main_done.wait()
     time.sleep(0.2)
     print("late thread done", flush=True)
 threading.Thread(target=late).start()
 print("main done", flush=True)
+main_done.set()
 ''',
     "daemon running": '''
 import threading

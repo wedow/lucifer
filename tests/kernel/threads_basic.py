@@ -28,7 +28,7 @@ box = []
 
 
 def waiter():
-    box.append(event.wait(5))
+    box.append(event.wait(60))
 
 
 t = threading.Thread(target=waiter, name='waiter')
@@ -280,7 +280,7 @@ held = threading.Lock()
 held.acquire()
 threading.Thread(target=held.acquire, daemon=True).start()
 threading.Thread(target=lambda: [None for _ in iter(int, 1)], daemon=True).start()      # busy for ever
-threading.Thread(target=lambda: (time.sleep(2), print('daemon woke')), daemon=True).start()
+threading.Thread(target=lambda: (time.sleep(60), print('daemon woke')), daemon=True).start()
 gate = threading.Event()
 atexit.register(print, 'atexit')
 

@@ -1,7 +1,8 @@
 # A task blocked in a wait does not hold up a stop-the-world: gc.collect() completes while threads
 # sleep in lu_park (locks, conditions, events, queues, join, sleep) and inside the syscall bracket
 # (pipe read, select, poll, waitpid, flock, socket receive). A wait that stayed attached would
-# never answer the stop request and this program would hang.
+# never answer the stop request and this program would hang. No wait ends by itself, so all of them
+# are still blocked when the collection completes, however long the host takes to get there.
 import fcntl
 import gc
 import os
@@ -12,13 +13,13 @@ import subprocess
 import threading
 import time
 
-release = []      # one callable per blocked thread: lets it go
+release = []      # one callable per blocked thread: lets it go (None: never; the thread is a daemon)
 names = []
 
 
 def blocked(name, wait, let_go):
     names.append(name)
-    t = threading.Thread(target=wait)
+    t = threading.Thread(target=wait, daemon=let_go is None)
     t.start()
     release.append((t, let_go))
 
@@ -55,7 +56,7 @@ sleeper = threading.Thread(target=gate.wait)
 sleeper.start()
 blocked("join", sleeper.join, gate.set)
 
-blocked("sleep", lambda: time.sleep(2.5), lambda: None)
+blocked("sleep", lambda: time.sleep(3600), None)
 
 r, w = os.pipe()
 blocked("pipe read", lambda: os.read(r, 1), lambda: os.write(w, b"x"))
@@ -74,8 +75,8 @@ def poll_wait():
 
 blocked("poll", poll_wait, lambda: os.write(w3, b"x"))
 
-proc = subprocess.Popen(["sleep", "2.5"])
-blocked("waitpid", lambda: os.waitpid(proc.pid, 0), lambda: None)
+proc = subprocess.Popen(["sleep", "3600"])
+blocked("waitpid", lambda: os.waitpid(proc.pid, 0), proc.kill)
 
 path = "/tmp/lucifer-blocked-stw.%d" % os.getpid()
 fd1 = os.open(path, os.O_CREAT | os.O_RDWR)
@@ -87,15 +88,15 @@ a, b = socket.socketpair()
 blocked("socket recv", lambda: a.recv(1), lambda: b.send(b"x"))
 
 time.sleep(0.6)                                    # let them all block
-alive = sum(t.is_alive() for t, _ in release)
 for i in range(3):
     gc.collect()
+alive = sum(t.is_alive() for t, _ in release)
 print("collected with", alive, "of", len(release), "blocked")
 
-for (t, let_go), name in zip(release, names):
-    let_go()
-for t, _ in release:
-    if t.is_alive():
-        t.join(5)
-print(sorted(n for (t, _), n in zip(release, names) if t.is_alive()))
+released = [(t, go, name) for (t, go), name in zip(release, names) if go]
+for t, go, name in released:
+    go()
+for t, go, name in released:
+    t.join(5)
+print(sorted(name for t, go, name in released if t.is_alive()))
 os.unlink(path)

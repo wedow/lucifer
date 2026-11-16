@@ -16,8 +16,9 @@ programs given as source (-c, a .py script, standard input, imports that write
 __pycache__): the oracle and bin/lucifer run each in the same directory, and the
 output, exit status and the .pyc files left behind must be identical.
 The SIGINT probe runs a -c program at both launch dispositions: default, and
-SIGINT ignored, as a background job starts. The oracle runs each program once:
-its results are kept in build/tests/kernel/oracle (ORACLE_RESULTS).
+SIGINT ignored, as a background job starts. The oracle runs each program text
+twice: results that agree are kept in build/tests/kernel/oracle
+(ORACLE_RESULTS); a program whose two runs differ fails with exit "varies".
 """
 import argparse
 import ast
@@ -49,8 +50,9 @@ HANDOFF_TIMEOUT = 600
 MAGIC = (3627).to_bytes(2, "little") + b"\r\n"
 # The oracle's result is a function of the program's name and text, its flags, environment and input, and the
 # oracle's build: kept here, each lane and every later run reads it instead of running CPython again, and a loaded
-# host's timeouts and stalls in CPython stop failing checks. It runs once per program, so with room to spare; a run
-# that still times out is not kept.
+# host's timeouts and stalls in CPython stop failing checks. It runs once per program text, so with room to spare; a
+# run that still times out is not kept. It runs twice: a program whose two outputs differ depends on the schedule,
+# a bug in the program, and is kept for no run, so a run stalled by load never pins a result.
 ORACLE_RESULTS = BUILD / "oracle"
 ORACLE_TIMEOUT = 600
 # Lanes are the -X policies a program runs under, on the oracle as well:
@@ -252,15 +254,18 @@ def run(interpreter, flags, pyc, env, cwd, timeout=None):
     return (child.returncode, child.stdout, child.stderr)
 
 
-def oracle_run(oracle, build, flags, pyc, env, cwd):
+def oracle_run(oracle, build, flags, pyc, env, cwd, runs=2):
     """run() on the oracle, from ORACLE_RESULTS when this program (its name is in tracebacks), flags,
-    environment and input have run on this oracle build before."""
+    environment and input have run on this oracle build before. A new result is kept when RUNS runs agree;
+    when they differ the exit status is "varies"."""
     inputs = (build, pyc.stem, flags, None if env is None else sorted(env.items()), STDIN.get(pyc.stem, b""))
     key = hashlib.sha256(repr(inputs).encode() + (SOURCES / f"{pyc.stem}.py").read_bytes()).hexdigest()
     path = ORACLE_RESULTS / key
     if path.exists():
         return ast.literal_eval(path.read_text())
-    result = run(oracle, flags, pyc, env, cwd, ORACLE_TIMEOUT)
+    result, *others = (run(oracle, flags, pyc, env, cwd, ORACLE_TIMEOUT) for _ in range(runs))
+    if any(other != result for other in others):
+        return ("varies", *result[1:])
     if result[0] != "timeout":
         partial = path.with_name(f"{key}.{os.getpid()}")
         partial.write_text(repr(result))
@@ -417,7 +422,7 @@ def main():
         if name in SEEDED:
             label = f"{name} unseeded"
             total += 1
-            oracle = oracle_run(args.oracle, build, LANES[args.lane], pyc, {}, cwd)
+            oracle = oracle_run(args.oracle, build, LANES[args.lane], pyc, {}, cwd, runs=1)  # unseeded: it varies
             first, second = (run(lucifer, LANES[args.lane], pyc, {}, cwd) for _ in range(2))
             head = lambda r: r[1].split(b"\n")[0]
             if first[0] == 0 and head(first) == head(oracle) and first[1] != second[1]:
