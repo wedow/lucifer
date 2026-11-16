@@ -184,9 +184,9 @@ lu_gen_enter_exc(PyThreadState *ts, PyObject *o)
 }
 
 /* gen_send_ex2's refusals: -1 with an error, 1 when gen is finished and
-   the caller sees None, 0 when it can run. */
-static int
-check_resumable(struct lu_gen *gen, PyObject *arg)
+   the caller sees None. */
+static __attribute__((noinline)) int
+refuse(struct lu_gen *gen, PyObject *arg)
 {
     if (gen->frame_state == LU_GEN_CREATED && arg != NULL && arg != Py_None) {
         lu_err_format(PyExc_TypeError, "can't send non-None value to a just-started %s",
@@ -207,6 +207,14 @@ check_resumable(struct lu_gen *gen, PyObject *arg)
     return 0;
 }
 
+/* refuse's verdict, 0 when gen can run. */
+static int
+check_resumable(struct lu_gen *gen, PyObject *arg)
+{
+    return suspended(gen) || (gen->frame_state == LU_GEN_CREATED && (arg == NULL || arg == Py_None))
+        ? 0 : refuse(gen, arg);
+}
+
 struct lu_frame *
 lu_gen_resume(PyThreadState *ts, PyObject *o, PyObject *arg)
 {
@@ -222,17 +230,6 @@ lu_gen_resume(PyThreadState *ts, PyObject *o, PyObject *arg)
         lu_jit_note_resume();
     }
     return &gen->frame;
-}
-
-void
-lu_gen_suspend(PyThreadState *ts, struct lu_frame *f, int oparg)
-{
-    struct lu_gen *gen = lu_gen_of(f);
-    gen->frame_state = (int8_t)(LU_GEN_SUSPENDED + oparg);
-    ts->exc_info = gen->exc_state.previous_item;
-    gen->exc_state.previous_item = NULL;
-    ts->py_recursion_remaining++;
-    f->previous = NULL;
 }
 
 /* gen_clear_frame: what the frame holds goes, except its code, which

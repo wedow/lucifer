@@ -89,7 +89,16 @@ struct lu_frame *lu_gen_resume(PyThreadState *ts, PyObject *gen, PyObject *arg);
 #define RESUME_AFTER_YIELD_FROM 2
 #define RESUME_OPARG_LOCATION_MASK 0x3
 
-void lu_gen_suspend(PyThreadState *ts, struct lu_frame *f, int oparg);
+static inline void
+lu_gen_suspend(PyThreadState *ts, struct lu_frame *f, int oparg)
+{
+    struct lu_gen *gen = lu_gen_of(f);
+    gen->frame_state = (int8_t)(LU_GEN_SUSPENDED + oparg);
+    ts->exc_info = gen->exc_state.previous_item;
+    gen->exc_state.previous_item = NULL;
+    ts->py_recursion_remaining++;
+    f->previous = NULL;
+}
 void lu_gen_finish(PyThreadState *ts, struct lu_frame *f);
 
 /* frame.clear() on a generator's frame: refused while it runs or is suspended;

@@ -1491,8 +1491,8 @@ op_RESUME: {
     }
     /* A call, or a generator going on after a yield. One going on inside
        `yield from` or `await` stays here: this loop runs the delegation
-       chain by switching frames, which a unit per level would pay a
-       nested entry and a yield for. */
+       chain by switching frames (121 instructions a level), which a unit
+       per level would pay a nested entry and a yield for (429). */
     if ((oparg == 0 || (frame->owner == LU_FRAME_GENERATOR
                         && (oparg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM))
         && lu_jit_on() && lu_jit_call_hot(code)) {
@@ -2142,6 +2142,14 @@ yielded:
     ts->current_frame = (struct _PyInterpreterFrame *)caller;
     frame = caller;
     LOAD_FRAME();
+    if (ret == LU_RETURN_SEND && next_instr->op.code == YIELD_VALUE) {
+        /* A delegation's SEND, its loop's YIELD_VALUE next: the value goes on up. */
+        prev_instr = cur_instr;
+        cur_instr = next_instr++;
+        oparg = cur_instr->op.arg;
+        SAVE_FRAME();
+        goto yielded;
+    }
     PUSH_RETURNED(ret, retval);
     DISPATCH();
 }
@@ -2164,7 +2172,27 @@ op_SEND: {
             DISPATCH();
         }
         callee->ret = LU_RETURN_SEND;
-        goto resume_linked;
+        lu_codeunit *resume = callee->instr;
+        if (resume->op.code != RESUME || (resume->op.arg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM) {
+            goto resume_linked;
+        }
+        /* The receiver goes on inside its own yield-from loop: RESUME has
+           nothing to do for code instrumented as the tools are now, and
+           the jump back to the loop's SEND runs at once. */
+        ts->current_frame = (struct _PyInterpreterFrame *)callee;
+        frame = callee;
+        LOAD_FRAME();
+        lu_codeunit *jump = resume + 1 + lu_opcode_caches[RESUME];
+        if (__atomic_load_n(&code->_co_instrumentation_version, __ATOMIC_ACQUIRE)
+                == (__atomic_load_n(poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK)
+            && jump->op.code == JUMP_BACKWARD_NO_INTERRUPT && jump[1 - jump->op.arg].op.code == SEND) {
+            prev_instr = jump;
+            cur_instr = jump + 1 - jump->op.arg;
+            oparg = cur_instr->op.arg;
+            next_instr = cur_instr + 1;
+            goto op_SEND;
+        }
+        DISPATCH();
     }
     kargs[1] = POP();
     kargs[0] = Py_NewRef(receiver);
