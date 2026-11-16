@@ -745,6 +745,17 @@ prim_gen_set_finalizer(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 #define FRAME(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_FRAME, NULL }
+int
+lu_gen_resumes(PyObject *callable)
+{
+    if (callable == NULL || !Py_IS_TYPE(callable, &PyCFunction_Type)) {
+        return 0;
+    }
+    PyMethodDef *ml = ((PyCFunctionObject *)callable)->m_ml;
+    return ml->ml_meth == (PyCFunction)(void (*)(void))prim_gen_send
+        || ml->ml_meth == (PyCFunction)(void (*)(void))prim_gen_throw;
+}
+
 PyMethodDef lu_prim_gen_methods[] = {
     FRAME(gen_send), FRAME(gen_throw),
     FAST(gen_state), FAST(gen_yieldfrom), FAST(gen_set_running), FAST(gen_clear), FAST(gen_flag),

@@ -8,6 +8,7 @@
    the kernel is answered from the state where its transfer function can
    (eval_prims.c). Any other call is the interpreter's, made by a helper. */
 #include "jit/eval.h"
+#include "interp/gen.h"
 
 #include <string.h>
 
@@ -617,9 +618,12 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
         kc = speculate_callee(c, callable, &self, &funcv);
     }
     const char *prim = primitive_name(kc);
-    if (prim != NULL && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_FRAME)) {
-        lu_ev_side_exit(c, EXIT_SIDE);  /* it hands the interpreter a frame to run */
+    if (lu_gen_resumes(kc)) {
+        lu_ev_side_exit(c, EXIT_SIDE);  /* the interpreter links the generator's frames */
         return 0;
+    }
+    if (prim != NULL && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_FRAME)) {
+        prim = NULL;    /* it hands a frame to run: called as C calls it, which runs the frame nested */
     }
     if (kc == (PyObject *)&PyType_Type && self == LU_NOV && n == 1 && nkw == 0 && a[0] != LU_NOV) {
         /* type(x): what is known of x, else the word of its header. */

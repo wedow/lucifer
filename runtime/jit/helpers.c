@@ -949,13 +949,14 @@ call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, 
 }
 
 /* Whether the interpreter makes a call of callable: the C stack is too
-   deep to recurse, or it is a primitive that hands the interpreter a frame
-   to run (a generator's resumption). */
+   deep to recurse, or it resumes a generator, whose frames the interpreter
+   links (a throw down a delegation chain links the chain). Another
+   primitive that hands a frame to run (eval) runs it nested, as for a C
+   caller. */
 static int
 declines(PyObject *callable)
 {
-    return stack_low() || (Py_IS_TYPE(callable, &PyCFunction_Type)
-                           && (((PyCFunctionObject *)callable)->m_ml->ml_flags & LU_METH_FRAME));
+    return stack_low() || lu_gen_resumes(callable);
 }
 
 /* The interpreter polls after a call: a signal the callee tripped is
