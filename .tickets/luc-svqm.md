@@ -1,6 +1,6 @@
 ---
 id: luc-svqm
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-16T12:55:50Z
