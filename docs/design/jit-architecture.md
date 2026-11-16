@@ -796,6 +796,14 @@ consumer's. Only generators whose suspensions are all outside `try` and
 its frame holds and runs nothing; one with cell variables, or that
 delegates (`yield from`), is a real generator still.
 
+**A unit entered inside a loop leaves at the back-edge of the loop
+around it.** Its entry's state (an iterator or generator the interpreter
+made) is what its loop header was built for; going round the outer loop
+in the same unit would make every later object of the outer loop's body
+real at that header. The interpreter takes the outer back-edge and
+enters that loop's own unit once it is hot, where what the outer body
+makes reaches the inner loop virtual.
+
 **A call in tail position returns through its caller.** Where an inlined
 frame's call is followed by `RETURN_VALUE`, each of the callee's returns
 goes on through that instruction on its own path instead of joining the

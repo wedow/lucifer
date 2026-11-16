@@ -118,6 +118,28 @@ def mapf(x):
     for v in map(double, SEQ):
         pass
 
+SHORT = [3, 1, 4, 1, 5, 9, 2, 6]
+
+def enum8(x):
+    for i in range(N):
+        for j, v in enumerate(SHORT):
+            pass
+
+def zip8(x):
+    for i in range(N):
+        for a, b in zip(SHORT, SHORT):
+            pass
+
+def map8(x):
+    for i in range(N):
+        for v in map(double, SHORT):
+            pass
+
+def gen8(x):
+    for i in range(N):
+        for v in small_gen(8):
+            pass
+
 def attr(x):
     o = C(); o.v = x
     for i in range(N):

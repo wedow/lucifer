@@ -441,6 +441,18 @@ lu_ev_instruction(struct ctx *c)
         lu_ev_jump(c, lu_ev_jump_target(c->base, oparg, c->next));
         return 0;
     case JUMP_BACKWARD:
+        if (c->parent == NULL && lu_ev_jump_target(c->base, oparg, c->next) < c->g->f->entry_pc
+            && c->blkat[c->g->f->entry_pc] >= 0 && c->bb[c->blkat[c->g->f->entry_pc]].loop) {
+            /* A unit entered at a loop's header runs that loop, not the
+               loop around it: its entry's state (an iterator the
+               interpreter made, say) would be what every later turn of
+               the outer loop must fit. The interpreter takes the outer
+               back-edge, and enters that loop's own unit once it is hot.
+               (A generator's unit, entered where it resumes, goes round
+               its loop.) */
+            lu_ev_side_exit(c, EXIT_SIDE);
+            return 0;
+        }
         lu_ev_guard(c, OP_POLL, LU_NOV, 0);
         lu_ev_jump(c, lu_ev_jump_target(c->base, oparg, c->next));
         return 0;

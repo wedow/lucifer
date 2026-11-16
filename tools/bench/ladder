@@ -45,7 +45,7 @@ CASES = (
     + group("call", "call.py", 30, 20, 120, 20000,
             ["empty", "rec0", "rec1", "rec2", "rec12", "krec2", "krec12", "srec2", "srec12",
              "skrec2", "skrec12", "meth2", "meth12", "replace", "dget", "lappend", "dqappend",
-             "isinst", "isinst_t", "gen_fused", "gen_call", "attr", "enum", "zip2", "mapf"])
+             "isinst", "isinst_t", "gen_fused", "gen_call", "attr", "enum", "zip2", "mapf", "enum8", "zip8", "map8", "gen8"])
     + group("pack", "pack.py", 10, 5, 25, 4400, ["empty", "pack_b", "spack", "genpack", "tobytes"])
 )
 
@@ -72,6 +72,10 @@ DERIVED = [
     ("op.enumerate_item", "call.enum", "call.empty", 1),
     ("op.zip_item", "call.zip2", "call.empty", 1),
     ("op.map_item", "call.mapf", "call.empty", 1),
+    ("op.enumerate_loop8", "call.enum8", "call.empty", 1),
+    ("op.zip_loop8", "call.zip8", "call.empty", 1),
+    ("op.map_loop8", "call.map8", "call.empty", 1),
+    ("op.gen_loop8", "call.gen8", "call.empty", 1),
     ("op.int_to_bytes", "pack.tobytes", "pack.empty", 1),
     ("op.hand_packer", "pack.genpack", "pack.empty", 1),
 ]
