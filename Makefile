@@ -237,7 +237,7 @@ EXT_DIR = build/tests/capi/ext
 EXT_SOURCES = tests/capi/exc_cross.c tests/capi/slots.c tests/capi/capi_monitoring.c tests/capi/capi_conv.c tests/capi/ready.c \
 	tests/capi/dict_watch_resurrect.c
 EXT_PROGRAMS = accel accel_use exc_cross_run slots_run capi_monitoring_run capi_conv_run testcapi_import container_refs ready_run list_capi_run bad_modules_run given_matches_run \
-	dict_watch_resurrect_run
+	dict_watch_resurrect_run native_containers_run
 SLOTS_MODULES = plain noshare shared_gil create two_exec unknown negative two_create two_interp \
 	two_gil not_module not_module_exec create_fails create_raises exec_fails exec_raises
 

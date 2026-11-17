@@ -170,6 +170,10 @@ PyDict_SetItem(PyObject *op, PyObject *key, PyObject *value)
         lu_err_format(PyExc_SystemError, "bad argument to internal function");
         return -1;
     }
+    int done = lu_dict_put_native(op, key, value);
+    if (done != -1) {
+        return done == 1 ? 0 : -1;
+    }
     PyObject *args[3] = { op, key, value };
     PyObject *r = lu_call_kernel(LU_K_dict_setitem, args, 3);
     Py_XDECREF(r);

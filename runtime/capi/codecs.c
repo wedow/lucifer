@@ -259,6 +259,9 @@ PyUnicode_DecodeUTF8Stateful(const char *s, Py_ssize_t size, const char *errors,
 {
     /* CPython errors on an incomplete tail unless the caller learns where
        decoding stopped, so only a reported consumed count makes it final. */
+    if (consumed == NULL) {
+        return PyUnicode_DecodeUTF8(s, size, errors);
+    }
     PyObject *r = call_codecs("utf_8_decode", "(y#zi)", s, size, errors, consumed == NULL);
     return r != NULL ? codec_result(r, consumed, NULL) : NULL;
 }

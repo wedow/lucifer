@@ -3,6 +3,8 @@
    method (or constructor), which is where CPython's semantics live here. */
 
 #include "lucifer.h"
+#include "interp/frame.h"
+#include "object/set.h"
 
 #include <string.h>
 
@@ -31,8 +33,20 @@ builtin(const char *name)
 PyObject *
 PySet_New(PyObject *iterable)
 {
-    return iterable != NULL ? PyObject_CallOneArg((PyObject *)&PySet_Type, iterable)
-                            : PyObject_CallNoArgs((PyObject *)&PySet_Type);
+    if (iterable != NULL && !PyAnySet_CheckExact(iterable)) {
+        return PyObject_CallOneArg((PyObject *)&PySet_Type, iterable);
+    }
+    PyObject *set = lu_set_new(&PySet_Type);
+    if (set != NULL && iterable != NULL) {
+        int err;
+        Py_BEGIN_CRITICAL_SECTION(iterable);
+        err = lu_set_merge((PySetObject *)set, (PySetObject *)iterable);
+        Py_END_CRITICAL_SECTION();
+        if (err < 0) {
+            Py_CLEAR(set);
+        }
+    }
+    return set;
 }
 
 PyObject *
@@ -49,6 +63,10 @@ PySet_Add(PyObject *anyset, PyObject *key)
         PyErr_BadInternalCall();
         return -1;
     }
+    int done = lu_set_add_simple(anyset, key);
+    if (done != 0) {
+        return done < 0 ? -1 : 0;
+    }
     PyObject *args[2] = { anyset, key };
     PyObject *r = lu_call_kernel(LU_K_set_add, args, 2);
     Py_XDECREF(r);
@@ -61,6 +79,10 @@ PySet_Contains(PyObject *anyset, PyObject *key)
     if (!PyAnySet_Check(anyset)) {
         PyErr_BadInternalCall();
         return -1;
+    }
+    int found = lu_contains_native(anyset, key);
+    if (found >= 0) {
+        return found;
     }
     /* The key is hashed, never compared by equality: an unhashable key is a
        TypeError (set_contains_key), not a scan. */
@@ -76,6 +98,15 @@ PySet_Discard(PyObject *set, PyObject *key)
     if (!PySet_Check(set)) {
         PyErr_BadInternalCall();
         return -1;
+    }
+    Py_hash_t hash;
+    if (lu_hash_native(key, &hash)) {
+        PyObject *candidate = NULL;
+        int verdict = lu_set_discard_native((PySetObject *)set, key, hash, NULL, 0, &candidate);
+        Py_XDECREF(candidate);
+        if (verdict == LU_SET_FOUND || verdict == LU_SET_ABSENT) {
+            return verdict == LU_SET_FOUND;
+        }
     }
     int found = PySequence_Contains(set, key);
     if (found <= 0) {

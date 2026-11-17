@@ -4,7 +4,9 @@
    callers see one behaviour. */
 
 #include "lucifer.h"
+#include "interp/frame.h"
 #include "object/dict.h"
+#include "object/set.h"
 #include "opcode.h"
 
 #include <string.h>
@@ -187,6 +189,10 @@ PyObject_CallMethod(PyObject *obj, const char *name, const char *format, ...)
 Py_hash_t
 PyObject_Hash(PyObject *o)
 {
+    Py_hash_t native;
+    if (lu_hash_native(o, &native)) {
+        return native;
+    }
     PyObject *h = call_builtin("hash", &o, 1);
     if (h == NULL) {
         return -1;
@@ -383,7 +389,22 @@ BINARY(PyNumber_InPlaceFloorDivide, NB_INPLACE_FLOOR_DIVIDE)
 BINARY(PyNumber_InPlaceTrueDivide, NB_INPLACE_TRUE_DIVIDE)
 BINARY(PyNumber_InPlaceRemainder, NB_INPLACE_REMAINDER) BINARY(PyNumber_InPlaceLshift, NB_INPLACE_LSHIFT)
 BINARY(PyNumber_InPlaceRshift, NB_INPLACE_RSHIFT) BINARY(PyNumber_InPlaceAnd, NB_INPLACE_AND)
-BINARY(PyNumber_InPlaceOr, NB_INPLACE_OR) BINARY(PyNumber_InPlaceXor, NB_INPLACE_XOR)
+BINARY(PyNumber_InPlaceXor, NB_INPLACE_XOR)
+
+/* set |= set is set.__ior__'s update, which needs no Python while the keys'
+   hashes differ (lu_set_merge). */
+PyObject *
+PyNumber_InPlaceOr(PyObject *a, PyObject *b)
+{
+    if (a == NULL || b == NULL || a == b || !PySet_CheckExact(a) || !PyAnySet_CheckExact(b)) {
+        return binary(a, b, NB_INPLACE_OR);
+    }
+    int err;
+    Py_BEGIN_CRITICAL_SECTION2(a, b);
+    err = lu_set_merge((PySetObject *)a, (PySetObject *)b);
+    Py_END_CRITICAL_SECTION2();
+    return err < 0 ? NULL : Py_NewRef(a);
+}
 
 PyObject *
 PyNumber_Divmod(PyObject *a, PyObject *b)
@@ -600,6 +621,10 @@ PySequence_Contains(PyObject *seq, PyObject *ob)
         }
         null_error();
         return -1;
+    }
+    int found = lu_contains_native(seq, ob);
+    if (found >= 0) {
+        return found;
     }
     PyObject *invert = Py_False;
     PyObject *args[3] = { seq, ob, invert };
@@ -909,21 +934,28 @@ mapping_list(PyObject *o, const char *method)
     return r;
 }
 
-/* The dict's own keys/values/items as a list, whatever a subclass overrides:
-   the method out of PyDict_Type's own dict (PyDict_Keys' contract). */
+enum { DICT_KEYS, DICT_VALUES, DICT_ITEMS };
+
+/* The dict's own keys, values or items as a list, whatever a subclass
+   overrides (PyDict_Keys' contract), read in its critical section. */
 static PyObject *
-dict_own_list(PyObject *o, const char *method)
+dict_own_list(PyObject *o, int what)
 {
-    PyObject *name = PyUnicode_InternFromString(method);
-    PyObject *func = name != NULL ? _PyType_LookupRef(&PyDict_Type, name) : NULL;
-    Py_XDECREF(name);
-    PyObject *view = func != NULL ? lu_call(func, &o, 1, NULL) : NULL;
-    Py_XDECREF(func);
-    if (view == NULL) {
+    PyObject *r = PyList_New(0);
+    if (r == NULL) {
         return NULL;
     }
-    PyObject *r = call_builtin("list", &view, 1);
-    Py_DECREF(view);
+    Py_BEGIN_CRITICAL_SECTION(o);
+    Py_ssize_t pos = 0;
+    PyObject *k, *v;
+    while (r != NULL && lu_ns_next(o, &pos, &k, &v)) {
+        PyObject *x = what == DICT_KEYS ? Py_NewRef(k) : what == DICT_VALUES ? Py_NewRef(v) : PyTuple_Pack(2, k, v);
+        if (x == NULL || lu_list_append(r, x) < 0) {
+            Py_CLEAR(r);
+        }
+        Py_XDECREF(x);
+    }
+    Py_END_CRITICAL_SECTION();
     return r;
 }
 
@@ -1015,6 +1047,10 @@ PyDict_GetItemRef(PyObject *op, PyObject *key, PyObject **result)
     *result = NULL;
     if (dict_arg(op) == NULL) {
         return -1;
+    }
+    int found = lu_dict_find_native(op, key, result);
+    if (found >= 0) {
+        return found;
     }
     PyObject *args[3] = { op, key, LU_MISSING };
     PyObject *v = lu_call_kernel(LU_K_dict_get, args, 3);
@@ -1123,19 +1159,19 @@ PyDict_Copy(PyObject *op)
 PyObject *
 PyDict_Keys(PyObject *op)
 {
-    return dict_arg(op) != NULL ? dict_own_list(op, "keys") : NULL;
+    return dict_arg(op) != NULL ? dict_own_list(op, DICT_KEYS) : NULL;
 }
 
 PyObject *
 PyDict_Values(PyObject *op)
 {
-    return dict_arg(op) != NULL ? dict_own_list(op, "values") : NULL;
+    return dict_arg(op) != NULL ? dict_own_list(op, DICT_VALUES) : NULL;
 }
 
 PyObject *
 PyDict_Items(PyObject *op)
 {
-    return dict_arg(op) != NULL ? dict_own_list(op, "items") : NULL;
+    return dict_arg(op) != NULL ? dict_own_list(op, DICT_ITEMS) : NULL;
 }
 
 int
@@ -1296,10 +1332,61 @@ PyList_Reverse(PyObject *op)
     return r == NULL ? -1 : 0;
 }
 
+/* A stable merge of a[0:n] by code point (unicode_compare), through tmp. */
+static void
+sort_strs(PyObject **a, PyObject **tmp, Py_ssize_t n)
+{
+    if (n < 2) {
+        return;
+    }
+    Py_ssize_t h = n / 2, i = 0, j = h, k = 0;
+    sort_strs(a, tmp, h);
+    sort_strs(a + h, tmp, n - h);
+    while (i < h && j < n) {
+        tmp[k++] = PyUnicode_Compare(a[j], a[i]) < 0 ? a[j++] : a[i++];
+    }
+    while (i < h) {
+        tmp[k++] = a[i++];
+    }
+    memcpy(a, tmp, sizeof(PyObject *) * (size_t)k);       /* what is left of a[h:] is in place */
+}
+
+/* list.sort() of a list of exact strs, which no Python takes part in: 1
+   sorted, 0 for the kernel, -1 with an error set. */
+static int
+sort_str_list(PyObject *op)
+{
+    PyListObject *l = (PyListObject *)op;
+    Py_ssize_t n = Py_SIZE(l);
+    for (Py_ssize_t i = 0; i < n; i++) {
+        if (!PyUnicode_CheckExact(l->ob_item[i])) {
+            return 0;
+        }
+    }
+    PyObject **tmp = PyMem_Malloc(sizeof(PyObject *) * (size_t)(n ? n : 1));
+    if (tmp == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    sort_strs(l->ob_item, tmp, n);
+    PyMem_Free(tmp);
+    return 1;
+}
+
 int
 PyList_Sort(PyObject *op)
 {
-    PyObject *r = list_arg(op) ? call_method(op, "sort", NULL, 0) : NULL;
+    if (!list_arg(op)) {
+        return -1;
+    }
+    int done;
+    Py_BEGIN_CRITICAL_SECTION(op);
+    done = sort_str_list(op);
+    Py_END_CRITICAL_SECTION();
+    if (done != 0) {
+        return done < 0 ? -1 : 0;
+    }
+    PyObject *r = call_method(op, "sort", NULL, 0);
     Py_XDECREF(r);
     return r == NULL ? -1 : 0;
 }
