@@ -86,7 +86,7 @@ STEP_TMO = 3600
 RUN = timeout -k 10 $(TMO)
 STEP = timeout -k 10 $(STEP_TMO)
 
-.PHONY: all oracle-exts fuzzdiff abi-audit check check-jit check-kernel-jit check-blocking check-globals check-capi check-capi-ext check-kernel check-embed regen-abi check-harness check-compiler check-timing
+.PHONY: all oracle-exts fuzzdiff abi-audit check check-jit check-kernel-jit check-blocking check-globals check-capi check-capi-ext check-capi-so check-kernel check-embed regen-abi check-harness check-compiler check-timing
 all: bin/lucifer build/lib/stamp
 
 # The runtime is an archive so that an embedder can link it too. Every member
@@ -266,21 +266,23 @@ check-capi-ext: bin/lucifer oracle-exts $(EXT_DIR)/accelerators $(EXT_DIR)/exc_c
 	  $(EXT_DIR)/capi_monitoring$(EXT_SUFFIX) $(EXT_DIR)/capi_conv$(EXT_SUFFIX) $(EXT_DIR)/ready$(EXT_SUFFIX) \
 	  $(EXT_DIR)/dict_watch_resurrect$(EXT_SUFFIX) \
 	  $(foreach m,$(SLOTS_MODULES),$(EXT_DIR)/slots_$(m)$(EXT_SUFFIX))
-	@for p in $(EXT_PROGRAMS); do \
+	@fail=0; for p in $(EXT_PROGRAMS); do \
 	  { PYTHONPATH=$(EXT_DIR) $(RUN) $(ORACLE_T) tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.expected; \
 	  { PYTHONPATH=$(EXT_DIR) $(RUN) bin/lucifer $(LUCIFER_FLAGS) tests/capi/$$p.py 2>&1; echo "exit $$?"; } > $(EXT_DIR)/$$p.actual; \
-	  diff $(EXT_DIR)/$$p.expected $(EXT_DIR)/$$p.actual > $(EXT_DIR)/$$p.diff || { cat $(EXT_DIR)/$$p.diff; echo "FAIL $$p"; exit 1; }; \
+	  diff $(EXT_DIR)/$$p.expected $(EXT_DIR)/$$p.actual > $(EXT_DIR)/$$p.diff || { cat $(EXT_DIR)/$$p.diff; echo "FAIL $$p"; fail=1; continue; }; \
 	  echo "PASS $$p"; \
-	done
+	done; exit $$fail
 
-check-capi: bin/lucifer $(CAPI_TESTS) check-capi-ext
-	@for so in $(CAPI_TESTS); do \
+check-capi: check-capi-ext check-capi-so
+
+check-capi-so: bin/lucifer $(CAPI_TESTS)
+	@fail=0; for so in $(CAPI_TESTS); do \
 	  name=$$(basename $$so .so); \
 	  for run in $$(seq 15); do \
 	    out=$$($(RUN) env LD_BIND_NOW=1 LD_PRELOAD=./$$so bin/lucifer $(LUCIFER_FLAGS) 2>&1); \
-	    [ "$$out" = "capi $$name ok" ] || { echo "FAIL $$name (run $$run)"; exit 1; }; \
+	    [ "$$out" = "capi $$name ok" ] || { echo "FAIL $$name (run $$run)"; fail=1; continue 2; }; \
 	  done; echo "PASS $$name"; \
-	done
+	done; exit $$fail
 
 # An embedder links the archive: its programs, each in its own initialize and
 # finalize cycle, print what the executable prints for the same -c programs.

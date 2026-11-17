@@ -168,8 +168,9 @@ def whole(corpus):
 
 @whole
 def capi(mode, flags, work, log):
-    """make check-capi (stops at the first failure: later tests are missing, so not PASS)."""
-    return output_lines(make("check-capi", log, LUCIFER_FLAGS=shlex.join(flags)))
+    """make check-capi, its two halves apart: a failure in one leaves the other's tests run."""
+    return output_lines("".join(make(half, log, LUCIFER_FLAGS=shlex.join(flags))
+                                for half in ("check-capi-ext", "check-capi-so")))
 
 
 @whole

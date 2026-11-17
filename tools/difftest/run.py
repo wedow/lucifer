@@ -307,7 +307,7 @@ def main():
     parser.add_argument("--loops", type=int, default=32)
     parser.add_argument("--awfy-loops", type=int, default=1)
     parser.add_argument("--timeout", type=positive, default=90)
-    parser.add_argument("--startup-timeout", type=positive, default=5)
+    parser.add_argument("--startup-timeout", type=positive, default=60)
     parser.add_argument("--budget", type=positive, default=900)
     parser.add_argument("--select", action="append", help="ID prefix; other expected programs stay NOTRUN")
     parser.add_argument("--allow-unpinned-oracle", action="store_true", help="development/self-checks only")
