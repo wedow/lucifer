@@ -14,7 +14,7 @@ from _lucifer import (
     MISSING, error, str_join, static_type, kernel_set, kernel_get, address, alloc, field_get,
     field_set, type_lookup, type_tp_name, is_subtype, is_exception, is_exception_class,
     is_callable, gen_send, gen_throw, gen_state, gen_yieldfrom,
-    gen_set_running, gen_clear, gen_flag, gen_set_finalizer, asyncgen_hooks, size,
+    gen_set_running, gen_clear, gen_close_quietly, gen_flag, gen_set_finalizer, asyncgen_hooks, size,
 )
 from _lucifer import set_asyncgen_hooks as _set_hooks
 from _lucifer import _boot, iter as _iter, object as _object
@@ -191,7 +191,10 @@ def _throw(gen, typ, val, tb, close_on_genexit):
 
 def _close_one(gen, exc):
     """gen_close's resumption of one generator whose delegate is closed:
-    GeneratorExit (or the delegate's closing error) raised in it."""
+    GeneratorExit (or the delegate's closing error) raised in it, unless no
+    handler of its could see it."""
+    if gen_close_quietly(gen):
+        return None
     try:
         value = gen_throw(gen, GeneratorExit() if exc is MISSING else exc, 0)
     except GeneratorExit:
@@ -210,8 +213,15 @@ def _close(gen):
         return None
     if state >= _COMPLETED:
         return None
-    chain = [gen]
     yf = gen_yieldfrom(gen)
+    if yf is None:
+        return _close_one(gen, MISSING)
+    return _close_chain(gen, yf)
+
+
+def _close_chain(gen, yf):
+    """_close of a generator suspended in `yield from` or `await` on yf."""
+    chain = [gen]
     while _is_gen_or_coro(yf) and gen_state(yf) == _SUSPENDED_YIELD_FROM:
         chain.append(yf)
         yf = gen_yieldfrom(yf)

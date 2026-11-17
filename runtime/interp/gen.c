@@ -17,6 +17,7 @@
 #include "jit/jit.h"
 #include "interp/code.h"
 #include "interp/exceptions.h"
+#include "interp/instrument.h"
 #include "prim/prim.h"
 
 #include "opcode_ids.h"
@@ -683,6 +684,26 @@ prim_gen_clear(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
+/* gen_close_quietly(gen): gen_close's shortcut. A generator suspended at a
+   yield outside every try and with block (but the one that turns a
+   StopIteration into RuntimeError) has nothing to run on GeneratorExit:
+   its frame is cleared, True, and nothing is thrown, unless a tool
+   watches unwinds, which the throw shows. False otherwise. */
+static PyObject *
+prim_gen_close_quietly(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); GEN_ARG();
+    struct lu_gen *gen = (struct lu_gen *)args[0];
+    lu_codeunit *at = gen->frame.instr;
+    if (!(suspended(gen) && (at->op.code == RESUME || at->op.code == INSTRUMENTED_RESUME)
+          && (at->op.arg & RESUME_OPARG_DEPTH1_MASK)
+          && lu_no_tools_for_global_event(PyThreadState_Get(), PY_MONITORING_EVENT_PY_UNWIND))) {
+        return Py_NewRef(Py_False);
+    }
+    clear_frame(gen);
+    return Py_NewRef(Py_True);
+}
+
 /* gen_flag(agen, which[, value]): an async generator's ag_hooks_inited (0),
    ag_closed (1) or ag_running_async (2), as a bool, set when value is given. */
 static PyObject *
@@ -755,7 +776,7 @@ lu_gen_resumes(PyObject *callable)
 
 PyMethodDef lu_prim_gen_methods[] = {
     FRAME(gen_send), FRAME(gen_throw),
-    FAST(gen_state), FAST(gen_yieldfrom), FAST(gen_set_running), FAST(gen_clear), FAST(gen_flag),
-    FAST(gen_set_finalizer), FAST(asyncgen_hooks), FAST(set_asyncgen_hooks),
+    FAST(gen_state), FAST(gen_yieldfrom), FAST(gen_set_running), FAST(gen_clear), FAST(gen_close_quietly),
+    FAST(gen_flag), FAST(gen_set_finalizer), FAST(asyncgen_hooks), FAST(set_asyncgen_hooks),
     { NULL, NULL, 0, NULL },
 };
