@@ -85,6 +85,7 @@ struct lu_frame *lu_gen_resume(PyThreadState *ts, PyObject *gen, PyObject *arg);
    suspended (oparg 0 or 1 of YIELD_VALUE) or finished. */
 /* RESUME's oparg says where the code resumes: its low bits are 0 at a
    call, 1 after a yield, 2 and 3 inside a delegation (yield from, await). */
+#define RESUME_AFTER_YIELD 1
 #define RESUME_AFTER_YIELD_FROM 2
 #define RESUME_OPARG_LOCATION_MASK 0x3
 #define RESUME_OPARG_DEPTH1_MASK 0x4      /* after a yield outside every try and with block */

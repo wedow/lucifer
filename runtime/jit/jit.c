@@ -1329,8 +1329,14 @@ static void
 hot_exit(struct lu_deopt *d)
 {
     struct lu_unit *u = d->unit;
+    /* A unit entered where a generator resumes after a yield runs one turn
+       of the generator's loop per entry: a call made on most turns is in it. */
+    lu_codeunit *resume = lu_code_start(u->code) + u->entry_pc - 1 - lu_opcode_caches[RESUME];
+    int turns = u->entry_pc > 1 + lu_opcode_caches[RESUME] && resume->op.code == RESUME
+        && (resume->op.arg & RESUME_OPARG_LOCATION_MASK) == RESUME_AFTER_YIELD;
     unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
-    if ((unsigned long)u->hot_calls < LOOP_CALLS * entries || __atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
+    unsigned long loop = turns ? entries / 2 : LOOP_CALLS * entries;
+    if ((unsigned long)u->hot_calls < loop || __atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
         return;
     }
     struct lu_jit_code *jc = state_of(u->code);
@@ -1342,7 +1348,7 @@ hot_exit(struct lu_deopt *d)
         for (int k = 0; k < jc->nhot && !known; k++) {
             known = jc->hot[k] == u->outs[i].key;
         }
-        if (!known && calls >= u->hot_calls / 4 && (unsigned long)calls >= LOOP_CALLS * entries) {
+        if (!known && calls >= u->hot_calls / 4 && (unsigned long)calls >= loop) {
             jc->hot = realloc(jc->hot, sizeof(uint64_t) * (size_t)(jc->nhot + 1));
             jc->hot[jc->nhot] = u->outs[i].key;
             __atomic_store_n(&jc->nhot, jc->nhot + 1, __ATOMIC_RELAXED);
