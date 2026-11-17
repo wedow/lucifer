@@ -1,6 +1,6 @@
 ---
 id: luc-u47w
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-16T11:32:48Z
