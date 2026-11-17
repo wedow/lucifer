@@ -9,12 +9,12 @@
    detached carrier is offline and holds nothing. The least
    sequence over the attached carriers is the read sequence; an item is freed
    once the read sequence has reached its goal. Each carrier keeps its own
-   queue, in goal order, and processes it only with a task attached (the poll
-   handler, or a retire that finds it long), as CPython processes a thread's
-   queue only attached: a release can run any finalizer, and a carrier with no
-   task attached is not stopped by a stop-the-world, whose collection borrows
-   ob_tid and empties the free lists. An exiting carrier leaves its queue to
-   the next carrier that processes.
+   queue, in goal order, and processes it only at a poll with a task attached:
+   a release can run any finalizer, which must not run in the middle of the
+   change that retired the item, and a carrier with no task attached is not
+   stopped by a stop-the-world, whose collection borrows ob_tid and empties
+   the free lists. An exiting carrier leaves its queue to the next carrier
+   that processes.
 
    Unlike CPython's array of per-thread states, the carriers form a list under
    the registry lock, which scans and advances take. */
@@ -27,11 +27,12 @@
 #define QSBR_LT(a, b) ((int64_t)((a) - (b)) < 0)
 #define QSBR_LEQ(a, b) ((int64_t)((a) - (b)) <= 0)
 
-/* Items retired per advance of the write sequence, and the queue length at
-   which a retire processes the queue itself (QSBR_DEFERRED_LIMIT and
-   WORK_ITEMS_PER_CHUNK). */
+/* Items retired per advance of the write sequence (QSBR_DEFERRED_LIMIT),
+   which also asks the next poll to process the queue. A retire never
+   processes it itself (CPython's does when a chunk fills): a release can run
+   a finalizer, which must not run in the middle of the retiring change (a
+   list resized under its lock). */
 #define DEFERRED_LIMIT 127
-#define QUEUE_LIMIT 254
 
 void
 lu_qsbr_register(struct lu_carrier *c)
@@ -244,9 +245,6 @@ lu_qsbr_retire(void *p)
         goal = next_goal();
     }
     push(&c->qsbr.queue, p, goal);
-    if (c->qsbr.queue.n - c->qsbr.queue.first >= QUEUE_LIMIT) {
-        lu_qsbr_process(c);                         /* so that none piles up unseen */
-    }
 }
 
 /* Releases `op` once no lock-free reader can still hold it (Objects/obmalloc.c). */
