@@ -7,7 +7,7 @@ protocols and the error texts."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, list_append,
-    repr_enter, repr_leave, set_slot, kernel_set,
+    repr_enter, repr_leave, set_slot, slot_index, kernel_set,
     dict_new, dict_probe, dict_find, dict_put, dict_key, dict_value, dict_entry, dict_stamp, dict_insert, dict_replace, dict_remove,
     dict_popitem, dict_clear, dict_next, dict_prev, dict_keys_id, dict_copy, dict_merge,
     dict_sizeof, dictiter_new, dictiter_next, dictiter_len, dictiter_copy, dictview_new,
@@ -542,9 +542,9 @@ Raises KeyError if the dict is empty."""
 
 
 # A dict answers mp_subscript, not sq_item (PySequence_Check is false for it).
-set_slot(dict, 'sq_length', 0, None)
-set_slot(dict, 'sq_item', 0, None)
-set_slot(dict, 'sq_ass_item', 0, None)
+set_slot(dict, slot_index('sq_length'), 0, None)
+set_slot(dict, slot_index('sq_item'), 0, None)
+set_slot(dict, slot_index('sq_ass_item'), 0, None)
 
 _DICT_ITER = type_lookup(dict, '__iter__')
 

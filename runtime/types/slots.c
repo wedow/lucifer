@@ -835,20 +835,16 @@ lu_nb_slot_kind(PyTypeObject *tp, size_t offset)
     return fn == NULL ? 0 : thunk == NULL || fn == thunk ? -1 : 1;
 }
 
+#define NSLOTS (int)(sizeof slots / sizeof slots[0])
+
 int
-lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from)
+lu_set_slot(PyTypeObject *tp, int index, int how, PyTypeObject *from)
 {
-    const char *n = PyUnicode_AsUTF8(name);
-    const struct slot *s = NULL;
-    for (size_t i = 0; n != NULL && i < sizeof slots / sizeof slots[0]; i++) {
-        if (!strcmp(slots[i].name, n)) {
-            s = &slots[i];
-        }
-    }
-    if (s == NULL) {
-        lu_err_format(PyExc_SystemError, "set_slot: no slot '%s'", n != NULL ? n : "?");
+    if (index < 0 || index >= NSLOTS) {
+        lu_err_format(PyExc_SystemError, "set_slot: no slot %d", index);
         return -1;
     }
+    const struct slot *s = &slots[index];
     void *value;
     switch (how) {
     case 0: value = NULL; break;
@@ -898,23 +894,37 @@ PyObject_HashNotImplemented(PyObject *self)
     return -1;
 }
 
-/* set_slot(type, slot, how, from): lu_set_slot; `from` a type or None. */
+/* slot_index(name): the index set_slot takes for the slot named so. */
+static PyObject *
+prim_slot_index(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    const char *n = nargs == 1 && PyUnicode_Check(args[0]) ? PyUnicode_AsUTF8(args[0]) : NULL;
+    for (int i = 0; n != NULL && i < NSLOTS; i++) {
+        if (!strcmp(slots[i].name, n)) {
+            return PyLong_FromLong(i);
+        }
+    }
+    return PyErr_Occurred() ? NULL : (lu_err_format(PyExc_SystemError, "slot_index: no such slot"), NULL);
+}
+
+/* set_slot(type, index, how, from): lu_set_slot; `from` a type or None. */
 static PyObject *
 prim_set_slot(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    long how;
-    if (nargs != 4 || !PyType_Check(args[0]) || !PyUnicode_Check(args[1])
+    long index, how;
+    if (nargs != 4 || !PyType_Check(args[0]) || !PyLong_CheckExact(args[1]) || lu_long_as_long(args[1], &index) < 0
         || !PyLong_CheckExact(args[2]) || lu_long_as_long(args[2], &how) < 0
         || (args[3] != Py_None && !PyType_Check(args[3]))) {
-        lu_err_format(PyExc_TypeError, "set_slot(type, name, how, from)");
+        lu_err_format(PyExc_TypeError, "set_slot(type, index, how, from)");
         return NULL;
     }
     PyTypeObject *from = args[3] != Py_None ? (PyTypeObject *)args[3] : NULL;
-    return lu_set_slot((PyTypeObject *)args[0], args[1], (int)how, from) < 0
+    return lu_set_slot((PyTypeObject *)args[0], (int)index, (int)how, from) < 0
         ? NULL : Py_NewRef(Py_None);
 }
 
 PyMethodDef lu_prim_slot_methods[] = {
     { "set_slot", (PyCFunction)(void (*)(void))prim_set_slot, METH_FASTCALL, NULL },
+    { "slot_index", (PyCFunction)(void (*)(void))prim_slot_index, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },
 };

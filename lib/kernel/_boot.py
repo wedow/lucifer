@@ -15,7 +15,7 @@ other kinds.
 from _lucifer import (
     MISSING, error, str_join, ns_get, ns_set, ns_del, ns_items, kind, size,
     type_lookup, type_dict, type_mro, type_bases, type_base, type_tp_name,
-    is_subtype, make_function, make_getset, set_slot, type_set_bases,
+    is_subtype, make_function, make_getset, set_slot, slot_index, type_set_bases,
     type_set_mro, call_with_locals, cell_get, static_type, new_check,
 )
 
@@ -70,12 +70,16 @@ SLOTDEFS = (
 
 
 def _group_slots():
+    """Each slot's index for set_slot with the dunders that feed it, and the dunders."""
     groups = {}
     dunders = {}
     for dunder, slot in SLOTDEFS:
         ns_set(groups, slot, (*ns_get(groups, slot, ()), dunder))
         ns_set(dunders, dunder, True)
-    return ns_items(groups), dunders
+    slots = ()
+    for slot, names in ns_items(groups):
+        slots = (*slots, (slot_index(slot), names))
+    return slots, dunders
 
 
 SLOTS, SLOT_DUNDERS = _group_slots()
@@ -87,6 +91,7 @@ _BODY_ONLY = {'__module__': 0, '__qualname__': 0, '__firstlineno__': 0,
 
 # Slot settings for set_slot.
 _CLEAR, _THUNK, _INHERIT, _HASH_NOT_IMPLEMENTED = 0, 1, 2, 3
+_TP_HASH = slot_index('tp_hash')
 
 
 def update_slots(cls, own_only):
@@ -105,7 +110,7 @@ def update_slots(cls, own_only):
         if found is MISSING:
             if not own_only:
                 set_slot(cls, slot, _INHERIT, base)
-        elif found is None and slot == 'tp_hash':
+        elif found is None and slot == _TP_HASH:
             set_slot(cls, slot, _HASH_NOT_IMPLEMENTED, None)
         else:
             set_slot(cls, slot, _THUNK, None)
@@ -114,8 +119,8 @@ def update_slots(cls, own_only):
 def builtin_sequence(cls):
     """A builtin sequence repeats through sq_repeat and has no nb_multiply, so
     C code that asks (NumPy's scalars) sees what CPython shows."""
-    set_slot(cls, 'sq_repeat', 4, None)
-    set_slot(cls, 'nb_multiply', 0, None)
+    set_slot(cls, slot_index('sq_repeat'), 4, None)
+    set_slot(cls, slot_index('nb_multiply'), 0, None)
 
 
 def check_new(cls, owner):

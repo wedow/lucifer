@@ -1691,10 +1691,10 @@ int lu_truth_exact(PyObject *v);
 PyObject *lu_slot_tp_getattro(PyObject *self, PyObject *name);
 int lu_slot_tp_setattro(PyObject *self, PyObject *name, PyObject *value);
 PyObject *lu_slot_tp_call(PyObject *self, PyObject *args, PyObject *kwargs);
-/* Sets slot `name` of tp: how 0 clears it, 1 installs the thunk, 2 copies
+/* Sets slot `index` of tp (_lucifer.slot_index names it): how 0 clears it, 1 installs the thunk, 2 copies
    it from `from`, 3 installs PyObject_HashNotImplemented (tp_hash only), 4 installs
    the repeat of a builtin sequence over its __mul__ (sq_repeat only). */
-int lu_set_slot(PyTypeObject *tp, PyObject *name, int how, PyTypeObject *from);
+int lu_set_slot(PyTypeObject *tp, int index, int how, PyTypeObject *from);
 /* type.__text_signature__: the signature tp_doc starts with, or None. */
 PyObject *lu_type_text_signature(PyTypeObject *tp);
 /* Whether f is one of the slot thunks, which look the dunder up by name. */
