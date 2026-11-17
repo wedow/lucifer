@@ -192,11 +192,12 @@ struct lu_unit {
     int nouts;
     int64_t hot_calls;          /* calls made at one of them that make it hot: about what a build of the unit costs */
     int dead;
-    /* While dead and not yet freed: the list of such units, and whether
-       a collection found an activation in it (jit.c). */
+    /* While dead and not yet freed: the list of such units, and
+       how many activations a collection found in it (jit.c). */
     struct lu_unit *dying_next, **dying_pprev;
     int held;
     int stale;                  /* a dict change killed it: it may hold the value let go (lu_jit_release) */
+    int holds;                  /* activations in it at the last reclaim not yet ended (left, jit.c) */
     unsigned long built;        /* sites marked generic before its build began (jit.c) */
     struct lu_dep *deps;        /* what it relies on between polls (runtime/jit/deps.c) */
     int ndeps;

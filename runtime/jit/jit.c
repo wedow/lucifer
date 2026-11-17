@@ -654,7 +654,7 @@ lu_jit_reclaim(PyInterpreterState *interp)
     pthread_mutex_lock(&interp->tasks_lock.mutex);
     for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
         for (struct lu_jit_act *a = ((struct lu_task *)ts)->jit_act; a != NULL; a = a->outer) {
-            a->unit->held = 1;
+            a->unit->held++;
         }
     }
     pthread_mutex_lock(&dying.lock);
@@ -662,6 +662,7 @@ lu_jit_reclaim(PyInterpreterState *interp)
     for (struct lu_unit *u = dying.head, *next; u != NULL; u = next) {
         next = u->dying_next;
         struct lu_jit_code *jc = state_of(u->code);
+        __atomic_store_n(&u->holds, u->held, __ATOMIC_RELAXED);
         if (u->held || jc->compiling) {
             continue;
         }
@@ -713,14 +714,12 @@ lu_jit_release(void)
     lu_jit_reclaim_free(dead);
 }
 
-/* An activation of u left it for the interpreter, which goes on with the
-   frame: a stale unit goes as soon as no activation is in it. A unit
-   leaves this way once it is dead (its next check), so a stale one that
-   returns or yields instead waits for the next release. */
+/* An activation of u ended. A stale unit goes once no activation is in
+   it: the last of those the release counted stops the world again. */
 static void
-left(struct lu_unit *u, int r)
+left(struct lu_unit *u)
 {
-    if ((r == LU_JIT_DEOPT || r == LU_JIT_ERROR) && __atomic_load_n(&u->stale, __ATOMIC_RELAXED)) {
+    if (__atomic_load_n(&u->stale, __ATOMIC_RELAXED) && __atomic_sub_fetch(&u->holds, 1, __ATOMIC_ACQ_REL) == 0) {
         __atomic_store_n(&release_due, 1, __ATOMIC_RELAXED);
         lu_jit_release();
     }
@@ -938,8 +937,7 @@ kill(struct lu_jit_code *jc, struct lu_unit *u)
 void
 lu_jit_unit_kill(struct lu_unit *u, int stale)
 {
-    if (stale) {
-        __atomic_store_n(&u->stale, 1, __ATOMIC_RELAXED);
+    if (stale && !__atomic_exchange_n(&u->stale, 1, __ATOMIC_RELAXED)) {
         __atomic_store_n(&release_due, 1, __ATOMIC_RELEASE);
     }
     if (!__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
@@ -1113,7 +1111,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     }
     int r = u->fn(ts, frame, result);
     task->jit_act = act.outer;
-    left(u, r);
+    left(u);
     if (debug) {
         struct lu_frame *cf = (struct lu_frame *)ts->current_frame;
         int py = cf != NULL && cf->code != NULL;       /* else back in a C caller, or its shim frame */
@@ -1223,6 +1221,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     ts->current_frame = (struct _PyInterpreterFrame *)frame;
     if (!gen && pc > 1 && prologue(frame) < 0) {
         task->jit_act = act.outer;
+        left(u);
         *result = lu_eval_continue(ts, 1);
         return 1;
     }
@@ -1233,7 +1232,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     bump_entries(u);
     int r = u->fn(ts, frame, result);
     task->jit_act = act.outer;
-    left(u, r);
+    left(u);
     if (r == LU_JIT_YIELD) {
         /* As the interpreter's YIELD_VALUE, back to a C caller. */
         lu_gen_suspend(ts, frame, frame->instr[-1].op.arg);
