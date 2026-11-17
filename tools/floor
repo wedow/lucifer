@@ -20,7 +20,8 @@ deopt (-X lucifer_jit=always -X lucifer_stress=deopt:7).
 Each corpus splits into units, one harness invocation each (a Lib/test module, a numpy test
 file, a fuzzdiff generator and seed, ...). Units of every corpus share one queue of --jobs
 workers (default: every CPU this process may use), longest first by the seconds each took last time
-(build/floor/unit-seconds.json; units never timed go first).
+in the mode (build/floor/unit-seconds.json; units never timed go first). A Lib/test module's and a
+fuzzdiff process's deadline is MARGIN times those seconds when that is over the harness's default.
 
 With --runs N each corpus runs N times; a test is PASS only if every run passed it, and a
 test whose status changed between runs is listed as flaky in the summary.
@@ -66,6 +67,9 @@ LINE = re.compile(r"^(PASS|FAIL|XPASS|XFAIL) (.+)$", re.M)
 # The harnesses' order of outcomes: a test two units report (a case two Lib/test modules share) keeps the worst.
 RANK = {s: i for i, s in enumerate(["PASS", "SKIP", "XFAIL", "NOTRUN", "XPASS", "FAIL", "ERROR", "CRASH", "TIMEOUT"])}
 HISTORY = ROOT / "build/floor/unit-seconds.json"
+# A unit may take this many times what it took last time in its mode before its harness calls it hung: a
+# stress mode's slow unit fits under load, and a hung one still stops at a bound its own cost sets.
+MARGIN = 2
 LOG_LOCK = threading.Lock()
 
 
@@ -120,6 +124,17 @@ def unit_results(suite, directory):
         if not re.fullmatch(r"lucifer(-.*)?\.(tsv|json)", path.name):
             (target / path.name).symlink_to(path)
     return target
+
+
+def unit_history(path=HISTORY):
+    """{mode: {CORPUS/LABEL: seconds its last run took}}; a file from before modes were kept apart reads empty."""
+    raw = json.loads(path.read_text()) if path.exists() else {}
+    return {mode: units for mode, units in raw.items() if isinstance(units, dict)}
+
+
+def deadline(past, unit, default):
+    """A harness deadline for unit, given its mode's history: MARGIN times its last run, at least default."""
+    return max(default, math.ceil(MARGIN * past.get(unit, 0)))
 
 
 def output_lines(text):
@@ -232,13 +247,15 @@ def libtest(mode, flags, work, log):
         for module, entry in build.items():
             modules.setdefault(module, set()).update(entry["cases"])
     names = sorted(modules)
+    past = unit_history().get(mode, {})
 
     def unit(index, module):
         directory = work / "libtest" / module
         results = unit_results("libtest", directory)
         run(["python3", "tools/libtest/run.py", "run", "--python", lucifer(flags), "--runtime", "lucifer",
              "--source", "installed", "--jobs", "1", "--results", str(results),
-             "--raw-dir", str(directory / "raw"), "--shard", f"{index}/{len(names)}"], log)
+             "--raw-dir", str(directory / "raw"), "--shard", f"{index}/{len(names)}",
+             "--timeout", str(deadline(past, f"libtest/{module}", 180))], log)
         rows = unit_manifest(results / "lucifer.tsv")
         # A case other modules share is the worst of theirs in the manifest; this module's own is here.
         shared = json.loads((results / "lucifer.json").read_text()).get("shared_cases", {}).get(module, {})
@@ -325,11 +342,12 @@ def fuzzdiff(mode, flags, work, log):
     for name in ("python-formalization", "cpython"):
         (fuzz / name).is_symlink() or (fuzz / name).symlink_to(ROOT / "build/fuzzdiff" / name)
     named = {"mismatch": "FAIL", "skip": "SKIP", "error": "ERROR"}
+    past = unit_history().get(mode, {})
 
     def unit(generator, seed):
         out = run(["env", f"PYTHONPATH={ROOT / 'build/tests/capi/ext'}", "python3", "tools/fuzzdiff/run.py",
                    "--oracle", env("ORACLE_T"), generator, "--seed", str(seed), "--python", lucifer(flags),
-                   "--work", str(fuzz)], log)
+                   "--work", str(fuzz), "--timeout", str(deadline(past, f"fuzzdiff/{generator}-s{seed}", 300))], log)
         rows = {}
         for line in out.splitlines():
             if line.startswith("{") and '"generator"' in line:
@@ -424,11 +442,11 @@ def write_summary(out, mode):
 
 def run_targets(targets, runs, jobs):
     """Run the units of every target, (mode, out, work, corpora, keep), from one queue of jobs workers,
-    longest first by the seconds each took last time (build/floor/unit-seconds.json; units never timed
-    go first). keep(corpus, label) picks a corpus's units. A target's CORPUS.tsv and summary are written
-    as each of its corpora finishes. Returns the corpora, as (mode, corpus), with a unit that produced
+    longest first by the seconds each took last time in its mode (build/floor/unit-seconds.json; units
+    never timed go first). keep(corpus, label) picks a corpus's units. A target's CORPUS.tsv and summary
+    are written as each of its corpora finishes. Returns the corpora, as (mode, corpus), with a unit that produced
     no results."""
-    history = json.loads(HISTORY.read_text()) if HISTORY.exists() else {}
+    history = unit_history()
     started = time.monotonic()
     units, logs, notes, seconds, failed, dropped = {}, {}, {}, {}, set(), set()
 
@@ -438,6 +456,7 @@ def run_targets(targets, runs, jobs):
         notes[out][name] = {"skipped": str(why)}
         dropped.add(target)
     for mode, out, work, corpora, keep in targets:
+        history.setdefault(mode, {})
         out.mkdir(parents=True, exist_ok=True)
         work.mkdir(parents=True, exist_ok=True)
         path = out / "summary.json"
@@ -460,12 +479,16 @@ def run_targets(targets, runs, jobs):
         try:
             return unit()
         finally:
-            seconds[target, label] = history[f"{target[1]}/{label}"] = round(time.monotonic() - start, 1)
+            took = seconds[target, label] = round(time.monotonic() - start, 1)
+            # A run over MARGIN times the last hung or stalled: its seconds would stretch the deadline.
+            past, key = history[target[0]], f"{target[1]}/{label}"
+            if took <= MARGIN * past.get(key, math.inf):
+                past[key] = took
     for _ in range(runs):  # a run's units reuse its scratch directories, so runs follow one another
         rows = {target: {} for target in units}
         left = collections.Counter({target: len(u) for target, u in units.items()})
         queue = [(target, label, unit) for target, u in units.items() for label, unit in sorted(u.items())]
-        queue.sort(key=lambda q: -history.get(f"{q[0][1]}/{q[1]}", float("inf")))
+        queue.sort(key=lambda q: -history[q[0][0]].get(f"{q[0][1]}/{q[1]}", math.inf))
         with ThreadPoolExecutor(jobs) as pool:
             futures = {pool.submit(timed, *q): q[:2] for q in queue}
             for future in as_completed(futures):
@@ -651,7 +674,10 @@ def units_of(corpus):
 def select(args):
     """Score each unit of the sliced corpora that some floor pass belongs to, by what it caught per
     second, and take the best until the budget is spent."""
-    seconds = json.loads(args.history.read_text())
+    seconds = {}  # a unit's cost is its slowest mode's
+    for units in unit_history(args.history).values():
+        for unit, took in units.items():
+            seconds[unit] = max(took, seconds.get(unit, 0))
     passes, losses, broken = collections.Counter(), collections.Counter(), set()
     for corpus in SLICED:
         owner, floor = units_of(corpus), read_tsv(FLOOR / f"{corpus}.tsv")
