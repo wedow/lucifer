@@ -111,10 +111,17 @@ each_ref(struct lu_func *f, const struct lu_fs *fs, lu_v r, void (*fn)(struct lu
 void
 lu_fs_each(struct lu_func *f, const struct lu_fs *fs, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
+    lu_fs_each_until(f, fs, NULL, fn, arg);
+}
+
+void
+lu_fs_each_until(struct lu_func *f, const struct lu_fs *fs, const struct lu_fs *stop,
+                 void (*fn)(struct lu_func *, lu_v, void *), void *arg)
+{
     for (int i = 0; i < fs->nheld; i++) {
         fn(f, fs->held[i], arg);
     }
-    for (const struct lu_fs *p = fs; p != NULL; p = p->caller) {
+    for (const struct lu_fs *p = fs; p != stop; p = p->caller) {
         if (p->funcv >= 0) {
             fn(f, p->funcv, arg);
         }

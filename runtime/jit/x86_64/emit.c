@@ -88,6 +88,10 @@ struct build {
     lu_pv *room;                /* an exit's slots, as make_deopt describes them */
     struct lu_fs **chain;       /* its frame states, outermost first */
     uint32_t caproom, capchain;
+    uint32_t *seen;             /* per location (lu_pv_arg_of_loc): the exit that last owned it */
+    uint32_t nseen;
+    lu_pv *placed;              /* per value: 1 + its place once found (place) */
+    int32_t *owns;              /* per value: 1 + the location an exit releases it at, -1 for none, once found */
 };
 
 /* The references the frames' slots are owed for an object a published
@@ -943,7 +947,7 @@ imm_index(struct build *b, int64_t w)
 /* Where instruction value v is, for an exit: a raw word's or an
    object's location, or a constant. */
 static lu_pv
-place(struct asm_ *a, lu_v v)
+find_place(struct asm_ *a, lu_v v)
 {
     struct lu_ins *in = I(a, v);
     if (in->op == OP_CONST) {
@@ -953,6 +957,19 @@ place(struct asm_ *a, lu_v v)
         return in->rep == REP_OBJ ? LU_PV(DV_OBJ, LU_PV_NOLOC) : LU_PV(DV_IMM, imm_index(&a->b, in->imm));
     }
     return LU_PV(in->rep == REP_OBJ ? DV_OBJ : DV_RAW, lu_pv_arg_of_loc(in->loc));
+}
+
+/* The same, found once per value: exits name the same values again and again. */
+static lu_pv
+place(struct asm_ *a, lu_v v)
+{
+    if (a->b.placed == NULL) {
+        a->b.placed = calloc((size_t)a->f->nins, sizeof(lu_pv));
+    }
+    if (a->b.placed[v] == 0) {
+        a->b.placed[v] = find_place(a, v) + 1;
+    }
+    return a->b.placed[v] - 1;
 }
 
 /* What a slot or a field of state fs holds: a value's place, or a virtual
@@ -997,29 +1014,97 @@ describe(struct asm_ *a, struct lu_deopt *d, struct lu_fs *fs, lu_v r)
 }
 
 /* An exit drops the reference of every owned value its state names: d's
-   row of owned locations, the last in the unit's while it is built. */
+   row of owned locations, the last in the unit's while it is built. A
+   location named twice is one value, entered once: seen says which
+   location d has (b->seen[...] == stamp). */
 struct owning {
     struct build *b;
     struct lu_deopt *d;
+    uint32_t stamp;
 };
+
+static void
+own_loc(struct owning *w, int32_t loc)
+{
+    struct build *b = w->b;
+    uint32_t *seen = &b->seen[lu_pv_arg_of_loc(loc)];
+    if (*seen == w->stamp) {
+        return;
+    }
+    *seen = w->stamp;
+    b->owned = grow(b->owned, &b->capowned, b->nowned + 1, sizeof *b->owned);
+    b->owned[b->nowned++] = loc;
+    w->d->nowned++;
+}
 
 static void
 note_owned(struct lu_func *f, lu_v v, void *arg)
 {
-    struct owning *w = arg;
-    struct build *b = w->b;
+    struct build *b = ((struct owning *)arg)->b;
+    if (b->owns[v] == 0) {
+        struct lu_ins *in = &f->ins[v];
+        b->owns[v] = (in->flags & INS_OWNED) && in->loc != LU_LOC_NONE ? (int32_t)lu_pv_arg_of_loc(in->loc) + 1 : -1;
+    }
+    if (b->owns[v] > 0) {
+        own_loc(arg, lu_pv_loc(LU_PV(0, (uint32_t)b->owns[v] - 1)));
+    }
+}
+
+/* What a recorded frame and its callers own (struct lu_fs record): its
+   own owned locations, then its caller's, each once. */
+struct chain_owned {
+    struct lu_func *f;
+    int32_t *locs;
+    int n;
+};
+
+static void
+note_chain_owned(struct lu_func *f, lu_v v, void *arg)
+{
+    struct chain_owned *w = arg;
     struct lu_ins *in = &f->ins[v];
     if (!(in->flags & INS_OWNED) || in->loc == LU_LOC_NONE) {
         return;
     }
-    for (uint32_t i = w->d->owned; i < b->nowned; i++) {
-        if (b->owned[i] == in->loc) {
-            return;             /* named twice: one value, one location */
+    for (int i = 0; i < w->n; i++) {
+        if (w->locs[i] == in->loc) {
+            return;
         }
     }
-    b->owned = grow(b->owned, &b->capowned, b->nowned + 1, sizeof *b->owned);
-    b->owned[b->nowned++] = in->loc;
-    w->d->nowned++;
+    w->locs[w->n++] = in->loc;
+}
+
+static void
+record_owned(struct lu_func *f, struct lu_fs *p)
+{
+    int most = 1 + p->nlocals + p->nstack + (p->caller != NULL ? p->caller->nowned : 0);
+    struct chain_owned w = { f, lu_ir_alloc(f, sizeof(int32_t) * (size_t)most), 0 };
+    struct lu_fs own = *p;
+    own.caller = NULL;
+    own.nheld = 0;
+    lu_fs_each(f, &own, note_chain_owned, &w);
+    for (int i = 0; p->caller != NULL && i < p->caller->nowned; i++) {
+        int k = 0;
+        while (k < w.n && w.locs[k] != p->caller->owned[i]) {
+            k++;
+        }
+        if (k == w.n) {
+            w.locs[w.n++] = p->caller->owned[i];
+        }
+    }
+    p->owned = w.locs;
+    p->nowned = w.n;
+}
+
+static int
+names_virtual(const struct lu_fs *p)
+{
+    for (int i = 0; i < p->nlocals + p->nstack; i++) {
+        if (LU_IS_VIRT(*lu_fs_slot(p, i))) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /* A frame record to find among the unit's: its values elsewhere. */
@@ -1084,33 +1169,44 @@ static struct lu_deopt *
 make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
 {
     struct build *b = &a->b;
-    struct pending *x = calloc(1, sizeof *x);
+    struct pending *x = lu_ir_alloc(a->f, sizeof *x);         /* freed with the build */
     x->index = a->nexits;
     struct lu_deopt *d = &x->d;
     d->unit = a->unit;
     d->objs = b->nobjs;
     d->owned = b->nowned;
-    /* The frames outermost first, each slot described into the room,
-       innermost first (the order its virtual objects are entered in). */
-    uint32_t n = 0, nvals = 0;
+    /* The frames outermost first. The outermost the unit has recorded are
+       not described again (struct lu_fs record); the rest go slot by slot
+       into the room, innermost first (the order virtual objects are
+       entered in). */
+    uint32_t n = 0, known = 0, nvals = 0;
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
         n++;
-        nvals += (uint32_t)(p->nlocals + p->nstack);
     }
     b->chain = grow(b->chain, &b->capchain, n, sizeof *b->chain);
-    b->room = grow(b->room, &b->caproom, nvals, sizeof *b->room);
-    uint32_t k = n, end = nvals;
+    uint32_t k = n;
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
         b->chain[--k] = p;
+        d->visible |= k > 0 && !(p->code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN));
+    }
+    while (known < n && b->chain[known]->record > 0) {
+        known++;
+    }
+    for (k = known; k < n; k++) {
+        nvals += (uint32_t)(b->chain[k]->nlocals + b->chain[k]->nstack);
+    }
+    b->room = grow(b->room, &b->caproom, nvals, sizeof *b->room);
+    uint32_t end = nvals;
+    for (k = n; k-- > known;) {
+        struct lu_fs *p = b->chain[k];
         int m = p->nlocals + p->nstack;
         end -= (uint32_t)m;
         for (int i = 0; i < m; i++) {
             b->room[end + (uint32_t)i] = describe(a, d, fs, *lu_fs_slot(p, i));
         }
-        d->visible |= k > 0 && !(p->code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN));
     }
-    int caller = -1;
-    for (k = 0; k < n; k++) {
+    int caller = known > 0 ? b->chain[known - 1]->record - 1 : -1, pure = 1;
+    for (k = known; k < n; k++) {
         struct lu_fs *p = b->chain[k];
         struct frame_key key = { .fr = { .code = p->code, .func = p->func, .pc = p->pc, .ret = p->ret,
                                          .funcv = p->funcv >= 0 ? place(a, p->funcv) : LU_PV(DV_NULL, 0),
@@ -1120,10 +1216,31 @@ make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
                                  .vals = b->room + end };
         end += (uint32_t)(p->nlocals + p->nstack);
         caller = frame_record(b, &key);
+        pure = pure && !names_virtual(p);
+        if (pure) {
+            p->record = caller + 1;
+            record_owned(a->f, p);
+        }
     }
     d->nframes = (int32_t)n;
     d->frame = caller;
-    lu_fs_each(a->f, fs, note_owned, &(struct owning){ b, d });
+    /* What it owns: what it holds and its frames' slots, the recorded
+       frames' from their list. */
+    uint32_t places = 32 + (uint32_t)a->f->nspill;
+    if (b->nseen < places) {
+        b->seen = realloc(b->seen, sizeof(uint32_t) * places);
+        memset(b->seen + b->nseen, 0, sizeof(uint32_t) * (places - b->nseen));
+        b->nseen = places;
+    }
+    if (b->owns == NULL) {
+        b->owns = calloc((size_t)a->f->nins, sizeof(int32_t));
+    }
+    struct owning w = { b, d, (uint32_t)a->nexits + 1 };
+    struct lu_fs *recorded = known > 0 ? b->chain[known - 1] : NULL;
+    lu_fs_each_until(a->f, fs, recorded, note_owned, &w);
+    for (int i = 0; recorded != NULL && i < recorded->nowned; i++) {
+        own_loc(&w, recorded->owned[i]);
+    }
     d->reason = (uint8_t)reason;
     d->error = (uint8_t)error;
     d->drop = drop;
@@ -1132,8 +1249,8 @@ make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
 }
 
 /* The unit's descriptions in one block, from the exits on (struct
-   lu_unit), each exit's builder freed; and the addresses of the exits
-   and of each published state written into the code that reads them. */
+   lu_unit); and the addresses of the exits and of each published state
+   written into the code that reads them. */
 static void
 pack(struct asm_ *a, struct lu_unit *u)
 {
@@ -1165,7 +1282,6 @@ pack(struct asm_ *a, struct lu_unit *u)
     u->nframes = (int)b->nframes;
     for (int i = 0; i < a->nexits; i++) {
         u->exits[i] = *a->exits[i].d;
-        free(a->exits[i].d);
     }
     a->nexits = 0;
     int64_t p = (int64_t)(intptr_t)u->exits;
@@ -1176,14 +1292,11 @@ pack(struct asm_ *a, struct lu_unit *u)
     }
 }
 
-/* What building the descriptions holds, the exits not yet packed too. */
+/* What building the descriptions holds. */
 static void
 build_free(struct asm_ *a)
 {
     struct build *b = &a->b;
-    for (int i = 0; i < a->nexits; i++) {
-        free(a->exits[i].d);
-    }
     free(b->frames);
     free(b->objs);
     free(b->vals);
@@ -1193,6 +1306,9 @@ build_free(struct asm_ *a)
     free(b->imm_table.slots);
     free(b->room);
     free(b->chain);
+    free(b->seen);
+    free(b->placed);
+    free(b->owns);
     free(a->pubs);
 }
 
@@ -1272,7 +1388,7 @@ hands(const struct lu_ins *in, lu_v v)
 static void
 hold_add(struct asm_ *a, struct lu_ins *in, struct hold *h, int *nh, lu_v v)
 {
-    if (v < 0 || I(a, v)->rep != REP_OBJ || I(a, v)->op == OP_CONST || I(a, v)->op == OP_BOOL || !hands(in, v)) {
+    if (v < 0 || !hands(in, v) || I(a, v)->rep != REP_OBJ || I(a, v)->op == OP_CONST || I(a, v)->op == OP_BOOL) {
         return;
     }
     int k = 0;

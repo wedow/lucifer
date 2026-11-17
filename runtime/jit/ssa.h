@@ -236,6 +236,13 @@ struct lu_fs {
     int nheld;
     uint32_t mark;              /* the walk that last saw it as a caller (lu_fs_each_once) */
     uint8_t virt;               /* and whether a slot of it names a virtual object then */
+    /* The backend's: 1 + the unit's record of this frame and its callers
+       once made, when none of them names a virtual object (so that every
+       exit describes them alike), and the locations of the owned values
+       they name, each once, in the order a walk meets them. */
+    int32_t record;
+    int32_t nowned;
+    int32_t *owned;
 };
 
 /* Slot i of the frame: its locals, then its stack. */
@@ -397,6 +404,9 @@ struct lu_vobj *lu_fs_vobj(struct lu_func *f, const struct lu_fs *fs, int id, lu
    its slots, the fields of the virtual objects they reach, the objects
    virtual ones became, and what it holds. A value may come more than once. */
 void lu_fs_each(struct lu_func *f, const struct lu_fs *fs, void (*fn)(struct lu_func *, lu_v, void *), void *arg);
+/* The same for what it holds and its frames up to, not including, stop. */
+void lu_fs_each_until(struct lu_func *f, const struct lu_fs *fs, const struct lu_fs *stop,
+                      void (*fn)(struct lu_func *, lu_v, void *), void *arg);
 /* lu_fs_each, for a walk that needs each value once: a caller's frame
    seen before under the same mark (++f->marks begins a walk) gives only
    what its virtual objects stand for at fs. Inlined code's states share
