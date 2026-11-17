@@ -804,6 +804,12 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
 }
 
 int
+lu_ev_call_function(struct ctx *c, PyObject *fn, lu_v *args, int n, int nops)
+{
+    return call_values(c, lu_ev_konst(c, fn), LU_NOV, args, n, NULL, nops, 0);
+}
+
+int
 lu_ev_kernel_op(struct ctx *c, int kid, lu_v *args, int n, int nops, int ret)
 {
     PyObject *kf = PyInterpreterState_Get()->kernel[kid];

@@ -458,6 +458,9 @@ int lu_ev_store_attr(struct ctx *c);
 int lu_ev_call(struct ctx *c);                  /* eval_call.c */
 int lu_ev_call_kw(struct ctx *c);
 int lu_ev_call_ex(struct ctx *c);
+/* Function fn called with the n values args, in place of the top `nops`
+   stack entries, as a CALL makes it: in line where it can be. */
+int lu_ev_call_function(struct ctx *c, PyObject *fn, lu_v *args, int n, int nops);
 /* The instruction as the interpreter leaves it to the kernel: kernel[kid]
    of the n args, in line, its result in place of the top `nops` stack
    entries. Only where every operand's type is known or learned: the

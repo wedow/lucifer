@@ -321,6 +321,16 @@ instance_store(struct ctx *c, lu_v owner, struct lu_vobj *o, PyObject *name)
     return 1;
 }
 
+/* The interpreter's own lookup, called, which tells `pic` (or NULL) what it meets. */
+static void
+load_generic(struct ctx *c, struct lu_pic *pic)
+{
+    lu_v args[3] = { lu_ev_peek(c, 1), lu_ev_konst(c, name_at(c, c->oparg >> 1)),
+                     lu_ev_const_i(c, (int64_t)(intptr_t)pic) };
+    /* load_method answers the bound method or attribute; CALL unbinds it. */
+    replace_owner(c, lu_ev_helper(c, c->oparg & 1 ? H_load_method : H_load_attr, 3, args, 1), LU_NOV);
+}
+
 /* The attribute loaded as specialization `op` has it (version, index and
    descr are that specialization's), in place of the owner on the stack;
    any other way through the generic load, which tells `pic` (the site's
@@ -367,6 +377,27 @@ load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr
         replace_owner(c, v, LU_NOV);
         break;
     }
+    case LOAD_ATTR_PROPERTY: {
+        /* The getter, a function, called with the owner: read from a
+           property each time (its __init__ may change it), so guarded. */
+        PyObject *fget = lu_property_fget(descr);
+        if (method || fget == NULL || !PyFunction_Check(fget)) {
+            load_generic(c, pic);
+            break;
+        }
+        lu_ev_guard_version(c, owner, version);
+        if (Py_IS_TYPE(descr, &PyProperty_Type)) {
+            lu_v g = lu_ev_guard(c, OP_GUARD_IS, lu_ev_konst(c, descr), (int64_t)(intptr_t)fget);
+            I(c, g)->imm2 = GI_FIELD | (int64_t)lu_field_offset(&PyProperty_Type, 0);
+        }
+        if (pic == NULL) {
+            return lu_ev_call_function(c, fget, &owner, 1, 1);
+        }
+        /* One way of several, which join after the instruction: called out of line. */
+        lu_v args[3] = { lu_ev_konst(c, fget), LU_NOV, owner };
+        replace_owner(c, lu_ev_helper(c, H_call, 3, args, 1), LU_NOV);
+        break;
+    }
     case LOAD_ATTR_INSTANCE_VALUE:
         if (descr == NULL) {
             lu_ev_guard_version(c, owner, version);
@@ -376,13 +407,9 @@ load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr
             break;
         }
         /* fall through: a class default stands behind the instance's value */
-    default: {
-        lu_v args[3] = { owner, lu_ev_konst(c, name), lu_ev_const_i(c, (int64_t)(intptr_t)pic) };
-        v = lu_ev_helper(c, method ? H_load_method : H_load_attr, 3, args, 1);
-        /* load_method answers the bound method or attribute; CALL unbinds it. */
-        replace_owner(c, v, LU_NOV);
+    default:
+        load_generic(c, pic);
         break;
-    }
     }
     return 0;
 }
