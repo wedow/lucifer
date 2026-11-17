@@ -344,8 +344,10 @@ slot_tp_finalize(PyObject *self)
     PyObject *exc = PyErr_GetRaisedException();
     PyObject *r = lu_call_special(self, LU_ID(__del__), NULL, 0);
     if (r == NULL) {
+        PyObject *err = PyErr_GetRaisedException();
         PyObject *del = PyObject_GetAttr((PyObject *)Py_TYPE(self), LU_ID(__del__));
         PyErr_Clear();
+        PyErr_SetRaisedException(err);
         lu_err_unraisable_text("Exception ignored while calling deallocator", del);
         Py_XDECREF(del);
     }

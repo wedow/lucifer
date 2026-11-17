@@ -1,6 +1,6 @@
 ---
 id: luc-hypt
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-17T19:50:56Z
