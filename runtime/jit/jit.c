@@ -1311,6 +1311,7 @@ hot_exit(struct lu_deopt *d)
                 u->entry_pc, PyUnicode_AsUTF8(in->code->co_qualname), in->pc, jc->nhot);
     }
     kill(jc, u);
+    __atomic_store_n(&jc->wait[u->entry_pc], 0, __ATOMIC_RELAXED);    /* not for its faults: built again at once */
 }
 
 void
