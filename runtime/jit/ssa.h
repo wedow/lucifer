@@ -131,7 +131,9 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(UNLINK, REP_NONE, IF_EFFECT)      /* the root frame leaves the stack before its locals go (a generator's stays) */ \
     X(DEOPT, REP_NONE, IF_TERM)         /* leaves unconditionally at fs; imm: the reason */ \
     X(POLL, REP_NONE, IF_GUARD)         /* a back-edge: leaves at fs if the poll word is set */ \
-    X(CHECK_LIVE, REP_NONE, IF_GUARD | IF_EFFECT)   /* leaves at fs, as a poll does, once the unit is dead */
+    X(CHECK_LIVE, REP_NONE, IF_GUARD | IF_EFFECT)   /* leaves at fs, as a poll does, once the unit is dead */ \
+    X(COUNT_OUT, REP_NONE, IF_GUARD | IF_EFFECT)    /* counts a call the budget left out of line, the unit's   \
+                                                       outs[imm]: leaves at fs at the unit's hot_calls (jit.c) */
 
 /* GUARD_VERSION's imm2: whose version. */
 enum { GV_TYPE_OF, GV_TYPE_ITSELF, GV_DICT_KEYS, GV_FUNC };
@@ -333,7 +335,7 @@ struct lu_func {
     int loops;                  /* back edges built: one entry may run unbounded work */
     int sites, cold;            /* sites with feedback, and those the interpreter never ran */
     int refused;                /* calls left out of line for want of budget */
-    uint64_t *outs;             /* their sites, by lu_jit_site_key: the unit counts the calls made there */
+    uint64_t *outs;             /* their sites, each once, by lu_jit_site_key: the unit counts the calls made there */
     int nouts, capouts;
     uint64_t *hots;             /* hot sites taken in line past the budget, each once */
     int nhots, caphots;

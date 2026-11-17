@@ -3234,6 +3234,18 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jcc(a, CC_NE, dead);
         return 0;
     }
+    case OP_COUNT_OUT: {
+        /* A call the budget left out of line, counted: the hot_calls-th
+           leaves, for jit.c to take the site in line. */
+        stress_exit(a, in);
+        int hot = exit_to(a, in->fs, EXIT_HOT, 0, 0);
+        mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->outs[in->imm].left);
+        rex(a, 1, 0, 0, R11);
+        b1(a, 0xFF);
+        modrm_mem(a, 0, R11, 0);                    /* inc qword [r11] */
+        jcc(a, CC_E, hot);
+        return 0;
+    }
     case OP_DEOPT:
         jmp(a, exit_to(a, in->fs, (int)in->imm, 0, 0));
         return 0;

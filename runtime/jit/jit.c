@@ -174,7 +174,7 @@ static struct {
 } allocs;
 
 /* Exit reasons by name, for the counts and LUCIFER_JIT_DEBUG. */
-static const char reasons[EXIT_REASONS][8] = { "guard", "stress", "poll", "side", "error", "frame", "yield" };
+static const char reasons[EXIT_REASONS][8] = { "guard", "stress", "poll", "side", "error", "frame", "yield", "hot" };
 
 /* A count for -X lucifer_jit_stats: free when the counts are off. */
 static void
@@ -710,17 +710,6 @@ lu_jit_hot_site(PyCodeObject *root, uint64_t key)
     return hot;
 }
 
-/* The unit's entry for a site's key, or NULL. */
-static struct lu_out *
-out_at(struct lu_unit *u, uint64_t key)
-{
-    for (int i = (int)(key >> 32) & u->outmask;; i = (i + 1) & u->outmask) {
-        if (u->outs[i].key == key || u->outs[i].key == 0) {
-            return u->outs[i].key == key ? &u->outs[i] : NULL;
-        }
-    }
-}
-
 /* The sites the build left calls out of line at, for the unit to count. */
 static void
 keep_outs(struct lu_unit *u, const struct lu_func *f)
@@ -728,19 +717,11 @@ keep_outs(struct lu_unit *u, const struct lu_func *f)
     if (f->nouts == 0) {
         return;
     }
-    int n = 4;
-    while (n < 2 * f->nouts) {
-        n *= 2;
-    }
-    u->outmask = n - 1;
-    u->hot_calls = HOT_CALLS_PER_INS * (uint32_t)f->nins;
-    u->outs = calloc((size_t)n, sizeof(struct lu_out));
-    for (int k = 0; k < f->nouts; k++) {
-        int i = (int)(f->outs[k] >> 32) & u->outmask;
-        while (u->outs[i].key != 0 && u->outs[i].key != f->outs[k]) {
-            i = (i + 1) & u->outmask;
-        }
-        u->outs[i].key = f->outs[k];
+    u->hot_calls = HOT_CALLS_PER_INS * (int64_t)f->nins;
+    u->nouts = f->nouts;
+    u->outs = malloc(sizeof(struct lu_out) * (size_t)f->nouts);
+    for (int i = 0; i < f->nouts; i++) {
+        u->outs[i] = (struct lu_out){ f->outs[i], -u->hot_calls };
     }
 }
 
@@ -789,6 +770,9 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     int ok = lu_ssa_build(&f, frame) == 0;
     double t1 = now();
     count(&stats.ir, (unsigned long)f.nins);
+    if (ok) {
+        keep_outs(u, &f);
+    }
     ok = ok && lu_ssa_optimize(&f) == 0;
     double t2 = now(), t3 = t2;
     if (_PyRuntime.jit.stats) {
@@ -838,7 +822,6 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     u->entry_pc = pc;
     u->loops = f.loops > 0;
     u->refused = f.refused;
-    keep_outs(u, &f);
     u->consts = f.consts;
     u->nconsts = f.nconsts;
     f.consts = NULL;
@@ -1151,82 +1134,12 @@ lu_jit_new_gen(PyThreadState *ts, struct lu_frame *frame)
     return gen;
 }
 
-/* C enters Python for the unit the task runs, from frame cf: a call the
-   unit left out of line, at the site its published description names
-   (the innermost frame's call, and that frame's caller in the unit). One
-   it left out for want of budget is counted at its site; at hot_calls the
-   sites it calls out at that often are hot for its code's next build, and
-   it dies (the task leaves it at its next poll). A site is taken in line
-   by how often it is called, not by where the build came to it. */
-static void
-called_out(struct lu_task *task, struct lu_frame *cf)
-{
-    struct lu_deopt *d = cf != NULL && cf->owner == LU_FRAME_JIT ? __atomic_load_n(&cf->jit_desc, __ATOMIC_ACQUIRE) : NULL;
-    uint16_t at = d != NULL ? __atomic_load_n(&d->out, __ATOMIC_RELAXED) : LU_OUT_NONE;
-    if (at == LU_OUT_NONE) {
-        return;
-    }
-    struct lu_unit *u = d->unit;
-    const struct lu_deopt_frame *in = &u->frames[d->frame];
-    const struct lu_deopt_frame *out = in->caller >= 0 ? &u->frames[in->caller] : NULL;
-    if (at == 0) {
-        /* The first call here finds the site, for the calls after. */
-        struct lu_out *o = u->outs == NULL ? NULL
-            : out_at(u, lu_jit_site_key(in->code, in->pc, out != NULL ? out->code : NULL, out != NULL ? out->pc : 0));
-        at = o != NULL && o - u->outs + 1 < LU_OUT_NONE ? (uint16_t)(o - u->outs + 1) : LU_OUT_NONE;
-        __atomic_store_n(&d->out, at, __ATOMIC_RELAXED);
-        if (at == LU_OUT_NONE) {
-            return;
-        }
-    }
-    if (__atomic_add_fetch(&u->outs[at - 1].calls, 1, __ATOMIC_RELAXED) != u->hot_calls) {
-        return;
-    }
-    /* Hot when the calls are also LOOP_CALLS per entry of the unit, calls
-       in a loop it runs (one made a few times per entry is a caller's to
-       make: taken in line, its code is copied into each unit that calls
-       it, as a recursive descent's would be into every other). Either
-       way, calls here are not counted again. */
-    __atomic_store_n(&d->out, LU_OUT_NONE, __ATOMIC_RELAXED);
-    unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
-    if (u->hot_calls < LOOP_CALLS * entries || __atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
-        return;
-    }
-    struct lu_jit_code *jc = state_of(u->code);
-    PyMutex_Lock(&jc->prof_lock);
-    int was = jc->nhot;
-    for (int i = 0; i <= u->outmask; i++) {
-        int known = 0;
-        for (int k = 0; k < jc->nhot && !known; k++) {
-            known = jc->hot[k] == u->outs[i].key;
-        }
-        if (!known && u->outs[i].key != 0 && __atomic_load_n(&u->outs[i].calls, __ATOMIC_RELAXED) >= u->hot_calls / 4
-            && __atomic_load_n(&u->outs[i].calls, __ATOMIC_RELAXED) >= LOOP_CALLS * entries) {
-            jc->hot = realloc(jc->hot, sizeof(uint64_t) * (size_t)(jc->nhot + 1));
-            jc->hot[jc->nhot] = u->outs[i].key;
-            __atomic_store_n(&jc->nhot, jc->nhot + 1, __ATOMIC_RELAXED);
-        }
-    }
-    PyMutex_Unlock(&jc->prof_lock);
-    if (jc->nhot == was) {
-        return;                 /* hot already: a copy the budget left out */
-    }
-    if (_PyRuntime.jit.debug) {
-        fprintf(stderr, "jit: %s@%d: hot site %s@%d%s%s, %d hot now\n", PyUnicode_AsUTF8(u->code->co_qualname),
-                u->entry_pc, PyUnicode_AsUTF8(in->code->co_qualname), in->pc, out != NULL ? " in " : "",
-                out != NULL ? PyUnicode_AsUTF8(out->code->co_qualname) : "", jc->nhot);
-    }
-    kill(jc, u);
-    lu_task_signal(task, LU_POLL_DEOPT_SELF);
-}
-
 int
 lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
 {
     PyCodeObject *code = frame->code;
     struct lu_jit_code *jc = state_of(code);
     struct lu_task *task = (struct lu_task *)ts;
-    called_out(task, (struct lu_frame *)ts->current_frame);
     /* lu_jit_enter's conditions, and RESUME's: no poll pending, the code
        instrumented for the tools as they are now. */
     uintptr_t poll = __atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED);
@@ -1356,12 +1269,60 @@ handling_frame(struct lu_deopt *d)
    frame's handler keeps taking (compiled code takes only the root's and
    kernel frames', which make no traceback entry) is treated as a side
    exit there: the function is called instead, and its own unit takes it. */
+/* A call the unit left out of line for want of budget was made hot_calls
+   times at one site, and the unit left there. When the calls are also
+   LOOP_CALLS per entry of the unit, calls in a loop it runs, the sites it
+   called out at that often are hot for its code's next build, and it dies.
+   One made a few times per entry is a caller's to make: taken in line, its
+   code is copied into each unit that calls it, as a recursive descent's
+   would be into every other. Either way the site's count goes on past
+   zero, and does not leave again. A site is taken in line by how often it
+   is called, not by where the build came to it. */
+static void
+hot_exit(struct lu_deopt *d)
+{
+    struct lu_unit *u = d->unit;
+    unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
+    if ((unsigned long)u->hot_calls < LOOP_CALLS * entries || __atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
+        return;
+    }
+    struct lu_jit_code *jc = state_of(u->code);
+    PyMutex_Lock(&jc->prof_lock);
+    int was = jc->nhot;
+    for (int i = 0; i < u->nouts; i++) {
+        int64_t calls = __atomic_load_n(&u->outs[i].left, __ATOMIC_RELAXED) + u->hot_calls;
+        int known = 0;
+        for (int k = 0; k < jc->nhot && !known; k++) {
+            known = jc->hot[k] == u->outs[i].key;
+        }
+        if (!known && calls >= u->hot_calls / 4 && (unsigned long)calls >= LOOP_CALLS * entries) {
+            jc->hot = realloc(jc->hot, sizeof(uint64_t) * (size_t)(jc->nhot + 1));
+            jc->hot[jc->nhot] = u->outs[i].key;
+            __atomic_store_n(&jc->nhot, jc->nhot + 1, __ATOMIC_RELAXED);
+        }
+    }
+    PyMutex_Unlock(&jc->prof_lock);
+    if (jc->nhot == was) {
+        return;                 /* hot already: a copy the budget left out */
+    }
+    if (_PyRuntime.jit.debug) {
+        const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
+        fprintf(stderr, "jit: %s@%d: hot site %s@%d, %d hot now\n", PyUnicode_AsUTF8(u->code->co_qualname),
+                u->entry_pc, PyUnicode_AsUTF8(in->code->co_qualname), in->pc, jc->nhot);
+    }
+    kill(jc, u);
+}
+
 void
 lu_jit_note_exit(struct lu_deopt *d)
 {
     count(&stats.exits[d->reason], 1);
     if (d->reason == EXIT_YIELD) {
         return;                 /* the end of a generator unit's run, no leave */
+    }
+    if (d->reason == EXIT_HOT) {
+        hot_exit(d);
+        return;
     }
     count(&stats.taken[d->opcode & 0xff], 1);
     if (_PyRuntime.jit.debug) {

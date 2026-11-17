@@ -39,6 +39,7 @@ lu_count_kind(const struct lu_ins *in)
     case OP_UNBOX_INT: case OP_UNBOX_FLOAT: return CNT_unbox;
     case OP_POLL: return CNT_poll;
     case OP_CHECK_LIVE: return CNT_live;
+    case OP_COUNT_OUT: return CNT_call_refused;
     case OP_LOAD:
         return in->imm == offsetof(PyObject, ob_type) ? CNT_load_type
             : in->imm == offsetof(PyTypeObject, tp_version_tag) && in->imm2 == 4 ? CNT_load_version

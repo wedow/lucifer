@@ -191,7 +191,16 @@ lu_ev_room(struct ctx *c, int again)
         return 1;
     }
     f->refused++;
-    note_key(&f->outs, &f->nouts, &f->capouts, key);
+    int i = 0;
+    while (i < f->nouts && f->outs[i] != key) {
+        i++;
+    }
+    if (i == f->nouts) {
+        note_key(&f->outs, &f->nouts, &f->capouts, key);
+    }
+    if (c->g->budget >= 0) {
+        lu_ev_guard(c, OP_COUNT_OUT, LU_NOV, i);        /* the unit counts the calls made here */
+    }
     return 0;
 }
 
