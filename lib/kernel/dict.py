@@ -13,7 +13,7 @@ from _lucifer import (
     dict_sizeof, dictiter_new, dictiter_next, dictiter_len, dictiter_copy, dictview_new,
     dictview_dict, set_next, set_entry, set_entries,
 )
-from _lucifer import _boot, _format, operators, iter as _iter, list as _list, str as _str
+from _lucifer import _boot, _format, operators, iter as _iter, list as _list, str as _str, object as _object
 
 kernel_type = _boot.kernel_type
 classmethod_ = _boot.classmethod_
@@ -23,6 +23,7 @@ decimal = operators.decimal
 to_repr = _format.to_repr
 to_str = _format.to_str
 _args = _str._args
+lookup_attr = _object.lookup_attr
 
 __all__ = ()
 
@@ -54,11 +55,8 @@ def key_hash(key):
 
 
 def has_keys(obj):
-    try:
-        obj.keys
-    except AttributeError:
-        return False
-    return True
+    """dict_update_arg's test: whether obj has a keys attribute."""
+    return lookup_attr(obj, 'keys') is not MISSING
 
 
 def lookup(d, key, h):
