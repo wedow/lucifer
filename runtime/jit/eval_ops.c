@@ -289,10 +289,9 @@ yield_value(struct ctx *c)
             return -1;
         }
     }
-    if (g->observed) {
-        lu_v w = lu_ev_guard(c, OP_GUARD_FRAMES, LU_NOV, 0);
-        I(c, w)->flags |= INS_NOSTRESS;
-    }
+    /* What an object made real here gave up (an unmade tuple's items)
+       is released before the yield, which ends the unit's run. */
+    lu_ev_settle(c, c->pc);
     /* Each value needs a reference per slot that names it, and the one
        yielded one more; an owned value has one already. */
     for (int i = 0; i <= n; i++) {
