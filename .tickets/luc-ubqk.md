@@ -1,6 +1,6 @@
 ---
 id: luc-ubqk
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-15T11:56:49Z

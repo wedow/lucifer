@@ -1,6 +1,6 @@
 ---
 id: luc-tk2r
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-15T10:38:25Z
