@@ -113,10 +113,20 @@ struct lu_jit_code {
     struct lu_opclasses **opclasses;    /* per code unit: an operator site's operand classes */
     struct lu_prof *profs;              /* a root's: what it learned of values, by context (target.h) */
     unsigned long learned;              /* how often one of them changed */
+    unsigned long stale;                /* passes its units made, since its last build, of places that met
+                                           nothing new while it had learned more than the unit knew */
+    int built_ins;                      /* instructions its last build made: about what the next costs */
     PyMutex prof_lock;                  /* theirs, and hot's */
     uint64_t *hot;                      /* a root's: call sites its units called out of line at often */
     int nhot;
 };
+
+/* Passes of places built without what the root learned since, per
+   instruction of its last build, before it is built again: a build costs
+   about 2,500 machine instructions per instruction it makes, and a pass
+   that calls the kernel where a learned type would have folded the call
+   a few hundred. */
+#define STALE_PER_INS 8
 
 struct lu_prof {
     struct lu_prof *next;
@@ -125,13 +135,7 @@ struct lu_prof {
     PyTypeObject *type;         /* the type the value had (a reference), or NULL before any */
     uint8_t poly;               /* it had another too, or the guard on it kept failing: nothing to rely on */
     uint16_t fails;
-    uint32_t passes;            /* times met with nothing new while the root knew more than the unit */
 };
-
-/* Passes of a place, with more learned than its unit was built with,
-   before the unit is built again: a build costs about what that many
-   passes of unspecialized code do. */
-#define REBUILD_PASSES 16
 
 static struct {
     unsigned long compiles, failures, entries, returns, units_dead, direct, compiled, invalidated, waited, retired;
@@ -404,11 +408,14 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
     struct lu_jit_code *jc = p->jc;
     PyTypeObject *t = Py_TYPE(o);
     if (__atomic_load_n(&p->type, __ATOMIC_RELAXED) == t || __atomic_load_n(&p->poly, __ATOMIC_RELAXED)) {
-        /* Nothing new here; once the root has learned anything since the
-           unit was built, and the place has been passed often enough for
-           another build to pay, the unit is built again. */
+        /* Nothing new here. Once the root has learned anything since the
+           unit was built, its units' places count passes of code built
+           without it, and the unit is built again when they have cost
+           about what the build will: code that runs only a few times more
+           is not built again for it. */
         return __atomic_load_n(&jc->learned, __ATOMIC_RELAXED) == learned
-            || __atomic_add_fetch(&p->passes, 1, __ATOMIC_RELAXED) < REBUILD_PASSES;
+            || __atomic_add_fetch(&jc->stale, 1, __ATOMIC_RELAXED)
+               < STALE_PER_INS * (unsigned long)__atomic_load_n(&jc->built_ins, __ATOMIC_RELAXED);
     }
     PyMutex_Lock(&jc->prof_lock);
     if (p->type == NULL) {
@@ -772,6 +779,8 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     count(&stats.ir, (unsigned long)f.nins);
     if (ok) {
         keep_outs(u, &f);
+        __atomic_store_n(&jc->built_ins, f.nins, __ATOMIC_RELAXED);
+        __atomic_store_n(&jc->stale, 0, __ATOMIC_RELAXED);
     }
     ok = ok && lu_ssa_optimize(&f) == 0;
     double t2 = now(), t3 = t2;

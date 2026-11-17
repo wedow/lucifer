@@ -917,9 +917,11 @@ What decides how code is specialized:
   and nothing gives it (`type(x)`, `kind`, an operator's operands, an
   iterator), compiled code reports the type to a record the root keeps for
   that place: the chain of frames from the root, each a code and its
-  instruction, hashed. Once a place the unit has run reports again with
-  the root knowing more than when the unit was built, the unit leaves and
-  is built again, guarding on what was learned. A place that met two
+  instruction, hashed. Once the root knows more than when the unit was
+  built, its places count their passes, and when they come to eight per
+  instruction of the last build (about what the next build costs) the
+  unit leaves and is built again, guarding on what was learned; code
+  that runs only a few times more is not built again. A place that met two
   types, or whose guard keeps failing, is left generic. This is what
   specializes kernel code for where it is inlined: the interpreter's own
   caches in kernel code are shared by every caller.
