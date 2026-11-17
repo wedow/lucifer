@@ -27,12 +27,38 @@ call_method(PyObject *self, const char *name, const char *format, ...)
     return r;
 }
 
+/* Whether s holds a surrogate, which no UTF-8 has. */
+static int
+has_surrogates(PyObject *s)
+{
+    int kind = PyUnicode_KIND(s);
+    const void *data = PyUnicode_DATA(s);
+    for (Py_ssize_t i = 0; kind != PyUnicode_1BYTE_KIND && i < PyUnicode_GET_LENGTH(s); i++) {
+        if (Py_UNICODE_IS_SURROGATE(PyUnicode_READ(kind, data, i))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 PyObject *
 PyUnicode_AsEncodedString(PyObject *unicode, const char *encoding, const char *errors)
 {
     if (!PyUnicode_Check(unicode)) {
         PyErr_BadArgument();
         return NULL;
+    }
+    if (encoding == NULL || !strcmp(encoding, "utf-8")) {
+        /* Without surrogates, what every handler makes: the cached UTF-8, no
+           codec looked up (paths, names). */
+        Py_ssize_t size;
+        const char *utf8 = !has_surrogates(unicode) ? PyUnicode_AsUTF8AndSize(unicode, &size) : NULL;
+        if (utf8 != NULL) {
+            return PyBytes_FromStringAndSize(utf8, size);
+        }
+        if (PyErr_Occurred()) {
+            return NULL;
+        }
     }
     PyObject *b = call_method(unicode, "encode", "(ss)", encoding != NULL ? encoding : "utf-8",
                               errors != NULL ? errors : "strict");
