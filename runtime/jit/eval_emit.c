@@ -420,8 +420,11 @@ lu_ev_settle(struct ctx *c, int pc)
     /* What the state names now (as an exit here would read it: this
        frame's slots and its callers' after their calls) and which virtual
        objects every frame's slots reach, found in one walk; each pending
-       value is then looked up, whatever their number. */
-    lu_ev_walk(c);
+       value is then looked up, whatever their number. A walker's sight
+       alone needs none. */
+    if (g->npending > 0) {
+        lu_ev_walk(c);
+    }
     /* pending grows as dead virtual objects give up their fields. */
     lu_v *rel = NULL;
     int nrel = 0, caprel = 0;

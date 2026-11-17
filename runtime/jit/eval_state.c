@@ -31,6 +31,7 @@ lu_ev_state_copy(struct gctx *g, struct state *to, const struct state *from)
     to->binds = copy_of(g, from->binds, sizeof(struct lu_bind) * (size_t)from->nbinds);
     to->nfacts = to->capfacts = from->nfacts;
     to->facts = copy_of(g, from->facts, sizeof(struct fact) * (size_t)from->nfacts);
+    to->version = from->version;
 }
 
 void
@@ -206,6 +207,10 @@ lu_ev_bind(struct gctx *g, struct state *st, int id, lu_v real, struct lu_vobj *
     lu_ev_changed(g);
     for (int i = 0; i < st->nbinds; i++) {
         if (st->binds[i].id == id) {
+            /* Another state may share the array, under the version it had
+               (lu_ev_replaced): the change is the copy's. */
+            st->binds = copy_of(g, st->binds, sizeof(struct lu_bind) * (size_t)st->nbinds);
+            st->capbinds = st->nbinds;
             st->binds[i].real = real;
             st->binds[i].obj = obj;
             return;
@@ -428,18 +433,17 @@ stamp_reached(struct gctx *g, lu_v r, uint32_t *reached, uint32_t stamp)
     }
 }
 
-/* The base is walked again when the frame, its slots or the epoch are not
-   the ones it was walked for. */
+/* The base is walked again when the frame or the state's version is not
+   the one it was walked for. */
 static void
 walk_base(struct ctx *c)
 {
     struct gctx *g = c->g;
-    if (g->base_ctx == c && g->base_of == slots(c) && g->base_epoch == g->epoch) {
+    if (g->base_ctx == c && g->base_version == g->st.version) {
         return;
     }
     g->base_ctx = c;
-    g->base_of = slots(c);
-    g->base_epoch = g->epoch;
+    g->base_version = g->st.version;
     g->base_stamp++;
     g->base_named = stamps(g, g->base_named, &g->capbase_named, g->f->nins);
     g->base_reached = stamps(g, g->base_reached, &g->capbase_reached, g->f->nvobjs);

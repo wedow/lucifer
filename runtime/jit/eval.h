@@ -47,6 +47,8 @@ struct state {
     int nbinds, capbinds;
     struct fact *facts;
     int nfacts, capfacts;
+    uint32_t version;           /* names what its frames' locals and its binds hold: a copy keeps it, a change
+                                   makes a new one (lu_ev_changed) */
 };
 
 /* Control reaching a block: the open graph block it comes through (no
@@ -233,10 +235,10 @@ struct gctx {
        the ones they were walked for. */
     uint32_t *base_named, *base_reached;
     int capbase_named, capbase_reached;
-    uint32_t base_stamp, base_epoch;
+    uint32_t base_stamp, base_version;
     struct ctx *base_ctx;
-    const lu_v *base_of;
     uint32_t epoch;             /* moves when a local, a virtual object or the frames change (lu_ev_changed) */
+    uint32_t versions;          /* states' versions handed out */
     int maxdepth;               /* the deepest inlined frame */
     PyTypeObject *relied;       /* the class last made a dependency for what is known of an object's type */
 };
@@ -328,7 +330,8 @@ void lu_ev_begin(struct ctx *c, int pc);
 /* What the state names is found by walking it once and stamping what
    the walk meets; any number of values are then looked up. The locals of
    a large frame and its callers' states change seldom, so their walk is
-   kept (the base) and only the innermost stack is walked each time.
+   kept (the base) for the state's version and only the innermost stack is
+   walked each time.
    lu_ev_walk stamps what the live state names and reaches; lu_ev_named
    and lu_ev_reached read it, until the next walk. */
 void lu_ev_walk(struct ctx *c);
@@ -338,6 +341,15 @@ int lu_ev_reached(struct gctx *g, int id);
    of them is stale. */
 static inline void
 lu_ev_changed(struct gctx *g)
+{
+    g->epoch++;
+    g->st.version = ++g->versions;
+}
+/* The state is one taken back whole (an edge's, a branch's other arm):
+   what was kept of the frame's slots is stale, but a walk of that very
+   state, as its version names it, still stands. */
+static inline void
+lu_ev_replaced(struct gctx *g)
 {
     g->epoch++;
 }

@@ -418,7 +418,7 @@ enter_edge(struct ctx *c, struct edge *e, int pc)
     struct gctx *g = c->g;
     g->cur = e->block;
     g->st = e->st;
-    lu_ev_changed(g);
+    lu_ev_replaced(g);
     begin_at(c, pc);
 }
 
@@ -1115,7 +1115,7 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
     if (n == 1) {
         g->cur = edges[0].block;
         g->st = edges[0].st;
-        lu_ev_changed(g);
+        lu_ev_replaced(g);
         return;
     }
     int d = edges[0].st.depth;
@@ -1618,7 +1618,7 @@ fresh_kept(struct ctx *c, struct bblk *bb)
             struct state st;
             lu_ev_state_copy(g, &st, &g->st);
             g->st = st;
-            lu_ev_changed(g);
+            lu_ev_replaced(g);
             own = 1;
         }
         slots(c)[i] = LU_NOV;
@@ -1916,7 +1916,7 @@ lu_ev_fork_with(struct ctx *c, lu_v bit, void (*arm)(struct ctx *c, void *arg), 
     g->cur = T;
     arm(c, arg);
     g->st = saved;
-    lu_ev_changed(g);
+    lu_ev_replaced(g);
     g->npending = 0;
     for (int i = 0; i < npending; i++) {
         lu_ev_drop(c, pending[i]);
@@ -1966,7 +1966,7 @@ lu_ev_split_else(struct ctx *c, struct split *s)
     struct gctx *g = c->g;
     split_arm(c, s);
     g->st = s->saved;
-    lu_ev_changed(g);
+    lu_ev_replaced(g);
     /* The instruction begins again: a way that split left the frame at
        the instruction's end (its join's). */
     c->pc = s->pc;
