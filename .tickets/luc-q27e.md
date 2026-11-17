@@ -1,6 +1,6 @@
 ---
 id: luc-q27e
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-17T14:36:00Z
@@ -17,3 +17,7 @@ The 11-17 deopt floor (4 jobs, nice 10, loaded host) lost 1351 libtest cases to 
 **2026-11-17T14:41:49Z**
 
 Alone on master (aaab42d): test_tarfile module wall time off 104 s, jit 151 s, deopt >181 s (killed at the 180 s regrtest module timeout after 745 cases at ~0.25 s each, no hang). Raising the libtest/fuzzdiff deadlines for every unit risks the daily's wall time where a module really hangs (the deopt floor has 3641 TIMEOUT cases), so pick per-mode deadlines from build/floor/unit-seconds.json rather than one constant.
+
+**2026-11-17T15:46:21Z**
+
+Landed: tools/floor keeps unit seconds per mode; a Lib/test module's and fuzzdiff process's deadline is 2x its last run in the mode (never under 180/300 s); a run over 2x keeps the old seconds. Deopt alone: test_tarfile 177 s, pygrammar_check-s1/-s2 190/184 s, next deadlines 354/380/368 s. A hung worker (test_bisect) stops at 211 s with no history, at 454 s with 211 s recorded, history kept at 211. floor quick PASS (off/jit/deopt, 429 s), check-harness PASS.
