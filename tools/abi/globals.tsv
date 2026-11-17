@@ -230,4 +230,5 @@ strs.*	runtime/jit/eval_prims.c	const table of the primitives whose result is al
 ints.*	runtime/jit/eval_prims.c	const table of the primitives whose result is always an exact int; relocated by ld.so, then read-only (RELRO)
 bools.*	runtime/jit/eval_prims.c	const table of the primitives whose result is always a bool; relocated by ld.so, then read-only (RELRO)
 known.*	runtime/jit/eval_prims.c	const table pairing those tables with their types; relocated by ld.so, then read-only (RELRO)
+lu_jit_exc_prev	runtime/jit/eval_exc.c	the immortal marker a unit's handler holds for the exc_info it left alone, compared by address, never written
 lu_jit_unbound	runtime/jit/jit.c	the immortal marker compiled code carries beside a raw number while its local is unbound; never written after load
