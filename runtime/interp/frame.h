@@ -110,6 +110,16 @@ lu_code_starts(PyCodeObject *code)
     return (uint64_t *)(((uintptr_t)(lu_code_start(code) + Py_SIZE(code)) + 7) & ~(uintptr_t)7);
 }
 
+/* Set once an attribute site of the code has cached a descriptor, which the
+   cache does not own: the word after the instruction starts. A collection
+   makes only such code forget its garbage (lu_specialize_forget); most code
+   never runs, or never caches one. */
+static inline uint32_t *
+lu_code_names_descrs(PyCodeObject *code)
+{
+    return (uint32_t *)(lu_code_starts(code) + (Py_SIZE(code) + 63) / 64);
+}
+
 /* The instruction that ends just before `after`, caches skipped: the last
    start below it. Unit 0 is a start, so the backward word walk ends. */
 static inline lu_codeunit *

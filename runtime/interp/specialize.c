@@ -578,7 +578,8 @@ void
 lu_specialize_forget(PyCodeObject *code, int (*dead)(PyObject *))
 {
     lu_codeunit *start = lu_code_start(code);
-    for (Py_ssize_t i = 0, n = Py_SIZE(code); i < n; ) {
+    for (Py_ssize_t i = 0, n = __atomic_load_n(lu_code_names_descrs(code), __ATOMIC_RELAXED) ? Py_SIZE(code) : 0;
+         i < n; ) {
         int base = lu_base_opcode(code, i);
         lu_codeunit *c = start + i + 1;
         PyObject *descr = base == LOAD_ATTR ? lu_cache_load_ptr(c + LA_DESCR) : NULL;

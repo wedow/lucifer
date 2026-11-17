@@ -3136,7 +3136,10 @@ op_LOAD_ATTR: {
        self and CALL unpacks the bound method. */
     PyObject *name = NAME(oparg >> 1);
     PyObject *owner = TOP();
-    ADAPT(lu_specialize_load_attr(owner, next_instr - 1, name));
+    ADAPT(lu_specialize_load_attr(owner, next_instr - 1, name);
+          if (lu_cache_load_ptr(next_instr + LA_DESCR) != NULL) {
+              __atomic_store_n(lu_code_names_descrs(code), 1, __ATOMIC_RELAXED);
+          });
     SKIP_CACHES();
     kret = (oparg & 1) ? LU_RETURN_METHOD : LU_RETURN_PUSH;
     if (PyModule_CheckExact(owner)) {
