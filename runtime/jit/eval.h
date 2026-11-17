@@ -490,10 +490,15 @@ lu_ev_in_gen(const struct ctx *c)
    its frame's words become a frame of the state and its body runs in
    line as a virtual one's does; a yield stores what changed back. 1 when
    built, 0 when not taken, -1 when the build failed. */
-int lu_ev_gen_adopt(struct ctx *c, lu_v it, int exit_pc);
+int lu_ev_gen_adopt(struct ctx *c, lu_v it, int exit_pc, int nops);
 int lu_ev_gen_takes(PyCodeObject *co);
 int lu_ev_gen_make(struct ctx *c);
-int lu_ev_gen_step(struct ctx *c, lu_v it, int exit_pc);
+int lu_ev_gen_step(struct ctx *c, lu_v it, int exit_pc, int nops);
+/* A call of the kernel's generator step (next() and the builtins that
+   consume an iterator take each item with it) on a generator either of
+   the above can run: stepped as a FOR_ITER steps it (exit_pc -1), its
+   value the next item or MISSING, the call's nops operands popped. */
+int lu_ev_gen_call(struct ctx *c, lu_v it, int nops);
 int lu_ev_gen_yield(struct ctx *c);
 void lu_ev_gen_finish(struct ctx *c);
 lu_v lu_ev_gen_real(struct ctx *c, struct lu_vobj *o);

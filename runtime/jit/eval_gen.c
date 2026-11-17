@@ -240,17 +240,40 @@ no_room(struct ctx *c, PyCodeObject *co)
     return NULL;
 }
 
+/* The consumer's step is a FOR_ITER that ends its loop at exit_pc, or
+   (exit_pc -1) a call of the kernel's generator step, the next item or
+   MISSING, whose nops operands leave the stack as it begins. */
+static void
+step_begins(struct ctx *c, int nops)
+{
+    for (int i = 0; i < nops; i++) {
+        lu_ev_pop(c);
+    }
+}
+
+static void
+step_finished(struct ctx *c, int exit_pc)
+{
+    if (exit_pc >= 0) {
+        lu_ev_fork(c, lu_ev_const_i(c, 1), exit_pc);    /* a finished generator ends the loop */
+        return;
+    }
+    lu_ev_push(c, lu_ev_konst(c, LU_MISSING));
+    lu_ev_settle(c, c->next);
+}
+
 /* The generator stands at code unit pc: its frame joins the state with
    its fields as its slots and the value a for loop sends, None, on its
    stack, and its code is evaluated from there. Its yields and its
    return go on in the consumer (lu_ev_gen_yield, lu_ev_return). */
 static int
-resume_at(struct ctx *c, lu_v it, int pc, int exit_pc)
+resume_at(struct ctx *c, lu_v it, int pc, int exit_pc, int nops)
 {
     struct gctx *g = c->g;
     struct lu_vobj *o = record_of(c, it);
+    step_begins(c, nops);
     if (pc == GEN_FINISHED) {
-        lu_ev_fork(c, lu_ev_const_i(c, 1), exit_pc);    /* a finished generator ends the loop */
+        step_finished(c, exit_pc);
         return 0;
     }
     PyFunctionObject *fn = (PyFunctionObject *)lu_ev_const(c, o->f[GEN_FN]);
@@ -258,7 +281,7 @@ resume_at(struct ctx *c, lu_v it, int pc, int exit_pc)
     struct resume *known = resume_find(g, co, 0, 0, pc);
     int depth = known != NULL ? known->depth : 0;
     struct ctx *k = lu_ir_alloc(g->f, sizeof(struct ctx));
-    k->ret = LU_RETURN_FOR_ITER;
+    k->ret = exit_pc >= 0 ? LU_RETURN_FOR_ITER : LU_RETURN_NEXT;
     k->gen = it;
     k->g = g;
     k->parent = c;
@@ -305,19 +328,19 @@ resume_at(struct ctx *c, lu_v it, int pc, int exit_pc)
 }
 
 static int
-resume_among(struct ctx *c, lu_v it, const int *pcs, int n, int exit_pc)
+resume_among(struct ctx *c, lu_v it, const int *pcs, int n, int exit_pc, int nops)
 {
     if (n == 1) {
-        return resume_at(c, it, pcs[0], exit_pc);
+        return resume_at(c, it, pcs[0], exit_pc, nops);
     }
     struct split s;
     lu_v at = record_of(c, it)->f[GEN_PC];
     lu_ev_split(c, lu_ev_emit(c, OP_CMP_I, REP_BIT, at, lu_ev_const_i(c, pcs[0]), LU_NOV, Py_EQ), &s);
-    if (resume_at(c, it, pcs[0], exit_pc) < 0) {
+    if (resume_at(c, it, pcs[0], exit_pc, nops) < 0) {
         return -1;
     }
     lu_ev_split_else(c, &s);
-    if (resume_among(c, it, pcs + 1, n - 1, exit_pc) < 0) {
+    if (resume_among(c, it, pcs + 1, n - 1, exit_pc, nops) < 0) {
         return -1;
     }
     lu_ev_split_end(c, &s);
@@ -325,7 +348,7 @@ resume_among(struct ctx *c, lu_v it, const int *pcs, int n, int exit_pc)
 }
 
 int
-lu_ev_gen_step(struct ctx *c, lu_v it, int exit_pc)
+lu_ev_gen_step(struct ctx *c, lu_v it, int exit_pc, int nops)
 {
     struct lu_vobj *o = record_of(c, it);
     PyCodeObject *co = (PyCodeObject *)((PyFunctionObject *)lu_ev_const(c, o->f[GEN_FN]))->func_code;
@@ -338,7 +361,7 @@ lu_ev_gen_step(struct ctx *c, lu_v it, int exit_pc)
         return 0;
     }
     int room = lu_ev_room_begin(c);
-    int r = resume_among(c, it, pcs, n, exit_pc);
+    int r = resume_among(c, it, pcs, n, exit_pc, nops);
     lu_ev_room_end(c, room);
     return r < 0 ? -1 : 1;
 }
@@ -491,7 +514,8 @@ show(struct gctx *g, lu_v v, PyObject *o)
    frame's words are loaded as a frame of the state, the unit's from here
    with the references they held, and its code is evaluated from pc. */
 static int
-adopt_at(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, int pc, int depth)
+adopt_at(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, int pc, int depth, int exit_pc,
+         int nops)
 {
     struct gctx *g = c->g;
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
@@ -510,10 +534,11 @@ adopt_at(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, 
             I(c, v)->blame_pc = I(c, at)->blame_pc;
         }
     }
+    step_begins(c, nops);
     word_set(c, it, STATE_WORD, STATE_AS_WORD(LU_GEN_EXECUTING));
     word_set(c, it, FRAME_WORD(owner), OWNER_AS_WORD(LU_FRAME_JIT));
     struct ctx *k = lu_ir_alloc(g->f, sizeof(struct ctx));
-    k->ret = LU_RETURN_FOR_ITER;
+    k->ret = exit_pc >= 0 ? LU_RETURN_FOR_ITER : LU_RETURN_NEXT;
     k->gen = it;
     k->adopted = 1;
     k->g = g;
@@ -572,7 +597,8 @@ struct stands {
 };
 
 static int
-adopt_among(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, const struct stands *s, int n)
+adopt_among(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, const struct stands *s, int n,
+            int exit_pc, int nops)
 {
     lu_v here = lu_ev_emit(c, OP_CMP_I, REP_BIT, at,
                            lu_ev_const_i(c, (int64_t)(intptr_t)(lu_code_start((PyCodeObject *)fn->func_code) + s[0].pc)),
@@ -587,15 +613,15 @@ adopt_among(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *see
         }
         I(c, g)->blame = I(c, at)->blame = root->code;
         I(c, g)->blame_pc = I(c, at)->blame_pc = root->pc;
-        return adopt_at(c, it, at, fn, seen, s[0].pc, s[0].depth);
+        return adopt_at(c, it, at, fn, seen, s[0].pc, s[0].depth, exit_pc, nops);
     }
     struct split sp;
     lu_ev_split(c, here, &sp);
-    if (adopt_at(c, it, at, fn, seen, s[0].pc, s[0].depth) < 0) {
+    if (adopt_at(c, it, at, fn, seen, s[0].pc, s[0].depth, exit_pc, nops) < 0) {
         return -1;
     }
     lu_ev_split_else(c, &sp);
-    if (adopt_among(c, it, at, fn, seen, s + 1, n - 1) < 0) {
+    if (adopt_among(c, it, at, fn, seen, s + 1, n - 1, exit_pc, nops) < 0) {
         return -1;
     }
     lu_ev_split_end(c, &sp);
@@ -603,7 +629,7 @@ adopt_among(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *see
 }
 
 int
-lu_ev_gen_adopt(struct ctx *c, lu_v it, int exit_pc)
+lu_ev_gen_adopt(struct ctx *c, lu_v it, int exit_pc, int nops)
 {
     struct gctx *g = c->g;
     PyObject *seen = shown(c, it);
@@ -679,7 +705,14 @@ lu_ev_gen_adopt(struct ctx *c, lu_v it, int exit_pc)
     }
     I(c, at)->blame = root->code;       /* for the guards each code unit's step makes (adopt_at) */
     I(c, at)->blame_pc = root->pc;
-    return adopt_among(c, it, at, fn, seen, s, n) < 0 ? -1 : 1;
+    return adopt_among(c, it, at, fn, seen, s, n, exit_pc, nops) < 0 ? -1 : 1;
+}
+
+int
+lu_ev_gen_call(struct ctx *c, lu_v it, int nops)
+{
+    return record_of(c, it) != NULL ? lu_ev_gen_step(c, it, -1, nops)
+        : !LU_IS_VIRT(it) ? lu_ev_gen_adopt(c, it, -1, nops) : 0;
 }
 
 /* YIELD_VALUE in an adopted frame: the frame's words get what the slots

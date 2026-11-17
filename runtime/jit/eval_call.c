@@ -684,13 +684,23 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
     if (kc == NULL && site) {
         kc = speculate_callee(c, callable, &self, &funcv);
     }
+    if (n == 1 && nkw == 0 && self == LU_NOV && kc != NULL && PyFunction_Check(kc)
+        && kc == lu_next_missing_of((PyObject *)&PyGen_Type)) {
+        int done = lu_ev_gen_call(c, a[0], nops);
+        if (done != 0) {
+            return done < 0 ? -1 : 0;
+        }
+    }
     const char *prim = primitive_name(kc);
-    if (lu_gen_resumes(kc)) {
-        lu_ev_side_exit(c, EXIT_SIDE);  /* the interpreter links the generator's frames */
+    if (lu_gen_throws(kc)) {
+        lu_ev_side_exit(c, EXIT_SIDE);  /* the interpreter links the delegation chain's frames */
         return 0;
     }
     if (prim != NULL && (((PyCFunctionObject *)kc)->m_ml->ml_flags & LU_METH_FRAME)) {
-        prim = NULL;    /* it hands a frame to run: called as C calls it, which runs the frame nested */
+        /* It hands a frame to run (a generator resumed, as next() and send()
+           resume one): called as C calls it, which runs the frame nested,
+           the generator's compiled code entered at its resume point. */
+        prim = NULL;
     }
     if (kc == (PyObject *)&PyType_Type && self == LU_NOV && n == 1 && nkw == 0 && a[0] != LU_NOV) {
         /* type(x): what is known of x, else the word of its header. */

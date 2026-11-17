@@ -112,6 +112,10 @@ require that a count of the tier's does not grow with the iterations:
          consuming a generator expression, the first run of `yield from`
          and await: the resumes the interpreter runs (each resume enters
          compiled code).
+  consumers tests/kernel/jit_gen_consumers.py, whose hot code hands
+         generators to the builtins that consume them and steps generators
+         it did not make with next() and send(): side exits, entries left
+         to the interpreter and units retired. Compiled code resumes them.
   callees tests/kernel/jit_callee_calls.py, whose hot calls are of
          methods at a site that meets four classes, and of functions,
          bound methods and closures the code reaches through locals and
@@ -240,6 +244,8 @@ GROWTH = {
     'guards': ('jit_guards.py', r'jit: unit hot@\d+ entries \d+ guards (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
     'gens': ('jit_gen_resumes.py', r'jit: generator resumes interpreted (\d+)', 0),
+    'consumers': ('jit_gen_consumers.py', r'jit: entries .* side (\d+)'
+                  r'|jit: entries waited (\d+), units retired (\d+)', 0),
     'callees': ('jit_callee_calls.py', r'call_unknown (\d+) call_poly (\d+)', 0),
     'rebind': ('jit_rebind.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
                r'|jit: entries waited (\d+)', 0),
@@ -294,7 +300,7 @@ def qualnames(program):
 # (entries by shape for calls that are not inlined, handlers and generators
 # inside a unit, polymorphic sites). Their programs' output is still checked.
 NOT_BUILT = frozenset("""calls raised caught ccalls shapes classes objects
-iterators forward slices guards gens unpack order""".split())
+iterators forward slices guards gens order""".split())
 
 
 def check_growth(args, lane):

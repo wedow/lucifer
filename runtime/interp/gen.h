@@ -38,10 +38,9 @@ lu_gen_of(struct lu_frame *f)
    over the frame `f`'s contents; `f` is left empty for lu_frame_pop. */
 PyObject *lu_gen_new(PyThreadState *ts, struct lu_frame *f);
 
-/* Whether callable is a primitive that resumes a generator (gen_send,
-   gen_throw): its frame comes linked as the interpreter runs it, a
-   throw's down a delegation chain with the chain. */
-int lu_gen_resumes(PyObject *callable);
+/* Whether callable is gen_throw, whose frames come linked down a
+   delegation chain as the interpreter runs it. */
+int lu_gen_throws(PyObject *callable);
 
 /* For the tier, which makes a generator its code kept virtual
    (runtime/jit/exit.c): lu_gen_blank gives a generator for a call of func

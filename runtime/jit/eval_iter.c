@@ -165,7 +165,7 @@ lu_ev_for_iter(struct ctx *c)
             return virtual_step(c, it, o, exit_pc);
         }
         if (o != NULL && real == LU_NOV && o->kind == VK_GEN) {
-            int done = lu_ev_gen_step(c, it, exit_pc);
+            int done = lu_ev_gen_step(c, it, exit_pc, 0);
             if (done != 0) {
                 return done < 0 ? -1 : 0;
             }
@@ -195,7 +195,7 @@ lu_ev_for_iter(struct ctx *c)
     else {
         /* Any other iterator but a generator (resumed, not called): the
            kernel's step in line, MISSING at the end. */
-        int done = !LU_IS_VIRT(it) ? lu_ev_gen_adopt(c, it, exit_pc) : 0;
+        int done = !LU_IS_VIRT(it) ? lu_ev_gen_adopt(c, it, exit_pc, 0) : 0;
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }
