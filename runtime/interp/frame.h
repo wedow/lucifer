@@ -171,15 +171,10 @@ lu_frame_in_gen(struct lu_frame *f)
 }
 
 /* What local i's slot holds (a cell for a cell variable) as a new reference,
-   or NULL when unbound. A frame compiled code runs (LU_FRAME_JIT) is read
-   through the state it published at its call; another task's, with the
-   world stopped. */
+   or NULL when unbound, for f on this task's chain or with every other task
+   stopped. A frame compiled code runs (LU_FRAME_JIT) is read through the
+   state it published at its call. */
 PyObject *lu_frame_slot(struct lu_frame *f, int i);
-
-/* Before a write to f's locals: a frame compiled code runs gets real
-   slots, and compiled code leaves it when the call it is in returns.
-   0, or -1 with an exception set. */
-int lu_frame_sync(struct lu_frame *f);
 
 /* The walker (FOUNDATIONS 2.2): calls visit(f, arg) on `from` and then each
    frame outward until it returns nonzero, and returns that frame, or NULL.

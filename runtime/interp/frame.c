@@ -176,39 +176,22 @@ on_own_chain(struct lu_frame *f)
 PyObject *
 lu_frame_slot(struct lu_frame *f, int i)
 {
-    if (__atomic_load_n(&f->owner, __ATOMIC_ACQUIRE) != LU_FRAME_JIT) {
-        return Py_XNewRef(f->localsplus[i]);
-    }
-    if (on_own_chain(f)) {
+    if (__atomic_load_n(&f->owner, __ATOMIC_ACQUIRE) == LU_FRAME_JIT && (on_own_chain(f) || !lu_jit_surface(f))) {
         return lu_jit_slot(f, i);
     }
-    if (lu_jit_surface(f)) {
-        return Py_XNewRef(f->localsplus[i]);
-    }
-    struct _is *interp = PyThreadState_Get()->interp;
-    lu_stw_stop(interp);
-    PyObject *v = f->owner == LU_FRAME_JIT ? lu_jit_slot(f, i) : Py_XNewRef(f->localsplus[i]);
-    lu_stw_start(interp);
-    return v;
+    return Py_XNewRef(f->localsplus[i]);
 }
 
-int
-lu_frame_sync(struct lu_frame *f)
+/* Before a write to f's locals (held as for lu_frame_slot): a frame compiled
+   code runs gets real slots, and compiled code leaves it when the call it is
+   in returns. 0, or -1 with an exception set. */
+static int
+frame_sync(struct lu_frame *f)
 {
-    if (__atomic_load_n(&f->owner, __ATOMIC_ACQUIRE) != LU_FRAME_JIT) {
-        return 0;
-    }
-    if (on_own_chain(f)) {
+    if (__atomic_load_n(&f->owner, __ATOMIC_ACQUIRE) == LU_FRAME_JIT && (on_own_chain(f) || !lu_jit_surface(f))) {
         return lu_jit_sync(f);
     }
-    if (lu_jit_surface(f)) {
-        return 0;
-    }
-    struct _is *interp = PyThreadState_Get()->interp;
-    lu_stw_stop(interp);
-    int r = f->owner == LU_FRAME_JIT ? lu_jit_sync(f) : 0;
-    lu_stw_start(interp);
-    return r;
+    return 0;
 }
 
 /* The walker (FOUNDATIONS 2.2). Links are single-store pushes and pops, so a
@@ -708,6 +691,29 @@ prim_frame_clear(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return lu_frame_clear((PyFrameObject *)args[0]) < 0 ? NULL : Py_NewRef(Py_None);
 }
 
+/* The record a frame object reads through, held still while its locals are
+   read or written. Another task may run it, or resume it (a generator), and
+   its stores free the values they replace, so unless the record is on this
+   task's chain every other task stops until frame_release. CPython reads
+   without holding (framelocalsproxy_getval) and can take a value as it dies. */
+static struct lu_frame *
+frame_hold(PyObject *op, int *stopped)
+{
+    *stopped = !on_own_chain(FO(op)->f_frame);
+    if (*stopped) {
+        lu_stw_stop(PyThreadState_Get()->interp);
+    }
+    return FO(op)->f_frame;     /* again: the frame may have finished before the world stopped */
+}
+
+static void
+frame_release(int stopped)
+{
+    if (stopped) {
+        lu_stw_start(PyThreadState_Get()->interp);
+    }
+}
+
 /* The value of fast local `i`: a new reference, or NULL when unbound. */
 static PyObject *
 fast_value(struct lu_frame *f, int i)
@@ -727,39 +733,42 @@ fast_name_is(PyCodeObject *co, int i, PyObject *key)
     return name == key || (PyUnicode_Check(key) && lu_str_eq(name, key));
 }
 
+/* The value of the bound fast local named key: a new reference, or NULL. */
+static PyObject *
+fast_lookup(PyObject *op, PyObject *key)
+{
+    int stopped;
+    struct lu_frame *f = frame_hold(op, &stopped);
+    PyObject *v = NULL;
+    for (int i = 0; v == NULL && i < f->code->co_nlocalsplus; i++) {
+        if (fast_name_is(f->code, i, key)) {
+            v = fast_value(f, i);
+        }
+    }
+    frame_release(stopped);
+    return v;
+}
+
 /* frame_fast_get(frame, key): a bound fast local's value, else MISSING. */
 static PyObject *
 prim_frame_fast_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2);
-    struct lu_frame *f = FO(args[0])->f_frame;
-    for (int i = 0; i < f->code->co_nlocalsplus; i++) {
-        if (fast_name_is(f->code, i, args[1])) {
-            PyObject *v = fast_value(f, i);
-            if (v != NULL) {
-                return v;
-            }
-        }
-    }
-    return Py_NewRef(LU_MISSING);
+    PyObject *v = fast_lookup(args[0], args[1]);
+    return v != NULL ? v : Py_NewRef(LU_MISSING);
 }
 
-/* frame_fast_set(frame, key, value): writes a fast local that is not hidden
-   (through its cell), 1; 0 when there is none. MISSING as the value is a
-   deletion, which a local refuses. */
+/* Writes the fast local named key of fo's record f, held: True, False when
+   there is none, NULL with an exception set. */
 static PyObject *
-prim_frame_fast_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+fast_store(struct lu_frameobj *fo, struct lu_frame *f, PyObject *key, PyObject *value)
 {
-    ARGS(3);
-    struct lu_frameobj *fo = FO(args[0]);
-    struct lu_frame *f = fo->f_frame;
-    PyObject *value = args[2];
-    if (lu_frame_sync(f) < 0) {
+    if (frame_sync(f) < 0) {
         return NULL;
     }
     for (int i = 0; i < f->code->co_nlocalsplus; i++) {
         unsigned char kind = (unsigned char)PyBytes_AS_STRING(f->code->co_localspluskinds)[i];
-        if (!fast_name_is(f->code, i, args[1]) || (kind & CO_FAST_HIDDEN)) {
+        if (!fast_name_is(f->code, i, key) || (kind & CO_FAST_HIDDEN)) {
             continue;
         }
         if (value == LU_MISSING) {
@@ -789,12 +798,27 @@ prim_frame_fast_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_False);
 }
 
+/* frame_fast_set(frame, key, value): writes a fast local that is not hidden
+   (through its cell), 1; 0 when there is none. MISSING as the value is a
+   deletion, which a local refuses. */
+static PyObject *
+prim_frame_fast_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(3);
+    int stopped;
+    struct lu_frame *f = frame_hold(args[0], &stopped);
+    PyObject *r = fast_store(FO(args[0]), f, args[1], args[2]);
+    frame_release(stopped);
+    return r;
+}
+
 /* frame_fast_items(frame): [(name, value)] of the bound fast locals, in order. */
 static PyObject *
 prim_frame_fast_items(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(1);
-    struct lu_frame *f = FO(args[0])->f_frame;
+    int stopped;
+    struct lu_frame *f = frame_hold(args[0], &stopped);
     PyObject *items = PyList_New(0);
     for (int i = 0; items != NULL && i < f->code->co_nlocalsplus; i++) {
         PyObject *v = fast_value(f, i);
@@ -810,6 +834,7 @@ prim_frame_fast_items(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         }
         Py_DECREF(pair);
     }
+    frame_release(stopped);
     return items;
 }
 
@@ -927,12 +952,9 @@ PyFrame_GetVar(PyFrameObject *f, PyObject *name)
                       Py_TYPE(name)->tp_name);
         return NULL;
     }
-    struct lu_frame *lf = FO(f)->f_frame;
-    for (int i = 0; i < lf->code->co_nlocalsplus; i++) {
-        PyObject *v = fast_name_is(lf->code, i, name) ? fast_value(lf, i) : NULL;
-        if (v != NULL) {
-            return v;
-        }
+    PyObject *v = fast_lookup((PyObject *)f, name);
+    if (v != NULL) {
+        return v;
     }
     lu_err_format(PyExc_NameError, "variable '%s' does not exist",
                   PyUnicode_AsUTF8(name));

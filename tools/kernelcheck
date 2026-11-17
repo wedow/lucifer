@@ -96,6 +96,7 @@ HANDOFF_XFAIL = {
 }
 # name -> [(flags, env)]: env None is -I -S with the inherited environment.
 RUNS = {
+    "threads_frame_locals_race": [([], None), (["-X", "lucifer_jit=off"], None)],
     "hash_seed": [([], {"PYTHONHASHSEED": "12345"}), ([], {"PYTHONHASHSEED": "0"})],
     "jit_deopt_raise": [(["-X", "lucifer_jit=always", "-X", f"lucifer_stress=deopt:{n}"], None)
                         for n in range(1, 13)],
