@@ -370,10 +370,12 @@ instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, ui
         op = managed ? LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES : LOAD_ATTR_NONDESCRIPTOR_NO_DICT;
     }
     else if (!method && (Py_IS_TYPE(*descr, &PyProperty_Type) || Py_IS_TYPE(*descr, &PyGetSetDescr_Type))
-             && lu_property_fget(*descr) != NULL && PyFunction_Check(lu_property_fget(*descr))) {
+             && lu_property_fget(*descr) != NULL && PyFunction_Check(lu_property_fget(*descr))
+             && _PyType_Lookup(tp, LU_ID(__getattr__)) == NULL) {
         /* A property whose getter is a function, or a kernel getset (whose
            getter is kernel Python): the getter called, which is read from
-           the property each time (its __init__ may change it). */
+           the property each time (its __init__ may change it). Not where a
+           __getattr__ answers the AttributeError the getter raises. */
         op = LOAD_ATTR_PROPERTY;
     }
     if (op == LOAD_ATTR || !cacheable(*descr)) {

@@ -321,7 +321,7 @@ lu_prim_os_fstat(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return stat_tuple(&st);
 }
 
-/* listdir(path): the entry names, without . and .. */
+/* listdir(path): the entry names, without . and .., str or bytes as path is */
 PyObject *
 lu_prim_os_listdir(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -349,7 +349,8 @@ lu_prim_os_listdir(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) {
             continue;
         }
-        PyObject *name = from_locale(e->d_name);
+        /* Names as the path was given: bytes for bytes (posix_listdir). */
+        PyObject *name = PyBytes_Check(args[0]) ? PyBytes_FromString(e->d_name) : from_locale(e->d_name);
         if (name == NULL || lu_list_append(names, name) < 0) {
             Py_XDECREF(name);
             Py_CLEAR(names);
