@@ -527,6 +527,9 @@ struct lu_jit_act {
     struct lu_jit_act *outer;
 };
 
+/* Whether a dict change killed a unit since the last release (lu_jit_release). */
+static int release_due;
+
 /* The dead units not yet freed, the count of them, and of those freed. */
 static struct { pthread_mutex_t lock; struct lu_unit *head; unsigned long n, freed; } dying = {
     .lock = PTHREAD_MUTEX_INITIALIZER };
@@ -691,6 +694,35 @@ lu_jit_reclaim_free(struct lu_unit *units)
         next = u->next;
         free_unit(u);
         count(&dying.freed, 1);
+    }
+}
+
+/* A collection's reclaim, now, when a dict change killed a unit since the
+   last (lucifer.h). */
+void
+lu_jit_release(void)
+{
+    PyThreadState *ts = PyThreadState_GetUnchecked();
+    if (!__atomic_load_n(&release_due, __ATOMIC_RELAXED) || ts == NULL || lu_world_stopped(ts->interp)
+        || !__atomic_exchange_n(&release_due, 0, __ATOMIC_ACQUIRE)) {
+        return;
+    }
+    lu_stw_stop(ts->interp);
+    struct lu_unit *dead = lu_jit_reclaim(ts->interp);
+    lu_stw_start(ts->interp);
+    lu_jit_reclaim_free(dead);
+}
+
+/* An activation of u left it for the interpreter, which goes on with the
+   frame: a stale unit goes as soon as no activation is in it. A unit
+   leaves this way once it is dead (its next check), so a stale one that
+   returns or yields instead waits for the next release. */
+static void
+left(struct lu_unit *u, int r)
+{
+    if ((r == LU_JIT_DEOPT || r == LU_JIT_ERROR) && __atomic_load_n(&u->stale, __ATOMIC_RELAXED)) {
+        __atomic_store_n(&release_due, 1, __ATOMIC_RELAXED);
+        lu_jit_release();
     }
 }
 
@@ -901,10 +933,15 @@ kill(struct lu_jit_code *jc, struct lu_unit *u)
 
 /* A writer took back what the unit relies on (runtime/jit/deps.c), or a
    guard moved out of its loop failed: it dies, and calls stop entering it
-   directly. */
+   directly. stale: a dict changed, so it may hold a value the dict lets
+   go, and the next release frees it (lu_jit_release). */
 void
-lu_jit_unit_kill(struct lu_unit *u)
+lu_jit_unit_kill(struct lu_unit *u, int stale)
 {
+    if (stale) {
+        __atomic_store_n(&u->stale, 1, __ATOMIC_RELAXED);
+        __atomic_store_n(&release_due, 1, __ATOMIC_RELEASE);
+    }
     if (!__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
         count(&stats.invalidated, 1);
     }
@@ -1076,6 +1113,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     }
     int r = u->fn(ts, frame, result);
     task->jit_act = act.outer;
+    left(u, r);
     if (debug) {
         struct lu_frame *cf = (struct lu_frame *)ts->current_frame;
         int py = cf != NULL && cf->code != NULL;       /* else back in a C caller, or its shim frame */
@@ -1195,6 +1233,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     bump_entries(u);
     int r = u->fn(ts, frame, result);
     task->jit_act = act.outer;
+    left(u, r);
     if (r == LU_JIT_YIELD) {
         /* As the interpreter's YIELD_VALUE, back to a C caller. */
         lu_gen_suspend(ts, frame, frame->instr[-1].op.arg);

@@ -196,6 +196,7 @@ struct lu_unit {
        a collection found an activation in it (jit.c). */
     struct lu_unit *dying_next, **dying_pprev;
     int held;
+    int stale;                  /* a dict change killed it: it may hold the value let go (lu_jit_release) */
     unsigned long built;        /* sites marked generic before its build began (jit.c) */
     struct lu_dep *deps;        /* what it relies on between polls (runtime/jit/deps.c) */
     int ndeps;
@@ -259,7 +260,7 @@ uint64_t lu_jit_deps_begin(void);
 void lu_jit_deps_end(void);
 int lu_jit_deps_publish(struct lu_unit *u, const struct lu_fdep *want, int n, uint64_t ticket);
 void lu_jit_deps_free(struct lu_unit *u);
-void lu_jit_unit_kill(struct lu_unit *u);
+void lu_jit_unit_kill(struct lu_unit *u, int stale);
 void lu_jit_nohoist_set(PyCodeObject *code, int pc);
 int lu_jit_nohoist(PyCodeObject *code, int pc);
 

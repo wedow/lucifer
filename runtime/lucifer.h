@@ -1751,6 +1751,12 @@ void lu_watchers_init(struct _is *interp);
    running one's code at its next check. */
 enum lu_dep_kind { LU_DEP_TYPE, LU_DEP_KEYS, LU_DEP_VALUE, LU_DEP_FUNC, LU_DEP_CALLEES };
 void lu_jit_invalidate(int kind, uintptr_t obj, uint32_t sub);
+/* A unit holds each dict value it compiled in as a constant. A writer
+   that lets go of a watched dict's value calls this after: if a dict
+   change killed a unit since the last call, the dead units no activation
+   is in are freed now, so the value dies there as in CPython; one an
+   activation is in goes when that activation leaves it. */
+void lu_jit_release(void);
 int lu_watcher_add(lu_watcher *table, int first, lu_watcher callback, const char *kind);
 int lu_watcher_check(lu_watcher *table, int id, const char *invalid, const char *unset);
 

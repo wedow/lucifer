@@ -75,11 +75,13 @@ lu_ev_load_global(struct ctx *c)
             v = lu_ev_dict_const(c, c->builtins, NULL, name);
         }
     }
-    else if (nospec(c, c->pc) && PyDict_CheckExact(c->globals) && PyDict_CheckExact(c->builtins)
-             && !binds_code(c, name)) {
-        /* Its guards kept failing (a value rebound on every call): loaded
-           through the site's own cache each time; a miss leaves for the
-           NameError. */
+    else if ((nospec(c, c->pc) || lu_jit_nohoist(c->code, c->pc)) && PyDict_CheckExact(c->globals)
+             && PyDict_CheckExact(c->builtins) && !binds_code(c, name)) {
+        /* Its guards kept failing (a value rebound on every call), or a
+           writer took its value back before: loaded through the site's own
+           cache each time, so no unit holds a value the global let go (a
+           guard kept in place would, until the unit dies); a miss leaves
+           for the NameError. */
         lu_v args[4] = { lu_ev_konst(c, c->globals), lu_ev_konst(c, c->builtins), lu_ev_konst(c, name),
                          lu_ev_const_i(c, (int64_t)(intptr_t)(c->cache - 1)) };
         lu_ev_push(c, lu_ev_helper(c, H_load_global, 4, args, 0));
@@ -502,7 +504,7 @@ lu_ev_load_attr(struct ctx *c)
     /* A known module's attribute: a constant, guarded
        as a global is. */
     PyObject *mod = lu_ev_const(c, owner);
-    if (mod != NULL && PyModule_CheckExact(mod) && !nospec(c, c->pc)) {
+    if (mod != NULL && PyModule_CheckExact(mod) && !nospec(c, c->pc) && !lu_jit_nohoist(c->code, c->pc)) {
         PyObject *k = lu_ev_dict_const(c, PyModule_GetDict(mod), NULL, name);
         if (k != NULL) {
             replace_owner(c, lu_ev_konst(c, k), LU_NOV);

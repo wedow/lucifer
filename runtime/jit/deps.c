@@ -208,7 +208,7 @@ lu_jit_invalidate(int kind, uintptr_t obj, uint32_t sub)
         if (kind != LU_DEP_CALLEES) {
             lu_jit_nohoist_set(d->want.code, d->want.pc);       /* a new callee is no failed guard */
         }
-        lu_jit_unit_kill(u);
+        lu_jit_unit_kill(u, kind == LU_DEP_KEYS || kind == LU_DEP_VALUE);
         killed = 1;
     }
     PyMutex_Unlock(&b->lock);

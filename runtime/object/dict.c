@@ -144,19 +144,23 @@ lu_dict_send_event(int watcher_bits, PyDict_WatchEvent event, PyDictObject *mp, 
 
 /* After a change to a dict compiled code relies on (dict watcher id 0):
    its keys (ix < 0), or the value of entry ix, named by its word's offset
-   in the keys table, which only a change of keys moves. */
-static void
+   in the keys table, which only a change of keys moves. True when compiled
+   code relies on the dict: a change that lets go of a value then calls
+   lu_jit_release once the dict is whole. */
+static int
 changed(PyDictObject *mp, Py_ssize_t ix)
 {
-    if (__atomic_load_n(&mp->_ma_watcher_tag, __ATOMIC_ACQUIRE) & 1) {
-        PyDictKeysObject *dk = mp->ma_keys;
-        if (ix >= 0) {
-            lu_jit_invalidate(LU_DEP_VALUE, (uintptr_t)mp, (uint32_t)((char *)lu_dk_value_slot(dk, ix) - (char *)dk));
-        }
-        else {
-            lu_jit_invalidate(LU_DEP_KEYS, (uintptr_t)mp, 0);
-        }
+    if (!(__atomic_load_n(&mp->_ma_watcher_tag, __ATOMIC_ACQUIRE) & 1)) {
+        return 0;
     }
+    PyDictKeysObject *dk = mp->ma_keys;
+    if (ix >= 0) {
+        lu_jit_invalidate(LU_DEP_VALUE, (uintptr_t)mp, (uint32_t)((char *)lu_dk_value_slot(dk, ix) - (char *)dk));
+    }
+    else {
+        lu_jit_invalidate(LU_DEP_KEYS, (uintptr_t)mp, 0);
+    }
+    return 1;
 }
 
 /* The item calls of the dict API that watchers are tested through. They go
@@ -860,13 +864,17 @@ lu_dict_replace(PyDictObject *mp, Py_ssize_t ix, PyObject *value)
     if (old != value) {
         lu_dict_notify(mp, PyDict_EVENT_MODIFIED, lu_dk_key(dk, ix), value);
         __atomic_store_n(slot, Py_NewRef(value), __ATOMIC_RELEASE);
-        changed(mp, ix);
+        int watched = changed(mp, ix);
         Py_XDECREF(old);
+        if (watched) {
+            lu_jit_release();
+        }
     }
 }
 
-PyObject *
-lu_dict_remove(PyDictObject *mp, Py_ssize_t ix)
+/* Takes entry ix out; its value goes to the caller. *watched: changed's. */
+static PyObject *
+remove_entry(PyDictObject *mp, Py_ssize_t ix, int *watched)
 {
     PyDictKeysObject *dk = mp->ma_keys;
     PyObject *key = lu_dk_key(dk, ix), *value = lu_dk_value(dk, ix);
@@ -881,8 +889,19 @@ lu_dict_remove(PyDictObject *mp, Py_ssize_t ix)
     }
     dk->dk_version = 0;
     __atomic_store_n(&mp->ma_used, mp->ma_used - 1, __ATOMIC_RELAXED);
-    changed(mp, -1);
+    *watched = changed(mp, -1);
     Py_DECREF(key);
+    return value;
+}
+
+PyObject *
+lu_dict_remove(PyDictObject *mp, Py_ssize_t ix)
+{
+    int watched;
+    PyObject *value = remove_entry(mp, ix, &watched);
+    if (watched) {
+        lu_jit_release();       /* the caller holds the value: it dies when the caller lets go */
+    }
     return value;
 }
 
@@ -896,11 +915,15 @@ lu_dict_popitem(PyDictObject *mp)
         return NULL;
     }
     PyObject *key = Py_NewRef(lu_dk_key(dk, ix));
-    PyObject *value = lu_dict_remove(mp, ix);
+    int watched;
+    PyObject *value = remove_entry(mp, ix, &watched);
     dk->dk_nentries = ix;       /* the entries after it are deleted too */
     dk->dk_serial = next_serial();  /* the numbers it frees are used again */
     PyTuple_SET_ITEM(pair, 0, key);
     PyTuple_SET_ITEM(pair, 1, value);
+    if (watched) {
+        lu_jit_release();
+    }
     return pair;
 }
 
@@ -914,12 +937,15 @@ lu_dict_clear(PyDictObject *mp)
     lu_dict_notify(mp, PyDict_EVENT_CLEARED, NULL, NULL);
     __atomic_store_n(&mp->ma_keys, LU_EMPTY_KEYS, __ATOMIC_RELEASE);
     __atomic_store_n(&mp->ma_used, 0, __ATOMIC_RELAXED);
-    changed(mp, -1);
+    int watched = changed(mp, -1);
     for (Py_ssize_t i = 0; i < old->dk_nentries; i++) {
         Py_XDECREF(lu_dk_key(old, i));
         Py_XDECREF(lu_dk_value(old, i));
     }
     lu_qsbr_retire(old);
+    if (watched) {
+        lu_jit_release();
+    }
 }
 
 Py_ssize_t
