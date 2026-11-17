@@ -234,8 +234,7 @@ no_room(struct ctx *c, PyCodeObject *co)
     if (lu_jit_noinline(co)) {
         return "its inlined copies kept leaving";
     }
-    if (c->g->f->nins + 2 * c->g->f->ninlined > c->g->budget) {
-        c->g->f->refused++;
+    if (!lu_ev_room(c, again)) {
         return "over budget";
     }
     return NULL;
@@ -338,7 +337,10 @@ lu_ev_gen_step(struct ctx *c, lu_v it, int exit_pc)
         lu_ev_val(c, it);
         return 0;
     }
-    return resume_among(c, it, pcs, n, exit_pc) < 0 ? -1 : 1;
+    int room = lu_ev_room_begin(c);
+    int r = resume_among(c, it, pcs, n, exit_pc);
+    lu_ev_room_end(c, room);
+    return r < 0 ? -1 : 1;
 }
 
 static int adopted_yield(struct ctx *c);

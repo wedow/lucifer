@@ -333,6 +333,10 @@ struct lu_func {
     int loops;                  /* back edges built: one entry may run unbounded work */
     int sites, cold;            /* sites with feedback, and those the interpreter never ran */
     int refused;                /* calls left out of line for want of budget */
+    uint64_t *outs;             /* their sites, by lu_jit_site_key: the unit counts the calls made there */
+    int nouts, capouts;
+    uint64_t *hots;             /* hot sites taken in line past the budget, each once */
+    int nhots, caphots;
     int budget;                 /* instructions past which the evaluator inlines no more (jit.c) */
     struct lu_fdep *deps;       /* the facts the code relies on between polls */
     int ndeps, capdeps;

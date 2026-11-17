@@ -371,6 +371,8 @@ lu_ir_free(struct lu_func *f)
     }
     free(f->blocks);
     free(f->ins);
+    free(f->outs);
+    free(f->hots);
     free(f->known);
     free(f->vobjs);
     free(f->deps);

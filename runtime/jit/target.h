@@ -141,7 +141,10 @@ struct lu_deopt {
     uint8_t tier;
     uint8_t regs;               /* published by a slow path that saved every register at the frame's jit_regs */
     uint8_t visible;            /* an inlined frame is a user's: a walker makes the frames real */
+    uint16_t out;               /* published by a call: 1 + its site's index in the unit's outs, LU_OUT_NONE
+                                   when the budget did not leave it out, 0 before the first call (jit.c) */
 };
+#define LU_OUT_NONE UINT16_MAX
 
 /* The activation's forced state (runtime/jit/exit.c), made when a walker
    first needs a frame or an object of it that compiled code kept virtual:
@@ -184,6 +187,12 @@ struct lu_unit {
     unsigned long leaves;       /* exits no recompile can remove: side exits of the root frame, errors */
     int loops;                  /* the code has a back edge: an entry may do unbounded work */
     int refused;                /* calls it left out of line for want of budget (jit.c grows it) */
+    struct lu_out {             /* their sites, hashed by key (open addressing, mask + 1 of them; jit.c) */
+        uint64_t key;           /* 0: none */
+        uint32_t calls;         /* made there while the unit ran */
+    } *outs;
+    int outmask;
+    uint32_t hot_calls;         /* calls made at one of them that make it hot: about what a build of the unit costs */
     int dead;
     /* While dead and not yet freed: the list of such units, and whether
        a collection found an activation in it (jit.c). */

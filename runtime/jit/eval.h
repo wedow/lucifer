@@ -200,6 +200,7 @@ struct gctx {
                                    MISFIT_FRESH when a local's object phi an instance the loop made) */
     unsigned long learned;      /* the root's count of what it learned, when the build began */
     int ret_missing;            /* the call just inlined for a FOR_ITER may have answered MISSING */
+    uint64_t hot_room;          /* the hot site lu_ev_room let a call in at past the budget, or 0 */
     struct hint *hints;
     int nhints, caphints;
     PyObject **shown;           /* objects the entry frame shows the unit (eval_gen.c), each a reference */
@@ -245,6 +246,12 @@ int lu_jit_nospec(PyCodeObject *code, int pc);
 int lu_jit_catches(PyCodeObject *code, int pc);     /* the kernel handler at pc took what calls raised (jit.c) */
 int lu_jit_next_pc(PyCodeObject *code, int pc);
 int lu_jit_noinline(PyCodeObject *code);
+/* A call site: pc of code, reached in line from outer's call at outer_pc,
+   or a site of the unit's own code (outer NULL). */
+uint64_t lu_jit_site_key(PyCodeObject *code, int pc, PyCodeObject *outer, int outer_pc);
+/* Whether units of root made calls out of line at the site often: a
+   call there goes in line whatever the budget has left. */
+int lu_jit_hot_site(PyCodeObject *root, uint64_t key);
 /* The evaluator's scan of a code (eval_flow.c), kept with the code's JIT
    state: the one kept, or NULL; and one to keep, malloc'd, which the
    state takes (or frees for one another thread kept first), NULL when the
@@ -487,6 +494,17 @@ int lu_ev_gen_back_edge(struct ctx *c, lu_v phi, lu_v now);
    ret says, goes on after the caller's instruction (eval_call.c). The
    frame has left the state. */
 int lu_ev_returned(struct ctx *c, lu_v v);
+/* Whether the unit has room for a call at c's instruction in line: its
+   budget is not spent, or units of its code called out there often and
+   the callee is not in line already (`again`, its frames in the state).
+   A call refused is recorded for the unit to count (eval_call.c). */
+int lu_ev_room(struct ctx *c, int again);
+/* The call lu_ev_room let in for a hot site goes in line: the build
+   takes the site past the budget only this once, and the callee's own
+   calls have the room the unit began with, from where it begins.
+   lu_ev_room_end takes the room back once the callee is built. */
+int lu_ev_room_begin(struct ctx *c);
+void lu_ev_room_end(struct ctx *c, int room);
 /* An instance of tp as object.__new__ makes it: one that does not exist
    when its class allows (VK_INST, eval_attr.c). */
 lu_v lu_ev_new_instance(struct ctx *c, PyTypeObject *tp);

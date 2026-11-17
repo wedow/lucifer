@@ -157,6 +157,65 @@ speculate_callee(struct ctx *c, lu_v callable, lu_v *self, lu_v *funcv)
     return e.obj;
 }
 
+static void
+note_key(uint64_t **keys, int *n, int *cap, uint64_t key)
+{
+    if (*n == *cap) {
+        *cap = *cap ? 2 * *cap : 16;
+        *keys = realloc(*keys, sizeof(uint64_t) * (size_t)*cap);
+    }
+    (*keys)[(*n)++] = key;
+}
+
+int
+lu_ev_room(struct ctx *c, int again)
+{
+    struct lu_func *f = c->g->f;
+    c->g->hot_room = 0;
+    /* An inlined frame's entry and return each cost an instruction once
+       (the recursion count, kept now only across calls): the budget, tuned
+       with them, still charges them. */
+    if (f->nins + 2 * f->ninlined <= c->g->budget) {
+        return 1;
+    }
+    uint64_t key = lu_jit_site_key(c->code, c->pc, c->parent != NULL ? c->parent->code : NULL,
+                                   c->parent != NULL ? c->parent->next : 0);
+    /* A hot site goes in line past the budget once: the build's other
+       paths to it, and copies of the code around it, keep to the budget. */
+    int taken = 0;
+    for (int i = 0; i < f->nhots && !taken; i++) {
+        taken = f->hots[i] == key;
+    }
+    if (!taken && again == 0 && c->g->budget >= 0 && lu_jit_hot_site(f->code, key)) {
+        c->g->hot_room = key;
+        return 1;
+    }
+    f->refused++;
+    note_key(&f->outs, &f->nouts, &f->capouts, key);
+    return 0;
+}
+
+int
+lu_ev_room_begin(struct ctx *c)
+{
+    struct gctx *g = c->g;
+    uint64_t key = g->hot_room;
+    g->hot_room = 0;
+    if (key == 0) {
+        return 0;
+    }
+    note_key(&g->f->hots, &g->f->nhots, &g->f->caphots, key);
+    int room = g->f->nins + 2 * g->f->ninlined + g->f->budget - g->budget;
+    g->budget += room;
+    return room;
+}
+
+void
+lu_ev_room_end(struct ctx *c, int room)
+{
+    c->g->budget -= room;
+}
+
 /* Why fn cannot be evaluated in line for a call here, or NULL. */
 static const char *
 not_inlinable(struct ctx *c, PyFunctionObject *fn, lu_v funcv)
@@ -185,11 +244,7 @@ not_inlinable(struct ctx *c, PyFunctionObject *fn, lu_v funcv)
     if (again > 1) {
         return "recursive";
     }
-    /* An inlined frame's entry and return each cost an instruction once
-       (the recursion count, kept now only across calls): the budget, tuned
-       with them, still charges them. */
-    if (c->g->f->nins + 2 * c->g->f->ninlined > c->g->budget) {
-        c->g->f->refused++;
+    if (!lu_ev_room(c, again)) {
         return "over budget";
     }
     if (!lu_ev_supported(c->g, co)) {
@@ -425,7 +480,12 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, lu_v *args, int npo
        the callee's first instruction, where its frame is whole. */
     k->pc = 0;
     lu_ev_settle(k, 0);
-    if (lu_ev_build(k, 0) < 0) {
+    /* A hot site's callee has room for its own calls: what its own unit
+       would take in line comes with it. */
+    int room = lu_ev_room_begin(c);
+    int built = lu_ev_build(k, 0);
+    lu_ev_room_end(c, room);
+    if (built < 0) {
         return -1;
     }
     if (g->restart) {
