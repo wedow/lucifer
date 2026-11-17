@@ -14,7 +14,8 @@
    change that retired the item, and a carrier with no task attached is not
    stopped by a stop-the-world, whose collection borrows ob_tid and empties
    the free lists. An exiting carrier leaves its queue to the next carrier
-   that processes.
+   that processes. A collection takes every queue, as CPython's does: what
+   is queued dies by the end of gc.collect().
 
    Unlike CPython's array of per-thread states, the carriers form a list under
    the registry lock, which scans and advances take. */
@@ -197,6 +198,38 @@ lu_qsbr_process(struct lu_carrier *c)
     c->qsbr.should_process = 0;
     process_queue(&c->qsbr.queue);
     process_orphans();
+}
+
+/* Empties `q`: frees its memory now and hands each object to `release`. */
+static void
+take_queue(struct lu_qsbr_queue *q, void (*release)(PyObject *, void *), void *arg)
+{
+    for (size_t i = q->first; i < q->n; i++) {
+        void *p = q->items[i].ptr;
+        if ((uintptr_t)p & 1) {
+            release((PyObject *)((uintptr_t)p - 1), arg);
+        }
+        else {
+            PyMem_Free(p);
+        }
+    }
+    q->first = q->n = 0;
+}
+
+/* With the world stopped every other task is at a poll or detached, so no
+   reader holds anything queued: every queue and the orphans are due. Each
+   object's reference goes to `release`, which drops it without running a
+   dealloc there (the collector merges it, as CPython's process_delayed_frees
+   does), so a replaced dict nothing else holds dies in this collection. */
+void
+lu_qsbr_take_all(void (*release)(PyObject *, void *), void *arg)
+{
+    pthread_mutex_lock(&_PyRuntime.qsbr.lock.mutex);
+    for (struct lu_carrier *c = _PyRuntime.qsbr.head; c != NULL; c = c->qsbr.next) {
+        take_queue(&c->qsbr.queue, release, arg);
+    }
+    take_queue(&_PyRuntime.qsbr.orphans, release, arg);
+    pthread_mutex_unlock(&_PyRuntime.qsbr.lock.mutex);
 }
 
 /* An exiting carrier, with no task attached: goes offline and leaves its items behind. */

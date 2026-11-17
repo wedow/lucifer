@@ -269,9 +269,11 @@ start_the_world(struct _is *interp)
 
 /* ---- Deducing the unreachable set ---- */
 
-/* An object another thread queued to its owner is merged now: the queue's
-   reference is dropped, and if that was the last, a dead object is released
-   after the restart (a tracked one is found as garbage with no references). */
+/* An object another thread queued to its owner, or one whose release was
+   delayed for lock-free readers (lu_qsbr_take_all), is merged now: the
+   queue's reference is dropped, and if that was the last, a dead object is
+   released after the restart (a tracked one is found as garbage with no
+   references). */
 static void
 merge_queued_object(PyObject *op, void *arg)
 {
@@ -742,6 +744,7 @@ collect_internal(struct collection_state *state, int generation)
         }
     }
     lu_brc_take_queued(interp, merge_queued_object, state);
+    lu_qsbr_take_all(merge_queued_object, state);
     deduce_unreachable_heap(state);
     if (state->debug & LU_GC_DEBUG_COLLECTABLE) {
         WORKSTACK_FOR_EACH(&state->unreachable, op) {

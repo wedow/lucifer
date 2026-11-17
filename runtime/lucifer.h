@@ -910,6 +910,8 @@ void lu_qsbr_unregister(struct lu_carrier *c);
 void lu_qsbr_attach(struct lu_carrier *c);
 void lu_qsbr_detach(struct lu_carrier *c);
 void lu_qsbr_process(struct lu_carrier *c);
+/* A collection, with the world stopped: every delayed free is due. */
+void lu_qsbr_take_all(void (*release)(PyObject *, void *), void *arg);
 /* The goals that readers must reach before something is freed: for mimalloc
    pages (runtime/object/alloc.c). Advance moves the write sequence on and
    answers the goal that follows; next answers it without moving. */
