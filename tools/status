@@ -13,8 +13,10 @@ Environment:
   NUMPY_SITE, NUMPY_CACHE, NUMPY_WORK  site-packages, wheel cache and raw-log directory (--numpy)
   WEB_SITE       site-packages with Flask for the 3.14t ABI (the web benchmark; skipped when unset)
   WEB_GIL_PYTHON a CPython 3.14 GIL interpreter that imports Flask (--refresh-reference only)
+  PYPY           a PyPy interpreter, timed beside CPython (--refresh-reference only)
 
-CPython timings come from results/status-reference.json; --refresh-reference rewrites it.
+CPython and PyPy timings come from results/status-reference.json; --refresh-reference rewrites it.
+PyPy runs AWFY and the corpus at CPython's loop counts; a program it cannot run counts as failing.
 The corpus (tools/bench/corpus) installs into build/corpus/site; its CPython run sets each program's loops.
 """
 import argparse
@@ -128,12 +130,16 @@ def corpus_timings(command, reference=None):
 
 
 def refresh_reference(names, iters, oracle):
-    times = timings(names, iters, {"cpython": oracle})
+    pypy = os.environ.get("PYPY")
+    times = timings(names, iters, {"cpython": oracle, **({"pypy": pypy} if pypy else {})})
     site, gil = os.environ.get("WEB_SITE"), os.environ.get("WEB_GIL_PYTHON")
     web = web_timings({"cpython-3.14": gil, "cpython-3.14t": f"env PYTHONPATH={site} {oracle}"})[0] if site and gil else {}
-    REFERENCE.write_text(json.dumps({"version": oracle_version(oracle),
-                                     "best_us": {n: times[n]["cpython"] for n in names},
-                                     "web": web, "corpus": corpus_timings(oracle)[0]}, indent=1) + "\n")
+    reference = {"version": oracle_version(oracle), "best_us": {n: times[n]["cpython"] for n in names},
+                 "web": web, "corpus": corpus_timings(oracle)[0]}
+    if pypy:
+        reference["pypy"] = {"version": oracle_version(pypy), "best_us": {n: times[n]["pypy"] for n in names},
+                             "corpus": corpus_timings(pypy, reference["corpus"])[0]}
+    REFERENCE.write_text(json.dumps(reference, indent=1) + "\n")
 
 
 # --- gates and conformance --------------------------------------------------
@@ -274,28 +280,36 @@ def web_section(metrics, before):
     return md
 
 
-def suite_ratios(record):
-    """{suite: [ratio, or None for a failing program]} over a record's *.on_over_cpython keys."""
+def suite_ratios(record, runtime="on"):
+    """{suite: {program: ratio, or None where it fails}} over a record's *.RUNTIME_over_cpython keys."""
     found = {}
     for k, v in record.items():
-        if k.endswith(".on_over_cpython"):
-            found.setdefault(k.split(".")[0], []).append(float(v) if v not in (None, "") else None)
+        if k.endswith(f".{runtime}_over_cpython"):
+            found.setdefault(k.split(".")[0], {})[k.rsplit(".", 1)[0]] = float(v) if v not in (None, "") else None
     return found
 
 
 def suites_section(metrics, before):
-    """Per suite: programs, failing and the geomean of the rest, as the README composite counts them."""
-    now, then = suite_ratios(metrics), suite_ratios(before)
-    scored = lambda record: sum((v for k, v in record.items() if k != WARM), [])
-    now, then["all"] = {**dict(sorted(now.items())), "all": scored(now)}, scored(then)
+    """Per suite: programs, failing and the geomean of the rest, as the README composite counts them, and PyPy's."""
+    now, then, pypy = suite_ratios(metrics), suite_ratios(before), suite_ratios(metrics, "pypy")
+    scored = lambda record: {p: v for suite, ratios in record.items() if suite != WARM for p, v in ratios.items()}
+    now, then["all"], pypy["all"] = {**dict(sorted(now.items())), "all": scored(now)}, scored(then), scored(pypy)
     md = ["", "## Suites (time over CPython 3.14t, lower is faster; the README speed is 1 / the all row)", "",
-          "| suite | programs | failing | geomean | yesterday |", "|---|---|---|---|---|"]
-    for suite, values in now.items():
-        md.append(f"| {suite} | {len(values)} | {values.count(None)} | {fmt(geomean([v for v in values if v]))} "
-                  f"| {fmt(geomean([v for v in then.get(suite, []) if v]))} |")
+          "| suite | programs | failing | geomean | yesterday | PyPy failing | PyPy geomean | Lucifer/PyPy |",
+          "|---|---|---|---|---|---|---|---|"]
+    for suite, ratios in now.items():
+        on, py = list(ratios.values()), pypy.get(suite)
+        cells = "not run | - | -"
+        if py:
+            both = [v / py[p] for p, v in ratios.items() if v and py.get(p)]
+            cells = f"{list(py.values()).count(None)} | {fmt(geomean([v for v in py.values() if v]))} | {fmt(geomean(both))}"
+        md.append(f"| {suite} | {len(on)} | {on.count(None)} | {fmt(geomean([v for v in on if v]))} "
+                  f"| {fmt(geomean([v for v in then.get(suite, {}).values() if v]))} | {cells} |")
     return md + ["", "cli, cadence and startup are end-to-end: whole-process wall time, startup, import and compile included. "
                  f"{WARM} repeats pyperformance with more warm-up, so its gap to pyperformance is the cost of warming up; "
-                 "it is not in the all row."]
+                 "it is not in the all row. PyPy is timed with the CPython reference at CPython's loop counts; "
+                 "PyPy failing counts programs it cannot run or whose output differs, not run marks a suite it is not timed on, "
+                 "and Lucifer/PyPy is the geomean over the programs both run."]
 
 
 def corpus_metrics(results, reference):
@@ -325,13 +339,16 @@ def write_summary(out, date, metrics, gate_rows, problems, names, ran_numpy):
             w.writerow([k, "" if v is None else v, before.get(k, "")])
     val = metrics.get
     md = [f"# Lucifer status {date}", "", "## AWFY (best iteration, ms; ratio is JIT on / CPython)", "",
-          "| benchmark | CPython | JIT on | on/CPython | on vs yesterday |", "|---|---|---|---|---|"]
+          "| benchmark | CPython | PyPy | JIT on | on/CPython | on/PyPy | on vs yesterday |", "|---|---|---|---|---|---|---|"]
+    on_over_pypy = []
     for n in names:
-        c, on = (val(f"awfy.{n}.{k}_us") for k in ("cpython", "on"))
-        md.append(f"| {n} | {fmt(c and c / 1000, 1)} | {fmt(on and on / 1000, 1)} "
-                  f"| {fmt(val(f'awfy.{n}.on_over_cpython'))} | {delta(on, before.get(f'awfy.{n}.on_us'))} |")
+        c, p, on = (val(f"awfy.{n}.{k}_us") for k in ("cpython", "pypy", "on"))
+        on_over_pypy.append(on / p if on and p else None)
+        md.append(f"| {n} | {fmt(c and c / 1000, 1)} | {fmt(p and p / 1000, 1)} | {fmt(on and on / 1000, 1)} "
+                  f"| {fmt(val(f'awfy.{n}.on_over_cpython'))} | {fmt(on_over_pypy[-1])} | {delta(on, before.get(f'awfy.{n}.on_us'))} |")
     md += ["", f"Geomean JIT on / CPython: {fmt(val('awfy.geomean_on_over_cpython'))} "
-           f"(yesterday {fmt(float(before['awfy.geomean_on_over_cpython']) if before.get('awfy.geomean_on_over_cpython') else None)})"]
+           f"(yesterday {fmt(float(before['awfy.geomean_on_over_cpython']) if before.get('awfy.geomean_on_over_cpython') else None)}); "
+           f"JIT on / PyPy: {fmt(geomean([r for r in on_over_pypy if r]))}"]
     md += web_section(metrics, before)
     md += suites_section(metrics, before)
     md += ["", "## Gates", "", "| target | result | detail |", "|---|---|---|"]
@@ -385,6 +402,16 @@ def main():
                         f"awfy.{n}.on_over_cpython": on / c if on and c else None})
         if on is None:
             problems.append(f"AWFY {n}: JIT on produced no timing")
+    pypy = ref.get("pypy")
+    if pypy:  # PyPy rows as the corpus records them: seconds and the ratio to CPython, empty where PyPy fails
+        for n in names:
+            c, p = ref["best_us"].get(n), pypy["best_us"].get(n)
+            metrics.update({f"awfy.{n}.pypy_us": p, f"awfy.{n}.pypy_over_cpython": p / c if p and c else None})
+        for program, r in pypy["corpus"].items():
+            if r["status"] != "noreference":
+                p = r["seconds"] if r["status"] == "ok" else None
+                metrics.update({f"{program}.pypy_s": p,
+                                f"{program}.pypy_over_cpython": p / ref["corpus"][program]["seconds"] if p else None})
     metrics["awfy.geomean_on_over_cpython"] = geomean([metrics[f"awfy.{n}.on_over_cpython"] for n in names if metrics[f"awfy.{n}.on_over_cpython"]])
     site = os.environ.get("WEB_SITE")
     if site:
