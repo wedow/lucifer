@@ -121,6 +121,7 @@ struct asm_ {
     struct hold *held;          /* what the published call in hand holds of what it is handed */
     int nheld;
     uint32_t *walked, walk;     /* per virtual object, the holds_of walk that went through it last */
+    uint32_t *handed;           /* per value, the holds_of walk whose call is handed it */
     int inlined;                /* the published call's inlined frames, counted toward the limit across it */
     struct build b;
     /* The code that publishes an exit's state: where its address goes. */
@@ -1050,50 +1051,22 @@ note_owned(struct lu_func *f, lu_v v, void *arg)
     }
 }
 
-/* What a recorded frame and its callers own (struct lu_fs record): its
-   own owned locations, then its caller's, each once. */
-struct chain_owned {
-    struct lu_func *f;
-    int32_t *locs;
-    int n;
-};
-
+/* What a frame that names no virtual object owns (struct lu_fs record). */
 static void
-note_chain_owned(struct lu_func *f, lu_v v, void *arg)
+note_frame_owned(struct lu_func *f, lu_v v, void *arg)
 {
-    struct chain_owned *w = arg;
+    struct lu_fs *p = arg;
     struct lu_ins *in = &f->ins[v];
-    if (!(in->flags & INS_OWNED) || in->loc == LU_LOC_NONE) {
-        return;
+    if ((in->flags & INS_OWNED) && in->loc != LU_LOC_NONE) {
+        p->owned[p->nowned++] = in->loc;
     }
-    for (int i = 0; i < w->n; i++) {
-        if (w->locs[i] == in->loc) {
-            return;
-        }
-    }
-    w->locs[w->n++] = in->loc;
 }
 
 static void
 record_owned(struct lu_func *f, struct lu_fs *p)
 {
-    int most = 1 + p->nlocals + p->nstack + (p->caller != NULL ? p->caller->nowned : 0);
-    struct chain_owned w = { f, lu_ir_alloc(f, sizeof(int32_t) * (size_t)most), 0 };
-    struct lu_fs own = *p;
-    own.caller = NULL;
-    own.nheld = 0;
-    lu_fs_each(f, &own, note_chain_owned, &w);
-    for (int i = 0; p->caller != NULL && i < p->caller->nowned; i++) {
-        int k = 0;
-        while (k < w.n && w.locs[k] != p->caller->owned[i]) {
-            k++;
-        }
-        if (k == w.n) {
-            w.locs[w.n++] = p->caller->owned[i];
-        }
-    }
-    p->owned = w.locs;
-    p->nowned = w.n;
+    p->owned = lu_ir_alloc(f, sizeof(int32_t) * (size_t)(2 + p->nlocals + p->nstack));
+    lu_fs_each_frame(f, p, p, note_frame_owned, p);
 }
 
 static int
@@ -1175,57 +1148,64 @@ make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
     d->unit = a->unit;
     d->objs = b->nobjs;
     d->owned = b->nowned;
-    /* The frames outermost first. The outermost the unit has recorded are
-       not described again (struct lu_fs record); the rest go slot by slot
-       into the room, innermost first (the order virtual objects are
-       entered in). */
-    uint32_t n = 0, known = 0, nvals = 0;
+    /* The frames outermost first, and room for their slots in that order. */
+    uint32_t n = 0, nvals = 0;
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
         n++;
+        nvals += (uint32_t)(p->nlocals + p->nstack);
     }
     b->chain = grow(b->chain, &b->capchain, n, sizeof *b->chain);
+    b->room = grow(b->room, &b->caproom, nvals, sizeof *b->room);
     uint32_t k = n;
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
         b->chain[--k] = p;
         d->visible |= k > 0 && !(p->code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN));
+        if (p->record == 0 && (p->gen > 0 || names_virtual(p))) {
+            p->record = -1;
+        }
     }
-    while (known < n && b->chain[known]->record > 0) {
-        known++;
-    }
-    for (k = known; k < n; k++) {
-        nvals += (uint32_t)(b->chain[k]->nlocals + b->chain[k]->nstack);
-    }
-    b->room = grow(b->room, &b->caproom, nvals, sizeof *b->room);
+    /* The slots of frames that name virtual objects, innermost first (the
+       order those are entered in). A frame that names none is described
+       once per caller record (struct lu_fs record), below. */
     uint32_t end = nvals;
-    for (k = n; k-- > known;) {
+    for (k = n; k-- > 0;) {
         struct lu_fs *p = b->chain[k];
         int m = p->nlocals + p->nstack;
         end -= (uint32_t)m;
-        for (int i = 0; i < m; i++) {
+        for (int i = 0; p->record < 0 && i < m; i++) {
             b->room[end + (uint32_t)i] = describe(a, d, fs, *lu_fs_slot(p, i));
         }
     }
-    int caller = known > 0 ? b->chain[known - 1]->record - 1 : -1, pure = 1;
-    for (k = known; k < n; k++) {
+    int caller = -1;
+    for (k = 0; k < n; end += (uint32_t)(b->chain[k]->nlocals + b->chain[k]->nstack), k++) {
         struct lu_fs *p = b->chain[k];
+        if (p->record > 0 && p->under == caller) {
+            caller = p->record - 1;
+            continue;
+        }
+        for (int i = 0; p->record >= 0 && i < p->nlocals + p->nstack; i++) {
+            b->room[end + (uint32_t)i] = describe(a, d, fs, *lu_fs_slot(p, i));
+        }
         struct frame_key key = { .fr = { .code = p->code, .func = p->func, .pc = p->pc, .ret = p->ret,
                                          .funcv = p->funcv >= 0 ? place(a, p->funcv) : LU_PV(DV_NULL, 0),
                                          .gen = p->gen > 0 ? describe(a, d, fs, LU_VIRT(p->gen - 1))
                                              : p->gen < 0 ? place(a, -1 - p->gen) : LU_PV(DV_NULL, 0),
                                          .nlocals = p->nlocals, .nstack = p->nstack, .caller = caller },
                                  .vals = b->room + end };
-        end += (uint32_t)(p->nlocals + p->nstack);
+        int under = caller;
         caller = frame_record(b, &key);
-        pure = pure && !names_virtual(p);
-        if (pure) {
+        if (p->record >= 0) {
+            if (p->owned == NULL) {
+                record_owned(a->f, p);
+            }
             p->record = caller + 1;
-            record_owned(a->f, p);
+            p->under = under;
         }
     }
     d->nframes = (int32_t)n;
     d->frame = caller;
-    /* What it owns: what it holds and its frames' slots, the recorded
-       frames' from their list. */
+    /* What it owns: what it holds and its frames' slots, a recorded
+       frame's from its list. */
     uint32_t places = 32 + (uint32_t)a->f->nspill;
     if (b->nseen < places) {
         b->seen = realloc(b->seen, sizeof(uint32_t) * places);
@@ -1236,10 +1216,17 @@ make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
         b->owns = calloc((size_t)a->f->nins, sizeof(int32_t));
     }
     struct owning w = { b, d, (uint32_t)a->nexits + 1 };
-    struct lu_fs *recorded = known > 0 ? b->chain[known - 1] : NULL;
-    lu_fs_each_until(a->f, fs, recorded, note_owned, &w);
-    for (int i = 0; recorded != NULL && i < recorded->nowned; i++) {
-        own_loc(&w, recorded->owned[i]);
+    for (int i = 0; i < fs->nheld; i++) {
+        note_owned(a->f, fs->held[i], &w);
+    }
+    for (k = 0; k < n; k++) {
+        struct lu_fs *p = b->chain[k];
+        if (p->record < 0) {
+            lu_fs_each_frame(a->f, fs, p, note_owned, &w);
+        }
+        for (int i = 0; p->record > 0 && i < p->nowned; i++) {
+            own_loc(&w, p->owned[i]);
+        }
     }
     d->reason = (uint8_t)reason;
     d->error = (uint8_t)error;
@@ -1372,23 +1359,20 @@ published(struct asm_ *a, struct lu_ins *in)
 static void incref(struct asm_ *a, int r);
 static void decref(struct asm_ *a, int r, struct lu_ins *in, struct lu_deopt *d, int left);
 
-/* Whether the instruction hands value v to the C it calls. */
+/* Whether v is an object a hold may be owed for: one the call is handed
+   (a->handed, stamped by holds_of). */
 static int
-hands(const struct lu_ins *in, lu_v v)
+holdable(struct asm_ *a, lu_v v)
 {
-    for (int j = 0; j < in->nargs; j++) {
-        if (in->args[j] == v) {
-            return 1;
-        }
-    }
-    return in->a == v || in->b == v || in->c == v;
+    return v >= 0 && a->handed[v] == a->walk && I(a, v)->rep == REP_OBJ && I(a, v)->op != OP_CONST
+        && I(a, v)->op != OP_BOOL;
 }
 
 /* One more name of v, when it is an object the call is handed. */
 static void
 hold_add(struct asm_ *a, struct lu_ins *in, struct hold *h, int *nh, lu_v v)
 {
-    if (v < 0 || !hands(in, v) || I(a, v)->rep != REP_OBJ || I(a, v)->op == OP_CONST || I(a, v)->op == OP_BOOL) {
+    if (!holdable(a, v)) {
         return;
     }
     int k = 0;
@@ -1449,9 +1433,18 @@ holds_of(struct asm_ *a, struct lu_ins *in, struct hold **out)
     struct hold *h = lu_ir_alloc(a->f, sizeof(struct hold) * (size_t)(in->nargs + 3));
     if (a->walked == NULL) {
         a->walked = lu_ir_alloc(a->f, sizeof(uint32_t) * (size_t)(a->f->nvobjs + 1));
+        a->handed = lu_ir_alloc(a->f, sizeof(uint32_t) * (size_t)a->f->nins);
     }
     a->walk++;
-    for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
+    int any = 0;
+    for (int j = -3; j < in->nargs; j++) {
+        lu_v v = j == -3 ? in->a : j == -2 ? in->b : j == -1 ? in->c : in->args[j];
+        if (v >= 0) {
+            a->handed[v] = a->walk;
+            any |= holdable(a, v);
+        }
+    }
+    for (struct lu_fs *p = fs; any && p != NULL; p = p->caller) {
         for (int i = 0; i < p->nlocals + p->nstack; i++) {
             hold_names(a, in, *lu_fs_slot(p, i), h, &nh);
         }

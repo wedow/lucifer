@@ -65,18 +65,12 @@ visit_used(struct lu_func *f, lu_v v, void *arg)
 }
 
 /* Calls fn(f, v, arg) for every value the state fs names that has a
-   location; with a mark, once per walk for what callers' frames name
-   (lu_fs_each_once). */
+   location, once per walk for what callers' frames name (lu_fs_each_once). */
 static void
 each_state_use(struct lu_func *f, struct lu_fs *fs, uint32_t mark, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
     struct visit vis = { fn, arg };
-    if (mark != 0) {
-        lu_fs_each_once(f, fs, mark, visit_used, &vis);
-    }
-    else {
-        lu_fs_each(f, fs, visit_used, &vis);
-    }
+    lu_fs_each_once(f, fs, mark, visit_used, &vis);
 }
 
 /* Calls fn(f, v, arg) for every value instruction `in` reads as an
@@ -318,6 +312,7 @@ lu_regalloc(struct lu_func *f)
     int *calls = malloc(sizeof(int) * (size_t)(f->nins + 1)), ncalls = 0;
     int *hard = malloc(sizeof(int) * (size_t)(f->nins + 1)), nhard = 0;
     char *memory = calloc((size_t)f->nins + 1, 1);
+    uint32_t mark = ++f->marks;         /* memory is the unit's: a caller's frame once */
     for (int k = 0; k < f->norder; k++) {
         int b = f->order[k];
         struct lu_block *bl = &f->blocks[b];
@@ -343,7 +338,7 @@ lu_regalloc(struct lu_func *f)
             if (lu_alloc_call(ins) && ins->fs != NULL && lu_publishes(ins)) {
                 /* A call that publishes its state (lu_publishes) is read by
                    walkers during the call, from memory. */
-                each_state_use(f, ins->fs, 0, mark_memory, memory);
+                each_state_use(f, ins->fs, mark, mark_memory, memory);
             }
             if (lu_alloc_call(ins)) {
                 calls[ncalls++] = ins->pos;

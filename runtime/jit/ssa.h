@@ -236,11 +236,11 @@ struct lu_fs {
     int nheld;
     uint32_t mark;              /* the walk that last saw it as a caller (lu_fs_each_once) */
     uint8_t virt;               /* and whether a slot of it names a virtual object then */
-    /* The backend's: 1 + the unit's record of this frame and its callers
-       once made, when none of them names a virtual object (so that every
-       exit describes them alike), and the locations of the owned values
-       they name, each once, in the order a walk meets them. */
-    int32_t record;
+    /* The backend's, for a frame that names no virtual object (so that
+       every exit describes it alike): 1 + the unit's record of it under
+       the caller record `under` (-1: none), and the locations of the
+       owned values it names; -1 for a frame that names one. */
+    int32_t record, under;
     int32_t nowned;
     int32_t *owned;
 };
@@ -339,6 +339,8 @@ struct lu_func {
     int nvobjs, capvobjs;
     int ninlined;
     uint32_t marks;             /* walks begun with lu_fs_each_once */
+    const lu_v *last_locals;    /* the locals of the state that walk saw last, and the walk */
+    uint32_t last_mark;
     int loops;                  /* back edges built: one entry may run unbounded work */
     int sites, cold;            /* sites with feedback, and those the interpreter never ran */
     int refused;                /* calls left out of line for want of budget */
@@ -404,18 +406,19 @@ struct lu_vobj *lu_fs_vobj(struct lu_func *f, const struct lu_fs *fs, int id, lu
    its slots, the fields of the virtual objects they reach, the objects
    virtual ones became, and what it holds. A value may come more than once. */
 void lu_fs_each(struct lu_func *f, const struct lu_fs *fs, void (*fn)(struct lu_func *, lu_v, void *), void *arg);
-/* The same for what it holds and its frames up to, not including, stop. */
-void lu_fs_each_until(struct lu_func *f, const struct lu_fs *fs, const struct lu_fs *stop,
+/* The same for one of its frames, p, alone: not what fs holds. */
+void lu_fs_each_frame(struct lu_func *f, const struct lu_fs *fs, const struct lu_fs *p,
                       void (*fn)(struct lu_func *, lu_v, void *), void *arg);
 /* lu_fs_each, for a walk that needs each value once: a caller's frame
-   seen before under the same mark (++f->marks begins a walk) gives only
-   what its virtual objects stand for at fs. Inlined code's states share
-   their callers' frames. */
+   seen before under the same mark (++f->marks begins a walk), and the
+   locals of a state whose locals are the last state's of the walk, give
+   only what their virtual objects stand for at fs. Inlined code's states
+   share their callers' frames, and states of one frame often its locals. */
 void lu_fs_each_once(struct lu_func *f, const struct lu_fs *fs, uint32_t mark,
                      void (*fn)(struct lu_func *, lu_v, void *), void *arg);
 /* The same for the slots and fields themselves, to rewrite them with fn,
    which gives what it gave before for a value it returned: a caller's
-   frame rewritten under the same mark is not again. */
+   frame or locals rewritten under the same mark are not again. */
 void lu_fs_rewrite(struct lu_func *f, struct lu_fs *fs, uint32_t mark, lu_v (*fn)(lu_v));
 
 /* JIT build statistics, for -X lucifer_jit_stats. */

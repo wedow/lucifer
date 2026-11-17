@@ -111,27 +111,38 @@ each_ref(struct lu_func *f, const struct lu_fs *fs, lu_v r, void (*fn)(struct lu
 void
 lu_fs_each(struct lu_func *f, const struct lu_fs *fs, void (*fn)(struct lu_func *, lu_v, void *), void *arg)
 {
-    lu_fs_each_until(f, fs, NULL, fn, arg);
-}
-
-void
-lu_fs_each_until(struct lu_func *f, const struct lu_fs *fs, const struct lu_fs *stop,
-                 void (*fn)(struct lu_func *, lu_v, void *), void *arg)
-{
     for (int i = 0; i < fs->nheld; i++) {
         fn(f, fs->held[i], arg);
     }
-    for (const struct lu_fs *p = fs; p != stop; p = p->caller) {
-        if (p->funcv >= 0) {
-            fn(f, p->funcv, arg);
-        }
-        if (p->gen < 0) {
-            fn(f, -1 - p->gen, arg);
-        }
-        for (int i = 0; i < p->nlocals + p->nstack; i++) {
-            each_ref(f, fs, *lu_fs_slot(p, i), fn, arg);
-        }
+    for (const struct lu_fs *p = fs; p != NULL; p = p->caller) {
+        lu_fs_each_frame(f, fs, p, fn, arg);
     }
+}
+
+void
+lu_fs_each_frame(struct lu_func *f, const struct lu_fs *fs, const struct lu_fs *p,
+                 void (*fn)(struct lu_func *, lu_v, void *), void *arg)
+{
+    if (p->funcv >= 0) {
+        fn(f, p->funcv, arg);
+    }
+    if (p->gen < 0) {
+        fn(f, -1 - p->gen, arg);
+    }
+    for (int i = 0; i < p->nlocals + p->nstack; i++) {
+        each_ref(f, fs, *lu_fs_slot(p, i), fn, arg);
+    }
+}
+
+/* Whether fs's locals are the last state's the walk under mark saw:
+   they are now. */
+static int
+locals_seen(struct lu_func *f, const struct lu_fs *fs, uint32_t mark)
+{
+    int seen = f->last_mark == mark && f->last_locals == fs->locals;
+    f->last_mark = mark;
+    f->last_locals = fs->locals;
+    return seen;
 }
 
 void
@@ -141,7 +152,13 @@ lu_fs_each_once(struct lu_func *f, const struct lu_fs *fs, uint32_t mark,
     for (int i = 0; i < fs->nheld; i++) {
         fn(f, fs->held[i], arg);
     }
-    for (struct lu_fs *p = (struct lu_fs *)fs; p != NULL; p = p->caller) {
+    int from = locals_seen(f, fs, mark) ? fs->nlocals : 0;
+    for (int i = 0; i < from; i++) {
+        if (LU_IS_VIRT(fs->locals[i])) {
+            each_ref(f, fs, fs->locals[i], fn, arg);
+        }
+    }
+    for (struct lu_fs *p = (struct lu_fs *)fs; p != NULL; p = p->caller, from = 0) {
         int n = p->nlocals + p->nstack;
         if (p != fs && p->mark == mark) {
             for (int i = 0; p->virt && i < n; i++) {
@@ -159,7 +176,7 @@ lu_fs_each_once(struct lu_func *f, const struct lu_fs *fs, uint32_t mark,
             fn(f, -1 - p->gen, arg);
         }
         uint8_t virt = 0;
-        for (int i = 0; i < n; i++) {
+        for (int i = from; i < n; i++) {
             lu_v r = *lu_fs_slot(p, i);
             virt |= LU_IS_VIRT(r);
             each_ref(f, fs, r, fn, arg);
@@ -182,7 +199,8 @@ lu_fs_rewrite(struct lu_func *f, struct lu_fs *fs, uint32_t mark, lu_v (*fn)(lu_
             fs->binds[i].real = fn(fs->binds[i].real);
         }
     }
-    for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
+    int from = locals_seen(f, fs, mark) ? fs->nlocals : 0;
+    for (struct lu_fs *p = fs; p != NULL; p = p->caller, from = 0) {
         if (p != fs && p->mark == mark) {
             continue;
         }
@@ -195,7 +213,7 @@ lu_fs_rewrite(struct lu_func *f, struct lu_fs *fs, uint32_t mark, lu_v (*fn)(lu_
         if (p->gen < 0) {
             p->gen = -1 - fn(-1 - p->gen);
         }
-        for (int i = 0; i < p->nlocals + p->nstack; i++) {
+        for (int i = from; i < p->nlocals + p->nstack; i++) {
             lu_v *slot = lu_fs_slot(p, i);
             if (*slot >= 0) {
                 *slot = fn(*slot);
