@@ -31,3 +31,20 @@ for f in (b.readline, b.readlines, lambda: next(b), lambda: iter(b)):
         f()
     except ValueError as e:
         print(e)
+
+# A size whose __index__ closes the file is converted before the closed
+# check, as CPython's C BytesIO does.
+class Closer:
+    def __index__(self):
+        c.close()
+        return -1
+for name in ('read', 'read1', 'readline'):
+    c = io.BytesIO(b'a\nb')
+    try:
+        print(name, getattr(c, name)(Closer()))
+    except ValueError as e:
+        print(name, e)
+try:
+    io.BytesIO(b'a').read(1.5)
+except TypeError as e:
+    print('read', e)

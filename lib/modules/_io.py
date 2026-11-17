@@ -911,17 +911,9 @@ class BytesIO(_BufferedIOBase):
         super().close()
 
     def read(self, size=-1):
+        size = _size_arg(size)  # first: an __index__ may close the file
         if self.closed:
             raise ValueError("I/O operation on closed file.")
-        if size is None:
-            size = -1
-        else:
-            try:
-                size_index = size.__index__
-            except AttributeError:
-                raise TypeError(f"{size!r} is not an integer")
-            else:
-                size = size_index()
         if size < 0:
             size = len(self._buffer)
         if len(self._buffer) <= self._pos:
@@ -949,9 +941,10 @@ class BytesIO(_BufferedIOBase):
         return bytes(buf[pos:end])
 
     def readline(self, size=-1, /):
+        size = _size_arg(size)  # first: an __index__ may close the file
         if self.closed:
             raise ValueError("I/O operation on closed file.")
-        return self._line(_size_arg(size))
+        return self._line(size)
 
     def readlines(self, hint=None, /):
         if self.closed:
