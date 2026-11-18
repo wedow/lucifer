@@ -5,7 +5,10 @@ Run with a host CPython 3.14 (magic 3627). Each tests/kernel/NAME.py is
 compiled by the host into build/tests/kernel/NAME.pyc, then run as
 `INTERPRETER -I -S NAME.pyc` under a 512 KiB RLIMIT_STACK, once on the
 free-threaded oracle and once on bin/lucifer. stdout, stderr and the exit
-status must be identical. Exit status 1 when any program differs.
+status must be identical. Exit status 1 when any program differs. Programs
+run --jobs at once (default: the CPUs the process may use), each in a
+directory of its own, and print in their order; the threads_ programs run
+one at a time after the others.
 
 Programs in RUNS run once per (flags, environment); an environment replaces
 -I -S and the inherited environment. A lane's flags go to the oracle too.
@@ -22,6 +25,7 @@ twice: results that agree are kept in build/tests/kernel/oracle
 """
 import argparse
 import ast
+import concurrent.futures
 import difflib
 import dis
 import hashlib
@@ -37,6 +41,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import warnings
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -249,7 +254,7 @@ def run(interpreter, flags, pyc, env, cwd, timeout=None):
     try:
         child = subprocess.run([interpreter, *isolation, *flags, str(pyc)],
                                capture_output=True, timeout=timeout, env=env,
-                               input=stdin, preexec_fn=limit_stack, cwd=cwd)
+                               input=stdin, cwd=cwd)      # the stack limit is main's, inherited
     except subprocess.TimeoutExpired:
         return ("timeout", b"", b"")
     return (child.returncode, child.stdout, child.stderr)
@@ -268,7 +273,7 @@ def oracle_run(oracle, build, flags, pyc, env, cwd, runs=2):
     if any(other != result for other in others):
         return ("varies", *result[1:])
     if result[0] != "timeout":
-        partial = path.with_name(f"{key}.{os.getpid()}")
+        partial = path.with_name(f"{key}.{os.getpid()}.{threading.get_ident()}")
         partial.write_text(repr(result))
         partial.replace(path)
     return result
@@ -382,6 +387,8 @@ def main():
     parser.add_argument("--checks", action="store_true",
                         help="the checks that are not programs alone (flag rows, stress, SIGINT, source programs)")
     parser.add_argument("--lane", default="plain")
+    parser.add_argument("--jobs", type=int, default=len(os.sched_getaffinity(0)),
+                        help="checks run at once (default: the CPUs this process may use)")
     parser.add_argument("--opcodes", action="store_true", help="check the eval loop handles every base opcode")
     args = parser.parse_args()
     if args.opcodes:
@@ -403,35 +410,54 @@ def main():
     cwd = BUILD / "cwd" / args.lane
     cwd.mkdir(parents=True, exist_ok=True)
 
-    failed = total = 0
+    # Children inherit the stack limit: set here, not in a preexec_fn, which is unsafe with threads.
+    limit_stack()
+    # Checks run at once, each in a directory of its own (programs write files in it), and print in order.
+    checks = []
     for name in names:
         pyc = compile_program(name)
         for flags, env in RUNS.get(name, [([], None)]):
-            label = name if not flags and env is None else f"{name} {flags} {env or ''}".rstrip()
-            total += 1
-            oracle = oracle_run(args.oracle, build, LANES[args.lane] + flags, pyc, env, cwd)
-            if args.lane.startswith("handoff") and name in HANDOFF_STDOUT:
-                oracle = (oracle[0], HANDOFF_STDOUT[name], oracle[2])
-            ours = run(lucifer, LANES[args.lane] + flags, pyc, env, cwd)
-            if args.lane.startswith("handoff") and name in HANDOFF_XFAIL and oracle[0] == ours[0]:
-                print(f"{'XPASS' if oracle == ours else 'XFAIL'} {label} ({HANDOFF_XFAIL[name]})")
-            elif oracle == ours:
-                print(f"PASS {label}")
-            else:
-                failed += 1
-                print(describe(label, oracle, ours))
+            checks.append((name, pyc, flags, env, False))
         if name in SEEDED:
+            checks.append((name, pyc, [], {}, True))
+
+    def check(i, name, pyc, flags, env, unseeded):
+        here = cwd / str(i)
+        here.mkdir(parents=True, exist_ok=True)
+        if unseeded:
             label = f"{name} unseeded"
-            total += 1
-            oracle = oracle_run(args.oracle, build, LANES[args.lane], pyc, {}, cwd, runs=1)  # unseeded: it varies
-            first, second = (run(lucifer, LANES[args.lane], pyc, {}, cwd) for _ in range(2))
+            oracle = oracle_run(args.oracle, build, LANES[args.lane], pyc, env, here, runs=1)  # unseeded: it varies
+            first, second = (run(lucifer, LANES[args.lane], pyc, env, here) for _ in range(2))
             head = lambda r: r[1].split(b"\n")[0]
             if first[0] == 0 and head(first) == head(oracle) and first[1] != second[1]:
-                print(f"PASS {label}")
-            else:
-                failed += 1
-                print(f"FAIL {label}: exit {first[0]}, flag line {head(first)!r} vs {head(oracle)!r}, "
-                      f"runs {'differ' if first[1] != second[1] else 'are identical'}")
+                return 0, f"PASS {label}"
+            return 1, (f"FAIL {label}: exit {first[0]}, flag line {head(first)!r} vs {head(oracle)!r}, "
+                       f"runs {'differ' if first[1] != second[1] else 'are identical'}")
+        label = name if not flags and env is None else f"{name} {flags} {env or ''}".rstrip()
+        oracle = oracle_run(args.oracle, build, LANES[args.lane] + flags, pyc, env, here)
+        if args.lane.startswith("handoff") and name in HANDOFF_STDOUT:
+            oracle = (oracle[0], HANDOFF_STDOUT[name], oracle[2])
+        ours = run(lucifer, LANES[args.lane] + flags, pyc, env, here)
+        if args.lane.startswith("handoff") and name in HANDOFF_XFAIL and oracle[0] == ours[0]:
+            return 0, f"{'XPASS' if oracle == ours else 'XFAIL'} {label} ({HANDOFF_XFAIL[name]})"
+        if oracle == ours:
+            return 0, f"PASS {label}"
+        return 1, describe(label, oracle, ours)
+
+    # The threads_ programs time their own threads against each other: beside other checks they hit the
+    # timeout (threads_container_protocol, threads_local_race, threads_set_race, threads_frame_locals_race in
+    # the jit lane on 2026-11-18), so they run one at a time after the rest.
+    alone = [i for i, c in enumerate(checks) if c[0].startswith("threads_")]
+    results = [None] * len(checks)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        together = [i for i in range(len(checks)) if i not in set(alone)]
+        for i, result in zip(together, pool.map(lambda i: check(i, *checks[i]), together)):
+            results[i] = result
+    for i in alone:
+        results[i] = check(i, *checks[i])
+    failed, total = sum(bad for bad, _ in results), len(checks)
+    for _, text in results:
+        print(text)
     if args.programs.split():
         print(f"{total - failed}/{total} checks pass ({args.lane})")
         return 1 if failed else 0

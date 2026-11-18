@@ -320,14 +320,14 @@ check-harness:
 # tests/kernel programs, host-compiled to .pyc, against the free-threaded
 # oracle under a 512 KiB stack. PROGRAMS="a b" selects; LANE= picks a policy.
 
-check-kernel: bin/lucifer build/lib/stamp $(STDLIB_EXT_FILES)
+check-kernel: bin/lucifer build/lib/stamp oracle-exts $(STDLIB_EXT_FILES)
 	$(STEP) $(HOST_PYTHON) tools/kernelcheck --opcodes
 	$(STEP) $(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer \
 	  --programs "$(PROGRAMS)" $(if $(LANE),--lane $(LANE))
 
 # tests/kernel with every function compiled at its first call, then with every
 # 7th guard failing as well: the lanes every landing runs.
-check-kernel-jit: bin/lucifer build/lib/stamp $(STDLIB_EXT_FILES)
+check-kernel-jit: bin/lucifer build/lib/stamp oracle-exts $(STDLIB_EXT_FILES)
 	for lane in jit jit-deopt; do \
 	  $(STEP) $(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer --lane $$lane || exit 1; \
 	done

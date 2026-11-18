@@ -158,9 +158,10 @@ def kernel_programs():
 
 
 def kernelcheck(mode, selection, log):
-    """kernelcheck in MODE's lane on --programs NAMES or --checks; {check: status}."""
+    """kernelcheck in MODE's lane on --programs NAMES or --checks; {check: status}. One check at a time:
+    the floor's own queue runs the shards at once."""
     out = run([env("HOST_PYTHON"), "tools/kernelcheck", "--oracle", env("ORACLE_T"), "--lucifer",
-               env("LUCIFER", "bin/lucifer"), "--lane", KERNEL_LANES[mode], *selection], log)
+               env("LUCIFER", "bin/lucifer"), "--lane", KERNEL_LANES[mode], "--jobs", "1", *selection], log)
     rows = output_lines(out)
     total = re.search(r"\d+/(\d+) checks pass", out)
     if not total or int(total[1]) != len(rows):
