@@ -945,11 +945,9 @@ static PyObject *
 call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames,
               uint64_t takes)
 {
-    if (kwnames == NULL) {
-        PyObject *r = lu_jit_direct(&t->ts, func, args, nargs, takes);
-        if (r != LU_JIT_DECLINED) {
-            return r;
-        }
+    PyObject *r;
+    if (kwnames == NULL && lu_jit_direct(&t->ts, func, args, nargs, takes, &r)) {
+        return r;
     }
     PyCodeObject *co = (PyCodeObject *)func->func_code;
     struct lu_frame *f;
@@ -972,7 +970,7 @@ call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, 
         }
         f = lu_frame_call(&t->ts, func, (PyObject **)args, nargs, kwnames);
     }
-    PyObject *r = NULL;
+    r = NULL;
     if (f != NULL) {
         r = co->_co_monitoring == NULL && !t->ts.tracing ? lu_jit_new_gen(&t->ts, f) : LU_JIT_DECLINED;
         if (r == LU_JIT_DECLINED) {

@@ -1272,8 +1272,9 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     return 1;
 }
 
-PyObject *
-lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, uint64_t takes)
+int
+lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, uint64_t takes,
+              PyObject **out)
 {
     PyCodeObject *code = (PyCodeObject *)func->func_code;
     struct lu_jit_code *jc = state_of(code);
@@ -1281,14 +1282,14 @@ lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, 
         jc != NULL && jc->direct.nargs == nargs ? __atomic_load_n(&jc->direct.entry, __ATOMIC_ACQUIRE) : NULL;
     /* An exception pending, which lu_eval would set aside: the interpreter's call. */
     if (entry == NULL || ts->current_exception != NULL) {
-        return LU_JIT_DECLINED;
+        return 0;
     }
     takes &= nargs < 64 ? ((uint64_t)1 << nargs) - 1 : ~(uint64_t)0;
     struct lu_jit_call call;
     PyObject *result;
     int r = entry(ts, func, args, &result, takes, &call);
     if (r == 0) {
-        return LU_JIT_DECLINED;
+        return 0;
     }
     ((struct lu_task *)ts)->jit_act = call.act.outer;
     left(call.act.unit);
@@ -1302,7 +1303,8 @@ lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, 
     for (; takes != 0; takes &= takes - 1) {
         Py_INCREF(args[__builtin_ctzll(takes)]);
     }
-    return result;
+    *out = result;
+    return 1;
 }
 
 void

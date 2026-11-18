@@ -92,6 +92,17 @@ function_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf, Py
     Py_ssize_t total = nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
     PyThreadState *ts = PyThreadState_Get();
     PyObject *result;
+    if (kwnames == NULL && ts->interp->eval_frame == NULL && ts->current_frame != NULL && lu_jit_on()) {
+        /* A compiled unit at the call entry runs as compiled code calls it,
+           with no frame bound in C and no turn of the eval loop. */
+        struct lu_task *t = (struct lu_task *)ts;
+        t->pin++;
+        int done = lu_jit_direct(ts, func, args, nargs, 0, &result);
+        t->pin--;
+        if (done) {
+            return result;
+        }
+    }
     PyObject *small[16];
     PyObject **owned = total <= 16 ? small : PyMem_Malloc(total * sizeof(PyObject *));
     if (owned == NULL) {
