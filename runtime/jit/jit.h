@@ -212,6 +212,16 @@ int lu_jit_call_entry(PyCodeObject *code);
    an exception), or 0 with nothing done when there is no unit to enter. */
 int lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
 
+/* A call of func by exactly its positional parameters, args[0 .. nargs),
+   that a helper compiled code calls makes (runtime/jit/helpers.c), through
+   the direct entry of its code's unit at the call entry, as compiled code
+   makes it (target.h struct lu_jit_direct): the value, or NULL with an
+   exception. The arguments in `takes` (bits by index) give their
+   references to the parameters. LU_JIT_DECLINED with nothing done when
+   the code has no such entry or the entry declines. */
+PyObject *lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs,
+                        uint64_t takes);
+
 /* Calls a generator function from compiled code: `frame`, pushed and bound
    (the task's topmost, not linked), runs RETURN_GENERATOR and the prologue
    before it as the interpreter does (a tool sees neither: PY_START comes

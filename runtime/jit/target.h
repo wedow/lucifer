@@ -164,6 +164,7 @@ struct lu_unit {
     PyCodeObject *code;         /* whose unit it is (borrowed: the code frees its units) */
     int entry_pc;
     int (*fn)(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
+    void *direct;               /* a call entry's direct entry (struct lu_jit_direct), or NULL */
     void *mem;
     size_t size;
     size_t code_bytes;
@@ -270,6 +271,53 @@ int lu_jit_nohoist(PyCodeObject *code, int pc);
    Free gives back a unit's range once nothing can run it. */
 void *lu_code_alloc(size_t n, void **rw);
 void lu_code_free(void *code, size_t n);
+
+/* An activation of a unit, linked from its task (jit_act) while it runs,
+   so that jit.c frees no unit one is in. */
+struct lu_jit_act {
+    struct lu_unit *unit;
+    struct lu_jit_act *outer;
+};
+
+/* Entries a unit counts: one past this many is not retired, and the count
+   is only read, so calls from many threads share its line. */
+#define ENTRIES_SEEN (1u << 16)
+
+/* Calls compiled code (and helpers.c) makes of a compiled callee directly.
+   A code's JIT state, at co_executors, begins with a struct lu_jit_direct:
+   how many positional arguments a call passes when they are all the code
+   takes (no keyword-only, star or cell parameters, no cells among its
+   locals, not a generator's), else -1; and the direct entry of its live
+   unit at the call entry, or NULL.
+
+   The entry is a C function:
+       int entry(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args,
+                 PyObject **result, uint64_t takes, struct lu_jit_call *call)
+   It makes the checks the interpreter makes at a call and at RESUME, and
+   returns 0 with nothing done when one fails. Else it pushes the frame,
+   binds the nargs arguments (those in `takes`, bits by index, give their
+   references to the parameters; the others are counted), links the
+   activation in `call`, names the frame there, and runs the unit: an enum
+   lu_jit_result. The caller then ends the activation (lu_jit_left) and
+   either pops the frame (LU_JIT_RETURN, the value in *result) as
+   lu_frame_pop pops it, or has the interpreter run it
+   (lu_jit_call_finish). */
+struct lu_jit_direct {
+    void *entry;
+    int nargs;
+};
+int lu_jit_direct_nargs(PyCodeObject *code);
+
+struct lu_jit_call {
+    struct lu_jit_act act;
+    struct lu_frame *frame;
+};
+
+void lu_jit_left(struct lu_unit *u);
+PyObject *lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r);
+
+/* -X lucifer_jit_stats' count of direct entries, or NULL when the counts are off. */
+unsigned long *lu_jit_direct_count(void);
 
 /* Lowers an allocated function into unit: code, exits, constants. 0, or
    -1 with f->fail set. */

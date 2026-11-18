@@ -89,11 +89,9 @@
    and the calls per entry of the unit that show the site in a loop it runs. */
 #define HOT_CALLS_PER_INS 8
 #define LOOP_CALLS 64
-/* Entries a unit counts: one past this many is not retired, and the count
-   is only read, so calls from many threads share its line. */
-#define ENTRIES_SEEN (1u << 16)
 
 struct lu_jit_code {
+    struct lu_jit_direct direct;        /* first: compiled callers read it (target.h) */
     int compiling;              /* a thread is compiling: others interpret */
     int disabled;               /* LUCIFER_JIT_ONLY does not list it */
     int level;                  /* the wait's doublings: retirements and failed compiles, less decay */
@@ -305,6 +303,21 @@ lu_jit_call_entry(PyCodeObject *code)
     return -1;
 }
 
+int
+lu_jit_direct_nargs(PyCodeObject *code)
+{
+    if (lu_jit_call_entry(code) <= 0 || !(code->co_flags & CO_OPTIMIZED) || code->co_kwonlyargcount != 0
+        || (code->co_flags & (CO_VARARGS | CO_VARKEYWORDS | LU_CO_GENERATORS))) {
+        return -1;
+    }
+    for (int i = 0; code->co_localspluskinds != NULL && i < code->co_nlocalsplus; i++) {
+        if (((const unsigned char *)PyBytes_AS_STRING(code->co_localspluskinds))[i] & CO_FAST_CELL) {
+            return -1;
+        }
+    }
+    return code->co_argcount;
+}
+
 static struct lu_jit_code *
 state_for(PyCodeObject *code)
 {
@@ -319,6 +332,7 @@ state_for(PyCodeObject *code)
     jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint32_t));
     jc->seen = calloc((size_t)jc->ncode + 1, 1);
     jc->call_pc = lu_jit_call_entry(code);
+    jc->direct.nargs = lu_jit_direct_nargs(code);
     uintptr_t seen = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
     while (seen == 0 || (seen & 1)) {
         if (__atomic_compare_exchange_n((uintptr_t *)&code->co_executors, &seen, (uintptr_t)jc, 0,
@@ -521,12 +535,6 @@ note_failure(const char *why)
     }
 }
 
-/* An activation of a unit, linked from its task (freeing dead units, below). */
-struct lu_jit_act {
-    struct lu_unit *unit;
-    struct lu_jit_act *outer;
-};
-
 /* Whether a dict change killed a unit since the last release (lu_jit_release). */
 static int release_due;
 
@@ -604,7 +612,9 @@ free_unit(struct lu_unit *u)
    A unit is in use while an activation runs it or a thread reads its
    code's list of units. An activation is a call of the unit's code from
    lu_jit_enter or lu_jit_run, which links it from its task (jit_act) for
-   exactly that call, innermost first. Whatever reads a unit's code or
+   exactly that call, innermost first, or from a direct entry, which links
+   it in its caller's record until the caller ends it (target.h struct
+   lu_jit_call). Whatever reads a unit's code or
    descriptions does so inside one: compiled code, its exits
    (lu_jit_deopt returns into the unit's epilogue), walkers that read a
    frame's published state (frame->jit_desc, which only an activation
@@ -617,9 +627,10 @@ free_unit(struct lu_unit *u)
    frees them once the world runs again. No thread can still reach one:
 
    - Every other task is stopped at a poll or detached, and nothing
-     between taking a unit from the code's list (find) and linking the
-     activation polls, detaches or takes a lock that may park: the marks
-     see every activation that can run the unit.
+     between taking a unit from the code's list (find), or its direct
+     entry from the code's state, and linking the activation polls,
+     detaches or takes a lock that may park: the marks see every
+     activation that can run the unit.
    - Nothing that walks a code's list (find, the loops that kill its
      units) polls, detaches or parks either: no thread stands on the list
      when it changes, and after it none finds the unit.
@@ -917,6 +928,11 @@ kill(struct lu_jit_code *jc, struct lu_unit *u)
     if (__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
         return;
     }
+    void *entry = u->direct;
+    if (entry != NULL) {
+        /* Callers stop entering it; one that read the entry before finds it dead. */
+        __atomic_compare_exchange_n(&jc->direct.entry, &entry, NULL, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+    }
     dying_add(u);
     count(&stats.units_dead, 1);
     unsigned long served = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
@@ -1046,6 +1062,9 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
         if (u != NULL) {
             u->next = jc->units;
             __atomic_store_n(&jc->units, u, __ATOMIC_RELEASE);
+            if (u->direct != NULL) {
+                __atomic_store_n(&jc->direct.entry, u->direct, __ATOMIC_RELEASE);
+            }
         }
         else if (jc->wait[pc] == 0) {
             /* It failed: tried again later, like a unit that died. (A compile
@@ -1256,6 +1275,51 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         *result = lu_eval_continue(ts, r == LU_JIT_ERROR);
     }
     return 1;
+}
+
+PyObject *
+lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, uint64_t takes)
+{
+    PyCodeObject *code = (PyCodeObject *)func->func_code;
+    struct lu_jit_code *jc = state_of(code);
+    int (*entry)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, uint64_t, struct lu_jit_call *) =
+        jc != NULL && jc->direct.nargs == nargs ? __atomic_load_n(&jc->direct.entry, __ATOMIC_ACQUIRE) : NULL;
+    /* An exception pending, which lu_eval would set aside: the interpreter's call. */
+    if (entry == NULL || ts->current_exception != NULL) {
+        return LU_JIT_DECLINED;
+    }
+    takes &= nargs < 64 ? ((uint64_t)1 << nargs) - 1 : ~(uint64_t)0;
+    struct lu_jit_call call;
+    PyObject *result;
+    int r = entry(ts, func, args, &result, takes, &call);
+    if (r == 0) {
+        return LU_JIT_DECLINED;
+    }
+    ((struct lu_task *)ts)->jit_act = call.act.outer;
+    left(call.act.unit);
+    if (r == LU_JIT_RETURN) {
+        lu_frame_pop(ts, call.frame);
+    }
+    else {
+        result = lu_jit_call_finish(ts, call.frame, r);
+    }
+    /* The parameters released what the arguments gave them: they have it again. */
+    for (; takes != 0; takes &= takes - 1) {
+        Py_INCREF(args[__builtin_ctzll(takes)]);
+    }
+    return result;
+}
+
+void
+lu_jit_left(struct lu_unit *u)
+{
+    left(u);
+}
+
+unsigned long *
+lu_jit_direct_count(void)
+{
+    return _PyRuntime.jit.stats ? &stats.compiled : NULL;
 }
 
 void

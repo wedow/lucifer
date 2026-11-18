@@ -1,8 +1,11 @@
 # Calls compiled code makes to compiled functions it does not inline: a
 # function and a bound method the caller only knows as arguments, one
-# called without its defaulted parameters, and a recursion. tools/jitcheck runs this at two sizes and requires that no
-# call per iteration enters compiled code from C (its direct calls): the
-# caller pushes the callee's frame and enters its unit itself.
+# called without its defaulted parameters, a recursion, and one site that
+# meets closures, bound methods of two classes and a lambda (no profile
+# names one callee there). tools/jitcheck runs this at two sizes and
+# requires that no call per iteration enters compiled code from C (its
+# direct calls): the caller pushes the callee's frame and enters its unit
+# itself.
 import sys
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
@@ -44,3 +47,29 @@ try:
 except TypeError as e:
     print('TypeError', e)
 print(fib(15))
+
+
+def make(k):
+    def add(a, b):
+        return a + b + k
+    return add
+
+
+class P:
+    def m(self, a, b):
+        return a - b
+
+
+class Q:
+    def m(self, a, b):
+        return a ^ b
+
+
+def mixed(fs, n):
+    s = 0
+    for i in range(n):
+        s += fs[i % 5](i, 3)
+    return s
+
+
+print(mixed([make(1), P().m, make(2), Q().m, lambda a, b: a * b], N))

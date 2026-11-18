@@ -933,17 +933,24 @@ taken_args(struct lu_task *t)
     return d != NULL ? d->takes : 0;
 }
 
-/* A Python function's call, as CALL and CALL_KW make it: the frame is
-   pushed and bound (by plain stores when the arguments are exactly its
-   positional parameters), then run by lu_eval, which enters a compiled
-   unit at its call entry. The interpreter moves its operands into the
-   callee's frame: so the arguments in `takes` (bits by index), whose
-   stack entries hold references of their own, give those to the
-   parameters for the call, and have them again after it. */
+/* A Python function's call, as CALL and CALL_KW make it: a compiled unit
+   at its call entry that takes the arguments as they are runs directly
+   (lu_jit_direct); else the frame is pushed and bound (by plain stores
+   when the arguments are exactly its positional parameters), then run by
+   lu_eval, which enters such a unit too. The interpreter moves its
+   operands into the callee's frame: so the arguments in `takes` (bits by
+   index), whose stack entries hold references of their own, give those to
+   the parameters for the call, and have them again after it. */
 static PyObject *
 call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames,
               uint64_t takes)
 {
+    if (kwnames == NULL) {
+        PyObject *r = lu_jit_direct(&t->ts, func, args, nargs, takes);
+        if (r != LU_JIT_DECLINED) {
+            return r;
+        }
+    }
     PyCodeObject *co = (PyCodeObject *)func->func_code;
     struct lu_frame *f;
     Py_ssize_t total = nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
@@ -1000,6 +1007,20 @@ polled(struct lu_task *t, PyObject *r)
         Py_CLEAR(r);
     }
     return r;
+}
+
+PyObject *
+lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r)
+{
+    struct lu_task *t = (struct lu_task *)ts;
+    /* The callee's frame returns into a C-entry marker, as under lu_eval. */
+    struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
+    entry.previous = callee->previous;
+    callee->previous = &entry;
+    t->pin++;
+    PyObject *v = lu_eval_continue(ts, r == LU_JIT_ERROR);
+    t->pin--;
+    return polled(t, v);
 }
 
 /* SEND: a generator or coroutine is resumed as the interpreter resumes it:
