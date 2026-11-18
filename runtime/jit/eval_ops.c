@@ -413,6 +413,9 @@ lu_ev_instruction(struct ctx *c)
     case UNARY_NEGATIVE: case UNARY_INVERT:
         return lu_ev_unary(c);
     case TO_BOOL:
+        /* The operand's type, learned where it is not known: a bool's or
+           None's truth is a comparison, not a call. */
+        lu_ev_learn_type(c, lu_ev_peek(c, 1), 0);
         w = lu_ev_truth(c, lu_ev_peek(c, 1));
         lu_ev_pop(c);
         lu_ev_push(c, lu_ev_bool(c, w, 0));

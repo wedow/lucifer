@@ -398,6 +398,12 @@ lu_ev_truth(struct ctx *c, lu_v r)
         }
     }
     PyTypeObject *t = lu_ev_type(c, r);
+    if (t == &PyBool_Type) {
+        return lu_ev_emit(c, OP_IS, REP_BIT, lu_ev_val(c, r), lu_ev_konst(c, Py_True), LU_NOV, 0);
+    }
+    if (t == Py_TYPE(Py_None)) {
+        return lu_ev_const_i(c, 0);
+    }
     if (t == &PyLong_Type) {
         return lu_ev_emit(c, OP_CMP_I, REP_BIT, lu_ev_unbox_int(c, r), lu_ev_const_i(c, 0), LU_NOV, Py_NE);
     }
@@ -473,7 +479,11 @@ lu_ev_settle(struct ctx *c, int pc)
     g->npending = 0;
     struct lu_fs *fs = NULL;    /* the state after the instruction, copied when something leaves from it */
     for (int i = 0; i < nrel; i++) {
-        int noisy = !quiet(lu_ev_type(c, rel[i]));
+        PyTypeObject *t = lu_ev_type(c, rel[i]);
+        if (t == &PyBool_Type || t == Py_TYPE(Py_None)) {
+            continue;           /* its objects are immortal */
+        }
+        int noisy = !quiet(t);
         lu_v d = lu_ev_emit(c, OP_DECREF, REP_NONE, rel[i], LU_NOV, LU_NOV, noisy);
         if (noisy) {
             /* Its finalizer sees the frames as they are after the
