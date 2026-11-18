@@ -133,11 +133,24 @@ lu_ev_learn_type(struct ctx *c, lu_v r, int which)
     return NULL;
 }
 
+/* owner's type has version `version`. A type the path knows is relied on
+   as of the version, a dependency of the unit (facts.c); a version the
+   path read already is relied on the same way, by a guard marked proven. */
 void
 lu_ev_guard_version(struct ctx *c, lu_v owner, uint32_t version)
 {
-    lu_v g = lu_ev_guard(c, OP_GUARD_VERSION, lu_ev_val(c, owner), version);
+    PyTypeObject *t = lu_ev_type(c, owner);
+    if (t != NULL && lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)t), version)) {
+        return;
+    }
+    lu_v v = lu_ev_val(c, owner);
+    struct fact *fa = lu_ev_fact(c, v, 0);
+    lu_v g = lu_ev_guard(c, OP_GUARD_VERSION, v, version);
     I(c, g)->imm2 = GV_TYPE_OF;
+    if (fa != NULL && fa->version == version) {
+        I(c, g)->flags |= INS_PROVEN;
+    }
+    lu_ev_fact(c, v, 1)->version = version;
 }
 
 void

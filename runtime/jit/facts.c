@@ -1,8 +1,8 @@
 /* Guards the unit need not run (docs/design/jit-architecture.md 2,
    feedback and invalidation): a guard on a constant whose fact only a
    writer changes (a dict's keys, the value of one key, a function's code
-   and defaults, a class's version) becomes a dependency of the unit
-   (runtime/jit/deps.c). A writer that changes the fact kills the unit,
+   and defaults, a class's version), or of a type's version its path read
+   already (INS_PROVEN), becomes a dependency of the unit (runtime/jit/deps.c). A writer that changes the fact kills the unit,
    which then leaves at its next poll; the running thread's own change
    must reach it at once: a unit with dependencies checks that it lives
    where it checks its frames after an instruction that may have run code
@@ -22,6 +22,12 @@
 static int
 fact_of(struct lu_func *f, struct lu_ins *in, struct lu_fdep *dep)
 {
+    if (in->op == OP_GUARD_VERSION && in->imm2 == GV_TYPE_OF && (in->flags & INS_PROVEN)
+        && !lu_jit_nohoist(in->fs->code, in->fs->pc)) {
+        /* Its path read the version already: only a change to the type takes it back. */
+        *dep = (struct lu_fdep){ .kind = LU_DEP_TYPE, .obj = (uint32_t)in->imm, .code = in->fs->code, .pc = in->fs->pc };
+        return 1;
+    }
     if (in->fs == NULL || in->a == LU_NOV || f->ins[in->a].op != OP_CONST || lu_jit_nohoist(in->fs->code, in->fs->pc)) {
         return 0;
     }

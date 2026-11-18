@@ -1214,7 +1214,7 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
     memset(at, 0, sizeof(int) * (size_t)n);
     for (int i = 0; i < g->st.nfacts; i++) {
         struct fact fa = g->st.facts[i];
-        for (int e = 1; e < n && fa.t != NULL; e++) {
+        for (int e = 1; e < n && (fa.t != NULL || fa.version != 0); e++) {
             /* Each edge's facts are sorted by value, as these are. */
             struct fact *other = NULL;
             while (at[e] < edges[e].st.nfacts && edges[e].st.facts[at[e]].v < fa.v) {
@@ -1223,14 +1223,18 @@ lu_ev_merge(struct ctx *c, struct edge *edges, int n, int pc)
             if (at[e] < edges[e].st.nfacts && edges[e].st.facts[at[e]].v == fa.v) {
                 other = &edges[e].st.facts[at[e]];
             }
+            if (other == NULL || other->version != fa.version) {
+                fa.version = 0;
+            }
             if (other == NULL || other->t != fa.t) {
                 fa.t = NULL;
+                fa.raw = LU_NOV;
             }
             else if (other->raw != fa.raw) {
                 fa.raw = LU_NOV;
             }
         }
-        if (fa.t != NULL) {
+        if (fa.t != NULL || fa.version != 0) {
             g->st.facts[kept++] = fa;
         }
     }

@@ -29,12 +29,13 @@
 
 #include "jit/target.h"
 
-/* What a path has proved of an object value: its exact type, and its raw
-   value once it was unboxed. */
+/* What a path has proved of an object value: its exact type, its raw
+   value once it was unboxed, and its type's version once a guard read it. */
 struct fact {
     lu_v v;
     PyTypeObject *t;
     lu_v raw;
+    uint32_t version;
 };
 
 struct state {

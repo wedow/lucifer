@@ -256,7 +256,7 @@ lu_ev_fact(struct ctx *c, lu_v v, int create)
     }
     memmove(&st->facts[lo + 1], &st->facts[lo], sizeof(struct fact) * (size_t)(st->nfacts - lo));
     st->nfacts++;
-    st->facts[lo] = (struct fact){ v, NULL, LU_NOV };
+    st->facts[lo] = (struct fact){ v, NULL, LU_NOV, 0 };
     return &st->facts[lo];
 }
 
