@@ -1,9 +1,9 @@
 /* What is left to do over the finished graph (docs/design/jit-architecture.md
    2, optimizer): the evaluator folded, forwarded and kept virtual what it
    could while it built, so the passes here only tidy. Phis every input of
-   which is one value go, with their uses forwarded; values nothing reads
-   go; critical edges get a block for their phi moves; blocks are ordered
-   for emission. */
+   which is one value go, with their uses forwarded, and a branch they make
+   constant jumps; values nothing reads go; critical edges get a block for
+   their phi moves; blocks are ordered for emission. */
 #include "jit/target.h"
 
 #include <stdlib.h>
@@ -93,6 +93,62 @@ trivial_phis(struct lu_func *f)
             fwd[v] = same;
             changed = 1;
         }
+    }
+    return changed;
+}
+
+/* The constant a condition has once phis are forwarded, or -1. */
+static int
+known_bit(struct lu_func *f, lu_v v)
+{
+    struct lu_ins *in = &f->ins[resolve(v)];
+    if (in->op == OP_CONST_I) {
+        return in->imm != 0;
+    }
+    if (in->op != OP_CMP_I || f->ins[resolve(in->a)].op != OP_CONST_I || f->ins[resolve(in->b)].op != OP_CONST_I) {
+        return -1;
+    }
+    int64_t p = f->ins[resolve(in->a)].imm, q = f->ins[resolve(in->b)].imm;
+    int op = (int)in->imm;
+    return op == Py_LT ? p < q : op == Py_LE ? p <= q : op == Py_EQ ? p == q
+        : op == Py_NE ? p != q : op == Py_GT ? p > q : p >= q;
+}
+
+/* A branch on a condition a trivial phi made constant jumps: the arm it
+   never takes loses the edge, and is dead if nothing else reaches it. A
+   peeled loop's first turn tests for every yield of the generator it runs,
+   and only its start can come there: the other arms' states are not the
+   generator's (an unbound local it reads), so they must not be emitted. */
+static int
+fold_branches(struct lu_func *f)
+{
+    int changed = 0;
+    for (int b = 0; b < f->nblocks; b++) {
+        struct lu_block *bl = &f->blocks[b];
+        struct lu_ins *term = bl->nins ? &f->ins[bl->ins[bl->nins - 1]] : NULL;
+        int bit = term != NULL && term->op == OP_BRANCH && bl->succ[0] != bl->succ[1] ? known_bit(f, term->a) : -1;
+        if (bit < 0) {
+            continue;
+        }
+        struct lu_block *gone = &f->blocks[bl->succ[bit]];
+        term->op = OP_JUMP;
+        term->a = LU_NOV;
+        bl->succ[0] = bl->succ[!bit];
+        bl->nsucc = 1;
+        int p = 0;
+        while (gone->preds[p] != b) {
+            p++;
+        }
+        gone->npreds--;
+        memmove(gone->preds + p, gone->preds + p + 1, sizeof(int) * (size_t)(gone->npreds - p));
+        for (int i = 0; i < gone->nins && f->ins[gone->ins[i]].op == OP_PHI; i++) {
+            struct lu_ins *phi = &f->ins[gone->ins[i]];
+            if (p < phi->nargs) {
+                phi->nargs--;
+                memmove(phi->args + p, phi->args + p + 1, sizeof(lu_v) * (size_t)(phi->nargs - p));
+            }
+        }
+        changed = 1;
     }
     return changed;
 }
@@ -492,7 +548,7 @@ lu_ssa_optimize(struct lu_func *f)
     for (int v = 0; v < f->nins; v++) {
         fwd[v] = v;
     }
-    while (trivial_phis(f)) {
+    while (trivial_phis(f) | fold_branches(f)) {
     }
     rewrite(f);
     if (raw_loads(f)) {
