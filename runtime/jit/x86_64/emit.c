@@ -3301,8 +3301,21 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         }
         int inline_ok = in->imm == H_build_tuple || in->imm == H_build_list ? emit_build(a, v)
             : in->imm == H_new_object ? emit_new_object(a, v) : 0;
+        int lacks = in->imm == H_dict_lacks ? new_label(a) : -1;
+        if (lacks >= 0) {
+            /* An instance with no dict of its own lacks every name: 1
+               without the call. */
+            load(a, RAX, gpr_of(a, in->args[0], RDX), LU_MANAGED_DICT_OFFSET);
+            test_rr(a, RAX, RAX);
+            b1(a, 0xB8);
+            b4(a, 1);                           /* mov eax, 1: the flags stay */
+            jcc(a, CC_E, lacks);
+        }
         if (!inline_ok) {
             call_helper(a, v, pub);
+        }
+        if (lacks >= 0) {
+            bind(a, lacks);
         }
         if (err >= 0 && h->rep == REP_BIT) {
             b1(a, 0x83);
