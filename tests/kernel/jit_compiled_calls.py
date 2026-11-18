@@ -1,8 +1,8 @@
 # Calls compiled code makes to compiled functions it does not inline: a
 # function and a bound method the caller only knows as arguments, one
 # called without its defaulted parameters, a recursion, and one site that
-# meets closures, bound methods of two classes and a lambda (no profile
-# names one callee there). tools/jitcheck runs this at two sizes and
+# meets closures, bound methods of two classes, a lambda and a function
+# whose parameter is a cell (no profile names one callee there). tools/jitcheck runs this at two sizes and
 # requires that no call per iteration enters compiled code from C (its
 # direct calls): the caller pushes the callee's frame and enters its unit
 # itself.
@@ -65,11 +65,17 @@ class Q:
         return a ^ b
 
 
+def celled(a, b):
+    def get():
+        return a | b
+    return get()
+
+
 def mixed(fs, n):
     s = 0
     for i in range(n):
-        s += fs[i % 5](i, 3)
+        s += fs[i % 6](i, 3)
     return s
 
 
-print(mixed([make(1), P().m, make(2), Q().m, lambda a, b: a * b], N))
+print(mixed([make(1), P().m, make(2), Q().m, lambda a, b: a * b, celled], N))

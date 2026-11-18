@@ -310,11 +310,6 @@ lu_jit_direct_nargs(PyCodeObject *code)
         || (code->co_flags & (CO_VARARGS | CO_VARKEYWORDS | LU_CO_GENERATORS))) {
         return -1;
     }
-    for (int i = 0; code->co_localspluskinds != NULL && i < code->co_nlocalsplus; i++) {
-        if (((const unsigned char *)PyBytes_AS_STRING(code->co_localspluskinds))[i] & CO_FAST_CELL) {
-            return -1;
-        }
-    }
     return code->co_argcount;
 }
 
@@ -1314,6 +1309,12 @@ void
 lu_jit_left(struct lu_unit *u)
 {
     left(u);
+}
+
+int
+lu_jit_prologue(struct lu_frame *frame)
+{
+    return prologue(frame);
 }
 
 unsigned long *

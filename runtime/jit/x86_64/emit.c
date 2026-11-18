@@ -3742,10 +3742,10 @@ epilogue(struct asm_ *a)
    lu_jit_call. The checks the interpreter makes at a call and at RESUME,
    and lu_jit_run's, decline with 0 and nothing done; so does a datastack
    chunk without room for the frame, which lu_frame_push would make. The
-   frame is then pushed and bound as lu_frame_push and COPY_FREE_VARS make
-   it, the activation linked in the caller's record, and the unit run from
-   where its own entry has set up the same registers. Its offset in the
-   code. */
+   frame is then pushed and bound as lu_frame_push makes it, the
+   activation linked in the caller's record, the prologue run (in line
+   for COPY_FREE_VARS alone, else in C), and the unit run from where its
+   own entry has set up the same registers. Its offset in the code. */
 static int
 direct_entry(struct asm_ *a)
 {
@@ -3839,27 +3839,51 @@ direct_entry(struct asm_ *a)
         bind(a, given);
         store(a, R15, offsetof(struct lu_frame, localsplus) + 8 * i, R10);
     }
-    /* The other locals the unit reads at entry are unbound (a loop's
-       header at the call's entry reads them all). */
-    int nfree = code->co_nfreevars;
-    for (int v = 0; v < f->nins; v++) {
-        struct lu_ins *in = &f->ins[v];
-        int i = (int)in->imm;
-        if (in->op == OP_ENTRY_LOCAL && !(in->flags & INS_DEAD) && i >= code->co_argcount
-            && i < code->co_nlocalsplus - nfree) {
+    int nfree = code->co_nfreevars, cells = 0;
+    for (int i = 0; code->co_localspluskinds != NULL && i < code->co_nlocalsplus; i++) {
+        cells |= (((const unsigned char *)PyBytes_AS_STRING(code->co_localspluskinds))[i] & CO_FAST_CELL) != 0;
+    }
+    if (cells) {
+        /* MAKE_CELL may raise: the prologue runs in C on a frame the
+           interpreter can take, every local unbound and the stack at its
+           base, and its error is the interpreter's to unwind. */
+        int made = new_label(a);
+        for (int i = code->co_argcount; i < code->co_nlocalsplus - nfree; i++) {
             store_mi(a, R15, offsetof(struct lu_frame, localsplus) + 8 * i, 0);
         }
+        lea(a, R11, R15, offsetof(struct lu_frame, localsplus) + 8 * code->co_nlocalsplus);
+        store(a, R15, offsetof(struct lu_frame, stackpointer), R11);
+        store(a, R14, offsetof(PyThreadState, current_frame), R15);
+        mov_rr(a, RDI, R15);
+        call_abs(a, (void *)lu_jit_prologue);
+        op_rr(a, 0, 0x85, RAX, RAX);            /* test eax, eax */
+        jcc(a, CC_E, made);
+        mov_ri(a, RAX, LU_JIT_ERROR);
+        jmp(a, a->epilogue);
+        bind(a, made);
     }
-    if (nfree > 0) {
-        /* COPY_FREE_VARS, the prologue's only instruction (no cells: lu_jit_direct_nargs). */
-        load(a, R11, RSI, offsetof(PyFunctionObject, func_closure));
-        for (int i = 0; i < nfree; i++) {
-            load(a, R10, R11, offsetof(PyTupleObject, ob_item) + 8 * i);
-            incref(a, R10);
-            store(a, R15, offsetof(struct lu_frame, localsplus) + 8 * (code->co_nlocalsplus - nfree + i), R10);
+    else {
+        /* The other locals the unit reads at entry are unbound (a loop's
+           header at the call's entry reads them all). */
+        for (int v = 0; v < f->nins; v++) {
+            struct lu_ins *in = &f->ins[v];
+            int i = (int)in->imm;
+            if (in->op == OP_ENTRY_LOCAL && !(in->flags & INS_DEAD) && i >= code->co_argcount
+                && i < code->co_nlocalsplus - nfree) {
+                store_mi(a, R15, offsetof(struct lu_frame, localsplus) + 8 * i, 0);
+            }
         }
+        if (nfree > 0) {
+            /* COPY_FREE_VARS, the prologue's only instruction. */
+            load(a, R11, RSI, offsetof(PyFunctionObject, func_closure));
+            for (int i = 0; i < nfree; i++) {
+                load(a, R10, R11, offsetof(PyTupleObject, ob_item) + 8 * i);
+                incref(a, R10);
+                store(a, R15, offsetof(struct lu_frame, localsplus) + 8 * (code->co_nlocalsplus - nfree + i), R10);
+            }
+        }
+        store(a, R14, offsetof(PyThreadState, current_frame), R15);
     }
-    store(a, R14, offsetof(PyThreadState, current_frame), R15);
     /* Entries, while the unit counts them (runtime/jit/jit.c). */
     mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->entries);
     cmp_mi(a, 1, R11, 0, (int32_t)ENTRIES_SEEN);

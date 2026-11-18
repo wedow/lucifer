@@ -286,9 +286,8 @@ struct lu_jit_act {
 /* Calls compiled code (and helpers.c) makes of a compiled callee directly.
    A code's JIT state, at co_executors, begins with a struct lu_jit_direct:
    how many positional arguments a call passes when they are all the code
-   takes (no keyword-only, star or cell parameters, no cells among its
-   locals, not a generator's), else -1; and the direct entry of its live
-   unit at the call entry, or NULL.
+   takes (no keyword-only or star parameters, not a generator's), else -1;
+   and the direct entry of its live unit at the call entry, or NULL.
 
    The entry is a C function:
        int entry(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args,
@@ -297,10 +296,11 @@ struct lu_jit_act {
    returns 0 with nothing done when one fails. Else it pushes the frame,
    binds the nargs arguments (those in `takes`, bits by index, give their
    references to the parameters; the others are counted), links the
-   activation in `call`, names the frame there, and runs the unit: an enum
-   lu_jit_result. The caller then ends the activation (lu_jit_left) and
-   either pops the frame (LU_JIT_RETURN, the value in *result) as
-   lu_frame_pop pops it, or has the interpreter run it
+   activation in `call`, names the frame there, runs the prologue
+   (lu_jit_prologue where it makes cells: LU_JIT_ERROR when that raises)
+   and runs the unit: an enum lu_jit_result. The caller then ends the
+   activation (lu_jit_left) and either pops the frame (LU_JIT_RETURN, the
+   value in *result) as lu_frame_pop pops it, or has the interpreter run it
    (lu_jit_call_finish). */
 struct lu_jit_direct {
     void *entry;
@@ -314,6 +314,7 @@ struct lu_jit_call {
 };
 
 void lu_jit_left(struct lu_unit *u);
+int lu_jit_prologue(struct lu_frame *frame);
 PyObject *lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r);
 
 /* -X lucifer_jit_stats' count of direct entries, or NULL when the counts are off. */
