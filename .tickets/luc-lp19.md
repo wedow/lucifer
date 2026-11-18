@@ -1,6 +1,6 @@
 ---
 id: luc-lp19
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-17T23:51:30Z
