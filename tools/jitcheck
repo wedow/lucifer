@@ -182,6 +182,9 @@ require that a count of the tier's does not grow with the iterations:
          them.
   boolpow tests/kernel/jit_bool_float_pow.py, whose hot loop raises floats
          to bools' powers and bools to floats': guard and side exits.
+  fields tests/kernel/jit_unboxed_fields.py, whose hot loop keeps instances
+         it made with a computed float field: float boxes. The instance is
+         made real with the number stored unboxed.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -238,6 +241,7 @@ GROWTH = {
     'repeat': ('jit_inline_paths.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'classes': ('jit_class_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'objects': ('jit_virtual_objects.py', r'jit: allocations by kind: .*tuple (\d+), .*instance (\d+)', 0),
+    'fields': ('jit_unboxed_fields.py', r'jit: allocations by kind: int \d+, float (\d+)', 0),
     'iterators': ('jit_virtual_iterators.py', r'jit: allocations by kind: .*tuple (\d+), .*iterator (\d+)', 0),
     'carried': ('jit_carried_objects.py',
                 r'jit: allocations by kind: int (\d+), .*tuple (\d+), list (\d+), dict (\d+), .*instance (\d+)', 0),

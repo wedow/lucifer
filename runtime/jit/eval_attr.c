@@ -241,8 +241,25 @@ unpublished_since(struct ctx *c, lu_v from)
     return 1;
 }
 
+/* The raw value of field value v of instance `id`, made real now, when v
+   is an int or a float the code made, which no object is yet, and nothing
+   but the instance names: the attribute takes the number itself, as a
+   store of a temporary does (temporary_number). Else LU_NOV. */
+static lu_v
+field_number(struct ctx *c, lu_v v, int id, int *op)
+{
+    lu_v real;
+    struct lu_vobj *o = LU_IS_VIRT(v) ? lu_ev_virt(c->g, &c->g->st, v, &real) : NULL;
+    if (o == NULL || real != LU_NOV || o->n != 1 || (o->kind != VK_BOX_INT && o->kind != VK_BOX_FLOAT)
+        || lu_ev_reaches_past(c->g, &c->g->st, LU_VIRT_ID(v), id)) {
+        return LU_NOV;
+    }
+    *op = o->kind == VK_BOX_INT ? OP_INLINE_STORE_I : OP_INLINE_STORE_F;
+    return o->f[0];
+}
+
 lu_v
-lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o)
+lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o, int id)
 {
     PyTypeObject *tp = o->type;
     lu_v k = lu_ev_konst(c, (PyObject *)tp);
@@ -250,17 +267,19 @@ lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o)
     lu_ev_def_type(c, obj, tp);
     for (int i = 0; i < o->n; i += 2) {
         PyObject *name = lu_ev_const(c, o->f[i]), *d = _PyType_Lookup(tp, name);
-        lu_v val = lu_ev_val(c, o->f[i + 1]);
         uint32_t version;
         uint16_t index;
         if (slot_member(d)) {
-            lu_v args[3] = { obj, lu_ev_const_i(c, ((PyMemberDescrObject *)d)->d_member->offset), val };
+            lu_v args[3] = { obj, lu_ev_const_i(c, ((PyMemberDescrObject *)d)->d_member->offset),
+                             lu_ev_val(c, o->f[i + 1]) };
             lu_ev_helper(c, H_slot_store, 3, args, 0);
         }
         else if (lu_specialize_store_fresh(tp, name, &version, &index) == STORE_ATTR_INSTANCE_VALUE
                  && lu_ev_class_relied(c, k, version)) {
-            int fresh = unpublished_since(c, obj);
-            lu_v st = lu_ev_emit(c, OP_INLINE_STORE, REP_NONE, obj, val, LU_NOV, index);
+            int fresh = unpublished_since(c, obj), raw_op;
+            lu_v raw = field_number(c, o->f[i + 1], id, &raw_op);
+            lu_v st = raw != LU_NOV ? lu_ev_emit(c, raw_op, REP_NONE, obj, raw, LU_NOV, index)
+                                    : lu_ev_emit(c, OP_INLINE_STORE, REP_NONE, obj, lu_ev_val(c, o->f[i + 1]), LU_NOV, index);
             I(c, st)->fs = lu_ev_exit_fs(c);
             store_room(c, st, tp, index);
             if (fresh) {
@@ -269,7 +288,7 @@ lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o)
             c->g->observed |= !fresh;
         }
         else {
-            lu_v args[4] = { obj, lu_ev_konst(c, name), val, lu_ev_const_i(c, 0) };
+            lu_v args[4] = { obj, lu_ev_konst(c, name), lu_ev_val(c, o->f[i + 1]), lu_ev_const_i(c, 0) };
             lu_ev_helper(c, H_store_attr, 4, args, 0);
         }
     }

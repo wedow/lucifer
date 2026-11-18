@@ -359,8 +359,10 @@ lu_ev_replaced(struct gctx *g)
    virtual one became), other than as held, until the next walk. */
 void lu_ev_names_walk(struct gctx *g, struct lu_fs *fs);
 int lu_ev_names(struct gctx *g, lu_v v);
-/* Whether the state's slots reach virtual object id. */
+/* Whether the state's slots reach virtual object id; the same, not
+   looking inside virtual object `past`. */
 int lu_ev_reaches(struct gctx *g, const struct state *st, int id);
+int lu_ev_reaches_past(struct gctx *g, const struct state *st, int id, int past);
 /* Whether r is virtual object id, or one whose fields reach it (eval_flow.c). */
 int lu_ev_reaches_id(struct gctx *g, const struct state *st, lu_v r, int id);
 
@@ -531,7 +533,7 @@ void lu_ev_room_end(struct ctx *c, int room);
 lu_v lu_ev_new_instance(struct ctx *c, PyTypeObject *tp);
 /* That instance made, as the interpreter would have made it: object.__new__'s,
    then its attributes stored in order as on a fresh instance. */
-lu_v lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o);
+lu_v lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o, int id);
 /* eval_exc.c: RAISE_VARARGS, taken by a handler of the unit where nothing
    can tell; PUSH_EXC_INFO, POP_EXCEPT and CHECK_EXC_MATCH in it. */
 int lu_ev_raise(struct ctx *c);

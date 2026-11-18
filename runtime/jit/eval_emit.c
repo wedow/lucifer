@@ -214,7 +214,7 @@ lu_ev_val(struct ctx *c, lu_v r)
         break;
     }
     case VK_INST:
-        v = lu_ev_instance_real(c, o);
+        v = lu_ev_instance_real(c, o, LU_VIRT_ID(r));
         break;
     case VK_EXC: {
         lu_v k = lu_ev_konst(c, (PyObject *)o->type);

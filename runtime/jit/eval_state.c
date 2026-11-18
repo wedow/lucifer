@@ -358,8 +358,10 @@ lu_ev_snapshot(struct ctx *c, int pc)
     return fs;
 }
 
+/* Whether r is, or reaches through objects not yet made, virtual object
+   id, not looking inside virtual object `past` (-1: none). */
 static int
-reaches(struct gctx *g, const struct state *st, lu_v r, int id)
+reaches(struct gctx *g, const struct state *st, lu_v r, int id, int past)
 {
     if (!LU_IS_VIRT(r)) {
         return 0;
@@ -367,11 +369,27 @@ reaches(struct gctx *g, const struct state *st, lu_v r, int id)
     if (LU_VIRT_ID(r) == id) {
         return 1;
     }
+    if (LU_VIRT_ID(r) == past) {
+        return 0;
+    }
     lu_v real;
     struct lu_vobj *o = lu_ev_virt(g, st, r, &real);
     for (int i = 0; real == LU_NOV && i < o->n; i++) {
-        if (reaches(g, st, o->f[i], id)) {
+        if (reaches(g, st, o->f[i], id, past)) {
             return 1;
+        }
+    }
+    return 0;
+}
+
+int
+lu_ev_reaches_past(struct gctx *g, const struct state *st, int id, int past)
+{
+    for (int d = 0; d <= st->depth; d++) {
+        for (int i = 0; i < st->nlocals[d] + st->sp[d]; i++) {
+            if (reaches(g, st, st->v[d][i], id, past)) {
+                return 1;
+            }
         }
     }
     return 0;
@@ -380,14 +398,7 @@ reaches(struct gctx *g, const struct state *st, lu_v r, int id)
 int
 lu_ev_reaches(struct gctx *g, const struct state *st, int id)
 {
-    for (int d = 0; d <= st->depth; d++) {
-        for (int i = 0; i < st->nlocals[d] + st->sp[d]; i++) {
-            if (reaches(g, st, st->v[d][i], id)) {
-                return 1;
-            }
-        }
-    }
-    return 0;
+    return lu_ev_reaches_past(g, st, id, -1);
 }
 
 static uint32_t *
