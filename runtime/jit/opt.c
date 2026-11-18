@@ -383,6 +383,61 @@ raw_loads(struct lu_func *f)
     return changed;
 }
 
+/* Whether nothing the instruction does can free an object the code does
+   not hold a reference to: it runs no code, releases nothing that may
+   hold others, writes no object and never parks the task (where another
+   task may stop the world and merge counts). */
+static int
+lets_borrow(const struct lu_ins *in)
+{
+    switch (in->op) {
+    case OP_GUARD_TYPE: case OP_GUARD_VERSION: case OP_GUARD_IS: case OP_GUARD_BIT: case OP_GUARD_NOT_NULL:
+    case OP_CHECK_LIVE: case OP_LOAD: case OP_INCREF: case OP_UNBOX_INT: case OP_UNBOX_FLOAT:
+    case OP_BOX_INT: case OP_BOX_FLOAT: case OP_ADD_I: case OP_SUB_I: case OP_MUL_I: case OP_NEG_I: case OP_ABS_I:
+    case OP_SHL_I: case OP_SAR_I: case OP_FLOORDIV_I: case OP_MOD_I: case OP_DIV_F: case OP_SQRT_F:
+    case OP_RITER_DONE:
+        return 1;
+    case OP_DECREF:
+        return in->imm == 0;    /* a number's or a string's, which holds nothing */
+    default:
+        return (lu_op_flags[in->op] & IF_PURE) != 0;
+    }
+}
+
+/* An attribute read from an instance's inline values whose reference the
+   code releases in the read's own block, with nothing between that could
+   free the value (lets_borrow), takes no reference: the instance's keeps
+   it. The read still leaves for a value another thread owns, which that
+   thread may free at any time. */
+static void
+borrowed_loads(struct lu_func *f)
+{
+    for (int b = 0; b < f->nblocks; b++) {
+        struct lu_block *bl = &f->blocks[b];
+        for (int k = 0; k < bl->nins; k++) {
+            lu_v v = bl->ins[k];
+            struct lu_ins *in = &f->ins[v];
+            if ((in->flags & INS_DEAD) || in->op != OP_INLINE_LOAD || !(in->flags & INS_OWNED)) {
+                continue;
+            }
+            for (int j = k + 1; j < bl->nins; j++) {
+                struct lu_ins *x = &f->ins[bl->ins[j]];
+                if (x->flags & INS_DEAD) {
+                    continue;
+                }
+                if (x->op == OP_DECREF && x->a == v) {
+                    in->flags &= ~INS_OWNED;
+                    x->flags |= INS_DEAD;
+                    break;
+                }
+                if (!lets_borrow(x)) {
+                    break;
+                }
+            }
+        }
+    }
+}
+
 static void
 count_use(struct lu_func *f, lu_v v, void *arg)
 {
@@ -556,6 +611,7 @@ lu_ssa_optimize(struct lu_func *f)
     }
     free(fwd);
     fwd = NULL;
+    borrowed_loads(f);
     order_blocks(f);            /* what cannot be reached is dead before its uses count */
     dce(f);
     split_edges(f);

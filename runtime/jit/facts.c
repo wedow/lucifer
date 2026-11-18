@@ -86,9 +86,55 @@ unsettles(const struct lu_ins *in)
     }
 }
 
+/* A check of the frames (GUARD_FRAMES) that no published call can have
+   reached since the last check, on any path, goes: only such a call lets
+   a walker see the frames. A release the optimizer took out leaves one so. */
+static void
+frames_checks(struct lu_func *f)
+{
+    int nb = f->nblocks;
+    char *seen = calloc((size_t)nb, 1);
+    for (int changed = 1, final = 0; changed || !final;) {
+        final = !changed;
+        changed = 0;
+        for (int k = 0; k < f->norder; k++) {
+            int b = f->order[k];
+            struct lu_block *bl = &f->blocks[b];
+            int any = 0;
+            for (int p = 0; p < bl->npreds; p++) {
+                any |= seen[bl->preds[p]];
+            }
+            for (int i = 0; i < bl->nins; i++) {
+                struct lu_ins *in = &f->ins[bl->ins[i]];
+                if (in->flags & INS_DEAD) {
+                    continue;
+                }
+                if (in->op == OP_GUARD_FRAMES) {
+                    if (final && !any && in->imm == 0) {
+                        in->flags |= INS_DEAD;
+                    }
+                    any = 0;
+                }
+                else if (lu_publishes(in)) {
+                    any = 1;
+                }
+            }
+            if (seen[b] != any) {
+                seen[b] = (char)any;
+                changed = 1;
+            }
+        }
+        if (final) {
+            break;
+        }
+    }
+    free(seen);
+}
+
 int
 lu_ssa_facts(struct lu_func *f)
 {
+    frames_checks(f);
     int nb = f->nblocks;
     /* alive[b]: the unit is known alive where block b ends (it was at its
        entry, and a poll leaves a dead one). Optimistic, then to a fixpoint. */

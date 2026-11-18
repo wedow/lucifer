@@ -408,6 +408,21 @@ lu_inline_get(PyObject *obj, PyObject **word)
 }
 
 PyObject *
+lu_inline_peek(PyObject *obj, PyObject **word)
+{
+    PyObject *v = lu_inline_get(obj, word);
+    if (v == NULL || _Py_IsImmortal(v)) {
+        return v;
+    }
+    if (!_Py_IsOwnedByCurrentThread(v) || v->ob_ref_local < 2) {
+        Py_DECREF(v);
+        return NULL;
+    }
+    _Py_atomic_store_uint32_relaxed(&v->ob_ref_local, v->ob_ref_local - 1);     /* the word holds it still */
+    return v;
+}
+
+PyObject *
 lu_inline_number(PyObject *obj, Py_ssize_t offset, uint64_t bits, int is_float)
 {
     PyObject *v = lu_inline_live(obj) ? lu_inline_get(obj, (PyObject **)((char *)obj + offset)) : NULL;

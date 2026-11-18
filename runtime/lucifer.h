@@ -342,6 +342,10 @@ int lu_inline_store_i(PyObject *obj, Py_ssize_t offset, int64_t v);
    without its lock): NULL when absent or when a try fails; an unboxed
    float gets its box. */
 PyObject *lu_inline_get(PyObject *obj, PyObject **word);
+/* The same object borrowed, for compiled code that holds the instance and
+   lets nothing run before it is done with the value: this thread owns it,
+   so only this thread frees it. NULL when it is not so. */
+PyObject *lu_inline_peek(PyObject *obj, PyObject **word);
 /* An exit's box of the value compiled code stored raw in word: installed
    while the word still holds that value unboxed, so that the box the
    exit's frame names and the attribute are one object. */

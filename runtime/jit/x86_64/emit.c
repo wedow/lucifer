@@ -539,6 +539,26 @@ incref_owned_or_exit(struct asm_ *a, int r, int fail)
     bind(a, done);
 }
 
+/* The same test without the reference: r's object is immortal or this
+   thread's, which no other thread frees. Clobbers RCX, R11. */
+static void
+owned_or_exit(struct asm_ *a, int r, int fail)
+{
+    int done = new_label(a);
+    load32(a, RCX, r, offsetof(PyObject, ob_ref_local));
+    cmp32_ri8(a, RCX, -1);
+    jcc(a, CC_E, done);                         /* immortal */
+    b1(a, 0x64);
+    b1(a, 0x4C);
+    b1(a, 0x8B);
+    b1(a, 0x1C);
+    b1(a, 0x25);
+    b4(a, 0);                                   /* mov r11, fs:[0] */
+    cmp_rm(a, R11, r, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, fail);
+    bind(a, done);
+}
+
 /* A call on a slow path that keeps every allocatable register: the
    caller-saved ones the unit allocates at all (a->volatiles, by location)
    go to the stack around it, in a multiple of 16 bytes that keeps it
@@ -1659,8 +1679,10 @@ parked_end(struct asm_ *a, struct lu_ins *in)
     unpublish(a, REP_NONE);
     cmp8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
     jcc(a, CC_E, kept);
-    mov_rr(a, RDI, RAX);
-    call_abs(a, (void *)lu_jit_decref);
+    if (in->op != OP_INLINE_LOAD || (in->flags & INS_OWNED)) {
+        mov_rr(a, RDI, RAX);    /* a borrowed read (opt.c) took none */
+        call_abs(a, (void *)lu_jit_decref);
+    }
     b1(a, 0xE8);
     rel32_to(a, a->restore_all);
     alu_ri(a, ALU_ADD, RSP, 256);
@@ -3119,7 +3141,12 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jcc(a, CC_E, fail);
         alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
         jcc(a, CC_BE, unboxed);
-        incref_owned_or_exit(a, RAX, fail);
+        if (in->flags & INS_OWNED) {
+            incref_owned_or_exit(a, RAX, fail);
+        }
+        else {
+            owned_or_exit(a, RAX, fail);        /* borrowed (opt.c): only this thread frees it */
+        }
         jmp(a, done);
         bind(a, unboxed);
         /* An unboxed value: its box, made once in C and kept by the owner;
@@ -3131,7 +3158,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         rex(a, 1, RSI, 0, RDI);
         b1(a, 0x8D);
         modrm_mem(a, RSI, RDI, (int32_t)in->imm);      /* lea rsi, [rdi+imm]: the word */
-        call_abs(a, (void *)lu_inline_get);
+        call_abs(a, (in->flags & INS_OWNED) ? (void *)lu_inline_get : (void *)lu_inline_peek);
         parked_end(a, in);
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
