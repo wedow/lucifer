@@ -1644,6 +1644,12 @@ settle(struct asm_ *a, int left)
     if (left >= 0) {
         cmp8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
         jcc(a, CC_NE, left);
+        if (a->f->ndeps > 0) {
+            /* As GUARD_FRAMES: nor did the code it ran take back a fact. */
+            mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
+            cmp_mi(a, 0, R11, 0, 0);
+            jcc(a, CC_NE, left);
+        }
     }
 }
 
@@ -3269,7 +3275,15 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         incref(a, r);
         return 0;
     case OP_DECREF:
-        decref(a, gpr_of(a, in->a, RDX), in, lu_publishes(in) ? published(a, in) : NULL, -1);
+        if (lu_publishes(in)) {
+            /* A release that ran C checks the frames there, so the check
+               after it (GUARD_FRAMES) may go (facts.c). */
+            struct lu_deopt *d = published(a, in);
+            decref(a, gpr_of(a, in->a, RDX), in, d, exit_to(a, in->fs, EXIT_FRAME, 0, 0));
+        }
+        else {
+            decref(a, gpr_of(a, in->a, RDX), in, NULL, -1);
+        }
         return 0;
     case OP_RITER_DONE:
         r = gpr_of(a, in->a, RDX);

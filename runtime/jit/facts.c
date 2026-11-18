@@ -78,7 +78,7 @@ unsettles(const struct lu_ins *in)
     case OP_TRUTH:
         return in->imm != 1;
     case OP_DECREF:
-        return in->imm == 1;
+        return 0;               /* a release that runs code checks that the unit lives (emit.c settle) */
     case OP_LIST_STORE: case OP_INLINE_STORE: case OP_INLINE_STORE_F: case OP_INLINE_STORE_I:
     case OP_ATTR_STORE: case OP_STORE:
         return 1;
@@ -89,7 +89,8 @@ unsettles(const struct lu_ins *in)
 
 /* A check of the frames (GUARD_FRAMES) that no published call can have
    reached since the last check, on any path, goes: only such a call lets
-   a walker see the frames. A release the optimizer took out leaves one so. */
+   a walker see the frames. A release the optimizer took out leaves one so,
+   and a release that runs C checks the frames itself (emit.c settle). */
 static void
 frames_checks(struct lu_func *f)
 {
@@ -116,8 +117,8 @@ frames_checks(struct lu_func *f)
                     }
                     any = 0;
                 }
-                else if (lu_publishes(in)) {
-                    any = 1;
+                else if (lu_publishes(in) && in->op != OP_DECREF) {
+                    any = 1;           /* a release checks the frames itself (emit.c) */
                 }
             }
             if (seen[b] != any) {
