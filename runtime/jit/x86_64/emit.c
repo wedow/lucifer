@@ -2415,7 +2415,7 @@ inline_store_raw(struct asm_ *a, lu_v v)
     modrm_mem(a, 0, RDI, flags);
     b1(a, LU_ATTRS_IN_DICT >> 8);               /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
     jcc(a, CC_NE, slow);
-    int fresh = 0;     /* an instance no other thread can have seen takes no lock (S4) */
+    int fresh = (in->flags & INS_FRESH) != 0;  /* an instance no other thread can have seen: no lock */
     if (!fresh) {
         lock_object(a, RDI, slow);
         b1(a, 0xF6);
@@ -3081,7 +3081,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         modrm_mem(a, 0, RDI, flags);
         b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
         jcc(a, CC_NE, slow);
-        int fresh = 0;     /* an instance no other thread can have seen takes no lock (S4) */
+        int fresh = (in->flags & INS_FRESH) != 0;  /* an instance no other thread can have seen: no lock */
         if (!fresh) {
             lock_object(a, RDI, slow);
             b1(a, 0xF6);

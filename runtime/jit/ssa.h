@@ -261,6 +261,8 @@ enum {
     INS_NOSTRESS = 4,           /* a guard after its instruction's effect: deopt:N never fails it */
     INS_CAUGHT = 8,             /* a helper whose raise a handler of the unit takes: NULL is its result */
     INS_PROVEN = 16,            /* a guard of what its path proved already: only a writer takes it back (facts.c) */
+    INS_FRESH = 32,             /* an inline store into an instance the code just made, which no other thread can
+                                   have seen, of a name it lacks: no lock, nothing released, nothing published */
 };
 
 struct lu_ins {

@@ -391,7 +391,7 @@ extern const struct lu_helper lu_helpers[H_COUNT];
 static inline int
 lu_publishes(const struct lu_ins *in)
 {
-    if (in->fs == NULL) {
+    if (in->fs == NULL || (in->flags & INS_FRESH)) {
         return 0;
     }
     switch (in->op) {

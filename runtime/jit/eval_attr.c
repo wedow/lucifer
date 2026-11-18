@@ -214,6 +214,33 @@ class_entry(struct ctx *c, PyTypeObject *tp, PyObject *name, PyObject **d)
     return lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)tp), version);
 }
 
+/* An inline store into an instance of class t (NULL: not known) may take
+   a new name in line: every instance has at least the room settled now
+   (ssa.h INLINE_STORE imm2). */
+static void
+store_room(struct ctx *c, lu_v st, PyTypeObject *t, uint16_t index)
+{
+    if (t == NULL || !(t->tp_flags & Py_TPFLAGS_INLINE_VALUES)) {
+        return;
+    }
+    int64_t word = LU_INLINE_STRIDE * sizeof(PyObject *);
+    int64_t room = (int64_t)lu_inline_settle_room(t) - ((int64_t)index - (int64_t)t->tp_basicsize) / word;
+    I(c, st)->imm2 = room > 0 ? room : 0;
+}
+
+/* Whether no instruction from `from` on publishes its state: an object
+   made at `from` has reached no other thread. */
+static int
+unpublished_since(struct ctx *c, lu_v from)
+{
+    for (lu_v v = from; v < c->g->f->nins; v++) {
+        if (!(I(c, v)->flags & INS_DEAD) && lu_publishes(I(c, v))) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 lu_v
 lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o)
 {
@@ -232,9 +259,14 @@ lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o)
         }
         else if (lu_specialize_store_fresh(tp, name, &version, &index) == STORE_ATTR_INSTANCE_VALUE
                  && lu_ev_class_relied(c, k, version)) {
+            int fresh = unpublished_since(c, obj);
             lu_v st = lu_ev_emit(c, OP_INLINE_STORE, REP_NONE, obj, val, LU_NOV, index);
             I(c, st)->fs = lu_ev_exit_fs(c);
-            c->g->observed = 1;
+            store_room(c, st, tp, index);
+            if (fresh) {
+                I(c, st)->flags |= INS_FRESH;
+            }
+            c->g->observed |= !fresh;
         }
         else {
             lu_v args[4] = { obj, lu_ev_konst(c, name), val, lu_ev_const_i(c, 0) };
@@ -584,6 +616,7 @@ store_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *desc
         lu_v st = raw != LU_NOV ? lu_ev_emit(c, raw_op, REP_NONE, owner, raw, LU_NOV, index)
                                 : lu_ev_emit(c, OP_INLINE_STORE, REP_NONE, owner, lu_ev_val(c, v), LU_NOV, index);
         I(c, st)->fs = lu_ev_exit_fs(c);
+        store_room(c, st, lu_ev_type(c, owner), index);
         c->g->observed = 1;     /* the value it replaces is released */
     }
     else if (op == STORE_ATTR_SLOT) {
