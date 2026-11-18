@@ -334,7 +334,7 @@ lu_ev_instruction(struct ctx *c)
         if (c->parent != NULL && !c->kernel && !lu_ev_in_gen(c)) {
             /* An inlined call polls where the interpreter's would: a tool
                turned on since the compile sees the call. */
-            lu_ev_guard(c, OP_POLL, LU_NOV, 0);
+            I(c, lu_ev_guard(c, OP_POLL, LU_NOV, 0))->imm = POLL_CALL;
         }
         return 0;
     case LOAD_FAST: case LOAD_FAST_BORROW:

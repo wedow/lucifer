@@ -1671,14 +1671,11 @@ parked_begin(struct asm_ *a, struct lu_ins *in)
     publish(a, in, d);
 }
 
+/* Leaves from a parked slow path to `exit`: the reference the call took
+   (RAX) released, the registers back. */
 static void
-parked_end(struct asm_ *a, struct lu_ins *in)
+parked_leave(struct asm_ *a, struct lu_ins *in, int exit)
 {
-    int kept = new_label(a);
-    int left = exit_to(a, in->fs, EXIT_FRAME, 0, 0);
-    unpublish(a, REP_NONE);
-    cmp8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
-    jcc(a, CC_E, kept);
     if (in->op != OP_INLINE_LOAD || (in->flags & INS_OWNED)) {
         mov_rr(a, RDI, RAX);    /* a borrowed read (opt.c) took none */
         call_abs(a, (void *)lu_jit_decref);
@@ -1686,7 +1683,34 @@ parked_end(struct asm_ *a, struct lu_ins *in)
     b1(a, 0xE8);
     rel32_to(a, a->restore_all);
     alu_ri(a, ALU_ADD, RSP, 256);
-    jmp(a, left);
+    jmp(a, exit);
+}
+
+/* After the park: a walker that made the frames real leaves, and so does
+   a poll word that changed meanwhile (a tool turned on while the world
+   stopped), so that a park is a poll and a call's poll after it may go
+   (facts.c). */
+static void
+parked_end(struct asm_ *a, struct lu_ins *in)
+{
+    int kept = new_label(a), seen = new_label(a);
+    int left = exit_to(a, in->fs, EXIT_FRAME, 0, 0);
+    unpublish(a, REP_NONE);
+    cmp8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
+    if (in->op == OP_POLL) {
+        jcc(a, CC_E, kept);     /* the poll reads the word again itself */
+    }
+    else {
+        int polled = exit_to(a, in->fs, EXIT_POLL, 0, 0);
+        jcc(a, CC_NE, seen);
+        load(a, RCX, R14, offsetof(struct lu_task, carrier));
+        mov_ri(a, R11, (int64_t)a->f->code->_co_instrumentation_version);
+        cmp_rm(a, R11, RCX, offsetof(struct lu_carrier, poll));
+        jcc(a, CC_E, kept);
+        parked_leave(a, in, polled);
+    }
+    bind(a, seen);
+    parked_leave(a, in, left);
     bind(a, kept);
     b1(a, 0xE8);
     rel32_to(a, a->restore_all);                   /* call restore_all */

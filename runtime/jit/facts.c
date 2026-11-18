@@ -16,6 +16,7 @@
 #include "jit/target.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 /* The dependency a guard stands for, watched so that its writers report
    it, when its fact holds now; 0 for a guard that stays. */
@@ -131,10 +132,60 @@ frames_checks(struct lu_func *f)
     free(seen);
 }
 
+/* A call's poll (POLL_CALL) goes where every path polled since the last
+   instruction that published its state (lu_publishes: it may run code or
+   park, where another task may stop the world): what the poll would see,
+   nothing since can have set, and the code between is no loop (a
+   back-edge polls). A slow path that parks leaves when the poll word
+   changed meanwhile (emit.c parked_end), so it needs no poll after it. */
+static void
+call_polls(struct lu_func *f)
+{
+    int nb = f->nblocks;
+    char *polled = malloc((size_t)nb);
+    memset(polled, 1, (size_t)nb);
+    for (int changed = 1, final = 0; changed || !final;) {
+        final = !changed;
+        changed = 0;
+        for (int k = 0; k < f->norder; k++) {
+            int b = f->order[k];
+            struct lu_block *bl = &f->blocks[b];
+            int ok = k > 0 && bl->npreds > 0;
+            for (int p = 0; p < bl->npreds; p++) {
+                ok &= polled[bl->preds[p]];
+            }
+            for (int i = 0; i < bl->nins; i++) {
+                struct lu_ins *in = &f->ins[bl->ins[i]];
+                if (in->flags & INS_DEAD) {
+                    continue;
+                }
+                if (in->op == OP_POLL) {
+                    if (final && ok && in->imm == POLL_CALL) {
+                        in->flags |= INS_DEAD;
+                    }
+                    ok = 1;
+                }
+                else if (lu_publishes(in)) {
+                    ok = 0;
+                }
+            }
+            if (polled[b] != ok) {
+                polled[b] = (char)ok;
+                changed = 1;
+            }
+        }
+        if (final) {
+            break;
+        }
+    }
+    free(polled);
+}
+
 int
 lu_ssa_facts(struct lu_func *f)
 {
     frames_checks(f);
+    call_polls(f);
     int nb = f->nblocks;
     /* alive[b]: the unit is known alive where block b ends (it was at its
        entry, and a poll leaves a dead one). Optimistic, then to a fixpoint. */

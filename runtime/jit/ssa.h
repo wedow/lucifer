@@ -135,6 +135,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(COUNT_OUT, REP_NONE, IF_GUARD | IF_EFFECT)    /* counts a call the budget left out of line, the unit's   \
                                                        outs[imm]: leaves at fs at the unit's hot_calls (jit.c) */
 
+/* POLL's imm: a loop's back-edge, or a call's start (facts.c may drop it). */
+enum { POLL_LOOP, POLL_CALL };
 /* GUARD_VERSION's imm2: whose version. */
 enum { GV_TYPE_OF, GV_TYPE_ITSELF, GV_DICT_KEYS, GV_FUNC };
 /* GUARD_IS's imm2: the word compared, a itself, or at an offset (low 32
