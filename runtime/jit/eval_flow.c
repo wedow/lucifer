@@ -506,36 +506,41 @@ place_class(struct ctx *c, const struct lu_vobj *o, lu_v v)
     return cls == FIELD_UNSET && o->kind == VK_GEN ? FIELD_OBJ : cls;
 }
 
-/* What each phi takes on the current edge, for the places from `from`
-   on: the object an object phi takes (made real here if it was not), the
-   object a raw phi's value stands for if there is one, or LU_NOV. */
+/* What each object phi takes on the current edge, for the places from
+   `from` on: the object, made real here if it was not; LU_NOV for the
+   other places, whose inputs edge_take reads. */
 static void
 edge_inputs(struct ctx *c, const struct places *P, int from, lu_v *in)
 {
-    struct gctx *g = c->g;
     for (int p = from; p < P->n; p++) {
-        in[p] = LU_NOV;
-        if (P->lead[p] != p || P->kind[p] == PLACE_DIRECT || P->kind[p] == PLACE_VIRT) {
-            continue;
-        }
-        lu_v r = place_get(g, &g->st, P->at[p]);
-        if (P->kind[p] == PLACE_OBJ) {
-            in[p] = r == LU_NOV ? lu_ev_konst(c, NULL) : lu_ev_val(c, r);
-        }
-        else if (LU_IS_VIRT(r)) {
-            /* The object the box became here, or the one it came from. */
-            struct lu_vobj *o = lu_ev_virt(g, &g->st, r, &in[p]);
-            if (in[p] == LU_NOV && o != NULL && o->n == 2) {
-                in[p] = o->f[1];
-            }
-        }
-        else if (r == LU_NOV) {
-            in[p] = lu_ev_konst(c, &lu_jit_unbound);
-        }
-        else if (lu_ev_const(c, r) == NULL) {
-            in[p] = r;          /* the object whose raw value the phi takes */
+        lu_v r = place_get(c->g, &c->g->st, P->at[p]);
+        in[p] = P->lead[p] != p || P->kind[p] != PLACE_OBJ ? LU_NOV
+            : r == LU_NOV ? lu_ev_konst(c, NULL) : lu_ev_val(c, r);
+    }
+}
+
+/* The object a raw place's value stands for on the current edge, or
+   LU_NOV: read once the object phis have made what they take, as making
+   a box real releases the object it came from. */
+static lu_v
+raw_input(struct ctx *c, const struct places *P, int p)
+{
+    struct gctx *g = c->g;
+    lu_v r = place_get(g, &g->st, P->at[p]), in = LU_NOV;
+    if (LU_IS_VIRT(r)) {
+        /* The object the box became here, or the one it came from. */
+        struct lu_vobj *o = lu_ev_virt(g, &g->st, r, &in);
+        if (in == LU_NOV && o != NULL && o->n == 2) {
+            in = o->f[1];
         }
     }
+    else if (r == LU_NOV) {
+        in = lu_ev_konst(c, &lu_jit_unbound);
+    }
+    else if (lu_ev_const(c, r) == NULL) {
+        in = r;                 /* the object whose raw value the phi takes */
+    }
+    return in;
 }
 
 /* Whether place p comes round a loop unchanged: what its phi would take
@@ -592,18 +597,32 @@ rest_of(struct ctx *c, const struct places *P, const lu_v *in, int pc)
     return rest;
 }
 
+/* Whether place p's phis take the object on its edge: an object phi, or
+   a raw one with the phi of its object beside it. */
+static int
+takes(const struct places *P, int p)
+{
+    return P->kind[p] == PLACE_OBJ || P->origin[p] != LU_NOV;
+}
+
 /* The phis take their inputs. An object phi takes a reference: the
    value's own when no place left names it and no earlier phi took it, a
    new one otherwise. A raw phi's inputs were added by its maker; the
-   object its value stood for on this edge goes to the phi beside it
-   (origin, which keeps `is` true of a value that was an object before
-   the join), or is released when there is none and nothing names it. A
-   place a loop carries unchanged gives nothing up: it is one of the
-   places left. */
+   object its value stands for on this edge, read now that the object
+   phis have made theirs (making a box real releases the object it came
+   from), goes to the phi beside it (origin, which keeps `is` true of a
+   value that was an object before the join), or is released when there
+   is none and nothing names or takes it. A place a loop carries
+   unchanged gives nothing up: it is one of the places left. */
 static void
-edge_take(struct ctx *c, const struct places *P, const lu_v *in, int pc)
+edge_take(struct ctx *c, const struct places *P, lu_v *in, int pc)
 {
     struct gctx *g = c->g;
+    for (int p = 0; p < P->n; p++) {
+        if (P->lead[p] == p && P->kind[p] != PLACE_OBJ && P->kind[p] != PLACE_DIRECT && P->kind[p] != PLACE_VIRT) {
+            in[p] = raw_input(c, P, p);
+        }
+    }
     lu_ev_names_walk(g, rest_of(c, P, in, pc));
     for (int p = 0; p < P->n; p++) {
         lu_v x = in[p], phi = P->phi[p], origin = P->origin[p];
@@ -620,7 +639,7 @@ edge_take(struct ctx *c, const struct places *P, const lu_v *in, int pc)
         int owned = (I(c, x)->flags & INS_OWNED) != 0;
         int free_now = owned && !lu_ev_names(g, x);
         for (int k = 0; k < p && free_now; k++) {
-            free_now = in[k] != x;      /* an earlier phi took it, or it was released */
+            free_now = in[k] != x || !takes(P, k);      /* an earlier phi took it */
         }
         if (P->kind[p] != PLACE_OBJ) {
             if (origin != LU_NOV) {
@@ -628,8 +647,12 @@ edge_take(struct ctx *c, const struct places *P, const lu_v *in, int pc)
                 if (owned && !free_now) {
                     lu_ev_retain(c, x);
                 }
+                continue;
             }
-            else if (free_now) {
+            for (int k = 0; k < P->n && free_now; k++) {
+                free_now = k == p || in[k] != x || (k > p && !takes(P, k));    /* a later phi takes it, or it was released */
+            }
+            if (free_now) {
                 lu_ev_emit(c, OP_DECREF, REP_NONE, x, LU_NOV, LU_NOV, 0);       /* an int or a float */
             }
             continue;
