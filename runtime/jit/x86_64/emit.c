@@ -3891,6 +3891,14 @@ direct_entry(struct asm_ *a)
     rex(a, 1, 0, 0, R11);
     b1(a, 0xFF);
     modrm_mem(a, 0, R11, 0);                    /* inc qword [r11] */
+    if (f->refused) {
+        /* Hot with calls left out for want of budget: its code's next
+           build gets more (this activation runs on in the dead unit). */
+        cmp_mi(a, 1, R11, 0, HOT_ENTRIES);
+        jcc(a, CC_NE, counted);
+        mov_ri(a, RDI, (int64_t)(intptr_t)a->unit);
+        call_abs(a, (void *)lu_jit_grow);
+    }
     bind(a, counted);
     unsigned long *stat = lu_jit_direct_count();
     if (stat != NULL) {

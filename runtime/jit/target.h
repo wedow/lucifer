@@ -280,8 +280,11 @@ struct lu_jit_act {
 };
 
 /* Entries a unit counts: one past this many is not retired, and the count
-   is only read, so calls from many threads share its line. */
+   is only read, so calls from many threads share its line. One that has
+   left calls out of line for want of budget at HOT_ENTRIES of them dies,
+   its code's next build given more (jit.c grow, lu_jit_grow). */
 #define ENTRIES_SEEN (1u << 16)
+#define HOT_ENTRIES 4096
 
 /* Calls compiled code (and helpers.c) makes of a compiled callee directly.
    A code's JIT state, at co_executors, begins with a struct lu_jit_direct:
@@ -314,6 +317,7 @@ struct lu_jit_call {
 };
 
 void lu_jit_left(struct lu_unit *u);
+void lu_jit_grow(struct lu_unit *u);
 int lu_jit_prologue(struct lu_frame *frame);
 PyObject *lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r);
 

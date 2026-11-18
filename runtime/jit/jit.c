@@ -76,12 +76,11 @@
 /* seen bits. */
 #define WARMED 1                /* the entry's compile was put off for feedback once */
 /* Instructions a unit may have and still take a call in line at first
-   (what the evaluator folds away costs it nothing), the entries
-   after which a unit that left calls out is built again with twice that,
-   and how often: past it a build costs more than its unit's code earns
-   back (a regex engine inlined whole took minutes). */
+   (what the evaluator folds away costs it nothing), and how often a unit
+   that left calls out is built again with twice that (after HOT_ENTRIES,
+   target.h): past it a build costs more than its unit's code earns back
+   (a regex engine inlined whole took minutes). */
 #define INLINE_BUDGET 1000
-#define HOT_ENTRIES 4096
 #define MAX_GROWN 4
 /* Out-of-line calls a unit makes at one site, per instruction the unit's
    build made, before the site is taken in line whatever the budget has
@@ -957,6 +956,20 @@ lu_jit_unit_kill(struct lu_unit *u, int stale)
     kill(state_of(u->code), u);
 }
 
+/* A unit that stayed hot with calls left out of line for want of budget
+   dies, and the next build of its code gets twice as much, a bounded
+   number of times: 1 when it died so. */
+static int
+grow(struct lu_jit_code *jc, struct lu_unit *u)
+{
+    if (!u->refused || jc == NULL || jc->grown >= MAX_GROWN) {
+        return 0;
+    }
+    __atomic_store_n(&jc->grown, jc->grown + 1, __ATOMIC_RELAXED);
+    kill(jc, u);
+    return 1;
+}
+
 /* A death no recompile was asked to fix (a unit that keeps leaving, a
    compile that failed): the code's waits double from now on. */
 static void
@@ -1108,12 +1121,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         return LU_JIT_NONE;
     }
     count(&stats.entries, 1);
-    if (u->refused && __atomic_load_n(&u->entries, __ATOMIC_RELAXED) == HOT_ENTRIES && jc != NULL
-        && jc->grown < MAX_GROWN) {
-        /* It stayed hot with calls left out of line for want of budget:
-           the next build of this code gets twice as much. */
-        __atomic_store_n(&jc->grown, jc->grown + 1, __ATOMIC_RELAXED);
-        kill(jc, u);
+    if (__atomic_load_n(&u->entries, __ATOMIC_RELAXED) == HOT_ENTRIES && grow(jc, u)) {
         return LU_JIT_NONE;
     }
     struct lu_jit_act act = { u, task->jit_act };
@@ -1305,6 +1313,12 @@ lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, 
     }
     *out = result;
     return 1;
+}
+
+void
+lu_jit_grow(struct lu_unit *u)
+{
+    grow(state_of(u->code), u);
 }
 
 void
