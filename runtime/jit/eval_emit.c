@@ -528,9 +528,12 @@ lu_ev_settle(struct ctx *c, int pc)
         }
         int noisy = !quiet(t);
         lu_v d = lu_ev_emit(c, OP_DECREF, REP_NONE, rel[i], LU_NOV, LU_NOV, noisy);
-        if (noisy) {
+        if (noisy && !g->leaving) {
             /* Its finalizer sees the frames as they are after the
-               instruction; an exit from there owes the releases to come. */
+               instruction; an exit from there owes the releases to come.
+               A returning root's releases take no state: an exit would
+               resume its RETURN_VALUE with the value and the locals gone,
+               and no walker sees the frame or needs its unit alive. */
             fs = fs != NULL ? fs : lu_ev_snapshot(c, pc);
             struct lu_fs *at = lu_ir_alloc(g->f, sizeof(struct lu_fs));
             *at = *fs;
