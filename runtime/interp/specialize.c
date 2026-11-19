@@ -77,13 +77,14 @@ fail(lu_codeunit *site)
     lu_cache_store(site + 1, backed_off(lu_cache_load(site + 1)));
 }
 
-/* Rewriting a site, one writer at a time: begin makes it generic and clears
-   its guard word; end sets the guard, the cooldown, and last the opcode.
-   A site that monitoring has instrumented (INSTRUMENTED_LINE runs the
-   instruction under it) is left alone and backs off as a failure would
-   (CPython pauses its counter): begin returns 0, holding nothing. */
+/* Rewriting a site, one writer at a time: begin makes the rewrite
+   sequence odd, end sets the cooldown and the opcode and makes it even
+   again (specialize.h). A site that monitoring has instrumented
+   (INSTRUMENTED_LINE runs the instruction under it) is left alone and backs
+   off as a failure would (CPython pauses its counter): begin returns 0,
+   holding nothing. */
 static int
-begin(lu_codeunit *site, int generic, lu_codeunit *guard, int guard_words)
+begin(lu_codeunit *site)
 {
     PyMutex_Lock(&_PyRuntime.specialize_lock);
     if (site->op.code >= MIN_INSTRUMENTED_OPCODE) {
@@ -91,18 +92,19 @@ begin(lu_codeunit *site, int generic, lu_codeunit *guard, int guard_words)
         fail(site);
         return 0;
     }
-    __atomic_store_n(&site->op.code, (uint8_t)generic, __ATOMIC_RELEASE);
-    for (int i = 0; i < guard_words; i++) {
-        lu_cache_store(guard + i, 0);
-    }
+    uint64_t seq = __atomic_load_n(&_PyRuntime.specialize_seq, __ATOMIC_RELAXED);
+    __atomic_store_n(&_PyRuntime.specialize_seq, seq + 1, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_RELEASE);        /* the odd sequence before any word */
     return 1;
 }
 
 static void
 end(lu_codeunit *site, int opcode)
 {
+    uint64_t seq = __atomic_load_n(&_PyRuntime.specialize_seq, __ATOMIC_RELAXED);
     lu_cache_store(site + 1, COOLDOWN);
-    __atomic_store_n(&site->op.code, (uint8_t)opcode, __ATOMIC_RELEASE);
+    __atomic_store_n(&site->op.code, (uint8_t)opcode, __ATOMIC_RELAXED);
+    __atomic_store_n(&_PyRuntime.specialize_seq, seq + 1, __ATOMIC_RELEASE);
     PyMutex_Unlock(&_PyRuntime.specialize_lock);
 }
 
@@ -135,7 +137,7 @@ lu_specialize_load_global(PyObject *globals, PyObject *builtins, lu_codeunit *si
         if (index > UINT16_MAX || globals_version == 0) {
             return fail(site);
         }
-        if (!begin(site, LOAD_GLOBAL, c + LG_MODULE_KEYS_VERSION, 2)) {
+        if (!begin(site)) {
             return;
         }
         lu_cache_store(c + LG_INDEX, (uint16_t)index);
@@ -151,7 +153,7 @@ lu_specialize_load_global(PyObject *globals, PyObject *builtins, lu_codeunit *si
     if (index < 0 || index > UINT16_MAX || globals_version == 0 || builtins_version == 0) {
         return fail(site);
     }
-    if (!begin(site, LOAD_GLOBAL, c + LG_MODULE_KEYS_VERSION, 2)) {
+    if (!begin(site)) {
         return;
     }
     lu_cache_store(c + LG_INDEX, (uint16_t)index);
@@ -216,7 +218,7 @@ set_attr_cache(lu_codeunit *site, int opcode, uint32_t version, uint32_t second,
     if (!cacheable(descr)) {
         return fail(site);
     }
-    if (!begin(site, LOAD_ATTR, c + LA_VERSION, 2)) {
+    if (!begin(site)) {
         return;
     }
     lu_cache_store32(c + LA_KEYS_VERSION, second);
@@ -546,21 +548,21 @@ lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
         fail(site);
     }
     else if (is_slot_member(descr) && !(((PyMemberDescrObject *)descr)->d_member->flags & Py_READONLY)) {
-        if (begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
+        if (begin(site)) {
             lu_cache_store(c + LA_INDEX, (uint16_t)((PyMemberDescrObject *)descr)->d_member->offset);
             lu_cache_store32(c + LA_VERSION, version);
             end(site, STORE_ATTR_SLOT);
         }
     }
     else if (lu_inline_live(owner) && (index = store_inline_offset(tp, name, kind)) >= 0) {
-        if (begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
+        if (begin(site)) {
             lu_cache_store(c + LA_INDEX, (uint16_t)index);      /* the byte offset */
             lu_cache_store32(c + LA_VERSION, version);
             end(site, STORE_ATTR_INSTANCE_VALUE);
         }
     }
     else if (descr == NULL && (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT)) {
-        if (begin(site, STORE_ATTR, c + LA_VERSION, 3)) {
+        if (begin(site)) {
             lu_cache_store32(c + LA_VERSION, version);
             end(site, STORE_ATTR_WITH_HINT);
         }

@@ -563,6 +563,7 @@ static PyObject *
 h_load_global(PyObject *globals, PyObject *builtins, PyObject *name, int64_t at)
 {
     lu_codeunit *site = (lu_codeunit *)(intptr_t)at, *cache = site + 1;
+    uint64_t seq = lu_site_read();
     int op = __atomic_load_n(&site->op.code, __ATOMIC_RELAXED);
     if (op == LOAD_GLOBAL_MODULE || op == LOAD_GLOBAL_BUILTIN) {
         uint16_t mv = lu_cache_load(cache + LG_MODULE_KEYS_VERSION), bv = lu_cache_load(cache + LG_BUILTIN_KEYS_VERSION);
@@ -574,7 +575,7 @@ h_load_global(PyObject *globals, PyObject *builtins, PyObject *name, int64_t at)
             && lu_dk_is_unicode(dk) && index < dk->dk_nentries) {
             PyObject *v = lu_try_xget_ref(lu_dk_value_slot(dk, index));
             if (v != NULL && dk == __atomic_load_n(&((PyDictObject *)in)->ma_keys, __ATOMIC_ACQUIRE)
-                && lu_site_unchanged(site, op) && lu_cache_load(cache + LG_MODULE_KEYS_VERSION) == mv) {
+                && lu_site_unchanged(site, op, seq)) {
                 return v;
             }
             Py_XDECREF(v);

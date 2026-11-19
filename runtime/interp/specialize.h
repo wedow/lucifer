@@ -54,10 +54,12 @@ enum {
 #define LU_COUNTER_STEP (1 << 4)
 
 /* Words are written and read with relaxed atomics: a site is rewritten while
-   other carriers run it. A reader takes a word pair or a pointer only after
-   the version it checked, and re-reads that version and its own opcode
-   afterwards (lu_site_unchanged); the writer makes the site generic, clears
-   the version, writes the rest, sets the version, and sets the opcode last. */
+   other carriers run it. Rewrites take specialize_lock one at a time and
+   make _PyRuntime.specialize_seq odd while they write (a seqlock). A reader
+   takes the sequence (lu_site_read), loads the words, and uses what they
+   say only once lu_site_unchanged has seen the same even sequence and its
+   own opcode: no rewrite began or ended in between, so every word it loaded
+   is one specialization's, however many rewrites came and went before. */
 static inline uint16_t
 lu_cache_load(const lu_codeunit *w)
 {
@@ -101,14 +103,21 @@ lu_cache_store_ptr(lu_codeunit *w, const void *ptr)
     }
 }
 
-/* Whether the instruction at `site` is still `opcode`: no one has rewritten
-   it since the reader took its opcode. Called after the reader has loaded the
-   cache, with a re-read of the guard word. */
-static inline int
-lu_site_unchanged(const lu_codeunit *site, int opcode)
+/* The sequence a reader of a site's words starts from. */
+static inline uint64_t
+lu_site_read(void)
 {
+    return __atomic_load_n(&_PyRuntime.specialize_seq, __ATOMIC_ACQUIRE);
+}
+
+/* Whether the words loaded since lu_site_read returned `seq` are the
+   specialization `opcode` the instruction at `site` still is. */
+static inline int
+lu_site_unchanged(const lu_codeunit *site, int opcode, uint64_t seq)
+{
+    int op = __atomic_load_n(&site->op.code, __ATOMIC_RELAXED);
     __atomic_thread_fence(__ATOMIC_ACQUIRE);
-    return __atomic_load_n(&site->op.code, __ATOMIC_RELAXED) == opcode;
+    return op == opcode && !(seq & 1) && __atomic_load_n(&_PyRuntime.specialize_seq, __ATOMIC_RELAXED) == seq;
 }
 
 /* Tries to turn the generic LOAD_GLOBAL or LOAD_ATTR at `site` into a

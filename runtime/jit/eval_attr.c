@@ -114,6 +114,7 @@ static int
 cached_site(struct ctx *c, int generic, uint32_t *version, uint16_t *index, PyObject **descr)
 {
     lu_codeunit *site = c->cache - 1;
+    uint64_t seq = lu_site_read();
     int op = __atomic_load_n(&site->op.code, __ATOMIC_RELAXED);
     *version = lu_cache_load32(c->cache + LA_VERSION);
     *index = lu_cache_load(c->cache + LA_INDEX);
@@ -122,8 +123,7 @@ cached_site(struct ctx *c, int generic, uint32_t *version, uint16_t *index, PyOb
         c->g->f->sites++;
         c->g->f->cold += op == generic && lu_cache_load(c->cache + LA_COUNTER) == 0;
     }
-    if (*version == 0 || nospec(c, c->pc) || !lu_site_unchanged(site, op)
-        || lu_cache_load32(c->cache + LA_VERSION) != *version) {
+    if (*version == 0 || nospec(c, c->pc) || !lu_site_unchanged(site, op, seq)) {
         *descr = NULL;
         return generic;
     }

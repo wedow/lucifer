@@ -1666,6 +1666,7 @@ op_LOAD_GLOBAL: {
 op_LOAD_GLOBAL_MODULE:
 op_LOAD_GLOBAL_BUILTIN: {
     lu_codeunit *site = next_instr - 1;
+    uint64_t seq = lu_site_read();
     uint16_t module_version = lu_cache_load(next_instr + LG_MODULE_KEYS_VERSION);
     uint16_t builtin_version = lu_cache_load(next_instr + LG_BUILTIN_KEYS_VERSION);
     Py_ssize_t index = lu_cache_load(next_instr + LG_INDEX);
@@ -1685,8 +1686,7 @@ op_LOAD_GLOBAL_BUILTIN: {
             }
         }
     }
-    if (v == NULL || !lu_site_unchanged(site, opcode)
-        || lu_cache_load(next_instr + LG_MODULE_KEYS_VERSION) != module_version) {
+    if (v == NULL || !lu_site_unchanged(site, opcode, seq)) {
         Py_XDECREF(v);
         goto op_LOAD_GLOBAL;
     }
@@ -2986,6 +2986,7 @@ jit_enter:
 
 op_LOAD_ATTR_MODULE: {
     PyObject *owner = TOP();
+    uint64_t seq = lu_site_read();
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
     PyObject *v = NULL;
     if (version != 0 && PyModule_CheckExact(owner) && PyDict_CheckExact(((PyModuleObject *)owner)->md_dict)) {
@@ -2999,8 +3000,7 @@ op_LOAD_ATTR_MODULE: {
             }
         }
     }
-    if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
-        || lu_cache_load32(next_instr + LA_VERSION) != version) {
+    if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode, seq)) {
         Py_XDECREF(v);
         goto op_LOAD_ATTR;
     }
@@ -3015,14 +3015,14 @@ op_LOAD_ATTR_MODULE: {
 
 op_LOAD_ATTR_CLASS: {
     PyObject *owner = TOP();
+    uint64_t seq = lu_site_read();
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
     int meta_checked = opcode == LOAD_ATTR_CLASS_WITH_METACLASS_CHECK;
     uint32_t meta_version = meta_checked ? lu_cache_load32(next_instr + LA_KEYS_VERSION) : 0;
     PyObject *descr = lu_cache_load_ptr(next_instr + LA_DESCR);
     if (version == 0 || !PyType_Check(owner) || ((PyTypeObject *)owner)->tp_version_tag != version
         || (meta_checked && (meta_version == 0 || Py_TYPE(owner)->tp_version_tag != meta_version))
-        || !lu_site_unchanged(next_instr - 1, opcode)
-        || lu_cache_load32(next_instr + LA_VERSION) != version) {
+        || !lu_site_unchanged(next_instr - 1, opcode, seq)) {
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
@@ -3036,6 +3036,7 @@ op_LOAD_ATTR_CLASS: {
 
 op_LOAD_ATTR_WITH_HINT: {
     PyObject *owner = TOP();
+    uint64_t seq = lu_site_read();
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
     PyObject *v = NULL;
     if (version != 0 && Py_TYPE(owner)->tp_version_tag == version) {
@@ -3051,8 +3052,7 @@ op_LOAD_ATTR_WITH_HINT: {
             }
         }
     }
-    if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
-        || lu_cache_load32(next_instr + LA_VERSION) != version) {
+    if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode, seq)) {
         Py_XDECREF(v);
         goto op_LOAD_ATTR;
     }
@@ -3069,17 +3069,18 @@ op_LOAD_ATTR_WITH_HINT: {
    owner keeps them, read at its cached offset. */
 op_LOAD_ATTR_SLOT: {
     PyObject *owner = TOP();
+    uint64_t seq = lu_site_read();
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
+    unsigned offset = lu_cache_load(next_instr + LA_INDEX);
     PyObject *v = NULL;
+    /* The offset is the version's only once the site is seen unchanged. */
     if (version != 0 && Py_TYPE(owner)->tp_version_tag == version
-        && (opcode == LOAD_ATTR_SLOT || lu_inline_live(owner))) {
+        && (opcode == LOAD_ATTR_SLOT || lu_inline_live(owner)) && lu_site_unchanged(next_instr - 1, opcode, seq)) {
         /* Another thread may store and free the value: taken only if alive. */
-        PyObject **word = (PyObject **)((char *)owner + lu_cache_load(next_instr + LA_INDEX));
+        PyObject **word = (PyObject **)((char *)owner + offset);
         v = opcode == LOAD_ATTR_SLOT ? lu_try_xget_ref(word) : lu_inline_get(owner, word);
     }
-    if (v == NULL || !lu_site_unchanged(next_instr - 1, opcode)
-        || lu_cache_load32(next_instr + LA_VERSION) != version) {
-        Py_XDECREF(v);
+    if (v == NULL) {
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
@@ -3094,11 +3095,15 @@ op_LOAD_ATTR_SLOT: {
 /* A property's getter, a function, called with the owner as a call does. */
 op_LOAD_ATTR_PROPERTY: {
     PyObject *owner = TOP();
+    uint64_t seq = lu_site_read();
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
     PyObject *prop = lu_cache_load_ptr(next_instr + LA_DESCR);
-    PyObject *fget = prop != NULL ? lu_property_fget(prop) : NULL;
-    if (version == 0 || Py_TYPE(owner)->tp_version_tag != version || fget == NULL || !PyFunction_Check(fget)
-        || !lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
+    if (version == 0 || Py_TYPE(owner)->tp_version_tag != version || prop == NULL
+        || !lu_site_unchanged(next_instr - 1, opcode, seq)) {
+        goto op_LOAD_ATTR;
+    }
+    PyObject *fget = lu_property_fget(prop);
+    if (fget == NULL || !PyFunction_Check(fget)) {
         goto op_LOAD_ATTR;
     }
     SKIP_CACHES();
@@ -3116,6 +3121,7 @@ op_LOAD_ATTR_PROPERTY: {
    has the name: a method is pushed under its owner, a value alone. */
 op_LOAD_ATTR_METHOD: {
     PyObject *owner = TOP();
+    uint64_t seq = lu_site_read();
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
     PyObject *descr = lu_cache_load_ptr(next_instr + LA_DESCR);
     int with_dict = opcode == LOAD_ATTR_METHOD_WITH_VALUES || opcode == LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES;
@@ -3128,7 +3134,7 @@ op_LOAD_ATTR_METHOD: {
             goto op_LOAD_ATTR;
         }
     }
-    if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
+    if (!lu_site_unchanged(next_instr - 1, opcode, seq)) {
         goto op_LOAD_ATTR;
     }
     if (opcode == LOAD_ATTR_METHOD_NO_DICT && !(oparg & 1)) {
@@ -3262,7 +3268,9 @@ op_LOAD_ATTR: {
    dict. */
 op_STORE_ATTR_FAST: {
     PyObject *owner = sp[-1];
+    uint64_t seq = lu_site_read();
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
+    unsigned offset = lu_cache_load(next_instr + LA_INDEX);
     PyObject *dict = NULL;
     if (version == 0 || Py_TYPE(owner)->tp_version_tag != version) {
         goto op_STORE_ATTR;
@@ -3273,11 +3281,10 @@ op_STORE_ATTR_FAST: {
             goto op_STORE_ATTR;     /* the generic form makes the dict */
         }
     }
-    if (!lu_site_unchanged(next_instr - 1, opcode) || lu_cache_load32(next_instr + LA_VERSION) != version) {
+    if (!lu_site_unchanged(next_instr - 1, opcode, seq)) {
         goto op_STORE_ATTR;
     }
     PyObject *v = sp[-2];
-    unsigned offset = lu_cache_load(next_instr + LA_INDEX);
     SKIP_CACHES();
     sp -= 2;
     int err = 0;
