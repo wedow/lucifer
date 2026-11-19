@@ -198,36 +198,43 @@ def _split_args(name, args, kwargs, first):
     return sep, maxsplit
 
 
-def _in(x, names):
-    for n in names:
-        if n == x:
-            return True
-    return False
+def _plain(s):
+    """s as an exact str: what C reads of a str subclass, none of its methods run."""
+    return s if type(s) is str else str_slice(s, 0, str_len(s))
+
+
+# Encoding name, as given or as codecs.lookup normalizes it (lowercase, '-'
+# and ' ' made '_') -> the primitive codec's canonical name.
+_PRIMITIVE_NAMES = {}
+for _codec, _spellings in (
+        ('utf-8', ('utf-8', 'utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4', 'UTF-8', 'UTF8')),
+        ('latin-1', ('latin-1', 'latin_1', 'latin1', 'iso-8859-1', 'iso_8859_1', 'iso8859_1', '8859', 'cp819',
+                     'latin', 'l1', 'iso_ir_100', 'iso_8859_1_1987')),
+        ('ascii', ('ascii', 'us-ascii', 'us_ascii', '646', 'ansi_x3.4_1968', 'ansi_x3_4_1968', 'cp367',
+                   'iso646_us', 'iso_646.irv_1991', 'iso_ir_6', 'us', 'ASCII'))):
+    for _s in _spellings:
+        _PRIMITIVE_NAMES[_s] = _codec
+del _codec, _spellings, _s
 
 
 def _encoding_name(encoding):
     """The primitive codec's canonical name, as codecs.lookup normalizes it, or
     None for an encoding that only the codec registry knows."""
-    name = str_replace(str_case(encoding, 0), '-', '_', -1)
-    name = str_replace(name, ' ', '_', -1)
-    if _in(name, ('utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4')):
-        return 'utf-8'
-    if _in(name, ('latin_1', 'latin1', 'iso_8859_1', 'iso8859_1', '8859', 'cp819', 'latin', 'l1',
-                'iso_ir_100', 'iso8859_1', 'iso_8859_1_1987')):
-        return 'latin-1'
-    if _in(name, ('ascii', 'us_ascii', '646', 'ansi_x3.4_1968', 'ansi_x3_4_1968', 'cp367', 'iso646_us',
-                'iso_646.irv_1991', 'iso_ir_6', 'us')):
-        return 'ascii'
-    return None
+    name = _PRIMITIVE_NAMES.get(encoding)
+    if name is None:
+        name = _PRIMITIVE_NAMES.get(str_replace(str_replace(str_case(encoding, 0), '-', '_', -1), ' ', '_', -1))
+    return name
 
 
-_HANDLERS = ('strict', 'ignore', 'replace', 'backslashreplace', 'xmlcharrefreplace',
-             'surrogateescape', 'surrogatepass')
+# The error handlers the primitive codecs apply themselves.
+_HANDLERS = {'strict': True, 'ignore': True, 'replace': True, 'backslashreplace': True, 'xmlcharrefreplace': True,
+             'surrogateescape': True, 'surrogatepass': True}
 
 
 def _encode(self, encoding, errors):
+    encoding, errors = _plain(encoding), _plain(errors)     # as C reads them: no subclass methods run
     name = _encoding_name(encoding)
-    if name is None or not _in(errors, _HANDLERS):
+    if name is None or errors not in _HANDLERS:
         return __import__('_codecs')._encode_text(self, encoding, errors)
     r = str_encode(self, name, errors)
     if kind(r, 'tuple'):
@@ -237,8 +244,9 @@ def _encode(self, encoding, errors):
 
 
 def _decode(data, encoding, errors):
+    encoding, errors = _plain(encoding), _plain(errors)     # as C reads them: no subclass methods run
     name = _encoding_name(encoding)
-    if name is None or not _in(errors, _HANDLERS):
+    if name is None or errors not in _HANDLERS:
         return __import__('_codecs')._decode_text(data, encoding, errors)
     r = str_decode(data, name, errors)
     if kind(r, 'tuple'):
