@@ -958,13 +958,14 @@ wait_at(struct lu_jit_code *jc, int pc)
 static void
 kill(struct lu_jit_code *jc, struct lu_unit *u)
 {
-    if (__atomic_exchange_n(&u->dead, 1, __ATOMIC_RELAXED)) {
+    if (__atomic_exchange_n(&u->dead, 1, __ATOMIC_SEQ_CST)) {
         return;
     }
     void *entry = u->direct;
     if (entry != NULL) {
-        /* Callers stop entering it; one that read the entry before finds it dead. */
-        __atomic_compare_exchange_n(&jc->direct.entry, &entry, NULL, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+        /* Callers stop entering it; one that read the entry before finds it
+           dead. One not published yet is taken back by its compile. */
+        __atomic_compare_exchange_n(&jc->direct.entry, &entry, NULL, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);
     }
     dying_add(u);
     count(&stats.units_dead, 1);
@@ -1110,7 +1111,15 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
             u->next = jc->units;
             __atomic_store_n(&jc->units, u, __ATOMIC_RELEASE);
             if (u->direct != NULL) {
-                __atomic_store_n(&jc->direct.entry, u->direct, __ATOMIC_RELEASE);
+                /* A writer that killed the unit since its dependencies went
+                   in found no entry of it to take back (kill): this does,
+                   before a collection may free it. Both sides store, then
+                   read the other's word, in one total order. */
+                void *entry = u->direct;
+                __atomic_store_n(&jc->direct.entry, entry, __ATOMIC_SEQ_CST);
+                if (__atomic_load_n(&u->dead, __ATOMIC_SEQ_CST)) {
+                    __atomic_compare_exchange_n(&jc->direct.entry, &entry, NULL, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);
+                }
             }
         }
         else if (jc->wait[pc] == 0) {
