@@ -29,7 +29,7 @@ _MODES = {'@': (True, 'little'), '=': (False, 'little'), '<': (False, 'little'),
 
 
 def _compile(fmt):
-    """(items, size, nvalues, little, native): items are (code, count, offset, size) runs of
+    """(items, size, nvalues, little, native): items are (kind, code, count, offset, size) runs of
     `count` items of `size` bytes, or for 's' and 'p' one string of `count` bytes. A
     repeat count is never expanded, so a huge one costs nothing until data meets it."""
     if isinstance(fmt, bytes):
@@ -63,13 +63,13 @@ def _compile(fmt):
         if native and c not in 'xspc?' and offset % size:
             offset += size - offset % size
         if c in 'sp':
-            items.append((c, n, offset, n))
+            items.append((entry[2], c, n, offset, n))
             offset += n
             nvalues += 1
         elif c == 'x':
             offset += n
         elif n:
-            items.append((c, n, offset, size))
+            items.append((entry[2], c, n, offset, size))
             offset += n * size
             nvalues += n
         if offset > _SSIZE_MAX:
@@ -78,16 +78,6 @@ def _compile(fmt):
     if count is not None:
         raise error('repeat count given without format specifier')
     return tuple(items), offset, nvalues, order == 'little', native
-
-
-def _each(items):
-    """The runs one value at a time, as (code, count, offset, size)."""
-    for code, count, offset, size in items:
-        if code in 'sp':
-            yield code, count, offset, size
-        else:
-            for k in range(count):
-                yield code, 1, offset + k * size, size
 
 
 _SSIZE_MAX = (1 << 63) - 1
@@ -108,50 +98,119 @@ def _int(value, code, size, signed):
     return value
 
 
-def _pack_item(code, count, size, value, little):
-    kind = _CODES[code][2]
-    if kind in 'iu':
-        data = _int(value, code, size, kind == 'i').to_bytes(size, 'little', signed=kind == 'i')
-    elif kind == 'f':
-        try:
-            x = float(value) if not isinstance(value, str) else None
-        except (TypeError, ValueError):
-            x = None
-        if x is None:
-            raise error('required argument is not a float')
-        data = _float_pack(x, size)
-    elif kind == '?':
-        data = b'\1' if value else b'\0'
-    elif kind == 'c':
-        if not isinstance(value, bytes) or len(value) != 1:
-            raise error('char format requires a bytes object of length 1')
-        return value
-    else:
-        if not isinstance(value, (bytes, bytearray)):
-            raise error("argument for '%s' must be a bytes object" % code)
-        if kind == 's':
-            return bytes(value[:count]).ljust(count, b'\0')
-        n = min(len(value), count - 1, 255) if count else 0
-        return (bytes([n]) + bytes(value[:n])).ljust(count, b'\0') if count else b''
-    return data if little else data[::-1]
+def _pack_into(out, items, args, little):
+    """Each value of args into out at its offset, a run at a time."""
+    k = 0
+    for kind, code, count, offset, size in items:
+        if kind == 'i' or kind == 'u':
+            signed = kind == 'i'
+            end = offset + count * size
+            while offset < end:
+                value = _int(args[k], code, size, signed)
+                k += 1
+                if size == 1:
+                    out[offset] = value & 255
+                elif size <= 4:
+                    # The bytes of a value that fits a machine word, stored one by one.
+                    i = offset if little else offset + size - 1
+                    step = 1 if little else -1
+                    for _ in range(size):
+                        out[i] = value & 255
+                        value >>= 8
+                        i += step
+                else:
+                    out[offset:offset + size] = value.to_bytes(size, 'little' if little else 'big', signed=signed)
+                offset += size
+        elif kind == 'f':
+            end = offset + count * size
+            while offset < end:
+                value = args[k]
+                k += 1
+                try:
+                    x = float(value) if not isinstance(value, str) else None
+                except (TypeError, ValueError):
+                    x = None
+                if x is None:
+                    raise error('required argument is not a float')
+                data = _float_pack(x, size)
+                out[offset:offset + size] = data if little else data[::-1]
+                offset += size
+        elif kind == '?':
+            for i in range(offset, offset + count):
+                out[i] = 1 if args[k] else 0
+                k += 1
+        elif kind == 'c':
+            for i in range(offset, offset + count):
+                value = args[k]
+                k += 1
+                if not isinstance(value, bytes) or len(value) != 1:
+                    raise error('char format requires a bytes object of length 1')
+                out[i] = value[0]
+        else:
+            value = args[k]
+            k += 1
+            if not isinstance(value, (bytes, bytearray)):
+                raise error("argument for '%s' must be a bytes object" % code)
+            if kind == 's':
+                n = min(len(value), count)
+                out[offset:offset + n] = value[:n]
+            elif count:
+                n = min(len(value), count - 1, 255)
+                out[offset] = n
+                out[offset + 1:offset + 1 + n] = value[:n]
 
 
-def _unpack_item(code, count, size, data, little):
-    kind = _CODES[code][2]
-    if kind == 'c':
-        return data
-    if kind == 's':
-        return bytes(data)
-    if kind == 'p':
-        n = min(data[0], count - 1) if count else 0
-        return bytes(data[1:1 + n])
-    if kind == '?':
-        return data[0] != 0
-    if not little:
-        data = data[::-1]
-    if kind == 'f':
-        return _float_unpack(bytes(data))
-    return int.from_bytes(data, 'little', signed=kind == 'i')
+def _unpack_from(data, base, items, little):
+    """The values of items in data, whose first byte is at base."""
+    values = []
+    for kind, code, count, offset, size in items:
+        offset += base
+        if kind == 'i' or kind == 'u':
+            end = offset + count * size
+            if size <= 4:
+                # A value that fits a machine word, put together from its bytes.
+                half = 1 << (size * 8 - 1)
+                while offset < end:
+                    if little:
+                        i = offset + size - 1
+                        value = data[i]
+                        while i > offset:
+                            i -= 1
+                            value = (value << 8) | data[i]
+                    else:
+                        i = offset
+                        value = data[i]
+                        while i < offset + size - 1:
+                            i += 1
+                            value = (value << 8) | data[i]
+                    if kind == 'i' and value >= half:
+                        value -= half << 1
+                    values.append(value)
+                    offset += size
+            else:
+                order = 'little' if little else 'big'
+                signed = kind == 'i'
+                while offset < end:
+                    values.append(int.from_bytes(data[offset:offset + size], order, signed=signed))
+                    offset += size
+        elif kind == 'f':
+            end = offset + count * size
+            while offset < end:
+                piece = data[offset:offset + size]
+                values.append(_float_unpack(piece if little else piece[::-1]))
+                offset += size
+        elif kind == '?':
+            for i in range(offset, offset + count):
+                values.append(data[i] != 0)
+        elif kind == 'c':
+            for i in range(offset, offset + count):
+                values.append(data[i:i + 1])
+        elif kind == 's':
+            values.append(data[offset:offset + count])
+        else:
+            n = min(data[offset], count - 1) if count else 0
+            values.append(data[offset + 1:offset + 1 + n])
+    return tuple(values)
 
 
 class Struct:
@@ -163,11 +222,10 @@ class Struct:
 Return a new Struct object which writes and reads binary data according to
 the format string."""
 
-    __slots__ = ('_items', '_flat', '_size', '_nvalues', '_little', '_format', '__weakref__')
+    __slots__ = ('_items', '_size', '_nvalues', '_little', '_format', '__weakref__')
 
     def __init__(self, format):
         self._items, self._size, self._nvalues, self._little, _ = _compile(format)
-        self._flat = None
         self._format = format if isinstance(format, str) else format.decode('ascii')
 
     @property
@@ -184,12 +242,7 @@ the format string."""
         if len(args) != self._nvalues:
             raise error('pack expected %d items for packing (got %d)' % (self._nvalues, len(args)))
         out = bytearray(self._size)
-        flat = self._flat
-        if flat is None:
-            flat = self._expand()
-        for (code, count, offset, size), value in zip(flat, args):
-            data = _pack_item(code, count, size, value, self._little)
-            out[offset:offset + len(data)] = data
+        _pack_into(out, self._items, args, self._little)
         return bytes(out)
 
     def pack(self, *args):
@@ -218,29 +271,15 @@ the format string."""
                         '(actual buffer size is %d)' % (self._size + offset, self._size, offset, length))
         view[offset:offset + self._size] = self._pack(args)
 
-    def _expand(self):
-        """The runs one value at a time, made at the first pack or unpack:
-        the size and count checks before it admit a huge repeat count only
-        with that many values at hand."""
-        self._flat = tuple(_each(self._items))
-        return self._flat
-
-    def _unpack(self, data):
-        flat = self._flat
-        if flat is None:
-            flat = self._expand()
-        return tuple(_unpack_item(code, count, size, data[offset:offset + size], self._little)
-                     for code, count, offset, size in flat)
-
     def unpack(self, buffer, /):
         """Return a tuple containing unpacked values.
 
 Unpack according to the format string Struct.format. The buffer's size
 in bytes must be Struct.size."""
-        data = bytes(memoryview(buffer))
+        data = buffer if type(buffer) is bytes else bytes(memoryview(buffer))
         if len(data) != self._size:
             raise error('unpack requires a buffer of %d bytes' % self._size)
-        return self._unpack(data)
+        return _unpack_from(data, 0, self._items, self._little)
 
     def unpack_from(self, buffer, offset=0):
         """Return a tuple containing unpacked values.
@@ -262,7 +301,7 @@ See the struct module documentation for more information."""
                 raise error('offset %d out of range for %d-byte buffer' % (offset, length))
             raise error('unpack_from requires a buffer of at least %d bytes for unpacking %d bytes at '
                         'offset %d (actual buffer size is %d)' % (self._size + offset, self._size, offset, length))
-        return self._unpack(bytes(view[offset:offset + self._size]))
+        return _unpack_from(bytes(view[offset:offset + self._size]), 0, self._items, self._little)
 
     def iter_unpack(self, buffer, /):
         """Return an iterator yielding tuples unpacked from the given bytes.
@@ -274,7 +313,8 @@ a repeated invocation of unpack_from()."""
         data = bytes(memoryview(buffer))
         if len(data) % self._size:
             raise error('iterative unpacking requires a buffer of a multiple of %d bytes' % self._size)
-        return (self._unpack(data[i:i + self._size]) for i in range(0, len(data), self._size))
+        items, little = self._items, self._little
+        return (_unpack_from(data, i, items, little) for i in range(0, len(data), self._size))
 
     def __repr__(self):
         return 'Struct(%r)' % (self._format,)
