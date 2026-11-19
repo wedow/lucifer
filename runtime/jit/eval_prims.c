@@ -15,6 +15,14 @@ type_at(struct ctx *c, lu_v *args, int i)
     return lu_ev_type(c, args[i]);
 }
 
+/* The i-th argument's type, learned where it is not known (guarded): a
+   str primitive's operand that came in from outside the unit. */
+static PyTypeObject *
+learned_at(struct ctx *c, lu_v *args, int i)
+{
+    return lu_ev_learn_type(c, args[i], i);
+}
+
 static lu_v
 truth_const(struct ctx *c, int v)
 {
@@ -212,17 +220,17 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
             return lu_ev_box_float(c, lu_ev_emit(c, OP_I2F, REP_F64, lu_ev_unbox_int(c, args[0]), LU_NOV, LU_NOV, 0));
         }
     }
-    if (nargs == 1 && (strcmp(name, "size") == 0 || (strcmp(name, "str_len") == 0 && type_at(c, args, 0) == &PyUnicode_Type))) {
+    if (nargs == 1 && (strcmp(name, "size") == 0 || (strcmp(name, "str_len") == 0 && learned_at(c, args, 0) == &PyUnicode_Type))) {
         return size_of(c, args[0]);
     }
-    if (nargs == 2 && strcmp(name, "str_ord") == 0 && type_at(c, args, 0) == &PyUnicode_Type
-        && type_at(c, args, 1) == &PyLong_Type) {
+    if (nargs == 2 && strcmp(name, "str_ord") == 0 && learned_at(c, args, 1) == &PyLong_Type
+        && learned_at(c, args, 0) == &PyUnicode_Type) {
         lu_v r = lu_ev_emit(c, OP_STR_ORD, REP_I64, lu_ev_val(c, args[0]), lu_ev_unbox_int(c, args[1]), LU_NOV, 0);
         I(c, r)->fs = lu_ev_exit_fs(c);
         return lu_ev_box_int(c, r);
     }
-    if (nargs == 2 && strcmp(name, "str_item") == 0 && !nospec(c, c->pc) && type_at(c, args, 0) == &PyUnicode_Type
-        && type_at(c, args, 1) == &PyLong_Type) {
+    if (nargs == 2 && strcmp(name, "str_item") == 0 && !nospec(c, c->pc) && learned_at(c, args, 1) == &PyLong_Type
+        && learned_at(c, args, 0) == &PyUnicode_Type) {
         /* The code point read in line, and its str: a latin-1 one is the
            runtime's singleton (emit.c), any other made in C. */
         lu_v cp = lu_ev_emit(c, OP_STR_ORD, REP_I64, lu_ev_val(c, args[0]), lu_ev_unbox_int(c, args[1]), LU_NOV, 0);
@@ -236,8 +244,8 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
         /* A str against one character the code names: its first character
            and its length tell, in line. */
         PyObject *k = lu_ev_const(c, args[1 - j]);
-        if (type_at(c, args, j) == &PyUnicode_Type && k != NULL && PyUnicode_CheckExact(k)
-            && PyUnicode_GET_LENGTH(k) == 1) {
+        if (k != NULL && PyUnicode_CheckExact(k) && PyUnicode_GET_LENGTH(k) == 1
+            && learned_at(c, args, j) == &PyUnicode_Type) {
             lu_v r = lu_ev_emit(c, OP_STR_CMP1, REP_I64, lu_ev_val(c, args[j]), LU_NOV, LU_NOV,
                                 PyUnicode_READ_CHAR(k, 0));
             I(c, r)->imm2 = j;
