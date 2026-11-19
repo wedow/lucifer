@@ -1,6 +1,6 @@
 ---
 id: luc-36to
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-18T18:48:08Z
