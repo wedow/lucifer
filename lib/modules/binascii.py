@@ -15,6 +15,8 @@ class Incomplete(Exception):
 
 def _ascii(data):
     """Bytes of an ASCII str or any bytes-like object."""
+    if type(data) is bytes:
+        return data
     if isinstance(data, str):
         try:
             return data.encode('ascii')
@@ -28,6 +30,8 @@ def _ascii(data):
 
 
 def _bytes(data):
+    if type(data) is bytes:
+        return data
     try:
         return bytes(memoryview(data))
     except TypeError:
@@ -64,15 +68,22 @@ def crc_hqx(data, crc, /):
 
 
 _HEX = b'0123456789abcdef'
+# Byte -> its hexadecimal digit's value, 255 for any other byte.
+_HEX_VALUE = bytes(int(chr(c), 16) if chr(c) in '0123456789abcdefABCDEF' else 255 for c in range(256))
 
 
 def b2a_hex(data, sep=None, bytes_per_sep=1):
     """Hexadecimal representation of binary data."""
     data = _bytes(data)
-    out = bytearray()
-    for b in data:
-        out.append(_HEX[b >> 4])
-        out.append(_HEX[b & 15])
+    n = len(data)
+    out = bytearray(2 * n)
+    hexdigits = _HEX
+    i = 0
+    while i < n:
+        b = data[i]
+        out[2 * i] = hexdigits[b >> 4]
+        out[2 * i + 1] = hexdigits[b & 15]
+        i += 1
     if sep is None or not data:
         return bytes(out)
     if isinstance(sep, str):
@@ -92,88 +103,137 @@ def b2a_hex(data, sep=None, bytes_per_sep=1):
     return bytes(sep).join(b''.join(g) for g in groups)
 
 
-hexlify = b2a_hex
+
+def hexlify(data, sep=None, bytes_per_sep=1):
+    """Hexadecimal representation of binary data."""
+    return b2a_hex(data, sep, bytes_per_sep)
 
 
 def a2b_hex(hexstr, /):
     """Binary data of hexadecimal representation."""
     data = _ascii(hexstr)
-    if len(data) % 2:
+    n = len(data)
+    if n % 2:
         raise Error('Odd-length string')
-    if not all(c in b'0123456789abcdefABCDEF' for c in data):
-        raise Error('Non-hexadecimal digit found')
-    return bytes(int(data[i:i + 2], 16) for i in range(0, len(data), 2))
+    out = bytearray(n // 2)
+    values = _HEX_VALUE
+    i = 0
+    while i < n:
+        high = values[data[i]]
+        low = values[data[i + 1]]
+        if high > 15 or low > 15:
+            raise Error('Non-hexadecimal digit found')
+        out[i >> 1] = (high << 4) | low
+        i += 2
+    return bytes(out)
 
 
-unhexlify = a2b_hex
+
+def unhexlify(hexstr, /):
+    """Binary data of hexadecimal representation."""
+    return a2b_hex(hexstr)
 
 _B64 = b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-_B64_INDEX = {c: i for i, c in enumerate(_B64)}
+# Byte -> its base64 digit's value, 255 for any other byte.
+_B64_VALUE = bytes(_B64.find(c) if c in _B64 else 255 for c in range(256))
 
 
 def b2a_base64(data, /, *, newline=True):
     """Base64-code line of data."""
     data = _bytes(data)
-    out = bytearray()
-    for i in range(0, len(data), 3):
-        chunk = data[i:i + 3]
-        n = int.from_bytes(chunk + b'\0' * (3 - len(chunk)), 'big')
-        quad = [_B64[(n >> s) & 63] for s in (18, 12, 6, 0)]
-        if len(chunk) < 3:
-            quad[3] = 61
-        if len(chunk) < 2:
-            quad[2] = 61
-        out += bytes(quad)
+    n = len(data)
+    whole = n - n % 3
+    out = bytearray((n + 2) // 3 * 4 + (1 if newline else 0))
+    digits = _B64
+    i = j = 0
+    while i < whole:
+        a = data[i]
+        b = data[i + 1]
+        c = data[i + 2]
+        out[j] = digits[a >> 2]
+        out[j + 1] = digits[((a & 3) << 4) | (b >> 4)]
+        out[j + 2] = digits[((b & 15) << 2) | (c >> 6)]
+        out[j + 3] = digits[c & 63]
+        i += 3
+        j += 4
+    if whole < n:
+        a = data[whole]
+        b = data[whole + 1] if whole + 1 < n else 0
+        out[j] = digits[a >> 2]
+        out[j + 1] = digits[((a & 3) << 4) | (b >> 4)]
+        out[j + 2] = digits[(b & 15) << 2] if whole + 1 < n else 61
+        out[j + 3] = 61
+        j += 4
     if newline:
-        out.append(10)
+        out[j] = 10
     return bytes(out)
 
 
 def a2b_base64(data, /, *, strict_mode=False):
     """Decode a line of base64 data."""
     data = _ascii(data)
-    if strict_mode and data[:1] == b'=':
-        raise Error('Leading padding not allowed')
-    out = bytearray()
-    left = quad = pads = seen = 0
-    padding_started = False
-    for pos, c in enumerate(data):
+    n = len(data)
+    out = bytearray((n + 3) // 4 * 3)
+    values = _B64_VALUE
+    left = quad = pads = j = 0
+    i = 0
+    while i < n:
+        if quad == 0 and (pads == 0 or not strict_mode) and i + 4 <= n:
+            # Four digits at once, the common case.
+            a = values[data[i]]
+            b = values[data[i + 1]]
+            c = values[data[i + 2]]
+            d = values[data[i + 3]]
+            if a | b | c | d < 64:
+                out[j] = (a << 2) | (b >> 4)
+                out[j + 1] = ((b & 15) << 4) | (c >> 2)
+                out[j + 2] = ((c & 3) << 6) | d
+                j += 3
+                i += 4
+                pads = 0
+                continue
+        c = data[i]
+        i += 1
         if c == 61:
-            padding_started = True
-            if strict_mode and quad == 0:
-                raise Error('Excess padding not allowed')
-            if quad >= 2:
-                pads += 1
-                if quad + pads >= 4:
-                    if strict_mode and pos + 1 < len(data):
-                        raise Error('Excess data after padding')
-                    break
-            continue
-        v = _B64_INDEX.get(c)
-        if v is None:
+            # RFC 4648 3.3: a pad character before the end, or an excess
+            # one, may be ignored; strict mode refuses them.
+            pads += 1
+            if (quad >= 2 and quad + pads <= 4) or not strict_mode:
+                continue
+            if quad == 1:
+                break
+            raise Error('Leading padding not allowed' if quad == 0 and i == 1 else 'Excess padding not allowed')
+        v = values[c]
+        if v > 63:
             if strict_mode:
                 raise Error('Only base64 data is allowed')
             continue
-        if strict_mode and padding_started:
-            raise Error('Discontinuous padding not allowed')
+        if pads and strict_mode:
+            raise Error('Excess data after padding' if quad + pads == 4 else 'Discontinuous padding not allowed')
         pads = 0
-        seen += 1
         if quad == 0:
             left = v
+            quad = 1
         elif quad == 1:
-            out.append((left << 2) | (v >> 4))
+            out[j] = (left << 2) | (v >> 4)
+            j += 1
             left = v & 15
+            quad = 2
         elif quad == 2:
-            out.append((left << 4) | (v >> 2))
+            out[j] = (left << 4) | (v >> 2)
+            j += 1
             left = v & 3
+            quad = 3
         else:
-            out.append((left << 6) | v)
-        quad = (quad + 1) % 4
+            out[j] = (left << 6) | v
+            j += 1
+            quad = 0
     if quad == 1:
         raise Error('Invalid base64-encoded string: number of data characters (%d) cannot be 1 more '
-                    'than a multiple of 4' % seen)
+                    'than a multiple of 4' % (j // 3 * 4 + 1))
     if quad and quad + pads < 4:
         raise Error('Incorrect padding')
+    del out[j:]
     return bytes(out)
 
 
