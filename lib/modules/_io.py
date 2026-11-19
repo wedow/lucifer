@@ -976,21 +976,14 @@ class BytesIO(_BufferedIOBase):
     def write(self, b):
         if isinstance(b, str):
             raise TypeError("a bytes-like object is required, not 'str'")
-        with memoryview(b) as view:
-            if self.closed:
-                raise ValueError("I/O operation on closed file.")
-
-            n = view.nbytes  # Size of any bytes-like object
-            if n == 0:
-                return 0
-
-            pos = self._pos
-            if pos > len(self._buffer):
-                # Pad buffer to pos with null bytes.
-                self._buffer.resize(pos)
-            self._buffer[pos:pos + n] = view
-            self._pos += n
-        return n
+        if type(b) is bytes:
+            return _bytesio_write(self, b, len(b))      # the common case: no view to make
+        try:
+            view = memoryview(b)
+        except TypeError:
+            raise TypeError("a bytes-like object is required, not '%s'" % type(b).__name__) from None
+        with view:
+            return _bytesio_write(self, view, view.nbytes)  # nbytes: the size of any bytes-like object
 
     def seek(self, pos, whence=0):
         if self.closed:
@@ -1049,6 +1042,21 @@ class BytesIO(_BufferedIOBase):
         if self.closed:
             raise ValueError("I/O operation on closed file.")
         return True
+
+
+def _bytesio_write(self, data, n):
+    """BytesIO.write of n bytes of data (bytes, or a view of a bytes-like object)."""
+    if self.closed:
+        raise ValueError("I/O operation on closed file.")
+    if n == 0:
+        return 0
+    pos = self._pos
+    buffer = self._buffer
+    if pos > len(buffer):
+        buffer.resize(pos)      # pad to pos with null bytes
+    buffer[pos:pos + n] = data
+    self._pos = pos + n
+    return n
 
 
 def _size_arg(size):
