@@ -585,8 +585,21 @@ lu_ev_load_attr(struct ctx *c)
     if (inst != NULL && instance_load(c, owner, inst, name)) {
         return 0;
     }
-    /* An object the code made has no cache to read: its own lookup. */
-    int op = LU_IS_VIRT(owner) ? LOAD_ATTR : cached_site(c, LOAD_ATTR, &version, &index, &descr);
+    int op = LOAD_ATTR;
+    if (!LU_IS_VIRT(owner)) {
+        op = cached_site(c, LOAD_ATTR, &version, &index, &descr);
+    }
+    else if ((c->oparg & 1) && !nospec(c, c->pc)) {
+        /* An exact builtin the unit made can supply its method even if the
+           bytecode site has never seen this receiver. */
+        PyTypeObject *tp = lu_ev_type(c, owner);
+        if (tp != NULL && (tp->tp_flags & Py_TPFLAGS_IMMUTABLETYPE)) {
+            int fresh = lu_specialize_load_fresh(tp, name, 1, &version, &index, &descr);
+            if (fresh == LOAD_ATTR_METHOD_NO_DICT) {
+                op = fresh;
+            }
+        }
+    }
     /* A site with no one shape has a cache of the few it met (jit.h), and
        so has one whose one shape kept failing: its tests leave nowhere. */
     struct lu_pic *pic = op == LOAD_ATTR && owner >= 0
