@@ -30,6 +30,19 @@ builtin(const char *name)
 
 /* Sets. */
 
+static int
+call_set_key(enum lu_kernel_id id, PyObject *set, PyObject *key)
+{
+    PyObject *args[2] = { set, key };
+    PyObject *r = lu_call_kernel(id, args, 2);
+    if (r == NULL) {
+        return -1;
+    }
+    int found = r == Py_True;
+    Py_DECREF(r);
+    return found;
+}
+
 PyObject *
 PySet_New(PyObject *iterable)
 {
@@ -81,15 +94,7 @@ PySet_Contains(PyObject *anyset, PyObject *key)
         return -1;
     }
     int found = lu_contains_native(anyset, key);
-    if (found >= 0) {
-        return found;
-    }
-    /* The key is hashed, never compared by equality: an unhashable key is a
-       TypeError (set_contains_key), not a scan. */
-    if (PyObject_Hash(key) == -1) {
-        return -1;
-    }
-    return PySequence_Contains(anyset, key);
+    return found >= 0 ? found : call_set_key(LU_K_set_contains_key, anyset, key);
 }
 
 int
@@ -108,13 +113,7 @@ PySet_Discard(PyObject *set, PyObject *key)
             return verdict == LU_SET_FOUND;
         }
     }
-    int found = PySequence_Contains(set, key);
-    if (found <= 0) {
-        return found;
-    }
-    PyObject *r = call_method(set, "discard", "(O)", key);
-    Py_XDECREF(r);
-    return r == NULL ? -1 : 1;
+    return call_set_key(LU_K_set_discard_key, set, key);
 }
 
 PyObject *

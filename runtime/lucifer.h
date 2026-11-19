@@ -233,6 +233,8 @@ struct lu_static_type_state {
     X(dict_update)              /* DICT_UPDATE: dict.update(mapping) for {**mapping} */ \
     X(set_add)                  /* SET_ADD: (set, item) */ \
     X(set_update)               /* SET_UPDATE: (set, iterable) */ \
+    X(set_contains_key)         /* PySet_Contains(set, key) */ \
+    X(set_discard_key)          /* PySet_Discard(set, key) */ \
     X(unpack)                   /* the n items of an iterable, as a tuple: UNPACK_SEQUENCE */ \
     X(unpack_ex)                /* (before, starred list, after) as a tuple: UNPACK_EX */ \
     X(tuple_of)                 /* PySequence_Tuple(iterable) */ \

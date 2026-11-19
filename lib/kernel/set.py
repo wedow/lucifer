@@ -838,6 +838,8 @@ def set_add(s, item):
 kernel_set('build_set', build_set)
 kernel_set('set_add', set_add)
 kernel_set('set_update', update_internal)
+kernel_set('set_contains_key', contains_key)
+kernel_set('set_discard_key', discard_key)
 
 
 _iter.next_missing_set(set_iterator, setiter_next)

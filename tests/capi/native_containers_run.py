@@ -46,6 +46,42 @@ print(sorted(map(str, s)), len(s))
 print(l.set_contains(s, 'k'), l.set_contains(s, 'z'), l.set_contains(s, 1.0), l.set_contains(s, (2, 'k')),
       l.set_contains(s, Key('k')))
 print(l.set_discard(s, 'k'), l.set_discard(s, 'k'), l.set_discard(s, (2, 'k')), sorted(map(str, s)))
+
+for op in (l.set_contains, l.set_discard):
+    for key in ([], {1}):
+        try:
+            print(op({frozenset({1})}, key))
+        except TypeError as e:
+            print(op.__name__, type(e).__name__, str(e))
+
+
+class TracedKey(Key):
+    def __hash__(self):
+        print('hash', self.like)
+        return super().__hash__()
+
+
+q = {1}
+print(l.set_contains(q, TracedKey(1)))
+print(l.set_discard(q, TracedKey(1)), len(q))
+print(l.set_discard(q, TracedKey(1)), len(q))
+
+
+class S(set):
+    def __contains__(self, key):
+        raise AssertionError('set subclass containment override')
+
+    def discard(self, key):
+        raise AssertionError('set subclass discard override')
+
+
+q = S({1})
+for op in (l.set_contains, l.set_discard):
+    try:
+        print(op(q, Key(1)), len(q))
+    except AssertionError as e:
+        print(type(e).__name__, str(e))
+
 f = l.set_new()
 print(type(f), f, l.sequence_contains(f, 1), l.sequence_contains(['a', 1], 1), l.sequence_contains(('a',), 'b'))
 
