@@ -228,6 +228,20 @@ unpack_sequence(struct ctx *c)
     return 0;
 }
 
+/* Whether a value stored into a bytearray is an int: known or learned,
+   or, where the site met several types, guarded to be one, as any other
+   but an __index__ object is refused. */
+static int
+store_byte(struct ctx *c, lu_v val)
+{
+    PyTypeObject *t = lu_ev_learn_type(c, val, 2);
+    if (t == NULL && val != LU_NOV && !LU_IS_VIRT(val) && I(c, val)->rep == REP_OBJ) {
+        lu_ev_guard_type(c, val, &PyLong_Type);
+        t = &PyLong_Type;
+    }
+    return t == &PyLong_Type;
+}
+
 static int
 store_subscr(struct ctx *c)
 {
@@ -239,6 +253,14 @@ store_subscr(struct ctx *c)
         lu_v st = lu_ev_emit(c, OP_LIST_STORE, REP_NONE, lu_ev_val(c, cont), i, lu_ev_val(c, val), 0);
         I(c, st)->fs = lu_ev_exit_fs(c);
         c->g->observed = 1;     /* the value it replaces is released */
+    }
+    else if (!nospec(c, c->pc) && (kinds & 0xff) == LU_KIND_OTHER && (kinds >> 8) == LU_KIND_INT
+             && lu_ev_learn_type(c, cont, 0) == &PyByteArray_Type && store_byte(c, val)) {
+        /* A bytearray's byte, stored under its lock as an array of 'B': a
+           value out of range(256) leaves, for the interpreter to raise. */
+        lu_v st = lu_ev_emit(c, OP_TYPED_STORE, REP_NONE, lu_ev_val(c, cont), lu_ev_unbox_int(c, sub),
+                             lu_ev_unbox_int(c, val), 'B');
+        I(c, st)->fs = lu_ev_exit_fs(c);
     }
     else {
         /* Through the kernel's setitem, which folds on the container's

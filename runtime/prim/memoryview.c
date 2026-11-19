@@ -1131,23 +1131,38 @@ typed_offset(PyObject *ba, char c, Py_ssize_t i)
     return 0 <= i && i < n ? i * size : -1;
 }
 
-/* typed_get(bytearray, code, i): the item at index i of the bytearray read as
-   native items of struct code, or MISSING when i is out of range. */
+/* The typecodes of array.array whose items are native numbers ('l' and
+   'L' are 8 bytes here), as typed_get and typed_set index them. */
+static int
+typed_code(PyObject *code, char *c)
+{
+    if (!PyUnicode_Check(code) || PyUnicode_GET_LENGTH(code) != 1) {
+        return 0;
+    }
+    Py_UCS4 ch = PyUnicode_READ_CHAR(code, 0);
+    *c = (char)ch;
+    return ch != 0 && ch < 128 && strchr("bBhHiIlLqQfd", (int)ch) != NULL;
+}
+
+/* typed_get(bytearray, typecode, i): the item at index i of the bytearray
+   read as native items of an array typecode, or MISSING when i is out of
+   range or the typecode's items are not numbers ('u', 'w'). */
 static PyObject *
 prim_typed_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     long i;
-    if (nargs != 3 || !PyByteArray_Check(args[0]) || !PyUnicode_Check(args[1])
-        || PyUnicode_GET_LENGTH(args[1]) != 1 || fmt_size(PyUnicode_READ_CHAR(args[1], 0)) < 0
-        || !PyLong_CheckExact(args[2])) {
-        lu_err_format(PyExc_TypeError, "typed_get(bytearray, code, int)");
+    char c, item[8];
+    if (nargs != 3 || !PyByteArray_Check(args[0]) || !PyLong_CheckExact(args[2])) {
+        lu_err_format(PyExc_TypeError, "typed_get(bytearray, typecode, int)");
         return NULL;
+    }
+    if (!typed_code(args[1], &c)) {
+        return Py_NewRef(LU_MISSING);
     }
     if (lu_long_as_long(args[2], &i) < 0) {
         PyErr_Clear();
         return Py_NewRef(LU_MISSING);
     }
-    char c = (char)PyUnicode_READ_CHAR(args[1], 0), item[8];
     Py_ssize_t off;
     Py_BEGIN_CRITICAL_SECTION(args[0]);
     off = typed_offset(args[0], c, i);
@@ -1158,25 +1173,24 @@ prim_typed_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return off < 0 ? Py_NewRef(LU_MISSING) : unpack_item(item, c);
 }
 
-/* typed_set(bytearray, code, i, value): stores an exact int or float value
-   at index i, read as native items of struct code, and answers True; MISSING
-   (nothing stored) when i is out of range, the value is of another type or
-   out of the code's range: the caller's checks then raise the right error. */
+/* typed_set(bytearray, typecode, i, value): stores an exact int or float
+   value at index i, read as native items of an array typecode, and answers
+   True; MISSING (nothing stored) when i is out of range, the value is of
+   another type or out of the typecode's range, or its items are not
+   numbers: the caller's checks then raise the right error. */
 static PyObject *
 prim_typed_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     long i;
-    if (nargs != 4 || !PyByteArray_Check(args[0]) || !PyUnicode_Check(args[1])
-        || PyUnicode_GET_LENGTH(args[1]) != 1 || fmt_size(PyUnicode_READ_CHAR(args[1], 0)) < 0
-        || !PyLong_CheckExact(args[2])) {
-        lu_err_format(PyExc_TypeError, "typed_set(bytearray, code, int, value)");
+    char c, item[8];
+    if (nargs != 4 || !PyByteArray_Check(args[0]) || !PyLong_CheckExact(args[2])) {
+        lu_err_format(PyExc_TypeError, "typed_set(bytearray, typecode, int, value)");
         return NULL;
     }
-    if (lu_long_as_long(args[2], &i) < 0) {
+    if (!typed_code(args[1], &c) || lu_long_as_long(args[2], &i) < 0) {
         PyErr_Clear();
         return Py_NewRef(LU_MISSING);
     }
-    char c = (char)PyUnicode_READ_CHAR(args[1], 0), item[8];
     PyObject *v = args[3];
     if (c == 'f' || c == 'd') {
         double d;
@@ -1196,7 +1210,7 @@ prim_typed_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         if (c == 'f') { float f = (float)d; memcpy(item, &f, sizeof f); }
         else memcpy(item, &d, sizeof d);
     }
-    else if (strchr("bBhHiIlLqQ", c) == NULL || !PyLong_CheckExact(v) || pack_int(item, c, v, "") < 0) {
+    else if (!PyLong_CheckExact(v) || pack_int(item, c, v, "") < 0) {
         PyErr_Clear();
         return Py_NewRef(LU_MISSING);
     }

@@ -32,8 +32,6 @@ _LIMITS = {
 _MACHINE = {'b': 1, 'B': 0, 'h': 4, 'H': 2, 'i': 8, 'I': 6, 'l': 12, 'L': 10, 'q': 12, 'Q': 10, 'f': 14, 'd': 16,
             'u': 20, 'w': 20}
 _MISSING = object()
-# The typecodes whose items index directly, as the native struct code.
-_DIRECT = {code: native for code, native in _NATIVE.items() if code not in 'uw'}
 
 
 def _index(value):
@@ -47,8 +45,11 @@ def _index(value):
 
 
 def _item_index(index):
-    """PyNumber_AsSsize_t(index, IndexError)."""
-    index = _index(index)
+    """array_subscr's index: PyNumber_AsSsize_t(index, IndexError) of a key
+    that has __index__."""
+    if not isinstance(index, int) and not hasattr(type(index), '__index__'):
+        raise TypeError('array indices must be integers')
+    index = int(_index(index))
     if not -2**63 <= index < 2**63:
         raise IndexError("cannot fit 'int' into an index-sized integer")
     return index
@@ -156,35 +157,37 @@ a bytes-like object, or iterable over elements of the appropriate type."""
         return iter(self._values())
 
     def __getitem__(self, index):
-        code = _DIRECT.get(self._typecode)
-        if code is not None and type(index) is int:
-            item = _typed_get(self, code, index)
+        if type(index) is int:
+            item = _typed_get(self, self._typecode, index)
             if item is not _NOT_STORED:
                 return item
         if isinstance(index, slice):
             result = array(self._typecode)
             bytearray.extend(result, self._pack(self._values()[index]))
             return result
+        # Read under the storage's lock, as every resize changes it: in
+        # range or not, whatever other threads do meanwhile.
         index = _item_index(index)
-        n = len(self)
-        if index < 0:
-            index += n
-        if not 0 <= index < n:
+        wide = self._typecode in 'uw'
+        item = _typed_get(self, 'I' if wide else self._typecode, index)
+        if item is _NOT_STORED:
             raise IndexError('array index out of range')
-        item = self._struct.unpack_from(self, index * self._struct.size)[0]
-        return chr(item) if self._typecode in 'uw' else item
+        return chr(item) if wide else item
 
     def __setitem__(self, index, value):
-        code = _DIRECT.get(self._typecode)
-        if code is not None and type(index) is int and _typed_set(self, code, index, value) is True:
+        if type(index) is int and _typed_set(self, self._typecode, index, value) is True:
             return
         if not isinstance(index, slice):
+            # The index is checked before the value, as array_ass_item does;
+            # the store itself checks it again under the storage's lock.
             index = _item_index(index)
-            if index < 0:
-                index += len(self)
-            if not 0 <= index < len(self):
+            if not -len(self) <= index < len(self):
                 raise IndexError('array assignment index out of range')
-            self._struct.pack_into(self, index * self._struct.size, _encode(self._typecode, value))
+            code = self._typecode
+            item = _encode(code, value)
+            item = float(item) if code in 'fd' else int(item)
+            if _typed_set(self, 'I' if code in 'uw' else code, index, item) is not True:
+                raise IndexError('array assignment index out of range')
             return
         values = self._values()
         if not isinstance(value, array):
@@ -202,7 +205,7 @@ a bytes-like object, or iterable over elements of the appropriate type."""
         if isinstance(index, slice):
             del values[index]
         else:
-            index = _index(index)
+            index = _item_index(index)
             if index < 0:
                 index += len(values)
             if not 0 <= index < len(values):

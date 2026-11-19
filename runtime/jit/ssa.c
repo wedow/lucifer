@@ -45,10 +45,13 @@ lu_count_kind(const struct lu_ins *in)
             : in->imm == offsetof(PyTypeObject, tp_version_tag) && in->imm2 == 4 ? CNT_load_version
             : in->imm == offsetof(PyVarObject, ob_size) ? CNT_load_size : CNT_load_other;
     case OP_INLINE_LOAD: case OP_INLINE_LOAD_F: case OP_INLINE_LOAD_I: case OP_INLINE_ORIGIN: case OP_ATTR_LOAD:
+    case OP_SLOT_LOAD:
         return CNT_attr_load;
     case OP_INLINE_STORE: case OP_INLINE_STORE_F: case OP_INLINE_STORE_I: case OP_ATTR_STORE: return CNT_attr_store;
     case OP_GLOBAL_LOAD: return CNT_global_load;
-    case OP_LIST_ITEM: case OP_LIST_STORE: case OP_STR_ORD: case OP_BYTES_ITEM: return CNT_item;
+    case OP_LIST_ITEM: case OP_LIST_STORE: case OP_STR_ORD: case OP_BYTES_ITEM: case OP_TYPED_LOAD:
+    case OP_TYPED_STORE:
+        return CNT_item;
     case OP_HELPER: return in->imm2 > 0 ? (int)in->imm2 - 1 : CNT_helper;
     case OP_INCREF: return CNT_incref;
     case OP_DECREF: return CNT_decref;

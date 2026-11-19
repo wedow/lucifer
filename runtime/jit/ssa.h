@@ -106,6 +106,13 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(LIST_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* a[b] = c, borrowing c */ \
     X(STR_ORD, REP_I64, IF_GUARD)       /* a: an exact str, b: i64 index; the code point; deopts out of range */ \
     X(BYTES_ITEM, REP_I64, IF_GUARD)    /* a: an exact bytes, b: i64 index; the byte; deopts out of range */ \
+    X(SLOT_LOAD, REP_OBJ, IF_GUARD)     /* a's __slots__ member at byte imm, a new reference; deopts when it is \
+                                           empty */ \
+    X(TYPED_LOAD, REP_NONE, IF_GUARD)   /* a: a bytearray, b: i64 index (negative from the end); its item read as \
+                                           array typecode imm, i64 or f64 (rep set by the builder); deopts out of \
+                                           range, past 2**63, or when another thread holds a's lock */ \
+    X(TYPED_STORE, REP_NONE, IF_GUARD | IF_EFFECT)     /* a[b] = c (i64, f64) as typecode imm; deopts as TYPED_LOAD \
+                                                          and for a c out of the typecode's range */ \
     X(ATTR_LOAD, REP_OBJ, IF_GUARD | IF_CALL)   /* a.name from its managed dict: imm version, imm2 entry; c: the name */ \
     X(ATTR_STORE, REP_NONE, IF_RAISE | IF_EFFECT | IF_CALL)     /* a.(name c) = b, borrowing b */ \
     X(INLINE_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN) /* a's inline word at byte imm = b, borrowing b;   \

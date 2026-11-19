@@ -159,6 +159,13 @@ subscript(struct ctx *c, lu_v a, lu_v b, int lk, int rk)
         I(c, byte)->fs = lu_ev_exit_fs(c);
         return lu_ev_box_int(c, byte);
     }
+    if (lk == LU_KIND_OTHER && rk == LU_KIND_INT && !nospec(c, c->pc)
+        && lu_ev_learn_type(c, a, 0) == &PyByteArray_Type) {
+        /* A bytearray's byte, read under its lock as an array of 'B'. */
+        lu_v byte = lu_ev_emit(c, OP_TYPED_LOAD, REP_I64, lu_ev_val(c, a), lu_ev_unbox_int(c, b), LU_NOV, 'B');
+        I(c, byte)->fs = lu_ev_exit_fs(c);
+        return lu_ev_box_int(c, byte);
+    }
     return LU_NOV;
 }
 

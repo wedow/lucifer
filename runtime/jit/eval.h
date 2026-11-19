@@ -318,6 +318,12 @@ void lu_ev_def_type(struct ctx *c, lu_v v, PyTypeObject *t);
    lu_ev_type knows it; NULL when it knows none yet, and compiled code then
    reports the type here. */
 PyTypeObject *lu_ev_learn_type(struct ctx *c, lu_v r, int which);
+/* The same for r's value, which compiled code may rely on when it is one
+   immortal object (a typecode, a small int): the constant, or NULL; *r is
+   the constant from here. Value records are asked for apart from type
+   records, by `which` alone. */
+#define LU_PROF_VALUES 64
+PyObject *lu_ev_learn_const(struct ctx *c, lu_v *r, int which);
 /* The root's record of that value, and compiled code that reports r's
    type to it (and leaves when the unit is to be built again). */
 struct lu_prof *lu_ev_prof(struct ctx *c, int which);

@@ -424,10 +424,9 @@ load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr
         break;
     case LOAD_ATTR_SLOT: {
         lu_ev_guard_version(c, owner, version);
-        lu_v args[2] = { owner, lu_ev_const_i(c, index) };
-        v = lu_ev_helper(c, H_slot_load, 2, args, 0);
-        lu_ev_guard(c, OP_GUARD_NOT_NULL, v, 0);
-        replace_owner(c, v, LU_NOV);
+        v = lu_ev_emit(c, OP_SLOT_LOAD, REP_OBJ, lu_ev_val(c, owner), LU_NOV, LU_NOV, index);
+        I(c, v)->fs = lu_ev_exit_fs(c);
+        replace_owner(c, lu_ev_own(c, v), LU_NOV);
         break;
     }
     case LOAD_ATTR_PROPERTY: {

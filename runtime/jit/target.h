@@ -348,7 +348,6 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(list_store) \
     X(attr_load) \
     X(attr_store) \
-    X(slot_load) \
     X(slot_store) \
     X(dict_lacks) X(profile) X(pic_same) X(fields_new) X(exc_new) X(exc_push) X(exc_fetch) X(exc_pop) X(gen_new) X(gen_give) X(gen_over) \
     X(cell_load) \
@@ -488,6 +487,10 @@ PyTypeObject *lu_jit_prof_type(struct lu_prof *p, int *poly);
    many, or -1 when it met more; *relied says whether the one type it met
    is relied on as lu_jit_prof_type has it. */
 int lu_jit_prof_types(struct lu_prof *p, PyTypeObject **types, int *relied);
+/* The same of a value profile: the value it met first (a new reference) or
+   NULL, and whether that is not the one to rely on. The record notes
+   values from here on, and only immortal ones: another makes it poly. */
+PyObject *lu_jit_prof_value(struct lu_prof *p, int *poly);
 /* A count that changes whenever a record of the root does. */
 unsigned long lu_jit_prof_learned(PyCodeObject *root);
 /* Compiled code met `o` there, in a unit built when the count was
@@ -512,7 +515,7 @@ lu_alloc_call(const struct lu_ins *in)
 /* -X lucifer_jit_stats: how often compiled code takes the C path of an
    operation it otherwise runs in line (runtime/jit/jit.c reports them). */
 #define LU_C_PATHS(X) X(list_item) X(tuple_item) X(list_store) X(box_int) X(box_float) X(build_list) X(build_tuple) \
-    X(new_object)
+    X(new_object) X(slot_load)
 enum lu_c_path {
 #define LU_C_PATH_ENUM(name) C_PATH_##name,
     LU_C_PATHS(LU_C_PATH_ENUM)

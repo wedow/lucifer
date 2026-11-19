@@ -92,6 +92,51 @@ size_of(struct ctx *c, lu_v r)
     return LU_EV_NONE;
 }
 
+/* typed_get(ba, typecode, i) and typed_set(ba, typecode, i, value)
+   (runtime/prim/memoryview.c, array.array's items) where ba's class is
+   known to be a bytearray's, the typecode is one the site met alone (array
+   instances keep theirs for life), i is an int and the value an int or a
+   float: the item read or stored in line (TYPED_LOAD, TYPED_STORE), which
+   leaves for whatever the primitive answers MISSING to. */
+static lu_v
+typed_item(struct ctx *c, lu_v *args, int nargs)
+{
+    PyTypeObject *t = lu_ev_learn_type(c, args[0], 0);
+    if (t == NULL || !PyType_IsSubtype(t, &PyByteArray_Type) || lu_ev_type(c, args[2]) != &PyLong_Type) {
+        return LU_EV_NONE;
+    }
+    lu_v typecode = args[1];
+    PyObject *k = lu_ev_learn_const(c, &typecode, 1);
+    int code = k != NULL && PyUnicode_CheckExact(k) && PyUnicode_GET_LENGTH(k) == 1
+        ? (int)PyUnicode_READ_CHAR(k, 0) : 0;
+    if (code == 0 || code > 127 || strchr("bBhHiIlLqQfd", code) == NULL) {
+        return LU_EV_NONE;
+    }
+    int f = code == 'f' || code == 'd';
+    lu_v value = LU_NOV;
+    if (nargs == 4) {
+        PyTypeObject *vt = lu_ev_learn_type(c, args[3], 3);
+        if (vt == &PyFloat_Type && f) {
+            value = lu_ev_unbox_float(c, args[3]);
+        }
+        else if (vt == &PyLong_Type && f) {
+            value = lu_ev_emit(c, OP_I2F, REP_F64, lu_ev_unbox_int(c, args[3]), LU_NOV, LU_NOV, 1);
+            I(c, value)->fs = lu_ev_exit_fs(c);         /* exact below 2**53; any other leaves */
+        }
+        else if (vt == &PyLong_Type) {
+            value = lu_ev_unbox_int(c, args[3]);
+        }
+        else {
+            return LU_EV_NONE;
+        }
+    }
+    lu_v ba = lu_ev_val(c, args[0]), i = lu_ev_unbox_int(c, args[2]);
+    lu_v r = lu_ev_emit(c, nargs == 3 ? OP_TYPED_LOAD : OP_TYPED_STORE, nargs == 4 ? REP_NONE : f ? REP_F64 : REP_I64,
+                        ba, i, value, code);
+    I(c, r)->fs = lu_ev_exit_fs(c);
+    return nargs == 4 ? lu_ev_konst(c, Py_True) : f ? lu_ev_box_float(c, r) : lu_ev_box_int(c, r);
+}
+
 /* The exact type of every result of the primitive, or NULL: what the
    C of each returns (runtime/prim), read there. */
 PyTypeObject *
@@ -289,6 +334,9 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
             Py_DECREF(r);       /* the unit holds its constants */
             return v;
         }
+    }
+    if ((nargs == 3 && strcmp(name, "typed_get") == 0) || (nargs == 4 && strcmp(name, "typed_set") == 0)) {
+        return typed_item(c, args, nargs);
     }
     if (nargs == 2 && strcmp(name, "list_append") == 0 && type_at(c, args, 0) == &PyList_Type) {
         lu_ev_helper(c, H_list_append, 2, args, c->oparg + 2);

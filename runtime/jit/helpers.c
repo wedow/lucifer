@@ -112,6 +112,15 @@ lu_jit_list_item(PyObject *list, int64_t i)
     return i >= 0 ? lu_list_item_ref((PyListObject *)list, (Py_ssize_t)i) : NULL;
 }
 
+/* LOAD_ATTR_SLOT's value at slot, a new reference, as the interpreter
+   takes it: NULL when the slot is empty or its value is being replaced. */
+PyObject *
+lu_jit_slot_load(PyObject **slot)
+{
+    LU_JIT_C_PATH(slot_load);
+    return lu_try_xget_ref(slot);
+}
+
 /* t[i] for -len <= i < len, else NULL (which leaves). */
 PyObject *
 lu_jit_tuple_item(PyObject *t, int64_t i)
@@ -458,14 +467,7 @@ h_attr_store(PyObject *owner, PyObject *v, PyObject *name, int64_t version)
     return 1;
 }
 
-/* LOAD_ATTR_SLOT and STORE_ATTR_SLOT, as the interpreter runs them: NULL
-   when the slot is empty or its value is being replaced. */
-static PyObject *
-h_slot_load(PyObject *owner, int64_t offset)
-{
-    return lu_try_xget_ref((PyObject **)((char *)owner + offset));
-}
-
+/* STORE_ATTR_SLOT, as the interpreter runs it. */
 static void
 h_slot_store(PyObject *owner, int64_t offset, PyObject *v)
 {
@@ -1488,7 +1490,6 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_list_store] = { (void *)lu_jit_list_store, "list_store", REP_BIT, FX_SEEN, 3 },
     [H_attr_load] = { (void *)lu_jit_attr_load, "attr_load", REP_OBJ, 0, 4 },
     [H_attr_store] = { (void *)h_attr_store, "attr_store", REP_BIT, FX_SEEN, 4 },
-    [H_slot_load] = { (void *)h_slot_load, "slot_load", REP_OBJ, 0, 2 },
     [H_slot_store] = { (void *)h_slot_store, "slot_store", REP_NONE, FX_SEEN, 3 },
     [H_dict_lacks] = { (void *)h_dict_lacks, "dict_lacks", REP_BIT, 0, 2 },
     [H_profile] = { (void *)h_profile, "profile", REP_BIT, 0, 3 },

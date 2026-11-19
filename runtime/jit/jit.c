@@ -129,8 +129,10 @@ struct lu_prof {
     struct lu_prof *next;
     uint64_t key;
     struct lu_jit_code *jc;     /* the root's */
-    PyTypeObject *types[LU_OPCLASS_WAYS];       /* the types the value had, in the order met (references) */
+    PyObject *met[LU_OPCLASS_WAYS];     /* the types the value had, in the order met (references); of a value
+                                           profile, the values themselves */
     int n;                      /* how many: release-stored after the type */
+    uint8_t values;             /* a value profile (lu_jit_prof_value) */
     uint8_t poly;               /* it had more than those: nothing to rely on */
     uint16_t fails;             /* exits of a guard on its one type: GUARD_FAILS of them and it is not relied on */
 };
@@ -399,10 +401,21 @@ PyTypeObject *
 lu_jit_prof_type(struct lu_prof *p, int *poly)
 {
     PyMutex_Lock(&p->jc->prof_lock);
-    PyTypeObject *t = p->n > 0 ? (PyTypeObject *)Py_NewRef((PyObject *)p->types[0]) : NULL;
+    PyTypeObject *t = p->n > 0 ? (PyTypeObject *)Py_NewRef(p->met[0]) : NULL;
     *poly = p->poly || p->n > 1 || p->fails >= GUARD_FAILS;
     PyMutex_Unlock(&p->jc->prof_lock);
     return t;
+}
+
+PyObject *
+lu_jit_prof_value(struct lu_prof *p, int *poly)
+{
+    PyMutex_Lock(&p->jc->prof_lock);
+    __atomic_store_n(&p->values, 1, __ATOMIC_RELAXED);
+    PyObject *k = p->n > 0 ? Py_NewRef(p->met[0]) : NULL;
+    *poly = p->poly || p->n > 1 || p->fails >= GUARD_FAILS;
+    PyMutex_Unlock(&p->jc->prof_lock);
+    return k;
 }
 
 int
@@ -411,7 +424,7 @@ lu_jit_prof_types(struct lu_prof *p, PyTypeObject **types, int *relied)
     PyMutex_Lock(&p->jc->prof_lock);
     int n = p->poly ? -1 : p->n;
     for (int i = 0; i < n; i++) {
-        types[i] = (PyTypeObject *)Py_NewRef((PyObject *)p->types[i]);
+        types[i] = (PyTypeObject *)Py_NewRef(p->met[i]);
     }
     *relied = n == 1 && p->fails < GUARD_FAILS;
     PyMutex_Unlock(&p->jc->prof_lock);
@@ -428,10 +441,13 @@ int
 lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
 {
     struct lu_jit_code *jc = p->jc;
-    PyTypeObject *t = Py_TYPE(o);
+    /* A value profile keeps the values themselves, while they are
+       immortal: any other is no constant to rely on, and makes it poly. */
+    int values = __atomic_load_n(&p->values, __ATOMIC_RELAXED);
+    PyObject *t = values ? o : (PyObject *)Py_TYPE(o);
     int met = __atomic_load_n(&p->poly, __ATOMIC_RELAXED);
     for (int i = 0, n = __atomic_load_n(&p->n, __ATOMIC_ACQUIRE); i < n && !met; i++) {
-        met = p->types[i] == t;
+        met = p->met[i] == t;
     }
     if (met) {
         /* Nothing new here. Once the root has learned anything since the
@@ -446,10 +462,10 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
     PyMutex_Lock(&jc->prof_lock);
     int known = p->poly;
     for (int i = 0; i < p->n && !known; i++) {
-        known = p->types[i] == t;
+        known = p->met[i] == t;
     }
-    if (!known && p->n < LU_OPCLASS_WAYS) {
-        p->types[p->n] = (PyTypeObject *)Py_NewRef((PyObject *)t);
+    if (!known && p->n < LU_OPCLASS_WAYS && (!values || _Py_IsImmortal(o))) {
+        p->met[p->n] = Py_NewRef(t);
         __atomic_store_n(&p->n, p->n + 1, __ATOMIC_RELEASE);
         jc->learned++;
     }
@@ -1978,7 +1994,7 @@ lu_jit_code_free(PyCodeObject *code)
     for (struct lu_prof *p = jc->profs, *next; p != NULL; p = next) {
         next = p->next;
         for (int i = 0; i < p->n; i++) {
-            Py_DECREF(p->types[i]);
+            Py_DECREF(p->met[i]);
         }
         free(p);
     }

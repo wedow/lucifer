@@ -2037,6 +2037,7 @@ extern int64_t lu_jit_unbox_wide(PyObject *o);
 extern PyObject *lu_jit_box_float(double v);
 extern PyObject *lu_jit_list_item(PyObject *list, int64_t i);
 extern PyObject *lu_jit_tuple_item(PyObject *t, int64_t i);
+extern PyObject *lu_jit_slot_load(PyObject **slot);
 extern int lu_jit_list_store(PyObject *list, int64_t i, PyObject *v);
 extern PyObject *lu_jit_attr_load(PyObject *owner, int64_t version, int64_t index, PyObject *name);
 extern int lu_jit_truth(PyObject *v);
@@ -2502,41 +2503,168 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
 
 /* PyMutex_LockFast on the lock byte of the object in r (ob_mutex), as
    CPython's LOCK_OBJECT: `busy` when another thread holds it. Clobbers
-   RAX, RCX. */
+   RAX and tmp. */
 static void
-lock_object(struct asm_ *a, int r, int busy)
+lock_object(struct asm_ *a, int r, int tmp, int busy)
 {
     alu_rr(a, ALU_XOR, RAX, RAX);
-    b1(a, 0xB1);
-    b1(a, 1);                                   /* mov cl, 1 */
+    rex(a, 0, 0, 0, tmp);
+    b1(a, 0xB0 + (tmp & 7));
+    b1(a, 1);                                   /* mov tmp8, 1 */
     b1(a, 0xF0);
-    rex(a, 0, RCX, 0, r);
+    rex(a, 0, tmp, 0, r);
     b1(a, 0x0F);
     b1(a, 0xB0);
-    modrm_mem(a, RCX, r, offsetof(PyObject, ob_mutex));     /* lock cmpxchg [r+mutex], cl */
+    modrm_mem(a, tmp, r, offsetof(PyObject, ob_mutex));     /* lock cmpxchg [r+mutex], tmp8 */
     jcc(a, CC_NE, busy);
 }
 
-/* Its release: a waiter parked on it is woken in C, a call that clobbers
-   the caller-saved registers (RDI among them). */
+/* Its release, clobbering RAX and tmp: a waiter parked on it is woken in
+   C, a call that clobbers the caller-saved registers (RDI among them), or
+   with `keep` every allocated register and RCX and XMM0 kept. */
 static void
-unlock_object(struct asm_ *a, int r)
+unlock_object(struct asm_ *a, int r, int tmp, int keep)
 {
     int unlocked = new_label(a);
     b1(a, 0xB0);
     b1(a, 1);                                   /* mov al, 1 */
-    alu_rr(a, ALU_XOR, RCX, RCX);
+    alu_rr(a, ALU_XOR, tmp, tmp);
     b1(a, 0xF0);
-    rex(a, 0, RCX, 0, r);
+    rex(a, 0, tmp, 0, r);
     b1(a, 0x0F);
     b1(a, 0xB0);
-    modrm_mem(a, RCX, r, offsetof(PyObject, ob_mutex));     /* lock cmpxchg [r+mutex], cl */
+    modrm_mem(a, tmp, r, offsetof(PyObject, ob_mutex));     /* lock cmpxchg [r+mutex], tmp8 */
     jcc(a, CC_E, unlocked);
+    if (keep) {
+        alu_ri(a, ALU_SUB, RSP, 16);
+        store(a, RSP, 0, RCX);
+        sse_rm(a, 0xF2, 0x11, 0, RSP, 8);       /* movsd [rsp+8], xmm0 */
+        save_volatile(a);
+    }
     rex(a, 1, RDI, 0, r);
     b1(a, 0x8D);
     modrm_mem(a, RDI, r, offsetof(PyObject, ob_mutex));     /* lea rdi, [r+mutex] */
     call_abs(a, (void *)PyMutex_Unlock);
+    if (keep) {
+        restore_volatile(a);
+        sse_rm(a, 0xF2, 0x10, 0, RSP, 8);
+        load(a, RCX, RSP, 0);
+        alu_ri(a, ALU_ADD, RSP, 16);
+    }
     bind(a, unlocked);
+}
+
+/* TYPED_LOAD and TYPED_STORE: item b of the bytearray in a, read as native
+   items of array typecode imm (runtime/prim/memoryview.c typed_get and
+   typed_set), in line under the bytearray's lock, which every resize takes
+   too: the storage and the size read under it are the ones the item is
+   in. The lock byte is taken with one cmpxchg, the index (negative from
+   the end) is tested against the size in items, the item moved and the
+   lock released. A lock another thread holds, an index out of range, a
+   stored int out of the typecode's range or a 'Q' item past 2**63 leaves
+   before anything is stored, for the primitive to do the operation; a
+   waiter that parked on the lock meanwhile is woken in C, every register
+   kept. Scratch registers only: RAX, RCX, RDX, R11, XMM0, XMM1. */
+static void
+typed_item(struct asm_ *a, struct lu_ins *in, lu_v v)
+{
+    int code = (int)in->imm, store_ = in->op == OP_TYPED_STORE, f = code == 'f' || code == 'd';
+    int width = code == 'b' || code == 'B' ? 1 : code == 'h' || code == 'H' ? 2
+        : code == 'i' || code == 'I' || code == 'f' ? 4 : 8;
+    int fail = guard_exit(a, in), out = new_label(a), done = new_label(a);
+    int o = gpr_of(a, in->a, RDX), i = gpr_of(a, in->b, RCX);
+    int x = store_ && f ? fpr_of(a, in->c, 0) : -1;     /* before RAX holds anything: a constant passes through it */
+    if (store_ && !f && code != 'q' && code != 'l') {
+        x = gpr_of(a, in->c, R11);
+        if (code == 'Q' || code == 'L') {
+            test_rr(a, x, x);
+            jcc(a, CC_S, fail);                 /* unsigned: below 2**63 as an unboxed int is */
+        }
+        else if (code == 'B' || code == 'H' || code == 'I') {
+            mov_rr(a, RAX, x);
+            rex(a, 1, 0, 0, RAX);
+            b1(a, 0xC1);
+            modrm_rr(a, 5, RAX);
+            b1(a, 8 * width);                   /* shr rax, bits */
+            jcc(a, CC_NE, fail);
+        }
+        else {
+            op_rr(a, 1, width == 1 ? 0x0FBE : width == 2 ? 0x0FBF : 0x63, RAX, x);  /* movsx rax, x's low bits */
+            alu_rr(a, ALU_CMP, RAX, x);
+            jcc(a, CC_NE, fail);
+        }
+    }
+    lock_object(a, o, R11, fail);
+    load(a, RAX, o, offsetof(PyVarObject, ob_size));
+    if (width > 1) {
+        rex(a, 1, 0, 0, RAX);
+        b1(a, 0xC1);
+        modrm_rr(a, 5, RAX);
+        b1(a, __builtin_ctz(width));            /* shr rax, log2(width): the size in items */
+    }
+    int positive = new_label(a);
+    mov_rr(a, R11, i);
+    test_rr(a, R11, R11);
+    jcc(a, CC_NS, positive);
+    alu_rr(a, ALU_ADD, R11, RAX);               /* negative: from the end */
+    bind(a, positive);
+    alu_rr(a, ALU_CMP, R11, RAX);
+    jcc(a, CC_AE, out);                         /* unsigned: still negative too */
+    load(a, RAX, o, offsetof(PyByteArrayObject, ob_start));
+    rex(a, 1, RAX, R11, RAX);
+    b1(a, 0x8D);
+    b1(a, 0x44);
+    b1(a, (__builtin_ctz(width) << 6) | ((R11 & 7) << 3) | RAX);
+    b1(a, 0);                                   /* lea rax, [rax + r11 * width] */
+    if (!store_ && f) {
+        sse_rm(a, code == 'd' ? 0xF2 : 0xF3, 0x10, 0, RAX, 0);   /* movsd / movss xmm0, [rax] */
+        if (code == 'f') {
+            sse_rr(a, 0xF3, 0x5A, 0, 0, 0);     /* cvtss2sd xmm0, xmm0 */
+        }
+    }
+    else if (!store_) {
+        static const struct { char code; int w, op; } loads[] = {
+            { 'b', 1, 0x0FBE }, { 'B', 0, 0x0FB6 }, { 'h', 1, 0x0FBF }, { 'H', 0, 0x0FB7 }, { 'i', 1, 0x63 },
+            { 'I', 0, 0x8B }, { 'l', 1, 0x8B }, { 'L', 1, 0x8B }, { 'q', 1, 0x8B }, { 'Q', 1, 0x8B },
+        };
+        for (size_t k = 0; k < sizeof loads / sizeof loads[0]; k++) {
+            if (loads[k].code == code) {
+                op_rm(a, loads[k].w, loads[k].op, RCX, RAX, 0);    /* sign- or zero-extended to 64 bits */
+            }
+        }
+        if (code == 'L' || code == 'Q') {
+            test_rr(a, RCX, RCX);
+            jcc(a, CC_S, out);                  /* past 2**63: no unboxed int */
+        }
+    }
+    else if (f) {
+        if (code == 'f') {
+            sse_rr(a, 0xF2, 0x5A, 1, x, 0);     /* cvtsd2ss xmm1, x */
+            sse_rm(a, 0xF3, 0x11, 1, RAX, 0);   /* movss [rax], xmm1 */
+        }
+        else {
+            sse_rm(a, 0xF2, 0x11, x, RAX, 0);   /* movsd [rax], x */
+        }
+    }
+    else {
+        to_gpr(a, R11, in->c);
+        if (width == 2) {
+            b1(a, 0x66);
+        }
+        op_rm(a, width == 8, width == 1 ? 0x88 : 0x89, R11, RAX, 0);    /* mov [rax], r11 (its low bytes) */
+    }
+    unlock_object(a, o, R11, 1);
+    jmp(a, done);
+    bind(a, out);
+    unlock_object(a, o, R11, 1);
+    jmp(a, fail);
+    bind(a, done);
+    if (!store_ && f) {
+        def_fpr(a, v, 0);
+    }
+    else if (!store_) {
+        def_gpr(a, v, RCX);
+    }
 }
 
 /* An inline store's word at off of the object in r holds nothing: the
@@ -2593,7 +2721,7 @@ inline_store_raw(struct asm_ *a, lu_v v)
     jcc(a, CC_NE, slow);
     int fresh = (in->flags & INS_FRESH) != 0;  /* an instance no other thread can have seen: no lock */
     if (!fresh) {
-        lock_object(a, RDI, slow);
+        lock_object(a, RDI, RCX, slow);
         b1(a, 0xF6);
         modrm_mem(a, 0, RDI, flags);
         b1(a, LU_ATTRS_IN_DICT >> 8);
@@ -2609,7 +2737,7 @@ inline_store_raw(struct asm_ *a, lu_v v)
     mov_ri(a, RAX, (int64_t)(intptr_t)(is_int ? LU_UNBOXED_INT : LU_UNBOXED));
     store(a, RDI, off, RAX);                    /* after the raw word: x86 stores stay in order */
     if (!fresh) {
-        unlock_object(a, RDI);
+        unlock_object(a, RDI, RCX, 0);
     }
     alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED_INT);
     jcc(a, CC_BE, done);                        /* no object to release */
@@ -2617,7 +2745,7 @@ inline_store_raw(struct asm_ *a, lu_v v)
     jmp(a, done);
     bind(a, unlock_slow);
     if (!fresh) {
-        unlock_object(a, RDI);
+        unlock_object(a, RDI, RCX, 0);
     }
     bind(a, slow);
     mov_rr(a, RDI, R12);
@@ -3195,6 +3323,32 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         def_gpr(a, v, RAX);
         return 0;
     }
+    case OP_SLOT_LOAD: {
+        /* LOAD_ATTR_SLOT in line: the word read without a lock, and the
+           reference taken in place for an immortal value or one the running
+           thread owns, which no other thread frees; another thread's value
+           is C's (lu_try_xget_ref), every register kept. An empty slot
+           leaves, for the interpreter to raise. */
+        int fail = guard_exit(a, in), slow = new_label(a), done = new_label(a);
+        r = gpr_of(a, in->a, RDX);
+        load(a, RAX, r, (int32_t)in->imm);
+        test_rr(a, RAX, RAX);
+        jcc(a, CC_E, fail);
+        incref_owned_or_exit(a, RAX, slow);
+        jmp(a, done);
+        bind(a, slow);
+        save_volatile(a);
+        rex(a, 1, RDI, 0, r);
+        b1(a, 0x8D);
+        modrm_mem(a, RDI, r, (int32_t)in->imm);     /* lea rdi, [r+imm] */
+        call_abs(a, (void *)lu_jit_slot_load);
+        restore_volatile(a);
+        test_rr(a, RAX, RAX);
+        jcc(a, CC_E, fail);
+        bind(a, done);
+        def_gpr(a, v, RAX);
+        return 0;
+    }
     case OP_BYTES_ITEM: {
         int fail = guard_exit(a, in);
         int b = gpr_of(a, in->a, RDX), i = gpr_of(a, in->b, RCX);
@@ -3204,6 +3358,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         def_gpr(a, v, RAX);
         return 0;
     }
+    case OP_TYPED_LOAD: case OP_TYPED_STORE:
+        typed_item(a, in, v);
+        return 0;
     case OP_LIST_STORE: {
         /* STORE_SUBSCR_LIST_INT in line, as CPython locks the list: its
            lock byte taken with one cmpxchg, an index below the size, the
@@ -3214,18 +3371,18 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int fail = guard_exit(a, in), slow = new_label(a), out = new_label(a), done = new_label(a);
         struct lu_deopt *d = published(a, in);
         parallel_moves(a, m, 3);
-        lock_object(a, RDI, slow);
+        lock_object(a, RDI, RCX, slow);
         cmp_rm(a, RSI, RDI, offsetof(PyVarObject, ob_size));
         jcc(a, CC_AE, out);                     /* unsigned: a negative index too */
         load(a, R11, RDI, offsetof(PyListObject, ob_item));
         load_indexed8(a, RBX, R11, RSI, 0);     /* the old value, kept across calls (IF_CALL) */
         incref(a, RDX);
         store_indexed8(a, R11, RSI, 0, RDX);    /* a release on x86: readers take it without the lock */
-        unlock_object(a, RDI);
+        unlock_object(a, RDI, RCX, 0);
         decref(a, RBX, in, d, -1);     /* the old value */
         jmp(a, done);
         bind(a, out);
-        unlock_object(a, RDI);
+        unlock_object(a, RDI, RCX, 0);
         jmp(a, fail);
         bind(a, slow);
         publish(a, in, d);
@@ -3259,7 +3416,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jcc(a, CC_NE, slow);
         int fresh = (in->flags & INS_FRESH) != 0;  /* an instance no other thread can have seen: no lock */
         if (!fresh) {
-            lock_object(a, RDI, slow);
+            lock_object(a, RDI, RCX, slow);
             b1(a, 0xF6);
             modrm_mem(a, 0, RDI, flags);
             b1(a, LU_ATTRS_IN_DICT >> 8);
@@ -3294,7 +3451,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         bind(a, immortal);
         store(a, RDI, off, RSI);
         if (!fresh) {
-            unlock_object(a, RDI);
+            unlock_object(a, RDI, RCX, 0);
         }
         test_rr(a, RBX, RBX);
         jcc(a, CC_E, done);                     /* a new name: nothing to release */
@@ -3302,7 +3459,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jmp(a, done);
         bind(a, unlock_slow);
         if (!fresh) {
-            unlock_object(a, RDI);
+            unlock_object(a, RDI, RCX, 0);
         }
         mov_rr(a, RDI, R12);
         mov_rr(a, RSI, R13);

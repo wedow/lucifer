@@ -189,6 +189,9 @@ require that a count of the tier's does not grow with the iterations:
          and `in` meet operands of a few classes at each site: helper
          calls compiled code makes. Each site takes the classes it met in
          line, the operator's dispatch folded on each.
+  typed  tests/kernel/jit_typed_items.py, whose hot loops read and store
+         bytearray items and array items of every numeric typecode: helper
+         calls compiled code makes. Each item is read and stored in line.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -247,6 +250,7 @@ GROWTH = {
     'objects': ('jit_virtual_objects.py', r'jit: allocations by kind: .*tuple (\d+), .*instance (\d+)', 0),
     'fields': ('jit_unboxed_fields.py', r'jit: allocations by kind: int \d+, float (\d+)', 0),
     'operators': ('jit_operator_arms.py', r'jit: executed:.* helper (\d+)', 0),
+    'typed': ('jit_typed_items.py', r'jit: executed:.* helper (\d+)', 0),
     'iterators': ('jit_virtual_iterators.py', r'jit: allocations by kind: .*tuple (\d+), .*iterator (\d+)', 0),
     'carried': ('jit_carried_objects.py',
                 r'jit: allocations by kind: int (\d+), .*tuple (\d+), list (\d+), dict (\d+), .*instance (\d+)', 0),
