@@ -1,7 +1,8 @@
 # Hot operators whose operands are of one of a few classes at each site:
 # == and != between None and instances that keep object's equality (and
 # between two such classes), + on two classes with their own __add__, and
-# [] and `in` on two classes with their own __getitem__ and __contains__.
+# [], []= and `in` on two classes with their own __getitem__, __setitem__
+# and __contains__.
 # tools/jitcheck runs this at two sizes and requires that compiled code's
 # helper calls do not grow with the iterations: each site takes the class
 # it meets in line, with the operator's dispatch folded on it. Then each
@@ -87,6 +88,7 @@ def sends(vs, ss, rounds):
             n += s[i]
             if i in s:
                 n += 1
+            s[i] = n
     return n
 
 

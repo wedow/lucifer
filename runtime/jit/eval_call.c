@@ -631,7 +631,7 @@ lu_ev_returned(struct ctx *c, lu_v v)
         PyTypeObject *t = lu_ev_type(c, v);
         c->missing |= !LU_IS_VIRT(v) && lu_ev_const(c, v) == NULL && (t == NULL || t == Py_TYPE(LU_MISSING));
     }
-    if (c->ret != LU_RETURN_INIT) {
+    if (c->ret != LU_RETURN_INIT && c->ret != LU_RETURN_DISCARD) {
         lu_ev_push(p, v);
     }
     lu_ev_settle(p, p->next);

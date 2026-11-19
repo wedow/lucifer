@@ -241,7 +241,14 @@ store_subscr(struct ctx *c)
         c->g->observed = 1;     /* the value it replaces is released */
     }
     else {
+        /* Through the kernel's setitem, which folds on the container's
+           class to its __setitem__. */
         lu_v args[3] = { cont, sub, val };
+        int done = lu_ev_kernel_arms(c, args, 1);
+        done = done != 0 ? done : lu_ev_kernel_op(c, LU_K_setitem, args, 3, 3, LU_RETURN_DISCARD);
+        if (done != 0) {
+            return done < 0 ? -1 : 0;
+        }
         lu_ev_helper(c, H_setitem, 3, args, 3);
     }
     pop_n(c, 3);
