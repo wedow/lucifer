@@ -10,7 +10,9 @@ STATS = Path(__file__).resolve().parent / "stats"
 
 RECORD = """metric,value,previous
 awfy.A.on_over_cpython,0.5,0.6
+awfy.A.pypy_over_cpython,0.125,
 awfy.B.on_over_cpython,2.0,2.1
+awfy.B.pypy_over_cpython,0.5,
 awfy.geomean_on_over_cpython,1.0,1.1
 web.cpython-3.14t.8.rps,8000.0,
 web.lucifer.8.rps,1000.0,
@@ -42,6 +44,7 @@ TABLE = """<!-- stats:begin -->
 | Metric | Score | Counts |
 |---|---|---|
 | Speed vs CPython 3.14t, composite across benchmark suites | 0.50x CPython's speed | geomean of 3 programs, 0 fail, 2026-01-02 |
+| Speed vs PyPy 3.11, same composite | 0.25x PyPy's speed | geomean of the 2 programs both run, 2026-01-02 |
 | C-API functions implemented | 66.5% | 1,083 of 1,628 |
 | numpy test suite passing | 96.2% | 50,299 of 52,273 collected, run 2025-12-28 |
 | `Lib/test` passing, relative to CPython | 75.0% | 30,107 of CPython's 40,143, run 2025-12-01 |
@@ -84,6 +87,13 @@ class StatsCheck(unittest.TestCase):
         with (self.day / "summary.csv").open("a") as f:
             f.write("pyperformance.C.on_over_cpython,0.125,\npyperformance.D.on_over_cpython,,0.5\n")
         self.assertIn("| 1.00x CPython's speed | geomean of 4 programs, 1 fail, 2026-01-02 |", self.stats())
+
+    def test_pypy_row_skips_programs_either_runtime_fails(self):
+        with (self.day / "summary.csv").open("a") as f:
+            f.write("pyperformance.C.on_over_cpython,0.125,\npyperformance.C.pypy_over_cpython,,\n"
+                    "pyperformance.D.on_over_cpython,,\npyperformance.D.pypy_over_cpython,0.5,\n"
+                    "pyperformance-warm.A.on_over_cpython,1.0,\npyperformance-warm.A.pypy_over_cpython,0.001,\n")
+        self.assertIn("| 0.25x PyPy's speed | geomean of the 2 programs both run, 2026-01-02 |", self.stats())
 
 
 if __name__ == "__main__":

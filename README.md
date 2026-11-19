@@ -14,6 +14,7 @@ Status, refreshed by each daily status run (details: `tools/scoreboard`):
 | Metric | Score | Counts |
 |---|---|---|
 | Speed vs CPython 3.14t, composite across benchmark suites | 0.49x CPython's speed | geomean of 122 programs, 1 fail, 2026-11-19 |
+| Speed vs PyPy 3.11, same composite | 0.26x PyPy's speed | geomean of the 113 programs both run, 2026-11-19 |
 | C-API functions implemented | 70.8% | 1,152 of 1,628 |
 | numpy test suite passing | 97.1% | 50,745 of 52,273 collected, run 2026-11-15 |
 | `Lib/test` passing, relative to CPython | 70.6% | 35,857 of CPython's 50,816, run 2026-11-09 |

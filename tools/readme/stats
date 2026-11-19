@@ -3,7 +3,8 @@
 
 Speed is the geomean over every *.on_over_cpython ratio in the latest record, one per
 program across every benchmark suite, so new benchmarks join it by recording that key.
-A program recorded with an empty ratio failed: it is counted, not scored. Kernel and differential rows take the worst of
+A program recorded with an empty ratio failed: it is counted, not scored. The PyPy row is the
+same composite over the programs where both Lucifer and PyPy recorded a ratio (*.pypy_over_cpython). Kernel and differential rows take the worst of
 the record's lanes; numpy and Lib/test rows carry the date of the run behind their counts.
 """
 import argparse
@@ -35,15 +36,23 @@ def worst_lane(name, m, suite):
     return share(name, m, f"conformance.{suite}.{lane}.pass", f"conformance.{suite}.{lane}.total", note=f", {len(lanes)} modes")
 
 
+def speedup(ratios):
+    """Inverse geomean of time ratios: how many times faster than the reference."""
+    return math.exp(-sum(map(math.log, ratios)) / len(ratios))
+
+
 def table(results):
     date, m = latest(results)
-    recorded = [v for k, v in m.items() if k.endswith(".on_over_cpython") and not k.startswith("pyperformance-warm.")]
-    ratios = [float(v) for v in recorded if v]
-    speed = math.exp(-sum(map(math.log, ratios)) / len(ratios))
+    recorded = {k.removesuffix(".on_over_cpython"): v for k, v in m.items()
+                if k.endswith(".on_over_cpython") and not k.startswith("pyperformance-warm.")}
+    ratios = [float(v) for v in recorded.values() if v]
+    both = [float(v) / float(m[p + ".pypy_over_cpython"]) for p, v in recorded.items()
+            if v and m.get(p + ".pypy_over_cpython")]
     rows = [
         "| Metric | Score | Counts |",
         "|---|---|---|",
-        f"| Speed vs CPython 3.14t, composite across benchmark suites | {speed:.2f}x CPython's speed | geomean of {len(ratios)} programs, {len(recorded) - len(ratios)} fail, {date} |",
+        f"| Speed vs CPython 3.14t, composite across benchmark suites | {speedup(ratios):.2f}x CPython's speed | geomean of {len(ratios)} programs, {len(recorded) - len(ratios)} fail, {date} |",
+        f"| Speed vs PyPy 3.11, same composite | {speedup(both):.2f}x PyPy's speed | geomean of the {len(both)} programs both run, {date} |",
         share("C-API functions implemented", m, "capi.implemented", "capi.total"),
         share("numpy test suite passing", m, "conformance.numpytest.lucifer.pass", "conformance.numpytest.total",
               note=f" collected, run {m['conformance.numpytest.date']}"),
