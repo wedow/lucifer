@@ -98,6 +98,18 @@ def _int(value, code, size, signed):
     return value
 
 
+def _float_bytes(value, size, little):
+    """The size bytes of value as a float, in the struct's order."""
+    try:
+        x = float(value) if not isinstance(value, str) else None
+    except (TypeError, ValueError):
+        x = None
+    if x is None:
+        raise error('required argument is not a float')
+    data = _float_pack(x, size)
+    return data if little else data[::-1]
+
+
 def _pack_into(out, items, args, little):
     """Each value of args into out at its offset, a run at a time."""
     k = 0
@@ -124,16 +136,8 @@ def _pack_into(out, items, args, little):
         elif kind == 'f':
             end = offset + count * size
             while offset < end:
-                value = args[k]
+                out[offset:offset + size] = _float_bytes(args[k], size, little)
                 k += 1
-                try:
-                    x = float(value) if not isinstance(value, str) else None
-                except (TypeError, ValueError):
-                    x = None
-                if x is None:
-                    raise error('required argument is not a float')
-                data = _float_pack(x, size)
-                out[offset:offset + size] = data if little else data[::-1]
                 offset += size
         elif kind == '?':
             for i in range(offset, offset + count):
@@ -241,8 +245,16 @@ the format string."""
     def _pack(self, args):
         if len(args) != self._nvalues:
             raise error('pack expected %d items for packing (got %d)' % (self._nvalues, len(args)))
+        items = self._items
+        kind, code, count, offset, size = items[0] if len(items) == 1 else ('', '', 0, 0, 0)
+        if size == self._size and (kind == 'i' or kind == 'u'):
+            # One number that is the whole struct: its bytes are the result.
+            signed = kind == 'i'
+            return _int(args[0], code, size, signed).to_bytes(size, 'little' if self._little else 'big', signed=signed)
+        if size == self._size and kind == 'f':
+            return _float_bytes(args[0], size, self._little)
         out = bytearray(self._size)
-        _pack_into(out, self._items, args, self._little)
+        _pack_into(out, items, args, self._little)
         return bytes(out)
 
     def pack(self, *args):
