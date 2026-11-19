@@ -101,7 +101,7 @@ lu_ev_prim_type(const char *name)
         "str_slice", "str_slice_step", "str_case", "str_chr", "str_item", "str_strip", "str_repeat",
         "str_expandtabs", NULL };
     static const char *const ints[] = { "str_find", "str_count", "str_hash", "int_hash", "size", "str_len",
-        "str_cmp", "str_decimal", "tuple_hash", NULL };
+        "str_cmp", "int_cmp", "str_decimal", "tuple_hash", NULL };
     static const char *const bools[] = { "kind", "is_subtype", "type_flag", "str_is", "type_can_new", NULL };
     static const struct { const char *const *names; PyTypeObject *type; } known[] = {
         { strs, &PyUnicode_Type }, { ints, &PyLong_Type }, { bools, &PyBool_Type },

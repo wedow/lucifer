@@ -639,40 +639,6 @@ h_build_string(PyObject **argv, intptr_t n)
 
 /* --- operators --- */
 
-/* Answers per thread, by type version: a version names one type in one
-   state, so an entry holds while its type keeps it. */
-#define EQ_SEEN 64
-static __thread struct {
-    unsigned int version;
-    int answer;
-} eq_seen[EQ_SEEN];
-
-static int
-uses_object_eq(PyObject *o)
-{
-    PyTypeObject *t = Py_TYPE(o);
-    unsigned int version = t->tp_version_tag;
-    unsigned int at = version % EQ_SEEN;
-    if (version != 0 && eq_seen[at].version == version) {
-        return eq_seen[at].answer;
-    }
-    int answer = _PyType_Lookup(t, LU_ID(__eq__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__eq__))
-        && _PyType_Lookup(t, LU_ID(__ne__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__ne__));
-    if (version != 0 && version == __atomic_load_n(&t->tp_version_tag, __ATOMIC_ACQUIRE)) {
-        eq_seen[at].version = version;
-        eq_seen[at].answer = answer;
-    }
-    return answer;
-}
-
-/* Whether `a == b` (or !=) is identity: both types keep object's __eq__
-   and __ne__, so compare reaches its `a is b` fallback (operators.compare). */
-static int
-h_compare_ideq(PyObject *a, PyObject *b, int64_t op)
-{
-    return uses_object_eq(a) && uses_object_eq(b);
-}
-
 static PyObject *
 h_binary_op(PyObject *a, PyObject *b, int64_t op)
 {
@@ -1528,7 +1494,6 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_profile] = { (void *)h_profile, "profile", REP_BIT, 0, 3 },
     [H_pic_same] = { (void *)h_pic_same, "pic_same", REP_BIT, 0, 2 },
     [H_cell_load] = { (void *)h_cell_load, "cell_load", REP_OBJ, FX_SEEN, 1 },
-    [H_compare_ideq] = { (void *)h_compare_ideq, "compare_ideq", REP_BIT, 0, 3 },
     [H_str_concat] = { (void *)lu_str_concat, "str_concat", REP_OBJ, FX_RAISE, 2 },
     [H_binary_op] = { (void *)h_binary_op, "binary_op", REP_OBJ, FX_RAISE | FX_PY, 3 },
     [H_compare_op] = { (void *)h_compare_op, "compare_op", REP_OBJ, FX_RAISE | FX_PY, 3 },

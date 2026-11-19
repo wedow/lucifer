@@ -129,9 +129,10 @@ struct lu_prof {
     struct lu_prof *next;
     uint64_t key;
     struct lu_jit_code *jc;     /* the root's */
-    PyTypeObject *type;         /* the type the value had (a reference), or NULL before any */
-    uint8_t poly;               /* it had another too, or the guard on it kept failing: nothing to rely on */
-    uint16_t fails;
+    PyTypeObject *types[LU_OPCLASS_WAYS];       /* the types the value had, in the order met (references) */
+    int n;                      /* how many: release-stored after the type */
+    uint8_t poly;               /* it had more than those: nothing to rely on */
+    uint16_t fails;             /* exits of a guard on its one type: GUARD_FAILS of them and it is not relied on */
 };
 
 static struct {
@@ -398,10 +399,23 @@ PyTypeObject *
 lu_jit_prof_type(struct lu_prof *p, int *poly)
 {
     PyMutex_Lock(&p->jc->prof_lock);
-    PyTypeObject *t = (PyTypeObject *)Py_XNewRef((PyObject *)p->type);
-    *poly = p->poly;
+    PyTypeObject *t = p->n > 0 ? (PyTypeObject *)Py_NewRef((PyObject *)p->types[0]) : NULL;
+    *poly = p->poly || p->n > 1 || p->fails >= GUARD_FAILS;
     PyMutex_Unlock(&p->jc->prof_lock);
     return t;
+}
+
+int
+lu_jit_prof_types(struct lu_prof *p, PyTypeObject **types, int *relied)
+{
+    PyMutex_Lock(&p->jc->prof_lock);
+    int n = p->poly ? -1 : p->n;
+    for (int i = 0; i < n; i++) {
+        types[i] = (PyTypeObject *)Py_NewRef((PyObject *)p->types[i]);
+    }
+    *relied = n == 1 && p->fails < GUARD_FAILS;
+    PyMutex_Unlock(&p->jc->prof_lock);
+    return n;
 }
 
 unsigned long
@@ -415,7 +429,11 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
 {
     struct lu_jit_code *jc = p->jc;
     PyTypeObject *t = Py_TYPE(o);
-    if (__atomic_load_n(&p->type, __ATOMIC_RELAXED) == t || __atomic_load_n(&p->poly, __ATOMIC_RELAXED)) {
+    int met = __atomic_load_n(&p->poly, __ATOMIC_RELAXED);
+    for (int i = 0, n = __atomic_load_n(&p->n, __ATOMIC_ACQUIRE); i < n && !met; i++) {
+        met = p->types[i] == t;
+    }
+    if (met) {
         /* Nothing new here. Once the root has learned anything since the
            unit was built, its units' places count passes of code built
            without it, and the unit is built again when they have cost
@@ -426,11 +444,16 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
                < STALE_PER_INS * (unsigned long)__atomic_load_n(&jc->built_ins, __ATOMIC_RELAXED);
     }
     PyMutex_Lock(&jc->prof_lock);
-    if (p->type == NULL) {
-        __atomic_store_n(&p->type, (PyTypeObject *)Py_NewRef((PyObject *)t), __ATOMIC_RELAXED);
+    int known = p->poly;
+    for (int i = 0; i < p->n && !known; i++) {
+        known = p->types[i] == t;
+    }
+    if (!known && p->n < LU_OPCLASS_WAYS) {
+        p->types[p->n] = (PyTypeObject *)Py_NewRef((PyObject *)t);
+        __atomic_store_n(&p->n, p->n + 1, __ATOMIC_RELEASE);
         jc->learned++;
     }
-    else if (p->type != t && !p->poly) {
+    else if (!known) {
         __atomic_store_n(&p->poly, 1, __ATOMIC_RELAXED);
         jc->learned++;
     }
@@ -442,8 +465,9 @@ static void kill(struct lu_jit_code *jc, struct lu_unit *u);
 
 /* An exit a learned type's site took: the unit is built again with what
    the root knows now, at once, when its sites reported; when the type
-   keeps being another, nothing is relied on there and every unit of the
-   root is built again. */
+   keeps being another, its one type is not relied on there (an operator
+   learns the others, lu_ev_kernel_arms) and every unit of the root is
+   built again. */
 static void
 prof_exit(struct lu_deopt *d)
 {
@@ -455,9 +479,8 @@ prof_exit(struct lu_deopt *d)
         return;
     }
     PyMutex_Lock(&jc->prof_lock);
-    int now = !p->poly && ++p->fails >= GUARD_FAILS;
+    int now = !p->poly && p->fails < GUARD_FAILS && ++p->fails == GUARD_FAILS;
     if (now) {
-        p->poly = 1;
         jc->learned++;
     }
     PyMutex_Unlock(&jc->prof_lock);
@@ -1954,7 +1977,9 @@ lu_jit_code_free(PyCodeObject *code)
     free(jc->hot);
     for (struct lu_prof *p = jc->profs, *next; p != NULL; p = next) {
         next = p->next;
-        Py_XDECREF(p->type);
+        for (int i = 0; i < p->n; i++) {
+            Py_DECREF(p->types[i]);
+        }
         free(p);
     }
     free(jc->nospec);

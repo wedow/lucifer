@@ -427,11 +427,16 @@ lu_ev_instruction(struct ctx *c)
         return 0;
     case IS_OP: {
         lu_v b = lu_ev_peek(c, 1), a = lu_ev_peek(c, 2);
-        /* Two names of one value are one object; else the objects are
-           compared, made real if need be: a small int that does not exist
-           yet is the one every other small int of its value is. */
-        w = a == b ? lu_ev_const_i(c, 1)
-            : lu_ev_const(c, a) != NULL && lu_ev_const(c, b) != NULL ? lu_ev_const_i(c, 0)   /* two constants: two objects */
+        PyTypeObject *ta = lu_ev_type(c, a), *tb = lu_ev_type(c, b);
+        /* Two names of one value are one object, and so are two values of
+           a type that has one instance; values of two types are two
+           objects. Else the objects are compared, made real if need be: a
+           small int that does not exist yet is the one every other small
+           int of its value is. */
+        w = a == b || (ta == tb && (ta == Py_TYPE(Py_None) || ta == Py_TYPE(Py_NotImplemented)
+                                    || ta == Py_TYPE(Py_Ellipsis))) ? lu_ev_const_i(c, 1)
+            : (lu_ev_const(c, a) != NULL && lu_ev_const(c, b) != NULL)     /* two constants: two objects */
+              || (ta != NULL && tb != NULL && ta != tb) ? lu_ev_const_i(c, 0)
             : lu_ev_emit(c, OP_IS, REP_BIT, a == LU_NOV ? lu_ev_konst(c, NULL) : lu_ev_val(c, a),
                          b == LU_NOV ? lu_ev_konst(c, NULL) : lu_ev_val(c, b), LU_NOV, 0);
         pop_n(c, 2);
@@ -612,7 +617,8 @@ lu_ev_instruction(struct ctx *c)
         return 0;
     case CONTAINS_OP: {
         lu_v kargs[3] = { lu_ev_peek(c, 1), lu_ev_peek(c, 2), lu_ev_konst(c, lu_small_int(oparg)) };   /* the container first */
-        int done = lu_ev_kernel_op(c, LU_K_contains, kargs, 3, 2, LU_RETURN_PUSH);
+        int done = lu_ev_kernel_arms(c, kargs, 2);
+        done = done != 0 ? done : lu_ev_kernel_op(c, LU_K_contains, kargs, 3, 2, LU_RETURN_PUSH);
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }

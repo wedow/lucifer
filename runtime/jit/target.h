@@ -352,7 +352,6 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(slot_store) \
     X(dict_lacks) X(profile) X(pic_same) X(fields_new) X(exc_new) X(exc_push) X(exc_fetch) X(exc_pop) X(gen_new) X(gen_give) X(gen_over) \
     X(cell_load) \
-    X(compare_ideq) \
     X(binary_op) \
     X(str_concat) \
     X(compare_op) \
@@ -482,8 +481,13 @@ extern PyObject lu_jit_exc_prev;     /* eval_exc.c */
 struct lu_prof;
 /* The root's record for the context `key`, made if new; NULL without memory. */
 struct lu_prof *lu_jit_prof(PyCodeObject *root, uint64_t key);
-/* The type it met (a new reference) or NULL, and whether it met more than one. */
+/* The type it met first (a new reference) or NULL, and whether that is not
+   the one type to rely on: it met another, or a guard on it kept failing. */
 PyTypeObject *lu_jit_prof_type(struct lu_prof *p, int *poly);
+/* Every type it met, up to LU_OPCLASS_WAYS (new references in types): how
+   many, or -1 when it met more; *relied says whether the one type it met
+   is relied on as lu_jit_prof_type has it. */
+int lu_jit_prof_types(struct lu_prof *p, PyTypeObject **types, int *relied);
 /* A count that changes whenever a record of the root does. */
 unsigned long lu_jit_prof_learned(PyCodeObject *root);
 /* Compiled code met `o` there, in a unit built when the count was

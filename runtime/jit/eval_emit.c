@@ -100,6 +100,25 @@ lu_ev_guard_type(struct ctx *c, lu_v r, PyTypeObject *t)
     lu_ev_set_type(c, v, t);
 }
 
+/* The root's record of what r, the `which`-th value the current
+   instruction asks about, has been: kept per chain of inlined frames. */
+struct lu_prof *
+lu_ev_prof(struct ctx *c, int which)
+{
+    uint64_t key = (uint64_t)which;
+    for (struct ctx *k = c; k != NULL; k = k->parent) {
+        key = lu_jit_ctx_mix(key, k->code, k->pc);
+    }
+    return lu_jit_prof(c->g->f->code, key);
+}
+
+void
+lu_ev_profile(struct ctx *c, struct lu_prof *p, lu_v r)
+{
+    lu_v args[3] = { lu_ev_const_i(c, (int64_t)(intptr_t)p), r, lu_ev_const_i(c, (int64_t)c->g->learned) };
+    I(c, lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_profile, 3, args, 0), 1))->prof = p;
+}
+
 PyTypeObject *
 lu_ev_learn_type(struct ctx *c, lu_v r, int which)
 {
@@ -110,11 +129,7 @@ lu_ev_learn_type(struct ctx *c, lu_v r, int which)
     if (t != NULL || r == LU_NOV || LU_IS_VIRT(r) || I(c, r)->rep != REP_OBJ) {
         return t;
     }
-    uint64_t key = (uint64_t)which;
-    for (struct ctx *k = c; k != NULL; k = k->parent) {
-        key = lu_jit_ctx_mix(key, k->code, k->pc);
-    }
-    struct lu_prof *p = lu_jit_prof(c->g->f->code, key);
+    struct lu_prof *p = lu_ev_prof(c, which);
     int poly = 1;
     t = p != NULL ? lu_jit_prof_type(p, &poly) : NULL;
     if (poly) {
@@ -128,8 +143,7 @@ lu_ev_learn_type(struct ctx *c, lu_v r, int which)
         lu_ev_set_type(c, r, t);
         return lu_ev_type(c, r);        /* none, of a class with no version to rely on */
     }
-    lu_v args[3] = { lu_ev_const_i(c, (int64_t)(intptr_t)p), r, lu_ev_const_i(c, (int64_t)c->g->learned) };
-    I(c, lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_profile, 3, args, 0), 1))->prof = p;
+    lu_ev_profile(c, p, r);
     return NULL;
 }
 
@@ -405,7 +419,9 @@ lu_ev_truth(struct ctx *c, lu_v r)
         return lu_ev_const_i(c, 0);
     }
     if (t == &PyLong_Type) {
-        return lu_ev_emit(c, OP_CMP_I, REP_BIT, lu_ev_unbox_int(c, r), lu_ev_const_i(c, 0), LU_NOV, Py_NE);
+        lu_v x = lu_ev_unbox_int(c, r);
+        return I(c, x)->op == OP_CONST_I ? lu_ev_const_i(c, I(c, x)->imm != 0)
+            : lu_ev_emit(c, OP_CMP_I, REP_BIT, x, lu_ev_const_i(c, 0), LU_NOV, Py_NE);
     }
     if (t == &PyFloat_Type) {
         /* -0.0 compares equal to 0.0, as it is false. */

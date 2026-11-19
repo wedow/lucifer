@@ -835,6 +835,81 @@ lu_ev_kernel_op(struct ctx *c, int kid, lu_v *args, int n, int nops, int ret)
     return known ? inline_call(c, (PyFunctionObject *)kf, LU_NOV, args, n, NULL, nops, NULL, ret) : 0;
 }
 
+/* The ways of lu_ev_kernel_arms for v from its k-th type on. */
+static int
+type_ways(struct ctx *c, lu_v v, lu_v type, PyTypeObject **types, int k, int n, struct lu_prof *p)
+{
+    struct gctx *g = c->g;
+    if (k == n) {
+        lu_ev_profile(c, p, v);
+        g->generic = 1;
+        int r = lu_ev_instruction(c);
+        g->generic = 0;
+        return r;
+    }
+    struct split s;
+    lu_ev_split(c, lu_ev_emit(c, OP_IS, REP_BIT, type, lu_ev_konst(c, (PyObject *)types[k]), LU_NOV, 0), &s);
+    lu_ev_set_type(c, v, types[k]);
+    /* A class with no version to rely on is not known: its way is generic. */
+    g->generic = lu_ev_type(c, v) != types[k];
+    int r = lu_ev_instruction(c);
+    g->generic = 0;
+    if (r < 0 || g->f->fail != NULL) {
+        return -1;
+    }
+    lu_ev_split_else(c, &s);
+    if (type_ways(c, v, type, types, k + 1, n, p) < 0 || g->f->fail != NULL) {
+        return -1;
+    }
+    lu_ev_split_end(c, &s);
+    return 0;
+}
+
+int
+lu_ev_kernel_arms(struct ctx *c, lu_v *args, int n)
+{
+    PyTypeObject *types[LU_OPCLASS_WAYS], *these[LU_OPCLASS_WAYS];
+    struct lu_prof *p = NULL;
+    int m = 0, at = -1;
+    if (c->g->generic || nospec(c, c->pc)) {
+        return 0;
+    }
+    for (int i = 0; i < n; i++) {
+        lu_v v = args[i];
+        if (v == LU_NOV || LU_IS_VIRT(v) || lu_ev_type(c, v) != NULL) {
+            continue;
+        }
+        if (I(c, v)->rep != REP_OBJ) {
+            return 0;
+        }
+        struct lu_prof *q = lu_ev_prof(c, i);
+        int relied = 0, k = q != NULL ? lu_jit_prof_types(q, these, &relied) : -1;
+        for (int j = 0; j < k; j++) {
+            lu_ev_konst(c, (PyObject *)these[j]);
+            Py_DECREF(these[j]);        /* the unit holds its constants */
+        }
+        if (k <= 0) {
+            return 0;           /* not learned yet, or met too many: nothing folds */
+        }
+        if (relied) {
+            continue;           /* its one type, guarded by lu_ev_kernel_op */
+        }
+        if (at < 0) {
+            at = i;
+            m = k;
+            p = q;
+            memcpy(types, these, sizeof(PyTypeObject *) * (size_t)k);
+        }
+    }
+    if (at < 0) {
+        return 0;
+    }
+    lu_v v = args[at];
+    lu_ev_guard(c, OP_GUARD_NOT_NULL, v, 0);    /* an unbound local: the interpreter raises */
+    lu_v type = lu_ev_emit(c, OP_LOAD, REP_OBJ, v, LU_NOV, LU_NOV, offsetof(PyObject, ob_type));
+    return type_ways(c, v, type, types, 0, m, p) < 0 ? -1 : 1;
+}
+
 int
 lu_ev_call(struct ctx *c)
 {

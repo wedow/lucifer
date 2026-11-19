@@ -814,12 +814,38 @@ lu_getattr_native(PyObject *owner, PyObject *name)
     return v;
 }
 
-/* Whether tp compares for equality as `base` does: the same __eq__ and __ne__. */
 static int
-eq_as(PyTypeObject *tp, PyTypeObject *base)
+same_eq(PyTypeObject *tp, PyTypeObject *base)
 {
     return _PyType_Lookup(tp, LU_ID(__eq__)) == _PyType_Lookup(base, LU_ID(__eq__))
         && _PyType_Lookup(tp, LU_ID(__ne__)) == _PyType_Lookup(base, LU_ID(__ne__));
+}
+
+/* Whether tp compares for equality as `base` (object or tuple) does: the
+   same __eq__ and __ne__. Answered per thread by type version, for both
+   bases at once: a version names one type in one state, so an entry holds
+   while its type keeps it. */
+#define EQ_SEEN 64
+static __thread struct {
+    unsigned int version;
+    int as;
+} eq_seen[EQ_SEEN];
+
+static int
+eq_as(PyTypeObject *tp, PyTypeObject *base)
+{
+    int bit = base == &PyTuple_Type ? 2 : 1;
+    unsigned int version = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE);
+    unsigned int at = version % EQ_SEEN;
+    if (version != 0 && eq_seen[at].version == version) {
+        return (eq_seen[at].as & bit) != 0;
+    }
+    int as = same_eq(tp, &PyBaseObject_Type) | same_eq(tp, &PyTuple_Type) << 1;
+    if (version != 0 && version == __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE)) {
+        eq_seen[at].version = version;
+        eq_seen[at].as = as;
+    }
+    return (as & bit) != 0;
 }
 
 /* a == b as PyObject_RichCompare answers it when no Python code decides:

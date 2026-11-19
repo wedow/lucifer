@@ -242,6 +242,7 @@ struct gctx {
     uint32_t versions;          /* states' versions handed out */
     int maxdepth;               /* the deepest inlined frame */
     PyTypeObject *relied;       /* the class last made a dependency for what is known of an object's type */
+    int generic;                /* the way of lu_ev_kernel_arms for types it has no way for is being built */
 };
 
 /* Per-code JIT state the evaluator consults (jit.c). */
@@ -317,6 +318,10 @@ void lu_ev_def_type(struct ctx *c, lu_v v, PyTypeObject *t);
    lu_ev_type knows it; NULL when it knows none yet, and compiled code then
    reports the type here. */
 PyTypeObject *lu_ev_learn_type(struct ctx *c, lu_v r, int which);
+/* The root's record of that value, and compiled code that reports r's
+   type to it (and leaves when the unit is to be built again). */
+struct lu_prof *lu_ev_prof(struct ctx *c, int which);
+void lu_ev_profile(struct ctx *c, struct lu_prof *p, lu_v r);
 
 /* The innermost frame's state at pc as a frame state, with the path's
    binds; and the state before the current instruction as an exit takes
@@ -473,6 +478,14 @@ int lu_ev_call_function(struct ctx *c, PyObject *fn, lu_v *args, int n, int nops
    whether the one pushed may still be it). 1 when done, 0 when
    the instruction is still to be built, -1 when the build failed. */
 int lu_ev_kernel_op(struct ctx *c, int kid, lu_v *args, int n, int nops, int ret);
+/* An operator instruction that has changed nothing yet, whose operands
+   args (as lu_ev_kernel_op takes them) are of types not known here but
+   learned to be one of a few: one way per type, in which the instruction
+   is built again with the type known, so that the operator's kernel
+   function folds; and a last way for any other type, which reports it and
+   takes the instruction's generic path. 1 when built so, 0 when not, -1
+   when the build failed. */
+int lu_ev_kernel_arms(struct ctx *c, lu_v *args, int n);
 int lu_ev_return(struct ctx *c);
 /* eval_gen.c: a generator the unit made and resumes in line never
    exists. RETURN_GENERATOR in an inlined frame makes the frame's slots

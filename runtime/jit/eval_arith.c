@@ -242,8 +242,9 @@ lu_ev_binary_op(struct ctx *c)
     }
     if (r == LU_NOV) {
         lu_v kargs[3] = { a, b, lu_ev_konst(c, lu_small_int(op)) };
-        int done = lu_ev_kernel_op(c, op == NB_SUBSCR ? LU_K_getitem : LU_K_binary_op, kargs, op == NB_SUBSCR ? 2 : 3, 2,
-                                   LU_RETURN_PUSH);
+        int done = lu_ev_kernel_arms(c, kargs, 2);
+        done = done != 0 ? done : lu_ev_kernel_op(c, op == NB_SUBSCR ? LU_K_getitem : LU_K_binary_op, kargs,
+                                                  op == NB_SUBSCR ? 2 : 3, 2, LU_RETURN_PUSH);
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }
@@ -287,7 +288,8 @@ lu_ev_compare_op(struct ctx *c)
     }
     else {
         lu_v kargs[3] = { a, b, lu_ev_konst(c, lu_small_int(c->oparg)) };
-        int done = lu_ev_kernel_op(c, LU_K_compare, kargs, 3, 2, LU_RETURN_PUSH);
+        int done = lu_ev_kernel_arms(c, kargs, 2);
+        done = done != 0 ? done : lu_ev_kernel_op(c, LU_K_compare, kargs, 3, 2, LU_RETURN_PUSH);
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }

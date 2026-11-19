@@ -215,7 +215,7 @@ fwd	-	thread-local: the optimizer pass running on this thread; its TLS symbol ha
 istart	-	thread-local: the register allocation running on this thread; its TLS symbol has no line
 iend	-	thread-local: the register allocation running on this thread; its TLS symbol has no line
 identity_seen	-	thread-local: per type version, whether a dict key's class keeps object's __hash__ and __eq__; its TLS symbol has no line
-eq_seen	-	thread-local: the last type compiled code asked whether == is identity for; its TLS symbol has no line
+eq_seen	-	thread-local: types == has answered for as object or tuple would, by version; its TLS symbol has no line
 stack_floor	-	thread-local: the lowest C stack address a call from compiled code may recurse to; its TLS symbol has no line
 lu_managed_buffer_type	runtime/prim/memoryview.c	a private static type, readied at startup; its slots filled once then (lu_memoryview_init)
 lu_ring_type	runtime/prim/deque.c	the deque's ring buffer, a private static type readied at startup
