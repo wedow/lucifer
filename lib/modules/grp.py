@@ -12,11 +12,10 @@ struct_group = _lucifer.structseq.structseq_type(
 
 def getgrgid(id):
     """Return the group database entry for the given numeric group ID."""
-    if not isinstance(id, int):
-        try:
-            id = id.__index__()
-        except AttributeError:
-            raise TypeError("'%s' object cannot be interpreted as an integer" % type(id).__name__) from None
+    try:
+        id = _lucifer.operators.index(id)
+    except Exception:
+        raise TypeError('gid should be integer, not %s' % type(id).__name__) from None
     entry = _lucifer.grp_gid(id) if -1 <= id < 2**32 else None
     if entry is None:
         raise KeyError('getgrgid(): gid not found: %d' % id)

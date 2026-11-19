@@ -9,6 +9,8 @@ import sys
 import _lucifer
 from _thread import allocate_lock
 
+_index = _lucifer.operators.index
+
 PROT_NONE, PROT_READ, PROT_WRITE, PROT_EXEC = 0, 1, 2, 4
 MAP_SHARED, MAP_PRIVATE = 1, 2
 MAP_ANON = MAP_ANONYMOUS = 0x20
@@ -44,13 +46,6 @@ def _call(function, rtype, types, args):
 def _fail():
     errno = _lucifer.ct_errno(None)
     raise OSError(errno, os.strerror(errno))
-
-
-def _index(value):
-    try:
-        return value.__index__()
-    except AttributeError:
-        raise TypeError("'%s' object cannot be interpreted as an integer" % type(value).__name__) from None
 
 
 class mmap:

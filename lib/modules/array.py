@@ -4,7 +4,10 @@ packed items (as bytes, with format 'B': memoryview(array) is not typed);
 length, indexing, iteration and the methods work in items."""
 
 import struct as _struct
+import _lucifer
 from _lucifer import MISSING as _NOT_STORED, typed_get as _typed_get, typed_set as _typed_set
+
+_index = _lucifer.operators.index
 
 typecodes = 'bBuwhHiIlLqQfd'
 _NATIVE = {'b': 'b', 'B': 'B', 'u': 'I', 'w': 'I', 'h': 'h', 'H': 'H', 'i': 'i', 'I': 'I', 'l': 'q', 'L': 'Q',
@@ -34,22 +37,12 @@ _MACHINE = {'b': 1, 'B': 0, 'h': 4, 'H': 2, 'i': 8, 'I': 6, 'l': 12, 'L': 10, 'q
 _MISSING = object()
 
 
-def _index(value):
-    if isinstance(value, int):
-        return value
-    try:
-        method = type(value).__index__
-    except AttributeError:
-        raise TypeError("'%s' object cannot be interpreted as an integer" % type(value).__name__) from None
-    return method(value)
-
-
 def _item_index(index):
     """array_subscr's index: PyNumber_AsSsize_t(index, IndexError) of a key
     that has __index__."""
     if not isinstance(index, int) and not hasattr(type(index), '__index__'):
         raise TypeError('array indices must be integers')
-    index = int(_index(index))
+    index = _index(index)
     if not -2**63 <= index < 2**63:
         raise IndexError("cannot fit 'int' into an index-sized integer")
     return index

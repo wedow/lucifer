@@ -451,7 +451,7 @@ requiring allocation in multiples of the system memory page size
 (4 KiB pages are common; using multiples of 4096 for the stack size is
 the suggested approach in the absence of more specific information)."""
     global _stack_size
-    size = size.__index__()
+    size = _lucifer.operators.index(size)
     if size != 0 and size < _STACK_MIN:
         raise ValueError('size must be at least %d bytes' % _STACK_MIN)
     old = _stack_size

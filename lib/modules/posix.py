@@ -769,8 +769,7 @@ def WCOREDUMP(status):
 
 def waitstatus_to_exitcode(status):
     """Convert a wait status to an exit code."""
-    if not isinstance(status, int):
-        status = status.__index__()
+    status = _lucifer.operators.index(status)
     if WIFEXITED(status):
         return WEXITSTATUS(status)
     if WIFSIGNALED(status):

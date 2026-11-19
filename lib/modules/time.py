@@ -138,11 +138,7 @@ def _time_t(seconds):
         if not -9.223372036854776e18 <= seconds < 9.223372036854776e18:
             raise OverflowError('timestamp out of range for platform time_t')
         return int(seconds // 1.0)
-    try:
-        seconds = seconds.__index__()
-    except AttributeError:
-        raise TypeError("'%s' object cannot be interpreted as an integer"
-                        % type(seconds).__name__) from None
+    seconds = _lucifer.operators.index(seconds)
     if not -(1 << 63) <= seconds < (1 << 63):
         raise OverflowError('timestamp out of range for platform time_t')
     return seconds

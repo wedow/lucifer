@@ -7,21 +7,13 @@ from _lucifer import (
     MISSING, repr_enter, repr_leave, kind, size, seq_get, kernel_set, ring_new, ring_push, ring_extend, ring_pop,
     ring_get, ring_set, ring_del, ring_insert, ring_rotate, ring_reverse, ring_clear, ring_items, ring_len, ring_state,
 )
+import _lucifer
 from _types import GenericAlias
+
+_index = _lucifer.operators.index
 
 __all__ = ('deque', 'defaultdict', '_deque_iterator', '_deque_reverse_iterator',
            '_count_elements', '_tuplegetter')
-
-
-def _index(x):
-    """PyNumber_AsSsize_t: an int or an object with __index__."""
-    if isinstance(x, int):
-        return x
-    try:
-        method = type(x).__index__
-    except AttributeError:
-        raise TypeError("'%s' object cannot be interpreted as an integer" % type(x).__name__) from None
-    return method(x)
 
 
 def _slice_index(x):

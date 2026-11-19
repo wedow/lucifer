@@ -12,11 +12,10 @@ struct_passwd = _lucifer.structseq.structseq_type(
 
 def getpwuid(uid, /):
     """Return the password database entry for the given numeric user ID."""
-    if not isinstance(uid, int):
-        try:
-            uid = uid.__index__()
-        except AttributeError:
-            raise TypeError('uid should be integer, not %s' % type(uid).__name__) from None
+    try:
+        uid = _lucifer.operators.index(uid)
+    except Exception:
+        raise TypeError('uid should be integer, not %s' % type(uid).__name__) from None
     entry = _lucifer.pwd_uid(uid) if -1 <= uid < 2**32 else None
     if entry is None:
         raise KeyError('getpwuid(): uid not found: %d' % uid)

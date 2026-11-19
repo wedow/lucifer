@@ -3,20 +3,12 @@ equivalents. Each iterator is a class with the state in slots; the
 combinatorics run in a generator held by the iterator."""
 
 import sys
+import _lucifer
 from _types import GenericAlias
 
+_index = _lucifer.operators.index
+
 _MISSING = object()
-
-
-def _index(x):
-    """PyNumber_AsSsize_t: an int or an object with __index__."""
-    if isinstance(x, int):
-        return x
-    try:
-        method = type(x).__index__
-    except AttributeError:
-        raise TypeError("'%s' object cannot be interpreted as an integer" % type(x).__name__) from None
-    return method(x)
 
 
 def _self_iter(self):

@@ -9,7 +9,7 @@ jump and resumes it by label, as sre_lib.h resumes by goto."""
 
 import sys
 from _types import GenericAlias, MappingProxyType
-from _lucifer import str_encode, str_ord, str_slice, b_find, str_find
+from _lucifer import operators, str_encode, str_ord, str_slice, b_find, str_find
 
 MAGIC = 20230612
 CODESIZE = 4
@@ -351,13 +351,7 @@ def _getstring(string):
 
 def _ssize(value):
     if type(value) is not int:
-        if not isinstance(value, int):
-            try:
-                method = type(value).__index__
-            except AttributeError:
-                raise TypeError("'%s' object cannot be interpreted as an integer" % type(value).__name__) from None
-            value = method(value)
-        value = int.__index__(value)    # the value, as C reads it: no subclass's methods run
+        value = operators.index(value)
     if value > _SSIZE_MAX or value < _SSIZE_MIN:
         raise OverflowError("Python int too large to convert to C ssize_t")
     return value

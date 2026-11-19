@@ -5,6 +5,8 @@ result into the exception the C code raises."""
 
 import _lucifer
 
+_index = _lucifer.operators.index
+
 _as_double = _lucifer.m_to_double
 _pack, _unpack = _lucifer.float_pack, _lucifer.float_unpack
 _fma = _lucifer.m_fma
@@ -506,14 +508,6 @@ Uses the __trunc__ magic method."""
 
 
 # Integers
-
-def _index(n):
-    return n if isinstance(n, int) else n.__index__() if hasattr(type(n), '__index__') else _not_int(n)
-
-
-def _not_int(n):
-    raise TypeError("'%s' object cannot be interpreted as an integer" % type(n).__name__)
-
 
 def gcd(*integers):
     """Greatest Common Divisor."""

@@ -9,6 +9,8 @@ either is a plain int, so from_address and pointers work on any memory."""
 import _lucifer
 import _struct
 
+_index = _lucifer.operators.index
+
 __version__ = '1.1.0'
 RTLD_LOCAL = 0
 CTYPES_MAX_ARGCOUNT = 1024
@@ -43,13 +45,6 @@ _MASK = {code: (1 << (8 * size)) - 1 for code, (_, size) in _CODES.items()}
 
 def _align_up(n, a):
     return (n + a - 1) // a * a
-
-
-def _index(value):
-    try:
-        return value.__index__()
-    except AttributeError:
-        raise TypeError("'%s' object cannot be interpreted as an integer" % type(value).__name__) from None
 
 
 # ---------------------------------------------------------------- instances
