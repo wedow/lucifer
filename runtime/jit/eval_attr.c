@@ -451,14 +451,18 @@ load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr
         break;
     }
     case LOAD_ATTR_INSTANCE_VALUE:
-        if (descr == NULL) {
+        if (descr == NULL || _Py_IsImmortal(descr)) {
+            /* A class value that is no descriptor stands behind the
+               instance's (an _IOBase's __closed): the version guard keeps
+               it the class's, so a word with none reads as it. */
             lu_ev_guard_version(c, owner, version);
             v = lu_ev_emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, index);
+            I(c, v)->imm2 = (int64_t)(intptr_t)descr;
             I(c, v)->fs = lu_ev_exit_fs(c);
             replace_owner(c, lu_ev_own(c, v), LU_NOV);
             break;
         }
-        /* fall through: a class default stands behind the instance's value */
+        /* fall through: a class default that is not immortal */
     default:
         load_generic(c, pic);
         break;

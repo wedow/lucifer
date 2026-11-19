@@ -301,7 +301,7 @@ raw_loads(struct lu_func *f)
     for (int v = 0; v < n; v++) {
         box[v] = LU_NOV;
         int kind = want[v] & (WANT_INT | WANT_FLOAT | WANT_BAD), deep = want[v] & WANT_DEEP;
-        if ((f->ins[v].flags & INS_DEAD) || f->ins[v].op != OP_INLINE_LOAD || !unboxed[v]
+        if ((f->ins[v].flags & INS_DEAD) || f->ins[v].op != OP_INLINE_LOAD || f->ins[v].imm2 != 0 || !unboxed[v]
             || (kind != WANT_INT && kind != WANT_FLOAT) || (deep && (want[v] & WANT_LOOSE))) {
             continue;
         }

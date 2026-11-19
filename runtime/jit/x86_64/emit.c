@@ -3541,7 +3541,24 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int unboxed = new_label(a), done = new_label(a);
         load(a, RAX, r, (int32_t)in->imm);
         test_rr(a, RAX, RAX);
-        jcc(a, CC_E, fail);
+        if (in->imm2 != 0) {
+            /* None of its own, while its values are still in line (a move to
+               the dict sets the flag before it clears the words, attrs.c):
+               the class's value, immortal (eval_attr.c). */
+            int own = new_label(a);
+            jcc(a, CC_NE, own);
+            rex(a, 0, 0, 0, r);
+            b1(a, 0xF6);
+            modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
+            b1(a, LU_ATTRS_IN_DICT >> 8);       /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
+            jcc(a, CC_NE, fail);
+            mov_ri(a, RAX, in->imm2);
+            jmp(a, done);
+            bind(a, own);
+        }
+        else {
+            jcc(a, CC_E, fail);
+        }
         alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
         jcc(a, CC_BE, unboxed);
         if (in->flags & INS_OWNED) {
