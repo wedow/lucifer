@@ -67,6 +67,29 @@ class Comparison(unittest.TestCase):
 
 
 class Run(unittest.TestCase):
+    def test_dictset_nan_keys_have_stable_hashes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            difftest = Path(temp)
+            (difftest / 'common.py').touch()
+            (difftest / 'dictset_diff.py').write_text('''import common
+
+NANS = [float("nan"), float("nan")]
+
+def gen_case(rng):
+    return {"hashes": [hash(x) for x in NANS]}
+
+def run_python(case):
+    a, b = NANS
+    return {"ok": a is not b and a != b and a != a and b != b,
+            "reprs": [repr(a), repr(b)], "set_size": len(set(NANS))}
+
+common.main(gen_case, run_python)
+''')
+            oracle = Interpreter([sys.executable], difftest, difftest, 2, 4 << 30)
+            _, pairs = oracle.run('dictset_diff', 0, 0, 1, difftest / 'scratch')
+        self.assertEqual(pairs, [[{'hashes': [0x1234, 0x5678]},
+                                  {'ok': True, 'reprs': ['nan', 'nan'], 'set_size': 2}]])
+
     def test_batches_crashes_and_timeouts(self):
         with tempfile.TemporaryDirectory() as temp:
             difftest = Path(temp)

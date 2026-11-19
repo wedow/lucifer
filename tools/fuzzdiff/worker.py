@@ -21,6 +21,16 @@ class Captured(Exception):
     pass
 
 
+class StableNaN(float):
+    def __new__(cls, key_hash):
+        value = super().__new__(cls, 'nan')
+        value._hash = key_hash
+        return value
+
+    def __hash__(self):
+        return self._hash
+
+
 def adapt():
     """Let the generators' cases run on any 3.14 runtime."""
     import math
@@ -59,6 +69,10 @@ def load(difftest, spec):
         with open(path) as source:
             exec(compile(source.read(), path, 'exec'), module.__dict__)
     except Captured as captured:
+        if hasattr(module, 'NANS'):
+            # A NaN hashes by address, so set order and pop results over NaN keys follow heap layout.
+            # Give a generator's NaNs fixed hashes so the same case compares across interpreters.
+            module.NANS[:] = [StableNaN(0x1234 + 0x4444 * i) for i in range(len(module.NANS))]
         return captured.args
     raise SystemExit(f'{script} never called common.main')
 
