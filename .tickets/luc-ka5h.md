@@ -35,3 +35,7 @@ Richards 0.588 (cycles 0.63), Json 0.925, CD 0.996, DeltaBlue 1.014 (3 reps; 0.8
 rows 1.000; pyperformance scimark 0.808 (3 reps), base64 0.699, raytrace 0.896, pickle_pure_python 0.953,
 chaos 0.955, unpickle_pure_python 0.980, nqueens 0.980, go 0.951 (its usual swing), json_loads 1.007,
 float 1.026 (accepted loss, see luc-voki), hexiom/nbody 1.00.
+
+scimark's master instructions vary run to run (3.80 G and 5.33 G per steady iteration in different runs, base
+long runs 303-319 G); the landing measured 3.07 G in all six runs, so scimark is 0.58-0.81 of master. A build
+of the landing without the int_cmp type measured the same (scimark 3.07 G, float 1.030).
