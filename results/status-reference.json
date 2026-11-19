@@ -1,87 +1,111 @@
 {
  "version": "3.14.10 free-threading build (tags/v3.14.10:b703b2c, Nov  2 2026, 05:02:58) [GCC 16.2.1 20260810]",
  "best_us": {
-  "Bounce": 1747192,
-  "CD": 2635417,
-  "DeltaBlue": 670712,
-  "Havlak": 3617612,
-  "Json": 888826,
-  "List": 1081033,
-  "Mandelbrot": 1362256,
-  "NBody": 1948680,
-  "Permute": 2091920,
-  "Queens": 991679,
-  "Richards": 4313822,
-  "Sieve": 2169188,
-  "Storage": 1725766,
-  "Towers": 1470677
+  "Bounce": 1774643,
+  "CD": 2658810,
+  "DeltaBlue": 687012,
+  "Havlak": 3692964,
+  "Json": 904753,
+  "List": 1126550,
+  "Mandelbrot": 1410960,
+  "NBody": 2008202,
+  "Permute": 2139708,
+  "Queens": 1053121,
+  "Richards": 4406922,
+  "Sieve": 2215459,
+  "Storage": 1779355,
+  "Towers": 1434077
  },
  "web": {
   "cpython-3.14": {
    "1": {
-    "rps": 2914.9,
-    "p50_ms": 20.6,
-    "p99_ms": 94.806,
+    "rps": 2977.0,
+    "p50_ms": 20.106,
+    "p99_ms": 79.506,
     "errors": 0,
     "server_exit": null
    },
    "2": {
-    "rps": 2799.8,
-    "p50_ms": 20.199,
-    "p99_ms": 678.296,
+    "rps": 2778.0,
+    "p50_ms": 20.299,
+    "p99_ms": 621.398,
     "errors": 0,
     "server_exit": null
    },
    "4": {
-    "rps": 2835.6,
-    "p50_ms": 20.042,
-    "p99_ms": 576.934,
+    "rps": 2767.1,
+    "p50_ms": 20.146,
+    "p99_ms": 718.008,
     "errors": 0,
     "server_exit": null
    },
    "8": {
-    "rps": 2350.4,
-    "p50_ms": 25.088,
-    "p99_ms": 752.716,
+    "rps": 2315.1,
+    "p50_ms": 25.096,
+    "p99_ms": 855.752,
     "errors": 0,
     "server_exit": null
    }
   },
   "cpython-3.14t": {
    "1": {
-    "rps": 2518.9,
-    "p50_ms": 3.913,
-    "p99_ms": 7748.122,
-    "errors": 1,
+    "rps": 2469.3,
+    "p50_ms": 3.444,
+    "p99_ms": 7742.082,
+    "errors": 0,
     "server_exit": null
    },
    "2": {
-    "rps": 4186.2,
-    "p50_ms": 18.566,
-    "p99_ms": 1174.476,
+    "rps": 4017.8,
+    "p50_ms": 19.029,
+    "p99_ms": 412.119,
     "errors": 0,
     "server_exit": null
    },
    "4": {
-    "rps": 7523.2,
-    "p50_ms": 10.059,
-    "p99_ms": 294.843,
+    "rps": 7526.7,
+    "p50_ms": 10.081,
+    "p99_ms": 347.761,
     "errors": 0,
     "server_exit": null
    },
    "8": {
-    "rps": 10366.4,
-    "p50_ms": 6.532,
-    "p99_ms": 28.854,
+    "rps": 10349.2,
+    "p50_ms": 6.541,
+    "p99_ms": 32.554,
     "errors": 0,
     "server_exit": null
    }
   }
  },
  "corpus": {
+  "startup.python_startup": {
+   "status": "ok",
+   "seconds": 0.013327428605407476,
+   "loops": 7,
+   "check": [
+    "python_startup",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "startup.python_startup_no_site": {
+   "status": "ok",
+   "seconds": 0.009586164215579628,
+   "loops": 10,
+   "check": [
+    "python_startup_no_site",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  "startup.import_stdlib": {
+   "status": "ok",
+   "seconds": 0.09218607796356082,
+   "loops": null,
+   "check": "e75f5a71e974f738de7fb29ecafb8072554c66a1e3074e59409b6f1e4615ca83"
+  },
   "pyperformance.2to3": {
    "status": "ok",
-   "seconds": 0.32292425306513906,
+   "seconds": 0.32707451609894633,
    "loops": 1,
    "check": [
     "2to3",
@@ -90,8 +114,8 @@
   },
   "pyperformance.argparse": {
    "status": "ok",
-   "seconds": 0.0012120075078438158,
-   "loops": 69,
+   "seconds": 0.001228992877384791,
+   "loops": 65,
    "check": [
     "many_optionals",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -99,8 +123,8 @@
   },
   "pyperformance.argparse_subparsers": {
    "status": "ok",
-   "seconds": 0.011905371477561337,
-   "loops": 7,
+   "seconds": 0.01255127799231559,
+   "loops": 8,
    "check": [
     "subparsers",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -108,7 +132,7 @@
   },
   "pyperformance.async_generators": {
    "status": "ok",
-   "seconds": 0.3846736717969179,
+   "seconds": 0.40966464299708605,
    "loops": 1,
    "check": [
     "async_generators",
@@ -117,7 +141,7 @@
   },
   "pyperformance.async_tree": {
    "status": "ok",
-   "seconds": 0.2809045249596238,
+   "seconds": 0.30288026574999094,
    "loops": 1,
    "check": [
     "async_tree_none",
@@ -126,7 +150,7 @@
   },
   "pyperformance.async_tree_cpu_io_mixed": {
    "status": "ok",
-   "seconds": 0.5873718908987939,
+   "seconds": 0.5872403490357101,
    "loops": 1,
    "check": [
     "async_tree_cpu_io_mixed",
@@ -135,7 +159,7 @@
   },
   "pyperformance.async_tree_io": {
    "status": "ok",
-   "seconds": 0.613276332616806,
+   "seconds": 0.6796351009979844,
    "loops": 1,
    "check": [
     "async_tree_io",
@@ -144,7 +168,7 @@
   },
   "pyperformance.async_tree_memoization": {
    "status": "ok",
-   "seconds": 0.3402102719992399,
+   "seconds": 0.34166683070361614,
    "loops": 1,
    "check": [
     "async_tree_memoization",
@@ -153,7 +177,7 @@
   },
   "pyperformance.async_tree_eager": {
    "status": "ok",
-   "seconds": 0.13637583702802658,
+   "seconds": 0.14176285406574607,
    "loops": 1,
    "check": [
     "async_tree_eager",
@@ -162,7 +186,7 @@
   },
   "pyperformance.async_tree_eager_cpu_io_mixed": {
    "status": "ok",
-   "seconds": 0.5010135732591152,
+   "seconds": 0.5075937947258353,
    "loops": 1,
    "check": [
     "async_tree_eager_cpu_io_mixed",
@@ -171,7 +195,7 @@
   },
   "pyperformance.async_tree_eager_io": {
    "status": "ok",
-   "seconds": 0.5959709999151528,
+   "seconds": 0.6303088860586286,
    "loops": 1,
    "check": [
     "async_tree_eager_io",
@@ -180,7 +204,7 @@
   },
   "pyperformance.async_tree_eager_memoization": {
    "status": "ok",
-   "seconds": 0.24394405586645007,
+   "seconds": 0.25173035310581326,
    "loops": 1,
    "check": [
     "async_tree_eager_memoization",
@@ -189,7 +213,7 @@
   },
   "pyperformance.async_tree_tg": {
    "status": "ok",
-   "seconds": 0.25925821578130126,
+   "seconds": 0.2829051432199776,
    "loops": 1,
    "check": [
     "async_tree_none_tg",
@@ -198,7 +222,7 @@
   },
   "pyperformance.async_tree_cpu_io_mixed_tg": {
    "status": "ok",
-   "seconds": 0.5489641739986837,
+   "seconds": 0.5669773737899959,
    "loops": 1,
    "check": [
     "async_tree_cpu_io_mixed_tg",
@@ -207,7 +231,7 @@
   },
   "pyperformance.async_tree_io_tg": {
    "status": "ok",
-   "seconds": 0.6199656999669969,
+   "seconds": 0.6116964011453092,
    "loops": 1,
    "check": [
     "async_tree_io_tg",
@@ -216,7 +240,7 @@
   },
   "pyperformance.async_tree_memoization_tg": {
    "status": "ok",
-   "seconds": 0.31426368094980717,
+   "seconds": 0.3184202262200415,
    "loops": 1,
    "check": [
     "async_tree_memoization_tg",
@@ -225,7 +249,7 @@
   },
   "pyperformance.async_tree_eager_tg": {
    "status": "ok",
-   "seconds": 0.205356583930552,
+   "seconds": 0.22883924562484026,
    "loops": 1,
    "check": [
     "async_tree_eager_tg",
@@ -234,7 +258,7 @@
   },
   "pyperformance.async_tree_eager_cpu_io_mixed_tg": {
    "status": "ok",
-   "seconds": 0.5188014986924827,
+   "seconds": 0.5518682901747525,
    "loops": 1,
    "check": [
     "async_tree_eager_cpu_io_mixed_tg",
@@ -243,7 +267,7 @@
   },
   "pyperformance.async_tree_eager_io_tg": {
    "status": "ok",
-   "seconds": 0.5705037610605359,
+   "seconds": 0.5998856527730823,
    "loops": 1,
    "check": [
     "async_tree_eager_io_tg",
@@ -252,7 +276,7 @@
   },
   "pyperformance.async_tree_eager_memoization_tg": {
    "status": "ok",
-   "seconds": 0.28689438896253705,
+   "seconds": 0.30720279179513454,
    "loops": 1,
    "check": [
     "async_tree_eager_memoization_tg",
@@ -261,7 +285,7 @@
   },
   "pyperformance.asyncio_tcp": {
    "status": "ok",
-   "seconds": 0.4032649891451001,
+   "seconds": 0.4165684971958399,
    "loops": 1,
    "check": [
     "asyncio_tcp",
@@ -270,7 +294,7 @@
   },
   "pyperformance.asyncio_tcp_ssl": {
    "status": "ok",
-   "seconds": 1.6440299348905683,
+   "seconds": 1.6646715230308473,
    "loops": 1,
    "check": [
     "asyncio_tcp_ssl",
@@ -279,7 +303,7 @@
   },
   "pyperformance.asyncio_websockets": {
    "status": "ok",
-   "seconds": 0.48199131013825536,
+   "seconds": 0.4913769760169089,
    "loops": 1,
    "check": [
     "asyncio_websockets",
@@ -288,7 +312,7 @@
   },
   "pyperformance.base64": {
    "status": "ok",
-   "seconds": 2.2814176292158663,
+   "seconds": 2.420321512967348,
    "loops": 1,
    "check": [
     "ascii85_large",
@@ -307,7 +331,7 @@
   },
   "pyperformance.bpe_tokeniser": {
    "status": "ok",
-   "seconds": 5.044321635272354,
+   "seconds": 5.17445471463725,
    "loops": 1,
    "check": [
     "bpe_tokeniser",
@@ -316,7 +340,7 @@
   },
   "pyperformance.concurrent_imap": {
    "status": "ok",
-   "seconds": 0.00832205917686224,
+   "seconds": 0.008660863153636456,
    "loops": 1,
    "check": [
     "bench_mp_pool",
@@ -326,7 +350,7 @@
   },
   "pyperformance.coroutines": {
    "status": "ok",
-   "seconds": 0.026838512043468654,
+   "seconds": 0.02652534155640751,
    "loops": 4,
    "check": [
     "coroutines",
@@ -335,7 +359,7 @@
   },
   "pyperformance.coverage": {
    "status": "ok",
-   "seconds": 0.7224626410752535,
+   "seconds": 0.7540723872371018,
    "loops": 1,
    "check": [
     "coverage",
@@ -344,8 +368,8 @@
   },
   "pyperformance.gc_traversal": {
    "status": "ok",
-   "seconds": 0.002189719428618749,
-   "loops": 42,
+   "seconds": 0.0021800753350059193,
+   "loops": 45,
    "check": [
     "gc_traversal",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -353,8 +377,8 @@
   },
   "pyperformance.gc_collect": {
    "status": "ok",
-   "seconds": 0.0014287590289093328,
-   "loops": 66,
+   "seconds": 0.0015265947116202996,
+   "loops": 61,
    "check": [
     "create_gc_cycles",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -362,7 +386,7 @@
   },
   "pyperformance.generators": {
    "status": "ok",
-   "seconds": 0.03218287602066994,
+   "seconds": 0.03252141332874695,
    "loops": 3,
    "check": [
     "generators",
@@ -371,7 +395,7 @@
   },
   "pyperformance.chameleon": {
    "status": "ok",
-   "seconds": 0.018707349430769682,
+   "seconds": 0.018456186354160308,
    "loops": 5,
    "check": [
     "chameleon",
@@ -380,7 +404,7 @@
   },
   "pyperformance.chaos": {
    "status": "ok",
-   "seconds": 0.07187217706814408,
+   "seconds": 0.07287166826426983,
    "loops": 1,
    "check": [
     "chaos",
@@ -389,8 +413,8 @@
   },
   "pyperformance.comprehensions": {
    "status": "ok",
-   "seconds": 2.168771439552476e-05,
-   "loops": 2827,
+   "seconds": 2.1484322124686008e-05,
+   "loops": 2660,
    "check": [
     "comprehensions",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -398,7 +422,7 @@
   },
   "pyperformance.crypto_pyaes": {
    "status": "ok",
-   "seconds": 0.09969322476536036,
+   "seconds": 0.10404852917417884,
    "loops": 1,
    "check": [
     "crypto_pyaes",
@@ -407,8 +431,8 @@
   },
   "pyperformance.deepcopy": {
    "status": "ok",
-   "seconds": 0.0003932654751803387,
-   "loops": 220,
+   "seconds": 0.00039740037862901335,
+   "loops": 189,
    "check": [
     "deepcopy",
     "deepcopy_memo",
@@ -418,8 +442,8 @@
   },
   "pyperformance.deltablue": {
    "status": "ok",
-   "seconds": 0.0037334323144302918,
-   "loops": 26,
+   "seconds": 0.0038379274580317238,
+   "loops": 24,
    "check": [
     "deltablue",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -427,7 +451,7 @@
   },
   "pyperformance.django_template": {
    "status": "ok",
-   "seconds": 0.04573211842216551,
+   "seconds": 0.048162946943193674,
    "loops": 2,
    "check": [
     "django_template",
@@ -436,7 +460,7 @@
   },
   "pyperformance.dulwich_log": {
    "status": "ok",
-   "seconds": 0.08036083821207285,
+   "seconds": 0.08370344201102853,
    "loops": 1,
    "check": [
     "dulwich_log",
@@ -445,7 +469,7 @@
   },
   "pyperformance.docutils": {
    "status": "ok",
-   "seconds": 2.930001789703965,
+   "seconds": 3.059376077260822,
    "loops": 1,
    "check": [
     "docutils",
@@ -454,7 +478,7 @@
   },
   "pyperformance.fannkuch": {
    "status": "ok",
-   "seconds": 0.5038811662234366,
+   "seconds": 0.5140468031167984,
    "loops": 1,
    "check": [
     "fannkuch",
@@ -463,7 +487,7 @@
   },
   "pyperformance.fastapi": {
    "status": "ok",
-   "seconds": 0.23921439098194242,
+   "seconds": 0.2441830518655479,
    "loops": 1,
    "check": [
     "fastapi_http",
@@ -472,7 +496,7 @@
   },
   "pyperformance.float": {
    "status": "ok",
-   "seconds": 0.07840405311435461,
+   "seconds": 0.07523448439314961,
    "loops": 1,
    "check": [
     "float",
@@ -481,7 +505,7 @@
   },
   "pyperformance.genshi": {
    "status": "ok",
-   "seconds": 0.09861444588750601,
+   "seconds": 0.10317528061568737,
    "loops": 1,
    "check": [
     "genshi_text",
@@ -491,7 +515,7 @@
   },
   "pyperformance.go": {
    "status": "ok",
-   "seconds": 0.12867882894352078,
+   "seconds": 0.1298569729551673,
    "loops": 1,
    "check": [
     "go",
@@ -500,7 +524,7 @@
   },
   "pyperformance.hexiom": {
    "status": "ok",
-   "seconds": 0.00723299072482265,
+   "seconds": 0.007470593250428255,
    "loops": 13,
    "check": [
     "hexiom",
@@ -509,7 +533,7 @@
   },
   "pyperformance.html5lib": {
    "status": "ok",
-   "seconds": 0.06931761000305414,
+   "seconds": 0.0709677659906447,
    "loops": 1,
    "check": [
     "html5lib",
@@ -518,7 +542,7 @@
   },
   "pyperformance.json_dumps": {
    "status": "ok",
-   "seconds": 0.014055500738322735,
+   "seconds": 0.014787963192377771,
    "loops": 7,
    "check": [
     "json_dumps",
@@ -527,8 +551,8 @@
   },
   "pyperformance.json_loads": {
    "status": "ok",
-   "seconds": 3.706646124040013e-05,
-   "loops": 134,
+   "seconds": 3.817783300439979e-05,
+   "loops": 129,
    "check": [
     "json_loads",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -536,8 +560,8 @@
   },
   "pyperformance.logging": {
    "status": "ok",
-   "seconds": 1.8090892368477514e-05,
-   "loops": 269,
+   "seconds": 1.9433300287739653e-05,
+   "loops": 259,
    "check": [
     "logging_format",
     "logging_silent",
@@ -547,7 +571,7 @@
   },
   "pyperformance.mako": {
    "status": "ok",
-   "seconds": 0.0167933851480484,
+   "seconds": 0.01727042142301798,
    "loops": 5,
    "check": [
     "mako",
@@ -556,7 +580,7 @@
   },
   "pyperformance.mdp": {
    "status": "ok",
-   "seconds": 1.61385247297585,
+   "seconds": 1.6082945712842047,
    "loops": 1,
    "check": [
     "mdp",
@@ -565,7 +589,7 @@
   },
   "pyperformance.meteor_contest": {
    "status": "ok",
-   "seconds": 0.1243366776034236,
+   "seconds": 0.1207325397990644,
    "loops": 1,
    "check": [
     "meteor_contest",
@@ -574,7 +598,7 @@
   },
   "pyperformance.networkx": {
    "status": "ok",
-   "seconds": 0.5150140542536974,
+   "seconds": 0.5145088071003556,
    "loops": 1,
    "check": [
     "shortest_path",
@@ -583,7 +607,7 @@
   },
   "pyperformance.networkx_connected_components": {
    "status": "ok",
-   "seconds": 0.48223973624408245,
+   "seconds": 0.482249965891242,
    "loops": 1,
    "check": [
     "connected_components",
@@ -592,7 +616,7 @@
   },
   "pyperformance.networkx_k_core": {
    "status": "ok",
-   "seconds": 2.2988213472999632,
+   "seconds": 2.397827192209661,
    "loops": 1,
    "check": [
     "k_core",
@@ -601,7 +625,7 @@
   },
   "pyperformance.nbody": {
    "status": "ok",
-   "seconds": 0.14852627459913492,
+   "seconds": 0.15084332088008523,
    "loops": 1,
    "check": [
     "nbody",
@@ -610,7 +634,7 @@
   },
   "pyperformance.nqueens": {
    "status": "ok",
-   "seconds": 0.1006331667304039,
+   "seconds": 0.10545589309185743,
    "loops": 1,
    "check": [
     "nqueens",
@@ -619,7 +643,7 @@
   },
   "pyperformance.pathlib": {
    "status": "ok",
-   "seconds": 0.019299745187163354,
+   "seconds": 0.01871036160737276,
    "loops": 5,
    "check": [
     "pathlib",
@@ -628,8 +652,8 @@
   },
   "pyperformance.pickle": {
    "status": "ok",
-   "seconds": 1.3342965394258499e-05,
-   "loops": 316,
+   "seconds": 1.3142192411968219e-05,
+   "loops": 336,
    "check": [
     "pickle",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -637,8 +661,8 @@
   },
   "pyperformance.pickle_dict": {
    "status": "ok",
-   "seconds": 3.3352086115080644e-05,
-   "loops": 544,
+   "seconds": 3.364396302818414e-05,
+   "loops": 569,
    "check": [
     "pickle_dict",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -646,8 +670,8 @@
   },
   "pyperformance.pickle_list": {
    "status": "ok",
-   "seconds": 5.319579532148228e-06,
-   "loops": 1680,
+   "seconds": 5.573183360999534e-06,
+   "loops": 1629,
    "check": [
     "pickle_list",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -655,7 +679,7 @@
   },
   "pyperformance.pickle_pure_python": {
    "status": "ok",
-   "seconds": 0.00038817381137050687,
+   "seconds": 0.00040311458675811686,
    "loops": 12,
    "check": [
     "pickle_pure_python",
@@ -664,7 +688,7 @@
   },
   "pyperformance.pidigits": {
    "status": "ok",
-   "seconds": 0.17841990012675524,
+   "seconds": 0.1815279759466648,
    "loops": 1,
    "check": [
     "pidigits",
@@ -673,7 +697,7 @@
   },
   "pyperformance.pprint": {
    "status": "ok",
-   "seconds": 2.928871964570135,
+   "seconds": 3.126835687085986,
    "loops": 1,
    "check": [
     "pprint_pformat",
@@ -683,34 +707,16 @@
   },
   "pyperformance.pyflate": {
    "status": "ok",
-   "seconds": 0.49410084495320916,
+   "seconds": 0.5046299658715725,
    "loops": 1,
    "check": [
     "pyflate",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
    ]
   },
-  "startup.python_startup": {
-   "status": "ok",
-   "seconds": 0.013262189725147826,
-   "loops": 7,
-   "check": [
-    "python_startup",
-    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-   ]
-  },
-  "startup.python_startup_no_site": {
-   "status": "ok",
-   "seconds": 0.009151569990949198,
-   "loops": 11,
-   "check": [
-    "python_startup_no_site",
-    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-   ]
-  },
   "pyperformance.raytrace": {
    "status": "ok",
-   "seconds": 0.34836364910006523,
+   "seconds": 0.3655760260298848,
    "loops": 1,
    "check": [
     "raytrace",
@@ -719,7 +725,7 @@
   },
   "pyperformance.regex_compile": {
    "status": "ok",
-   "seconds": 0.15538546675816178,
+   "seconds": 0.1681853123009205,
    "loops": 1,
    "check": [
     "regex_compile",
@@ -728,7 +734,7 @@
   },
   "pyperformance.regex_dna": {
    "status": "ok",
-   "seconds": 0.166730304248631,
+   "seconds": 0.17096951277926564,
    "loops": 1,
    "check": [
     "regex_dna",
@@ -737,7 +743,7 @@
   },
   "pyperformance.regex_effbot": {
    "status": "ok",
-   "seconds": 0.002512101724278182,
+   "seconds": 0.0025014546466991306,
    "loops": 4,
    "check": [
     "regex_effbot",
@@ -746,7 +752,7 @@
   },
   "pyperformance.regex_v8": {
    "status": "ok",
-   "seconds": 0.01967223105020821,
+   "seconds": 0.019989795982837677,
    "loops": 4,
    "check": [
     "regex_v8",
@@ -755,7 +761,7 @@
   },
   "pyperformance.richards": {
    "status": "ok",
-   "seconds": 0.05644608894363046,
+   "seconds": 0.06088760239072144,
    "loops": 2,
    "check": [
     "richards",
@@ -764,8 +770,8 @@
   },
   "pyperformance.richards_super": {
    "status": "ok",
-   "seconds": 0.06479232804849744,
-   "loops": 2,
+   "seconds": 0.06768117798492312,
+   "loops": 1,
    "check": [
     "richards_super",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -773,7 +779,7 @@
   },
   "pyperformance.scimark": {
    "status": "ok",
-   "seconds": 0.8095952486619353,
+   "seconds": 0.8430812978185713,
    "loops": 1,
    "check": [
     "scimark_fft",
@@ -786,7 +792,7 @@
   },
   "pyperformance.spectral_norm": {
    "status": "ok",
-   "seconds": 0.12184071214869618,
+   "seconds": 0.12502034660428762,
    "loops": 1,
    "check": [
     "spectral_norm",
@@ -795,7 +801,7 @@
   },
   "pyperformance.sphinx": {
    "status": "ok",
-   "seconds": 1.1613922421820462,
+   "seconds": 1.2482406231574714,
    "loops": 1,
    "check": [
     "sphinx",
@@ -804,7 +810,7 @@
   },
   "pyperformance.sqlalchemy_declarative": {
    "status": "ok",
-   "seconds": 0.15556119475513697,
+   "seconds": 0.1601219750009477,
    "loops": 1,
    "check": [
     "sqlalchemy_declarative",
@@ -813,7 +819,7 @@
   },
   "pyperformance.sqlalchemy_imperative": {
    "status": "ok",
-   "seconds": 0.024771654629148543,
+   "seconds": 0.02532411168795079,
    "loops": 4,
    "check": [
     "sqlalchemy_imperative",
@@ -822,7 +828,7 @@
   },
   "pyperformance.sqlglot_v2": {
    "status": "ok",
-   "seconds": 0.13843537773936987,
+   "seconds": 0.14325094129890203,
    "loops": 1,
    "check": [
     "sqlglot_v2_normalize",
@@ -831,8 +837,8 @@
   },
   "pyperformance.sqlglot_v2_parse": {
    "status": "ok",
-   "seconds": 0.0015191775414028338,
-   "loops": 56,
+   "seconds": 0.0015735420229082758,
+   "loops": 55,
    "check": [
     "sqlglot_v2_parse",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -840,7 +846,7 @@
   },
   "pyperformance.sqlglot_v2_transpile": {
    "status": "ok",
-   "seconds": 0.0019039766386497853,
+   "seconds": 0.002031782133028258,
    "loops": 43,
    "check": [
     "sqlglot_v2_transpile",
@@ -849,7 +855,7 @@
   },
   "pyperformance.sqlglot_v2_optimize": {
    "status": "ok",
-   "seconds": 0.06686171190813184,
+   "seconds": 0.067351836245507,
    "loops": 1,
    "check": [
     "sqlglot_v2_optimize",
@@ -858,8 +864,8 @@
   },
   "pyperformance.sqlite_synth": {
    "status": "ok",
-   "seconds": 2.513443777228103e-06,
-   "loops": 340,
+   "seconds": 2.5340898002817904e-06,
+   "loops": 323,
    "check": [
     "sqlite_synth",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -867,7 +873,7 @@
   },
   "pyperformance.sympy": {
    "status": "ok",
-   "seconds": 0.9415826741605997,
+   "seconds": 0.986878308467567,
    "loops": 1,
    "check": [
     "sympy_expand",
@@ -879,7 +885,7 @@
   },
   "pyperformance.telco": {
    "status": "ok",
-   "seconds": 0.010542302133722438,
+   "seconds": 0.010947795481317572,
    "loops": 9,
    "check": [
     "telco",
@@ -888,7 +894,7 @@
   },
   "pyperformance.tomli_loads": {
    "status": "ok",
-   "seconds": 2.2145818509161472,
+   "seconds": 2.356677247211337,
    "loops": 1,
    "check": [
     "tomli_loads",
@@ -897,7 +903,7 @@
   },
   "pyperformance.tornado_http": {
    "status": "ok",
-   "seconds": 0.13810376403853297,
+   "seconds": 0.14716619299724698,
    "loops": 1,
    "check": [
     "tornado_http",
@@ -906,8 +912,8 @@
   },
   "pyperformance.typing_runtime_protocols": {
    "status": "ok",
-   "seconds": 0.0002154640985057928,
-   "loops": 191,
+   "seconds": 0.0002156445634127223,
+   "loops": 213,
    "check": [
     "typing_runtime_protocols",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -915,8 +921,8 @@
   },
   "pyperformance.unpack_sequence": {
    "status": "ok",
-   "seconds": 5.569235900658971e-08,
-   "loops": 2209,
+   "seconds": 5.523678570131308e-08,
+   "loops": 2206,
    "check": [
     "unpack_sequence",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -924,8 +930,8 @@
   },
   "pyperformance.unpickle": {
    "status": "ok",
-   "seconds": 1.97185770779544e-05,
-   "loops": 245,
+   "seconds": 2.0857623958804272e-05,
+   "loops": 227,
    "check": [
     "unpickle",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -933,8 +939,8 @@
   },
   "pyperformance.unpickle_list": {
    "status": "ok",
-   "seconds": 5.131783168385359e-06,
-   "loops": 1776,
+   "seconds": 5.0986961678085405e-06,
+   "loops": 1652,
    "check": [
     "unpickle_list",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -942,8 +948,8 @@
   },
   "pyperformance.unpickle_pure_python": {
    "status": "ok",
-   "seconds": 0.0002684310292049001,
-   "loops": 12,
+   "seconds": 0.0002869089121102459,
+   "loops": 18,
    "check": [
     "unpickle_pure_python",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -951,7 +957,7 @@
   },
   "pyperformance.xdsl": {
    "status": "ok",
-   "seconds": 0.05572375957854092,
+   "seconds": 0.06015098816715181,
    "loops": 2,
    "check": [
     "xdsl_constant_fold",
@@ -960,7 +966,7 @@
   },
   "pyperformance.xml_etree": {
    "status": "ok",
-   "seconds": 0.4275430613197386,
+   "seconds": 0.4468066729605198,
    "loops": 1,
    "check": [
     "xml_etree_generate",
@@ -970,81 +976,9 @@
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
    ]
   },
-  "cli.black": {
-   "status": "ok",
-   "seconds": 0.38024247204884887,
-   "loops": null,
-   "check": "33cec38ba78ee25f0208eb4ae6deac2cdb96ebfb2656bee0f0b53af86f9e0a5f"
-  },
-  "cli.isort": {
-   "status": "ok",
-   "seconds": 0.10234187636524439,
-   "loops": null,
-   "check": "c06198941fc8912f99937a2c3f3ef9a2e086bbf9bbcb1ef634ca351e8fd4b432"
-  },
-  "cli.pyflakes": {
-   "status": "ok",
-   "seconds": 0.6047240924090147,
-   "loops": null,
-   "check": "62704a520611b5645c959dfabe6dff0cd75866d4ccc7ca6bc883561e8d79d302"
-  },
-  "cli.pycodestyle": {
-   "status": "ok",
-   "seconds": 0.7309919921681285,
-   "loops": null,
-   "check": "6e9913f73a026051f37d1e11e14b29ad35cf61b11d94eb50260711b4a4509cdd"
-  },
-  "cli.pygments": {
-   "status": "ok",
-   "seconds": 0.22954482538625598,
-   "loops": null,
-   "check": "90b41c122e5961ddc9ef516fc055a875abad5508bccaed23ac8c085c34dbc0f9"
-  },
-  "cli.markdown": {
-   "status": "ok",
-   "seconds": 0.09437965089455247,
-   "loops": null,
-   "check": "2bd6e8d43a9ca3a41323bb1821539eb481961a5fdc72b26de12ecd21421f335f"
-  },
-  "cadence.continuing_brain": {
-   "status": "ok",
-   "seconds": 0.8118633097037673,
-   "loops": null,
-   "check": "36a466341465f832116b02e3709788f7caa8e8f5caa4734ad9879a96a7c2d4a9"
-  },
-  "cadence.walking_rhythm": {
-   "status": "ok",
-   "seconds": 6.026445587165654,
-   "loops": null,
-   "check": "871991227de9ca7a50fa796bc1c73a3102fe0851564da366a2cc6a71a58659e9"
-  },
-  "cadence.walking_for_reward": {
-   "status": "ok",
-   "seconds": 6.380207414738834,
-   "loops": null,
-   "check": "ac64c36bb1c5b7c0938e50396f358ca062a0317c40293115c3d3b10afc4c3991"
-  },
-  "cadence.bandit": {
-   "status": "ok",
-   "seconds": 1.2336366097442806,
-   "loops": null,
-   "check": "2d0237a0e42e5af23d52cb330b1119cbade65a9a13fe5451b2dc3e1db39e18fd"
-  },
-  "cadence.night_replay": {
-   "status": "ok",
-   "seconds": 2.0012694019824266,
-   "loops": null,
-   "check": "f50a6b3be3df4d4429453fcaa2b2e011bab00697da1c5bef0b3263bd3d37b792"
-  },
-  "startup.import_stdlib": {
-   "status": "ok",
-   "seconds": 0.08110239403322339,
-   "loops": null,
-   "check": "e75f5a71e974f738de7fb29ecafb8072554c66a1e3074e59409b6f1e4615ca83"
-  },
   "pyperformance-warm.2to3": {
    "status": "ok",
-   "seconds": 0.3190166037529707,
+   "seconds": 0.327431189827621,
    "loops": 1,
    "check": [
     "2to3",
@@ -1053,7 +987,7 @@
   },
   "pyperformance-warm.argparse": {
    "status": "ok",
-   "seconds": 0.0011957954848185182,
+   "seconds": 0.0012122915701611953,
    "loops": 68,
    "check": [
     "many_optionals",
@@ -1062,7 +996,7 @@
   },
   "pyperformance-warm.argparse_subparsers": {
    "status": "ok",
-   "seconds": 0.012433752766810358,
+   "seconds": 0.013503465219400823,
    "loops": 8,
    "check": [
     "subparsers",
@@ -1071,7 +1005,7 @@
   },
   "pyperformance-warm.async_generators": {
    "status": "ok",
-   "seconds": 0.3763240668922663,
+   "seconds": 0.391892998944968,
    "loops": 1,
    "check": [
     "async_generators",
@@ -1080,7 +1014,7 @@
   },
   "pyperformance-warm.async_tree": {
    "status": "ok",
-   "seconds": 0.28564430586993694,
+   "seconds": 0.28175007784739137,
    "loops": 1,
    "check": [
     "async_tree_none",
@@ -1089,7 +1023,7 @@
   },
   "pyperformance-warm.async_tree_cpu_io_mixed": {
    "status": "ok",
-   "seconds": 0.5835434682667255,
+   "seconds": 0.6088533760048449,
    "loops": 1,
    "check": [
     "async_tree_cpu_io_mixed",
@@ -1098,7 +1032,7 @@
   },
   "pyperformance-warm.async_tree_io": {
    "status": "ok",
-   "seconds": 0.6337987971492112,
+   "seconds": 0.7302783913910389,
    "loops": 1,
    "check": [
     "async_tree_io",
@@ -1107,7 +1041,7 @@
   },
   "pyperformance-warm.async_tree_memoization": {
    "status": "ok",
-   "seconds": 0.3428024291060865,
+   "seconds": 0.3468607789836824,
    "loops": 1,
    "check": [
     "async_tree_memoization",
@@ -1116,7 +1050,7 @@
   },
   "pyperformance-warm.async_tree_eager": {
    "status": "ok",
-   "seconds": 0.14209222327917814,
+   "seconds": 0.1390017787925899,
    "loops": 1,
    "check": [
     "async_tree_eager",
@@ -1125,7 +1059,7 @@
   },
   "pyperformance-warm.async_tree_eager_cpu_io_mixed": {
    "status": "ok",
-   "seconds": 0.4876704290509224,
+   "seconds": 0.495791622903198,
    "loops": 1,
    "check": [
     "async_tree_eager_cpu_io_mixed",
@@ -1134,7 +1068,7 @@
   },
   "pyperformance-warm.async_tree_eager_io": {
    "status": "ok",
-   "seconds": 0.6070977430790663,
+   "seconds": 0.6761454562656581,
    "loops": 1,
    "check": [
     "async_tree_eager_io",
@@ -1143,7 +1077,7 @@
   },
   "pyperformance-warm.async_tree_eager_memoization": {
    "status": "ok",
-   "seconds": 0.24583286000415683,
+   "seconds": 0.25413793371990323,
    "loops": 1,
    "check": [
     "async_tree_eager_memoization",
@@ -1152,7 +1086,7 @@
   },
   "pyperformance-warm.async_tree_tg": {
    "status": "ok",
-   "seconds": 0.2658819821663201,
+   "seconds": 0.27418491803109646,
    "loops": 1,
    "check": [
     "async_tree_none_tg",
@@ -1161,7 +1095,7 @@
   },
   "pyperformance-warm.async_tree_cpu_io_mixed_tg": {
    "status": "ok",
-   "seconds": 0.5409965980798006,
+   "seconds": 0.5544451419264078,
    "loops": 1,
    "check": [
     "async_tree_cpu_io_mixed_tg",
@@ -1170,7 +1104,7 @@
   },
   "pyperformance-warm.async_tree_io_tg": {
    "status": "ok",
-   "seconds": 0.6094679278321564,
+   "seconds": 0.6296062148176134,
    "loops": 1,
    "check": [
     "async_tree_io_tg",
@@ -1179,7 +1113,7 @@
   },
   "pyperformance-warm.async_tree_memoization_tg": {
    "status": "ok",
-   "seconds": 0.3204318629577756,
+   "seconds": 0.33645250694826245,
    "loops": 1,
    "check": [
     "async_tree_memoization_tg",
@@ -1188,7 +1122,7 @@
   },
   "pyperformance-warm.async_tree_eager_tg": {
    "status": "ok",
-   "seconds": 0.2198582086712122,
+   "seconds": 0.23066530283540487,
    "loops": 1,
    "check": [
     "async_tree_eager_tg",
@@ -1197,7 +1131,7 @@
   },
   "pyperformance-warm.async_tree_eager_cpu_io_mixed_tg": {
    "status": "ok",
-   "seconds": 0.5414537969045341,
+   "seconds": 0.5465518827550113,
    "loops": 1,
    "check": [
     "async_tree_eager_cpu_io_mixed_tg",
@@ -1206,7 +1140,7 @@
   },
   "pyperformance-warm.async_tree_eager_io_tg": {
    "status": "ok",
-   "seconds": 0.5793794947676361,
+   "seconds": 0.5888345898129046,
    "loops": 1,
    "check": [
     "async_tree_eager_io_tg",
@@ -1215,7 +1149,7 @@
   },
   "pyperformance-warm.async_tree_eager_memoization_tg": {
    "status": "ok",
-   "seconds": 0.3017143211327493,
+   "seconds": 0.2989090569317341,
    "loops": 1,
    "check": [
     "async_tree_eager_memoization_tg",
@@ -1224,7 +1158,7 @@
   },
   "pyperformance-warm.asyncio_tcp": {
    "status": "ok",
-   "seconds": 0.4088934799656272,
+   "seconds": 0.4343352089636028,
    "loops": 1,
    "check": [
     "asyncio_tcp",
@@ -1233,7 +1167,7 @@
   },
   "pyperformance-warm.asyncio_tcp_ssl": {
    "status": "ok",
-   "seconds": 1.5976548749022186,
+   "seconds": 1.676321865990758,
    "loops": 1,
    "check": [
     "asyncio_tcp_ssl",
@@ -1242,7 +1176,7 @@
   },
   "pyperformance-warm.asyncio_websockets": {
    "status": "ok",
-   "seconds": 0.48067157668992877,
+   "seconds": 0.4816384082660079,
    "loops": 1,
    "check": [
     "asyncio_websockets",
@@ -1251,7 +1185,7 @@
   },
   "pyperformance-warm.base64": {
    "status": "ok",
-   "seconds": 2.3078197208233178,
+   "seconds": 2.371374235022813,
    "loops": 1,
    "check": [
     "ascii85_large",
@@ -1270,7 +1204,7 @@
   },
   "pyperformance-warm.bpe_tokeniser": {
    "status": "ok",
-   "seconds": 5.06053598690778,
+   "seconds": 5.227219248190522,
    "loops": 1,
    "check": [
     "bpe_tokeniser",
@@ -1279,7 +1213,7 @@
   },
   "pyperformance-warm.concurrent_imap": {
    "status": "ok",
-   "seconds": 0.008458556141704321,
+   "seconds": 0.008625281043350697,
    "loops": 1,
    "check": [
     "bench_mp_pool",
@@ -1289,7 +1223,7 @@
   },
   "pyperformance-warm.coroutines": {
    "status": "ok",
-   "seconds": 0.02607750426977873,
+   "seconds": 0.026447837008163333,
    "loops": 4,
    "check": [
     "coroutines",
@@ -1298,7 +1232,7 @@
   },
   "pyperformance-warm.coverage": {
    "status": "ok",
-   "seconds": 0.7298425273038447,
+   "seconds": 0.7543696211650968,
    "loops": 1,
    "check": [
     "coverage",
@@ -1307,8 +1241,8 @@
   },
   "pyperformance-warm.gc_traversal": {
    "status": "ok",
-   "seconds": 0.001993381428870965,
-   "loops": 44,
+   "seconds": 0.0022191041563120154,
+   "loops": 45,
    "check": [
     "gc_traversal",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1316,8 +1250,8 @@
   },
   "pyperformance-warm.gc_collect": {
    "status": "ok",
-   "seconds": 0.0014087787704236473,
-   "loops": 67,
+   "seconds": 0.0015161343850195407,
+   "loops": 60,
    "check": [
     "create_gc_cycles",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1325,7 +1259,7 @@
   },
   "pyperformance-warm.generators": {
    "status": "ok",
-   "seconds": 0.03144127425427238,
+   "seconds": 0.03211742096270124,
    "loops": 3,
    "check": [
     "generators",
@@ -1334,7 +1268,7 @@
   },
   "pyperformance-warm.chameleon": {
    "status": "ok",
-   "seconds": 0.018839171435683966,
+   "seconds": 0.018447639979422094,
    "loops": 5,
    "check": [
     "chameleon",
@@ -1343,7 +1277,7 @@
   },
   "pyperformance-warm.chaos": {
    "status": "ok",
-   "seconds": 0.07252170331776142,
+   "seconds": 0.07326747989282012,
    "loops": 1,
    "check": [
     "chaos",
@@ -1352,8 +1286,8 @@
   },
   "pyperformance-warm.comprehensions": {
    "status": "ok",
-   "seconds": 2.086825221878538e-05,
-   "loops": 1467,
+   "seconds": 2.211689810413932e-05,
+   "loops": 2768,
    "check": [
     "comprehensions",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1361,7 +1295,7 @@
   },
   "pyperformance-warm.crypto_pyaes": {
    "status": "ok",
-   "seconds": 0.09951401222497225,
+   "seconds": 0.10120685491710901,
    "loops": 1,
    "check": [
     "crypto_pyaes",
@@ -1370,8 +1304,8 @@
   },
   "pyperformance-warm.deepcopy": {
    "status": "ok",
-   "seconds": 0.0003920860351326893,
-   "loops": 212,
+   "seconds": 0.00039940296667696806,
+   "loops": 203,
    "check": [
     "deepcopy",
     "deepcopy_memo",
@@ -1381,8 +1315,8 @@
   },
   "pyperformance-warm.deltablue": {
    "status": "ok",
-   "seconds": 0.003722750742991383,
-   "loops": 26,
+   "seconds": 0.0038643813133239745,
+   "loops": 25,
    "check": [
     "deltablue",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1390,7 +1324,7 @@
   },
   "pyperformance-warm.django_template": {
    "status": "ok",
-   "seconds": 0.04788876953534782,
+   "seconds": 0.04931269655935466,
    "loops": 2,
    "check": [
     "django_template",
@@ -1399,7 +1333,7 @@
   },
   "pyperformance-warm.dulwich_log": {
    "status": "ok",
-   "seconds": 0.0795678780414164,
+   "seconds": 0.08531018672510982,
    "loops": 1,
    "check": [
     "dulwich_log",
@@ -1408,7 +1342,7 @@
   },
   "pyperformance-warm.docutils": {
    "status": "ok",
-   "seconds": 2.866422380320728,
+   "seconds": 3.0671445121988654,
    "loops": 1,
    "check": [
     "docutils",
@@ -1417,7 +1351,7 @@
   },
   "pyperformance-warm.fannkuch": {
    "status": "ok",
-   "seconds": 0.4969153427518904,
+   "seconds": 0.5154287498444319,
    "loops": 1,
    "check": [
     "fannkuch",
@@ -1426,7 +1360,7 @@
   },
   "pyperformance-warm.fastapi": {
    "status": "ok",
-   "seconds": 0.23988359374925494,
+   "seconds": 0.24131896113976836,
    "loops": 1,
    "check": [
     "fastapi_http",
@@ -1435,7 +1369,7 @@
   },
   "pyperformance-warm.float": {
    "status": "ok",
-   "seconds": 0.07775976788252592,
+   "seconds": 0.08176580211147666,
    "loops": 1,
    "check": [
     "float",
@@ -1444,7 +1378,7 @@
   },
   "pyperformance-warm.genshi": {
    "status": "ok",
-   "seconds": 0.098309475928545,
+   "seconds": 0.10063577303662896,
    "loops": 1,
    "check": [
     "genshi_text",
@@ -1454,7 +1388,7 @@
   },
   "pyperformance-warm.go": {
    "status": "ok",
-   "seconds": 0.12449430581182241,
+   "seconds": 0.12915336713194847,
    "loops": 1,
    "check": [
     "go",
@@ -1463,8 +1397,8 @@
   },
   "pyperformance-warm.hexiom": {
    "status": "ok",
-   "seconds": 0.007312575721048883,
-   "loops": 14,
+   "seconds": 0.007339860061899974,
+   "loops": 13,
    "check": [
     "hexiom",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1472,7 +1406,7 @@
   },
   "pyperformance-warm.html5lib": {
    "status": "ok",
-   "seconds": 0.06672375090420246,
+   "seconds": 0.07256169989705086,
    "loops": 1,
    "check": [
     "html5lib",
@@ -1481,8 +1415,8 @@
   },
   "pyperformance-warm.json_dumps": {
    "status": "ok",
-   "seconds": 0.013608980857368027,
-   "loops": 7,
+   "seconds": 0.014360702518994609,
+   "loops": 6,
    "check": [
     "json_dumps",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1490,8 +1424,8 @@
   },
   "pyperformance-warm.json_loads": {
    "status": "ok",
-   "seconds": 3.632986497946252e-05,
-   "loops": 133,
+   "seconds": 3.8179990207386574e-05,
+   "loops": 129,
    "check": [
     "json_loads",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1499,7 +1433,7 @@
   },
   "pyperformance-warm.logging": {
    "status": "ok",
-   "seconds": 1.8237903890566844e-05,
+   "seconds": 1.99082935454719e-05,
    "loops": 264,
    "check": [
     "logging_format",
@@ -1510,7 +1444,7 @@
   },
   "pyperformance-warm.mako": {
    "status": "ok",
-   "seconds": 0.01667318819090724,
+   "seconds": 0.017105996143072844,
    "loops": 5,
    "check": [
     "mako",
@@ -1519,7 +1453,7 @@
   },
   "pyperformance-warm.mdp": {
    "status": "ok",
-   "seconds": 1.5884743318893015,
+   "seconds": 1.666247789748013,
    "loops": 1,
    "check": [
     "mdp",
@@ -1528,7 +1462,7 @@
   },
   "pyperformance-warm.meteor_contest": {
    "status": "ok",
-   "seconds": 0.12000876897946,
+   "seconds": 0.12085139891132712,
    "loops": 1,
    "check": [
     "meteor_contest",
@@ -1537,7 +1471,7 @@
   },
   "pyperformance-warm.networkx": {
    "status": "ok",
-   "seconds": 0.5139937242493033,
+   "seconds": 0.5275875353254378,
    "loops": 1,
    "check": [
     "shortest_path",
@@ -1546,7 +1480,7 @@
   },
   "pyperformance-warm.networkx_connected_components": {
    "status": "ok",
-   "seconds": 0.47272171871736646,
+   "seconds": 0.47111463360488415,
    "loops": 1,
    "check": [
     "connected_components",
@@ -1555,7 +1489,7 @@
   },
   "pyperformance-warm.networkx_k_core": {
    "status": "ok",
-   "seconds": 2.2853968129493296,
+   "seconds": 2.3794291550293565,
    "loops": 1,
    "check": [
     "k_core",
@@ -1564,7 +1498,7 @@
   },
   "pyperformance-warm.nbody": {
    "status": "ok",
-   "seconds": 0.1513492576777935,
+   "seconds": 0.15164048317819834,
    "loops": 1,
    "check": [
     "nbody",
@@ -1573,7 +1507,7 @@
   },
   "pyperformance-warm.nqueens": {
    "status": "ok",
-   "seconds": 0.10206907195970416,
+   "seconds": 0.1054104957729578,
    "loops": 1,
    "check": [
     "nqueens",
@@ -1582,7 +1516,7 @@
   },
   "pyperformance-warm.pathlib": {
    "status": "ok",
-   "seconds": 0.019103769585490225,
+   "seconds": 0.01917602401226759,
    "loops": 5,
    "check": [
     "pathlib",
@@ -1591,8 +1525,8 @@
   },
   "pyperformance-warm.pickle": {
    "status": "ok",
-   "seconds": 1.338512713193369e-05,
-   "loops": 341,
+   "seconds": 1.3350869607731835e-05,
+   "loops": 331,
    "check": [
     "pickle",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1600,7 +1534,7 @@
   },
   "pyperformance-warm.pickle_dict": {
    "status": "ok",
-   "seconds": 3.2834683393473034e-05,
+   "seconds": 3.3465907248349335e-05,
    "loops": 578,
    "check": [
     "pickle_dict",
@@ -1609,8 +1543,8 @@
   },
   "pyperformance-warm.pickle_list": {
    "status": "ok",
-   "seconds": 5.4994138620243775e-06,
-   "loops": 1639,
+   "seconds": 5.567832668647693e-06,
+   "loops": 1567,
    "check": [
     "pickle_list",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1618,7 +1552,7 @@
   },
   "pyperformance-warm.pickle_pure_python": {
    "status": "ok",
-   "seconds": 0.0003824728288842986,
+   "seconds": 0.00039724202554983397,
    "loops": 12,
    "check": [
     "pickle_pure_python",
@@ -1627,7 +1561,7 @@
   },
   "pyperformance-warm.pidigits": {
    "status": "ok",
-   "seconds": 0.17911314917728305,
+   "seconds": 0.18267384124919772,
    "loops": 1,
    "check": [
     "pidigits",
@@ -1636,7 +1570,7 @@
   },
   "pyperformance-warm.pprint": {
    "status": "ok",
-   "seconds": 2.868434277828783,
+   "seconds": 3.0237158313393593,
    "loops": 1,
    "check": [
     "pprint_pformat",
@@ -1646,7 +1580,7 @@
   },
   "pyperformance-warm.pyflate": {
    "status": "ok",
-   "seconds": 0.5027278549969196,
+   "seconds": 0.51299390476197,
    "loops": 1,
    "check": [
     "pyflate",
@@ -1655,7 +1589,7 @@
   },
   "pyperformance-warm.raytrace": {
    "status": "ok",
-   "seconds": 0.3433003928512335,
+   "seconds": 0.36323783406987786,
    "loops": 1,
    "check": [
     "raytrace",
@@ -1664,7 +1598,7 @@
   },
   "pyperformance-warm.regex_compile": {
    "status": "ok",
-   "seconds": 0.15790201583877206,
+   "seconds": 0.16347869811579585,
    "loops": 1,
    "check": [
     "regex_compile",
@@ -1673,7 +1607,7 @@
   },
   "pyperformance-warm.regex_dna": {
    "status": "ok",
-   "seconds": 0.1680849390104413,
+   "seconds": 0.17378517892211676,
    "loops": 1,
    "check": [
     "regex_dna",
@@ -1682,7 +1616,7 @@
   },
   "pyperformance-warm.regex_effbot": {
    "status": "ok",
-   "seconds": 0.0025046768481843174,
+   "seconds": 0.0026913204696029426,
    "loops": 4,
    "check": [
     "regex_effbot",
@@ -1691,7 +1625,7 @@
   },
   "pyperformance-warm.regex_v8": {
    "status": "ok",
-   "seconds": 0.020514758420176804,
+   "seconds": 0.02071185747627169,
    "loops": 4,
    "check": [
     "regex_v8",
@@ -1700,8 +1634,8 @@
   },
   "pyperformance-warm.richards": {
    "status": "ok",
-   "seconds": 0.05652067717164755,
-   "loops": 2,
+   "seconds": 0.0607453603297472,
+   "loops": 1,
    "check": [
     "richards",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1709,8 +1643,8 @@
   },
   "pyperformance-warm.richards_super": {
    "status": "ok",
-   "seconds": 0.07014238950796425,
-   "loops": 2,
+   "seconds": 0.07493218686431646,
+   "loops": 1,
    "check": [
     "richards_super",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1718,7 +1652,7 @@
   },
   "pyperformance-warm.scimark": {
    "status": "ok",
-   "seconds": 0.7979243933223188,
+   "seconds": 0.8115031840279698,
    "loops": 1,
    "check": [
     "scimark_fft",
@@ -1731,7 +1665,7 @@
   },
   "pyperformance-warm.spectral_norm": {
    "status": "ok",
-   "seconds": 0.12439615512266755,
+   "seconds": 0.1253640940412879,
    "loops": 1,
    "check": [
     "spectral_norm",
@@ -1740,7 +1674,7 @@
   },
   "pyperformance-warm.sphinx": {
    "status": "ok",
-   "seconds": 1.1631095963530242,
+   "seconds": 1.211342144291848,
    "loops": 1,
    "check": [
     "sphinx",
@@ -1749,7 +1683,7 @@
   },
   "pyperformance-warm.sqlalchemy_declarative": {
    "status": "ok",
-   "seconds": 0.15455913310870528,
+   "seconds": 0.1576943420805037,
    "loops": 1,
    "check": [
     "sqlalchemy_declarative",
@@ -1758,8 +1692,8 @@
   },
   "pyperformance-warm.sqlalchemy_imperative": {
    "status": "ok",
-   "seconds": 0.02430712874047458,
-   "loops": 4,
+   "seconds": 0.025952379995336134,
+   "loops": 3,
    "check": [
     "sqlalchemy_imperative",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1767,7 +1701,7 @@
   },
   "pyperformance-warm.sqlglot_v2": {
    "status": "ok",
-   "seconds": 0.1330766947939992,
+   "seconds": 0.13747924007475376,
    "loops": 1,
    "check": [
     "sqlglot_v2_normalize",
@@ -1776,8 +1710,8 @@
   },
   "pyperformance-warm.sqlglot_v2_parse": {
    "status": "ok",
-   "seconds": 0.0014915906317662774,
-   "loops": 57,
+   "seconds": 0.0015462525828065826,
+   "loops": 51,
    "check": [
     "sqlglot_v2_parse",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1785,8 +1719,8 @@
   },
   "pyperformance-warm.sqlglot_v2_transpile": {
    "status": "ok",
-   "seconds": 0.0018605266594224506,
-   "loops": 45,
+   "seconds": 0.0019635970076156218,
+   "loops": 43,
    "check": [
     "sqlglot_v2_transpile",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1794,8 +1728,8 @@
   },
   "pyperformance-warm.sqlglot_v2_optimize": {
    "status": "ok",
-   "seconds": 0.066872384166345,
-   "loops": 2,
+   "seconds": 0.06774652004241943,
+   "loops": 1,
    "check": [
     "sqlglot_v2_optimize",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1803,8 +1737,8 @@
   },
   "pyperformance-warm.sqlite_synth": {
    "status": "ok",
-   "seconds": 2.6247055595454994e-06,
-   "loops": 326,
+   "seconds": 2.8112267572728414e-06,
+   "loops": 189,
    "check": [
     "sqlite_synth",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1812,7 +1746,7 @@
   },
   "pyperformance-warm.sympy": {
    "status": "ok",
-   "seconds": 0.9606835911981761,
+   "seconds": 0.9629589673131704,
    "loops": 1,
    "check": [
     "sympy_expand",
@@ -1824,7 +1758,7 @@
   },
   "pyperformance-warm.telco": {
    "status": "ok",
-   "seconds": 0.010442751356297068,
+   "seconds": 0.012182234527750148,
    "loops": 9,
    "check": [
     "telco",
@@ -1833,7 +1767,7 @@
   },
   "pyperformance-warm.tomli_loads": {
    "status": "ok",
-   "seconds": 2.316721186041832,
+   "seconds": 2.3521437868475914,
    "loops": 1,
    "check": [
     "tomli_loads",
@@ -1842,7 +1776,7 @@
   },
   "pyperformance-warm.tornado_http": {
    "status": "ok",
-   "seconds": 0.13955816300585866,
+   "seconds": 0.14803606690838933,
    "loops": 1,
    "check": [
     "tornado_http",
@@ -1851,8 +1785,8 @@
   },
   "pyperformance-warm.typing_runtime_protocols": {
    "status": "ok",
-   "seconds": 0.00022404340795423997,
-   "loops": 209,
+   "seconds": 0.00023072304185291732,
+   "loops": 198,
    "check": [
     "typing_runtime_protocols",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1860,8 +1794,8 @@
   },
   "pyperformance-warm.unpack_sequence": {
    "status": "ok",
-   "seconds": 5.578192060211556e-08,
-   "loops": 2207,
+   "seconds": 5.785062642971684e-08,
+   "loops": 2131,
    "check": [
     "unpack_sequence",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1869,8 +1803,8 @@
   },
   "pyperformance-warm.unpickle": {
    "status": "ok",
-   "seconds": 2.033770879885803e-05,
-   "loops": 240,
+   "seconds": 2.0775142158463336e-05,
+   "loops": 228,
    "check": [
     "unpickle",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1878,8 +1812,8 @@
   },
   "pyperformance-warm.unpickle_list": {
    "status": "ok",
-   "seconds": 5.1075361372543825e-06,
-   "loops": 1784,
+   "seconds": 4.997195079135643e-06,
+   "loops": 1704,
    "check": [
     "unpickle_list",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1887,8 +1821,8 @@
   },
   "pyperformance-warm.unpickle_pure_python": {
    "status": "ok",
-   "seconds": 0.00027514418405998086,
-   "loops": 18,
+   "seconds": 0.0003006693975561682,
+   "loops": 17,
    "check": [
     "unpickle_pure_python",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -1896,7 +1830,7 @@
   },
   "pyperformance-warm.xdsl": {
    "status": "ok",
-   "seconds": 0.0562053716275841,
+   "seconds": 0.05683813942596316,
    "loops": 2,
    "check": [
     "xdsl_constant_fold",
@@ -1905,7 +1839,7 @@
   },
   "pyperformance-warm.xml_etree": {
    "status": "ok",
-   "seconds": 0.43318618601188064,
+   "seconds": 0.445325365755707,
    "loops": 1,
    "check": [
     "xml_etree_generate",
@@ -1914,6 +1848,1899 @@
     "xml_etree_process",
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
    ]
+  },
+  "cli.black": {
+   "status": "ok",
+   "seconds": 0.4031151835806668,
+   "loops": null,
+   "check": "33cec38ba78ee25f0208eb4ae6deac2cdb96ebfb2656bee0f0b53af86f9e0a5f"
+  },
+  "cli.isort": {
+   "status": "ok",
+   "seconds": 0.11520550306886435,
+   "loops": null,
+   "check": "c06198941fc8912f99937a2c3f3ef9a2e086bbf9bbcb1ef634ca351e8fd4b432"
+  },
+  "cli.pyflakes": {
+   "status": "ok",
+   "seconds": 0.6493810438551009,
+   "loops": null,
+   "check": "62704a520611b5645c959dfabe6dff0cd75866d4ccc7ca6bc883561e8d79d302"
+  },
+  "cli.pycodestyle": {
+   "status": "ok",
+   "seconds": 0.762080037035048,
+   "loops": null,
+   "check": "6e9913f73a026051f37d1e11e14b29ad35cf61b11d94eb50260711b4a4509cdd"
+  },
+  "cli.pygments": {
+   "status": "ok",
+   "seconds": 0.2525320090353489,
+   "loops": null,
+   "check": "90b41c122e5961ddc9ef516fc055a875abad5508bccaed23ac8c085c34dbc0f9"
+  },
+  "cli.markdown": {
+   "status": "ok",
+   "seconds": 0.10438274592161179,
+   "loops": null,
+   "check": "2bd6e8d43a9ca3a41323bb1821539eb481961a5fdc72b26de12ecd21421f335f"
+  },
+  "cadence.continuing_brain": {
+   "status": "ok",
+   "seconds": 0.8460686090402305,
+   "loops": null,
+   "check": "36a466341465f832116b02e3709788f7caa8e8f5caa4734ad9879a96a7c2d4a9"
+  },
+  "cadence.walking_rhythm": {
+   "status": "ok",
+   "seconds": 6.21300035296008,
+   "loops": null,
+   "check": "871991227de9ca7a50fa796bc1c73a3102fe0851564da366a2cc6a71a58659e9"
+  },
+  "cadence.walking_for_reward": {
+   "status": "ok",
+   "seconds": 6.568643582984805,
+   "loops": null,
+   "check": "ac64c36bb1c5b7c0938e50396f358ca062a0317c40293115c3d3b10afc4c3991"
+  },
+  "cadence.bandit": {
+   "status": "ok",
+   "seconds": 1.2859346782788634,
+   "loops": null,
+   "check": "2d0237a0e42e5af23d52cb330b1119cbade65a9a13fe5451b2dc3e1db39e18fd"
+  },
+  "cadence.night_replay": {
+   "status": "ok",
+   "seconds": 1.9882155489176512,
+   "loops": null,
+   "check": "f50a6b3be3df4d4429453fcaa2b2e011bab00697da1c5bef0b3263bd3d37b792"
+  }
+ },
+ "pypy": {
+  "version": "3.11.15 (194f9f44b505, May 25 2026, 19:34:11)\n[PyPy 7.3.23 with GCC 10.2.1 20210130 (Red Hat 10.2.1-11)]",
+  "best_us": {
+   "Bounce": 39315,
+   "CD": 261370,
+   "DeltaBlue": 77286,
+   "Havlak": 453834,
+   "Json": 203657,
+   "List": 249661,
+   "Mandelbrot": 52949,
+   "NBody": 64917,
+   "Permute": 146673,
+   "Queens": 86932,
+   "Richards": 193489,
+   "Sieve": 122626,
+   "Storage": 248818,
+   "Towers": 191894
+  },
+  "corpus": {
+   "startup.python_startup": {
+    "status": "ok",
+    "seconds": 0.02340609041441764,
+    "loops": 7,
+    "check": [
+     "python_startup",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "startup.python_startup_no_site": {
+    "status": "ok",
+    "seconds": 0.021874993527308106,
+    "loops": 10,
+    "check": [
+     "python_startup_no_site",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "startup.import_stdlib": {
+    "status": "ok",
+    "seconds": 0.13098765211179852,
+    "loops": null,
+    "check": "e75f5a71e974f738de7fb29ecafb8072554c66a1e3074e59409b6f1e4615ca83"
+   },
+   "pyperformance.2to3": {
+    "status": "ok",
+    "seconds": 1.1702073239721358,
+    "loops": 1,
+    "check": [
+     "2to3",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.argparse": {
+    "status": "ok",
+    "seconds": 0.00200765673787548,
+    "loops": 65,
+    "check": [
+     "many_optionals",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.argparse_subparsers": {
+    "status": "ok",
+    "seconds": 0.021138927375432104,
+    "loops": 8,
+    "check": [
+     "subparsers",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_generators": {
+    "status": "ok",
+    "seconds": 0.21934178890660405,
+    "loops": 1,
+    "check": [
+     "async_generators",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree": {
+    "status": "ok",
+    "seconds": 0.41869982378557324,
+    "loops": 1,
+    "check": [
+     "async_tree_none",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_cpu_io_mixed": {
+    "status": "ok",
+    "seconds": 0.769506508950144,
+    "loops": 1,
+    "check": [
+     "async_tree_cpu_io_mixed",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_io": {
+    "status": "ok",
+    "seconds": 0.5280124489217997,
+    "loops": 1,
+    "check": [
+     "async_tree_io",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_memoization": {
+    "status": "ok",
+    "seconds": 0.39636783534660935,
+    "loops": 1,
+    "check": [
+     "async_tree_memoization",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_eager": {
+    "status": "ok",
+    "seconds": 0.398441752884537,
+    "loops": 1,
+    "check": [
+     "async_tree_eager",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_eager_cpu_io_mixed": {
+    "status": "ok",
+    "seconds": 0.7944591748528183,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_cpu_io_mixed",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_eager_io": {
+    "status": "ok",
+    "seconds": 0.5236581745557487,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_io",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_eager_memoization": {
+    "status": "ok",
+    "seconds": 0.3852573619224131,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_memoization",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_tg": {
+    "status": "ok",
+    "seconds": 0.33937357598915696,
+    "loops": 1,
+    "check": [
+     "async_tree_none_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_cpu_io_mixed_tg": {
+    "status": "ok",
+    "seconds": 0.7175554032437503,
+    "loops": 1,
+    "check": [
+     "async_tree_cpu_io_mixed_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_io_tg": {
+    "status": "ok",
+    "seconds": 0.49249779200181365,
+    "loops": 1,
+    "check": [
+     "async_tree_io_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_memoization_tg": {
+    "status": "ok",
+    "seconds": 0.3645589677616954,
+    "loops": 1,
+    "check": [
+     "async_tree_memoization_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_eager_tg": {
+    "status": "ok",
+    "seconds": 0.3456832622177899,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_eager_cpu_io_mixed_tg": {
+    "status": "ok",
+    "seconds": 0.6963375289924443,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_cpu_io_mixed_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_eager_io_tg": {
+    "status": "ok",
+    "seconds": 0.5024047940969467,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_io_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.async_tree_eager_memoization_tg": {
+    "status": "ok",
+    "seconds": 0.36847673496231437,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_memoization_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.asyncio_tcp": {
+    "status": "ok",
+    "seconds": 2.930704860948026,
+    "loops": 1,
+    "check": [
+     "asyncio_tcp",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.asyncio_tcp_ssl": {
+    "status": "ok",
+    "seconds": 8.210700762923807,
+    "loops": 1,
+    "check": [
+     "asyncio_tcp_ssl",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.asyncio_websockets": {
+    "status": "ok",
+    "seconds": 0.5551843158900738,
+    "loops": 1,
+    "check": [
+     "asyncio_websockets",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.base64": {
+    "status": "ok",
+    "seconds": 0.4692792617715895,
+    "loops": 1,
+    "check": [
+     "ascii85_large",
+     "ascii85_small",
+     "base16_large",
+     "base16_small",
+     "base32_large",
+     "base32_small",
+     "base64_large",
+     "base64_small",
+     "base85_large",
+     "base85_small",
+     "urlsafe_base64_small",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.bpe_tokeniser": {
+    "status": "ok",
+    "seconds": 1.596743745263666,
+    "loops": 1,
+    "check": [
+     "bpe_tokeniser",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.concurrent_imap": {
+    "status": "ok",
+    "seconds": 0.02687320951372385,
+    "loops": 1,
+    "check": [
+     "bench_mp_pool",
+     "bench_thread_pool",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.coroutines": {
+    "status": "ok",
+    "seconds": 0.012103687971830368,
+    "loops": 4,
+    "check": [
+     "coroutines",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.coverage": {
+    "status": "ok",
+    "seconds": 0.1528595150448382,
+    "loops": 1,
+    "check": [
+     "coverage",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.gc_traversal": {
+    "status": "ok",
+    "seconds": 0.007081740804844432,
+    "loops": 45,
+    "check": [
+     "gc_traversal",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.gc_collect": {
+    "status": "ok",
+    "seconds": 0.005283661789764635,
+    "loops": 61,
+    "check": [
+     "create_gc_cycles",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.generators": {
+    "status": "ok",
+    "seconds": 0.02185668796300888,
+    "loops": 3,
+    "check": [
+     "generators",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.chameleon": {
+    "status": "ok",
+    "seconds": 0.003976469766348601,
+    "loops": 5,
+    "check": [
+     "chameleon",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.chaos": {
+    "status": "ok",
+    "seconds": 0.005224201362580061,
+    "loops": 1,
+    "check": [
+     "chaos",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.comprehensions": {
+    "status": "ok",
+    "seconds": 6.925645879560844e-06,
+    "loops": 2660,
+    "check": [
+     "comprehensions",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.crypto_pyaes": {
+    "status": "ok",
+    "seconds": 0.0039538308046758175,
+    "loops": 1,
+    "check": [
+     "crypto_pyaes",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.deepcopy": {
+    "status": "ok",
+    "seconds": 0.00011800331305022592,
+    "loops": 189,
+    "check": [
+     "deepcopy",
+     "deepcopy_memo",
+     "deepcopy_reduce",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.deltablue": {
+    "status": "ok",
+    "seconds": 0.0006934530877818664,
+    "loops": 24,
+    "check": [
+     "deltablue",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.django_template": {
+    "status": "ok",
+    "seconds": 0.00818300200626254,
+    "loops": 2,
+    "check": [
+     "django_template",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.dulwich_log": {
+    "status": "ok",
+    "seconds": 0.050260500982403755,
+    "loops": 1,
+    "check": [
+     "dulwich_log",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.docutils": {
+    "status": "ok",
+    "seconds": 3.390817688778043,
+    "loops": 1,
+    "check": [
+     "docutils",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.fannkuch": {
+    "status": "ok",
+    "seconds": 0.0734371030703187,
+    "loops": 1,
+    "check": [
+     "fannkuch",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.fastapi": {
+    "status": "fail",
+    "seconds": null,
+    "loops": null,
+    "check": null
+   },
+   "pyperformance.float": {
+    "status": "ok",
+    "seconds": 0.008290765807032585,
+    "loops": 1,
+    "check": [
+     "float",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.genshi": {
+    "status": "ok",
+    "seconds": 0.06033054366707802,
+    "loops": 1,
+    "check": [
+     "genshi_text",
+     "genshi_xml",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.go": {
+    "status": "ok",
+    "seconds": 0.153336426243186,
+    "loops": 1,
+    "check": [
+     "go",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.hexiom": {
+    "status": "ok",
+    "seconds": 0.0029163922971257796,
+    "loops": 13,
+    "check": [
+     "hexiom",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.html5lib": {
+    "status": "ok",
+    "seconds": 0.046050471253693104,
+    "loops": 1,
+    "check": [
+     "html5lib",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.json_dumps": {
+    "status": "ok",
+    "seconds": 0.006452255150569337,
+    "loops": 7,
+    "check": [
+     "json_dumps",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.json_loads": {
+    "status": "ok",
+    "seconds": 9.387629575911881e-06,
+    "loops": 129,
+    "check": [
+     "json_loads",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.logging": {
+    "status": "ok",
+    "seconds": 5.829004520500029e-06,
+    "loops": 259,
+    "check": [
+     "logging_format",
+     "logging_silent",
+     "logging_simple",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.mako": {
+    "status": "ok",
+    "seconds": 0.008183031994849443,
+    "loops": 5,
+    "check": [
+     "mako",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.mdp": {
+    "status": "ok",
+    "seconds": 4.174674098845571,
+    "loops": 1,
+    "check": [
+     "mdp",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.meteor_contest": {
+    "status": "ok",
+    "seconds": 0.046369106974452734,
+    "loops": 1,
+    "check": [
+     "meteor_contest",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.networkx": {
+    "status": "ok",
+    "seconds": 0.4427100960165262,
+    "loops": 1,
+    "check": [
+     "shortest_path",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.networkx_connected_components": {
+    "status": "ok",
+    "seconds": 0.4382268930785358,
+    "loops": 1,
+    "check": [
+     "connected_components",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.networkx_k_core": {
+    "status": "ok",
+    "seconds": 1.8207412827759981,
+    "loops": 1,
+    "check": [
+     "k_core",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.nbody": {
+    "status": "ok",
+    "seconds": 0.010040836874395609,
+    "loops": 1,
+    "check": [
+     "nbody",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.nqueens": {
+    "status": "ok",
+    "seconds": 0.02165723592042923,
+    "loops": 1,
+    "check": [
+     "nqueens",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.pathlib": {
+    "status": "ok",
+    "seconds": 0.0075839806348085405,
+    "loops": 5,
+    "check": [
+     "pathlib",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.pickle": {
+    "status": "ok",
+    "seconds": 2.22385262965136e-05,
+    "loops": 336,
+    "check": [
+     "pickle",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.pickle_dict": {
+    "status": "ok",
+    "seconds": 0.00013454071048038286,
+    "loops": 569,
+    "check": [
+     "pickle_dict",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.pickle_list": {
+    "status": "ok",
+    "seconds": 2.0082941006679267e-05,
+    "loops": 1629,
+    "check": [
+     "pickle_list",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.pickle_pure_python": {
+    "status": "ok",
+    "seconds": 4.242752135420839e-05,
+    "loops": 12,
+    "check": [
+     "pickle_pure_python",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.pidigits": {
+    "status": "ok",
+    "seconds": 0.13024415401741862,
+    "loops": 1,
+    "check": [
+     "pidigits",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.pprint": {
+    "status": "ok",
+    "seconds": 0.5670111137442291,
+    "loops": 1,
+    "check": [
+     "pprint_pformat",
+     "pprint_safe_repr",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.pyflate": {
+    "status": "ok",
+    "seconds": 0.10806423705071211,
+    "loops": 1,
+    "check": [
+     "pyflate",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.raytrace": {
+    "status": "ok",
+    "seconds": 0.010409444104880095,
+    "loops": 1,
+    "check": [
+     "raytrace",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.regex_compile": {
+    "status": "wrong",
+    "seconds": null,
+    "loops": 1,
+    "check": null
+   },
+   "pyperformance.regex_dna": {
+    "status": "ok",
+    "seconds": 0.08262698305770755,
+    "loops": 1,
+    "check": [
+     "regex_dna",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.regex_effbot": {
+    "status": "ok",
+    "seconds": 0.001845738384872675,
+    "loops": 4,
+    "check": [
+     "regex_effbot",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.regex_v8": {
+    "status": "ok",
+    "seconds": 0.020092777791433036,
+    "loops": 4,
+    "check": [
+     "regex_v8",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.richards": {
+    "status": "ok",
+    "seconds": 0.0019039795733988285,
+    "loops": 2,
+    "check": [
+     "richards",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.richards_super": {
+    "status": "ok",
+    "seconds": 0.0025315452367067337,
+    "loops": 1,
+    "check": [
+     "richards_super",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.scimark": {
+    "status": "ok",
+    "seconds": 0.01378772733733058,
+    "loops": 1,
+    "check": [
+     "scimark_fft",
+     "scimark_lu",
+     "scimark_monte_carlo",
+     "scimark_sor",
+     "scimark_sparse_mat_mult",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.spectral_norm": {
+    "status": "ok",
+    "seconds": 0.004896795377135277,
+    "loops": 1,
+    "check": [
+     "spectral_norm",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.sphinx": {
+    "status": "ok",
+    "seconds": 2.6938964840956032,
+    "loops": 1,
+    "check": [
+     "sphinx",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.sqlalchemy_declarative": {
+    "status": "fail",
+    "seconds": null,
+    "loops": 1,
+    "check": null
+   },
+   "pyperformance.sqlalchemy_imperative": {
+    "status": "ok",
+    "seconds": 0.011808170820586383,
+    "loops": 4,
+    "check": [
+     "sqlalchemy_imperative",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.sqlglot_v2": {
+    "status": "ok",
+    "seconds": 0.10571782616898417,
+    "loops": 1,
+    "check": [
+     "sqlglot_v2_normalize",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.sqlglot_v2_parse": {
+    "status": "ok",
+    "seconds": 0.0014843946661461484,
+    "loops": 55,
+    "check": [
+     "sqlglot_v2_parse",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.sqlglot_v2_transpile": {
+    "status": "ok",
+    "seconds": 0.002296944603670475,
+    "loops": 43,
+    "check": [
+     "sqlglot_v2_transpile",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.sqlglot_v2_optimize": {
+    "status": "ok",
+    "seconds": 0.20504149794578552,
+    "loops": 1,
+    "check": [
+     "sqlglot_v2_optimize",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.sqlite_synth": {
+    "status": "ok",
+    "seconds": 4.4764535668833706e-05,
+    "loops": 323,
+    "check": [
+     "sqlite_synth",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.sympy": {
+    "status": "ok",
+    "seconds": 0.5701060527935624,
+    "loops": 1,
+    "check": [
+     "sympy_expand",
+     "sympy_integrate",
+     "sympy_str",
+     "sympy_sum",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.telco": {
+    "status": "ok",
+    "seconds": 0.007660784810367558,
+    "loops": 9,
+    "check": [
+     "telco",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.tomli_loads": {
+    "status": "ok",
+    "seconds": 0.9597754157148302,
+    "loops": 1,
+    "check": [
+     "tomli_loads",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.tornado_http": {
+    "status": "ok",
+    "seconds": 0.4195053209550679,
+    "loops": 1,
+    "check": [
+     "tornado_http",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.typing_runtime_protocols": {
+    "status": "ok",
+    "seconds": 0.0007503392292894948,
+    "loops": 213,
+    "check": [
+     "typing_runtime_protocols",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.unpack_sequence": {
+    "status": "ok",
+    "seconds": 1.2404300569677395e-10,
+    "loops": 2206,
+    "check": [
+     "unpack_sequence",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.unpickle": {
+    "status": "ok",
+    "seconds": 4.041039514137916e-05,
+    "loops": 227,
+    "check": [
+     "unpickle",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.unpickle_list": {
+    "status": "ok",
+    "seconds": 1.368977295203229e-05,
+    "loops": 1652,
+    "check": [
+     "unpickle_list",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.unpickle_pure_python": {
+    "status": "ok",
+    "seconds": 5.4044478262464205e-05,
+    "loops": 18,
+    "check": [
+     "unpickle_pure_python",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.xdsl": {
+    "status": "ok",
+    "seconds": 0.009713181992992759,
+    "loops": 2,
+    "check": [
+     "xdsl_constant_fold",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance.xml_etree": {
+    "status": "wrong",
+    "seconds": null,
+    "loops": 1,
+    "check": null
+   },
+   "pyperformance-warm.2to3": {
+    "status": "ok",
+    "seconds": 1.1759359841234982,
+    "loops": 1,
+    "check": [
+     "2to3",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.argparse": {
+    "status": "ok",
+    "seconds": 0.00041957776171757896,
+    "loops": 68,
+    "check": [
+     "many_optionals",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.argparse_subparsers": {
+    "status": "ok",
+    "seconds": 0.02101410075556487,
+    "loops": 8,
+    "check": [
+     "subparsers",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_generators": {
+    "status": "ok",
+    "seconds": 0.20553210889920592,
+    "loops": 1,
+    "check": [
+     "async_generators",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree": {
+    "status": "ok",
+    "seconds": 0.33724226523190737,
+    "loops": 1,
+    "check": [
+     "async_tree_none",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_cpu_io_mixed": {
+    "status": "ok",
+    "seconds": 0.8132970803417265,
+    "loops": 1,
+    "check": [
+     "async_tree_cpu_io_mixed",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_io": {
+    "status": "ok",
+    "seconds": 0.4440336739644408,
+    "loops": 1,
+    "check": [
+     "async_tree_io",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_memoization": {
+    "status": "ok",
+    "seconds": 0.3750285152345896,
+    "loops": 1,
+    "check": [
+     "async_tree_memoization",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_eager": {
+    "status": "ok",
+    "seconds": 0.339996709022671,
+    "loops": 1,
+    "check": [
+     "async_tree_eager",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_eager_cpu_io_mixed": {
+    "status": "ok",
+    "seconds": 0.8081441512331367,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_cpu_io_mixed",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_eager_io": {
+    "status": "ok",
+    "seconds": 0.4783354359678924,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_io",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_eager_memoization": {
+    "status": "ok",
+    "seconds": 0.37262969790026546,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_memoization",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_tg": {
+    "status": "ok",
+    "seconds": 0.3259896910749376,
+    "loops": 1,
+    "check": [
+     "async_tree_none_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_cpu_io_mixed_tg": {
+    "status": "ok",
+    "seconds": 0.6483325543813407,
+    "loops": 1,
+    "check": [
+     "async_tree_cpu_io_mixed_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_io_tg": {
+    "status": "ok",
+    "seconds": 0.4230249081738293,
+    "loops": 1,
+    "check": [
+     "async_tree_io_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_memoization_tg": {
+    "status": "ok",
+    "seconds": 0.3540246360935271,
+    "loops": 1,
+    "check": [
+     "async_tree_memoization_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_eager_tg": {
+    "status": "ok",
+    "seconds": 0.3211717172525823,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_eager_cpu_io_mixed_tg": {
+    "status": "ok",
+    "seconds": 0.6629264848306775,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_cpu_io_mixed_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_eager_io_tg": {
+    "status": "ok",
+    "seconds": 0.42756189685314894,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_io_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.async_tree_eager_memoization_tg": {
+    "status": "ok",
+    "seconds": 0.34754821471869946,
+    "loops": 1,
+    "check": [
+     "async_tree_eager_memoization_tg",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.asyncio_tcp": {
+    "status": "ok",
+    "seconds": 2.8542157649062574,
+    "loops": 1,
+    "check": [
+     "asyncio_tcp",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.asyncio_tcp_ssl": {
+    "status": "ok",
+    "seconds": 8.232872437685728,
+    "loops": 1,
+    "check": [
+     "asyncio_tcp_ssl",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.asyncio_websockets": {
+    "status": "ok",
+    "seconds": 0.5434555867686868,
+    "loops": 1,
+    "check": [
+     "asyncio_websockets",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.base64": {
+    "status": "ok",
+    "seconds": 0.4753158837556839,
+    "loops": 1,
+    "check": [
+     "ascii85_large",
+     "ascii85_small",
+     "base16_large",
+     "base16_small",
+     "base32_large",
+     "base32_small",
+     "base64_large",
+     "base64_small",
+     "base85_large",
+     "base85_small",
+     "urlsafe_base64_small",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.bpe_tokeniser": {
+    "status": "ok",
+    "seconds": 1.5798781383782625,
+    "loops": 1,
+    "check": [
+     "bpe_tokeniser",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.concurrent_imap": {
+    "status": "ok",
+    "seconds": 0.028707449790090322,
+    "loops": 1,
+    "check": [
+     "bench_mp_pool",
+     "bench_thread_pool",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.coroutines": {
+    "status": "ok",
+    "seconds": 0.012348306481726468,
+    "loops": 4,
+    "check": [
+     "coroutines",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.coverage": {
+    "status": "ok",
+    "seconds": 0.15749702928587794,
+    "loops": 1,
+    "check": [
+     "coverage",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.gc_traversal": {
+    "status": "ok",
+    "seconds": 0.0072004205133352015,
+    "loops": 45,
+    "check": [
+     "gc_traversal",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.gc_collect": {
+    "status": "ok",
+    "seconds": 0.00521935794968158,
+    "loops": 60,
+    "check": [
+     "create_gc_cycles",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.generators": {
+    "status": "ok",
+    "seconds": 0.01964742907633384,
+    "loops": 3,
+    "check": [
+     "generators",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.chameleon": {
+    "status": "ok",
+    "seconds": 0.0032412946224212647,
+    "loops": 5,
+    "check": [
+     "chameleon",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.chaos": {
+    "status": "ok",
+    "seconds": 0.00448159035295248,
+    "loops": 1,
+    "check": [
+     "chaos",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.comprehensions": {
+    "status": "ok",
+    "seconds": 7.066748345895223e-06,
+    "loops": 2768,
+    "check": [
+     "comprehensions",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.crypto_pyaes": {
+    "status": "ok",
+    "seconds": 0.0041235811077058315,
+    "loops": 1,
+    "check": [
+     "crypto_pyaes",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.deepcopy": {
+    "status": "ok",
+    "seconds": 0.00011090379382662586,
+    "loops": 203,
+    "check": [
+     "deepcopy",
+     "deepcopy_memo",
+     "deepcopy_reduce",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.deltablue": {
+    "status": "ok",
+    "seconds": 0.00043431119993329046,
+    "loops": 25,
+    "check": [
+     "deltablue",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.django_template": {
+    "status": "ok",
+    "seconds": 0.006229972932487726,
+    "loops": 2,
+    "check": [
+     "django_template",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.dulwich_log": {
+    "status": "ok",
+    "seconds": 0.03492689086124301,
+    "loops": 1,
+    "check": [
+     "dulwich_log",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.docutils": {
+    "status": "ok",
+    "seconds": 2.7083294023759663,
+    "loops": 1,
+    "check": [
+     "docutils",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.fannkuch": {
+    "status": "ok",
+    "seconds": 0.07485385937616229,
+    "loops": 1,
+    "check": [
+     "fannkuch",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.fastapi": {
+    "status": "fail",
+    "seconds": null,
+    "loops": null,
+    "check": null
+   },
+   "pyperformance-warm.float": {
+    "status": "ok",
+    "seconds": 0.0075942338444292545,
+    "loops": 1,
+    "check": [
+     "float",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.genshi": {
+    "status": "ok",
+    "seconds": 0.057959518395364285,
+    "loops": 1,
+    "check": [
+     "genshi_text",
+     "genshi_xml",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.go": {
+    "status": "ok",
+    "seconds": 0.08669797796756029,
+    "loops": 1,
+    "check": [
+     "go",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.hexiom": {
+    "status": "ok",
+    "seconds": 0.002068302844865964,
+    "loops": 13,
+    "check": [
+     "hexiom",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.html5lib": {
+    "status": "ok",
+    "seconds": 0.024520968087017536,
+    "loops": 1,
+    "check": [
+     "html5lib",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.json_dumps": {
+    "status": "ok",
+    "seconds": 0.006451641287033756,
+    "loops": 6,
+    "check": [
+     "json_dumps",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.json_loads": {
+    "status": "ok",
+    "seconds": 7.5970426230698595e-06,
+    "loops": 129,
+    "check": [
+     "json_loads",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.logging": {
+    "status": "ok",
+    "seconds": 5.2313860082490875e-06,
+    "loops": 264,
+    "check": [
+     "logging_format",
+     "logging_silent",
+     "logging_simple",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.mako": {
+    "status": "ok",
+    "seconds": 0.006534423399716616,
+    "loops": 5,
+    "check": [
+     "mako",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.mdp": {
+    "status": "ok",
+    "seconds": 4.140763954259455,
+    "loops": 1,
+    "check": [
+     "mdp",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.meteor_contest": {
+    "status": "ok",
+    "seconds": 0.045563052874058485,
+    "loops": 1,
+    "check": [
+     "meteor_contest",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.networkx": {
+    "status": "ok",
+    "seconds": 0.43151198886334896,
+    "loops": 1,
+    "check": [
+     "shortest_path",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.networkx_connected_components": {
+    "status": "ok",
+    "seconds": 0.43281873408704996,
+    "loops": 1,
+    "check": [
+     "connected_components",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.networkx_k_core": {
+    "status": "ok",
+    "seconds": 1.8192363199777901,
+    "loops": 1,
+    "check": [
+     "k_core",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.nbody": {
+    "status": "ok",
+    "seconds": 0.01023649238049984,
+    "loops": 1,
+    "check": [
+     "nbody",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.nqueens": {
+    "status": "ok",
+    "seconds": 0.020770708099007607,
+    "loops": 1,
+    "check": [
+     "nqueens",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.pathlib": {
+    "status": "ok",
+    "seconds": 0.007677640579640865,
+    "loops": 5,
+    "check": [
+     "pathlib",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.pickle": {
+    "status": "ok",
+    "seconds": 2.1813818312663687e-05,
+    "loops": 331,
+    "check": [
+     "pickle",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.pickle_dict": {
+    "status": "ok",
+    "seconds": 0.00013131203845298002,
+    "loops": 578,
+    "check": [
+     "pickle_dict",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.pickle_list": {
+    "status": "ok",
+    "seconds": 1.9826444404362566e-05,
+    "loops": 1567,
+    "check": [
+     "pickle_list",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.pickle_pure_python": {
+    "status": "ok",
+    "seconds": 2.3000083941345414e-05,
+    "loops": 12,
+    "check": [
+     "pickle_pure_python",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.pidigits": {
+    "status": "ok",
+    "seconds": 0.1293755820952356,
+    "loops": 1,
+    "check": [
+     "pidigits",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.pprint": {
+    "status": "ok",
+    "seconds": 0.5837070210836828,
+    "loops": 1,
+    "check": [
+     "pprint_pformat",
+     "pprint_safe_repr",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.pyflate": {
+    "status": "ok",
+    "seconds": 0.10648870980367064,
+    "loops": 1,
+    "check": [
+     "pyflate",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.raytrace": {
+    "status": "ok",
+    "seconds": 0.008894480299204588,
+    "loops": 1,
+    "check": [
+     "raytrace",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.regex_compile": {
+    "status": "wrong",
+    "seconds": null,
+    "loops": 1,
+    "check": null
+   },
+   "pyperformance-warm.regex_dna": {
+    "status": "ok",
+    "seconds": 0.07852195808663964,
+    "loops": 1,
+    "check": [
+     "regex_dna",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.regex_effbot": {
+    "status": "ok",
+    "seconds": 0.0018324775504879654,
+    "loops": 4,
+    "check": [
+     "regex_effbot",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.regex_v8": {
+    "status": "ok",
+    "seconds": 0.01588346518110484,
+    "loops": 4,
+    "check": [
+     "regex_v8",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.richards": {
+    "status": "ok",
+    "seconds": 0.0016183662228286266,
+    "loops": 1,
+    "check": [
+     "richards",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.richards_super": {
+    "status": "ok",
+    "seconds": 0.001710966695100069,
+    "loops": 1,
+    "check": [
+     "richards_super",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.scimark": {
+    "status": "ok",
+    "seconds": 0.01229590643197298,
+    "loops": 1,
+    "check": [
+     "scimark_fft",
+     "scimark_lu",
+     "scimark_monte_carlo",
+     "scimark_sor",
+     "scimark_sparse_mat_mult",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.spectral_norm": {
+    "status": "ok",
+    "seconds": 0.0046415431424975395,
+    "loops": 1,
+    "check": [
+     "spectral_norm",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.sphinx": {
+    "status": "ok",
+    "seconds": 1.946264212951064,
+    "loops": 1,
+    "check": [
+     "sphinx",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.sqlalchemy_declarative": {
+    "status": "fail",
+    "seconds": null,
+    "loops": 1,
+    "check": null
+   },
+   "pyperformance-warm.sqlalchemy_imperative": {
+    "status": "ok",
+    "seconds": 0.02009148042028149,
+    "loops": 3,
+    "check": [
+     "sqlalchemy_imperative",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.sqlglot_v2": {
+    "status": "ok",
+    "seconds": 0.061355025973170996,
+    "loops": 1,
+    "check": [
+     "sqlglot_v2_normalize",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.sqlglot_v2_parse": {
+    "status": "ok",
+    "seconds": 0.0006473808750218036,
+    "loops": 51,
+    "check": [
+     "sqlglot_v2_parse",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.sqlglot_v2_transpile": {
+    "status": "ok",
+    "seconds": 0.001352872526229814,
+    "loops": 43,
+    "check": [
+     "sqlglot_v2_transpile",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.sqlglot_v2_optimize": {
+    "status": "ok",
+    "seconds": 0.10430481610819697,
+    "loops": 1,
+    "check": [
+     "sqlglot_v2_optimize",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.sqlite_synth": {
+    "status": "ok",
+    "seconds": 4.6365500166618e-06,
+    "loops": 189,
+    "check": [
+     "sqlite_synth",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.sympy": {
+    "status": "ok",
+    "seconds": 0.40445706620812416,
+    "loops": 1,
+    "check": [
+     "sympy_expand",
+     "sympy_integrate",
+     "sympy_str",
+     "sympy_sum",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.telco": {
+    "status": "ok",
+    "seconds": 0.006979251746088266,
+    "loops": 9,
+    "check": [
+     "telco",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.tomli_loads": {
+    "status": "ok",
+    "seconds": 0.9698192239739001,
+    "loops": 1,
+    "check": [
+     "tomli_loads",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.tornado_http": {
+    "status": "ok",
+    "seconds": 0.29168641893193126,
+    "loops": 1,
+    "check": [
+     "tornado_http",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.typing_runtime_protocols": {
+    "status": "ok",
+    "seconds": 0.00037364008591858427,
+    "loops": 198,
+    "check": [
+     "typing_runtime_protocols",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.unpack_sequence": {
+    "status": "ok",
+    "seconds": 1.1290483445922067e-10,
+    "loops": 2131,
+    "check": [
+     "unpack_sequence",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.unpickle": {
+    "status": "ok",
+    "seconds": 3.8486754362422386e-05,
+    "loops": 228,
+    "check": [
+     "unpickle",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.unpickle_list": {
+    "status": "ok",
+    "seconds": 1.410936978820519e-05,
+    "loops": 1704,
+    "check": [
+     "unpickle_list",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.unpickle_pure_python": {
+    "status": "ok",
+    "seconds": 3.991002107367796e-05,
+    "loops": 17,
+    "check": [
+     "unpickle_pure_python",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.xdsl": {
+    "status": "ok",
+    "seconds": 0.008508354891091585,
+    "loops": 2,
+    "check": [
+     "xdsl_constant_fold",
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ]
+   },
+   "pyperformance-warm.xml_etree": {
+    "status": "wrong",
+    "seconds": null,
+    "loops": 1,
+    "check": null
+   },
+   "cli.black": {
+    "status": "ok",
+    "seconds": 1.4838957749307156,
+    "loops": null,
+    "check": "33cec38ba78ee25f0208eb4ae6deac2cdb96ebfb2656bee0f0b53af86f9e0a5f"
+   },
+   "cli.isort": {
+    "status": "ok",
+    "seconds": 0.2313616988249123,
+    "loops": null,
+    "check": "c06198941fc8912f99937a2c3f3ef9a2e086bbf9bbcb1ef634ca351e8fd4b432"
+   },
+   "cli.pyflakes": {
+    "status": "ok",
+    "seconds": 1.5111146359704435,
+    "loops": null,
+    "check": "62704a520611b5645c959dfabe6dff0cd75866d4ccc7ca6bc883561e8d79d302"
+   },
+   "cli.pycodestyle": {
+    "status": "ok",
+    "seconds": 1.7153391470201313,
+    "loops": null,
+    "check": "6e9913f73a026051f37d1e11e14b29ad35cf61b11d94eb50260711b4a4509cdd"
+   },
+   "cli.pygments": {
+    "status": "ok",
+    "seconds": 0.7898887107148767,
+    "loops": null,
+    "check": "90b41c122e5961ddc9ef516fc055a875abad5508bccaed23ac8c085c34dbc0f9"
+   },
+   "cli.markdown": {
+    "status": "ok",
+    "seconds": 0.18029263196513057,
+    "loops": null,
+    "check": "2bd6e8d43a9ca3a41323bb1821539eb481961a5fdc72b26de12ecd21421f335f"
+   },
+   "cadence.continuing_brain": {
+    "status": "wrong",
+    "seconds": null,
+    "loops": null,
+    "check": null
+   },
+   "cadence.walking_rhythm": {
+    "status": "wrong",
+    "seconds": null,
+    "loops": null,
+    "check": null
+   },
+   "cadence.walking_for_reward": {
+    "status": "wrong",
+    "seconds": null,
+    "loops": null,
+    "check": null
+   },
+   "cadence.bandit": {
+    "status": "wrong",
+    "seconds": null,
+    "loops": null,
+    "check": null
+   },
+   "cadence.night_replay": {
+    "status": "wrong",
+    "seconds": null,
+    "loops": null,
+    "check": null
+   }
   }
  }
 }
