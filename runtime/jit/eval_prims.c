@@ -221,6 +221,30 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
         I(c, r)->fs = lu_ev_exit_fs(c);
         return lu_ev_box_int(c, r);
     }
+    if (nargs == 2 && strcmp(name, "str_item") == 0 && !nospec(c, c->pc) && type_at(c, args, 0) == &PyUnicode_Type
+        && type_at(c, args, 1) == &PyLong_Type) {
+        /* The code point read in line, and its str: a latin-1 one is the
+           runtime's singleton (emit.c), any other made in C. */
+        lu_v cp = lu_ev_emit(c, OP_STR_ORD, REP_I64, lu_ev_val(c, args[0]), lu_ev_unbox_int(c, args[1]), LU_NOV, 0);
+        I(c, cp)->fs = lu_ev_exit_fs(c);
+        lu_v r = lu_ev_helper(c, H_str_char, 1, &cp, c->oparg + 2);
+        I(c, r)->imm2 = 1 + CNT_item;           /* counted as the item read it is */
+        lu_ev_def_type(c, r, &PyUnicode_Type);
+        return r;
+    }
+    for (int j = 0; nargs == 2 && j < 2 && strcmp(name, "str_cmp") == 0 && !nospec(c, c->pc); j++) {
+        /* A str against one character the code names: its first character
+           and its length tell, in line. */
+        PyObject *k = lu_ev_const(c, args[1 - j]);
+        if (type_at(c, args, j) == &PyUnicode_Type && k != NULL && PyUnicode_CheckExact(k)
+            && PyUnicode_GET_LENGTH(k) == 1) {
+            lu_v r = lu_ev_emit(c, OP_STR_CMP1, REP_I64, lu_ev_val(c, args[j]), LU_NOV, LU_NOV,
+                                PyUnicode_READ_CHAR(k, 0));
+            I(c, r)->imm2 = j;
+            I(c, r)->fs = lu_ev_exit_fs(c);
+            return lu_ev_box_int(c, r);
+        }
+    }
     PyObject *k0 = nargs > 0 ? lu_ev_const(c, args[0]) : NULL, *k1 = nargs > 1 ? lu_ev_const(c, args[1]) : NULL;
     if (nargs == 1 && strcmp(name, "static_type") == 0 && k0 != NULL && PyUnicode_CheckExact(k0)) {
         /* A static type by name: immortal, and the same every time. */

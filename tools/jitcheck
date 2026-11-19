@@ -192,6 +192,9 @@ require that a count of the tier's does not grow with the iterations:
   typed  tests/kernel/jit_typed_items.py, whose hot loops read and store
          bytearray items and array items of every numeric typecode: helper
          calls compiled code makes. Each item is read and stored in line.
+  strs   tests/kernel/jit_str_chars.py, whose hot loops read str characters
+         and compare strs with one character: helper calls compiled code
+         makes. Each is read and compared in line.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -251,6 +254,7 @@ GROWTH = {
     'fields': ('jit_unboxed_fields.py', r'jit: allocations by kind: int \d+, float (\d+)', 0),
     'operators': ('jit_operator_arms.py', r'jit: executed:.* helper (\d+)', 0),
     'typed': ('jit_typed_items.py', r'jit: executed:.* helper (\d+)', 0),
+    'strs': ('jit_str_chars.py', r'jit: executed:.* helper (\d+)', 0),
     'iterators': ('jit_virtual_iterators.py', r'jit: allocations by kind: .*tuple (\d+), .*iterator (\d+)', 0),
     'carried': ('jit_carried_objects.py',
                 r'jit: allocations by kind: int (\d+), .*tuple (\d+), list (\d+), dict (\d+), .*instance (\d+)', 0),

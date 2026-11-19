@@ -3349,6 +3349,52 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         def_gpr(a, v, RAX);
         return 0;
     }
+    case OP_STR_CMP1: {
+        /* str_cmp against the str of one code point: an empty str is
+           below it; else its first character decides, and on a tie its
+           length. Read as STR_ORD reads, from a compact str's data. */
+        static const struct { int kind, ascii; int32_t disp; } kinds[] = {
+            { 1, 1, sizeof(PyASCIIObject) }, { 1, 0, sizeof(PyCompactUnicodeObject) },
+            { 2, 0, sizeof(PyCompactUnicodeObject) }, { 4, 0, sizeof(PyCompactUnicodeObject) },
+        };
+        int fail = guard_exit(a, in), got = new_label(a), less = new_label(a), more = new_label(a);
+        int done = new_label(a);
+        int s = gpr_of(a, in->a, RDX);
+        load(a, R11, s, offsetof(PyASCIIObject, length));
+        test_rr(a, R11, R11);
+        jcc(a, CC_E, in->imm2 ? more : less);
+        load32(a, RAX, s, offsetof(PyASCIIObject, state));
+        alu_ri(a, ALU_AND, RAX, str_state(7, 1));
+        for (int k = 0; k < 4; k++) {
+            int next = new_label(a);
+            alu_ri(a, ALU_CMP, RAX, str_state(kinds[k].kind, kinds[k].ascii));
+            jcc(a, CC_NE, k < 3 ? next : fail);
+            if (kinds[k].kind == 4) {
+                load32(a, RCX, s, kinds[k].disp);
+            }
+            else {
+                op_rm(a, 0, kinds[k].kind == 1 ? 0x0FB6 : 0x0FB7, RCX, s, kinds[k].disp);   /* movzx ecx, [s+data] */
+            }
+            jmp(a, got);
+            bind(a, next);
+        }
+        bind(a, got);
+        alu_ri(a, ALU_CMP, RCX, (int32_t)in->imm);
+        jcc(a, CC_B, in->imm2 ? more : less);
+        jcc(a, CC_A, in->imm2 ? less : more);
+        alu_ri(a, ALU_CMP, R11, 1);
+        jcc(a, CC_A, in->imm2 ? less : more);  /* the same character, then more of them */
+        alu_rr(a, ALU_XOR, RAX, RAX);
+        jmp(a, done);
+        bind(a, less);
+        mov_ri(a, RAX, -1);
+        jmp(a, done);
+        bind(a, more);
+        mov_ri(a, RAX, 1);
+        bind(a, done);
+        def_gpr(a, v, RAX);
+        return 0;
+    }
     case OP_BYTES_ITEM: {
         int fail = guard_exit(a, in);
         int b = gpr_of(a, in->a, RDX), i = gpr_of(a, in->b, RCX);
@@ -3642,8 +3688,20 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         }
         int inline_ok = in->imm == H_build_tuple || in->imm == H_build_list ? emit_build(a, v)
             : in->imm == H_new_object ? emit_new_object(a, v) : 0;
-        int lacks = in->imm == H_dict_lacks ? new_label(a) : -1;
-        if (lacks >= 0) {
+        int lacks = in->imm == H_dict_lacks || in->imm == H_str_char ? new_label(a) : -1;
+        if (in->imm == H_str_char) {
+            /* A latin-1 code point's str is the runtime's singleton, which
+               is immortal: no call, and no reference to take. */
+            int r = gpr_of(a, in->args[0], RDX);
+            mov_rr(a, RAX, r);
+            op_rr(a, 1, 0x69, RAX, RAX);
+            b4(a, (int32_t)sizeof(_PyRuntime.singletons.latin1[0]));     /* imul rax, rax, size */
+            mov_ri(a, R11, (int64_t)(intptr_t)&_PyRuntime.singletons.latin1[0]);
+            alu_rr(a, ALU_ADD, RAX, R11);
+            alu_ri(a, ALU_CMP, r, 255);
+            jcc(a, CC_BE, lacks);               /* unsigned */
+        }
+        else if (lacks >= 0) {
             /* An instance with no dict of its own lacks every name: 1
                without the call. */
             load(a, RAX, gpr_of(a, in->args[0], RDX), LU_MANAGED_DICT_OFFSET);

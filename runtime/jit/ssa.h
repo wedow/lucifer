@@ -108,6 +108,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(BYTES_ITEM, REP_I64, IF_GUARD)    /* a: an exact bytes, b: i64 index; the byte; deopts out of range */ \
     X(SLOT_LOAD, REP_OBJ, IF_GUARD)     /* a's __slots__ member at byte imm, a new reference; deopts when it is \
                                            empty */ \
+    X(STR_CMP1, REP_I64, IF_GUARD)      /* a: an exact str; -1, 0 or 1 as a compares with the str of code point imm \
+                                           (imm2 1: that str with a); deopts for a str not compact */ \
     X(TYPED_LOAD, REP_NONE, IF_GUARD)   /* a: a bytearray, b: i64 index (negative from the end); its item read as \
                                            array typecode imm, i64 or f64 (rep set by the builder); deopts out of \
                                            range, past 2**63, or when another thread holds a's lock */ \
