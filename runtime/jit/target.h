@@ -233,7 +233,7 @@ lu_deopt_obj(const struct lu_deopt *d, int k)
     X(guard_type) X(guard_type_of) X(guard_type_itself) X(guard_keys) X(guard_func) \
     X(guard_is) X(guard_cell) X(guard_global) X(guard_bit) X(guard_not_null) X(guard_other) \
     X(unbox) X(live) X(poll) X(load_type) X(load_version) X(load_size) X(load_other) \
-    X(attr_load) X(attr_store) X(global_load) X(item) X(helper) X(incref) X(decref) X(box) \
+    X(attr_load) X(attr_store) X(global_load) X(item) X(helper) X(truth) X(incref) X(decref) X(box) \
     X(call_unknown) X(call_poly) X(call_refused) X(call_c) X(call_kw)
 enum lu_count {
 #define LU_COUNT_ENUM(name) CNT_##name,

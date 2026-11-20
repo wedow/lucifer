@@ -454,6 +454,14 @@ lu_ev_truth(struct ctx *c, lu_v r)
         /* -0.0 compares equal to 0.0, as it is false. */
         return lu_ev_emit(c, OP_CMP_F, REP_BIT, lu_ev_unbox_float(c, r), lu_ev_const_f(c, 0.0), LU_NOV, Py_NE);
     }
+    /* The class version covers inherited methods as well. Read the MRO
+       because slot refresh can finish after a type change is published. */
+    uint32_t version;
+    if (t != NULL && lu_ev_class_as_of(c, t, &version)
+        && _PyType_Lookup(t, LU_ID(__bool__)) == NULL && _PyType_Lookup(t, LU_ID(__len__)) == NULL
+        && lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)t), version)) {
+        return lu_ev_const_i(c, 1);
+    }
     lu_v bit = lu_ev_emit(c, OP_TRUTH, REP_BIT, lu_ev_val(c, r), LU_NOV, LU_NOV, 0);
     I(c, bit)->fs = lu_ev_exit_fs(c);
     I(c, bit)->drop = 1;
