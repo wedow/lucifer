@@ -546,7 +546,8 @@ adopt_at(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, 
     k->depth = c->depth + 1;
     k->code = co;
     k->func = fn;
-    k->funcv = LU_NOV;
+    /* A closure's frame reads its cells from the function the generator holds. */
+    k->funcv = co->co_nfreevars > 0 ? lu_ev_emit(c, OP_LOAD, REP_OBJ, it, LU_NOV, LU_NOV, FRAME_WORD(func)) : LU_NOV;
     k->globals = fn->func_globals;
     k->builtins = fn->func_builtins;
     k->kernel = (co->co_flags & LU_CO_KERNEL) != 0;
@@ -688,14 +689,20 @@ lu_ev_gen_adopt(struct ctx *c, lu_v it, int exit_pc, int nops)
        made it (a closure made anew per call has one code). Where it
        stands is the code unit its frame names. */
     lu_ev_guard_type(c, it, &PyGen_Type);
-    lu_ev_konst(c, func);       /* the unit keeps what its guards compare with */
+    /* The unit keeps what its guards compare with. Not a closure: one is
+       made anew per call, and its cells would keep that call's objects
+       alive as long as the unit (adopt_at names it as a value). */
+    if (co->co_nfreevars > 0) {
+        lu_ev_konst(c, (PyObject *)co);
+        lu_ev_konst(c, fn->func_globals);
+        lu_ev_konst(c, fn->func_builtins);
+    }
+    else {
+        lu_ev_konst(c, func);
+    }
     word_is(c, it, FRAME_WORD(code), (int64_t)(intptr_t)co);
     word_is(c, it, FRAME_WORD(globals), (int64_t)(intptr_t)fn->func_globals);
     word_is(c, it, FRAME_WORD(builtins), (int64_t)(intptr_t)fn->func_builtins);
-    if (co->co_nfreevars > 0) {
-        /* The evaluator reads a known function's cells as what they hold: then it is this function's. */
-        word_is(c, it, FRAME_WORD(func), (int64_t)(intptr_t)func);
-    }
     lu_v at = lu_ev_emit(c, OP_LOAD, REP_I64, it, LU_NOV, LU_NOV, FRAME_WORD(instr));
     for (lu_v v = first; v < g->f->nins; v++) {
         if (lu_op_flags[I(c, v)->op] & IF_GUARD) {
