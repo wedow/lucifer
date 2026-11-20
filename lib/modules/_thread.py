@@ -1,7 +1,8 @@
 """_thread (Modules/_threadmodule.c): threads, locks, thread ids and
-thread-local data. A lock is a PyMutex kept in the byte of a bytearray, which
-the _lucifer.mutex_* primitives lock and unlock. A thread is a new task on a
-carrier of its own (DESIGN 5.7); _lucifer.thread_start runs a function in it.
+thread-local data. A lock is a PyMutex kept in a bytearray with the ident of
+the thread holding it, which the _lucifer.mutex_* primitives lock and unlock
+(mutex_mine tells the holder). A thread is a new task on a carrier of its own
+(DESIGN 5.7); _lucifer.thread_start runs a function in it.
 """
 
 import _lucifer

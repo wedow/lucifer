@@ -11,7 +11,7 @@ import sys
 import _codecs
 import _lucifer
 # Import _thread instead of threading to reduce startup cost
-from _thread import allocate_lock as Lock, get_ident
+from _thread import allocate_lock as Lock
 import _weakref
 
 class _BufferLock:
@@ -21,26 +21,23 @@ class _BufferLock:
     interpreter finalizes, which may be inside a stream: the finalizing thread, the only one left
     running, then takes the stream over instead of waiting for ever."""
 
-    __slots__ = ('_lock', '_owner', '_stream')
+    __slots__ = ('_lock', '_stream')
 
     def __init__(self, stream):
         self._lock = Lock()
-        self._owner = 0
         self._stream = _weakref.ref(stream)
 
     def __enter__(self):
-        me = get_ident()
-        if self._owner == me:
+        lock = self._lock
+        if _lucifer.mutex_mine(lock._mutex):
             raise RuntimeError('reentrant call inside %r' % self._stream())
         if not sys.is_finalizing():
-            self._lock.acquire()
-        elif not self._lock.acquire(False):
-            self._lock = Lock()
-            self._lock.acquire()
-        self._owner = me
+            lock.acquire()
+        elif not lock.acquire(False):
+            self._lock = lock = Lock()
+            lock.acquire()
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self._owner = 0
         self._lock.release()
 
 
@@ -48,18 +45,17 @@ class _Pending:
     """The encoded text a TextIOWrapper keeps back (pending_bytes, Modules/_io/textio.c), which
     CPython guards with the stream's critical section. Writers append to items, one list primitive,
     without a lock; a flush takes the items there, removes just those and writes them out, one
-    flush at a time and in order (lock, held by owner). A flush that finds its own thread flushing
+    flush at a time and in order (lock). A flush that finds its own thread flushing
     (a signal handler that writes in the middle of one) leaves its text to the next; a daemon
     thread stopped for good inside a flush at finalization leaves the stream to the finalizing
     thread (_BufferLock)."""
 
-    __slots__ = ('items', 'count', 'lock', 'owner')
+    __slots__ = ('items', 'count', 'lock')
 
     def __init__(self):
         self.items = []
         self.count = 0          # bytes in items: when to flush, read and reset without the lock
         self.lock = Lock()
-        self.owner = 0
 
 
 BlockingIOError = BlockingIOError   # _io.BlockingIOError is the builtin
@@ -2429,16 +2425,14 @@ class TextIOWrapper(_TextIOBase):
         if not p.items:
             return
         lock = p.lock
-        me = get_ident()
         if not lock.acquire(False):
-            if p.owner == me:
+            if _lucifer.mutex_mine(lock._mutex):
                 return
             if not sys.is_finalizing():
                 lock.acquire()
             elif not lock.acquire(False):
                 p.lock = lock = Lock()
                 lock.acquire()
-        p.owner = me
         try:
             items = p.items
             n = len(items)
@@ -2448,7 +2442,6 @@ class TextIOWrapper(_TextIOBase):
                 p.count = 0
                 self.buffer.write(data)
         finally:
-            p.owner = 0
             lock.release()
 
     def close(self):
