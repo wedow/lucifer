@@ -44,6 +44,24 @@ class _BufferLock:
         self._lock.release()
 
 
+class _Pending:
+    """The encoded text a TextIOWrapper keeps back (pending_bytes, Modules/_io/textio.c), which
+    CPython guards with the stream's critical section. Writers append to items, one list primitive,
+    without a lock; a flush takes the items there, removes just those and writes them out, one
+    flush at a time and in order (lock, held by owner). A flush that finds its own thread flushing
+    (a signal handler that writes in the middle of one) leaves its text to the next; a daemon
+    thread stopped for good inside a flush at finalization leaves the stream to the finalizing
+    thread (_BufferLock)."""
+
+    __slots__ = ('items', 'count', 'lock', 'owner')
+
+    def __init__(self):
+        self.items = []
+        self.count = 0          # bytes in items: when to flush, read and reset without the lock
+        self.lock = Lock()
+        self.owner = 0
+
+
 BlockingIOError = BlockingIOError   # _io.BlockingIOError is the builtin
 
 SEEK_SET = 0
@@ -2277,8 +2295,7 @@ class TextIOWrapper(_TextIOBase):
         self._encoder = None
         self._decoder = None
         self._b2cratio = 0.0
-        self._pending = []
-        self._pending_count = 0
+        self._pending = _Pending()
 
         self._readuniversal = not newline
         self._readtranslate = newline is None
@@ -2407,12 +2424,32 @@ class TextIOWrapper(_TextIOBase):
         self.buffer.flush()
 
     def _writeflush(self):
-        """Hands the encoded text kept back since the last flush to the buffer."""
-        if self._pending:
-            data = b''.join(self._pending)
-            self._pending = []
-            self._pending_count = 0
-            self.buffer.write(data)
+        """Hands the encoded text kept back since the last flush to the buffer (_Pending)."""
+        p = self._pending
+        if not p.items:
+            return
+        lock = p.lock
+        me = get_ident()
+        if not lock.acquire(False):
+            if p.owner == me:
+                return
+            if not sys.is_finalizing():
+                lock.acquire()
+            elif not lock.acquire(False):
+                p.lock = lock = Lock()
+                lock.acquire()
+        p.owner = me
+        try:
+            items = p.items
+            n = len(items)
+            if n:
+                data = b''.join(items[:n])
+                del items[:n]
+                p.count = 0
+                self.buffer.write(data)
+        finally:
+            p.owner = 0
+            lock.release()
 
     def close(self):
         if self.buffer is not None and not self.closed:
@@ -2464,12 +2501,13 @@ class TextIOWrapper(_TextIOBase):
             if not isinstance(b, bytes):
                 raise TypeError("encoder should return a bytes object, not '%s'" %
                                 type(b).__name__)
-        pending = self._pending_count
+        p = self._pending
+        pending = p.count
         if pending + len(b) > self._CHUNK_SIZE:
             self._writeflush()
             pending = 0
-        self._pending.append(b)
-        self._pending_count = pending = pending + len(b)
+        p.items.append(b)
+        p.count = pending = pending + len(b)
         if pending >= self._CHUNK_SIZE or needflush or self._write_through:
             self._writeflush()
         if needflush:
