@@ -240,28 +240,18 @@ clear_frame(struct lu_gen *gen)
 {
     struct lu_frame *f = &gen->frame;
     gen->frame_state = LU_GEN_CLEARED;
-    int taken = lu_frame_retire(f);
+    lu_frame_release(f);
     f->previous = NULL;
-    PyObject **top = f->stackpointer;
-    f->stackpointer = f->localsplus;
-    if (taken) {
-        f->locals = NULL;
-        f->func = NULL;
-    }
-    else {
-        for (PyObject **p = f->localsplus; p < top; p++) {
-            Py_XDECREF(*p);
-        }
-        Py_CLEAR(f->locals);
-        Py_CLEAR(f->func);
-    }
     Py_CLEAR(gen->exc_state.exc_value);
 }
 
+/* A returning generator's frame leaves the stack before its locals go
+   (CPython's clear_gen_frame from _PyEval_FrameClearAndPop). */
 void
 lu_gen_finish(PyThreadState *ts, struct lu_frame *f)
 {
     struct lu_gen *gen = lu_gen_of(f);
+    lu_frame_unlink(ts, f);
     ts->exc_info = gen->exc_state.previous_item;
     gen->exc_state.previous_item = NULL;
     ts->py_recursion_remaining++;

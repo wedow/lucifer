@@ -245,8 +245,17 @@ lu_frame_floor(PyCodeObject *code)
    local unbound. Returns NULL with RecursionError or MemoryError set. */
 struct lu_frame *lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals);
 
-/* Releases the frame's references and its datastack space. The frame must
-   be the task's topmost. */
+/* A stopping frame leaves the stack before its references go (GH-99729):
+   a finalizer they run sees its caller on top, never the frame. */
+void lu_frame_unlink(PyThreadState *ts, struct lu_frame *f);
+
+/* The frame's references, except its code, go to its frame object if
+   observers hold one (lu_frame_retire), else are released, each slot
+   cleared before its release. */
+void lu_frame_release(struct lu_frame *f);
+
+/* Unlinks the frame, then releases its references and its datastack space.
+   The frame must be the task's topmost. */
 void lu_frame_pop(PyThreadState *ts, struct lu_frame *f);
 
 /* Room for `words` more datastack words in the current chunk, which a new

@@ -137,7 +137,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(FRAME_STORE, REP_NONE, IF_EFFECT) /* the root frame's localsplus[imm] = a, with no reference taken */ \
     X(YIELD, REP_NONE, IF_TERM)         /* a generator's root frame yields a (owned): its slots were stored; imm: the  \
                                            slots it holds, imm2: the instruction it resumes at */ \
-    X(UNLINK, REP_NONE, IF_EFFECT)      /* the root frame leaves the stack before its locals go (a generator's stays) */ \
+    X(UNLINK, REP_NONE, IF_EFFECT)      /* the root frame leaves the stack before its locals go */ \
     X(DEOPT, REP_NONE, IF_TERM)         /* leaves unconditionally at fs; imm: the reason */ \
     X(POLL, REP_NONE, IF_GUARD)         /* a back-edge: leaves at fs if the poll word is set */ \
     X(CHECK_LIVE, REP_NONE, IF_GUARD | IF_EFFECT)   /* leaves at fs, as a poll does, once the unit is dead */ \

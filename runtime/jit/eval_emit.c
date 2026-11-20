@@ -532,8 +532,11 @@ lu_ev_settle(struct ctx *c, int pc)
             /* Its finalizer sees the frames as they are after the
                instruction; an exit from there owes the releases to come.
                A returning root's releases take no state: an exit would
-               resume its RETURN_VALUE with the value and the locals gone,
-               and no walker sees the frame or needs its unit alive. */
+               resume its RETURN_VALUE with the value and the locals gone.
+               The frame is off the chain (OP_UNLINK, a generator's too),
+               so no walker finds it there; one that reaches a generator's
+               through gi_frame finds nothing published and reads its
+               locals unbound. Nor does the return need its unit alive. */
             fs = fs != NULL ? fs : lu_ev_snapshot(c, pc);
             struct lu_fs *at = lu_ir_alloc(g->f, sizeof(struct lu_fs));
             *at = *fs;

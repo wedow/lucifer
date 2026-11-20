@@ -3838,16 +3838,11 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     case OP_DEOPT:
         jmp(a, exit_to(a, in->fs, (int)in->imm, 0, 0));
         return 0;
-    case OP_UNLINK: {
-        /* A generator's frame stays the current one until lu_gen_finish. */
-        int stays = new_label(a);
-        cmp8_mi(a, R15, offsetof(struct lu_frame, home), LU_FRAME_GENERATOR);
-        jcc(a, CC_E, stays);
+    case OP_UNLINK:
+        /* lu_frame_unlink: a generator's too, before lu_gen_finish. */
         load(a, R11, R15, offsetof(struct lu_frame, previous));
         store(a, R14, offsetof(PyThreadState, current_frame), R11);
-        bind(a, stays);
         return 0;
-    }
     case OP_FRAME_STORE:
         r = gpr_of(a, in->a, RAX);
         store(a, R15, (int32_t)(offsetof(struct lu_frame, localsplus) + 8 * in->imm), r);
