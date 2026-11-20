@@ -1,6 +1,6 @@
 ---
 id: luc-kfmv
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-20T02:35:46Z
@@ -51,3 +51,9 @@ print(len(kept), bad)
 
 Fix direction: make the caller current (and clear each slot before its release) before the generator's locals go, in both the interpreter and OP_UNLINK.
 
+
+## Notes
+
+**2026-11-20T18:46:12Z**
+
+Fixed: lu_gen_finish unlinks before releasing (lu_frame_unlink/lu_frame_release, slots cleared before each release); OP_UNLINK unlinks generator roots too. tests/kernel/gen_return_release_frame.py 40 runs/lane master -> fixed: plain 40/40 SIGABRT -> 0/40, jit 0/40 -> 0/40, jit-deopt 40/40 SIGSEGV -> 0/40. gi_frame divergence filed as luc-y0wy.

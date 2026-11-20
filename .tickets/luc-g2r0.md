@@ -1,6 +1,6 @@
 ---
 id: luc-g2r0
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-20T02:35:46Z
@@ -41,3 +41,9 @@ print("done")
 
 Fix direction: make "held by this thread" readable without the gap (e.g. an owner check that tolerates the window, or an RLock-like primitive with an atomic owner), for both _Pending and _BufferLock.
 
+
+## Notes
+
+**2026-11-20T18:46:12Z**
+
+Fixed: mutex primitives record the holder's ident in the same call (mutex_mine); _Pending and _BufferLock use it. tests/kernel/text_write_signal_reentry.py 40 runs/lane: hang 40/40 -> 0/40 in plain, jit, jit-deopt.
