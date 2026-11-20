@@ -166,6 +166,8 @@ require that a count of the tier's does not grow with the iterations:
          an int with no feedback: guard and side exits, and entries left to
          the interpreter. The unit built after the site is marked keeps no
          guard there.
+  shifts tests/kernel/jit_wide_shift.py, whose array packing shifts past
+         a signed word: guard exits and entries left to the interpreter.
   hoisted tests/kernel/jit_unpack_phases.py, whose hot loop unpacks a tuple
          and then a list, by turns, after the tuple's guard moved out of
          the loop: entries left to the interpreter and side exits. The
@@ -284,6 +286,7 @@ GROWTH = {
     'shadowed': ('jit_shadowed.py', r'jit: compiles (\d+)|exits guard (\d+)', 0),
     'kept': ('jit_marked_guards.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
              r'|jit: entries waited (\d+)', 0),
+    'shifts': ('jit_wide_shift.py', r'exits guard (\d+)|jit: entries waited (\d+)', 0),
     'hoisted': ('jit_unpack_phases.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
     'reclaim': ('jit_reclaim.py', r'jit: units freed \d+, dead held (\d+)', 0),
     'boolpow': ('jit_bool_float_pow.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)', 0),

@@ -39,9 +39,6 @@ operand_kinds(struct ctx *c, lu_v a, lu_v b, int kinds, int *lk, int *rk)
     *rk = kinds >> 8;
     if (*lk == 0 && (*rk == LU_KIND_INT || *rk == LU_KIND_FLOAT)) *lk = *rk;
     if (*rk == 0 && (*lk == LU_KIND_INT || *lk == LU_KIND_FLOAT)) *rk = *lk;
-    if (nospec(c, c->pc)) {
-        *lk = *rk = LU_KIND_OTHER;
-    }
     PyTypeObject *ta = lu_ev_type(c, a), *tb = lu_ev_type(c, b);
     static const struct { PyTypeObject *t; int kind; } kind_types[] = {
         { &PyFloat_Type, LU_KIND_FLOAT }, { &PyList_Type, LU_KIND_LIST }, { &PyTuple_Type, LU_KIND_TUPLE },
@@ -53,7 +50,9 @@ operand_kinds(struct ctx *c, lu_v a, lu_v b, int kinds, int *lk, int *rk)
         if (ta == kind_types[i].t) *lk = kind_types[i].kind;
         if (tb == kind_types[i].t) *rk = kind_types[i].kind;
     }
-    if (a == LU_NOV || b == LU_NOV) {
+    if (a == LU_NOV || b == LU_NOV || nospec(c, c->pc)) {
+        /* A site whose guess kept failing takes the generic operation,
+           whatever is known of its operands (an int shift past a word). */
         *lk = *rk = LU_KIND_OTHER;
     }
 }

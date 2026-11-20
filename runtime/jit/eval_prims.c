@@ -209,7 +209,8 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
             return args[0];
         }
     }
-    if (nargs == 1 && type_at(c, args, 0) == &PyLong_Type) {
+    if (nargs == 1 && type_at(c, args, 0) == &PyLong_Type && !nospec(c, c->pc)) {
+        /* (An int past a word keeps failing the unboxing: the primitive's call.) */
         if (strcmp(name, "int_abs") == 0 || strcmp(name, "int_neg") == 0) {
             lu_v r = lu_ev_emit(c, name[4] == 'a' ? OP_ABS_I : OP_NEG_I, REP_I64, lu_ev_unbox_int(c, args[0]),
                                 LU_NOV, LU_NOV, 0);
