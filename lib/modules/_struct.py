@@ -84,7 +84,8 @@ _SSIZE_MAX = (1 << 63) - 1
 
 
 def _int(value, code, size, signed):
-    if not isinstance(value, int):
+    is_int = isinstance(value, int)
+    if not is_int:
         try:
             value = value.__index__()
         except AttributeError:
@@ -92,8 +93,14 @@ def _int(value, code, size, signed):
     bits = size * 8
     low, high = (-(1 << bits - 1), (1 << bits - 1) - 1) if signed else (0, (1 << bits) - 1)
     if not low <= value <= high:
-        if size == 8 and code in 'qQnNP':
-            raise error('argument out of range')
+        if code == 'P':
+            # Native pointers also accept signed negatives as unsigned bit patterns.
+            if -(1 << (bits - 1)) <= value < 0:
+                return value + high + 1
+            if is_int:
+                raise error('int too large to convert')
+            c_type = 'long' if value < 0 else 'unsigned long'
+            raise OverflowError(f'Python int too large to convert to C {c_type}')
         raise error("'%s' format requires %d <= number <= %d" % (code, low, high))
     return value
 

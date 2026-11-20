@@ -76,3 +76,34 @@ for fmt, data in (('<I', b'abc'), ('<I', b'abcde'), ('!20I', b'\0' * 79)):
         struct.unpack(fmt, data)
     except struct.error as e:
         print(fmt, 'error', e)
+
+# Compare the error at either edge of each integer range in both packing paths.
+for mode in ('', '@', '=', '<', '>', '!'):
+    for code in ('lLqQnNP' if mode in ('', '@') else 'lLqQ'):
+        bits = 8 * struct.calcsize(mode + code)
+        low = -(1 << (bits - 1)) if code in 'lqnP' else 0
+        high = (1 << (bits - (code in 'lqn'))) - 1
+        for value in (low - 1, high + 1):
+            for suffix, tail in (('', ()), ('b', (0,))):
+                fmt = mode + code + suffix
+                try:
+                    struct.pack(fmt, value, *tail)
+                except struct.error as e:
+                    print(fmt, value, type(e).__name__, e)
+                else:
+                    raise AssertionError((fmt, value))
+
+
+class Indexed:
+    def __init__(self, value):
+        self.value = value
+
+    def __index__(self):
+        return self.value
+
+
+for value in (-2**63, -1, 2**64 - 1, Indexed(-2**63 - 1), Indexed(2**64)):
+    try:
+        print('@P', struct.pack('@P', value).hex())
+    except (struct.error, OverflowError) as e:
+        print('@P', type(e).__name__, e)
