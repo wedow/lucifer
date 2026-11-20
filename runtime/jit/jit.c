@@ -965,7 +965,7 @@ kill(struct lu_jit_code *jc, struct lu_unit *u)
     if (entry != NULL) {
         /* Callers stop entering it; one that read the entry before finds it
            dead. One not published yet is taken back by its compile. */
-        __atomic_compare_exchange_n(&jc->direct.entry, &entry, NULL, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED);
+        __atomic_compare_exchange_n(&jc->direct.entry, &entry, NULL, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
     }
     dying_add(u);
     count(&stats.units_dead, 1);
