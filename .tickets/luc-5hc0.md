@@ -1,6 +1,6 @@
 ---
 id: luc-5hc0
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-19T21:51:34Z
@@ -39,3 +39,13 @@ Use the existing guarded no-dict method specialization for these receivers. The 
 The literal-method regression check matched the CPython output in both builds. Doubling the test from 20,000 to 40,000 iterations added 60,000 helper calls before the fix and 40,000 after it. The same program matched the oracle in the plain, JIT, and deopt kernel lanes.
 
 The other shape probes improved from `720b666` to `ec1c1238`. Logging went from 2.087 M to 1.918 M instructions per loop, pure-Python pickle from 342.986 M to 110.013 M, and pprint from 74.532 G to 55.542 G.
+
+**2026-11-20T02:35:48Z**
+
+Compared `ec1c1238` and `38870d81` across all 14 AWFY and 94 pyperformance instruction rows. Each row uses medians from three fresh, paired runs on a single core with a fixed hash seed. AWFY checks the canonical results and counts four iterations after eight warmups. Pyperformance uses the corpus loop counts. It counts three values after ten warmups, with four warmups for the longest rows. The JSON encoder uses the original 96/36 window.
+
+AWFY moved +0.02% by geometric mean. The largest change was CD at +0.31%. Pyperformance moved -1.92% by geometric mean. Base64 moved -27.24%, comprehensions -22.84%, BPE tokenization -21.34%, JSON encoding -19.24%, and regex_v8 -10.16%. Of the related workloads, pure-Python pickle moved -9.29%, pprint +0.19%, and logging +0.0045%.
+
+Dulwich's commit walk had the largest increase in the standard window, +10.69%. With 40 warmups and seven counted values, the paired medians went from 923.787 M to 922.475 M instructions per loop (-0.14%). The next-largest increase in the standard window was concurrent_imap at +3.16%.
+
+The regression check failed before the change and passed after it. The `make check`, `make check-jit`, `make check-harness`, and quick floor gates all exited zero. The kernel passed 792/792 in each of the default, JIT, and deopt lanes. The quick floor lost zero passes.
