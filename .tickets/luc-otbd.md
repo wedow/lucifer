@@ -1,6 +1,6 @@
 ---
 id: luc-otbd
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-21T06:18:23Z
@@ -15,3 +15,9 @@ Review of 62aaa6bf (pre-existing: the old _acquire_restore used Lock.acquire). R
 Repro: main does 'with cond: cond.wait(10)'; a helper takes cond, notifies, sleeps 0.2 s, calls _thread.interrupt_main(), sleeps 0.2 s, releases. CPython: KeyboardInterrupt (no context). lucifer, all lanes: RuntimeError with KeyboardInterrupt as context.
 Fix: _acquire_restore waits without handling signals.
 
+
+## Notes
+
+**2026-11-21T06:21:48Z**
+
+Fixed by 8fb53ff2 (_acquire_restore waits without handling signals). tests/kernel/condition_wait_interrupt.py: RuntimeError before / KeyboardInterrupt after, 10/10 per lane.

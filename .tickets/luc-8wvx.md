@@ -1,6 +1,6 @@
 ---
 id: luc-8wvx
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-21T06:18:23Z
@@ -26,3 +26,9 @@ Repro (CPython: 'bad [] 0 False'; lucifer all lanes: RuntimeError in holder, or 
     stop = True
 Fix: write the count only when the caller gives up a hold.
 
+
+## Notes
+
+**2026-11-21T06:21:47Z**
+
+Fixed by 8fb53ff2 (rlock_release writes the count only when the caller gives up a hold). tests/kernel/rlock_foreign_release.py: fails before in plain, jit (RuntimeError in holder) and jit-deopt (hang); passes 10/10 per lane after.
