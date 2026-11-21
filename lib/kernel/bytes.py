@@ -14,11 +14,12 @@ from _lucifer import (
     b_sizeof, ba_new, ba_wrap, ba_splice, ba_set_step, ba_del_step, ba_set_item, ba_pop,
     ba_remove, ba_reverse, ba_resize, ba_irepeat, ba_alloc, list_append,
 )
-from _lucifer import _boot, operators, _format, slice as _slice, iter as _iter, str as _str
+from _lucifer import _args, _boot, operators, _format, slice as _slice, iter as _iter, str as _str
 
 kernel_type = _boot.kernel_type
 classmethod_ = _boot.classmethod_
 call_special = _boot.call_special
+check_positional = _args.check_positional
 index = operators.index
 as_ssize = operators.as_ssize
 ssize_arg = operators.ssize_arg
@@ -49,20 +50,6 @@ def _plural(n):
     return 'argument' if n == 1 else 'arguments'
 
 
-def _args(name, args, lo, hi):
-    """_PyArg_CheckPositional: args padded with MISSING to hi entries."""
-    n = size(args)
-    if n < lo or n > hi:
-        qual = '' if lo == hi else 'at least ' if n < lo else 'at most '
-        want = lo if n < lo else hi
-        error(TypeError, _cat(name, ' expected ', qual, _decimal(want), ' ', _plural(want),
-                              ', got ', _decimal(n)))
-    while n < hi:
-        args = (*args, MISSING)
-        n += 1
-    return args
-
-
 def _tname(self):
     """The type named in a method's messages: the class of self, or self for a classmethod."""
     if kind(self, 'type'):
@@ -75,10 +62,11 @@ def _nokw(self, name, kwargs):
         error(TypeError, _cat(_tname(self), '.', name, '() takes no keyword arguments'))
 
 
-def _a(self, name, args, kwargs, lo, hi):
-    """A fastcall method's positional arguments, padded."""
+def _check_args(self, name, args, kwargs, lo, hi):
     _nokw(self, name, kwargs)
-    return _args(name, args, lo, hi)
+    n = size(args)
+    check_positional(name, n, lo, hi)
+    return n
 
 
 def _o(self, name, args, kwargs):
@@ -166,10 +154,11 @@ def _bound(x, default):
 
 
 def _find_args(name, args):
-    sub, start, end = _args(name, args, 1, 3)
-    start = _bound(start, 0)
-    end = _bound(end, _SSIZE_MAX)
-    return _sub(sub), start, end
+    n = size(args)
+    check_positional(name, n, 1, 3)
+    start = _bound(args[1], 0) if n > 1 else 0
+    end = _bound(args[2], _SSIZE_MAX) if n > 2 else _SSIZE_MAX
+    return _sub(args[0]), start, end
 
 
 def _find(self, args, name, last):
@@ -185,9 +174,11 @@ def _find_index(self, args, name, last):
 
 
 def _tailmatch(self, args, name, at_end):
-    prefix, start, end = _args(name, args, 1, 3)
-    start = _bound(start, 0)
-    end = _bound(end, _SSIZE_MAX)
+    n = size(args)
+    check_positional(name, n, 1, 3)
+    prefix = args[0]
+    start = _bound(args[1], 0) if n > 1 else 0
+    end = _bound(args[2], _SSIZE_MAX) if n > 2 else _SSIZE_MAX
     if kind(prefix, 'tuple'):
         for p in prefix:
             if b_match(self, p, start, end, at_end):
@@ -328,12 +319,16 @@ def _m_join(self, *args, **kwargs):
 
 
 def _m_replace(self, *args, **kwargs):
-    old, new, count = _a(self, 'replace', args, kwargs, 2, 3)
+    n = _check_args(self, 'replace', args, kwargs, 2, 3)
+    old, new = args[0], args[1]
+    count = args[2] if n > 2 else MISSING
     return _out(self, b_replace(self, old, new, -1 if count is MISSING else ssize_arg(count)))
 
 
 def _chars(args, name):
-    chars, = _args(name, args, 0, 1)
+    n = size(args)
+    check_positional(name, n, 0, 1)
+    chars = args[0] if n else MISSING
     return None if chars is MISSING else chars
 
 
@@ -383,9 +378,9 @@ def _is(mode, name):
 
 
 def _m_center(self, *args, **kwargs):
-    width, fill = _a(self, 'center', args, kwargs, 1, 2)
-    width = ssize_arg(width)
-    fill = _fill_arg('center', fill)
+    n = _check_args(self, 'center', args, kwargs, 1, 2)
+    width = ssize_arg(args[0])
+    fill = _fill_arg('center', args[1] if n > 1 else MISSING)
     n = b_len(self)
     if width <= n:
         return _out(self, b_bytes(self))
@@ -395,17 +390,17 @@ def _m_center(self, *args, **kwargs):
 
 
 def _m_ljust(self, *args, **kwargs):
-    width, fill = _a(self, 'ljust', args, kwargs, 1, 2)
-    width = ssize_arg(width)
-    fill = _fill_arg('ljust', fill)
+    n = _check_args(self, 'ljust', args, kwargs, 1, 2)
+    width = ssize_arg(args[0])
+    fill = _fill_arg('ljust', args[1] if n > 1 else MISSING)
     n = b_len(self)
     return _out(self, b_concat(self, _pad(fill, width - n)))
 
 
 def _m_rjust(self, *args, **kwargs):
-    width, fill = _a(self, 'rjust', args, kwargs, 1, 2)
-    width = ssize_arg(width)
-    fill = _fill_arg('rjust', fill)
+    n = _check_args(self, 'rjust', args, kwargs, 1, 2)
+    width = ssize_arg(args[0])
+    fill = _fill_arg('rjust', args[1] if n > 1 else MISSING)
     n = b_len(self)
     return _out(self, b_concat(_pad(fill, width - n), self))
 
@@ -440,7 +435,8 @@ def _m_translate(self, *args, **kwargs):
 
 
 def _m_maketrans(cls, *args, **kwargs):
-    frm, to = _a(cls, 'maketrans', args, kwargs, 2, 2)
+    _check_args(cls, 'maketrans', args, kwargs, 2, 2)
+    frm, to = args
     if b_len(frm) != b_len(to):
         error(ValueError, 'maketrans arguments must have same length')
     f = b_bytes(frm)
@@ -1055,7 +1051,8 @@ Construct a mutable bytearray object from:
 
     def insert(self, *args, **kwargs):
         """Insert a single item into the bytearray before the given index."""
-        index, item = _a(self, 'insert', args, kwargs, 2, 2)
+        _check_args(self, 'insert', args, kwargs, 2, 2)
+        index, item = args
         i = as_ssize(index, None)
         v = _byte(item)
         n = b_len(self)
@@ -1069,7 +1066,8 @@ Construct a mutable bytearray object from:
 
     def pop(self, *args, **kwargs):
         """Remove and return a single item from B."""
-        index, = _a(self, 'pop', args, kwargs, 0, 1)
+        n = _check_args(self, 'pop', args, kwargs, 0, 1)
+        index = args[0] if n else MISSING
         return ba_pop(self, -1 if index is MISSING else as_ssize(index, None))
 
     def remove(self, *args, **kwargs):

@@ -10,11 +10,12 @@ from _lucifer import (
     str_repeat, str_split, str_splitlines, str_strip, str_case, str_is, str_expandtabs, str_ascii,
     str_encode, str_decode, str_iter, str_iter_next, str_subtype, str_sizeof, list_append, slice_parts, kernel_set, b_check, b_bytes, kernel_twin,
 )
-from _lucifer import _boot, operators, _format, iter as _iter
+from _lucifer import _args, _boot, operators, _format, iter as _iter
 
 kernel_type = _boot.kernel_type
 classmethod_ = _boot.classmethod_
 call_special = _boot.call_special
+check_positional = _args.check_positional
 index = operators.index
 ssize_arg = operators.ssize_arg
 int_arg = operators.int_arg
@@ -40,25 +41,6 @@ def _cat(*parts):
 
 def _decimal(n):
     return int_format(n, 10, False)
-
-
-def _plural(n):
-    return 'argument' if n == 1 else 'arguments'
-
-
-def _args(name, args, lo, hi):
-    """_PyArg_CheckPositional: args padded with MISSING to hi entries."""
-    n = size(args)
-    if n < lo:
-        error(TypeError, _cat(name, ' expected at least ', _decimal(lo), ' ', _plural(lo),
-                              ', got ', _decimal(n)))
-    if n > hi:
-        error(TypeError, _cat(name, ' expected at most ', _decimal(hi), ' ', _plural(hi),
-                              ', got ', _decimal(n)))
-    while n < hi:
-        args = (*args, MISSING)
-        n += 1
-    return args
 
 
 def _noargs(name, args, kwargs):
@@ -115,19 +97,21 @@ def _adjust(n, start, end):
 
 
 def _find(self, args, name, last):
-    sub, start, end = _args(name, args, 1, 3)
-    _str_arg(sub, name, '1')
-    start = _slice_index(start, 0)
-    end = _slice_index(end, _SSIZE_MAX)
+    n = size(args)
+    check_positional(name, n, 1, 3)
+    sub = _str_arg(args[0], name, '1')
+    start = _slice_index(args[1], 0) if n > 1 else 0
+    end = _slice_index(args[2], _SSIZE_MAX) if n > 2 else _SSIZE_MAX
     return str_find(self, sub, start, end, last)
 
 
 def _tailmatch(self, args, name, at_end):
-    prefix, start, end = _args(name, args, 1, 3)
-    start = _slice_index(start, 0)
-    end = _slice_index(end, _SSIZE_MAX)
-    n = str_len(self)
-    start, end = _adjust(n, start, end)
+    n = size(args)
+    check_positional(name, n, 1, 3)
+    prefix = args[0]
+    start = _slice_index(args[1], 0) if n > 1 else 0
+    end = _slice_index(args[2], _SSIZE_MAX) if n > 2 else _SSIZE_MAX
+    start, end = _adjust(str_len(self), start, end)
     if kind(prefix, 'tuple'):
         for p in prefix:
             if not kind(p, 'str'):
@@ -152,7 +136,10 @@ def _match(s, sub, start, end, at_end):
 
 
 def _fill(args, name):
-    width, fill = _args(name, args, 1, 2)
+    n = size(args)
+    check_positional(name, n, 1, 2)
+    width = args[0]
+    fill = args[1] if n > 1 else MISSING
     if fill is MISSING:
         fill = ' '
     elif not kind(fill, 'str'):
@@ -528,9 +515,12 @@ errors defaults to 'strict'."""
         return r
 
     def count(self, *args):
-        sub, start, end = _args('count', args, 1, 3)
-        _str_arg(sub, 'count', '1')
-        return str_count(self, sub, _slice_index(start, 0), _slice_index(end, _SSIZE_MAX))
+        n = size(args)
+        check_positional('count', n, 1, 3)
+        sub = _str_arg(args[0], 'count', '1')
+        start = _slice_index(args[1], 0) if n > 1 else 0
+        end = _slice_index(args[2], _SSIZE_MAX) if n > 2 else _SSIZE_MAX
+        return str_count(self, sub, start, end)
 
     def startswith(self, *args):
         return _tailmatch(self, args, 'startswith', False)

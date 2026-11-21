@@ -1,7 +1,5 @@
-"""Argument parsing for kernel functions that take keywords, with the
-refusals of the Argument Clinic parser (Python/getargs.c
-_PyArg_UnpackKeywords). Functions of positional-only parameters need none:
-the interpreter words their arity errors as a C builtin's."""
+"""Kernel argument checks with the messages of Python/getargs.c.
+The interpreter checks functions with fixed positional-only signatures."""
 
 from _lucifer import MISSING, error, str_join, size, ns_get, ns_items, suggest_keyword
 from _lucifer import _boot, operators
@@ -13,6 +11,15 @@ decimal = operators.decimal
 
 def _plural(n):
     return '' if n == 1 else 's'
+
+
+def check_positional(name, n, lo, hi):
+    """_PyArg_CheckPositional for a method that takes a range of arities."""
+    if n < lo or n > hi:
+        qual = '' if lo == hi else 'at least ' if n < lo else 'at most '
+        want = lo if n < lo else hi
+        error(TypeError, str_join('', (name, ' expected ', qual, decimal(want),
+                                      ' argument', _plural(want), ', got ', decimal(n))))
 
 
 def unpack(fname, args, kwargs, names, posonly, minpos):

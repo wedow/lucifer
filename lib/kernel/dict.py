@@ -13,7 +13,7 @@ from _lucifer import (
     dict_sizeof, dictiter_new, dictiter_next, dictiter_len, dictiter_copy, dictview_new,
     dictview_dict, set_next, set_entry, set_entries,
 )
-from _lucifer import _boot, _format, operators, iter as _iter, list as _list, str as _str, object as _object
+from _lucifer import _args, _boot, _format, operators, iter as _iter, list as _list, object as _object
 
 kernel_type = _boot.kernel_type
 classmethod_ = _boot.classmethod_
@@ -22,7 +22,7 @@ hash_of = operators.hash_of
 decimal = operators.decimal
 to_repr = _format.to_repr
 to_str = _format.to_str
-_args = _str._args
+check_positional = _args.check_positional
 lookup_attr = _object.lookup_attr
 
 __all__ = ()
@@ -275,7 +275,7 @@ def update_arg(d, arg):
 def update_common(d, args, kwargs, name):
     n = size(args)
     if n > 1:
-        _args(name, args, 0, 1)
+        check_positional(name, n, 0, 1)
     if n == 1:
         update_arg(d, args[0])
     if kwargs:
