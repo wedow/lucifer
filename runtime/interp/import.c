@@ -253,26 +253,34 @@ prim_fix_co_filename(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
-/* marshal_loads(bytes): the object marshal.loads returns. */
+/* marshal_loads(data, allow_code): the object marshal.loads returns. */
 static PyObject *
 prim_marshal_loads(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    if (nargs != 1 || !PyBytes_Check(args[0])) {
-        lu_err_format(PyExc_TypeError, "marshal_loads(bytes)");
+    if (nargs != 2) {
+        lu_err_format(PyExc_TypeError, "marshal_loads(data, allow_code)");
         return NULL;
     }
-    return PyMarshal_ReadObjectFromString(PyBytes_AS_STRING(args[0]), PyBytes_GET_SIZE(args[0]));
+    Py_buffer data;
+    if (PyObject_GetBuffer(args[0], &data, PyBUF_SIMPLE) < 0) {
+        return NULL;
+    }
+    int allow_code = lu_is_true(args[1]);
+    PyObject *result = allow_code < 0 ? NULL : lu_marshal_loads(data.buf, data.len, allow_code);
+    PyBuffer_Release(&data);
+    return result;
 }
 
-/* marshal_load(file): the object marshal.load reads from file. */
+/* marshal_load(file, allow_code): the object marshal.load reads from file. */
 static PyObject *
 prim_marshal_load(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    if (nargs != 1) {
-        lu_err_format(PyExc_TypeError, "marshal_load(file)");
+    if (nargs != 2) {
+        lu_err_format(PyExc_TypeError, "marshal_load(file, allow_code)");
         return NULL;
     }
-    return lu_marshal_load(args[0]);
+    int allow_code = lu_is_true(args[1]);
+    return allow_code < 0 ? NULL : lu_marshal_load(args[0], allow_code);
 }
 
 /* marshal_dumps(obj, version, allow_code): the bytes marshal.dumps returns. */

@@ -77,9 +77,6 @@ r_string(Py_ssize_t n, RFILE *p)
         p->ptr += n;
         return res;
     }
-    if (n == 0) {
-        return "";
-    }
     if (n > p->buf_size) {
         char *buf = PyMem_Realloc(p->buf, (size_t)n);
         if (buf == NULL) {
@@ -305,7 +302,7 @@ r_str(RFILE *p, long n, int ascii, int is_interned)
         }
         return NULL;
     }
-    const char *ptr = n ? r_string(n, p) : "";
+    const char *ptr = (n || ascii) ? r_string(n, p) : "";
     if (ptr == NULL) {
         return NULL;
     }
@@ -659,18 +656,36 @@ read_object(RFILE *rf)
 }
 
 PyObject *
+lu_marshal_loads(const char *str, Py_ssize_t len, int allow_code)
+{
+    RFILE rf = { .ptr = str, .end = str + len, .allow_code = allow_code };
+    return read_object(&rf);
+}
+
+PyObject *
 PyMarshal_ReadObjectFromString(const char *str, Py_ssize_t len)
 {
-    RFILE rf = { .ptr = str, .end = str + len, .allow_code = 1 };
-    return read_object(&rf);
+    return lu_marshal_loads(str, len, 1);
 }
 
 /* marshal.load: one object read from file through its readinto, no further than the object. */
 PyObject *
-lu_marshal_load(PyObject *file)
+lu_marshal_load(PyObject *file, int allow_code)
 {
-    RFILE rf = { .readable = file, .allow_code = 1 };
-    return read_object(&rf);
+    PyObject *data = PyObject_CallMethod(file, "read", "i", 0);
+    if (data == NULL) {
+        return NULL;
+    }
+    PyObject *result = NULL;
+    if (PyBytes_Check(data)) {
+        RFILE rf = { .readable = file, .allow_code = allow_code };
+        result = read_object(&rf);
+    }
+    else {
+        lu_err_format(PyExc_TypeError, "file.read() returned not bytes but %.100s", Py_TYPE(data)->tp_name);
+    }
+    Py_DECREF(data);
+    return result;
 }
 
 /* The writer (w_object and its helpers). Objects seen more than once, or not

@@ -1427,9 +1427,10 @@ int lu_sys_init_streams(struct _is *interp);
 /* runtime/interp/import.c: _imp, then _frozen_importlib and its install. */
 int lu_import_init(struct _is *interp);
 
-/* runtime/interp/marshal.c: marshal.dumps and marshal.load. */
+/* runtime/interp/marshal.c: marshal module primitives. */
 PyObject *lu_marshal_dumps(PyObject *x, int version, int allow_code);
-PyObject *lu_marshal_load(PyObject *file);
+PyObject *lu_marshal_load(PyObject *file, int allow_code);
+PyObject *lu_marshal_loads(const char *str, Py_ssize_t len, int allow_code);
 
 /* PyModuleObject (Include/internal/pycore_moduleobject.h). */
 typedef struct {

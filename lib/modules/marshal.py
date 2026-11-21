@@ -8,15 +8,12 @@ version = 5
 
 def loads(data, /, *, allow_code=True):
     """Convert the bytes-like object to a value."""
-    return _loads(data if type(data) is bytes else bytes(data))
+    return _loads(data, allow_code)
 
 
 def load(file, /, *, allow_code=True):
     """Read one value from the open file, reading no further than the value."""
-    data = file.read(0)
-    if not isinstance(data, bytes):
-        raise TypeError('file.read() returned not bytes but %.100s' % type(data).__name__)
-    return _load(file)
+    return _load(file, allow_code)
 
 
 def dumps(value, version=version, /, *, allow_code=True):
