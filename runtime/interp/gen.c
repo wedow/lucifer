@@ -244,15 +244,19 @@ clear_frame(struct lu_gen *gen)
 }
 
 /* A returning generator's frame leaves the stack before its locals go
-   (CPython's clear_gen_frame from _PyEval_FrameClearAndPop). */
+   (CPython's clear_gen_frame from _PyEval_FrameClearAndPop). Compiled
+   code's return (OP_UNLINK) has done all but the release already: the
+   generator is cleared then. */
 void
 lu_gen_finish(PyThreadState *ts, struct lu_frame *f)
 {
     struct lu_gen *gen = lu_gen_of(f);
-    lu_frame_unlink(ts, f);
-    ts->exc_info = gen->exc_state.previous_item;
-    gen->exc_state.previous_item = NULL;
-    lu_depth_leave(ts, f->code);
+    if (gen->frame_state != LU_GEN_CLEARED) {
+        lu_frame_unlink(ts, f);
+        ts->exc_info = gen->exc_state.previous_item;
+        gen->exc_state.previous_item = NULL;
+        lu_depth_leave(ts, f->code);
+    }
     clear_frame(gen);
 }
 

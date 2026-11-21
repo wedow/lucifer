@@ -15,6 +15,7 @@
 #include "jit/target.h"
 #include "jit/jit.h"
 #include "interp/perf.h"
+#include "interp/gen.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -3857,9 +3858,25 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jmp(a, exit_to(a, in->fs, (int)in->imm, 0, 0));
         return 0;
     case OP_UNLINK:
-        /* lu_frame_unlink: a generator's too, before lu_gen_finish. */
+        /* lu_frame_unlink; for a generator lu_gen_finish's state as well,
+           so that the releases see it cleared (clear_gen_frame), and
+           lu_gen_finish then releases only. */
         load(a, R11, R15, offsetof(struct lu_frame, previous));
         store(a, R14, offsetof(PyThreadState, current_frame), R11);
+        if (f->code->co_flags & LU_CO_GENERATORS) {
+            const int32_t gen = -(int32_t)offsetof(struct lu_gen, frame);
+            const int32_t prev = gen + (int32_t)offsetof(struct lu_gen, exc_state.previous_item);
+            store8_mi(a, R15, gen + (int32_t)offsetof(struct lu_gen, frame_state), LU_GEN_CLEARED);
+            load(a, R11, R15, prev);
+            store(a, R14, offsetof(PyThreadState, exc_info), R11);
+            store_mi(a, R15, prev, 0);
+            if (lu_frame_is_kernel(f->code)) {         /* lu_depth_leave */
+                alu_mi(a, 1, ALU_ADD, R14, offsetof(struct lu_task, kernel_room), f->code->co_framesize);
+            }
+            else {
+                incdec32(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));
+            }
+        }
         return 0;
     case OP_FRAME_STORE:
         r = gpr_of(a, in->a, RAX);
