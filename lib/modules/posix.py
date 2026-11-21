@@ -521,7 +521,7 @@ Return 0 to child process and PID of child to parent process."""
     sys.audit('os.fork')
     _run_at_fork('before')
     _imp.acquire_lock()
-    held = _imp._lock_count - 1         # the forking thread's own holds: the lock is exclusive
+    held = _imp._lock_depth() - 1       # exclude fork's own acquisition
     try:
         pid = _lucifer.os_fork()
     except BaseException:

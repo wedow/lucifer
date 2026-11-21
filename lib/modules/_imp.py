@@ -12,8 +12,7 @@ import sys
 check_hash_based_pycs = 'default'
 pyc_magic_number_token = 3627 | (ord('\r') << 16) | (ord('\n') << 24)
 
-_lock = None
-_lock_count = 0
+_lock = _lucifer.mutex_new()
 
 
 def acquire_lock():
@@ -21,40 +20,34 @@ def acquire_lock():
 
 This lock should be used by import hooks to ensure thread-safety when importing
 modules. On platforms without threads, this function does nothing."""
-    global _lock, _lock_count
-    if _lock is None:
-        import _thread
-        _lock = _thread.RLock()
-    _lock.acquire()
-    _lock_count += 1
+    _lucifer.rlock_acquire(_lock, -1, 1)
 
 
 def release_lock():
     """Release the interpreter's import lock.
 
 On platforms without threads, this function does nothing."""
-    global _lock_count
-    if _lock_count == 0:
+    if not _lucifer.rlock_release(_lock, False):
         raise RuntimeError('not holding the import lock')
-    _lock_count -= 1
-    _lock.release()
+
+
+def _lock_depth():
+    return _lucifer.mutex_mine(_lock)
 
 
 def _reinit_lock(held):
     """After a fork: the import lock is a new one, held by the surviving thread `held` times."""
-    global _lock, _lock_count
-    import _thread
-    _lock = _thread.RLock()
-    _lock_count = 0
-    for _ in range(held):
-        acquire_lock()
+    global _lock
+    _lock = _lucifer.mutex_new()
+    if held:
+        _lucifer.rlock_acquire(_lock, -1, held)
 
 
 def lock_held():
     """Return True if the import lock is currently held, else False.
 
 On platforms without threads, return False."""
-    return _lock_count > 0
+    return _lucifer.mutex_locked(_lock)
 
 
 def is_builtin(name, /):
