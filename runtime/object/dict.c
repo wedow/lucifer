@@ -165,13 +165,14 @@ changed(PyDictObject *mp, Py_ssize_t ix)
 
 /* The item calls of the dict API that watchers are tested through. They go
    to the dict's own implementation, which hashes and compares keys; a
-   subclass's __setitem__ or __delitem__ is not consulted, as in CPython. */
+   subclass's __setitem__ or __delitem__ is not consulted, as in CPython.
+   Bad argument errors use the source locations from CPython 3.14.10. */
 
 int
 PyDict_SetItem(PyObject *op, PyObject *key, PyObject *value)
 {
     if (!PyDict_Check(op)) {
-        lu_err_format(PyExc_SystemError, "bad argument to internal function");
+        _PyErr_BadInternalCall("Objects/dictobject.c", 2722);
         return -1;
     }
     int done = lu_dict_put_native(op, key, value);
@@ -188,7 +189,12 @@ int
 PyDict_DelItem(PyObject *op, PyObject *key)
 {
     if (!PyDict_Check(op)) {
-        lu_err_format(PyExc_SystemError, "bad argument to internal function");
+        /* CPython hashes the key before rejecting the target. */
+        PyObject *hash = lu_call_kernel(LU_K_dict_key_hash, &key, 1);
+        if (hash != NULL) {
+            Py_DECREF(hash);
+            _PyErr_BadInternalCall("Objects/dictobject.c", 2854);
+        }
         return -1;
     }
     PyObject *args[2] = { op, key };

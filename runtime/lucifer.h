@@ -223,6 +223,7 @@ struct lu_static_type_state {
     X(isinstance)               /* */ \
     X(dict_setitem)             /* PyDict_SetItem(dict, key, value): the dict's own, whatever the subclass overrides */ \
     X(dict_delitem)             /* PyDict_DelItem(dict, key) */ \
+    X(dict_key_hash)            /* hash with dict-specific errors */ \
     X(length)                   /* PyObject_Size as an int: GET_LEN */ \
     X(get_iter)                 /* PyObject_GetIter: GET_ITER */ \
     X(next_item)                /* the next item of an iterator, or MISSING: FOR_ITER */ \
