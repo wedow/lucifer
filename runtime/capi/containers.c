@@ -167,7 +167,10 @@ PyIter_NextItem(PyObject *iter, PyObject **item)
 PySendResult
 PyIter_Send(PyObject *iter, PyObject *arg, PyObject **result)
 {
-    PyObject *r = arg == Py_None && PyIter_Check(iter) ? PyIter_Next(iter) : call_method(iter, "send", "(O)", arg);
+    /* The raw step preserves a StopIteration value for the sender. */
+    PyObject *r = arg == Py_None && PyIter_Check(iter)
+        ? lu_call_special(iter, LU_ID(__next__), NULL, 0)
+        : call_method(iter, "send", "(O)", arg);
     if (r != NULL) {
         *result = r;
         return PYGEN_NEXT;
@@ -178,7 +181,7 @@ PyIter_Send(PyObject *iter, PyObject *arg, PyObject **result)
         Py_DECREF(exc);
         return *result != NULL ? PYGEN_RETURN : PYGEN_ERROR;
     }
-    if (!PyErr_Occurred()) {                    /* PyIter_Next: exhausted without a value */
+    if (!PyErr_Occurred()) {
         *result = Py_NewRef(Py_None);
         return PYGEN_RETURN;
     }

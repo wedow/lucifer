@@ -378,7 +378,6 @@ class reversed:
         return 0 if position > n else position
 
 
-_iter.next_missing_set(map, _map_next)
 _iter.next_missing_set(filter, _filter_next)
 _iter.next_missing_set(zip, _zip_next)
 _iter.next_missing_set(enumerate, _enumerate_next)

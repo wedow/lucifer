@@ -114,6 +114,14 @@ print(mg.x, mg.y, mg.__dict__, weakref.ref(mg)() is mg, Managed.__dictoffset__ !
 
 # sets, iterators, lists, bytes, weak references, codecs
 print(ready.containers())
+
+
+def stop_mapping(value):
+    raise StopIteration(value)
+
+
+show(ready.iterator_step, map(stop_mapping, (42,)), False)
+show(ready.iterator_step, map(stop_mapping, (42,)), True)
 print(ready.codecs())
 
 # sys, thread-specific storage, running code

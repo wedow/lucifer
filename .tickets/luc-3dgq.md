@@ -1,6 +1,6 @@
 ---
 id: luc-3dgq
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T02:42:33Z
@@ -52,3 +52,9 @@ list StopIteration
 ```
 
 
+
+## Notes
+
+**2026-11-21T08:49:27Z**
+
+The exact-type map step bypassed the shared StopIteration handler. Map now uses the standard iterator path, which treats the callback exception as exhaustion for consumers and preserves its value for direct calls and yield from. PyIter_Send calls the special method directly so it can recover the same value. The new kernel and C-API cases failed on the base. Both passed after the fix in plain, jit, and jit-deopt, along with the targeted iterator checks and the ABI audit.

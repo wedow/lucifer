@@ -669,6 +669,21 @@ make_managed(PyObject *self, PyObject *Py_UNUSED(ignored))
     return PyType_FromSpec(&spec);
 }
 
+static PyObject *
+iterator_step(PyObject *self, PyObject *args)
+{
+    PyObject *it, *item;
+    int send;
+    if (!PyArg_ParseTuple(args, "Op", &it, &send)) {
+        return NULL;
+    }
+    int status = send ? PyIter_Send(it, Py_None, &item) : PyIter_NextItem(it, &item);
+    if (status < 0) {
+        return NULL;
+    }
+    return Py_BuildValue("iN", status, item != NULL ? item : Py_NewRef(Py_None));
+}
+
 /* Sets, iterators, lists, bytes, weak references and str codecs. */
 static PyObject *
 containers(PyObject *self, PyObject *Py_UNUSED(ignored))
@@ -1299,6 +1314,7 @@ static PyMethodDef module_methods[] = {
     { "runtime_services", runtime_services, METH_NOARGS, NULL },
     { "dealloc_count", dealloc_count, METH_NOARGS, NULL },
     { "containers", containers, METH_NOARGS, NULL },
+    { "iterator_step", iterator_step, METH_VARARGS, NULL },
     { "codecs", codecs, METH_NOARGS, NULL },
     { "make_managed", make_managed, METH_NOARGS, NULL },
     { "make_meta_class", make_meta_class, METH_NOARGS, NULL },
