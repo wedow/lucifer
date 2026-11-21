@@ -167,7 +167,7 @@ to be available for other threads."""
         return count, get_ident()
 
     def _acquire_restore(self, state):
-        _lucifer.rlock_acquire(self._block._mutex, -1, state[0])
+        _lucifer.rlock_acquire(self._block._mutex, None, state[0])     # signals wait until it is held
 
     def _at_fork_reinit(self):
         self._block._at_fork_reinit()

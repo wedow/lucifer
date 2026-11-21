@@ -62,19 +62,23 @@ prim_mutex_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 /* Locks args[0], waiting at most args[1] nanoseconds, for ever if it is
    negative and not at all if 0, and records the caller holding it `count`
    times. Detached while it waits. A signal handler that raises ends the
-   wait with its exception; one that returns lets it go on. */
+   wait with its exception; one that returns lets it go on. A timeout of
+   None waits for ever and leaves signals to the next poll, as CPython's
+   PyMutex_Lock does for Condition's _acquire_restore: the lock is held
+   again before any handler runs. */
 static PyObject *
 lock_timed(PyObject *const *args, long long count)
 {
     struct mutex *mutex = mutex_of(args[0]);
-    long timeout;
-    if (mutex == NULL || !PyLong_Check(args[1]) || lu_long_as_long(args[1], &timeout) < 0) {
+    long timeout = -1;
+    if (mutex == NULL
+        || (args[1] != Py_None && (!PyLong_Check(args[1]) || lu_long_as_long(args[1], &timeout) < 0))) {
         return NULL;
     }
+    _PyLockFlags flags = args[1] == Py_None ? _PY_LOCK_DETACH : _PY_LOCK_DETACH | _PY_LOCK_HANDLE_SIGNALS;
     PyTime_t deadline = timeout > 0 ? lu_monotonic_ns() + timeout : 0;
     PyTime_t left = timeout > 0 ? deadline - lu_monotonic_ns() : timeout;
-    PyLockStatus status = _PyMutex_LockTimed(&mutex->lock, left > 0 || timeout <= 0 ? left : 0,
-                                             _PY_LOCK_DETACH | _PY_LOCK_HANDLE_SIGNALS);
+    PyLockStatus status = _PyMutex_LockTimed(&mutex->lock, left > 0 || timeout <= 0 ? left : 0, flags);
     if (status == PY_LOCK_INTR) {
         return NULL;
     }
@@ -146,11 +150,11 @@ prim_rlock_release(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return NULL;
     }
     long long held = mine(mutex), n = PyObject_IsTrue(args[1]) ? held : held > 0;
-    if (n == held && held > 0) {
+    if (n > 0 && n == held) {
         unlock(mutex);
     }
-    else {
-        mutex->count -= n;
+    else if (n > 0) {
+        mutex->count -= n;      /* only the holder writes the count */
     }
     return PyLong_FromLongLong(n);
 }
