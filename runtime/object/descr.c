@@ -286,6 +286,10 @@ lu_wrapper_descr_call(PyObject *descr, PyObject *const *args, Py_ssize_t nargs, 
     if (check_self((PyDescrObject *)d, args, nargs, 1) < 0) {
         return NULL;
     }
+    if (d->d_base == &kernel_wrapperbase && (kwargs == NULL || ((PyDictObject *)kwargs)->ma_used == 0)) {
+        /* kernel_wrapper's call, made from the arguments as they are. */
+        return lu_call(((struct lu_kernel_def *)d->d_wrapped)->func, args, (size_t)nargs, NULL);
+    }
     PyObject *rest = PyTuple_New(nargs - 1);
     for (Py_ssize_t i = 1; rest != NULL && i < nargs; i++) {
         PyTuple_SET_ITEM(rest, i - 1, Py_NewRef(args[i]));
