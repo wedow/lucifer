@@ -20,7 +20,7 @@ def acquire_lock():
 
 This lock should be used by import hooks to ensure thread-safety when importing
 modules. On platforms without threads, this function does nothing."""
-    _lucifer.rlock_acquire(_lock, -1, 1)
+    _lucifer.rlock_acquire(_lock, None, 1)     # not interrupted, as _PyRecursiveMutex_Lock
 
 
 def release_lock():
