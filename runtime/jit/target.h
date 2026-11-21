@@ -505,10 +505,11 @@ unsigned long lu_jit_prof_kinds(struct lu_prof *p);
 /* Whether its one type was dropped and it has met no other yet: compiled
    code reports the type it meets (lu_ev_profile). */
 int lu_jit_prof_learns(struct lu_prof *p);
+enum lu_prof_value_kind { LU_PROF_IMMORTAL = 1, LU_PROF_CLASS };
 /* The same of a value profile: the value it met first (a new reference) or
-   NULL, and whether that is not the one to rely on. The record notes
-   values from here on, and only immortal ones: another makes it poly. */
-PyObject *lu_jit_prof_value(struct lu_prof *p, int *poly);
+   NULL, and whether that is not the one to rely on. The record notes only
+   values of the requested kind from here on: another makes it poly. */
+PyObject *lu_jit_prof_value(struct lu_prof *p, enum lu_prof_value_kind kind, int *poly);
 /* A count that changes whenever a record of the root does. */
 unsigned long lu_jit_prof_learned(PyCodeObject *root);
 /* Compiled code met `o` there, in a unit built when the count was

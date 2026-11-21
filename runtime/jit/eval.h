@@ -324,14 +324,11 @@ PyTypeObject *lu_ev_learn_type(struct ctx *c, lu_v r, int which);
    any class, LU_PROF_KINDS): its type's, or what every type the root met
    there had (guarded) where it met several. */
 int lu_ev_learn_kind(struct ctx *c, lu_v r, int which, unsigned long kind);
-/* The same for r's value, which compiled code may rely on when it is one
-   immortal object (a typecode, a small int): the constant, or NULL; *r is
-   the constant from here. Value records are asked for apart from type
-   records, by `which` alone. */
-#define LU_PROF_VALUES 64
-PyObject *lu_ev_learn_const(struct ctx *c, lu_v *r, int which);
-/* The root's record of that value, and compiled code that reports r's
-   type to it (and leaves when the unit is to be built again). */
+/* The same for r's identity: the constant, or NULL. *r is the constant
+   from here. Value records are separate by kind and from type records. */
+PyObject *lu_ev_learn_const(struct ctx *c, lu_v *r, int which, enum lu_prof_value_kind kind);
+/* The root's record of that value, and compiled code that reports r to
+   it (and leaves when the unit is to be built again). */
 struct lu_prof *lu_ev_prof(struct ctx *c, int which);
 void lu_ev_profile(struct ctx *c, struct lu_prof *p, lu_v r);
 

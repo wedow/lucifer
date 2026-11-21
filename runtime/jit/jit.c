@@ -139,7 +139,7 @@ struct lu_prof {
     PyObject *met[LU_OPCLASS_WAYS];     /* the types the value had, in the order met (references); of a value
                                            profile, the values themselves */
     int n;                      /* how many: release-stored after the type */
-    uint8_t values;             /* a value profile (lu_jit_prof_value) */
+    uint8_t value_kind;         /* lu_prof_value_kind, or zero for types of operands */
     uint8_t poly;               /* it had more than those: nothing to rely on */
     uint8_t dropped;            /* not relied on: a guard on its one type failed as often as a site's (GUARD_FAILS) */
     uint32_t fails;             /* exits of that guard */
@@ -417,10 +417,10 @@ lu_jit_prof_type(struct lu_prof *p, int *poly)
 }
 
 PyObject *
-lu_jit_prof_value(struct lu_prof *p, int *poly)
+lu_jit_prof_value(struct lu_prof *p, enum lu_prof_value_kind kind, int *poly)
 {
     PyMutex_Lock(&p->jc->prof_lock);
-    __atomic_store_n(&p->values, 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&p->value_kind, kind, __ATOMIC_RELAXED);
     PyObject *k = p->n > 0 ? Py_NewRef(p->met[0]) : NULL;
     *poly = p->poly || p->n > 1 || p->dropped;
     PyMutex_Unlock(&p->jc->prof_lock);
@@ -434,7 +434,7 @@ int
 lu_jit_prof_learns(struct lu_prof *p)
 {
     PyMutex_Lock(&p->jc->prof_lock);
-    int learns = p->dropped && p->n == 1 && !p->poly && !p->values;
+    int learns = p->dropped && p->n == 1 && !p->poly && !p->value_kind;
     PyMutex_Unlock(&p->jc->prof_lock);
     return learns;
 }
@@ -443,7 +443,7 @@ unsigned long
 lu_jit_prof_kinds(struct lu_prof *p)
 {
     PyMutex_Lock(&p->jc->prof_lock);
-    unsigned long k = (p->n > 1 || p->poly || (p->n == 1 && !p->dropped)) && !p->values
+    unsigned long k = (p->n > 1 || p->poly || (p->n == 1 && !p->dropped)) && !p->value_kind
         ? LU_PROF_KINDS & ~p->unshared : 0;
     PyMutex_Unlock(&p->jc->prof_lock);
     return k;
@@ -472,10 +472,8 @@ int
 lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
 {
     struct lu_jit_code *jc = p->jc;
-    /* A value profile keeps the values themselves, while they are
-       immortal: any other is no constant to rely on, and makes it poly. */
-    int values = __atomic_load_n(&p->values, __ATOMIC_RELAXED);
-    PyObject *t = values ? o : (PyObject *)Py_TYPE(o);
+    int kind = __atomic_load_n(&p->value_kind, __ATOMIC_RELAXED);
+    PyObject *t = kind ? o : (PyObject *)Py_TYPE(o);
     int met = __atomic_load_n(&p->poly, __ATOMIC_RELAXED);
     for (int i = 0, n = __atomic_load_n(&p->n, __ATOMIC_ACQUIRE); i < n && !met; i++) {
         met = p->met[i] == t;
@@ -495,10 +493,11 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
     for (int i = 0; i < p->n && !known; i++) {
         known = p->met[i] == t;
     }
-    if (!known) {
+    if (!known && !kind) {
         p->unshared |= LU_PROF_KINDS & ~Py_TYPE(o)->tp_flags;
     }
-    if (!known && p->n < LU_OPCLASS_WAYS && (!values || _Py_IsImmortal(o))) {
+    if (!known && p->n < LU_OPCLASS_WAYS
+        && (!kind || (kind == LU_PROF_CLASS ? PyType_Check(o) : _Py_IsImmortal(o)))) {
         p->met[p->n] = Py_NewRef(t);
         __atomic_store_n(&p->n, p->n + 1, __ATOMIC_RELEASE);
         jc->learned++;

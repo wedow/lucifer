@@ -167,7 +167,7 @@ typed_item(struct ctx *c, lu_v *args, int nargs)
         return LU_EV_NONE;
     }
     lu_v typecode = args[1];
-    PyObject *k = lu_ev_learn_const(c, &typecode, 1);
+    PyObject *k = lu_ev_learn_const(c, &typecode, 1, LU_PROF_IMMORTAL);
     int code = k != NULL && PyUnicode_CheckExact(k) && PyUnicode_GET_LENGTH(k) == 1
         ? (int)PyUnicode_READ_CHAR(k, 0) : 0;
     if (code == 0 || code > 127 || strchr("bBhHiIlLqQfd", code) == NULL) {
@@ -333,11 +333,16 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
         return t != NULL ? lu_ev_konst(c, (PyObject *)t) : LU_EV_NONE;
     }
     uint32_t version;
-    if (nargs == 2 && strcmp(name, "type_lookup") == 0 && k0 != NULL && PyType_Check(k0) && k1 != NULL
-        && PyUnicode_CheckExact(k1) && lu_ev_class_as_of(c, (PyTypeObject *)k0, &version)) {
-        PyObject *r = _PyType_Lookup((PyTypeObject *)k0, k1);
+    if (nargs == 2 && strcmp(name, "type_lookup") == 0 && k1 != NULL && PyUnicode_CheckExact(k1)) {
+        lu_v cls = args[0];
+        PyObject *t = lu_ev_learn_const(c, &cls, 0, LU_PROF_CLASS);
+        if (t == NULL || !PyType_Check(t) || !lu_ev_class_as_of(c, (PyTypeObject *)t, &version)) {
+            return LU_EV_NONE;
+        }
+        PyObject *r = _PyType_LookupRef((PyTypeObject *)t, k1);
         lu_v k = lu_ev_konst(c, r != NULL ? r : LU_MISSING);
-        return lu_ev_class_relied(c, args[0], version) ? k : LU_EV_NONE;
+        Py_XDECREF(r);
+        return lu_ev_class_relied(c, cls, version) ? k : LU_EV_NONE;
     }
     if (nargs == 1 && strcmp(name, "type_can_new") == 0 && k0 != NULL && PyType_Check(k0)
         && (((PyTypeObject *)k0)->tp_flags & Py_TPFLAGS_IMMUTABLETYPE)) {

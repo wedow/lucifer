@@ -165,20 +165,20 @@ lu_ev_learn_kind(struct ctx *c, lu_v r, int which, unsigned long kind)
     return 1;
 }
 
-/* r as a constant: the one it is known to be, else the one immortal value
+/* r as a constant: the one it is known to be, else the one of this kind
    the root met as the `which`-th value this instruction asks about
    (guarded, and r stands for it from here); NULL when it knows none yet,
    and compiled code then reports r's value here, or when it met others. */
 PyObject *
-lu_ev_learn_const(struct ctx *c, lu_v *r, int which)
+lu_ev_learn_const(struct ctx *c, lu_v *r, int which, enum lu_prof_value_kind kind)
 {
     PyObject *k = lu_ev_const(c, *r);
     if (k != NULL || *r == LU_NOV || LU_IS_VIRT(*r) || I(c, *r)->rep != REP_OBJ || nospec(c, c->pc)) {
         return k;
     }
-    struct lu_prof *p = lu_ev_prof(c, LU_PROF_VALUES + which);
+    struct lu_prof *p = lu_ev_prof(c, 64 * kind + which);
     int poly = 1;
-    k = p != NULL ? lu_jit_prof_value(p, &poly) : NULL;
+    k = p != NULL ? lu_jit_prof_value(p, kind, &poly) : NULL;
     if (poly || k == NULL) {
         if (!poly) {
             lu_ev_profile(c, p, *r);
@@ -188,7 +188,7 @@ lu_ev_learn_const(struct ctx *c, lu_v *r, int which)
     }
     I(c, lu_ev_guard(c, OP_GUARD_IS, *r, (int64_t)(intptr_t)k))->prof = p;
     *r = lu_ev_konst(c, k);
-    Py_DECREF(k);               /* immortal */
+    Py_DECREF(k);               /* held by the unit's constants */
     return k;
 }
 
