@@ -1,6 +1,6 @@
 ---
 id: luc-8b3s
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-20T21:58:12Z
@@ -35,3 +35,9 @@ Repro (CPython 3.14t prints [(False, 'stop')]; Lucifer prints [(True, 'generator
 
 Fix direction: mark the generator cleared and restore exc_info at OP_UNLINK for a generator root (or call lu_gen_finish's state part there), so the releases run as in clear_gen_frame. Same family as luc-y0wy (gi_frame).
 
+
+## Notes
+
+**2026-11-21T01:43:13Z**
+
+Fixed by 0eeebe59: OP_UNLINK of a compiled generator root marks it cleared, restores exc_info and gives back its depth before the releases; lu_gen_finish then only releases. tests/kernel/gen_return_release_state.py (oracle [(False, True, 'stop')]) before: plain [(False,True,'stop'),(True,False,'generator already executing')], jit [(True,False,'generator already executing')], jit-deopt both; after: oracle's output in all three lanes. 23/23 generator and recursion neighbours pass in plain, jit and jit-deopt.
