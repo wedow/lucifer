@@ -351,7 +351,11 @@ mbuf_release(_PyManagedBufferObject *mb)
 static void
 mbuf_dealloc(PyObject *op)
 {
-    mbuf_release((_PyManagedBufferObject *)op);
+    _PyManagedBufferObject *mb = (_PyManagedBufferObject *)op;
+    mbuf_release(mb);
+    if (mb->flags & _Py_MANAGED_BUFFER_FREE_FORMAT) {
+        PyMem_Free(mb->master.format);
+    }
     lu_object_free(op);
 }
 
@@ -617,7 +621,7 @@ prim_mv_len(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 
 /* Copying ---------------------------------------------------------------- */
 
-/* The bytes of a view in C order. */
+/* The bytes of a view in the requested order. */
 static PyObject *
 tobytes(PyMemoryViewObject *mv, char order)
 {
@@ -627,6 +631,81 @@ tobytes(PyMemoryViewObject *mv, char order)
         Py_CLEAR(r);
     }
     return r;
+}
+
+/* Copy the data into bytes and retain the source's logical layout. */
+static PyObject *
+contiguous_copy(PyMemoryViewObject *mv, char order)
+{
+    const Py_buffer *src = &mv->view;
+    PyObject *bytes = tobytes(mv, order);
+    if (bytes == NULL) {
+        return NULL;
+    }
+    _PyManagedBufferObject *mb = mbuf_new();
+    if (mb == NULL) {
+        Py_DECREF(bytes);
+        return NULL;
+    }
+    int result = PyObject_GetBuffer(bytes, &mb->master, PyBUF_FULL_RO);
+    Py_DECREF(bytes);
+    if (result < 0) {
+        Py_DECREF(mb);
+        return NULL;
+    }
+
+    /* The source exporter can be released as soon as the copy is made. */
+    size_t format_size = strlen(src->format) + 1;
+    char *format = PyMem_Malloc(format_size);
+    if (format == NULL) {
+        Py_DECREF(mb);
+        return PyErr_NoMemory();
+    }
+    memcpy(format, src->format, format_size);
+    mb->master.format = format;
+    mb->flags |= _Py_MANAGED_BUFFER_FREE_FORMAT;
+
+    Py_ssize_t strides[MAX_NDIM];
+    Py_ssize_t stride = src->itemsize;
+    for (int i = 0; i < src->ndim; i++) {
+        int axis = order == 'F' ? i : src->ndim - 1 - i;
+        strides[axis] = stride;
+        stride *= src->shape[axis];
+    }
+    Py_buffer layout = mb->master;
+    layout.itemsize = src->itemsize;
+    layout.ndim = src->ndim;
+    layout.shape = src->shape;
+    layout.strides = strides;
+    PyMemoryViewObject *copy = add_view(mb, &layout, layout.ndim);
+    Py_DECREF(mb);
+    return (PyObject *)copy;
+}
+
+PyObject *
+PyMemoryView_GetContiguous(PyObject *obj, int buffertype, char order)
+{
+    PyObject *mv = PyMemoryView_FromObject(obj);
+    if (mv == NULL) {
+        return NULL;
+    }
+    const Py_buffer *view = &MV(mv)->view;
+    PyObject *result = NULL;
+    if (buffertype == PyBUF_WRITE && view->readonly) {
+        PyErr_SetString(PyExc_BufferError, "underlying buffer is not writable");
+    }
+    else if (PyBuffer_IsContiguous(view, order)) {
+        return mv;
+    }
+    else if (buffertype == PyBUF_WRITE) {
+        PyErr_SetString(PyExc_BufferError,
+                        "writable contiguous buffer requested for a non-contiguous object.");
+    }
+    else {
+        result = contiguous_copy(MV(mv), order);
+    }
+    Py_DECREF(mv);
+    return result;
 }
 
 /* mv_tobytes(mv, order) */

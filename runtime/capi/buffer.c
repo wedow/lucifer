@@ -1,7 +1,6 @@
 /* The buffer protocol for C callers (Objects/abstract.c, memoryobject.c):
    the Py_buffer a type exports through bf_getbuffer, and the helpers around
-   it. Strided copies handle C and Fortran order without suboffsets, which
-   is what the exporters here (bytes, bytearray, memoryview) produce. */
+   it. Strided copies handle C and Fortran order. */
 
 #include "prim/bytes.h"
 
@@ -124,22 +123,27 @@ PyBuffer_GetPointer(const Py_buffer *view, const Py_ssize_t *indices)
     for (int i = 0; i < view->ndim; i++) {
         pointer += view->strides[i] * indices[i];
         if (view->suboffsets != NULL && view->suboffsets[i] >= 0) {
-            pointer = *((char **)pointer) + view->suboffsets[i];
+            pointer = *(char **)pointer;
+            if (pointer == NULL) {
+                return NULL;
+            }
+            pointer += view->suboffsets[i];
         }
     }
     return pointer;
 }
 
 /* Copies between a strided view and a contiguous buffer: to_buf says which way. */
-static void
+static int
 copy_strided(char *buf, const Py_buffer *view, int to_buf, char order)
 {
     Py_ssize_t idx[64] = { 0 };
     Py_ssize_t items = view->itemsize ? view->len / view->itemsize : 0;
     for (Py_ssize_t n = 0; n < items; n++) {
-        char *p = (char *)view->buf;
-        for (int d = 0; d < view->ndim; d++) {
-            p += idx[d] * view->strides[d];
+        char *p = PyBuffer_GetPointer(view, idx);
+        if (p == NULL) {
+            PyErr_SetString(PyExc_ValueError, "memoryview: NULL item pointer");
+            return -1;
         }
         if (to_buf) {
             memcpy(buf + n * view->itemsize, p, view->itemsize);
@@ -160,6 +164,7 @@ copy_strided(char *buf, const Py_buffer *view, int to_buf, char order)
             }
         }
     }
+    return 0;
 }
 
 int
@@ -176,12 +181,7 @@ PyBuffer_ToContiguous(void *buf, const Py_buffer *view, Py_ssize_t len, char ord
         PyErr_SetString(PyExc_ValueError, "PyBuffer_ToContiguous: len != view->len");
         return -1;
     }
-    if (view->suboffsets != NULL) {
-        PyErr_SetString(PyExc_NotImplementedError, "buffers with suboffsets are not supported");
-        return -1;
-    }
-    copy_strided(buf, view, 1, order == 'F' ? 'F' : 'C');
-    return 0;
+    return copy_strided(buf, view, 1, order);
 }
 
 int
@@ -198,6 +198,5 @@ PyBuffer_FromContiguous(const Py_buffer *view, const void *buf, Py_ssize_t len, 
         PyErr_SetString(PyExc_NotImplementedError, "buffers with suboffsets are not supported");
         return -1;
     }
-    copy_strided((char *)buf, view, 0, order == 'F' ? 'F' : 'C');
-    return 0;
+    return copy_strided((char *)buf, view, 0, order);
 }
