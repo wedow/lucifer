@@ -478,6 +478,7 @@ struct _is {
     lu_watcher func_watchers[LU_MAX_WATCHERS];      /* PyFunction_WatchCallback */
     lu_watcher code_watchers[LU_MAX_WATCHERS];      /* PyCode_WatchCallback */
     lu_watcher context_watchers[LU_MAX_WATCHERS];   /* PyContext_WatchCallback */
+    PyObject *contextvar_type;          /* strong: _contextvars' ContextVar class */
     int specializing;                   /* set once the kernel has booted: instructions may specialize */
     /* The type attribute cache (CPython's method cache): what _PyType_Lookup
        found for an interned name in a type of that version. Read without a
@@ -1024,7 +1025,7 @@ struct lu_static_objects {
     X(__imod__) X(__ipow__) X(__ilshift__) X(__irshift__) X(__iand__) X(__ixor__) \
     X(__ior__) X(__import__) X(__ifloordiv__) X(__itruediv__) X(__imatmul__) X(__neg__) X(__pos__) \
     X(__abs__) X(__invert__) X(__int__) X(__float__) X(__index__) X(mro) X(__getattribute__) X(__static_attributes__) X(__getattr__) X(__setattr__) X(__delattr__) \
-    X(_data) X(__enter__) X(__exit__) X(__aenter__) X(__aexit__)
+    X(_data) X(_default) X(__enter__) X(__exit__) X(__aenter__) X(__aexit__)
 struct lu_identifiers {
 #define LU_ID_FIELD(name) PyObject *name;
     LU_IDENTIFIERS(LU_ID_FIELD)

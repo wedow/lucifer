@@ -1,6 +1,6 @@
 ---
 id: luc-r4xh
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-09T05:53:29Z
@@ -16,3 +16,21 @@ Profile of the cadence corpus programs (perf, -X perf): PyContextVar_Get is 28-4
 
 Native PyContextVar_Get: the thread's current context and its data dict reached in C (keep the current context on the task, as Context.run already reports switches through _lucifer.context_switched), a dict lookup without raising, then the default. A per-variable cache keyed by the context's data dict identity, as CPython caches by context version, makes the repeat case one compare. Measure with tools/bench/corpus --programs cadence.* before and after.
 
+
+## Notes
+
+**2026-11-21T04:12:50Z**
+
+The measured base (`efa5f4a9`) already stored the current context on the task and used `dict.get` in the Python method. `PyContextVar_Get` still called that method on misses. It now shares a native lookup with `ContextVar.get` and reads the call and variable defaults directly. A lookup on a fresh task leaves the context absent, and the switch watcher receives `None` when that state is restored. The active-context path uses one dict lookup without retaining cached bindings.
+
+The new C-API kernel check failed on the base for the invalid-type error, the `Token.MISSING` default and the context installed by a fresh-thread lookup. All three contextvars kernel tests passed in plain, jit and jit-deopt. The `ready.contextvars` extension check and ABI audit passed.
+
+All five Cadence output digests matched the CPython reference. The corpus columns use the tool's best of three after a warmup. The paired columns use the median of five alternating runs on one core after a warmup. Values are seconds with the default JIT.
+
+| Cadence program | Corpus before | Corpus after | Paired before | Paired after |
+| --- | ---: | ---: | ---: | ---: |
+| continuing_brain | 3.08 | 3.25 | 3.04 | 2.77 |
+| walking_rhythm | 16.81 | 15.50 | 16.54 | 12.99 |
+| walking_for_reward | 20.94 | 19.29 | 20.83 | 17.70 |
+| bandit | 4.59 | 4.66 | 5.41 | 4.94 |
+| night_replay | 6.71 | 6.19 | 6.51 | 5.26 |

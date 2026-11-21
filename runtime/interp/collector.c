@@ -497,7 +497,7 @@ mark_alive_from_roots(struct _is *interp)
     struct lu_stack stack = { NULL, 0, 0 };
     PyObject *roots[] = { interp->sysdict, interp->builtins, interp->dict, interp->modules,
                           interp->importlib, interp->kernel_rebound, interp->kernel_twins,
-                          interp->kernel_nexts };
+                          interp->kernel_nexts, interp->contextvar_type };
     for (size_t i = 0; i < sizeof roots / sizeof roots[0]; i++) {
         visit_mark_alive(roots[i], &stack);
     }

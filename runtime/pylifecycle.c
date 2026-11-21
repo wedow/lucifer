@@ -652,6 +652,7 @@ release_interpreter(struct _is *interp)
     interp->kernel_rebound = NULL;
     interp->kernel_twins = NULL;
     interp->kernel_nexts = NULL;
+    interp->contextvar_type = NULL;
     PyConfig_Clear(&interp->config);
 }
 

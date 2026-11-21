@@ -21,7 +21,7 @@ class _Missing:
 
 
 _MISSING = _Missing()
-_ABSENT = object()       # no value in the context: Token.MISSING may be one
+_NO_DEFAULT = _lucifer.MISSING  # Token.MISSING is itself a valid default
 
 
 def _generic_alias(cls, item):
@@ -98,10 +98,11 @@ def _check_var(key):
         raise TypeError('a ContextVar key was expected, got %r' % (key,))
 
 
+@_lucifer.contextvar_type
 class ContextVar:
     """A context variable."""
 
-    def __init__(self, name, *, default=_MISSING):
+    def __init__(self, name, *, default=_NO_DEFAULT):
         if not isinstance(name, str):
             raise TypeError('context variable name must be a str')
         self._name = name
@@ -116,14 +117,7 @@ class ContextVar:
         """Return a value for the context variable for the current context."""
         if len(args) > 1:
             raise TypeError('get expected at most 1 argument, got %d' % len(args))
-        value = _get_current()._data.get(self, _ABSENT)
-        if value is not _ABSENT:
-            return value
-        if args:
-            return args[0]
-        if self._default is not _MISSING:
-            return self._default
-        raise LookupError(self)
+        return _lucifer.contextvar_get(self, *args)
 
     def set(self, value, /):
         """Call to set a new value for the context variable in the current context."""
@@ -155,7 +149,7 @@ class ContextVar:
 
     def __repr__(self):
         r = '<ContextVar name=%r' % (self._name,)
-        if self._default is not _MISSING:
+        if self._default is not _NO_DEFAULT:
             r += ' default=%r' % (self._default,)
         return r + ' at 0x%x>' % id(self)
 

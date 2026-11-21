@@ -19,34 +19,93 @@ PyContextVar_New(const char *name, PyObject *def)
     return var;
 }
 
-/* *val is the variable's value in the current context, else default_value,
-   else the variable's own default, else NULL. */
-int
-PyContextVar_Get(PyObject *var, PyObject *default_value, PyObject **val)
+/* The port stores these fields directly on its Python instances. */
+static PyObject *
+context_attr(PyObject *obj, PyObject *name)
 {
-    /* A value the current context holds, read as ContextVar.get reads it
-       (its _data dict) without calling it; the rest is the method's. */
-    PyObject *ctx = PyThreadState_Get()->context;
-    PyObject *data = ctx != NULL ? lu_getattr_native(ctx, LU_ID(_data)) : NULL;
-    if (data != NULL) {
-        int found = PyDict_CheckExact(data) ? PyDict_GetItemRef(data, var, val) : 0;
+    PyObject *value;
+    return lu_attr_lookup(obj, name, &value) == 1 ? value : PyObject_GetAttr(obj, name);
+}
+
+/* *val is a new reference to the binding or the applicable default. A miss
+   with no default leaves it NULL, without creating a context or an error. */
+static int
+contextvar_get(PyThreadState *ts, PyObject *var, PyObject *def, PyObject **val)
+{
+    *val = NULL;
+    if (ts->context != NULL) {
+        PyObject *data = context_attr(ts->context, LU_ID(_data));
+        if (data == NULL) {
+            return -1;
+        }
+        int found = PyDict_GetItemRef(data, var, val);
         Py_DECREF(data);
         if (found != 0) {
             return found < 0 ? -1 : 0;
         }
     }
-    else if (ctx != NULL && PyErr_Occurred()) {
-        PyErr_Clear();          /* the method answers, or raises, instead */
-    }
-    PyObject *r = default_value != NULL ? PyObject_CallMethod(var, "get", "O", default_value)
-                                        : PyObject_CallMethod(var, "get", NULL);
-    if (r == NULL && PyErr_ExceptionMatches(PyExc_LookupError)) {
-        PyErr_Clear();
-        *val = NULL;
+    if (def != NULL) {
+        *val = Py_NewRef(def);
         return 0;
     }
-    *val = r;
-    return r == NULL ? -1 : 0;
+    def = context_attr(var, LU_ID(_default));
+    if (def == NULL) {
+        return -1;
+    }
+    if (def == LU_MISSING) {
+        Py_DECREF(def);
+    }
+    else {
+        *val = def;
+    }
+    return 0;
+}
+
+int
+PyContextVar_Get(PyObject *var, PyObject *default_value, PyObject **val)
+{
+    PyThreadState *ts = PyThreadState_Get();
+    if ((PyObject *)Py_TYPE(var) != __atomic_load_n(&ts->interp->contextvar_type, __ATOMIC_ACQUIRE)) {
+        PyErr_SetString(PyExc_TypeError, "an instance of ContextVar was expected");
+        return -1;
+    }
+    return contextvar_get(ts, var, default_value, val);
+}
+
+static PyObject *
+prim_contextvar_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 1 && nargs != 2) {
+        lu_err_format(PyExc_TypeError, "contextvar_get(var, default=...)");
+        return NULL;
+    }
+    PyObject *value;
+    if (contextvar_get(PyThreadState_Get(), args[0], nargs == 2 ? args[1] : NULL, &value) < 0) {
+        return NULL;
+    }
+    if (value == NULL) {
+        PyErr_SetObject(PyExc_LookupError, args[0]);
+    }
+    return value;
+}
+
+/* Reimporting the builtin module keeps its original type. */
+static PyObject *
+prim_contextvar_type(PyObject *m, PyObject *type)
+{
+    if (!PyType_Check(type)) {
+        lu_err_format(PyExc_TypeError, "contextvar_type(type)");
+        return NULL;
+    }
+    PyInterpreterState *interp = PyInterpreterState_Get();
+    PyObject *registered = NULL;
+    Py_INCREF(type);
+    if (__atomic_compare_exchange_n(&interp->contextvar_type, &registered, type, 0,
+                                    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        return Py_NewRef(type);
+    }
+    Py_DECREF(type);
+    return Py_NewRef(registered);
 }
 
 PyObject *
@@ -110,7 +169,7 @@ prim_context_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_watcher *table = ts->interp->context_watchers;
         for (int i = 0; i < LU_MAX_WATCHERS; i++) {
             PyContext_WatchCallback cb = (PyContext_WatchCallback)table[i];
-            if (cb != NULL && cb(Py_CONTEXT_SWITCHED, ctx) < 0) {
+            if (cb != NULL && cb(Py_CONTEXT_SWITCHED, args[0]) < 0) {
                 PyErr_FormatUnraisable("Exception ignored in %s watcher callback for %R",
                                        "Py_CONTEXT_SWITCHED", args[0]);
             }
@@ -120,6 +179,8 @@ prim_context_set(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 PyMethodDef lu_prim_context_methods[] = {
+    { "contextvar_get", (PyCFunction)(void (*)(void))prim_contextvar_get, METH_FASTCALL, NULL },
+    { "contextvar_type", prim_contextvar_type, METH_O, NULL },
     { "context_get", (PyCFunction)(void (*)(void))prim_context_get, METH_FASTCALL, NULL },
     { "context_set", (PyCFunction)(void (*)(void))prim_context_set, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },
