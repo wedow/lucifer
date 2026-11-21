@@ -166,8 +166,7 @@ name_error(PyObject *name)
     PyErr_SetRaisedException(exc);
 }
 
-/* LOAD_NAME and LOAD_GLOBAL over namespace dicts, a new reference; mappings
-   that are not exact dicts arrive with the kernel's mapping protocol (K1c). */
+/* Internal namespace access for a store or the bootstrap builtins. */
 static PyObject *
 ns_get(PyObject *ns, PyObject *name)
 {
@@ -184,7 +183,7 @@ static PyObject *
 locals_get(PyObject *ns, PyObject *name)
 {
     if (PyDict_CheckExact(ns)) {
-        return lu_ns_get(ns, name);
+        return lu_dict_get_name(ns, name);
     }
     PyObject *args[2] = { ns, name };
     PyObject *v = lu_call_kernel(LU_K_getitem, args, 2);
@@ -1601,9 +1600,15 @@ op_LOAD_NAME: {
         lu_err_format(PyExc_SystemError, "no locals found");
         goto error;
     }
+    SAVE_FRAME();
     v = locals_get(frame->locals, name);
-    if (v == NULL && !PyErr_Occurred() && (v = global_get(frame, name)) == NULL && !PyErr_Occurred()) {
-        name_error(name);
+    if (v == NULL && !PyErr_Occurred()) {
+        v = PyDict_Check(frame->globals) ? lu_dict_get_name(frame->globals, name)
+                                        : locals_get(frame->globals, name);
+        if (v == NULL && !PyErr_Occurred()
+            && (v = locals_get(frame->builtins, name)) == NULL && !PyErr_Occurred()) {
+            name_error(name);
+        }
     }
     ERROR_IF(v == NULL);
     PUSH(v);
@@ -1654,6 +1659,7 @@ op_LOAD_GLOBAL: {
     PyObject *name = NAME(oparg >> 1), *v;
     ADAPT(lu_specialize_load_global(frame->globals, frame->builtins, next_instr - 1, name));
     SKIP_CACHES();
+    SAVE_FRAME();
     if ((v = global_get(frame, name)) == NULL && !PyErr_Occurred()) {
         name_error(name);
     }
@@ -1681,7 +1687,8 @@ op_LOAD_GLOBAL_BUILTIN: {
         PyDictKeysObject *gk = __atomic_load_n(&((PyDictObject *)frame->globals)->ma_keys, __ATOMIC_ACQUIRE);
         PyDictKeysObject *dk = from_builtins
             ? __atomic_load_n(&((PyDictObject *)frame->builtins)->ma_keys, __ATOMIC_ACQUIRE) : gk;
-        if (gk->dk_version == module_version && dk->dk_version == (from_builtins ? builtin_version : module_version)
+        if (lu_dk_is_unicode(gk) && gk->dk_version == module_version
+            && dk->dk_version == (from_builtins ? builtin_version : module_version)
             && lu_dk_is_unicode(dk) && index < dk->dk_nentries) {
             v = lu_try_xget_ref(lu_dk_value_slot(dk, index));
             if (v != NULL && dk != __atomic_load_n(&((PyDictObject *)(from_builtins ? frame->builtins : frame->globals))->ma_keys,

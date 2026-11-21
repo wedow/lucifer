@@ -12,8 +12,12 @@ lu_ev_dict_const(struct ctx *c, PyObject *d, PyObject *b, PyObject *name)
         return NULL;
     }
     /* Versioned first: a table still of that version after the lookup has
-       not changed meanwhile, so the entry found is its own. */
+       not changed meanwhile, so the entry found is its own. A mixed globals
+       table may have a key that compares equal before we reach builtins. */
     uint32_t dv = lu_dict_keys_version((PyDictObject *)d), bv = 0;
+    if (dv == 0 || !lu_dict_str_keys(d)) {
+        return NULL;
+    }
     PyObject *at = d;
     Py_ssize_t ix = lu_ns_index(d, name);
     if (ix < 0 && b != NULL) {
@@ -22,7 +26,7 @@ lu_ev_dict_const(struct ctx *c, PyObject *d, PyObject *b, PyObject *name)
         ix = lu_ns_index(b, name);
     }
     PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)at)->ma_keys, __ATOMIC_ACQUIRE);
-    if (ix < 0 || dv == 0 || (at == b && bv == 0) || !lu_dk_is_unicode(dk) || ix >= dk->dk_nentries
+    if (ix < 0 || (at == b && bv == 0) || !lu_dk_is_unicode(dk) || ix >= dk->dk_nentries
         || __atomic_load_n(&dk->dk_version, __ATOMIC_ACQUIRE) != (at == b ? bv : dv)) {
         return NULL;
     }

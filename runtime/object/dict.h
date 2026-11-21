@@ -181,6 +181,12 @@ int lu_dict_merge_prepare(PyDictObject *mp, PyDictObject *other);
 int lu_dict_merge_dict(PyDictObject *mp, PyDictObject *other, int override);
 /* The entry number of exact-str `key` in a namespace dict, or -1. */
 Py_ssize_t lu_ns_index(PyObject *dict, PyObject *key);
+/* Exact-str lookup without Python: 1 with a new reference, 0 for a miss,
+   or -1 when a mixed table needs a Python comparison. */
+int lu_dict_find_name(PyObject *dict, PyObject *key, PyObject **value);
+/* Bytecode name lookup, with dict equality semantics for mixed keys.
+   A new reference, or NULL for a miss or a comparison error. */
+PyObject *lu_dict_get_name(PyObject *dict, PyObject *key);
 /* Lookup and store of an exact str or int key in any dict, decided without
    Python: find answers 1 with *value a new reference, 0 absent, or -1 when
    the key is another type or an equal-hash entry needs __eq__; put answers

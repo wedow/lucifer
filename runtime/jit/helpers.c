@@ -557,8 +557,8 @@ h_store_attr(PyObject *owner, PyObject *name, PyObject *v, int64_t pic)
 /* LOAD_GLOBAL without speculation, as the interpreter runs it: through
    the site's LOAD_GLOBAL_MODULE/BUILTIN cache (keys versions and an index)
    while it holds, else the name in the globals, then the builtins (both
-   exact dicts), specializing the site for the next time. A new
-   reference; declined where the interpreter raises the NameError. */
+   exact dicts), specializing the site for the next time. A new reference,
+   or a side exit for a Python comparison or a missing name. */
 static PyObject *
 h_load_global(PyObject *globals, PyObject *builtins, PyObject *name, int64_t at)
 {
@@ -571,7 +571,8 @@ h_load_global(PyObject *globals, PyObject *builtins, PyObject *name, int64_t at)
         PyObject *in = op == LOAD_GLOBAL_BUILTIN ? builtins : globals;
         PyDictKeysObject *gk = __atomic_load_n(&((PyDictObject *)globals)->ma_keys, __ATOMIC_ACQUIRE);
         PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)in)->ma_keys, __ATOMIC_ACQUIRE);
-        if (mv != 0 && gk->dk_version == mv && dk->dk_version == (in == globals ? mv : bv) && (in == globals || bv != 0)
+        if (mv != 0 && lu_dk_is_unicode(gk) && gk->dk_version == mv
+            && dk->dk_version == (in == globals ? mv : bv) && (in == globals || bv != 0)
             && lu_dk_is_unicode(dk) && index < dk->dk_nentries) {
             PyObject *v = lu_try_xget_ref(lu_dk_value_slot(dk, index));
             if (v != NULL && dk == __atomic_load_n(&((PyDictObject *)in)->ma_keys, __ATOMIC_ACQUIRE)
@@ -584,11 +585,12 @@ h_load_global(PyObject *globals, PyObject *builtins, PyObject *name, int64_t at)
     else if (op == LOAD_GLOBAL && PyThreadState_Get()->interp->specializing) {
         lu_specialize_load_global(globals, builtins, site, name);
     }
-    PyObject *v = lu_ns_get(globals, name);
-    if (v == NULL && !PyErr_Occurred()) {
-        v = lu_ns_get(builtins, name);
+    PyObject *v;
+    int found = lu_dict_find_name(globals, name, &v);
+    if (found == 0) {
+        found = lu_dict_find_name(builtins, name, &v);
     }
-    return v != NULL || PyErr_Occurred() ? v : LU_JIT_DECLINED;
+    return found > 0 ? v : LU_JIT_DECLINED;
 }
 
 /* STORE_GLOBAL into an exact dict, borrowing v. */

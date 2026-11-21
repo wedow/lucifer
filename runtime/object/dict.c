@@ -1159,13 +1159,68 @@ lu_dict_sizeof(PyDictObject *mp)
 
 /* The namespace primitives: exact-str keys, never raising for a lookup. */
 
+/* Both keys are exact strs, so a cached hash and native equality suffice.
+   A distinct table key still needs a reference before reading its data. */
+static Py_ssize_t
+probe_unicode(PyDictKeysObject *dk, PyObject *key, Py_hash_t hash)
+{
+    PyDictUnicodeEntry *entries = lu_dk_entries(dk);
+    size_t mask = DK_MASK(dk);
+    size_t perturb = hash;
+    size_t i = (size_t)hash & mask;
+    for (;;) {
+        Py_ssize_t ix = lu_dk_get_index(dk, i);
+        if (ix >= 0) {
+            PyObject **slot = &entries[ix].me_key;
+            PyObject *k = _Py_atomic_load_ptr(slot);
+            if (k == key) {
+                return ix;
+            }
+            if (k != NULL) {
+                int held = !_Py_IsImmortal(k);
+                if (held && !lu_try_incref_compare(slot, k)) {
+                    return LU_PROBE_CHANGED;
+                }
+                int equal = _Py_atomic_load_ssize_relaxed(&((PyASCIIObject *)k)->hash) == hash
+                    && lu_str_eq(k, key);
+                if (held) {
+                    Py_DECREF(k);
+                }
+                if (equal) {
+                    return ix;
+                }
+            }
+        }
+        else if (ix == DKIX_EMPTY) {
+            return DKIX_EMPTY;
+        }
+        perturb >>= PERTURB_SHIFT;
+        i = mask & (i * 5 + perturb + 1);
+    }
+}
+
+static inline Py_hash_t
+name_hash(PyObject *key)
+{
+    Py_hash_t hash = _Py_atomic_load_ssize_relaxed(&((PyASCIIObject *)key)->hash);
+    return hash != -1 ? hash : lu_str_hash(key);
+}
+
 static Py_ssize_t
 ns_find(PyObject *dict, PyObject *key)
 {
-    Py_hash_t hash = lu_str_hash(key);
+    PyDictObject *mp = (PyDictObject *)dict;
+    Py_hash_t hash = name_hash(key);
+    PyDictKeysObject *dk = __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE);
+    if (lu_dk_is_unicode(dk)) {
+        Py_ssize_t ix = probe_unicode(dk, key, hash);
+        if (ix != LU_PROBE_CHANGED) {
+            return ix;
+        }
+    }
     Py_ssize_t steps = 0, ix;
     do {
-        ix = lu_dict_probe((PyDictObject *)dict, key, hash, &steps);
+        ix = lu_dict_probe(mp, key, hash, &steps);
     } while (ix <= -3);
     return ix;
 }
@@ -1189,11 +1244,53 @@ lu_ns_lookup(PyObject *dict, PyObject *key)
     return ix >= 0 ? lu_dk_value(((PyDictObject *)dict)->ma_keys, ix) : NULL;
 }
 
+/* Probe and take a reference from the same table. The generic lookup
+   handles mixed keys and retries under the lock if a reference was lost. */
+static inline int
+ns_find_ref(PyObject *dict, PyObject *key, PyObject **value)
+{
+    PyDictObject *mp = (PyDictObject *)dict;
+    PyDictKeysObject *dk = __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE);
+    if (lu_dk_is_unicode(dk) && PyUnicode_CheckExact(key)) {
+        Py_ssize_t ix = probe_unicode(dk, key, name_hash(key));
+        if (ix == DKIX_EMPTY) {
+            return 0;
+        }
+        if (ix >= 0) {
+            PyDictUnicodeEntry *entries = lu_dk_entries(dk);
+            PyObject *v = lu_try_xget_ref(&entries[ix].me_value);
+            if (v != NULL && dk == __atomic_load_n(&mp->ma_keys, __ATOMIC_ACQUIRE)) {
+                *value = v;
+                return 1;
+            }
+            Py_XDECREF(v);
+        }
+    }
+    return lu_dict_find_native(dict, key, value);
+}
+
+int
+lu_dict_find_name(PyObject *dict, PyObject *key, PyObject **value)
+{
+    return ns_find_ref(dict, key, value);
+}
+
 PyObject *
 lu_ns_get(PyObject *dict, PyObject *key)
 {
     PyObject *value;
-    return lu_dict_find_native(dict, key, &value) > 0 ? value : NULL;
+    return ns_find_ref(dict, key, &value) > 0 ? value : NULL;
+}
+
+PyObject *
+lu_dict_get_name(PyObject *dict, PyObject *key)
+{
+    PyObject *value;
+    int found = ns_find_ref(dict, key, &value);
+    if (found < 0) {
+        found = PyDict_GetItemRef(dict, key, &value);
+    }
+    return found > 0 ? value : NULL;
 }
 
 int
