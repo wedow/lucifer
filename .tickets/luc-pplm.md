@@ -1,6 +1,6 @@
 ---
 id: luc-pplm
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-21T10:59:31Z
@@ -18,3 +18,7 @@ Found while counting the booted kernel heap for the boot-snapshot design (11-21,
 **2026-11-21T11:03:15Z**
 
 Same walk: the dict 'seen' (id -> object) has len 29572 and iterates 29572 keys, but seen.values() and list(seen.values()) yield 1834. So the leaked sentinel acts as end-of-container in dict values iteration as well as a hole in list deletion: any container that stores it is corrupted. Root cause is the leak itself.
+
+**2026-11-21T12:56:47Z**
+
+The traversal visitor in `runtime/interp/gc.c` returned `LU_MISSING` as a Python value. The list primitive deleted the item and returned the sentinel, which the kernel interpreted as an invalid index. Dict value iteration treated the sentinel as exhaustion. The visitor now skips it by identity. `tests/kernel/gc_referents.py` reproduced the `IndexError` before the fix. After the fix, the new test and ten related kernel tests matched CPython 3.14t in each of the plain, jit and jit-deopt lanes.

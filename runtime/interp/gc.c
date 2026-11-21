@@ -345,6 +345,10 @@ prim_gc_get_referrers(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 static int
 referents_visit(PyObject *obj, void *list)
 {
+    /* The kernel uses MISSING to signal absence and end of iteration. */
+    if (obj == LU_MISSING) {
+        return 0;
+    }
     return lu_list_append(list, obj) < 0;
 }
 
