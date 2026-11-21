@@ -11,12 +11,15 @@ import warnings
 
 warnings.simplefilter('ignore')
 ready = threading.Event()
+forking = threading.Event()
+os.register_at_fork(before=forking.set)
 
 
 def holder():
     _imp.acquire_lock()
     ready.set()
-    time.sleep(0.2)            # the main thread now waits in fork for the import lock
+    forking.wait()
+    time.sleep(0.2)            # give fork time to enter the native import-lock wait
     _thread.interrupt_main()
     time.sleep(0.2)
     _imp.release_lock()
