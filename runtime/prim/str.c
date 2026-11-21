@@ -1157,60 +1157,6 @@ prim_str_encode(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return r;
 }
 
-#define CONT(c) ((c) >= 0x80 && (c) < 0xC0)
-
-/* One utf-8 sequence at s[0..avail): 0 and its character, 1 invalid start byte,
-   2-4 invalid continuation byte (the error covers 1 to 3 bytes), 5 truncated. */
-static int
-utf8_step(const unsigned char *s, Py_ssize_t avail, int surrogates, Py_UCS4 *out, int *len)
-{
-    Py_UCS4 ch = s[0], c2, c3, c4;
-    if (ch < 0x80) { *out = ch; *len = 1; return 0; }
-    if (ch < 0xE0) {
-        if (ch < 0xC2) return 1;
-        if (avail < 2) return 5;
-        if (!CONT(s[1])) return 2;
-        *out = (ch << 6) + s[1] - ((0xC0 << 6) + 0x80);
-        *len = 2;
-        return 0;
-    }
-    if (ch < 0xF0) {
-        if (avail < 3) {
-            if (avail < 2) return 5;
-            c2 = s[1];
-            if (!CONT(c2) || (c2 < 0xA0 ? ch == 0xE0 : (ch == 0xED && !surrogates))) return 2;
-            return 5;
-        }
-        c2 = s[1]; c3 = s[2];
-        if (!CONT(c2)) return 2;
-        if (ch == 0xE0 ? c2 < 0xA0 : (ch == 0xED && c2 >= 0xA0 && !surrogates)) return 2;
-        if (!CONT(c3)) return 3;
-        *out = (ch << 12) + (c2 << 6) + c3 - ((0xE0 << 12) + (0x80 << 6) + 0x80);
-        *len = 3;
-        return 0;
-    }
-    if (ch < 0xF5) {
-        if (avail < 4) {
-            if (avail < 2) return 5;
-            c2 = s[1];
-            if (!CONT(c2) || (c2 < 0x90 ? ch == 0xF0 : ch == 0xF4)) return 2;
-            if (avail < 3) return 5;
-            if (!CONT(s[2])) return 3;
-            return 5;
-        }
-        c2 = s[1]; c3 = s[2]; c4 = s[3];
-        if (!CONT(c2)) return 2;
-        if (ch == 0xF0 ? c2 < 0x90 : (ch == 0xF4 && c2 >= 0x90)) return 2;
-        if (!CONT(c3)) return 3;
-        if (!CONT(c4)) return 4;
-        *out = (ch << 18) + (c2 << 12) + (c3 << 6) + c4
-             - ((0xF0 << 18) + (0x80 << 12) + (0x80 << 6) + 0x80);
-        *len = 4;
-        return 0;
-    }
-    return 1;
-}
-
 /* str_decode(bytes, codec, errors) -> str, or (start, end, reason). */
 static PyObject *
 prim_str_decode(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -1223,30 +1169,35 @@ prim_str_decode(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     const unsigned char *s = (const unsigned char *)PyBytes_AS_STRING(args[0]);
     Py_ssize_t n = PyBytes_GET_SIZE(args[0]);
     int codec = codec_of(args[1]), handler = handler_of(args[2]);
+    if (codec == UTF8) {
+        struct lu_utf8_error error = {0};
+        PyObject *text = lu_str_decode_utf8((const char *)s, n, handler == H_SURROGATEPASS, &error);
+        if (error.reason == NULL) {
+            return text;
+        }
+        if (handler == H_STRICT || handler == H_SURROGATEPASS || handler == H_XMLCHARREF) {
+            return codec_error(error.start, error.end, error.reason);
+        }
+    }
+    /* The remaining UTF-8 handlers translate malformed bytes in the output. */
     ubuf b = { 0 };
     int err = 0;
     for (Py_ssize_t i = 0; i < n && !err;) {
         Py_UCS4 c = s[i];
-        int len = 1, bad = 0;
+        int len = 1;
         const char *reason = NULL;
-        Py_ssize_t end = i + 1;
         if (codec == UTF8) {
-            bad = utf8_step(s + i, n - i, handler == H_SURROGATEPASS, &c, &len);
-            if (bad) {
-                reason = bad == 1 ? "invalid start byte" : bad == 5 ? "unexpected end of data"
-                                                                   : "invalid continuation byte";
-                end = bad == 5 ? n : i + (bad == 1 ? 1 : bad - 1);
-            }
+            reason = lu_utf8_step(s + i, n - i, 0, &c, &len);
         }
         else if (codec == ASCII && c > 0x7f) {
-            bad = 1;
             reason = "ordinal not in range(128)";
         }
-        if (!bad) {
+        if (reason == NULL) {
             err = ub_put(&b, c);
             i += len;
             continue;
         }
+        Py_ssize_t end = i + len;
         if (handler == H_STRICT || handler == H_SURROGATEPASS || handler == H_XMLCHARREF) {
             PyMem_Free(b.p);
             return codec_error(i, end, reason);

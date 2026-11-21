@@ -124,97 +124,175 @@ PyUnicode_FromKindAndData(int kind, const void *buffer, Py_ssize_t size)
     return op;
 }
 
-/* One UTF-8 sequence at s[0..n): its code point and length, or 0 if
-   malformed. Encoded surrogates are accepted only with `surrogatepass`. */
+#define CONT(c) ((c) >= 0x80 && (c) < 0xC0)
+
+/* One UTF-8 sequence at s[0..avail): 0 and its character, 1 invalid start byte,
+   2-4 invalid continuation byte (the error covers 1 to 3 bytes), 5 truncated. */
 static int
-utf8_char(const unsigned char *s, Py_ssize_t n, int surrogatepass, Py_UCS4 *out)
+utf8_step(const unsigned char *s, Py_ssize_t avail, int surrogates, Py_UCS4 *out, int *len)
 {
-    unsigned char c = s[0];
-    int len;
-    Py_UCS4 ch, min;
-    if (c < 0x80) {
-        *out = c;
-        return 1;
-    }
-    if (c >= 0xc2 && c <= 0xdf) { len = 2; ch = c & 0x1f; min = 0x80; }
-    else if (c >= 0xe0 && c <= 0xef) { len = 3; ch = c & 0x0f; min = 0x800; }
-    else if (c >= 0xf0 && c <= 0xf4) { len = 4; ch = c & 0x07; min = 0x10000; }
-    else { return 0; }
-    if (n < len) {
+    Py_UCS4 ch = s[0], c2, c3, c4;
+    if (ch < 0x80) { *out = ch; *len = 1; return 0; }
+    if (ch < 0xE0) {
+        if (ch < 0xC2) return 1;
+        if (avail < 2) return 5;
+        if (!CONT(s[1])) return 2;
+        *out = (ch << 6) + s[1] - ((0xC0 << 6) + 0x80);
+        *len = 2;
         return 0;
     }
-    for (int i = 1; i < len; i++) {
-        if ((s[i] & 0xc0) != 0x80) {
-            return 0;
+    if (ch < 0xF0) {
+        if (avail < 3) {
+            if (avail < 2) return 5;
+            c2 = s[1];
+            if (!CONT(c2) || (c2 < 0xA0 ? ch == 0xE0 : (ch == 0xED && !surrogates))) return 2;
+            return 5;
         }
-        ch = (ch << 6) | (s[i] & 0x3f);
-    }
-    if (ch < min || ch > 0x10ffff || (!surrogatepass && ch >= 0xd800 && ch <= 0xdfff)) {
+        c2 = s[1]; c3 = s[2];
+        if (!CONT(c2)) return 2;
+        if (ch == 0xE0 ? c2 < 0xA0 : (ch == 0xED && c2 >= 0xA0 && !surrogates)) return 2;
+        if (!CONT(c3)) return 3;
+        *out = (ch << 12) + (c2 << 6) + c3 - ((0xE0 << 12) + (0x80 << 6) + 0x80);
+        *len = 3;
         return 0;
     }
-    *out = ch;
-    return len;
+    if (ch < 0xF5) {
+        if (avail < 4) {
+            if (avail < 2) return 5;
+            c2 = s[1];
+            if (!CONT(c2) || (c2 < 0x90 ? ch == 0xF0 : ch == 0xF4)) return 2;
+            if (avail < 3) return 5;
+            if (!CONT(s[2])) return 3;
+            return 5;
+        }
+        c2 = s[1]; c3 = s[2]; c4 = s[3];
+        if (!CONT(c2)) return 2;
+        if (ch == 0xF0 ? c2 < 0x90 : (ch == 0xF4 && c2 >= 0x90)) return 2;
+        if (!CONT(c3)) return 3;
+        if (!CONT(c4)) return 4;
+        *out = (ch << 18) + (c2 << 12) + (c3 << 6) + c4
+             - ((0xF0 << 18) + (0x80 << 12) + (0x80 << 6) + 0x80);
+        *len = 4;
+        return 0;
+    }
+    return 1;
+}
+
+#undef CONT
+
+const char *
+lu_utf8_step(const unsigned char *s, Py_ssize_t avail, int surrogatepass, Py_UCS4 *ch, int *len)
+{
+    int bad = utf8_step(s, avail, surrogatepass, ch, len);
+    if (!bad) {
+        return NULL;
+    }
+    if (surrogatepass) {
+        /* A failed surrogatepass handler re-raises the strict decode error. */
+        bad = utf8_step(s, avail, 0, ch, len);
+    }
+    *len = bad == 5 ? (int)avail : bad == 1 ? 1 : bad - 1;
+    return bad == 1 ? "invalid start byte" : bad == 5 ? "unexpected end of data"
+                                                     : "invalid continuation byte";
+}
+
+static Py_ssize_t
+ascii_prefix(const unsigned char *s, Py_ssize_t size)
+{
+    Py_ssize_t i = 0;
+    uint64_t word;
+    while (size - i >= (Py_ssize_t)sizeof(word)) {
+        /* memcpy allows an unaligned source without aliasing or reading past size. */
+        memcpy(&word, s + i, sizeof(word));
+        if (word & UINT64_C(0x8080808080808080)) {
+            break;
+        }
+        i += sizeof(word);
+    }
+    while (i < size && s[i] < 0x80) {
+        i++;
+    }
+    return i;
 }
 
 PyObject *
-lu_str_from_utf8(const char *str, Py_ssize_t size, int surrogatepass)
+lu_str_decode_utf8(const char *str, Py_ssize_t size, int surrogatepass, struct lu_utf8_error *error)
 {
-    /* No string of that many characters can be made: CPython's decoder
-       makes its result first (PyUnicode_New), before reading the bytes. */
+    /* CPython checks that its initial result can fit before reading the bytes. */
     if (size > (PY_SSIZE_T_MAX - (Py_ssize_t)sizeof(PyCompactUnicodeObject)) - 1) {
         return PyErr_NoMemory();
     }
+    if (size <= 0) {
+        return (PyObject *)&_PyRuntime.singletons.empty_str;
+    }
     const unsigned char *s = (const unsigned char *)str;
-    Py_ssize_t length = 0;
+    Py_ssize_t prefix = ascii_prefix(s, size);
+    if (prefix == size) {
+        if (size == 1) {
+            return (PyObject *)&_PyRuntime.singletons.latin1[s[0]];
+        }
+        PyObject *op = PyUnicode_New(size, 0x7f);
+        if (op != NULL) {
+            Py_UCS1 *data = PyUnicode_1BYTE_DATA(op);
+            memcpy(data, s, size);
+            data[size] = 0;
+        }
+        return op;
+    }
+
+    Py_ssize_t length = prefix;
     Py_UCS4 maxchar = 0;
-    for (Py_ssize_t i = 0; i < size; length++) {
+    for (Py_ssize_t i = prefix; i < size; length++) {
         Py_UCS4 ch;
-        int n = utf8_char(s + i, size - i, surrogatepass, &ch);
-        if (n == 0) {
-            /* CPython's 5-argument UnicodeDecodeError, whose __str__ is the
-               message Python sees (unicode_decode_utf8) */
-            unsigned c = s[i];
-            const char *reason = c < 0x80 || (c >= 0xc2 && c <= 0xf4)
-                ? "unexpected end of data" : "invalid start byte";
-            if ((c & 0xc0) == 0x80) {
-                reason = "invalid continuation byte";
-            }
-            PyObject *input = PyBytes_FromStringAndSize(str, size);
-            PyObject *args[5] = { NULL, input, PyLong_FromSsize_t(i),
-                                  PyLong_FromSsize_t(i + 1), NULL };
-            args[0] = PyUnicode_FromString("utf-8");
-            args[4] = PyUnicode_FromString(reason);
-            PyObject *exc = input != NULL && args[2] != NULL && args[3] != NULL
-                ? lu_call(PyExc_UnicodeDecodeError, args, 5, NULL) : NULL;
-            int failed = exc == NULL;
-            PyErr_Clear();
-            for (int k = 0; k < 5; k++) {
-                Py_XDECREF(args[k]);
-            }
-            if (failed) {
-                return PyErr_NoMemory();
-            }
-            PyErr_SetRaisedException(exc);
+        int len;
+        const char *reason = lu_utf8_step(s + i, size - i, surrogatepass, &ch, &len);
+        if (reason != NULL) {
+            *error = (struct lu_utf8_error){i, i + len, reason};
             return NULL;
         }
         maxchar = ch > maxchar ? ch : maxchar;
-        i += n;
+        i += len;
     }
     if (length == 1 && maxchar < 256) {
         return (PyObject *)&_PyRuntime.singletons.latin1[maxchar];
     }
     PyObject *op = PyUnicode_New(length, maxchar);
-    if (op == NULL || length == 0) {
-        return op;
+    if (op == NULL) {
+        return NULL;
     }
     int kind = PyUnicode_KIND(op);
     void *data = PyUnicode_DATA(op);
-    for (Py_ssize_t i = 0, j = 0; i < size; j++) {
+    if (kind == PyUnicode_1BYTE_KIND) {
+        memcpy(data, s, prefix);
+    }
+    else {
+        for (Py_ssize_t i = 0; i < prefix; i++) {
+            PyUnicode_WRITE(kind, data, i, s[i]);
+        }
+    }
+    for (Py_ssize_t i = prefix, j = prefix; i < size; j++) {
         Py_UCS4 ch;
-        i += utf8_char(s + i, size - i, surrogatepass, &ch);
+        int len;
+        utf8_step(s + i, size - i, surrogatepass, &ch, &len);
         PyUnicode_WRITE(kind, data, j, ch);
+        i += len;
     }
     PyUnicode_WRITE(kind, data, length, 0);
+    return op;
+}
+
+PyObject *
+lu_str_from_utf8(const char *str, Py_ssize_t size, int surrogatepass)
+{
+    struct lu_utf8_error error = {0};
+    PyObject *op = lu_str_decode_utf8(str, size, surrogatepass, &error);
+    if (error.reason != NULL) {
+        PyObject *exc = PyUnicodeDecodeError_Create("utf-8", str, size, error.start, error.end,
+                                                    error.reason);
+        if (exc != NULL) {
+            PyErr_SetRaisedException(exc);
+        }
+    }
     return op;
 }
 

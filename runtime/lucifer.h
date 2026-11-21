@@ -1383,6 +1383,14 @@ int lu_str_eq(PyObject *a, PyObject *b);
 void lu_error_unexpected_keyword_arg(PyObject *kwargs, PyObject *kwnames,
                                      PyObject *kwtuple, const char *fname);
 void lu_intern(PyInterpreterState *interp, PyObject **p);
+struct lu_utf8_error {
+    Py_ssize_t start, end;
+    const char *reason;
+};
+/* A malformed sequence sets error. Allocation failure leaves it untouched. */
+PyObject *lu_str_decode_utf8(const char *s, Py_ssize_t n, int surrogatepass, struct lu_utf8_error *error);
+/* Read one sequence. On error return the reason and its byte length in len. */
+const char *lu_utf8_step(const unsigned char *s, Py_ssize_t avail, int surrogatepass, Py_UCS4 *ch, int *len);
 PyObject *lu_str_from_utf8(const char *s, Py_ssize_t n, int surrogatepass);
 Py_hash_t lu_hash(PyObject *v);
 Py_hash_t lu_tuple_hash(PyObject *tuple);
