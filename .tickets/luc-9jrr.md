@@ -18,3 +18,6 @@ A load through an instance of a class attribute that is no descriptor specialize
 **2026-11-11T05:45:03Z**
 
 Shelved 2026-11-11. On pickle_pure_python the generic class-constant loads this targets run about 8.8k times per loop, under 0.5% of the loop's instructions, so the change would not pay for itself. Reopen if a program shows these loads in its profile.
+
+## Review 11-21: not landed, branch luc-9jrr kept
+Correct, but ~80 lines of C with no win on a real row: pickle_pure_python +0.48%, json_dumps +0.21% (microbenchmark -58%). Revisit if luc-szry (type-feedback lookup folding) wants it.
