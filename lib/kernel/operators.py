@@ -7,6 +7,7 @@ functions' frames, so reflection never recurses in C (DESIGN 5.2)."""
 from _lucifer import (
     MISSING, error, str_join, kind, type_lookup, type_tp_name, is_subtype, kernel_set, int_add,
     truth_exact, int_format, int_hash, str_hash, size, object_hash, tuple_hash, native_hash, type_has_sequence, list_append, new_check, kernel_get,
+    str_encode, str_decode,
 )
 from _lucifer import _boot
 
@@ -71,6 +72,12 @@ _function = type(_sequence_slot)
 
 def _name(x):
     return type_tp_name(type(x))
+
+
+def error_type_name(x):
+    """A type name formatted with CPython's %.200s byte precision."""
+    data = str_encode(_name(x), 'utf-8', 'strict')
+    return str_decode(data[:200], 'utf-8', 'ignore')
 
 
 def _unsupported(op, a, b):
@@ -274,7 +281,8 @@ def as_ssize(x, exc):
     n = x if type(x) is int else index(x)
     if n > _SSIZE_MAX or n < _SSIZE_MIN:
         if exc is not None:
-            error(exc, "cannot fit 'int' into an index-sized integer")
+            error(exc, str_join('', ("cannot fit '", error_type_name(x),
+                                     "' into an index-sized integer")))
         return _SSIZE_MAX if n > 0 else _SSIZE_MIN
     return n
 

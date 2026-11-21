@@ -1348,13 +1348,33 @@ PRIM(b_translate, 3)
 
 /* Hex ----------------------------------------------------------------- */
 
-/* b_hex(data, sep, bytes_per_sep): sep is a byte value or -1. */
+/* b_hex(data, sep, bytes_per_sep): the kernel checks sep's reported
+   length. The separator comes from the underlying str or bytes storage. */
 PRIM(b_hex, 3)
 {
-    IDX(1, sep); IDX(2, group);
+    IDX(2, group);
+    PyObject *separator = args[1];
+    int sep = -1;
+    if (separator != LU_MISSING) {
+        if (PyUnicode_Check(separator)) {
+            sep = PyUnicode_KIND(separator) == PyUnicode_1BYTE_KIND
+                ? PyUnicode_1BYTE_DATA(separator)[0] : 128;
+        }
+        else if (PyBytes_Check(separator)) {
+            sep = (unsigned char)PyBytes_AS_STRING(separator)[0];
+        }
+        else {
+            PyErr_SetString(PyExc_TypeError, "sep must be str or bytes.");
+            return NULL;
+        }
+        if (sep > 127) {
+            PyErr_SetString(PyExc_ValueError, "sep must be ASCII.");
+            return NULL;
+        }
+    }
     BV(v, 0);
     static const char digits[] = "0123456789abcdef";
-    Py_ssize_t g = group < 0 ? -group : group;
+    size_t g = group < 0 ? -(size_t)group : (size_t)group;
     int seps = sep >= 0 && g > 0 && v.n > 0;
     Py_ssize_t nsep = seps ? (v.n - 1) / g : 0;
     PyObject *r = PyUnicode_New(v.n * 2 + nsep, 127);

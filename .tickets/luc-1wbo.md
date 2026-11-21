@@ -1,6 +1,6 @@
 ---
 id: luc-1wbo
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T04:18:01Z
@@ -106,3 +106,9 @@ tuple[x] with a long non-ASCII class name TypeError tuple indices must be intege
 Companion of the str/bytes Py_ssize_t ticket; bytearray(b'\t').expandtabs(2**31) kills the process.
 
 
+
+## Notes
+
+**2026-11-21T05:56:16Z**
+
+The baseline already rejects widths and split counts outside Py_ssize_t and tab sizes outside C int. The remaining mismatches came from validating search needles before slice bounds, validating hex separators before the C int group size, losing the original index type in errors, and ignoring iterable length hints. Search and hex conversions now follow CPython order, sequence index messages use UTF-8 byte precision, and generic list extension reserves capacity using the existing length-hint protocol. The new kernel check failed against CPython 3.14t before the fix. After the fix, it and 11 nearby checks passed in plain, jit and jit-deopt.

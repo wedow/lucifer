@@ -46,7 +46,7 @@ def getitem(self, key, what):
             return self
         return seq_slice(self, start, step, count, what == 'tuple')
     error(TypeError, str_join('', (
-        what, ' indices must be integers or slices, not ', _name(key))))
+        what, ' indices must be integers or slices, not ', operators.error_type_name(key))))
 
 
 def eq_bool(a, b):

@@ -6,7 +6,8 @@ exact tuple, list and range loops never come here."""
 
 from _lucifer import (
     MISSING, error, str_join, kind, size, type_lookup, type_tp_name, static_type, kernel_set,
-    iter_new, iter_state, iter_set, list_append, list_splice, tuple_from, is_callable,
+    iter_new, iter_state, iter_set, list_append, list_splice, list_reserve_hint, list_trim,
+    tuple_from, is_callable,
     alloc, field_get, field_set, seqiter_next, dictiter_next, type_has_sq_item, next_missing_of,
     next_missing_set,
 )
@@ -191,17 +192,13 @@ def unpack_ex(obj, before, after):
 
 
 def extend(lst, iterable):
-    """list.extend over any iterable: PyObject_LengthHint asks for __len__
-    first, and its error, other than a TypeError, ends the extension."""
+    """Extend through the iterator, using the iterable's length hint."""
     it = get_iter(iterable)
-    if type_lookup(type(iterable), '__len__') is not MISSING:
-        try:
-            operators.length(iterable)
-        except TypeError:
-            pass
+    list_reserve_hint(lst, iterable)
     while True:
         x = next_item(it)
         if x is MISSING:
+            list_trim(lst)
             return
         list_append(lst, x)
 

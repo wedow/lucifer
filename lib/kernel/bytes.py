@@ -165,10 +165,16 @@ def _bound(x, default):
     return slice_index(x)
 
 
-def _find(self, args, name, last):
+def _find_args(name, args):
     sub, start, end = _args(name, args, 1, 3)
-    sub = _sub(sub)
-    return b_find(self, sub, _bound(start, 0), _bound(end, _SSIZE_MAX), last)
+    start = _bound(start, 0)
+    end = _bound(end, _SSIZE_MAX)
+    return _sub(sub), start, end
+
+
+def _find(self, args, name, last):
+    sub, start, end = _find_args(name, args)
+    return b_find(self, sub, start, end, last)
 
 
 def _find_index(self, args, name, last):
@@ -224,25 +230,10 @@ def _concat_error(other, self):
 
 def _hex(self, args, kwargs):
     sep, group = _parse('hex', args, kwargs, ('sep', 'bytes_per_sep'), 0)
-    byte = -1
-    if sep is not MISSING:
-        if kind(sep, 'str'):
-            n = size_of_str(sep)
-        elif b_check(sep):
-            n = b_len(sep)
-        else:
-            n = operators.length(sep)
-        if n != 1:
-            error(ValueError, 'sep must be length 1.')
-        data = str_encode(sep, 'latin-1', 'strict') if kind(sep, 'str') else b_bytes(sep)
-        byte = b_item(data, 0)
-        if byte > 127:
-            error(ValueError, 'sep must be ASCII.')
-    return b_hex(self, byte, 1 if group is MISSING else as_ssize(group, None))
-
-
-def size_of_str(s):
-    return operators.length(s)
+    group = 1 if group is MISSING else operators.int_arg(group)
+    if sep is not MISSING and operators.length(sep) != 1:
+        error(ValueError, 'sep must be length 1.')
+    return b_hex(self, sep, group)
 
 
 # shared methods ------------------------------------------------------------
@@ -269,8 +260,8 @@ def _m_rindex(self, *args, **kwargs):
 
 def _m_count(self, *args, **kwargs):
     _nokw(self, 'count', kwargs)
-    sub, start, end = _args('count', args, 1, 3)
-    return b_count(self, _sub(sub), _bound(start, 0), _bound(end, _SSIZE_MAX))
+    sub, start, end = _find_args('count', args)
+    return b_count(self, sub, start, end)
 
 
 def _m_startswith(self, *args, **kwargs):

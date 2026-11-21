@@ -115,23 +115,26 @@ seq_take(PyObject **items, Py_ssize_t n, int as_tuple)
     return r;
 }
 
-/* list_resize (Objects/listobject.c): the array is replaced, never grown in
-   place, so a lock-free reader sees the old one or the new, whole. Items
-   past the old size are left for the caller to fill. */
+/* Replace the array so lock-free readers can keep using the old one.
+   When reserving, target exceeds newsize and only capacity grows. */
 static int
-list_resize(PyListObject *self, Py_ssize_t newsize)
+list_resize_to(PyListObject *self, Py_ssize_t newsize, Py_ssize_t target)
 {
     Py_ssize_t allocated = self->allocated;
-    if (allocated >= newsize && newsize >= (allocated >> 1)) {
+    if (allocated >= target && target >= (allocated >> 1)) {
         Py_SET_SIZE(self, newsize);
         return 0;
     }
-    size_t new_allocated = ((size_t)newsize + (newsize >> 3) + 6) & ~(size_t)3;
-    if (newsize - Py_SIZE(self) > (Py_ssize_t)(new_allocated - newsize)) {
-        new_allocated = ((size_t)newsize + 3) & ~(size_t)3;
+    size_t new_allocated = ((size_t)target + (target >> 3) + 6) & ~(size_t)3;
+    if (target - Py_SIZE(self) > (Py_ssize_t)(new_allocated - target)) {
+        new_allocated = ((size_t)target + 3) & ~(size_t)3;
     }
-    if (newsize == 0) {
+    if (target == 0) {
         new_allocated = 0;
+    }
+    else if (target > newsize && self->ob_item == NULL) {
+        /* list_preallocate_exact rounds an empty list's hint to an even count. */
+        new_allocated = ((size_t)target + 1) & ~(size_t)1;
     }
     PyObject **items = NULL;
     if (new_allocated > 0) {
@@ -151,6 +154,12 @@ list_resize(PyListObject *self, Py_ssize_t newsize)
     self->allocated = (Py_ssize_t)new_allocated;
     lu_list_array_retire(old);
     return 0;
+}
+
+static int
+list_resize(PyListObject *self, Py_ssize_t newsize)
+{
+    return list_resize_to(self, newsize, newsize);
 }
 
 /* l[i] under the list's lock, the reference marked as shared so that
@@ -476,6 +485,42 @@ prim_list_append(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     int err;
     Py_BEGIN_CRITICAL_SECTION(args[0]);
     err = lu_list_append(args[0], args[1]);
+    Py_END_CRITICAL_SECTION();
+    return err < 0 ? NULL : Py_NewRef(Py_None);
+}
+
+/* Reserve before consuming the iterator. A hint whose sum with the
+   current length overflows is ignored, as in list_extend_iter_lock_held. */
+static PyObject *
+prim_list_reserve_hint(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2); LIST(0);
+    Py_ssize_t hint = PyObject_LengthHint(args[1], 8);
+    if (hint < 0) {
+        return NULL;
+    }
+    PyListObject *list = (PyListObject *)args[0];
+    int err = 0;
+    Py_BEGIN_CRITICAL_SECTION(list);
+    Py_ssize_t n = Py_SIZE(list);
+    if (hint <= PY_SSIZE_T_MAX - n && (hint || list->ob_item != NULL)) {
+        err = list_resize_to(list, n, n + hint);
+    }
+    Py_END_CRITICAL_SECTION();
+    return err < 0 ? NULL : Py_NewRef(Py_None);
+}
+
+static PyObject *
+prim_list_trim(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); LIST(0);
+    PyListObject *list = (PyListObject *)args[0];
+    int err = 0;
+    Py_BEGIN_CRITICAL_SECTION(list);
+    Py_ssize_t n = Py_SIZE(list);
+    if (n < list->allocated) {
+        err = list_resize(list, n);
+    }
     Py_END_CRITICAL_SECTION();
     return err < 0 ? NULL : Py_NewRef(Py_None);
 }
@@ -1268,7 +1313,7 @@ lu_storage_init(void)
 PyMethodDef lu_prim_storage_methods[] = {
     FAST(seq_get), FAST(seq_slice), FAST(seq_concat), FAST(seq_repeat), FAST(tuple_from),
     FAST(xxh_hash), FAST(tuple_hash), FAST(repr_enter), FAST(repr_leave), FAST(list_alloc), FAST(list_append),
-    FAST(list_set), FAST(list_splice), FAST(list_insert), FAST(list_insert), FAST(list_set_stride), FAST(list_del_stride),
+    FAST(list_reserve_hint), FAST(list_trim), FAST(list_set), FAST(list_splice), FAST(list_insert), FAST(list_insert), FAST(list_set_stride), FAST(list_del_stride),
     FAST(list_reverse), FAST(list_pop), FAST(list_sort_begin), FAST(list_sort_end), FAST(iter_new),
     FAST(seqiter_next), FAST(iter_state), FAST(iter_set), FAST(range_new), FAST(range_get),
     FAST(range_iter_new), FAST(rangeiter_next), FAST(rangeiter_len), FAST(range_iter),
