@@ -1,6 +1,6 @@
 ---
 id: luc-igt3
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-20T21:58:12Z
@@ -30,3 +30,9 @@ Repro (CPython 3.14t: 'ok True'; Lucifer, plain, jit and jit-deopt: RecursionErr
 
 Fix direction: keep the RLock's count with the mutex too (one primitive per acquire/release that sets owner and count together), so RLock drops _owner like the stream locks did.
 
+
+## Notes
+
+**2026-11-21T03:13:58Z**
+
+Fixed by 62aaa6bf: rlock_acquire/rlock_release keep the holder and its count with the PyMutex in one primitive call, so a handler at a poll never sees the lock without them. tests/kernel/rlock_signal_reentry.py, 20 runs per lane failing before / after: plain, jit, jit-deopt 20/20 / 0/20. Kernel threading/RLock/signal programs (10) pass in all three lanes. Instructions, 1M nested with-RLock pairs on a core lease, median of 3: 10.25G before, 7.68G after (-25%).
