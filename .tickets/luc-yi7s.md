@@ -1,6 +1,6 @@
 ---
 id: luc-yi7s
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-21T07:30:59Z
@@ -12,3 +12,9 @@ tags: [imports, signals, fidelity]
 
 Review of 48331397. acquire_lock calls rlock_acquire(_lock, -1, 1), which waits with _PY_LOCK_HANDLE_SIGNALS: a KeyboardInterrupt while another thread holds the import lock leaves acquire_lock without it. CPython's _PyImport_AcquireLock is _PyRecursiveMutex_Lock (PyMutex_Lock, not interrupted): the handler runs once the lock is held. Repro: tests/kernel/import_lock_interrupt.py (a holder thread calls _thread.interrupt_main() while main waits in acquire_lock). CPython: 'held when interrupted True False'; lucifer: held False.
 
+
+## Notes
+
+**2026-11-21T07:42:42Z**
+
+Fixed by ab39382c: acquire_lock passes a timeout of None (wait without handling signals). tests/kernel/import_lock_interrupt.py fails before (held False) and passes after in plain, jit and jit-deopt.

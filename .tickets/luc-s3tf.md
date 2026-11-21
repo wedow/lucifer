@@ -1,6 +1,6 @@
 ---
 id: luc-s3tf
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-21T02:53:04Z
@@ -38,3 +38,9 @@ CPython: all ok. lucifer -X lucifer_jit=off: 10000+ RecursionError.
 
 Fix direction: charge kernel frames what the C they stand for would take (or give the room a measured ratio of kernel words to C bytes), not word for word; pass the C 'where' text through.
 
+
+## Notes
+
+**2026-11-21T07:42:42Z**
+
+Fixed by 585436fb. A stack-pointer reading cannot bound interpreted kernel frames (they live on the datastack and never move the SP), so the room stays a model of CPython's C stack: a word of kernel frame per byte of carrier stack, since a kernel level takes about as many words as CPython's C takes bytes. Deepest level, CPython / before / after (jit off; jit, jit-deopt within 15%), 8 MiB: repr list 57970/9881/79136, repr dict 47430/12619/101066 (jit 108548), json.dumps 47429/16366/131070, == 40133/7535/60348, hash tuple (C, SP-checked) 130434/104309/104385. 64 KiB thread: repr list 151/75/616, == 104/57/470; 1 MiB: repr list 6978/1234/9890. 200,000 levels raise everywhere. Message suffixes from _recursion_where on to_repr, _json _encode/_parse_object/_parse_array and the compare functions; a walk stops at compiled code's frames, so json.dumps under jit-deopt can lack its suffix. JIT floor: min(192 KiB, 3/4 of the stack), so threads under 192 KiB run compiled code (jit lane 64 KiB repr dict 794). tests/kernel/kernel_stack_depth.py fails before, passes after in plain, jit, jit-deopt.
