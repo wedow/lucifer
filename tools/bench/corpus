@@ -17,6 +17,7 @@ Suites:
 Every program runs as `COMMAND ARGS` with PYTHONPATH=SITE and nothing else changed.
 
   corpus prepare SITE              install corpus.lock.json into SITE (hash-checked downloads, cached)
+  corpus list SITE                 JSON list of program ids in measurement order
   corpus time SITE --run COMMAND   one JSON object, {program: result}, on the last stdout line
       --reference FILE             measure against a reference produced without it: the same
                                    pyperf loops, and an output that must match the reference's
@@ -275,6 +276,7 @@ def main():
     prep = sub.add_parser("prepare")
     prep.add_argument("site", type=Path)
     prep.add_argument("--cache", type=Path, default=CACHE)
+    sub.add_parser("list").add_argument("site", type=Path)
     t = sub.add_parser("time")
     t.add_argument("site", type=Path)
     t.add_argument("--run", required=True, help="the interpreter command, as shell words")
@@ -283,6 +285,9 @@ def main():
     args = p.parse_args()
     if args.action == "prepare":
         return prepare(args.site.resolve(), args.cache)
+    if args.action == "list":
+        print(json.dumps(list(programs(args.site.resolve()))))
+        return
     reference = json.loads(args.reference.read_text()) if args.reference else None
     only = set(filter(None, args.programs.split(",")))
     command = shlex.split(args.run)

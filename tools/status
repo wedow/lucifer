@@ -67,6 +67,13 @@ def run(argv, prefix="", cwd=ROOT):
 
 # --- timing -----------------------------------------------------------------
 
+def last_json(stdout):
+    try:
+        return json.loads(stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return {}
+
+
 def time_one(names, iters, commands):
     """Worker: per benchmark, best-of-iters microseconds per labelled command, as JSON on stdout."""
     inner = awfy_inner()
@@ -82,13 +89,13 @@ def time_one(names, iters, commands):
 
 
 def timings(names, iters, commands):
-    """All benchmarks in one prefixed step: one wait for the host, however busy."""
-    done = run([sys.executable, __file__, "time", ",".join(names), "--iters", str(iters)]
-               + [f"--run={label}={command}" for label, command in commands.items()], "TIMING_PREFIX")
-    try:
-        return json.loads(done.stdout.strip().splitlines()[-1])
-    except (ValueError, IndexError):
-        return {name: {label: None for label in commands} for name in names}
+    """One prefixed step per AWFY benchmark, with every runtime at the same iteration count."""
+    results = {}
+    options = ["--iters", str(iters)] + [f"--run={label}={command}" for label, command in commands.items()]
+    for name in names:
+        done = run([sys.executable, __file__, "time", name] + options, "TIMING_PREFIX")
+        results[name] = last_json(done.stdout).get(name, {label: None for label in commands})
+    return results
 
 
 def oracle_version(oracle):
@@ -97,14 +104,18 @@ def oracle_version(oracle):
 
 def web_timings(runs):
     """The web benchmark per runtime and server CPU count: {runtime: {cpus: point}}."""
-    done = run([sys.executable, str(WEB), "time", "--cpus", WEB_CPUS] + [f"--run={n}={c}" for n, c in runs.items()],
-               "TIMING_PREFIX")
+    logs = []
+    for name, command in runs.items():
+        for cpus in WEB_CPUS.split(","):
+            done = run([sys.executable, str(WEB), "time", "--cpus", cpus, f"--run={name}={command}"], "TIMING_PREFIX")
+            logs.append(done.stdout)
+    log = "".join(logs)
     points = {}
-    for line in done.stdout.splitlines():
+    for line in log.splitlines():
         if line.startswith("{"):
             p = json.loads(line)
             points.setdefault(p["runtime"], {})[str(p["cpus"])] = {k: p[k] for k in ("rps", "p50_ms", "p99_ms", "errors", "server_exit")}
-    return points, done.stdout
+    return points, log
 
 
 def web_check(oracle, site):
@@ -114,19 +125,26 @@ def web_check(oracle, site):
 
 
 def corpus_timings(command, reference=None):
-    """{program: result} from tools/bench/corpus in one prefixed step, against REFERENCE when given."""
+    """{program: result} from one prefixed step per corpus program."""
     prepared = run([sys.executable, str(CORPUS), "prepare", str(CORPUS_SITE)])
     if prepared.returncode:
         return {}, prepared.stdout
+    listing = run([sys.executable, str(CORPUS), "list", str(CORPUS_SITE)])
+    names = last_json(listing.stdout)
+    if listing.returncode or not names:
+        return {}, listing.stdout
+    results, logs = {}, []
     with tempfile.NamedTemporaryFile("w", suffix=".json") as ref:
-        json.dump(reference, ref)
-        ref.flush()
-        done = run([sys.executable, str(CORPUS), "time", str(CORPUS_SITE), "--run", command]
-                   + (["--reference", ref.name] if reference is not None else []), "TIMING_PREFIX")
-    try:
-        return json.loads(done.stdout.strip().splitlines()[-1]), done.stdout
-    except (ValueError, IndexError):
-        return {}, done.stdout
+        args = [sys.executable, str(CORPUS), "time", str(CORPUS_SITE), "--run", command]
+        if reference is not None:
+            json.dump(reference, ref)
+            ref.flush()
+            args += ["--reference", ref.name]
+        for name in names:
+            done = run(args + ["--programs", name], "TIMING_PREFIX")
+            results.update(last_json(done.stdout))
+            logs.append(done.stdout)
+    return results, "".join(logs)
 
 
 def refresh_reference(names, iters, oracle):
