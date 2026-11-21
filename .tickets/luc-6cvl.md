@@ -1,6 +1,6 @@
 ---
 id: luc-6cvl
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T02:42:33Z
@@ -35,3 +35,9 @@ hook args
 ```
 
 
+
+## Notes
+
+**2026-11-21T11:28:43Z**
+
+The kernel constructors assigned args through instance attribute lookup. CPython writes the BaseException field directly (Objects/exceptions.c). Use the existing BaseException.args descriptor setter for every constructor write. The regression test covers subclass hooks, shadowed args, and explicit assignment. It failed on the baseline and passed with the fix. The regression and four nearby kernel checks passed in plain, jit, and jit-deopt.

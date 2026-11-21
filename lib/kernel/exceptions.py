@@ -77,7 +77,7 @@ _word = exc_word
 def _init(self, args, kwds):
     """BaseException_init."""
     _no_keywords(type(self), kwds)
-    self.args = args
+    _set_args(self, args)
 
 
 # BaseException
@@ -88,7 +88,7 @@ class BaseException:
 
     def __new__(cls, /, *args, **kwds):
         self = alloc(cls, BaseException)
-        self.args = args
+        _set_args(self, args)
         return self
 
     def __init__(self, /, *args, **kwds):
@@ -147,6 +147,9 @@ class BaseException:
         return None
 
 
+# Constructors write the base layout even when a subclass overrides attribute
+# assignment or shadows args with a descriptor.
+_set_args = BaseException.args.__set__
 _base_dict_new = type_lookup(BaseException, '__new__')
 
 
@@ -191,7 +194,7 @@ class NameError:
     """Name not found globally."""
 
     def __init__(self, /, *args, **kwds):
-        self.args = args
+        _set_args(self, args)
         _store_keywords(self, 'NameError', kwds, ('name',))
 
 
@@ -200,7 +203,7 @@ class AttributeError:
     """Attribute not found."""
 
     def __init__(self, /, *args, **kwds):
-        self.args = args
+        _set_args(self, args)
         _store_keywords(self, 'AttributeError', kwds, ('obj', 'name'))
 
     def __reduce__(self):
@@ -220,7 +223,7 @@ class ImportError:
     """Import can't find module, or can't find name in module."""
 
     def __init__(self, /, *args, **kwds):
-        self.args = args
+        _set_args(self, args)
         for key, value in ns_items(kwds):
             if key != 'name' and key != 'path' and key != 'name_from':
                 error(TypeError, str_join('', (
@@ -259,7 +262,7 @@ class OSError:
     def __new__(cls, /, *args, **kwds):
         if _use_init(cls):
             self = alloc(cls, OSError)
-            self.args = ()
+            _set_args(self, ())
             return self
         _no_keywords(cls, kwds)
         errno, strerror, filename, filename2 = _oserror_args(args)
@@ -356,7 +359,7 @@ def _oserror_fill(self, args, errno, strerror, filename, filename2):
     if errno is not MISSING:
         _set(self, 0, errno)
         _set(self, 1, strerror)
-    self.args = args
+    _set_args(self, args)
 
 
 def _two(args):
@@ -670,7 +673,7 @@ class BaseExceptionGroup:
             error(TypeError, str_join('', (
                 "Cannot nest BaseExceptions in '", type_tp_name(cls), "'")))
         self = alloc(cls, BaseExceptionGroup)
-        self.args = args
+        _set_args(self, args)
         exc_set_word(self, 0, message)
         exc_set_word(self, 1, exceptions)
         exc_set_word(self, 2, excs_str)
