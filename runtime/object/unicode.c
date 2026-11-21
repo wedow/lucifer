@@ -128,7 +128,7 @@ PyUnicode_FromKindAndData(int kind, const void *buffer, Py_ssize_t size)
 
 /* One UTF-8 sequence at s[0..avail): 0 and its character, 1 invalid start byte,
    2-4 invalid continuation byte (the error covers 1 to 3 bytes), 5 truncated. */
-static int
+static inline __attribute__((always_inline)) int
 utf8_step(const unsigned char *s, Py_ssize_t avail, int surrogates, Py_UCS4 *out, int *len)
 {
     Py_UCS4 ch = s[0], c2, c3, c4;
@@ -245,8 +245,8 @@ lu_str_decode_utf8(const char *str, Py_ssize_t size, int surrogatepass, struct l
     for (Py_ssize_t i = prefix; i < size; length++) {
         Py_UCS4 ch;
         int len;
-        const char *reason = lu_utf8_step(s + i, size - i, surrogatepass, &ch, &len);
-        if (reason != NULL) {
+        if (utf8_step(s + i, size - i, surrogatepass, &ch, &len)) {
+            const char *reason = lu_utf8_step(s + i, size - i, surrogatepass, &ch, &len);
             *error = (struct lu_utf8_error){i, i + len, reason};
             return NULL;
         }
@@ -271,8 +271,8 @@ lu_str_decode_utf8(const char *str, Py_ssize_t size, int surrogatepass, struct l
         }
     }
     for (Py_ssize_t i = prefix, j = prefix; i < size; j++) {
-        Py_UCS4 ch;
-        int len;
+        Py_UCS4 ch = 0;     /* validated above: every step succeeds */
+        int len = 1;
         utf8_step(s + i, size - i, surrogatepass, &ch, &len);
         PyUnicode_WRITE(kind, data, j, ch);
         i += len;
