@@ -63,8 +63,15 @@
 #define NOSPEC 1
 #define NOHOIST 2
 #define CATCH 4                 /* at a kernel handler: what a call raises under it is taken in the unit */
-/* A guard that fails this often makes its instruction generic. */
+/* A guard that fails this often makes its instruction generic, and at
+   least once per INS_PER_FAIL instructions its root's last build made: an
+   exit costs about what building two instructions does (4,700 machine
+   instructions against 2,500), so the build that gives the site up is
+   made once its exits have cost about as much. A guard that fails rarely
+   in a large unit keeps its speculation: until then the exits cost less
+   than the build, and the generic site's helper calls more. */
 #define GUARD_FAILS 50
+#define INS_PER_FAIL 2
 /* Exits a unit without loops takes, on at least half its entries, before
    it is retired. */
 #define LEAVES 50
@@ -97,7 +104,7 @@ struct lu_jit_code {
     struct lu_unit *units;      /* live ones and dead ones not yet freed */
     int ncode;
     uint8_t *nospec;            /* per code unit: NOSPEC, do not speculate; NOHOIST, keep its guards in place */
-    uint16_t *fails;            /* per code unit: guard failures */
+    uint32_t *fails;            /* per code unit: guard failures */
     uint32_t *wait;             /* per code unit: entries to leave to the interpreter */
     uint8_t *seen;              /* per code unit: WARMED */
     int noinline;               /* a side exit in an inlined copy keeps leaving: call it instead */
@@ -134,7 +141,8 @@ struct lu_prof {
     int n;                      /* how many: release-stored after the type */
     uint8_t values;             /* a value profile (lu_jit_prof_value) */
     uint8_t poly;               /* it had more than those: nothing to rely on */
-    uint16_t fails;             /* exits of a guard on its one type: GUARD_FAILS of them and it is not relied on */
+    uint8_t dropped;            /* not relied on: a guard on its one type failed as often as a site's (GUARD_FAILS) */
+    uint32_t fails;             /* exits of that guard */
 };
 
 static struct {
@@ -325,7 +333,7 @@ state_for(PyCodeObject *code)
     jc = calloc(1, sizeof(struct lu_jit_code));
     jc->ncode = (int)Py_SIZE(code);
     jc->nospec = calloc((size_t)jc->ncode + 1, 1);
-    jc->fails = calloc((size_t)jc->ncode + 1, sizeof(uint16_t));
+    jc->fails = calloc((size_t)jc->ncode + 1, sizeof(uint32_t));
     jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint32_t));
     jc->seen = calloc((size_t)jc->ncode + 1, 1);
     jc->call_pc = lu_jit_call_entry(code);
@@ -402,7 +410,7 @@ lu_jit_prof_type(struct lu_prof *p, int *poly)
 {
     PyMutex_Lock(&p->jc->prof_lock);
     PyTypeObject *t = p->n > 0 ? (PyTypeObject *)Py_NewRef(p->met[0]) : NULL;
-    *poly = p->poly || p->n > 1 || p->fails >= GUARD_FAILS;
+    *poly = p->poly || p->n > 1 || p->dropped;
     PyMutex_Unlock(&p->jc->prof_lock);
     return t;
 }
@@ -413,7 +421,7 @@ lu_jit_prof_value(struct lu_prof *p, int *poly)
     PyMutex_Lock(&p->jc->prof_lock);
     __atomic_store_n(&p->values, 1, __ATOMIC_RELAXED);
     PyObject *k = p->n > 0 ? Py_NewRef(p->met[0]) : NULL;
-    *poly = p->poly || p->n > 1 || p->fails >= GUARD_FAILS;
+    *poly = p->poly || p->n > 1 || p->dropped;
     PyMutex_Unlock(&p->jc->prof_lock);
     return k;
 }
@@ -426,7 +434,7 @@ lu_jit_prof_types(struct lu_prof *p, PyTypeObject **types, int *relied)
     for (int i = 0; i < n; i++) {
         types[i] = (PyTypeObject *)Py_NewRef(p->met[i]);
     }
-    *relied = n == 1 && p->fails < GUARD_FAILS;
+    *relied = n == 1 && !p->dropped;
     PyMutex_Unlock(&p->jc->prof_lock);
     return n;
 }
@@ -479,6 +487,14 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
 
 static void kill(struct lu_jit_code *jc, struct lu_unit *u);
 
+/* Whether n exits of a guard in a unit of root's justify building it again
+   without the guard (GUARD_FAILS). */
+static int
+fails_enough(uint32_t n, struct lu_jit_code *root)
+{
+    return n >= GUARD_FAILS && n >= (uint32_t)__atomic_load_n(&root->built_ins, __ATOMIC_RELAXED) / INS_PER_FAIL;
+}
+
 /* An exit a learned type's site took: the unit is built again with what
    the root knows now, at once, when its sites reported; when the type
    keeps being another, its one type is not relied on there (an operator
@@ -490,16 +506,23 @@ prof_exit(struct lu_deopt *d)
     struct lu_prof *p = d->prof;
     struct lu_jit_code *jc = p->jc;
     if (d->tier) {
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: recompile %s: learned since its build\n", PyUnicode_AsUTF8(d->unit->code->co_qualname));
+        }
         kill(jc, d->unit);
         __atomic_store_n(&jc->wait[d->unit->entry_pc], 0, __ATOMIC_RELAXED);
         return;
     }
     PyMutex_Lock(&jc->prof_lock);
-    int now = !p->poly && p->fails < GUARD_FAILS && ++p->fails == GUARD_FAILS;
+    int now = !p->poly && !p->dropped && fails_enough(++p->fails, jc);
     if (now) {
+        p->dropped = 1;
         jc->learned++;
     }
     PyMutex_Unlock(&jc->prof_lock);
+    if (now && _PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: recompile %s: learned type fails\n", PyUnicode_AsUTF8(d->unit->code->co_qualname));
+    }
     for (struct lu_unit *u = now ? __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE) : NULL; u != NULL; u = u->next) {
         kill(jc, u);
     }
@@ -1004,6 +1027,9 @@ grow(struct lu_jit_code *jc, struct lu_unit *u)
 {
     if (!u->refused || jc == NULL || jc->grown >= MAX_GROWN) {
         return 0;
+    }
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: recompile %s: grown %d\n", PyUnicode_AsUTF8(u->code->co_qualname), jc->grown + 1);
     }
     __atomic_store_n(&jc->grown, jc->grown + 1, __ATOMIC_RELAXED);
     kill(jc, u);
@@ -1551,8 +1577,10 @@ lu_jit_note_exit(struct lu_deopt *d)
     }
     /* Past the threshold too: another root that inlined the same copy before
        the flag was set leaves here as well, and is recompiled when it does. */
-    uint16_t n = __atomic_add_fetch(&jc->fails[site_pc], 1, __ATOMIC_RELAXED);
-    if (n >= GUARD_FAILS) {
+    uint32_t n = __atomic_add_fetch(&jc->fails[site_pc], 1, __ATOMIC_RELAXED);
+    PyCodeObject *code = lu_deopt_frame(d, 0)->code;
+    struct lu_jit_code *root = state_for(code);
+    if (fails_enough(n, root)) {
         int again;
         if (caught >= 0) {
             /* A kernel handler keeps taking what a call raises: the unit is
@@ -1586,9 +1614,7 @@ lu_jit_note_exit(struct lu_deopt *d)
             leave(d, u, 1);
             return;
         }
-        PyCodeObject *code = lu_deopt_frame(d, 0)->code;
         say_recompile(code, d->reason != EXIT_GUARD ? "inlined copy leaves" : "guard fails", site, site_pc);
-        struct lu_jit_code *root = state_for(code);
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
             kill(root, u);
         }
