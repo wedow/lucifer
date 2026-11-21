@@ -174,11 +174,8 @@ def unpack_ex(obj, before, after):
                 ', got ', decimal(size(items)), ')')))
         list_append(items, x)
     rest = []
-    while True:
-        x = next_item(it)
-        if x is MISSING:
-            break
-        list_append(rest, x)
+    # PySequence_List calls iter() and takes the hint from the same input.
+    extend(rest, it)
     if size(rest) < after:
         error(ValueError, str_join('', (
             'not enough values to unpack (expected at least ', decimal(before + after),

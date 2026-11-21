@@ -1,6 +1,6 @@
 ---
 id: luc-a8ee
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T03:08:31Z
@@ -80,3 +80,11 @@ ValueError not enough values to unpack (expected at least 1, got 0)
 ```
 
 
+
+## Notes
+
+**2026-11-21T09:29:25Z**
+
+Starred unpacking consumed the first iterator directly after filling the fixed prefix. CPython 3.14t extends a list from that iterator, which calls iter() again and takes the length hint from the first iterator. Reused the kernel's list-extension helper so the remainder comes from the second iterator and hint errors propagate with their original messages.
+
+The new unpack_starred_protocol check failed on the baseline and passed after the fix. It and the four nearby kernel checks passed in plain, jit, and jit-deopt.
