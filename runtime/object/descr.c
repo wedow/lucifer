@@ -1200,44 +1200,37 @@ is_descr(PyObject *d, PyTypeObject *tp)
     return 1;
 }
 
-/* make_function(owner, name, func, kind): a kernel function as a descriptor
-   of type `owner`: kind 'method', 'classmethod', 'wrapper', or 'new', the
-   builtin __new__ bound to the type. */
+enum kernel_descriptor_kind {
+    KERNEL_METHOD,
+    KERNEL_CLASSMETHOD,
+    KERNEL_WRAPPER,
+    KERNEL_NEW,
+};
+
 static PyObject *
-prim_make_function(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+make_kernel_function(PyTypeObject *owner, PyObject *name, PyObject *func,
+                     enum kernel_descriptor_kind kind)
 {
-    ARGS(4);
-    PyObject *owner = args[0], *name = args[1], *func = args[2];
-    const char *kind = PyUnicode_Check(args[3]) ? PyUnicode_AsUTF8(args[3]) : "";
-    if (!PyUnicode_CheckExact(name) || !PyFunction_Check(func)) {
-        lu_err_format(PyExc_TypeError, "make_function(owner, str, function, kind)");
+    if (!PyFunction_Check(func)) {
+        lu_err_format(PyExc_TypeError, "a kernel method must be a function");
         return NULL;
     }
-    if (!PyType_Check(owner)) {
-        lu_err_format(PyExc_TypeError, "make_function: owner must be a type");
-        return NULL;
-    }
-    int flags = !strcmp(kind, "classmethod") ? METH_CLASS : !strcmp(kind, "new") ? METH_STATIC : 0;
+    int flags = kind == KERNEL_CLASSMETHOD ? METH_CLASS : kind == KERNEL_NEW ? METH_STATIC : 0;
     /* A bound method from a descriptor passes its self; __new__ does not. */
-    int bind = strcmp(kind, "new") != 0;
-    struct lu_kernel_def *k = lu_kernel_def_new(name, func, flags, bind);
+    struct lu_kernel_def *k = lu_kernel_def_new(name, func, flags, kind != KERNEL_NEW);
     if (k == NULL) {
         return NULL;
     }
-    if (!strcmp(kind, "method")) {
-        return lu_descr_new_method((PyTypeObject *)owner, &k->def);
+    switch (kind) {
+    case KERNEL_CLASSMETHOD:
+        return lu_descr_new_classmethod(owner, &k->def);
+    case KERNEL_WRAPPER:
+        return lu_descr_new_wrapper(owner, name, k);
+    case KERNEL_NEW:
+        return cfunction_bound(&k->def, (PyObject *)owner, NULL);
+    default:
+        return lu_descr_new_method(owner, &k->def);
     }
-    if (!strcmp(kind, "classmethod")) {
-        return lu_descr_new_classmethod((PyTypeObject *)owner, &k->def);
-    }
-    if (!strcmp(kind, "wrapper")) {
-        return lu_descr_new_wrapper((PyTypeObject *)owner, name, k);
-    }
-    if (!strcmp(kind, "new")) {
-        return cfunction_bound(&k->def, owner, NULL);
-    }
-    lu_err_format(PyExc_SystemError, "make_function: bad kind '%s'", kind);
-    return NULL;
 }
 
 /* _tuplegetter.__get__ for a tuple that has the item: its _index slot is the position. */
@@ -1409,29 +1402,92 @@ prim_setattr_native(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return done < 0 ? NULL : Py_NewRef(done ? Py_True : Py_False);
 }
 
-/* make_getset(type, name, fget, fset or None) */
 static PyObject *
-prim_make_getset(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+make_kernel_getset(PyTypeObject *owner, PyObject *name, PyObject *fget, PyObject *fset)
 {
-    ARGS(4);
-    if (!PyType_Check(args[0]) || !PyUnicode_CheckExact(args[1])) {
-        lu_err_format(PyExc_TypeError, "make_getset(type, str, fget, fset)");
-        return NULL;
-    }
     struct lu_kernel_getset *g = PyMem_Calloc(1, sizeof *g);
     if (g == NULL) {
         return PyErr_NoMemory();
     }
-    g->name = Py_NewRef(args[1]);
-    g->fget = Py_NewRef(args[2]);
-    g->fset = args[3] != Py_None ? Py_NewRef(args[3]) : NULL;
-    g->def.name = PyUnicode_AsUTF8(args[1]);
+    g->name = Py_NewRef(name);
+    g->fget = Py_NewRef(fget);
+    g->fset = fset != Py_None ? Py_NewRef(fset) : NULL;
+    g->def.name = PyUnicode_AsUTF8(name);
     g->def.get = kernel_getset_get;
     g->def.set = kernel_getset_set;
-    PyObject *doc = PyFunction_Check(args[2]) ? ((PyFunctionObject *)args[2])->func_doc : NULL;
+    PyObject *doc = PyFunction_Check(fget) ? ((PyFunctionObject *)fget)->func_doc : NULL;
     g->def.doc = doc != NULL && PyUnicode_Check(doc) ? PyUnicode_AsUTF8(doc) : NULL;
     g->def.closure = g;
-    return lu_descr_new_getset((PyTypeObject *)args[0], &g->def);
+    return lu_descr_new_getset(owner, &g->def);
+}
+
+static PyObject *
+kernel_body_value(PyTypeObject *owner, PyObject *name, PyObject *value, int has_slot,
+                  PyObject *classmethod_tag, PyObject *getset_tag)
+{
+    if (PyFunction_Check(value)) {
+        enum kernel_descriptor_kind kind = lu_str_eq(name, LU_ID(__new__)) ? KERNEL_NEW
+            : has_slot ? KERNEL_WRAPPER : KERNEL_METHOD;
+        return make_kernel_function(owner, name, value, kind);
+    }
+    if (PyTuple_Check(value) && PyTuple_GET_SIZE(value) == 3) {
+        PyObject *tag = PyTuple_GET_ITEM(value, 0);
+        if (tag == classmethod_tag) {
+            return make_kernel_function(owner, name, PyTuple_GET_ITEM(value, 1), KERNEL_CLASSMETHOD);
+        }
+        if (tag == getset_tag) {
+            return make_kernel_getset(owner, name, PyTuple_GET_ITEM(value, 1), PyTuple_GET_ITEM(value, 2));
+        }
+    }
+    return Py_NewRef(value);
+}
+
+/* Install a frozen kernel class body. Return whether it supplied any slot dunders. */
+static PyObject *
+prim_install_kernel_body(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(6);
+    PyObject *body = args[1], *slot_dunders = args[2], *body_only = args[3];
+    if (!PyType_Check(args[0]) || !PyDict_CheckExact(body)
+        || !PyDict_CheckExact(slot_dunders) || !PyDict_CheckExact(body_only)) {
+        lu_err_format(PyExc_TypeError,
+                      "install_kernel_body(type, namespace, slot_dunders, body_only, classmethod, getset)");
+        return NULL;
+    }
+    if (PyInterpreterState_Get()->kernel_booted) {
+        lu_err_format(PyExc_RuntimeError, "install_kernel_body requires kernel bootstrap");
+        return NULL;
+    }
+    PyTypeObject *owner = (PyTypeObject *)args[0];
+    PyObject *dict = lu_type_dict(owner);
+    PyObject *doc = lu_ns_lookup(dict, LU_ID(__doc__));
+    PyObject *name, *value;
+    Py_ssize_t pos = 0;
+    int defines_slots = 0;
+    while (lu_ns_next(body, &pos, &name, &value)) {
+        if (!PyUnicode_CheckExact(name)) {
+            lu_err_format(PyExc_TypeError, "a kernel namespace key must be an exact str");
+            return NULL;
+        }
+        if (doc != NULL && doc != Py_None && lu_str_eq(name, LU_ID(__doc__))) {
+            continue;                       /* keep the layout's own __doc__ member */
+        }
+        if (lu_ns_lookup(body_only, name) != NULL && !PyTuple_Check(value)) {
+            continue;
+        }
+        int has_slot = lu_ns_lookup(slot_dunders, name) != NULL;
+        PyObject *installed = kernel_body_value(owner, name, value, has_slot, args[4], args[5]);
+        if (installed == NULL) {
+            return NULL;
+        }
+        int err = lu_ns_insert(dict, name, installed);
+        Py_DECREF(installed);
+        if (err < 0) {
+            return NULL;
+        }
+        defines_slots |= has_slot;
+    }
+    return Py_NewRef(defines_slots ? Py_True : Py_False);
 }
 
 /* getset_kernel(d): (fget, fset or None) of a kernel getset, or MISSING. */
@@ -1822,7 +1878,7 @@ prim_kernel_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 #define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_descr_methods[] = {
     FAST(kernel_get), FAST(setattr_native),
-    FAST(make_function), FAST(make_getset), PURE(getset_kernel), FAST(getset_get),
+    FAST(install_kernel_body), PURE(getset_kernel), FAST(getset_get),
     FAST(getset_set), FAST(member_get), PURE(member_peek), FAST(member_set), PURE(descr_type), FAST(bind),
     FAST(method_new), FAST(instancemethod_new), PURE(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set), FAST(kernel_twin), FAST(next_missing_set), FAST(next_missing_of),
     { NULL, NULL, 0, NULL },

@@ -6,7 +6,7 @@ from _lucifer import (
     MISSING, error, str_join, kind, size, seq_get, type_lookup, type_dict, type_mro, type_bases,
     type_base, type_name, type_qualname, type_set_name, type_tp_name, type_text_signature, type_flag, type_set_flag,
     type_can_new, type_new_layout, type_set_mro, type_set_bases, type_subclasses,
-    type_modified, type_static_module, is_subtype, ns_get, ns_set, ns_del, ns_items, cell_set, proxy_new,
+    type_modified, type_static_module, type_set_names, is_subtype, ns_get, ns_set, ns_del, cell_set, proxy_new,
     field_get, kernel_get, is_callable, type_layout, enable_deferred, instance_store,
 )
 from _lucifer import _boot, object as _object
@@ -348,13 +348,6 @@ def _compute_mro(cls):
     return (*result,)
 
 
-def _set_names(cls):
-    for key, value in ns_items(type_dict(cls)):
-        set_name = type_lookup(type(value), '__set_name__')
-        if set_name is not MISSING:
-            call_special(set_name, value, cls, key)
-
-
 def _type_getattr(cls, name, suppress=False):
     """type_getattro; MISSING instead of AttributeError when suppress."""
     if not kind(name, 'str'):
@@ -468,7 +461,7 @@ type(name, bases, dict, **kwds) -> a new type"""
                 ns_del(d, cellname)
         type_set_mro(cls, _compute_mro(cls))
         update_slots(cls, False)
-        _set_names(cls)
+        type_set_names(cls)
         init_subclass = super(cls, cls).__init_subclass__
         init_subclass(**kwargs)
         return cls

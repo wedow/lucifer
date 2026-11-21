@@ -14,8 +14,8 @@ other kinds.
 
 from _lucifer import (
     MISSING, error, str_join, ns_get, ns_set, ns_del, ns_items, kind, size,
-    type_lookup, type_dict, type_mro, type_bases, type_base, type_tp_name,
-    is_subtype, make_function, make_getset, set_slot, slot_index, type_set_bases,
+    type_lookup, type_mro, type_bases, type_base, type_tp_name,
+    is_subtype, install_kernel_body, set_slot, slot_index, type_set_bases,
     type_set_mro, call_with_locals, cell_get, static_type, new_check,
 )
 from _lucifer import update_slots as _update_slots
@@ -123,39 +123,15 @@ def getset(fget, fset=None):
     return (getset, fget, fset)
 
 
-def _kernel_value(cls, name, value):
-    if kind(value, 'function'):
-        if name == '__new__':
-            return make_function(cls, name, value, 'new')
-        if ns_get(SLOT_DUNDERS, name, False):
-            return make_function(cls, name, value, 'wrapper')
-        return make_function(cls, name, value, 'method')
-    if kind(value, 'tuple') and size(value) == 3:
-        tag, a, b = value
-        if tag is classmethod_:
-            return make_function(cls, name, a, 'classmethod')
-        if tag is getset:
-            return make_getset(cls, name, a, b)
-    return value
-
-
 def kernel_type(cls):
     """@kernel_type(T) on a kernel class statement installs its body into
     the static type T, whose dict lives in interpreter state."""
     def install(body):
-        name, bases, ns = body
+        _, bases, ns = body
         if bases:
             type_set_bases(cls, bases)
             type_set_mro(cls, mro_of(cls))
-        d = type_dict(cls)
-        slots = False
-        for key, value in ns_items(ns):
-            if key == '__doc__' and ns_get(d, key, None) is not None:
-                continue            # the layout's own __doc__ member
-            if ns_get(_BODY_ONLY, key, MISSING) is MISSING or kind(value, 'tuple'):
-                ns_set(d, key, _kernel_value(cls, key, value))
-                slots = slots or ns_get(SLOT_DUNDERS, key, False)
-        if slots:
+        if install_kernel_body(cls, ns, SLOT_DUNDERS, _BODY_ONLY, classmethod_, getset):
             update_slots(cls, True)     # a body without dunders leaves what the type's own code set
         return cls
     return install

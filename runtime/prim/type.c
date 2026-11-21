@@ -29,6 +29,7 @@
 #define VERSION_TAG_BASE (2u << 16)     /* _Py_TYPE_BASE_VERSION_TAG */
 
 extern PyTypeObject *const lu_static_types[];
+extern void _PyErr_FormatNote(const char *format, ...);
 void _PyObject_XDecRefDelayed(PyObject *op);     /* runtime/thread/qsbr.c */
 
 static size_t
@@ -1833,6 +1834,62 @@ prim_type_dict(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(lu_type_dict((PyTypeObject *)args[0]));
 }
 
+/* type_new_set_names: take a snapshot before any hook can change the class. */
+static PyObject *
+prim_type_set_names(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); TYPE_ARG(0);
+    PyTypeObject *tp = (PyTypeObject *)args[0];
+    PyObject *dict = lu_type_dict(tp);
+    PyObject *snapshot;
+    Py_BEGIN_CRITICAL_SECTION(dict);
+    snapshot = PyDict_Copy(dict);
+    Py_END_CRITICAL_SECTION();
+    if (snapshot == NULL) {
+        return NULL;
+    }
+
+    Py_ssize_t pos = 0;
+    PyObject *key, *value;
+    while (PyDict_Next(snapshot, &pos, &key, &value)) {
+        PyObject *hook = _PyType_LookupRef(Py_TYPE(value), LU_ID(__set_name__));
+        if (hook == NULL) {
+            if (PyErr_Occurred()) {
+                goto error;
+            }
+            continue;
+        }
+        PyObject *call_args[] = {value, args[0], key};
+        PyObject *result;
+        if (PyFunction_Check(hook)) {
+            result = lu_call(hook, call_args, 3, NULL);
+        }
+        else {
+            descrgetfunc get = Py_TYPE(hook)->tp_descr_get;
+            if (get != NULL) {
+                Py_SETREF(hook, get(hook, value, (PyObject *)Py_TYPE(value)));
+                if (hook == NULL) {
+                    goto error;
+                }
+            }
+            result = lu_call(hook, call_args + 1, 2, NULL);
+        }
+        Py_DECREF(hook);
+        if (result == NULL) {
+            _PyErr_FormatNote("Error calling __set_name__ on '%.100s' instance %R in '%.100s'",
+                              Py_TYPE(value)->tp_name, key, tp->tp_name);
+            goto error;
+        }
+        Py_DECREF(result);
+    }
+    Py_DECREF(snapshot);
+    return Py_NewRef(Py_None);
+
+error:
+    Py_DECREF(snapshot);
+    return NULL;
+}
+
 /* type_mro(t), type_bases(t), type_base(t), type_name(t), type_qualname(t):
    tp_mro (None while unset), tp_bases, tp_base (None for object), __name__
    and __qualname__. */
@@ -2678,6 +2735,7 @@ PyMethodDef lu_prim_type_methods[] = {
     PURE(type_lookup), PURE(type_dict), PURE(type_mro), PURE(type_bases), PURE(type_base),
     FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag), FAST(type_set_flag), FAST(type_layout), FAST(object_size),
     FAST(type_can_new), FAST(type_has_sq_item), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
+    FAST(type_set_names),
     FAST(type_subclasses), FAST(type_modified), PURE(is_subtype), FAST(alloc), FAST(new_check),
     PURE(type_tp_name), FAST(type_text_signature), FAST(type_static_module), PURE(size),
     PURE(truth_exact), PURE(instance_dict), FAST(instance_load), FAST(instance_store), FAST(set_class), FAST(caller_globals), FAST(super_args),
