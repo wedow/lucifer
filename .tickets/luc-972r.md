@@ -1,6 +1,6 @@
 ---
 id: luc-972r
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T02:47:17Z
@@ -55,3 +55,11 @@ exit 0
 ```
 
 
+
+## Notes
+
+**2026-11-21T16:36:22Z**
+
+The accelerator sliced list and tuple subclasses through their base types, bypassing iterator overrides and using the copy for circular references and error notes. It now materializes the subclass iterator and keeps the original instance for those checks. Dictionary encoding translates TypeError from acquiring the items iterator to CPython's mapping-specific error, preserves errors from the method and iterator advancement, and sorts an exact list returned by items() in place. Reference behavior comes from CPython's Modules/_json.c and Objects/abstract.c.
+
+The new json_encoder_subclasses kernel check failed against the baseline and passed after the fix. It and json_module, json_scan_random, deep_container_recursion, and kernel_stack_depth pass against CPython 3.14t in plain, jit, and jit-deopt.

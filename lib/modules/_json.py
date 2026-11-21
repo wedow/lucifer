@@ -561,10 +561,17 @@ def _enter(markers, obj):
 
 
 def _encode_list(enc, out, seq, level, cache):
+    items = seq
     if type(seq) is not list and type(seq) is not tuple:
-        # A subclass: its stored items, as PySequence_Fast reads them.
-        seq = (list if isinstance(seq, list) else tuple).__getitem__(seq, slice(None))
-    if not seq:
+        # PySequence_Fast translates TypeError from acquiring the iterator.
+        try:
+            it = iter(seq)
+        except TypeError:
+            it = None
+        if it is None:
+            raise TypeError('_iterencode_list needs a sequence')
+        items = list(it)
+    if not items:
         out.append('[]')
         return
     markers = enc.markers
@@ -576,11 +583,11 @@ def _encode_list(enc, out, seq, level, cache):
         separator = _item_separator(enc, level, cache)
         out.append(cache[level * 2])
     i = 0
-    while i < len(seq):
+    while i < len(items):
         if i:
             out.append(separator)
         try:
-            _encode(enc, out, seq[i], level, cache)
+            _encode(enc, out, items[i], level, cache)
         except BaseException as e:
             e.add_note('when serializing %s item %d' % (_type_name(seq), i))
             raise
@@ -604,7 +611,16 @@ def _encode_dict(enc, out, dct, level, cache):
         level += 1
         separator = _item_separator(enc, level, cache)
     if enc.sort_keys or type(dct) is not dict:
-        items = list(dct.items())
+        items = dct.items()
+        if type(items) is not list:
+            try:
+                it = iter(items)
+            except TypeError:
+                it = None
+            if it is None:
+                raise TypeError('%s.items() returned a non-iterable (type %s)'
+                                % (type_tp_name(type(dct), 200), type_tp_name(type(items), 200)))
+            items = list(it)
         if enc.sort_keys:
             items.sort()
         for item in items:
