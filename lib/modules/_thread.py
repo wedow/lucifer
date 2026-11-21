@@ -1,7 +1,7 @@
 """_thread (Modules/_threadmodule.c): threads, locks, thread ids and
 thread-local data. A lock is a PyMutex kept in a bytearray with the ident of
-the thread holding it, which the _lucifer.mutex_* primitives lock and unlock
-(mutex_mine tells the holder). A thread is a new task on a carrier of its own
+the thread holding it and its count of holds, which the _lucifer.mutex_* and
+rlock_* primitives lock and unlock (mutex_mine tells the holder's count). A thread is a new task on a carrier of its own
 (DESIGN 5.7); _lucifer.thread_start runs a function in it.
 """
 
@@ -109,15 +109,14 @@ allocate_lock = allocate = lock
 class RLock:
     """Lock that can be acquired multiple times by the same thread."""
 
-    __slots__ = ('_block', '_owner', '_count', '__weakref__')
+    __slots__ = ('_block', '__weakref__')
 
     def __init_subclass__(cls, **kwargs):
         raise TypeError("type '_thread.RLock' is not an acceptable base type")
 
     def __init__(self):
+        # The mutex primitives keep the holder and its count with the lock.
         self._block = lock()
-        self._owner = 0
-        self._count = 0
 
     def acquire(self, blocking=True, timeout=-1):
         """Lock the lock.  `blocking` indicates whether we should wait
@@ -132,16 +131,7 @@ In all other cases, the method will return True immediately.
 Precisely, if the current thread already holds the lock, its
 internal counter is simply incremented. If nobody holds the lock,
 the lock is taken and its internal counter initialized to 1."""
-        wait = _timeout_ns(blocking, timeout)
-        me = get_ident()
-        if self._count and self._owner == me:
-            self._count += 1
-            return True
-        if _lucifer.mutex_acquire(self._block._mutex, wait):
-            self._owner = me
-            self._count = 1
-            return True
-        return False
+        return _lucifer.rlock_acquire(self._block._mutex, _timeout_ns(blocking, timeout), 1)
 
     __enter__ = acquire
 
@@ -154,12 +144,8 @@ and must be locked by the same thread that unlocks it; otherwise a
 Do note that if the lock was acquire()d several times in a row by the
 current thread, release() needs to be called as many times for the lock
 to be available for other threads."""
-        if not self._count or self._owner != get_ident():
+        if not _lucifer.rlock_release(self._block._mutex, False):
             raise RuntimeError('cannot release un-acquired lock')
-        self._count -= 1
-        if not self._count:
-            self._owner = 0
-            self._block.release()
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
@@ -169,33 +155,28 @@ to be available for other threads."""
         return self._block.locked()
 
     def _is_owned(self):
-        return bool(self._count) and self._owner == get_ident()
+        return bool(_lucifer.mutex_mine(self._block._mutex))
 
     def _recursion_count(self):
-        return self._count if self._owner == get_ident() else 0
+        return _lucifer.mutex_mine(self._block._mutex)
 
     def _release_save(self):
-        if not self._count:
+        count = _lucifer.rlock_release(self._block._mutex, True)
+        if not count:
             raise RuntimeError('cannot release un-acquired lock')
-        state = (self._count, self._owner)
-        self._count = 0
-        self._owner = 0
-        self._block.release()
-        return state
+        return count, get_ident()
 
     def _acquire_restore(self, state):
-        self._block.acquire()
-        self._count, self._owner = state
+        _lucifer.rlock_acquire(self._block._mutex, -1, state[0])
 
     def _at_fork_reinit(self):
         self._block._at_fork_reinit()
-        self._owner = 0
-        self._count = 0
 
     def __repr__(self):
+        owner, count = _lucifer.mutex_state(self._block._mutex)
         return '<%s %s.%s object owner=%d count=%d at %#x>' % (
-            'locked' if self._count else 'unlocked', type(self).__module__,
-            type(self).__qualname__, self._owner, self._count, id(self))
+            'locked' if count else 'unlocked', type(self).__module__,
+            type(self).__qualname__, owner, count, id(self))
 
 
 class _localimpl:

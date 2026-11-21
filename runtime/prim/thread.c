@@ -16,11 +16,15 @@
         return NULL; } } while (0)
 
 /* A mutex is a bytearray holding the PyMutex and, while it is locked, the
-   ident of the thread that locked it, which the lock and unlock record in
-   the same primitive call: no signal handler sees the one without the other. */
+   ident of the thread that locked it and how many times that thread holds
+   it (an RLock's recursion count; 1 for a lock), which the lock and unlock
+   record in the same primitive call as the PyMutex itself: a signal
+   handler runs only at a poll between primitives, so none sees the mutex
+   without its holder and count. Only the holder writes them. */
 struct mutex {
     PyMutex lock;
     long long owner;
+    long long count;
 };
 
 static struct mutex *
@@ -33,6 +37,19 @@ mutex_of(PyObject *o)
     return (struct mutex *)PyByteArray_AsString(o);
 }
 
+static long long
+me(void)
+{
+    return (long long)PyThreadState_Get()->thread_id;
+}
+
+/* The calling thread's holds on the mutex: 0 when it does not hold it. */
+static long long
+mine(struct mutex *mutex)
+{
+    return __atomic_load_n(&mutex->owner, __ATOMIC_RELAXED) == me() ? mutex->count : 0;
+}
+
 /* mutex_new(): an unlocked mutex. */
 static PyObject *
 prim_mutex_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -42,14 +59,13 @@ prim_mutex_new(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyByteArray_FromStringAndSize((const char *)&init, sizeof init);
 }
 
-/* mutex_acquire(mutex, timeout_ns): waits at most timeout_ns, for ever if it
-   is negative and not at all if 0. True when the mutex is taken. Detached
-   while it waits. A signal handler that raises ends the wait with its
-   exception; one that returns lets it go on. */
+/* Locks args[0], waiting at most args[1] nanoseconds, for ever if it is
+   negative and not at all if 0, and records the caller holding it `count`
+   times. Detached while it waits. A signal handler that raises ends the
+   wait with its exception; one that returns lets it go on. */
 static PyObject *
-prim_mutex_acquire(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+lock_timed(PyObject *const *args, long long count)
 {
-    ARGS(2);
     struct mutex *mutex = mutex_of(args[0]);
     long timeout;
     if (mutex == NULL || !PyLong_Check(args[1]) || lu_long_as_long(args[1], &timeout) < 0) {
@@ -65,8 +81,26 @@ prim_mutex_acquire(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (status != PY_LOCK_ACQUIRED) {
         Py_RETURN_FALSE;
     }
-    __atomic_store_n(&mutex->owner, (long long)PyThreadState_Get()->thread_id, __ATOMIC_RELAXED);
+    mutex->count = count;
+    __atomic_store_n(&mutex->owner, me(), __ATOMIC_RELAXED);
     Py_RETURN_TRUE;
+}
+
+/* Unlocks the mutex: 0, or -1 when it was not locked. */
+static int
+unlock(struct mutex *mutex)
+{
+    __atomic_store_n(&mutex->owner, 0, __ATOMIC_RELAXED);
+    mutex->count = 0;
+    return _PyMutex_TryUnlock(&mutex->lock);
+}
+
+/* mutex_acquire(mutex, timeout_ns): True when the mutex is taken (lock_timed). */
+static PyObject *
+prim_mutex_acquire(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2);
+    return lock_timed(args, 1);
 }
 
 /* mutex_release(mutex): False when it was not locked. */
@@ -78,8 +112,47 @@ prim_mutex_release(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (mutex == NULL) {
         return NULL;
     }
-    __atomic_store_n(&mutex->owner, 0, __ATOMIC_RELAXED);
-    return Py_NewRef(_PyMutex_TryUnlock(&mutex->lock) == 0 ? Py_True : Py_False);
+    return Py_NewRef(unlock(mutex) == 0 ? Py_True : Py_False);
+}
+
+/* rlock_acquire(mutex, timeout_ns, count): the caller holds the mutex
+   `count` times more, at once when it holds it already, else as
+   mutex_acquire. True when it does. */
+static PyObject *
+prim_rlock_acquire(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(3);
+    struct mutex *mutex = mutex_of(args[0]);
+    long count;
+    if (mutex == NULL || !PyLong_Check(args[2]) || lu_long_as_long(args[2], &count) < 0) {
+        return NULL;
+    }
+    if (mine(mutex)) {
+        mutex->count += count;
+        Py_RETURN_TRUE;
+    }
+    return lock_timed(args, count);
+}
+
+/* rlock_release(mutex, all): gives up one of the caller's holds, or all of
+   them, unlocking the mutex with the last. The holds given up: 0 when the
+   caller holds none. */
+static PyObject *
+prim_rlock_release(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2);
+    struct mutex *mutex = mutex_of(args[0]);
+    if (mutex == NULL) {
+        return NULL;
+    }
+    long long held = mine(mutex), n = PyObject_IsTrue(args[1]) ? held : held > 0;
+    if (n == held && held > 0) {
+        unlock(mutex);
+    }
+    else {
+        mutex->count -= n;
+    }
+    return PyLong_FromLongLong(n);
 }
 
 static PyObject *
@@ -93,7 +166,7 @@ prim_mutex_locked(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(PyMutex_IsLocked(&mutex->lock) ? Py_True : Py_False);
 }
 
-/* mutex_mine(mutex): True when the calling thread locked it and holds it. */
+/* mutex_mine(mutex): the times the calling thread holds it: 0 when it does not. */
 static PyObject *
 prim_mutex_mine(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -102,8 +175,20 @@ prim_mutex_mine(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (mutex == NULL) {
         return NULL;
     }
-    long long me = (long long)PyThreadState_Get()->thread_id;
-    return Py_NewRef(__atomic_load_n(&mutex->owner, __ATOMIC_RELAXED) == me ? Py_True : Py_False);
+    return PyLong_FromLongLong(mine(mutex));
+}
+
+/* mutex_state(mutex): (holder's ident, its holds), (0, 0) when unlocked. */
+static PyObject *
+prim_mutex_state(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    struct mutex *mutex = mutex_of(args[0]);
+    if (mutex == NULL) {
+        return NULL;
+    }
+    long long owner = __atomic_load_n(&mutex->owner, __ATOMIC_RELAXED);
+    return Py_BuildValue("(LL)", owner, owner != 0 ? __atomic_load_n(&mutex->count, __ATOMIC_RELAXED) : 0LL);
 }
 
 static PyObject *
@@ -195,6 +280,7 @@ prim_thread_dict(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_thread_methods[] = {
     FAST(mutex_new), FAST(mutex_acquire), FAST(mutex_release), FAST(mutex_locked), FAST(mutex_mine),
+    FAST(mutex_state), FAST(rlock_acquire), FAST(rlock_release),
     FAST(thread_ident), FAST(thread_native_id), FAST(thread_start), FAST(main_thread_ident),
     FAST(thread_dict),
     { NULL, NULL, 0, NULL },
