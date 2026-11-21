@@ -1,6 +1,6 @@
 ---
 id: luc-7ob8
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T02:42:33Z
@@ -49,3 +49,9 @@ AttributeError 'int' object has no attribute 'a'
 ```
 
 
+
+## Notes
+
+**2026-11-21T11:25:01Z**
+
+The plain kernel regression reproduced the missing suffix for del and delattr on dict-less instances. The generic mutation path now uses both attribute hooks to decide when to include the suffix and sets the AttributeError name and obj when it does. The regression and five nearby kernel checks passed in plain, jit, and jit-deopt. An initial probe also found a separate AttributeError context mismatch when deleting from an instance with a dictionary.

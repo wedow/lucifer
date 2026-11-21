@@ -108,10 +108,11 @@ def generic_setattr(obj, name, value, dct=MISSING):
         if descr is not MISSING:
             error(AttributeError, str_join('', (
                 "'", type_tp_name(tp), "' object attribute '", name, "' is read-only")))
-        if type_lookup(tp, '__setattr__') is _object_setattr and value is not MISSING:
-            error(AttributeError, str_join('', (
+        if (type_lookup(tp, '__setattr__') is _object_setattr
+                and type_lookup(tp, '__delattr__') is _object_delattr):
+            attribute_error(str_join('', (
                 "'", type_tp_name(tp), "' object has no attribute '", name,
-                "' and no __dict__ for setting new attributes")))
+                "' and no __dict__ for setting new attributes")), name, obj)
         _no_attribute(obj, name)
     if not found:
         _no_attribute(obj, name)
@@ -407,6 +408,7 @@ _object_new = ns_get(_object_dict, '__new__', MISSING)
 _object_init = ns_get(_object_dict, '__init__', MISSING)
 _object_getattribute = ns_get(_object_dict, '__getattribute__', MISSING)
 _object_setattr = ns_get(_object_dict, '__setattr__', MISSING)
+_object_delattr = ns_get(_object_dict, '__delattr__', MISSING)
 
 kernel_set('getattr', getattr_hook)
 kernel_set('generic_getattr', generic_getattr)
