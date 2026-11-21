@@ -12,6 +12,7 @@ from _lucifer import (
     stdio_tty, stdio_readline,
 )
 from _lucifer import _boot, _format, operators, _args, iter as _iter, object as _object
+from _lucifer import type as _type
 import sys
 
 call_special = _boot.call_special
@@ -24,6 +25,8 @@ get_iter = _iter.get_iter
 next_item = _iter.next_item
 getattr_hook = kernel_get('getattr')
 lookup_attr = _object.lookup_attr
+_instancecheck = _type._instancecheck
+_subclasscheck = _type._subclasscheck
 setattr_hook = kernel_get('setattr')
 delattr_hook = kernel_get('delattr')
 
@@ -79,20 +82,22 @@ def print(*args, sep=' ', end='\n', file=None, flush=False):
         file.flush()
 
 
-def _check(name, cls, inst, method, what):
-    """PyObject_IsInstance and PyObject_IsSubclass: exact type, tuples of
-    classes, then the metaclass's __instancecheck__ or __subclasscheck__."""
+def _check(obj, cls, method, fallback):
+    if fallback is _instancecheck and type(obj) is cls:
+        return True
+    if type(cls) is type:
+        return fallback(obj, cls)
     if type(cls) is _Union:
         cls = field_get(cls, 0)
     if kind(cls, 'tuple'):
-        for c in cls:
-            if _check(name, c, inst, method, what):
+        for c in tuple.__iter__(cls):
+            if _check(obj, c, method, fallback):
                 return True
         return False
     check = type_lookup(type(cls), method)
     if check is MISSING:
-        error(TypeError, str_join('', (name, '() arg 2 must be a ', what)))
-    return True if call_special(check, cls, inst) else False
+        return fallback(obj, cls)
+    return True if call_special(check, cls, obj) else False
 
 
 _object_class = type_lookup(object, '__class__')
@@ -122,14 +127,12 @@ def isinstance(obj, class_or_tuple, /):
                 return True
         else:
             return False
-    return _check('isinstance', class_or_tuple, obj, '__instancecheck__',
-                  'type, a tuple of types, or a union')
+    return _check(obj, class_or_tuple, '__instancecheck__', _instancecheck)
 
 
 def issubclass(cls, class_or_tuple, /):
     """Return whether 'cls' is derived from another class or is the same class."""
-    return _check('issubclass', class_or_tuple, cls, '__subclasscheck__',
-                  'class, a tuple of classes, or a union')
+    return _check(cls, class_or_tuple, '__subclasscheck__', _subclasscheck)
 
 
 def len(obj, /):

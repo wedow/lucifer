@@ -1,6 +1,6 @@
 ---
 id: luc-2r3w
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T02:42:33Z
@@ -82,3 +82,11 @@ TypeError isinstance() arg 2 must be a type, a tuple of types, or a union
 ```
 
 
+
+## Notes
+
+**2026-11-21T11:02:12Z**
+
+The kernel now shares default checks between the builtins and the type methods. As in CPython Objects/abstract.c, the fallback validates tuple-valued __bases__, walks bases in order, and propagates exceptions other than AttributeError. The default issubclass check validates argument 1 before argument 2. Tuple classinfo uses the tuple items directly, and custom check hooks retain precedence.
+
+The abstract_class_checks regression failed on the base revision. It and the seven neighboring kernel programs passed in plain, jit, and jit-deopt against CPython 3.14t.

@@ -3,7 +3,7 @@
 and the type getsets over the layout primitives)."""
 
 from _lucifer import (
-    MISSING, error, str_join, kind, size, type_lookup, type_dict, type_mro, type_bases,
+    MISSING, error, str_join, kind, size, seq_get, type_lookup, type_dict, type_mro, type_bases,
     type_base, type_name, type_qualname, type_set_name, type_tp_name, type_text_signature, type_flag, type_set_flag,
     type_can_new, type_new_layout, type_set_mro, type_set_bases, type_subclasses,
     type_modified, type_static_module, is_subtype, ns_get, ns_set, ns_del, ns_items, cell_set, proxy_new,
@@ -23,6 +23,7 @@ calculate_metaclass = _boot.calculate_metaclass
 
 generic_setattr = kernel_get('generic_setattr')
 merge_class_dict = _object.merge_class_dict
+lookup_attr = _object.lookup_attr
 
 __all__ = ('type',)
 
@@ -30,6 +31,48 @@ _HEAPTYPE = 1 << 9
 _IMMUTABLETYPE = 1 << 8      # setattr refuses (check_set_special_type_attr, type_setattro)
 _staticmethod = staticmethod
 _classmethod = classmethod
+
+
+def _abstract_bases(cls, error_message=None):
+    bases = lookup_attr(cls, '__bases__')
+    if kind(bases, 'tuple'):
+        return bases
+    if error_message is not None:
+        error(TypeError, error_message)
+    return ()
+
+
+def _abstract_subclass(derived, cls):
+    # Walk single inheritance iteratively and visit multiple bases in order.
+    while derived is not cls:
+        bases = _abstract_bases(derived)
+        n = size(bases)
+        if n != 1:
+            for i in range(n):
+                if _abstract_subclass(seq_get(bases, i), cls):
+                    return True
+            return False
+        derived = seq_get(bases, 0)
+    return True
+
+
+def _instancecheck(instance, cls):
+    if kind(cls, 'type'):
+        if is_subtype(type(instance), cls):
+            return True
+        apparent = lookup_attr(instance, '__class__')
+        return apparent is not type(instance) and kind(apparent, 'type') and is_subtype(apparent, cls)
+    _abstract_bases(cls, 'isinstance() arg 2 must be a type, a tuple of types, or a union')
+    apparent = lookup_attr(instance, '__class__')
+    return apparent is not MISSING and _abstract_subclass(apparent, cls)
+
+
+def _subclasscheck(derived, cls):
+    if kind(cls, 'type') and kind(derived, 'type'):
+        return is_subtype(derived, cls)
+    _abstract_bases(derived, 'issubclass() arg 1 must be a class')
+    _abstract_bases(cls, 'issubclass() arg 2 must be a class, a tuple of classes, or a union')
+    return _abstract_subclass(derived, cls)
 
 
 def _first(seq):
@@ -473,16 +516,11 @@ type(name, bases, dict, **kwds) -> a new type"""
 
     def __instancecheck__(cls, instance):
         """Check if an object is an instance."""
-        if is_subtype(type(instance), cls):
-            return True
-        c = instance.__class__
-        return c is not type(instance) and kind(c, 'type') and is_subtype(c, cls)
+        return _instancecheck(instance, cls)
 
     def __subclasscheck__(cls, subclass):
         """Check if a class is a subclass."""
-        if not kind(subclass, 'type'):
-            error(TypeError, 'issubclass() arg 1 must be a class')
-        return is_subtype(subclass, cls)
+        return _subclasscheck(subclass, cls)
 
     __name__ = getset(_get_name, _set_name)
     __qualname__ = getset(_get_qualname, _set_qualname)
