@@ -130,6 +130,9 @@ def compare(self, other, op, what):
     return v >= w
 
 
+compare._recursion_where = ' in comparison'  # a stack overflow's text (interp/frame.c)
+
+
 def repeat_count(other):
     """The count of seq * other (sequence_repeat)."""
     if not kind(other, 'int') and type_lookup(type(other), '__index__') is MISSING:

@@ -84,14 +84,45 @@ free_frame(PyThreadState *ts, struct lu_frame *f)
     ts->datastack_limit = prev != NULL ? (PyObject **)((char *)prev + prev->size) : NULL;
 }
 
+/* What CPython's C check would add to a stack overflow's message: the
+   `_recursion_where` of the innermost kernel function running that has one
+   (to_repr's " while getting the repr of an object"), a new reference, or
+   NULL. The kernel functions that stand for a C function with a check
+   (_Py_EnterRecursiveCall) carry its text. Compiled code's frames end the
+   walk: their records are compiled code's own. */
+static PyObject *
+overflow_where(PyThreadState *ts)
+{
+    for (struct lu_frame *f = (struct lu_frame *)ts->current_frame; f != NULL && f->owner != LU_FRAME_JIT;
+         f = f->previous) {
+        if (f->owner == LU_FRAME_C_ENTRY) {
+            continue;
+        }
+        if (!lu_frame_is_kernel(f->code)) {
+            break;
+        }
+        PyObject *dict = f->func != NULL && PyFunction_Check(f->func) ? ((PyFunctionObject *)f->func)->func_dict : NULL;
+        PyObject *key, *where;
+        /* A walk, not a lookup: hashing the key would run kernel code, which has no room left. */
+        for (Py_ssize_t pos = 0; dict != NULL && PyDict_Next(dict, &pos, &key, &where);) {
+            if (PyUnicode_Check(key) && PyUnicode_Check(where) && PyUnicode_EqualToUTF8(key, "_recursion_where")) {
+                return Py_NewRef(where);
+            }
+        }
+    }
+    return NULL;
+}
+
 int
 lu_depth_error(PyThreadState *ts, PyCodeObject *code)
 {
     if (lu_frame_is_kernel(code)) {
         struct lu_task *t = (struct lu_task *)ts;
-        Py_ssize_t size = lu_stack_words(t->c_stack_init_base, t->c_stack_init_top);
-        lu_err_format(PyExc_RecursionError, "Stack overflow (used %d kB)",
-                      (int)((size - t->kernel_room) * (Py_ssize_t)sizeof(PyObject *) / 1024));
+        Py_ssize_t size = lu_kernel_room(t->c_stack_init_base, t->c_stack_init_top);
+        PyObject *where = overflow_where(ts);
+        lu_err_format(PyExc_RecursionError, "Stack overflow (used %d kB)%s", (int)((size - t->kernel_room) / 1024),
+                      where != NULL ? PyUnicode_AsUTF8(where) : "");
+        Py_XDECREF(where);
     }
     else {
         lu_err_format(PyExc_RecursionError, "maximum recursion depth exceeded");

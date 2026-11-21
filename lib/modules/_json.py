@@ -293,6 +293,9 @@ def _parse_object(sc, memo, s, idx):
     return rval, idx + 1
 
 
+_parse_object._recursion_where = ' while decoding a JSON object from a unicode string'  # a stack overflow's text (interp/frame.c)
+
+
 def _parse_array(sc, memo, s, idx):
     """_parse_array_unicode: the array whose [ is just before idx."""
     n = len(s)
@@ -316,6 +319,9 @@ def _parse_array(sc, memo, s, idx):
             if idx < n and str_ord(s, idx) == 93:
                 _error('Illegal trailing comma before end of array', s, comma)
     return rval, idx + 1
+
+
+_parse_array._recursion_where = ' while decoding a JSON array from a unicode string'  # a stack overflow's text (interp/frame.c)
 
 
 def _match_number(sc, s, start):
@@ -538,6 +544,9 @@ def _encode(enc, out, obj, level, cache):
             raise
         if ident is not None:
             markers.pop(ident)
+
+
+_encode._recursion_where = ' while encoding a JSON object'  # a stack overflow's text (interp/frame.c)
 
 
 def _enter(markers, obj):

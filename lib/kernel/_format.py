@@ -55,6 +55,9 @@ def to_repr(x):
     return r
 
 
+to_repr._recursion_where = ' while getting the repr of an object'  # a stack overflow's text (interp/frame.c)
+
+
 def to_ascii(x):
     return str_ascii(to_repr(x))
 

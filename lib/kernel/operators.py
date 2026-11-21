@@ -195,6 +195,9 @@ def compare(a, b, oparg):
     return r
 
 
+compare._recursion_where = ' in comparison'  # a stack overflow's text (interp/frame.c)
+
+
 def _unary(v, name, sym):
     f = type_lookup(type(v), name)
     if f is MISSING:

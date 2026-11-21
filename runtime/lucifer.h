@@ -574,9 +574,9 @@ struct lu_task {
     Py_ssize_t tstate_refcount;
     uintptr_t c_stack_top, c_stack_soft_limit, c_stack_hard_limit;
     uintptr_t c_stack_init_base, c_stack_init_top;
-    /* The words kernel frames may still take: they stand in for CPython's C
-       frames, which its C stack bounds, so they get the carrier's C stack
-       size (interp/frame.h lu_depth_enter). */
+    /* What kernel frames may still take, in words of their frames: they
+       stand in for CPython's C frames, which its C stack bounds, and get a
+       word for each byte of the carrier's C stack (lu_kernel_room). */
     Py_ssize_t kernel_room;
     uintptr_t pin;              /* transient pins: foreign C and nested evals (DESIGN 5.4) */
     int pinned_for_life;        /* main, foreign-thread and thread-scoped tasks */
@@ -708,7 +708,9 @@ extern _Thread_local struct lu_carrier *lu_carrier;
 
 /* How much C stack a call from compiled code leaves for the callee's
    activation: below it the interpreter makes the call, without
-   recursing (DESIGN 5.2). */
+   recursing (DESIGN 5.2). A stack under 4/3 of it keeps its lower three
+   quarters instead: compiled code runs in a small thread too, its calls
+   leaving the C recursion checks' margins room for an activation. */
 #define LU_JIT_STACK_RESERVE (192 * 1024)
 
 /* Raising and clearing reasons from any thread. A reason aimed at a task
@@ -759,12 +761,17 @@ struct lu_entry *lu_entry_of(struct lu_carrier *c, struct _is *interp);
 struct lu_task *lu_task_new(struct _is *interp, int whence);
 void lu_task_bind(struct lu_task *t);
 void lu_task_set_c_stack(struct lu_task *t, uintptr_t base, uintptr_t top);
-/* The words of a C stack [base, top): the kernel frames' room. An unknown
-   stack (zeros) bounds nothing. */
+/* The kernel frames' room on a C stack [base, top): a word of kernel frame
+   for each byte of the stack. Kernel frames live on the datastack and never
+   move the stack pointer, so no reading of it bounds them; the room stands
+   for the C stack CPython's builtins would spend instead, and a nesting
+   level of kernel code takes about as many words as CPython's C takes bytes
+   (repr of a list 106 words / 145 bytes, of a dict 83 / 177, json.dumps
+   64 / 177, == 139 / 209). An unknown stack (zeros) bounds nothing. */
 static inline Py_ssize_t
-lu_stack_words(uintptr_t base, uintptr_t top)
+lu_kernel_room(uintptr_t base, uintptr_t top)
 {
-    return top != 0 ? (Py_ssize_t)((top - base) / sizeof(PyObject *)) : PY_SSIZE_T_MAX / 2;
+    return top != 0 ? (Py_ssize_t)(top - base) : PY_SSIZE_T_MAX / 2;
 }
 void lu_task_attach(PyThreadState *ts);
 /* The task stops using objects: its critical sections release their locks,

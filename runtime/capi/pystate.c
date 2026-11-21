@@ -394,7 +394,7 @@ tstate_set_stack(PyThreadState *tstate, uintptr_t base, uintptr_t top)
 void
 lu_task_set_c_stack(struct lu_task *t, uintptr_t base, uintptr_t top)
 {
-    t->kernel_room += lu_stack_words(base, top) - lu_stack_words(t->c_stack_init_base, t->c_stack_init_top);
+    t->kernel_room += lu_kernel_room(base, top) - lu_kernel_room(t->c_stack_init_base, t->c_stack_init_top);
     t->c_stack_init_base = base;
     t->c_stack_init_top = top;
     if (top != 0) {

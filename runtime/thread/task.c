@@ -30,7 +30,7 @@ lu_task_new(struct _is *interp, int whence)
     ts->gilstate_counter = 1;
     ts->py_recursion_limit = LU_DEFAULT_RECURSION_LIMIT;
     ts->py_recursion_remaining = LU_DEFAULT_RECURSION_LIMIT;
-    t->kernel_room = lu_stack_words(0, 0);      /* lu_task_set_c_stack sizes it */
+    t->kernel_room = lu_kernel_room(0, 0);      /* lu_task_set_c_stack sizes it */
     ts->what_event = -1;
     ts->exc_info = &ts->exc_state;
     ts->context_ver = 1;
