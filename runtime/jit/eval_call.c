@@ -747,7 +747,8 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
         if (r == LU_EV_NONE && fast) {
             /* A primitive that runs no Python is called as it is; one that
                may is called with the frames observable. */
-            r = lu_ev_helper(c, flags & LU_METH_NOPY ? H_prim : H_prim_call, n + 1, args, nops);
+            r = lu_ev_prim_words(c, prim, args, n, nops);
+            r = r != LU_EV_NONE ? r : lu_ev_helper(c, flags & LU_METH_NOPY ? H_prim : H_prim_call, n + 1, args, nops);
             if (lu_ev_prim_type(prim) != NULL) {
                 lu_ev_def_type(c, r, lu_ev_prim_type(prim));
             }

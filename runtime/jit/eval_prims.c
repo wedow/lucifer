@@ -280,6 +280,20 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
     if (nargs == 2 && strcmp(name, "seq_get") == 0) {
         return seq_item(c, args);
     }
+    if (nargs == 1) {
+        /* A word the primitive would box: the helper's, unboxed. */
+        static const struct { const char *name; int helper; unsigned long kind; } words[] = {
+            { "str_hash", H_str_hash, Py_TPFLAGS_UNICODE_SUBCLASS },
+            { "dict_keys_id", H_dict_keys_id, Py_TPFLAGS_DICT_SUBCLASS },
+            { "dict_stamp", H_dict_stamp, Py_TPFLAGS_DICT_SUBCLASS },
+        };
+        for (size_t i = 0; i < sizeof words / sizeof words[0]; i++) {
+            if (strcmp(name, words[i].name) == 0 && lu_ev_learn_kind(c, args[0], 0, words[i].kind)) {
+                lu_v v = lu_ev_val(c, args[0]);
+                return lu_ev_box_int(c, lu_ev_helper(c, words[i].helper, 1, &v, c->oparg + 2));
+            }
+        }
+    }
     if (nargs == 2 && strcmp(name, "str_ord") == 0 && learned_at(c, args, 1) == &PyLong_Type
         && learned_at(c, args, 0) == &PyUnicode_Type) {
         lu_v r = lu_ev_emit(c, OP_STR_ORD, REP_I64, lu_ev_val(c, args[0]), lu_ev_unbox_int(c, args[1]), LU_NOV, 0);
@@ -445,4 +459,38 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
         return lu_ev_konst(c, Py_None);
     }
     return LU_EV_NONE;
+}
+
+/* A primitive whose index and hash operands it reads as C integers, where
+   those are ints: called with them as machine words (H_prim_words), which
+   an int the code computed (a hash, an entry number) needs no box for.
+   argv is the call's: the primitive, then its n operands. */
+lu_v
+lu_ev_prim_words(struct ctx *c, const char *name, lu_v *argv, int n, int nops)
+{
+    static const struct { const char *name; int n; unsigned mask; } prims[] = {
+        { "set_probe", 4, 1 << 2 }, { "set_add_entry", 4, 1 << 2 }, { "set_discard_entry", 5, 1 << 2 },
+        { "dict_probe", 4, 1 << 2 | 1 << 3 }, { "dict_key", 2, 1 << 1 }, { "dict_value", 2, 1 << 1 },
+        { "dict_entry", 2, 1 << 1 }, { "dict_insert", 5, 1 << 1 | 1 << 3 }, { "dict_replace", 4, 1 << 1 | 1 << 2 },
+        { "dict_remove", 3, 1 << 1 | 1 << 2 },
+    };
+    size_t k = 0;
+    while (k < sizeof prims / sizeof prims[0] && (prims[k].n != n || strcmp(prims[k].name, name) != 0)) {
+        k++;
+    }
+    if (k == sizeof prims / sizeof prims[0]) {
+        return LU_EV_NONE;
+    }
+    for (int i = 0; i < n; i++) {
+        if ((prims[k].mask >> i & 1) && lu_ev_learn_type(c, argv[1 + i], i) != &PyLong_Type) {
+            return LU_EV_NONE;
+        }
+    }
+    lu_v w[8];
+    w[0] = argv[0];
+    w[1] = lu_ev_const_i(c, prims[k].mask);
+    for (int i = 0; i < n; i++) {
+        w[2 + i] = prims[k].mask >> i & 1 ? lu_ev_unbox_int(c, argv[1 + i]) : argv[1 + i];
+    }
+    return lu_ev_helper(c, H_prim_words, n + 2, w, nops);
 }

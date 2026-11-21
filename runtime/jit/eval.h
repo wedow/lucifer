@@ -585,6 +585,9 @@ int lu_ev_class_relied(struct ctx *c, lu_v type, uint32_t version);
 #define LU_EV_NONE (INT32_MIN)
 lu_v lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs);
 PyTypeObject *lu_ev_prim_type(const char *name);
+/* The call itself, where the primitive's int operands can go as machine
+   words (H_prim_words): its result, else LU_EV_NONE. */
+lu_v lu_ev_prim_words(struct ctx *c, const char *name, lu_v *argv, int n, int nops);
 
 static inline PyObject *
 name_at(struct ctx *c, int i)

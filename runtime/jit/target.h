@@ -371,6 +371,10 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(super_attr) \
     X(prim) \
     X(prim_call) \
+    X(prim_words) \
+    X(str_hash) \
+    X(dict_keys_id) \
+    X(dict_stamp) \
     X(make_function) \
     X(set_function_attribute) \
     X(cell_store) \

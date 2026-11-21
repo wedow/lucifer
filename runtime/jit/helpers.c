@@ -1164,6 +1164,71 @@ h_prim_call(PyObject **argv, intptr_t n)
     return polled(t, r);
 }
 
+/* str_hash(s), dict_keys_id(d) and dict_stamp(d) as the machine words they
+   answer, for a str and a dict of any class. */
+static int64_t
+h_str_hash(PyObject *s)
+{
+    return lu_str_hash(s);
+}
+
+static int64_t
+h_dict_keys_id(PyObject *d)
+{
+    return (int64_t)LU_STAMP_SERIAL(lu_dict_stamp((PyDictObject *)d));
+}
+
+static int64_t
+h_dict_stamp(PyObject *d)
+{
+    return (int64_t)lu_dict_stamp((PyDictObject *)d);
+}
+
+/* v as an exact int in b, immortal and on the caller's stack, for a
+   primitive that reads it and keeps nothing of it. */
+union stack_int {
+    PyLongObject l;
+    char room[sizeof(PyLongObject) + 2 * sizeof(digit)];
+};
+
+static PyObject *
+stack_int(union stack_int *b, int64_t v)
+{
+    if (v >= -5 && v <= 256) {
+        return PyLong_FromLongLong(v);          /* a small int: immortal */
+    }
+    memset(b, 0, sizeof *b);
+    b->l.ob_base.ob_ref_local = _Py_IMMORTAL_REFCNT_LOCAL;
+    b->l.ob_base.ob_type = &PyLong_Type;
+    uint64_t m = v < 0 ? -(uint64_t)v : (uint64_t)v;
+    digit d[3];
+    size_t n = 0;
+    do {
+        d[n++] = (digit)(m & PyLong_MASK);
+        m >>= PyLong_SHIFT;
+    } while (m != 0);
+    /* past ob_digit's one declared element: copied, not indexed */
+    memcpy(b->room + offsetof(PyLongObject, long_value.ob_digit), d, n * sizeof(digit));
+    b->l.long_value.lv_tag = (n << _PyLong_NON_SIZE_BITS) | (v < 0 ? 2 : 0);
+    return (PyObject *)&b->l;
+}
+
+/* A primitive as h_prim_call calls it, its operands named by the mask
+   argv[1] given as machine words (index and hash operands, which it reads
+   as C integers). */
+static PyObject *
+h_prim_words(PyObject **argv, intptr_t n)
+{
+    union stack_int ints[4];
+    PyObject *args[8];
+    uintptr_t mask = (uintptr_t)argv[1];
+    for (intptr_t i = 2, k = 0; i < n; i++) {
+        args[i - 1] = mask & ((uintptr_t)1 << (i - 2)) ? stack_int(&ints[k++], (int64_t)(intptr_t)argv[i]) : argv[i];
+    }
+    args[0] = argv[0];
+    return h_prim_call(args, n - 1);
+}
+
 /* LOAD_SUPER_ATTR: super's attribute as the interpreter takes it: the
    kernel's when super is the builtin and the class a type, else super
    called (with the class and self when `two`) and its attribute taken. */
@@ -1621,6 +1686,10 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_super_attr] = { (void *)h_super_attr, "super_attr", REP_OBJ, FX_RAISE | FX_PY, 5 },
     [H_prim] = { (void *)h_prim, "prim", REP_OBJ, FX_RAISE | FX_SEEN, 0 },
     [H_prim_call] = { (void *)h_prim_call, "prim_call", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
+    [H_prim_words] = { (void *)h_prim_words, "prim_words", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
+    [H_str_hash] = { (void *)h_str_hash, "str_hash", REP_I64, 0, 1 },
+    [H_dict_keys_id] = { (void *)h_dict_keys_id, "dict_keys_id", REP_I64, 0, 1 },
+    [H_dict_stamp] = { (void *)h_dict_stamp, "dict_stamp", REP_I64, 0, 1 },
     [H_make_function] = { (void *)h_make_function, "make_function", REP_OBJ, FX_RAISE | FX_PY, 2 },
     [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, FX_SEEN, 3 },
     [H_cell_store] = { (void *)h_cell_store, "cell_store", REP_NONE, FX_SEEN, 2 },
