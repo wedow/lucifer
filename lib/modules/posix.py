@@ -3,6 +3,7 @@ the file layer need, over the _lucifer.os_* primitives, which make each
 call inside the syscall bracket."""
 
 import _lucifer
+import sys as _sys
 
 error = OSError
 
@@ -242,6 +243,13 @@ WNOHANG = 1
 WUNTRACED = 2
 EX_OK = 0
 SCHED_OTHER = 0
+SCHED_NORMAL = SCHED_OTHER
+SCHED_FIFO = 1
+SCHED_RR = 2
+SCHED_BATCH = 3
+SCHED_IDLE = 5
+SCHED_DEADLINE = 6
+SCHED_RESET_ON_FORK = 0x40000000
 _call = _lucifer.os_call
 
 
@@ -459,6 +467,65 @@ def waitpid(pid, options, /):
 def wait():
     """Wait for completion of a child process."""
     return waitpid(-1, 0)
+
+
+class sched_param(tuple):
+    """Currently has only one field: sched_priority
+
+  sched_priority
+    A scheduling parameter."""
+
+    __slots__ = ()
+    __match_args__ = ('sched_priority',)
+    n_fields = n_sequence_fields = 1
+    n_unnamed_fields = 0
+
+    def __new__(cls, /, *args, **kwargs):
+        count = len(args) + len(kwargs)
+        if count > 1:
+            kind = '' if args else 'keyword '
+            raise TypeError(f'sched_param() takes at most 1 {kind}argument ({count} given)')
+        if args:
+            priority = args[0]
+        elif 'sched_priority' in kwargs:
+            priority = kwargs['sched_priority']
+        else:
+            raise TypeError("sched_param() missing required argument 'sched_priority' (pos 1)")
+        return tuple.__new__(cls, (priority,))
+
+    def __init_subclass__(cls):
+        raise TypeError("type 'posix.sched_param' is not an acceptable base type")
+
+    @property
+    def sched_priority(self):
+        return self[0]
+
+    def __setattr__(self, name, value):
+        if name == 'sched_priority':
+            raise AttributeError('readonly attribute')
+        raise AttributeError(f"'posix.sched_param' object has no attribute '{name}' "
+                             "and no __dict__ for setting new attributes")
+
+    def __delattr__(self, name):
+        if name == 'sched_priority':
+            raise AttributeError('readonly attribute')
+        object.__delattr__(self, name)
+
+    def __repr__(self):
+        return f'posix.sched_param(sched_priority={self.sched_priority!r})'
+
+    def __reduce__(self):
+        return type(self), (self.sched_priority,)
+
+    def __replace__(self, /, **changes):
+        priority = changes.pop('sched_priority', self.sched_priority)
+        if changes:
+            raise TypeError(f'Got unexpected field name(s): {list(changes)!r}')
+        return type(self)(priority)
+
+
+_sched_param = sched_param
+_lucifer.os_sched_init(_sys.modules[__name__])
 
 
 def sched_getaffinity(pid, /):

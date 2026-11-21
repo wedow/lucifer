@@ -1881,6 +1881,67 @@ int_list(const int *v, int n)
     return list;
 }
 
+static PyObject *
+os_sched_getscheduler(PyObject *module, PyObject *arg)
+{
+    pid_t pid = PyLong_AsPid(arg);
+    if (pid == (pid_t)-1 && PyErr_Occurred()) {
+        return NULL;
+    }
+    int policy = sched_getscheduler(pid);
+    if (policy < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    return PyLong_FromLong(policy);
+}
+
+static PyObject *
+os_sched_getparam(PyObject *module, PyObject *arg)
+{
+    pid_t pid = PyLong_AsPid(arg);
+    if (pid == (pid_t)-1 && PyErr_Occurred()) {
+        return NULL;
+    }
+    struct sched_param param;
+    if (sched_getparam(pid, &param) < 0) {
+        set_oserror(errno, NULL);
+        return NULL;
+    }
+    PyObject *type = PyObject_GetAttrString(module, "_sched_param");
+    PyObject *priority = type != NULL ? PyLong_FromLong(param.sched_priority) : NULL;
+    PyObject *result = priority != NULL ? PyObject_CallOneArg(type, priority) : NULL;
+    Py_XDECREF(priority);
+    Py_XDECREF(type);
+    return result;
+}
+
+static PyMethodDef os_sched_methods[] = {
+    { "sched_getscheduler", os_sched_getscheduler, METH_O,
+      "sched_getscheduler($module, pid, /)\n--\n\n"
+      "Get the scheduling policy for the process identified by pid.\n\n"
+      "Passing 0 for pid returns the scheduling policy for the calling process." },
+    { "sched_getparam", os_sched_getparam, METH_O,
+      "sched_getparam($module, pid, /)\n--\n\n"
+      "Returns scheduling parameters for the process identified by pid.\n\n"
+      "If pid is 0, returns parameters for the calling process.\n"
+      "Return value is an instance of sched_param." },
+    { NULL, NULL, 0, NULL },
+};
+
+static PyObject *
+prim_os_sched_init(PyObject *m, PyObject *module)
+{
+    if (!PyModule_CheckExact(module)) {
+        PyErr_SetString(PyExc_TypeError, "os_sched_init() requires a module");
+        return NULL;
+    }
+    if (lu_module_add_functions(module, os_sched_methods) < 0) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
 /* sched_getaffinity(pid): the CPUs the thread may run on, ascending. */
 static PyObject *
 prim_os_sched_getaffinity(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -2395,6 +2456,7 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_getrusage", (PyCFunction)(void (*)(void))prim_os_getrusage, METH_FASTCALL, NULL },
     { "os_get_terminal_size", (PyCFunction)(void (*)(void))prim_os_get_terminal_size, METH_FASTCALL, NULL },
     { "os_waitpid", (PyCFunction)(void (*)(void))prim_os_waitpid, METH_FASTCALL, NULL },
+    { "os_sched_init", prim_os_sched_init, METH_O, NULL },
     { "os_sched_getaffinity", (PyCFunction)(void (*)(void))prim_os_sched_getaffinity, METH_FASTCALL, NULL },
     { "os_sched_setaffinity", (PyCFunction)(void (*)(void))prim_os_sched_setaffinity, METH_FASTCALL, NULL },
     { "os_pthread_sigmask", (PyCFunction)(void (*)(void))prim_os_pthread_sigmask, METH_FASTCALL, NULL },
