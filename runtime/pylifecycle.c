@@ -14,6 +14,7 @@
 #include "jit/jit.h"
 #include "interp/exceptions.h"
 #include "interp/frozen.h"
+#include "interp/image.h"
 #include "interp/instrument.h"
 #include "interp/perf.h"
 #include "prim/prim.h"
@@ -242,7 +243,7 @@ static int
 boot_native(struct _is *interp)
 {
     interp->max_str_digits = interp->config.int_max_str_digits;
-    if ((interp->interned = PyDict_New()) == NULL) {
+    if ((interp->interned = PyDict_New()) == NULL || lu_image_map(interp) < 0) {
         return -1;
     }
 #define LU_ID_INIT(name) \

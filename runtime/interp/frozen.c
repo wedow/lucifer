@@ -8,8 +8,7 @@
 #include "interp/exceptions.h"
 #include "interp/code.h"
 #include "interp/frame.h"
-
-#include "marshal.h"
+#include "interp/image.h"
 
 /* Marks a kernel code object and those nested in it, so that their frames
    are kernel-hidden and __build_class__ knows kernel class bodies. The
@@ -99,7 +98,7 @@ lu_kernel_boot(PyInterpreterState *interp)
         return -1;
     }
     for (const struct lu_frozen *m = lu_frozen_kernel; m->name != NULL; m++) {
-        PyObject *code = PyMarshal_ReadObjectFromString((const char *)m->data, m->size);
+        PyObject *code = lu_frozen_code(m);
         if (code == NULL) {
             return -1;
         }

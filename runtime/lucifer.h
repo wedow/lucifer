@@ -451,6 +451,7 @@ struct _is {
     struct lu_atexit *atexit;   /* PyUnstable_AtExit callbacks, newest first */
     PyMutex atexit_lock;
     PyObject *interned;         /* interned str -> itself */
+    struct lu_image *image;     /* the code image's copy (runtime/interp/image.c), linked to the earlier ones */
     int co_extra_user_count;    /* PyUnstable_Eval_RequestCodeExtraIndex hands out the next */
     freefunc co_extra_freefuncs[MAX_CO_EXTRA_USERS];
     PyMutex co_extra_lock;      /* hands out the indexes */

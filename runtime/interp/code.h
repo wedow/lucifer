@@ -34,6 +34,9 @@ struct lu_code_fields {
 
 PyObject *lu_code_new(const struct lu_code_fields *fields);
 
+/* The bytes a code object of `nunits` code units takes. */
+size_t lu_code_size(Py_ssize_t nunits);
+
 /* co_code: the bytecode with specialized opcodes made generic and caches cleared. */
 PyObject *lu_code_bytes(PyCodeObject *co);
 

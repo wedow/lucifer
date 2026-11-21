@@ -3,7 +3,7 @@
 
 #include "lucifer.h"
 #include <marshal.h>
-#include "interp/frozen.h"
+#include "interp/image.h"
 
 PyObject *
 PyImport_GetModuleDict(void)
@@ -292,7 +292,7 @@ PyImport_ImportFrozenModuleObject(PyObject *name)
     if (f == NULL) {
         return 0;
     }
-    PyObject *code = PyMarshal_ReadObjectFromString((const char *)f->data, f->size);
+    PyObject *code = lu_frozen_code(f);
     if (code == NULL) {
         return -1;
     }

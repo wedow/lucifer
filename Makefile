@@ -12,7 +12,9 @@ JIT_TARGET ?= $(if $(filter x86_64,$(shell uname -m)),x86_64,stub)
 SRCS = $(wildcard runtime/*.c runtime/*/*.c runtime/compiler/*/*.c runtime/jit/$(JIT_TARGET)/*.c)
 HEADERS = $(wildcard runtime/*.h runtime/*/*.h runtime/compiler/*/*.h runtime/jit/$(JIT_TARGET)/*.h)
 MAIN = build/runtime/main.o
-LIB_OBJS = $(filter-out $(MAIN),$(SRCS:%.c=build/%.o)) build/frozen.o
+IMAGEGEN = build/runtime/imagegen.o
+RUNTIME_OBJS = $(filter-out $(MAIN) $(IMAGEGEN),$(SRCS:%.c=build/%.o)) build/frozen.o
+LIB_OBJS = $(RUNTIME_OBJS) build/image.o
 HOST_PYTHON ?= python3
 ORACLE_T ?= python3.14t
 
@@ -101,6 +103,17 @@ build/liblucifer.a: $(LIB_OBJS)
 bin/lucifer: $(MAIN) build/liblucifer.a
 	@mkdir -p $(@D)
 	$(CC) $(LU_LDFLAGS) -o $@ $(MAIN) -Wl,--whole-archive build/liblucifer.a -Wl,--no-whole-archive -lm -lz -lffi
+
+# The code image (runtime/interp/image.h): the runtime without one lays out
+# the frozen tables' code, which the runtime archive then carries.
+build/imagegen: $(IMAGEGEN) $(RUNTIME_OBJS)
+	$(CC) $(LU_LDFLAGS) -o $@ $^ -lm -lz -lffi
+
+build/image.bin: build/imagegen
+	build/imagegen $@
+
+build/image.o: runtime/image.S build/image.bin
+	$(CC) -c -o $@ runtime/image.S
 
 build/runtime/object/alloc.o: LU_CFLAGS += -Ithird_party/mimalloc/src
 

@@ -5,7 +5,7 @@
    what they and the _imp port need from the runtime is here, as _lucifer
    primitives. */
 
-#include "interp/frozen.h"
+#include "interp/image.h"
 #include "interp/code.h"
 #include "prim/prim.h"
 
@@ -37,12 +37,6 @@ const struct lu_frozen *
 lu_frozen_find(PyObject *name)
 {
     return name != NULL && name != Py_None ? find_module(lu_frozen_modules, name) : NULL;
-}
-
-static PyObject *
-load_code(const struct lu_frozen *m)
-{
-    return PyMarshal_ReadObjectFromString((const char *)m->data, m->size);
 }
 
 /* Runs a module's code in its namespace, as exec_code_in_module does. */
@@ -153,7 +147,7 @@ prim_port_exec(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (port == NULL) {
         return Py_NewRef(Py_None);      /* a native module has nothing to run */
     }
-    PyObject *code = load_code(port);
+    PyObject *code = lu_frozen_code(port);
     if (code == NULL) {
         return NULL;
     }
@@ -184,7 +178,7 @@ static PyObject *
 prim_frozen_code(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     const struct lu_frozen *f = nargs == 1 ? lu_frozen_find(args[0]) : NULL;
-    PyObject *code = f == NULL ? Py_NewRef(Py_None) : load_code(f);
+    PyObject *code = f == NULL ? Py_NewRef(Py_None) : lu_frozen_code(f);
     if (code != NULL && f != NULL && f->hidden) {
         lu_hide_frames(code);
     }
@@ -445,7 +439,7 @@ static PyObject *
 start_module(struct _is *interp, const struct lu_frozen *m, int frozen)
 {
     PyObject *module = lu_module_new(m->name);
-    PyObject *code = module != NULL ? load_code(m) : NULL;
+    PyObject *code = module != NULL ? lu_frozen_code(m) : NULL;
     if (code == NULL) {
         Py_XDECREF(module);
         return NULL;

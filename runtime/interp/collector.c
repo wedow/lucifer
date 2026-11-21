@@ -41,6 +41,7 @@
       everything they name. */
 
 #include "interp/exceptions.h"
+#include "interp/image.h"
 #include "interp/specialize.h"
 #include "jit/jit.h"
 #include "prim/prim.h"
@@ -462,15 +463,21 @@ not_immortal(PyObject *op)
     return !_Py_IsImmortal(op);
 }
 
-/* Invariant 7: code objects' caches forget the garbage, frozen code too. */
+/* Invariant 7: code objects' caches forget the garbage, frozen and image code too. */
+static void
+forget(PyCodeObject *code, void *args)
+{
+    int shutdown = ((struct collection_state *)args)->reason == LU_GC_REASON_SHUTDOWN;
+    lu_specialize_forget(code, shutdown ? not_immortal : gc_is_unreachable);
+}
+
 static bool
 forget_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area, void *block, size_t block_size,
                     void *args)
 {
     PyObject *op = op_from_block(block, args, 1);
     if (op != NULL && PyCode_Check(op)) {
-        int shutdown = ((struct collection_state *)args)->reason == LU_GC_REASON_SHUTDOWN;
-        lu_specialize_forget((PyCodeObject *)op, shutdown ? not_immortal : gc_is_unreachable);
+        forget((PyCodeObject *)op, args);
     }
     return true;
 }
@@ -527,6 +534,7 @@ deduce_unreachable_heap(struct collection_state *state)
     }
     if (state->forget || state->reason == LU_GC_REASON_SHUTDOWN) {
         visit_heaps(interp, forget_heap_visitor, &state->base);
+        lu_image_each_code(forget, &state->base);
     }
 }
 

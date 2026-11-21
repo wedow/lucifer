@@ -18,7 +18,6 @@ void
 lu_watchers_init(struct _is *interp)
 {
     interp->next_keys_version = 2;              /* 0 is none, 1 is reserved, as in 3.14 */
-    interp->next_func_version = 2;              /* FUNC_VERSION_FIRST_VALID */
     interp->dict_watchers[0] = (lu_watcher)reserved_dict_callback;
 }
 

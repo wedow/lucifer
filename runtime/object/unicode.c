@@ -3,6 +3,7 @@
    and the cached UTF-8 form, hashing and interning. */
 
 #include "prim/prim.h"
+#include "interp/image.h"
 
 #include <string.h>
 
@@ -397,6 +398,16 @@ lu_intern(PyInterpreterState *interp, PyObject **p)
     PyObject *t = lu_ns_lookup(interp->interned, s);
     if (t != NULL) {
         Py_SETREF(*p, Py_NewRef(t));
+        return;
+    }
+    /* The code image's strs are interned without being in the table: the
+       first time one is asked for, it goes in. */
+    t = lu_image_interned(interp, s);
+    if (t != NULL) {
+        if (lu_ns_insert(interp->interned, t, t) < 0) {
+            PyErr_Clear();
+        }
+        Py_SETREF(*p, t);
         return;
     }
     if (lu_ns_insert(interp->interned, s, s) < 0) {

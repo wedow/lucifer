@@ -369,6 +369,15 @@ intern_constants(PyObject *tuple, int *modified)
     return 0;
 }
 
+/* The bytecode, then the instruction-start map (lu_code_starts), then
+   lu_code_names_descrs. */
+size_t
+lu_code_size(Py_ssize_t nunits)
+{
+    size_t starts_at = (offsetof(PyCodeObject, co_code_adaptive) + nunits * sizeof(lu_codeunit) + 7) & ~(size_t)7;
+    return starts_at + (nunits + 63) / 64 * sizeof(uint64_t) + sizeof(uint32_t);
+}
+
 PyObject *
 lu_code_new(const struct lu_code_fields *c)
 {
@@ -391,11 +400,7 @@ lu_code_new(const struct lu_code_fields *c)
     }
     Py_ssize_t nbytes = PyBytes_GET_SIZE(c->code);
     Py_ssize_t nunits = nbytes / (Py_ssize_t)sizeof(lu_codeunit);
-    /* The bytecode, then the instruction-start map (lu_code_starts), then
-       lu_code_names_descrs. */
-    size_t starts_at = (offsetof(PyCodeObject, co_code_adaptive) + nbytes + 7) & ~(size_t)7;
-    PyCodeObject *co = (PyCodeObject *)lu_object_new(&PyCode_Type,
-        starts_at + (nunits + 63) / 64 * sizeof(uint64_t) + sizeof(uint32_t));
+    PyCodeObject *co = (PyCodeObject *)lu_object_new(&PyCode_Type, lu_code_size(nunits));
     if (co == NULL) {
         return NULL;
     }
