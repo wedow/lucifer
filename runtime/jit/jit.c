@@ -427,11 +427,24 @@ lu_jit_prof_value(struct lu_prof *p, int *poly)
     return k;
 }
 
+/* A type profile whose one type was dropped knows nothing of what failed
+   its guard: it learns the next type it meets, and its kind is then what
+   both share. */
+int
+lu_jit_prof_learns(struct lu_prof *p)
+{
+    PyMutex_Lock(&p->jc->prof_lock);
+    int learns = p->dropped && p->n == 1 && !p->poly && !p->values;
+    PyMutex_Unlock(&p->jc->prof_lock);
+    return learns;
+}
+
 unsigned long
 lu_jit_prof_kinds(struct lu_prof *p)
 {
     PyMutex_Lock(&p->jc->prof_lock);
-    unsigned long k = (p->n > 0 || p->poly) && !p->dropped && !p->values ? LU_PROF_KINDS & ~p->unshared : 0;
+    unsigned long k = (p->n > 1 || p->poly || (p->n == 1 && !p->dropped)) && !p->values
+        ? LU_PROF_KINDS & ~p->unshared : 0;
     PyMutex_Unlock(&p->jc->prof_lock);
     return k;
 }
@@ -510,9 +523,10 @@ fails_enough(uint32_t n, struct lu_jit_code *root)
 
 /* An exit a learned type's site took: the unit is built again with what
    the root knows now, at once, when its sites reported; when the type
-   keeps being another, its one type is not relied on there (an operator
-   learns the others, lu_ev_kernel_arms) and every unit of the root is
-   built again. */
+   keeps being another, its one type is not relied on there (the site
+   learns the others: lu_jit_prof_learns, lu_ev_kernel_arms) and every
+   unit of the root is built again; when a kind its types shared keeps
+   failing, the kind is not relied on either. */
 static void
 prof_exit(struct lu_deopt *d)
 {
@@ -527,14 +541,23 @@ prof_exit(struct lu_deopt *d)
         return;
     }
     PyMutex_Lock(&jc->prof_lock);
-    int now = !p->poly && !p->dropped && fails_enough(++p->fails, jc);
-    if (now) {
-        p->dropped = 1;
-        jc->learned++;
+    int now = 0;
+    const char *what = "type";
+    if (fails_enough(++p->fails, jc)) {
+        if (!p->poly && !p->dropped) {
+            p->dropped = now = 1;
+        }
+        else if (p->unshared != LU_PROF_KINDS) {
+            p->unshared = LU_PROF_KINDS;
+            now = 1;
+            what = "kind";
+        }
+        p->fails = 0;
+        jc->learned += now;
     }
     PyMutex_Unlock(&jc->prof_lock);
     if (now && _PyRuntime.jit.debug) {
-        fprintf(stderr, "jit: recompile %s: learned type fails\n", PyUnicode_AsUTF8(d->unit->code->co_qualname));
+        fprintf(stderr, "jit: recompile %s: learned %s fails\n", PyUnicode_AsUTF8(d->unit->code->co_qualname), what);
     }
     for (struct lu_unit *u = now ? __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE) : NULL; u != NULL; u = u->next) {
         kill(jc, u);

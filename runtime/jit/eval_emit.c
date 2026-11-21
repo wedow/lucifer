@@ -134,6 +134,9 @@ lu_ev_learn_type(struct ctx *c, lu_v r, int which)
     t = p != NULL ? lu_jit_prof_type(p, &poly) : NULL;
     if (poly) {
         Py_XDECREF(t);
+        if (p != NULL && lu_jit_prof_learns(p)) {
+            lu_ev_profile(c, p, r);
+        }
         return NULL;
     }
     if (t != NULL) {
