@@ -1,6 +1,6 @@
 ---
 id: luc-0pbt
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T04:18:01Z
@@ -32,3 +32,9 @@ Lucifer:
 ```
 
 
+
+## Notes
+
+**2026-11-21T06:45:15Z**
+
+CPython uses a Py_ssize_t constructor argument and formats the stored index and doc repr in Modules/_collectionsmodule.c. Lucifer now reuses the shared signed-size argument converter and implements the same repr. The new collections_tuplegetter kernel check failed before the fix on repr and on overflow in both directions, including an oversized __index__ result. It passed after the fix alongside collections_deque and namedtuple_basic in plain, jit and jit-deopt against CPython 3.14t.

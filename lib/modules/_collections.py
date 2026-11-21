@@ -448,10 +448,14 @@ class _tuplegetter:
     __slots__ = ('_index', '__doc__')
 
     def __new__(cls, index, doc, /):
+        index = _lucifer.operators.ssize_arg(index)
         self = object.__new__(cls)
-        self._index = _index(index)
+        self._index = index
         self.__doc__ = doc
         return self
+
+    def __repr__(self):
+        return '%s(%d, %r)' % (type(self).__name__, self._index, self.__doc__)
 
     def __get__(self, instance, owner=None, /):
         if instance is None:
