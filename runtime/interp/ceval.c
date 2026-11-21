@@ -154,7 +154,11 @@ lu_is_true(PyObject *v)
 static void
 name_error(PyObject *name)
 {
-    lu_err_format(PyExc_NameError, NAME_ERROR_MSG, PyUnicode_AsUTF8(name));
+    const char *text = PyUnicode_AsUTF8(name);
+    if (text == NULL) {
+        return;
+    }
+    PyErr_Format(PyExc_NameError, NAME_ERROR_MSG, text);
     PyObject *exc = PyErr_GetRaisedException();
     if (exc != NULL && PyObject_SetAttrString(exc, "name", name) < 0) {
         PyErr_Clear();

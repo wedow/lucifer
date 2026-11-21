@@ -2215,12 +2215,28 @@ prim_new_check(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return check_new((PyTypeObject *)args[0], (PyTypeObject *)args[1]) < 0 ? NULL : Py_NewRef(Py_None);
 }
 
-/* type_tp_name(t): tp_name, as error messages name a type. */
+/* type_tp_name(t, precision=-1): tp_name with optional UTF-8 byte precision. */
 static PyObject *
 prim_type_tp_name(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(1); TYPE_ARG(0);
-    return PyUnicode_FromString(((PyTypeObject *)args[0])->tp_name);
+    if (nargs != 1 && nargs != 2) {
+        lu_err_format(PyExc_TypeError, "type_tp_name() takes 1 or 2 arguments (%zd given)", nargs);
+        return NULL;
+    }
+    TYPE_ARG(0);
+    const char *name = ((PyTypeObject *)args[0])->tp_name;
+    if (nargs == 1) {
+        return PyUnicode_FromString(name);
+    }
+    if (!PyLong_Check(args[1])) {
+        PyErr_SetString(PyExc_TypeError, "type_tp_name() precision must be an integer");
+        return NULL;
+    }
+    int precision = PyLong_AsInt(args[1]);
+    if (precision == -1 && PyErr_Occurred()) {
+        return NULL;
+    }
+    return PyUnicode_FromFormat("%.*s", precision, name);
 }
 
 /* type_text_signature(t): the signature a static type's tp_doc starts with, or None. */

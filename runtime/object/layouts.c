@@ -641,8 +641,7 @@ lu_hash(PyObject *v)
     if (tp == &PyCode_Type || tp == &PyEllipsis_Type || PyType_Check(v)) {
         return Py_HashPointer(v);
     }
-    lu_err_format(PyExc_TypeError, "unhashable type: '%s'", tp->tp_name);
-    return -1;
+    return PyObject_HashNotImplemented(v);
 }
 
 static int

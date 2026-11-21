@@ -221,7 +221,7 @@ instance that has no instance attributes and cannot be given any.
             if type_lookup(cls, '__new__') is not _object_new:
                 error(TypeError, 'object.__new__() takes exactly one argument (the type to instantiate)')
             if type_lookup(cls, '__init__') is _object_init:
-                error(TypeError, str_join('', (type_tp_name(cls), '() takes no arguments')))
+                error(TypeError, str_join('', (type_tp_name(cls, 200), '() takes no arguments')))
         if type_flag(cls, _IS_ABSTRACT):
             _abstract_error(cls)
         return alloc(cls, object)
@@ -233,7 +233,7 @@ instance that has no instance attributes and cannot be given any.
                 error(TypeError, 'object.__init__() takes exactly one argument (the instance to initialize)')
             if type_lookup(tp, '__new__') is _object_new:
                 error(TypeError, str_join('', (
-                    type_tp_name(tp), '.__init__() takes exactly one argument (the instance to initialize)')))
+                    type_tp_name(tp, 200), '.__init__() takes exactly one argument (the instance to initialize)')))
 
     def __dir__(self):
         """Default dir() implementation."""

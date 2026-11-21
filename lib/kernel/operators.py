@@ -295,7 +295,7 @@ def hash_of(x):
     if f is not MISSING and f is type_lookup(object, '__hash__'):
         return object_hash(x)
     if f is MISSING or f is None:
-        error(TypeError, str_join('', ("unhashable type: '", _name(x), "'")))
+        error(TypeError, str_join('', ("unhashable type: '", type_tp_name(t, 200), "'")))
     h = call_special(f, x)
     if not kind(h, 'int'):
         error(TypeError, '__hash__ method should return an integer')

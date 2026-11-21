@@ -42,7 +42,7 @@ put_pad(struct ubuf *b, Py_ssize_t count, Py_UCS4 c)
    length could start with, where the leading byte also bounds the second
    byte (no overlongs, no surrogates, no more than U+10FFFF). */
 static Py_ssize_t
-decode_utf8(const unsigned char *s, Py_ssize_t n, Py_UCS4 *out)
+decode_utf8(const unsigned char *s, Py_ssize_t n, int truncated, Py_UCS4 *out)
 {
     Py_ssize_t count = 0;
     for (Py_ssize_t i = 0; i < n; count++) {
@@ -84,7 +84,6 @@ decode_utf8(const unsigned char *s, Py_ssize_t n, Py_UCS4 *out)
             ch = c;
         }
         else if (len > 1) {
-            sub = 0;
             if (i + 1 < n && s[i + 1] >= lo && s[i + 1] <= hi) {
                 sub = 2;
                 for (int k = 2; k < len && i + k < n && (s[i + k] & 0xc0) == 0x80; k++) {
@@ -97,8 +96,8 @@ decode_utf8(const unsigned char *s, Py_ssize_t n, Py_UCS4 *out)
                     ch = (ch << 6) | (s[i + k] & 0x3f);
                 }
             }
-            else {
-                sub = sub ? sub : 1;     /* the leading byte alone */
+            else if (truncated && sub == n - i) {
+                break;                  /* precision cut a valid prefix */
             }
         }
         if (out != NULL) {
@@ -169,18 +168,9 @@ PyUnicode_FromFormatV(const char *format, va_list vargs)
     va_copy(ap, vargs);
     for (const char *f = format; *f && !b.failed; ) {
         if (*f != '%') {
-            const char *end = strchr(f, '%');
-            Py_ssize_t n = end != NULL ? end - f : (Py_ssize_t)strlen(f);
-            Py_ssize_t count = decode_utf8((const unsigned char *)f, n, NULL);
-            Py_UCS4 *text = PyMem_Malloc((count + 1) * sizeof(Py_UCS4));
-            if (text == NULL) {
-                b.failed = 1;
-                break;
+            while (*f && *f != '%' && !b.failed) {
+                put(&b, (unsigned char)*f++);
             }
-            decode_utf8((const unsigned char *)f, n, text);
-            put_field(&b, text, count, 0, 0);
-            PyMem_Free(text);
-            f += n;
             continue;
         }
         const char *spec = f++;
@@ -367,14 +357,17 @@ PyUnicode_FromFormatV(const char *format, va_list vargs)
                character drops it, and other bad bytes are replaced
                (unicode_fromformat_write_utf8). */
             Py_ssize_t n = prec >= 0 ? (Py_ssize_t)strnlen(s, prec) : (Py_ssize_t)strlen(s);
-            Py_ssize_t consumed = n;
-            PyObject *text = PyUnicode_DecodeUTF8Stateful(s, n, "replace", prec >= 0 && n == prec ? &consumed : NULL);
+            int truncated = n == prec;
+            const unsigned char *bytes = (const unsigned char *)s;
+            Py_ssize_t count = decode_utf8(bytes, n, truncated, NULL);
+            Py_UCS4 *text = PyMem_Malloc((count + 1) * sizeof(Py_UCS4));
             if (text == NULL) {
-                b.failed = 2;
+                b.failed = 1;
                 break;
             }
-            put_str(&b, text, width, -1, left);
-            Py_DECREF(text);
+            decode_utf8(bytes, n, truncated, text);
+            put_field(&b, text, count, width, left);
+            PyMem_Free(text);
             break;
         }
         case 'U': case 'S': case 'R': case 'A': case 'T': case 'N': {

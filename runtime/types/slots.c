@@ -892,7 +892,7 @@ lu_tp_new_is_thunk(newfunc f)
 Py_hash_t
 PyObject_HashNotImplemented(PyObject *self)
 {
-    lu_err_format(PyExc_TypeError, "unhashable type: '%.200s'", Py_TYPE(self)->tp_name);
+    PyErr_Format(PyExc_TypeError, "unhashable type: '%.200s'", Py_TYPE(self)->tp_name);
     return -1;
 }
 
