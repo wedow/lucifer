@@ -1,6 +1,6 @@
 ---
 id: luc-7hk7
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T03:08:31Z
@@ -90,3 +90,18 @@ TypeError async_generator_athrow.throw() takes from 2 to 4 positional arguments 
 ```
 
 
+
+## Notes
+
+**2026-11-21T16:10:49Z**
+
+Kernel method binding rejected invalid positional counts before the async
+awaitable could check or update its state. The shared throw path now validates
+the count and warns on legacy forms before resuming. Async awaitables check
+reuse first and finish when a throw raises or produces an async yield.
+Direct athrow() warns when creating the awaitable.
+
+This follows [CPython 3.14.10's generator implementation](https://github.com/python/cpython/blob/v3.14.10/Objects/genobject.c).
+
+tests/kernel/gen_throw_args.py failed on the base before the fix. After the fix
+it and seven neighboring kernel programs passed in plain, jit and jit-deopt.

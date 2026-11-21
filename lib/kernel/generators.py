@@ -255,7 +255,30 @@ def _close_chain(gen, yf):
     return result
 
 
-def _throw_method(gen, typ, val, tb):
+def _throw_args(name, args):
+    n = size(args)
+    if n < 1:
+        error(TypeError, str_join('', (name, ' expected at least 1 argument, got 0')))
+    if n > 3:
+        error(TypeError, str_join('', (name, ' expected at most 3 arguments, got ', str(n))))
+    return args[0], args[1] if n > 1 else MISSING, args[2] if n > 2 else MISSING
+
+
+def _warn_legacy_throw(name):
+    from warnings import warn
+    warn(str_join('', ('the (type, exc, tb) signature of ', name, '() is deprecated, ',
+                       'use the single-arg signature instead.')), DeprecationWarning)
+
+
+def _check_throw_keywords(obj, kwargs):
+    if kwargs:
+        error(TypeError, str_join('', (_name(obj), '.throw() takes no keyword arguments')))
+
+
+def _throw_method(gen, args):
+    typ, val, tb = _throw_args('throw', args)
+    if size(args) > 1:
+        _warn_legacy_throw('throw')
     return _throw(gen, typ, val, tb, True)
 
 
@@ -276,7 +299,7 @@ class generator:
 return next yielded value or raise StopIteration."""
         return _send(self, value)
 
-    def throw(self, typ, val=MISSING, tb=MISSING, /):
+    def throw(self, /, *args, **kwargs):
         """throw(value)
 throw(type[,value[,tb]])
 
@@ -284,7 +307,8 @@ Raise exception in generator, return next yielded value or raise
 StopIteration.
 the (type, val, tb) signature is deprecated,
 and may be removed in a future version of Python."""
-        return _throw_method(self, typ, val, tb)
+        _check_throw_keywords(self, kwargs)
+        return _throw_method(self, args)
 
     def close(self):
         """close() -> raise GeneratorExit inside generator."""
@@ -301,7 +325,7 @@ class coroutine:
 return next iterated value or raise StopIteration."""
         return _send(self, value)
 
-    def throw(self, typ, val=MISSING, tb=MISSING, /):
+    def throw(self, /, *args, **kwargs):
         """throw(value)
 throw(type[,value[,traceback]])
 
@@ -309,7 +333,8 @@ Raise exception in coroutine, return next iterated value or raise
 StopIteration.
 the (type, val, tb) signature is deprecated,
 and may be removed in a future version of Python."""
-        return _throw_method(self, typ, val, tb)
+        _check_throw_keywords(self, kwargs)
+        return _throw_method(self, args)
 
     def close(self):
         """close() -> raise GeneratorExit inside coroutine."""
@@ -337,8 +362,9 @@ class coroutine_wrapper:
     def send(self, value, /):
         return _send(field_get(self, 0), value)
 
-    def throw(self, typ, val=MISSING, tb=MISSING, /):
-        return _throw_method(field_get(self, 0), typ, val, tb)
+    def throw(self, /, *args, **kwargs):
+        _check_throw_keywords(self, kwargs)
+        return _throw_method(field_get(self, 0), args)
 
     def close(self):
         return _close(field_get(self, 0))
@@ -497,6 +523,8 @@ athrow(type[,value[,tb]])
 raise exception in generator.
 the (type, val, tb) signature is deprecated,
 and may be removed in a future version of Python."""
+        if size(args) > 1:
+            _warn_legacy_throw('athrow')
         _init_hooks(self)
         return _awaitable(_athrow, self, args)
 
@@ -549,7 +577,7 @@ def _asend_send(self, value):
     return r
 
 
-def _asend_throw(self, typ, val, tb):
+def _asend_throw(self, args):
     agen, state = field_get(self, 0), field_get(self, 2)
     if state == _CLOSED:
         _asend_closed()
@@ -560,7 +588,7 @@ def _asend_throw(self, typ, val, tb):
         field_set(self, 2, _ITER)
         gen_flag(agen, _RUNNING_ASYNC, True)
     try:
-        return _unwrap(agen, lambda: _throw_method(agen, typ, val, tb))
+        return _unwrap(agen, lambda: _throw_method(agen, args))
     except BaseException:
         gen_flag(agen, _RUNNING_ASYNC, False)
         field_set(self, 2, _CLOSED)
@@ -573,7 +601,7 @@ def _awaitable_close(self, throw):
     if field_get(self, 2) == _CLOSED:
         return None
     try:
-        throw(self, GeneratorExit, MISSING, MISSING)
+        throw(self, (GeneratorExit,))
     except BaseException as e:
         if _matches(e, StopIteration) or _matches(e, StopAsyncIteration) \
                 or _matches(e, GeneratorExit):
@@ -598,8 +626,9 @@ class async_generator_asend:
 return next yielded value or raise StopIteration."""
         return _asend_send(self, value)
 
-    def throw(self, typ, val=MISSING, tb=MISSING, /):
-        return _asend_throw(self, typ, val, tb)
+    def throw(self, /, *args, **kwargs):
+        _check_throw_keywords(self, kwargs)
+        return _asend_throw(self, args)
 
     def close(self):
         """close() -> raise GeneratorExit inside generator."""
@@ -610,15 +639,6 @@ def _athrow_running(self, closing):
     field_set(self, 2, _CLOSED)
     error(RuntimeError, 'aclose(): asynchronous generator is already running' if closing
           else 'athrow(): asynchronous generator is already running')
-
-
-def _athrow_args(args):
-    n = size(args)
-    if n < 1:
-        error(TypeError, 'athrow expected at least 1 argument, got 0')
-    if n > 3:
-        error(TypeError, str_join('', ('athrow expected at most 3 arguments, got ', str(n))))
-    return args[0], args[1] if n > 1 else MISSING, args[2] if n > 2 else MISSING
 
 
 def _athrow_end(self, agen, closing, e):
@@ -664,7 +684,7 @@ def _athrow_send(self, value):
             if type(r) is _wrapped:
                 _yield_close(self, agen)
             return r
-        typ, val, tb = _athrow_args(args)
+        typ, val, tb = _throw_args('athrow', args)
         try:
             return _unwrap(agen, lambda: _throw(agen, typ, val, tb, False))
         except BaseException as e:
@@ -683,9 +703,9 @@ def _athrow_send(self, value):
     return r
 
 
-def _athrow_throw(self, typ, val, tb):
-    agen, args, state = field_get(self, 0), field_get(self, 1), field_get(self, 2)
-    closing = args is None
+def _athrow_throw(self, args):
+    agen, state = field_get(self, 0), field_get(self, 2)
+    closing = field_get(self, 1) is None
     if state == _CLOSED:
         error(RuntimeError, 'cannot reuse already awaited aclose()/athrow()')
     if state == _INIT:
@@ -694,15 +714,11 @@ def _athrow_throw(self, typ, val, tb):
         field_set(self, 2, _ITER)
         gen_flag(agen, _RUNNING_ASYNC, True)
     try:
-        r = _throw_method(agen, typ, val, tb)
+        if not closing:
+            return _unwrap(agen, lambda: _throw_method(agen, args))
+        r = _throw_method(agen, args)
     except BaseException as e:
-        gen_flag(agen, _RUNNING_ASYNC, False)
-        field_set(self, 2, _CLOSED)
-        if closing and (_matches(e, StopAsyncIteration) or _matches(e, GeneratorExit)):
-            raise StopIteration
-        raise
-    if not closing:
-        return _unwrap(agen, lambda: r)
+        _athrow_end(self, agen, closing, e)
     if type(r) is _wrapped:
         _yield_close(self, agen)
     return r
@@ -724,8 +740,9 @@ class async_generator_athrow:
 return next yielded value or raise StopIteration."""
         return _athrow_send(self, value)
 
-    def throw(self, typ, val=MISSING, tb=MISSING, /):
-        return _athrow_throw(self, typ, val, tb)
+    def throw(self, /, *args, **kwargs):
+        _check_throw_keywords(self, kwargs)
+        return _athrow_throw(self, args)
 
     def close(self):
         """close() -> raise GeneratorExit inside generator."""
