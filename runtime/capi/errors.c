@@ -328,10 +328,10 @@ PyErr_BadArgument(void)
     return 0;
 }
 
-int _Py_CheckRecursiveCall(PyThreadState *tstate, const char *where);
-
-/* Nesting recurses on the C stack: past its limit the RecursionError is
-   unraisable, the exception in flight stays, and nothing matches (gh-156204). */
+/* Nesting recurses on the C stack: near its end the RecursionError is
+   unraisable, the exception in flight stays, and nothing matches (gh-156204).
+   It stops two margins short of the limit, as CPython does, so that the
+   unraisable hook has stack to run on. */
 int
 PyErr_GivenExceptionMatches(PyObject *given, PyObject *exc)
 {
@@ -340,11 +340,10 @@ PyErr_GivenExceptionMatches(PyObject *given, PyObject *exc)
     }
     if (PyTuple_Check(exc)) {
         PyThreadState *ts = lu_tstate_get();
-        if ((uintptr_t)__builtin_frame_address(0) < ((struct lu_task *)ts)->c_stack_soft_limit) {
+        if (_Py_ReachedRecursionLimitWithMargin(ts, 2)) {
             PyObject *pending = PyErr_GetRaisedException();
-            if (_Py_CheckRecursiveCall(ts, " in PyErr_GivenExceptionMatches") < 0) {
-                PyErr_WriteUnraisable(NULL);
-            }
+            PyErr_SetString(PyExc_RecursionError, "maximum recursion depth exceeded while checking exception tuple");
+            PyErr_FormatUnraisable("Exception ignored while checking exception tuple");
             PyErr_SetRaisedException(pending);
             return 0;
         }
