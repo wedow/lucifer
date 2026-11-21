@@ -151,6 +151,11 @@ require that a count of the tier's does not grow with the iterations:
          makes, one per eight iterations for the tuple's calls, which run
          their loop outside the unit. A guard that fails that rarely costs
          less in exits than a build that gives up its site, which it keeps.
+  seqkinds tests/kernel/jit_seq_kinds.py, whose hot loops compare tuples
+         and lists of 40 items whose classes the kernel's comparison meets
+         by the half dozen (luc-tax0): helper calls compiled code makes, a
+         few per comparison and none per item. The comparison reads sizes
+         and items in line under a guard on the kind its classes share.
   retry  tests/kernel/jit_retry.py, whose hot function leaves compiled code
          on every call for a while and then stops (luc-j4mj): calls
          compiled code makes of it, and entries left to the interpreter,
@@ -298,6 +303,7 @@ GROWTH = {
     'phases': ('jit_phases.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
                r'|jit: entries waited (\d+)', 0),
     'rare': ('jit_rare_fails.py', r'jit: executed:.* helper (\d+)', 1 / 8),
+    'seqkinds': ('jit_seq_kinds.py', r'jit: executed:.* helper (\d+)', 120),
     'retry': ('jit_retry.py', r'jit: whynot .* waiting (\d+)|jit: entries waited (\d+)', 0),
     'unpack': ('jit_unpack_generic.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
     'contexts': ('jit_contexts.py', r'jit: entries waited (\d+), units retired (\d+)', 0),

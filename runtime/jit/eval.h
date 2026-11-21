@@ -320,6 +320,10 @@ void lu_ev_def_type(struct ctx *c, lu_v v, PyTypeObject *t);
    lu_ev_type knows it; NULL when it knows none yet, and compiled code then
    reports the type here. */
 PyTypeObject *lu_ev_learn_type(struct ctx *c, lu_v r, int which);
+/* Whether r's class has the type flags `kind` (a tuple's or a list's of
+   any class, LU_PROF_KINDS): its type's, or what every type the root met
+   there had (guarded) where it met several. */
+int lu_ev_learn_kind(struct ctx *c, lu_v r, int which, unsigned long kind);
 /* The same for r's value, which compiled code may rely on when it is one
    immortal object (a typecode, a small int): the constant, or NULL; *r is
    the constant from here. Value records are asked for apart from type

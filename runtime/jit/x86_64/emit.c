@@ -3141,6 +3141,19 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jcc(a, CC_NE, fail);
         return 0;
     }
+    case OP_GUARD_KIND: {
+        int fail = guard_exit(a, in);
+        r = gpr_of(a, in->a, RDX);
+        test_rr(a, r, r);
+        jcc(a, CC_E, fail);
+        load(a, RAX, r, offsetof(PyObject, ob_type));
+        load(a, RAX, RAX, offsetof(PyTypeObject, tp_flags));
+        mov_ri(a, RCX, in->imm);
+        alu_rr(a, ALU_AND, RAX, RCX);
+        alu_rr(a, ALU_CMP, RAX, RCX);
+        jcc(a, CC_NE, fail);
+        return 0;
+    }
     case OP_GUARD_VERSION: {
         int fail = guard_exit(a, in);
         r = gpr_of(a, in->a, RDX);
@@ -3279,6 +3292,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         if (in->imm) {
             int shared = new_label(a);
             load_indexed8(a, RAX, s, i, offsetof(PyTupleObject, ob_item));
+            test_rr(a, RAX, RAX);
+            jcc(a, CC_E, fail);                 /* a tuple not filled yet: the interpreter's */
             incref_owned_or_exit(a, RAX, shared);
             jmp(a, done);
             bind(a, shared);

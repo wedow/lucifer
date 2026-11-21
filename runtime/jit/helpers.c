@@ -121,13 +121,13 @@ lu_jit_slot_load(PyObject **slot)
     return lu_try_xget_ref(slot);
 }
 
-/* t[i] for -len <= i < len, else NULL (which leaves). */
+/* t[i] for -len <= i < len, else NULL (which leaves), as for an empty slot. */
 PyObject *
 lu_jit_tuple_item(PyObject *t, int64_t i)
 {
     LU_JIT_C_PATH(tuple_item);
     i += i < 0 ? Py_SIZE(t) : 0;
-    return i >= 0 && i < Py_SIZE(t) ? Py_NewRef(PyTuple_GET_ITEM(t, i)) : NULL;
+    return i >= 0 && i < Py_SIZE(t) ? Py_XNewRef(PyTuple_GET_ITEM(t, i)) : NULL;
 }
 
 /* list[i] = v for 0 <= i < len: 1, else 0 and nothing stored. */

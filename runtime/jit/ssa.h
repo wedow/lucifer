@@ -92,6 +92,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(BOOL, REP_OBJ, IF_PURE)           /* a: bit; Py_True or Py_False, immortal */ \
     X(TRUTH, REP_BIT, IF_RAISE | IF_CALL | IF_EFFECT)       /* a: any object, as TO_BOOL decides */ \
     X(GUARD_TYPE, REP_NONE, IF_GUARD)   /* Py_TYPE(a) == imm */ \
+    X(GUARD_KIND, REP_NONE, IF_GUARD)   /* Py_TYPE(a)->tp_flags has the flags imm */ \
     X(GUARD_VERSION, REP_NONE, IF_GUARD)        /* a version == imm; imm2 says which (GV_*) */ \
     X(GUARD_IS, REP_NONE, IF_GUARD)     /* a == imm, or a field of a (GI_*) */ \
     X(GUARD_BIT, REP_NONE, IF_GUARD)    /* a == imm */ \

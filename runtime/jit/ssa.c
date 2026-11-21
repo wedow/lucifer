@@ -27,7 +27,7 @@ int
 lu_count_kind(const struct lu_ins *in)
 {
     switch (in->op) {
-    case OP_GUARD_TYPE: return CNT_guard_type;
+    case OP_GUARD_TYPE: case OP_GUARD_KIND: return CNT_guard_type;
     case OP_GUARD_VERSION:
         return in->imm2 == GV_TYPE_OF ? CNT_guard_type_of : in->imm2 == GV_TYPE_ITSELF ? CNT_guard_type_itself
             : in->imm2 == GV_DICT_KEYS ? CNT_guard_keys : CNT_guard_func;

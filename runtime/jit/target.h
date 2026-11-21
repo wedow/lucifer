@@ -490,6 +490,13 @@ PyTypeObject *lu_jit_prof_type(struct lu_prof *p, int *poly);
    many, or -1 when it met more; *relied says whether the one type it met
    is relied on as lu_jit_prof_type has it. */
 int lu_jit_prof_types(struct lu_prof *p, PyTypeObject **types, int *relied);
+/* The flags of LU_PROF_KINDS every type it met has (none before it met
+   one, or once a guard on them kept failing): the kinds of object, such as
+   a tuple's or a list's of any class, a value of the site was every time. */
+#define LU_PROF_KINDS (Py_TPFLAGS_LONG_SUBCLASS | Py_TPFLAGS_LIST_SUBCLASS | Py_TPFLAGS_TUPLE_SUBCLASS \
+                       | Py_TPFLAGS_BYTES_SUBCLASS | Py_TPFLAGS_UNICODE_SUBCLASS | Py_TPFLAGS_DICT_SUBCLASS \
+                       | Py_TPFLAGS_BASE_EXC_SUBCLASS | Py_TPFLAGS_TYPE_SUBCLASS)
+unsigned long lu_jit_prof_kinds(struct lu_prof *p);
 /* The same of a value profile: the value it met first (a new reference) or
    NULL, and whether that is not the one to rely on. The record notes
    values from here on, and only immortal ones: another makes it poly. */

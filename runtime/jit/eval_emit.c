@@ -147,6 +147,21 @@ lu_ev_learn_type(struct ctx *c, lu_v r, int which)
     return NULL;
 }
 
+int
+lu_ev_learn_kind(struct ctx *c, lu_v r, int which, unsigned long kind)
+{
+    PyTypeObject *t = lu_ev_learn_type(c, r, which);
+    if (t != NULL || r == LU_NOV || LU_IS_VIRT(r) || I(c, r)->rep != REP_OBJ) {
+        return t != NULL && (t->tp_flags & kind) == kind;
+    }
+    struct lu_prof *p = lu_ev_prof(c, which);
+    if (p == NULL || nospec(c, c->pc) || (lu_jit_prof_kinds(p) & kind) != kind) {
+        return 0;
+    }
+    I(c, lu_ev_guard(c, OP_GUARD_KIND, r, (int64_t)kind))->prof = p;
+    return 1;
+}
+
 /* r as a constant: the one it is known to be, else the one immortal value
    the root met as the `which`-th value this instruction asks about
    (guarded, and r stands for it from here); NULL when it knows none yet,

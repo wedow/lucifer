@@ -143,6 +143,7 @@ struct lu_prof {
     uint8_t poly;               /* it had more than those: nothing to rely on */
     uint8_t dropped;            /* not relied on: a guard on its one type failed as often as a site's (GUARD_FAILS) */
     uint32_t fails;             /* exits of that guard */
+    unsigned long unshared;     /* the LU_PROF_KINDS flags some type it met lacks */
 };
 
 static struct {
@@ -426,6 +427,15 @@ lu_jit_prof_value(struct lu_prof *p, int *poly)
     return k;
 }
 
+unsigned long
+lu_jit_prof_kinds(struct lu_prof *p)
+{
+    PyMutex_Lock(&p->jc->prof_lock);
+    unsigned long k = (p->n > 0 || p->poly) && !p->dropped && !p->values ? LU_PROF_KINDS & ~p->unshared : 0;
+    PyMutex_Unlock(&p->jc->prof_lock);
+    return k;
+}
+
 int
 lu_jit_prof_types(struct lu_prof *p, PyTypeObject **types, int *relied)
 {
@@ -471,6 +481,9 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
     int known = p->poly;
     for (int i = 0; i < p->n && !known; i++) {
         known = p->met[i] == t;
+    }
+    if (!known) {
+        p->unshared |= LU_PROF_KINDS & ~Py_TYPE(o)->tp_flags;
     }
     if (!known && p->n < LU_OPCLASS_WAYS && (!values || _Py_IsImmortal(o))) {
         p->met[p->n] = Py_NewRef(t);

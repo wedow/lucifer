@@ -75,10 +75,20 @@ lu_ev_class_relied(struct ctx *c, lu_v type, uint32_t version)
     return 1;
 }
 
-static lu_v
-size_of(struct ctx *c, lu_v r)
+/* A tuple's or a list's class, any subclass of one, that r's is (known,
+   or as every class the site met was, guarded): &PyTuple_Type or
+   &PyList_Type, else NULL. */
+static PyTypeObject *
+seq_kind(struct ctx *c, lu_v *args, int i)
 {
-    PyTypeObject *t = lu_ev_type(c, r);
+    return lu_ev_learn_kind(c, args[i], i, Py_TPFLAGS_TUPLE_SUBCLASS) ? &PyTuple_Type
+        : lu_ev_learn_kind(c, args[i], i, Py_TPFLAGS_LIST_SUBCLASS) ? &PyList_Type : NULL;
+}
+
+static lu_v
+size_of(struct ctx *c, lu_v *args)
+{
+    lu_v r = args[0];
     if (LU_IS_VIRT(r)) {
         lu_v real;
         struct lu_vobj *o = lu_ev_virt(c->g, &c->g->st, r, &real);
@@ -91,13 +101,56 @@ size_of(struct ctx *c, lu_v r)
     if (k != NULL && PyTuple_CheckExact(k)) {
         return lu_ev_box_int(c, lu_ev_const_i(c, PyTuple_GET_SIZE(k)));
     }
-    if (t == &PyList_Type || t == &PyTuple_Type || t == &PyBytes_Type || t == &PyByteArray_Type) {
-        return lu_ev_box_int(c, lu_ev_emit(c, OP_LOAD, REP_I64, r, LU_NOV, LU_NOV, offsetof(PyVarObject, ob_size)));
+    PyTypeObject *t = lu_ev_learn_type(c, r, 0);
+    Py_ssize_t at = t == &PyUnicode_Type ? (Py_ssize_t)offsetof(PyASCIIObject, length)
+        : t == &PySet_Type || t == &PyFrozenSet_Type ? (Py_ssize_t)offsetof(PySetObject, used)
+        : t == &PyBytes_Type || t == &PyByteArray_Type || seq_kind(c, args, 0) != NULL ? (Py_ssize_t)offsetof(PyVarObject, ob_size)
+        : lu_ev_learn_kind(c, r, 0, Py_TPFLAGS_DICT_SUBCLASS) ? (Py_ssize_t)offsetof(PyDictObject, ma_used) : -1;
+    return at < 0 ? LU_EV_NONE : lu_ev_box_int(c, lu_ev_emit(c, OP_LOAD, REP_I64, lu_ev_val(c, r), LU_NOV, LU_NOV, at));
+}
+
+/* The type flag that says an object is of kind k (prim_kind's), or 0. */
+static unsigned long
+kind_flag(PyObject *k)
+{
+    static const struct { const char *name; unsigned long flag; } flags[] = {
+        { "str", Py_TPFLAGS_UNICODE_SUBCLASS }, { "type", Py_TPFLAGS_TYPE_SUBCLASS },
+        { "dict", Py_TPFLAGS_DICT_SUBCLASS }, { "int", Py_TPFLAGS_LONG_SUBCLASS },
+        { "bytes", Py_TPFLAGS_BYTES_SUBCLASS }, { "tuple", Py_TPFLAGS_TUPLE_SUBCLASS },
+        { "list", Py_TPFLAGS_LIST_SUBCLASS },
+    };
+    const char *name = k != NULL && PyUnicode_CheckExact(k) ? PyUnicode_AsUTF8(k) : NULL;
+    for (size_t i = 0; name != NULL && i < sizeof flags / sizeof flags[0]; i++) {
+        if (strcmp(name, flags[i].name) == 0) {
+            return flags[i].flag;
+        }
     }
-    if (t == &PyUnicode_Type) {
-        return lu_ev_box_int(c, lu_ev_emit(c, OP_LOAD, REP_I64, r, LU_NOV, LU_NOV, offsetof(PyASCIIObject, length)));
+    PyErr_Clear();
+    return 0;
+}
+
+/* seq_get(seq, i) of a tuple or a list, of any class, at an int i: the item
+   read in line, which leaves for an index out of range (the primitive
+   raises) and wherever LIST_ITEM does. */
+static lu_v
+seq_item(struct ctx *c, lu_v *args)
+{
+    if (lu_ev_learn_type(c, args[1], 1) != &PyLong_Type) {
+        return LU_EV_NONE;
     }
-    return LU_EV_NONE;
+    PyTypeObject *t = seq_kind(c, args, 0);
+    if (t == NULL) {
+        return LU_EV_NONE;
+    }
+    lu_v i = lu_ev_unbox_int(c, args[1]);
+    if (t == &PyTuple_Type) {
+        /* LIST_ITEM counts a tuple's negative index from the end. */
+        lu_v ok = lu_ev_emit(c, OP_CMP_I, REP_BIT, i, lu_ev_const_i(c, 0), LU_NOV, Py_GE);
+        lu_ev_guard(c, OP_GUARD_BIT, ok, 1);
+    }
+    lu_v r = lu_ev_emit(c, OP_LIST_ITEM, REP_OBJ, lu_ev_val(c, args[0]), i, LU_NOV, t == &PyTuple_Type);
+    I(c, r)->fs = lu_ev_exit_fs(c);
+    return lu_ev_own(c, r);
 }
 
 /* typed_get(ba, typecode, i) and typed_set(ba, typecode, i, value)
@@ -222,7 +275,10 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
         }
     }
     if (nargs == 1 && (strcmp(name, "size") == 0 || (strcmp(name, "str_len") == 0 && learned_at(c, args, 0) == &PyUnicode_Type))) {
-        return size_of(c, args[0]);
+        return size_of(c, args);
+    }
+    if (nargs == 2 && strcmp(name, "seq_get") == 0) {
+        return seq_item(c, args);
     }
     if (nargs == 2 && strcmp(name, "str_ord") == 0 && learned_at(c, args, 1) == &PyLong_Type
         && learned_at(c, args, 0) == &PyUnicode_Type) {
@@ -281,6 +337,19 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
         && PyType_Check(k1) && lu_ev_class_as_of(c, (PyTypeObject *)k0, &version)) {
         int sub = PyType_IsSubtype((PyTypeObject *)k0, (PyTypeObject *)k1);
         return lu_ev_class_relied(c, args[0], version) ? truth_const(c, sub) : LU_EV_NONE;
+    }
+    unsigned long flag = nargs == 2 && strcmp(name, "kind") == 0 ? kind_flag(k1) : 0;
+    if (flag != 0 && lu_ev_type(c, args[0]) == NULL && !LU_IS_VIRT(args[0]) && I(c, args[0])->rep == REP_OBJ
+        && lu_ev_learn_type(c, args[0], 0) == NULL) {
+        /* Of a class not known: what every class the site met was, else
+           the class's flags tested in line. */
+        if (lu_ev_learn_kind(c, args[0], 0, flag)) {
+            return lu_ev_konst(c, Py_True);
+        }
+        lu_v type = lu_ev_emit(c, OP_LOAD, REP_OBJ, lu_ev_val(c, args[0]), LU_NOV, LU_NOV, offsetof(PyObject, ob_type));
+        lu_v flags = lu_ev_emit(c, OP_LOAD, REP_I64, type, LU_NOV, LU_NOV, offsetof(PyTypeObject, tp_flags));
+        lu_v has = lu_ev_emit(c, OP_AND_I, REP_I64, flags, lu_ev_const_i(c, (int64_t)flag), LU_NOV, 0);
+        return lu_ev_bool(c, lu_ev_emit(c, OP_CMP_I, REP_BIT, has, lu_ev_const_i(c, 0), LU_NOV, Py_NE), 0);
     }
     if (nargs == 2 && strcmp(name, "kind") == 0 && k1 != NULL && PyUnicode_CheckExact(k1)
         && lu_ev_learn_type(c, args[0], 0) != NULL) {

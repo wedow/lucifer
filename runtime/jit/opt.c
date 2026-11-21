@@ -391,8 +391,8 @@ static int
 lets_borrow(const struct lu_ins *in)
 {
     switch (in->op) {
-    case OP_GUARD_TYPE: case OP_GUARD_VERSION: case OP_GUARD_IS: case OP_GUARD_BIT: case OP_GUARD_NOT_NULL:
-    case OP_CHECK_LIVE: case OP_LOAD: case OP_INCREF: case OP_UNBOX_INT: case OP_UNBOX_FLOAT:
+    case OP_GUARD_TYPE: case OP_GUARD_KIND: case OP_GUARD_VERSION: case OP_GUARD_IS: case OP_GUARD_BIT:
+    case OP_GUARD_NOT_NULL: case OP_CHECK_LIVE: case OP_LOAD: case OP_INCREF: case OP_UNBOX_INT: case OP_UNBOX_FLOAT:
     case OP_BOX_INT: case OP_BOX_FLOAT: case OP_ADD_I: case OP_SUB_I: case OP_MUL_I: case OP_NEG_I: case OP_ABS_I:
     case OP_SHL_I: case OP_SAR_I: case OP_FLOORDIV_I: case OP_MOD_I: case OP_DIV_F: case OP_SQRT_F:
     case OP_RITER_DONE: case OP_TYPED_LOAD: case OP_TYPED_STORE:
