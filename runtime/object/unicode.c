@@ -385,9 +385,35 @@ lu_str_eq(PyObject *a, PyObject *b)
         && memcmp(PyUnicode_DATA(a), PyUnicode_DATA(b), n * PyUnicode_KIND(a)) == 0;
 }
 
+/* The interned str equal to s, which is put in the table when none is: the
+   code image's, whose strs are interned without being in the table until
+   one is first asked for, or s itself, made immortal. NULL if the table
+   could not grow. The caller holds the table's lock. */
+static PyObject *
+intern_miss(PyInterpreterState *interp, PyObject *s)
+{
+    PyObject *t = lu_ns_lookup(interp->interned, s);
+    if (t != NULL) {
+        return t;
+    }
+    t = lu_image_interned(interp, s);
+    if (t != NULL) {
+        return lu_ns_insert(interp->interned, t, t) < 0 ? NULL : t;
+    }
+    s->ob_tid = 0;
+    s->ob_ref_shared = 0;
+    _Py_atomic_store_uint32_relaxed(&s->ob_ref_local, _Py_IMMORTAL_REFCNT_LOCAL);
+    if (lu_ns_insert(interp->interned, s, s) < 0) {
+        return NULL;
+    }
+    _Py_atomic_store_uint8_relaxed(&((PyASCIIObject *)s)->state.interned, SSTATE_INTERNED_IMMORTAL);
+    return s;
+}
+
 /* _PyUnicode_InternImmortal: in the free-threaded build every interned
    string is immortal. The interned table is per interpreter (FOUNDATIONS
-   2.1); a string found there replaces *p. */
+   2.1); a string found there replaces *p. A miss takes the table's lock, so
+   that threads interning equal strs at once get one object. */
 void
 lu_intern(PyInterpreterState *interp, PyObject **p)
 {
@@ -396,29 +422,18 @@ lu_intern(PyInterpreterState *interp, PyObject **p)
         return;
     }
     PyObject *t = lu_ns_lookup(interp->interned, s);
-    if (t != NULL) {
-        Py_SETREF(*p, Py_NewRef(t));
-        return;
-    }
-    /* The code image's strs are interned without being in the table: the
-       first time one is asked for, it goes in. */
-    t = lu_image_interned(interp, s);
-    if (t != NULL) {
-        if (lu_ns_insert(interp->interned, t, t) < 0) {
-            PyErr_Clear();
+    if (t == NULL) {
+        Py_BEGIN_CRITICAL_SECTION(interp->interned);
+        t = intern_miss(interp, s);
+        Py_END_CRITICAL_SECTION();
+        if (t == NULL) {
+            PyErr_Clear();      /* an uninterned string is still correct */
+            return;
         }
-        Py_SETREF(*p, t);
-        return;
     }
-    if (lu_ns_insert(interp->interned, s, s) < 0) {
-        PyErr_Clear();          /* an uninterned string is still correct */
-        return;
+    if (t != s) {
+        Py_SETREF(*p, Py_NewRef(t));
     }
-    s->ob_tid = 0;
-    s->ob_ref_shared = 0;
-    _Py_atomic_store_uint32_relaxed(&s->ob_ref_local, _Py_IMMORTAL_REFCNT_LOCAL);
-    _Py_atomic_store_uint8_relaxed(&((PyASCIIObject *)s)->state.interned,
-                                   SSTATE_INTERNED_IMMORTAL);
 }
 
 PyObject *
