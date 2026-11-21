@@ -4,10 +4,11 @@
 # Py_TPFLAGS_SEQUENCE and _MAPPING are not set here: pattern matching asks the
 # collections.abc classes instead (lib/kernel/match.py).
 # The caches and the registry map a class's id to a weak reference to it: a
-# check is one int-keyed lookup and a dereference, where a set of weak
-# references makes one and hashes it per check. An entry leaves when its class
-# dies, and a stale id never matches: the reference must name the class asked.
+# check probes by address and dereferences the result. An entry leaves when
+# its class dies, and a stale id never matches: the reference must name the
+# class asked.
 
+from _lucifer import dict_get_by_id, dict_values_snapshot, weakref_get
 from _weakref import ref as _ref
 
 _invalidation_counter = 0
@@ -38,13 +39,6 @@ class _WeakIdSet:
         self.refs = {}
         self._selfref = _ref(self)
 
-    def __contains__(self, obj):
-        ref = self.refs.get(id(obj))
-        return ref is not None and ref() is obj
-
-    def __len__(self):
-        return len(self.refs)
-
     def add(self, obj):
         key, selfref = id(obj), self._selfref
 
@@ -58,11 +52,14 @@ class _WeakIdSet:
         self.refs.clear()
 
     def refs_alive(self):
-        return {ref for ref in self.refs.values() if ref() is not None}
+        return {ref for ref in dict_values_snapshot(self.refs) if weakref_get(ref) is not None}
 
 
 def _in_weak_set(weak_set, obj):
-    return bool(weak_set) and obj in weak_set
+    if weak_set is None:
+        return False
+    ref = dict_get_by_id(weak_set.refs, obj)
+    return ref is not None and weakref_get(ref) is obj
 
 
 def _add_to_weak_set(impl, name, obj):
@@ -161,11 +158,12 @@ def _abc_subclasscheck(self, subclass, /):
         return True
     # 5. A subclass of a registered class (recursive).
     registry = impl._abc_registry
-    if registry:
+    if registry is not None and registry.refs:
         if _in_weak_set(registry, subclass):
             return True
-        for rcls in registry.refs_alive():
-            rcls = rcls()
+        # Take a weak snapshot before calling user code, which may change the registry.
+        for ref in dict_values_snapshot(registry.refs):
+            rcls = weakref_get(ref)
             if rcls is not None and issubclass(subclass, rcls):
                 _add_to_weak_set(impl, '_abc_cache', subclass)
                 return True

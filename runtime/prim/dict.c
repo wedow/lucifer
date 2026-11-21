@@ -12,6 +12,7 @@
 
 #include "prim/prim.h"
 #include "object/dict.h"
+#include <alloca.h>
 
 #define ARGS(n) do { if (nargs != (n)) { \
         lu_err_format(PyExc_TypeError, "%s() takes %d arguments", __func__ + 5, (n)); \
@@ -120,6 +121,36 @@ prim_dict_find(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     PyObject *value;
     int found = lu_dict_find_native(args[0], args[1], &value);
     return found > 0 ? value : Py_NewRef(found < 0 ? Py_NotImplemented : LU_MISSING);
+}
+
+/* Look up id(obj) in an exact-int-keyed dict without boxing the address on
+   the heap. The native probe only reads this key and never runs Python. */
+static PyObject *
+prim_dict_get_by_id(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2); DICT(0);
+    enum { DIGITS = (64 + PyLong_SHIFT - 1) / PyLong_SHIFT };
+    PyLongObject *key = alloca(sizeof(PyLongObject) + (DIGITS - 1) * sizeof(digit));
+    Py_SET_TYPE(key, &PyLong_Type);
+
+    int64_t address = (int64_t)(uintptr_t)args[1];
+    uint64_t magnitude = address < 0 ? -(uint64_t)address : (uint64_t)address;
+    size_t n = 0;
+    do {
+        key->long_value.ob_digit[n++] = magnitude & PyLong_MASK;
+        magnitude >>= PyLong_SHIFT;
+    } while (magnitude != 0);
+    key->long_value.lv_tag = (n << _PyLong_NON_SIZE_BITS) | (address < 0 ? 2 : 0);
+
+    PyObject *value;
+    return lu_dict_find_native(args[0], (PyObject *)key, &value) > 0 ? value : Py_NewRef(Py_None);
+}
+
+static PyObject *
+prim_dict_values_snapshot(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1); DICT(0);
+    return PyDict_Values(args[0]);
 }
 
 /* dict_put(d, key, value) -> True when stored, NotImplemented as dict_find. */
@@ -530,6 +561,7 @@ lu_dict_views_init(void)
 #define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_dict_methods[] = {
     FAST(dict_new), FAST(dict_probe), FAST(dict_find), FAST(dict_put), FAST(dict_key), FAST(dict_value), FAST(dict_entry),
+    FAST(dict_get_by_id), FAST(dict_values_snapshot),
     FAST(native_hash),
     FAST(dict_stamp), FAST(dict_insert), FAST(dict_replace), FAST(dict_remove), FAST(dict_popitem),
     FAST(dict_clear), FAST(dict_next), FAST(dict_prev), PURE(dict_keys_id), FAST(dict_copy),
