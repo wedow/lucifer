@@ -118,6 +118,8 @@ struct ctx {
     struct gctx *g;
     struct ctx *parent;
     int depth;
+    int spent;                  /* what the unit had spent of its budget when this call went in line; 0 for the
+                                   root and a generator resumed in line, counted from the unit's start */
     PyCodeObject *code;
     PyFunctionObject *func;     /* NULL for the root when its function is not a function */
     lu_v funcv;                 /* an inlined frame's function as a value, where the call knew it by its code

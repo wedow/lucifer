@@ -21,6 +21,9 @@ require that a count of the tier's does not grow with the iterations:
   large  tests/kernel/jit_large_callees.py, whose hot call is of a function
          too large to inline whole but small along the path the program
          runs: entries into compiled code, direct and compiled calls.
+  recursive tests/kernel/jit_recursive_budget.py, whose recursive descent
+         keeps room for the calls that finish each level. One outlined
+         recursive call per descent, with one descent per eight iterations.
   turns  tests/kernel/jit_gen_turns.py, whose hot generator a C consumer
          resumes, each turn calling a function its unit's budget left out:
          direct calls past the consumer's one step a turn. The call is in
@@ -238,6 +241,7 @@ GROWTH = {
     'exits': ('jit_exits.py', r'jit: entries .* side (\d+)', 0),
     'calls': ('jit_calls.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'large': ('jit_large_callees.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
+    'recursive': ('jit_recursive_budget.py', r'compiled calls (\d+)', 1 / 8),
     'turns': ('jit_gen_turns.py', r'direct calls (\d+)', 1),
     'quiet': ('jit_quiet_misses.py', r'jit: entries .* error (\d+)', 0),
     'raised': ('jit_raised.py', r'jit: entries .* side (\d+) error (\d+) frame', 0),

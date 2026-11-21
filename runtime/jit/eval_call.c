@@ -167,15 +167,21 @@ note_key(uint64_t **keys, int *n, int *cap, uint64_t key)
     (*keys)[(*n)++] = key;
 }
 
+/* What the unit has spent of its budget. An inlined frame's entry and
+   return each cost an instruction once (the recursion count, kept now only
+   across calls): the budget, tuned with them, still charges them. */
+static int
+spent(struct gctx *g)
+{
+    return g->f->nins + 2 * g->f->ninlined;
+}
+
 int
 lu_ev_room(struct ctx *c, int again)
 {
     struct lu_func *f = c->g->f;
     c->g->hot_room = 0;
-    /* An inlined frame's entry and return each cost an instruction once
-       (the recursion count, kept now only across calls): the budget, tuned
-       with them, still charges them. */
-    if (f->nins + 2 * f->ninlined <= c->g->budget) {
+    if (spent(c->g) <= c->g->budget) {
         return 1;
     }
     uint64_t key = lu_jit_site_key(c->code, c->pc, c->parent != NULL ? c->parent->code : NULL,
@@ -214,7 +220,7 @@ lu_ev_room_begin(struct ctx *c)
         return 0;
     }
     note_key(&g->f->hots, &g->f->nhots, &g->f->caphots, key);
-    int room = g->f->nins + 2 * g->f->ninlined + g->f->budget - g->budget;
+    int room = spent(g) + g->f->budget - g->budget;
     g->budget += room;
     return room;
 }
@@ -255,6 +261,17 @@ not_inlinable(struct ctx *c, PyFunctionObject *fn, lu_v funcv)
     }
     if (!lu_ev_room(c, again)) {
         return "over budget";
+    }
+    /* A function's copy of itself costs about what its active frame has
+       spent so far, and the calls after it in both frames still need room:
+       it goes out of line when the budget cannot hold that again, and the
+       call enters the function's own unit. A call out of line within a
+       cycle of several functions makes each a root of its own, built again
+       with the rest of the cycle in line, so a cycle's copy keeps to the
+       budget alone. Kernel dispatchers specialize a second time for the new
+       operands. */
+    if (c->code == co && !kernel && 2 * spent(c->g) - c->spent > c->g->budget) {
+        return "over budget for a recursive copy";
     }
     if (!lu_ev_supported(c->g, co)) {
         return "an instruction the evaluator lacks";
@@ -470,6 +487,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, lu_v *args, int npo
     k->g = g;
     k->parent = c;
     k->depth = c->depth + 1;
+    k->spent = spent(g);
     k->code = co;
     k->func = fn;
     k->funcv = funcv;
