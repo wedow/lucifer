@@ -348,7 +348,7 @@ def qualnames(program):
 # (entries by shape for calls that are not inlined, handlers and generators
 # inside a unit, polymorphic sites). Their programs' output is still checked.
 NOT_BUILT = frozenset("""calls raised caught shapes classes objects
-iterators forward slices guards gens order""".split())
+iterators slices guards gens order""".split())
 
 
 def check_growth(args, lane):

@@ -962,6 +962,50 @@ lu_ev_call_kw(struct ctx *c)
                        n + 3, 0);
 }
 
+/* CALL_FUNCTION_EX whose star argument is an exact tuple, whole or after
+   leading items (a tuple or a VK_SPLICE that does not exist), and whose
+   keywords are none or an exact dict (DICT_MERGE leaves the caller's
+   own, eval_ops.c): one call that takes the items and entries as they
+   are (h_call_spread). 0 when the operands are not of that shape. */
+static int
+call_spread(struct ctx *c, lu_v callable, lu_v star, lu_v kw)
+{
+    lu_v args[MAX_ARGS + 4], real;
+    int lead = 0;
+    if (kw != LU_NOV && (LU_IS_VIRT(kw) || lu_ev_type(c, kw) != &PyDict_Type)) {
+        return 0;
+    }
+    struct lu_vobj *so = LU_IS_VIRT(star) ? lu_ev_virt(c->g, &c->g->st, star, &real) : NULL;
+    if (so != NULL && real == LU_NOV && so->kind == VK_SPLICE && so->type == &PyTuple_Type && so->n <= MAX_ARGS) {
+        lead = so->n - 1;
+        memcpy(args + 3, so->f, sizeof(lu_v) * (size_t)lead);
+        args[1] = so->f[lead];
+    }
+    else if (so != NULL && real == LU_NOV && so->kind == VK_TUPLE && so->n <= MAX_ARGS) {
+        lead = so->n;
+        memcpy(args + 3, so->f, sizeof(lu_v) * (size_t)lead);
+        args[1] = lu_ev_konst(c, (PyObject *)&_PyRuntime.singletons.empty_tuple);
+    }
+    else if (so == NULL && lu_ev_type(c, star) == &PyTuple_Type) {
+        args[1] = star;
+    }
+    else if (so == NULL && lu_ev_type(c, star) == NULL && !nospec(c, c->pc)) {
+        lu_ev_guard_type(c, star, &PyTuple_Type);
+        args[1] = star;
+    }
+    else {
+        return 0;
+    }
+    args[0] = callable;
+    args[2] = kw != LU_NOV ? kw : lu_ev_konst(c, Py_None);
+    lu_v w = lu_ev_helper(c, H_call_spread, 3 + lead, args, 4);
+    for (int i = 0; i < 4; i++) {
+        lu_ev_pop(c);
+    }
+    lu_ev_push(c, w);
+    return 1;
+}
+
 int
 lu_ev_call_ex(struct ctx *c)
 {
@@ -998,6 +1042,9 @@ lu_ev_call_ex(struct ctx *c)
         }
     }
     if (n < 0 || !plain) {
+        if (call_spread(c, callable, star, kw)) {
+            return 0;
+        }
         lu_v args[3] = { callable, star, kw };
         lu_v w = lu_ev_helper(c, H_call_ex, 3, args, 4);
         for (int i = 0; i < 4; i++) {

@@ -274,6 +274,14 @@ lu_ev_val(struct ctx *c, lu_v r)
     case VK_GEN:
         v = lu_ev_gen_real(c, o);
         break;
+    case VK_SPLICE: {
+        lu_v *args = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)(o->n + 1));
+        args[0] = lu_ev_konst(c, (PyObject *)o->type);
+        memcpy(args + 1, o->f, sizeof(lu_v) * (size_t)o->n);
+        v = lu_ev_helper(c, H_splice, o->n + 1, args, 0);
+        lu_ev_def_type(c, v, o->type);
+        break;
+    }
     case VK_SEQITER: {
         lu_v fields[2] = { o->f[0], o->f[1] };
         v = lu_ev_helper(c, o->type == &PyListIter_Type ? H_listiter_new : H_tupleiter_new, 2, fields, 0);

@@ -190,6 +190,8 @@ enum lu_vkind {
                                    GEN_RUNNING while a frame of the state is its frame, and holds what it
                                    holds); f[GEN_DEPTH] its stack's depth there, an i64; then its frame's
                                    locals and its stack's room, nothing where a slot holds nothing */
+    VK_SPLICE,                  /* type: an exact list or tuple; f[i] its items, the last an exact tuple whose
+                                   items follow (a call's f(a, *args), CALL_FUNCTION_EX's operand) */
     VK_KINDS
 };
 
@@ -200,7 +202,8 @@ enum { GEN_FUNCV, GEN_FN, GEN_PC, GEN_DEPTH, GEN_SLOTS };
 /* Kinds whose object may change once it exists: a record of one says
    nothing after that. */
 #define LU_VKIND_MUTABLE(kind) \
-    ((kind) == VK_SEQITER || (kind) == VK_DICT || (kind) == VK_LIST || (kind) == VK_FIELDS || (kind) == VK_INST || (kind) == VK_GEN)
+    ((kind) == VK_SEQITER || (kind) == VK_DICT || (kind) == VK_LIST || (kind) == VK_FIELDS || (kind) == VK_INST || (kind) == VK_GEN \
+     || (kind) == VK_SPLICE)
 
 struct lu_vobj {
     uint8_t kind;               /* enum lu_vkind */

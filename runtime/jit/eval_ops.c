@@ -65,6 +65,16 @@ joined(struct ctx *c, int kind, PyTypeObject *type, const lu_v *a, int n, const 
     return r;
 }
 
+/* Whether the instruction after the current one is `base` (with `oparg`
+   unless that is -1). */
+static int
+next_is(struct ctx *c, int base, int oparg)
+{
+    int b, a, op;
+    lu_ev_decode(c, c->next, &b, &a, &op);
+    return b == base && (oparg < 0 || a == oparg);
+}
+
 static void
 pop_n(struct ctx *c, int n)
 {
@@ -588,6 +598,17 @@ lu_ev_instruction(struct ctx *c)
             lu_ev_pop(c);
             return 0;
         }
+        PyTypeObject *st = lu_ev_type(c, src);
+        if (lo != NULL && !LU_IS_VIRT(src) && (st == NULL || st == &PyTuple_Type) && lo->n < MAX_OPERANDS && !nospec(c, c->pc)
+            && next_is(c, CALL_INTRINSIC_1, INTRINSIC_LIST_TO_TUPLE)) {
+            /* A call's f(a, *args): the list, and the tuple made of it, wait
+               for the call, which takes the tuple's items as they are. */
+            lu_ev_guard_type(c, src, &PyTuple_Type);
+            joined(c, VK_SPLICE, &PyList_Type, lo->f, lo->n, &src, 1, &o);
+            lu_ev_bind(c->g, &c->g->st, LU_VIRT_ID(list), LU_NOV, o);
+            lu_ev_pop(c);
+            return 0;
+        }
         lu_v args[2] = { lu_ev_peek(c, oparg + 1), lu_ev_peek(c, 1) };
         lu_ev_helper(c, H_list_extend, 2, args, 1);
         lu_ev_pop(c);
@@ -616,6 +637,17 @@ lu_ev_instruction(struct ctx *c)
             lu_ev_pop(c);
             return 0;
         }
+        PyTypeObject *ut = lu_ev_type(c, update);
+        if (oparg == 1 && d != NULL && d->n == 0 && !LU_IS_VIRT(update) && (ut == NULL || ut == &PyDict_Type) && !nospec(c, c->pc)
+            && next_is(c, CALL_FUNCTION_EX, -1)) {
+            /* The keywords of a call of f(..., **kw) alone: the call reads
+               them from kw itself, as it would from the copy, which nothing
+               can see before it does. */
+            lu_ev_guard_type(c, update, &PyDict_Type);
+            pop_n(c, 2);
+            lu_ev_push(c, update);
+            return 0;
+        }
         lu_v args[3] = { lu_ev_peek(c, oparg + 4), lu_ev_peek(c, oparg + 1), lu_ev_peek(c, 1) };
         lu_ev_helper(c, H_dict_merge, 3, args, 1);
         lu_ev_pop(c);
@@ -624,6 +656,14 @@ lu_ev_instruction(struct ctx *c)
     case CALL_INTRINSIC_1:
         if (oparg != INTRINSIC_LIST_TO_TUPLE) {
             lu_ev_side_exit(c, EXIT_SIDE);
+            return 0;
+        }
+        struct lu_vobj *spliced = unmade(c, lu_ev_peek(c, 1), VK_SPLICE);
+        if (spliced != NULL && spliced->type == &PyList_Type) {
+            struct lu_vobj *o;
+            w = joined(c, VK_SPLICE, &PyTuple_Type, spliced->f, spliced->n, NULL, 0, &o);
+            lu_ev_pop(c);
+            lu_ev_push(c, w);
             return 0;
         }
         if (unmade(c, lu_ev_peek(c, 1), VK_LIST) != NULL) {

@@ -208,6 +208,18 @@ object(struct maker *m, int k)
             PyList_SET_ITEM(o, i, take(m, fields[i]));
         }
         break;
+    case VK_SPLICE: {
+        PyObject *items[ob->nfields + 1];
+        int n = 0;
+        while (n < ob->nfields && (items[n] = take(m, fields[n])) != NULL) {
+            n++;
+        }
+        o = n == ob->nfields ? lu_splice(ob->type, items, n) : NULL;
+        while (n > 0) {
+            Py_DECREF(items[--n]);
+        }
+        break;
+    }
     case VK_DICT:
         o = PyDict_New();
         for (int i = 0; o != NULL && i + 1 < ob->nfields; i += 2) {

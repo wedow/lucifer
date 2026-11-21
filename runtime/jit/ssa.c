@@ -243,7 +243,7 @@ lu_alloc_kind(const struct lu_ins *in)
     switch (in->imm) {
     case H_box_int: return ALLOC_int;
     case H_box_float: return ALLOC_float;
-    case H_build_tuple: case H_list_to_tuple: return ALLOC_tuple;
+    case H_build_tuple: case H_list_to_tuple: case H_splice: return ALLOC_tuple;
     case H_build_list: case H_list_repeat: return ALLOC_list;
     case H_new_dict: case H_build_map: return ALLOC_dict;
     case H_build_set: return ALLOC_set;
@@ -421,7 +421,7 @@ lu_ir_free(struct lu_func *f)
 static void
 dump_ref(struct lu_func *f, struct lu_fs *fs, lu_v r, FILE *out)
 {
-    static const char *const vkind_names[VK_KINDS] = { "int", "float", "bool", "tuple", "iter", "dict", "list", "method", "fields", "inst", "exc", "gen" };
+    static const char *const vkind_names[VK_KINDS] = { "int", "float", "bool", "tuple", "iter", "dict", "list", "method", "fields", "inst", "exc", "gen", "splice" };
     if (!LU_IS_VIRT(r)) {
         fprintf(out, " v%d", r);
         return;

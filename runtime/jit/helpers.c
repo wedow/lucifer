@@ -1082,9 +1082,10 @@ call_generic(PyObject *callable, PyObject *const *args, size_t nargs, PyObject *
     return polled(t, r);
 }
 
-/* argv: the callable, self or NULL, then the arguments. */
+/* argv: the callable, self or NULL, then the arguments; `takes` as
+   call_function's, by argv index. */
 static PyObject *
-h_call(PyObject **argv, intptr_t n)
+call_argv(PyObject **argv, intptr_t n, uint64_t takes)
 {
     if (declines(argv[0])) {
         return LU_JIT_DECLINED;
@@ -1094,7 +1095,6 @@ h_call(PyObject **argv, intptr_t n)
     PyObject *const *args = argv[1] != NULL ? argv + 1 : argv + 2;
     size_t nargs = (size_t)(argv[1] != NULL ? n - 1 : n - 2);
     PyObject *target, *self, *r = NULL;
-    uint64_t takes = taken_args(t);
     if (callable == (PyObject *)&PyType_Type && nargs == 1) {
         return Py_NewRef((PyObject *)Py_TYPE(args[0]));         /* type(x), as the interpreter's CALL answers it */
     }
@@ -1142,6 +1142,12 @@ called:
     return polled(t, r);
 }
 
+static PyObject *
+h_call(PyObject **argv, intptr_t n)
+{
+    return call_argv(argv, n, taken_args(lu_current_task()));
+}
+
 /* A primitive that may run Python, as h_call makes the call with less
    in the way: argv[0] is the primitive, then its arguments. */
 static PyObject *
@@ -1185,7 +1191,7 @@ h_super_attr(PyObject *gsuper, PyObject *cls, PyObject *self, PyObject *name, in
 /* CALL_KW: argv as h_call's, then the keyword names. A Python function,
    or a bound method of one, is called as h_call calls it. */
 static PyObject *
-h_call_kw(PyObject **argv, intptr_t n)
+call_kw_argv(PyObject **argv, intptr_t n, uint64_t takes)
 {
     if (declines(argv[0])) {
         return LU_JIT_DECLINED;
@@ -1202,15 +1208,21 @@ h_call_kw(PyObject **argv, intptr_t n)
     }
     PyObject *r;
     if ((PyObject *)func == callable) {
-        r = call_function(t, func, args, (Py_ssize_t)nargs, kwnames, taken_args(t) >> (args - argv));
+        r = call_function(t, func, args, (Py_ssize_t)nargs, kwnames, takes >> (args - argv));
     }
     else {
         /* A bound method: its self goes in the free word before the arguments. */
         argv[1] = PyMethod_GET_SELF(callable);
-        r = call_function(t, func, argv + 1, (Py_ssize_t)nargs + 1, kwnames, taken_args(t) >> 1);
+        r = call_function(t, func, argv + 1, (Py_ssize_t)nargs + 1, kwnames, takes >> 1);
         argv[1] = NULL;
     }
     return polled(t, r);
+}
+
+static PyObject *
+h_call_kw(PyObject **argv, intptr_t n)
+{
+    return call_kw_argv(argv, n, taken_args(lu_current_task()));
 }
 
 /* CALL_FUNCTION_EX: callable(*callargs, **kwargs), kwargs NULL without. */
@@ -1232,6 +1244,104 @@ h_call_ex(PyObject *callable, PyObject *callargs, PyObject *kwargs)
         }
         Py_XDECREF(kwnames);
         PyMem_Free(args - 1);
+    }
+    return r;
+}
+
+/* A VK_SPLICE made: a list or tuple (type) of items[0..n-1), then the
+   items of the exact tuple items[n-1]. */
+PyObject *
+lu_splice(PyTypeObject *type, PyObject *const *items, intptr_t n)
+{
+    PyObject *tail = items[n - 1];
+    Py_ssize_t lead = n - 1, size = lead + PyTuple_GET_SIZE(tail);
+    PyObject *o = type == &PyList_Type ? PyList_New(size) : PyTuple_New(size);
+    for (Py_ssize_t i = 0; o != NULL && i < size; i++) {
+        PyObject *v = Py_NewRef(i < lead ? items[i] : PyTuple_GET_ITEM(tail, i - lead));
+        if (type == &PyList_Type) {
+            PyList_SET_ITEM(o, i, v);
+        }
+        else {
+            PyTuple_SET_ITEM(o, i, v);
+        }
+    }
+    return o;
+}
+
+static PyObject *
+h_splice(PyObject **argv, intptr_t n)
+{
+    return lu_splice((PyTypeObject *)argv[0], argv + 1, n - 1);
+}
+
+/* CALL_FUNCTION_EX of callable(lead..., *star, **kw), where the star
+   argument is an exact tuple and the keywords an exact dict, or None for
+   none: argv is the callable, star, kw, then the leading arguments. The
+   call takes the tuple's items and the dict's entries as they are, as
+   CALL_FUNCTION_EX would unpack the tuple and dict it makes of them. */
+static PyObject *
+h_call_spread(PyObject **argv, intptr_t n)
+{
+    PyObject *star = argv[1], *kw = argv[2] != Py_None ? argv[2] : NULL;
+    intptr_t lead = n - 3, nstar = PyTuple_GET_SIZE(star);
+    /* As h_call's argv: the callable, a free word, the arguments, then
+       the keyword names when there are keywords. */
+    intptr_t m = 2 + lead + nstar;
+    PyObject *few[16], **all = few, *kwnames = NULL, *r = NULL;
+    Py_ssize_t nkw = 0;
+    if (kw != NULL) {
+        Py_BEGIN_CRITICAL_SECTION(kw);
+        nkw = PyDict_GET_SIZE(kw);
+        if (nkw > 0 && !lu_dict_str_keys(kw)) {
+            Py_ssize_t pos = 0;
+            PyObject *key, *value;
+            while (nkw >= 0 && lu_ns_next(kw, &pos, &key, &value)) {
+                if (!PyUnicode_Check(key)) {
+                    PyErr_SetString(PyExc_TypeError, "keywords must be strings");
+                    nkw = -1;
+                }
+            }
+        }
+        if (nkw > 0) {
+            kwnames = PyTuple_New(nkw);
+            all = m + nkw + 1 <= 16 ? few : PyMem_Malloc(sizeof(PyObject *) * (size_t)(m + nkw + 1));
+            if (kwnames == NULL || all == NULL) {
+                nkw = -1;
+            }
+            Py_ssize_t pos = 0, i = 0;
+            PyObject *key, *value;
+            while (nkw > 0 && lu_ns_next(kw, &pos, &key, &value)) {
+                PyTuple_SET_ITEM(kwnames, i, Py_NewRef(key));
+                all[m + i++] = Py_NewRef(value);        /* the dict may change while the call runs */
+            }
+        }
+        Py_END_CRITICAL_SECTION();
+    }
+    if (nkw < 0 || (nkw == 0 && m > 16 && (all = PyMem_Malloc(sizeof(PyObject *) * (size_t)m)) == NULL)) {
+        if (all == NULL) {
+            PyErr_NoMemory();
+        }
+        goto done;
+    }
+    all[0] = argv[0];
+    all[1] = NULL;
+    memcpy(all + 2, argv + 3, sizeof(PyObject *) * (size_t)lead);
+    /* The tuple holds its items while the call runs: they are borrowed. */
+    memcpy(all + 2 + lead, ((PyTupleObject *)star)->ob_item, sizeof(PyObject *) * (size_t)nstar);
+    if (nkw > 0) {
+        all[m + nkw] = kwnames;
+        r = call_kw_argv(all, m + nkw + 1, 0);
+        for (Py_ssize_t i = 0; i < nkw; i++) {
+            Py_DECREF(all[m + i]);
+        }
+    }
+    else {
+        r = call_argv(all, m, 0);
+    }
+done:
+    Py_XDECREF(kwnames);
+    if (all != few && all != NULL) {
+        PyMem_Free(all);
     }
     return r;
 }
@@ -1560,6 +1670,8 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_store_slice] = { (void *)h_store_slice, "store_slice", REP_BIT, FX_RAISE | FX_PY, 4 },
     [H_call_kw] = { (void *)h_call_kw, "call_kw", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
     [H_call_ex] = { (void *)h_call_ex, "call_ex", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 3 },
+    [H_call_spread] = { (void *)h_call_spread, "call_spread", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
+    [H_splice] = { (void *)h_splice, "splice", REP_OBJ, FX_RAISE, 0 },
     [H_dict_merge] = { (void *)h_dict_merge, "dict_merge", REP_BIT, FX_RAISE | FX_PY, 3 },
     [H_dict_update] = { (void *)h_dict_update, "dict_update", REP_BIT, FX_RAISE | FX_PY, 2 },
     [H_push_exc_info] = { (void *)h_push_exc_info, "push_exc_info", REP_OBJ, 0, 1 },

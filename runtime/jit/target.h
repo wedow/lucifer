@@ -412,6 +412,8 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(store_slice) \
     X(call_kw) \
     X(call_ex) \
+    X(call_spread) \
+    X(splice) \
     X(dict_merge) \
     X(dict_update) \
     X(push_exc_info) \
@@ -433,6 +435,7 @@ enum lu_helper_id {
     H_COUNT
 };
 extern const struct lu_helper lu_helpers[H_COUNT];
+PyObject *lu_splice(PyTypeObject *type, PyObject *const *items, intptr_t n);
 
 /* Whether a walker may see the frames during the instruction's call to
    C: it may run Python, release a value whose type runs code, or park the

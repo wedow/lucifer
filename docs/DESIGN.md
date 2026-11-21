@@ -762,12 +762,12 @@ Block SSA in C, ported from the donor's backend (`docs/vm/optimizer-backend-DESI
    binding that would raise declines, so that the slow way raises it. A
    function borrows the parameters it never rebinds from its caller.
    `f(a, *args, **kwargs)` compiles as one call that passes the star
-   tuple's items and the keyword dict on as they are, without the list,
-   tuple and dict CALL_FUNCTION_EX makes: an exception from the call is
-   CALL_FUNCTION_EX's, and a declined call leaves from the sequence's
-   first instruction, where nothing is made yet. It declines what would
-   need more (a star argument that is not an exact tuple, keys that are
-   not strs).
+   tuple's items and the keyword dict's entries on as they are, without
+   the list, tuple and dict CALL_FUNCTION_EX makes: the list and tuple of
+   `a` and `args` stay virtual (VK_SPLICE), made only by an exit, and the
+   keywords are read from the caller's dict itself, which nothing can see
+   before the call does. A star argument that is not an exact tuple, or
+   keywords that are not an exact dict, take the slow way.
 8. **Publication and invalidation.** Code is published by a ticket-checked
    atomic store into the code object's private tail. Patching running code
    waits for a measured need. Compiled code keeps facts between polls, under
