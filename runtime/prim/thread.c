@@ -6,6 +6,7 @@
 #include "thread/lock.h"
 #include "interp/exceptions.h"
 
+#include <errno.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -159,6 +160,48 @@ prim_rlock_release(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLongLong(n);
 }
 
+/* os_fork(lock): fork() holding `lock`, the import lock, once more across
+   it, as CPython's PyOS_BeforeFork and PyOS_AfterFork_*: the pid in the
+   parent, 0 in the child (runtime/thread/fork.c). The wait for the lock is
+   not interrupted, and taking it, forking and giving it back are one
+   primitive call, so no signal handler runs while fork holds it. The
+   child's lock keeps only its own holds: the threads waiting on it are
+   gone. */
+static PyObject *
+prim_os_fork(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    struct mutex *mutex = mutex_of(args[0]);
+    if (mutex == NULL) {
+        return NULL;
+    }
+    long long held = mine(mutex);
+    if (held == 0) {
+        _PyMutex_LockTimed(&mutex->lock, -1, _PY_LOCK_DETACH);
+        __atomic_store_n(&mutex->owner, me(), __ATOMIC_RELAXED);
+    }
+    mutex->count = held + 1;
+    int err = 0;
+    long pid = lu_fork();
+    if (pid < 0) {
+        err = errno;
+    }
+    if (pid == 0) {
+        *mutex = (struct mutex){ .lock = { held > 0 ? _Py_LOCKED : 0 }, .owner = held > 0 ? me() : 0, .count = held };
+    }
+    else if (held > 0) {
+        mutex->count = held;
+    }
+    else {
+        unlock(mutex);
+    }
+    if (pid < 0) {
+        errno = err;
+        return PyErr_SetFromErrno(PyExc_OSError);
+    }
+    return PyLong_FromLong(pid);
+}
+
 static PyObject *
 prim_mutex_locked(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -284,7 +327,7 @@ prim_thread_dict(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 #define FAST(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL, NULL }
 PyMethodDef lu_prim_thread_methods[] = {
     FAST(mutex_new), FAST(mutex_acquire), FAST(mutex_release), FAST(mutex_locked), FAST(mutex_mine),
-    FAST(mutex_state), FAST(rlock_acquire), FAST(rlock_release),
+    FAST(mutex_state), FAST(rlock_acquire), FAST(rlock_release), FAST(os_fork),
     FAST(thread_ident), FAST(thread_native_id), FAST(thread_start), FAST(main_thread_ident),
     FAST(thread_dict),
     { NULL, NULL, 0, NULL },

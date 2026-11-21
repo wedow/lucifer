@@ -1993,22 +1993,6 @@ prim_os_pthread_kill(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(Py_None);
 }
 
-/* fork(): the pid in the parent, 0 in the child (runtime/thread/fork.c). */
-static PyObject *
-prim_os_fork(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
-{
-    if (nargs != 0) {
-        lu_err_format(PyExc_TypeError, "fork() takes no arguments");
-        return NULL;
-    }
-    long pid = lu_fork();
-    if (pid < 0) {
-        set_oserror(errno, NULL);
-        return NULL;
-    }
-    return PyLong_FromLong(pid);
-}
-
 /* The Python threads in this process that the runtime did not start: the OS's count of the
    threads, less the second scheduler carrier. */
 static PyObject *
@@ -2418,7 +2402,6 @@ PyMethodDef lu_prim_os_methods[] = {
     { "os_getaddrinfo", (PyCFunction)(void (*)(void))prim_os_getaddrinfo, METH_FASTCALL, NULL },
     { "os_flock", (PyCFunction)(void (*)(void))prim_os_flock, METH_FASTCALL, NULL },
     { "os_lockf", (PyCFunction)(void (*)(void))prim_os_lockf, METH_FASTCALL, NULL },
-    { "os_fork", (PyCFunction)(void (*)(void))prim_os_fork, METH_FASTCALL, NULL },
     { "os_thread_count", (PyCFunction)(void (*)(void))prim_os_thread_count, METH_FASTCALL, NULL },
     { "locale_encoding", (PyCFunction)(void (*)(void))prim_os_locale_encoding, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },

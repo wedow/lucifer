@@ -520,20 +520,12 @@ Return 0 to child process and PID of child to parent process."""
         raise PythonFinalizationError("can't fork at interpreter shutdown")
     sys.audit('os.fork')
     _run_at_fork('before')
-    _imp.acquire_lock()
-    held = _imp._lock_depth() - 1       # exclude fork's own acquisition
-    try:
-        pid = _lucifer.os_fork()
-    except BaseException:
-        _imp.release_lock()
-        raise
+    pid = _lucifer.os_fork(_imp._lock)
     if pid == 0:
-        _imp._reinit_lock(held)
         _thread._after_fork()
         _run_at_fork('after_in_child')
         return 0
     threads = _lucifer.os_thread_count()
-    _imp.release_lock()
     _run_at_fork('after_in_parent')
     if threads > 1:
         import warnings

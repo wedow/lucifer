@@ -31,18 +31,6 @@ On platforms without threads, this function does nothing."""
         raise RuntimeError('not holding the import lock')
 
 
-def _lock_depth():
-    return _lucifer.mutex_mine(_lock)
-
-
-def _reinit_lock(held):
-    """After a fork: the import lock is a new one, held by the surviving thread `held` times."""
-    global _lock
-    _lock = _lucifer.mutex_new()
-    if held:
-        _lucifer.rlock_acquire(_lock, -1, held)
-
-
 def lock_held():
     """Return True if the import lock is currently held, else False.
 
