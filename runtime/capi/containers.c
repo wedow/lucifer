@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+extern void _PyErr_FormatNote(const char *format, ...);
+
 static PyObject *
 call_method(PyObject *self, const char *name, const char *format, ...)
 {
@@ -232,8 +234,11 @@ PyDict_MergeFromSeq2(PyObject *d, PyObject *seq2, int override)
     }
     int status = 0;
     for (Py_ssize_t i = 0; status == 0 && (item = PyIter_Next(it)) != NULL; i++) {
-        PyObject *fast = PySequence_Fast(item, "cannot convert dictionary update sequence element to a sequence");
+        PyObject *fast = PySequence_Fast(item, "object is not iterable");
         if (fast == NULL) {
+            if (PyErr_ExceptionMatches(PyExc_TypeError)) {
+                _PyErr_FormatNote("Cannot convert dictionary update sequence element #%zd to a sequence", i);
+            }
             status = -1;
         }
         else if (PySequence_Fast_GET_SIZE(fast) != 2) {

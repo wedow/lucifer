@@ -179,7 +179,7 @@ _PyErr_FormatNote(const char *format, ...)
     va_start(ap, format);
     PyObject *note = PyUnicode_FromFormatV(format, ap);
     va_end(ap);
-    PyObject *r = note == NULL ? NULL : PyObject_CallMethod(exc, "add_note", "O", note);
+    PyObject *r = note == NULL ? NULL : PyObject_CallMethod(PyExc_BaseException, "add_note", "OO", exc, note);
     Py_XDECREF(note);
     if (r == NULL) {
         _PyErr_ChainExceptions1(exc);

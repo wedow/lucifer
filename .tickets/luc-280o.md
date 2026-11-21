@@ -1,6 +1,6 @@
 ---
 id: luc-280o
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T02:46:58Z
@@ -41,3 +41,9 @@ TypeError object is not iterable
 ```
 
 
+
+## Notes
+
+**2026-11-21T06:55:36Z**
+
+CPython 3.14t puts the failing pair index in a TypeError note. PyDict_MergeFromSeq2 used the older text as the exception message and omitted the note. It now uses the same sequence-conversion message as CPython and appends the indexed note through BaseException.add_note. The regression reproduced both differences before the fix and passes with dict_ops, err_dict_update_seq, and exceptions in plain, jit, and jit-deopt. The ABI audit passed.
