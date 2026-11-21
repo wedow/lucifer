@@ -345,14 +345,20 @@ cmp32_ri8(struct asm_ *a, int r, int imm)
     b1(a, imm);
 }
 
-/* cmp qword/dword [base+disp], imm32 */
+/* op qword/dword [base+disp], imm32 */
 static void
-cmp_mi(struct asm_ *a, int w, int base, int32_t disp, int32_t imm)
+alu_mi(struct asm_ *a, int w, int alu, int base, int32_t disp, int32_t imm)
 {
     rex(a, w, 0, 0, base);
     b1(a, 0x81);
-    modrm_mem(a, ALU_CMP, base, disp);
+    modrm_mem(a, alu, base, disp);
     b4(a, imm);
+}
+
+static void
+cmp_mi(struct asm_ *a, int w, int base, int32_t disp, int32_t imm)
+{
+    alu_mi(a, w, ALU_CMP, base, disp, imm);
 }
 
 /* cmp byte [base+disp], imm8 and mov byte [base+disp], imm8 */
@@ -1533,17 +1539,17 @@ takes_of(struct asm_ *a, struct lu_ins *in, const struct hold *h, int nh)
 static void
 depth_add(struct asm_ *a, int32_t n)
 {
-    rex(a, 0, 0, 0, R14);
-    b1(a, 0x81);
-    modrm_mem(a, ALU_ADD, R14, offsetof(PyThreadState, py_recursion_remaining));
-    b4(a, n);                                   /* add dword [r14+remaining], n */
+    alu_mi(a, 0, ALU_ADD, R14, offsetof(PyThreadState, py_recursion_remaining), n);
 }
 
 static void
 publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
 {
     struct lu_fs *fs = in->fs;
-    a->inlined = d->nframes - 1;
+    a->inlined = 0;
+    for (struct lu_fs *p = fs; p->caller != NULL; p = p->caller) {
+        a->inlined += !lu_frame_is_kernel(p->code);        /* kernel frames count against no limit while inlined */
+    }
     if (a->inlined > 0) {
         depth_add(a, -a->inlined);
     }
@@ -1648,6 +1654,19 @@ direct_done(struct asm_ *a, uint64_t takes, int done)
     jcc(a, CC_E, alone);
     call_abs(a, (void *)lu_frame_retire);      /* a frame object only the record holds goes with it */
     bind(a, alone);
+    /* lu_depth_leave, for the callee's code. */
+    int user = new_label(a), left = new_label(a);
+    load(a, RDX, RBP, CALL_AT(frame));
+    load(a, RDX, RDX, offsetof(struct lu_frame, code));
+    load32(a, R11, RDX, offsetof(PyCodeObject, co_flags));
+    alu_ri(a, ALU_AND, R11, LU_CO_KERNEL | LU_CO_HIDDEN);
+    jcc(a, CC_E, user);
+    load32(a, R11, RDX, offsetof(PyCodeObject, co_framesize));
+    op_rm(a, 1, 0x01, R11, R14, offsetof(struct lu_task, kernel_room));     /* add [r14+kernel_room], r11 */
+    jmp(a, left);
+    bind(a, user);
+    incdec32(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));
+    bind(a, left);
     /* The function and the code: the caller holds the function, and the
        code is released here, outside the callee's unit, which its last
        reference frees. */
@@ -1659,7 +1678,6 @@ direct_done(struct asm_ *a, uint64_t takes, int done)
     }
     load(a, RDX, RBP, CALL_AT(frame));
     store(a, R14, offsetof(PyThreadState, datastack_top), RDX);
-    incdec32(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));
     takes_back(a, takes);
     load(a, RAX, RSP, 0);
     jmp(a, done);
@@ -4006,9 +4024,15 @@ direct_entry(struct asm_ *a)
     alu_rr(a, ALU_CMP, R11, RAX);
     jcc(a, CC_NE, decline);
     bind(a, hooked);
-    cmp_mi(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining), lu_frame_floor(code));
-    jcc(a, CC_LE, decline);
-    int words = code->co_framesize;
+    int words = code->co_framesize, kernel = lu_frame_is_kernel(code);
+    if (kernel) {
+        cmp_mi(a, 1, R14, offsetof(struct lu_task, kernel_room), words);
+        jcc(a, CC_L, decline);
+    }
+    else {
+        cmp_mi(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining), 0);
+        jcc(a, CC_LE, decline);
+    }
     load(a, R10, R14, offsetof(PyThreadState, datastack_top));
     test_rr(a, R10, R10);
     jcc(a, CC_E, decline);
@@ -4019,7 +4043,12 @@ direct_entry(struct asm_ *a)
     /* The frame. */
     lea(a, R11, R10, 8 * words);
     store(a, R14, offsetof(PyThreadState, datastack_top), R11);
-    incdec32(a, 1, R14, offsetof(PyThreadState, py_recursion_remaining));
+    if (kernel) {
+        alu_mi(a, 1, ALU_SUB, R14, offsetof(struct lu_task, kernel_room), words);
+    }
+    else {
+        incdec32(a, 1, R14, offsetof(PyThreadState, py_recursion_remaining));
+    }
     mov_rr(a, R15, R10);
     store(a, RBP, RESULT_SLOT, RCX);
     store(a, R9, offsetof(struct lu_jit_call, frame), R15);

@@ -120,9 +120,7 @@ lu_gen_stand(PyObject *o, int pc)
 static int
 start(PyThreadState *ts, struct lu_gen *gen, struct lu_frame *previous, _PyErr_StackItem *exc_prev)
 {
-    if (ts->py_recursion_remaining-- <= 0) {
-        ts->py_recursion_remaining++;
-        lu_err_format(PyExc_RecursionError, "maximum recursion depth exceeded");
+    if (lu_depth_enter(ts, gen->frame.code) < 0) {
         return -1;
     }
     gen->frame.previous = previous;
@@ -169,7 +167,7 @@ struct lu_frame *
 lu_gen_enter(PyThreadState *ts, PyObject *o, struct lu_frame *previous)
 {
     struct lu_gen *gen = (struct lu_gen *)o;
-    ts->py_recursion_remaining++;       /* start's own check cannot fail: the unit made room at its entry */
+    lu_depth_leave(ts, gen->frame.code);       /* start's own check cannot fail: the unit made room at its entry */
     start(ts, gen, previous, NULL);
     return &gen->frame;
 }
@@ -254,7 +252,7 @@ lu_gen_finish(PyThreadState *ts, struct lu_frame *f)
     lu_frame_unlink(ts, f);
     ts->exc_info = gen->exc_state.previous_item;
     gen->exc_state.previous_item = NULL;
-    ts->py_recursion_remaining++;
+    lu_depth_leave(ts, f->code);
     clear_frame(gen);
 }
 

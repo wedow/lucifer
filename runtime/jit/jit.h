@@ -60,6 +60,17 @@ lu_jit_on(void)
     return _PyRuntime.jit.mode != LU_JIT_OFF;
 }
 
+/* Whether the C stack is below the room it keeps for an activation of the
+   interpreter: compiled code, which nests on the C stack at every call it
+   makes through C, is not entered there, and the interpreter, which nests
+   nothing, runs the calls. */
+static inline int
+lu_jit_stack_low(void)
+{
+    char here;
+    return &here < lu_current_task()->carrier->jit_stack_floor;
+}
+
 /* Whether the code has JIT state (it is warm): co_executors holds its
    call count, tagged with bit 0, until then. */
 static inline int

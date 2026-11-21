@@ -232,13 +232,52 @@ void lu_frame_rehome(struct lu_frame *from, struct lu_frame *to);
    that is executing or suspended. */
 int lu_frame_clear(PyFrameObject *frame);
 
-/* Kernel code stands in for C, which CPython's limit does not count: it runs
-   a little past the limit, so an exception raised at the limit can be built.
-   A frame of `code` is pushed while ts->py_recursion_remaining is above this. */
+/* Kernel code stands in for C. CPython counts Python frames against the
+   recursion limit and bounds C frames by the C stack: a kernel frame leaves
+   ts->py_recursion_remaining alone and takes its words from the task's
+   kernel_room instead. */
 static inline int
-lu_frame_floor(PyCodeObject *code)
+lu_frame_is_kernel(PyCodeObject *code)
 {
-    return (code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) ? -50 : 0;
+    return (code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN)) != 0;
+}
+
+int lu_depth_error(PyThreadState *ts, PyCodeObject *code);
+
+/* lu_depth_enter's charge, unchecked: for room made earlier. */
+static inline void
+lu_depth_take(PyThreadState *ts, PyCodeObject *code)
+{
+    if (lu_frame_is_kernel(code)) {
+        ((struct lu_task *)ts)->kernel_room -= code->co_framesize;
+    }
+    else {
+        ts->py_recursion_remaining--;
+    }
+}
+
+/* A frame of `code` is counted: 0, or -1 with RecursionError. */
+static inline int
+lu_depth_enter(PyThreadState *ts, PyCodeObject *code)
+{
+    if (lu_frame_is_kernel(code) ? ((struct lu_task *)ts)->kernel_room < code->co_framesize
+        : ts->py_recursion_remaining <= 0) {
+        return lu_depth_error(ts, code);
+    }
+    lu_depth_take(ts, code);
+    return 0;
+}
+
+/* What lu_depth_enter took, given back. */
+static inline void
+lu_depth_leave(PyThreadState *ts, PyCodeObject *code)
+{
+    if (lu_frame_is_kernel(code)) {
+        ((struct lu_task *)ts)->kernel_room += code->co_framesize;
+    }
+    else {
+        ts->py_recursion_remaining++;
+    }
 }
 
 /* Pushes a frame for `func` on the current task's datastack, with every

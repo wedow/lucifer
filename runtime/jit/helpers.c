@@ -885,13 +885,6 @@ h_rangeiter_new(int64_t start, int64_t step, int64_t len)
 
 /* --- calls --- */
 
-static int
-stack_low(void)
-{
-    char here;
-    return &here < lu_current_task()->carrier->jit_stack_floor;
-}
-
 /* The arguments of the call compiled code is making (bits by argv index)
    whose stack entries hold references of their own while it runs: the
    root frame's published state says (struct lu_deopt). */
@@ -961,7 +954,7 @@ call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, 
 static int
 declines(PyObject *callable)
 {
-    return stack_low() || lu_gen_throws(callable);
+    return lu_jit_stack_low() || lu_gen_throws(callable);
 }
 
 /* The interpreter polls after a call: a signal the callee tripped is
@@ -999,7 +992,7 @@ static PyObject *
 h_send(PyObject *receiver, PyObject *v)
 {
     struct lu_task *t = lu_current_task();
-    if (t->ts.interp->eval_frame != NULL || stack_low()) {
+    if (t->ts.interp->eval_frame != NULL || lu_jit_stack_low()) {
         return LU_JIT_DECLINED;
     }
     if (!Py_IS_TYPE(receiver, &PyGen_Type) && !Py_IS_TYPE(receiver, &PyCoro_Type)) {
@@ -1152,7 +1145,7 @@ called:
 static PyObject *
 h_prim_call(PyObject **argv, intptr_t n)
 {
-    if (stack_low()) {
+    if (lu_jit_stack_low()) {
         return LU_JIT_DECLINED;
     }
     struct lu_task *t = lu_current_task();

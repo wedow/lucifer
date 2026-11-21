@@ -4306,9 +4306,17 @@ exception_unwind: {
 }
 }
 
+int _Py_CheckRecursiveCall(PyThreadState *tstate, const char *where);
+
 PyObject *
 lu_eval(PyThreadState *ts, struct lu_frame *frame)
 {
+    /* A call from C nests an activation on the C stack, which bounds it as
+       CPython's _PyEval_EvalFrameDefault is bounded. */
+    if (ts->current_frame != NULL && _Py_CheckRecursiveCall(ts, "") < 0) {
+        lu_frame_pop(ts, frame);
+        return NULL;
+    }
     /* C may call Python with an exception pending (an error path that looks
        up a dict or drops an object), and the loop reads a set indicator as a
        failure: the exception waits outside the call and is set again when

@@ -97,7 +97,7 @@ lu_gen_suspend(PyThreadState *ts, struct lu_frame *f, int oparg)
     gen->frame_state = (int8_t)(LU_GEN_SUSPENDED + oparg);
     ts->exc_info = gen->exc_state.previous_item;
     gen->exc_state.previous_item = NULL;
-    ts->py_recursion_remaining++;
+    lu_depth_leave(ts, f->code);
     f->previous = NULL;
 }
 void lu_gen_finish(PyThreadState *ts, struct lu_frame *f);

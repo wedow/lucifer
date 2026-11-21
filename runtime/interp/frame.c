@@ -84,18 +84,31 @@ free_frame(PyThreadState *ts, struct lu_frame *f)
     ts->datastack_limit = prev != NULL ? (PyObject **)((char *)prev + prev->size) : NULL;
 }
 
+int
+lu_depth_error(PyThreadState *ts, PyCodeObject *code)
+{
+    if (lu_frame_is_kernel(code)) {
+        struct lu_task *t = (struct lu_task *)ts;
+        Py_ssize_t size = lu_stack_words(t->c_stack_init_base, t->c_stack_init_top);
+        lu_err_format(PyExc_RecursionError, "Stack overflow (used %d kB)",
+                      (int)((size - t->kernel_room) * (Py_ssize_t)sizeof(PyObject *) / 1024));
+    }
+    else {
+        lu_err_format(PyExc_RecursionError, "maximum recursion depth exceeded");
+    }
+    return -1;
+}
+
 struct lu_frame *
 lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals)
 {
     PyCodeObject *code = (PyCodeObject *)func->func_code;
-    if (ts->py_recursion_remaining-- <= lu_frame_floor(code)) {
-        ts->py_recursion_remaining++;
-        lu_err_format(PyExc_RecursionError, "maximum recursion depth exceeded");
+    if (lu_depth_enter(ts, code) < 0) {
         return NULL;
     }
     struct lu_frame *f = alloc_frame(ts, func);
     if (f == NULL) {
-        ts->py_recursion_remaining++;
+        lu_depth_leave(ts, code);
         PyErr_NoMemory();
         return NULL;
     }
@@ -162,8 +175,8 @@ lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
 {
     lu_frame_unlink(ts, f);
     lu_frame_release(f);
+    lu_depth_leave(ts, f->code);
     Py_DECREF(f->code);
-    ts->py_recursion_remaining++;
     free_frame(ts, f);
 }
 

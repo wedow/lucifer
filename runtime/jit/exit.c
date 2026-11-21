@@ -478,8 +478,8 @@ gen_frame(PyThreadState *ts, struct maker *m, const struct lu_deopt_frame *fr, s
         }
         f->stackpointer = f->localsplus + fr->nlocals;
     }
-    ts->py_recursion_remaining -= counted;
     if (counted) {
+        lu_depth_take(ts, f->code);
         lu_gen_enter_exc(ts, gen);
     }
     f->previous = previous;     /* a walker's record of its caller gave way to the caller's frame */

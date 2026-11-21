@@ -43,23 +43,19 @@ _PyThreadState_GetCurrent(void)
     return PyThreadState_GetUnchecked();
 }
 
-/* C recursion shares the Python recursion budget (Python/ceval.c). */
+int _Py_CheckRecursiveCall(PyThreadState *tstate, const char *where);
+
+/* C recursion is bounded by the C stack, not the recursion limit
+   (Python/ceval.c, 3.14). */
 int
 Py_EnterRecursiveCall(const char *where)
 {
-    PyThreadState *ts = PyThreadState_Get();
-    if (ts->py_recursion_remaining-- <= 0) {
-        ts->py_recursion_remaining++;
-        PyErr_Format(PyExc_RecursionError, "maximum recursion depth exceeded%s", where);
-        return -1;
-    }
-    return 0;
+    return _Py_CheckRecursiveCall(PyThreadState_Get(), where);
 }
 
 void
 Py_LeaveRecursiveCall(void)
 {
-    PyThreadState_Get()->py_recursion_remaining++;
 }
 
 /* The internal headers' _Py_EnterRecursiveCall calls this once the C stack
@@ -378,9 +374,8 @@ PyState_RemoveModule(PyModuleDef *def)
 /* PyUnstable_ThreadState_SetStackProtection (Python/ceval.c): the C stack
    bounds a thread's recursion checks watch. The margins are CPython's
    (_PyOS_MIN_STACK_SIZE, _PyOS_STACK_MARGIN_BYTES of a release build). The
-   interpreter's recursion limit is a counter; the bounds serve the C
-   recursion checks extensions inline from the internal headers
-   (_Py_EnterRecursiveCall), and no page is protected. */
+   bounds serve the C recursion checks (_Py_CheckRecursiveCall), and no page
+   is protected. */
 
 #define LU_STACK_MARGIN_BYTES ((size_t)1 << 14)
 #define LU_MIN_STACK_SIZE (LU_STACK_MARGIN_BYTES * 3)
@@ -399,6 +394,7 @@ tstate_set_stack(PyThreadState *tstate, uintptr_t base, uintptr_t top)
 void
 lu_task_set_c_stack(struct lu_task *t, uintptr_t base, uintptr_t top)
 {
+    t->kernel_room += lu_stack_words(base, top) - lu_stack_words(t->c_stack_init_base, t->c_stack_init_top);
     t->c_stack_init_base = base;
     t->c_stack_init_top = top;
     if (top != 0) {

@@ -567,12 +567,16 @@ struct lu_task {
     PyThreadState ts;
     /* CPython's _PyThreadStateImpl continues here: a reference count, then
        the C stack bounds PyUnstable_ThreadState_SetStackProtection records
-       (an extension reads them at these offsets, pycore_tstate.h). lucifer's
-       recursion limit is a counter, so the bounds are bookkeeping only; the
+       (an extension reads them at these offsets, pycore_tstate.h). They
+       bound C recursion, a call from C into the interpreter included; the
        init pair backs ResetStackProtection. */
     Py_ssize_t tstate_refcount;
     uintptr_t c_stack_top, c_stack_soft_limit, c_stack_hard_limit;
     uintptr_t c_stack_init_base, c_stack_init_top;
+    /* The words kernel frames may still take: they stand in for CPython's C
+       frames, which its C stack bounds, so they get the carrier's C stack
+       size (interp/frame.h lu_depth_enter). */
+    Py_ssize_t kernel_room;
     uintptr_t pin;              /* transient pins: foreign C and nested evals (DESIGN 5.4) */
     int pinned_for_life;        /* main, foreign-thread and thread-scoped tasks */
     struct lu_carrier *carrier; /* the carrier whose thread it is bound to, or NULL */
@@ -754,6 +758,13 @@ struct lu_entry *lu_entry_of(struct lu_carrier *c, struct _is *interp);
 struct lu_task *lu_task_new(struct _is *interp, int whence);
 void lu_task_bind(struct lu_task *t);
 void lu_task_set_c_stack(struct lu_task *t, uintptr_t base, uintptr_t top);
+/* The words of a C stack [base, top): the kernel frames' room. An unknown
+   stack (zeros) bounds nothing. */
+static inline Py_ssize_t
+lu_stack_words(uintptr_t base, uintptr_t top)
+{
+    return top != 0 ? (Py_ssize_t)((top - base) / sizeof(PyObject *)) : PY_SSIZE_T_MAX / 2;
+}
 void lu_task_attach(PyThreadState *ts);
 /* The task stops using objects: its critical sections release their locks,
    its carrier goes offline for QSBR, and its state becomes `state`, detached

@@ -1145,7 +1145,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     PyCodeObject *code = frame->code;
     struct lu_task *task = (struct lu_task *)ts;
     /* What can change while the code has units: the frame, tools, a hook. */
-    if (frame->locals != NULL || code->_co_monitoring != NULL
+    if (frame->locals != NULL || code->_co_monitoring != NULL || lu_jit_stack_low()
         || ts->tracing || (ts->interp->eval_frame != NULL && ts->interp->eval_frame != lu_perf_eval)
         || code->_co_instrumentation_version
            != (__atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK)) {
@@ -1268,7 +1268,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         return 0;
     }
     int at = gen ? (int)(frame->instr - lu_code_start(code)) + 1 + lu_opcode_caches[RESUME] : jc != NULL ? jc->call_pc : 0;
-    if (jc == NULL || at <= 0 || frame->locals != NULL
+    if (jc == NULL || at <= 0 || frame->locals != NULL || lu_jit_stack_low()
         || (poll & LU_POLL_EVENTS_MASK)
         || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) || code->_co_monitoring != NULL
         || ts->tracing || code->_co_instrumentation_version != (poll & ~LU_POLL_EVENTS_MASK)) {
