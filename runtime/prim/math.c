@@ -218,14 +218,17 @@ unpack2(const unsigned char *p)
     return sign ? -x : x;
 }
 
-/* float_pack(x, size): the little-endian IEEE bytes of a 2, 4 or 8 byte float. */
+/* float_pack(x, size, allow_float32_overflow=False): the little-endian IEEE
+   bytes of a 2, 4 or 8 byte float. The optional flag permits the native
+   float32 cast to produce infinity from a finite value. */
 static PyObject *
 prim_float_pack(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     double x;
     long size;
     unsigned char out[8];
-    if (nargs != 2 || double_arg(args[0], &x) < 0 || lu_long_as_long(args[1], &size) < 0) {
+    if ((nargs != 2 && nargs != 3) ||
+        double_arg(args[0], &x) < 0 || lu_long_as_long(args[1], &size) < 0) {
         return NULL;
     }
     if (size == 2) {
@@ -236,7 +239,8 @@ prim_float_pack(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     else if (size == 4) {
         float f = (float)x;
-        if (isinf(f) && !isinf(x)) {
+        int allow_overflow = nargs == 3 && args[2] == Py_True;
+        if (!allow_overflow && isinf(f) && !isinf(x)) {
             lu_err_format(PyExc_OverflowError, "float too large to pack with f format");
             return NULL;
         }

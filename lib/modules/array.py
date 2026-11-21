@@ -127,8 +127,8 @@ a bytes-like object, or iterable over elements of the appropriate type."""
             array.fromunicode(self, str.__str__(initializer))
         elif isinstance(initializer, (list, tuple)):
             length = list.__len__(initializer) if isinstance(initializer, list) else tuple.__len__(initializer)
-            pack = self._struct.pack
-            bytearray.extend(self, b''.join([pack(_encode(typecode, initializer[i])) for i in range(length)]))
+            pack = array._pack_item
+            bytearray.extend(self, b''.join([pack(self, initializer[i]) for i in range(length)]))
         return self
 
     def __init__(self, *args):
@@ -150,9 +150,16 @@ a bytes-like object, or iterable over elements of the appropriate type."""
             return [chr(v) for (v,) in self._struct.iter_unpack(data)]
         return [v for (v,) in self._struct.iter_unpack(data)]
 
+    def _pack_item(self, value):
+        code = self._typecode
+        value = _encode(code, value)
+        if code == 'f':
+            return _lucifer.float_pack(value, 4, True)
+        return self._struct.pack(value)
+
     def _pack(self, values):
-        pack = self._struct.pack
-        return b''.join(pack(_encode(self._typecode, v)) for v in values)
+        pack = array._pack_item
+        return b''.join(pack(self, v) for v in values)
 
     def _replace(self, values):
         data = self._pack(values)
@@ -293,7 +300,7 @@ a bytes-like object, or iterable over elements of the appropriate type."""
 
     def append(self, value, /):
         """Append new value v to the end of the array."""
-        bytearray.extend(self, self._struct.pack(_encode(self._typecode, value)))
+        bytearray.extend(self, array._pack_item(self, value))
 
     def _extend_iterable(self, iterable):
         for value in iterable:

@@ -1,6 +1,6 @@
 ---
 id: luc-9uoy
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T04:18:01Z
@@ -34,3 +34,9 @@ OverflowError float too large to pack with f format
 ```
 
 
+
+## Notes
+
+**2026-11-21T16:41:41Z**
+
+CPython narrows these values with a native C float cast (Modules/arraymodule.c and Python/getargs.c). Array construction and mutation now use that cast when packing float32 items. Standard-size struct packing and overflow during conversion to double retain their exceptions. The new tests/kernel/array_float_overflow.py check reproduced the old failure, then passed with the six neighboring checks in plain, jit, and jit-deopt.
