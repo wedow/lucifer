@@ -540,6 +540,17 @@ unpack_call(PyObject *callargs, PyObject *kwargs, Py_ssize_t *nargs, PyObject **
 {
     Py_ssize_t npos = PyTuple_GET_SIZE(callargs);
     Py_ssize_t nkw = kwargs != NULL ? ((PyDictObject *)kwargs)->ma_used : 0;
+    /* DICT_MERGE checks duplicates before CALL_FUNCTION_EX checks key types. */
+    if (nkw && !lu_dict_str_keys(kwargs)) {
+        Py_ssize_t pos = 0;
+        PyObject *key, *value;
+        while (lu_ns_next(kwargs, &pos, &key, &value)) {
+            if (!PyUnicode_Check(key)) {
+                PyErr_SetString(PyExc_TypeError, "keywords must be strings");
+                return NULL;
+            }
+        }
+    }
     PyObject **array = PyMem_Malloc((npos + nkw + 1) * sizeof(PyObject *));
     *kwnames = nkw ? PyTuple_New(nkw) : NULL;
     if (array == NULL || (nkw && *kwnames == NULL)) {

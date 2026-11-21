@@ -1,6 +1,6 @@
 ---
 id: luc-5v2r
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T03:08:31Z
@@ -59,3 +59,9 @@ KeyError 'zz'
 ```
 
 
+
+## Notes
+
+**2026-11-21T09:08:41Z**
+
+CPython formats errors from the whole dictionary merge. Use that same merge for both unpacking opcodes so it looks up keys once and detects duplicate keywords before reading values. Both opcodes translate AttributeError with the oracle’s type-name limit. Keyword calls also translate one-argument KeyError using its stored argument and validate keyword types after all merges. The regression reproduced the original failure against CPython 3.14t.

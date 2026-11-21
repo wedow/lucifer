@@ -293,24 +293,31 @@ def build_map(items):
 
 
 def merge_kwargs(d, update, fname):
-    """DICT_MERGE: the keywords of f(**update) into the kwargs dict d, which
-    holds strs and refuses a key twice."""
-    if not kind(update, 'dict') and not has_keys(update):
-        error(TypeError, _cat(fname, ' argument after ** must be a mapping, not ', _name(update)))
-    for key in mapping_keys(update):
-        if not kind(key, 'str'):
-            error(TypeError, 'keywords must be strings')
-        value = operators.getitem(update, key)
-        if contains(d, key):
-            error(TypeError, _cat(fname, " got multiple values for keyword argument '", key, "'"))
-        setitem(d, key, value)
+    """DICT_MERGE: reject duplicate keys and format merge errors for the call."""
+    try:
+        merge(d, update, 2)
+        return
+    except AttributeError:
+        args = None
+    except KeyError as exc:
+        args = BaseException.args.__get__(exc)
+        if size(args) != 1:
+            raise
+    # Format after leaving the handler, as CPython clears the merge error.
+    if args is None:
+        error(TypeError, _cat(fname, ' argument after ** must be a mapping, not ',
+                              operators.error_type_name(update)))
+    error(TypeError, _cat(fname, " got multiple values for keyword argument '", to_str(args[0]), "'"))
 
 
 def update_op(d, update):
     """DICT_UPDATE: {**update}."""
-    if not has_keys(update):
-        error(TypeError, _cat("'", _name(update), "' object is not a mapping"))
-    merge(d, update, 1)
+    try:
+        merge(d, update, 1)
+        return
+    except AttributeError:
+        pass
+    error(TypeError, _cat("'", operators.error_type_name(update), "' object is not a mapping"))
 
 
 def fromkeys(cls, iterable, value):
