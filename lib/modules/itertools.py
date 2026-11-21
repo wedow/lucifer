@@ -4,6 +4,7 @@ combinatorics run in a generator held by the iterator."""
 
 import sys
 import _lucifer
+from _thread import allocate_lock as _allocate_lock
 from _types import GenericAlias
 
 _index = _lucifer.operators.index
@@ -731,42 +732,123 @@ class _grouper:
         return value
 
 
+_TEE_BLOCK_SIZE = 57
+
+
+class _tee_dataobject:
+    """Data container common to multiple tee objects."""
+
+    __module__ = 'itertools'
+    __slots__ = ('_source', '_values', '_next', '_lock', '_running')
+
+    def __new__(cls, /, *args, **kwargs):
+        if kwargs:
+            raise TypeError('teedataobject() takes no keyword arguments')
+        if len(args) != 3:
+            raise TypeError(f'teedataobject expected 3 arguments, got {len(args)}')
+        source, values, link = args
+        if not issubclass(type(values), list):
+            name = 'None' if values is None else _lucifer.type_tp_name(type(values))
+            raise TypeError(f'teedataobject() argument 2 must be list, not {name:.50}')
+        values = list.__getitem__(values, slice(_TEE_BLOCK_SIZE + 1))
+        size = len(values)
+        if size > _TEE_BLOCK_SIZE or (
+            link is not None and (size != _TEE_BLOCK_SIZE or type(link) is not cls)
+        ):
+            raise ValueError('Invalid arguments')
+        data = _new_tee_data(source, values, _allocate_lock())
+        data._next = link
+        return data
+
+    def __init_subclass__(cls, **kwargs):
+        raise TypeError("type 'itertools._tee_dataobject' is not an acceptable base type")
+
+
+def _new_tee_data(source, values, lock):
+    data = object_new(_tee_dataobject)
+    data._source = source
+    data._values = values
+    data._next = None
+    data._lock = lock
+    data._running = False
+    return data
+
+
 class _tee:
     """Iterator wrapped to make it copyable."""
 
     __module__ = 'itertools'
-    __slots__ = ('_it', '_link')
+    __slots__ = ('_data', '_index', '__weakref__')
 
-    def __init__(self, iterable, /):
-        self._it = iter(iterable)
-        self._link = [_MISSING, None]
+    def __new__(cls, iterable, /):
+        source = iter(iterable)
+        if type(source) is _tee:
+            return source.__copy__()
+        self = object_new(cls)
+        self._data = _new_tee_data(source, [], _allocate_lock())
+        self._index = 0
+        return self
+
+    def __init_subclass__(cls, **kwargs):
+        raise TypeError("type 'itertools._tee' is not an acceptable base type")
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        link = self._link
-        if link[1] is None:
-            link[0] = next(self._it)
-            link[1] = [_MISSING, None]
-        self._link = link[1]
-        return link[0]
+        lock = self._data._lock
+        with lock:
+            # Keep the old block alive until the lock is released. Dropping
+            # its cached values can run user finalizers.
+            previous = self._data
+            if self._index == _TEE_BLOCK_SIZE:
+                self._data = previous._next
+                self._index = 0
+            data = self._data
+            index = self._index
+            if index < len(data._values):
+                value = data._values[index]
+                self._index = index + 1
+                return value
+            if data._running:
+                raise RuntimeError('cannot re-enter the tee iterator')
+            data._running = True
+
+        try:
+            # Allocate the successor before fetching the last item, so
+            # publishing the block and moving cursors need no callbacks.
+            successor = None
+            if index == _TEE_BLOCK_SIZE - 1:
+                successor = _new_tee_data(data._source, [], lock)
+            value = next(data._source)
+        except BaseException:
+            with lock:
+                data._running = False
+            raise
+
+        with lock:
+            data._running = False
+            data._values.append(value)
+            data._next = successor
+            self._index = index + 1
+        return value
 
     def __copy__(self):
         new = object_new(type(self))
-        new._it = self._it
-        new._link = self._link
+        with self._data._lock:
+            new._data = self._data
+            new._index = self._index
         return new
 
 
 def tee(iterable, n=2, /):
     """Returns a tuple of n independent iterators."""
     n = _index(n)
+    if not -sys.maxsize - 1 <= n <= sys.maxsize:
+        raise OverflowError('Python int too large to convert to C ssize_t')
     if n < 0:
         raise ValueError('n must be >= 0')
-    it = iter(iterable)
     if not n:
         return ()
-    if not hasattr(it, '__copy__'):
-        it = _tee(it)
+    it = _tee(iter(iterable))
     return (it,) + tuple(it.__copy__() for _ in range(n - 1))

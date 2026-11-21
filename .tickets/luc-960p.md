@@ -1,6 +1,6 @@
 ---
 id: luc-960p
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T02:46:58Z
@@ -79,3 +79,16 @@ RecursionError maximum recursion depth exceeded
 ```
 
 
+
+## Notes
+
+**2026-11-21T16:19:08Z**
+
+The old tee cached one item per link and delegated copying to arbitrary source
+iterators. Use shared 57-item data blocks with a guarded source refill,
+independent branch cursors, and weak-referenceable branches. The constructor
+and source re-entry behavior follow CPython's `Modules/itertoolsmodule.c`.
+
+`tests/kernel/itertools_tee.py` failed against the base and passed after the fix.
+It passed alongside `itertools_basic` and `weakref_basic` in the plain, jit, and
+jit-deopt lanes against CPython 3.14t.
