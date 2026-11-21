@@ -67,19 +67,6 @@ PyStatus_Exception(PyStatus err)
     return err._type != _PyStatus_TYPE_OK;
 }
 
-/* A failed startup: an error prints Python's fatal-error line and exits 1;
-   an exit status leaves with its code (its message was printed already). */
-void
-Py_ExitStatusException(PyStatus status)
-{
-    if (status._type == _PyStatus_TYPE_EXIT) {
-        exit(status.exitcode);
-    }
-    fprintf(stderr, "Fatal Python error: %s%s%s\n", status.func != NULL ? status.func : "",
-            status.func != NULL ? ": " : "", status.err_msg != NULL ? status.err_msg : "");
-    exit(1);
-}
-
 /* An exit status after a message on stderr. */
 static PyStatus
 exit_with(int code, const char *format, const char *a, const char *b)
@@ -322,7 +309,7 @@ config_init(PyConfig *config, int isolated)
     config->import_time = -1;
     config->code_debug_ranges = 1;
     config->parse_argv = !isolated;
-    config->site_import = !isolated;
+    config->site_import = 1;
     config->write_bytecode = 1;
     config->user_site_directory = !isolated;
     config->configure_c_stdio = !isolated;

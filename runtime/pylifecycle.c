@@ -9,7 +9,7 @@
    2. layouts and singletons;
    3. interned names, sys.modules, _lucifer, builtins and sys;
    4. from here a failure prints the exception's type and message, exit 1;
-   5. the kernel, sys.configure, importlib. */
+   5. the kernel, sys.configure, importlib, standard streams, __main__ and site. */
 
 #include "jit/jit.h"
 #include "interp/exceptions.h"
@@ -107,6 +107,22 @@ report(void)
     }
     Py_DECREF(exc);
     return 1;
+}
+
+void
+Py_ExitStatusException(PyStatus status)
+{
+    if (PyStatus_IsExit(status)) {
+        exit(status.exitcode);
+    }
+    fprintf(stderr, "Fatal Python error: %s%s%s\n", status.func != NULL ? status.func : "",
+            status.func != NULL ? ": " : "", status.err_msg != NULL ? status.err_msg : "");
+    if (PyThreadState_GetUnchecked() != NULL && PyErr_Occurred()) {
+        fputs("Python runtime state: initialized\n", stderr);
+        report();
+        flush_io();
+    }
+    exit(1);
 }
 
 /* The status of a program that ended by an exception nothing caught
@@ -380,13 +396,17 @@ compile_main(struct _is *interp, PyObject *source, PyObject *filename)
     return code;
 }
 
-/* A fresh __main__ in sys.modules, as pyrun_file leaves it: __builtins__,
-   and the loader of the file it came from, or the builtin importer for -c,
-   standard input and embedded strings (loader_class NULL). Borrowed. */
+/* __main__ exists during site initialization and keeps its namespace when the
+   program starts. Returns a new reference. */
 static PyObject *
-new_main(struct _is *interp, const wchar_t *path, const char *loader_class)
+get_main(struct _is *interp)
 {
-    PyObject *main = lu_module_new("__main__");
+    PyObject *main = lu_ns_get(interp->modules, LU_ID(__main__));
+    if (main != NULL && PyModule_Check(main)) {
+        return main;
+    }
+    Py_XDECREF(main);
+    main = lu_module_new("__main__");
     if (main == NULL) {
         return NULL;
     }
@@ -396,11 +416,12 @@ new_main(struct _is *interp, const wchar_t *path, const char *loader_class)
     PyObject *builtin_importer = importlib != NULL
         ? lu_ns_lookup(PyModule_GetDict(importlib), PyUnicode_InternFromString("BuiltinImporter")) : NULL;
     int err = lu_ns_insert(ns, LU_ID(__builtins__), builtins) < 0
-        || lu_ns_insert(interp->modules, LU_ID(__main__), main) < 0
-        || (loader_class != NULL ? set_main_file(interp, main, path, loader_class) < 0
-            : builtin_importer != NULL && lu_ns_insert(ns, LU_ID(__loader__), builtin_importer) < 0);
-    Py_DECREF(main);                    /* sys.modules holds it */
-    return err ? NULL : main;
+        || (builtin_importer != NULL && lu_ns_insert(ns, LU_ID(__loader__), builtin_importer) < 0)
+        || PyDict_SetItem(interp->modules, LU_ID(__main__), main) < 0;
+    if (err) {
+        Py_CLEAR(main);
+    }
+    return main;
 }
 
 /* What follows the main code's activation: the exit status of its result. */
@@ -420,8 +441,14 @@ finish_main(PyObject *result)
 static int
 run_main_code(struct _is *interp, PyObject *code, const wchar_t *path, const char *loader_class)
 {
-    PyObject *main = new_main(interp, path, loader_class);
-    return finish_main(main != NULL ? PyEval_EvalCode(code, PyModule_GetDict(main), PyModule_GetDict(main)) : NULL);
+    PyObject *main = get_main(interp);
+    if (main != NULL && loader_class != NULL && set_main_file(interp, main, path, loader_class) < 0) {
+        Py_CLEAR(main);
+    }
+    PyObject *ns = main != NULL ? PyModule_GetDict(main) : NULL;
+    PyObject *result = ns != NULL ? PyEval_EvalCode(code, ns, ns) : NULL;
+    Py_XDECREF(main);
+    return finish_main(result);
 }
 
 /* -m: runpy runs the module as __main__. */
@@ -431,7 +458,7 @@ run_module(struct _is *interp, const wchar_t *name)
     PyObject *runpy = PyImport_ImportModule("runpy");
     PyObject *module = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, name, (Py_ssize_t)wcslen(name));
     PyObject *result = NULL;
-    if (runpy != NULL && module != NULL && new_main(interp, NULL, NULL) != NULL) {
+    if (runpy != NULL && module != NULL) {
         result = PyObject_CallMethod(runpy, "_run_module_as_main", "OO", module, Py_True);
     }
     Py_XDECREF(runpy);
@@ -566,6 +593,12 @@ Py_InitializeFromConfig(const PyConfig *src)
         report();
         return PyStatus_Exit(1);
     }
+    PyObject *main = get_main(interp);
+    if (main == NULL) {
+        report();
+        return PyStatus_Exit(1);
+    }
+    Py_DECREF(main);
     interp->gc.long_lived_total = __atomic_exchange_n(&interp->gc.young_count, 0, __ATOMIC_RELAXED);
     faulthandler_start(interp);
     if (lu_perf_start(interp) < 0) {
@@ -574,6 +607,14 @@ Py_InitializeFromConfig(const PyConfig *src)
     }
     if (_PyRuntime.handoff.on) {
         lu_sched_start();
+    }
+    if (config.site_import) {
+        PyObject *site = PyImport_ImportModule("site");
+        if (site == NULL) {
+            return (PyStatus){ ._type = _PyStatus_TYPE_ERROR, .func = "init_import_site",
+                               .err_msg = "Failed to import the site module" };
+        }
+        Py_DECREF(site);
     }
     return PyStatus_Ok();
 }
@@ -721,12 +762,38 @@ finalize_status(int status)
     return __atomic_load_n(&_PyRuntime.signals.unhandled_keyboard_interrupt, __ATOMIC_RELAXED) ? exit_sigint() : status;
 }
 
+/* The script directory or working directory becomes importable after site. */
+static int
+prepend_main_path(struct _is *interp)
+{
+    const wchar_t *path0 = interp->config.sys_path_0;
+    if (path0 == NULL) {
+        return 0;
+    }
+    PyObject *path;
+    int found = PyDict_GetItemStringRef(interp->sysdict, "path", &path);
+    if (found == 0) {
+        PyErr_SetString(PyExc_RuntimeError, "unable to get sys.path");
+    }
+    if (found <= 0) {
+        return -1;
+    }
+    PyObject *entry = PyUnicode_FromWideChar(path0, -1);
+    int status = entry != NULL ? PyList_Insert(path, 0, entry) : -1;
+    Py_XDECREF(entry);
+    Py_DECREF(path);
+    return status;
+}
+
 /* Modules/main.c: run the file the config names, then finalize. */
 int
 Py_RunMain(void)
 {
     struct _is *interp = &_PyRuntime.main_interp;
     const PyConfig *config = &interp->config;
+    if (prepend_main_path(interp) < 0) {
+        return finalize_status(finish_main(NULL));
+    }
     char *program = Py_EncodeLocale(config->orig_argv.length > 0 ? config->orig_argv.items[0] : L"lucifer", NULL);
     char *path = config->run_filename != NULL ? Py_EncodeLocale(config->run_filename, NULL) : NULL;
     int status = run_program(interp, program, path);
@@ -793,15 +860,13 @@ Py_Finalize(void)
     Py_FinalizeEx();
 }
 
-/* pythonrun.c PyRun_SimpleStringFlags: the string runs in __main__, which is
-   made on first use and kept for the next call. An uncaught exception is
-   printed (SystemExit leaves quietly) and the result is -1. */
+/* pythonrun.c PyRun_SimpleStringFlags: the string runs in __main__. An uncaught
+   exception is printed (SystemExit leaves quietly) and the result is -1. */
 int
 PyRun_SimpleStringFlags(const char *command, PyCompilerFlags *flags)
 {
     struct _is *interp = &_PyRuntime.main_interp;
-    PyObject *main = lu_ns_lookup(interp->modules, LU_ID(__main__));
-    main = main != NULL ? main : new_main(interp, NULL, NULL);
+    PyObject *main = get_main(interp);
     PyObject *source = main != NULL ? PyUnicode_FromString(command) : NULL;
     PyObject *name = source != NULL ? PyUnicode_FromString("<string>") : NULL;
     PyObject *code = name != NULL ? compile_main(interp, source, name) : NULL;
@@ -809,6 +874,7 @@ PyRun_SimpleStringFlags(const char *command, PyCompilerFlags *flags)
     Py_XDECREF(source);
     Py_XDECREF(name);
     Py_XDECREF(code);
+    Py_XDECREF(main);
     flush_io();
     if (result == NULL) {
         report_uncaught();

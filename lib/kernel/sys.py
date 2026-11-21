@@ -474,8 +474,7 @@ def configure(c):
         key, equals, value = option.partition('=')
         xoptions[key] = value if equals else True
     put('_xoptions', xoptions)
-    path = [c['sys_path_0']] if c['sys_path_0'] is not None else []
-    path.extend(entry for entry in c['pythonpath'].split(':') if entry)
+    path = [entry for entry in c['pythonpath'].split(':') if entry]
     if c['stdlib_dir'] is not None:
         path.append(c['stdlib_dir'])
         path.append(c['stdlib_dir'] + '/lib-dynload')

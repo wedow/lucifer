@@ -137,7 +137,6 @@ config_dict(struct _is *interp)
         || put(d, "base_prefix", wide_str(c->base_prefix))
         || put(d, "base_exec_prefix", wide_str(c->base_exec_prefix))
         || put(d, "stdlib_dir", wide_str(c->stdlib_dir))
-        || put(d, "sys_path_0", wide_str(c->sys_path_0))
         || put(d, "pythonpath", c->pythonpath_env != NULL ? wide_str(c->pythonpath_env)
                                                           : PyUnicode_FromString(""))
         || put(d, "builtin_module_names", names);
