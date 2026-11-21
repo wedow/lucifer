@@ -1,6 +1,6 @@
 ---
 id: luc-7vga
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-19T12:00:49Z
