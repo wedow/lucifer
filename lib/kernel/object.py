@@ -322,7 +322,7 @@ def _getstate_default(obj, required):
     cls = type(obj)
     if required and cls.__itemsize__:
         error(TypeError, str_join('', ('cannot pickle ', type_tp_name(cls), ' objects')))
-    d = instance_dict(obj, False)
+    d = instance_dict(obj, None)
     state = d if d else None
     import copyreg
     slotnames = copyreg._slotnames(cls)

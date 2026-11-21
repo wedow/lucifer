@@ -276,7 +276,8 @@ enum lu_kernel_id {
 #define LU_ATTRS_IN_DICT (1 << 8)       /* ob_flags: set once the values moved to the dict */
 #define LU_ATTRS_UNORDERED (1 << 9)     /* ob_flags: the words' insertion order is in the order record */
 #define LU_ATTRS_ROOM_SHIFT 10
-#define LU_ATTRS_ROOM (63 << LU_ATTRS_ROOM_SHIFT)  /* ob_flags: the names the instance has room for (0: the table's) */
+#define LU_ATTRS_ROOM (31 << LU_ATTRS_ROOM_SHIFT)  /* ob_flags: the names the instance has room for (0: the table's) */
+#define LU_ATTRS_DELETED (1 << 15)      /* ob_flags: an inline attribute was deleted */
 static inline int
 lu_inline_live(PyObject *obj)
 {
@@ -321,8 +322,10 @@ uint16_t lu_inline_room_flags(PyTypeObject *tp, Py_ssize_t room);
 Py_ssize_t lu_inline_index(PyTypeObject *tp, PyObject *name);
 /* The address of the instance's dict pointer, or NULL when it has none. */
 PyObject **lu_dict_ptr(PyObject *obj);
-/* The instance dict (borrowed), made on demand when `create`; the inline
-   values move into it. NULL when there is none, or on error. */
+/* The instance dict (borrowed), made on demand when create > 0; the inline
+   values move into it. LU_DICT_IF_PRESENT leaves an untouched inline
+   namespace alone. NULL when there is no dict, or on error. */
+enum { LU_DICT_IF_PRESENT = -1 };
 PyObject *lu_instance_dict(PyObject *obj, int create);
 /* __dict__ assignment (dict NULL deletes): -1 with an error, else 0. */
 int lu_instance_set_dict(PyObject *obj, PyObject *dict);

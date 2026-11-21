@@ -325,6 +325,8 @@ note_insert(PyObject *obj, Py_ssize_t i)
 static void
 note_delete(PyObject *obj, Py_ssize_t i)
 {
+    /* The namespace still exists after its last attribute is deleted. */
+    __atomic_fetch_or(&obj->ob_flags, LU_ATTRS_DELETED, __ATOMIC_RELAXED);
     if (unordered(obj)) {
         uint8_t *order = order_record(obj);
         int k = 1;
@@ -474,12 +476,29 @@ move_to_dict(PyObject *obj)
     return 0;
 }
 
+/* Called with the object's lock held and its inline values live. */
 static int
-detach_inline(PyObject *obj)
+inline_namespace_present(PyObject *obj)
+{
+    if (__atomic_load_n(&obj->ob_flags, __ATOMIC_RELAXED) & LU_ATTRS_DELETED) {
+        return 1;
+    }
+    PyObject **values = lu_inline_values(obj);
+    Py_ssize_t n = __atomic_load_n(&shared_names(Py_TYPE(obj))->count, __ATOMIC_ACQUIRE);
+    for (Py_ssize_t i = 0; i < n; i++) {
+        if (LU_INLINE_WORD(values, i) != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+detach_inline(PyObject *obj, int if_present)
 {
     int err = 0;
     Py_BEGIN_CRITICAL_SECTION(obj);
-    if (lu_inline_live(obj)) {
+    if (lu_inline_live(obj) && (!if_present || inline_namespace_present(obj))) {
         err = move_to_dict(obj);
     }
     Py_END_CRITICAL_SECTION();
@@ -516,11 +535,11 @@ PyObject *
 lu_instance_dict(PyObject *obj, int create)
 {
     PyObject **p = lu_dict_ptr(obj);
-    if (p == NULL || (lu_inline_live(obj) && detach_inline(obj) < 0)) {
+    if (p == NULL || (lu_inline_live(obj) && detach_inline(obj, create == LU_DICT_IF_PRESENT) < 0)) {
         return NULL;
     }
     PyObject *d = __atomic_load_n(p, __ATOMIC_ACQUIRE);
-    if (d == NULL && create && (d = PyDict_New()) != NULL) {
+    if (d == NULL && create > 0 && (d = PyDict_New()) != NULL) {
         /* Threads that make it at once keep the first one. */
         PyObject *first = NULL;
         if (!__atomic_compare_exchange_n(p, &first, d, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
@@ -541,7 +560,7 @@ lu_instance_set_dict(PyObject *obj, PyObject *dict)
         lu_err_format(PyExc_AttributeError, "This object has no __dict__");
         return -1;
     }
-    if (lu_inline_live(obj) && detach_inline(obj) < 0) {
+    if (lu_inline_live(obj) && detach_inline(obj, 0) < 0) {
         return -1;
     }
     /* Lock-free readers may still hold the old dict borrowed: it goes once

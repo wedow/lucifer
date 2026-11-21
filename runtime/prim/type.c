@@ -2354,12 +2354,14 @@ prim_truth_exact(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return t < 0 ? Py_NewRef(LU_MISSING) : bool_of(t);
 }
 
-/* instance_dict(obj, create): the instance's dict, or None. */
+/* instance_dict(obj, create): the instance's dict, or None. Pass None to
+   leave an untouched inline namespace unmaterialized. */
 static PyObject *
 prim_instance_dict(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(2);
-    PyObject *d = lu_instance_dict(args[0], args[1] == Py_True);
+    int create = args[1] == Py_None ? LU_DICT_IF_PRESENT : args[1] == Py_True;
+    PyObject *d = lu_instance_dict(args[0], create);
     if (d == NULL && PyErr_Occurred()) {
         return NULL;
     }
