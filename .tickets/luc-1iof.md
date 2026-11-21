@@ -1,6 +1,6 @@
 ---
 id: luc-1iof
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-11T04:18:01Z
@@ -43,3 +43,9 @@ overflow while iterating OverflowError int too big to convert
 ```
 
 
+
+## Notes
+
+**2026-11-21T07:02:38Z**
+
+The constructor now gets generic iterators before looking up the typecode. Extend converts and commits one item at a time, preserves the successful prefix, and propagates iterator errors. The new kernel check reproduced the reported differences before the fix. It and the two existing array checks passed against CPython 3.14t in plain, jit, and jit-deopt. One remaining callback detail is that CPython exposes a reserved slot during the second conversion, while Lucifer commits the slot after that conversion succeeds.

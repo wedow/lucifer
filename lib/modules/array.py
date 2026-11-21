@@ -88,31 +88,47 @@ a bytes-like object, or iterable over elements of the appropriate type."""
                             if not args else 'array() takes at most 2 arguments (%d given)' % len(args))
         typecode = args[0]
         initializer = args[1] if len(args) > 1 else _MISSING
-        if not isinstance(typecode, str) or len(typecode) != 1:
+        if not isinstance(typecode, str):
             raise TypeError('array() argument 1 must be a unicode character, not %s' % type(typecode).__name__)
-        if typecode not in typecodes:
-            raise ValueError('bad typecode (must be b, B, u, w, h, H, i, I, l, L, q, Q, f or d)')
+        length = str.__len__(typecode)
+        if length != 1:
+            raise TypeError('array() argument 1 must be a unicode character, not a string of length %d' % length)
+        typecode = str.__getitem__(typecode, 0)
         if typecode == 'u':
             import warnings
             warnings.warn("The 'u' type code is deprecated and will be removed in Python 3.16",
                           DeprecationWarning, 2)
+
+        # Generic initializers supply an iterator before the typecode lookup.
+        iterator = _MISSING
+        if isinstance(initializer, array):
+            if initializer._typecode in 'uw' and typecode not in 'uw':
+                raise TypeError("cannot use a unicode array to initialize an array with typecode '%s'" % typecode)
+            if initializer._typecode != typecode:
+                iterator = iter(initializer)
+        elif isinstance(initializer, str):
+            if typecode not in 'uw':
+                raise TypeError("cannot use a str to initialize an array with typecode '%s'" % typecode)
+        elif initializer is not _MISSING and not isinstance(initializer, (list, tuple, bytes, bytearray)):
+            iterator = iter(initializer)
+
+        if typecode not in typecodes:
+            raise ValueError('bad typecode (must be b, B, u, w, h, H, i, I, l, L, q, Q, f or d)')
         self = bytearray.__new__(cls)
         self._typecode = typecode
         self._struct = _struct.Struct('<' + _NATIVE[typecode])
-        if initializer is not _MISSING:
-            if isinstance(initializer, array):
-                if (typecode in 'uw') != (initializer._typecode in 'uw'):
-                    raise TypeError('cannot use a unicode array to initialize an array with typecode '
-                                    "'%s'" % typecode)
-                bytearray.extend(self, self._pack(initializer._values()))
-            elif isinstance(initializer, (bytes, bytearray)):
-                self.frombytes(initializer)
-            elif isinstance(initializer, str):
-                if typecode not in 'uw':
-                    raise TypeError("cannot use a str to initialize an array with typecode '%s'" % typecode)
-                self.fromunicode(initializer)
-            else:
-                self.extend(initializer)
+        if iterator is not _MISSING:
+            array._extend_iterable(self, iterator)
+        elif isinstance(initializer, array):
+            bytearray.extend(self, bytes(memoryview(initializer)))
+        elif isinstance(initializer, (bytes, bytearray)):
+            array.frombytes(self, initializer)
+        elif isinstance(initializer, str):
+            array.fromunicode(self, str.__str__(initializer))
+        elif isinstance(initializer, (list, tuple)):
+            length = list.__len__(initializer) if isinstance(initializer, list) else tuple.__len__(initializer)
+            pack = self._struct.pack
+            bytearray.extend(self, b''.join([pack(_encode(typecode, initializer[i])) for i in range(length)]))
         return self
 
     def __init__(self, *args):
@@ -209,21 +225,18 @@ a bytes-like object, or iterable over elements of the appropriate type."""
     def __contains__(self, value):
         return value in self._values()
 
-    def _same(self, other, operation):
-        if not isinstance(other, array):
-            raise TypeError('can only extend array with array (not "%s")' % type(other).__name__
-                            if operation == 'extend' else 'bad argument type for built-in operation')
-        if other._typecode != self._typecode:
+    def _same(self, other):
+        if not isinstance(other, array) or other._typecode != self._typecode:
             raise TypeError('bad argument type for built-in operation')
 
     def __add__(self, other):
-        self._same(other, 'add')
+        self._same(other)
         result = array(self._typecode)
         bytearray.extend(result, bytes(memoryview(self)) + bytes(memoryview(other)))
         return result
 
     def __iadd__(self, other):
-        self._same(other, 'add')
+        self._same(other)
         bytearray.extend(self, bytes(memoryview(other)))
         return self
 
@@ -282,17 +295,21 @@ a bytes-like object, or iterable over elements of the appropriate type."""
         """Append new value v to the end of the array."""
         bytearray.extend(self, self._struct.pack(_encode(self._typecode, value)))
 
+    def _extend_iterable(self, iterable):
+        for value in iterable:
+            # CPython validates the item before appending it, then converts it
+            # again for the store. Both conversions precede the next pull.
+            _encode(self._typecode, value)
+            array.append(self, value)
+
     def extend(self, iterable, /):
         """Append items to the end of the array."""
         if isinstance(iterable, array):
-            self._same(iterable, 'extend')
+            if iterable._typecode != self._typecode:
+                raise TypeError('can only extend with array of same kind')
             bytearray.extend(self, bytes(memoryview(iterable)))
         else:
-            try:
-                values = list(iterable)
-            except TypeError:
-                raise TypeError('can only extend with iterable') from None
-            bytearray.extend(self, self._pack(values))
+            array._extend_iterable(self, iterable)
 
     def fromlist(self, list, /):
         """Append items to array from list."""
