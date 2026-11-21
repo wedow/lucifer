@@ -160,19 +160,45 @@ prim_rlock_release(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLongLong(n);
 }
 
-/* os_fork(lock): fork() holding `lock`, the import lock, once more across
-   it, as CPython's PyOS_BeforeFork and PyOS_AfterFork_*: the pid in the
-   parent, 0 in the child (runtime/thread/fork.c). The wait for the lock is
-   not interrupted, and taking it, forking and giving it back are one
+/* os_fork(lock, hooks): fork() holding `lock`, the import lock, once more
+   across it, as CPython's PyOS_BeforeFork and PyOS_AfterFork_*: the pid in
+   the parent, 0 in the child (runtime/thread/fork.c). The wait for the lock
+   is not interrupted, and taking it, forking and giving it back are one
    primitive call, so no signal handler runs while fork holds it. The
    child's lock keeps only its own holds: the threads waiting on it are
-   gone. */
+   gone. The parent then calls a copy of the list `hooks` (after_in_parent),
+   as PyOS_AfterFork_Parent does from C, failed fork or not: no poll comes
+   between fork and the first hook, so a pending signal fires inside it and
+   is reported as an atfork callback's error, not raised before the hooks. */
+static void
+run_at_forkers(PyObject *hooks)
+{
+    PyObject *copy = PyList_GetSlice(hooks, 0, PyList_GET_SIZE(hooks));
+    if (copy == NULL) {
+        PyErr_FormatUnraisable("Exception ignored in atfork callback while copying list %R", hooks);
+        return;
+    }
+    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(copy); i++) {
+        PyObject *func = PyList_GET_ITEM(copy, i);
+        PyObject *res = PyObject_CallNoArgs(func);
+        if (res == NULL) {
+            PyErr_FormatUnraisable("Exception ignored in atfork callback %R", func);
+        }
+        Py_XDECREF(res);
+    }
+    Py_DECREF(copy);
+}
+
 static PyObject *
 prim_os_fork(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(1);
+    ARGS(2);
     struct mutex *mutex = mutex_of(args[0]);
     if (mutex == NULL) {
+        return NULL;
+    }
+    if (!PyList_CheckExact(args[1])) {
+        lu_err_format(PyExc_TypeError, "os_fork(lock, hooks): hooks must be a list");
         return NULL;
     }
     long long held = mine(mutex);
@@ -194,6 +220,9 @@ prim_os_fork(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     else {
         unlock(mutex);
+    }
+    if (pid != 0) {
+        run_at_forkers(args[1]);
     }
     if (pid < 0) {
         errno = err;

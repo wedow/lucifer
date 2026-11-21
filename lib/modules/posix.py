@@ -567,13 +567,14 @@ def register_at_fork(*, before=None, after_in_parent=None, after_in_child=None):
 
 
 def _run_at_fork(kind):
-    """The registered callables of one kind: `before` in reverse registration order, the others in it."""
+    """The registered callables of one kind: `before` in reverse registration order, the others in it.
+The parent's after_in_parent ones run inside os_fork."""
     funcs = _at_fork[kind]
     for func in (reversed(funcs) if kind == 'before' else list(funcs)):
         try:
             func()
         except BaseException as exc:
-            _lucifer.write_unraisable('Exception ignored in', func, exc)
+            _lucifer.write_unraisable('Exception ignored in atfork callback', func, exc)
 
 
 def fork():
@@ -588,22 +589,21 @@ Return 0 to child process and PID of child to parent process."""
     sys.audit('os.fork')
     _run_at_fork('before')
     try:
-        pid = _lucifer.os_fork(_imp._lock)
+        pid = _lucifer.os_fork(_imp._lock, _at_fork['after_in_parent'])
     except OSError:
-        _after_fork_in_parent()
+        _warn_fork_with_threads()
         raise
     if pid == 0:
         _thread._after_fork()
         _run_at_fork('after_in_child')
         return 0
-    _after_fork_in_parent()
+    _warn_fork_with_threads()
     return pid
 
 
-def _after_fork_in_parent():
-    """The parent's side of fork, failed or not (os_fork_impl): the hooks, then the warning, which
+def _warn_fork_with_threads():
+    """The parent's side of fork after its hooks, failed or not (os_fork_impl): the warning, which
 can only be shown: a filter that makes it an error is ignored."""
-    _run_at_fork('after_in_parent')
     if _lucifer.os_thread_count() > 1:
         import warnings
         try:
