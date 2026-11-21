@@ -7,6 +7,7 @@ rlock_* primitives lock and unlock (mutex_mine tells the holder's count). A thre
 
 import _lucifer
 from _lucifer import object as _kobject
+from _lucifer import type as _ktype
 from sys import is_finalizing as _is_finalizing
 
 TIMEOUT_MAX = 9223372036.0
@@ -111,12 +112,11 @@ class RLock:
 
     __slots__ = ('_block', '__weakref__')
 
-    def __init_subclass__(cls, **kwargs):
-        raise TypeError("type '_thread.RLock' is not an acceptable base type")
-
-    def __init__(self):
-        # The mutex primitives keep the holder and its count with the lock.
-        self._block = lock()
+    def __new__(cls, /, *args, **kwargs):
+        # A subclass initializer can use the lock without calling super().
+        self = object.__new__(cls)
+        object.__setattr__(self, '_block', lock())
+        return self
 
     def acquire(self, blocking=True, timeout=-1):
         """Lock the lock.  `blocking` indicates whether we should wait
@@ -147,8 +147,8 @@ to be available for other threads."""
         if not _lucifer.rlock_release(self._block._mutex, False):
             raise RuntimeError('cannot release un-acquired lock')
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.release()
+    def __exit__(self, /, *exc_info):
+        RLock.release(self)
 
     def locked(self):
         """Return a boolean indicating whether this object is locked right now."""
@@ -174,9 +174,10 @@ to be available for other threads."""
 
     def __repr__(self):
         owner, count = _lucifer.mutex_state(self._block._mutex)
-        return '<%s %s.%s object owner=%d count=%d at %#x>' % (
-            'locked' if count else 'unlocked', type(self).__module__,
-            type(self).__qualname__, owner, count, id(self))
+        cls = type(self)
+        name = '_thread.RLock' if cls is RLock else _ktype.type_tp_name(cls)
+        return '<%s %s object owner=%d count=%d at %#x>' % (
+            'locked' if count else 'unlocked', name, owner, count, id(self))
 
 
 class _localimpl:
