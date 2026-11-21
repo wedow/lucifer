@@ -587,18 +587,30 @@ Return 0 to child process and PID of child to parent process."""
         raise PythonFinalizationError("can't fork at interpreter shutdown")
     sys.audit('os.fork')
     _run_at_fork('before')
-    pid = _lucifer.os_fork(_imp._lock)
+    try:
+        pid = _lucifer.os_fork(_imp._lock)
+    except OSError:
+        _after_fork_in_parent()
+        raise
     if pid == 0:
         _thread._after_fork()
         _run_at_fork('after_in_child')
         return 0
-    threads = _lucifer.os_thread_count()
-    _run_at_fork('after_in_parent')
-    if threads > 1:
-        import warnings
-        warnings.warn('This process (pid=%d) is multi-threaded, use of fork() may lead to deadlocks in the child.'
-                      % getpid(), DeprecationWarning, 2)
+    _after_fork_in_parent()
     return pid
+
+
+def _after_fork_in_parent():
+    """The parent's side of fork, failed or not (os_fork_impl): the hooks, then the warning, which
+can only be shown: a filter that makes it an error is ignored."""
+    _run_at_fork('after_in_parent')
+    if _lucifer.os_thread_count() > 1:
+        import warnings
+        try:
+            warnings.warn('This process (pid=%d) is multi-threaded, use of fork() may lead to deadlocks '
+                          'in the child.' % getpid(), DeprecationWarning)
+        except Exception:
+            pass
 
 
 def WIFEXITED(status):
