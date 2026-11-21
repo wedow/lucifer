@@ -13,14 +13,15 @@ import os
 from pathlib import Path
 import re
 import shlex
-import signal
 import subprocess
+import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
-BRIDGE = Path(__file__).with_name('bridge.py')
+BRIDGE = Path(__file__).resolve().with_name('bridge.py')
+SUPERVISOR = BRIDGE.with_name('supervise.py')
 RESULTS = ROOT / 'results' / 'libtest'
 RESOURCES = 'all,-network,-urlfetch,tzdata,xpickle'
 # Modules whose deep-recursion cases outrun the default on a loaded host.
@@ -57,7 +58,7 @@ def read_manifest(path):
 def environment(source):
     env = dict(os.environ)
     for name in list(env):
-        if name.startswith('PYTHON') or name in ('LIBTEST_EVENTS', 'LIBTEST_STATE', 'LIBTEST_PID'):
+        if name.startswith('PYTHON') or name in ('LIBTEST_EVENTS', 'LIBTEST_STATE'):
             env.pop(name)
     env.update(PYTHONHASHSEED='0', PYTHON_JIT='0',
                LC_ALL='C.UTF-8', TZ='UTC', TERM='dumb', NO_COLOR='1')
@@ -66,32 +67,15 @@ def environment(source):
     return env
 
 
-def execute(command, env, cwd, timeout, log, stderr_log=None, worker_pid=None):
+def execute(command, env, cwd, timeout, log, stderr_log=None):
     started = time.monotonic()
     with log.open('wb') as output, (stderr_log.open('wb') if stderr_log else nullcontext(output)) as error_output:
-        try:
-            proc = subprocess.Popen(command, cwd=cwd, env=env, stdout=output,
-                                    stderr=error_output, start_new_session=True)
-        except OSError as error:
-            output.write(str(error).encode())
-            return None, False, time.monotonic() - started
-        try:
-            code = proc.wait(timeout=timeout)
-            timed_out = False
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            # regrtest workers create separate process groups. Reap that
-            # owned group too if the controller itself stopped responding.
-            if worker_pid and worker_pid.exists():
-                try:
-                    os.killpg(int(worker_pid.read_text()), signal.SIGKILL)
-                except (ProcessLookupError, ValueError):
-                    pass
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            code = proc.wait()
+        fd = output.fileno()
+        result = subprocess.run(
+            [sys.executable, '-I', str(SUPERVISOR), str(timeout), str(fd), *command],
+            cwd=cwd, env=env, pass_fds=(fd,), stdout=subprocess.PIPE,
+            stderr=error_output, check=True)
+        code, timed_out = json.loads(result.stdout)
     return code, timed_out, time.monotonic() - started
 
 
@@ -216,8 +200,8 @@ def run_module(module, ids, args, python, env, raw, unavailable, excluded=None, 
     directory = raw / module
     directory.mkdir(parents=True, exist_ok=True)
     timeout = max(args.timeout, MODULE_TIMEOUTS.get(module, 0), SLOWDOWN * oracle_seconds)
-    events, state, xml, worker_pid = (directory / name for name in ('events.jsonl', 'state.jsonl', 'junit.xml', 'worker.pid'))
-    for path in (events, state, xml, worker_pid):
+    events, state, xml = (directory / name for name in ('events.jsonl', 'state.jsonl', 'junit.xml'))
+    for path in (events, state, xml):
         path.unlink(missing_ok=True)
     worker = shlex.join([*python, str(BRIDGE), '--worker'])
     # Cases that kill this runtime's worker are left out: regrtest ignores
@@ -230,9 +214,9 @@ def run_module(module, ids, args, python, env, raw, unavailable, excluded=None, 
     command = [*python, str(BRIDGE), '-j', '1', '--python', worker,
                '--timeout', str(timeout), '--randseed', '0', '-u', args.resources,
                *ignore, '--junit-xml', str(xml), '--tempdir', str(directory), module]
-    local_env = dict(env, LIBTEST_EVENTS=str(events), LIBTEST_STATE=str(state), LIBTEST_PID=str(worker_pid))
+    local_env = dict(env, LIBTEST_EVENTS=str(events), LIBTEST_STATE=str(state))
     code, hung, elapsed = execute(command, local_env, directory, timeout + 30,
-                                  directory / 'output.log', worker_pid=worker_pid)
+                                  directory / 'output.log')
     states = json_lines(state)
     disposition = states[-1].get('state', 'MISSING') if states else 'MISSING'
     # Upstream normally implements its timeout with faulthandler exit=True;

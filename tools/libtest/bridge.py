@@ -88,8 +88,6 @@ def observe_cases():
 
 def main():
     if sys.argv[1:2] == ['--worker']:
-        with open(os.environ['LIBTEST_PID'], 'w', encoding='ascii') as stream:
-            stream.write(str(os.getpid()))
         observe_cases()
         # regrtest adds interpreter options before -m; those options already
         # apply to the parent. The actual test worker remains upstream's.

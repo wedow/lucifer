@@ -1,6 +1,6 @@
 ---
 id: luc-oof7
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-21T05:39:27Z
@@ -12,3 +12,9 @@ assignee: Greg Wedow
 
 The 11-19 and 11-20 daily floors left five test scopes alive for a day (3 processes each): test_multiprocessing_forkserver/spawn shards 108, 110, 112 of 538 under -X lucifer_stress=deopt:7. tools/libtest/run.py exited but the multiprocessing forkserver and manager processes the tests started stayed, so the scope never ended. The runner must kill every process a shard started (its process group or session, and anything still in it) when the shard ends or hits --timeout, normally or not. Test: a harness test whose fake worker starts a detached grandchild that ignores SIGTERM; after the shard returns, the grandchild is gone.
 
+
+## Notes
+
+**2026-11-21T06:02:01Z**
+
+The controller and worker can exit while descendants in separate sessions stay alive. The runner now gives each command a Linux subreaper that kills and reaps adopted descendants before returning. The detached SIGTERM-ignoring process in tools/libtest/check.py survived normal exit, a crash, and a deadline before the fix. All three cases pass with the fix.

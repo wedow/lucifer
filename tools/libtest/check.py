@@ -5,10 +5,13 @@ import json
 import os
 from pathlib import Path
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
+
+import run as libtest
 
 RUNNER = Path(__file__).with_name('run.py')
 
@@ -93,19 +96,20 @@ with open(os.environ['LIBTEST_STATE'], 'w') as stream:
     def test_killed_run_keeps_finished_module_records(self):
         # A run killed midway (the test host's memory cap, say) keeps each
         # finished module's metadata beside its rows, so --resume can finish it.
+        # Put the runner in its own session so the fake can identify it.
         (self.root / 'inventory.json').write_text(json.dumps({'free-threaded': {
             'test_fixture': {'cases': self.ids[:2]}, 'test_fixture_z': {'cases': self.ids[2:]}}}))
         fake = self.root / 'fake.py'
         fake.write_text(self.fake_probe() + """
 import signal
 if sys.argv[-1] == 'test_fixture_z':
-    os.kill(os.getppid(), signal.SIGKILL)
+    os.kill(os.getsid(os.getppid()), signal.SIGKILL)
 with open(os.environ['LIBTEST_STATE'], 'w') as stream:
     stream.write(json.dumps({'state':'PASSED'}) + '\\n')
 """)
         subprocess.run([sys.executable, str(RUNNER), 'run', '--python', shlex.join([sys.executable, str(fake)]),
                         '--runtime', 'fake', '--results', str(self.root), '--source', 'installed',
-                        '--jobs', '1', '--timeout', '5'], capture_output=True, timeout=40)
+                        '--jobs', '1', '--timeout', '5'], start_new_session=True, capture_output=True, timeout=40)
         self.assertEqual(list(json.loads((self.root / 'fake.json').read_text())['modules']), ['test_fixture'])
 
     def test_module_timeout_scales_with_the_oracle_duration(self):
@@ -151,6 +155,50 @@ with open(os.environ['LIBTEST_EVENTS'], 'w') as stream:
 import signal
 os.kill(os.getpid(), signal.SIGKILL)
 """), ['CRASH'] * 3)
+
+    @unittest.skipUnless(sys.platform == 'linux', 'requires Linux process tracking')
+    def test_shard_reaps_detached_grandchild(self):
+        for ending in ('exit', 'crash', 'timeout'):
+            with self.subTest(ending=ending):
+                ready = self.root / f'{ending}.pid'
+                child = (
+                    'import os, signal, time\n'
+                    'from pathlib import Path\n'
+                    'signal.signal(signal.SIGTERM, signal.SIG_IGN)\n'
+                    f'Path({str(ready)!r}).write_text(str(os.getpid()))\n'
+                    'time.sleep(60)\n'
+                )
+                body = f"""
+import subprocess
+subprocess.Popen([sys.executable, '-c', {child!r}], start_new_session=True)
+while not os.path.exists({str(ready)!r}) or not open({str(ready)!r}).read():
+    time.sleep(0.01)
+"""
+                if ending == 'timeout':
+                    code, hung, _ = libtest.execute(
+                        [sys.executable, '-c', 'import os, sys, time\n' + body + 'time.sleep(60)'],
+                        os.environ, self.root, 1, self.root / 'timeout.log')
+                    self.assertTrue(hung)
+                    self.assertEqual(code, -signal.SIGKILL)
+                else:
+                    if ending == 'crash':
+                        body += 'import signal; os.kill(os.getpid(), signal.SIGKILL)\n'
+                    self.assertEqual(self.run_fake(self.fake_probe() + body, timeout=2),
+                                     ['CRASH' if ending == 'crash' else 'NOTRUN'] * 3)
+
+                pid = int(ready.read_text())
+                try:
+                    fd = os.pidfd_open(pid)
+                except ProcessLookupError:
+                    continue
+                try:
+                    self.fail(f'detached process {pid} was not reaped')
+                finally:
+                    try:
+                        signal.pidfd_send_signal(fd, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    os.close(fd)
 
     def test_module_timeout(self):
         # A real regrtest timeout is reported by its parent without waiting for
