@@ -18,6 +18,7 @@ from _lucifer import (
     is_subtype, make_function, make_getset, set_slot, slot_index, type_set_bases,
     type_set_mro, call_with_locals, cell_get, static_type, new_check,
 )
+from _lucifer import update_slots as _update_slots
 
 __all__ = ('__build_class__',)
 
@@ -89,31 +90,9 @@ SLOTS, SLOT_DUNDERS = _group_slots()
 _BODY_ONLY = {'__module__': 0, '__qualname__': 0, '__firstlineno__': 0,
               '__static_attributes__': 0, '__classcell__': 0, '__classdictcell__': 0}
 
-# Slot settings for set_slot.
-_CLEAR, _THUNK, _INHERIT, _HASH_NOT_IMPLEMENTED = 0, 1, 2, 3
-_TP_HASH = slot_index('tp_hash')
-
-
 def update_slots(cls, own_only):
-    """fixup_slot_dispatchers: each slot gets the thunk when one of its
-    dunders is defined (in cls's own dict for a static type, anywhere in its
-    MRO for a class) and stays inherited otherwise; __hash__ = None makes
-    the type unhashable."""
-    d = type_dict(cls)
-    base = type_base(cls)
-    for slot, names in SLOTS:
-        found = MISSING
-        for name in names:
-            v = ns_get(d, name, MISSING) if own_only else type_lookup(cls, name)
-            if v is not MISSING:
-                found = v
-        if found is MISSING:
-            if not own_only:
-                set_slot(cls, slot, _INHERIT, base)
-        elif found is None and slot == _TP_HASH:
-            set_slot(cls, slot, _HASH_NOT_IMPLEMENTED, None)
-        else:
-            set_slot(cls, slot, _THUNK, None)
+    """fixup_slot_dispatchers, over SLOTS (the update_slots primitive)."""
+    _update_slots(cls, own_only, SLOTS)
 
 
 def builtin_sequence(cls):

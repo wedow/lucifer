@@ -56,3 +56,7 @@ on the Lucifer base and +14.3M on CPython. Importing `_collections_abc`
 alone adds +44.9M and +8.9M respectively. These imports show the scale
 of the dependency work, with the command path already present in the
 diagnostic runs. One base pair with the JIT off still adds 85.1M for site.
+
+**2026-11-21T09:30:02Z**
+
+Attribution (perf record instructions:u + a scratch per-code bytecode counter, JIT off): of the 1.04M bytecodes -S -c pass runs, 511k were _boot.update_slots, the kernel's fixup_slot_dispatchers loop (80 slot groups x type_lookup per class, kernel types installed at boot and every class statement after). Stage 1 moves that loop into an update_slots primitive in runtime/types/slots.c over _boot.SLOTS (the table stays in Python). Medians of 5, instructions:u, PYTHONHASHSEED=0, base f2985db9 -> candidate: -S -c pass 182.34M -> 147.29M (-19%); -c pass (site) 276.11M -> 239.69M; -S import os 263.77M -> 227.50M; -S import _collections_abc 227.23M -> 191.12M. Oracle 3.14.10t: 35.95M / 52.98M / 50.27M / 44.86M. tests/kernel/class_slot_dispatch.py plus 15 class/slot/thread neighbours pass plain, jit, jit-deopt.

@@ -925,8 +925,50 @@ prim_set_slot(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         ? NULL : Py_NewRef(Py_None);
 }
 
+/* update_slots(type, own_only, slotdefs): fixup_slot_dispatchers over
+   slotdefs, _boot.SLOTS's (index, dunders) pairs. Each slot gets its thunk
+   when one of its dunders is defined (in the type's own dict when own_only,
+   for a static type, anywhere in its MRO for a class) and is inherited from
+   tp_base otherwise; __hash__ = None makes the type unhashable. */
+static PyObject *
+prim_update_slots(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (nargs != 3 || !PyType_Check(args[0]) || !PyTuple_CheckExact(args[2])) {
+        lu_err_format(PyExc_TypeError, "update_slots(type, own_only, slotdefs)");
+        return NULL;
+    }
+    PyTypeObject *tp = (PyTypeObject *)args[0];
+    int own_only = PyObject_IsTrue(args[1]);
+    PyObject *dict = lu_type_dict(tp);
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(args[2]); i++) {
+        PyObject *def = PyTuple_GET_ITEM(args[2], i), *names = PyTuple_GET_ITEM(def, 1);
+        int index = (int)PyLong_AsLong(PyTuple_GET_ITEM(def, 0));
+        PyObject *found = NULL;         /* the last dunder found decides, as in slotdefs order */
+        for (Py_ssize_t j = 0; j < PyTuple_GET_SIZE(names); j++) {
+            PyObject *name = PyTuple_GET_ITEM(names, j);
+            PyObject *v = own_only ? lu_ns_get(dict, name) : _PyType_LookupRef(tp, name);
+            if (v != NULL) {
+                Py_XSETREF(found, v);
+            }
+            else if (PyErr_Occurred()) {
+                Py_XDECREF(found);
+                return NULL;
+            }
+        }
+        int how = found == NULL ? (own_only ? -1 : 2)
+            : found == Py_None && slots[index].where == IN_TYPE && slots[index].offset == offsetof(PyTypeObject, tp_hash) ? 3
+            : 1;
+        Py_XDECREF(found);
+        if (how >= 0 && lu_set_slot(tp, index, how, tp->tp_base) < 0) {
+            return NULL;
+        }
+    }
+    return Py_NewRef(Py_None);
+}
+
 PyMethodDef lu_prim_slot_methods[] = {
     { "set_slot", (PyCFunction)(void (*)(void))prim_set_slot, METH_FASTCALL, NULL },
     { "slot_index", (PyCFunction)(void (*)(void))prim_slot_index, METH_FASTCALL, NULL },
+    { "update_slots", (PyCFunction)(void (*)(void))prim_update_slots, METH_FASTCALL, NULL },
     { NULL, NULL, 0, NULL },
 };
