@@ -522,7 +522,7 @@ Raises KeyError if the dict is empty."""
         """Return an object providing a view on the dict's values."""
         return dictview_new(static_type('dict_values'), self)
 
-    def update(self, *args, **kwargs):
+    def update(self, /, *args, **kwargs):
         update_common(self, args, kwargs, 'update')
 
     @classmethod_

@@ -778,7 +778,7 @@ errors defaults to 'strict'."""
 
     # formatting
 
-    def format(self, *args, **kwargs):
+    def format(self, /, *args, **kwargs):
         return _format.str_format(self, args, kwargs)
 
     def format_map(self, mapping, /):

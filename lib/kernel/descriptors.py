@@ -460,7 +460,7 @@ class staticmethod:
     def __get__(self, instance, owner=None):
         return field_get(self, _CALLABLE)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, /, *args, **kwargs):
         return field_get(self, _CALLABLE)(*args, **kwargs)
 
     __isabstractmethod__ = getset(_wrapped_abstract)

@@ -47,7 +47,7 @@ def _namespace_reduce(self):
     return (type(self), (), self.__dict__)
 
 
-def _namespace_replace(self, **changes):
+def _namespace_replace(self, /, **changes):
     result = type(self)()
     result.__dict__.update(self.__dict__)
     result.__dict__.update(changes)

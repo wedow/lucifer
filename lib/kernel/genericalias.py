@@ -282,7 +282,7 @@ is (int,)."""
         newargs = subs_parameters(self, field_get(self, _ARGS), _ga_parameters(self), item)
         return make_alias(field_get(self, _ORIGIN), newargs, field_get(self, _STARRED))
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, /, *args, **kwargs):
         return _set_orig_class(field_get(self, _ORIGIN)(*args, **kwargs), self)
 
     def __getattribute__(self, name):
