@@ -86,3 +86,20 @@ Cycles per iteration, interleaved min of 3, origin/master vs stages a+b:
 | pstores | 66 | 63 | 110 | 121 | 5476 | 5926 |
 | floatloop | 27 | 26 | 54 | 54 | 7464 | 7820 |
 | listidx | 115 | 116 | 279 | 287 | 9082 | 9640 |
+
+## 2026-11-22: stages c+d, compare fused with its branch; immediates; results in place
+
+A compare (CMP_I, IS, RITER_DONE, ordered CMP_F) whose one reader is the next instruction, a BRANCH or a GUARD_BIT, leaves its condition in the flags (cmp, jcc instead of cmp, setcc, movzx, mov, test, jcc); constant operands that fit are immediates; ADD/SUB/MUL/AND/OR/XOR_I, float arithmetic and LOAD make their result in its own register.
+
+| row | instructions after b | after c+d | cycles after b | after c+d |
+|---|---|---|---|---|
+| tupunpack | 147 | 132 | 31 | 28 |
+| floatloop | 54 | 48 | 22 | 14 |
+| loads | 177 | 169 | 49 | 31 |
+| listsum | 84 | 77 | 17 | 16 |
+| calls | 112 | 103 | 21, 35, 24 | 26, 21, 25 |
+| stores | 158 | 153 | 120 | 115 |
+| pstores | 121 | 115 | 64, 67, 66 | 68, 64, 62 |
+| listidx | 287 | 284 | 121 | 122 |
+
+calls swings between runs on both arms (21 to 35 cycles); counters taken in one lease: 24.8 cycles after b, 21.5 after c+d.

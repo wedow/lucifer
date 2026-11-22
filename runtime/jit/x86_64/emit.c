@@ -141,6 +141,10 @@ struct asm_ {
     int parks;
     int parking;                /* the publish in hand is a park's: no code of this thread runs to count holds */
     int saved;                  /* the published call in hand saved every register at jit_regs (kept_begin) */
+    lu_v next;                  /* the instruction after the one in hand in its block, or LU_NOV */
+    lu_v flags_of;              /* the compare whose condition the flags hold, flags_cc, or LU_NOV */
+    int flags_cc;
+    int *uses;                  /* per value: how many instructions and states read it */
     uint32_t volatiles;         /* the caller-saved registers the unit allocates, by location */
     struct hold *held;          /* what the published call in hand holds of what it is handed */
     int nheld;
@@ -1515,6 +1519,7 @@ build_free(struct asm_ *a)
     free(b->owns);
     free(a->pubs);
     free(a->other.buf);
+    free(a->uses);
 }
 
 /* A label to jump to that leaves at fs. */
@@ -2677,6 +2682,120 @@ cond_of(int op, int swap)
     return swap ? sw[op] : cc[op];
 }
 
+/* How many operands and frame states read each value (a state once per
+   instruction), for a compare whose one reader is the next instruction. */
+static void
+count_use(struct lu_func *f, lu_v v, void *arg)
+{
+    if (v >= 0) {
+        ((int *)arg)[v]++;
+    }
+}
+
+static int *
+count_uses(struct lu_func *f)
+{
+    int *uses = calloc((size_t)f->nins + 1, sizeof(int));
+    for (int k = 0; k < f->norder; k++) {
+        struct lu_block *bl = &f->blocks[f->order[k]];
+        for (int i = 0; i < bl->nins; i++) {
+            struct lu_ins *in = &f->ins[bl->ins[i]];
+            lu_v ops[3] = { in->a, in->b, in->c };
+            for (int j = 0; j < 3; j++) {
+                count_use(f, ops[j], uses);
+            }
+            for (int j = 0; j < in->nargs; j++) {
+                count_use(f, in->args[j], uses);
+            }
+            if (in->fs != NULL) {
+                lu_fs_each_once(f, in->fs, ++f->marks, count_use, uses);
+            }
+        }
+    }
+    return uses;
+}
+
+/* Whether the compare v's result goes to the flags only: its one reader
+   is the instruction after it, a BRANCH or a GUARD_BIT, which then tests
+   the condition itself. The flags must survive to it: no count or stress
+   code runs before it. */
+static int
+flags_only(struct asm_ *a, lu_v v)
+{
+    if (a->next == LU_NOV || a->uses[v] != 1 || a->unit->counts != NULL) {
+        return 0;
+    }
+    struct lu_ins *n = I(a, a->next);
+    if (n->a != v) {
+        return 0;
+    }
+    return n->op == OP_BRANCH
+        || (n->op == OP_GUARD_BIT && !(a->f->stress && !(n->flags & INS_NOSTRESS)));
+}
+
+/* After a compare that set the flags to condition cc: the bit, unless the
+   next instruction reads the flags instead (flags_only). */
+static void
+def_cond(struct asm_ *a, lu_v v, int cc)
+{
+    if (flags_only(a, v)) {
+        a->flags_of = v;
+        a->flags_cc = cc;
+        return;
+    }
+    int loc = I(a, v)->loc;
+    setcc(a, cc, RAX);
+    movzx8(a, loc >= 0 && loc < LU_LOC_FPR ? loc : RAX, RAX);
+    if (!(loc >= 0 && loc < LU_LOC_FPR)) {
+        def_gpr(a, v, RAX);
+    }
+}
+
+/* A constant operand that fits a sign-extended imm32. */
+static int
+imm32_of(struct asm_ *a, lu_v v, int32_t *imm)
+{
+    struct lu_ins *in = I(a, v);
+    if ((in->op == OP_CONST_I || in->op == OP_CONST) && in->imm >= INT32_MIN && in->imm <= INT32_MAX) {
+        *imm = (int32_t)in->imm;
+        return 1;
+    }
+    return 0;
+}
+
+/* The register v's result is made in: its own, unless it is spilled or
+   is the register of `avoid` (an operand read after the result is
+   written), else RAX. */
+static int
+result_gpr(struct asm_ *a, lu_v v, lu_v avoid)
+{
+    int loc = I(a, v)->loc;
+    if (loc >= 0 && loc < LU_LOC_FPR
+        && (avoid == LU_NOV || I(a, avoid)->op == OP_CONST_I || I(a, avoid)->op == OP_CONST || I(a, avoid)->loc != loc)) {
+        return loc;
+    }
+    return RAX;
+}
+
+/* cmp a, b, with b an immediate when it can be: the condition code of
+   `op` (cond_of) as the flags then say it. */
+static int
+cmp_operands(struct asm_ *a, lu_v x, lu_v y, int op)
+{
+    int32_t imm;
+    if (imm32_of(a, y, &imm)) {
+        alu_ri(a, ALU_CMP, gpr_of(a, x, RAX), imm);
+        return cond_of(op, 0);
+    }
+    if (imm32_of(a, x, &imm)) {
+        alu_ri(a, ALU_CMP, gpr_of(a, y, RAX), imm);
+        return cond_of(op, 1);
+    }
+    int r = gpr_of(a, x, RAX);
+    alu_rr(a, ALU_CMP, r, gpr_of(a, y, RCX));
+    return cond_of(op, 0);
+}
+
 /* INLINE_LOAD_F and _I: an inline value as binary64 (int64): an unboxed
    value's raw word, or an exact float's (a compact int's) value, read only
    when the owning thread holds the object (as INLINE_LOAD takes a
@@ -3148,22 +3267,43 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         def_gpr(a, v, RAX);
         return 0;
     case OP_ADD_I: case OP_SUB_I: case OP_MUL_I: case OP_AND_I: case OP_OR_I: case OP_XOR_I: {
-        /* The exit first: under stress it emits a dec, which would clobber OF. */
+        /* The exit first: under stress it emits a dec, which would clobber OF.
+           The result is made in its own register, which no value the exit
+           reads holds (the allocator gives it to nothing live here), with a
+           constant operand as an immediate. */
         int fail = in->op == OP_ADD_I || in->op == OP_SUB_I || in->op == OP_MUL_I ? guard_exit(a, in) : -1;
-        to_gpr(a, RAX, in->a);
-        r = gpr_of(a, in->b, RCX);
-        if (in->op == OP_MUL_I) {
-            op_rr(a, 1, 0x0FAF, RAX, r);        /* imul rax, r */
+        lu_v xv = in->a, yv = in->b;
+        int32_t imm;
+        if (in->op != OP_SUB_I && !imm32_of(a, yv, &imm) && imm32_of(a, xv, &imm)) {
+            xv = in->b;
+            yv = in->a;
+        }
+        int d = result_gpr(a, v, yv), konst = imm32_of(a, yv, &imm);
+        to_gpr(a, d, xv);
+        r = konst ? -1 : gpr_of(a, yv, RCX);
+        if (in->op == OP_MUL_I && konst) {
+            rex(a, 1, d, 0, d);
+            b1(a, 0x69);
+            modrm_rr(a, d, d);
+            b4(a, imm);                         /* imul d, d, imm32 */
+        }
+        else if (in->op == OP_MUL_I) {
+            op_rr(a, 1, 0x0FAF, d, r);          /* imul d, r */
         }
         else {
             int alu = in->op == OP_ADD_I ? ALU_ADD : in->op == OP_SUB_I ? ALU_SUB
                     : in->op == OP_AND_I ? ALU_AND : in->op == OP_OR_I ? ALU_OR : ALU_XOR;
-            alu_rr(a, alu, RAX, r);
+            if (konst) {
+                alu_ri(a, alu, d, imm);
+            }
+            else {
+                alu_rr(a, alu, d, r);
+            }
         }
         if (in->op == OP_ADD_I || in->op == OP_SUB_I || in->op == OP_MUL_I) {
             jcc(a, CC_O, fail);
         }
-        def_gpr(a, v, RAX);
+        def_gpr(a, v, d);
         return 0;
     }
     case OP_NEG_I: case OP_ABS_I: {
@@ -3240,7 +3380,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     }
     case OP_ADD_F: case OP_SUB_F: case OP_MUL_F: case OP_DIV_F: {
         static const int ops[] = { [OP_ADD_F] = 0x58, [OP_SUB_F] = 0x5C, [OP_MUL_F] = 0x59, [OP_DIV_F] = 0x5E };
-        to_fpr(a, 0, in->a);
+        int loc = in->loc;
+        x = loc >= LU_LOC_FPR ? loc - LU_LOC_FPR : 0;  /* made in its own register, as the ints are */
+        to_fpr(a, x, in->a);
         y = fpr_of(a, in->b, 1);
         if (in->op == OP_DIV_F) {
             int fail = guard_exit(a, in), ok = new_label(a);
@@ -3250,8 +3392,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             jcc(a, CC_E, fail);
             bind(a, ok);
         }
-        sse_rr(a, 0xF2, ops[in->op], 0, y, 0);
-        def_fpr(a, v, 0);
+        sse_rr(a, 0xF2, ops[in->op], x, y, 0);
+        def_fpr(a, v, x);
         return 0;
     }
     case OP_NEG_F: case OP_ABS_F:
@@ -3287,12 +3429,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         return 0;
     }
     case OP_CMP_I:
-        r = gpr_of(a, in->a, RAX);
-        y = gpr_of(a, in->b, RCX);
-        alu_rr(a, ALU_CMP, r, y);
-        setcc(a, cond_of((int)in->imm, 0), RAX);
-        movzx8(a, RAX, RAX);
-        def_gpr(a, v, RAX);
+        def_cond(a, v, cmp_operands(a, in->a, in->b, (int)in->imm));
         return 0;
     case OP_CMP_F: {
         int op = (int)in->imm;
@@ -3300,11 +3437,13 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         y = fpr_of(a, in->b, 1);
         if (op == Py_LT || op == Py_LE) {
             sse_rr(a, 0x66, 0x2E, y, x, 0);
-            setcc(a, op == Py_LT ? CC_A : CC_AE, RAX);
+            def_cond(a, v, op == Py_LT ? CC_A : CC_AE);
+            return 0;
         }
         else if (op == Py_GT || op == Py_GE) {
             sse_rr(a, 0x66, 0x2E, x, y, 0);
-            setcc(a, op == Py_GT ? CC_A : CC_AE, RAX);
+            def_cond(a, v, op == Py_GT ? CC_A : CC_AE);
+            return 0;
         }
         else {
             sse_rr(a, 0x66, 0x2E, x, y, 0);
@@ -3317,12 +3456,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         return 0;
     }
     case OP_IS:
-        r = gpr_of(a, in->a, RAX);
-        y = gpr_of(a, in->b, RCX);
-        alu_rr(a, ALU_CMP, r, y);
-        setcc(a, CC_E, RAX);
-        movzx8(a, RAX, RAX);
-        def_gpr(a, v, RAX);
+        def_cond(a, v, cmp_operands(a, in->a, in->b, Py_EQ));
         return 0;
     case OP_NOT:
         to_gpr(a, RAX, in->a);
@@ -3451,6 +3585,10 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     }
     case OP_GUARD_BIT: {
         int fail = guard_exit(a, in);
+        if (a->flags_of == in->a) {
+            jcc(a, in->imm ? a->flags_cc ^ 1 : a->flags_cc, fail);     /* the compare's condition */
+            return 0;
+        }
         r = gpr_of(a, in->a, RAX);
         alu_ri(a, ALU_CMP, r, (int32_t)in->imm);
         jcc(a, CC_NE, fail);
@@ -3520,13 +3658,14 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         return 0;
     case OP_LOAD:
         r = gpr_of(a, in->a, RAX);
+        x = result_gpr(a, v, LU_NOV);
         if (in->imm2 == 4) {
-            load32(a, RAX, r, (int32_t)in->imm);
+            load32(a, x, r, (int32_t)in->imm);
         }
         else {
-            load(a, RAX, r, (int32_t)in->imm);
+            load(a, x, r, (int32_t)in->imm);
         }
-        def_gpr(a, v, RAX);
+        def_gpr(a, v, x);
         return 0;
     case OP_LIST_ITEM: {
         /* BINARY_OP_SUBSCR_LIST_INT and _TUPLE_INT in line: an index below
@@ -3970,9 +4109,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     case OP_RITER_DONE:
         r = gpr_of(a, in->a, RDX);
         cmp_mi(a, 1, r, offsetof(rangeiterobject, len), 0);
-        setcc(a, CC_LE, RAX);
-        movzx8(a, RAX, RAX);
-        def_gpr(a, v, RAX);
+        def_cond(a, v, CC_LE);
         return 0;
     case OP_RITER_NEXT:
         r = gpr_of(a, in->a, RDX);
@@ -4517,6 +4654,8 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     a->entered = new_label(a);
     a->save_all = new_label(a);
     a->restore_all = new_label(a);
+    a->flags_of = LU_NOV;
+    a->uses = count_uses(f);
     int maxargs = 0;
     for (int v = 0; v < f->nins; v++) {
         if (f->ins[v].op == OP_HELPER && f->ins[v].nargs > maxargs) {
@@ -4567,10 +4706,14 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
             if (_PyRuntime.jit.dump) {
                 fprintf(stderr, "  code +%d v%d\n", a->n, bl->ins[i]);    /* with the unit's address below: a profile by instruction */
             }
+            a->next = i + 1 < bl->nins ? bl->ins[i + 1] : LU_NOV;
             if (emit_ins(a, bl->ins[i], next, labels) < 0) {
                 free(labels);
                 build_free(a);
                 return -1;
+            }
+            if (a->flags_of != bl->ins[i] && I(a, bl->ins[i])->op != OP_BRANCH) {
+                a->flags_of = LU_NOV;           /* only the next instruction reads them */
             }
         }
         if (l2 > 0 && a->n - start > l2) {
@@ -4581,6 +4724,8 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
         }
         lu_v last = bl->nins ? bl->ins[bl->nins - 1] : LU_NOV;
         struct lu_ins *term = last != LU_NOV ? &f->ins[last] : NULL;
+        lu_v flags = a->flags_of;
+        a->flags_of = LU_NOV;
         if (term == NULL) {
             continue;
         }
@@ -4591,16 +4736,22 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
             }
         }
         else if (term->op == OP_BRANCH) {
-            int r = gpr_of(a, term->a, RAX);
-            test_rr(a, r, r);
-            if (bl->succ[1] == next) {
-                jcc(a, CC_NE, labels[bl->succ[0]]);
-            }
-            else if (bl->succ[0] == next) {
-                jcc(a, CC_E, labels[bl->succ[1]]);
+            int cc = CC_NE;
+            if (flags == term->a) {
+                cc = a->flags_cc;               /* the compare's condition, its bit never made */
             }
             else {
-                jcc(a, CC_NE, labels[bl->succ[0]]);
+                int r = gpr_of(a, term->a, RAX);
+                test_rr(a, r, r);
+            }
+            if (bl->succ[1] == next) {
+                jcc(a, cc, labels[bl->succ[0]]);
+            }
+            else if (bl->succ[0] == next) {
+                jcc(a, cc ^ 1, labels[bl->succ[1]]);
+            }
+            else {
+                jcc(a, cc, labels[bl->succ[0]]);
                 jmp(a, labels[bl->succ[1]]);
             }
         }
