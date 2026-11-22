@@ -4300,6 +4300,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         alu_rr(a, ALU_CMP, RCX, R11);
         jcc(a, CC_NE, poll);
         parked_call(a, v, (void *)lu_poll_in_place, NULL, 0);
+        if (a->f->ndeps > 0) {
+            jump_if_dead(a, poll);     /* a collection's destructors may have taken back a fact */
+        }
         jmp(a, top);
         cold_end(a);
         bind(a, done);

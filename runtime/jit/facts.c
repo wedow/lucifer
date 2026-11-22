@@ -199,15 +199,17 @@ locks_in_line(const struct lu_ins *in)
    depends on the serial state. Making a second task kills the unit with
    the world stopped, before that task exists (runtime/thread/task.c),
    which can happen only while this task is inside an instruction that may
-   run code, park or detach (lu_publishes), or at a poll, whose in-place
-   work runs destructors; a unit is entered only alive (jit.c find, emit.c
-   direct_entry). So an activation still in the unit after the switch
-   meets one of those first, and no unlocked store runs before a check
-   that the unit lives: a store some path reaches with no check since
-   checks first (INS_RECHECK), and leaves before storing. Checks are
-   CHECK_LIVE, GUARD_FRAMES that check the unit (with a dependency every
-   one does), and such a store's own. A poll is no check: a destructor's
-   own polls may have taken the reason it would leave for. */
+   run code, park or detach (lu_publishes, unsettles); a unit is entered
+   only alive (jit.c find, emit.c direct_entry). So an activation still in
+   the unit after the switch meets one of those first, and no unlocked
+   store runs before a check that the unit lives: a store some path
+   reaches with no check since checks first (INS_RECHECK), and leaves
+   before storing. Checks are CHECK_LIVE, GUARD_FRAMES that check the unit
+   (with a dependency every one does), and such a store's own. A release
+   and a poll change nothing: a release that runs C checks the unit after
+   (emit.c settle), as does a poll's work in place, and their other paths
+   run no code or leave. A check rather than the poll's reason, which a
+   destructor's own polls may have taken. */
 static void
 serial_stores(struct lu_func *f)
 {
@@ -247,7 +249,7 @@ serial_stores(struct lu_func *f)
                 if (in->op == OP_CHECK_LIVE || (in->op == OP_GUARD_FRAMES && !(in->imm & 1))) {
                     ok = 1;
                 }
-                else if (in->op == OP_POLL || lu_publishes(in) || unsettles(in)) {
+                else if (in->op != OP_DECREF && in->op != OP_POLL && (lu_publishes(in) || unsettles(in))) {
                     ok = 0;
                 }
             }
