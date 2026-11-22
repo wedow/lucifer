@@ -156,6 +156,9 @@ require that a count of the tier's does not grow with the iterations:
          by the half dozen (luc-tax0): helper calls compiled code makes, a
          few per comparison and none per item. The comparison reads sizes
          and items in line under a guard on the kind its classes share.
+  intrange tests/kernel/jit_int_range_prims.py: a hot loop steps a range
+         iterator and multiplies integers. Allow nine helpers per iteration,
+         two fewer than when both primitives run out of line.
   raresub tests/kernel/jit_rare_subclass.py, whose hot comparisons of 40
          items learned plain tuples and then meet a namedtuple now and then
          (luc-tax0), compiled as calls come (-X lucifer_jit=on): helper
@@ -314,6 +317,7 @@ GROWTH = {
                r'|jit: entries waited (\d+)', 0),
     'rare': ('jit_rare_fails.py', r'jit: executed:.* helper (\d+)', 1 / 8),
     'seqkinds': ('jit_seq_kinds.py', r'jit: executed:.* helper (\d+)', 120),
+    'intrange': ('jit_int_range_prims.py', r'jit: executed:.* helper (\d+)', 9),
     'raresub': ('jit_rare_subclass.py', r'jit: executed:.* helper (\d+)', 30, ('-X', 'lucifer_jit=on')),
     'typelookup': ('jit_type_lookup.py', r'jit: executed:.* helper (\d+)', 0),
     'retry': ('jit_retry.py', r'jit: whynot .* waiting (\d+)|jit: entries waited (\d+)', 0),

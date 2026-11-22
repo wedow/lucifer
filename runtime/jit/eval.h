@@ -564,6 +564,7 @@ int lu_ev_pop_except(struct ctx *c);
 int lu_ev_check_exc_match(struct ctx *c);
 int lu_ev_get_iter(struct ctx *c);              /* eval_iter.c */
 int lu_ev_for_iter(struct ctx *c);
+int lu_ev_rangeiter_next(struct ctx *c, lu_v it, int nops);
 /* An exact list's or tuple's iterator that does not exist, at its start;
    the kernel's seqiter_next of one, a call of nops entries, done in place
    (1), or 0 when the iterator exists. */

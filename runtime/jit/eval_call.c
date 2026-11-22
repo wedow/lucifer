@@ -673,6 +673,54 @@ lu_ev_returned(struct ctx *c, lu_v v)
     return 0;
 }
 
+static void
+call_result(struct ctx *c, int nops, lu_v r)
+{
+    for (int i = 0; i < nops; i++) {
+        lu_ev_pop(c);
+    }
+    lu_ev_push(c, r);
+}
+
+static lu_v
+int_product(struct ctx *c, lu_v a, lu_v b)
+{
+    lu_v x = lu_ev_unbox_int(c, a);
+    lu_v y = lu_ev_unbox_int(c, b);
+    lu_v r = lu_ev_emit(c, OP_MUL_I, REP_I64, x, y, LU_NOV, 0);
+    I(c, r)->fs = lu_ev_exit_fs(c);
+    return lu_ev_box_int(c, r);
+}
+
+/* A site that often overflows can still multiply two compact operands
+   inline. A product of two compact ints fits in a machine word. */
+static int
+lower_int_mul(struct ctx *c, lu_v *args, int nops)
+{
+    if (lu_ev_learn_type(c, args[1], 0) != &PyLong_Type || lu_ev_learn_type(c, args[2], 1) != &PyLong_Type) {
+        return 0;
+    }
+    if (!nospec(c, c->pc)) {
+        call_result(c, nops, int_product(c, args[1], args[2]));
+        return 1;
+    }
+    lu_v a = lu_ev_emit(c, OP_LOAD, REP_I64, lu_ev_val(c, args[1]), LU_NOV, LU_NOV,
+                       offsetof(PyLongObject, long_value.lv_tag));
+    lu_v b = lu_ev_emit(c, OP_LOAD, REP_I64, lu_ev_val(c, args[2]), LU_NOV, LU_NOV,
+                       offsetof(PyLongObject, long_value.lv_tag));
+    lu_v tags = lu_ev_emit(c, OP_OR_I, REP_I64, a, b, LU_NOV, 0);
+    lu_v compact = lu_ev_emit(c, OP_CMP_I, REP_BIT, tags, lu_ev_const_i(c, 2 << _PyLong_NON_SIZE_BITS), LU_NOV, Py_LT);
+    struct split s;
+    lu_ev_split(c, compact, &s);
+    call_result(c, nops, int_product(c, args[1], args[2]));
+    lu_ev_split_else(c, &s);
+    lu_v r = lu_ev_helper(c, H_prim, 3, args, nops);
+    lu_ev_def_type(c, r, &PyLong_Type);
+    call_result(c, nops, r);
+    lu_ev_split_end(c, &s);
+    return 1;
+}
+
 /* A call of `callable` (the self beside it, or LU_NOV) with n positional
    arguments in a[], then one value per name of kwnames (NULL: none). The
    instruction's `nops` operands are on the stack still and are popped
@@ -732,14 +780,18 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
             lu_ev_own(c, r);
         }
     }
-    else if (prim != NULL && self == LU_NOV && nkw == 0 && n == 1 && strcmp(prim, "seqiter_next") == 0
-             && lu_ev_seqiter_next(c, a[0], nops)) {
+    else if (prim != NULL && self == LU_NOV && nkw == 0 && n == 1
+             && ((strcmp(prim, "seqiter_next") == 0 && lu_ev_seqiter_next(c, a[0], nops))
+                 || (strcmp(prim, "rangeiter_next") == 0 && lu_ev_rangeiter_next(c, a[0], nops)))) {
         return 0;
     }
     else if (prim != NULL && self == LU_NOV && nkw == 0) {
         lu_v args[MAX_ARGS + 2];
         args[0] = callable;
         memcpy(args + 1, a, sizeof(lu_v) * (size_t)n);
+        if (n == 2 && strcmp(prim, "int_mul") == 0 && lower_int_mul(c, args, nops)) {
+            return 0;
+        }
         r = lu_ev_prim(c, prim, args + 1, n);
         int flags = ((PyCFunctionObject *)kc)->m_ml->ml_flags;
         int fast = (flags & (METH_VARARGS | METH_FASTCALL | METH_NOARGS | METH_O | METH_KEYWORDS | METH_METHOD))
@@ -755,10 +807,7 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
         }
     }
     if (r != LU_EV_NONE) {
-        for (int i = 0; i < nops; i++) {
-            lu_ev_pop(c);
-        }
-        lu_ev_push(c, r);
+        call_result(c, nops, r);
         return 0;
     }
     lu_v args[MAX_ARGS + 4];

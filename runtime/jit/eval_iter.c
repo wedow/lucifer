@@ -124,6 +124,31 @@ call_result(struct ctx *c, int nops, lu_v r)
     lu_ev_push(c, r);
 }
 
+static lu_v
+range_item(struct ctx *c, lu_v it)
+{
+    return lu_ev_box_int(c, lu_ev_emit(c, OP_RITER_NEXT, REP_I64, it, LU_NOV, LU_NOV, 0));
+}
+
+/* The kernel's rangeiter_next on the machine-word iterator. Check for
+   exhaustion before stepping, as FOR_ITER does. */
+int
+lu_ev_rangeiter_next(struct ctx *c, lu_v it, int nops)
+{
+    if (lu_ev_learn_type(c, it, 0) != &PyRangeIter_Type) {
+        return 0;
+    }
+    it = lu_ev_val(c, it);
+    lu_v end = lu_ev_emit(c, OP_RITER_DONE, REP_BIT, it, LU_NOV, LU_NOV, 0);
+    struct split s;
+    lu_ev_split(c, end, &s);
+    call_result(c, nops, lu_ev_konst(c, LU_MISSING));
+    lu_ev_split_else(c, &s);
+    call_result(c, nops, range_item(c, it));
+    lu_ev_split_end(c, &s);
+    return 1;
+}
+
 /* The kernel's seqiter_next(it), a call of nops stack entries, of an
    iterator that does not exist: its item, or MISSING past the end, each
    way to the call's end. 0 when it exists. */
@@ -185,7 +210,7 @@ lu_ev_for_iter(struct ctx *c)
         if (c->g->cur < 0) {
             return 0;
         }
-        v = lu_ev_box_int(c, lu_ev_emit(c, OP_RITER_NEXT, REP_I64, obj, LU_NOV, LU_NOV, 0));
+        v = range_item(c, obj);
     }
     else if (kind == LU_ITER_LIST || kind == LU_ITER_TUPLE) {
         lu_ev_guard_type(c, it, kind == LU_ITER_LIST ? &PyListIter_Type : &PyTupleIter_Type);
