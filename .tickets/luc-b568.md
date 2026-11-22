@@ -32,3 +32,7 @@ The table gives median user-space instructions over five alternating runs per ar
 | async_tree_cpu_io_mixed | 104,753,110,376 | 100,540,547,462 | -4.02% |
 | async_tree_eager_cpu_io_mixed | 98,176,303,648 | 94,107,042,889 | -4.14% |
 | async_tree_cpu_io_mixed_tg | 103,366,782,580 | 99,265,688,724 | -3.97% |
+
+**2026-11-22T05:29:16Z**
+
+Review: correct at every multiply boundary (compact, 2^62/2^63, -1 * -2^63, bools, subclasses, NotImplemented) and range case (negative and empty steps, word and long iterators, exhaustion, length_hint, shared iterators across threads); jit_int_range_edges checks them in plain, jit and jit-deopt. Whole-run minimum of 7 at n=4, base vs branch on rebased master: async_tree_cpu_io_mixed cycles -2.4%, instructions -4.1%; nbody -3.5%/-2.1%; spectral_norm -3.3%/-3.6%; fannkuch -2.4%/-0.6%; chaos -1.7%/-4.1%; raytrace -0.0%/-1.2%; deltablue -2.4%/-3.0%; mdp -3.0%/-0.1%. Compiles drop by 8-11 per row.
