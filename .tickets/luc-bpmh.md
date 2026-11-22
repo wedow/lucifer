@@ -23,3 +23,49 @@ What the disassembly shows, each general:
 
 Acceptance: instructions per iteration on the idiom rows read-4-attributes, store rows, list sum, list update, monomorphic call, tuple unpack, float accumulate, linked-list walk each down by at least 2x with cycles down; code bytes per unit down; jitcheck lanes and the kernel programs in all three modes unchanged.
 
+
+## 2026-11-22: per-opcode table (origin/master 8c0ad0cc)
+
+Executed machine instructions per inner iteration, by IR opcode of the hot unit, counted exactly by single-stepping steady-state iterations (all iterations of a row identical but the outer loop's). "C" is code a fast path calls; only listidx calls C on its hot path. CMP_I + BRANCH is the compare-and-branch pair.
+
+| opcode | loads | stores | pstores | listsum | listidx | calls | tupunpack | floatloop |
+|---|---|---|---|---|---|---|---|---|
+| total | 167 | 141 | 110 | 73 | 279 | 104 | 141 | 54 |
+| INLINE_LOAD_I | 84 (4x21) | | | | | 21 | | |
+| INLINE_STORE | | 70 (2x35) | 47 | | | | | |
+| LIST_STORE | | | | | 74 + 66 C | | | |
+| LIST_ITEM | 20 | 20 | 20 | 20 | 21 | 20 | 20 | |
+| DECREF | 16 | 13 | 13 | 15 | 30 | 16 | 28 | 6 |
+| UNBOX_INT | | | | 12 | 12 | | 26 | |
+| BOX_INT | | | | | 32 | | | |
+| ADD_I / SUB_I | 21 | 5 | 5 | 9 | 5 | 9 | 13 | |
+| CMP_I + BRANCH | 6 | 6 | 6 | 6 | 2 | 6 | 11 | 2 |
+| JUMP (edge moves) | 8 | 5 | 5 | 5 | 5 | 8 | 12 | 7 |
+| GUARD_* | 6 | 16 | 8 | | 11 | 8 | 7 | |
+| LOAD | 3 | 3 | 3 | 3 | | 3 | 9 | |
+| POLL | 3 | 3 | 3 | 3 | 3 | 6 | 3 | 3 |
+| INCREF | | | | | | | 12 | |
+| float ops, I2F | | | | | | | | 21 |
+| RITER_*, PHI | | | | | 18 | | | 15 |
+| code bytes | 6861 | 8021 | 5476 | 6057 | 9082 | 6296 | 7730 | 7464 |
+
+while_attr is left out: its Node class is made per call, so the traced call runs a fresh class through exits, not the steady state.
+
+Reading: the emitter bodies of the object protocol (attribute load 21, attribute store 35, list item 20, release 8-15, unbox 12, box 32) dominate; the compare/branch pair, the poll, edge moves and constant operands are 3-12 per row together.
+
+## 2026-11-22: stage a, registers kept across slow-path calls
+
+Releases and truth tests call C only on a slow path, which now keeps every register (a published state reads them where the slow path saved them), so they no longer count as calls to the allocator; a call clobbers only what is live across it (backward liveness per block, not the interval's span); an attribute load from a dict, which calls nothing, is not a call. Stores (INLINE_STORE*, LIST_STORE) are untouched while the lock elision changes them.
+
+| row | instructions before | after | cycles before | after | code bytes before | after |
+|---|---|---|---|---|---|---|
+| loads | 167 | 157 | 60, 71, 56 | 64, 49, 53 | 6861 | 6674 |
+| tupunpack | 141 | 132 | 42, 44, 42 | 47, 46, 46 | 7730 | 7572 |
+| floatloop | 54 | 49 | 32 | 24 | 7464 | 7391 |
+| calls | 104 | 102 | 43 | 42 | 6296 | 6192 |
+| listidx | 279 | 277 | | | 9082 | 9106 |
+| listsum | 73 | 73 | 27 | 26 | 6057 | 5960 |
+| stores | 141 | 141 | 122 | 119 | 8021 | 8103 |
+| pstores | 110 | 110 | | | 5476 | 5611 |
+
+tupunpack loses about 9% of cycles with 9 fewer instructions and no worse code on its path (the loop's values moved from frame words to registers); the likely cause is layout of a loop whose slow paths sit in line, which stage b changes.

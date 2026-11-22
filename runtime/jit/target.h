@@ -524,13 +524,12 @@ int lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned);
 double lu_jit_float_pow(double v, double w);
 
 /* Whether the register allocator treats the instruction as a call, which
-   clobbers every register but the preserved ones: an IF_CALL instruction,
-   but for a release that publishes nothing, whose slow path keeps every
-   register (luc-15mf). */
+   clobbers every register but the preserved ones: an IF_CALL instruction.
+   One that calls C only on a slow path keeps every register there. */
 static inline int
 lu_alloc_call(const struct lu_ins *in)
 {
-    return (lu_op_flags[in->op] & IF_CALL) && !(in->op == OP_DECREF && !lu_publishes(in));
+    return (lu_op_flags[in->op] & IF_CALL) != 0;
 }
 
 /* -X lucifer_jit_stats: how often compiled code takes the C path of an

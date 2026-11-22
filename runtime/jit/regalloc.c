@@ -8,9 +8,8 @@
    stretched over every block it is live through, so a value live around a
    loop holds its location through the whole loop. Values in one interval keep one location: no splitting.
 
-   A release that publishes nothing (it runs no Python a walker could see
-   the frame from) is not a call here: its slow path keeps the registers
-   (lu_alloc_call). Calls clobber every register but the ones the target says every call
+   An instruction that calls C only on a slow path is not a call here:
+   the slow path keeps the registers (lu_alloc_call). Calls clobber every register but the ones the target says every call
    preserves (the C ABI's callee-saved ones), so a value live across one
    gets one of those for its whole interval, or a spill word when none is
    free, when it is a float, or when an instruction it lives across uses
@@ -243,21 +242,43 @@ mark_memory(struct lu_func *f, lu_v v, void *set)
     ((char *)set)[v] = 1;
 }
 
-/* Whether a call at one of the n sorted positions falls inside (start, end). */
-static int
-crosses(const int *calls, int n, int start, int end)
+/* What crosses each call: walking each block backward from its live-out,
+   every value live after a call (its state's values included, which its
+   exits read after it) but the call's own is live across it; `cross`
+   gets 1 for that, and 2 when the call clobbers the preserved registers
+   (clobbers_saved). Only where a value is live counts: its interval may
+   span a call on a path that no longer needs it. */
+static void
+crossings(struct lu_func *f, struct live *L, char *cross)
 {
-    int lo = 0, hi = n;
-    while (lo < hi) {
-        int mid = (lo + hi) / 2;
-        if (calls[mid] > start) {
-            hi = mid;
-        }
-        else {
-            lo = mid + 1;
+    word *live = malloc(sizeof(word) * (size_t)L->nwords);
+    for (int k = 0; k < f->norder; k++) {
+        int b = f->order[k];
+        struct lu_block *bl = &f->blocks[b];
+        memcpy(live, L->out + (size_t)b * L->nwords, sizeof(word) * (size_t)L->nwords);
+        uint32_t mark = ++f->marks;
+        for (int i = bl->nins - 1; i >= 0; i--) {
+            lu_v v = bl->ins[i];
+            struct lu_ins *ins = &f->ins[v];
+            if (ins->op == OP_PHI) {
+                break;
+            }
+            BIT_CLR(live, v);
+            if (ins->fs != NULL) {
+                each_state_use(f, ins->fs, mark, mark_live, live);
+            }
+            if (lu_alloc_call(ins)) {
+                char bit = lu_target.clobbers_saved(ins) ? 3 : 1;
+                for (int w = 0; w < L->nwords; w++) {
+                    for (word m = live[w]; m != 0; m &= m - 1) {
+                        cross[w * 64 + __builtin_ctzll(m)] |= bit;
+                    }
+                }
+            }
+            each_operand_use(f, ins, mark_live, live);
         }
     }
-    return lo < n && calls[lo] < end;
+    free(live);
 }
 
 static int
@@ -309,8 +330,8 @@ lu_regalloc(struct lu_func *f)
     }
     struct live L;
     liveness(f, &L);
-    int *calls = malloc(sizeof(int) * (size_t)(f->nins + 1)), ncalls = 0;
-    int *hard = malloc(sizeof(int) * (size_t)(f->nins + 1)), nhard = 0;
+    char *cross = calloc((size_t)f->nins + 1, 1);
+    crossings(f, &L, cross);
     char *memory = calloc((size_t)f->nins + 1, 1);
     uint32_t mark = ++f->marks;         /* memory is the unit's: a caller's frame once */
     for (int k = 0; k < f->norder; k++) {
@@ -339,12 +360,6 @@ lu_regalloc(struct lu_func *f)
                 /* A call that publishes its state (lu_publishes) is read by
                    walkers during the call, from memory. */
                 each_state_use(f, ins->fs, mark, mark_memory, memory);
-            }
-            if (lu_alloc_call(ins)) {
-                calls[ncalls++] = ins->pos;
-                if (lu_target.clobbers_saved(ins)) {
-                    hard[nhard++] = ins->pos;
-                }
             }
         }
         /* Phi inputs are read at the end of their predecessor. */
@@ -380,8 +395,8 @@ lu_regalloc(struct lu_func *f)
         it->start = istart[v];
         it->end = iend[v];
         it->fpr = f->ins[v].rep == REP_F64;
-        it->crosses = crosses(calls, ncalls, it->start, it->end);
-        it->memory = it->crosses && (it->fpr || memory[v] || crosses(hard, nhard, it->start, it->end));
+        it->crosses = cross[v] != 0;
+        it->memory = it->crosses && (it->fpr || memory[v] || (cross[v] & 2));
     }
     qsort(iv, (size_t)n, sizeof(struct interval), by_start);
     int nspill = 0;
@@ -453,8 +468,7 @@ lu_regalloc(struct lu_func *f)
     }
     f->nspill = nspill;
     free(iv);
-    free(calls);
-    free(hard);
+    free(cross);
     free(memory);
     free(istart);
     free(iend);

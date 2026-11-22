@@ -121,6 +121,8 @@ struct asm_ {
     int frame_bytes;
     int save_all, restore_all;  /* the shared stubs of parked_call, emitted when used */
     int parks;
+    int parking;                /* the publish in hand is a park's: no code of this thread runs to count holds */
+    int saved;                  /* the published call in hand saved every register at jit_regs (kept_begin) */
     uint32_t volatiles;         /* the caller-saved registers the unit allocates, by location */
     struct hold *held;          /* what the published call in hand holds of what it is handed */
     int nheld;
@@ -1560,7 +1562,7 @@ publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
     a->pubs[a->npubs++].exit = ((struct pending *)d)->index;
     mov_ri(a, RAX, 0x1122334455667788LL);       /* d's address, patched (pack) */
     store(a, R15, offsetof(struct lu_frame, jit_desc), RAX);
-    a->nheld = d->regs ? 0 : holds_of(a, in, &a->held);
+    a->nheld = a->parking ? 0 : holds_of(a, in, &a->held);
     d->takes = takes_of(a, in, a->held, a->nheld);
     if (a->nheld > 0) {
         b1(a, 0x51);                            /* push rcx: an argument may be in it already */
@@ -1575,8 +1577,11 @@ publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
 }
 
 /* After the call: the holds go, with the call's result (RAX, or XMM0 for
-   `rep` REP_F64) kept. The values are in memory, where the allocator puts
-   what a published state names. */
+   `rep` REP_F64) kept. A held value is where the published state says it
+   is: in memory, where the allocator puts what a call's state names, or,
+   after a slow path that saved the registers (kept_begin), in a register
+   whose word at jit_regs holds it while the registers C used are not yet
+   back. */
 static void
 unpublish(struct asm_ *a, int rep)
 {
@@ -1594,8 +1599,15 @@ unpublish(struct asm_ *a, int rep)
         sse_rm(a, 0xF2, 0x11, 0, RSP, 8);
     }
     for (int k = 0; k < a->nheld; k++) {
+        int loc = I(a, a->held[k].v)->loc;
         for (int i = 0; i < a->held[k].n; i++) {
-            to_gpr(a, RDX, a->held[k].v);
+            if (a->saved && loc >= 0 && loc < LU_LOC_FPR && I(a, a->held[k].v)->op != OP_CONST) {
+                load(a, RDX, R15, offsetof(struct lu_frame, jit_regs));
+                load(a, RDX, RDX, 8 * loc);
+            }
+            else {
+                to_gpr(a, RDX, a->held[k].v);
+            }
             decref(a, RDX, NULL, NULL, -1);
         }
     }
@@ -1853,17 +1865,52 @@ extern void lu_jit_decref(PyObject *o);
    nothing has changed but the reference the call took (RAX), released
    first. Arguments are set up after parked_begin; the call is the
    caller's. */
+static void kept_begin(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d);
+
 static void
 parked_begin(struct asm_ *a, struct lu_ins *in)
 {
+    a->parking = 1;
+    kept_begin(a, in, published(a, in));
+    a->parking = 0;
+}
+
+/* A call on the slow path of an instruction that is not a call to the
+   allocator (lu_alloc_call): every register it allocates is kept across.
+   With `d`, the state the call publishes, every register goes where that
+   state reads them (jit_regs), and back after, but RAX; else the
+   caller-saved ones go to the stack. Arguments are set up after
+   kept_begin; a walker's exit is taken after kept_end, with the
+   registers back. */
+static void
+kept_begin(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
+{
+    if (d == NULL) {
+        save_volatile(a);
+        return;
+    }
     a->parks = 1;
     alu_ri(a, ALU_SUB, RSP, 256);
     b1(a, 0xE8);
-    rel32_to(a, a->save_all);                      /* call save_all */
+    rel32_to(a, a->save_all);                   /* call save_all */
     store(a, R15, offsetof(struct lu_frame, jit_regs), RSP);
-    struct lu_deopt *d = published(a, in);
     d->regs = 1;
     publish(a, in, d);
+    a->saved = 1;
+}
+
+static void
+kept_end(struct asm_ *a, struct lu_deopt *d)
+{
+    if (d == NULL) {
+        restore_volatile(a);
+        return;
+    }
+    unpublish(a, REP_NONE);
+    a->saved = 0;
+    b1(a, 0xE8);
+    rel32_to(a, a->restore_all);                /* call restore_all */
+    alu_ri(a, ALU_ADD, RSP, 256);
 }
 
 /* Leaves from a parked slow path to `exit`: the reference the call took
@@ -1891,6 +1938,7 @@ parked_end(struct asm_ *a, struct lu_ins *in)
     int kept = new_label(a), seen = new_label(a);
     int left = exit_to(a, in->fs, EXIT_FRAME, 0, 0);
     unpublish(a, REP_NONE);
+    a->saved = 0;
     cmp8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
     if (in->op == OP_POLL) {
         jcc(a, CC_E, kept);     /* the poll reads the word again itself */
@@ -2001,10 +2049,11 @@ incref(struct asm_ *a, int r)
 
 /* Py_DECREF of r: the owning thread's count above one drops in place;
    anything else (immortal, last reference, another thread's object) goes
-   to C. DECREF is a call to the allocator (no value is in a register
-   across it). When the release may run a finalizer, C runs with `d`, the
-   state of `in`, published, and a walker's write then leaves at `left`
-   if it is a label. Clobbers RAX, RCX. */
+   to C, which keeps the registers for a DECREF (kept_begin) and clobbers
+   them for the stores that release an old value. When the release may
+   run a finalizer, C runs with `d`, the state of `in`, published, and a
+   walker's write then leaves at `left` if it is a label. Clobbers RAX,
+   RCX. */
 static void settle(struct asm_ *a, int left);
 
 static void
@@ -2035,19 +2084,24 @@ decref(struct asm_ *a, int r, struct lu_ins *in, struct lu_deopt *d, int left)
     bind(a, slow);
     int keep = in != NULL && !lu_alloc_call(in);   /* a release values stay in registers across */
     if (keep) {
-        save_volatile(a);
+        kept_begin(a, in, d);
+        mov_rr(a, RDI, r);
     }
-    mov_rr(a, RDI, r);
-    if (d != NULL) {
-        publish(a, in, d);
+    else {
+        mov_rr(a, RDI, r);
+        if (d != NULL) {
+            publish(a, in, d);
+        }
     }
     call_abs(a, (void *)lu_jit_decref);
-    if (d != NULL) {
-        unpublish(a, REP_NONE);
-        settle(a, left);
-    }
     if (keep) {
-        restore_volatile(a);
+        kept_end(a, d);
+    }
+    else if (d != NULL) {
+        unpublish(a, REP_NONE);
+    }
+    if (d != NULL) {
+        settle(a, left);
     }
     bind(a, done);
 }
@@ -3109,14 +3163,11 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            other leaves. */
         int err = in->imm == 1 ? exit_to(a, in->fs, EXIT_GUARD, 0, 0)
                                : exit_to(a, in->fs, EXIT_ERROR, 1, in->drop);
-        if (in->imm != 1) {
-            publish(a, in, a->exits[a->nexits - 1].d);
-        }
+        struct lu_deopt *d = in->imm != 1 ? a->exits[a->nexits - 1].d : NULL;
+        kept_begin(a, in, d);
         mov_rr(a, RDI, r);
         call_abs(a, in->imm == 1 ? (void *)lu_truth_exact : (void *)lu_jit_truth);
-        if (in->imm != 1) {
-            unpublish(a, REP_NONE);
-        }
+        kept_end(a, d);
         b1(a, 0x83);
         b1(a, 0xF8);
         b1(a, 0xFF);                            /* cmp eax, -1 */

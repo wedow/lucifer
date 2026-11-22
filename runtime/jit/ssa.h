@@ -46,7 +46,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
 #define IF_GUARD    0x01        /* may deopt to its frame state */
 #define IF_RAISE    0x02        /* may raise: leaves through its frame state with an exception */
 #define IF_EFFECT   0x04        /* not removable when unused (a guard that stands for a raise is one) */
-#define IF_CALL     0x08        /* calls C: every register is dead across it */
+#define IF_CALL     0x08        /* calls C on its fast path: every register but the preserved is dead across it */
 #define IF_PURE     0x10        /* a value of its operands alone */
 #define IF_TERM     0x20        /* ends its block */
 #define IF_SEEN     0x40        /* its C may let a walker see the frames: it publishes its state */
@@ -90,7 +90,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(IS, REP_BIT, IF_PURE)             /* a is b */ \
     X(NOT, REP_BIT, IF_PURE) \
     X(BOOL, REP_OBJ, IF_PURE)           /* a: bit; Py_True or Py_False, immortal */ \
-    X(TRUTH, REP_BIT, IF_RAISE | IF_CALL | IF_EFFECT)       /* a: any object, as TO_BOOL decides */ \
+    X(TRUTH, REP_BIT, IF_RAISE | IF_EFFECT)       /* a: any object, as TO_BOOL decides */ \
     X(GUARD_TYPE, REP_NONE, IF_GUARD)   /* Py_TYPE(a) == imm */ \
     X(GUARD_KIND, REP_NONE, IF_GUARD)   /* Py_TYPE(a)->tp_flags has the flags imm */ \
     X(GUARD_VERSION, REP_NONE, IF_GUARD)        /* a version == imm; imm2 says which (GV_*) */ \
@@ -116,7 +116,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
                                            range, past 2**63, or when another thread holds a's lock */ \
     X(TYPED_STORE, REP_NONE, IF_GUARD | IF_EFFECT)     /* a[b] = c (i64, f64) as typecode imm; deopts as TYPED_LOAD \
                                                           and for a c out of the typecode's range */ \
-    X(ATTR_LOAD, REP_OBJ, IF_GUARD | IF_CALL)   /* a.name from its managed dict: imm version, imm2 entry; c: the name */ \
+    X(ATTR_LOAD, REP_OBJ, IF_GUARD)   /* a.name from its managed dict: imm version, imm2 entry; c: the name */ \
     X(ATTR_STORE, REP_NONE, IF_RAISE | IF_EFFECT | IF_CALL)     /* a.(name c) = b, borrowing b */ \
     X(INLINE_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN) /* a's inline word at byte imm = b, borrowing b;   \
                                                        imm2: 1 + the words after it in the class's room (0: unknown) */ \
@@ -128,7 +128,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(INLINE_STORE_I, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* the same for the int b */ \
     X(GLOBAL_LOAD, REP_OBJ, IF_GUARD | IF_CALL) /* imm: the dict, imm2: keys version << 32 | entry */ \
     X(INCREF, REP_NONE, IF_EFFECT) \
-    X(DECREF, REP_NONE, IF_EFFECT | IF_CALL)    /* imm 1: its type may run code when freed: publishes fs */ \
+    X(DECREF, REP_NONE, IF_EFFECT)    /* imm 1: its type may run code when freed: publishes fs */ \
     X(RITER_NEXT, REP_I64, IF_EFFECT)   /* a: an exact range_iterator; the next value, stepping it */ \
     X(RITER_DONE, REP_BIT, 0)           /* a: an exact range_iterator: exhausted */ \
     X(HELPER, REP_NONE, IF_EFFECT | IF_CALL)    /* imm: the helper, args; rep and effects from it */ \
