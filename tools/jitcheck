@@ -56,6 +56,12 @@ require that a count of the tier's does not grow with the iterations:
          methods and classes it knows pass keywords: the calls made as C
          makes a keyword call (-X lucifer_jit_stats' call_kw). Each binds
          its keywords at compile time and inlines.
+  bound  tests/kernel/jit_bound_calls.py, whose hot calls are of functions
+         the site met (nested functions, closures, functions passed in),
+         with keywords, defaults, keyword-only parameters and star
+         arguments on either side: the calls made as C makes a keyword or
+         star call (call_kw). Each binds at compile time, in line or not.
+         Under -X lucifer_jit=on: the interpreter learns the callees first.
   cmethods tests/kernel/jit_class_methods.py, whose hot methods call
          classmethods and staticmethods through their class: entries into
          compiled code, direct and compiled calls. The loads bind at
@@ -276,6 +282,7 @@ GROWTH = {
     'ccalls': ('jit_c_calls.py', r'direct calls (\d+)', 0),
     'shapes': ('jit_call_shapes.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
     'kwcalls': ('jit_kw_calls.py', r'jit: executed:.* call_kw (\d+)', 0),
+    'bound': ('jit_bound_calls.py', r'jit: executed:.* call_kw (\d+)', 0, ('-X', 'lucifer_jit=on')),
     'cmethods': ('jit_class_methods.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'attrorder': ('jit_attr_order.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
                   r'|jit: entries waited (\d+)', 0),

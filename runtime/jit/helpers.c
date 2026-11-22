@@ -507,6 +507,19 @@ h_cell_load(PyObject *cell)
     return PyCell_Check(cell) ? lu_cell_get(cell) : NULL;
 }
 
+/* A function's keyword-only default `name` (an exact str), or NULL
+   without an error when it has none. */
+static PyObject *
+h_kwdefault(PyObject *func, PyObject *name)
+{
+    PyObject *d = ((PyFunctionObject *)func)->func_kwdefaults;
+    PyObject *v = d != NULL && PyDict_CheckExact(d) && lu_dict_str_keys(d) ? lu_ns_get(d, name) : NULL;
+    if (v == NULL) {
+        PyErr_Clear();
+    }
+    return v;
+}
+
 static PyObject *
 h_load_attr(PyObject *owner, PyObject *name)
 {
@@ -758,7 +771,7 @@ run_resumed(struct lu_task *t, struct lu_frame *f)
 }
 
 static PyObject *call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs,
-                               PyObject *kwnames, uint64_t takes);
+                               PyObject *kwnames, uint64_t takes, int bound);
 static PyObject *polled(struct lu_task *t, PyObject *r);
 
 /* The next item, LU_MISSING when exhausted, or NULL with an exception. A
@@ -793,12 +806,12 @@ h_for_iter(PyObject *it, struct lu_opclasses *classes)
     PyObject *step = lu_next_missing_of((PyObject *)t);
     if (step != Py_None) {
         return PyFunction_Check(step) && task->ts.interp->eval_frame == NULL
-            ? polled(task, call_function(task, (PyFunctionObject *)step, &it, 1, NULL, 0)) : lu_call(step, &it, 1, NULL);
+            ? polled(task, call_function(task, (PyFunctionObject *)step, &it, 1, NULL, 0, 0)) : lu_call(step, &it, 1, NULL);
     }
     PyObject *f = _PyType_LookupRef(t, LU_ID(__next__));
     if (f != NULL && PyFunction_Check(f)) {
         PyObject *v = task->ts.interp->eval_frame == NULL
-            ? polled(task, call_function(task, (PyFunctionObject *)f, &it, 1, NULL, 0)) : lu_call(f, &it, 1, NULL);
+            ? polled(task, call_function(task, (PyFunctionObject *)f, &it, 1, NULL, 0, 0)) : lu_call(f, &it, 1, NULL);
         Py_DECREF(f);
         if (v == NULL && PyErr_ExceptionMatches(PyExc_StopIteration)) {
             PyErr_Clear();
@@ -904,10 +917,13 @@ taken_args(struct lu_task *t)
    lu_eval, which enters such a unit too. The interpreter moves its
    operands into the callee's frame: so the arguments in `takes` (bits by
    index), whose stack entries hold references of their own, give those to
-   the parameters for the call, and have them again after it. */
+   the parameters for the call, and have them again after it. `bound`:
+   the arguments are already one value per parameter, in the frame's
+   order (a call compiled code bound, keyword-only, *args and **kwargs
+   parameters included). */
 static PyObject *
 call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames,
-              uint64_t takes)
+              uint64_t takes, int bound)
 {
     PyObject *r;
     if (kwnames == NULL && lu_jit_direct(&t->ts, func, args, nargs, takes, &r)) {
@@ -917,8 +933,8 @@ call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, 
     struct lu_frame *f;
     Py_ssize_t total = nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
     takes &= total < 64 ? ((uint64_t)1 << total) - 1 : ~(uint64_t)0;
-    if (co->co_argcount == nargs && co->co_kwonlyargcount == 0 && kwnames == NULL
-        && !(co->co_flags & (CO_VARARGS | CO_VARKEYWORDS))) {
+    if (bound || (co->co_argcount == nargs && co->co_kwonlyargcount == 0 && kwnames == NULL
+                  && !(co->co_flags & (CO_VARARGS | CO_VARKEYWORDS)))) {
         if ((f = lu_frame_push(&t->ts, func, NULL)) == NULL) {
             return NULL;
         }
@@ -1100,7 +1116,7 @@ call_argv(PyObject **argv, intptr_t n, uint64_t takes)
     }
     if (t->ts.interp->eval_frame == NULL) {
         if (PyFunction_Check(callable)) {
-            r = call_function(t, (PyFunctionObject *)callable, args, (Py_ssize_t)nargs, NULL, takes >> (args - argv));
+            r = call_function(t, (PyFunctionObject *)callable, args, (Py_ssize_t)nargs, NULL, takes >> (args - argv), 0);
             goto called;
         }
         if (Py_IS_TYPE(callable, &PyMethod_Type) && argv[1] == NULL
@@ -1108,7 +1124,7 @@ call_argv(PyObject **argv, intptr_t n, uint64_t takes)
             /* A bound method: its self goes in the free word before the arguments. */
             argv[1] = PyMethod_GET_SELF(callable);
             r = call_function(t, (PyFunctionObject *)PyMethod_GET_FUNCTION(callable), argv + 1,
-                              (Py_ssize_t)nargs + 1, NULL, takes >> 1);
+                              (Py_ssize_t)nargs + 1, NULL, takes >> 1, 0);
             argv[1] = NULL;
             goto called;
         }
@@ -1126,11 +1142,11 @@ call_argv(PyObject **argv, intptr_t n, uint64_t takes)
         /* The kernel function C does not answer runs as the interpreter
            calls it: its frame pushed directly, self in the free word. */
         if (self == NULL) {
-            r = call_function(t, (PyFunctionObject *)target, args, (Py_ssize_t)nargs, NULL, takes >> (args - argv));
+            r = call_function(t, (PyFunctionObject *)target, args, (Py_ssize_t)nargs, NULL, takes >> (args - argv), 0);
         }
         else {
             argv[1] = self;
-            r = call_function(t, (PyFunctionObject *)target, argv + 1, (Py_ssize_t)nargs + 1, NULL, takes >> 1);
+            r = call_function(t, (PyFunctionObject *)target, argv + 1, (Py_ssize_t)nargs + 1, NULL, takes >> 1, 0);
             argv[1] = NULL;
         }
         goto called;
@@ -1273,12 +1289,12 @@ call_kw_argv(PyObject **argv, intptr_t n, uint64_t takes)
     }
     PyObject *r;
     if ((PyObject *)func == callable) {
-        r = call_function(t, func, args, (Py_ssize_t)nargs, kwnames, takes >> (args - argv));
+        r = call_function(t, func, args, (Py_ssize_t)nargs, kwnames, takes >> (args - argv), 0);
     }
     else {
         /* A bound method: its self goes in the free word before the arguments. */
         argv[1] = PyMethod_GET_SELF(callable);
-        r = call_function(t, func, argv + 1, (Py_ssize_t)nargs + 1, kwnames, takes >> 1);
+        r = call_function(t, func, argv + 1, (Py_ssize_t)nargs + 1, kwnames, takes >> 1, 0);
         argv[1] = NULL;
     }
     return polled(t, r);
@@ -1288,6 +1304,19 @@ static PyObject *
 h_call_kw(PyObject **argv, intptr_t n)
 {
     return call_kw_argv(argv, n, taken_args(lu_current_task()));
+}
+
+/* A Python function's call whose arguments compiled code bound to its
+   parameters: argv is the function, then one value per parameter in the
+   frame's order. */
+static PyObject *
+h_call_bound(PyObject **argv, intptr_t n)
+{
+    struct lu_task *t = lu_current_task();
+    if (declines(argv[0]) || t->ts.interp->eval_frame != NULL) {
+        return LU_JIT_DECLINED;
+    }
+    return polled(t, call_function(t, (PyFunctionObject *)argv[0], argv + 1, n - 1, NULL, taken_args(t) >> 1, 1));
 }
 
 /* CALL_FUNCTION_EX: callable(*callargs, **kwargs), kwargs NULL without. */
@@ -1666,6 +1695,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_profile] = { (void *)h_profile, "profile", REP_BIT, 0, 3 },
     [H_pic_same] = { (void *)h_pic_same, "pic_same", REP_BIT, 0, 2 },
     [H_cell_load] = { (void *)h_cell_load, "cell_load", REP_OBJ, FX_SEEN, 1 },
+    [H_kwdefault] = { (void *)h_kwdefault, "kwdefault", REP_OBJ, FX_SEEN, 2 },
     [H_str_concat] = { (void *)lu_str_concat, "str_concat", REP_OBJ, FX_RAISE, 2 },
     [H_binary_op] = { (void *)h_binary_op, "binary_op", REP_OBJ, FX_RAISE | FX_PY, 3 },
     [H_compare_op] = { (void *)h_compare_op, "compare_op", REP_OBJ, FX_RAISE | FX_PY, 3 },
@@ -1738,6 +1768,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_binary_slice_raw] = { (void *)h_binary_slice_raw, "binary_slice_raw", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 4 },
     [H_store_slice] = { (void *)h_store_slice, "store_slice", REP_BIT, FX_RAISE | FX_PY, 4 },
     [H_call_kw] = { (void *)h_call_kw, "call_kw", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
+    [H_call_bound] = { (void *)h_call_bound, "call_bound", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
     [H_call_ex] = { (void *)h_call_ex, "call_ex", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 3 },
     [H_call_spread] = { (void *)h_call_spread, "call_spread", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
     [H_splice] = { (void *)h_splice, "splice", REP_OBJ, FX_RAISE, 0 },

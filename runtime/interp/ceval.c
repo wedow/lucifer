@@ -2088,6 +2088,9 @@ op_INSTRUMENTED_CALL_FUNCTION_EX:
 op_CALL_FUNCTION_EX: {
     /* func, null, callargs, kwargs or NULL */
     PyObject *callargs = sp[-2];
+    if (_PyRuntime.jit.mode != LU_JIT_OFF && PyFunction_Check(sp[-4])) {
+        lu_jit_callee_note(code, next_instr, sp[-4], NULL, 0);     /* no cache words: the table is asked */
+    }
     SAVE_FRAME();
     if (!PyTuple_CheckExact(callargs)) {
         PyObject *t = lu_args_as_tuple(sp[-4], callargs);

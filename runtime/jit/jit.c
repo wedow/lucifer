@@ -1808,19 +1808,27 @@ lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, P
     int cmeth = kfn != NULL && bself != NULL && !PyModule_Check(bself) && PyFunction_Check(kfn)
         && (_Py_IsImmortal(kfn) || lu_has_deferred_refcount(kfn));
     if (!named && !cmeth && !PyFunction_Check(fn)) {
-        lu_cache_store32(cache + 1, tag);
+        if (tag) {
+            lu_cache_store32(cache + 1, tag);
+        }
         return;
     }
     struct lu_callee want = cmeth
-        ? (struct lu_callee){ kfn, (PyObject *)((PyCFunctionObject *)fn)->m_ml, LU_CALLEE_CMETH }
+        ? (struct lu_callee){ kfn, (PyObject *)((PyCFunctionObject *)fn)->m_ml, LU_CALLEE_CMETH, -1 }
         : (struct lu_callee){ named ? fn : f->func_code, named ? NULL : f->func_globals,
-                              (fn != callable || self != NULL ? LU_CALLEE_BOUND : 0) | (named ? 0 : LU_CALLEE_CODE) };
+                              (fn != callable || self != NULL ? LU_CALLEE_BOUND : 0) | (named ? 0 : LU_CALLEE_CODE),
+                              !named && f->func_defaults != NULL ? (int)PyTuple_GET_SIZE(f->func_defaults) : -1 };
     struct lu_jit_code *jc = state_cold(code);
     struct lu_callees *t = lu_jit_callees(code, pc);
     int n = t != NULL ? __atomic_load_n(&t->n, __ATOMIC_ACQUIRE) : 0;
+    if (tag == 0 && t != NULL && __atomic_load_n(&t->mega, __ATOMIC_ACQUIRE)) {
+        return;                 /* nothing to learn, and no cache words to say so */
+    }
     for (int i = 0; i < n; i++) {
         if (t->e[i].obj == want.obj && t->e[i].kind == want.kind && t->e[i].globals == want.globals) {
-            lu_cache_store32(cache + 1, tag);
+            if (tag) {
+                lu_cache_store32(cache + 1, tag);
+            }
             return;
         }
     }
@@ -1848,7 +1856,9 @@ lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, P
         }
         added = 1;
     }
-    lu_cache_store32(cache + 1, t->mega ? LU_CALLEE_MEGA : tag);
+    if (tag) {
+        lu_cache_store32(cache + 1, t->mega ? LU_CALLEE_MEGA : tag);
+    }
     PyMutex_Unlock(&_PyRuntime.pic_lock);
     if (added) {
         lu_jit_invalidate(LU_DEP_CALLEES, (uintptr_t)t, 0);
@@ -1999,7 +2009,9 @@ lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
         }
         if (t != NULL && k < t->n) {
             t->n = k;
-            lu_cache_store32(lu_code_start(code) + pc + 2, 0);     /* the next call relearns its callee */
+            if (lu_base_opcode(code, pc) != CALL_FUNCTION_EX) {
+                lu_cache_store32(lu_code_start(code) + pc + 2, 0);     /* the next call relearns its callee */
+            }
         }
     }
     for (int pc = 0; jc != NULL && jc->opclasses != NULL && pc < jc->ncode; pc++) {

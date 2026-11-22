@@ -52,7 +52,9 @@ lu_count_kind(const struct lu_ins *in)
     case OP_LIST_ITEM: case OP_LIST_STORE: case OP_STR_ORD: case OP_BYTES_ITEM: case OP_TYPED_LOAD:
     case OP_TYPED_STORE: case OP_STR_CMP1:
         return CNT_item;
-    case OP_HELPER: return in->imm2 > 0 ? (int)in->imm2 - 1 : CNT_helper;
+    case OP_HELPER:
+        return in->imm2 > 0 ? (int)in->imm2 - 1
+            : in->imm == H_call_kw || in->imm == H_call_ex || in->imm == H_call_spread ? CNT_call_kw : CNT_helper;
     case OP_TRUTH: return CNT_truth;
     case OP_INCREF: return CNT_incref;
     case OP_DECREF: return CNT_decref;

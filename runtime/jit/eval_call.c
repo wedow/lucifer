@@ -67,9 +67,9 @@ held_field(struct ctx *c, lu_v a, size_t offset)
 /* A function that stands, in all they share, for every function of the
    code and globals: what a call of one of them is built from, while the
    function called goes with its frame as a value (struct ctx funcv) and
-   gives its own cells. It has no defaults, so a call that needs one is
-   not bound from it. The value is guarded to be such a function; one the
-   unit made itself (`made`) is one unless its code was changed since.
+   gives its own cells and defaults (bind). The value is guarded to be
+   such a function; one the unit made itself (`made`) is one unless its
+   code was changed since.
    The unit keeps it; NULL when it cannot be made. */
 static PyObject *
 function_of_code(struct ctx *c, lu_v callable, PyObject *code, PyObject *globals, int made)
@@ -103,7 +103,7 @@ function_of_code(struct ctx *c, lu_v callable, PyObject *code, PyObject *globals
    read from the object into *self. NULL when the site says no such
    thing. */
 static PyObject *
-speculate_callee(struct ctx *c, lu_v callable, lu_v *self, lu_v *funcv)
+speculate_callee(struct ctx *c, lu_v callable, lu_v *self, lu_v *funcv, int *ndef)
 {
     if (callable == LU_NOV || LU_IS_VIRT(callable) || nospec(c, c->pc)) {
         return NULL;
@@ -122,6 +122,7 @@ speculate_callee(struct ctx *c, lu_v callable, lu_v *self, lu_v *funcv)
         }
         PyObject *one = function_of_code(c, callable, e.obj, e.globals, 0);
         *funcv = one != NULL ? callable : LU_NOV;
+        *ndef = e.ndefaults;
         return one;
     }
     if (!PyFunction_Check(e.obj)) {
@@ -292,14 +293,30 @@ takes(PyCodeObject *co, PyObject *name)
     return 0;
 }
 
+/* The defaults tuple of the function funcv, guarded to hold n items. */
+static lu_v
+defaults_of(struct ctx *c, lu_v funcv, int n)
+{
+    lu_v d = lu_ev_emit(c, OP_LOAD, REP_OBJ, funcv, LU_NOV, LU_NOV, offsetof(PyFunctionObject, func_defaults));
+    lu_ev_guard(c, OP_GUARD_NOT_NULL, d, 0);
+    lu_ev_guard_type(c, d, &PyTuple_Type);
+    lu_v g = lu_ev_guard(c, OP_GUARD_IS, d, n);
+    I(c, g)->imm2 = GI_FIELD | (int64_t)offsetof(PyVarObject, ob_size);
+    return d;
+}
+
 /* fn's parameters bound to the call's operands, as initialize_locals
    binds them, into `locals` (the callee's slots, unset): args[0..npos)
    positional, then one value per name of kwnames (NULL: none). 0 where
    the binding would raise or needs what the state cannot hold (keywords
    for **kwargs), and the call is made out of line. `dry` only answers
-   that, emitting nothing. */
+   that, emitting nothing. A function of fn's code called as the value
+   funcv gives its own defaults, read where the call is made: `ndef`
+   positional ones (what the site's first function had; -1 none), and the
+   keyword-only ones its dict holds. */
 static int
-bind(struct ctx *c, PyFunctionObject *fn, const lu_v *args, int npos, PyObject *kwnames, lu_v *locals, int dry)
+bind(struct ctx *c, PyFunctionObject *fn, lu_v funcv, int ndef, const lu_v *args, int npos, PyObject *kwnames,
+     lu_v *locals, int dry)
 {
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
     int argc = co->co_argcount, total = argc + co->co_kwonlyargcount;
@@ -328,24 +345,57 @@ bind(struct ctx *c, PyFunctionObject *fn, const lu_v *args, int npos, PyObject *
         locals[j] = dry ? 0 : args[npos + k];
     }
     PyObject *defaults = fn->func_defaults, *kwdefaults = fn->func_kwdefaults;
-    int first = argc - (defaults != NULL ? (int)PyTuple_GET_SIZE(defaults) : 0);
+    int nd = funcv != LU_NOV ? (ndef > 0 ? ndef : 0) : defaults != NULL ? (int)PyTuple_GET_SIZE(defaults) : 0;
+    int first = argc - nd;
+    lu_v dv = LU_NOV;
     for (int i = 0; i < argc; i++) {
-        if (locals[i] == LU_NOV) {
-            if (i < first) {
-                return 0;
-            }
-            locals[i] = dry ? 0 : lu_ev_konst(c, PyTuple_GET_ITEM(defaults, i - first));
+        if (locals[i] != LU_NOV) {
+            continue;
+        }
+        if (i < first) {
+            return 0;
+        }
+        if (dry) {
+            locals[i] = 0;
+        }
+        else if (funcv == LU_NOV) {
+            locals[i] = lu_ev_konst(c, PyTuple_GET_ITEM(defaults, i - first));
+        }
+        else {
+            dv = dv != LU_NOV ? dv : defaults_of(c, funcv, nd);
+            locals[i] = held_field(c, dv, offsetof(PyTupleObject, ob_item) + sizeof(PyObject *) * (size_t)(i - first));
         }
     }
     for (int j = argc; j < total; j++) {
-        if (locals[j] == LU_NOV) {
-            PyObject *d = kwdefaults != NULL && PyDict_CheckExact(kwdefaults) ? lu_ns_get(kwdefaults, names[j]) : NULL;
+        if (locals[j] != LU_NOV) {
+            continue;
+        }
+        PyObject *d = NULL;
+        if (funcv == LU_NOV) {
+            d = kwdefaults != NULL && PyDict_CheckExact(kwdefaults) ? lu_ns_get(kwdefaults, names[j]) : NULL;
             if (d == NULL) {
                 PyErr_Clear();
                 return 0;
             }
-            locals[j] = dry ? 0 : lu_ev_konst(c, d);
+            Py_DECREF(d);
+            /* A constant while its dict holds it: the dict can change in
+               place, its function's version not. */
+            d = dry ? NULL : lu_ev_dict_const(c, kwdefaults, NULL, names[j]);
+        }
+        if (dry) {
+            locals[j] = 0;
+        }
+        else if (d != NULL) {
+            locals[j] = lu_ev_konst(c, d);
             Py_DECREF(d);       /* the unit holds its constants */
+        }
+        else {
+            /* The function's own dict, asked when the call is made (a
+               function of fn's code, or a dict with no version): the
+               interpreter raises when it lacks the name. */
+            lu_v a[2] = { funcv != LU_NOV ? funcv : lu_ev_konst(c, (PyObject *)fn), lu_ev_konst(c, names[j]) };
+            locals[j] = lu_ev_helper(c, H_kwdefault, 2, a, 0);
+            lu_ev_guard(c, OP_GUARD_NOT_NULL, locals[j], 0);
         }
     }
     if (dry) {
@@ -426,8 +476,8 @@ class_init(struct ctx *c, PyTypeObject *tp, int nargs, PyFunctionObject **init, 
    after the call. 0 when the call is to be made out of line instead
    (nothing was changed); -1 when the build failed. */
 static int
-inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, lu_v *args, int npos, PyObject *kwnames, int nops,
-            PyTypeObject *cls, int ret)
+inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, int ndef, lu_v *args, int npos, PyObject *kwnames,
+            int nops, PyTypeObject *cls, int ret)
 {
     struct gctx *g = c->g;
     if (kwnames == NULL && cls == NULL && (((PyCodeObject *)fn->func_code)->co_flags & LU_CO_KERNEL)) {
@@ -454,7 +504,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, lu_v *args, int npo
             return 0;
         }
     }
-    if (!bind(c, fn, args, npos, kwnames, locals, 1)) {
+    if (!bind(c, fn, funcv, ndef, args, npos, kwnames, locals, 1)) {
         if (_PyRuntime.jit.debug) {
             fprintf(stderr, "jit: %s not inlined at %s@%d: its arguments do not bind\n",
                     PyUnicode_AsUTF8(co->co_qualname), PyUnicode_AsUTF8(c->code->co_qualname), c->pc);
@@ -469,7 +519,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, lu_v *args, int npo
            it, and is __init__'s first argument. */
         args[0] = lu_ev_new_instance(c, cls);
     }
-    bind(c, fn, args, npos, kwnames, locals, 0);
+    bind(c, fn, funcv, ndef, args, npos, kwnames, locals, 0);
     if (!(co->co_flags & LU_CO_KERNEL) && funcv == LU_NOV) {
         /* Its code and defaults are what the unit was built from. */
         lu_v gv = lu_ev_guard(c, OP_GUARD_VERSION, lu_ev_konst(c, (PyObject *)fn), fn->func_version);
@@ -525,6 +575,57 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, lu_v *args, int npo
     }
     lu_ev_merge(c, k->rets, k->nrets, c->next);
     g->ret_missing = k->missing;
+    return 1;
+}
+
+/* A call of fn with keywords that is not made in line, bound here: the
+   function called (funcv, else fn itself) gets one value per parameter.
+   Positional parameters alone are a positional call (h_call, which enters
+   a compiled callee directly); keyword-only and star parameters go in the
+   frame's order (h_call_bound). 0 when the arguments do not bind here. */
+static int
+call_bound(struct ctx *c, PyFunctionObject *fn, lu_v funcv, int ndef, lu_v *args, int npos, PyObject *kwnames,
+           int nops)
+{
+    PyCodeObject *co = (PyCodeObject *)fn->func_code;
+    if (!PyCode_Check(co) || !(co->co_flags & CO_OPTIMIZED) || (co->co_flags & LU_CO_KERNEL)
+        || (funcv == LU_NOV && fn->func_version < 2)) {
+        return 0;
+    }
+    int star = (co->co_flags & CO_VARARGS) != 0, kwstar = (co->co_flags & CO_VARKEYWORDS) != 0;
+    int nparams = co->co_argcount + co->co_kwonlyargcount + star + kwstar, plain = nparams == co->co_argcount;
+    if (nparams > MAX_ARGS) {
+        return 0;
+    }
+    for (int i = 0; i < npos + (int)PyTuple_GET_SIZE(kwnames); i++) {
+        if (args[i] == LU_NOV) {
+            return 0;
+        }
+    }
+    lu_v argv[MAX_ARGS + 2], *locals = argv + 2;
+    for (int i = 0; i < nparams; i++) {
+        locals[i] = LU_NOV;
+    }
+    if (!bind(c, fn, funcv, ndef, args, npos, kwnames, locals, 1)) {
+        return 0;
+    }
+    for (int i = 0; i < nparams; i++) {
+        locals[i] = LU_NOV;
+    }
+    bind(c, fn, funcv, ndef, args, npos, kwnames, locals, 0);
+    if (funcv == LU_NOV) {
+        /* Its code and defaults are what the call was bound from. */
+        lu_v gv = lu_ev_guard(c, OP_GUARD_VERSION, lu_ev_konst(c, (PyObject *)fn), fn->func_version);
+        I(c, gv)->imm2 = GV_FUNC;
+    }
+    argv[0] = funcv != LU_NOV ? funcv : lu_ev_konst(c, (PyObject *)fn);
+    argv[1] = LU_NOV;           /* h_call's free word */
+    lu_v r = plain ? lu_ev_helper(c, H_call, 2 + nparams, argv, nops)
+                   : (argv[1] = argv[0], lu_ev_helper(c, H_call_bound, 1 + nparams, argv + 1, nops));
+    for (int i = 0; i < nops; i++) {
+        lu_ev_pop(c);
+    }
+    lu_ev_push(c, r);
     return 1;
 }
 
@@ -740,6 +841,7 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
     PyObject *kc = lu_ev_const(c, callable);
     lu_v r = LU_EV_NONE, written = self;        /* the self the instruction has, for a call made as written */
     lu_v funcv = LU_NOV;
+    int ndef = -1;
     if (kc == NULL && self == LU_NOV && callable >= 0 && I(c, callable)->op == OP_HELPER
         && I(c, callable)->imm == H_make_function && !nospec(c, c->pc)) {
         /* A function the unit made (a lambda passed down to where it is called). */
@@ -748,7 +850,7 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
         funcv = kc != NULL ? callable : LU_NOV;
     }
     if (kc == NULL && site) {
-        kc = speculate_callee(c, callable, &self, &funcv);
+        kc = speculate_callee(c, callable, &self, &funcv, &ndef);
     }
     if (n == 1 && nkw == 0 && self == LU_NOV && kc != NULL && PyFunction_Check(kc)
         && kc == lu_next_missing_of((PyObject *)&PyGen_Type)) {
@@ -835,7 +937,7 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
             lu_ev_push(c, obj);
             return 0;
         }
-        int done = inline_call(c, init, LU_NOV, args, n + 1, NULL, nops, tp, LU_RETURN_INIT);
+        int done = inline_call(c, init, LU_NOV, -1, args, n + 1, NULL, nops, tp, LU_RETURN_INIT);
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }
@@ -860,9 +962,12 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
             args[k++] = self;
         }
         memcpy(args + k, a, sizeof(lu_v) * (size_t)(n + nkw));
-        int done = inline_call(c, fn, funcv, args, k + n, kwnames, nops, NULL, LU_RETURN_PUSH);
+        int done = inline_call(c, fn, funcv, ndef, args, k + n, kwnames, nops, NULL, LU_RETURN_PUSH);
         if (done != 0) {
             return done < 0 ? -1 : 0;
+        }
+        if (nkw > 0 && call_bound(c, fn, funcv, ndef, args, k + n, kwnames, nops)) {
+            return 0;
         }
     }
     /* As the interpreter makes it: argv is the callable, self or NULL, the
@@ -900,7 +1005,7 @@ lu_ev_kernel_op(struct ctx *c, int kid, lu_v *args, int n, int nops, int ret)
         known &= t != NULL && t != &PyList_Type && t != &PyDict_Type && t != &PySet_Type && t != &PyByteArray_Type
             && t != &PyDictIterKey_Type && t != &PyDictIterValue_Type && t != &PyDictIterItem_Type;
     }
-    return known ? inline_call(c, (PyFunctionObject *)kf, LU_NOV, args, n, NULL, nops, NULL, ret) : 0;
+    return known ? inline_call(c, (PyFunctionObject *)kf, LU_NOV, -1, args, n, NULL, nops, NULL, ret) : 0;
 }
 
 /* The ways of lu_ev_kernel_arms for v from its k-th type on. */
@@ -1008,8 +1113,9 @@ lu_ev_call_kw(struct ctx *c)
     for (int i = 0; i < n; i++) {
         a[i] = lu_ev_peek(c, n - i + 1);
     }
+    lu_ev_feedback(c, c->cache);
     return call_values(c, lu_ev_peek(c, n + 3), lu_ev_peek(c, n + 2), a, n - (int)PyTuple_GET_SIZE(names), names,
-                       n + 3, 0);
+                       n + 3, 1);
 }
 
 /* CALL_FUNCTION_EX whose star argument is an exact tuple, whole or after
@@ -1107,5 +1213,5 @@ lu_ev_call_ex(struct ctx *c)
         lu_ev_konst(c, names);  /* the unit keeps the names it calls with */
         Py_DECREF(names);
     }
-    return call_values(c, callable, LU_NOV, a, n, names, 4, 0);
+    return call_values(c, callable, LU_NOV, a, n, names, 4, 1);
 }

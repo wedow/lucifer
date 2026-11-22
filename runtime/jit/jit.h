@@ -310,6 +310,7 @@ struct lu_callee {
     PyObject *globals;          /* LU_CALLEE_CODE: the functions' globals, LU_CALLEE_CMETH: the method
                                    def, compared but never read */
     int kind;
+    int ndefaults;              /* LU_CALLEE_CODE: the positional defaults of the first function met (-1: none) */
 };
 struct lu_callees {
     int n;                      /* entries published, release-stored after the entry */
@@ -320,7 +321,9 @@ struct lu_callees {
 /* The site's table, or NULL. The site is the CALL's code unit. */
 struct lu_callees *lu_jit_callees(PyCodeObject *code, int pc);
 /* The interpreter's CALL met a callee whose tag (lu_jit_observe_callee) is
-   not the one its cache words hold: its table learns it. */
+   not the one its cache words hold: its table learns it. A tag of 0: the
+   instruction has no cache words (CALL_FUNCTION_EX), `cache` is the one
+   after it, and the table is asked each time. */
 void lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, PyObject *self, uint32_t tag);
 /* The tag a megamorphic site's cache words hold. */
 #define LU_CALLEE_MEGA UINT32_MAX
