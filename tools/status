@@ -142,7 +142,7 @@ def corpus_timings(command, reference=None):
             json.dump(reference, ref)
             ref.flush()
             args += ["--reference", ref.name]
-        for group in batches(names, 8):
+        for group in batches(names, 20):
             done = run(args + ["--programs", ",".join(group)], "TIMING_PREFIX")
             results.update(last_json(done.stdout))
             logs.append(done.stdout)
