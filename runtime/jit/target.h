@@ -198,6 +198,7 @@ struct lu_unit {
     int nouts;
     int64_t hot_calls;          /* calls made at one of them that make it hot: about what a build of the unit costs */
     int dead;
+    int serial;                 /* stores without locks while serial (facts.c): keeps the task's unlocked_jit */
     /* While dead and not yet freed: the list of such units, and
        how many activations a collection found in it (jit.c). */
     struct lu_unit *dying_next, **dying_pprev;
@@ -282,6 +283,7 @@ void lu_code_free(void *code, size_t n);
 struct lu_jit_act {
     struct lu_unit *unit;
     struct lu_jit_act *outer;
+    intptr_t unlocked_jit;      /* the task's word before a serial unit's entry, back at its end */
 };
 
 /* Entries a unit counts: one past this many is not retired, and the count

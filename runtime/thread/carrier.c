@@ -41,6 +41,7 @@ start_runtime(void)
     interp->subproc = mi_subproc_main();
     _PyRuntime.main_thread = pthread_self();
     _PyRuntime.qsbr.wr_seq = _PyRuntime.qsbr.rd_seq = 1;        /* QSBR_INITIAL */
+    lu_serial_start();
     interp->gc.enabled = 1;
     interp->gc.young_threshold = 2000;
     interp->gc.old_threshold[0] = interp->gc.old_threshold[1] = 10;

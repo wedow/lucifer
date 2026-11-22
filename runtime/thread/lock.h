@@ -79,10 +79,13 @@ void _PyParkingLot_UnparkAll(const void *address);
 /* A tstate's critical_section word is a tagged pointer to its top section. */
 #define _Py_CRITICAL_SECTION_INACTIVE       0x1
 #define _Py_CRITICAL_SECTION_TWO_MUTEXES    0x2
-#define _Py_CRITICAL_SECTION_MASK           0x3
+#define LU_CRITICAL_SECTION_UNLOCKED        0x4     /* begun while serial: no lock, counted (critical_section.c) */
+#define _Py_CRITICAL_SECTION_MASK           0x7
 
 /* Called by the syscall bracket (lu_syscall_begin and lu_syscall_end). */
 void _PyCriticalSection_SuspendAll(PyThreadState *tstate);
 void _PyCriticalSection_Resume(PyThreadState *tstate);
+/* The switch to parallel made by a task with sections open (runtime/thread/task.c). */
+void lu_critical_sections_after_switch(PyThreadState *tstate);
 
 #endif

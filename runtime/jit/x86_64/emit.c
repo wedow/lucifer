@@ -50,9 +50,11 @@ const struct lu_target lu_target = {
 
 #define SAVES 40                /* rbx, r12-r15 below rbp */
 #define RESULT_SLOT (-(SAVES + 8))
-#define CALL_SLOT (-(SAVES + 32))       /* the struct lu_jit_call of the direct call in hand (target.h) */
+#define CALL_BYTES 32                   /* sizeof (struct lu_jit_call), rounded to 8 */
+#define CALL_SLOT (RESULT_SLOT - CALL_BYTES)    /* the struct lu_jit_call of the direct call in hand (target.h) */
 #define CALL_AT(field) (CALL_SLOT + (int32_t)offsetof(struct lu_jit_call, field))
-#define SPILL_BASE (-(SAVES + 40))
+#define SPILL_BASE (CALL_SLOT - 8)
+static_assert(sizeof(struct lu_jit_call) <= CALL_BYTES, "the call's record outgrew its slot");
 
 struct patch {
     int at;                     /* the rel32 to fill */
@@ -138,6 +140,7 @@ struct asm_ {
     int entered;                /* past the prologue's own setup, where the direct entry joins it */
     struct lu_func *f;
     struct lu_unit *unit;
+    int serial;                 /* it stores without locks while serial: keeps the task's unlocked_jit */
     int frame_bytes;
     int save_all, restore_all;  /* the shared stubs of parked_call, emitted when used */
     int parks;
@@ -1771,6 +1774,9 @@ publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
     a->pubs[a->npubs++].exit = ((struct pending *)d)->index;
     mov_ri(a, RAX, 0x1122334455667788LL);       /* d's address, patched (pack) */
     store(a, R15, offsetof(struct lu_frame, jit_desc), RAX);
+    if (a->serial) {
+        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 0);    /* what returns from the call checks before an unlocked store */
+    }
     a->nheld = a->parking ? 0 : holds_of(a, in, &a->held);
     d->takes = takes_of(a, in, a->held, a->nheld);
     if (a->nheld > 0) {
@@ -1861,6 +1867,12 @@ direct_done(struct asm_ *a, uint64_t takes, int done)
     load(a, R11, RBP, CALL_AT(act.outer));
     store(a, R14, offsetof(struct lu_task, jit_act), R11);
     load(a, RDI, RBP, CALL_AT(act.unit));
+    int plain = new_label(a);
+    cmp_mi(a, 0, RDI, offsetof(struct lu_unit, serial), 0);
+    jcc(a, CC_E, plain);
+    load(a, R11, RBP, CALL_AT(act.unlocked_jit));
+    store(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), R11);                   /* a serial callee's entry kept it */
+    bind(a, plain);
     cmp_mi(a, 0, RDI, offsetof(struct lu_unit, stale), 0);
     jcc(a, CC_E, fresh);
     store(a, RBP, CALL_SLOT, RAX);              /* the record's activation is over: room for EAX */
@@ -2046,10 +2058,15 @@ call_helper(struct asm_ *a, lu_v v, struct lu_deopt *d)
     }
 }
 
-/* Leaves at `dead` once the unit is dead (runtime/jit/deps.c). Clobbers R11. */
+/* Leaves at `dead` once the unit is dead (runtime/jit/deps.c). Clobbers R11.
+   In a unit that stores without locks, the task's unlocked_jit is 1 first:
+   what follows may store before the next check (runtime/thread/task.c). */
 static void
 jump_if_dead(struct asm_ *a, int dead)
 {
+    if (a->serial) {
+        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 1);
+    }
     mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
     cmp_mi(a, 0, R11, 0, 0);
     jcc(a, CC_NE, dead);
@@ -2154,6 +2171,9 @@ parked_end(struct asm_ *a, struct lu_ins *in)
     int left = exit_to(a, in->fs, EXIT_FRAME, 0, 0);
     unpublish(a, REP_NONE);
     a->saved = 0;
+    if (a->f->ndeps > 0) {
+        jump_if_dead(a, seen);     /* nor did the code it ran take back a fact */
+    }
     cmp8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
     if (in->op == OP_POLL) {
         jcc(a, CC_E, kept);     /* the poll reads the word again itself */
@@ -4300,9 +4320,6 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         alu_rr(a, ALU_CMP, RCX, R11);
         jcc(a, CC_NE, poll);
         parked_call(a, v, (void *)lu_poll_in_place, NULL, 0);
-        if (a->f->ndeps > 0) {
-            jump_if_dead(a, poll);     /* a collection's destructors may have taken back a fact */
-        }
         jmp(a, top);
         cold_end(a);
         bind(a, done);
@@ -4495,6 +4512,10 @@ direct_entry(struct asm_ *a)
     int at = a->n, decline = new_label(a), hooked = new_label(a), counted = new_label(a);
     saves(a);
     mov_rr(a, R14, RDI);
+    if (a->serial) {
+        load(a, R11, R14, (int32_t)offsetof(struct lu_task, unlocked_jit));
+        store(a, R9, offsetof(struct lu_jit_call, act.unlocked_jit), R11);     /* back at its end */
+    }
     jump_if_dead(a, decline);                   /* a caller may have read the entry before it died */
     load(a, RAX, R14, offsetof(struct lu_task, carrier));
     cmp_rm(a, RSP, RAX, offsetof(struct lu_carrier, jit_stack_floor));
@@ -4660,6 +4681,10 @@ direct_entry(struct asm_ *a)
     }
     jmp(a, a->entered);
     bind(a, decline);
+    if (a->serial) {
+        load(a, R11, R9, offsetof(struct lu_jit_call, act.unlocked_jit));
+        store(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), R11);
+    }
     mov_ri(a, RAX, 0);
     jmp(a, a->epilogue);
     return at;
@@ -4714,6 +4739,10 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     struct asm_ A = { 0 }, *a = &A;
     a->f = f;
     a->unit = unit;
+    for (int i = 0; i < f->ndeps; i++) {
+        a->serial |= f->deps[i].kind == LU_DEP_SERIAL;
+    }
+    unit->serial = a->serial;
     a->epilogue = new_label(a);
     a->entered = new_label(a);
     a->save_all = new_label(a);
@@ -4728,7 +4757,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     }
     /* After push rbp the stack is 16-aligned and the five saves leave it
        8 off, so the frame is 8 more than a multiple of 16. */
-    int bytes = 32 + 8 * f->nspill + 8 * maxargs;
+    int bytes = 8 + CALL_BYTES + 8 * f->nspill + 8 * maxargs;     /* RESULT_SLOT, CALL_SLOT, spills, arguments */
     a->frame_bytes = ((bytes + 15) & ~15) + 8;
     for (int v = 0; v < f->nins; v++) {
         int32_t loc = f->ins[v].loc;

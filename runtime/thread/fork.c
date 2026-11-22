@@ -144,6 +144,7 @@ child_after_fork(struct _is *interp, struct lu_task *self)
     _PyRuntime.sched.carriers[0] = _PyRuntime.sched.carriers[1] = NULL;
     self->pinned_for_life = 1;
     lu_jit_code_after_fork();
+    lu_serial_after_fork(interp, self);
 }
 
 long

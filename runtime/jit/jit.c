@@ -1208,6 +1208,34 @@ lu_jit_backend(void)
     return lu_target.name;
 }
 
+/* Entering a unit that stores without locks while serial: the task's
+   unlocked_jit is 1 before the unit's death is read, so that the switch to
+   parallel either sees the word or is seen (runtime/thread/task.c); the
+   word before is the activation's, back when it ends. Whether it died. */
+static int
+serial_entry_dead(struct lu_task *t, struct lu_jit_act *act)
+{
+    act->unlocked_jit = t->unlocked_jit;
+    if (!act->unit->serial) {
+        return 0;
+    }
+    __atomic_store_n(&t->unlocked_jit, 1, __ATOMIC_RELAXED);
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    if (!__atomic_load_n(&act->unit->dead, __ATOMIC_RELAXED)) {
+        return 0;
+    }
+    __atomic_store_n(&t->unlocked_jit, act->unlocked_jit, __ATOMIC_RELAXED);
+    return 1;
+}
+
+static void
+serial_exit(struct lu_task *t, struct lu_jit_act *act)
+{
+    if (act->unit->serial) {
+        __atomic_store_n(&t->unlocked_jit, act->unlocked_jit, __ATOMIC_RELAXED);
+    }
+}
+
 enum lu_jit_result
 lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
 {
@@ -1241,7 +1269,10 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     if (__atomic_load_n(&u->entries, __ATOMIC_RELAXED) == HOT_ENTRIES && grow(jc, u)) {
         return LU_JIT_NONE;
     }
-    struct lu_jit_act act = { u, task->jit_act };
+    struct lu_jit_act act = { u, task->jit_act, 0 };
+    if (serial_entry_dead(task, &act)) {
+        return LU_JIT_NONE;
+    }
     task->jit_act = &act;
     bump_entries(u);
     int debug = _PyRuntime.jit.debug;
@@ -1249,6 +1280,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         fprintf(stderr, "jit: enter %s@%d\n", PyUnicode_AsUTF8(code->co_qualname), pc);
     }
     int r = u->fn(ts, frame, result);
+    serial_exit(task, &act);
     task->jit_act = act.outer;
     left(u);
     if (debug) {
@@ -1348,7 +1380,10 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     if (u == NULL) {
         return 0;
     }
-    struct lu_jit_act act = { u, task->jit_act };
+    struct lu_jit_act act = { u, task->jit_act, 0 };
+    if (serial_entry_dead(task, &act)) {
+        return 0;
+    }
     task->jit_act = &act;
     if (_PyRuntime.jit.debug) {
         fprintf(stderr, "jit: call %s\n", PyUnicode_AsUTF8(code->co_qualname));
@@ -1359,6 +1394,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     frame->previous = &entry;
     ts->current_frame = (struct _PyInterpreterFrame *)frame;
     if (!gen && pc > 1 && prologue(frame) < 0) {
+        serial_exit(task, &act);
         task->jit_act = act.outer;
         left(u);
         *result = lu_eval_continue(ts, 1);
@@ -1370,6 +1406,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     count(gen ? &stats.resumes_compiled : &stats.direct, 1);
     bump_entries(u);
     int r = u->fn(ts, frame, result);
+    serial_exit(task, &act);
     task->jit_act = act.outer;
     left(u);
     if (r == LU_JIT_YIELD) {
@@ -1417,6 +1454,7 @@ lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, 
     if (r == 0) {
         return 0;
     }
+    serial_exit((struct lu_task *)ts, &call.act);     /* the entry kept the word in the record */
     ((struct lu_task *)ts)->jit_act = call.act.outer;
     left(call.act.unit);
     if (r == LU_JIT_RETURN) {

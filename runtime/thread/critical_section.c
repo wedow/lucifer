@@ -4,18 +4,20 @@
    locks released, whenever the task detaches (the syscall bracket, or a
    park inside PyMutex_Lock), and the top one is resumed on attach.
 
-   While serial (lu_serial) a section takes no lock: it is pushed suspended,
-   as a detach leaves it, naming its mutexes, and a resume while serial
-   locks nothing. Once parallel, the first attach (or the switch itself, for
-   the task that makes it) locks the top section, and each outer one locks
-   when the one above it ends, as after any detach; a section ends with an
-   unlock only if it is active. So the locks stay balanced whenever the
-   state changes, which it does only where the task may detach. */
+   While serial (lu_serial) a section takes no lock. It is counted in the
+   task first (lu_unlocked_begin), then pushed suspended, as a detach leaves
+   it, naming its mutexes, and tagged LU_CRITICAL_SECTION_UNLOCKED; a resume
+   while serial leaves it so. It stops counting when it ends or when a
+   resume locks it, which is the first resume after the switch to parallel:
+   the attach after a detach for the top section, the end of the section
+   above for an outer one, as after any detach. The switch waits until no
+   attached task counts one (runtime/thread/task.c); a section ends with an
+   unlock only if it is active. */
 
 #include "thread/lock.h"
 
-static_assert(_Alignof(PyCriticalSection) >= 4,
-              "critical section must be aligned to at least 4 bytes");
+static_assert(_Alignof(PyCriticalSection) >= 8,
+              "critical section must be aligned to at least 8 bytes");
 
 static PyCriticalSection *
 untag_critical_section(uintptr_t tag)
@@ -150,6 +152,9 @@ _PyCriticalSection_Resume(PyThreadState *tstate)
     uintptr_t p = tstate->critical_section;
     PyCriticalSection *c = untag_critical_section(p);
     assert(!is_active(p));
+    if ((p & LU_CRITICAL_SECTION_UNLOCKED) && lu_serial()) {
+        return;
+    }
 
     PyMutex *m1 = c->_cs_mutex;
     c->_cs_mutex = NULL;
@@ -174,27 +179,46 @@ _PyCriticalSection_Resume(PyThreadState *tstate)
         c2->_cs_mutex2 = m2;
     }
 
-    tstate->critical_section &= ~_Py_CRITICAL_SECTION_INACTIVE;
+    tstate->critical_section &= ~(uintptr_t)(_Py_CRITICAL_SECTION_INACTIVE | LU_CRITICAL_SECTION_UNLOCKED);
+    if (p & LU_CRITICAL_SECTION_UNLOCKED) {
+        lu_unlocked_end((struct lu_task *)tstate);      /* locked now */
+    }
 }
 
-/* A section begun while serial: on the stack, suspended. */
-static void
-push_suspended(PyCriticalSection *c, PyMutex *m, uintptr_t tag)
+/* The task made the switch with sections open: they become suspended ones,
+   as a detach would leave them, and the top one is resumed, locking it. */
+void
+lu_critical_sections_after_switch(PyThreadState *tstate)
 {
-    PyThreadState *tstate = PyThreadState_GetUnchecked();
+    for (uintptr_t *tagptr = &tstate->critical_section; *tagptr != 0;
+         tagptr = &untag_critical_section(*tagptr)->_cs_prev) {
+        if (*tagptr & LU_CRITICAL_SECTION_UNLOCKED) {
+            *tagptr &= ~(uintptr_t)LU_CRITICAL_SECTION_UNLOCKED;
+            lu_unlocked_end((struct lu_task *)tstate);
+        }
+    }
+    if (tstate->critical_section & _Py_CRITICAL_SECTION_INACTIVE) {
+        _PyCriticalSection_Resume(tstate);
+    }
+}
+
+/* A section begun while serial, counted already: on the stack, suspended. */
+static void
+push_unlocked(PyThreadState *tstate, PyCriticalSection *c, PyMutex *m, uintptr_t tag)
+{
     c->_cs_mutex = m;
     c->_cs_prev = tstate->critical_section;
-    tstate->critical_section = (uintptr_t)c | tag | _Py_CRITICAL_SECTION_INACTIVE;
+    tstate->critical_section = (uintptr_t)c | tag | _Py_CRITICAL_SECTION_INACTIVE | LU_CRITICAL_SECTION_UNLOCKED;
 }
 
 void
 PyCriticalSection_BeginMutex(PyCriticalSection *c, PyMutex *m)
 {
-    if (lu_serial()) {
-        push_suspended(c, m, 0);
+    PyThreadState *tstate = PyThreadState_GetUnchecked();
+    if (lu_unlocked_begin((struct lu_task *)tstate)) {
+        push_unlocked(tstate, c, m, 0);
     }
     else if (lock_fast(m)) {
-        PyThreadState *tstate = PyThreadState_GetUnchecked();
         c->_cs_mutex = m;
         c->_cs_prev = tstate->critical_section;
         tstate->critical_section = (uintptr_t)c;
@@ -234,7 +258,10 @@ PyCriticalSection_End(PyCriticalSection *c)
         return;
     }
     PyThreadState *tstate = PyThreadState_GetUnchecked();
-    if (is_active(tstate->critical_section)) {
+    if (tstate->critical_section & LU_CRITICAL_SECTION_UNLOCKED) {
+        lu_unlocked_end((struct lu_task *)tstate);
+    }
+    else if (is_active(tstate->critical_section)) {
         PyMutex_Unlock(c->_cs_mutex);
     }
     pop(tstate, c);
@@ -260,9 +287,10 @@ PyCriticalSection2_BeginMutex(PyCriticalSection2 *c, PyMutex *m1, PyMutex *m2)
         m2 = tmp;
     }
 
-    if (lu_serial()) {
+    PyThreadState *ts = PyThreadState_GetUnchecked();
+    if (lu_unlocked_begin((struct lu_task *)ts)) {
         c->_cs_mutex2 = m2;
-        push_suspended(&c->_cs_base, m1, _Py_CRITICAL_SECTION_TWO_MUTEXES);
+        push_unlocked(ts, &c->_cs_base, m1, _Py_CRITICAL_SECTION_TWO_MUTEXES);
     }
     else if (lock_fast(m1)) {
         if (lock_fast(m2)) {
@@ -300,7 +328,10 @@ PyCriticalSection2_End(PyCriticalSection2 *c)
         return;
     }
     PyThreadState *tstate = PyThreadState_GetUnchecked();
-    if (is_active(tstate->critical_section)) {
+    if (tstate->critical_section & LU_CRITICAL_SECTION_UNLOCKED) {
+        lu_unlocked_end((struct lu_task *)tstate);
+    }
+    else if (is_active(tstate->critical_section)) {
         if (c->_cs_mutex2) {
             PyMutex_Unlock(c->_cs_mutex2);
         }

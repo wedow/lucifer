@@ -639,8 +639,10 @@ store_at(PyObject *obj, Py_ssize_t offset, PyObject *v, uint64_t bits)
     PyObject *old = NULL;
     int done;
     uint8_t unlocked = _Py_UNLOCKED;
-    if (lu_serial()) {
-        done = store_locked(obj, i, v, bits, &old);     /* one task runs, and is not switched out here */
+    struct lu_task *t = lu_current_task();
+    if (lu_unlocked_begin(t)) {
+        done = store_locked(obj, i, v, bits, &old);     /* serial: counted, no lock */
+        lu_unlocked_end(t);
     }
     else if (__atomic_compare_exchange_n(&obj->ob_mutex._bits, &unlocked, _Py_LOCKED, 0,
                                          __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {

@@ -196,20 +196,22 @@ locks_in_line(const struct lu_ins *in)
 }
 
 /* While serial (lu_serial), such a store takes no lock, and the unit
-   depends on the serial state. Making a second task kills the unit with
-   the world stopped, before that task exists (runtime/thread/task.c),
-   which can happen only while this task is inside an instruction that may
-   run code, park or detach (lu_publishes, unsettles); a unit is entered
-   only alive (jit.c find, emit.c direct_entry). So an activation still in
-   the unit after the switch meets one of those first, and no unlocked
-   store runs before a check that the unit lives: a store some path
-   reaches with no check since checks first (INS_RECHECK), and leaves
-   before storing. Checks are CHECK_LIVE, GUARD_FRAMES that check the unit
-   (with a dependency every one does), and such a store's own. A release
-   and a poll change nothing: a release that runs C checks the unit after
-   (emit.c settle), as does a poll's work in place, and their other paths
-   run no code or leave. A check rather than the poll's reason, which a
-   destructor's own polls may have taken. */
+   depends on the serial state: making a second task kills the unit, then
+   waits until the first task is detached or shows no unit that may store
+   unlocked before its next check (its unlocked_jit, runtime/thread/task.c).
+   The word is 1 from the unit's entry and from every check of it (CHECK_LIVE,
+   a GUARD_FRAMES that checks it, which with a dependency every one does, a
+   release's or a park's check after its C, and such a store's own), set
+   before the check reads the unit; and 0 from every publish, before the
+   call. So the switch goes on only where the task is out of the unit, in a
+   published call, or detached; and it then meets an instruction that may
+   run code, park or detach (lu_publishes, unsettles), the only ones a
+   published call or a detach can be in, before its next unlocked store. A
+   store some path reaches with no check since one checks first
+   (INS_RECHECK), and leaves before storing if the unit died. A release and
+   a poll change nothing: their C ends with a check (emit.c settle and
+   parked_end), and their other paths run no code. A poll is no check: a
+   destructor's own polls may have taken the reason it would leave for. */
 static void
 serial_stores(struct lu_func *f)
 {

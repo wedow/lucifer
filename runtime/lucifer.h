@@ -602,6 +602,10 @@ struct lu_task {
                                    while the task is between carriers */
     int sent_returned;          /* compiled SEND's kernel send: whether the receiver returned */
     struct lu_jit_act *jit_act; /* the innermost activation of a compiled unit (runtime/jit/jit.c) */
+    /* While serial (lu_serial), what leaves object locks out, which the switch to parallel
+       waits on (runtime/thread/task.c); plain stores of this task's, read by the switcher. */
+    intptr_t unlocked_jit;      /* 1: a unit built while serial may store unlocked before its next check */
+    intptr_t unlocked_c;        /* C critical sections and stretches running without their lock */
 };
 
 /* Quiescent-state-based reclamation (runtime/thread/qsbr.c), after
@@ -1148,6 +1152,37 @@ lu_serial(void)
 {
     return !__atomic_load_n(&_PyRuntime.parallel, __ATOMIC_RELAXED);
 }
+
+/* A C stretch that leaves its object lock out while serial: counted in the
+   task (unlocked_c) before the state is read, so that the switch, which
+   sets parallel and then issues a process-wide barrier before it reads the
+   count, either finds it counted or is seen here. 1: go without the lock,
+   and end with lu_unlocked_end; 0: take the lock. */
+static inline int
+lu_unlocked_begin(struct lu_task *t)
+{
+    if (t == NULL || !lu_serial()) {
+        return 0;
+    }
+    __atomic_store_n(&t->unlocked_c, t->unlocked_c + 1, __ATOMIC_RELAXED);
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);    /* the count before the load, as the program has it */
+    if (lu_serial()) {
+        return 1;
+    }
+    __atomic_store_n(&t->unlocked_c, t->unlocked_c - 1, __ATOMIC_RELAXED);
+    return 0;
+}
+
+static inline void
+lu_unlocked_end(struct lu_task *t)
+{
+    __atomic_store_n(&t->unlocked_c, t->unlocked_c - 1, __ATOMIC_RELAXED);
+}
+
+/* The serial state at startup and in a fork's child (runtime/thread/task.c):
+   serial only where the process-wide barrier the switch needs is to be had. */
+void lu_serial_start(void);
+void lu_serial_after_fork(struct _is *interp, struct lu_task *self);
 
 /* The header PyObject_Init gives a block, written once: the type (a heap
    type's referenced), owned by this thread with one local reference, and
