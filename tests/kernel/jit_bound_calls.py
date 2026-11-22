@@ -3,10 +3,12 @@
 # local, called with keywords, defaults, keyword-only parameters and star
 # arguments on either side. tools/jitcheck runs this at two sizes and
 # requires that no call per iteration is made as C makes a keyword or star
-# call: each binds its arguments at compile time and goes on in line.
-# After the loops, the callees' defaults change (replaced, and changed in
-# place) and the callee is replaced under the compiled calls, and calls
-# that cannot bind raise the interpreter's errors.
+# call: each binds its arguments at compile time, in line or not (a
+# recursive callee, one too large to inline, a bound method, a generator,
+# a coroutine, a function made in the loop with its defaults). The
+# callees' defaults change (replaced, and changed in place, also while a
+# loop runs) and the callee is replaced under the compiled calls.
+# jit_bound_edges.py has the calls that do not bind.
 import sys
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
@@ -93,28 +95,77 @@ print(hot(3, make(2)))              # functions of the same code, other cells an
 print(hot(3, (lambda w, h=0, depth=0: w + h + depth,) + fns[1:]))
 print(fns[4](0))                    # the default list made once
 
-area, fwd, lead, keep, acc, order = make(3)
-d = {'depth': 2}
-calls = [
-    lambda: area(),
-    lambda: area(1, 2, 3),
-    lambda: area(1, w=2),
-    lambda: area(1, x=2),
-    lambda: area(1, h=2, h2=3),
-    lambda: fwd(1, 2, 3),
-    lambda: fwd(1, **{'w': 2}),
-    lambda: fwd(1, **{1: 2}),
-    lambda: fwd(**{'w': 1}, **{'w': 2}),
-    lambda: lead(),
-    lambda: lead(1, **d, depth=3),
-    lambda: order(1),
-    lambda: order(a=1),
-    lambda: order(a=1, b=2, d=4),
-    lambda: keep(*[1, 2], **d),
-]
-for call in calls:
+# Calls made out of line: a recursive callee and one too large to inline,
+# with keyword-only and star parameters.
+def rec(n, *, k=0):
+    if n == 0:
+        return k
+    return rec(n - 1, k=k + 1)
+
+
+def large(a, *rest, k=1, **kw):
+    x = a
+    for j in range(3):
+        x = x * 3 + j
+        x = x ^ (x >> 2)
+        x = x - k
+        x = x * 3 + j
+        x = x ^ (x >> 2)
+        x = x - k
+        x = x * 3 + j
+        x = x ^ (x >> 2)
+        x = x - k
+        x = x % 1000003
+    for j in range(2):
+        x = x + len(rest) * 7 + len(kw) * 11
+        x = x * 5 % 1000033
+        x = x + len(rest) * 7 + len(kw) * 11
+        x = x * 5 % 1000033
+    return x
+
+
+class Box:
+    def __init__(self, v):
+        self.v = v
+
+    def get(self, plus=0, *, times=1):
+        return (self.v + plus) * times
+
+
+def gen(n, *, step=1):
+    for j in range(0, n, step):
+        yield j
+
+
+async def coro(x, *more, by=2):
+    return x * by + len(more)
+
+
+def cellparam(x, *, y=1):
+    return (lambda: x + y)()
+
+
+def posonly(a, /, **kw):
+    return a + len(kw) * 10 + kw.get('a', 0) * 100
+
+
+def run(c):
     try:
-        print(call())
-    except TypeError as e:
-        print('TypeError', e)
-print(d)
+        c.send(None)
+    except StopIteration as e:
+        return e.value
+
+
+def more(n):
+    s = 0
+    b = Box(3)
+    for i in range(n):
+        s += rec(3, k=1) + rec(2, k=i) + large(i, k=2) + large(i, 1, 2, k=3, q=4)
+        s += b.get(plus=i) + b.get(1, times=2) + sum(gen(5, step=2)) + run(coro(i, 1, by=3))
+        s += cellparam(i, y=2) + cellparam(x=i) + posonly(1, a=2) + posonly(i, b=i)
+        add = lambda x, y=i, z=2, *, w=3: x + y * z + w      # made here, its defaults with it
+        s += add(1) + add(1, w=0) + add(x=2, z=1)
+    return s
+
+
+print(more(N))

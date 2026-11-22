@@ -293,6 +293,29 @@ takes(PyCodeObject *co, PyObject *name)
     return 0;
 }
 
+/* How many positional defaults SET_FUNCTION_ATTRIBUTE gave the function
+   the unit made as fv (H_make_function): -1 for none, or a number it
+   cannot see. */
+static int
+made_defaults(struct ctx *c, lu_v fv)
+{
+    int n = -1;
+    for (int k = fv + 1; k < c->g->f->nins; k++) {
+        struct lu_ins *in = I(c, k);
+        if (in->op != OP_HELPER || in->imm != H_set_function_attribute || in->args[0] != fv) {
+            continue;
+        }
+        PyObject *d = lu_ev_const(c, in->args[1]);
+        if (I(c, in->args[2])->op != OP_CONST_I || I(c, in->args[2])->imm != 1) {
+            continue;           /* not MAKE_FUNCTION_DEFAULTS */
+        }
+        n = d != NULL && PyTuple_CheckExact(d) ? (int)PyTuple_GET_SIZE(d)
+            : in->args[1] >= 0 && I(c, in->args[1])->op == OP_HELPER && I(c, in->args[1])->imm == H_build_tuple
+            ? I(c, in->args[1])->nargs : -1;
+    }
+    return n;
+}
+
 /* The defaults tuple of the function funcv, guarded to hold n items. */
 static lu_v
 defaults_of(struct ctx *c, lu_v funcv, int n)
@@ -373,7 +396,8 @@ bind(struct ctx *c, PyFunctionObject *fn, lu_v funcv, int ndef, const lu_v *args
         PyObject *d = NULL;
         if (funcv == LU_NOV) {
             d = kwdefaults != NULL && PyDict_CheckExact(kwdefaults) ? lu_ns_get(kwdefaults, names[j]) : NULL;
-            if (d == NULL) {
+            if (d == NULL || nospec(c, c->pc)) {
+                Py_XDECREF(d);  /* none, or a site whose guards kept failing */
                 PyErr_Clear();
                 return 0;
             }
@@ -848,6 +872,7 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
         PyObject *code = lu_ev_const(c, I(c, callable)->args[0]), *globals = lu_ev_const(c, I(c, callable)->args[1]);
         kc = code != NULL && globals != NULL ? function_of_code(c, callable, code, globals, 1) : NULL;
         funcv = kc != NULL ? callable : LU_NOV;
+        ndef = made_defaults(c, callable);
     }
     if (kc == NULL && site) {
         kc = speculate_callee(c, callable, &self, &funcv, &ndef);

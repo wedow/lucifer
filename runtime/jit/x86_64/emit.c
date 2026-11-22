@@ -1709,7 +1709,7 @@ static uint64_t
 takes_of(struct asm_ *a, struct lu_ins *in, const struct hold *h, int nh)
 {
     struct lu_fs *fs = in->fs;
-    if (in->op != OP_HELPER || (in->imm != H_call && in->imm != H_call_kw)) {
+    if (in->op != OP_HELPER || (in->imm != H_call && in->imm != H_call_kw && in->imm != H_call_bound)) {
         return 0;
     }
     int *left = lu_ir_alloc(a->f, sizeof(int) * (size_t)(nh ? nh : 1));
