@@ -69,3 +69,20 @@ Releases and truth tests call C only on a slow path, which now keeps every regis
 | pstores | 110 | 110 | | | 5476 | 5611 |
 
 tupunpack loses about 9% of cycles with 9 fewer instructions and no worse code on its path (the loop's values moved from frame words to registers); the likely cause is layout of a loop whose slow paths sit in line, which stage b changes.
+
+## 2026-11-22: stage b, slow paths out of line; branches kept within 32-byte windows
+
+Slow paths go to a second code stream that ends the unit, so fast paths fall through. Alone that made tuple unpacking about 9% slower: counters showed the loop decoded by the legacy decoders (70-80 uops per iteration from MITE, 15-40 from the uop cache), the JCC erratum's microcode fix keeping no branch that crosses or ends at a 32-byte boundary in the uop cache. Branches (with the compare they fuse with) are now moved to the next window by NOPs: tupunpack 120 of 120 uops from the uop cache, 3 cycles of 67 undelivered. The NOPs count as instructions (loads +22, others +6 to +17).
+
+Cycles per iteration, interleaved min of 3, origin/master vs stages a+b:
+
+| row | cycles before | after | instructions before | after | code bytes before | after |
+|---|---|---|---|---|---|---|
+| tupunpack | 47 | 30 | 141 | 147 | 7730 | 8023 |
+| loads | 65 | 37 | 167 | 177 | 6861 | 7078 |
+| listsum | 22 | 16 | 73 | 84 | 6057 | 6298 |
+| calls | 39 | 22 | 104 | 112 | 6296 | 6568 |
+| stores | 123 | 115 | 141 | 158 | 8021 | 8546 |
+| pstores | 66 | 63 | 110 | 121 | 5476 | 5926 |
+| floatloop | 27 | 26 | 54 | 54 | 7464 | 7820 |
+| listidx | 115 | 116 | 279 | 287 | 9082 | 9640 |

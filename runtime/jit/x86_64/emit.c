@@ -17,6 +17,7 @@
 #include "interp/perf.h"
 #include "interp/gen.h"
 
+#include <cpuid.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -104,9 +105,26 @@ struct hold {
     int n;
 };
 
+/* Code is written to one of two streams: the hot one, in emission order,
+   and the cold one, which the unit's code ends with: slow paths, so that
+   the fast path falls through instead of jumping over them. A position in
+   the cold stream is COLD plus its offset there until the streams join. */
+#define COLD (1 << 30)
+
+struct stream {
+    uint8_t *buf;
+    int n, cap;
+};
+
 struct asm_ {
     uint8_t *buf;
     int n, cap;
+    struct stream other;        /* the stream not being written */
+    int cold;                   /* cold_begin depth */
+    int fuse_at, fuse_end;      /* the last flag-setting instruction a jcc may fuse with (here positions) */
+    int last_bind;              /* where the last label was bound (here position) */
+    int skips[16];              /* per depth past the first: the label after a nested slow path (emitters
+                                   nest a few deep) */
     int *labels;
     int nlabels, caplabels;
     struct patch *patches;
@@ -192,6 +210,83 @@ b8(struct asm_ *a, int64_t x)
     put(a, &x, 8);
 }
 
+/* The position the next byte goes to. */
+static int
+here(struct asm_ *a)
+{
+    return a->n + (a->cold ? COLD : 0);
+}
+
+static void
+swap_streams(struct asm_ *a)
+{
+    struct stream s = a->other;
+    a->other = (struct stream){ a->buf, a->n, a->cap };
+    a->buf = s.buf;
+    a->n = s.n;
+    a->cap = s.cap;
+}
+
+static void jmp(struct asm_ *a, int label);
+static int new_label(struct asm_ *a);
+static void bind(struct asm_ *a, int label);
+
+/* Code from here to cold_end goes to the cold stream, after the code
+   before it, which does not fall into it. A slow path inside a slow path
+   is already cold: the code before it jumps over it. */
+static void
+cold_begin(struct asm_ *a)
+{
+    if (a->cold++ == 0) {
+        swap_streams(a);
+        return;
+    }
+    a->skips[a->cold - 2] = new_label(a);
+    jmp(a, a->skips[a->cold - 2]);
+}
+
+static void
+cold_end(struct asm_ *a)
+{
+    if (--a->cold == 0) {
+        swap_streams(a);
+        return;
+    }
+    bind(a, a->skips[a->cold - 1]);
+}
+
+/* The cold stream after the hot one: positions become offsets. */
+static int
+joined(struct asm_ *a, int pos)
+{
+    return pos >= COLD ? pos - COLD + a->n : pos;
+}
+
+static void
+join_streams(struct asm_ *a)
+{
+    if (a->n + a->other.n > a->cap) {
+        grow_buf(a, a->other.n);
+    }
+    memcpy(a->buf + a->n, a->other.buf, (size_t)a->other.n);
+    if (_PyRuntime.jit.dump) {
+        fprintf(stderr, "  cold +%d\n", a->n);     /* where the slow paths begin */
+    }
+    for (int i = 0; i < a->nlabels; i++) {
+        a->labels[i] = joined(a, a->labels[i]);
+    }
+    for (int i = 0; i < a->npatches; i++) {
+        a->patches[i].at = joined(a, a->patches[i].at);
+    }
+    for (uint32_t i = 0; i < a->npubs; i++) {
+        a->pubs[i].at = joined(a, a->pubs[i].at);
+    }
+    a->deopts_patch = joined(a, a->deopts_patch);
+    a->n += a->other.n;
+    free(a->other.buf);
+    a->other = (struct stream){ 0 };
+}
+
 static int
 new_label(struct asm_ *a)
 {
@@ -206,7 +301,81 @@ new_label(struct asm_ *a)
 static void
 bind(struct asm_ *a, int label)
 {
-    a->labels[label] = a->n;
+    a->labels[label] = here(a);
+    a->last_bind = here(a);
+}
+
+/* An instruction that sets the flags, which a jcc right after it may
+   fuse with, began at `start`. */
+static void
+sets_flags(struct asm_ *a, int start)
+{
+    a->fuse_at = start;
+    a->fuse_end = here(a);
+}
+
+/* Whether this is one of the cores whose JCC erratum microcode fix
+   keeps no branch that crosses or ends at a 32-byte boundary in the
+   decoded-uop cache: Intel family 6, Skylake through Comet Lake (the
+   models Intel lists for the erratum). Asked once; every thread gets the
+   same answer. */
+static int
+jcc_erratum(void)
+{
+    static int known;           /* 0: not asked; 1: no; 2: yes */
+    if (__atomic_load_n(&known, __ATOMIC_RELAXED) == 0) {
+        unsigned eax, ebx, ecx, edx, vendor[3];
+        int yes = 0;
+        if (__get_cpuid(0, &eax, &vendor[0], &vendor[2], &vendor[1]) && memcmp(vendor, "GenuineIntel", 12) == 0
+            && __get_cpuid(1, &eax, &ebx, &ecx, &edx) && ((eax >> 8) & 0xF) == 6) {
+            unsigned model = ((eax >> 4) & 0xF) | ((eax >> 12) & 0xF0);
+            static const unsigned models[] = { 0x4E, 0x5E, 0x55, 0x8E, 0x9E, 0xA5, 0xA6 };
+            for (size_t i = 0; i < sizeof models / sizeof models[0]; i++) {
+                yes |= model == models[i];
+            }
+        }
+        __atomic_store_n(&known, yes ? 2 : 1, __ATOMIC_RELAXED);
+    }
+    return __atomic_load_n(&known, __ATOMIC_RELAXED) == 2;
+}
+
+/* A branch of `len` bytes is about to be written in the hot stream. On
+   those cores a loop of branches that cross or end at a 32-byte boundary
+   runs from the legacy decoders: NOPs move such a branch, with the
+   compare it fuses with, to the next window. Units start 64-byte aligned
+   (codemem.c), so offsets say where windows are. */
+static void
+window_branch(struct asm_ *a, int len)
+{
+    static const uint8_t nops[][11] = {         /* the longest a decoder takes without a stall */
+        { 0x90 }, { 0x66, 0x90 }, { 0x0F, 0x1F, 0x00 }, { 0x0F, 0x1F, 0x40, 0x00 },
+        { 0x0F, 0x1F, 0x44, 0x00, 0x00 }, { 0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00 },
+        { 0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00 }, { 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 },
+        { 0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 },
+        { 0x66, 0x2E, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 },
+        { 0x66, 0x66, 0x2E, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 },
+    };
+    if (a->cold || !jcc_erratum()) {
+        return;
+    }
+    int fused = a->fuse_end == a->n && a->last_bind <= a->fuse_at;
+    int start = fused ? a->fuse_at : a->n, end = a->n + len;
+    if (start / 32 == (end - 1) / 32 && end % 32 != 0) {
+        return;
+    }
+    int pad = 32 - start % 32, moved = a->n - start;
+    if (a->n + pad > a->cap) {
+        grow_buf(a, pad);
+    }
+    memmove(a->buf + start + pad, a->buf + start, (size_t)moved);
+    for (int at = start, left = pad; left > 0;) {
+        int k = left < 11 ? left : 11;
+        memcpy(a->buf + at, nops[k - 1], (size_t)k);
+        at += k;
+        left -= k;
+    }
+    a->n += pad;
+    a->fuse_at = a->fuse_end = -1;
 }
 
 static void
@@ -216,7 +385,7 @@ rel32_to(struct asm_ *a, int label)
         a->cappatches = a->cappatches ? a->cappatches * 2 : 64;
         a->patches = realloc(a->patches, sizeof(struct patch) * (size_t)a->cappatches);
     }
-    a->patches[a->npatches++] = (struct patch){ a->n, label };
+    a->patches[a->npatches++] = (struct patch){ here(a), label };
     b4(a, 0);
 }
 
@@ -326,36 +495,44 @@ enum { ALU_ADD = 0, ALU_OR = 1, ALU_AND = 4, ALU_SUB = 5, ALU_XOR = 6, ALU_CMP =
 static void
 alu_rr(struct asm_ *a, int alu, int dst, int src)
 {
+    int at = here(a);
     op_rr(a, 1, 0x01 + alu * 8, src, dst);
+    sets_flags(a, at);
 }
 
 static void
 alu_ri(struct asm_ *a, int alu, int dst, int32_t imm)
 {
+    int at = here(a);
     rex(a, 1, 0, 0, dst);
     b1(a, 0x81);
     modrm_rr(a, alu, dst);
     b4(a, imm);
+    sets_flags(a, at);
 }
 
 /* cmp r32, imm8 (sign-extended) */
 static void
 cmp32_ri8(struct asm_ *a, int r, int imm)
 {
+    int at = here(a);
     rex(a, 0, 0, 0, r);
     b1(a, 0x83);
     modrm_rr(a, ALU_CMP, r);
     b1(a, imm);
+    sets_flags(a, at);
 }
 
 /* op qword/dword [base+disp], imm32 */
 static void
 alu_mi(struct asm_ *a, int w, int alu, int base, int32_t disp, int32_t imm)
 {
+    int at = here(a);
     rex(a, w, 0, 0, base);
     b1(a, 0x81);
     modrm_mem(a, alu, base, disp);
     b4(a, imm);
+    sets_flags(a, at);
 }
 
 static void
@@ -368,10 +545,12 @@ cmp_mi(struct asm_ *a, int w, int base, int32_t disp, int32_t imm)
 static void
 cmp8_mi(struct asm_ *a, int base, int32_t disp, int imm)
 {
+    int at = here(a);
     rex(a, 0, 0, 0, base);
     b1(a, 0x80);
     modrm_mem(a, ALU_CMP, base, disp);
     b1(a, imm);
+    sets_flags(a, at);
 }
 
 static void
@@ -396,13 +575,17 @@ store_mi(struct asm_ *a, int base, int32_t disp, int32_t imm)
 static void
 cmp_rm(struct asm_ *a, int reg, int base, int32_t disp)
 {
+    int at = here(a);
     op_rm(a, 1, 0x3B, reg, base, disp);
+    sets_flags(a, at);
 }
 
 static void
 test_rr(struct asm_ *a, int x, int y)
 {
+    int at = here(a);
     op_rr(a, 1, 0x85, y, x);
+    sets_flags(a, at);
 }
 
 static void
@@ -427,6 +610,7 @@ enum { CC_O = 0, CC_NO = 1, CC_B = 2, CC_AE = 3, CC_E = 4, CC_NE = 5, CC_BE = 6,
 static void
 jcc(struct asm_ *a, int cc, int label)
 {
+    window_branch(a, 6);
     b1(a, 0x0F);
     b1(a, 0x80 + cc);
     rel32_to(a, label);
@@ -435,6 +619,7 @@ jcc(struct asm_ *a, int cc, int label)
 static void
 jmp(struct asm_ *a, int label)
 {
+    window_branch(a, 5);
     b1(a, 0xE9);
     rel32_to(a, label);
 }
@@ -1329,6 +1514,7 @@ build_free(struct asm_ *a)
     free(b->placed);
     free(b->owns);
     free(a->pubs);
+    free(a->other.buf);
 }
 
 /* A label to jump to that leaves at fs. */
@@ -1558,7 +1744,7 @@ publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
     }
     d->instr = in->op != OP_DECREF ? lu_jit_next_pc(fs->code, fs->pc) : fs->pc;
     a->pubs = grow(a->pubs, &a->cappubs, a->npubs + 1, sizeof *a->pubs);
-    a->pubs[a->npubs].at = a->n + 2;
+    a->pubs[a->npubs].at = here(a) + 2;
     a->pubs[a->npubs++].exit = ((struct pending *)d)->index;
     mov_ri(a, RAX, 0x1122334455667788LL);       /* d's address, patched (pack) */
     store(a, R15, offsetof(struct lu_frame, jit_desc), RAX);
@@ -2036,13 +2222,15 @@ incref(struct asm_ *a, int r)
     cmp_rm(a, RAX, r, offsetof(PyObject, ob_tid));
     jcc(a, CC_NE, shared);
     op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
-    jmp(a, done);
+    cold_begin(a);
     bind(a, shared);
     b1(a, 0xF0);
     rex(a, 1, 0, 0, r);
     b1(a, 0x83);
     modrm_mem(a, ALU_ADD, r, offsetof(PyObject, ob_ref_shared));
     b1(a, 1 << _Py_REF_SHARED_SHIFT);
+    jmp(a, done);
+    cold_end(a);
     bind(a, done);
 }
 
@@ -2080,7 +2268,7 @@ decref(struct asm_ *a, int r, struct lu_ins *in, struct lu_deopt *d, int left)
     modrm_rr(a, ALU_SUB, RCX);
     b1(a, 1);                                   /* sub ecx, 1 */
     op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
-    jmp(a, done);
+    cold_begin(a);
     bind(a, slow);
     int keep = in != NULL && !lu_alloc_call(in);   /* a release values stay in registers across */
     if (keep) {
@@ -2103,6 +2291,8 @@ decref(struct asm_ *a, int r, struct lu_ins *in, struct lu_deopt *d, int left)
     if (d != NULL) {
         settle(a, left);
     }
+    jmp(a, done);
+    cold_end(a);
     bind(a, done);
 }
 extern PyObject *lu_jit_box_int(int64_t v);
@@ -2299,7 +2489,7 @@ emit_box(struct asm_ *a, struct lu_ins *in)
         sse_rm(a, 0xF2, 0x11, x, RCX, offsetof(PyFloatObject, ob_fval));
     }
     mov_rr(a, RAX, RCX);
-    jmp(a, done);
+    cold_begin(a);
     bind(a, slow);
     save_volatile(a);
     if (is_int) {
@@ -2311,6 +2501,8 @@ emit_box(struct asm_ *a, struct lu_ins *in)
         call_abs(a, (void *)lu_jit_box_float);
     }
     restore_volatile(a);
+    jmp(a, done);
+    cold_end(a);
     bind(a, done);
 }
 
@@ -2403,7 +2595,7 @@ emit_build(struct asm_ *a, lu_v v)
         store(a, items, first + 8 * i, RBX);
     }
     mov_rr(a, RAX, RDX);
-    jmp(a, done);
+    cold_begin(a);
     bind(a, undo);                              /* the object's block goes back */
     load(a, R11, RCX, offsetof(mi_page_t, free));
     store(a, RDX, 0, R11);
@@ -2415,6 +2607,8 @@ emit_build(struct asm_ *a, lu_v v)
     mov_rr(a, RDI, RSP);
     mov_ri(a, RSI, n);
     call_abs(a, lu_helpers[in->imm].fn);
+    jmp(a, done);
+    cold_end(a);
     bind(a, done);
     return 1;
 }
@@ -2465,10 +2659,12 @@ emit_new_object(struct asm_ *a, lu_v v)
     store(a, RDX, offsetof(PyObject, ob_type), RBX);
     incref(a, RBX);                             /* clobbers RAX, RCX */
     mov_rr(a, RAX, RDX);
-    jmp(a, done);
+    cold_begin(a);
     bind(a, slow);
     mov_ri(a, RDI, (int64_t)(intptr_t)tp);
     call_abs(a, lu_helpers[in->imm].fn);
+    jmp(a, done);
+    cold_end(a);
     bind(a, done);
     return 1;
 }
@@ -2552,7 +2748,7 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
         b1(a, 2);                               /* test cl, 2: negative */
         jcc(a, CC_E, done);
         unary(a, 3, RAX);
-        jmp(a, done);
+        cold_begin(a);
         bind(a, wide);
         save_volatile(a);
         mov_rr(a, RDI, RAX);
@@ -2561,6 +2757,8 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
         mov_ri(a, RCX, INT64_MIN);
         alu_rr(a, ALU_CMP, RAX, RCX);
         jcc(a, CC_E, fail);
+        jmp(a, done);
+        cold_end(a);
     }
     else {
         sse_rm(a, 0xF2, 0x10, 0, RAX, offsetof(PyFloatObject, ob_fval));
@@ -2879,7 +3077,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         b1(a, 2);                               /* test cl, 2: negative */
         jcc(a, CC_E, done);
         unary(a, 3, RAX);
-        jmp(a, done);
+        cold_begin(a);
         bind(a, wide);                          /* more digits: in C, leaving past 64 bits */
         save_volatile(a);
         mov_rr(a, RDI, r);
@@ -2888,6 +3086,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         mov_ri(a, RCX, INT64_MIN);
         alu_rr(a, ALU_CMP, RAX, RCX);
         jcc(a, CC_E, fail);
+        jmp(a, done);
+        cold_end(a);
         bind(a, done);
         def_gpr(a, v, RAX);
         return 0;
@@ -3158,6 +3358,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         alu_ri(a, ALU_CMP, RCX, 1);             /* the sign bits of zero */
         jcc(a, CC_E, fz);
         jmp(a, t);
+        cold_begin(a);
         bind(a, other);
         /* imm 1: only a layout's own truth, which runs no Python; any
            other leaves. */
@@ -3173,6 +3374,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         b1(a, 0xFF);                            /* cmp eax, -1 */
         jcc(a, CC_E, err);
         jmp(a, done);
+        cold_end(a);
         bind(a, t);
         mov_ri(a, RAX, 1);
         jmp(a, done);
@@ -3353,7 +3555,6 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             b1(a, 0x83);
             modrm_mem(a, ALU_ADD, RAX, offsetof(PyObject, ob_ref_shared));
             b1(a, 1 << _Py_REF_SHARED_SHIFT);   /* lock add qword [rax+shared], 1 */
-            jmp(a, done);
         }
         else {
             load(a, RAX, s, offsetof(PyListObject, ob_item));
@@ -3365,8 +3566,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             test_rr(a, RAX, RAX);
             jcc(a, CC_E, slow);
             incref_owned_or_exit(a, RAX, slow);
-            jmp(a, done);
         }
+        cold_begin(a);
         bind(a, slow);
         if (in->imm) {
             save_volatile(a);
@@ -3379,6 +3580,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         }
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
+        jmp(a, done);
+        cold_end(a);
         bind(a, done);
         def_gpr(a, v, RAX);
         return 0;
@@ -3420,7 +3623,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
         incref_owned_or_exit(a, RAX, slow);
-        jmp(a, done);
+        cold_begin(a);
         bind(a, slow);
         save_volatile(a);
         rex(a, 1, RDI, 0, r);
@@ -3430,6 +3633,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         restore_volatile(a);
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
+        jmp(a, done);
+        cold_end(a);
         bind(a, done);
         def_gpr(a, v, RAX);
         return 0;
@@ -3652,7 +3857,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         else {
             owned_or_exit(a, RAX, fail);        /* borrowed (opt.c): only this thread frees it */
         }
-        jmp(a, done);
+        cold_begin(a);
         bind(a, unboxed);
         /* An unboxed value: its box, made once in C and kept by the owner;
            making it may wait for the owner's lock. */
@@ -3667,6 +3872,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         parked_end(a, in);
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);
+        jmp(a, done);
+        cold_end(a);
         bind(a, done);
         def_gpr(a, v, RAX);
         return 0;
@@ -3851,7 +4058,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            for the poll after it returns too: leaving for one would only
            come back. */
         int poll = exit_to(a, in->fs, EXIT_POLL, 0, 0), done = new_label(a), top = new_label(a);
-        int merge = new_label(a);
+        int merge = new_label(a), slow = new_label(a);
         int64_t version = (int64_t)a->f->code->_co_instrumentation_version;
         uintptr_t stays = LU_POLL_QSBR | (in->fs->code->co_flags & LU_CO_KERNEL ? LU_POLL_VISIBLE : 0);
         bind(a, top);
@@ -3863,7 +4070,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             mov_ri(a, R11, version);
             cmp_rm(a, R11, RAX, offsetof(struct lu_carrier, poll));
         }
-        jcc(a, CC_E, done);
+        jcc(a, CC_NE, slow);
+        cold_begin(a);
+        bind(a, slow);
         load(a, RCX, RAX, offsetof(struct lu_carrier, poll));
         alu_ri(a, ALU_AND, RCX, (int32_t)~stays);
         mov_ri(a, R11, version);
@@ -3889,6 +4098,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jcc(a, CC_NE, poll);
         parked_call(a, v, (void *)lu_poll_in_place, NULL, 0);
         jmp(a, top);
+        cold_end(a);
         bind(a, done);
         if (_PyRuntime.handoff.on) {
             /* The handoff scheduler migrates tasks at the interpreter's polls. */
@@ -4277,7 +4487,7 @@ exits(struct asm_ *a)
         sse_rm(a, 0xF2, 0x11, x, RSP, 128 + 8 * x);
     }
     load(a, RAX, RSP, 264);                     /* the index */
-    a->deopts_patch = a->n + 2;
+    a->deopts_patch = here(a) + 2;
     mov_ri(a, RDX, 0x1122334455667788LL);       /* the exits, patched (pack) */
     rex(a, 1, RAX, 0, RAX);
     b1(a, 0x69);
@@ -4403,6 +4613,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     exits(a);
     int direct = lu_jit_call_entry(f->code) == f->entry_pc && lu_jit_direct_nargs(f->code) >= 0
         ? direct_entry(a) : -1;
+    join_streams(a);
     /* Labels. */
     for (int i = 0; i < a->npatches; i++) {
         int target = a->labels[a->patches[i].label];
