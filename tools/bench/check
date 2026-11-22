@@ -96,7 +96,9 @@ class IdiomsCheck(unittest.TestCase):
             (root / 'bad').write_text('#!/bin/sh\necho 0\n')
             for name in ('perf', 'bad'):
                 (root / name).chmod(0o755)
-            (root / 'counts.json').write_text(json.dumps({'counts': {'listsum': [2, 6], 'calls': [2, 6]}}))
+            (root / 'counts.json').write_text(json.dumps({'counts': {'listsum': {'lucifer': [2, 6], 'pypy': [3, 9]},
+                                                                   'calls': {'lucifer': [2, 6]}},
+                                                        'outputs': {'listsum': '314850', 'calls': '14850'}}))
             tool = ROOT / 'tools/bench/idioms'
             env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}')
             done = subprocess.run([sys.executable, tool, 'time', '--counts', root / 'counts.json',
@@ -105,7 +107,10 @@ class IdiomsCheck(unittest.TestCase):
                                   stdout=subprocess.PIPE, check=True)
             result = json.loads(done.stdout.splitlines()[-1])
             self.assertEqual(result['rows']['listsum']['lucifer'], dict(status='ok', cycles=7.0, instructions=11.0))
+            self.assertEqual(result['rows']['listsum']['pypy'], dict(status='ok', cycles=7.0, instructions=11.0))
             self.assertEqual(result['rows']['calls']['cpython'], dict(status='wrong'))
+            self.assertEqual(result['counts']['listsum'], {'lucifer': [2, 6], 'pypy': [3, 9]})
+            self.assertEqual(len(result['counts']['calls']['pypy']), 2)  # calibrated: not in the file
             (root / 'a.json').write_text(done.stdout)
             result['rows']['calls']['lucifer']['cycles'] = 7.5
             (root / 'b.json').write_text(json.dumps(result))

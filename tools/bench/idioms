@@ -7,11 +7,13 @@ instructions:u), takes the minimum of RUNS runs at each, and divides the differe
 difference in inner iterations, so startup and warm-up cancel.
 
   idioms time --run LABEL=COMMAND ... [--only NAMES] [--cpu N] [--counts FILE]
-      one JSON object on the last stdout line: {"counts", "outputs", "rows"}.
-      Without --counts the loop counts are calibrated so the longer run takes about TARGET
-      seconds on the slowest runtime; --counts FILE takes them (and the expected outputs)
-      from an earlier run, so two runs compare. A runtime whose output differs from the
-      expected one (the one most runtimes print, or the file's) gets status wrong for that idiom.
+      one JSON object on the last stdout line: {"counts": {idiom: {label: [n1, n2]}}, "outputs", "rows"}.
+      Each runtime's counts are calibrated on it alone so its longer run takes about TARGET
+      seconds. Correctness is separate: every runtime runs NAME(CHECK_N) once, and one whose
+      output differs from the expected one (the file's, or the one most runtimes print) is
+      wrong; a timed run need only exit cleanly and repeat its output. --counts FILE takes the
+      expected outputs and the counts of the labels it has from an earlier run (so a compare
+      measures the same loops) and calibrates any other label.
   idioms table FILE            Markdown table; the ratio columns are against labels pypy and cpython
   idioms compare A B           idioms and runtimes whose cycles moved more than THRESHOLD
 
@@ -29,7 +31,9 @@ from common import command, run
 CASES = Path(__file__).resolve().with_name("idiom_cases.py")
 INNER = 100
 RUNS = 3
-TARGET = 0.4       # seconds for the longer run on the slowest runtime: 86 idioms x 3 runtimes in about 6 minutes
+TARGET = 0.3       # seconds for a runtime's longer run: per idiom about 4 x TARGET of loops plus
+                   # ten start-ups and calibration, so 86 idioms take about 4 minutes per runtime
+CHECK_N = 3        # the loop count at which every runtime's output is compared
 CALIBRATE = 0.05   # seconds of loop time a calibration run must reach
 THRESHOLD = 0.03
 TIMEOUT = 120
@@ -82,31 +86,36 @@ def best(argv, name, n, cpu):
     return "ok", results[0][1], {e: min(r[2][e] for r in results) for e in EVENTS}
 
 
+def counts_for(argv, name, cpu):
+    per = calibrate(argv, name, cpu)
+    n2 = max(3, round(TARGET / per)) if per else 3
+    return [n2 // 3, n2]
+
+
 def time_idiom(runs, name, counts, expected, cpu):
-    if counts is None:
-        per = [calibrate(argv, name, cpu) for argv in runs.values()]
-        per = max([p for p in per if p] or [None], key=lambda p: p or 0)
-        n2 = max(4, round(TARGET / per)) if per else 4
-        counts = [n2 // 3, n2]
-    found = {}
+    """Each runtime at its own loop counts (calibrated unless given); output checked at CHECK_N."""
+    checks = {}
     for label, argv in runs.items():
-        (s1, o1, c1), (s2, o2, c2) = (best(argv, name, n, cpu) for n in counts)
-        found[label] = (s1 if s1 != "ok" else s2, [o1, o2], c1, c2)
+        status, output, _, _ = once(argv, name, CHECK_N, cpu)
+        checks[label] = output if status == "PASS" else None
     if expected is None:  # the output most runtimes agree on
-        outputs = [o for s, o, _, _ in found.values() if s == "ok"]
+        outputs = [o for o in checks.values() if o is not None]
         expected = max(outputs, key=outputs.count) if outputs else None
-    row = {}
-    for label, (status, output, c1, c2) in found.items():
-        if status == "ok" and output != expected:
-            status = "wrong"
+    row, used = {}, {}
+    for label, argv in runs.items():
+        status = "fail" if checks[label] is None else "ok" if checks[label] == expected else "wrong"
         cell = dict(status=status)
         if status == "ok":
-            iters = (counts[1] - counts[0]) * INNER
-            cell.update(cycles=(c2["cycles:u"] - c1["cycles:u"]) / iters,
-                        instructions=(c2["instructions:u"] - c1["instructions:u"]) / iters)
+            used[label] = n1, n2 = counts.get(label) or counts_for(argv, name, cpu)
+            (s1, _, c1), (s2, _, c2) = (best(argv, name, n, cpu) for n in (n1, n2))
+            cell["status"] = s1 if s1 != "ok" else s2
+            if cell["status"] == "ok":
+                iters = (n2 - n1) * INNER
+                cell.update(cycles=(c2["cycles:u"] - c1["cycles:u"]) / iters,
+                            instructions=(c2["instructions:u"] - c1["instructions:u"]) / iters)
         row[label] = cell
-        print(f"{name} {label}: {status} {cell.get('cycles', 0):.1f}", file=sys.stderr, flush=True)
-    return counts, expected, row
+        print(f"{name} {label}: {cell['status']} {cell.get('cycles', 0):.1f}", file=sys.stderr, flush=True)
+    return used, expected, row
 
 
 def time_all(args):
@@ -115,10 +124,10 @@ def time_all(args):
         label, _, text = r.partition("=")
         runs[label] = command(text)
     fixed = json.loads(Path(args.counts).read_text()) if args.counts else {}
-    chosen = args.only.split(",") if args.only else (list(fixed["counts"]) if fixed else names())
+    chosen = args.only.split(",") if args.only else (list(fixed["outputs"]) if fixed else names())
     result = dict(counts={}, outputs={}, rows={})
     for name in chosen:
-        counts, outputs, row = time_idiom(runs, name, fixed.get("counts", {}).get(name),
+        counts, outputs, row = time_idiom(runs, name, fixed.get("counts", {}).get(name, {}),
                                           fixed.get("outputs", {}).get(name), args.cpu)
         result["counts"][name], result["outputs"][name], result["rows"][name] = counts, outputs, row
     print(json.dumps(result))

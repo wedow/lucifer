@@ -108,7 +108,7 @@ def timings(names, iters, commands):
 
 
 def idiom_timings(commands, reference=None):
-    """The idiom table in one prefixed step: {"counts", "outputs", "rows"}, at the reference's loop counts if given."""
+    """The idiom table in one prefixed step: {"counts", "outputs", "rows"}, checked against the reference's outputs if given."""
     with tempfile.NamedTemporaryFile("w", suffix=".json") as ref:
         args = [sys.executable, str(IDIOMS), "time"] + [f"--run={label}={command}" for label, command in commands.items()]
         if reference is not None:
@@ -174,8 +174,12 @@ def refresh_reference(names, iters, oracle):
     web = web_timings({"cpython-3.14": gil, "cpython-3.14t": f"env PYTHONPATH={site} {oracle}"})[0] if site and gil else {}
     reference = {"version": oracle_version(oracle), "best_us": {n: times[n]["cpython"] for n in names},
                  "web": web, "corpus": corpus_timings(oracle)[0],
-                 "idioms": idiom_timings({"cpython": oracle, **({"pypy": pypy} if pypy else {})})[0]}
-    if pypy:
+                 "idioms": idiom_timings({"cpython": oracle})[0]}
+    if pypy:  # its own prefixed call: one runtime's idiom table is about 4 minutes
+        found = idiom_timings({"pypy": pypy}, reference["idioms"])[0]
+        for key in ("counts", "rows"):
+            for name, cells in found.get(key, {}).items():
+                reference["idioms"][key][name].update(cells)
         reference["pypy"] = {"version": oracle_version(pypy), "best_us": {n: times[n]["pypy"] for n in names},
                              "corpus": corpus_timings(pypy, reference["corpus"])[0]}
     REFERENCE.write_text(json.dumps(reference, indent=1) + "\n")
