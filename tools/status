@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily status pass on a built tree: gates, AWFY timing, the web benchmark, the corpus, conformance, optional numpy and Lib/test.
+"""Daily status pass on a built tree: gates, AWFY timing, the idiom table, the web benchmark, the corpus, conformance, optional numpy and Lib/test.
 
 Writes results/status-DATE/{summary.csv,summary.md,*.log}. Run from the repository root.
 
@@ -16,7 +16,7 @@ Environment:
   PYPY           a PyPy interpreter, timed beside CPython (--refresh-reference only)
 
 CPython and PyPy timings come from results/status-reference.json; --refresh-reference rewrites it.
-PyPy runs AWFY and the corpus at CPython's loop counts; a program it cannot run counts as failing.
+PyPy runs AWFY, the idioms and the corpus at CPython's loop counts; a program it cannot run counts as failing.
 The corpus (tools/bench/corpus) installs into build/corpus/site; its CPython run sets each program's loops.
 """
 import argparse
@@ -40,20 +40,26 @@ AWFY = ROOT / "third_party/awfy/Python"
 WEB = ROOT / "tools/bench/web/bench"
 WEB_CPUS = "1,2,4,8"
 CORPUS = ROOT / "tools/bench/corpus"
+IDIOMS = ROOT / "tools/bench/idioms"
 CORPUS_SITE = ROOT / "build/corpus/site"
 WEB_SCORE_CPUS = "8"  # the composite speed score takes the web point that uses every core: no GIL is the point
 WARM = "pyperformance-warm"  # a corpus suite that repeats another with more warm-up; the composite leaves it out
 LUCIFER = str(Path(os.environ.get("LUCIFER", "bin/lucifer")).resolve())
 
 
-def awfy_inner():
-    """The canonical inner counts, from the AWFY driver."""
+def bench_tool(name):
+    """A tools/bench driver loaded as a module."""
     sys.path.insert(0, str(ROOT / "tools/bench"))
-    path = str(ROOT / "tools/bench/awfy")
-    spec = importlib.util.spec_from_loader("awfy_driver", importlib.machinery.SourceFileLoader("awfy_driver", path))
+    path = str(ROOT / "tools/bench" / name)
+    spec = importlib.util.spec_from_loader(f"{name}_driver", importlib.machinery.SourceFileLoader(f"{name}_driver", path))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.INNER
+    return module
+
+
+def awfy_inner():
+    """The canonical inner counts, from the AWFY driver."""
+    return bench_tool("awfy").INNER
 
 
 def words(prefix):
@@ -99,6 +105,18 @@ def timings(names, iters, commands):
     options = ["--iters", str(iters)] + [f"--run={label}={command}" for label, command in commands.items()]
     found = last_json(run([sys.executable, __file__, "time", ",".join(names)] + options, "TIMING_PREFIX").stdout)
     return {name: found.get(name, {label: None for label in commands}) for name in names}
+
+
+def idiom_timings(commands, reference=None):
+    """The idiom table in one prefixed step: {"counts", "outputs", "rows"}, at the reference's loop counts if given."""
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as ref:
+        args = [sys.executable, str(IDIOMS), "time"] + [f"--run={label}={command}" for label, command in commands.items()]
+        if reference is not None:
+            json.dump(reference, ref)
+            ref.flush()
+            args += ["--counts", ref.name]
+        done = run(args, "TIMING_PREFIX")
+    return last_json(done.stdout), done.stdout
 
 
 def oracle_version(oracle):
@@ -155,7 +173,8 @@ def refresh_reference(names, iters, oracle):
     site, gil = os.environ.get("WEB_SITE"), os.environ.get("WEB_GIL_PYTHON")
     web = web_timings({"cpython-3.14": gil, "cpython-3.14t": f"env PYTHONPATH={site} {oracle}"})[0] if site and gil else {}
     reference = {"version": oracle_version(oracle), "best_us": {n: times[n]["cpython"] for n in names},
-                 "web": web, "corpus": corpus_timings(oracle)[0]}
+                 "web": web, "corpus": corpus_timings(oracle)[0],
+                 "idioms": idiom_timings({"cpython": oracle, **({"pypy": pypy} if pypy else {})})[0]}
     if pypy:
         reference["pypy"] = {"version": oracle_version(pypy), "best_us": {n: times[n]["pypy"] for n in names},
                              "corpus": corpus_timings(pypy, reference["corpus"])[0]}
@@ -350,7 +369,17 @@ def corpus_metrics(results, reference):
     return metrics, problems
 
 
-def write_summary(out, date, metrics, gate_rows, problems, names, ran_numpy):
+def idioms_section(metrics, before, idioms):
+    if not idioms:
+        return []
+    was = lambda k: fmt(float(before[k]) if before.get(k) else None)
+    return ["", "## Idioms (cycles and instructions per inner iteration, steady state)", "",
+            bench_tool("idioms").table(idioms), "",
+            f"Geomean Lucifer/PyPy: {fmt(metrics.get('idioms.geomean_on_over_pypy'))} (yesterday {was('idioms.geomean_on_over_pypy')}); "
+            f"Lucifer/CPython: {fmt(metrics.get('idioms.geomean_on_over_cpython'))} (yesterday {was('idioms.geomean_on_over_cpython')})"]
+
+
+def write_summary(out, date, metrics, gate_rows, problems, names, ran_numpy, idioms=None):
     before = previous_summary(date)
     with (out / "summary.csv").open("w", newline="") as f:
         w = csv.writer(f)
@@ -369,6 +398,7 @@ def write_summary(out, date, metrics, gate_rows, problems, names, ran_numpy):
     md += ["", f"Geomean JIT on / CPython: {fmt(val('awfy.geomean_on_over_cpython'))} "
            f"(yesterday {fmt(float(before['awfy.geomean_on_over_cpython']) if before.get('awfy.geomean_on_over_cpython') else None)}); "
            f"JIT on / PyPy: {fmt(geomean([r for r in on_over_pypy if r]))}"]
+    md += idioms_section(metrics, before, idioms)
     md += web_section(metrics, before)
     md += suites_section(metrics, before)
     md += ["", "## Gates", "", "| target | result | detail |", "|---|---|---|"]
@@ -433,6 +463,20 @@ def main():
                 metrics.update({f"{program}.pypy_s": p,
                                 f"{program}.pypy_over_cpython": p / ref["corpus"][program]["seconds"] if p else None})
     metrics["awfy.geomean_on_over_cpython"] = geomean([metrics[f"awfy.{n}.on_over_cpython"] for n in names if metrics[f"awfy.{n}.on_over_cpython"]])
+    idioms = None
+    if ref.get("idioms"):
+        found, idiom_log = idiom_timings({"lucifer": LUCIFER}, ref["idioms"])
+        (out / "idioms.log").write_text(idiom_log)
+        idioms = dict(ref["idioms"], rows={k: {"lucifer": found.get("rows", {}).get(k, {}).get("lucifer", {"status": "notrun"}), **row}
+                                          for k, row in ref["idioms"]["rows"].items()})
+        tool = bench_tool("idioms")
+        for other in ("pypy", "cpython"):
+            metrics[f"idioms.geomean_on_over_{other}"] = tool.geomean(list(tool.ratios(idioms, "lucifer", other).values()))
+        bad = [k for k, row in idioms["rows"].items() if row["lucifer"]["status"] != "ok"]
+        if bad:
+            problems.append(f"idioms not ok on Lucifer (idioms.log): {', '.join(bad)}")
+    else:
+        problems.append("idioms skipped: no idiom reference; run --refresh-reference")
     site = os.environ.get("WEB_SITE")
     if site:
         ok, log = web_check(oracle, site)
@@ -470,7 +514,7 @@ def main():
     metrics.update(conformance(out))
     metrics.update(numpy_metrics)
     metrics.update({f"gate.{t}": int(ok) for t, (ok, _) in gate_rows.items()})
-    write_summary(out, date, metrics, gate_rows, problems, names, args.numpy)
+    write_summary(out, date, metrics, gate_rows, problems, names, args.numpy, idioms)
     print(f"status: {out.relative_to(ROOT) if out.is_relative_to(ROOT) else out}")
     return 0
 

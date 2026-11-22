@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""The idiom table: cycles and instructions per inner iteration of small loops, one idiom each.
+
+The idioms are the functions of idiom_cases.py; NAME(N) runs N outer iterations of 100 inner ones
+and prints a result. A row runs each idiom at two loop counts under perf stat (cycles:u,
+instructions:u), takes the minimum of RUNS runs at each, and divides the difference by the
+difference in inner iterations, so startup and warm-up cancel.
+
+  idioms time --run LABEL=COMMAND ... [--only NAMES] [--cpu N] [--counts FILE]
+      one JSON object on the last stdout line: {"counts", "outputs", "rows"}.
+      Without --counts the loop counts are calibrated so the longer run takes about TARGET
+      seconds on the slowest runtime; --counts FILE takes them (and the expected outputs)
+      from an earlier run, so two runs compare. A runtime whose output differs from the
+      expected one (the one most runtimes print, or the file's) gets status wrong for that idiom.
+  idioms table FILE            Markdown table; the ratio columns are against labels pypy and cpython
+  idioms compare A B           idioms and runtimes whose cycles moved more than THRESHOLD
+
+Host stdlib only.
+"""
+import argparse
+import json
+import math
+from pathlib import Path
+import subprocess
+import sys
+
+from common import command, run
+
+CASES = Path(__file__).resolve().with_name("idiom_cases.py")
+INNER = 100
+RUNS = 3
+TARGET = 0.4       # seconds for the longer run on the slowest runtime: 86 idioms x 3 runtimes in about 6 minutes
+CALIBRATE = 0.05   # seconds of loop time a calibration run must reach
+THRESHOLD = 0.03
+TIMEOUT = 120
+EVENTS = ("cycles:u", "instructions:u")
+
+
+def names():
+    done = subprocess.run([sys.executable, str(CASES), "--list"], text=True, stdout=subprocess.PIPE, check=True)
+    return done.stdout.split()
+
+
+def once(argv, name, n, cpu=None):
+    """(status, stdout, {event: count}) of one perf-stat run of NAME(n)."""
+    pin = ["taskset", "-c", str(cpu)] if cpu is not None else []
+    status, out, err, seconds = run(pin + ["perf", "stat", "-x,", "-e", ",".join(EVENTS), "--"] + argv
+                                    + [str(CASES), name, str(n)], timeout=TIMEOUT)
+    counts = {}
+    for line in err.splitlines():
+        fields = line.split(",")
+        if len(fields) > 2 and fields[2] in EVENTS and fields[0].isdigit():
+            counts[fields[2]] = int(fields[0])
+    if status == "PASS" and len(counts) != len(EVENTS):
+        status = "ERROR"
+    return status, out.strip(), counts, seconds
+
+
+def calibrate(argv, name, cpu):
+    """Seconds per outer iteration, from runs growing until the loop time is CALIBRATE."""
+    base = once(argv, name, 1, cpu)
+    n = 16
+    while base[0] == "PASS":
+        status, _, _, seconds = once(argv, name, n, cpu)
+        if status != "PASS":
+            break
+        loop = seconds - base[3]
+        if loop >= CALIBRATE:
+            return loop / n
+        n *= min(16, max(2, round(2 * CALIBRATE / max(loop, 1e-4))))
+    return None
+
+
+def best(argv, name, n, cpu):
+    """(status, output, {event: minimum count}) over RUNS runs; a varying output is wrong."""
+    results = [once(argv, name, n, cpu) for _ in range(RUNS)]
+    failed = [r[0] for r in results if r[0] != "PASS"]
+    if failed:
+        return failed[0].lower(), None, None
+    if len({r[1] for r in results}) != 1:
+        return "wrong", None, None
+    return "ok", results[0][1], {e: min(r[2][e] for r in results) for e in EVENTS}
+
+
+def time_idiom(runs, name, counts, expected, cpu):
+    if counts is None:
+        per = [calibrate(argv, name, cpu) for argv in runs.values()]
+        per = max([p for p in per if p] or [None], key=lambda p: p or 0)
+        n2 = max(4, round(TARGET / per)) if per else 4
+        counts = [n2 // 3, n2]
+    found = {}
+    for label, argv in runs.items():
+        (s1, o1, c1), (s2, o2, c2) = (best(argv, name, n, cpu) for n in counts)
+        found[label] = (s1 if s1 != "ok" else s2, [o1, o2], c1, c2)
+    if expected is None:  # the output most runtimes agree on
+        outputs = [o for s, o, _, _ in found.values() if s == "ok"]
+        expected = max(outputs, key=outputs.count) if outputs else None
+    row = {}
+    for label, (status, output, c1, c2) in found.items():
+        if status == "ok" and output != expected:
+            status = "wrong"
+        cell = dict(status=status)
+        if status == "ok":
+            iters = (counts[1] - counts[0]) * INNER
+            cell.update(cycles=(c2["cycles:u"] - c1["cycles:u"]) / iters,
+                        instructions=(c2["instructions:u"] - c1["instructions:u"]) / iters)
+        row[label] = cell
+        print(f"{name} {label}: {status} {cell.get('cycles', 0):.1f}", file=sys.stderr, flush=True)
+    return counts, expected, row
+
+
+def time_all(args):
+    runs = {}
+    for r in args.run:
+        label, _, text = r.partition("=")
+        runs[label] = command(text)
+    fixed = json.loads(Path(args.counts).read_text()) if args.counts else {}
+    chosen = args.only.split(",") if args.only else (list(fixed["counts"]) if fixed else names())
+    result = dict(counts={}, outputs={}, rows={})
+    for name in chosen:
+        counts, outputs, row = time_idiom(runs, name, fixed.get("counts", {}).get(name),
+                                          fixed.get("outputs", {}).get(name), args.cpu)
+        result["counts"][name], result["outputs"][name], result["rows"][name] = counts, outputs, row
+    print(json.dumps(result))
+
+
+def geomean(values):
+    return math.exp(sum(map(math.log, values)) / len(values)) if values else None
+
+
+def ratios(result, numerator, denominator):
+    """{idiom: cycles ratio} over idioms both runtimes ran correctly with positive cycles."""
+    found = {}
+    for name, row in result["rows"].items():
+        a, b = row.get(numerator, {}), row.get(denominator, {})
+        if a.get("cycles", 0) > 0 and b.get("cycles", 0) > 0:
+            found[name] = a["cycles"] / b["cycles"]
+    return found
+
+
+def table(result, subject="lucifer"):
+    labels = list(next(iter(result["rows"].values()), {}))
+    others = [label for label in ("pypy", "cpython") if label in labels and label != subject]
+    cell = lambda c, key: f"{c[key]:.0f}" if c.get("status") == "ok" else c.get("status", "-")
+    lines = ["| idiom | " + " | ".join(f"{label} cycles | {label} instr" for label in labels)
+             + "".join(f" | {subject}/{o}" for o in others) + " |",
+             "|---" * (1 + 2 * len(labels) + len(others)) + "|"]
+    found = {o: ratios(result, subject, o) for o in others}
+    for name, row in result["rows"].items():
+        cells = [f"{cell(row.get(l, {}), 'cycles')} | {cell(row.get(l, {}), 'instructions')}" for l in labels]
+        cells += [f"{found[o][name]:.2f}" if name in found[o] else "-" for o in others]
+        lines.append(f"| {name} | " + " | ".join(cells) + " |")
+    lines.append("")
+    lines += [f"Geomean {subject}/{o} cycles over {len(found[o])} idioms: {geomean(list(found[o].values())):.2f}"
+              for o in others if found[o]]
+    return "\n".join(lines)
+
+
+def compare(a, b):
+    lines = []
+    for name, row in b["rows"].items():
+        for label, cell in row.items():
+            old = a["rows"].get(name, {}).get(label, {})
+            if old.get("status") != cell.get("status"):
+                lines.append(f"{name} {label}: {old.get('status', 'absent')} -> {cell['status']}")
+            elif cell.get("cycles", 0) > 0 and old.get("cycles", 0) > 0:
+                change = cell["cycles"] / old["cycles"] - 1
+                if abs(change) > THRESHOLD:
+                    lines.append(f"{name} {label}: {old['cycles']:.1f} -> {cell['cycles']:.1f} cycles ({100 * change:+.1f}%), "
+                                 f"instructions {old['instructions']:.1f} -> {cell['instructions']:.1f}")
+    return "\n".join(lines) or "no row moved more than 3%"
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="action", required=True)
+    t = sub.add_parser("time")
+    t.add_argument("--run", action="append", required=True, help="LABEL=COMMAND (shell words, no shell)")
+    t.add_argument("--only", help="comma-separated idioms")
+    t.add_argument("--cpu", type=int, help="pin each run to this CPU with taskset")
+    t.add_argument("--counts", help="an earlier time output whose loop counts and outputs to use")
+    sub.add_parser("table").add_argument("file")
+    c = sub.add_parser("compare")
+    c.add_argument("a")
+    c.add_argument("b")
+    args = p.parse_args()
+    load = lambda path: json.loads(Path(path).read_text().strip().splitlines()[-1])
+    if args.action == "time":
+        time_all(args)
+    elif args.action == "table":
+        print(table(load(args.file)))
+    else:
+        print(compare(load(args.a), load(args.b)))
+
+
+if __name__ == "__main__":
+    main()

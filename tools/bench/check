@@ -36,7 +36,7 @@ def status_with_prefix(root):
 
 
 class StatusCheck(unittest.TestCase):
-    def test_awfy_prefix_runs_one_benchmark_at_a_time(self):
+    def test_awfy_is_one_prefixed_step(self):
         with tempfile.TemporaryDirectory() as temp:
             status, log, prefix = status_with_prefix(Path(temp))
             worker = Path(temp) / 'awfy.py'
@@ -46,9 +46,9 @@ class StatusCheck(unittest.TestCase):
             with prefix, patch.object(status, '__file__', str(worker)):
                 times = status.timings(['Alpha', 'Beta'], 3, {'on': 'fake'})
             self.assertEqual(times, {'Alpha': {'on': 42}, 'Beta': {'on': 42}})
-            self.assertEqual([json.loads(line)[1] for line in log.read_text().splitlines()], ['Alpha', 'Beta'])
+            self.assertEqual([json.loads(line)[1] for line in log.read_text().splitlines()], ['Alpha,Beta'])
 
-    def test_web_prefix_runs_one_point_at_a_time(self):
+    def test_web_is_one_prefixed_step_per_runtime(self):
         with tempfile.TemporaryDirectory() as temp:
             status, log, prefix = status_with_prefix(Path(temp))
             worker = Path(temp) / 'web.py'
@@ -65,7 +65,57 @@ class StatusCheck(unittest.TestCase):
                                                             server_exit=None) for cpu in (1, 2)} for name in 'ab'})
             self.assertEqual(len(output.splitlines()), 4)
             self.assertEqual([json.loads(line)[2:] for line in log.read_text().splitlines()],
-                             [[str(cpu), f'--run={name}=fake {name}'] for name in 'ab' for cpu in (1, 2)])
+                             [['1,2', f'--run={name}=fake {name}'] for name in 'ab'])
+
+
+    def test_idioms_are_one_prefixed_step_at_the_reference_counts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            status, log, prefix = status_with_prefix(Path(temp))
+            worker = Path(temp) / 'idioms.py'
+            worker.write_text('import json, sys\n'
+                              'assert sys.argv[2] == "--run=lucifer=fake"\n'
+                              'print(json.dumps(json.load(open(sys.argv[4]))))\n')
+            with prefix, patch.object(status, 'IDIOMS', worker):
+                found, _ = status.idiom_timings({'lucifer': 'fake'}, {'counts': {'a': [1, 2]}})
+            self.assertEqual(found, {'counts': {'a': [1, 2]}})
+            self.assertEqual(len(log.read_text().splitlines()), 1)
+
+
+class IdiomsCheck(unittest.TestCase):
+    """tools/bench/idioms over a fake perf whose counts grow 7 cycles and 11 instructions per inner iteration."""
+
+    def test_rows_wrong_answers_table_and_compare(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'perf').write_text('#!/bin/sh\n'
+                                       'shift 5\n'
+                                       'for n; do :; done\n'
+                                       '"$@" || exit\n'
+                                       'echo "$((1000 + n * 700)),,cycles:u,1,100.00,," >&2\n'
+                                       'echo "$((500 + n * 1100)),,instructions:u,1,100.00,," >&2\n')
+            (root / 'bad').write_text('#!/bin/sh\necho 0\n')
+            for name in ('perf', 'bad'):
+                (root / name).chmod(0o755)
+            (root / 'counts.json').write_text(json.dumps({'counts': {'listsum': [2, 6], 'calls': [2, 6]}}))
+            tool = ROOT / 'tools/bench/idioms'
+            env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}')
+            done = subprocess.run([sys.executable, tool, 'time', '--counts', root / 'counts.json',
+                                   f'--run=lucifer={sys.executable}', f'--run=pypy={sys.executable}',
+                                   f'--run=cpython={root / "bad"}'], env=env, text=True,
+                                  stdout=subprocess.PIPE, check=True)
+            result = json.loads(done.stdout.splitlines()[-1])
+            self.assertEqual(result['rows']['listsum']['lucifer'], dict(status='ok', cycles=7.0, instructions=11.0))
+            self.assertEqual(result['rows']['calls']['cpython'], dict(status='wrong'))
+            (root / 'a.json').write_text(done.stdout)
+            result['rows']['calls']['lucifer']['cycles'] = 7.5
+            (root / 'b.json').write_text(json.dumps(result))
+            show = lambda *args: subprocess.run([sys.executable, tool, *args], text=True,
+                                                stdout=subprocess.PIPE, check=True).stdout
+            table = show('table', root / 'a.json')
+            self.assertIn('| listsum | 7 | 11 | 7 | 11 | wrong | wrong | 1.00 | - |', table)
+            self.assertIn('Geomean lucifer/pypy cycles over 2 idioms: 1.00', table)
+            self.assertEqual(show('compare', root / 'a.json', root / 'b.json').splitlines(),
+                             ['calls lucifer: 7.0 -> 7.5 cycles (+7.1%), instructions 11.0 -> 11.0'])
 
 
 class BenchCheck(unittest.TestCase):
@@ -280,7 +330,7 @@ class CorpusCheck(unittest.TestCase):
         self.assertEqual(self.time(['cli.black'], reference)['cli.black']['status'], 'wrong')
         self.assertEqual(self.time(['cli.isort'], reference)['cli.isort']['status'], 'noreference')
 
-    def test_status_corpus_prefix_runs_one_program_at_a_time(self):
+    def test_status_corpus_prefix_runs_a_batch_of_programs_per_step(self):
         status, log, prefix = status_with_prefix(self.root)
         stamp = hashlib.sha256((ROOT / 'tools/bench/corpus.lock.json').read_bytes()).hexdigest()
         (self.site / '.lock-sha256').write_text(stamp)
@@ -293,8 +343,8 @@ class CorpusCheck(unittest.TestCase):
                          self.time(programs, reference), output)
         self.assertEqual(results['startup.import_stdlib']['status'], 'noreference')
         calls = [json.loads(line) for line in log.read_text().splitlines()]
-        self.assertEqual(len(calls), len(results))
-        self.assertEqual([args[args.index('--programs') + 1] for args in calls], list(results))
+        self.assertEqual([args[args.index('--programs') + 1] for args in calls],
+                         [','.join(group) for group in status.batches(list(results), 20)])
 
     def test_compile_warnings_of_a_fresh_site_are_not_output(self):
         # The reference ran on a site whose bytecode was already cached; this one compiles on its first run.
