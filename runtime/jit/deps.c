@@ -159,15 +159,13 @@ lu_jit_deps_free(struct lu_unit *u)
     u->ndeps = 0;
 }
 
-/* Every task leaves compiled code at its next poll. */
+/* Every task leaves compiled code at its next poll. A writer may be a
+   thread with no task yet (the serial state's, runtime/thread/task.c). */
 static void
 signal_all(void)
 {
     PyThreadState *self = PyThreadState_GetUnchecked();
-    if (self == NULL) {
-        return;
-    }
-    PyInterpreterState *interp = self->interp;
+    PyInterpreterState *interp = self != NULL ? self->interp : &_PyRuntime.main_interp;
     pthread_mutex_lock(&interp->tasks_lock.mutex);
     for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
         lu_task_signal((struct lu_task *)ts, LU_POLL_DEOPT_SELF);
@@ -205,7 +203,7 @@ lu_jit_invalidate(int kind, uintptr_t obj, uint32_t sub)
             fprintf(stderr, "jit: invalidate kind %d of %s@%d\n", kind, PyUnicode_AsUTF8(d->want.code->co_qualname),
                     d->want.pc);
         }
-        if (kind != LU_DEP_CALLEES) {
+        if (kind != LU_DEP_CALLEES && kind != LU_DEP_SERIAL) {
             lu_jit_nohoist_set(d->want.code, d->want.pc);       /* a new callee is no failed guard */
         }
         lu_jit_unit_kill(u, kind == LU_DEP_KEYS || kind == LU_DEP_VALUE);

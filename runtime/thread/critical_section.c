@@ -2,7 +2,15 @@
    Include/internal/pycore_critical_section.h, CPython 3.14): per-object
    PyMutex locks kept as a stack in the tstate. A section is suspended, its
    locks released, whenever the task detaches (the syscall bracket, or a
-   park inside PyMutex_Lock), and the top one is resumed on attach. */
+   park inside PyMutex_Lock), and the top one is resumed on attach.
+
+   While serial (lu_serial) a section takes no lock: it is pushed suspended,
+   as a detach leaves it, naming its mutexes, and a resume while serial
+   locks nothing. Once parallel, the first attach (or the switch itself, for
+   the task that makes it) locks the top section, and each outer one locks
+   when the one above it ends, as after any detach; a section ends with an
+   unlock only if it is active. So the locks stay balanced whenever the
+   state changes, which it does only where the task may detach. */
 
 #include "thread/lock.h"
 
@@ -136,6 +144,9 @@ _PyCriticalSection_SuspendAll(PyThreadState *tstate)
 LU_EXPORT void
 _PyCriticalSection_Resume(PyThreadState *tstate)
 {
+    if (lu_serial()) {
+        return;
+    }
     uintptr_t p = tstate->critical_section;
     PyCriticalSection *c = untag_critical_section(p);
     assert(!is_active(p));
@@ -166,10 +177,23 @@ _PyCriticalSection_Resume(PyThreadState *tstate)
     tstate->critical_section &= ~_Py_CRITICAL_SECTION_INACTIVE;
 }
 
+/* A section begun while serial: on the stack, suspended. */
+static void
+push_suspended(PyCriticalSection *c, PyMutex *m, uintptr_t tag)
+{
+    PyThreadState *tstate = PyThreadState_GetUnchecked();
+    c->_cs_mutex = m;
+    c->_cs_prev = tstate->critical_section;
+    tstate->critical_section = (uintptr_t)c | tag | _Py_CRITICAL_SECTION_INACTIVE;
+}
+
 void
 PyCriticalSection_BeginMutex(PyCriticalSection *c, PyMutex *m)
 {
-    if (lock_fast(m)) {
+    if (lu_serial()) {
+        push_suspended(c, m, 0);
+    }
+    else if (lock_fast(m)) {
         PyThreadState *tstate = PyThreadState_GetUnchecked();
         c->_cs_mutex = m;
         c->_cs_prev = tstate->critical_section;
@@ -190,9 +214,8 @@ PyCriticalSection_Begin(PyCriticalSection *c, PyObject *op)
 // sections. If the new top-most critical section is inactive, then it is
 // resumed.
 static void
-pop(PyCriticalSection *c)
+pop(PyThreadState *tstate, PyCriticalSection *c)
 {
-    PyThreadState *tstate = PyThreadState_GetUnchecked();
     uintptr_t prev = c->_cs_prev;
     tstate->critical_section = prev;
 
@@ -210,8 +233,11 @@ PyCriticalSection_End(PyCriticalSection *c)
     if (c->_cs_mutex == NULL) {
         return;
     }
-    PyMutex_Unlock(c->_cs_mutex);
-    pop(c);
+    PyThreadState *tstate = PyThreadState_GetUnchecked();
+    if (is_active(tstate->critical_section)) {
+        PyMutex_Unlock(c->_cs_mutex);
+    }
+    pop(tstate, c);
 }
 
 void
@@ -234,7 +260,11 @@ PyCriticalSection2_BeginMutex(PyCriticalSection2 *c, PyMutex *m1, PyMutex *m2)
         m2 = tmp;
     }
 
-    if (lock_fast(m1)) {
+    if (lu_serial()) {
+        c->_cs_mutex2 = m2;
+        push_suspended(&c->_cs_base, m1, _Py_CRITICAL_SECTION_TWO_MUTEXES);
+    }
+    else if (lock_fast(m1)) {
         if (lock_fast(m2)) {
             PyThreadState *tstate = PyThreadState_GetUnchecked();
             c->_cs_base._cs_mutex = m1;
@@ -269,9 +299,12 @@ PyCriticalSection2_End(PyCriticalSection2 *c)
         assert(c->_cs_mutex2 == NULL);
         return;
     }
-    if (c->_cs_mutex2) {
-        PyMutex_Unlock(c->_cs_mutex2);
+    PyThreadState *tstate = PyThreadState_GetUnchecked();
+    if (is_active(tstate->critical_section)) {
+        if (c->_cs_mutex2) {
+            PyMutex_Unlock(c->_cs_mutex2);
+        }
+        PyMutex_Unlock(c->_cs_base._cs_mutex);
     }
-    PyMutex_Unlock(c->_cs_base._cs_mutex);
-    pop(&c->_cs_base);
+    pop(tstate, &c->_cs_base);
 }

@@ -276,6 +276,8 @@ enum {
     INS_PROVEN = 16,            /* a guard of what its path proved already: only a writer takes it back (facts.c) */
     INS_FRESH = 32,             /* an inline store into an instance the code just made, which no other thread can
                                    have seen, of a name it lacks: no lock, nothing released, nothing published */
+    INS_UNLOCKED = 64,          /* a store that locks in line, built while serial: no lock (facts.c) */
+    INS_RECHECK = 128,          /* such a store where the unit may have died: it checks first, and leaves */
 };
 
 struct lu_ins {

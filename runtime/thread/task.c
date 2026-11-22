@@ -16,6 +16,31 @@
 
 #define TASK(ts) ((struct lu_task *)(ts))
 
+/* The second task's creation ends the serial state (lu_serial) before that
+   task exists, on whichever thread makes it: a thread start, a foreign
+   thread's PyGILState_Ensure, PyThreadState_New. With the world stopped,
+   the first task is at a poll, which leaves compiled code for the stop, or
+   detached, and attaches again only after the restart. Meanwhile the units
+   that store without locks die (runtime/jit/facts.c says why none of their
+   stores runs after), and the first task's critical sections, all of them
+   suspended, lock where it attaches again (critical_section.c), or here
+   when it is the task making the second. */
+static void
+enter_parallel(struct _is *interp)
+{
+    lu_stw_stop(interp);
+    if (lu_serial()) {
+        __atomic_store_n(&_PyRuntime.parallel, 1, __ATOMIC_SEQ_CST);
+        lu_jit_invalidate(LU_DEP_SERIAL, 0, 0);
+        struct lu_task *self = lu_current_task();
+        if (self != NULL && self->ts.state == _Py_THREAD_ATTACHED
+            && (self->ts.critical_section & _Py_CRITICAL_SECTION_INACTIVE)) {
+            _PyCriticalSection_Resume(&self->ts);
+        }
+    }
+    lu_stw_start(interp);
+}
+
 struct lu_task *
 lu_task_new(struct _is *interp, int whence)
 {
@@ -35,6 +60,12 @@ lu_task_new(struct _is *interp, int whence)
     ts->exc_info = &ts->exc_state;
     ts->context_ver = 1;
     pthread_mutex_lock(&interp->tasks_lock.mutex);
+    /* A task made after the others were shut down never runs. */
+    while (interp->next_task_id > 0 && !interp->tasks_closed && lu_serial()) {
+        pthread_mutex_unlock(&interp->tasks_lock.mutex);
+        enter_parallel(interp);
+        pthread_mutex_lock(&interp->tasks_lock.mutex);
+    }
     lu_stw_task_new(interp, t);
     ts->id = ++interp->next_task_id;
     ts->next = interp->tasks;

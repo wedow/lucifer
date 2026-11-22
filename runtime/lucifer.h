@@ -1098,6 +1098,7 @@ extern LU_EXPORT union lu_runtime {
         PyMutex pic_lock;               /* a polymorphic inline cache grows one entry at a time (jit/jit.c) */
         pthread_t main_thread;          /* the thread that started the runtime */
         struct lu_task *main_task;      /* signals and the main thread's pending calls are aimed at it */
+        int parallel;                   /* a second task was made: objects are locked (lu_serial) */
         struct {
             struct lu_lock lock;        /* every carrier's run queue */
             struct lu_carrier *carriers[2];     /* the main thread's, and the second */
@@ -1137,6 +1138,16 @@ extern LU_EXPORT union lu_runtime {
     };
     unsigned char oracle_size[LU_RUNTIME_SIZE];
 } _PyRuntime;
+
+/* Serial: no task but the first has been made, so one task alone runs
+   Python, and object locks are left out (compiled stores, runtime/jit/facts.c;
+   critical sections, runtime/thread/critical_section.c). Making the second
+   task ends it for good, with the world stopped (runtime/thread/task.c). */
+static inline int
+lu_serial(void)
+{
+    return !__atomic_load_n(&_PyRuntime.parallel, __ATOMIC_RELAXED);
+}
 
 /* The header PyObject_Init gives a block, written once: the type (a heap
    type's referenced), owned by this thread with one local reference, and
@@ -1787,11 +1798,12 @@ void lu_watchers_init(struct _is *interp);
    dict watcher id 0 marks), the value of one key (obj: the dict, sub: its
    value word's offset in the keys table), a function's code and defaults
    (obj: the function), and the callees a call site has met (obj: its
-   table, runtime/jit/jit.c), which only grows. A
+   table, runtime/jit/jit.c), which only grows, and the serial state
+   (lu_serial), which only ends. A
    writer calls lu_jit_invalidate after its change: the units that rely on
    it are dead, and every task leaves compiled code at its next poll, the
    running one's code at its next check. */
-enum lu_dep_kind { LU_DEP_TYPE, LU_DEP_KEYS, LU_DEP_VALUE, LU_DEP_FUNC, LU_DEP_CALLEES };
+enum lu_dep_kind { LU_DEP_TYPE, LU_DEP_KEYS, LU_DEP_VALUE, LU_DEP_FUNC, LU_DEP_CALLEES, LU_DEP_SERIAL };
 void lu_jit_invalidate(int kind, uintptr_t obj, uint32_t sub);
 /* A unit holds each dict value it compiled in as a constant. A writer
    that lets go of a watched dict's value calls this after: if a dict

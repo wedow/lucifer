@@ -133,6 +133,11 @@ lu_member_exchange(PyObject *obj, PyObject **addr, PyObject *v)
 {
     PyObject *old;
     uint8_t unlocked = _Py_UNLOCKED;
+    if (lu_serial()) {
+        old = *addr;                    /* one task runs, and is not switched out here */
+        __atomic_store_n(addr, Py_XNewRef(v), __ATOMIC_RELEASE);
+        return old;
+    }
     if (__atomic_compare_exchange_n(&obj->ob_mutex._bits, &unlocked, _Py_LOCKED, 0,
                                     __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
         /* The lock alone, as CPython's LOCK_OBJECT for STORE_ATTR_SLOT (luc-po0x). */

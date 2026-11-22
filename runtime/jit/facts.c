@@ -182,6 +182,87 @@ call_polls(struct lu_func *f)
     free(polled);
 }
 
+/* A store that takes its object's lock byte in line (emit.c lock_object). */
+static int
+locks_in_line(const struct lu_ins *in)
+{
+    switch (in->op) {
+    case OP_INLINE_STORE: case OP_INLINE_STORE_I: case OP_INLINE_STORE_F:
+    case OP_LIST_STORE: case OP_TYPED_LOAD: case OP_TYPED_STORE:
+        return !(in->flags & INS_FRESH);
+    default:
+        return 0;
+    }
+}
+
+/* While serial (lu_serial), such a store takes no lock, and the unit
+   depends on the serial state. Making a second task kills the unit with
+   the world stopped, before that task exists (runtime/thread/task.c),
+   which can happen only while this task is inside an instruction that may
+   run code, park or detach (lu_publishes), or at a poll, whose in-place
+   work runs destructors; a unit is entered only alive (jit.c find, emit.c
+   direct_entry). So an activation still in the unit after the switch
+   meets one of those first, and no unlocked store runs before a check
+   that the unit lives: a store some path reaches with no check since
+   checks first (INS_RECHECK), and leaves before storing. Checks are
+   CHECK_LIVE, GUARD_FRAMES that check the unit (with a dependency every
+   one does), and such a store's own. A poll is no check: a destructor's
+   own polls may have taken the reason it would leave for. */
+static void
+serial_stores(struct lu_func *f)
+{
+    int any = 0;
+    for (int v = 0; v < f->nins && !any; v++) {
+        any = !(f->ins[v].flags & INS_DEAD) && locks_in_line(&f->ins[v]);
+    }
+    if (!any || !lu_serial()) {
+        return;
+    }
+    struct lu_fdep dep = { .kind = LU_DEP_SERIAL, .code = f->code };
+    lu_ir_dep(f, &dep);
+    int nb = f->nblocks;
+    char *alive = malloc((size_t)nb);
+    memset(alive, 1, (size_t)nb);
+    for (int changed = 1, final = 0; changed || !final;) {
+        final = !changed;
+        changed = 0;
+        for (int k = 0; k < f->norder; k++) {
+            int b = f->order[k];
+            struct lu_block *bl = &f->blocks[b];
+            int ok = 1;
+            for (int p = 0; p < bl->npreds; p++) {
+                ok &= alive[bl->preds[p]];
+            }
+            for (int i = 0; i < bl->nins; i++) {
+                struct lu_ins *in = &f->ins[bl->ins[i]];
+                if (in->flags & INS_DEAD) {
+                    continue;
+                }
+                if (locks_in_line(in)) {
+                    if (final) {
+                        in->flags |= INS_UNLOCKED | (ok ? 0 : INS_RECHECK);
+                    }
+                    ok = 1;
+                }
+                if (in->op == OP_CHECK_LIVE || (in->op == OP_GUARD_FRAMES && !(in->imm & 1))) {
+                    ok = 1;
+                }
+                else if (in->op == OP_POLL || lu_publishes(in) || unsettles(in)) {
+                    ok = 0;
+                }
+            }
+            if (alive[b] != ok) {
+                alive[b] = (char)ok;
+                changed = 1;
+            }
+        }
+        if (final) {
+            break;
+        }
+    }
+    free(alive);
+}
+
 int
 lu_ssa_facts(struct lu_func *f)
 {
@@ -247,5 +328,6 @@ lu_ssa_facts(struct lu_func *f)
     }
     free(alive);
     free(is_fact);
+    serial_stores(f);
     return 0;
 }

@@ -2046,6 +2046,15 @@ call_helper(struct asm_ *a, lu_v v, struct lu_deopt *d)
     }
 }
 
+/* Leaves at `dead` once the unit is dead (runtime/jit/deps.c). Clobbers R11. */
+static void
+jump_if_dead(struct asm_ *a, int dead)
+{
+    mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
+    cmp_mi(a, 0, R11, 0, 0);
+    jcc(a, CC_NE, dead);
+}
+
 /* After a call that published: a walker that made the frames real during
    it leaves at `left`, when the instruction has such an exit of its own. */
 static void
@@ -2055,10 +2064,7 @@ settle(struct asm_ *a, int left)
         cmp8_mi(a, R15, offsetof(struct lu_frame, owner), LU_FRAME_JIT);
         jcc(a, CC_NE, left);
         if (a->f->ndeps > 0) {
-            /* As GUARD_FRAMES: nor did the code it ran take back a fact. */
-            mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
-            cmp_mi(a, 0, R11, 0, 0);
-            jcc(a, CC_NE, left);
+            jump_if_dead(a, left);     /* as GUARD_FRAMES: nor did the code it ran take back a fact */
         }
     }
 }
@@ -2962,6 +2968,19 @@ unlock_object(struct asm_ *a, int r, int tmp, int keep)
     bind(a, unlocked);
 }
 
+/* Whether a store that locks in line takes the lock: not into an instance
+   no other thread can see (INS_FRESH), nor while serial (INS_UNLOCKED,
+   runtime/jit/facts.c), when a store the unit may have died before checks
+   that it lives first and leaves at `fail`, before storing. */
+static int
+store_locks(struct asm_ *a, struct lu_ins *in, int fail)
+{
+    if (in->flags & INS_RECHECK) {
+        jump_if_dead(a, fail);
+    }
+    return !(in->flags & (INS_FRESH | INS_UNLOCKED));
+}
+
 /* TYPED_LOAD and TYPED_STORE: item b of the bytearray in a, read as native
    items of array typecode imm (runtime/prim/memoryview.c typed_get and
    typed_set), in line under the bytearray's lock, which every resize takes
@@ -2980,6 +2999,7 @@ typed_item(struct asm_ *a, struct lu_ins *in, lu_v v)
     int width = code == 'b' || code == 'B' ? 1 : code == 'h' || code == 'H' ? 2
         : code == 'i' || code == 'I' || code == 'f' ? 4 : 8;
     int fail = guard_exit(a, in), out = new_label(a), done = new_label(a);
+    int locks = store_locks(a, in, fail);
     int o = gpr_of(a, in->a, RDX), i = gpr_of(a, in->b, RCX);
     int x = store_ && f ? fpr_of(a, in->c, 0) : -1;     /* before RAX holds anything: a constant passes through it */
     if (store_ && !f && code != 'q' && code != 'l') {
@@ -3002,7 +3022,9 @@ typed_item(struct asm_ *a, struct lu_ins *in, lu_v v)
             jcc(a, CC_NE, fail);
         }
     }
-    lock_object(a, o, R11, fail);
+    if (locks) {
+        lock_object(a, o, R11, fail);
+    }
     load(a, RAX, o, offsetof(PyVarObject, ob_size));
     if (width > 1) {
         rex(a, 1, 0, 0, RAX);
@@ -3061,10 +3083,14 @@ typed_item(struct asm_ *a, struct lu_ins *in, lu_v v)
         }
         op_rm(a, width == 8, width == 1 ? 0x88 : 0x89, R11, RAX, 0);    /* mov [rax], r11 (its low bytes) */
     }
-    unlock_object(a, o, R11, 1);
+    if (locks) {
+        unlock_object(a, o, R11, 1);
+    }
     jmp(a, done);
     bind(a, out);
-    unlock_object(a, o, R11, 1);
+    if (locks) {
+        unlock_object(a, o, R11, 1);
+    }
     jmp(a, fail);
     bind(a, done);
     if (!store_ && f) {
@@ -3111,6 +3137,7 @@ inline_store_raw(struct asm_ *a, lu_v v)
     struct move m[2] = { { RDI, in->a, 0, 0 }, is_int ? (struct move){ RSI, in->b, 0, 0 }
                                                       : (struct move){ XMM(0), in->b, 0, 1 } };
     int fail = guard_exit(a, in);
+    int fresh = !store_locks(a, in, fail);
     int slow = new_label(a), unlock_slow = new_label(a), done = new_label(a);
     int32_t flags = offsetof(PyObject, ob_flags) + 1;
     int32_t off = (int32_t)in->imm;
@@ -3127,7 +3154,6 @@ inline_store_raw(struct asm_ *a, lu_v v)
     modrm_mem(a, 0, RDI, flags);
     b1(a, LU_ATTRS_IN_DICT >> 8);               /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
     jcc(a, CC_NE, slow);
-    int fresh = (in->flags & INS_FRESH) != 0;  /* an instance no other thread can have seen: no lock */
     if (!fresh) {
         lock_object(a, RDI, RCX, slow);
         b1(a, 0xF6);
@@ -3645,9 +3671,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             /* Nor did the code the instruction ran take back a fact the
                unit relies on (runtime/jit/facts.c): the same way out. A
                frame that returns relies on nothing more. */
-            mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
-            cmp_mi(a, 0, R11, 0, 0);
-            jcc(a, CC_NE, seen);
+            jump_if_dead(a, seen);
         }
         if (in->imm & 1) {
             /* A frame object takes the locals only if another holds it too
@@ -3878,20 +3902,27 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            is lu_jit_list_store's. */
         struct move m[3] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 }, { RDX, in->c, 0, 0 } };
         int fail = guard_exit(a, in), slow = new_label(a), out = new_label(a), done = new_label(a);
+        int locks = store_locks(a, in, fail);
         struct lu_deopt *d = published(a, in);
         parallel_moves(a, m, 3);
-        lock_object(a, RDI, RCX, slow);
+        if (locks) {
+            lock_object(a, RDI, RCX, slow);
+        }
         cmp_rm(a, RSI, RDI, offsetof(PyVarObject, ob_size));
         jcc(a, CC_AE, out);                     /* unsigned: a negative index too */
         load(a, R11, RDI, offsetof(PyListObject, ob_item));
         load_indexed8(a, RBX, R11, RSI, 0);     /* the old value, kept across calls (IF_CALL) */
         incref(a, RDX);
         store_indexed8(a, R11, RSI, 0, RDX);    /* a release on x86: readers take it without the lock */
-        unlock_object(a, RDI, RCX, 0);
+        if (locks) {
+            unlock_object(a, RDI, RCX, 0);
+        }
         decref(a, RBX, in, d, -1);     /* the old value */
         jmp(a, done);
         bind(a, out);
-        unlock_object(a, RDI, RCX, 0);
+        if (locks) {
+            unlock_object(a, RDI, RCX, 0);
+        }
         jmp(a, fail);
         bind(a, slow);
         publish(a, in, d);
@@ -3911,6 +3942,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            else is lu_inline_store's, and leaves when it declines. */
         struct move m[2] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 } };
         int fail = guard_exit(a, in);
+        int fresh = !store_locks(a, in, fail);
         int slow = new_label(a), unlock_slow = new_label(a), immortal = new_label(a);
         int done = new_label(a);
         int32_t flags = offsetof(PyObject, ob_flags) + 1;
@@ -3923,7 +3955,6 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         modrm_mem(a, 0, RDI, flags);
         b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
         jcc(a, CC_NE, slow);
-        int fresh = (in->flags & INS_FRESH) != 0;  /* an instance no other thread can have seen: no lock */
         if (!fresh) {
             lock_object(a, RDI, RCX, slow);
             b1(a, 0xF6);
@@ -4284,10 +4315,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         /* A fact relied on since the last check may have been taken back
            (runtime/jit/deps.c): a dead unit leaves, as at a poll. */
         stress_exit(a, in);
-        int dead = exit_to(a, in->fs, EXIT_POLL, 0, 0);
-        mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
-        cmp_mi(a, 0, R11, 0, 0);
-        jcc(a, CC_NE, dead);
+        jump_if_dead(a, exit_to(a, in->fs, EXIT_POLL, 0, 0));
         return 0;
     }
     case OP_COUNT_OUT: {
@@ -4464,9 +4492,7 @@ direct_entry(struct asm_ *a)
     int at = a->n, decline = new_label(a), hooked = new_label(a), counted = new_label(a);
     saves(a);
     mov_rr(a, R14, RDI);
-    mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
-    cmp_mi(a, 0, R11, 0, 0);
-    jcc(a, CC_NE, decline);                     /* a caller may have read the entry before it died */
+    jump_if_dead(a, decline);                   /* a caller may have read the entry before it died */
     load(a, RAX, R14, offsetof(struct lu_task, carrier));
     cmp_rm(a, RSP, RAX, offsetof(struct lu_carrier, jit_stack_floor));
     jcc(a, CC_B, decline);
