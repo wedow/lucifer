@@ -1,6 +1,6 @@
 ---
 id: luc-jy33
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-22T22:12:37Z
@@ -37,3 +37,7 @@ Nine-row check, one pinned core, cycles per inner iteration (instructions), Luci
 | strjoin | 469 (1123) | 120 (294) | 542 (1352) | 411/118/541 |
 
 Lucifer and CPython rows are within about 10% except calls (-19%), dictcount (-13%) and strjoin (+14%); the original two-count script in the same lease gave calls 35 and strjoin 569, so those rows move between runs by that much. PyPy rows under 40 cycles differ by a few cycles absolute; use instructions there.
+
+**2026-11-22 (per-runtime counts)**
+
+Each runtime calibrates its own loop counts (its longer run about 0.3 s), since a count sized for the slowest runtime left PyPy's loop at a few milliseconds beside start-up and gave unstable, once negative, rows. Outputs are compared at one small fixed count instead. The reference times CPython and PyPy in one prefixed call each; the daily times Lucifer in one. Pinned recheck, PyPy cycles (instructions): keyword call 9 (34), list sum 5 (19), method call 10 (29), store 2 attributes 10 (26). The first full table comes from the daily.
