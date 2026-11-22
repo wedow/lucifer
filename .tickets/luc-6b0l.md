@@ -25,3 +25,9 @@ Design. The runtime is in one of two states, serial or parallel.
 
 Acceptance, stage 1: idiom rows store-int-attributes <= 65 cycles, store-object-attribute <= 35, store-float-attribute <= 42 with instructions down; a threaded differential test that starts its second thread mid-loop over shared objects stays correct in every JIT mode; the free-threading corpus and the thread kernel tests unchanged. Full review (locks, races).
 
+
+## Notes
+
+**2026-11-22T23:31:05Z**
+
+Stage 1 built on branch luc-6b0l (not landed). Serial until a second task is made; compiled INLINE_STORE/_I/_F, LIST_STORE and TYPED_LOAD/STORE built while serial take no lock and depend on the serial state (LU_DEP_SERIAL); critical sections begun while serial are pushed suspended. Idiom cycles/iteration, base -> branch (min of 3, interleaved, one core): stores 120 -> 50, pstores 65 -> 33, fstores 63 -> 29, oo 181 -> 107, listcomp 122 -> 91, listidx 121 -> 115; loads 65 -> 64; calls 37 -> 36..48 on identical code (noise). Blocker: the switch stops the world at the second task's creation and so waits for the first task to poll or detach. An attached thread spinning in C while a raw pthread calls PyGILState_Ensure (tests/capi/poll.c, tests/capi/mutex.c) now deadlocks; free-threaded CPython allows that. Needs a handshake that does not depend on the first task polling before this can land.
