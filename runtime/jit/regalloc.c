@@ -220,6 +220,7 @@ liveness(struct lu_func *f, struct live *L)
 
 struct interval {
     lu_v v;
+    lu_v hint;                  /* a phi it flows into, or a phi's input: one register for both saves a move */
     int start, end;
     int fpr;
     int crosses;                /* a call */
@@ -290,6 +291,39 @@ saved_reg(int reg)
         }
     }
     return 0;
+}
+
+/* The register of it's hint when it can have it: free, of its class and
+   kind; or held by the instruction's operand a, which is that hint and
+   ends where it starts, when the instruction may write its result over a
+   (result_over_a): a moves out of the active set. -1 otherwise. */
+static int
+hinted(struct lu_func *f, struct interval *it, struct interval **active, int *nactive, int *busy,
+       const int8_t *regs, int nregs)
+{
+    if (it->hint == LU_NOV) {
+        return -1;
+    }
+    int r = f->ins[it->hint].loc, ok = 0;
+    for (int i = 0; i < nregs; i++) {
+        ok |= regs[i] == r;
+    }
+    if (!ok || saved_reg(r)) {
+        return -1;
+    }
+    if (!busy[r]) {
+        return r;
+    }
+    struct lu_ins *def = &f->ins[it->v];
+    for (int a = 0; a < *nactive; a++) {
+        if (active[a]->v == it->hint && f->ins[active[a]->v].loc == r && active[a]->end == it->start
+            && def->a == it->hint && lu_target.result_over_a(def)) {
+            active[a] = active[--*nactive];
+            busy[r] = 0;
+            return r;
+        }
+    }
+    return -1;
 }
 
 static int
@@ -383,6 +417,27 @@ lu_regalloc(struct lu_func *f)
     }
     free(L.in);
     free(L.out);
+    /* Each phi input with a location of its own and the phi it flows
+       into hint at each other (the first phi a value feeds). */
+    lu_v *hint = malloc(sizeof(lu_v) * (size_t)(f->nins + 1));
+    for (int v = 0; v < f->nins; v++) {
+        hint[v] = LU_NOV;
+    }
+    for (int v = 0; v < f->nins; v++) {
+        struct lu_ins *phi = &f->ins[v];
+        if (phi->op != OP_PHI || !allocatable(f, v)) {
+            continue;
+        }
+        for (int i = 0; i < phi->nargs; i++) {
+            lu_v u = used(f, phi->args[i]);
+            if (u != LU_NOV && u != v && hint[u] == LU_NOV) {
+                hint[u] = v;
+                if (hint[v] == LU_NOV) {
+                    hint[v] = u;
+                }
+            }
+        }
+    }
     /* Intervals, then linear scan. */
     struct interval *iv = malloc(sizeof(struct interval) * (size_t)(f->nins + 1));
     int n = 0;
@@ -395,6 +450,7 @@ lu_regalloc(struct lu_func *f)
         it->start = istart[v];
         it->end = iend[v];
         it->fpr = f->ins[v].rep == REP_F64;
+        it->hint = hint[v];
         it->crosses = cross[v] != 0;
         it->memory = it->crosses && (it->fpr || memory[v] || (cross[v] & 2));
     }
@@ -434,7 +490,7 @@ lu_regalloc(struct lu_func *f)
         }
         const int8_t *regs = it->fpr ? lu_target.fpr : lu_target.gpr;
         int nregs = it->fpr ? lu_target.nfpr : lu_target.ngpr;
-        int reg = -1;
+        int reg = hinted(f, it, active, &nactive, busy, regs, nregs);
         /* The registers calls preserve last: values that cross calls want them. */
         for (int pass = 0; pass < 2 && reg < 0; pass++) {
             for (int r = 0; r < nregs; r++) {
@@ -469,6 +525,7 @@ lu_regalloc(struct lu_func *f)
     f->nspill = nspill;
     free(iv);
     free(cross);
+    free(hint);
     free(memory);
     free(istart);
     free(iend);

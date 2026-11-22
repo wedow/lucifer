@@ -29,6 +29,10 @@ struct lu_target {
     int nsaved;
     const int8_t *saved;
     int (*clobbers_saved)(const struct lu_ins *in);
+    /* Whether the instruction's code reads its operand a's register
+       before it writes its result there, and keeps a's value for its
+       exits (so the two may share a register). */
+    int (*result_over_a)(const struct lu_ins *in);
     /* For perf (runtime/interp/perf.c): the stack trampoline, which calls
        its fourth argument with its first three inside a frame of its own
        (NULL: none); the ELF machine; and the DWARF call frame information

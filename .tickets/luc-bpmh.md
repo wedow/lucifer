@@ -103,3 +103,47 @@ A compare (CMP_I, IS, RITER_DONE, ordered CMP_F) whose one reader is the next in
 | listidx | 287 | 284 | 121 | 122 |
 
 calls swings between runs on both arms (21 to 35 cycles); counters taken in one lease: 24.8 cycles after b, 21.5 after c+d.
+
+## 2026-11-23: stage f, phis and their inputs share a register; e not done
+
+A phi and its inputs hint at each other in the linear scan: an input takes the phi's register when it is free, or when its instruction reads the phi as operand a for the last time and may write its result over it (an add or subtract undoes itself on overflow before the exit reads the operand). It fires on the sums and the iterator index of loads, listsum and tupunpack; values whose interval runs past their last use (a later block in the layout) still move. The one-compare POLL (e) needs the poll word at a fixed place from the task, which it is not (task -> carrier -> word): not a few lines, left.
+
+| row | instructions after c+d | after f |
+|---|---|---|
+| loads | 169 | 162 |
+| listsum | 77 | 74 |
+| tupunpack | 132 | 125 |
+| calls | 103 | 104 |
+| pstores | 115 | 116 |
+| stores, listidx, floatloop | 153, 284, 48 | 153, 284, 48 |
+
+Counters in one lease, min of 3 (cycles): tupunpack 25.5 after c+d, 24.4 after f; listidx 125.3 master, 124.5 b, 122.0 c+d, 118.6 f.
+
+## 2026-11-23: all stages against origin/master
+
+| row | instructions master | now | cycles master | now (one lease, interleaved min of 3) | code bytes master | now |
+|---|---|---|---|---|---|---|
+| loads | 167 | 162 | 68 | 25 | 6861 | 6996 |
+| tupunpack | 141 | 125 | 49 | 31 | 7730 | 7906 |
+| calls | 104 | 104 | 39 | 22 | 6296 | 6472 |
+| listsum | 73 | 74 | 22 | 19 | 6057 | 6303 |
+| floatloop | 54 | 48 | 31 | 25 | 7464 | 7820 |
+| stores | 141 | 153 | 121 | 118 | 8021 | 8517 |
+| pstores | 110 | 116 | 66 | 64 | 5476 | 5859 |
+| listidx | 279 | 284 | 115 | 129 (118.6 in the counter lease) | 9082 | 9640 |
+
+Instructions include the NOPs that keep branches inside 32-byte windows (6 to 22 per iteration); code bytes grow by them as well. Cycle numbers move by 10-20% between leases on the same binary (calls 21-35); compare within a row of one lease.
+
+## 2026-11-23: review fix, held values after a published slow path
+
+Defect (stage a): after a published slow-path call that saves the registers but is not a park (TRUTH imm != 1, DECREF imm 1), unpublish dropped the frame slots' holds before the registers came back, reading each held value from a register C had clobbered: the decref hit garbage and the real object leaked the reference taken before the call. tests/kernel/jit_published_holds.py shows it (truth refcount delta 2244 to 239646 instead of 0 in plain, jit and jit-deopt); passes on master and now. Fix: one rule for where a value is during a published slow path, the walkers' own: when the slow path saved the registers, unpublish reads a held value in a register from its word at jit_regs.
+
+Sites that reach unpublish after a C call, and where held values are then:
+- call_helper (HELPER, a call to the allocator): the state's values live across the call, so in a preserved register (kept by the C ABI) or a spill word.
+- kept_end (TRUTH imm != 1, DECREF imm 1): in the register save area at jit_regs, read from there (the fix).
+- parked_end (LIST_ITEM, INLINE_LOAD box, POLL): a park takes no holds (nheld 0).
+- decref without keep (the old value an INLINE_STORE*/LIST_STORE releases), inline_store_raw, LIST_STORE, INLINE_STORE slow paths: those are calls to the allocator that clobber the preserved registers, so every value live across them is in a spill word.
+
+Holds at a release: none can exist, since a release's state cannot name the object it releases (a walker would read a freed object). Probed: every published slow path that took holds, over all tests/kernel jit, finalizer and truth programs compiled at first call, was a TRUTH (153 sites), none a DECREF. The test's release case (an alias that outlives the released name, a finalizer that allocates and calls) passes in the three lanes, as does a __bool__ that writes the caller's locals through f_locals in a loop with no call.
+
+Branch windows (stage b) are padded only on the cores the JCC erratum fix covers (CPUID: Intel family 6, models 4E 5E 55 8E 9E A5 A6), decided once; elsewhere no NOPs. Prefix padding instead of NOPs needs instruction starts the encoder does not keep: left.

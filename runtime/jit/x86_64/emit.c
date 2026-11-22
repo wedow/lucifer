@@ -28,6 +28,7 @@ enum { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, 
 static const int8_t gprs[] = { RBX, R12, R13, RSI, RDI, R8, R9, R10 };
 static const int8_t saved_gprs[] = { RBX, R12, R13 };
 static int clobbers_saved(const struct lu_ins *in);
+static int result_over_a(const struct lu_ins *in);
 static const int8_t fprs[] = { XMM(2), XMM(3), XMM(4), XMM(5), XMM(6), XMM(7), XMM(8), XMM(9),
                                XMM(10), XMM(11), XMM(12), XMM(13), XMM(14) };
 /* push rbp; mov rbp, rsp; call *rcx; pop rbp; ret */
@@ -42,6 +43,7 @@ static const uint8_t fp_cfi[] = { 0x41, 0x0e, 16, 0x86, 2, 0x43, 0x0d, 6 };
 const struct lu_target lu_target = {
     .name = "x86_64", .ngpr = sizeof gprs, .nfpr = sizeof fprs, .gpr = gprs, .fpr = fprs,
     .nsaved = sizeof saved_gprs, .saved = saved_gprs, .clobbers_saved = clobbers_saved,
+    .result_over_a = result_over_a,
     .trampoline = trampoline, .ntrampoline = sizeof trampoline, .elf_machine = 62,
     .cie = cie, .ncie = sizeof cie, .fp_cfi = fp_cfi, .nfp_cfi = sizeof fp_cfi,
 };
@@ -167,6 +169,22 @@ clobbers_saved(const struct lu_ins *in)
         return 1;
     case OP_HELPER:
         return in->imm == H_build_tuple || in->imm == H_build_list || in->imm == H_new_object;
+    default:
+        return 0;
+    }
+}
+
+/* The instructions whose result may take operand a's register (target.h):
+   an overflow undoes the operation before the exit reads a. */
+static int
+result_over_a(const struct lu_ins *in)
+{
+    switch (in->op) {
+    case OP_ADD_I: case OP_SUB_I: case OP_AND_I: case OP_OR_I: case OP_XOR_I:
+    case OP_ADD_F: case OP_SUB_F: case OP_MUL_F: case OP_DIV_F:
+        return in->a != in->b;
+    case OP_LOAD:
+        return 1;
     default:
         return 0;
     }
@@ -3300,7 +3318,23 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
                 alu_rr(a, alu, d, r);
             }
         }
-        if (in->op == OP_ADD_I || in->op == OP_SUB_I || in->op == OP_MUL_I) {
+        if ((in->op == OP_ADD_I || in->op == OP_SUB_I) && d == I(a, xv)->loc) {
+            /* The result took x's register: an overflow takes x back for the exit. */
+            int undo = new_label(a);
+            jcc(a, CC_O, undo);
+            cold_begin(a);
+            bind(a, undo);
+            int back = in->op == OP_ADD_I ? ALU_SUB : ALU_ADD;
+            if (konst) {
+                alu_ri(a, back, d, imm);
+            }
+            else {
+                alu_rr(a, back, d, r);
+            }
+            jmp(a, fail);
+            cold_end(a);
+        }
+        else if (in->op == OP_ADD_I || in->op == OP_SUB_I || in->op == OP_MUL_I) {
             jcc(a, CC_O, fail);
         }
         def_gpr(a, v, d);
