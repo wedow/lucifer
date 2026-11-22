@@ -88,14 +88,17 @@ def time_one(names, iters, commands):
     print(json.dumps(result))
 
 
+def batches(items, size):
+    """Consecutive runs of at most size items, one timed step each: a step's lock first drains
+    the host, so a few steps of minutes beat one per item."""
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
 def timings(names, iters, commands):
-    """One prefixed step per AWFY benchmark, with every runtime at the same iteration count."""
-    results = {}
+    """AWFY in one prefixed step (seconds per benchmark), every runtime at the same iteration count."""
     options = ["--iters", str(iters)] + [f"--run={label}={command}" for label, command in commands.items()]
-    for name in names:
-        done = run([sys.executable, __file__, "time", name] + options, "TIMING_PREFIX")
-        results[name] = last_json(done.stdout).get(name, {label: None for label in commands})
-    return results
+    found = last_json(run([sys.executable, __file__, "time", ",".join(names)] + options, "TIMING_PREFIX").stdout)
+    return {name: found.get(name, {label: None for label in commands}) for name in names}
 
 
 def oracle_version(oracle):
@@ -106,9 +109,8 @@ def web_timings(runs):
     """The web benchmark per runtime and server CPU count: {runtime: {cpus: point}}."""
     logs = []
     for name, command in runs.items():
-        for cpus in WEB_CPUS.split(","):
-            done = run([sys.executable, str(WEB), "time", "--cpus", cpus, f"--run={name}={command}"], "TIMING_PREFIX")
-            logs.append(done.stdout)
+        done = run([sys.executable, str(WEB), "time", "--cpus", WEB_CPUS, f"--run={name}={command}"], "TIMING_PREFIX")
+        logs.append(done.stdout)
     log = "".join(logs)
     points = {}
     for line in log.splitlines():
@@ -125,7 +127,7 @@ def web_check(oracle, site):
 
 
 def corpus_timings(command, reference=None):
-    """{program: result} from one prefixed step per corpus program."""
+    """{program: result} from prefixed steps of a few corpus programs each."""
     prepared = run([sys.executable, str(CORPUS), "prepare", str(CORPUS_SITE)])
     if prepared.returncode:
         return {}, prepared.stdout
@@ -140,8 +142,8 @@ def corpus_timings(command, reference=None):
             json.dump(reference, ref)
             ref.flush()
             args += ["--reference", ref.name]
-        for name in names:
-            done = run(args + ["--programs", name], "TIMING_PREFIX")
+        for group in batches(names, 8):
+            done = run(args + ["--programs", ",".join(group)], "TIMING_PREFIX")
             results.update(last_json(done.stdout))
             logs.append(done.stdout)
     return results, "".join(logs)
