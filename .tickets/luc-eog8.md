@@ -128,9 +128,23 @@ The stores row stores the loop variable, an int a local also names, into an int 
 
 Exact instructions per inner iteration, origin/master 161b0abb -> (b) -> (c) -> now: loads 162 -> 94 -> 94 -> 120; calls 104 -> 88 -> 88 -> 97; oo (mean of 11 traced iterations) 2905 -> 2689 -> 2526 -> 2400; fstores 104 -> - -> 90 -> 89; stores 130 -> 147 -> 147 -> 148. A load of a word holding the marker is 3 instructions (compare in memory, branch, raw load: fstores' float load, disassembled); a float store over a marker 4 (load, compare, branch, store). The loads and calls rows read instances the interpreter made, whose words hold int boxes: those take the cold path, about 12 instructions a load (type and tag checks, then the raw word) where (b) trusted the kind in 5.
 
+## 2026-11-23: G1, instances from __class__ assignment
+
+set_class moves an instance's values to a dict and swaps its type, keeping the room its first class gave it; the new class's names can outnumber that room, so stage (d)'s "an index below the count is in every live instance's room" fails for it, and a word past its room may hold a neighbour's value. Fix: the first time a class receives an instance by assignment it is marked for good (lu_shared_names.foreign) and its version changed, before the type swap; units compiled for a marked class, or for a class the compile cannot find, test the in-dict flag before reading any word (LU_LOAD_FLAG_FIRST, LU_STORE_FLAG_FIRST); such an instance's values are always in a dict. Test jit_class_assign_room: 40 names read, read as ints and stored by code of their own on an instance with a small room among neighbours whose words all hold values; it fails (no output) on the stage (d) build in the jit and jit-deopt lanes and passes with the fix in all three.
+
+Other ways an exact-class instance could have a smaller room than its class's count, and why each cannot: copy and pickle make the instance through the class's own allocation (object.__reduce_ex__, copyreg.__newobj__); the count never outgrows a room the class gave, since count + usable never grows; a subclass's instance fails the exact version guard; the collector and resurrection keep an object's class; instances made by compiled code (emit_new_object) take the class's room. C code that sets ob_type itself on an instance with inline values bypasses compatible_for_assignment, as it does in CPython, whose inline values also depend on the class; the runtime's own Py_SET_TYPE uses are on module defs, types and dict keys, never instances.
+
+A load site whose word holds a str half the time (.scratch/mixed.py): 116 guard exits in all at n = 3000 and at n = 300000, so the site stops speculating after its first failures.
+
+## 2026-11-23: counting for stage (e)
+
+C and interpreter int stores under int-first names, by value (a temporary counter in take_kind; AWFY at 20 iterations, the idiom rows at 300): Richards small 7885, other one-digit 2982, wider 32; DeltaBlue 8733 / 714 / 40; Havlak 27047 / 8924 / 5317522; CD 699 / 2160 / 96; Bounce 3577 / 4437 / 34; Json 4973 / 1945 / 35; loads 438 / 20; oo 1944 / 2023; stores 2932 / 106. Cached small ints are 72% of Richards', 92% of DeltaBlue's, 24% of CD's, 44% of Bounce's, 72% of Json's; Havlak's are almost all wider than one digit and want a look of their own. Nothing built yet.
+
 ## State (keep current)
 
-Branch luc-eog8 from origin/master 161b0abb, history rebuilt without local details (old head c7d9e06c, tree identical). Commits: 21e1e2c5 stage (a); e78a3906 review fixes of (a); a0ce0a7d stage (b); 0187a775 stage (c); 6d830451 ticket; a7b2acf8 ticket luc-2dd7 (classes made at run time); a533dff5 loads check the word (F1, F2); then stage (d), the in-dict test only for absent words. Gated after each of the last two: 50 focused programs in plain, jit, jit-deopt; jitcheck 0 failing; the kinds programs and jit_threads in handoff and handoff:2.
+Branch luc-eog8 rebased on origin/master 0b2fc137 (only ticket commits moved there). Code commits: (a), its review fixes, (b), (c), loads check the word (F1, F2), stage (d), the G1 fix (c4196ac7). Gated after the G1 fix: 51 focused programs in plain, jit, jit-deopt (jit_class_assign_room among them); jitcheck 0 failing; the kinds programs and jit_threads in handoff and handoff:2.
+
+Nothing running. Next step: report; the G1 fix goes back to review, then lands. Then stage (e): C and interpreter stores of a cached small int under an int-first name write the marker and the raw word (numbers above).
 
 Nothing running. Next step: report and wait for review.
 
@@ -143,6 +157,6 @@ Scratch tools (untracked, .scratch/):
 - keep/ctr.sh ROW BIN...: counters; under the host lock (core class).
 - keep/dis.sh ROW FUNC + keep/ann.py: annotated disassembly of a function's last unit (dis3.sh: oo, dis4.sh: fstores).
 - gate.sh: the focused gate; sb.sh / sc.sh / sd.sh: build + gate + traces per stage; wa/: the while_attr probe.
-- bin/lucifer-base (master 161b0abb), bin/lucifer-a, -b, -c, -d (self-checking loads), -d2 (stage d): the arms.
+- bin/lucifer-base (master 161b0abb), bin/lucifer-a, -b, -c, -d (self-checking loads), -d2 (stage d), -g (G1 fix): the arms; mixed.py: the mixed load site; census.txt: the stage (e) counts; sg.sh, sg2.sh: the G1 runs.
 
 Not obvious from the code: lu_jit LU_KIND_* (jit.h) is an unrelated enum (call-site operand kinds); the field kinds are LU_FIELD_*. emit_new_object does not zero raw words (luc-uqyj), so a raw word means something only beside a value word of the first kind. The cold stream follows the hot one, so a jump to the label right after a cold block is a jump to the next hot instruction: leave it out. tk in a worktree names tickets after the directory (le-*): rename to luc-*.
