@@ -12,10 +12,13 @@ import pickle
 import sys
 
 try:
-    from _lucifer import inline_kinds_ok
+    from _lucifer import inline_kinds_ok, inline_field
 except ImportError:
     def inline_kinds_ok(o):
         return True
+
+    def inline_field(o, name):
+        return None
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 2000
 
@@ -45,7 +48,54 @@ def ints(n):
         p = ps[i % 20]
         p.x = i
         p.y = i * 0.25
-    return ok(ps), sum(p.x for p in ps), sum(p.y for p in ps)
+    before = ok(ps)
+    sums = sum(p.x for p in ps), sum(p.y for p in ps)
+    return before, ok(ps), sums      # again after reads made boxes
+
+
+def raw_kept(n):
+    # A name's raw words keep its first kind: a float name that takes an
+    # int, an int name that takes a float or a str, and an object name
+    # that takes numbers leave every raw word as it was.
+    class F:
+        pass
+    class I:
+        pass
+    class O:
+        pass
+    f, g, o = F(), I(), O()
+    f.x = 3.5
+    g.x = 12
+    o.x = 'a'
+    was = [inline_field(f, 'x'), inline_field(g, 'x'), inline_field(o, 'x')]
+    for i in range(n):
+        f.x = 7 if i % 2 else 3.5 + i
+        g.x = 2.5 if i % 3 == 0 else ('s' if i % 3 == 1 else i)
+        o.x = i if i % 2 else i * 0.5
+    now = [inline_field(f, 'x'), inline_field(g, 'x'), inline_field(o, 'x')]
+    kept = [w is None or w[1] == m[1] for w, m in zip(was, now)]
+    return kept, ok([f, g, o]), f.x, g.x, o.x
+
+
+def ordered_delete(n):
+    # Instances that took their names in different orders keep an order
+    # record; stores after deletions keep it whole.
+    out = []
+    for i in range(n):
+        p = Q.__new__(Q)
+        if i % 2:
+            p.y = i
+            p.x = i * 0.5
+        else:
+            p.x = i
+            p.y = 'y'
+        for k in range(5):
+            del p.x
+            p.x = k + 0.25 if i % 3 else k
+            del p.y
+            p.y = k
+        out.append(p)
+    return ok(out), [list(vars(p)) for p in out[:2]], sum(p.x for p in out), sum(p.y for p in out)
 
 
 def generalize(n):
@@ -113,3 +163,5 @@ print('generalize', generalize(N))
 print('odd values', odd_values(N))
 print('writers', writers(N // 10))
 print('floats', floats(N))
+print('raw kept', raw_kept(N))
+print('ordered delete', ordered_delete(N // 10))

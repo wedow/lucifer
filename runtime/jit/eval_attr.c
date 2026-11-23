@@ -218,6 +218,17 @@ class_entry(struct ctx *c, PyTypeObject *tp, PyObject *name, PyObject **d)
     return lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)tp), version);
 }
 
+/* A new reference to the class whose instances the version guard on
+   owner admits, or NULL: known, or found by the version, which is read
+   before anything is read from the class (a change after the read takes
+   the version back, and the guard fails). */
+static PyTypeObject *
+owner_class(struct ctx *c, lu_v owner, uint32_t version)
+{
+    PyTypeObject *t = lu_ev_type(c, owner);
+    return t != NULL ? (PyTypeObject *)Py_NewRef(t) : lu_type_of_version(version);
+}
+
 /* An inline store into an instance of class t (NULL: not known) may take
    a new name in line: every instance has at least the room settled now
    (ssa.h INLINE_STORE imm2). */
@@ -234,9 +245,10 @@ store_room(struct ctx *c, lu_v st, PyTypeObject *t, uint16_t index)
 
 /* Whether an inline store into class t's word at `index` must go to C,
    which keeps the name's kind (attrs.c): an object store unless the name
-   holds any object already, a raw int or float unless it holds that kind.
-   A kind only moves toward object, and every store taken in line here
-   stays right when it does. t NULL: not known, C. */
+   holds objects already, a raw int or float unless it holds that kind.
+   Built under a kind that then moves, a store still writes a complete
+   pair of that kind until the version guard stops it. t NULL: not known,
+   C. */
 static void
 store_kind(struct ctx *c, lu_v st, PyTypeObject *t, uint16_t index)
 {
@@ -250,7 +262,7 @@ store_kind(struct ctx *c, lu_v st, PyTypeObject *t, uint16_t index)
         I(c, st)->imm2 |= LU_STORE_FLOAT_RAW;
         return;
     }
-    int in_line = op == OP_INLINE_STORE ? k == LU_FIELD_OBJECT
+    int in_line = op == OP_INLINE_STORE ? k == LU_FIELD_OBJECT || k == LU_FIELD_ANY
                 : op == OP_INLINE_STORE_I ? k == LU_FIELD_INT : k == LU_FIELD_FLOAT;
     if (!in_line) {
         I(c, st)->imm2 |= LU_STORE_BY_C;
@@ -681,12 +693,10 @@ store_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *desc
         lu_v st = raw != LU_NOV ? lu_ev_emit(c, raw_op, REP_NONE, owner, raw, LU_NOV, index)
                                 : lu_ev_emit(c, OP_INLINE_STORE, REP_NONE, owner, lu_ev_val(c, v), LU_NOV, index);
         I(c, st)->fs = lu_ev_exit_fs(c);
-        PyTypeObject *t = lu_ev_type(c, owner);
-        if (t == NULL) {
-            t = lu_type_of_version(version);    /* the class the version guard holds to */
-        }
+        PyTypeObject *t = owner_class(c, owner, version);
         store_room(c, st, t, index);
         store_kind(c, st, t, index);
+        Py_XDECREF(t);
         c->g->observed = 1;     /* the value it replaces is released */
     }
     else if (op == STORE_ATTR_SLOT) {

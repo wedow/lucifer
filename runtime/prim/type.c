@@ -140,22 +140,84 @@ subclasses_snapshot(PyTypeObject *tp)
 #define MAX_VERSIONS_PER_CLASS 1000
 #define MCACHE_MAX_ATTR_SIZE 100
 
-/* The type each live version names, for compiled code that knows a
+/* The heap type each live version names, for compiled code that knows a
    version and wants its class (lu_type_of_version), as CPython's
-   _PyType_LookupByVersion: borrowed, a slot per version modulo the size,
-   cleared when the type leaves its version or dies. */
-#define VERSION_TYPES 4096
-static PyTypeObject *version_types[VERSION_TYPES];
+   _PyType_LookupByVersion but without its fixed size: a type is in the
+   interpreter's map from taking a tag until it leaves it or dies, and
+   the map's lock keeps a type found there from being freed before the
+   finder has its reference. Static types have no inline values to ask
+   about and stay out. */
+static size_t
+vt_home(const struct lu_version_types *m, unsigned int version)
+{
+    return (size_t)(version * 2654435761u) & (m->cap - 1);
+}
+
+static size_t
+vt_find(const struct lu_version_types *m, unsigned int version)
+{
+    size_t i = vt_home(m, version);
+    while (m->e[i].version != 0 && m->e[i].version != version) {
+        i = (i + 1) & (m->cap - 1);
+    }
+    return i;
+}
+
+static int
+vt_grow(struct lu_version_types *m)
+{
+    struct lu_version_types bigger = { .cap = m->cap != 0 ? 2 * m->cap : 64, .n = m->n };
+    bigger.e = PyMem_RawCalloc(bigger.cap, sizeof *bigger.e);
+    if (bigger.e == NULL) {
+        return 0;
+    }
+    for (size_t i = 0; i < m->cap; i++) {
+        if (m->e[i].version != 0) {
+            bigger.e[vt_find(&bigger, m->e[i].version)] = m->e[i];
+        }
+    }
+    PyMem_RawFree(m->e);
+    m->cap = bigger.cap;
+    m->e = bigger.e;
+    return 1;
+}
+
+static void
+remember_version(PyTypeObject *tp, unsigned int version)
+{
+    struct lu_version_types *m = &PyInterpreterState_Get()->version_types;
+    PyMutex_Lock(&m->lock);
+    if (2 * (m->n + 1) <= m->cap || vt_grow(m)) {       /* no room to be had: the type is not found, and C stores */
+        size_t i = vt_find(m, version);
+        m->n += m->e[i].version == 0;
+        m->e[i] = (struct lu_version_type){ version, tp };
+    }
+    PyMutex_Unlock(&m->lock);
+}
 
 static void
 forget_version(PyTypeObject *tp)
 {
-    unsigned int old = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_RELAXED);
-    PyTypeObject *mine = tp;
-    if (old != 0) {
-        __atomic_compare_exchange_n(&version_types[old % VERSION_TYPES], &mine, NULL, 0, __ATOMIC_RELEASE,
-                                    __ATOMIC_RELAXED);
+    unsigned int version = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_RELAXED);
+    if (version == 0 || !(tp->tp_flags & Py_TPFLAGS_HEAPTYPE)) {
+        return;
     }
+    struct lu_version_types *m = &PyInterpreterState_Get()->version_types;
+    PyMutex_Lock(&m->lock);
+    size_t i = m->cap != 0 ? vt_find(m, version) : 0;
+    if (m->cap != 0 && m->e[i].tp == tp) {
+        /* Deleted by moving back the entries after it that may sit there. */
+        for (size_t j = (i + 1) & (m->cap - 1); m->e[j].version != 0; j = (j + 1) & (m->cap - 1)) {
+            size_t home = vt_home(m, m->e[j].version);
+            if (((j - home) & (m->cap - 1)) >= ((j - i) & (m->cap - 1))) {
+                m->e[i] = m->e[j];
+                i = j;
+            }
+        }
+        m->e[i] = (struct lu_version_type){ 0 };
+        m->n--;
+    }
+    PyMutex_Unlock(&m->lock);
 }
 
 static void
@@ -166,17 +228,25 @@ set_version(PyTypeObject *tp, unsigned int version)
         tp->tp_versions_used++;
     }
     __atomic_store_n(&tp->tp_version_tag, version, __ATOMIC_RELEASE);
-    if (version != 0) {
-        __atomic_store_n(&version_types[version % VERSION_TYPES], tp, __ATOMIC_RELEASE);
+    if (version != 0 && (tp->tp_flags & Py_TPFLAGS_HEAPTYPE)) {
+        remember_version(tp, version);
     }
 }
 
 PyTypeObject *
 lu_type_of_version(unsigned int version)
 {
-    PyTypeObject *tp = version != 0 ? __atomic_load_n(&version_types[version % VERSION_TYPES], __ATOMIC_ACQUIRE)
-                                    : NULL;
-    return tp != NULL && __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) == version ? tp : NULL;
+    struct lu_version_types *m = &PyInterpreterState_Get()->version_types;
+    PyTypeObject *tp = NULL;
+    PyMutex_Lock(&m->lock);
+    if (version != 0 && m->cap != 0) {
+        tp = m->e[vt_find(m, version)].tp;
+    }
+    if (tp != NULL && !lu_try_incref((PyObject *)tp)) {
+        tp = NULL;              /* dying: its dealloc waits for the lock to take it out */
+    }
+    PyMutex_Unlock(&m->lock);
+    return tp;
 }
 
 /* next_global_version_tag: the runtime-wide range, shared by all interpreters. */
@@ -2436,6 +2506,21 @@ prim_inline_kinds_ok(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return bool_of(lu_inline_kinds_ok(args[0]));
 }
 
+/* inline_field(obj, name): (kind, raw word) of the name obj keeps in line,
+   kind as LU_FIELD_* (unseen 0, int 1, float 2, object 3, any 4); None
+   when it keeps none there (tests). */
+static PyObject *
+prim_inline_field(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2);
+    int kind;
+    uint64_t raw;
+    if (!lu_inline_field(args[0], args[1], &kind, &raw)) {
+        Py_RETURN_NONE;
+    }
+    return Py_BuildValue("iK", kind, (unsigned long long)raw);
+}
+
 /* set_class(obj, cls): __class__ assignment after the kernel's checks.
    Concurrent assignments to one object take turns, so that each takes the
    reference of the class it replaced, once. */
@@ -2780,7 +2865,7 @@ PyMethodDef lu_prim_type_methods[] = {
     FAST(type_set_names),
     FAST(type_subclasses), FAST(type_modified), PURE(is_subtype), FAST(alloc), FAST(new_check),
     PURE(type_tp_name), FAST(type_text_signature), FAST(type_static_module), PURE(size),
-    PURE(truth_exact), PURE(instance_dict), FAST(instance_load), FAST(instance_store), FAST(inline_kinds_ok), FAST(set_class), FAST(caller_globals), FAST(super_args),
+    PURE(truth_exact), PURE(instance_dict), FAST(instance_load), FAST(instance_store), FAST(inline_kinds_ok), FAST(inline_field), FAST(set_class), FAST(caller_globals), FAST(super_args),
     FAST(error), FAST(attribute_error), FAST(ns_get), FAST(ns_set), FAST(ns_del), PURE(ns_items),
     PURE(kind),
     FAST(cell_get), FAST(cell_set), FAST(address), FAST(object_hash),

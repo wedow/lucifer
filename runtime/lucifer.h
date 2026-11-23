@@ -352,16 +352,22 @@ int lu_inline_store(PyObject *obj, Py_ssize_t offset, PyObject *v);
 int lu_inline_store_f(PyObject *obj, Py_ssize_t offset, double v);
 int lu_inline_store_i(PyObject *obj, Py_ssize_t offset, int64_t v);
 /* What every instance of a class holds under one name (attrs.c), which
-   only moves up: unseen, then an int (exact, fits int64 but INT64_MIN) or a float
-   (exact), then any object. Under an int or float name the raw word
-   beside a value word that holds a number holds its value, whoever
-   stored it. */
-enum { LU_FIELD_UNSEEN, LU_FIELD_INT, LU_FIELD_FLOAT, LU_FIELD_OBJECT };
+   only moves up: unseen, then an int (exact, fits int64) or
+   a float (exact), then anything. A name whose first value was some other
+   object is an object name instead, whose words never hold a marker.
+   Under an int or float name the raw word beside a value word that holds
+   a number holds its value, whoever stored it. A name that leaves int or
+   float changes its class's version first, so code that relied on the
+   kind under the version guard is invalidated. */
+enum { LU_FIELD_UNSEEN, LU_FIELD_INT, LU_FIELD_FLOAT, LU_FIELD_OBJECT, LU_FIELD_ANY };
 /* The kind of the name whose word is at byte `offset` of tp's instances. */
 int lu_inline_kind_at(PyTypeObject *tp, Py_ssize_t offset);
 /* Whether every word of obj agrees with its name's kind (tests). */
 int lu_inline_kinds_ok(PyObject *obj);
 /* The class whose current version is `version`, or NULL (runtime/prim/type.c). */
+/* Name's kind and its raw word in obj, while obj keeps it in line (tests). */
+int lu_inline_field(PyObject *obj, PyObject *name, int *kind, uint64_t *raw);
+/* A new reference to the heap type whose tag is version, or NULL. */
 PyTypeObject *lu_type_of_version(unsigned int version);
 /* A new reference to the value word at `word` (an instance's, read
    without its lock): NULL when absent or when a try fails; an unboxed
@@ -455,6 +461,14 @@ struct lu_pending {
 typedef struct { uint8_t tools[LU_MON_LOCAL_EVENTS]; } lu_local_monitors;
 typedef struct { uint8_t tools[LU_MON_UNGROUPED_EVENTS]; } lu_global_monitors;
 
+/* A heap type per live version tag (type.c lu_type_of_version): open
+   addressing, a power of two entries, version 0 empty; it grows. */
+struct lu_version_types {
+    PyMutex lock;
+    size_t cap, n;
+    struct lu_version_type { unsigned int version; PyTypeObject *tp; } *e;
+};
+
 /* PyInterpreterState (private layout; DESIGN 4.1). */
 #define LU_MCACHE_SIZE 4096
 struct _is {
@@ -497,6 +511,7 @@ struct _is {
     PyObject *kernel_twins;             /* strong: (a kernel function's code, its twin) pairs (kernel_twin) */
     PyObject *kernel_nexts;             /* strong: (iterator type, its step) pairs (next_missing_set) */
     unsigned int next_version_tag;      /* heap types' tp_version_tag; 0 once spent */
+    struct lu_version_types version_types;  /* borrowed: each heap type under its tag */
     uint32_t next_keys_version;         /* dk_version of the next keys table versioned; 0 once spent */
     uint32_t next_func_version;         /* co_version of the next code object; 0 once spent */
     /* Watchers (FOUNDATIONS 2.4): a callback per id; a type, dict, function
