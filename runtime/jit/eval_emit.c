@@ -501,7 +501,8 @@ static int
 quiet(PyTypeObject *t)
 {
     return t == &PyLong_Type || t == &PyFloat_Type || t == &PyBool_Type || t == &PyUnicode_Type
-        || t == &PyBytes_Type || t == Py_TYPE(Py_None);
+        || t == &PyBytes_Type || t == Py_TYPE(Py_None)
+        || t == &PyRangeIter_Type;      /* raw start, step and length (rangeiterobject) */
 }
 
 void

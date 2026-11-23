@@ -405,6 +405,510 @@ lets_borrow(const struct lu_ins *in)
     }
 }
 
+/* List and tuple items read without a count (luc-5bi7 stage 1), while
+   serial (lu_serial): no other task runs, so an item stays alive while its
+   container keeps it, and a container keeps it until code runs, a store
+   writes it, or it is released.
+
+   A web is a set of values that must be counted alike: the reads (a
+   LIST_ITEM, or a tuple item's LOAD with its INCREF) and the phis that
+   carry them around loops, joined through the phis' inputs. A web goes
+   uncounted when nothing in the range of its values can free what they
+   hold: no instruction outside borrow_safe while a member is live after it
+   or is its operand (a frame state an instruction carries counts as a use:
+   a published call's state names what it may need), no release of a
+   container on the chain its reads came from (an item of a row of a grid
+   needs the grid), and members of these kinds only, or constants. The one
+   counted input allowed is the entry's (ENTRY_LOCAL or ENTRY_STACK of the
+   entry block, the value a local held when an OSR entry began): its
+   reference goes at the end of the entry block (RELEASE_SHARED), which
+   leaves the unit when no other holder exists, so every path counts the
+   web alike. A poll with a member live across it leaves the unit for its
+   work in place (count merges and collections, which run finalizers and
+   decide garbage from counts) instead of doing it there (POLL_LEAVES).
+
+   An exit needs nothing more: it owns what its state names only if
+   INS_OWNED, and every slot it fills takes a new reference. Borrowed reads
+   depend on the serial state as unlocked stores do (facts.c locks_in_line).
+   Invalidation set: luc-5bi7's ticket. */
+static int
+borrow_safe(const struct lu_ins *in)
+{
+    switch (in->op) {
+    case OP_GUARD_FRAMES: case OP_GUARD_DEPTH: case OP_LIST_ITEM: case OP_INLINE_LOAD: case OP_INLINE_LOAD_I:
+    case OP_INLINE_LOAD_F: case OP_INLINE_ORIGIN: case OP_RITER_NEXT: case OP_JUMP: case OP_BRANCH: case OP_PHI:
+    case OP_RELEASE_SHARED: case OP_ENTRY_LOCAL: case OP_ENTRY_STACK: case OP_ENTRY_PC:
+        return 1;
+    case OP_HELPER:
+        /* Runs no Python and releases nothing that may hold others (FX_SEEN), nor parks. */
+        return !(lu_helpers[in->imm].fx & (FX_PY | FX_SEEN));
+    default:
+        return lets_borrow(in);
+    }
+}
+
+enum { NOT_IN, READ, CARRIER, NO_COUNT, ENTRY_COUNT };
+
+struct borrow {
+    struct lu_func *f;
+    int *uf;                    /* union-find over values */
+    uint8_t *kind;
+    int *bit;                   /* a member's index in the live sets, else -1 */
+    lu_v *of_bit;
+    int nbits, words;
+    char *bad;                  /* per root: counted after all */
+    uint64_t *out;              /* per block: members live out */
+    int entry;                  /* the entry block */
+};
+
+/* Whether something else holds an entry value now, in the frame the
+   build was made for: what decides that its release at the entry will
+   keep it alive (RELEASE_SHARED checks again at every entry). */
+static int
+held_elsewhere(struct lu_func *f, const struct lu_ins *in)
+{
+    if (f->frame == NULL) {
+        return 0;
+    }
+    int i = in->op == OP_ENTRY_LOCAL ? (int)in->imm : f->frame->code->co_nlocalsplus + (int)in->imm;
+    PyObject *o = f->frame->localsplus[i];
+    return o != NULL && (_Py_IsImmortal(o) || (o->ob_tid == _Py_ThreadId() && o->ob_ref_local >= 2));
+}
+
+static int
+uf_root(int *uf, int v)
+{
+    while (uf[v] != v) {
+        uf[v] = uf[uf[v]];
+        v = uf[v];
+    }
+    return v;
+}
+
+static int
+is_tuple_item(const struct lu_ins *in)
+{
+    return in->op == OP_LOAD && in->imm2 == LU_LOAD_TUPLE_ITEM;
+}
+
+/* The one INCREF of a tuple item's LOAD, or -1. */
+static lu_v
+item_incref(struct lu_func *f, lu_v v)
+{
+    lu_v found = -1;
+    for (int x = 0; x < f->nins; x++) {
+        struct lu_ins *in = &f->ins[x];
+        if (!(in->flags & INS_DEAD) && in->op == OP_INCREF && in->a == v) {
+            if (found >= 0) {
+                return -1;
+            }
+            found = x;
+        }
+    }
+    return found;
+}
+
+static int
+live_member(struct borrow *w, lu_v v)
+{
+    return v >= 0 && w->bit[v] >= 0 && !w->bad[uf_root(w->uf, v)];
+}
+
+/* An instruction that goes with its web: a member's release, a read's INCREF. */
+static int
+goes(struct borrow *w, const struct lu_ins *in)
+{
+    if ((in->op != OP_DECREF && in->op != OP_INCREF) || !live_member(w, in->a)) {
+        return 0;
+    }
+    int k = w->kind[in->a];
+    return (k == READ || k == CARRIER) && (in->op == OP_DECREF || is_tuple_item(&w->f->ins[in->a]));
+}
+
+static void
+use_bit(struct lu_func *f, lu_v v, void *arg)
+{
+    struct borrow *w = arg;
+    if (live_member(w, v)) {
+        w->out[(size_t)f->nblocks * (size_t)w->words + (size_t)(w->bit[v] / 64)] |= 1ull << (w->bit[v] % 64);
+    }
+}
+
+/* The members an instruction uses, into the scratch set after the blocks'. */
+static uint64_t *
+uses_of(struct borrow *w, struct lu_ins *in)
+{
+    struct lu_func *f = w->f;
+    uint64_t *u = w->out + (size_t)f->nblocks * (size_t)w->words;
+    memset(u, 0, sizeof(uint64_t) * (size_t)w->words);
+    if (in->op != OP_PHI && !goes(w, in)) {
+        use_bit(f, in->a, w);
+        use_bit(f, in->b, w);
+        use_bit(f, in->c, w);
+        for (int i = 0; i < in->nargs; i++) {
+            use_bit(f, in->args[i], w);
+        }
+        if (in->fs != NULL) {
+            lu_fs_each(f, in->fs, use_bit, w);
+        }
+    }
+    return u;
+}
+
+struct finding {
+    lu_v v;
+    int seen;
+};
+
+static void
+find_value(struct lu_func *f, lu_v v, void *arg)
+{
+    struct finding *p = arg;
+    p->seen |= v == p->v;
+}
+
+/* The containers a web's reads hang from, transitively through borrowed ones. */
+static int
+on_chain(struct borrow *w, int root, lu_v c, int depth)
+{
+    struct lu_func *f = w->f;
+    if (depth > 8) {
+        return 1;               /* deep: say yes, which keeps the web counted */
+    }
+    for (int v = 0; v < f->nins; v++) {
+        if (w->bit[v] < 0 || w->kind[v] != READ || uf_root(w->uf, v) != root) {
+            continue;
+        }
+        lu_v k = f->ins[v].a;
+        if (k == c) {
+            return 1;
+        }
+        if (live_member(w, k) && on_chain(w, uf_root(w->uf, k), c, depth + 1)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Marks the webs of the members in `set` bad; whether any was good. */
+static int
+spoil(struct borrow *w, const uint64_t *set, lu_v at)
+{
+    int changed = 0;
+    for (int i = 0; i < w->nbits; i++) {
+        if (set[i / 64] & (1ull << (i % 64))) {
+            int r = uf_root(w->uf, w->of_bit[i]);
+            if (!w->bad[r] && _PyRuntime.jit.debug) {
+                fprintf(stderr, "jit: borrow: v%d counted: live across v%d %s\n", w->of_bit[i], at,
+                        lu_op_names[w->f->ins[at].op]);
+            }
+            changed |= !w->bad[r];
+            w->bad[r] = 1;
+        }
+    }
+    return changed;
+}
+
+/* One round: members' liveness to a fixpoint, then every instruction checked. */
+static int
+borrow_round(struct borrow *w)
+{
+    struct lu_func *f = w->f;
+    int W = w->words, nb = f->nblocks;
+    uint64_t *in_ = calloc((size_t)nb * (size_t)W, sizeof(uint64_t));
+    memset(w->out, 0, sizeof(uint64_t) * (size_t)(nb + 2) * (size_t)W);
+    uint64_t *live = w->out + (size_t)(nb + 1) * (size_t)W;
+    for (int changed = 1; changed;) {
+        changed = 0;
+        for (int k = f->norder - 1; k >= 0; k--) {
+            int b = f->order[k];
+            struct lu_block *bl = &f->blocks[b];
+            uint64_t *o = w->out + (size_t)b * (size_t)W;
+            for (int s = 0; s < bl->nsucc; s++) {
+                int sb = bl->succ[s];
+                struct lu_block *sbl = &f->blocks[sb];
+                int pi = 0;
+                while (pi < sbl->npreds && sbl->preds[pi] != b) {
+                    pi++;
+                }
+                for (int j = 0; j < W; j++) {
+                    uint64_t x = in_[(size_t)sb * (size_t)W + (size_t)j];
+                    if ((o[j] | x) != o[j]) {
+                        o[j] |= x;
+                        changed = 1;
+                    }
+                }
+                for (int i = 0; i < sbl->nins; i++) {
+                    struct lu_ins *p = &f->ins[sbl->ins[i]];
+                    if (p->op != OP_PHI) {
+                        break;
+                    }
+                    lu_v a = pi < p->nargs ? p->args[pi] : LU_NOV;
+                    if (!(p->flags & INS_DEAD) && live_member(w, a)
+                        && !(o[w->bit[a] / 64] & (1ull << (w->bit[a] % 64)))) {
+                        o[w->bit[a] / 64] |= 1ull << (w->bit[a] % 64);
+                        changed = 1;
+                    }
+                }
+            }
+            memcpy(live, o, sizeof(uint64_t) * (size_t)W);
+            for (int i = bl->nins - 1; i >= 0; i--) {
+                lu_v v = bl->ins[i];
+                struct lu_ins *in = &f->ins[v];
+                if (in->flags & INS_DEAD) {
+                    continue;
+                }
+                if (live_member(w, v)) {
+                    live[w->bit[v] / 64] &= ~(1ull << (w->bit[v] % 64));
+                }
+                uint64_t *u = uses_of(w, in);
+                for (int j = 0; j < W; j++) {
+                    live[j] |= u[j];
+                }
+            }
+            uint64_t *li = in_ + (size_t)b * (size_t)W;
+            if (memcmp(li, live, sizeof(uint64_t) * (size_t)W) != 0) {
+                memcpy(li, live, sizeof(uint64_t) * (size_t)W);
+                changed = 1;
+            }
+        }
+    }
+    /* What crosses an instruction that may free what a member holds. */
+    int spoiled = 0;
+    uint64_t *across = malloc(sizeof(uint64_t) * (size_t)W);
+    for (int b = 0; b < nb; b++) {
+        struct lu_block *bl = &f->blocks[b];
+        memcpy(live, w->out + (size_t)b * (size_t)W, sizeof(uint64_t) * (size_t)W);
+        for (int i = bl->nins - 1; i >= 0; i--) {
+            lu_v v = bl->ins[i];
+            struct lu_ins *in = &f->ins[v];
+            if (in->flags & INS_DEAD) {
+                continue;
+            }
+            if (live_member(w, v)) {
+                live[w->bit[v] / 64] &= ~(1ull << (w->bit[v] % 64));
+            }
+            uint64_t *u = uses_of(w, in);
+            for (int j = 0; j < W; j++) {
+                across[j] = live[j] | u[j];
+            }
+            if (in->op == OP_POLL) {
+                in->imm2 &= ~(int64_t)POLL_LEAVES;
+                for (int j = 0; j < W; j++) {
+                    if (across[j] != 0) {
+                        in->imm2 |= POLL_LEAVES;        /* a member it would keep across work in place */
+                    }
+                }
+            }
+            else if (!goes(w, in) && !borrow_safe(in)) {
+                spoiled |= spoil(w, across, v);
+            }
+            else if (!goes(w, in) && in->op == OP_DECREF) {
+                /* A release that frees nothing that holds others, unless it is a container's. */
+                for (int x = 0; x < w->nbits; x++) {
+                    if ((across[x / 64] & (1ull << (x % 64))) && !w->bad[uf_root(w->uf, w->of_bit[x])]
+                        && on_chain(w, uf_root(w->uf, w->of_bit[x]), in->a, 0)) {
+                        if (_PyRuntime.jit.debug) {
+                            fprintf(stderr, "jit: borrow: v%d counted: its container released at v%d\n", w->of_bit[x], v);
+                        }
+                        w->bad[uf_root(w->uf, w->of_bit[x])] = 1;
+                        spoiled = 1;
+                    }
+                }
+            }
+            for (int j = 0; j < W; j++) {
+                live[j] |= u[j];
+            }
+        }
+    }
+    free(across);
+    free(in_);
+    return spoiled;
+}
+
+static void
+borrow_items(struct lu_func *f)
+{
+    if (!lu_serial() || f->norder == 0) {
+        return;
+    }
+    int n = f->nins;
+    struct borrow w = { .f = f, .entry = f->order[0] };
+    w.uf = malloc(sizeof(int) * (size_t)n);
+    w.kind = calloc((size_t)n, 1);
+    w.bit = malloc(sizeof(int) * (size_t)n);
+    w.of_bit = malloc(sizeof(lu_v) * (size_t)n);
+    w.bad = calloc((size_t)n, 1);
+    int any = 0;
+    for (int v = 0; v < n; v++) {
+        w.uf[v] = v;
+        w.bit[v] = -1;
+        struct lu_ins *in = &f->ins[v];
+        if (!(in->flags & INS_DEAD) && (in->flags & INS_OWNED) && in->rep == REP_OBJ
+            && (in->op == OP_LIST_ITEM || (is_tuple_item(in) && item_incref(f, v) >= 0))) {
+            w.kind[v] = READ;
+            any = 1;
+        }
+    }
+    if (!any) {
+        goto done;
+    }
+    /* Phis that carry reads join them, with their other inputs. */
+    for (int v = 0; v < n; v++) {
+        struct lu_ins *in = &f->ins[v];
+        if (!(in->flags & INS_DEAD) && in->op == OP_PHI && in->rep == REP_OBJ && (in->flags & INS_OWNED)) {
+            w.kind[v] = CARRIER;
+        }
+    }
+    for (int v = 0; v < n; v++) {
+        struct lu_ins *in = &f->ins[v];
+        if (w.kind[v] != CARRIER) {
+            continue;
+        }
+        for (int i = 0; i < in->nargs; i++) {
+            lu_v a = in->args[i];
+            if (a < 0) {
+                continue;
+            }
+            w.uf[uf_root(w.uf, a)] = uf_root(w.uf, v);
+            if (w.kind[a] == NOT_IN) {
+                struct lu_ins *x = &f->ins[a];
+                w.kind[a] = !(x->flags & INS_OWNED) && x->op == OP_CONST ? NO_COUNT
+                    : (x->op == OP_ENTRY_LOCAL || x->op == OP_ENTRY_STACK) && (x->flags & INS_OWNED)
+                      && x->block == w.entry ? ENTRY_COUNT
+                    : 0xff;     /* anything else: the web stays counted */
+            }
+        }
+    }
+    /* Webs without a read, or with a member of another kind, stay counted. */
+    char *has_read = calloc((size_t)n, 1);
+    for (int v = 0; v < n; v++) {
+        if (w.kind[v] == READ) {
+            has_read[uf_root(w.uf, v)] = 1;
+        }
+    }
+    for (int v = 0; v < n; v++) {
+        if (w.kind[v] != NOT_IN && (w.kind[v] == 0xff || !has_read[uf_root(w.uf, v)])) {
+            if (_PyRuntime.jit.debug && w.kind[v] == 0xff && has_read[uf_root(w.uf, v)]) {
+                fprintf(stderr, "jit: borrow: v%d counted: a member of another kind\n", v);
+            }
+            w.bad[uf_root(w.uf, v)] = 1;
+        }
+    }
+    free(has_read);
+    /* An entry's counted input: an entry block that only enters (so its
+       states are the entry's), one with a state to leave at, a site where
+       leaving has not kept failing, a value something else holds as the
+       build is made, and no use of the value outside the entry block but
+       the web's phis. */
+    struct lu_block *eb = &f->blocks[w.entry];
+    struct lu_fs *entry_fs = NULL;
+    int pure = 1;
+    for (int i = 0; i < eb->nins; i++) {
+        struct lu_ins *in = &f->ins[eb->ins[i]];
+        if (in->flags & INS_DEAD) {
+            continue;
+        }
+        if (entry_fs == NULL && in->fs != NULL) {
+            entry_fs = in->fs;
+        }
+        pure &= in->op == OP_ENTRY_LOCAL || in->op == OP_ENTRY_STACK || in->op == OP_ENTRY_PC || in->op == OP_CONST
+                || in->op == OP_CONST_I || in->op == OP_CONST_F || in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT
+                || in->op == OP_GUARD_TYPE || in->op == OP_GUARD_DEPTH || in->op == OP_JUMP;
+    }
+    int can_enter = pure && entry_fs != NULL && entry_fs->caller == NULL && !lu_jit_nospec(entry_fs->code, entry_fs->pc);
+    for (int v = 0; v < n; v++) {
+        if (w.kind[v] != ENTRY_COUNT || w.bad[uf_root(w.uf, v)]) {
+            continue;
+        }
+        int outside = !can_enter || !held_elsewhere(f, &f->ins[v]);
+        for (int x = 0; x < n && !outside; x++) {
+            struct lu_ins *in = &f->ins[x];
+            if ((in->flags & INS_DEAD) || in->block == w.entry) {
+                continue;
+            }
+            if (in->op == OP_PHI) {
+                continue;       /* a phi's input: joined above, or in a web that stays counted */
+            }
+            outside = in->a == v || in->b == v || in->c == v;
+            for (int i = 0; i < in->nargs && !outside; i++) {
+                outside = in->args[i] == v;
+            }
+            if (!outside && in->fs != NULL) {
+                struct finding probe = { v, 0 };
+                lu_fs_each(f, in->fs, find_value, &probe);
+                outside = probe.seen;
+            }
+        }
+        if (outside) {
+            if (_PyRuntime.jit.debug) {
+                fprintf(stderr, "jit: borrow: v%d counted: an entry value used past the entry (or no entry)\n", v);
+            }
+            w.bad[uf_root(w.uf, v)] = 1;
+        }
+    }
+    /* Live sets over the members of webs still in question. */
+    for (int v = 0; v < n; v++) {
+        if (w.kind[v] != NOT_IN && !w.bad[uf_root(w.uf, v)]) {
+            w.of_bit[w.nbits] = v;
+            w.bit[v] = w.nbits++;
+        }
+    }
+    if (w.nbits == 0 || w.nbits > 4096) {
+        goto done;
+    }
+    w.words = (w.nbits + 63) / 64;
+    w.out = calloc((size_t)(f->nblocks + 2) * (size_t)w.words, sizeof(uint64_t));
+    while (borrow_round(&w)) {
+    }
+    /* What is left goes uncounted; the last round marked the polls. */
+    lu_v *entries = malloc(sizeof(lu_v) * (size_t)n);
+    int nentries = 0;
+    for (int v = 0; v < n; v++) {
+        struct lu_ins *in = &f->ins[v];
+        if (!(in->flags & INS_DEAD) && goes(&w, in)) {
+            in->flags |= INS_DEAD;
+        }
+    }
+    for (int v = 0; v < n; v++) {
+        if (!live_member(&w, v)) {
+            continue;
+        }
+        if (w.kind[v] == READ || w.kind[v] == CARRIER) {
+            f->ins[v].flags &= ~INS_OWNED;
+        }
+        else if (w.kind[v] == ENTRY_COUNT) {
+            entries[nentries++] = v;
+        }
+    }
+    for (int i = 0; i < nentries; i++) {
+        if (_PyRuntime.jit.debug) {
+            fprintf(stderr, "jit: borrow: entry v%d released; web:", entries[i]);
+            for (int v = 0; v < n; v++) {
+                if (w.bit[v] >= 0 && uf_root(w.uf, v) == uf_root(w.uf, entries[i])) {
+                    fprintf(stderr, " v%d(%s,%d)", v, lu_op_names[f->ins[v].op], w.kind[v]);
+                }
+            }
+            fprintf(stderr, "\n");
+        }
+        lu_v r = lu_ir_emit(f, w.entry, OP_RELEASE_SHARED, REP_NONE, entries[i], LU_NOV, LU_NOV, 0);
+        f->ins[r].fs = entry_fs;
+        eb = &f->blocks[w.entry];
+        int last = eb->nins - 1;        /* before the entry block's jump */
+        int t = eb->ins[last];
+        eb->ins[last] = eb->ins[last - 1];
+        eb->ins[last - 1] = t;
+    }
+    free(entries);
+done:
+    free(w.uf);
+    free(w.kind);
+    free(w.bit);
+    free(w.of_bit);
+    free(w.bad);
+    free(w.out);
+}
+
 /* An attribute read from an instance's inline values whose reference the
    code releases in the read's own block, with nothing between that could
    free the value (lets_borrow), takes no reference: the instance's keeps
@@ -617,6 +1121,7 @@ lu_ssa_optimize(struct lu_func *f)
     dce(f);
     split_edges(f);
     order_blocks(f);
+    borrow_items(f);
     lu_ssa_facts(f);
     compact(f);
     return 0;

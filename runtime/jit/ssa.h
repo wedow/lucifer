@@ -102,7 +102,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(GUARD_FRAMES, REP_NONE, IF_GUARD | IF_EFFECT) /* no walker made the frames real during the instruction's   \
                                                        calls (runtime/jit/exit.c); imm 1: nor holds the root's  \
                                                        frame object, which would take its locals at a return */ \
-    X(LOAD, REP_NONE, 0)                /* *(a + imm), rep set by the builder; a borrowed object; imm2 4: 32 bits */ \
+    X(LOAD, REP_NONE, 0)                /* *(a + imm), rep set by the builder; a borrowed object; imm2 4: 32 bits, 8: a tuple's item */ \
     X(STORE, REP_NONE, IF_EFFECT)       /* *(a + imm) = b, raw */ \
     X(LIST_ITEM, REP_OBJ, IF_GUARD)    /* a: an exact list (imm 1: tuple), b: i64 index; deopts out of range; publishes on its slow path (parked_call) */ \
     X(LIST_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* a[b] = c, borrowing c */ \
@@ -132,6 +132,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(GLOBAL_LOAD, REP_OBJ, IF_GUARD | IF_CALL) /* imm: the dict, imm2: keys version << 32 | entry */ \
     X(INCREF, REP_NONE, IF_EFFECT) \
     X(DECREF, REP_NONE, IF_EFFECT)    /* imm 1: its type may run code when freed: publishes fs */ \
+    X(RELEASE_SHARED, REP_NONE, IF_GUARD | IF_EFFECT)  /* a's reference goes where another holds the object; else leaves (opt.c borrow_items) */ \
     X(RITER_NEXT, REP_I64, IF_EFFECT)   /* a: an exact range_iterator; the next value, stepping it */ \
     X(RITER_DONE, REP_BIT, 0)           /* a: an exact range_iterator: exhausted */ \
     X(HELPER, REP_NONE, IF_EFFECT | IF_CALL)    /* imm: the helper, args; rep and effects from it */ \
@@ -179,6 +180,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
 
 /* POLL's imm: a loop's back-edge, or a call's start (facts.c may drop it). */
 enum { POLL_LOOP, POLL_CALL };
+#define POLL_LEAVES 1           /* a POLL's imm2: its work in place leaves the unit instead (opt.c borrow_items) */
 /* GUARD_VERSION's imm2: whose version. */
 enum { GV_TYPE_OF, GV_TYPE_ITSELF, GV_DICT_KEYS, GV_FUNC };
 /* GUARD_IS's imm2: the word compared, a itself, or at an offset (low 32
@@ -299,6 +301,9 @@ lu_fs_slot(const struct lu_fs *p, int i)
     return i < p->nlocals ? &p->locals[i] : &p->stack[i - p->nlocals];
 }
 
+/* LOAD's imm2: a word of a tuple's items, which the tuple keeps for its life. */
+#define LU_LOAD_TUPLE_ITEM 8
+
 /* Instruction flags kept per instruction. */
 enum {
     INS_DEAD = 1,               /* removed */
@@ -404,6 +409,7 @@ struct lu_func {
     int budget;                 /* instructions past which the evaluator inlines no more (jit.c) */
     struct lu_fdep *deps;       /* the facts the code relies on between polls */
     int ndeps, capdeps;
+    struct lu_frame *frame;     /* the frame the build was made for, as it is now (jit.c compile) */
     int *idom;                  /* per block, once optimized: its immediate dominator (-1: unreached) */
 };
 

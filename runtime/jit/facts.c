@@ -182,7 +182,8 @@ call_polls(struct lu_func *f)
     free(polled);
 }
 
-/* A store that takes its object's lock byte in line (emit.c lock_object). */
+/* A store that takes its object's lock byte in line (emit.c lock_object), or a read that
+   relies on no other task running (a borrowed LIST_ITEM, opt.c borrow_items). */
 static int
 locks_in_line(const struct lu_ins *in)
 {
@@ -191,6 +192,8 @@ locks_in_line(const struct lu_ins *in)
     case OP_LIST_STORE: case OP_TYPED_LOAD: case OP_TYPED_STORE:
     case OP_INLINE_LOAD: case OP_INLINE_LOAD_I: case OP_INLINE_LOAD_F: case OP_INLINE_ORIGIN:
         return !(in->flags & INS_FRESH);
+    case OP_LIST_ITEM:
+        return !(in->flags & INS_OWNED);    /* borrowed, in its serial form (opt.c borrow_items) */
     default:
         return 0;
     }

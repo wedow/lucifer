@@ -228,6 +228,7 @@ unpack_sequence(struct ctx *c)
     for (int i = 0; i < n; i++) {
         loaded[i] = lu_ev_emit(c, OP_LOAD, REP_OBJ, items, LU_NOV, LU_NOV,
                                (int64_t)(offsetof(PyTupleObject, ob_item) + sizeof(PyObject *) * (size_t)i));
+        I(c, loaded[i])->imm2 = LU_LOAD_TUPLE_ITEM;     /* the tuple keeps it (opt.c borrow_items) */
         lu_ev_emit(c, OP_INCREF, REP_NONE, loaded[i], LU_NOV, LU_NOV, 0);
         lu_ev_own(c, loaded[i]);
     }

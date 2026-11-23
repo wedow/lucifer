@@ -923,6 +923,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
         __atomic_store_n(&jc->built_ins, f.nins, __ATOMIC_RELAXED);
         __atomic_store_n(&jc->stale, 0, __ATOMIC_RELAXED);
     }
+    f.frame = frame;
     ok = ok && lu_ssa_optimize(&f) == 0;
     double t2 = now(), t3 = t2;
     if (_PyRuntime.jit.stats) {

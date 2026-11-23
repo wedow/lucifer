@@ -3589,8 +3589,8 @@ unlock_object(struct asm_ *a, int r, int tmp, int keep)
 
 /* Whether a store that locks in line takes the lock: not into an instance
    no other thread can see (INS_FRESH), nor while serial (INS_UNLOCKED,
-   runtime/jit/facts.c), when a store the unit may have died before checks
-   that it lives first and leaves before storing, as at a poll: no guard
+   runtime/jit/facts.c), when a store or read the unit may have died before
+   checks that it lives first and leaves before it, as at a poll: no guard
    failed, and the site must not count one (a unit that dies often would
    make its site generic). */
 static int
@@ -4408,6 +4408,28 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            count. Anything else (a negative index, a list resized under the
            read, another thread's list item) is C's, which keeps the
            registers: a list's may wait for its lock. */
+        if (!(in->flags & INS_OWNED)) {
+            /* Borrowed, while serial (opt.c borrow_items): no other task
+               changes the list, so an index below its size finds the array
+               and an item in it, which the list keeps; nothing is counted.
+               A unit that may have died checks first (facts.c). */
+            int fail = guard_exit(a, in);
+            store_locks(a, in);
+            int s = gpr_of(a, in->a, RDX), i = gpr_of(a, in->b, RCX);
+            cmp_rm(a, i, s, offsetof(PyVarObject, ob_size));
+            jcc(a, CC_AE, fail);                /* unsigned: a negative index too */
+            if (in->imm) {
+                load_indexed8(a, RAX, s, i, offsetof(PyTupleObject, ob_item));
+                test_rr(a, RAX, RAX);
+                jcc(a, CC_E, fail);             /* a tuple not filled yet: the interpreter's */
+            }
+            else {
+                load(a, RAX, s, offsetof(PyListObject, ob_item));
+                load_indexed8(a, RAX, RAX, i, 0);
+            }
+            def_gpr(a, v, RAX);
+            return 0;
+        }
         struct move m[2] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 } };
         int fail = guard_exit(a, in), slow = new_label(a), done = new_label(a);
         int s = gpr_of(a, in->a, RDX), i = gpr_of(a, in->b, RCX);
@@ -4885,6 +4907,36 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         r = gpr_of(a, in->a, RDX);
         incref(a, r);
         return 0;
+    case OP_RELEASE_SHARED: {
+        /* opt.c borrow_items: the entry's reference to what a loop now
+           carries without a count goes, where another holds the object so
+           that this cannot free it: an immortal, or an object of this
+           thread's whose local count is at least 2. Else the unit leaves
+           at its entry, owning the reference still, as at a poll: no
+           guard failed, and no site must count one. */
+        int fail = exit_to(a, in->fs, EXIT_POLL, 0, 0), done = new_label(a);
+        r = gpr_of(a, in->a, RDX);
+        load32(a, RCX, r, offsetof(PyObject, ob_ref_local));
+        cmp32_ri8(a, RCX, -1);
+        jcc(a, CC_E, done);                     /* immortal */
+        cmp32_ri8(a, RCX, 2);
+        jcc(a, CC_B, fail);                     /* none else here may hold it */
+        b1(a, 0x64);
+        b1(a, 0x48);
+        b1(a, 0x8B);
+        b1(a, 0x04);
+        b1(a, 0x25);
+        b4(a, 0);                               /* mov rax, fs:[0] */
+        cmp_rm(a, RAX, r, offsetof(PyObject, ob_tid));
+        jcc(a, CC_NE, fail);
+        rex(a, 0, 0, 0, RCX);
+        b1(a, 0x83);
+        modrm_rr(a, ALU_SUB, RCX);
+        b1(a, 1);                               /* sub ecx, 1 */
+        op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
+        bind(a, done);
+        return 0;
+    }
     case OP_DECREF:
         if (lu_publishes(in)) {
             /* A release that ran C checks the frames there, so the check
@@ -5021,11 +5073,16 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         /* Another event: a merge and a collection are made here, and the
            word read again. */
         bind(a, merge);
-        alu_ri(a, ALU_AND, RCX, (int32_t)~(LU_POLL_EXPLICIT_MERGE | LU_POLL_GC_SCHEDULED));
-        alu_rr(a, ALU_CMP, RCX, R11);
-        jcc(a, CC_NE, poll);
-        parked_call(a, v, (void *)lu_poll_in_place, NULL, 0);
-        jmp(a, top);
+        if (in->imm2 & POLL_LEAVES) {
+            jmp(a, poll);       /* values held without a count live across: the interpreter does it */
+        }
+        else {
+            alu_ri(a, ALU_AND, RCX, (int32_t)~(LU_POLL_EXPLICIT_MERGE | LU_POLL_GC_SCHEDULED));
+            alu_rr(a, ALU_CMP, RCX, R11);
+            jcc(a, CC_NE, poll);
+            parked_call(a, v, (void *)lu_poll_in_place, NULL, 0);
+            jmp(a, top);
+        }
         cold_end(a);
         bind(a, done);
         if (_PyRuntime.handoff.on) {

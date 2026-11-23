@@ -249,7 +249,6 @@ struct gctx {
 };
 
 /* Per-code JIT state the evaluator consults (jit.c). */
-int lu_jit_nospec(PyCodeObject *code, int pc);
 int lu_jit_catches(PyCodeObject *code, int pc);     /* the kernel handler at pc took what calls raised (jit.c) */
 int lu_jit_raises_out(PyCodeObject *code, int pc);  /* what pc raised kept leaving its unit's root (jit.c) */
 int lu_jit_next_pc(PyCodeObject *code, int pc);

@@ -271,6 +271,7 @@ void lu_jit_deps_free(struct lu_unit *u);
 void lu_jit_unit_kill(struct lu_unit *u, int stale);
 void lu_jit_nohoist_set(PyCodeObject *code, int pc);
 int lu_jit_nohoist(PyCodeObject *code, int pc);
+int lu_jit_nospec(PyCodeObject *code, int pc);
 
 /* Executable memory (runtime/jit/codemem.c): n bytes to run code from,
    and through *rw the same bytes to write it in; NULL without memory.
