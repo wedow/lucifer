@@ -5,14 +5,17 @@
    park inside PyMutex_Lock), and the top one is resumed on attach.
 
    While serial (lu_serial) a section takes no lock. It is counted in the
-   task first (lu_unlocked_begin), then pushed suspended, as a detach leaves
-   it, naming its mutexes, and tagged LU_CRITICAL_SECTION_UNLOCKED; a resume
-   while serial leaves it so. It stops counting when it ends or when a
-   resume locks it, which is the first resume after the switch to parallel:
-   the attach after a detach for the top section, the end of the section
-   above for an outer one, as after any detach. The switch waits until no
-   attached task counts one (runtime/thread/task.c); a section ends with an
-   unlock only if it is active. */
+   task first (lu_unlocked_begin), then pushed suspended, naming its
+   mutexes, and tagged LU_CRITICAL_SECTION_UNLOCKED; a resume while serial
+   leaves it so. It stops counting when it ends, when a resume locks it
+   (once the switch to parallel has begun: the end of the section above),
+   or when the task detaches: then, as in CPython, no section of the task
+   holds anything, and each is an ordinary suspended one, locked by the
+   resume after the attach (the top) or after the section above ends. So
+   the count is the sections the task relies on without their lock, which
+   the switch waits to see at 0 for each attached task
+   (runtime/thread/task.c). A section ends with an unlock only if it is
+   active, and is taken as holding a mutex again only if it is active. */
 
 #include "thread/lock.h"
 
@@ -49,7 +52,8 @@ _PyCriticalSection_BeginSlow(PyCriticalSection *c, PyMutex *m)
     // section.
     // If the top-most critical section is a two-mutex critical section,
     // then locking is skipped if either mutex is m.
-    if (tstate->critical_section) {
+    // Lucifer: only an active section holds its mutexes (one begun serial does not).
+    if (is_active(tstate->critical_section)) {
         PyCriticalSection *prev = untag_critical_section(tstate->critical_section);
         if (prev->_cs_mutex == m) {
             c->_cs_mutex = NULL;
@@ -92,7 +96,7 @@ _PyCriticalSection2_BeginSlow(PyCriticalSection2 *c, PyMutex *m1, PyMutex *m2,
     }
     // Same optimization as in _PyCriticalSection_BeginSlow: skip locking when
     // recursively acquiring the same locks.
-    if (tstate->critical_section &&
+    if (is_active(tstate->critical_section) &&
         tstate->critical_section & _Py_CRITICAL_SECTION_TWO_MUTEXES) {
         PyCriticalSection2 *prev2 = (PyCriticalSection2 *)
             untag_critical_section(tstate->critical_section);
@@ -121,9 +125,24 @@ _PyCriticalSection2_BeginSlow(PyCriticalSection2 *c, PyMutex *m1, PyMutex *m2,
 
 // Release all locks held by critical sections. This is called by
 // lu_syscall_begin.
+/* Sections begun without their lock become ordinary suspended ones: the
+   task relies on none of them until a resume locks it. */
+static void
+forget_unlocked(PyThreadState *tstate)
+{
+    for (uintptr_t *tagptr = &tstate->critical_section; *tagptr != 0;
+         tagptr = &untag_critical_section(*tagptr)->_cs_prev) {
+        if (*tagptr & LU_CRITICAL_SECTION_UNLOCKED) {
+            *tagptr &= ~(uintptr_t)LU_CRITICAL_SECTION_UNLOCKED;
+            lu_unlocked_end((struct lu_task *)tstate);
+        }
+    }
+}
+
 LU_EXPORT void
 _PyCriticalSection_SuspendAll(PyThreadState *tstate)
 {
+    forget_unlocked(tstate);
     uintptr_t *tagptr = &tstate->critical_section;
     while (is_active(*tagptr)) {
         PyCriticalSection *c = untag_critical_section(*tagptr);
@@ -176,8 +195,11 @@ _PyCriticalSection_Resume(PyThreadState *tstate)
         c2->_cs_mutex2 = m2;
     }
 
-    tstate->critical_section &= ~(uintptr_t)(_Py_CRITICAL_SECTION_INACTIVE | LU_CRITICAL_SECTION_UNLOCKED);
-    if (p & LU_CRITICAL_SECTION_UNLOCKED) {
+    /* The tag as it is now: a park in the lock above detached the task,
+       which counted the section out already (forget_unlocked). */
+    uintptr_t now = tstate->critical_section;
+    tstate->critical_section = now & ~(uintptr_t)(_Py_CRITICAL_SECTION_INACTIVE | LU_CRITICAL_SECTION_UNLOCKED);
+    if (now & LU_CRITICAL_SECTION_UNLOCKED) {
         lu_unlocked_end((struct lu_task *)tstate);      /* locked now */
     }
 }
@@ -187,13 +209,7 @@ _PyCriticalSection_Resume(PyThreadState *tstate)
 void
 lu_critical_sections_after_switch(PyThreadState *tstate)
 {
-    for (uintptr_t *tagptr = &tstate->critical_section; *tagptr != 0;
-         tagptr = &untag_critical_section(*tagptr)->_cs_prev) {
-        if (*tagptr & LU_CRITICAL_SECTION_UNLOCKED) {
-            *tagptr &= ~(uintptr_t)LU_CRITICAL_SECTION_UNLOCKED;
-            lu_unlocked_end((struct lu_task *)tstate);
-        }
-    }
+    forget_unlocked(tstate);
     if (tstate->critical_section & _Py_CRITICAL_SECTION_INACTIVE) {
         _PyCriticalSection_Resume(tstate);
     }

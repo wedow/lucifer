@@ -1106,7 +1106,7 @@ extern LU_EXPORT union lu_runtime {
         PyMutex pic_lock;               /* a polymorphic inline cache grows one entry at a time (jit/jit.c) */
         pthread_t main_thread;          /* the thread that started the runtime */
         struct lu_task *main_task;      /* signals and the main thread's pending calls are aimed at it */
-        int parallel;                   /* a second task was made: objects are locked (lu_serial) */
+        int parallel;                   /* LU_SERIAL, LU_SWITCHING or LU_PARALLEL (lu_serial) */
         struct {
             struct lu_lock lock;        /* every carrier's run queue */
             struct lu_carrier *carriers[2];     /* the main thread's, and the second */
@@ -1151,10 +1151,12 @@ extern LU_EXPORT union lu_runtime {
    Python, and object locks are left out (compiled stores, runtime/jit/facts.c;
    critical sections, runtime/thread/critical_section.c). Making the second
    task ends it for good, with the world stopped (runtime/thread/task.c). */
+enum { LU_SERIAL, LU_SWITCHING, LU_PARALLEL };     /* _PyRuntime.parallel: locks from LU_SWITCHING on */
+
 static inline int
 lu_serial(void)
 {
-    return !__atomic_load_n(&_PyRuntime.parallel, __ATOMIC_RELAXED);
+    return __atomic_load_n(&_PyRuntime.parallel, __ATOMIC_RELAXED) == LU_SERIAL;
 }
 
 /* A C stretch that leaves its object lock out while serial: counted in the

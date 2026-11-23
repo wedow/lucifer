@@ -22,20 +22,29 @@
    the first task, which pays only plain stores to its own words:
    unlocked_jit (1 while a unit built serial may store without a check,
    runtime/jit/facts.c) and unlocked_c (the C sections and stretches it runs
-   without their lock, lu_unlocked_begin). The switcher sets parallel, kills
-   those units, and issues a process-wide barrier (membarrier): every store
-   the first task made before is then visible to the switcher, and every
-   load it makes after sees parallel and the dead units, so neither word can
-   go from 0 to 1 again. It then waits until each other task is detached
-   (it touches no object until it attaches, and then locks: a resume locks
-   its top section) or shows both words 0, raising the deopt reason meanwhile
-   so that a unit looping on polls leaves. A task that makes the switch itself
-   has its own sections locked here, as after a detach. Without the barrier
-   the runtime is parallel from the start. */
+   without their lock, lu_unlocked_begin).
+
+   Under the switch lock the switcher moves the state to LU_SWITCHING (from
+   then on nothing new goes unlocked), kills those units, and issues a
+   process-wide barrier (membarrier): every store the first task made before
+   is then visible to the switcher, and every load it makes after sees the
+   state and the dead units, so neither word can go from 0 to 1 again. It
+   then waits until each other task is detached (it touches no object until
+   it attaches, and then locks: a resume locks its top section) or shows
+   both words 0, raising the deopt reason whenever the task has taken it so
+   that a unit looping on polls leaves, and only then moves the state to
+   LU_PARALLEL and lets the lock go. Every task creation waits for
+   LU_PARALLEL, so no task runs alongside one that still goes unlocked; a
+   first task that makes a task while another thread switches locks its own
+   sections, as after a detach, and waits too. The switch lock is in the
+   fork registry (runtime/thread/fork.c), so no fork happens during a switch.
+   Without the barrier at startup the runtime is parallel from the start;
+   a barrier refused later (a sandbox) is replaced by a stop of the world,
+   which waits for the first task's next poll or detach. */
 #include <linux/membarrier.h>
 #include <sched.h>
 
-static pthread_mutex_t switching = PTHREAD_MUTEX_INITIALIZER;
+static struct lu_lock switching = { .mutex = PTHREAD_MUTEX_INITIALIZER };
 
 /* Registration belongs to the address space, so a fork's child registers again. */
 static int
@@ -49,8 +58,9 @@ barrier_registered(void)
 void
 lu_serial_start(void)
 {
+    lu_lock_register(&switching);
     if (!barrier_registered()) {
-        __atomic_store_n(&_PyRuntime.parallel, 1, __ATOMIC_SEQ_CST);
+        __atomic_store_n(&_PyRuntime.parallel, LU_PARALLEL, __ATOMIC_SEQ_CST);
     }
 }
 
@@ -63,7 +73,9 @@ leaves_locks_out(struct _is *interp, struct lu_task *self)
         struct lu_task *t = TASK(ts);
         if (t != self && __atomic_load_n(&ts->state, __ATOMIC_SEQ_CST) == _Py_THREAD_ATTACHED
             && (__atomic_load_n(&t->unlocked_jit, __ATOMIC_RELAXED) || __atomic_load_n(&t->unlocked_c, __ATOMIC_RELAXED))) {
-            lu_task_signal(t, LU_POLL_DEOPT_SELF);
+            if (!(__atomic_load_n(&t->pending, __ATOMIC_SEQ_CST) & LU_POLL_DEOPT_SELF)) {
+                lu_task_signal(t, LU_POLL_DEOPT_SELF);
+            }
             busy = 1;
         }
     }
@@ -79,20 +91,25 @@ enter_parallel(struct _is *interp, int alone)
     if (self != NULL && self->ts.state != _Py_THREAD_ATTACHED) {
         self = NULL;
     }
-    /* An attached task does not block on another switch, which may be
-       waiting for its sections: once that switch has begun, it locks them. */
-    while (pthread_mutex_trylock(&switching) != 0) {
-        if (self != NULL && !lu_serial()) {
-            lu_critical_sections_after_switch(&self->ts);
+    /* An attached task does not block on a switch another thread makes,
+       which may be waiting for its sections: it locks them, and waits on. */
+    int locked_own = 0;
+    while (pthread_mutex_trylock(&switching.mutex) != 0) {
+        if (__atomic_load_n(&_PyRuntime.parallel, __ATOMIC_ACQUIRE) == LU_PARALLEL) {
             return;
+        }
+        if (self != NULL && !locked_own && !lu_serial()) {
+            lu_critical_sections_after_switch(&self->ts);
+            locked_own = 1;
         }
         sched_yield();
     }
     if (lu_serial()) {
-        __atomic_store_n(&_PyRuntime.parallel, 1, __ATOMIC_SEQ_CST);
+        __atomic_store_n(&_PyRuntime.parallel, LU_SWITCHING, __ATOMIC_SEQ_CST);
         lu_jit_invalidate(LU_DEP_SERIAL, 0, 0);
         if (!alone && lu_membarrier(MEMBARRIER_CMD_PRIVATE_EXPEDITED) != 0) {
-            Py_FatalError("lucifer: the process-wide barrier failed after it was registered");
+            lu_stw_stop(interp);        /* the barrier refused: the first task stops at a poll or is detached */
+            lu_stw_start(interp);
         }
         if (self != NULL) {
             lu_critical_sections_after_switch(&self->ts);
@@ -106,22 +123,18 @@ enter_parallel(struct _is *interp, int alone)
             }
         }
     }
-    pthread_mutex_unlock(&switching);
+    __atomic_store_n(&_PyRuntime.parallel, LU_PARALLEL, __ATOMIC_RELEASE);
+    pthread_mutex_unlock(&switching.mutex);
 }
 
-/* The child's only thread is the forking one: if the barrier is gone, the
-   switch it makes waits for no one. A switch the parent was making when it
-   forked is over in the child, which locks its own sections as the switch
-   would. */
+/* The child's only thread is the forking one, and no switch was under way
+   (the fork took the switch lock): if the barrier is gone, the switch it
+   makes waits for no one. */
 void
 lu_serial_after_fork(struct _is *interp, struct lu_task *self)
 {
-    pthread_mutex_init(&switching, NULL);
     if (lu_serial() && !barrier_registered()) {
         enter_parallel(interp, 1);
-    }
-    else if (!lu_serial()) {
-        lu_critical_sections_after_switch(&self->ts);
     }
 }
 
@@ -145,7 +158,8 @@ lu_task_new(struct _is *interp, int whence)
     ts->context_ver = 1;
     pthread_mutex_lock(&interp->tasks_lock.mutex);
     /* A task made after the others were shut down never runs. */
-    while (interp->next_task_id > 0 && !interp->tasks_closed && lu_serial()) {
+    while (interp->next_task_id > 0 && !interp->tasks_closed
+           && __atomic_load_n(&_PyRuntime.parallel, __ATOMIC_ACQUIRE) != LU_PARALLEL) {
         pthread_mutex_unlock(&interp->tasks_lock.mutex);
         enter_parallel(interp, 0);
         pthread_mutex_lock(&interp->tasks_lock.mutex);

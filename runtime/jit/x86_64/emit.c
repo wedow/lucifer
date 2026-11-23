@@ -1757,6 +1757,25 @@ depth_add(struct asm_ *a, int32_t n)
     alu_mi(a, 0, ALU_ADD, R14, offsetof(PyThreadState, py_recursion_remaining), n);
 }
 
+/* The task's unlocked_jit in a unit that stores without locks while serial
+   (runtime/thread/task.c): 0 while C the unit called may run Python, 1 again
+   after, before any check reads the unit. */
+static void
+unlocked_pause(struct asm_ *a)
+{
+    if (a->serial) {
+        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 0);
+    }
+}
+
+static void
+unlocked_again(struct asm_ *a)
+{
+    if (a->serial) {
+        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 1);
+    }
+}
+
 static void
 publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
 {
@@ -1774,9 +1793,7 @@ publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
     a->pubs[a->npubs++].exit = ((struct pending *)d)->index;
     mov_ri(a, RAX, 0x1122334455667788LL);       /* d's address, patched (pack) */
     store(a, R15, offsetof(struct lu_frame, jit_desc), RAX);
-    if (a->serial) {
-        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 0);    /* in the call: what returns checks before an unlocked store */
-    }
+    unlocked_pause(a);          /* in the call: what returns checks before an unlocked store */
     a->nheld = a->parking ? 0 : holds_of(a, in, &a->held);
     d->takes = takes_of(a, in, a->held, a->nheld);
     if (a->nheld > 0) {
@@ -1805,10 +1822,8 @@ unpublish(struct asm_ *a, int rep)
         a->inlined = 0;
     }
     store_mi(a, R15, offsetof(struct lu_frame, jit_desc), 0);
-    if (a->serial) {
-        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 1);    /* out of the call, before any check reads the unit */
-    }
     if (a->nheld == 0) {
+        unlocked_again(a);
         return;
     }
     alu_ri(a, ALU_SUB, RSP, 16);
@@ -1835,6 +1850,7 @@ unpublish(struct asm_ *a, int rep)
     load(a, RAX, RSP, 0);
     alu_ri(a, ALU_ADD, RSP, 16);
     a->nheld = 0;
+    unlocked_again(a);          /* after the releases, whose destructors may run Python */
 }
 
 /* inc dword [base+disp] (digit 0) or dec (digit 1) */
@@ -2052,12 +2068,19 @@ call_helper(struct asm_ *a, lu_v v, struct lu_deopt *d)
         }
         parallel_moves(a, moves, nm);
     }
+    int bare = d == NULL && (h->fx & (FX_PY | FX_SEEN));    /* no state to publish (facts.c unsettles) */
+    if (bare) {
+        unlocked_pause(a);
+    }
     call_abs(a, h->fn);
     if (done >= 0) {
         bind(a, done);
     }
     if (d != NULL) {
         unpublish(a, h->rep);
+    }
+    else if (bare) {
+        unlocked_again(a);
     }
 }
 
@@ -2328,7 +2351,14 @@ decref(struct asm_ *a, int r, struct lu_ins *in, struct lu_deopt *d, int left)
             publish(a, in, d);
         }
     }
+    int bare = d == NULL && in != NULL && in->op == OP_DECREF && in->imm == 1;   /* a return's (facts.c) */
+    if (bare) {
+        unlocked_pause(a);
+    }
     call_abs(a, (void *)lu_jit_decref);
+    if (bare) {
+        unlocked_again(a);
+    }
     if (keep) {
         kept_end(a, d);
     }

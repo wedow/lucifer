@@ -210,9 +210,14 @@ locks_in_line(const struct lu_ins *in)
    its C, and such a store's own: a store some path reaches with no check
    since checks first (INS_RECHECK), and leaves before storing if the unit
    died. A release and a poll change nothing: their C ends with a check
-   (emit.c settle and parked_end), and their other paths run no code. A
-   poll is no check: a destructor's own polls may have taken the reason it
-   would leave for. */
+   (emit.c settle and parked_end), and their other paths run no code; but a
+   release with no state to publish (a returning frame's) has no check after
+   its C, so it counts as code run. A poll is no check: a destructor's own
+   polls may have taken the reason it would leave for. C the unit calls
+   that may run Python without publishing (such a release, a helper with no
+   state) has the word at 0 too (emit.c unlocked_pause), so Python never
+   runs with it at 1 but in the callee of an instruction the helper table
+   says runs none. */
 static void
 serial_stores(struct lu_func *f)
 {
@@ -252,7 +257,8 @@ serial_stores(struct lu_func *f)
                 if (in->op == OP_CHECK_LIVE || (in->op == OP_GUARD_FRAMES && !(in->imm & 1))) {
                     ok = 1;
                 }
-                else if (in->op != OP_DECREF && in->op != OP_POLL && (lu_publishes(in) || unsettles(in))) {
+                else if (in->op == OP_DECREF ? in->imm == 1 && !lu_publishes(in)     /* a return's: no check after */
+                         : in->op != OP_POLL && (lu_publishes(in) || unsettles(in))) {
                     ok = 0;
                 }
             }
