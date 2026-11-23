@@ -110,6 +110,14 @@ leaves_locks_out(struct _is *interp)
 static void
 enter_parallel(struct _is *interp, int alone)
 {
+    /* A task that holds the world stopped cannot make the switch: with the
+       barrier refused, the switch stops the world itself (lu_stw_stop), and
+       would wait for the stop-the-world mutex its caller holds. No path of
+       the runtime makes a task with the world stopped. */
+    struct lu_task *self = lu_current_task();
+    if (self != NULL && lu_world_stopped(interp) && interp->stw.requester == self) {
+        Py_FatalError("lucifer: a task was made while its maker held the world stopped");
+    }
     PyThreadState *ts = lu_syscall_begin();
     pthread_mutex_lock(&switching);
     if (lu_serial()) {
