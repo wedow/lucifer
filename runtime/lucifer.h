@@ -351,15 +351,27 @@ int lu_inline_store(PyObject *obj, Py_ssize_t offset, PyObject *v);
    int64: no object is made. */
 int lu_inline_store_f(PyObject *obj, Py_ssize_t offset, double v);
 int lu_inline_store_i(PyObject *obj, Py_ssize_t offset, int64_t v);
-/* What every instance of a class holds under one name (attrs.c), which
-   only moves up: unseen, then an int (exact, fits int64) or
-   a float (exact), then anything. A name whose first value was some other
-   object is an object name instead, whose words never hold a marker.
-   Under an int or float name the raw word beside a value word that holds
-   a number holds its value, whoever stored it. A name that leaves int or
-   float changes its class's version first, so code that relied on the
-   kind under the version guard is invalidated. */
-enum { LU_FIELD_UNSEEN, LU_FIELD_INT, LU_FIELD_FLOAT, LU_FIELD_OBJECT, LU_FIELD_ANY };
+/* What a class's instances have held under one name (attrs.c), which
+   only moves up: unseen, then an int (exact, fits int64) or a float
+   (exact), then anything, remembering which number came first (ANY_INT,
+   ANY_FLOAT); a name whose first value was some other object is an
+   object name, whose words never hold a marker. A name's first number
+   kind is for good: every store of a value of that kind writes the raw
+   word, before the value word, and no other store writes it. So a value
+   word that holds the first kind's marker, or an object of that kind
+   (an int that fits int64), has its value in the raw word, and a raw
+   word only ever holds values of the first kind. Compiled loads check the
+   word they read; a kind tells them which shape to expect, never what
+   they may skip checking. */
+enum { LU_FIELD_UNSEEN, LU_FIELD_INT, LU_FIELD_FLOAT, LU_FIELD_OBJECT, LU_FIELD_ANY_INT, LU_FIELD_ANY_FLOAT };
+/* The number kind a name's raw words hold (LU_FIELD_INT or _FLOAT), or
+   LU_FIELD_OBJECT for none. */
+static inline int
+lu_field_first(int kind)
+{
+    return kind == LU_FIELD_INT || kind == LU_FIELD_ANY_INT ? LU_FIELD_INT
+        : kind == LU_FIELD_FLOAT || kind == LU_FIELD_ANY_FLOAT ? LU_FIELD_FLOAT : LU_FIELD_OBJECT;
+}
 /* The kind of the name whose word is at byte `offset` of tp's instances. */
 int lu_inline_kind_at(PyTypeObject *tp, Py_ssize_t offset);
 /* Whether every word of obj agrees with its name's kind (tests). */

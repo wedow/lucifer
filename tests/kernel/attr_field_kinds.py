@@ -9,6 +9,7 @@
 # must be the interpreter's.
 import copy
 import pickle
+import struct
 import sys
 
 try:
@@ -53,10 +54,15 @@ def ints(n):
     return before, ok(ps), sums      # again after reads made boxes
 
 
+def float_bits(d):
+    return struct.unpack('<Q', struct.pack('<d', d))[0]
+
+
 def raw_kept(n):
-    # A name's raw words keep its first kind: a float name that takes an
-    # int, an int name that takes a float or a str, and an object name
-    # that takes numbers leave every raw word as it was.
+    # A name's raw words hold only its first number kind, and every store
+    # of that kind writes them, before and after the name takes anything:
+    # a float name that takes ints, an int name that takes floats and
+    # strs, and an object name that takes numbers.
     class F:
         pass
     class I:
@@ -67,13 +73,19 @@ def raw_kept(n):
     f.x = 3.5
     g.x = 12
     o.x = 'a'
-    was = [inline_field(f, 'x'), inline_field(g, 'x'), inline_field(o, 'x')]
+    last_f, last_g = 3.5, 12
+    was_o = inline_field(o, 'x')
     for i in range(n):
         f.x = 7 if i % 2 else 3.5 + i
+        if i % 2 == 0:
+            last_f = 3.5 + i
         g.x = 2.5 if i % 3 == 0 else ('s' if i % 3 == 1 else i)
+        if i % 3 == 2:
+            last_g = i
         o.x = i if i % 2 else i * 0.5
     now = [inline_field(f, 'x'), inline_field(g, 'x'), inline_field(o, 'x')]
-    kept = [w is None or w[1] == m[1] for w, m in zip(was, now)]
+    want = [float_bits(last_f), last_g, was_o[1] if was_o else None]
+    kept = [m is None or m[1] == w for w, m in zip(want, now)]
     return kept, ok([f, g, o]), f.x, g.x, o.x
 
 

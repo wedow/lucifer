@@ -3347,11 +3347,37 @@ cmp_operands(struct asm_ *a, lu_v x, lu_v y, int op)
     return cond_of(op, 0);
 }
 
+/* The raw word of the word at in->imm of the object in r, into v. */
+static void
+raw_into(struct asm_ *a, struct lu_ins *in, lu_v v, int r, int is_int)
+{
+    int loc = in->loc;                          /* read straight into the value's register */
+    if (is_int) {
+        int t = loc >= 0 && loc < LU_LOC_FPR ? loc : RAX;
+        load(a, t, r, (int32_t)in->imm + 8);
+        def_gpr(a, v, t);
+    }
+    else {
+        int x = loc >= LU_LOC_FPR ? loc - LU_LOC_FPR : 0;
+        sse_rm(a, 0xF2, 0x10, x, r, (int32_t)in->imm + 8);     /* movsd, the binary64 */
+        def_fpr(a, v, x);
+    }
+}
+
 /* INLINE_LOAD_F and _I: an inline value as binary64 (int64): an unboxed
    value's raw word, or an exact float's (a compact int's) value, read only
    when the owning thread holds the object (as INLINE_LOAD takes a
-   reference only then). Under a name of its kind the raw word beside any
-   value is the value (attrs.c): a present word is all there is to test. */
+   reference only then).
+
+   Under a name whose first number is the load's (lucifer.h), the word
+   decides, whatever the name holds now: the marker, or an exact float
+   (an exact int of one digit), has its value in the raw word; nothing
+   leaves (absent); any other object leaves, at a guard whose failures
+   the site counts; a wider int is read from the object as below. The
+   object's type and tag are read without a reference: an object freed
+   meanwhile stays readable until this thread's next quiescent point
+   (qsbr), and whatever it reads as only picks the raw word, which holds
+   a value stored under the name. */
 static void
 inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
 {
@@ -3359,26 +3385,33 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
     int fail = guard_exit(a, in);
     int boxed = new_label(a), done = new_label(a), typed = new_label(a), held = new_label(a);
     int r = gpr_of(a, in->a, RDX);
-    if (in->b == LU_NOV && LU_LOAD_KIND(in->imm2) == (is_int ? LU_FIELD_INT : LU_FIELD_FLOAT)) {
-        rex(a, 0, 0, 0, r);
-        b1(a, 0xF6);
-        modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
-        b1(a, LU_ATTRS_IN_DICT >> 8);
-        jcc(a, CC_NE, fail);
-        cmp_mi(a, 1, r, (int32_t)in->imm, 0);
+    int after = -1;
+    if (in->b == LU_NOV && lu_field_first(LU_LOAD_KIND(in->imm2)) == (is_int ? LU_FIELD_INT : LU_FIELD_FLOAT)) {
+        int other = new_label(a), wide = new_label(a);
+        after = new_label(a);
+        cmp_mi(a, 1, r, (int32_t)in->imm, (int32_t)(intptr_t)(is_int ? LU_UNBOXED_INT : LU_UNBOXED));
+        jcc(a, CC_NE, other);
+        raw_into(a, in, v, r, is_int);
+        cold_begin(a);
+        bind(a, other);
+        load(a, RAX, r, (int32_t)in->imm);
+        test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);                     /* absent */
-        int loc = in->loc;                      /* read straight into the value's register */
+        mov_ri(a, RCX, (int64_t)(intptr_t)(is_int ? &PyLong_Type : &PyFloat_Type));
+        cmp_rm(a, RCX, RAX, offsetof(PyObject, ob_type));
+        jcc(a, CC_NE, fail);                    /* another kind */
         if (is_int) {
-            int t = loc >= 0 && loc < LU_LOC_FPR ? loc : RAX;
-            load(a, t, r, (int32_t)in->imm + 8);
-            def_gpr(a, v, t);
+            cmp_mi(a, 1, RAX, offsetof(PyLongObject, long_value.lv_tag), 2 << _PyLong_NON_SIZE_BITS);
+            jcc(a, CC_AE, wide);
         }
-        else {
-            int x = loc >= LU_LOC_FPR ? loc - LU_LOC_FPR : 0;
-            sse_rm(a, 0xF2, 0x10, x, r, (int32_t)in->imm + 8);     /* movsd, the binary64 */
-            def_fpr(a, v, x);
+        raw_into(a, in, v, r, is_int);
+        jmp(a, after);
+        if (!is_int) {
+            cold_end(a);
+            bind(a, after);
+            return;
         }
-        return;
+        bind(a, wide);                          /* the general way below, in the cold code */
     }
     if (in->b != LU_NOV) {
         /* The object the word held is the number, and held already. */
@@ -3461,6 +3494,11 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
     }
     else {
         def_fpr(a, v, 0);
+    }
+    if (after >= 0) {
+        jmp(a, after);
+        cold_end(a);
+        bind(a, after);
     }
 }
 
@@ -4565,13 +4603,18 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             b1(a, LU_ATTRS_IN_DICT >> 8);
             jcc(a, CC_NE, unlock_slow);         /* moved to the dict before the lock */
         }
+        /* Under a name whose raw words hold ints (floats), the value's
+           raw word into RAX, stored with it: an int of one digit (an exact
+           float) in line, a wider int C's; any other value is C's while
+           the name is of that kind, and under one that takes anything is
+           stored with the raw word as it was (RAX reloaded). */
+        int plain = new_label(a);
+        int other = in->imm2 & LU_STORE_RAW_OR_PLAIN ? plain : unlock_slow;
         if (in->imm2 & LU_STORE_INT_RAW) {
-            /* An int name: only an exact int of the tier's range in line,
-               its value into RAX for the raw word (stored with the value). */
             int positive = new_label(a);
             mov_ri(a, R11, (int64_t)(intptr_t)&PyLong_Type);
             cmp_rm(a, R11, RSI, offsetof(PyObject, ob_type));
-            jcc(a, CC_NE, unlock_slow);
+            jcc(a, CC_NE, other);
             load(a, RCX, RSI, offsetof(PyLongObject, long_value.lv_tag));
             alu_ri(a, ALU_CMP, RCX, 2 << _PyLong_NON_SIZE_BITS);
             jcc(a, CC_AE, unlock_slow);         /* more than one digit: C's */
@@ -4587,8 +4630,15 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         else if (in->imm2 & LU_STORE_FLOAT_RAW) {
             mov_ri(a, R11, (int64_t)(intptr_t)&PyFloat_Type);
             cmp_rm(a, R11, RSI, offsetof(PyObject, ob_type));
-            jcc(a, CC_NE, unlock_slow);
+            jcc(a, CC_NE, other);
             load(a, RAX, RSI, offsetof(PyFloatObject, ob_fval));   /* the bits */
+        }
+        if (in->imm2 & LU_STORE_RAW_OR_PLAIN) {
+            int raw_done = new_label(a);
+            jmp(a, raw_done);
+            bind(a, plain);
+            load(a, RAX, RDI, off + 8);         /* the raw word, unchanged */
+            bind(a, raw_done);
         }
         load(a, RBX, RDI, off);                 /* the old value, kept across calls */
         int have = new_label(a), take = new_label(a);

@@ -243,33 +243,29 @@ store_room(struct ctx *c, lu_v st, PyTypeObject *t, uint16_t index)
     I(c, st)->imm2 = room > 0 ? room : 0;
 }
 
-/* Whether an inline store into class t's word at `index` must go to C,
-   which keeps the name's kind (attrs.c): an object store unless the name
-   holds objects already, a raw int or float unless it holds that kind.
-   Built under a kind that then moves, a store still writes a complete
-   pair of that kind until the version guard stops it. t NULL: not known,
-   C. */
+/* How an inline store into class t's word at `index` keeps the name's
+   raw words (attrs.c, lucifer.h): an object store under a name whose
+   first number is int (float) writes the raw word for an int that fits
+   (an exact float), in line for a one-digit int; under a name still of
+   that kind any other value is C's, which generalizes it, and under one
+   that takes anything it is stored without a raw word. A raw store is in
+   line under a name whose first number is its own, a complete pair even
+   after the name generalizes. Anything else is C's. t NULL: not known. */
 static void
 store_kind(struct ctx *c, lu_v st, PyTypeObject *t, uint16_t index)
 {
     int op = I(c, st)->op;
-    int k = t != NULL ? lu_inline_kind_at(t, index) : LU_FIELD_UNSEEN;
-    if (op == OP_INLINE_STORE && k == LU_FIELD_INT) {
-        I(c, st)->imm2 |= LU_STORE_INT_RAW;
+    int k = t != NULL ? lu_inline_kind_at(t, index) : LU_FIELD_UNSEEN, first = lu_field_first(k);
+    int64_t *imm2 = &I(c, st)->imm2;
+    if (op == OP_INLINE_STORE) {
+        *imm2 |= k == LU_FIELD_UNSEEN ? LU_STORE_BY_C
+               : k == LU_FIELD_OBJECT ? LU_STORE_OBJECTS
+               : (first == LU_FIELD_INT ? LU_STORE_INT_RAW : LU_STORE_FLOAT_RAW)
+                 | (k == first ? 0 : LU_STORE_RAW_OR_PLAIN);
         return;
     }
-    if (op == OP_INLINE_STORE && k == LU_FIELD_FLOAT) {
-        I(c, st)->imm2 |= LU_STORE_FLOAT_RAW;
-        return;
-    }
-    if (op == OP_INLINE_STORE && k == LU_FIELD_OBJECT) {
-        I(c, st)->imm2 |= LU_STORE_OBJECTS;
-        return;
-    }
-    int in_line = op == OP_INLINE_STORE ? k == LU_FIELD_ANY
-                : op == OP_INLINE_STORE_I ? k == LU_FIELD_INT : k == LU_FIELD_FLOAT;
-    if (!in_line) {
-        I(c, st)->imm2 |= LU_STORE_BY_C;
+    if (first != (op == OP_INLINE_STORE_I ? LU_FIELD_INT : LU_FIELD_FLOAT)) {
+        *imm2 |= LU_STORE_BY_C;
     }
 }
 
@@ -504,7 +500,7 @@ load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr
             lu_ev_guard_version(c, owner, version);
             v = lu_ev_emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, index);
             PyTypeObject *t = owner_class(c, owner, version);
-            int kind = t != NULL ? lu_inline_kind_at(t, index) : LU_FIELD_ANY;
+            int kind = t != NULL ? lu_inline_kind_at(t, index) : LU_FIELD_UNSEEN;
             Py_XDECREF(t);
             I(c, v)->imm2 = (int64_t)(intptr_t)descr | (int64_t)kind << LU_LOAD_KIND_SHIFT;
             I(c, v)->fs = lu_ev_exit_fs(c);

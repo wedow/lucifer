@@ -640,16 +640,16 @@ value_kind(PyObject *v, uint64_t *bits)
 
 /* Name i's kind joined with k, for good: unseen takes k, a kind keeps
    itself, an object name stays one, and an int or float name meeting
-   anything else takes anything. Atomic: the kinds are the class's, the
-   store's lock only the instance's. *was gets the kind before. */
+   anything else takes anything, keeping its first number. Atomic: the
+   kinds are the class's, the store's lock only the instance's. */
 static int
-join_kind(struct lu_shared_names *names, Py_ssize_t i, int k, int *before)
+join_kind(struct lu_shared_names *names, Py_ssize_t i, int k)
 {
     uint8_t was = __atomic_load_n(&names->kinds[i], __ATOMIC_ACQUIRE), now;
     do {
-        *before = was;
         now = was == LU_FIELD_UNSEEN ? (uint8_t)k
-            : was == k || was == LU_FIELD_OBJECT || was == LU_FIELD_ANY ? was : LU_FIELD_ANY;
+            : was == k || was == LU_FIELD_OBJECT || was == LU_FIELD_ANY_INT || was == LU_FIELD_ANY_FLOAT ? was
+            : was == LU_FIELD_INT ? LU_FIELD_ANY_INT : LU_FIELD_ANY_FLOAT;
         if (now == was) {
             return now;
         }
@@ -659,26 +659,20 @@ join_kind(struct lu_shared_names *names, Py_ssize_t i, int k, int *before)
 
 /* Before a store of *v (raw bits for a marker) under tp's name i takes
    the lock: joins the name's kind with the value's, and returns whether
-   the store writes the raw word too (in *raw), which it does only when
-   the name keeps the value's kind, int or float: a raw word only ever
-   holds its name's first kind, so that a reader that saw a marker of
-   that kind reads a value stored under it. A marker the name no longer
-   takes becomes its box, a new reference in *box (-1: no memory, the
-   error cleared). A name that leaves int or float changes tp's version
-   here, before any value of another kind is stored, so that compiled
-   code relying on the kind leaves. */
+   the store writes the raw word too (in *raw), which it does exactly
+   when the value is of the name's first number kind (lucifer.h). A
+   marker of another kind becomes its box, a new reference in *box (-1:
+   no memory, the error cleared). Nothing waits on the join: compiled
+   loads check the word they read. */
 static int
 take_kind(PyTypeObject *tp, Py_ssize_t i, PyObject **v, uint64_t bits, uint64_t *raw, PyObject **box)
 {
     *raw = bits;
     *box = NULL;
-    int k = value_kind(*v, raw), was;
-    int now = join_kind(shared_names(tp), i, k, &was);
-    if (now != was && (was == LU_FIELD_INT || was == LU_FIELD_FLOAT)) {
-        lu_type_modified(tp);
-    }
-    if (now == k) {
-        return k != LU_FIELD_OBJECT;
+    int k = value_kind(*v, raw);
+    int first = lu_field_first(join_kind(shared_names(tp), i, k));
+    if (k == first) {
+        return 1;
     }
     if (lu_unboxed(*v)) {
         double d;
@@ -699,11 +693,15 @@ lu_inline_kind_at(PyTypeObject *tp, Py_ssize_t offset)
     struct lu_shared_names *names = shared_names(tp);
     Py_ssize_t i = (offset - tp->tp_basicsize) / (Py_ssize_t)(LU_INLINE_STRIDE * sizeof(PyObject *));
     if (!(tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) || names == NULL || i < 0 || i >= names->capacity) {
-        return LU_FIELD_ANY;
+        return LU_FIELD_UNSEEN;
     }
     return __atomic_load_n(&names->kinds[i], __ATOMIC_ACQUIRE);
 }
 
+/* Each word against its name's kind: nothing under an unseen name, no
+   marker but the first number's, any other object only once the name
+   takes anything, and a raw word equal to every object of the first
+   kind. */
 int
 lu_inline_kinds_ok(PyObject *obj)
 {
@@ -716,19 +714,22 @@ lu_inline_kinds_ok(PyObject *obj)
     for (Py_ssize_t i = 0; i < n && i < room; i++) {
         PyObject **slot = &LU_INLINE_WORD(values, i);
         PyObject *w = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
-        int k = __atomic_load_n(&names->kinds[i], __ATOMIC_ACQUIRE);
+        int k = __atomic_load_n(&names->kinds[i], __ATOMIC_ACQUIRE), first = lu_field_first(k);
         uint64_t bits = 0;
-        if (w == NULL || k == LU_FIELD_ANY) {
+        if (w == NULL) {
             continue;
         }
-        if (k == LU_FIELD_OBJECT) {
-            if (lu_unboxed(w)) {
+        int wk = value_kind(w, &bits);
+        if (k == LU_FIELD_UNSEEN || (lu_unboxed(w) && wk != first)) {
+            return 0;
+        }
+        if (wk != first) {
+            if (k != LU_FIELD_OBJECT && k != LU_FIELD_ANY_INT && k != LU_FIELD_ANY_FLOAT) {
                 return 0;
             }
-            continue;
         }
-        if (k == LU_FIELD_UNSEEN || value_kind(w, &bits) != k
-            || (!lu_unboxed(w) && bits != __atomic_load_n(lu_inline_raw(slot), __ATOMIC_RELAXED))) {
+        else if (first != LU_FIELD_OBJECT && !lu_unboxed(w)
+                 && bits != __atomic_load_n(lu_inline_raw(slot), __ATOMIC_RELAXED)) {
             return 0;
         }
     }

@@ -2507,7 +2507,8 @@ prim_inline_kinds_ok(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 }
 
 /* inline_field(obj, name): (kind, raw word) of the name obj keeps in line,
-   kind as LU_FIELD_* (unseen 0, int 1, float 2, object 3, any 4); None
+   kind as LU_FIELD_* (unseen 0, int 1, float 2, object 3, any after an
+   int 4, any after a float 5); None
    when it keeps none there (tests). */
 static PyObject *
 prim_inline_field(PyObject *m, PyObject *const *args, Py_ssize_t nargs)

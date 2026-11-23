@@ -7,6 +7,7 @@
 # back as those numbers; compiled stores of computed numbers replace
 # boxes, markers and deleted words alike. Every value must be the
 # interpreter's.
+import gc
 import sys
 
 try:
@@ -90,6 +91,10 @@ def stale_store(n):
             ps[(i + 1) % 10].x = 'str'
         if i == n // 2 + 3:
             ps[(i + 1) % 10].x = 2.5
+        if i > n // 2:
+            q = P(0)                    # a fresh instance stored to after the name took anything
+            q.x = i + 2
+            ps[i % 10 - 1].x = q.x
     return all(inline_kinds_ok(p) for p in ps), [p.x for p in ps]
 
 
@@ -130,9 +135,53 @@ def raw_stores(n):
     return all(inline_kinds_ok(f) for f in fs), [f.x for f in fs], [f.n for f in fs]
 
 
+def make_class(i):
+    class K:
+        def __init__(self):
+            self.x = i
+
+        def bump(self, d):
+            self.x = self.x + d
+    return K
+
+
+BUMP = '''
+def bump_all(objs, n):
+    for r in range(n):
+        for o in objs:
+            o.bump(1)
+'''
+
+
+def many_classes(n):
+    # More classes than the version map's first size, half of them freed
+    # (their entries leave, later ones move back), then code compiled
+    # after the frees for the rest and for new ones, and a site whose
+    # cached class died before it was compiled.
+    objs = [make_class(i)() for i in range(300)]
+    ns = {}
+    exec(BUMP, ns)
+    ns['bump_all'](objs, n // 100)
+    objs = objs[1::2]
+    gc.collect()
+    objs += [make_class(i)() for i in range(40)]
+    ns2 = {}
+    exec(BUMP, ns2)
+    ns2['bump_all'](objs, n // 100)
+    dead = make_class(-1)()
+    ns3 = {}
+    exec(BUMP, ns3)
+    ns3['bump_all']([dead], 3)          # the site caches dead's class
+    del dead
+    gc.collect()
+    ns3['bump_all'](objs, n // 100)
+    return all(inline_kinds_ok(o) for o in objs), sum(o.x for o in objs)
+
+
 print('callee', wait_callee(N))
 print('finalizer', wait_finalizer(N))
 print('eq', wait_eq(N))
 print('stale store', stale_store(N))
 print('numbers into objects', numbers_into_objects(N))
 print('raw stores', raw_stores(N))
+print('many classes', many_classes(N))
