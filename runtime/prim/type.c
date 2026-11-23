@@ -660,7 +660,7 @@ static PyGetSetDef subtype_getsets_full[] = {
     { NULL },
 };
 
-/* Allocation (PyType_GenericAlloc, subtype_dealloc). */
+/* Allocation (PyType_GenericAlloc, lu_subtype_dealloc). */
 
 PyObject *
 PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
@@ -690,8 +690,8 @@ PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
     return op;
 }
 
-static void
-subtype_dealloc(PyObject *self)
+void
+lu_subtype_dealloc(PyObject *self)
 {
     if (Py_TYPE(self)->tp_finalize != NULL && PyObject_CallFinalizerFromDealloc(self) < 0) {
         return;                         /* resurrected */
@@ -825,7 +825,7 @@ type_dealloc(PyObject *self)
     lu_inline_values_fini(tp);
     PyMem_Free((void *)tp->tp_doc);
     PyMem_Free(et->_ht_tpname);
-    lu_object_free(self);       /* a heap metatype's subtype_dealloc releases it */
+    lu_object_free(self);       /* a heap metatype's lu_subtype_dealloc releases it */
 }
 
 /* Static types (type_ready for _Py_TPFLAGS_STATIC_BUILTIN types). */
@@ -1610,7 +1610,7 @@ type_new_layout(PyTypeObject *meta, PyObject *name, PyObject *bases, PyObject *n
     tp->tp_bases = bases;
     bases = NULL;
     tp->tp_base = (PyTypeObject *)Py_NewRef(base);
-    tp->tp_dealloc = subtype_dealloc;
+    tp->tp_dealloc = lu_subtype_dealloc;
     tp->tp_traverse = subtype_traverse;
     tp->tp_clear = subtype_clear;
     tp->tp_alloc = PyType_GenericAlloc;
@@ -1739,7 +1739,7 @@ compatible_with_tp_base(PyTypeObject *child)
         && child->tp_dictoffset == parent->tp_dictoffset
         && child->tp_weaklistoffset == parent->tp_weaklistoffset
         && (child->tp_flags & Py_TPFLAGS_HAVE_GC) == (parent->tp_flags & Py_TPFLAGS_HAVE_GC)
-        && (child->tp_dealloc == subtype_dealloc || child->tp_dealloc == parent->tp_dealloc);
+        && (child->tp_dealloc == lu_subtype_dealloc || child->tp_dealloc == parent->tp_dealloc);
 }
 
 static int

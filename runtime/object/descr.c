@@ -1010,7 +1010,7 @@ static PyMemberDef super_members[] = {
 
 /* Deallocation: every field these layouts hold is an object reference
    after the header, except property's trailing int. A heap subclass's
-   subtype_dealloc releases the type. */
+   lu_subtype_dealloc releases the type. */
 static void
 fields_dealloc(PyObject *op, Py_ssize_t first, Py_ssize_t end)
 {

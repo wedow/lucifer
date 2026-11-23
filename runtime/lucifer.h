@@ -299,6 +299,9 @@ lu_inline_values(PyObject *obj)
    an object, its value in the second word, whose box the first generic
    reader makes and installs (DESIGN 4.5). */
 #define LU_INLINE_STRIDE 2
+/* Where a class's shared-names table (its ht_cached_keys, attrs.c) keeps
+   how many names it has: an instance has inline words for that many. */
+#define LU_SHARED_NAMES_COUNT 8
 #define LU_INLINE_WORD(values, i) ((values)[LU_INLINE_STRIDE * (i)])
 #define LU_UNBOXED ((PyObject *)1)
 #define LU_UNBOXED_INT ((PyObject *)3)
@@ -369,6 +372,9 @@ int lu_inline_traverse(PyObject *obj, visitproc visit, void *arg);
    with MemoryError. */
 int lu_inline_box_all(PyObject *obj);
 void lu_inline_clear(PyObject *obj);
+/* A Python class's tp_dealloc (runtime/prim/type.c); compiled code
+   releases plain instances in line, knowing it by this address. */
+void lu_subtype_dealloc(PyObject *self);
 
 /* Watcher ids per kind, as CPython's TYPE_/DICT_/FUNC_/CODE_MAX_WATCHERS. */
 #define LU_MAX_WATCHERS 8

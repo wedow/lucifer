@@ -17,3 +17,41 @@ Mechanisms: the release of an object whose class has no finalizer, no weak refer
 
 Acceptance: idiom rows object-kept-in-list <= 60 cycles, list update <= 40.
 
+
+## 2026-11-23: measured (origin/master f2577f26)
+
+Executed instructions per inner iteration, exact (single-stepped steady-state iterations, C attributed to the function it ran in and to the IR instruction that called it). "cold" is the unit's out-of-line code. floatstore is a new row: xs[j] = j * 0.5 + i over a list of 100 floats. isinst and genexp are per item of their inner loop.
+
+| row | total | compiled | C | allocation (compiled) | release |
+|---|---|---|---|---|---|
+| alloc_escape | 488 | 252 | 236 | HELPER new_object 48 in line, BOX_INT 9, INLINE_STORE 50 | old instance: LIST_STORE 38 cold + subtype_dealloc 68, lu_inline_clear 56, lu_object_free 48, _Py_Dealloc 25, lu_clear_weakrefs 22, lu_jit_decref 12, _Py_MergeZeroLocalRefcount 5 = 274 |
+| listidx | 284 | 218 | 66 | BOX_INT 32 | old int: LIST_STORE 38 cold + _Py_Dealloc 25, long_dealloc 24, lu_jit_decref 12, merge 5 = 104 |
+| floatstore | 242 | 180 | 62 | BOX_FLOAT 21 | old float: LIST_STORE 38 cold + _Py_Dealloc 25, float_dealloc 20, lu_jit_decref 12, merge 5 = 100 |
+| isinst | 565 | 383 | 182 | HELPER build_tuple 53 | tuple: tuple_dealloc 72, _Py_Dealloc 25, lu_jit_decref 12, merge 5 = 114; prim_is_subtype 62 |
+| strfmt | 1264 | 176 | 1088 | lu_object_new 61, PyTuple_New 51, PyUnicode_New 45 | tuple_dealloc 68, _Py_Dealloc 50, lu_object_free 38, str_dealloc 18, lu_jit_decref 12, merge 10; the formatting itself (format_decimal 180, join_items 169, copy_into 123) |
+| genexp | 406 | 212 | 194 | PyLong_FromLongLong 19 (in lu_long_add) | seqiter and int add in C: lu_seqiter_next 56, lu_long_add 40, PyCriticalSection 45 |
+
+Reading: on the rows the ticket names, the release is most of the cost: 274 of 488 instructions for an instance, 104 of 284 for an int, 100 of 242 for a float, 114 of 565 for a tuple. Every release of an object whose count compiled code drops to zero goes lu_jit_decref -> _Py_MergeZeroLocalRefcount -> _Py_Dealloc -> the type's dealloc, through the decref's slow path in cold code (38 instructions there before the call: publishing the state for a finalizer that ints, floats and tuples of them cannot have). genexp's cost is the generator protocol and the int add in C, not allocation: out of this ticket.
+
+## 2026-11-23: stage 1, release in line
+
+When compiled code drops the last local reference to an object this thread owns with no shared references, the release's slow path now first tries one stub the unit shares (object in RDX): exact compact ints and exact floats go back to their freelists; exact tuples of 1 to 20 items none of which dies here go back to theirs; exact compact ascii strs and plain instances (lu_subtype_dealloc, no tp_finalize, object as base, no __slots__, no dict, no weak reference to them, every inline value unboxed or not dying, the type not dying, the collector's count short of a flush) go to mi_free with the unit's registers kept around the call. Anything else, or allocators or a ref tracer observed, takes the C path as before.
+
+Skipped from the generic path, and why that is sound: _Py_DecRef/_Py_MergeZeroLocalRefcount (the count is the owner's and the shared count is zero, so nothing to merge and nobody to queue for); _Py_Dealloc's trash queue (nothing released here releases anything that dies, so no dealloc nests); the publication of the frame state for a finalizer (none of these kinds runs code); lu_clear_weakrefs (the list is empty or the type has none); lu_inline_clear and the type's decref (their counts drop in place, none reaches zero). The collector's tracked bit is cleared before the block goes, as _Py_Dealloc clears it, and the collector cannot run meanwhile (no poll, no park between the checks and the free).
+
+Exact instructions per iteration, and cycles (interleaved min of 3, origin/master vs now, one lease; alloc_escape three leases):
+
+| row | instructions before | after | in C before | after | cycles before | after |
+|---|---|---|---|---|---|---|
+| alloc_escape | 488 | 410 | 236 | 23 (mi_free) | 206, 200, 193 | 170, 167, 166 |
+| listidx | 284 | 221 | 66 | 0 | 128 | 104 |
+| floatstore | 242 | 184 | 62 | 0 | 109 | 94 |
+| isinst (per item) | 565 | 496 | 182 | 68 | 190 | 138 |
+| strfmt | 1264 | 1238 | 1088 | 1013 | 859 | 665 |
+| loads, tupunpack, poly (neighbours) | 162, 125, 468 | same | | | 40, 28, 128 | 39, 28, 117 |
+
+Code bytes per unit grow by the stub (about 900 bytes once per unit that releases): alloc_escape 11077 -> 13057, listidx 9640 -> 11616.
+
+Found on the way, filed as lu-ex68: a tuple compiled code keeps virtual releases its items first to last, CPython last to first (on master too).
+
+Left for alloc_escape (target 60): the stub's instance path is about 160 instructions (checks, the scans, the volatile saves around mi_free); the list store's lock (lock elision's), new_object's 48 and the inline stores' 50 (stage 2).

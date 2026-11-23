@@ -143,6 +143,7 @@ struct asm_ {
     int serial;                 /* it stores without locks while serial: keeps the task's unlocked_jit */
     int frame_bytes;
     int save_all, restore_all;  /* the shared stubs of parked_call, emitted when used */
+    int release;                /* 1 + the label of the release stub (release_in_line), or 0 */
     int parks;
     int parking;                /* the publish in hand is a park's: no code of this thread runs to count holds */
     int saved;                  /* the published call in hand saved every register at jit_regs (kept_begin) */
@@ -2311,8 +2312,344 @@ incref(struct asm_ *a, int r)
    them for the stores that release an old value. When the release may
    run a finalizer, C runs with `d`, the state of `in`, published, and a
    walker's write then leaves at `left` if it is a label. Clobbers RAX,
-   RCX. */
+   RCX, RDX and R11. */
 static void settle(struct asm_ *a, int left);
+
+static void store32_mi(struct asm_ *a, int base, int32_t disp, int32_t imm);
+static void thread_id(struct asm_ *a, int r);
+
+/* The carrier's entry (struct lu_entry) into dst: the freelists. */
+static void
+entry_of(struct asm_ *a, int dst)
+{
+    load(a, dst, R14, offsetof(struct lu_task, carrier));
+    load(a, dst, dst, offsetof(struct lu_carrier, current));
+}
+
+/* Keeps the dead object in r on the freelist at disp from `base`, as
+   lu_freelist_push does (no owner, no count), then `done`; `full` when
+   the list holds LU_FREE_MAX (-1: known to have room). Clobbers RCX. */
+static void
+freelist_push(struct asm_ *a, int r, int base, int32_t disp, int full, int done)
+{
+    int32_t head = disp + (int32_t)offsetof(struct lu_freelist, head), n = disp + (int32_t)offsetof(struct lu_freelist, n);
+    _Static_assert(sizeof(struct lu_freelist) == 16, "a tuple's freelist is 16 bytes after the one before");
+    if (full >= 0) {
+        cmp_mi(a, 0, base, n, LU_FREE_MAX);
+        jcc(a, CC_GE, full);
+    }
+    load(a, RCX, base, head);
+    store(a, r, sizeof(PyObject), RCX);         /* LU_FREE_NEXT */
+    store(a, base, head, r);
+    alu_mi(a, 0, ALU_ADD, base, n, 1);
+    store_mi(a, r, offsetof(PyObject, ob_tid), 0);
+    store32_mi(a, r, offsetof(PyObject, ob_ref_local), 0);
+    jmp(a, done);
+}
+
+/* The release of the object in r whose local count (in ECX) is about to
+   reach zero, in line for the kinds whose dealloc only returns the block
+   to a freelist or the allocator: an exact compact int, an exact float,
+   an exact tuple of 1 to LU_FREE_TUPLE_SIZES items none of which this
+   release frees, an exact compact ascii str, and a plain instance
+   (release_instance).
+   What _Py_DecRef, _Py_MergeZeroLocalRefcount and _Py_Dealloc do on the
+   way there is not needed: the count is the owner's and the shared count
+   is zero, so the object dies now and no other thread holds or queues it;
+   no finalizer, weakref or ref tracer can see it (the types have none,
+   and a tracer makes the allocators observed); no item dies, so no dealloc
+   nests (the trash queue's depth). A tuple leaves the collector's view
+   first, as _Py_Dealloc does. The code is one stub the unit's releases
+   share, the object in RDX: it returns with ZF set when it released the
+   object, clear when not. Clobbers RAX, RCX, RDX, R11. */
+static void
+release_in_line(struct asm_ *a, int r, int done)
+{
+    if (a->release == 0) {
+        a->release = 1 + new_label(a);
+    }
+    mov_rr(a, RDX, r);
+    b1(a, 0xE8);
+    rel32_to(a, a->release - 1);                /* call the stub */
+    jcc(a, CC_E, done);
+}
+
+/* test r64, imm32 */
+static void
+test_ri(struct asm_ *a, int r, int32_t imm)
+{
+    rex(a, 1, 0, 0, r);
+    b1(a, 0xF7);
+    modrm_rr(a, 0, r);
+    b4(a, imm);
+}
+
+/* The release of an instance of a Python class (type in RAX, object in
+   r, RDX) whose lu_subtype_dealloc would only release its attributes,
+   its type and its block: no __del__ (tp_finalize), no weak reference to
+   it (an empty list, or none), no __slots__ of its own and object as its
+   base, no dict (its attributes inline). Nothing it holds dies with it:
+   each inline value is unboxed, immortal or this thread's with a count
+   above one, and so is its type; then the counts drop, the collector's
+   count of objects with it (lu_gc_record_deallocation, short of a
+   flush), and mi_free takes the block (this thread's heap or another's,
+   as mimalloc sorts it), the registers the unit allocates kept around the
+   call. Else `fail`. Clobbers RAX, RCX, R11; R10 kept. */
+static void
+release_instance(struct asm_ *a, int r, int fail, int done)
+{
+    int failed = new_label(a), noweak = new_label(a), nodict = new_label(a), typed = new_label(a);
+    int scan = new_label(a), scanned = new_label(a), drop = new_label(a), dropped = new_label(a);
+    int whole = new_label(a), untyped = new_label(a);
+    load(a, R11, RAX, offsetof(PyTypeObject, tp_dealloc));
+    mov_ri(a, RCX, (int64_t)(intptr_t)lu_subtype_dealloc);
+    alu_rr(a, ALU_CMP, R11, RCX);
+    jcc(a, CC_NE, fail);
+    cmp_mi(a, 1, RAX, offsetof(PyTypeObject, tp_finalize), 0);
+    jcc(a, CC_NE, fail);
+    mov_ri(a, RCX, (int64_t)(intptr_t)&PyBaseObject_Type);
+    cmp_rm(a, RCX, RAX, offsetof(PyTypeObject, tp_base));
+    jcc(a, CC_NE, fail);
+    cmp_mi(a, 1, RAX, offsetof(PyVarObject, ob_size), 0);
+    jcc(a, CC_NE, fail);                        /* __slots__ */
+    load(a, RCX, RAX, offsetof(PyTypeObject, tp_weaklistoffset));
+    test_rr(a, RCX, RCX);
+    jcc(a, CC_E, noweak);
+    alu_rr(a, ALU_ADD, RCX, r);
+    cmp_mi(a, 1, RCX, 0, 0);
+    jcc(a, CC_NE, fail);                        /* a weak reference to it */
+    bind(a, noweak);
+    load(a, RCX, RAX, offsetof(PyTypeObject, tp_flags));
+    test_ri(a, RCX, Py_TPFLAGS_MANAGED_DICT);
+    jcc(a, CC_E, nodict);
+    cmp_mi(a, 1, r, LU_MANAGED_DICT_OFFSET, 0);
+    jcc(a, CC_NE, fail);                        /* a dict, which inline values moved to make too */
+    bind(a, nodict);
+    load(a, RCX, R14, offsetof(struct lu_task, carrier));
+    load(a, RCX, RCX, offsetof(struct lu_carrier, current));
+    cmp_mi(a, 0, RCX, offsetof(struct lu_entry, gc_alloc_count), -LU_GC_ALLOC_FLUSH + 1);
+    jcc(a, CC_LE, fail);                        /* the decrement would flush */
+    b1(a, 0x41);
+    b1(a, 0x52);                                /* push r10 */
+    thread_id(a, R10);
+    /* The type's reference, and the inline values': none may die. */
+    load32(a, RCX, RAX, offsetof(PyObject, ob_ref_local));
+    cmp32_ri8(a, RCX, -1);
+    jcc(a, CC_E, typed);
+    cmp32_ri8(a, RCX, 1);
+    jcc(a, CC_BE, failed);
+    cmp_rm(a, R10, RAX, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, failed);
+    bind(a, typed);
+    load(a, R11, RAX, offsetof(PyTypeObject, tp_basicsize));
+    alu_rr(a, ALU_ADD, R11, r);                 /* the values */
+    mov_rr(a, RCX, R11);
+    load(a, RAX, RAX, offsetof(PyTypeObject, tp_flags));
+    test_ri(a, RAX, Py_TPFLAGS_INLINE_VALUES);
+    jcc(a, CC_E, scanned);                      /* no words: the end is the start */
+    load(a, RAX, r, offsetof(PyObject, ob_type));
+    load(a, RAX, RAX, offsetof(PyHeapTypeObject, ht_cached_keys));
+    load(a, RAX, RAX, LU_SHARED_NAMES_COUNT);
+    rex(a, 1, 0, 0, RAX);
+    b1(a, 0xC1);
+    modrm_rr(a, 4, RAX);
+    b1(a, 4);                                   /* shl rax, 4: LU_INLINE_STRIDE words a name */
+    alu_rr(a, ALU_ADD, RCX, RAX);               /* the end */
+    bind(a, scan);
+    alu_rr(a, ALU_CMP, R11, RCX);
+    jcc(a, CC_AE, scanned);
+    load(a, RAX, R11, 0);
+    alu_ri(a, ALU_ADD, R11, LU_INLINE_STRIDE * sizeof(PyObject *));
+    alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+    jcc(a, CC_BE, scan);                        /* absent, or unboxed */
+    cmp_mi(a, 0, RAX, offsetof(PyObject, ob_ref_local), -1);
+    jcc(a, CC_E, scan);
+    cmp_mi(a, 0, RAX, offsetof(PyObject, ob_ref_local), 1);
+    jcc(a, CC_BE, failed);
+    cmp_rm(a, R10, RAX, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, failed);
+    jmp(a, scan);
+    bind(a, scanned);
+    /* It dies: the values' counts, then the type's, then the block. */
+    load(a, R11, r, offsetof(PyObject, ob_type));
+    load(a, R11, R11, offsetof(PyTypeObject, tp_basicsize));
+    alu_rr(a, ALU_ADD, R11, r);
+    bind(a, drop);
+    alu_rr(a, ALU_CMP, R11, RCX);
+    jcc(a, CC_AE, dropped);
+    load(a, RAX, R11, 0);
+    alu_ri(a, ALU_ADD, R11, LU_INLINE_STRIDE * sizeof(PyObject *));
+    alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+    jcc(a, CC_BE, drop);
+    cmp_mi(a, 0, RAX, offsetof(PyObject, ob_ref_local), -1);
+    jcc(a, CC_E, drop);
+    alu_mi(a, 0, ALU_SUB, RAX, offsetof(PyObject, ob_ref_local), 1);
+    jmp(a, drop);
+    bind(a, dropped);
+    load(a, RAX, r, offsetof(PyObject, ob_type));
+    cmp_mi(a, 0, RAX, offsetof(PyObject, ob_ref_local), -1);
+    jcc(a, CC_E, untyped);
+    alu_mi(a, 0, ALU_SUB, RAX, offsetof(PyObject, ob_ref_local), 1);
+    bind(a, untyped);
+    load(a, RCX, R14, offsetof(struct lu_task, carrier));
+    load(a, RCX, RCX, offsetof(struct lu_carrier, current));
+    alu_mi(a, 0, ALU_SUB, RCX, offsetof(struct lu_entry, gc_alloc_count), 1);
+    rex(a, 0, 0, 0, r);
+    b1(a, 0x80);
+    modrm_mem(a, 4, r, offsetof(PyObject, ob_gc_bits));
+    b1(a, (uint8_t)~LU_GC_TRACKED);             /* and byte [r+gc_bits]: the collector's no longer */
+    load(a, RAX, RAX, offsetof(PyTypeObject, tp_flags));
+    save_volatile(a);                           /* aligned: the push and the call to the stub */
+    mov_rr(a, RDI, r);
+    test_ri(a, RAX, Py_TPFLAGS_PREHEADER);
+    jcc(a, CC_E, whole);
+    alu_ri(a, ALU_SUB, RDI, 2 * sizeof(PyObject *));  /* a heap subclass's block starts at the preheader */
+    bind(a, whole);
+    call_abs(a, (void *)mi_free);
+    restore_volatile(a);
+    b1(a, 0x41);
+    b1(a, 0x5A);                                /* pop r10 */
+    jmp(a, done);
+    bind(a, failed);
+    b1(a, 0x41);
+    b1(a, 0x5A);                                /* pop r10 */
+    jmp(a, fail);
+}
+
+static void
+release_stub(struct asm_ *a)
+{
+    const int r = RDX;
+    int other = new_label(a), done = new_label(a);
+    bind(a, a->release - 1);
+    int not_int = new_label(a), not_float = new_label(a), scan = new_label(a), scanned = new_label(a);
+    int drop = new_label(a), dropped = new_label(a), back = new_label(a), kind = new_label(a);
+    /* The kinds first: most objects released another way leave here. */
+    load(a, RAX, r, offsetof(PyObject, ob_type));
+    static PyTypeObject *const kinds[] = { &PyLong_Type, &PyFloat_Type, &PyTuple_Type, &PyUnicode_Type };
+    for (int k = 0; k < 4; k++) {
+        mov_ri(a, R11, (int64_t)(intptr_t)kinds[k]);
+        alu_rr(a, ALU_CMP, RAX, R11);
+        jcc(a, CC_E, kind);
+    }
+    load(a, R11, RAX, offsetof(PyTypeObject, tp_dealloc));
+    mov_ri(a, RCX, (int64_t)(intptr_t)lu_subtype_dealloc);
+    alu_rr(a, ALU_CMP, R11, RCX);
+    jcc(a, CC_NE, other);
+    bind(a, kind);
+    load32(a, RCX, r, offsetof(PyObject, ob_ref_local));
+    cmp32_ri8(a, RCX, 1);
+    jcc(a, CC_NE, other);                       /* merged, or another thread's */
+    thread_id(a, R11);
+    cmp_rm(a, R11, r, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, other);
+    cmp_mi(a, 1, r, offsetof(PyObject, ob_ref_shared), 0);
+    jcc(a, CC_NE, other);
+    mov_ri(a, R11, (int64_t)(intptr_t)&_PyRuntime.allocators.observed);
+    cmp_mi(a, 0, R11, 0, 0);
+    jcc(a, CC_NE, other);
+    load(a, RAX, r, offsetof(PyObject, ob_type));
+    mov_ri(a, R11, (int64_t)(intptr_t)&PyLong_Type);
+    alu_rr(a, ALU_CMP, RAX, R11);
+    jcc(a, CC_NE, not_int);
+    cmp_mi(a, 1, r, offsetof(PyLongObject, long_value.lv_tag), 2 << _PyLong_NON_SIZE_BITS);
+    jcc(a, CC_AE, back);                        /* not compact */
+    entry_of(a, RAX);
+    freelist_push(a, r, RAX, offsetof(struct lu_entry, free_ints), back, done);
+    bind(a, not_int);
+    mov_ri(a, R11, (int64_t)(intptr_t)&PyFloat_Type);
+    alu_rr(a, ALU_CMP, RAX, R11);
+    jcc(a, CC_NE, not_float);
+    entry_of(a, RAX);
+    freelist_push(a, r, RAX, offsetof(struct lu_entry, free_floats), back, done);
+    bind(a, not_float);
+    int instance = new_label(a), not_str = new_label(a);
+    mov_ri(a, R11, (int64_t)(intptr_t)&PyUnicode_Type);
+    alu_rr(a, ALU_CMP, RAX, R11);
+    jcc(a, CC_NE, not_str);
+    /* An exact compact ascii str holds nothing but its block (str_dealloc). */
+    load32(a, RAX, r, offsetof(PyASCIIObject, state));
+    alu_ri(a, ALU_AND, RAX, str_state(0, 1));
+    alu_ri(a, ALU_CMP, RAX, str_state(0, 1));
+    jcc(a, CC_NE, back);
+    alu_ri(a, ALU_SUB, RSP, 8);                 /* aligned for the call (the stub's own return address) */
+    save_volatile(a);
+    mov_rr(a, RDI, r);
+    call_abs(a, (void *)mi_free);
+    restore_volatile(a);
+    alu_ri(a, ALU_ADD, RSP, 8);
+    jmp(a, done);
+    bind(a, not_str);
+    mov_ri(a, R11, (int64_t)(intptr_t)&PyTuple_Type);
+    alu_rr(a, ALU_CMP, RAX, R11);
+    jcc(a, CC_NE, instance);
+    load(a, RCX, r, offsetof(PyVarObject, ob_size));
+    alu_ri(a, ALU_SUB, RCX, 1);
+    alu_ri(a, ALU_CMP, RCX, LU_FREE_TUPLE_SIZES - 1);
+    jcc(a, CC_A, back);                         /* unsigned: 1 to LU_FREE_TUPLE_SIZES items */
+    entry_of(a, RAX);
+    rex(a, 1, 0, 0, RCX);
+    b1(a, 0xC1);
+    modrm_rr(a, 4, RCX);
+    b1(a, 4);                                   /* shl rcx, 4: the list's offset */
+    alu_rr(a, ALU_ADD, RAX, RCX);
+    int32_t lists = (int32_t)offsetof(struct lu_entry, free_tuples);
+    cmp_mi(a, 0, RAX, lists + (int32_t)offsetof(struct lu_freelist, n), LU_FREE_MAX);
+    jcc(a, CC_GE, back);
+    /* No item may die here: each is immortal or this thread's with a
+       count above one. */
+    load(a, RCX, r, offsetof(PyVarObject, ob_size));
+    bind(a, scan);
+    alu_ri(a, ALU_SUB, RCX, 1);
+    jcc(a, CC_S, scanned);
+    load_indexed8(a, R11, r, RCX, offsetof(PyTupleObject, ob_item));
+    test_rr(a, R11, R11);
+    jcc(a, CC_E, scan);
+    load32(a, RAX, R11, offsetof(PyObject, ob_ref_local));
+    cmp32_ri8(a, RAX, -1);
+    jcc(a, CC_E, scan);
+    cmp32_ri8(a, RAX, 1);
+    jcc(a, CC_BE, back);
+    thread_id(a, RAX);
+    cmp_rm(a, RAX, R11, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, back);
+    jmp(a, scan);
+    bind(a, scanned);
+    load(a, RCX, r, offsetof(PyVarObject, ob_size));
+    bind(a, drop);
+    alu_ri(a, ALU_SUB, RCX, 1);
+    jcc(a, CC_S, dropped);
+    load_indexed8(a, R11, r, RCX, offsetof(PyTupleObject, ob_item));
+    test_rr(a, R11, R11);
+    jcc(a, CC_E, drop);
+    load32(a, RAX, R11, offsetof(PyObject, ob_ref_local));
+    cmp32_ri8(a, RAX, -1);
+    jcc(a, CC_E, drop);
+    alu_mi(a, 0, ALU_SUB, R11, offsetof(PyObject, ob_ref_local), 1);
+    jmp(a, drop);
+    bind(a, dropped);
+    rex(a, 0, 0, 0, r);
+    b1(a, 0x80);
+    modrm_mem(a, 4, r, offsetof(PyObject, ob_gc_bits));
+    b1(a, (uint8_t)~LU_GC_TRACKED);             /* and byte [r+gc_bits]: the collector's no longer */
+    load(a, R11, r, offsetof(PyVarObject, ob_size));
+    entry_of(a, RAX);
+    rex(a, 1, 0, 0, R11);
+    b1(a, 0xC1);
+    modrm_rr(a, 4, R11);
+    b1(a, 4);                                   /* shl r11, 4 */
+    alu_rr(a, ALU_ADD, RAX, R11);
+    freelist_push(a, r, RAX, lists - (int32_t)sizeof(struct lu_freelist), -1, done);   /* room: seen above */
+    bind(a, instance);
+    release_instance(a, r, back, done);
+    bind(a, back);
+    bind(a, other);
+    test_rr(a, RSP, RSP);                       /* ZF clear: not released */
+    b1(a, 0xC3);
+    bind(a, done);
+    alu_rr(a, ALU_XOR, RAX, RAX);               /* ZF set: released */
+    b1(a, 0xC3);
+}
 
 static void
 decref(struct asm_ *a, int r, struct lu_ins *in, struct lu_deopt *d, int left)
@@ -2340,6 +2677,7 @@ decref(struct asm_ *a, int r, struct lu_ins *in, struct lu_deopt *d, int left)
     op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
     cold_begin(a);
     bind(a, slow);
+    release_in_line(a, r, done);
     int keep = in != NULL && !lu_alloc_call(in);   /* a release values stay in registers across */
     if (keep) {
         kept_begin(a, in, d);
@@ -4886,6 +5224,9 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     exits(a);
     int direct = lu_jit_call_entry(f->code) == f->entry_pc && lu_jit_direct_nargs(f->code) >= 0
         ? direct_entry(a) : -1;
+    if (a->release) {
+        release_stub(a);                /* last: every release has been written */
+    }
     join_streams(a);
     /* Labels. */
     for (int i = 0; i < a->npatches; i++) {

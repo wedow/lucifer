@@ -55,6 +55,8 @@ struct lu_shared_names {
     PyObject *names[];
 };
 
+_Static_assert(offsetof(struct lu_shared_names, count) == LU_SHARED_NAMES_COUNT, "compiled code reads the count there");
+
 static struct lu_shared_names *
 shared_names(PyTypeObject *tp)
 {
