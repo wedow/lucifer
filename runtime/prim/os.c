@@ -62,6 +62,19 @@ lu_join_thread(pthread_t thread)
     return LU_SYSCALL(pthread_join(thread, NULL));
 }
 
+int
+lu_membarrier(int cmd)
+{
+    return (int)LU_SYSCALL(syscall(__NR_membarrier, cmd, 0, 0));
+}
+
+void
+lu_pause_us(long us)
+{
+    struct timespec ts = { us / 1000000, us % 1000000 * 1000 };
+    LU_SYSCALL(nanosleep(&ts, NULL));
+}
+
 /* The fault handler's calls (runtime/prim/faulthandler.c). Its output is
    written from fatal-signal handlers, where the interrupted task's state may
    be half changed and no bracket is safe, so the write is bare, under

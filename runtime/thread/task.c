@@ -34,24 +34,16 @@
    the runtime is parallel from the start. */
 #include <linux/membarrier.h>
 #include <sched.h>
-#include <sys/syscall.h>
-#include <time.h>
 
 static pthread_mutex_t switching = PTHREAD_MUTEX_INITIALIZER;
-
-static int
-membarrier(int cmd)
-{
-    return (int)syscall(__NR_membarrier, cmd, 0, 0);
-}
 
 /* Registration belongs to the address space, so a fork's child registers again. */
 static int
 barrier_registered(void)
 {
-    int cmds = membarrier(MEMBARRIER_CMD_QUERY);
+    int cmds = lu_membarrier(MEMBARRIER_CMD_QUERY);
     return cmds >= 0 && (cmds & MEMBARRIER_CMD_PRIVATE_EXPEDITED)
-           && membarrier(MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED) == 0;
+           && lu_membarrier(MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED) == 0;
 }
 
 void
@@ -99,7 +91,7 @@ enter_parallel(struct _is *interp, int alone)
     if (lu_serial()) {
         __atomic_store_n(&_PyRuntime.parallel, 1, __ATOMIC_SEQ_CST);
         lu_jit_invalidate(LU_DEP_SERIAL, 0, 0);
-        if (!alone && membarrier(MEMBARRIER_CMD_PRIVATE_EXPEDITED) != 0) {
+        if (!alone && lu_membarrier(MEMBARRIER_CMD_PRIVATE_EXPEDITED) != 0) {
             Py_FatalError("lucifer: the process-wide barrier failed after it was registered");
         }
         if (self != NULL) {
@@ -110,7 +102,7 @@ enter_parallel(struct _is *interp, int alone)
                 sched_yield();
             }
             else {
-                nanosleep(&(struct timespec){ 0, 50 * 1000 }, NULL);
+                lu_pause_us(50);
             }
         }
     }
