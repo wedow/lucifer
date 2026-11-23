@@ -1,6 +1,6 @@
 ---
 id: lu-r6wr
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-23T02:06:08Z
@@ -36,3 +36,7 @@ On origin/master (dd9ce457). Program:
 
 Each D should be finalized when del o.__dict__ drops the dict (its only holder), so CPython's count should be close to 500; it printed 247 under the jit lane's flags and 248 under the plain lane's, so CPython itself is not exact here (the dict's release may be left to its collector). Lucifer printed 485 (jit) and 416 (plain). A following case that counted 3 finalizers per iteration over 2000 iterations (5999 in CPython) counted 6014 and 6083 on Lucifer after the log was cleared, which looks like finalizers of this case's objects running later; not verified. To settle: whether del __dict__ releases the dict at once on each runtime, and when the remaining D objects die (gc.collect() before counting). jit_release_shapes.py (luc-uqyj) now only checks that this case completes.
 
+
+## 2026-11-23: same in kind as CPython, closed
+
+Both runtimes delay the release of the dict `del o.__dict__` replaces: Lucifer's lu_instance_set_dict drops it through _PyObject_XDecRefDelayed (runtime/object/attrs.c), and free-threaded CPython's _PyObject_SetManagedDict through decref_maybe_delay(prev_dict, true), which is _PyObject_XDecRefDelayed (vendor/cpython/Objects/dictobject.c, _PyObject_SetManagedDict and decref_maybe_delay). The values' finalizers run when the next QSBR point frees the delayed dicts, and how many have run by a given line depends on when each runtime's quiescent states advance: CPython's own count moved between 247 and 248 with the lane's flags. Not a defect; the counts are not comparable at that line.

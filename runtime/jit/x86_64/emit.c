@@ -2380,6 +2380,16 @@ release_in_line(struct asm_ *a, int r, int done)
    count drops; then `done`. Anything else, or the page's last block
    (whose page retires), goes on to `other` with RAX as it was. Clobbers
    RCX, R11. */
+/* The free above is mimalloc's fast path for this configuration only: a
+   build that encodes free lists, pads or guards blocks, tracks them for a
+   sanitizer or keeps statistics frees another way. */
+#if (defined(MI_ENCODE_FREELIST) && MI_ENCODE_FREELIST) || (defined(MI_PADDING) && MI_PADDING) \
+    || (defined(MI_GUARDED) && MI_GUARDED) || (defined(MI_TRACK_ENABLED) && MI_TRACK_ENABLED) \
+    || (defined(MI_STAT) && MI_STAT > 0) || (defined(MI_DEBUG) && MI_DEBUG != 0) \
+    || (defined(MI_SECURE) && MI_SECURE != 0)
+#error "free_in_line pushes plain next pointers: this mimalloc configuration frees blocks another way"
+#endif
+
 static void
 free_in_line(struct asm_ *a, int other, int done)
 {
