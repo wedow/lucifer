@@ -155,6 +155,9 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
    word beside it; any other value is C's. */
 #define LU_STORE_INT_RAW ((int64_t)1 << 33)
 #define LU_STORE_FLOAT_RAW ((int64_t)1 << 34)
+/* An object store's imm2 bit under an object name: the word it replaces
+   holds no marker. */
+#define LU_STORE_OBJECTS ((int64_t)1 << 35)
 #define LU_STORE_WORDS(imm2) ((imm2) & 0xffffffff)
 
 /* INLINE_LOAD[_I/_F]'s imm2: the class value that stands behind a

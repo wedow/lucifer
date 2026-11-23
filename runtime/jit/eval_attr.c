@@ -262,7 +262,11 @@ store_kind(struct ctx *c, lu_v st, PyTypeObject *t, uint16_t index)
         I(c, st)->imm2 |= LU_STORE_FLOAT_RAW;
         return;
     }
-    int in_line = op == OP_INLINE_STORE ? k == LU_FIELD_OBJECT || k == LU_FIELD_ANY
+    if (op == OP_INLINE_STORE && k == LU_FIELD_OBJECT) {
+        I(c, st)->imm2 |= LU_STORE_OBJECTS;
+        return;
+    }
+    int in_line = op == OP_INLINE_STORE ? k == LU_FIELD_ANY
                 : op == OP_INLINE_STORE_I ? k == LU_FIELD_INT : k == LU_FIELD_FLOAT;
     if (!in_line) {
         I(c, st)->imm2 |= LU_STORE_BY_C;

@@ -4,7 +4,9 @@
 # __eq__ run by the loop stores a str there; a loop storing ints keeps
 # storing right after another instance's name takes a str; ints and
 # floats stored by compiled code into a name that holds objects read
-# back as those numbers. Every value must be the interpreter's.
+# back as those numbers; compiled stores of computed numbers replace
+# boxes, markers and deleted words alike. Every value must be the
+# interpreter's.
 import sys
 
 try:
@@ -106,8 +108,31 @@ def numbers_into_objects(n):
     return all(inline_kinds_ok(o) for o in os_), [o.x for o in os_], sum(o.x for o in os_)
 
 
+class F:
+    def __init__(self, x, n):
+        self.x = x
+        self.n = n
+
+
+def raw_stores(n):
+    # Compiled stores of computed numbers into words that hold the
+    # interpreter's boxes, their own markers, or nothing after a deletion.
+    fs = [F(i * 0.5, i) for i in range(10)]
+    for i in range(n):
+        f = fs[i % 10]
+        f.x = f.x * 0.5 + i
+        f.n = f.n + i
+        if i == n // 3:
+            del fs[3].x
+            del fs[4].n
+            fs[3].x = 1.5
+            fs[4].n = 4
+    return all(inline_kinds_ok(f) for f in fs), [f.x for f in fs], [f.n for f in fs]
+
+
 print('callee', wait_callee(N))
 print('finalizer', wait_finalizer(N))
 print('eq', wait_eq(N))
 print('stale store', stale_store(N))
 print('numbers into objects', numbers_into_objects(N))
+print('raw stores', raw_stores(N))

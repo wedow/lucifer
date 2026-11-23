@@ -3674,10 +3674,11 @@ fresh_word(struct asm_ *a, struct lu_ins *in, int r, int slow)
     }
 }
 
-/* INLINE_STORE_F and _I: lu_inline_store_f (_i) in line. Under the
-   owner's lock byte, taken with one cmpxchg, a word that already holds a
-   value takes the raw value and its marker; the old value, an object, is
-   released after the unlock. Anything else is C's, and leaves when it
+/* INLINE_STORE_F and _I: lu_inline_store_f (_i) in line. Unlocked, a
+   word that holds the marker takes the raw value alone. Otherwise, under
+   the owner's lock byte, taken with one cmpxchg, a word that already holds
+   a value takes the raw value and its marker; the old value, an object,
+   is released after the unlock. Anything else is C's, and leaves when it
    declines. */
 static void
 inline_store_raw(struct asm_ *a, lu_v v)
@@ -3692,6 +3693,48 @@ inline_store_raw(struct asm_ *a, lu_v v)
     int32_t flags = offsetof(PyObject, ob_flags) + 1;
     int32_t off = (int32_t)in->imm;
     struct lu_deopt *d = lu_publishes(in) ? published(a, in) : NULL;
+    int general = -1;
+    if (fresh && !(in->imm2 & LU_STORE_BY_C)) {
+        /* Under its own kind (eval_attr.c store_kind), unlocked: a word
+           that holds the marker takes the raw value alone; one that holds
+           the kind's object takes the raw value and the marker, and the
+           object is released. */
+        int32_t marker = (int32_t)(intptr_t)(is_int ? LU_UNBOXED_INT : LU_UNBOXED);
+        int boxed = new_label(a);
+        general = new_label(a);
+        int r = gpr_of(a, in->a, RDI);
+        rex(a, 0, 0, 0, r);
+        b1(a, 0xF6);
+        modrm_mem(a, 0, r, flags);
+        b1(a, LU_ATTRS_IN_DICT >> 8);
+        jcc(a, CC_NE, general);
+        load(a, RBX, r, off);                   /* the old value: nothing is live here (IF_CALL) */
+        alu_ri(a, ALU_CMP, RBX, marker);
+        jcc(a, CC_NE, boxed);
+        for (int k = 0; k < 2; k++) {
+            if (is_int) {
+                store(a, r, off + 8, gpr_of(a, in->b, RSI));
+            }
+            else {
+                sse_rm(a, 0xF2, 0x11, fpr_of(a, in->b, 0), r, off + 8);     /* movsd [r+off+8], the binary64 */
+            }
+            if (k == 1) {
+                rex(a, 1, 0, 0, r);
+                b1(a, 0xC7);
+                modrm_mem(a, 0, r, off);
+                b4(a, marker);                  /* mov qword [r+off], marker: after the raw word */
+                decref(a, RBX, in, d, -1);      /* the old value, an object of the kind */
+                jmp(a, done);
+            }
+            if (k == 0) {                       /* the hot stream goes on at done, after the cold code */
+                cold_begin(a);
+                bind(a, boxed);
+                test_rr(a, RBX, RBX);
+                jcc(a, CC_E, general);          /* a name new to the instance */
+            }
+        }
+        bind(a, general);
+    }
     parallel_moves(a, m, 2);
     mov_rr(a, R12, RDI);                        /* kept across calls: nothing is live here (IF_CALL) */
     if (is_int) {
@@ -3754,6 +3797,10 @@ inline_store_raw(struct asm_ *a, lu_v v)
     b1(a, 0x85);
     b1(a, 0xC0);                                /* test eax, eax */
     jcc(a, CC_E, fail);
+    if (general >= 0) {
+        jmp(a, done);
+        cold_end(a);
+    }
     bind(a, done);
 }
 
@@ -4550,9 +4597,11 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         fresh_word(a, in, RDI, unlock_slow);    /* a name new to the instance */
         jmp(a, take);
         bind(a, have);
-        alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED_INT);
-        jcc(a, CC_A, take);
-        alu_rr(a, ALU_XOR, RBX, RBX);           /* an unboxed value: no object to release */
+        if (!(in->imm2 & LU_STORE_OBJECTS)) {
+            alu_ri(a, ALU_CMP, RBX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+            jcc(a, CC_A, take);
+            alu_rr(a, ALU_XOR, RBX, RBX);       /* an unboxed value: no object to release */
+        }
         bind(a, take);
         load32(a, RCX, RSI, offsetof(PyObject, ob_ref_local));
         rex(a, 0, 0, 0, RCX);
