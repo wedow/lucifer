@@ -161,6 +161,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
 /* With LU_STORE_INT_RAW (_FLOAT_RAW), under a name that takes anything:
    a value of another kind is stored in line, its raw word left as it is. */
 #define LU_STORE_RAW_OR_PLAIN ((int64_t)1 << 36)
+/* As LU_LOAD_FLAG_FIRST, for a store. */
+#define LU_STORE_FLAG_FIRST ((int64_t)1 << 37)
 #define LU_STORE_WORDS(imm2) ((imm2) & 0xffffffff)
 
 /* INLINE_LOAD[_I/_F]'s imm2: the class value that stands behind a
@@ -168,7 +170,10 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
    name had when the load was built: which shape of word to expect first.
    The load checks the word it reads whatever the kind is now. */
 #define LU_LOAD_KIND_SHIFT 60
-#define LU_LOAD_KIND(imm2) ((int)((uint64_t)(imm2) >> LU_LOAD_KIND_SHIFT))
+#define LU_LOAD_KIND(imm2) ((int)(((uint64_t)(imm2) >> LU_LOAD_KIND_SHIFT) & 7))
+/* The class may have instances that came by __class__ assignment
+   (lucifer.h lu_inline_foreign): the in-dict flag is tested first. */
+#define LU_LOAD_FLAG_FIRST ((int64_t)((uint64_t)1 << 63))
 #define LU_LOAD_CLASS_VALUE(imm2) ((imm2) & (((int64_t)1 << LU_LOAD_KIND_SHIFT) - 1))
 
 /* POLL's imm: a loop's back-edge, or a call's start (facts.c may drop it). */

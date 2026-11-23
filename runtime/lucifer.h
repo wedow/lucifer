@@ -372,6 +372,13 @@ lu_field_first(int kind)
     return kind == LU_FIELD_INT || kind == LU_FIELD_ANY_INT ? LU_FIELD_INT
         : kind == LU_FIELD_FLOAT || kind == LU_FIELD_ANY_FLOAT ? LU_FIELD_FLOAT : LU_FIELD_OBJECT;
 }
+/* Whether an instance of tp may have come by __class__ assignment, with
+   the room its first class gave it, which can be less than tp's names:
+   compiled code then tests the in-dict flag before reading any word (such
+   an instance's values are in a dict). Unknown classes count as marked.
+   lu_inline_take_foreign marks tp for good, changing its version first. */
+int lu_inline_foreign(PyTypeObject *tp);
+void lu_inline_take_foreign(PyTypeObject *tp);
 /* The kind of the name whose word is at byte `offset` of tp's instances. */
 int lu_inline_kind_at(PyTypeObject *tp, Py_ssize_t offset);
 /* Whether every word of obj agrees with its name's kind (tests). */

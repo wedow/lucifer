@@ -2542,6 +2542,7 @@ set_class(PyObject *self, PyTypeObject *newto)
     if (lu_inline_live(self) && lu_instance_dict(self, 0) == NULL && PyErr_Occurred()) {
         return -1;
     }
+    lu_inline_take_foreign(newto);      /* before any unit can find the instance under newto */
     if (newto->tp_flags & Py_TPFLAGS_HEAPTYPE) {
         Py_INCREF(newto);
     }

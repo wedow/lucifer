@@ -52,6 +52,7 @@ struct lu_shared_names {
     Py_ssize_t count;               /* names[0..count) are set and never change */
     Py_ssize_t usable;              /* count + usable: a new instance's room, which never grows */
     int fixed;                      /* every instance's room is capacity */
+    int foreign;                    /* an instance came by __class__ assignment, with another class's room: for good */
     uint8_t *kinds;                 /* per name, LU_FIELD_*: what every instance holds there (after names) */
     PyObject *names[];
 };
@@ -672,7 +673,7 @@ take_kind(PyTypeObject *tp, Py_ssize_t i, PyObject **v, uint64_t bits, uint64_t 
     int k = value_kind(*v, raw);
     int first = lu_field_first(join_kind(shared_names(tp), i, k));
     if (k == first) {
-        return 1;
+        return first != LU_FIELD_OBJECT;
     }
     if (lu_unboxed(*v)) {
         double d;
@@ -685,6 +686,22 @@ take_kind(PyTypeObject *tp, Py_ssize_t i, PyObject **v, uint64_t bits, uint64_t 
         *v = *box;
     }
     return 0;
+}
+
+int
+lu_inline_foreign(PyTypeObject *tp)
+{
+    struct lu_shared_names *names = (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) ? shared_names(tp) : NULL;
+    return names == NULL || __atomic_load_n(&names->foreign, __ATOMIC_ACQUIRE);
+}
+
+void
+lu_inline_take_foreign(PyTypeObject *tp)
+{
+    struct lu_shared_names *names = (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) ? shared_names(tp) : NULL;
+    if (names != NULL && !__atomic_exchange_n(&names->foreign, 1, __ATOMIC_ACQ_REL)) {
+        lu_type_modified(tp);       /* units built before the mark leave at their version guards */
+    }
 }
 
 int

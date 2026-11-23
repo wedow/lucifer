@@ -329,6 +329,7 @@ raw_loads(struct lu_func *f)
         bl->ins[at + 1] = r;
         raw->src = in->src;
         raw->src_pc = in->src_pc;
+        raw->imm2 = in->imm2;   /* the kind and whether the flag goes first */
         raw->fs = lu_ir_alloc(f, sizeof(struct lu_fs));
         *raw->fs = *in->fs;     /* an exit from the read gives the object back */
         raw->fs->held = lu_ir_alloc(f, sizeof(lu_v) * (size_t)(in->fs->nheld + 1));

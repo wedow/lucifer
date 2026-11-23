@@ -501,8 +501,9 @@ load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr
             v = lu_ev_emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, index);
             PyTypeObject *t = owner_class(c, owner, version);
             int kind = t != NULL ? lu_inline_kind_at(t, index) : LU_FIELD_UNSEEN;
+            int64_t first = t == NULL || lu_inline_foreign(t) ? LU_LOAD_FLAG_FIRST : 0;
             Py_XDECREF(t);
-            I(c, v)->imm2 = (int64_t)(intptr_t)descr | (int64_t)kind << LU_LOAD_KIND_SHIFT;
+            I(c, v)->imm2 = (int64_t)(intptr_t)descr | (int64_t)kind << LU_LOAD_KIND_SHIFT | first;
             I(c, v)->fs = lu_ev_exit_fs(c);
             replace_owner(c, lu_ev_own(c, v), LU_NOV);
             break;
@@ -699,6 +700,9 @@ store_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *desc
         PyTypeObject *t = owner_class(c, owner, version);
         store_room(c, st, t, index);
         store_kind(c, st, t, index);
+        if (t == NULL || lu_inline_foreign(t)) {
+            I(c, st)->imm2 |= LU_STORE_FLAG_FIRST;
+        }
         Py_XDECREF(t);
         c->g->observed = 1;     /* the value it replaces is released */
     }

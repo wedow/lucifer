@@ -13,10 +13,13 @@ import pickle
 import sys
 
 try:
-    from _lucifer import inline_kinds_ok
+    from _lucifer import inline_kinds_ok, inline_field
 except ImportError:
     def inline_kinds_ok(o):
         return True
+
+    def inline_field(o, name):
+        return None
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
 
@@ -222,6 +225,43 @@ def moves(n):
             t, [m.a for m in every])
 
 
+class Z:
+    pass
+
+
+def plain_after_any(n):
+    # Compiled object stores into a name that took a str after ints: a
+    # str goes in line leaving the raw word, an int writes it.
+    zs = [Z() for _ in range(4)]
+    for z in zs:
+        z.x = 1
+    zs[0].x = 's'
+    vals = ['a', 5, 'b', 9, 300, 'c']
+    last = [1] * 4
+    for i in range(n):
+        v = vals[i % 6]
+        zs[i % 4].x = v
+        if type(v) is int:
+            last[i % 4] = v
+    raws = [inline_field(z, 'x') for z in zs]
+    return all(inline_kinds_ok(z) for z in zs), [z.x for z in zs], [r is None or r[1] == w for r, w in zip(raws, last)]
+
+
+def mixed_site(n):
+    # A load site whose word holds a str half the time.
+    ms = [Z() for _ in range(10)]
+    for k, m in enumerate(ms):
+        m.x = k
+    for k in range(0, 10, 2):
+        ms[k].x = 's'
+    s = 0
+    for i in range(n):
+        v = ms[i % 10].x
+        if type(v) is int:
+            s += v + 1
+    return s
+
+
 print('callee', wait_callee(N))
 print('finalizer', wait_finalizer(N))
 print('eq', wait_eq(N))
@@ -230,3 +270,5 @@ print('numbers into objects', numbers_into_objects(N))
 print('raw stores', raw_stores(N))
 print('many classes', many_classes(N))
 print('moves', moves(N))
+print('plain after any', plain_after_any(N))
+print('mixed site', mixed_site(N))

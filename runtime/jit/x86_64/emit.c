@@ -3350,9 +3350,12 @@ cmp_operands(struct asm_ *a, lu_v x, lu_v y, int op)
 /* To `label` when the object in r keeps its attributes in a dict. Only a
    word found absent needs this: values that move to a dict leave every
    word NULL for good (attrs.c move_to_dict), and an index below the
-   class's count is in every live instance's room, so a word that holds a
+   class's count is in every room the class gave, so a word that holds a
    value is in line, for a store under the object's lock (or serial)
-   always, for a load as of its read. */
+   always, for a load as of its read. An instance that came by __class__
+   assignment has another class's room, and its values in a dict: code
+   for a class that may have one tests first (LU_LOAD_FLAG_FIRST,
+   LU_STORE_FLAG_FIRST). */
 static void
 in_dict_jump(struct asm_ *a, int r, int label)
 {
@@ -3402,6 +3405,9 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
     int boxed = new_label(a), done = new_label(a), typed = new_label(a), held = new_label(a);
     int r = gpr_of(a, in->a, RDX);
     int after = -1;
+    if (in->imm2 & LU_LOAD_FLAG_FIRST) {
+        in_dict_jump(a, r, fail);               /* maybe another class's room (lucifer.h lu_inline_foreign) */
+    }
     if (in->b == LU_NOV && lu_field_first(LU_LOAD_KIND(in->imm2)) == (is_int ? LU_FIELD_INT : LU_FIELD_FLOAT)) {
         int other = new_label(a), wide = new_label(a);
         after = new_label(a);
@@ -3742,7 +3748,7 @@ inline_store_raw(struct asm_ *a, lu_v v)
     int32_t off = (int32_t)in->imm;
     struct lu_deopt *d = lu_publishes(in) ? published(a, in) : NULL;
     int general = -1;
-    if (fresh && !(in->imm2 & LU_STORE_BY_C)) {
+    if (fresh && !(in->imm2 & (LU_STORE_BY_C | LU_STORE_FLAG_FIRST))) {
         /* Under its own kind (eval_attr.c store_kind), unlocked: a word
            that holds the marker takes the raw value alone; one that holds
            the kind's object takes the raw value and the marker, and the
@@ -3788,6 +3794,9 @@ inline_store_raw(struct asm_ *a, lu_v v)
     }
     if (in->imm2 & LU_STORE_BY_C) {
         jmp(a, slow);                           /* the name's kind is C's to keep (attrs.c) */
+    }
+    if (in->imm2 & LU_STORE_FLAG_FIRST) {
+        in_dict_jump(a, RDI, slow);             /* maybe another class's room (lucifer.h lu_inline_foreign) */
     }
     if (!fresh) {
         lock_object(a, RDI, RCX, slow);
@@ -4589,6 +4598,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         if (in->imm2 & LU_STORE_BY_C) {
             jmp(a, slow);                       /* the name's kind is C's to keep (attrs.c) */
         }
+        if (in->imm2 & LU_STORE_FLAG_FIRST) {
+            in_dict_jump(a, RDI, slow);         /* maybe another class's room (lucifer.h lu_inline_foreign) */
+        }
         if (!fresh) {
             lock_object(a, RDI, RCX, slow);
         }
@@ -4700,6 +4712,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            thread takes the reference in place. */
         int fail = guard_exit(a, in);
         r = gpr_of(a, in->a, RDX);
+        if (in->imm2 & LU_LOAD_FLAG_FIRST) {
+            in_dict_jump(a, r, fail);           /* maybe another class's room (lucifer.h lu_inline_foreign) */
+        }
         int unboxed = new_label(a), done = new_label(a);
         int64_t class_value = LU_LOAD_CLASS_VALUE(in->imm2);
         int objects = LU_LOAD_KIND(in->imm2) == LU_FIELD_OBJECT;  /* no marker under an object name (attrs.c) */
@@ -4764,6 +4779,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int fail = guard_exit(a, in);
         int have = new_label(a), done = new_label(a);
         r = gpr_of(a, in->a, RDX);
+        if (in->imm2 & LU_LOAD_FLAG_FIRST) {
+            in_dict_jump(a, r, fail);
+        }
         load(a, RAX, r, (int32_t)in->imm);
         test_rr(a, RAX, RAX);
         jcc(a, CC_E, fail);                     /* absent, or in a dict (in_dict_jump) */
