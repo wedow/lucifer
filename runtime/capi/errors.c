@@ -71,10 +71,15 @@ PyErr_Occurred(void)
    own __new__ and an __init__ that then only stores them as args (its
    own, or AttributeError's and NameError's, whose keywords alone set
    more), which CPython has in C: nothing else can observe the call. */
+static PyObject *plain_exception_call(PyObject *type, PyObject *const *args, size_t nargsf, PyObject *kwnames);
+
 static int
 plain_exception(PyTypeObject *tp)
 {
     PyTypeObject *base = (PyTypeObject *)PyExc_BaseException;
+    if (tp->tp_vectorcall == plain_exception_call) {
+        return 1;               /* a builtin class lu_exc_vectorcalls found so: no lookups per raise */
+    }
     if (!Py_IS_TYPE(tp, &PyType_Type) || _PyType_Lookup(tp, LU_ID(__new__)) != _PyType_Lookup(base, LU_ID(__new__))) {
         return 0;
     }
@@ -470,7 +475,7 @@ raised_value(PyObject *exc)
     if (PyExceptionInstance_Check(exc)) {
         return Py_NewRef(exc);
     }
-    if (plain_exception((PyTypeObject *)exc)) {
+    if (((PyTypeObject *)exc)->tp_vectorcall == NULL && plain_exception((PyTypeObject *)exc)) {
         return create_exception(exc, NULL);     /* BaseException's own construction, as C makes it */
     }
     PyObject *value = PyObject_CallNoArgs(exc);
