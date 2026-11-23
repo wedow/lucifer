@@ -3355,7 +3355,9 @@ cmp_operands(struct asm_ *a, lu_v x, lu_v y, int op)
    always, for a load as of its read. An instance that came by __class__
    assignment has another class's room, and its values in a dict: code
    for a class that may have one tests first (LU_LOAD_FLAG_FIRST,
-   LU_STORE_FLAG_FIRST). */
+   LU_STORE_FLAG_FIRST), and so does every unit built while threads run
+   (skips_flag): one built before the class was marked could be handed
+   such an instance by another thread before it notices it is dead. */
 static void
 in_dict_jump(struct asm_ *a, int r, int label)
 {
@@ -3364,6 +3366,19 @@ in_dict_jump(struct asm_ *a, int r, int label)
     modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
     b1(a, LU_ATTRS_IN_DICT >> 8);               /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
     jcc(a, CC_NE, label);
+}
+
+/* Whether an inline load may read its word without the in-dict test
+   first: built while serial (INS_UNLOCKED, facts.c), and for a class no
+   instance has come to by assignment (first_bit clear). One the unit may
+   have died before checks that it lives first, and leaves at `fail`. */
+static int
+skips_flag(struct asm_ *a, struct lu_ins *in, int fail, int64_t first_bit)
+{
+    if (in->flags & INS_RECHECK) {
+        jump_if_dead(a, fail);
+    }
+    return (in->flags & (INS_FRESH | INS_UNLOCKED)) && !(in->imm2 & first_bit);
 }
 
 /* The raw word of the word at in->imm of the object in r, into v. */
@@ -3405,7 +3420,7 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
     int boxed = new_label(a), done = new_label(a), typed = new_label(a), held = new_label(a);
     int r = gpr_of(a, in->a, RDX);
     int after = -1;
-    if (in->imm2 & LU_LOAD_FLAG_FIRST) {
+    if (!skips_flag(a, in, fail, LU_LOAD_FLAG_FIRST)) {
         in_dict_jump(a, r, fail);               /* maybe another class's room (lucifer.h lu_inline_foreign) */
     }
     if (in->b == LU_NOV && lu_field_first(LU_LOAD_KIND(in->imm2)) == (is_int ? LU_FIELD_INT : LU_FIELD_FLOAT)) {
@@ -3795,7 +3810,7 @@ inline_store_raw(struct asm_ *a, lu_v v)
     if (in->imm2 & LU_STORE_BY_C) {
         jmp(a, slow);                           /* the name's kind is C's to keep (attrs.c) */
     }
-    if (in->imm2 & LU_STORE_FLAG_FIRST) {
+    if (!fresh || (in->imm2 & LU_STORE_FLAG_FIRST)) {
         in_dict_jump(a, RDI, slow);             /* maybe another class's room (lucifer.h lu_inline_foreign) */
     }
     if (!fresh) {
@@ -4598,7 +4613,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         if (in->imm2 & LU_STORE_BY_C) {
             jmp(a, slow);                       /* the name's kind is C's to keep (attrs.c) */
         }
-        if (in->imm2 & LU_STORE_FLAG_FIRST) {
+        if (!fresh || (in->imm2 & LU_STORE_FLAG_FIRST)) {
             in_dict_jump(a, RDI, slow);         /* maybe another class's room (lucifer.h lu_inline_foreign) */
         }
         if (!fresh) {
@@ -4712,7 +4727,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            thread takes the reference in place. */
         int fail = guard_exit(a, in);
         r = gpr_of(a, in->a, RDX);
-        if (in->imm2 & LU_LOAD_FLAG_FIRST) {
+        if (!skips_flag(a, in, fail, LU_LOAD_FLAG_FIRST)) {
             in_dict_jump(a, r, fail);           /* maybe another class's room (lucifer.h lu_inline_foreign) */
         }
         int unboxed = new_label(a), done = new_label(a);
@@ -4779,7 +4794,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int fail = guard_exit(a, in);
         int have = new_label(a), done = new_label(a);
         r = gpr_of(a, in->a, RDX);
-        if (in->imm2 & LU_LOAD_FLAG_FIRST) {
+        if (!skips_flag(a, in, fail, LU_LOAD_FLAG_FIRST)) {
             in_dict_jump(a, r, fail);
         }
         load(a, RAX, r, (int32_t)in->imm);

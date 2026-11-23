@@ -496,6 +496,9 @@ lu_ir_dump(struct lu_func *f, FILE *out)
             if (in->loc != LU_LOC_NONE) {
                 fprintf(out, " @%d", in->loc);
             }
+            if (in->flags & INS_UNLOCKED) {
+                fprintf(out, (in->flags & INS_RECHECK) ? " serial-recheck" : " serial");
+            }
             if (in->fs != NULL) {
                 dump_fs(f, in->fs, out);
             }

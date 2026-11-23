@@ -189,14 +189,19 @@ locks_in_line(const struct lu_ins *in)
     switch (in->op) {
     case OP_INLINE_STORE: case OP_INLINE_STORE_I: case OP_INLINE_STORE_F:
     case OP_LIST_STORE: case OP_TYPED_LOAD: case OP_TYPED_STORE:
+    case OP_INLINE_LOAD: case OP_INLINE_LOAD_I: case OP_INLINE_LOAD_F: case OP_INLINE_ORIGIN:
         return !(in->flags & INS_FRESH);
     default:
         return 0;
     }
 }
 
-/* While serial (lu_serial), such a store takes no lock, and the unit
-   depends on the serial state: making a second task kills the unit, then
+/* While serial (lu_serial), such a store takes no lock, an inline load or
+   store does not test the in-dict flag before the word (emit.c
+   in_dict_jump: an instance another thread gave the class by __class__
+   assignment could otherwise reach a unit built before the class was
+   marked, and no other thread exists), and the unit depends on the
+   serial state: making a second task kills the unit, then
    waits until the first task is detached or shows no unit that may store
    unlocked before its next check (its unlocked_jit, runtime/thread/task.c).
    The word is 0 only inside a published call: 1 from the unit's entry and
