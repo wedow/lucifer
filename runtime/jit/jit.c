@@ -1495,15 +1495,14 @@ kernel_handler(struct lu_deopt *d, int k)
     return lu_exception_handler(fr->code, at, &level, &handler, &lasti) && !lasti ? handler : -1;
 }
 
-/* Whether every frame of an exit inside the root is kernel code, and none
-   a generator's: no inlined frame makes a traceback entry (the root's the
-   unit makes itself, eval_exc.c). */
+/* Whether every frame of an exit is kernel code, the root's too, and none
+   a generator's: none makes a traceback entry. */
 static int
 all_kernel(struct lu_deopt *d)
 {
     for (int i = 0; i < d->nframes; i++) {
         PyCodeObject *co = lu_deopt_frame(d, i)->code;
-        if ((!(co->co_flags & LU_CO_KERNEL) && i > 0) || (co->co_flags & LU_CO_GENERATORS)) {
+        if (!(co->co_flags & LU_CO_KERNEL) || (co->co_flags & LU_CO_GENERATORS)) {
             return 0;
         }
     }
@@ -1608,8 +1607,8 @@ lu_jit_note_exit(struct lu_deopt *d)
     }
     struct lu_unit *u = d->unit;
     int handled = d->reason == EXIT_ERROR ? handling_frame(d) : d->nframes - 1;
-    /* An exception that leaves the root through kernel frames only is the
-       root's return once it keeps doing so: counted at the raising site. */
+    /* An exception that leaves a kernel root through kernel frames only is
+       the root's return once it keeps doing so: counted at the raising site. */
     int out = handled < 0 && d->reason == EXIT_ERROR && d->catchable && all_kernel(d);
     if (handled < 0 && !out) {
         return;

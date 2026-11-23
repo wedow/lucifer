@@ -196,20 +196,23 @@ raised_arm(struct ctx *c, void *arg)
 {
     struct thrown *t = arg;
     lu_v pc = lu_ev_const_i(c, lasti_of(t->h));
-    lu_v exc = t->h->kernel ? lu_ev_helper(c, H_exc_fetch, 0, NULL, 0) : lu_ev_helper(c, H_exc_here, 1, &pc, 0);
+    /* A hidden frame (the kernel's, a module port's) makes no traceback entry. */
+    int hidden = t->h->kernel || (t->h->code->co_flags & LU_CO_HIDDEN);
+    lu_v exc = hidden ? lu_ev_helper(c, H_exc_fetch, 0, NULL, 0) : lu_ev_helper(c, H_exc_here, 1, &pc, 0);
     throw_to(c, t->h, t->handler, t->level, exc);
 }
 
 /* Whether an exception raised at c's instruction leaves the unit's root
-   with no handler on the way: every frame inside the root the kernel's
+   with no handler on the way: every frame, the root's too, the kernel's
    (no traceback entry), none a generator's, and what this instruction
-   raised has kept leaving (lu_jit_raises_out). */
+   raised has kept leaving (lu_jit_raises_out). A user root leaves with an
+   error exit, which the interpreter unwinds. */
 static int
 leaves_root(struct ctx *c)
 {
     for (struct ctx *k = c; k != NULL; k = k->parent) {
         int level, handler, lasti;
-        if (lu_ev_in_gen(k) || (!k->kernel && k->parent != NULL) || (k->code->co_flags & LU_CO_GENERATORS)
+        if (lu_ev_in_gen(k) || !k->kernel || (k->code->co_flags & LU_CO_GENERATORS)
             || lu_exception_handler(k->code, k->pc, &level, &handler, &lasti)) {
             return 0;
         }
@@ -228,21 +231,13 @@ raised_out(struct ctx *c, void *arg)
     while (root->parent != NULL) {
         root = root->parent;
     }
+    lu_ev_helper(c, H_exc_left, 0, NULL, 0);      /* the arms' rule, below */
     for (struct ctx *k = c; k != root; k = k->parent) {
         for (int i = 0; i < k->nlocals + *depth_of(k); i++) {
             lu_ev_drop(k, slots(k)[i]);
         }
         lu_ev_drop(k, k->funcv);
         lu_ev_state_pop(g);
-    }
-    if (root->kernel) {
-        lu_ev_guard(root, OP_GUARD_FRAMES, LU_NOV, 1);
-    }
-    else {
-        /* As the interpreter's unwinding: the frame joins the traceback,
-           and the frame object that made gets the locals when it goes. */
-        lu_v pc = lu_ev_const_i(root, lasti_of(root));
-        lu_ev_helper(root, H_unwind_here, 1, &pc, 0);
     }
     lu_ev_leave_root(root, lu_ev_konst(root, NULL), 1);
 }
@@ -255,9 +250,19 @@ failed(struct ctx *c, lu_v v)
                                    : lu_ev_emit(c, OP_IS, REP_BIT, v, lu_ev_konst(c, NULL), LU_NOV, 0);
 }
 
+/* Each raised arm begins with one of H_exc_fetch, H_exc_here, H_exc_left,
+   which owe what a published call owes on its normal return: when a
+   walker made the frames real, the unit died, or tools came on during the
+   raising call, they fail, and the unit leaves with an error exit at the
+   raising instruction for the interpreter to unwind (helpers.c
+   raised_arm_ok). Their own failure is not taken here. */
 void
 lu_ev_caught(struct ctx *c, lu_v v)
 {
+    if (I(c, v)->op == OP_HELPER
+        && (I(c, v)->imm == H_exc_fetch || I(c, v)->imm == H_exc_here || I(c, v)->imm == H_exc_left)) {
+        return;
+    }
     struct thrown t;
     t.h = catcher(c, NULL, 0, &t.handler, &t.level);
     if (t.h == NULL && c->g->cur >= 0 && leaves_root(c)) {

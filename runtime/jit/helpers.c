@@ -241,11 +241,37 @@ h_exc_push(PyObject *exc)
     return prev != NULL ? prev : Py_NewRef(Py_None);
 }
 
+/* Whether a raised arm may go on in compiled code after the raising call,
+   as GUARD_FRAMES lets the normal return go on: the root frame is still
+   compiled code's (no walker made it real), its unit lives, and no tool
+   came on that the interpreter's unwinding would report to; and, for a
+   root that ends (`leaving`), no frame object waits to take its locals.
+   Else the arm's helper fails and the unit leaves with an error exit. */
+static int
+raised_arm_ok(int leaving)
+{
+    struct lu_task *t = lu_current_task();
+    struct lu_frame *f = (struct lu_frame *)t->ts.current_frame;
+    struct lu_unit *u = t->jit_act != NULL ? t->jit_act->unit : NULL;
+    return f != NULL && f->owner == LU_FRAME_JIT && u != NULL && !__atomic_load_n(&u->dead, __ATOMIC_RELAXED)
+        && (!leaving || f->frame_obj == NULL) && f->code->_co_monitoring == NULL && !t->ts.tracing
+        && t->ts.c_tracefunc == NULL && t->ts.c_profilefunc == NULL
+        && f->code->_co_instrumentation_version
+           == (__atomic_load_n(&t->carrier->poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK);
+}
+
 /* What a helper the unit's handler takes raised, taken from the thread. */
 static PyObject *
 h_exc_fetch(PyObject **argv, intptr_t n)
 {
-    return PyErr_GetRaisedException();
+    return raised_arm_ok(0) ? PyErr_GetRaisedException() : NULL;
+}
+
+/* A raise that leaves a kernel root: whether it may (Py_None), else NULL. */
+static PyObject *
+h_exc_left(PyObject **argv, intptr_t n)
+{
+    return raised_arm_ok(1) ? Py_None : NULL;
 }
 
 /* What a helper raised in the root frame, whose own handler takes it: the
@@ -254,6 +280,9 @@ h_exc_fetch(PyObject **argv, intptr_t n)
 static PyObject *
 h_exc_here(intptr_t lasti)
 {
+    if (!raised_arm_ok(0)) {
+        return NULL;
+    }
     PyThreadState *ts = PyThreadState_Get();
     lu_traceback_here((struct lu_frame *)ts->current_frame, lasti);
     return PyErr_GetRaisedException();
@@ -263,23 +292,6 @@ h_exc_here(intptr_t lasti)
    frame joins its traceback at code unit lasti, and its slots get its
    locals, which the frame object the entry made takes when the frame
    goes (lu_frame_retire), as when the interpreter unwinds it. */
-int lu_jit_sync(struct lu_frame *f);    /* runtime/jit/exit.c */
-
-static void
-h_unwind_here(intptr_t lasti)
-{
-    PyThreadState *ts = PyThreadState_Get();
-    struct lu_frame *f = (struct lu_frame *)ts->current_frame;
-    lu_traceback_here(f, lasti);
-    if (f->frame_obj != NULL) {
-        PyObject *exc = PyErr_GetRaisedException();
-        if (lu_jit_sync(f) < 0) {
-            PyErr_Clear();
-        }
-        PyErr_SetRaisedException(exc);
-    }
-}
-
 /* POP_EXCEPT: exc_info holds prev again (nothing for None). */
 static void
 h_exc_pop(PyObject *prev)
@@ -1778,9 +1790,9 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_fields_new] = { (void *)h_fields_new, "fields_new", REP_OBJ, FX_RAISE, 0 },
     [H_exc_new] = { (void *)h_exc_new, "exc_new", REP_OBJ, FX_RAISE | FX_PY, 1 },
     [H_exc_push] = { (void *)h_exc_push, "exc_push", REP_OBJ, 0, 1 },
-    [H_exc_fetch] = { (void *)h_exc_fetch, "exc_fetch", REP_OBJ, 0, 0 },
-    [H_exc_here] = { (void *)h_exc_here, "exc_here", REP_OBJ, FX_SEEN, 1 },
-    [H_unwind_here] = { (void *)h_unwind_here, "unwind_here", REP_NONE, FX_SEEN, 1 },
+    [H_exc_fetch] = { (void *)h_exc_fetch, "exc_fetch", REP_OBJ, FX_RAISE, 0 },
+    [H_exc_here] = { (void *)h_exc_here, "exc_here", REP_OBJ, FX_RAISE | FX_SEEN, 1 },
+    [H_exc_left] = { (void *)h_exc_left, "exc_left", REP_OBJ, FX_RAISE, 0 },
     [H_exc_pop] = { (void *)h_exc_pop, "exc_pop", REP_NONE, FX_SEEN, 1 },
     [H_gen_new] = { (void *)h_gen_new, "gen_new", REP_OBJ, FX_RAISE, 0 },
     [H_gen_give] = { (void *)h_gen_give, "gen_give", REP_BIT, 0, 3 },
