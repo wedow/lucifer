@@ -121,7 +121,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(INLINE_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN) /* a's inline word at byte imm = b, borrowing b;   \
                                                        imm2: 1 + the words after it in the class's room (0: unknown), \
                                                        LU_STORE_BY_C when the name's kind does not take it */ \
-    X(INLINE_LOAD, REP_OBJ, IF_GUARD)   /* a's inline value at byte imm, while it keeps them; scratch registers only */ \
+    X(INLINE_LOAD, REP_OBJ, IF_GUARD)   /* a's inline value at byte imm, while it keeps them; scratch registers only; \
+                                           imm2 (and _F's, _I's): the class value or 0, and LU_LOAD_KIND */ \
     X(INLINE_LOAD_F, REP_F64, IF_GUARD) /* the same as binary64: an unboxed float's, or an exact float's */ \
     X(INLINE_LOAD_I, REP_I64, IF_GUARD) /* the same as int64: an unboxed int's, or an int's; b (both): the word's object as INLINE_ORIGIN read it, whose number it is when not NULL */ \
     X(INLINE_ORIGIN, REP_OBJ, IF_GUARD) /* a's inline value at byte imm as the object it is, a new reference; NULL when it is unboxed */ \
@@ -155,6 +156,14 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
 #define LU_STORE_INT_RAW ((int64_t)1 << 33)
 #define LU_STORE_FLOAT_RAW ((int64_t)1 << 34)
 #define LU_STORE_WORDS(imm2) ((imm2) & 0xffffffff)
+
+/* INLINE_LOAD[_I/_F]'s imm2: the class value that stands behind a
+   missing word (a pointer, below bit 60), and the kind (LU_FIELD_*) the
+   name had under the version guard, which the guard keeps: a name that
+   leaves int or float takes its class's version back first (attrs.c). */
+#define LU_LOAD_KIND_SHIFT 60
+#define LU_LOAD_KIND(imm2) ((int)((uint64_t)(imm2) >> LU_LOAD_KIND_SHIFT))
+#define LU_LOAD_CLASS_VALUE(imm2) ((imm2) & (((int64_t)1 << LU_LOAD_KIND_SHIFT) - 1))
 
 /* POLL's imm: a loop's back-edge, or a call's start (facts.c may drop it). */
 enum { POLL_LOOP, POLL_CALL };

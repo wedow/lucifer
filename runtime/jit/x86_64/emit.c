@@ -3350,7 +3350,8 @@ cmp_operands(struct asm_ *a, lu_v x, lu_v y, int op)
 /* INLINE_LOAD_F and _I: an inline value as binary64 (int64): an unboxed
    value's raw word, or an exact float's (a compact int's) value, read only
    when the owning thread holds the object (as INLINE_LOAD takes a
-   reference only then). */
+   reference only then). Under a name of its kind the raw word beside any
+   value is the value (attrs.c): a present word is all there is to test. */
 static void
 inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
 {
@@ -3358,6 +3359,27 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
     int fail = guard_exit(a, in);
     int boxed = new_label(a), done = new_label(a), typed = new_label(a), held = new_label(a);
     int r = gpr_of(a, in->a, RDX);
+    if (in->b == LU_NOV && LU_LOAD_KIND(in->imm2) == (is_int ? LU_FIELD_INT : LU_FIELD_FLOAT)) {
+        rex(a, 0, 0, 0, r);
+        b1(a, 0xF6);
+        modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
+        b1(a, LU_ATTRS_IN_DICT >> 8);
+        jcc(a, CC_NE, fail);
+        cmp_mi(a, 1, r, (int32_t)in->imm, 0);
+        jcc(a, CC_E, fail);                     /* absent */
+        int loc = in->loc;                      /* read straight into the value's register */
+        if (is_int) {
+            int t = loc >= 0 && loc < LU_LOC_FPR ? loc : RAX;
+            load(a, t, r, (int32_t)in->imm + 8);
+            def_gpr(a, v, t);
+        }
+        else {
+            int x = loc >= LU_LOC_FPR ? loc - LU_LOC_FPR : 0;
+            sse_rm(a, 0xF2, 0x10, x, r, (int32_t)in->imm + 8);     /* movsd, the binary64 */
+            def_fpr(a, v, x);
+        }
+        return;
+    }
     if (in->b != LU_NOV) {
         /* The object the word held is the number, and held already. */
         to_gpr(a, RAX, in->b);
@@ -4595,9 +4617,11 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
         jcc(a, CC_NE, fail);
         int unboxed = new_label(a), done = new_label(a);
+        int64_t class_value = LU_LOAD_CLASS_VALUE(in->imm2);
+        int objects = LU_LOAD_KIND(in->imm2) == LU_FIELD_OBJECT;  /* no marker under an object name (attrs.c) */
         load(a, RAX, r, (int32_t)in->imm);
         test_rr(a, RAX, RAX);
-        if (in->imm2 != 0) {
+        if (class_value != 0) {
             /* None of its own, while its values are still in line (a move to
                the dict sets the flag before it clears the words, attrs.c):
                the class's value, immortal (eval_attr.c). */
@@ -4608,20 +4632,28 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
             b1(a, LU_ATTRS_IN_DICT >> 8);       /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
             jcc(a, CC_NE, fail);
-            mov_ri(a, RAX, in->imm2);
+            mov_ri(a, RAX, class_value);
             jmp(a, done);
             bind(a, own);
         }
         else {
             jcc(a, CC_E, fail);
         }
-        alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
-        jcc(a, CC_BE, unboxed);
+        if (!objects) {
+            alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+            jcc(a, CC_BE, unboxed);
+        }
+        /* The reference, a step of its own. */
         if (in->flags & INS_OWNED) {
             incref_owned_or_exit(a, RAX, fail);
         }
         else {
             owned_or_exit(a, RAX, fail);        /* borrowed (opt.c): only this thread frees it */
+        }
+        if (objects) {
+            bind(a, done);
+            def_gpr(a, v, RAX);
+            return 0;
         }
         cold_begin(a);
         bind(a, unboxed);

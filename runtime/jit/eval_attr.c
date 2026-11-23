@@ -499,7 +499,10 @@ load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr
                it the class's, so a word with none reads as it. */
             lu_ev_guard_version(c, owner, version);
             v = lu_ev_emit(c, OP_INLINE_LOAD, REP_OBJ, owner, LU_NOV, LU_NOV, index);
-            I(c, v)->imm2 = (int64_t)(intptr_t)descr;
+            PyTypeObject *t = owner_class(c, owner, version);
+            int kind = t != NULL ? lu_inline_kind_at(t, index) : LU_FIELD_ANY;
+            Py_XDECREF(t);
+            I(c, v)->imm2 = (int64_t)(intptr_t)descr | (int64_t)kind << LU_LOAD_KIND_SHIFT;
             I(c, v)->fs = lu_ev_exit_fs(c);
             replace_owner(c, lu_ev_own(c, v), LU_NOV);
             break;
