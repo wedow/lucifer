@@ -55,3 +55,22 @@ Code bytes per unit grow by the stub (about 900 bytes once per unit that release
 Found on the way, filed as lu-ex68: a tuple compiled code keeps virtual releases its items first to last, CPython last to first (on master too).
 
 Left for alloc_escape (target 60): the stub's instance path is about 160 instructions (checks, the scans, the volatile saves around mi_free); the list store's lock (lock elision's), new_object's 48 and the inline stores' 50 (stage 2).
+
+## 2026-11-23: stage 2 (items 1-2), boxes and new_object
+
+Ints and floats are none of the collector's: lu_object_new counts only GC types, and the box's in-line path counts nothing (its alloc_count is -X lucifer_jit_stats only), so there was no accounting to amortize. The box now falls through on a freelist hit (the page pop and the negative sign moved out of line), writes the tag as an immediate and the digit from the value's own register, and leaves the object in RCX instead of moving it: BOX_INT 32 -> 29 on listidx (window NOPs included), the floor for a freelist pop and _Py_NewReference's five header words. new_object zeroes only the inline value words (a raw word is read only under its value word's marker, written after it) besides the preheader, slots and order record, takes the type's reference without a NULL test and with the thread id it already holds, and leaves the result unchecked on its in-line path: 48 -> 41 on alloc_escape.
+
+| row | instructions after stage 1 | after | cycles (one lease, min of 3) |
+|---|---|---|---|
+| alloc_escape | 410 | 401 | 170 -> 162 |
+| listidx | 221 | 220 | 100 -> 99 |
+| floatstore | 184 | 184 | 93 -> 94 |
+| isinst | 496 | 496 | 149 -> 147 |
+| loads, tupunpack | 162, 125 | same | 41 -> 35, 25 -> 28 |
+
+New rows, traced once on this build (instructions per inner iteration):
+- tupret (a, b = pair(j), pair too large to inline): 64, all compiled: the tuple stays virtual across the call's return.
+- shortlist (for v in [i, j, 3]): 53 for most iterations, 256 every fourth (the list's array from the allocator).
+- smalldict ({'a': i, 'b': j}; d['b']): 1484, 1191 in C: lu_dict_insert 185, probe_keys 171, dict_dealloc 111, probe_unicode 107, new_keys 68, lu_dict_find_lockfree 67, h_build_map 66.
+- boundm (m = b.get; m()): 995, 700 in C: type_lookup 88, lu_getattr_native 80, lu_attr_lookup 68, lu_gc_alloc 57, lu_inline_index 53, lu_fields_clear 51, lu_object_free 48, lu_object_new 45, PyMethod_New 37: the bound method is made and freed in C every time.
+- strslice (out[j] = text[a:b]): 752, 478 in C: slice_unpack 96, PyUnicode_FromKindAndData 78, lu_object_new 61, lu_slice_native 55.

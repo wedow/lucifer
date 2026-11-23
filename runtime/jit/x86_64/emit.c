@@ -2826,20 +2826,22 @@ alloc_count_before(struct asm_ *a, lu_v v)
     bind(a, skip);
 }
 
-/* A box of in->a's raw value, in RAX, as PyLong_FromLongLong and
+/* A box of in->a's raw value, in RCX, as PyLong_FromLongLong and
    PyFloat_FromDouble make it: a small int from the cache, a one-digit int
-   or a float from the carrier's freelist, else from its mimalloc object
-   heap, with the header _Py_NewReference gives it. Anything else is C's,
-   which keeps the registers: a wider int, a page with no block at hand, or
-   a hook that sees allocations. */
+   or a float from the carrier's freelist (its type stays), else from its
+   mimalloc object heap, with the header _Py_NewReference gives it. Ints
+   and floats are none of the collector's: nothing counts them. Anything
+   else is C's, which keeps the registers: a wider int, a page with no
+   block at hand, or a hook that sees allocations or births. */
 static void
 emit_box(struct asm_ *a, struct lu_ins *in)
 {
     int is_int = in->op == OP_BOX_INT, slow = new_label(a), done = new_label(a);
     int32_t list = is_int ? (int32_t)offsetof(struct lu_entry, free_ints) : (int32_t)offsetof(struct lu_entry, free_floats);
-    int x = 0;
+    int x = 0, r = -1;
     if (is_int) {
-        int fresh = new_label(a), r = gpr_of(a, in->a, RDX);
+        int fresh = new_label(a);
+        r = gpr_of(a, in->a, RDX);
         lea(a, RCX, r, LU_NSMALLNEGINTS);
         alu_ri(a, ALU_CMP, RCX, LU_NSMALLNEGINTS + LU_NSMALLPOSINTS);
         jcc(a, CC_AE, fresh);                   /* unsigned: below the cache too */
@@ -2848,7 +2850,7 @@ emit_box(struct asm_ *a, struct lu_ins *in)
         modrm_rr(a, RCX, RCX);
         b4(a, (int32_t)sizeof(PyLongObject));  /* imul rcx, rcx, size */
         mov_ri(a, RAX, (int64_t)(intptr_t)&_PyRuntime.singletons.small_ints[0]);
-        alu_rr(a, ALU_ADD, RAX, RCX);
+        alu_rr(a, ALU_ADD, RCX, RAX);
         jmp(a, done);
         bind(a, fresh);
         alloc_count(a, in);
@@ -2874,12 +2876,17 @@ emit_box(struct asm_ *a, struct lu_ins *in)
     b1(a, 0x83);
     modrm_mem(a, ALU_SUB, RAX, list + (int32_t)offsetof(struct lu_freelist, n));
     b1(a, 1);                                   /* sub dword [rax+n], 1 */
-    jmp(a, header);
+    cold_begin(a);
     bind(a, page);                              /* a block of lu_object_new's size; its type too */
     pop_block(a, LU_HEAP_OBJECT, is_int ? offsetof(PyLongObject, long_value.ob_digit) + sizeof(digit)
                                         : sizeof(PyFloatObject), RCX, RDX, slow);
     mov_ri(a, R11, (int64_t)(intptr_t)(is_int ? &PyLong_Type : &PyFloat_Type));
     store(a, RCX, offsetof(PyObject, ob_type), R11);
+    if (r == RDX) {
+        to_gpr(a, RDX, in->a);                  /* again: RDX held the page */
+    }
+    jmp(a, header);
+    cold_end(a);
     bind(a, header);
     thread_id(a, R11);
     store(a, RCX, offsetof(PyObject, ob_tid), R11);
@@ -2889,21 +2896,25 @@ emit_box(struct asm_ *a, struct lu_ins *in)
     store32_mi(a, RCX, offsetof(PyObject, ob_ref_local), 1);
     store_mi(a, RCX, offsetof(PyObject, ob_ref_shared), 0);
     if (is_int) {
-        int positive = new_label(a);
-        to_gpr(a, RAX, in->a);                  /* again: RDX held the page */
-        mov_ri(a, R11, ((uintptr_t)1 << _PyLong_NON_SIZE_BITS) | 0);
-        test_rr(a, RAX, RAX);
-        jcc(a, CC_NS, positive);
+        /* One digit and the sign: a non-negative value is its own digit. */
+        int negative = new_label(a), tagged = new_label(a);
+        test_rr(a, r, r);
+        jcc(a, CC_S, negative);
+        store_mi(a, RCX, offsetof(PyLongObject, long_value.lv_tag), (int32_t)(((uintptr_t)1 << _PyLong_NON_SIZE_BITS) | 0));
+        op_rm(a, 0, 0x89, r, RCX, offsetof(PyLongObject, long_value.ob_digit));
+        bind(a, tagged);
+        cold_begin(a);
+        bind(a, negative);
+        mov_rr(a, RAX, r);
         unary(a, 3, RAX);                       /* neg rax */
-        mov_ri(a, R11, ((uintptr_t)1 << _PyLong_NON_SIZE_BITS) | 2);
-        bind(a, positive);
-        store(a, RCX, offsetof(PyLongObject, long_value.lv_tag), R11);
+        store_mi(a, RCX, offsetof(PyLongObject, long_value.lv_tag), (int32_t)(((uintptr_t)1 << _PyLong_NON_SIZE_BITS) | 2));
         op_rm(a, 0, 0x89, RAX, RCX, offsetof(PyLongObject, long_value.ob_digit));
+        jmp(a, tagged);
+        cold_end(a);
     }
     else {
         sse_rm(a, 0xF2, 0x11, x, RCX, offsetof(PyFloatObject, ob_fval));
     }
-    mov_rr(a, RAX, RCX);
     cold_begin(a);
     bind(a, slow);
     save_volatile(a);
@@ -2916,6 +2927,7 @@ emit_box(struct asm_ *a, struct lu_ins *in)
         call_abs(a, (void *)lu_jit_box_float);
     }
     restore_volatile(a);
+    mov_rr(a, RCX, RAX);
     jmp(a, done);
     cold_end(a);
     bind(a, done);
@@ -3034,7 +3046,7 @@ emit_build(struct asm_ *a, lu_v v)
    a reference to its type. The helper takes the rest, as for builds. 0
    when the allocation is the helper's alone (a block too large to pop). */
 static int
-emit_new_object(struct asm_ *a, lu_v v)
+emit_new_object(struct asm_ *a, lu_v v, int err)
 {
     struct lu_ins *in = I(a, v);
     PyTypeObject *tp = (PyTypeObject *)(intptr_t)I(a, in->args[0])->imm;
@@ -3057,9 +3069,14 @@ emit_new_object(struct asm_ *a, lu_v v)
     b1(a, 0x83);
     modrm_mem(a, ALU_ADD, RAX, offsetof(struct lu_entry, gc_alloc_count));
     b1(a, 1);                                   /* add dword [rax+count], 1 */
+    /* Zero: the preheader, the slots, each inline value word (a raw word
+       is read only under its value word's marker, which a store writes
+       after it) and the order record. */
+    size_t values = pre + (size_t)tp->tp_basicsize, raw = values + (size_t)room * LU_INLINE_STRIDE * sizeof(PyObject *);
     for (size_t off = 0; off < size; off += 8) {
-        if (off < pre || off >= pre + sizeof(PyObject)) {
-            store_mi(a, RDX, (int32_t)off, 0);  /* the preheader, slots and inline values */
+        int raw_word = off >= values && off < raw && (off - values) % (LU_INLINE_STRIDE * sizeof(PyObject *)) != 0;
+        if ((off < pre || off >= pre + sizeof(PyObject)) && !raw_word) {
+            store_mi(a, RDX, (int32_t)off, 0);
         }
     }
     if (pre) {
@@ -3072,16 +3089,39 @@ emit_new_object(struct asm_ *a, lu_v v)
     store_mi(a, RDX, offsetof(PyObject, ob_ref_shared), 0);
     mov_ri(a, RBX, (int64_t)(intptr_t)tp);
     store(a, RDX, offsetof(PyObject, ob_type), RBX);
-    incref(a, RBX);                             /* clobbers RAX, RCX */
+    /* The instance's reference to its type, as incref with R11 still the
+       thread's id: the type is no NULL. */
+    int typed = new_label(a), shared = new_label(a);
+    load32(a, RCX, RBX, offsetof(PyObject, ob_ref_local));
+    rex(a, 0, 0, 0, RCX);
+    b1(a, 0x83);
+    modrm_rr(a, ALU_ADD, RCX);
+    b1(a, 1);                                   /* add ecx, 1 */
+    jcc(a, CC_E, typed);                        /* immortal */
+    cmp_rm(a, R11, RBX, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, shared);
+    op_rm(a, 0, 0x89, RCX, RBX, offsetof(PyObject, ob_ref_local));
+    bind(a, typed);
     mov_rr(a, RAX, RDX);
     cold_begin(a);
+    bind(a, shared);
+    b1(a, 0xF0);
+    rex(a, 1, 0, 0, RBX);
+    b1(a, 0x83);
+    modrm_mem(a, ALU_ADD, RBX, offsetof(PyObject, ob_ref_shared));
+    b1(a, 1 << _Py_REF_SHARED_SHIFT);
+    jmp(a, typed);
     bind(a, slow);
     mov_ri(a, RDI, (int64_t)(intptr_t)tp);
     call_abs(a, lu_helpers[in->imm].fn);
+    if (err >= 0) {
+        test_rr(a, RAX, RAX);
+        jcc(a, CC_E, err);                      /* only C's object can be missing */
+    }
     jmp(a, done);
     cold_end(a);
     bind(a, done);
-    return 1;
+    return 2;
 }
 
 static int
@@ -3689,12 +3729,12 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             jmp(a, done);
             bind(a, made);
             emit_box(a, in);
-            def_gpr(a, v, RAX);
+            def_gpr(a, v, RCX);
             bind(a, done);
             return 0;
         }
         emit_box(a, in);
-        def_gpr(a, v, RAX);
+        def_gpr(a, v, RCX);
         return 0;
     case OP_ADD_I: case OP_SUB_I: case OP_MUL_I: case OP_AND_I: case OP_OR_I: case OP_XOR_I: {
         /* The exit first: under stress it emits a dec, which would clobber OF.
@@ -4585,7 +4625,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             pub = err >= 0 ? a->exits[a->nexits - 1].d : published(a, in);
         }
         int inline_ok = in->imm == H_build_tuple || in->imm == H_build_list ? emit_build(a, v)
-            : in->imm == H_new_object ? emit_new_object(a, v) : 0;
+            : in->imm == H_new_object ? emit_new_object(a, v, err) : 0;
         int lacks = in->imm == H_dict_lacks || in->imm == H_str_char ? new_label(a) : -1;
         if (in->imm == H_str_char) {
             /* A latin-1 code point's str is the runtime's singleton, which
@@ -4620,7 +4660,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             b1(a, 0xFF);                        /* cmp eax, -1 */
             jcc(a, CC_E, err);
         }
-        else if (err >= 0 && h->rep == REP_OBJ) {
+        else if (err >= 0 && h->rep == REP_OBJ && inline_ok != 2) {   /* 2: the result checked */
             test_rr(a, RAX, RAX);
             jcc(a, CC_E, err);
         }
