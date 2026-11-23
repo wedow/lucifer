@@ -140,11 +140,15 @@ A load site whose word holds a str half the time (.scratch/mixed.py): 116 guard 
 
 C and interpreter int stores under int-first names, by value (a temporary counter in take_kind; AWFY at 20 iterations, the idiom rows at 300): Richards small 7885, other one-digit 2982, wider 32; DeltaBlue 8733 / 714 / 40; Havlak 27047 / 8924 / 5317522; CD 699 / 2160 / 96; Bounce 3577 / 4437 / 34; Json 4973 / 1945 / 35; loads 438 / 20; oo 1944 / 2023; stores 2932 / 106. Cached small ints are 72% of Richards', 92% of DeltaBlue's, 24% of CD's, 44% of Bounce's, 72% of Json's; Havlak's are almost all wider than one digit and want a look of their own. Nothing built yet.
 
+## 2026-11-23: H1, the in-dict test skipped only while serial
+
+A unit running on another thread, built for a class before the class was marked, could be handed a reassigned instance and pass its type test (a known class's version guard becomes a dependency and the per-object test is the type pointer) before it notices it is dead. So the elision of stage (d) applies only to units built while serial: facts.c gives inline loads and stores INS_UNLOCKED there (with the LU_DEP_SERIAL dependency, and INS_RECHECK where code may have run since the unit was last known alive), and every other inline load and store tests the flag first (two instructions). Serial is enough: no other thread exists to reassign an instance and publish it; a reassignment on the same thread happens inside a call, whose version change kills the unit before its next elided access (that access rechecks, as unlocked stores do); at the switch to parallel the first task is out of the unit, inside a published call, or detached, so it rechecks before any elided access. Dumps show it: the loads row's four inline loads are marked serial; in attr_class_assign_threads (a reader thread loading and storing high-index names over a list a writer extends with reassigned small-room instances, 20 rounds, in the handoff lanes too) all 40 of the reader's inline loads and stores test the flag first. The five rows did not move.
+
 ## State (keep current)
 
-Branch luc-eog8 rebased on origin/master 0b2fc137 (only ticket commits moved there). Code commits: (a), its review fixes, (b), (c), loads check the word (F1, F2), stage (d), the G1 fix (c4196ac7). Gated after the G1 fix: 51 focused programs in plain, jit, jit-deopt (jit_class_assign_room among them); jitcheck 0 failing; the kinds programs and jit_threads in handoff and handoff:2.
+Branch luc-eog8 rebased on origin/master 0b2fc137 (only ticket commits moved there). Code commits: (a), its review fixes, (b), (c), loads check the word (F1, F2), stage (d), the G1 fix (c4196ac7), the H1 fix (e696295d). Gated after the H1 fix: 52 focused programs in plain, jit, jit-deopt (jit_class_assign_room and attr_class_assign_threads among them); jitcheck 0 failing; the kinds programs and jit_threads in handoff and handoff:2.
 
-Nothing running. Next step: report; the G1 fix goes back to review, then lands. Then stage (e): C and interpreter stores of a cached small int under an int-first name write the marker and the raw word (numbers above).
+In progress: stage (e): C and interpreter stores of a cached small int under an int-first name write the marker and the raw word (numbers above).
 
 Nothing running. Next step: report and wait for review.
 
