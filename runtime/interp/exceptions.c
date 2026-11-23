@@ -41,7 +41,7 @@ static const struct exc_layout layouts[] = {
 };
 
 static const struct exc_layout *
-layout_of(PyTypeObject *tp)
+layout_scan(PyTypeObject *tp)
 {
     for (size_t i = 0; i < sizeof layouts / sizeof layouts[0]; i++) {
         if (PyType_IsSubtype(tp, (PyTypeObject *)*layouts[i].root)) {
@@ -49,6 +49,14 @@ layout_of(PyTypeObject *tp)
         }
     }
     return NULL;
+}
+
+/* A type whose instances end at the head (sized at startup, below) has no
+   layout: no scan of the roots for each instance made, cleared or freed. */
+static const struct exc_layout *
+layout_of(PyTypeObject *tp)
+{
+    return tp->tp_basicsize == sizeof(PyBaseExceptionObject) ? NULL : layout_scan(tp);
 }
 
 static PyObject **
@@ -1118,7 +1126,7 @@ void
 lu_exc_init(void)
 {
     for (PyTypeObject *const *tp = lu_exception_types; *tp != NULL; tp++) {
-        const struct exc_layout *l = layout_of(*tp);
+        const struct exc_layout *l = layout_scan(*tp);
         (*tp)->tp_basicsize = sizeof(PyBaseExceptionObject)
             + (l != NULL ? l->nwords * sizeof(PyObject *) : 0);
         (*tp)->tp_flags |= Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;

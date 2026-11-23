@@ -465,6 +465,9 @@ raised_value(PyObject *exc)
     if (PyExceptionInstance_Check(exc)) {
         return Py_NewRef(exc);
     }
+    if (plain_exception((PyTypeObject *)exc)) {
+        return create_exception(exc, NULL);     /* BaseException's own construction, as C makes it */
+    }
     PyObject *value = PyObject_CallNoArgs(exc);
     if (value != NULL && !PyExceptionInstance_Check(value)) {
         PyErr_Format(PyExc_TypeError, "calling %R should have returned an instance of BaseException, "
