@@ -123,16 +123,22 @@ drops_unseen(struct ctx *k, int pc, PyTypeObject *t)
    exception leaves the unit or is not to be taken here: a generator's
    frame is on the way, or a frame that is not the kernel's would show in
    a traceback that someone may read (`fresh`: the unit made the
-   exception and the handler drops it unseen). */
+   exception and the handler drops it unseen). The root frame, which is
+   real, may be such a frame when its own handler takes the exception: its
+   traceback entry is made as the interpreter makes it (h_exc_here). */
 static struct ctx *
 catcher(struct ctx *c, PyTypeObject *t, int fresh, int *handler, int *level)
 {
     for (struct ctx *k = c; k != NULL; k = k->parent) {
         int lasti;
-        if (lu_ev_in_gen(k) || (!fresh && !k->kernel)) {
+        if (lu_ev_in_gen(k)) {
             return NULL;
         }
-        if (lu_exception_handler(k->code, k->pc, level, handler, &lasti)) {
+        int has = lu_exception_handler(k->code, k->pc, level, handler, &lasti);
+        if (!fresh && !k->kernel && !(has && k->parent == NULL)) {
+            return NULL;
+        }
+        if (has) {
             return !lasti && (fresh ? drops_unseen(k, *handler, t) : lu_jit_catches(k->code, *handler)) ? k : NULL;
         }
     }
@@ -173,7 +179,8 @@ static void
 raised_arm(struct ctx *c, void *arg)
 {
     struct thrown *t = arg;
-    lu_v exc = lu_ev_helper(c, H_exc_fetch, 0, NULL, 0);
+    lu_v pc = lu_ev_const_i(c, t->h->pc);
+    lu_v exc = t->h->kernel ? lu_ev_helper(c, H_exc_fetch, 0, NULL, 0) : lu_ev_helper(c, H_exc_here, 1, &pc, 0);
     throw_to(c, t->h, t->handler, t->level, exc);
 }
 
@@ -195,6 +202,14 @@ lu_ev_raise(struct ctx *c)
     PyObject *k = c->oparg == 1 ? lu_ev_const(c, lu_ev_peek(c, 1)) : NULL;
     int handler, level;
     struct ctx *h = plain_class(k) ? catcher(c, (PyTypeObject *)k, 1, &handler, &level) : NULL;
+    if (h == NULL && (c->oparg == 1 || c->oparg == 2)) {
+        /* Raised as RAISE_VARARGS raises it: a handler the unit holds
+           takes it (lu_ev_caught), else the unit leaves with it. */
+        lu_v args[2] = { lu_ev_peek(c, c->oparg), c->oparg == 2 ? lu_ev_peek(c, 1) : lu_ev_konst(c, LU_MISSING) };
+        lu_ev_helper(c, H_raise, 2, args, c->oparg);
+        lu_ev_side_exit(c, EXIT_SIDE);      /* never: h_raise always raises */
+        return 0;
+    }
     if (h == NULL) {
         lu_ev_side_exit(c, EXIT_SIDE);      /* the interpreter raises */
         return 0;

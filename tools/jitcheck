@@ -40,6 +40,10 @@ require that a count of the tier's does not grow with the iterations:
   caught tests/kernel/jit_caught.py, whose hot code raises exceptions that
          handlers in the same compiled code take: error exits, and exits
          at a return for the frame object the traceback made.
+  userexc tests/kernel/jit_user_raises.py, whose hot loop drops exceptions
+         that user code's own handlers take (a dict miss, an index, getattr,
+         next(), raise, a call's): error and side exits. Each handler runs
+         in compiled code.
   compiled  tests/kernel/jit_compiled_calls.py, whose hot calls are of
          functions it cannot inline: direct calls (compiled code entered
          from C). Compiled code makes them itself.
@@ -282,6 +286,7 @@ GROWTH = {
     'quiet': ('jit_quiet_misses.py', r'jit: entries .* error (\d+)', 0),
     'raised': ('jit_raised.py', r'jit: entries .* side (\d+) error (\d+) frame', 0),
     'caught': ('jit_caught.py', r'jit: entries .* error (\d+) frame (\d+)', 0),
+    'userexc': ('jit_user_raises.py', r'jit: entries .* side (\d+) error (\d+)', 0, ('-X', 'lucifer_jit=on')),
     'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
     'ccalls': ('jit_c_calls.py', r'direct calls (\d+)', 0),
     'shapes': ('jit_call_shapes.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
@@ -381,7 +386,7 @@ def qualnames(program):
 # stage docs/design/jit-architecture.md section 11 lists as not built
 # (entries by shape for calls that are not inlined, handlers and generators
 # inside a unit, polymorphic sites). Their programs' output is still checked.
-NOT_BUILT = frozenset("""calls raised caught shapes classes objects
+NOT_BUILT = frozenset("""calls raised userexc shapes classes objects
 iterators slices guards gens order""".split())
 
 

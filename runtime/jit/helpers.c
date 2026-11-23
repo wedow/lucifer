@@ -248,6 +248,17 @@ h_exc_fetch(PyObject **argv, intptr_t n)
     return PyErr_GetRaisedException();
 }
 
+/* What a helper raised in the root frame, whose own handler takes it: the
+   frame joins its traceback at code unit lasti, as the interpreter's
+   unwinding does, and the exception is taken from the thread. */
+static PyObject *
+h_exc_here(intptr_t lasti)
+{
+    PyThreadState *ts = PyThreadState_Get();
+    lu_traceback_here((struct lu_frame *)ts->current_frame, lasti);
+    return PyErr_GetRaisedException();
+}
+
 /* POP_EXCEPT: exc_info holds prev again (nothing for None). */
 static void
 h_exc_pop(PyObject *prev)
@@ -1743,6 +1754,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_exc_new] = { (void *)h_exc_new, "exc_new", REP_OBJ, FX_RAISE | FX_PY, 1 },
     [H_exc_push] = { (void *)h_exc_push, "exc_push", REP_OBJ, 0, 1 },
     [H_exc_fetch] = { (void *)h_exc_fetch, "exc_fetch", REP_OBJ, 0, 0 },
+    [H_exc_here] = { (void *)h_exc_here, "exc_here", REP_OBJ, FX_SEEN, 1 },
     [H_exc_pop] = { (void *)h_exc_pop, "exc_pop", REP_NONE, FX_SEEN, 1 },
     [H_gen_new] = { (void *)h_gen_new, "gen_new", REP_OBJ, FX_RAISE, 0 },
     [H_gen_give] = { (void *)h_gen_give, "gen_give", REP_BIT, 0, 3 },

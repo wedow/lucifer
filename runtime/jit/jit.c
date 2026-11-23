@@ -1468,14 +1468,14 @@ handles(struct lu_deopt *d, int k)
 
 /* The handler (a code unit of frame k's code) that takes an error exit's
    exception in the unit's build when told to (eval_exc.c): frame k's, when
-   every frame from the innermost to k is the kernel's and none a
-   generator's; else -1. */
+   every frame from the innermost to k is the kernel's, or k is the root,
+   whose traceback entry the unit makes, and none a generator's; else -1. */
 static int
 kernel_handler(struct lu_deopt *d, int k)
 {
     for (int i = k; i < d->nframes; i++) {
         PyCodeObject *co = lu_deopt_frame(d, i)->code;
-        if (!(co->co_flags & LU_CO_KERNEL) || (co->co_flags & LU_CO_GENERATORS)) {
+        if ((!(co->co_flags & LU_CO_KERNEL) && !(i == 0 && k == 0)) || (co->co_flags & LU_CO_GENERATORS)) {
             return -1;
         }
     }

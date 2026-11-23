@@ -334,7 +334,7 @@ lu_ev_helper(struct ctx *c, int id, int nargs, const lu_v *args, int drop)
         I(c, v)->fs = lu_ev_exit_fs(c);
     }
     g->observed |= (h->fx & (FX_PY | FX_SEEN)) != 0;
-    if ((h->fx & FX_RAISE) && h->rep == REP_OBJ && c->kernel) {
+    if ((h->fx & FX_RAISE) && h->rep == REP_OBJ && (c->kernel || c->parent == NULL)) {
         lu_ev_caught(c, v);
     }
     if (h->fx & FX_DECLINES) {
