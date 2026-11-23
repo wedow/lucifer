@@ -119,7 +119,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(ATTR_LOAD, REP_OBJ, IF_GUARD)   /* a.name from its managed dict: imm version, imm2 entry; c: the name */ \
     X(ATTR_STORE, REP_NONE, IF_RAISE | IF_EFFECT | IF_CALL)     /* a.(name c) = b, borrowing b */ \
     X(INLINE_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN) /* a's inline word at byte imm = b, borrowing b;   \
-                                                       imm2: 1 + the words after it in the class's room (0: unknown) */ \
+                                                       imm2: 1 + the words after it in the class's room (0: unknown), \
+                                                       LU_STORE_BY_C when the name's kind does not take it */ \
     X(INLINE_LOAD, REP_OBJ, IF_GUARD)   /* a's inline value at byte imm, while it keeps them; scratch registers only */ \
     X(INLINE_LOAD_F, REP_F64, IF_GUARD) /* the same as binary64: an unboxed float's, or an exact float's */ \
     X(INLINE_LOAD_I, REP_I64, IF_GUARD) /* the same as int64: an unboxed int's, or an int's; b (both): the word's object as INLINE_ORIGIN read it, whose number it is when not NULL */ \
@@ -144,6 +145,16 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(CHECK_LIVE, REP_NONE, IF_GUARD | IF_EFFECT)   /* leaves at fs, as a poll does, once the unit is dead */ \
     X(COUNT_OUT, REP_NONE, IF_GUARD | IF_EFFECT)    /* counts a call the budget left out of line, the unit's   \
                                                        outs[imm]: leaves at fs at the unit's hot_calls (jit.c) */
+
+/* INLINE_STORE[_I/_F]'s imm2 bit: the value is not of a kind the name's
+   (attrs.c LU_FIELD_*) takes in line, so C stores it and keeps the kind. */
+#define LU_STORE_BY_C ((int64_t)1 << 32)
+/* An object store's imm2 bits under an int (float) name: the store takes
+   only an exact int that fits (an exact float) in line, and writes its raw
+   word beside it; any other value is C's. */
+#define LU_STORE_INT_RAW ((int64_t)1 << 33)
+#define LU_STORE_FLOAT_RAW ((int64_t)1 << 34)
+#define LU_STORE_WORDS(imm2) ((imm2) & 0xffffffff)
 
 /* POLL's imm: a loop's back-edge, or a call's start (facts.c may drop it). */
 enum { POLL_LOOP, POLL_CALL };

@@ -351,6 +351,18 @@ int lu_inline_store(PyObject *obj, Py_ssize_t offset, PyObject *v);
    int64: no object is made. */
 int lu_inline_store_f(PyObject *obj, Py_ssize_t offset, double v);
 int lu_inline_store_i(PyObject *obj, Py_ssize_t offset, int64_t v);
+/* What every instance of a class holds under one name (attrs.c), which
+   only moves up: unseen, then an int (exact, fits int64 but INT64_MIN) or a float
+   (exact), then any object. Under an int or float name the raw word
+   beside a value word that holds a number holds its value, whoever
+   stored it. */
+enum { LU_FIELD_UNSEEN, LU_FIELD_INT, LU_FIELD_FLOAT, LU_FIELD_OBJECT };
+/* The kind of the name whose word is at byte `offset` of tp's instances. */
+int lu_inline_kind_at(PyTypeObject *tp, Py_ssize_t offset);
+/* Whether every word of obj agrees with its name's kind (tests). */
+int lu_inline_kinds_ok(PyObject *obj);
+/* The class whose current version is `version`, or NULL (runtime/prim/type.c). */
+PyTypeObject *lu_type_of_version(unsigned int version);
 /* A new reference to the value word at `word` (an instance's, read
    without its lock): NULL when absent or when a try fails; an unboxed
    float gets its box. */

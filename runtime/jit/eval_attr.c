@@ -232,6 +232,31 @@ store_room(struct ctx *c, lu_v st, PyTypeObject *t, uint16_t index)
     I(c, st)->imm2 = room > 0 ? room : 0;
 }
 
+/* Whether an inline store into class t's word at `index` must go to C,
+   which keeps the name's kind (attrs.c): an object store unless the name
+   holds any object already, a raw int or float unless it holds that kind.
+   A kind only moves toward object, and every store taken in line here
+   stays right when it does. t NULL: not known, C. */
+static void
+store_kind(struct ctx *c, lu_v st, PyTypeObject *t, uint16_t index)
+{
+    int op = I(c, st)->op;
+    int k = t != NULL ? lu_inline_kind_at(t, index) : LU_FIELD_UNSEEN;
+    if (op == OP_INLINE_STORE && k == LU_FIELD_INT) {
+        I(c, st)->imm2 |= LU_STORE_INT_RAW;
+        return;
+    }
+    if (op == OP_INLINE_STORE && k == LU_FIELD_FLOAT) {
+        I(c, st)->imm2 |= LU_STORE_FLOAT_RAW;
+        return;
+    }
+    int in_line = op == OP_INLINE_STORE ? k == LU_FIELD_OBJECT
+                : op == OP_INLINE_STORE_I ? k == LU_FIELD_INT : k == LU_FIELD_FLOAT;
+    if (!in_line) {
+        I(c, st)->imm2 |= LU_STORE_BY_C;
+    }
+}
+
 /* Whether no instruction from `from` on publishes its state: an object
    made at `from` has reached no other thread. */
 static int
@@ -286,6 +311,7 @@ lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o, int id)
                                     : lu_ev_emit(c, OP_INLINE_STORE, REP_NONE, obj, lu_ev_val(c, o->f[i + 1]), LU_NOV, index);
             I(c, st)->fs = lu_ev_exit_fs(c);
             store_room(c, st, tp, index);
+            store_kind(c, st, tp, index);
             if (fresh) {
                 I(c, st)->flags |= INS_FRESH;
             }
@@ -655,7 +681,12 @@ store_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *desc
         lu_v st = raw != LU_NOV ? lu_ev_emit(c, raw_op, REP_NONE, owner, raw, LU_NOV, index)
                                 : lu_ev_emit(c, OP_INLINE_STORE, REP_NONE, owner, lu_ev_val(c, v), LU_NOV, index);
         I(c, st)->fs = lu_ev_exit_fs(c);
-        store_room(c, st, lu_ev_type(c, owner), index);
+        PyTypeObject *t = lu_ev_type(c, owner);
+        if (t == NULL) {
+            t = lu_type_of_version(version);    /* the class the version guard holds to */
+        }
+        store_room(c, st, t, index);
+        store_kind(c, st, t, index);
         c->g->observed = 1;     /* the value it replaces is released */
     }
     else if (op == STORE_ATTR_SLOT) {

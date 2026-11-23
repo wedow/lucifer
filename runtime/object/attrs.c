@@ -52,6 +52,7 @@ struct lu_shared_names {
     Py_ssize_t count;               /* names[0..count) are set and never change */
     Py_ssize_t usable;              /* count + usable: a new instance's room, which never grows */
     int fixed;                      /* every instance's room is capacity */
+    uint8_t *kinds;                 /* per name, LU_FIELD_*: what every instance holds there (after names) */
     PyObject *names[];
 };
 
@@ -193,11 +194,12 @@ lu_inline_values_init(PyTypeObject *tp)
     }
     Py_ssize_t capacity = PyDict_GET_SIZE(seen) > ROOM ? PyDict_GET_SIZE(seen) : ROOM;
     Py_DECREF(seen);
-    struct lu_shared_names *names = PyMem_Calloc(1, sizeof *names + (size_t)capacity * sizeof(PyObject *));
+    struct lu_shared_names *names = PyMem_Calloc(1, sizeof *names + (size_t)capacity * (sizeof(PyObject *) + 1));
     if (names == NULL) {
         PyErr_NoMemory();
         return -1;
     }
+    names->kinds = (uint8_t *)&names->names[capacity];     /* all LU_FIELD_UNSEEN */
     names->capacity = capacity;
     names->usable = capacity;
     names->fixed = capacity > ROOM_MAX;
@@ -610,10 +612,91 @@ lu_attr_lookup(PyObject *obj, PyObject *name, PyObject **v)
     return *v != NULL;
 }
 
+/* The kind of a value word v (an object or a marker) and, for a number,
+   its raw word in *bits. An int is exact and fits int64 (a bool is an
+   object: its box is not its value); a float is exact. */
+static int
+value_kind(PyObject *v, uint64_t *bits)
+{
+    if (v == LU_UNBOXED_INT) {
+        return LU_FIELD_INT;
+    }
+    if (v == LU_UNBOXED) {
+        return LU_FIELD_FLOAT;
+    }
+    if (PyLong_CheckExact(v)) {
+        int overflow;
+        long long n = PyLong_AsLongLongAndOverflow(v, &overflow);
+        *bits = (uint64_t)n;
+        return overflow == 0 && n != INT64_MIN ? LU_FIELD_INT : LU_FIELD_OBJECT;     /* the tier's int range */
+    }
+    if (PyFloat_CheckExact(v)) {
+        double d = PyFloat_AS_DOUBLE(v);
+        memcpy(bits, &d, sizeof d);
+        return LU_FIELD_FLOAT;
+    }
+    return LU_FIELD_OBJECT;
+}
+
+/* Name i's kind joined with k, for good: unseen takes k, a kind keeps
+   itself, any two others make an object. Atomic: the kinds are the
+   class's, the store's lock only the instance's. */
+static int
+join_kind(struct lu_shared_names *names, Py_ssize_t i, int k)
+{
+    uint8_t was = __atomic_load_n(&names->kinds[i], __ATOMIC_ACQUIRE), now;
+    do {
+        now = was == LU_FIELD_UNSEEN ? (uint8_t)k : was == k ? was : LU_FIELD_OBJECT;
+        if (now == was) {
+            return now;
+        }
+    } while (!__atomic_compare_exchange_n(&names->kinds[i], &was, now, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+    return now;
+}
+
+int
+lu_inline_kind_at(PyTypeObject *tp, Py_ssize_t offset)
+{
+    struct lu_shared_names *names = shared_names(tp);
+    Py_ssize_t i = (offset - tp->tp_basicsize) / (Py_ssize_t)(LU_INLINE_STRIDE * sizeof(PyObject *));
+    if (!(tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) || names == NULL || i < 0 || i >= names->capacity) {
+        return LU_FIELD_OBJECT;
+    }
+    return __atomic_load_n(&names->kinds[i], __ATOMIC_ACQUIRE);
+}
+
+int
+lu_inline_kinds_ok(PyObject *obj)
+{
+    if (!lu_inline_live(obj)) {
+        return 1;
+    }
+    struct lu_shared_names *names = shared_names(Py_TYPE(obj));
+    PyObject **values = lu_inline_values(obj);
+    Py_ssize_t n = __atomic_load_n(&names->count, __ATOMIC_ACQUIRE), room = room_of(obj);
+    for (Py_ssize_t i = 0; i < n && i < room; i++) {
+        PyObject **slot = &LU_INLINE_WORD(values, i);
+        PyObject *w = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
+        int k = __atomic_load_n(&names->kinds[i], __ATOMIC_ACQUIRE);
+        uint64_t bits = 0;
+        if (w == NULL || k == LU_FIELD_OBJECT) {
+            continue;
+        }
+        if (k == LU_FIELD_UNSEEN || value_kind(w, &bits) != k
+            || (!lu_unboxed(w) && bits != __atomic_load_n(lu_inline_raw(slot), __ATOMIC_RELAXED))) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* Stores v (or a marker with the raw bits) in word i, holding the
    object's lock: the old value in *old (NULL for none or an unboxed
    value), or 0 when the values moved to the dict or the instance's
-   insertion order has no record to go in. */
+   insertion order has no record to go in. The name's kind is joined
+   with the value's first; under an int or float name the raw word takes
+   the value before the value word does, so that a reader that sees the
+   value word sees its raw word. */
 static int
 store_locked(PyObject *obj, Py_ssize_t i, PyObject *v, uint64_t bits, PyObject **old)
 {
@@ -621,10 +704,27 @@ store_locked(PyObject *obj, Py_ssize_t i, PyObject *v, uint64_t bits, PyObject *
     if (!lu_inline_live(obj) || (*slot == NULL && !note_insert(obj, i))) {
         return 0;
     }
-    if (lu_unboxed(v)) {
-        __atomic_store_n(lu_inline_raw(slot), bits, __ATOMIC_RELAXED);
+    uint64_t raw = bits;
+    int k = value_kind(v, &raw);
+    int owned = 0;
+    if (join_kind(shared_names(Py_TYPE(obj)), i, k) != k && lu_unboxed(v)) {
+        /* A number the name no longer takes raw: stored as its box, so
+           that no raw word of an object name is written again and a
+           reader still relying on the old kind reads a value stored
+           under it. */
+        double d;
+        memcpy(&d, &bits, sizeof d);
+        v = v == LU_UNBOXED ? PyFloat_FromDouble(d) : PyLong_FromLongLong((long long)bits);
+        if (v == NULL) {
+            PyErr_Clear();
+            return 0;                   /* the caller's slower way, which raises the MemoryError */
+        }
+        owned = 1;
     }
-    else {
+    else if (k != LU_FIELD_OBJECT) {
+        __atomic_store_n(lu_inline_raw(slot), raw, __ATOMIC_RELAXED);
+    }
+    if (!lu_unboxed(v) && !owned) {
         Py_INCREF(v);
     }
     *old = __atomic_exchange_n(slot, v, __ATOMIC_RELEASE);

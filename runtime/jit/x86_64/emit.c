@@ -3636,7 +3636,8 @@ typed_item(struct asm_ *a, struct lu_ins *in, lu_v v)
 static void
 fresh_word(struct asm_ *a, struct lu_ins *in, int r, int slow)
 {
-    if (in->imm2 == 0) {
+    int64_t words = LU_STORE_WORDS(in->imm2);
+    if (words == 0) {
         jmp(a, slow);
         return;
     }
@@ -3645,7 +3646,7 @@ fresh_word(struct asm_ *a, struct lu_ins *in, int r, int slow)
     modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
     b1(a, LU_ATTRS_UNORDERED >> 8);             /* test byte [r+flags+1], LU_ATTRS_UNORDERED */
     jcc(a, CC_NE, slow);
-    for (int k = 1; k < in->imm2; k++) {
+    for (int k = 1; k < words; k++) {
         cmp_mi(a, 1, r, (int32_t)in->imm + (int32_t)(LU_INLINE_STRIDE * sizeof(PyObject *)) * k, 0);
         jcc(a, CC_NE, slow);
     }
@@ -3676,6 +3677,9 @@ inline_store_raw(struct asm_ *a, lu_v v)
     }
     else {
         movq_rx(a, R13, 0);
+    }
+    if (in->imm2 & LU_STORE_BY_C) {
+        jmp(a, slow);                           /* the name's kind is C's to keep (attrs.c) */
     }
     b1(a, 0xF6);
     modrm_mem(a, 0, RDI, flags);
@@ -4478,6 +4482,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         parallel_moves(a, m, 2);
         mov_rr(a, R12, RDI);                    /* kept across calls: nothing is live here (IF_CALL) */
         mov_rr(a, R13, RSI);
+        if (in->imm2 & LU_STORE_BY_C) {
+            jmp(a, slow);                       /* the name's kind is C's to keep (attrs.c) */
+        }
         b1(a, 0xF6);
         modrm_mem(a, 0, RDI, flags);
         b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
@@ -4488,6 +4495,31 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             modrm_mem(a, 0, RDI, flags);
             b1(a, LU_ATTRS_IN_DICT >> 8);
             jcc(a, CC_NE, unlock_slow);         /* moved to the dict before the lock */
+        }
+        if (in->imm2 & LU_STORE_INT_RAW) {
+            /* An int name: only an exact int of the tier's range in line,
+               its value into RAX for the raw word (stored with the value). */
+            int positive = new_label(a);
+            mov_ri(a, R11, (int64_t)(intptr_t)&PyLong_Type);
+            cmp_rm(a, R11, RSI, offsetof(PyObject, ob_type));
+            jcc(a, CC_NE, unlock_slow);
+            load(a, RCX, RSI, offsetof(PyLongObject, long_value.lv_tag));
+            alu_ri(a, ALU_CMP, RCX, 2 << _PyLong_NON_SIZE_BITS);
+            jcc(a, CC_AE, unlock_slow);         /* more than one digit: C's */
+            load32(a, RAX, RSI, offsetof(PyLongObject, long_value.ob_digit));
+            rex(a, 0, 0, 0, RCX);
+            b1(a, 0xF6);
+            modrm_rr(a, 0, RCX);
+            b1(a, 2);                           /* test cl, 2: negative */
+            jcc(a, CC_E, positive);
+            unary(a, 3, RAX);
+            bind(a, positive);
+        }
+        else if (in->imm2 & LU_STORE_FLOAT_RAW) {
+            mov_ri(a, R11, (int64_t)(intptr_t)&PyFloat_Type);
+            cmp_rm(a, R11, RSI, offsetof(PyObject, ob_type));
+            jcc(a, CC_NE, unlock_slow);
+            load(a, RAX, RSI, offsetof(PyFloatObject, ob_fval));   /* the bits */
         }
         load(a, RBX, RDI, off);                 /* the old value, kept across calls */
         int have = new_label(a), take = new_label(a);
@@ -4516,6 +4548,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jcc(a, CC_NE, unlock_slow);
         op_rm(a, 0, 0x89, RCX, RSI, offsetof(PyObject, ob_ref_local));
         bind(a, immortal);
+        if (in->imm2 & (LU_STORE_INT_RAW | LU_STORE_FLOAT_RAW)) {
+            store(a, RDI, off + 8, RAX);        /* the raw word, before the value word (attrs.c's order) */
+        }
         store(a, RDI, off, RSI);
         if (!fresh) {
             unlock_object(a, RDI, RCX, 0);

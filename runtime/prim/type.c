@@ -140,13 +140,43 @@ subclasses_snapshot(PyTypeObject *tp)
 #define MAX_VERSIONS_PER_CLASS 1000
 #define MCACHE_MAX_ATTR_SIZE 100
 
+/* The type each live version names, for compiled code that knows a
+   version and wants its class (lu_type_of_version), as CPython's
+   _PyType_LookupByVersion: borrowed, a slot per version modulo the size,
+   cleared when the type leaves its version or dies. */
+#define VERSION_TYPES 4096
+static PyTypeObject *version_types[VERSION_TYPES];
+
+static void
+forget_version(PyTypeObject *tp)
+{
+    unsigned int old = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_RELAXED);
+    PyTypeObject *mine = tp;
+    if (old != 0) {
+        __atomic_compare_exchange_n(&version_types[old % VERSION_TYPES], &mine, NULL, 0, __ATOMIC_RELEASE,
+                                    __ATOMIC_RELAXED);
+    }
+}
+
 static void
 set_version(PyTypeObject *tp, unsigned int version)
 {
+    forget_version(tp);
     if (version != 0) {
         tp->tp_versions_used++;
     }
     __atomic_store_n(&tp->tp_version_tag, version, __ATOMIC_RELEASE);
+    if (version != 0) {
+        __atomic_store_n(&version_types[version % VERSION_TYPES], tp, __ATOMIC_RELEASE);
+    }
+}
+
+PyTypeObject *
+lu_type_of_version(unsigned int version)
+{
+    PyTypeObject *tp = version != 0 ? __atomic_load_n(&version_types[version % VERSION_TYPES], __ATOMIC_ACQUIRE)
+                                    : NULL;
+    return tp != NULL && __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) == version ? tp : NULL;
 }
 
 /* next_global_version_tag: the runtime-wide range, shared by all interpreters. */
@@ -813,6 +843,7 @@ type_dealloc(PyObject *self)
         remove_subclass((PyTypeObject *)PyTuple_GET_ITEM(tp->tp_bases, i), tp);
     }
     lu_clear_weakrefs(self);
+    forget_version(tp);
     Py_CLEAR(tp->tp_dict);
     Py_CLEAR(tp->tp_bases);
     Py_CLEAR(tp->tp_mro);
@@ -2396,6 +2427,15 @@ prim_instance_store(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return r < 0 ? NULL : bool_of(r);
 }
 
+/* inline_kinds_ok(obj): whether each of obj's inline words agrees with
+   what its class records its name holds (tests). */
+static PyObject *
+prim_inline_kinds_ok(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(1);
+    return bool_of(lu_inline_kinds_ok(args[0]));
+}
+
 /* set_class(obj, cls): __class__ assignment after the kernel's checks.
    Concurrent assignments to one object take turns, so that each takes the
    reference of the class it replaced, once. */
@@ -2740,7 +2780,7 @@ PyMethodDef lu_prim_type_methods[] = {
     FAST(type_set_names),
     FAST(type_subclasses), FAST(type_modified), PURE(is_subtype), FAST(alloc), FAST(new_check),
     PURE(type_tp_name), FAST(type_text_signature), FAST(type_static_module), PURE(size),
-    PURE(truth_exact), PURE(instance_dict), FAST(instance_load), FAST(instance_store), FAST(set_class), FAST(caller_globals), FAST(super_args),
+    PURE(truth_exact), PURE(instance_dict), FAST(instance_load), FAST(instance_store), FAST(inline_kinds_ok), FAST(set_class), FAST(caller_globals), FAST(super_args),
     FAST(error), FAST(attribute_error), FAST(ns_get), FAST(ns_set), FAST(ns_del), PURE(ns_items),
     PURE(kind),
     FAST(cell_get), FAST(cell_set), FAST(address), FAST(object_hash),
