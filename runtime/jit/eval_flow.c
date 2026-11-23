@@ -2182,6 +2182,14 @@ build_root(struct gctx *g)
        room for the deepest leaves the unit to the interpreter when there
        is not, and an exit never lacks it. */
     lu_v room = lu_ev_guard(c, OP_GUARD_DEPTH, LU_NOV, 0);
+    for (int i = 0; co->co_localspluskinds != NULL && i < c->nlocals; i++) {
+        /* A cell or free variable's slot holds its cell from the prologue
+           on, and every entry is after it. */
+        if ((((unsigned char *)PyBytes_AS_STRING(co->co_localspluskinds))[i] & (CO_FAST_CELL | CO_FAST_FREE))
+            && slots(c)[i] != LU_NOV && frame->localsplus[i] != NULL && PyCell_Check(frame->localsplus[i])) {
+            lu_ev_def_type(c, slots(c)[i], &PyCell_Type);
+        }
+    }
     if (!lu_jit_nospec(co, entry)) {
         /* Locals the live frame holds as ints or floats are taken to be
            ints or floats: their raw values are at hand from here on. */

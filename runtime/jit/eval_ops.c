@@ -789,6 +789,15 @@ lu_ev_instruction(struct ctx *c)
                 return 0;
             }
         }
+        if (lu_ev_type(c, v) == &PyCell_Type) {
+            /* A cell's word read in line, as lu_cell_get reads it: empty
+               (unbound), or another thread's value whose count cannot be
+               taken in place, leaves for the interpreter. */
+            w = lu_ev_emit(c, OP_SLOT_LOAD, REP_OBJ, lu_ev_val(c, v), LU_NOV, LU_NOV, offsetof(PyCellObject, ob_ref));
+            I(c, w)->fs = lu_ev_exit_fs(c);
+            lu_ev_push(c, lu_ev_own(c, w));
+            return 0;
+        }
         w = lu_ev_helper(c, H_cell_load, 1, &v, 0);
         lu_ev_guard(c, OP_GUARD_NOT_NULL, w, 0);        /* unbound: the interpreter raises */
         lu_ev_push(c, w);

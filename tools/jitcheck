@@ -62,6 +62,10 @@ require that a count of the tier's does not grow with the iterations:
          arguments on either side: the calls made as C makes a keyword or
          star call (call_kw). Each binds at compile time, in line or not.
          Under -X lucifer_jit=on: the interpreter learns the callees first.
+  cells  tests/kernel/jit_cell_reads.py, whose hot loop reads cells: of a
+         closure the call site learned, of a closure that is a constant,
+         and its own: the helpers compiled code calls. Each read is a load
+         of the cell's word, or a compare of a constant cell's word.
   cmethods tests/kernel/jit_class_methods.py, whose hot methods call
          classmethods and staticmethods through their class: entries into
          compiled code, direct and compiled calls. The loads bind at
@@ -282,6 +286,7 @@ GROWTH = {
     'ccalls': ('jit_c_calls.py', r'direct calls (\d+)', 0),
     'shapes': ('jit_call_shapes.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
     'kwcalls': ('jit_kw_calls.py', r'jit: executed:.* call_kw (\d+)', 0),
+    'cells': ('jit_cell_reads.py', r'jit: executed:.* helper (\d+)', 0, ('-X', 'lucifer_jit=on')),
     'bound': ('jit_bound_calls.py', r'jit: executed:.* call_kw (\d+)', 0, ('-X', 'lucifer_jit=on')),
     'cmethods': ('jit_class_methods.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'attrorder': ('jit_attr_order.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
