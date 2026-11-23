@@ -204,17 +204,6 @@ _PyCriticalSection_Resume(PyThreadState *tstate)
     }
 }
 
-/* The task made the switch with sections open: they become suspended ones,
-   as a detach would leave them, and the top one is resumed, locking it. */
-void
-lu_critical_sections_after_switch(PyThreadState *tstate)
-{
-    forget_unlocked(tstate);
-    if (tstate->critical_section & _Py_CRITICAL_SECTION_INACTIVE) {
-        _PyCriticalSection_Resume(tstate);
-    }
-}
-
 /* A section begun while serial, counted already: on the stack, suspended. */
 static void
 push_unlocked(PyThreadState *tstate, PyCriticalSection *c, PyMutex *m, uintptr_t tag)

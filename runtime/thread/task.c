@@ -34,17 +34,24 @@
    both words 0, raising the deopt reason whenever the task has taken it so
    that a unit looping on polls leaves, and only then moves the state to
    LU_PARALLEL and lets the lock go. Every task creation waits for
-   LU_PARALLEL, so no task runs alongside one that still goes unlocked; a
-   first task that makes a task while another thread switches locks its own
-   sections, as after a detach, and waits too. The switch lock is in the
-   fork registry (runtime/thread/fork.c), so no fork happens during a switch.
-   Without the barrier at startup the runtime is parallel from the start;
-   a barrier refused later (a sandbox) is replaced by a stop of the world,
-   which waits for the first task's next poll or detach. */
+   LU_PARALLEL, so no task runs alongside one that still goes unlocked.
+
+   Whoever takes the switch lock (a task maker, or a fork) waits for it
+   detached: a switch in progress may wait for that task's sections, or
+   stop the world, and a detached task stops at once and relies on no
+   section (a detach suspends them all; the attach after locks the top one).
+   Without the barrier at startup the runtime is parallel from the start; a
+   barrier refused later (a sandbox) is replaced by a stop of the world,
+   which waits for the first task's next poll or detach.
+
+   Lock order: the switch lock comes before the stop-the-world mutex
+   (struct lu_stw) and the fork registry's locks. A switch holds it while
+   it stops the world; a fork takes it first, then stops the world
+   (runtime/thread/fork.c), so no fork lands inside a switch. */
 #include <linux/membarrier.h>
 #include <sched.h>
 
-static struct lu_lock switching = { .mutex = PTHREAD_MUTEX_INITIALIZER };
+static pthread_mutex_t switching = PTHREAD_MUTEX_INITIALIZER;
 
 /* Registration belongs to the address space, so a fork's child registers again. */
 static int
@@ -58,20 +65,35 @@ barrier_registered(void)
 void
 lu_serial_start(void)
 {
-    lu_lock_register(&switching);
     if (!barrier_registered()) {
         __atomic_store_n(&_PyRuntime.parallel, LU_PARALLEL, __ATOMIC_SEQ_CST);
     }
 }
 
+/* The switch lock, taken detached (above): a fork's, around the stop of the
+   world and the fork. */
+void
+lu_switch_hold(void)
+{
+    PyThreadState *ts = lu_syscall_begin();
+    pthread_mutex_lock(&switching);
+    lu_syscall_end(ts);
+}
+
+void
+lu_switch_release(void)
+{
+    pthread_mutex_unlock(&switching);
+}
+
 static int
-leaves_locks_out(struct _is *interp, struct lu_task *self)
+leaves_locks_out(struct _is *interp)
 {
     int busy = 0;
     pthread_mutex_lock(&interp->tasks_lock.mutex);
     for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
         struct lu_task *t = TASK(ts);
-        if (t != self && __atomic_load_n(&ts->state, __ATOMIC_SEQ_CST) == _Py_THREAD_ATTACHED
+        if (__atomic_load_n(&ts->state, __ATOMIC_SEQ_CST) == _Py_THREAD_ATTACHED
             && (__atomic_load_n(&t->unlocked_jit, __ATOMIC_RELAXED) || __atomic_load_n(&t->unlocked_c, __ATOMIC_RELAXED))) {
             if (!(__atomic_load_n(&t->pending, __ATOMIC_SEQ_CST) & LU_POLL_DEOPT_SELF)) {
                 lu_task_signal(t, LU_POLL_DEOPT_SELF);
@@ -83,27 +105,13 @@ leaves_locks_out(struct _is *interp, struct lu_task *self)
     return busy;
 }
 
-/* alone: no other thread exists (a fork's child), so no barrier and no wait. */
+/* alone: no other thread exists (a fork's child), so no barrier and no wait.
+   The calling thread's task, if any, is detached throughout. */
 static void
 enter_parallel(struct _is *interp, int alone)
 {
-    struct lu_task *self = lu_current_task();
-    if (self != NULL && self->ts.state != _Py_THREAD_ATTACHED) {
-        self = NULL;
-    }
-    /* An attached task does not block on a switch another thread makes,
-       which may be waiting for its sections: it locks them, and waits on. */
-    int locked_own = 0;
-    while (pthread_mutex_trylock(&switching.mutex) != 0) {
-        if (__atomic_load_n(&_PyRuntime.parallel, __ATOMIC_ACQUIRE) == LU_PARALLEL) {
-            return;
-        }
-        if (self != NULL && !locked_own && !lu_serial()) {
-            lu_critical_sections_after_switch(&self->ts);
-            locked_own = 1;
-        }
-        sched_yield();
-    }
+    PyThreadState *ts = lu_syscall_begin();
+    pthread_mutex_lock(&switching);
     if (lu_serial()) {
         __atomic_store_n(&_PyRuntime.parallel, LU_SWITCHING, __ATOMIC_SEQ_CST);
         lu_jit_invalidate(LU_DEP_SERIAL, 0, 0);
@@ -111,10 +119,7 @@ enter_parallel(struct _is *interp, int alone)
             lu_stw_stop(interp);        /* the barrier refused: the first task stops at a poll or is detached */
             lu_stw_start(interp);
         }
-        if (self != NULL) {
-            lu_critical_sections_after_switch(&self->ts);
-        }
-        for (int spins = 0; !alone && leaves_locks_out(interp, self); spins++) {
+        for (int spins = 0; !alone && leaves_locks_out(interp); spins++) {
             if (spins < 1000) {
                 sched_yield();
             }
@@ -124,15 +129,17 @@ enter_parallel(struct _is *interp, int alone)
         }
     }
     __atomic_store_n(&_PyRuntime.parallel, LU_PARALLEL, __ATOMIC_RELEASE);
-    pthread_mutex_unlock(&switching.mutex);
+    pthread_mutex_unlock(&switching);
+    lu_syscall_end(ts);
 }
 
-/* The child's only thread is the forking one, and no switch was under way
-   (the fork took the switch lock): if the barrier is gone, the switch it
-   makes waits for no one. */
+/* The child's only thread is the forking one, which held the switch lock
+   across the fork: the child starts it afresh. If the barrier is gone, the
+   switch it makes waits for no one. */
 void
-lu_serial_after_fork(struct _is *interp, struct lu_task *self)
+lu_serial_after_fork(struct _is *interp)
 {
+    pthread_mutex_init(&switching, NULL);
     if (lu_serial() && !barrier_registered()) {
         enter_parallel(interp, 1);
     }

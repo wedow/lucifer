@@ -1,7 +1,7 @@
 /* os.fork (FOUNDATIONS 2.9, Python/pystate.c PyOS_BeforeFork and PyOS_AfterFork_Child).
 
-   The forking task stops the world, so that every other task is suspended or detached, then takes
-   every lock of the registry (runtime.c lu_lock_register). The child inherits them all taken by
+   The forking task takes the serial switch lock (runtime/thread/task.c), stops the world, so that
+   every other task is suspended or detached, then takes every lock of the registry (runtime.c lu_lock_register). The child inherits them all taken by
    its one thread and starts them afresh; the parent releases them.
 
    Only the forking thread exists in the child. Every other task and carrier is dead: its tasks
@@ -144,7 +144,7 @@ child_after_fork(struct _is *interp, struct lu_task *self)
     _PyRuntime.sched.carriers[0] = _PyRuntime.sched.carriers[1] = NULL;
     self->pinned_for_life = 1;
     lu_jit_code_after_fork();
-    lu_serial_after_fork(interp, self);
+    lu_serial_after_fork(interp);
 }
 
 long
@@ -152,6 +152,7 @@ lu_fork(void)
 {
     struct _is *interp = &_PyRuntime.main_interp;
     struct lu_task *self = lu_current_task();
+    lu_switch_hold();                   /* no switch in progress, and none begins: the lock order (task.c) */
     lu_stw_stop(interp);
     lock_registry();
     pid_t pid = fork();
@@ -163,6 +164,9 @@ lu_fork(void)
         unlock_registry();
     }
     lu_stw_start(interp);
+    if (pid != 0) {
+        lu_switch_release();            /* the child's is new (lu_serial_after_fork) */
+    }
     errno = saved_errno;
     return pid;
 }

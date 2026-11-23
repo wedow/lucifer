@@ -383,7 +383,8 @@ typedef struct PyEvent {
    The task list lock guards everything but the mutex, which serializes
    requests, and world_stopped, which the requester writes. */
 struct lu_stw {
-    PyMutex mutex;
+    PyMutex mutex;              /* after the serial switch lock, which a switch holds while it stops
+                                   the world and a fork takes first (runtime/thread/task.c) */
     int requested;
     int world_stopped;
     int countdown;              /* attached tasks that have yet to stop */
@@ -1188,7 +1189,10 @@ lu_unlocked_end(struct lu_task *t)
 /* The serial state at startup and in a fork's child (runtime/thread/task.c):
    serial only where the process-wide barrier the switch needs is to be had. */
 void lu_serial_start(void);
-void lu_serial_after_fork(struct _is *interp, struct lu_task *self);
+void lu_serial_after_fork(struct _is *interp);
+/* The switch lock, taken detached, around a fork's stop of the world (runtime/thread/task.c). */
+void lu_switch_hold(void);
+void lu_switch_release(void);
 
 /* The header PyObject_Init gives a block, written once: the type (a heap
    type's referenced), owned by this thread with one local reference, and

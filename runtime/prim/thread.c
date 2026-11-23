@@ -332,6 +332,15 @@ prim_thread_start(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return PyLong_FromLongLong((long long)thread);
 }
 
+/* thread_serial(): whether the runtime is still serial (lu_serial): no task
+   but the first has been made, so objects are not locked. For tests. */
+static PyObject *
+prim_thread_serial(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(0);
+    return Py_NewRef(lu_serial() ? Py_True : Py_False);
+}
+
 /* main_thread_ident(): the ident of the main task, from any thread. */
 static PyObject *
 prim_main_thread_ident(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -357,7 +366,7 @@ prim_thread_dict(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 PyMethodDef lu_prim_thread_methods[] = {
     FAST(mutex_new), FAST(mutex_acquire), FAST(mutex_release), FAST(mutex_locked), FAST(mutex_mine),
     FAST(mutex_state), FAST(rlock_acquire), FAST(rlock_release), FAST(os_fork),
-    FAST(thread_ident), FAST(thread_native_id), FAST(thread_start), FAST(main_thread_ident),
+    FAST(thread_ident), FAST(thread_native_id), FAST(thread_start), FAST(main_thread_ident), FAST(thread_serial),
     FAST(thread_dict),
     { NULL, NULL, 0, NULL },
 };

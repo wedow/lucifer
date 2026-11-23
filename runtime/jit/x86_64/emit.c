@@ -2035,8 +2035,12 @@ call_helper(struct asm_ *a, lu_v v, struct lu_deopt *d)
 {
     struct lu_ins *in = I(a, v);
     const struct lu_helper *h = &lu_helpers[in->imm];
+    int bare = d == NULL && (h->fx & (FX_PY | FX_SEEN));    /* no state to publish (facts.c unsettles) */
     if (d != NULL) {
         publish(a, in, d);
+    }
+    else if (bare) {
+        unlocked_pause(a);      /* before a direct call too: its callee runs Python */
     }
     static const int argregs[] = { RDI, RSI, RDX, RCX, R8, R9 };
     struct move moves[8];
@@ -2067,10 +2071,6 @@ call_helper(struct asm_ *a, lu_v v, struct lu_deopt *d)
             }
         }
         parallel_moves(a, moves, nm);
-    }
-    int bare = d == NULL && (h->fx & (FX_PY | FX_SEEN));    /* no state to publish (facts.c unsettles) */
-    if (bare) {
-        unlocked_pause(a);
     }
     call_abs(a, h->fn);
     if (done >= 0) {

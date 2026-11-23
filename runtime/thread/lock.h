@@ -85,7 +85,5 @@ void _PyParkingLot_UnparkAll(const void *address);
 /* Called by the syscall bracket (lu_syscall_begin and lu_syscall_end). */
 void _PyCriticalSection_SuspendAll(PyThreadState *tstate);
 void _PyCriticalSection_Resume(PyThreadState *tstate);
-/* The switch to parallel made by a task with sections open (runtime/thread/task.c). */
-void lu_critical_sections_after_switch(PyThreadState *tstate);
 
 #endif
