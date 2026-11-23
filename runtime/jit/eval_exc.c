@@ -8,6 +8,7 @@
    makes no traceback entry. */
 #include "jit/eval.h"
 #include "interp/exceptions.h"
+#include "interp/instrument.h"
 
 /* Stands on a handler's stack for the exc_info PUSH_EXC_INFO would have
    saved while the unit leaves exc_info alone: an exit takes what exc_info
@@ -131,7 +132,10 @@ catcher(struct ctx *c, PyTypeObject *t, int fresh, int *handler, int *level)
 {
     for (struct ctx *k = c; k != NULL; k = k->parent) {
         int lasti;
-        if (lu_ev_in_gen(k)) {
+        /* A generator's frame, in line or the root, is on the way: its
+           unwinding (a finished generator, StopIteration's rules) is the
+           interpreter's. */
+        if (lu_ev_in_gen(k) || (k->code->co_flags & LU_CO_GENERATORS)) {
             return NULL;
         }
         int has = lu_exception_handler(k->code, k->pc, level, handler, &lasti);
@@ -173,15 +177,35 @@ struct thrown {
     int handler, level;
 };
 
+/* The code unit of frame k's instruction itself, past its EXTENDED_ARG
+   prefixes: what the interpreter's unwinding names as its lasti. */
+static int
+lasti_of(struct ctx *k)
+{
+    int pc = k->pc;
+    while (lu_base_opcode(k->code, pc) == EXTENDED_ARG) {
+        pc++;
+    }
+    return pc;
+}
+
 /* The way a helper raised: what it raised, fetched before anything else
    runs, to the handler. */
 static void
 raised_arm(struct ctx *c, void *arg)
 {
     struct thrown *t = arg;
-    lu_v pc = lu_ev_const_i(c, t->h->pc);
+    lu_v pc = lu_ev_const_i(c, lasti_of(t->h));
     lu_v exc = t->h->kernel ? lu_ev_helper(c, H_exc_fetch, 0, NULL, 0) : lu_ev_helper(c, H_exc_here, 1, &pc, 0);
     throw_to(c, t->h, t->handler, t->level, exc);
+}
+
+/* A helper's failure: NULL, or -1 for a bit (FX_RAISE). */
+static lu_v
+failed(struct ctx *c, lu_v v)
+{
+    return I(c, v)->rep == REP_BIT ? lu_ev_emit(c, OP_CMP_I, REP_BIT, v, lu_ev_const_i(c, -1), LU_NOV, Py_EQ)
+                                   : lu_ev_emit(c, OP_IS, REP_BIT, v, lu_ev_konst(c, NULL), LU_NOV, 0);
 }
 
 void
@@ -193,7 +217,7 @@ lu_ev_caught(struct ctx *c, lu_v v)
         return;
     }
     I(c, v)->flags |= INS_CAUGHT;
-    lu_ev_fork_with(c, lu_ev_emit(c, OP_IS, REP_BIT, v, lu_ev_konst(c, NULL), LU_NOV, 0), raised_arm, &t);
+    lu_ev_fork_with(c, failed(c, v), raised_arm, &t);
 }
 
 int

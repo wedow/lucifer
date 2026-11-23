@@ -44,6 +44,11 @@ require that a count of the tier's does not grow with the iterations:
          that user code's own handlers take (a dict miss, an index, getattr,
          next(), raise, a call's): error and side exits. Each handler runs
          in compiled code.
+  bitexc tests/kernel/jit_bit_raises.py, whose hot loop drops exceptions of
+         instructions that fail with a bit (del, attribute and item
+         stores) under user code's own handlers: compiles. None of its
+         functions may be disabled or retired: an exit no rebuild can
+         take in the unit teaches no rebuild.
   compiled  tests/kernel/jit_compiled_calls.py, whose hot calls are of
          functions it cannot inline: direct calls (compiled code entered
          from C). Compiled code makes them itself.
@@ -287,6 +292,7 @@ GROWTH = {
     'raised': ('jit_raised.py', r'jit: entries .* side (\d+) error (\d+) frame', 0),
     'caught': ('jit_caught.py', r'jit: entries .* error (\d+) frame (\d+)', 0),
     'userexc': ('jit_user_raises.py', r'jit: entries .* side (\d+) error (\d+)', 0, ('-X', 'lucifer_jit=on')),
+    'bitexc': ('jit_bit_raises.py', r'jit: compiles (\d+)', 0, ('-X', 'lucifer_jit=on')),
     'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
     'ccalls': ('jit_c_calls.py', r'direct calls (\d+)', 0),
     'shapes': ('jit_call_shapes.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
@@ -409,7 +415,7 @@ def check_growth(args, lane):
             problems.append(f'{tag}{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
         own = qualnames(program)
         given_up = own & {name for pair in small[3] for name in pair if name}
-        if lane in ('calls', 'super', 'rebind', 'phases') and given_up:
+        if lane in ('calls', 'super', 'rebind', 'phases', 'bitexc') and given_up:
             problems.append(f"{tag}disabled or retired: {' '.join(sorted(given_up))}")
         seen.append(f'{small[2]}, {large[2]}')
     if lane in NOT_BUILT and not any('output differs' in p or 'no stats' in p for p in problems):

@@ -4161,6 +4161,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int err = -1;
         if ((h->fx & FX_RAISE) && in->fs != NULL && (h->rep == REP_BIT || h->rep == REP_OBJ) && !(in->flags & INS_CAUGHT)) {
             err = exit_to(a, in->fs, EXIT_ERROR, 1, in->drop);
+            a->exits[a->nexits - 1].d->catchable = 1;
         }
         struct lu_deopt *pub = NULL;
         if (lu_publishes(in)) {

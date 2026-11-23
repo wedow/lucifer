@@ -34,6 +34,12 @@ class Ctx:
         return False
 
 
+def seen(j, n):
+    # Early iterations run in the interpreter; late ones in the handler
+    # compiled code takes: both are recorded.
+    return j < 4 or j >= n - 4
+
+
 def far(j):
     # Large enough to stay a call of its own.
     t = 0
@@ -89,19 +95,22 @@ def read(n):
         try:
             d[j % 3]
         except KeyError as e:
-            if j < 3:
+            if seen(j, n):
                 out.append((type(e).__name__, e.args, [f.lineno for f in traceback.extract_tb(e.__traceback__)],
-                            e.__traceback__.tb_frame.f_locals['j'], sys.exception() is e))
+                            e.__traceback__.tb_frame.f_locals['j'], sys.exception() is e, e.__traceback__.tb_lasti,
+                            repr(e.__context__)))
         try:
             far(j)
         except Oops as e:
-            if j < 8:
-                out.append((e.args, [f.name for f in traceback.extract_tb(e.__traceback__)]))
+            if seen(j, n):
+                tb = e.__traceback__.tb_next      # far's own entry: its frame is gone, its locals stay
+                out.append((e.args, [f.name for f in traceback.extract_tb(e.__traceback__)],
+                            sorted(tb.tb_frame.f_locals.items()), tb.tb_lineno, tb.tb_frame.f_lineno))
         try:
             raise Oops(j) from ValueError(j)
         except Oops as e:
-            if j < 2:
-                out.append((e.args, repr(e.__cause__), e.__suppress_context__))
+            if seen(j, n):
+                out.append((e.args, repr(e.__cause__), e.__suppress_context__, e.__traceback__.tb_lasti))
     return out
 
 
@@ -114,7 +123,7 @@ def chained(n):
             except KeyError:
                 raise Oops(j)
         except Oops as e:
-            if j < 2:
+            if seen(j, n):
                 out.append((e.args, repr(e.__context__)))
         try:
             try:
@@ -123,7 +132,7 @@ def chained(n):
                 if j & 1:
                     raise
         except IndexError as e:
-            if j < 4:
+            if seen(j, n):
                 out.append(('again', str(e), len(traceback.extract_tb(e.__traceback__))))
     return out
 
@@ -162,6 +171,206 @@ def escapes(n):
         return s, e.args, [f.lineno for f in traceback.extract_tb(e.__traceback__)]
 
 
+class Custom(Exception):
+    def __init__(self, *args):
+        super().__init__('custom', *args)
+        self.extra = len(args)
+
+
+class Bare(Exception):
+    __slots__ = ()
+
+
+class OwnOS(OSError):
+    pass
+
+
+class Slotted:
+    __slots__ = ('x',)
+
+
+def shapes(n):
+    out = []
+    d = {}
+    o = Slotted()
+    total = 0
+    for j in range(n):
+        try:
+            [][j] if j & 1 else {}[j]
+        except (KeyError, IndexError) as e:
+            total += 1
+            if seen(j, n):
+                out.append(type(e).__name__)
+        try:
+            try:
+                {}[j]
+            except 5:
+                pass
+        except TypeError as e:
+            if seen(j, n):
+                out.append(str(e))
+        try:
+            raise 5
+        except TypeError as e:
+            if seen(j, n):
+                out.append(str(e))
+        try:
+            raise Custom
+        except Custom as e:
+            if seen(j, n):
+                out.append((e.args, e.extra))
+        try:
+            raise Bare(j)
+        except Bare as e:
+            total += e.args[0] & 1
+        try:
+            raise OwnOS(2, 'no such', 'f%d' % (j & 3))
+        except OSError as e:
+            if seen(j, n):
+                out.append((e.errno, e.strerror, e.filename, type(e).__name__))
+        # Instructions that fail with a bit, not an object.
+        try:
+            del d[j]
+        except KeyError:
+            total += 2
+        try:
+            o.y = j
+        except AttributeError as e:
+            if seen(j, n):
+                out.append(str(e))
+        try:
+            d[[j]] = 1
+        except TypeError:
+            total += 3
+    return total, out
+
+
+def flow(n):
+    # break, continue and return from inside a handler compiled code takes.
+    s = 0
+    for j in range(n):
+        try:
+            {}[j]
+        except KeyError:
+            if j % 7 == 0:
+                continue
+            s += 1
+        try:
+            [][j]
+        except IndexError:
+            if j == n - 2:
+                break
+            s += 2
+    def ret(k):
+        for j in range(k):
+            try:
+                {}[j]
+            except KeyError:
+                if j == k - 1:
+                    return j, sys.exception()
+        return None
+    return s, ret(n), sys.exception()
+
+
+def outer_handler(n):
+    # Called inside an except: the previous exc_info is not None.
+    try:
+        raise ValueError('outer')
+    except ValueError:
+        r = []
+        for j in range(n):
+            try:
+                {}[j]
+            except KeyError as e:
+                if seen(j, n):
+                    r.append((repr(e.__context__), repr(sys.exception())))
+            if seen(j, n):
+                r.append(repr(sys.exception()))
+        return r
+
+
+def keep_tb(n):
+    # A traceback read after the function that made it returned.
+    kept = None
+    for j in range(n):
+        try:
+            {}[j]
+        except KeyError as e:
+            kept = e
+    return kept
+
+
+def closure_root(n):
+    k = 3
+
+    def inner(m):
+        s = 0
+        for j in range(m):
+            try:
+                s += {0: k}[j & 1]
+            except KeyError as e:
+                s -= k
+                if j >= m - 2:
+                    s += e.__traceback__.tb_frame.f_locals['k']
+        return s
+    return inner(n)
+
+
+class Dies:
+    deaths = 0
+
+    def __hash__(self):
+        return 1
+
+    def __del__(self):
+        Dies.deaths += 1
+
+
+def released(n):
+    # Every value a failing instruction held is released on the way to
+    # the handler: the keys die, each with its exception.
+    d = {}
+    for j in range(n):
+        try:
+            d[Dies()]
+        except KeyError:
+            pass
+        try:
+            getattr(Dies(), 'missing')      # through kernel frames, the object in the exception too
+        except AttributeError:
+            pass
+        try:
+            d[j * 1000003]                  # a key boxed for the lookup alone
+        except KeyError:
+            pass
+    return Dies.deaths
+
+
+def lasti_wide(n):
+    # 200 names: LOAD_ATTR of the last needs EXTENDED_ARG.
+    names = ['name%d' % i for i in range(200)]
+    src = 'def probe(o, n):\n    if n < 0:\n        return ' + ' + '.join('o.' + x for x in names) + '\n'
+    src += '    out = set()\n    for j in range(n):\n        try:\n'
+    src += '            o.' + names[-1] + '\n        except AttributeError as e:\n'
+    src += '            out.add((e.__traceback__.tb_lasti, e.name))\n'
+    src += '    return sorted(out)\n'
+    ns = {}
+    exec(src, ns)
+
+    class O:
+        name0 = 0
+    return ns['probe'](O(), max(n, 20000))
+
+
+print(shapes(N))
+print(flow(N))
+print(outer_handler(N))
+print(sys.exception())
+k = keep_tb(N)
+print(k.args, [f.lineno for f in traceback.extract_tb(k.__traceback__)], k.__traceback__.tb_frame.f_locals['j'])
+print(closure_root(N))
+print(released(N))
+print(lasti_wide(N))
 print(dropped(N))
 print(read(N))
 print(chained(N))

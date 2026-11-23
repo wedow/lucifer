@@ -1587,7 +1587,8 @@ lu_jit_note_exit(struct lu_deopt *d)
     if (handled < 0) {
         return;
     }
-    int caught = d->reason == EXIT_ERROR ? kernel_handler(d, handled) : -1;
+    /* Only an exit a rebuild can take in the unit teaches it to. */
+    int caught = d->reason == EXIT_ERROR && d->catchable ? kernel_handler(d, handled) : -1;
     if (d->reason == EXIT_ERROR || (d->reason == EXIT_SIDE && d->nframes == 1)) {
         leave(d, u, 0);
         if (d->reason != EXIT_ERROR || (handled == 0 && caught < 0)) {
@@ -1646,7 +1647,9 @@ lu_jit_note_exit(struct lu_deopt *d)
             return;
         }
         else if (u->built >= __atomic_load_n(&jc->marked, __ATOMIC_RELAXED)) {
-            leave(d, u, 1);
+            if (d->reason != EXIT_ERROR) {
+                leave(d, u, 1);         /* an error exit counted its leave above */
+            }
             return;
         }
         say_recompile(code, d->reason != EXIT_GUARD ? "inlined copy leaves" : "guard fails", site, site_pc);

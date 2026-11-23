@@ -146,6 +146,7 @@ struct lu_deopt {
     uint8_t tier;
     uint8_t regs;               /* published by a slow path that saved every register at the frame's jit_regs */
     uint8_t visible;            /* an inlined frame is a user's: a walker makes the frames real */
+    uint8_t catchable;          /* error: a helper's failure, which a rebuild can take in the unit (eval_exc.c) */
 };
 
 /* The activation's forced state (runtime/jit/exit.c), made when a walker
