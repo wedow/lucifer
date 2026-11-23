@@ -79,26 +79,38 @@ Lives in the class flags, not the names table: its inputs (finalizer, base, slot
 
 Exact instructions per inner iteration (single-stepped), origin/master 161b0abb -> stage (a): loads 162 -> 162, stores 130 -> 147, pstores 109 -> 108, fstores 104 -> 104, calls 104 -> 104. The stores row's 17 are the raw word an object store of an int now writes beside it (two stores an iteration: the type, one-digit and sign tests and the raw store); stage (c) replaces those stores. Gate: the focused kernel programs (48, among them attr_field_kinds and the attribute, class-value, unboxed-field and release programs) pass in plain, jit and jit-deopt; jitcheck 0 failing.
 
+## 2026-11-23: review of stage (a), and stage (b)
+
+Fixes from the review of stage (a):
+- E1: a C store wrote the raw word by the value's kind, not the name's after the join, so an int stored into a float name overwrote the float's raw word while a compiled reader could have seen the float marker (a torn read: a number made of the other kind's bits). Now the raw word is written only when the joined kind equals the value's, int or float: a name's raw words only ever hold its first kind. Rule, restated: no C writer writes a raw word of a name that left int or float, or of an object name; a compiled store built under the old kind writes only a complete old-kind pair until its version guard stops it.
+- E2: the box a marker needs under a name that no longer takes it was made after note_insert recorded the index, so a failed allocation left a recorded index with an absent word, and retries appended again. The kind join and the box now come first, before the lock (take_kind), so store_locked cannot fail after note_insert for that reason.
+- Kinds now: UNSEEN, INT, FLOAT, OBJECT (the first value was some other object: no word ever holds a marker), ANY (an int or float name that met another kind: markers of its first kind may remain in old instances). OBJECT and ANY are final. A name that leaves INT or FLOAT calls lu_type_modified on its class after the join and before any value of another kind is stored; that takes the version back, which kills every unit that relied on the version (proven and hoisted guards register LU_DEP_TYPE) and signals running tasks, and fails every unhoisted guard. take_kind runs before the object's lock, so lu_type_modified is never called under an object lock or a serial unlocked section.
+- INT64_MIN: one rule, accepted under int (value_kind no longer excludes it). The raw-word loads represent it; only the boxed-int unbox path's wide fallback uses INT64_MIN as its failure value, and that path reads the object, not the raw word. With every int64 a valid raw int, a marker has no value to check.
+- lu_type_of_version: the fixed 4096-slot table (a collision lost a class, and its stores went to C) is now a growable open-addressing map in the interpreter state (struct lu_version_types), heap types only, under its own leaf lock; the lookup takes a reference with a try-incref under that lock, and a dying type's dealloc removes it under the same lock before the memory is freed. Chosen over carrying the class with the specialization because STORE_ATTR's inline cache (CPython's layout, four code units) has no room for a pointer, so carrying it means a side structure per site written by the specializer; the map stays beside set_version, where versions are assigned and taken back.
+
+Stage (b): INLINE_LOAD's imm2 carries the name's kind under the version guard (LU_LOAD_KIND, bits 60 up; the class value below). INLINE_LOAD_I/_F under its own kind (and no origin object) is the in-dict test, the presence compare on the value word, and the raw word's load. An object load under an OBJECT name has no marker compare and no out-of-line box path; the reference step (incref_owned_or_exit / owned_or_exit) stays separate. ANY and unknown kinds keep today's code. The in-dict test stays until stage (d): the words are cleared after the dict is published and the flag set, so a reader in that window could read a value the dict has since replaced; dropping the test needs the class-level fact.
+
+## 2026-11-23: stage (b) and (c) numbers
+
+Exact instructions per inner iteration (single-stepped), origin/master 161b0abb -> (a) -> (b) -> (c): loads 162 -> 162 -> 94 -> 94; calls 104 -> 104 -> 88 -> 88; stores 130 -> 147 -> 147 -> 147; pstores 109 -> 108 -> - -> 108; fstores 104 -> 104 -> - -> 90; oo (the Bounce-shaped loop, mean of 11 traced iterations, data dependent) 2905 -> - -> 2689 -> 2526. An int load is 5 instructions (in-dict test and branch, presence compare and branch, the raw word straight into the value's register), from about 23; a float store 6 when the word holds the marker. ≤4 per load needs the in-dict test gone (stage d). The stores row (an object, the loop variable, into an int name) still makes the raw word from the box and keeps the reference counting: identity of a named int is kept, so the box is stored.
+
+while_attr: 2405 per iteration on master and on every stage, 2158 of them in C (lu_jit_deopt, eval_frame, lu_jit_enter, type lookups): its Node class is made anew per call, so the unit's version guard fails and the loop leaves and re-enters every iteration. Not a field-kind question; a master behaviour worth its own ticket.
+
 ## State (keep current)
 
-Branch luc-eog8 from origin/master 161b0abb.
+Branch luc-eog8 from origin/master 161b0abb. Commits: f5a8603f stage (a); 2f934fbf review fixes (E1, E2, OBJECT/ANY kinds, version change on generalization, INT64_MIN accepted, growable version map); 2db684bd stage (b) loads by kind; fb277e56 stage (c) stores by kind. Each of (b) and (c) gated: 50 focused programs in plain, jit, jit-deopt; jitcheck 0 failing; the kinds programs and jit_threads in handoff and handoff:2.
 
-Done, committed (one commit, "attrs: record what each class's instances hold under each name"): stage (a). Kinds recorded per name (struct lu_shared_names gains `kinds`, one byte per name after the names: runtime/object/attrs.c), joined by CAS in store_locked (every C and interpreter store ends there) before the raw word (int/float names) and then the value word are written; a marker stored by C into a name that became OBJECT is stored as its box. Compiled stores: eval_attr.c store_kind() sets LU_STORE_BY_C (ssa.h, imm2 bit 32) unless the name's kind takes the store in line (object store: OBJECT; INLINE_STORE_I: INT; _F: FLOAT); emit.c jumps straight to the existing C slow path for those (INLINE_STORE and inline_store_raw), and fresh_word masks imm2 with LU_STORE_WORDS. Verifier lu_inline_kinds_ok (attrs.c), exposed as _lucifer.inline_kinds_ok (runtime/prim/type.c). Test tests/kernel/attr_field_kinds.py (passes on master too: the verifier is new; it catches a writer that leaves a raw word stale).
+Nothing running. Next step: report (b) and (c) and wait for review; then stage (d): a class-level fact that no instance has moved to its dict, under the version guard (the first move takes the version back), removing the in-dict test from every load and store (int load 3 instructions, marker store 4).
 
-Gate for (a): .scratch/gate.sh (focused kernel programs in plain, jit, jit-deopt, then jitcheck lanes incl. releases): all pass but pickle_c_module, which needs the _pickle accelerator the bin/lucifer + build/lib/stamp build does not make (environmental; dropped from the list).
-
-Also in stage (a): compiled object stores into an INT (FLOAT) name take an exact one-digit int (exact float) in line and write its raw word before the value word (emit.c OP_INLINE_STORE, LU_STORE_INT_RAW / LU_STORE_FLOAT_RAW in ssa.h); a store whose owner's class the IR does not know finds it by lu_type_of_version (runtime/prim/type.c: a version-to-type table like CPython's _PyType_LookupByVersion, borrowed, a slot per version modulo 4096, cleared when a class leaves its version or dies). Without these the stores row went to C (130 -> 697 instructions).
-
-Next step: report stage (a) and wait for review; then stage (b) below.
-
-Then stage (b): compiled INT/FLOAT loads under the version guard read the value word (present?) and the raw word, with a dependency on the name's kind invalidated by join_kind's move to OBJECT (the dependency machinery in runtime/jit/deps.c, LU_DEP_*), the invalidation before the value word's store.
+Known limits: the parallel (locked) raw store keeps the old code; INLINE_STORE under an int name still converts the box (type, tag, digit, sign).
 
 Scratch tools (untracked, .scratch/):
-- keep/k.py and keep/kk.py: the idiom rows (python3-runnable; `bin/lucifer k.py NAME N`).
-- keep/tr.sh NAMES (env LUC=binary OUT=dir): exact single-step traces with gdb (trace_gdb.py), per IR opcode and C function; run under the host lock (test class); summarize with keep/trsum.py dir/NAME.json.
-- keep/ab.sh NAMES (env A=, B=): interleaved min-of-3 cycles and instructions per iteration; run under the host lock (core class), pinned.
-- keep/ctr.sh ROW BIN...: frontend/branch counters; under the host lock (core class).
-- keep/dis.sh ROW FUNC + keep/ann.py: annotated disassembly of a function's last unit.
-- gate.sh: the focused gate; sa.sh: build + gate + traces for stage (a).
+- keep/k.py and keep/kk.py: the idiom rows (with oo, the Bounce-shaped loop); `bin/lucifer k.py NAME N`.
+- keep/tr.sh NAMES (env LUC=binary OUT=dir, ALL=1 to break on every entry's last build, needed for while_attr): exact single-step traces with gdb (trace_gdb.py); under the host lock (test class); keep/trsum.py dir/NAME.json summarizes.
+- keep/ab.sh NAMES (env A=, B=): interleaved min-of-3 cycles and instructions; under the host lock (core class).
+- keep/ctr.sh ROW BIN...: counters; under the host lock (core class).
+- keep/dis.sh ROW FUNC + keep/ann.py: annotated disassembly of a function's last unit (keep/dis3.sh: oo for B=arm and base).
+- gate.sh: the focused gate; sb.sh / sc.sh: build + gate + traces for (b) / (c).
+- bin/lucifer-base (master 161b0abb), bin/lucifer-a, -b, -c: the arms.
 
-Not obvious from the code: lu_jit LU_KIND_* (jit.h) is a different, unrelated enum (call-site operand kinds); the field kinds are LU_FIELD_*. INT kind excludes INT64_MIN to match the tier's int range. emit_new_object no longer zeroes raw words (luc-uqyj), so a raw word means something only beside a present value word.
+Not obvious from the code: lu_jit LU_KIND_* (jit.h) is an unrelated enum (call-site operand kinds); the field kinds are LU_FIELD_*. emit_new_object does not zero raw words (luc-uqyj), so a raw word means something only beside a present value word. attr_field_kinds' raw_kept case uses _lucifer.inline_field, which stage (a) lacks, so it could not fail on (a); the torn read it guards is the review's interleaving, not reproduced. The cold stream follows the hot one, so a jump to the label right after a cold block is a jump to the next hot instruction: leave it out.
