@@ -46,6 +46,7 @@ lu_jit_box_float(double v)
 void
 lu_jit_decref(PyObject *o)
 {
+    LU_JIT_C_PATH(release);     /* a release compiled code did not make in line */
     Py_XDECREF(o);
 }
 

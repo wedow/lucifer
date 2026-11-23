@@ -74,3 +74,30 @@ New rows, traced once on this build (instructions per inner iteration):
 - smalldict ({'a': i, 'b': j}; d['b']): 1484, 1191 in C: lu_dict_insert 185, probe_keys 171, dict_dealloc 111, probe_unicode 107, new_keys 68, lu_dict_find_lockfree 67, h_build_map 66.
 - boundm (m = b.get; m()): 995, 700 in C: type_lookup 88, lu_getattr_native 80, lu_attr_lookup 68, lu_gc_alloc 57, lu_inline_index 53, lu_fields_clear 51, lu_object_free 48, lu_object_new 45, PyMethod_New 37: the bound method is made and freed in C every time.
 - strslice (out[j] = text[a:b]): 752, 478 in C: slice_unpack 96, PyUnicode_FromKindAndData 78, lu_object_new 61, lu_slice_native 55.
+
+## 2026-11-23: stage 2 item 3, mimalloc's free fast path in line
+
+A dying instance's or str's block of a page of this thread's segment that is neither full nor holds aligned blocks goes on the page's local free list in line, with the used count dropped, as mi_free's fast path puts it (this build encodes no free lists and keeps no padding or statistics); another thread's segment, a full or aligned page, or the page's last block (which retires) still calls mi_free. Each kind goes from the stub's first type test to its own code with one owner check (the second dispatch and the dealloc recheck are gone).
+
+| row | instructions after items 1-2 | after | cycles (min of 3, one lease) |
+|---|---|---|---|
+| alloc_escape | 401 (23 in mi_free) | 371 (none in C) | 155 -> 153 |
+| strfmt | 1238 | 1207 | 640 -> 636 |
+| strslice | 752 | 724 | 341 -> 333 |
+| listidx | 220 | 218 | 102 -> 97 |
+| loads, tupunpack | 162, 125 | same | 40 -> 42, 31 -> 26 |
+
+## 2026-11-23: review fixes for stage 1 (D1, D2)
+
+D1: one object in several of the slots a release drops (a tuple (x, x), two attributes on one value, an attribute holding the instance's own class) passed a per-slot "count above one" test and was decremented to zero without being freed. The rule now: every object a release drops references to without freeing must be immortal or this thread's with a local count above the number of references the release can drop at most (a tuple's size; an instance's room plus one for its type). However the slots repeat, none reaches zero; anything else takes the generic path, which frees as it goes.
+
+D2: the instance release read inline words while the attributes were in a dict (__class__ assigned, then del __dict__: the dict pointer NULL, LU_ATTRS_IN_DICT set for good) and sized the scan by the class's count of names. It now requires LU_ATTRS_IN_DICT clear and scans the instance's own room (its flags, else the class table's capacity, as lu_inline_clear reads it). Every other layout the stub reads from the class (basic size, preheader, inline-values flag, weak list offset) __class__ assignment keeps equal (compatible_for_assignment), and an assignment always moves inline values to a dict.
+
+Also: the shared-word test says why the weak-list test depends on it; a freed str or instance gets local count 0 as every other path leaves it; releases that call C are counted (-X lucifer_jit_stats C paths "release") and a jitcheck lane (releases, tests/kernel/jit_release_paths.py) requires they do not grow with iterations, so a stub that stops firing fails. tests/kernel/jit_release_shapes.py covers D1 (tuple, attributes, own class, a float three times), D2, a dict made real, __slots__, a builtin's subclass, an attribute dying with its instance, a class dying with its last instance, tuples longer than 20 and (), an object another thread referenced, and more releases than a freelist keeps.
+
+## 2026-11-23: what remains, by owner (exact instructions per inner iteration, before the D1/D2 fix adds a few to the stub)
+
+alloc_escape, 371: release of the old instance (the stub: kind dispatch, owner check, class conditions, room scan and drops of the attribute words, type and collector counts, the in-line free) 168, this ticket; new_object 41 and BOX_INT 9, this ticket; LIST_STORE 38 (the list's lock byte taken and released around the store), lock elision; INLINE_STORE 50 (two attribute stores on the fresh instance), the field-kinds ticket luc-eog8; the loop, poll and guards about 45.
+listidx, 218: release of the old int 41, this ticket; BOX_INT 29, this ticket; LIST_STORE 40, lock elision; DECREF 30 and LIST_ITEM 23 and UNBOX_INT 13 (reference counts and boxes around the item), luc-5bi7 and luc-eog8; the loop about 40.
+
+Against PyPy's whole iteration (instructions, one lease): alloc_escape 36, listidx 21, floatstore 18, isinst 24, strfmt 500. Allocation plus release now: alloc_escape about 220 (6x PyPy's iteration), listidx 70 (3.3x), floatstore about 59 (3.3x): the bar (2x) is not met. The next levers by number: the instance release's 168 (most of it the class and room checks, which a per-class "plain" bit kept by the type machinery would fold into one test, and the attribute scans), then the box's header words.

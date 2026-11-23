@@ -2447,7 +2447,7 @@ test_ri(struct asm_ *a, int r, int32_t imm)
 static void
 release_instance(struct asm_ *a, int r, int fail, int done)
 {
-    int failed = new_label(a), noweak = new_label(a), nodict = new_label(a), typed = new_label(a);
+    int failed = new_label(a), noweak = new_label(a), nodict = new_label(a);
     int scan = new_label(a), scanned = new_label(a), drop = new_label(a), dropped = new_label(a);
     int whole = new_label(a), untyped = new_label(a);
     cmp_mi(a, 1, RAX, offsetof(PyTypeObject, tp_finalize), 0);
@@ -2474,34 +2474,61 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     load(a, RCX, RCX, offsetof(struct lu_carrier, current));
     cmp_mi(a, 0, RCX, offsetof(struct lu_entry, gc_alloc_count), -LU_GC_ALLOC_FLUSH + 1);
     jcc(a, CC_LE, fail);                        /* the decrement would flush */
-    b1(a, 0x41);
-    b1(a, 0x52);                                /* push r10 */
+    /* [rsp] R10, [rsp+8] the end of the inline values; 24 bytes keep the
+       stack aligned for a call (the stub's return address below). */
+    alu_ri(a, ALU_SUB, RSP, 24);
+    store(a, RSP, 0, R10);
     thread_id(a, R10);
-    /* The type's reference, and the inline values': none may die. */
-    load32(a, RCX, RAX, offsetof(PyObject, ob_ref_local));
-    cmp32_ri8(a, RCX, -1);
-    jcc(a, CC_E, typed);
-    cmp32_ri8(a, RCX, 1);
+    /* The instance's own inline words: none while its values are in a
+       dict (LU_ATTRS_IN_DICT, which stays set once they moved), else its
+       room's names, as lu_inline_clear reads them, from its flags or the
+       class's table: never the class's count of names, which another
+       class's instance (__class__ assigned) may lack room for. */
+    int roomed = new_label(a), sized = new_label(a);
+    load(a, RCX, RAX, offsetof(PyTypeObject, tp_flags));
+    test_ri(a, RCX, Py_TPFLAGS_INLINE_VALUES);
+    b1(a, 0xB9);
+    b4(a, 0);                                   /* mov ecx, 0: no words, the flags kept */
+    jcc(a, CC_E, roomed);
+    rex(a, 0, 0, 0, r);
+    b1(a, 0xF6);
+    modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
+    b1(a, LU_ATTRS_IN_DICT >> 8);               /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
+    jcc(a, CC_NE, failed);
+    op_rm(a, 0, 0x0FB7, RCX, r, offsetof(PyObject, ob_flags));     /* movzx ecx, word [r+flags] */
+    alu_ri(a, ALU_AND, RCX, LU_ATTRS_ROOM);
+    rex(a, 1, 0, 0, RCX);
+    b1(a, 0xC1);
+    modrm_rr(a, 5, RCX);
+    b1(a, LU_ATTRS_ROOM_SHIFT);                 /* shr rcx: the room, 0 for the table's capacity */
+    jcc(a, CC_NE, roomed);
+    load(a, RCX, RAX, offsetof(PyHeapTypeObject, ht_cached_keys));
+    load(a, RCX, RCX, LU_SHARED_NAMES_CAPACITY);
+    bind(a, roomed);
+    load(a, R11, RAX, offsetof(PyTypeObject, tp_basicsize));
+    alu_rr(a, ALU_ADD, R11, r);                 /* the values */
+    store(a, RSP, 8, RCX);
+    rex(a, 1, 0, 0, RSP);
+    b1(a, 0xC1);
+    modrm_mem(a, 4, RSP, 8);
+    b1(a, 4);                                   /* shl qword [rsp+8], 4: LU_INLINE_STRIDE words a name */
+    op_rm(a, 1, 0x01, R11, RSP, 8);             /* add [rsp+8], r11: the end */
+    bind(a, sized);
+    /* Nothing it holds may die with it: the type and each value are
+       immortal, or this thread's with a local count above the references
+       this release drops (one per word, one for the type). However the
+       same object repeats among them, it stays above zero. */
+    alu_ri(a, ALU_ADD, RCX, 1);
+    int typed2 = new_label(a);
+    cmp_mi(a, 0, RAX, offsetof(PyObject, ob_ref_local), -1);
+    jcc(a, CC_E, typed2);
+    op_rm(a, 0, 0x39, RCX, RAX, offsetof(PyObject, ob_ref_local));  /* cmp [rax+local], ecx */
     jcc(a, CC_BE, failed);
     cmp_rm(a, R10, RAX, offsetof(PyObject, ob_tid));
     jcc(a, CC_NE, failed);
-    bind(a, typed);
-    load(a, R11, RAX, offsetof(PyTypeObject, tp_basicsize));
-    alu_rr(a, ALU_ADD, R11, r);                 /* the values */
-    mov_rr(a, RCX, R11);
-    load(a, RAX, RAX, offsetof(PyTypeObject, tp_flags));
-    test_ri(a, RAX, Py_TPFLAGS_INLINE_VALUES);
-    jcc(a, CC_E, scanned);                      /* no words: the end is the start */
-    load(a, RAX, r, offsetof(PyObject, ob_type));
-    load(a, RAX, RAX, offsetof(PyHeapTypeObject, ht_cached_keys));
-    load(a, RAX, RAX, LU_SHARED_NAMES_COUNT);
-    rex(a, 1, 0, 0, RAX);
-    b1(a, 0xC1);
-    modrm_rr(a, 4, RAX);
-    b1(a, 4);                                   /* shl rax, 4: LU_INLINE_STRIDE words a name */
-    alu_rr(a, ALU_ADD, RCX, RAX);               /* the end */
+    bind(a, typed2);
     bind(a, scan);
-    alu_rr(a, ALU_CMP, R11, RCX);
+    cmp_rm(a, R11, RSP, 8);
     jcc(a, CC_AE, scanned);
     load(a, RAX, R11, 0);
     alu_ri(a, ALU_ADD, R11, LU_INLINE_STRIDE * sizeof(PyObject *));
@@ -2509,7 +2536,7 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     jcc(a, CC_BE, scan);                        /* absent, or unboxed */
     cmp_mi(a, 0, RAX, offsetof(PyObject, ob_ref_local), -1);
     jcc(a, CC_E, scan);
-    cmp_mi(a, 0, RAX, offsetof(PyObject, ob_ref_local), 1);
+    op_rm(a, 0, 0x39, RCX, RAX, offsetof(PyObject, ob_ref_local));  /* cmp [rax+local], ecx */
     jcc(a, CC_BE, failed);
     cmp_rm(a, R10, RAX, offsetof(PyObject, ob_tid));
     jcc(a, CC_NE, failed);
@@ -2520,7 +2547,7 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     load(a, R11, R11, offsetof(PyTypeObject, tp_basicsize));
     alu_rr(a, ALU_ADD, R11, r);
     bind(a, drop);
-    alu_rr(a, ALU_CMP, R11, RCX);
+    cmp_rm(a, R11, RSP, 8);
     jcc(a, CC_AE, dropped);
     load(a, RAX, R11, 0);
     alu_ri(a, ALU_ADD, R11, LU_INLINE_STRIDE * sizeof(PyObject *));
@@ -2543,6 +2570,7 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     b1(a, 0x80);
     modrm_mem(a, 4, r, offsetof(PyObject, ob_gc_bits));
     b1(a, (uint8_t)~LU_GC_TRACKED);             /* and byte [r+gc_bits]: the collector's no longer */
+    store32_mi(a, r, offsetof(PyObject, ob_ref_local), 0);     /* dead, as on every other path */
     load(a, RAX, RAX, offsetof(PyTypeObject, tp_flags));
     test_ri(a, RAX, Py_TPFLAGS_PREHEADER);
     mov_rr(a, RAX, r);
@@ -2552,17 +2580,17 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     int freed = new_label(a), call = new_label(a);
     free_in_line(a, call, freed);
     bind(a, call);
-    save_volatile(a);                           /* aligned: the push and the call to the stub */
+    save_volatile(a);                           /* aligned: the 24 bytes and the call to the stub */
     mov_rr(a, RDI, RAX);
     call_abs(a, (void *)mi_free);
     restore_volatile(a);
     bind(a, freed);
-    b1(a, 0x41);
-    b1(a, 0x5A);                                /* pop r10 */
+    load(a, R10, RSP, 0);
+    alu_ri(a, ALU_ADD, RSP, 24);
     jmp(a, done);
     bind(a, failed);
-    b1(a, 0x41);
-    b1(a, 0x5A);                                /* pop r10 */
+    load(a, R10, RSP, 0);
+    alu_ri(a, ALU_ADD, RSP, 24);
     jmp(a, fail);
 }
 
@@ -2577,6 +2605,10 @@ owner_dies(struct asm_ *a, int r, int other)
     thread_id(a, R11);
     cmp_rm(a, R11, r, offsetof(PyObject, ob_tid));
     jcc(a, CC_NE, other);
+    /* The whole shared word: no other thread's references, and no flag
+       either. The weakref tests below rely on it: making a weak reference
+       sets the shared word's maybe-weakref bit, so an object anyone ever
+       weakly referenced never gets here. Do not narrow this to the count. */
     cmp_mi(a, 1, r, offsetof(PyObject, ob_ref_shared), 0);
     jcc(a, CC_NE, other);
     mov_ri(a, R11, (int64_t)(intptr_t)&_PyRuntime.allocators.observed);
@@ -2625,6 +2657,7 @@ release_stub(struct asm_ *a)
     alu_ri(a, ALU_AND, RAX, str_state(0, 1));
     alu_ri(a, ALU_CMP, RAX, str_state(0, 1));
     jcc(a, CC_NE, back);
+    store32_mi(a, r, offsetof(PyObject, ob_ref_local), 0);     /* dead, as on every other path */
     mov_rr(a, RAX, r);
     int str_call = new_label(a);
     free_in_line(a, str_call, done);
@@ -2651,8 +2684,10 @@ release_stub(struct asm_ *a)
     int32_t lists = (int32_t)offsetof(struct lu_entry, free_tuples);
     cmp_mi(a, 0, RAX, lists + (int32_t)offsetof(struct lu_freelist, n), LU_FREE_MAX);
     jcc(a, CC_GE, back);
-    /* No item may die here: each is immortal or this thread's with a
-       count above one. */
+    /* No item may die here: each is immortal, or this thread's with a
+       local count above the tuple's size. An item may fill several slots,
+       but never more than all of them, so dropping one reference per slot
+       leaves it above zero however the slots repeat. */
     load(a, RCX, r, offsetof(PyVarObject, ob_size));
     bind(a, scan);
     alu_ri(a, ALU_SUB, RCX, 1);
@@ -2663,7 +2698,7 @@ release_stub(struct asm_ *a)
     load32(a, RAX, R11, offsetof(PyObject, ob_ref_local));
     cmp32_ri8(a, RAX, -1);
     jcc(a, CC_E, scan);
-    cmp32_ri8(a, RAX, 1);
+    op_rm(a, 0, 0x3B, RAX, r, offsetof(PyVarObject, ob_size));  /* cmp eax, [r+size]: at most 20 */
     jcc(a, CC_BE, back);
     thread_id(a, RAX);
     cmp_rm(a, RAX, R11, offsetof(PyObject, ob_tid));

@@ -300,8 +300,8 @@ lu_inline_values(PyObject *obj)
    reader makes and installs (DESIGN 4.5). */
 #define LU_INLINE_STRIDE 2
 /* Where a class's shared-names table (its ht_cached_keys, attrs.c) keeps
-   how many names it has: an instance has inline words for that many. */
-#define LU_SHARED_NAMES_COUNT 8
+   the most names it takes: the room of an instance whose flags give none. */
+#define LU_SHARED_NAMES_CAPACITY 0
 #define LU_INLINE_WORD(values, i) ((values)[LU_INLINE_STRIDE * (i)])
 #define LU_UNBOXED ((PyObject *)1)
 #define LU_UNBOXED_INT ((PyObject *)3)

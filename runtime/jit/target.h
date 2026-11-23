@@ -542,7 +542,7 @@ lu_alloc_call(const struct lu_ins *in)
 /* -X lucifer_jit_stats: how often compiled code takes the C path of an
    operation it otherwise runs in line (runtime/jit/jit.c reports them). */
 #define LU_C_PATHS(X) X(list_item) X(tuple_item) X(list_store) X(box_int) X(box_float) X(build_list) X(build_tuple) \
-    X(new_object) X(slot_load)
+    X(new_object) X(slot_load) X(release)
 enum lu_c_path {
 #define LU_C_PATH_ENUM(name) C_PATH_##name,
     LU_C_PATHS(LU_C_PATH_ENUM)
