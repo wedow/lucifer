@@ -108,6 +108,10 @@ require that a count of the tier's does not grow with the iterations:
   repeat the same program, whose hot loop repeats a list ([x] * n):
          entries into compiled code, direct and compiled calls (the copies
          are made without list.__mul__).
+  borrowed tests/kernel/jit_borrowed_counts.py, whose hot loops read list
+         and tuple items nothing can free before their last use: no INCREF
+         or DECREF per item (-X lucifer_jit_stats' incref, decref): only the
+         inner loop's list iterator is released, once per outer turn.
   classes  tests/kernel/jit_class_calls.py, whose hot loop calls classes
          with Python initializers: entries into compiled code, direct and
          compiled calls (the instance is made in line, __init__ inlines).
@@ -330,6 +334,7 @@ GROWTH = {
     'truth': ('jit_default_truth.py', r'(?s)jit: unit count@\d+ entries [1-9]\d* .*?'
               r'jit: executed:[^\n]* truth (\d+)', 0),
     'typed': ('jit_typed_items.py', r'jit: executed:.* helper (\d+)', 0),
+    'borrowed': ('jit_borrowed_counts.py', r'jit: executed:.* incref (\d+) decref (\d+)', 1 / 2),
     'strs': ('jit_str_chars.py', r'jit: executed:.* helper (\d+)', 0),
     'positional': ('jit_positional_args.py', r'(?s)jit: unit scan@\d+ entries [1-9]\d* .*?'
                    r'jit: allocations by kind:[^\n]* tuple (\d+), list (\d+)', 0),
