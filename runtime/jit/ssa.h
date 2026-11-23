@@ -134,7 +134,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(HELPER, REP_NONE, IF_EFFECT | IF_CALL)    /* imm: the helper, args; rep and effects from it */ \
     X(JUMP, REP_NONE, IF_TERM) \
     X(BRANCH, REP_NONE, IF_TERM)        /* a: bit; to succ[0] when 1 */ \
-    X(RETURN, REP_NONE, IF_TERM)        /* a: the frame's result, owned */ \
+    X(RETURN, REP_NONE, IF_TERM)        /* a: the frame's result, owned; imm 1: none, the exception set raised it */ \
     X(FRAME_STORE, REP_NONE, IF_EFFECT) /* the root frame's localsplus[imm] = a, with no reference taken */ \
     X(YIELD, REP_NONE, IF_TERM)         /* a generator's root frame yields a (owned): its slots were stored; imm: the  \
                                            slots it holds, imm2: the instruction it resumes at */ \

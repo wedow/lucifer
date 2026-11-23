@@ -259,6 +259,27 @@ h_exc_here(intptr_t lasti)
     return PyErr_GetRaisedException();
 }
 
+/* An exception leaving the root frame, which has no handler for it: the
+   frame joins its traceback at code unit lasti, and its slots get its
+   locals, which the frame object the entry made takes when the frame
+   goes (lu_frame_retire), as when the interpreter unwinds it. */
+int lu_jit_sync(struct lu_frame *f);    /* runtime/jit/exit.c */
+
+static void
+h_unwind_here(intptr_t lasti)
+{
+    PyThreadState *ts = PyThreadState_Get();
+    struct lu_frame *f = (struct lu_frame *)ts->current_frame;
+    lu_traceback_here(f, lasti);
+    if (f->frame_obj != NULL) {
+        PyObject *exc = PyErr_GetRaisedException();
+        if (lu_jit_sync(f) < 0) {
+            PyErr_Clear();
+        }
+        PyErr_SetRaisedException(exc);
+    }
+}
+
 /* POP_EXCEPT: exc_info holds prev again (nothing for None). */
 static void
 h_exc_pop(PyObject *prev)
@@ -1002,6 +1023,10 @@ PyObject *
 lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r)
 {
     struct lu_task *t = (struct lu_task *)ts;
+    if (r == LU_JIT_RAISED) {
+        lu_frame_pop(ts, callee);       /* unwound: the call's value is the exception */
+        return NULL;
+    }
     /* The callee's frame returns into a C-entry marker, as under lu_eval. */
     struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
     entry.previous = callee->previous;
@@ -1755,6 +1780,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_exc_push] = { (void *)h_exc_push, "exc_push", REP_OBJ, 0, 1 },
     [H_exc_fetch] = { (void *)h_exc_fetch, "exc_fetch", REP_OBJ, 0, 0 },
     [H_exc_here] = { (void *)h_exc_here, "exc_here", REP_OBJ, FX_SEEN, 1 },
+    [H_unwind_here] = { (void *)h_unwind_here, "unwind_here", REP_NONE, FX_SEEN, 1 },
     [H_exc_pop] = { (void *)h_exc_pop, "exc_pop", REP_NONE, FX_SEEN, 1 },
     [H_gen_new] = { (void *)h_gen_new, "gen_new", REP_OBJ, FX_RAISE, 0 },
     [H_gen_give] = { (void *)h_gen_give, "gen_give", REP_BIT, 0, 3 },

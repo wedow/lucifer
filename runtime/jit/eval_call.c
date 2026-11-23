@@ -717,20 +717,7 @@ lu_ev_return(struct ctx *c)
         else {
             lu_ev_retain(c, x);
         }
-        /* GH-99729: a finalizer the releases run sees the caller on top. */
-        lu_ev_emit(c, OP_UNLINK, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
-        while (*depth_of(c) > 0) {
-            lu_ev_pop(c);
-        }
-        for (int i = 0; i < c->nlocals; i++) {
-            lu_ev_set_local(c, i, LU_NOV);
-        }
-        g->leaving = 1;
-        lu_ev_settle(c, c->pc);
-        g->leaving = 0;
-        g->keep = LU_NOV;
-        lu_ev_emit(c, OP_RETURN, REP_NONE, x, LU_NOV, LU_NOV, 0);
-        g->cur = -1;
+        lu_ev_leave_root(c, x, 0);
         return 0;
     }
     /* The frame is gone before its references are; the value is the
@@ -754,6 +741,26 @@ lu_ev_return(struct ctx *c)
     lu_ev_drop(c, c->funcv);
     lu_ev_state_pop(g);
     return lu_ev_returned(c, v);
+}
+
+void
+lu_ev_leave_root(struct ctx *c, lu_v x, int raised)
+{
+    struct gctx *g = c->g;
+    /* GH-99729: a finalizer the releases run sees the caller on top. */
+    lu_ev_emit(c, OP_UNLINK, REP_NONE, LU_NOV, LU_NOV, LU_NOV, 0);
+    while (*depth_of(c) > 0) {
+        lu_ev_pop(c);
+    }
+    for (int i = 0; i < c->nlocals; i++) {
+        lu_ev_set_local(c, i, LU_NOV);
+    }
+    g->leaving = 1;
+    lu_ev_settle(c, c->pc);
+    g->leaving = 0;
+    g->keep = LU_NOV;
+    lu_ev_emit(c, OP_RETURN, REP_NONE, x, LU_NOV, LU_NOV, raised);
+    g->cur = -1;
 }
 
 int

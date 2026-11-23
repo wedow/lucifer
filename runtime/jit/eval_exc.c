@@ -200,6 +200,53 @@ raised_arm(struct ctx *c, void *arg)
     throw_to(c, t->h, t->handler, t->level, exc);
 }
 
+/* Whether an exception raised at c's instruction leaves the unit's root
+   with no handler on the way: every frame inside the root the kernel's
+   (no traceback entry), none a generator's, and what this instruction
+   raised has kept leaving (lu_jit_raises_out). */
+static int
+leaves_root(struct ctx *c)
+{
+    for (struct ctx *k = c; k != NULL; k = k->parent) {
+        int level, handler, lasti;
+        if (lu_ev_in_gen(k) || (!k->kernel && k->parent != NULL) || (k->code->co_flags & LU_CO_GENERATORS)
+            || lu_exception_handler(k->code, k->pc, &level, &handler, &lasti)) {
+            return 0;
+        }
+    }
+    return lu_jit_raises_out(c->code, c->pc);
+}
+
+/* The way a helper raised that leaves the root: the frames inside it go
+   as the interpreter unwinds them, then the root returns with the
+   exception set (LU_JIT_RAISED). */
+static void
+raised_out(struct ctx *c, void *arg)
+{
+    struct gctx *g = c->g;
+    struct ctx *root = c;
+    while (root->parent != NULL) {
+        root = root->parent;
+    }
+    for (struct ctx *k = c; k != root; k = k->parent) {
+        for (int i = 0; i < k->nlocals + *depth_of(k); i++) {
+            lu_ev_drop(k, slots(k)[i]);
+        }
+        lu_ev_drop(k, k->funcv);
+        lu_ev_state_pop(g);
+    }
+    if (root->kernel) {
+        lu_ev_guard(root, OP_GUARD_FRAMES, LU_NOV, 1);
+    }
+    else {
+        /* As the interpreter's unwinding: the frame joins the traceback,
+           and the frame object that made gets the locals when it goes. */
+        lu_v pc = lu_ev_const_i(root, lasti_of(root));
+        lu_ev_helper(root, H_unwind_here, 1, &pc, 0);
+    }
+    lu_ev_leave_root(root, lu_ev_konst(root, NULL), 1);
+}
+
 /* A helper's failure: NULL, or -1 for a bit (FX_RAISE). */
 static lu_v
 failed(struct ctx *c, lu_v v)
@@ -213,6 +260,11 @@ lu_ev_caught(struct ctx *c, lu_v v)
 {
     struct thrown t;
     t.h = catcher(c, NULL, 0, &t.handler, &t.level);
+    if (t.h == NULL && c->g->cur >= 0 && leaves_root(c)) {
+        I(c, v)->flags |= INS_CAUGHT;
+        lu_ev_fork_with(c, failed(c, v), raised_out, NULL);
+        return;
+    }
     if (t.h == NULL || c->g->cur < 0) {
         return;
     }

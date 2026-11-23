@@ -67,16 +67,21 @@ PyErr_Occurred(void)
     return lu_err_occurred();
 }
 
-/* Whether calling `tp` runs only BaseException's own __new__ and __init__,
-   which CPython has in C: they store the arguments as args, and nothing
-   else can observe the call. */
+/* Whether calling `tp` with positional arguments runs only BaseException's
+   own __new__ and an __init__ that then only stores them as args (its
+   own, or AttributeError's and NameError's, whose keywords alone set
+   more), which CPython has in C: nothing else can observe the call. */
 static int
 plain_exception(PyTypeObject *tp)
 {
     PyTypeObject *base = (PyTypeObject *)PyExc_BaseException;
-    return Py_IS_TYPE(tp, &PyType_Type)
-        && _PyType_Lookup(tp, LU_ID(__new__)) == _PyType_Lookup(base, LU_ID(__new__))
-        && _PyType_Lookup(tp, LU_ID(__init__)) == _PyType_Lookup(base, LU_ID(__init__));
+    if (!Py_IS_TYPE(tp, &PyType_Type) || _PyType_Lookup(tp, LU_ID(__new__)) != _PyType_Lookup(base, LU_ID(__new__))) {
+        return 0;
+    }
+    PyObject *init = _PyType_Lookup(tp, LU_ID(__init__));
+    return init == _PyType_Lookup(base, LU_ID(__init__))
+        || init == _PyType_Lookup((PyTypeObject *)PyExc_AttributeError, LU_ID(__init__))
+        || init == _PyType_Lookup((PyTypeObject *)PyExc_NameError, LU_ID(__init__));
 }
 
 /* BaseException_vectorcall: a call with positional arguments of a class

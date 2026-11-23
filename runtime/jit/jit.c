@@ -63,6 +63,7 @@
 #define NOSPEC 1
 #define NOHOIST 2
 #define CATCH 4                 /* at a kernel handler: what a call raises under it is taken in the unit */
+#define RAISES 8                /* at an instruction: what it raises leaves the unit, which returns it */
 /* A guard that fails this often makes its instruction generic, and at
    least once per INS_PER_FAIL instructions its root's last build made: an
    exit costs about what building two instructions does (4,700 machine
@@ -366,6 +367,13 @@ lu_jit_nohoist(PyCodeObject *code, int pc)
 {
     struct lu_jit_code *jc = state_of(code);
     return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & NOHOIST);
+}
+
+int
+lu_jit_raises_out(PyCodeObject *code, int pc)
+{
+    struct lu_jit_code *jc = state_of(code);
+    return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & RAISES);
 }
 
 int
@@ -1379,9 +1387,10 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         }
         ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
     }
-    else if (r == LU_JIT_RETURN) {
+    else if (r == LU_JIT_RETURN || r == LU_JIT_RAISED) {
         lu_frame_pop(ts, frame);
         ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
+        *result = r == LU_JIT_RETURN ? *result : NULL;
     }
     else {
         *result = lu_eval_continue(ts, r == LU_JIT_ERROR);
@@ -1486,6 +1495,21 @@ kernel_handler(struct lu_deopt *d, int k)
     return lu_exception_handler(fr->code, at, &level, &handler, &lasti) && !lasti ? handler : -1;
 }
 
+/* Whether every frame of an exit inside the root is kernel code, and none
+   a generator's: no inlined frame makes a traceback entry (the root's the
+   unit makes itself, eval_exc.c). */
+static int
+all_kernel(struct lu_deopt *d)
+{
+    for (int i = 0; i < d->nframes; i++) {
+        PyCodeObject *co = lu_deopt_frame(d, i)->code;
+        if ((!(co->co_flags & LU_CO_KERNEL) && i > 0) || (co->co_flags & LU_CO_GENERATORS)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* The frame of an error exit whose handler takes its exception, as the
    interpreter unwinds it, or -1 when the exception leaves the root frame. */
 static int
@@ -1584,12 +1608,18 @@ lu_jit_note_exit(struct lu_deopt *d)
     }
     struct lu_unit *u = d->unit;
     int handled = d->reason == EXIT_ERROR ? handling_frame(d) : d->nframes - 1;
-    if (handled < 0) {
+    /* An exception that leaves the root through kernel frames only is the
+       root's return once it keeps doing so: counted at the raising site. */
+    int out = handled < 0 && d->reason == EXIT_ERROR && d->catchable && all_kernel(d);
+    if (handled < 0 && !out) {
         return;
     }
+    if (out) {
+        handled = d->nframes - 1;
+    }
     /* Only an exit a rebuild can take in the unit teaches it to. */
-    int caught = d->reason == EXIT_ERROR && d->catchable ? kernel_handler(d, handled) : -1;
-    if (d->reason == EXIT_ERROR || (d->reason == EXIT_SIDE && d->nframes == 1)) {
+    int caught = d->reason == EXIT_ERROR && d->catchable && !out ? kernel_handler(d, handled) : -1;
+    if (!out && (d->reason == EXIT_ERROR || (d->reason == EXIT_SIDE && d->nframes == 1))) {
         leave(d, u, 0);
         if (d->reason != EXIT_ERROR || (handled == 0 && caught < 0)) {
             return;
@@ -1624,6 +1654,10 @@ lu_jit_note_exit(struct lu_deopt *d)
             struct lu_jit_code *hc = state_for(inner->code);
             again = __atomic_fetch_or(&hc->nospec[caught], CATCH, __ATOMIC_RELAXED) & CATCH;
         }
+        else if (out) {
+            /* What it raises keeps leaving the unit: the unit returns it. */
+            again = __atomic_fetch_or(&jc->nospec[site_pc], RAISES, __ATOMIC_RELAXED) & RAISES;
+        }
         else if (d->reason != EXIT_GUARD) {
             /* The inlined copy keeps leaving here: it is called instead from
                now on (and if that call leaves its caller's copy, the caller next). */
@@ -1647,7 +1681,7 @@ lu_jit_note_exit(struct lu_deopt *d)
             return;
         }
         else if (u->built >= __atomic_load_n(&jc->marked, __ATOMIC_RELAXED)) {
-            if (d->reason != EXIT_ERROR) {
+            if (!out && d->reason != EXIT_ERROR) {
                 leave(d, u, 1);         /* an error exit counted its leave above */
             }
             return;

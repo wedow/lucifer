@@ -2988,6 +2988,8 @@ jit_enter:
         frame = (struct lu_frame *)ts->current_frame;
         LOAD_FRAME();
         goto error;
+    case LU_JIT_RAISED:
+        goto unwound;           /* the frame raised and has no handler: it goes */
     case LU_JIT_YIELD:
         /* The unit saved the frame as YIELD_VALUE does: its oparg is the instruction's before the resume point. */
         retval = result;
@@ -4302,6 +4304,7 @@ exception_unwind: {
     if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_PY_UNWIND)) {
         lu_monitor_unwind(ts, frame, INSTR_START());
     }
+unwound:;
     struct lu_frame *caller = frame->previous;
     if (frame->owner == LU_FRAME_GENERATOR) {
         lu_gen_finish(ts, frame);

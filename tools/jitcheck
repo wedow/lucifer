@@ -49,6 +49,9 @@ require that a count of the tier's does not grow with the iterations:
          stores) under user code's own handlers: compiles. None of its
          functions may be disabled or retired: an exit no rebuild can
          take in the unit teaches no rebuild.
+  bitexits the same program: error and side exits. The kernel code that
+         raises (del, the stores) returns the exception to the unit that
+         called it, whose handler takes it.
   compiled  tests/kernel/jit_compiled_calls.py, whose hot calls are of
          functions it cannot inline: direct calls (compiled code entered
          from C). Compiled code makes them itself.
@@ -293,6 +296,7 @@ GROWTH = {
     'caught': ('jit_caught.py', r'jit: entries .* error (\d+) frame (\d+)', 0),
     'userexc': ('jit_user_raises.py', r'jit: entries .* side (\d+) error (\d+)', 0, ('-X', 'lucifer_jit=on')),
     'bitexc': ('jit_bit_raises.py', r'jit: compiles (\d+)', 0, ('-X', 'lucifer_jit=on')),
+    'bitexits': ('jit_bit_raises.py', r'jit: entries .* side (\d+) error (\d+)', 0, ('-X', 'lucifer_jit=on')),
     'compiled': ('jit_compiled_calls.py', r'direct calls (\d+)', 0),
     'ccalls': ('jit_c_calls.py', r'direct calls (\d+)', 0),
     'shapes': ('jit_call_shapes.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),

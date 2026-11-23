@@ -44,6 +44,11 @@ static const struct exc_layout *
 layout_scan(PyTypeObject *tp)
 {
     for (size_t i = 0; i < sizeof layouts / sizeof layouts[0]; i++) {
+        if (tp == (PyTypeObject *)*layouts[i].root) {
+            return &layouts[i];         /* a root itself: the common case, no subtype walk */
+        }
+    }
+    for (size_t i = 0; i < sizeof layouts / sizeof layouts[0]; i++) {
         if (PyType_IsSubtype(tp, (PyTypeObject *)*layouts[i].root)) {
             return &layouts[i];
         }

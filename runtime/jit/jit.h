@@ -29,6 +29,9 @@ enum lu_jit_result {
     LU_JIT_YIELD,       /* the frame, a generator's, yields *result (a new reference): it is saved at its
                            resume point with its values, as the interpreter's YIELD_VALUE saves it, and is
                            still to be suspended */
+    LU_JIT_RAISED,      /* the frame's function raised (the exception is set) with no handler: the
+                           frame is still pushed, its slots released, as the interpreter's unwinding
+                           leaves it before it pops the frame */
 };
 
 /* Back-edges (at one site) or calls before a code is compiled

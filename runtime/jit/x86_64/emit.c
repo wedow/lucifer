@@ -4355,7 +4355,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         store(a, RAX, 0, RCX);
         op_rm(a, 0, 0x0FB6, RAX, R15, offsetof(struct lu_frame, home));
         op_rm(a, 0, 0x88, RAX, R15, offsetof(struct lu_frame, owner));      /* its owner's again: lu_gen_finish's, a generator's */
-        mov_ri(a, RAX, 1);                      /* LU_JIT_RETURN */
+        mov_ri(a, RAX, in->imm ? LU_JIT_RAISED : LU_JIT_RETURN);           /* imm: the exception set, no value */
         jmp(a, a->epilogue);
         return 0;
     case OP_JUMP: case OP_BRANCH:
