@@ -2374,6 +2374,54 @@ release_in_line(struct asm_ *a, int r, int done)
     jcc(a, CC_E, done);
 }
 
+/* mi_free's fast path for the block in RAX, which nothing else holds:
+   a block of a page of this thread's segment that is neither full nor
+   holds aligned blocks goes on the page's local free list, and its used
+   count drops; then `done`. Anything else, or the page's last block
+   (whose page retires), goes on to `other` with RAX as it was. Clobbers
+   RCX, R11. */
+static void
+free_in_line(struct asm_ *a, int other, int done)
+{
+    _Static_assert(sizeof(mi_slice_t) == sizeof(mi_page_t), "a page is its first slice");
+    mov_rr(a, RCX, RAX);
+    mov_ri(a, R11, (int64_t)~(uint64_t)MI_SEGMENT_MASK);
+    alu_rr(a, ALU_AND, RCX, R11);               /* the segment */
+    thread_id(a, R11);
+    cmp_rm(a, R11, RCX, offsetof(mi_segment_t, thread_id));
+    jcc(a, CC_NE, other);                       /* another thread's: mi_free sorts it */
+    mov_rr(a, R11, RAX);
+    alu_rr(a, ALU_SUB, R11, RCX);
+    rex(a, 1, 0, 0, R11);
+    b1(a, 0xC1);
+    modrm_rr(a, 5, R11);
+    b1(a, MI_SEGMENT_SLICE_SHIFT);              /* shr r11: the slice's index */
+    rex(a, 1, R11, 0, R11);
+    b1(a, 0x69);
+    modrm_rr(a, R11, R11);
+    b4(a, (int32_t)sizeof(mi_slice_t));         /* imul r11, r11, size */
+    alu_rr(a, ALU_ADD, R11, RCX);
+    alu_ri(a, ALU_ADD, R11, offsetof(mi_segment_t, slices));
+    load32(a, RCX, R11, offsetof(mi_slice_t, slice_offset));
+    alu_rr(a, ALU_SUB, R11, RCX);               /* the page: the area's first slice */
+    cmp8_mi(a, R11, offsetof(mi_page_t, flags), 0);
+    jcc(a, CC_NE, other);                       /* full, or aligned blocks */
+    b1(a, 0x66);
+    rex(a, 0, 0, 0, R11);
+    b1(a, 0x83);
+    modrm_mem(a, ALU_CMP, R11, offsetof(mi_page_t, used));
+    b1(a, 1);                                   /* cmp word [r11+used], 1 */
+    jcc(a, CC_E, other);                        /* the last block: the page retires */
+    load(a, RCX, R11, offsetof(mi_page_t, local_free));
+    store(a, RAX, 0, RCX);                      /* the block's next, unencoded in this build */
+    store(a, R11, offsetof(mi_page_t, local_free), RAX);
+    b1(a, 0x66);
+    rex(a, 0, 0, 0, R11);
+    b1(a, 0xFF);
+    modrm_mem(a, 1, R11, offsetof(mi_page_t, used));   /* dec word [r11+used] */
+    jmp(a, done);
+}
+
 /* test r64, imm32 */
 static void
 test_ri(struct asm_ *a, int r, int32_t imm)
@@ -2385,7 +2433,8 @@ test_ri(struct asm_ *a, int r, int32_t imm)
 }
 
 /* The release of an instance of a Python class (type in RAX, object in
-   r, RDX) whose lu_subtype_dealloc would only release its attributes,
+   r, RDX; its tp_dealloc lu_subtype_dealloc, as the caller saw) whose
+   dealloc would only release its attributes,
    its type and its block: no __del__ (tp_finalize), no weak reference to
    it (an empty list, or none), no __slots__ of its own and object as its
    base, no dict (its attributes inline). Nothing it holds dies with it:
@@ -2401,10 +2450,6 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     int failed = new_label(a), noweak = new_label(a), nodict = new_label(a), typed = new_label(a);
     int scan = new_label(a), scanned = new_label(a), drop = new_label(a), dropped = new_label(a);
     int whole = new_label(a), untyped = new_label(a);
-    load(a, R11, RAX, offsetof(PyTypeObject, tp_dealloc));
-    mov_ri(a, RCX, (int64_t)(intptr_t)lu_subtype_dealloc);
-    alu_rr(a, ALU_CMP, R11, RCX);
-    jcc(a, CC_NE, fail);
     cmp_mi(a, 1, RAX, offsetof(PyTypeObject, tp_finalize), 0);
     jcc(a, CC_NE, fail);
     mov_ri(a, RCX, (int64_t)(intptr_t)&PyBaseObject_Type);
@@ -2499,14 +2544,19 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     modrm_mem(a, 4, r, offsetof(PyObject, ob_gc_bits));
     b1(a, (uint8_t)~LU_GC_TRACKED);             /* and byte [r+gc_bits]: the collector's no longer */
     load(a, RAX, RAX, offsetof(PyTypeObject, tp_flags));
-    save_volatile(a);                           /* aligned: the push and the call to the stub */
-    mov_rr(a, RDI, r);
     test_ri(a, RAX, Py_TPFLAGS_PREHEADER);
+    mov_rr(a, RAX, r);
     jcc(a, CC_E, whole);
-    alu_ri(a, ALU_SUB, RDI, 2 * sizeof(PyObject *));  /* a heap subclass's block starts at the preheader */
+    alu_ri(a, ALU_SUB, RAX, 2 * sizeof(PyObject *));  /* a heap subclass's block starts at the preheader */
     bind(a, whole);
+    int freed = new_label(a), call = new_label(a);
+    free_in_line(a, call, freed);
+    bind(a, call);
+    save_volatile(a);                           /* aligned: the push and the call to the stub */
+    mov_rr(a, RDI, RAX);
     call_abs(a, (void *)mi_free);
     restore_volatile(a);
+    bind(a, freed);
     b1(a, 0x41);
     b1(a, 0x5A);                                /* pop r10 */
     jmp(a, done);
@@ -2516,29 +2566,13 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     jmp(a, fail);
 }
 
+/* The object in r dies now if its count is the owner's last (local one,
+   this thread's, nothing shared) and no hook observes the allocators;
+   else `other`. Clobbers RCX, R11; RAX kept. */
 static void
-release_stub(struct asm_ *a)
+owner_dies(struct asm_ *a, int r, int other)
 {
-    const int r = RDX;
-    int other = new_label(a), done = new_label(a);
-    bind(a, a->release - 1);
-    int not_int = new_label(a), not_float = new_label(a), scan = new_label(a), scanned = new_label(a);
-    int drop = new_label(a), dropped = new_label(a), back = new_label(a), kind = new_label(a);
-    /* The kinds first: most objects released another way leave here. */
-    load(a, RAX, r, offsetof(PyObject, ob_type));
-    static PyTypeObject *const kinds[] = { &PyLong_Type, &PyFloat_Type, &PyTuple_Type, &PyUnicode_Type };
-    for (int k = 0; k < 4; k++) {
-        mov_ri(a, R11, (int64_t)(intptr_t)kinds[k]);
-        alu_rr(a, ALU_CMP, RAX, R11);
-        jcc(a, CC_E, kind);
-    }
-    load(a, R11, RAX, offsetof(PyTypeObject, tp_dealloc));
-    mov_ri(a, RCX, (int64_t)(intptr_t)lu_subtype_dealloc);
-    alu_rr(a, ALU_CMP, R11, RCX);
-    jcc(a, CC_NE, other);
-    bind(a, kind);
-    load32(a, RCX, r, offsetof(PyObject, ob_ref_local));
-    cmp32_ri8(a, RCX, 1);
+    cmp_mi(a, 0, r, offsetof(PyObject, ob_ref_local), 1);
     jcc(a, CC_NE, other);                       /* merged, or another thread's */
     thread_id(a, R11);
     cmp_rm(a, R11, r, offsetof(PyObject, ob_tid));
@@ -2548,30 +2582,53 @@ release_stub(struct asm_ *a)
     mov_ri(a, R11, (int64_t)(intptr_t)&_PyRuntime.allocators.observed);
     cmp_mi(a, 0, R11, 0, 0);
     jcc(a, CC_NE, other);
+}
+
+static void
+release_stub(struct asm_ *a)
+{
+    const int r = RDX;
+    int other = new_label(a), done = new_label(a);
+    bind(a, a->release - 1);
+    int not_int = new_label(a), not_float = new_label(a), scan = new_label(a), scanned = new_label(a);
+    int drop = new_label(a), dropped = new_label(a), back = new_label(a);
+    int instance = new_label(a), not_str = new_label(a);
+    /* The kind first, each to its own code: most objects released another
+       way leave here. The type stays in RAX. */
+    int labels[4] = { new_label(a), not_int, not_float, not_str };
     load(a, RAX, r, offsetof(PyObject, ob_type));
-    mov_ri(a, R11, (int64_t)(intptr_t)&PyLong_Type);
-    alu_rr(a, ALU_CMP, RAX, R11);
-    jcc(a, CC_NE, not_int);
+    static PyTypeObject *const kinds[] = { &PyLong_Type, &PyFloat_Type, &PyUnicode_Type, &PyTuple_Type };
+    for (int k = 0; k < 4; k++) {
+        mov_ri(a, R11, (int64_t)(intptr_t)kinds[k]);
+        alu_rr(a, ALU_CMP, RAX, R11);
+        jcc(a, CC_E, labels[k]);
+    }
+    load(a, R11, RAX, offsetof(PyTypeObject, tp_dealloc));
+    mov_ri(a, RCX, (int64_t)(intptr_t)lu_subtype_dealloc);
+    alu_rr(a, ALU_CMP, R11, RCX);
+    jcc(a, CC_E, instance);
+    jmp(a, other);
+    bind(a, labels[0]);
+    owner_dies(a, r, other);
     cmp_mi(a, 1, r, offsetof(PyLongObject, long_value.lv_tag), 2 << _PyLong_NON_SIZE_BITS);
     jcc(a, CC_AE, back);                        /* not compact */
     entry_of(a, RAX);
     freelist_push(a, r, RAX, offsetof(struct lu_entry, free_ints), back, done);
-    bind(a, not_int);
-    mov_ri(a, R11, (int64_t)(intptr_t)&PyFloat_Type);
-    alu_rr(a, ALU_CMP, RAX, R11);
-    jcc(a, CC_NE, not_float);
+    bind(a, not_int);                           /* a float */
+    owner_dies(a, r, other);
     entry_of(a, RAX);
     freelist_push(a, r, RAX, offsetof(struct lu_entry, free_floats), back, done);
-    bind(a, not_float);
-    int instance = new_label(a), not_str = new_label(a);
-    mov_ri(a, R11, (int64_t)(intptr_t)&PyUnicode_Type);
-    alu_rr(a, ALU_CMP, RAX, R11);
-    jcc(a, CC_NE, not_str);
+    bind(a, not_float);                         /* a str */
+    owner_dies(a, r, other);
     /* An exact compact ascii str holds nothing but its block (str_dealloc). */
     load32(a, RAX, r, offsetof(PyASCIIObject, state));
     alu_ri(a, ALU_AND, RAX, str_state(0, 1));
     alu_ri(a, ALU_CMP, RAX, str_state(0, 1));
     jcc(a, CC_NE, back);
+    mov_rr(a, RAX, r);
+    int str_call = new_label(a);
+    free_in_line(a, str_call, done);
+    bind(a, str_call);
     alu_ri(a, ALU_SUB, RSP, 8);                 /* aligned for the call (the stub's own return address) */
     save_volatile(a);
     mov_rr(a, RDI, r);
@@ -2579,10 +2636,8 @@ release_stub(struct asm_ *a)
     restore_volatile(a);
     alu_ri(a, ALU_ADD, RSP, 8);
     jmp(a, done);
-    bind(a, not_str);
-    mov_ri(a, R11, (int64_t)(intptr_t)&PyTuple_Type);
-    alu_rr(a, ALU_CMP, RAX, R11);
-    jcc(a, CC_NE, instance);
+    bind(a, not_str);                           /* a tuple */
+    owner_dies(a, r, other);
     load(a, RCX, r, offsetof(PyVarObject, ob_size));
     alu_ri(a, ALU_SUB, RCX, 1);
     alu_ri(a, ALU_CMP, RCX, LU_FREE_TUPLE_SIZES - 1);
@@ -2641,6 +2696,7 @@ release_stub(struct asm_ *a)
     alu_rr(a, ALU_ADD, RAX, R11);
     freelist_push(a, r, RAX, lists - (int32_t)sizeof(struct lu_freelist), -1, done);   /* room: seen above */
     bind(a, instance);
+    owner_dies(a, r, other);
     release_instance(a, r, back, done);
     bind(a, back);
     bind(a, other);
