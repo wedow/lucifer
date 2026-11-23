@@ -5,9 +5,11 @@
 # storing right after another instance's name takes a str; ints and
 # floats stored by compiled code into a name that holds objects read
 # back as those numbers; compiled stores of computed numbers replace
-# boxes, markers and deleted words alike. Every value must be the
-# interpreter's.
+# boxes, markers and deleted words alike; values that move to a dict
+# under compiled loops. Every value must be the interpreter's.
+import copy
 import gc
+import pickle
 import sys
 
 try:
@@ -178,6 +180,48 @@ def many_classes(n):
     return all(inline_kinds_ok(o) for o in objs), sum(o.x for o in objs)
 
 
+class M:
+    def __init__(self, i):
+        self.a = i
+        self.b = i * 0.5
+        self.c = 'c'
+
+
+class M2(M):
+    pass
+
+
+def moves(n):
+    # Instances whose values move to a dict while compiled loops read and
+    # store them: vars(), __dict__, __class__ assignment, a copy of the
+    # dict, pickling; and a class whose every instance moves, every time.
+    ms = [M(i) for i in range(10)]
+    s = 0.0
+    for i in range(n):
+        m = ms[i % 10]
+        s += m.a + m.b
+        m.a = m.a + 1
+        m.b = m.b * 0.5 + 1.0
+        m.c = m.c if i % 3 else 'c'
+        if i == n // 5:
+            vars(ms[1])
+        if i == 2 * n // 5:
+            ms[2].__dict__['a'] = 1000
+        if i == 3 * n // 5:
+            ms[3].__class__ = M2
+        if i == 4 * n // 5:
+            copy.copy(ms[4].__dict__)
+            ms[5] = pickle.loads(pickle.dumps(ms[5]))
+    every = [M(i) for i in range(10)]
+    t = 0
+    for i in range(n // 10):
+        for m in every:
+            t += m.a + len(vars(m))
+            m.a = m.a + 1
+    return (all(inline_kinds_ok(m) for m in ms), round(s, 3), [m.a for m in ms], [round(m.b, 6) for m in ms],
+            t, [m.a for m in every])
+
+
 print('callee', wait_callee(N))
 print('finalizer', wait_finalizer(N))
 print('eq', wait_eq(N))
@@ -185,3 +229,4 @@ print('stale store', stale_store(N))
 print('numbers into objects', numbers_into_objects(N))
 print('raw stores', raw_stores(N))
 print('many classes', many_classes(N))
+print('moves', moves(N))

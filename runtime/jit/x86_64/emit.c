@@ -3347,6 +3347,22 @@ cmp_operands(struct asm_ *a, lu_v x, lu_v y, int op)
     return cond_of(op, 0);
 }
 
+/* To `label` when the object in r keeps its attributes in a dict. Only a
+   word found absent needs this: values that move to a dict leave every
+   word NULL for good (attrs.c move_to_dict), and an index below the
+   class's count is in every live instance's room, so a word that holds a
+   value is in line, for a store under the object's lock (or serial)
+   always, for a load as of its read. */
+static void
+in_dict_jump(struct asm_ *a, int r, int label)
+{
+    rex(a, 0, 0, 0, r);
+    b1(a, 0xF6);
+    modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
+    b1(a, LU_ATTRS_IN_DICT >> 8);               /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
+    jcc(a, CC_NE, label);
+}
+
 /* The raw word of the word at in->imm of the object in r, into v. */
 static void
 raw_into(struct asm_ *a, struct lu_ins *in, lu_v v, int r, int is_int)
@@ -3419,11 +3435,6 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
         test_rr(a, RAX, RAX);
         jcc(a, CC_NE, typed);
     }
-    rex(a, 0, 0, 0, r);
-    b1(a, 0xF6);
-    modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
-    b1(a, LU_ATTRS_IN_DICT >> 8);
-    jcc(a, CC_NE, fail);
     load(a, RAX, r, (int32_t)in->imm);
     alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)(is_int ? LU_UNBOXED_INT : LU_UNBOXED));
     jcc(a, CC_NE, boxed);
@@ -3728,7 +3739,6 @@ inline_store_raw(struct asm_ *a, lu_v v)
     int fail = guard_exit(a, in);
     int fresh = !store_locks(a, in, fail);
     int slow = new_label(a), unlock_slow = new_label(a), done = new_label(a);
-    int32_t flags = offsetof(PyObject, ob_flags) + 1;
     int32_t off = (int32_t)in->imm;
     struct lu_deopt *d = lu_publishes(in) ? published(a, in) : NULL;
     int general = -1;
@@ -3741,11 +3751,6 @@ inline_store_raw(struct asm_ *a, lu_v v)
         int boxed = new_label(a);
         general = new_label(a);
         int r = gpr_of(a, in->a, RDI);
-        rex(a, 0, 0, 0, r);
-        b1(a, 0xF6);
-        modrm_mem(a, 0, r, flags);
-        b1(a, LU_ATTRS_IN_DICT >> 8);
-        jcc(a, CC_NE, general);
         load(a, RBX, r, off);                   /* the old value: nothing is live here (IF_CALL) */
         alu_ri(a, ALU_CMP, RBX, marker);
         jcc(a, CC_NE, boxed);
@@ -3784,21 +3789,14 @@ inline_store_raw(struct asm_ *a, lu_v v)
     if (in->imm2 & LU_STORE_BY_C) {
         jmp(a, slow);                           /* the name's kind is C's to keep (attrs.c) */
     }
-    b1(a, 0xF6);
-    modrm_mem(a, 0, RDI, flags);
-    b1(a, LU_ATTRS_IN_DICT >> 8);               /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
-    jcc(a, CC_NE, slow);
     if (!fresh) {
         lock_object(a, RDI, RCX, slow);
-        b1(a, 0xF6);
-        modrm_mem(a, 0, RDI, flags);
-        b1(a, LU_ATTRS_IN_DICT >> 8);
-        jcc(a, CC_NE, unlock_slow);             /* moved to the dict before the lock */
     }
     load(a, RBX, RDI, off);                     /* the old value, kept across calls */
     int have = new_label(a);
     test_rr(a, RBX, RBX);
     jcc(a, CC_NE, have);
+    in_dict_jump(a, RDI, unlock_slow);
     fresh_word(a, in, RDI, unlock_slow);        /* a name new to the instance */
     bind(a, have);
     store(a, RDI, off + 8, R13);                /* the raw value */
@@ -4583,7 +4581,6 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int fresh = !store_locks(a, in, fail);
         int slow = new_label(a), unlock_slow = new_label(a), immortal = new_label(a);
         int done = new_label(a);
-        int32_t flags = offsetof(PyObject, ob_flags) + 1;
         int32_t off = (int32_t)in->imm;
         struct lu_deopt *d = lu_publishes(in) ? published(a, in) : NULL;
         parallel_moves(a, m, 2);
@@ -4592,16 +4589,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         if (in->imm2 & LU_STORE_BY_C) {
             jmp(a, slow);                       /* the name's kind is C's to keep (attrs.c) */
         }
-        b1(a, 0xF6);
-        modrm_mem(a, 0, RDI, flags);
-        b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [rdi+flags+1], LU_ATTRS_IN_DICT */
-        jcc(a, CC_NE, slow);
         if (!fresh) {
             lock_object(a, RDI, RCX, slow);
-            b1(a, 0xF6);
-            modrm_mem(a, 0, RDI, flags);
-            b1(a, LU_ATTRS_IN_DICT >> 8);
-            jcc(a, CC_NE, unlock_slow);         /* moved to the dict before the lock */
         }
         /* Under a name whose raw words hold ints (floats), the value's
            raw word into RAX, stored with it: an int of one digit (an exact
@@ -4644,6 +4633,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int have = new_label(a), take = new_label(a);
         test_rr(a, RBX, RBX);
         jcc(a, CC_NE, have);
+        in_dict_jump(a, RDI, unlock_slow);
         fresh_word(a, in, RDI, unlock_slow);    /* a name new to the instance */
         jmp(a, take);
         bind(a, have);
@@ -4706,15 +4696,10 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
     }
     case OP_INLINE_LOAD: {
         /* LOAD_ATTR_INSTANCE_VALUE in line, after its version guard: the
-           owner still keeps its inline values, the word at imm holds a value,
-           and the owning thread takes the reference in place. */
+           word at imm holds a value (in line, in_dict_jump), and the owning
+           thread takes the reference in place. */
         int fail = guard_exit(a, in);
         r = gpr_of(a, in->a, RDX);
-        rex(a, 0, 0, 0, r);
-        b1(a, 0xF6);
-        modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
-        b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
-        jcc(a, CC_NE, fail);
         int unboxed = new_label(a), done = new_label(a);
         int64_t class_value = LU_LOAD_CLASS_VALUE(in->imm2);
         int objects = LU_LOAD_KIND(in->imm2) == LU_FIELD_OBJECT;  /* no marker under an object name (attrs.c) */
@@ -4726,11 +4711,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
                the class's value, immortal (eval_attr.c). */
             int own = new_label(a);
             jcc(a, CC_NE, own);
-            rex(a, 0, 0, 0, r);
-            b1(a, 0xF6);
-            modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
-            b1(a, LU_ATTRS_IN_DICT >> 8);       /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
-            jcc(a, CC_NE, fail);
+            in_dict_jump(a, r, fail);
             mov_ri(a, RAX, class_value);
             jmp(a, done);
             bind(a, own);
@@ -4783,14 +4764,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         int fail = guard_exit(a, in);
         int have = new_label(a), done = new_label(a);
         r = gpr_of(a, in->a, RDX);
-        rex(a, 0, 0, 0, r);
-        b1(a, 0xF6);
-        modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
-        b1(a, LU_ATTRS_IN_DICT >> 8);           /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
-        jcc(a, CC_NE, fail);
         load(a, RAX, r, (int32_t)in->imm);
         test_rr(a, RAX, RAX);
-        jcc(a, CC_E, fail);
+        jcc(a, CC_E, fail);                     /* absent, or in a dict (in_dict_jump) */
         alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
         jcc(a, CC_A, have);
         alu_rr(a, ALU_XOR, RAX, RAX);
