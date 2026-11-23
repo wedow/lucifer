@@ -3590,12 +3590,14 @@ unlock_object(struct asm_ *a, int r, int tmp, int keep)
 /* Whether a store that locks in line takes the lock: not into an instance
    no other thread can see (INS_FRESH), nor while serial (INS_UNLOCKED,
    runtime/jit/facts.c), when a store the unit may have died before checks
-   that it lives first and leaves at `fail`, before storing. */
+   that it lives first and leaves before storing, as at a poll: no guard
+   failed, and the site must not count one (a unit that dies often would
+   make its site generic). */
 static int
-store_locks(struct asm_ *a, struct lu_ins *in, int fail)
+store_locks(struct asm_ *a, struct lu_ins *in)
 {
     if (in->flags & INS_RECHECK) {
-        jump_if_dead(a, fail);
+        jump_if_dead(a, exit_to(a, in->fs, EXIT_POLL, 0, 0));
     }
     return !(in->flags & (INS_FRESH | INS_UNLOCKED));
 }
@@ -3618,7 +3620,7 @@ typed_item(struct asm_ *a, struct lu_ins *in, lu_v v)
     int width = code == 'b' || code == 'B' ? 1 : code == 'h' || code == 'H' ? 2
         : code == 'i' || code == 'I' || code == 'f' ? 4 : 8;
     int fail = guard_exit(a, in), out = new_label(a), done = new_label(a);
-    int locks = store_locks(a, in, fail);
+    int locks = store_locks(a, in);
     int o = gpr_of(a, in->a, RDX), i = gpr_of(a, in->b, RCX);
     int x = store_ && f ? fpr_of(a, in->c, 0) : -1;     /* before RAX holds anything: a constant passes through it */
     if (store_ && !f && code != 'q' && code != 'l') {
@@ -3758,7 +3760,7 @@ inline_store_raw(struct asm_ *a, lu_v v)
     struct move m[2] = { { RDI, in->a, 0, 0 }, is_int ? (struct move){ RSI, in->b, 0, 0 }
                                                       : (struct move){ XMM(0), in->b, 0, 1 } };
     int fail = guard_exit(a, in);
-    int fresh = !store_locks(a, in, fail);
+    int fresh = !store_locks(a, in);
     int slow = new_label(a), unlock_slow = new_label(a), done = new_label(a);
     int32_t off = (int32_t)in->imm;
     struct lu_deopt *d = lu_publishes(in) ? published(a, in) : NULL;
@@ -4574,7 +4576,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            is lu_jit_list_store's. */
         struct move m[3] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 }, { RDX, in->c, 0, 0 } };
         int fail = guard_exit(a, in), slow = new_label(a), out = new_label(a), done = new_label(a);
-        int locks = store_locks(a, in, fail);
+        int locks = store_locks(a, in);
         struct lu_deopt *d = published(a, in);
         parallel_moves(a, m, 3);
         if (locks) {
@@ -4614,7 +4616,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            else is lu_inline_store's, and leaves when it declines. */
         struct move m[2] = { { RDI, in->a, 0, 0 }, { RSI, in->b, 0, 0 } };
         int fail = guard_exit(a, in);
-        int fresh = !store_locks(a, in, fail);
+        int fresh = !store_locks(a, in);
         int slow = new_label(a), unlock_slow = new_label(a), immortal = new_label(a);
         int done = new_label(a);
         int32_t off = (int32_t)in->imm;
