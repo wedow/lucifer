@@ -146,9 +146,6 @@ _PyCriticalSection_SuspendAll(PyThreadState *tstate)
 LU_EXPORT void
 _PyCriticalSection_Resume(PyThreadState *tstate)
 {
-    if (lu_serial()) {
-        return;
-    }
     uintptr_t p = tstate->critical_section;
     PyCriticalSection *c = untag_critical_section(p);
     assert(!is_active(p));

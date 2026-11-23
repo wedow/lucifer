@@ -1775,7 +1775,7 @@ publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
     mov_ri(a, RAX, 0x1122334455667788LL);       /* d's address, patched (pack) */
     store(a, R15, offsetof(struct lu_frame, jit_desc), RAX);
     if (a->serial) {
-        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 0);    /* what returns from the call checks before an unlocked store */
+        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 0);    /* in the call: what returns checks before an unlocked store */
     }
     a->nheld = a->parking ? 0 : holds_of(a, in, &a->held);
     d->takes = takes_of(a, in, a->held, a->nheld);
@@ -1805,6 +1805,9 @@ unpublish(struct asm_ *a, int rep)
         a->inlined = 0;
     }
     store_mi(a, R15, offsetof(struct lu_frame, jit_desc), 0);
+    if (a->serial) {
+        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 1);    /* out of the call, before any check reads the unit */
+    }
     if (a->nheld == 0) {
         return;
     }
@@ -2058,15 +2061,10 @@ call_helper(struct asm_ *a, lu_v v, struct lu_deopt *d)
     }
 }
 
-/* Leaves at `dead` once the unit is dead (runtime/jit/deps.c). Clobbers R11.
-   In a unit that stores without locks, the task's unlocked_jit is 1 first:
-   what follows may store before the next check (runtime/thread/task.c). */
+/* Leaves at `dead` once the unit is dead (runtime/jit/deps.c). Clobbers R11. */
 static void
 jump_if_dead(struct asm_ *a, int dead)
 {
-    if (a->serial) {
-        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 1);
-    }
     mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->dead);
     cmp_mi(a, 0, R11, 0, 0);
     jcc(a, CC_NE, dead);
@@ -4515,6 +4513,7 @@ direct_entry(struct asm_ *a)
     if (a->serial) {
         load(a, R11, R14, (int32_t)offsetof(struct lu_task, unlocked_jit));
         store(a, R9, offsetof(struct lu_jit_call, act.unlocked_jit), R11);     /* back at its end */
+        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 1);    /* before the unit's death is read */
     }
     jump_if_dead(a, decline);                   /* a caller may have read the entry before it died */
     load(a, RAX, R14, offsetof(struct lu_task, carrier));
