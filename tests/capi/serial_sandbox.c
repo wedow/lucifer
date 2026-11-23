@@ -1,8 +1,10 @@
 /* The switch out of the serial state when the process-wide barrier it
    registered at startup is refused later, as a sandbox's seccomp filter
-   installed mid-run refuses it: the switch stops the world instead, and a
-   program that starts threads storing into shared objects runs to the end
-   with every value accounted for. */
+   installed mid-run refuses it: the switch stops the world instead. The
+   first task is attached and polling, in a hot loop of stores into shared
+   objects, when a foreign thread (pthread_create through ctypes) becomes the
+   second task and stops it; the loop goes on and every value is accounted
+   for. */
 
 #include "Python.h"
 
@@ -36,23 +38,29 @@ refuse_membarrier(void)
 }
 
 static const char program[] =
-    "import threading\n"
+    "import ctypes, threading\n"
     "class P:\n"
     "    def __init__(self): self.i = 0; self.o = None\n"
     "ps = [P() for _ in range(8)]\n"
     "xs = [None] * 32\n"
     "toks = [object() for _ in range(32)]\n"
-    "def other(n):\n"
-    "    for k in range(n):\n"
+    "done = threading.Event()\n"
+    "def other(arg):\n"
+    "    for k in range(200000):\n"
     "        p = ps[k & 7]; p.i = k; p.o = toks[k & 31]; xs[k & 31] = toks[(k + 1) & 31]\n"
+    "    done.set()\n"
+    "    return None\n"
+    "libc = ctypes.CDLL(None)\n"
+    "libc.pthread_create.argtypes = [ctypes.POINTER(ctypes.c_ulong), ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]\n"
+    "fn = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)(other)\n"
+    "tid = ctypes.c_ulong()\n"
     "def hot(n):\n"
-    "    th = []\n"
     "    for k in range(n):\n"
     "        p = ps[k & 7]; p.i = -k; p.o = toks[k & 31]; xs[k & 31] = toks[k & 31]\n"
-    "        if k == n // 3:\n"
-    "            t = threading.Thread(target=other, args=(n,)); t.start(); th.append(t)\n"
-    "    for t in th: t.join()\n"
-    "hot(300000)\n"
+    "        if k == n // 4:\n"
+    "            libc.pthread_create(ctypes.byref(tid), None, ctypes.cast(fn, ctypes.c_void_p), None)\n"
+    "hot(600000)\n"
+    "done.wait()\n"
     "ok = all(type(p.i) is int and p.o in toks for p in ps) and all(x in toks for x in xs)\n"
     "import sys\n"
     "sys.serial_sandbox_ok = ok\n";

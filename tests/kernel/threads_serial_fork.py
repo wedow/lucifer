@@ -1,11 +1,20 @@
 # As threads_serial_loop, in the child of a fork made while the parent
 # was still one thread: the child starts serial too (with its own barrier
 # registration), and its hot loop starts the second thread. The parent, still
-# one thread, runs the same loop with no thread after the child is done.
+# one thread, runs the same loop with no thread after the child is done, and
+# stays serial. The runtime's state is read where it exists (_lucifer); the
+# oracle, which has none, reports what it should be.
 import gc
 import os
 import sys
 import threading
+
+STARTED = []
+try:
+    from _lucifer import thread_serial
+except ImportError:
+    def thread_serial():
+        return not STARTED
 
 N = 400000
 START = 150000
@@ -51,6 +60,7 @@ def hot(ps, xs, n, spawn=True):
         p.o = t
         xs[k & 31] = t
         if k == START and spawn:
+            STARTED.append(k)
             th = threading.Thread(target=other, args=(ps, xs, N))
             th.start()
     return th
@@ -59,7 +69,9 @@ def hot(ps, xs, n, spawn=True):
 def main():
     ps = [P() for _ in range(8)]
     xs = [None] * 32
+    print("child serial before", thread_serial())
     hot(ps, xs, N).join()
+    print("child serial after", thread_serial())
     kinds = {(type(p.i).__name__, type(p.f).__name__, type(p.o).__name__) for p in ps}
     print(kinds <= {(a, b, "Tok") for a in ("int", "Tok") for b in ("float", "Tok")},
           all(type(x) is Tok for x in xs))
@@ -83,7 +95,7 @@ if pid == 0:
     os._exit(0)
 os.waitpid(pid, 0)
 hot(warm, [None] * 32, N, spawn=False)
-print("parent", threading.active_count(), type(warm[0].o).__name__)
+print("parent", threading.active_count(), type(warm[0].o).__name__, "serial", thread_serial())
 warm.clear()
 MINE.clear()
 THEIRS.clear()
