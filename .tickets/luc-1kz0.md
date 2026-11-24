@@ -267,9 +267,54 @@ Method: the same two binaries as the table (master ca02da54, branch on ca02da54)
 - Reading: A and B remove the classtests loss (level with master) and halve deltablue's whole-run loss (+5.8% to +2.3%), and deltablue's table window (calls 128-256) is level. Not met: json_loads calls 192-384 is +2.9% (+3.1% before A and B, so not theirs) and its early windows are worse than before (+1.9%, +5.5% against -1.3%, +2.5%), deltablue 256-512 +0.4% against -2.4%. The whole-run table (tab9) was not rerun.
 - The "steady" column of the final note is not steady state: its windows (json_loads calls 24-48, deltablue 128-256, richards 24-48, regex_v8 16-32, deepcopy 32-64, AWFY 20-60 iterations) are windows in which both arms still rebuild. Long-run figures (diagnosis note): json_loads +1.2% at calls 768-1536, deltablue +0.1% over 128-2048.
 
+**2026-11-24 final gate and whole-run table (base dbb9b594)**
+
+- Rebased onto origin/master dbb9b594 as luc-1kz0-land; one conflict, mechanical: master dropped the call_special helper, the branch adds call_any beside it (kept call_any, dropped call_special).
+- Review fixes (jit: ledger review fixes): out_calls and the per-entry loss clamped (a torn read of a callee's counters under another root's lock could cache a huge per_entry for good), the per-entry loss bounded by the unit's recorded losses; inline growth capped at master's MAX_GROWN (budget at most 16,000), the ledger still buys each doubling; check_ledger counts each purchase once per root and event; the classtests cap is 2 x 164,529 (the count this tree measures at 20,000 iterations; the earlier 203,280 was before the rebase); jit_grow_direct's comment corrected (under the ledger the callee's first build takes big in line, so it no longer exercises growth).
+- Gate on the fixed tree: focused kernel programs 64/64 in jit-off, plain, jit, jit-deopt; threads 7/7 in handoff; tools/jitcheck 0 failing (classtests 164,529 at 20,000 and 40,000; its ledger 56,958 first, 9,290 rebuilt, at most 76,070; churn 2,941 first, 9,692 rebuilt, at most 31,127); tools/jitcost PASS.
+- Table: master dbb9b594 against the branch on it; instructions:u, one measurement a core lease, two runs per arm alternated, min of the two. Whole run at the small size (pyperf richards -l 12, deltablue -l 64, json_loads -l 12, regex_v8 -l 8, deepcopy -l 16; AWFY 20 iterations); long window from the two larger sizes (pyperf -l 48/96, 512/1024, 384/768, 32/64, 64/128, as calls, a worker making 2N; AWFY 20/60 iterations). AWFY inner size 1, except CD 10 and Mandelbrot 500 (their inner count is the problem size; CD at 1 fails verification, as it did in the earlier tables). Compile ms, IR and code from one -X lucifer_jit_stats run per arm at the whole-run size.
+
+| program | whole run m/b (G) | whole | long window | per call/it. m/b | long | compile ms m/b | IR m/b | code KB m/b |
+|---|---|---|---|---|---|---|---|---|
+| pyflakes | 11.204/10.307 | -8.0% |  |  |  | 701/550 | 302k/235k | 40220/30887 |
+| black | 11.859/12.097 | +2.0% |  |  |  | 815/904 | 292k/315k | 32883/35282 |
+| pygments | 14.741/13.669 | -7.3% |  |  |  | 1016/593 | 194k/184k | 21880/21125 |
+| imports | 1.434/1.470 | +2.6% |  |  |  | 59/72 | 29k/33k | 3804/4178 |
+| richards | 6.844/6.959 | +1.7% | calls 96-192 | 122.57M/122.31M | -0.2% | 235/274 | 113k/120k | 13141/14199 |
+| deltablue | 9.328/9.403 | +0.8% | calls 1024-2048 | 32.43M/32.22M | -0.7% | 487/484 | 226k/209k | 21142/19937 |
+| json_loads | 4.750/4.607 | -3.0% | calls 768-1536 | 21.91M/22.31M | +1.8% | 292/392 | 110k/103k | 12885/12024 |
+| regex_v8 | 28.935/24.205 | -16.3% | calls 64-128 | 794.91M/867.50M | +9.1% | 1896/1030 | 312k/263k | 35870/30895 |
+| deepcopy | 4.214/4.130 | -2.0% | calls 128-256 | 5.87M/5.97M | +1.7% | 256/260 | 107k/106k | 12639/12457 |
+| AWFY Richards | 2.673/2.695 | +0.8% | it. 20-60 | 119.98M/120.17M | +0.2% | 22/15 | 8k/8k | 910/904 |
+| AWFY DeltaBlue | 0.409/0.409 | +0.0% | it. 20-60 | 5.77M/5.85M | +1.5% | 27/18 | 10k/9k | 1046/970 |
+| AWFY Json | 2.239/1.637 | -26.9% | it. 20-60 | 65.42M/44.26M | -32.3% | 210/112 | 94k/57k | 7862/4855 |
+| AWFY Havlak | 335.950/334.737 | -0.4% | it. 20-60 | 17299.12M/17231.32M | -0.4% | 652/445 | 192k/147k | 17923/13746 |
+| AWFY Bounce | 0.237/0.238 | +0.7% | it. 20-60 | 1.33M/1.33M | -0.0% | 4/4 | 2k/2k | 352/336 |
+| AWFY Sieve | 0.185/0.184 | -0.6% | it. 20-60 | 1.15M/1.15M | -0.0% | 2/2 | 1k/1k | 177/161 |
+| AWFY List | 0.250/0.251 | +0.2% | it. 20-60 | 3.86M/3.89M | +0.6% | 3/3 | 2k/2k | 312/296 |
+| AWFY Permute | 0.393/0.396 | +0.6% | it. 20-60 | 9.33M/9.33M | +0.0% | 8/8 | 3k/3k | 424/408 |
+| AWFY Queens | 0.295/0.289 | -2.0% | it. 20-60 | 3.99M/4.00M | +0.3% | 9/10 | 4k/3k | 481/423 |
+| AWFY Storage | 0.425/0.422 | -0.8% | it. 20-60 | 10.28M/10.28M | +0.0% | 6/8 | 3k/2k | 358/329 |
+| AWFY Towers | 0.319/0.318 | -0.3% | it. 20-60 | 7.07M/7.07M | +0.0% | 4/4 | 1k/1k | 259/242 |
+| AWFY NBody | 0.229/0.229 | -0.0% | it. 20-60 | 2.54M/2.55M | +0.4% | 4/3 | 2k/1k | 240/228 |
+| AWFY CD | 6.562/6.900 | +5.2% | it. 20-60 | 263.87M/233.64M | -11.5% | 147/140 | 71k/60k | 8502/7360 |
+| AWFY Mandelbrot | 12.586/12.589 | +0.0% | it. 20-60 | 610.30M/610.30M | -0.0% | 9/8 | 4k/4k | 542/529 |
+
+- Reading: whole runs better on pyflakes -8.0%, pygments -7.3%, regex_v8 -16.3%, AWFY Json -26.9%; worse on CD +5.2% (its long window -11.5%), imports +2.6%, black +2.0%, richards +1.7%. Long windows within 2% except regex_v8 +9.1% (calls 64-128) and the CD and Json gains.
+
+Follow-ups from the adversarial review (low):
+- The per-exit "bytecodes still to run" value (d->rest) counts bytecodes in build order past the loop and is not validated by tools/jitcost.
+- Places' rest/pass prices are shared across all units of a root and clamped to u->nins: a place priced by a larger sibling predicts a relearn cost of 0; such kills print no paid/cost.
+- Rule A's "old" test uses the code-wide mark counter (marked_since), so a later mark of another site kills units built after the first mark.
+- relearn() resets an escalated wait.
+- The out-call counter `left` is re-armed without atomics and can leave a site that never exits again.
+- The "same" rebuild diagnostic is dead (the unit's address is hashed as a constant).
+- h_pic_same passes a NULL place on allocation failure.
+- The value-class table is scanned linearly (eval_emit.c).
+
 ## State
 
-- Stage A ready for review on branch luc-1kz0, on origin/master 12e0fa43: the lanes, the mechanism (ledger, stale ledger per unit, quiet rule, value sharing), tools/jitcost, this ticket.
+- Landing candidate luc-1kz0-land on origin/master dbb9b594 (gated, table above); stage A was on branch luc-1kz0, on 12e0fa43: the lanes, the mechanism (ledger, stale ledger per unit, quiet rule, value sharing), tools/jitcost, this ticket.
 - Gate on the rebased tree: focused kernel programs and threads, full tools/jitcheck, tools/jitcost all pass. The table was measured on the same code on ca02da54 (the rebase moved only the interpreter).
 - Known losses and follow-ups: the final-pass note. Stages B and C not started.
 - The json_loads and deltablue steady-state losses are windows of both arms' convergence, not worse final builds (diagnosis note); rules A and B built and gated (A+B note); json_loads windows still short of the landing bar.
