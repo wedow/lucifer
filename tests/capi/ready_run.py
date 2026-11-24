@@ -68,6 +68,18 @@ print(p, -p, p.norm2(), p + p, type(p + p).__name__, len(p), list(p), p == PyVec
 p.extra = 5
 print(p.extra, p.__dict__)
 
+# a class over Vec gets its own getattro as its slot; hooks gained and lost mid-loop still win
+answers = []
+for i in range(8):
+    if i == 3:
+        PyVec.__getattr__ = lambda self, name: 'fallback-' + name
+    if i == 5:
+        PyVec.__getattribute__ = lambda self, name: 'hooked-' + name
+    if i == 7:
+        del PyVec.__getattr__, PyVec.__getattribute__
+    answers.append((p.magic, getattr(p, 'magic'), p.extra, getattr(p, 'nope', 'dflt'), hasattr(p, 'nope')))
+print(answers)
+
 # instances die through their own tp_dealloc, and a subclass's through tp_free
 before = ready.dealloc_count()
 a1 = Vec(1, 2)

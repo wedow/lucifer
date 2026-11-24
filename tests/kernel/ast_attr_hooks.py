@@ -84,3 +84,93 @@ Sub.__setattr__ = hook_setattr
 print(Sub('x', ast.Load(), lineno=3).lineno, ast.Name('x', lineno=3).lineno)
 del Sub.__setattr__
 print(Sub('x', ast.Load(), lineno=3).lineno)
+
+
+# A sibling base supplies the hooks, gained and lost mid-loop.
+class Mixin:
+    pass
+
+
+class Both(Mixin, ast.Name):
+    pass
+
+
+run(Both, Mixin, 'mixin')
+
+
+# __bases__ reassigned, and a custom mro(), change which hooks are found.
+class Plain:
+    def __getattr__(self, name):
+        return 'plain-' + name
+
+
+class Moving(ast.AST):
+    pass
+
+
+m = Moving()
+m.a = 1
+print('moving', m.a, attempt(lambda: m.b), getattr(m, 'b', 'default'))
+Moving.__bases__ = (Plain, ast.AST)
+print('moving', m.a, attempt(lambda: m.b), getattr(m, 'b', 'default'))
+Moving.__bases__ = (ast.AST,)
+print('moving', m.a, attempt(lambda: m.b), getattr(m, 'b', 'default'))
+
+
+class Meta(type):
+    flip = False
+
+    def mro(cls):
+        default = super().mro()
+        return [cls, Plain, *default[1:]] if Meta.flip else default
+
+
+class Chosen(ast.AST, metaclass=Meta):
+    pass
+
+
+c = Chosen()
+c.a = 2
+print('mro', c.a, attempt(lambda: c.b))
+Meta.flip = True
+Chosen.__bases__ = (ast.AST,)
+print('mro', c.a, attempt(lambda: c.b), Chosen.__mro__[1].__name__)
+Meta.flip = False
+Chosen.__bases__ = (ast.AST,)
+print('mro', c.a, attempt(lambda: c.b))
+
+
+# A wrapper copied into a class that is not a subclass of its type runs
+# its own check: TypeError, through the bytecodes and the builtins.
+def typeerror(f):
+    try:
+        return f()
+    except (TypeError, AttributeError) as e:
+        return type(e).__name__ + ': ' + str(e)
+
+
+for dunder in ('__getattribute__', '__setattr__', '__delattr__'):
+    Copy = type('Copy', (), {dunder: getattr(ast.AST, dunder)})
+    o = Copy()
+    print('copied', dunder, typeerror(lambda: o.x), typeerror(lambda: getattr(o, 'x')),
+          typeerror(lambda: getattr(o, 'x', 'd')), typeerror(lambda: setattr(o, 'x', 1)),
+          typeerror(lambda: delattr(o, 'x')))
+WithGetattr = type('WithGetattr', (), {'__getattribute__': ast.AST.__getattribute__,
+                                       '__getattr__': lambda self, name: 'fallback'})
+print('copied with __getattr__', typeerror(lambda: WithGetattr().x), typeerror(lambda: getattr(WithGetattr(), 'x')))
+
+
+class Meta2(type):
+    __setattr__ = ast.AST.__setattr__
+    __delattr__ = ast.AST.__delattr__
+
+
+class Ruled(metaclass=Meta2):
+    pass
+
+
+print('meta', typeerror(lambda: setattr(Ruled, 'x', 1)), typeerror(lambda: delattr(Ruled, 'x')))
+for name, owner in (('type', type), ('module', type(ast))):
+    Fake = type('Fake', (), {'__getattribute__': owner.__getattribute__})
+    print('fake', name, typeerror(lambda: Fake().x), typeerror(lambda: getattr(Fake(), 'x')),
+          typeerror(lambda: getattr(Fake(), 'x', 'd')), typeerror(lambda: hasattr(Fake(), 'x')))
