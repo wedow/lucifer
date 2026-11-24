@@ -327,6 +327,12 @@ log: its function's start buys a larger inlining budget with its calls out
 of line, and the loops of an arm that runs only in the second half are
 entered from the interpreter after that: they are built at the base budget,
 since the doubling was that entry's purchase, not the code's.
+The delivers lane runs tests/kernel/jit_grown_generic.py at 2N with the event
+log: its function's start calls a large callee at many sites, whose losses
+are the callee's own generic attribute reads; a doubling takes more of the
+calls in line but leaves those reads generic, so the start grows once: a
+doubling that removes less than half of the losses that bought it is not
+followed by the next.
 The perf lane records Richards under -X perf with `perf record -g` and
 requires that at least 95% of the samples in compiled code (code perf finds
 in no file: it looks it up in /tmp/perf-PID.map) resolve to py:: symbols.
@@ -585,23 +591,39 @@ def check_ledger(args, lane):
     return 1 if problems else 0
 
 
-def check_entries(args):
-    """A doubling of the inlining budget belongs to the entry whose losses bought it: entry's start is built grown,
-    and the entries of its second arm's loops, built after that, at the base budget."""
-    program = ROOT / 'tests' / 'kernel' / 'jit_entry_growth.py'
+def events(args, name):
+    """tests/kernel/NAME at 2N with the tier's event log: (problems, the log)."""
+    program = ROOT / 'tests' / 'kernel' / name
     n = 2 * GROWTH_N
     p = subprocess.run([args.lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', str(program), str(n)],
                        capture_output=True, text=True, timeout=args.timeout,
                        env=dict(os.environ, PYTHONHASHSEED='0', LUCIFER_JIT_DEBUG='units'))
-    problems = []
-    if (p.returncode, p.stdout) != run([args.oracle, str(program), str(n)], args.timeout)[:2]:
-        problems.append('output differs')
-    builds = re.findall(r'^jit-ev \S+ build entry@(\d+) ok ins (\d+) .* grown (\d+) ', p.stderr, re.M)
+    same = (p.returncode, p.stdout) == run([args.oracle, str(program), str(n)], args.timeout)[:2]
+    return [] if same else ['output differs'], p.stderr
+
+
+def check_entries(args):
+    """A doubling of the inlining budget belongs to the entry whose losses bought it: entry's start is built grown,
+    and the entries of its second arm's loops, built after that, at the base budget."""
+    problems, log = events(args, 'jit_entry_growth.py')
+    builds = re.findall(r'^jit-ev \S+ build entry@(\d+) ok ins (\d+) .* grown (\d+) ', log, re.M)
     if not any(pc == '1' and int(grown) > 0 for pc, _, grown in builds):
         problems.append('the start never grew')
     problems += [f'entry@{pc} built grown {grown} ({ins} IR)' for pc, ins, grown in builds if pc != '1' and grown != '0']
     print(f"{'FAIL' if problems else 'PASS'} entrygrowth" + (': ' + '; '.join(problems[:5]) if problems else
           f' ({len(builds)} builds of entry)'))
+    return 1 if problems else 0
+
+
+def check_delivers(args):
+    """A doubling that removes less than half of the losses that bought it is its entry's last: entry's start,
+    whose callee's losses are its own generic reads, grows once."""
+    problems, log = events(args, 'jit_grown_generic.py')
+    grown = re.findall(r'^jit-ev \S+ kill entry@1 .*: grown ', log, re.M)
+    if len(grown) != 1:
+        problems.append(f'the start grew {len(grown)} times')
+    print(f"{'FAIL' if problems else 'PASS'} delivers" + (': ' + '; '.join(problems) if problems else
+          ' (the start grew once)'))
     return 1 if problems else 0
 
 
@@ -632,7 +654,7 @@ def main():
     ap.add_argument('--lucifer', required=True)
     ap.add_argument('--oracle', required=True)
     ap.add_argument('--benchmarks', default=','.join(RUNS))
-    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, *LEDGER, 'entrygrowth', 'perf']))
+    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, *LEDGER, 'entrygrowth', 'delivers', 'perf']))
     ap.add_argument('--timeout', type=float, default=600)
     args = ap.parse_args()
     failed = 0
@@ -665,6 +687,8 @@ def main():
             failed += check_ledger(args, lane)
     if 'entrygrowth' in args.modes.split(','):
         failed += check_entries(args)
+    if 'delivers' in args.modes.split(','):
+        failed += check_delivers(args)
     if 'perf' in args.modes.split(','):
         failed += check_perf(args)
     print(f'{failed} failing')
