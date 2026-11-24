@@ -16,7 +16,7 @@ With the JIT off the interpreter costs 105-114 machine instructions per bytecode
 
 ## State
 
-Branch luc-interp. Stage 0 done (commit "perf(jit): the borrow pass lists each instruction's member uses once"). Next: stage 1 (hooks).
+Branch luc-interp. Stages 0 and 1 done. Next: stage 2 (machine-word int results), started: PyLong_FromLongLong built in place, lu_small_int inline, compact fast paths for //, % and compares; test tests/kernel/int_word_edges.py.
 Measuring: instructions per bytecode with the JIT off from two sizes of each workload (fib 25/27, the arith loop 1M/2M,
 the attribute loop 750k/1.5M; 4.52M, 15M, 15M bytecodes apart, counted with CPython's opcode tracing); whole-run
 `perf stat -e instructions:u` with the JIT on for `-c pass`, `-c "import <STARTUP_IMPORTS>"`, pyflakes as the corpus runs it
@@ -56,3 +56,25 @@ load. With the JIT on, two commits (bisected over the 20 runtime commits, every 
 After the fix, against origin/master (718ec7d9), JIT on: -c pass 173.82M both; imports 1629.9M to 1584.7M (-2.8%);
 pyflakes 16.69G to 16.24G (-2.7%); Richards (harness 10x100) 120.34G to 120.33G; DeltaBlue (10x12000) 49.96G to
 49.63G. Instructions per bytecode with the JIT off unchanged: fib 104.5, arith 113.7, attributes 105.3.
+
+### 2026-11-24 stage 1: feedback hooks
+
+What the interpreter records and what the tier reads: BINARY_OP, COMPARE_OP, STORE_SUBSCR and UNPACK_SEQUENCE
+operand kinds (read by eval_arith.c/eval_ops.c to pick the typed form); POP_JUMP_IF_* branch counts
+(lu_jit_branch_rare); FOR_ITER iterator kinds (eval_iter.c); CALL's callee tag and table (eval_call.c); class tables
+for warm codes (lu_jit_observe_classes, opclasses); PIC notes for codes with units. All were behind a tier-off test
+but the branch counts, which were written on every branch with the JIT off. CALL's and CALL_KW's kinds word is read
+only as "the site ran" (lu_ev_feedback's cold count), so a call now marks it once; argument kinds are taken only for
+a warm code's builtin calls, where the class tables use them. The operator kinds stay per execution until those
+operators have specialized forms (stage 4), whose specialization is then the record.
+
+| row | before | after |
+|---|---|---|
+| fib, instr/bc, JIT off | 104.5 | 100.1 |
+| arith loop | 113.7 | 112.4 |
+| attribute loop | 105.3 | 104.6 |
+| -c pass, JIT on | 173.85M | 170.13M |
+| stdlib imports | 1585.0M | 1558.3M |
+| pyflakes | 16.24G | 16.19G |
+| Richards (harness 5x20) | 12.320G | 12.314G |
+| DeltaBlue (harness 5x2000) | 5.95G | 5.93G |
