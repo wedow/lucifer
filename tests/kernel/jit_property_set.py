@@ -4,9 +4,17 @@
 # attribute takes the store), fset None (AttributeError), a property
 # subclass, an instance dict entry of the same name (the property wins),
 # __setattr__ defined on the class later, the receiver's class assigned,
-# a property on a metaclass, and a setter that raises. Every value, call
-# count and error must be the interpreter's.
+# a property on a metaclass, a setter that raises; a class whose own
+# __setattr__ must run (from the start, raising, added and kept), the
+# property re-initialized in place, traceback lines through a raising
+# setter, setters returning fresh objects (finalizer probes on the stored
+# value and the dropped result), the setter replaced during its own run,
+# generator and async setters, and a site mixing property and plain
+# stores. Every value, call count and error must be the interpreter's.
 import sys
+import warnings
+
+warnings.simplefilter('ignore', RuntimeWarning)       # the async setter's coroutine is never awaited
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
 calls = []
@@ -209,6 +217,219 @@ def raising(n):
             caught += 1
     return caught, o._z
 
+seen = []
+
+
+class Watched:
+    def __setattr__(self, k, v):
+        seen.append(k)
+        object.__setattr__(self, k, v)
+
+    @property
+    def x(self):
+        return self.__dict__.get('_x')
+
+    @x.setter
+    def x(self, v):
+        self.__dict__['_x'] = v
+
+
+class Frozen:
+    def __setattr__(self, k, v):
+        raise AttributeError('frozen ' + k)
+
+    @property
+    def x(self):
+        return 0
+
+    @x.setter
+    def x(self, v):
+        self.__dict__['_x'] = v
+
+
+class Later:
+    @property
+    def x(self):
+        return self.__dict__.get('_x')
+
+    @x.setter
+    def x(self, v):
+        self.__dict__['_x'] = v
+
+
+def own_setattr(n):
+    del seen[:]
+    w = Watched()
+    for i in range(n):
+        w.x = i
+    errs = set()
+    f = Frozen()
+    for i in range(n):
+        try:
+            f.x = i
+        except AttributeError as e:
+            errs.add(str(e))
+    o = Later()
+    for i in range(n):
+        o.x = i
+    Later.__setattr__ = Watched.__setattr__
+    for i in range(n):
+        o.x = i
+    return len(seen), w.x, sorted(errs), '_x' in f.__dict__, o.x
+
+
+class Reinit:
+    def __init__(self):
+        self._r = 0
+
+    def _g(self):
+        return self._r
+
+    def _s1(self, v):
+        self._r = v
+
+    def _s2(self, v):
+        self._r = -v
+    r = property(_g, _s1)
+
+
+def reinit(n):
+    o = Reinit()
+    for i in range(n):
+        o.r = i
+        if i == n // 2:
+            Reinit.r.__init__(Reinit._g, Reinit._s2)
+    return o.r
+
+
+class Tb:
+    @property
+    def t(self):
+        return 0
+
+    @t.setter
+    def t(self, v):
+        if v == 1500:
+            raise KeyError(v)
+        self._t = v
+
+
+def traceback_lines(n):
+    import traceback
+    o = Tb()
+    lines = None
+    done = 0
+    for i in range(n):
+        try:
+            try:
+                o.t = i
+            finally:
+                done += 1
+        except KeyError:
+            lines = [f.name for f in traceback.extract_tb(sys.exc_info()[2])]
+    return done, lines
+
+
+probes = []
+
+
+class Probe:
+    def __init__(self, k):
+        self.k = k
+
+    def __del__(self):
+        probes.append(self.k)
+
+
+class Ret:
+    @property
+    def v(self):
+        return self._v
+
+    @v.setter
+    def v(self, value):
+        self._v = value
+        if value.k % 3 == 0:
+            return Probe('result')
+        if value.k % 3 == 1:
+            return [value]
+        return None
+
+
+def returns(n):
+    del probes[:]
+    o = Ret()
+    for i in range(n):
+        o.v = Probe(i)
+    stored = len([p for p in probes if p != 'result'])
+    results = probes.count('result')
+    return stored, results, o.v.k
+
+
+class Swap:
+    def __init__(self):
+        self._w = 0
+
+    @property
+    def w(self):
+        return self._w
+
+    @w.setter
+    def w(self, value):
+        if value == 1000:
+            Swap.w = property(Swap.w.fget, lambda self, v: setattr(self, '_w', v * 3))
+        self._w = value
+
+
+def swap_during(n):
+    o = Swap()
+    for i in range(n):
+        o.w = i
+    return o.w
+
+
+class GenSet:
+    @property
+    def g(self):
+        return self._g
+
+    @g.setter
+    def g(self, value):
+        self._g = value
+        yield value
+
+
+class AsyncSet:
+    @property
+    def a(self):
+        return self._a
+
+    @a.setter
+    async def a(self, value):
+        self._a = value
+
+
+def odd_setters(n):
+    o = GenSet()
+    p = AsyncSet()
+    for i in range(n):
+        o.g = i
+        p.a = i
+    return hasattr(o, '_g'), hasattr(p, '_a')
+
+
+class Plain:
+    def __init__(self):
+        self.v = 0
+
+
+def mixed_shapes(n):
+    objs = [P(1), Plain(), P(2), Plain()]
+    for i in range(n):
+        for o in objs:
+            o.v = i
+    return [o.v for o in objs]
+
 
 print('setters', setters(N))
 print('from base', from_base(N))
@@ -217,3 +438,10 @@ print('subclass and shadow', subclass_and_shadow(N))
 print('later setattr and class', later_setattr_and_class(N))
 print('metaclass', metaclass_property(N))
 print('raising', raising(N))
+print('own setattr', own_setattr(N))
+print('reinit', reinit(N))
+print('traceback', traceback_lines(N))
+print('returns', returns(N))
+print('swap during', swap_during(N))
+print('odd setters', odd_setters(N))
+print('mixed shapes', mixed_shapes(N))

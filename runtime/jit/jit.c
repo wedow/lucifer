@@ -1802,8 +1802,13 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
     }
     int op = site[0].op.code;
     PyObject *prop = NULL;
-    if (pic->store && op == STORE_ATTR && lu_type_assign_version(tp)) {
-        /* A store through a property: its setter, under the class's version. */
+    if (pic->store && op == STORE_ATTR && tp->tp_setattro == PyObject_GenericSetAttr
+        && _PyType_Lookup(tp, LU_ID(__setattr__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))
+        && lu_type_assign_version(tp)) {
+        /* A store through a property: its setter, under the class's version,
+           where object's __setattr__ is the class's (as the specializer asks
+           of its stores); a type as owner (a metaclass property) sets
+           attributes its own way and keeps the generic store. */
         PyObject *d = _PyType_Lookup(tp, name);
         PyObject *fset = d != NULL && Py_IS_TYPE(d, &PyProperty_Type) ? lu_property_fset(d) : NULL;
         if (fset != NULL && PyFunction_Check(fset)) {
