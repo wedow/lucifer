@@ -680,6 +680,7 @@ release_interpreter(struct _is *interp)
     interp->stw.mutex = (PyMutex){ 0 };     /* held for good since the other tasks were shut down */
     interp->modules = interp->builtins = interp->sysdict = interp->interned = NULL;
     interp->dict = interp->last_resort_memory_error = NULL;
+    memset(interp->common_consts, 0, sizeof interp->common_consts);
     interp->interactive_src_count = 0;
     interp->co_extra_user_count = 0;
     memset(interp->co_extra_freefuncs, 0, sizeof interp->co_extra_freefuncs);

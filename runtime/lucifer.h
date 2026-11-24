@@ -565,6 +565,9 @@ struct _is {
         PyObject *value;            /* borrowed; NULL for an absent name */
     } mcache[LU_MCACHE_SIZE];
     int kernel_booted;                  /* set with it: the kernel's functions are all registered */
+    /* LOAD_COMMON_CONSTANT's objects (Lib/opcode.py's _common_constants), as
+       the kernel booted them: rebinding a builtin does not change them. */
+    PyObject *common_consts[5];
     int max_str_digits;                 /* sys.get_int_max_str_digits() */
     PyObject *importlib;                /* _frozen_importlib, once installed */
     PyObject *import_func;              /* the original builtins.__import__ */

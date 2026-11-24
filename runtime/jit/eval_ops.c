@@ -382,21 +382,12 @@ store_subscr(struct ctx *c)
 static int
 load_common_constant(struct ctx *c)
 {
-    if (c->oparg < 2) {
-        lu_ev_push(c, lu_ev_konst(c, c->oparg == 0 ? PyExc_AssertionError : PyExc_NotImplementedError));
-        return 0;
-    }
-    const char *s = c->oparg == 2 ? "tuple" : c->oparg == 3 ? "all" : c->oparg == 4 ? "any" : NULL;
-    PyObject *name = s != NULL ? PyUnicode_InternFromString(s) : NULL;
-    PyObject *v = name != NULL ? lu_ev_dict_const(c, PyThreadState_Get()->interp->builtins, NULL, name) : NULL;
-    Py_XDECREF(name);
+    PyObject *v = PyThreadState_Get()->interp->common_consts[c->oparg];
     if (v == NULL) {
-        PyErr_Clear();
-        lu_ev_side_exit(c, EXIT_SIDE);
+        lu_ev_side_exit(c, EXIT_SIDE);      /* the kernel booting */
         return 0;
     }
     lu_ev_push(c, lu_ev_konst(c, v));
-    Py_DECREF(v);               /* the unit holds its constants */
     return 0;
 }
 

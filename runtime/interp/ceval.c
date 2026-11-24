@@ -4373,23 +4373,22 @@ op_WITH_EXCEPT_START: {
 }
 
 op_LOAD_COMMON_CONSTANT: {
-    /* _common_constants of Lib/opcode.py */
-    static const char *const names[] = { NULL, NULL, "tuple", "all", "any" };
-    PyObject *v = oparg == 0 ? PyExc_AssertionError : oparg == 1 ? PyExc_NotImplementedError : NULL;
+    PyObject *v = ts->interp->common_consts[oparg];
     if (v == NULL) {
+        /* The kernel booting: the builtins as they are so far. */
+        static const char *const names[] = { "AssertionError", "NotImplementedError", "tuple", "all", "any" };
         SAVE_FRAME();
-        PyObject *name = oparg < 5 ? PyUnicode_InternFromString(names[oparg]) : NULL;
+        PyObject *name = PyUnicode_InternFromString(names[oparg]);
         v = name != NULL ? lu_ns_get(ts->interp->builtins, name) : NULL;
         Py_XDECREF(name);
         if (v == NULL) {
             lu_err_format(PyExc_SystemError, "common constant %d is not defined yet", (int)oparg);
             goto error;
         }
+        PUSH(v);
+        DISPATCH();
     }
-    else {
-        Py_INCREF(v);
-    }
-    PUSH(v);
+    PUSH(Py_NewRef(v));
     DISPATCH();
 }
 
