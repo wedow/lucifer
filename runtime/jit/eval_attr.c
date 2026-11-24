@@ -330,8 +330,8 @@ lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o, int id)
             c->g->observed |= !fresh;
         }
         else {
-            lu_v args[4] = { obj, lu_ev_konst(c, name), lu_ev_val(c, o->f[i + 1]), lu_ev_const_i(c, 0) };
-            lu_ev_helper(c, H_store_attr, 4, args, 0);
+            lu_v args[5] = { obj, lu_ev_konst(c, name), lu_ev_val(c, o->f[i + 1]), lu_ev_const_i(c, 0), lu_ev_unit(c) };
+            lu_ev_helper(c, H_store_attr, 5, args, 0);
         }
     }
     return obj;
@@ -420,10 +420,10 @@ instance_store(struct ctx *c, lu_v owner, struct lu_vobj *o, PyObject *name)
 static void
 load_generic(struct ctx *c, struct lu_pic *pic)
 {
-    lu_v args[3] = { lu_ev_peek(c, 1), lu_ev_konst(c, name_at(c, c->oparg >> 1)),
-                     lu_ev_const_i(c, (int64_t)(intptr_t)pic) };
+    lu_v args[4] = { lu_ev_peek(c, 1), lu_ev_konst(c, name_at(c, c->oparg >> 1)),
+                     lu_ev_const_i(c, (int64_t)(intptr_t)pic), lu_ev_unit(c) };
     /* load_method answers the bound method or attribute; CALL unbinds it. */
-    replace_owner(c, lu_ev_helper(c, c->oparg & 1 ? H_load_method : H_load_attr, 3, args, 1), LU_NOV);
+    replace_owner(c, lu_ev_helper(c, c->oparg & 1 ? H_load_method : H_load_attr, 4, args, 1), LU_NOV);
 }
 
 /* The attribute loaded as specialization `op` has it (version, index and
@@ -539,9 +539,10 @@ attr_ways(struct ctx *c, struct lu_pic *pic, int n, int i, attr_as *as, int gene
         for (struct ctx *k = c; k != NULL; k = k->parent) {
             key = lu_jit_ctx_mix(key, k->code, k->pc);
         }
-        lu_v args[2] = { lu_ev_const_i(c, (int64_t)(intptr_t)pic), lu_ev_const_i(c, n) };
-        I(c, lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_pic_same, 2, args, 0), 1))->prof
-            = lu_jit_prof(c->g->f->code, key, c->code, c->pc);
+        struct lu_prof *p = lu_jit_prof(c->g->f->code, key, c->code, c->pc);
+        lu_v args[4] = { lu_ev_const_i(c, (int64_t)(intptr_t)pic), lu_ev_const_i(c, n),
+                         lu_ev_const_i(c, (int64_t)(intptr_t)p), lu_ev_unit(c) };
+        I(c, lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_pic_same, 4, args, 0), 1))->prof = p;
         return as(c, generic, 0, 0, NULL, pic);
     }
     struct lu_pic_entry e = pic->e[i];
@@ -731,8 +732,8 @@ store_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *desc
         lu_ev_pop(c);           /* the setter's result */
     }
     else {
-        lu_v args[4] = { owner, lu_ev_konst(c, name), v, lu_ev_const_i(c, (int64_t)(intptr_t)pic) };
-        lu_ev_helper(c, H_store_attr, 4, args, 2);
+        lu_v args[5] = { owner, lu_ev_konst(c, name), v, lu_ev_const_i(c, (int64_t)(intptr_t)pic), lu_ev_unit(c) };
+        lu_ev_helper(c, H_store_attr, 5, args, 2);
     }
     lu_ev_pop(c);
     lu_ev_pop(c);

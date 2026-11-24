@@ -1396,6 +1396,7 @@ make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
     for (struct lu_fs *p = fs; p != NULL; p = p->caller) {
         n++;
         nvals += (uint32_t)(p->nlocals + p->nstack);
+        d->rest += p->evaluated != NULL && *p->evaluated > p->seq ? (uint32_t)(*p->evaluated - p->seq) : 0;
     }
     b->chain = grow(b->chain, &b->capchain, n, sizeof *b->chain);
     b->room = grow(b->room, &b->caproom, nvals, sizeof *b->room);
@@ -1715,7 +1716,8 @@ static uint64_t
 takes_of(struct asm_ *a, struct lu_ins *in, const struct hold *h, int nh)
 {
     struct lu_fs *fs = in->fs;
-    if (in->op != OP_HELPER || (in->imm != H_call && in->imm != H_call_kw && in->imm != H_call_bound)) {
+    if (in->op != OP_HELPER || (in->imm != H_call && in->imm != H_call_any && in->imm != H_call_kw
+                                && in->imm != H_call_bound)) {
         return 0;
     }
     int *left = lu_ir_alloc(a->f, sizeof(int) * (size_t)(nh ? nh : 1));
@@ -2070,7 +2072,7 @@ call_helper(struct asm_ *a, lu_v v, struct lu_deopt *d)
             to_gpr(a, RAX, in->args[i]);
             store(a, RSP, 8 * i, RAX);
         }
-        if (in->imm == H_call) {
+        if (in->imm == H_call || in->imm == H_call_any) {
             done = new_label(a);
             call_direct(a, v, d != NULL ? d->takes : 0, done);
         }
@@ -5201,8 +5203,8 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         return 0;
     }
     case OP_COUNT_OUT: {
-        /* A call the budget left out of line, counted: the hot_calls-th
-           leaves, for jit.c to take the site in line. */
+        /* A call the budget left out of line, counted: the one its site
+           was armed for leaves, for jit.c to look at the unit's sites. */
         stress_exit(a, in);
         int hot = exit_to(a, in->fs, EXIT_HOT, 0, 0);
         mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->outs[in->imm].left);
@@ -5534,14 +5536,6 @@ direct_entry(struct asm_ *a)
     rex(a, 1, 0, 0, R11);
     b1(a, 0xFF);
     modrm_mem(a, 0, R11, 0);                    /* inc qword [r11] */
-    if (f->refused) {
-        /* Hot with calls left out for want of budget: its code's next
-           build gets more (this activation runs on in the dead unit). */
-        cmp_mi(a, 1, R11, 0, HOT_ENTRIES);
-        jcc(a, CC_NE, counted);
-        mov_ri(a, RDI, (int64_t)(intptr_t)a->unit);
-        call_abs(a, (void *)lu_jit_grow);
-    }
     bind(a, counted);
     unsigned long *stat = lu_jit_direct_count();
     if (stat != NULL) {

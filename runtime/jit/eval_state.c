@@ -347,6 +347,8 @@ lu_ev_snapshot(struct ctx *c, int pc)
     fs->func = c->func != NULL ? (PyObject *)c->func : g->live->func;
     fs->funcv = c->funcv;
     fs->pc = pc;
+    fs->evaluated = lu_ev_count(c);
+    fs->seq = *fs->evaluated;
     fs->nlocals = c->nlocals;
     fs->nstack = *depth_of(c);
     fs->locals = copy_of(g, slots(c), sizeof(lu_v) * (size_t)c->nlocals);
@@ -587,6 +589,8 @@ snap(struct ctx *c)
     fs->func = c->func != NULL ? (PyObject *)c->func : g->live->func;
     fs->funcv = c->funcv;
     fs->pc = c->snap_pc;
+    fs->evaluated = lu_ev_count(c);
+    fs->seq = *fs->evaluated;
     fs->nlocals = c->nlocals;
     fs->nstack = c->snap_sp;
     fs->ret = (uint8_t)c->ret;

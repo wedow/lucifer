@@ -287,7 +287,6 @@ struct lu_pic {
     int store;                  /* a STORE_ATTR site's */
     int n;                      /* entries published, release-stored after the entry */
     int tries;                  /* shapes looked at: a site whose owners have none stops looking */
-    unsigned passes;            /* generic loads by units built for fewer shapes than it has now */
     struct lu_pic_entry e[LU_PIC_WAYS];
 };
 
@@ -300,9 +299,10 @@ lu_jit_pic_learns(struct lu_pic *pic, int n)
 }
 /* The site's cache, made when `create`; NULL without one. */
 struct lu_pic *lu_jit_pic(PyCodeObject *code, int pc, int create);
-/* A generic load at the site met owner: its shape joins the cache, while
-   there is room. */
-void lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name);
+/* A generic load at the site met owner (in unit u, NULL in the interpreter): its
+   shape joins the cache, while there is room. */
+struct lu_unit;
+void lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name, struct lu_unit *u);
 /* The interpreter's generic load or store at pc of code that has compiled units met
    owner: the site's cache (made now) notes its shape, so that a unit that
    inlines the code, whose generic load or store leaves, tests for it
@@ -458,7 +458,6 @@ int lu_jit_code_traverse(PyCodeObject *code, visitproc visit, void *arg);
 /* A collection frees dead units (runtime/jit/jit.c): with the world
    stopped, it takes those no activation is in off every list a thread
    reads, and frees them once the world runs again. */
-struct lu_unit;
 struct lu_unit *lu_jit_reclaim(PyInterpreterState *interp);
 void lu_jit_reclaim_free(struct lu_unit *units);
 

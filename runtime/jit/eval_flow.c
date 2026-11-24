@@ -2060,10 +2060,12 @@ build_block(struct ctx *c, struct bblk *bb)
             return -1;
         }
         c->pc = pc;
+        (*lu_ev_count(c))++;
         c->next = lu_ev_decode(c, pc, &c->base, &c->oparg, &c->opcode);
         c->cache = lu_code_start(c->code) + c->next - lu_opcode_caches[c->base];
         lu_ev_begin(c, pc);
         int next = c->next;
+        lu_v from = g->f->nins;
         if (lu_ev_instruction(c) < 0 || g->f->fail != NULL) {
             if (g->f->fail == NULL) {
                 g->f->fail = "an instruction failed to build";
@@ -2073,6 +2075,7 @@ build_block(struct ctx *c, struct bblk *bb)
         if (g->restart) {
             return 0;
         }
+        lu_ev_price_places(c, from);
         lu_ev_settle(c, next);
         pc = next;
     }
@@ -2092,6 +2095,7 @@ lu_ev_build(struct ctx *c, int pc)
     }
     scanned = c->nbb;
     add_edge(c, pc);
+    lu_v start = g->f->nins;
     for (;;) {
         /* The lowest block control reaches that is not built: blocks are
            in order of their pc but for the entry's, which is built first,
@@ -2109,6 +2113,7 @@ lu_ev_build(struct ctx *c, int pc)
         }
         if (c->lo == c->nbb) {
             if (c->loops == NULL) {
+                lu_ev_price_rest(c, start);
                 return 0;
             }
             /* The way in is built: now the loops it reached. */
@@ -2132,10 +2137,12 @@ static void
 reset(struct lu_func *f)
 {
     PyCodeObject *code = f->code;
+    struct lu_unit *unit = f->unit;
     int entry = f->entry_pc, stress = f->stress, budget = f->budget;
     lu_ir_free(f);
     memset(f, 0, sizeof(*f));
     f->code = code;
+    f->unit = unit;
     f->entry_pc = entry;
     f->stress = stress;
     f->budget = budget;
@@ -2256,6 +2263,7 @@ lu_ssa_build(struct lu_func *f, struct lu_frame *frame)
         }
         free(g.shown);
         free(g.shown_as);
+        free(g.vclasses);
         if (r < 0 || !g.restart) {
             break;
         }

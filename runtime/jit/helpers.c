@@ -253,6 +253,17 @@ h_exc_push(PyObject *exc)
     return prev != NULL ? prev : Py_NewRef(Py_None);
 }
 
+/* A pass of a generic path for unit u (the evaluator passes the unit it
+   builds; NULL: no generic pass), its loss while u's ledger counts (jit.c
+   lu_jit_generic): once it has settled, a load and a test. */
+static inline void
+generic(struct lu_unit *u, enum lu_generic kind)
+{
+    if (u != NULL && !__atomic_load_n(&u->settled, __ATOMIC_RELAXED)) {
+        lu_jit_generic(u, kind);
+    }
+}
+
 /* Whether a raised arm may go on in compiled code after the raising call,
    as GUARD_FRAMES lets the normal return go on: the root frame is still
    compiled code's (no walker made it real), its unit lives, and no tool
@@ -539,22 +550,20 @@ h_dict_lacks(PyObject *owner, PyObject *name)
 }
 
 static intptr_t
-h_profile(struct lu_prof *p, PyObject *o, intptr_t learned)
+h_profile(struct lu_prof *p, PyObject *o, intptr_t learned, struct lu_unit *u)
 {
-    return lu_jit_prof_note(p, o, (unsigned long)learned);
+    return lu_jit_prof_note(p, o, (unsigned long)learned, u);
 }
 
 /* Whether an attribute site's cache is as a unit was built for: the n
    shapes it tests for, and still learning. Once it has more shapes, or
-   has stopped looking, the unit is built again: not at the first such
-   load but at one in 64, so that the shapes that come together are
-   learned together. */
+   has stopped looking, its generic loads are stale passes of unit u (at
+   place p), which is built again when they have cost its build. */
 static intptr_t
-h_pic_same(struct lu_pic *pic, intptr_t n)
+h_pic_same(struct lu_pic *pic, intptr_t n, struct lu_prof *p, struct lu_unit *u)
 {
     int now = __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE);
-    return (now == n && lu_jit_pic_learns(pic, now))
-        || (__atomic_add_fetch(&pic->passes, 1, __ATOMIC_RELAXED) & 63) != 0;
+    return (now == n && lu_jit_pic_learns(pic, now)) || lu_jit_stale_pass(p, u);
 }
 
 static PyObject *
@@ -592,25 +601,21 @@ h_load_attr(PyObject *owner, PyObject *name)
 
 /* A generic site with a polymorphic cache records what it meets. */
 static PyObject *
-h_load_attr_pic(PyObject *owner, PyObject *name, int64_t pic)
+h_load_attr_pic(PyObject *owner, PyObject *name, int64_t pic, struct lu_unit *u)
 {
+    generic(u, LU_GENERIC_ATTR);
     if (pic != 0) {
-        lu_jit_pic_note((struct lu_pic *)(intptr_t)pic, owner, name);
+        lu_jit_pic_note((struct lu_pic *)(intptr_t)pic, owner, name, u);
     }
     return h_load_attr(owner, name);
 }
 
-static PyObject *
-h_load_method(PyObject *owner, PyObject *name, int64_t site)
-{
-    return h_load_attr_pic(owner, name, site);
-}
-
 static int
-h_store_attr(PyObject *owner, PyObject *name, PyObject *v, int64_t pic)
+h_store_attr(PyObject *owner, PyObject *name, PyObject *v, int64_t pic, struct lu_unit *u)
 {
+    generic(u, LU_GENERIC_ATTR);
     if (pic != 0) {
-        lu_jit_pic_note((struct lu_pic *)(intptr_t)pic, owner, name);
+        lu_jit_pic_note((struct lu_pic *)(intptr_t)pic, owner, name, u);
     }
     int done = lu_setattr_native(owner, name, v);
     if (done != 0) {
@@ -714,8 +719,9 @@ h_build_string(PyObject **argv, intptr_t n)
 /* --- operators --- */
 
 static PyObject *
-h_binary_op(PyObject *a, PyObject *b, int64_t op)
+h_binary_op(PyObject *a, PyObject *b, int64_t op, struct lu_unit *u)
 {
+    generic(u, LU_GENERIC_OP);
     if (op == NB_SUBSCR) {
         PyObject *item = lu_subscr_native(a, b);
         if (item != NULL || PyErr_Occurred()) {
@@ -755,8 +761,9 @@ h_binary_op(PyObject *a, PyObject *b, int64_t op)
 }
 
 static PyObject *
-h_compare_op(PyObject *a, PyObject *b, int64_t oparg)
+h_compare_op(PyObject *a, PyObject *b, int64_t oparg, struct lu_unit *u)
 {
+    generic(u, LU_GENERIC_OP);
     int r = lu_compare_native(a, b, (int)oparg);
     if (r < 0) {
         PyObject *args[3] = { a, b, lu_small_int((int)oparg) };
@@ -835,8 +842,9 @@ static PyObject *polled(struct lu_task *t, PyObject *r);
    the loop's end, with no StopIteration. Another class votes in the
    site's table (classes, or NULL) for the class to take in line. */
 static PyObject *
-h_for_iter(PyObject *it, struct lu_opclasses *classes)
+h_for_iter(PyObject *it, struct lu_opclasses *classes, struct lu_unit *u)
 {
+    generic(u, LU_GENERIC_ITER);
     PyTypeObject *t = Py_TYPE(it);
     if (t == &PyListIter_Type || t == &PyTupleIter_Type || t == &PyRangeIter_Type) {
         PyObject *v = t == &PyRangeIter_Type ? lu_rangeiter_next(it) : lu_seqiter_next(it);
@@ -1222,6 +1230,16 @@ static PyObject *
 h_call(PyObject **argv, intptr_t n)
 {
     return call_argv(argv, n, taken_args(lu_current_task()));
+}
+
+/* A call of a callable the build did not know. */
+static PyObject *
+h_call_any(PyObject **argv, intptr_t n)
+{
+    /* Its argument array is the interpreter's: the running activation names the unit. */
+    struct lu_jit_act *act = lu_current_task()->jit_act;
+    generic(act != NULL ? act->unit : NULL, LU_GENERIC_CALL);
+    return h_call(argv, n);
 }
 
 /* A primitive that may run Python, as h_call makes the call with less
@@ -1753,19 +1771,19 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_attr_store] = { (void *)h_attr_store, "attr_store", REP_BIT, FX_SEEN, 4 },
     [H_slot_store] = { (void *)h_slot_store, "slot_store", REP_NONE, FX_SEEN, 3 },
     [H_dict_lacks] = { (void *)h_dict_lacks, "dict_lacks", REP_BIT, 0, 2 },
-    [H_profile] = { (void *)h_profile, "profile", REP_BIT, 0, 3 },
-    [H_pic_same] = { (void *)h_pic_same, "pic_same", REP_BIT, 0, 2 },
+    [H_profile] = { (void *)h_profile, "profile", REP_BIT, 0, 4 },
+    [H_pic_same] = { (void *)h_pic_same, "pic_same", REP_BIT, 0, 4 },
     [H_cell_load] = { (void *)h_cell_load, "cell_load", REP_OBJ, FX_SEEN, 1 },
     [H_kwdefault] = { (void *)h_kwdefault, "kwdefault", REP_OBJ, FX_SEEN, 2 },
     [H_str_concat] = { (void *)lu_str_concat, "str_concat", REP_OBJ, FX_RAISE, 2 },
-    [H_binary_op] = { (void *)h_binary_op, "binary_op", REP_OBJ, FX_RAISE | FX_PY, 3 },
-    [H_compare_op] = { (void *)h_compare_op, "compare_op", REP_OBJ, FX_RAISE | FX_PY, 3 },
+    [H_binary_op] = { (void *)h_binary_op, "binary_op", REP_OBJ, FX_RAISE | FX_PY, 4 },
+    [H_compare_op] = { (void *)h_compare_op, "compare_op", REP_OBJ, FX_RAISE | FX_PY, 4 },
     [H_setitem] = { (void *)h_setitem, "setitem", REP_BIT, FX_RAISE | FX_PY, 3 },
     [H_delitem] = { (void *)h_delitem, "delitem", REP_BIT, FX_RAISE | FX_PY, 2 },
     [H_list_extend] = { (void *)h_list_extend, "list_extend", REP_BIT, FX_RAISE | FX_PY, 2 },
-    [H_load_attr] = { (void *)h_load_attr_pic, "load_attr", REP_OBJ, FX_RAISE | FX_PY, 3 },
-    [H_load_method] = { (void *)h_load_method, "load_method", REP_OBJ, FX_RAISE | FX_PY, 3 },
-    [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, FX_RAISE | FX_PY, 4 },
+    [H_load_attr] = { (void *)h_load_attr_pic, "load_attr", REP_OBJ, FX_RAISE | FX_PY, 4 },
+    [H_load_method] = { (void *)h_load_attr_pic, "load_method", REP_OBJ, FX_RAISE | FX_PY, 4 },
+    [H_store_attr] = { (void *)h_store_attr, "store_attr", REP_BIT, FX_RAISE | FX_PY, 5 },
     [H_load_global] = { (void *)h_load_global, "load_global", REP_OBJ, FX_RAISE | FX_DECLINES, 4 },
     [H_store_global] = { (void *)h_store_global, "store_global", REP_BIT, FX_RAISE | FX_SEEN, 3 },
     [H_build_slice] = { (void *)h_build_slice, "build_slice", REP_OBJ, FX_RAISE, 3 },
@@ -1773,6 +1791,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_format] = { (void *)h_format, "format", REP_OBJ, FX_RAISE | FX_PY, 2 },
     [H_build_string] = { (void *)h_build_string, "build_string", REP_OBJ, FX_RAISE, 0 },
     [H_call] = { (void *)h_call, "call", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
+    [H_call_any] = { (void *)h_call_any, "call_any", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
     [H_super_attr] = { (void *)h_super_attr, "super_attr", REP_OBJ, FX_RAISE | FX_PY, 5 },
     [H_import_name] = { (void *)h_import_name, "import_name", REP_OBJ, FX_RAISE | FX_PY, 4 },
     [H_import_from] = { (void *)h_import_from, "import_from", REP_OBJ, FX_RAISE | FX_PY, 2 },
@@ -1786,7 +1805,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, FX_SEEN, 3 },
     [H_cell_store] = { (void *)h_cell_store, "cell_store", REP_NONE, FX_SEEN, 2 },
     [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, FX_RAISE | FX_PY, 1 },
-    [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, FX_RAISE | FX_PY, 2 },
+    [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, FX_RAISE | FX_PY, 3 },
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, FX_SEEN, 1 },
     [H_seqiter_step] = { (void *)h_seqiter_step, "seqiter_step", REP_OBJ, FX_SEEN, 1 },
     [H_field_get] = { (void *)lu_field_get, "field_get", REP_OBJ, FX_SEEN, 2 },

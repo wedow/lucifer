@@ -133,6 +133,8 @@ struct ctx {
     int lo;                     /* blocks below it are built or not reached yet */
     const int *blkat;           /* code unit -> bblk index, or -1 */
     struct lu_fs *caller_fs;    /* an inlined frame's caller, after the call */
+    int *evaluated;             /* the bytecodes of its own code the evaluator began (not its inlined calls'):
+                                   lu_ev_count, which its states point at */
     lu_v gen;                   /* the generator whose frame this is, its body run in line (eval_gen.c): a
                                    virtual one, or with `adopted` the value that is one that exists */
     int adopted;
@@ -226,6 +228,13 @@ struct gctx {
         lu_v v;
     } *konsts;
     int nkonsts, capkonsts;
+    struct vclasses {           /* what places of the build learned of a value (lu_ev_value_classes) */
+        lu_v v;
+        int kind;               /* 0: its classes; else a value profile's kind: the values */
+        int n;                  /* -1 past the polymorphic limit */
+        PyObject *k[LU_OPCLASS_WAYS];   /* constants of the unit */
+    } *vclasses;
+    int nvclasses, capvclasses;
     int budget;                 /* instructions the unit may have and still take a call in line */
     uint32_t *named;            /* per value: the stamp of the last walk that found a slot naming it */
     uint32_t *reached;          /* per virtual object: the same */
@@ -247,6 +256,16 @@ struct gctx {
     int generic;                /* the way of lu_ev_kernel_arms for types it has no way for is being built */
     int classtest;              /* the way of a class test (eval_call.c) its folds do not answer is being built */
 };
+
+/* The count of c's own bytecodes begun (ctx evaluated), made at its first use. */
+static inline int *
+lu_ev_count(struct ctx *c)
+{
+    if (c->evaluated == NULL) {
+        c->evaluated = lu_ir_alloc(c->g->f, sizeof(int));
+    }
+    return c->evaluated;
+}
 
 /* Per-code JIT state the evaluator consults (jit.c). */
 int lu_jit_catches(PyCodeObject *code, int pc);     /* the kernel handler at pc took what calls raised (jit.c) */
@@ -328,10 +347,13 @@ int lu_ev_learn_kind(struct ctx *c, lu_v r, int which, unsigned long kind);
 /* The same for r's identity: the constant, or NULL. *r is the constant
    from here. Value records are separate by kind and from type records. */
 PyObject *lu_ev_learn_const(struct ctx *c, lu_v *r, int which, enum lu_prof_value_kind kind);
+int lu_ev_value_classes(struct ctx *c, lu_v r, int kind, struct lu_prof *p, PyObject **out, int *relied);
 /* The root's record of that value, and compiled code that reports r to
    it (and leaves when the unit is to be built again). */
 struct lu_prof *lu_ev_prof(struct ctx *c, int which);
 void lu_ev_profile(struct ctx *c, struct lu_prof *p, lu_v r);
+void lu_ev_price_places(struct ctx *c, lu_v from);
+void lu_ev_price_rest(struct ctx *c, lu_v from);
 
 /* The innermost frame's state at pc as a frame state, with the path's
    binds; and the state before the current instruction as an exit takes
@@ -386,6 +408,14 @@ int lu_ev_reaches_id(struct gctx *g, const struct state *st, lu_v r, int id);
 lu_v lu_ev_emit(struct ctx *c, int op, int rep, lu_v a, lu_v b, lu_v cc, int64_t imm);
 lu_v lu_ev_konst(struct ctx *c, PyObject *o);
 lu_v lu_ev_const_i(struct ctx *c, int64_t i);
+/* The unit being built, for a generic helper's last argument: the helper
+   counts its passes there (helpers.c generic). */
+static inline lu_v
+lu_ev_unit(struct ctx *c)
+{
+    return lu_ev_const_i(c, (int64_t)(intptr_t)c->g->f->unit);
+}
+
 lu_v lu_ev_const_f(struct ctx *c, double d);
 /* A guard that leaves before the current instruction; one after its effect. */
 lu_v lu_ev_guard(struct ctx *c, int op, lu_v a, int64_t imm);
@@ -552,7 +582,7 @@ int lu_ev_returned(struct ctx *c, lu_v v);
    budget is not spent, or units of its code called out there often and
    the callee is not in line already (`again`, its frames in the state).
    A call refused is recorded for the unit to count (eval_call.c). */
-int lu_ev_room(struct ctx *c, int again);
+int lu_ev_room(struct ctx *c, int again, PyCodeObject *callee);
 /* The call lu_ev_room let in for a hot site goes in line: the build
    takes the site past the budget only this once, and the callee's own
    calls have the room the unit began with, from where it begins.

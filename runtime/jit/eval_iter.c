@@ -25,6 +25,12 @@ lu_ev_get_iter(struct ctx *c)
         if (t != NULL) {
             lu_ev_guard_type(c, v, t);
         }
+        else {
+            /* The interpreter has not run the loop (compiled code has), or
+               met more than one kind: what the root learned compiled code
+               meets there, whose guard exits pay for giving it up. */
+            t = lu_ev_learn_type(c, v, 0);
+        }
     }
     lu_v w;
     if (t == &PyTuple_Type || t == &PyList_Type) {
@@ -240,8 +246,8 @@ lu_ev_for_iter(struct ctx *c)
         if (done) {
             return 0;
         }
-        lu_v args[2] = { it, lu_ev_const_i(c, 0) };
-        v = lu_ev_helper(c, H_for_iter, 2, args, 0);            /* MISSING at the end */
+        lu_v args[3] = { it, lu_ev_const_i(c, 0), lu_ev_unit(c) };
+        v = lu_ev_helper(c, H_for_iter, 3, args, 0);            /* MISSING at the end */
         lu_ev_fork(c, lu_ev_emit(c, OP_IS, REP_BIT, v, lu_ev_konst(c, LU_MISSING), LU_NOV, 0), exit_pc);
     }
     if (c->g->cur >= 0) {

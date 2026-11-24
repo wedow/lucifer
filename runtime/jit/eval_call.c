@@ -178,7 +178,7 @@ spent(struct gctx *g)
 }
 
 int
-lu_ev_room(struct ctx *c, int again)
+lu_ev_room(struct ctx *c, int again, PyCodeObject *callee)
 {
     struct lu_func *f = c->g->f;
     c->g->hot_room = 0;
@@ -204,6 +204,9 @@ lu_ev_room(struct ctx *c, int again)
     }
     if (i == f->nouts) {
         note_key(&f->outs, &f->nouts, &f->capouts, key);
+        f->out_callees = realloc(f->out_callees, sizeof(PyCodeObject *) * (size_t)f->capouts);
+        f->out_callees[i] = callee;
+        lu_ev_konst(c, (PyObject *)callee);     /* the unit keeps it */
     }
     if (c->g->budget >= 0) {
         lu_ev_guard(c, OP_COUNT_OUT, LU_NOV, i);        /* the unit counts the calls made here */
@@ -260,7 +263,7 @@ not_inlinable(struct ctx *c, PyFunctionObject *fn, lu_v funcv)
     if (again > 1) {
         return "recursive";
     }
-    if (!lu_ev_room(c, again)) {
+    if (!lu_ev_room(c, again, co)) {
         return "over budget";
     }
     /* A function's copy of itself costs about what its active frame has
@@ -1232,7 +1235,8 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
     if (nkw > 0) {
         args[2 + n + nkw] = lu_ev_konst(c, kwnames);
     }
-    r = lu_ev_helper(c, nkw > 0 ? H_call_kw : H_call, 2 + n + nkw + (nkw > 0), args, nops);
+    r = lu_ev_helper(c, nkw > 0 ? H_call_kw : kc == NULL && fn == NULL ? H_call_any : H_call, 2 + n + nkw + (nkw > 0),
+                     args, nops);
     for (int i = 0; i < nops; i++) {
         lu_ev_pop(c);
     }
@@ -1320,11 +1324,7 @@ lu_ev_kernel_arms(struct ctx *c, lu_v *args, int n)
             return 0;
         }
         struct lu_prof *q = lu_ev_prof(c, i);
-        int relied = 0, k = q != NULL ? lu_jit_prof_types(q, these, &relied) : -1;
-        for (int j = 0; j < k; j++) {
-            lu_ev_konst(c, (PyObject *)these[j]);
-            Py_DECREF(these[j]);        /* the unit holds its constants */
-        }
+        int relied = 0, k = q != NULL ? lu_ev_value_classes(c, v, 0, q, (PyObject **)these, &relied) : -1;
         if (k <= 0) {
             return 0;           /* not learned yet, or met too many: nothing folds */
         }

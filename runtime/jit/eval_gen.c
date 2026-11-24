@@ -234,7 +234,7 @@ no_room(struct ctx *c, PyCodeObject *co)
     if (lu_jit_noinline(co)) {
         return "its inlined copies kept leaving";
     }
-    if (!lu_ev_room(c, again)) {
+    if (!lu_ev_room(c, again, co)) {
         return "over budget";
     }
     return NULL;

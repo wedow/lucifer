@@ -66,15 +66,15 @@
 #define CATCH 4                 /* at a kernel handler: what a call raises under it is taken in the unit */
 #define RAISES 8                /* at an instruction: what it raises leaves the unit, which returns it */
 #define NOBORROW 16             /* at an OSR entry: its entry values are counted (opt.c borrow_items) */
-/* A guard that fails this often makes its instruction generic, and at
-   least once per INS_PER_FAIL instructions its root's last build made: an
-   exit costs about what building two instructions does (4,700 machine
-   instructions against 2,500), so the build that gives the site up is
-   made once its exits have cost about as much. A guard that fails rarely
-   in a large unit keeps its speculation: until then the exits cost less
-   than the build, and the generic site's helper calls more. */
-#define GUARD_FAILS 50
-#define INS_PER_FAIL 2
+/* What a rebuild is worth. A unit is built again to give up a guard that
+   keeps failing, to take in what its root learned since its build, or to
+   take calls in line; each is made once what the unit loses meanwhile
+   (exits at the guard, passes that call the kernel where a learned type
+   would fold the call, calls made out of line) has cost what the new build
+   will: code that runs on then pays at most twice what the best choice in
+   hindsight would, and code that stops soon pays little. Both sides are
+   estimated by the ledger, below. A guard that fails rarely in a large
+   unit keeps its speculation. */
 /* Exits a unit without loops takes, on at least half its entries, before
    it is retired. */
 #define LEAVES 50
@@ -86,17 +86,11 @@
 /* seen bits. */
 #define WARMED 1                /* the entry's compile was put off for feedback once */
 /* Instructions a unit may have and still take a call in line at first
-   (what the evaluator folds away costs it nothing), and how often a unit
-   that left calls out is built again with twice that (after HOT_ENTRIES,
-   target.h): past it a build costs more than its unit's code earns back
-   (a regex engine inlined whole took minutes). */
+   (what the evaluator folds away costs it nothing). A unit that left calls
+   out is built again with twice that once the calls it made out of line
+   have cost what that larger build will (hot_exit). */
 #define INLINE_BUDGET 1000
-#define MAX_GROWN 4
-/* Out-of-line calls a unit makes at one site, per instruction the unit's
-   build made, before the site is taken in line whatever the budget has
-   left (what they cost by then is about what the unit's next build does),
-   and the calls per entry of the unit that show the site in a loop it runs. */
-#define HOT_CALLS_PER_INS 8
+/* The calls per entry of a unit that show a site in a loop it runs. */
 #define LOOP_CALLS 64
 
 struct lu_jit_code {
@@ -107,7 +101,7 @@ struct lu_jit_code {
     struct lu_unit *units;      /* live ones and dead ones not yet freed */
     int ncode;
     uint8_t *nospec;            /* per code unit: NOSPEC, do not speculate; NOHOIST, keep its guards in place */
-    uint32_t *fails;            /* per code unit: guard failures */
+    uint64_t *fails;            /* per code unit: what its guards' exits lost (exit_cost) */
     uint32_t *wait;             /* per code unit: entries to leave to the interpreter */
     uint8_t *seen;              /* per code unit: WARMED */
     int noinline;               /* a side exit in an inlined copy keeps leaving: call it instead */
@@ -120,8 +114,6 @@ struct lu_jit_code {
     struct lu_opclasses **opclasses;    /* per code unit: an operator site's operand classes */
     struct lu_prof *profs;              /* a root's: what it learned of values, by context (target.h) */
     unsigned long learned;              /* how often one of them changed */
-    unsigned long stale;                /* passes its units made, since its last build, of places that met
-                                           nothing new while it had learned more than the unit knew */
     int built_ins;                      /* instructions its last build made: about what the next costs */
     PyMutex prof_lock;                  /* theirs, and hot's */
     PyCodeObject *code;                 /* LUCIFER_JIT_DEBUG: whose (a name only) */
@@ -131,12 +123,6 @@ struct lu_jit_code {
     int nhot;
 };
 
-/* Passes of places built without what the root learned since, per
-   instruction of its last build, before it is built again: a build costs
-   about 2,500 machine instructions per instruction it makes, and a pass
-   that calls the kernel where a learned type would have folded the call
-   a few hundred. */
-#define STALE_PER_INS 8
 
 struct lu_prof {
     struct lu_prof *next;
@@ -149,13 +135,20 @@ struct lu_prof {
     int n;                      /* how many: release-stored after the type */
     uint8_t value_kind;         /* lu_prof_value_kind, or zero for types of operands */
     uint8_t poly;               /* it had more than those: nothing to rely on */
-    uint8_t dropped;            /* not relied on: a guard on its one type failed as often as a site's (GUARD_FAILS) */
-    uint32_t fails;             /* exits of that guard */
+    uint8_t dropped;            /* not relied on: a guard on its one type failed as a site's does (fails_enough) */
+    uint64_t fails;             /* what that guard's exits lost (exit_cost) */
+    unsigned long at;           /* its root's learned count when it last learned: a unit built before then is
+                                   stale here */
     unsigned long unshared;     /* the LU_PROF_KINDS flags some type it met lacks */
+    uint64_t pass;              /* what a pass of its instruction loses in a unit built without what it learned
+                                   (lu_jit_prof_built) */
+    int rest;                   /* the IR its last build emitted after its report in its frame, when it had met
+                                   nothing: what learning here can fold (lu_jit_prof_rest) */
 };
 
 static struct {
-    unsigned long compiles, failures, entries, returns, units_dead, direct, compiled, invalidated, waited, retired;
+    unsigned long compiles, failures, entries, returns, units_dead, direct, compiled, invalidated, waited, retired,
+        generic;
     unsigned long resumes, resumes_compiled, raised;
     unsigned long exits[EXIT_REASONS];
     unsigned long inlined;
@@ -172,6 +165,76 @@ static struct {
 
 static void event(const char *fmt, ...);
 static const char *qualname(PyCodeObject *code);
+
+/* The ledger: what builds, exits and calls cost, in machine instructions
+   of this binary, estimated from counts so that every decision is the same
+   run to run (tools/jitcost measures them). A build of n IR instructions
+   costs about BUILD_INS n + BUILD_INS2 n^2: each exit of a unit carries the
+   frames of every call in line around it, so a larger unit costs more per
+   instruction (within a factor of two per size from 16 to 8,000
+   instructions, on 3,000 builds of seven programs and on tools/jitcost's).
+   An exit costs DEOPT_INS, the deopt path and the entry back, and what the
+   interpreter does in the unit's stead until then: the bytecodes the build
+   evaluated after the exit's place in the code of each frame the exit
+   rebuilds (the rest of the loop's pass or of the call; all of it for a
+   guard at the unit's entry; the calls the interpreter makes enter their
+   own units), at BYTECODE_INS each (the interpreter's, less compiled
+   code's few).
+   A call made out of line costs CALL_COST (tools/jitcost: the same small
+   function called out of line and in line, its argument and result boxed
+   for the call), and what the callee's unit loses per entry (out_cost); a
+   pass through a place built without what it learned since, what a
+   generic path of the place's kind loses (below), or for another
+   instruction a call for each helper call the build made for it
+   (lu_jit_prof_built). A pass through a generic path
+   (a helper that stands where a build for the operands' classes would have
+   had a guard and an in-line path: an iterator's step, an attribute's load
+   or store, an operator, a call of an unknown callable) costs what the
+   helper path takes beyond that in-line form, by kind (lu_jit_generic). */
+#define BUILD_INS 6500
+#define BUILD_INS2 5
+#define DEOPT_INS 3800
+#define BYTECODE_INS 100
+#define CALL_COST 420
+#define ITER_INS 1000
+#define ATTR_INS 550
+#define OP_INS 1900
+#define ANYCALL_INS 500
+
+/* The instructions a build of n IR instructions takes. */
+static double
+build_cost(int n)
+{
+    return (double)n * (BUILD_INS + BUILD_INS2 * (double)n);
+}
+
+/* What exit d loses. */
+static uint64_t
+exit_cost(const struct lu_deopt *d)
+{
+    return DEOPT_INS + BYTECODE_INS * (uint64_t)d->rest;
+}
+
+/* What unit u lost, for unit_losses: counted while its entries are, until
+   it covers u's own build (enough), past which no decision needs more.
+   Relaxed: a lost update under a race only delays a decision, and a
+   saturated count is not written, so threads do not share its line. */
+static void
+lose(struct lu_unit *u, uint64_t cost)
+{
+    uint64_t lost = __atomic_load_n(&u->lost, __ATOMIC_RELAXED);
+    unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
+    if (lost >= u->enough || entries >= ENTRIES_SEEN) {
+        if (!__atomic_load_n(&u->settled, __ATOMIC_RELAXED) && !_PyRuntime.jit.stats) {
+            __atomic_store_n(&u->settled, 1, __ATOMIC_RELAXED);     /* with the counts on, generic passes are counted */
+        }
+        return;
+    }
+    __atomic_store_n(&u->lost, lost + cost, __ATOMIC_RELAXED);
+    if (lost + cost >= u->enough) {
+        __atomic_store_n(&u->lost_entries, entries > 0 ? entries : 1, __ATOMIC_RELAXED);
+    }
+}
 
 /* Sites marked generic (nospec, noinline) so far: a unit built after a
    mark knows it. */
@@ -346,7 +409,7 @@ state_for(PyCodeObject *code)
     jc->ncode = (int)Py_SIZE(code);
     jc->code = code;
     jc->nospec = calloc((size_t)jc->ncode + 1, 1);
-    jc->fails = calloc((size_t)jc->ncode + 1, sizeof(uint32_t));
+    jc->fails = calloc((size_t)jc->ncode + 1, sizeof(uint64_t));
     jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint32_t));
     jc->seen = calloc((size_t)jc->ncode + 1, 1);
     jc->call_pc = lu_jit_call_entry(code);
@@ -496,8 +559,89 @@ lu_jit_prof_learned(PyCodeObject *root)
     return __atomic_load_n(&state_for(root)->learned, __ATOMIC_RELAXED);
 }
 
+/* A learned rebuild is made only once its root's places are quiet: what
+   unit u paid towards it since a place last learned covers half its
+   predicted cost. A rebuild made while the places are still learning is
+   wasted with certainty when the next class arrives, and is made again;
+   waiting costs at most half a build more than not waiting. A place past
+   its polymorphic limit learns nothing more, and so does not count. */
+static int
+quiet(struct lu_unit *u, uint64_t paid, uint64_t cost)
+{
+    return __atomic_add_fetch(&u->quiet, paid, __ATOMIC_RELAXED) >= cost / 2;
+}
+
+/* A place or attribute cache of root jc's learned: its units' places are
+   not quiet. */
+static void
+learning(struct lu_jit_code *jc)
+{
+    for (struct lu_unit *u = jc != NULL ? __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE) : NULL; u != NULL; u = u->next) {
+        __atomic_store_n(&u->quiet, 0, __ATOMIC_RELAXED);
+    }
+}
+
+/* A pass of unit u that lost `cost` for want of what its root learned
+   since its build: 0 once such passes have cost what u's build did and
+   the places are quiet, and u is to be built again. */
+static int
+stale_pass(struct lu_unit *u, uint64_t cost)
+{
+    uint64_t relearn = __atomic_load_n(&u->relearn, __ATOMIC_RELAXED);
+    int still = quiet(u, cost, relearn) == 0;
+    return __atomic_add_fetch(&u->unlearned, cost, __ATOMIC_RELAXED) < relearn || still;
+}
+
+/* The learned rebuild is predicted at u's build less what p's generic
+   expansion emitted, the least over the places that pass: a place that
+   had met nothing at the build left every way after it in line, and what
+   it learned since folds those. */
 int
-lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
+lu_jit_stale_pass(struct lu_prof *p, struct lu_unit *u)
+{
+    int rest = __atomic_load_n(&p->rest, __ATOMIC_RELAXED);
+    uint64_t cost = (uint64_t)build_cost(u->nins - (rest < u->nins ? rest : u->nins));
+    uint64_t was = __atomic_load_n(&u->relearn, __ATOMIC_RELAXED);
+    while (cost < was && !__atomic_compare_exchange_n(&u->relearn, &was, cost, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+    }
+    uint64_t pass = __atomic_load_n(&p->pass, __ATOMIC_RELAXED);
+    return stale_pass(u, pass != 0 ? pass : CALL_COST);
+}
+
+void
+lu_jit_prof_rest(struct lu_prof *p, int rest)
+{
+    __atomic_store_n(&p->rest, __atomic_load_n(&p->n, __ATOMIC_RELAXED) == 0 ? rest : 0, __ATOMIC_RELAXED);
+}
+
+void
+lu_jit_prof_built(struct lu_prof *p, int base, int calls)
+{
+    uint64_t pass;
+    switch (base) {
+    case FOR_ITER:
+        pass = ITER_INS;
+        break;
+    case LOAD_ATTR:
+    case STORE_ATTR:
+        pass = ATTR_INS;
+        break;
+    case BINARY_OP:
+    case COMPARE_OP:
+        pass = OP_INS;
+        break;
+    case CALL:
+    case CALL_KW:
+        pass = ANYCALL_INS;
+        break;
+    default:
+        pass = (uint64_t)CALL_COST * (uint64_t)(calls > 0 ? calls : 1);
+    }
+    __atomic_store_n(&p->pass, pass, __ATOMIC_RELAXED);
+}
+
+int
+lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned, struct lu_unit *u)
 {
     struct lu_jit_code *jc = p->jc;
     int kind = __atomic_load_n(&p->value_kind, __ATOMIC_RELAXED);
@@ -507,14 +651,12 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
         met = p->met[i] == t;
     }
     if (met) {
-        /* Nothing new here. Once the root has learned anything since the
-           unit was built, its units' places count passes of code built
-           without it, and the unit is built again when they have cost
-           about what the build will: code that runs only a few times more
-           is not built again for it. */
-        return __atomic_load_n(&jc->learned, __ATOMIC_RELAXED) == learned
-            || __atomic_add_fetch(&jc->stale, 1, __ATOMIC_RELAXED)
-               < STALE_PER_INS * (unsigned long)__atomic_load_n(&jc->built_ins, __ATOMIC_RELAXED);
+        /* Nothing new here. Once the place has learned anything since the
+           unit was built, its passes are of code built without it, and the
+           unit is built again when they have cost about what the build
+           will: code that runs only a few times more is not built again
+           for it. */
+        return __atomic_load_n(&p->at, __ATOMIC_RELAXED) <= learned || lu_jit_stale_pass(p, u);
     }
     PyMutex_Lock(&jc->prof_lock);
     int known = p->poly;
@@ -528,13 +670,16 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
         && (!kind || (kind == LU_PROF_CLASS ? PyType_Check(o) : _Py_IsImmortal(o)))) {
         p->met[p->n] = Py_NewRef(t);
         __atomic_store_n(&p->n, p->n + 1, __ATOMIC_RELEASE);
-        jc->learned++;
+        __atomic_store_n(&p->at, ++jc->learned, __ATOMIC_RELAXED);
     }
     else if (!known) {
         __atomic_store_n(&p->poly, 1, __ATOMIC_RELAXED);
-        jc->learned++;
+        __atomic_store_n(&p->at, ++jc->learned, __ATOMIC_RELAXED);
     }
     PyMutex_Unlock(&jc->prof_lock);
+    if (!known) {
+        learning(jc);
+    }
     if (!known && _PyRuntime.jit.events) {
         event("learn %s %s at %s@%d: %s%s", qualname(jc->code), jc->print ? "built" : "unbuilt", qualname(p->code), p->pc,
               kind ? Py_TYPE(o)->tp_name : ((PyTypeObject *)t)->tp_name, p->poly ? " (poly)" : "");
@@ -542,14 +687,29 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
     return 1;
 }
 
-static void kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *at, int pc);
+static void kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *at, int pc, double paid,
+                 double cost);
 
-/* Whether n exits of a guard in a unit of root's justify building it again
-   without the guard (GUARD_FAILS). */
+/* Whether exits of a guard in a unit of root's that lost `lost` have cost
+   what building it again without the guard will. */
 static int
-fails_enough(uint32_t n, struct lu_jit_code *root)
+fails_enough(uint64_t lost, struct lu_jit_code *root)
 {
-    return n >= GUARD_FAILS && n >= (uint32_t)__atomic_load_n(&root->built_ins, __ATOMIC_RELAXED) / INS_PER_FAIL;
+    return lost >= build_cost(__atomic_load_n(&root->built_ins, __ATOMIC_RELAXED));
+}
+
+/* d's unit is built again, at once, with what its root jc learned since. */
+static void
+relearn(struct lu_jit_code *jc, struct lu_deopt *d)
+{
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: recompile %s: learned since its build\n", PyUnicode_AsUTF8(d->unit->code->co_qualname));
+    }
+    const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
+    kill(jc, d->unit, "learned-since-build", in->code, in->pc,
+         (double)__atomic_load_n(&d->unit->unlearned, __ATOMIC_RELAXED),
+         (double)__atomic_load_n(&d->unit->relearn, __ATOMIC_RELAXED));
+    __atomic_store_n(&jc->wait[d->unit->entry_pc], 0, __ATOMIC_RELAXED);
 }
 
 /* An exit a learned type's site took: the unit is built again with what
@@ -564,18 +724,15 @@ prof_exit(struct lu_deopt *d)
     struct lu_prof *p = d->prof;
     struct lu_jit_code *jc = p->jc;
     if (d->tier) {
-        if (_PyRuntime.jit.debug) {
-            fprintf(stderr, "jit: recompile %s: learned since its build\n", PyUnicode_AsUTF8(d->unit->code->co_qualname));
-        }
-        const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
-        kill(jc, d->unit, "learned-since-build", in->code, in->pc);
-        __atomic_store_n(&jc->wait[d->unit->entry_pc], 0, __ATOMIC_RELAXED);
+        relearn(jc, d);
         return;
     }
     PyMutex_Lock(&jc->prof_lock);
     int now = 0;
     const char *what = "type";
-    if (fails_enough(++p->fails, jc)) {
+    uint64_t cost = exit_cost(d);
+    double paid = (double)(p->fails += cost);
+    if (quiet(d->unit, cost, build_cost(__atomic_load_n(&jc->built_ins, __ATOMIC_RELAXED))) && fails_enough(p->fails, jc)) {
         if (!p->poly && !p->dropped) {
             p->dropped = now = 1;
         }
@@ -593,7 +750,8 @@ prof_exit(struct lu_deopt *d)
     }
     const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
     for (struct lu_unit *u = now ? __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE) : NULL; u != NULL; u = u->next) {
-        kill(jc, u, what[0] == 't' ? "learned-type-fails" : "learned-kind-fails", in->code, in->pc);
+        kill(jc, u, what[0] == 't' ? "learned-type-fails" : "learned-kind-fails", in->code, in->pc, paid,
+             build_cost(__atomic_load_n(&jc->built_ins, __ATOMIC_RELAXED)));
     }
 }
 
@@ -953,18 +1111,19 @@ lu_jit_hot_site(PyCodeObject *root, uint64_t key)
     return hot;
 }
 
-/* The sites the build left calls out of line at, for the unit to count. */
+/* The sites the build left calls out of line at, for the unit to count:
+   each leaves first after as many calls as the build made instructions,
+   then after as many again as it made before (hot_exit). */
 static void
 keep_outs(struct lu_unit *u, const struct lu_func *f)
 {
     if (f->nouts == 0) {
         return;
     }
-    u->hot_calls = HOT_CALLS_PER_INS * (int64_t)f->nins;
     u->nouts = f->nouts;
     u->outs = malloc(sizeof(struct lu_out) * (size_t)f->nouts);
     for (int i = 0; i < f->nouts; i++) {
-        u->outs[i] = (struct lu_out){ f->outs[i], -u->hot_calls };
+        u->outs[i] = (struct lu_out){ f->outs[i], -(int64_t)f->nins, f->nins, 0, f->out_callees[i] };
     }
 }
 
@@ -978,10 +1137,11 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     u->builtins = frame->builtins;
     u->built = __atomic_load_n(&marks, __ATOMIC_ACQUIRE);
     f.code = frame->code;
+    f.unit = u;
     f.entry_pc = (int)(frame->instr - lu_code_start(frame->code));
     /* What the evaluator may inline, in code units: a unit that stayed hot
        with calls left out is built again with twice as much. */
-    f.budget = INLINE_BUDGET << jc->grown;
+    f.budget = jc->grown < 21 ? INLINE_BUDGET << jc->grown : INT_MAX;     /* what an int holds */
     f.stress = _PyRuntime.stress.deopt != 0;
     if (f.stress) {
         u->stress_counter = malloc(sizeof(long));
@@ -1020,8 +1180,10 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     count(&stats.ir, (unsigned long)f.nins);
     if (ok) {
         keep_outs(u, &f);
+        u->enough = (uint64_t)build_cost(f.nins);
+        u->relearn = u->enough;
+        u->nins = f.nins;
         __atomic_store_n(&jc->built_ins, f.nins, __ATOMIC_RELAXED);
-        __atomic_store_n(&jc->stale, 0, __ATOMIC_RELAXED);
     }
     ok = ok && lu_ssa_optimize(&f) == 0;
     double t2 = now(), t3 = t2;
@@ -1142,16 +1304,19 @@ wait_at(struct lu_jit_code *jc, int pc)
    what the last good unit served, and one that served past what its count
    holds starts the code over. */
 static void
-kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *at, int pc)
+kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *at, int pc, double paid, double cost)
 {
     if (__atomic_exchange_n(&u->dead, 1, __ATOMIC_SEQ_CST)) {
         return;
     }
     if (_PyRuntime.jit.events) {
-        char cause[512];
+        char cause[512], ledger[64] = "";
         snprintf(cause, sizeof cause, "%s %s@%d", why, qualname(at), pc);
-        event("kill %s@%d entries %lu leaves %lu level %d: %s", qualname(u->code), u->entry_pc, u->entries,
-              u->leaves, jc->level, cause);
+        if (cost > 0) {
+            snprintf(ledger, sizeof ledger, " paid %.0f cost %.0f", paid, cost);
+        }
+        event("kill %s@%d entries %lu leaves %lu level %d%s: %s", qualname(u->code), u->entry_pc, u->entries,
+              u->leaves, jc->level, ledger, cause);
         free(jc->cause);
         jc->cause = strdup(cause);
     }
@@ -1187,24 +1352,7 @@ lu_jit_unit_kill(struct lu_unit *u, int stale, const char *why, PyCodeObject *at
     if (!__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
         count(&stats.invalidated, 1);
     }
-    kill(state_of(u->code), u, why, at, pc);
-}
-
-/* A unit that stayed hot with calls left out of line for want of budget
-   dies, and the next build of its code gets twice as much, a bounded
-   number of times: 1 when it died so. */
-static int
-grow(struct lu_jit_code *jc, struct lu_unit *u)
-{
-    if (!u->refused || jc == NULL || jc->grown >= MAX_GROWN) {
-        return 0;
-    }
-    if (_PyRuntime.jit.debug) {
-        fprintf(stderr, "jit: recompile %s: grown %d\n", PyUnicode_AsUTF8(u->code->co_qualname), jc->grown + 1);
-    }
-    __atomic_store_n(&jc->grown, jc->grown + 1, __ATOMIC_RELAXED);
-    kill(jc, u, "grown", NULL, jc->grown);
-    return 1;
+    kill(state_of(u->code), u, why, at, pc, 0, 0);
 }
 
 /* A death no recompile was asked to fix (a unit that keeps leaving, a
@@ -1233,7 +1381,7 @@ retire(struct lu_jit_code *jc, struct lu_unit *u)
     }
     count(&stats.retired, 1);
     escalate(jc);
-    kill(jc, u, "retired", NULL, jc->level);
+    kill(jc, u, "retired", NULL, jc->level, 0, 0);
 }
 
 /* An exit no recompile can remove: a unit without loops that leaves on
@@ -1428,9 +1576,6 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         return LU_JIT_NONE;
     }
     count(&stats.entries, 1);
-    if (__atomic_load_n(&u->entries, __ATOMIC_RELAXED) == HOT_ENTRIES && grow(jc, u)) {
-        return LU_JIT_NONE;
-    }
     struct lu_jit_act act = { u, task->jit_act, 0 };
     if (serial_entry_dead(task, &act)) {
         return LU_JIT_NONE;
@@ -1634,12 +1779,6 @@ lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, 
 }
 
 void
-lu_jit_grow(struct lu_unit *u)
-{
-    grow(state_of(u->code), u);
-}
-
-void
 lu_jit_left(struct lu_unit *u)
 {
     left(u);
@@ -1729,19 +1868,73 @@ handling_frame(struct lu_deopt *d)
    frame's handler keeps taking (compiled code takes only the root's and
    kernel frames', which make no traceback entry) is treated as a side
    exit there: the function is called instead, and its own unit takes it. */
-/* A call the unit left out of line for want of budget was made hot_calls
-   times at one site, and the unit left there. When the calls are also
-   LOOP_CALLS per entry of the unit, calls in a loop it runs, the sites it
-   called out at that often are hot for its code's next build, and it dies.
-   One made a few times per entry is a caller's to make: taken in line, its
-   code is copied into each unit that calls it, as a recursive descent's
-   would be into every other. Either way the site's count goes on past
-   zero, and does not leave again. A site is taken in line by how often it
-   is called, not by where the build came to it. */
+/* Calls made at site i of the unit's out-of-line calls. */
+static int64_t
+out_calls(const struct lu_out *o)
+{
+    return o->before + o->armed + __atomic_load_n(&o->left, __ATOMIC_RELAXED);
+}
+
+/* What a unit has lost per entry: what its exits and generic paths lost
+   (lost, over the entries that made it: past `enough` it stops, and
+   lost_entries says after how many) and its calls made out of line. Read
+   only when a caller decides: the loss is valued for that decision, not
+   added to the caller's ledger. Past ENTRIES_SEEN, which the count stops
+   at, the value first made then stands. */
+static double
+unit_losses(struct lu_unit *u)
+{
+    unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
+    uint64_t kept = __atomic_load_n(&u->per_entry, __ATOMIC_RELAXED);
+    if (entries == 0 || (entries >= ENTRIES_SEEN && kept != 0)) {
+        return (double)kept;
+    }
+    unsigned long upto = __atomic_load_n(&u->lost_entries, __ATOMIC_RELAXED);
+    double per = (double)__atomic_load_n(&u->lost, __ATOMIC_RELAXED) / (double)(upto != 0 ? upto : entries);
+    for (int i = 0; i < u->nouts; i++) {
+        per += CALL_COST * (double)out_calls(&u->outs[i]) / (double)entries;
+    }
+    __atomic_store_n(&u->per_entry, (uint64_t)per, __ATOMIC_RELAXED);
+    return per;
+}
+
+/* What a call made out of line at o loses: its own cost, and what the
+   callee's unit then loses per entry for running uncustomized (its exits,
+   generic paths, its own calls out of line). */
+static double
+out_cost(const struct lu_out *o)
+{
+    struct lu_jit_code *cc = state_of(o->callee);
+    double callee = 0;
+    for (struct lu_unit *v = cc != NULL ? __atomic_load_n(&cc->units, __ATOMIC_ACQUIRE) : NULL; v != NULL; v = v->next) {
+        if (!__atomic_load_n(&v->dead, __ATOMIC_RELAXED) && v->entry_pc == cc->call_pc) {
+            callee = unit_losses(v);
+            break;
+        }
+    }
+    return CALL_COST + callee;
+}
+
+/* A site the unit left out of line for want of budget was called as often
+   as it was armed for, and the unit left there: a look at its sites, each
+   valued at its calls times out_cost. When one site's calls have cost what
+   the unit's next build will, the sites that cost a quarter of that, and
+   are called LOOP_CALLS times per entry of the unit (calls in a loop it
+   runs), are hot for that build, and it dies. One made a few times per
+   entry is a caller's to make: taken in line, its code is copied into each
+   unit that calls it, as a recursive descent's would be into every other.
+   Else, when its calls out of line, all sites together, have cost what a
+   build with twice the budget will, the unit is built again with it. Else
+   each site that left is armed for as many calls again as it made: looks
+   are few next to the calls. A site is taken in line by how often it is
+   called, not by where the build came to it. */
 static void
 hot_exit(struct lu_deopt *d)
 {
     struct lu_unit *u = d->unit;
+    if (__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
+        return;
+    }
     /* A unit entered where a generator resumes after a yield runs one turn
        of the generator's loop per entry: a call made on most turns is in it. */
     lu_codeunit *resume = lu_code_start(u->code) + u->entry_pc - 1 - lu_opcode_caches[RESUME];
@@ -1749,36 +1942,62 @@ hot_exit(struct lu_deopt *d)
         && (resume->op.arg & RESUME_OPARG_LOCATION_MASK) == RESUME_AFTER_YIELD;
     unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
     unsigned long loop = turns ? entries / 2 : LOOP_CALLS * entries;
-    if ((unsigned long)u->hot_calls < loop || __atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
-        return;
-    }
     struct lu_jit_code *jc = state_of(u->code);
+    int built = __atomic_load_n(&jc->built_ins, __ATOMIC_RELAXED);
+    double worth = build_cost(built);
     PyMutex_Lock(&jc->prof_lock);
-    int was = jc->nhot;
+    double most = 0, total = 0, *cost = malloc(sizeof(double) * (size_t)u->nouts);
     for (int i = 0; i < u->nouts; i++) {
-        int64_t calls = __atomic_load_n(&u->outs[i].left, __ATOMIC_RELAXED) + u->hot_calls;
+        cost[i] = (double)out_calls(&u->outs[i]) * out_cost(&u->outs[i]);
+        total += cost[i];
+        most = cost[i] > most ? cost[i] : most;
+    }
+    int was = jc->nhot;
+    for (int i = 0; i < u->nouts && most >= worth; i++) {
+        int64_t calls = out_calls(&u->outs[i]);
         int known = 0;
         for (int k = 0; k < jc->nhot && !known; k++) {
             known = jc->hot[k] == u->outs[i].key;
         }
-        if (!known && calls >= u->hot_calls / 4 && (unsigned long)calls >= loop) {
+        if (!known && cost[i] >= worth / 4 && (unsigned long)calls >= loop) {
             jc->hot = realloc(jc->hot, sizeof(uint64_t) * (size_t)(jc->nhot + 1));
             jc->hot[jc->nhot] = u->outs[i].key;
             __atomic_store_n(&jc->nhot, jc->nhot + 1, __ATOMIC_RELAXED);
         }
     }
-    PyMutex_Unlock(&jc->prof_lock);
-    if (jc->nhot == was) {
-        return;                 /* hot already: a copy the budget left out */
+    const char *why = jc->nhot > was ? "hot-site"
+        : u->refused && total >= build_cost(2 * built) ? "grown" : NULL;
+    free(cost);
+    for (int i = 0; why == NULL && i < u->nouts; i++) {
+        struct lu_out *o = &u->outs[i];
+        if (__atomic_load_n(&o->left, __ATOMIC_RELAXED) >= 0) {
+            o->before = out_calls(o);
+            o->armed = o->before;
+            __atomic_store_n(&o->left, -o->armed, __ATOMIC_RELAXED);
+        }
     }
-    if (_PyRuntime.jit.debug) {
-        const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
-        fprintf(stderr, "jit: %s@%d: hot site %s@%d, %d hot now\n", PyUnicode_AsUTF8(u->code->co_qualname),
-                u->entry_pc, PyUnicode_AsUTF8(in->code->co_qualname), in->pc, jc->nhot);
+    PyMutex_Unlock(&jc->prof_lock);
+    if (why == NULL) {
+        return;
     }
     const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
-    kill(jc, u, "hot-site", in->code, in->pc);
+    if (_PyRuntime.jit.debug) {
+        fprintf(stderr, "jit: %s@%d: %s at %s@%d, %d hot now\n", PyUnicode_AsUTF8(u->code->co_qualname),
+                u->entry_pc, why, PyUnicode_AsUTF8(in->code->co_qualname), in->pc, jc->nhot);
+    }
+    if (why[0] == 'g') {
+        __atomic_store_n(&jc->grown, jc->grown + 1, __ATOMIC_RELAXED);
+    }
+    kill(jc, u, why, in->code, in->pc, why[0] == 'g' ? total : most, why[0] == 'g' ? build_cost(2 * built) : worth);
     __atomic_store_n(&jc->wait[u->entry_pc], 0, __ATOMIC_RELAXED);    /* not for its faults: built again at once */
+}
+
+void
+lu_jit_generic(struct lu_unit *u, enum lu_generic kind)
+{
+    static const uint16_t costs[LU_GENERIC_KINDS] = { ITER_INS, ATTR_INS, OP_INS, ANYCALL_INS };
+    count(&stats.generic, 1);
+    lose(u, costs[kind]);
 }
 
 void
@@ -1791,6 +2010,9 @@ lu_jit_note_exit(struct lu_deopt *d)
     if (d->reason == EXIT_HOT) {
         hot_exit(d);
         return;
+    }
+    if (d->reason != EXIT_POLL) {
+        lose(d->unit, exit_cost(d));    /* a poll's exit is the runtime's, when it asks: no build removes it */
     }
     count(&stats.taken[d->opcode & 0xff], 1);
     if (_PyRuntime.jit.events) {
@@ -1810,6 +2032,24 @@ lu_jit_note_exit(struct lu_deopt *d)
     }
     if (d->prof != NULL) {
         prof_exit(d);
+        return;
+    }
+    /* A guard's exit while its unit is stale: a pass of the unit went
+       through a place that has met a class its build did not know (and had
+       room to take it: a place past its polymorphic limit teaches nothing
+       more), which charged the unit's stale ledger (unlearned). Such exits
+       are mostly that pass's own doing (a guard after a place's generic
+       path, on a value the path gives in another form), so they are losses
+       of the stale build, paid towards the rebuild that takes what was
+       learned, not towards a mark that makes the guard's instruction
+       generic. The rebuild has what was learned: a guard of its that fails
+       has failed on what its places know, and its exits buy the mark. Each
+       diverted rebuild needs a place to have learned since the unit's
+       build, so there are at most as many as its root's places learn. */
+    if (d->reason == EXIT_GUARD && __atomic_load_n(&d->unit->unlearned, __ATOMIC_RELAXED) != 0) {
+        if (!stale_pass(d->unit, exit_cost(d)) && !__atomic_load_n(&d->unit->dead, __ATOMIC_RELAXED)) {
+            relearn(state_of(d->unit->code), d);
+        }
         return;
     }
     struct lu_unit *u = d->unit;
@@ -1849,7 +2089,7 @@ lu_jit_note_exit(struct lu_deopt *d)
     }
     /* Past the threshold too: another root that inlined the same copy before
        the flag was set leaves here as well, and is recompiled when it does. */
-    uint32_t n = __atomic_add_fetch(&jc->fails[site_pc], 1, __ATOMIC_RELAXED);
+    uint64_t n = __atomic_add_fetch(&jc->fails[site_pc], exit_cost(d), __ATOMIC_RELAXED);
     PyCodeObject *code = lu_deopt_frame(d, 0)->code;
     struct lu_jit_code *root = state_for(code);
     if (fails_enough(n, root)) {
@@ -1902,7 +2142,7 @@ lu_jit_note_exit(struct lu_deopt *d)
             { "old-unit-catch", "old-unit-raises", "old-unit-noinline", "old-unit-noborrow", "old-unit-nospec" } };
         const char *why = whys[again != 0][caught >= 0 ? 0 : out ? 1 : d->reason != EXIT_GUARD ? 2 : d->borrow ? 3 : 4];
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
-            kill(root, u, why, site, site_pc);
+            kill(root, u, why, site, site_pc, (double)n, build_cost(__atomic_load_n(&root->built_ins, __ATOMIC_RELAXED)));
         }
     }
 }
@@ -1941,7 +2181,7 @@ lu_jit_pic(PyCodeObject *code, int pc, int create)
 }
 
 void
-lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
+lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name, struct lu_unit *u)
 {
     PyTypeObject *tp = Py_TYPE(owner);
     int n = __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE);
@@ -2004,6 +2244,9 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
         added = 1;
     }
     PyMutex_Unlock(&_PyRuntime.pic_lock);
+    if (added) {
+        learning(state_of(u != NULL ? u->code : pic->code));
+    }
     if (added && _PyRuntime.jit.debug) {
         /* A unit that tests for fewer shapes is built again when its generic load next runs (eval_attr.c). */
         fprintf(stderr, "jit: pic grows %s for %s\n", PyUnicode_AsUTF8(pic->code->co_qualname), tp->tp_name);
@@ -2019,7 +2262,7 @@ lu_jit_pic_note_interpreted(PyCodeObject *code, int pc, PyObject *owner, PyObjec
     }
     struct lu_pic *pic = lu_jit_pic(code, pc, 1);
     if (pic != NULL) {
-        lu_jit_pic_note(pic, owner, name);
+        lu_jit_pic_note(pic, owner, name, NULL);
     }
 }
 
@@ -2424,7 +2667,8 @@ lu_jit_report(void)
         fprintf(stderr, " %s %lu", reasons[i], stats.exits[i]);
     }
     fprintf(stderr, ", raised %lu\n", stats.raised);
-    fprintf(stderr, "jit: entries waited %lu, units retired %lu\n", stats.waited, stats.retired);
+    fprintf(stderr, "jit: entries waited %lu, units retired %lu, generic passes %lu\n", stats.waited, stats.retired,
+            stats.generic);
     fprintf(stderr, "jit: units freed %lu, dead held %lu\n", dying.freed, dying.n);
     fprintf(stderr, "jit: side exits compiled (bailouts) by opcode:");
     for (int i = 0; i < 256; i++) {

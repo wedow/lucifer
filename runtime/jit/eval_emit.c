@@ -112,11 +112,104 @@ lu_ev_prof(struct ctx *c, int which)
     return lu_jit_prof(c->g->f->code, key, c->code, c->pc);
 }
 
+/* The places the instruction at c->pc asked about (the guards from `from`
+   on that report or rely on one): a pass of its code built without what
+   one learned later loses what a generic path of the instruction's kind
+   does, or for another instruction a call for each helper call the build
+   made for it (the place's report among them), which what was learned
+   would fold (jit.c lu_jit_prof_built). */
+void
+lu_ev_price_places(struct ctx *c, lu_v from)
+{
+    int calls = 0;
+    for (lu_v v = from; v < c->g->f->nins; v++) {
+        const struct lu_ins *in = I(c, v);
+        calls += in->op == OP_HELPER && in->src == c->code && in->src_pc == c->pc;
+    }
+    for (lu_v v = from; v < c->g->f->nins; v++) {
+        const struct lu_ins *in = I(c, v);
+        if (in->prof != NULL && in->src == c->code && in->src_pc == c->pc) {
+            lu_jit_prof_built(in->prof, c->base, calls);
+        }
+    }
+}
+
+/* The reports an inlined frame c's build from `from` on made of places in
+   its own code: the IR built after each in the frame is what one class
+   learned there could fold away, the generic expansion of a place that had
+   met nothing (jit.c lu_jit_prof_rest). The rest of a root frame is most of
+   its unit, which learning does not fold: none. */
+void
+lu_ev_price_rest(struct ctx *c, lu_v from)
+{
+    lu_v end = c->g->f->nins;
+    for (lu_v v = c->parent != NULL ? from : end; v < end; v++) {
+        const struct lu_ins *in = I(c, v);
+        if (in->op == OP_GUARD_BIT && in->prof != NULL && in->src == c->code && I(c, in->a)->op == OP_HELPER
+            && I(c, in->a)->imm == H_profile) {
+            lu_jit_prof_rest(in->prof, (int)(end - v));
+        }
+    }
+}
+
 void
 lu_ev_profile(struct ctx *c, struct lu_prof *p, lu_v r)
 {
-    lu_v args[3] = { lu_ev_const_i(c, (int64_t)(intptr_t)p), r, lu_ev_const_i(c, (int64_t)c->g->learned) };
-    I(c, lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_profile, 3, args, 0), 1))->prof = p;
+    lu_v args[4] = { lu_ev_const_i(c, (int64_t)(intptr_t)p), r, lu_ev_const_i(c, (int64_t)c->g->learned),
+                     lu_ev_unit(c) };
+    I(c, lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_profile, 4, args, 0), 1))->prof = p;
+}
+
+/* What the places of this build learned of r (its classes, or with `kind`
+   a value profile's values), joined with what p learned: the union in
+   out, its count, or -1 past the polymorphic limit. A place relies on no
+   narrower set than the build already knows for its value: an exit at an
+   earlier place on r, which hides r's other classes from the places after
+   it, then cannot teach those places one class by chance. relied: p's one
+   type is relied on (lu_jit_prof_types) and is the whole union. Each
+   class is a constant of the unit. */
+int
+lu_ev_value_classes(struct ctx *c, lu_v r, int kind, struct lu_prof *p, PyObject **out, int *relied)
+{
+    struct gctx *g = c->g;
+    PyObject *these[LU_OPCLASS_WAYS];
+    int own = 0, k = p != NULL ? lu_jit_prof_types(p, (PyTypeObject **)these, &own) : 0;
+    for (int j = 0; j < k; j++) {
+        lu_ev_konst(c, these[j]);
+        Py_DECREF(these[j]);    /* the unit holds its constants */
+    }
+    struct vclasses *e = NULL;
+    for (int i = 0; i < g->nvclasses && e == NULL; i++) {
+        e = g->vclasses[i].v == r && g->vclasses[i].kind == kind ? &g->vclasses[i] : NULL;
+    }
+    if (e == NULL) {
+        if (g->nvclasses == g->capvclasses) {
+            g->capvclasses = g->capvclasses ? 2 * g->capvclasses : 16;
+            g->vclasses = realloc(g->vclasses, sizeof(struct vclasses) * (size_t)g->capvclasses);
+        }
+        e = &g->vclasses[g->nvclasses++];
+        *e = (struct vclasses){ .v = r, .kind = kind };
+    }
+    for (int j = 0; j < k && e->n >= 0; j++) {
+        int known = 0;
+        for (int i = 0; i < e->n; i++) {
+            known |= e->k[i] == these[j];
+        }
+        if (!known) {
+            e->n = e->n < LU_OPCLASS_WAYS ? e->n : -1;
+            if (e->n >= 0) {
+                e->k[e->n++] = these[j];
+            }
+        }
+    }
+    e->n = k < 0 ? -1 : e->n;
+    for (int i = 0; i < e->n; i++) {
+        out[i] = e->k[i];
+    }
+    if (relied != NULL) {
+        *relied = own && e->n == 1;
+    }
+    return e->n;
 }
 
 PyTypeObject *
@@ -132,6 +225,10 @@ lu_ev_learn_type(struct ctx *c, lu_v r, int which)
     struct lu_prof *p = lu_ev_prof(c, which);
     int poly = 1;
     t = p != NULL ? lu_jit_prof_type(p, &poly) : NULL;
+    PyObject *known[LU_OPCLASS_WAYS];
+    if (p != NULL && lu_ev_value_classes(c, r, 0, p, known, NULL) != 1 && t != NULL && !poly) {
+        poly = 1;               /* an earlier place on r met more */
+    }
     if (poly) {
         Py_XDECREF(t);
         if (p != NULL && lu_jit_prof_learns(p)) {
@@ -179,6 +276,12 @@ lu_ev_learn_const(struct ctx *c, lu_v *r, int which, enum lu_prof_value_kind kin
     struct lu_prof *p = lu_ev_prof(c, 64 * kind + which);
     int poly = 1;
     k = p != NULL ? lu_jit_prof_value(p, kind, &poly) : NULL;
+    PyObject *known[LU_OPCLASS_WAYS];
+    if (p != NULL && lu_ev_value_classes(c, *r, kind, p, known, NULL) != 1 && k != NULL && !poly) {
+        Py_DECREF(k);
+        k = NULL;
+        poly = 1;               /* an earlier place on r met more */
+    }
     if (poly || k == NULL) {
         if (!poly) {
             lu_ev_profile(c, p, *r);

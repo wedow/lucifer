@@ -254,7 +254,7 @@ lu_alloc_kind(const struct lu_ins *in)
     case H_rangeiter_new: case H_gen_new:
         return ALLOC_iterator;
     case H_make_function: return ALLOC_function;
-    case H_call: return ALLOC_class_call;
+    case H_call: case H_call_any: return ALLOC_class_call;
     default: return -1;
     }
 }
@@ -404,6 +404,7 @@ lu_ir_free(struct lu_func *f)
     free(f->blocks);
     free(f->ins);
     free(f->outs);
+    free(f->out_callees);
     free(f->hots);
     free(f->known);
     free(f->vobjs);

@@ -57,6 +57,15 @@ operand_kinds(struct ctx *c, lu_v a, lu_v b, int kinds, int *lk, int *rk)
     }
 }
 
+/* The unit, for the operator helper to count its passes in, when a or b is
+   of a class the build does not know: the helper then stands where a build
+   for their classes would have its way. Else 0. */
+static lu_v
+generic(struct ctx *c, lu_v a, lu_v b)
+{
+    return lu_ev_type(c, a) == NULL || lu_ev_type(c, b) == NULL ? lu_ev_unit(c) : lu_ev_const_i(c, 0);
+}
+
 static lu_v
 int_op(struct ctx *c, int op, lu_v a, lu_v b)
 {
@@ -254,8 +263,8 @@ lu_ev_binary_op(struct ctx *c)
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }
-        lu_v args[3] = { a, b, lu_ev_const_i(c, op) };
-        r = lu_ev_helper(c, H_binary_op, 3, args, 2);
+        lu_v args[4] = { a, b, lu_ev_const_i(c, op), generic(c, a, b) };
+        r = lu_ev_helper(c, H_binary_op, 4, args, 2);
     }
     lu_ev_pop(c);
     lu_ev_pop(c);
@@ -299,8 +308,8 @@ lu_ev_compare_op(struct ctx *c)
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }
-        lu_v args[3] = { a, b, lu_ev_const_i(c, c->oparg) };
-        r = lu_ev_helper(c, H_compare_op, 3, args, 2);
+        lu_v args[4] = { a, b, lu_ev_const_i(c, c->oparg), generic(c, a, b) };
+        r = lu_ev_helper(c, H_compare_op, 4, args, 2);
     }
     lu_ev_pop(c);
     lu_ev_pop(c);

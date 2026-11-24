@@ -148,7 +148,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(POLL, REP_NONE, IF_GUARD)         /* a back-edge: leaves at fs if the poll word is set */ \
     X(CHECK_LIVE, REP_NONE, IF_GUARD | IF_EFFECT)   /* leaves at fs, as a poll does, once the unit is dead */ \
     X(COUNT_OUT, REP_NONE, IF_GUARD | IF_EFFECT)    /* counts a call the budget left out of line, the unit's   \
-                                                       outs[imm]: leaves at fs at the unit's hot_calls (jit.c) */
+                                                       outs[imm]: leaves at fs when the site's count is reached (jit.c) */
 
 /* INLINE_STORE[_I/_F]'s imm2 bit: the value is not of a kind the name's
    (attrs.c LU_FIELD_*) takes in line, so C stores it and keeps the kind. */
@@ -284,6 +284,8 @@ struct lu_fs {
     lu_v *held;
     int nheld;
     uint32_t mark;              /* the walk that last saw it as a caller (lu_fs_each_once) */
+    int *evaluated, seq;        /* the bytecodes of its frame's own code the build began, and their count when
+                                   the state was made: what the frame runs after it is the final count less seq */
     uint8_t virt;               /* and whether a slot of it names a virtual object then */
     /* The backend's, for a frame that names no virtual object (so that
        every exit describes it alike): 1 + the unit's record of it under
@@ -382,6 +384,7 @@ struct lu_func {
     int *order;                 /* blocks in emission order */
     int norder;
     PyCodeObject *code;
+    struct lu_unit *unit;       /* the unit it is built for: generic helpers count their passes in it */
     int entry_pc;
     int stress;                 /* deopt:N is on: guards count */
     PyObject **consts;          /* strong references the unit keeps */
@@ -405,6 +408,7 @@ struct lu_func {
     int sites, cold;            /* sites with feedback, and those the interpreter never ran */
     int refused;                /* calls left out of line for want of budget */
     uint64_t *outs;             /* their sites, each once, by lu_jit_site_key: the unit counts the calls made there */
+    PyCodeObject **out_callees; /* and the code each calls (a constant of the unit) */
     int nouts, capouts;
     uint64_t *hots;             /* hot sites taken in line past the budget, each once */
     int nhots, caphots;

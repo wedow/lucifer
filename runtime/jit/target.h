@@ -122,7 +122,7 @@ enum lu_exit_reason {
     EXIT_ERROR,                 /* an exception */
     EXIT_FRAME,                 /* a walker wrote the frame's locals, or keeps its frame object */
     EXIT_YIELD,                 /* a generator yields: its frame is left at the YIELD_VALUE */
-    EXIT_HOT,                   /* a call the budget left out of line was made hot_calls times */
+    EXIT_HOT,                   /* a call the budget left out of line was made as often as its site was armed for */
     EXIT_REASONS
 };
 
@@ -140,6 +140,8 @@ struct lu_deopt {
     int32_t blame_pc;
     int32_t instr;              /* published: the code unit the innermost frame shows as running */
     int32_t drop;               /* with error, pop this many stack entries of the innermost frame */
+    uint32_t rest;              /* the bytecodes of the frames' own code the build evaluated after the exit's
+                                   place: what the interpreter runs until the unit is entered again (jit.c) */
     uint8_t error;              /* leave with the exception set */
     uint8_t reason;             /* enum lu_exit_reason */
     uint8_t opcode;             /* the base opcode at the exit, for the counts */
@@ -198,10 +200,25 @@ struct lu_unit {
     int refused;                /* calls it left out of line for want of budget (jit.c grows it) */
     struct lu_out {             /* their sites (jit.c) */
         uint64_t key;
-        int64_t left;           /* calls there until hot_calls: from -hot_calls up; COUNT_OUT counts it */
+        int64_t left;           /* calls there until the next look (an exit): from -armed up; COUNT_OUT counts it */
+        int64_t armed;          /* the calls counted from that look's -armed */
+        int64_t before;         /* calls made there before it was armed */
+        PyCodeObject *callee;   /* the code called there (a constant of the unit) */
     } *outs;
     int nouts;
-    int64_t hot_calls;          /* calls made at one of them that make it hot: about what a build of the unit costs */
+    uint64_t lost;              /* what its exits and generic paths lost while its entries were counted (jit.c lose) */
+    uint64_t enough;            /* what its build cost: lost stops there */
+    unsigned long lost_entries; /* the entries that lost that much, once it has */
+    uint64_t per_entry;         /* its losses per entry when last valued, in instructions (jit.c unit_losses) */
+    uint64_t unlearned;         /* what its passes lost for want of what its root learned since its build
+                                   (jit.c stale_pass) */
+    uint64_t relearn;           /* the learned rebuild's predicted cost: its build's, less the generic
+                                   expansions of the places that learned since (jit.c lu_jit_stale_pass) */
+    uint64_t quiet;             /* what it paid towards learned rebuilds since a place of its root last
+                                   learned (jit.c learning) */
+    int nins;                   /* the IR instructions its build made */
+    int settled;                /* lost has stopped counting (covers enough, or the entries are past counting):
+                                   helpers.c looks no further */
     int dead;
     int serial;                 /* stores without locks while serial (facts.c): keeps the task's unlocked_jit */
     /* While dead and not yet freed: the list of such units, and
@@ -295,11 +312,8 @@ struct lu_jit_act {
 };
 
 /* Entries a unit counts: one past this many is not retired, and the count
-   is only read, so calls from many threads share its line. One that has
-   left calls out of line for want of budget at HOT_ENTRIES of them dies,
-   its code's next build given more (jit.c grow, lu_jit_grow). */
+   is only read, so calls from many threads share its line. */
 #define ENTRIES_SEEN (1u << 16)
-#define HOT_ENTRIES 4096
 
 /* Calls compiled code (and helpers.c) makes of a compiled callee directly.
    A code's JIT state, at co_executors, begins with a struct lu_jit_direct:
@@ -332,7 +346,6 @@ struct lu_jit_call {
 };
 
 void lu_jit_left(struct lu_unit *u);
-void lu_jit_grow(struct lu_unit *u);
 int lu_jit_prologue(struct lu_frame *frame);
 PyObject *lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r);
 
@@ -383,6 +396,7 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(format) \
     X(build_string) \
     X(call) \
+    X(call_any) \
     X(super_attr) \
     X(import_name) \
     X(import_from) \
@@ -532,7 +546,24 @@ PyObject *lu_jit_prof_value(struct lu_prof *p, enum lu_prof_value_kind kind, int
 unsigned long lu_jit_prof_learned(PyCodeObject *root);
 /* Compiled code met `o` there, in a unit built when the count was
    `learned`: 0 when the unit is to leave and be built again. */
-int lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned);
+int lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned, struct lu_unit *u);
+/* A pass of unit u through place p, built without what p learned since (a
+   type, a polymorphic cache's shape): 0 once such passes have cost what u's
+   build did, and u is built again. */
+int lu_jit_stale_pass(struct lu_prof *p, struct lu_unit *u);
+/* The last build of p's instruction (base opcode `base`) made `calls`
+   helper calls there without what p learned since: what each stale pass of
+   it loses, the measured loss of a generic path of its kind, else
+   CALL_COST a call (jit.c). */
+void lu_jit_prof_built(struct lu_prof *p, int base, int calls);
+/* The last build emitted `rest` IR instructions in p's frame after p's
+   report: what learning there can fold, when p had met nothing (jit.c). */
+void lu_jit_prof_rest(struct lu_prof *p, int rest);
+/* A helper of a generic path ran for unit u, which called it: a loss of
+   u's by kind (jit.c lu_jit_generic). helpers.c calls it only while u's
+   ledger counts (settled). */
+enum lu_generic { LU_GENERIC_ITER, LU_GENERIC_ATTR, LU_GENERIC_OP, LU_GENERIC_CALL, LU_GENERIC_KINDS };
+void lu_jit_generic(struct lu_unit *u, enum lu_generic kind);
 
 /* POW_F's call (runtime/jit/helpers.c): a NaN with these bits where the
    power raises or is complex. */
