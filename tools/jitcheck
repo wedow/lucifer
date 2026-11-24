@@ -195,6 +195,17 @@ require that a count of the tier's does not grow with the iterations:
          budget allows (luc-idah): guard and side exits, and entries left
          to the interpreter while a dead unit's entry waits. None of its
          functions may be disabled or retired.
+  grown  tests/kernel/jit_grown_calls.py, whose function calls more than
+         its first build takes in line, entered with little work each
+         time: IR instructions built. Calls made out of line are not worth
+         a build twice as large.
+  common tests/kernel/jit_rare_then_common.py, the rare lane's loop whose
+         rare iterable turns common after 3,000 calls: exits. Its guard's
+         exits pay for the build that takes both.
+  dispatch tests/kernel/jit_class_dispatch.py, a scheduler's loop whose
+         tasks, of four classes met one after another, share their step
+         method: compiled calls, at most one per step (the step's own call
+         of its class's work). The shared step ends in line.
   rare   tests/kernel/jit_rare_fails.py, whose hot loop's iterable is a
          tuple on one call in 600 (luc-tax0): helper calls compiled code
          makes, one per eight iterations for the tuple's calls, which run
@@ -291,6 +302,19 @@ A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
          iteration for that callee, none for the method, which inlines.
+Ledger lanes run a program each at the larger size with the tier's event log
+(LUCIFER_JIT_DEBUG=units) and check its ledger: every rebuild a unit's
+losses bought (a kill event that says what was paid and what the rebuild
+was predicted to cost) was paid for, and the IR the whole run built, but
+for rebuilds after a dependency changed, is at most what its first builds
+made plus LEDGER_SLACK times what the losses paid would build at BUILD_INS
+machine instructions per IR instruction (runtime/jit/jit.c):
+  churn  tests/kernel/jit_rebuild_churn.py, whose hot loop's handler meets
+         new classes through the run, which its root learns and whose
+         guards fail now and then.
+  classtests tests/kernel/jit_isinstance_growth.py (the growth lane's
+         program), whose places meet the classes of a rotation one after
+         another, behind guards that hide them from the places after.
 The perf lane records Richards under -X perf with `perf record -g` and
 requires that at least 95% of the samples in compiled code (code perf finds
 in no file: it looks it up in /tmp/perf-PID.map) resolve to py:: symbols.
@@ -382,6 +406,9 @@ GROWTH = {
                r'|jit: entries waited (\d+)', 0),
     'phases': ('jit_phases.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
                r'|jit: entries waited (\d+)', 0),
+    'grown': ('jit_grown_calls.py', r'ir instructions (\d+)', 0, ('-X', 'lucifer_jit=on')),
+    'common': ('jit_rare_then_common.py', r'exits guard (\d+) stress \d+ poll \d+ side (\d+)', 0),
+    'dispatch': ('jit_class_dispatch.py', r'compiled calls (\d+)', 40),
     'rare': ('jit_rare_fails.py', r'jit: executed:.* helper (\d+)', 1 / 8),
     'seqkinds': ('jit_seq_kinds.py', r'jit: executed:.* helper (\d+)', 120),
     'intrange': ('jit_int_range_prims.py', r'jit: executed:.* helper (\d+)', 9),
@@ -405,6 +432,14 @@ GROWTH = {
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),
 }
 GROWTH_N = 20000
+# lane: (program, flags), checked from its event log (check_ledger).
+LEDGER = {'churn': ('jit_rebuild_churn.py', ('-X', 'lucifer_jit=on')), 'classtests': ('jit_isinstance_growth.py', ())}
+# The new builds' IR against what the losses paid would build: a rebuild is predicted at the size of its root's
+# last build, and the build it buys may take in more (what the root learned, a call in line).
+LEDGER_SLACK = 2
+# lane: the most its count may be at GROWTH_N: twice what the tier's ledger came to when the bound was set (a
+# polymorphic rotation the ledger learns over several rebuilds, where the interpreter-era policy rebuilt once).
+AT_MOST = {'classtests': 2 * 377636}
 # lane: (the counts, summed, that must grow by at least this many per iteration): work compiled code does.
 AT_LEAST = {'sharedcode': (r'jit: executed:.* poll (\d+)', 0.9)}
 PERF_RESOLVED = 0.95
@@ -460,6 +495,8 @@ def check_growth(args, lane):
             problems.append(tag + 'no stats')
         elif large[2] - small[2] > per * GROWTH_N + GROWTH_N // 20:
             problems.append(f'{tag}{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
+        if lane in AT_MOST and small[2] is not None and small[2] > AT_MOST[lane]:
+            problems.append(f'{tag}{small[2]} at {GROWTH_N} iterations, more than {AT_MOST[lane]}')
         if lane in AT_LEAST:
             more, least = AT_LEAST[lane]
             done = [sum(int(n) for n in re.findall(more, r[4])) for r in (small, large)]
@@ -479,6 +516,41 @@ def check_growth(args, lane):
         return 1
     print(f"{'FAIL' if problems else 'PASS'} {lane}" + (': ' + '; '.join(problems) if problems else
                                                       f" ({'; '.join(seen)})"))
+    return 1 if problems else 0
+
+
+def check_ledger(args, lane):
+    """Each rebuild the run's losses bought, against what they paid; the IR built, against the first builds and
+    what the losses paid would build."""
+    name, flags = LEDGER[lane]
+    program = ROOT / 'tests' / 'kernel' / name
+    n = 2 * GROWTH_N
+    p = subprocess.run([args.lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', *flags, str(program),
+                        str(n)], capture_output=True, text=True, timeout=args.timeout,
+                       env=dict(os.environ, PYTHONHASHSEED='0', LUCIFER_JIT_DEBUG='units'))
+    problems = []
+    if (p.returncode, TIMING.sub('Nus', p.stdout)) != run([args.oracle, str(program), str(n)], args.timeout)[:2]:
+        problems.append('output differs')
+    build_ins = int(re.search(r'^#define BUILD_INS (\d+)', (ROOT / 'runtime' / 'jit' / 'jit.c').read_text(), re.M)[1])
+    first = later = paid = 0
+    for line in p.stderr.splitlines():
+        b = re.match(r'jit-ev \S+ build \S+ \S+ ins (\d+) .*: (\S+)', line)
+        k = re.match(r'jit-ev \S+ kill (\S+) .* paid (\d+) cost (\d+): (.*)', line)
+        if b and b[2] == 'first':
+            first += int(b[1])
+        elif b and not b[2].startswith('dep-'):
+            later += int(b[1])      # a dependency that changed (dep-keys, dep-value) rebuilds whatever was paid
+        elif k:
+            paid += int(k[2])
+            if int(k[3]) > int(k[2]):
+                problems.append(f'{k[1]} rebuilt for {k[4]}: paid {k[2]}, predicted {k[3]}')
+    bound = first + LEDGER_SLACK * paid / build_ins
+    if first == 0:
+        problems.append('no builds')
+    elif first + later > bound:
+        problems.append(f'{first + later} IR instructions built, more than {bound:.0f}')
+    print(f"{'FAIL' if problems else 'PASS'} {lane}" + (': ' + '; '.join(problems[:5]) if problems else
+          f' ({first} first, {later} rebuilt, {paid} paid: at most {bound:.0f})'))
     return 1 if problems else 0
 
 
@@ -509,7 +581,7 @@ def main():
     ap.add_argument('--lucifer', required=True)
     ap.add_argument('--oracle', required=True)
     ap.add_argument('--benchmarks', default=','.join(RUNS))
-    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, 'perf']))
+    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, *LEDGER, 'perf']))
     ap.add_argument('--timeout', type=float, default=600)
     args = ap.parse_args()
     failed = 0
@@ -537,6 +609,9 @@ def main():
     for lane in GROWTH:
         if lane in args.modes.split(','):
             failed += check_growth(args, lane)
+    for lane in LEDGER:
+        if lane in args.modes.split(','):
+            failed += check_ledger(args, lane)
     if 'perf' in args.modes.split(','):
         failed += check_perf(args)
     print(f'{failed} failing')
