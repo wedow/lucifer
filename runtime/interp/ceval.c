@@ -32,37 +32,8 @@
 #include "prim/prim.h"
 #include "prim/bytes.h"
 
-/* gcc inlines the header's Py_DECREF and Py_NewRef nowhere in eval_frame, the
-   largest function there is: each count step was a call. Here the owner
-   thread's step and the immortal test are inline, and only a count reaching
-   zero (_Py_MergeZeroLocalRefcount) or another thread's object
-   (_Py_DecRefShared) calls out, as in CPython's eval loop. */
-static inline Py_ALWAYS_INLINE void
-lu_decref(PyObject *op)
-{
-    uint32_t local = _Py_atomic_load_uint32_relaxed(&op->ob_ref_local);
-    if (local == _Py_IMMORTAL_REFCNT_LOCAL) {
-        return;
-    }
-    if (_Py_IsOwnedByCurrentThread(op)) {
-        _Py_atomic_store_uint32_relaxed(&op->ob_ref_local, local - 1);
-        if (local == 1) {
-            _Py_MergeZeroLocalRefcount(op);
-        }
-    }
-    else {
-        _Py_DecRefShared(op);
-    }
-}
-
-static inline Py_ALWAYS_INLINE void
-lu_xdecref(PyObject *op)
-{
-    if (op != NULL) {
-        lu_decref(op);
-    }
-}
-
+/* gcc inlines the header's Py_NewRef nowhere in eval_frame, the largest
+   function there is; its count steps are inline here (lu_decref). */
 static inline Py_ALWAYS_INLINE PyObject *
 lu_newref(PyObject *op)
 {
@@ -2296,13 +2267,13 @@ return_frame: {
         }
     }
     else {
-        lu_frame_pop(ts, frame);
+        ts->current_frame = (struct _PyInterpreterFrame *)caller;      /* the frame leaves the stack first */
+        lu_frame_drop(ts, frame);
     }
     if (caller->owner == LU_FRAME_C_ENTRY) {
         ts->current_frame = (struct _PyInterpreterFrame *)caller->previous;
         return retval;
     }
-    ts->current_frame = (struct _PyInterpreterFrame *)caller;
     frame = caller;
     LOAD_FRAME();
     if (ret == LU_RETURN_SEND) {

@@ -53,15 +53,10 @@ alloc_frame(PyThreadState *ts, PyFunctionObject *func, PyCodeObject *code)
     return lu_frame_fill((struct lu_frame *)base, func, code);
 }
 
-/* Gives the topmost frame's datastack space back. */
-static void
-free_frame(PyThreadState *ts, struct lu_frame *f)
+void
+lu_frame_free_chunk(PyThreadState *ts)
 {
     _PyStackChunk *c = ts->datastack_chunk;
-    if ((PyObject **)f != &c->data[0]) {
-        ts->datastack_top = (PyObject **)f;
-        return;
-    }
     _PyStackChunk *prev = c->previous;
     PyMem_RawFree(ts->datastack_cached_chunk);
     ts->datastack_cached_chunk = c;
@@ -153,9 +148,9 @@ lu_frame_reserve(PyThreadState *ts, size_t words)
     return 0;
 }
 
-/* The references a frame holds, except its code, as CPython's
-   _PyFrame_ClearLocals releases them: from the top of its stack down to
-   its first local, each word cleared before its release. */
+/* lu_frame_release_refs for a frame object's own frame, whose locals its
+   finalizers may still read (f_locals): each word is cleared before its
+   release. */
 static void
 release_refs(struct lu_frame *f)
 {
@@ -171,14 +166,6 @@ release_refs(struct lu_frame *f)
 }
 
 void
-lu_frame_unlink(PyThreadState *ts, struct lu_frame *f)
-{
-    if (ts->current_frame == (struct _PyInterpreterFrame *)f) {
-        ts->current_frame = (struct _PyInterpreterFrame *)f->previous;
-    }
-}
-
-void
 lu_frame_release(struct lu_frame *f)
 {
     if (f->frame_obj != NULL && lu_frame_retire(f)) {
@@ -187,18 +174,8 @@ lu_frame_release(struct lu_frame *f)
         f->func = NULL;
     }
     else {
-        release_refs(f);
+        lu_frame_release_refs(f);
     }
-}
-
-void
-lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
-{
-    lu_frame_unlink(ts, f);
-    lu_frame_release(f);
-    lu_depth_leave(ts, f->code);
-    Py_DECREF(f->code);
-    free_frame(ts, f);
 }
 
 /* Frames compiled code runs (LU_FRAME_JIT). Their own task reads them only

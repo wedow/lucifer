@@ -1298,6 +1298,37 @@ lu_qsbr_quiescent(struct lu_carrier *c)
     }
 }
 
+/* Py_DECREF in line where gcc does not inline the header's (the eval loop,
+   the largest function there is, and the frame release): the owner thread's
+   step and the immortal test are inline, and only a count reaching zero
+   (_Py_MergeZeroLocalRefcount) or another thread's object (_Py_DecRefShared)
+   calls out, as in CPython's eval loop. */
+static inline Py_ALWAYS_INLINE void
+lu_decref(PyObject *op)
+{
+    uint32_t local = _Py_atomic_load_uint32_relaxed(&op->ob_ref_local);
+    if (local == _Py_IMMORTAL_REFCNT_LOCAL) {
+        return;
+    }
+    if (_Py_IsOwnedByCurrentThread(op)) {
+        _Py_atomic_store_uint32_relaxed(&op->ob_ref_local, local - 1);
+        if (local == 1) {
+            _Py_MergeZeroLocalRefcount(op);
+        }
+    }
+    else {
+        _Py_DecRefShared(op);
+    }
+}
+
+static inline Py_ALWAYS_INLINE void
+lu_xdecref(PyObject *op)
+{
+    if (op != NULL) {
+        lu_decref(op);
+    }
+}
+
 /* Lock-free reads of a container's items (Include/internal/pycore_object.h).
    A reader that holds no lock may find the item freed or replaced between its
    load and its incref, so it takes a reference only if the object is still

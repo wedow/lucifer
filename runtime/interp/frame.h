@@ -353,16 +353,70 @@ lu_frame_push_exact(PyThreadState *ts, PyFunctionObject *func, PyCodeObject *cod
 
 /* A stopping frame leaves the stack before its references go (GH-99729):
    a finalizer they run sees its caller on top, never the frame. */
-void lu_frame_unlink(PyThreadState *ts, struct lu_frame *f);
+static inline Py_ALWAYS_INLINE void
+lu_frame_unlink(PyThreadState *ts, struct lu_frame *f)
+{
+    if (ts->current_frame == (struct _PyInterpreterFrame *)f) {
+        ts->current_frame = (struct _PyInterpreterFrame *)f->previous;
+    }
+}
+
+/* The references a frame holds, except its code (CPython's
+   _PyFrame_ClearLocals, then the function). The frame shows no values
+   first, then they go from the top of its stack down to its first local,
+   as CPython releases them; a finalizer that runs meanwhile cannot reach
+   the frame, which has left the stack, so its words are not cleared. */
+static inline Py_ALWAYS_INLINE void
+lu_frame_release_refs(struct lu_frame *f)
+{
+    PyObject **p = f->stackpointer;
+    f->stackpointer = f->localsplus;
+    while (p > f->localsplus) {
+        lu_xdecref(*--p);
+    }
+    PyObject *locals = f->locals, *func = f->func;
+    f->locals = NULL;
+    f->func = NULL;
+    lu_xdecref(locals);
+    lu_decref(func);
+}
 
 /* The frame's references, except its code, go to its frame object if
-   observers hold one (lu_frame_retire), else are released, each slot
-   cleared before its release. */
+   observers hold one (lu_frame_retire), else are released. */
 void lu_frame_release(struct lu_frame *f);
+
+/* Gives back the datastack space of a frame that began its chunk. */
+void lu_frame_free_chunk(PyThreadState *ts);
+
+/* Releases an unlinked frame's references and its datastack space. The
+   frame must be the task's topmost. */
+static inline Py_ALWAYS_INLINE void
+lu_frame_drop(PyThreadState *ts, struct lu_frame *f)
+{
+    if (f->frame_obj == NULL) {
+        lu_frame_release_refs(f);
+    }
+    else {
+        lu_frame_release(f);
+    }
+    lu_depth_leave(ts, f->code);
+    lu_decref((PyObject *)f->code);
+    if ((PyObject **)f != &ts->datastack_chunk->data[0]) {
+        ts->datastack_top = (PyObject **)f;
+    }
+    else {
+        lu_frame_free_chunk(ts);
+    }
+}
 
 /* Unlinks the frame, then releases its references and its datastack space.
    The frame must be the task's topmost. */
-void lu_frame_pop(PyThreadState *ts, struct lu_frame *f);
+static inline Py_ALWAYS_INLINE void
+lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
+{
+    lu_frame_unlink(ts, f);
+    lu_frame_drop(ts, f);
+}
 
 /* Room for `words` more datastack words in the current chunk, which a new
    one gives when it has none: -1 when out of memory. */
