@@ -605,6 +605,17 @@ takes(const struct places *P, int p)
     return P->kind[p] == PLACE_OBJ || P->origin[p] != LU_NOV;
 }
 
+/* A new reference to x for phi, tagged with the phi (imm2, the phi + 1):
+   it goes where the phi goes uncounted (opt.c goes). */
+static void
+counted_for(struct ctx *c, lu_v phi, lu_v x)
+{
+    lu_v r = lu_ev_retain(c, x);
+    if (r != LU_NOV) {
+        I(c, r)->imm2 = phi + 1;
+    }
+}
+
 /* The phis take their inputs. An object phi takes a reference: the
    value's own when no place left names it and no earlier phi took it, a
    new one otherwise. A raw phi's inputs were added by its maker; the
@@ -645,7 +656,7 @@ edge_take(struct ctx *c, const struct places *P, lu_v *in, int pc)
             if (origin != LU_NOV) {
                 phi_add(c, origin, x);
                 if (owned && !free_now) {
-                    lu_ev_retain(c, x);
+                    counted_for(c, origin, x);
                 }
                 continue;
             }
@@ -659,7 +670,7 @@ edge_take(struct ctx *c, const struct places *P, lu_v *in, int pc)
         }
         phi_add(c, phi, x);
         if ((I(c, phi)->flags & INS_OWNED) && !free_now) {
-            lu_ev_retain(c, x);
+            counted_for(c, phi, x);
         }
     }
 }

@@ -411,7 +411,7 @@ void lu_ev_settle(struct ctx *c, int pc);
 /* Leaves to the interpreter before the current instruction. */
 void lu_ev_side_exit(struct ctx *c, int reason);
 /* A reference for v's new holder outside the state (a result, a phi). */
-void lu_ev_retain(struct ctx *c, lu_v v);
+lu_v lu_ev_retain(struct ctx *c, lu_v v);
 
 /* --- eval_flow.c --- */
 

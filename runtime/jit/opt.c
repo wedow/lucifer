@@ -525,10 +525,16 @@ borrowed_read(struct borrow *w, lu_v v)
     return live_member(w, v) && w->kind[v] == READ;
 }
 
-/* An instruction that goes with its web: a member's release, a read's INCREF. */
+/* An instruction that goes with its web: a member's release, a read's
+   INCREF, and the count an edge took for a carrier (edge_take tags it with
+   the phi + 1 in imm2): a constant's, or a copy's where two phis take one
+   value. */
 static int
 goes(struct borrow *w, const struct lu_ins *in)
 {
+    if (in->op == OP_INCREF && in->imm2 > 0) {
+        return live_member(w, (lu_v)in->imm2 - 1);
+    }
     if ((in->op != OP_DECREF && in->op != OP_INCREF) || !live_member(w, in->a)) {
         return 0;
     }

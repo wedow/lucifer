@@ -212,15 +212,15 @@ lu_ev_guard_version(struct ctx *c, lu_v owner, uint32_t version)
     lu_ev_fact(c, v, 1)->version = version;
 }
 
-void
+lu_v
 lu_ev_retain(struct ctx *c, lu_v v)
 {
     PyObject *k = lu_ev_const(c, v);
     if (v == LU_NOV || (k != NULL && _Py_IsImmortal(k)) || I(c, v)->op == OP_BOOL
         || (I(c, v)->op == OP_CONST && k == NULL)) {
-        return;
+        return LU_NOV;
     }
-    lu_ev_emit(c, OP_INCREF, REP_NONE, v, LU_NOV, LU_NOV, 0);
+    return lu_ev_emit(c, OP_INCREF, REP_NONE, v, LU_NOV, LU_NOV, 0);
 }
 
 lu_v
