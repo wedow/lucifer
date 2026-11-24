@@ -110,7 +110,8 @@ struct lu_jit_code {
     unsigned long marked;       /* marks when a site of it (or noinline) was last marked */
     int call_pc;                /* where a call enters (call_entry), or -1 */
     struct lu_pic **pics;       /* per code unit: an attribute site's polymorphic cache */
-    int grown;                  /* doublings of the inlining budget: a hot unit that left calls out asked */
+    uint8_t *grown;             /* per code unit: doublings of the inlining budget of the unit entered there, which
+                                   its own calls left out bought (hot_exit); another entry starts at the base */
     struct lu_callees **callees;        /* per code unit: a call site's callees */
     struct lu_opclasses **opclasses;    /* per code unit: an operator site's operand classes */
     struct lu_prof *profs;              /* a root's: what it learned of values, by context (target.h) */
@@ -411,6 +412,7 @@ state_for(PyCodeObject *code)
     jc->fails = calloc((size_t)jc->ncode + 1, sizeof(uint64_t));
     jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint32_t));
     jc->seen = calloc((size_t)jc->ncode + 1, 1);
+    jc->grown = calloc((size_t)jc->ncode + 1, 1);
     jc->call_pc = lu_jit_call_entry(code);
     jc->direct.nargs = lu_jit_direct_nargs(code);
     uintptr_t seen = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
@@ -424,6 +426,7 @@ state_for(PyCodeObject *code)
     free(jc->fails);
     free(jc->wait);
     free(jc->seen);
+    free(jc->grown);
     free(jc);
     return (struct lu_jit_code *)seen;
 }
@@ -1128,7 +1131,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     /* What the evaluator may inline, in code units: a unit that stayed hot
        with calls left out is built again with twice as much. */
     /* The ceiling is master's (MAX_GROWN), kept until the owner decides whether growth may be unbounded. */
-    f.budget = INLINE_BUDGET << jc->grown;
+    f.budget = INLINE_BUDGET << jc->grown[f.entry_pc];
     f.stress = _PyRuntime.stress.deopt != 0;
     if (f.stress) {
         u->stress_counter = malloc(sizeof(long));
@@ -1212,7 +1215,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
             }
         }
         event("build %s@%d %s ins %d bytes %zu ms %.3f grown %d level %d%s: %s", qualname(frame->code), pc,
-              ok ? "ok" : "failed", f.nins, u->code_bytes, dt * 1e3, jc->grown, jc->level,
+              ok ? "ok" : "failed", f.nins, u->code_bytes, dt * 1e3, jc->grown[f.entry_pc], jc->level,
               ok && print == jc->print ? " same" : "", jc->cause != NULL ? jc->cause : "first");
         jc->print = ok ? print : jc->print;
     }
@@ -1962,7 +1965,7 @@ hot_exit(struct lu_deopt *d)
         }
     }
     const char *why = jc->nhot > was ? "hot-site"
-        : u->refused && jc->grown < MAX_GROWN && total >= build_cost(2 * built) ? "grown" : NULL;
+        : u->refused && jc->grown[u->entry_pc] < MAX_GROWN && total >= build_cost(2 * built) ? "grown" : NULL;
     free(cost);
     for (int i = 0; why == NULL && i < u->nouts; i++) {
         struct lu_out *o = &u->outs[i];
@@ -1982,7 +1985,7 @@ hot_exit(struct lu_deopt *d)
                 u->entry_pc, why, PyUnicode_AsUTF8(in->code->co_qualname), in->pc, jc->nhot);
     }
     if (why[0] == 'g') {
-        __atomic_store_n(&jc->grown, jc->grown + 1, __ATOMIC_RELAXED);
+        __atomic_store_n(&jc->grown[u->entry_pc], jc->grown[u->entry_pc] + 1, __ATOMIC_RELAXED);
     }
     kill(jc, u, why, in->code, in->pc, why[0] == 'g' ? total : most, why[0] == 'g' ? build_cost(2 * built) : worth);
     __atomic_store_n(&jc->wait[u->entry_pc], 0, __ATOMIC_RELAXED);    /* not for its faults: built again at once */
@@ -2662,6 +2665,7 @@ lu_jit_code_free(PyCodeObject *code)
     free(jc->fails);
     free(jc->wait);
     free(jc->seen);
+    free(jc->grown);
     free(jc->cause);
     free(jc);
     code->co_executors = NULL;
