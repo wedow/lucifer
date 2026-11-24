@@ -3431,9 +3431,14 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
         raw_into(a, in, v, r, is_int);
         cold_begin(a);
         bind(a, other);
+        /* The word again, which a store on another thread may have made
+           the marker since. */
+        int take = new_label(a);
         load(a, RAX, r, (int32_t)in->imm);
-        test_rr(a, RAX, RAX);
-        jcc(a, CC_E, fail);                     /* absent */
+        alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)(is_int ? LU_UNBOXED_INT : LU_UNBOXED));
+        jcc(a, CC_E, take);
+        alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+        jcc(a, CC_BE, fail);                    /* absent, or no object */
         mov_ri(a, RCX, (int64_t)(intptr_t)(is_int ? &PyLong_Type : &PyFloat_Type));
         cmp_rm(a, RCX, RAX, offsetof(PyObject, ob_type));
         jcc(a, CC_NE, fail);                    /* another kind */
@@ -3441,6 +3446,7 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
             cmp_mi(a, 1, RAX, offsetof(PyLongObject, long_value.lv_tag), 2 << _PyLong_NON_SIZE_BITS);
             jcc(a, CC_AE, wide);
         }
+        bind(a, take);
         raw_into(a, in, v, r, is_int);
         jmp(a, after);
         if (!is_int) {
