@@ -209,20 +209,19 @@ global_get(struct lu_frame *frame, PyObject *name)
 /* IMPORT_NAME: builtins.__import__(name, globals, locals, fromlist, level).
    Until builtins.py has defined it, while the kernel boots, a name is its
    sys.modules entry. */
-static PyObject *
-import_name(PyThreadState *ts, struct lu_frame *frame, PyObject *name, PyObject *fromlist,
-            PyObject *level)
+PyObject *
+lu_import_name(PyObject *name, PyObject *globals, PyObject *locals, PyObject *fromlist, PyObject *level)
 {
-    PyObject *import_func = lu_ns_get(ts->interp->builtins, LU_ID(__import__));
+    PyInterpreterState *interp = PyThreadState_Get()->interp;
+    PyObject *import_func = lu_ns_get(interp->builtins, LU_ID(__import__));
     if (import_func == NULL) {
-        PyObject *mod = lu_ns_get(ts->interp->modules, name);
+        PyObject *mod = lu_ns_get(interp->modules, name);
         if (mod == NULL) {
             lu_err_format(PyExc_ModuleNotFoundError, "No module named '%s'", PyUnicode_AsUTF8(name));
         }
         return mod;
     }
-    PyObject *args[5] = { name, frame->globals, frame->locals != NULL ? frame->locals : Py_None,
-                          fromlist, level };
+    PyObject *args[5] = { name, globals, locals != NULL ? locals : Py_None, fromlist, level };
     PyObject *r = lu_call(import_func, args, 5, NULL);
     Py_DECREF(import_func);
     return r;
@@ -230,8 +229,8 @@ import_name(PyThreadState *ts, struct lu_frame *frame, PyObject *name, PyObject 
 
 /* IMPORT_FROM: the attribute of an exact module's dict, else the kernel's
    import_from, which falls back to sys.modules and words the error. */
-static PyObject *
-import_from(PyObject *module, PyObject *name)
+PyObject *
+lu_import_from(PyObject *module, PyObject *name)
 {
     PyObject *v = PyModule_CheckExact(module)
         ? lu_ns_get(((PyModuleObject *)module)->md_dict, name) : NULL;
@@ -2471,7 +2470,7 @@ op_IMPORT_NAME: {
     PyObject *fromlist = POP();
     PyObject *level = POP();
     SAVE_FRAME();
-    PyObject *res = import_name(ts, frame, NAME(oparg), fromlist, level);
+    PyObject *res = lu_import_name(NAME(oparg), frame->globals, frame->locals, fromlist, level);
     Py_DECREF(fromlist);
     Py_DECREF(level);
     ERROR_IF(res == NULL);
@@ -2481,7 +2480,7 @@ op_IMPORT_NAME: {
 
 op_IMPORT_FROM: {
     SAVE_FRAME();
-    PyObject *res = import_from(TOP(), NAME(oparg));
+    PyObject *res = lu_import_from(TOP(), NAME(oparg));
     ERROR_IF(res == NULL);
     PUSH(res);
     DISPATCH();

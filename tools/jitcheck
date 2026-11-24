@@ -280,6 +280,13 @@ require that a count of the tier's does not grow with the iterations:
   positional tests/kernel/jit_positional_args.py, whose hot calls omit
          optional positional arguments: tuples and lists compiled code
          allocates. The callers apply defaults directly.
+  imports tests/kernel/jit_import_hot.py, whose hot functions import
+         (modules imported already and not, from-imports, relative imports
+         in a package, imports in inlined callees of other modules, a lazy
+         module attribute, a module that replaces itself, a replaced
+         __import__): side exits and entries left to the interpreter.
+         Each import is a call compiled code makes, and none of the
+         functions is retired.
 A third lane allows one count per iteration:
   inlined  tests/kernel/jit_inlined_frames.py, whose hot method makes a call
          the tier cannot inline: direct and compiled calls, one per
@@ -393,6 +400,7 @@ GROWTH = {
     'boolpow': ('jit_bool_float_pow.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)', 0),
     'useriter': ('jit_user_iter_end.py', r'exits guard \d+ stress \d+ poll \d+ side (\d+) error (\d+)', 0),
     'megaiter': ('jit_mega_iter.py', r'compiled calls (\d+)', 24),
+    'imports': ('jit_import_hot.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
     'order': ('jit_call_order.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),
 }
@@ -459,7 +467,7 @@ def check_growth(args, lane):
                 problems.append(f'{tag}compiled code did {done[0]} at {GROWTH_N} iterations, {done[1]} at {2 * GROWTH_N}')
         own = qualnames(program)
         given_up = own & {name for pair in small[3] for name in pair if name}
-        if lane in ('calls', 'super', 'rebind', 'phases', 'bitexc') and given_up:
+        if lane in ('calls', 'super', 'rebind', 'phases', 'bitexc', 'imports') and given_up:
             problems.append(f"{tag}disabled or retired: {' '.join(sorted(given_up))}")
         seen.append(f'{small[2]}, {large[2]}')
     if lane in NOT_BUILT and not any('output differs' in p or 'no stats' in p for p in problems):

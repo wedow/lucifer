@@ -119,6 +119,7 @@ lu_ev_op_supported(int base)
     case LOAD_COMMON_CONSTANT: case CALL_KW: case CALL_FUNCTION_EX: case DICT_MERGE: case DICT_UPDATE:
     case DELETE_FAST: case LOAD_SUPER_ATTR: case STORE_GLOBAL: case BUILD_SLICE: case CONVERT_VALUE:
     case FORMAT_SIMPLE: case FORMAT_WITH_SPEC: case BUILD_STRING: case LOAD_SPECIAL:
+    case IMPORT_NAME: case IMPORT_FROM:
     case RETURN_GENERATOR: case YIELD_VALUE:    /* a generator made in line (eval_gen.c) */
     case RAISE_VARARGS: case RERAISE:   /* the interpreter raises: an exit, on a path that is leaving anyway */
     case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH:  /* a handler the unit's raise reached (eval_exc.c) */
@@ -909,6 +910,18 @@ lu_ev_instruction(struct ctx *c)
         stack_helper(c, H_load_special, 1, &v, 1);
         lu_ev_push(c, LU_NOV);
         return 0;
+    case IMPORT_NAME: {
+        /* level, fromlist -- module: the import system, called */
+        lu_v extra[2] = { lu_ev_konst(c, name_at(c, oparg)), lu_ev_konst(c, c->globals) };
+        stack_helper(c, H_import_name, 2, extra, 2);
+        return 0;
+    }
+    case IMPORT_FROM: {
+        /* module -- module, attr */
+        lu_v args[2] = { lu_ev_peek(c, 1), lu_ev_konst(c, name_at(c, oparg)) };
+        lu_ev_push(c, lu_ev_helper(c, H_import_from, 2, args, 0));
+        return 0;
+    }
     case LOAD_SUPER_ATTR: {
         /* global_super, class, self -- attr, NULL in the method form */
         if (super_known(c, oparg)) {

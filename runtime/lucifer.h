@@ -2023,6 +2023,10 @@ typedef struct {
 /* GET_ITER of the types the loop iterates natively (runtime/interp/ceval.c);
    NULL without an error for every other iterable, which the kernel handles. */
 PyObject *lu_get_iter_exact(PyObject *v);
+/* IMPORT_NAME (locals NULL in an optimized frame) and IMPORT_FROM, as the
+   eval loop runs them; compiled code calls them too. New references. */
+PyObject *lu_import_name(PyObject *name, PyObject *globals, PyObject *locals, PyObject *fromlist, PyObject *level);
+PyObject *lu_import_from(PyObject *module, PyObject *name);
 /* The next item of a tuple, list or list_reverseiterator, or a range_iterator's
    next int; NULL when exhausted. */
 PyObject *lu_seqiter_next(PyObject *iter);

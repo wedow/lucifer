@@ -385,6 +385,8 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(call) \
     X(call_special) \
     X(super_attr) \
+    X(import_name) \
+    X(import_from) \
     X(prim) \
     X(prim_call) \
     X(prim_words) \

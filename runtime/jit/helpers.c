@@ -1305,6 +1305,20 @@ h_prim_words(PyObject **argv, intptr_t n)
     return h_prim_call(args, n - 1);
 }
 
+/* IMPORT_NAME and IMPORT_FROM as the interpreter runs them: the import
+   system is Python and may run anything. */
+static PyObject *
+h_import_name(PyObject *level, PyObject *fromlist, PyObject *name, PyObject *globals)
+{
+    return lu_import_name(name, globals, NULL, fromlist, level);
+}
+
+static PyObject *
+h_import_from(PyObject *module, PyObject *name)
+{
+    return lu_import_from(module, name);
+}
+
 /* LOAD_SUPER_ATTR: super's attribute as the interpreter takes it: the
    kernel's when super is the builtin and the class a type, else super
    called (with the class and self when `two`) and its attribute taken. */
@@ -1774,6 +1788,8 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_call] = { (void *)h_call, "call", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
     [H_call_special] = { (void *)h_call_special, "call_special", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
     [H_super_attr] = { (void *)h_super_attr, "super_attr", REP_OBJ, FX_RAISE | FX_PY, 5 },
+    [H_import_name] = { (void *)h_import_name, "import_name", REP_OBJ, FX_RAISE | FX_PY, 4 },
+    [H_import_from] = { (void *)h_import_from, "import_from", REP_OBJ, FX_RAISE | FX_PY, 2 },
     [H_prim] = { (void *)h_prim, "prim", REP_OBJ, FX_RAISE | FX_SEEN, 0 },
     [H_prim_call] = { (void *)h_prim_call, "prim_call", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
     [H_prim_words] = { (void *)h_prim_words, "prim_words", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
