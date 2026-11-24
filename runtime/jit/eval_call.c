@@ -947,11 +947,12 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
     lu_v args[MAX_ARGS + 4];
     PyFunctionObject *init;
     uint32_t version, meta;
-    if (kc != NULL && PyType_Check(kc) && self == LU_NOV && nkw == 0
-        && class_init(c, (PyTypeObject *)kc, n, &init, &version, &meta)) {
+    if (kc != NULL && PyType_Check(kc) && self == LU_NOV
+        && class_init(c, (PyTypeObject *)kc, n + nkw, &init, &version, &meta)) {
+        /* Keywords bind to __init__'s parameters as a function's do. */
         PyTypeObject *tp = (PyTypeObject *)kc;
         args[0] = LU_NOV;       /* the instance, made once the call is known to inline */
-        memcpy(args + 1, a, sizeof(lu_v) * (size_t)n);
+        memcpy(args + 1, a, sizeof(lu_v) * (size_t)(n + nkw));
         if (init == NULL || not_inlinable(c, init, LU_NOV) == NULL) {
             /* The class and its metaclass are as they were: the same __new__ and __init__. */
             lu_v gv = lu_ev_guard(c, OP_GUARD_VERSION, callable, version);
@@ -969,7 +970,7 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
             lu_ev_push(c, obj);
             return 0;
         }
-        int done = inline_call(c, init, LU_NOV, -1, args, n + 1, NULL, nops, tp, LU_RETURN_INIT);
+        int done = inline_call(c, init, LU_NOV, -1, args, n + 1, kwnames, nops, tp, LU_RETURN_INIT);
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }
