@@ -469,18 +469,45 @@ C. Rule changes, in order:
 - Misses: CD whole +4.9% (its window -11.2%), deepcopy window +4.1%, richards whole +2.4%, deltablue whole +1.2%, regex windows (compile of the growth chain, above).
 - deepcopy, from the event log (not yet built or measured directly): the window's extra exits are _deepcopy_tuple@1's error exits at @35, which its handler catches (3,839 in calls 128-256, about 30 a call), and 829 guard exits. They buy nothing. By the code path, lu_jit_note_exit returns for an error handled in frame 0 when kernel_handler finds no handler (handled == 0, caught < 0): the exit counts only as a leave, never into fails, so no mark can pay (unverified that this is the path taken). The 667 exits of the @7 entry, the one that bought mark-catch before, no longer cover the price, which now includes the live 1,061-IR @1 unit. The window's gap over its exits implies about 6k instructions per exit against the model's 3,800 + 100 x rest: within 2x on this estimate. json_loads' window has no extra exits and is level.
 
+**2026-11-24 stage A final: rules in force, table, known losses, follow-ups (e4982587)**
+
+Rules in force:
+- Break-even: a rebuild, a doubling of the inlining budget or a mark is bought when the losses the unit has already paid equal the predicted cost of what it builds (ski rental: at most twice the best policy in hindsight). Costs are deterministic instruction estimates checked by tools/jitcost.
+- Exit valuation: DEOPT_INS plus BYTECODE_INS for each bytecode of the exit's frames' own code after the exit's place.
+- Generic-pass losses: iteration, attribute, operator and unknown-call helpers charge their unit's ledger. Calls left out of line are valued at CALL_COST plus the callee unit's losses per entry.
+- Stale ledger per unit: a place that learned since the build charges its passes to the unit.
+- Quiet rule: a learned rebuild waits until the unit paid half its price since a place last learned.
+- Value sharing: a later place on the same SSA value relies on no narrower class set than an earlier one.
+- Rules A and B: an exit at a site marked since the unit's build kills the unit at once, and the old unit's death buys nothing. A diverted exit pays its site's mark ledger too.
+- A learned rebuild is predicted at the unit's own full build.
+- Growth is per entry; MAX_GROWN (four doublings) is master's.
+- A purchase is priced at the sum of the builds it kills, never below any one. Hot site and growth are priced at the killed unit's own build (twice it for growth).
+- Caught exits pay: an error exit caught in the unit (kernel handler found, the root's own frame included) adds its cost to the site's fails and buys mark-catch. Checked on deepcopy: _deepcopy_tuple@1's exits at @35 add about 3.9k each against a 29.9M price.
+
+Dropped, and why:
+- Rest discount (a learned rebuild priced at the IR after the first place that learned): measured rebuilds are 0.95-1.9 times the unit they replace, never the 3-5% predicted, which broke the ski-rental bound and cost imports and black their compile.
+- Evidence rule (rely on a place's one type only after a second report): on jit_int_range_prims a confirmed place stays in profiling form in a final build the ledger never rebuilds.
+- Delivery rule (the next doubling only if losses per entry fell by half the last one's reason): the loss counters do not see what a doubling saves in run code. CD's refused second doublings cut counted losses 39k of 180k per entry while the run got 17 points better.
+
+Gate on e4982587: kernel 68/68 in jit-off, plain, jit, jit-deopt; handoff 7/7; full tools/jitcheck 0 failing; tools/jitcost PASS. Final table: the previous note's.
+
+Known losses (accepted by the coordinator, stage A):
+- regex_v8 windows: calls 64-128 +7.0% (compile 14.1M/61.5M a call, run +1.1%), calls 128-256 +5.3% (compile 7.2M/44.2M, run +0.6%). 20 grown kills by call 64, 32 by 128, 43 by 256; block0, block2, Pattern.sub and _subx still double in 128-256. Bounded by four doublings per entry. Whole -l 8 -16.1%.
+- Whole runs converging later than master's fixed triggers under break-even: AWFY CD +4.9% (window -11.2%), richards +2.4% (window -0.2%), deltablue +1.2% (window -1.0%).
+- deepcopy window +4.1%. _deepcopy_tuple's mark-catch is priced at the sum of its live units (29.9M); its exits are charged about 3.9k (rest about 1), against about 6k implied by the window gap. It is bought after about 7,700 exits, past call 256; master's fixed count bought it after about 474.
+
+Follow-ups:
+1. Value growth by what inlining removes. The run-code saving of a doubling is what the loss counters miss; a correct delivery test needs it.
+2. Validate the exit charge (3,800 + 100 x rest) on real units against measurement, and add a real-unit exit check to tools/jitcost. deepcopy's case is within 2x (about 3.9k charged, about 6k implied).
+3. Review follow-ups from the earlier final note still stand.
+
 ## State
 
-Branch luc-1kz0-land, on origin/master dbb9b594. Measured binary e4982587.
+Stage A done, for review and landing. Branch luc-1kz0-land, on origin/master dbb9b594; code as gated at e4982587, plus ticket commits.
 
-Built: (4b477b47) a learned rebuild is predicted at the unit's own build; (1e23eebd) growth per entry; (dd6d2f69) a purchase is priced at the builds it kills, and the kill event prints the unit's IR. The delivery rule (fcf5f177) is reverted (e4982587). Its lane program is kept out of the tree.
+Built: learned rebuilds at the unit's own build (4b477b47); growth per entry (1e23eebd); purchases priced at the builds they kill, the kill event printing the unit's IR (dd6d2f69). The delivery rule (fcf5f177) is reverted (e4982587).
 
-Gate on e4982587: kernel 68/68 in four lanes, handoff 7/7, jitcheck 0 failing, jitcost PASS. Table in the last note.
-
-Open (coordinator's item 2, not built):
-1. Exit losses the ledger never counts. An error exit handled in the unit's root frame with no kernel handler (lu_jit_note_exit: handled == 0, caught < 0) counts only as a leave. deepcopy's _deepcopy_tuple@1 takes about 30 such exits a call at @35 and never buys a mark. Decide whether such exits should accrue to a site's fails (a mark-catch for the root's own handler) or to the retire ledger.
-2. Validate the exit charge. Validate 3,800 + 100 x rest against measurement on real units: _deepcopy_tuple@7/@35, _deepcopy_list@30, _new_match@169/@202, _parse_object@103. Measure the per-call instruction difference between a build with the site marked from the start and one where it keeps leaving, divided by exits per call. If the charge is low by more than 2x, fix the estimate in general form: for example, count downstream loop bodies by the unit's recorded trip counts, or keep a running mean of interpreted bytecodes per exit off the fast path. Extend tools/jitcost with a real-unit exit check. The window estimate above (about 6k per exit) suggests the charge is within 2x for deepcopy.
-3. After that, re-run the gate and the missed rows: CD whole, deepcopy window, richards and deltablue whole, regex windows past call 256 (when the last doubling happens).
+Gate, table, rules in force, known losses and follow-ups: the last two notes.
 
 Lanes and sizes (tools/jitcheck):
 - Helpers and count lanes at N and 2N (N = 20,000), except typed at 4N and 8N (START).
