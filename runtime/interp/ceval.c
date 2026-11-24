@@ -32,6 +32,62 @@
 #include "prim/prim.h"
 #include "prim/bytes.h"
 
+/* gcc inlines the header's Py_DECREF and Py_NewRef nowhere in eval_frame, the
+   largest function there is: each count step was a call. Here the owner
+   thread's step and the immortal test are inline, and only a count reaching
+   zero (_Py_MergeZeroLocalRefcount) or another thread's object
+   (_Py_DecRefShared) calls out, as in CPython's eval loop. */
+static inline Py_ALWAYS_INLINE void
+lu_decref(PyObject *op)
+{
+    uint32_t local = _Py_atomic_load_uint32_relaxed(&op->ob_ref_local);
+    if (local == _Py_IMMORTAL_REFCNT_LOCAL) {
+        return;
+    }
+    if (_Py_IsOwnedByCurrentThread(op)) {
+        _Py_atomic_store_uint32_relaxed(&op->ob_ref_local, local - 1);
+        if (local == 1) {
+            _Py_MergeZeroLocalRefcount(op);
+        }
+    }
+    else {
+        _Py_DecRefShared(op);
+    }
+}
+
+static inline Py_ALWAYS_INLINE void
+lu_xdecref(PyObject *op)
+{
+    if (op != NULL) {
+        lu_decref(op);
+    }
+}
+
+static inline Py_ALWAYS_INLINE PyObject *
+lu_newref(PyObject *op)
+{
+    Py_INCREF(op);
+    return op;
+}
+
+static inline Py_ALWAYS_INLINE PyObject *
+lu_xnewref(PyObject *op)
+{
+    if (op != NULL) {
+        Py_INCREF(op);
+    }
+    return op;
+}
+
+#undef Py_DECREF
+#define Py_DECREF(op) lu_decref(_PyObject_CAST(op))
+#undef Py_XDECREF
+#define Py_XDECREF(op) lu_xdecref(_PyObject_CAST(op))
+#undef Py_NewRef
+#define Py_NewRef(op) lu_newref(_PyObject_CAST(op))
+#undef Py_XNewRef
+#define Py_XNewRef(op) lu_xnewref(_PyObject_CAST(op))
+
 #define NAME_ERROR_MSG "name '%.200s' is not defined"
 #define UNBOUNDLOCAL_ERROR_MSG \
     "cannot access local variable '%s' where it is not associated with a value"
@@ -1312,9 +1368,9 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
     }
 
     PyCodeObject *code;
-    PyObject **localsplus, **sp;
+    PyObject **sp;
     lu_codeunit *next_instr;
-    int opcode, oparg;
+    intptr_t opcode, oparg;     /* word-sized: no sign extension at each use */
     Py_ssize_t lasti;           /* the raising instruction, in code units, for the unwinder */
     PyObject *result;
     PyObject *retval;           /* what a returning or yielding frame hands its caller */
@@ -1340,7 +1396,6 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
 
 #define LOAD_FRAME() do { \
         code = frame->code; \
-        localsplus = frame->localsplus; \
         sp = frame->stackpointer; \
         next_instr = frame->instr; \
         cur_instr = frame->last; \
@@ -1362,7 +1417,7 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
 #define PUSH(v) (*sp++ = (v))
 #define POP() (*--sp)
 #define TOP() (sp[-1])
-#define GETLOCAL(i) (localsplus[i])
+#define GETLOCAL(i) (frame->localsplus[i])
 #define NAME(i) PyTuple_GET_ITEM(code->co_names, i)
 #define ERROR_IF(cond) do { if (cond) goto error; } while (0)
 /* A returned value, per the callee's enum lu_frame_return. */
@@ -1470,13 +1525,13 @@ op_CACHE:
 unknown_opcode:
     SAVE_FRAME();
     lu_err_format(PyExc_SystemError, "%s:%d: unknown opcode %d at unit %d",
-                  PyUnicode_AsUTF8(code->co_filename), code->co_firstlineno, opcode,
+                  PyUnicode_AsUTF8(code->co_filename), code->co_firstlineno, (int)opcode,
                   (int)(next_instr - 1 - lu_code_start(code)));
     goto error;
 
 instrumented_opcode:
     SAVE_FRAME();
-    lu_err_format(PyExc_SystemError, "instrumented opcode %d without monitoring", opcode);
+    lu_err_format(PyExc_SystemError, "instrumented opcode %d without monitoring", (int)opcode);
     goto error;
 
 /* The jump an instrumented instruction makes, once the tools have seen it:
@@ -2745,7 +2800,7 @@ op_MAKE_CELL: {
 
 op_COPY_FREE_VARS: {
     PyObject **closure = &PyTuple_GET_ITEM(((PyFunctionObject *)frame->func)->func_closure, 0);
-    PyObject **free = localsplus + code->co_nlocalsplus - oparg;
+    PyObject **free = frame->localsplus + code->co_nlocalsplus - oparg;
     for (int i = 0; i < oparg; i++) {
         free[i] = Py_NewRef(closure[i]);
     }
@@ -3030,7 +3085,7 @@ op_CALL_INTRINSIC_1: {
         goto kernel_call;
     }
     if (oparg != INTRINSIC_LIST_TO_TUPLE) {
-        lu_err_format(PyExc_SystemError, "intrinsic %d arrives with its consumer", oparg);
+        lu_err_format(PyExc_SystemError, "intrinsic %d arrives with its consumer", (int)oparg);
         goto error;
     }
     PyObject *list = TOP();
@@ -4259,7 +4314,7 @@ op_CALL_INTRINSIC_2: {
         goto kernel_call;
     }
     if (oparg != INTRINSIC_PREP_RERAISE_STAR) {
-        lu_err_format(PyExc_SystemError, "intrinsic %d arrives with its consumer", oparg);
+        lu_err_format(PyExc_SystemError, "intrinsic %d arrives with its consumer", (int)oparg);
         goto error;
     }
     kargs[1] = POP();
@@ -4324,7 +4379,7 @@ op_LOAD_COMMON_CONSTANT: {
         v = name != NULL ? lu_ns_get(ts->interp->builtins, name) : NULL;
         Py_XDECREF(name);
         if (v == NULL) {
-            lu_err_format(PyExc_SystemError, "common constant %d is not defined yet", oparg);
+            lu_err_format(PyExc_SystemError, "common constant %d is not defined yet", (int)oparg);
             goto error;
         }
     }
@@ -4355,7 +4410,7 @@ exception_unwind: {
     int level, handler, push_lasti;
     int offset = (int)(next_instr - lu_code_start(code)) - 1;
     if (lu_exception_handler(code, offset, &level, &handler, &push_lasti)) {
-        PyObject **new_top = localsplus + code->co_nlocalsplus + level;
+        PyObject **new_top = frame->localsplus + code->co_nlocalsplus + level;
         while (sp > new_top) {
             Py_XDECREF(*--sp);
         }
