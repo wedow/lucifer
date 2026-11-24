@@ -489,7 +489,26 @@ Dropped, and why:
 - Evidence rule (rely on a place's one type only after a second report): on jit_int_range_prims a confirmed place stays in profiling form in a final build the ledger never rebuilds.
 - Delivery rule (the next doubling only if losses per entry fell by half the last one's reason): the loss counters do not see what a doubling saves in run code. CD's refused second doublings cut counted losses 39k of 180k per entry while the run got 17 points better.
 
-Gate on e4982587: kernel 68/68 in jit-off, plain, jit, jit-deopt; handoff 7/7; full tools/jitcheck 0 failing; tools/jitcost PASS. Final table: the previous note's.
+Gate on e4982587: kernel 68/68 in jit-off, plain, jit, jit-deopt; handoff 7/7; full tools/jitcheck 0 failing; tools/jitcost PASS.
+
+Final table (e4982587 against master dbb9b594, instructions:u, core leases, min of two runs):
+
+| program | whole | long window | per call/it. m/b | long | compile ms m/b | IR m/b |
+|---|---|---|---|---|---|---|
+| regex_v8 | -16.1% | calls 64-128 | 794.9M/851.0M | +7.0% | | |
+| regex_v8 | | calls 128-256 | 781.5M/823.0M | +5.3% | | |
+| pyflakes | -10.4% | | | | 712/333 | 302k/197k |
+| pygments | -10.3% | | | | 839/364 | 194k/157k |
+| imports | -0.8% | | | | 55/46 | 29k/28k |
+| black | -5.1% | | | | 697/511 | 292k/261k |
+| AWFY Json | -22.3% | it. 20-60 | 65.29M/42.45M | -35.0% | | |
+| AWFY CD (10) | +4.9% | it. 20-60 | 263.87M/234.34M | -11.2% | | |
+| AWFY DeltaBlue | -0.0% | it. 20-60 | 5.76M/5.31M | -7.8% | | |
+| AWFY Richards | +0.9% | it. 20-60 | 119.97M/120.17M | +0.2% | | |
+| richards | +2.4% | calls 96-192 | 122.56M/122.34M | -0.2% | | |
+| deltablue | +1.2% | calls 1024-2048 | 32.42M/32.08M | -1.0% | | |
+| json_loads | -4.4% | calls 768-1536 | 21.91M/21.89M | -0.1% | | |
+| deepcopy | -2.4% | calls 128-256 | 5.88M/6.12M | +4.1% | | |
 
 Known losses (accepted by the coordinator, stage A):
 - regex_v8 windows: calls 64-128 +7.0% (compile 14.1M/61.5M a call, run +1.1%), calls 128-256 +5.3% (compile 7.2M/44.2M, run +0.6%). 20 grown kills by call 64, 32 by 128, 43 by 256; block0, block2, Pattern.sub and _subx still double in 128-256. Bounded by four doublings per entry. Whole -l 8 -16.1%.
@@ -498,8 +517,10 @@ Known losses (accepted by the coordinator, stage A):
 
 Follow-ups:
 1. Value growth by what inlining removes. The run-code saving of a doubling is what the loss counters miss; a correct delivery test needs it.
-2. Validate the exit charge (3,800 + 100 x rest) on real units against measurement, and add a real-unit exit check to tools/jitcost. deepcopy's case is within 2x (about 3.9k charged, about 6k implied).
-3. Review follow-ups from the earlier final note still stand.
+2. Validate the per-exit charge (3,800 + 100 x rest) on real units against measurement, and add a real-unit exit check to tools/jitcost. At _deepcopy_tuple@35 rest is about 1 (about 3.9k charged) against about 6k per exit implied by the window gap.
+3. Attribute exits by cause, so a window's loss can be read per purchase.
+4. Remove the dead class tables.
+5. The review follow-ups listed in the earlier final note still stand.
 
 ## State
 
