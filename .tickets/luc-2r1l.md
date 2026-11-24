@@ -16,9 +16,10 @@ With the JIT off the interpreter costs 105-114 machine instructions per bytecode
 
 ## State
 
-Branch luc-interp, on master 12e0fa43 (C1 landed as 642de4c7; rebase onto master once C2 lands). Stages 0-2, A, B,
-C1 landed; C2 landing; D (LOAD_GLOBAL forms) committed for review; next E (dispatch), F (remaining forms by the
-census after C2, below) (coordinator's order). Earlier order and evidence:
+Branch luc-interp, on master 85255bc6. Stages 0-2, A-D landed; E (dispatch) and D's review follow-ups committed
+for review; next (coordinator): split CALL's 265 instructions per execution (its path to the primitive, glue
+inside primitives, real work, top ten primitives; luc-ee8q sections 1 and 3 first), report, then the call path;
+F (remaining forms) after. Earlier order and evidence:
 
 1. B done (count steps inline, locals through the frame, word-sized opcode/oparg). Dispatch is still 10 instructions
    against CPython's 8 (6 plus its instr_ptr store and next_instr step): opcode is live across calls in many handlers
@@ -406,3 +407,32 @@ arity error differently from CPython's clinic message, so the test calls it with
 
 Gate: global_guard_changes (new) and 12 global, builtin, shared-code and special-method programs in jit-off, plain,
 jit, jit-deopt; threads_global_guard_changes (new) and threads_global_churn in handoff; jitcheck: pass.
+
+### 2026-11-24 stage E: dispatch
+
+Dispatch was ten instructions: opcode and oparg loads, next_instr step, cur_instr and prev_instr moves, the target
+table base reloaded from the stack, the opcode spilled to the stack, the target load and the jump, and a register
+zeroed: `monitored` (the INSTRUMENTED_CALL whose call is being made), NULL at every instruction boundary, which gcc
+kept in a register and re-zeroed at every dispatch. It lives in memory now (one load at a call): nine instructions,
+CPython's eight. The opcode spill stays: about thirty handlers use opcode after a call (stacked specialized forms,
+SKIP_CACHES through the opcode table in 35 places); removing it means a constant cache skip per handler and the
+stacked forms taking their opcode before any call, not a contained change.
+D review follow-ups: dk_version read atomically by the interpreter and cleared atomically by the dict's writers;
+global_guard_changes adds globals turned general-keys mid-loop, a dict subclass as builtins, exec with builtins of
+its own changed mid-loop, __builtins__ rebound; the thread program resizes the builtins dict too.
+
+| row | D | E |
+|---|---|---|
+| fib / arith / attribute loop, instr/bc, JIT off | 72.7 / 96.4 / 93.5 | 70.6 / 94.6 / 91.8 |
+| -c pass, JIT off | 119.25M | 117.38M |
+| stdlib imports, JIT off | 1.167-1.169G | 1.131G |
+| pyflakes, JIT off | 13.44G | 13.11-13.15G |
+| -c pass, JIT on | 144.07M | 142.26M |
+| stdlib imports, JIT on | 1.384G | 1.374G |
+| pyflakes, JIT on | 10.88-10.91G | 10.84-10.85G |
+| Richards | 12.266G | 12.263G |
+| DeltaBlue | 5.586-5.594G | 5.567-5.581G |
+
+Gate: global_guard_changes and 11 global, builtin, monitoring and profiling programs in jit-off, plain, jit,
+jit-deopt; threads_global_guard_changes, threads_global_churn, trace_thread_exit in handoff; jitcheck: pass, except
+cprofile_stats, which fails the same way on D (No module named '_lsprof' in this tree's build).
