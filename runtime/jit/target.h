@@ -383,7 +383,6 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(format) \
     X(build_string) \
     X(call) \
-    X(call_special) \
     X(super_attr) \
     X(import_name) \
     X(import_from) \

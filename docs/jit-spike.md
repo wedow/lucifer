@@ -254,7 +254,7 @@ The top runtime symbols for each:
   - **Calls that are not inlined** go through `lu_call` and a nested
     `eval_frame`. There are no direct JIT-to-JIT calls yet.
 - **Kernel dispatch code does not fold by plain inlining.**
-  - `binary_op`, `compare`, `call_special` (`*args, **kwargs`) and the generic
+  - `binary_op`, `compare`, `call_special` (`*args, **kwargs` at the time) and the generic
     getattr loop over tables, take varargs and consult mutable registries.
   - The slice needed three compile-time folds written in C:
     - same-type float operator dispatch to the type's method;

@@ -59,7 +59,7 @@ require that a count of the tier's does not grow with the iterations:
          functions (a dict lookup calls its keys' __hash__ and __eq__):
          direct calls (compiled code entered through the eval loop's C
          entry). C enters the callee's unit itself, the kernel's
-         call_special (which the comparison reaches, with *args) too.
+         call_special (which the comparison reaches) too.
   sharedcode tests/kernel/jit_shared_code_hot.py, two functions of one code
          with different globals, the second's loop growing with the size:
          exits at a unit's entry (another function's frame), which stay
@@ -152,8 +152,8 @@ require that a count of the tier's does not grow with the iterations:
          generator never exists, and a tuple it yields is unpacked
          without being made.
   forward  tests/kernel/jit_forward_calls.py, whose hot code calls classes
-         through type.__call__ and operators through call_special, which
-         forward their arguments with f(a, *args, **kwargs): the tuples,
+         through type.__call__, which forwards its arguments with
+         f(a, *args, **kwargs), and operators through call_special: the tuples,
          lists and dicts compiled code allocates. The call passes them on.
   literalmethods tests/kernel/jit_literal_methods.py, whose hot loop calls
          a method on a freshly made list. The calls use its descriptor,

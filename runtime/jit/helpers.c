@@ -1643,19 +1643,6 @@ h_list_extend(PyObject *list, PyObject *iterable)
     return r == NULL ? -1 : 0;
 }
 
-/* call_special(descr, obj, *args) for a function, wrapper or method
-   descriptor, which it calls unbound: descr(obj, *args). Anything else is
-   bound through its __get__ first, which the interpreter does. */
-static PyObject *
-h_call_special(PyObject **argv, intptr_t n)
-{
-    PyTypeObject *t = Py_TYPE(argv[0]);
-    if (t != &PyFunction_Type && t != &PyWrapperDescr_Type && t != &PyMethodDescr_Type) {
-        return LU_JIT_DECLINED;
-    }
-    return h_call(argv, n);     /* obj as the self word: args are argv + 1 */
-}
-
 /* --- exceptions --- */
 
 /* PUSH_EXC_INFO: exc becomes the handled exception; the one before it (or None). */
@@ -1786,7 +1773,6 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_format] = { (void *)h_format, "format", REP_OBJ, FX_RAISE | FX_PY, 2 },
     [H_build_string] = { (void *)h_build_string, "build_string", REP_OBJ, FX_RAISE, 0 },
     [H_call] = { (void *)h_call, "call", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
-    [H_call_special] = { (void *)h_call_special, "call_special", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
     [H_super_attr] = { (void *)h_super_attr, "super_attr", REP_OBJ, FX_RAISE | FX_PY, 5 },
     [H_import_name] = { (void *)h_import_name, "import_name", REP_OBJ, FX_RAISE | FX_PY, 4 },
     [H_import_from] = { (void *)h_import_from, "import_from", REP_OBJ, FX_RAISE | FX_PY, 2 },
