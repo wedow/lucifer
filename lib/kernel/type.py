@@ -402,10 +402,10 @@ type(name, bases, dict, **kwds) -> a new type"""
         if init is _object._object_init and (args or kwargs) and type_lookup(type(obj), '__new__') is not _object._object_new:
             return obj
         if init is not MISSING and (init is not _object._object_init or args or kwargs):
-            if type(init) is _function:
+            if _boot.is_unbound_special(init):
                 res = init(obj, *args, **kwargs)
             else:
-                res = call_special(init, obj, *args, **kwargs)
+                res = _boot.bind_special(init, obj)(*args, **kwargs)
             if res is not None:
                 error(TypeError, str_join('', (
                     "__init__() should return None, not '", type_tp_name(type(res)), "'")))

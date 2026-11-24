@@ -215,16 +215,36 @@ def is_data(descr):
     return type_lookup(t, '__set__') is not MISSING or type_lookup(t, '__delete__') is not MISSING
 
 
-def call_special(descr, obj, /, *args, **kwargs):
-    """Calls a special method found on obj's type (call_attribute): functions
-    and kernel descriptors unbound, anything else bound through __get__."""
+def is_unbound_special(descr):
+    """Whether a special method is called with obj as its first argument
+    (functions and kernel descriptors) rather than bound (bind_special)."""
     t = type(descr)
-    if t is _function or t is _wrapper_descriptor or t is _method_descriptor:
-        return descr(obj, *args, **kwargs)
-    get = type_lookup(t, '__get__')
-    if get is not MISSING:
-        descr = get(descr, obj, type(obj))
-    return descr(*args, **kwargs)
+    return t is _function or t is _wrapper_descriptor or t is _method_descriptor
+
+
+def bind_special(descr, obj):
+    """A special method found on obj's type bound through its __get__, or
+    itself when it has none (call_attribute)."""
+    get = type_lookup(type(descr), '__get__')
+    return descr if get is MISSING else get(descr, obj, type(obj))
+
+
+def call_special(descr, obj, a=MISSING, b=MISSING, /):
+    """Calls a special method found on obj's type with up to two arguments
+    after obj, without packing them (type.__call__ calls __init__ with any)."""
+    t = type(descr)
+    if t is not _function and t is not _wrapper_descriptor and t is not _method_descriptor:
+        f = bind_special(descr, obj)
+        if a is MISSING:
+            return f()
+        if b is MISSING:
+            return f(a)
+        return f(a, b)
+    if a is MISSING:
+        return descr(obj)
+    if b is MISSING:
+        return descr(obj, a)
+    return descr(obj, a, b)
 
 
 def _update_bases(bases):
