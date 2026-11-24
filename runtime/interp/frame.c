@@ -35,12 +35,12 @@ push_chunk(PyThreadState *ts, size_t words)
     return &c->data[0];
 }
 
-/* A frame for func on the datastack, its fields borrowed and its locals
-   not set; the recursion count is the caller's. NULL when out of memory. */
+/* A frame for func running code on the datastack, its fields borrowed and
+   its locals not set; the recursion count is the caller's. NULL when out of
+   memory. */
 static struct lu_frame *
-alloc_frame(PyThreadState *ts, PyFunctionObject *func)
+alloc_frame(PyThreadState *ts, PyFunctionObject *func, PyCodeObject *code)
 {
-    PyCodeObject *code = (PyCodeObject *)func->func_code;
     size_t words = (size_t)code->co_framesize;
     PyObject **base = ts->datastack_top;
     if (base == NULL || (size_t)(ts->datastack_limit - base) < words) {
@@ -50,7 +50,7 @@ alloc_frame(PyThreadState *ts, PyFunctionObject *func)
         }
     }
     ts->datastack_top = base + words;
-    return lu_frame_fill((struct lu_frame *)base, func);
+    return lu_frame_fill((struct lu_frame *)base, func, code);
 }
 
 /* Gives the topmost frame's datastack space back. */
@@ -119,17 +119,18 @@ lu_depth_error(PyThreadState *ts, PyCodeObject *code)
 struct lu_frame *
 lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals)
 {
-    PyCodeObject *code = (PyCodeObject *)func->func_code;
+    PyCodeObject *code = lu_func_code_ref(func);
     if (lu_depth_enter(ts, code) < 0) {
+        Py_DECREF(code);
         return NULL;
     }
-    struct lu_frame *f = alloc_frame(ts, func);
+    struct lu_frame *f = alloc_frame(ts, func, code);
     if (f == NULL) {
         lu_depth_leave(ts, code);
+        Py_DECREF(code);
         PyErr_NoMemory();
         return NULL;
     }
-    Py_INCREF(code);
     Py_INCREF(func);
     f->locals = Py_XNewRef(locals);
     for (int i = 0; i < code->co_nlocalsplus; i++) {

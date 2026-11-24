@@ -157,6 +157,7 @@ make_function(PyObject *code, PyObject *globals, int notify, int defer)
     op->func_name = Py_NewRef(co->co_name);
     op->func_qualname = Py_NewRef(co->co_qualname);
     op->func_code = Py_NewRef(code);
+    lu_set_maybe_weakref(code);         /* frames on other threads take it with a try (lu_func_code_ref) */
     PyObject *doc = (co->co_flags & CO_HAS_DOCSTRING) ? PyTuple_GET_ITEM(co->co_consts, 0)
                                                       : Py_None;
     op->func_doc = Py_NewRef(doc);
@@ -674,6 +675,7 @@ func_set_code(PyObject *op, PyObject *value, void *closure)
     }
     /* CPython warns when the new code is a different kind (generator, coroutine);
        the warnings machinery arrives with its own ticket. */
+    lu_set_maybe_weakref(value);
     modify(func, PyFunction_EVENT_MODIFY_CODE, &func->func_code, value);
     return 0;
 }

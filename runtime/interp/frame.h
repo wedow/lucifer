@@ -291,11 +291,25 @@ lu_depth_leave(PyThreadState *ts, PyCodeObject *code)
    local unbound. Returns NULL with RecursionError or MemoryError set. */
 struct lu_frame *lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals);
 
-/* The fields of a new frame for func at f, borrowed; its locals not set. */
-static inline Py_ALWAYS_INLINE struct lu_frame *
-lu_frame_fill(struct lu_frame *f, PyFunctionObject *func)
+/* A reference to func's code. Another thread may replace __code__ at any
+   time, so a frame reads it once, here, and keeps what it read: the size,
+   the depth charge and the reference all belong to that code. The try
+   fails only for a code already replaced and dead, whose slot then holds
+   another (functions mark their code shared, so other threads' tries succeed). */
+static inline PyCodeObject *
+lu_func_code_ref(PyFunctionObject *func)
 {
-    PyCodeObject *code = (PyCodeObject *)func->func_code;
+    PyObject *code;
+    while ((code = lu_try_xget_ref(&func->func_code)) == NULL) {
+    }
+    return (PyCodeObject *)code;
+}
+
+/* The fields of a new frame for func running code at f; func and code
+   borrowed, its locals not set. */
+static inline Py_ALWAYS_INLINE struct lu_frame *
+lu_frame_fill(struct lu_frame *f, PyFunctionObject *func, PyCodeObject *code)
+{
     f->code = code;
     f->previous = NULL;
     f->func = (PyObject *)func;
@@ -312,23 +326,22 @@ lu_frame_fill(struct lu_frame *f, PyFunctionObject *func)
     return f;
 }
 
-/* CALL's exact-arguments frame (CPython's _INIT_CALL_PY_EXACT_ARGS): func's
-   code takes exactly the n positional arguments args[0..n), owned, which
-   become its first locals, and the frame takes the caller's reference to
-   func. NULL with nothing done when the depth or the current stack chunk
-   has no room: the general call raises or grows it. */
+/* CALL's exact-arguments frame (CPython's _INIT_CALL_PY_EXACT_ARGS): code,
+   func's as the caller read it once, takes exactly the n positional
+   arguments args[0..n), owned, which become its first locals; the frame
+   takes the caller's references to func and to code. NULL with nothing
+   done when the depth or the current stack chunk has no room: the general
+   call raises or grows it. */
 static inline Py_ALWAYS_INLINE struct lu_frame *
-lu_frame_push_exact(PyThreadState *ts, PyFunctionObject *func, PyObject **args, int n)
+lu_frame_push_exact(PyThreadState *ts, PyFunctionObject *func, PyCodeObject *code, PyObject **args, int n)
 {
-    PyCodeObject *code = (PyCodeObject *)func->func_code;
     PyObject **base = ts->datastack_top;
     if (!lu_depth_room(ts, code) || base == NULL || ts->datastack_limit - base < code->co_framesize) {
         return NULL;
     }
     lu_depth_take(ts, code);
     ts->datastack_top = base + code->co_framesize;
-    struct lu_frame *f = lu_frame_fill((struct lu_frame *)base, func);
-    Py_INCREF(code);
+    struct lu_frame *f = lu_frame_fill((struct lu_frame *)base, func, code);
     for (int i = 0; i < n; i++) {
         f->localsplus[i] = args[i];
     }

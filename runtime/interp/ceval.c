@@ -1837,12 +1837,19 @@ op_CALL:
                 fn = sp[-oparg - 2];
             }
             int n = oparg + (sp[-oparg - 1] != NULL);
+            PyObject **slot = &((PyFunctionObject *)fn)->func_code;
             PyCodeObject *co;
             if (Py_IS_TYPE(fn, &PyFunction_Type)
-                && (co = (PyCodeObject *)((PyFunctionObject *)fn)->func_code)->co_argcount == n
+                && (co = _Py_atomic_load_ptr(slot))->co_argcount == n
                 && !(co->co_flags & (CO_VARARGS | CO_VARKEYWORDS)) && co->co_kwonlyargcount == 0
                 && ts->interp->eval_frame == NULL
-                && (callee = lu_frame_push_exact(ts, (PyFunctionObject *)fn, sp - n, n)) != NULL) {
+                && lu_try_incref_compare(slot, (PyObject *)co)) {
+                /* co is the code the frame runs, whatever __code__ holds by now. */
+                callee = lu_frame_push_exact(ts, (PyFunctionObject *)fn, co, sp - n, n);
+                if (callee == NULL) {
+                    Py_DECREF(co);
+                    goto call_general;
+                }
                 sp -= oparg + 2;
                 SAVE_FRAME();
                 callee->previous = frame;
@@ -1853,6 +1860,7 @@ op_CALL:
             }
         }
     }
+call_general:
     kwnames = NULL;
 call_stack_args:
     /* callable, self_or_null, args[oparg] */
@@ -1899,7 +1907,7 @@ call_tail: {
         result = Py_NewRef((PyObject *)Py_TYPE(args[0]));       /* type(x) */
         goto call_done;
     }
-    if (callable == (PyObject *)&PyBool_Type && total == 1 && npos == 1) {
+    if (!mon && callable == (PyObject *)&PyBool_Type && total == 1 && npos == 1) {
         int truth = lu_truth_exact(args[0]);
         if (truth >= 0) {
             result = Py_NewRef(truth ? Py_True : Py_False);
