@@ -386,10 +386,18 @@ C. Rule changes, in order:
 - Order: 1, then 2, then 3. 1 is a deletion that addresses both the cold programs and part of regex. 2 is small and local. 3 is a design.
 - Not examined here: (3) json_loads, deepcopy and DeltaBlue's long windows.
 
+**2026-11-24 change 1 built (4b477b47); stopped: the typed lane needs a decision**
+
+- Built: a learned rebuild is predicted at the unit's own build (enough = build_cost(nins)); the rest discount is deleted (lu_ev_price_rest, lu_jit_prof_rest, lu_prof rest, lu_unit relearn and the minimum in lu_jit_stale_pass). Lane learnprice (tests/kernel/jit_learned_price.py, a ledger lane): every learned rebuild must be predicted at least at the build of the unit it replaces. The ledger lanes now check that too. Before the change, learnprice, churn and classtests failed on it (setitem@1: 85 IR predicted 0.32M; main@78: 1,184 IR predicted 13.5M). After it, they pass: churn 2,988 first, 14,431 rebuilt; classtests 56,842 first, 8,371 rebuilt; learnprice 56,906 first, 3,247 rebuilt.
+- typed fails: 511,732 helpers at 20,000 iterations, 594,094 at 40,000 (with the discount: 368,853 flat). fill@33 (1,212 IR) is rebuilt for array.__setitem__@37 after paying 15.2M, which is build_cost(1,212), between 20,000 and 40,000 iterations. The rebuild comes out at 1,214 IR, so no sound price lies below the full one. Rules A and B do not carry this lane: its demand (flat after 20,000) is stricter than break-even for this unit. Its stale pass loses about 840 instructions, so a 1,212-IR rebuild pays back after about 18,000 passes. Decision needed: keep the lane's demand (which no sound price meets) or bound typed by the ledger as churn and classtests are.
+- Other lanes run: dispatch passes (674,882 -> 1,374,882, as before). classtests growth passes at 246,789 flat (before 164,529; AT_MOST 329,058).
+- AWFY DeltaBlue, instructions per iteration (sizes 20 and 60, one run a lease): master 5.747M; change 1 5.328M (-7.3%); branch before it 5.857M (+1.9%). Whole run at 20: 409.5M, 407.6M, 408.7M. Guard exits at 60: 4,390.
+- Not done: changes 2 (growth per entry) and 3 (growth must deliver), the full gate and the table.
+
 ## State
 
 - Landing candidate luc-1kz0-land on origin/master dbb9b594 (gated, table above); stage A was on branch luc-1kz0, on 12e0fa43: the lanes, the mechanism (ledger, stale ledger per unit, quiet rule, value sharing), tools/jitcost, this ticket.
 - Gate on the rebased tree: focused kernel programs and threads, full tools/jitcheck, tools/jitcost all pass. The table was measured on the same code on ca02da54 (the rebase moved only the interpreter).
-- Known losses and follow-ups: the final-pass note; regex_v8's windows and the cold programs' extra compiles are diagnosed (last note): rule changes 1-3 proposed, not built. Stages B and C not started.
+- Known losses and follow-ups: the final-pass note. regex_v8's windows and the cold programs' extra compiles are diagnosed (diagnosis note); change 1 is built (4b477b47) but fails the typed lane, which needs a decision; changes 2 and 3 are not built. Stages B and C not started.
 - The json_loads and deltablue steady-state losses are windows of both arms' convergence, not worse final builds (diagnosis note); rules A and B built and gated (A+B note); json_loads windows still short of the landing bar.
 - Debug aids: LUCIFER_JIT_DEBUG=units logs builds, kills (with `paid P cost C` for ledger kills) and learns; -X lucifer_jit_stats prints generic passes; LUCIFER_JIT_DUMP=1 prints each unit's IR.
