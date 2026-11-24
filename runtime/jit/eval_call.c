@@ -735,7 +735,7 @@ lu_ev_return(struct ctx *c)
         /* An __init__ that returns anything but None: the interpreter raises. */
         lu_ev_guard(c, OP_GUARD_BIT, lu_ev_emit(c, OP_IS, REP_BIT, lu_ev_val(c, v), lu_ev_konst(c, Py_None), LU_NOV, 0), 1);
     }
-    for (int i = 0; i < c->nlocals + *depth_of(c); i++) {
+    for (int i = c->nlocals + *depth_of(c) - 1; i >= 0; i--) {
         lu_ev_drop(c, slots(c)[i]);
     }
     lu_ev_drop(c, c->funcv);
@@ -752,7 +752,7 @@ lu_ev_leave_root(struct ctx *c, lu_v x, int raised)
     while (*depth_of(c) > 0) {
         lu_ev_pop(c);
     }
-    for (int i = 0; i < c->nlocals; i++) {
+    for (int i = c->nlocals - 1; i >= 0; i--) {      /* the last local first, as the interpreter */
         lu_ev_set_local(c, i, LU_NOV);
     }
     g->leaving = 1;

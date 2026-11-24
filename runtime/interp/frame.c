@@ -153,15 +153,18 @@ lu_frame_reserve(PyThreadState *ts, size_t words)
     return 0;
 }
 
-/* The references a frame holds, except its code. */
+/* The references a frame holds, except its code, as CPython's
+   _PyFrame_ClearLocals releases them: from the top of its stack down to
+   its first local, each word cleared before its release. */
 static void
 release_refs(struct lu_frame *f)
 {
-    PyObject **top = f->stackpointer;
+    PyObject **p = f->stackpointer;
     f->stackpointer = f->localsplus;
-    for (PyObject **p = f->localsplus; p < top; p++) {
-        Py_XDECREF(*p);
+    while (p > f->localsplus) {
+        PyObject *v = *--p;
         *p = NULL;
+        Py_XDECREF(v);
     }
     Py_CLEAR(f->locals);
     Py_CLEAR(f->func);

@@ -158,7 +158,7 @@ throw_to(struct ctx *c, struct ctx *h, int handler, int level, lu_v exc)
 {
     struct gctx *g = c->g;
     for (struct ctx *k = c; k != h; k = k->parent) {
-        for (int i = 0; i < k->nlocals + *depth_of(k); i++) {
+        for (int i = k->nlocals + *depth_of(k) - 1; i >= 0; i--) {
             lu_ev_drop(k, slots(k)[i]);
         }
         lu_ev_drop(k, k->funcv);
@@ -233,7 +233,7 @@ raised_out(struct ctx *c, void *arg)
     }
     lu_ev_helper(c, H_exc_left, 0, NULL, 0);      /* the arms' rule, below */
     for (struct ctx *k = c; k != root; k = k->parent) {
-        for (int i = 0; i < k->nlocals + *depth_of(k); i++) {
+        for (int i = k->nlocals + *depth_of(k) - 1; i >= 0; i--) {
             lu_ev_drop(k, slots(k)[i]);
         }
         lu_ev_drop(k, k->funcv);
