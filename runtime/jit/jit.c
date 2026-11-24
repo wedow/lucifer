@@ -2000,6 +2000,26 @@ lu_jit_generic(struct lu_unit *u, enum lu_generic kind)
     lose(u, costs[kind]);
 }
 
+/* The site a guard's exit counts against: the instruction it left at, or
+   for a guard that speculates for a loop header, the header; NULL when it
+   is outside its code. */
+static struct lu_jit_code *
+guard_site(struct lu_deopt *d, int *pc)
+{
+    const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
+    struct lu_jit_code *jc = state_for(d->blame_code != NULL ? d->blame_code : in->code);
+    *pc = d->blame_code != NULL ? d->blame_pc : in->pc;
+    return *pc >= 0 && *pc < jc->ncode ? jc : NULL;
+}
+
+/* Whether guard exit d's site (pc of jc) was marked after d's unit was built. */
+static int
+marked_since(struct lu_jit_code *jc, int pc, struct lu_deopt *d)
+{
+    return (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & (d->borrow ? NOBORROW : NOSPEC))
+        && d->unit->built < __atomic_load_n(&jc->marked, __ATOMIC_RELAXED);
+}
+
 void
 lu_jit_note_exit(struct lu_deopt *d)
 {
@@ -2046,11 +2066,17 @@ lu_jit_note_exit(struct lu_deopt *d)
        has failed on what its places know, and its exits buy the mark. Each
        diverted rebuild needs a place to have learned since the unit's
        build, so there are at most as many as its root's places learn. */
+    /* An exit at a site marked since the unit's build is not diverted:
+       the mark is bought, and the unit dies at once (below). */
     if (d->reason == EXIT_GUARD && __atomic_load_n(&d->unit->unlearned, __ATOMIC_RELAXED) != 0) {
-        if (!stale_pass(d->unit, exit_cost(d)) && !__atomic_load_n(&d->unit->dead, __ATOMIC_RELAXED)) {
-            relearn(state_of(d->unit->code), d);
+        int pc;
+        struct lu_jit_code *sc = guard_site(d, &pc);
+        if (sc == NULL || !marked_since(sc, pc, d)) {
+            if (!stale_pass(d->unit, exit_cost(d)) && !__atomic_load_n(&d->unit->dead, __ATOMIC_RELAXED)) {
+                relearn(state_of(d->unit->code), d);
+            }
+            return;
         }
-        return;
     }
     struct lu_unit *u = d->unit;
     int handled = d->reason == EXIT_ERROR ? handling_frame(d) : d->nframes - 1;
@@ -2092,7 +2118,7 @@ lu_jit_note_exit(struct lu_deopt *d)
     uint64_t n = __atomic_add_fetch(&jc->fails[site_pc], exit_cost(d), __ATOMIC_RELAXED);
     PyCodeObject *code = lu_deopt_frame(d, 0)->code;
     struct lu_jit_code *root = state_for(code);
-    if (fails_enough(n, root)) {
+    if (fails_enough(n, root) || (d->reason == EXIT_GUARD && marked_since(jc, site_pc, d))) {
         int again;
         if (caught >= 0) {
             /* A kernel handler keeps taking what a call raises: the unit is
@@ -2142,7 +2168,9 @@ lu_jit_note_exit(struct lu_deopt *d)
             { "old-unit-catch", "old-unit-raises", "old-unit-noinline", "old-unit-noborrow", "old-unit-nospec" } };
         const char *why = whys[again != 0][caught >= 0 ? 0 : out ? 1 : d->reason != EXIT_GUARD ? 2 : d->borrow ? 3 : 4];
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
-            kill(root, u, why, site, site_pc, (double)n, build_cost(__atomic_load_n(&root->built_ins, __ATOMIC_RELAXED)));
+            /* An old unit's death buys nothing: the mark was bought. */
+            kill(root, u, why, site, site_pc, again ? 0 : (double)n,
+                 again ? 0 : build_cost(__atomic_load_n(&root->built_ins, __ATOMIC_RELAXED)));
         }
     }
 }
