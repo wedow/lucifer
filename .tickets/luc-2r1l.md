@@ -16,9 +16,10 @@ With the JIT off the interpreter costs 105-114 machine instructions per bytecode
 
 ## State
 
-Branch luc-interp, on master dbb9b594. Stages 0-2, A-E landed; the CALL primitive-path trims committed for review
-(below, 2026-11-24 "CALL's primitive path"). This builder stopped there (coordinator). Next, for a builder with a full
-context: (b) the Python call and return paths, then the operand reference counts as their own item, then F.
+Branch luc-interp, on master dbb9b594. Stages 0-2, A-E landed; the CALL primitive-path trims, the callee-table fix,
+the release-order fix and the return in line committed for review (notes below). Left of (b): the code object's
+count and the argcount/flags fold (see the 2026-11-24 note "the trims with the JIT on"). Next: F, then the operand
+reference counts (sized below).
 
 (b) Python call and return, pyflakes JIT off, profile of the stage-E build (13.17G instructions; 3.12M exact
 Python calls through CALL's in-line push, 6.4M returns). CPython's CALL_PY_EXACT_ARGS + RETURN_VALUE is about 208
@@ -50,27 +51,44 @@ together. Here:
   Contained first steps: frame.c's decrefs inline with one thread-id load per frame (about 20% of lu_frame_pop),
   no NULL stores into released locals, lu_frame_pop inlined into return_frame, the code held without a count.
 
-Operand reference counts (its own item; not started). Today LOAD_FAST and LOAD_FAST_BORROW are one handler
-(targets[LOAD_FAST_BORROW] = op_LOAD_FAST): both take a count (about 9 instructions: immortal test, owner test,
-local increment, or an atomic shared increment), and every consumer drops it (about 8-11). CPython 3.14: the
-compiler emits LOAD_FAST_BORROW (and LOAD_FAST_BORROW_LOAD_FAST_BORROW) where the local cannot be rebound while the
-value is on the stack (flowgraph.c optimize_load_fast); the stack holds _PyStackRef words whose low bit
-(Py_TAG_REFCNT) says "no count owned"; PyStackRef_CLOSE skips the decrement for a tagged word; a borrowed or deferred
-reference is made owned (PyStackRef_AsPyObjectSteal / _PyStackRef_MakeHeapSafe / PyStackRef_DUP) where it outlives
-the frame's own reference: stored to the heap (STORE_ATTR, STORE_SUBSCR, BUILD_*, LIST_APPEND, STORE_GLOBAL,
-cells), returned (RETURN_VALUE makes it heap-safe), yielded (YIELD_VALUE), passed to C that may keep it (a vectorcall
-gets PyObject pointers: the callee increments what it keeps). Deferred references: objects with deferred counting
-in the free-threaded build (functions, code, modules, type objects' heap types with _PyObject_SetDeferredRefcount)
-are pushed tagged by LOAD_GLOBAL, LOAD_ATTR of methods and LOAD_CONST; the collector scans every thread's stacks for
-them. Here the value stack would need the same tag bit in the stack word, and every reader of a stack entry
-would have to tell borrowed from owned: each handler's POP/consume (Py_DECREF of operands becomes the tagged close),
-the frame walker and frame objects (f_locals, tracebacks), the JIT's exit and deopt materialization (it rebuilds
-stack words: they must carry the tag), the collector's stack scan (deferred objects reachable only from stacks),
-generators' saved stacks, and call_stack_args / call_tail, which move stack words into callees' locals (a callee's
-local must own its count: arguments made owned at the call). Estimate from the census after C2 (pyflakes, JIT
-off): about 39M borrow loads (LOAD_FAST_BORROW 27.4M, LOAD_FAST_BORROW_LOAD_FAST_BORROW 5.7M x2) at about 17
-instructions saved each (the count and its drop) is about 0.66G, 5% of the run; LOAD_GLOBAL of deferred objects
-(26M, mostly functions and types) about 0.45G more, 3%; arguments made owned at calls give part back.
+Operand reference counts (its own item; sized 2026-11-24, not built). Today LOAD_FAST and LOAD_FAST_BORROW are
+one handler: both take a count (about 9 instructions), and every consumer drops it (about 8-11). The compiler is
+CPython's, so LOAD_FAST_BORROW and LOAD_FAST_BORROW_LOAD_FAST_BORROW are already emitted where CPython's
+optimize_load_fast (Python/flowgraph.c) proves the local outlives the stack entry: the entry is consumed before the
+local is killed and is never stored as a local, except that arguments may arrive borrowed in a callee's locals.
+CPython 3.14 marks such words with the stack reference tag (low bit); PyStackRef_CLOSE skips a tagged word; a
+borrowed word is made owned where it can outlive its support: RETURN_VALUE and YIELD_VALUE (PyStackRef_MakeHeapSafe),
+generator and frame-object snapshots, and every store to the heap goes through PyStackRef_AsPyObjectSteal of an
+owned word or a new reference. Deferred words (LOAD_GLOBAL, LOAD_CONST, method loads of objects with deferred
+counting) are the same tag on objects only a collection frees; the collector scans thread stacks for them.
+
+Design here, in stages:
+1. Borrowed words from LOAD_FAST_BORROW(_LOAD_FAST_BORROW), argument words made owned at the call. A tag bit in the
+   value-stack word; ceval.c gets CLOSE (tag test, else lu_decref), AS_OBJ (mask) and OWN (incref if tagged).
+   Consumers to convert: every handler that drops or passes an operand (about 240 stack accesses and 216 count
+   steps in ceval.c; most become CLOSE or AS_OBJ mechanically); OWN at STORE_FAST/STORE_DEREF (cannot meet a borrow,
+   asserted), stores to the heap (STORE_ATTR, STORE_SUBSCR, STORE_GLOBAL/NAME, BUILD_*, LIST_APPEND, SET_ADD,
+   MAP_ADD, cells), RETURN_VALUE, YIELD_VALUE, and the moves into a callee's locals (lu_frame_push_exact,
+   call_stack_args/call_tail, CALL_FUNCTION_EX packing); C calls get AS_OBJ arrays (the primitive path passes the
+   stack slice: a borrowed word needs a masked copy, or the tag test per argument). Other readers: the frame's
+   release (CLOSE), exception unwinding to a handler (CLOSE), frame objects (lu_frame_retire's memcpy makes the
+   stack part owned; f_locals reads mask), generators (lu_gen_new's memcpy and the saved stack at YIELD: owned),
+   instrumentation reading TOP() (mask), PyUnstable_Object_IsUniqueReferencedTemporary (mask), and the JIT: its
+   entry from the interpreter (RESUME and back-edge entry read the frame's locals and stack as owned: OWN each
+   tagged word on entry), its exits and deopt materialization (exit.c writes owned words: no change), its frame
+   states (unchanged: compiled code owns its values). Size: about 350-450 changed lines, mostly ceval.c.
+2. Borrowed arguments kept borrowed in the callee's locals (CPython's rule): the release CLOSEs locals, frame
+   objects and generators OWN locals when they snapshot, f_locals writes keep the overwritten word (f_overwritten
+   already does), the JIT entry OWNs tagged locals. About 100-150 lines.
+3. Deferred words: LOAD_GLOBAL of functions and types, LOAD_CONST, method loads push objects with deferred counting
+   tagged. The collector must then scan every task's datastack frames, suspended generators' frames and frame
+   objects' own frames for tagged words before it frees a deferred object (today it relies on LU_REF_DEFERRED in
+   the shared count, and nothing scans stacks). About 150-200 lines plus the collector scan.
+Saving (pyflakes JIT off, the census after C2): stage 1 about 39M borrow loads (27.4M LOAD_FAST_BORROW, 5.7M x2 of
+the pair) x about 17 instructions = 0.66G (5%), less OWN at calls (3.1M in-line pushes x about 2 arguments x 9 =
+0.06G) and the tag test on every owned close (about 100M closes x 1-2 = 0.1-0.2G): net about 0.4-0.5G (3-4%);
+stage 2 gives the argument part back (about 0.06G); stage 3 about 26M LOAD_GLOBALs of deferred objects x 17 = 0.45G
+(3%). With the JIT on the interpreter's share is smaller (pyflakes about 10.8G): roughly half of these.
 
 F, the remaining forms after C2's census (pyflakes JIT off, instructions each with dispatch, share of the run):
 POP_JUMP_IF_FALSE 11.4M x 43 (3.5%) and _TRUE 3.5M x 48 (1.2%): SKIP_CACHES through the opcode table, the
@@ -516,3 +534,61 @@ The JIT-on startup rows lose 1M (pass) and 6M (imports); not explained yet (the 
 dict is a few hundred entries).
 Gate: the two new programs and 14 call, refcount, signal and global programs in jit-off, plain, jit, jit-deopt;
 three thread programs in handoff; jitcheck; exc_cross_run: pass.
+
+### 2026-11-24 the trims with the JIT on; release order; the return in line
+
+Trims with the JIT on: the immortal primitives cost `-c pass` +1.5M and the imports +8.8M (each trim built alone;
+the result check and the cache skip were wins in both modes). lu_jit_callee_note named every immortal callable, so
+each kernel call site that met a primitive built a callee table, took pic_lock and invalidated, for an entry
+speculate_callee never reads (it speculates on Python functions only). Builtin functions are no longer named.
+Open, not understood: (1) naming nothing but functions (static types left out too) cost `-c pass` +14.6% and
+DeltaBlue +1.6%, so something reads type entries of callee tables or their tags; (2) two interpreter-only edits with
+identical behaviour (the result check, the cache skip) move DeltaBlue JIT on by +0.4%: the same units are built,
+in a different order (deterministic per binary, different between binaries), the extra in lu_ssa_optimize; look for
+anything in the tier's decisions keyed by address or by layout.
+
+Release order (a compatibility fix): CPython's _PyFrame_ClearLocals releases a frame's values from the top of its
+stack down to its first local; the interpreter and compiled code's return and unwinding released first to last
+(locals, arguments, cells, generators, coroutines). return_release failed in jit-off, plain, jit and jit-deopt
+before; the interpreter's release and the JIT's (lu_ev_return, lu_ev_leave_root, throw_to and the error exit) now
+go from the top down.
+
+The pop in line: lu_frame_pop, the release and the datastack free are in line (frame.h) with the eval loop's count
+steps (lu_decref, now in lucifer.h); the return sets current_frame with a plain store; a popped frame's words are not
+stored back to NULL (it has left the stack and has no frame object; a frame object's own frame still clears them,
+as f_locals stays readable). Not done: the code's count (a frame holds one because __code__ can be replaced while
+it runs, by its own thread too; on the owner thread it is an in-line local step, about 12 instructions for the
+pair; removing it needs the collector to find running frames' code, see below) and folding the argcount, flags and
+kwonly tests (one more field in the code object, about 3 instructions).
+
+Exact-arguments call and return (`f(i)` loop minus an empty loop, instructions per iteration, JIT off): CPython
+3.14t 329, before 401, after 369 (1.12x).
+
+| row | release order | in line |
+|---|---|---|
+| fib / arith / attribute loop, instr/bc, JIT off | 70.4 / 94.6 / 91.8 | 66.7 / 93.2 / 90.5 |
+| -c pass, JIT off | 116.36M | 114.03M |
+| stdlib imports, JIT off | 1.141-1.143G | 1.116G |
+| pyflakes, JIT off | 12.97-13.00G | 12.63G |
+| -c pass, JIT on | 140.93M | 138.76M |
+| stdlib imports, JIT on | 1.370G | 1.352-1.353G |
+| pyflakes, JIT on | 10.890G | 10.789-10.803G |
+| Richards | 12.262G | 12.258G |
+| DeltaBlue | 5.605G | 5.591G |
+
+### 2026-11-24 review fixes; compatibility follow-ups for their own ticket
+
+A frame gives its recursion depth back before its references go (CPython's _Py_LeaveRecursiveCallPy precedes the
+clear), so their finalizers have it; the release tolerates a frame whose function is already gone. Compiled code's
+direct return (direct_done in the x86-64 emitter) still gives the depth back after the unit released its locals:
+moving it means the unit's own return sequence, not a few lines.
+Found by the review, not fixed here (a separate compatibility ticket):
+(a) JIT lanes: lu_ev_settle (runtime/jit/eval_emit.c) appends a dead escape-analysed container's items to the end
+of the pending releases, so `a = D('a'); b = [D('b')]` releases a before b in compiled code (CPython: b, a); the
+same across inlined frames in throw_to and raised_out.
+(b) Exception unwinding releases the value stack after the frame is unlinked and after PY_UNWIND (ceval.c's
+exit_unwind and the JIT's raised_out); CPython pops it while the frame is current and before the event
+(`def g(): return [D(), 1/0]` with D.__del__ printing sys._getframe(1).f_code.co_name: CPython prints g).
+(c) frame_dealloc's order (frame.c) differs from CPython's frameobject.c: code, function and f_locals first, then
+the fast locals top down, then f_back.
+(d) Not determined: an inlined callee whose frames a walker made real records, returning inside compiled code.
