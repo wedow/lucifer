@@ -430,8 +430,17 @@ struct lu_fdep {
     int pc;
 };
 
-/* Releases a code object's compiled units (code_dealloc). */
+/* Releases a code object's compiled units and JIT state (code_dealloc). */
 void lu_jit_code_free(PyCodeObject *code);
+/* Releases its units alone (the collector's clear of a code in a cycle,
+   which no activation can be in: a running frame holds its function).
+   The state stays until dealloc: another garbage code's unit that inlined
+   this one is in the dependency buckets until its own clear, and an
+   invalidation may still mark this code's sites. */
+void lu_jit_code_clear(PyCodeObject *code);
+/* Visits what the code's units hold (their constants, among them the
+   globals and builtins they were built for), for the collector. */
+int lu_jit_code_traverse(PyCodeObject *code, visitproc visit, void *arg);
 
 /* A collection frees dead units (runtime/jit/jit.c): with the world
    stopped, it takes those no activation is in off every list a thread

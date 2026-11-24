@@ -2,10 +2,16 @@
 # (types.FunctionType(code, other_globals), or a module imported twice
 # from the same compiled code): compiled code made for one must not answer
 # with the other's globals. Each case runs one function hot, then the
-# other, at a call's entry and at a loop's. Each output line must be the
-# interpreter's.
+# other, at a call's entry and at a loop's, called from module code, from
+# a compiled caller that calls it out of line (its direct entry) or in line
+# (a callee known by its code), as generators, and after importlib.reload.
+# Each output line must be the interpreter's.
 import builtins
+import importlib
+import os
+import shutil
 import sys
+import tempfile
 import types
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
@@ -40,6 +46,18 @@ def count(xs):
 def bump():
     global TOTAL
     TOTAL += 1
+
+def depth(n):
+    if n == 0:
+        return 0
+    return K + depth(n - 1)
+
+def tagged(x):
+    return x * K
+
+def gen(n):
+    for i in range(n):
+        yield i * K
 '''
 
 
@@ -51,7 +69,7 @@ def module(k):
 
 g1 = module(1)
 g2 = module(2)
-g2_funcs = {name: types.FunctionType(g1[name].__code__, g2) for name in ('merge', 'scale', 'count', 'bump')}
+g2_funcs = {name: types.FunctionType(g1[name].__code__, g2) for name in ('merge', 'scale', 'count', 'bump', 'depth', 'tagged', 'gen')}
 print(g2_funcs['merge'].__code__ is g1['merge'].__code__)
 
 # Constants folded from the globals: one function hot, then the other.
@@ -91,3 +109,64 @@ print('count', c1, count3((1, 2, 3)))
 for _ in range(N):
     c3 = count3((1, 2, 3))
 print('count hot', c3, g1['count']((1, 2, 3)))
+
+
+# A compiled caller reaching each function out of line (recursive: its
+# direct entry), one hot first, then both.
+def call_depth(f, n):
+    s = 0
+    for _ in range(n):
+        s += f(5)
+    return s
+
+
+print('direct', call_depth(g1['depth'], N), call_depth(g2_funcs['depth'], N))
+def call_both(n):
+    s = 0
+    for i in range(n):
+        s += (g1['depth'] if i & 1 else g2_funcs['depth'])(3)
+    return s
+
+
+print('direct both', call_both(N))
+
+# A compiled caller whose callee is known by its code: two functions of it
+# with different globals, one site.
+def call_tagged(fs, n):
+    s = 0
+    for i in range(n):
+        s += fs[i & 1](i)
+    return s
+
+
+print('by code', call_tagged([g1['tagged'], g1['tagged']], N), call_tagged([g1['tagged'], g2_funcs['tagged']], N),
+      call_tagged([g2_funcs['tagged'], g1['tagged']], N))
+
+# Generators of one code with different globals.
+def drain(f, n):
+    s = 0
+    for _ in range(n // 10):
+        for v in f(10):
+            s += v
+    return s
+
+
+print('gens', drain(g1['gen'], N), drain(g2_funcs['gen'], N), drain(g1['gen'], N))
+
+# importlib.reload of a module with a hot function: the old function keeps
+# running beside the new one.
+tmp = tempfile.mkdtemp()
+with open(os.path.join(tmp, 'shared_code_mod.py'), 'w') as fh:
+    fh.write('SCALE = 3\n\ndef work(n):\n    s = 0\n    for i in range(n):\n        s += i * SCALE\n    return s\n')
+sys.path.insert(0, tmp)
+sys.dont_write_bytecode = True
+import shared_code_mod
+old_work = shared_code_mod.work
+r1 = [old_work(N) for _ in range(20)][-1]
+with open(os.path.join(tmp, 'shared_code_mod.py'), 'w') as fh:
+    fh.write('SCALE = 5\n\ndef work(n):\n    s = 0\n    for i in range(n):\n        s += i * SCALE\n    return s\n')
+importlib.invalidate_caches()
+importlib.reload(shared_code_mod)
+r2 = [shared_code_mod.work(N) for _ in range(20)][-1]
+print('reload', r1, r2, old_work(N), shared_code_mod.SCALE)
+shutil.rmtree(tmp)

@@ -60,6 +60,11 @@ require that a count of the tier's does not grow with the iterations:
          direct calls (compiled code entered through the eval loop's C
          entry). C enters the callee's unit itself, the kernel's
          call_special (which the comparison reaches, with *args) too.
+  sharedcode tests/kernel/jit_shared_code_hot.py, two functions of one code
+         with different globals, the second's loop growing with the size:
+         exits at a unit's entry (another function's frame), which stay
+         flat, and the back-edges compiled code takes (executed polls),
+         which must grow with it: each function runs its own units.
   shapes tests/kernel/jit_call_shapes.py, whose hot calls are of functions
          it cannot inline with star, keyword and keyword-only parameters
          and cells, some made with keywords: entries into compiled code and
@@ -321,6 +326,7 @@ GROWTH = {
     'kwcalls': ('jit_kw_calls.py', r'jit: executed:.* call_kw (\d+)', 0),
     'cells': ('jit_cell_reads.py', r'jit: executed:.* helper (\d+)', 0, ('-X', 'lucifer_jit=on')),
     'bound': ('jit_bound_calls.py', r'jit: executed:.* call_kw (\d+)', 0, ('-X', 'lucifer_jit=on')),
+    'sharedcode': ('jit_shared_code_hot.py', r'jit: entries .* poll (\d+) side', 0),
     'classtests': ('jit_isinstance_growth.py', r'jit: executed:.* helper (\d+)|jit: C paths .* build_tuple (\d+)', 0),
     'cmethods': ('jit_class_methods.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
     'attrorder': ('jit_attr_order.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
@@ -386,6 +392,8 @@ GROWTH = {
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),
 }
 GROWTH_N = 20000
+# lane: (the counts, summed, that must grow by at least this many per iteration): work compiled code does.
+AT_LEAST = {'sharedcode': (r'jit: executed:.* poll (\d+)', 0.9)}
 PERF_RESOLVED = 0.95
 
 
@@ -400,7 +408,7 @@ def counted(lucifer, program, pattern, n, timeout, flags=(), extra=()):
                           *extra], timeout)
     found = [int(n) for m in re.finditer(pattern, err) for n in m.groups() if n is not None]
     return (code, out, sum(found) if found else None,
-            re.findall(r'^jit: (?:disabled (\S+)|retire (\S+)@)', err, re.M))
+            re.findall(r'^jit: (?:disabled (\S+)|retire (\S+)@)', err, re.M), err)
 
 
 def qualnames(program):
@@ -439,6 +447,11 @@ def check_growth(args, lane):
             problems.append(tag + 'no stats')
         elif large[2] - small[2] > per * GROWTH_N + GROWTH_N // 20:
             problems.append(f'{tag}{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
+        if lane in AT_LEAST:
+            more, least = AT_LEAST[lane]
+            done = [sum(int(n) for n in re.findall(more, r[4])) for r in (small, large)]
+            if done[1] - done[0] < least * GROWTH_N:
+                problems.append(f'{tag}compiled code did {done[0]} at {GROWTH_N} iterations, {done[1]} at {2 * GROWTH_N}')
         own = qualnames(program)
         given_up = own & {name for pair in small[3] for name in pair if name}
         if lane in ('calls', 'super', 'rebind', 'phases', 'bitexc') and given_up:

@@ -5306,6 +5306,15 @@ direct_entry(struct asm_ *a)
         store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 1);    /* before the unit's death is read */
     }
     jump_if_dead(a, decline);                   /* a caller may have read the entry before it died */
+    /* A function of the same code with other globals or builtins has units of its own. */
+    load(a, R11, RSI, offsetof(PyFunctionObject, func_globals));
+    mov_ri(a, RAX, (int64_t)(intptr_t)a->unit->globals);
+    alu_rr(a, ALU_CMP, R11, RAX);
+    jcc(a, CC_NE, decline);
+    load(a, R11, RSI, offsetof(PyFunctionObject, func_builtins));
+    mov_ri(a, RAX, (int64_t)(intptr_t)a->unit->builtins);
+    alu_rr(a, ALU_CMP, R11, RAX);
+    jcc(a, CC_NE, decline);
     load(a, RAX, R14, offsetof(struct lu_task, carrier));
     cmp_rm(a, RSP, RAX, offsetof(struct lu_carrier, jit_stack_floor));
     jcc(a, CC_B, decline);

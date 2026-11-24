@@ -169,6 +169,10 @@ struct lu_unit {
     struct lu_unit *next;
     PyCodeObject *code;         /* whose unit it is (borrowed: the code frees its units) */
     int entry_pc;
+    /* The globals and builtins of the frame it was built from, whose names
+       it folds: only frames of the same enter it (functions that share a
+       code object each have their own units); among its constants. */
+    PyObject *globals, *builtins;
     int (*fn)(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
     void *direct;               /* a call entry's direct entry (struct lu_jit_direct), or NULL */
     void *mem;

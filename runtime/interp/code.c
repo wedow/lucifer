@@ -107,11 +107,22 @@ code_dealloc(PyObject *op)
     lu_object_free(op);
 }
 
-/* co_consts is the only reference a code object holds that can be in a cycle. */
+/* What a code object holds that can be in a cycle: co_consts, and what its
+   compiled units hold (a function's globals hold the function, which holds
+   the code). */
 static int
 code_traverse(PyObject *op, visitproc visit, void *arg)
 {
     Py_VISIT(((PyCodeObject *)op)->co_consts);
+    return lu_jit_code_traverse((PyCodeObject *)op, visit, arg);
+}
+
+/* A code in a cycle the collector breaks lets its units go (their
+   constants hold the cycle); its JIT state stays until dealloc. */
+static int
+code_clear(PyObject *op)
+{
+    lu_jit_code_clear((PyCodeObject *)op);
     return 0;
 }
 
@@ -302,6 +313,7 @@ lu_code_init(void)
     PyCode_Type.tp_weaklistoffset = offsetof(PyCodeObject, co_weakreflist);
     PyCode_Type.tp_dealloc = code_dealloc;
     PyCode_Type.tp_traverse = code_traverse;
+    PyCode_Type.tp_clear = code_clear;
 }
 
 /* intern_strings: the items of a names tuple become the interned strings, in place. */

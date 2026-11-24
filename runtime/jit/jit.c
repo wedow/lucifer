@@ -887,6 +887,8 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     struct lu_func f = { 0 };
     struct lu_unit *u = calloc(1, sizeof(struct lu_unit));
     u->code = frame->code;
+    u->globals = frame->globals;
+    u->builtins = frame->builtins;
     u->built = __atomic_load_n(&marks, __ATOMIC_ACQUIRE);
     f.code = frame->code;
     f.entry_pc = (int)(frame->instr - lu_code_start(frame->code));
@@ -1131,15 +1133,40 @@ leave(struct lu_deopt *d, struct lu_unit *u, int kept)
     }
 }
 
+/* The live unit at pc built for frame's globals and builtins. */
 static struct lu_unit *
-find(struct lu_jit_code *jc, int pc)
+find(struct lu_jit_code *jc, int pc, struct lu_frame *frame)
 {
     for (struct lu_unit *u = __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
-        if (u->entry_pc == pc && !__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
+        if (u->entry_pc == pc && u->globals == frame->globals && u->builtins == frame->builtins
+            && !__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
             return u;
         }
     }
     return NULL;
+}
+
+/* Whether frame's function may have units of its own. The code's warmth
+   (its call and back-edge counts, its waits) is the first function's to
+   have units; a function of the same code with other globals or builtins
+   (another namespace that runs it) compiles once it is hot itself, by its
+   own count of entries against the code's threshold, so one that runs
+   once stays in the interpreter. One that had a unit (on the list, live
+   or dead) was hot: the code's waits apply to it as to the first. */
+static int
+own_hot(struct lu_jit_code *jc, struct lu_frame *frame)
+{
+    int other = 0, own = 0;
+    for (struct lu_unit *u = __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
+        int mine = u->globals == frame->globals && u->builtins == frame->builtins;
+        own |= mine;
+        other |= !mine && !__atomic_load_n(&u->dead, __ATOMIC_RELAXED);
+    }
+    if (own || !other || !PyFunction_Check(frame->func)) {
+        return 1;
+    }
+    PyFunctionObject *f = (PyFunctionObject *)frame->func;
+    return __atomic_add_fetch(&f->lu_jit_calls, 1, __ATOMIC_RELAXED) >= lu_jit_threshold(frame->code);
 }
 
 /* LUCIFER_JIT_ONLY: a comma-separated list of qualnames. */
@@ -1174,12 +1201,15 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
         __atomic_store_n(&jc->disabled, 1, __ATOMIC_RELAXED);      /* asked once */
         return NULL;
     }
+    if (!own_hot(jc, frame)) {
+        return NULL;
+    }
     int idle = 0;
     if (__atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) || jc->wait[pc] != 0
         || !__atomic_compare_exchange_n(&jc->compiling, &idle, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
         return NULL;
     }
-    struct lu_unit *u = find(jc, pc);
+    struct lu_unit *u = find(jc, pc, frame);
     if (u == NULL) {
         uint64_t ticket = lu_jit_deps_begin();     /* before anything the build reads */
         u = compile(jc, frame, pc, ticket);
@@ -1268,7 +1298,7 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
             }
             return LU_JIT_NONE;
         }
-        u = find(jc, pc);
+        u = find(jc, pc, frame);
     }
     if (u == NULL && (u = compile_at(ts, frame, pc)) == NULL) {
         return LU_JIT_NONE;
@@ -1384,7 +1414,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         return 0;
     }
     /* A unit is live only while its entry does not wait (kill marks it dead). */
-    struct lu_unit *u = find(jc, at);
+    struct lu_unit *u = find(jc, at, frame);
     if (u == NULL) {
         return 0;
     }
@@ -2142,13 +2172,29 @@ lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
     }
 }
 
-void
-lu_jit_code_free(PyCodeObject *code)
+/* Run with the world stopped (or by a thread that keeps the units from
+   being freed: it polls nowhere while it walks): a unit leaves its code's
+   list only in a collection's stop (lu_jit_reclaim) or in code_dealloc. */
+int
+lu_jit_code_traverse(PyCodeObject *code, visitproc visit, void *arg)
 {
     struct lu_jit_code *jc = state_of(code);
-    if (jc == NULL) {
-        return;
+    for (struct lu_unit *u = jc != NULL ? __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE) : NULL; u != NULL;
+         u = u->next) {
+        for (int i = 0; i < u->nconsts; i++) {
+            Py_VISIT(u->consts[i]);
+        }
     }
+    return 0;
+}
+
+/* Takes the code's units off its list and the dying list under the dying
+   lock, so each is freed once, and frees them: their dependencies, then
+   their constants. */
+static void
+free_units(struct lu_jit_code *jc)
+{
+    __atomic_store_n(&jc->direct.entry, NULL, __ATOMIC_SEQ_CST);
     pthread_mutex_lock(&dying.lock);
     struct lu_unit *units = jc->units;
     jc->units = NULL;
@@ -2162,6 +2208,25 @@ lu_jit_code_free(PyCodeObject *code)
         next = u->next;
         free_unit(u);
     }
+}
+
+void
+lu_jit_code_clear(PyCodeObject *code)
+{
+    struct lu_jit_code *jc = state_of(code);
+    if (jc != NULL) {
+        free_units(jc);
+    }
+}
+
+void
+lu_jit_code_free(PyCodeObject *code)
+{
+    struct lu_jit_code *jc = state_of(code);
+    if (jc == NULL) {
+        return;
+    }
+    free_units(jc);
     for (int i = 0; jc->pics != NULL && i < jc->ncode; i++) {
         free(jc->pics[i]);
     }

@@ -53,6 +53,9 @@ typedef struct {
      *     annotations
      *     vectorcall function pointer */
     uint32_t func_version;
+    /* Lucifer: its entries into a code whose units are other functions'
+       (other globals or builtins), counted until it is hot (runtime/jit). */
+    uint32_t lu_jit_calls;
 
     /* Invariant:
      *     func_closure contains the bindings for func_code->co_freevars, so
