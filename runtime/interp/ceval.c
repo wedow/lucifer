@@ -1865,7 +1865,7 @@ op_CALL:
             lu_jit_observe_classes(code, next_instr - 1, lu_jit_kind(first) | lu_jit_kind(second) << 8, first, second);
         }
     }
-    SKIP_CACHES();
+    next_instr += 3;            /* CALL's and INSTRUMENTED_CALL's cache words */
     if (monitored == NULL) {
         /* CPython's CALL_BUILTIN_FAST, CALL_PY_EXACT_ARGS and
            CALL_BOUND_METHOD_EXACT_ARGS, chosen at each call: a METH_FASTCALL
@@ -1886,7 +1886,8 @@ op_CALL:
                 t->pin++;
                 result = ((_PyCFunctionFast)(void (*)(void))ml->ml_meth)(((PyCFunctionObject *)fn)->m_self, a, n);
                 t->pin--;
-                if ((result == NULL) != (ts->current_exception != NULL)) {
+                if ((result == NULL || ts->current_exception != NULL)
+                    && (result == NULL) != (ts->current_exception != NULL)) {
                     result = _Py_CheckFunctionResult(ts, fn, result, NULL);
                 }
                 for (int i = 0; i < n; i++) {

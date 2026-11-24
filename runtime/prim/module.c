@@ -312,6 +312,15 @@ lucifer_exec(PyObject *m)
         || add_functions(m, lu_prim_os_methods) < 0) {
         return -1;
     }
+    /* The primitives live as long as the runtime: immortal, the kernel's loads
+       and calls of them change no counts. */
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(PyModule_GetDict(m), &pos, &key, &value)) {
+        if (PyCFunction_Check(value) && ((PyCFunctionObject *)value)->m_self == m) {
+            lu_set_immortal(value);
+        }
+    }
     PyObject *name = PyUnicode_InternFromString("MISSING");
     int err = name == NULL || lu_ns_insert(PyModule_GetDict(m), name, LU_MISSING) < 0;
     Py_XDECREF(name);
