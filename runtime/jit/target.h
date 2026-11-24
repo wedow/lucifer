@@ -212,8 +212,6 @@ struct lu_unit {
     uint64_t per_entry;         /* its losses per entry when last valued, in instructions (jit.c unit_losses) */
     uint64_t unlearned;         /* what its passes lost for want of what its root learned since its build
                                    (jit.c stale_pass) */
-    uint64_t relearn;           /* the learned rebuild's predicted cost: its build's, less the generic
-                                   expansions of the places that learned since (jit.c lu_jit_stale_pass) */
     uint64_t quiet;             /* what it paid towards learned rebuilds since a place of its root last
                                    learned (jit.c learning) */
     int nins;                   /* the IR instructions its build made */
@@ -556,9 +554,6 @@ int lu_jit_stale_pass(struct lu_prof *p, struct lu_unit *u);
    it loses, the measured loss of a generic path of its kind, else
    CALL_COST a call (jit.c). */
 void lu_jit_prof_built(struct lu_prof *p, int base, int calls);
-/* The last build emitted `rest` IR instructions in p's frame after p's
-   report: what learning there can fold, when p had met nothing (jit.c). */
-void lu_jit_prof_rest(struct lu_prof *p, int rest);
 /* A helper of a generic path ran for unit u, which called it: a loss of
    u's by kind (jit.c lu_jit_generic). helpers.c calls it only while u's
    ledger counts (settled). */

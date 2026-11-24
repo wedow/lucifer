@@ -353,7 +353,6 @@ int lu_ev_value_classes(struct ctx *c, lu_v r, int kind, struct lu_prof *p, PyOb
 struct lu_prof *lu_ev_prof(struct ctx *c, int which);
 void lu_ev_profile(struct ctx *c, struct lu_prof *p, lu_v r);
 void lu_ev_price_places(struct ctx *c, lu_v from);
-void lu_ev_price_rest(struct ctx *c, lu_v from);
 
 /* The innermost frame's state at pc as a frame state, with the path's
    binds; and the state before the current instruction as an exit takes

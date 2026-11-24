@@ -134,24 +134,6 @@ lu_ev_price_places(struct ctx *c, lu_v from)
     }
 }
 
-/* The reports an inlined frame c's build from `from` on made of places in
-   its own code: the IR built after each in the frame is what one class
-   learned there could fold away, the generic expansion of a place that had
-   met nothing (jit.c lu_jit_prof_rest). The rest of a root frame is most of
-   its unit, which learning does not fold: none. */
-void
-lu_ev_price_rest(struct ctx *c, lu_v from)
-{
-    lu_v end = c->g->f->nins;
-    for (lu_v v = c->parent != NULL ? from : end; v < end; v++) {
-        const struct lu_ins *in = I(c, v);
-        if (in->op == OP_GUARD_BIT && in->prof != NULL && in->src == c->code && I(c, in->a)->op == OP_HELPER
-            && I(c, in->a)->imm == H_profile) {
-            lu_jit_prof_rest(in->prof, (int)(end - v));
-        }
-    }
-}
-
 void
 lu_ev_profile(struct ctx *c, struct lu_prof *p, lu_v r)
 {

@@ -143,8 +143,6 @@ struct lu_prof {
     unsigned long unshared;     /* the LU_PROF_KINDS flags some type it met lacks */
     uint64_t pass;              /* what a pass of its instruction loses in a unit built without what it learned
                                    (lu_jit_prof_built) */
-    int rest;                   /* the IR its last build emitted after its report in its frame, when it had met
-                                   nothing: what learning here can fold (lu_jit_prof_rest) */
 };
 
 static struct {
@@ -588,31 +586,18 @@ learning(struct lu_jit_code *jc)
 static int
 stale_pass(struct lu_unit *u, uint64_t cost)
 {
-    uint64_t relearn = __atomic_load_n(&u->relearn, __ATOMIC_RELAXED);
-    int still = quiet(u, cost, relearn) == 0;
-    return __atomic_add_fetch(&u->unlearned, cost, __ATOMIC_RELAXED) < relearn || still;
+    int still = quiet(u, cost, u->enough) == 0;
+    return __atomic_add_fetch(&u->unlearned, cost, __ATOMIC_RELAXED) < u->enough || still;
 }
 
-/* The learned rebuild is predicted at u's build less what p's generic
-   expansion emitted, the least over the places that pass: a place that
-   had met nothing at the build left every way after it in line, and what
-   it learned since folds those. */
+/* A pass of unit u through place p, built without what p learned since:
+   the learned rebuild is predicted at u's own build (enough), never less:
+   measured rebuilds are 0.95-1.9 times the unit they replace. */
 int
 lu_jit_stale_pass(struct lu_prof *p, struct lu_unit *u)
 {
-    int rest = __atomic_load_n(&p->rest, __ATOMIC_RELAXED);
-    uint64_t cost = (uint64_t)build_cost(u->nins - (rest < u->nins ? rest : u->nins));
-    uint64_t was = __atomic_load_n(&u->relearn, __ATOMIC_RELAXED);
-    while (cost < was && !__atomic_compare_exchange_n(&u->relearn, &was, cost, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
-    }
     uint64_t pass = __atomic_load_n(&p->pass, __ATOMIC_RELAXED);
     return stale_pass(u, pass != 0 ? pass : CALL_COST);
-}
-
-void
-lu_jit_prof_rest(struct lu_prof *p, int rest)
-{
-    __atomic_store_n(&p->rest, __atomic_load_n(&p->n, __ATOMIC_RELAXED) == 0 ? rest : 0, __ATOMIC_RELAXED);
 }
 
 void
@@ -709,7 +694,7 @@ relearn(struct lu_jit_code *jc, struct lu_deopt *d)
     const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
     kill(jc, d->unit, "learned-since-build", in->code, in->pc,
          (double)__atomic_load_n(&d->unit->unlearned, __ATOMIC_RELAXED),
-         (double)__atomic_load_n(&d->unit->relearn, __ATOMIC_RELAXED));
+         (double)d->unit->enough);
     __atomic_store_n(&jc->wait[d->unit->entry_pc], 0, __ATOMIC_RELAXED);
 }
 
@@ -1183,7 +1168,6 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     if (ok) {
         keep_outs(u, &f);
         u->enough = (uint64_t)build_cost(f.nins);
-        u->relearn = u->enough;
         u->nins = f.nins;
         __atomic_store_n(&jc->built_ins, f.nins, __ATOMIC_RELAXED);
     }

@@ -315,6 +315,10 @@ machine instructions per IR instruction (runtime/jit/jit.c):
   classtests tests/kernel/jit_isinstance_growth.py (the growth lane's
          program), whose places meet the classes of a rotation one after
          another, behind guards that hide them from the places after.
+  learnprice tests/kernel/jit_learned_price.py, a large inlined callee
+         whose early places meet their first objects late; a learned
+         rebuild must also be predicted at least at the build of the unit
+         it replaces.
 The perf lane records Richards under -X perf with `perf record -g` and
 requires that at least 95% of the samples in compiled code (code perf finds
 in no file: it looks it up in /tmp/perf-PID.map) resolve to py:: symbols.
@@ -433,7 +437,8 @@ GROWTH = {
 }
 GROWTH_N = 20000
 # lane: (program, flags), checked from its event log (check_ledger).
-LEDGER = {'churn': ('jit_rebuild_churn.py', ('-X', 'lucifer_jit=on')), 'classtests': ('jit_isinstance_growth.py', ())}
+LEDGER = {'churn': ('jit_rebuild_churn.py', ('-X', 'lucifer_jit=on')), 'classtests': ('jit_isinstance_growth.py', ()),
+          'learnprice': ('jit_learned_price.py', ())}
 # The new builds' IR against what the losses paid would build: a rebuild is predicted at the size of its root's
 # last build, and the build it buys may take in more (what the root learned, a call in line).
 LEDGER_SLACK = 2
@@ -531,22 +536,32 @@ def check_ledger(args, lane):
     problems = []
     if (p.returncode, TIMING.sub('Nus', p.stdout)) != run([args.oracle, str(program), str(n)], args.timeout)[:2]:
         problems.append('output differs')
-    build_ins = int(re.search(r'^#define BUILD_INS (\d+)', (ROOT / 'runtime' / 'jit' / 'jit.c').read_text(), re.M)[1])
+    source = (ROOT / 'runtime' / 'jit' / 'jit.c').read_text()
+    build_ins = int(re.search(r'^#define BUILD_INS (\d+)', source, re.M)[1])
+    build_ins2 = int(re.search(r'^#define BUILD_INS2 (\d+)', source, re.M)[1])
     first = later = paid = 0
+    size = {}           # each unit's last build, in IR instructions
     bought = set()      # a purchase prints the same paid on every unit of its root it kills: count it once
     for line in p.stderr.splitlines():
-        b = re.match(r'jit-ev \S+ build \S+ \S+ ins (\d+) .*: (\S+)', line)
-        k = re.match(r'jit-ev \S+ kill (\S+?)@\d+ .* paid (\d+) cost (\d+): (.*)', line)
-        if b and b[2] == 'first':
-            first += int(b[1])
-        elif b and not b[2].startswith('dep-'):
-            later += int(b[1])      # a dependency that changed (dep-keys, dep-value) rebuilds whatever was paid
+        b = re.match(r'jit-ev \S+ build (\S+) \S+ ins (\d+) .*: (\S+)', line)
+        k = re.match(r'jit-ev \S+ kill ((\S+?)@\d+) .* paid (\d+) cost (\d+): (.*)', line)
+        if b:
+            size[b[1]] = int(b[2])
+            if b[3] == 'first':
+                first += int(b[2])
+            elif not b[3].startswith('dep-'):
+                later += int(b[2])  # a dependency that changed (dep-keys, dep-value) rebuilds whatever was paid
         elif k:
-            if k.groups() not in bought:
-                bought.add(k.groups())
-                paid += int(k[2])
-            if int(k[3]) > int(k[2]):
-                problems.append(f'{k[1]} rebuilt for {k[4]}: paid {k[2]}, predicted {k[3]}')
+            unit, root, given, cost, why = k.groups()
+            if (root, given, cost, why) not in bought:
+                bought.add((root, given, cost, why))
+                paid += int(given)
+            if int(cost) > int(given):
+                problems.append(f'{root} rebuilt for {why}: paid {given}, predicted {cost}')
+            own = size.get(unit, 0)
+            if why.startswith('learned-') and int(cost) < own * (build_ins + build_ins2 * own):
+                # a learned rebuild is at least the unit it replaces: learning folds a place's own paths
+                problems.append(f'{unit} rebuilt for {why}: predicted {cost}, below its own build of {own} IR')
     bound = first + LEDGER_SLACK * paid / build_ins
     if first == 0:
         problems.append('no builds')

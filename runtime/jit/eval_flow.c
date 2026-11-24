@@ -2095,7 +2095,6 @@ lu_ev_build(struct ctx *c, int pc)
     }
     scanned = c->nbb;
     add_edge(c, pc);
-    lu_v start = g->f->nins;
     for (;;) {
         /* The lowest block control reaches that is not built: blocks are
            in order of their pc but for the entry's, which is built first,
@@ -2113,7 +2112,6 @@ lu_ev_build(struct ctx *c, int pc)
         }
         if (c->lo == c->nbb) {
             if (c->loops == NULL) {
-                lu_ev_price_rest(c, start);
                 return 0;
             }
             /* The way in is built: now the loops it reached. */
