@@ -541,7 +541,7 @@ attr_ways(struct ctx *c, struct lu_pic *pic, int n, int i, attr_as *as, int gene
         }
         lu_v args[2] = { lu_ev_const_i(c, (int64_t)(intptr_t)pic), lu_ev_const_i(c, n) };
         I(c, lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_pic_same, 2, args, 0), 1))->prof
-            = lu_jit_prof(c->g->f->code, key);
+            = lu_jit_prof(c->g->f->code, key, c->code, c->pc);
         return as(c, generic, 0, 0, NULL, pic);
     }
     struct lu_pic_entry e = pic->e[i];

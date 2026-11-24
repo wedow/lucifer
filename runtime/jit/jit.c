@@ -54,6 +54,7 @@
 #include "interp/exceptions.h"
 #include "interp/gen.h"
 
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -123,6 +124,9 @@ struct lu_jit_code {
                                            nothing new while it had learned more than the unit knew */
     int built_ins;                      /* instructions its last build made: about what the next costs */
     PyMutex prof_lock;                  /* theirs, and hot's */
+    PyCodeObject *code;                 /* LUCIFER_JIT_DEBUG: whose (a name only) */
+    char *cause;                        /* LUCIFER_JIT_DEBUG: why its last unit died, for its next build */
+    uint64_t print;                     /* LUCIFER_JIT_DEBUG: its last build's fingerprint */
     uint64_t *hot;                      /* a root's: call sites its units called out of line at often */
     int nhot;
 };
@@ -138,6 +142,8 @@ struct lu_prof {
     struct lu_prof *next;
     uint64_t key;
     struct lu_jit_code *jc;     /* the root's */
+    PyCodeObject *code;         /* LUCIFER_JIT_DEBUG: the site it was made for (a key only) */
+    int pc;
     PyObject *met[LU_OPCLASS_WAYS];     /* the types the value had, in the order met (references); of a value
                                            profile, the values themselves */
     int n;                      /* how many: release-stored after the type */
@@ -163,6 +169,9 @@ static struct {
     const char *failure_names[8];
     unsigned long c_paths[C_PATHS];
 } stats;
+
+static void event(const char *fmt, ...);
+static const char *qualname(PyCodeObject *code);
 
 /* Sites marked generic (nospec, noinline) so far: a unit built after a
    mark knows it. */
@@ -335,6 +344,7 @@ state_for(PyCodeObject *code)
     }
     jc = calloc(1, sizeof(struct lu_jit_code));
     jc->ncode = (int)Py_SIZE(code);
+    jc->code = code;
     jc->nospec = calloc((size_t)jc->ncode + 1, 1);
     jc->fails = calloc((size_t)jc->ncode + 1, sizeof(uint32_t));
     jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint32_t));
@@ -404,7 +414,7 @@ PyObject lu_jit_unbound = { .ob_flags = _Py_STATICALLY_ALLOCATED_FLAG, .ob_ref_l
                              .ob_type = &PyBaseObject_Type };
 
 struct lu_prof *
-lu_jit_prof(PyCodeObject *root, uint64_t key)
+lu_jit_prof(PyCodeObject *root, uint64_t key, PyCodeObject *code, int pc)
 {
     struct lu_jit_code *jc = state_for(root);
     PyMutex_Lock(&jc->prof_lock);
@@ -415,6 +425,8 @@ lu_jit_prof(PyCodeObject *root, uint64_t key)
     if (p == NULL && (p = calloc(1, sizeof(struct lu_prof))) != NULL) {
         p->key = key;
         p->jc = jc;
+        p->code = code;
+        p->pc = pc;
         p->next = jc->profs;
         jc->profs = p;
     }
@@ -523,10 +535,14 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned)
         jc->learned++;
     }
     PyMutex_Unlock(&jc->prof_lock);
+    if (!known && _PyRuntime.jit.events) {
+        event("learn %s %s at %s@%d: %s%s", qualname(jc->code), jc->print ? "built" : "unbuilt", qualname(p->code), p->pc,
+              kind ? Py_TYPE(o)->tp_name : ((PyTypeObject *)t)->tp_name, p->poly ? " (poly)" : "");
+    }
     return 1;
 }
 
-static void kill(struct lu_jit_code *jc, struct lu_unit *u);
+static void kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *at, int pc);
 
 /* Whether n exits of a guard in a unit of root's justify building it again
    without the guard (GUARD_FAILS). */
@@ -551,7 +567,8 @@ prof_exit(struct lu_deopt *d)
         if (_PyRuntime.jit.debug) {
             fprintf(stderr, "jit: recompile %s: learned since its build\n", PyUnicode_AsUTF8(d->unit->code->co_qualname));
         }
-        kill(jc, d->unit);
+        const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
+        kill(jc, d->unit, "learned-since-build", in->code, in->pc);
         __atomic_store_n(&jc->wait[d->unit->entry_pc], 0, __ATOMIC_RELAXED);
         return;
     }
@@ -574,8 +591,9 @@ prof_exit(struct lu_deopt *d)
     if (now && _PyRuntime.jit.debug) {
         fprintf(stderr, "jit: recompile %s: learned %s fails\n", PyUnicode_AsUTF8(d->unit->code->co_qualname), what);
     }
+    const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
     for (struct lu_unit *u = now ? __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE) : NULL; u != NULL; u = u->next) {
-        kill(jc, u);
+        kill(jc, u, what[0] == 't' ? "learned-type-fails" : "learned-kind-fails", in->code, in->pc);
     }
 }
 
@@ -623,6 +641,75 @@ now(void)
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (double)t.tv_sec + (double)t.tv_nsec * 1e-9;
+}
+
+/* LUCIFER_JIT_DEBUG: a unit built or killed, at the wall-clock time (to
+   line up with a harness's own timestamps). */
+static void
+event(const char *fmt, ...)
+{
+    struct timespec t, mono;
+    clock_gettime(CLOCK_REALTIME, &t);
+    static int clocks;
+    if (!clocks) {
+        /* Both clocks once, for profilers that stamp samples with the monotonic one. */
+        clock_gettime(CLOCK_MONOTONIC, &mono);
+        fprintf(stderr, "jit-ev-clocks %ld.%06ld %ld.%06ld\n", (long)t.tv_sec, t.tv_nsec / 1000, (long)mono.tv_sec,
+                mono.tv_nsec / 1000);
+        clocks = 1;
+    }
+    char line[768];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "jit-ev %ld.%06ld %s\n", (long)t.tv_sec, t.tv_nsec / 1000, line);
+}
+
+static const char *
+qualname(PyCodeObject *code)
+{
+    return code != NULL ? PyUnicode_AsUTF8(code->co_qualname) : "-";
+}
+
+/* LUCIFER_JIT_DEBUG: counts by what happened where, printed at exit (exits
+   by site, entries the interpreter kept). */
+struct tally {
+    struct tally *next;
+    const char *kind;
+    const void *k[3];
+    int kpc[3];
+    char *what;
+    unsigned long n;
+};
+static struct {
+    PyMutex lock;
+    struct tally *head[1024];
+} tallies;
+
+static void
+tally(const char *kind, const void *root, int rpc, PyCodeObject *code, int pc, const void *extra, int epc)
+{
+    uint64_t h = ((uint64_t)(uintptr_t)root * 31 + (uint64_t)rpc) * 0x9e3779b97f4a7c15u;
+    h = (h ^ ((uint64_t)(uintptr_t)code + (uint64_t)pc * 7 + (uint64_t)(uintptr_t)kind)) * 0xff51afd7ed558ccdu;
+    h = (h ^ ((uint64_t)(uintptr_t)extra + (uint64_t)epc)) * 0x9e3779b97f4a7c15u;
+    struct tally **head = &tallies.head[h >> 54];
+    PyMutex_Lock(&tallies.lock);
+    struct tally *t = *head;
+    while (t != NULL && (t->k[0] != root || t->kpc[0] != rpc || t->k[1] != code || t->kpc[1] != pc
+                         || t->k[2] != extra || t->kpc[2] != epc || t->kind != kind)) {
+        t = t->next;
+    }
+    if (t == NULL) {
+        char what[768];
+        snprintf(what, sizeof what, "%s %s@%d %s@%d %d", kind, root != NULL ? qualname((PyCodeObject *)root) : "-",
+                 rpc, qualname(code), pc, epc);
+        t = calloc(1, sizeof *t);
+        *t = (struct tally){ *head, kind, { root, code, extra }, { rpc, pc, epc }, strdup(what), 0 };
+        *head = t;
+    }
+    t->n++;
+    PyMutex_Unlock(&tallies.lock);
 }
 
 static void
@@ -916,6 +1003,9 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
         f.budget = budget;
         if (cold) {
             stats.phase_seconds[4] += now() - t0;
+            if (_PyRuntime.jit.events) {
+                event("putoff %s@%d ms %.3f", qualname(frame->code), pc, (now() - t0) * 1e3);
+            }
             /* Most of it never ran: the interpreter runs the entry a few times
                to gather feedback, and the compile after that stands. */
             jc->seen[pc] |= WARMED;
@@ -961,6 +1051,23 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
         }
     }
     count(&stats.inlined, (unsigned long)f.ninlined);
+    if (_PyRuntime.jit.events) {
+        /* What tells an identical rebuild: the IR as built, before the optimizer. */
+        uint64_t print = (uint64_t)f.nins;
+        for (int i = 0; ok && i < f.nins; i++) {
+            const struct lu_ins *in = &f.ins[i];
+            uint64_t w[5] = { (uint64_t)in->op | (uint64_t)in->rep << 8 | (uint64_t)in->flags << 16,
+                              (uint64_t)in->a | (uint64_t)in->b << 32, (uint64_t)in->c, (uint64_t)in->imm,
+                              (uint64_t)in->imm2 };
+            for (int k = 0; k < 5; k++) {
+                print = (print ^ w[k]) * 0x100000001b3u;
+            }
+        }
+        event("build %s@%d %s ins %d bytes %zu ms %.3f grown %d level %d%s: %s", qualname(frame->code), pc,
+              ok ? "ok" : "failed", f.nins, u->code_bytes, dt * 1e3, jc->grown, jc->level,
+              ok && print == jc->print ? " same" : "", jc->cause != NULL ? jc->cause : "first");
+        jc->print = ok ? print : jc->print;
+    }
     if (!ok) {
         note_failure(f.fail != NULL ? f.fail : "compile failed");
         if (_PyRuntime.jit.debug) {
@@ -974,6 +1081,9 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     if (lu_jit_deps_publish(u, f.deps, f.ndeps, ticket) < 0) {
         /* A fact it relies on changed while it compiled: the next entry compiles again. */
         note_failure("a dependency changed during the compile");
+        if (_PyRuntime.jit.events) {
+            event("overtaken %s@%d", qualname(frame->code), pc);
+        }
         __atomic_store_n(&jc->wait[pc], 1, __ATOMIC_RELAXED);
         lu_ir_free(&f);
         free_unit(u);
@@ -1032,10 +1142,18 @@ wait_at(struct lu_jit_code *jc, int pc)
    what the last good unit served, and one that served past what its count
    holds starts the code over. */
 static void
-kill(struct lu_jit_code *jc, struct lu_unit *u)
+kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *at, int pc)
 {
     if (__atomic_exchange_n(&u->dead, 1, __ATOMIC_SEQ_CST)) {
         return;
+    }
+    if (_PyRuntime.jit.events) {
+        char cause[512];
+        snprintf(cause, sizeof cause, "%s %s@%d", why, qualname(at), pc);
+        event("kill %s@%d entries %lu leaves %lu level %d: %s", qualname(u->code), u->entry_pc, u->entries,
+              u->leaves, jc->level, cause);
+        free(jc->cause);
+        jc->cause = strdup(cause);
     }
     void *entry = u->direct;
     if (entry != NULL) {
@@ -1061,7 +1179,7 @@ kill(struct lu_jit_code *jc, struct lu_unit *u)
    directly. stale: a dict changed, so it may hold a value the dict lets
    go, and the next release frees it (lu_jit_release). */
 void
-lu_jit_unit_kill(struct lu_unit *u, int stale)
+lu_jit_unit_kill(struct lu_unit *u, int stale, const char *why, PyCodeObject *at, int pc)
 {
     if (stale && !__atomic_exchange_n(&u->stale, 1, __ATOMIC_RELAXED)) {
         __atomic_store_n(&release_due, 1, __ATOMIC_RELEASE);
@@ -1069,7 +1187,7 @@ lu_jit_unit_kill(struct lu_unit *u, int stale)
     if (!__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
         count(&stats.invalidated, 1);
     }
-    kill(state_of(u->code), u);
+    kill(state_of(u->code), u, why, at, pc);
 }
 
 /* A unit that stayed hot with calls left out of line for want of budget
@@ -1085,7 +1203,7 @@ grow(struct lu_jit_code *jc, struct lu_unit *u)
         fprintf(stderr, "jit: recompile %s: grown %d\n", PyUnicode_AsUTF8(u->code->co_qualname), jc->grown + 1);
     }
     __atomic_store_n(&jc->grown, jc->grown + 1, __ATOMIC_RELAXED);
-    kill(jc, u);
+    kill(jc, u, "grown", NULL, jc->grown);
     return 1;
 }
 
@@ -1115,7 +1233,7 @@ retire(struct lu_jit_code *jc, struct lu_unit *u)
     }
     count(&stats.retired, 1);
     escalate(jc);
-    kill(jc, u);
+    kill(jc, u, "retired", NULL, jc->level);
 }
 
 /* An exit no recompile can remove: a unit without loops that leaves on
@@ -1193,6 +1311,9 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
 {
     PyCodeObject *code = frame->code;
     if (!ts->interp->kernel_booted || !(code->co_flags & CO_OPTIMIZED)) {
+        if (_PyRuntime.jit.events) {
+            tally(ts->interp->kernel_booted ? "refused-unoptimized" : "refused-boot", code, pc, NULL, 0, NULL, 0);
+        }
         return NULL;
     }
     struct lu_jit_code *jc = state_for(code);
@@ -1295,6 +1416,9 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
             if (wait != 0) {
                 __atomic_store_n(&jc->wait[pc], wait - 1, __ATOMIC_RELAXED);
                 count(&stats.waited, 1);
+                if (_PyRuntime.jit.events) {
+                    tally(jc->print != 0 ? "waited-after-unit" : "waited-cold", code, pc, NULL, 0, NULL, 0);
+                }
             }
             return LU_JIT_NONE;
         }
@@ -1652,7 +1776,8 @@ hot_exit(struct lu_deopt *d)
         fprintf(stderr, "jit: %s@%d: hot site %s@%d, %d hot now\n", PyUnicode_AsUTF8(u->code->co_qualname),
                 u->entry_pc, PyUnicode_AsUTF8(in->code->co_qualname), in->pc, jc->nhot);
     }
-    kill(jc, u);
+    const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
+    kill(jc, u, "hot-site", in->code, in->pc);
     __atomic_store_n(&jc->wait[u->entry_pc], 0, __ATOMIC_RELAXED);    /* not for its faults: built again at once */
 }
 
@@ -1668,6 +1793,12 @@ lu_jit_note_exit(struct lu_deopt *d)
         return;
     }
     count(&stats.taken[d->opcode & 0xff], 1);
+    if (_PyRuntime.jit.events) {
+        static const char kinds[EXIT_REASONS][12] = { "exit-guard", "exit-stress", "exit-poll", "exit-side",
+                                                      "exit-error", "exit-frame", "exit-yield", "exit-hot" };
+        const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
+        tally(kinds[d->reason], d->unit->code, d->unit->entry_pc, in->code, in->pc, NULL, d->opcode);
+    }
     if (_PyRuntime.jit.debug) {
         const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
         const struct lu_deopt_frame *root = lu_deopt_frame(d, 0);
@@ -1766,8 +1897,12 @@ lu_jit_note_exit(struct lu_deopt *d)
             return;
         }
         say_recompile(code, d->reason != EXIT_GUARD ? "inlined copy leaves" : "guard fails", site, site_pc);
+        static const char *const whys[2][5] = {
+            { "mark-catch", "mark-raises", "mark-noinline", "mark-noborrow", "mark-nospec" },
+            { "old-unit-catch", "old-unit-raises", "old-unit-noinline", "old-unit-noborrow", "old-unit-nospec" } };
+        const char *why = whys[again != 0][caught >= 0 ? 0 : out ? 1 : d->reason != EXIT_GUARD ? 2 : d->borrow ? 3 : 4];
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
-            kill(root, u);
+            kill(root, u, why, site, site_pc);
         }
     }
 }
@@ -2252,6 +2387,7 @@ lu_jit_code_free(PyCodeObject *code)
     free(jc->fails);
     free(jc->wait);
     free(jc->seen);
+    free(jc->cause);
     free(jc);
     code->co_executors = NULL;
 }
@@ -2259,6 +2395,11 @@ lu_jit_code_free(PyCodeObject *code)
 void
 lu_jit_report(void)
 {
+    for (int i = 0; _PyRuntime.jit.events && i < 1024; i++) {
+        for (struct tally *t = tallies.head[i]; t != NULL; t = t->next) {
+            fprintf(stderr, "jit-tally %lu %s\n", t->n, t->what);
+        }
+    }
     if (!_PyRuntime.jit.stats) {
         return;
     }

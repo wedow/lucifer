@@ -109,7 +109,7 @@ lu_ev_prof(struct ctx *c, int which)
     for (struct ctx *k = c; k != NULL; k = k->parent) {
         key = lu_jit_ctx_mix(key, k->code, k->pc);
     }
-    return lu_jit_prof(c->g->f->code, key);
+    return lu_jit_prof(c->g->f->code, key, c->code, c->pc);
 }
 
 void

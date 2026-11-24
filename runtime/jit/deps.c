@@ -206,7 +206,21 @@ lu_jit_invalidate(int kind, uintptr_t obj, uint32_t sub)
         if (kind != LU_DEP_CALLEES && kind != LU_DEP_SERIAL) {
             lu_jit_nohoist_set(d->want.code, d->want.pc);       /* a new callee is no failed guard */
         }
-        lu_jit_unit_kill(u, kind == LU_DEP_KEYS || kind == LU_DEP_VALUE);
+        /* LUCIFER_JIT_DEBUG names the fact and the code that changed it. */
+        static const char *const whys[] = { [LU_DEP_TYPE] = "dep-type", [LU_DEP_KEYS] = "dep-keys",
+                                            [LU_DEP_VALUE] = "dep-value", [LU_DEP_FUNC] = "dep-func",
+                                            [LU_DEP_CALLEES] = "dep-callees", [LU_DEP_SERIAL] = "dep-serial" };
+        if (_PyRuntime.jit.events) {
+            PyThreadState *ts = PyThreadState_GetUnchecked();
+            struct lu_frame *w = ts != NULL ? (struct lu_frame *)ts->current_frame : NULL;
+            while (w != NULL && w->code == NULL) {
+                w = w->previous;
+            }
+            fprintf(stderr, "jit-ev-writer %s %s@%d by %s@%d\n", whys[kind], PyUnicode_AsUTF8(d->want.code->co_qualname),
+                    d->want.pc, w != NULL ? PyUnicode_AsUTF8(w->code->co_qualname) : "C",
+                    w != NULL ? (int)(w->instr - lu_code_start(w->code)) : -1);
+        }
+        lu_jit_unit_kill(u, kind == LU_DEP_KEYS || kind == LU_DEP_VALUE, whys[kind], d->want.code, d->want.pc);
         killed = 1;
     }
     PyMutex_Unlock(&b->lock);

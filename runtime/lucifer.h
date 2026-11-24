@@ -593,9 +593,11 @@ struct lu_jit_options {
     int mode;                   /* enum lu_jit_mode */
     int stats;                  /* print the tier's counts at exit */
     /* Debugging aids, from the environment: LUCIFER_JIT_DEBUG logs entries
-       and exits, LUCIFER_JIT_DUMP prints each unit's IR, LUCIFER_JIT_ONLY
-       compiles only the qualnames it lists, comma-separated. */
-    int debug, dump;
+       and exits (debug) and each unit's build and death with its cause
+       (events); LUCIFER_JIT_DEBUG=units logs only the latter, cheap enough
+       for a whole program. LUCIFER_JIT_DUMP prints each unit's IR,
+       LUCIFER_JIT_ONLY compiles only the qualnames it lists, comma-separated. */
+    int debug, events, dump;
     const char *only;
 };
 

@@ -274,7 +274,7 @@ uint64_t lu_jit_deps_begin(void);
 void lu_jit_deps_end(void);
 int lu_jit_deps_publish(struct lu_unit *u, const struct lu_fdep *want, int n, uint64_t ticket);
 void lu_jit_deps_free(struct lu_unit *u);
-void lu_jit_unit_kill(struct lu_unit *u, int stale);
+void lu_jit_unit_kill(struct lu_unit *u, int stale, const char *why, PyCodeObject *at, int pc);
 void lu_jit_nohoist_set(PyCodeObject *code, int pc);
 int lu_jit_nohoist(PyCodeObject *code, int pc);
 int lu_jit_nospec(PyCodeObject *code, int pc);
@@ -503,7 +503,7 @@ extern PyObject lu_jit_exc_prev;     /* eval_exc.c */
 
 struct lu_prof;
 /* The root's record for the context `key`, made if new; NULL without memory. */
-struct lu_prof *lu_jit_prof(PyCodeObject *root, uint64_t key);
+struct lu_prof *lu_jit_prof(PyCodeObject *root, uint64_t key, PyCodeObject *code, int pc);
 /* The type it met first (a new reference) or NULL, and whether that is not
    the one type to rely on: it met another, or a guard on it kept failing. */
 PyTypeObject *lu_jit_prof_type(struct lu_prof *p, int *poly);

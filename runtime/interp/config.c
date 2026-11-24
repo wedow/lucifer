@@ -1160,7 +1160,9 @@ lu_runtime_options(const PyConfig *config)
     if (!PyStatus_Exception(status)) {
         _PyRuntime.stress = stress;
         _PyRuntime.handoff = handoff;
-        jit.debug = getenv("LUCIFER_JIT_DEBUG") != NULL;
+        const char *debug = getenv("LUCIFER_JIT_DEBUG");
+        jit.events = debug != NULL;
+        jit.debug = debug != NULL && strcmp(debug, "units") != 0;
         jit.dump = getenv("LUCIFER_JIT_DUMP") != NULL;
         jit.only = getenv("LUCIFER_JIT_ONLY");
         _PyRuntime.jit = jit;
