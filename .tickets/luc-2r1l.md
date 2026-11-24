@@ -17,18 +17,22 @@ With the JIT off the interpreter costs 105-114 machine instructions per bytecode
 ## State
 
 Branch luc-interp, rebased on master after stage 2. Stages 0-2 landed. Stage A (calls and returns, replacing the
-unlanded stage 3 commit) committed for review. Successor order, from the coordinator's brief:
+unlanded stage 3 commit) and its fix reviewed; stage B committed for review. Successor order, from the coordinator's brief:
 
-1. B, the costs every opcode pays: the count-down step of Py_DECREF/Py_XDECREF and Py_NewRef are out-of-line calls in
-   eval_frame (gcc inlines neither into the function); make the owner-thread step inline there, the merge and shared
-   paths calls. Dispatch is 10 instructions against CPython's 6 plus its instr_ptr store and next_instr step: the
-   targets table and localsplus are reloaded from the stack, opcode and oparg are sign-extended at each use, and
-   prev_instr is spilled. GETLOCAL can index frame->localsplus (the local goes); opcode/oparg as word-sized values.
-2. C, the kernel wrappers' forwarding: call_special(descr, obj, *args, **kwargs) (lib/kernel/_boot.py) is called
-   1.87M times in pyflakes and its descr(obj, *args, **kwargs) builds a list, a tuple and a dict for
-   CALL_FUNCTION_EX, which then calls a wrapper_descriptor (1.85M) through lu_wrapper_descr_call (8.6% of the run,
-   inclusive). Find its hot callers (getattr_hook's __getattribute__, operators) and pick the interpreter or the
-   kernel-source fix.
+1. B done (count steps inline, locals through the frame, word-sized opcode/oparg). Dispatch is still 10 instructions
+   against CPython's 8 (6 plus its instr_ptr store and next_instr step): opcode is live across calls in many handlers
+   (SKIP_CACHES, the specialized forms' guards), so gcc stores it to the stack at every dispatch, and keeps one
+   register zeroed there; prev_instr/cur_instr are two register moves.
+2. C, call_special's forwarding. Census (pyflakes, JIT off, after A): call_special is called 1.87M times, from
+   getattr_hook 0.80M and setattr_hook 0.65M with ast.AST's own __getattribute__/__setattr__ slot wrappers (C
+   tp_getattro/tp_setattro = the generic ones; CPython's ast.AST has those wrappers too), contains 0.16M,
+   getitem 0.12M, get_iter, setitem, next (kernel wrappers of dict, str, tuple...). Each builds a list, a tuple and a
+   dict for descr(obj, *args, **kwargs) and the non-kernel wrapper then goes through lu_wrapper_descr_call ->
+   call_wrapper (another tuple) -> the C slot: about 8.6% of the run. The largest general lever is not the forwarding
+   but the route: an object whose type's tp_getattro/tp_setattro is foreign C (not the kernel's slot functions)
+   should have it called directly, as CPython's PyObject_GetAttr does, instead of the kernel hook reaching it through
+   call_special and the slot wrapper; then call_special keeps the rare cases, and its *args/**kwargs build (BUILD_LIST,
+   LIST_EXTEND, CALL_INTRINSIC_1, BUILD_MAP, DICT_MERGE, CALL_FUNCTION_EX: 2M each) can be weighed again.
 3. D, LOAD_GLOBAL_MODULE/BUILTIN (44.5M executions in pyflakes, 59 instructions each, 9.8% of the run after A).
 4. E, the remaining forms by the census (POP_JUMP_IF_*, RESUME, IS_OP, attribute forms).
 
@@ -220,4 +224,45 @@ What call_tail still does is mostly lu_wrapper_descr_call (8.6% of the run) and 
 | pyflakes, JIT on | 16.18G | 15.22G |
 | Richards (harness 5x20) | 12.314G | 12.291G |
 | DeltaBlue (harness 5x2000) | 5.916G | 5.703G |
+
+### 2026-11-24 stage A review fix: a frame reads its function's code once
+
+CALL's exact form read func_code three times (its checks; room, depth charge and reference; the frame's code) and
+lu_frame_push twice: another thread assigning __code__ in between could store arguments for one code into a frame
+sized for another. The code is now read once, its reference taken with a try (lu_try_incref_compare; functions
+mark their code shared at creation and assignment so that other threads' tries succeed while it lives), and passed
+down. A monitored bool(x) also skipped its C_RETURN event (master's call_tail shortcut lacked the !mon guard).
+Tests tests/kernel/call_fast_forms.py (type with a __class__ property, bool's errors, a builtin's own Stack overflow,
+a signal raised by a C call in a hot loop, sys.monitoring CALL/C_RETURN/C_RAISE from mid-loop) and
+tests/kernel/threads_call_code_race.py (__code__ flipped between a 2- and a 0-parameter code, unsynchronised).
+Trying lu_native_call first for kernel callees of the exact form: pyflakes JIT off 28.02G to 28.15G, imports
+1.358G to 1.353G; not taken. eval_frame's stack frame is unchanged (0x338 bytes before and after).
+
+### 2026-11-24 stage B: the costs every opcode pays
+
+Py_DECREF/Py_XDECREF and Py_NewRef were out-of-line calls in eval_frame (gcc inlines neither into it); ceval.c now
+defines them always inline, the owner-thread step and the immortal test in the loop, _Py_MergeZeroLocalRefcount and
+_Py_DecRefShared as calls. GETLOCAL indexed a localsplus local kept on the stack (one reload per access); it indexes
+frame->localsplus now. opcode and oparg were ints, sign-extended at each use as an index; they are intptr_t.
+Dispatch went from 11 to 10 instructions; CPython 3.14t's computed-goto build (the oracle's eval loop disassembled)
+takes 6 per dispatch (one 16-bit load, two byte extracts, oparg moved to its register, the table's address reloaded
+from the stack, the indirect jump) plus 2 in each instruction (frame->instr_ptr store, next_instr step).
+What is left is above in State.
+
+| row | stage A | stage B |
+|---|---|---|
+| fib, instr/bc, JIT off | 77.0 | 75.1 |
+| arith loop | 97.5 | 96.4 |
+| attribute loop | 95.7 | 93.5 |
+| -c pass, JIT off | 135.34M | 130.53M |
+| stdlib imports, JIT off | 1.353G | 1.302G |
+| pyflakes, JIT off | 28.07G | 26.68G |
+| -c pass, JIT on | 156.48M | 151.35M |
+| stdlib imports, JIT on | 1.466G | 1.432G |
+| pyflakes, JIT on | 15.31G | 15.22G |
+| Richards | 12.291G | 12.285G |
+| DeltaBlue | 5.716G | 5.699G |
+
+Gate: 29 programs (calls, frames, closures, classes, dicts, ints, errors, generators, recursion, JIT calls,
+monitoring) in jit-off, plain, jit and jit-deopt, six thread programs in handoff, jitcheck: all pass.
 
