@@ -234,10 +234,43 @@ Method: the same two binaries as the table (master ca02da54, branch on ca02da54)
 - Growth: the ledger buys json's growth 15 to 60 times later than master's fixed trigger (ski rental, by design); it costs early windows, not the final build. No change proposed.
 - Both arms: the large loop units of deltablue are rebuilt every 30-300 calls to the end for places in inlined kernel frames that learn late; a separate follow-up.
 
+**2026-11-24 rules A and B (built, gated; not landable yet: windows)**
+
+- A (86707fc3): an exit at a site marked since its unit's build kills the unit at once, whatever its stale ledger holds; the stale diversion applies only to unmarked sites. An old unit's death buys nothing (the mark was bought), so its kill carries no ledger figures.
+- B (73fa7e63): a diverted exit pays its site's mark ledger as well as the unit's stale ledger; the mark is still decided only by an exit of a unit that is not stale.
+- The invariant: a unit that keeps losing at a site gets at most ways plus one learned rebuilds, then the mark, then pays nothing there; with A its old units stop too. Bound: one mark per site, at most LU_OPCLASS_WAYS + 1 learned rebuilds per place; B moves a purchase earlier and adds none.
+- Test: not built. A lane of the shape (a loop whose places learn a class every 2,500 iterations, inlining a method load whose receiver alternates after the build, alone and beside a second root that marks the site first) did not reach the diverted path: its marks and kills were the same with and without A and B (guard exits 2,974 before, 2,949 with A, 2,778 with A and B, master 2,365, the difference outside the lane's units), so it was dropped rather than kept as a test that passes either way. The evidence is deltablue's (diagnosis note).
+- Gate (73fa7e63): focused kernel programs 64/64 in jit-off, plain, jit, jit-deopt; threads 7/7 in handoff; tools/jitcheck 0 failing (classtests 203,280 helpers flat, before 377,636, master 116,504; its ledger 61,899 first, 9,624 rebuilt, 61.9M paid: at most 80,948; churn 2,808 first, 9,554 rebuilt; intrange 256,193/436,193); tools/jitcost PASS. With A alone the classtests ledger failed on an old-unit kill printed as a purchase (paid 2.4M against 15.9M); fixed in A by printing none.
+- Windows (master 12e0fa43 against the branch with A and B and the branch before them, both on 12e0fa43; instructions per call, pyperf worker, one run per arm on core leases; `-l N` makes 2N calls):
+
+| program | calls | master | A+B | before A+B |
+|---|---|---|---|---|
+| json_loads | 24-48 | 29.19M | 29.73M (+1.9%) | 28.81M (-1.3%) |
+| json_loads | 48-96 | 26.77M | 28.25M (+5.5%) | 27.44M (+2.5%) |
+| json_loads | 96-192 | 26.62M | 24.36M (-8.5%) | 24.76M (-7.0%) |
+| json_loads | 192-384 | 21.88M | 22.52M (+2.9%) | 22.57M (+3.1%) |
+| json_loads whole, -l 12 | | 4.647G | 4.538G (-2.3%) | 4.573G (-1.6%) |
+| deltablue | 128-256 | 35.42M | 35.44M (+0.0%) | 35.89M (+1.3%) |
+| deltablue | 256-512 | 34.20M | 34.34M (+0.4%) | 33.38M (-2.4%) |
+| deltablue | 512-1024 | 34.48M | 33.12M (-3.9%) | 33.31M (-3.4%) |
+| deltablue | 1024-2048 | 33.23M | 33.55M (+1.0%) | 33.22M (-0.0%) |
+| deltablue whole, -l 64 | | 9.289G | 9.503G (+2.3%) | 9.827G (+5.8%) |
+| richards | 24-48 | 122.89M | 119.71M (-2.6%) | 121.98M (-0.7%) |
+| richards | 48-96 | 122.21M | 120.33M (-1.5%) | 122.01M (-0.2%) |
+| richards whole, -l 12 | | 6.764G | 6.900G (+2.0%) | 6.885G (+1.8%) |
+| regex_v8 | 16-32 | 1104.12M | 996.16M (-9.8%) | 983.61M (-10.9%) |
+| regex_v8 | 32-64 | 883.36M | 939.09M (+6.3%) | 920.88M (+4.2%) |
+| regex_v8 whole, -l 8 | | 30.285G | 24.749G (-18.3%) | 24.707G (-18.4%) |
+| classtests total (lucifer_jit=always) | 20,000 it. | 1.217G | 1.217G (-0.1%) | 1.285G (+5.5%) |
+| classtests total | 40,000 it. | 1.228G | 1.224G (-0.4%) | 1.296G (+5.5%) |
+
+- Reading: A and B remove the classtests loss (level with master) and halve deltablue's whole-run loss (+5.8% to +2.3%), and deltablue's table window (calls 128-256) is level. Not met: json_loads calls 192-384 is +2.9% (+3.1% before A and B, so not theirs) and its early windows are worse than before (+1.9%, +5.5% against -1.3%, +2.5%), deltablue 256-512 +0.4% against -2.4%. The whole-run table (tab9) was not rerun.
+- The "steady" column of the final note is not steady state: its windows (json_loads calls 24-48, deltablue 128-256, richards 24-48, regex_v8 16-32, deepcopy 32-64, AWFY 20-60 iterations) are windows in which both arms still rebuild. Long-run figures (diagnosis note): json_loads +1.2% at calls 768-1536, deltablue +0.1% over 128-2048.
+
 ## State
 
 - Stage A ready for review on branch luc-1kz0, on origin/master 12e0fa43: the lanes, the mechanism (ledger, stale ledger per unit, quiet rule, value sharing), tools/jitcost, this ticket.
 - Gate on the rebased tree: focused kernel programs and threads, full tools/jitcheck, tools/jitcost all pass. The table was measured on the same code on ca02da54 (the rebase moved only the interpreter).
 - Known losses and follow-ups: the final-pass note. Stages B and C not started.
-- The json_loads and deltablue steady-state losses are windows of both arms' convergence, not worse final builds (diagnosis note); rule changes A (stale diversion shadows old-unit kills, a defect) and B (diverted exits also pay the mark) proposed, not built.
+- The json_loads and deltablue steady-state losses are windows of both arms' convergence, not worse final builds (diagnosis note); rules A and B built and gated (A+B note); json_loads windows still short of the landing bar.
 - Debug aids: LUCIFER_JIT_DEBUG=units logs builds, kills (with `paid P cost C` for ledger kills) and learns; -X lucifer_jit_stats prints generic passes; LUCIFER_JIT_DUMP=1 prints each unit's IR.
