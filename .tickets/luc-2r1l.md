@@ -16,9 +16,9 @@ With the JIT off the interpreter costs 105-114 machine instructions per bytecode
 
 ## State
 
-Branch luc-interp. Stages 0-2, A and B landed or landing; C1 (a C type's generic attribute slots run directly, the
-ast node classes' getattr/setattr no longer through call_special) committed for review; next C2 if the census still
-shows the forwarding above 2%, then D, E, F (coordinator's order). Earlier order and evidence:
+Branch luc-interp, on master 12e0fa43. Stages 0-2, A and B landed; C1 (a C type's generic attribute slots run
+directly) with its review fixes, and C2 (call_special without packing), committed for review; next D (LOAD_GLOBAL
+forms), E (dispatch), F (remaining forms by a fresh census) (coordinator's order). Earlier order and evidence:
 
 1. B done (count steps inline, locals through the frame, word-sized opcode/oparg). Dispatch is still 10 instructions
    against CPython's 8 (6 plus its instr_ptr store and next_instr step): opcode is live across calls in many handlers
@@ -317,3 +317,27 @@ threads_ast_attr_hooks (new) and attr_class_assign_threads in handoff; jitcheck:
   committed: 14.76G, 10.89G).
 - Reviewer's note for stage F: default_getattribute and the STORE_ATTR specializer (runtime/interp/specialize.c)
   still compare against object's lookup, so these classes get no specialised LOAD_ATTR / STORE_ATTR yet.
+
+### 2026-11-24 stage C2: call_special without packing
+
+Census after C1 (pyflakes, JIT off, counting build): 159M bytecodes; CALL_FUNCTION_EX 0.50M, with BUILD_LIST,
+LIST_EXTEND, CALL_INTRINSIC_1, BUILD_MAP, DICT_MERGE about 0.5M each (call_special's forwarding: callers contains
+0.16M, getitem 0.12M, get_iter 33k, setitem 23k, next 22k, ...), about 5% of the run at the per-op costs above.
+call_special(descr, obj, a=MISSING, b=MISSING, /) now calls without packing (no kernel caller passes more than two
+arguments after obj); type.__call__ calls __init__ with its *args/**kwargs through bind_special. Test:
+special_method_kinds.
+
+| row | C1 (review fixes) | C2 |
+|---|---|---|
+| fib / arith / attribute loop, instr/bc, JIT off | 75.1 / 96.4 / 93.5 | unchanged |
+| -c pass, JIT off | 128.38M | 122.83M |
+| stdlib imports, JIT off | 1.268G | 1.212G |
+| pyflakes, JIT off | 14.81G | 14.11G |
+| -c pass, JIT on | 150.09M | 147.34M |
+| stdlib imports, JIT on | 1.424-1.436G | 1.406G |
+| pyflakes, JIT on | 11.06G | 10.92-10.94G |
+| Richards | 12.285G | 12.271G |
+| DeltaBlue | 5.678-5.686G | 5.600-5.603G |
+
+Gate: 14 programs (special methods, descriptors, wrappers, fast paths) in jit-off, plain, jit, jit-deopt; two thread
+programs in handoff; jitcheck: pass. Next: D (LOAD_GLOBAL_MODULE/BUILTIN, 25.4M executions in pyflakes after C1).
