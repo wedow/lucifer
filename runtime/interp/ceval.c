@@ -262,6 +262,23 @@ global_get(struct lu_frame *frame, PyObject *name)
     return v;
 }
 
+/* A new reference to the value at entry `index` of exact dict d's keys table,
+   if the table has `version` (nonzero) and is still d's after the value is
+   taken; NULL otherwise. */
+static inline Py_ALWAYS_INLINE PyObject *
+versioned_entry(PyObject *d, uint16_t version, Py_ssize_t index)
+{
+    PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)d)->ma_keys, __ATOMIC_ACQUIRE);
+    if (dk->dk_version != version) {
+        return NULL;
+    }
+    PyObject *v = lu_try_xget_ref(&((PyDictUnicodeEntry *)lu_dk_entries(dk))[index].me_value);
+    if (v != NULL && dk != __atomic_load_n(&((PyDictObject *)d)->ma_keys, __ATOMIC_ACQUIRE)) {
+        Py_CLEAR(v);
+    }
+    return v;
+}
+
 /* IMPORT_NAME: builtins.__import__(name, globals, locals, fromlist, level).
    Until builtins.py has defined it, while the kernel boots, a name is its
    sys.modules entry. */
@@ -1728,37 +1745,45 @@ op_LOAD_GLOBAL: {
     DISPATCH();
 }
 
-/* The value at the cached entry of a keys table that still has the cached
-   version, or NULL: a different table, or the entry is gone. */
-op_LOAD_GLOBAL_MODULE:
-op_LOAD_GLOBAL_BUILTIN: {
-    lu_codeunit *site = next_instr - 1;
+/* LOAD_GLOBAL_MODULE and LOAD_GLOBAL_BUILTIN (CPython's _GUARD_GLOBALS_VERSION,
+   _GUARD_BUILTINS_VERSION and _LOAD_GLOBAL_*). The site check comes before any
+   word is used, so the words are one specialization's; a keys table that still
+   has the cached version has the same keys at the same entries, so the entry is
+   in range and a str-keyed one. */
+op_LOAD_GLOBAL_MODULE: {
     uint64_t seq = lu_site_read();
-    uint16_t module_version = lu_cache_load(next_instr + LG_MODULE_KEYS_VERSION);
-    uint16_t builtin_version = lu_cache_load(next_instr + LG_BUILTIN_KEYS_VERSION);
+    uint16_t version = lu_cache_load(next_instr + LG_MODULE_KEYS_VERSION);
     Py_ssize_t index = lu_cache_load(next_instr + LG_INDEX);
-    int from_builtins = opcode == LOAD_GLOBAL_BUILTIN;
     PyObject *v = NULL;
-    if (module_version != 0 && PyDict_CheckExact(frame->globals)
-        && (!from_builtins || (builtin_version != 0 && PyDict_CheckExact(frame->builtins)))) {
-        PyDictKeysObject *gk = __atomic_load_n(&((PyDictObject *)frame->globals)->ma_keys, __ATOMIC_ACQUIRE);
-        PyDictKeysObject *dk = from_builtins
-            ? __atomic_load_n(&((PyDictObject *)frame->builtins)->ma_keys, __ATOMIC_ACQUIRE) : gk;
-        if (lu_dk_is_unicode(gk) && gk->dk_version == module_version
-            && dk->dk_version == (from_builtins ? builtin_version : module_version)
-            && lu_dk_is_unicode(dk) && index < dk->dk_nentries) {
-            v = lu_try_xget_ref(lu_dk_value_slot(dk, index));
-            if (v != NULL && dk != __atomic_load_n(&((PyDictObject *)(from_builtins ? frame->builtins : frame->globals))->ma_keys,
-                                                   __ATOMIC_ACQUIRE)) {
-                Py_CLEAR(v);
-            }
-        }
+    if (lu_site_unchanged(next_instr - 1, LOAD_GLOBAL_MODULE, seq) && PyDict_CheckExact(frame->globals)) {
+        v = versioned_entry(frame->globals, version, index);
     }
-    if (v == NULL || !lu_site_unchanged(site, opcode, seq)) {
-        Py_XDECREF(v);
+    if (v == NULL) {
         goto op_LOAD_GLOBAL;
     }
-    SKIP_CACHES();
+    next_instr += LG_WORDS;
+    PUSH(v);
+    if (oparg & 1) {
+        PUSH(NULL);
+    }
+    DISPATCH();
+}
+
+op_LOAD_GLOBAL_BUILTIN: {
+    uint64_t seq = lu_site_read();
+    uint16_t globals_version = lu_cache_load(next_instr + LG_MODULE_KEYS_VERSION);
+    uint16_t version = lu_cache_load(next_instr + LG_BUILTIN_KEYS_VERSION);
+    Py_ssize_t index = lu_cache_load(next_instr + LG_INDEX);
+    PyObject *v = NULL;
+    if (lu_site_unchanged(next_instr - 1, LOAD_GLOBAL_BUILTIN, seq)
+        && PyDict_CheckExact(frame->globals) && PyDict_CheckExact(frame->builtins)
+        && __atomic_load_n(&((PyDictObject *)frame->globals)->ma_keys, __ATOMIC_ACQUIRE)->dk_version == globals_version) {
+        v = versioned_entry(frame->builtins, version, index);
+    }
+    if (v == NULL) {
+        goto op_LOAD_GLOBAL;
+    }
+    next_instr += LG_WORDS;
     PUSH(v);
     if (oparg & 1) {
         PUSH(NULL);

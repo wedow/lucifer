@@ -35,6 +35,7 @@ enum {
     LG_MODULE_KEYS_VERSION = 1,
     LG_BUILTIN_KEYS_VERSION = 2,
     LG_INDEX = 3,
+    LG_WORDS = 4,
 };
 
 /* LOAD_ATTR's (_PyLoadMethodCache): a 32-bit version, the guard; a second
