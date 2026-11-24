@@ -2442,44 +2442,52 @@ test_ri(struct asm_ *a, int r, int32_t imm)
     b4(a, imm);
 }
 
+/* To `label` when the type in RAX has LU_TPFLAGS_PLAIN_RELEASE. */
+static void
+plain_jump(struct asm_ *a, int label)
+{
+    rex(a, 0, 0, 0, RAX);
+    b1(a, 0xF6);
+    modrm_mem(a, 0, RAX, offsetof(PyTypeObject, tp_flags) + 5);
+    b1(a, (uint8_t)(LU_TPFLAGS_PLAIN_RELEASE >> 40));     /* test byte [rax+flags+5], plain */
+    jcc(a, CC_NE, label);
+}
+
 /* The release of an instance of a Python class (type in RAX, object in
-   r, RDX; its tp_dealloc lu_subtype_dealloc, as the caller saw) whose
-   dealloc would only release its attributes,
-   its type and its block: no __del__ (tp_finalize), no weak reference to
-   it (an empty list, or none), no __slots__ of its own and object as its
-   base, no dict (its attributes inline). Nothing it holds dies with it:
-   each inline value is unboxed, immortal or this thread's with a count
-   above one, and so is its type; then the counts drop, the collector's
-   count of objects with it (lu_gc_record_deallocation, short of a
-   flush), and mi_free takes the block (this thread's heap or another's,
-   as mimalloc sorts it), the registers the unit allocates kept around the
-   call. Else `fail`. Clobbers RAX, RCX, R11; R10 kept. */
+   r, RDX; its class plain, as the caller saw: plain_jump) whose
+   dealloc would only release its attributes, its type and its block: a
+   class with LU_TPFLAGS_PLAIN_RELEASE (no __del__, no __slots__, object
+   its base, inline values), and an instance with no dict and its values
+   in line (a weak reference to it the caller ruled out, owner_dies).
+   Nothing it holds dies with it: each inline value is unboxed, immortal
+   or this thread's with a count above the references this release drops,
+   and so is its type; then the counts drop, the collector's count of
+   objects with it (lu_gc_record_deallocation, short of a flush), and
+   mi_free takes the block (this thread's heap or another's, as mimalloc
+   sorts it), the registers the unit allocates kept around the call.
+   Else `fail`. Clobbers RAX, RCX, R11; R10 kept.
+
+   The words read are the class's names, not the instance's room: no
+   instance holds a word at or past the count (attrs.c), and one that came
+   by __class__ assignment, with another class's room, has its values in a
+   dict, which fails here. The count bounds the references dropped too. */
 static void
 release_instance(struct asm_ *a, int r, int fail, int done)
 {
-    int failed = new_label(a), noweak = new_label(a), nodict = new_label(a);
+    int failed = new_label(a);
     int scan = new_label(a), scanned = new_label(a), drop = new_label(a), dropped = new_label(a);
-    int whole = new_label(a), untyped = new_label(a);
-    cmp_mi(a, 1, RAX, offsetof(PyTypeObject, tp_finalize), 0);
-    jcc(a, CC_NE, fail);
-    mov_ri(a, RCX, (int64_t)(intptr_t)&PyBaseObject_Type);
-    cmp_rm(a, RCX, RAX, offsetof(PyTypeObject, tp_base));
-    jcc(a, CC_NE, fail);
-    cmp_mi(a, 1, RAX, offsetof(PyVarObject, ob_size), 0);
-    jcc(a, CC_NE, fail);                        /* __slots__ */
-    load(a, RCX, RAX, offsetof(PyTypeObject, tp_weaklistoffset));
-    test_rr(a, RCX, RCX);
-    jcc(a, CC_E, noweak);
-    alu_rr(a, ALU_ADD, RCX, r);
-    cmp_mi(a, 1, RCX, 0, 0);
-    jcc(a, CC_NE, fail);                        /* a weak reference to it */
-    bind(a, noweak);
-    load(a, RCX, RAX, offsetof(PyTypeObject, tp_flags));
-    test_ri(a, RCX, Py_TPFLAGS_MANAGED_DICT);
-    jcc(a, CC_E, nodict);
+    int untyped = new_label(a);
+    load(a, R11, RAX, offsetof(PyTypeObject, tp_dealloc));
+    mov_ri(a, RCX, (int64_t)(intptr_t)lu_subtype_dealloc);
+    alu_rr(a, ALU_CMP, R11, RCX);
+    jcc(a, CC_NE, fail);                        /* a metaclass's C may have set its own after the bit */
     cmp_mi(a, 1, r, LU_MANAGED_DICT_OFFSET, 0);
     jcc(a, CC_NE, fail);                        /* a dict, which inline values moved to make too */
-    bind(a, nodict);
+    rex(a, 0, 0, 0, r);
+    b1(a, 0xF6);
+    modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
+    b1(a, LU_ATTRS_IN_DICT >> 8);               /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
+    jcc(a, CC_NE, fail);
     load(a, RCX, R14, offsetof(struct lu_task, carrier));
     load(a, RCX, RCX, offsetof(struct lu_carrier, current));
     cmp_mi(a, 0, RCX, offsetof(struct lu_entry, gc_alloc_count), -LU_GC_ALLOC_FLUSH + 1);
@@ -2489,32 +2497,8 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     alu_ri(a, ALU_SUB, RSP, 24);
     store(a, RSP, 0, R10);
     thread_id(a, R10);
-    /* The instance's own inline words: none while its values are in a
-       dict (LU_ATTRS_IN_DICT, which stays set once they moved), else its
-       room's names, as lu_inline_clear reads them, from its flags or the
-       class's table: never the class's count of names, which another
-       class's instance (__class__ assigned) may lack room for. */
-    int roomed = new_label(a), sized = new_label(a);
-    load(a, RCX, RAX, offsetof(PyTypeObject, tp_flags));
-    test_ri(a, RCX, Py_TPFLAGS_INLINE_VALUES);
-    b1(a, 0xB9);
-    b4(a, 0);                                   /* mov ecx, 0: no words, the flags kept */
-    jcc(a, CC_E, roomed);
-    rex(a, 0, 0, 0, r);
-    b1(a, 0xF6);
-    modrm_mem(a, 0, r, offsetof(PyObject, ob_flags) + 1);
-    b1(a, LU_ATTRS_IN_DICT >> 8);               /* test byte [r+flags+1], LU_ATTRS_IN_DICT */
-    jcc(a, CC_NE, failed);
-    op_rm(a, 0, 0x0FB7, RCX, r, offsetof(PyObject, ob_flags));     /* movzx ecx, word [r+flags] */
-    alu_ri(a, ALU_AND, RCX, LU_ATTRS_ROOM);
-    rex(a, 1, 0, 0, RCX);
-    b1(a, 0xC1);
-    modrm_rr(a, 5, RCX);
-    b1(a, LU_ATTRS_ROOM_SHIFT);                 /* shr rcx: the room, 0 for the table's capacity */
-    jcc(a, CC_NE, roomed);
     load(a, RCX, RAX, offsetof(PyHeapTypeObject, ht_cached_keys));
-    load(a, RCX, RCX, LU_SHARED_NAMES_CAPACITY);
-    bind(a, roomed);
+    load(a, RCX, RCX, LU_SHARED_NAMES_COUNT);  /* the names */
     load(a, R11, RAX, offsetof(PyTypeObject, tp_basicsize));
     alu_rr(a, ALU_ADD, R11, r);                 /* the values */
     store(a, RSP, 8, RCX);
@@ -2523,20 +2507,19 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     modrm_mem(a, 4, RSP, 8);
     b1(a, 4);                                   /* shl qword [rsp+8], 4: LU_INLINE_STRIDE words a name */
     op_rm(a, 1, 0x01, R11, RSP, 8);             /* add [rsp+8], r11: the end */
-    bind(a, sized);
     /* Nothing it holds may die with it: the type and each value are
        immortal, or this thread's with a local count above the references
-       this release drops (one per word, one for the type). However the
-       same object repeats among them, it stays above zero. */
+       this release drops (at most one per name, one for the type). However
+       the same object repeats among them, it stays above zero. */
     alu_ri(a, ALU_ADD, RCX, 1);
-    int typed2 = new_label(a);
+    int typed = new_label(a);
     cmp_mi(a, 0, RAX, offsetof(PyObject, ob_ref_local), -1);
-    jcc(a, CC_E, typed2);
+    jcc(a, CC_E, typed);
     op_rm(a, 0, 0x39, RCX, RAX, offsetof(PyObject, ob_ref_local));  /* cmp [rax+local], ecx */
     jcc(a, CC_BE, failed);
     cmp_rm(a, R10, RAX, offsetof(PyObject, ob_tid));
     jcc(a, CC_NE, failed);
-    bind(a, typed2);
+    bind(a, typed);
     bind(a, scan);
     cmp_rm(a, R11, RSP, 8);
     jcc(a, CC_AE, scanned);
@@ -2581,12 +2564,8 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     modrm_mem(a, 4, r, offsetof(PyObject, ob_gc_bits));
     b1(a, (uint8_t)~LU_GC_TRACKED);             /* and byte [r+gc_bits]: the collector's no longer */
     store32_mi(a, r, offsetof(PyObject, ob_ref_local), 0);     /* dead, as on every other path */
-    load(a, RAX, RAX, offsetof(PyTypeObject, tp_flags));
-    test_ri(a, RAX, Py_TPFLAGS_PREHEADER);
     mov_rr(a, RAX, r);
-    jcc(a, CC_E, whole);
-    alu_ri(a, ALU_SUB, RAX, 2 * sizeof(PyObject *));  /* a heap subclass's block starts at the preheader */
-    bind(a, whole);
+    alu_ri(a, ALU_SUB, RAX, 2 * sizeof(PyObject *));  /* the block starts at the preheader (a managed dict) */
     int freed = new_label(a), call = new_label(a);
     free_in_line(a, call, freed);
     bind(a, call);
@@ -2639,16 +2618,13 @@ release_stub(struct asm_ *a)
        way leave here. The type stays in RAX. */
     int labels[4] = { new_label(a), not_int, not_float, not_str };
     load(a, RAX, r, offsetof(PyObject, ob_type));
+    plain_jump(a, instance);
     static PyTypeObject *const kinds[] = { &PyLong_Type, &PyFloat_Type, &PyUnicode_Type, &PyTuple_Type };
     for (int k = 0; k < 4; k++) {
         mov_ri(a, R11, (int64_t)(intptr_t)kinds[k]);
         alu_rr(a, ALU_CMP, RAX, R11);
         jcc(a, CC_E, labels[k]);
     }
-    load(a, R11, RAX, offsetof(PyTypeObject, tp_dealloc));
-    mov_ri(a, RCX, (int64_t)(intptr_t)lu_subtype_dealloc);
-    alu_rr(a, ALU_CMP, R11, RCX);
-    jcc(a, CC_E, instance);
     jmp(a, other);
     bind(a, labels[0]);
     owner_dies(a, r, other);

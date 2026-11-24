@@ -791,6 +791,20 @@ PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
 }
 
 void
+lu_type_refresh_plain(PyTypeObject *tp)
+{
+    unsigned long need = Py_TPFLAGS_HEAPTYPE | Py_TPFLAGS_INLINE_VALUES | Py_TPFLAGS_MANAGED_DICT;
+    int plain = (tp->tp_flags & need) == need && tp->tp_dealloc == lu_subtype_dealloc && tp->tp_finalize == NULL
+        && tp->tp_del == NULL && tp->tp_base == &PyBaseObject_Type && Py_SIZE(tp) == 0;
+    if (plain) {
+        __atomic_fetch_or(&tp->tp_flags, LU_TPFLAGS_PLAIN_RELEASE, __ATOMIC_RELEASE);
+    }
+    else {
+        __atomic_fetch_and(&tp->tp_flags, ~LU_TPFLAGS_PLAIN_RELEASE, __ATOMIC_RELEASE);
+    }
+}
+
+void
 lu_subtype_dealloc(PyObject *self)
 {
     if (Py_TYPE(self)->tp_finalize != NULL && PyObject_CallFinalizerFromDealloc(self) < 0) {
@@ -2270,6 +2284,7 @@ prim_type_set_bases(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (!(tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)) {
         _PyObject_XDecRefDelayed(old);          /* lock-free readers, as the MRO's */
     }
+    lu_type_refresh_plain(tp);                  /* the base it reads */
     return Py_NewRef(Py_None);
 }
 

@@ -878,6 +878,9 @@ lu_set_slot(PyTypeObject *tp, int index, int how, PyTypeObject *from)
         return -1;
     }
     *(void **)(base + s->offset) = value;
+    if (base == (char *)tp) {
+        lu_type_refresh_plain(tp);      /* tp_finalize, tp_del or tp_dealloc may be what changed */
+    }
     return 0;
 }
 

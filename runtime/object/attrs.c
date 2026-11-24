@@ -58,6 +58,7 @@ struct lu_shared_names {
 };
 
 _Static_assert(offsetof(struct lu_shared_names, capacity) == LU_SHARED_NAMES_CAPACITY, "compiled code reads it there");
+_Static_assert(offsetof(struct lu_shared_names, count) == LU_SHARED_NAMES_COUNT, "compiled code reads it there");
 
 static struct lu_shared_names *
 shared_names(PyTypeObject *tp)
@@ -206,6 +207,7 @@ lu_inline_values_init(PyTypeObject *tp)
     names->fixed = capacity > ROOM_MAX;
     ((PyHeapTypeObject *)tp)->ht_cached_keys = (PyDictKeysObject *)names;
     tp->tp_flags |= Py_TPFLAGS_INLINE_VALUES;
+    lu_type_refresh_plain(tp);
     return 0;
 }
 
