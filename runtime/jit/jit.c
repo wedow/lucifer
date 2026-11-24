@@ -112,8 +112,6 @@ struct lu_jit_code {
     struct lu_pic **pics;       /* per code unit: an attribute site's polymorphic cache */
     uint8_t *grown;             /* per code unit: doublings of the inlining budget of the unit entered there, which
                                    its own calls left out bought (hot_exit); another entry starts at the base */
-    double *bar;                /* per code unit, made at its first doubling: what the unit entered there may lose
-                                   per entry for its next doubling to be bought; -1 once a doubling did not deliver */
     struct lu_callees **callees;        /* per code unit: a call site's callees */
     struct lu_opclasses **opclasses;    /* per code unit: an operator site's operand classes */
     struct lu_prof *profs;              /* a root's: what it learned of values, by context (target.h) */
@@ -1873,15 +1871,6 @@ out_calls(const struct lu_out *o)
     return n > 0 ? n : 0;
 }
 
-/* What u's exits and generic paths lost per entry, of its first `entries`:
-   over the entries that made it (lost stops counting past `enough`). */
-static double
-own_losses(struct lu_unit *u, unsigned long entries)
-{
-    unsigned long upto = __atomic_load_n(&u->lost_entries, __ATOMIC_RELAXED);
-    return (double)__atomic_load_n(&u->lost, __ATOMIC_RELAXED) / (double)(upto != 0 ? upto : entries);
-}
-
 /* What a unit has lost per entry: what its exits and generic paths lost
    (lost, over the entries that made it: past `enough` it stops, and
    lost_entries says after how many) and its calls made out of line. Read
@@ -1896,8 +1885,10 @@ unit_losses(struct lu_unit *u)
     if (entries == 0 || (entries >= ENTRIES_SEEN && kept != 0)) {
         return (double)kept;
     }
-    double total = (double)__atomic_load_n(&u->lost, __ATOMIC_RELAXED);
-    double per = own_losses(u, entries);
+    unsigned long upto = __atomic_load_n(&u->lost_entries, __ATOMIC_RELAXED);
+    double lost = (double)__atomic_load_n(&u->lost, __ATOMIC_RELAXED);
+    double total = lost;
+    double per = lost / (double)(upto != 0 ? upto : entries);
     for (int i = 0; i < u->nouts; i++) {
         double out = CALL_COST * (double)out_calls(&u->outs[i]);
         total += out;
@@ -1976,23 +1967,8 @@ hot_exit(struct lu_deopt *d)
             __atomic_store_n(&jc->nhot, jc->nhot + 1, __ATOMIC_RELAXED);
         }
     }
-    /* A doubling must deliver: the next is bought only once the grown unit
-       loses, per entry, at least half of what bought the last less than the
-       unit before it did. A doubling costs twice the last; one that removes
-       less than half its reason starts a chain to MAX_GROWN that costs more
-       than it can return (the callee's exits and generic paths stay in its
-       copy unless the caller's facts reach its places). */
-    int e = u->entry_pc, grows = jc->nhot == was && u->refused && jc->grown[e] < MAX_GROWN && total >= grow;
-    double out = total / (double)(entries > 0 ? entries : 1), per = own_losses(u, entries > 0 ? entries : 1) + out;
-    if (grows && jc->grown[e] > 0 && !(per <= jc->bar[e])) {
-        jc->bar[e] = -1;        /* it stops growing */
-        grows = 0;
-    }
-    if (grows) {
-        jc->bar = jc->bar != NULL ? jc->bar : calloc((size_t)jc->ncode + 1, sizeof(double));
-        jc->bar[e] = per - out / 2;
-    }
-    const char *why = jc->nhot > was ? "hot-site" : grows ? "grown" : NULL;
+    const char *why = jc->nhot > was ? "hot-site"
+        : u->refused && jc->grown[u->entry_pc] < MAX_GROWN && total >= grow ? "grown" : NULL;
     free(cost);
     for (int i = 0; why == NULL && i < u->nouts; i++) {
         struct lu_out *o = &u->outs[i];
@@ -2693,7 +2669,6 @@ lu_jit_code_free(PyCodeObject *code)
     free(jc->wait);
     free(jc->seen);
     free(jc->grown);
-    free(jc->bar);
     free(jc->cause);
     free(jc);
     code->co_executors = NULL;
