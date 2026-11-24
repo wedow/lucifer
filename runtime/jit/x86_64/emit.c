@@ -4335,6 +4335,18 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jcc(a, CC_L, fail);
         return 0;
     }
+    case OP_GUARD_ENTRY: {
+        int other = exit_to(a, in->fs, EXIT_POLL, 0, 0);
+        load(a, RCX, R15, offsetof(struct lu_frame, globals));
+        mov_ri(a, RAX, in->imm);
+        alu_rr(a, ALU_CMP, RCX, RAX);
+        jcc(a, CC_NE, other);
+        load(a, RCX, R15, offsetof(struct lu_frame, builtins));
+        mov_ri(a, RAX, in->imm2);
+        alu_rr(a, ALU_CMP, RCX, RAX);
+        jcc(a, CC_NE, other);
+        return 0;
+    }
     case OP_GUARD_FRAMES: {
         /* Not a speculation: the root is still compiled code's unless a
            walker made the frames real (runtime/jit/exit.c). */
