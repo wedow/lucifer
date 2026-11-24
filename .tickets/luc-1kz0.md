@@ -312,10 +312,84 @@ Follow-ups from the adversarial review (low):
 - h_pic_same passes a NULL place on allocation failure.
 - The value-class table is scanned linearly (eval_emit.c).
 
+**2026-11-24 diagnosis: regex_v8's long windows and the cold programs' extra compiles (base dbb9b594, branch 44b4b232)**
+
+Method: the binaries of the final table. Event logs (LUCIFER_JIT_DEBUG=units) of both arms: regex_v8 under its pyperf worker at `-l 256`, with a marker after each pass of the benchmark loop (block11 wrapped; calls 1-512), and imports, black, pyflakes, pygments, AWFY Json 60. Builds per window, counted in IR and in each build's own ms. Instructions:u on core leases, one measurement per lease, regex_v8 at `-l 32/64/128/256` under perf record (fp chains) to split compile from run. compile's children share undercounts once inlining makes chains deeper than the kernel's 127-frame limit (master `-l 64` reads less than `-l 32`), so compile is counted as the self samples of the build pipeline's functions (eval_*, opt, ssa, regalloc, emit, facts, codemem) times 1.13. 1.13 is children/self at `-l 32`, where the chains are complete (1.115 master, 1.148 branch). Logs reproduce the table's IR exactly (imports 29,183/32,559, black 292,126/315,157).
+
+A. regex_v8. Neither arm stops rebuilding: about 100 builds per 64 calls in each to the end, new code still gets its first builds late (block3 and block4 at calls 460 and 504), and master's largest builds come last (block0@12 39.7k IR at call 381, block1@12 47.8k IR at 474).
+
+| calls | master per call | branch per call | compile m/b | run m/b |
+|---|---|---|---|---|
+| 1-64 (whole -l 32) | 1116.1M | 1056.4M (-5.3%) | 212M/147M | 904M/909M (+0.6%) |
+| 64-128 | 795.1M | 867.8M (+9.1%) | 15.2M/90.7M | 779.9M/777.1M (-0.4%) |
+| 128-256 | 781.5M | 836.7M (+7.1%) | 6.9M/64.1M | 774.6M/772.6M (-0.3%) |
+| 256-512 | 785.9M | 790.4M (+0.6%) | 17.0M/27.3M | 768.9M/763.1M (-0.8%) |
+| whole -l 256 | 423.54G | 432.60G (+2.1%) | 19.8G/30.4G | |
+
+- The +72.7M a call at calls 64-128 is all compile: +75.5M (+66.8M in self samples alone) against run -2.8M. The branch's units run 0.3-0.8% better than master's from call 64 on. The branch converges to that: about 0.5% better run code, compile still paid to the end. Whole run: -16.3% at `-l 8`, +2.1% at `-l 256`.
+- Builds by cause, calls 64-128 (each build's own ms; branch 1,447 ms against master 293; about 4.2M instructions/ms from the counts above):
+  - growth: 4 builds, 713 ms, about 47M a call. block0@12 to grown 4 at call 100, Pattern.sub and sub to 3, search to 1.
+  - new loop entries of block0 at grown budgets: @104 grown 3 (9.8k IR) and @210 grown 4 (16.6k IR). 473 ms, about 31M a call.
+  - a mark at grown 1: 71 ms, about 5M a call.
+  - the rest -6M a call, against master's hot-site and learned rebuilds. Sum +76M.
+  - These ms are wall times of an unpinned run: the split is good to about 10%, the total is the perf figure.
+- Over calls 65-512 the branch's builds take 5,377 ms against master's 2,120. Branch: growth 15 builds 2,644 ms; new entries at grown budgets 1,007 ms; other builds at a grown budget 949 ms. Master: one growth build in the window, 9 ms (its fixed trigger grew Pattern.sub to 4 before call 3, then stopped).
+- What buys it: hot_exit's growth rule. Every doubling is a ledger purchase (`paid` at or above `cost`), and each code climbs to the ceiling:
+  - block0@12 at calls 9, 24, 48, 100, then a 33k-IR hot-site build at 278;
+  - sub at 2, 37, 79, 178;
+  - Pattern.sub at 9, 35, 85, 222;
+  - Pattern.search at 11, 62, 129, 374;
+  - block2 at 210, 322, 467;
+  - Pattern.split at 167, 381; search at 83, 438.
+  It is a repeated purchase for one reason, bounded only by MAX_GROWN. The purchases are valued by out_cost: CALL_COST plus the callee unit's losses per entry. Inlining does not remove most of the callee's losses (its exits and generic passes stay in the inlined copy), so the saving is not realized. block0's growth at call 100 was paid 2.21G over 58 entries, about 38M a call claimed. The run per call after it is within 0.5% of master's, which never grew block0. unit_losses also freezes a callee's value once it passes ENTRIES_SEEN (unverified whether that matters here).
+- New entries: jc->grown is per code, so block0's loop entries (@58, @104, @164, @210, @297, @343) are built at the budget block0@12's ledger bought: 5.7-16.9k IR for units entered 2-18 times, 88k IR and about 1.3 s in all. They exist because the interpreter's loop-header waits in block0 run out (5,800 waits; master reaches 5,341 at @58 by call 512 and builds none). Master would build them at grown 0.
+
+B. Cold programs. First builds are not the cause: imports 95/19,376 against 95/19,553 IR, black 434/120,398 against 426/119,523. The extra IR is learned-since-build rebuilds:
+- imports: 46/6.2k IR on master, 54/10.6k on the branch (+4.4k against +3.4k net). Marks -0.4k.
+- black: 242/61.7k on master, 297/100.9k on the branch (+39.1k), offset by mark-nospec -12.5k and retired -7.5k. old-unit-nospec 13/7.9k against 16/14.3k: +6.4k, rule A's old units rebuilt. Net +23k.
+- The pattern is not hundreds of small units: a few large units, each rebuilt once and bought far below cost. The learned rebuild is predicted at build_cost(nins - rest), where rest is the IR after a place that had met nothing in an inlined frame (lu_ev_price_rest, lu_jit_prof_rest, lu_jit_stale_pass). When that frame is most of the unit, the prediction falls to a few percent, but the rebuild is as large or larger:
+
+| unit (imports) | IR before -> after | predicted | build_cost(after) |
+|---|---|---|---|
+| hasattr | 1,137 -> 1,085 | 0.43M | 12.9M |
+| _wraps | 1,087 -> 1,057 | 0.44M | 12.5M |
+| getattr | 1,028 -> 1,017 | 0.49M | 11.8M |
+| lookup_attr | 551 -> 1,027 | | |
+| len | 272 -> 424 | | |
+
+  In black: dict.__init__ predicted 0.17M against 12.2M, update_common 0.39M against 16.6M, _match_entry 1.11M against 34.4M.
+- Learned rebuilds predicted below a third of build_cost(the unit's own size):
+
+| program | rebuilds | IR | predicted | build_cost |
+|---|---|---|---|---|
+| imports | 12 | 5.4k | 5M | 57M |
+| black | 81 | 38.6k | 72M | 462M |
+| regex_v8 | 75 | 63k | 108M | 2.18G |
+
+  In imports and black that IR matches the excess learned IR. The quiet rule and value sharing make no build larger that I could find (first builds equal in size).
+
+C. Rule changes, in order:
+1. Predict a learned rebuild at the unit's own build: relearn = enough = build_cost(nins). Delete the rest discount (lu_ev_price_rest, lu_jit_prof_rest, prof->rest, the minimum in lu_jit_stale_pass).
+   - Argument: the ski-rental bound holds only if the predicted cost is at least the build bought. Measured rebuilds are 0.95-1.9 times the unit they replace, never the 3-5% predicted. Learning one class folds that place's generic expansion, not the rest of its frame.
+   - Removes imports' +4.4k and black's +39k learned IR, and regex's learned rebuilds at grown sizes.
+   - Risk to the gains: the same purchases occur in pyflakes (50, 41k IR), pygments (45, 29k) and Json (12, 7.5k), and would be delayed to about master's timing. Their gains come mostly from growth and marks the branch no longer makes: pyflakes grown 63.3k -> 10.5k IR and learned-type-fails 23.5k -> 9.7k; Json grown 73.3k -> 24.3k and learned 75.8k -> 45.4k. Measure them.
+   - A deletion, but a change of the model, not a plain defect: not built.
+2. Growth belongs to the entry that paid it: a unit's budget is INLINE_BUDGET shifted by its own entry's doublings, not the code's jc->grown.
+   - Argument: the ledger that bought a doubling was one unit's calls. Inheriting it multiplies one purchase by every later entry, which never lost anything for want of it.
+   - Removes regex's grown loop entries (about 31M a call at calls 64-128, 1.0-1.3 s over the run).
+   - Risk low: it touches only codes with several entries after a growth. A few lines, but a mechanism change: not built.
+3. Value a doubling by what inlining removes, and buy the next one only after the last one delivered.
+   - Argument: out_cost adds the callee's exits and generic passes, which stay in the inlined copy unless the caller's facts reach the callee's places. The megaiter case, where the caller knows the iterable, is the exception that motivated it.
+   - Rule: after a growth, the unit's losses per entry (own, plus out-of-line calls valued as now) must have fallen by at least what the doubling was bought for, else the code grows no further. Ski rental again: a purchase that removes nothing is not repeated.
+   - Removes regex's growth chain (about 47M a call at calls 64-128, 2.6 s over the run).
+   - Risk: Json and megaiter rely on growth. It needs its own design and lane: not built.
+- Order: 1, then 2, then 3. 1 is a deletion that addresses both the cold programs and part of regex. 2 is small and local. 3 is a design.
+- Not examined here: (3) json_loads, deepcopy and DeltaBlue's long windows.
+
 ## State
 
 - Landing candidate luc-1kz0-land on origin/master dbb9b594 (gated, table above); stage A was on branch luc-1kz0, on 12e0fa43: the lanes, the mechanism (ledger, stale ledger per unit, quiet rule, value sharing), tools/jitcost, this ticket.
 - Gate on the rebased tree: focused kernel programs and threads, full tools/jitcheck, tools/jitcost all pass. The table was measured on the same code on ca02da54 (the rebase moved only the interpreter).
-- Known losses and follow-ups: the final-pass note. Stages B and C not started.
+- Known losses and follow-ups: the final-pass note; regex_v8's windows and the cold programs' extra compiles are diagnosed (last note): rule changes 1-3 proposed, not built. Stages B and C not started.
 - The json_loads and deltablue steady-state losses are windows of both arms' convergence, not worse final builds (diagnosis note); rules A and B built and gated (A+B note); json_loads windows still short of the landing bar.
 - Debug aids: LUCIFER_JIT_DEBUG=units logs builds, kills (with `paid P cost C` for ledger kills) and learns; -X lucifer_jit_stats prints generic passes; LUCIFER_JIT_DUMP=1 prints each unit's IR.
