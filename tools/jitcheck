@@ -285,6 +285,8 @@ require that a count of the tier's does not grow with the iterations:
   typed  tests/kernel/jit_typed_items.py, whose hot loops read and store
          bytearray items and array items of every numeric typecode: helper
          calls compiled code makes. Each item is read and stored in line.
+         Its sizes are 4N and 8N (START): the learned rebuild that puts the
+         stores in line is bought by the ledger after about N iterations.
   strs   tests/kernel/jit_str_chars.py, whose hot loops read str characters
          and compare strs with one character: helper calls compiled code
          makes. Each is read and compared in line.
@@ -319,6 +321,12 @@ machine instructions per IR instruction (runtime/jit/jit.c):
          whose early places meet their first objects late; a learned
          rebuild must also be predicted at least at the build of the unit
          it replaces.
+  typed  tests/kernel/jit_typed_items.py (the helpers lane's program).
+The entrygrowth lane runs tests/kernel/jit_entry_growth.py at 2N with the event
+log: its function's start buys a larger inlining budget with its calls out
+of line, and the loops of an arm that runs only in the second half are
+entered from the interpreter after that: they are built at the base budget,
+since the doubling was that entry's purchase, not the code's.
 The perf lane records Richards under -X perf with `perf record -g` and
 requires that at least 95% of the samples in compiled code (code perf finds
 in no file: it looks it up in /tmp/perf-PID.map) resolve to py:: symbols.
@@ -436,9 +444,14 @@ GROWTH = {
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),
 }
 GROWTH_N = 20000
+# lane: the multiple of GROWTH_N its two sizes start at, for a lane whose rebuilds the ledger buys after GROWTH_N
+# iterations (typed: fill's two learned rebuilds, 1,212 and 1,214 IR, are each paid by stale passes of about 840
+# instructions, about 18,000 of them, the second after 40,000 iterations): both sizes are past the purchases, and the
+# lane checks the steady state after them.
+START = {'typed': 4}
 # lane: (program, flags), checked from its event log (check_ledger).
 LEDGER = {'churn': ('jit_rebuild_churn.py', ('-X', 'lucifer_jit=on')), 'classtests': ('jit_isinstance_growth.py', ()),
-          'learnprice': ('jit_learned_price.py', ())}
+          'learnprice': ('jit_learned_price.py', ()), 'typed': ('jit_typed_items.py', ())}
 # The new builds' IR against what the losses paid would build: a rebuild is predicted at the size of its root's
 # last build, and the build it buys may take in more (what the root learned, a call in line).
 LEDGER_SLACK = 2
@@ -488,7 +501,8 @@ def check_growth(args, lane):
     name, pattern, per, *rest = GROWTH[lane]
     flags, variants = (rest + [(), [()]][len(rest):])[:2]
     program = ROOT / 'tests' / 'kernel' / name
-    sizes = (GROWTH_N, 2 * GROWTH_N)
+    n = START.get(lane, 1) * GROWTH_N
+    sizes = (n, 2 * n)
     problems, seen = [], []
     for extra in variants:
         small, large = (counted(args.lucifer, program, pattern, n, args.timeout, flags, extra) for n in sizes)
@@ -498,8 +512,8 @@ def check_growth(args, lane):
             problems.append(tag + 'output differs')
         if small[2] is None or large[2] is None:
             problems.append(tag + 'no stats')
-        elif large[2] - small[2] > per * GROWTH_N + GROWTH_N // 20:
-            problems.append(f'{tag}{small[2]} at {GROWTH_N} iterations, {large[2]} at {2 * GROWTH_N}')
+        elif large[2] - small[2] > per * n + n // 20:
+            problems.append(f'{tag}{small[2]} at {n} iterations, {large[2]} at {2 * n}')
         if lane in AT_MOST and small[2] is not None and small[2] > AT_MOST[lane]:
             problems.append(f'{tag}{small[2]} at {GROWTH_N} iterations, more than {AT_MOST[lane]}')
         if lane in AT_LEAST:
@@ -572,6 +586,26 @@ def check_ledger(args, lane):
     return 1 if problems else 0
 
 
+def check_entries(args):
+    """A doubling of the inlining budget belongs to the entry whose losses bought it: entry's start is built grown,
+    and the entries of its second arm's loops, built after that, at the base budget."""
+    program = ROOT / 'tests' / 'kernel' / 'jit_entry_growth.py'
+    n = 2 * GROWTH_N
+    p = subprocess.run([args.lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', str(program), str(n)],
+                       capture_output=True, text=True, timeout=args.timeout,
+                       env=dict(os.environ, PYTHONHASHSEED='0', LUCIFER_JIT_DEBUG='units'))
+    problems = []
+    if (p.returncode, p.stdout) != run([args.oracle, str(program), str(n)], args.timeout)[:2]:
+        problems.append('output differs')
+    builds = re.findall(r'^jit-ev \S+ build entry@(\d+) ok ins (\d+) .* grown (\d+) ', p.stderr, re.M)
+    if not any(pc == '1' and int(grown) > 0 for pc, _, grown in builds):
+        problems.append('the start never grew')
+    problems += [f'entry@{pc} built grown {grown} ({ins} IR)' for pc, ins, grown in builds if pc != '1' and grown != '0']
+    print(f"{'FAIL' if problems else 'PASS'} entrygrowth" + (': ' + '; '.join(problems[:5]) if problems else
+          f' ({len(builds)} builds of entry)'))
+    return 1 if problems else 0
+
+
 def check_perf(args):
     """The share of compiled-code samples that perf names py::."""
     with tempfile.TemporaryDirectory() as d:
@@ -599,7 +633,7 @@ def main():
     ap.add_argument('--lucifer', required=True)
     ap.add_argument('--oracle', required=True)
     ap.add_argument('--benchmarks', default=','.join(RUNS))
-    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, *LEDGER, 'perf']))
+    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, *LEDGER, 'entrygrowth', 'perf']))
     ap.add_argument('--timeout', type=float, default=600)
     args = ap.parse_args()
     failed = 0
@@ -630,6 +664,8 @@ def main():
     for lane in LEDGER:
         if lane in args.modes.split(','):
             failed += check_ledger(args, lane)
+    if 'entrygrowth' in args.modes.split(','):
+        failed += check_entries(args)
     if 'perf' in args.modes.split(','):
         failed += check_perf(args)
     print(f'{failed} failing')
