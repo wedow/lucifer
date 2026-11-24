@@ -570,9 +570,9 @@ attr_ways(struct ctx *c, struct lu_pic *pic, int n, int i, attr_as *as, int gene
 /* A plain attribute of a class the unit knows (Color.RED, a constant kept
    on a class), as type.__getattribute__ finds it: the metaclass has
    nothing by the name and its lookup is type's own, and what the class
-   has is no descriptor. Read as of both classes' versions, which the unit
-   then depends on. 1 with the attribute in place of the owner; 0 when
-   it is not such an attribute. */
+   has is a plain value. Read as of the versions of both classes and of
+   the value's own class, which the unit then depends on. 1 with the
+   attribute in place of the owner; 0 when it is not such an attribute. */
 static int
 class_attribute(struct ctx *c, lu_v owner, PyTypeObject *cls, PyObject *name)
 {
@@ -583,13 +583,14 @@ class_attribute(struct ctx *c, lu_v owner, PyTypeObject *cls, PyObject *name)
         return 0;
     }
     PyObject *k = _PyType_Lookup(cls, name);
-    if (k == NULL || Py_TYPE(k)->tp_descr_get != NULL || _PyType_Lookup(meta, name) != NULL
+    if (k == NULL || _PyType_Lookup(meta, name) != NULL
         || _PyType_Lookup(meta, LU_ID(__getattr__)) != NULL
         || _PyType_Lookup(meta, LU_ID(__getattribute__)) != _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__))) {
         return 0;
     }
     lu_v value = lu_ev_konst(c, k);
-    if (!lu_ev_class_relied(c, owner, vc) || !lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)meta), vm)) {
+    if (!lu_ev_plain_value(c, k) || !lu_ev_class_relied(c, owner, vc)
+        || !lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)meta), vm)) {
         return 0;
     }
     replace_owner(c, value, LU_NOV);

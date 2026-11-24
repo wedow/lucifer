@@ -75,6 +75,15 @@ lu_ev_class_relied(struct ctx *c, lu_v type, uint32_t version)
     return 1;
 }
 
+int
+lu_ev_plain_value(struct ctx *c, PyObject *v)
+{
+    PyTypeObject *t = Py_TYPE(v);
+    uint32_t version;
+    return lu_ev_class_as_of(c, t, &version) && t->tp_descr_get == NULL
+        && lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)t), version);
+}
+
 /* A tuple's or a list's class, any subclass of one, that r's is (known,
    or as every class the site met was, guarded): &PyTuple_Type or
    &PyList_Type, else NULL. */

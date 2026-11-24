@@ -587,6 +587,10 @@ int lu_ev_seqiter_next(struct ctx *c, lu_v it, int nops);
    is then a dependency of the unit. */
 int lu_ev_class_as_of(struct ctx *c, PyTypeObject *t, uint32_t *version);
 int lu_ev_class_relied(struct ctx *c, lu_v type, uint32_t version);
+/* Whether v, found on a class, is a plain value (its own class has no
+   __get__) and stays one while the unit runs: relied on under its class's
+   version, which a __get__ assigned to that class takes back. */
+int lu_ev_plain_value(struct ctx *c, PyObject *v);
 /* A call of the primitive `name` answered from the state: the result, or
    LU_NOV - 1 when the call must be made (eval_prims.c). */
 #define LU_EV_NONE (INT32_MIN)
