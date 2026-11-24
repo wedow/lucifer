@@ -144,15 +144,23 @@ C and interpreter int stores under int-first names, by value (a temporary counte
 
 A unit running on another thread, built for a class before the class was marked, could be handed a reassigned instance and pass its type test (a known class's version guard becomes a dependency and the per-object test is the type pointer) before it notices it is dead. So the elision of stage (d) applies only to units built while serial: facts.c gives inline loads and stores INS_UNLOCKED there (with the LU_DEP_SERIAL dependency, and INS_RECHECK where code may have run since the unit was last known alive), and every other inline load and store tests the flag first (two instructions). Serial is enough: no other thread exists to reassign an instance and publish it; a reassignment on the same thread happens inside a call, whose version change kills the unit before its next elided access (that access rechecks, as unlocked stores do); at the switch to parallel the first task is out of the unit, inside a published call, or detached, so it rechecks before any elided access. Dumps show it: the loads row's four inline loads are marked serial; in attr_class_assign_threads (a reader thread loading and storing high-index names over a list a writer extends with reassigned small-room instances, 20 rounds, in the handoff lanes too) all 40 of the reader's inline loads and stores test the flag first. The five rows did not move.
 
+## 2026-11-24: stage (e), cached small ints as markers; the reload race
+
+A C or interpreter store of a cached small int (-5 to 256, the singleton itself) under a name whose first number is int writes the marker and the raw word: every way back to an object (boxed_locked and lu_inline_get through PyLong_FromLongLong, BOX_INT's in-line cache lookup, the exit materializer) returns that singleton, so identity holds; lock-free readers (try_word_ref) and the compiled object load's out-of-line path hand back the singleton without the lock and without installing a box. lu_attr_store keeps the value it was given for its dict fallback (the marker is only for the word). Test attr_small_ints: identity through the interpreter, compiled object and number loads, getattr, vars of a copy and pickle, for 7, a variable holding 7, a computed 257 and 257000, -5 and a computed -6.
+
+The gate first crashed in attr_field_kinds_threads: the raw load's out-of-line path read the word again after the in-line marker compare missed, and a store on another thread had made it the marker meanwhile, so the type test read through address 3. That race existed since the self-checking loads (any compiled raw store on another thread); stage (e) made it common. Fixed in its own commit: the second read takes the raw word on the marker and leaves on anything below an object.
+
+Havlak's 5.3M wider ints: the sentinel _UNVISITED = 2_147_483_647 (2^31 - 1, two digits) stored into its dictionary entries' value attribute. Two digits always fit int64, so the raw word is written; the out-of-line raw load now takes the raw word for an exact int of up to two digits (the tag compare against 3 << _PyLong_NON_SIZE_BITS instead of 2 <<, the same cost) where it went to the object read (ownership check and lu_jit_unbox_wide, a C call).
+
+Exact instructions per inner iteration, master -> (H1) -> (e): loads 162 -> 120 -> 84; calls 104 -> 97 -> 88; oo (mean of 11) 2905 -> 2400 -> 2416; fstores 104 -> 89 -> 89; stores 130 -> 148 -> 148. oo's instances get computed ints from compiled stores, so (e) leaves it; its few instructions more are the out-of-line code's layout.
+
 ## State (keep current)
 
-Branch luc-eog8 rebased on origin/master 0b2fc137 (only ticket commits moved there). Code commits: (a), its review fixes, (b), (c), loads check the word (F1, F2), stage (d), the G1 fix (c4196ac7), the H1 fix (e696295d). Gated after the H1 fix: 52 focused programs in plain, jit, jit-deopt (jit_class_assign_room and attr_class_assign_threads among them); jitcheck 0 failing; the kinds programs and jit_threads in handoff and handoff:2.
+Branch luc-eog8 rebased on origin/master 8cb18719. Code commits: (a), its review fixes, (b), (c), loads check the word (F1, F2), stage (d), the G1 fix, the H1 fix, the reload race fix, stage (e). Gated after stage (e): 53 focused programs in plain, jit, jit-deopt (jit_class_assign_room, attr_class_assign_threads, attr_small_ints among them); jitcheck 0 failing; the kinds programs and jit_threads in handoff and handoff:2; attr_field_kinds_threads 8 more times in the jit lane.
 
-In progress: stage (e): C and interpreter stores of a cached small int under an int-first name write the marker and the raw word (numbers above).
+Nothing running. Next step: report; the H1 fix and the reload race fix go to review, then land; stage (e) after its own review.
 
-Nothing running. Next step: report and wait for review.
-
-Known limits: the parallel (locked) raw store keeps the general code; instances the interpreter made read through the cold path (above); the stores row keeps its counting (above).
+Known limits: the parallel (locked) raw store keeps the general code; instances the interpreter made read non-cached ints through the cold path (above); the stores row keeps its counting (above).
 
 Scratch tools (untracked, .scratch/):
 - keep/k.py and keep/kk.py: the idiom rows (with oo, the Bounce-shaped loop); `bin/lucifer k.py NAME N`.
@@ -161,6 +169,6 @@ Scratch tools (untracked, .scratch/):
 - keep/ctr.sh ROW BIN...: counters; under the host lock (core class).
 - keep/dis.sh ROW FUNC + keep/ann.py: annotated disassembly of a function's last unit (dis3.sh: oo, dis4.sh: fstores).
 - gate.sh: the focused gate; sb.sh / sc.sh / sd.sh: build + gate + traces per stage; wa/: the while_attr probe.
-- bin/lucifer-base (master 161b0abb), bin/lucifer-a, -b, -c, -d (self-checking loads), -d2 (stage d), -g (G1 fix): the arms; mixed.py: the mixed load site; census.txt: the stage (e) counts; sg.sh, sg2.sh: the G1 runs.
+- bin/lucifer-base (master 161b0abb), bin/lucifer-a, -b, -c, -d (self-checking loads), -d2 (stage d), -g (G1 fix), -h (H1), -e (stage e): the arms; mixed.py: the mixed load site; census.txt: the stage (e) counts; sg.sh, sg2.sh: the G1 runs.
 
 Not obvious from the code: lu_jit LU_KIND_* (jit.h) is an unrelated enum (call-site operand kinds); the field kinds are LU_FIELD_*. emit_new_object does not zero raw words (luc-uqyj), so a raw word means something only beside a value word of the first kind. The cold stream follows the hot one, so a jump to the label right after a cold block is a jump to the next hot instruction: leave it out. tk in a worktree names tickets after the directory (le-*): rename to luc-*.
