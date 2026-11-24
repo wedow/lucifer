@@ -20,6 +20,10 @@ Acceptance: idiom rows list sum, tuple unpack, linked-list walk, read-4-attribut
 
 ## Notes
 
+**2026-11-24T10:00:00Z**
+
+Regression found: jitcheck borrowed failed on master as landed (9fcc18bc: 237346 at 20k, 385346 at 40k, 7.4 per iteration; the branch's gate ran before the rebase onto ecdae1b2). ecdae1b2 added GUARD_ENTRY to every unit's entry block; borrow_items' entry-block list (pure) and borrow_safe named GUARD_DEPTH but not it, so can_enter was 0 and every entry value read "no named holder keeps" (the hot units' carried item released each turn: decref 21993 per unit at 20k). GUARD_ENTRY now sits beside GUARD_DEPTH in both (two frame words compared, a poll-style exit with the entry state before any release). After: borrowed (97539, 105539), decref 2003 per unit; entryfails, releases, sharedcode pass; kernel borrow and shared-code programs pass in plain, jit, jit-deopt, threads_borrow_items in handoff.
+
 **2026-11-23T05:37:57Z**
 
 Firing check (master 379f3476; final IR of every unit of listsum, tupunpack, while_attr, loads, closure, calls, AWFY Richards and DeltaBlue): 0 of 165 INCREFs have their DECREF in the same block with nothing between, so block-local pair cancellation is dropped. Pairs do not cancel in any mode in general: a tuple item while the tuple is held is safe, but a bound method's self or type(x)'s ob_type can be freed by an owning thread's racing __class__ assignment. In every target row's hot loop the counted read is carried across the back edge in a phi and released one iteration later (the list item in listsum, loads, calls; the tuple items as locals a, b in tupunpack; node.next in while_attr; the cell read in closure). Stage 1 is whole-unit ownership inference over loop phis for list and tuple items.
