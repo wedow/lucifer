@@ -23,3 +23,19 @@ The release then tests the bit, the dict pointer and the in-dict flag of the obj
 The bound: the words read and the references counted are the class's names (shared names' count), not the instance's room. No instance holds a word at or past the count (an instance's room is at least every later count, attrs.c), and one that came by __class__ assignment has its values in a dict, which fails the release. An instance the interpreter made has room up to 30, so the old bound (room + 1) asked every value for a local count above 31 and the scan read every word of the room; now a class with two names asks for 3 and reads two words. A value can be dropped at most once per name, plus the type, so the D1 argument (nothing it holds reaches zero) holds unchanged.
 
 Test: jit_release_plain (a class gaining and losing __del__ mid-loop, its base gaining one, __bases__ reassigned to a class with a finalizer, subclasses of a plain class).
+
+## 2026-11-24: numbers after (1) and (2)
+
+Exact instructions per inner iteration, origin/master 8c183450 -> now: alloc_escape 415 -> 362 (the release stub 192 -> 139: the class walk and the room bound gone, instances dispatched first); alloc_local 48 -> 48 (no release: the instance stays virtual); alloc_kwinit 1087 -> 35 (keywords bound to __init__: the instance stays virtual, no type.__call__, object.__new__, type_lookup or allocation helper); oo 2120 -> 2120.
+
+What the 139 of alloc_escape's release are, by part (one traced release; small ints in both words, so each value check is one compare): dispatch 3; owner_dies 10 (local count, owner, shared word, allocation hook); the tp_dealloc compare 4; dict pointer and in-dict flag 4; the collector's count 4; the stack frame and thread 4; the bound (names, values, end) 8; the type's count check 6; the scan, 2 words and the end, 17; the drop, 2 words and the end, 19; the type's drop 4; the collector's count, GC bits and the dead count 5; mi_free in line 22; the return 6; alignment nops the rest. The target of 40 needs the scan and the drop made one pass (no drop to do when every word is unboxed or immortal), the type's count check and drop folded (a class is referenced by every instance: a deferred or immortal count), and the free's page lookup shortened.
+
+## State (keep current)
+
+Branch luc-eud7 from origin/master 8c183450. Commits: d822703c (1) the plain-release bit and the class-count bound; 64c2a599 (2) class calls with keywords bound to __init__; tickets. Gated (both on one build): 46 focused programs (the release, finalizer, weakref and collector programs, the kinds programs, jit_release_plain, jit_class_kwcalls, jit_kw_calls) in plain, jit, jit-deopt; jitcheck 0 failing; the release programs, jit_threads, gc_thread_queues, weakref_threads and handoff_finalize in handoff and handoff:2.
+
+Next step: report; then the release toward 40 (above) if wanted.
+
+Scratch tools (untracked, .scratch/): keep/ (k.py, kk.py with alloc_kwinit and oo rows; tr.sh, trace_gdb.py, trsum.py: exact traces under the host lock, test class; dis.sh, ann.py: disassembly; ab.sh, ctr.sh: timing and counters under the core class); gate.sh: the focused gate; s1.sh, s2.sh: build, gate and traces; kw.sh: the alloc_kwinit firing check; bin/lucifer-base (8c183450), -1, -2: the arms.
+
+Not obvious from the code: rm of tr.* in keep/ deletes tr.sh itself.
