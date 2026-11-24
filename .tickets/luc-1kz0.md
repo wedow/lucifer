@@ -394,10 +394,49 @@ C. Rule changes, in order:
 - AWFY DeltaBlue, instructions per iteration (sizes 20 and 60, one run a lease): master 5.747M; change 1 5.328M (-7.3%); branch before it 5.857M (+1.9%). Whole run at 20: 409.5M, 407.6M, 408.7M. Guard exits at 60: 4,390.
 - Not done: changes 2 (growth per entry) and 3 (growth must deliver), the full gate and the table.
 
+**2026-11-24 typed reshaped, change 2 built (a624c785, 1e23eebd)**
+
+- typed (coordinator's ruling): "flat after 20,000 iterations" encoded master's fixed stale wait, not a property.
+  - Under break-even, fill@33's learned rebuild (1,212 IR, 15.2M) is bought after about 18,000 stale passes of about 840 instructions each, and the same again for its second learned rebuild (1,214 IR, a new inline-context key), which lands between 40,000 and 80,000 iterations.
+  - The lane now compares 4N and 8N (80,000 and 160,000; START in tools/jitcheck): 636,330 helpers flat. It also joins the ledger lanes at 2N.
+  - The ledger part fails: fill@33 rebuilt for learned-type-fails fill@58 is predicted at 1.35M, below its own build of 226 IR (1.73M). learned-type/kind-fails prices its purchase at build_cost(jc->built_ins), the root's last build of any entry, while the purchase kills every unit of the root. Not fixed: the sound price is the builds it kills (the sum of their `enough`, or at least each one's own), a pricing change for the coordinator.
+- Change 2 (1e23eebd): the doublings of the inlining budget are kept per entry (jc->grown per code unit, indexed by the unit's entry pc). An entry's doublings are bought by its own unit's calls out of line; a new loop entry of a grown code starts at the base budget.
+  - The growth cost is still build_cost(2 x jc->built_ins), the root's last build, unchanged.
+  - Lane entrygrowth (tests/kernel/jit_entry_growth.py): entry's start grows on its calls out of line, and the loops of an arm run only in the second half are entered from the interpreter after that.
+  - Before the change it fails (entry@255 and entry@307 built at grown 1). After it, it passes.
+  - The lane's checker code went into a624c785 with the typed reshape (one file); the program and the runtime change are in 1e23eebd.
+- Lanes on 1e23eebd: PASS entrygrowth, learnprice, churn, classtests (ledger and helpers, 246,789 flat), dispatch, grown (2,013 flat), megaiter (504,236/525,239), large, recursive, turns, typed helpers (636,330 flat). FAIL: the typed ledger (above). The rest of the jitcheck lanes, the kernel gate and jitcost were not run.
+
 ## State
 
-- Landing candidate luc-1kz0-land on origin/master dbb9b594 (gated, table above); stage A was on branch luc-1kz0, on 12e0fa43: the lanes, the mechanism (ledger, stale ledger per unit, quiet rule, value sharing), tools/jitcost, this ticket.
-- Gate on the rebased tree: focused kernel programs and threads, full tools/jitcheck, tools/jitcost all pass. The table was measured on the same code on ca02da54 (the rebase moved only the interpreter).
-- Known losses and follow-ups: the final-pass note. regex_v8's windows and the cold programs' extra compiles are diagnosed (diagnosis note); change 1 is built (4b477b47) but fails the typed lane, which needs a decision; changes 2 and 3 are not built. Stages B and C not started.
-- The json_loads and deltablue steady-state losses are windows of both arms' convergence, not worse final builds (diagnosis note); rules A and B built and gated (A+B note); json_loads windows still short of the landing bar.
-- Debug aids: LUCIFER_JIT_DEBUG=units logs builds, kills (with `paid P cost C` for ledger kills) and learns; -X lucifer_jit_stats prints generic passes; LUCIFER_JIT_DUMP=1 prints each unit's IR.
+Branch luc-1kz0-land, on origin/master dbb9b594. The landing table (whole runs and long windows) was measured on 44b4b232. Three rule changes come from the diagnosis note:
+
+1. **Built** (4b477b47): a learned rebuild is predicted at the unit's own build; the rest discount is deleted. AWFY DeltaBlue goes from 5.857M to 5.328M instructions per iteration (master 5.747M).
+2. **Built** (1e23eebd): growth is per entry.
+3. **Not built.** Growth must deliver: record, when a doubling is bought, the unit's losses per entry that bought it. The next doubling for that entry is bought only if, in the grown unit, losses per entry fell by at least half that amount; else the entry stops growing. Argument for the ticket: a doubling costs twice the last, so one that removes less than half its reason makes the chain to the ceiling cost more than it can ever return. Lanes: megaiter and grown must still pass, plus a new lane of regex's shape (a hot loop calling a large callee whose losses are its own generic paths: growth bought at most once).
+
+Open: the typed ledger lane fails on the price of learned-type/kind-fails (last note); the coordinator decides that price.
+
+Lanes and sizes (tools/jitcheck):
+- Helpers and count lanes at N and 2N (N = 20,000), except typed at 4N and 8N (START).
+- Ledger lanes (churn, classtests, learnprice, typed) at 2N. Each checks:
+  - every purchase paid at least its predicted cost;
+  - every learned rebuild predicted at least at the build of the unit it replaces;
+  - total IR within first builds plus LEDGER_SLACK x paid / BUILD_INS.
+- entrygrowth at 2N: the start grew; loop entries built after that are at grown 0.
+
+To do next: change 3 and its lanes; then every jitcheck lane, the focused kernel gate in the jit-off, plain, jit and jit-deopt lanes and handoff, and tools/jitcost. Then the table against a build of origin/master dbb9b594 (the table's master binary), two runs per arm on core leases:
+- regex_v8: whole run at -l 8, and windows 64-128 and 128-256 with the compile/run split;
+- imports and black: whole runs with compile ms and IR;
+- pyflakes, pygments, AWFY Json, AWFY CD (size 10), AWFY DeltaBlue, richards, deltablue: whole runs and long windows;
+- json_loads and deepcopy: long windows.
+
+Acceptance: no whole run and no long window worse than master by more than 1%; compile ms on imports and black at or below master's; the gains on pyflakes, pygments, regex_v8 (whole) and AWFY Json kept within a few points.
+
+Compile/run split for regex_v8:
+- Record the pyperf worker at -l 32, 64, 128 and 128-call multiples, one run per core lease, pinned: `perf record -e instructions:u -c 1000003 --call-graph fp`.
+- Count compile as the self samples (`perf report --no-children --sort sym`) of the build pipeline's functions: every function defined in eval_*.c, opt.c, regalloc.c, ssa.c, x86_64/emit.c, facts.c and codemem.c, taken from the source. Multiply by 1.13: children/self of compile() where chains are complete (-l 32: 1.115 master, 1.148 branch).
+- Do not use compile()'s children share: chains deeper than the kernel's 127 frames drop it (master -l 64 reads less than -l 32).
+- A window is the difference of two run lengths; `-l N` makes 2N passes.
+
+Debug aids: LUCIFER_JIT_DEBUG=units logs builds (with the entry's grown level), kills (`paid P cost C` for ledger kills) and learns; -X lucifer_jit_stats prints generic passes; LUCIFER_JIT_DUMP=1 prints each unit's IR.
