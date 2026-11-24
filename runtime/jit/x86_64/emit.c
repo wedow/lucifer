@@ -1603,6 +1603,8 @@ published(struct asm_ *a, struct lu_ins *in)
 
 static void incref(struct asm_ *a, int r);
 static void decref(struct asm_ *a, int r, struct lu_ins *in, struct lu_deopt *d, int left);
+static void increfs(struct asm_ *a, int r, int n);
+static void decrefs(struct asm_ *a, int r, int n);
 static void lea(struct asm_ *a, int dst, int base, int32_t disp);
 
 /* Whether v is an object a hold may be owed for: one the call is handed
@@ -1813,11 +1815,9 @@ publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
     if (a->nheld > 0) {
         b1(a, 0x51);                            /* push rcx: an argument may be in it already */
         for (int k = 0; k < a->nheld; k++) {
+            counted(a, CNT_hold, RAX);
             to_gpr(a, R11, a->held[k].v);
-            for (int i = 0; i < a->held[k].n; i++) {
-                counted(a, CNT_hold, RAX);
-                incref(a, R11);
-            }
+            increfs(a, R11, a->held[k].n);
         }
         b1(a, 0x59);                            /* pop rcx */
     }
@@ -1848,15 +1848,18 @@ unpublish(struct asm_ *a, int rep)
     }
     for (int k = 0; k < a->nheld; k++) {
         int loc = I(a, a->held[k].v)->loc;
-        for (int i = 0; i < a->held[k].n; i++) {
-            if (a->saved && loc >= 0 && loc < LU_LOC_FPR && I(a, a->held[k].v)->op != OP_CONST) {
-                load(a, RDX, R15, offsetof(struct lu_frame, jit_regs));
-                load(a, RDX, RDX, 8 * loc);
-            }
-            else {
-                to_gpr(a, RDX, a->held[k].v);
-            }
+        if (a->saved && loc >= 0 && loc < LU_LOC_FPR && I(a, a->held[k].v)->op != OP_CONST) {
+            load(a, RDX, R15, offsetof(struct lu_frame, jit_regs));
+            load(a, RDX, RDX, 8 * loc);
+        }
+        else {
+            to_gpr(a, RDX, a->held[k].v);
+        }
+        if (a->held[k].n == 1) {
             decref(a, RDX, NULL, NULL, -1);
+        }
+        else {
+            decrefs(a, RDX, a->held[k].n);
         }
     }
     if (rep == REP_F64) {
@@ -2284,20 +2287,38 @@ quiescent(struct asm_ *a)
     bind(a, same);
 }
 
+/* Py_INCREF n times on the free-threaded build, in one step: immortal
+   objects stay; the owning thread counts locally, others in the shared
+   count. */
 static void
-incref(struct asm_ *a, int r)
+increfs(struct asm_ *a, int r, int n)
 {
-    /* Py_INCREF on the free-threaded build: immortal objects stay; the
-       owning thread counts locally, others in the shared count. */
     int done = new_label(a), shared = new_label(a);
     test_rr(a, r, r);
     jcc(a, CC_E, done);                         /* Py_XINCREF: a phi may carry NULL */
     load32(a, RCX, r, offsetof(PyObject, ob_ref_local));
-    rex(a, 0, 0, 0, RCX);
-    b1(a, 0x83);
-    modrm_rr(a, ALU_ADD, RCX);
-    b1(a, 1);                                   /* add ecx, 1 */
-    jcc(a, CC_E, done);                         /* immortal: the count wraps to 0 */
+    if (n == 1) {
+        rex(a, 0, 0, 0, RCX);
+        b1(a, 0x83);
+        modrm_rr(a, ALU_ADD, RCX);
+        b1(a, 1);                               /* add ecx, 1 */
+        jcc(a, CC_E, done);                     /* immortal: the count wraps to 0 */
+    }
+    else {
+        int below = new_label(a);
+        cmp32_ri8(a, RCX, -1);
+        jcc(a, CC_E, done);                     /* immortal */
+        rex(a, 0, 0, 0, RCX);
+        b1(a, n < 128 ? 0x83 : 0x81);
+        modrm_rr(a, ALU_ADD, RCX);
+        n < 128 ? b1(a, n) : b4(a, n);          /* add ecx, n */
+        jcc(a, CC_AE, below);
+        rex(a, 0, 0, 0, RCX);
+        b1(a, 0x83);
+        modrm_rr(a, ALU_OR, RCX);
+        b1(a, 0xFF);                            /* or ecx, -1: immortal, where n steps of one end */
+        bind(a, below);
+    }
     b1(a, 0x64);
     b1(a, 0x48);
     b1(a, 0x8B);
@@ -2309,14 +2330,22 @@ incref(struct asm_ *a, int r)
     op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
     cold_begin(a);
     bind(a, shared);
+    /* lock add qword [r+shared], n: no flags noted, so no padding goes
+       between the prefix and its instruction */
     b1(a, 0xF0);
     rex(a, 1, 0, 0, r);
-    b1(a, 0x83);
+    b1(a, n << _Py_REF_SHARED_SHIFT < 128 ? 0x83 : 0x81);
     modrm_mem(a, ALU_ADD, r, offsetof(PyObject, ob_ref_shared));
-    b1(a, 1 << _Py_REF_SHARED_SHIFT);
+    n << _Py_REF_SHARED_SHIFT < 128 ? b1(a, n << _Py_REF_SHARED_SHIFT) : b4(a, n << _Py_REF_SHARED_SHIFT);
     jmp(a, done);
     cold_end(a);
     bind(a, done);
+}
+
+static void
+incref(struct asm_ *a, int r)
+{
+    increfs(a, r, 1);
 }
 
 
@@ -2331,6 +2360,37 @@ static void settle(struct asm_ *a, int left);
 
 static void store32_mi(struct asm_ *a, int base, int32_t disp, int32_t imm);
 static void thread_id(struct asm_ *a, int r);
+
+extern void lu_jit_decrefs(PyObject *o, int64_t n);
+
+/* Py_DECREF n times (n > 1), in one step, of the object in r: the owning
+   thread's count above n drops in place; anything else (immortal aside)
+   goes to C, which drops them one by one. Clobbers RAX, RCX, RDX, R11. */
+static void
+decrefs(struct asm_ *a, int r, int n)
+{
+    int done = new_label(a), slow = new_label(a);
+    test_rr(a, r, r);
+    jcc(a, CC_E, done);
+    load32(a, RCX, r, offsetof(PyObject, ob_ref_local));
+    cmp32_ri8(a, RCX, -1);
+    jcc(a, CC_E, done);                         /* immortal */
+    alu_ri(a, ALU_CMP, RCX, n);
+    jcc(a, CC_BE, slow);                        /* the last local references, or not as many */
+    thread_id(a, RAX);
+    cmp_rm(a, RAX, r, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, slow);
+    alu_ri(a, ALU_SUB, RCX, n);
+    op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
+    cold_begin(a);
+    bind(a, slow);
+    mov_rr(a, RDI, r);
+    mov_ri(a, RSI, n);
+    call_abs(a, (void *)lu_jit_decrefs);
+    jmp(a, done);
+    cold_end(a);
+    bind(a, done);
+}
 
 /* The carrier's entry (struct lu_entry) into dst: the freelists. */
 static void

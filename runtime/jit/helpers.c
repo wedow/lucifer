@@ -50,6 +50,17 @@ lu_jit_decref(PyObject *o)
     Py_XDECREF(o);
 }
 
+/* n references to o at once (a published call's holds, x86_64/emit.c
+   unpublish), dropped one by one. */
+void
+lu_jit_decrefs(PyObject *o, int64_t n)
+{
+    LU_JIT_C_PATH(release);
+    while (n-- > 0) {
+        Py_DECREF(o);
+    }
+}
+
 int
 lu_jit_truth(PyObject *v)
 {
