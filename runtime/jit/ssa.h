@@ -132,7 +132,8 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(GLOBAL_LOAD, REP_OBJ, IF_GUARD | IF_CALL) /* imm: the dict, imm2: keys version << 32 | entry */ \
     X(INCREF, REP_NONE, IF_EFFECT) \
     X(DECREF, REP_NONE, IF_EFFECT)    /* imm 1: its type may run code when freed: publishes fs */ \
-    X(RELEASE_SHARED, REP_NONE, IF_GUARD | IF_EFFECT)  /* a's reference goes where another holds the object; else leaves (opt.c borrow_items) */ \
+    X(ENTRY_BORROW, REP_OBJ, IF_GUARD) /* a, uncounted: an entry value that is b[c - 1] (c LU_NOV: b's last item; imm 1: b a tuple), \
+                                          or with imm2 >= 0 that item's tuple item at byte imm2 (opt.c borrow_items) */ \
     X(RITER_NEXT, REP_I64, IF_EFFECT)   /* a: an exact range_iterator; the next value, stepping it */ \
     X(RITER_DONE, REP_BIT, 0)           /* a: an exact range_iterator: exhausted */ \
     X(HELPER, REP_NONE, IF_EFFECT | IF_CALL)    /* imm: the helper, args; rep and effects from it */ \
@@ -180,7 +181,6 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
 
 /* POLL's imm: a loop's back-edge, or a call's start (facts.c may drop it). */
 enum { POLL_LOOP, POLL_CALL };
-#define POLL_LEAVES 1           /* a POLL's imm2: its work in place leaves the unit instead (opt.c borrow_items) */
 /* GUARD_VERSION's imm2: whose version. */
 enum { GV_TYPE_OF, GV_TYPE_ITSELF, GV_DICT_KEYS, GV_FUNC };
 /* GUARD_IS's imm2: the word compared, a itself, or at an offset (low 32
@@ -316,19 +316,21 @@ enum {
     INS_UNLOCKED = 64,          /* a store that locks in line, built while serial: no lock; an inline load or
                                    store: no in-dict test before the word (facts.c) */
     INS_RECHECK = 128,          /* such an instruction where the unit may have died: it checks first, and leaves */
+    INS_LEAVES = 256,           /* a POLL or INLINE_LOAD with values held without a count live across: its work in
+                                   place or the box it would park to make leaves the unit instead (opt.c borrow_items) */
 };
 
 struct lu_ins {
     uint8_t op;
     uint8_t rep;
-    uint8_t flags;
-    uint8_t drop;               /* IF_RAISE: stack entries of fs the raising instruction consumed */
+    uint16_t flags;
     int32_t block;
     lu_v a, b, c;
     int64_t imm, imm2;
     struct lu_fs *fs;           /* where a guard or a raise leaves */
     PyCodeObject *blame;        /* a guard that speculates for another site (a loop header's): its failure counts there */
     int blame_pc;
+    uint8_t drop;               /* IF_RAISE: stack entries of fs the raising instruction consumed */
     struct lu_prof *prof;       /* a guard on a learned type, or on a report of one (target.h) */
     PyCodeObject *src;          /* the bytecode it was built for (NULL: the optimizer's), for the counts */
     int src_pc;
@@ -409,7 +411,6 @@ struct lu_func {
     int budget;                 /* instructions past which the evaluator inlines no more (jit.c) */
     struct lu_fdep *deps;       /* the facts the code relies on between polls */
     int ndeps, capdeps;
-    struct lu_frame *frame;     /* the frame the build was made for, as it is now (jit.c compile) */
     int *idom;                  /* per block, once optimized: its immediate dominator (-1: unreached) */
 };
 

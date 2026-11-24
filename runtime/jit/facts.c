@@ -194,6 +194,8 @@ locks_in_line(const struct lu_ins *in)
         return !(in->flags & INS_FRESH);
     case OP_LIST_ITEM:
         return !(in->flags & INS_OWNED);    /* borrowed, in its serial form (opt.c borrow_items) */
+    case OP_ENTRY_BORROW:
+        return 1;
     default:
         return 0;
     }

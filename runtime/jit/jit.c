@@ -64,6 +64,7 @@
 #define NOHOIST 2
 #define CATCH 4                 /* at a kernel handler: what a call raises under it is taken in the unit */
 #define RAISES 8                /* at an instruction: what it raises leaves the unit, which returns it */
+#define NOBORROW 16             /* at an OSR entry: its entry values are counted (opt.c borrow_items) */
 /* A guard that fails this often makes its instruction generic, and at
    least once per INS_PER_FAIL instructions its root's last build made: an
    exit costs about what building two instructions does (4,700 machine
@@ -353,6 +354,13 @@ state_for(PyCodeObject *code)
     free(jc->seen);
     free(jc);
     return (struct lu_jit_code *)seen;
+}
+
+int
+lu_jit_noborrow(PyCodeObject *code, int pc)
+{
+    struct lu_jit_code *jc = state_of(code);
+    return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & NOBORROW);
 }
 
 int
@@ -923,7 +931,6 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
         __atomic_store_n(&jc->built_ins, f.nins, __ATOMIC_RELAXED);
         __atomic_store_n(&jc->stale, 0, __ATOMIC_RELAXED);
     }
-    f.frame = frame;
     ok = ok && lu_ssa_optimize(&f) == 0;
     double t2 = now(), t3 = t2;
     if (_PyRuntime.jit.stats) {
@@ -1700,6 +1707,10 @@ lu_jit_note_exit(struct lu_deopt *d)
             /* The inlined copy keeps leaving here: it is called instead from
                now on (and if that call leaves its caller's copy, the caller next). */
             again = __atomic_exchange_n(&jc->noinline, 1, __ATOMIC_RELAXED);
+        }
+        else if (d->borrow) {
+            /* An entry value keeps not being its holder's item: the loop counts it. */
+            again = __atomic_fetch_or(&jc->nospec[site_pc], NOBORROW, __ATOMIC_RELAXED) & NOBORROW;
         }
         else {
             again = __atomic_fetch_or(&jc->nospec[site_pc], NOSPEC, __ATOMIC_RELAXED) & NOSPEC;

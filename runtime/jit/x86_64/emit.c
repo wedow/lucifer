@@ -3370,7 +3370,7 @@ static int
 skips_flag(struct asm_ *a, struct lu_ins *in, int fail, int64_t first_bit)
 {
     if (in->flags & INS_RECHECK) {
-        jump_if_dead(a, fail);
+        jump_if_dead(a, exit_to(a, in->fs, EXIT_POLL, 0, 0));      /* a dead unit is no failed guard (store_locks) */
     }
     return (in->flags & (INS_FRESH | INS_UNLOCKED)) && !(in->imm2 & first_bit);
 }
@@ -4814,6 +4814,9 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         mov_rr(a, RAX, RCX);
         jmp(a, done);
         bind(a, made);
+        if (in->flags & INS_LEAVES) {
+            jmp(a, fail);       /* values held without a count live across: no park (opt.c borrow_items) */
+        }
         parked_begin(a, in);
         if (r != RDI) {
             mov_rr(a, RDI, r);
@@ -4907,34 +4910,57 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         r = gpr_of(a, in->a, RDX);
         incref(a, r);
         return 0;
-    case OP_RELEASE_SHARED: {
-        /* opt.c borrow_items: the entry's reference to what a loop now
-           carries without a count goes, where another holds the object so
-           that this cannot free it: an immortal, or an object of this
-           thread's whose local count is at least 2. Else the unit leaves
-           at its entry, owning the reference still, as at a poll: no
-           guard failed, and no site must count one. */
-        int fail = exit_to(a, in->fs, EXIT_POLL, 0, 0), done = new_label(a);
-        r = gpr_of(a, in->a, RDX);
-        load32(a, RCX, r, offsetof(PyObject, ob_ref_local));
-        cmp32_ri8(a, RCX, -1);
-        jcc(a, CC_E, done);                     /* immortal */
-        cmp32_ri8(a, RCX, 2);
-        jcc(a, CC_B, fail);                     /* none else here may hold it */
-        b1(a, 0x64);
-        b1(a, 0x48);
-        b1(a, 0x8B);
-        b1(a, 0x04);
-        b1(a, 0x25);
-        b4(a, 0);                               /* mov rax, fs:[0] */
-        cmp_rm(a, RAX, r, offsetof(PyObject, ob_tid));
+    case OP_ENTRY_BORROW: {
+        /* opt.c borrow_items: an OSR entry's value goes uncounted where it
+           is its holder's item, which keeps it: the container's item before
+           index c (its last item without c), or that item's tuple item at
+           byte imm2. Anything else is a failed guard whose failures make
+           the entry count the value (jit.c NOBORROW). */
+        int fail = guard_exit(a, in);
+        a->exits[a->nexits - 1].d->borrow = 1;
+        store_locks(a, in);
+        int e = gpr_of(a, in->a, RDX), done = new_label(a);
+        alu_rr(a, ALU_XOR, RAX, RAX);
+        test_rr(a, e, e);
+        jcc(a, CC_E, done);                     /* an unbound local: nothing to hold */
+        int c = gpr_of(a, in->b, RCX);
+        mov_ri(a, R11, (int64_t)(intptr_t)(in->imm ? &PyTuple_Type : &PyList_Type));
+        cmp_rm(a, R11, c, offsetof(PyObject, ob_type));
         jcc(a, CC_NE, fail);
-        rex(a, 0, 0, 0, RCX);
-        b1(a, 0x83);
-        modrm_rr(a, ALU_SUB, RCX);
-        b1(a, 1);                               /* sub ecx, 1 */
-        op_rm(a, 0, 0x89, RCX, r, offsetof(PyObject, ob_ref_local));
+        if (in->c == LU_NOV) {
+            load(a, RAX, c, offsetof(PyVarObject, ob_size));
+        }
+        else {
+            int i = gpr_of(a, in->c, RAX);
+            if (i != RAX) {
+                mov_rr(a, RAX, i);
+            }
+        }
+        alu_ri(a, ALU_SUB, RAX, 1);
+        cmp_rm(a, RAX, c, offsetof(PyVarObject, ob_size));
+        jcc(a, CC_AE, fail);                    /* unsigned: below 0 too */
+        if (in->imm) {
+            load_indexed8(a, RAX, c, RAX, offsetof(PyTupleObject, ob_item));
+        }
+        else {
+            load(a, R11, c, offsetof(PyListObject, ob_item));
+            load_indexed8(a, RAX, R11, RAX, 0);
+        }
+        if (in->imm2 >= 0) {
+            test_rr(a, RAX, RAX);
+            jcc(a, CC_E, fail);
+            mov_ri(a, R11, (int64_t)(intptr_t)&PyTuple_Type);
+            cmp_rm(a, R11, RAX, offsetof(PyObject, ob_type));
+            jcc(a, CC_NE, fail);
+            mov_ri(a, R11, (int64_t)((in->imm2 - (int64_t)offsetof(PyTupleObject, ob_item)) / 8));
+            cmp_rm(a, R11, RAX, offsetof(PyVarObject, ob_size));
+            jcc(a, CC_AE, fail);
+            load(a, RAX, RAX, (int32_t)in->imm2);
+        }
+        alu_rr(a, ALU_CMP, RAX, e);
+        jcc(a, CC_NE, fail);
         bind(a, done);
+        def_gpr(a, v, RAX);
         return 0;
     }
     case OP_DECREF:
@@ -5073,7 +5099,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         /* Another event: a merge and a collection are made here, and the
            word read again. */
         bind(a, merge);
-        if (in->imm2 & POLL_LEAVES) {
+        if (in->flags & INS_LEAVES) {
             jmp(a, poll);       /* values held without a count live across: the interpreter does it */
         }
         else {
