@@ -198,9 +198,46 @@ Follow-ups:
 - The evidence rule (rely on a place's one type only after a second report of it, counted where reports are written): classtests total +15% against master with it, +28% without, run@98 built 5 times. Not landed: on jit_int_range_prims a place confirmed by its second report (mixed_products@73) stays in the profiling form in a final build the ledger never rebuilds (intrange 298,758 -> 518,758 helpers at 20,000/40,000 iterations, 11 an iteration against the lane's 9).
 - Remove the dead class tables (lu_jit_want_classes, lu_jit_observe_classes, lu_jit_opclass_note and their interpreter calls): a separate small ticket.
 
+**2026-11-24 diagnosis: the json_loads and deltablue steady-state losses**
+
+Method: the same two binaries as the table (master ca02da54, branch on ca02da54); instructions:u on core leases, one measurement a lease; per-call figures from differences of run lengths; units logs with a marker after each benchmark call (the pyperf worker with its bench function wrapped, and a bare driver calling the function N times); exit tallies differenced between run lengths. A pyperf `-l N` worker makes 2N calls (warmup and value), so the table's `-l 12`/`-l 24` window is calls 24-48.
+
+1. Neither figure is a final build. In both programs both arms are still rebuilding inside the measured window, and the sign of the difference changes from window to window:
+
+| window (calls) | json_loads m/b per call | deltablue m/b per call |
+|---|---|---|
+| 24-48 (pyperf) | 26.64M/28.44M (+6.8%; table +11.5%) | |
+| 48-96 | 24.58M/28.30M (+15.1%) | |
+| 96-192 | 27.20M/24.68M (-9.3%) | |
+| 128-256 (pyperf; the table's) | | 35.22M/37.45M (+6.3%) |
+| 192-384 | 22.07M/22.43M (+1.7%) | |
+| 256-512 | | 33.87M/33.83M (-0.1%) |
+| 512-1024 | | 34.45M/33.37M (-3.2%) |
+| 768-1536 (driver) | 21.41M/21.67M (+1.2%) | |
+| 1024-2048 | | 33.19M/33.55M (+1.1%) |
+| 128-2048 together | | 33.75M/33.80M (+0.1%) |
+
+- json_loads (driver): the scanner units' last builds come at call 305 on master (loads, learned) and at 474 on the branch (_scan_once grown), then 1,823 (_scan_once grown again); JSONDecoder.decode is still rebuilt at 1,355 and 1,661 on master, 1,029 on the branch. Master grows _scan_once at calls 23 and 28 and Scanner.__call__ at 84 and 156 (the fixed 4,096-entry trigger); the ledger buys the same growth at 474 and 1,823, and at 96 and 381 (paid 44.9M against 42.1M, 140.6M against 115.3M). Converged, the branch is within 1-2% of master (+1.2% at calls 768-1536); the same window under -X perf is -5.8% (master's Scanner.__call__ is not grown in that run), so the residual is inside the spread of which build each arm happens to end in. The guard exits stop before call 200 in both arms (tallies identical at 200, 800 and 3,000 calls); the branch keeps the speculation master gave up at _parse_array@155 and _parse_object@381 (a learned rebuild fixed the guard). Whole run at `-l 192`: branch -0.9%.
+- deltablue: rebuilds go on past call 1,000 in both arms (master 62 kills after call 300, branch 56), largely of the 4,000-IR loop units projection_test@58 and chain_test@34 (about 115M each) for learned-since-build at shared kernel places (get_iter@84, truth@7, type.__call__@230) and late marks. Over calls 128-2048 the arms are equal (+0.1%); whole run at `-l 1024` +0.7%.
+
+2-3. What the windows hold (pyperf, exits differenced between `-l 64` and `-l 128`; the cost of an exit, about 17k instructions, is the window's remainder divided by the excess exits, not measured on its own):
+- deltablue calls 128-256, +2.23M a call (+6.3%): builds 428M against 372M (+0.44M a call, 1.2 points; projection_test@58 built twice against once); guard exits 15,988 against 2,688 (+13,300, about 5.1 points):
+  - (a) Old units that keep exiting at a site already marked: Constraint.satisfy@102 is marked at call 129, but projection_test@58 (built at 125) exits there 3,166 times until its old-unit-nospec kill at call 160 (`paid 64.0M cost 1.1M`); StayConstraint.__init__ and incremental_add add 1,118. About 4,300 exits, 1.6 points. Cause: a guard's exit in a unit whose stale ledger is non-zero is diverted to it and returns before the old-unit check, so a unit that keeps learning (a large root almost always has) is never killed for a mark already bought. This is a defect of the stale rule, not a cost estimate.
+  - (e) Marks paid twice: incremental_add@34 exits at Constraint.satisfy@134 and @130 (5,161), ScaleConstraint.__init__ at BinaryConstraint.__init__@28 (2,099). The diverted exits buy a learned rebuild (incremental_add@34 at 165, learned-since-build satisfy@134; ScaleConstraint.__init__ at 67, 72, 101) that does not fix the guard, and the next unit's exits pay the mark from zero: satisfy@130 marked at 190, BinaryConstraint.__init__@28 at 148 (master: 97 and 18). About 7,260 exits, 2.7 points. The fifth pass's add_propagate is the same rule: marks at calls 21, 52, 106 against master's 2, 5, 7.
+  - Other sites about 0.8 point; nothing of (b), (c) or (d) found.
+- json_loads calls 24-48, +1.80M a call (+6.8%): builds equal (66M each arm), exits fewer on the branch (374 against 776). The branch's _parse_array@1 runs stale from call 14 to 39 (what its stale ledger paid by the learned rebuild at 39, passes and diverted exits: 14.1M, 0.56M a call, 2.1 points) where master marked _parse_array@155 at 22 and rebuilt at 26; the remaining 4.7 points are not attributed (code of the intermediate units in each arm; per-unit profiles under -X perf change which builds are made, so they do not resolve it).
+
+4. Rule changes, in order:
+- (A) An exit at a site already marked, from a unit built before the mark, kills the unit at once whatever its stale ledger: the stale diversion is taken only when the site is not marked. It cannot bring churn back: the mark is already bought, each unit dies at most once per mark, and the unit built next knows the mark (master's old-unit rule unchanged). A few lines in lu_jit_note_exit (the site is the blame site or the innermost frame, as below the diversion); not built here: it needs its own failing test and gate.
+- (B) A diverted exit pays its site's mark ledger as well as the stale ledger, and the mark is still decided only by exits of a unit that is not stale (built with what its places had learned). A guard that keeps failing after the learned rebuild is then marked on its first exit there, with what it already lost, instead of after paying the mark again from zero. Bound unchanged: a mark is bought once per site, learned rebuilds at most ways plus one per place; the change moves a purchase earlier, it adds none. This gives the invariant the ledger lacks: a unit paying exits at a steady rate at a site is rebuilt with what was learned at most ways plus one times, then marked, and after that pays nothing there (with A, its old units too).
+- Generic-pass losses buying the unit's own rebuild: not the cause in either program (no permanent generic site found; json's exits end by call 200 and the final builds converge). The stale ledger already charges passes of places that learned since the build; a place that has not learned cannot be changed by a rebuild, so charging it is the churn the earlier builder saw. Keep it excluded.
+- Growth: the ledger buys json's growth 15 to 60 times later than master's fixed trigger (ski rental, by design); it costs early windows, not the final build. No change proposed.
+- Both arms: the large loop units of deltablue are rebuilt every 30-300 calls to the end for places in inlined kernel frames that learn late; a separate follow-up.
+
 ## State
 
 - Stage A ready for review on branch luc-1kz0, on origin/master 12e0fa43: the lanes, the mechanism (ledger, stale ledger per unit, quiet rule, value sharing), tools/jitcost, this ticket.
 - Gate on the rebased tree: focused kernel programs and threads, full tools/jitcheck, tools/jitcost all pass. The table was measured on the same code on ca02da54 (the rebase moved only the interpreter).
 - Known losses and follow-ups: the final-pass note. Stages B and C not started.
+- The json_loads and deltablue steady-state losses are windows of both arms' convergence, not worse final builds (diagnosis note); rule changes A (stale diversion shadows old-unit kills, a defect) and B (diverted exits also pay the mark) proposed, not built.
 - Debug aids: LUCIFER_JIT_DEBUG=units logs builds, kills (with `paid P cost C` for ledger kills) and learns; -X lucifer_jit_stats prints generic passes; LUCIFER_JIT_DUMP=1 prints each unit's IR.
