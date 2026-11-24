@@ -8,6 +8,96 @@
 #define INTRINSIC_LIST_TO_TUPLE 6       /* pycore_intrinsics.h */
 #define MAX_OPERANDS 30
 
+/* The class in the __class__ cell of the function the root frame runs,
+   or NULL (borrowed: the unit keeps it as a constant once used). */
+static PyObject *
+root_class_cell(struct ctx *c)
+{
+    PyObject *fn = c->g->live != NULL ? c->g->live->func : NULL;
+    PyObject *closure = fn != NULL && PyFunction_Check(fn) ? ((PyFunctionObject *)fn)->func_closure : NULL;
+    PyObject *names = closure != NULL ? PyCode_GetFreevars(c->code) : NULL;
+    PyObject *cls = NULL;
+    for (Py_ssize_t i = 0; names != NULL && i < PyTuple_GET_SIZE(names) && i < PyTuple_GET_SIZE(closure); i++) {
+        if (PyUnicode_CheckExact(PyTuple_GET_ITEM(names, i))
+            && PyUnicode_CompareWithASCIIString(PyTuple_GET_ITEM(names, i), "__class__") == 0) {
+            PyObject *cell = PyTuple_GET_ITEM(closure, i);
+            cls = PyCell_Check(cell) ? PyCell_GET(cell) : NULL;
+        }
+    }
+    Py_XDECREF(names);
+    if (names == NULL) {
+        PyErr_Clear();
+    }
+    return cls != NULL && PyType_Check(cls) ? cls : NULL;
+}
+
+/* LOAD_SUPER_ATTR with super the builtin, the class a known class and
+   self's class known or learned: the attribute found past the class in
+   self's class's MRO is constant under that class's version (a change to
+   any class in the MRO takes the version back), so the site is the
+   function itself with self (the method form) or the plain value (a
+   value with no __get__), and no super object or bound method is made.
+   0 when the site is not of that shape (nothing was changed). */
+static int
+super_known(struct ctx *c, int oparg)
+{
+    lu_v self = lu_ev_peek(c, 1);
+    PyObject *cls = lu_ev_const(c, lu_ev_peek(c, 2));
+    if (lu_ev_const(c, lu_ev_peek(c, 3)) != (PyObject *)&PySuper_Type) {
+        return 0;
+    }
+    if (cls == NULL && c->parent == NULL && !nospec(c, c->pc)) {
+        cls = root_class_cell(c);
+        if (cls != NULL) {
+            /* The method's __class__ cell, set when its class was made: what
+               it holds now, guarded. */
+            lu_ev_konst(c, cls);
+            lu_ev_guard(c, OP_GUARD_IS, lu_ev_val(c, lu_ev_peek(c, 2)), (int64_t)(intptr_t)cls);
+        }
+    }
+    if (cls == NULL || !PyType_Check(cls)) {
+        return 0;
+    }
+    /* Self's class: known, or named by the version a guard on self already
+       holds (the method's own load through self). */
+    PyTypeObject *t = lu_ev_type(c, self);
+    struct fact *fa = t == NULL && !LU_IS_VIRT(self) ? lu_ev_fact(c, lu_ev_val(c, self), 0) : NULL;
+    t = t != NULL ? (PyTypeObject *)Py_NewRef(t) : fa != NULL && fa->version != 0 ? lu_type_of_version(fa->version) : NULL;
+    if (t == NULL && !LU_IS_VIRT(self) && !nospec(c, c->pc)) {
+        /* Not known: the class the site's profile learned for self (one
+           class: a guard; none yet or several: profiled, the generic way). */
+        t = lu_ev_learn_type(c, self, 0);
+        Py_XINCREF(t);
+    }
+    if (t == NULL || PyType_IsSubtype(t, &PyType_Type) || !PyType_IsSubtype(t, (PyTypeObject *)cls)
+        || !lu_type_assign_version(t)) {
+        Py_XDECREF(t);
+        return 0;               /* a class as self (a classmethod's super): the generic way */
+    }
+    uint32_t version = __atomic_load_n(&t->tp_version_tag, __ATOMIC_ACQUIRE);
+    PyObject *v = lu_super_lookup(t, cls, name_at(c, oparg >> 2));
+    int method = oparg & 1;
+    int fn = v != NULL && PyFunction_Check(v);
+    if (v == NULL || __atomic_load_n(&t->tp_version_tag, __ATOMIC_ACQUIRE) != version
+        || (fn ? !method : !lu_ev_plain_value(c, v))) {
+        Py_XDECREF(v);
+        Py_DECREF(t);
+        return 0;
+    }
+    Py_DECREF(t);
+    lu_ev_guard_version(c, self, version);
+    lu_v k = lu_ev_konst(c, v);
+    Py_DECREF(v);
+    lu_ev_pop(c);
+    lu_ev_pop(c);
+    lu_ev_pop(c);
+    lu_ev_push(c, k);
+    if (method) {
+        lu_ev_push(c, fn ? self : LU_NOV);
+    }
+    return 1;
+}
+
 int
 lu_ev_op_supported(int base)
 {
@@ -821,6 +911,9 @@ lu_ev_instruction(struct ctx *c)
         return 0;
     case LOAD_SUPER_ATTR: {
         /* global_super, class, self -- attr, NULL in the method form */
+        if (super_known(c, oparg)) {
+            return 0;
+        }
         lu_v extra[2] = { lu_ev_konst(c, name_at(c, oparg >> 2)), lu_ev_const_i(c, oparg & 2) };
         stack_helper(c, H_super_attr, 3, extra, 2);
         if (oparg & 1) {
