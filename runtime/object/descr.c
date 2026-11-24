@@ -1618,18 +1618,20 @@ prim_descr_type(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef((PyObject *)((PyDescrObject *)args[0])->d_type);
 }
 
-/* generic_wrapper(d, name): whether d is a C type's slot wrapper `name`
+/* generic_wrapper(d, name, tp): whether d is a C type's slot wrapper `name`
    (__getattribute__, __setattr__ or __delattr__) of PyObject_GenericGetAttr
-   or PyObject_GenericSetAttr, which the kernel's hooks run as generic access
-   (slot_tp_getattr_hook's test). */
+   or PyObject_GenericSetAttr for a base of the type tp, which the kernel's
+   hooks run as generic access (slot_tp_getattr_hook's test; with tp None,
+   for any type, as that hook does before __getattr__). */
 static PyObject *
 prim_generic_wrapper(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
-    ARGS(2);
+    ARGS(3);
     PyWrapperDescrObject *d = (PyWrapperDescrObject *)args[0];
     int generic = Py_IS_TYPE(args[0], &PyWrapperDescr_Type)
         && (d->d_wrapped == (void *)PyObject_GenericGetAttr || d->d_wrapped == (void *)PyObject_GenericSetAttr)
-        && PyUnicode_EqualToUTF8(args[1], d->d_base->name);
+        && PyUnicode_EqualToUTF8(args[1], d->d_base->name)
+        && (args[2] == Py_None || (PyType_Check(args[2]) && PyType_IsSubtype((PyTypeObject *)args[2], PyDescr_TYPE(d))));
     return Py_NewRef(generic ? Py_True : Py_False);
 }
 

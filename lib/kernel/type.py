@@ -321,6 +321,7 @@ def _set_bases(cls, value):
             error(TypeError, 'a __bases__ item causes an inheritance cycle')
     type_set_bases(cls, value)
     _remro(cls)
+    type_modified(cls)                  # after the subclasses' slots, as in _type_set
 
 
 def _remro(cls):
@@ -547,9 +548,9 @@ def _type_set(cls, name, value):
         enable_deferred(value)          # cp314t (gh-139103): a class's methods are freed by collections
     type_modified(cls)
     generic_setattr(cls, name, value)
-    type_modified(cls)
     if ns_get(_boot.SLOT_DUNDERS, name, False):
         _remro_slots(cls)
+    type_modified(cls)                  # after the slots: a tag assigned meanwhile may name the old ones
 
 
 def _remro_slots(cls):

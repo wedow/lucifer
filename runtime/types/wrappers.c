@@ -797,8 +797,11 @@ lu_wrapper_specific(PyTypeObject *tp, PyObject *name)
         return NULL;
     }
     PyWrapperDescrObject *d = (PyWrapperDescrObject *)descr;     /* a kernel wrapper's base is named "kernel" */
-    return PyUnicode_EqualToUTF8(name, d->d_base->name) && PyType_IsSubtype(tp, PyDescr_TYPE(d))
-        ? d->d_wrapped : NULL;
+    void *f = d->d_wrapped;
+    if (f == (void *)getattro_from_getattr || f == (void *)setattro_from_setattr) {
+        return NULL;        /* they run the old slots only for the type that has them */
+    }
+    return PyUnicode_EqualToUTF8(name, d->d_base->name) && PyType_IsSubtype(tp, PyDescr_TYPE(d)) ? f : NULL;
 }
 
 /* Adds a wrapper descriptor to tp's dict for each slot tp has of its own

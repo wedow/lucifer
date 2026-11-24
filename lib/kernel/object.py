@@ -128,15 +128,15 @@ def getattr_hook(obj, name):
     if getattr_ is MISSING:
         if getattribute is _object_getattribute:
             return generic_getattr(obj, name)
-        if getattribute is type_getattribute:
+        if getattribute is type_getattribute and kind(obj, 'type'):
             return type_getattr(obj, name)
-        if getattribute is module_getattribute:
+        if getattribute is module_getattribute and is_subtype(tp, descr_type(getattribute)):
             return module_getattr(obj, name)
-        if generic_wrapper(getattribute, '__getattribute__'):
+        if generic_wrapper(getattribute, '__getattribute__', tp):
             return generic_getattr(obj, name)
         return call_special(getattribute, obj, name)
     try:
-        if getattribute is _object_getattribute or generic_wrapper(getattribute, '__getattribute__'):
+        if getattribute is _object_getattribute or generic_wrapper(getattribute, '__getattribute__', None):
             v = generic_getattr(obj, name, True)
             if v is not MISSING:
                 return v
@@ -162,11 +162,11 @@ def lookup_attr(obj, name):
             getattribute = type_lookup(tp, '__getattribute__')
             if getattribute is _object_getattribute:
                 return generic_getattr(obj, name, True)
-            if getattribute is type_getattribute:
+            if getattribute is type_getattribute and kind(obj, 'type'):
                 return type_getattr(obj, name, True)
-            if getattribute is module_getattribute:
+            if getattribute is module_getattribute and is_subtype(tp, descr_type(getattribute)):
                 return module_getattr(obj, name, True)
-            if generic_wrapper(getattribute, '__getattribute__'):
+            if generic_wrapper(getattribute, '__getattribute__', tp):
                 return generic_getattr(obj, name, True)
         return getattr_hook(obj, name)
     except AttributeError:
@@ -176,15 +176,17 @@ def lookup_attr(obj, name):
 def setattr_hook(obj, name, value):
     """PyObject_SetAttr for every kernel type and class: a C type's generic
     slot runs as its function does, without its wrapper."""
-    setattr_ = type_lookup(type(obj), '__setattr__')
-    if generic_wrapper(setattr_, '__setattr__'):
+    tp = type(obj)
+    setattr_ = type_lookup(tp, '__setattr__')
+    if generic_wrapper(setattr_, '__setattr__', tp):
         return generic_setattr(obj, name, value)
     call_special(setattr_, obj, name, value)
 
 
 def delattr_hook(obj, name):
-    delattr_ = type_lookup(type(obj), '__delattr__')
-    if generic_wrapper(delattr_, '__delattr__'):
+    tp = type(obj)
+    delattr_ = type_lookup(tp, '__delattr__')
+    if generic_wrapper(delattr_, '__delattr__', tp):
         return generic_setattr(obj, name, MISSING)
     call_special(delattr_, obj, name)
 
