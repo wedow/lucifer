@@ -1753,9 +1753,10 @@ op_POP_TOP:
 op_INSTRUMENTED_CALL_KW:
     monitored = next_instr - 1;
 op_CALL_KW:
-    /* As CALL's, below the keyword names: a keyword call has an argument. */
-    lu_jit_observe(next_instr, sp[-1 - oparg], oparg >= 2 ? sp[-oparg] : sp[-1 - oparg]);
-    lu_jit_observe_callee(code, next_instr, sp[-oparg - 3], sp[-oparg - 2]);
+    if (lu_jit_on()) {
+        lu_jit_observe_ran(next_instr);
+        lu_jit_observe_callee(code, next_instr, sp[-oparg - 3], sp[-oparg - 2]);
+    }
     SKIP_CACHES();
     kwnames = POP();
     goto call_stack_args;
@@ -1763,19 +1764,18 @@ op_CALL_KW:
 op_INSTRUMENTED_CALL:
     monitored = next_instr - 1;
 op_CALL:
-    {
-        /* The arguments' kinds; for a call without any, the callable's, so
-           that the site shows it ran. */
-        PyObject *first = oparg >= 1 ? sp[-oparg] : sp[-2];
+    if (lu_jit_on()) {
         PyObject *callable = sp[-oparg - 2];
-        unsigned kinds = lu_jit_observe(next_instr, first, oparg >= 2 ? sp[-oparg + 1] : first);
+        lu_jit_observe_ran(next_instr);
         lu_jit_observe_callee(code, next_instr, callable, sp[-oparg - 1]);
-        if (oparg >= 1 && (Py_IS_TYPE(callable, &PyCFunction_Type)
-                           || (PyType_Check(callable) && !(((PyTypeObject *)callable)->tp_flags & Py_TPFLAGS_HEAPTYPE))
-                           || (PyFunction_Check(callable)
-                               && (((PyCodeObject *)((PyFunctionObject *)callable)->func_code)->co_flags & LU_CO_KERNEL)))) {
+        if (oparg >= 1 && lu_jit_warm(code)
+            && (Py_IS_TYPE(callable, &PyCFunction_Type)
+                || (PyType_Check(callable) && !(((PyTypeObject *)callable)->tp_flags & Py_TPFLAGS_HEAPTYPE))
+                || (PyFunction_Check(callable)
+                    && (((PyCodeObject *)((PyFunctionObject *)callable)->func_code)->co_flags & LU_CO_KERNEL)))) {
             /* A builtin's or a kernel function's call: the classes its kernel code dispatches on. */
-            lu_jit_observe_classes(code, next_instr - 1, kinds, first, oparg >= 2 ? sp[-oparg + 1] : first);
+            PyObject *first = sp[-oparg], *second = oparg >= 2 ? sp[-oparg + 1] : first;
+            lu_jit_observe_classes(code, next_instr - 1, lu_jit_kind(first) | lu_jit_kind(second) << 8, first, second);
         }
     }
     SKIP_CACHES();

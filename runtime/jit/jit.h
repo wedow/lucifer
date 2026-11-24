@@ -121,10 +121,9 @@ lu_jit_call_hot(PyCodeObject *code)
 
 /* Type feedback: the kinds of operands an instruction has met, OR-ed into
    a cache word the interpreter does not otherwise use (BINARY_OP's second,
-   COMPARE_OP's, STORE_SUBSCR's and CALL's first): the left operand's (a
-   call's first argument's) kinds in the low byte, the right's (the second
-   argument's) in the high byte. The tier speculates on a site
-   only when it has met nothing else. */
+   COMPARE_OP's, STORE_SUBSCR's and UNPACK_SEQUENCE's first): the left
+   operand's kinds in the low byte, the right's in the high byte. The tier
+   speculates on a site only when it has met nothing else. */
 enum {
     LU_KIND_INT = 1,            /* an exact int that fits 64 bits (but INT64_MIN) */
     LU_KIND_FLOAT = 2,
@@ -164,6 +163,17 @@ lu_jit_observe(lu_codeunit *word, PyObject *left, PyObject *right)
     return kinds;
 }
 
+/* CALL's first cache word: whether the site ran, all the tier reads of it
+   (lu_ev_feedback); the kinds of a call's arguments matter only to a warm
+   code's builtin calls (lu_jit_observe_classes), which take them as they go. */
+static inline void
+lu_jit_observe_ran(lu_codeunit *word)
+{
+    if (__atomic_load_n(&word->cache, __ATOMIC_RELAXED) == 0) {
+        __atomic_store_n(&word->cache, LU_KIND_OTHER, __ATOMIC_RELAXED);
+    }
+}
+
 /* FOR_ITER's cache word: the iterators it has met. */
 enum { LU_ITER_RANGE = 1, LU_ITER_LIST = 2, LU_ITER_OTHER = 4, LU_ITER_TUPLE = 8 };
 
@@ -190,6 +200,9 @@ lu_jit_observe_iter(lu_codeunit *word, PyTypeObject *t)
 static inline void
 lu_jit_observe_branch(lu_codeunit *word, int jumped)
 {
+    if (_PyRuntime.jit.mode == LU_JIT_OFF) {
+        return;
+    }
     unsigned w = __atomic_load_n(&word->cache, __ATOMIC_RELAXED) + (jumped ? 0x100 : 1);
     if ((w & 0xff) == 0xff || (w >> 8) == 0xff) {
         w = (w >> 1) & 0x7f7f;
